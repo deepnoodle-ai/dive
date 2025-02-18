@@ -21,12 +21,14 @@ const (
 
 // StreamEvent represents a single streaming event from the LLM
 type StreamEvent struct {
-	Type         StreamEventType `json:"type"`
-	Message      *Message        `json:"message,omitempty"`
-	Index        *int            `json:"index,omitempty"`
-	ContentBlock *ContentBlock   `json:"content_block,omitempty"`
-	Delta        *Delta          `json:"delta,omitempty"`
-	Usage        *Usage          `json:"usage,omitempty"`
+	Type            StreamEventType `json:"type"`
+	Index           int             `json:"index"`
+	Message         *Message        `json:"message,omitempty"`
+	ContentBlock    *ContentBlock   `json:"content_block,omitempty"`
+	Delta           *Delta          `json:"delta,omitempty"`
+	Usage           *Usage          `json:"usage,omitempty"`
+	AccumulatedText string          `json:"accumulated_text,omitempty"`
+	AccumulatedJSON string          `json:"accumulated_json,omitempty"`
 }
 
 // Stream represents a stream of LLM generation events
@@ -48,8 +50,10 @@ type ContentBlock struct {
 }
 
 type Delta struct {
-	Type         string `json:"type,omitempty"`
-	Text         string `json:"text,omitempty"`
-	StopReason   string `json:"stop_reason,omitempty"`
-	StopSequence string `json:"stop_sequence,omitempty"`
+	Type         string  `json:"type,omitempty"`
+	Text         string  `json:"text,omitempty"`
+	Index        int     `json:"index,omitempty"`
+	StopReason   string  `json:"stop_reason,omitempty"`
+	StopSequence *string `json:"stop_sequence,omitempty"`
+	PartialJSON  string  `json:"partial_json,omitempty"`
 }

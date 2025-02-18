@@ -24,7 +24,7 @@ type GenerateConfig struct {
 	MaxTokens    *int
 	Temperature  *float64
 	Tools        []Tool
-	ToolChoice   string
+	ToolChoice   ToolChoice
 	ToolFunc     ToolFunc[any]
 }
 
@@ -57,14 +57,14 @@ func WithSystemPrompt(systemPrompt string) GenerateOption {
 }
 
 // WithTools sets the tools for the message.
-func WithTools(tools []Tool) GenerateOption {
+func WithTools(tools ...Tool) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.Tools = tools
 	}
 }
 
 // WithToolChoice sets the tool choice for the message.
-func WithToolChoice(toolChoice string) GenerateOption {
+func WithToolChoice(toolChoice ToolChoice) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.ToolChoice = toolChoice
 	}

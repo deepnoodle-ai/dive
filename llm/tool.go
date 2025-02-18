@@ -16,6 +16,12 @@ func (t *Tool) ParametersCount() int {
 
 type ToolFunc[T any] func(ctx context.Context, name string, input T) (string, error)
 
+type ToolChoice struct {
+	Type                   string `json:"type"`
+	Name                   string `json:"name,omitempty"`
+	DisableParallelToolUse bool   `json:"disable_parallel_tool_use,omitempty"`
+}
+
 // type Tool interface {
 // 	Definition() *ToolDefinition
 // 	Invoke(ctx context.Context, input json.RawMessage) (string, error)

@@ -1,12 +1,16 @@
 package llm
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type ContentType string
 
 const (
-	ContentTypeText  ContentType = "text"
-	ContentTypeImage ContentType = "image"
+	ContentTypeText    ContentType = "text"
+	ContentTypeImage   ContentType = "image"
+	ContentTypeToolUse ContentType = "tool_use"
 )
 
 // Content is a single piece of content in a message.
@@ -22,6 +26,15 @@ type Content struct {
 
 	// MediaType is the media type of the content
 	MediaType string `json:"media_type,omitempty"`
+
+	// ID is the ID of the content
+	ID string `json:"id,omitempty"`
+
+	// Name is the name of the content
+	Name string `json:"name,omitempty"`
+
+	// Input is the input of the content
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 // Message passed to an LLM for generation.

@@ -1,14 +1,25 @@
 package anthropic
 
+import (
+	"encoding/json"
+
+	"github.com/getstingrai/agents/llm"
+)
+
 type Message struct {
 	Role    string         `json:"role"`
 	Content []ContentBlock `json:"content"`
 }
 
 type ContentBlock struct {
-	Type   string       `json:"type"`
-	Text   string       `json:"text,omitempty"`
-	Source *ImageSource `json:"source,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Type      string          `json:"type"`
+	Name      string          `json:"name,omitempty"`
+	Text      string          `json:"text,omitempty"`
+	Source    *ImageSource    `json:"source,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
 }
 
 type ImageSource struct {
@@ -18,12 +29,20 @@ type ImageSource struct {
 }
 
 type Request struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	MaxTokens   *int      `json:"max_tokens,omitempty"`
-	Temperature *float64  `json:"temperature,omitempty"`
-	System      string    `json:"system,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []Message       `json:"messages"`
+	MaxTokens   *int            `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	System      string          `json:"system,omitempty"`
+	Stream      bool            `json:"stream,omitempty"`
+	Tools       []Tool          `json:"tools,omitempty"`
+	ToolChoice  *llm.ToolChoice `json:"tool_choice,omitempty"`
+}
+
+type Tool struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	InputSchema llm.Schema `json:"input_schema"`
 }
 
 type Response struct {
@@ -45,17 +64,29 @@ type Usage struct {
 }
 
 type StreamEvent struct {
-	Type    string        `json:"type"`
-	Message StreamMessage `json:"message"`
-	Delta   StreamDelta   `json:"delta"`
+	Type         string        `json:"type"`
+	Index        int           `json:"index"`
+	Message      StreamMessage `json:"message"`
+	Delta        StreamDelta   `json:"delta"`
+	ContentBlock *ContentBlock `json:"content_block"`
+	// AccumulatedContent string                `json:"accumulated_content"`
+	// ContentBlocks      map[int]*ContentBlock `json:"content_blocks"`
 }
 
 type StreamMessage struct {
-	Content []ContentBlock `json:"content"`
+	ID           string         `json:"id"`
+	Role         string         `json:"role"`
+	Type         string         `json:"type"`
+	Model        string         `json:"model"`
+	StopSequence *string        `json:"stop_sequence"`
+	StopReason   *string        `json:"stop_reason"`
+	Content      []ContentBlock `json:"content"`
 }
 
 type StreamDelta struct {
-	Type       string `json:"type"`
-	Text       string `json:"text"`
-	StopReason string `json:"stop_reason,omitempty"`
+	Type         string  `json:"type"`
+	Text         string  `json:"text"`
+	StopReason   string  `json:"stop_reason,omitempty"`
+	StopSequence *string `json:"stop_sequence,omitempty"`
+	PartialJSON  string  `json:"partial_json,omitempty"`
 }

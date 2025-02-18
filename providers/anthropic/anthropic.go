@@ -95,10 +95,27 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		System:      config.SystemPrompt,
 	}
 
+	if len(config.Tools) > 0 {
+		var tools []Tool
+		for _, tool := range config.Tools {
+			tools = append(tools, Tool{
+				Name:        tool.Name,
+				Description: tool.Description,
+				InputSchema: tool.Parameters,
+			})
+		}
+		reqBody.Tools = tools
+	}
+	if config.ToolChoice.Type != "" {
+		reqBody.ToolChoice = &config.ToolChoice
+	}
+
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
+
+	fmt.Println(string(jsonBody))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
@@ -126,16 +143,29 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error decoding response: %w", err)
 	}
 
+	fmt.Printf("RESPONSE: %+v\n", result)
+
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
 
 	var contentBlocks []llm.Content
 	for _, block := range result.Content {
-		contentBlocks = append(contentBlocks, llm.Content{
-			Type: llm.ContentTypeText,
-			Text: block.Text,
-		})
+		switch block.Type {
+		case "text":
+			contentBlocks = append(contentBlocks, llm.Content{
+				Type: llm.ContentTypeText,
+				Text: block.Text,
+			})
+		case "tool_use":
+			contentBlocks = append(contentBlocks, llm.Content{
+				Type:  llm.ContentTypeToolUse,
+				ID:    block.ID,
+				Name:  block.Name,
+				Input: block.Input,
+			})
+			fmt.Printf("TOOL USE: %+v\n", contentBlocks[len(contentBlocks)-1])
+		}
 	}
 
 	return llm.NewResponse(llm.ResponseOptions{
@@ -257,12 +287,38 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 
 // Stream implements the llm.Stream interface for Anthropic streaming responses
 type Stream struct {
-	reader *bufio.Reader
-	body   io.ReadCloser
-	err    error
+	reader         *bufio.Reader
+	body           io.ReadCloser
+	err            error
+	contentBlocks  map[int]*ContentBlockAccumulator
+	currentMessage *StreamEvent
+}
+
+type ContentBlockAccumulator struct {
+	Type        string
+	Text        string
+	PartialJSON string
+	ToolUse     *ToolUse
+	IsComplete  bool
+}
+
+type ToolUse struct {
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+type Delta struct {
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 }
 
 func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
+	if s.contentBlocks == nil {
+		s.contentBlocks = make(map[int]*ContentBlockAccumulator)
+	}
 	for {
 		line, err := s.reader.ReadBytes('\n')
 		if err != nil {
@@ -272,6 +328,11 @@ func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
 
 		// Skip empty lines
 		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+
+		// Parse the event type from the SSE format
+		if bytes.HasPrefix(line, []byte("event: ")) {
 			continue
 		}
 
@@ -290,23 +351,76 @@ func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
 
 		switch event.Type {
 		case "message_start":
-			continue // Skip message start events
+			s.currentMessage = &event
+
 		case "content_block_start":
-			continue // Skip content block start events
-		case "content_block_delta":
-			if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
-				return &llm.StreamEvent{
-					Type: llm.EventContentBlockDelta,
-					Delta: &llm.Delta{
-						Type: "text_delta",
-						Text: event.Delta.Text,
-					},
-				}, true
+			s.contentBlocks[event.Index] = &ContentBlockAccumulator{
+				Type: event.ContentBlock.Type,
+				Text: event.ContentBlock.Text,
+				// ToolUse: event.ContentBlock.ToolUse,
 			}
+
+		case "content_block_stop":
+			if block, exists := s.contentBlocks[event.Index]; exists {
+				block.IsComplete = true
+			}
+
+		case "content_block_delta":
+			block, exists := s.contentBlocks[event.Index]
+			if !exists {
+				block = &ContentBlockAccumulator{
+					Type: event.Delta.Type,
+				}
+				s.contentBlocks[event.Index] = block
+			}
+
+			switch event.Delta.Type {
+			case "text_delta":
+				if event.Delta.Text != "" {
+					block.Text += event.Delta.Text
+					return &llm.StreamEvent{
+						Type:  llm.EventContentBlockDelta,
+						Index: event.Index,
+						Delta: &llm.Delta{
+							Type: "text_delta",
+							Text: event.Delta.Text,
+						},
+						AccumulatedText: block.Text,
+					}, true
+				}
+
+			case "input_json_delta":
+				if event.Delta.PartialJSON != "" {
+					block.PartialJSON += event.Delta.PartialJSON
+					return &llm.StreamEvent{
+						Type:  llm.EventContentBlockDelta,
+						Index: event.Index,
+						Delta: &llm.Delta{
+							Type:        "input_json_delta",
+							PartialJSON: event.Delta.PartialJSON,
+						},
+						AccumulatedJSON: block.PartialJSON,
+					}, true
+				}
+			}
+
 		case "message_delta":
 			if event.Delta.StopReason != "" {
-				return nil, false
+				return &llm.StreamEvent{
+					Type:  llm.EventMessageDelta,
+					Index: event.Index,
+					Delta: &llm.Delta{
+						Type:         "message_delta",
+						StopReason:   event.Delta.StopReason,
+						StopSequence: event.Delta.StopSequence,
+					},
+					AccumulatedText: event.Delta.Text,
+					AccumulatedJSON: event.Delta.PartialJSON,
+				}, true
 			}
+
+		case "message_stop", "ping":
+			continue
 		}
 	}
 }
