@@ -7,6 +7,8 @@ import (
 	"os"
 	"path"
 	"time"
+
+	"github.com/getstingrai/agents/llm"
 )
 
 type AgentLog struct {
@@ -18,10 +20,10 @@ type AgentLog struct {
 }
 
 type ConversationLog struct {
-	Agent           *AgentLog         `json:"agent"`
-	Messages        []*Message        `json:"messages"`
-	Response        *Response         `json:"response"`
-	ToolInvocations []*ToolInvocation `json:"tool_invocations"`
+	Agent    *AgentLog      `json:"agent"`
+	Messages []*llm.Message `json:"messages"`
+	Response *llm.Response  `json:"response"`
+	// ToolInvocations []*ToolInvocation `json:"tool_invocations"`
 }
 
 type FileConversationLogger struct {
@@ -43,8 +45,8 @@ func NewFileConversationLogger(dir string) *FileConversationLogger {
 func (l *FileConversationLogger) LogConversation(
 	ctx context.Context,
 	agent *Agent,
-	messages []*Message,
-	response *Response,
+	messages []*llm.Message,
+	response *llm.Response,
 ) error {
 	if err := os.MkdirAll(l.dir, 0755); err != nil {
 		return err
@@ -72,7 +74,7 @@ func (l *FileConversationLogger) LogConversation(
 	}
 	allMessagesText := ""
 	for _, message := range messages {
-		allMessagesText += "---- " + message.Role.String() + "\n\n" + message.GetText() + "\n\n"
+		allMessagesText += "---- " + message.Role.String() + "\n\n" + message.Text() + "\n\n"
 	}
 	os.WriteFile(fmt.Sprintf("%s/%s_conversation_%02d.txt", l.dir, agent.Name(), seq), []byte(allMessagesText), 0644)
 	return nil

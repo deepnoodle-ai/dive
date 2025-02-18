@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/getstingrai/agents/llm"
 )
 
 const ModelClaude3Dot5Sonnet20241022 = "claude-3-5-sonnet-20241022"
@@ -17,8 +19,8 @@ type ConversationLogger interface {
 	LogConversation(
 		ctx context.Context,
 		agent *Agent,
-		messages []*Message,
-		response *Response,
+		messages []*llm.Message,
+		response *llm.Response,
 	) error
 }
 
@@ -155,7 +157,7 @@ func (a *Agent) InterpolateInputs(input any) error {
 }
 
 // respond sends a message to the agent's brain and returns the response
-func (a *Agent) respond(ctx context.Context, messages ...*Message) (*Response, error) {
+func (a *Agent) respond(ctx context.Context, messages ...*llm.Message) (*llm.Response, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -184,7 +186,7 @@ func (a *Agent) executeTask(ctx context.Context, task *Task, deps []TaskResult) 
 	}
 
 	// Send the request to the agent
-	resp, err := a.respond(ctx, NewUserTextMessage(prompt))
+	resp, err := a.respond(ctx, llm.NewUserMessage(prompt))
 	if err != nil {
 		return TaskResult{Task: task, Error: err}
 	}
@@ -192,7 +194,7 @@ func (a *Agent) executeTask(ctx context.Context, task *Task, deps []TaskResult) 
 	output, err := parseResponse(
 		task.OutputFormat(),
 		task.OutputObject(),
-		resp.Message.GetText(),
+		resp.Message().Text(),
 	)
 	if err != nil {
 		return TaskResult{

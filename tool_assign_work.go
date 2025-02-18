@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/getstingrai/agents/llm"
 )
 
 type AssignWorkInput struct {
@@ -32,11 +34,11 @@ func (t *AssignWorkTool) Description() string {
 	return "Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request."
 }
 
-func (t *AssignWorkTool) Definition() *ToolDefinition {
-	return &ToolDefinition{
+func (t *AssignWorkTool) Definition() *llm.Tool {
+	return &llm.Tool{
 		Name:        t.Name(),
 		Description: t.Description(),
-		Parameters: Schema{
+		Parameters: llm.Schema{
 			Type: "object",
 			Required: []string{
 				"agent",
@@ -44,7 +46,7 @@ func (t *AssignWorkTool) Definition() *ToolDefinition {
 				"description",
 				"expected_output",
 			},
-			Properties: map[string]SchemaProperty{
+			Properties: map[string]*llm.SchemaProperty{
 				"agent": {
 					Type:        "string",
 					Description: "The name of the agent that should do the work.",

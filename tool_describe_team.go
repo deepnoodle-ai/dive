@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/getstingrai/agents/llm"
 )
 
 type DescribeTeamTool struct {
@@ -22,14 +24,14 @@ func (t *DescribeTeamTool) Description() string {
 	return "Returns a description of the team, including the roles of all team members."
 }
 
-func (t *DescribeTeamTool) Definition() *ToolDefinition {
-	return &ToolDefinition{
+func (t *DescribeTeamTool) Definition() *llm.Tool {
+	return &llm.Tool{
 		Name:        t.Name(),
 		Description: t.Description(),
-		Parameters: Schema{
+		Parameters: llm.Schema{
 			Type:       "object",
 			Required:   []string{},
-			Properties: map[string]SchemaProperty{},
+			Properties: map[string]*llm.SchemaProperty{},
 		},
 	}
 }
