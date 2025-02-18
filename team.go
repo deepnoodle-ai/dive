@@ -21,7 +21,7 @@ type TeamState struct {
 // Team orchestrates multiple agents working together
 type Team struct {
 	// Agents participating in this team
-	agents []*Agent
+	agents []Agent
 
 	// Tasks to be performed
 	tasks map[string]*Task
@@ -40,7 +40,7 @@ type Team struct {
 }
 
 type TeamSpec struct {
-	Agents       []*Agent
+	Agents       []Agent
 	Tasks        []*Task
 	Description  string
 	LogDirectory string
@@ -72,7 +72,7 @@ func (t *Team) Description() string {
 	return t.description
 }
 
-func (t *Team) Agents() []*Agent {
+func (t *Team) Agents() []Agent {
 	return t.agents
 }
 
@@ -88,7 +88,7 @@ func (t *Team) Tasks() []*Task {
 	return tasks
 }
 
-func (t *Team) GetAgent(name string) (*Agent, bool) {
+func (t *Team) GetAgent(name string) (Agent, bool) {
 	for _, agent := range t.agents {
 		if agent.Name() == name {
 			return agent, true
@@ -135,13 +135,15 @@ func (t *Team) Execute(ctx context.Context, input ...any) (map[string]TaskResult
 	t.started = true
 
 	for _, agent := range t.agents {
-		agent.SetTeam(t)
-	}
-	for _, agent := range t.agents {
-		if err := agent.InterpolateInputs(theInput); err != nil {
-			return nil, fmt.Errorf("failed to interpolate inputs: %w", err)
+		if err := agent.Join(ctx, t); err != nil {
+			return nil, fmt.Errorf("failed to join team: %w", err)
 		}
 	}
+	// for _, agent := range t.agents {
+	// 	if err := agent.InterpolateInputs(theInput); err != nil {
+	// 		return nil, fmt.Errorf("failed to interpolate inputs: %w", err)
+	// 	}
+	// }
 	for _, task := range t.tasks {
 		if err := task.InterpolateInputs(theInput); err != nil {
 			return nil, fmt.Errorf("failed to interpolate inputs: %w", err)
@@ -187,7 +189,20 @@ func (t *Team) executeTask(ctx context.Context, task *Task, deps []TaskResult) T
 func (t *Team) executeSingleAttempt(ctx context.Context, task *Task, deps []TaskResult) TaskResult {
 
 	// Execute the task using the agent
-	result := task.Agent().ExecuteTask(ctx, task, deps)
+	promise, err := task.Agent().Work(ctx, task)
+	if err != nil {
+		return TaskResult{
+			Task:  task,
+			Error: err,
+		}
+	}
+	result, err := promise.Get(ctx)
+	if err != nil {
+		return TaskResult{
+			Task:  task,
+			Error: err,
+		}
+	}
 
 	// Handle file output if specified
 	if task.OutputFile() != "" && result.Error == nil {
@@ -196,7 +211,7 @@ func (t *Team) executeSingleAttempt(ctx context.Context, task *Task, deps []Task
 		// 	result.Error = err
 		// }
 	}
-	return result
+	return *result
 }
 
 func (t *Team) Validate() error {

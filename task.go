@@ -64,7 +64,7 @@ type Task struct {
 	expectedOutputTemplate string
 	outputFormat           OutputFormat
 	outputObject           interface{}
-	agent                  *Agent
+	agent                  Agent
 	dependencies           []string
 	condition              string
 	maxIterations          *int
@@ -81,7 +81,7 @@ func (t *Task) Description() string        { return t.description }
 func (t *Task) ExpectedOutput() string     { return t.expectedOutput }
 func (t *Task) OutputFormat() OutputFormat { return t.outputFormat }
 func (t *Task) OutputObject() interface{}  { return t.outputObject }
-func (t *Task) Agent() *Agent              { return t.agent }
+func (t *Task) Agent() Agent               { return t.agent }
 func (t *Task) Dependencies() []string     { return t.dependencies }
 func (t *Task) Condition() string          { return t.condition }
 func (t *Task) MaxIterations() *int        { return t.maxIterations }
@@ -97,7 +97,7 @@ type TaskSpec struct {
 	ExpectedOutput string        `json:"expected_output"`
 	OutputFormat   OutputFormat  `json:"output_format"`
 	OutputObject   interface{}   `json:"output_object"`
-	Agent          *Agent        `json:"-"`
+	Agent          Agent         `json:"-"`
 	Dependencies   []string      `json:"dependencies"`
 	Condition      string        `json:"condition"`
 	MaxIterations  *int          `json:"max_iterations"`

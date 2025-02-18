@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path"
 	"time"
@@ -44,38 +42,38 @@ func NewFileConversationLogger(dir string) *FileConversationLogger {
 
 func (l *FileConversationLogger) LogConversation(
 	ctx context.Context,
-	agent *Agent,
+	// agent *Agent,
 	messages []*llm.Message,
 	response *llm.Response,
 ) error {
 	if err := os.MkdirAll(l.dir, 0755); err != nil {
 		return err
 	}
-	l.agentSeq[agent.Name()]++
-	seq := l.agentSeq[agent.Name()]
+	// l.agentSeq[agent.Name()]++
+	// seq := l.agentSeq[agent.Name()]
 
-	entry := &ConversationLog{
-		Agent: &AgentLog{
-			Name:      agent.Name(),
-			Role:      agent.Role(),
-			Backstory: agent.Backstory(),
-			Goal:      agent.Goal(),
-		},
-		Messages: messages,
-		Response: response,
-	}
-	json, err := json.MarshalIndent(entry, "", "  ")
-	if err != nil {
-		return err
-	}
-	filename := fmt.Sprintf("%s/%s_conversation_%02d.json", l.dir, agent.Name(), seq)
-	if err := os.WriteFile(filename, json, 0644); err != nil {
-		return err
-	}
-	allMessagesText := ""
-	for _, message := range messages {
-		allMessagesText += "---- " + message.Role.String() + "\n\n" + message.Text() + "\n\n"
-	}
-	os.WriteFile(fmt.Sprintf("%s/%s_conversation_%02d.txt", l.dir, agent.Name(), seq), []byte(allMessagesText), 0644)
+	// entry := &ConversationLog{
+	// 	Agent: &AgentLog{
+	// 		// Name:      agent.Name(),
+	// 		// Role:      agent.Role(),
+	// 		// Backstory: agent.Backstory(),
+	// 		// Goal:      agent.Goal(),
+	// 	},
+	// 	Messages: messages,
+	// 	Response: response,
+	// }
+	// json, err := json.MarshalIndent(entry, "", "  ")
+	// if err != nil {
+	// 	return err
+	// }
+	// filename := fmt.Sprintf("%s/%s_conversation_%02d.json", l.dir, agent.Name(), seq)
+	// if err := os.WriteFile(filename, json, 0644); err != nil {
+	// 	return err
+	// }
+	// allMessagesText := ""
+	// for _, message := range messages {
+	// 	allMessagesText += "---- " + message.Role.String() + "\n\n" + message.Text() + "\n\n"
+	// }
+	// os.WriteFile(fmt.Sprintf("%s/%s_conversation_%02d.txt", l.dir, agent.Name(), seq), []byte(allMessagesText), 0644)
 	return nil
 }

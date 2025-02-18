@@ -41,7 +41,7 @@ func TestHelloWorldStream(t *testing.T) {
 	for _, event := range events {
 		switch event.Type {
 		case llm.EventContentBlockDelta:
-			numbers := strings.Fields(strings.TrimSpace(event.Delta.Text))
+			numbers := strings.Fields(event.Delta.Text)
 			texts = append(texts, numbers...)
 			finalText = event.AccumulatedText
 		}
