@@ -85,7 +85,10 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		MaxTokens:   maxTokens,
 		Temperature: config.Temperature,
 		Tools:       config.Tools,
-		ToolChoice:  config.ToolChoice,
+	}
+
+	if config.ToolChoice.Type != "" {
+		reqBody.ToolChoice = config.ToolChoice.Type
 	}
 
 	if config.SystemPrompt != "" {

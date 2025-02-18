@@ -115,8 +115,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	fmt.Println(string(jsonBody))
-
 	req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
@@ -143,8 +141,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error decoding response: %w", err)
 	}
 
-	fmt.Printf("RESPONSE: %+v\n", result)
-
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
@@ -164,7 +160,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 				Name:  block.Name,
 				Input: block.Input,
 			})
-			fmt.Printf("TOOL USE: %+v\n", contentBlocks[len(contentBlocks)-1])
 		}
 	}
 

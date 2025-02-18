@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/getstingrai/agents/llm"
@@ -15,5 +16,7 @@ func TestHelloWorld(t *testing.T) {
 		llm.NewUserMessage("respond with \"hello\""),
 	})
 	require.NoError(t, err)
-	require.Equal(t, "hello", response.Message().Text())
+
+	// Oddly, uppercase "Hello" is often returned :-)
+	require.Equal(t, "hello", strings.ToLower(response.Message().Text()))
 }
