@@ -4,11 +4,35 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/agents/prompt"
 )
 
 var _ Agent = &StandardAgent{}
+
+// Define message types
+type messageEvent struct {
+	event *Event
+}
+
+type messageWork struct {
+	task    *Task
+	promise *Promise
+}
+
+type messageChat struct {
+	ctx     context.Context
+	message *llm.Message
+	result  chan *llm.Response
+	err     chan error
+}
+
+type messageStop struct {
+	ctx  context.Context
+	done chan error
+}
 
 type StandardAgentSpec struct {
 	Name  string
@@ -25,31 +49,20 @@ type StandardAgent struct {
 	team    *Team
 	running bool
 
-	eventChan chan *Event
-	workChan  chan workItem
-	stopChan  chan struct{}
-	mu        sync.Mutex
-	wg        sync.WaitGroup
+	// Consolidate all message types into a single channel
+	mailbox chan interface{}
 
-	currentWork     *workItem
-	currentWorkDone chan struct{}
-}
-
-type workItem struct {
-	task    *Task
-	promise *Promise
+	mu sync.Mutex
+	wg sync.WaitGroup
 }
 
 func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 	return &StandardAgent{
-		name:            spec.Name,
-		role:            spec.Role,
-		goals:           spec.Goals,
-		llm:             spec.LLM,
-		eventChan:       make(chan *Event, 32),
-		workChan:        make(chan workItem, 32),
-		stopChan:        make(chan struct{}),
-		currentWorkDone: make(chan struct{}),
+		name:    spec.Name,
+		role:    spec.Role,
+		goals:   spec.Goals,
+		llm:     spec.LLM,
+		mailbox: make(chan interface{}, 32),
 	}
 }
 
@@ -71,11 +84,27 @@ func (a *StandardAgent) Join(ctx context.Context, team *Team) error {
 }
 
 func (a *StandardAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Response, error) {
-	response, err := a.llm.Generate(ctx, []*llm.Message{message})
-	if err != nil {
-		return nil, err
+	result := make(chan *llm.Response, 1)
+	errChan := make(chan error, 1)
+
+	select {
+	case a.mailbox <- messageChat{
+		ctx:     ctx,
+		message: message,
+		result:  result,
+		err:     errChan,
+	}:
+		select {
+		case resp := <-result:
+			return resp, nil
+		case err := <-errChan:
+			return nil, err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return response, nil
 }
 
 func (a *StandardAgent) ChatStream(ctx context.Context, message *llm.Message) (llm.Stream, error) {
@@ -86,8 +115,9 @@ func (a *StandardAgent) Event(ctx context.Context, event *Event) error {
 	if !a.IsRunning() {
 		return fmt.Errorf("agent is not running")
 	}
+
 	select {
-	case a.eventChan <- event:
+	case a.mailbox <- messageEvent{event: event}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -100,10 +130,10 @@ func (a *StandardAgent) Work(ctx context.Context, task *Task) (*Promise, error) 
 	}
 
 	promise := &Promise{agent: a, ch: make(chan *TaskResult, 1)}
-	item := workItem{task: task, promise: promise}
+	item := messageWork{task: task, promise: promise}
 
 	select {
-	case a.workChan <- item:
+	case a.mailbox <- item:
 		return promise, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -131,19 +161,22 @@ func (a *StandardAgent) Stop(ctx context.Context) error {
 	if !a.running {
 		return nil
 	}
+	done := make(chan error)
 
+	// Send stop message before closing mailbox
+	a.mailbox <- messageStop{
+		ctx:  ctx,
+		done: done,
+	}
+
+	// Close mailbox after sending stop message
+	close(a.mailbox)
 	a.running = false
-	close(a.stopChan)
-
-	done := make(chan struct{})
-	go func() {
-		a.wg.Wait()
-		close(done)
-	}()
 
 	select {
-	case <-done:
-		return nil
+	case err := <-done:
+		a.wg.Wait()
+		return err
 	case <-ctx.Done():
 		return fmt.Errorf("timeout waiting for agent to stop: %w", ctx.Err())
 	}
@@ -159,22 +192,75 @@ func (a *StandardAgent) run() error {
 	defer a.wg.Done()
 	for {
 		select {
-		case event := <-a.eventChan:
-			fmt.Printf("event: %+v\n", event)
-
-		case work := <-a.workChan:
-			go func() {
-				result := a.processWork(work.task)
-				work.promise.ch <- result
-				close(work.promise.ch)
-			}()
-
-		case <-a.stopChan:
-			return nil
+		case msg := <-a.mailbox:
+			switch m := msg.(type) {
+			case messageEvent:
+				a.handleEvent(m.event)
+			case messageWork:
+				a.handleWork(m)
+			case messageChat:
+				a.handleChat(m)
+			case messageStop:
+				return a.handleStop(m)
+			}
 		}
 	}
 }
 
-func (a *StandardAgent) processWork(task *Task) *TaskResult {
+func (a *StandardAgent) handleEvent(event *Event) {
+	fmt.Printf("event: %+v\n", event)
+}
+
+func (a *StandardAgent) handleWork(msg messageWork) {
+	task := msg.task
+
+	p, err := prompt.New(
+		prompt.WithSystemMessage(task.Description()),
+		prompt.WithUserMessage(task.ExpectedOutput()),
+	).Build(nil)
+
+	if err != nil {
+		msg.promise.ch <- &TaskResult{
+			Task:  task,
+			Error: err,
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
+	defer cancel()
+
+	response, err := a.llm.Generate(ctx, p.Messages,
+		llm.WithSystemPrompt(p.System))
+	if err != nil {
+		msg.promise.ch <- &TaskResult{
+			Task:  task,
+			Error: err,
+		}
+		return
+	}
+
+	responseText := response.Message().Text()
+
+	msg.promise.ch <- &TaskResult{
+		Task:   task,
+		Output: TaskOutput{Content: responseText},
+	}
+
+	fmt.Println("work complete", task.Name(), responseText)
+}
+
+func (a *StandardAgent) handleChat(msg messageChat) {
+	response, err := a.llm.Generate(msg.ctx, []*llm.Message{msg.message})
+	if err != nil {
+		msg.err <- err
+	} else {
+		msg.result <- response
+	}
+}
+
+func (a *StandardAgent) handleStop(msg messageStop) error {
+	// Cleanup logic here
+	msg.done <- nil
 	return nil
 }
