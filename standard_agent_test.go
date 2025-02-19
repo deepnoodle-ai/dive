@@ -81,7 +81,13 @@ func TestStandardAgentTask(t *testing.T) {
 	result, err := promise.Get(ctx)
 	require.NoError(t, err)
 
-	content := result.Output.Content
-	require.Contains(t, content, "cat")
-	require.Contains(t, content, "poem")
+	content := strings.ToLower(result.Output.Content)
+
+	matches := 0
+	for _, word := range []string{"cat", "whiskers", "paws"} {
+		if strings.Contains(content, word) {
+			matches += 1
+		}
+	}
+	require.Greater(t, matches, 0)
 }

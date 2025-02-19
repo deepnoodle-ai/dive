@@ -171,3 +171,30 @@ func (t *Task) Validate() error {
 func (t *Task) SetResult(result *TaskResult) {
 	t.result = result
 }
+
+func (t *Task) PromptText() string {
+	text := "# Task Instructions\n\n"
+	if t.name != "" {
+		text += fmt.Sprintf("## Task Name\n%s\n\n", t.name)
+	}
+	if t.description != "" {
+		text += fmt.Sprintf("## Description\n%s\n\n", t.description)
+	}
+	if t.outputFormat != "" || t.expectedOutput != "" {
+		text += fmt.Sprintf("## Expected Output\n")
+		if t.outputFormat != "" {
+			text += fmt.Sprintf("- Format: %s\n", t.outputFormat)
+		}
+		if t.expectedOutput != "" {
+			text += fmt.Sprintf("- Requirements: %s\n\n", t.expectedOutput)
+		}
+	}
+	if t.context != "" {
+		text += "## Additional Context\n"
+		text += "```context\n" // Clear delimiter for context start
+		text += t.context
+		text += "\n```\n\n" // Clear delimiter for context end
+	}
+	text += "Please provide your response following the specified format and requirements."
+	return text
+}

@@ -206,7 +206,12 @@ func (a *StandardAgent) run() error {
 			case messageEvent:
 				a.handleEvent(m.event)
 			case messageWork:
-				a.handleWork(m)
+				result, err := a.handleTask(m.task)
+				if err != nil {
+					m.promise.ch <- NewTaskResultError(m.task, err)
+				} else {
+					m.promise.ch <- result
+				}
 			case messageChat:
 				a.handleChat(m)
 			case messageStop:
@@ -231,44 +236,53 @@ func (a *StandardAgent) getTools() []llm.Tool {
 	return results
 }
 
-func (a *StandardAgent) handleWork(msg messageWork) {
-	task := msg.task
+func (a *StandardAgent) systemPrompt() (string, error) {
+	return ExecuteTemplate(agentSystemPromptTemplate, a.TemplateData())
+}
 
-	p, err := prompt.New(
-		prompt.WithSystemMessage(task.Description()),
-		prompt.WithUserMessage(task.ExpectedOutput()),
-	).Build(nil)
-
-	if err != nil {
-		msg.promise.ch <- &TaskResult{
-			Task:  task,
-			Error: err,
-		}
-		return
+func (a *StandardAgent) handleTask(task *Task) (*TaskResult, error) {
+	timeout := task.Timeout()
+	if timeout == 0 {
+		timeout = time.Minute * 3
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	response, err := a.llm.Generate(ctx, p.Messages,
+	systemPrompt, err := a.systemPrompt()
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println("==== systemPrompt ====")
+	fmt.Println(systemPrompt)
+	fmt.Println("==== /systemPrompt ====")
+
+	p, err := prompt.New(
+		prompt.WithSystemMessage(systemPrompt),
+		prompt.WithUserMessage(task.PromptText()),
+	).Build()
+
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := a.llm.Generate(ctx,
+		p.Messages,
 		llm.WithSystemPrompt(p.System),
 		llm.WithTools(a.getTools()...),
 	)
 	if err != nil {
-		msg.promise.ch <- &TaskResult{
-			Task:  task,
-			Error: err,
-		}
-		return
+		return nil, err
 	}
 
 	responseText := response.Message().Text()
 
-	msg.promise.ch <- &TaskResult{
+	fmt.Println("work complete", task.Name(), responseText)
+
+	return &TaskResult{
 		Task:   task,
 		Output: TaskOutput{Content: responseText},
-	}
-	fmt.Println("work complete", task.Name(), responseText)
+	}, nil
 }
 
 func (a *StandardAgent) handleChat(msg messageChat) {
@@ -284,4 +298,31 @@ func (a *StandardAgent) handleStop(msg messageStop) error {
 	// Cleanup logic here
 	msg.done <- nil
 	return nil
+}
+
+func NewTaskResultError(task *Task, err error) *TaskResult {
+	return &TaskResult{
+		Task:  task,
+		Error: err,
+	}
+}
+
+type AgentTemplateData struct {
+	Name      string
+	Role      string
+	Goals     []*Goal
+	Team      *Team
+	IsManager bool
+	IsWorker  bool
+}
+
+func (a *StandardAgent) TemplateData() *AgentTemplateData {
+	return &AgentTemplateData{
+		Name:      a.name,
+		Role:      a.role.Description,
+		Goals:     a.goals,
+		Team:      a.team,
+		IsManager: a.isManager,
+		IsWorker:  a.isWorker,
+	}
 }

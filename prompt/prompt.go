@@ -155,7 +155,7 @@ func (t *Template) Build(params ...map[string]any) (*Prompt, error) {
 	}
 
 	if len(t.directives) > 0 {
-		directivesText, err := renderTemplate(bulletedList(t.directives), allParams)
+		directivesText, err := renderTemplate(BulletedList(t.directives), allParams)
 		if err != nil {
 			return nil, err
 		}
@@ -231,8 +231,8 @@ func renderTemplate(text string, params map[string]any) (string, error) {
 	return buf.String(), nil
 }
 
-// bulletedList joins strings with newlines
-func bulletedList(items []string) string {
+// BulletedList joins strings with newlines
+func BulletedList(items []string) string {
 	var buf bytes.Buffer
 	for _, item := range items {
 		buf.WriteString("- ")

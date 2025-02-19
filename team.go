@@ -97,13 +97,8 @@ func (t *Team) GetAgent(name string) (Agent, bool) {
 	return nil, false
 }
 
-func (t *Team) Overview() string {
-	result, err := interpolateTemplate("team", teamTemplate,
-		map[string]interface{}{"Team": t})
-	if err != nil {
-		panic(err)
-	}
-	return result
+func (t *Team) Overview() (string, error) {
+	return ExecuteTemplate(teamPromptTemplate, t)
 }
 
 // AddTask adds a task to the team's workflow

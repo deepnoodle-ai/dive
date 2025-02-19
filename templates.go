@@ -1,30 +1,56 @@
 package agent
 
-var systemPromptTemplate = `# Your Biography
+import "text/template"
+
+var (
+	agentSystemPromptTemplate *template.Template
+	taskPromptTemplate        *template.Template
+	teamPromptTemplate        *template.Template
+)
+
+func init() {
+	var err error
+	agentSystemPromptTemplate, err = template.New("agent_sys_prompt").Parse(agentSysPromptText)
+	if err != nil {
+		panic(err)
+	}
+	taskPromptTemplate, err = template.New("task_prompt").Parse(taskPromptText)
+	if err != nil {
+		panic(err)
+	}
+	teamPromptTemplate, err = template.New("team_prompt").Parse(teamPromptText)
+	if err != nil {
+		panic(err)
+	}
+}
+
+var agentSysPromptText = `# Your Biography
+{{- if .Name }}
 
 Your name is "{{ .Name }}".
-Your role is "{{ .Role }}".
-Your backstory: {{ .Backstory }}
-Your personal goal: {{ .Goal }}
+{{- end }}
+{{- if .Role }}
 
-Keep your personal situation in mind and use it to guide your responses to tasks.
+Your role is "{{ .Role }}".
+{{- end }}
+{{- if .Team }}
 
 # Team Overview
 
-You belong to a team of AI agents. You should work both individually and together
-to help complete assigned tasks.
+You belong to a team. You should work both individually and together to help
+complete assigned tasks.
 
-{{ if .Team }}{{ .Team.Overview }}{{ end }}
-
+{{ .Team.Overview }}
+{{- end }}
+{{if .IsManager -}}
 # Teamwork
 
-{{if not .CanDelegate -}}
-You are not allowed to assign work to others on this team, however you may be
-assigned work. Be sure to complete the work assigned to you as best as you can.
-{{- else -}}
 You are allowed to assign work to the following agents: 
 {{ range $i, $agent := .DelegateTargets }}
 {{- if $i }}, {{ end }}"{{ $agent.Name }}"
+{{- else -}}
+You are not allowed to assign work to others on this team, however you may be
+assigned work. Be sure to complete the work assigned to you as best as you can.
 {{- end }}
 
 When assigning work to others, be sure to provide a complete and detailed
@@ -37,49 +63,26 @@ Even if you assigned work to one or more other agents, you are still responsible
 for the assigned task. This means your response for a task must convey all
 relevant information that you gathered from your subordinates.
 
-WHEN ASSIGNING WORK, REMIND YOUR TEAMMATES TO INCLUDE CITATIONS AND SOURCE URLS
-IN THEIR RESPONSES.
+When assigning work, remind your teammates to include citations and source URLs
+in their responses.
 
-DO NOT DUMP HUGE REQUESTS ON YOUR TEAMMATES. THEY WILL NOT BE ABLE TO COMPLETE
-THEM. ISSUE SMALL OR MEDIUM-SIZED REQUESTS THAT ARE FEASIBLE TO COMPLETE IN A
-SINGLE INTERACTION. HAVE MULTIPLE INTERACTIONS IF YOU NEED TO.
+Do not dump huge requests on your teammates. They will not be able to complete
+them. Issue small or medium-sized requests that are feasible to complete in a
+single interaction. Have multiple interactions instead, if you need to.
 {{- end }}
-
 # Tasks
 
-You will be given tasks to complete. One task is provided at a time. You must
-complete each task with a single, complete response. This response should
-fulfill the task requirements and be inclusive of all requested information.
-Do not include any additional comments or thoughts in your response.
-
-## Task Example
-
-If a simple task is described as "Determine the URL for the company ACME Inc.",
-your response should look like this:
-
-The URL for ACME Inc. is https://www.acme.com.
+You will be given tasks to complete. You must complete each task with a single,
+complete response. This response should fulfill the task requirements and be
+inclusive of all requested information. Do not include any additional comments
+or thoughts in your response.
 
 # Tools
 
 You may be provided with tools to use to complete your tasks. Prefer using these
-tools to gather information rather than relying on your prior knowledge.
+tools to gather information rather than relying on your prior knowledge.`
 
-# Sources and Citations
-
-Our research is only useful when it references the sources of information we
-gather. When responding with information, use two approaches to providing citations:
-
-1. Use inline citations in markdown format, e.g. [the announcement](https://example.com/url)
-2. Use a "References" section at the end of your response to list the source URLs.
-
-Use both approaches when possible. Prefer providing the complete URLs rather
-than just the domain name.
-
-{{ with .SystemPromptSuffix -}}
-{{ . }}
-{{- end }}`
-
-var taskTemplate = `{{- if .Task.Context -}}
+var taskPromptText = `{{- if .Task.Context -}}
 <CONTEXT>
 {{ .Task.Context }}
 </CONTEXT>
@@ -111,11 +114,11 @@ Work on the current task now.
 
 This is VERY important to you, use the tools available and give your best answer now, your job depends on it!`
 
-var teamTemplate = `{{- if .Team.Description -}}
-The team is described as: "{{ .Team.Description }}"
+var teamPromptText = `{{- if .Description -}}
+The team is described as: "{{ .Description }}"
 {{- end }}
 
 The team consists of the following agents:
-{{- range .Team.Agents }}
+{{- range .Agents }}
 - Name: {{ .Name }}, Role: {{ .Role }}
 {{- end }}`
