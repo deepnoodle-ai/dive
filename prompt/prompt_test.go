@@ -7,28 +7,48 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBasicPrompt(t *testing.T) {
-	p := New(
-		WithSystem("You are a helpful assistant named {{.Name}}."),
-		WithMessage(llm.User, "Hello, how are you?"),
-	)
-	msgs, err := p.Build(map[string]any{"Name": "John"})
+func TestSimplePrompt(t *testing.T) {
+	p, err := New(
+		WithSystemMessage("Talk about {{.Topic}}"),
+		WithUserMessage("Hello {{.Name}}, how are you?"),
+	).Build(map[string]any{
+		"Name":  "John",
+		"Topic": "cats",
+	})
 	require.NoError(t, err)
-	require.Equal(t, 2, len(msgs))
+	require.Equal(t, 1, len(p.Messages))
+	require.Equal(t, "Talk about cats", p.System)
 
-	require.Equal(t, llm.Message{
-		Role: llm.System,
+	require.Equal(t, &llm.Message{
+		Role: llm.User,
 		Content: []llm.Content{{
 			Type: llm.ContentTypeText,
-			Text: "You are a helpful assistant named John.",
+			Text: "Hello John, how are you?",
 		}},
-	}, msgs[0])
+	}, p.Messages[0])
+}
 
-	require.Equal(t, llm.Message{
+func TestPromptWithDirectives(t *testing.T) {
+	p, err := New(
+		WithSystemMessage("Talk with a pirate accent"),
+		WithUserMessage("Hello, how are you?"),
+		WithDirective("You are a helpful pirate"),
+	).Build()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(p.Messages))
+
+	expectedSystem := `Talk with a pirate accent
+
+Directives:
+- You are a helpful pirate
+`
+	require.Equal(t, expectedSystem, p.System)
+
+	require.Equal(t, &llm.Message{
 		Role: llm.User,
 		Content: []llm.Content{{
 			Type: llm.ContentTypeText,
 			Text: "Hello, how are you?",
 		}},
-	}, msgs[1])
+	}, p.Messages[0])
 }

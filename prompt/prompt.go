@@ -9,8 +9,13 @@ import (
 	"github.com/getstingrai/agents/llm"
 )
 
-// Prompt represents a complete prompt configuration
 type Prompt struct {
+	System   string
+	Messages []*llm.Message
+}
+
+// Template represents a complete prompt configuration
+type Template struct {
 	system         []string
 	messages       []llm.Message
 	directives     []string
@@ -20,12 +25,12 @@ type Prompt struct {
 	params         map[string]interface{}
 }
 
-// Option is a functional option for configuring a Prompt
-type Option func(*Prompt)
+// Option is a functional option for configuring a Template
+type Option func(*Template)
 
-// New creates a new Prompt with the given options
-func New(opts ...Option) *Prompt {
-	p := &Prompt{
+// New creates a new prompt template with the given options
+func New(opts ...Option) *Template {
+	p := &Template{
 		params: make(map[string]interface{}),
 	}
 	for _, opt := range opts {
@@ -34,35 +39,44 @@ func New(opts ...Option) *Prompt {
 	return p
 }
 
-// WithSystem appends to the system message
-func WithSystem(content ...string) Option {
-	return func(p *Prompt) {
-		p.system = append(p.system, content...)
+// WithSystemMessage appends to the system message
+func WithSystemMessage(content ...string) Option {
+	return func(t *Template) {
+		t.system = append(t.system, content...)
 	}
 }
 
-// WithMessage adds a user or assistant message
-func WithMessage(role llm.Role, content string) Option {
-	return func(p *Prompt) {
-		p.messages = append(p.messages, llm.Message{
-			Role:    role,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: content}},
-		})
+// WithMessage appends one or more messages to the prompt
+func WithMessage(messages ...llm.Message) Option {
+	return func(t *Template) {
+		t.messages = append(t.messages, messages...)
 	}
 }
 
+// WithUserMessage adds a user message with the given text to the prompt
 func WithUserMessage(content string) Option {
-	return func(p *Prompt) {
-		p.messages = append(p.messages, llm.Message{
+	return func(t *Template) {
+		t.messages = append(t.messages, llm.Message{
 			Role:    llm.User,
 			Content: []llm.Content{{Type: llm.ContentTypeText, Text: content}},
 		})
 	}
 }
 
+// WithAssistantMessage adds an assistant message with the given text to the prompt
+func WithAssistantMessage(content string) Option {
+	return func(t *Template) {
+		t.messages = append(t.messages, llm.Message{
+			Role:    llm.Assistant,
+			Content: []llm.Content{{Type: llm.ContentTypeText, Text: content}},
+		})
+	}
+}
+
+// WithImage adds an image to the prompt
 func WithImage(mediaType string, encodedData string) Option {
-	return func(p *Prompt) {
-		p.messages = append(p.messages, llm.Message{
+	return func(t *Template) {
+		t.messages = append(t.messages, llm.Message{
 			Role: llm.User,
 			Content: []llm.Content{{
 				Type:      llm.ContentTypeImage,
@@ -73,99 +87,116 @@ func WithImage(mediaType string, encodedData string) Option {
 	}
 }
 
+// WithExpectedOutput adds an expected output to the prompt
 func WithExpectedOutput(expectedOutput string) Option {
-	return func(p *Prompt) {
-		p.expectedOutput = expectedOutput
+	return func(t *Template) {
+		t.expectedOutput = expectedOutput
 	}
 }
 
-// WithDirective adds a directive to the prompt
-func WithDirective(directive string) Option {
-	return func(p *Prompt) {
-		p.directives = append(p.directives, directive)
+// WithDirective adds one or more directives to the prompt
+func WithDirective(directive ...string) Option {
+	return func(t *Template) {
+		t.directives = append(t.directives, directive...)
 	}
 }
 
-// WithContext adds context information to the prompt
-func WithContext(context string) Option {
-	return func(p *Prompt) {
-		p.context = append(p.context, context)
+// WithContext adds one or more context items to the prompt
+func WithContext(context ...string) Option {
+	return func(t *Template) {
+		t.context = append(t.context, context...)
 	}
 }
 
-// WithExample adds an example conversation
+// WithExample adds one or more examples to the prompt
 func WithExample(examples ...string) Option {
-	return func(p *Prompt) {
-		p.examples = append(p.examples, examples...)
+	return func(t *Template) {
+		t.examples = append(t.examples, examples...)
 	}
 }
 
 // Build compiles the prompt and returns messages and options for LLM generation
-func (p *Prompt) Build(params map[string]any) ([]llm.Message, error) {
-	var messages []llm.Message
+func (t *Template) Build(params ...map[string]any) (*Prompt, error) {
+	allParams := map[string]any{}
+	for _, p := range params {
+		for k, v := range p {
+			allParams[k] = v
+		}
+	}
 
-	// Build system message with stable instructions only
+	var messages []*llm.Message
 	var systemContent []string
 
-	// Add original system message if present
-	if len(p.system) > 0 {
-		msg, err := renderTemplate(strings.Join(p.system, "\n\n"), params)
+	if len(t.system) > 0 {
+		systemText, err := renderTemplate(strings.Join(t.system, "\n\n"), allParams)
 		if err != nil {
 			return nil, err
 		}
-		systemContent = append(systemContent, msg)
+		systemContent = append(systemContent, systemText)
 	}
 
-	// Add directives
-	if len(p.directives) > 0 {
-		systemContent = append(systemContent,
-			fmt.Sprintf("Directives:\n\n%s\n", joinStrings(p.directives)),
-		)
-	}
-
-	// Add combined system message if we have any system content
-	if len(systemContent) > 0 {
-		systemText := strings.Join(systemContent, "\n\n")
-		messages = append(messages, llm.Message{
-			Role:    llm.System,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: systemText}},
-		})
-	}
-
-	// Add context as a separate user message if present
-	if len(p.context) > 0 {
-		contextContent := "Here is the relevant context:\n" + joinStrings(p.context)
-		messages = append(messages, llm.Message{
-			Role:    llm.User,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: contextContent}},
-		})
-	}
-
-	// Add examples
-	for _, ex := range p.examples {
-		exampleText, err := renderTemplate(ex, params)
+	if len(t.directives) > 0 {
+		directivesText, err := renderTemplate(bulletedList(t.directives), allParams)
 		if err != nil {
 			return nil, err
 		}
-		messages = append(messages, llm.Message{
+		directivesText = fmt.Sprintf("Directives:\n%s", directivesText)
+		systemContent = append(systemContent, directivesText)
+	}
+
+	for i, ex := range t.examples {
+		exampleText, err := renderTemplate(ex, allParams)
+		if err != nil {
+			return nil, err
+		}
+		exampleText = fmt.Sprintf("Example %d:\n%s", i+1, exampleText)
+		messages = append(messages, &llm.Message{
 			Role:    llm.User,
 			Content: []llm.Content{{Type: llm.ContentTypeText, Text: exampleText}},
 		})
 	}
 
-	// Add conversation messages
-	for _, msg := range p.messages {
-		renderedMsg, err := renderTemplate(msg.Content[0].Text, params)
-		if err != nil {
-			return nil, err
-		}
-		messages = append(messages, llm.Message{
-			Role:    msg.Role,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: renderedMsg}},
+	for i, context := range t.context {
+		contextContent := fmt.Sprintf("Context %d:\n%s", i+1, context)
+		messages = append(messages, &llm.Message{
+			Role:    llm.User,
+			Content: []llm.Content{{Type: llm.ContentTypeText, Text: contextContent}},
 		})
 	}
 
-	return messages, nil
+	for _, msg := range t.messages {
+		var contents []llm.Content
+		for _, content := range msg.Content {
+			var text string
+			if content.Type == llm.ContentTypeText {
+				renderedContent, err := renderTemplate(content.Text, allParams)
+				if err != nil {
+					return nil, err
+				}
+				text = renderedContent
+			} else {
+				text = content.Text
+			}
+			contents = append(contents, llm.Content{
+				ID:        content.ID,
+				Name:      content.Name,
+				Type:      content.Type,
+				Text:      text,
+				Data:      content.Data,
+				MediaType: content.MediaType,
+				Input:     content.Input,
+			})
+		}
+		messages = append(messages, &llm.Message{
+			Role:    msg.Role,
+			Content: contents,
+		})
+	}
+
+	return &Prompt{
+		System:   strings.Join(systemContent, "\n\n"),
+		Messages: messages,
+	}, nil
 }
 
 // renderTemplate applies template parameters to text
@@ -181,8 +212,8 @@ func renderTemplate(text string, params map[string]any) (string, error) {
 	return buf.String(), nil
 }
 
-// joinStrings joins strings with newlines
-func joinStrings(items []string) string {
+// bulletedList joins strings with newlines
+func bulletedList(items []string) string {
 	var buf bytes.Buffer
 	for _, item := range items {
 		buf.WriteString("- ")
