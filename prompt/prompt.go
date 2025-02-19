@@ -17,7 +17,7 @@ type Prompt struct {
 // Template represents a complete prompt configuration
 type Template struct {
 	system         []string
-	messages       []llm.Message
+	messages       []*llm.Message
 	directives     []string
 	context        []string
 	examples       []string
@@ -55,7 +55,7 @@ func WithPersona(persona string) Option {
 }
 
 // WithMessage appends one or more messages to the prompt
-func WithMessage(messages ...llm.Message) Option {
+func WithMessage(messages ...*llm.Message) Option {
 	return func(t *Template) {
 		t.messages = append(t.messages, messages...)
 	}
@@ -64,7 +64,7 @@ func WithMessage(messages ...llm.Message) Option {
 // WithUserMessage adds a user message with the given text to the prompt
 func WithUserMessage(content string) Option {
 	return func(t *Template) {
-		t.messages = append(t.messages, llm.Message{
+		t.messages = append(t.messages, &llm.Message{
 			Role:    llm.User,
 			Content: []llm.Content{{Type: llm.ContentTypeText, Text: content}},
 		})
@@ -74,7 +74,7 @@ func WithUserMessage(content string) Option {
 // WithAssistantMessage adds an assistant message with the given text to the prompt
 func WithAssistantMessage(content string) Option {
 	return func(t *Template) {
-		t.messages = append(t.messages, llm.Message{
+		t.messages = append(t.messages, &llm.Message{
 			Role:    llm.Assistant,
 			Content: []llm.Content{{Type: llm.ContentTypeText, Text: content}},
 		})
@@ -84,7 +84,7 @@ func WithAssistantMessage(content string) Option {
 // WithImage adds an image to the prompt
 func WithImage(mediaType string, encodedData string) Option {
 	return func(t *Template) {
-		t.messages = append(t.messages, llm.Message{
+		t.messages = append(t.messages, &llm.Message{
 			Role: llm.User,
 			Content: []llm.Content{{
 				Type:      llm.ContentTypeImage,

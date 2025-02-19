@@ -1,17 +1,19 @@
-package agent
+package agents
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 type TaskStatus string
 
 const (
-	TaskStatusPending   TaskStatus = "pending"
-	TaskStatusRunning   TaskStatus = "running"
+	TaskStatusQueued    TaskStatus = "queued"
+	TaskStatusActive    TaskStatus = "active"
+	TaskStatusPaused    TaskStatus = "paused"
 	TaskStatusCompleted TaskStatus = "completed"
-	TaskStatusFailed    TaskStatus = "failed"
+	TaskStatusError     TaskStatus = "error"
 )
 
 // TaskResult holds the output of a completed task
@@ -21,14 +23,14 @@ type TaskResult struct {
 	Error  error
 }
 
-// TaskState holds the state of a task
-type TaskState struct {
-	IterationCount int
-	LastError      error
-	StartTime      time.Time
-	CompletionTime time.Time
-	Status         TaskStatus
-}
+// // TaskState holds the state of a task
+// type TaskState struct {
+// 	IterationCount int
+// 	LastError      error
+// 	StartTime      time.Time
+// 	CompletionTime time.Time
+// 	Status         TaskStatus
+// }
 
 // OutputFormat defines the structure of task outputs
 type OutputFormat string
@@ -73,6 +75,7 @@ type Task struct {
 	state                  *TaskState
 	timeout                time.Duration
 	context                string
+	priority               int
 }
 
 // Getters
@@ -89,6 +92,7 @@ func (t *Task) OutputFile() string         { return t.outputFile }
 func (t *Task) Result() *TaskResult        { return t.result }
 func (t *Task) Timeout() time.Duration     { return t.timeout }
 func (t *Task) Context() string            { return t.context }
+func (t *Task) Priority() int              { return t.priority }
 
 // TaskSpec defines the configuration for creating a new Task
 type TaskSpec struct {
@@ -104,6 +108,7 @@ type TaskSpec struct {
 	OutputFile     string        `json:"output_file,omitempty"`
 	Timeout        time.Duration `json:"timeout,omitempty"`
 	Context        string        `json:"context,omitempty"`
+	Priority       int           `json:"priority"`
 }
 
 // NewTask creates a new Task from a TaskSpec
@@ -124,6 +129,7 @@ func NewTask(spec TaskSpec) *Task {
 		outputFile:             spec.OutputFile,
 		timeout:                spec.Timeout,
 		context:                spec.Context,
+		priority:               spec.Priority,
 	}
 }
 
@@ -173,28 +179,23 @@ func (t *Task) SetResult(result *TaskResult) {
 }
 
 func (t *Task) PromptText() string {
-	text := "# Task Instructions\n\n"
+	lines := []string{}
 	if t.name != "" {
-		text += fmt.Sprintf("## Task Name\n%s\n\n", t.name)
+		lines = append(lines, fmt.Sprintf("Let's work on a task named %q.", t.name))
+	} else {
+		lines = append(lines, "Let's work on a task.")
 	}
 	if t.description != "" {
-		text += fmt.Sprintf("## Description\n%s\n\n", t.description)
+		lines = append(lines, t.description)
 	}
-	if t.outputFormat != "" || t.expectedOutput != "" {
-		text += fmt.Sprintf("## Expected Output\n")
-		if t.outputFormat != "" {
-			text += fmt.Sprintf("- Format: %s\n", t.outputFormat)
-		}
-		if t.expectedOutput != "" {
-			text += fmt.Sprintf("- Requirements: %s\n\n", t.expectedOutput)
-		}
+	if t.expectedOutput != "" {
+		lines = append(lines, fmt.Sprintf("Please respond with %s.", t.expectedOutput))
+	}
+	if t.outputFormat != "" {
+		lines = append(lines, fmt.Sprintf("Your response must be in %s format.", t.outputFormat))
 	}
 	if t.context != "" {
-		text += "## Additional Context\n"
-		text += "```context\n" // Clear delimiter for context start
-		text += t.context
-		text += "\n```\n\n" // Clear delimiter for context end
+		lines = append(lines, fmt.Sprintf("Use this context while working on the task:\n\n%s\n\n", t.context))
 	}
-	text += "Please provide your response following the specified format and requirements."
-	return text
+	return strings.Join(lines, "\n\n")
 }

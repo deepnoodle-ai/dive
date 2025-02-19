@@ -1,4 +1,4 @@
-package agent
+package agents
 
 // func TestNewTeam(t *testing.T) {
 // 	// Create test agents

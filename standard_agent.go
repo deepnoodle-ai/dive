@@ -1,8 +1,9 @@
-package agent
+package agents
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,26 +35,85 @@ type messageStop struct {
 	done chan error
 }
 
+type TaskState struct {
+	task           *Task
+	promise        *Promise
+	status         TaskStatus
+	priority       int
+	started        time.Time
+	output         string
+	reasoning      string
+	reportedStatus string
+	messages       []*llm.Message
+}
+
+func (s *TaskState) Task() *Task {
+	return s.task
+}
+
+func (s *TaskState) Output() string {
+	return s.output
+}
+
+func (s *TaskState) Reasoning() string {
+	return s.reasoning
+}
+
+func (s *TaskState) Status() TaskStatus {
+	return s.status
+}
+
+func (s *TaskState) ReportedStatus() string {
+	return s.reportedStatus
+}
+
+func (s *TaskState) Messages() []*llm.Message {
+	return s.messages
+}
+
+func (s *TaskState) String() string {
+	text, err := ExecuteTemplate(taskStatePromptTemplate, s)
+	if err != nil {
+		panic(err)
+	}
+	return text
+}
+
+type Document struct {
+	Name    string
+	Content string
+	Format  OutputFormat
+}
+
 type StandardAgentSpec struct {
-	Name      string
-	Role      *Role
-	Goals     []*Goal
-	LLM       llm.LLM
-	Tools     []llm.Tool
-	IsManager bool
-	IsWorker  bool
+	Name           string
+	Role           *Role
+	Goals          []*Goal
+	LLM            llm.LLM
+	Tools          []llm.Tool
+	IsManager      bool
+	IsWorker       bool
+	MaxActiveTasks int
+	TickFrequency  time.Duration
 }
 
 type StandardAgent struct {
-	name      string
-	role      *Role
-	goals     []*Goal
-	llm       llm.LLM
-	team      *Team
-	running   bool
-	tools     []llm.Tool
-	isManager bool
-	isWorker  bool
+	name           string
+	role           *Role
+	goals          []*Goal
+	llm            llm.LLM
+	team           *Team
+	running        bool
+	tools          []llm.Tool
+	isManager      bool
+	isWorker       bool
+	maxActiveTasks int
+	tickFrequency  time.Duration
+	taskQueue      []*TaskState
+	activeTask     *TaskState
+	workspace      []*Document
+	ticker         *time.Ticker
+	completedTasks []*TaskState
 
 	// Consolidate all message types into a single channel
 	mailbox chan interface{}
@@ -63,15 +123,24 @@ type StandardAgent struct {
 }
 
 func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
+	if spec.MaxActiveTasks == 0 {
+		spec.MaxActiveTasks = 1
+	}
+	if spec.TickFrequency == 0 {
+		spec.TickFrequency = time.Second
+	}
+
 	return &StandardAgent{
-		name:      spec.Name,
-		role:      spec.Role,
-		goals:     spec.Goals,
-		llm:       spec.LLM,
-		tools:     spec.Tools,
-		isManager: spec.IsManager,
-		isWorker:  spec.IsWorker,
-		mailbox:   make(chan interface{}, 32),
+		name:           spec.Name,
+		role:           spec.Role,
+		goals:          spec.Goals,
+		llm:            spec.LLM,
+		tools:          spec.Tools,
+		isManager:      spec.IsManager,
+		isWorker:       spec.IsWorker,
+		maxActiveTasks: spec.MaxActiveTasks,
+		tickFrequency:  spec.TickFrequency,
+		mailbox:        make(chan interface{}, 32),
 	}
 }
 
@@ -139,10 +208,12 @@ func (a *StandardAgent) Work(ctx context.Context, task *Task) (*Promise, error) 
 	}
 
 	promise := &Promise{agent: a, ch: make(chan *TaskResult, 1)}
-	item := messageWork{task: task, promise: promise}
 
 	select {
-	case a.mailbox <- item:
+	case a.mailbox <- messageWork{
+		task:    task,
+		promise: promise,
+	}:
 		return promise, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -199,18 +270,38 @@ func (a *StandardAgent) IsRunning() bool {
 
 func (a *StandardAgent) run() error {
 	defer a.wg.Done()
+
+	a.ticker = time.NewTicker(a.tickFrequency)
+	defer a.ticker.Stop()
+
+	ctx := context.Background()
+
 	for {
 		select {
+		case <-a.ticker.C:
+			a.processTaskQueue(ctx)
 		case msg := <-a.mailbox:
 			switch m := msg.(type) {
 			case messageEvent:
 				a.handleEvent(m.event)
 			case messageWork:
-				result, err := a.handleTask(m.task)
-				if err != nil {
-					m.promise.ch <- NewTaskResultError(m.task, err)
-				} else {
-					m.promise.ch <- result
+				taskState := &TaskState{
+					task:     m.task,
+					promise:  m.promise,
+					status:   TaskStatusQueued,
+					priority: m.task.Priority(),
+				}
+				// Insert into queue maintaining priority order
+				inserted := false
+				for i, existing := range a.taskQueue {
+					if taskState.priority > existing.priority {
+						a.taskQueue = append(a.taskQueue[:i], append([]*TaskState{taskState}, a.taskQueue[i:]...)...)
+						inserted = true
+						break
+					}
+				}
+				if !inserted {
+					a.taskQueue = append(a.taskQueue, taskState)
 				}
 			case messageChat:
 				a.handleChat(m)
@@ -240,7 +331,41 @@ func (a *StandardAgent) systemPrompt() (string, error) {
 	return ExecuteTemplate(agentSystemPromptTemplate, a.TemplateData())
 }
 
-func (a *StandardAgent) handleTask(task *Task) (*TaskResult, error) {
+func parseStructuredResponse(responseText string) (string, string, string) {
+	var response, thinking, reportedStatus string
+
+	// Split on <think> tag
+	if strings.Contains(responseText, "<think>") {
+		parts := strings.Split(responseText, "<think>")
+		if len(parts) > 1 {
+			// Find the end of think section
+			thinkParts := strings.Split(parts[1], "</think>")
+			if len(thinkParts) > 1 {
+				thinking = strings.TrimSpace(thinkParts[0])
+				response = strings.TrimSpace(thinkParts[1])
+			}
+		}
+	} else {
+		response = responseText
+	}
+
+	// Extract status if present
+	if strings.Contains(response, "<status>") {
+		parts := strings.Split(response, "<status>")
+		if len(parts) > 1 {
+			statusParts := strings.Split(parts[1], "</status>")
+			if len(statusParts) > 1 {
+				reportedStatus = strings.TrimSpace(statusParts[0])
+				response = strings.TrimSpace(parts[0])
+			}
+		}
+	}
+
+	return response, thinking, reportedStatus
+}
+
+func (a *StandardAgent) handleTask(state *TaskState) error {
+	task := state.task
 	timeout := task.Timeout()
 	if timeout == 0 {
 		timeout = time.Minute * 3
@@ -250,21 +375,33 @@ func (a *StandardAgent) handleTask(task *Task) (*TaskResult, error) {
 
 	systemPrompt, err := a.systemPrompt()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	fmt.Println("==== systemPrompt ====")
-	fmt.Println(systemPrompt)
-	fmt.Println("==== /systemPrompt ====")
+	messages := []*llm.Message{}
+
+	if len(state.Messages()) == 0 {
+		messages = append(messages, llm.NewUserMessage(task.PromptText()))
+		messages = append(messages, llm.NewUserMessage("Please begin working on the task."))
+	} else {
+		messages = append(messages, state.Messages()...)
+		messages = append(messages, llm.NewUserMessage("Continue working on the task."))
+	}
 
 	p, err := prompt.New(
 		prompt.WithSystemMessage(systemPrompt),
-		prompt.WithUserMessage(task.PromptText()),
+		prompt.WithMessage(messages...),
 	).Build()
 
 	if err != nil {
-		return nil, err
+		return err
 	}
+
+	fmt.Println("==== messages ====")
+	for i, msg := range p.Messages {
+		fmt.Printf("---- message %d role: %s ----\n%s\n", i, msg.Role, msg.Text())
+	}
+	fmt.Println("==================")
 
 	response, err := a.llm.Generate(ctx,
 		p.Messages,
@@ -272,17 +409,28 @@ func (a *StandardAgent) handleTask(task *Task) (*TaskResult, error) {
 		llm.WithTools(a.getTools()...),
 	)
 	if err != nil {
-		return nil, err
+		fmt.Println("==== error ====")
+		fmt.Println(err)
+		fmt.Println("==== /error ====")
+		return err
 	}
 
-	responseText := response.Message().Text()
+	messages = append(messages, response.Message())
+	state.messages = messages
 
-	fmt.Println("work complete", task.Name(), responseText)
+	fmt.Println("==== response ====")
+	fmt.Println(response.Message().Text())
+	fmt.Println("==== /response ====")
 
-	return &TaskResult{
-		Task:   task,
-		Output: TaskOutput{Content: responseText},
-	}, nil
+	finalOutput, thinking, reportedStatus := parseStructuredResponse(response.Message().Text())
+	if state.output == "" {
+		state.output = finalOutput
+	} else {
+		state.output = fmt.Sprintf("%s\n\n%s", state.output, finalOutput)
+	}
+	state.reasoning = thinking
+	state.reportedStatus = reportedStatus
+	return nil
 }
 
 func (a *StandardAgent) handleChat(msg messageChat) {
@@ -298,6 +446,61 @@ func (a *StandardAgent) handleStop(msg messageStop) error {
 	// Cleanup logic here
 	msg.done <- nil
 	return nil
+}
+
+func (a *StandardAgent) processTaskQueue(ctx context.Context) {
+
+	// If no active task and queue not empty, activate next task
+	if a.activeTask == nil && len(a.taskQueue) > 0 {
+		a.activeTask = a.taskQueue[0]
+		a.taskQueue = a.taskQueue[1:]
+		a.activeTask.status = TaskStatusActive
+		a.activeTask.started = time.Now()
+		fmt.Println("activated task:", a.activeTask.task.Name())
+	}
+
+	if a.activeTask != nil {
+		err := a.handleTask(a.activeTask)
+		if err != nil {
+			fmt.Println("task error:", a.activeTask.task.Name(), err)
+			a.activeTask.status = TaskStatusError
+			a.activeTask.promise.ch <- NewTaskResultError(a.activeTask.task, err)
+			a.activeTask = nil
+		}
+		reportedStatus := strings.ToLower(a.activeTask.reportedStatus)
+		isComplete := !strings.Contains(reportedStatus, "incomplete")
+		if isComplete {
+			fmt.Println("task completed:", a.activeTask.task.Name())
+			a.activeTask.status = TaskStatusCompleted
+			a.completedTasks = append(a.completedTasks, a.activeTask)
+			a.activeTask.promise.ch <- &TaskResult{
+				Task:   a.activeTask.task,
+				Output: TaskOutput{Content: a.activeTask.output},
+			}
+			a.activeTask = nil
+		} else {
+			fmt.Println("task not yet complete:", a.activeTask.task.Name())
+		}
+	}
+}
+
+func (a *StandardAgent) getTaskHistory() string {
+	var history []string
+	for _, task := range a.completedTasks {
+		history = append(history, fmt.Sprintf("Task: %s\nStatus: %s\n",
+			task.task.Name(),
+			task.status,
+		))
+	}
+	return strings.Join(history, "\n")
+}
+
+func (a *StandardAgent) getWorkspaceState() string {
+	var blobs []string
+	for _, doc := range a.workspace {
+		blobs = append(blobs, fmt.Sprintf("<document name=%q>\n%s\n</document>", doc.Name, doc.Content))
+	}
+	return strings.Join(blobs, "\n\n")
 }
 
 func NewTaskResultError(task *Task, err error) *TaskResult {
@@ -326,3 +529,18 @@ func (a *StandardAgent) TemplateData() *AgentTemplateData {
 		IsWorker:  a.isWorker,
 	}
 }
+
+// func (a *StandardAgent) checkTaskCompletion(ctx context.Context, taskState *TaskState) (bool, error) {
+// 	response, err := prompt.Execute(ctx, a.llm,
+// 		prompt.WithSystemMessage(`You are evaluating if a task has been completed successfully. Review the original task and its output. Respond with exactly "complete" if the task was completed successfully, or "incomplete" if it needs more work.`),
+// 		prompt.WithUserMessage(taskState.String()))
+// 	if err != nil {
+// 		return false, err
+// 	}
+// 	text := strings.TrimSpace(strings.ToLower(response.Message().Text()))
+// 	fmt.Println("==== checkTaskCompletion ====")
+// 	fmt.Println(text)
+// 	fmt.Println(text == "complete")
+// 	fmt.Println("==== /checkTaskCompletion ====")
+// 	return text == "complete", nil
+// }

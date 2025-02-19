@@ -1,4 +1,4 @@
-package agent
+package agents
 
 import "text/template"
 
@@ -6,6 +6,7 @@ var (
 	agentSystemPromptTemplate *template.Template
 	taskPromptTemplate        *template.Template
 	teamPromptTemplate        *template.Template
+	taskStatePromptTemplate   *template.Template
 )
 
 func init() {
@@ -19,6 +20,10 @@ func init() {
 		panic(err)
 	}
 	teamPromptTemplate, err = template.New("team_prompt").Parse(teamPromptText)
+	if err != nil {
+		panic(err)
+	}
+	taskStatePromptTemplate, err = template.New("task_state_prompt").Parse(taskStatePromptText)
 	if err != nil {
 		panic(err)
 	}
@@ -72,15 +77,46 @@ single interaction. Have multiple interactions instead, if you need to.
 {{- end }}
 # Tasks
 
-You will be given tasks to complete. You must complete each task with a single,
-complete response. This response should fulfill the task requirements and be
-inclusive of all requested information. Do not include any additional comments
-or thoughts in your response.
+You will be given tasks to complete. Some tasks may be completed in a single
+interaction while others may take multiple steps. Just make sure you complete
+the task as it is described and include all the requested information in your
+responses. It is up to you to determine when the task is complete. You will
+indicate completion in your response using <status> ... </status> tags as
+described below.
 
 # Tools
 
 You may be provided with tools to use to complete your tasks. Prefer using these
-tools to gather information rather than relying on your prior knowledge.`
+tools to gather information rather than relying on your prior knowledge.
+
+# Output
+
+Each response should include three sections, in this order:
+
+* <think> ... </think> - In this section, you think step-by-step about how to make progress on the task.
+* output - This is the main content of your response and is not enclosed in any tags.
+* <status> ... </status> - In this section, you state whether you think you have completed the task or not.
+
+The <status> section must include the word "complete" or "incomplete". It may
+also include a short explanation of your reasoning for the status.
+
+Your response MUST NOT include any other sections.
+
+Here is an example response to a task "write a joke about a cat":
+
+---
+<think>
+I'll create a simple cat-themed joke.
+</think>
+
+What do you call a cat that likes to go bowling?
+An alley cat!
+
+<status>
+complete - Created a simple cat-themed joke that plays on the double meaning of "alley"
+</status>
+---
+`
 
 var taskPromptText = `{{- if .Task.Context -}}
 <CONTEXT>
@@ -122,3 +158,27 @@ The team consists of the following agents:
 {{- range .Agents }}
 - Name: {{ .Name }}, Role: {{ .Role }}
 {{- end }}`
+
+var taskStatePromptText = `# Task State
+
+The task is described as: "{{ .Task.Description }}"
+
+The task has the following dependencies:
+{{- range .Task.Dependencies }}
+- {{ .Name }}
+{{- end }}
+
+# Current State
+{{- if .Output }}
+
+Prior Thinking:
+{{ .Reasoning }}
+{{- end }}
+{{- if .Status }}
+
+Prior Output:
+{{ .Output }}
+{{- end }}
+
+Last Reported Status:
+{{ .ReportedStatus }}`
