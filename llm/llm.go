@@ -25,7 +25,6 @@ type GenerateConfig struct {
 	Temperature  *float64
 	Tools        []Tool
 	ToolChoice   ToolChoice
-	ToolFunc     ToolFunc[any]
 }
 
 // WithModel sets the LLM model for the generation.
@@ -67,13 +66,6 @@ func WithTools(tools ...Tool) GenerateOption {
 func WithToolChoice(toolChoice ToolChoice) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.ToolChoice = toolChoice
-	}
-}
-
-// WithToolFunc sets the tool function for the message.
-func WithToolFunc(toolFunc ToolFunc[any]) GenerateOption {
-	return func(config *GenerateConfig) {
-		config.ToolFunc = toolFunc
 	}
 }
 

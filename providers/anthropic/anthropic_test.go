@@ -2,6 +2,8 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -50,6 +52,14 @@ func TestHelloWorldStream(t *testing.T) {
 	require.Equal(t, "1\n2\n3\n4\n5\n6\n7\n8\n9\n10", strings.Join(texts, "\n"))
 }
 
+func addFunc(ctx context.Context, input json.RawMessage) (string, error) {
+	var params map[string]interface{}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d", params["a"].(int)+params["b"].(int)), nil
+}
+
 func TestToolUse(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
@@ -58,7 +68,7 @@ func TestToolUse(t *testing.T) {
 		llm.NewUserMessage("add 567 and 111"),
 	}
 
-	add := llm.Tool{
+	add := llm.ToolDefinition{
 		Name:        "add",
 		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
 		Parameters: llm.Schema{
@@ -72,7 +82,7 @@ func TestToolUse(t *testing.T) {
 	}
 
 	response, err := provider.Generate(ctx, messages,
-		llm.WithTools(add),
+		llm.WithTools(llm.NewTool(&add, addFunc)),
 		llm.WithToolChoice(llm.ToolChoice{
 			Type: "tool",
 			Name: "add",

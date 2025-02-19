@@ -98,10 +98,11 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if len(config.Tools) > 0 {
 		var tools []Tool
 		for _, tool := range config.Tools {
+			toolDef := tool.Definition()
 			tools = append(tools, Tool{
-				Name:        tool.Name,
-				Description: tool.Description,
-				InputSchema: tool.Parameters,
+				Name:        toolDef.Name,
+				Description: toolDef.Description,
+				InputSchema: toolDef.Parameters,
 			})
 		}
 		reqBody.Tools = tools

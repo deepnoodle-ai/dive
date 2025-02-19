@@ -21,6 +21,7 @@ type Template struct {
 	directives     []string
 	context        []string
 	examples       []string
+	persona        string
 	expectedOutput string
 	params         map[string]interface{}
 }
@@ -43,6 +44,13 @@ func New(opts ...Option) *Template {
 func WithSystemMessage(content ...string) Option {
 	return func(t *Template) {
 		t.system = append(t.system, content...)
+	}
+}
+
+// WithPersona appends a persona to the prompt
+func WithPersona(persona string) Option {
+	return func(t *Template) {
+		t.persona = persona
 	}
 }
 
@@ -133,6 +141,17 @@ func (t *Template) Build(params ...map[string]any) (*Prompt, error) {
 			return nil, err
 		}
 		systemContent = append(systemContent, systemText)
+	}
+
+	// TODO: Optionally include a description of the team
+
+	if t.persona != "" {
+		personaText, err := renderTemplate(t.persona, allParams)
+		if err != nil {
+			return nil, err
+		}
+		personaText = fmt.Sprintf("Persona:\n%s", personaText)
+		systemContent = append(systemContent, personaText)
 	}
 
 	if len(t.directives) > 0 {

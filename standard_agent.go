@@ -35,19 +35,25 @@ type messageStop struct {
 }
 
 type StandardAgentSpec struct {
-	Name  string
-	Role  *Role
-	Goals []*Goal
-	LLM   llm.LLM
+	Name      string
+	Role      *Role
+	Goals     []*Goal
+	LLM       llm.LLM
+	Tools     []llm.Tool
+	IsManager bool
+	IsWorker  bool
 }
 
 type StandardAgent struct {
-	name    string
-	role    *Role
-	goals   []*Goal
-	llm     llm.LLM
-	team    *Team
-	running bool
+	name      string
+	role      *Role
+	goals     []*Goal
+	llm       llm.LLM
+	team      *Team
+	running   bool
+	tools     []llm.Tool
+	isManager bool
+	isWorker  bool
 
 	// Consolidate all message types into a single channel
 	mailbox chan interface{}
@@ -58,11 +64,14 @@ type StandardAgent struct {
 
 func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 	return &StandardAgent{
-		name:    spec.Name,
-		role:    spec.Role,
-		goals:   spec.Goals,
-		llm:     spec.LLM,
-		mailbox: make(chan interface{}, 32),
+		name:      spec.Name,
+		role:      spec.Role,
+		goals:     spec.Goals,
+		llm:       spec.LLM,
+		tools:     spec.Tools,
+		isManager: spec.IsManager,
+		isWorker:  spec.IsWorker,
+		mailbox:   make(chan interface{}, 32),
 	}
 }
 
@@ -211,6 +220,17 @@ func (a *StandardAgent) handleEvent(event *Event) {
 	fmt.Printf("event: %+v\n", event)
 }
 
+func (a *StandardAgent) getTools() []llm.Tool {
+	results := []llm.Tool{}
+	for _, tool := range a.tools {
+		results = append(results, tool)
+	}
+	if a.isManager {
+		// results = append(results, a.team.Tools()...)
+	}
+	return results
+}
+
 func (a *StandardAgent) handleWork(msg messageWork) {
 	task := msg.task
 
@@ -231,7 +251,9 @@ func (a *StandardAgent) handleWork(msg messageWork) {
 	defer cancel()
 
 	response, err := a.llm.Generate(ctx, p.Messages,
-		llm.WithSystemPrompt(p.System))
+		llm.WithSystemPrompt(p.System),
+		llm.WithTools(a.getTools()...),
+	)
 	if err != nil {
 		msg.promise.ch <- &TaskResult{
 			Task:  task,
@@ -246,7 +268,6 @@ func (a *StandardAgent) handleWork(msg messageWork) {
 		Task:   task,
 		Output: TaskOutput{Content: responseText},
 	}
-
 	fmt.Println("work complete", task.Name(), responseText)
 }
 

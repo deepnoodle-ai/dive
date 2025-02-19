@@ -7,6 +7,8 @@ import (
 	"github.com/getstingrai/agents/llm"
 )
 
+var _ llm.Tool = &AssignWorkTool{}
+
 type AssignWorkInput struct {
 	AgentName      string `json:"agent"`
 	Name           string `json:"name"`
@@ -33,8 +35,8 @@ func (t *AssignWorkTool) Description() string {
 	return "Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request."
 }
 
-func (t *AssignWorkTool) Definition() *llm.Tool {
-	return &llm.Tool{
+func (t *AssignWorkTool) Definition() *llm.ToolDefinition {
+	return &llm.ToolDefinition{
 		Name:        t.Name(),
 		Description: t.Description(),
 		Parameters: llm.Schema{
@@ -75,7 +77,7 @@ func (t *AssignWorkTool) Definition() *llm.Tool {
 	}
 }
 
-func (t *AssignWorkTool) Invoke(ctx context.Context, input json.RawMessage) (string, error) {
+func (t *AssignWorkTool) Call(ctx context.Context, input json.RawMessage) (string, error) {
 	// var params AssignWorkInput
 	// if err := json.Unmarshal(input, &params); err != nil {
 	// 	return "", err
