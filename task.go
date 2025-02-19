@@ -181,9 +181,9 @@ func (t *Task) SetResult(result *TaskResult) {
 func (t *Task) PromptText() string {
 	lines := []string{}
 	if t.name != "" {
-		lines = append(lines, fmt.Sprintf("Let's work on a task named %q.", t.name))
+		lines = append(lines, fmt.Sprintf("Let's work on a new task named %q.", t.name))
 	} else {
-		lines = append(lines, "Let's work on a task.")
+		lines = append(lines, "Let's work on a new task.")
 	}
 	if t.description != "" {
 		lines = append(lines, t.description)

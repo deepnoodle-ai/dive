@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -127,9 +128,8 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 		spec.MaxActiveTasks = 1
 	}
 	if spec.TickFrequency == 0 {
-		spec.TickFrequency = time.Second
+		spec.TickFrequency = time.Millisecond * 250
 	}
-
 	return &StandardAgent{
 		name:           spec.Name,
 		role:           spec.Role,
@@ -140,7 +140,7 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 		isWorker:       spec.IsWorker,
 		maxActiveTasks: spec.MaxActiveTasks,
 		tickFrequency:  spec.TickFrequency,
-		mailbox:        make(chan interface{}, 32),
+		mailbox:        make(chan interface{}, 64),
 	}
 }
 
@@ -381,6 +381,9 @@ func (a *StandardAgent) handleTask(state *TaskState) error {
 	messages := []*llm.Message{}
 
 	if len(state.Messages()) == 0 {
+		if len(a.completedTasks) > 0 {
+			messages = append(messages, llm.NewUserMessage(fmt.Sprintf("For reference, here is an overview of other recent tasks we completed:\n\n%s", a.getTaskHistory())))
+		}
 		messages = append(messages, llm.NewUserMessage(task.PromptText()))
 		messages = append(messages, llm.NewUserMessage("Please begin working on the task."))
 	} else {
@@ -464,6 +467,7 @@ func (a *StandardAgent) processTaskQueue(ctx context.Context) {
 		if err != nil {
 			fmt.Println("task error:", a.activeTask.task.Name(), err)
 			a.activeTask.status = TaskStatusError
+			a.rememberTask(a.activeTask)
 			a.activeTask.promise.ch <- NewTaskResultError(a.activeTask.task, err)
 			a.activeTask = nil
 		}
@@ -472,7 +476,7 @@ func (a *StandardAgent) processTaskQueue(ctx context.Context) {
 		if isComplete {
 			fmt.Println("task completed:", a.activeTask.task.Name())
 			a.activeTask.status = TaskStatusCompleted
-			a.completedTasks = append(a.completedTasks, a.activeTask)
+			a.rememberTask(a.activeTask)
 			a.activeTask.promise.ch <- &TaskResult{
 				Task:   a.activeTask.task,
 				Output: TaskOutput{Content: a.activeTask.output},
@@ -484,15 +488,34 @@ func (a *StandardAgent) processTaskQueue(ctx context.Context) {
 	}
 }
 
+func (a *StandardAgent) rememberTask(task *TaskState) {
+	a.completedTasks = append(a.completedTasks, task)
+	if len(a.completedTasks) > 10 {
+		a.completedTasks = a.completedTasks[1:]
+	}
+}
+
 func (a *StandardAgent) getTaskHistory() string {
 	var history []string
-	for _, task := range a.completedTasks {
-		history = append(history, fmt.Sprintf("Task: %s\nStatus: %s\n",
-			task.task.Name(),
-			task.status,
+	for _, status := range a.completedTasks {
+		title := status.task.Name()
+		if title == "" {
+			title = status.task.Description()
+		}
+		title = TruncateText(title, 8)
+		output := replaceNewlines(status.output)
+		history = append(history, fmt.Sprintf("- task: %q status: %q output: %q\n",
+			title, status.status, TruncateText(output, 8),
 		))
 	}
-	return strings.Join(history, "\n")
+	result := strings.Join(history, "\n")
+	if len(result) > 200 {
+		result = result[:200]
+	}
+	// fmt.Println("==== task history ====")
+	// fmt.Println(result)
+	// fmt.Println("==== /task history ====")
+	return result
 }
 
 func (a *StandardAgent) getWorkspaceState() string {
@@ -544,3 +567,43 @@ func (a *StandardAgent) TemplateData() *AgentTemplateData {
 // 	fmt.Println("==== /checkTaskCompletion ====")
 // 	return text == "complete", nil
 // }
+
+func TruncateText(text string, maxWords int) string {
+	// Split into lines while preserving newlines
+	lines := strings.Split(text, "\n")
+	wordCount := 0
+	var result []string
+	// Process each line
+	for _, line := range lines {
+		words := strings.Fields(line)
+		// If we haven't reached maxWords, add words from this line
+		if wordCount < maxWords {
+			remaining := maxWords - wordCount
+			if len(words) <= remaining {
+				// Add entire line if it fits
+				if len(words) > 0 {
+					result = append(result, line)
+				} else {
+					// Preserve empty lines
+					result = append(result, "")
+				}
+				wordCount += len(words)
+			} else {
+				// Add partial line up to remaining words
+				result = append(result, strings.Join(words[:remaining], " "))
+				wordCount = maxWords
+			}
+		}
+	}
+	truncated := strings.Join(result, "\n")
+	if wordCount >= maxWords {
+		truncated += "..."
+	}
+	return truncated
+}
+
+var newlinesRegex = regexp.MustCompile(`\n+`)
+
+func replaceNewlines(text string) string {
+	return newlinesRegex.ReplaceAllString(text, "<br>")
+}

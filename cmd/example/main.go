@@ -42,4 +42,21 @@ func main() {
 	}
 
 	fmt.Println(result.Output.Content)
+
+	task = agents.NewTask(agents.TaskSpec{
+		Name:        "Jokes",
+		Description: "Share two jokes. Ideally related to previous tasks. Respond with one at a time.",
+	})
+
+	promise, err = a.Work(ctx, task)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	result, err = promise.Get(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(result.Output.Content)
 }
