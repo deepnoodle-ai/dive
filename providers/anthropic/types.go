@@ -6,20 +6,34 @@ import (
 	"github.com/getstingrai/agents/llm"
 )
 
+const (
+	CacheControlTypeEphemeral  = "ephemeral"
+	CacheControlTypePersistent = "persistent"
+)
+
 type Message struct {
-	Role    string         `json:"role"`
-	Content []ContentBlock `json:"content"`
+	Role    string          `json:"role"`
+	Content []*ContentBlock `json:"content"`
+}
+
+type CacheControl struct {
+	Type string `json:"type"`
 }
 
 type ContentBlock struct {
-	ID        string          `json:"id,omitempty"`
-	Type      string          `json:"type"`
-	Name      string          `json:"name,omitempty"`
-	Text      string          `json:"text,omitempty"`
-	Source    *ImageSource    `json:"source,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Type         string          `json:"type"`
+	Name         string          `json:"name,omitempty"`
+	Text         string          `json:"text,omitempty"`
+	Source       *ImageSource    `json:"source,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+}
+
+func (c *ContentBlock) SetCacheControl(cacheControlType string) {
+	c.CacheControl = &CacheControl{Type: cacheControlType}
 }
 
 type ImageSource struct {
@@ -30,12 +44,12 @@ type ImageSource struct {
 
 type Request struct {
 	Model       string          `json:"model"`
-	Messages    []Message       `json:"messages"`
+	Messages    []*Message      `json:"messages"`
 	MaxTokens   *int            `json:"max_tokens,omitempty"`
 	Temperature *float64        `json:"temperature,omitempty"`
 	System      string          `json:"system,omitempty"`
 	Stream      bool            `json:"stream,omitempty"`
-	Tools       []Tool          `json:"tools,omitempty"`
+	Tools       []*Tool         `json:"tools,omitempty"`
 	ToolChoice  *llm.ToolChoice `json:"tool_choice,omitempty"`
 }
 
@@ -46,14 +60,14 @@ type Tool struct {
 }
 
 type Response struct {
-	ID           string         `json:"id"`
-	Content      []ContentBlock `json:"content"`
-	Model        string         `json:"model"`
-	Role         string         `json:"role"`
-	StopReason   string         `json:"stop_reason"`
-	StopSequence *string        `json:"stop_sequence"`
-	Type         string         `json:"type"`
-	Usage        Usage          `json:"usage"`
+	ID           string          `json:"id"`
+	Content      []*ContentBlock `json:"content"`
+	Model        string          `json:"model"`
+	Role         string          `json:"role"`
+	StopReason   string          `json:"stop_reason"`
+	StopSequence *string         `json:"stop_sequence"`
+	Type         string          `json:"type"`
+	Usage        Usage           `json:"usage"`
 }
 
 type Usage struct {

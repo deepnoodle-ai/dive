@@ -8,14 +8,15 @@ import (
 type ContentType string
 
 const (
-	ContentTypeText    ContentType = "text"
-	ContentTypeImage   ContentType = "image"
-	ContentTypeToolUse ContentType = "tool_use"
+	ContentTypeText       ContentType = "text"
+	ContentTypeImage      ContentType = "image"
+	ContentTypeToolUse    ContentType = "tool_use"
+	ContentTypeToolResult ContentType = "tool_result"
 )
 
 // Content is a single piece of content in a message.
 type Content struct {
-	// Type: text, image, ...
+	// Type: text, image, tool_result, ...
 	Type ContentType `json:"type"`
 
 	// Text content
@@ -35,12 +36,15 @@ type Content struct {
 
 	// Input is the input of the content
 	Input json.RawMessage `json:"input,omitempty"`
+
+	// ToolUseID is used when passing a tool result back to the LLM
+	ToolUseID string `json:"tool_use_id,omitempty"`
 }
 
 // Message passed to an LLM for generation.
 type Message struct {
-	Role    Role      `json:"role"`
-	Content []Content `json:"content"`
+	Role    Role       `json:"role"`
+	Content []*Content `json:"content"`
 }
 
 // Text returns the message text content. Specifically, it returns the last text
@@ -71,31 +75,43 @@ func (m *Message) CompleteText() string {
 }
 
 func (m *Message) WithText(text string) *Message {
-	m.Content = append(m.Content, Content{Type: ContentTypeText, Text: text})
+	m.Content = append(m.Content, &Content{Type: ContentTypeText, Text: text})
 	return m
 }
 
 func (m *Message) WithImage(data string) *Message {
-	m.Content = append(m.Content, Content{Type: ContentTypeImage, Data: data})
+	m.Content = append(m.Content, &Content{Type: ContentTypeImage, Data: data})
 	return m
 }
 
-func NewMessage(role Role, content []Content) *Message {
+func NewMessage(role Role, content []*Content) *Message {
 	return &Message{Role: role, Content: content}
 }
 
 func NewUserMessage(text string) *Message {
 	return &Message{
 		Role:    User,
-		Content: []Content{{Type: ContentTypeText, Text: text}},
+		Content: []*Content{{Type: ContentTypeText, Text: text}},
 	}
 }
 
 func NewAssistantMessage(text string) *Message {
 	return &Message{
 		Role:    Assistant,
-		Content: []Content{{Type: ContentTypeText, Text: text}},
+		Content: []*Content{{Type: ContentTypeText, Text: text}},
 	}
+}
+
+func NewToolResultMessage(results []*ToolResult) *Message {
+	content := make([]*Content, len(results))
+	for i, result := range results {
+		content[i] = &Content{
+			Type:      ContentTypeToolResult,
+			ToolUseID: result.ID,
+			Text:      result.Result,
+		}
+	}
+	return &Message{Role: User, Content: content}
 }
 
 // type RawMessage struct {

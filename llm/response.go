@@ -1,13 +1,19 @@
 package llm
 
+import (
+	"encoding/json"
+)
+
 // Response represents an LLM response
 type Response struct {
-	id      string
-	model   string
-	role    Role
-	message *Message
-	usage   Usage
-	object  any
+	id         string
+	model      string
+	stopReason string
+	role       Role
+	message    *Message
+	usage      Usage
+	object     any
+	toolCalls  []ToolCall
 }
 
 // ID returns the unique identifier of the response
@@ -28,24 +34,51 @@ func (r *Response) Usage() Usage { return r.usage }
 // Object returns any additional metadata
 func (r *Response) Object() any { return r.object }
 
+// ToolCalls returns the tool calls made by the LLM
+func (r *Response) ToolCalls() []ToolCall { return r.toolCalls }
+
 // ResponseOptions contains the configuration for creating a new Response
 type ResponseOptions struct {
-	ID      string
-	Model   string
-	Role    Role
-	Message *Message
-	Usage   Usage
-	Object  any
+	ID         string
+	Model      string
+	StopReason string
+	Role       Role
+	Message    *Message
+	Usage      Usage
+	Object     any
 }
 
 // NewResponse creates a new Response instance with the given options
 func NewResponse(opts ResponseOptions) *Response {
-	return &Response{
-		id:      opts.ID,
-		model:   opts.Model,
-		role:    opts.Role,
-		message: opts.Message,
-		usage:   opts.Usage,
-		object:  opts.Object,
+	var toolCalls []ToolCall
+	for _, content := range opts.Message.Content {
+		if content.Type == ContentTypeToolUse {
+			toolCalls = append(toolCalls, ToolCall{
+				ID:    content.ID, // e.g. "toolu_01A09q90qw90lq917835lq9"
+				Name:  content.Name,
+				Input: content.Input,
+			})
+		}
 	}
+	return &Response{
+		id:         opts.ID,
+		model:      opts.Model,
+		stopReason: opts.StopReason,
+		role:       opts.Role,
+		message:    opts.Message,
+		usage:      opts.Usage,
+		object:     opts.Object,
+		toolCalls:  toolCalls,
+	}
+}
+
+type ToolCall struct {
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+type ToolResult struct {
+	ID     string
+	Result string
 }

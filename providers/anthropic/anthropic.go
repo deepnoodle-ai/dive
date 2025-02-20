@@ -29,6 +29,7 @@ type Provider struct {
 	messagesEndpoint string
 	maxTokens        int
 	client           *http.Client
+	caching          bool
 }
 
 func New() *Provider {
@@ -66,6 +67,11 @@ func (p *Provider) WithAnthropicVersion(anthropicVersion string) *Provider {
 	return p
 }
 
+func (p *Provider) WithCaching(caching bool) *Provider {
+	p.caching = caching
+	return p
+}
+
 func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (*llm.Response, error) {
 	config := &llm.GenerateConfig{}
 	for _, opt := range opts {
@@ -82,6 +88,14 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
+	if config.CacheControl != "" && len(msgs) > 0 {
+		lastMessage := msgs[len(msgs)-1]
+		if len(lastMessage.Content) > 0 {
+			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
+			lastContent.SetCacheControl(config.CacheControl)
+		}
+	}
+
 	maxTokens := config.MaxTokens
 	if maxTokens == nil {
 		maxTokens = &p.maxTokens
@@ -96,10 +110,10 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 
 	if len(config.Tools) > 0 {
-		var tools []Tool
+		var tools []*Tool
 		for _, tool := range config.Tools {
 			toolDef := tool.Definition()
-			tools = append(tools, Tool{
+			tools = append(tools, &Tool{
 				Name:        toolDef.Name,
 				Description: toolDef.Description,
 				InputSchema: toolDef.Parameters,
@@ -111,10 +125,13 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		reqBody.ToolChoice = &config.ToolChoice
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
+	jsonBody, err := json.MarshalIndent(reqBody, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
+	// fmt.Println("==== request body ====")
+	// fmt.Println(string(jsonBody))
+	// fmt.Println("==== /request body ====")
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
@@ -146,16 +163,16 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
 
-	var contentBlocks []llm.Content
+	var contentBlocks []*llm.Content
 	for _, block := range result.Content {
 		switch block.Type {
 		case "text":
-			contentBlocks = append(contentBlocks, llm.Content{
+			contentBlocks = append(contentBlocks, &llm.Content{
 				Type: llm.ContentTypeText,
 				Text: block.Text,
 			})
 		case "tool_use":
-			contentBlocks = append(contentBlocks, llm.Content{
+			contentBlocks = append(contentBlocks, &llm.Content{
 				Type:  llm.ContentTypeToolUse,
 				ID:    block.ID,
 				Name:  block.Name,
@@ -164,13 +181,20 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
+	fmt.Println("==== usage ====")
+	fmt.Printf("%+v\n", result.Usage)
+	fmt.Println("==== /usage ====")
+
 	return llm.NewResponse(llm.ResponseOptions{
-		ID:    result.ID,
-		Model: model,
-		Role:  llm.Assistant,
+		ID:         result.ID,
+		Model:      model,
+		Role:       llm.Assistant,
+		StopReason: result.StopReason,
 		Usage: llm.Usage{
-			InputTokens:  result.Usage.InputTokens,
-			OutputTokens: result.Usage.OutputTokens,
+			InputTokens:              result.Usage.InputTokens,
+			OutputTokens:             result.Usage.OutputTokens,
+			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 		},
 		Message: &llm.Message{
 			Role:    llm.Assistant,
@@ -245,21 +269,19 @@ func (p *Provider) SupportsStreaming() bool {
 	return true
 }
 
-func convertMessages(messages []*llm.Message) ([]Message, error) {
-	var result []Message
-
+func convertMessages(messages []*llm.Message) ([]*Message, error) {
+	var result []*Message
 	for _, msg := range messages {
-		var content []ContentBlock
-
+		var blocks []*ContentBlock
 		for _, c := range msg.Content {
 			switch c.Type {
 			case llm.ContentTypeText:
-				content = append(content, ContentBlock{
+				blocks = append(blocks, &ContentBlock{
 					Type: "text",
 					Text: c.Text,
 				})
 			case llm.ContentTypeImage:
-				content = append(content, ContentBlock{
+				blocks = append(blocks, &ContentBlock{
 					Type: "image",
 					Source: &ImageSource{
 						Type:      "base64",
@@ -267,17 +289,28 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 						Data:      c.Data,
 					},
 				})
+			case llm.ContentTypeToolUse:
+				blocks = append(blocks, &ContentBlock{
+					Type:  "tool_use",
+					ID:    c.ID,
+					Name:  c.Name,
+					Input: json.RawMessage(c.Input),
+				})
+			case llm.ContentTypeToolResult:
+				blocks = append(blocks, &ContentBlock{
+					Type:      "tool_result",
+					ToolUseID: c.ToolUseID,
+					Content:   c.Text, // oddly we have to rename to "content"
+				})
 			default:
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type)
 			}
 		}
-
-		result = append(result, Message{
+		result = append(result, &Message{
 			Role:    strings.ToLower(string(msg.Role)),
-			Content: content,
+			Content: blocks,
 		})
 	}
-
 	return result, nil
 }
 

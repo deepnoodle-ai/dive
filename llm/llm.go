@@ -25,6 +25,7 @@ type GenerateConfig struct {
 	Temperature  *float64
 	Tools        []Tool
 	ToolChoice   ToolChoice
+	// ToolResults  []*ToolResult
 }
 
 // WithModel sets the LLM model for the generation.
@@ -55,21 +56,28 @@ func WithSystemPrompt(systemPrompt string) GenerateOption {
 	}
 }
 
-// WithTools sets the tools for the message.
+// WithTools sets the tools for the interaction.
 func WithTools(tools ...Tool) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.Tools = tools
 	}
 }
 
-// WithToolChoice sets the tool choice for the message.
+// WithToolChoice sets the tool choice for the interaction.
 func WithToolChoice(toolChoice ToolChoice) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.ToolChoice = toolChoice
 	}
 }
 
-// WithCacheControl sets the cache control for the message.
+// WithToolResults appends tool results to the interaction.
+// func WithToolResults(toolResults []*ToolResult) GenerateOption {
+// 	return func(config *GenerateConfig) {
+// 		config.ToolResults = toolResults
+// 	}
+// }
+
+// WithCacheControl sets the cache control for the interaction.
 func WithCacheControl(cacheControl string) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.CacheControl = cacheControl

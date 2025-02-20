@@ -143,7 +143,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		},
 		Message: &llm.Message{
 			Role: llm.Assistant,
-			Content: []llm.Content{{
+			Content: []*llm.Content{{
 				Type: llm.ContentTypeText,
 				Text: choice.Message.Content,
 			}},

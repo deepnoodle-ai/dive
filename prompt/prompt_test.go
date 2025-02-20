@@ -21,7 +21,7 @@ func TestSimplePrompt(t *testing.T) {
 
 	require.Equal(t, &llm.Message{
 		Role: llm.User,
-		Content: []llm.Content{{
+		Content: []*llm.Content{{
 			Type: llm.ContentTypeText,
 			Text: "Hello John, how are you?",
 		}},
@@ -46,7 +46,7 @@ Directives:
 
 	require.Equal(t, &llm.Message{
 		Role: llm.User,
-		Content: []llm.Content{{
+		Content: []*llm.Content{{
 			Type: llm.ContentTypeText,
 			Text: "Hello, how are you?",
 		}},

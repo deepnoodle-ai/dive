@@ -66,7 +66,7 @@ func WithUserMessage(content string) Option {
 	return func(t *Template) {
 		t.messages = append(t.messages, &llm.Message{
 			Role:    llm.User,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: content}},
+			Content: []*llm.Content{{Type: llm.ContentTypeText, Text: content}},
 		})
 	}
 }
@@ -76,7 +76,7 @@ func WithAssistantMessage(content string) Option {
 	return func(t *Template) {
 		t.messages = append(t.messages, &llm.Message{
 			Role:    llm.Assistant,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: content}},
+			Content: []*llm.Content{{Type: llm.ContentTypeText, Text: content}},
 		})
 	}
 }
@@ -86,7 +86,7 @@ func WithImage(mediaType string, encodedData string) Option {
 	return func(t *Template) {
 		t.messages = append(t.messages, &llm.Message{
 			Role: llm.User,
-			Content: []llm.Content{{
+			Content: []*llm.Content{{
 				Type:      llm.ContentTypeImage,
 				MediaType: mediaType,
 				Data:      encodedData,
@@ -171,7 +171,7 @@ func (t *Template) Build(params ...map[string]any) (*Prompt, error) {
 		exampleText = fmt.Sprintf("Example %d:\n%s", i+1, exampleText)
 		messages = append(messages, &llm.Message{
 			Role:    llm.User,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: exampleText}},
+			Content: []*llm.Content{{Type: llm.ContentTypeText, Text: exampleText}},
 		})
 	}
 
@@ -179,12 +179,12 @@ func (t *Template) Build(params ...map[string]any) (*Prompt, error) {
 		contextContent := fmt.Sprintf("Context %d:\n%s", i+1, context)
 		messages = append(messages, &llm.Message{
 			Role:    llm.User,
-			Content: []llm.Content{{Type: llm.ContentTypeText, Text: contextContent}},
+			Content: []*llm.Content{{Type: llm.ContentTypeText, Text: contextContent}},
 		})
 	}
 
 	for _, msg := range t.messages {
-		var contents []llm.Content
+		var contents []*llm.Content
 		for _, content := range msg.Content {
 			var text string
 			if content.Type == llm.ContentTypeText {
@@ -196,7 +196,7 @@ func (t *Template) Build(params ...map[string]any) (*Prompt, error) {
 			} else {
 				text = content.Text
 			}
-			contents = append(contents, llm.Content{
+			contents = append(contents, &llm.Content{
 				ID:        content.ID,
 				Name:      content.Name,
 				Type:      content.Type,
@@ -204,6 +204,7 @@ func (t *Template) Build(params ...map[string]any) (*Prompt, error) {
 				Data:      content.Data,
 				MediaType: content.MediaType,
 				Input:     content.Input,
+				ToolUseID: content.ToolUseID,
 			})
 		}
 		messages = append(messages, &llm.Message{

@@ -76,6 +76,7 @@ type Task struct {
 	timeout                time.Duration
 	context                string
 	priority               int
+	kind                   string
 }
 
 // Getters
@@ -93,6 +94,7 @@ func (t *Task) Result() *TaskResult        { return t.result }
 func (t *Task) Timeout() time.Duration     { return t.timeout }
 func (t *Task) Context() string            { return t.context }
 func (t *Task) Priority() int              { return t.priority }
+func (t *Task) Kind() string               { return t.kind }
 
 // TaskSpec defines the configuration for creating a new Task
 type TaskSpec struct {
@@ -109,6 +111,7 @@ type TaskSpec struct {
 	Timeout        time.Duration `json:"timeout,omitempty"`
 	Context        string        `json:"context,omitempty"`
 	Priority       int           `json:"priority"`
+	Kind           string        `json:"kind"`
 }
 
 // NewTask creates a new Task from a TaskSpec
@@ -130,6 +133,7 @@ func NewTask(spec TaskSpec) *Task {
 		timeout:                spec.Timeout,
 		context:                spec.Context,
 		priority:               spec.Priority,
+		kind:                   spec.Kind,
 	}
 }
 
@@ -179,12 +183,13 @@ func (t *Task) SetResult(result *TaskResult) {
 }
 
 func (t *Task) PromptText() string {
-	lines := []string{}
+	var intro string
 	if t.name != "" {
-		lines = append(lines, fmt.Sprintf("Let's work on a new task named %q.", t.name))
+		intro = fmt.Sprintf("Let's work on a new task named %q:", t.name)
 	} else {
-		lines = append(lines, "Let's work on a new task.")
+		intro = "Let's work on a new task:"
 	}
+	lines := []string{}
 	if t.description != "" {
 		lines = append(lines, t.description)
 	}
@@ -197,5 +202,10 @@ func (t *Task) PromptText() string {
 	if t.context != "" {
 		lines = append(lines, fmt.Sprintf("Use this context while working on the task:\n\n%s\n\n", t.context))
 	}
-	return strings.Join(lines, "\n\n")
+	result := fmt.Sprintf("%s\n\n<task>\n%s\n</task>", intro, strings.Join(lines, "\n\n"))
+	result += "\n\nPlease begin working on the task."
+	fmt.Println("==== prompt text ====")
+	fmt.Println(result)
+	fmt.Println("==== /prompt text ====")
+	return result
 }

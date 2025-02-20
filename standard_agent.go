@@ -46,6 +46,9 @@ type TaskState struct {
 	reasoning      string
 	reportedStatus string
 	messages       []*llm.Message
+	suspended      bool
+	chatResult     chan *llm.Response
+	chatError      chan error
 }
 
 func (s *TaskState) Task() *Task {
@@ -96,6 +99,7 @@ type StandardAgentSpec struct {
 	IsWorker       bool
 	MaxActiveTasks int
 	TickFrequency  time.Duration
+	CacheControl   string
 }
 
 type StandardAgent struct {
@@ -106,10 +110,12 @@ type StandardAgent struct {
 	team           *Team
 	running        bool
 	tools          []llm.Tool
+	toolsByName    map[string]llm.Tool
 	isManager      bool
 	isWorker       bool
 	maxActiveTasks int
 	tickFrequency  time.Duration
+	cacheControl   string
 	taskQueue      []*TaskState
 	activeTask     *TaskState
 	workspace      []*Document
@@ -130,7 +136,7 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 	if spec.TickFrequency == 0 {
 		spec.TickFrequency = time.Millisecond * 250
 	}
-	return &StandardAgent{
+	a := &StandardAgent{
 		name:           spec.Name,
 		role:           spec.Role,
 		goals:          spec.Goals,
@@ -140,8 +146,14 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 		isWorker:       spec.IsWorker,
 		maxActiveTasks: spec.MaxActiveTasks,
 		tickFrequency:  spec.TickFrequency,
+		cacheControl:   spec.CacheControl,
 		mailbox:        make(chan interface{}, 64),
+		toolsByName:    make(map[string]llm.Tool),
 	}
+	for _, tool := range spec.Tools {
+		a.toolsByName[tool.Definition().Name] = tool
+	}
+	return a
 }
 
 func (a *StandardAgent) Name() string {
@@ -270,16 +282,13 @@ func (a *StandardAgent) IsRunning() bool {
 
 func (a *StandardAgent) run() error {
 	defer a.wg.Done()
-
 	a.ticker = time.NewTicker(a.tickFrequency)
 	defer a.ticker.Stop()
-
-	ctx := context.Background()
 
 	for {
 		select {
 		case <-a.ticker.C:
-			a.processTaskQueue(ctx)
+			a.processTaskQueue()
 		case msg := <-a.mailbox:
 			switch m := msg.(type) {
 			case messageEvent:
@@ -382,49 +391,62 @@ func (a *StandardAgent) handleTask(state *TaskState) error {
 
 	if len(state.Messages()) == 0 {
 		if len(a.completedTasks) > 0 {
-			messages = append(messages, llm.NewUserMessage(fmt.Sprintf("For reference, here is an overview of other recent tasks we completed:\n\n%s", a.getTaskHistory())))
+			messages = append(messages, llm.NewUserMessage(
+				fmt.Sprintf("For reference, here is an overview of other recent tasks we completed:\n\n%s", a.getTaskHistory())))
 		}
 		messages = append(messages, llm.NewUserMessage(task.PromptText()))
-		messages = append(messages, llm.NewUserMessage("Please begin working on the task."))
 	} else {
 		messages = append(messages, state.Messages()...)
 		messages = append(messages, llm.NewUserMessage("Continue working on the task."))
 	}
 
-	p, err := prompt.New(
-		prompt.WithSystemMessage(systemPrompt),
-		prompt.WithMessage(messages...),
-	).Build()
+	var response *llm.Response
 
-	if err != nil {
-		return err
+	for i := 0; i < 3; i++ {
+		p, err := prompt.New(
+			prompt.WithSystemMessage(systemPrompt),
+			prompt.WithMessage(messages...),
+		).Build()
+		if err != nil {
+			return err
+		}
+		response, err = a.llm.Generate(ctx,
+			p.Messages,
+			llm.WithSystemPrompt(p.System),
+			llm.WithTools(a.getTools()...),
+			llm.WithCacheControl(a.cacheControl),
+		)
+		if err != nil {
+			return err
+		}
+		messages = append(messages, response.Message())
+		if len(response.ToolCalls()) > 0 {
+			var toolResults []*llm.ToolResult
+			for _, toolCall := range response.ToolCalls() {
+				tool, ok := a.toolsByName[toolCall.Name]
+				if !ok {
+					return fmt.Errorf("tool not found: %s", toolCall.Name)
+				} else {
+					result, err := tool.Call(ctx, toolCall.Input)
+					if err != nil {
+						return fmt.Errorf("tool error: %w", err)
+					} else {
+						toolResults = append(toolResults, &llm.ToolResult{
+							ID:     toolCall.ID,
+							Result: result,
+						})
+					}
+				}
+			}
+			if len(toolResults) > 0 {
+				messages = append(messages, llm.NewToolResultMessage(toolResults))
+			}
+		} else {
+			break
+		}
 	}
 
-	fmt.Println("==== messages ====")
-	for i, msg := range p.Messages {
-		fmt.Printf("---- message %d role: %s ----\n%s\n", i, msg.Role, msg.Text())
-	}
-	fmt.Println("==================")
-
-	response, err := a.llm.Generate(ctx,
-		p.Messages,
-		llm.WithSystemPrompt(p.System),
-		llm.WithTools(a.getTools()...),
-	)
-	if err != nil {
-		fmt.Println("==== error ====")
-		fmt.Println(err)
-		fmt.Println("==== /error ====")
-		return err
-	}
-
-	messages = append(messages, response.Message())
 	state.messages = messages
-
-	fmt.Println("==== response ====")
-	fmt.Println(response.Message().Text())
-	fmt.Println("==== /response ====")
-
 	finalOutput, thinking, reportedStatus := parseStructuredResponse(response.Message().Text())
 	if state.output == "" {
 		state.output = finalOutput
@@ -436,12 +458,44 @@ func (a *StandardAgent) handleTask(state *TaskState) error {
 	return nil
 }
 
-func (a *StandardAgent) handleChat(msg messageChat) {
-	response, err := a.llm.Generate(msg.ctx, []*llm.Message{msg.message})
-	if err != nil {
-		msg.err <- err
-	} else {
-		msg.result <- response
+// Add new constructor for chat tasks
+func NewChatTask(message *llm.Message) *Task {
+	return &Task{
+		name:        "",
+		kind:        "chat",
+		description: fmt.Sprintf("Generate a response to user message: %q", message.Text()),
+		// promptText:  message.Text(),
+		priority: 10, // High priority for chat responses
+		timeout:  time.Minute * 1,
+	}
+}
+
+func (a *StandardAgent) handleChat(m messageChat) {
+	// Create a task from the chat message with the response channels
+	task := NewChatTask(m.message)
+
+	// Create task state and add to queue with high priority
+	taskState := &TaskState{
+		task:       task,
+		promise:    &Promise{agent: a, ch: make(chan *TaskResult, 1)},
+		status:     TaskStatusQueued,
+		priority:   task.Priority(),
+		messages:   []*llm.Message{m.message},
+		chatResult: m.result,
+		chatError:  m.err,
+	}
+
+	// Insert into queue maintaining priority order
+	inserted := false
+	for i, existing := range a.taskQueue {
+		if taskState.priority > existing.priority {
+			a.taskQueue = append(a.taskQueue[:i], append([]*TaskState{taskState}, a.taskQueue[i:]...)...)
+			inserted = true
+			break
+		}
+	}
+	if !inserted {
+		a.taskQueue = append(a.taskQueue, taskState)
 	}
 }
 
@@ -451,15 +505,41 @@ func (a *StandardAgent) handleStop(msg messageStop) error {
 	return nil
 }
 
-func (a *StandardAgent) processTaskQueue(ctx context.Context) {
+func (a *StandardAgent) processTaskQueue() {
+	// Check if we should preempt current task
+	if a.activeTask != nil && len(a.taskQueue) > 0 {
+		nextTask := a.taskQueue[0]
+		if nextTask.priority > a.activeTask.priority {
+			// Suspend current task and move it back to queue
+			a.activeTask.suspended = true
+			a.activeTask.status = TaskStatusQueued
+			// Insert suspended task back into queue maintaining priority order
+			inserted := false
+			for i, existing := range a.taskQueue {
+				if a.activeTask.priority > existing.priority {
+					a.taskQueue = append(a.taskQueue[:i], append([]*TaskState{a.activeTask}, a.taskQueue[i:]...)...)
+					inserted = true
+					break
+				}
+			}
+			if !inserted {
+				a.taskQueue = append(a.taskQueue, a.activeTask)
+			}
+			a.activeTask = nil
+		}
+	}
 
 	// If no active task and queue not empty, activate next task
 	if a.activeTask == nil && len(a.taskQueue) > 0 {
 		a.activeTask = a.taskQueue[0]
 		a.taskQueue = a.taskQueue[1:]
 		a.activeTask.status = TaskStatusActive
-		a.activeTask.started = time.Now()
-		fmt.Println("activated task:", a.activeTask.task.Name())
+		if !a.activeTask.suspended {
+			// Only set started time if this is a new task, not a resumed one
+			a.activeTask.started = time.Now()
+		}
+		a.activeTask.suspended = false
+		fmt.Printf("activated task: %s (priority: %d)\n", a.activeTask.task.Name(), a.activeTask.priority)
 	}
 
 	if a.activeTask != nil {
@@ -470,6 +550,7 @@ func (a *StandardAgent) processTaskQueue(ctx context.Context) {
 			a.rememberTask(a.activeTask)
 			a.activeTask.promise.ch <- NewTaskResultError(a.activeTask.task, err)
 			a.activeTask = nil
+			return
 		}
 		reportedStatus := strings.ToLower(a.activeTask.reportedStatus)
 		isComplete := !strings.Contains(reportedStatus, "incomplete")
@@ -477,9 +558,18 @@ func (a *StandardAgent) processTaskQueue(ctx context.Context) {
 			fmt.Println("task completed:", a.activeTask.task.Name())
 			a.activeTask.status = TaskStatusCompleted
 			a.rememberTask(a.activeTask)
-			a.activeTask.promise.ch <- &TaskResult{
-				Task:   a.activeTask.task,
-				Output: TaskOutput{Content: a.activeTask.output},
+			// Handle chat task resolution
+			if a.activeTask.task.Kind() == "chat" {
+				a.activeTask.chatResult <- llm.NewResponse(llm.ResponseOptions{
+					Role:    llm.Assistant,
+					Message: llm.NewAssistantMessage(a.activeTask.output),
+				})
+			}
+			if a.activeTask.promise != nil {
+				a.activeTask.promise.ch <- &TaskResult{
+					Task:   a.activeTask.task,
+					Output: TaskOutput{Content: a.activeTask.output},
+				}
 			}
 			a.activeTask = nil
 		} else {
