@@ -82,6 +82,12 @@ func main() {
 			log.Fatal(err)
 		}
 		description = strings.TrimSpace(description)
+		if description == "exit" {
+			break
+		}
+		if description == "" {
+			continue
+		}
 
 		task := agents.NewTask(agents.TaskSpec{Description: description})
 

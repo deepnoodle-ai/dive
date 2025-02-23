@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/agents/retry"
 )
 
 var (
@@ -127,28 +128,32 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error making request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("error from openai api (status %d): %s", resp.StatusCode, string(body))
-	}
-
 	var result Response
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("error decoding response: %w", err)
+	err = retry.WithRetry(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return fmt.Errorf("error creating request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("error making request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return &APIError{statusCode: resp.StatusCode, body: string(body)}
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return fmt.Errorf("error decoding response: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	fmt.Printf("result: %+v\n", result)
@@ -353,4 +358,17 @@ func (s *Stream) Close() error {
 
 func (s *Stream) Err() error {
 	return s.err
+}
+
+type APIError struct {
+	statusCode int
+	body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("error from groq api (status %d): %s", e.statusCode, e.body)
+}
+
+func (e *APIError) StatusCode() int {
+	return e.statusCode
 }
