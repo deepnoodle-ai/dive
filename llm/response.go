@@ -1,9 +1,5 @@
 package llm
 
-import (
-	"encoding/json"
-)
-
 // Response represents an LLM response
 type Response struct {
 	id         string
@@ -45,21 +41,12 @@ type ResponseOptions struct {
 	Role       Role
 	Message    *Message
 	Usage      Usage
+	ToolCalls  []ToolCall
 	Object     any
 }
 
 // NewResponse creates a new Response instance with the given options
 func NewResponse(opts ResponseOptions) *Response {
-	var toolCalls []ToolCall
-	for _, content := range opts.Message.Content {
-		if content.Type == ContentTypeToolUse {
-			toolCalls = append(toolCalls, ToolCall{
-				ID:    content.ID, // e.g. "toolu_01A09q90qw90lq917835lq9"
-				Name:  content.Name,
-				Input: content.Input,
-			})
-		}
-	}
 	return &Response{
 		id:         opts.ID,
 		model:      opts.Model,
@@ -68,14 +55,14 @@ func NewResponse(opts ResponseOptions) *Response {
 		message:    opts.Message,
 		usage:      opts.Usage,
 		object:     opts.Object,
-		toolCalls:  toolCalls,
+		toolCalls:  opts.ToolCalls,
 	}
 }
 
 type ToolCall struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
+	ID    string
+	Name  string
+	Input string
 }
 
 type ToolResult struct {

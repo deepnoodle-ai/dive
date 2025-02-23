@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -12,13 +13,30 @@ import (
 	"github.com/getstingrai/agents"
 	"github.com/getstingrai/agents/llm"
 	"github.com/getstingrai/agents/providers/anthropic"
+	"github.com/getstingrai/agents/providers/groq"
+	"github.com/getstingrai/agents/providers/openai"
 	"github.com/getstingrai/agents/tools"
 	"github.com/getstingrai/agents/tools/google"
 )
 
 func main() {
+	var providerName, modelName string
+	flag.StringVar(&providerName, "provider", "anthropic", "provider to use")
+	flag.StringVar(&modelName, "model", "", "model to use")
+	flag.Parse()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	var provider llm.LLM
+	switch providerName {
+	case "anthropic":
+		provider = anthropic.New()
+	case "openai":
+		provider = openai.New()
+	case "groq":
+		provider = groq.New()
+	}
 
 	googleClient, err := google.New()
 	if err != nil {
@@ -28,7 +46,7 @@ func main() {
 	a := agents.NewStandardAgent(agents.StandardAgentSpec{
 		Name:         "test",
 		Role:         &agents.Role{Name: "test"},
-		LLM:          anthropic.New(),
+		LLM:          provider,
 		Tools:        []llm.Tool{tools.NewGoogleSearch(googleClient)},
 		CacheControl: "ephemeral",
 	})

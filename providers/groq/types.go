@@ -1,4 +1,4 @@
-package openai
+package groq
 
 import "github.com/getstingrai/agents/llm"
 
@@ -18,18 +18,6 @@ type Message struct {
 	Name       string     `json:"name,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-}
-
-type ToolFunction struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Parameters  llm.Schema `json:"parameters"`
-	Strict      bool       `json:"strict,omitempty"`
-}
-
-type Tool struct {
-	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
 }
 
 type ToolCall struct {
@@ -79,4 +67,16 @@ type StreamChoice struct {
 type StreamDelta struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type ToolFunction struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Parameters  llm.Schema `json:"parameters"`
+	Strict      bool       `json:"strict,omitempty"`
+}
+
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
 }

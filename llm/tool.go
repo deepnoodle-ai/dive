@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 )
 
 type ToolDefinition struct {
@@ -15,7 +14,7 @@ func (t *ToolDefinition) ParametersCount() int {
 	return len(t.Parameters.Properties)
 }
 
-type ToolFunc func(ctx context.Context, input json.RawMessage) (string, error)
+type ToolFunc func(ctx context.Context, input string) (string, error)
 
 type ToolChoice struct {
 	Type                   string `json:"type"`
@@ -25,7 +24,7 @@ type ToolChoice struct {
 
 type Tool interface {
 	Definition() *ToolDefinition
-	Call(ctx context.Context, input json.RawMessage) (string, error)
+	Call(ctx context.Context, input string) (string, error)
 }
 
 type StandardTool struct {
@@ -41,7 +40,7 @@ func (t *StandardTool) Definition() *ToolDefinition {
 	return t.def
 }
 
-func (t *StandardTool) Call(ctx context.Context, input json.RawMessage) (string, error) {
+func (t *StandardTool) Call(ctx context.Context, input string) (string, error) {
 	return t.fn(ctx, input)
 }
 

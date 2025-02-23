@@ -18,7 +18,7 @@ var (
 	DefaultModel            = "claude-3-5-sonnet-20241022"
 	DefaultMessagesEndpoint = "https://api.anthropic.com/v1/messages"
 	DefaultAnthropicVersion = "2023-06-01"
-	DefaultMaxTokens        = 4000
+	DefaultMaxTokens        = 4096
 )
 
 var _ llm.LLM = &Provider{}
@@ -185,6 +185,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	fmt.Printf("%+v\n", result.Usage)
 	fmt.Println("==== /usage ====")
 
+	var toolCalls []llm.ToolCall
+	for _, content := range contentBlocks {
+		if content.Type == llm.ContentTypeToolUse {
+			toolCalls = append(toolCalls, llm.ToolCall{
+				ID:    content.ID, // e.g. "toolu_01A09q90qw90lq917835lq9"
+				Name:  content.Name,
+				Input: string(content.Input),
+			})
+		}
+	}
+
 	return llm.NewResponse(llm.ResponseOptions{
 		ID:         result.ID,
 		Model:      model,
@@ -200,6 +211,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			Role:    llm.Assistant,
 			Content: contentBlocks,
 		},
+		ToolCalls: toolCalls,
 	}), nil
 }
 

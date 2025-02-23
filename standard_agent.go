@@ -141,7 +141,6 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 		role:           spec.Role,
 		goals:          spec.Goals,
 		llm:            spec.LLM,
-		tools:          spec.Tools,
 		isManager:      spec.IsManager,
 		isWorker:       spec.IsWorker,
 		maxActiveTasks: spec.MaxActiveTasks,
@@ -150,7 +149,16 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 		mailbox:        make(chan interface{}, 64),
 		toolsByName:    make(map[string]llm.Tool),
 	}
-	for _, tool := range spec.Tools {
+	var tools []llm.Tool
+	if len(spec.Tools) > 0 {
+		tools = make([]llm.Tool, len(spec.Tools))
+		copy(tools, spec.Tools)
+	}
+	if spec.IsManager {
+		tools = append(tools, NewAssignWorkTool(a))
+	}
+	a.tools = tools
+	for _, tool := range tools {
 		a.toolsByName[tool.Definition().Name] = tool
 	}
 	return a
@@ -171,6 +179,10 @@ func (a *StandardAgent) Goals() []*Goal {
 func (a *StandardAgent) Join(ctx context.Context, team *Team) error {
 	a.team = team
 	return nil
+}
+
+func (a *StandardAgent) Team() *Team {
+	return a.team
 }
 
 func (a *StandardAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Response, error) {

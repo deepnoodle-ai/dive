@@ -54,9 +54,9 @@ func (t *GoogleSearch) Definition() *llm.ToolDefinition {
 	}
 }
 
-func (t *GoogleSearch) Call(ctx context.Context, input json.RawMessage) (string, error) {
+func (t *GoogleSearch) Call(ctx context.Context, input string) (string, error) {
 	var s GoogleSearchInput
-	if err := json.Unmarshal(input, &s); err != nil {
+	if err := json.Unmarshal([]byte(input), &s); err != nil {
 		return "", err
 	}
 	if s.Limit <= 0 {

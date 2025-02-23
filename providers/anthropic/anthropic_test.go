@@ -52,9 +52,9 @@ func TestHelloWorldStream(t *testing.T) {
 	require.Equal(t, "1\n2\n3\n4\n5\n6\n7\n8\n9\n10", strings.Join(texts, "\n"))
 }
 
-func addFunc(ctx context.Context, input json.RawMessage) (string, error) {
+func addFunc(ctx context.Context, input string) (string, error) {
 	var params map[string]interface{}
-	if err := json.Unmarshal(input, &params); err != nil {
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%d", params["a"].(int)+params["b"].(int)), nil

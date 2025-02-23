@@ -67,6 +67,9 @@ type Agent interface {
 	// Join a team
 	Join(ctx context.Context, team *Team) error
 
+	// Team returns the team the agent is part of
+	Team() *Team
+
 	// Chat with the agent
 	Chat(ctx context.Context, message *llm.Message) (*llm.Response, error)
 

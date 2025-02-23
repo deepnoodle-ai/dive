@@ -1,4 +1,4 @@
-package openai
+package groq
 
 import (
 	"bufio"
@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	DefaultModel            = "gpt-4-turbo-preview"
-	DefaultMessagesEndpoint = "https://api.openai.com/v1/chat/completions"
+	DefaultModel            = "llama-3.3-70b-versatile"
+	DefaultMessagesEndpoint = "https://api.groq.com/openai/v1/chat/completions"
 	DefaultMaxTokens        = 4096
 )
 
@@ -31,7 +31,7 @@ type Provider struct {
 
 func New() *Provider {
 	return &Provider{
-		apiKey:           os.Getenv("OPENAI_API_KEY"),
+		apiKey:           os.Getenv("GROQ_API_KEY"),
 		messagesEndpoint: DefaultMessagesEndpoint,
 		maxTokens:        DefaultMaxTokens,
 		client:           http.DefaultClient,
@@ -91,16 +91,20 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		})
 	}
 
+	var toolChoice string
+	if config.ToolChoice.Type != "" {
+		toolChoice = config.ToolChoice.Type
+	} else if len(tools) > 0 {
+		toolChoice = "auto"
+	}
+
 	reqBody := Request{
 		Model:       model,
 		Messages:    msgs,
 		MaxTokens:   maxTokens,
 		Temperature: config.Temperature,
 		Tools:       tools,
-	}
-
-	if config.ToolChoice.Type != "" {
-		reqBody.ToolChoice = config.ToolChoice.Type
+		ToolChoice:  toolChoice,
 	}
 
 	if config.SystemPrompt != "" {
@@ -138,6 +142,8 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("error decoding response: %w", err)
 	}
+
+	fmt.Printf("result: %+v\n", result)
 
 	if len(result.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from openai api")
@@ -253,6 +259,14 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 			switch c.Type {
 			case llm.ContentTypeText:
 				content += c.Text
+			case llm.ContentTypeToolResult:
+				result = append(result, Message{
+					Role:       "tool",
+					Content:    c.Text,
+					ToolCallID: c.ToolUseID,
+					Name:       c.Name,
+				})
+				fmt.Printf("tool result: %+v\n", result[len(result)-1])
 			default:
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type)
 			}

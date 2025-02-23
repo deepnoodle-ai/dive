@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/getstingrai/agents/llm"
 )
@@ -19,12 +20,11 @@ type AssignWorkInput struct {
 }
 
 type AssignWorkTool struct {
-	team *Team
-	self Agent
+	agent Agent
 }
 
-func NewAssignWorkTool(team *Team, self Agent) *AssignWorkTool {
-	return &AssignWorkTool{team: team, self: self}
+func NewAssignWorkTool(agent Agent) *AssignWorkTool {
+	return &AssignWorkTool{agent: agent}
 }
 
 func (t *AssignWorkTool) Name() string {
@@ -77,46 +77,49 @@ func (t *AssignWorkTool) Definition() *llm.ToolDefinition {
 	}
 }
 
-func (t *AssignWorkTool) Call(ctx context.Context, input json.RawMessage) (string, error) {
-	// var params AssignWorkInput
-	// if err := json.Unmarshal(input, &params); err != nil {
-	// 	return "", err
-	// }
-	// if params.AgentName == "" {
-	// 	return "", fmt.Errorf("agent name is required")
-	// }
-	// if params.Name == "" {
-	// 	return "", fmt.Errorf("name is required")
-	// }
-	// if params.Description == "" {
-	// 	return "", fmt.Errorf("description is required")
-	// }
-	// if params.ExpectedOutput == "" {
-	// 	return "", fmt.Errorf("expected output is required")
-	// }
-	// if params.AgentName == t.self.Name() {
-	// 	return "", fmt.Errorf("cannot delegate task to self")
-	// }
-	// agent, ok := t.team.GetAgent(params.AgentName)
-	// if !ok {
-	// 	return "", fmt.Errorf("agent not found")
-	// }
-	// outputFormat := OutputFormat(params.OutputFormat)
-	// if outputFormat == "" {
-	// 	outputFormat = OutputMarkdown
-	// }
-	// // Generate a dynamic task for the agent
-	// task := NewTask(TaskSpec{
-	// 	Name:           params.Name,
-	// 	Description:    params.Description,
-	// 	ExpectedOutput: params.ExpectedOutput,
-	// 	Context:        params.Context,
-	// 	OutputFormat:   outputFormat,
-	// })
-	// result := agent.ExecuteTask(ctx, task, nil)
-	// if result.Error != nil {
-	// 	return fmt.Sprintf("I couldn't complete this work due to the following error: %s", result.Error.Error()), nil
-	// }
-	// return result.Output.Content, nil
-	return "", nil
+func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error) {
+	var params AssignWorkInput
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return "", err
+	}
+	if params.AgentName == "" {
+		return "", fmt.Errorf("agent name is required")
+	}
+	if params.Name == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	if params.Description == "" {
+		return "", fmt.Errorf("description is required")
+	}
+	if params.ExpectedOutput == "" {
+		return "", fmt.Errorf("expected output is required")
+	}
+	if params.AgentName == t.agent.Name() {
+		return "", fmt.Errorf("cannot delegate task to self")
+	}
+	agent, ok := t.agent.Team().GetAgent(params.AgentName)
+	if !ok {
+		return "", fmt.Errorf("agent not found")
+	}
+	outputFormat := OutputFormat(params.OutputFormat)
+	if outputFormat == "" {
+		outputFormat = OutputMarkdown
+	}
+	// Generate a dynamic task for the agent
+	task := NewTask(TaskSpec{
+		Name:           params.Name,
+		Description:    params.Description,
+		ExpectedOutput: params.ExpectedOutput,
+		Context:        params.Context,
+		OutputFormat:   outputFormat,
+	})
+	promise, err := agent.Work(ctx, task)
+	if err != nil {
+		return fmt.Sprintf("I couldn't complete this work due to the following error: %s", err.Error()), nil
+	}
+	result, err := promise.Get(ctx)
+	if err != nil {
+		return fmt.Sprintf("I couldn't complete this work due to the following error: %s", err.Error()), nil
+	}
+	return result.Output.Content, nil
 }
