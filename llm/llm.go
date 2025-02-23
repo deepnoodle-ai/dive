@@ -1,6 +1,9 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 type LLM interface {
 	// Generate a response from the LLM by passing messages.
@@ -25,13 +28,27 @@ type GenerateConfig struct {
 	Temperature  *float64
 	Tools        []Tool
 	ToolChoice   ToolChoice
-	// ToolResults  []*ToolResult
+	LogLevel     string
+	Hooks        Hooks
 }
 
 // WithModel sets the LLM model for the generation.
 func WithModel(model string) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.Model = model
+	}
+}
+
+// WithLogLevel sets the log level.
+func WithLogLevel(logLevel string) GenerateOption {
+	return func(config *GenerateConfig) {
+		value := strings.ToUpper(logLevel)
+		switch value {
+		case "DEBUG", "INFO", "WARN", "ERROR":
+		default:
+			value = "INFO"
+		}
+		config.LogLevel = value
 	}
 }
 
@@ -70,16 +87,26 @@ func WithToolChoice(toolChoice ToolChoice) GenerateOption {
 	}
 }
 
-// WithToolResults appends tool results to the interaction.
-// func WithToolResults(toolResults []*ToolResult) GenerateOption {
-// 	return func(config *GenerateConfig) {
-// 		config.ToolResults = toolResults
-// 	}
-// }
-
 // WithCacheControl sets the cache control for the interaction.
 func WithCacheControl(cacheControl string) GenerateOption {
 	return func(config *GenerateConfig) {
 		config.CacheControl = cacheControl
+	}
+}
+
+// WithHook adds a hook for the specified event type
+func WithHook(hookType HookType, hook Hook) GenerateOption {
+	return func(config *GenerateConfig) {
+		if config.Hooks == nil {
+			config.Hooks = make(Hooks)
+		}
+		config.Hooks[hookType] = hook
+	}
+}
+
+// WithHooks sets the hooks for the interaction.
+func WithHooks(hooks Hooks) GenerateOption {
+	return func(config *GenerateConfig) {
+		config.Hooks = hooks
 	}
 }

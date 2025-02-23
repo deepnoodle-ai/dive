@@ -2,78 +2,49 @@ package agents
 
 import (
 	"context"
-	"os"
-	"path"
-	"time"
-
-	"github.com/getstingrai/agents/llm"
+	"log/slog"
 )
 
-type AgentLog struct {
-	Name         string `json:"name"`
-	Role         string `json:"role"`
-	Backstory    string `json:"backstory"`
-	Goal         string `json:"goal"`
-	SystemPrompt string `json:"system_prompt"`
+// Logger defines the interface for logging within agents.
+// It supports structured logging and is designed to be compatible
+// with common logging libraries like zerolog and slog.
+type Logger interface {
+	// Debug logs a message at debug level with optional key-value pairs
+	Debug(msg string, keysAndValues ...any)
+
+	// Info logs a message at info level with optional key-value pairs
+	Info(msg string, keysAndValues ...any)
+
+	// Warn logs a message at warn level with optional key-value pairs
+	Warn(msg string, keysAndValues ...any)
+
+	// Error logs a message at error level with optional key-value pairs
+	Error(msg string, keysAndValues ...any)
+
+	// With returns a new Logger instance with the given key-value pairs added to the context
+	With(keysAndValues ...any) Logger
 }
 
-type ConversationLog struct {
-	Agent    *AgentLog      `json:"agent"`
-	Messages []*llm.Message `json:"messages"`
-	Response *llm.Response  `json:"response"`
-	// ToolInvocations []*ToolInvocation `json:"tool_invocations"`
-}
+type contextKey string
 
-type FileConversationLogger struct {
-	dir       string
-	timestamp string
-	agentSeq  map[string]int
-}
+const (
+	loggerKey contextKey = "agents.logger"
+)
 
-func NewFileConversationLogger(dir string) *FileConversationLogger {
-	now := time.Now().Format("2006_01_02_15_04_05")
-	dir = path.Join(dir, now)
-	return &FileConversationLogger{
-		dir:       dir,
-		timestamp: now,
-		agentSeq:  make(map[string]int),
+func WithLogger(ctx context.Context, logger Logger) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	return context.WithValue(ctx, loggerKey, logger)
 }
 
-func (l *FileConversationLogger) LogConversation(
-	ctx context.Context,
-	// agent *Agent,
-	messages []*llm.Message,
-	response *llm.Response,
-) error {
-	if err := os.MkdirAll(l.dir, 0755); err != nil {
-		return err
+func LoggerFromCtx(ctx context.Context) Logger {
+	if ctx == nil {
+		return NewSlogLogger(slog.Default())
 	}
-	// l.agentSeq[agent.Name()]++
-	// seq := l.agentSeq[agent.Name()]
-
-	// entry := &ConversationLog{
-	// 	Agent: &AgentLog{
-	// 		// Name:      agent.Name(),
-	// 		// Role:      agent.Role(),
-	// 		// Backstory: agent.Backstory(),
-	// 		// Goal:      agent.Goal(),
-	// 	},
-	// 	Messages: messages,
-	// 	Response: response,
-	// }
-	// json, err := json.MarshalIndent(entry, "", "  ")
-	// if err != nil {
-	// 	return err
-	// }
-	// filename := fmt.Sprintf("%s/%s_conversation_%02d.json", l.dir, agent.Name(), seq)
-	// if err := os.WriteFile(filename, json, 0644); err != nil {
-	// 	return err
-	// }
-	// allMessagesText := ""
-	// for _, message := range messages {
-	// 	allMessagesText += "---- " + message.Role.String() + "\n\n" + message.Text() + "\n\n"
-	// }
-	// os.WriteFile(fmt.Sprintf("%s/%s_conversation_%02d.txt", l.dir, agent.Name(), seq), []byte(allMessagesText), 0644)
-	return nil
+	logger, ok := ctx.Value(loggerKey).(Logger)
+	if !ok {
+		return NewSlogLogger(slog.Default())
+	}
+	return logger
 }

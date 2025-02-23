@@ -49,6 +49,24 @@ func main() {
 		LLM:          provider,
 		Tools:        []llm.Tool{tools.NewGoogleSearch(googleClient)},
 		CacheControl: "ephemeral",
+		LogLevel:     "info",
+		Hooks: llm.Hooks{
+			llm.BeforeGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
+				fmt.Println("before generate")
+				for _, message := range hookCtx.Messages {
+					fmt.Println("message", message.Role)
+					for i, content := range message.Content {
+						fmt.Printf("  content %d: %s %s\n", i, content.Type, content.Text)
+					}
+				}
+			},
+			llm.AfterGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
+				fmt.Println("after generate")
+				for _, content := range hookCtx.Response.Message().Content {
+					fmt.Println("content", content.Type, content.Text)
+				}
+			},
+		},
 	})
 
 	if err := a.Start(ctx); err != nil {

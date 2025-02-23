@@ -78,6 +78,14 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		opt(config)
 	}
 
+	if hooks := config.Hooks[llm.BeforeGenerate]; hooks != nil {
+		hooks(ctx, &llm.HookContext{
+			Type:     llm.BeforeGenerate,
+			Messages: messages,
+			Config:   config,
+		})
+	}
+
 	model := config.Model
 	if model == "" {
 		model = DefaultModel
@@ -196,7 +204,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
-	return llm.NewResponse(llm.ResponseOptions{
+	response := llm.NewResponse(llm.ResponseOptions{
 		ID:         result.ID,
 		Model:      model,
 		Role:       llm.Assistant,
@@ -212,7 +220,18 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			Content: contentBlocks,
 		},
 		ToolCalls: toolCalls,
-	}), nil
+	})
+
+	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
+		hooks(ctx, &llm.HookContext{
+			Type:     llm.AfterGenerate,
+			Messages: messages,
+			Config:   config,
+			Response: response,
+		})
+	}
+
+	return response, nil
 }
 
 func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (llm.Stream, error) {

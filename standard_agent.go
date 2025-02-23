@@ -100,6 +100,9 @@ type StandardAgentSpec struct {
 	MaxActiveTasks int
 	TickFrequency  time.Duration
 	CacheControl   string
+	LogLevel       string
+	Hooks          llm.Hooks
+	Logger         Logger
 }
 
 type StandardAgent struct {
@@ -121,6 +124,9 @@ type StandardAgent struct {
 	workspace      []*Document
 	ticker         *time.Ticker
 	completedTasks []*TaskState
+	logLevel       string
+	hooks          llm.Hooks
+	logger         Logger
 
 	// Consolidate all message types into a single channel
 	mailbox chan interface{}
@@ -148,6 +154,9 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 		cacheControl:   spec.CacheControl,
 		mailbox:        make(chan interface{}, 64),
 		toolsByName:    make(map[string]llm.Tool),
+		logLevel:       strings.ToLower(spec.LogLevel),
+		hooks:          spec.Hooks,
+		logger:         spec.Logger,
 	}
 	var tools []llm.Tool
 	if len(spec.Tools) > 0 {
@@ -160,6 +169,9 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 	a.tools = tools
 	for _, tool := range tools {
 		a.toolsByName[tool.Definition().Name] = tool
+	}
+	if a.logger == nil {
+		a.logger = NewSlogLogger(nil)
 	}
 	return a
 }
@@ -183,6 +195,19 @@ func (a *StandardAgent) Join(ctx context.Context, team *Team) error {
 
 func (a *StandardAgent) Team() *Team {
 	return a.team
+}
+
+func (a *StandardAgent) Log(msg string, keysAndValues ...any) {
+	switch a.logLevel {
+	case "debug":
+		a.logger.Debug(msg, keysAndValues...)
+	case "info":
+		a.logger.Info(msg, keysAndValues...)
+	case "warn":
+		a.logger.Warn(msg, keysAndValues...)
+	case "error":
+		a.logger.Error(msg, keysAndValues...)
+	}
 }
 
 func (a *StandardAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Response, error) {
@@ -255,12 +280,16 @@ func (a *StandardAgent) Start(ctx context.Context) error {
 	a.running = true
 	a.wg.Add(1)
 	go a.run()
+	a.Log("agent started", "name", a.name)
 	return nil
 }
 
 func (a *StandardAgent) Stop(ctx context.Context) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	defer func() {
+		a.mu.Unlock()
+		a.Log("agent stopped", "name", a.name)
+	}()
 
 	if !a.running {
 		return nil
@@ -427,6 +456,10 @@ func (a *StandardAgent) handleTask(state *TaskState) error {
 			llm.WithSystemPrompt(p.System),
 			llm.WithTools(a.getTools()...),
 			llm.WithCacheControl(a.cacheControl),
+			llm.WithLogLevel(a.logLevel),
+			llm.WithHook(llm.BeforeGenerate, func(ctx context.Context, hookCtx *llm.HookContext) {
+				fmt.Println("before generate")
+			}),
 		)
 		if err != nil {
 			return err
@@ -445,6 +478,7 @@ func (a *StandardAgent) handleTask(state *TaskState) error {
 					} else {
 						toolResults = append(toolResults, &llm.ToolResult{
 							ID:     toolCall.ID,
+							Name:   toolCall.Name,
 							Result: result,
 						})
 					}

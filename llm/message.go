@@ -108,6 +108,7 @@ func NewToolResultMessage(results []*ToolResult) *Message {
 		content[i] = &Content{
 			Type:      ContentTypeToolResult,
 			ToolUseID: result.ID,
+			Name:      result.Name,
 			Text:      result.Result,
 		}
 	}

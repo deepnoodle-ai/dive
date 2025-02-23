@@ -67,5 +67,6 @@ type ToolCall struct {
 
 type ToolResult struct {
 	ID     string
+	Name   string
 	Result string
 }
