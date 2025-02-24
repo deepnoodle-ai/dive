@@ -1,11 +1,11 @@
-package agents
+package dive
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/dive/llm"
 )
 
 var _ llm.Tool = &AssignWorkTool{}
@@ -20,25 +20,17 @@ type AssignWorkInput struct {
 }
 
 type AssignWorkTool struct {
-	agent Agent
+	self Agent
 }
 
-func NewAssignWorkTool(agent Agent) *AssignWorkTool {
-	return &AssignWorkTool{agent: agent}
-}
-
-func (t *AssignWorkTool) Name() string {
-	return "AssignWork"
-}
-
-func (t *AssignWorkTool) Description() string {
-	return "Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request."
+func NewAssignWorkTool(self Agent) *AssignWorkTool {
+	return &AssignWorkTool{self: self}
 }
 
 func (t *AssignWorkTool) Definition() *llm.ToolDefinition {
 	return &llm.ToolDefinition{
-		Name:        t.Name(),
-		Description: t.Description(),
+		Name:        "AssignWork",
+		Description: "Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request.",
 		Parameters: llm.Schema{
 			Type: "object",
 			Required: []string{
@@ -94,10 +86,10 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 	if params.ExpectedOutput == "" {
 		return "", fmt.Errorf("expected output is required")
 	}
-	if params.AgentName == t.agent.Name() {
+	if params.AgentName == t.self.Name() {
 		return "", fmt.Errorf("cannot delegate task to self")
 	}
-	agent, ok := t.agent.Team().GetAgent(params.AgentName)
+	agent, ok := t.self.Team().GetAgent(params.AgentName)
 	if !ok {
 		return "", fmt.Errorf("agent not found")
 	}
@@ -106,7 +98,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 		outputFormat = OutputMarkdown
 	}
 	// Generate a dynamic task for the agent
-	task := NewTask(TaskSpec{
+	task := NewTask(TaskOptions{
 		Name:           params.Name,
 		Description:    params.Description,
 		ExpectedOutput: params.ExpectedOutput,
@@ -121,5 +113,5 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 	if err != nil {
 		return fmt.Sprintf("I couldn't complete this work due to the following error: %s", err.Error()), nil
 	}
-	return result.Output.Content, nil
+	return result.Content, nil
 }

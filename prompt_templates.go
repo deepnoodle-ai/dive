@@ -1,6 +1,10 @@
-package agents
+package dive
 
-import "text/template"
+import (
+	"bytes"
+	"fmt"
+	"text/template"
+)
 
 var (
 	agentSystemPromptTemplate *template.Template
@@ -11,22 +15,38 @@ var (
 
 func init() {
 	var err error
-	agentSystemPromptTemplate, err = template.New("agent_sys_prompt").Parse(agentSysPromptText)
+	agentSystemPromptTemplate, err = parseTemplate("agent_sys_prompt", agentSysPromptText)
 	if err != nil {
 		panic(err)
 	}
-	taskPromptTemplate, err = template.New("task_prompt").Parse(taskPromptText)
+	taskPromptTemplate, err = parseTemplate("task_prompt", taskPromptText)
 	if err != nil {
 		panic(err)
 	}
-	teamPromptTemplate, err = template.New("team_prompt").Parse(teamPromptText)
+	teamPromptTemplate, err = parseTemplate("team_prompt", teamPromptText)
 	if err != nil {
 		panic(err)
 	}
-	taskStatePromptTemplate, err = template.New("task_state_prompt").Parse(taskStatePromptText)
+	taskStatePromptTemplate, err = parseTemplate("task_state_prompt", taskStatePromptText)
 	if err != nil {
 		panic(err)
 	}
+}
+
+func executeTemplate(tmpl *template.Template, input any) (string, error) {
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, input); err != nil {
+		return "", fmt.Errorf("executing template: %w", err)
+	}
+	return buffer.String(), nil
+}
+
+func parseTemplate(name string, text string) (*template.Template, error) {
+	tmpl, err := template.New(name).Parse(text)
+	if err != nil {
+		return nil, err
+	}
+	return tmpl, nil
 }
 
 var agentSysPromptText = `# Your Biography

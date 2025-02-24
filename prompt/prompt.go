@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/dive/llm"
 )
 
 type Prompt struct {

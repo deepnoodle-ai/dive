@@ -3,7 +3,7 @@ package prompt
 import (
 	"context"
 
-	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/dive/llm"
 )
 
 func Execute(ctx context.Context, model llm.LLM, opts ...Option) (*llm.Response, error) {

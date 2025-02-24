@@ -10,13 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getstingrai/agents"
-	"github.com/getstingrai/agents/llm"
-	"github.com/getstingrai/agents/providers/anthropic"
-	"github.com/getstingrai/agents/providers/groq"
-	"github.com/getstingrai/agents/providers/openai"
-	"github.com/getstingrai/agents/tools"
-	"github.com/getstingrai/agents/tools/google"
+	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/providers/anthropic"
+	"github.com/getstingrai/dive/providers/groq"
+	"github.com/getstingrai/dive/providers/openai"
+	"github.com/getstingrai/dive/tools"
+	"github.com/getstingrai/dive/tools/google"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-package agents
+package dive
 
 // func TestNewTeam(t *testing.T) {
 // 	// Create test agents

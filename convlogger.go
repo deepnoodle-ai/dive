@@ -1,4 +1,4 @@
-package agents
+package dive
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/dive/llm"
 )
 
 type AgentLog struct {

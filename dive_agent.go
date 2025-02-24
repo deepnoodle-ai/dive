@@ -1,4 +1,4 @@
-package agents
+package dive
 
 import (
 	"context"
@@ -8,80 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getstingrai/agents/llm"
-	"github.com/getstingrai/agents/prompt"
+	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/prompt"
 )
 
-var _ Agent = &StandardAgent{}
-
-// Define message types
-type messageEvent struct {
-	event *Event
-}
-
-type messageWork struct {
-	task    *Task
-	promise *Promise
-}
-
-type messageChat struct {
-	ctx     context.Context
-	message *llm.Message
-	result  chan *llm.Response
-	err     chan error
-}
-
-type messageStop struct {
-	ctx  context.Context
-	done chan error
-}
-
-type TaskState struct {
-	task           *Task
-	promise        *Promise
-	status         TaskStatus
-	priority       int
-	started        time.Time
-	output         string
-	reasoning      string
-	reportedStatus string
-	messages       []*llm.Message
-	suspended      bool
-	chatResult     chan *llm.Response
-	chatError      chan error
-}
-
-func (s *TaskState) Task() *Task {
-	return s.task
-}
-
-func (s *TaskState) Output() string {
-	return s.output
-}
-
-func (s *TaskState) Reasoning() string {
-	return s.reasoning
-}
-
-func (s *TaskState) Status() TaskStatus {
-	return s.status
-}
-
-func (s *TaskState) ReportedStatus() string {
-	return s.reportedStatus
-}
-
-func (s *TaskState) Messages() []*llm.Message {
-	return s.messages
-}
-
-func (s *TaskState) String() string {
-	text, err := ExecuteTemplate(taskStatePromptTemplate, s)
-	if err != nil {
-		panic(err)
-	}
-	return text
-}
+var _ Agent = &DiveAgent{}
 
 type Document struct {
 	Name    string
@@ -89,13 +20,12 @@ type Document struct {
 	Format  OutputFormat
 }
 
-type StandardAgentSpec struct {
+type AgentOptions struct {
 	Name           string
 	Role           *Role
-	Goals          []*Goal
 	LLM            llm.LLM
 	Tools          []llm.Tool
-	IsManager      bool
+	IsSupervisor   bool
 	IsWorker       bool
 	MaxActiveTasks int
 	TickFrequency  time.Duration
@@ -105,16 +35,16 @@ type StandardAgentSpec struct {
 	Logger         Logger
 }
 
-type StandardAgent struct {
+// DiveAgent implements the Agent interface.
+type DiveAgent struct {
 	name           string
 	role           *Role
-	goals          []*Goal
 	llm            llm.LLM
-	team           *Team
+	team           Team
 	running        bool
 	tools          []llm.Tool
 	toolsByName    map[string]llm.Tool
-	isManager      bool
+	isSupervisor   bool
 	isWorker       bool
 	maxActiveTasks int
 	tickFrequency  time.Duration
@@ -131,39 +61,39 @@ type StandardAgent struct {
 	// Consolidate all message types into a single channel
 	mailbox chan interface{}
 
-	mu sync.Mutex
-	wg sync.WaitGroup
+	mutex sync.Mutex
+	wg    sync.WaitGroup
 }
 
-func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
-	if spec.MaxActiveTasks == 0 {
-		spec.MaxActiveTasks = 1
+// NewAgent returns a new Agent configured with the given options.
+func NewAgent(opts AgentOptions) *DiveAgent {
+	if opts.MaxActiveTasks == 0 {
+		opts.MaxActiveTasks = 1
 	}
-	if spec.TickFrequency == 0 {
-		spec.TickFrequency = time.Millisecond * 250
+	if opts.TickFrequency == 0 {
+		opts.TickFrequency = time.Millisecond * 250
 	}
-	a := &StandardAgent{
-		name:           spec.Name,
-		role:           spec.Role,
-		goals:          spec.Goals,
-		llm:            spec.LLM,
-		isManager:      spec.IsManager,
-		isWorker:       spec.IsWorker,
-		maxActiveTasks: spec.MaxActiveTasks,
-		tickFrequency:  spec.TickFrequency,
-		cacheControl:   spec.CacheControl,
+	a := &DiveAgent{
+		name:           opts.Name,
+		role:           opts.Role,
+		llm:            opts.LLM,
+		isSupervisor:   opts.IsSupervisor,
+		isWorker:       opts.IsWorker,
+		maxActiveTasks: opts.MaxActiveTasks,
+		tickFrequency:  opts.TickFrequency,
+		cacheControl:   opts.CacheControl,
 		mailbox:        make(chan interface{}, 64),
 		toolsByName:    make(map[string]llm.Tool),
-		logLevel:       strings.ToLower(spec.LogLevel),
-		hooks:          spec.Hooks,
-		logger:         spec.Logger,
+		logLevel:       strings.ToLower(opts.LogLevel),
+		hooks:          opts.Hooks,
+		logger:         opts.Logger,
 	}
 	var tools []llm.Tool
-	if len(spec.Tools) > 0 {
-		tools = make([]llm.Tool, len(spec.Tools))
-		copy(tools, spec.Tools)
+	if len(opts.Tools) > 0 {
+		tools = make([]llm.Tool, len(opts.Tools))
+		copy(tools, opts.Tools)
 	}
-	if spec.IsManager {
+	if opts.IsSupervisor {
 		tools = append(tools, NewAssignWorkTool(a))
 	}
 	a.tools = tools
@@ -176,28 +106,33 @@ func NewStandardAgent(spec StandardAgentSpec) *StandardAgent {
 	return a
 }
 
-func (a *StandardAgent) Name() string {
+func (a *DiveAgent) Name() string {
 	return a.name
 }
 
-func (a *StandardAgent) Role() *Role {
+func (a *DiveAgent) Role() *Role {
 	return a.role
 }
 
-func (a *StandardAgent) Goals() []*Goal {
-	return a.goals
-}
+func (a *DiveAgent) Join(team Team) error {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
 
-func (a *StandardAgent) Join(ctx context.Context, team *Team) error {
+	if a.running {
+		return fmt.Errorf("agent is already running")
+	}
+	if a.team != nil {
+		return fmt.Errorf("agent is already a member of a team")
+	}
 	a.team = team
 	return nil
 }
 
-func (a *StandardAgent) Team() *Team {
+func (a *DiveAgent) Team() Team {
 	return a.team
 }
 
-func (a *StandardAgent) Log(msg string, keysAndValues ...any) {
+func (a *DiveAgent) Log(msg string, keysAndValues ...any) {
 	switch a.logLevel {
 	case "debug":
 		a.logger.Debug(msg, keysAndValues...)
@@ -210,17 +145,19 @@ func (a *StandardAgent) Log(msg string, keysAndValues ...any) {
 	}
 }
 
-func (a *StandardAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Response, error) {
+func (a *DiveAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Response, error) {
 	result := make(chan *llm.Response, 1)
 	errChan := make(chan error, 1)
 
-	select {
-	case a.mailbox <- messageChat{
+	chatMessage := messageChat{
 		ctx:     ctx,
 		message: message,
 		result:  result,
 		err:     errChan,
-	}:
+	}
+
+	select {
+	case a.mailbox <- chatMessage:
 		select {
 		case resp := <-result:
 			return resp, nil
@@ -234,44 +171,51 @@ func (a *StandardAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Re
 	}
 }
 
-func (a *StandardAgent) ChatStream(ctx context.Context, message *llm.Message) (llm.Stream, error) {
+func (a *DiveAgent) ChatStream(ctx context.Context, message *llm.Message) (llm.Stream, error) {
 	return nil, nil
 }
 
-func (a *StandardAgent) Event(ctx context.Context, event *Event) error {
+func (a *DiveAgent) Event(ctx context.Context, event *Event) error {
 	if !a.IsRunning() {
 		return fmt.Errorf("agent is not running")
 	}
 
+	message := messageEvent{event: event}
+
 	select {
-	case a.mailbox <- messageEvent{event: event}:
+	case a.mailbox <- message:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (a *StandardAgent) Work(ctx context.Context, task *Task) (*Promise, error) {
+func (a *DiveAgent) Work(ctx context.Context, task *Task) (*Promise, error) {
 	if !a.IsRunning() {
 		return nil, fmt.Errorf("agent is not running")
 	}
 
-	promise := &Promise{agent: a, ch: make(chan *TaskResult, 1)}
+	promise := &Promise{
+		task: task,
+		ch:   make(chan *TaskResult, 1),
+	}
 
-	select {
-	case a.mailbox <- messageWork{
+	message := messageWork{
 		task:    task,
 		promise: promise,
-	}:
+	}
+
+	select {
+	case a.mailbox <- message:
 		return promise, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
 
-func (a *StandardAgent) Start(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+func (a *DiveAgent) Start(ctx context.Context) error {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
 
 	if a.running {
 		return fmt.Errorf("agent is already running")
@@ -284,27 +228,24 @@ func (a *StandardAgent) Start(ctx context.Context) error {
 	return nil
 }
 
-func (a *StandardAgent) Stop(ctx context.Context) error {
-	a.mu.Lock()
+func (a *DiveAgent) Stop(ctx context.Context) error {
+	a.mutex.Lock()
 	defer func() {
-		a.mu.Unlock()
+		a.running = false
+		a.mutex.Unlock()
 		a.Log("agent stopped", "name", a.name)
 	}()
 
 	if !a.running {
-		return nil
+		return fmt.Errorf("agent is not running")
 	}
 	done := make(chan error)
 
-	// Send stop message before closing mailbox
 	a.mailbox <- messageStop{
 		ctx:  ctx,
 		done: done,
 	}
-
-	// Close mailbox after sending stop message
 	close(a.mailbox)
-	a.running = false
 
 	select {
 	case err := <-done:
@@ -315,14 +256,16 @@ func (a *StandardAgent) Stop(ctx context.Context) error {
 	}
 }
 
-func (a *StandardAgent) IsRunning() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+func (a *DiveAgent) IsRunning() bool {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+
 	return a.running
 }
 
-func (a *StandardAgent) run() error {
+func (a *DiveAgent) run() error {
 	defer a.wg.Done()
+
 	a.ticker = time.NewTicker(a.tickFrequency)
 	defer a.ticker.Stop()
 
@@ -332,53 +275,56 @@ func (a *StandardAgent) run() error {
 			a.processTaskQueue()
 		case msg := <-a.mailbox:
 			switch m := msg.(type) {
-			case messageEvent:
-				a.handleEvent(m.event)
 			case messageWork:
-				taskState := &TaskState{
-					task:     m.task,
-					promise:  m.promise,
-					status:   TaskStatusQueued,
-					priority: m.task.Priority(),
-				}
-				// Insert into queue maintaining priority order
-				inserted := false
-				for i, existing := range a.taskQueue {
-					if taskState.priority > existing.priority {
-						a.taskQueue = append(a.taskQueue[:i], append([]*TaskState{taskState}, a.taskQueue[i:]...)...)
-						inserted = true
-						break
-					}
-				}
-				if !inserted {
-					a.taskQueue = append(a.taskQueue, taskState)
-				}
+				a.handleWorkMessage(m)
 			case messageChat:
-				a.handleChat(m)
+				a.handleChatMessage(m)
+			case messageEvent:
+				a.handleEventMessage(m.event)
 			case messageStop:
-				return a.handleStop(m)
+				return a.handleStopMessage(m)
 			}
 		}
 	}
 }
 
-func (a *StandardAgent) handleEvent(event *Event) {
+func (a *DiveAgent) handleWorkMessage(m messageWork) {
+	a.taskQueue = append(a.taskQueue, &TaskState{
+		task:    m.task,
+		promise: m.promise,
+		status:  TaskStatusQueued,
+	})
+}
+
+func (a *DiveAgent) handleEventMessage(event *Event) {
 	fmt.Printf("event: %+v\n", event)
 }
 
-func (a *StandardAgent) getTools() []llm.Tool {
-	results := []llm.Tool{}
-	for _, tool := range a.tools {
-		results = append(results, tool)
+func (a *DiveAgent) handleChatMessage(m messageChat) {
+	// Create a task from the chat message with the response channels
+	task := NewChatTask(m.message)
+
+	// Create task state and add to queue
+	taskState := &TaskState{
+		task:       task,
+		promise:    &Promise{ch: make(chan *TaskResult, 1)},
+		status:     TaskStatusQueued,
+		messages:   []*llm.Message{m.message},
+		chatResult: m.result,
+		chatError:  m.err,
 	}
-	if a.isManager {
-		// results = append(results, a.team.Tools()...)
-	}
-	return results
+
+	// Simply append to queue - no priority ordering needed
+	a.taskQueue = append(a.taskQueue, taskState)
 }
 
-func (a *StandardAgent) systemPrompt() (string, error) {
-	return ExecuteTemplate(agentSystemPromptTemplate, a.TemplateData())
+func (a *DiveAgent) handleStopMessage(msg messageStop) error {
+	msg.done <- nil
+	return nil
+}
+
+func (a *DiveAgent) systemPrompt() (string, error) {
+	return executeTemplate(agentSystemPromptTemplate, a)
 }
 
 func parseStructuredResponse(responseText string) (string, string, string) {
@@ -414,7 +360,7 @@ func parseStructuredResponse(responseText string) (string, string, string) {
 	return response, thinking, reportedStatus
 }
 
-func (a *StandardAgent) handleTask(state *TaskState) error {
+func (a *DiveAgent) handleTask(state *TaskState) error {
 	task := state.task
 	timeout := task.Timeout()
 	if timeout == 0 {
@@ -454,7 +400,7 @@ func (a *StandardAgent) handleTask(state *TaskState) error {
 		response, err = a.llm.Generate(ctx,
 			p.Messages,
 			llm.WithSystemPrompt(p.System),
-			llm.WithTools(a.getTools()...),
+			llm.WithTools(a.tools...),
 			llm.WithCacheControl(a.cacheControl),
 			llm.WithLogLevel(a.logLevel),
 			llm.WithHook(llm.BeforeGenerate, func(ctx context.Context, hookCtx *llm.HookContext) {
@@ -504,88 +450,28 @@ func (a *StandardAgent) handleTask(state *TaskState) error {
 	return nil
 }
 
-// Add new constructor for chat tasks
 func NewChatTask(message *llm.Message) *Task {
 	return &Task{
 		name:        "",
 		kind:        "chat",
 		description: fmt.Sprintf("Generate a response to user message: %q", message.Text()),
 		// promptText:  message.Text(),
-		priority: 10, // High priority for chat responses
-		timeout:  time.Minute * 1,
+		timeout: time.Minute * 1,
 	}
 }
 
-func (a *StandardAgent) handleChat(m messageChat) {
-	// Create a task from the chat message with the response channels
-	task := NewChatTask(m.message)
-
-	// Create task state and add to queue with high priority
-	taskState := &TaskState{
-		task:       task,
-		promise:    &Promise{agent: a, ch: make(chan *TaskResult, 1)},
-		status:     TaskStatusQueued,
-		priority:   task.Priority(),
-		messages:   []*llm.Message{m.message},
-		chatResult: m.result,
-		chatError:  m.err,
-	}
-
-	// Insert into queue maintaining priority order
-	inserted := false
-	for i, existing := range a.taskQueue {
-		if taskState.priority > existing.priority {
-			a.taskQueue = append(a.taskQueue[:i], append([]*TaskState{taskState}, a.taskQueue[i:]...)...)
-			inserted = true
-			break
-		}
-	}
-	if !inserted {
-		a.taskQueue = append(a.taskQueue, taskState)
-	}
-}
-
-func (a *StandardAgent) handleStop(msg messageStop) error {
-	// Cleanup logic here
-	msg.done <- nil
-	return nil
-}
-
-func (a *StandardAgent) processTaskQueue() {
-	// Check if we should preempt current task
-	if a.activeTask != nil && len(a.taskQueue) > 0 {
-		nextTask := a.taskQueue[0]
-		if nextTask.priority > a.activeTask.priority {
-			// Suspend current task and move it back to queue
-			a.activeTask.suspended = true
-			a.activeTask.status = TaskStatusQueued
-			// Insert suspended task back into queue maintaining priority order
-			inserted := false
-			for i, existing := range a.taskQueue {
-				if a.activeTask.priority > existing.priority {
-					a.taskQueue = append(a.taskQueue[:i], append([]*TaskState{a.activeTask}, a.taskQueue[i:]...)...)
-					inserted = true
-					break
-				}
-			}
-			if !inserted {
-				a.taskQueue = append(a.taskQueue, a.activeTask)
-			}
-			a.activeTask = nil
-		}
-	}
-
+func (a *DiveAgent) processTaskQueue() {
 	// If no active task and queue not empty, activate next task
 	if a.activeTask == nil && len(a.taskQueue) > 0 {
+		// Simply take the first task in queue
 		a.activeTask = a.taskQueue[0]
 		a.taskQueue = a.taskQueue[1:]
 		a.activeTask.status = TaskStatusActive
 		if !a.activeTask.suspended {
-			// Only set started time if this is a new task, not a resumed one
 			a.activeTask.started = time.Now()
 		}
 		a.activeTask.suspended = false
-		fmt.Printf("activated task: %s (priority: %d)\n", a.activeTask.task.Name(), a.activeTask.priority)
+		fmt.Printf("activated task: %s\n", a.activeTask.task.Name())
 	}
 
 	if a.activeTask != nil {
@@ -613,8 +499,8 @@ func (a *StandardAgent) processTaskQueue() {
 			}
 			if a.activeTask.promise != nil {
 				a.activeTask.promise.ch <- &TaskResult{
-					Task:   a.activeTask.task,
-					Output: TaskOutput{Content: a.activeTask.output},
+					Task:    a.activeTask.task,
+					Content: a.activeTask.output,
 				}
 			}
 			a.activeTask = nil
@@ -624,14 +510,14 @@ func (a *StandardAgent) processTaskQueue() {
 	}
 }
 
-func (a *StandardAgent) rememberTask(task *TaskState) {
+func (a *DiveAgent) rememberTask(task *TaskState) {
 	a.completedTasks = append(a.completedTasks, task)
 	if len(a.completedTasks) > 10 {
 		a.completedTasks = a.completedTasks[1:]
 	}
 }
 
-func (a *StandardAgent) getTaskHistory() string {
+func (a *DiveAgent) getTaskHistory() string {
 	var history []string
 	for _, status := range a.completedTasks {
 		title := status.task.Name()
@@ -648,13 +534,10 @@ func (a *StandardAgent) getTaskHistory() string {
 	if len(result) > 200 {
 		result = result[:200]
 	}
-	// fmt.Println("==== task history ====")
-	// fmt.Println(result)
-	// fmt.Println("==== /task history ====")
 	return result
 }
 
-func (a *StandardAgent) getWorkspaceState() string {
+func (a *DiveAgent) getWorkspaceState() string {
 	var blobs []string
 	for _, doc := range a.workspace {
 		blobs = append(blobs, fmt.Sprintf("<document name=%q>\n%s\n</document>", doc.Name, doc.Content))
@@ -672,24 +555,23 @@ func NewTaskResultError(task *Task, err error) *TaskResult {
 type AgentTemplateData struct {
 	Name      string
 	Role      string
-	Goals     []*Goal
 	Team      *Team
 	IsManager bool
 	IsWorker  bool
 }
 
-func (a *StandardAgent) TemplateData() *AgentTemplateData {
-	return &AgentTemplateData{
-		Name:      a.name,
-		Role:      a.role.Description,
-		Goals:     a.goals,
-		Team:      a.team,
-		IsManager: a.isManager,
-		IsWorker:  a.isWorker,
-	}
-}
+// func (a *DiveAgent) TemplateData() *AgentTemplateData {
+// 	return &AgentTemplateData{
+// 		Name: a.name,
+// 		Role: a.role.Description,
+// 		// Goals:     a.goals,
+// 		Team:      a.team,
+// 		IsManager: a.isManager,
+// 		IsWorker:  a.isWorker,
+// 	}
+// }
 
-// func (a *StandardAgent) checkTaskCompletion(ctx context.Context, taskState *TaskState) (bool, error) {
+// func (a *DiveAgent) checkTaskCompletion(ctx context.Context, taskState *TaskState) (bool, error) {
 // 	response, err := prompt.Execute(ctx, a.llm,
 // 		prompt.WithSystemMessage(`You are evaluating if a task has been completed successfully. Review the original task and its output. Respond with exactly "complete" if the task was completed successfully, or "incomplete" if it needs more work.`),
 // 		prompt.WithUserMessage(taskState.String()))

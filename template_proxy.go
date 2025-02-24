@@ -1,4 +1,4 @@
-package agents
+package dive
 
 // type AgentTemplateProxy struct {
 // 	Agent *BasicAgent

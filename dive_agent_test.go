@@ -1,4 +1,4 @@
-package agents
+package dive
 
 import (
 	"context"
@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getstingrai/agents/llm"
-	"github.com/getstingrai/agents/providers/anthropic"
+	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/stretchr/testify/require"
 )
 
-func TestStandardAgent(t *testing.T) {
+func TestDiveAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	agent := NewStandardAgent(StandardAgentSpec{
+	agent := NewAgent(AgentOptions{
 		Name: "test",
 		Role: &Role{
 			Name: "test",
@@ -32,11 +32,11 @@ func TestStandardAgent(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestStandardAgentChat(t *testing.T) {
+func TestDiveAgentChat(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	agent := NewStandardAgent(StandardAgentSpec{
+	agent := NewAgent(AgentOptions{
 		Name: "test",
 		Role: &Role{Name: "test"},
 		LLM:  anthropic.New(),
@@ -55,11 +55,11 @@ func TestStandardAgentChat(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestStandardAgentTask(t *testing.T) {
+func TestDiveAgentTask(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	agent := NewStandardAgent(StandardAgentSpec{
+	agent := NewAgent(AgentOptions{
 		Name: "test",
 		Role: &Role{Name: "test"},
 		LLM:  anthropic.New(),
@@ -69,7 +69,7 @@ func TestStandardAgentTask(t *testing.T) {
 	require.NoError(t, err)
 	defer agent.Stop(ctx)
 
-	task := NewTask(TaskSpec{
+	task := NewTask(TaskOptions{
 		Name:           "Poem",
 		Description:    "Write a cat poem",
 		ExpectedOutput: "A short poem about a cat",
@@ -81,7 +81,7 @@ func TestStandardAgentTask(t *testing.T) {
 	result, err := promise.Get(ctx)
 	require.NoError(t, err)
 
-	content := strings.ToLower(result.Output.Content)
+	content := strings.ToLower(result.Content)
 
 	matches := 0
 	for _, word := range []string{"cat", "whiskers", "paws"} {

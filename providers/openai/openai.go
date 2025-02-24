@@ -11,9 +11,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/getstingrai/agents/llm"
-	"github.com/getstingrai/agents/providers"
-	"github.com/getstingrai/agents/retry"
+	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/providers"
+	"github.com/getstingrai/dive/retry"
 )
 
 var (

@@ -1,6 +1,6 @@
 package openai
 
-import "github.com/getstingrai/agents/llm"
+import "github.com/getstingrai/dive/llm"
 
 type Request struct {
 	Model       string    `json:"model"`

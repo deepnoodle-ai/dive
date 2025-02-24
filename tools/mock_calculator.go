@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 
-	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/dive/llm"
 )
 
 type MockCalculatorTool struct {

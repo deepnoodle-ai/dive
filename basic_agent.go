@@ -1,38 +1,35 @@
-package agents
+package dive
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/getstingrai/agents/llm"
 )
 
-const ModelClaude3Dot5Sonnet20241022 = "claude-3-5-sonnet-20241022"
+// const ModelClaude3Dot5Sonnet20241022 = "claude-3-5-sonnet-20241022"
 
-type ConversationLogger interface {
-	LogConversation(
-		ctx context.Context,
-		// agent *BasicAgent,
-		messages []*llm.Message,
-		response *llm.Response,
-	) error
-}
+// type ConversationLogger interface {
+// 	LogConversation(
+// 		ctx context.Context,
+// 		// agent *BasicAgent,
+// 		messages []*llm.Message,
+// 		response *llm.Response,
+// 	) error
+// }
 
-type AgentSpec struct {
-	Name              string   `json:"name"`
-	Role              string   `json:"role"`
-	Goal              string   `json:"goal"`
-	Backstory         string   `json:"backstory"`
-	Model             string   `json:"model"`
-	CanDelegate       bool     `json:"can_delegate"`
-	Subordinates      []string `json:"subordinates"`
-	AcceptsDelegation bool     `json:"accepts_delegation"`
-	Temperature       *float64 `json:"temperature"`
-	MaxTokens         int      `json:"max_tokens"`
-	Caching           bool     `json:"caching"`
-}
+// type AgentSpec struct {
+// 	Name              string   `json:"name"`
+// 	Role              string   `json:"role"`
+// 	Goal              string   `json:"goal"`
+// 	Backstory         string   `json:"backstory"`
+// 	Model             string   `json:"model"`
+// 	CanDelegate       bool     `json:"can_delegate"`
+// 	Subordinates      []string `json:"subordinates"`
+// 	AcceptsDelegation bool     `json:"accepts_delegation"`
+// 	Temperature       *float64 `json:"temperature"`
+// 	MaxTokens         int      `json:"max_tokens"`
+// 	Caching           bool     `json:"caching"`
+// }
 
 // // BasicAgent represents a single AI agent with a specific role and capabilities
 // type BasicAgent struct {
@@ -245,17 +242,16 @@ type AgentSpec struct {
 // 	)
 // }
 
-func parseResponse(format OutputFormat, object interface{}, responseText string) (TaskOutput, error) {
+func parseResponse(format OutputFormat, object interface{}, responseText string) (*TaskResult, error) {
 	// Ensure final answer is not empty
 	if strings.TrimSpace(responseText) == "" {
-		return TaskOutput{}, fmt.Errorf("empty final answer")
+		return nil, fmt.Errorf("empty final answer")
 	}
 
 	if format != OutputJSON {
-		return TaskOutput{
-			Content:   responseText,
-			Format:    format,
-			Reasoning: "",
+		return &TaskResult{
+			Content: responseText,
+			Format:  format,
 		}, nil
 	}
 
@@ -264,7 +260,7 @@ func parseResponse(format OutputFormat, object interface{}, responseText string)
 	firstBracket := strings.Index(responseText, "[")
 	firstBrace := strings.Index(responseText, "{")
 	if firstBrace == -1 && firstBracket == -1 {
-		return TaskOutput{}, fmt.Errorf("no json found in response")
+		return nil, fmt.Errorf("no json found in response")
 	}
 
 	isArray := firstBracket != -1 && (firstBrace == -1 || firstBracket < firstBrace)
@@ -282,24 +278,24 @@ func parseResponse(format OutputFormat, object interface{}, responseText string)
 	lastIndex := strings.LastIndex(responseText, string(closeChar))
 
 	if lastIndex == -1 {
-		return TaskOutput{}, fmt.Errorf("malformed JSON: no closing character found")
+		return nil, fmt.Errorf("malformed JSON: no closing character found")
 	}
 
 	endIndex := lastIndex + 1
 
 	// Extract the JSON content and any preceding text as reasoning
-	thought := strings.TrimSpace(responseText[:startIndex])
+	reasoning := strings.TrimSpace(responseText[:startIndex])
 	finalAnswer := responseText[startIndex:endIndex]
 
 	finalAnswer = strings.TrimSpace(finalAnswer)
 	if err := json.Unmarshal([]byte(finalAnswer), object); err != nil {
-		return TaskOutput{}, fmt.Errorf("invalid json output: %w", err)
+		return nil, fmt.Errorf("invalid json output: %w", err)
 	}
 
-	return TaskOutput{
+	return &TaskResult{
 		Content:   finalAnswer,
 		Format:    format,
 		Object:    object,
-		Reasoning: thought,
+		Reasoning: reasoning,
 	}, nil
 }

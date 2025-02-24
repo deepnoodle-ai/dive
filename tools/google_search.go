@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/getstingrai/agents/llm"
-	"github.com/getstingrai/agents/tools/google"
+	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/tools/google"
 )
 
 var _ llm.Tool = &GoogleSearch{}

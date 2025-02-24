@@ -1,4 +1,4 @@
-package agents
+package dive
 
 import (
 	"log/slog"

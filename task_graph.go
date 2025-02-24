@@ -1,19 +1,28 @@
-package agents
+package dive
 
 import "fmt"
 
 // taskGraph handles dependency resolution
 type taskGraph struct {
-	tasks map[string]*Task
+	tasks  map[string]*Task
+	sorted []string
 }
 
-func newTaskGraph(tasks map[string]*Task) *taskGraph {
-	return &taskGraph{tasks: tasks}
+func newTaskGraph(tasks []*Task) *taskGraph {
+	taskMap := make(map[string]*Task, len(tasks))
+	for _, task := range tasks {
+		taskMap[task.Name()] = task
+	}
+	return &taskGraph{tasks: taskMap}
 }
 
 func (g *taskGraph) TopologicalSort() ([]string, error) {
 	// Implementation of Kahn's algorithm for topological sort
 	// Returns ordered list of task IDs respecting dependencies
+
+	if g.sorted != nil {
+		return g.sorted, nil
+	}
 
 	// Build in-degree counting for each task
 	inDegree := make(map[string]int, len(g.tasks))
@@ -58,5 +67,6 @@ func (g *taskGraph) TopologicalSort() ([]string, error) {
 	if len(result) != len(g.tasks) {
 		return nil, fmt.Errorf("invalid task dependencies: cycle detected")
 	}
+	g.sorted = result
 	return result, nil
 }
