@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	DefaultModel            = "gpt-4-turbo-preview"
+	DefaultModel            = "gpt-4o"
 	DefaultMessagesEndpoint = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens        = 4096
 )
@@ -82,14 +82,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		if len(message.Content) == 0 {
 			return nil, fmt.Errorf("empty message detected (index %d)", i)
 		}
-	}
-
-	// The generation "prefilled" if the last message is an assistant message
-	lastMessage := messages[messageCount-1]
-	isPrefilled := lastMessage.Role == llm.Assistant
-	prefilledText := ""
-	if isPrefilled {
-		prefilledText = lastMessage.Text()
 	}
 
 	var tools []Tool
@@ -165,23 +157,26 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	choice := result.Choices[0]
 
 	var toolCalls []llm.ToolCall
-	for _, toolCall := range choice.Message.ToolCalls {
-		toolCalls = append(toolCalls, llm.ToolCall{
-			ID:    toolCall.ID,
-			Name:  toolCall.Function.Name,
-			Input: toolCall.Function.Arguments,
-		})
-	}
-
-	responseMessage := llm.NewAssistantMessage(choice.Message.Content)
-	if isPrefilled {
-		// Prepend any prefilled text to the response message
-		for _, content := range responseMessage.Content {
-			if content.Type == llm.ContentTypeText {
-				content.Text = prefilledText + content.Text
-				break
-			}
+	var contentBlocks []*llm.Content
+	if len(choice.Message.ToolCalls) > 0 {
+		for _, toolCall := range choice.Message.ToolCalls {
+			toolCalls = append(toolCalls, llm.ToolCall{
+				ID:    toolCall.ID,
+				Name:  toolCall.Function.Name,
+				Input: toolCall.Function.Arguments,
+			})
+			contentBlocks = append(contentBlocks, &llm.Content{
+				Type:  llm.ContentTypeToolUse,
+				ID:    toolCall.ID, // e.g. call_12345xyz
+				Name:  toolCall.Function.Name,
+				Input: json.RawMessage(toolCall.Function.Arguments),
+			})
 		}
+	} else {
+		contentBlocks = append(contentBlocks, &llm.Content{
+			Type: llm.ContentTypeText,
+			Text: choice.Message.Content,
+		})
 	}
 
 	response := llm.NewResponse(llm.ResponseOptions{
@@ -192,21 +187,14 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			InputTokens:  result.Usage.PromptTokens,
 			OutputTokens: result.Usage.CompletionTokens,
 		},
-		Message:   responseMessage,
+		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
 		ToolCalls: toolCalls,
 	})
 
 	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
-		debugMessages := messages
-		if !isPrefilled {
-			debugMessages = append(debugMessages, responseMessage)
-		} else {
-			// replace the last message with the response message
-			debugMessages[len(debugMessages)-1] = responseMessage
-		}
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.AfterGenerate,
-			Messages: append(messages, responseMessage),
+			Messages: messages,
 			Response: response,
 		})
 	}
@@ -287,24 +275,32 @@ func (p *Provider) SupportsStreaming() bool {
 
 func convertMessages(messages []*llm.Message) ([]Message, error) {
 	var result []Message
-
 	for _, msg := range messages {
-		content := ""
+		outMsg := Message{Role: strings.ToLower(string(msg.Role))}
 		for _, c := range msg.Content {
 			switch c.Type {
 			case llm.ContentTypeText:
-				content += c.Text
+				outMsg.Content += c.Text
+			case llm.ContentTypeToolUse:
+				outMsg.Content = ""
+				outMsg.ToolCalls = append(outMsg.ToolCalls, ToolCall{
+					ID:   c.ID,
+					Type: "function",
+					Function: ToolCallFunction{
+						Name:      c.Name,
+						Arguments: string(c.Input),
+					},
+				})
+			case llm.ContentTypeToolResult:
+				outMsg.Role = "tool"
+				outMsg.Content = c.Text
+				outMsg.ToolCallID = c.ToolUseID
 			default:
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type)
 			}
 		}
-
-		result = append(result, Message{
-			Role:    strings.ToLower(string(msg.Role)),
-			Content: content,
-		})
+		result = append(result, outMsg)
 	}
-
 	return result, nil
 }
 

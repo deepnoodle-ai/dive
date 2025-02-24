@@ -1,36 +1,43 @@
 package dive
 
-import "strings"
+import (
+	"strings"
+)
 
-func parseStructuredResponse(responseText string) (string, string, string) {
-	var response, thinking, reportedStatus string
+type StructuredResponse struct {
+	Thinking string
+	Text     string
+	Status   string
+}
 
-	// Split on <think> tag
-	if strings.Contains(responseText, "<think>") {
-		parts := strings.Split(responseText, "<think>")
-		if len(parts) > 1 {
-			// Find the end of think section
-			thinkParts := strings.Split(parts[1], "</think>")
-			if len(thinkParts) > 1 {
-				thinking = strings.TrimSpace(thinkParts[0])
-				response = strings.TrimSpace(thinkParts[1])
-			}
-		}
-	} else {
-		response = responseText
-	}
+func ParseStructuredResponse(text string) StructuredResponse {
+	var thinking, reportedStatus string
+	workingText := text
 
 	// Extract status if present
-	if strings.Contains(response, "<status>") {
-		parts := strings.Split(response, "<status>")
-		if len(parts) > 1 {
-			statusParts := strings.Split(parts[1], "</status>")
-			if len(statusParts) > 1 {
-				reportedStatus = strings.TrimSpace(statusParts[0])
-				response = strings.TrimSpace(parts[0])
-			}
-		}
+	statusStart := strings.Index(workingText, "<status>")
+	statusEnd := strings.Index(workingText, "</status>")
+	if statusStart != -1 && statusEnd != -1 && statusEnd > statusStart {
+		reportedStatus = strings.TrimSpace(workingText[statusStart+8 : statusEnd])
+		// Remove the status tag and its content
+		workingText = workingText[:statusStart] + workingText[statusEnd+9:]
 	}
 
-	return response, thinking, reportedStatus
+	// Extract thinking if present
+	thinkStart := strings.Index(workingText, "<think>")
+	thinkEnd := strings.Index(workingText, "</think>")
+	if thinkStart != -1 && thinkEnd != -1 && thinkEnd > thinkStart {
+		thinking = strings.TrimSpace(workingText[thinkStart+7 : thinkEnd])
+		// Remove the think tag and its content
+		workingText = workingText[:thinkStart] + workingText[thinkEnd+8:]
+	}
+
+	// The response is whatever text remains, trimmed
+	response := strings.TrimSpace(workingText)
+
+	return StructuredResponse{
+		Thinking: thinking,
+		Text:     response,
+		Status:   reportedStatus,
+	}
 }

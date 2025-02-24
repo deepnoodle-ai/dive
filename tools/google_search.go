@@ -13,8 +13,8 @@ import (
 var _ llm.Tool = &GoogleSearch{}
 
 type GoogleSearchInput struct {
-	Query string `json:"query"`
-	Limit int    `json:"limit"`
+	Query string      `json:"query"`
+	Limit interface{} `json:"limit"`
 }
 
 type GoogleSearch struct {
@@ -47,7 +47,7 @@ func (t *GoogleSearch) Definition() *llm.ToolDefinition {
 				},
 				"limit": {
 					Type:        "number",
-					Description: "The maximum number of results to return (Default: 10, Max: 30)",
+					Description: "The maximum number of results to return (Default: 10, Min: 10, Max: 30)",
 				},
 			},
 		},
@@ -59,15 +59,21 @@ func (t *GoogleSearch) Call(ctx context.Context, input string) (string, error) {
 	if err := json.Unmarshal([]byte(input), &s); err != nil {
 		return "", err
 	}
-	if s.Limit <= 0 {
-		s.Limit = 10
+	limit := 10
+	if value, ok := s.Limit.(int); ok {
+		limit = value
+	} else if value, ok := s.Limit.(float64); ok {
+		limit = int(value)
 	}
-	if s.Limit > 30 {
-		s.Limit = 30
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 30 {
+		limit = 30
 	}
 	results, err := t.client.Search(ctx, &google.Query{
 		Text:  s.Query,
-		Limit: s.Limit,
+		Limit: limit,
 	})
 	if err != nil {
 		return "", err
@@ -75,8 +81,8 @@ func (t *GoogleSearch) Call(ctx context.Context, input string) (string, error) {
 	if len(results.Items) == 0 {
 		return "ERROR: no results found", nil
 	}
-	if len(results.Items) > s.Limit {
-		results.Items = results.Items[:s.Limit]
+	if len(results.Items) > limit {
+		results.Items = results.Items[:limit]
 	}
 	var lines []string
 	lines = append(lines, fmt.Sprintf("Found %d search results:", len(results.Items)))

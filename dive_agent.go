@@ -365,22 +365,16 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		if err != nil {
 			return err
 		}
-		response, err = a.llm.Generate(ctx,
-			p.Messages,
+		generateOpts := []llm.Option{
 			llm.WithSystemPrompt(p.System),
 			llm.WithTools(a.tools...),
 			llm.WithCacheControl(a.cacheControl),
 			llm.WithLogLevel(a.logLevel),
-			llm.WithHook(llm.AfterGenerate, func(ctx context.Context, hookCtx *llm.HookContext) {
-				fmt.Println("----")
-				fmt.Println("INPUT")
-				fmt.Println(FormatMessages(hookCtx.Messages))
-				fmt.Println("----")
-				fmt.Println("OUTPUT")
-				fmt.Println(FormatMessages([]*llm.Message{hookCtx.Response.Message()}))
-				fmt.Println("----")
-			}),
-		)
+		}
+		if a.hooks != nil {
+			generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
+		}
+		response, err = a.llm.Generate(ctx, p.Messages, generateOpts...)
 		if err != nil {
 			return err
 		}
@@ -389,7 +383,8 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		responseMessage := response.Message()
 		if len(responseMessage.Content) > 0 {
 			for _, content := range responseMessage.Content {
-				if content.Type == llm.ContentTypeText {
+				// Only insert the opening <think> if we see the closing </think>
+				if content.Type == llm.ContentTypeText && strings.Contains(content.Text, "</think>") {
 					content.Text = "<think>" + content.Text
 					break
 				}
@@ -425,14 +420,14 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	}
 
 	state.Messages = messages
-	finalOutput, thinking, reportedStatus := parseStructuredResponse(response.Message().Text())
+	sr := ParseStructuredResponse(response.Message().Text())
 	if state.Output == "" {
-		state.Output = finalOutput
+		state.Output = sr.Text
 	} else {
-		state.Output = fmt.Sprintf("%s\n\n%s", state.Output, finalOutput)
+		state.Output = fmt.Sprintf("%s\n\n%s", state.Output, sr.Text)
 	}
-	state.Reasoning = thinking
-	state.ReportedStatus = reportedStatus
+	state.Reasoning = sr.Thinking
+	state.ReportedStatus = sr.Status
 	return nil
 }
 

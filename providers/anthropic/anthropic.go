@@ -88,14 +88,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
-	// The generation "prefilled" if the last message is an assistant message
-	lastMessage := messages[messageCount-1]
-	isPrefilled := lastMessage.Role == llm.Assistant
-	prefilledText := ""
-	if isPrefilled {
-		prefilledText = lastMessage.Text()
-	}
-
 	if config.CacheControl != "" && len(msgs) > 0 {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
@@ -166,6 +158,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
 
+	var toolCalls []llm.ToolCall
 	var contentBlocks []*llm.Content
 	for _, block := range result.Content {
 		switch block.Type {
@@ -175,34 +168,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 				Text: block.Text,
 			})
 		case "tool_use":
+			toolCalls = append(toolCalls, llm.ToolCall{
+				ID:    block.ID, // e.g. "toolu_01A09q90qw90lq917835lq9"
+				Name:  block.Name,
+				Input: string(block.Input),
+			})
 			contentBlocks = append(contentBlocks, &llm.Content{
 				Type:  llm.ContentTypeToolUse,
 				ID:    block.ID,
 				Name:  block.Name,
 				Input: block.Input,
 			})
-		}
-	}
-
-	var toolCalls []llm.ToolCall
-	for _, content := range contentBlocks {
-		if content.Type == llm.ContentTypeToolUse {
-			toolCalls = append(toolCalls, llm.ToolCall{
-				ID:    content.ID, // e.g. "toolu_01A09q90qw90lq917835lq9"
-				Name:  content.Name,
-				Input: string(content.Input),
-			})
-		}
-	}
-
-	responseMessage := llm.NewMessage(llm.Assistant, contentBlocks)
-	if isPrefilled {
-		// Prepend any prefilled text to the response message
-		for _, content := range responseMessage.Content {
-			if content.Type == llm.ContentTypeText {
-				content.Text = prefilledText + content.Text
-				break
-			}
 		}
 	}
 
@@ -217,7 +193,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 		},
-		Message:   responseMessage,
+		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
 		ToolCalls: toolCalls,
 	})
 
