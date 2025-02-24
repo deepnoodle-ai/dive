@@ -27,6 +27,7 @@ var _ llm.LLM = &Provider{}
 type Provider struct {
 	apiKey    string
 	endpoint  string
+	model     string
 	maxTokens int
 	client    *http.Client
 }
@@ -35,6 +36,7 @@ func New(opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:    os.Getenv("OPENAI_API_KEY"),
 		endpoint:  DefaultMessagesEndpoint,
+		model:     DefaultModel,
 		maxTokens: DefaultMaxTokens,
 		client:    http.DefaultClient,
 	}
@@ -59,7 +61,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	model := config.Model
 	if model == "" {
-		model = DefaultModel
+		model = p.model
 	}
 
 	maxTokens := config.MaxTokens
@@ -190,7 +192,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 
 	model := config.Model
 	if model == "" {
-		model = DefaultModel
+		model = p.model
 	}
 
 	msgs, err := convertMessages(messages)

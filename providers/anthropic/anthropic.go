@@ -29,6 +29,7 @@ type Provider struct {
 	apiKey    string
 	client    *http.Client
 	endpoint  string
+	model     string
 	version   string
 	maxTokens int
 	caching   bool
@@ -40,6 +41,7 @@ func New(opts ...Option) *Provider {
 		client:    http.DefaultClient,
 		endpoint:  DefaultEndpoint,
 		version:   DefaultVersion,
+		model:     DefaultModel,
 		maxTokens: DefaultMaxTokens,
 	}
 	for _, opt := range opts {
@@ -63,7 +65,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	model := config.Model
 	if model == "" {
-		model = DefaultModel
+		model = p.model
 	}
 
 	maxTokens := config.MaxTokens
@@ -213,7 +215,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 
 	model := config.Model
 	if model == "" {
-		model = DefaultModel
+		model = p.model
 	}
 
 	maxTokens := config.MaxTokens

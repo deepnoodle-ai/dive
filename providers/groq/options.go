@@ -1,6 +1,8 @@
-package openai
+package groq
 
-import "net/http"
+import (
+	"net/http"
+)
 
 type Option func(*Provider)
 
