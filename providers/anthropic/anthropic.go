@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/agents/providers"
+	"github.com/getstingrai/agents/retry"
 )
 
 var (
@@ -137,34 +139,35 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
-	// fmt.Println("==== request body ====")
-	// fmt.Println(string(jsonBody))
-	// fmt.Println("==== /request body ====")
-
-	req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
-	}
-
-	req.Header.Set("x-api-key", p.apiKey)
-	req.Header.Set("anthropic-version", p.anthropicVersion)
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error making request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("error from anthropic api (status %d): %s", resp.StatusCode, string(body))
-	}
 
 	var result Response
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("error decoding response: %w", err)
+	err = retry.Do(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return fmt.Errorf("error creating request: %w", err)
+		}
+		req.Header.Set("x-api-key", p.apiKey)
+		req.Header.Set("anthropic-version", p.anthropicVersion)
+		req.Header.Set("content-type", "application/json")
+		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("error making request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return providers.NewError(resp.StatusCode, string(body))
+		}
+		var result Response
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return fmt.Errorf("error decoding response: %w", err)
+		}
+		return nil
+	}, retry.WithMaxRetries(5))
+	if err != nil {
+		return nil, err
 	}
 
 	if len(result.Content) == 0 {

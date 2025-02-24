@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/agents/providers"
 	"github.com/getstingrai/agents/retry"
 )
 
@@ -78,14 +79,14 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		model = DefaultModel
 	}
 
-	msgs, err := convertMessages(messages)
-	if err != nil {
-		return nil, fmt.Errorf("error converting messages: %w", err)
-	}
-
 	maxTokens := config.MaxTokens
 	if maxTokens == nil {
 		maxTokens = &p.maxTokens
+	}
+
+	msgs, err := convertMessages(messages)
+	if err != nil {
+		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
 	var tools []Tool
@@ -129,14 +130,13 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 
 	var result Response
-	err = retry.WithRetry(ctx, func() error {
+	err = retry.Do(ctx, func() error {
 		req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 		req.Header.Set("Content-Type", "application/json")
-
 		resp, err := p.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("error making request: %w", err)
@@ -145,23 +145,20 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			return &APIError{statusCode: resp.StatusCode, body: string(body)}
+			return providers.NewError(resp.StatusCode, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	})
+	}, retry.WithMaxRetries(5))
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Printf("result: %+v\n", result)
-
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("empty response from openai api")
+		return nil, fmt.Errorf("empty response from groq api")
 	}
-
 	choice := result.Choices[0]
 
 	var toolCalls []llm.ToolCall
@@ -358,17 +355,4 @@ func (s *Stream) Close() error {
 
 func (s *Stream) Err() error {
 	return s.err
-}
-
-type APIError struct {
-	statusCode int
-	body       string
-}
-
-func (e *APIError) Error() string {
-	return fmt.Sprintf("error from groq api (status %d): %s", e.statusCode, e.body)
-}
-
-func (e *APIError) StatusCode() int {
-	return e.statusCode
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/getstingrai/agents/llm"
+	"github.com/getstingrai/agents/providers"
 	"github.com/getstingrai/agents/retry"
 )
 
@@ -78,14 +79,14 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		model = DefaultModel
 	}
 
-	msgs, err := convertMessages(messages)
-	if err != nil {
-		return nil, fmt.Errorf("error converting messages: %w", err)
-	}
-
 	maxTokens := config.MaxTokens
 	if maxTokens == nil {
 		maxTokens = &p.maxTokens
+	}
+
+	msgs, err := convertMessages(messages)
+	if err != nil {
+		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
 	var tools []Tool
@@ -100,16 +101,20 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		})
 	}
 
+	var toolChoice string
+	if config.ToolChoice.Type != "" {
+		toolChoice = config.ToolChoice.Type
+	} else if len(tools) > 0 {
+		toolChoice = "auto"
+	}
+
 	reqBody := Request{
 		Model:       model,
 		Messages:    msgs,
 		MaxTokens:   maxTokens,
 		Temperature: config.Temperature,
 		Tools:       tools,
-	}
-
-	if config.ToolChoice.Type != "" {
-		reqBody.ToolChoice = config.ToolChoice.Type
+		ToolChoice:  toolChoice,
 	}
 
 	if config.SystemPrompt != "" {
@@ -125,7 +130,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 
 	var result Response
-	err = retry.WithRetry(ctx, func() error {
+	err = retry.Do(ctx, func() error {
 		req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
@@ -140,20 +145,20 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("error from openai api (status %d): %s", resp.StatusCode, string(body))
+			return providers.NewError(resp.StatusCode, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
 		}
-		if len(result.Choices) == 0 {
-			return fmt.Errorf("empty response from openai api")
-		}
 		return nil
-	})
+	}, retry.WithMaxRetries(5))
 	if err != nil {
 		return nil, err
 	}
 
+	if len(result.Choices) == 0 {
+		return nil, fmt.Errorf("empty response from openai api")
+	}
 	choice := result.Choices[0]
 
 	var toolCalls []llm.ToolCall

@@ -4,26 +4,52 @@ import (
 	"context"
 	"math"
 	"math/rand"
-	"net/http"
 	"time"
 )
 
 const (
-	MaxRetries    = 3
-	RetryBaseWait = 1 * time.Second
+	MaxRetries = 3
+	BaseWait   = 1 * time.Second
 )
+
+type retryConfig struct {
+	MaxRetries int
+	BaseWait   time.Duration
+}
+
+type Option func(*retryConfig)
+
+func WithMaxRetries(maxRetries int) Option {
+	return func(c *retryConfig) {
+		c.MaxRetries = maxRetries
+	}
+}
+
+func WithBaseWait(baseWait time.Duration) Option {
+	return func(c *retryConfig) {
+		c.BaseWait = baseWait
+	}
+}
 
 // RetryableFunc represents a function that can be retried
 type RetryableFunc func() error
 
-// WithRetry executes the given function with retry logic
-func WithRetry(ctx context.Context, f RetryableFunc) error {
+// Do executes the given function with retry logic
+func Do(ctx context.Context, f RetryableFunc, opts ...Option) error {
 	var lastError error
 
-	for attempt := 0; attempt < MaxRetries; attempt++ {
+	config := &retryConfig{
+		MaxRetries: MaxRetries,
+		BaseWait:   BaseWait,
+	}
+	for _, opt := range opts {
+		opt(config)
+	}
+
+	for attempt := 0; attempt < config.MaxRetries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff with jitter
-			backoff := time.Duration(float64(RetryBaseWait) * math.Pow(2, float64(attempt-1)))
+			backoff := time.Duration(float64(config.BaseWait) * math.Pow(2, float64(attempt-1)))
 			jitter := time.Duration(rand.Float64() * float64(backoff) * 0.1)
 			select {
 			case <-ctx.Done():
@@ -34,25 +60,12 @@ func WithRetry(ctx context.Context, f RetryableFunc) error {
 
 		if err := f(); err != nil {
 			lastError = err
-			if apiErr, ok := err.(APIError); ok && !ShouldRetry(apiErr.StatusCode()) {
-				return err
+			if IsRecoverable(err) {
+				continue
 			}
-			continue
+			return err
 		}
 		return nil
 	}
 	return lastError
-}
-
-// ShouldRetry determines if the given status code should trigger a retry
-func ShouldRetry(statusCode int) bool {
-	return statusCode == http.StatusTooManyRequests || // 429
-		statusCode == http.StatusServiceUnavailable || // 503
-		statusCode == http.StatusGatewayTimeout // 504
-}
-
-// APIError interface for errors that contain HTTP status codes
-type APIError interface {
-	error
-	StatusCode() int
 }
