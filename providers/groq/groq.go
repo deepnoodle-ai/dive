@@ -60,8 +60,8 @@ func (p *Provider) WithAPIKey(apiKey string) *Provider {
 	return p
 }
 
-func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (*llm.Response, error) {
-	config := &llm.GenerateConfig{}
+func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+	config := &llm.Config{}
 	for _, opt := range opts {
 		opt(config)
 	}
@@ -70,7 +70,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.BeforeGenerate,
 			Messages: messages,
-			Config:   config,
 		})
 	}
 
@@ -192,7 +191,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.AfterGenerate,
 			Messages: messages,
-			Config:   config,
 			Response: response,
 		})
 	}
@@ -200,8 +198,8 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	return response, nil
 }
 
-func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (llm.Stream, error) {
-	config := &llm.GenerateConfig{}
+func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.Stream, error) {
+	config := &llm.Config{}
 	for _, opt := range opts {
 		opt(config)
 	}

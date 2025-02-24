@@ -18,7 +18,6 @@ const (
 type HookContext struct {
 	Type     HookType
 	Messages []*Message
-	Config   *GenerateConfig
 	Response *Response // Only set for AfterGenerate and OnStreamChunk
 	Error    error     // Only set for OnError
 	Stream   Stream    // Only set for stream-related hooks

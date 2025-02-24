@@ -17,65 +17,39 @@ import (
 )
 
 var (
-	DefaultModel            = "claude-3-5-sonnet-20241022"
-	DefaultMessagesEndpoint = "https://api.anthropic.com/v1/messages"
-	DefaultAnthropicVersion = "2023-06-01"
-	DefaultMaxTokens        = 4096
+	DefaultModel     = "claude-3-5-sonnet-20241022"
+	DefaultEndpoint  = "https://api.anthropic.com/v1/messages"
+	DefaultVersion   = "2023-06-01"
+	DefaultMaxTokens = 4096
 )
 
 var _ llm.LLM = &Provider{}
 
 type Provider struct {
-	apiKey           string
-	anthropicVersion string
-	messagesEndpoint string
-	maxTokens        int
-	client           *http.Client
-	caching          bool
+	apiKey    string
+	client    *http.Client
+	endpoint  string
+	version   string
+	maxTokens int
+	caching   bool
 }
 
-func New() *Provider {
-	return &Provider{
-		apiKey:           os.Getenv("ANTHROPIC_API_KEY"),
-		anthropicVersion: DefaultAnthropicVersion,
-		messagesEndpoint: DefaultMessagesEndpoint,
-		maxTokens:        DefaultMaxTokens,
-		client:           http.DefaultClient,
+func New(opts ...Option) *Provider {
+	p := &Provider{
+		apiKey:    os.Getenv("ANTHROPIC_API_KEY"),
+		client:    http.DefaultClient,
+		endpoint:  DefaultEndpoint,
+		version:   DefaultVersion,
+		maxTokens: DefaultMaxTokens,
 	}
-}
-
-func (p *Provider) WithMaxTokens(maxTokens int) *Provider {
-	p.maxTokens = maxTokens
+	for _, opt := range opts {
+		opt(p)
+	}
 	return p
 }
 
-func (p *Provider) WithMessagesEndpoint(messagesEndpoint string) *Provider {
-	p.messagesEndpoint = messagesEndpoint
-	return p
-}
-
-func (p *Provider) WithClient(client *http.Client) *Provider {
-	p.client = client
-	return p
-}
-
-func (p *Provider) WithAPIKey(apiKey string) *Provider {
-	p.apiKey = apiKey
-	return p
-}
-
-func (p *Provider) WithAnthropicVersion(anthropicVersion string) *Provider {
-	p.anthropicVersion = anthropicVersion
-	return p
-}
-
-func (p *Provider) WithCaching(caching bool) *Provider {
-	p.caching = caching
-	return p
-}
-
-func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (*llm.Response, error) {
-	config := &llm.GenerateConfig{}
+func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+	config := &llm.Config{}
 	for _, opt := range opts {
 		opt(config)
 	}
@@ -84,13 +58,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.BeforeGenerate,
 			Messages: messages,
-			Config:   config,
 		})
 	}
 
 	model := config.Model
 	if model == "" {
 		model = DefaultModel
+	}
+
+	maxTokens := config.MaxTokens
+	if maxTokens == nil {
+		maxTokens = &p.maxTokens
 	}
 
 	msgs, err := convertMessages(messages)
@@ -104,11 +82,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
 			lastContent.SetCacheControl(config.CacheControl)
 		}
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
 	}
 
 	reqBody := Request{
@@ -142,12 +115,12 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	var result Response
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
 		req.Header.Set("x-api-key", p.apiKey)
-		req.Header.Set("anthropic-version", p.anthropicVersion)
+		req.Header.Set("anthropic-version", p.version)
 		req.Header.Set("content-type", "application/json")
 		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 		resp, err := p.client.Do(req)
@@ -192,10 +165,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
-	fmt.Println("==== usage ====")
-	fmt.Printf("%+v\n", result.Usage)
-	fmt.Println("==== /usage ====")
-
 	var toolCalls []llm.ToolCall
 	for _, content := range contentBlocks {
 		if content.Type == llm.ContentTypeToolUse {
@@ -229,7 +198,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.AfterGenerate,
 			Messages: messages,
-			Config:   config,
 			Response: response,
 		})
 	}
@@ -237,8 +205,8 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	return response, nil
 }
 
-func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (llm.Stream, error) {
-	config := &llm.GenerateConfig{}
+func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.Stream, error) {
+	config := &llm.Config{}
 	for _, opt := range opts {
 		opt(config)
 	}
@@ -248,14 +216,14 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		model = DefaultModel
 	}
 
-	msgs, err := convertMessages(messages)
-	if err != nil {
-		return nil, fmt.Errorf("error converting messages: %w", err)
-	}
-
 	maxTokens := config.MaxTokens
 	if maxTokens == nil {
 		maxTokens = &p.maxTokens
+	}
+
+	msgs, err := convertMessages(messages)
+	if err != nil {
+		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
 	reqBody := Request{
@@ -272,13 +240,13 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 
 	req.Header.Set("x-api-key", p.apiKey)
-	req.Header.Set("anthropic-version", p.anthropicVersion)
+	req.Header.Set("anthropic-version", p.version)
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("accept", "text/event-stream")
 

@@ -25,43 +25,27 @@ var (
 var _ llm.LLM = &Provider{}
 
 type Provider struct {
-	apiKey           string
-	messagesEndpoint string
-	maxTokens        int
-	client           *http.Client
+	apiKey    string
+	endpoint  string
+	maxTokens int
+	client    *http.Client
 }
 
-func New() *Provider {
-	return &Provider{
-		apiKey:           os.Getenv("OPENAI_API_KEY"),
-		messagesEndpoint: DefaultMessagesEndpoint,
-		maxTokens:        DefaultMaxTokens,
-		client:           http.DefaultClient,
+func New(opts ...Option) *Provider {
+	p := &Provider{
+		apiKey:    os.Getenv("OPENAI_API_KEY"),
+		endpoint:  DefaultMessagesEndpoint,
+		maxTokens: DefaultMaxTokens,
+		client:    http.DefaultClient,
 	}
-}
-
-func (p *Provider) WithMaxTokens(maxTokens int) *Provider {
-	p.maxTokens = maxTokens
+	for _, opt := range opts {
+		opt(p)
+	}
 	return p
 }
 
-func (p *Provider) WithMessagesEndpoint(messagesEndpoint string) *Provider {
-	p.messagesEndpoint = messagesEndpoint
-	return p
-}
-
-func (p *Provider) WithClient(client *http.Client) *Provider {
-	p.client = client
-	return p
-}
-
-func (p *Provider) WithAPIKey(apiKey string) *Provider {
-	p.apiKey = apiKey
-	return p
-}
-
-func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (*llm.Response, error) {
-	config := &llm.GenerateConfig{}
+func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+	config := &llm.Config{}
 	for _, opt := range opts {
 		opt(config)
 	}
@@ -70,7 +54,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.BeforeGenerate,
 			Messages: messages,
-			Config:   config,
 		})
 	}
 
@@ -131,7 +114,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	var result Response
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
@@ -192,7 +175,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.AfterGenerate,
 			Messages: messages,
-			Config:   config,
 			Response: response,
 		})
 	}
@@ -200,8 +182,8 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	return response, nil
 }
 
-func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.GenerateOption) (llm.Stream, error) {
-	config := &llm.GenerateConfig{}
+func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.Stream, error) {
+	config := &llm.Config{}
 	for _, opt := range opts {
 		opt(config)
 	}
@@ -241,7 +223,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.messagesEndpoint, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
