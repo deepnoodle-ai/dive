@@ -74,6 +74,24 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
+	messageCount := len(messages)
+	if messageCount == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+	for i, message := range messages {
+		if len(message.Content) == 0 {
+			return nil, fmt.Errorf("empty message detected (index %d)", i)
+		}
+	}
+
+	// The generation "prefilled" if the last message is an assistant message
+	lastMessage := messages[messageCount-1]
+	isPrefilled := lastMessage.Role == llm.Assistant
+	prefilledText := ""
+	if isPrefilled {
+		prefilledText = lastMessage.Text()
+	}
+
 	var tools []Tool
 	for _, tool := range config.Tools {
 		tools = append(tools, Tool{
@@ -155,6 +173,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		})
 	}
 
+	responseMessage := llm.NewAssistantMessage(choice.Message.Content)
+	if isPrefilled {
+		// Prepend any prefilled text to the response message
+		for _, content := range responseMessage.Content {
+			if content.Type == llm.ContentTypeText {
+				content.Text = prefilledText + content.Text
+				break
+			}
+		}
+	}
+
 	response := llm.NewResponse(llm.ResponseOptions{
 		ID:    result.ID,
 		Model: model,
@@ -163,20 +192,21 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			InputTokens:  result.Usage.PromptTokens,
 			OutputTokens: result.Usage.CompletionTokens,
 		},
-		Message: &llm.Message{
-			Role: llm.Assistant,
-			Content: []*llm.Content{{
-				Type: llm.ContentTypeText,
-				Text: choice.Message.Content,
-			}},
-		},
+		Message:   responseMessage,
 		ToolCalls: toolCalls,
 	})
 
 	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
+		debugMessages := messages
+		if !isPrefilled {
+			debugMessages = append(debugMessages, responseMessage)
+		} else {
+			// replace the last message with the response message
+			debugMessages[len(debugMessages)-1] = responseMessage
+		}
 		hooks(ctx, &llm.HookContext{
 			Type:     llm.AfterGenerate,
-			Messages: messages,
+			Messages: append(messages, responseMessage),
 			Response: response,
 		})
 	}

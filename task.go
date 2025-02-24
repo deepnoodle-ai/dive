@@ -22,7 +22,6 @@ type Task struct {
 	maxIterations          *int
 	outputFile             string
 	result                 *TaskResult
-	state                  *TaskState
 	timeout                time.Duration
 	context                string
 	kind                   string
@@ -63,6 +62,9 @@ type TaskOptions struct {
 
 // NewTask creates a new Task from a TaskOptions
 func NewTask(opts TaskOptions) *Task {
+	if opts.Name == "" {
+		opts.Name = fmt.Sprintf("task-%d", time.Now().UnixNano())
+	}
 	return &Task{
 		name:                   opts.Name,
 		nameTemplate:           opts.Name,
@@ -125,8 +127,5 @@ func (t *Task) PromptText() string {
 	}
 	result := fmt.Sprintf("%s\n\n<task>\n%s\n</task>", intro, strings.Join(lines, "\n\n"))
 	result += "\n\nPlease begin working on the task."
-	fmt.Println("==== prompt text ====")
-	fmt.Println(result)
-	fmt.Println("==== /prompt text ====")
 	return result
 }

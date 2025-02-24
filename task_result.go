@@ -2,8 +2,6 @@ package dive
 
 import (
 	"time"
-
-	"github.com/getstingrai/dive/llm"
 )
 
 // OutputFormat defines the format of task results
@@ -50,51 +48,4 @@ type TaskResult struct {
 
 	// FinishedAt is the time the task stopped
 	FinishedAt time.Time
-}
-
-type TaskState struct {
-	task           *Task
-	promise        *Promise
-	status         TaskStatus
-	priority       int
-	started        time.Time
-	output         string
-	reasoning      string
-	reportedStatus string
-	messages       []*llm.Message
-	suspended      bool
-	chatResult     chan *llm.Response
-	chatError      chan error
-}
-
-func (s *TaskState) Task() *Task {
-	return s.task
-}
-
-func (s *TaskState) Output() string {
-	return s.output
-}
-
-func (s *TaskState) Reasoning() string {
-	return s.reasoning
-}
-
-func (s *TaskState) Status() TaskStatus {
-	return s.status
-}
-
-func (s *TaskState) ReportedStatus() string {
-	return s.reportedStatus
-}
-
-func (s *TaskState) Messages() []*llm.Message {
-	return s.messages
-}
-
-func (s *TaskState) String() string {
-	text, err := executeTemplate(taskStatePromptTemplate, s)
-	if err != nil {
-		panic(err)
-	}
-	return text
 }

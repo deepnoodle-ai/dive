@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/llm"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/getstingrai/dive/providers/groq"
@@ -42,9 +43,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	a := agents.NewStandardAgent(agents.StandardAgentSpec{
+	a := dive.NewAgent(dive.AgentOptions{
 		Name:         "test",
-		Role:         &agents.Role{Name: "test"},
+		Role:         dive.Role{Description: "test"},
 		LLM:          provider,
 		Tools:        []llm.Tool{tools.NewGoogleSearch(googleClient)},
 		CacheControl: "ephemeral",
@@ -88,7 +89,9 @@ func main() {
 			continue
 		}
 
-		task := agents.NewTask(agents.TaskSpec{Description: description})
+		task := dive.NewTask(dive.TaskOptions{
+			Description: description,
+		})
 
 		promise, err := a.Work(ctx, task)
 		if err != nil {
@@ -98,6 +101,6 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(result.Output.Content)
+		fmt.Println(result.Content)
 	}
 }

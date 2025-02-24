@@ -67,7 +67,7 @@ complete assigned tasks.
 
 {{ .Team.Overview }}
 {{- end }}
-{{if .IsManager -}}
+{{if .Role.IsSupervisor -}}
 # Teamwork
 
 You are allowed to assign work to the following agents: 

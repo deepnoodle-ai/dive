@@ -78,6 +78,24 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
+	messageCount := len(messages)
+	if messageCount == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+	for i, message := range messages {
+		if len(message.Content) == 0 {
+			return nil, fmt.Errorf("empty message detected (index %d)", i)
+		}
+	}
+
+	// The generation "prefilled" if the last message is an assistant message
+	lastMessage := messages[messageCount-1]
+	isPrefilled := lastMessage.Role == llm.Assistant
+	prefilledText := ""
+	if isPrefilled {
+		prefilledText = lastMessage.Text()
+	}
+
 	if config.CacheControl != "" && len(msgs) > 0 {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
@@ -135,7 +153,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			body, _ := io.ReadAll(resp.Body)
 			return providers.NewError(resp.StatusCode, string(body))
 		}
-		var result Response
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
 		}
@@ -178,6 +195,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
+	responseMessage := llm.NewMessage(llm.Assistant, contentBlocks)
+	if isPrefilled {
+		// Prepend any prefilled text to the response message
+		for _, content := range responseMessage.Content {
+			if content.Type == llm.ContentTypeText {
+				content.Text = prefilledText + content.Text
+				break
+			}
+		}
+	}
+
 	response := llm.NewResponse(llm.ResponseOptions{
 		ID:         result.ID,
 		Model:      model,
@@ -189,10 +217,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 		},
-		Message: &llm.Message{
-			Role:    llm.Assistant,
-			Content: contentBlocks,
-		},
+		Message:   responseMessage,
 		ToolCalls: toolCalls,
 	})
 

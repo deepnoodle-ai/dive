@@ -13,7 +13,6 @@ type Event struct {
 }
 
 type Role struct {
-	Name          string
 	Description   string
 	IsSupervisor  bool
 	AcceptsChats  bool
@@ -60,7 +59,7 @@ type Agent interface {
 	Name() string
 
 	// Role returns the agent's assigned role
-	Role() *Role
+	Role() Role
 
 	// Join a team. This is only valid if the agent is not yet running and is
 	// not yet a member of any team.

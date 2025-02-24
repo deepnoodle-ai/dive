@@ -11,15 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDiveAgent(t *testing.T) {
+func TestAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	agent := NewAgent(AgentOptions{
 		Name: "test",
-		Role: &Role{
-			Name: "test",
-		},
+		Role: Role{Description: "test"},
 	})
 
 	err := agent.Start(ctx)
@@ -32,13 +30,13 @@ func TestDiveAgent(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestDiveAgentChat(t *testing.T) {
+func TestAgentChat(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	agent := NewAgent(AgentOptions{
 		Name: "test",
-		Role: &Role{Name: "test"},
+		Role: Role{Description: "test"},
 		LLM:  anthropic.New(),
 	})
 
@@ -55,13 +53,13 @@ func TestDiveAgentChat(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestDiveAgentTask(t *testing.T) {
+func TestAgentTask(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	agent := NewAgent(AgentOptions{
 		Name: "test",
-		Role: &Role{Name: "test"},
+		Role: Role{Description: "test"},
 		LLM:  anthropic.New(),
 	})
 

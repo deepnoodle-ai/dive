@@ -22,7 +22,7 @@ type Document struct {
 
 type AgentOptions struct {
 	Name           string
-	Role           *Role
+	Role           Role
 	LLM            llm.LLM
 	Tools          []llm.Tool
 	IsSupervisor   bool
@@ -38,7 +38,7 @@ type AgentOptions struct {
 // DiveAgent implements the Agent interface.
 type DiveAgent struct {
 	name           string
-	role           *Role
+	role           Role
 	llm            llm.LLM
 	team           Team
 	running        bool
@@ -49,11 +49,11 @@ type DiveAgent struct {
 	maxActiveTasks int
 	tickFrequency  time.Duration
 	cacheControl   string
-	taskQueue      []*TaskState
-	activeTask     *TaskState
+	taskQueue      []*taskState
+	activeTask     *taskState
 	workspace      []*Document
 	ticker         *time.Ticker
-	completedTasks []*TaskState
+	recentTasks    []*taskState
 	logLevel       string
 	hooks          llm.Hooks
 	logger         Logger
@@ -110,7 +110,7 @@ func (a *DiveAgent) Name() string {
 	return a.name
 }
 
-func (a *DiveAgent) Role() *Role {
+func (a *DiveAgent) Role() Role {
 	return a.role
 }
 
@@ -272,7 +272,7 @@ func (a *DiveAgent) run() error {
 	for {
 		select {
 		case <-a.ticker.C:
-			a.processTaskQueue()
+			a.doSomeWork()
 		case msg := <-a.mailbox:
 			switch m := msg.(type) {
 			case messageWork:
@@ -289,10 +289,10 @@ func (a *DiveAgent) run() error {
 }
 
 func (a *DiveAgent) handleWorkMessage(m messageWork) {
-	a.taskQueue = append(a.taskQueue, &TaskState{
-		task:    m.task,
-		promise: m.promise,
-		status:  TaskStatusQueued,
+	a.taskQueue = append(a.taskQueue, &taskState{
+		Task:    m.task,
+		Promise: m.promise,
+		Status:  TaskStatusQueued,
 	})
 }
 
@@ -301,21 +301,21 @@ func (a *DiveAgent) handleEventMessage(event *Event) {
 }
 
 func (a *DiveAgent) handleChatMessage(m messageChat) {
-	// Create a task from the chat message with the response channels
-	task := NewChatTask(m.message)
-
-	// Create task state and add to queue
-	taskState := &TaskState{
-		task:       task,
-		promise:    &Promise{ch: make(chan *TaskResult, 1)},
-		status:     TaskStatusQueued,
-		messages:   []*llm.Message{m.message},
-		chatResult: m.result,
-		chatError:  m.err,
+	task := &Task{
+		name:        fmt.Sprintf("chat-%d", time.Now().UnixNano()),
+		kind:        "chat",
+		description: fmt.Sprintf("Generate a response to user message: %q", m.message.Text()),
+		timeout:     time.Minute * 1,
 	}
-
-	// Simply append to queue - no priority ordering needed
-	a.taskQueue = append(a.taskQueue, taskState)
+	// Enqueue a corresponding task state
+	a.taskQueue = append(a.taskQueue, &taskState{
+		Task:         task,
+		Promise:      &Promise{ch: make(chan *TaskResult, 1)},
+		Status:       TaskStatusQueued,
+		Messages:     []*llm.Message{m.message},
+		ChanResponse: m.result,
+		ChanError:    m.err,
+	})
 }
 
 func (a *DiveAgent) handleStopMessage(msg messageStop) error {
@@ -327,41 +327,8 @@ func (a *DiveAgent) systemPrompt() (string, error) {
 	return executeTemplate(agentSystemPromptTemplate, a)
 }
 
-func parseStructuredResponse(responseText string) (string, string, string) {
-	var response, thinking, reportedStatus string
-
-	// Split on <think> tag
-	if strings.Contains(responseText, "<think>") {
-		parts := strings.Split(responseText, "<think>")
-		if len(parts) > 1 {
-			// Find the end of think section
-			thinkParts := strings.Split(parts[1], "</think>")
-			if len(thinkParts) > 1 {
-				thinking = strings.TrimSpace(thinkParts[0])
-				response = strings.TrimSpace(thinkParts[1])
-			}
-		}
-	} else {
-		response = responseText
-	}
-
-	// Extract status if present
-	if strings.Contains(response, "<status>") {
-		parts := strings.Split(response, "<status>")
-		if len(parts) > 1 {
-			statusParts := strings.Split(parts[1], "</status>")
-			if len(statusParts) > 1 {
-				reportedStatus = strings.TrimSpace(statusParts[0])
-				response = strings.TrimSpace(parts[0])
-			}
-		}
-	}
-
-	return response, thinking, reportedStatus
-}
-
-func (a *DiveAgent) handleTask(state *TaskState) error {
-	task := state.task
+func (a *DiveAgent) handleTask(state *taskState) error {
+	task := state.Task
 	timeout := task.Timeout()
 	if timeout == 0 {
 		timeout = time.Minute * 3
@@ -376,14 +343,14 @@ func (a *DiveAgent) handleTask(state *TaskState) error {
 
 	messages := []*llm.Message{}
 
-	if len(state.Messages()) == 0 {
-		if len(a.completedTasks) > 0 {
+	if len(state.Messages) == 0 {
+		if len(a.recentTasks) > 0 {
 			messages = append(messages, llm.NewUserMessage(
-				fmt.Sprintf("For reference, here is an overview of other recent tasks we completed:\n\n%s", a.getTaskHistory())))
+				fmt.Sprintf("For reference, here is an overview of other recent tasks we completed:\n\n%s", a.getRecentTasksHistory())))
 		}
 		messages = append(messages, llm.NewUserMessage(task.PromptText()))
 	} else {
-		messages = append(messages, state.Messages()...)
+		messages = append(messages, state.Messages...)
 		messages = append(messages, llm.NewUserMessage("Continue working on the task."))
 	}
 
@@ -393,6 +360,7 @@ func (a *DiveAgent) handleTask(state *TaskState) error {
 		p, err := prompt.New(
 			prompt.WithSystemMessage(systemPrompt),
 			prompt.WithMessage(messages...),
+			prompt.WithMessage(llm.NewAssistantMessage("<think>")),
 		).Build()
 		if err != nil {
 			return err
@@ -403,14 +371,32 @@ func (a *DiveAgent) handleTask(state *TaskState) error {
 			llm.WithTools(a.tools...),
 			llm.WithCacheControl(a.cacheControl),
 			llm.WithLogLevel(a.logLevel),
-			llm.WithHook(llm.BeforeGenerate, func(ctx context.Context, hookCtx *llm.HookContext) {
-				fmt.Println("before generate")
+			llm.WithHook(llm.AfterGenerate, func(ctx context.Context, hookCtx *llm.HookContext) {
+				fmt.Println("----")
+				fmt.Println("INPUT")
+				fmt.Println(FormatMessages(hookCtx.Messages))
+				fmt.Println("----")
+				fmt.Println("OUTPUT")
+				fmt.Println(FormatMessages([]*llm.Message{hookCtx.Response.Message()}))
+				fmt.Println("----")
 			}),
 		)
 		if err != nil {
 			return err
 		}
-		messages = append(messages, response.Message())
+
+		// Mutate first text message response to include opening <think> tag
+		responseMessage := response.Message()
+		if len(responseMessage.Content) > 0 {
+			for _, content := range responseMessage.Content {
+				if content.Type == llm.ContentTypeText {
+					content.Text = "<think>" + content.Text
+					break
+				}
+			}
+		}
+
+		messages = append(messages, responseMessage)
 		if len(response.ToolCalls()) > 0 {
 			var toolResults []*llm.ToolResult
 			for _, toolCall := range response.ToolCalls() {
@@ -438,96 +424,104 @@ func (a *DiveAgent) handleTask(state *TaskState) error {
 		}
 	}
 
-	state.messages = messages
+	state.Messages = messages
 	finalOutput, thinking, reportedStatus := parseStructuredResponse(response.Message().Text())
-	if state.output == "" {
-		state.output = finalOutput
+	if state.Output == "" {
+		state.Output = finalOutput
 	} else {
-		state.output = fmt.Sprintf("%s\n\n%s", state.output, finalOutput)
+		state.Output = fmt.Sprintf("%s\n\n%s", state.Output, finalOutput)
 	}
-	state.reasoning = thinking
-	state.reportedStatus = reportedStatus
+	state.Reasoning = thinking
+	state.ReportedStatus = reportedStatus
 	return nil
 }
 
-func NewChatTask(message *llm.Message) *Task {
-	return &Task{
-		name:        "",
-		kind:        "chat",
-		description: fmt.Sprintf("Generate a response to user message: %q", message.Text()),
-		// promptText:  message.Text(),
-		timeout: time.Minute * 1,
-	}
-}
+func (a *DiveAgent) doSomeWork() {
 
-func (a *DiveAgent) processTaskQueue() {
-	// If no active task and queue not empty, activate next task
+	// Activate the next task if there is one and we're idle
 	if a.activeTask == nil && len(a.taskQueue) > 0 {
-		// Simply take the first task in queue
+		// Pop and activate the first task in queue
 		a.activeTask = a.taskQueue[0]
 		a.taskQueue = a.taskQueue[1:]
-		a.activeTask.status = TaskStatusActive
-		if !a.activeTask.suspended {
-			a.activeTask.started = time.Now()
+		a.activeTask.Status = TaskStatusActive
+		if !a.activeTask.Suspended {
+			a.activeTask.Started = time.Now()
 		}
-		a.activeTask.suspended = false
-		fmt.Printf("activated task: %s\n", a.activeTask.task.Name())
+		a.activeTask.Suspended = false
+		a.logger.Info("task activated", "name", a.activeTask.Task.Name())
 	}
 
-	if a.activeTask != nil {
-		err := a.handleTask(a.activeTask)
-		if err != nil {
-			fmt.Println("task error:", a.activeTask.task.Name(), err)
-			a.activeTask.status = TaskStatusError
-			a.rememberTask(a.activeTask)
-			a.activeTask.promise.ch <- NewTaskResultError(a.activeTask.task, err)
-			a.activeTask = nil
-			return
+	if a.activeTask == nil {
+		return
+	}
+
+	// Make progress on the active task
+	err := a.handleTask(a.activeTask)
+
+	// An error deactivates the task and we send the error via the promise
+	if err != nil {
+		duration := time.Since(a.activeTask.Started)
+		a.logger.Error("task error",
+			"name", a.activeTask.Task.Name(),
+			"duration", duration.Seconds(),
+			"error", err,
+		)
+
+		a.activeTask.Status = TaskStatusError
+		a.rememberTask(a.activeTask)
+		a.activeTask.Promise.ch <- NewTaskResultError(a.activeTask.Task, err)
+		a.activeTask = nil
+		return
+	}
+
+	if isTaskComplete(a.activeTask.ReportedStatus) {
+		duration := time.Since(a.activeTask.Started)
+		a.logger.Info("task completed",
+			"name", a.activeTask.Task.Name(),
+			"duration", duration.Seconds(),
+		)
+
+		a.activeTask.Status = TaskStatusCompleted
+		a.rememberTask(a.activeTask)
+
+		if a.activeTask.Task.Kind() == "chat" {
+			a.activeTask.ChanResponse <- llm.NewResponse(llm.ResponseOptions{
+				Role:    llm.Assistant,
+				Message: llm.NewAssistantMessage(a.activeTask.Output),
+			})
 		}
-		reportedStatus := strings.ToLower(a.activeTask.reportedStatus)
-		isComplete := !strings.Contains(reportedStatus, "incomplete")
-		if isComplete {
-			fmt.Println("task completed:", a.activeTask.task.Name())
-			a.activeTask.status = TaskStatusCompleted
-			a.rememberTask(a.activeTask)
-			// Handle chat task resolution
-			if a.activeTask.task.Kind() == "chat" {
-				a.activeTask.chatResult <- llm.NewResponse(llm.ResponseOptions{
-					Role:    llm.Assistant,
-					Message: llm.NewAssistantMessage(a.activeTask.output),
-				})
+
+		if a.activeTask.Promise != nil {
+			a.activeTask.Promise.ch <- &TaskResult{
+				Task:    a.activeTask.Task,
+				Content: a.activeTask.Output,
 			}
-			if a.activeTask.promise != nil {
-				a.activeTask.promise.ch <- &TaskResult{
-					Task:    a.activeTask.task,
-					Content: a.activeTask.output,
-				}
-			}
-			a.activeTask = nil
-		} else {
-			fmt.Println("task not yet complete:", a.activeTask.task.Name())
 		}
+
+		a.activeTask = nil
 	}
 }
 
-func (a *DiveAgent) rememberTask(task *TaskState) {
-	a.completedTasks = append(a.completedTasks, task)
-	if len(a.completedTasks) > 10 {
-		a.completedTasks = a.completedTasks[1:]
+func (a *DiveAgent) rememberTask(task *taskState) {
+	// Remember the last 10 tasks that were worked on, so that the agent can
+	// use them as context for future tasks.
+	a.recentTasks = append(a.recentTasks, task)
+	if len(a.recentTasks) > 10 {
+		a.recentTasks = a.recentTasks[1:]
 	}
 }
 
-func (a *DiveAgent) getTaskHistory() string {
+func (a *DiveAgent) getRecentTasksHistory() string {
 	var history []string
-	for _, status := range a.completedTasks {
-		title := status.task.Name()
+	for _, status := range a.recentTasks {
+		title := status.Task.Name()
 		if title == "" {
-			title = status.task.Description()
+			title = status.Task.Description()
 		}
 		title = TruncateText(title, 8)
-		output := replaceNewlines(status.output)
+		output := replaceNewlines(status.Output)
 		history = append(history, fmt.Sprintf("- task: %q status: %q output: %q\n",
-			title, status.status, TruncateText(output, 8),
+			title, status.Status, TruncateText(output, 8),
 		))
 	}
 	result := strings.Join(history, "\n")
@@ -543,13 +537,6 @@ func (a *DiveAgent) getWorkspaceState() string {
 		blobs = append(blobs, fmt.Sprintf("<document name=%q>\n%s\n</document>", doc.Name, doc.Content))
 	}
 	return strings.Join(blobs, "\n\n")
-}
-
-func NewTaskResultError(task *Task, err error) *TaskResult {
-	return &TaskResult{
-		Task:  task,
-		Error: err,
-	}
 }
 
 type AgentTemplateData struct {
@@ -624,4 +611,8 @@ var newlinesRegex = regexp.MustCompile(`\n+`)
 
 func replaceNewlines(text string) string {
 	return newlinesRegex.ReplaceAllString(text, "<br>")
+}
+
+func isTaskComplete(status string) bool {
+	return strings.Contains(strings.ToLower(status), "complete")
 }
