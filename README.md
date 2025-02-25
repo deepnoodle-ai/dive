@@ -1,7 +1,10 @@
 
-<img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
-
-# Dive - AI Agent Framework
+<p align="center">
+  <img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
+  <h1 align="center">
+    <a href="https://github.com/getstingrai/dive">Dive - AI Agent Framework</a>
+  </h1>
+</p>
 
 ## Introduction
 
