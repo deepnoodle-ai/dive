@@ -29,6 +29,7 @@ func NewError(statusCode int, body string) *ProviderError {
 // ShouldRetry determines if the given status code should trigger a retry
 func ShouldRetry(statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests || // 429
+		statusCode == http.StatusInternalServerError || // 500
 		statusCode == http.StatusServiceUnavailable || // 503
 		statusCode == http.StatusGatewayTimeout // 504
 }

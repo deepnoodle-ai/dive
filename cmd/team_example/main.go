@@ -31,11 +31,23 @@ func main() {
 	var provider llm.LLM
 	switch providerName {
 	case "anthropic":
-		provider = anthropic.New()
+		var opts []anthropic.Option
+		if modelName != "" {
+			opts = append(opts, anthropic.WithModel(modelName))
+		}
+		provider = anthropic.New(opts...)
 	case "openai":
-		provider = openai.New()
+		var opts []openai.Option
+		if modelName != "" {
+			opts = append(opts, openai.WithModel(modelName))
+		}
+		provider = openai.New(opts...)
 	case "groq":
-		provider = groq.New()
+		var opts []groq.Option
+		if modelName != "" {
+			opts = append(opts, groq.WithModel(modelName))
+		}
+		provider = groq.New(opts...)
 	}
 
 	logLevel := "info"
@@ -138,13 +150,13 @@ func main() {
 
 	researchTask := dive.NewTask(dive.TaskOptions{
 		Name:        "Background Research",
-		Description: "Gather background research that will be used to create a history of maple syrup production in Vermont. Don't consult more than 3 sources.",
+		Description: "Gather background research that will be used to create a history of maple syrup production in Vermont. Don't consult more than 3 sources. The goal is to produce about 3 paragraphs of research - that is all. Don't overdo it.",
 	})
 
 	writingTask := dive.NewTask(dive.TaskOptions{
 		Name:           "Write History",
 		Description:    "Create a brief 3 paragraph history of maple syrup production in Vermont.",
-		ExpectedOutput: "The history, with the first word of each paragraph in ALL UPPERCASE.",
+		ExpectedOutput: "The history, with the first word of each paragraph in ALL UPPERCASE",
 		Dependencies:   []string{researchTask.Name()},
 	})
 
@@ -157,5 +169,17 @@ func main() {
 		fmt.Printf("---- task result %d - %s ----\n", i+1, result.Task.Name())
 		fmt.Println(result.Content)
 		fmt.Println()
+	}
+
+	if err := os.MkdirAll("output", 0755); err != nil {
+		log.Fatal(err)
+	}
+
+	for _, result := range results {
+		filename := fmt.Sprintf("output/%s.txt", result.Task.Name())
+		if err := os.WriteFile(filename, []byte(result.Content), 0644); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("wrote %s\n", filename)
 	}
 }

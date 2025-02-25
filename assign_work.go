@@ -115,3 +115,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 	}
 	return result.Content, nil
 }
+
+func (t *AssignWorkTool) ShouldReturnResult() bool {
+	return true
+}

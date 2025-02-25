@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	DefaultTaskTimeout     = time.Minute * 5
-	DefaultChatTimeout     = time.Minute * 1
-	DefaultTickFrequency   = time.Second * 10
-	DefaultGenerationLimit = 4
+	DefaultTaskTimeout      = time.Minute * 5
+	DefaultChatTimeout      = time.Minute * 1
+	DefaultTickFrequency    = time.Second * 1
+	DefaultTaskMessageLimit = 12
+	DefaultGenerationLimit  = 5
 )
 
 var _ Agent = &DiveAgent{}
@@ -30,46 +31,48 @@ type Document struct {
 
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
-	Name            string
-	Role            Role
-	LLM             llm.LLM
-	Tools           []llm.Tool
-	MaxActiveTasks  int
-	TickFrequency   time.Duration
-	TaskTimeout     time.Duration
-	ChatTimeout     time.Duration
-	CacheControl    string
-	LogLevel        string
-	Hooks           llm.Hooks
-	Logger          slogger.Logger
-	GenerationLimit int
+	Name             string
+	Role             Role
+	LLM              llm.LLM
+	Tools            []llm.Tool
+	MaxActiveTasks   int
+	TickFrequency    time.Duration
+	TaskTimeout      time.Duration
+	ChatTimeout      time.Duration
+	CacheControl     string
+	LogLevel         string
+	Hooks            llm.Hooks
+	Logger           slogger.Logger
+	GenerationLimit  int
+	TaskMessageLimit int
 }
 
 // DiveAgent implements the Agent interface.
 type DiveAgent struct {
-	name            string
-	role            Role
-	llm             llm.LLM
-	team            Team
-	running         bool
-	tools           []llm.Tool
-	toolsByName     map[string]llm.Tool
-	isSupervisor    bool
-	isWorker        bool
-	maxActiveTasks  int
-	tickFrequency   time.Duration
-	taskTimeout     time.Duration
-	chatTimeout     time.Duration
-	cacheControl    string
-	taskQueue       []*taskState
-	recentTasks     []*taskState
-	activeTask      *taskState
-	workspace       []*Document
-	ticker          *time.Ticker
-	logLevel        string
-	hooks           llm.Hooks
-	logger          slogger.Logger
-	generationLimit int
+	name             string
+	role             Role
+	llm              llm.LLM
+	team             Team
+	running          bool
+	tools            []llm.Tool
+	toolsByName      map[string]llm.Tool
+	isSupervisor     bool
+	isWorker         bool
+	maxActiveTasks   int
+	tickFrequency    time.Duration
+	taskTimeout      time.Duration
+	chatTimeout      time.Duration
+	cacheControl     string
+	taskQueue        []*taskState
+	recentTasks      []*taskState
+	activeTask       *taskState
+	workspace        []*Document
+	ticker           *time.Ticker
+	logLevel         string
+	hooks            llm.Hooks
+	logger           slogger.Logger
+	generationLimit  int
+	taskMessageLimit int
 
 	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
@@ -95,6 +98,9 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 	if opts.GenerationLimit <= 0 {
 		opts.GenerationLimit = DefaultGenerationLimit
 	}
+	if opts.TaskMessageLimit <= 0 {
+		opts.TaskMessageLimit = DefaultTaskMessageLimit
+	}
 	if opts.LogLevel == "" {
 		opts.LogLevel = "info"
 	}
@@ -116,19 +122,20 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		}
 	}
 	a := &DiveAgent{
-		name:            opts.Name,
-		llm:             opts.LLM,
-		role:            opts.Role,
-		maxActiveTasks:  opts.MaxActiveTasks,
-		tickFrequency:   opts.TickFrequency,
-		taskTimeout:     opts.TaskTimeout,
-		chatTimeout:     opts.ChatTimeout,
-		generationLimit: opts.GenerationLimit,
-		cacheControl:    opts.CacheControl,
-		hooks:           opts.Hooks,
-		mailbox:         make(chan interface{}, 64),
-		logger:          opts.Logger,
-		logLevel:        strings.ToLower(opts.LogLevel),
+		name:             opts.Name,
+		llm:              opts.LLM,
+		role:             opts.Role,
+		maxActiveTasks:   opts.MaxActiveTasks,
+		tickFrequency:    opts.TickFrequency,
+		taskTimeout:      opts.TaskTimeout,
+		chatTimeout:      opts.ChatTimeout,
+		generationLimit:  opts.GenerationLimit,
+		taskMessageLimit: opts.TaskMessageLimit,
+		cacheControl:     opts.CacheControl,
+		hooks:            opts.Hooks,
+		mailbox:          make(chan interface{}, 64),
+		logger:           opts.Logger,
+		logLevel:         strings.ToLower(opts.LogLevel),
 	}
 	var tools []llm.Tool
 	if len(opts.Tools) > 0 {
@@ -387,10 +394,14 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 			messages = append(messages, recentTasksMessage)
 		}
 		messages = append(messages, llm.NewUserMessage(task.PromptText()))
-	} else {
-		// We're resuming a task
+	} else if len(state.Messages) < a.taskMessageLimit {
+		// We're resuming a task and can still work some more
 		messages = append(messages, state.Messages...)
 		messages = append(messages, llm.NewUserMessage("Continue working on the task."))
+	} else {
+		// We're resuming a task but need to wrap it up
+		messages = append(messages, state.Messages...)
+		messages = append(messages, llm.NewUserMessage("Finish the task to the best of your ability now. Do not use any more tools. Respond with the complete response to the task's prompt."))
 	}
 
 	a.logger.Info("handling task",
@@ -450,6 +461,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		}
 
 		// Execute tool-uses and accumulate results
+		shouldReturnResult := false
 		toolResults := make([]*llm.ToolResult, len(response.ToolCalls()))
 		for i, toolCall := range response.ToolCalls() {
 			tool, ok := a.toolsByName[toolCall.Name]
@@ -465,6 +477,14 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 				Name:   toolCall.Name,
 				Result: result,
 			}
+			if tool.ShouldReturnResult() {
+				shouldReturnResult = true
+			}
+		}
+
+		// If no tool calls need to return results to the LLM, we're done
+		if !shouldReturnResult {
+			break
 		}
 
 		// Capture results in a new message to send on next loop iteration
@@ -484,13 +504,11 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	}
 
 	// Update task state based on the last response from the LLM. It should
-	// contain thinking, status, and the primary output.
+	// contain thinking, status, and the primary output. We could concatenate
+	// the new output with prior output, but for now it seems like it's better
+	// not to, and to request a full final response instead.
 	taskResponse := ParseStructuredResponse(response.Message().Text())
-	if state.Output == "" {
-		state.Output = taskResponse.Text
-	} else {
-		state.Output = fmt.Sprintf("%s\n\n%s", state.Output, taskResponse.Text)
-	}
+	state.Output = taskResponse.Text
 	state.Reasoning = taskResponse.Thinking
 	state.StatusDescription = taskResponse.StatusDescription
 	state.Messages = messages
@@ -502,7 +520,6 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		a.logger.Warn("defaulting to completed status",
 			"agent", a.name,
 			"task", task.Name(),
-			"output", state.Output,
 		)
 	} else {
 		state.Status = taskResponse.Status()

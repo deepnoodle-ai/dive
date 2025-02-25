@@ -98,6 +98,10 @@ func (t *FirecrawlScraper) Call(ctx context.Context, input string) (string, erro
 	return text, nil
 }
 
+func (t *FirecrawlScraper) ShouldReturnResult() bool {
+	return true
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

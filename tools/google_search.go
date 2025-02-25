@@ -25,18 +25,10 @@ func NewGoogleSearch(client *google.Client) *GoogleSearch {
 	return &GoogleSearch{client: client}
 }
 
-func (t *GoogleSearch) Name() string {
-	return "GoogleSearch"
-}
-
-func (t *GoogleSearch) Description() string {
-	return "Returns search results from Google for the given search query. The response includes the url, title, and description of each webpage in the search results."
-}
-
 func (t *GoogleSearch) Definition() *llm.ToolDefinition {
 	return &llm.ToolDefinition{
-		Name:        t.Name(),
-		Description: t.Description(),
+		Name:        "google_search",
+		Description: "Returns search results from Google for the given search query. The response includes the url, title, and description of each webpage in the search results.",
 		Parameters: llm.Schema{
 			Type:     "object",
 			Required: []string{"query"},
@@ -99,4 +91,8 @@ func (t *GoogleSearch) Call(ctx context.Context, input string) (string, error) {
 	text := strings.Join(lines, "\n")
 	text = strings.ReplaceAll(text, "```", "")
 	return text, nil
+}
+
+func (t *GoogleSearch) ShouldReturnResult() bool {
+	return true
 }

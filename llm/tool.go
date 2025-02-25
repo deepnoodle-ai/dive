@@ -25,15 +25,30 @@ type ToolChoice struct {
 type Tool interface {
 	Definition() *ToolDefinition
 	Call(ctx context.Context, input string) (string, error)
+	ShouldReturnResult() bool
 }
 
 type StandardTool struct {
-	def *ToolDefinition
-	fn  ToolFunc
+	def          *ToolDefinition
+	fn           ToolFunc
+	returnResult bool
 }
 
 func NewTool(def *ToolDefinition, fn ToolFunc) Tool {
-	return &StandardTool{def: def, fn: fn}
+	return &StandardTool{
+		def:          def,
+		fn:           fn,
+		returnResult: true,
+	}
+}
+
+// NewToolWithOptions creates a new tool with additional options
+func NewToolWithOptions(def *ToolDefinition, fn ToolFunc, returnResult bool) Tool {
+	return &StandardTool{
+		def:          def,
+		fn:           fn,
+		returnResult: returnResult,
+	}
 }
 
 func (t *StandardTool) Definition() *ToolDefinition {
@@ -44,14 +59,6 @@ func (t *StandardTool) Call(ctx context.Context, input string) (string, error) {
 	return t.fn(ctx, input)
 }
 
-// type Tool interface {
-// 	Definition() *ToolDefinition
-// 	Invoke(ctx context.Context, input json.RawMessage) (string, error)
-// }
-
-// type ToolInvocation struct {
-// 	Name   string          `json:"name"`
-// 	Input  json.RawMessage `json:"input"`
-// 	Result string          `json:"result"`
-// 	Error  error           `json:"error"`
-// }
+func (t *StandardTool) ShouldReturnResult() bool {
+	return t.returnResult
+}

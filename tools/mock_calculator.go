@@ -33,3 +33,7 @@ func (t *MockCalculatorTool) Call(ctx context.Context, input string) (string, er
 	t.Input = input
 	return t.Result, t.Error
 }
+
+func (t *MockCalculatorTool) ShouldReturnResult() bool {
+	return true
+}

@@ -33,3 +33,9 @@ func WithMaxTokens(maxTokens int) Option {
 		p.maxTokens = maxTokens
 	}
 }
+
+func WithModel(model string) Option {
+	return func(p *Provider) {
+		p.model = model
+	}
+}
