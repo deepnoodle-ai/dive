@@ -89,10 +89,17 @@ import (
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/getstingrai/dive/tools"
+    "github.com/getstingrai/dive/tools/google"
 )
 
 func main() {
 	ctx := context.Background()
+
+    // Create a Google Search API client
+    googleClient, err := google.New()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Create a new agent
 	agent := dive.NewAgent(dive.AgentOptions{
@@ -103,7 +110,7 @@ func main() {
 		},
 		LLM:          anthropic.New(),
 		CacheControl: "ephemeral",
-		Tools:        []dive.Tool{tools.NewGoogleSearch()},
+		Tools:        []dive.Tool{tools.NewGoogleSearch(googleClient)},
 	})
 
 	// Start the agent
@@ -193,7 +200,7 @@ agent := dive.NewAgent(dive.AgentOptions{
     Name:         "analyst",
     Role:         &dive.Role{Description: "Financial Analyst"},
     LLM:          anthropic.New(),
-    Tools:        []dive.Tool{tools.NewCalculator(), tools.NewDataFetcher()},
+    Tools:        []dive.Tool{},
 })
 ```
 
@@ -363,9 +370,9 @@ between providers or models without changing your application code.
 
 The framework currently supports:
 
-* **Anthropic** (Claude models)
-* **OpenAI** (GPT models)
-* **Groq** (Various models)
+* **Anthropic**
+* **OpenAI**
+* **Groq**
 
 Each provider implementation handles the specifics of API communication, token
 counting, error handling, and other provider-specific details, giving you a
@@ -374,10 +381,10 @@ consistent interface regardless of which provider you're using.
 Key features of the LLM integration include:
 
 * **Unified Interface**: Work with any supported LLM through the same API
-* **Streaming Support**: Stream responses for better user experience
 * **Tool Use**: Enable LLMs to use tools to extend their capabilities
 * **Caching**: Cache responses to reduce API costs and improve performance
 * **Context Management**: Automatically handle context windows and token limits
+* **Streaming Support**: Stream responses for better user experience **(in-progress)**
 
 Using an LLM directly:
 
@@ -389,12 +396,12 @@ llm := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
 response, err := llm.Generate(ctx, 
     []*llm.Message{llm.NewUserMessage("What is the capital of France?")},
     llm.WithSystemPrompt("You are a helpful assistant."),
-    llm.WithCacheControl("ephemeral"),
 )
 ```
 
 ### Supported Providers
-Each provider has its own package with provider-specific configuration options:
+
+Each provider has its own package but offers similar configuration options:
 
 ```go
 // Anthropic
@@ -406,15 +413,28 @@ llm := anthropic.New(
 // OpenAI
 llm := openai.New(
     openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
-    openai.WithModel("gpt-4-turbo"),
+    openai.WithModel("gpt-4o"),
 )
 
 // Groq
 llm := groq.New(
     groq.WithAPIKey(os.Getenv("GROQ_API_KEY")),
-    groq.WithModel("llama3-70b-8192"),
+    groq.WithModel("llama-3.3-70b-versatile"),
 )
 ```
+
+### Tested Models
+
+These are the models that I have personally tested so far. Currently, Dive does
+not restrict the model names you can specify, so feel free to try others.
+
+| Provider  | Model                         |
+| --------- | ----------------------------- |
+| Anthropic | claude-3-5-sonnet-20240620    |
+| Anthropic | claude-3-5-sonnet-20241022    |
+| OpenAI    | gpt-4o                        |
+| Groq      | llama-3.3-70b-versatile       |
+| Groq      | deepseek-r1-distill-llama-70b |
 
 ### Tool Use
 
@@ -426,18 +446,16 @@ Dive provides a simple interface for defining and using tools:
 
 ```go
 type Tool interface {
-    Definition() *ToolDefinition
-    Call(ctx context.Context, input string) (string, error)
+	Definition() *ToolDefinition
+	Call(ctx context.Context, input string) (string, error)
+	ShouldReturnResult() bool
 }
 ```
 
-The framework includes several built-in tools:
+The framework includes a couple of built-in tools at this time:
 
 * **Google Search**: Search the web for information
 * **Firecrawl**: Extract content from web pages
-* **Calculator**: Perform mathematical calculations
-* **File System**: Read and write files
-* **Data Fetcher**: Retrieve data from APIs or databases
 
 Creating a custom tool is straightforward:
 
@@ -470,6 +488,10 @@ func (t *WeatherTool) Definition() *llm.ToolDefinition {
 func (t *WeatherTool) Call(ctx context.Context, input string) (string, error) {
     // Parse input, call weather API, and return results
     // ...
+}
+
+func (t *WeatherTool) ShouldReturnResult() bool {
+	return true
 }
 ```
 
@@ -508,14 +530,16 @@ information, and perform actions beyond just generating text.
 
 ### Google Search
 
-The Google Search tool allows agents to search the web for information:
+The Google Search tool allows agents to search the web for information. This
+uses the [Google Custom Search JSON API](https://developers.google.com/custom-search/v1/overview).
 
 ```go
-// Create a Google Search tool
-googleClient := google.NewClient(
-    os.Getenv("GOOGLE_SEARCH_API_KEY"),
-    os.Getenv("GOOGLE_SEARCH_CX"),
-)
+// Create a Google Search API client
+googleClient, err := google.New()
+if err != nil {
+    log.Fatal(err)
+}
+
 searchTool := tools.NewGoogleSearch(googleClient)
 
 // Add it to an agent
@@ -527,32 +551,17 @@ agent := dive.NewAgent(dive.AgentOptions{
 
 ### Firecrawl
 
-The Firecrawl tool allows agents to extract content from web pages:
+The [Firecrawl](https://www.firecrawl.dev) tool allows agents to extract content from web pages:
 
 ```go
 // Create a Firecrawl tool
-firecrawlClient := firecrawl.NewClient(os.Getenv("FIRECRAWL_API_KEY"))
-scrapeTool := tools.NewFirecrawlScrape(firecrawlClient)
+app, err := firecrawl.NewFirecrawlApp(os.Getenv("FIRECRAWL_API_KEY"), "")
+scrapeTool := tools.NewFirecrawlScraper(app, 30000)
 
 // Add it to an agent
 agent := dive.NewAgent(dive.AgentOptions{
     // ... other configuration ...
     Tools: []dive.Tool{scrapeTool},
-})
-```
-
-### Calculator
-
-The Calculator tool allows agents to perform mathematical calculations:
-
-```go
-// Create a Calculator tool
-calculatorTool := tools.NewMockCalculator()
-
-// Add it to an agent
-agent := dive.NewAgent(dive.AgentOptions{
-    // ... other configuration ...
-    Tools: []dive.Tool{calculatorTool},
 })
 ```
 
