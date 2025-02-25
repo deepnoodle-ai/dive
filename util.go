@@ -2,10 +2,20 @@ package dive
 
 import (
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 
+	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/providers/anthropic"
+	"github.com/getstingrai/dive/providers/groq"
+	"github.com/getstingrai/dive/providers/openai"
 )
+
+func init() {
+	petname.NonDeterministicMode()
+}
 
 func FormatMessages(messages []*llm.Message) string {
 	var lines []string
@@ -47,4 +57,75 @@ func FormatMessages(messages []*llm.Message) string {
 		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func TruncateText(text string, maxWords int) string {
+	// Split into lines while preserving newlines
+	lines := strings.Split(text, "\n")
+	wordCount := 0
+	var result []string
+	// Process each line
+	for _, line := range lines {
+		words := strings.Fields(line)
+		// If we haven't reached maxWords, add words from this line
+		if wordCount < maxWords {
+			remaining := maxWords - wordCount
+			if len(words) <= remaining {
+				// Add entire line if it fits
+				if len(words) > 0 {
+					result = append(result, line)
+				} else {
+					// Preserve empty lines
+					result = append(result, "")
+				}
+				wordCount += len(words)
+			} else {
+				// Add partial line up to remaining words
+				result = append(result, strings.Join(words[:remaining], " "))
+				wordCount = maxWords
+			}
+		}
+	}
+	truncated := strings.Join(result, "\n")
+	if wordCount >= maxWords {
+		truncated += " ..."
+	}
+	return truncated
+}
+
+var newlinesRegex = regexp.MustCompile(`\n+`)
+
+func replaceNewlines(text string) string {
+	return newlinesRegex.ReplaceAllString(text, "<br>")
+}
+
+func addPrefill(message *llm.Message, prefill string) bool {
+	if prefill == "" {
+		return false
+	}
+	for _, content := range message.Content {
+		if content.Type == llm.ContentTypeText &&
+			strings.Contains(content.Text, "</think>") {
+			content.Text = prefill + content.Text
+			return true
+		}
+	}
+	return false
+}
+
+func detectProvider() (llm.LLM, bool) {
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		return anthropic.New(), true
+	}
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		return openai.New(), true
+	}
+	if key := os.Getenv("GROQ_API_KEY"); key != "" {
+		return groq.New(), true
+	}
+	return nil, false
+}
+
+func randomName() string {
+	return fmt.Sprintf("%s-%s", petname.Adjective(), petname.Name())
 }

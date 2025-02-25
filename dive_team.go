@@ -170,7 +170,6 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, err
 		if err != nil {
 			return nil, fmt.Errorf("failed to assign work to agent %s: %w", assignedAgent.Name(), err)
 		}
-		fmt.Println("assigned agent", assignedAgent.Name(), "to task", task.Name())
 		promises[i] = promise
 	}
 

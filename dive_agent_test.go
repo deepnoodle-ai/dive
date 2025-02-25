@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/logger"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +40,6 @@ func TestAgentChat(t *testing.T) {
 		Name:     "test",
 		Role:     Role{Description: "test"},
 		LLM:      anthropic.New(),
-		Logger:   logger.NewSlogLogger(nil),
 		LogLevel: "info",
 	})
 

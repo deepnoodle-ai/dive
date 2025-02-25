@@ -4,27 +4,26 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	petname "github.com/dustinkirkland/golang-petname"
 )
 
 // Task represents a unit of work to be performed by an agent
 type Task struct {
-	name                   string
-	nameTemplate           string
-	description            string
-	descriptionTemplate    string
-	expectedOutput         string
-	expectedOutputTemplate string
-	outputFormat           OutputFormat
-	outputObject           interface{}
-	assignedAgent          Agent
-	dependencies           []string
-	condition              string
-	maxIterations          *int
-	outputFile             string
-	result                 *TaskResult
-	timeout                time.Duration
-	context                string
-	kind                   string
+	name           string
+	description    string
+	expectedOutput string
+	outputFormat   OutputFormat
+	outputObject   interface{}
+	assignedAgent  Agent
+	dependencies   []string
+	maxIterations  *int
+	outputFile     string
+	result         *TaskResult
+	timeout        time.Duration
+	context        string
+	kind           string
+	nameIsRandom   bool
 }
 
 func (t *Task) Name() string               { return t.name }
@@ -34,7 +33,6 @@ func (t *Task) OutputFormat() OutputFormat { return t.outputFormat }
 func (t *Task) OutputObject() interface{}  { return t.outputObject }
 func (t *Task) AssignedAgent() Agent       { return t.assignedAgent }
 func (t *Task) Dependencies() []string     { return t.dependencies }
-func (t *Task) Condition() string          { return t.condition }
 func (t *Task) MaxIterations() *int        { return t.maxIterations }
 func (t *Task) OutputFile() string         { return t.outputFile }
 func (t *Task) Result() *TaskResult        { return t.result }
@@ -48,12 +46,10 @@ type TaskOptions struct {
 	Name           string        `json:"name,omitempty"`
 	ExpectedOutput string        `json:"expected_output,omitempty"`
 	Dependencies   []string      `json:"dependencies,omitempty"`
-	Condition      string        `json:"condition,omitempty"`
 	MaxIterations  *int          `json:"max_iterations,omitempty"`
 	OutputFile     string        `json:"output_file,omitempty"`
 	Timeout        time.Duration `json:"timeout,omitempty"`
 	Context        string        `json:"context,omitempty"`
-	Priority       int           `json:"priority,omitempty"`
 	Kind           string        `json:"kind,omitempty"`
 	OutputFormat   OutputFormat  `json:"output_format,omitempty"`
 	OutputObject   interface{}   `json:"-"`
@@ -62,26 +58,25 @@ type TaskOptions struct {
 
 // NewTask creates a new Task from a TaskOptions
 func NewTask(opts TaskOptions) *Task {
+	var nameIsRandom bool
 	if opts.Name == "" {
-		opts.Name = fmt.Sprintf("task-%d", time.Now().UnixNano())
+		opts.Name = fmt.Sprintf("task-%s", petname.Generate(2, "-"))
+		nameIsRandom = true
 	}
 	return &Task{
-		name:                   opts.Name,
-		nameTemplate:           opts.Name,
-		description:            opts.Description,
-		descriptionTemplate:    opts.Description,
-		expectedOutput:         opts.ExpectedOutput,
-		expectedOutputTemplate: opts.ExpectedOutput,
-		outputFormat:           opts.OutputFormat,
-		outputObject:           opts.OutputObject,
-		assignedAgent:          opts.AssignedAgent,
-		dependencies:           opts.Dependencies,
-		condition:              opts.Condition,
-		maxIterations:          opts.MaxIterations,
-		outputFile:             opts.OutputFile,
-		timeout:                opts.Timeout,
-		context:                opts.Context,
-		kind:                   opts.Kind,
+		name:           opts.Name,
+		description:    opts.Description,
+		expectedOutput: opts.ExpectedOutput,
+		outputFormat:   opts.OutputFormat,
+		outputObject:   opts.OutputObject,
+		assignedAgent:  opts.AssignedAgent,
+		dependencies:   opts.Dependencies,
+		maxIterations:  opts.MaxIterations,
+		outputFile:     opts.OutputFile,
+		timeout:        opts.Timeout,
+		context:        opts.Context,
+		kind:           opts.Kind,
+		nameIsRandom:   nameIsRandom,
 	}
 }
 
@@ -107,7 +102,7 @@ func (t *Task) Validate() error {
 // PromptText returns the LLM prompt text for the task
 func (t *Task) PromptText() string {
 	var intro string
-	if t.name != "" {
+	if t.name != "" && !t.nameIsRandom {
 		intro = fmt.Sprintf("Let's work on a new task named %q:", t.name)
 	} else {
 		intro = "Let's work on a new task:"

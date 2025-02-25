@@ -9,22 +9,23 @@ import (
 
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/logger"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/getstingrai/dive/providers/groq"
 	"github.com/getstingrai/dive/providers/openai"
+	"github.com/getstingrai/dive/slogger"
 	"github.com/getstingrai/dive/tools"
 	"github.com/getstingrai/dive/tools/google"
 	"github.com/mendableai/firecrawl-go"
 )
 
-// groq.WithModel("deepseek-r1-distill-llama-70b")
+const DefaultTask = "Create a brief 3 paragraph biography of Alan Turing"
 
 func main() {
 	var verbose bool
-	var providerName, modelName string
+	var providerName, modelName, taskDescription string
 	flag.StringVar(&providerName, "provider", "anthropic", "provider to use")
 	flag.StringVar(&modelName, "model", "", "model to use")
+	flag.StringVar(&taskDescription, "task", DefaultTask, "task description")
 	flag.BoolVar(&verbose, "verbose", false, "verbose output")
 	flag.Parse()
 
@@ -40,7 +41,11 @@ func main() {
 		provider = groq.New()
 	}
 
-	logger := logger.NewSlogLogger(nil)
+	logLevel := "info"
+	if verbose {
+		logLevel = "debug"
+	}
+	logger := slogger.New(slogger.LevelFromString(logLevel))
 
 	var theTools []llm.Tool
 
@@ -50,8 +55,9 @@ func main() {
 			log.Fatal(err)
 		}
 		theTools = append(theTools, tools.NewFirecrawlScraper(app, 30000))
-
-		log.Println("firecrawl enabled")
+		logger.Info("firecrawl enabled")
+	} else {
+		logger.Info("firecrawl is not enabled")
 	}
 
 	if key := os.Getenv("GOOGLE_SEARCH_CX"); key != "" {
@@ -60,8 +66,13 @@ func main() {
 			log.Fatal(err)
 		}
 		theTools = append(theTools, tools.NewGoogleSearch(googleClient))
+		logger.Info("google search enabled")
+	} else {
+		logger.Info("google search is not enabled")
+	}
 
-		log.Println("google search enabled")
+	if len(theTools) == 0 {
+		logger.Warn("no tools enabled")
 	}
 
 	supervisor := dive.NewAgent(dive.AgentOptions{
@@ -73,7 +84,7 @@ func main() {
 		},
 		CacheControl: "ephemeral",
 		LLM:          provider,
-		LogLevel:     "info",
+		LogLevel:     logLevel,
 		Logger:       logger,
 	})
 
@@ -85,25 +96,21 @@ func main() {
 		CacheControl: "ephemeral",
 		LLM:          provider,
 		Tools:        theTools,
-		LogLevel:     "info",
+		LogLevel:     logLevel,
 		Logger:       logger,
 		Hooks: llm.Hooks{
-			llm.BeforeGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
-				if verbose {
-					fmt.Println("----")
-					fmt.Println("INPUT")
-					fmt.Println(dive.FormatMessages(hookCtx.Messages))
-				}
-			},
 			llm.AfterGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
 				if verbose {
-					fmt.Println("OUTPUT")
-					fmt.Println(dive.FormatMessages([]*llm.Message{hookCtx.Response.Message()}))
+					messages := hookCtx.Messages
+					messages = append(messages, hookCtx.Response.Message())
+					fmt.Println("----")
+					fmt.Println(dive.FormatMessages(messages))
 					fmt.Println("----")
 				}
 			},
 		},
 	})
+
 	team, err := dive.NewTeam(dive.TeamOptions{
 		Name:        "Elite Research Team",
 		Description: "A team of researchers led by a supervisor. The supervisor should delegate work as needed.",
@@ -122,8 +129,8 @@ func main() {
 	defer team.Stop(ctx)
 
 	task := dive.NewTask(dive.TaskOptions{
-		Description:    "Quickly research the history of the internet",
-		ExpectedOutput: "A brief report of the key events and milestones in the history of the internet",
+		Description:    taskDescription,
+		ExpectedOutput: "A brief report on the subject.",
 		OutputFormat:   dive.OutputMarkdown,
 	})
 
@@ -134,7 +141,6 @@ func main() {
 
 	for _, result := range results {
 		fmt.Println("----")
-		fmt.Println("task", result.Task.Name())
 		fmt.Println(result.Content)
 		fmt.Println()
 	}

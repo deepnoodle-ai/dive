@@ -65,6 +65,9 @@ func (t *FirecrawlScraper) Call(ctx context.Context, input string) (string, erro
 		ExcludeTags:     []string{"script", "style", "a", "img", "iframe"},
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "403") {
+			return "Scraping this website is not supported.", nil
+		}
 		return "", err
 	}
 

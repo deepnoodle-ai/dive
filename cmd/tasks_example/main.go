@@ -9,7 +9,6 @@ import (
 
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/logger"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/getstingrai/dive/providers/groq"
 	"github.com/getstingrai/dive/providers/openai"
@@ -40,8 +39,6 @@ func main() {
 		provider = groq.New()
 	}
 
-	logger := logger.NewSlogLogger(nil)
-
 	var theTools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
@@ -71,7 +68,6 @@ func main() {
 		LLM:          provider,
 		Tools:        theTools,
 		LogLevel:     "info",
-		Logger:       logger,
 		Hooks: llm.Hooks{
 			llm.BeforeGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
 				if verbose {

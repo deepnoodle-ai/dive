@@ -1,8 +1,8 @@
-package logger
+package slogger
 
 import (
 	"context"
-	"log/slog"
+	"strings"
 )
 
 // Logger defines the interface for logging within agents.
@@ -40,11 +40,27 @@ func WithLogger(ctx context.Context, logger Logger) context.Context {
 
 func Ctx(ctx context.Context) Logger {
 	if ctx == nil {
-		return NewSlogLogger(slog.Default())
+		return New(DefaultLogLevel)
 	}
 	logger, ok := ctx.Value(loggerKey).(Logger)
 	if !ok {
-		return NewSlogLogger(slog.Default())
+		return New(DefaultLogLevel)
 	}
 	return logger
+}
+
+func LevelFromString(level string) LogLevel {
+	value := strings.ToLower(level)
+	switch value {
+	case "debug":
+		return LevelDebug
+	case "info":
+		return LevelInfo
+	case "warn":
+		return LevelWarn
+	case "error":
+		return LevelError
+	default:
+		return DefaultLogLevel
+	}
 }

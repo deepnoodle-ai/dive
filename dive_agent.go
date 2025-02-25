@@ -4,14 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/logger"
-	"github.com/getstingrai/dive/prompt"
+	"github.com/getstingrai/dive/slogger"
+)
+
+var (
+	DefaultTaskTimeout     = time.Minute * 5
+	DefaultChatTimeout     = time.Minute * 1
+	DefaultTickFrequency   = time.Second * 10
+	DefaultGenerationLimit = 4
 )
 
 var _ Agent = &DiveAgent{}
@@ -22,43 +28,50 @@ type Document struct {
 	Format  OutputFormat
 }
 
+// AgentOptions are used to configure an Agent.
 type AgentOptions struct {
-	Name           string
-	Role           Role
-	LLM            llm.LLM
-	Tools          []llm.Tool
-	MaxActiveTasks int
-	TickFrequency  time.Duration
-	CacheControl   string
-	LogLevel       string
-	Hooks          llm.Hooks
-	Logger         logger.Logger
+	Name            string
+	Role            Role
+	LLM             llm.LLM
+	Tools           []llm.Tool
+	MaxActiveTasks  int
+	TickFrequency   time.Duration
+	TaskTimeout     time.Duration
+	ChatTimeout     time.Duration
+	CacheControl    string
+	LogLevel        string
+	Hooks           llm.Hooks
+	Logger          slogger.Logger
+	GenerationLimit int
 }
 
 // DiveAgent implements the Agent interface.
 type DiveAgent struct {
-	name           string
-	role           Role
-	llm            llm.LLM
-	team           Team
-	running        bool
-	tools          []llm.Tool
-	toolsByName    map[string]llm.Tool
-	isSupervisor   bool
-	isWorker       bool
-	maxActiveTasks int
-	tickFrequency  time.Duration
-	cacheControl   string
-	taskQueue      []*taskState
-	activeTask     *taskState
-	workspace      []*Document
-	ticker         *time.Ticker
-	recentTasks    []*taskState
-	logLevel       string
-	hooks          llm.Hooks
-	logger         logger.Logger
+	name            string
+	role            Role
+	llm             llm.LLM
+	team            Team
+	running         bool
+	tools           []llm.Tool
+	toolsByName     map[string]llm.Tool
+	isSupervisor    bool
+	isWorker        bool
+	maxActiveTasks  int
+	tickFrequency   time.Duration
+	taskTimeout     time.Duration
+	chatTimeout     time.Duration
+	cacheControl    string
+	taskQueue       []*taskState
+	recentTasks     []*taskState
+	activeTask      *taskState
+	workspace       []*Document
+	ticker          *time.Ticker
+	logLevel        string
+	hooks           llm.Hooks
+	logger          slogger.Logger
+	generationLimit int
 
-	// Consolidate all message types into a single channel
+	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
 
 	mutex sync.Mutex
@@ -67,24 +80,55 @@ type DiveAgent struct {
 
 // NewAgent returns a new Agent configured with the given options.
 func NewAgent(opts AgentOptions) *DiveAgent {
-	if opts.MaxActiveTasks == 0 {
+	if opts.MaxActiveTasks <= 0 {
 		opts.MaxActiveTasks = 1
 	}
-	if opts.TickFrequency == 0 {
-		opts.TickFrequency = time.Millisecond * 250
+	if opts.TickFrequency <= 0 {
+		opts.TickFrequency = DefaultTickFrequency
+	}
+	if opts.TaskTimeout <= 0 {
+		opts.TaskTimeout = DefaultTaskTimeout
+	}
+	if opts.ChatTimeout <= 0 {
+		opts.ChatTimeout = DefaultChatTimeout
+	}
+	if opts.GenerationLimit <= 0 {
+		opts.GenerationLimit = DefaultGenerationLimit
+	}
+	if opts.LogLevel == "" {
+		opts.LogLevel = "info"
+	}
+	if opts.Logger == nil {
+		opts.Logger = slogger.New(slogger.LevelFromString(opts.LogLevel))
+	}
+	if opts.LLM == nil {
+		if llm, ok := detectProvider(); ok {
+			opts.LLM = llm
+		} else {
+			panic("no llm provided")
+		}
+	}
+	if opts.Name == "" {
+		if opts.Role.Description != "" {
+			opts.Name = opts.Role.Description
+		} else {
+			opts.Name = randomName()
+		}
 	}
 	a := &DiveAgent{
-		name:           opts.Name,
-		role:           opts.Role,
-		llm:            opts.LLM,
-		maxActiveTasks: opts.MaxActiveTasks,
-		tickFrequency:  opts.TickFrequency,
-		cacheControl:   opts.CacheControl,
-		mailbox:        make(chan interface{}, 64),
-		toolsByName:    make(map[string]llm.Tool),
-		logLevel:       strings.ToLower(opts.LogLevel),
-		hooks:          opts.Hooks,
-		logger:         opts.Logger,
+		name:            opts.Name,
+		llm:             opts.LLM,
+		role:            opts.Role,
+		maxActiveTasks:  opts.MaxActiveTasks,
+		tickFrequency:   opts.TickFrequency,
+		taskTimeout:     opts.TaskTimeout,
+		chatTimeout:     opts.ChatTimeout,
+		generationLimit: opts.GenerationLimit,
+		cacheControl:    opts.CacheControl,
+		hooks:           opts.Hooks,
+		mailbox:         make(chan interface{}, 64),
+		logger:          opts.Logger,
+		logLevel:        strings.ToLower(opts.LogLevel),
 	}
 	var tools []llm.Tool
 	if len(opts.Tools) > 0 {
@@ -95,11 +139,11 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		tools = append(tools, NewAssignWorkTool(a))
 	}
 	a.tools = tools
-	for _, tool := range tools {
-		a.toolsByName[tool.Definition().Name] = tool
-	}
-	if a.logger == nil {
-		a.logger = logger.NewSlogLogger(nil)
+	if len(tools) > 0 {
+		a.toolsByName = make(map[string]llm.Tool, len(tools))
+		for _, tool := range tools {
+			a.toolsByName[tool.Definition().Name] = tool
+		}
 	}
 	return a
 }
@@ -197,11 +241,7 @@ func (a *DiveAgent) Work(ctx context.Context, task *Task) (*Promise, error) {
 		task: task,
 		ch:   make(chan *TaskResult, 1),
 	}
-
-	message := messageWork{
-		task:    task,
-		promise: promise,
-	}
+	message := messageWork{task: task, promise: promise}
 
 	select {
 	case a.mailbox <- message:
@@ -220,9 +260,10 @@ func (a *DiveAgent) Start(ctx context.Context) error {
 	}
 
 	a.running = true
+	a.wg = sync.WaitGroup{}
 	a.wg.Add(1)
 	go a.run()
-	a.Log("agent started", "name", a.name)
+	a.logger.Debug("agent started", "name", a.name)
 	return nil
 }
 
@@ -231,7 +272,7 @@ func (a *DiveAgent) Stop(ctx context.Context) error {
 	defer func() {
 		a.running = false
 		a.mutex.Unlock()
-		a.Log("agent stopped", "name", a.name)
+		a.logger.Debug("agent stopped", "name", a.name)
 	}()
 
 	if !a.running {
@@ -239,10 +280,7 @@ func (a *DiveAgent) Stop(ctx context.Context) error {
 	}
 	done := make(chan error)
 
-	a.mailbox <- messageStop{
-		ctx:  ctx,
-		done: done,
-	}
+	a.mailbox <- messageStop{ctx: ctx, done: done}
 	close(a.mailbox)
 
 	select {
@@ -282,6 +320,7 @@ func (a *DiveAgent) run() error {
 			case messageStop:
 				return a.handleStopMessage(m)
 			}
+			a.doSomeWork()
 		}
 	}
 }
@@ -299,11 +338,12 @@ func (a *DiveAgent) handleEventMessage(event *Event) {
 }
 
 func (a *DiveAgent) handleChatMessage(m messageChat) {
+	// Create a task corresponding to the chat request
 	task := &Task{
-		name:        fmt.Sprintf("chat-%d", time.Now().UnixNano()),
 		kind:        "chat",
+		name:        fmt.Sprintf("chat-%s", petname.Generate(2, "-")),
 		description: fmt.Sprintf("Generate a response to user message: %q", m.message.Text()),
-		timeout:     time.Minute * 1,
+		timeout:     a.chatTimeout,
 	}
 	// Enqueue a corresponding task state
 	a.taskQueue = append(a.taskQueue, &taskState{
@@ -322,15 +362,14 @@ func (a *DiveAgent) handleStopMessage(msg messageStop) error {
 }
 
 func (a *DiveAgent) getSystemPrompt() (string, error) {
-	data := NewAgentTemplateData(a)
-	return executeTemplate(agentSystemPromptTemplate, data)
+	return executeTemplate(agentSystemPromptTemplate, NewAgentTemplateData(a))
 }
 
 func (a *DiveAgent) handleTask(state *taskState) error {
 	task := state.Task
 	timeout := task.Timeout()
 	if timeout == 0 {
-		timeout = time.Minute * 3
+		timeout = a.taskTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -339,48 +378,47 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	if err != nil {
 		return err
 	}
-
 	messages := []*llm.Message{}
 
 	if len(state.Messages) == 0 {
-		if len(a.recentTasks) > 0 {
-			messages = append(messages, llm.NewUserMessage(
-				fmt.Sprintf("For reference, here is an overview of other recent tasks we completed:\n\n%s", a.getRecentTasksHistory())))
+		// We're starting a new task
+		recentTasksMessage, ok := a.getTasksHistoryMessage()
+		if ok {
+			messages = append(messages, recentTasksMessage)
 		}
 		messages = append(messages, llm.NewUserMessage(task.PromptText()))
 	} else {
+		// We're resuming a task
 		messages = append(messages, state.Messages...)
 		messages = append(messages, llm.NewUserMessage("Continue working on the task."))
 	}
 
-	a.Log("handle task",
+	a.logger.Info("handling task",
 		"agent", a.name,
 		"task", task.Name(),
 		"status", state.Status,
-		"description", task.Description(),
-		"prompt_text", task.PromptText(),
+		"truncated_description", TruncateText(task.Description(), 10),
+		"truncated_prompt", TruncateText(task.PromptText(), 10),
 	)
 
+	// Holds the most recent response from the LLM
 	var response *llm.Response
-	generationLimit := 8
 
-	for i := 0; i < generationLimit; i++ {
+	// The loop is used to run and respond to the primary generation request
+	// and then automatically run any tool-use invocations. The first time
+	// through, we submit the primary generation. On subsequent loops, we are
+	// running tool-uses and responding with the results.
+	for i := 0; i < a.generationLimit; i++ {
 		var prefill string
-		if i == generationLimit-1 {
+		if i == a.generationLimit-1 {
 			prefill = "<think>I must respond with my final answer now."
 		} else {
 			prefill = "<think>"
 		}
-		p, err := prompt.New(
-			prompt.WithSystemMessage(systemPrompt),
-			prompt.WithMessage(messages...),
-			prompt.WithMessage(llm.NewAssistantMessage(prefill)),
-		).Build()
-		if err != nil {
-			return err
-		}
+		promptMessages := append(messages, llm.NewAssistantMessage(prefill))
+
 		generateOpts := []llm.Option{
-			llm.WithSystemPrompt(p.System),
+			llm.WithSystemPrompt(systemPrompt),
 			llm.WithCacheControl(a.cacheControl),
 			llm.WithLogLevel(a.logLevel),
 			llm.WithTools(a.tools...),
@@ -391,68 +429,79 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		if a.logger != nil {
 			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 		}
-		response, err = a.llm.Generate(ctx, p.Messages, generateOpts...)
+
+		response, err = a.llm.Generate(ctx, promptMessages, generateOpts...)
 		if err != nil {
 			return err
 		}
 
-		// Mutate first text message response to include opening <think> tag
+		// Mutate first text message response to include the prefill text if
+		// we see the closing </think> tag. The prefill is a behind-the-scenes
+		// behavior for the caller.
 		responseMessage := response.Message()
-		if len(responseMessage.Content) > 0 {
-			for _, content := range responseMessage.Content {
-				// Only insert the opening <think> if we see the closing </think>
-				if content.Type == llm.ContentTypeText && strings.Contains(content.Text, "</think>") {
-					content.Text = prefill + content.Text
-					break
-				}
-			}
-		}
+		addPrefill(responseMessage, prefill)
 
+		// Remember the assistant response message
 		messages = append(messages, responseMessage)
-		if len(response.ToolCalls()) > 0 {
-			var toolResults []*llm.ToolResult
-			for _, toolCall := range response.ToolCalls() {
-				tool, ok := a.toolsByName[toolCall.Name]
-				if !ok {
-					return fmt.Errorf("tool not found: %s", toolCall.Name)
-				} else {
-					result, err := tool.Call(ctx, toolCall.Input)
-					if err != nil {
-						return fmt.Errorf("tool error: %w", err)
-					} else {
-						toolResults = append(toolResults, &llm.ToolResult{
-							ID:     toolCall.ID,
-							Name:   toolCall.Name,
-							Result: result,
-						})
-					}
-				}
-			}
-			if len(toolResults) > 0 {
-				messages = append(messages, llm.NewToolResultMessage(toolResults))
-			}
-		} else {
+
+		// We're done if there are no tool-uses
+		if len(response.ToolCalls()) == 0 {
 			break
 		}
+
+		// Execute tool-uses and accumulate results
+		toolResults := make([]*llm.ToolResult, len(response.ToolCalls()))
+		for i, toolCall := range response.ToolCalls() {
+			tool, ok := a.toolsByName[toolCall.Name]
+			if !ok {
+				return fmt.Errorf("tool call for unknown tool: %q", toolCall.Name)
+			}
+			result, err := tool.Call(ctx, toolCall.Input)
+			if err != nil {
+				return fmt.Errorf("tool call error: %w", err)
+			}
+			toolResults[i] = &llm.ToolResult{
+				ID:     toolCall.ID,
+				Name:   toolCall.Name,
+				Result: result,
+			}
+		}
+
+		// Capture results in a new message to send on next loop iteration
+		messages = append(messages, llm.NewToolResultMessage(toolResults))
 	}
 
-	state.Messages = messages
-	sr := ParseStructuredResponse(response.Message().Text())
+	// Update task state based on the last response from the LLM. It should
+	// contain thinking, status, and the primary output.
+	taskResponse := ParseStructuredResponse(response.Message().Text())
 	if state.Output == "" {
-		state.Output = sr.Text
+		state.Output = taskResponse.Text
 	} else {
-		state.Output = fmt.Sprintf("%s\n\n%s", state.Output, sr.Text)
+		state.Output = fmt.Sprintf("%s\n\n%s", state.Output, taskResponse.Text)
 	}
-	state.Reasoning = sr.Thinking
-	state.StatusDescription = sr.StatusDescription
-	state.Status = sr.Status()
+	state.Reasoning = taskResponse.Thinking
+	state.StatusDescription = taskResponse.StatusDescription
+	state.Messages = messages
 
-	a.Log("task updated",
+	// For now, if the status description is empty, let's assume it is complete.
+	// We may need to make this configurable in the future.
+	if taskResponse.StatusDescription == "" {
+		state.Status = TaskStatusCompleted
+		a.logger.Warn("defaulting to completed status",
+			"agent", a.name,
+			"task", task.Name(),
+			"output", state.Output,
+		)
+	} else {
+		state.Status = taskResponse.Status()
+	}
+
+	a.logger.Info("task updated",
 		"agent", a.name,
 		"task", task.Name(),
 		"status", state.Status,
 		"status_description", state.StatusDescription,
-		"output", state.Output,
+		"truncated_output", TruncateText(state.Output, 10),
 	)
 	return nil
 }
@@ -469,7 +518,7 @@ func (a *DiveAgent) doSomeWork() {
 			a.activeTask.Started = time.Now()
 		}
 		a.activeTask.Suspended = false
-		a.logger.Info("task activated",
+		a.logger.Debug("task activated",
 			"agent", a.name,
 			"task", a.activeTask.Task.Name(),
 			"description", a.activeTask.Task.Description(),
@@ -503,7 +552,7 @@ func (a *DiveAgent) doSomeWork() {
 	switch a.activeTask.Status {
 	case TaskStatusCompleted:
 		duration := time.Since(a.activeTask.Started)
-		a.logger.Info("task completed",
+		a.logger.Debug("task completed",
 			"agent", a.name,
 			"task", a.activeTask.Task.Name(),
 			"duration", duration.Seconds(),
@@ -525,7 +574,7 @@ func (a *DiveAgent) doSomeWork() {
 		a.activeTask = nil
 
 	case TaskStatusPaused:
-		a.logger.Info("task paused",
+		a.logger.Debug("task paused",
 			"agent", a.name,
 			"task", a.activeTask.Task.Name(),
 		)
@@ -534,7 +583,7 @@ func (a *DiveAgent) doSomeWork() {
 		a.activeTask = nil
 
 	case TaskStatusBlocked, TaskStatusError, TaskStatusInvalid:
-		a.logger.Info("task error",
+		a.logger.Warn("task error",
 			"agent", a.name,
 			"task", a.activeTask.Task.Name(),
 			"status", a.activeTask.Status,
@@ -550,7 +599,7 @@ func (a *DiveAgent) doSomeWork() {
 		a.activeTask = nil
 
 	case TaskStatusActive:
-		a.logger.Info("task remains active",
+		a.logger.Debug("task remains active",
 			"agent", a.name,
 			"task", a.activeTask.Task.Name(),
 			"status", a.activeTask.Status,
@@ -560,27 +609,32 @@ func (a *DiveAgent) doSomeWork() {
 	}
 }
 
+// Remember the last 10 tasks that were worked on, so that the agent can
+// use them as context for future tasks.
 func (a *DiveAgent) rememberTask(task *taskState) {
-	// Remember the last 10 tasks that were worked on, so that the agent can
-	// use them as context for future tasks.
 	a.recentTasks = append(a.recentTasks, task)
 	if len(a.recentTasks) > 10 {
 		a.recentTasks = a.recentTasks[1:]
 	}
 }
 
-func (a *DiveAgent) getRecentTasksHistory() string {
-	var history []string
-	for _, status := range a.recentTasks {
+// Returns a block of text that summarizes the most recent tasks worked on by
+// the agent. The text is truncated if needed to avoid using a lot of tokens.
+func (a *DiveAgent) getTasksHistory() string {
+	if len(a.recentTasks) == 0 {
+		return ""
+	}
+	history := make([]string, len(a.recentTasks))
+	for i, status := range a.recentTasks {
 		title := status.Task.Name()
 		if title == "" {
 			title = status.Task.Description()
 		}
-		title = TruncateText(title, 8)
-		output := replaceNewlines(status.Output)
-		history = append(history, fmt.Sprintf("- task: %q status: %q output: %q\n",
-			title, status.Status, TruncateText(output, 8),
-		))
+		history[i] = fmt.Sprintf("- task: %q status: %q output: %q\n",
+			TruncateText(title, 8),
+			status.Status,
+			TruncateText(replaceNewlines(status.Output), 8),
+		)
 	}
 	result := strings.Join(history, "\n")
 	if len(result) > 200 {
@@ -589,90 +643,21 @@ func (a *DiveAgent) getRecentTasksHistory() string {
 	return result
 }
 
+// Returns a user message that contains a summary of the most recent tasks
+// worked on by the agent.
+func (a *DiveAgent) getTasksHistoryMessage() (*llm.Message, bool) {
+	history := a.getTasksHistory()
+	if history == "" {
+		return nil, false
+	}
+	text := fmt.Sprintf("Recently completed tasks:\n\n%s", history)
+	return llm.NewUserMessage(text), true
+}
+
 func (a *DiveAgent) getWorkspaceState() string {
 	var blobs []string
 	for _, doc := range a.workspace {
 		blobs = append(blobs, fmt.Sprintf("<document name=%q>\n%s\n</document>", doc.Name, doc.Content))
 	}
 	return strings.Join(blobs, "\n\n")
-}
-
-type AgentTemplateData struct {
-	Name      string
-	Role      string
-	Team      *Team
-	IsManager bool
-	IsWorker  bool
-}
-
-func TruncateText(text string, maxWords int) string {
-	// Split into lines while preserving newlines
-	lines := strings.Split(text, "\n")
-	wordCount := 0
-	var result []string
-	// Process each line
-	for _, line := range lines {
-		words := strings.Fields(line)
-		// If we haven't reached maxWords, add words from this line
-		if wordCount < maxWords {
-			remaining := maxWords - wordCount
-			if len(words) <= remaining {
-				// Add entire line if it fits
-				if len(words) > 0 {
-					result = append(result, line)
-				} else {
-					// Preserve empty lines
-					result = append(result, "")
-				}
-				wordCount += len(words)
-			} else {
-				// Add partial line up to remaining words
-				result = append(result, strings.Join(words[:remaining], " "))
-				wordCount = maxWords
-			}
-		}
-	}
-	truncated := strings.Join(result, "\n")
-	if wordCount >= maxWords {
-		truncated += "..."
-	}
-	return truncated
-}
-
-var newlinesRegex = regexp.MustCompile(`\n+`)
-
-func replaceNewlines(text string) string {
-	return newlinesRegex.ReplaceAllString(text, "<br>")
-}
-
-type agentTemplateData struct {
-	*DiveAgent
-	DelegateTargets []Agent
-}
-
-func NewAgentTemplateData(agent *DiveAgent) *agentTemplateData {
-	var delegateTargets []Agent
-	if agent.role.IsSupervisor {
-		if agent.role.Subordinates == nil {
-			if agent.team != nil {
-				// Unspecified means we can delegate to all non-supervisors
-				for _, a := range agent.team.Agents() {
-					if !a.Role().IsSupervisor {
-						delegateTargets = append(delegateTargets, a)
-					}
-				}
-			}
-		} else if agent.team != nil {
-			for _, name := range agent.role.Subordinates {
-				other, found := agent.team.GetAgent(name)
-				if found {
-					delegateTargets = append(delegateTargets, other)
-				}
-			}
-		}
-	}
-	return &agentTemplateData{
-		DiveAgent:       agent,
-		DelegateTargets: delegateTargets,
-	}
 }
