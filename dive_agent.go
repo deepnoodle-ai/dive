@@ -361,8 +361,9 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	)
 
 	var response *llm.Response
+	generationLimit := 8
 
-	for i := 0; i < 8; i++ {
+	for i := 0; i < generationLimit; i++ {
 		p, err := prompt.New(
 			prompt.WithSystemMessage(systemPrompt),
 			prompt.WithMessage(messages...),
@@ -373,9 +374,11 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		}
 		generateOpts := []llm.Option{
 			llm.WithSystemPrompt(p.System),
-			llm.WithTools(a.tools...),
 			llm.WithCacheControl(a.cacheControl),
 			llm.WithLogLevel(a.logLevel),
+		}
+		if i == 0 || i < generationLimit-1 {
+			generateOpts = append(generateOpts, llm.WithTools(a.tools...))
 		}
 		if a.hooks != nil {
 			generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
