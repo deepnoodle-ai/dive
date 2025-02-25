@@ -1,3 +1,6 @@
+
+<img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
+
 # Dive - AI Agent Framework
 
 ## Introduction
@@ -7,10 +10,26 @@ actually get things done. Whether you need a single specialized agent or a
 collaborative team of AI workers, Dive makes it easy to create, orchestrate, and
 manage AI agents powered by leading LLM providers.
 
-Dive embraces the actor model of concurrency, allowing each agent to operate
-independently with its own run loop while communicating through a clean
-message-passing interface. This approach enables complex agent behaviors while
-maintaining a simple, intuitive API for developers.
+This approach enables complex agent behaviors while maintaining a simple,
+intuitive API for developers.
+
+Dive can easily be embedded into existing Go applications, or run as a
+standalone process.
+
+## Project Status
+
+**⚠️ Early Development Stage ⚠️**
+
+Dive is currently in its early development stages. While the core functionality
+is in place, the project is still evolving rapidly.
+
+- **Not recommended for production use** at this time
+- **Breaking changes will happen** as the API matures
+- **Feedback is highly valued** on concepts, APIs, and usability
+
+We welcome your input! Please reach out in
+[GitHub Discussions](https://github.com/getstingrai/dive/discussions) with
+questions, suggestions, or feedback.
 
 ## Features
 
@@ -34,10 +53,11 @@ go get github.com/getstingrai/dive
 ### Prerequisites
 
 - Go 1.20 or higher
-- API keys for the LLM providers you plan to use (Anthropic, OpenAI, and/or Groq)
+- API keys for the LLM providers you plan to use (Anthropic, OpenAI, Groq, etc.)
 - API keys for any external tools you plan to use (Google Search, Firecrawl, etc.)
 
 ### Environment Setup
+
 Set up your environment variables for the LLM providers and tools:
 
 ```bash
@@ -53,6 +73,7 @@ export FIRECRAWL_API_KEY="your-firecrawl-api-key"
 ```
 
 ## Quick Start
+
 Get started with Dive in just a few lines of code:
 
 ```go
@@ -158,7 +179,6 @@ tools to interact with the outside world.
 Key aspects of agents include:
 
 * **Independent Operation**: Each agent runs in its own goroutine with a dedicated run loop
-* **Message-Based Communication**: Agents communicate through a clean message-passing interface
 * **Role-Based Specialization**: Define specific roles and responsibilities for each agent
 * **Tool Access**: Equip agents with the tools they need for their specific tasks
 * **State Management**: Agents maintain their own state and context across interactions
@@ -167,30 +187,26 @@ Creating an agent is straightforward:
 
 ```go
 agent := dive.NewAgent(dive.AgentOptions{
-    Name: "analyst",
-    Role: &dive.Role{
-        Description: "Financial Analyst",
-        AcceptsWork: []string{"analysis", "reporting"},
-    },
+    Name:         "analyst",
+    Role:         &dive.Role{Description: "Financial Analyst"},
     LLM:          anthropic.New(),
-    CacheControl: "ephemeral",
     Tools:        []dive.Tool{tools.NewCalculator(), tools.NewDataFetcher()},
 })
 ```
 
 ### Teams
+
 Teams allow multiple agents to collaborate on complex tasks. A team consists of
 a group of agents, potentially with different roles and capabilities, working
 together toward a common goal.
 
 Teams can have hierarchical structures, with supervisor agents delegating tasks
-to subordinate agents based on their specialties. This enables complex workflows
-where different parts of a task are handled by the most appropriate agent.
+to subordinate agents based on their specialties.
 
 Key features of teams include:
 
 * **Hierarchical Structure**: Create teams with supervisors and subordinates
-* **Task Delegation**: Supervisors can assign tasks to the most appropriate agent
+* **Task Assignment**: Supervisors can assign tasks to the most appropriate agent
 * **Shared Context**: Team members can share context and build on each other's work
 * **Parallel Execution**: Multiple agents can work on different tasks simultaneously
 * **Coordinated Workflows**: Create complex workflows with dependencies between tasks
@@ -229,7 +245,20 @@ agents:
     tools: ['calculator', 'data_fetcher']
 ```
 
+### Execution Model
+
+Dive embraces the actor model of concurrency, providing a robust foundation for
+building and scaling complex agent systems. This execution model enables agents
+to work concurrently on different tasks while maintaining strict isolation
+between them.
+
+The actor-inspired design is particularly well-suited for AI agent systems,
+where each agent needs to maintain its own context, make independent decisions,
+and collaborate with others through well-defined interfaces.
+
 ### Events
+
+**Disclaimer:** This is not fully implemented yet.
 
 Events provide a way to notify agents about changes or occurrences that might
 require their attention. Events can be used to trigger agent actions, provide
@@ -820,24 +849,13 @@ task := dive.NewTask(dive.TaskOptions{
 For YAML configuration, see the [examples/README.md](examples/README.md) file
 for detailed information on the YAML structure and options.
 
-## Testing
-
-Dive includes a comprehensive test suite to ensure reliability and correctness.
-The framework also provides utilities and interfaces that aid you in testing
-your own agent implementations.
-
-### Running Tests
-
-To run the test suite:
-
-```bash
-go test -v ./...
-```
-
 ## Contributing
 
 We welcome contributions to Dive! Whether you're fixing bugs, adding features,
 improving documentation, or spreading the word, your help is appreciated.
+
+At this early stage, we're particularly interested in feedback on the concepts,
+API design, usability, and any use cases you'd like to see supported.
 
 ## FAQ
 
@@ -879,20 +897,13 @@ llm := anthropic.New(
 
 ### Can I use Dive in production?
 
-Yes, Dive is designed for production use. It includes features like:
-- Robust error handling and recovery
-- Configurable timeouts and retry mechanisms
-- Comprehensive logging
-- Flexible caching options
-- Thorough test coverage
+No, Dive is not recommended for production use at this time. As mentioned in the
+Project Status section, Dive is in its early development stages and breaking
+changes will occur as the API matures.
 
-### How do I debug agent behavior?
-
-Dive provides several debugging tools:
-1. Enable verbose logging to see detailed agent activities
-2. Use the conversation logger to record agent interactions
-3. Set timeouts and iteration limits to prevent runaway processes
-4. Examine task results and error messages
+We recommend using it for experimentation, prototyping, and providing feedback
+during this early stage. Once the project reaches a more stable state, we'll
+provide clear guidance on production readiness.
 
 ### How can I extend Dive with custom functionality?
 
@@ -904,11 +915,8 @@ Dive is designed to be extensible:
 
 ### What are the resource requirements?
 
-Resource requirements depend on your specific use case, but in general:
-- Memory: 50-100MB base + memory for each active agent
-- CPU: Minimal for the framework itself; most processing happens in the LLM APIs
-- Network: Requires internet access for LLM API calls
-- Disk: Minimal unless you're storing large amounts of task results
+Dive uses remote LLMs from the leading AI providers, so local resource usage is
+minimal. Thousands of agents can run in parallel on a single machine.
 
 ### Is there a hosted or managed version available?
 
