@@ -89,7 +89,7 @@ import (
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/getstingrai/dive/tools"
-    "github.com/getstingrai/dive/tools/google"
+	"github.com/getstingrai/dive/tools/google"
 )
 
 func main() {
@@ -905,3 +905,8 @@ minimal. Thousands of agents can run in parallel on a single machine.
 
 Not at this time. Dive is provided as an open-source framework that you can
 self-host and integrate into your own applications.
+
+## Who is Behind Dive?
+
+Dive is developed by [Stingrai](https://www.getstingrai.com), a company building
+products for competitive intelligence, market research, and product messaging.
