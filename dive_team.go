@@ -27,7 +27,6 @@ type TeamOptions struct {
 	Name         string
 	Description  string
 	Agents       []Agent
-	Tasks        []*Task
 	LogDirectory string
 }
 
@@ -37,11 +36,8 @@ func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 		name:        opts.Name,
 		description: opts.Description,
 		agents:      opts.Agents,
-		tasks:       make(map[string]*Task, len(opts.Tasks)),
+		tasks:       make(map[string]*Task),
 		state:       make(map[string]interface{}),
-	}
-	if err := t.addTasks(opts.Tasks...); err != nil {
-		return nil, err
 	}
 	for _, agent := range t.agents {
 		if err := agent.Join(t); err != nil {
