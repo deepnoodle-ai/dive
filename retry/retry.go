@@ -9,7 +9,7 @@ import (
 
 const (
 	MaxRetries = 3
-	BaseWait   = 1 * time.Second
+	BaseWait   = 2 * time.Second
 )
 
 type retryConfig struct {

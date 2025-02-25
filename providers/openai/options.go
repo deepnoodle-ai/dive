@@ -33,3 +33,9 @@ func WithModel(model string) Option {
 		p.model = model
 	}
 }
+
+func WithSystemRole(systemRole string) Option {
+	return func(p *Provider) {
+		p.systemRole = systemRole
+	}
+}

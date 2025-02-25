@@ -2,11 +2,14 @@ package dive
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/logger"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/stretchr/testify/require"
 )
@@ -35,9 +38,11 @@ func TestAgentChat(t *testing.T) {
 	defer cancel()
 
 	agent := NewAgent(AgentOptions{
-		Name: "test",
-		Role: Role{Description: "test"},
-		LLM:  anthropic.New(),
+		Name:     "test",
+		Role:     Role{Description: "test"},
+		LLM:      anthropic.New(),
+		Logger:   logger.NewSlogLogger(nil),
+		LogLevel: "info",
 	})
 
 	err := agent.Start(ctx)
@@ -88,4 +93,96 @@ func TestAgentTask(t *testing.T) {
 		}
 	}
 	require.Greater(t, matches, 0)
+}
+
+func TestAgentSystemPromptWithoutTeam(t *testing.T) {
+	tests := []struct {
+		name     string
+		options  AgentOptions
+		expected string
+	}{
+		{
+			name: "basic agent",
+			options: AgentOptions{
+				Name: "TestAgent",
+				Role: Role{Description: "You are a research assistant"},
+			},
+			expected: "fixtures/agent-system-prompt-1.txt",
+		},
+		{
+			name: "supervisor agent",
+			options: AgentOptions{
+				Name: "Lead Researcher",
+				Role: Role{
+					Description:  "You supervise a research team",
+					IsSupervisor: true,
+				},
+			},
+			expected: "fixtures/agent-system-prompt-2.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create agent with test options
+			agent := NewAgent(tt.options)
+
+			// Get the system prompt
+			systemPrompt, err := agent.getSystemPrompt()
+			require.NoError(t, err)
+
+			fmt.Println(systemPrompt)
+
+			// Read expected prompt from file
+			expected, err := os.ReadFile(tt.expected)
+			require.NoError(t, err)
+
+			require.Equal(t, string(expected), systemPrompt)
+		})
+	}
+}
+
+func TestAgentSystemPromptWithTeam(t *testing.T) {
+	team, err := NewTeam(TeamOptions{
+		Name:        "Research Team",
+		Description: "A team of researchers",
+		Agents: []Agent{
+			NewAgent(AgentOptions{
+				Name: "Supervisor",
+				Role: Role{
+					Description:  "You are a research lead",
+					IsSupervisor: true,
+				},
+			}),
+			NewAgent(AgentOptions{
+				Name: "Researcher",
+				Role: Role{
+					Description:  "You are a research assistant",
+					IsSupervisor: false,
+				},
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	supervisorAgent, found := team.GetAgent("Supervisor")
+	require.True(t, found)
+	require.True(t, supervisorAgent.Role().IsSupervisor)
+
+	researcherAgent, found := team.GetAgent("Researcher")
+	require.True(t, found)
+	require.False(t, researcherAgent.Role().IsSupervisor)
+
+	supervisor, ok := supervisorAgent.(*DiveAgent)
+	require.True(t, ok)
+
+	systemPrompt, err := supervisor.getSystemPrompt()
+	require.NoError(t, err)
+
+	fmt.Println(systemPrompt)
+
+	expected, err := os.ReadFile("fixtures/agent-system-prompt-3.txt")
+	require.NoError(t, err)
+
+	require.Equal(t, string(expected), systemPrompt)
 }

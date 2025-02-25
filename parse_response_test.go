@@ -16,45 +16,45 @@ func TestParseResponseText(t *testing.T) {
 			name:  "only thinking tag",
 			input: `<think>Ok, let me see</think>`,
 			expected: StructuredResponse{
-				Thinking: "Ok, let me see",
-				Text:     "",
-				Status:   "",
+				Thinking:          "Ok, let me see",
+				Text:              "",
+				StatusDescription: "",
 			},
 		},
 		{
 			name:  "thinking and response text",
 			input: `<think>Processing request</think>Here is the answer`,
 			expected: StructuredResponse{
-				Thinking: "Processing request",
-				Text:     "Here is the answer",
-				Status:   "",
+				Thinking:          "Processing request",
+				Text:              "Here is the answer",
+				StatusDescription: "",
 			},
 		},
 		{
 			name:  "all tags with content",
 			input: `<think>Analyzing</think><status>Working</status>Processing complete`,
 			expected: StructuredResponse{
-				Thinking: "Analyzing",
-				Text:     "Processing complete",
-				Status:   "Working",
+				Thinking:          "Analyzing",
+				Text:              "Processing complete",
+				StatusDescription: "Working",
 			},
 		},
 		{
 			name:  "empty input",
 			input: "",
 			expected: StructuredResponse{
-				Thinking: "",
-				Text:     "",
-				Status:   "",
+				Thinking:          "",
+				Text:              "",
+				StatusDescription: "",
 			},
 		},
 		{
 			name:  "only status tag",
 			input: `<status>In Progress</status>`,
 			expected: StructuredResponse{
-				Thinking: "",
-				Text:     "",
-				Status:   "In Progress",
+				Thinking:          "",
+				Text:              "",
+				StatusDescription: "In Progress",
 			},
 		},
 		{
@@ -64,27 +64,27 @@ func TestParseResponseText(t *testing.T) {
 multiline
 response`,
 			expected: StructuredResponse{
-				Thinking: "Thinking deeply",
-				Text:     "Here is the\nmultiline\nresponse",
-				Status:   "Processing",
+				Thinking:          "Thinking deeply",
+				Text:              "Here is the\nmultiline\nresponse",
+				StatusDescription: "Processing",
 			},
 		},
 		{
 			name:  "bad status tag",
 			input: `<status>Hmm`,
 			expected: StructuredResponse{
-				Thinking: "",
-				Text:     "<status>Hmm",
-				Status:   "",
+				Thinking:          "",
+				Text:              "<status>Hmm",
+				StatusDescription: "",
 			},
 		},
 		{
 			name:  "bad think tag",
 			input: `<think>Hmm`,
 			expected: StructuredResponse{
-				Thinking: "",
-				Text:     "<think>Hmm",
-				Status:   "",
+				Thinking:          "",
+				Text:              "<think>Hmm",
+				StatusDescription: "",
 			},
 		},
 	}

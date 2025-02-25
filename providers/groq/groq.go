@@ -45,6 +45,7 @@ func New(opts ...Option) *Provider {
 		openai.WithEndpoint(p.endpoint),
 		openai.WithMaxTokens(p.maxTokens),
 		openai.WithModel(p.model),
+		openai.WithSystemRole("system"),
 	)
 	p.Provider = oai
 	return p

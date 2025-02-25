@@ -20,7 +20,9 @@ const (
 	TaskStatusActive    TaskStatus = "active"
 	TaskStatusPaused    TaskStatus = "paused"
 	TaskStatusCompleted TaskStatus = "completed"
+	TaskStatusBlocked   TaskStatus = "blocked"
 	TaskStatusError     TaskStatus = "error"
+	TaskStatusInvalid   TaskStatus = "invalid"
 )
 
 // TaskResult holds the output of a completed task

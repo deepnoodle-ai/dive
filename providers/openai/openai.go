@@ -20,25 +20,28 @@ var (
 	DefaultModel            = "gpt-4o"
 	DefaultMessagesEndpoint = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens        = 4096
+	DefaultSystemRole       = "developer"
 )
 
 var _ llm.LLM = &Provider{}
 
 type Provider struct {
-	apiKey    string
-	endpoint  string
-	model     string
-	maxTokens int
-	client    *http.Client
+	apiKey     string
+	endpoint   string
+	model      string
+	systemRole string
+	maxTokens  int
+	client     *http.Client
 }
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:    os.Getenv("OPENAI_API_KEY"),
-		endpoint:  DefaultMessagesEndpoint,
-		model:     DefaultModel,
-		maxTokens: DefaultMaxTokens,
-		client:    http.DefaultClient,
+		apiKey:     os.Getenv("OPENAI_API_KEY"),
+		endpoint:   DefaultMessagesEndpoint,
+		model:      DefaultModel,
+		maxTokens:  DefaultMaxTokens,
+		client:     http.DefaultClient,
+		systemRole: DefaultSystemRole,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -114,7 +117,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	if config.SystemPrompt != "" {
 		reqBody.Messages = append([]Message{{
-			Role:    "system",
+			Role:    p.systemRole,
 			Content: config.SystemPrompt,
 		}}, reqBody.Messages...)
 	}
@@ -140,13 +143,19 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode == 429 {
+				if config.Logger != nil {
+					config.Logger.Warn("rate limit exceeded",
+						"status", resp.StatusCode, "body", string(body))
+				}
+			}
 			return providers.NewError(resp.StatusCode, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxRetries(5))
+	}, retry.WithMaxRetries(6))
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +242,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 
 	if config.SystemPrompt != "" {
 		reqBody.Messages = append([]Message{{
-			Role:    "system",
+			Role:    p.systemRole,
 			Content: config.SystemPrompt,
 		}}, reqBody.Messages...)
 	}
@@ -276,14 +285,19 @@ func (p *Provider) SupportsStreaming() bool {
 func convertMessages(messages []*llm.Message) ([]Message, error) {
 	var result []Message
 	for _, msg := range messages {
-		outMsg := Message{Role: strings.ToLower(string(msg.Role))}
+		role := strings.ToLower(string(msg.Role))
+
+		// Group all tool use content blocks into a single message
+		var toolCalls []ToolCall
+		var textContent string
+		var hasToolUse bool
+		var hasToolResult bool
+
+		// First pass: collect all tool use content blocks and check for tool results
 		for _, c := range msg.Content {
-			switch c.Type {
-			case llm.ContentTypeText:
-				outMsg.Content += c.Text
-			case llm.ContentTypeToolUse:
-				outMsg.Content = ""
-				outMsg.ToolCalls = append(outMsg.ToolCalls, ToolCall{
+			if c.Type == llm.ContentTypeToolUse {
+				hasToolUse = true
+				toolCalls = append(toolCalls, ToolCall{
 					ID:   c.ID,
 					Type: "function",
 					Function: ToolCallFunction{
@@ -291,15 +305,44 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 						Arguments: string(c.Input),
 					},
 				})
-			case llm.ContentTypeToolResult:
-				outMsg.Role = "tool"
-				outMsg.Content = c.Text
-				outMsg.ToolCallID = c.ToolUseID
-			default:
-				return nil, fmt.Errorf("unsupported content type: %s", c.Type)
+			} else if c.Type == llm.ContentTypeText {
+				textContent = c.Text
+			} else if c.Type == llm.ContentTypeToolResult {
+				hasToolResult = true
 			}
 		}
-		result = append(result, outMsg)
+
+		// Create a single message for all tool use content blocks
+		if hasToolUse {
+			result = append(result, Message{
+				Role:      role,
+				Content:   textContent, // Can be empty for pure tool use messages
+				ToolCalls: toolCalls,
+			})
+		}
+
+		// Process non-tool-use content blocks
+		if !hasToolUse || hasToolResult {
+			for _, c := range msg.Content {
+				switch c.Type {
+				case llm.ContentTypeText:
+					if !hasToolUse { // Only add text content if not already added with tool calls
+						result = append(result, Message{Role: role, Content: c.Text})
+					}
+				case llm.ContentTypeToolResult:
+					// Each tool result goes in its own message
+					result = append(result, Message{
+						Role:       "tool",
+						Content:    c.Text,
+						ToolCallID: c.ToolUseID,
+					})
+				case llm.ContentTypeToolUse:
+					// Already handled above
+				default:
+					return nil, fmt.Errorf("unsupported content type: %s", c.Type)
+				}
+			}
+		}
 	}
 	return result, nil
 }

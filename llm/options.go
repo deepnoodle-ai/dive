@@ -3,6 +3,8 @@ package llm
 import (
 	"net/http"
 	"strings"
+
+	"github.com/getstingrai/dive/logger"
 )
 
 const CacheControlEphemeral = "ephemeral"
@@ -23,6 +25,7 @@ type Config struct {
 	LogLevel     string
 	Hooks        Hooks
 	Client       *http.Client
+	Logger       logger.Logger
 }
 
 // WithModel sets the LLM model for the generation.
@@ -42,6 +45,13 @@ func WithLogLevel(logLevel string) Option {
 			value = "INFO"
 		}
 		config.LogLevel = value
+	}
+}
+
+// WithLogger sets the logger.
+func WithLogger(logger logger.Logger) Option {
+	return func(config *Config) {
+		config.Logger = logger
 	}
 }
 

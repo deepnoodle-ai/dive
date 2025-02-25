@@ -1,4 +1,4 @@
-package dive
+package logger
 
 import (
 	"context"
@@ -28,7 +28,7 @@ type Logger interface {
 type contextKey string
 
 const (
-	loggerKey contextKey = "agents.logger"
+	loggerKey contextKey = "dive.logger"
 )
 
 func WithLogger(ctx context.Context, logger Logger) context.Context {
@@ -38,7 +38,7 @@ func WithLogger(ctx context.Context, logger Logger) context.Context {
 	return context.WithValue(ctx, loggerKey, logger)
 }
 
-func LoggerFromCtx(ctx context.Context) Logger {
+func Ctx(ctx context.Context) Logger {
 	if ctx == nil {
 		return NewSlogLogger(slog.Default())
 	}

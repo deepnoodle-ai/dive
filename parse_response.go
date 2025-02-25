@@ -5,9 +5,34 @@ import (
 )
 
 type StructuredResponse struct {
-	Thinking string
-	Text     string
-	Status   string
+	Thinking          string
+	Text              string
+	StatusDescription string
+}
+
+func (sr StructuredResponse) Status() TaskStatus {
+	fields := strings.Fields(sr.StatusDescription)
+	if len(fields) == 0 {
+		return TaskStatusInvalid
+	}
+	// Find the first matching status
+	for _, field := range fields {
+		value := strings.TrimPrefix(field, "\"")
+		value = strings.TrimSuffix(value, "\"")
+		switch value {
+		case "active":
+			return TaskStatusActive
+		case "paused":
+			return TaskStatusPaused
+		case "completed":
+			return TaskStatusCompleted
+		case "blocked":
+			return TaskStatusBlocked
+		case "error":
+			return TaskStatusError
+		}
+	}
+	return TaskStatusInvalid
 }
 
 func ParseStructuredResponse(text string) StructuredResponse {
@@ -36,8 +61,8 @@ func ParseStructuredResponse(text string) StructuredResponse {
 	response := strings.TrimSpace(workingText)
 
 	return StructuredResponse{
-		Thinking: thinking,
-		Text:     response,
-		Status:   reportedStatus,
+		Thinking:          thinking,
+		Text:              response,
+		StatusDescription: reportedStatus,
 	}
 }

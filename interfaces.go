@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"strings"
 
 	"github.com/getstingrai/dive/llm"
 )
@@ -15,9 +16,28 @@ type Event struct {
 type Role struct {
 	Description   string
 	IsSupervisor  bool
+	Subordinates  []string
 	AcceptsChats  bool
 	AcceptsEvents []string
 	AcceptsWork   []string
+}
+
+func (r Role) String() string {
+	var lines []string
+	result := strings.TrimSpace(r.Description)
+	if result != "" {
+		if !strings.HasSuffix(result, ".") {
+			result += "."
+		}
+		lines = append(lines, result)
+	}
+	if r.IsSupervisor {
+		lines = append(lines, "You are a supervisor. You can assign work to other agents.")
+	}
+	if len(lines) > 0 {
+		result = strings.Join(lines, "\n\n")
+	}
+	return result
 }
 
 // Team is a collection of agents that work together to complete tasks

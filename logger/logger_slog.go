@@ -1,4 +1,4 @@
-package dive
+package logger
 
 import (
 	"log/slog"

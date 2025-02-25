@@ -25,7 +25,7 @@ func TestHelloWorldStream(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 	stream, err := provider.Stream(ctx, []*llm.Message{
-		llm.NewUserMessage("count to 10"),
+		llm.NewUserMessage("count to 10. respond with the integers only, separated by spaces."),
 	})
 	require.NoError(t, err)
 
@@ -43,13 +43,20 @@ func TestHelloWorldStream(t *testing.T) {
 	for _, event := range events {
 		switch event.Type {
 		case llm.EventContentBlockDelta:
-			numbers := strings.Fields(event.Delta.Text)
+			numbers := strings.FieldsFunc(event.Delta.Text, func(r rune) bool {
+				return r == '\n' || r == ' '
+			})
 			texts = append(texts, numbers...)
 			finalText = event.AccumulatedText
 		}
 	}
-	require.Equal(t, "1\n2\n3\n4\n5\n6\n7\n8\n9\n10", finalText)
-	require.Equal(t, "1\n2\n3\n4\n5\n6\n7\n8\n9\n10", strings.Join(texts, "\n"))
+
+	expectedOutput := "1 2 3 4 5 6 7 8 9 10"
+	normalizedFinalText := strings.Join(strings.Fields(finalText), " ")
+	normalizedTexts := strings.Join(texts, " ")
+
+	require.Equal(t, expectedOutput, normalizedFinalText)
+	require.Equal(t, expectedOutput, normalizedTexts)
 }
 
 func addFunc(ctx context.Context, input string) (string, error) {

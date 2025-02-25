@@ -7,18 +7,18 @@ import (
 )
 
 type taskState struct {
-	Task           *Task
-	Promise        *Promise
-	Status         TaskStatus
-	Iterations     int
-	Started        time.Time
-	Output         string
-	Reasoning      string
-	ReportedStatus string
-	Messages       []*llm.Message
-	Suspended      bool
-	ChanResponse   chan *llm.Response
-	ChanError      chan error
+	Task              *Task
+	Promise           *Promise
+	Status            TaskStatus
+	Iterations        int
+	Started           time.Time
+	Output            string
+	Reasoning         string
+	StatusDescription string
+	Messages          []*llm.Message
+	Suspended         bool
+	ChanResponse      chan *llm.Response
+	ChanError         chan error
 }
 
 func (s *taskState) String() string {

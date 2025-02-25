@@ -143,13 +143,19 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode == 429 {
+				if config.Logger != nil {
+					config.Logger.Warn("rate limit exceeded",
+						"status", resp.StatusCode, "body", string(body))
+				}
+			}
 			return providers.NewError(resp.StatusCode, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxRetries(5))
+	}, retry.WithMaxRetries(6))
 	if err != nil {
 		return nil, err
 	}

@@ -19,9 +19,11 @@ import (
 )
 
 func main() {
+	var verbose bool
 	var providerName, modelName string
 	flag.StringVar(&providerName, "provider", "anthropic", "provider to use")
 	flag.StringVar(&modelName, "model", "", "model to use")
+	flag.BoolVar(&verbose, "verbose", false, "verbose output")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -42,21 +44,28 @@ func main() {
 	}
 
 	a := dive.NewAgent(dive.AgentOptions{
-		Name:         "test",
-		Role:         dive.Role{Description: "test"},
+		Name: "Dr. Smith",
+		Role: dive.Role{
+			Description: `
+You are a virtual doctor for role-playing purposes only. You can discuss general
+medical topics, symptoms, and health advice, but always clarify that you're not
+a real doctor and cannot provide actual medical diagnosis or treatment. Refuse
+to answer non-medical questions. Use maximum medical jargon.`,
+		},
 		LLM:          provider,
 		Tools:        []llm.Tool{tools.NewGoogleSearch(googleClient)},
 		CacheControl: "ephemeral",
 		LogLevel:     "info",
 		Hooks: llm.Hooks{
 			llm.AfterGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
-				fmt.Println("----")
-				fmt.Println("INPUT")
-				fmt.Println(dive.FormatMessages(hookCtx.Messages))
-				fmt.Println("----")
-				fmt.Println("OUTPUT")
-				fmt.Println(dive.FormatMessages([]*llm.Message{hookCtx.Response.Message()}))
-				fmt.Println("----")
+				if verbose {
+					fmt.Println("----")
+					fmt.Println("INPUT")
+					fmt.Println(dive.FormatMessages(hookCtx.Messages))
+					fmt.Println("OUTPUT")
+					fmt.Println(dive.FormatMessages([]*llm.Message{hookCtx.Response.Message()}))
+					fmt.Println("----")
+				}
 			},
 		},
 	})
@@ -68,32 +77,19 @@ func main() {
 
 	for {
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Enter a task description: ")
-		description, err := reader.ReadString('\n')
+		fmt.Print("Enter a chat message about a medical topic: ")
+		message, err := reader.ReadString('\n')
 		if err != nil {
 			log.Fatal(err)
 		}
-		description = strings.TrimSpace(description)
-		if description == "exit" {
+		message = strings.TrimSpace(message)
+		if message == "exit" {
 			break
 		}
-		if description == "" {
+		if message == "" {
 			continue
 		}
-
-		// task := dive.NewTask(dive.TaskOptions{
-		// 	Description: description,
-		// })
-		// promise, err := a.Work(ctx, task)
-		// if err != nil {
-		// 	log.Fatal(err)
-		// }
-		// result, err := promise.Get(ctx)
-		// if err != nil {
-		// 	log.Fatal(err)
-		// }
-
-		response, err := a.Chat(ctx, llm.NewUserMessage(description))
+		response, err := a.Chat(ctx, llm.NewUserMessage(message))
 		if err != nil {
 			log.Fatal(err)
 		}

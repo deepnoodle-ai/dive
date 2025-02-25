@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/logger"
 	"github.com/getstingrai/dive/prompt"
 )
 
@@ -25,14 +27,12 @@ type AgentOptions struct {
 	Role           Role
 	LLM            llm.LLM
 	Tools          []llm.Tool
-	IsSupervisor   bool
-	IsWorker       bool
 	MaxActiveTasks int
 	TickFrequency  time.Duration
 	CacheControl   string
 	LogLevel       string
 	Hooks          llm.Hooks
-	Logger         Logger
+	Logger         logger.Logger
 }
 
 // DiveAgent implements the Agent interface.
@@ -56,7 +56,7 @@ type DiveAgent struct {
 	recentTasks    []*taskState
 	logLevel       string
 	hooks          llm.Hooks
-	logger         Logger
+	logger         logger.Logger
 
 	// Consolidate all message types into a single channel
 	mailbox chan interface{}
@@ -77,8 +77,6 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		name:           opts.Name,
 		role:           opts.Role,
 		llm:            opts.LLM,
-		isSupervisor:   opts.IsSupervisor,
-		isWorker:       opts.IsWorker,
 		maxActiveTasks: opts.MaxActiveTasks,
 		tickFrequency:  opts.TickFrequency,
 		cacheControl:   opts.CacheControl,
@@ -93,7 +91,7 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		tools = make([]llm.Tool, len(opts.Tools))
 		copy(tools, opts.Tools)
 	}
-	if opts.IsSupervisor {
+	if opts.Role.IsSupervisor {
 		tools = append(tools, NewAssignWorkTool(a))
 	}
 	a.tools = tools
@@ -101,7 +99,7 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		a.toolsByName[tool.Definition().Name] = tool
 	}
 	if a.logger == nil {
-		a.logger = NewSlogLogger(nil)
+		a.logger = logger.NewSlogLogger(nil)
 	}
 	return a
 }
@@ -172,7 +170,7 @@ func (a *DiveAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Respon
 }
 
 func (a *DiveAgent) ChatStream(ctx context.Context, message *llm.Message) (llm.Stream, error) {
-	return nil, nil
+	return nil, errors.New("not yet implemented")
 }
 
 func (a *DiveAgent) Event(ctx context.Context, event *Event) error {
@@ -323,8 +321,9 @@ func (a *DiveAgent) handleStopMessage(msg messageStop) error {
 	return nil
 }
 
-func (a *DiveAgent) systemPrompt() (string, error) {
-	return executeTemplate(agentSystemPromptTemplate, a)
+func (a *DiveAgent) getSystemPrompt() (string, error) {
+	data := NewAgentTemplateData(a)
+	return executeTemplate(agentSystemPromptTemplate, data)
 }
 
 func (a *DiveAgent) handleTask(state *taskState) error {
@@ -336,7 +335,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	systemPrompt, err := a.systemPrompt()
+	systemPrompt, err := a.getSystemPrompt()
 	if err != nil {
 		return err
 	}
@@ -354,9 +353,16 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		messages = append(messages, llm.NewUserMessage("Continue working on the task."))
 	}
 
+	a.Log("handle task",
+		"name", task.Name(),
+		"status", state.Status,
+		"description", task.Description(),
+		"prompt_text", task.PromptText(),
+	)
+
 	var response *llm.Response
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 8; i++ {
 		p, err := prompt.New(
 			prompt.WithSystemMessage(systemPrompt),
 			prompt.WithMessage(messages...),
@@ -373,6 +379,9 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		}
 		if a.hooks != nil {
 			generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
+		}
+		if a.logger != nil {
+			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 		}
 		response, err = a.llm.Generate(ctx, p.Messages, generateOpts...)
 		if err != nil {
@@ -427,7 +436,8 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		state.Output = fmt.Sprintf("%s\n\n%s", state.Output, sr.Text)
 	}
 	state.Reasoning = sr.Thinking
-	state.ReportedStatus = sr.Status
+	state.StatusDescription = sr.StatusDescription
+	state.Status = sr.Status()
 	return nil
 }
 
@@ -469,31 +479,57 @@ func (a *DiveAgent) doSomeWork() {
 		return
 	}
 
-	if isTaskComplete(a.activeTask.ReportedStatus) {
+	switch a.activeTask.Status {
+	case TaskStatusCompleted:
 		duration := time.Since(a.activeTask.Started)
 		a.logger.Info("task completed",
 			"name", a.activeTask.Task.Name(),
 			"duration", duration.Seconds(),
 		)
-
 		a.activeTask.Status = TaskStatusCompleted
 		a.rememberTask(a.activeTask)
-
 		if a.activeTask.Task.Kind() == "chat" {
 			a.activeTask.ChanResponse <- llm.NewResponse(llm.ResponseOptions{
 				Role:    llm.Assistant,
 				Message: llm.NewAssistantMessage(a.activeTask.Output),
 			})
 		}
-
 		if a.activeTask.Promise != nil {
 			a.activeTask.Promise.ch <- &TaskResult{
 				Task:    a.activeTask.Task,
 				Content: a.activeTask.Output,
 			}
 		}
-
 		a.activeTask = nil
+
+	case TaskStatusPaused:
+		a.logger.Info("task paused", "name", a.activeTask.Task.Name())
+		a.activeTask.Suspended = true
+		a.taskQueue = append(a.taskQueue, a.activeTask)
+		a.activeTask = nil
+
+	case TaskStatusBlocked, TaskStatusError, TaskStatusInvalid:
+		a.logger.Info("task error",
+			"name", a.activeTask.Task.Name(),
+			"status", a.activeTask.Status,
+			"status_description", a.activeTask.StatusDescription,
+			"duration", time.Since(a.activeTask.Started).Seconds(),
+		)
+		if a.activeTask.Task.Kind() == "chat" && a.activeTask.ChanError != nil {
+			a.activeTask.ChanError <- fmt.Errorf("task error: %s", a.activeTask.Status)
+		}
+		if a.activeTask.Promise != nil {
+			a.activeTask.Promise.ch <- NewTaskResultError(a.activeTask.Task, fmt.Errorf("task error"))
+		}
+		a.activeTask = nil
+
+	case TaskStatusActive:
+		a.logger.Info("task remains active",
+			"name", a.activeTask.Task.Name(),
+			"status", a.activeTask.Status,
+			"status_description", a.activeTask.StatusDescription,
+			"duration", time.Since(a.activeTask.Started).Seconds(),
+		)
 	}
 }
 
@@ -542,32 +578,6 @@ type AgentTemplateData struct {
 	IsWorker  bool
 }
 
-// func (a *DiveAgent) TemplateData() *AgentTemplateData {
-// 	return &AgentTemplateData{
-// 		Name: a.name,
-// 		Role: a.role.Description,
-// 		// Goals:     a.goals,
-// 		Team:      a.team,
-// 		IsManager: a.isManager,
-// 		IsWorker:  a.isWorker,
-// 	}
-// }
-
-// func (a *DiveAgent) checkTaskCompletion(ctx context.Context, taskState *TaskState) (bool, error) {
-// 	response, err := prompt.Execute(ctx, a.llm,
-// 		prompt.WithSystemMessage(`You are evaluating if a task has been completed successfully. Review the original task and its output. Respond with exactly "complete" if the task was completed successfully, or "incomplete" if it needs more work.`),
-// 		prompt.WithUserMessage(taskState.String()))
-// 	if err != nil {
-// 		return false, err
-// 	}
-// 	text := strings.TrimSpace(strings.ToLower(response.Message().Text()))
-// 	fmt.Println("==== checkTaskCompletion ====")
-// 	fmt.Println(text)
-// 	fmt.Println(text == "complete")
-// 	fmt.Println("==== /checkTaskCompletion ====")
-// 	return text == "complete", nil
-// }
-
 func TruncateText(text string, maxWords int) string {
 	// Split into lines while preserving newlines
 	lines := strings.Split(text, "\n")
@@ -608,6 +618,34 @@ func replaceNewlines(text string) string {
 	return newlinesRegex.ReplaceAllString(text, "<br>")
 }
 
-func isTaskComplete(status string) bool {
-	return strings.Contains(strings.ToLower(status), "complete")
+type agentTemplateData struct {
+	*DiveAgent
+	DelegateTargets []Agent
+}
+
+func NewAgentTemplateData(agent *DiveAgent) *agentTemplateData {
+	var delegateTargets []Agent
+	if agent.role.IsSupervisor {
+		if agent.role.Subordinates == nil {
+			if agent.team != nil {
+				// Unspecified means we can delegate to all non-supervisors
+				for _, a := range agent.team.Agents() {
+					if !a.Role().IsSupervisor {
+						delegateTargets = append(delegateTargets, a)
+					}
+				}
+			}
+		} else if agent.team != nil {
+			for _, name := range agent.role.Subordinates {
+				other, found := agent.team.GetAgent(name)
+				if found {
+					delegateTargets = append(delegateTargets, other)
+				}
+			}
+		}
+	}
+	return &agentTemplateData{
+		DiveAgent:       agent,
+		DelegateTargets: delegateTargets,
+	}
 }
