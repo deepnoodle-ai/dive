@@ -909,4 +909,5 @@ self-host and integrate into your own applications.
 ## Who is Behind Dive?
 
 Dive is developed by [Stingrai](https://www.getstingrai.com), a company building
-products for competitive intelligence, market research, and product messaging.
+products powered by agentic AI for competitive intelligence and product
+messaging.
