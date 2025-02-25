@@ -468,7 +468,19 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		}
 
 		// Capture results in a new message to send on next loop iteration
-		messages = append(messages, llm.NewToolResultMessage(toolResults))
+		resultMessage := llm.NewToolResultMessage(toolResults)
+
+		// Add instructions to the message to not use any more tools if we
+		// have only one generation left.
+		if i == a.generationLimit-2 {
+			resultMessage.Content = append(resultMessage.Content, &llm.Content{
+				Type: llm.ContentTypeText,
+				Text: "Do not use any more tools. You must respond with your final answer now.",
+			})
+			a.logger.Debug("adding tool use limit instruction", "agent", a.name, "task", task.Name())
+		}
+
+		messages = append(messages, resultMessage)
 	}
 
 	// Update task state based on the last response from the LLM. It should

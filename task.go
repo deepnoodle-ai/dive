@@ -22,6 +22,7 @@ type Task struct {
 	result         *TaskResult
 	timeout        time.Duration
 	context        string
+	depOutput      string
 	kind           string
 	nameIsRandom   bool
 }
@@ -39,6 +40,7 @@ func (t *Task) Result() *TaskResult        { return t.result }
 func (t *Task) Timeout() time.Duration     { return t.timeout }
 func (t *Task) Context() string            { return t.context }
 func (t *Task) Kind() string               { return t.kind }
+func (t *Task) DependenciesOutput() string { return t.depOutput }
 
 // TaskOptions is used to define a Task
 type TaskOptions struct {
@@ -103,9 +105,9 @@ func (t *Task) Validate() error {
 func (t *Task) PromptText() string {
 	var intro string
 	if t.name != "" && !t.nameIsRandom {
-		intro = fmt.Sprintf("Let's work on a new task named %q:", t.name)
+		intro = fmt.Sprintf("Let's work on a new task named %q.", t.name)
 	} else {
-		intro = "Let's work on a new task:"
+		intro = "Let's work on a new task."
 	}
 	lines := []string{}
 	if t.description != "" {
@@ -117,10 +119,19 @@ func (t *Task) PromptText() string {
 	if t.outputFormat != "" {
 		lines = append(lines, fmt.Sprintf("Your response must be in %s format.", t.outputFormat))
 	}
+	result := fmt.Sprintf("%s\n\n```TASK\n%s\n```", intro, strings.Join(lines, "\n\n"))
+
 	if t.context != "" {
-		lines = append(lines, fmt.Sprintf("Use this context while working on the task:\n\n%s\n\n", t.context))
+		result += fmt.Sprintf("\n\nUse this context while working on the task:\n\n```CONTEXT\n%s\n```", t.context)
 	}
-	result := fmt.Sprintf("%s\n\n<task>\n%s\n</task>", intro, strings.Join(lines, "\n\n"))
+	if t.depOutput != "" {
+		result += fmt.Sprintf("\n\nHere is the output from this task's dependencies:\n\n```DEPENDENCIES\n%s\n```", t.depOutput)
+	}
+
 	result += "\n\nPlease begin working on the task."
 	return result
+}
+
+func (t *Task) SetDependenciesOutput(output string) {
+	t.depOutput = output
 }

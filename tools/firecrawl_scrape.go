@@ -58,6 +58,10 @@ func (t *FirecrawlScraper) Call(ctx context.Context, input string) (string, erro
 	if err := json.Unmarshal([]byte(input), &s); err != nil {
 		return "", err
 	}
+	if strings.HasSuffix(s.URL, ".pdf") {
+		return "PDFs are not supported by this tool currently.", nil
+	}
+
 	response, err := t.app.ScrapeURL(s.URL, &firecrawl.ScrapeParams{
 		Timeout:         ptr(15000),
 		OnlyMainContent: ptr(true),

@@ -18,14 +18,11 @@ import (
 	"github.com/mendableai/firecrawl-go"
 )
 
-const DefaultTask = "Create a brief 3 paragraph biography of Alan Turing"
-
 func main() {
 	var verbose bool
-	var providerName, modelName, taskDescription string
+	var providerName, modelName string
 	flag.StringVar(&providerName, "provider", "anthropic", "provider to use")
 	flag.StringVar(&modelName, "model", "", "model to use")
-	flag.StringVar(&taskDescription, "task", DefaultTask, "task description")
 	flag.BoolVar(&verbose, "verbose", false, "verbose output")
 	flag.Parse()
 
@@ -78,7 +75,7 @@ func main() {
 	supervisor := dive.NewAgent(dive.AgentOptions{
 		Name: "Supervisor",
 		Role: dive.Role{
-			Description:  "Research Supervisor",
+			Description:  "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
 			IsSupervisor: true,
 			Subordinates: []string{"Research Assistant"},
 		},
@@ -86,6 +83,17 @@ func main() {
 		LLM:          provider,
 		LogLevel:     logLevel,
 		Logger:       logger,
+		Hooks: llm.Hooks{
+			llm.AfterGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
+				if verbose {
+					messages := hookCtx.Messages
+					messages = append(messages, hookCtx.Response.Message())
+					fmt.Println("----")
+					fmt.Println(dive.FormatMessages(messages))
+					fmt.Println("----")
+				}
+			},
+		},
 	})
 
 	researcher := dive.NewAgent(dive.AgentOptions{
@@ -128,19 +136,25 @@ func main() {
 	}
 	defer team.Stop(ctx)
 
-	task := dive.NewTask(dive.TaskOptions{
-		Description:    taskDescription,
-		ExpectedOutput: "A brief report on the subject.",
-		OutputFormat:   dive.OutputMarkdown,
+	researchTask := dive.NewTask(dive.TaskOptions{
+		Name:        "Background Research",
+		Description: "Gather background research that will be used to create a history of maple syrup production in Vermont. Don't consult more than 3 sources.",
 	})
 
-	results, err := team.Work(ctx, task)
+	writingTask := dive.NewTask(dive.TaskOptions{
+		Name:           "Write History",
+		Description:    "Create a brief 3 paragraph history of maple syrup production in Vermont.",
+		ExpectedOutput: "The history, with the first word of each paragraph in ALL UPPERCASE.",
+		Dependencies:   []string{researchTask.Name()},
+	})
+
+	results, err := team.Work(ctx, researchTask, writingTask)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	for _, result := range results {
-		fmt.Println("----")
+	for i, result := range results {
+		fmt.Printf("---- task result %d - %s ----\n", i+1, result.Task.Name())
 		fmt.Println(result.Content)
 		fmt.Println()
 	}

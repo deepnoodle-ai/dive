@@ -56,6 +56,9 @@ then the task is to simply reply with your response.
 You may be provided with tools to use to complete your tasks. Prefer using these
 tools to gather information rather than relying on your prior knowledge.
 
+Prefer making multiple tool calls in parallel (in a single response) when
+possible, for efficiency.
+
 # Context
 
 Context you are given may be helpful to you when answering questions. If the

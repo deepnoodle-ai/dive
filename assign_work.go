@@ -30,7 +30,7 @@ func NewAssignWorkTool(self Agent) *AssignWorkTool {
 func (t *AssignWorkTool) Definition() *llm.ToolDefinition {
 	return &llm.ToolDefinition{
 		Name:        "assign_work",
-		Description: "Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request.",
+		Description: "Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request. You must assume the response is not visible to anyone else, so you are responsible for relaying the information in your own responses as needed.",
 		Parameters: llm.Schema{
 			Type: "object",
 			Required: []string{

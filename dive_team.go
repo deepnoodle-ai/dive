@@ -3,7 +3,7 @@ package dive
 import (
 	"context"
 	"fmt"
-	"sort"
+	"strings"
 	"sync"
 )
 
@@ -79,26 +79,13 @@ func (t *DiveTeam) IsRunning() bool {
 	return t.started
 }
 
-func (t *DiveTeam) newTaskGraph() *taskGraph {
-	var tasks []*Task
-	for _, task := range t.tasks {
-		tasks = append(tasks, task)
-	}
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].Name() < tasks[j].Name()
-	})
-	return newTaskGraph(tasks)
-}
-
-func (t *DiveTeam) recalculateTaskOrder() error {
-	graph := t.newTaskGraph()
+func (t *DiveTeam) calculateTaskOrder(tasks []*Task) ([]string, error) {
+	graph := newTaskGraph(tasks)
 	order, err := graph.TopologicalSort()
 	if err != nil {
-		return fmt.Errorf("invalid task dependencies: %w", err)
+		return nil, fmt.Errorf("invalid task dependencies: %w", err)
 	}
-	t.taskGraph = graph
-	t.taskOrder = order
-	return nil
+	return order, nil
 }
 
 func (t *DiveTeam) Start(ctx context.Context) error {
@@ -107,12 +94,6 @@ func (t *DiveTeam) Start(ctx context.Context) error {
 
 	if t.started {
 		return fmt.Errorf("team already started")
-	}
-
-	if len(t.tasks) > 0 {
-		if err := t.recalculateTaskOrder(); err != nil {
-			return err
-		}
 	}
 
 	for _, agent := range t.agents {
@@ -151,13 +132,22 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, err
 	if err := t.addTasks(tasks...); err != nil {
 		return nil, err
 	}
-	if err := t.recalculateTaskOrder(); err != nil {
-		return nil, fmt.Errorf("failed to recalculate task order: %w", err)
+
+	tasksByName := make(map[string]*Task, len(tasks))
+	for _, task := range tasks {
+		tasksByName[task.Name()] = task
 	}
 
-	// Create promises for tasks in sorted order
-	promises := make([]*Promise, len(tasks))
-	for i, task := range tasks {
+	order, err := t.calculateTaskOrder(tasks)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate task order: %w", err)
+	}
+
+	results := make([]*TaskResult, len(order))
+	resultsByTaskName := make(map[string]*TaskResult, len(order))
+
+	for i, taskName := range order {
+		task := tasksByName[taskName]
 		var assignedAgent Agent
 		if task.AssignedAgent() != nil {
 			assignedAgent = task.AssignedAgent()
@@ -166,17 +156,32 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, err
 		} else {
 			assignedAgent = t.agents[0]
 		}
+		// Set the dependencies output for the task
+		if depNames := task.Dependencies(); len(depNames) > 0 {
+			var depOutputs []string
+			for _, depName := range depNames {
+				depTask, ok := resultsByTaskName[depName]
+				if !ok {
+					return nil, fmt.Errorf("task %q has dependency %q, but it has not been completed yet", taskName, depName)
+				}
+				entry := fmt.Sprintf("# Task %q Output\n\n%s", depName, depTask.Content)
+				depOutputs = append(depOutputs, entry)
+			}
+			depOutputsText := strings.Join(depOutputs, "\n\n")
+			task.SetDependenciesOutput(depOutputsText)
+		}
 		promise, err := assignedAgent.Work(ctx, task)
 		if err != nil {
 			return nil, fmt.Errorf("failed to assign work to agent %s: %w", assignedAgent.Name(), err)
 		}
-		promises[i] = promise
+		result, err := promise.Get(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get result for task %s: %w", taskName, err)
+		}
+		results[i] = result
+		resultsByTaskName[taskName] = result
 	}
 
-	results, err := WaitAll(ctx, promises)
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for tasks to complete: %w", err)
-	}
 	return results, nil
 }
 
