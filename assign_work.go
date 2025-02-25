@@ -29,7 +29,7 @@ func NewAssignWorkTool(self Agent) *AssignWorkTool {
 
 func (t *AssignWorkTool) Definition() *llm.ToolDefinition {
 	return &llm.ToolDefinition{
-		Name:        "AssignWork",
+		Name:        "assign_work",
 		Description: "Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request.",
 		Parameters: llm.Schema{
 			Type: "object",
