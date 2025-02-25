@@ -1,6 +1,9 @@
 package dive
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type Promise struct {
 	task *Task
@@ -25,4 +28,27 @@ func (p *Promise) Set(res *TaskResult) {
 
 func (p *Promise) Task() *Task {
 	return p.task
+}
+
+func WaitAll(ctx context.Context, promises []*Promise) ([]*TaskResult, error) {
+	results := make([]*TaskResult, len(promises))
+	var firstError error
+
+	// Wait for all promises to complete
+	for i, promise := range promises {
+		result, err := promise.Get(ctx)
+		if err != nil {
+			if firstError == nil {
+				firstError = err
+			}
+			continue
+		}
+		results[i] = result
+	}
+
+	if firstError != nil {
+		return results, fmt.Errorf("one or more tasks failed: %w", firstError)
+	}
+
+	return results, nil
 }

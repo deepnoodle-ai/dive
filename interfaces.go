@@ -61,7 +61,7 @@ type Team interface {
 	Event(ctx context.Context, event *Event) error
 
 	// Work on tasks
-	Work(ctx context.Context, tasks ...*Task) ([]*Promise, error)
+	Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, error)
 
 	// Start all agents belonging to the team
 	Start(ctx context.Context) error

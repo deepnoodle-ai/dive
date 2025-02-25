@@ -109,8 +109,10 @@ func (t *DiveTeam) Start(ctx context.Context) error {
 		return fmt.Errorf("team already started")
 	}
 
-	if err := t.recalculateTaskOrder(); err != nil {
-		return fmt.Errorf("failed to calculate task order: %w", err)
+	if len(t.tasks) > 0 {
+		if err := t.recalculateTaskOrder(); err != nil {
+			return err
+		}
 	}
 
 	for _, agent := range t.agents {
@@ -138,7 +140,7 @@ func (t *DiveTeam) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*Promise, error) {
+func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
@@ -156,28 +158,27 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*Promise, error)
 	// Create promises for tasks in sorted order
 	promises := make([]*Promise, len(tasks))
 	for i, task := range tasks {
-		// If task has an assigned agent, use it
+		var assignedAgent Agent
 		if task.AssignedAgent() != nil {
-			promise, err := task.AssignedAgent().Work(ctx, task)
-			if err != nil {
-				return nil, fmt.Errorf("failed to assign work to agent %s: %w", task.AssignedAgent().Name(), err)
-			}
-			promises[i] = promise
-			continue
+			assignedAgent = task.AssignedAgent()
+		} else if len(t.supervisors) > 0 {
+			assignedAgent = t.supervisors[0]
+		} else {
+			assignedAgent = t.agents[0]
 		}
-
-		// TODO: Implement task assignment strategy when no agent is specified
-		// For now, assign to first available agent
-		if len(t.agents) == 0 {
-			return nil, fmt.Errorf("no agents available to work on task %s", task.Name())
-		}
-		promise, err := t.agents[0].Work(ctx, task)
+		promise, err := assignedAgent.Work(ctx, task)
 		if err != nil {
-			return nil, fmt.Errorf("failed to assign work to agent %s: %w", t.agents[0].Name(), err)
+			return nil, fmt.Errorf("failed to assign work to agent %s: %w", assignedAgent.Name(), err)
 		}
+		fmt.Println("assigned agent", assignedAgent.Name(), "to task", task.Name())
 		promises[i] = promise
 	}
-	return promises, nil
+
+	results, err := WaitAll(ctx, promises)
+	if err != nil {
+		return nil, fmt.Errorf("failed to wait for tasks to complete: %w", err)
+	}
+	return results, nil
 }
 
 func (t *DiveTeam) GetAgent(name string) (Agent, bool) {

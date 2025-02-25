@@ -79,7 +79,7 @@ func (t *FirecrawlScraper) Call(ctx context.Context, input string) (string, erro
 			sb.WriteString(fmt.Sprintf("# Description: %s\n\n", *description))
 		}
 	}
-	sb.WriteString(response.Markdown + "\n")
+	sb.WriteString(response.Markdown)
 
 	truncatedPage := truncateText(sb.String(), t.maxSize)
 

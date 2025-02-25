@@ -354,7 +354,8 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	}
 
 	a.Log("handle task",
-		"name", task.Name(),
+		"agent", a.name,
+		"task", task.Name(),
 		"status", state.Status,
 		"description", task.Description(),
 		"prompt_text", task.PromptText(),
@@ -364,10 +365,16 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	generationLimit := 8
 
 	for i := 0; i < generationLimit; i++ {
+		var prefill string
+		if i == generationLimit-1 {
+			prefill = "<think>I must respond with my final answer now."
+		} else {
+			prefill = "<think>"
+		}
 		p, err := prompt.New(
 			prompt.WithSystemMessage(systemPrompt),
 			prompt.WithMessage(messages...),
-			prompt.WithMessage(llm.NewAssistantMessage("<think>")),
+			prompt.WithMessage(llm.NewAssistantMessage(prefill)),
 		).Build()
 		if err != nil {
 			return err
@@ -376,9 +383,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 			llm.WithSystemPrompt(p.System),
 			llm.WithCacheControl(a.cacheControl),
 			llm.WithLogLevel(a.logLevel),
-		}
-		if i == 0 || i < generationLimit-1 {
-			generateOpts = append(generateOpts, llm.WithTools(a.tools...))
+			llm.WithTools(a.tools...),
 		}
 		if a.hooks != nil {
 			generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
@@ -397,7 +402,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 			for _, content := range responseMessage.Content {
 				// Only insert the opening <think> if we see the closing </think>
 				if content.Type == llm.ContentTypeText && strings.Contains(content.Text, "</think>") {
-					content.Text = "<think>" + content.Text
+					content.Text = prefill + content.Text
 					break
 				}
 			}
@@ -441,6 +446,14 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	state.Reasoning = sr.Thinking
 	state.StatusDescription = sr.StatusDescription
 	state.Status = sr.Status()
+
+	a.Log("task updated",
+		"agent", a.name,
+		"task", task.Name(),
+		"status", state.Status,
+		"status_description", state.StatusDescription,
+		"output", state.Output,
+	)
 	return nil
 }
 
@@ -456,7 +469,11 @@ func (a *DiveAgent) doSomeWork() {
 			a.activeTask.Started = time.Now()
 		}
 		a.activeTask.Suspended = false
-		a.logger.Info("task activated", "name", a.activeTask.Task.Name())
+		a.logger.Info("task activated",
+			"agent", a.name,
+			"task", a.activeTask.Task.Name(),
+			"description", a.activeTask.Task.Description(),
+		)
 	}
 
 	if a.activeTask == nil {
@@ -470,7 +487,8 @@ func (a *DiveAgent) doSomeWork() {
 	if err != nil {
 		duration := time.Since(a.activeTask.Started)
 		a.logger.Error("task error",
-			"name", a.activeTask.Task.Name(),
+			"agent", a.name,
+			"task", a.activeTask.Task.Name(),
 			"duration", duration.Seconds(),
 			"error", err,
 		)
@@ -486,7 +504,8 @@ func (a *DiveAgent) doSomeWork() {
 	case TaskStatusCompleted:
 		duration := time.Since(a.activeTask.Started)
 		a.logger.Info("task completed",
-			"name", a.activeTask.Task.Name(),
+			"agent", a.name,
+			"task", a.activeTask.Task.Name(),
 			"duration", duration.Seconds(),
 		)
 		a.activeTask.Status = TaskStatusCompleted
@@ -506,14 +525,18 @@ func (a *DiveAgent) doSomeWork() {
 		a.activeTask = nil
 
 	case TaskStatusPaused:
-		a.logger.Info("task paused", "name", a.activeTask.Task.Name())
+		a.logger.Info("task paused",
+			"agent", a.name,
+			"task", a.activeTask.Task.Name(),
+		)
 		a.activeTask.Suspended = true
 		a.taskQueue = append(a.taskQueue, a.activeTask)
 		a.activeTask = nil
 
 	case TaskStatusBlocked, TaskStatusError, TaskStatusInvalid:
 		a.logger.Info("task error",
-			"name", a.activeTask.Task.Name(),
+			"agent", a.name,
+			"task", a.activeTask.Task.Name(),
 			"status", a.activeTask.Status,
 			"status_description", a.activeTask.StatusDescription,
 			"duration", time.Since(a.activeTask.Started).Seconds(),
@@ -528,7 +551,8 @@ func (a *DiveAgent) doSomeWork() {
 
 	case TaskStatusActive:
 		a.logger.Info("task remains active",
-			"name", a.activeTask.Task.Name(),
+			"agent", a.name,
+			"task", a.activeTask.Task.Name(),
 			"status", a.activeTask.Status,
 			"status_description", a.activeTask.StatusDescription,
 			"duration", time.Since(a.activeTask.Started).Seconds(),
