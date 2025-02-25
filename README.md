@@ -95,8 +95,8 @@ import (
 func main() {
 	ctx := context.Background()
 
-    // Create a Google Search API client
-    googleClient, err := google.New()
+	// Create a Google Search API client
+	googleClient, err := google.New()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -565,17 +565,6 @@ agent := dive.NewAgent(dive.AgentOptions{
 })
 ```
 
-### Custom Tools
-
-You can create your own custom tools by implementing the `Tool` interface:
-
-```go
-type Tool interface {
-    Definition() *ToolDefinition
-    Call(ctx context.Context, input string) (string, error)
-}
-```
-
 ## Examples
 
 Here are some examples of how to use Dive for common use cases:
@@ -873,41 +862,23 @@ API design, usability, and any use cases you'd like to see supported.
 
 ### What makes Dive different from other agent frameworks?
 
-Dive is designed with a focus on practical, production-ready agent systems. Key differentiators include:
+Dive is designed with a focus on practical, production-ready agent systems.
+Key differentiators include:
 
-- Strong emphasis on the actor model for concurrency
-- First-class support for agent teams and hierarchies
+- First-class support for agent teams
+- Simple concepts: agents, teams, tasks, roles
+- Easy definition of tasks with dependencies
 - Built-in support for multiple LLM providers
-- Comprehensive tooling for real-world tasks
-- Flexible configuration options (Go API and YAML)
+- Web search and scraping tools included
+- Scalable to thousands of concurrent agents
+- Great defaults so a lot works out-of-the-box
 
-### Which LLM provider should I use?
+### How do I handle LLM rate limits?
 
-Each provider has its strengths:
+Dive includes built-in retry mechanisms for handling rate limits. This includes
+exponential backoff and jitter.
 
-- **Anthropic Claude**: Excellent for complex reasoning, following instructions, and longer contexts
-- **OpenAI GPT**: Great general-purpose models with strong tool use capabilities
-- **Groq**: Offers very fast inference times for certain models
-
-The best choice depends on your specific requirements.
-
-### How do I handle API rate limits?
-
-Dive includes built-in retry mechanisms for handling rate limits. You can
-configure these in the provider options:
-
-```go
-llm := anthropic.New(
-    anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
-    anthropic.WithRetryConfig(retry.Config{
-        MaxRetries:    5,
-        InitialBackoff: 1 * time.Second,
-        MaxBackoff:    30 * time.Second,
-    }),
-)
-```
-
-### Can I use Dive in production?
+### Should I use Dive in production?
 
 No, Dive is not recommended for production use at this time. As mentioned in the
 Project Status section, Dive is in its early development stages and breaking
