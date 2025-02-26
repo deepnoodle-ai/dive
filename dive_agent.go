@@ -194,6 +194,9 @@ func (a *DiveAgent) Log(msg string, keysAndValues ...any) {
 	}
 }
 
+// May need to be able to express whether this is the beginning of a conversation
+// or a continuation. Pass a conversation ID? Multiple messages? What if two people
+// are talking to the same agent?
 func (a *DiveAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Response, error) {
 	result := make(chan *llm.Response, 1)
 	errChan := make(chan error, 1)
@@ -239,21 +242,25 @@ func (a *DiveAgent) Event(ctx context.Context, event *Event) error {
 	}
 }
 
-func (a *DiveAgent) Work(ctx context.Context, task *Task) (*Promise, error) {
+func (a *DiveAgent) Work(ctx context.Context, task *Task) (Stream, error) {
 	if !a.IsRunning() {
 		return nil, fmt.Errorf("agent is not running")
 	}
 
-	promise := &Promise{
-		task: task,
-		ch:   make(chan *TaskResult, 1),
+	stream := NewDiveStream()
+	publisher := NewDiveStreamPublisher(stream)
+
+	message := messageWork{
+		task:      task,
+		stream:    stream,
+		publisher: publisher,
 	}
-	message := messageWork{task: task, promise: promise}
 
 	select {
 	case a.mailbox <- message:
-		return promise, nil
+		return stream, nil
 	case <-ctx.Done():
+		stream.Close()
 		return nil, ctx.Err()
 	}
 }
@@ -334,9 +341,10 @@ func (a *DiveAgent) run() error {
 
 func (a *DiveAgent) handleWorkMessage(m messageWork) {
 	a.taskQueue = append(a.taskQueue, &taskState{
-		Task:    m.task,
-		Promise: m.promise,
-		Status:  TaskStatusQueued,
+		Task:      m.task,
+		Stream:    m.stream,
+		Publisher: m.publisher,
+		Status:    TaskStatusQueued,
 	})
 }
 
@@ -355,7 +363,6 @@ func (a *DiveAgent) handleChatMessage(m messageChat) {
 	// Enqueue a corresponding task state
 	a.taskQueue = append(a.taskQueue, &taskState{
 		Task:         task,
-		Promise:      &Promise{ch: make(chan *TaskResult, 1)},
 		Status:       TaskStatusQueued,
 		Messages:     []*llm.Message{m.message},
 		ChanResponse: m.result,
@@ -561,7 +568,7 @@ func (a *DiveAgent) doSomeWork() {
 	// Make progress on the active task
 	err := a.handleTask(a.activeTask)
 
-	// An error deactivates the task and we send the error via the promise
+	// An error deactivates the task and we send the error via the stream
 	if err != nil {
 		duration := time.Since(a.activeTask.Started)
 		a.logger.Error("task error",
@@ -573,7 +580,23 @@ func (a *DiveAgent) doSomeWork() {
 
 		a.activeTask.Status = TaskStatusError
 		a.rememberTask(a.activeTask)
-		a.activeTask.Promise.ch <- NewTaskResultError(a.activeTask.Task, err)
+
+		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
+			errorEvent := &StreamEvent{
+				Type:  "error",
+				Error: fmt.Sprintf("task error: %s", a.activeTask.Status),
+			}
+			a.activeTask.Publisher.SendEvent(context.Background(), errorEvent)
+
+			// Create the error result
+			errorResult := NewTaskResultError(a.activeTask.Task, fmt.Errorf("task error: %s", a.activeTask.Status))
+
+			// Send the error result using the publisher
+			a.activeTask.Publisher.SendResult(context.Background(), errorResult)
+
+			a.activeTask.Stream.Close()
+		}
+
 		a.activeTask = nil
 		return
 	}
@@ -588,18 +611,31 @@ func (a *DiveAgent) doSomeWork() {
 		)
 		a.activeTask.Status = TaskStatusCompleted
 		a.rememberTask(a.activeTask)
+
 		if a.activeTask.Task.Kind() == "chat" {
 			a.activeTask.ChanResponse <- llm.NewResponse(llm.ResponseOptions{
 				Role:    llm.Assistant,
 				Message: llm.NewAssistantMessage(a.activeTask.Output),
 			})
 		}
-		if a.activeTask.Promise != nil {
-			a.activeTask.Promise.ch <- &TaskResult{
+
+		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
+			completedEvent := &StreamEvent{
+				Type: "completed",
+			}
+			a.activeTask.Publisher.SendEvent(context.Background(), completedEvent)
+
+			result := &TaskResult{
 				Task:    a.activeTask.Task,
 				Content: a.activeTask.Output,
 			}
+
+			// Send the result using the publisher
+			a.activeTask.Publisher.SendResult(context.Background(), result)
+
+			a.activeTask.Stream.Close()
 		}
+
 		a.activeTask = nil
 
 	case TaskStatusPaused:
@@ -607,6 +643,14 @@ func (a *DiveAgent) doSomeWork() {
 			"agent", a.name,
 			"task", a.activeTask.Task.Name(),
 		)
+
+		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
+			pausedEvent := &StreamEvent{
+				Type: "paused",
+			}
+			a.activeTask.Publisher.SendEvent(context.Background(), pausedEvent)
+		}
+
 		a.activeTask.Suspended = true
 		a.taskQueue = append(a.taskQueue, a.activeTask)
 		a.activeTask = nil
@@ -619,12 +663,27 @@ func (a *DiveAgent) doSomeWork() {
 			"status_description", a.activeTask.StatusDescription,
 			"duration", time.Since(a.activeTask.Started).Seconds(),
 		)
+
 		if a.activeTask.Task.Kind() == "chat" && a.activeTask.ChanError != nil {
 			a.activeTask.ChanError <- fmt.Errorf("task error: %s", a.activeTask.Status)
 		}
-		if a.activeTask.Promise != nil {
-			a.activeTask.Promise.ch <- NewTaskResultError(a.activeTask.Task, fmt.Errorf("task error"))
+
+		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
+			errorEvent := &StreamEvent{
+				Type:  "error",
+				Error: fmt.Sprintf("task error: %s", a.activeTask.Status),
+			}
+			a.activeTask.Publisher.SendEvent(context.Background(), errorEvent)
+
+			// Create the error result
+			errorResult := NewTaskResultError(a.activeTask.Task, fmt.Errorf("task error: %s", a.activeTask.Status))
+
+			// Send the error result using the publisher
+			a.activeTask.Publisher.SendResult(context.Background(), errorResult)
+
+			a.activeTask.Stream.Close()
 		}
+
 		a.activeTask = nil
 
 	case TaskStatusActive:
@@ -635,6 +694,13 @@ func (a *DiveAgent) doSomeWork() {
 			"status_description", a.activeTask.StatusDescription,
 			"duration", time.Since(a.activeTask.Started).Seconds(),
 		)
+
+		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
+			progressEvent := &StreamEvent{
+				Type: "progress",
+			}
+			a.activeTask.Publisher.SendEvent(context.Background(), progressEvent)
+		}
 	}
 }
 

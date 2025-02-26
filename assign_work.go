@@ -74,6 +74,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 	if err := json.Unmarshal([]byte(input), &params); err != nil {
 		return "", err
 	}
+
 	if params.AgentName == "" {
 		return "", fmt.Errorf("agent name is required")
 	}
@@ -97,6 +98,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 	if outputFormat == "" {
 		outputFormat = OutputMarkdown
 	}
+
 	// Generate a dynamic task for the agent
 	task := NewTask(TaskOptions{
 		Name:           params.Name,
@@ -105,15 +107,23 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 		Context:        params.Context,
 		OutputFormat:   outputFormat,
 	})
-	promise, err := agent.Work(ctx, task)
+
+	stream, err := agent.Work(ctx, task)
 	if err != nil {
 		return fmt.Sprintf("I couldn't complete this work due to the following error: %s", err.Error()), nil
 	}
-	result, err := promise.Get(ctx)
-	if err != nil {
-		return fmt.Sprintf("I couldn't complete this work due to the following error: %s", err.Error()), nil
+
+	// Wait for the result
+	select {
+	case result := <-stream.Results():
+		if result.Error != nil {
+			return fmt.Sprintf("I couldn't complete this work due to the following error: %s", result.Error.Error()), nil
+		}
+		return result.Content, nil
+	case <-ctx.Done():
+		stream.Close()
+		return fmt.Sprintf("I couldn't complete this work due to the following error: %s", ctx.Err().Error()), nil
 	}
-	return result.Content, nil
 }
 
 func (t *AssignWorkTool) ShouldReturnResult() bool {

@@ -100,12 +100,12 @@ func main() {
 		OutputFormat:   dive.OutputMarkdown,
 	})
 
-	promise, err := a.Work(ctx, task)
+	stream, err := a.Work(ctx, task)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	response, err := promise.Get(ctx)
+	response := <-stream.Results()
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -428,10 +428,17 @@ func LoadAndRunHCLTeam(ctx context.Context, filePath string, vars VariableValues
 	}
 	defer team.Stop(ctx)
 
-	results, err := team.Work(ctx, tasks...)
+	stream, err := team.Work(ctx, tasks...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute work: %w", err)
 	}
+
+	// Collect all results from the stream
+	var results []*TaskResult
+	for result := range stream.Results() {
+		results = append(results, result)
+	}
+
 	return results, nil
 }
 

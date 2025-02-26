@@ -124,7 +124,7 @@ func TestFileReadTool(t *testing.T) {
 		})
 		def := tool.Definition()
 
-		require.Equal(t, "ReadFile", def.Name, "Tool name mismatch")
+		require.Equal(t, "file_read", def.Name, "Tool name mismatch")
 		require.Contains(t, def.Description, "default.txt", "Description should contain default file path")
 	})
 
@@ -463,7 +463,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 		def := tool.Definition()
 
-		require.Equal(t, "WriteFile", def.Name, "Tool name mismatch")
+		require.Equal(t, "file_write", def.Name, "Tool name mismatch")
 		require.Contains(t, def.Description, "default.txt", "Description should contain default file path")
 		require.Contains(t, def.Description, "restricted", "Description should mention path restrictions")
 	})

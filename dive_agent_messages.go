@@ -12,8 +12,9 @@ type messageEvent struct {
 }
 
 type messageWork struct {
-	task    *Task
-	promise *Promise
+	task      *Task
+	stream    Stream
+	publisher *DiveStreamPublisher
 }
 
 type messageChat struct {

@@ -117,7 +117,7 @@ func (t *DiveTeam) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, error) {
+func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
@@ -139,46 +139,116 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, err
 		return nil, fmt.Errorf("failed to calculate task order: %w", err)
 	}
 
-	results := make([]*TaskResult, len(order))
-	resultsByTaskName := make(map[string]*TaskResult, len(order))
+	// Create a stream to return immediately
+	stream := NewDiveStream()
 
-	for i, taskName := range order {
-		task := tasksByName[taskName]
-		var assignedAgent Agent
-		if task.AssignedAgent() != nil {
-			assignedAgent = task.AssignedAgent()
-		} else if len(t.supervisors) > 0 {
-			assignedAgent = t.supervisors[0]
-		} else {
-			assignedAgent = t.agents[0]
-		}
-		// Set the dependencies output for the task
-		if depNames := task.Dependencies(); len(depNames) > 0 {
-			var depOutputs []string
-			for _, depName := range depNames {
-				depTask, ok := resultsByTaskName[depName]
-				if !ok {
-					return nil, fmt.Errorf("task %q has dependency %q, but it has not been completed yet", taskName, depName)
-				}
-				entry := fmt.Sprintf("# Task %q Output\n\n%s", depName, depTask.Content)
-				depOutputs = append(depOutputs, entry)
+	// Start a goroutine to process tasks asynchronously
+	go func() {
+		publisher := NewDiveStreamPublisher(stream)
+		defer publisher.Close()
+
+		resultsByTaskName := make(map[string]*TaskResult, len(order))
+
+		for _, taskName := range order {
+			task := tasksByName[taskName]
+			var assignedAgent Agent
+			if task.AssignedAgent() != nil {
+				assignedAgent = task.AssignedAgent()
+			} else if len(t.supervisors) > 0 {
+				assignedAgent = t.supervisors[0]
+			} else {
+				assignedAgent = t.agents[0]
 			}
-			depOutputsText := strings.Join(depOutputs, "\n\n")
-			task.SetDependenciesOutput(depOutputsText)
-		}
-		promise, err := assignedAgent.Work(ctx, task)
-		if err != nil {
-			return nil, fmt.Errorf("failed to assign work to agent %s: %w", assignedAgent.Name(), err)
-		}
-		result, err := promise.Get(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get result for task %s: %w", taskName, err)
-		}
-		results[i] = result
-		resultsByTaskName[taskName] = result
-	}
+			agentName := assignedAgent.Name()
 
-	return results, nil
+			// Set the dependencies output for the task
+			if depNames := task.Dependencies(); len(depNames) > 0 {
+				var depOutputs []string
+				for _, depName := range depNames {
+					depTask, ok := resultsByTaskName[depName]
+					if !ok {
+						publisher.SendEvent(ctx, &StreamEvent{
+							Type:      "error",
+							TaskName:  taskName,
+							AgentName: assignedAgent.Name(),
+							Error:     fmt.Sprintf("task %q has dependency %q, but it has not been completed yet", taskName, depName),
+						})
+						return
+					}
+					entry := fmt.Sprintf("# Task %q Output\n\n%s", depName, depTask.Content)
+					depOutputs = append(depOutputs, entry)
+				}
+				depOutputsText := strings.Join(depOutputs, "\n\n")
+				task.SetDependenciesOutput(depOutputsText)
+			}
+
+			fmt.Println("XXX assigning task", taskName, "to", agentName)
+
+			// Start the task
+			taskStream, err := assignedAgent.Work(ctx, task)
+			if err != nil {
+				publisher.SendEvent(ctx, &StreamEvent{
+					Type:      "error",
+					TaskName:  taskName,
+					AgentName: agentName,
+					Error:     fmt.Sprintf("failed to assign work to agent %s: %v", agentName, err),
+				})
+				return
+			}
+
+			// Guarantee we close the stream no matter what. This may be
+			// redundant for other calls below, but that's fine.
+			defer taskStream.Close()
+
+			// Process all events and results from the task stream. We don't
+			// move to the next task until this one is complete.
+			taskDone := false
+			for !taskDone {
+				select {
+
+				// Forward events
+				case event, ok := <-taskStream.Events():
+					if !ok {
+						continue
+					}
+					if !publisher.SendEvent(ctx, event) {
+						return // Context canceled
+					}
+
+				// Forward results and process
+				case result, ok := <-taskStream.Results():
+					if !ok {
+						taskDone = true
+						continue
+					}
+					if !publisher.SendResult(ctx, result) {
+						return // Context canceled
+					}
+					if result.Error != nil {
+						return // The task failed, so we are done
+					}
+					resultsByTaskName[taskName] = result
+					fmt.Println("XXX done with task", taskName, "result", result.Content, "agent", agentName)
+
+				case <-ctx.Done():
+					publisher.SendEvent(context.Background(), &StreamEvent{
+						Type:      "error",
+						TaskName:  taskName,
+						AgentName: agentName,
+						Error:     fmt.Sprintf("context canceled while waiting for task %s: %v", taskName, ctx.Err()),
+					})
+					taskStream.Close()
+					return
+				}
+			}
+		}
+
+		// Send a final event indicating all tasks are complete
+		completeEvent := &StreamEvent{Type: "done"}
+		publisher.SendEvent(context.Background(), completeEvent)
+	}()
+
+	return stream, nil
 }
 
 func (t *DiveTeam) GetAgent(name string) (Agent, bool) {

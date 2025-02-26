@@ -8,7 +8,8 @@ import (
 
 type taskState struct {
 	Task              *Task
-	Promise           *Promise
+	Stream            Stream
+	Publisher         *DiveStreamPublisher
 	Status            TaskStatus
 	Iterations        int
 	Started           time.Time

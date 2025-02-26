@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/getstingrai/dive/llm"
@@ -61,7 +62,7 @@ type Team interface {
 	Event(ctx context.Context, event *Event) error
 
 	// Work on tasks
-	Work(ctx context.Context, tasks ...*Task) ([]*TaskResult, error)
+	Work(ctx context.Context, tasks ...*Task) (Stream, error)
 
 	// Start all agents belonging to the team
 	Start(ctx context.Context) error
@@ -98,7 +99,7 @@ type Agent interface {
 	Event(ctx context.Context, event *Event) error
 
 	// Work gives the agent a task to complete
-	Work(ctx context.Context, task *Task) (*Promise, error)
+	Work(ctx context.Context, task *Task) (Stream, error)
 
 	// Start the agent
 	Start(ctx context.Context) error
@@ -108,4 +109,34 @@ type Agent interface {
 
 	// IsRunning returns true if the agent is running
 	IsRunning() bool
+}
+
+// Stream is a stream of events from a Team or Agent
+type Stream interface {
+	// Events returns a channel of events from the stream
+	Events() <-chan *StreamEvent
+
+	// Result returns a channel that will receive task results
+	Results() <-chan *TaskResult
+
+	// Close closes the stream
+	Close()
+}
+
+// StreamEvent is an event from a Stream
+type StreamEvent struct {
+	// Type of the event
+	Type string `json:"type"`
+
+	// TaskName is the name of the task that generated the event, if any
+	TaskName string `json:"task_name,omitempty"`
+
+	// AgentName is the name of the agent associated with the event, if any
+	AgentName string `json:"agent_name,omitempty"`
+
+	// Data contains the event payload
+	Data json.RawMessage `json:"data,omitempty"`
+
+	// Error contains an error message if the event is an error
+	Error string `json:"error,omitempty"`
 }

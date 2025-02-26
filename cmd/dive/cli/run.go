@@ -301,15 +301,30 @@ func runTeam(filePath string, varsFlag string, verbose bool) tea.Cmd {
 		}
 		defer team.Stop(ctx)
 
-		results, err := team.Work(ctx, tasks...)
+		stream, err := team.Work(ctx, tasks...)
 		if err != nil {
 			return resultMsg{
 				err: fmt.Errorf("failed to execute work: %w", err),
 			}
 		}
 
+		for {
+			select {
+			case event, ok := <-stream.Events():
+				if !ok {
+					continue
+				}
+				print("EVENT", event.Type)
+			case result, ok := <-stream.Results():
+				if !ok {
+					continue
+				}
+				print("RESULT", result.Content)
+			}
+		}
+
 		return resultMsg{
-			results: results,
+			results: nil,
 			err:     err,
 		}
 	}

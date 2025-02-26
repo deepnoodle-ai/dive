@@ -163,15 +163,25 @@ func main() {
 		Dependencies:   []string{researchTask.Name()},
 	})
 
-	results, err := team.Work(ctx, researchTask, writingTask)
+	stream, err := team.Work(ctx, researchTask, writingTask)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	for i, result := range results {
-		fmt.Printf("---- task result %d - %s ----\n", i+1, result.Task.Name())
-		fmt.Println(result.Content)
-		fmt.Println()
+	results := []*dive.TaskResult{}
+	running := true
+	for running {
+		select {
+		case result, ok := <-stream.Results():
+			if !ok {
+				running = false
+				break
+			}
+			fmt.Printf("---- task result %s ----\n", result.Task.Name())
+			fmt.Println(result.Content)
+			fmt.Println()
+			results = append(results, result)
+		}
 	}
 
 	if err := os.MkdirAll("output", 0755); err != nil {

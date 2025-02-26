@@ -76,11 +76,17 @@ func TestAgentTask(t *testing.T) {
 		ExpectedOutput: "A short poem about a cat",
 	})
 
-	promise, err := agent.Work(ctx, task)
+	stream, err := agent.Work(ctx, task)
 	require.NoError(t, err)
 
-	result, err := promise.Get(ctx)
-	require.NoError(t, err)
+	var result *TaskResult
+	select {
+	case result = <-stream.Results():
+		require.NotNil(t, result)
+		require.Nil(t, result.Error)
+	case <-ctx.Done():
+		t.Fatal("context canceled while waiting for task result")
+	}
 
 	content := strings.ToLower(result.Content)
 
