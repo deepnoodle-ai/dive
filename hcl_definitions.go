@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
-	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/hashicorp/hcl/v2/hclsimple"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 
@@ -18,8 +18,8 @@ import (
 
 // HCLDefinition represents the top-level HCL structure
 type HCLDefinition struct {
-	Name        string           `hcl:"name,label"`
-	Description string           `hcl:"description"`
+	Name        string           `hcl:"name,optional"`
+	Description string           `hcl:"description,optional"`
 	Agents      []*HCLAgent      `hcl:"agent,block"`
 	Tasks       []*HCLTask       `hcl:"task,block"`
 	Config      *HCLGlobalConfig `hcl:"config,block"`
@@ -64,6 +64,7 @@ type HCLRole struct {
 // HCLTask represents a task definition in HCL
 type HCLTask struct {
 	Name           string   `hcl:"name,label"`
+	NameOverride   string   `hcl:"name,optional"`
 	Description    string   `hcl:"description"`
 	ExpectedOutput string   `hcl:"expected_output,optional"`
 	OutputFormat   string   `hcl:"output_format,optional"`
@@ -81,7 +82,7 @@ type HCLVariable struct {
 	Name        string   `hcl:"name,label"`
 	Type        string   `hcl:"type"`
 	Description string   `hcl:"description,optional"`
-	Default     hcl.Body `hcl:"default,optional"`
+	Default     hcl.Body `hcl:"default,block"`
 }
 
 // VariableValues represents the values for variables
@@ -106,15 +107,16 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 	}
 
 	// First pass: extract variable definitions
-	var tempDef HCLDefinition
-	// tempCtx := &hcl.EvalContext{
-	// 	Functions: createStandardFunctions(),
-	// }
-
-	// Use a custom schema to handle variable blocks with default blocks
 	content, diags := file.Body.Content(&hcl.BodySchema{
 		Blocks: []hcl.BlockHeaderSchema{
 			{Type: "variable", LabelNames: []string{"name"}},
+			{Type: "agent", LabelNames: []string{"name"}},
+			{Type: "task", LabelNames: []string{"name"}},
+			{Type: "config", LabelNames: []string{}},
+		},
+		Attributes: []hcl.AttributeSchema{
+			{Name: "name", Required: false},
+			{Name: "description", Required: false},
 		},
 	})
 
@@ -178,27 +180,6 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 				varValues[varName] = val
 			}
 		}
-
-		// Create a variable object for the definition
-		variable := &HCLVariable{
-			Name: varName,
-		}
-
-		if typeAttr, exists := varContent.Attributes["type"]; exists {
-			typeVal, diags := typeAttr.Expr.Value(evalCtx)
-			if !diags.HasErrors() && typeVal.Type() == cty.String {
-				variable.Type = typeVal.AsString()
-			}
-		}
-
-		if descAttr, exists := varContent.Attributes["description"]; exists {
-			descVal, diags := descAttr.Expr.Value(evalCtx)
-			if !diags.HasErrors() && descVal.Type() == cty.String {
-				variable.Description = descVal.AsString()
-			}
-		}
-
-		tempDef.Variables = append(tempDef.Variables, variable)
 	}
 
 	// Update the evaluation context with the variable values
@@ -207,8 +188,7 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 	// Second pass: decode the full configuration with variables and functions
 	var def HCLDefinition
 
-	// Instead of using gohcl.DecodeBody directly, we need to use a custom decoder
-	// that can handle variables in all contexts
+	// Use a custom schema to handle blocks with variables
 	fullContent, diags := file.Body.Content(&hcl.BodySchema{
 		Blocks: []hcl.BlockHeaderSchema{
 			{Type: "agent", LabelNames: []string{"name"}},
@@ -252,14 +232,8 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 	for _, block := range fullContent.Blocks {
 		switch block.Type {
 		case "variable":
-			// Variables were already processed in the first pass
-			// Just copy them to the final definition
-			for _, v := range tempDef.Variables {
-				if v.Name == block.Labels[0] {
-					def.Variables = append(def.Variables, v)
-					break
-				}
-			}
+			// Skip variables, they were already processed
+			continue
 
 		case "config":
 			var config HCLGlobalConfig
@@ -271,25 +245,26 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 		case "agent":
 			var agent HCLAgent
 			agent.Name = block.Labels[0]
-
 			if diags := gohcl.DecodeBody(block.Body, evalCtx, &agent); diags.HasErrors() {
 				return nil, fmt.Errorf("failed to decode agent block: %s", diags.Error())
 			}
-
+			if agent.NameOverride != "" {
+				agent.Name = agent.NameOverride
+			}
 			def.Agents = append(def.Agents, &agent)
 
 		case "task":
 			var task HCLTask
 			task.Name = block.Labels[0]
-
 			if diags := gohcl.DecodeBody(block.Body, evalCtx, &task); diags.HasErrors() {
 				return nil, fmt.Errorf("failed to decode task block: %s", diags.Error())
 			}
-
+			if task.NameOverride != "" {
+				task.Name = task.NameOverride
+			}
 			def.Tasks = append(def.Tasks, &task)
 		}
 	}
-
 	return &def, nil
 }
 
@@ -547,61 +522,28 @@ func createStandardFunctions() map[string]function.Function {
 	}
 }
 
-// ParseHCLWithVars parses an HCL string with variables
-func ParseHCLWithVars(hclStr string, vars VariableValues) (map[string]cty.Value, error) {
-	file, diags := hclsyntax.ParseConfig([]byte(hclStr), "inline.hcl", hcl.Pos{Line: 1, Column: 1})
-	if diags.HasErrors() {
-		return nil, fmt.Errorf("failed to parse HCL: %s", diags.Error())
-	}
-
-	// Create evaluation context with variables
+// StringWithVars evaluates a string with variables
+func StringWithVars(input string, vars VariableValues) (string, error) {
+	// Create evaluation context with variables and functions
 	evalCtx := &hcl.EvalContext{
-		Variables: make(map[string]cty.Value),
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(vars),
+		},
 		Functions: createStandardFunctions(),
 	}
 
-	// Add provided variables to context
-	for k, v := range vars {
-		evalCtx.Variables[k] = v
-	}
-
-	// Extract attributes
-	attrs, diags := file.Body.JustAttributes()
-	if diags.HasErrors() {
-		return nil, fmt.Errorf("failed to extract attributes: %s", diags.Error())
-	}
-
-	// Evaluate each attribute
-	result := make(map[string]cty.Value)
-	for name, attr := range attrs {
-		val, diags := attr.Expr.Value(evalCtx)
-		if diags.HasErrors() {
-			return nil, fmt.Errorf("failed to evaluate attribute %s: %s", name, diags.Error())
-		}
-		result[name] = val
-	}
-
-	return result, nil
-}
-
-// StringWithVars evaluates a string with variables
-func StringWithVars(input string, vars VariableValues) (string, error) {
 	// Wrap the input in an HCL attribute for parsing
 	hclStr := fmt.Sprintf("value = %s", input)
 
-	result, err := ParseHCLWithVars(hclStr, vars)
+	// Parse and evaluate the string
+	var result struct {
+		Value string `hcl:"value"`
+	}
+
+	err := hclsimple.Decode("inline.hcl", []byte(hclStr), evalCtx, &result)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to evaluate string with variables: %w", err)
 	}
 
-	val, ok := result["value"]
-	if !ok {
-		return "", fmt.Errorf("failed to evaluate string with variables")
-	}
-
-	if val.Type() != cty.String {
-		return "", fmt.Errorf("evaluated expression is not a string")
-	}
-
-	return val.AsString(), nil
+	return result.Value, nil
 }

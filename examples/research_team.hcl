@@ -1,4 +1,15 @@
-// Define variables
+
+// Global configuration
+
+config {
+  default_provider = "anthropic"
+  log_level = "info"
+  cache_control = "ephemeral"
+  enabled_tools = ["google_search", "firecrawl"]
+}
+
+// Variables
+
 variable "team_name" {
   type = "string"
   description = "The name of the research team"
@@ -11,7 +22,7 @@ variable "supervisor_name" {
   type = "string"
   description = "The name of the supervisor agent"
   default {
-    value = "Supervisor"
+    value = "Supervisor Joe"
   }
 }
 
@@ -39,18 +50,9 @@ variable "task_timeout" {
   }
 }
 
-# description = "my research team"
-
-// Global configuration
-config {
-  default_provider = "anthropic"
-  log_level = "info"
-  cache_control = "ephemeral"
-  enabled_tools = ["google_search", "firecrawl"]
-}
-
 // Define agents
-agent "Supervisor" {
+
+agent "Supervisory" {
   name = var.supervisor_name
   role {
     description = format("Research Supervisor and Renowned Author. Assign research tasks to %s, but prepare the final reports or biographies yourself.", var.assistant_name)
@@ -79,6 +81,7 @@ agent "Research Assistant" {
 }
 
 // Define tasks
+
 task "Background Research" {
   description = format("Gather background research that will be used to create a history of %s. Don't consult more than 3 sources. The goal is to produce about 3 paragraphs of research - that is all. Don't overdo it.", var.research_topic)
   assigned_agent = var.assistant_name
