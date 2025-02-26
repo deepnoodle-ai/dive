@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/getstingrai/dive"
+	"github.com/getstingrai/dive/slogger"
 	"github.com/zclconf/go-cty/cty"
 )
 
@@ -46,12 +47,40 @@ func main() {
 	// Create context
 	ctx := context.Background()
 
-	// Run the team
-	results, err := dive.LoadAndRunHCLTeam(ctx, *filePath, vars)
+	// Create logger
+	logger := slogger.New(slogger.LevelFromString("debug"))
+
+	team, tasks, err := dive.LoadHCLTeam(ctx, *filePath, vars, logger)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	fmt.Println("team loaded", team.Name())
+
+	if err := team.Start(ctx); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer team.Stop(ctx)
+
+	fmt.Println("team started")
+
+	stream, err := team.Work(ctx, tasks...)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("team working")
+
+	// Collect all results from the stream
+	var results []*dive.TaskResult
+	for result := range stream.Results() {
+		results = append(results, result)
+	}
+
+	fmt.Println("team done")
 
 	// Print results
 	fmt.Println("\nResults:")

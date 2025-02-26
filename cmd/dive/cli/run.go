@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/getstingrai/dive"
+	"github.com/getstingrai/dive/slogger"
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -83,6 +84,7 @@ var keys = keyMap{
 const (
 	stateRunning = iota
 	stateResults
+	stateStreaming // New state for streaming events and results
 )
 
 // Model represents the application state
@@ -93,12 +95,19 @@ type runModel struct {
 	help     help.Model
 	keys     keyMap
 	results  []*dive.TaskResult
+	events   []string // Store events
+	logs     []string // Store combined logs of events and results
 	err      error
 	width    int
 	height   int
 	filePath string
 	vars     string
 	verbose  bool
+
+	// Channels for async communication
+	eventCh  chan eventMsg
+	resultCh chan taskResultMsg
+	doneCh   chan completionMsg
 }
 
 func initialRunModel(filePath string, vars string, verbose bool) runModel {
@@ -117,13 +126,22 @@ func initialRunModel(filePath string, vars string, verbose bool) runModel {
 		filePath: filePath,
 		vars:     vars,
 		verbose:  verbose,
+		events:   []string{},
+		logs:     []string{},
+		results:  []*dive.TaskResult{},
+
+		// Initialize channels
+		eventCh:  make(chan eventMsg),
+		resultCh: make(chan taskResultMsg),
+		doneCh:   make(chan completionMsg),
 	}
 }
 
 func (m runModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		runTeam(m.filePath, m.vars, m.verbose),
+		runTeam(m.filePath, m.vars, m.verbose, m.eventCh, m.resultCh, m.doneCh),
+		waitForActivity(m.eventCh, m.resultCh, m.doneCh),
 	)
 }
 
@@ -145,7 +163,7 @@ func (m runModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		if m.state == stateResults {
+		if m.state == stateResults || m.state == stateStreaming {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - 10 // Adjust for header and footer
 		}
@@ -157,7 +175,65 @@ func (m runModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
 
+	case eventMsg:
+		// Add event to logs
+		logEntry := fmt.Sprintf("[%s] EVENT: %s", msg.timestamp.Format("15:04:05"), msg.eventType)
+		m.logs = append(m.logs, logEntry)
+		m.events = append(m.events, msg.eventType)
+
+		// If we're already in streaming state, update the viewport
+		if m.state == stateStreaming {
+			m.viewport.SetContent(formatLogs(m.logs, m.verbose))
+		} else {
+			// Transition to streaming state
+			m.state = stateStreaming
+			vp := viewport.New(m.width, m.height-10)
+			vp.SetContent(formatLogs(m.logs, m.verbose))
+			m.viewport = vp
+		}
+
+		// Continue waiting for more activity
+		cmds = append(cmds, waitForActivity(m.eventCh, m.resultCh, m.doneCh))
+		return m, tea.Batch(cmds...)
+
+	case taskResultMsg:
+		// Add result to logs and results
+		m.results = append(m.results, msg.result)
+		logEntry := fmt.Sprintf("[%s] RESULT: Task completed with content: %s",
+			msg.result.FinishedAt.Format("15:04:05"),
+			// msg.result.Task.Name(),
+			msg.result.Content)
+		m.logs = append(m.logs, logEntry)
+
+		// If we're already in streaming state, update the viewport
+		if m.state == stateStreaming {
+			m.viewport.SetContent(formatLogs(m.logs, m.verbose))
+		} else {
+			// Transition to streaming state
+			m.state = stateStreaming
+			vp := viewport.New(m.width, m.height-10)
+			vp.SetContent(formatLogs(m.logs, m.verbose))
+			m.viewport = vp
+		}
+
+		// Continue waiting for more activity
+		cmds = append(cmds, waitForActivity(m.eventCh, m.resultCh, m.doneCh))
+		return m, tea.Batch(cmds...)
+
+	case completionMsg:
+		// Handle completion
+		m.state = stateResults
+		m.err = msg.err
+
+		// Create viewport for final results
+		vp := viewport.New(m.width, m.height-10)
+		vp.SetContent(formatResults(m.results, m.err, m.verbose))
+		m.viewport = vp
+
+		return m, nil
+
 	case resultMsg:
+		// For backward compatibility
 		m.state = stateResults
 		m.results = msg.results
 		m.err = msg.err
@@ -170,7 +246,7 @@ func (m runModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.state == stateResults {
+	if m.state == stateResults || m.state == stateStreaming {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		cmds = append(cmds, cmd)
@@ -185,6 +261,8 @@ func (m runModel) View() string {
 		return runningView(m)
 	case stateResults:
 		return resultsView(m)
+	case stateStreaming:
+		return streamingView(m)
 	default:
 		return "Unknown state"
 	}
@@ -230,6 +308,25 @@ func resultsView(m runModel) string {
 	)
 }
 
+func streamingView(m runModel) string {
+	title := titleStyle.Render("Dive Team Runner - Live Stream")
+
+	status := infoStyle.Render(fmt.Sprintf("Streaming events and results (%d events, %d results)",
+		len(m.events), len(m.results)))
+
+	help := m.help.View(m.keys)
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		status,
+		"",
+		m.viewport.View(),
+		"",
+		help,
+	)
+}
+
 // Format results for display
 func formatResults(results []*dive.TaskResult, err error, verbose bool) string {
 	if err != nil {
@@ -257,14 +354,74 @@ func formatResults(results []*dive.TaskResult, err error, verbose bool) string {
 	return sb.String()
 }
 
+// Format logs for display
+func formatLogs(logs []string, verbose bool) string {
+	if len(logs) == 0 {
+		return "No logs yet..."
+	}
+
+	var sb strings.Builder
+
+	// If verbose, show all logs
+	if verbose {
+		for _, log := range logs {
+			sb.WriteString(log)
+			sb.WriteString("\n")
+		}
+	} else {
+		// Otherwise, show only the last 20 logs
+		startIdx := 0
+		if len(logs) > 20 {
+			startIdx = len(logs) - 20
+		}
+
+		for i := startIdx; i < len(logs); i++ {
+			sb.WriteString(logs[i])
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
 // Message for team run results
 type resultMsg struct {
 	results []*dive.TaskResult
 	err     error
 }
 
+// Message for a single event
+type eventMsg struct {
+	eventType string
+	timestamp time.Time
+}
+
+// Message for a single result
+type taskResultMsg struct {
+	result *dive.TaskResult
+}
+
+// Message for completion
+type completionMsg struct {
+	err error
+}
+
+// Command to wait for activity from the runTeam command
+func waitForActivity(eventCh chan eventMsg, resultCh chan taskResultMsg, doneCh chan completionMsg) tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case msg := <-eventCh:
+			return msg
+		case msg := <-resultCh:
+			return msg
+		case msg := <-doneCh:
+			return msg
+		}
+	}
+}
+
 // Command to run the team
-func runTeam(filePath string, varsFlag string, verbose bool) tea.Cmd {
+func runTeam(filePath string, varsFlag string, verbose bool, eventCh chan eventMsg, resultCh chan taskResultMsg, doneCh chan completionMsg) tea.Cmd {
 	return func() tea.Msg {
 		// Parse variables
 		vars := dive.VariableValues{}
@@ -273,9 +430,10 @@ func runTeam(filePath string, varsFlag string, verbose bool) tea.Cmd {
 			for _, pair := range varPairs {
 				parts := strings.SplitN(pair, "=", 2)
 				if len(parts) != 2 {
-					return resultMsg{
+					doneCh <- completionMsg{
 						err: fmt.Errorf("invalid variable format: %s", pair),
 					}
+					return nil
 				}
 				key := strings.TrimSpace(parts[0])
 				value := strings.TrimSpace(parts[1])
@@ -287,46 +445,71 @@ func runTeam(filePath string, varsFlag string, verbose bool) tea.Cmd {
 		ctx := context.Background()
 
 		// Run the team
-		team, tasks, err := dive.LoadHCLTeam(ctx, filePath, vars)
+		logger := slogger.New(slogger.LevelFromString("debug"))
+		team, tasks, err := dive.LoadHCLTeam(ctx, filePath, vars, logger)
 		if err != nil {
-			return resultMsg{
+			doneCh <- completionMsg{
 				err: fmt.Errorf("failed to load HCL team: %w", err),
 			}
+			return nil
 		}
 
 		if err := team.Start(ctx); err != nil {
-			return resultMsg{
+			doneCh <- completionMsg{
 				err: fmt.Errorf("failed to start team: %w", err),
 			}
+			return nil
 		}
 		defer team.Stop(ctx)
 
 		stream, err := team.Work(ctx, tasks...)
 		if err != nil {
-			return resultMsg{
+			doneCh <- completionMsg{
 				err: fmt.Errorf("failed to execute work: %w", err),
 			}
+			return nil
 		}
 
-		for {
-			select {
-			case event, ok := <-stream.Events():
-				if !ok {
-					continue
+		// Start a goroutine to process events and results
+		go func() {
+			for {
+				select {
+				case result, ok := <-stream.Results():
+					if !ok {
+						break
+					}
+					resultCh <- taskResultMsg{
+						result: result,
+					}
 				}
-				print("EVENT", event.Type)
-			case result, ok := <-stream.Results():
-				if !ok {
-					continue
-				}
-				print("RESULT", result.Content)
 			}
-		}
+			// var results []*dive.TaskResult
+			// var streamErr error
 
-		return resultMsg{
-			results: nil,
-			err:     err,
-		}
+			// // Process events
+			// for event := range stream.Events() {
+			// 	eventCh <- eventMsg{
+			// 		eventType: event.Type,
+			// 		timestamp: time.Now(),
+			// 	}
+			// }
+
+			// // Process results
+			// for result := range stream.Results() {
+			// 	results = append(results, result)
+			// 	resultCh <- taskResultMsg{
+			// 		result: result,
+			// 	}
+			// }
+
+			// // Send completion message when both channels are closed
+			// doneCh <- completionMsg{
+			// 	err: streamErr,
+			// }
+		}()
+
+		// Return nil as we're using channels for communication
+		return nil
 	}
 }
 

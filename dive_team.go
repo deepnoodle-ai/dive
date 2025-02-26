@@ -142,6 +142,8 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 	// Create a stream to return immediately
 	stream := NewDiveStream()
 
+	fmt.Println("XXX starting task processing")
+
 	// Start a goroutine to process tasks asynchronously
 	go func() {
 		publisher := NewDiveStreamPublisher(stream)
@@ -217,8 +219,8 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 
 				// Forward results and process
 				case result, ok := <-taskStream.Results():
+					taskDone = true
 					if !ok {
-						taskDone = true
 						continue
 					}
 					if !publisher.SendResult(ctx, result) {

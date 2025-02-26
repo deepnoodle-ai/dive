@@ -295,15 +295,7 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 }
 
 // BuildTeamFromHCL builds a Team from an HCL definition
-func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition) (*DiveTeam, []*Task, error) {
-	// Set up default configuration
-	logLevel := "info"
-	if def.Config != nil && def.Config.LogLevel != "" {
-		logLevel = def.Config.LogLevel
-	}
-
-	// Create logger
-	logger := slogger.New(slogger.LevelFromString(logLevel))
+func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition, logger slogger.Logger) (*DiveTeam, []*Task, error) {
 
 	// Initialize tools
 	var enabledTools []string
@@ -404,42 +396,16 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition) (*DiveTeam, []*Ta
 	return team, tasks, nil
 }
 
-func LoadHCLTeam(ctx context.Context, filePath string, vars VariableValues) (*DiveTeam, []*Task, error) {
+func LoadHCLTeam(ctx context.Context, filePath string, vars VariableValues, logger slogger.Logger) (*DiveTeam, []*Task, error) {
 	def, err := LoadHCLDefinition(filePath, vars)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load HCL definition: %w", err)
 	}
-	team, tasks, err := BuildTeamFromHCL(ctx, def)
+	team, tasks, err := BuildTeamFromHCL(ctx, def, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build team: %w", err)
 	}
 	return team, tasks, nil
-}
-
-// LoadAndRunHCLTeam loads an HCL definition and runs the team
-func LoadAndRunHCLTeam(ctx context.Context, filePath string, vars VariableValues) ([]*TaskResult, error) {
-	team, tasks, err := LoadHCLTeam(ctx, filePath, vars)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load HCL team: %w", err)
-	}
-
-	if err := team.Start(ctx); err != nil {
-		return nil, fmt.Errorf("failed to start team: %w", err)
-	}
-	defer team.Stop(ctx)
-
-	stream, err := team.Work(ctx, tasks...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute work: %w", err)
-	}
-
-	// Collect all results from the stream
-	var results []*TaskResult
-	for result := range stream.Results() {
-		results = append(results, result)
-	}
-
-	return results, nil
 }
 
 // Helper functions for variable handling

@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/getstingrai/dive"
+	"github.com/getstingrai/dive/slogger"
 	"github.com/spf13/cobra"
 )
 
@@ -247,7 +248,8 @@ type teamLoadedMsg struct {
 func loadTeam(filePath string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		team, tasks, err := dive.LoadHCLTeam(ctx, filePath, nil)
+		logger := slogger.New(slogger.LevelFromString("debug"))
+		team, tasks, err := dive.LoadHCLTeam(ctx, filePath, nil, logger)
 		if err != nil {
 			// Return error message
 			return chatResponseMsg{

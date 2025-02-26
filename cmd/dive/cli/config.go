@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/getstingrai/dive"
+	"github.com/getstingrai/dive/slogger"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +32,8 @@ This will check the syntax and structure of the file without executing any tasks
 		ctx := context.Background()
 
 		// Validate the team definition
-		_, _, err := dive.LoadHCLTeam(ctx, filePath, nil)
+		logger := slogger.New(slogger.LevelFromString("debug"))
+		_, _, err := dive.LoadHCLTeam(ctx, filePath, nil, logger)
 		if err != nil {
 			return fmt.Errorf("validation failed: %v", err)
 		}
