@@ -132,7 +132,7 @@ func (t *FileWriteTool) Definition() *llm.ToolDefinition {
 	}
 
 	return &llm.ToolDefinition{
-		Name:        "WriteFile",
+		Name:        "file_write",
 		Description: description,
 		Parameters: llm.Schema{
 			Type:     "object",

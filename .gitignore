@@ -26,3 +26,4 @@ go.work.sum
 
 .venv
 /output
+/cmd/dive/dive

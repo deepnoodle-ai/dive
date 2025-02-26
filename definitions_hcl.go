@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -10,10 +11,14 @@ import (
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/hashicorp/hcl/v2/hclsimple"
+	"github.com/mendableai/firecrawl-go"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 
+	"github.com/getstingrai/dive/llm"
 	"github.com/getstingrai/dive/slogger"
+	"github.com/getstingrai/dive/tools"
+	"github.com/getstingrai/dive/tools/google"
 )
 
 // HCLDefinition represents the top-level HCL structure
@@ -24,6 +29,7 @@ type HCLDefinition struct {
 	Tasks       []*HCLTask       `hcl:"task,block"`
 	Config      *HCLGlobalConfig `hcl:"config,block"`
 	Variables   []*HCLVariable   `hcl:"variable,block"`
+	Tools       []*HCLTool       `hcl:"tool,block"`
 }
 
 // HCLGlobalConfig contains global configuration settings
@@ -34,6 +40,12 @@ type HCLGlobalConfig struct {
 	CacheControl    string            `hcl:"cache_control,optional"`
 	EnabledTools    []string          `hcl:"enabled_tools,optional"`
 	ProviderConfigs map[string]string `hcl:"provider_configs,optional"`
+}
+
+// HCLTool represents a tool definition in HCL
+type HCLTool struct {
+	Name    string `hcl:"name,label"`
+	Enabled bool   `hcl:"enabled,optional"`
 }
 
 // HCLAgent represents an agent definition in HCL
@@ -113,6 +125,7 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 			{Type: "agent", LabelNames: []string{"name"}},
 			{Type: "task", LabelNames: []string{"name"}},
 			{Type: "config", LabelNames: []string{}},
+			{Type: "tool", LabelNames: []string{"name"}},
 		},
 		Attributes: []hcl.AttributeSchema{
 			{Name: "name", Required: false},
@@ -195,6 +208,7 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 			{Type: "task", LabelNames: []string{"name"}},
 			{Type: "config", LabelNames: []string{}},
 			{Type: "variable", LabelNames: []string{"name"}},
+			{Type: "tool", LabelNames: []string{"name"}},
 		},
 		Attributes: []hcl.AttributeSchema{
 			{Name: "name", Required: false},
@@ -263,6 +277,18 @@ func LoadHCLDefinition(filePath string, vars VariableValues) (*HCLDefinition, er
 				task.Name = task.NameOverride
 			}
 			def.Tasks = append(def.Tasks, &task)
+
+		case "tool":
+			var tool HCLTool
+			tool.Name = block.Labels[0]
+			if diags := gohcl.DecodeBody(block.Body, evalCtx, &tool); diags.HasErrors() {
+				return nil, fmt.Errorf("failed to decode tool block: %s", diags.Error())
+			}
+			// By default, a tool defined in HCL is enabled
+			if !tool.Enabled {
+				tool.Enabled = true
+			}
+			def.Tools = append(def.Tools, &tool)
 		}
 	}
 	return &def, nil
@@ -284,17 +310,29 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition) (*DiveTeam, []*Ta
 	if def.Config != nil {
 		enabledTools = def.Config.EnabledTools
 	}
-	toolsMap, err := initializeTools(enabledTools, logger)
+
+	// Add tools from tool blocks
+	toolConfigs := make(map[string]map[string]interface{})
+	for _, toolDef := range def.Tools {
+		enabledTools = append(enabledTools, toolDef.Name)
+		// Store the config for this tool
+		toolConfigs[toolDef.Name] = map[string]interface{}{
+			"name":    toolDef.Name,
+			"enabled": toolDef.Enabled,
+		}
+	}
+
+	toolsMap, err := initializeToolsWithConfig(enabledTools, toolConfigs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize tools: %w", err)
 	}
 
 	// Create agents
 	agents := make([]Agent, 0, len(def.Agents))
-	for _, agentDef := range def.Agents {
-		var globalConfig YAMLGlobalConfig
+	for _, agentHcl := range def.Agents {
+		var globalConfig ConfigDefinition
 		if def.Config != nil {
-			globalConfig = YAMLGlobalConfig{
+			globalConfig = ConfigDefinition{
 				DefaultProvider: def.Config.DefaultProvider,
 				DefaultModel:    def.Config.DefaultModel,
 				LogLevel:        def.Config.LogLevel,
@@ -303,32 +341,28 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition) (*DiveTeam, []*Ta
 				ProviderConfigs: def.Config.ProviderConfigs,
 			}
 		}
-
-		// Convert HCL agent to YAML agent for compatibility with existing code
-		yamlAgent := YAMLAgent{
-			Name:           agentDef.Name,
-			Provider:       agentDef.Provider,
-			Model:          agentDef.Model,
-			Tools:          agentDef.Tools,
-			CacheControl:   agentDef.CacheControl,
-			MaxActiveTasks: agentDef.MaxActiveTasks,
-			TaskTimeout:    agentDef.TaskTimeout,
-			ChatTimeout:    agentDef.ChatTimeout,
-			Config:         agentDef.Config,
+		agentDef := AgentDefinition{
+			Name:           agentHcl.Name,
+			Provider:       agentHcl.Provider,
+			Model:          agentHcl.Model,
+			Tools:          agentHcl.Tools,
+			CacheControl:   agentHcl.CacheControl,
+			MaxActiveTasks: agentHcl.MaxActiveTasks,
+			TaskTimeout:    agentHcl.TaskTimeout,
+			ChatTimeout:    agentHcl.ChatTimeout,
+			Config:         agentHcl.Config,
 		}
-
-		if agentDef.Role != nil {
-			yamlAgent.Role = YAMLRole{
-				Description:   agentDef.Role.Description,
-				IsSupervisor:  agentDef.Role.IsSupervisor,
-				Subordinates:  agentDef.Role.Subordinates,
-				AcceptsChats:  agentDef.Role.AcceptsChats,
-				AcceptsEvents: agentDef.Role.AcceptsEvents,
-				AcceptsWork:   agentDef.Role.AcceptsWork,
+		if agentHcl.Role.Description != "" {
+			agentDef.Role = RoleDefinition{
+				Description:   agentHcl.Role.Description,
+				IsSupervisor:  agentHcl.Role.IsSupervisor,
+				Subordinates:  agentHcl.Role.Subordinates,
+				AcceptsChats:  agentHcl.Role.AcceptsChats,
+				AcceptsEvents: agentHcl.Role.AcceptsEvents,
+				AcceptsWork:   agentHcl.Role.AcceptsWork,
 			}
 		}
-
-		agent, err := buildAgent(yamlAgent, globalConfig, toolsMap, logger)
+		agent, err := buildAgent(agentDef, globalConfig, toolsMap, logger)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
 		}
@@ -338,8 +372,7 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition) (*DiveTeam, []*Ta
 	// Create tasks
 	tasks := make([]*Task, 0, len(def.Tasks))
 	for _, taskDef := range def.Tasks {
-		// Convert HCL task to YAML task for compatibility
-		yamlTask := YAMLTask{
+		task, err := buildTask(TaskDefinition{
 			Name:           taskDef.Name,
 			Description:    taskDef.Description,
 			ExpectedOutput: taskDef.ExpectedOutput,
@@ -351,9 +384,7 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition) (*DiveTeam, []*Ta
 			Timeout:        taskDef.Timeout,
 			Context:        taskDef.Context,
 			Kind:           taskDef.Kind,
-		}
-
-		task, err := buildTask(yamlTask, agents)
+		}, agents)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to build task %s: %w", taskDef.Name, err)
 		}
@@ -373,16 +404,23 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition) (*DiveTeam, []*Ta
 	return team, tasks, nil
 }
 
-// LoadAndRunHCLTeam loads an HCL definition and runs the team
-func LoadAndRunHCLTeam(ctx context.Context, filePath string, vars VariableValues) ([]*TaskResult, error) {
+func LoadHCLTeam(ctx context.Context, filePath string, vars VariableValues) (*DiveTeam, []*Task, error) {
 	def, err := LoadHCLDefinition(filePath, vars)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load HCL definition: %w", err)
+		return nil, nil, fmt.Errorf("failed to load HCL definition: %w", err)
 	}
-
 	team, tasks, err := BuildTeamFromHCL(ctx, def)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build team: %w", err)
+		return nil, nil, fmt.Errorf("failed to build team: %w", err)
+	}
+	return team, tasks, nil
+}
+
+// LoadAndRunHCLTeam loads an HCL definition and runs the team
+func LoadAndRunHCLTeam(ctx context.Context, filePath string, vars VariableValues) ([]*TaskResult, error) {
+	team, tasks, err := LoadHCLTeam(ctx, filePath, vars)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load HCL team: %w", err)
 	}
 
 	if err := team.Start(ctx); err != nil {
@@ -546,4 +584,91 @@ func StringWithVars(input string, vars VariableValues) (string, error) {
 	}
 
 	return result.Value, nil
+}
+
+// initializeToolsWithConfig initializes tools with custom configurations
+func initializeToolsWithConfig(enabledTools []string, toolConfigs map[string]map[string]interface{}) (map[string]llm.Tool, error) {
+	toolsMap := make(map[string]llm.Tool)
+
+	// Create a set of enabled tools for quick lookup
+	enabledToolsSet := make(map[string]bool)
+	for _, tool := range enabledTools {
+		enabledToolsSet[tool] = true
+	}
+
+	if enabledToolsSet["google_search"] {
+		key := os.Getenv("GOOGLE_SEARCH_CX")
+		if key == "" {
+			return nil, fmt.Errorf("google search requested but GOOGLE_SEARCH_CX not set")
+		}
+		googleClient, err := google.New()
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize Google Search: %w", err)
+		}
+		toolsMap["google_search"] = tools.NewGoogleSearch(googleClient)
+	}
+
+	if enabledToolsSet["firecrawl"] {
+		key := os.Getenv("FIRECRAWL_API_KEY")
+		if key == "" {
+			return nil, fmt.Errorf("firecrawl requested but FIRECRAWL_API_KEY not set")
+		}
+		app, err := firecrawl.NewFirecrawlApp(key, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize Firecrawl: %w", err)
+		}
+		var options tools.FirecrawlScrapeToolOptions
+		if config, ok := toolConfigs["firecrawl"]; ok {
+			if err := populateToolConfig(config, &options); err != nil {
+				return nil, fmt.Errorf("failed to populate firecrawl tool config: %w", err)
+			}
+		}
+		options.App = app
+		toolsMap["firecrawl"] = tools.NewFirecrawlScrapeTool(options)
+	}
+
+	if enabledToolsSet["file_read"] {
+		var options tools.FileReadToolOptions
+		if config, ok := toolConfigs["file_read"]; ok {
+			if err := populateToolConfig(config, &options); err != nil {
+				return nil, fmt.Errorf("failed to populate file_read tool config: %w", err)
+			}
+		}
+		toolsMap["file_read"] = tools.NewFileReadTool(options)
+	}
+
+	if enabledToolsSet["file_write"] {
+		var options tools.FileWriteToolOptions
+		if config, ok := toolConfigs["file_write"]; ok {
+			if err := populateToolConfig(config, &options); err != nil {
+				return nil, fmt.Errorf("failed to populate file_write tool config: %w", err)
+			}
+		}
+		toolsMap["file_write"] = tools.NewFileWriteTool(options)
+	}
+
+	if enabledToolsSet["directory_list"] {
+		var options tools.DirectoryListToolOptions
+		if config, ok := toolConfigs["directory_list"]; ok {
+			if err := populateToolConfig(config, &options); err != nil {
+				return nil, fmt.Errorf("failed to populate directory_list tool config: %w", err)
+			}
+		}
+		toolsMap["directory_list"] = tools.NewDirectoryListTool(options)
+	}
+
+	// Add more tools here as needed
+
+	return toolsMap, nil
+}
+
+func populateToolConfig(config map[string]interface{}, options interface{}) error {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tool config: %w", err)
+	}
+	if err := json.Unmarshal(configJSON, &options); err != nil {
+		return fmt.Errorf("failed to unmarshal tool config: %w", err)
+	}
+	return nil
 }

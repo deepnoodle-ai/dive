@@ -10,36 +10,38 @@ import (
 	"github.com/mendableai/firecrawl-go"
 )
 
+const DefaultFirecrawlScrapeMaxSize = 1024 * 200 // 200KB
+
 var _ llm.Tool = &GoogleSearch{}
 
 type FirecrawlScrapeInput struct {
 	URL string `json:"url"`
 }
 
-type FirecrawlScraper struct {
+type FirecrawlScrapeToolOptions struct {
+	App     *firecrawl.FirecrawlApp `json:"-"`
+	MaxSize int                     `json:"max_size,omitempty"`
+}
+
+type FirecrawlScrapeTool struct {
 	app     *firecrawl.FirecrawlApp
 	maxSize int
 }
 
-func NewFirecrawlScraper(app *firecrawl.FirecrawlApp, maxSize int) *FirecrawlScraper {
-	if maxSize <= 0 {
-		maxSize = 10000
+func NewFirecrawlScrapeTool(options FirecrawlScrapeToolOptions) *FirecrawlScrapeTool {
+	if options.MaxSize <= 0 {
+		options.MaxSize = DefaultFirecrawlScrapeMaxSize
 	}
-	return &FirecrawlScraper{app: app, maxSize: maxSize}
+	if options.App == nil {
+		panic("firecrawl app is required")
+	}
+	return &FirecrawlScrapeTool{app: options.App, maxSize: options.MaxSize}
 }
 
-func (t *FirecrawlScraper) Name() string {
-	return "FirecrawlScraper"
-}
-
-func (t *FirecrawlScraper) Description() string {
-	return "Retrieves the contents of the webpage at the given URL. The content will be truncated if it is overly long. If that happens, don't try to retrieve more content, just use what you have."
-}
-
-func (t *FirecrawlScraper) Definition() *llm.ToolDefinition {
+func (t *FirecrawlScrapeTool) Definition() *llm.ToolDefinition {
 	return &llm.ToolDefinition{
-		Name:        t.Name(),
-		Description: t.Description(),
+		Name:        "firecrawl_scrape",
+		Description: "Retrieves the contents of the webpage at the given URL. The content will be truncated if it is overly long. If that happens, don't try to retrieve more content, just use what you have.",
 		Parameters: llm.Schema{
 			Type:     "object",
 			Required: []string{"url"},
@@ -53,7 +55,7 @@ func (t *FirecrawlScraper) Definition() *llm.ToolDefinition {
 	}
 }
 
-func (t *FirecrawlScraper) Call(ctx context.Context, input string) (string, error) {
+func (t *FirecrawlScrapeTool) Call(ctx context.Context, input string) (string, error) {
 	var s FirecrawlScrapeInput
 	if err := json.Unmarshal([]byte(input), &s); err != nil {
 		return "", err
@@ -98,7 +100,7 @@ func (t *FirecrawlScraper) Call(ctx context.Context, input string) (string, erro
 	return text, nil
 }
 
-func (t *FirecrawlScraper) ShouldReturnResult() bool {
+func (t *FirecrawlScrapeTool) ShouldReturnResult() bool {
 	return true
 }
 

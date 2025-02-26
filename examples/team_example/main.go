@@ -63,7 +63,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, tools.NewFirecrawlScraper(app, 30000))
+		scraper := tools.NewFirecrawlScrapeTool(tools.FirecrawlScrapeToolOptions{
+			App: app,
+		})
+		theTools = append(theTools, scraper)
 		logger.Info("firecrawl enabled")
 	} else {
 		logger.Info("firecrawl is not enabled")

@@ -46,7 +46,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, tools.NewFirecrawlScraper(app, 30000))
+		scraper := tools.NewFirecrawlScrapeTool(tools.FirecrawlScrapeToolOptions{
+			App: app,
+		})
+		theTools = append(theTools, scraper)
 
 		log.Println("firecrawl enabled")
 	}
