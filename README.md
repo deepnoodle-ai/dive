@@ -1,4 +1,3 @@
-
 <p align="center">
   <img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
   <h1 align="center">
@@ -766,7 +765,7 @@ go run cmd/yaml_runner/main.go -file=research_team.yaml -verbose
 
 Dive provides flexible configuration options for agents, teams, and tasks. You
 can configure these components either programmatically in Go or declaratively
-using YAML.
+using YAML or HCL.
 
 ### Agent Configuration
 
@@ -797,55 +796,6 @@ agent := dive.NewAgent(dive.AgentOptions{
     ChatTimeout:     1 * time.Minute,
 })
 ```
-
-### Team Configuration
-
-When creating a team, you can configure:
-
-* **Name**: A unique identifier for the team
-* **Description**: A description of the team's purpose
-* **Agents**: The agents that belong to the team
-
-Example:
-
-```go
-team, err := dive.NewTeam(dive.TeamOptions{
-    Name:        "research-team",
-    Description: "A team for conducting research",
-    Agents:      []dive.Agent{supervisor, researcher, analyst},
-})
-```
-
-### Task Configuration
-
-When creating a task, you can configure:
-
-* **Name**: A unique identifier for the task
-* **Description**: A description of what the task should accomplish
-* **Expected Output**: A description of what the output should look like
-* **Output Format**: The format of the output (text, JSON, etc.)
-* **Assigned Agent**: Which agent should perform the task
-* **Dependencies**: Which tasks must be completed before this one
-* **Timeout**: Maximum time allowed for the task
-* **Max Iterations**: Maximum number of attempts allowed
-* **Output File**: Where to save the task output
-
-Example:
-
-```go
-task := dive.NewTask(dive.TaskOptions{
-    Name:           "market-research",
-    Description:    "Research the current market trends for electric vehicles",
-    ExpectedOutput: "A 500-word summary with 3 key insights",
-    OutputFormat:   dive.OutputFormatText,
-    Dependencies:   []string{"data-collection"},
-    MaxIterations:  3,
-    Timeout:        5 * time.Minute,
-    OutputFile:     "market_research_results.txt",
-})
-```
-
-### YAML Configuration
 
 For YAML configuration, see the [examples/README.md](examples/README.md) file
 for detailed information on the YAML structure and options.

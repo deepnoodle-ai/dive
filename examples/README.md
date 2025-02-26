@@ -81,3 +81,137 @@ The following environment variables are used by various tools:
 ## Example
 
 See `research_team.yaml` for a complete example of a team definition. 
+
+## Examples
+
+### YAML Examples
+
+- `research_team.yaml`: A team of researchers led by a supervisor, with a research assistant.
+
+### HCL Examples
+
+- `research_team.hcl`: A team of researchers with variable interpolation and function usage.
+
+## YAML Configuration Format
+
+## HCL Configuration Format
+
+HCL (HashiCorp Configuration Language) provides a more flexible way to define teams, agents, and tasks with support for variables and functions.
+
+### Top-Level Structure
+
+```hcl
+// Define variables
+variable "team_name" {
+  type = "string"
+  description = "The name of the research team"
+  default {
+    value = "Elite Research Team"
+  }
+}
+
+// Team definition
+name "research_team" {
+  description = format("A team of researchers focused on %s.", var.research_topic)
+}
+
+// Global configuration
+config {
+  default_provider = "anthropic"
+  log_level = "info"
+  enabled_tools = ["google_search"]
+}
+
+// Define agents
+agent "Supervisor" {
+  // Agent configuration
+}
+
+// Define tasks
+task "Research" {
+  // Task configuration
+}
+```
+
+### Variables
+
+Variables allow you to parameterize your configuration:
+
+```hcl
+variable "research_topic" {
+  type = "string"
+  description = "The topic to research"
+  default {
+    value = "artificial intelligence"
+  }
+}
+```
+
+You can reference variables using the `var.` prefix:
+
+```hcl
+description = format("Research the history of %s", var.research_topic)
+```
+
+### Functions
+
+HCL supports several built-in functions:
+
+- `format(format_string, args...)`: Format a string using printf-style formatting
+- `env(name)`: Get the value of an environment variable
+- `concat(list1, list2, ...)`: Concatenate multiple lists
+- `replace(string, search, replace)`: Replace all occurrences of a substring
+
+Example:
+
+```hcl
+output_file = format("%s_summary.txt", replace(var.research_topic, " ", "_"))
+```
+
+### Agent Configuration
+
+```hcl
+agent "Supervisor" {
+  role {
+    description = "Research Team Lead"
+    is_supervisor = true
+    subordinates = ["Researcher"]
+  }
+  provider = "anthropic"
+  cache_control = "ephemeral"
+  max_active_tasks = 1
+  task_timeout = "10m"
+  chat_timeout = "2m"
+}
+```
+
+### Task Configuration
+
+```hcl
+task "Research" {
+  description = format("Research the history of %s", var.research_topic)
+  assigned_agent = "Researcher"
+  timeout = "5m"
+  output_file = format("%s_research.txt", replace(var.research_topic, " ", "_"))
+}
+```
+
+## Running Examples
+
+### YAML Examples
+
+```bash
+go run cmd/yaml_runner/main.go -file=examples/research_team.yaml -verbose
+```
+
+### HCL Examples
+
+```bash
+go run cmd/hcl_runner/main.go -file=examples/research_team.hcl -verbose
+```
+
+You can override variables from the command line:
+
+```bash
+go run cmd/hcl_runner/main.go -file=examples/research_team.hcl -vars="research_topic=quantum computing"
+``` 
