@@ -115,11 +115,11 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 
 	// Wait for the result
 	select {
-	case result := <-stream.Results():
-		if result.Error != nil {
-			return fmt.Sprintf("I couldn't complete this work due to the following error: %s", result.Error.Error()), nil
+	case event := <-stream.Channel():
+		if event.Error != "" {
+			return fmt.Sprintf("I couldn't complete this work due to the following error: %s", event.Error), nil
 		}
-		return result.Content, nil
+		return event.TaskResult.Content, nil
 	case <-ctx.Done():
 		stream.Close()
 		return fmt.Sprintf("I couldn't complete this work due to the following error: %s", ctx.Err().Error()), nil

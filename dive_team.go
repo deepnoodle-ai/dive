@@ -169,7 +169,7 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 				for _, depName := range depNames {
 					depTask, ok := resultsByTaskName[depName]
 					if !ok {
-						publisher.SendEvent(ctx, &StreamEvent{
+						publisher.Send(ctx, &StreamEvent{
 							Type:      "error",
 							TaskName:  taskName,
 							AgentName: assignedAgent.Name(),
@@ -189,7 +189,7 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 			// Start the task
 			taskStream, err := assignedAgent.Work(ctx, task)
 			if err != nil {
-				publisher.SendEvent(ctx, &StreamEvent{
+				publisher.Send(ctx, &StreamEvent{
 					Type:      "error",
 					TaskName:  taskName,
 					AgentName: agentName,
@@ -209,31 +209,21 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 				select {
 
 				// Forward events
-				case event, ok := <-taskStream.Events():
+				case event, ok := <-taskStream.Channel():
 					if !ok {
 						continue
 					}
-					if !publisher.SendEvent(ctx, event) {
+					fmt.Println("XXX event:", event.Type)
+					if !publisher.Send(ctx, event) {
 						return // Context canceled
 					}
-
-				// Forward results and process
-				case result, ok := <-taskStream.Results():
-					taskDone = true
-					if !ok {
-						continue
+					if event.TaskResult != nil {
+						resultsByTaskName[taskName] = event.TaskResult
+						taskDone = true
 					}
-					if !publisher.SendResult(ctx, result) {
-						return // Context canceled
-					}
-					if result.Error != nil {
-						return // The task failed, so we are done
-					}
-					resultsByTaskName[taskName] = result
-					fmt.Println("XXX done with task", taskName, "result", result.Content, "agent", agentName)
 
 				case <-ctx.Done():
-					publisher.SendEvent(context.Background(), &StreamEvent{
+					publisher.Send(context.Background(), &StreamEvent{
 						Type:      "error",
 						TaskName:  taskName,
 						AgentName: agentName,
@@ -247,7 +237,7 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 
 		// Send a final event indicating all tasks are complete
 		completeEvent := &StreamEvent{Type: "done"}
-		publisher.SendEvent(context.Background(), completeEvent)
+		publisher.Send(context.Background(), completeEvent)
 	}()
 
 	return stream, nil

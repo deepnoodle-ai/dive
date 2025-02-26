@@ -76,8 +76,11 @@ func main() {
 
 	// Collect all results from the stream
 	var results []*dive.TaskResult
-	for result := range stream.Results() {
-		results = append(results, result)
+	for event := range stream.Channel() {
+		fmt.Println("EVENT", event.Type)
+		if event.Type == "task.result" {
+			results = append(results, event.TaskResult)
+		}
 	}
 
 	fmt.Println("team done")

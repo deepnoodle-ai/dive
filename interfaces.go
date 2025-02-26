@@ -111,13 +111,10 @@ type Agent interface {
 	IsRunning() bool
 }
 
-// Stream is a stream of events from a Team or Agent
+// Stream provides access to a stream of events from a Team or Agent
 type Stream interface {
-	// Events returns a channel of events from the stream
-	Events() <-chan *StreamEvent
-
-	// Result returns a channel that will receive task results
-	Results() <-chan *TaskResult
+	// Channel returns the channel to be used to receive events
+	Channel() <-chan *StreamEvent
 
 	// Close closes the stream
 	Close()
@@ -139,4 +136,9 @@ type StreamEvent struct {
 
 	// Error contains an error message if the event is an error
 	Error string `json:"error,omitempty"`
+
+	// TaskResult is the result of a task, if the event is a task result
+	TaskResult *TaskResult `json:"task_result,omitempty"`
 }
+
+// TODO: TaskResult should not hold a Task. Make it JSON serializable.

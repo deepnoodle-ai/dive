@@ -586,13 +586,16 @@ func (a *DiveAgent) doSomeWork() {
 				Type:  "error",
 				Error: fmt.Sprintf("task error: %s", a.activeTask.Status),
 			}
-			a.activeTask.Publisher.SendEvent(context.Background(), errorEvent)
+			a.activeTask.Publisher.Send(context.Background(), errorEvent)
 
 			// Create the error result
-			errorResult := NewTaskResultError(a.activeTask.Task, fmt.Errorf("task error: %s", a.activeTask.Status))
+			// errorResult := NewTaskResultError(a.activeTask.Task, fmt.Errorf("task error: %s", a.activeTask.Status))
 
 			// Send the error result using the publisher
-			a.activeTask.Publisher.SendResult(context.Background(), errorResult)
+			a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
+				Type:  "error",
+				Error: fmt.Sprintf("task error: %s", a.activeTask.Status),
+			})
 
 			a.activeTask.Stream.Close()
 		}
@@ -600,6 +603,12 @@ func (a *DiveAgent) doSomeWork() {
 		a.activeTask = nil
 		return
 	}
+
+	a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
+		Type:      "task.progress",
+		TaskName:  a.activeTask.Task.Name(),
+		AgentName: a.name,
+	})
 
 	switch a.activeTask.Status {
 	case TaskStatusCompleted:
@@ -620,19 +629,14 @@ func (a *DiveAgent) doSomeWork() {
 		}
 
 		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
-			completedEvent := &StreamEvent{
-				Type: "completed",
-			}
-			a.activeTask.Publisher.SendEvent(context.Background(), completedEvent)
-
-			result := &TaskResult{
-				Task:    a.activeTask.Task,
-				Content: a.activeTask.Output,
-			}
-
 			// Send the result using the publisher
-			a.activeTask.Publisher.SendResult(context.Background(), result)
-
+			a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
+				Type: "task.result",
+				TaskResult: &TaskResult{
+					Task:    a.activeTask.Task,
+					Content: a.activeTask.Output,
+				},
+			})
 			a.activeTask.Stream.Close()
 		}
 
@@ -645,10 +649,9 @@ func (a *DiveAgent) doSomeWork() {
 		)
 
 		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
-			pausedEvent := &StreamEvent{
-				Type: "paused",
-			}
-			a.activeTask.Publisher.SendEvent(context.Background(), pausedEvent)
+			a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
+				Type: "task.paused",
+			})
 		}
 
 		a.activeTask.Suspended = true
@@ -669,18 +672,11 @@ func (a *DiveAgent) doSomeWork() {
 		}
 
 		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
-			errorEvent := &StreamEvent{
+			// Send the error result using the publisher
+			a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
 				Type:  "error",
 				Error: fmt.Sprintf("task error: %s", a.activeTask.Status),
-			}
-			a.activeTask.Publisher.SendEvent(context.Background(), errorEvent)
-
-			// Create the error result
-			errorResult := NewTaskResultError(a.activeTask.Task, fmt.Errorf("task error: %s", a.activeTask.Status))
-
-			// Send the error result using the publisher
-			a.activeTask.Publisher.SendResult(context.Background(), errorResult)
-
+			})
 			a.activeTask.Stream.Close()
 		}
 
@@ -696,10 +692,9 @@ func (a *DiveAgent) doSomeWork() {
 		)
 
 		if a.activeTask.Stream != nil && a.activeTask.Publisher != nil {
-			progressEvent := &StreamEvent{
-				Type: "progress",
-			}
-			a.activeTask.Publisher.SendEvent(context.Background(), progressEvent)
+			a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
+				Type: "task.progress",
+			})
 		}
 	}
 }
