@@ -353,6 +353,33 @@ func initializeTools(enabledTools []string, logger slogger.Logger) (map[string]l
 		}
 	}
 
+	if enabledToolsSet["file_read"] {
+		toolsMap["file_read"] = tools.NewFileReadTool(tools.FileReadToolOptions{
+			DefaultFilePath: "",
+			MaxSize:         1024 * 200,
+			RootDirectory:   "",
+		})
+		logger.Info("file_read enabled")
+	}
+
+	if enabledToolsSet["file_write"] {
+		toolsMap["file_write"] = tools.NewFileWriteTool(tools.FileWriteToolOptions{
+			DefaultFilePath: "",
+			AllowList:       []string{},
+			DenyList:        []string{},
+			RootDirectory:   "",
+		})
+		logger.Info("file_write enabled")
+	}
+
+	if enabledToolsSet["directory_list"] {
+		toolsMap["directory_list"] = tools.NewDirectoryListTool(tools.DirectoryListToolOptions{
+			DefaultPath:   "",
+			MaxEntries:    200,
+			RootDirectory: "",
+		})
+	}
+
 	// Add more tools here as needed
 
 	return toolsMap, nil
