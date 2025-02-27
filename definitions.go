@@ -2,8 +2,10 @@ package dive
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/getstingrai/dive/llm"
@@ -14,30 +16,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TeamDefinition represents the top-level YAML structure
+// TeamDefinition is a serializable representation of a Team
 type TeamDefinition struct {
-	Name        string            `yaml:"name" json:"name"`
-	Description string            `yaml:"description" json:"description"`
-	Agents      []AgentDefinition `yaml:"agents" json:"agents"`
-	Tasks       []TaskDefinition  `yaml:"tasks" json:"tasks"`
-	Tools       []ToolDefinition  `yaml:"tools" json:"tools"`
-	Config      ConfigDefinition  `yaml:"config" json:"config"`
+	Name        string            `yaml:"name,omitempty" json:"name,omitempty"`
+	Description string            `yaml:"description,omitempty" json:"description,omitempty"`
+	Agents      []AgentDefinition `yaml:"agents,omitempty" json:"agents,omitempty"`
+	Tasks       []TaskDefinition  `yaml:"tasks,omitempty" json:"tasks,omitempty"`
+	Tools       []ToolDefinition  `yaml:"tools,omitempty" json:"tools,omitempty"`
+	Config      ConfigDefinition  `yaml:"config,omitempty" json:"config,omitempty"`
 }
 
-// ConfigDefinition contains global configuration settings
+// ConfigDefinition is a serializable representation of global configuration
 type ConfigDefinition struct {
-	DefaultProvider string            `yaml:"default_provider" json:"default_provider"`
-	DefaultModel    string            `yaml:"default_model" json:"default_model"`
-	LogLevel        string            `yaml:"log_level" json:"log_level"`
-	CacheControl    string            `yaml:"cache_control" json:"cache_control"`
-	EnabledTools    []string          `yaml:"enabled_tools" json:"enabled_tools"`
-	ProviderConfigs map[string]string `yaml:"provider_configs" json:"provider_configs"`
+	DefaultProvider string            `yaml:"default_provider,omitempty" json:"default_provider,omitempty"`
+	DefaultModel    string            `yaml:"default_model,omitempty" json:"default_model,omitempty"`
+	LogLevel        string            `yaml:"log_level,omitempty" json:"log_level,omitempty"`
+	CacheControl    string            `yaml:"cache_control,omitempty" json:"cache_control,omitempty"`
+	EnabledTools    []string          `yaml:"enabled_tools,omitempty" json:"enabled_tools,omitempty"`
+	ProviderConfigs map[string]string `yaml:"provider_configs,omitempty" json:"provider_configs,omitempty"`
 }
 
-// AgentDefinition represents an agent definition in YAML
+// AgentDefinition is a serializable representation of an Agent
 type AgentDefinition struct {
-	Name           string            `yaml:"name" json:"name"`
-	Role           RoleDefinition    `yaml:"role" json:"role"`
+	Name           string            `yaml:"name,omitempty" json:"name,omitempty"`
+	Role           RoleDefinition    `yaml:"role,omitempty" json:"role,omitempty"`
 	Provider       string            `yaml:"provider,omitempty" json:"provider,omitempty"`
 	Model          string            `yaml:"model,omitempty" json:"model,omitempty"`
 	Tools          []string          `yaml:"tools,omitempty" json:"tools,omitempty"`
@@ -48,20 +50,18 @@ type AgentDefinition struct {
 	Config         map[string]string `yaml:"config,omitempty" json:"config,omitempty"`
 }
 
-// RoleDefinition represents a role definition in YAML
+// RoleDefinition is a serializable representation of a Role
 type RoleDefinition struct {
-	Description   string   `yaml:"description" json:"description"`
-	IsSupervisor  bool     `yaml:"is_supervisor,omitempty" json:"is_supervisor,omitempty"`
-	Subordinates  []string `yaml:"subordinates,omitempty" json:"subordinates,omitempty"`
-	AcceptsChats  bool     `yaml:"accepts_chats,omitempty" json:"accepts_chats,omitempty"`
-	AcceptsEvents []string `yaml:"accepts_events,omitempty" json:"accepts_events,omitempty"`
-	AcceptsWork   []string `yaml:"accepts_work,omitempty" json:"accepts_work,omitempty"`
+	Description    string   `yaml:"description,omitempty" json:"description,omitempty"`
+	IsSupervisor   bool     `yaml:"is_supervisor,omitempty" json:"is_supervisor,omitempty"`
+	Subordinates   []string `yaml:"subordinates,omitempty" json:"subordinates,omitempty"`
+	AcceptedEvents []string `yaml:"accepted_events,omitempty" json:"accepted_events,omitempty"`
 }
 
-// TaskDefinition represents a task definition in YAML
+// TaskDefinition is a serializable representation of a Task
 type TaskDefinition struct {
-	Name           string   `yaml:"name" json:"name"`
-	Description    string   `yaml:"description" json:"description"`
+	Name           string   `yaml:"name,omitempty" json:"name,omitempty"`
+	Description    string   `yaml:"description,omitempty" json:"description,omitempty"`
 	ExpectedOutput string   `yaml:"expected_output,omitempty" json:"expected_output,omitempty"`
 	OutputFormat   string   `yaml:"output_format,omitempty" json:"output_format,omitempty"`
 	AssignedAgent  string   `yaml:"assigned_agent,omitempty" json:"assigned_agent,omitempty"`
@@ -73,18 +73,25 @@ type TaskDefinition struct {
 	Kind           string   `yaml:"kind,omitempty" json:"kind,omitempty"`
 }
 
-// ToolDefinition represents a tool definition
+// ToolDefinition used for serializing tool configurations
 type ToolDefinition map[string]interface{}
 
-// LoadDefinitionYAML loads a YAML team definition from a file
-func LoadDefinitionYAML(filePath string) (*TeamDefinition, error) {
+// LoadDefinition loads a TeamDefinition from a file. If the file has a .json
+// extension, it is parsed as JSON. Otherwise, it is parsed as YAML.
+func LoadDefinition(filePath string) (*TeamDefinition, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 	var def TeamDefinition
-	if err := yaml.Unmarshal(data, &def); err != nil {
-		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	if strings.HasSuffix(filePath, ".json") {
+		if err := json.Unmarshal(data, &def); err != nil {
+			return nil, fmt.Errorf("failed to parse JSON: %w", err)
+		}
+	} else {
+		if err := yaml.Unmarshal(data, &def); err != nil {
+			return nil, fmt.Errorf("failed to parse YAML: %w", err)
+		}
 	}
 	return &def, nil
 }
@@ -239,12 +246,10 @@ func buildAgent(agentDef AgentDefinition, globalConfig ConfigDefinition, toolsMa
 	agent := NewAgent(AgentOptions{
 		Name: agentDef.Name,
 		Role: Role{
-			Description:   agentDef.Role.Description,
-			IsSupervisor:  agentDef.Role.IsSupervisor,
-			Subordinates:  agentDef.Role.Subordinates,
-			AcceptsChats:  agentDef.Role.AcceptsChats,
-			AcceptsEvents: agentDef.Role.AcceptsEvents,
-			AcceptsWork:   agentDef.Role.AcceptsWork,
+			Description:    agentDef.Role.Description,
+			IsSupervisor:   agentDef.Role.IsSupervisor,
+			Subordinates:   agentDef.Role.Subordinates,
+			AcceptedEvents: agentDef.Role.AcceptedEvents,
 		},
 		LLM:            llmProvider,
 		Tools:          agentTools,

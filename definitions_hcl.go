@@ -65,12 +65,10 @@ type HCLAgent struct {
 
 // HCLRole represents a role definition in HCL
 type HCLRole struct {
-	Description   string   `hcl:"description"`
-	IsSupervisor  bool     `hcl:"is_supervisor,optional"`
-	Subordinates  []string `hcl:"subordinates,optional"`
-	AcceptsChats  bool     `hcl:"accepts_chats,optional"`
-	AcceptsEvents []string `hcl:"accepts_events,optional"`
-	AcceptsWork   []string `hcl:"accepts_work,optional"`
+	Description    string   `hcl:"description"`
+	IsSupervisor   bool     `hcl:"is_supervisor,optional"`
+	Subordinates   []string `hcl:"subordinates,optional"`
+	AcceptedEvents []string `hcl:"accepted_events,optional"`
 }
 
 // HCLTask represents a task definition in HCL
@@ -346,12 +344,10 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition, logger slogger.Lo
 		}
 		if agentHcl.Role.Description != "" {
 			agentDef.Role = RoleDefinition{
-				Description:   agentHcl.Role.Description,
-				IsSupervisor:  agentHcl.Role.IsSupervisor,
-				Subordinates:  agentHcl.Role.Subordinates,
-				AcceptsChats:  agentHcl.Role.AcceptsChats,
-				AcceptsEvents: agentHcl.Role.AcceptsEvents,
-				AcceptsWork:   agentHcl.Role.AcceptsWork,
+				Description:    agentHcl.Role.Description,
+				IsSupervisor:   agentHcl.Role.IsSupervisor,
+				Subordinates:   agentHcl.Role.Subordinates,
+				AcceptedEvents: agentHcl.Role.AcceptedEvents,
 			}
 		}
 		agent, err := buildAgent(agentDef, globalConfig, toolsMap, logger)

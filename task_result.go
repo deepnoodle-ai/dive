@@ -51,3 +51,10 @@ type TaskResult struct {
 	// FinishedAt is the time the task stopped
 	FinishedAt time.Time
 }
+
+func NewTaskResultError(task *Task, err error) *TaskResult {
+	return &TaskResult{
+		Task:  task,
+		Error: err,
+	}
+}

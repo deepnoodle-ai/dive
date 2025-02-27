@@ -14,13 +14,13 @@ type Event struct {
 	Parameters  map[string]any
 }
 
+// Role describes an agent's role on the team: its purpose, responsibilities,
+// what agents it can supervise, and what events it can handle.
 type Role struct {
-	Description   string
-	IsSupervisor  bool
-	Subordinates  []string
-	AcceptsChats  bool
-	AcceptsEvents []string
-	AcceptsWork   []string
+	Description    string
+	IsSupervisor   bool
+	Subordinates   []string
+	AcceptedEvents []string
 }
 
 func (r Role) String() string {

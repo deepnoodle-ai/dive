@@ -14,7 +14,7 @@ type messageEvent struct {
 type messageWork struct {
 	task      *Task
 	stream    Stream
-	publisher *DiveStreamPublisher
+	publisher *StreamPublisher
 }
 
 type messageChat struct {

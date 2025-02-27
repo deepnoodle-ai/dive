@@ -1,0 +1,315 @@
+package dive
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/getstingrai/dive/graph"
+)
+
+var _ Team = &DiveTeam{}
+
+// DiveTeam is the primary implementation of the Team interface. A Team consists
+// of one or more Agents that work together to complete tasks.
+type DiveTeam struct {
+	name        string
+	description string
+	agents      []Agent
+	supervisors []Agent
+	running     bool
+	taskGraph   *graph.Graph
+	taskOrder   []string
+	mutex       sync.Mutex
+}
+
+// TeamOptions are used to configure a new team.
+type TeamOptions struct {
+	Name        string
+	Description string
+	Agents      []Agent
+}
+
+// NewTeam creates a new team composed of the given agents.
+func NewTeam(opts TeamOptions) (*DiveTeam, error) {
+	t := &DiveTeam{
+		name:        opts.Name,
+		description: opts.Description,
+		agents:      opts.Agents,
+	}
+	if len(t.agents) == 0 {
+		return nil, fmt.Errorf("at least one agent is required")
+	}
+	for _, agent := range t.agents {
+		if name := agent.Name(); name == "" {
+			return nil, fmt.Errorf("agent has no name")
+		}
+		if err := agent.Join(t); err != nil {
+			return nil, err
+		}
+		if agent.Role().IsSupervisor {
+			t.supervisors = append(t.supervisors, agent)
+		}
+	}
+	if len(t.agents) > 1 && len(t.supervisors) == 0 {
+		return nil, fmt.Errorf("at least one supervisor is required")
+	}
+	return t, nil
+}
+
+// Description of the team.
+func (t *DiveTeam) Description() string {
+	return t.description
+}
+
+// Agents returns a copy of the agents in the team.
+func (t *DiveTeam) Agents() []Agent {
+	// Make a copy to help ensure immutability on the set
+	agents := make([]Agent, len(t.agents))
+	copy(agents, t.agents)
+	return agents
+}
+
+// Name returns the name of the team.
+func (t *DiveTeam) Name() string {
+	return t.name
+}
+
+// IsRunning returns true if the team is active.
+func (t *DiveTeam) IsRunning() bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	return t.running
+}
+
+// Start all agents belonging to the team.
+func (t *DiveTeam) Start(ctx context.Context) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	if len(t.agents) == 0 {
+		return fmt.Errorf("no agents to start")
+	}
+	if t.running {
+		return fmt.Errorf("team already running")
+	}
+
+	// Start all agents, but if any fail, stop them all before returning the error
+	var startedAgents []Agent
+	for _, agent := range t.agents {
+		if err := agent.Start(ctx); err != nil {
+			for _, startedAgent := range startedAgents {
+				startedAgent.Stop(ctx)
+			}
+			return fmt.Errorf("failed to start agent %q: %w", agent.Name(), err)
+		}
+		startedAgents = append(startedAgents, agent)
+	}
+
+	t.running = true
+	return nil
+}
+
+// Stop all agents belonging to the team.
+func (t *DiveTeam) Stop(ctx context.Context) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	if !t.running {
+		return fmt.Errorf("team not running")
+	}
+	t.running = false
+
+	var lastErr error
+	for _, agent := range t.agents {
+		if err := agent.Stop(ctx); err != nil {
+			lastErr = fmt.Errorf("failed to stop agent %s: %w", agent.Name(), err)
+		}
+	}
+	return lastErr
+}
+
+// Work on one or more tasks. The returned stream will deliver events and
+// results to the caller as progress is made. This batch of work is considered
+// independent of any other work the team may be doing.
+func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	if !t.running {
+		return nil, fmt.Errorf("team not running")
+	}
+	if len(tasks) == 0 {
+		return nil, fmt.Errorf("no tasks provided")
+	}
+
+	// Validate and index tasks by name
+	tasksByName := make(map[string]*Task, len(tasks))
+	for _, task := range tasks {
+		if err := task.Validate(); err != nil {
+			return nil, err
+		}
+		name := task.Name()
+		if tasksByName[name] != nil {
+			return nil, fmt.Errorf("duplicate task name: %q", name)
+		}
+		tasksByName[name] = task
+	}
+
+	// Sort tasks into execution order
+	order, err := OrderTasks(tasks)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine task execution order: %w", err)
+	}
+	var orderedTasks []*Task
+	for _, taskName := range order {
+		orderedTasks = append(orderedTasks, tasksByName[taskName])
+	}
+
+	// This stream will be used to deliver events and results to the caller
+	stream := NewDiveStream()
+
+	// Run work and process events in a separate goroutine
+	go t.workOnTasks(ctx, orderedTasks, stream)
+
+	return stream, nil
+}
+
+func (t *DiveTeam) workOnTasks(ctx context.Context, tasks []*Task, stream *DiveStream) {
+	publisher := NewStreamPublisher(stream)
+	defer publisher.Close()
+
+	resultsByTaskName := make(map[string]*TaskResult, len(tasks))
+
+	// Work on tasks sequentially
+	for _, task := range tasks {
+
+		// Determine which agent should take the task
+		var agent Agent
+		if task.AssignedAgent() != nil {
+			agent = task.AssignedAgent()
+		} else if len(t.supervisors) > 0 {
+			agent = t.supervisors[0]
+		} else {
+			agent = t.agents[0]
+		}
+
+		// Capture the output of any dependencies and store on the task
+		if dependencies := task.Dependencies(); len(dependencies) > 0 {
+			var outputs []string
+			for _, dep := range dependencies {
+				depResult, ok := resultsByTaskName[dep]
+				if !ok {
+					// This should never happen since the tasks were sorted into
+					// execution order! If it does, it indicates a severe bug so
+					// a panic is appropriate.
+					panic(fmt.Sprintf("task execution failure: task %q dependency %q", task.Name(), dep))
+				}
+				outputs = append(outputs,
+					fmt.Sprintf("<output task=%q>\n%s\n</output>", dep, depResult.Content))
+			}
+			task.SetDependenciesOutput(strings.Join(outputs, "\n\n"))
+		}
+
+		// Work the task to completion
+		result, err := t.workOnTask(ctx, task, agent, publisher)
+		if err != nil {
+			publisher.Send(context.Background(), &StreamEvent{
+				Type:      "work.error",
+				TaskName:  task.Name(),
+				AgentName: agent.Name(),
+				Error: fmt.Sprintf("work failed on task %q agent %q: %v",
+					task.Name(), agent.Name(), err),
+			})
+			return
+		}
+		resultsByTaskName[task.Name()] = result
+	}
+
+	// Send a final event indicating all work is done. Use a clean context since
+	// the provided context may have been canceled.
+	publisher.Send(context.Background(), &StreamEvent{Type: "work.done"})
+}
+
+func (t *DiveTeam) workOnTask(ctx context.Context, task *Task, agent Agent, pub *StreamPublisher) (*TaskResult, error) {
+	// Give the task to the agent then start streaming events
+	taskStream, err := agent.Work(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	defer taskStream.Close()
+
+	// Heartbeats will indicate to the client that we're still going
+	heartbeatTicker := time.NewTicker(time.Second * 1)
+	defer heartbeatTicker.Stop()
+
+	// Process all events from the task stream. Return when a task result is
+	// found or the context is canceled. The worker handles the task timeouts.
+	done := false
+	for !done {
+		select {
+		// Forward all events via the publisher
+		case event, ok := <-taskStream.Channel():
+			if !ok {
+				done = true
+				continue
+			}
+			if err := pub.Send(ctx, event); err != nil {
+				return nil, err // Canceled context probably
+			}
+			if event.TaskResult != nil {
+				return event.TaskResult, nil
+			}
+
+		// Send heartbeats periodically
+		case <-heartbeatTicker.C:
+			pub.Send(ctx, &StreamEvent{
+				Type:      "task.heartbeat",
+				TaskName:  task.Name(),
+				AgentName: agent.Name(),
+			})
+
+		// Abort if the context is canceled
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	// Reaching this point may indicate a bug since a task result should have
+	// been returned, even if it failed. Return an error in any case.
+	return nil, fmt.Errorf("task %q did not return a result", task.Name())
+}
+
+// GetAgent returns the agent with the given name
+func (t *DiveTeam) GetAgent(name string) (Agent, bool) {
+	for _, agent := range t.agents {
+		if agent.Name() == name {
+			return agent, true
+		}
+	}
+	return nil, false
+}
+
+// Overview returns a string representation of the team, which can be included
+// in agent prompts to help them understand the team's capabilities.
+func (t *DiveTeam) Overview() (string, error) {
+	return executeTemplate(teamPromptTemplate, t)
+}
+
+// Event notifies the team of an event. All agents that accept this event type
+// will be notified.
+func (t *DiveTeam) Event(ctx context.Context, event *Event) error {
+	for _, agent := range t.agents {
+		acceptedEvents := agent.Role().AcceptedEvents
+		if !sliceContains(acceptedEvents, "*") && !sliceContains(acceptedEvents, event.Name) {
+			continue
+		}
+		if err := agent.Event(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}

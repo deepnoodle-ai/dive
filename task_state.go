@@ -9,7 +9,7 @@ import (
 type taskState struct {
 	Task              *Task
 	Stream            Stream
-	Publisher         *DiveStreamPublisher
+	Publisher         *StreamPublisher
 	Status            TaskStatus
 	Iterations        int
 	Started           time.Time

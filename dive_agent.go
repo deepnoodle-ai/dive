@@ -133,7 +133,7 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		taskMessageLimit: opts.TaskMessageLimit,
 		cacheControl:     opts.CacheControl,
 		hooks:            opts.Hooks,
-		mailbox:          make(chan interface{}, 64),
+		mailbox:          make(chan interface{}, 16),
 		logger:           opts.Logger,
 		logLevel:         strings.ToLower(opts.LogLevel),
 	}
@@ -248,7 +248,7 @@ func (a *DiveAgent) Work(ctx context.Context, task *Task) (Stream, error) {
 	}
 
 	stream := NewDiveStream()
-	publisher := NewDiveStreamPublisher(stream)
+	publisher := NewStreamPublisher(stream)
 
 	message := messageWork{
 		task:      task,
