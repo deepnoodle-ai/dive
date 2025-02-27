@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseResponseText(t *testing.T) {
+func TestParseStructuredResponseText(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string

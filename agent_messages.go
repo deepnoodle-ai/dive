@@ -6,7 +6,6 @@ import (
 	"github.com/getstingrai/dive/llm"
 )
 
-// Define message types
 type messageEvent struct {
 	event *Event
 }

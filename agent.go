@@ -19,6 +19,7 @@ var (
 	DefaultTickFrequency    = time.Second * 1
 	DefaultTaskMessageLimit = 12
 	DefaultGenerationLimit  = 5
+	DefaultLogger           = slogger.NewDevNullLogger()
 )
 
 var _ Agent = &DiveAgent{}
@@ -101,11 +102,8 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 	if opts.TaskMessageLimit <= 0 {
 		opts.TaskMessageLimit = DefaultTaskMessageLimit
 	}
-	if opts.LogLevel == "" {
-		opts.LogLevel = "info"
-	}
 	if opts.Logger == nil {
-		opts.Logger = slogger.New(slogger.LevelFromString(opts.LogLevel))
+		opts.Logger = DefaultLogger
 	}
 	if opts.LLM == nil {
 		if llm, ok := detectProvider(); ok {
@@ -137,14 +135,30 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		logger:           opts.Logger,
 		logLevel:         strings.ToLower(opts.LogLevel),
 	}
-	var tools []llm.Tool
+
+	tools := make([]llm.Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
-		tools = make([]llm.Tool, len(opts.Tools))
 		copy(tools, opts.Tools)
 	}
+
+	// Supervisors need a tool to give work assignments to others
 	if opts.Role.IsSupervisor {
-		tools = append(tools, NewAssignWorkTool(a))
+		// Only create the assign_work tool if it wasn't provided. This allows
+		// a custom assign_work implementation to be used.
+		var foundAssignWorkTool bool
+		for _, tool := range tools {
+			if tool.Definition().Name == "assign_work" {
+				foundAssignWorkTool = true
+			}
+		}
+		if !foundAssignWorkTool {
+			tools = append(tools, NewAssignWorkTool(AssignWorkToolOptions{
+				Self:               a,
+				DefaultTaskTimeout: opts.TaskTimeout,
+			}))
+		}
 	}
+
 	a.tools = tools
 	if len(tools) > 0 {
 		a.toolsByName = make(map[string]llm.Tool, len(tools))
@@ -179,19 +193,6 @@ func (a *DiveAgent) Join(team Team) error {
 
 func (a *DiveAgent) Team() Team {
 	return a.team
-}
-
-func (a *DiveAgent) Log(msg string, keysAndValues ...any) {
-	switch a.logLevel {
-	case "debug":
-		a.logger.Debug(msg, keysAndValues...)
-	case "info":
-		a.logger.Info(msg, keysAndValues...)
-	case "warn":
-		a.logger.Warn(msg, keysAndValues...)
-	case "error":
-		a.logger.Error(msg, keysAndValues...)
-	}
 }
 
 // May need to be able to express whether this is the beginning of a conversation
@@ -376,7 +377,7 @@ func (a *DiveAgent) handleStopMessage(msg messageStop) error {
 }
 
 func (a *DiveAgent) getSystemPrompt() (string, error) {
-	return executeTemplate(agentSystemPromptTemplate, NewAgentTemplateData(a))
+	return executeTemplate(agentSystemPromptTemplate, newAgentTemplateData(a))
 }
 
 func (a *DiveAgent) handleTask(state *taskState) error {

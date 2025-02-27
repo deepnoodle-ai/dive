@@ -1,19 +1,13 @@
 package dive
 
-type AgentTemplateData struct {
-	Name      string
-	Role      string
-	Team      *Team
-	IsManager bool
-	IsWorker  bool
-}
-
+// agentTemplateData is the data used to render the agent prompt template.
+// It carries some information that isn't available via the Agent Go interface.
 type agentTemplateData struct {
 	*DiveAgent
 	DelegateTargets []Agent
 }
 
-func NewAgentTemplateData(agent *DiveAgent) *agentTemplateData {
+func newAgentTemplateData(agent *DiveAgent) *agentTemplateData {
 	var delegateTargets []Agent
 	if agent.role.IsSupervisor {
 		if agent.role.Subordinates == nil {
