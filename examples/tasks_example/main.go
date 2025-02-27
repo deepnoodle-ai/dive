@@ -105,10 +105,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	response := <-stream.Results()
-	if err != nil {
-		log.Fatal(err)
+	for event := range stream.Channel() {
+		if event.Error != "" {
+			log.Fatal(event.Error)
+		}
+		if event.TaskResult != nil {
+			fmt.Println(event.TaskResult.Content)
+		}
 	}
-
-	fmt.Println(response.Content)
 }

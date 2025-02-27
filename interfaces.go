@@ -61,7 +61,8 @@ type Team interface {
 	// Event passes an event to the team
 	Event(ctx context.Context, event *Event) error
 
-	// Work on tasks
+	// Work on one or more tasks. The returned stream can be read from
+	// asynchronously to receive events and task results.
 	Work(ctx context.Context, tasks ...*Task) (Stream, error)
 
 	// Start all agents belonging to the team
@@ -89,16 +90,14 @@ type Agent interface {
 	// Team the agent belongs to. Returns nil if the agent is not on a team.
 	Team() Team
 
-	// Chat with the agent
+	// Chat with the agent in a non-streaming fashion
 	Chat(ctx context.Context, message *llm.Message) (*llm.Response, error)
-
-	// ChatStream streams the conversation between the agent and the user
-	ChatStream(ctx context.Context, message *llm.Message) (llm.Stream, error)
 
 	// Event passes an event to the agent
 	Event(ctx context.Context, event *Event) error
 
-	// Work gives the agent a task to complete
+	// Work gives the agent a task to complete and returns a stream of events
+	// that can be read from asynchronously
 	Work(ctx context.Context, task *Task) (Stream, error)
 
 	// Start the agent
@@ -141,4 +140,4 @@ type StreamEvent struct {
 	TaskResult *TaskResult `json:"task_result,omitempty"`
 }
 
-// TODO: TaskResult should not hold a Task. Make it JSON serializable.
+// TODO: TaskResult should not hold a Task. Make it JSON serializable?

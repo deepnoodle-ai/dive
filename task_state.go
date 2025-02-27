@@ -8,7 +8,6 @@ import (
 
 type taskState struct {
 	Task              *Task
-	Stream            Stream
 	Publisher         *StreamPublisher
 	Status            TaskStatus
 	Iterations        int
@@ -17,7 +16,7 @@ type taskState struct {
 	Reasoning         string
 	StatusDescription string
 	Messages          []*llm.Message
-	Suspended         bool
+	Paused            bool
 	ChanResponse      chan *llm.Response
 	ChanError         chan error
 }

@@ -172,15 +172,18 @@ func main() {
 	running := true
 	for running {
 		select {
-		case result, ok := <-stream.Results():
+		case event, ok := <-stream.Channel():
 			if !ok {
 				running = false
 				break
 			}
-			fmt.Printf("---- task result %s ----\n", result.Task.Name())
-			fmt.Println(result.Content)
+			if event.Error != "" {
+				log.Fatal(event.Error)
+			}
+			fmt.Printf("---- task result %s ----\n", event.TaskResult.Task.Name())
+			fmt.Println(event.TaskResult.Content)
 			fmt.Println()
-			results = append(results, result)
+			results = append(results, event.TaskResult)
 		}
 	}
 

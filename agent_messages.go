@@ -6,21 +6,15 @@ import (
 	"github.com/getstingrai/dive/llm"
 )
 
-type messageEvent struct {
-	event *Event
-}
-
 type messageWork struct {
 	task      *Task
-	stream    Stream
 	publisher *StreamPublisher
 }
 
 type messageChat struct {
-	ctx     context.Context
-	message *llm.Message
-	result  chan *llm.Response
-	err     chan error
+	message    *llm.Message
+	resultChan chan *llm.Response
+	errChan    chan error
 }
 
 type messageStop struct {

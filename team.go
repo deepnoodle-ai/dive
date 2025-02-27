@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -259,6 +260,9 @@ func (t *DiveTeam) workOnTask(ctx context.Context, task *Task, agent Agent, pub 
 			}
 			if err := pub.Send(ctx, event); err != nil {
 				return nil, err // Canceled context probably
+			}
+			if event.Error != "" {
+				return nil, errors.New(event.Error)
 			}
 			if event.TaskResult != nil {
 				return event.TaskResult, nil
