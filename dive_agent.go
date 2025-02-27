@@ -604,11 +604,13 @@ func (a *DiveAgent) doSomeWork() {
 		return
 	}
 
-	a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
-		Type:      "task.progress",
-		TaskName:  a.activeTask.Task.Name(),
-		AgentName: a.name,
-	})
+	if a.activeTask.Publisher != nil {
+		a.activeTask.Publisher.Send(context.Background(), &StreamEvent{
+			Type:      "task.progress",
+			TaskName:  a.activeTask.Task.Name(),
+			AgentName: a.name,
+		})
+	}
 
 	switch a.activeTask.Status {
 	case TaskStatusCompleted:

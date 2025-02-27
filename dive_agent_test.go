@@ -80,15 +80,17 @@ func TestAgentTask(t *testing.T) {
 	require.NoError(t, err)
 
 	var result *TaskResult
-	select {
-	case event := <-stream.Channel():
-		require.NotNil(t, event)
-		require.Nil(t, event.Error)
-		require.Equal(t, "task.result", event.Type)
-		require.NotNil(t, event.TaskResult)
-		result = event.TaskResult
-	case <-ctx.Done():
-		t.Fatal("context canceled while waiting for task result")
+	running := true
+	for running {
+		select {
+		case event := <-stream.Channel():
+			if event.TaskResult != nil {
+				result = event.TaskResult
+				running = false
+			}
+		case <-ctx.Done():
+			t.Fatal("context canceled while waiting for task result")
+		}
 	}
 
 	content := strings.ToLower(result.Content)
