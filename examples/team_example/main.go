@@ -180,10 +180,14 @@ func main() {
 			if event.Error != "" {
 				log.Fatal(event.Error)
 			}
-			fmt.Printf("---- task result %s ----\n", event.TaskResult.Task.Name())
-			fmt.Println(event.TaskResult.Content)
-			fmt.Println()
-			results = append(results, event.TaskResult)
+			if event.TaskResult != nil {
+				fmt.Printf("---- task result %s ----\n", event.TaskResult.Task.Name())
+				fmt.Println(event.TaskResult.Content)
+				fmt.Println()
+				results = append(results, event.TaskResult)
+			} else {
+				fmt.Println("event:", event.Type)
+			}
 		}
 	}
 

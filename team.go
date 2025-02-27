@@ -244,7 +244,7 @@ func (t *DiveTeam) workOnTask(ctx context.Context, task *Task, agent Agent, pub 
 	defer taskStream.Close()
 
 	// Heartbeats will indicate to the client that we're still going
-	heartbeatTicker := time.NewTicker(time.Second * 1)
+	heartbeatTicker := time.NewTicker(time.Second * 3)
 	defer heartbeatTicker.Stop()
 
 	// Process all events from the task stream. Return when a task result is
