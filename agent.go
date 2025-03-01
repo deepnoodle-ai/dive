@@ -3,6 +3,7 @@ package dive
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -465,16 +466,26 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 				}
 				break
 			}
-			eventData, err := json.Marshal(event)
-			if err != nil {
-				return err
+			if event.Response != nil {
+				response = event.Response
 			}
-			state.Publisher.Send(ctx, &StreamEvent{
-				Type:      "llm.event",
-				TaskName:  task.Name(),
-				AgentName: a.name,
-				Data:      eventData,
-			})
+			if state.Publisher != nil {
+				eventData, err := json.Marshal(event)
+				if err != nil {
+					return err
+				}
+				state.Publisher.Send(ctx, &StreamEvent{
+					Type:      "llm.event",
+					TaskName:  task.Name(),
+					AgentName: a.name,
+					Data:      eventData,
+				})
+			}
+		}
+
+		if response == nil {
+			// This indicates a bug in the LLM provider implementation
+			return errors.New("no final response from llm provider")
 		}
 
 		// Mutate first text message response to include the prefill text if

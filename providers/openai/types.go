@@ -70,6 +70,7 @@ type StreamResponse struct {
 	Created int64          `json:"created"`
 	Model   string         `json:"model"`
 	Choices []StreamChoice `json:"choices"`
+	Usage   Usage          `json:"usage,omitempty"`
 }
 
 type StreamChoice struct {
@@ -79,6 +80,21 @@ type StreamChoice struct {
 }
 
 type StreamDelta struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string          `json:"role"`
+	Content   string          `json:"content,omitempty"`
+	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// ToolCallDelta represents a partial tool call in a streaming response
+type ToolCallDelta struct {
+	Index    int               `json:"index"`
+	ID       string            `json:"id,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Function ToolFunctionDelta `json:"function,omitempty"`
+}
+
+// ToolFunctionDelta represents a partial function call in a streaming response
+type ToolFunctionDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
