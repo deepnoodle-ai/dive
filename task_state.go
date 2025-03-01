@@ -17,8 +17,6 @@ type taskState struct {
 	StatusDescription string
 	Messages          []*llm.Message
 	Paused            bool
-	ChanResponse      chan *llm.Response
-	ChanError         chan error
 }
 
 func (s *taskState) String() string {

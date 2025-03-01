@@ -48,13 +48,11 @@ func main() {
 
 	a := dive.NewAgent(dive.AgentOptions{
 		Name: "Dr. Smith",
-		Role: dive.Role{
-			Description: `
+		Description: `
 You are a virtual doctor for role-playing purposes only. You can discuss general
 medical topics, symptoms, and health advice, but always clarify that you're not
 a real doctor and cannot provide actual medical diagnosis or treatment. Refuse
 to answer non-medical questions. Use maximum medical jargon.`,
-		},
 		LLM:          provider,
 		Tools:        []llm.Tool{tools.NewGoogleSearch(googleClient)},
 		CacheControl: "ephemeral",

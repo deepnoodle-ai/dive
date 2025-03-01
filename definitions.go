@@ -39,7 +39,9 @@ type ConfigDefinition struct {
 // AgentDefinition is a serializable representation of an Agent
 type AgentDefinition struct {
 	Name           string            `yaml:"name,omitempty" json:"name,omitempty"`
-	Role           RoleDefinition    `yaml:"role,omitempty" json:"role,omitempty"`
+	Description    string            `yaml:"description,omitempty" json:"description,omitempty"`
+	Instructions   string            `yaml:"instructions,omitempty" json:"instructions,omitempty"`
+	IsSupervisor   bool              `yaml:"is_supervisor,omitempty" json:"is_supervisor,omitempty"`
 	Provider       string            `yaml:"provider,omitempty" json:"provider,omitempty"`
 	Model          string            `yaml:"model,omitempty" json:"model,omitempty"`
 	Tools          []string          `yaml:"tools,omitempty" json:"tools,omitempty"`
@@ -244,13 +246,10 @@ func buildAgent(agentDef AgentDefinition, globalConfig ConfigDefinition, toolsMa
 
 	// Create agent
 	agent := NewAgent(AgentOptions{
-		Name: agentDef.Name,
-		Role: Role{
-			Description:    agentDef.Role.Description,
-			IsSupervisor:   agentDef.Role.IsSupervisor,
-			Subordinates:   agentDef.Role.Subordinates,
-			AcceptedEvents: agentDef.Role.AcceptedEvents,
-		},
+		Name:           agentDef.Name,
+		Description:    agentDef.Description,
+		Instructions:   agentDef.Instructions,
+		IsSupervisor:   agentDef.IsSupervisor,
 		LLM:            llmProvider,
 		Tools:          agentTools,
 		MaxActiveTasks: agentDef.MaxActiveTasks,

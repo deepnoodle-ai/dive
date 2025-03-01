@@ -88,12 +88,10 @@ func main() {
 	}
 
 	supervisor := dive.NewAgent(dive.AgentOptions{
-		Name: "Supervisor",
-		Role: dive.Role{
-			Description:  "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
-			IsSupervisor: true,
-			Subordinates: []string{"Research Assistant"},
-		},
+		Name:         "Supervisor",
+		Description:  "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
+		IsSupervisor: true,
+		Subordinates: []string{"Research Assistant"},
 		CacheControl: "ephemeral",
 		LLM:          provider,
 		LogLevel:     logLevel,
@@ -112,10 +110,8 @@ func main() {
 	})
 
 	researcher := dive.NewAgent(dive.AgentOptions{
-		Name: "Research Assistant",
-		Role: dive.Role{
-			Description: "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
-		},
+		Name:         "Research Assistant",
+		Description:  "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
 		CacheControl: "ephemeral",
 		LLM:          provider,
 		Tools:        theTools,

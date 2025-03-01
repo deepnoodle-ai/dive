@@ -66,7 +66,6 @@ func main() {
 
 	a := dive.NewAgent(dive.AgentOptions{
 		Name:         "Research Assistant",
-		Role:         dive.Role{Description: "Research assistant"},
 		CacheControl: "ephemeral",
 		LLM:          provider,
 		Tools:        theTools,

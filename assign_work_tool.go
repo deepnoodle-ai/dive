@@ -25,7 +25,7 @@ type AssignWorkToolInput struct {
 // AssignWorkToolOptions is used to configure a new AssignWorkTool.
 type AssignWorkToolOptions struct {
 	// Self indicates which agent owns this tool
-	Self Agent
+	Self TeamAgent
 
 	// DefaultTaskTimeout is the default timeout for tasks assigned using this tool
 	DefaultTaskTimeout time.Duration
@@ -35,7 +35,7 @@ type AssignWorkToolOptions struct {
 // The tool call blocks until the work is complete. The result of the call is
 // the output of the task.
 type AssignWorkTool struct {
-	self               Agent
+	self               TeamAgent
 	defaultTaskTimeout time.Duration
 }
 
@@ -121,6 +121,11 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 	if !ok {
 		return fmt.Sprintf("I couldn't find an agent named %q", params.AgentName), nil
 	}
+	teamAgent, ok := agent.(TeamAgent)
+	if !ok {
+		return fmt.Sprintf("Agent %q cannot accept tasks", params.AgentName), nil
+	}
+
 	outputFormat := OutputFormat(params.OutputFormat)
 	if outputFormat == "" {
 		outputFormat = OutputMarkdown
@@ -139,7 +144,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 	})
 
 	// Tell the agent to work on the task
-	stream, err := agent.Work(ctx, task)
+	stream, err := teamAgent.Work(ctx, task)
 	if err != nil {
 		return fmt.Sprintf("This assignment could not be started: %s", err.Error()), nil
 	}

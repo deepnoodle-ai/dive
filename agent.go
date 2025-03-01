@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/memory"
 	"github.com/getstingrai/dive/slogger"
 )
 
@@ -34,7 +34,10 @@ type Document struct {
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
 	Name             string
-	Role             Role
+	Description      string
+	Instructions     string
+	IsSupervisor     bool
+	Subordinates     []string
 	LLM              llm.LLM
 	Tools            []llm.Tool
 	MaxActiveTasks   int
@@ -47,17 +50,26 @@ type AgentOptions struct {
 	Logger           slogger.Logger
 	GenerationLimit  int
 	TaskMessageLimit int
+	Memory           memory.Memory
+}
+
+// Publisher is an interface for sending events to a stream.
+type Publisher interface {
+	Send(ctx context.Context, event *StreamEvent) error
+	Close()
 }
 
 // DiveAgent implements the Agent interface.
 type DiveAgent struct {
 	name             string
-	role             Role
+	description      string
+	instructions     string
 	llm              llm.LLM
 	team             Team
 	running          bool
 	tools            []llm.Tool
 	toolsByName      map[string]llm.Tool
+	subordinates     []string
 	isSupervisor     bool
 	isWorker         bool
 	maxActiveTasks   int
@@ -75,6 +87,7 @@ type DiveAgent struct {
 	logger           slogger.Logger
 	generationLimit  int
 	taskMessageLimit int
+	memory           memory.Memory
 
 	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
@@ -114,8 +127,8 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		}
 	}
 	if opts.Name == "" {
-		if opts.Role.Description != "" {
-			opts.Name = opts.Role.Description
+		if opts.Description != "" {
+			opts.Name = opts.Description
 		} else {
 			opts.Name = randomName()
 		}
@@ -123,7 +136,10 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 	a := &DiveAgent{
 		name:             opts.Name,
 		llm:              opts.LLM,
-		role:             opts.Role,
+		description:      opts.Description,
+		instructions:     opts.Instructions,
+		subordinates:     opts.Subordinates,
+		isSupervisor:     opts.IsSupervisor,
 		maxActiveTasks:   opts.MaxActiveTasks,
 		tickFrequency:    opts.TickFrequency,
 		taskTimeout:      opts.TaskTimeout,
@@ -143,7 +159,7 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 	}
 
 	// Supervisors need a tool to give work assignments to others
-	if opts.Role.IsSupervisor {
+	if opts.IsSupervisor {
 		// Only create the assign_work tool if it wasn't provided. This allows
 		// a custom assign_work implementation to be used.
 		var foundAssignWorkTool bool
@@ -174,8 +190,20 @@ func (a *DiveAgent) Name() string {
 	return a.name
 }
 
-func (a *DiveAgent) Role() Role {
-	return a.role
+func (a *DiveAgent) Description() string {
+	return a.description
+}
+
+func (a *DiveAgent) Instructions() string {
+	return a.instructions
+}
+
+func (a *DiveAgent) IsSupervisor() bool {
+	return a.isSupervisor
+}
+
+func (a *DiveAgent) Subordinates() []string {
+	return a.subordinates
 }
 
 func (a *DiveAgent) Join(team Team) error {
@@ -247,7 +275,7 @@ func (a *DiveAgent) IsRunning() bool {
 // May need to be able to express whether this is the beginning of a conversation
 // or a continuation. Pass a conversation ID? Multiple messages? What if two people
 // are talking to the same agent?
-func (a *DiveAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Response, error) {
+func (a *DiveAgent) Generate(ctx context.Context, message *llm.Message, opts ...GenerateOption) (*llm.Response, error) {
 	resultChan := make(chan *llm.Response, 1)
 	errChan := make(chan error, 1)
 
@@ -274,6 +302,11 @@ func (a *DiveAgent) Chat(ctx context.Context, message *llm.Message) (*llm.Respon
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func (a *DiveAgent) Stream(ctx context.Context, message *llm.Message, opts ...GenerateOption) (Stream, error) {
+	// return a.Generate(ctx, message, opts...)
+	return nil, errors.New("not implemented")
 }
 
 func (a *DiveAgent) Event(ctx context.Context, event *Event) error {
@@ -360,25 +393,196 @@ func (a *DiveAgent) handleEvent(event *Event) {
 }
 
 func (a *DiveAgent) handleChat(m messageChat) {
-	// Translate the chat request into a task behind the scenes
-	task := &Task{
-		kind:         "chat",
-		nameIsRandom: true,
-		name:         fmt.Sprintf("chat-%s", petname.Generate(2, "-")),
-		description:  fmt.Sprintf("Generate a response to user message: %q", m.message.Text()),
-		timeout:      a.chatTimeout,
+	ctx, cancel := context.WithTimeout(context.Background(), a.chatTimeout)
+	defer cancel()
+
+	systemPrompt, err := a.getSystemPrompt()
+	if err != nil {
+		m.errChan <- err
+		return
 	}
-	a.taskQueue = append(a.taskQueue, &taskState{
-		Task:         task,
-		Status:       TaskStatusQueued,
-		Messages:     []*llm.Message{m.message},
-		ChanResponse: m.resultChan,
-		ChanError:    m.errChan,
-	})
+
+	// Create a message array with just the user's message
+	messages := []*llm.Message{m.message}
+
+	a.logger.Info("handling chat",
+		"agent", a.name,
+		"truncated_message", TruncateText(m.message.Text(), 10),
+	)
+
+	// Execute the LLM generation and tool execution loop
+	response, _, err := a.executeToolLoop(
+		ctx,
+		messages,
+		systemPrompt,
+		"chat", // No task name for chat
+		nil,    // No publisher for chat
+	)
+
+	if err != nil {
+		m.errChan <- err
+		return
+	}
+
+	// Send the response back through the result channel
+	m.resultChan <- response
 }
 
 func (a *DiveAgent) getSystemPrompt() (string, error) {
 	return executeTemplate(agentSystemPromptTemplate, newAgentTemplateData(a))
+}
+
+// executeToolLoop runs the LLM generation and tool execution loop.
+// It handles the interaction between the agent and the LLM, including tool calls.
+// Returns the final LLM response and any error that occurred.
+func (a *DiveAgent) executeToolLoop(
+	ctx context.Context,
+	messages []*llm.Message,
+	systemPrompt string,
+	taskName string,
+	publisher *StreamPublisher,
+) (*llm.Response, []*llm.Message, error) {
+
+	// Holds the most recent response from the LLM
+	var response *llm.Response
+	updatedMessages := make([]*llm.Message, len(messages))
+	copy(updatedMessages, messages)
+
+	// Helper function to safely send events to the publisher
+	safePublish := func(event *StreamEvent) error {
+		if publisher == nil {
+			return nil
+		}
+		return publisher.Send(ctx, event)
+	}
+
+	// The loop is used to run and respond to the primary generation request
+	// and then automatically run any tool-use invocations. The first time
+	// through, we submit the primary generation. On subsequent loops, we are
+	// running tool-uses and responding with the results.
+	for i := 0; i < a.generationLimit; i++ {
+		var prefill string
+		if i == a.generationLimit-1 {
+			prefill = "<think>I must respond with my final answer now."
+		} else {
+			prefill = "<think>"
+		}
+		promptMessages := append(updatedMessages, llm.NewAssistantMessage(prefill))
+
+		generateOpts := []llm.Option{
+			llm.WithSystemPrompt(systemPrompt),
+			llm.WithCacheControl(a.cacheControl),
+			llm.WithLogLevel(a.logLevel),
+			llm.WithTools(a.tools...),
+		}
+		if a.hooks != nil {
+			generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
+		}
+		if a.logger != nil {
+			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
+		}
+
+		if a.llm.SupportsStreaming() {
+			stream, err := a.llm.Stream(ctx, promptMessages, generateOpts...)
+			if err != nil {
+				return nil, updatedMessages, err
+			}
+			for {
+				event, ok := stream.Next(ctx)
+				if !ok {
+					if err := stream.Err(); err != nil {
+						return nil, updatedMessages, err
+					}
+					break
+				}
+				if event.Response != nil {
+					response = event.Response
+				}
+				eventData, err := json.Marshal(event)
+				if err != nil {
+					return nil, updatedMessages, err
+				}
+				err = safePublish(&StreamEvent{
+					Type:      "llm.event",
+					TaskName:  taskName,
+					AgentName: a.name,
+					Data:      eventData,
+				})
+				if err != nil {
+					return nil, updatedMessages, err
+				}
+			}
+		} else {
+			var err error
+			response, err = a.llm.Generate(ctx, promptMessages, generateOpts...)
+			if err != nil {
+				return nil, updatedMessages, err
+			}
+		}
+
+		if response == nil {
+			// This indicates a bug in the LLM provider implementation
+			return nil, updatedMessages, errors.New("no final response from llm provider")
+		}
+
+		// Mutate first text message response to include the prefill text if
+		// we see the closing </think> tag. The prefill is a behind-the-scenes
+		// behavior for the caller.
+		responseMessage := response.Message()
+		addPrefill(responseMessage, prefill)
+
+		// Remember the assistant response message
+		updatedMessages = append(updatedMessages, responseMessage)
+
+		// We're done if there are no tool-uses
+		if len(response.ToolCalls()) == 0 {
+			break
+		}
+
+		// Execute tool-uses and accumulate results
+		shouldReturnResult := false
+		toolResults := make([]*llm.ToolResult, len(response.ToolCalls()))
+		for i, toolCall := range response.ToolCalls() {
+			tool, ok := a.toolsByName[toolCall.Name]
+			if !ok {
+				return nil, updatedMessages, fmt.Errorf("tool call for unknown tool: %q", toolCall.Name)
+			}
+			result, err := tool.Call(ctx, toolCall.Input)
+			if err != nil {
+				return nil, updatedMessages, fmt.Errorf("tool call error: %w", err)
+			}
+			toolResults[i] = &llm.ToolResult{
+				ID:     toolCall.ID,
+				Name:   toolCall.Name,
+				Result: result,
+			}
+			if tool.ShouldReturnResult() {
+				shouldReturnResult = true
+			}
+		}
+
+		// If no tool calls need to return results to the LLM, we're done
+		if !shouldReturnResult {
+			break
+		}
+
+		// Capture results in a new message to send on next loop iteration
+		resultMessage := llm.NewToolResultMessage(toolResults)
+
+		// Add instructions to the message to not use any more tools if we
+		// have only one generation left.
+		if i == a.generationLimit-2 {
+			resultMessage.Content = append(resultMessage.Content, &llm.Content{
+				Type: llm.ContentTypeText,
+				Text: "Do not use any more tools. You must respond with your final answer now.",
+			})
+			a.logger.Debug("adding tool use limit instruction", "agent", a.name, "task", taskName)
+		}
+
+		updatedMessages = append(updatedMessages, resultMessage)
+	}
+
+	return response, updatedMessages, nil
 }
 
 func (a *DiveAgent) handleTask(state *taskState) error {
@@ -421,131 +625,16 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		"truncated_prompt", TruncateText(task.PromptText(), 10),
 	)
 
-	// Holds the most recent response from the LLM
-	var response *llm.Response
-
-	// The loop is used to run and respond to the primary generation request
-	// and then automatically run any tool-use invocations. The first time
-	// through, we submit the primary generation. On subsequent loops, we are
-	// running tool-uses and responding with the results.
-	for i := 0; i < a.generationLimit; i++ {
-		var prefill string
-		if i == a.generationLimit-1 {
-			prefill = "<think>I must respond with my final answer now."
-		} else {
-			prefill = "<think>"
-		}
-		promptMessages := append(messages, llm.NewAssistantMessage(prefill))
-
-		generateOpts := []llm.Option{
-			llm.WithSystemPrompt(systemPrompt),
-			llm.WithCacheControl(a.cacheControl),
-			llm.WithLogLevel(a.logLevel),
-			llm.WithTools(a.tools...),
-		}
-		if a.hooks != nil {
-			generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
-		}
-		if a.logger != nil {
-			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
-		}
-
-		if a.llm.SupportsStreaming() {
-			stream, err := a.llm.Stream(ctx, promptMessages, generateOpts...)
-			if err != nil {
-				return err
-			}
-			for {
-				event, ok := stream.Next(ctx)
-				if !ok {
-					if err := stream.Err(); err != nil {
-						return err
-					}
-					break
-				}
-				if event.Response != nil {
-					response = event.Response
-				}
-				if state.Publisher != nil {
-					eventData, err := json.Marshal(event)
-					if err != nil {
-						return err
-					}
-					state.Publisher.Send(ctx, &StreamEvent{
-						Type:      "llm.event",
-						TaskName:  task.Name(),
-						AgentName: a.name,
-						Data:      eventData,
-					})
-				}
-			}
-		} else {
-			response, err = a.llm.Generate(ctx, promptMessages, generateOpts...)
-			if err != nil {
-				return err
-			}
-		}
-
-		if response == nil {
-			// This indicates a bug in the LLM provider implementation
-			return errors.New("no final response from llm provider")
-		}
-
-		// Mutate first text message response to include the prefill text if
-		// we see the closing </think> tag. The prefill is a behind-the-scenes
-		// behavior for the caller.
-		responseMessage := response.Message()
-		addPrefill(responseMessage, prefill)
-
-		// Remember the assistant response message
-		messages = append(messages, responseMessage)
-
-		// We're done if there are no tool-uses
-		if len(response.ToolCalls()) == 0 {
-			break
-		}
-
-		// Execute tool-uses and accumulate results
-		shouldReturnResult := false
-		toolResults := make([]*llm.ToolResult, len(response.ToolCalls()))
-		for i, toolCall := range response.ToolCalls() {
-			tool, ok := a.toolsByName[toolCall.Name]
-			if !ok {
-				return fmt.Errorf("tool call for unknown tool: %q", toolCall.Name)
-			}
-			result, err := tool.Call(ctx, toolCall.Input)
-			if err != nil {
-				return fmt.Errorf("tool call error: %w", err)
-			}
-			toolResults[i] = &llm.ToolResult{
-				ID:     toolCall.ID,
-				Name:   toolCall.Name,
-				Result: result,
-			}
-			if tool.ShouldReturnResult() {
-				shouldReturnResult = true
-			}
-		}
-
-		// If no tool calls need to return results to the LLM, we're done
-		if !shouldReturnResult {
-			break
-		}
-
-		// Capture results in a new message to send on next loop iteration
-		resultMessage := llm.NewToolResultMessage(toolResults)
-
-		// Add instructions to the message to not use any more tools if we
-		// have only one generation left.
-		if i == a.generationLimit-2 {
-			resultMessage.Content = append(resultMessage.Content, &llm.Content{
-				Type: llm.ContentTypeText,
-				Text: "Do not use any more tools. You must respond with your final answer now.",
-			})
-			a.logger.Debug("adding tool use limit instruction", "agent", a.name, "task", task.Name())
-		}
-
-		messages = append(messages, resultMessage)
+	// Execute the LLM generation and tool execution loop
+	response, updatedMessages, err := a.executeToolLoop(
+		ctx,
+		messages,
+		systemPrompt,
+		task.Name(),
+		state.Publisher,
+	)
+	if err != nil {
+		return err
 	}
 
 	// Update task state based on the last response from the LLM. It should
@@ -556,7 +645,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	state.Output = taskResponse.Text
 	state.Reasoning = taskResponse.Thinking
 	state.StatusDescription = taskResponse.StatusDescription
-	state.Messages = messages
+	state.Messages = updatedMessages
 
 	// For now, if the status description is empty, let's assume it is complete.
 	// We may need to make this configurable in the future.
@@ -653,25 +742,18 @@ func (a *DiveAgent) doSomeWork() {
 			"task", a.activeTask.Task.Name(),
 			"duration", time.Since(a.activeTask.Started).Seconds(),
 		)
-		if a.activeTask.Task.Kind() == "chat" {
-			a.activeTask.ChanResponse <- llm.NewResponse(llm.ResponseOptions{
-				Role:    llm.Assistant,
-				Message: llm.NewAssistantMessage(a.activeTask.Output),
-			})
-		} else {
-			publish(&StreamEvent{
-				Type:      "task.result",
-				TaskName:  taskName,
-				AgentName: a.name,
-				TaskResult: &TaskResult{
-					Task:    a.activeTask.Task,
-					Content: a.activeTask.Output,
-				},
-			})
-			if a.activeTask.Publisher != nil {
-				a.activeTask.Publisher.Close()
-				a.activeTask.Publisher = nil
-			}
+		publish(&StreamEvent{
+			Type:      "task.result",
+			TaskName:  taskName,
+			AgentName: a.name,
+			TaskResult: &TaskResult{
+				Task:    a.activeTask.Task,
+				Content: a.activeTask.Output,
+			},
+		})
+		if a.activeTask.Publisher != nil {
+			a.activeTask.Publisher.Close()
+			a.activeTask.Publisher = nil
 		}
 		a.activeTask = nil
 
@@ -712,9 +794,6 @@ func (a *DiveAgent) doSomeWork() {
 			"status_description", a.activeTask.StatusDescription,
 			"duration", time.Since(a.activeTask.Started).Seconds(),
 		)
-		if a.activeTask.Task.Kind() == "chat" {
-			a.activeTask.ChanError <- fmt.Errorf("task error: %s", a.activeTask.Status)
-		}
 		publish(&StreamEvent{
 			Type:      "task.error",
 			TaskName:  taskName,

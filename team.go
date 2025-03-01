@@ -47,11 +47,13 @@ func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 		if name := agent.Name(); name == "" {
 			return nil, fmt.Errorf("agent has no name")
 		}
-		if err := agent.Join(t); err != nil {
-			return nil, err
-		}
-		if agent.Role().IsSupervisor {
-			t.supervisors = append(t.supervisors, agent)
+		if teamAgent, ok := agent.(TeamAgent); ok {
+			if err := teamAgent.Join(t); err != nil {
+				return nil, err
+			}
+			if teamAgent.IsSupervisor() {
+				t.supervisors = append(t.supervisors, agent)
+			}
 		}
 	}
 	if len(t.agents) > 1 && len(t.supervisors) == 0 {
@@ -99,15 +101,19 @@ func (t *DiveTeam) Start(ctx context.Context) error {
 	}
 
 	// Start all agents, but if any fail, stop them all before returning the error
-	var startedAgents []Agent
+	var startedAgents []RunnableAgent
 	for _, agent := range t.agents {
-		if err := agent.Start(ctx); err != nil {
+		runnableAgent, ok := agent.(RunnableAgent)
+		if !ok {
+			continue
+		}
+		if err := runnableAgent.Start(ctx); err != nil {
 			for _, startedAgent := range startedAgents {
 				startedAgent.Stop(ctx)
 			}
 			return fmt.Errorf("failed to start agent %q: %w", agent.Name(), err)
 		}
-		startedAgents = append(startedAgents, agent)
+		startedAgents = append(startedAgents, runnableAgent)
 	}
 
 	t.running = true
@@ -126,7 +132,11 @@ func (t *DiveTeam) Stop(ctx context.Context) error {
 
 	var lastErr error
 	for _, agent := range t.agents {
-		if err := agent.Stop(ctx); err != nil {
+		runnableAgent, ok := agent.(RunnableAgent)
+		if !ok {
+			continue
+		}
+		if err := runnableAgent.Stop(ctx); err != nil {
 			lastErr = fmt.Errorf("failed to stop agent %s: %w", agent.Name(), err)
 		}
 	}
@@ -236,8 +246,12 @@ func (t *DiveTeam) workOnTasks(ctx context.Context, tasks []*Task, stream *DiveS
 }
 
 func (t *DiveTeam) workOnTask(ctx context.Context, task *Task, agent Agent, pub *StreamPublisher) (*TaskResult, error) {
-	// Give the task to the agent then start streaming events
-	taskStream, err := agent.Work(ctx, task)
+	workerAgent, ok := agent.(TeamAgent)
+	if !ok {
+		return nil, fmt.Errorf("agent %q does not accept tasks", agent.Name())
+	}
+
+	taskStream, err := workerAgent.Work(ctx, task)
 	if err != nil {
 		return nil, err
 	}
@@ -303,15 +317,18 @@ func (t *DiveTeam) Overview() (string, error) {
 	return executeTemplate(teamPromptTemplate, t)
 }
 
-// Event notifies the team of an event. All agents that accept this event type
-// will be notified.
-func (t *DiveTeam) Event(ctx context.Context, event *Event) error {
+// HandleEvent passes an event to any agents that accept it.
+func (t *DiveTeam) HandleEvent(ctx context.Context, event *Event) error {
 	for _, agent := range t.agents {
-		acceptedEvents := agent.Role().AcceptedEvents
+		eventedAgent, ok := agent.(EventedAgent)
+		if !ok {
+			continue
+		}
+		acceptedEvents := eventedAgent.AcceptedEvents()
 		if !sliceContains(acceptedEvents, "*") && !sliceContains(acceptedEvents, event.Name) {
 			continue
 		}
-		if err := agent.Event(ctx, event); err != nil {
+		if err := eventedAgent.HandleEvent(ctx, event); err != nil {
 			return err
 		}
 	}

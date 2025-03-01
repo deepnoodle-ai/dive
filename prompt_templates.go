@@ -54,9 +54,13 @@ var agentSysPromptText = `# Your Biography
 
 Your name is "{{ .Name }}".
 {{- end }}
-{{- if .Role.String }}
+{{- if .Description }}
 
-{{ .Role.String }}
+{{ .Description }}
+{{- end }}
+{{- if .Instructions }}
+
+{{ .Instructions }}
 {{- end }}
 {{- if .Team }}
 
@@ -67,13 +71,13 @@ complete assigned tasks.
 
 {{ .Team.Overview }}
 {{- end }}
-{{- if and .Role.IsSupervisor (gt (len .DelegateTargets) 0)}}
+{{- if and .IsSupervisor (gt (len .Subordinates) 0)}}
 
 # Teamwork
 
-You are allowed to assign work to the following agents:
-{{ range $i, $agent := .DelegateTargets }}
-{{- if $i }}, {{ end }}"{{ $agent.Name }}"
+You are a supervisor. You are allowed to assign work to the following agents:
+{{ range $i, $agent := .Subordinates }}
+{{- if $i }}, {{ end }}"{{ $agent }}"
 {{- end }}
 
 When assigning work to others, be sure to provide a complete and detailed
@@ -192,7 +196,7 @@ The team is described as: "{{ .Description }}"
 
 The team consists of the following agents:
 {{ range $i, $agent := .Agents }}
-- Name: {{ $agent.Name }}, Role: "{{ $agent.Role.Description }}"
+- Name: {{ $agent.Name }}, Description: "{{ $agent.Description }}"
 {{- end }}`
 
 var taskStatePromptText = `# Task State

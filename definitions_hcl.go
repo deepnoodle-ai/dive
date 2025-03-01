@@ -52,7 +52,9 @@ type HCLTool struct {
 type HCLAgent struct {
 	Name           string            `hcl:"name,label"`
 	NameOverride   string            `hcl:"name,optional"`
-	Role           *HCLRole          `hcl:"role,block"`
+	Description    string            `hcl:"description,optional"`
+	Instructions   string            `hcl:"instructions,optional"`
+	IsSupervisor   bool              `hcl:"is_supervisor,optional"`
 	Provider       string            `hcl:"provider,optional"`
 	Model          string            `hcl:"model,optional"`
 	Tools          []string          `hcl:"tools,optional"`
@@ -333,6 +335,9 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition, logger slogger.Lo
 		}
 		agentDef := AgentDefinition{
 			Name:           agentHcl.Name,
+			Description:    agentHcl.Description,
+			Instructions:   agentHcl.Instructions,
+			IsSupervisor:   agentHcl.IsSupervisor,
 			Provider:       agentHcl.Provider,
 			Model:          agentHcl.Model,
 			Tools:          agentHcl.Tools,
@@ -341,14 +346,6 @@ func BuildTeamFromHCL(ctx context.Context, def *HCLDefinition, logger slogger.Lo
 			TaskTimeout:    agentHcl.TaskTimeout,
 			ChatTimeout:    agentHcl.ChatTimeout,
 			Config:         agentHcl.Config,
-		}
-		if agentHcl.Role.Description != "" {
-			agentDef.Role = RoleDefinition{
-				Description:    agentHcl.Role.Description,
-				IsSupervisor:   agentHcl.Role.IsSupervisor,
-				Subordinates:   agentHcl.Role.Subordinates,
-				AcceptedEvents: agentHcl.Role.AcceptedEvents,
-			}
 		}
 		agent, err := buildAgent(agentDef, globalConfig, toolsMap, logger)
 		if err != nil {

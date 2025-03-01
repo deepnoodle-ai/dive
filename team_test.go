@@ -9,14 +9,12 @@ import (
 
 func TestNewTeam(t *testing.T) {
 	agent1 := NewAgent(AgentOptions{
-		Role: Role{
-			Description:  "AI researcher",
-			IsSupervisor: true,
-		},
+		Description:  "AI researcher",
+		IsSupervisor: true,
 	})
 	agent2 := NewAgent(AgentOptions{
-		Name: "Chris",
-		Role: Role{Description: "Content writer"},
+		Name:        "Chris",
+		Description: "Content writer",
 	})
 	team, err := NewTeam(TeamOptions{
 		Name:        "Research Team",
@@ -29,8 +27,8 @@ func TestNewTeam(t *testing.T) {
 	require.Equal(t, "Researching the history of Go", team.Description())
 	require.False(t, team.IsRunning())
 	require.Len(t, team.Agents(), 2)
-	require.Equal(t, "AI researcher", team.Agents()[0].Role().Description)
-	require.Equal(t, "Content writer", team.Agents()[1].Role().Description)
+	require.Equal(t, "AI researcher", team.Agents()[0].Description())
+	require.Equal(t, "Content writer", team.Agents()[1].Description())
 
 	overview, err := team.Overview()
 	require.NoError(t, err)
@@ -39,8 +37,8 @@ func TestNewTeam(t *testing.T) {
 
 The team consists of the following agents:
 
-- Name: AI researcher, Role: "AI researcher"
-- Name: Chris, Role: "Content writer"`
+- Name: AI researcher, Description: "AI researcher"
+- Name: Chris, Description: "Content writer"`
 
 	require.Equal(t, expectedOverview, overview)
 }
@@ -56,10 +54,10 @@ func TestTeamWithoutSupervisors(t *testing.T) {
 	team, err := NewTeam(TeamOptions{
 		Agents: []Agent{
 			NewAgent(AgentOptions{
-				Role: Role{Description: "Content writer"},
+				Description: "Content writer",
 			}),
 			NewAgent(AgentOptions{
-				Role: Role{Description: "Content writer"},
+				Description: "Content writer",
 			}),
 		},
 	})
@@ -73,7 +71,7 @@ func TestTeamStartStop(t *testing.T) {
 
 	team, err := NewTeam(TeamOptions{
 		Agents: []Agent{
-			NewAgent(AgentOptions{Role: Role{Description: "Content writer"}}),
+			NewAgent(AgentOptions{Description: "Content writer"}),
 		},
 	})
 	require.NoError(t, err)

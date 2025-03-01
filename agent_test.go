@@ -18,8 +18,12 @@ func TestAgent(t *testing.T) {
 	defer cancel()
 
 	agent := NewAgent(AgentOptions{
-		Name: "test",
-		Role: Role{Description: "test"},
+		Name:         "test",
+		Description:  "test",
+		Instructions: "test",
+		IsSupervisor: false,
+		LLM:          anthropic.New(),
+		LogLevel:     "info",
 	})
 
 	err := agent.Start(ctx)
@@ -37,20 +41,65 @@ func TestAgentChat(t *testing.T) {
 	defer cancel()
 
 	agent := NewAgent(AgentOptions{
-		Name:     "test",
-		Role:     Role{Description: "test"},
-		LLM:      anthropic.New(),
-		LogLevel: "info",
+		Name:         "test",
+		Description:  "test",
+		IsSupervisor: false,
+		LLM:          anthropic.New(),
+		LogLevel:     "info",
 	})
 
 	err := agent.Start(ctx)
 	require.NoError(t, err)
 
-	response, err := agent.Chat(ctx, llm.NewUserMessage("Hello, world!"))
+	response, err := agent.Generate(ctx, llm.NewUserMessage("Hello, world!"))
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
 	require.True(t, strings.Contains(text, "hello") || strings.Contains(text, "hi"))
+
+	err = agent.Stop(ctx)
+	require.NoError(t, err)
+}
+
+// TestAgentChatWithTools tests that the agent can use tools in chat mode
+func TestAgentChatWithTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Create a simple tool for testing
+	echoToolDef := llm.ToolDefinition{
+		Name:        "echo",
+		Description: "Echoes back the input",
+		Parameters: llm.Schema{
+			Type:     "object",
+			Required: []string{"text"},
+			Properties: map[string]*llm.SchemaProperty{
+				"text": {Type: "string", Description: "The text to echo back"},
+			},
+		},
+	}
+
+	echoFunc := func(ctx context.Context, input string) (string, error) {
+		return fmt.Sprintf("Echo: %s", input), nil
+	}
+
+	agent := NewAgent(AgentOptions{
+		Name:         "test",
+		Description:  "test",
+		IsSupervisor: false,
+		LLM:          anthropic.New(),
+		LogLevel:     "info",
+		Tools:        []llm.Tool{llm.NewTool(&echoToolDef, echoFunc)},
+	})
+
+	err := agent.Start(ctx)
+	require.NoError(t, err)
+
+	response, err := agent.Generate(ctx, llm.NewUserMessage("Please use the echo tool to echo 'hello world'"))
+	require.NoError(t, err)
+
+	text := response.Message().Text()
+	require.Contains(t, text, "Echo: ")
 
 	err = agent.Stop(ctx)
 	require.NoError(t, err)
@@ -61,9 +110,12 @@ func TestAgentTask(t *testing.T) {
 	defer cancel()
 
 	agent := NewAgent(AgentOptions{
-		Name: "test",
-		Role: Role{Description: "test"},
-		LLM:  anthropic.New(),
+		Name:         "test",
+		Description:  "test",
+		Instructions: "test",
+		IsSupervisor: false,
+		LLM:          anthropic.New(),
+		LogLevel:     "info",
 	})
 
 	err := agent.Start(ctx)
@@ -113,19 +165,24 @@ func TestAgentSystemPromptWithoutTeam(t *testing.T) {
 		{
 			name: "basic agent",
 			options: AgentOptions{
-				Name: "TestAgent",
-				Role: Role{Description: "You are a research assistant"},
+				Name:         "TestAgent",
+				Description:  "You are a research assistant.",
+				Instructions: "You are extremely thorough and detail-oriented.",
+				IsSupervisor: false,
+				LLM:          anthropic.New(),
+				LogLevel:     "info",
 			},
 			expected: "fixtures/agent-system-prompt-1.txt",
 		},
 		{
 			name: "supervisor agent",
 			options: AgentOptions{
-				Name: "Lead Researcher",
-				Role: Role{
-					Description:  "You supervise a research team",
-					IsSupervisor: true,
-				},
+				Name:         "Lead Researcher",
+				Description:  "You supervise a research team.",
+				Instructions: "You are kind and helpful.",
+				IsSupervisor: true,
+				LLM:          anthropic.New(),
+				LogLevel:     "info",
 			},
 			expected: "fixtures/agent-system-prompt-2.txt",
 		},
@@ -157,18 +214,18 @@ func TestAgentSystemPromptWithTeam(t *testing.T) {
 		Description: "A team of researchers",
 		Agents: []Agent{
 			NewAgent(AgentOptions{
-				Name: "Supervisor",
-				Role: Role{
-					Description:  "You are a research lead",
-					IsSupervisor: true,
-				},
+				Name:         "Supervisor",
+				Instructions: "You are a research lead.",
+				IsSupervisor: true,
+				LLM:          anthropic.New(),
+				LogLevel:     "info",
 			}),
 			NewAgent(AgentOptions{
-				Name: "Researcher",
-				Role: Role{
-					Description:  "You are a research assistant",
-					IsSupervisor: false,
-				},
+				Name:         "Researcher",
+				Instructions: "You are a research assistant.",
+				IsSupervisor: false,
+				LLM:          anthropic.New(),
+				LogLevel:     "info",
 			}),
 		},
 	})
@@ -176,11 +233,11 @@ func TestAgentSystemPromptWithTeam(t *testing.T) {
 
 	supervisorAgent, found := team.GetAgent("Supervisor")
 	require.True(t, found)
-	require.True(t, supervisorAgent.Role().IsSupervisor)
+	require.True(t, supervisorAgent.(TeamAgent).IsSupervisor())
 
 	researcherAgent, found := team.GetAgent("Researcher")
 	require.True(t, found)
-	require.False(t, researcherAgent.Role().IsSupervisor)
+	require.False(t, researcherAgent.(TeamAgent).IsSupervisor())
 
 	supervisor, ok := supervisorAgent.(*DiveAgent)
 	require.True(t, ok)
