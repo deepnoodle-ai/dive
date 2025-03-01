@@ -549,7 +549,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	}
 
 	// Update task state based on the last response from the LLM. It should
-	// contain thinking, status, and the primary output. We could concatenate
+	// contain thinking, primary output, then status. We could concatenate
 	// the new output with prior output, but for now it seems like it's better
 	// not to, and to request a full final response instead.
 	taskResponse := ParseStructuredResponse(response.Message().Text())
