@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -117,4 +118,71 @@ func TestToolUse(t *testing.T) {
 	require.Equal(t, llm.ContentTypeToolUse, content.Type)
 	require.Equal(t, "add", content.Name)
 	require.Equal(t, `{"a":567,"b":111}`, string(content.Input))
+}
+
+func TestToolCallStream(t *testing.T) {
+	// Skip this test in normal runs as it requires mocking the API
+	if os.Getenv("TEST_ANTHROPIC_TOOL_CALLS") != "1" {
+		t.Skip("Skipping tool call test; set TEST_ANTHROPIC_TOOL_CALLS=1 to run")
+	}
+
+	ctx := context.Background()
+	provider := New()
+
+	// Define a simple calculator tool
+	calculatorTool := llm.NewTool(&llm.ToolDefinition{
+		Name:        "calculator",
+		Description: "Perform a calculation",
+		Parameters: llm.Schema{
+			Type:     "object",
+			Required: []string{"operation", "a", "b"},
+			Properties: map[string]*llm.SchemaProperty{
+				"operation": {
+					Type:        "string",
+					Description: "The operation to perform",
+					Enum:        []string{"add", "subtract", "multiply", "divide"},
+				},
+				"a": {
+					Type:        "number",
+					Description: "The first operand",
+				},
+				"b": {
+					Type:        "number",
+					Description: "The second operand",
+				},
+			},
+		},
+	}, func(ctx context.Context, input string) (string, error) {
+		return "4", nil // Mock result
+	})
+
+	stream, err := provider.Stream(ctx, []*llm.Message{
+		llm.NewUserMessage("What is 2+2?"),
+	}, llm.WithTools(calculatorTool))
+
+	require.NoError(t, err)
+
+	var finalResponse *llm.Response
+	for {
+		event, ok := stream.Next(ctx)
+		if !ok {
+			break
+		}
+		if event.Response != nil {
+			finalResponse = event.Response
+		}
+	}
+
+	require.NotNil(t, finalResponse, "Should have received a final response")
+
+	// Check if tool calls were properly processed
+	toolCalls := finalResponse.ToolCalls()
+	if len(toolCalls) > 0 {
+		// If the model decided to use a tool, verify the attributes
+		for _, toolCall := range toolCalls {
+			require.NotEmpty(t, toolCall.ID, "Tool call ID should not be empty")
+			require.NotEmpty(t, toolCall.Name, "Tool call name should not be empty")
+			require.NotEmpty(t, toolCall.Input, "Tool call input should not be empty")
+		}
+	}
 }

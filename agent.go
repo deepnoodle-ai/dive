@@ -181,6 +181,7 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		a.toolsByName = make(map[string]llm.Tool, len(tools))
 		for _, tool := range tools {
 			a.toolsByName[tool.Definition().Name] = tool
+			fmt.Println("registered tool", tool.Definition().Name)
 		}
 	}
 	return a
@@ -203,7 +204,32 @@ func (a *DiveAgent) IsSupervisor() bool {
 }
 
 func (a *DiveAgent) Subordinates() []string {
-	return a.subordinates
+	if a.subordinates != nil {
+		return a.subordinates
+	}
+	if a.team == nil || len(a.team.Agents()) == 1 {
+		return nil
+	}
+	// If there are no other supervisors, assume we are the supervisor of all
+	// agents in the team.
+	var isAnotherSupervisor bool
+	for _, agent := range a.team.Agents() {
+		teamAgent, ok := agent.(TeamAgent)
+		if ok && teamAgent.IsSupervisor() && teamAgent.Name() != a.name {
+			isAnotherSupervisor = true
+		}
+	}
+	if isAnotherSupervisor {
+		return nil
+	}
+	var others []string
+	for _, agent := range a.team.Agents() {
+		if agent.Name() != a.name {
+			others = append(others, agent.Name())
+		}
+	}
+	a.subordinates = others
+	return others
 }
 
 func (a *DiveAgent) Join(team Team) error {

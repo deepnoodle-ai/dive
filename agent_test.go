@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -79,8 +80,14 @@ func TestAgentChatWithTools(t *testing.T) {
 		},
 	}
 
+	var echoInput string
+
 	echoFunc := func(ctx context.Context, input string) (string, error) {
-		return fmt.Sprintf("Echo: %s", input), nil
+		var m map[string]interface{}
+		err := json.Unmarshal([]byte(input), &m)
+		require.NoError(t, err)
+		echoInput = m["text"].(string)
+		return input, nil
 	}
 
 	agent := NewAgent(AgentOptions{
@@ -98,9 +105,9 @@ func TestAgentChatWithTools(t *testing.T) {
 	response, err := agent.Generate(ctx, llm.NewUserMessage("Please use the echo tool to echo 'hello world'"))
 	require.NoError(t, err)
 
-	text := response.Message().Text()
-	require.Contains(t, text, "Echo: ")
-
+	text := strings.ToLower(response.Message().Text())
+	require.Contains(t, text, "echo")
+	require.Equal(t, "hello world", echoInput)
 	err = agent.Stop(ctx)
 	require.NoError(t, err)
 }
@@ -215,14 +222,14 @@ func TestAgentSystemPromptWithTeam(t *testing.T) {
 		Agents: []Agent{
 			NewAgent(AgentOptions{
 				Name:         "Supervisor",
-				Instructions: "You are a research lead.",
+				Description:  "Research lead.",
 				IsSupervisor: true,
 				LLM:          anthropic.New(),
 				LogLevel:     "info",
 			}),
 			NewAgent(AgentOptions{
 				Name:         "Researcher",
-				Instructions: "You are a research assistant.",
+				Description:  "Research assistant.",
 				IsSupervisor: false,
 				LLM:          anthropic.New(),
 				LogLevel:     "info",
@@ -244,8 +251,6 @@ func TestAgentSystemPromptWithTeam(t *testing.T) {
 
 	systemPrompt, err := supervisor.getSystemPrompt()
 	require.NoError(t, err)
-
-	fmt.Println(systemPrompt)
 
 	expected, err := os.ReadFile("fixtures/agent-system-prompt-3.txt")
 	require.NoError(t, err)

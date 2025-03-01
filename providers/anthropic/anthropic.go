@@ -480,6 +480,13 @@ func (s *Stream) next() (*llm.StreamEvent, error) {
 			Type: event.ContentBlock.Type,
 			Text: event.ContentBlock.Text,
 		}
+		// If this is a tool_use block, extract the tool information
+		if event.ContentBlock.Type == "tool_use" {
+			s.contentBlocks[event.Index].ToolUse = &ToolUse{
+				ID:   event.ContentBlock.ID,
+				Name: event.ContentBlock.Name,
+			}
+		}
 
 	case "content_block_stop":
 		if block, exists := s.contentBlocks[event.Index]; exists {
@@ -509,6 +516,12 @@ func (s *Stream) next() (*llm.StreamEvent, error) {
 		case "input_json_delta":
 			if event.Delta.PartialJSON != "" {
 				block.PartialJSON += event.Delta.PartialJSON
+				// Ensure we have a ToolUse struct if this is a tool_use block
+				if block.Type == "tool_use" && block.ToolUse == nil {
+					block.ToolUse = &ToolUse{
+						// We don't have ID and Name yet, but we'll at least have the JSON input
+					}
+				}
 				return &llm.StreamEvent{
 					Type:  llm.EventContentBlockDelta,
 					Index: event.Index,

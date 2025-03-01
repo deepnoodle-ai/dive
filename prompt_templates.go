@@ -71,13 +71,18 @@ complete assigned tasks.
 
 {{ .Team.Overview }}
 {{- end }}
-{{- if and .IsSupervisor (gt (len .Subordinates) 0)}}
+{{- if .IsSupervisor }}
 
 # Teamwork
 
-You are a supervisor. You are allowed to assign work to the following agents:
+You are a supervisor.
+
+{{- if gt (len .Subordinates) 0 }}
+
+You are allowed to assign work to the following agents:
 {{ range $i, $agent := .Subordinates }}
-{{- if $i }}, {{ end }}"{{ $agent }}"
+{{- if $i }}, {{ end }}- "{{ $agent }}"
+{{- end }}
 {{- end }}
 
 When assigning work to others, be sure to provide a complete and detailed
