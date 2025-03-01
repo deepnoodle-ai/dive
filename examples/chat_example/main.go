@@ -14,6 +14,7 @@ import (
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/getstingrai/dive/providers/groq"
 	"github.com/getstingrai/dive/providers/openai"
+	"github.com/getstingrai/dive/slogger"
 	"github.com/getstingrai/dive/tools"
 	"github.com/getstingrai/dive/tools/google"
 )
@@ -43,6 +44,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	logger := slogger.New(slogger.LevelDebug)
+
 	a := dive.NewAgent(dive.AgentOptions{
 		Name: "Dr. Smith",
 		Role: dive.Role{
@@ -56,16 +59,12 @@ to answer non-medical questions. Use maximum medical jargon.`,
 		Tools:        []llm.Tool{tools.NewGoogleSearch(googleClient)},
 		CacheControl: "ephemeral",
 		LogLevel:     "info",
+		Logger:       logger,
 		Hooks: llm.Hooks{
 			llm.AfterGenerate: func(ctx context.Context, hookCtx *llm.HookContext) {
-				if verbose {
-					fmt.Println("----")
-					fmt.Println("INPUT")
-					fmt.Println(dive.FormatMessages(hookCtx.Messages))
-					fmt.Println("OUTPUT")
-					fmt.Println(dive.FormatMessages([]*llm.Message{hookCtx.Response.Message()}))
-					fmt.Println("----")
-				}
+				inputText := dive.FormatMessages(hookCtx.Messages)
+				outputText := dive.FormatMessages([]*llm.Message{hookCtx.Response.Message()})
+				os.WriteFile("output/chat.txt", []byte(inputText+"\n\n"+outputText), 0644)
 			},
 		},
 	})
@@ -89,10 +88,21 @@ to answer non-medical questions. Use maximum medical jargon.`,
 		if message == "" {
 			continue
 		}
-		response, err := a.Chat(ctx, llm.NewUserMessage(message))
+
+		response, err := a.Work(ctx, dive.NewTask(dive.TaskOptions{
+			Name:        "chat",
+			Description: "Respond to this message: " + message,
+		}))
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(response.Message().Text())
+
+		// fmt.Println(response.Message().Text())
+		for {
+			select {
+			case e := <-response.Channel():
+				fmt.Println("event", e.Type, e.AgentName, e.TaskName, string(e.Data))
+			}
+		}
 	}
 }

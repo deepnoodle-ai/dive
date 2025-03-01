@@ -38,16 +38,20 @@ func TestHelloWorldStream(t *testing.T) {
 		events = append(events, event)
 	}
 
+	var finalResponse *llm.Response
 	var finalText string
 	var texts []string
 	for _, event := range events {
+		if event.Response != nil {
+			finalResponse = event.Response
+		}
 		switch event.Type {
 		case llm.EventContentBlockDelta:
 			numbers := strings.FieldsFunc(event.Delta.Text, func(r rune) bool {
 				return r == '\n' || r == ' '
 			})
 			texts = append(texts, numbers...)
-			finalText = event.AccumulatedText
+			finalText += event.Delta.Text
 		}
 	}
 
@@ -57,6 +61,17 @@ func TestHelloWorldStream(t *testing.T) {
 
 	require.Equal(t, expectedOutput, normalizedFinalText)
 	require.Equal(t, expectedOutput, normalizedTexts)
+	require.NotNil(t, finalResponse)
+	require.Equal(t, llm.Assistant, finalResponse.Role())
+
+	require.Len(t, finalResponse.Message().Content, 1)
+	content := finalResponse.Message().Content[0]
+	require.Equal(t, llm.ContentTypeText, content.Type)
+	require.Equal(t, finalText, content.Text)
+
+	usage := finalResponse.Usage()
+	require.True(t, usage.OutputTokens > 0)
+	require.True(t, usage.InputTokens > 0)
 }
 
 func addFunc(ctx context.Context, input string) (string, error) {

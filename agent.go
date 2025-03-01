@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -448,9 +449,32 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 		}
 
-		response, err = a.llm.Generate(ctx, promptMessages, generateOpts...)
+		// response, err = a.llm.Generate(ctx, promptMessages, generateOpts...)
+		// if err != nil {
+		// 	return err
+		// }
+		stream, err := a.llm.Stream(ctx, promptMessages, generateOpts...)
 		if err != nil {
 			return err
+		}
+		for {
+			event, ok := stream.Next(ctx)
+			if !ok {
+				if err := stream.Err(); err != nil {
+					return err
+				}
+				break
+			}
+			eventData, err := json.Marshal(event)
+			if err != nil {
+				return err
+			}
+			state.Publisher.Send(ctx, &StreamEvent{
+				Type:      "llm.event",
+				TaskName:  task.Name(),
+				AgentName: a.name,
+				Data:      eventData,
+			})
 		}
 
 		// Mutate first text message response to include the prefill text if

@@ -31,5 +31,6 @@ func ShouldRetry(statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests || // 429
 		statusCode == http.StatusInternalServerError || // 500
 		statusCode == http.StatusServiceUnavailable || // 503
-		statusCode == http.StatusGatewayTimeout // 504
+		statusCode == http.StatusGatewayTimeout || // 504
+		statusCode == 520 // Cloudflare
 }

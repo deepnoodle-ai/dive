@@ -164,9 +164,40 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
 
+	toolCalls, contentBlocks := processContentBlocks(result.Content)
+
+	response := llm.NewResponse(llm.ResponseOptions{
+		ID:         result.ID,
+		Model:      model,
+		Role:       llm.Assistant,
+		StopReason: result.StopReason,
+		Usage: llm.Usage{
+			InputTokens:              result.Usage.InputTokens,
+			OutputTokens:             result.Usage.OutputTokens,
+			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
+		},
+		ToolCalls: toolCalls,
+		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
+	})
+
+	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
+		hooks(ctx, &llm.HookContext{
+			Type:     llm.AfterGenerate,
+			Messages: messages,
+			Response: response,
+		})
+	}
+
+	return response, nil
+}
+
+// processContentBlocks converts Anthropic content blocks to LLM content blocks and tool calls
+func processContentBlocks(blocks []*ContentBlock) ([]llm.ToolCall, []*llm.Content) {
 	var toolCalls []llm.ToolCall
 	var contentBlocks []*llm.Content
-	for _, block := range result.Content {
+
+	for _, block := range blocks {
 		switch block.Type {
 		case "text":
 			contentBlocks = append(contentBlocks, &llm.Content{
@@ -188,30 +219,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
-	response := llm.NewResponse(llm.ResponseOptions{
-		ID:         result.ID,
-		Model:      model,
-		Role:       llm.Assistant,
-		StopReason: result.StopReason,
-		Usage: llm.Usage{
-			InputTokens:              result.Usage.InputTokens,
-			OutputTokens:             result.Usage.OutputTokens,
-			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
-			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
-		},
-		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
-		ToolCalls: toolCalls,
-	})
-
-	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.AfterGenerate,
-			Messages: messages,
-			Response: response,
-		})
-	}
-
-	return response, nil
+	return toolCalls, contentBlocks
 }
 
 func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.Stream, error) {
@@ -271,8 +279,9 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	}
 
 	return &Stream{
-		reader: bufio.NewReader(resp.Body),
-		body:   resp.Body,
+		reader:        bufio.NewReader(resp.Body),
+		body:          resp.Body,
+		contentBlocks: make(map[int]*ContentBlockAccumulator),
 	}, nil
 }
 
@@ -332,6 +341,7 @@ type Stream struct {
 	err            error
 	contentBlocks  map[int]*ContentBlockAccumulator
 	currentMessage *StreamEvent
+	usage          Usage
 }
 
 type ContentBlockAccumulator struct {
@@ -355,114 +365,187 @@ type Delta struct {
 	StopReason  string `json:"stop_reason,omitempty"`
 }
 
+// ---- Example response event stream ----
+
+// event: message_start
+// data: {"type": "message_start", "message": {"id": "msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY", "type": "message", "role": "assistant", "content": [], "model": "claude-3-7-sonnet-20250219", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}
+
+// event: content_block_start
+// data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}
+
+// event: ping
+// data: {"type": "ping"}
+
+// event: content_block_delta
+// data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello"}}
+
+// event: content_block_delta
+// data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "!"}}
+
+// event: content_block_stop
+// data: {"type": "content_block_stop", "index": 0}
+
+// event: message_delta
+// data: {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence":null}, "usage": {"output_tokens": 15}}
+
+// event: message_stop
+// data: {"type": "message_stop"}
+
+// ---- End example response event stream ----
+
 func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
-	if s.contentBlocks == nil {
-		s.contentBlocks = make(map[int]*ContentBlockAccumulator)
-	}
 	for {
-		line, err := s.reader.ReadBytes('\n')
+		event, err := s.next()
 		if err != nil {
-			s.err = err
+			if err != io.EOF {
+				// EOF is the expected error when the stream ends
+				s.err = err
+			}
 			return nil, false
 		}
+		if event != nil {
+			return event, true
+		}
+	}
+}
 
-		// Skip empty lines
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+func (s *Stream) next() (*llm.StreamEvent, error) {
+	line, err := s.reader.ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+
+	// Skip empty lines
+	if len(bytes.TrimSpace(line)) == 0 {
+		return nil, nil
+	}
+
+	// Parse the event type from the SSE format
+	if bytes.HasPrefix(line, []byte("event: ")) {
+		return nil, nil
+	}
+
+	// Remove "data: " prefix if present
+	line = bytes.TrimPrefix(line, []byte("data: "))
+
+	// Check for stream end
+	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
+		return nil, nil
+	}
+
+	var event StreamEvent
+	if err := json.Unmarshal(line, &event); err != nil {
+		return nil, err
+	}
+
+	switch event.Type {
+	case "message_start":
+		s.currentMessage = &event
+		s.usage = event.Message.Usage
+
+	case "content_block_start":
+		s.contentBlocks[event.Index] = &ContentBlockAccumulator{
+			Type: event.ContentBlock.Type,
+			Text: event.ContentBlock.Text,
 		}
 
-		// Parse the event type from the SSE format
-		if bytes.HasPrefix(line, []byte("event: ")) {
-			continue
+	case "content_block_stop":
+		if block, exists := s.contentBlocks[event.Index]; exists {
+			block.IsComplete = true
 		}
 
-		// Remove "data: " prefix if present
-		line = bytes.TrimPrefix(line, []byte("data: "))
-
-		// Check for stream end
-		if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-			return nil, false
+	case "content_block_delta":
+		block, exists := s.contentBlocks[event.Index]
+		if !exists {
+			block = &ContentBlockAccumulator{Type: event.Delta.Type}
+			s.contentBlocks[event.Index] = block
 		}
-
-		var event StreamEvent
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue // Skip malformed events
-		}
-
-		switch event.Type {
-		case "message_start":
-			s.currentMessage = &event
-
-		case "content_block_start":
-			s.contentBlocks[event.Index] = &ContentBlockAccumulator{
-				Type: event.ContentBlock.Type,
-				Text: event.ContentBlock.Text,
-				// ToolUse: event.ContentBlock.ToolUse,
-			}
-
-		case "content_block_stop":
-			if block, exists := s.contentBlocks[event.Index]; exists {
-				block.IsComplete = true
-			}
-
-		case "content_block_delta":
-			block, exists := s.contentBlocks[event.Index]
-			if !exists {
-				block = &ContentBlockAccumulator{
-					Type: event.Delta.Type,
-				}
-				s.contentBlocks[event.Index] = block
-			}
-
-			switch event.Delta.Type {
-			case "text_delta":
-				if event.Delta.Text != "" {
-					block.Text += event.Delta.Text
-					return &llm.StreamEvent{
-						Type:  llm.EventContentBlockDelta,
-						Index: event.Index,
-						Delta: &llm.Delta{
-							Type: "text_delta",
-							Text: event.Delta.Text,
-						},
-						AccumulatedText: block.Text,
-					}, true
-				}
-
-			case "input_json_delta":
-				if event.Delta.PartialJSON != "" {
-					block.PartialJSON += event.Delta.PartialJSON
-					return &llm.StreamEvent{
-						Type:  llm.EventContentBlockDelta,
-						Index: event.Index,
-						Delta: &llm.Delta{
-							Type:        "input_json_delta",
-							PartialJSON: event.Delta.PartialJSON,
-						},
-						AccumulatedJSON: block.PartialJSON,
-					}, true
-				}
-			}
-
-		case "message_delta":
-			if event.Delta.StopReason != "" {
+		// Accumulate both the text and the partial JSON on the block
+		switch event.Delta.Type {
+		case "text_delta":
+			if event.Delta.Text != "" {
+				block.Text += event.Delta.Text
 				return &llm.StreamEvent{
-					Type:  llm.EventMessageDelta,
+					Type:  llm.EventContentBlockDelta,
 					Index: event.Index,
 					Delta: &llm.Delta{
-						Type:         "message_delta",
-						StopReason:   event.Delta.StopReason,
-						StopSequence: event.Delta.StopSequence,
+						Type: "text_delta",
+						Text: event.Delta.Text,
 					},
-					AccumulatedText: event.Delta.Text,
-					AccumulatedJSON: event.Delta.PartialJSON,
-				}, true
+				}, nil
 			}
-
-		case "message_stop", "ping":
-			continue
+		case "input_json_delta":
+			if event.Delta.PartialJSON != "" {
+				block.PartialJSON += event.Delta.PartialJSON
+				return &llm.StreamEvent{
+					Type:  llm.EventContentBlockDelta,
+					Index: event.Index,
+					Delta: &llm.Delta{
+						Type:        "input_json_delta",
+						PartialJSON: event.Delta.PartialJSON,
+					},
+				}, nil
+			}
 		}
+
+	case "message_delta":
+		// Combine initial usage with this updated usage
+		usage := s.usage
+		usage.InputTokens += event.Usage.InputTokens
+		usage.OutputTokens += event.Usage.OutputTokens
+		usage.CacheCreationInputTokens += event.Usage.CacheCreationInputTokens
+		usage.CacheReadInputTokens += event.Usage.CacheReadInputTokens
+		response := s.buildFinalResponse(event.Delta.StopReason, usage)
+		return &llm.StreamEvent{
+			Type:  llm.EventMessageDelta,
+			Index: event.Index,
+			Delta: &llm.Delta{
+				Type:         "message_delta",
+				StopReason:   event.Delta.StopReason,
+				StopSequence: event.Delta.StopSequence,
+			},
+			Response: response,
+		}, nil
+
+	case "message_stop":
+		return &llm.StreamEvent{Type: llm.EventMessageStop}, nil
+
+	case "ping":
+		return &llm.StreamEvent{Type: llm.EventPing}, nil
 	}
+	return nil, nil
+}
+
+func (s *Stream) buildFinalResponse(stopReason string, usage Usage) *llm.Response {
+	blocks := make([]*ContentBlock, 0, len(s.contentBlocks))
+	for _, block := range s.contentBlocks {
+		contentBlock := &ContentBlock{
+			Type: block.Type,
+			Text: block.Text,
+		}
+		if block.Type == "tool_use" && block.ToolUse != nil {
+			contentBlock.ID = block.ToolUse.ID
+			contentBlock.Name = block.ToolUse.Name
+			contentBlock.Input = json.RawMessage(block.PartialJSON)
+		}
+		blocks = append(blocks, contentBlock)
+	}
+	toolCalls, contentBlocks := processContentBlocks(blocks)
+
+	return llm.NewResponse(llm.ResponseOptions{
+		ID:         s.currentMessage.Message.ID,
+		Model:      s.currentMessage.Message.Model,
+		Role:       llm.Assistant,
+		StopReason: stopReason,
+		ToolCalls:  toolCalls,
+		Message:    llm.NewMessage(llm.Assistant, contentBlocks),
+		Usage: llm.Usage{
+			InputTokens:              usage.InputTokens,
+			OutputTokens:             usage.OutputTokens,
+			CacheCreationInputTokens: usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     usage.CacheReadInputTokens,
+		},
+	})
 }
 
 func (s *Stream) Close() error {
@@ -470,5 +553,5 @@ func (s *Stream) Close() error {
 }
 
 func (s *Stream) Err() error {
-	return nil
+	return s.err
 }
