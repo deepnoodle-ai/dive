@@ -422,7 +422,7 @@ func (a *DiveAgent) handleChat(m messageChat) {
 	ctx, cancel := context.WithTimeout(context.Background(), a.chatTimeout)
 	defer cancel()
 
-	systemPrompt, err := a.getSystemPrompt()
+	systemPrompt, err := a.getSystemPromptForMode("chat")
 	if err != nil {
 		m.errChan <- err
 		return
@@ -455,7 +455,17 @@ func (a *DiveAgent) handleChat(m messageChat) {
 }
 
 func (a *DiveAgent) getSystemPrompt() (string, error) {
-	return executeTemplate(agentSystemPromptTemplate, newAgentTemplateData(a))
+	// Default to task mode for backward compatibility
+	return a.getSystemPromptForMode("task")
+}
+
+func (a *DiveAgent) getSystemPromptForMode(mode string) (string, error) {
+	data := newAgentTemplateData(a)
+	if mode == "chat" {
+		return executeTemplate(chatSystemPromptTemplate, data)
+	}
+	// Default to task system prompt
+	return executeTemplate(agentSystemPromptTemplate, data)
 }
 
 // executeToolLoop runs the LLM generation and tool execution loop.
@@ -620,7 +630,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	systemPrompt, err := a.getSystemPrompt()
+	systemPrompt, err := a.getSystemPromptForMode("task")
 	if err != nil {
 		return err
 	}

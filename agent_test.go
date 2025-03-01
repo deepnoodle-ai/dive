@@ -106,6 +106,7 @@ func TestAgentChatWithTools(t *testing.T) {
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
+	fmt.Println(text)
 	require.Contains(t, text, "echo")
 	require.Equal(t, "hello world", echoInput)
 	err = agent.Stop(ctx)
@@ -201,7 +202,7 @@ func TestAgentSystemPromptWithoutTeam(t *testing.T) {
 			agent := NewAgent(tt.options)
 
 			// Get the system prompt
-			systemPrompt, err := agent.getSystemPrompt()
+			systemPrompt, err := agent.getSystemPromptForMode("task")
 			require.NoError(t, err)
 
 			fmt.Println(systemPrompt)
@@ -249,11 +250,46 @@ func TestAgentSystemPromptWithTeam(t *testing.T) {
 	supervisor, ok := supervisorAgent.(*DiveAgent)
 	require.True(t, ok)
 
-	systemPrompt, err := supervisor.getSystemPrompt()
+	systemPrompt, err := supervisor.getSystemPromptForMode("task")
 	require.NoError(t, err)
 
 	expected, err := os.ReadFile("fixtures/agent-system-prompt-3.txt")
 	require.NoError(t, err)
 
 	require.Equal(t, string(expected), systemPrompt)
+}
+
+func TestAgentChatSystemPrompt(t *testing.T) {
+	agent := NewAgent(AgentOptions{
+		Name:         "TestAgent",
+		Description:  "You are a research assistant.",
+		Instructions: "You are extremely thorough and detail-oriented.",
+		IsSupervisor: false,
+		LLM:          anthropic.New(),
+		LogLevel:     "info",
+	})
+
+	// Get the chat system prompt
+	chatSystemPrompt, err := agent.getSystemPromptForMode("chat")
+	require.NoError(t, err)
+
+	// Verify that the chat system prompt doesn't contain the status section
+	require.NotContains(t, chatSystemPrompt, "<status>")
+	require.NotContains(t, chatSystemPrompt, "active")
+	require.NotContains(t, chatSystemPrompt, "completed")
+	require.NotContains(t, chatSystemPrompt, "paused")
+	require.NotContains(t, chatSystemPrompt, "blocked")
+	require.NotContains(t, chatSystemPrompt, "error")
+
+	// Get the task system prompt
+	taskSystemPrompt, err := agent.getSystemPromptForMode("task")
+	require.NoError(t, err)
+
+	// Verify that the task system prompt contains the status section
+	require.Contains(t, taskSystemPrompt, "<status>")
+	require.Contains(t, taskSystemPrompt, "active")
+	require.Contains(t, taskSystemPrompt, "completed")
+	require.Contains(t, taskSystemPrompt, "paused")
+	require.Contains(t, taskSystemPrompt, "blocked")
+	require.Contains(t, taskSystemPrompt, "error")
 }
