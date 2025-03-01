@@ -252,37 +252,69 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		Stream:      true,
 	}
 
+	if len(config.Tools) > 0 {
+		var tools []*Tool
+		for _, tool := range config.Tools {
+			toolDef := tool.Definition()
+			tools = append(tools, &Tool{
+				Name:        toolDef.Name,
+				Description: toolDef.Description,
+				InputSchema: toolDef.Parameters,
+			})
+		}
+		reqBody.Tools = tools
+	}
+	if config.ToolChoice.Type != "" {
+		reqBody.ToolChoice = &config.ToolChoice
+	}
+
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+	var stream *Stream
+	err = retry.Do(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return fmt.Errorf("error creating request: %w", err)
+		}
+
+		req.Header.Set("x-api-key", p.apiKey)
+		req.Header.Set("anthropic-version", p.version)
+		req.Header.Set("content-type", "application/json")
+		req.Header.Set("accept", "text/event-stream")
+		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("error making request: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 429 {
+				if config.Logger != nil {
+					config.Logger.Warn("rate limit exceeded",
+						"status", resp.StatusCode, "body", string(body))
+				}
+			}
+			return providers.NewError(resp.StatusCode, string(body))
+		}
+
+		stream = &Stream{
+			reader:        bufio.NewReader(resp.Body),
+			body:          resp.Body,
+			contentBlocks: make(map[int]*ContentBlockAccumulator),
+		}
+		return nil
+	}, retry.WithMaxRetries(6))
+
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
+		return nil, err
 	}
-
-	req.Header.Set("x-api-key", p.apiKey)
-	req.Header.Set("anthropic-version", p.version)
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("accept", "text/event-stream")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error making request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("error from API (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	return &Stream{
-		reader:        bufio.NewReader(resp.Body),
-		body:          resp.Body,
-		contentBlocks: make(map[int]*ContentBlockAccumulator),
-	}, nil
+	return stream, nil
 }
 
 func (p *Provider) SupportsStreaming() bool {
