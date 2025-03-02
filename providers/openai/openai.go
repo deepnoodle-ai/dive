@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	DefaultModel            = "chatgpt-4o-latest"
+	DefaultModel            = "gpt-4o"
 	DefaultMessagesEndpoint = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens        = 4096
 	DefaultSystemRole       = "developer"
@@ -611,17 +611,38 @@ func (s *Stream) next() ([]*llm.StreamEvent, error) {
 				events = append(events, &llm.StreamEvent{
 					Type:  llm.EventContentBlockStart,
 					Index: index,
+					ContentBlock: &llm.ContentBlock{
+						Type: "tool_use",
+					},
 				})
 			}
 			toolCall := s.toolCalls[index]
 			if toolCallDelta.ID != "" {
 				toolCall.ID = toolCallDelta.ID
+				// Update the ContentBlock in the event queue if it exists
+				for _, queuedEvent := range s.eventQueue {
+					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
+						if queuedEvent.ContentBlock == nil {
+							queuedEvent.ContentBlock = &llm.ContentBlock{Type: "tool_use"}
+						}
+						queuedEvent.ContentBlock.ID = toolCallDelta.ID
+					}
+				}
 			}
 			if toolCallDelta.Type != "" {
 				toolCall.Type = toolCallDelta.Type
 			}
 			if toolCallDelta.Function.Name != "" {
 				toolCall.Name = toolCallDelta.Function.Name
+				// Update the ContentBlock in the event queue if it exists
+				for _, queuedEvent := range s.eventQueue {
+					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
+						if queuedEvent.ContentBlock == nil {
+							queuedEvent.ContentBlock = &llm.ContentBlock{Type: "tool_use"}
+						}
+						queuedEvent.ContentBlock.Name = toolCallDelta.Function.Name
+					}
+				}
 			}
 			if toolCallDelta.Function.Arguments != "" {
 				toolCall.Arguments += toolCallDelta.Function.Arguments
@@ -669,10 +690,28 @@ func (s *Stream) next() ([]*llm.StreamEvent, error) {
 
 		// Add stop events for all blocks that need to be stopped
 		for _, block := range blocksToStop {
-			events = append(events, &llm.StreamEvent{
+			event := &llm.StreamEvent{
 				Type:  llm.EventContentBlockStop,
 				Index: block.Index,
-			})
+			}
+
+			// Add ContentBlock with ID and Name for tool calls
+			if block.Type == "tool" {
+				toolCall := s.toolCalls[block.Index]
+				event.ContentBlock = &llm.ContentBlock{
+					ID:   toolCall.ID,
+					Name: toolCall.Name,
+					Type: "tool_use",
+				}
+			} else if block.Type == "content" {
+				contentBlock := s.contentBlocks[block.Index]
+				event.ContentBlock = &llm.ContentBlock{
+					Type: contentBlock.Type,
+					Text: contentBlock.Text,
+				}
+			}
+
+			events = append(events, event)
 		}
 
 		// Add message_delta event with stop reason

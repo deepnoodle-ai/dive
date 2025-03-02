@@ -46,7 +46,9 @@ type Stream interface {
 
 type ContentBlock struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type Delta struct {

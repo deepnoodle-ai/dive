@@ -92,10 +92,37 @@ to answer non-medical questions. Use maximum medical jargon.`,
 			log.Fatal(err)
 		}
 
+		var inToolUse bool
+		toolUseAccum := ""
+		toolName := ""
+		toolID := ""
 		for event := range stream.Channel() {
 			if event.LLMEvent != nil {
+				if event.LLMEvent.ContentBlock != nil {
+					cb := event.LLMEvent.ContentBlock
+					if cb.Type == "tool_use" {
+						toolName = cb.Name
+						toolID = cb.ID
+					}
+				}
 				if event.LLMEvent.Delta != nil {
-					fmt.Print(event.LLMEvent.Delta.Text)
+					delta := event.LLMEvent.Delta
+					if delta.PartialJSON != "" {
+						if !inToolUse {
+							inToolUse = true
+							fmt.Println("\n----")
+						}
+						toolUseAccum += delta.PartialJSON
+					} else if delta.Text != "" {
+						if inToolUse {
+							fmt.Println("NAME:", toolName, "ID:", toolID)
+							fmt.Println(toolUseAccum)
+							fmt.Println("----")
+							inToolUse = false
+							toolUseAccum = ""
+						}
+						fmt.Print(delta.Text)
+					}
 				}
 			}
 		}

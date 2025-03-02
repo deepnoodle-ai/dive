@@ -552,15 +552,28 @@ func (s *Stream) next() (*llm.StreamEvent, error) {
 		return &llm.StreamEvent{
 			Type:  llm.EventContentBlockStart,
 			Index: event.Index,
+			ContentBlock: &llm.ContentBlock{
+				ID:   event.ContentBlock.ID,
+				Name: event.ContentBlock.Name,
+				Type: event.ContentBlock.Type,
+				Text: event.ContentBlock.Text,
+			},
 		}, nil
 
 	case "content_block_stop":
-		if block, exists := s.contentBlocks[event.Index]; exists {
+		block, exists := s.contentBlocks[event.Index]
+		if exists {
 			block.IsComplete = true
 		}
 		return &llm.StreamEvent{
 			Type:  llm.EventContentBlockStop,
 			Index: event.Index,
+			ContentBlock: &llm.ContentBlock{
+				ID:   event.ContentBlock.ID,
+				Name: event.ContentBlock.Name,
+				Type: event.ContentBlock.Type,
+				Text: event.ContentBlock.Text,
+			},
 		}, nil
 
 	case "content_block_delta":
