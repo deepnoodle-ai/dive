@@ -16,9 +16,14 @@ type messageWork struct {
 // The agent will process this message immediately and respond through
 // the provided channels, without converting it to a task
 type messageChat struct {
-	message    *llm.Message
+	message *llm.Message
+
+	// For synchronous responses:
 	resultChan chan *llm.Response
 	errChan    chan error
+
+	// For streaming responses:
+	stream *DiveStream
 }
 
 // messageStop represents a request to stop the agent

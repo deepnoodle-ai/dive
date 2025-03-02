@@ -23,7 +23,7 @@ var (
 	DefaultSystemRole       = "developer"
 )
 
-var _ llm.LLM = &Provider{}
+var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
 	apiKey     string
@@ -72,11 +72,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		maxTokens = &p.maxTokens
 	}
 
-	msgs, err := convertMessages(messages)
-	if err != nil {
-		return nil, fmt.Errorf("error converting messages: %w", err)
-	}
-
 	messageCount := len(messages)
 	if messageCount == 0 {
 		return nil, fmt.Errorf("no messages provided")
@@ -85,6 +80,11 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		if len(message.Content) == 0 {
 			return nil, fmt.Errorf("empty message detected (index %d)", i)
 		}
+	}
+
+	msgs, err := convertMessages(messages)
+	if err != nil {
+		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
 	var tools []Tool
@@ -104,6 +104,10 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		toolChoice = config.ToolChoice.Type
 	} else if len(tools) > 0 {
 		toolChoice = "auto"
+	}
+
+	if config.Prefill != "" {
+		msgs = append(msgs, Message{Role: "assistant", Content: config.Prefill})
 	}
 
 	reqBody := Request{
@@ -188,6 +192,18 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		})
 	}
 
+	if config.Prefill != "" {
+		for _, block := range contentBlocks {
+			if block.Type == llm.ContentTypeText {
+				if config.PrefillClosingTag == "" ||
+					strings.Contains(block.Text, config.PrefillClosingTag) {
+					block.Text = config.Prefill + block.Text
+				}
+				break
+			}
+		}
+	}
+
 	response := llm.NewResponse(llm.ResponseOptions{
 		ID:    result.ID,
 		Model: model,
@@ -231,14 +247,28 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		model = p.model
 	}
 
+	maxTokens := config.MaxTokens
+	if maxTokens == nil {
+		maxTokens = &p.maxTokens
+	}
+
+	messageCount := len(messages)
+	if messageCount == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+	for i, message := range messages {
+		if len(message.Content) == 0 {
+			return nil, fmt.Errorf("empty message detected (index %d)", i)
+		}
+	}
+
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
+	if config.Prefill != "" {
+		msgs = append(msgs, Message{Role: "assistant", Content: config.Prefill})
 	}
 
 	var tools []Tool
@@ -282,31 +312,47 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+	var stream *Stream
+	err = retry.Do(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return fmt.Errorf("error creating request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("error making request: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 429 {
+				if config.Logger != nil {
+					config.Logger.Warn("rate limit exceeded",
+						"status", resp.StatusCode, "body", string(body))
+				}
+			}
+			return providers.NewError(resp.StatusCode, string(body))
+		}
+
+		stream = &Stream{
+			reader:            bufio.NewReader(resp.Body),
+			body:              resp.Body,
+			toolCalls:         make(map[int]*ToolCallAccumulator),
+			prefill:           config.Prefill,
+			prefillClosingTag: config.PrefillClosingTag,
+		}
+		return nil
+	}, retry.WithMaxRetries(6))
+
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
+		return nil, err
 	}
-
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error making request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("error from API (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	return &Stream{
-		reader:    bufio.NewReader(resp.Body),
-		body:      resp.Body,
-		toolCalls: make(map[int]*ToolCallAccumulator),
-	}, nil
+	return stream, nil
 }
 
 func (p *Provider) SupportsStreaming() bool {
@@ -379,13 +425,15 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 }
 
 type Stream struct {
-	reader        *bufio.Reader
-	body          io.ReadCloser
-	err           error
-	toolCalls     map[int]*ToolCallAccumulator
-	responseID    string
-	responseModel string
-	usage         Usage
+	reader            *bufio.Reader
+	body              io.ReadCloser
+	err               error
+	toolCalls         map[int]*ToolCallAccumulator
+	responseID        string
+	responseModel     string
+	usage             Usage
+	prefill           string
+	prefillClosingTag string
 }
 
 type ToolCallAccumulator struct {
@@ -409,7 +457,11 @@ func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
 	for {
 		line, err := s.reader.ReadBytes('\n')
 		if err != nil {
-			s.err = err
+			if err != io.EOF {
+				// EOF is the expected error when the stream ends
+				s.Close()
+				s.err = err
+			}
 			return nil, false
 		}
 
@@ -458,6 +510,11 @@ func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
 
 			// Handle text content
 			if choice.Delta.Content != "" {
+				if s.prefill != "" {
+					// Inject our prefill and then clear it
+					choice.Delta.Content = s.prefill + choice.Delta.Content
+					s.prefill = ""
+				}
 				return &llm.StreamEvent{
 					Type: llm.EventContentBlockDelta,
 					Delta: &llm.Delta{

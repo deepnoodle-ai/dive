@@ -2,7 +2,6 @@ package dive
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,6 +50,7 @@ type AgentOptions struct {
 	GenerationLimit  int
 	TaskMessageLimit int
 	Memory           memory.Memory
+	DisablePrefill   bool
 }
 
 // Publisher is an interface for sending events to a stream.
@@ -88,7 +88,7 @@ type DiveAgent struct {
 	generationLimit  int
 	taskMessageLimit int
 	memory           memory.Memory
-
+	disablePrefill   bool
 	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
 
@@ -151,6 +151,7 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		mailbox:          make(chan interface{}, 16),
 		logger:           opts.Logger,
 		logLevel:         strings.ToLower(opts.LogLevel),
+		disablePrefill:   opts.DisablePrefill,
 	}
 
 	tools := make([]llm.Tool, len(opts.Tools))
@@ -302,6 +303,10 @@ func (a *DiveAgent) IsRunning() bool {
 // or a continuation. Pass a conversation ID? Multiple messages? What if two people
 // are talking to the same agent?
 func (a *DiveAgent) Generate(ctx context.Context, message *llm.Message, opts ...GenerateOption) (*llm.Response, error) {
+	if !a.IsRunning() {
+		return nil, fmt.Errorf("agent is not running")
+	}
+
 	resultChan := make(chan *llm.Response, 1)
 	errChan := make(chan error, 1)
 
@@ -331,8 +336,27 @@ func (a *DiveAgent) Generate(ctx context.Context, message *llm.Message, opts ...
 }
 
 func (a *DiveAgent) Stream(ctx context.Context, message *llm.Message, opts ...GenerateOption) (Stream, error) {
-	// return a.Generate(ctx, message, opts...)
-	return nil, errors.New("not implemented")
+	if !a.IsRunning() {
+		return nil, fmt.Errorf("agent is not running")
+	}
+
+	stream := NewDiveStream()
+
+	chatMessage := messageChat{
+		message: message,
+		stream:  stream,
+	}
+
+	// Send the chat message to the agent's mailbox, but make sure we timeout
+	// if the agent doesn't pick it up in a reasonable amount of time
+	select {
+	case a.mailbox <- chatMessage:
+	case <-ctx.Done():
+		stream.Close()
+		return nil, ctx.Err()
+	}
+
+	return stream, nil
 }
 
 func (a *DiveAgent) Event(ctx context.Context, event *Event) error {
@@ -428,35 +452,46 @@ func (a *DiveAgent) handleChat(m messageChat) {
 		return
 	}
 
-	// Create a message array with just the user's message
-	messages := []*llm.Message{m.message}
+	var isStreaming bool
+	var publisher *StreamPublisher
+	if m.stream != nil {
+		isStreaming = true
+		publisher = NewStreamPublisher(m.stream)
+		defer publisher.Close()
+	}
 
 	a.logger.Info("handling chat",
 		"agent", a.name,
 		"truncated_message", TruncateText(m.message.Text(), 10),
+		"streaming", isStreaming,
 	)
 
-	// Execute the LLM generation and tool execution loop
 	response, _, err := a.executeToolLoop(
 		ctx,
-		messages,
+		[]*llm.Message{m.message},
 		systemPrompt,
-		"chat", // No task name for chat
-		nil,    // No publisher for chat
+		"chat",
+		publisher,
 	)
 
 	if err != nil {
-		m.errChan <- err
+		a.logger.Error("error generating chat response", "agent", a.name, "error", err)
+	}
+
+	if isStreaming {
 		return
 	}
 
-	// Send the response back through the result channel
+	if err != nil {
+		m.errChan <- err
+		a.logger.Error("error generating chat response",
+			"agent", a.name,
+			"error", err,
+		)
+		return
+	}
 	m.resultChan <- response
-}
-
-func (a *DiveAgent) getSystemPrompt() (string, error) {
-	// Default to task mode for backward compatibility
-	return a.getSystemPromptForMode("task")
+	return
 }
 
 func (a *DiveAgent) getSystemPromptForMode(mode string) (string, error) {
@@ -464,7 +499,6 @@ func (a *DiveAgent) getSystemPromptForMode(mode string) (string, error) {
 	if mode == "chat" {
 		return executeTemplate(chatSystemPromptTemplate, data)
 	}
-	// Default to task system prompt
 	return executeTemplate(agentSystemPromptTemplate, data)
 }
 
@@ -497,14 +531,6 @@ func (a *DiveAgent) executeToolLoop(
 	// through, we submit the primary generation. On subsequent loops, we are
 	// running tool-uses and responding with the results.
 	for i := 0; i < a.generationLimit; i++ {
-		var prefill string
-		if i == a.generationLimit-1 {
-			prefill = "<think>I must respond with my final answer now."
-		} else {
-			prefill = "<think>"
-		}
-		promptMessages := append(updatedMessages, llm.NewAssistantMessage(prefill))
-
 		generateOpts := []llm.Option{
 			llm.WithSystemPrompt(systemPrompt),
 			llm.WithCacheControl(a.cacheControl),
@@ -517,12 +543,25 @@ func (a *DiveAgent) executeToolLoop(
 		if a.logger != nil {
 			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 		}
+		if !a.disablePrefill {
+			prefill := "<think>"
+			if i >= a.generationLimit-1 {
+				prefill += "I must respond with my final answer now."
+			}
+			generateOpts = append(generateOpts, llm.WithPrefill(prefill, "</think>"))
+		}
 
-		if a.llm.SupportsStreaming() {
-			stream, err := a.llm.Stream(ctx, promptMessages, generateOpts...)
+		var currentResponse *llm.Response
+
+		if streamingLLM, ok := a.llm.(llm.StreamingLLM); ok {
+			stream, err := streamingLLM.Stream(ctx, updatedMessages, generateOpts...)
 			if err != nil {
 				return nil, updatedMessages, err
 			}
+			// Guarantee that Close is called. It's ok if this is redundant with
+			// additional calls to Close below.
+			defer stream.Close()
+
 			for {
 				event, ok := stream.Next(ctx)
 				if !ok {
@@ -532,40 +571,38 @@ func (a *DiveAgent) executeToolLoop(
 					break
 				}
 				if event.Response != nil {
-					response = event.Response
-				}
-				eventData, err := json.Marshal(event)
-				if err != nil {
-					return nil, updatedMessages, err
+					currentResponse = event.Response
 				}
 				err = safePublish(&StreamEvent{
 					Type:      "llm.event",
 					TaskName:  taskName,
 					AgentName: a.name,
-					Data:      eventData,
+					LLMEvent:  event,
+					Response:  currentResponse,
 				})
 				if err != nil {
 					return nil, updatedMessages, err
 				}
 			}
+			stream.Close()
 		} else {
 			var err error
-			response, err = a.llm.Generate(ctx, promptMessages, generateOpts...)
+			currentResponse, err = a.llm.Generate(ctx, updatedMessages, generateOpts...)
 			if err != nil {
 				return nil, updatedMessages, err
 			}
 		}
 
-		if response == nil {
+		if currentResponse == nil {
 			// This indicates a bug in the LLM provider implementation
 			return nil, updatedMessages, errors.New("no final response from llm provider")
 		}
+		response = currentResponse
 
-		// Mutate first text message response to include the prefill text if
-		// we see the closing </think> tag. The prefill is a behind-the-scenes
+		// Mutate first text message response to include the prefill text if we
+		// see the closing </think> tag. The prefill is a behind-the-scenes
 		// behavior for the caller.
 		responseMessage := response.Message()
-		addPrefill(responseMessage, prefill)
 
 		// Remember the assistant response message
 		updatedMessages = append(updatedMessages, responseMessage)
@@ -575,7 +612,7 @@ func (a *DiveAgent) executeToolLoop(
 			break
 		}
 
-		// Execute tool-uses and accumulate results
+		// Execute all requested tool uses and accumulate results
 		shouldReturnResult := false
 		toolResults := make([]*llm.ToolResult, len(response.ToolCalls()))
 		for i, toolCall := range response.ToolCalls() {
@@ -601,12 +638,11 @@ func (a *DiveAgent) executeToolLoop(
 		if !shouldReturnResult {
 			break
 		}
-
 		// Capture results in a new message to send on next loop iteration
 		resultMessage := llm.NewToolResultMessage(toolResults)
 
-		// Add instructions to the message to not use any more tools if we
-		// have only one generation left.
+		// Add instructions to the message to not use any more tools if we have
+		// only one generation left.
 		if i == a.generationLimit-2 {
 			resultMessage.Content = append(resultMessage.Content, &llm.Content{
 				Type: llm.ContentTypeText,
@@ -614,7 +650,6 @@ func (a *DiveAgent) executeToolLoop(
 			})
 			a.logger.Debug("adding tool use limit instruction", "agent", a.name, "task", taskName)
 		}
-
 		updatedMessages = append(updatedMessages, resultMessage)
 	}
 
@@ -844,8 +879,8 @@ func (a *DiveAgent) doSomeWork() {
 	}
 }
 
-// Remember the last 10 tasks that were worked on, so that the agent can
-// use them as context for future tasks.
+// Remember the last 10 tasks that were worked on, so that the agent can use
+// them as context for future tasks.
 func (a *DiveAgent) rememberTask(task *taskState) {
 	a.recentTasks = append(a.recentTasks, task)
 	if len(a.recentTasks) > 10 {

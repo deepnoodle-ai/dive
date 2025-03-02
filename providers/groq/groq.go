@@ -14,7 +14,7 @@ var (
 	DefaultMaxTokens = 4096
 )
 
-var _ llm.LLM = &Provider{}
+var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
 	apiKey    string

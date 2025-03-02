@@ -2,7 +2,6 @@ package dive
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/getstingrai/dive/llm"
 )
@@ -119,8 +118,8 @@ type RunnableAgent interface {
 	IsRunning() bool
 }
 
-// EventedAgent is an Agent that can handle events
-type EventedAgent interface {
+// EventHandlerAgent is an Agent that can handle events
+type EventHandlerAgent interface {
 	Agent
 
 	// AcceptedEvents returns the names of supported events
@@ -150,14 +149,17 @@ type StreamEvent struct {
 	// AgentName is the name of the agent associated with the event, if any
 	AgentName string `json:"agent_name,omitempty"`
 
-	// Data contains the event payload
-	Data json.RawMessage `json:"data,omitempty"`
+	// LLMEvent is the event from the LLM, if any
+	LLMEvent *llm.StreamEvent `json:"llm_event,omitempty"`
 
 	// Error contains an error message if the event is an error
 	Error string `json:"error,omitempty"`
 
 	// TaskResult is the result of a task, if the event is a task result
 	TaskResult *TaskResult `json:"task_result,omitempty"`
+
+	// Response is the final response from the agent
+	Response *llm.Response `json:"response,omitempty"`
 }
 
 // TODO: TaskResult should not hold a Task. Make it JSON serializable?

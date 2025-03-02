@@ -320,7 +320,7 @@ func (t *DiveTeam) Overview() (string, error) {
 // HandleEvent passes an event to any agents that accept it.
 func (t *DiveTeam) HandleEvent(ctx context.Context, event *Event) error {
 	for _, agent := range t.agents {
-		eventedAgent, ok := agent.(EventedAgent)
+		eventedAgent, ok := agent.(EventHandlerAgent)
 		if !ok {
 			continue
 		}
