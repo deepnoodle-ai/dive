@@ -94,11 +94,11 @@ to answer non-medical questions. Use maximum medical jargon.`,
 
 		for event := range stream.Channel() {
 			if event.LLMEvent != nil {
-				fmt.Println("llm event", event.Type, event.LLMEvent)
-			}
-			if event.Response != nil {
-				fmt.Println("response", event.Response.Message().Text())
+				if event.LLMEvent.Delta != nil {
+					fmt.Print(event.LLMEvent.Delta.Text)
+				}
 			}
 		}
+		fmt.Println()
 	}
 }

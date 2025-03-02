@@ -234,27 +234,7 @@ possible, for efficiency.
 
 Context you are given may be helpful to you when answering questions. If the
 context doesn't fully help answer a question, please use the available tools
-to gather more information.
-
-# Output
-
-Always respond with two sections, in this order:
-
-* <think> ... </think> - In this section, you think step-by-step about how to make progress on the task.
-* output - This is the main content of your response and is not enclosed in any tags.
-
-Here is an example response for reference:
-
----
-<think>
-Here is where you show your thought process for the task.
-</think>
-
-Here is where you show your response.
-
-It may span multiple lines.
----
-`
+to gather more information.`
 
 var taskPromptText = `{{- if .Task.Context -}}
 <CONTEXT>

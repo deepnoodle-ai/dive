@@ -65,12 +65,14 @@ type Usage struct {
 }
 
 type StreamResponse struct {
-	ID      string         `json:"id"`
-	Object  string         `json:"object"`
-	Created int64          `json:"created"`
-	Model   string         `json:"model"`
-	Choices []StreamChoice `json:"choices"`
-	Usage   Usage          `json:"usage,omitempty"`
+	ID                string         `json:"id"`                 // chatcmpl-B6ffy5hheub7qvA7LWuXEqDXR3TQ5
+	Object            string         `json:"object"`             // chat.completion.chunk
+	Created           int64          `json:"created"`            // 1740929870
+	Model             string         `json:"model"`              // gpt-4o-2024-08-06
+	ServiceTier       string         `json:"service_tier"`       // default
+	SystemFingerprint string         `json:"system_fingerprint"` // fp_eb9dce56a8
+	Choices           []StreamChoice `json:"choices"`
+	Usage             Usage          `json:"usage,omitempty"`
 }
 
 type StreamChoice struct {

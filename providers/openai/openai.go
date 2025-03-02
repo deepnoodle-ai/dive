@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/getstingrai/dive/llm"
 	"github.com/getstingrai/dive/providers"
@@ -17,7 +18,7 @@ import (
 )
 
 var (
-	DefaultModel            = "gpt-4o"
+	DefaultModel            = "chatgpt-4o-latest"
 	DefaultMessagesEndpoint = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens        = 4096
 	DefaultSystemRole       = "developer"
@@ -343,8 +344,11 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 			reader:            bufio.NewReader(resp.Body),
 			body:              resp.Body,
 			toolCalls:         make(map[int]*ToolCallAccumulator),
+			contentBlocks:     make(map[int]*ContentBlockAccumulator),
 			prefill:           config.Prefill,
 			prefillClosingTag: config.PrefillClosingTag,
+			messageStartSent:  false,
+			eventQueue:        make([]*llm.StreamEvent, 0),
 		}
 		return nil
 	}, retry.WithMaxRetries(6))
@@ -429,11 +433,15 @@ type Stream struct {
 	body              io.ReadCloser
 	err               error
 	toolCalls         map[int]*ToolCallAccumulator
+	contentBlocks     map[int]*ContentBlockAccumulator
 	responseID        string
 	responseModel     string
 	usage             Usage
 	prefill           string
 	prefillClosingTag string
+	closeOnce         sync.Once
+	messageStartSent  bool               // Track whether we've sent a message_start event
+	eventQueue        []*llm.StreamEvent // Queue to store events that need to be processed
 }
 
 type ToolCallAccumulator struct {
@@ -441,6 +449,12 @@ type ToolCallAccumulator struct {
 	Type       string
 	Name       string
 	Arguments  string
+	IsComplete bool
+}
+
+type ContentBlockAccumulator struct {
+	Type       string
+	Text       string
 	IsComplete bool
 }
 
@@ -454,8 +468,16 @@ type ToolCallAccumulator struct {
 // When the stream ends or a finish reason is received, it builds a final
 // response with all accumulated tool calls.
 func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
+	// If we have events in the queue, return the first one
+	if len(s.eventQueue) > 0 {
+		event := s.eventQueue[0]
+		s.eventQueue = s.eventQueue[1:]
+		return event, true
+	}
+
+	// Otherwise, try to get more events
 	for {
-		line, err := s.reader.ReadBytes('\n')
+		events, err := s.next()
 		if err != nil {
 			if err != io.EOF {
 				// EOF is the expected error when the stream ends
@@ -465,145 +487,212 @@ func (s *Stream) Next(ctx context.Context) (*llm.StreamEvent, bool) {
 			return nil, false
 		}
 
-		// Skip empty lines
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-
-		// Remove "data: " prefix if present
-		line = bytes.TrimPrefix(line, []byte("data: "))
-
-		// Check for stream end
-		if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-			// Return final response if we have tool calls
-			if len(s.toolCalls) > 0 {
-				return s.createFinalStreamEvent(llm.EventMessageStop, ""), true
+		// If we got events, add them to the queue and return the first one
+		if len(events) > 0 {
+			// If there's more than one event, queue the rest
+			if len(events) > 1 {
+				s.eventQueue = append(s.eventQueue, events[1:]...)
 			}
-			return &llm.StreamEvent{Type: llm.EventMessageStop}, true
+			return events[0], true
+		}
+	}
+}
+
+// next processes a single line from the stream and returns events if any are ready
+func (s *Stream) next() ([]*llm.StreamEvent, error) {
+	line, err := s.reader.ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+
+	// Skip empty lines
+	if len(bytes.TrimSpace(line)) == 0 {
+		return nil, nil
+	}
+
+	// Parse the event type from the SSE format
+	if bytes.HasPrefix(line, []byte("event: ")) {
+		return nil, nil
+	}
+
+	// Remove "data: " prefix if present
+	line = bytes.TrimPrefix(line, []byte("data: "))
+
+	// Check for stream end
+	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
+		// Return final response if we have tool calls or content blocks
+		if len(s.toolCalls) > 0 || len(s.contentBlocks) > 0 {
+			return []*llm.StreamEvent{
+				{
+					Type:     llm.EventMessageStop,
+					Response: s.buildFinalResponse(""),
+				},
+			}, nil
+		}
+		return []*llm.StreamEvent{{Type: llm.EventMessageStop}}, nil
+	}
+
+	var event StreamResponse
+	if err := json.Unmarshal(line, &event); err != nil {
+		return nil, err
+	}
+
+	if event.ID != "" {
+		s.responseID = event.ID
+	}
+	if event.Model != "" {
+		s.responseModel = event.Model
+	}
+	if event.Usage.TotalTokens > 0 {
+		s.usage = event.Usage
+	}
+	if len(event.Choices) == 0 {
+		return nil, nil
+	}
+
+	choice := event.Choices[0]
+	var events []*llm.StreamEvent
+
+	// If this is the first chunk, emit a message_start event
+	if !s.messageStartSent && s.responseID != "" {
+		s.messageStartSent = true
+		events = append(events, &llm.StreamEvent{Type: llm.EventMessageStart})
+	}
+
+	// Handle text content
+	if choice.Delta.Content != "" {
+		index := choice.Index
+
+		// Check if we need to emit a content_block_start event
+		if _, exists := s.contentBlocks[index]; !exists {
+			s.contentBlocks[index] = &ContentBlockAccumulator{
+				Type: "text",
+				Text: "",
+			}
+			events = append(events, &llm.StreamEvent{
+				Type:  llm.EventContentBlockStart,
+				Index: index,
+			})
 		}
 
-		var event StreamResponse
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue // Skip malformed events
+		// Accumulate the text
+		block := s.contentBlocks[index]
+
+		// Apply prefill if needed
+		if s.prefill != "" {
+			// Inject our prefill and then clear it.
+			if !strings.HasPrefix(choice.Delta.Content, s.prefill) &&
+				!strings.HasPrefix(s.prefill, choice.Delta.Content) {
+				choice.Delta.Content = s.prefill + choice.Delta.Content
+			}
+			s.prefill = ""
 		}
 
-		// Initialize tool calls map if needed
-		if s.toolCalls == nil {
-			s.toolCalls = make(map[int]*ToolCallAccumulator)
-		}
+		block.Text += choice.Delta.Content
 
-		// Store response ID and model for final response
-		if event.ID != "" {
-			s.responseID = event.ID
-		}
-		if event.Model != "" {
-			s.responseModel = event.Model
-		}
+		// Emit a content_block_delta event
+		events = append(events, &llm.StreamEvent{
+			Type:  llm.EventContentBlockDelta,
+			Index: index,
+			Delta: &llm.Delta{
+				Type: "text_delta",
+				Text: choice.Delta.Content,
+			},
+		})
+	}
 
-		// Update usage if available
-		if event.Usage.TotalTokens > 0 {
-			s.usage = event.Usage
-		}
-
-		if len(event.Choices) > 0 {
-			choice := event.Choices[0]
-
-			// Handle text content
-			if choice.Delta.Content != "" {
-				if s.prefill != "" {
-					// Inject our prefill and then clear it
-					choice.Delta.Content = s.prefill + choice.Delta.Content
-					s.prefill = ""
+	if len(choice.Delta.ToolCalls) > 0 {
+		for _, toolCallDelta := range choice.Delta.ToolCalls {
+			index := toolCallDelta.Index
+			if _, exists := s.toolCalls[index]; !exists {
+				s.toolCalls[index] = &ToolCallAccumulator{
+					Type: "function",
 				}
-				return &llm.StreamEvent{
-					Type: llm.EventContentBlockDelta,
+				events = append(events, &llm.StreamEvent{
+					Type:  llm.EventContentBlockStart,
+					Index: index,
+				})
+			}
+			toolCall := s.toolCalls[index]
+			if toolCallDelta.ID != "" {
+				toolCall.ID = toolCallDelta.ID
+			}
+			if toolCallDelta.Type != "" {
+				toolCall.Type = toolCallDelta.Type
+			}
+			if toolCallDelta.Function.Name != "" {
+				toolCall.Name = toolCallDelta.Function.Name
+			}
+			if toolCallDelta.Function.Arguments != "" {
+				toolCall.Arguments += toolCallDelta.Function.Arguments
+				events = append(events, &llm.StreamEvent{
+					Type:  llm.EventContentBlockDelta,
+					Index: index,
 					Delta: &llm.Delta{
-						Type: "text_delta",
-						Text: choice.Delta.Content,
+						Type:        "input_json_delta",
+						PartialJSON: toolCallDelta.Function.Arguments,
 					},
-				}, true
-			}
-
-			// Handle tool calls
-			if len(choice.Delta.ToolCalls) > 0 {
-				for _, toolCallDelta := range choice.Delta.ToolCalls {
-					// Use the index from the toolCallDelta
-					index := toolCallDelta.Index
-
-					// Initialize tool call if needed
-					if _, exists := s.toolCalls[index]; !exists {
-						s.toolCalls[index] = &ToolCallAccumulator{
-							Type: "function",
-						}
-					}
-
-					toolCall := s.toolCalls[index]
-
-					// Update tool call with new delta information
-					if toolCallDelta.ID != "" {
-						toolCall.ID = toolCallDelta.ID
-					}
-					if toolCallDelta.Type != "" {
-						toolCall.Type = toolCallDelta.Type
-					}
-					if toolCallDelta.Function.Name != "" {
-						toolCall.Name = toolCallDelta.Function.Name
-					}
-					if toolCallDelta.Function.Arguments != "" {
-						toolCall.Arguments += toolCallDelta.Function.Arguments
-
-						// Return a delta event for the tool call
-						return &llm.StreamEvent{
-							Type:  llm.EventContentBlockDelta,
-							Index: index,
-							Delta: &llm.Delta{
-								Type:        "input_json_delta",
-								PartialJSON: toolCallDelta.Function.Arguments,
-							},
-						}, true
-					}
-				}
-			}
-
-			// Handle finish reason
-			if choice.FinishReason != "" {
-				// Mark all tool calls as complete
-				for _, toolCall := range s.toolCalls {
-					toolCall.IsComplete = true
-				}
-				// Return final response with stop reason
-				return s.createFinalStreamEvent(llm.EventMessageDelta, choice.FinishReason), true
+				})
 			}
 		}
 	}
-}
 
-// createFinalStreamEvent creates a stream event with the final response
-// This helper eliminates duplicate calls to buildFinalResponse
-func (s *Stream) createFinalStreamEvent(eventType llm.StreamEventType, stopReason string) *llm.StreamEvent {
-	response := s.buildFinalResponse()
-
-	if eventType == llm.EventMessageStop {
-		return &llm.StreamEvent{
-			Type:     eventType,
-			Response: response,
+	// Handle finish reason
+	if choice.FinishReason != "" {
+		// Create a list of blocks that need stop events
+		var blocksToStop []struct {
+			Index int
+			Type  string
 		}
+
+		// Add tool calls that need to be stopped
+		for index, toolCall := range s.toolCalls {
+			if !toolCall.IsComplete {
+				blocksToStop = append(blocksToStop, struct {
+					Index int
+					Type  string
+				}{Index: index, Type: "tool"})
+				toolCall.IsComplete = true
+			}
+		}
+
+		// Add content blocks that need to be stopped
+		for index, block := range s.contentBlocks {
+			if !block.IsComplete {
+				blocksToStop = append(blocksToStop, struct {
+					Index int
+					Type  string
+				}{Index: index, Type: "content"})
+				block.IsComplete = true
+			}
+		}
+
+		// Add stop events for all blocks that need to be stopped
+		for _, block := range blocksToStop {
+			events = append(events, &llm.StreamEvent{
+				Type:  llm.EventContentBlockStop,
+				Index: block.Index,
+			})
+		}
+
+		// Add message_delta event with stop reason
+		events = append(events, &llm.StreamEvent{
+			Type: llm.EventMessageDelta,
+			Delta: &llm.Delta{
+				Type:       "message_delta",
+				StopReason: choice.FinishReason,
+			},
+			Response: s.buildFinalResponse(choice.FinishReason),
+		})
 	}
 
-	return &llm.StreamEvent{
-		Type: eventType,
-		Delta: &llm.Delta{
-			Type:       "message_delta",
-			StopReason: stopReason,
-		},
-		Response: response,
-	}
+	return events, nil
 }
 
-// buildFinalResponse creates a final response with all accumulated tool calls.
-// It converts the accumulated tool calls to the format expected by the llm package.
+// buildFinalResponse creates a final response with all accumulated tool calls and content blocks.
+// It converts the accumulated data to the format expected by the llm package.
 // This is called when the stream ends or a finish reason is received.
-func (s *Stream) buildFinalResponse() *llm.Response {
+func (s *Stream) buildFinalResponse(stopReason string) *llm.Response {
 	var toolCalls []llm.ToolCall
 	var contentBlocks []*llm.Content
 
@@ -624,6 +713,16 @@ func (s *Stream) buildFinalResponse() *llm.Response {
 		}
 	}
 
+	// Convert accumulated content blocks to response format
+	for _, block := range s.contentBlocks {
+		if block.Type == "text" {
+			contentBlocks = append(contentBlocks, &llm.Content{
+				Type: llm.ContentTypeText,
+				Text: block.Text,
+			})
+		}
+	}
+
 	// Ensure we have at least some token usage information
 	// OpenAI doesn't always include usage in streaming responses
 	inputTokens := s.usage.PromptTokens
@@ -632,17 +731,11 @@ func (s *Stream) buildFinalResponse() *llm.Response {
 		inputTokens = s.usage.TotalTokens - s.usage.CompletionTokens
 	}
 
-	// If we still don't have input tokens, set a minimum value
-	// This is a fallback to ensure tests pass and is better than zero
-	if inputTokens == 0 {
-		// Estimate based on the request - this is a minimal fallback
-		inputTokens = 10 // Minimal fallback value
-	}
-
 	return llm.NewResponse(llm.ResponseOptions{
-		ID:    s.responseID,
-		Model: s.responseModel,
-		Role:  llm.Assistant,
+		ID:         s.responseID,
+		Model:      s.responseModel,
+		Role:       llm.Assistant,
+		StopReason: stopReason,
 		Usage: llm.Usage{
 			InputTokens:  inputTokens,
 			OutputTokens: s.usage.CompletionTokens,
@@ -653,7 +746,9 @@ func (s *Stream) buildFinalResponse() *llm.Response {
 }
 
 func (s *Stream) Close() error {
-	return s.body.Close()
+	var err error
+	s.closeOnce.Do(func() { err = s.body.Close() })
+	return err
 }
 
 func (s *Stream) Err() error {

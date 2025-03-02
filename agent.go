@@ -50,7 +50,6 @@ type AgentOptions struct {
 	GenerationLimit  int
 	TaskMessageLimit int
 	Memory           memory.Memory
-	DisablePrefill   bool
 }
 
 // Publisher is an interface for sending events to a stream.
@@ -88,7 +87,7 @@ type DiveAgent struct {
 	generationLimit  int
 	taskMessageLimit int
 	memory           memory.Memory
-	disablePrefill   bool
+
 	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
 
@@ -151,7 +150,6 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		mailbox:          make(chan interface{}, 16),
 		logger:           opts.Logger,
 		logLevel:         strings.ToLower(opts.LogLevel),
-		disablePrefill:   opts.DisablePrefill,
 	}
 
 	tools := make([]llm.Tool, len(opts.Tools))
@@ -543,13 +541,6 @@ func (a *DiveAgent) executeToolLoop(
 		if a.logger != nil {
 			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 		}
-		if !a.disablePrefill {
-			prefill := "<think>"
-			if i >= a.generationLimit-1 {
-				prefill += "I must respond with my final answer now."
-			}
-			generateOpts = append(generateOpts, llm.WithPrefill(prefill, "</think>"))
-		}
 
 		var currentResponse *llm.Response
 
@@ -598,10 +589,6 @@ func (a *DiveAgent) executeToolLoop(
 			return nil, updatedMessages, errors.New("no final response from llm provider")
 		}
 		response = currentResponse
-
-		// Mutate first text message response to include the prefill text if we
-		// see the closing </think> tag. The prefill is a behind-the-scenes
-		// behavior for the caller.
 		responseMessage := response.Message()
 
 		// Remember the assistant response message
@@ -931,3 +918,11 @@ func (a *DiveAgent) getWorkspaceState() string {
 	}
 	return strings.Join(blobs, "\n\n")
 }
+
+// if !a.disablePrefill {
+// 	prefill := "<think>"
+// 	if i >= a.generationLimit-1 {
+// 		prefill += "I must respond with my final answer now."
+// 	}
+// 	generateOpts = append(generateOpts, llm.WithPrefill(prefill, "</think>"))
+// }
