@@ -38,15 +38,17 @@ questions, suggestions, or feedback.
 * **Declarative Configuration**: Define teams using YAML, JSON, HCL, or programmatically in Go
 * **Streaming Support**: Stream events for chats and task progress in real-time
 
+## Quick Start
+
 ### Prerequisites
 
 - Go 1.20 or higher
-- API keys for the LLM providers you plan to use (Anthropic, OpenAI, Groq, etc.)
+- API keys for any LLM providers you plan to use (Anthropic, OpenAI, Groq, etc.)
 - API keys for any external tools you plan to use (Google Search, Firecrawl, etc.)
 
 ### Environment Setup
 
-Set up your environment for the LLM providers and any tools you want to use:
+Set up your shell environment:
 
 ```bash
 # LLM Provider API Keys
@@ -60,11 +62,9 @@ export GOOGLE_SEARCH_CX="your-key"
 export FIRECRAWL_API_KEY="your-key"
 ```
 
-## Quick Start
-
 ### As a Library
 
-To get started with Dive as a library, use go get to install the package:
+To get started with Dive as a library, use go get:
 
 ```
 go get github.com/getstingrai/dive
@@ -174,6 +174,82 @@ event := &dive.Event{
     },
 }
 err := agent.HandleEvent(ctx, event)
+```
+
+## CLI
+
+The Dive CLI lets you run teams defined in YAML, JSON, or HCL. It also provides
+other subcommands for validating configurations and chatting 1:1 with an agent.
+
+Currently available commands:
+
+```bash
+# Run a team and any defined tasks
+dive run path/to/team.hcl
+
+# Chat with an agent on a team
+dive chat path/to/team.hcl
+
+# Validate a team configuration
+dive config check path/to/team.hcl
+```
+
+### Team Configurations
+
+Team configurations defined in HCL are the most useful and flexible currently.
+This supports referencing tasks and agents, basic string formatting, and dynamic
+configuration of variables.
+
+```hcl
+name = "Research Team"
+
+description = "A expert research team of agents that will research any topic"
+
+config {
+  log_level = "debug"
+  default_provider = "anthropic"
+  output_dir = "output"
+}
+
+variable "topic" {
+  type = "string"
+  description = "The topic to research"
+}
+
+tool "google_search" {
+  enabled = true
+}
+
+tool "firecrawl_scrape" {
+  enabled = true
+}
+
+agent "supervisor" {
+  description = "Expert research supervisor. Assign research tasks to the assistant. Prepare the final reports yourself."
+  is_supervisor = true
+  subordinates = [agents.assistant]
+}
+
+agent "assistant" {
+  description = "You are an expert research assistant. When researching, don't go too deep into the details unless specifically asked."
+  tools = [
+    tools.google_search,
+    tools.firecrawl_scrape,
+  ]
+}
+
+task "research" {
+  description = format("Gather background research on %s. Don't consult more than one source. The goal is to produce about 3 paragraphs of research - that is all. Don't overdo it.", var.topic)
+  output_file = "research.txt"
+}
+
+task "report" {
+  description = format("Create a brief 3 paragraph report on %s", var.topic)
+  expected_output = "The history, with the first word of each paragraph in ALL UPPERCASE"
+  assigned_agent = agents.supervisor
+  dependencies = [tasks.research]
+  output_file = "report.txt"
+}
 ```
 
 ## LLM Integration
@@ -324,9 +400,14 @@ API design, usability, and any use cases you'd like to see supported.
 ## Roadmap
 
 - Voice interactions
+- More memory systems
+- Defined interfaces for RAG
+- Agent state persistence
 - Tool use: Slack
 - Tool use: Google Drive
 - Tool use: Expanded set of file I/O tools
+- More tests
+- More CLI subcommands
 - Loads more...
 
 ## FAQ
@@ -343,6 +424,7 @@ Key differentiators include:
 - Easily embeddable into existing Go programs
 - Interfaces in place for customization and extension
 - Emphasis on streaming support and real-time updates
+- Built-in support for long-running tasks with flexible completion criteria
 
 ### How do I handle LLM rate limits?
 
