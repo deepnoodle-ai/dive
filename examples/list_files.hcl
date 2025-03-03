@@ -1,7 +1,7 @@
 
-name = "Software Engineering Team"
+name = "File Explorer"
 
-description = "A team of agents that will code a project"
+description = "List files in a directory"
 
 config {
   log_level = var.log_level
