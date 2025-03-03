@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/getstingrai/dive/teamconf"
 	"github.com/spf13/cobra"
@@ -9,22 +10,22 @@ import (
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Validate Dive configuration files",
-	Long:  `Validate Dive configuration files.`,
+	Short: "Validate Dive configuration",
+	Long:  "Validate Dive configuration",
 }
 
 var checkCmd = &cobra.Command{
 	Use:   "check [file]",
-	Short: "Validate a Dive team definition file",
-	Long:  `Validate a Dive team definition file.`,
+	Short: "Validate a Dive configuration",
+	Long:  "Validate a Dive configuration",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		conf, err := teamconf.LoadFile(args[0])
+	Run: func(cmd *cobra.Command, args []string) {
+		conf, err := teamconf.LoadFile(args[0], getUserVariables())
 		if err != nil {
-			return fmt.Errorf("validation failed: %v", err)
+			fmt.Printf("❌ %s\n", errorStyle.Sprint(err))
+			os.Exit(1)
 		}
-		fmt.Printf("Validation successful! Team %q is valid.\n", conf.Name)
-		return nil
+		fmt.Printf("✅ %q is valid\n", conf.Name)
 	},
 }
 

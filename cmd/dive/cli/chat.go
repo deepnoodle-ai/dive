@@ -21,6 +21,7 @@ var (
 	errorStyle   = color.New(color.FgRed)
 	infoStyle    = color.New(color.FgBlue)
 	toolStyle    = color.New(color.FgYellow)
+	provider     string
 )
 
 func chatMessage(ctx context.Context, message string, agent dive.Agent) (string, error) {
@@ -43,7 +44,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) (string,
 		case "llm.event":
 			if event.LLMEvent.Response != nil && len(event.LLMEvent.Response.ToolCalls()) > 0 {
 				toolName = event.LLMEvent.Response.ToolCalls()[0].Name
-				fmt.Print("\n\n" + toolStyle.Sprint(toolName+": "+toolInput))
+				fmt.Println("\n\n" + toolStyle.Sprint(toolName+": "+toolInput))
 				toolInput = ""
 			}
 			switch event.LLMEvent.Type {
@@ -82,7 +83,14 @@ func runChatSession(teamConfPath string) error {
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
 
-	team, err := teamconf.TeamFromFile(teamConfPath, teamconf.WithLogger(logger))
+	userVariables := getUserVariables()
+
+	teamOpts := []teamconf.BuildOption{
+		teamconf.WithLogger(logger),
+		teamconf.WithVariables(userVariables),
+	}
+
+	team, err := teamconf.TeamFromFile(teamConfPath, teamOpts...)
 	if err != nil {
 		return fmt.Errorf("error loading team: %v", err)
 	}
@@ -97,7 +105,7 @@ func runChatSession(teamConfPath string) error {
 	}
 	defer team.Stop(ctx)
 
-	fmt.Println(boldStyle.Sprint("Dive Chat"))
+	fmt.Println(boldStyle.Sprint("Team Chat"))
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -131,18 +139,17 @@ func runChatSession(teamConfPath string) error {
 	return nil
 }
 
-// chatCmd represents the chat command
 var chatCmd = &cobra.Command{
 	Use:   "chat [file]",
-	Short: "Start a chat session with a team",
-	Long: `Start an interactive chat session with a team defined in an HCL file.
-This allows you to ask questions and interact with the team's AI capabilities.
-
-To exit the chat, type 'exit' or 'quit'.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Short: "Start an interactive chat session with a team of agents",
+	Long:  `Start an interactive chat session with a team of agents.`,
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
 		filePath := args[0]
-		return runChatSession(filePath)
+		if err := runChatSession(filePath); err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
 	},
 }
 

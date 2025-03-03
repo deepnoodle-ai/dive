@@ -16,7 +16,7 @@ func runTeam(filePath string, logLevel string) error {
 
 	logger := slogger.New(slogger.LevelFromString(logLevel))
 
-	teamConf, err := teamconf.LoadFile(filePath)
+	teamConf, err := teamconf.LoadFile(filePath, getUserVariables())
 	if err != nil {
 		return fmt.Errorf("error loading team: %v", err)
 	}

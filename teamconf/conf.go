@@ -81,7 +81,7 @@ type ToolDefinition map[string]interface{}
 // - .json -> JSON
 // - .yml or .yaml -> YAML
 // - .hcl or .dive -> HCL
-func LoadFile(filePath string) (*Team, error) {
+func LoadFile(filePath string, variables map[string]interface{}) (*Team, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -95,7 +95,7 @@ func LoadFile(filePath string) (*Team, error) {
 	case ".yml", ".yaml":
 		return LoadYAML(data)
 	case ".hcl", ".dive":
-		return LoadHCL(data, filename)
+		return LoadHCL(data, filename, variables)
 	default:
 		return nil, fmt.Errorf("unsupported file extension: %s", extension)
 	}
@@ -120,21 +120,22 @@ func LoadYAML(conf []byte) (*Team, error) {
 }
 
 // LoadHCL loads a Team configuration from a HCL string
-func LoadHCL(conf []byte, filename string) (*Team, error) {
-	hclteam, err := LoadHCLDefinition(conf, filename, nil)
+func LoadHCL(conf []byte, filename string, variables map[string]interface{}) (*Team, error) {
+	hclteam, err := LoadHCLDefinition(conf, filename, variables)
 	if err != nil {
 		return nil, err
 	}
 
-	var variables []Variable
+	var teamVariables []Variable
 	for _, v := range hclteam.Variables {
-		variables = append(variables, Variable{
+		teamVariables = append(teamVariables, Variable{
 			Name:        v.Name,
 			Type:        v.Type,
 			Description: v.Description,
 			// Default:     v.Default.,
 		})
 	}
+
 	var tools []ToolDefinition
 	for _, t := range hclteam.Tools {
 		tools = append(tools, map[string]interface{}{
@@ -143,6 +144,7 @@ func LoadHCL(conf []byte, filename string) (*Team, error) {
 			// TODO: ... parameters
 		})
 	}
+
 	// Convert HCLTeam to Team
 	def := &Team{
 		Name:        hclteam.Name,
@@ -150,7 +152,7 @@ func LoadHCL(conf []byte, filename string) (*Team, error) {
 		Agents:      hclteam.Agents,
 		Tasks:       hclteam.Tasks,
 		Config:      hclteam.Config,
-		Variables:   variables,
+		Variables:   teamVariables,
 		Tools:       tools,
 	}
 	return def, nil
@@ -160,7 +162,11 @@ func LoadHCL(conf []byte, filename string) (*Team, error) {
 // the usable dive.Team. This is a convenience function that combines the load
 // and build steps.
 func TeamFromFile(filePath string, opts ...BuildOption) (dive.Team, error) {
-	conf, err := LoadFile(filePath)
+	buildOpts := &buildOptions{}
+	for _, opt := range opts {
+		opt(buildOpts)
+	}
+	conf, err := LoadFile(filePath, buildOpts.Variables)
 	if err != nil {
 		return nil, err
 	}

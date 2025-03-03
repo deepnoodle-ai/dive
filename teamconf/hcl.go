@@ -28,17 +28,17 @@ type HCLTool struct {
 
 // HCLVariable represents a variable definition in HCL
 type HCLVariable struct {
-	Name        string   `hcl:"name,label"`
-	Type        string   `hcl:"type"`
-	Description string   `hcl:"description,optional"`
-	Default     hcl.Body `hcl:"default,block"`
+	Name        string `hcl:"name,label"`
+	Type        string `hcl:"type"`
+	Description string `hcl:"description,optional"`
+	Default     string `hcl:"default,optional"`
 }
 
 // VariableValues represents the values for variables
 type VariableValues map[string]cty.Value
 
 // LoadHCLDefinition loads an HCL definition from a string
-func LoadHCLDefinition(conf []byte, filename string, vars VariableValues) (*HCLTeam, error) {
+func LoadHCLDefinition(conf []byte, filename string, vars map[string]interface{}) (*HCLTeam, error) {
 	parser := hclparse.NewParser()
 
 	// Read and parse the HCL string
@@ -53,6 +53,22 @@ func LoadHCLDefinition(conf []byte, filename string, vars VariableValues) (*HCLT
 			"var": cty.ObjectVal(make(map[string]cty.Value)),
 		},
 		Functions: createStandardFunctions(),
+	}
+
+	variableValues := make(VariableValues, len(vars))
+	for k, v := range vars {
+		switch v.(type) {
+		case string:
+			variableValues[k] = cty.StringVal(v.(string))
+		case int:
+			variableValues[k] = cty.NumberIntVal(int64(v.(int)))
+		case float64:
+			variableValues[k] = cty.NumberFloatVal(v.(float64))
+		case bool:
+			variableValues[k] = cty.BoolVal(v.(bool))
+		default:
+			return nil, fmt.Errorf("unsupported variable type: %T (key: %s)", v, k)
+		}
 	}
 
 	// First pass: extract variable definitions
@@ -82,44 +98,39 @@ func LoadHCLDefinition(conf []byte, filename string, vars VariableValues) (*HCLT
 			continue
 		}
 		varName := block.Labels[0]
+
 		// Check if variable value is provided externally
-		if value, exists := vars[varName]; exists {
+		if value, exists := variableValues[varName]; exists {
 			varValues[varName] = value
 			continue
 		}
+
 		// Try to extract type, description, and default value
 		varContent, diags := block.Body.Content(&hcl.BodySchema{
 			Attributes: []hcl.AttributeSchema{
 				{Name: "type", Required: true},
 				{Name: "description", Required: false},
-			},
-			Blocks: []hcl.BlockHeaderSchema{
-				{Type: "default", LabelNames: []string{}},
+				{Name: "default", Required: false},
 			},
 		})
 		if diags.HasErrors() {
 			return nil, fmt.Errorf("failed to decode variable %s: %s", varName, diags.Error())
 		}
+
 		// Process default value if present
-		for _, defaultBlock := range varContent.Blocks {
-			if defaultBlock.Type != "default" {
-				continue
-			}
-			defaultContent, diags := defaultBlock.Body.Content(&hcl.BodySchema{
-				Attributes: []hcl.AttributeSchema{
-					{Name: "value", Required: true},
-				},
-			})
+		if defaultAttr, exists := varContent.Attributes["default"]; exists {
+			val, diags := defaultAttr.Expr.Value(evalCtx)
 			if diags.HasErrors() {
-				return nil, fmt.Errorf("failed to decode default value for variable %s: %s", varName, diags.Error())
+				return nil, fmt.Errorf("failed to evaluate default value for variable %s: %s", varName, diags.Error())
 			}
-			if valueAttr, exists := defaultContent.Attributes["value"]; exists {
-				val, diags := valueAttr.Expr.Value(evalCtx)
-				if diags.HasErrors() {
-					return nil, fmt.Errorf("failed to evaluate default value for variable %s: %s", varName, diags.Error())
-				}
-				varValues[varName] = val
-			}
+			varValues[varName] = val
+		}
+	}
+
+	// Error if any variables were passed that are not defined in the HCL
+	for k := range variableValues {
+		if _, exists := varValues[k]; !exists {
+			return nil, fmt.Errorf("unknown variable provided: %q", k)
 		}
 	}
 

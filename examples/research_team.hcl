@@ -1,4 +1,3 @@
-
 name = "Research Team"
 
 description = "A team of agents that will research a topic"
@@ -13,33 +12,25 @@ config {
 variable "team_name" {
   type = "string"
   description = "The name of the research team"
-  default {
-    value = "Elite Research Team"
-  }
+  default = "Elite Research Team"
 }
 
 variable "supervisor_name" {
   type = "string"
   description = "The name of the supervisor agent"
-  default {
-    value = "Joe"
-  }
+  default = "Joe"
 }
 
 variable "assistant_name" {
   type = "string"
   description = "The name of the research assistant agent"
-  default {
-    value = "Holly"
-  }
+  default = "Holly"
 }
 
 variable "research_topic" {
   type = "string"
   description = "The topic to research"
-  default {
-    value = "Maple syrup production in Vermont"
-  }
+  default = "Maple syrup production in Vermont"
 }
 
 // Tools
