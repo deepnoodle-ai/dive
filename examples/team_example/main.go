@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/llm"
@@ -141,6 +142,24 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	prv := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
+
+	// Generate a response
+	response, err := llm.Generate(ctx,
+		[]*llm.Message{llm.NewUserMessage("What is the capital of France?")},
+		llm.WithSystemPrompt("You are a helpful assistant."),
+	)
+
+	event := &dive.Event{
+		Name:        "new_data_available",
+		Description: "New market data is available for analysis",
+		Parameters: map[string]any{
+			"data_source": "quarterly_reports",
+			"timestamp":   time.Now(),
+		},
+	}
+	researcher.HandleEvent(ctx, event)
 
 	if err := team.Start(ctx); err != nil {
 		log.Fatal(err)
