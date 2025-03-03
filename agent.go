@@ -297,11 +297,17 @@ func (a *DiveAgent) Generate(ctx context.Context, message *llm.Message, opts ...
 		return nil, fmt.Errorf("agent is not running")
 	}
 
+	var generateOptions generateOptions
+	for _, opt := range opts {
+		opt(&generateOptions)
+	}
+
 	resultChan := make(chan *llm.Response, 1)
 	errChan := make(chan error, 1)
 
 	chatMessage := messageChat{
 		message:    message,
+		options:    generateOptions,
 		resultChan: resultChan,
 		errChan:    errChan,
 	}
@@ -330,10 +336,16 @@ func (a *DiveAgent) Stream(ctx context.Context, message *llm.Message, opts ...Ge
 		return nil, fmt.Errorf("agent is not running")
 	}
 
+	var generateOptions generateOptions
+	for _, opt := range opts {
+		opt(&generateOptions)
+	}
+
 	stream := NewDiveStream()
 
 	chatMessage := messageChat{
 		message: message,
+		options: generateOptions,
 		stream:  stream,
 	}
 

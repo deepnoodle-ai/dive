@@ -138,28 +138,26 @@ type Stream interface {
 	Close()
 }
 
-// StreamEvent is an event from a Stream
+// StreamEvent is an event that carries LLM events, task results, or errors.
 type StreamEvent struct {
 	// Type of the event
 	Type string `json:"type"`
 
-	// TaskName is the name of the task that generated the event, if any
+	// AgentName is the name of the agent associated with the event
+	AgentName string `json:"agent_name"`
+
+	// TaskName is the name of the task that generated the event (if applicable)
 	TaskName string `json:"task_name,omitempty"`
 
-	// AgentName is the name of the agent associated with the event, if any
-	AgentName string `json:"agent_name,omitempty"`
-
-	// LLMEvent is the event from the LLM, if any
+	// LLMEvent is the event from the LLM (may be nil)
 	LLMEvent *llm.StreamEvent `json:"llm_event,omitempty"`
 
-	// Error contains an error message if the event is an error
-	Error string `json:"error,omitempty"`
-
-	// TaskResult is the result of a task, if the event is a task result
+	// TaskResult is the result of a task (may be nil)
 	TaskResult *TaskResult `json:"task_result,omitempty"`
 
-	// Response is the final response from the agent
+	// Response is the final response from the agent (may be nil)
 	Response *llm.Response `json:"response,omitempty"`
-}
 
-// TODO: TaskResult should not hold a Task. Make it JSON serializable?
+	// Error conveys an error message
+	Error string `json:"error,omitempty"`
+}

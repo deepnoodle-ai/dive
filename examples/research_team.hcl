@@ -56,14 +56,10 @@ variable "task_timeout" {
 // Tools
 
 tool "google_search" {
-  name = "google_search"
-  description = "Search the web for information"
   enabled = true
 }
 
 tool "firecrawl" {
-  name = "firecrawl"
-  description = "Scrape a webpage and return markdown"
   enabled = true
 }
 
@@ -96,7 +92,7 @@ agent "Research Assistant" {
 // Tasks
 
 task "Background Research" {
-  description = format("Gather background research that will be used to create a history of %s. Don't consult more than 3 sources. The goal is to produce about 3 paragraphs of research - that is all. Don't overdo it.", var.research_topic)
+  description = format("Gather background research that will be used to create a history of %s. Don't consult more than one source. The goal is to produce about 3 paragraphs of research - that is all. Don't overdo it.", var.research_topic)
   assigned_agent = var.assistant_name
   timeout = var.task_timeout
 }

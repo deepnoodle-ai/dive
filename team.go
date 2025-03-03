@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/getstingrai/dive/graph"
+	"github.com/getstingrai/dive/slogger"
 )
 
 var _ Team = &DiveTeam{}
@@ -24,6 +25,8 @@ type DiveTeam struct {
 	initialTasks []*Task
 	taskGraph    *graph.Graph
 	taskOrder    []string
+	logLevel     string
+	logger       slogger.Logger
 	mutex        sync.Mutex
 }
 
@@ -33,15 +36,22 @@ type TeamOptions struct {
 	Description string
 	Agents      []Agent
 	Tasks       []*Task
+	LogLevel    string
+	Logger      slogger.Logger
 }
 
 // NewTeam creates a new team composed of the given agents.
 func NewTeam(opts TeamOptions) (*DiveTeam, error) {
+	if opts.Logger == nil {
+		opts.Logger = DefaultLogger
+	}
 	t := &DiveTeam{
 		name:         opts.Name,
 		description:  opts.Description,
 		agents:       opts.Agents,
 		initialTasks: opts.Tasks,
+		logLevel:     opts.LogLevel,
+		logger:       opts.Logger,
 	}
 	for _, task := range opts.Tasks {
 		if err := task.Validate(); err != nil {
@@ -101,7 +111,11 @@ func (t *DiveTeam) Start(ctx context.Context) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	return t.start(ctx)
+	if err := t.start(ctx); err != nil {
+		t.logger.Error("failed to start team", "error", err)
+		return err
+	}
+	return nil
 }
 
 // Start all agents on the team. Call only when the team mutex is held.
@@ -112,6 +126,7 @@ func (t *DiveTeam) start(ctx context.Context) error {
 	if t.running {
 		return fmt.Errorf("team already running")
 	}
+
 	// Start all agents, but if any fail, stop them all before returning the error
 	var startedAgents []RunnableAgent
 	for _, agent := range t.agents {
@@ -127,6 +142,13 @@ func (t *DiveTeam) start(ctx context.Context) error {
 		}
 		startedAgents = append(startedAgents, runnableAgent)
 	}
+
+	t.logger.Debug("team started",
+		"team_name", t.name,
+		"team_description", t.description,
+		"agent_count", len(t.agents),
+		"agent_names", AgentNames(t.agents),
+	)
 	t.running = true
 	return nil
 }
@@ -151,6 +173,8 @@ func (t *DiveTeam) Stop(ctx context.Context) error {
 			lastErr = fmt.Errorf("failed to stop agent %s: %w", agent.Name(), err)
 		}
 	}
+
+	t.logger.Debug("team stopped", "team_name", t.name)
 	return lastErr
 }
 
@@ -220,6 +244,12 @@ func (t *DiveTeam) workOnTasks(ctx context.Context, tasks []*Task, stream *DiveS
 	publisher := NewStreamPublisher(stream)
 	defer publisher.Close()
 
+	t.logger.Debug("team work started",
+		"team_name", t.name,
+		"task_count", len(tasks),
+		"task_names", TaskNames(tasks),
+	)
+
 	resultsByTaskName := make(map[string]*TaskResult, len(tasks))
 
 	// Work on tasks sequentially
@@ -284,6 +314,12 @@ func (t *DiveTeam) workOnTask(ctx context.Context, task *Task, agent Agent, pub 
 	}
 	defer taskStream.Close()
 
+	logger := t.logger.With(
+		"task_name", task.Name(),
+		"agent_name", agent.Name(),
+	)
+	logger.Info("assigned task")
+
 	// Heartbeats will indicate to the client that we're still going
 	heartbeatTicker := time.NewTicker(time.Second * 3)
 	defer heartbeatTicker.Stop()
@@ -303,9 +339,11 @@ func (t *DiveTeam) workOnTask(ctx context.Context, task *Task, agent Agent, pub 
 				return nil, err // Canceled context probably
 			}
 			if event.Error != "" {
+				logger.Error("task failed", "error", event.Error)
 				return nil, errors.New(event.Error)
 			}
 			if event.TaskResult != nil {
+				logger.Info("task completed")
 				return event.TaskResult, nil
 			}
 
@@ -358,6 +396,26 @@ func (t *DiveTeam) HandleEvent(ctx context.Context, event *Event) error {
 		if err := eventedAgent.HandleEvent(ctx, event); err != nil {
 			return err
 		}
+		t.logger.Debug("passed event to agent",
+			"event_name", event.Name,
+			"agent_name", agent.Name(),
+		)
 	}
 	return nil
+}
+
+func AgentNames(agents []Agent) []string {
+	var agentNames []string
+	for _, agent := range agents {
+		agentNames = append(agentNames, agent.Name())
+	}
+	return agentNames
+}
+
+func TaskNames(tasks []*Task) []string {
+	var taskNames []string
+	for _, task := range tasks {
+		taskNames = append(taskNames, task.Name())
+	}
+	return taskNames
 }

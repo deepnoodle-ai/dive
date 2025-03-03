@@ -7,127 +7,118 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/fatih/color"
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/llm"
 	"github.com/getstingrai/dive/slogger"
+	"github.com/getstingrai/dive/teamconf"
 	"github.com/spf13/cobra"
 )
 
-// Define chat-specific styles
 var (
-	chatTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#7D56F4")).
-			Padding(0, 1)
-
-	userMsgStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#0D6EFD")).
-			Bold(true)
-
-	botMsgStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#198754"))
-
-	// Note: errorStyle is already defined in run.go
+	boldStyle    = color.New(color.Bold)
+	successStyle = color.New(color.FgGreen)
+	errorStyle   = color.New(color.FgRed)
+	infoStyle    = color.New(color.FgBlue)
 )
 
-// loadTeam loads a team from an HCL file
-func loadTeam(ctx context.Context, filePath string) (dive.Team, error) {
-	logger := slogger.New(slogger.LevelFromString("debug"))
-	team, _, err := dive.LoadHCLTeam(ctx, filePath, nil, logger)
+func chatMessage(ctx context.Context, message string, agent dive.Agent) (string, error) {
+	fmt.Print(boldStyle.Sprint("Assistant: "))
+
+	stream, err := agent.Stream(ctx,
+		llm.NewUserMessage(message),
+		dive.WithThreadID("chat"),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("error loading team: %v", err)
+		return "", fmt.Errorf("error generating response: %v", err)
 	}
-	return team, nil
-}
+	defer stream.Close()
 
-// processMessage sends a message to the team and returns the response
-func processMessage(ctx context.Context, message string, team dive.Team) string {
-	// Create a user message for the LLM
-	userMessage := llm.NewUserMessage(message)
-
-	// If there's a supervisor agent, use it first
-	for _, agent := range team.Agents() {
-		if teamAgent, ok := agent.(dive.TeamAgent); ok && teamAgent.IsSupervisor() {
-			response, err := agent.Generate(ctx, userMessage)
-			if err != nil {
-				return fmt.Sprintf("Error generating response: %v", err)
+	for event := range stream.Channel() {
+		switch event.Type {
+		case "llm.event":
+			switch event.LLMEvent.Type {
+			case llm.EventContentBlockDelta:
+				delta := event.LLMEvent.Delta
+				if delta.Text != "" {
+					fmt.Print(successStyle.Sprint(delta.Text))
+				} else if delta.PartialJSON != "" {
+					fmt.Print(infoStyle.Sprint(delta.PartialJSON))
+				}
 			}
-			return response.Message().Text()
 		}
 	}
 
-	// If no supervisor found, use the first agent
-	if len(team.Agents()) > 0 {
-		agent := team.Agents()[0]
-		response, err := agent.Generate(ctx, userMessage)
-		if err != nil {
-			return fmt.Sprintf("Error generating response: %v", err)
-		}
-		return response.Message().Text()
-	}
-
-	// Fallback if no agents are available
-	return "No agents are available to respond to your message."
+	fmt.Println()
+	return "", nil
 }
 
-// runChatSession starts an interactive chat session
-func runChatSession(filePath string) error {
+func getChatAgent(team dive.Team) (dive.Agent, bool) {
+	agents := team.Agents()
+	// Chat with the supervisor if there is one
+	for _, agent := range agents {
+		if teamAgent, ok := agent.(dive.TeamAgent); ok && teamAgent.IsSupervisor() {
+			return agent, true
+		}
+	}
+	// Otherwise, just pick the first agent
+	if len(agents) > 0 {
+		return agents[0], true
+	}
+	return nil, false
+}
+
+func runChatSession(teamConfPath string) error {
 	ctx := context.Background()
 
-	// Print welcome header
-	fmt.Println(chatTitleStyle.Render(" Dive Team Chat "))
-	fmt.Println()
+	logger := slogger.New(slogger.LevelFromString("warn"))
 
-	// Load the team
-	fmt.Println("Loading team from", filePath, "...")
-	team, err := loadTeam(ctx, filePath)
+	team, err := teamconf.TeamFromFile(teamConfPath, teamconf.WithLogger(logger))
 	if err != nil {
-		return err
+		return fmt.Errorf("error loading team: %v", err)
 	}
 
-	// Print welcome message
-	welcomeMsg := fmt.Sprintf("Welcome to the Dive chat! I'm your assistant for the team defined in %s. How can I help you today?", filePath)
-	fmt.Println(botMsgStyle.Render("Assistant: " + welcomeMsg))
+	chatAgent, ok := getChatAgent(team)
+	if !ok {
+		return fmt.Errorf("no agent available to chat with")
+	}
+
+	if err := team.Start(ctx); err != nil {
+		return fmt.Errorf("error starting team: %v", err)
+	}
+	defer team.Stop(ctx)
+
+	fmt.Println(boldStyle.Sprint("Dive Chat"))
 	fmt.Println()
 
-	// Create a scanner for user input
 	scanner := bufio.NewScanner(os.Stdin)
 
-	// Start the chat loop
 	for {
-		// Print prompt
-		fmt.Print(userMsgStyle.Render("You: "))
+		fmt.Print(boldStyle.Sprint("You: "))
 
-		// Get user input
 		if !scanner.Scan() {
 			break
 		}
-
 		userInput := scanner.Text()
 
-		// Check for exit commands
 		if strings.ToLower(userInput) == "exit" || strings.ToLower(userInput) == "quit" {
+			fmt.Println()
 			fmt.Println("Goodbye!")
 			break
 		}
 
-		// Skip empty messages
 		if strings.TrimSpace(userInput) == "" {
 			continue
 		}
 
-		fmt.Println() // Add a newline after user input
+		fmt.Println()
 
-		// Process the message
-		response := processMessage(ctx, userInput, team)
+		if _, err := chatMessage(ctx, userInput, chatAgent); err != nil {
+			return fmt.Errorf("error processing message: %v", err)
+		}
 
-		// Print the response
-		fmt.Println(botMsgStyle.Render("Assistant: " + response))
 		fmt.Println()
 	}
-
 	return nil
 }
 

@@ -17,6 +17,7 @@ type messageWork struct {
 // the provided channels, without converting it to a task
 type messageChat struct {
 	message *llm.Message
+	options generateOptions
 
 	// For synchronous responses:
 	resultChan chan *llm.Response

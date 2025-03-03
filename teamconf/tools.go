@@ -23,13 +23,17 @@ func populateToolConfig(config map[string]interface{}, options interface{}) erro
 }
 
 // initializeTools initializes tools with custom configurations
-func initializeTools(enabledTools []string, toolConfigs map[string]map[string]interface{}) (map[string]llm.Tool, error) {
+func initializeTools(toolConfigs map[string]map[string]interface{}) (map[string]llm.Tool, error) {
 	toolsMap := make(map[string]llm.Tool)
 
 	// Create a set of enabled tools for quick lookup
 	enabledToolsSet := make(map[string]bool)
-	for _, tool := range enabledTools {
-		enabledToolsSet[tool] = true
+	for _, tool := range toolConfigs {
+		name, ok := tool["name"].(string)
+		if !ok {
+			return nil, fmt.Errorf("tool name is missing")
+		}
+		enabledToolsSet[name] = true
 	}
 
 	if enabledToolsSet["google_search"] {

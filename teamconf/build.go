@@ -1,7 +1,6 @@
 package teamconf
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -13,63 +12,14 @@ import (
 	"github.com/getstingrai/dive/slogger"
 )
 
-// Build builds a dive.Team from a team configuration
-func Build(ctx context.Context, def *Team) (*dive.DiveTeam, []*dive.Task, error) {
-	logLevel := "info"
-	if def.Config.LogLevel != "" {
-		logLevel = def.Config.LogLevel
-	}
-	logger := slogger.New(slogger.LevelFromString(logLevel))
+func buildAgent(
+	agentDef Agent,
+	globalConfig Config,
+	toolsMap map[string]llm.Tool,
+	logger slogger.Logger,
+	variables map[string]interface{},
+) (dive.Agent, error) {
 
-	var enabledTools []string
-	var toolConfigs map[string]map[string]interface{}
-
-	if def.Tools != nil {
-		toolConfigs = make(map[string]map[string]interface{}, len(def.Tools))
-		for _, toolDef := range def.Tools {
-			name, ok := toolDef["name"].(string)
-			if !ok {
-				return nil, nil, fmt.Errorf("tool name is missing")
-			}
-			toolConfigs[name] = toolDef
-		}
-	}
-
-	toolsMap, err := initializeTools(enabledTools, toolConfigs)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to initialize tools: %w", err)
-	}
-
-	agents := make([]dive.Agent, 0, len(def.Agents))
-	for _, agentDef := range def.Agents {
-		agent, err := buildAgent(agentDef, def.Config, toolsMap, logger)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
-		}
-		agents = append(agents, agent)
-	}
-
-	tasks := make([]*dive.Task, 0, len(def.Tasks))
-	for _, taskDef := range def.Tasks {
-		task, err := buildTask(taskDef, agents)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to build task %s: %w", taskDef.Name, err)
-		}
-		tasks = append(tasks, task)
-	}
-
-	team, err := dive.NewTeam(dive.TeamOptions{
-		Name:        def.Name,
-		Description: def.Description,
-		Agents:      agents,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create team: %w", err)
-	}
-	return team, tasks, nil
-}
-
-func buildAgent(agentDef Agent, globalConfig Config, toolsMap map[string]llm.Tool, logger slogger.Logger) (dive.Agent, error) {
 	provider := agentDef.Provider
 	if provider == "" {
 		provider = globalConfig.DefaultProvider
@@ -159,7 +109,11 @@ func buildAgent(agentDef Agent, globalConfig Config, toolsMap map[string]llm.Too
 	return agent, nil
 }
 
-func buildTask(taskDef Task, agents []dive.Agent) (*dive.Task, error) {
+func buildTask(
+	taskDef Task,
+	agents []dive.Agent,
+	variables map[string]interface{},
+) (*dive.Task, error) {
 	var timeout time.Duration
 	if taskDef.Timeout != "" {
 		var err error

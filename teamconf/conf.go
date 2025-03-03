@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/getstingrai/dive"
+	"github.com/getstingrai/dive/slogger"
 	"gopkg.in/yaml.v3"
 )
 
@@ -74,34 +76,33 @@ type Task struct {
 // ToolDefinition used for serializing tool configurations
 type ToolDefinition map[string]interface{}
 
-// LoadConfFile loads a Team configuration from a file. The file extension is
+// LoadFile loads a Team configuration from a file. The file extension is
 // used to determine the configuration format:
 // - .json -> JSON
 // - .yml or .yaml -> YAML
 // - .hcl or .dive -> HCL
-func LoadConfFile(filePath string) (*Team, error) {
+func LoadFile(filePath string) (*Team, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 	filename := filepath.Base(filePath)
+	extension := filepath.Ext(filePath)
 
-	var def Team
-
-	switch filepath.Ext(filePath) {
+	switch extension {
 	case ".json":
-		return LoadConfJSON(data)
+		return LoadJSON(data)
 	case ".yml", ".yaml":
-		return LoadConfYAML(data)
+		return LoadYAML(data)
 	case ".hcl", ".dive":
-		return LoadConfHCL(data, filename)
+		return LoadHCL(data, filename)
+	default:
+		return nil, fmt.Errorf("unsupported file extension: %s", extension)
 	}
-
-	return &def, nil
 }
 
-// LoadConfJSON loads a Team configuration from a JSON string
-func LoadConfJSON(conf []byte) (*Team, error) {
+// LoadJSON loads a Team configuration from a JSON string
+func LoadJSON(conf []byte) (*Team, error) {
 	var def Team
 	if err := json.Unmarshal([]byte(conf), &def); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
@@ -109,8 +110,8 @@ func LoadConfJSON(conf []byte) (*Team, error) {
 	return &def, nil
 }
 
-// LoadConfYAML loads a Team configuration from a YAML string
-func LoadConfYAML(conf []byte) (*Team, error) {
+// LoadYAML loads a Team configuration from a YAML string
+func LoadYAML(conf []byte) (*Team, error) {
 	var def Team
 	if err := yaml.Unmarshal([]byte(conf), &def); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
@@ -118,11 +119,29 @@ func LoadConfYAML(conf []byte) (*Team, error) {
 	return &def, nil
 }
 
-// LoadConfHCL loads a Team configuration from a HCL string
-func LoadConfHCL(conf []byte, filename string) (*Team, error) {
+// LoadHCL loads a Team configuration from a HCL string
+func LoadHCL(conf []byte, filename string) (*Team, error) {
 	hclteam, err := LoadHCLDefinition(conf, filename, nil)
 	if err != nil {
 		return nil, err
+	}
+
+	var variables []Variable
+	for _, v := range hclteam.Variables {
+		variables = append(variables, Variable{
+			Name:        v.Name,
+			Type:        v.Type,
+			Description: v.Description,
+			// Default:     v.Default.,
+		})
+	}
+	var tools []ToolDefinition
+	for _, t := range hclteam.Tools {
+		tools = append(tools, map[string]interface{}{
+			"name":    t.Name,
+			"enabled": t.Enabled,
+			// TODO: ... parameters
+		})
 	}
 	// Convert HCLTeam to Team
 	def := &Team{
@@ -131,8 +150,95 @@ func LoadConfHCL(conf []byte, filename string) (*Team, error) {
 		Agents:      hclteam.Agents,
 		Tasks:       hclteam.Tasks,
 		Config:      hclteam.Config,
-		// Variables:   hclteam.Variables,
-		// Tools:       hclteam.Tools,
+		Variables:   variables,
+		Tools:       tools,
 	}
 	return def, nil
+}
+
+// TeamFromFile loads a team configuration from a file and builds it, returning
+// the usable dive.Team. This is a convenience function that combines the load
+// and build steps.
+func TeamFromFile(filePath string, opts ...BuildOption) (dive.Team, error) {
+	conf, err := LoadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return conf.Build(opts...)
+}
+
+type buildOptions struct {
+	Variables map[string]interface{}
+	Logger    slogger.Logger
+}
+
+type BuildOption func(*buildOptions)
+
+func WithVariables(vars map[string]interface{}) BuildOption {
+	return func(o *buildOptions) {
+		o.Variables = vars
+	}
+}
+
+func WithLogger(logger slogger.Logger) BuildOption {
+	return func(o *buildOptions) {
+		o.Logger = logger
+	}
+}
+
+func (def *Team) Build(opts ...BuildOption) (dive.Team, error) {
+
+	buildOpts := &buildOptions{}
+	for _, opt := range opts {
+		opt(buildOpts)
+	}
+
+	logLevel := "info"
+	if def.Config.LogLevel != "" {
+		logLevel = def.Config.LogLevel
+	}
+
+	var toolConfigs map[string]map[string]interface{}
+	if def.Tools != nil {
+		toolConfigs = make(map[string]map[string]interface{}, len(def.Tools))
+		for _, toolDef := range def.Tools {
+			name, ok := toolDef["name"].(string)
+			if !ok {
+				return nil, fmt.Errorf("tool name is missing")
+			}
+			toolConfigs[name] = toolDef
+		}
+	}
+
+	toolsMap, err := initializeTools(toolConfigs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tools: %w", err)
+	}
+
+	agents := make([]dive.Agent, 0, len(def.Agents))
+	for _, agentDef := range def.Agents {
+		agent, err := buildAgent(agentDef, def.Config, toolsMap, buildOpts.Logger, buildOpts.Variables)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
+		}
+		agents = append(agents, agent)
+	}
+
+	tasks := make([]*dive.Task, 0, len(def.Tasks))
+	for _, taskDef := range def.Tasks {
+		task, err := buildTask(taskDef, agents, buildOpts.Variables)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build task %s: %w", taskDef.Name, err)
+		}
+		tasks = append(tasks, task)
+	}
+
+	return dive.NewTeam(dive.TeamOptions{
+		Name:        def.Name,
+		Description: def.Description,
+		Agents:      agents,
+		Tasks:       tasks,
+		Logger:      buildOpts.Logger,
+		LogLevel:    logLevel,
+	})
 }
