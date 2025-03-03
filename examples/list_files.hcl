@@ -27,6 +27,12 @@ variable "log_level" {
   default = "info"
 }
 
+variable "directory" {
+  type = string
+  description = "The directory to list files in"
+  default = "."
+}
+
 tool "google_search" {
   enabled = true
 }
@@ -54,6 +60,6 @@ agent "engineer" {
 }
 
 task "list-files" {
-  description = "List all files in the current directory"
+  description = format("List all files in the directory: %s", var.directory)
   assigned_agent = agents.engineer
 }

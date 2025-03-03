@@ -11,7 +11,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/getstingrai/dive/slogger"
 	"github.com/getstingrai/dive/teamconf"
-	"github.com/zclconf/go-cty/cty"
 )
 
 var (
@@ -25,7 +24,7 @@ var (
 )
 
 func fatal(msg string, args ...interface{}) {
-	fmt.Printf(msg+"\n", args...)
+	fmt.Printf(errorStyle.Sprint(msg)+"\n", args...)
 	os.Exit(1)
 }
 
@@ -42,7 +41,7 @@ func main() {
 
 	filePath := flag.Arg(0)
 
-	vars := teamconf.VariableValues{}
+	vars := map[string]any{}
 	if varsFlag != "" {
 		varPairs := strings.Split(varsFlag, ",")
 		for _, pair := range varPairs {
@@ -52,7 +51,7 @@ func main() {
 			}
 			key := strings.TrimSpace(parts[0])
 			value := strings.TrimSpace(parts[1])
-			vars[key] = cty.StringVal(value)
+			vars[key] = value
 		}
 	}
 
@@ -60,7 +59,10 @@ func main() {
 
 	logger := slogger.New(slogger.LevelFromString(logLevel))
 
-	team, err := teamconf.TeamFromFile(filePath, teamconf.WithLogger(logger))
+	team, err := teamconf.TeamFromFile(filePath,
+		teamconf.WithLogger(logger),
+		teamconf.WithVariables(vars),
+	)
 	if err != nil {
 		fatal(err.Error())
 	}
