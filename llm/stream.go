@@ -19,16 +19,16 @@ const (
 	EventContentBlockStop  StreamEventType = "content_block_stop"
 )
 
-// StreamEvent represents a single streaming event from the LLM
+// StreamEvent represents a single streaming event from the LLM. A successfully
+// run stream will end with a final message containing the complete Response.
 type StreamEvent struct {
-	Type            StreamEventType `json:"type"`
-	Index           int             `json:"index"`
-	Message         *Message        `json:"message,omitempty"`
-	ContentBlock    *ContentBlock   `json:"content_block,omitempty"`
-	Delta           *Delta          `json:"delta,omitempty"`
-	Usage           *Usage          `json:"usage,omitempty"`
-	AccumulatedText string          `json:"accumulated_text,omitempty"`
-	AccumulatedJSON string          `json:"accumulated_json,omitempty"`
+	Type         StreamEventType `json:"type"`
+	Index        int             `json:"index"`
+	Message      *Message        `json:"message,omitempty"`
+	ContentBlock *ContentBlock   `json:"content_block,omitempty"`
+	Delta        *Delta          `json:"delta,omitempty"`
+	Usage        *Usage          `json:"usage,omitempty"`
+	Response     *Response       `json:"response,omitempty"`
 }
 
 // Stream represents a stream of LLM generation events
@@ -46,7 +46,9 @@ type Stream interface {
 
 type ContentBlock struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+	Text string `json:"text,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type Delta struct {

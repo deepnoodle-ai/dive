@@ -1,4 +1,3 @@
-
 <p align="center">
   <img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
   <h1 align="center">
@@ -8,23 +7,18 @@
 
 ## Introduction
 
-Dive is a powerful, flexible Go framework for building AI agent systems that
-actually get things done. Whether you need a single specialized agent or a
-collaborative team of AI workers, Dive makes it easy to create, orchestrate, and
-manage AI agents powered by leading LLM providers.
+Dive is a flexible Go framework for building AI agent systems. Whether you need
+a single specialized agent or a collaborative team of AI workers, Dive makes it
+easy to accomplish tasks with AI.
 
-This approach enables complex agent behaviors while maintaining a simple,
-intuitive API for developers.
-
-Dive can easily be embedded into existing Go applications, or run as a
-standalone process.
+Dive can be embedded into existing Go applications or run standalone.
 
 ## Project Status
 
 **⚠️ Early Development Stage ⚠️**
 
-Dive is currently in its early development stages. While the core functionality
-is in place, the project is still evolving rapidly.
+Dive is in early development. While much core functionality is in place, the
+project is still evolving rapidly.
 
 - **Not recommended for production use** at this time
 - **Breaking changes will happen** as the API matures
@@ -36,255 +30,139 @@ questions, suggestions, or feedback.
 
 ## Features
 
-* **Flexible Agent Architecture**: Create specialized agents with different roles, capabilities, and access to tools
-* **Team Collaboration**: Build teams of agents that work together, with supervisors that can delegate tasks
-* **Task Management**: Define, assign, and track tasks with dependencies, timeouts, and expected outputs
-* **Multi-Provider Support**: Use your preferred LLM provider (Anthropic, OpenAI, Groq) with a unified interface
-* **Powerful Tool System**: Extend agent capabilities with tools like web search, document retrieval, and more
-* **Declarative Configuration**: Define agents and teams using simple YAML files or programmatically in Go
-* **Robust Error Handling**: Built-in retry mechanisms, timeouts, and error recovery for reliable operation
-* **Comprehensive Logging**: Detailed logging of agent activities, decisions, and task progress
+* **Flexible Agent Architecture**: Create specialized agents with different roles and capabilities
+* **Team Collaboration**: Agents work together and supervisors assign tasks
+* **Task Management**: Define, assign, and coordinate tasks with dependencies and expected outputs
+* **Multi-Provider Support**: Unified Go interface for multiple LLM providers (Anthropic, OpenAI, Groq)
+* **Tool System**: Extend agent capabilities with tools like web search, document retrieval, and more
+* **Declarative Configuration**: Define teams using YAML, JSON, HCL, or programmatically in Go
+* **Streaming Support**: Stream events for chats and task progress in real-time
 
-## Installation
-
-Getting started with Dive is simple. You can install it using Go's standard package management:
-
-```bash
-go get github.com/getstingrai/dive
-```
+## Quick Start
 
 ### Prerequisites
 
 - Go 1.20 or higher
-- API keys for the LLM providers you plan to use (Anthropic, OpenAI, Groq, etc.)
+- API keys for any LLM providers you plan to use (Anthropic, OpenAI, Groq, etc.)
 - API keys for any external tools you plan to use (Google Search, Firecrawl, etc.)
 
 ### Environment Setup
 
-Set up your environment variables for the LLM providers and tools:
+Set up your shell environment:
 
 ```bash
 # LLM Provider API Keys
-export ANTHROPIC_API_KEY="your-anthropic-api-key"
-export OPENAI_API_KEY="your-openai-api-key"
-export GROQ_API_KEY="your-groq-api-key"
+export ANTHROPIC_API_KEY="your-key"
+export OPENAI_API_KEY="your-key"
+export GROQ_API_KEY="your-key"
 
 # Tool API Keys
-export GOOGLE_SEARCH_API_KEY="your-google-search-api-key"
-export GOOGLE_SEARCH_CX="your-google-search-cx"
-export FIRECRAWL_API_KEY="your-firecrawl-api-key"
+export GOOGLE_SEARCH_API_KEY="your-key"
+export GOOGLE_SEARCH_CX="your-key"
+export FIRECRAWL_API_KEY="your-key"
 ```
 
-## Quick Start
+### As a Library
 
-Get started with Dive in just a few lines of code:
+To get started with Dive as a library, use go get:
 
-```go
-package main
-
-import (
-	"context"
-	"log"
-
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/providers/anthropic"
-	"github.com/getstingrai/dive/tools"
-	"github.com/getstingrai/dive/tools/google"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// Create a Google Search API client
-	googleClient, err := google.New()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Create a new agent
-	agent := dive.NewAgent(dive.AgentOptions{
-		Name: "researcher",
-		Role: &dive.Role{
-			Description: "Research Assistant",
-			AcceptsWork: []string{"research"},
-		},
-		LLM:          anthropic.New(),
-		CacheControl: "ephemeral",
-		Tools:        []dive.Tool{tools.NewGoogleSearch(googleClient)},
-	})
-
-	// Start the agent
-	if err := agent.Start(ctx); err != nil {
-		log.Fatal(err)
-	}
-	defer agent.Stop(ctx)
-
-	// Create and assign a task
-	task := dive.NewTask(dive.TaskOptions{
-		Description: "Research the history of AI and summarize in 3 paragraphs",
-	})
-	
-	promise, err := agent.Work(ctx, task)
-	if err != nil {
-		log.Fatal(err)
-	}
-	
-	// Wait for the result
-	result, err := promise.Get(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	
-	log.Printf("Task result: %s", result.Output)
-}
 ```
+go get github.com/getstingrai/dive
+```
+
+Then mimic one of the example programs to get up and running:
+
+- [Chat Example](examples/chat_example/main.go)
+- [Tasks Example](examples/tasks_example/main.go)
+- [Team Example](examples/team_example/main.go)
+
+### As a CLI
 
 Or use the YAML runner for a declarative approach:
 
 ```bash
-go run cmd/yaml_runner/main.go -file=examples/research_team.yaml
-```
-
-### Tasks
-
-Tasks are the fundamental units of work in Dive. Each task represents a discrete
-piece of work that an agent needs to complete, with clear inputs, expected
-outputs, and constraints.
-
-Tasks can be simple one-off requests or part of a complex workflow with
-dependencies on other tasks. The framework handles task scheduling, execution,
-and result management, allowing you to focus on defining what needs to be done
-rather than how to manage the execution.
-
-Key features of tasks include:
-
-* **Rich Descriptions**: Provide detailed instructions and context for the agent
-* **Expected Outputs**: Define what a successful result should look like
-* **Dependencies**: Create task workflows where tasks depend on the results of previous tasks
-* **Timeouts**: Set maximum execution times to prevent runaway processes
-* **Iteration Limits**: Control how many attempts an agent can make to complete a task
-* **Output Formatting**: Specify how results should be formatted (text, JSON, etc.)
-* **File Output**: Save task results directly to files
-
-Creating a task is as simple as:
-
-```go
-task := dive.NewTask(dive.TaskOptions{
-    Name:           "market-research",
-    Description:    "Research the current market trends for electric vehicles",
-    ExpectedOutput: "A 500-word summary with 3 key insights",
-    Timeout:        5 * time.Minute,
-})
+git clone https://github.com/getstingrai/dive
+cd dive/cmd/dive
+go build
+./dive run ../../examples/research_team.hcl --var "topic=history of the internet"
 ```
 
 ## Core Concepts
 
 ### Agents
 
-Agents are the intelligent workers in the Dive framework. Each agent is powered
-by a Large Language Model (LLM) and can be specialized for different roles and
-tasks. Agents can work independently or as part of a team, and they can use
-tools to interact with the outside world.
+Agents can work independently or as part of a team, and they can use tools to
+interact with the outside world. They may be assigned tasks.
 
-Key aspects of agents include:
+Dive's agents each run independently, with their own goroutine and run loop.
+This means they can truly operate and make progress independently. They can
+be spawned for a specific task and then stopped, or they can be run continuously
+and make progress in the background.
 
-* **Independent Operation**: Each agent runs in its own goroutine with a dedicated run loop
-* **Role-Based Specialization**: Define specific roles and responsibilities for each agent
-* **Tool Access**: Equip agents with the tools they need for their specific tasks
-* **State Management**: Agents maintain their own state and context across interactions
-
-Creating an agent is straightforward:
+Create an agent with the following code:
 
 ```go
 agent := dive.NewAgent(dive.AgentOptions{
-    Name:         "analyst",
-    Role:         &dive.Role{Description: "Financial Analyst"},
+    Name:         "Chris",
+    Description:  "Research Assistant",
+    Instructions: "Use Google to research assigned topics",
     LLM:          anthropic.New(),
-    Tools:        []dive.Tool{},
+    IsSupervisor: false,
+    Tools:        []llm.Tool{tools.NewGoogleSearch(googleClient)},
+})
+```
+
+As an implementation detail, message passing is used behind the Agent interface
+functions. Each agent has its own "mailbox" that accepts messages that tell the
+agent to chat or work on a task. This borrows aspects of the actor model of
+concurrency.
+
+### Tasks
+
+Tasks are the basic units of work in Dive. Each task describes the needed work
+along with expected outputs and other configuration. Tasks may have dependencies
+on other tasks, and Dive will automatically determine the order in which to
+execute them. Currently, a single agent works on one task at a time.
+
+Create a task as follows:
+
+```go
+task := dive.NewTask(dive.TaskOptions{
+    Name:           "Research",
+    Description:    "Research the current market trends for electric vehicles",
+    ExpectedOutput: "A 500-word summary with 3 key insights",
+    OutputFormat:   dive.OutputMarkdown,
+    Timeout:        time.Minute * 5,
 })
 ```
 
 ### Teams
 
-Teams allow multiple agents to collaborate on complex tasks. A team consists of
-a group of agents, potentially with different roles and capabilities, working
-together toward a common goal.
+Teams allow multiple agents to collaborate on tasks, where each agent has its
+own role and capabilities.
 
-Teams can have hierarchical structures, with supervisor agents delegating tasks
-to subordinate agents based on their specialties.
+Agents can be marked as supervisors, which allows them to assign tasks to other
+agents. A list of subordinates may be specified for each supervisor.
 
-Key features of teams include:
-
-* **Hierarchical Structure**: Create teams with supervisors and subordinates
-* **Task Assignment**: Supervisors can assign tasks to the most appropriate agent
-* **Shared Context**: Team members can share context and build on each other's work
-* **Parallel Execution**: Multiple agents can work on different tasks simultaneously
-* **Coordinated Workflows**: Create complex workflows with dependencies between tasks
-
-Creating a team programmatically:
+Create a simple two-agent team as follows:
 
 ```go
 team, err := dive.NewTeam(dive.TeamOptions{
-    Name:        "research-team",
-    Description: "A team for market research and analysis",
-    Agents:      []dive.Agent{supervisor, researcher, analyst},
+    Name:        "Research Team",
+    Description: "A team of researchers led by a supervisor.",
+    Agents:      []dive.Agent{supervisor, researcher},
 })
 ```
-
-Or define a team declaratively in YAML:
-
-```yaml
-name: 'Research Team'
-description: 'A team for market research and analysis'
-
-agents:
-  - name: 'Supervisor'
-    role:
-      description: 'Research Team Lead'
-      is_supervisor: true
-      subordinates: ['Researcher', 'Analyst']
-  
-  - name: 'Researcher'
-    role:
-      description: 'Market Researcher'
-    tools: ['google_search', 'web_scraper']
-  
-  - name: 'Analyst'
-    role:
-      description: 'Data Analyst'
-    tools: ['calculator', 'data_fetcher']
-```
-
-### Execution Model
-
-Dive embraces the actor model of concurrency, providing a robust foundation for
-building and scaling complex agent systems. This execution model enables agents
-to work concurrently on different tasks while maintaining strict isolation
-between them.
-
-The actor-inspired design is particularly well-suited for AI agent systems,
-where each agent needs to maintain its own context, make independent decisions,
-and collaborate with others through well-defined interfaces.
 
 ### Events
 
 **Disclaimer:** This is not fully implemented yet.
 
-Events provide a way to notify agents about changes or occurrences that might
-require their attention. Events can be used to trigger agent actions, provide
-new information, or coordinate activities between agents.
+Events provide a way to notify agents about something that happened in the world.
+They can be used to trigger agent actions, provide new information, or coordinate
+activities between agents.
 
-Events consist of a name, description, and optional parameters. They can be sent
-to individual agents or broadcast to an entire team.
-
-Examples of events include:
-
-* Notifying agents of new data becoming available
-* Alerting agents to changes in the environment
-* Triggering periodic tasks or reviews
-* Coordinating activities between multiple agents
-
-Sending an event to an agent:
+Create and pass an event to an agent as follows:
 
 ```go
 event := &dive.Event{
@@ -295,71 +173,83 @@ event := &dive.Event{
         "timestamp":   time.Now(),
     },
 }
-
-err := agent.Event(ctx, event)
+err := agent.HandleEvent(ctx, event)
 ```
 
-### Roles
+## CLI
 
-Roles define an agent's responsibilities, capabilities, and position within a
-team. A role includes a description of the agent's purpose, whether it's a
-supervisor, what types of work it accepts, and more.
+The Dive CLI lets you run teams defined in YAML, JSON, or HCL. It also provides
+other subcommands for validating configurations and chatting 1:1 with an agent.
 
-Roles help agents understand their purpose and constraints, guiding their
-decision-making and actions. They also help with task routing, ensuring that
-tasks are assigned to the most appropriate agent.
+Currently available commands:
 
-Key components of a role include:
+```bash
+# Run a team and any defined tasks
+dive run path/to/team.hcl
 
-* **Description**: A natural language description of the agent's role
-* **Supervisor Status**: Whether the agent can delegate tasks to others
-* **Subordinates**: Which agents report to this agent (if a supervisor)
-* **Work Types**: What kinds of tasks the agent can accept
-* **Event Types**: What kinds of events the agent can handle
+# Chat with an agent on a team
+dive chat path/to/team.hcl
 
-Defining a role:
-
-```go
-role := &dive.Role{
-    Description:   "You are a data scientist specializing in market trend analysis",
-    IsSupervisor:  false,
-    AcceptsChats:  true,
-    AcceptsEvents: []string{"data_update", "analysis_request"},
-    AcceptsWork:   []string{"data_analysis", "trend_forecasting"},
-}
+# Validate a team configuration
+dive config check path/to/team.hcl
 ```
 
-### Promises
+### Team Configurations
 
-Promises provide an asynchronous way to handle task results. When an agent is
-assigned a task, it returns a Promise that will eventually resolve to the task
-result.
+Team configurations defined in HCL are the most useful and flexible currently.
+This supports referencing tasks and agents, basic string formatting, and dynamic
+configuration of variables.
 
-Promises allow you to:
+```hcl
+name = "Research Team"
 
-* Start a task and continue with other work while it's being processed
-* Wait for a task to complete and retrieve its result
-* Handle errors that might occur during task execution
-* Coordinate multiple tasks with dependencies
+description = "A expert research team of agents that will research any topic"
 
-Working with promises:
-
-```go
-// Start a task and get a promise
-promise, err := agent.Work(ctx, task)
-if err != nil {
-    log.Fatal(err)
+config {
+  log_level = "debug"
+  default_provider = "anthropic"
+  output_dir = "output"
 }
 
-// Wait for the result (blocking)
-result, err := promise.Get(ctx)
-if err != nil {
-    log.Fatal(err)
+variable "topic" {
+  type = "string"
+  description = "The topic to research"
 }
 
-// Or wait for multiple promises
-promises := []*dive.Promise{promise1, promise2, promise3}
-results, err := dive.WaitAll(ctx, promises)
+tool "google_search" {
+  enabled = true
+}
+
+tool "firecrawl_scrape" {
+  enabled = true
+}
+
+agent "supervisor" {
+  description = "Expert research supervisor. Assign research tasks to the assistant. Prepare the final reports yourself."
+  is_supervisor = true
+  subordinates = [agents.assistant]
+}
+
+agent "assistant" {
+  description = "You are an expert research assistant. When researching, don't go too deep into the details unless specifically asked."
+  tools = [
+    tools.google_search,
+    tools.firecrawl_scrape,
+  ]
+}
+
+task "research" {
+  description = format("Gather background research on %s. Don't consult more than one source. The goal is to produce about 3 paragraphs of research - that is all. Don't overdo it.", var.topic)
+  output_file = "research.txt"
+}
+
+task "report" {
+  description = format("Create a brief 3 paragraph report on %s", var.topic)
+  expected_output = "The history, with the first word of each paragraph in ALL UPPERCASE"
+  assigned_agent = agents.supervisor
+  dependencies = [tasks.research]
+  output_file = "report.txt"
+}
 ```
 
 ## LLM Integration
@@ -378,63 +268,58 @@ Each provider implementation handles the specifics of API communication, token
 counting, error handling, and other provider-specific details, giving you a
 consistent interface regardless of which provider you're using.
 
-Key features of the LLM integration include:
+All providers support tool-use and streaming and non-streaming responses.
+Provider specific features are supported when possible. For example, with
+Anthropic you must opt into caching.
 
-* **Unified Interface**: Work with any supported LLM through the same API
-* **Tool Use**: Enable LLMs to use tools to extend their capabilities
-* **Caching**: Cache responses to reduce API costs and improve performance
-* **Context Management**: Automatically handle context windows and token limits
-* **Streaming Support**: Stream responses for better user experience **(in-progress)**
-
-Using an LLM directly:
+If you want, you can use these LLMs directly, without agents:
 
 ```go
 // Create an LLM instance
-llm := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
+provider := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
 
-// Generate a response
-response, err := llm.Generate(ctx, 
+// Generate a response (non-streaming API)
+response, err := provider.Generate(ctx, 
     []*llm.Message{llm.NewUserMessage("What is the capital of France?")},
     llm.WithSystemPrompt("You are a helpful assistant."),
 )
 ```
 
-### Supported Providers
-
 Each provider has its own package but offers similar configuration options:
 
 ```go
-// Anthropic
 llm := anthropic.New(
     anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
     anthropic.WithModel("claude-3-7-sonnet-20250219"),
 )
 
-// OpenAI
 llm := openai.New(
     openai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
     openai.WithModel("gpt-4o"),
 )
 
-// Groq
 llm := groq.New(
     groq.WithAPIKey(os.Getenv("GROQ_API_KEY")),
     groq.WithModel("llama-3.3-70b-versatile"),
 )
 ```
 
+If unspecified, the API keys will be read from the standard environment
+variables. Each provider defines its own default model as well.
+
 ### Tested Models
 
 These are the models that I have personally tested so far. Currently, Dive does
 not restrict the model names you can specify, so feel free to try others.
 
-| Provider  | Model                         |
-| --------- | ----------------------------- |
-| Anthropic | claude-3-5-sonnet-20240620    |
-| Anthropic | claude-3-5-sonnet-20241022    |
-| OpenAI    | gpt-4o                        |
-| Groq      | llama-3.3-70b-versatile       |
-| Groq      | deepseek-r1-distill-llama-70b |
+| Provider  | Model                           |
+| --------- | ------------------------------- |
+| Anthropic | `claude-3-7-sonnet-20250219`    |
+| Anthropic | `claude-3-5-sonnet-20241022`    |
+| Anthropic | `claude-3-5-haiku-20241022`     |
+| OpenAI    | `gpt-4o`                        |
+| Groq      | `llama-3.3-70b-versatile`       |
+| Groq      | `deepseek-r1-distill-llama-70b` |
 
 ### Tool Use
 
@@ -452,10 +337,13 @@ type Tool interface {
 }
 ```
 
-The framework includes a couple of built-in tools at this time:
+The framework includes a handful of built-in tools at this time:
 
-* **Google Search**: Search the web for information
-* **Firecrawl**: Extract content from web pages
+* **google_search**: Searches with Google and returns URL, description, and title
+* **firecrawl_scrape**: Scrapes a web page and returns the content as Markdown
+* **directory_list**: Lists the contents of a local directory
+* **file_read**: Reads the contents of a file and returns the content
+* **file_write**: Writes content to a file
 
 Creating a custom tool is straightforward:
 
@@ -495,360 +383,11 @@ func (t *WeatherTool) ShouldReturnResult() bool {
 }
 ```
 
-### Prompt Templates
-
-Dive includes a flexible prompt templating system that helps you create
-consistent, effective prompts for your agents. Templates can include variables
-that are filled in at runtime, making it easy to create dynamic prompts.
-
-Templates are defined using Go's text/template syntax and can include
-conditional logic, loops, and other template features.
-
-Example of using a prompt template:
-
-```go
-template := prompt.NewTemplate(`
-You are a {{.Role}} assistant.
-{{if .Context}}
-Here is some context to help you:
-{{.Context}}
-{{end}}
-Please help the user with their request.
-`)
-
-systemPrompt, err := template.Execute(map[string]interface{}{
-    "Role":    "financial",
-    "Context": "The user is asking about investment strategies.",
-})
-```
-
-## Available Tools
-
-Dive comes with several built-in tools that extend the capabilities of your
-agents. These tools allow agents to interact with the outside world, access
-information, and perform actions beyond just generating text.
-
-### Google Search
-
-The Google Search tool allows agents to search the web for information. This
-uses the [Google Custom Search JSON API](https://developers.google.com/custom-search/v1/overview).
-
-```go
-// Create a Google Search API client
-googleClient, err := google.New()
-if err != nil {
-    log.Fatal(err)
-}
-
-searchTool := tools.NewGoogleSearch(googleClient)
-
-// Add it to an agent
-agent := dive.NewAgent(dive.AgentOptions{
-    // ... other configuration ...
-    Tools: []dive.Tool{searchTool},
-})
-```
-
-### Firecrawl
-
-The [Firecrawl](https://www.firecrawl.dev) tool allows agents to extract content from web pages:
-
-```go
-// Create a Firecrawl tool
-app, err := firecrawl.NewFirecrawlApp(os.Getenv("FIRECRAWL_API_KEY"), "")
-scrapeTool := tools.NewFirecrawlScraper(app, 30000)
-
-// Add it to an agent
-agent := dive.NewAgent(dive.AgentOptions{
-    // ... other configuration ...
-    Tools: []dive.Tool{scrapeTool},
-})
-```
-
-## Examples
-
-Here are some examples of how to use Dive for common use cases:
-
-### Single Agent Chat
-
-Create a simple chat agent that can answer questions:
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-
-    "github.com/getstingrai/dive"
-    "github.com/getstingrai/dive/llm"
-    "github.com/getstingrai/dive/providers/anthropic"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Create an agent
-    agent := dive.NewAgent(dive.AgentOptions{
-        Name: "assistant",
-        Role: &dive.Role{
-            Description: "Helpful Assistant",
-            AcceptsChats: true,
-        },
-        LLM:          anthropic.New(),
-        CacheControl: "ephemeral",
-    })
-
-    // Start the agent
-    if err := agent.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer agent.Stop(ctx)
-
-    // Chat with the agent
-    response, err := agent.Chat(ctx, llm.NewUserMessage("What is the capital of France?"))
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Println(response.Message().Text())
-}
-```
-
-### Research Team
-
-Create a team of agents to collaborate on research tasks:
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-    "time"
-
-    "github.com/getstingrai/dive"
-    "github.com/getstingrai/dive/providers/anthropic"
-    "github.com/getstingrai/dive/tools"
-    "github.com/getstingrai/dive/tools/google"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Create Google Search tool
-    googleClient := google.NewClient(
-        os.Getenv("GOOGLE_SEARCH_API_KEY"),
-        os.Getenv("GOOGLE_SEARCH_CX"),
-    )
-    searchTool := tools.NewGoogleSearch(googleClient)
-
-    // Create agents
-    supervisor := dive.NewAgent(dive.AgentOptions{
-        Name: "supervisor",
-        Role: &dive.Role{
-            Description: "Research Team Lead",
-            IsSupervisor: true,
-            Subordinates: []string{"researcher"},
-        },
-        LLM:          anthropic.New(),
-        CacheControl: "ephemeral",
-    })
-
-    researcher := dive.NewAgent(dive.AgentOptions{
-        Name: "researcher",
-        Role: &dive.Role{
-            Description: "Research Assistant",
-        },
-        LLM:          anthropic.New(),
-        CacheControl: "ephemeral",
-        Tools:        []dive.Tool{searchTool},
-    })
-
-    // Create a team
-    team, err := dive.NewTeam(dive.TeamOptions{
-        Name:        "research-team",
-        Description: "A team for conducting research",
-        Agents:      []dive.Agent{supervisor, researcher},
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Start the team
-    if err := team.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer team.Stop(ctx)
-
-    // Create tasks
-    researchTask := dive.NewTask(dive.TaskOptions{
-        Name:        "research",
-        Description: "Research the history of artificial intelligence",
-        Timeout:     5 * time.Minute,
-    })
-
-    summaryTask := dive.NewTask(dive.TaskOptions{
-        Name:         "summary",
-        Description:  "Create a summary of the research findings",
-        Dependencies: []string{"research"},
-        Timeout:      5 * time.Minute,
-    })
-
-    // Assign tasks to the team
-    results, err := team.Work(ctx, researchTask, summaryTask)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Print results
-    for _, result := range results {
-        fmt.Printf("Task: %s\nResult: %s\n\n", result.Task.Name(), result.Output)
-    }
-}
-```
-
-### Using YAML Configuration
-
-Define and run a team using YAML configuration:
-
-```yaml
-# research_team.yaml
-name: 'Research Team'
-description: 'A team for conducting research'
-
-config:
-  default_provider: 'anthropic'
-  log_level: 'info'
-  cache_control: 'ephemeral'
-  enabled_tools:
-    - 'google_search'
-
-agents:
-  - name: 'Supervisor'
-    role:
-      description: 'Research Team Lead'
-      is_supervisor: true
-      subordinates:
-        - 'Researcher'
-  
-  - name: 'Researcher'
-    role:
-      description: 'Research Assistant'
-    tools:
-      - 'google_search'
-
-tasks:
-  - name: 'Research'
-    description: 'Research the history of artificial intelligence'
-    assigned_agent: 'Researcher'
-    timeout: '5m'
-
-  - name: 'Summary'
-    description: 'Create a summary of the research findings'
-    assigned_agent: 'Supervisor'
-    dependencies:
-      - 'Research'
-    timeout: '5m'
-```
-
-Run the YAML configuration:
-
-```bash
-go run cmd/yaml_runner/main.go -file=research_team.yaml -verbose
-```
-
 ## Configuration
 
 Dive provides flexible configuration options for agents, teams, and tasks. You
 can configure these components either programmatically in Go or declaratively
-using YAML.
-
-### Agent Configuration
-
-When creating an agent, you can configure:
-
-* **Name**: A unique identifier for the agent
-* **Role**: The agent's role, responsibilities, and capabilities
-* **LLM Provider**: Which LLM provider to use (Anthropic, OpenAI, Groq)
-* **Model**: Which specific model to use
-* **Tools**: Which tools the agent can use
-* **Cache Control**: How to handle caching of LLM responses
-* **Task Limits**: Maximum number of concurrent tasks, timeouts, etc.
-
-Example:
-
-```go
-agent := dive.NewAgent(dive.AgentOptions{
-    Name: "researcher",
-    Role: &dive.Role{
-        Description: "Research Assistant",
-        AcceptsWork: []string{"research"},
-    },
-    LLM:             anthropic.New(anthropic.WithModel("claude-3-7-sonnet-20250219")),
-    Tools:           []dive.Tool{searchTool, scrapeTool},
-    CacheControl:    "ephemeral",
-    MaxActiveTasks:  5,
-    TaskTimeout:     5 * time.Minute,
-    ChatTimeout:     1 * time.Minute,
-})
-```
-
-### Team Configuration
-
-When creating a team, you can configure:
-
-* **Name**: A unique identifier for the team
-* **Description**: A description of the team's purpose
-* **Agents**: The agents that belong to the team
-
-Example:
-
-```go
-team, err := dive.NewTeam(dive.TeamOptions{
-    Name:        "research-team",
-    Description: "A team for conducting research",
-    Agents:      []dive.Agent{supervisor, researcher, analyst},
-})
-```
-
-### Task Configuration
-
-When creating a task, you can configure:
-
-* **Name**: A unique identifier for the task
-* **Description**: A description of what the task should accomplish
-* **Expected Output**: A description of what the output should look like
-* **Output Format**: The format of the output (text, JSON, etc.)
-* **Assigned Agent**: Which agent should perform the task
-* **Dependencies**: Which tasks must be completed before this one
-* **Timeout**: Maximum time allowed for the task
-* **Max Iterations**: Maximum number of attempts allowed
-* **Output File**: Where to save the task output
-
-Example:
-
-```go
-task := dive.NewTask(dive.TaskOptions{
-    Name:           "market-research",
-    Description:    "Research the current market trends for electric vehicles",
-    ExpectedOutput: "A 500-word summary with 3 key insights",
-    OutputFormat:   dive.OutputFormatText,
-    Dependencies:   []string{"data-collection"},
-    MaxIterations:  3,
-    Timeout:        5 * time.Minute,
-    OutputFile:     "market_research_results.txt",
-})
-```
-
-### YAML Configuration
-
-For YAML configuration, see the [examples/README.md](examples/README.md) file
-for detailed information on the YAML structure and options.
+using JSON, YAML, or HCL.
 
 ## Contributing
 
@@ -858,20 +397,35 @@ improving documentation, or spreading the word, your help is appreciated.
 At this early stage, we're particularly interested in feedback on the concepts,
 API design, usability, and any use cases you'd like to see supported.
 
+## Roadmap
+
+- Voice interactions
+- More memory systems
+- Defined interfaces for RAG
+- Agent state persistence
+- Tool use: Slack
+- Tool use: Google Drive
+- Tool use: Expanded set of file I/O tools
+- More tests
+- More CLI subcommands
+- Loads more...
+
 ## FAQ
 
 ### What makes Dive different from other agent frameworks?
 
-Dive is designed with a focus on practical, production-ready agent systems.
+Dive is meant to be a highly practical, batteries-included agent framework.
 Key differentiators include:
 
-- First-class support for agent teams
-- Simple concepts: agents, teams, tasks, roles
-- Easy definition of tasks with dependencies
-- Built-in support for multiple LLM providers
-- Web search and scraping tools included
+- Simple concepts: teams, agents, and tasks
+- Easy definition of tasks and dependencies
 - Scalable to thousands of concurrent agents
-- Great defaults so a lot works out-of-the-box
+- Independent execution of agents and teams
+- Easily embeddable into existing Go programs
+- Interfaces in place for customization and extension
+- Emphasis on streaming support and real-time updates
+- Built-in support for long-running tasks with flexible completion criteria
+- Configuration via HCL provides path to flexible and robust team configurations
 
 ### How do I handle LLM rate limits?
 
@@ -888,18 +442,14 @@ We recommend using it for experimentation, prototyping, and providing feedback
 during this early stage. Once the project reaches a more stable state, we'll
 provide clear guidance on production readiness.
 
-### How can I extend Dive with custom functionality?
+### How can I extend or customize Dive?
 
-Dive is designed to be extensible:
-- Create custom tools by implementing the `Tool` interface
-- Implement custom agents by extending the base agent types
-- Add support for new LLM providers by implementing the `LLM` interface
-- Create custom prompt templates for specialized use cases
+Dive is designed to be highly extensible:
 
-### What are the resource requirements?
-
-Dive uses remote LLMs from the leading AI providers, so local resource usage is
-minimal. Thousands of agents can run in parallel on a single machine.
+- Create custom tools by implementing the `llm.Tool` interface
+- Add support for new LLM providers by implementing the `llm.Provider` interface
+- Implement custom agents by implementing the `dive.Agent` interface
+- Implement custom teams by implementing the `dive.Team` interface
 
 ### Is there a hosted or managed version available?
 
@@ -909,5 +459,4 @@ self-host and integrate into your own applications.
 ## Who is Behind Dive?
 
 Dive is developed by [Stingrai](https://www.getstingrai.com), a company building
-products powered by agentic AI for competitive intelligence and product
-messaging.
+products powered by agentic AI for competitive intelligence and product messaging.

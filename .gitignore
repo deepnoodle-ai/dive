@@ -25,4 +25,6 @@ go.work.sum
 .env
 
 .venv
-/output
+output
+/cmd/dive/dive
+tmp.json

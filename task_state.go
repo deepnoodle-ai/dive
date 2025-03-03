@@ -8,7 +8,7 @@ import (
 
 type taskState struct {
 	Task              *Task
-	Promise           *Promise
+	Publisher         *StreamPublisher
 	Status            TaskStatus
 	Iterations        int
 	Started           time.Time
@@ -16,9 +16,7 @@ type taskState struct {
 	Reasoning         string
 	StatusDescription string
 	Messages          []*llm.Message
-	Suspended         bool
-	ChanResponse      chan *llm.Response
-	ChanError         chan error
+	Paused            bool
 }
 
 func (s *taskState) String() string {

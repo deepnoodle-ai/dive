@@ -82,9 +82,8 @@ type StreamEvent struct {
 	Index        int           `json:"index"`
 	Message      StreamMessage `json:"message"`
 	Delta        StreamDelta   `json:"delta"`
-	ContentBlock *ContentBlock `json:"content_block"`
-	// AccumulatedContent string                `json:"accumulated_content"`
-	// ContentBlocks      map[int]*ContentBlock `json:"content_blocks"`
+	ContentBlock ContentBlock  `json:"content_block"`
+	Usage        Usage         `json:"usage"`
 }
 
 type StreamMessage struct {
@@ -95,6 +94,7 @@ type StreamMessage struct {
 	StopSequence *string        `json:"stop_sequence"`
 	StopReason   *string        `json:"stop_reason"`
 	Content      []ContentBlock `json:"content"`
+	Usage        Usage          `json:"usage"`
 }
 
 type StreamDelta struct {

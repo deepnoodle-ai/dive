@@ -3,11 +3,11 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/tools"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,27 +18,182 @@ func TestHelloWorld(t *testing.T) {
 		llm.NewUserMessage("respond with \"hello\""),
 	})
 	require.NoError(t, err)
+	// The model might respond with "Hello!" or other variations, so we check case-insensitive
+	require.Contains(t, strings.ToLower(response.Message().Text()), "hello")
+}
 
-	// Check if the response contains "hello" (case insensitive)
-	responseText := strings.ToLower(response.Message().Text())
-	require.Contains(t, responseText, "hello", "Response should contain 'hello'")
+func TestHelloWorldStream(t *testing.T) {
+	ctx := context.Background()
+	provider := New()
+	stream, err := provider.Stream(ctx, []*llm.Message{
+		llm.NewUserMessage("count to 10. respond with the integers only, separated by spaces."),
+	})
+	require.NoError(t, err)
+
+	var events []*llm.StreamEvent
+	for {
+		event, ok := stream.Next(ctx)
+		if !ok {
+			break
+		}
+		events = append(events, event)
+	}
+
+	var finalResponse *llm.Response
+	var finalText string
+	var texts []string
+	for _, event := range events {
+		if event.Response != nil {
+			finalResponse = event.Response
+		}
+		switch event.Type {
+		case llm.EventContentBlockDelta:
+			if event.Delta.Type == "text_delta" {
+				texts = append(texts, event.Delta.Text)
+				finalText += event.Delta.Text
+			}
+		}
+	}
+
+	// We don't check the exact output since the model might format it differently
+	require.NotEmpty(t, finalText)
+	require.NotEmpty(t, texts)
+
+	// Check that the response contains numbers 1-10 in some form
+	for i := 1; i <= 10; i++ {
+		require.Contains(t, finalText, fmt.Sprintf("%d", i))
+	}
+
+	require.NotNil(t, finalResponse)
+	require.Equal(t, llm.Assistant, finalResponse.Role())
+
+	// usage := finalResponse.Usage()
+	// require.True(t, usage.InputTokens > 0)
+	// require.True(t, usage.OutputTokens > 0)
+}
+
+func addFunc(ctx context.Context, input string) (string, error) {
+	var params map[string]interface{}
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d", int(params["a"].(float64))+int(params["b"].(float64))), nil
 }
 
 func TestToolUse(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
-	calculator := &tools.MockCalculatorTool{Result: "4"}
+	messages := []*llm.Message{
+		llm.NewUserMessage("add 567 and 111"),
+	}
 
-	response, err := provider.Generate(ctx, []*llm.Message{
-		llm.NewUserMessage("What is 2 + 2?"),
-	}, llm.WithTools(calculator))
+	add := llm.ToolDefinition{
+		Name:        "add",
+		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
+		Parameters: llm.Schema{
+			Type:     "object",
+			Required: []string{"a", "b"},
+			Properties: map[string]*llm.SchemaProperty{
+				"a": {Type: "number", Description: "The first number"},
+				"b": {Type: "number", Description: "The second number"},
+			},
+		},
+	}
+
+	response, err := provider.Generate(ctx, messages,
+		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithToolChoice(llm.ToolChoice{
+			Type: "auto",
+		}),
+	)
 	require.NoError(t, err)
 
-	require.Len(t, response.ToolCalls(), 1)
-	call := response.ToolCalls()[0]
-	require.Equal(t, "Calculator", call.Name)
-	require.Equal(t, `{"expression":"2 + 2"}`, call.Input)
+	require.Equal(t, 1, len(response.Message().Content))
+	content := response.Message().Content[0]
+	require.Equal(t, llm.ContentTypeToolUse, content.Type)
+	require.Equal(t, "add", content.Name)
+	// The exact format of the arguments may vary, so we just check that it contains the numbers
+	require.Contains(t, string(content.Input), "567")
+	require.Contains(t, string(content.Input), "111")
+}
+
+func TestToolUseStream(t *testing.T) {
+	ctx := context.Background()
+	provider := New()
+
+	messages := []*llm.Message{
+		llm.NewUserMessage("add 567 and 111"),
+	}
+
+	add := llm.ToolDefinition{
+		Name:        "add",
+		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
+		Parameters: llm.Schema{
+			Type:     "object",
+			Required: []string{"a", "b"},
+			Properties: map[string]*llm.SchemaProperty{
+				"a": {Type: "number", Description: "The first number"},
+				"b": {Type: "number", Description: "The second number"},
+			},
+		},
+	}
+
+	stream, err := provider.Stream(ctx, messages,
+		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
+	)
+	require.NoError(t, err)
+
+	var events []*llm.StreamEvent
+	for {
+		event, ok := stream.Next(ctx)
+		if !ok {
+			break
+		}
+		events = append(events, event)
+	}
+
+	var finalResponse *llm.Response
+	var jsonParts []string
+	for _, event := range events {
+		if event.Response != nil {
+			finalResponse = event.Response
+		}
+		switch event.Type {
+		case llm.EventContentBlockDelta:
+			if event.Delta.Type == "input_json_delta" {
+				jsonParts = append(jsonParts, event.Delta.PartialJSON)
+			}
+		}
+	}
+
+	require.NotNil(t, finalResponse)
+	require.Equal(t, llm.Assistant, finalResponse.Role())
+
+	// Check that we have at least one tool call
+	require.GreaterOrEqual(t, len(finalResponse.ToolCalls()), 1)
+
+	// Check that the tool call is for the add function
+	toolCall := finalResponse.ToolCalls()[0]
+	require.Equal(t, "add", toolCall.Name)
+
+	// Check that the arguments contain the numbers
+	require.Contains(t, toolCall.Input, "567")
+	require.Contains(t, toolCall.Input, "111")
+
+	// Check that we received JSON parts
+	require.Greater(t, len(jsonParts), 0)
+
+	// Combine the JSON parts and check that they form valid JSON
+	combinedJSON := strings.Join(jsonParts, "")
+	var parsedJSON map[string]interface{}
+	err = json.Unmarshal([]byte(combinedJSON), &parsedJSON)
+	require.NoError(t, err)
+
+	// Check that the parsed JSON contains the correct values
+	require.Equal(t, float64(567), parsedJSON["a"])
+	require.Equal(t, float64(111), parsedJSON["b"])
 }
 
 func TestConvertMessages(t *testing.T) {

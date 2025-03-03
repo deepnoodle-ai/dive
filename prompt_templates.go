@@ -8,6 +8,7 @@ import (
 
 var (
 	agentSystemPromptTemplate *template.Template
+	chatSystemPromptTemplate  *template.Template
 	taskPromptTemplate        *template.Template
 	teamPromptTemplate        *template.Template
 	taskStatePromptTemplate   *template.Template
@@ -16,6 +17,10 @@ var (
 func init() {
 	var err error
 	agentSystemPromptTemplate, err = parseTemplate("agent_sys_prompt", agentSysPromptText)
+	if err != nil {
+		panic(err)
+	}
+	chatSystemPromptTemplate, err = parseTemplate("chat_sys_prompt", chatSysPromptText)
 	if err != nil {
 		panic(err)
 	}
@@ -54,9 +59,13 @@ var agentSysPromptText = `# Your Biography
 
 Your name is "{{ .Name }}".
 {{- end }}
-{{- if .Role.String }}
+{{- if .Description }}
 
-{{ .Role.String }}
+{{ .Description }}
+{{- end }}
+{{- if .Instructions }}
+
+{{ .Instructions }}
 {{- end }}
 {{- if .Team }}
 
@@ -67,13 +76,18 @@ complete assigned tasks.
 
 {{ .Team.Overview }}
 {{- end }}
-{{- if and .Role.IsSupervisor (gt (len .DelegateTargets) 0)}}
+{{- if .IsSupervisor }}
 
 # Teamwork
 
+You are a supervisor.
+
+{{- if gt (len .Subordinates) 0 }}
+
 You are allowed to assign work to the following agents:
-{{ range $i, $agent := .DelegateTargets }}
-{{- if $i }}, {{ end }}"{{ $agent.Name }}"
+{{ range $i, $agent := .Subordinates }}
+{{- if $i }}, {{ end }}- "{{ $agent }}"
+{{- end }}
 {{- end }}
 
 When assigning work to others, be sure to provide a complete and detailed
@@ -154,6 +168,74 @@ completed - The task is complete for reasons X, Y, and Z.
 ---
 `
 
+var chatSysPromptText = `# Your Biography
+{{- if .Name }}
+
+Your name is "{{ .Name }}".
+{{- end }}
+{{- if .Description }}
+
+{{ .Description }}
+{{- end }}
+{{- if .Instructions }}
+
+{{ .Instructions }}
+{{- end }}
+{{- if .Team }}
+
+# Team Overview
+
+You belong to a team. You should work both individually and together to help
+complete assigned tasks.
+
+{{ .Team.Overview }}
+{{- end }}
+{{- if .IsSupervisor }}
+
+# Teamwork
+
+You are a supervisor.
+
+{{- if gt (len .Subordinates) 0 }}
+
+You are allowed to assign work to the following agents:
+{{ range $i, $agent := .Subordinates }}
+{{- if $i }}, {{ end }}- "{{ $agent }}"
+{{- end }}
+{{- end }}
+
+When assigning work to others, be sure to provide a complete and detailed
+request for the agent to fulfill. IMPORTANT: agents can't see the work you
+assigned to others (neither the request nor the response). Consequently, you
+are responsible for passing information between your subordinates as needed via
+the "context" property of the "AssignWork" tool calls.
+
+Even if you assigned work to one or more other agents, you are still responsible
+for the assigned task. This means your response for a task must convey all
+relevant information that you gathered from your subordinates.
+
+When assigning work, remind your teammates to include citations and source URLs
+in their responses.
+
+Do not dump huge requests on your teammates. They will not be able to complete
+them. Issue small or medium-sized requests that are feasible to complete in a
+single interaction. Have multiple interactions instead, if you need to.
+{{- end }}
+
+# Tools
+
+You may be provided with tools to use to complete your tasks. Prefer using these
+tools to gather information rather than relying on your prior knowledge.
+
+Prefer making multiple tool calls in parallel (in a single response) when
+possible, for efficiency.
+
+# Context
+
+Context you are given may be helpful to you when answering questions. If the
+context doesn't fully help answer a question, please use the available tools
+to gather more information.`
+
 var taskPromptText = `{{- if .Task.Context -}}
 <CONTEXT>
 {{ .Task.Context }}
@@ -192,7 +274,7 @@ The team is described as: "{{ .Description }}"
 
 The team consists of the following agents:
 {{ range $i, $agent := .Agents }}
-- Name: {{ $agent.Name }}, Role: "{{ $agent.Role.Description }}"
+- Name: {{ $agent.Name }}, Description: "{{ $agent.Description }}"
 {{- end }}`
 
 var taskStatePromptText = `# Task State

@@ -65,11 +65,14 @@ type Usage struct {
 }
 
 type StreamResponse struct {
-	ID      string         `json:"id"`
-	Object  string         `json:"object"`
-	Created int64          `json:"created"`
-	Model   string         `json:"model"`
-	Choices []StreamChoice `json:"choices"`
+	ID                string         `json:"id"`                 // chatcmpl-B6ffy5hheub7qvA7LWuXEqDXR3TQ5
+	Object            string         `json:"object"`             // chat.completion.chunk
+	Created           int64          `json:"created"`            // 1740929870
+	Model             string         `json:"model"`              // gpt-4o-2024-08-06
+	ServiceTier       string         `json:"service_tier"`       // default
+	SystemFingerprint string         `json:"system_fingerprint"` // fp_eb9dce56a8
+	Choices           []StreamChoice `json:"choices"`
+	Usage             Usage          `json:"usage,omitempty"`
 }
 
 type StreamChoice struct {
@@ -79,6 +82,21 @@ type StreamChoice struct {
 }
 
 type StreamDelta struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string          `json:"role"`
+	Content   string          `json:"content,omitempty"`
+	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// ToolCallDelta represents a partial tool call in a streaming response
+type ToolCallDelta struct {
+	Index    int               `json:"index"`
+	ID       string            `json:"id,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Function ToolFunctionDelta `json:"function,omitempty"`
+}
+
+// ToolFunctionDelta represents a partial function call in a streaming response
+type ToolFunctionDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }

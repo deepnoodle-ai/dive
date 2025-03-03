@@ -18,9 +18,9 @@ type FileReadInput struct {
 }
 
 type FileReadToolOptions struct {
-	DefaultFilePath string
-	MaxSize         int
-	RootDirectory   string
+	DefaultFilePath string `json:"default_file_path,omitempty"`
+	MaxSize         int    `json:"max_size,omitempty"`
+	RootDirectory   string `json:"root_directory,omitempty"`
 }
 
 type FileReadTool struct {
@@ -53,7 +53,7 @@ func (t *FileReadTool) Definition() *llm.ToolDefinition {
 	}
 
 	return &llm.ToolDefinition{
-		Name:        "ReadFile",
+		Name:        "file_read",
 		Description: description,
 		Parameters: llm.Schema{
 			Type:     "object",

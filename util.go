@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	petname "github.com/dustinkirkland/golang-petname"
+	"github.com/getstingrai/dive/graph"
 	"github.com/getstingrai/dive/llm"
 	"github.com/getstingrai/dive/providers/anthropic"
 	"github.com/getstingrai/dive/providers/groq"
@@ -128,4 +129,26 @@ func detectProvider() (llm.LLM, bool) {
 
 func randomName() string {
 	return fmt.Sprintf("%s-%s", petname.Adjective(), petname.Name())
+}
+
+func sliceContains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// OrderTasks sorts tasks into execution order using their dependencies.
+func OrderTasks(tasks []*Task) ([]string, error) {
+	nodes := make([]graph.Node, len(tasks))
+	for i, task := range tasks {
+		nodes[i] = task
+	}
+	order, err := graph.New(nodes).TopologicalSort()
+	if err != nil {
+		return nil, fmt.Errorf("invalid task dependencies: %w", err)
+	}
+	return order, nil
 }

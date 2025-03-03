@@ -9,12 +9,12 @@ import (
 )
 
 var (
-	DefaultModel     = "llama-3.3-70b-versatile"
+	DefaultModel     = ModelLlama3370bVersatile
 	DefaultEndpoint  = "https://api.groq.com/openai/v1/chat/completions"
 	DefaultMaxTokens = 4096
 )
 
-var _ llm.LLM = &Provider{}
+var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
 	apiKey    string

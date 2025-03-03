@@ -13,19 +13,21 @@ const CacheControlEphemeral = "ephemeral"
 type Option func(*Config)
 
 type Config struct {
-	Model        string
-	SystemPrompt string
-	CacheControl string
-	Endpoint     string
-	APIKey       string
-	MaxTokens    *int
-	Temperature  *float64
-	Tools        []Tool
-	ToolChoice   ToolChoice
-	LogLevel     string
-	Hooks        Hooks
-	Client       *http.Client
-	Logger       slogger.Logger
+	Model             string
+	SystemPrompt      string
+	CacheControl      string
+	Endpoint          string
+	APIKey            string
+	Prefill           string
+	PrefillClosingTag string
+	MaxTokens         *int
+	Temperature       *float64
+	Tools             []Tool
+	ToolChoice        ToolChoice
+	LogLevel          string
+	Hooks             Hooks
+	Client            *http.Client
+	Logger            slogger.Logger
 }
 
 // WithModel sets the LLM model for the generation.
@@ -132,5 +134,13 @@ func WithHooks(hooks Hooks) Option {
 func WithAPIKey(apiKey string) Option {
 	return func(config *Config) {
 		config.APIKey = apiKey
+	}
+}
+
+// WithPrefill sets the prefilled assistant response for the interaction.
+func WithPrefill(prefill, closingTag string) Option {
+	return func(config *Config) {
+		config.Prefill = prefill
+		config.PrefillClosingTag = closingTag
 	}
 }
