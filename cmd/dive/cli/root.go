@@ -9,13 +9,12 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "dive",
-	Short: "Dive is a tool for running and managing teams",
-	Long: `Dive is a command-line tool that allows you to run, validate, 
-and interact with team definitions stored in HCL format.`,
+	Short: "Dive runs teams of AI agents.",
+	Long: `Dive runs teams of AI agents and allows you to interact with them.
+
+Multiple LLM providers are supported. Teams can be defined in YAML or HCL files.`,
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
@@ -32,5 +31,5 @@ func init() {
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	// rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

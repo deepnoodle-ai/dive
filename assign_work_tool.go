@@ -139,7 +139,6 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 		Context:        params.Context,
 		OutputFormat:   outputFormat,
 		AssignedAgent:  agent,
-		Kind:           "assignment",
 		Timeout:        t.defaultTaskTimeout,
 	})
 

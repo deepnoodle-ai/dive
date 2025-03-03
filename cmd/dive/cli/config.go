@@ -9,11 +9,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// If there's a Bubbletea implementation in config.go, we would replace it with something like:
+
+func showConfig() error {
+	// Print title
+	fmt.Println(titleStyle.Render(" Configuration "))
+
+	// Print configuration details
+	// ... implementation details ...
+
+	return nil
+}
+
 // configCmd represents the config command
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Configuration related commands",
-	Long:  `Commands for working with Dive configuration files.`,
+	Short: "Display configuration information",
+	Long:  `Display configuration information for the Dive CLI.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return showConfig()
+	},
 }
 
 // checkCmd represents the check subcommand of config

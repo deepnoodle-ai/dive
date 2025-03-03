@@ -22,24 +22,24 @@ var (
 	DefaultLogger           = slogger.NewDevNullLogger()
 )
 
-var _ Agent = &DiveAgent{}
-
-type Document struct {
-	Name    string
-	Content string
-	Format  OutputFormat
-}
+// Confirm our standard implementation satisfies the different Agent interfaces
+var (
+	_ Agent             = &DiveAgent{}
+	_ TeamAgent         = &DiveAgent{}
+	_ RunnableAgent     = &DiveAgent{}
+	_ EventHandlerAgent = &DiveAgent{}
+)
 
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
 	Name             string
 	Description      string
 	Instructions     string
+	AcceptedEvents   []string
 	IsSupervisor     bool
 	Subordinates     []string
 	LLM              llm.LLM
 	Tools            []llm.Tool
-	MaxActiveTasks   int
 	TickFrequency    time.Duration
 	TaskTimeout      time.Duration
 	ChatTimeout      time.Duration
@@ -52,13 +52,7 @@ type AgentOptions struct {
 	Memory           memory.Memory
 }
 
-// Publisher is an interface for sending events to a stream.
-type Publisher interface {
-	Send(ctx context.Context, event *StreamEvent) error
-	Close()
-}
-
-// DiveAgent implements the Agent interface.
+// DiveAgent is the standard implementation of the Agent interface.
 type DiveAgent struct {
 	name             string
 	description      string
@@ -68,10 +62,9 @@ type DiveAgent struct {
 	running          bool
 	tools            []llm.Tool
 	toolsByName      map[string]llm.Tool
-	subordinates     []string
+	acceptedEvents   []string
 	isSupervisor     bool
-	isWorker         bool
-	maxActiveTasks   int
+	subordinates     []string
 	tickFrequency    time.Duration
 	taskTimeout      time.Duration
 	chatTimeout      time.Duration
@@ -79,7 +72,6 @@ type DiveAgent struct {
 	taskQueue        []*taskState
 	recentTasks      []*taskState
 	activeTask       *taskState
-	workspace        []*Document
 	ticker           *time.Ticker
 	logLevel         string
 	hooks            llm.Hooks
@@ -97,9 +89,6 @@ type DiveAgent struct {
 
 // NewAgent returns a new Agent configured with the given options.
 func NewAgent(opts AgentOptions) *DiveAgent {
-	if opts.MaxActiveTasks <= 0 {
-		opts.MaxActiveTasks = 1
-	}
 	if opts.TickFrequency <= 0 {
 		opts.TickFrequency = DefaultTickFrequency
 	}
@@ -132,14 +121,14 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 			opts.Name = randomName()
 		}
 	}
-	a := &DiveAgent{
+	agent := &DiveAgent{
 		name:             opts.Name,
 		llm:              opts.LLM,
 		description:      opts.Description,
 		instructions:     opts.Instructions,
-		subordinates:     opts.Subordinates,
+		acceptedEvents:   opts.AcceptedEvents,
 		isSupervisor:     opts.IsSupervisor,
-		maxActiveTasks:   opts.MaxActiveTasks,
+		subordinates:     opts.Subordinates,
 		tickFrequency:    opts.TickFrequency,
 		taskTimeout:      opts.TaskTimeout,
 		chatTimeout:      opts.ChatTimeout,
@@ -169,21 +158,20 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		}
 		if !foundAssignWorkTool {
 			tools = append(tools, NewAssignWorkTool(AssignWorkToolOptions{
-				Self:               a,
+				Self:               agent,
 				DefaultTaskTimeout: opts.TaskTimeout,
 			}))
 		}
 	}
 
-	a.tools = tools
+	agent.tools = tools
 	if len(tools) > 0 {
-		a.toolsByName = make(map[string]llm.Tool, len(tools))
+		agent.toolsByName = make(map[string]llm.Tool, len(tools))
 		for _, tool := range tools {
-			a.toolsByName[tool.Definition().Name] = tool
-			fmt.Println("registered tool", tool.Definition().Name)
+			agent.toolsByName[tool.Definition().Name] = tool
 		}
 	}
-	return a
+	return agent
 }
 
 func (a *DiveAgent) Name() string {
@@ -198,16 +186,20 @@ func (a *DiveAgent) Instructions() string {
 	return a.instructions
 }
 
+func (a *DiveAgent) AcceptedEvents() []string {
+	return a.acceptedEvents
+}
+
 func (a *DiveAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
 
 func (a *DiveAgent) Subordinates() []string {
+	if !a.isSupervisor || a.team == nil || len(a.team.Agents()) == 1 {
+		return nil
+	}
 	if a.subordinates != nil {
 		return a.subordinates
-	}
-	if a.team == nil || len(a.team.Agents()) == 1 {
-		return nil
 	}
 	// If there are no other supervisors, assume we are the supervisor of all
 	// agents in the team.
@@ -357,7 +349,7 @@ func (a *DiveAgent) Stream(ctx context.Context, message *llm.Message, opts ...Ge
 	return stream, nil
 }
 
-func (a *DiveAgent) Event(ctx context.Context, event *Event) error {
+func (a *DiveAgent) HandleEvent(ctx context.Context, event *Event) error {
 	if !a.IsRunning() {
 		return fmt.Errorf("agent is not running")
 	}
@@ -664,7 +656,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		if ok {
 			messages = append(messages, recentTasksMessage)
 		}
-		messages = append(messages, llm.NewUserMessage(task.PromptText()))
+		messages = append(messages, llm.NewUserMessage(task.Prompt()))
 	} else if len(state.Messages) < a.taskMessageLimit {
 		// We're resuming a task and can still work some more
 		messages = append(messages, state.Messages...)
@@ -680,7 +672,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		"task", task.Name(),
 		"status", state.Status,
 		"truncated_description", TruncateText(task.Description(), 10),
-		"truncated_prompt", TruncateText(task.PromptText(), 10),
+		"truncated_prompt", TruncateText(task.Prompt(), 10),
 	)
 
 	// Execute the LLM generation and tool execution loop
@@ -909,14 +901,6 @@ func (a *DiveAgent) getTasksHistoryMessage() (*llm.Message, bool) {
 	}
 	text := fmt.Sprintf("Recently completed tasks:\n\n%s", history)
 	return llm.NewUserMessage(text), true
-}
-
-func (a *DiveAgent) getWorkspaceState() string {
-	var blobs []string
-	for _, doc := range a.workspace {
-		blobs = append(blobs, fmt.Sprintf("<document name=%q>\n%s\n</document>", doc.Name, doc.Content))
-	}
-	return strings.Join(blobs, "\n\n")
 }
 
 // if !a.disablePrefill {

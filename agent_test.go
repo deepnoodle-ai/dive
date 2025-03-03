@@ -30,7 +30,7 @@ func TestAgent(t *testing.T) {
 	err := agent.Start(ctx)
 	require.NoError(t, err)
 
-	err = agent.Event(ctx, &Event{Name: "test"})
+	err = agent.HandleEvent(ctx, &Event{Name: "test"})
 	require.NoError(t, err)
 
 	err = agent.Stop(ctx)

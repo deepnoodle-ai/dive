@@ -8,6 +8,20 @@ import (
 	petname "github.com/dustinkirkland/golang-petname"
 )
 
+// TaskOptions is used to define a Task
+type TaskOptions struct {
+	Name           string
+	Description    string
+	ExpectedOutput string
+	OutputFormat   OutputFormat
+	OutputFile     string
+	Dependencies   []string
+	Timeout        time.Duration
+	Context        string
+	OutputObject   interface{}
+	AssignedAgent  Agent
+}
+
 // Task represents a unit of work to be performed by an agent
 type Task struct {
 	name           string
@@ -27,37 +41,6 @@ type Task struct {
 	nameIsRandom   bool
 }
 
-func (t *Task) Name() string               { return t.name }
-func (t *Task) Description() string        { return t.description }
-func (t *Task) ExpectedOutput() string     { return t.expectedOutput }
-func (t *Task) OutputFormat() OutputFormat { return t.outputFormat }
-func (t *Task) OutputObject() interface{}  { return t.outputObject }
-func (t *Task) AssignedAgent() Agent       { return t.assignedAgent }
-func (t *Task) Dependencies() []string     { return t.dependencies }
-func (t *Task) MaxIterations() *int        { return t.maxIterations }
-func (t *Task) OutputFile() string         { return t.outputFile }
-func (t *Task) Result() *TaskResult        { return t.result }
-func (t *Task) Timeout() time.Duration     { return t.timeout }
-func (t *Task) Context() string            { return t.context }
-func (t *Task) Kind() string               { return t.kind }
-func (t *Task) DependenciesOutput() string { return t.depOutput }
-
-// TaskOptions is used to define a Task
-type TaskOptions struct {
-	Description    string        `json:"description"`
-	Name           string        `json:"name,omitempty"`
-	ExpectedOutput string        `json:"expected_output,omitempty"`
-	Dependencies   []string      `json:"dependencies,omitempty"`
-	MaxIterations  *int          `json:"max_iterations,omitempty"`
-	OutputFile     string        `json:"output_file,omitempty"`
-	Timeout        time.Duration `json:"timeout,omitempty"`
-	Context        string        `json:"context,omitempty"`
-	Kind           string        `json:"kind,omitempty"`
-	OutputFormat   OutputFormat  `json:"output_format,omitempty"`
-	OutputObject   interface{}   `json:"-"`
-	AssignedAgent  Agent         `json:"-"`
-}
-
 // NewTask creates a new Task from a TaskOptions
 func NewTask(opts TaskOptions) *Task {
 	var nameIsRandom bool
@@ -73,14 +56,30 @@ func NewTask(opts TaskOptions) *Task {
 		outputObject:   opts.OutputObject,
 		assignedAgent:  opts.AssignedAgent,
 		dependencies:   opts.Dependencies,
-		maxIterations:  opts.MaxIterations,
 		outputFile:     opts.OutputFile,
 		timeout:        opts.Timeout,
 		context:        opts.Context,
-		kind:           opts.Kind,
 		nameIsRandom:   nameIsRandom,
 	}
 }
+
+func (t *Task) Name() string               { return t.name }
+func (t *Task) Description() string        { return t.description }
+func (t *Task) ExpectedOutput() string     { return t.expectedOutput }
+func (t *Task) OutputFormat() OutputFormat { return t.outputFormat }
+func (t *Task) OutputObject() interface{}  { return t.outputObject }
+func (t *Task) AssignedAgent() Agent       { return t.assignedAgent }
+func (t *Task) Dependencies() []string     { return t.dependencies }
+func (t *Task) OutputFile() string         { return t.outputFile }
+func (t *Task) Result() *TaskResult        { return t.result }
+func (t *Task) Timeout() time.Duration     { return t.timeout }
+func (t *Task) Context() string            { return t.context }
+func (t *Task) DependenciesOutput() string { return t.depOutput }
+
+func (t *Task) SetContext(ctx string)               { t.context = ctx }
+func (t *Task) SetDependenciesOutput(output string) { t.depOutput = output }
+func (t *Task) SetResult(result *TaskResult)        { t.result = result }
+func (t *Task) SetAssignedAgent(agent Agent)        { t.assignedAgent = agent }
 
 // Validate checks if the task is properly configured
 func (t *Task) Validate() error {
@@ -101,8 +100,8 @@ func (t *Task) Validate() error {
 	return nil
 }
 
-// PromptText returns the LLM prompt text for the task
-func (t *Task) PromptText() string {
+// Prompt returns the LLM prompt for the task
+func (t *Task) Prompt() string {
 	var intro string
 	if t.name != "" && !t.nameIsRandom {
 		intro = fmt.Sprintf("Let's work on a new task named %q.", t.name)
@@ -127,11 +126,6 @@ func (t *Task) PromptText() string {
 	if t.depOutput != "" {
 		result += fmt.Sprintf("\n\nHere is the output from this task's dependencies:\n\n```DEPENDENCIES\n%s\n```", t.depOutput)
 	}
-
 	result += "\n\nPlease begin working on the task."
 	return result
-}
-
-func (t *Task) SetDependenciesOutput(output string) {
-	t.depOutput = output
 }

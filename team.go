@@ -16,14 +16,15 @@ var _ Team = &DiveTeam{}
 // DiveTeam is the primary implementation of the Team interface. A Team consists
 // of one or more Agents that work together to complete tasks.
 type DiveTeam struct {
-	name        string
-	description string
-	agents      []Agent
-	supervisors []Agent
-	running     bool
-	taskGraph   *graph.Graph
-	taskOrder   []string
-	mutex       sync.Mutex
+	name         string
+	description  string
+	agents       []Agent
+	supervisors  []Agent
+	running      bool
+	initialTasks []*Task
+	taskGraph    *graph.Graph
+	taskOrder    []string
+	mutex        sync.Mutex
 }
 
 // TeamOptions are used to configure a new team.
@@ -31,14 +32,21 @@ type TeamOptions struct {
 	Name        string
 	Description string
 	Agents      []Agent
+	Tasks       []*Task
 }
 
 // NewTeam creates a new team composed of the given agents.
 func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 	t := &DiveTeam{
-		name:        opts.Name,
-		description: opts.Description,
-		agents:      opts.Agents,
+		name:         opts.Name,
+		description:  opts.Description,
+		agents:       opts.Agents,
+		initialTasks: opts.Tasks,
+	}
+	for _, task := range opts.Tasks {
+		if err := task.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	if len(t.agents) == 0 {
 		return nil, fmt.Errorf("at least one agent is required")
@@ -93,13 +101,17 @@ func (t *DiveTeam) Start(ctx context.Context) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
+	return t.start(ctx)
+}
+
+// Start all agents on the team. Call only when the team mutex is held.
+func (t *DiveTeam) start(ctx context.Context) error {
 	if len(t.agents) == 0 {
 		return fmt.Errorf("no agents to start")
 	}
 	if t.running {
 		return fmt.Errorf("team already running")
 	}
-
 	// Start all agents, but if any fail, stop them all before returning the error
 	var startedAgents []RunnableAgent
 	for _, agent := range t.agents {
@@ -115,7 +127,6 @@ func (t *DiveTeam) Start(ctx context.Context) error {
 		}
 		startedAgents = append(startedAgents, runnableAgent)
 	}
-
 	t.running = true
 	return nil
 }
@@ -145,21 +156,37 @@ func (t *DiveTeam) Stop(ctx context.Context) error {
 
 // Work on one or more tasks. The returned stream will deliver events and
 // results to the caller as progress is made. This batch of work is considered
-// independent of any other work the team may be doing.
+// independent of any other work the team may be doing. If the team has not yet
+// started, it is automatically started.
 func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
+	var todo []*Task
+
+	// Automatically start as needed
 	if !t.running {
-		return nil, fmt.Errorf("team not running")
+		if err := t.start(ctx); err != nil {
+			return nil, err
+		}
 	}
-	if len(tasks) == 0 {
-		return nil, fmt.Errorf("no tasks provided")
+	// Any initial tasks are enqueued first
+	if len(t.initialTasks) > 0 {
+		todo = append(todo, t.initialTasks...)
+		t.initialTasks = nil
+	}
+	// Add any tasks provided by the caller
+	if len(tasks) > 0 {
+		todo = append(todo, tasks...)
+	}
+	// Make sure we have something to do
+	if len(todo) == 0 {
+		return nil, fmt.Errorf("no tasks to work on")
 	}
 
 	// Validate and index tasks by name
-	tasksByName := make(map[string]*Task, len(tasks))
-	for _, task := range tasks {
+	tasksByName := make(map[string]*Task, len(todo))
+	for _, task := range todo {
 		if err := task.Validate(); err != nil {
 			return nil, err
 		}
@@ -171,12 +198,12 @@ func (t *DiveTeam) Work(ctx context.Context, tasks ...*Task) (Stream, error) {
 	}
 
 	// Sort tasks into execution order
-	order, err := OrderTasks(tasks)
+	orderedNames, err := OrderTasks(todo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine task execution order: %w", err)
 	}
 	var orderedTasks []*Task
-	for _, taskName := range order {
+	for _, taskName := range orderedNames {
 		orderedTasks = append(orderedTasks, tasksByName[taskName])
 	}
 

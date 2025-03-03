@@ -1,11 +1,14 @@
 
 // Global configuration
 
+name = "Research Team"
+
+description = "A team of agents that will research a topic"
+
 config {
-  default_provider = "anthropic"
   log_level = "info"
-  cache_control = "ephemeral"
-  enabled_tools = ["google_search", "firecrawl"]
+  default_provider = "anthropic"
+  default_model = "claude-3-5-sonnet-20240620"
 }
 
 // Variables
@@ -38,7 +41,7 @@ variable "research_topic" {
   type = "string"
   description = "The topic to research"
   default {
-    value = "maple syrup production in Vermont"
+    value = "Maple syrup production in Vermont"
   }
 }
 
@@ -50,15 +53,27 @@ variable "task_timeout" {
   }
 }
 
-// Define agents
+// Tools
 
-agent "Supervisory" {
+tool "google_search" {
+  name = "google_search"
+  description = "Search the web for information"
+  enabled = true
+}
+
+tool "firecrawl" {
+  name = "firecrawl"
+  description = "Scrape a webpage and return markdown"
+  enabled = true
+}
+
+// Agents
+
+agent "Supervisor" {
   name = var.supervisor_name
-  role {
-    description = format("Research Supervisor and Renowned Author. Assign research tasks to %s, but prepare the final reports or biographies yourself.", var.assistant_name)
-    is_supervisor = true
-    subordinates = [var.assistant_name]
-  }
+  description = format("Research Supervisor and Renowned Author. Assign research tasks to %s, but prepare the final reports or biographies yourself.", var.assistant_name)
+  is_supervisor = true
+  subordinates = [var.assistant_name]
   provider = "anthropic"
   cache_control = "ephemeral"
   max_active_tasks = 1
@@ -68,10 +83,8 @@ agent "Supervisory" {
 
 agent "Research Assistant" {
   name = var.assistant_name
-  role {
-    description = "You are an expert research assistant. Don't go too deep into the details unless specifically asked."
-    is_supervisor = false
-  }
+  description = "You are an expert research assistant. Don't go too deep into the details unless specifically asked."
+  is_supervisor = false
   provider = "anthropic"
   tools = ["google_search", "firecrawl"]
   cache_control = "ephemeral"
@@ -80,7 +93,7 @@ agent "Research Assistant" {
   chat_timeout = "2m"
 }
 
-// Define tasks
+// Tasks
 
 task "Background Research" {
   description = format("Gather background research that will be used to create a history of %s. Don't consult more than 3 sources. The goal is to produce about 3 paragraphs of research - that is all. Don't overdo it.", var.research_topic)
