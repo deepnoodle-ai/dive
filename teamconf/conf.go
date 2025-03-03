@@ -204,6 +204,11 @@ func (def *Team) Build(opts ...BuildOption) (dive.Team, error) {
 		logLevel = def.Config.LogLevel
 	}
 
+	logger := buildOpts.Logger
+	if logger == nil {
+		logger = slogger.New(slogger.LevelFromString(logLevel))
+	}
+
 	var toolConfigs map[string]map[string]interface{}
 	if def.Tools != nil {
 		toolConfigs = make(map[string]map[string]interface{}, len(def.Tools))
@@ -244,7 +249,7 @@ func (def *Team) Build(opts ...BuildOption) (dive.Team, error) {
 		Description: def.Description,
 		Agents:      agents,
 		Tasks:       tasks,
-		Logger:      buildOpts.Logger,
+		Logger:      logger,
 		LogLevel:    logLevel,
 	})
 }

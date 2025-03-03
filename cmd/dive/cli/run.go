@@ -3,8 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
-	"github.com/getstingrai/dive/slogger"
 	"github.com/getstingrai/dive/teamconf"
 	"github.com/spf13/cobra"
 )
@@ -14,14 +14,12 @@ func runTeam(filePath string, logLevel string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logger := slogger.New(slogger.LevelFromString(logLevel))
-
 	teamConf, err := teamconf.LoadFile(filePath, getUserVariables())
 	if err != nil {
 		return fmt.Errorf("error loading team: %v", err)
 	}
 
-	team, err := teamConf.Build(teamconf.WithLogger(logger))
+	team, err := teamConf.Build()
 	if err != nil {
 		return fmt.Errorf("error building team: %v", err)
 	}
@@ -31,7 +29,7 @@ func runTeam(filePath string, logLevel string) error {
 	}
 	defer team.Stop(ctx)
 
-	fmt.Printf("Running team %s...\n", boldStyle.Sprint(team.Name()))
+	fmt.Printf("Running %s\n", boldStyle.Sprint(team.Name()))
 	fmt.Println()
 
 	stream, err := team.Work(ctx)
@@ -57,13 +55,17 @@ var runCmd = &cobra.Command{
 	Short: "Run a team",
 	Long:  `Run a team`,
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		filePath := args[0]
 		logLevel, err := cmd.Flags().GetString("log-level")
 		if err != nil {
-			return fmt.Errorf("error getting log level: %v", err)
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
 		}
-		return runTeam(filePath, logLevel)
+		if err := runTeam(filePath, logLevel); err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
 	},
 }
 
