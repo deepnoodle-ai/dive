@@ -48,7 +48,7 @@ func initializeTools(toolConfigs map[string]map[string]interface{}) (map[string]
 		toolsMap["google_search"] = tools.NewGoogleSearch(googleClient)
 	}
 
-	if enabledToolsSet["firecrawl"] {
+	if enabledToolsSet["firecrawl_scrape"] {
 		key := os.Getenv("FIRECRAWL_API_KEY")
 		if key == "" {
 			return nil, fmt.Errorf("firecrawl requested but FIRECRAWL_API_KEY not set")
@@ -58,13 +58,13 @@ func initializeTools(toolConfigs map[string]map[string]interface{}) (map[string]
 			return nil, fmt.Errorf("failed to initialize Firecrawl: %w", err)
 		}
 		var options tools.FirecrawlScrapeToolOptions
-		if config, ok := toolConfigs["firecrawl"]; ok {
+		if config, ok := toolConfigs["firecrawl_scrape"]; ok {
 			if err := populateToolConfig(config, &options); err != nil {
 				return nil, fmt.Errorf("failed to populate firecrawl tool config: %w", err)
 			}
 		}
 		options.App = app
-		toolsMap["firecrawl"] = tools.NewFirecrawlScrapeTool(options)
+		toolsMap["firecrawl_scrape"] = tools.NewFirecrawlScrapeTool(options)
 	}
 
 	if enabledToolsSet["file_read"] {

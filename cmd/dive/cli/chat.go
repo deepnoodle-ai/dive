@@ -20,10 +20,11 @@ var (
 	successStyle = color.New(color.FgGreen)
 	errorStyle   = color.New(color.FgRed)
 	infoStyle    = color.New(color.FgBlue)
+	toolStyle    = color.New(color.FgYellow)
 )
 
 func chatMessage(ctx context.Context, message string, agent dive.Agent) (string, error) {
-	fmt.Print(boldStyle.Sprint("Assistant: "))
+	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
 
 	stream, err := agent.Stream(ctx,
 		llm.NewUserMessage(message),
@@ -34,16 +35,24 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) (string,
 	}
 	defer stream.Close()
 
+	var toolName string
+	var toolInput string
+
 	for event := range stream.Channel() {
 		switch event.Type {
 		case "llm.event":
+			if event.LLMEvent.Response != nil && len(event.LLMEvent.Response.ToolCalls()) > 0 {
+				toolName = event.LLMEvent.Response.ToolCalls()[0].Name
+				fmt.Print("\n\n" + toolStyle.Sprint(toolName+": "+toolInput))
+				toolInput = ""
+			}
 			switch event.LLMEvent.Type {
 			case llm.EventContentBlockDelta:
 				delta := event.LLMEvent.Delta
 				if delta.Text != "" {
 					fmt.Print(successStyle.Sprint(delta.Text))
 				} else if delta.PartialJSON != "" {
-					fmt.Print(infoStyle.Sprint(delta.PartialJSON))
+					toolInput += delta.PartialJSON
 				}
 			}
 		}

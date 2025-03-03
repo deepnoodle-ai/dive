@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	DefaultModel     = "claude-3-7-sonnet-20250219"
+	DefaultModel     = ModelClaude37Sonnet
 	DefaultEndpoint  = "https://api.anthropic.com/v1/messages"
 	DefaultVersion   = "2023-06-01"
 	DefaultMaxTokens = 4096

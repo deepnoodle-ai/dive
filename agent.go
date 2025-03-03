@@ -52,6 +52,12 @@ type AgentOptions struct {
 	Memory           memory.Memory
 }
 
+// chatThread contains a message history for a thread ID
+type chatThread struct {
+	ID       string
+	Messages []*llm.Message
+}
+
 // DiveAgent is the standard implementation of the Agent interface.
 type DiveAgent struct {
 	name             string
@@ -79,6 +85,7 @@ type DiveAgent struct {
 	generationLimit  int
 	taskMessageLimit int
 	memory           memory.Memory
+	threads          map[string]*chatThread
 
 	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
@@ -139,6 +146,7 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		mailbox:          make(chan interface{}, 16),
 		logger:           opts.Logger,
 		logLevel:         strings.ToLower(opts.LogLevel),
+		threads:          make(map[string]*chatThread),
 	}
 
 	tools := make([]llm.Tool, len(opts.Tools))
@@ -462,34 +470,53 @@ func (a *DiveAgent) handleChat(m messageChat) {
 		defer publisher.Close()
 	}
 
-	a.logger.Info("handling chat",
-		"agent", a.name,
-		"truncated_message", TruncateText(m.message.Text(), 10),
+	logger := a.logger.With(
+		"agent_name", a.name,
 		"streaming", isStreaming,
+		"thread_id", m.options.ThreadID,
+		"user_id", m.options.UserID,
 	)
 
-	response, _, err := a.executeToolLoop(
+	logger.Info("handling chat",
+		"truncated_message", TruncateText(m.message.Text(), 10))
+
+	// Append this new message to the thread history if a thread ID is provided
+	var thread *chatThread
+	var messages []*llm.Message
+	if m.options.ThreadID != "" {
+		var exists bool
+		thread, exists = a.threads[m.options.ThreadID]
+		if !exists {
+			thread = &chatThread{
+				ID:       m.options.ThreadID,
+				Messages: []*llm.Message{},
+			}
+			a.threads[m.options.ThreadID] = thread
+		}
+		messages = append(messages, thread.Messages...)
+	}
+	messages = append(messages, m.message)
+
+	response, updatedMessages, err := a.executeToolLoop(
 		ctx,
-		[]*llm.Message{m.message},
+		messages,
 		systemPrompt,
 		"chat",
 		publisher,
 	)
-
 	if err != nil {
-		a.logger.Error("error generating chat response", "agent", a.name, "error", err)
+		logger.Error("error generating chat response", "error", err)
+		// Intentional fall-through
+	}
+	if thread != nil {
+		thread.Messages = updatedMessages
 	}
 
 	if isStreaming {
 		return
 	}
-
 	if err != nil {
 		m.errChan <- err
-		a.logger.Error("error generating chat response",
-			"agent", a.name,
-			"error", err,
-		)
 		return
 	}
 	m.resultChan <- response
