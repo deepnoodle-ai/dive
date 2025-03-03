@@ -425,6 +425,7 @@ Key differentiators include:
 - Interfaces in place for customization and extension
 - Emphasis on streaming support and real-time updates
 - Built-in support for long-running tasks with flexible completion criteria
+- Configuration via HCL provides path to flexible and robust team configurations
 
 ### How do I handle LLM rate limits?
 
