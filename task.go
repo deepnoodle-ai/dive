@@ -2,6 +2,7 @@ package dive
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,7 +32,6 @@ type Task struct {
 	outputObject   interface{}
 	assignedAgent  Agent
 	dependencies   []string
-	maxIterations  *int
 	outputFile     string
 	result         *TaskResult
 	timeout        time.Duration
@@ -54,9 +54,9 @@ func NewTask(opts TaskOptions) *Task {
 		expectedOutput: opts.ExpectedOutput,
 		outputFormat:   opts.OutputFormat,
 		outputObject:   opts.OutputObject,
+		outputFile:     opts.OutputFile,
 		assignedAgent:  opts.AssignedAgent,
 		dependencies:   opts.Dependencies,
-		outputFile:     opts.OutputFile,
 		timeout:        opts.Timeout,
 		context:        opts.Context,
 		nameIsRandom:   nameIsRandom,
@@ -91,6 +91,11 @@ func (t *Task) Validate() error {
 	}
 	if t.outputObject != nil && t.outputFormat != OutputJSON {
 		return fmt.Errorf("expected json output format for task %q", t.name)
+	}
+	if t.outputFile != "" {
+		if !isSimpleFilename(t.outputFile) {
+			return fmt.Errorf("output file name %q contains invalid characters", t.outputFile)
+		}
 	}
 	for _, depID := range t.dependencies {
 		if depID == t.name {
@@ -128,4 +133,16 @@ func (t *Task) Prompt() string {
 	}
 	result += "\n\nPlease begin working on the task."
 	return result
+}
+
+var validFilenamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+func isSimpleFilename(filename string) bool {
+	// Check if filename is empty or too long
+	if filename == "" || len(filename) > 255 {
+		return false
+	}
+	// Only allow alphanumeric characters, dash, underscore, and period
+	// Must start with an alphanumeric character
+	return validFilenamePattern.MatchString(filename)
 }

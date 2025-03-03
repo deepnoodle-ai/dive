@@ -28,6 +28,7 @@ type Config struct {
 	DefaultModel    string `yaml:"default_model,omitempty" json:"default_model,omitempty" hcl:"default_model,optional"`
 	LogLevel        string `yaml:"log_level,omitempty" json:"log_level,omitempty" hcl:"log_level,optional"`
 	CacheControl    string `yaml:"cache_control,omitempty" json:"cache_control,omitempty" hcl:"cache_control,optional"`
+	OutputDir       string `yaml:"output_dir,omitempty" json:"output_dir,omitempty" hcl:"output_dir,optional"`
 }
 
 // Variable is used to dynamically configure a dive.Team
@@ -41,7 +42,6 @@ type Variable struct {
 // Agent is a serializable representation of a dive.Agent
 type Agent struct {
 	Name             string   `yaml:"name,omitempty" json:"name,omitempty" hcl:"name,label"`
-	NameOverride     string   `yaml:"name_override,omitempty" json:"name_override,omitempty" hcl:"name,optional"`
 	Description      string   `yaml:"description,omitempty" json:"description,omitempty" hcl:"description,optional"`
 	Instructions     string   `yaml:"instructions,omitempty" json:"instructions,omitempty" hcl:"instructions,optional"`
 	IsSupervisor     bool     `yaml:"is_supervisor,omitempty" json:"is_supervisor,omitempty" hcl:"is_supervisor,optional"`
@@ -62,7 +62,6 @@ type Agent struct {
 // Task is a serializable representation of a dive.Task
 type Task struct {
 	Name           string   `yaml:"name,omitempty" json:"name,omitempty" hcl:"name,label"`
-	NameOverride   string   `yaml:"name_override,omitempty" json:"name_override,omitempty" hcl:"name,optional"`
 	Description    string   `yaml:"description,omitempty" json:"description,omitempty" hcl:"description,optional"`
 	ExpectedOutput string   `yaml:"expected_output,omitempty" json:"expected_output,omitempty" hcl:"expected_output,optional"`
 	OutputFormat   string   `yaml:"output_format,omitempty" json:"output_format,omitempty" hcl:"output_format,optional"`
@@ -251,5 +250,6 @@ func (def *Team) Build(opts ...BuildOption) (dive.Team, error) {
 		Tasks:       tasks,
 		Logger:      logger,
 		LogLevel:    logLevel,
+		OutputDir:   def.Config.OutputDir,
 	})
 }

@@ -44,6 +44,9 @@ type Team interface {
 
 	// IsRunning returns true if the team is running
 	IsRunning() bool
+
+	// OutputDir returns the output directory for the team
+	OutputDir() string
 }
 
 type generateOptions struct {

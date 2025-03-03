@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ type DiveTeam struct {
 	initialTasks []*Task
 	taskGraph    *graph.Graph
 	taskOrder    []string
+	outputDir    string
 	logLevel     string
 	logger       slogger.Logger
 	mutex        sync.Mutex
@@ -38,6 +40,7 @@ type TeamOptions struct {
 	Tasks       []*Task
 	LogLevel    string
 	Logger      slogger.Logger
+	OutputDir   string
 }
 
 // NewTeam creates a new team composed of the given agents.
@@ -52,6 +55,7 @@ func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 		initialTasks: opts.Tasks,
 		logLevel:     opts.LogLevel,
 		logger:       opts.Logger,
+		outputDir:    opts.OutputDir,
 	}
 	for _, task := range opts.Tasks {
 		if err := task.Validate(); err != nil {
@@ -77,6 +81,11 @@ func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 	if len(t.agents) > 1 && len(t.supervisors) == 0 {
 		return nil, fmt.Errorf("at least one supervisor is required")
 	}
+	if t.outputDir != "" {
+		if err := os.MkdirAll(t.outputDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create output directory: %w", err)
+		}
+	}
 	return t, nil
 }
 
@@ -96,6 +105,11 @@ func (t *DiveTeam) Agents() []Agent {
 // Name returns the name of the team.
 func (t *DiveTeam) Name() string {
 	return t.name
+}
+
+// OutputDir returns the output directory for the team.
+func (t *DiveTeam) OutputDir() string {
+	return t.outputDir
 }
 
 // IsRunning returns true if the team is active.

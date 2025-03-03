@@ -19,6 +19,10 @@ func runTeam(filePath string, logLevel string) error {
 		return fmt.Errorf("error loading team: %v", err)
 	}
 
+	if logLevel != "" {
+		teamConf.Config.LogLevel = logLevel
+	}
+
 	team, err := teamConf.Build()
 	if err != nil {
 		return fmt.Errorf("error building team: %v", err)

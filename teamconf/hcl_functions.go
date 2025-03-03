@@ -2,6 +2,7 @@ package teamconf
 
 import (
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 
@@ -94,7 +95,12 @@ func createStandardFunctions() map[string]function.Function {
 					case arg.Type() == cty.String:
 						formatArgs[i] = arg.AsString()
 					case arg.Type() == cty.Number:
-						formatArgs[i] = arg.AsBigFloat()
+						bf := arg.AsBigFloat()
+						if i64, acc := bf.Int64(); acc == big.Exact {
+							formatArgs[i] = i64
+						} else {
+							formatArgs[i] = arg.AsBigFloat()
+						}
 					case arg.Type() == cty.Bool:
 						formatArgs[i] = arg.True()
 					default:

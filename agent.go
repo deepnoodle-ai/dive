@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -683,6 +685,11 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	logger := a.logger.With(
+		"agent_name", a.name,
+		"task_name", task.Name(),
+	)
+
 	systemPrompt, err := a.getSystemPromptForMode("task")
 	if err != nil {
 		return err
@@ -706,9 +713,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		messages = append(messages, llm.NewUserMessage("Finish the task to the best of your ability now. Do not use any more tools. Respond with the complete response to the task's prompt."))
 	}
 
-	a.logger.Info("handling task",
-		"agent", a.name,
-		"task", task.Name(),
+	logger.Info("handling task",
 		"status", state.Status,
 		"truncated_description", TruncateText(task.Description(), 10),
 		"truncated_prompt", TruncateText(task.Prompt(), 10),
@@ -740,17 +745,25 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	// We may need to make this configurable in the future.
 	if taskResponse.StatusDescription == "" {
 		state.Status = TaskStatusCompleted
-		a.logger.Warn("defaulting to completed status",
-			"agent", a.name,
-			"task", task.Name(),
-		)
+		logger.Warn("defaulting to completed status")
 	} else {
 		state.Status = taskResponse.Status()
 	}
 
-	a.logger.Info("task updated",
-		"agent", a.name,
-		"task", task.Name(),
+	if state.Status == TaskStatusCompleted {
+		if task.OutputFile() != "" && a.team != nil {
+			outDir := a.team.OutputDir()
+			dstPath := filepath.Join(outDir, task.OutputFile())
+			err := os.WriteFile(dstPath, []byte(state.Output), 0644)
+			if err != nil {
+				logger.Error("error writing output file", "error", err)
+			} else {
+				logger.Info("wrote output file", "path", dstPath)
+			}
+		}
+	}
+
+	logger.Info("task updated",
 		"status", state.Status,
 		"status_description", state.StatusDescription,
 		"truncated_output", TruncateText(state.Output, 10),

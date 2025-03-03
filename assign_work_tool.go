@@ -164,7 +164,6 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 			if event.TaskResult != nil {
 				return event.TaskResult.Content, nil
 			}
-			fmt.Println("assign work event", event.Type)
 		case <-ctx.Done():
 			return fmt.Sprintf("My work timed out: %s", ctx.Err()), nil
 		}

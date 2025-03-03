@@ -1,6 +1,8 @@
 package graph
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type Node interface {
 	// Name of the node
@@ -35,6 +37,19 @@ func (g *Graph) TopologicalSort() ([]string, error) {
 	// Returns cached sort if available
 	if g.sorted != nil {
 		return g.sorted, nil
+	}
+
+	// Check for invalid dependencies
+	nodeNames := map[string]bool{}
+	for _, node := range g.nodes {
+		nodeNames[node.Name()] = true
+	}
+	for _, node := range g.nodes {
+		for _, dep := range node.Dependencies() {
+			if !nodeNames[dep] {
+				return nil, fmt.Errorf("%q has an unknown dependency: %q", node.Name(), dep)
+			}
+		}
 	}
 
 	// Implementation of Kahn's algorithm for topological sort
