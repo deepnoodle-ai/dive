@@ -353,6 +353,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 			prefillClosingTag: config.PrefillClosingTag,
 			messageStartSent:  false,
 			eventQueue:        make([]*llm.StreamEvent, 0),
+			toolCallsSent:     false,
 		}
 		return nil
 	}, retry.WithMaxRetries(6))
@@ -446,6 +447,7 @@ type Stream struct {
 	closeOnce         sync.Once
 	messageStartSent  bool               // Track whether we've sent a message_start event
 	eventQueue        []*llm.StreamEvent // Queue to store events that need to be processed
+	toolCallsSent     bool               // Track whether we've sent a response with tool calls
 }
 
 type ToolCallAccumulator struct {
@@ -524,8 +526,13 @@ func (s *Stream) next() ([]*llm.StreamEvent, error) {
 
 	// Check for stream end
 	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-		// Return final response if we have tool calls or content blocks
+		// If we've already sent tool calls, just send a message stop event
+		if s.toolCallsSent {
+			return []*llm.StreamEvent{{Type: llm.EventMessageStop}}, nil
+		}
+		// Otherwise, send the final response if we have tool calls or content blocks
 		if len(s.toolCalls) > 0 || len(s.contentBlocks) > 0 {
+			s.toolCallsSent = true
 			return []*llm.StreamEvent{
 				{
 					Type:     llm.EventMessageStop,
@@ -725,8 +732,21 @@ func (s *Stream) next() ([]*llm.StreamEvent, error) {
 				Type:       "message_delta",
 				StopReason: choice.FinishReason,
 			},
-			Response: s.buildFinalResponse(choice.FinishReason),
 		})
+
+		// If we have tool calls and haven't sent them yet, send them now
+		if len(s.toolCalls) > 0 && !s.toolCallsSent {
+			s.toolCallsSent = true
+			events = append(events, &llm.StreamEvent{
+				Type:     llm.EventMessageStop,
+				Response: s.buildFinalResponse(choice.FinishReason),
+			})
+		}
+
+		// If this is a tool_calls finish reason, we're done
+		if choice.FinishReason == "tool_calls" {
+			return events, nil
+		}
 	}
 
 	return events, nil

@@ -118,6 +118,110 @@ func TestToolUse(t *testing.T) {
 	require.Contains(t, string(content.Input), "111")
 }
 
+func TestMultipleToolUse(t *testing.T) {
+	ctx := context.Background()
+	provider := New()
+
+	messages := []*llm.Message{
+		llm.NewUserMessage("Calculate two results for me: add 567 and 111, and add 233 and 444"),
+	}
+
+	add := llm.ToolDefinition{
+		Name:        "add",
+		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
+		Parameters: llm.Schema{
+			Type:     "object",
+			Required: []string{"a", "b"},
+			Properties: map[string]*llm.SchemaProperty{
+				"a": {Type: "number", Description: "The first number"},
+				"b": {Type: "number", Description: "The second number"},
+			},
+		},
+	}
+
+	response, err := provider.Generate(ctx, messages,
+		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
+	)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(response.Message().Content))
+
+	c1 := response.Message().Content[0]
+	require.Equal(t, llm.ContentTypeToolUse, c1.Type)
+	require.Equal(t, "add", c1.Name)
+	require.Contains(t, string(c1.Input), "567")
+	require.Contains(t, string(c1.Input), "111")
+
+	c2 := response.Message().Content[1]
+	require.Equal(t, llm.ContentTypeToolUse, c2.Type)
+	require.Equal(t, "add", c2.Name)
+	require.Contains(t, string(c2.Input), "233")
+	require.Contains(t, string(c2.Input), "444")
+}
+
+func TestMultipleToolUseStreaming(t *testing.T) {
+	ctx := context.Background()
+	provider := New()
+
+	messages := []*llm.Message{
+		llm.NewUserMessage("Calculate two results for me: add 567 and 111, and add 233 and 444"),
+	}
+
+	add := llm.ToolDefinition{
+		Name:        "add",
+		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
+		Parameters: llm.Schema{
+			Type:     "object",
+			Required: []string{"a", "b"},
+			Properties: map[string]*llm.SchemaProperty{
+				"a": {Type: "number", Description: "The first number"},
+				"b": {Type: "number", Description: "The second number"},
+			},
+		},
+	}
+
+	stream, err := provider.Stream(ctx, messages,
+		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
+	)
+	require.NoError(t, err)
+
+	var toolCalls []llm.ToolCall
+	for {
+		event, ok := stream.Next(ctx)
+		if !ok {
+			break
+		}
+		if event.Response != nil {
+			fmt.Printf("response: %+v\n", event.Response)
+			fmt.Println("tool call count:", len(event.Response.ToolCalls()))
+			toolCalls = append(toolCalls, event.Response.ToolCalls()...)
+		}
+	}
+	require.Equal(t, 2, len(toolCalls))
+
+	// The two calls can be in any order, so we need to check both
+
+	var c1 llm.ToolCall
+	var c2 llm.ToolCall
+
+	if strings.Contains(string(toolCalls[0].Input), "567") {
+		c1 = toolCalls[0]
+		c2 = toolCalls[1]
+	} else {
+		c1 = toolCalls[1]
+		c2 = toolCalls[0]
+	}
+
+	require.Equal(t, "add", c1.Name)
+	require.Contains(t, string(c1.Input), "567")
+	require.Contains(t, string(c1.Input), "111")
+
+	require.Equal(t, "add", c2.Name)
+	require.Contains(t, string(c2.Input), "233")
+	require.Contains(t, string(c2.Input), "444")
+}
+
 func TestToolUseStream(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
