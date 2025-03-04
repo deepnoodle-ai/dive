@@ -52,7 +52,7 @@ func FormatMessages(messages []*llm.Message) string {
 					lines = append(lines, " | ...")
 				}
 			default:
-				lines = append(lines, fmt.Sprintf(" | <unknown>"))
+				lines = append(lines, " | <unknown>")
 			}
 		}
 		lines = append(lines, "")
@@ -98,20 +98,6 @@ var newlinesRegex = regexp.MustCompile(`\n+`)
 
 func replaceNewlines(text string) string {
 	return newlinesRegex.ReplaceAllString(text, "<br>")
-}
-
-func addPrefill(message *llm.Message, prefill string) bool {
-	if prefill == "" {
-		return false
-	}
-	for _, content := range message.Content {
-		if content.Type == llm.ContentTypeText &&
-			strings.Contains(content.Text, "</think>") {
-			content.Text = prefill + content.Text
-			return true
-		}
-	}
-	return false
 }
 
 func detectProvider() (llm.LLM, bool) {

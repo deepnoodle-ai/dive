@@ -37,7 +37,6 @@ type Task struct {
 	timeout        time.Duration
 	context        string
 	depOutput      string
-	kind           string
 	nameIsRandom   bool
 }
 

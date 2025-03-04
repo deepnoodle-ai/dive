@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getstingrai/dive/graph"
 	"github.com/getstingrai/dive/llm"
 	"github.com/getstingrai/dive/slogger"
 )
@@ -24,8 +23,6 @@ type DiveTeam struct {
 	supervisors  []Agent
 	running      bool
 	initialTasks []*Task
-	taskGraph    *graph.Graph
-	taskOrder    []string
 	outputDir    string
 	outputPlugin OutputPlugin
 	logLevel     string

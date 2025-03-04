@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +16,11 @@ import (
 )
 
 var (
-	DefaultTaskTimeout      = time.Minute * 5
-	DefaultChatTimeout      = time.Minute * 1
-	DefaultTickFrequency    = time.Second * 1
-	DefaultTaskMessageLimit = 12
-	DefaultGenerationLimit  = 8
-	DefaultLogger           = slogger.NewDevNullLogger()
+	DefaultTaskTimeout        = time.Minute * 5
+	DefaultChatTimeout        = time.Minute * 1
+	DefaultTickFrequency      = time.Second * 1
+	DefaultToolIterationLimit = 8
+	DefaultLogger             = slogger.NewDevNullLogger()
 )
 
 // Confirm our standard implementation satisfies the different Agent interfaces
@@ -36,24 +33,23 @@ var (
 
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
-	Name             string
-	Description      string
-	Instructions     string
-	AcceptedEvents   []string
-	IsSupervisor     bool
-	Subordinates     []string
-	LLM              llm.LLM
-	Tools            []llm.Tool
-	TickFrequency    time.Duration
-	TaskTimeout      time.Duration
-	ChatTimeout      time.Duration
-	CacheControl     string
-	LogLevel         string
-	Hooks            llm.Hooks
-	Logger           slogger.Logger
-	GenerationLimit  int
-	TaskMessageLimit int
-	Memory           memory.Memory
+	Name               string
+	Description        string
+	Instructions       string
+	AcceptedEvents     []string
+	IsSupervisor       bool
+	Subordinates       []string
+	LLM                llm.LLM
+	Tools              []llm.Tool
+	TickFrequency      time.Duration
+	TaskTimeout        time.Duration
+	ChatTimeout        time.Duration
+	CacheControl       string
+	LogLevel           string
+	Hooks              llm.Hooks
+	Logger             slogger.Logger
+	ToolIterationLimit int
+	Memory             memory.Memory
 }
 
 // chatThread contains a message history for a thread ID
@@ -64,32 +60,31 @@ type chatThread struct {
 
 // DiveAgent is the standard implementation of the Agent interface.
 type DiveAgent struct {
-	name             string
-	description      string
-	instructions     string
-	llm              llm.LLM
-	team             Team
-	running          bool
-	tools            []llm.Tool
-	toolsByName      map[string]llm.Tool
-	acceptedEvents   []string
-	isSupervisor     bool
-	subordinates     []string
-	tickFrequency    time.Duration
-	taskTimeout      time.Duration
-	chatTimeout      time.Duration
-	cacheControl     string
-	taskQueue        []*taskState
-	recentTasks      []*taskState
-	activeTask       *taskState
-	ticker           *time.Ticker
-	logLevel         string
-	hooks            llm.Hooks
-	logger           slogger.Logger
-	generationLimit  int
-	taskMessageLimit int
-	memory           memory.Memory
-	threads          map[string]*chatThread
+	name               string
+	description        string
+	instructions       string
+	llm                llm.LLM
+	team               Team
+	running            bool
+	tools              []llm.Tool
+	toolsByName        map[string]llm.Tool
+	acceptedEvents     []string
+	isSupervisor       bool
+	subordinates       []string
+	tickFrequency      time.Duration
+	taskTimeout        time.Duration
+	chatTimeout        time.Duration
+	cacheControl       string
+	taskQueue          []*taskState
+	recentTasks        []*taskState
+	activeTask         *taskState
+	ticker             *time.Ticker
+	logLevel           string
+	hooks              llm.Hooks
+	logger             slogger.Logger
+	toolIterationLimit int
+	memory             memory.Memory
+	threads            map[string]*chatThread
 
 	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
@@ -109,11 +104,8 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 	if opts.ChatTimeout <= 0 {
 		opts.ChatTimeout = DefaultChatTimeout
 	}
-	if opts.GenerationLimit <= 0 {
-		opts.GenerationLimit = DefaultGenerationLimit
-	}
-	if opts.TaskMessageLimit <= 0 {
-		opts.TaskMessageLimit = DefaultTaskMessageLimit
+	if opts.ToolIterationLimit <= 0 {
+		opts.ToolIterationLimit = DefaultToolIterationLimit
 	}
 	if opts.Logger == nil {
 		opts.Logger = DefaultLogger
@@ -133,24 +125,23 @@ func NewAgent(opts AgentOptions) *DiveAgent {
 		}
 	}
 	agent := &DiveAgent{
-		name:             opts.Name,
-		llm:              opts.LLM,
-		description:      opts.Description,
-		instructions:     opts.Instructions,
-		acceptedEvents:   opts.AcceptedEvents,
-		isSupervisor:     opts.IsSupervisor,
-		subordinates:     opts.Subordinates,
-		tickFrequency:    opts.TickFrequency,
-		taskTimeout:      opts.TaskTimeout,
-		chatTimeout:      opts.ChatTimeout,
-		generationLimit:  opts.GenerationLimit,
-		taskMessageLimit: opts.TaskMessageLimit,
-		cacheControl:     opts.CacheControl,
-		hooks:            opts.Hooks,
-		mailbox:          make(chan interface{}, 16),
-		logger:           opts.Logger,
-		logLevel:         strings.ToLower(opts.LogLevel),
-		threads:          make(map[string]*chatThread),
+		name:               opts.Name,
+		llm:                opts.LLM,
+		description:        opts.Description,
+		instructions:       opts.Instructions,
+		acceptedEvents:     opts.AcceptedEvents,
+		isSupervisor:       opts.IsSupervisor,
+		subordinates:       opts.Subordinates,
+		tickFrequency:      opts.TickFrequency,
+		taskTimeout:        opts.TaskTimeout,
+		chatTimeout:        opts.ChatTimeout,
+		toolIterationLimit: opts.ToolIterationLimit,
+		cacheControl:       opts.CacheControl,
+		hooks:              opts.Hooks,
+		mailbox:            make(chan interface{}, 16),
+		logger:             opts.Logger,
+		logLevel:           strings.ToLower(opts.LogLevel),
+		threads:            make(map[string]*chatThread),
 	}
 
 	tools := make([]llm.Tool, len(opts.Tools))
@@ -272,11 +263,11 @@ func (a *DiveAgent) Start(ctx context.Context) error {
 		"cache_control", a.cacheControl,
 		"is_supervisor", a.isSupervisor,
 		"subordinates", a.subordinates,
-		"generation_limit", a.generationLimit,
-		"task_message_limit", a.taskMessageLimit,
 		"task_timeout", a.taskTimeout,
 		"chat_timeout", a.chatTimeout,
 		"tick_frequency", a.tickFrequency,
+		"tool_iteration_limit", a.toolIterationLimit,
+		"model", a.llm.Name(),
 	)
 	return nil
 }
@@ -571,11 +562,13 @@ func (a *DiveAgent) executeToolLoop(
 		return publisher.Send(ctx, event)
 	}
 
+	generationLimit := a.toolIterationLimit + 1
+
 	// The loop is used to run and respond to the primary generation request
 	// and then automatically run any tool-use invocations. The first time
 	// through, we submit the primary generation. On subsequent loops, we are
 	// running tool-uses and responding with the results.
-	for i := 0; i < a.generationLimit; i++ {
+	for i := 0; i < generationLimit; i++ {
 		generateOpts := []llm.Option{
 			llm.WithSystemPrompt(systemPrompt),
 			llm.WithCacheControl(a.cacheControl),
@@ -691,7 +684,7 @@ func (a *DiveAgent) executeToolLoop(
 
 		// Add instructions to the message to not use any more tools if we have
 		// only one generation left.
-		if i == a.generationLimit-2 {
+		if i == generationLimit-2 {
 			resultMessage.Content = append(resultMessage.Content, &llm.Content{
 				Type: llm.ContentTypeText,
 				Text: "Do not use any more tools. You must respond with your final answer now.",
@@ -735,7 +728,7 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 			messages = append(messages, recentTasksMessage)
 		}
 		messages = append(messages, llm.NewUserMessage(task.Prompt()))
-	} else if len(state.Messages) < a.taskMessageLimit {
+	} else if len(state.Messages) < 32 {
 		// We're resuming a task and can still work some more
 		messages = append(messages, state.Messages...)
 		messages = append(messages, llm.NewUserMessage("Continue working on the task."))
@@ -786,19 +779,6 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 		logger.Warn("defaulting to completed status")
 	} else {
 		state.Status = taskResponse.Status()
-	}
-
-	if state.Status == TaskStatusCompleted {
-		if task.OutputFile() != "" && a.team != nil {
-			outDir := a.team.OutputDir()
-			dstPath := filepath.Join(outDir, task.OutputFile())
-			err := os.WriteFile(dstPath, []byte(state.Output), 0644)
-			if err != nil {
-				logger.Error("error writing output file", "error", err)
-			} else {
-				logger.Info("wrote output file", "path", dstPath)
-			}
-		}
 	}
 
 	logger.Info("task updated",
