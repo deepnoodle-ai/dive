@@ -17,6 +17,7 @@ type taskState struct {
 	StatusDescription string
 	Messages          []*llm.Message
 	Paused            bool
+	Usage             llm.Usage
 }
 
 func (s *taskState) String() string {

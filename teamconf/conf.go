@@ -227,7 +227,7 @@ func (def *Team) Build(opts ...BuildOption) (dive.Team, error) {
 
 	agents := make([]dive.Agent, 0, len(def.Agents))
 	for _, agentDef := range def.Agents {
-		agent, err := buildAgent(agentDef, def.Config, toolsMap, buildOpts.Logger, buildOpts.Variables)
+		agent, err := buildAgent(agentDef, def.Config, toolsMap, logger, buildOpts.Variables)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
 		}

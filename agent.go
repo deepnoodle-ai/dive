@@ -2,6 +2,8 @@ package dive
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -20,7 +22,7 @@ var (
 	DefaultChatTimeout      = time.Minute * 1
 	DefaultTickFrequency    = time.Second * 1
 	DefaultTaskMessageLimit = 12
-	DefaultGenerationLimit  = 5
+	DefaultGenerationLimit  = 8
 	DefaultLogger           = slogger.NewDevNullLogger()
 )
 
@@ -263,7 +265,19 @@ func (a *DiveAgent) Start(ctx context.Context) error {
 	a.wg = sync.WaitGroup{}
 	a.wg.Add(1)
 	go a.run()
-	a.logger.Debug("agent started", "name", a.name)
+
+	a.logger.Debug("agent started",
+		"name", a.name,
+		"description", a.description,
+		"cache_control", a.cacheControl,
+		"is_supervisor", a.isSupervisor,
+		"subordinates", a.subordinates,
+		"generation_limit", a.generationLimit,
+		"task_message_limit", a.taskMessageLimit,
+		"task_timeout", a.taskTimeout,
+		"chat_timeout", a.chatTimeout,
+		"tick_frequency", a.tickFrequency,
+	)
 	return nil
 }
 
@@ -577,7 +591,7 @@ func (a *DiveAgent) executeToolLoop(
 
 		var currentResponse *llm.Response
 
-		if streamingLLM, ok := a.llm.(llm.StreamingLLM); ok {
+		if streamingLLM, ok := a.llm.(llm.StreamingLLM); ok && false {
 			stream, err := streamingLLM.Stream(ctx, updatedMessages, generateOpts...)
 			if err != nil {
 				return nil, updatedMessages, err
@@ -624,6 +638,15 @@ func (a *DiveAgent) executeToolLoop(
 		response = currentResponse
 		responseMessage := response.Message()
 
+		a.logger.Info("llm response",
+			"usage_input_tokens", response.Usage().InputTokens,
+			"usage_output_tokens", response.Usage().OutputTokens,
+			"cache_creation_input_tokens", response.Usage().CacheCreationInputTokens,
+			"cache_read_input_tokens", response.Usage().CacheReadInputTokens,
+			"truncated_response", TruncateText(responseMessage.Text(), 10),
+			"generation_number", i+1,
+		)
+
 		// Remember the assistant response message
 		updatedMessages = append(updatedMessages, responseMessage)
 
@@ -640,6 +663,11 @@ func (a *DiveAgent) executeToolLoop(
 			if !ok {
 				return nil, updatedMessages, fmt.Errorf("tool call for unknown tool: %q", toolCall.Name)
 			}
+			a.logger.Debug("tool call",
+				"agent_name", a.name,
+				"tool_name", toolCall.Name,
+				"tool_input", toolCall.Input,
+			)
 			result, err := tool.Call(ctx, toolCall.Input)
 			if err != nil {
 				return nil, updatedMessages, fmt.Errorf("tool call error: %w", err)
@@ -668,7 +696,11 @@ func (a *DiveAgent) executeToolLoop(
 				Type: llm.ContentTypeText,
 				Text: "Do not use any more tools. You must respond with your final answer now.",
 			})
-			a.logger.Debug("adding tool use limit instruction", "agent", a.name, "task", taskName)
+			a.logger.Debug("adding tool use limit instruction",
+				"agent", a.name,
+				"task", taskName,
+				"generation_number", i+1,
+			)
 		}
 		updatedMessages = append(updatedMessages, resultMessage)
 	}
@@ -740,6 +772,12 @@ func (a *DiveAgent) handleTask(state *taskState) error {
 	state.Reasoning = taskResponse.Thinking
 	state.StatusDescription = taskResponse.StatusDescription
 	state.Messages = updatedMessages
+
+	usage := response.Usage()
+	state.Usage.InputTokens += usage.InputTokens
+	state.Usage.OutputTokens += usage.OutputTokens
+	state.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+	state.Usage.CacheReadInputTokens += usage.CacheReadInputTokens
 
 	// For now, if the status description is empty, let's assume it is complete.
 	// We may need to make this configurable in the future.
@@ -851,6 +889,7 @@ func (a *DiveAgent) doSomeWork() {
 			TaskResult: &TaskResult{
 				Task:    a.activeTask.Task,
 				Content: a.activeTask.Output,
+				Usage:   a.activeTask.Usage,
 			},
 		})
 		if a.activeTask.Publisher != nil {
@@ -953,6 +992,20 @@ func (a *DiveAgent) getTasksHistoryMessage() (*llm.Message, bool) {
 	}
 	text := fmt.Sprintf("Recently completed tasks:\n\n%s", history)
 	return llm.NewUserMessage(text), true
+}
+
+func (a *DiveAgent) Fingerprint() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("agent: %s\n", a.name))
+	sb.WriteString(fmt.Sprintf("description: %s\n", a.description))
+	sb.WriteString(fmt.Sprintf("instructions: %s\n", a.instructions))
+	sb.WriteString(fmt.Sprintf("accepted_events: %v\n", a.acceptedEvents))
+	sb.WriteString(fmt.Sprintf("is_supervisor: %t\n", a.isSupervisor))
+	sb.WriteString(fmt.Sprintf("subordinates: %v\n", a.subordinates))
+	sb.WriteString(fmt.Sprintf("llm: %s\n", a.llm.Name()))
+	hash := sha256.New()
+	hash.Write([]byte(sb.String()))
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // if !a.disablePrefill {

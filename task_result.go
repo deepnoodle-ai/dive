@@ -2,6 +2,8 @@ package dive
 
 import (
 	"time"
+
+	"github.com/getstingrai/dive/llm"
 )
 
 // OutputFormat defines the format of task results
@@ -50,6 +52,9 @@ type TaskResult struct {
 
 	// FinishedAt is the time the task stopped
 	FinishedAt time.Time
+
+	// Usage is the usage of the LLM
+	Usage llm.Usage
 }
 
 func NewTaskResultError(task *Task, err error) *TaskResult {

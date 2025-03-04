@@ -5,6 +5,9 @@ import (
 )
 
 type LLM interface {
+	// Name of the LLM model
+	Name() string
+
 	// Generate a response from the LLM by passing messages.
 	Generate(ctx context.Context, messages []*Message, opts ...Option) (*Response, error)
 }
