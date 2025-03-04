@@ -50,6 +50,10 @@ func New(opts ...Option) *Provider {
 	return p
 }
 
+func (p *Provider) Name() string {
+	return fmt.Sprintf("openai-%s", p.model)
+}
+
 func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
 	for _, opt := range opts {

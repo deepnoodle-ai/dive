@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/getstingrai/dive/graph"
+	"github.com/getstingrai/dive/llm"
 	"github.com/getstingrai/dive/slogger"
 )
 
@@ -27,6 +27,7 @@ type DiveTeam struct {
 	taskGraph    *graph.Graph
 	taskOrder    []string
 	outputDir    string
+	outputPlugin OutputPlugin
 	logLevel     string
 	logger       slogger.Logger
 	mutex        sync.Mutex
@@ -34,19 +35,31 @@ type DiveTeam struct {
 
 // TeamOptions are used to configure a new team.
 type TeamOptions struct {
-	Name        string
-	Description string
-	Agents      []Agent
-	Tasks       []*Task
-	LogLevel    string
-	Logger      slogger.Logger
-	OutputDir   string
+	Name         string
+	Description  string
+	Agents       []Agent
+	Tasks        []*Task
+	LogLevel     string
+	Logger       slogger.Logger
+	OutputDir    string
+	OutputPlugin OutputPlugin
 }
 
 // NewTeam creates a new team composed of the given agents.
 func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 	if opts.Logger == nil {
 		opts.Logger = DefaultLogger
+	}
+	if opts.OutputPlugin == nil {
+		if opts.OutputDir == "" {
+			opts.OutputPlugin = NewInMemoryOutputPlugin()
+		} else {
+			var err error
+			opts.OutputPlugin, err = NewDiskOutputPlugin(opts.OutputDir)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create disk output plugin: %w", err)
+			}
+		}
 	}
 	t := &DiveTeam{
 		name:         opts.Name,
@@ -56,6 +69,7 @@ func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 		logLevel:     opts.LogLevel,
 		logger:       opts.Logger,
 		outputDir:    opts.OutputDir,
+		outputPlugin: opts.OutputPlugin,
 	}
 	for _, task := range opts.Tasks {
 		if err := task.Validate(); err != nil {
@@ -81,11 +95,8 @@ func NewTeam(opts TeamOptions) (*DiveTeam, error) {
 	if len(t.agents) > 1 && len(t.supervisors) == 0 {
 		return nil, fmt.Errorf("at least one supervisor is required")
 	}
-	if t.outputDir != "" {
-		if err := os.MkdirAll(t.outputDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create output directory: %w", err)
-		}
-	}
+	t.logger.Info("team created",
+		"output_plugin", t.outputPlugin.Name())
 	return t, nil
 }
 
@@ -258,13 +269,15 @@ func (t *DiveTeam) workOnTasks(ctx context.Context, tasks []*Task, stream *DiveS
 	publisher := NewStreamPublisher(stream)
 	defer publisher.Close()
 
+	backgroundCtx := context.Background()
+
 	t.logger.Debug("team work started",
 		"team_name", t.name,
 		"task_count", len(tasks),
 		"task_names", TaskNames(tasks),
 	)
 
-	resultsByTaskName := make(map[string]*TaskResult, len(tasks))
+	totalUsage := llm.Usage{}
 
 	// Work on tasks sequentially
 	for _, task := range tasks {
@@ -283,37 +296,65 @@ func (t *DiveTeam) workOnTasks(ctx context.Context, tasks []*Task, stream *DiveS
 		if dependencies := task.Dependencies(); len(dependencies) > 0 {
 			var outputs []string
 			for _, dep := range dependencies {
-				depResult, ok := resultsByTaskName[dep]
-				if !ok {
+				depResult, err := t.outputPlugin.ReadOutput(ctx, dep, "")
+				if err != nil {
 					// This should never happen since the tasks were sorted into
 					// execution order! If it does, it indicates a severe bug so
 					// a panic is appropriate.
 					panic(fmt.Sprintf("task execution failure: task %q dependency %q", task.Name(), dep))
 				}
-				outputs = append(outputs,
-					fmt.Sprintf("<output task=%q>\n%s\n</output>", dep, depResult.Content))
+				outputs = append(outputs, fmt.Sprintf("<output task=%q>\n%s\n</output>", dep, depResult))
 			}
 			task.SetDependenciesOutput(strings.Join(outputs, "\n\n"))
 		}
 
-		// Work the task to completion
-		result, err := t.workOnTask(ctx, task, agent, publisher)
+		// Has this work already been done?
+		done, err := t.outputPlugin.OutputExists(ctx, task.Name(), "")
 		if err != nil {
-			publisher.Send(context.Background(), &StreamEvent{
-				Type:      "work.error",
-				TaskName:  task.Name(),
-				AgentName: agent.Name(),
-				Error: fmt.Sprintf("work failed on task %q agent %q: %v",
-					task.Name(), agent.Name(), err),
-			})
-			return
+			t.logger.Error("failed to check if task output exists", "error", err)
 		}
-		resultsByTaskName[task.Name()] = result
+		if !done {
+			// Work the task to completion
+			result, err := t.workOnTask(ctx, task, agent, publisher)
+			if err != nil {
+				publisher.Send(backgroundCtx, &StreamEvent{
+					Type:      "work.error",
+					TaskName:  task.Name(),
+					AgentName: agent.Name(),
+					Error:     fmt.Sprintf("work failed on task %q agent %q: %v", task.Name(), agent.Name(), err),
+				})
+				return
+			}
+			// Store the task results
+			if err := t.outputPlugin.WriteOutput(ctx, task.Name(), "", result.Content); err != nil {
+				publisher.Send(backgroundCtx, &StreamEvent{
+					Type:      "work.error",
+					TaskName:  task.Name(),
+					AgentName: agent.Name(),
+					Error:     fmt.Sprintf("failed to write output for task %q: %v", task.Name(), err),
+				})
+				return
+			}
+			totalUsage.InputTokens += result.Usage.InputTokens
+			totalUsage.OutputTokens += result.Usage.OutputTokens
+			totalUsage.CacheCreationInputTokens += result.Usage.CacheCreationInputTokens
+			totalUsage.CacheReadInputTokens += result.Usage.CacheReadInputTokens
+		} else {
+			t.logger.Info("task output already exists - skipping", "task_name", task.Name())
+		}
 	}
+
+	t.logger.Info("team work completed",
+		"team_name", t.name,
+		"total_input_tokens", totalUsage.InputTokens,
+		"total_output_tokens", totalUsage.OutputTokens,
+		"total_cache_creation_input_tokens", totalUsage.CacheCreationInputTokens,
+		"total_cache_read_input_tokens", totalUsage.CacheReadInputTokens,
+	)
 
 	// Send a final event indicating all work is done. Use a clean context since
 	// the provided context may have been canceled.
-	publisher.Send(context.Background(), &StreamEvent{Type: "work.done"})
+	publisher.Send(backgroundCtx, &StreamEvent{Type: "work.done"})
 }
 
 func (t *DiveTeam) workOnTask(ctx context.Context, task *Task, agent Agent, pub *StreamPublisher) (*TaskResult, error) {

@@ -1,6 +1,7 @@
 package groq
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 
@@ -49,4 +50,8 @@ func New(opts ...Option) *Provider {
 	)
 	p.Provider = oai
 	return p
+}
+
+func (p *Provider) Name() string {
+	return fmt.Sprintf("groq-%s", p.model)
 }

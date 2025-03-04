@@ -75,5 +75,5 @@ var runCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().StringP("log-level", "", "info", "Log level to use (debug, info, warn, error)")
+	runCmd.Flags().StringP("log-level", "", "", "Log level to use (debug, info, warn, error)")
 }
