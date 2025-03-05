@@ -241,8 +241,7 @@ func LoadHCLDefinition(conf []byte, filename string, vars map[string]interface{}
 					{Name: "max_active_tasks", Required: false},
 					{Name: "task_timeout", Required: false},
 					{Name: "chat_timeout", Required: false},
-					{Name: "generation_limit", Required: false},
-					{Name: "task_message_limit", Required: false},
+					{Name: "tool_iteration_limit", Required: false},
 					{Name: "log_level", Required: false},
 				},
 			})
@@ -315,11 +314,6 @@ func LoadHCLDefinition(conf []byte, filename string, vars map[string]interface{}
 					if val.Type() == cty.String {
 						agent.CacheControl = val.AsString()
 					}
-				case "max_active_tasks":
-					if val.Type() == cty.Number {
-						v, _ := val.AsBigFloat().Int64()
-						agent.MaxActiveTasks = int(v)
-					}
 				case "task_timeout":
 					if val.Type() == cty.String {
 						agent.TaskTimeout = val.AsString()
@@ -328,15 +322,10 @@ func LoadHCLDefinition(conf []byte, filename string, vars map[string]interface{}
 					if val.Type() == cty.String {
 						agent.ChatTimeout = val.AsString()
 					}
-				case "generation_limit":
+				case "tool_iteration_limit":
 					if val.Type() == cty.Number {
 						v, _ := val.AsBigFloat().Int64()
-						agent.GenerationLimit = int(v)
-					}
-				case "task_message_limit":
-					if val.Type() == cty.Number {
-						v, _ := val.AsBigFloat().Int64()
-						agent.TaskMessageLimit = int(v)
+						agent.ToolIterationLimit = int(v)
 					}
 				case "log_level":
 					if val.Type() == cty.String {

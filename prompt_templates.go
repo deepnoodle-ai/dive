@@ -9,7 +9,6 @@ import (
 var (
 	agentSystemPromptTemplate *template.Template
 	chatSystemPromptTemplate  *template.Template
-	taskPromptTemplate        *template.Template
 	teamPromptTemplate        *template.Template
 	taskStatePromptTemplate   *template.Template
 )
@@ -21,10 +20,6 @@ func init() {
 		panic(err)
 	}
 	chatSystemPromptTemplate, err = parseTemplate("chat_sys_prompt", chatSysPromptText)
-	if err != nil {
-		panic(err)
-	}
-	taskPromptTemplate, err = parseTemplate("task_prompt", taskPromptText)
 	if err != nil {
 		panic(err)
 	}
@@ -186,7 +181,7 @@ Your name is "{{ .Name }}".
 # Team Overview
 
 You belong to a team. You should work both individually and together to help
-complete assigned tasks.
+answer questions and complete requests.
 
 {{ .Team.Overview }}
 {{- end }}
@@ -235,38 +230,6 @@ possible, for efficiency.
 Context you are given may be helpful to you when answering questions. If the
 context doesn't fully help answer a question, please use the available tools
 to gather more information.`
-
-var taskPromptText = `{{- if .Task.Context -}}
-<CONTEXT>
-{{ .Task.Context }}
-</CONTEXT>
-
-{{- end }}
-{{- if .Dependencies -}}
-<PRIOR-TASKS>
-{{- range .Dependencies }}
-Output from the task named "{{ .Task.Name }}":
-
-{{ .Output.Content }}
-{{- end }}
-</PRIOR-TASKS>
-
-{{- end }}
-<CURRENT-TASK>
-{{ .Task.Description }}
-{{- if .Task.ExpectedOutput }}
-
-RESPOND WITH THE FOLLOWING:
-
-{{ .Task.ExpectedOutput }}
-{{- end }}
-</CURRENT-TASK>
-
-Remember, the current date is {{ .CurrentDate }}.
-
-Work on the current task now.
-
-This is VERY important to you, use the tools available and give your best answer now, your job depends on it!`
 
 var teamPromptText = `{{- if .Description -}}
 The team is described as: "{{ .Description }}"

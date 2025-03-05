@@ -41,22 +41,20 @@ type Variable struct {
 
 // Agent is a serializable representation of a dive.Agent
 type Agent struct {
-	Name             string   `yaml:"name,omitempty" json:"name,omitempty" hcl:"name,label"`
-	Description      string   `yaml:"description,omitempty" json:"description,omitempty" hcl:"description,optional"`
-	Instructions     string   `yaml:"instructions,omitempty" json:"instructions,omitempty" hcl:"instructions,optional"`
-	IsSupervisor     bool     `yaml:"is_supervisor,omitempty" json:"is_supervisor,omitempty" hcl:"is_supervisor,optional"`
-	Subordinates     []string `yaml:"subordinates,omitempty" json:"subordinates,omitempty" hcl:"subordinates,optional"`
-	AcceptedEvents   []string `yaml:"accepted_events,omitempty" json:"accepted_events,omitempty" hcl:"accepted_events,optional"`
-	Provider         string   `yaml:"provider,omitempty" json:"provider,omitempty" hcl:"provider,optional"`
-	Model            string   `yaml:"model,omitempty" json:"model,omitempty" hcl:"model,optional"`
-	Tools            []string `yaml:"tools,omitempty" json:"tools,omitempty" hcl:"tools,optional"`
-	CacheControl     string   `yaml:"cache_control,omitempty" json:"cache_control,omitempty" hcl:"cache_control,optional"`
-	MaxActiveTasks   int      `yaml:"max_active_tasks,omitempty" json:"max_active_tasks,omitempty" hcl:"max_active_tasks,optional"`
-	TaskTimeout      string   `yaml:"task_timeout,omitempty" json:"task_timeout,omitempty" hcl:"task_timeout,optional"`
-	ChatTimeout      string   `yaml:"chat_timeout,omitempty" json:"chat_timeout,omitempty" hcl:"chat_timeout,optional"`
-	GenerationLimit  int      `yaml:"generation_limit,omitempty" json:"generation_limit,omitempty" hcl:"generation_limit,optional"`
-	TaskMessageLimit int      `yaml:"task_message_limit,omitempty" json:"task_message_limit,omitempty" hcl:"task_message_limit,optional"`
-	LogLevel         string   `yaml:"log_level,omitempty" json:"log_level,omitempty" hcl:"log_level,optional"`
+	Name               string   `yaml:"name,omitempty" json:"name,omitempty" hcl:"name,label"`
+	Description        string   `yaml:"description,omitempty" json:"description,omitempty" hcl:"description,optional"`
+	Instructions       string   `yaml:"instructions,omitempty" json:"instructions,omitempty" hcl:"instructions,optional"`
+	IsSupervisor       bool     `yaml:"is_supervisor,omitempty" json:"is_supervisor,omitempty" hcl:"is_supervisor,optional"`
+	Subordinates       []string `yaml:"subordinates,omitempty" json:"subordinates,omitempty" hcl:"subordinates,optional"`
+	AcceptedEvents     []string `yaml:"accepted_events,omitempty" json:"accepted_events,omitempty" hcl:"accepted_events,optional"`
+	Provider           string   `yaml:"provider,omitempty" json:"provider,omitempty" hcl:"provider,optional"`
+	Model              string   `yaml:"model,omitempty" json:"model,omitempty" hcl:"model,optional"`
+	Tools              []string `yaml:"tools,omitempty" json:"tools,omitempty" hcl:"tools,optional"`
+	CacheControl       string   `yaml:"cache_control,omitempty" json:"cache_control,omitempty" hcl:"cache_control,optional"`
+	TaskTimeout        string   `yaml:"task_timeout,omitempty" json:"task_timeout,omitempty" hcl:"task_timeout,optional"`
+	ChatTimeout        string   `yaml:"chat_timeout,omitempty" json:"chat_timeout,omitempty" hcl:"chat_timeout,optional"`
+	ToolIterationLimit int      `yaml:"tool_iteration_limit,omitempty" json:"tool_iteration_limit,omitempty" hcl:"tool_iteration_limit,optional"`
+	LogLevel           string   `yaml:"log_level,omitempty" json:"log_level,omitempty" hcl:"log_level,optional"`
 }
 
 // Task is a serializable representation of a dive.Task

@@ -39,3 +39,9 @@ func WithSystemRole(systemRole string) Option {
 		p.systemRole = systemRole
 	}
 }
+
+func WithCorePrompt(corePrompt string) Option {
+	return func(p *Provider) {
+		p.corePrompt = corePrompt
+	}
+}

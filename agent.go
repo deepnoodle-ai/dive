@@ -50,6 +50,11 @@ type AgentOptions struct {
 	Logger             slogger.Logger
 	ToolIterationLimit int
 	Memory             memory.Memory
+	Temperature        *float64
+	PresencePenalty    *float64
+	FrequencyPenalty   *float64
+	ReasoningFormat    string
+	ReasoningEffort    string
 }
 
 // chatThread contains a message history for a thread ID
@@ -85,6 +90,11 @@ type DiveAgent struct {
 	toolIterationLimit int
 	memory             memory.Memory
 	threads            map[string]*chatThread
+	temperature        *float64
+	presencePenalty    *float64
+	frequencyPenalty   *float64
+	reasoningFormat    string
+	reasoningEffort    string
 
 	// Holds incoming messages to be processed by the agent's run loop
 	mailbox chan interface{}
@@ -527,15 +537,25 @@ func (a *DiveAgent) handleChat(m messageChat) {
 		return
 	}
 	m.resultChan <- response
-	return
 }
 
 func (a *DiveAgent) getSystemPromptForMode(mode string) (string, error) {
+	var err error
+	var prompt string
 	data := newAgentTemplateData(a)
 	if mode == "chat" {
-		return executeTemplate(chatSystemPromptTemplate, data)
+		prompt, err = executeTemplate(chatSystemPromptTemplate, data)
+	} else {
+		prompt, err = executeTemplate(agentSystemPromptTemplate, data)
 	}
-	return executeTemplate(agentSystemPromptTemplate, data)
+	if err != nil {
+		return "", err
+	}
+	// Append the current date
+	now := time.Now().UTC()
+	prompt += "\n\nThe current date is " + now.Format("January 2, 2006") + "."
+	prompt += " It is a " + now.Format("Monday") + "."
+	return prompt, nil
 }
 
 // executeToolLoop runs the LLM generation and tool execution loop.
@@ -581,10 +601,25 @@ func (a *DiveAgent) executeToolLoop(
 		if a.logger != nil {
 			generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 		}
+		if a.temperature != nil {
+			generateOpts = append(generateOpts, llm.WithTemperature(*a.temperature))
+		}
+		if a.presencePenalty != nil {
+			generateOpts = append(generateOpts, llm.WithPresencePenalty(*a.presencePenalty))
+		}
+		if a.frequencyPenalty != nil {
+			generateOpts = append(generateOpts, llm.WithFrequencyPenalty(*a.frequencyPenalty))
+		}
+		if a.reasoningFormat != "" {
+			generateOpts = append(generateOpts, llm.WithReasoningFormat(a.reasoningFormat))
+		}
+		if a.reasoningEffort != "" {
+			generateOpts = append(generateOpts, llm.WithReasoningEffort(a.reasoningEffort))
+		}
 
 		var currentResponse *llm.Response
 
-		if streamingLLM, ok := a.llm.(llm.StreamingLLM); ok && false {
+		if streamingLLM, ok := a.llm.(llm.StreamingLLM); ok {
 			stream, err := streamingLLM.Stream(ctx, updatedMessages, generateOpts...)
 			if err != nil {
 				return nil, updatedMessages, err
