@@ -47,6 +47,7 @@ func New(opts ...Option) *Provider {
 		openai.WithMaxTokens(p.maxTokens),
 		openai.WithModel(p.model),
 		openai.WithSystemRole("system"),
+		openai.WithCorePrompt(CorePrompt),
 	)
 	p.Provider = oai
 	return p

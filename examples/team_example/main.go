@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/llm"
@@ -143,24 +142,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	prv := anthropic.New(anthropic.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
-
-	// Generate a response
-	response, err := llm.Generate(ctx,
-		[]*llm.Message{llm.NewUserMessage("What is the capital of France?")},
-		llm.WithSystemPrompt("You are a helpful assistant."),
-	)
-
-	event := &dive.Event{
-		Name:        "new_data_available",
-		Description: "New market data is available for analysis",
-		Parameters: map[string]any{
-			"data_source": "quarterly_reports",
-			"timestamp":   time.Now(),
-		},
-	}
-	researcher.HandleEvent(ctx, event)
-
 	if err := team.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
@@ -184,25 +165,17 @@ func main() {
 	}
 
 	results := []*dive.TaskResult{}
-	running := true
-	for running {
-		select {
-		case event, ok := <-stream.Channel():
-			if !ok {
-				running = false
-				break
-			}
-			if event.Error != "" {
-				log.Fatal(event.Error)
-			}
-			if event.TaskResult != nil {
-				fmt.Printf("---- task result %s ----\n", event.TaskResult.Task.Name())
-				fmt.Println(event.TaskResult.Content)
-				fmt.Println()
-				results = append(results, event.TaskResult)
-			} else {
-				fmt.Println("event:", event.Type)
-			}
+	for event := range stream.Channel() {
+		if event.Error != "" {
+			log.Fatal(event.Error)
+		}
+		if event.TaskResult != nil {
+			fmt.Printf("---- task result %s ----\n", event.TaskResult.Task.Name())
+			fmt.Println(event.TaskResult.Content)
+			fmt.Println()
+			results = append(results, event.TaskResult)
+		} else {
+			fmt.Println("event:", event.Type)
 		}
 	}
 

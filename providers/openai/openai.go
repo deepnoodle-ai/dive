@@ -31,6 +31,7 @@ type Provider struct {
 	endpoint   string
 	model      string
 	systemRole string
+	corePrompt string
 	maxTokens  int
 	client     *http.Client
 }
@@ -116,18 +117,22 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 
 	reqBody := Request{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   maxTokens,
-		Temperature: config.Temperature,
-		Tools:       tools,
-		ToolChoice:  toolChoice,
+		Model:            model,
+		Messages:         msgs,
+		MaxTokens:        maxTokens,
+		Temperature:      config.Temperature,
+		Tools:            tools,
+		ToolChoice:       toolChoice,
+		PresencePenalty:  config.PresencePenalty,
+		FrequencyPenalty: config.FrequencyPenalty,
+		ReasoningFormat:  config.ReasoningFormat,
+		ReasoningEffort:  ReasoningEffort(config.ReasoningEffort),
 	}
 
-	if config.SystemPrompt != "" {
+	if systemPrompt := p.GetSystemPrompt(config); systemPrompt != "" {
 		reqBody.Messages = append([]Message{{
 			Role:    p.systemRole,
-			Content: config.SystemPrompt,
+			Content: systemPrompt,
 		}}, reqBody.Messages...)
 	}
 
@@ -296,19 +301,24 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	}
 
 	reqBody := Request{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   maxTokens,
-		Temperature: config.Temperature,
-		Stream:      true,
-		Tools:       tools,
-		ToolChoice:  toolChoice,
+		Model:            model,
+		Messages:         msgs,
+		MaxTokens:        maxTokens,
+		Temperature:      config.Temperature,
+		Stream:           true,
+		StreamOptions:    &StreamOptions{IncludeUsage: true},
+		Tools:            tools,
+		ToolChoice:       toolChoice,
+		PresencePenalty:  config.PresencePenalty,
+		FrequencyPenalty: config.FrequencyPenalty,
+		ReasoningFormat:  config.ReasoningFormat,
+		ReasoningEffort:  ReasoningEffort(config.ReasoningEffort),
 	}
 
-	if config.SystemPrompt != "" {
+	if systemPrompt := p.GetSystemPrompt(config); systemPrompt != "" {
 		reqBody.Messages = append([]Message{{
 			Role:    p.systemRole,
-			Content: config.SystemPrompt,
+			Content: systemPrompt,
 		}}, reqBody.Messages...)
 	}
 
@@ -353,6 +363,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 			prefillClosingTag: config.PrefillClosingTag,
 			messageStartSent:  false,
 			eventQueue:        make([]*llm.StreamEvent, 0),
+			toolCallsSent:     false,
 		}
 		return nil
 	}, retry.WithMaxRetries(6))
@@ -365,6 +376,17 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 
 func (p *Provider) SupportsStreaming() bool {
 	return true
+}
+
+func (p *Provider) GetSystemPrompt(c *llm.Config) string {
+	var parts []string
+	if p.corePrompt != "" {
+		parts = append(parts, p.corePrompt)
+	}
+	if c.SystemPrompt != "" {
+		parts = append(parts, c.SystemPrompt)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
 func convertMessages(messages []*llm.Message) ([]Message, error) {
@@ -446,6 +468,7 @@ type Stream struct {
 	closeOnce         sync.Once
 	messageStartSent  bool               // Track whether we've sent a message_start event
 	eventQueue        []*llm.StreamEvent // Queue to store events that need to be processed
+	toolCallsSent     bool               // Track whether we've sent a response with tool calls
 }
 
 type ToolCallAccumulator struct {
@@ -524,8 +547,13 @@ func (s *Stream) next() ([]*llm.StreamEvent, error) {
 
 	// Check for stream end
 	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-		// Return final response if we have tool calls or content blocks
+		// If we've already sent tool calls, just send a message stop event
+		if s.toolCallsSent {
+			return []*llm.StreamEvent{{Type: llm.EventMessageStop}}, nil
+		}
+		// Otherwise, send the final response if we have tool calls or content blocks
 		if len(s.toolCalls) > 0 || len(s.contentBlocks) > 0 {
+			s.toolCallsSent = true
 			return []*llm.StreamEvent{
 				{
 					Type:     llm.EventMessageStop,
@@ -561,6 +589,10 @@ func (s *Stream) next() ([]*llm.StreamEvent, error) {
 	if !s.messageStartSent && s.responseID != "" {
 		s.messageStartSent = true
 		events = append(events, &llm.StreamEvent{Type: llm.EventMessageStart})
+	}
+
+	if choice.Delta.Reasoning != "" {
+		// TODO: handle accumulated reasoning
 	}
 
 	// Handle text content
@@ -725,8 +757,21 @@ func (s *Stream) next() ([]*llm.StreamEvent, error) {
 				Type:       "message_delta",
 				StopReason: choice.FinishReason,
 			},
-			Response: s.buildFinalResponse(choice.FinishReason),
 		})
+
+		// If we have tool calls and haven't sent them yet, send them now
+		if len(s.toolCalls) > 0 && !s.toolCallsSent {
+			s.toolCallsSent = true
+			events = append(events, &llm.StreamEvent{
+				Type:     llm.EventMessageStop,
+				Response: s.buildFinalResponse(choice.FinishReason),
+			})
+		}
+
+		// If this is a tool_calls finish reason, we're done
+		if choice.FinishReason == "tool_calls" {
+			return events, nil
+		}
 	}
 
 	return events, nil
@@ -766,25 +811,17 @@ func (s *Stream) buildFinalResponse(stopReason string) *llm.Response {
 		}
 	}
 
-	// Ensure we have at least some token usage information
-	// OpenAI doesn't always include usage in streaming responses
-	inputTokens := s.usage.PromptTokens
-	if inputTokens == 0 && s.usage.TotalTokens > 0 {
-		// If we have total tokens but no prompt tokens, estimate
-		inputTokens = s.usage.TotalTokens - s.usage.CompletionTokens
-	}
-
 	return llm.NewResponse(llm.ResponseOptions{
 		ID:         s.responseID,
 		Model:      s.responseModel,
 		Role:       llm.Assistant,
 		StopReason: stopReason,
+		Message:    llm.NewMessage(llm.Assistant, contentBlocks),
+		ToolCalls:  toolCalls,
 		Usage: llm.Usage{
-			InputTokens:  inputTokens,
+			InputTokens:  s.usage.PromptTokens,
 			OutputTokens: s.usage.CompletionTokens,
 		},
-		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
-		ToolCalls: toolCalls,
 	})
 }
 

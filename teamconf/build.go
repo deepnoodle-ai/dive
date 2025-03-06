@@ -92,19 +92,20 @@ func buildAgent(
 	}
 
 	agent := dive.NewAgent(dive.AgentOptions{
-		Name:           agentDef.Name,
-		Description:    agentDef.Description,
-		Instructions:   agentDef.Instructions,
-		IsSupervisor:   agentDef.IsSupervisor,
-		Subordinates:   agentDef.Subordinates,
-		AcceptedEvents: agentDef.AcceptedEvents,
-		LLM:            llmProvider,
-		Tools:          agentTools,
-		TaskTimeout:    taskTimeout,
-		ChatTimeout:    chatTimeout,
-		CacheControl:   cacheControl,
-		LogLevel:       globalConfig.LogLevel,
-		Logger:         logger,
+		Name:               agentDef.Name,
+		Description:        agentDef.Description,
+		Instructions:       agentDef.Instructions,
+		IsSupervisor:       agentDef.IsSupervisor,
+		Subordinates:       agentDef.Subordinates,
+		AcceptedEvents:     agentDef.AcceptedEvents,
+		LLM:                llmProvider,
+		Tools:              agentTools,
+		TaskTimeout:        taskTimeout,
+		ChatTimeout:        chatTimeout,
+		CacheControl:       cacheControl,
+		LogLevel:           globalConfig.LogLevel,
+		Logger:             logger,
+		ToolIterationLimit: agentDef.ToolIterationLimit,
 	})
 	return agent, nil
 }
