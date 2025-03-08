@@ -2,16 +2,11 @@ package dive
 
 import (
 	"fmt"
-	"os"
-	"regexp"
 	"strings"
+	"time"
 
 	petname "github.com/dustinkirkland/golang-petname"
-	"github.com/getstingrai/dive/graph"
 	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/providers/anthropic"
-	"github.com/getstingrai/dive/providers/groq"
-	"github.com/getstingrai/dive/providers/openai"
 )
 
 func init() {
@@ -94,47 +89,28 @@ func TruncateText(text string, maxWords int) string {
 	return truncated
 }
 
-var newlinesRegex = regexp.MustCompile(`\n+`)
-
-func replaceNewlines(text string) string {
-	return newlinesRegex.ReplaceAllString(text, "<br>")
-}
-
-func detectProvider() (llm.LLM, bool) {
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		return anthropic.New(), true
-	}
-	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		return openai.New(), true
-	}
-	if key := os.Getenv("GROQ_API_KEY"); key != "" {
-		return groq.New(), true
-	}
-	return nil, false
-}
-
-func randomName() string {
+func RandomName() string {
 	return fmt.Sprintf("%s-%s", petname.Adjective(), petname.Name())
 }
 
-func sliceContains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+func DateString(t time.Time) string {
+	prompt := "The current date is " + t.Format("January 2, 2006") + "."
+	prompt += " It is a " + t.Format("Monday") + "."
+	return prompt
 }
 
-// OrderTasks sorts tasks into execution order using their dependencies.
-func OrderTasks(tasks []*Task) ([]string, error) {
-	nodes := make([]graph.Node, len(tasks))
-	for i, task := range tasks {
-		nodes[i] = task
+func AgentNames(agents []Agent) []string {
+	var agentNames []string
+	for _, agent := range agents {
+		agentNames = append(agentNames, agent.Name())
 	}
-	order, err := graph.New(nodes).TopologicalSort()
-	if err != nil {
-		return nil, fmt.Errorf("invalid task dependencies: %w", err)
-	}
-	return order, nil
+	return agentNames
 }
+
+// func TaskNames(tasks []Task) []string {
+// 	var taskNames []string
+// 	for _, task := range tasks {
+// 		taskNames = append(taskNames, task.Name())
+// 	}
+// 	return taskNames
+// }

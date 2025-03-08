@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/getstingrai/dive/teamconf"
+	"github.com/getstingrai/dive/config"
 	"github.com/spf13/cobra"
 )
 
@@ -20,12 +20,12 @@ var checkCmd = &cobra.Command{
 	Long:  "Validate a Dive configuration",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		conf, err := teamconf.LoadFile(args[0], getUserVariables())
+		conf, err := config.LoadDirectory(args[0])
 		if err != nil {
 			fmt.Printf("❌ %s\n", errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		fmt.Printf("✅ %q is valid\n", conf.Name)
+		fmt.Printf("✅ %q is valid\n", conf.Name())
 	},
 }
 

@@ -2,40 +2,40 @@ package llm
 
 import "context"
 
-// StreamEventType represents the type of streaming event
-type StreamEventType string
+// EventType represents the type of streaming event
+type EventType string
 
-func (e StreamEventType) String() string {
+func (e EventType) String() string {
 	return string(e)
 }
 
 const (
-	EventPing              StreamEventType = "ping"
-	EventMessageStart      StreamEventType = "message_start"
-	EventMessageDelta      StreamEventType = "message_delta"
-	EventMessageStop       StreamEventType = "message_stop"
-	EventContentBlockStart StreamEventType = "content_block_start"
-	EventContentBlockDelta StreamEventType = "content_block_delta"
-	EventContentBlockStop  StreamEventType = "content_block_stop"
+	EventPing              EventType = "ping"
+	EventMessageStart      EventType = "message_start"
+	EventMessageDelta      EventType = "message_delta"
+	EventMessageStop       EventType = "message_stop"
+	EventContentBlockStart EventType = "content_block_start"
+	EventContentBlockDelta EventType = "content_block_delta"
+	EventContentBlockStop  EventType = "content_block_stop"
 )
 
-// StreamEvent represents a single streaming event from the LLM. A successfully
+// Event represents a single streaming event from the LLM. A successfully
 // run stream will end with a final message containing the complete Response.
-type StreamEvent struct {
-	Type         StreamEventType `json:"type"`
-	Index        int             `json:"index"`
-	Message      *Message        `json:"message,omitempty"`
-	ContentBlock *ContentBlock   `json:"content_block,omitempty"`
-	Delta        *Delta          `json:"delta,omitempty"`
-	Usage        *Usage          `json:"usage,omitempty"`
-	Response     *Response       `json:"response,omitempty"`
+type Event struct {
+	Type         EventType     `json:"type"`
+	Index        int           `json:"index"`
+	Message      *Message      `json:"message,omitempty"`
+	ContentBlock *ContentBlock `json:"content_block,omitempty"`
+	Delta        *Delta        `json:"delta,omitempty"`
+	Usage        *Usage        `json:"usage,omitempty"`
+	Response     *Response     `json:"response,omitempty"`
 }
 
 // Stream represents a stream of LLM generation events
 type Stream interface {
 	// Next returns the next event in the stream. Returns nil when the stream is
 	// complete or if an error occurs. Errors can be retrieved via the Err method.
-	Next(ctx context.Context) (*StreamEvent, bool)
+	Next(ctx context.Context) (*Event, bool)
 
 	// Err returns any error that occurred while reading from the stream
 	Err() error

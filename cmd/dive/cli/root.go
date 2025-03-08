@@ -11,6 +11,8 @@ import (
 var (
 	userVarFlags  []string
 	userVariables map[string]interface{}
+	provider      string
+	model         string
 )
 
 // getUserVariables returns the user variables for the Team, as set on the command line.
@@ -46,6 +48,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(
 		&provider, "provider", "", "",
 		"LLM provider to use (e.g., 'anthropic', 'openai', 'groq')")
+
+	rootCmd.PersistentFlags().StringVarP(
+		&model, "model", "m", "",
+		"Model to use (e.g. 'claude-3-7-sonnet-20250219')")
 
 	rootCmd.PersistentFlags().StringArrayVarP(
 		&userVarFlags, "var", "", []string{},

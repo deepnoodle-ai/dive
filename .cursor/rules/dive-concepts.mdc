@@ -1,0 +1,90 @@
+---
+description: Architectural and multiple package awareness in Dive
+globs: 
+alwaysApply: true
+---
+# Dive Concepts
+
+## Environment
+
+An environment is a running Dive configuration containing:
+
+- One or more AI agents
+- Task definitions that define units of work
+- Workflow definitions that define steps to run
+- Environment configuration
+- Triggers that cause workflows to start executing
+- When a workflow is triggered it creates an "execution"
+
+## Workflow
+
+A Workflow is a template for a repeatable process:
+
+- Has defined inputs and outputs
+- Can be triggered manually or automatically
+- Can invoke other workflows (supporting composition)
+- Each workflow execution is tracked independently
+- Consists of a directed graph that defines execution steps
+
+## Task
+
+A Task defines a reusable unit of work:
+
+- May be run one or more times in a Workflow
+- Defines a specific action
+- Some types are executed by agents
+- Other types may execute scripts or take other non-agent action
+- Has defined inputs and outputs
+- Examples: "research topic X", "summarize webpage", etc.
+
+## Execution
+
+An execution represents a single run of a Workflow:
+
+- Maintains state and history for each step
+- May have multiple active execution paths
+- May be long-running
+- Executes the Workflow's graph of steps
+
+## Agent
+
+An Agent is an AI entity that takes action:
+
+- May be assigned tasks to help with Workflows
+- Has a defined name, description, and instructions that together define its role
+- May have "memory" so that it can recall what it previously worked on
+- May be a "supervisor", which allows it to assign work to other agents
+
+## Documents
+
+- Store structured or unstructured data
+- May be read or written by Agents and Tasks
+
+## Tables
+
+- Structured data storage for Agents
+- Queryable by Agents and Tasks within Workflows
+
+## Memory
+
+- Persistent context for an Agent
+- Supports agent learning and adaptation
+- Can be cleared or preserved
+
+## Triggers
+
+- Event-based workflow initiators
+- Can fire based on a schedule or external events
+- Creates a Workflow Execution when it fires
+
+## Integrations
+
+- Incoming and outgoing connections to external systems
+- Can be part of a Task, Trigger, or Tool
+
+## Tools
+
+- Used by Agents to take action in the world
+- May be read-only (for querying) or take some active action
+
+

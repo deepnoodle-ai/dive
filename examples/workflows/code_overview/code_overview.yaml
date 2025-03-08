@@ -1,0 +1,84 @@
+Name: 'Code Overview'
+Description: 'Generate a code overview for a given codebase'
+
+Config:
+  LLM:
+    DefaultProvider: anthropic
+    DefaultModel: claude-3-7-sonnet-20250219
+    CacheControl: ephemeral
+  Logging:
+    Level: info
+
+Tools:
+  - Name: Google.Search
+    Enabled: true
+  - Name: Firecrawl.Scrape
+    Enabled: true
+  - Name: Directory.List
+    Enabled: true
+  - Name: File.Read
+    Enabled: true
+
+Agents:
+  - Name: Engineer
+    Goal: Analyze codebases and generate project overviews
+    Tools:
+      - Google.Search
+      - Firecrawl.Scrape
+      - Directory.List
+      - File.Read
+
+Workflows:
+  - Name: Code Overview
+    Description: 'Generate a code overview for a given codebase'
+    Inputs:
+      - Name: directory
+        Type: string
+        Description: 'The directory to generate a code overview for'
+        Default: '.'
+    Steps:
+      - Name: List Files
+        Agent: Engineer
+        Prompt:
+          Text: |
+            List all files in the directory: "${inputs.directory}"
+          Output: The list of file names
+          OutputFormat: Markdown
+        Store: file_list
+
+      - Name: Read Key Files
+        Agent: Engineer
+        Prompt:
+          Text: |
+            Here are the files we discovered:
+            ${file_list}
+
+            Read what look like the most important 2 files and summarize them.
+          Output: The key files in the codebase
+          OutputFormat: Markdown
+        Store: key_files
+
+      - Name: Generate Code Overview
+        Agent: Engineer
+        Prompt:
+          Text: |
+            Generate a code overview for the codebase.
+
+            The files are:
+            ${file_list}
+
+            Information about key files:
+
+            ${key_files}
+
+            Keep it short and concise.
+
+          Output: The code overview
+          OutputFormat: Markdown
+        Store: code_overview
+
+      - Name: Write Document
+        Action: Document.Write
+        Parameters:
+          Path: output/code_overview.md
+          Content: ${code_overview}

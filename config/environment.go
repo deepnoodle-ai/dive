@@ -1,0 +1,170 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/getstingrai/dive"
+	"github.com/getstingrai/dive/document"
+	"github.com/getstingrai/dive/environment"
+	"github.com/getstingrai/dive/slogger"
+	"github.com/getstingrai/dive/workflow"
+	"gopkg.in/yaml.v3"
+)
+
+// Environment is a serializable representation of an AI agent environment
+type Environment struct {
+	Name        string     `yaml:"Name,omitempty" json:"Name,omitempty"`
+	Description string     `yaml:"Description,omitempty" json:"Description,omitempty"`
+	Version     string     `yaml:"Version,omitempty" json:"Version,omitempty"`
+	Config      Config     `yaml:"Config,omitempty" json:"Config,omitempty"`
+	Tools       []Tool     `yaml:"Tools,omitempty" json:"Tools,omitempty"`
+	Documents   []Document `yaml:"Documents,omitempty" json:"Documents,omitempty"`
+	Agents      []Agent    `yaml:"Agents,omitempty" json:"Agents,omitempty"`
+	Workflows   []Workflow `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
+	Triggers    []Trigger  `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
+	Schedules   []Schedule `yaml:"Schedules,omitempty" json:"Schedules,omitempty"`
+	Prompts     []Prompt   `yaml:"Prompts,omitempty" json:"Prompts,omitempty"`
+}
+
+// Save writes an Environment configuration to a file. The file extension is used to
+// determine the configuration format:
+// - .json -> JSON
+// - .yml or .yaml -> YAML
+func (env *Environment) Save(path string) error {
+	// Determine format from extension
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".json":
+		return env.SaveJSON(path)
+	case ".yml", ".yaml":
+		return env.SaveYAML(path)
+	default:
+		return fmt.Errorf("unsupported file extension: %s", ext)
+	}
+}
+
+// SaveYAML writes an Environment configuration to a YAML file
+func (env *Environment) SaveYAML(path string) error {
+	data, err := yaml.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// SaveJSON writes an Environment configuration to a JSON file
+func (env *Environment) SaveJSON(path string) error {
+	data, err := json.MarshalIndent(env, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// Write an Environment configuration to a writer in YAML format
+func (env *Environment) Write(w io.Writer) error {
+	return yaml.NewEncoder(w).Encode(env)
+}
+
+// Build creates a new Environment from the configuration
+func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, error) {
+	buildOpts := &BuildOptions{}
+	for _, opt := range opts {
+		opt(buildOpts)
+	}
+
+	var logger slogger.Logger = slogger.DefaultLogger
+	if buildOpts.Logger != nil {
+		logger = buildOpts.Logger
+	} else if env.Config.Logging.Level != "" {
+		level := slogger.LevelFromString(env.Config.Logging.Level)
+		logger = slogger.New(level)
+	}
+
+	// Tools
+	toolsMap, err := initializeTools(env.Tools)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tools: %w", err)
+	}
+
+	// Agents
+	agents := make([]dive.Agent, 0, len(env.Agents))
+	for _, agentDef := range env.Agents {
+		agent, err := buildAgent(agentDef, env.Config, toolsMap, logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
+		}
+		agents = append(agents, agent)
+	}
+
+	// Prompts
+	var prompts []*dive.Prompt
+	for _, promptDef := range env.Prompts {
+		prompt, err := buildPrompt(promptDef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build prompt %s: %w", promptDef.Name, err)
+		}
+		prompts = append(prompts, prompt)
+	}
+
+	// Workflows
+	var workflows []*workflow.Workflow
+	for _, workflowDef := range env.Workflows {
+		workflow, err := buildWorkflow(workflowDef, agents, prompts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build workflow %s: %w", workflowDef.Name, err)
+		}
+		workflows = append(workflows, workflow)
+	}
+
+	// Triggers
+	var triggers []*environment.Trigger
+	for _, triggerDef := range env.Triggers {
+		trigger, err := buildTrigger(triggerDef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build trigger %s: %w", triggerDef.Name, err)
+		}
+		triggers = append(triggers, trigger)
+	}
+
+	if buildOpts.DocumentsDir != "" && buildOpts.DocumentsRepo != nil {
+		return nil, fmt.Errorf("documents dir and repo cannot both be set")
+	}
+	var repo document.Repository
+	if buildOpts.DocumentsRepo != nil {
+		repo = buildOpts.DocumentsRepo
+	} else {
+		dir := buildOpts.DocumentsDir
+		if dir == "" {
+			if env.Config.Documents.Root != "" {
+				dir = env.Config.Documents.Root
+			} else {
+				dir = "."
+			}
+		}
+		repo, err = document.NewFileSysRepository(dir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create document repository: %w", err)
+		}
+	}
+
+	// Environment
+	result, err := environment.New(environment.EnvironmentOptions{
+		Name:         env.Name,
+		Description:  env.Description,
+		Agents:       agents,
+		Workflows:    workflows,
+		Triggers:     triggers,
+		Logger:       logger,
+		DocumentRepo: repo,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create environment: %w", err)
+	}
+	return result, nil
+}

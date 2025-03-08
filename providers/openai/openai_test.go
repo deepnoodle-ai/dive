@@ -25,19 +25,17 @@ func TestHelloWorld(t *testing.T) {
 func TestHelloWorldStream(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	stream, err := provider.Stream(ctx, []*llm.Message{
+	iterator, err := provider.Stream(ctx, []*llm.Message{
 		llm.NewUserMessage("count to 10. respond with the integers only, separated by spaces."),
 	})
 	require.NoError(t, err)
 
-	var events []*llm.StreamEvent
-	for {
-		event, ok := stream.Next(ctx)
-		if !ok {
-			break
-		}
+	var events []*llm.Event
+	for iterator.Next() {
+		event := iterator.Event()
 		events = append(events, event)
 	}
+	require.NoError(t, iterator.Err())
 
 	var finalResponse *llm.Response
 	var finalText string
@@ -180,21 +178,18 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 		},
 	}
 
-	stream, err := provider.Stream(ctx, messages,
+	iterator, err := provider.Stream(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
 		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
 	)
 	require.NoError(t, err)
 
 	var toolCalls []llm.ToolCall
-	for {
-		event, ok := stream.Next(ctx)
-		if !ok {
-			break
-		}
+	for iterator.Next() {
+		event := iterator.Event()
 		if event.Response != nil {
-			fmt.Printf("response: %+v\n", event.Response)
-			fmt.Println("tool call count:", len(event.Response.ToolCalls()))
+			// fmt.Printf("response: %+v\n", event.Response)
+			// fmt.Println("tool call count:", len(event.Response.ToolCalls()))
 			toolCalls = append(toolCalls, event.Response.ToolCalls()...)
 		}
 	}
@@ -243,20 +238,18 @@ func TestToolUseStream(t *testing.T) {
 		},
 	}
 
-	stream, err := provider.Stream(ctx, messages,
+	iterator, err := provider.Stream(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
 		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
 	)
 	require.NoError(t, err)
 
-	var events []*llm.StreamEvent
-	for {
-		event, ok := stream.Next(ctx)
-		if !ok {
-			break
-		}
+	var events []*llm.Event
+	for iterator.Next() {
+		event := iterator.Event()
 		events = append(events, event)
 	}
+	require.NoError(t, iterator.Err())
 
 	var finalResponse *llm.Response
 	var jsonParts []string

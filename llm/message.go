@@ -43,6 +43,7 @@ type Content struct {
 
 // Message passed to an LLM for generation.
 type Message struct {
+	ID      string     `json:"id,omitempty"`
 	Role    Role       `json:"role"`
 	Content []*Content `json:"content"`
 }
@@ -114,25 +115,3 @@ func NewToolResultMessage(results []*ToolResult) *Message {
 	}
 	return &Message{Role: User, Content: content}
 }
-
-// type RawMessage struct {
-// 	Role    Role            `json:"role"`
-// 	Content json.RawMessage `json:"content"`
-// }
-
-// func (m *RawMessage) Parse() (*Message, error) {
-// 	message := &Message{Role: m.Role}
-// 	// First try to unmarshal as string
-// 	var stringContent string
-// 	if err := json.Unmarshal(m.Content, &stringContent); err == nil {
-// 		message.Text = stringContent
-// 		return message, nil
-// 	}
-// 	// If that fails, try to unmarshal as array of Content
-// 	var contentArray []Content
-// 	if err := json.Unmarshal(m.Content, &contentArray); err != nil {
-// 		return nil, fmt.Errorf("content must be either string or array: %w", err)
-// 	}
-// 	message.Content = contentArray
-// 	return message, nil
-// }
