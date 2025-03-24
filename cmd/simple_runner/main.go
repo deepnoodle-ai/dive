@@ -57,6 +57,9 @@ func main() {
 	if err != nil {
 		fatal(err.Error())
 	}
+	if err := env.Start(ctx); err != nil {
+		fatal(err.Error())
+	}
 
 	// Choose the workflow to run
 	var workflow *workflow.Workflow
