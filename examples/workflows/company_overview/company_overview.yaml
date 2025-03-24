@@ -1,0 +1,92 @@
+Name: 'Company Analysis'
+Description: 'Generate a company overview by analyzing their website'
+
+Config:
+  LLM:
+    DefaultProvider: anthropic
+    DefaultModel: claude-3-7-sonnet-20250219
+    CacheControl: ephemeral
+  Logging:
+    Level: debug
+
+Tools:
+  - Name: Google.Search
+    Enabled: true
+  - Name: Firecrawl.Scrape
+    Enabled: true
+
+Agents:
+  - Name: Analyst
+    Goal: Analyze company websites to understand their products, market position, and messaging
+    Tools:
+      - Google.Search
+      - Firecrawl.Scrape
+
+Workflows:
+  - Name: Company Analysis
+    Description: 'Generate a company overview by analyzing their website'
+    Inputs:
+      - Name: company
+        Type: string
+        Description: 'Company name or website URL'
+    Steps:
+      - Name: Discover Homepage
+        Agent: Analyst
+        Prompt:
+          Text: |
+            Find the official homepage URL for the company: "${inputs.company}"
+
+            If a direct URL was provided, verify it's the main company homepage.
+            If a company name was provided, search for their official website.
+
+            Return only the verified homepage URL.
+          Output: The company's homepage URL
+          OutputFormat: string
+        Store: homepage_url
+
+      - Name: Scrape Website
+        Agent: Analyst
+        Prompt:
+          Text: |
+            Analyze the content from this company homepage: ${homepage_url}
+
+            The company is: ${inputs.company}
+
+            Focus on:
+            1. Main product/service offerings
+            2. Target market and customers
+            3. Key value propositions
+            4. Brand messaging and tone
+
+            Scrape the homepage and any immediately linked product/about pages.
+          Output: The raw website content and initial observations
+          OutputFormat: Markdown
+        Store: website_content
+
+      - Name: Generate Analysis
+        Agent: Analyst
+        Prompt:
+          Text: |
+            Based on the website content, generate a short, structured analysis of the company.
+
+            The company is: ${inputs.company}
+
+            Website content and observations:
+            ${website_content}
+
+            Please provide:
+            1. Core Products/Services: What are their main offerings?
+            2. Market Position: Who do they serve? What market segments?
+            3. Value Proposition: What key benefits/value do they promise?
+            4. Messaging Analysis: How do they communicate? What themes emerge?
+
+            Make it concise but comprehensive.
+          Output: The company analysis
+          OutputFormat: Markdown
+        Store: company_analysis
+
+      - Name: Write Document
+        Action: Document.Write
+        Parameters:
+          Path: output/company_analysis.md
+          Content: ${company_analysis}

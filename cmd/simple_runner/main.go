@@ -24,7 +24,7 @@ func fatal(msg string, args ...interface{}) {
 
 func main() {
 	var varsFlag, workflowName string
-	flag.StringVar(&varsFlag, "vars", "", "Comma-separated list of variables in format key=value")
+	flag.StringVar(&varsFlag, "var", "", "Comma-separated list of variables in format key=value")
 	flag.StringVar(&workflowName, "workflow", "", "Workflow name")
 	flag.Parse()
 
