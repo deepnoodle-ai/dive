@@ -72,6 +72,14 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	}
 	defer env.Stop(ctx)
 
+	if workflowName == "" {
+		workflows := env.Workflows()
+		if len(workflows) != 1 {
+			return fmt.Errorf("you must specify a workflow name")
+		}
+		workflowName = workflows[0].Name()
+	}
+
 	execution, err := env.ExecuteWorkflow(ctx, workflowName, getUserVariables())
 	if err != nil {
 		return fmt.Errorf("error executing workflow: %v", err)
