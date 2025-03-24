@@ -10,8 +10,8 @@ import (
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Validate Dive configuration",
-	Long:  "Validate Dive configuration",
+	Short: "Work with Dive configurations",
+	Long:  "Work with Dive configurations",
 }
 
 var checkCmd = &cobra.Command{
@@ -20,16 +20,17 @@ var checkCmd = &cobra.Command{
 	Long:  "Validate a Dive configuration",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		conf, err := config.LoadDirectory(args[0])
+		env, err := config.LoadDirectory(args[0])
 		if err != nil {
 			fmt.Printf("❌ %s\n", errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		fmt.Printf("✅ %q is valid\n", conf.Name())
+		fmt.Printf("✅ %q is valid\n", env.Name())
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(configCmd)
+
 	configCmd.AddCommand(checkCmd)
 }

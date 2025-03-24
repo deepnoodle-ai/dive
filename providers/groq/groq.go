@@ -30,14 +30,18 @@ type Provider struct {
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:    os.Getenv("GROQ_API_KEY"),
-		endpoint:  DefaultEndpoint,
-		model:     DefaultModel,
-		maxTokens: DefaultMaxTokens,
-		client:    http.DefaultClient,
+		apiKey:   os.Getenv("GROQ_API_KEY"),
+		endpoint: DefaultEndpoint,
+		client:   http.DefaultClient,
 	}
 	for _, opt := range opts {
 		opt(p)
+	}
+	if p.model == "" {
+		p.model = DefaultModel
+	}
+	if p.maxTokens == 0 {
+		p.maxTokens = DefaultMaxTokens
 	}
 	// Pass the options through to the wrapped OpenAI provider
 	oai := openai.New(

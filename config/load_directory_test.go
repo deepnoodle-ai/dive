@@ -14,8 +14,8 @@ func TestParseFile(t *testing.T) {
 
 	// Test YAML file
 	yamlContent := `
-name: test-env
-description: Test Environment
+Name: test-env
+Description: Test Environment
 `
 	yamlFile := filepath.Join(tmpDir, "test.yaml")
 	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
@@ -23,8 +23,8 @@ description: Test Environment
 
 	// Test JSON file
 	jsonContent := `{
-		"name": "test-env",
-		"description": "Test Environment"
+		"Name": "test-env",
+		"Description": "Test Environment"
 	}`
 	jsonFile := filepath.Join(tmpDir, "test.json")
 	err = os.WriteFile(jsonFile, []byte(jsonContent), 0644)
@@ -86,8 +86,8 @@ func TestParseYAML(t *testing.T) {
 		{
 			name: "valid yaml",
 			data: []byte(`
-name: test-env
-description: Test Environment
+Name: test-env
+Description: Test Environment
 `),
 			wantErr: false,
 		},

@@ -26,6 +26,7 @@ type Environment struct {
 	documentRepo    document.Repository
 	knownDocuments  map[string]*document.Metadata
 	actions         map[string]Action
+	started         bool
 }
 
 // EnvironmentOptions configures a new environment
@@ -113,21 +114,12 @@ func New(opts EnvironmentOptions) (*Environment, error) {
 		knownDocuments:  opts.KnownDocuments,
 		actions:         actions,
 	}
-
 	for _, trigger := range env.triggers {
 		trigger.SetEnvironment(env)
 	}
-
 	for _, agent := range env.Agents() {
 		agent.SetEnvironment(env)
 	}
-
-	for _, agent := range env.Agents() {
-		if runnableAgent, ok := agent.(dive.RunnableAgent); ok {
-			runnableAgent.Start(context.Background())
-		}
-	}
-
 	return env, nil
 }
 
@@ -151,13 +143,35 @@ func (e *Environment) KnownDocuments() map[string]*document.Metadata {
 	return e.knownDocuments
 }
 
-func (e *Environment) Stop(ctx context.Context) {
+func (e *Environment) Start(ctx context.Context) error {
+	if e.started {
+		return fmt.Errorf("environment already started")
+	}
+	e.started = true
+	for _, agent := range e.Agents() {
+		if runnableAgent, ok := agent.(dive.RunnableAgent); ok {
+			runnableAgent.Start(ctx)
+		}
+	}
+	return nil
+}
+
+func (e *Environment) Stop(ctx context.Context) error {
+	if !e.started {
+		return fmt.Errorf("environment not started")
+	}
 	for _, agent := range e.Agents() {
 		if runnableAgent, ok := agent.(dive.RunnableAgent); ok {
 			runnableAgent.Stop(ctx)
 		}
 	}
-	// TODO: stop executions
+	// TODO: stop executions?
+	e.started = false
+	return nil
+}
+
+func (e *Environment) IsRunning() bool {
+	return e.started
 }
 
 func (e *Environment) Agents() []dive.Agent {
@@ -209,6 +223,16 @@ func (e *Environment) AddWorkflow(workflow *workflow.Workflow) error {
 // ExecuteWorkflow starts a new workflow and immediately returns the execution,
 // which will be running in the background.
 func (e *Environment) ExecuteWorkflow(ctx context.Context, name string, inputs map[string]interface{}) (*Execution, error) {
+	if !e.started {
+		return nil, fmt.Errorf("environment not started")
+	}
+	if name == "" {
+		if e.defaultWorkflow == "" {
+			return nil, fmt.Errorf("a workflow name is required")
+		}
+		name = e.defaultWorkflow
+	}
+
 	workflow, exists := e.workflows[name]
 	if !exists {
 		return nil, fmt.Errorf("workflow not found: %s", name)

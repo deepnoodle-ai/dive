@@ -5,25 +5,32 @@ import (
 	"os"
 	"strings"
 
+	"github.com/getstingrai/dive/slogger"
 	"github.com/spf13/cobra"
 )
 
 var (
 	userVarFlags  []string
 	userVariables map[string]interface{}
-	provider      string
-	model         string
+	llmProvider   string
+	llmModel      string
+	logLevel      string
 )
 
-// getUserVariables returns the user variables for the Team, as set on the command line.
 func getUserVariables() map[string]interface{} {
 	return userVariables
 }
 
+func getLogLevel() slogger.LogLevel {
+	return slogger.LevelFromString(logLevel)
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "dive",
-	Short: "Dive runs teams of AI agents.",
-	Long:  `Dive runs teams of AI agents.`,
+	Short: "Dive runs AI agent workflows.",
+	Long:  "Dive runs AI agent workflows.",
+
+	// Extract user-provided variables from --var flags.
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		userVariables = make(map[string]interface{}, len(userVarFlags))
 		for _, v := range userVarFlags {
@@ -45,15 +52,21 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.CompletionOptions.HiddenDefaultCmd = true
+
 	rootCmd.PersistentFlags().StringVarP(
-		&provider, "provider", "", "",
+		&llmProvider, "provider", "", "",
 		"LLM provider to use (e.g., 'anthropic', 'openai', 'groq')")
 
 	rootCmd.PersistentFlags().StringVarP(
-		&model, "model", "m", "",
+		&llmModel, "model", "m", "",
 		"Model to use (e.g. 'claude-3-7-sonnet-20250219')")
 
 	rootCmd.PersistentFlags().StringArrayVarP(
 		&userVarFlags, "var", "", []string{},
 		"Set a variable (format: key=value). Can be specified multiple times")
+
+	rootCmd.PersistentFlags().StringVarP(
+		&logLevel, "log-level", "l", "info",
+		"Log level to use (debug, info, warn, error)")
 }

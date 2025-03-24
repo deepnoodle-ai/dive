@@ -33,20 +33,23 @@ type Provider struct {
 	model     string
 	version   string
 	maxTokens int
-	caching   bool
 }
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:    os.Getenv("ANTHROPIC_API_KEY"),
-		client:    http.DefaultClient,
-		endpoint:  DefaultEndpoint,
-		version:   DefaultVersion,
-		model:     DefaultModel,
-		maxTokens: DefaultMaxTokens,
+		apiKey:   os.Getenv("ANTHROPIC_API_KEY"),
+		client:   http.DefaultClient,
+		endpoint: DefaultEndpoint,
+		version:  DefaultVersion,
 	}
 	for _, opt := range opts {
 		opt(p)
+	}
+	if p.model == "" {
+		p.model = DefaultModel
+	}
+	if p.maxTokens == 0 {
+		p.maxTokens = DefaultMaxTokens
 	}
 	return p
 }
