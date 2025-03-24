@@ -358,116 +358,6 @@ func (e *Execution) handlePathBranching(
 	return newPaths, nil
 }
 
-// processTaskInputs processes and validates task inputs for a step
-// func (e *Execution) processTaskInputs(
-// 	ctx context.Context,
-// 	currentStep *workflow.Step,
-// 	extras map[string]any,
-// ) (map[string]interface{}, error) {
-
-// 	task := &Task{
-// 		name: currentStep.Name(),
-// 		step: currentStep,
-// 	}
-
-// 	withCopy := make(map[string]any)
-// 	for k, v := range extras {
-// 		withCopy[k] = v
-// 	}
-
-// 	globals := map[string]any{
-// 		"inputs": e.inputs,
-// 	}
-// 	if repo := e.environment.DocumentRepository(); repo != nil {
-// 		globals["documents"] = objects.NewDocumentRepository(repo)
-// 	}
-
-// 	// Evaluate the prompt text
-// 	promptText := currentStep.Prompt().Text
-
-// 	// Determine task inputs
-// 	processedInputs := make(map[string]interface{})
-// 	for name, input := range taskInputs {
-// 		value, exists := withCopy[name]
-// 		if !exists {
-// 			if input.Default == nil {
-// 				return nil, fmt.Errorf("required input %q not provided in step %q", name, currentStep.Name())
-// 			}
-// 			value = input.Default
-// 		}
-// 		if code, ok := currentStep.Code(name); ok {
-// 			result, err := eval(ctx, code, globals)
-// 			if err != nil {
-// 				return nil, fmt.Errorf("failed to evaluate code for input %q: %w", name, err)
-// 			}
-// 			processedInputs[name] = result
-// 		} else {
-// 			processedInputs[name] = value
-// 		}
-// 	}
-
-// 	// Validate no unknown inputs
-// 	for name := range withInputs {
-// 		if _, exists := taskInputs[name]; !exists {
-// 			return nil, fmt.Errorf("unknown input %q provided in step %q", name, currentStep.Name())
-// 		}
-// 	}
-
-// 	return processedInputs, nil
-// }
-
-// handleEachBlock processes an each block and returns the combined result
-// func (e *Execution) handleEachBlock(
-// 	ctx context.Context,
-// 	agent dive.Agent,
-// 	step *workflow.Step,
-// 	each *workflow.EachBlock,
-// 	logger slogger.Logger,
-// ) (string, error) {
-// 	task := step.Task()
-// 	items, err := e.resolveEachItems(ctx, each, logger)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	e.logger.Info("each block items",
-// 		"items", items,
-// 		"count", len(items),
-// 		"step", step.Name(),
-// 	)
-// 	// Process each item sequentially for now
-// 	var results []string
-// 	for i, item := range items {
-// 		itemName := fmt.Sprintf("%s-%d", step.Name(), i+1)
-// 		e.logger.Info("processing item",
-// 			"item_name", itemName,
-// 			"item", item,
-// 			"as", each.As,
-// 		)
-// 		result, err := e.processEachItem(ctx, step, agent, itemName, item, each.As)
-// 		if err != nil {
-// 			return "", fmt.Errorf("failed to process item: %w", err)
-// 		}
-// 		results = append(results, result)
-// 	}
-// 	combined := strings.Join(results, "\n\n")
-
-// 	// Determine which output to use, with the step taking precedence
-// 	var output *dive.Output
-// 	if task.Output() != nil {
-// 		output = task.Output()
-// 	}
-// 	if step.Output() != nil {
-// 		output = step.Output()
-// 	}
-// 	if output != nil && output.Document != "" {
-// 		if err := e.saveOutput(ctx, step, combined, output, logger); err != nil {
-// 			return "", fmt.Errorf("failed to save output: %w", err)
-// 		}
-// 	}
-
-// 	return combined, nil
-// }
-
 // resolveEachItems resolves the array of items from either a direct array or a risor expression
 func (e *Execution) resolveEachItems(ctx context.Context, each *workflow.EachBlock) ([]string, error) {
 	// Handle array of strings directly
@@ -534,13 +424,8 @@ func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string)
 	return resultItems, nil
 }
 
-// handleStepExecution executes a single step and returns the result
-func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath, agent dive.Agent) (*dive.TaskResult, error) {
-	step := path.currentStep
-	// Update path state
-	e.updatePathState(path.id, func(state *PathState) {
-		state.CurrentStep = step
-	})
+// executeStepCore handles the core execution of a single step without "Each" logic
+func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.TaskResult, error) {
 	var result *dive.TaskResult
 	var err error
 	// Handle different step types
@@ -555,12 +440,66 @@ func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath
 	if err != nil {
 		return nil, err
 	}
+
 	// Store the output in a variable if specified
 	if varName := step.Store(); varName != "" {
 		e.scriptGlobals[varName] = object.NewString(result.Content)
 		e.logger.Info("stored step result", "variable_name", varName)
 	}
 	return result, nil
+}
+
+// handleStepExecution executes a single step and returns the result
+func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath, agent dive.Agent) (*dive.TaskResult, error) {
+	step := path.currentStep
+	e.updatePathState(path.id, func(state *PathState) {
+		state.CurrentStep = step
+	})
+	if step.Each() != nil {
+		return e.executeStepEach(ctx, step, agent)
+	}
+	return e.executeStepCore(ctx, step, agent)
+}
+
+// executeStepEach handles the execution of a step that has an each block
+func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.TaskResult, error) {
+	each := step.Each()
+
+	// Resolve the items to iterate over
+	items, err := e.resolveEachItems(ctx, each)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve each items: %w", err)
+	}
+
+	// Execute the step for each item and capture the results
+	var results []*dive.TaskResult
+	for _, item := range items {
+		if varName := each.As; varName != "" {
+			e.scriptGlobals[varName] = object.NewString(item)
+		}
+		result, err := e.executeStepCore(ctx, step, agent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to handle step execution: %w", err)
+		}
+		results = append(results, result)
+	}
+
+	// Combine the results into one string which we put in a single task result
+	var itemTexts []string
+	for i, result := range results {
+		var itemText string
+		if each.As != "" {
+			itemText = fmt.Sprintf("# %s: %s\n\n%s", each.As, items[i], result.Content)
+		} else {
+			itemText = fmt.Sprintf("# %s\n\n%s", items[i], result.Content)
+		}
+		itemTexts = append(itemTexts, itemText)
+	}
+
+	return &dive.TaskResult{
+		Content: strings.Join(itemTexts, "\n\n"),
+		Format:  dive.OutputMarkdown,
+	}, nil
 }
 
 // handlePromptStep handles a prompt step by creating a task and assigning it to an agent
@@ -570,6 +509,7 @@ func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, a
 	if prompt == nil {
 		return nil, fmt.Errorf("prompt step %q has no prompt", step.Name())
 	}
+
 	// Evaluate the prompt text as a template
 	promptText, err := eval.Eval(ctx, prompt.Text, e.scriptGlobals)
 	if err != nil {
@@ -585,6 +525,7 @@ func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, a
 			OutputFormat: prompt.OutputFormat,
 		},
 	}
+
 	// Execute the task
 	result, err := executeTask(ctx, agent, task)
 	if err != nil {
@@ -604,6 +545,7 @@ func (e *Execution) handleActionStep(ctx context.Context, step *workflow.Step) (
 	if !ok {
 		return nil, fmt.Errorf("action %q not found", actionName)
 	}
+
 	// Process parameters
 	params := make(map[string]interface{})
 	for name, value := range step.Parameters() {
@@ -618,12 +560,14 @@ func (e *Execution) handleActionStep(ctx context.Context, step *workflow.Step) (
 			params[name] = value
 		}
 	}
+
 	// Execute the action
 	result, err := action.Execute(ctx, params)
 	if err != nil {
 		e.logger.Error("action execution failed", "action", actionName, "error", err)
 		return nil, err
 	}
+
 	// Convert action result to task result
 	var content string
 	if result != nil {
@@ -727,37 +671,6 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath, updates ch
 		path = newPaths[0]
 	}
 }
-
-// processEachItem processes a single item in an each block
-// func (e *Execution) processEachItem(ctx context.Context, step *workflow.Step, agent dive.Agent, itemName, value, as string) (string, error) {
-// 	// Create inputs with the item value
-// 	extras := map[string]any{}
-// 	if as != "" {
-// 		// Add the item value to the inputs using the 'as' name
-// 		extras[as] = value
-// 	}
-// 	processedInputs, err := e.processTaskInputs(ctx, step, extras)
-// 	if err != nil {
-// 		return "", fmt.Errorf("failed to process task inputs: %w", err)
-// 	}
-
-// 	// Create a new task with a unique name for this iteration
-// 	originalTask := step.Task()
-// 	uniqueTask := workflow.NewTask(workflow.TaskOptions{
-// 		Name:        itemName,
-// 		Description: originalTask.Description(),
-// 		Inputs:      originalTask.Inputs(),
-// 		Output:      originalTask.Output(),
-// 		Agent:       originalTask.Agent(),
-// 	})
-
-// 	// Execute task with the unique name
-// 	result, err := executeTask(ctx, agent, uniqueTask, processedInputs)
-// 	if err != nil {
-// 		return "", fmt.Errorf("failed to execute task: %w", err)
-// 	}
-// 	return result.Content, nil
-// }
 
 // compileScript compiles a risor script with the given globals
 func compileScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
@@ -871,22 +784,6 @@ func (e *Execution) StepOutputs() map[string]string {
 		}
 	}
 	return outputs
-}
-
-func (e *Execution) evalScript(ctx context.Context, code string) (object.Object, error) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-
-	code = strings.TrimSuffix(strings.TrimPrefix(code, "$("), ")")
-	compiledCode, err := compileScript(ctx, code, e.scriptGlobals)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile script: %w", err)
-	}
-	result, err := risor.EvalCode(ctx, compiledCode, risor.WithGlobals(e.scriptGlobals))
-	if err != nil {
-		return nil, fmt.Errorf("failed to evaluate code: %w", err)
-	}
-	return result, nil
 }
 
 func executeTask(ctx context.Context, agent dive.Agent, task dive.Task) (*dive.TaskResult, error) {
