@@ -3,40 +3,79 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/getstingrai/dive/config"
 	"github.com/getstingrai/dive/slogger"
 	"github.com/spf13/cobra"
 )
 
-func runWorkflow(filePath string, logLevel string) error {
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("error opening source file: %v", err)
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("error creating destination file: %v", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("error copying file: %v", err)
+	}
+	return nil
+}
+
+func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	ctx := context.Background()
 
-	// Build environment from config file
-	buildOpts := []config.BuildOption{}
-	if logLevel != "" {
-		buildOpts = append(buildOpts, config.WithLogger(slogger.New(slogger.LevelFromString(logLevel))))
+	// Check if path is a directory or file
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("error accessing path: %v", err)
 	}
 
-	env, err := config.LoadDirectory(filePath, buildOpts...)
+	configDir := path
+
+	// If a single file is provided, copy it to a temporary directory
+	// and use that as the config directory.
+	if !fi.IsDir() {
+		tmpDir, err := os.MkdirTemp("", "dive-config-*")
+		if err != nil {
+			return fmt.Errorf("error creating temp directory: %v", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		dst := filepath.Join(tmpDir, filepath.Base(path))
+		if err := copyFile(path, dst); err != nil {
+			return err
+		}
+		configDir = tmpDir
+	}
+
+	buildOpts := []config.BuildOption{}
+	if logLevel != 0 {
+		logger := slogger.New(logLevel)
+		buildOpts = append(buildOpts, config.WithLogger(logger))
+	}
+	env, err := config.LoadDirectory(configDir, buildOpts...)
 	if err != nil {
 		return fmt.Errorf("error loading environment: %v", err)
 	}
-
-	// Get the default workflow
-	workflows := env.Workflows()
-	if len(workflows) == 0 {
-		return fmt.Errorf("no workflows defined")
+	if err := env.Start(ctx); err != nil {
+		return fmt.Errorf("error starting environment: %v", err)
 	}
-	workflow := workflows[0]
+	defer env.Stop(ctx)
 
-	// Execute the workflow
-	execution, err := env.ExecuteWorkflow(ctx, workflow.Name(), map[string]interface{}{})
+	execution, err := env.ExecuteWorkflow(ctx, workflowName, getUserVariables())
 	if err != nil {
 		return fmt.Errorf("error executing workflow: %v", err)
 	}
-
 	if err := execution.Wait(); err != nil {
 		return fmt.Errorf("error waiting for workflow: %v", err)
 	}
@@ -60,18 +99,18 @@ func runWorkflow(filePath string, logLevel string) error {
 }
 
 var runCmd = &cobra.Command{
-	Use:   "run [file]",
+	Use:   "run [file or directory]",
 	Short: "Run a workflow",
-	Long:  `Run a workflow defined in a YAML file`,
+	Long:  "Run a workflow",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		filePath := args[0]
-		logLevel, err := cmd.Flags().GetString("log-level")
+		workflowName, err := cmd.Flags().GetString("workflow")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		if err := runWorkflow(filePath, logLevel); err != nil {
+		if err := runWorkflow(filePath, workflowName, getLogLevel()); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -80,5 +119,6 @@ var runCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().StringP("log-level", "", "", "Log level to use (debug, info, warn, error)")
+
+	runCmd.Flags().StringP("workflow", "w", "", "Name of the workflow to run")
 }

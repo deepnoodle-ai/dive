@@ -25,11 +25,11 @@ func TestEnvironment_Build(t *testing.T) {
 		},
 		Tools: []Tool{
 			{
-				Name:    "google_search",
+				Name:    "Google.Search",
 				Enabled: true,
 			},
 			{
-				Name:    "file_read",
+				Name:    "File.Read",
 				Enabled: true,
 			},
 		},
@@ -39,31 +39,31 @@ func TestEnvironment_Build(t *testing.T) {
 				Goal:     "Assist with research",
 				Provider: "anthropic",
 				Model:    "claude-3-sonnet-20240229",
-				Tools:    []string{"google_search", "file_read"},
+				Tools:    []string{"Google.Search", "File.Read"},
 			},
 			{
 				Name:     "writer",
 				Goal:     "Write compelling content",
 				Provider: "anthropic",
 				Model:    "claude-3-sonnet-20240229",
-				Tools:    []string{"file_read"},
+				Tools:    []string{"File.Read"},
 			},
 		},
 		Workflows: []Workflow{
 			{
-				Name:        "research-and-write",
+				Name:        "Research and Write",
 				Description: "Research and write workflow",
 				Steps: []Step{
 					{
-						Name: "research-step",
+						Name: "Research",
 						Next: []NextStep{
 							{
-								Step: "write-step",
+								Step: "Write",
 							},
 						},
 					},
 					{
-						Name: "write-step",
+						Name: "Write",
 					},
 				},
 			},
@@ -104,7 +104,7 @@ func TestEnvironment_Build(t *testing.T) {
 	assert.Len(t, workflows, 1)
 
 	// Verify research-and-write workflow
-	researchWorkflow := findWorkflowByName(workflows, "research-and-write")
+	researchWorkflow := findWorkflowByName(workflows, "Research and Write")
 	assert.NotNil(t, researchWorkflow)
 	assert.Equal(t, "Research and write workflow", researchWorkflow.Description())
 
@@ -117,8 +117,8 @@ func TestEnvironment_Build(t *testing.T) {
 	for i, step := range steps {
 		stepNames[i] = step.Name()
 	}
-	assert.Contains(t, stepNames, "research-step")
-	assert.Contains(t, stepNames, "write-step")
+	assert.Contains(t, stepNames, "Research")
+	assert.Contains(t, stepNames, "Write")
 }
 
 func findAgentByName(agents []dive.Agent, name string) dive.Agent {

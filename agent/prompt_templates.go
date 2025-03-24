@@ -79,17 +79,6 @@ them. Issue smallrequests that are feasible to complete in a single interaction.
 Have multiple interactions instead, if you need to.
 {{- end }}
 
-# Tasks
-
-You will be given tasks to complete. Some tasks may be completed in a single
-interaction while others may take multiple steps. Make sure you complete each
-task as described and include all the requested information in your responses.
-You decide when the task is complete. You will indicate completion in your
-response using <status> ... </status> tags as described below.
-
-If a task is phrased like "Generate a response to user message: <message>",
-then the task is to simply reply with your response.
-
 # Tools
 
 You may be provided with tools to use to complete your tasks. Prefer using these
@@ -104,7 +93,18 @@ to gather more information.
 {{ .ResponseGuidelines -}}
 `
 
-var PromptForTaskResponses = `# Your Response Format
+var PromptForTaskResponses = `# Tasks
+
+You will be given tasks to complete. Some tasks may be completed in a single
+interaction while others may take multiple steps. Make sure you complete each
+task as described and include all the requested information in your responses.
+You decide when the task is complete. You will indicate completion in your
+response using <status> ... </status> tags as described below.
+
+If a task is phrased like "Generate a response to user message: <message>",
+then the task is to simply reply with your response.
+
+# Your Response Format
 
 Always respond with three sections, in this order:
 

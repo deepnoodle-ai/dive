@@ -72,6 +72,7 @@ func TestNewEnvironment(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, env)
+	require.NoError(t, env.Start(context.Background()))
 
 	require.Equal(t, "test", env.Name())
 
@@ -226,6 +227,7 @@ func TestExecutionStats(t *testing.T) {
 		Logger:    logger,
 	})
 	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
 
 	execution, err := env.ExecuteWorkflow(context.Background(), w.Name(), map[string]interface{}{})
 	require.NoError(t, err)
@@ -295,6 +297,7 @@ func TestExecutionCancellation(t *testing.T) {
 		Logger:    logger,
 	})
 	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
 
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())

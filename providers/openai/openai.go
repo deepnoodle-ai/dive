@@ -40,13 +40,17 @@ func New(opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:     os.Getenv("OPENAI_API_KEY"),
 		endpoint:   DefaultMessagesEndpoint,
-		model:      DefaultModel,
-		maxTokens:  DefaultMaxTokens,
 		client:     http.DefaultClient,
 		systemRole: DefaultSystemRole,
 	}
 	for _, opt := range opts {
 		opt(p)
+	}
+	if p.model == "" {
+		p.model = DefaultModel
+	}
+	if p.maxTokens == 0 {
+		p.maxTokens = DefaultMaxTokens
 	}
 	return p
 }

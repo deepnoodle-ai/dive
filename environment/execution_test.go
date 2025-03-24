@@ -76,6 +76,7 @@ func TestNewExecution(t *testing.T) {
 	require.NoError(t, err)
 
 	env := &Environment{}
+	require.NoError(t, env.Start(context.Background()))
 	exec := NewExecution(ExecutionOptions{
 		ID:          "test-exec",
 		Environment: env,
@@ -111,6 +112,7 @@ func TestExecutionBasicFlow(t *testing.T) {
 		Logger:    slogger.NewDevNullLogger(),
 	})
 	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
 
 	execution, err := env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
 	require.NoError(t, err)
@@ -165,6 +167,7 @@ func TestExecutionWithBranching(t *testing.T) {
 		Workflows: []*workflow.Workflow{wf},
 	})
 	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
 
 	execution, err := env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
 	require.NoError(t, err)
@@ -189,8 +192,7 @@ func TestExecutionWithError(t *testing.T) {
 		Name: "error-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
-				Name:  "error-step",
-				Agent: &mockAgent{},
+				Name: "error-step",
 				Prompt: &dive.Prompt{
 					Name: "error-task",
 					Text: "Error Task",
@@ -212,6 +214,7 @@ func TestExecutionWithError(t *testing.T) {
 		Workflows: []*workflow.Workflow{wf},
 	})
 	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
 
 	execution, err := env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
 	require.NoError(t, err)
@@ -263,6 +266,7 @@ func TestExecutionWithInputs(t *testing.T) {
 		Workflows: []*workflow.Workflow{wf},
 	})
 	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
 
 	// Test missing required input
 	_, err = env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
@@ -317,6 +321,7 @@ func TestExecutionContextCancellation(t *testing.T) {
 		Workflows: []*workflow.Workflow{wf},
 	})
 	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	execution, err := env.ExecuteWorkflow(ctx, wf.Name(), map[string]interface{}{})

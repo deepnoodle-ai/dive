@@ -1,5 +1,5 @@
-Name: Research
-Description: Research a Topic
+Name: Current Time
+Description: Show the current time
 
 Config:
   LLM:
