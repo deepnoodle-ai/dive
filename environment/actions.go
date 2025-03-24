@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/getstingrai/dive/document"
 )
@@ -70,4 +71,20 @@ func (a *DocumentReadAction) Execute(ctx context.Context, params map[string]inte
 		return nil, fmt.Errorf("failed to read document: %w", err)
 	}
 	return doc.Content(), nil
+}
+
+// GetTimeAction implements getting the current time
+type GetTimeAction struct {
+}
+
+func NewGetTimeAction() *GetTimeAction {
+	return &GetTimeAction{}
+}
+
+func (a *GetTimeAction) Name() string {
+	return "Time.Now"
+}
+
+func (a *GetTimeAction) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	return time.Now().Format(time.RFC3339), nil
 }

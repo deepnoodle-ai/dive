@@ -83,6 +83,8 @@ func New(opts EnvironmentOptions) (*Environment, error) {
 		actions[writeAction.Name()] = writeAction
 		actions[readAction.Name()] = readAction
 	}
+	getTimeAction := NewGetTimeAction()
+	actions[getTimeAction.Name()] = getTimeAction
 
 	for _, action := range opts.Actions {
 		if _, exists := actions[action.Name()]; exists {

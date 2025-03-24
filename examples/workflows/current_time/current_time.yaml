@@ -1,0 +1,27 @@
+Name: Research
+Description: Research a Topic
+
+Config:
+  LLM:
+    DefaultProvider: anthropic
+    DefaultModel: claude-3-7-sonnet-20250219
+    CacheControl: ephemeral
+  Logging:
+    Level: info
+
+Agents:
+  - Name: Assistant
+    Description: A helpful assistant that can respond to questions and provide information
+
+Workflows:
+  - Name: Show Current Time
+    Steps:
+      - Name: Get Current Time
+        Action: Time.Now
+        Store: current_time
+
+      - Name: Print Current Time
+        Prompt:
+          Text: |
+            The current time is: ${current_time}
+            Respond with the current wall clock time.
