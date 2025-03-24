@@ -541,15 +541,26 @@ func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath
 	e.updatePathState(path.id, func(state *PathState) {
 		state.CurrentStep = step
 	})
+	var result *dive.TaskResult
+	var err error
 	// Handle different step types
 	switch step.Type() {
 	case "prompt":
-		return e.handlePromptStep(ctx, step, agent)
+		result, err = e.handlePromptStep(ctx, step, agent)
 	case "action":
-		return e.handleActionStep(ctx, step)
+		result, err = e.handleActionStep(ctx, step)
 	default:
 		return nil, fmt.Errorf("unknown step type: %s", step.Type())
 	}
+	if err != nil {
+		return nil, err
+	}
+	// Store the output in a variable if specified
+	if varName := step.Store(); varName != "" {
+		e.scriptGlobals[varName] = object.NewString(result.Content)
+		e.logger.Info("stored step result", "variable_name", varName)
+	}
+	return result, nil
 }
 
 // handlePromptStep handles a prompt step by creating a task and assigning it to an agent
@@ -579,11 +590,6 @@ func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, a
 	if err != nil {
 		e.logger.Error("task execution failed", "task", task.Name(), "error", err)
 		return nil, err
-	}
-	// Store the output in a variable if specified
-	if varName := step.Store(); varName != "" {
-		e.scriptGlobals[varName] = object.NewString(result.Content)
-		e.logger.Info("stored step result", "variable_name", varName)
 	}
 	return result, nil
 }
