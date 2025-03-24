@@ -1,0 +1,86 @@
+Name: Research
+Description: Research a Topic
+
+Config:
+  LLM:
+    DefaultProvider: anthropic
+    DefaultModel: claude-3-7-sonnet-20250219
+    CacheControl: ephemeral
+  Logging:
+    Level: debug
+
+Tools:
+  - Name: Google.Search
+    Enabled: true
+  - Name: Firecrawl.Scrape
+    Enabled: true
+
+Agents:
+  - Name: Research Analyst
+    Description: Research Analyst who specializes in comprehensive topic research
+    Tools:
+      - Google.Search
+      - Firecrawl.Scrape
+
+Workflows:
+  - Name: Research
+    Description: 'Research on any topic including history, recent developments, and interesting facts'
+    Inputs:
+      - Name: topic
+        Type: string
+        Description: 'The topic to research'
+        Default: 'The history of maple syrup production in Vermont'
+    Steps:
+      - Name: Historical Research
+        Agent: Research Analyst
+        Prompt:
+          Text: |
+            Research the historical background and evolution of: "${inputs.topic}"
+            Focus on key developments, major milestones, and how it has evolved over time.
+          Output: A quick historical overview (2-3 paragraphs)
+          OutputFormat: Markdown
+        Store: historical_research
+
+      - Name: Recent News
+        Agent: Research Analyst
+        Prompt:
+          Text: |
+            Research recent news and current developments about: "${inputs.topic}"
+            Focus on events, changes, and developments from the past 1-2 years.
+          Output: A quick summary of recent developments and current state (2-3 paragraphs)
+          OutputFormat: Markdown
+        Store: recent_news
+
+      - Name: Interesting Facts
+        Agent: Research Analyst
+        Prompt:
+          Text: |
+            Discover interesting, surprising, or lesser-known facts about: "${inputs.topic}"
+            Look for unique insights, unexpected connections, or fascinating details that most people wouldn't know.
+          Output: A collection of 3-5 interesting facts or insights
+          OutputFormat: Markdown
+        Store: interesting_facts
+
+      - Name: Compile Research
+        Agent: Research Analyst
+        Prompt:
+          Text: |
+            Combine and organize the following research components into a short overview document:
+
+            Historical Background:
+            ${historical_research}
+
+            Recent Developments:
+            ${recent_news}
+
+            Interesting Facts:
+            ${interesting_facts}
+          Output: A well-structured research document with clear sections
+          OutputFormat: Markdown
+        Store: final_research
+
+      - Name: Write Document
+        Action: Document.Write
+        Parameters:
+          Path: output/research.md
+          Content: ${final_research}

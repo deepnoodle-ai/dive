@@ -2,7 +2,6 @@ package llm
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/getstingrai/dive/slogger"
 )
@@ -28,7 +27,6 @@ type Config struct {
 	ReasoningEffort   string
 	Tools             []Tool
 	ToolChoice        ToolChoice
-	LogLevel          string
 	Hooks             Hooks
 	Client            *http.Client
 	Logger            slogger.Logger
@@ -38,19 +36,6 @@ type Config struct {
 func WithModel(model string) Option {
 	return func(config *Config) {
 		config.Model = model
-	}
-}
-
-// WithLogLevel sets the log level.
-func WithLogLevel(logLevel string) Option {
-	return func(config *Config) {
-		value := strings.ToUpper(logLevel)
-		switch value {
-		case "DEBUG", "INFO", "WARN", "ERROR":
-		default:
-			value = "INFO"
-		}
-		config.LogLevel = value
 	}
 }
 

@@ -5,22 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/getstingrai/dive/config"
 	"github.com/getstingrai/dive/slogger"
-	"github.com/getstingrai/dive/teamconf"
+	"github.com/getstingrai/dive/workflow"
 )
 
 var (
-	boldStyle = color.New(color.Bold)
-
-	successStyle = color.New(color.FgGreen)
-
 	errorStyle = color.New(color.FgRed)
-
-	infoStyle = color.New(color.FgBlue)
 )
 
 func fatal(msg string, args ...interface{}) {
@@ -29,10 +23,9 @@ func fatal(msg string, args ...interface{}) {
 }
 
 func main() {
-	var logLevel, varsFlag, outDir string
-	flag.StringVar(&logLevel, "log-level", "debug", "Log level (debug, info, warn, error)")
+	var varsFlag, workflowName string
 	flag.StringVar(&varsFlag, "vars", "", "Comma-separated list of variables in format key=value")
-	flag.StringVar(&outDir, "output", "", "Output directory for task results")
+	flag.StringVar(&workflowName, "workflow", "", "Workflow name")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
@@ -55,58 +48,47 @@ func main() {
 		}
 	}
 
+	logger := slogger.New(slogger.LevelDebug)
+
 	ctx := context.Background()
 
-	logger := slogger.New(slogger.LevelFromString(logLevel))
-
-	team, err := teamconf.TeamFromFile(filePath,
-		teamconf.WithLogger(logger),
-		teamconf.WithVariables(vars),
-	)
-	if err != nil {
-		fatal(err.Error())
-	}
-	if err := team.Start(ctx); err != nil {
-		fatal(err.Error())
-	}
-	defer team.Stop(ctx)
-
-	fmt.Println("Starting", boldStyle.Sprint(team.Name()))
-
-	stream, err := team.Work(ctx)
+	// Load the environment
+	env, err := config.LoadDirectory(filePath, config.WithLogger(logger))
 	if err != nil {
 		fatal(err.Error())
 	}
 
-	if outDir != "" {
-		if err := os.MkdirAll(outDir, 0755); err != nil {
-			fatal("Error: failed to create output directory: %s", err)
+	// Choose the workflow to run
+	var workflow *workflow.Workflow
+	if workflowName != "" {
+		workflow, err = env.GetWorkflow(workflowName)
+		if err != nil {
+			fatal(err.Error())
 		}
+	} else {
+		workflows := env.Workflows()
+		if len(workflows) != 1 {
+			fatal("You must specify a workflow name")
+		}
+		workflow = workflows[0]
 	}
 
-	saveOutput := func(name string, result string) {
-		if outDir == "" {
-			return
-		}
-		dstPath := filepath.Join(outDir, name+".txt")
-		if err := os.WriteFile(dstPath, []byte(result), 0644); err != nil {
-			fatal("Error: failed to save output for %s: %s", name, err)
-		}
-		fmt.Println(infoStyle.Sprint("Saved output to " + dstPath))
+	// Start the workflow
+	execution, err := env.ExecuteWorkflow(ctx, workflow.Name(), vars)
+	if err != nil {
+		fatal(err.Error())
 	}
 
-	for event := range stream.Channel() {
-		switch event.Type {
-		case "task.result":
-			resultText := "\n" + boldStyle.Sprint(event.TaskName+":") + "\n" +
-				successStyle.Sprint(event.TaskResult.Content) + "\n"
-			fmt.Println(resultText)
-			saveOutput(event.TaskName, event.TaskResult.Content)
+	// Wait for the workflow to complete
+	if err := execution.Wait(); err != nil {
+		fatal(err.Error())
+	}
 
-		case "task.error":
-			fmt.Println(boldStyle.Sprint(event.TaskName+":") + "\n")
-			fmt.Println(errorStyle.Sprint(event.Error) + "\n")
-			fatal(event.Error)
+	// Print the outputs
+	outputs := execution.StepOutputs()
+	for name, output := range outputs {
+		if output != "" {
+			fmt.Printf("%q output:\n\n%s\n\n", name, output)
 		}
 	}
 }

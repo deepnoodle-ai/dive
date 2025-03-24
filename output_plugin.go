@@ -6,6 +6,22 @@ import (
 	"path/filepath"
 )
 
+// OutputPlugin is a plugin that can be used to store and retrieve task outputs
+type OutputPlugin interface {
+	// Name of the output plugin
+	Name() string
+
+	// OutputExists returns true if the output for the given task and fingerprint
+	// already exists.
+	OutputExists(ctx context.Context, name, fingerprint string) (bool, error)
+
+	// ReadOutput reads the output for the given task and fingerprint
+	ReadOutput(ctx context.Context, name, fingerprint string) (string, error)
+
+	// WriteOutput writes the output for the given task and fingerprint
+	WriteOutput(ctx context.Context, name, fingerprint string, output string) error
+}
+
 type DiskOutputPlugin struct {
 	dir string
 }

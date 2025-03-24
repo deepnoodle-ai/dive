@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -25,19 +24,17 @@ func TestHelloWorld(t *testing.T) {
 func TestHelloWorldStream(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	stream, err := provider.Stream(ctx, []*llm.Message{
+	iterator, err := provider.Stream(ctx, []*llm.Message{
 		llm.NewUserMessage("count to 10. respond with the integers only, separated by spaces."),
 	})
 	require.NoError(t, err)
+	defer iterator.Close()
 
-	var events []*llm.StreamEvent
-	for {
-		event, ok := stream.Next(ctx)
-		if !ok {
-			break
-		}
-		events = append(events, event)
+	var events []*llm.Event
+	for iterator.Next() {
+		events = append(events, iterator.Event())
 	}
+	require.NoError(t, iterator.Err())
 
 	var finalResponse *llm.Response
 	var finalText string
@@ -121,10 +118,6 @@ func TestToolUse(t *testing.T) {
 }
 
 func TestToolCallStream(t *testing.T) {
-	// Skip this test in normal runs as it requires mocking the API
-	if os.Getenv("TEST_ANTHROPIC_TOOL_CALLS") != "1" {
-		t.Skip("Skipping tool call test; set TEST_ANTHROPIC_TOOL_CALLS=1 to run")
-	}
 
 	ctx := context.Background()
 	provider := New()
@@ -156,33 +149,38 @@ func TestToolCallStream(t *testing.T) {
 		return "4", nil // Mock result
 	})
 
-	stream, err := provider.Stream(ctx, []*llm.Message{
-		llm.NewUserMessage("What is 2+2?"),
-	}, llm.WithTools(calculatorTool))
+	iterator, err := provider.Stream(ctx,
+		[]*llm.Message{llm.NewUserMessage("What is 2+2?")},
+		llm.WithTools(calculatorTool))
 
 	require.NoError(t, err)
+	defer iterator.Close()
 
 	var finalResponse *llm.Response
-	for {
-		event, ok := stream.Next(ctx)
-		if !ok {
-			break
-		}
+	for iterator.Next() {
+		event := iterator.Event()
 		if event.Response != nil {
 			finalResponse = event.Response
 		}
 	}
-
+	require.NoError(t, iterator.Err())
 	require.NotNil(t, finalResponse, "Should have received a final response")
 
 	// Check if tool calls were properly processed
 	toolCalls := finalResponse.ToolCalls()
-	if len(toolCalls) > 0 {
-		// If the model decided to use a tool, verify the attributes
-		for _, toolCall := range toolCalls {
-			require.NotEmpty(t, toolCall.ID, "Tool call ID should not be empty")
-			require.NotEmpty(t, toolCall.Name, "Tool call name should not be empty")
-			require.NotEmpty(t, toolCall.Input, "Tool call input should not be empty")
-		}
+	require.Equal(t, 1, len(toolCalls))
+
+	toolCall := toolCalls[0]
+	require.NotEmpty(t, toolCall.ID, "Tool call ID should not be empty")
+	require.NotEmpty(t, toolCall.Name, "Tool call name should not be empty")
+	require.NotEmpty(t, toolCall.Input, "Tool call input should not be empty")
+
+	var params map[string]interface{}
+	if err := json.Unmarshal([]byte(toolCall.Input), &params); err != nil {
+		t.Fatalf("Failed to unmarshal tool call input: %v", err)
 	}
+
+	require.Equal(t, "add", params["operation"])
+	require.Equal(t, 2.0, params["a"])
+	require.Equal(t, 2.0, params["b"])
 }

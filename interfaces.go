@@ -2,112 +2,90 @@ package dive
 
 import (
 	"context"
+	"time"
 
+	"github.com/getstingrai/dive/document"
 	"github.com/getstingrai/dive/llm"
 )
 
-type Event struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
+// OutputFormat defines the desired output format for a Task
+type OutputFormat string
+
+const (
+	OutputText     OutputFormat = "text"
+	OutputMarkdown OutputFormat = "markdown"
+	OutputJSON     OutputFormat = "json"
+)
+
+// TaskStatus indicates a Task's execution status
+type TaskStatus string
+
+const (
+	TaskStatusQueued    TaskStatus = "queued"
+	TaskStatusActive    TaskStatus = "active"
+	TaskStatusPaused    TaskStatus = "paused"
+	TaskStatusCompleted TaskStatus = "completed"
+	TaskStatusBlocked   TaskStatus = "blocked"
+	TaskStatusError     TaskStatus = "error"
+	TaskStatusInvalid   TaskStatus = "invalid"
+)
+
+// Input defines an expected input parameter
+type Input struct {
+	Name        string      `json:"name"`
+	Type        string      `json:"type,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Required    bool        `json:"required,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
 }
 
-// Team is a collection of agents that work together to complete tasks
-type Team interface {
-	// Name of the team
-	Name() string
-
-	// Description of the team
-	Description() string
-
-	// Overview of the team
-	Overview() (string, error)
-
-	// Agents belonging to the team
-	Agents() []Agent
-
-	// GetAgent returns an agent by name
-	GetAgent(name string) (Agent, bool)
-
-	// HandleEvent passes an event to the team
-	HandleEvent(ctx context.Context, event *Event) error
-
-	// Work on one or more tasks. The returned stream can be read from
-	// asynchronously to receive events and task results.
-	Work(ctx context.Context, tasks ...*Task) (Stream, error)
-
-	// Start all agents belonging to the team
-	Start(ctx context.Context) error
-
-	// Stop all agents belonging to the team
-	Stop(ctx context.Context) error
-
-	// IsRunning returns true if the team is running
-	IsRunning() bool
-
-	// OutputDir returns the output directory for the team
-	OutputDir() string
+// Output defines an expected output parameter
+type Output struct {
+	Name        string      `json:"name"`
+	Type        string      `json:"type,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Format      string      `json:"format,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
+	Document    string      `json:"document,omitempty"`
 }
 
-type generateOptions struct {
-	ThreadID string
-	UserID   string
+type PromptContext struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Text        string `json:"text,omitempty"`
 }
 
-type GenerateOption func(*generateOptions)
-
-func WithThreadID(threadID string) GenerateOption {
-	return func(opts *generateOptions) {
-		opts.ThreadID = threadID
-	}
+type Prompt struct {
+	Name         string           `json:"name"`
+	Text         string           `json:"text,omitempty"`
+	Context      []*PromptContext `json:"context,omitempty"`
+	Output       string           `json:"output,omitempty"`
+	OutputFormat string           `json:"output_format,omitempty"`
 }
 
-func WithUserID(userID string) GenerateOption {
-	return func(opts *generateOptions) {
-		opts.UserID = userID
-	}
-}
-
-// Agent is an entity that can perform tasks and interact with the world
+// Agent represents an AI agent that can perform tasks
 type Agent interface {
-	// Name of the agent
+
+	// Name of the Agent
 	Name() string
 
-	// Description of the agent
-	Description() string
+	// Goal of the Agent
+	Goal() string
 
-	// Instructions for the agent
-	Instructions() string
-
-	// Fingerprint of the agent captures the current state of the agent
-	Fingerprint() string
-
-	// Generate a response from the agent
-	Generate(ctx context.Context, message *llm.Message, opts ...GenerateOption) (*llm.Response, error)
-
-	// Stream a response from the agent
-	Stream(ctx context.Context, message *llm.Message, opts ...GenerateOption) (Stream, error)
-}
-
-// TeamAgent is an Agent that can join a team and work on tasks
-type TeamAgent interface {
-	Agent
-
-	// Team the agent belongs to
-	Team() Team
-
-	// Join a team. This is only valid if the agent is not yet running and is
-	// not yet a member of any team.
-	Join(team Team) error
-
-	// IsSupervisor returns true if the agent is a supervisor
+	// IsSupervisor indicates whether the Agent can assign work to other Agents
 	IsSupervisor() bool
 
-	// Subordinates returns the names of the agents that the agent can supervise
-	Subordinates() []string
+	// SetEnvironment sets the runtime Environment to which this Agent belongs
+	SetEnvironment(env Environment)
 
-	// Work gives the agent a task to complete and returns a stream of events
-	Work(ctx context.Context, task *Task) (Stream, error)
+	// Generate gives the agent a message to respond to
+	Generate(ctx context.Context, message *llm.Message, opts ...GenerateOption) (*llm.Response, error)
+
+	// Stream gives the agent a message to respond to and returns a stream of events
+	Stream(ctx context.Context, message *llm.Message, opts ...GenerateOption) (Stream, error)
+
+	// Work gives the agent a task to complete
+	Work(ctx context.Context, task Task) (Stream, error)
 }
 
 // RunnableAgent is an Agent that can be started and stopped
@@ -135,51 +113,90 @@ type EventHandlerAgent interface {
 	HandleEvent(ctx context.Context, event *Event) error
 }
 
-// Stream provides access to a stream of events from a Team or Agent
-type Stream interface {
-	// Channel returns the channel to be used to receive events
-	Channel() <-chan *StreamEvent
+// Environment is a container for running Agents and Workflow Executions.
+// Interactivity between Agents is scoped to a single Environment.
+type Environment interface {
 
-	// Close closes the stream
-	Close()
-}
-
-// StreamEvent is an event that carries LLM events, task results, or errors.
-type StreamEvent struct {
-	// Type of the event
-	Type string `json:"type"`
-
-	// AgentName is the name of the agent associated with the event
-	AgentName string `json:"agent_name"`
-
-	// TaskName is the name of the task that generated the event (if applicable)
-	TaskName string `json:"task_name,omitempty"`
-
-	// LLMEvent is the event from the LLM (may be nil)
-	LLMEvent *llm.StreamEvent `json:"llm_event,omitempty"`
-
-	// TaskResult is the result of a task (may be nil)
-	TaskResult *TaskResult `json:"task_result,omitempty"`
-
-	// Response is the final response from the agent (may be nil)
-	Response *llm.Response `json:"response,omitempty"`
-
-	// Error conveys an error message
-	Error string `json:"error,omitempty"`
-}
-
-// OutputPlugin is a plugin that can be used to store and retrieve task outputs
-type OutputPlugin interface {
-	// Name of the output plugin
+	// Name of the Environment
 	Name() string
 
-	// OutputExists returns true if the output for the given task and fingerprint
-	// already exists.
-	OutputExists(ctx context.Context, name, fingerprint string) (bool, error)
+	// Agents returns the list of all Agents belonging to this Environment
+	Agents() []Agent
 
-	// ReadOutput reads the output for the given task and fingerprint
-	ReadOutput(ctx context.Context, name, fingerprint string) (string, error)
+	// RegisterAgent adds an Agent to this Environment
+	RegisterAgent(agent Agent) error
 
-	// WriteOutput writes the output for the given task and fingerprint
-	WriteOutput(ctx context.Context, name, fingerprint string, output string) error
+	// GetAgent returns the Agent with the given name, if found
+	GetAgent(name string) (Agent, error)
+
+	// DocumentRepository returns the DocumentRepository for this Environment
+	DocumentRepository() document.Repository
+
+	// KnownDocuments returns a map of all documents known to this Environment
+	KnownDocuments() map[string]*document.Metadata
+}
+
+// GenerateOptions contains configuration for LLM generations.
+type GenerateOptions struct {
+	ThreadID string
+	UserID   string
+}
+
+// GenerateOption is a type signature for defining new LLM generation options.
+type GenerateOption func(*GenerateOptions)
+
+// Apply invokes any supplied options. Used internally in Dive.
+func (o *GenerateOptions) Apply(opts []GenerateOption) {
+	for _, opt := range opts {
+		opt(o)
+	}
+}
+
+// WithThreadID associates the given conversation thread ID with a generation.
+// This appends the new messages to any previous messages belonging to this thread.
+func WithThreadID(threadID string) GenerateOption {
+	return func(opts *GenerateOptions) {
+		opts.ThreadID = threadID
+	}
+}
+
+// WithUserID associates the given user ID with a generation, indicating what
+// person is the speaker in the conversation.
+func WithUserID(userID string) GenerateOption {
+	return func(opts *GenerateOptions) {
+		opts.UserID = userID
+	}
+}
+
+// Task represents a unit of work that can be executed by an Agent
+type Task interface {
+	// Name returns the name of the task
+	Name() string
+
+	// Timeout returns the maximum duration allowed for task execution
+	Timeout() time.Duration
+
+	// Prompt returns the LLM prompt for the task
+	Prompt() (*Prompt, error)
+}
+
+// TaskResult holds the output of a completed task
+type TaskResult struct {
+	// Task is the task that was executed
+	Task Task
+
+	// Content contains the raw output
+	Content string
+
+	// Format specifies how to interpret the content
+	Format OutputFormat
+
+	// Object holds parsed JSON output if applicable
+	Object interface{}
+
+	// Error is set if task execution failed
+	Error error
+
+	// Usage tracks LLM token usage
+	Usage llm.Usage
 }

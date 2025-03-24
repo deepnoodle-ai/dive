@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// DefaultLogger is the default logger for the application.
+var DefaultLogger = NewDevNullLogger()
+
 // Logger defines the interface for logging within agents.
 // It supports structured logging and is designed to be compatible
 // with common logging libraries like zerolog and slog.
@@ -31,6 +34,7 @@ const (
 	loggerKey contextKey = "dive.logger"
 )
 
+// WithLogger returns a new context with the given logger.
 func WithLogger(ctx context.Context, logger Logger) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -38,6 +42,7 @@ func WithLogger(ctx context.Context, logger Logger) context.Context {
 	return context.WithValue(ctx, loggerKey, logger)
 }
 
+// Ctx returns the logger from the given context.
 func Ctx(ctx context.Context) Logger {
 	if ctx == nil {
 		return New(DefaultLogLevel)
@@ -49,6 +54,7 @@ func Ctx(ctx context.Context) Logger {
 	return logger
 }
 
+// LevelFromString converts a string to a LogLevel.
 func LevelFromString(level string) LogLevel {
 	value := strings.ToLower(level)
 	switch value {
