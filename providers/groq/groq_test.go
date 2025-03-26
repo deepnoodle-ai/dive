@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive/llm"
 	"github.com/stretchr/testify/require"
 )
 

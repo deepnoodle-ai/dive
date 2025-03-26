@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/slogger"
-	"github.com/getstingrai/dive/workflow"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/slogger"
+	"github.com/diveagents/dive/workflow"
 	"github.com/stretchr/testify/require"
 )
 

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/getstingrai/dive/document"
+	"github.com/diveagents/dive/document"
 	"github.com/risor-io/risor/object"
 	"github.com/risor-io/risor/op"
 )

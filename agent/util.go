@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/providers/anthropic"
+	"github.com/diveagents/dive/providers/groq"
+	"github.com/diveagents/dive/providers/openai"
 	petname "github.com/dustinkirkland/golang-petname"
-	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/providers/anthropic"
-	"github.com/getstingrai/dive/providers/groq"
-	"github.com/getstingrai/dive/providers/openai"
 )
 
 func init() {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/getstingrai/dive/document"
+	"github.com/diveagents/dive/document"
 )
 
 // Action represents a named action that can be executed as part of a workflow

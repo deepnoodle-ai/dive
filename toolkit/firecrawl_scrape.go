@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive/llm"
 	"github.com/mendableai/firecrawl-go"
 )
 

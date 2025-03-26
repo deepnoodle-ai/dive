@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
   <h1 align="center">
-    <a href="https://github.com/getstingrai/dive">Dive - AI Agent Framework</a>
+    <a href="https://github.com/diveagents/dive">Dive - AI Agent Framework</a>
   </h1>
 </p>
 
@@ -25,7 +25,7 @@ project is still evolving rapidly.
 - **Feedback is highly valued** on concepts, APIs, and usability
 
 We welcome your input! Please reach out in
-[GitHub Discussions](https://github.com/getstingrai/dive/discussions) with
+[GitHub Discussions](https://github.com/diveagents/dive/discussions) with
 questions, suggestions, or feedback.
 
 ## Features
@@ -67,7 +67,7 @@ export FIRECRAWL_API_KEY="your-key"
 To get started with Dive as a library, use go get:
 
 ```
-go get github.com/getstingrai/dive
+go get github.com/diveagents/dive
 ```
 
 Here's a simple example of creating a chat agent:

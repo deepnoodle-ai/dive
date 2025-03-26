@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive/llm"
 )
 
 type FileWriteInput struct {

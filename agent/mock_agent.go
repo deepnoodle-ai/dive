@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm"
 )
 
 type WorkFunc func(ctx context.Context, task dive.Task) (dive.Stream, error)

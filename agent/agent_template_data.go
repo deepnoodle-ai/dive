@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/getstingrai/dive"
+import "github.com/diveagents/dive"
 
 // agentTemplateData is the data used to render the agent prompt template.
 // It carries some information that isn't available via the Agent struct.

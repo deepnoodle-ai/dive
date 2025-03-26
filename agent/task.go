@@ -3,7 +3,7 @@ package agent
 import (
 	"time"
 
-	"github.com/getstingrai/dive"
+	"github.com/diveagents/dive"
 )
 
 var _ dive.Task = &Task{}

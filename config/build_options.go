@@ -1,9 +1,9 @@
 package config
 
 import (
-	"github.com/getstingrai/dive/document"
-	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/slogger"
+	"github.com/diveagents/dive/document"
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/slogger"
 )
 
 type BuildOptions struct {

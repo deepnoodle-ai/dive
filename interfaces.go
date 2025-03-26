@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/getstingrai/dive/document"
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive/document"
+	"github.com/diveagents/dive/llm"
 )
 
 // OutputFormat defines the desired output format for a Task

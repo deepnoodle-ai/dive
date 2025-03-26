@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/getstingrai/dive/config"
+	"github.com/diveagents/dive/config"
 	"github.com/spf13/cobra"
 )
 

@@ -3,7 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive/llm"
 )
 
 const (

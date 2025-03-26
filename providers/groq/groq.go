@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/providers/openai"
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/providers/openai"
 )
 
 var (

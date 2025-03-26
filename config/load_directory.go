@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/getstingrai/dive/environment"
+	"github.com/diveagents/dive/environment"
 )
 
 // LoadDirectory loads all YAML and JSON files from a directory and combines

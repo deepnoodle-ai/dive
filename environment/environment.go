@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/document"
-	"github.com/getstingrai/dive/slogger"
-	"github.com/getstingrai/dive/workflow"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/document"
+	"github.com/diveagents/dive/slogger"
+	"github.com/diveagents/dive/workflow"
 	"github.com/google/uuid"
 )
 

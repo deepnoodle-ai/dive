@@ -1,12 +1,12 @@
-module github.com/getstingrai/dive/cmd/dive
+module github.com/diveagents/dive/cmd/dive
 
 go 1.23.2
 
-replace github.com/getstingrai/dive => ../..
+replace github.com/diveagents/dive => ../..
 
 require (
 	github.com/fatih/color v1.18.0
-	github.com/getstingrai/dive v0.0.0-00010101000000-000000000000
+	github.com/diveagents/dive v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.8.0
 )
 

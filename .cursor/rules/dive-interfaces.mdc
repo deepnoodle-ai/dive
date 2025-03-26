@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## Core Packages
 
-### Dive Package (`github.com/getstingrai/dive`)
+### Dive Package (`github.com/diveagents/dive`)
 
 The `dive` package defines the core Go interfaces used throughout Dive:
 
@@ -15,7 +15,7 @@ The `dive` package defines the core Go interfaces used throughout Dive:
 - `Agent` - AI agent that works on tasks
 - `Environment` - Agents run within an Environment
 
-### LLM Package (`github.com/getstingrai/dive/llm`)
+### LLM Package (`github.com/diveagents/dive/llm`)
 
 Defines the types and Go interfaces implemented by different large language model providers:
 
@@ -23,14 +23,14 @@ Defines the types and Go interfaces implemented by different large language mode
 - `StreamingLLM` - Interface used to stream responses
 - `StreamIterator` - Interface for iterating over events in a stream
 
-### Workflow Package (`github.com/getstingrai/dive/workflow`)
+### Workflow Package (`github.com/diveagents/dive/workflow`)
 
 Workflows define a directed graph of steps that are executed:
 
 - `Workflow` - Workflow implementation (a struct)
 - `Step` - Unit of work in a Workflow (a struct, points to a Task)
 
-### Retry Package (`github.com/getstingrai/dive/retry`)
+### Retry Package (`github.com/diveagents/dive/retry`)
 
 Handles error recovery:
 

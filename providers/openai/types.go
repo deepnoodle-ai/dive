@@ -1,6 +1,6 @@
 package openai
 
-import "github.com/getstingrai/dive/llm"
+import "github.com/diveagents/dive/llm"
 
 type ReasoningEffort string
 

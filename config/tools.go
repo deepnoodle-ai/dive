@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/toolkit"
-	"github.com/getstingrai/dive/toolkit/google"
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/toolkit"
+	"github.com/diveagents/dive/toolkit/google"
 	"github.com/mendableai/firecrawl-go"
 )
 

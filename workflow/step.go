@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/getstingrai/dive"
+	"github.com/diveagents/dive"
 )
 
 type Condition interface {

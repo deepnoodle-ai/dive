@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/getstingrai/dive/config"
-	"github.com/getstingrai/dive/slogger"
+	"github.com/diveagents/dive/config"
+	"github.com/diveagents/dive/slogger"
 	"github.com/spf13/cobra"
 )
 
