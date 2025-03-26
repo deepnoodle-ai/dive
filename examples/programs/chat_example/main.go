@@ -50,7 +50,7 @@ func main() {
 
 	logger := slogger.New(slogger.LevelInfo)
 
-	a, err := agent.NewAgent(agent.AgentOptions{
+	a, err := agent.New(agent.Options{
 		Name: "Dr. Smith",
 		Backstory: `
 You are a virtual doctor for role-playing purposes only. You can discuss general

@@ -18,7 +18,7 @@ func TestAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name:         "Testing Agent",
 		Goal:         "Test the agent",
 		Backstory:    "You are a testing agent",
@@ -38,7 +38,7 @@ func TestAgentChat(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name: "Testing Agent",
 		LLM:  anthropic.New(),
 	})
@@ -84,7 +84,7 @@ func TestAgentChatWithTools(t *testing.T) {
 		return input, nil
 	}
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		LLM:   anthropic.New(),
 		Tools: []llm.Tool{llm.NewTool(&echoToolDef, echoFunc)},
 	})
@@ -110,7 +110,7 @@ func TestAgentTask(t *testing.T) {
 
 	logger := slogger.New(slogger.LevelDebug)
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name:      "Poet",
 		Backstory: "You're a poet that loves writing limericks",
 		LLM:       anthropic.New(),
@@ -144,7 +144,7 @@ func TestAgentTask(t *testing.T) {
 }
 
 func TestAgentChatSystemPrompt(t *testing.T) {
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name:         "TestAgent",
 		Goal:         "Help research a topic.",
 		Backstory:    "You are a research assistant.",

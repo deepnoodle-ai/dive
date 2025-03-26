@@ -63,7 +63,7 @@ func main() {
 		log.Println("google search enabled")
 	}
 
-	a, err := agent.NewAgent(agent.AgentOptions{
+	a, err := agent.New(agent.Options{
 		Name:         "Research Assistant",
 		CacheControl: "ephemeral",
 		LLM:          provider,

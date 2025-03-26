@@ -1,4 +1,4 @@
-package document
+package dive
 
 import "context"
 
@@ -13,9 +13,9 @@ type ListDocumentOutput struct {
 	Items []Document
 }
 
-// Repository provides read/write access to a set of documents. This could be
+// DocumentRepository provides read/write access to a set of documents. This could be
 // backed by a local file system, a remote API, or a database.
-type Repository interface {
+type DocumentRepository interface {
 
 	// GetDocument returns a document by name
 	GetDocument(ctx context.Context, name string) (Document, error)

@@ -144,7 +144,7 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 		}
 	}
 
-	return workflow.NewWorkflow(workflow.WorkflowOptions{
+	return workflow.New(workflow.Options{
 		Name:        workflowDef.Name,
 		Description: workflowDef.Description,
 		Inputs:      inputs,

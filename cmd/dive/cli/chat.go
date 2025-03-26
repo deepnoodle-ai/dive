@@ -102,12 +102,13 @@ func runChat(systemPrompt, agentName string) error {
 	if err != nil {
 		return fmt.Errorf("error getting provider: %v", err)
 	}
-	chatAgent, err := agent.NewAgent(agent.AgentOptions{
-		Name:         agentName,
-		Backstory:    systemPrompt,
-		LLM:          llmProvider,
-		CacheControl: "ephemeral",
-		Logger:       logger,
+	chatAgent, err := agent.New(agent.Options{
+		Name:             agentName,
+		Backstory:        systemPrompt,
+		LLM:              llmProvider,
+		CacheControl:     "ephemeral",
+		Logger:           logger,
+		ThreadRepository: dive.NewMemoryThreadRepository(),
 	})
 	if err != nil {
 		return fmt.Errorf("error creating agent: %v", err)

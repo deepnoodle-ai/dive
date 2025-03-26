@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/diveagents/dive/document"
+	"github.com/diveagents/dive"
 	"github.com/risor-io/risor/object"
 	"github.com/risor-io/risor/op"
 )
@@ -13,7 +13,7 @@ import (
 var _ object.Object = &Document{}
 
 type Document struct {
-	doc document.Document
+	doc dive.Document
 }
 
 func (d *Document) Cost() int {
@@ -37,7 +37,7 @@ func (d *Document) Type() object.Type {
 	return "document"
 }
 
-func (d *Document) Value() document.Document {
+func (d *Document) Value() dive.Document {
 	return d.doc
 }
 
@@ -80,6 +80,6 @@ func (d *Document) MarshalJSON() ([]byte, error) {
 	})
 }
 
-func NewDocument(doc document.Document) *Document {
+func NewDocument(doc dive.Document) *Document {
 	return &Document{doc: doc}
 }

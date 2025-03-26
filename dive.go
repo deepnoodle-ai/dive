@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/diveagents/dive/document"
 	"github.com/diveagents/dive/llm"
 )
 
@@ -88,7 +87,7 @@ type Agent interface {
 	Work(ctx context.Context, task Task) (Stream, error)
 }
 
-// RunnableAgent is an Agent that can be started and stopped
+// RunnableAgent is an AI Agent that can be started and stopped
 type RunnableAgent interface {
 	Agent
 
@@ -100,17 +99,6 @@ type RunnableAgent interface {
 
 	// IsRunning returns true if the agent is running
 	IsRunning() bool
-}
-
-// EventHandlerAgent is an Agent that can handle events
-type EventHandlerAgent interface {
-	Agent
-
-	// AcceptedEvents returns the names of supported events
-	AcceptedEvents() []string
-
-	// HandleEvent passes an event to the event handler
-	HandleEvent(ctx context.Context, event *Event) error
 }
 
 // Environment is a container for running Agents and Workflow Executions.
@@ -130,7 +118,10 @@ type Environment interface {
 	GetAgent(name string) (Agent, error)
 
 	// DocumentRepository returns the DocumentRepository for this Environment
-	DocumentRepository() document.Repository
+	DocumentRepository() DocumentRepository
+
+	// ThreadRepository returns the ThreadRepository for this Environment
+	ThreadRepository() ThreadRepository
 }
 
 // GenerateOptions contains configuration for LLM generations.

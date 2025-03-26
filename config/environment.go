@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/document"
 	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
@@ -137,9 +136,9 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	if buildOpts.DocumentsDir != "" && buildOpts.DocumentsRepo != nil {
 		return nil, fmt.Errorf("documents dir and repo cannot both be set")
 	}
-	var repo document.Repository
+	var docRepo dive.DocumentRepository
 	if buildOpts.DocumentsRepo != nil {
-		repo = buildOpts.DocumentsRepo
+		docRepo = buildOpts.DocumentsRepo
 	} else {
 		dir := buildOpts.DocumentsDir
 		if dir == "" {
@@ -149,35 +148,43 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 				dir = "."
 			}
 		}
-		repo, err = document.NewFileSysRepository(dir)
+		docRepo, err = dive.NewFileDocumentRepository(dir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create document repository: %w", err)
 		}
 	}
-	if repo != nil {
-		namedDocuments := make(map[string]*document.Metadata, len(env.Documents))
+	if docRepo != nil {
+		namedDocuments := make(map[string]*dive.DocumentMetadata, len(env.Documents))
 		for _, doc := range env.Documents {
-			namedDocuments[doc.Name] = &document.Metadata{
+			namedDocuments[doc.Name] = &dive.DocumentMetadata{
 				Name: doc.Name,
 				Path: doc.Path,
 			}
 		}
 		for _, doc := range env.Documents {
-			if err := repo.RegisterDocument(context.Background(), doc.Name, doc.Path); err != nil {
+			if err := docRepo.RegisterDocument(context.Background(), doc.Name, doc.Path); err != nil {
 				return nil, fmt.Errorf("failed to register document %s: %w", doc.Name, err)
 			}
 		}
 	}
 
+	var threadRepo dive.ThreadRepository
+	if buildOpts.ThreadRepo != nil {
+		threadRepo = buildOpts.ThreadRepo
+	} else {
+		threadRepo = dive.NewMemoryThreadRepository()
+	}
+
 	// Environment
-	result, err := environment.New(environment.EnvironmentOptions{
-		Name:         env.Name,
-		Description:  env.Description,
-		Agents:       agents,
-		Workflows:    workflows,
-		Triggers:     triggers,
-		Logger:       logger,
-		DocumentRepo: repo,
+	result, err := environment.New(environment.Options{
+		Name:               env.Name,
+		Description:        env.Description,
+		Agents:             agents,
+		Workflows:          workflows,
+		Triggers:           triggers,
+		Logger:             logger,
+		DocumentRepository: docRepo,
+		ThreadRepository:   threadRepo,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create environment: %w", err)

@@ -60,7 +60,7 @@ func (m *mockAgent) Work(ctx context.Context, task dive.Task) (dive.Stream, erro
 }
 
 func TestNewExecution(t *testing.T) {
-	wf, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	wf, err := workflow.New(workflow.Options{
 		Name: "test-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -90,7 +90,7 @@ func TestNewExecution(t *testing.T) {
 }
 
 func TestExecutionBasicFlow(t *testing.T) {
-	wf, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	wf, err := workflow.New(workflow.Options{
 		Name: "test-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -105,7 +105,7 @@ func TestExecutionBasicFlow(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test-env",
 		Agents:    []dive.Agent{&mockAgent{}},
 		Workflows: []*workflow.Workflow{wf},
@@ -126,7 +126,7 @@ func TestExecutionBasicFlow(t *testing.T) {
 }
 
 func TestExecutionWithBranching(t *testing.T) {
-	wf, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	wf, err := workflow.New(workflow.Options{
 		Name: "branching-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -161,7 +161,7 @@ func TestExecutionWithBranching(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test-env",
 		Agents:    []dive.Agent{&mockAgent{}},
 		Workflows: []*workflow.Workflow{wf},
@@ -188,7 +188,7 @@ func TestExecutionWithBranching(t *testing.T) {
 }
 
 func TestExecutionWithError(t *testing.T) {
-	wf, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	wf, err := workflow.New(workflow.Options{
 		Name: "error-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -208,7 +208,7 @@ func TestExecutionWithError(t *testing.T) {
 		},
 	}
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test-env",
 		Agents:    []dive.Agent{mockAgent},
 		Workflows: []*workflow.Workflow{wf},
@@ -232,7 +232,7 @@ func TestExecutionWithError(t *testing.T) {
 }
 
 func TestExecutionWithInputs(t *testing.T) {
-	wf, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	wf, err := workflow.New(workflow.Options{
 		Name: "input-workflow",
 		Inputs: []*dive.Input{
 			{
@@ -260,7 +260,7 @@ func TestExecutionWithInputs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test-env",
 		Agents:    []dive.Agent{&mockAgent{}},
 		Workflows: []*workflow.Workflow{wf},
@@ -283,7 +283,7 @@ func TestExecutionWithInputs(t *testing.T) {
 }
 
 func TestExecutionContextCancellation(t *testing.T) {
-	wf, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	wf, err := workflow.New(workflow.Options{
 		Name: "cancellation-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -315,7 +315,7 @@ func TestExecutionContextCancellation(t *testing.T) {
 		},
 	}
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test-env",
 		Agents:    []dive.Agent{mockAgent},
 		Workflows: []*workflow.Workflow{wf},

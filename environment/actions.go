@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/diveagents/dive/document"
+	"github.com/diveagents/dive"
 )
 
 // Action represents a named action that can be executed as part of a workflow
@@ -17,10 +17,10 @@ type Action interface {
 
 // DocumentWriteAction implements writing to the document repository
 type DocumentWriteAction struct {
-	repo document.Repository
+	repo dive.DocumentRepository
 }
 
-func NewDocumentWriteAction(repo document.Repository) *DocumentWriteAction {
+func NewDocumentWriteAction(repo dive.DocumentRepository) *DocumentWriteAction {
 	return &DocumentWriteAction{repo: repo}
 }
 
@@ -37,7 +37,7 @@ func (a *DocumentWriteAction) Execute(ctx context.Context, params map[string]int
 	if !ok {
 		return nil, errors.New("content parameter must be a string")
 	}
-	doc := document.New(document.Options{
+	doc := dive.NewTextDocument(dive.TextDocumentOptions{
 		Path:    path,
 		Content: content,
 	})
@@ -49,10 +49,10 @@ func (a *DocumentWriteAction) Execute(ctx context.Context, params map[string]int
 
 // DocumentReadAction implements reading from the document repository
 type DocumentReadAction struct {
-	repo document.Repository
+	repo dive.DocumentRepository
 }
 
-func NewDocumentReadAction(repo document.Repository) *DocumentReadAction {
+func NewDocumentReadAction(repo dive.DocumentRepository) *DocumentReadAction {
 	return &DocumentReadAction{repo: repo}
 }
 

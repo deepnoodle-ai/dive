@@ -82,7 +82,7 @@ func buildAgent(
 		cacheControl = config.LLM.CacheControl
 	}
 
-	return agent.NewAgent(agent.AgentOptions{
+	return agent.New(agent.Options{
 		Name:               agentDef.Name,
 		Goal:               agentDef.Goal,
 		Backstory:          agentDef.Backstory,
