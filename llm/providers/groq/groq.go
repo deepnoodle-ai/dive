@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/llm/providers/openai"
 )
 
 var (

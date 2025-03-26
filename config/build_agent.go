@@ -7,9 +7,9 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
-	"github.com/diveagents/dive/providers/groq"
-	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/groq"
+	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 )
 

@@ -5,9 +5,9 @@ import (
 	"regexp"
 
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
-	"github.com/diveagents/dive/providers/groq"
-	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/groq"
+	"github.com/diveagents/dive/llm/providers/openai"
 )
 
 var newlinesRegex = regexp.MustCompile(`\n+`)

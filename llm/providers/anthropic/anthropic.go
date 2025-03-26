@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers"
+	"github.com/diveagents/dive/llm/providers"
 	"github.com/diveagents/dive/retry"
 )
 
