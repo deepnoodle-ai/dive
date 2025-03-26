@@ -13,7 +13,6 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/memory"
 	"github.com/diveagents/dive/slogger"
 )
 
@@ -47,7 +46,6 @@ type Options struct {
 	Hooks                llm.Hooks
 	Logger               slogger.Logger
 	ToolIterationLimit   int
-	Memory               memory.Memory
 	Temperature          *float64
 	PresencePenalty      *float64
 	FrequencyPenalty     *float64
