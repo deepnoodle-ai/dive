@@ -732,6 +732,14 @@ func (a *Agent) generate(
 		// Capture results in a new message to send on next loop iteration
 		resultMessage := llm.NewToolResultMessage(toolResults)
 
+		if err := safePublish(&dive.Event{
+			Type:    "llm.tool_result_message",
+			Origin:  a.eventOrigin(),
+			Payload: resultMessage,
+		}); err != nil {
+			return nil, nil, err
+		}
+
 		// Add instructions to the message to not use any more tools if we have
 		// only one generation left
 		if i == generationLimit-2 {
