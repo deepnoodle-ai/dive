@@ -10,9 +10,9 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
-	"github.com/diveagents/dive/providers/groq"
-	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/groq"
+	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -28,7 +28,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
 
 	iterator, err := agent.Stream(ctx,
-		llm.NewUserMessage(message),
+		llm.NewSingleUserMessage(message),
 		dive.WithThreadID("chat"),
 	)
 	if err != nil {
@@ -102,12 +102,13 @@ func runChat(systemPrompt, agentName string) error {
 	if err != nil {
 		return fmt.Errorf("error getting provider: %v", err)
 	}
-	chatAgent, err := agent.NewAgent(agent.AgentOptions{
-		Name:         agentName,
-		Backstory:    systemPrompt,
-		LLM:          llmProvider,
-		CacheControl: "ephemeral",
-		Logger:       logger,
+	chatAgent, err := agent.New(agent.Options{
+		Name:             agentName,
+		Backstory:        systemPrompt,
+		LLM:              llmProvider,
+		CacheControl:     "ephemeral",
+		Logger:           logger,
+		ThreadRepository: dive.NewMemoryThreadRepository(),
 	})
 	if err != nil {
 		return fmt.Errorf("error creating agent: %v", err)

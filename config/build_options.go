@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/diveagents/dive/document"
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 )
@@ -12,7 +12,8 @@ type BuildOptions struct {
 	Logger        slogger.Logger
 	LogLevel      string
 	DocumentsDir  string
-	DocumentsRepo document.Repository
+	DocumentsRepo dive.DocumentRepository
+	ThreadRepo    dive.ThreadRepository
 }
 
 type BuildOption func(*BuildOptions)
@@ -41,8 +42,14 @@ func WithDocumentsDir(dir string) BuildOption {
 	}
 }
 
-func WithDocumentsRepo(repo document.Repository) BuildOption {
+func WithDocumentsRepo(repo dive.DocumentRepository) BuildOption {
 	return func(opts *BuildOptions) {
 		opts.DocumentsRepo = repo
+	}
+}
+
+func WithThreadRepo(repo dive.ThreadRepository) BuildOption {
+	return func(opts *BuildOptions) {
+		opts.ThreadRepo = repo
 	}
 }

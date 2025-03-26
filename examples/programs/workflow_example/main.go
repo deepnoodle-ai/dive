@@ -11,9 +11,9 @@ import (
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
-	"github.com/diveagents/dive/providers/groq"
-	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/groq"
+	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
@@ -90,7 +90,7 @@ func main() {
 		logger.Warn("no tools enabled")
 	}
 
-	supervisor, err := agent.NewAgent(agent.AgentOptions{
+	supervisor, err := agent.New(agent.Options{
 		Name:         "Supervisor",
 		Backstory:    "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
 		IsSupervisor: true,
@@ -103,7 +103,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	researcher, err := agent.NewAgent(agent.AgentOptions{
+	researcher, err := agent.New(agent.Options{
 		Name:         "Research Assistant",
 		Backstory:    "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
 		CacheControl: "ephemeral",
@@ -115,7 +115,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	w, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	w, err := workflow.New(workflow.Options{
 		Name:        "Research Workflow",
 		Description: "A workflow for the research assistant. The supervisor will assign tasks to the research assistant.",
 		Steps: []*workflow.Step{
@@ -131,7 +131,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	env, err := environment.New(environment.EnvironmentOptions{
+	env, err := environment.New(environment.Options{
 		Name:        "Research Environment",
 		Description: "A research environment for the research assistant. The supervisor will assign tasks to the research assistant.",
 		Agents:      []dive.Agent{supervisor, researcher},

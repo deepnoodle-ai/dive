@@ -1,4 +1,4 @@
-package document
+package dive
 
 import (
 	"context"
@@ -9,20 +9,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFileSysRepository(t *testing.T) {
+func TestFileDocumentRepository(t *testing.T) {
 	// Create temp directory for tests
 	tmpDir, err := os.MkdirTemp("", "docrepo-test-*")
 	require.NoError(t, err, "Failed to create temp directory")
 	defer os.RemoveAll(tmpDir)
 
-	repo, err := NewFileSysRepository(tmpDir)
+	repo, err := NewFileDocumentRepository(tmpDir)
 	require.NoError(t, err, "Failed to create document repo")
 
 	ctx := context.Background()
 
 	// Test PutDocument
 	t.Run("PutDocument", func(t *testing.T) {
-		doc := New(Options{
+		doc := NewTextDocument(TextDocumentOptions{
 			Name:    "test.txt",
 			Path:    "docs/test.txt",
 			Content: "test content",
@@ -56,7 +56,7 @@ func TestFileSysRepository(t *testing.T) {
 		require.NoError(t, err, "Failed to create docs directory")
 
 		// Add test document that should already exist
-		doc := New(Options{
+		doc := NewTextDocument(TextDocumentOptions{
 			Name:    "test.txt",
 			Path:    "docs/test.txt",
 			Content: "test content",
@@ -74,7 +74,7 @@ func TestFileSysRepository(t *testing.T) {
 		}
 
 		for _, d := range docs {
-			doc := New(Options{
+			doc := NewTextDocument(TextDocumentOptions{
 				Name:    filepath.Base(d.uri),
 				Path:    d.uri,
 				Content: d.content,
@@ -128,7 +128,7 @@ func TestFileSysRepository(t *testing.T) {
 
 	// Test DeleteDocument
 	t.Run("DeleteDocument", func(t *testing.T) {
-		doc := New(Options{
+		doc := NewTextDocument(TextDocumentOptions{
 			Name:    "delete-test.txt",
 			Path:    "docs/delete-test.txt",
 			Content: "to be deleted",
@@ -152,7 +152,7 @@ func TestFileSysRepository(t *testing.T) {
 		require.Error(t, err, "Expected error getting non-existent document")
 
 		// Test putting document without URI
-		doc := New(Options{
+		doc := NewTextDocument(TextDocumentOptions{
 			Name:    "no-uri.txt",
 			Content: "test",
 		})

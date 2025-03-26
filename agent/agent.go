@@ -12,9 +12,7 @@ import (
 	"time"
 
 	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/document"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/memory"
 	"github.com/diveagents/dive/slogger"
 )
 
@@ -27,19 +25,12 @@ var (
 
 // Confirm our standard implementation satisfies the different Agent interfaces
 var (
-	_ dive.Agent             = &Agent{}
-	_ dive.RunnableAgent     = &Agent{}
-	_ dive.EventHandlerAgent = &Agent{}
+	_ dive.Agent         = &Agent{}
+	_ dive.RunnableAgent = &Agent{}
 )
 
-// chatThread contains the message history for a specific chat thread ID
-type chatThread struct {
-	ID       string
-	Messages []*llm.Message
-}
-
-// AgentOptions are used to configure an Agent.
-type AgentOptions struct {
+// Options are used to configure an Agent.
+type Options struct {
 	Name                 string
 	Goal                 string
 	Backstory            string
@@ -55,7 +46,6 @@ type AgentOptions struct {
 	Hooks                llm.Hooks
 	Logger               slogger.Logger
 	ToolIterationLimit   int
-	Memory               memory.Memory
 	Temperature          *float64
 	PresencePenalty      *float64
 	FrequencyPenalty     *float64
@@ -63,7 +53,8 @@ type AgentOptions struct {
 	ReasoningEffort      string
 	DateAwareness        *bool
 	Environment          dive.Environment
-	DocumentRepository   document.Repository
+	DocumentRepository   dive.DocumentRepository
+	ThreadRepository     dive.ThreadRepository
 	SystemPromptTemplate string
 }
 
@@ -90,7 +81,6 @@ type Agent struct {
 	hooks                llm.Hooks
 	logger               slogger.Logger
 	toolIterationLimit   int
-	threads              map[string]*chatThread
 	temperature          *float64
 	presencePenalty      *float64
 	frequencyPenalty     *float64
@@ -98,7 +88,8 @@ type Agent struct {
 	reasoningEffort      string
 	dateAwareness        *bool
 	environment          dive.Environment
-	documentRepository   document.Repository
+	documentRepository   dive.DocumentRepository
+	threadRepository     dive.ThreadRepository
 	systemPromptTemplate *template.Template
 
 	// Holds incoming messages to be processed by the agent's run loop
@@ -108,8 +99,8 @@ type Agent struct {
 	wg    sync.WaitGroup
 }
 
-// NewAgent returns a new Agent with the given options.
-func NewAgent(opts AgentOptions) (*Agent, error) {
+// New returns a new Agent configured with the given options.
+func New(opts Options) (*Agent, error) {
 	if opts.TickFrequency <= 0 {
 		opts.TickFrequency = DefaultTickFrequency
 	}
@@ -133,7 +124,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		}
 	}
 	if opts.Name == "" {
-		opts.Name = randomName()
+		opts.Name = dive.RandomName()
 	}
 	if opts.SystemPromptTemplate == "" {
 		opts.SystemPromptTemplate = SystemPromptTemplate
@@ -160,9 +151,9 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		hooks:                opts.Hooks,
 		mailbox:              make(chan interface{}, 16),
 		logger:               opts.Logger,
-		threads:              make(map[string]*chatThread),
 		dateAwareness:        opts.DateAwareness,
 		documentRepository:   opts.DocumentRepository,
+		threadRepository:     opts.ThreadRepository,
 		systemPromptTemplate: systemPromptTemplate,
 	}
 
@@ -322,7 +313,7 @@ func (a *Agent) IsRunning() bool {
 	return a.running
 }
 
-func (a *Agent) Generate(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
+func (a *Agent) Generate(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
 	if !a.IsRunning() {
 		return nil, fmt.Errorf("agent is not running")
 	}
@@ -334,7 +325,7 @@ func (a *Agent) Generate(ctx context.Context, message *llm.Message, opts ...dive
 	errChan := make(chan error, 1)
 
 	chatMessage := messageChat{
-		message:    message,
+		messages:   messages,
 		options:    generateOptions,
 		resultChan: resultChan,
 		errChan:    errChan,
@@ -359,7 +350,7 @@ func (a *Agent) Generate(ctx context.Context, message *llm.Message, opts ...dive
 	}
 }
 
-func (a *Agent) Stream(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
+func (a *Agent) Stream(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
 	if !a.IsRunning() {
 		return nil, fmt.Errorf("agent is not running")
 	}
@@ -370,9 +361,9 @@ func (a *Agent) Stream(ctx context.Context, message *llm.Message, opts ...dive.G
 	stream := dive.NewStream()
 
 	chatMessage := messageChat{
-		message: message,
-		options: generateOptions,
-		stream:  stream,
+		messages: messages,
+		options:  generateOptions,
+		stream:   stream,
 	}
 
 	// Send the chat message to the agent's mailbox, but make sure we timeout
@@ -385,19 +376,6 @@ func (a *Agent) Stream(ctx context.Context, message *llm.Message, opts ...dive.G
 	}
 
 	return stream, nil
-}
-
-func (a *Agent) HandleEvent(ctx context.Context, event *dive.Event) error {
-	if !a.IsRunning() {
-		return fmt.Errorf("agent is not running")
-	}
-
-	select {
-	case a.mailbox <- event:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 func (a *Agent) Work(ctx context.Context, task dive.Task) (dive.Stream, error) {
@@ -441,9 +419,6 @@ func (a *Agent) run() error {
 			case messageChat:
 				a.handleChat(msg)
 
-			case *dive.Event:
-				a.handleEvent(msg)
-
 			case messageStop:
 				msg.done <- nil
 				return nil
@@ -460,14 +435,6 @@ func (a *Agent) handleWork(m messageWork) {
 		Publisher: m.publisher,
 		Status:    dive.TaskStatusQueued,
 	})
-}
-
-func (a *Agent) handleEvent(event *dive.Event) {
-	a.logger.Info("event received",
-		"agent", a.name,
-		"event_type", event.Type)
-
-	// TODO: implement event triggered behaviors
 }
 
 func (a *Agent) handleChat(m messageChat) {
@@ -503,21 +470,24 @@ func (a *Agent) handleChat(m messageChat) {
 	logger.Info("handling chat")
 
 	// Append this new message to the thread history if a thread id was provided
-	var thread *chatThread
+	var thread *dive.Thread
 	var messages []*llm.Message
 	if m.options.ThreadID != "" {
-		var exists bool
-		thread, exists = a.threads[m.options.ThreadID]
-		if !exists {
-			thread = &chatThread{
-				ID:       m.options.ThreadID,
-				Messages: []*llm.Message{},
-			}
-			a.threads[m.options.ThreadID] = thread
+		if a.threadRepository == nil {
+			m.errChan <- fmt.Errorf("thread history not enabled")
+			return
 		}
-		messages = append(messages, thread.Messages...)
+		var err error
+		thread, err = a.getOrCreateThread(ctx, m.options.ThreadID)
+		if err != nil {
+			m.errChan <- err
+			return
+		}
+		if len(thread.Messages) > 0 {
+			messages = append(messages, thread.Messages...)
+		}
 	}
-	messages = append(messages, m.message)
+	messages = append(messages, m.messages...)
 
 	response, updatedMessages, err := a.generate(ctx, messages, systemPrompt, publisher)
 	if err != nil {
@@ -525,6 +495,11 @@ func (a *Agent) handleChat(m messageChat) {
 		// Intentional fall-through
 	} else if thread != nil {
 		thread.Messages = updatedMessages
+		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
+			logger.Error("error updating thread", "error", err)
+			m.errChan <- err
+			return
+		}
 	}
 	if isStreaming {
 		return
@@ -534,6 +509,23 @@ func (a *Agent) handleChat(m messageChat) {
 		return
 	}
 	m.resultChan <- response
+}
+
+func (a *Agent) getOrCreateThread(ctx context.Context, threadID string) (*dive.Thread, error) {
+	if a.threadRepository == nil {
+		return nil, fmt.Errorf("thread history not enabled")
+	}
+	thread, err := a.threadRepository.GetThread(ctx, threadID)
+	if err == nil {
+		return thread, nil
+	}
+	if err != dive.ErrThreadNotFound {
+		return nil, err
+	}
+	return &dive.Thread{
+		ID:       threadID,
+		Messages: []*llm.Message{},
+	}, nil
 }
 
 func (a *Agent) getSystemPromptForMode(mode string) (string, error) {
@@ -547,7 +539,7 @@ func (a *Agent) getSystemPromptForMode(mode string) (string, error) {
 		return "", err
 	}
 	if a.dateAwareness == nil || *a.dateAwareness {
-		prompt = fmt.Sprintf("%s\n\n# Date and Time\n\n%s", prompt, dateString(time.Now()))
+		prompt = fmt.Sprintf("%s\n\n# Date and Time\n\n%s", prompt, dive.DateString(time.Now()))
 	}
 	return strings.TrimSpace(prompt), nil
 }
@@ -981,9 +973,9 @@ func (a *Agent) getTasksHistory() string {
 	for i, status := range a.recentTasks {
 		title := status.Task.Name()
 		history[i] = fmt.Sprintf("- task: %q status: %q output: %q\n",
-			TruncateText(title, 8),
+			dive.TruncateText(title, 8),
 			status.Status,
-			TruncateText(replaceNewlines(status.LastOutput()), 10),
+			dive.TruncateText(replaceNewlines(status.LastOutput()), 10),
 		)
 	}
 	result := strings.Join(history, "\n")
@@ -1009,7 +1001,6 @@ func (a *Agent) Fingerprint() string {
 	sb.WriteString(fmt.Sprintf("agent: %s\n", a.name))
 	sb.WriteString(fmt.Sprintf("goal: %s\n", a.goal))
 	sb.WriteString(fmt.Sprintf("backstory: %s\n", a.backstory))
-	sb.WriteString(fmt.Sprintf("accepted_events: %v\n", a.acceptedEvents))
 	sb.WriteString(fmt.Sprintf("is_supervisor: %t\n", a.isSupervisor))
 	sb.WriteString(fmt.Sprintf("subordinates: %v\n", a.subordinates))
 	sb.WriteString(fmt.Sprintf("llm: %s\n", a.llm.Name()))

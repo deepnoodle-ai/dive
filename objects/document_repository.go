@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/diveagents/dive/document"
+	"github.com/diveagents/dive"
 	"github.com/risor-io/risor/object"
 	"github.com/risor-io/risor/op"
 )
@@ -13,7 +13,7 @@ import (
 var _ object.Object = &DocumentRepository{}
 
 type DocumentRepository struct {
-	repo document.Repository
+	repo dive.DocumentRepository
 }
 
 func (d *DocumentRepository) Cost() int {
@@ -50,7 +50,7 @@ func (d *DocumentRepository) Type() object.Type {
 	return "documents"
 }
 
-func (d *DocumentRepository) Value() document.Repository {
+func (d *DocumentRepository) Value() dive.DocumentRepository {
 	return d.repo
 }
 
@@ -88,6 +88,6 @@ func (d *DocumentRepository) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]any{})
 }
 
-func NewDocumentRepository(repo document.Repository) *DocumentRepository {
+func NewDocumentRepository(repo dive.DocumentRepository) *DocumentRepository {
 	return &DocumentRepository{repo: repo}
 }

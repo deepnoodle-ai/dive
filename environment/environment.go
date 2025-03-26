@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/document"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
 	"github.com/google/uuid"
@@ -23,28 +22,30 @@ type Environment struct {
 	executions      map[string]*Execution
 	logger          slogger.Logger
 	defaultWorkflow string
-	documentRepo    document.Repository
+	documentRepo    dive.DocumentRepository
+	threadRepo      dive.ThreadRepository
 	actions         map[string]Action
 	started         bool
 }
 
-// EnvironmentOptions configures a new environment
-type EnvironmentOptions struct {
-	ID              string
-	Name            string
-	Description     string
-	Agents          []dive.Agent
-	Workflows       []*workflow.Workflow
-	Triggers        []*Trigger
-	Executions      []*Execution
-	Logger          slogger.Logger
-	DefaultWorkflow string
-	DocumentRepo    document.Repository
-	Actions         []Action
+// Options are used to configure an Environment.
+type Options struct {
+	ID                 string
+	Name               string
+	Description        string
+	Agents             []dive.Agent
+	Workflows          []*workflow.Workflow
+	Triggers           []*Trigger
+	Executions         []*Execution
+	Logger             slogger.Logger
+	DefaultWorkflow    string
+	DocumentRepository dive.DocumentRepository
+	ThreadRepository   dive.ThreadRepository
+	Actions            []Action
 }
 
-// New creates a new Environment instance
-func New(opts EnvironmentOptions) (*Environment, error) {
+// New returns a new Environment configured with the given options.
+func New(opts Options) (*Environment, error) {
 	if opts.Name == "" {
 		return nil, fmt.Errorf("environment name is required")
 	}
@@ -76,9 +77,9 @@ func New(opts EnvironmentOptions) (*Environment, error) {
 	actions := make(map[string]Action, len(opts.Actions))
 
 	// Register document actions if we have a document repository
-	if opts.DocumentRepo != nil {
-		writeAction := NewDocumentWriteAction(opts.DocumentRepo)
-		readAction := NewDocumentReadAction(opts.DocumentRepo)
+	if opts.DocumentRepository != nil {
+		writeAction := NewDocumentWriteAction(opts.DocumentRepository)
+		readAction := NewDocumentReadAction(opts.DocumentRepository)
 		actions[writeAction.Name()] = writeAction
 		actions[readAction.Name()] = readAction
 	}
@@ -108,7 +109,8 @@ func New(opts EnvironmentOptions) (*Environment, error) {
 		executions:      executions,
 		logger:          opts.Logger,
 		defaultWorkflow: opts.DefaultWorkflow,
-		documentRepo:    opts.DocumentRepo,
+		documentRepo:    opts.DocumentRepository,
+		threadRepo:      opts.ThreadRepository,
 		actions:         actions,
 	}
 	for _, trigger := range env.triggers {
@@ -132,8 +134,12 @@ func (e *Environment) Description() string {
 	return e.description
 }
 
-func (e *Environment) DocumentRepository() document.Repository {
+func (e *Environment) DocumentRepository() dive.DocumentRepository {
 	return e.documentRepo
+}
+
+func (e *Environment) ThreadRepository() dive.ThreadRepository {
+	return e.threadRepo
 }
 
 func (e *Environment) Start(ctx context.Context) error {

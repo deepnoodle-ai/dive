@@ -1,4 +1,4 @@
-package document
+package dive
 
 import (
 	"context"
@@ -9,17 +9,17 @@ import (
 	"sync"
 )
 
-var _ Repository = &FileSysRepository{}
+var _ DocumentRepository = &FileDocumentRepository{}
 
-// FileSysRepository implements DocumentStore using the local file system
-type FileSysRepository struct {
+// FileDocumentRepository implements DocumentRepository using the local file system
+type FileDocumentRepository struct {
 	rootDir        string
 	namedDocuments map[string]string
 	mutex          sync.RWMutex
 }
 
-// NewFileSysRepository creates a new document store backed by the file system
-func NewFileSysRepository(rootDir string) (*FileSysRepository, error) {
+// NewFileDocumentRepository creates a new document repository backed by the file system
+func NewFileDocumentRepository(rootDir string) (*FileDocumentRepository, error) {
 	if rootDir == "" {
 		rootDir = "."
 	}
@@ -31,14 +31,14 @@ func NewFileSysRepository(rootDir string) (*FileSysRepository, error) {
 	if err := os.MkdirAll(absRoot, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create root directory: %w", err)
 	}
-	return &FileSysRepository{
+	return &FileDocumentRepository{
 		rootDir:        absRoot,
 		namedDocuments: make(map[string]string),
 	}, nil
 }
 
 // RegisterDocument assigns a name to a document path
-func (r *FileSysRepository) RegisterDocument(ctx context.Context, name, path string) error {
+func (r *FileDocumentRepository) RegisterDocument(ctx context.Context, name, path string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -56,7 +56,7 @@ func (r *FileSysRepository) RegisterDocument(ctx context.Context, name, path str
 }
 
 // sanitizePath ensures a path is safe and within the root directory
-func (r *FileSysRepository) sanitizePath(path string) (string, error) {
+func (r *FileDocumentRepository) sanitizePath(path string) (string, error) {
 	// Clean the path to remove any . or .. components
 	path = filepath.Clean(path)
 
@@ -77,7 +77,7 @@ func (r *FileSysRepository) sanitizePath(path string) (string, error) {
 }
 
 // GetDocument returns a document by name (which is treated as a path)
-func (r *FileSysRepository) GetDocument(ctx context.Context, name string) (Document, error) {
+func (r *FileDocumentRepository) GetDocument(ctx context.Context, name string) (Document, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -97,7 +97,7 @@ func (r *FileSysRepository) GetDocument(ctx context.Context, name string) (Docum
 	if err != nil {
 		return nil, fmt.Errorf("failed to read document %q: %w", name, err)
 	}
-	return New(Options{
+	return NewTextDocument(TextDocumentOptions{
 		Name:        name,
 		Path:        name, // Keep original path for reference
 		Content:     string(content),
@@ -106,7 +106,7 @@ func (r *FileSysRepository) GetDocument(ctx context.Context, name string) (Docum
 }
 
 // ListDocuments lists documents matching the input criteria
-func (r *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
+func (r *FileDocumentRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
 	var docs []Document
 
 	startPath, err := r.sanitizePath(input.PathPrefix)
@@ -138,7 +138,7 @@ func (r *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocume
 		if err != nil {
 			return nil // Skip files we can't read
 		}
-		doc := New(Options{
+		doc := NewTextDocument(TextDocumentOptions{
 			Name:        filepath.Base(relPath),
 			Path:        relPath,
 			Content:     string(content),
@@ -156,7 +156,7 @@ func (r *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocume
 }
 
 // PutDocument puts a document into the store
-func (r *FileSysRepository) PutDocument(ctx context.Context, doc Document) error {
+func (r *FileDocumentRepository) PutDocument(ctx context.Context, doc Document) error {
 	if doc.Path() == "" {
 		return fmt.Errorf("document path is required")
 	}
@@ -174,7 +174,7 @@ func (r *FileSysRepository) PutDocument(ctx context.Context, doc Document) error
 }
 
 // DeleteDocument deletes a document from the store
-func (r *FileSysRepository) DeleteDocument(ctx context.Context, doc Document) error {
+func (r *FileDocumentRepository) DeleteDocument(ctx context.Context, doc Document) error {
 	if doc.Path() == "" {
 		return fmt.Errorf("document path is required")
 	}
@@ -189,7 +189,7 @@ func (r *FileSysRepository) DeleteDocument(ctx context.Context, doc Document) er
 }
 
 // Exists checks if a document exists by name
-func (r *FileSysRepository) Exists(ctx context.Context, name string) (bool, error) {
+func (r *FileDocumentRepository) Exists(ctx context.Context, name string) (bool, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -210,8 +210,6 @@ func (r *FileSysRepository) Exists(ctx context.Context, name string) (bool, erro
 	}
 	return true, nil
 }
-
-// Helper functions
 
 func detectContentType(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))

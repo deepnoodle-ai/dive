@@ -10,7 +10,7 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/anthropic"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
@@ -36,7 +36,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	researcher, err := agent.NewAgent(agent.AgentOptions{
+	researcher, err := agent.New(agent.Options{
 		Name:   "Research Assistant",
 		Goal:   "Use Google to research assigned topics",
 		LLM:    anthropic.New(),

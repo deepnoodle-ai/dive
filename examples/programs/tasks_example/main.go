@@ -10,9 +10,9 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
-	"github.com/diveagents/dive/providers/groq"
-	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/groq"
+	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
@@ -63,7 +63,7 @@ func main() {
 		log.Println("google search enabled")
 	}
 
-	a, err := agent.NewAgent(agent.AgentOptions{
+	a, err := agent.New(agent.Options{
 		Name:         "Research Assistant",
 		CacheControl: "ephemeral",
 		LLM:          provider,
@@ -83,7 +83,7 @@ func main() {
 		Prompt: &dive.Prompt{
 			Text:         "Research the history of beer",
 			Output:       "The history of beer",
-			OutputFormat: string(dive.OutputMarkdown),
+			OutputFormat: dive.OutputFormatMarkdown,
 		},
 	})
 

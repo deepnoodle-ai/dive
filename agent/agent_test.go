@@ -9,7 +9,7 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/anthropic"
 	"github.com/diveagents/dive/slogger"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name:         "Testing Agent",
 		Goal:         "Test the agent",
 		Backstory:    "You are a testing agent",
@@ -38,7 +38,7 @@ func TestAgentChat(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name: "Testing Agent",
 		LLM:  anthropic.New(),
 	})
@@ -47,7 +47,7 @@ func TestAgentChat(t *testing.T) {
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	response, err := agent.Generate(ctx, llm.NewUserMessage("Hello, world!"))
+	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Hello, world!"))
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
@@ -84,7 +84,7 @@ func TestAgentChatWithTools(t *testing.T) {
 		return input, nil
 	}
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		LLM:   anthropic.New(),
 		Tools: []llm.Tool{llm.NewTool(&echoToolDef, echoFunc)},
 	})
@@ -93,7 +93,7 @@ func TestAgentChatWithTools(t *testing.T) {
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	response, err := agent.Generate(ctx, llm.NewUserMessage("Please use the echo tool to echo 'hello world'"))
+	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
@@ -110,7 +110,7 @@ func TestAgentTask(t *testing.T) {
 
 	logger := slogger.New(slogger.LevelDebug)
 
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name:      "Poet",
 		Backstory: "You're a poet that loves writing limericks",
 		LLM:       anthropic.New(),
@@ -125,7 +125,7 @@ func TestAgentTask(t *testing.T) {
 		prompt: &dive.Prompt{
 			Text:         "Write a limerick about a cat",
 			Output:       "A limerick about a cat",
-			OutputFormat: string(dive.OutputMarkdown),
+			OutputFormat: dive.OutputFormatMarkdown,
 		},
 	})
 	require.NoError(t, err)
@@ -144,7 +144,7 @@ func TestAgentTask(t *testing.T) {
 }
 
 func TestAgentChatSystemPrompt(t *testing.T) {
-	agent, err := NewAgent(AgentOptions{
+	agent, err := New(Options{
 		Name:         "TestAgent",
 		Goal:         "Help research a topic.",
 		Backstory:    "You are a research assistant.",

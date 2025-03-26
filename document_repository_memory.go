@@ -1,4 +1,4 @@
-package document
+package dive
 
 import (
 	"context"
@@ -7,25 +7,25 @@ import (
 	"sync"
 )
 
-var _ Repository = &MemoryRepository{}
+var _ DocumentRepository = &MemoryDocumentRepository{}
 
-// MemoryRepository implements Repository interface using an in-memory map
-type MemoryRepository struct {
+// MemoryDocumentRepository implements DocumentRepository interface using an in-memory map
+type MemoryDocumentRepository struct {
 	mu             sync.RWMutex
 	documents      map[string]*TextDocument
 	namedDocuments map[string]string
 }
 
-// NewMemoryRepository creates a new MemoryRepository
-func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{
+// NewMemoryDocumentRepository creates a new MemoryDocumentRepository
+func NewMemoryDocumentRepository() *MemoryDocumentRepository {
+	return &MemoryDocumentRepository{
 		documents:      make(map[string]*TextDocument),
 		namedDocuments: make(map[string]string),
 	}
 }
 
 // RegisterDocument assigns a name to a document path
-func (r *MemoryRepository) RegisterDocument(ctx context.Context, name, path string) error {
+func (r *MemoryDocumentRepository) RegisterDocument(ctx context.Context, name, path string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -34,7 +34,7 @@ func (r *MemoryRepository) RegisterDocument(ctx context.Context, name, path stri
 }
 
 // GetDocument returns a document by name
-func (r *MemoryRepository) GetDocument(ctx context.Context, name string) (Document, error) {
+func (r *MemoryDocumentRepository) GetDocument(ctx context.Context, name string) (Document, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -51,7 +51,7 @@ func (r *MemoryRepository) GetDocument(ctx context.Context, name string) (Docume
 }
 
 // ListDocuments lists documents matching the given criteria
-func (r *MemoryRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
+func (r *MemoryDocumentRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -78,14 +78,14 @@ func (r *MemoryRepository) ListDocuments(ctx context.Context, input *ListDocumen
 }
 
 // PutDocument stores a document
-func (r *MemoryRepository) PutDocument(ctx context.Context, doc Document) error {
+func (r *MemoryDocumentRepository) PutDocument(ctx context.Context, doc Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	textDoc, ok := doc.(*TextDocument)
 	if !ok {
 		// If not already a TextDocument, create a new one with the same properties
-		textDoc = New(Options{
+		textDoc = NewTextDocument(TextDocumentOptions{
 			ID:          doc.ID(),
 			Name:        doc.Name(),
 			Description: doc.Description(),
@@ -101,7 +101,7 @@ func (r *MemoryRepository) PutDocument(ctx context.Context, doc Document) error 
 }
 
 // DeleteDocument removes a document
-func (r *MemoryRepository) DeleteDocument(ctx context.Context, doc Document) error {
+func (r *MemoryDocumentRepository) DeleteDocument(ctx context.Context, doc Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -114,7 +114,7 @@ func (r *MemoryRepository) DeleteDocument(ctx context.Context, doc Document) err
 }
 
 // Exists checks if a document exists by name
-func (r *MemoryRepository) Exists(ctx context.Context, name string) (bool, error) {
+func (r *MemoryDocumentRepository) Exists(ctx context.Context, name string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

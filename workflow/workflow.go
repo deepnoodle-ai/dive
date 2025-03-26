@@ -12,7 +12,7 @@ type Trigger struct {
 	Config map[string]interface{}
 }
 
-// Workflow defines a repeatable process as a graph of tasks to be executed
+// Workflow defines a repeatable process as a graph of tasks to be executed.
 type Workflow struct {
 	name        string
 	description string
@@ -23,8 +23,8 @@ type Workflow struct {
 	triggers    []*Trigger
 }
 
-// WorkflowOptions configures a new workflow
-type WorkflowOptions struct {
+// Options are used to configure a Workflow.
+type Options struct {
 	Name        string
 	Description string
 	Inputs      []*dive.Input
@@ -33,8 +33,8 @@ type WorkflowOptions struct {
 	Triggers    []*Trigger
 }
 
-// NewWorkflow creates and validates a Workflow
-func NewWorkflow(opts WorkflowOptions) (*Workflow, error) {
+// New returns a new Workflow configured with the given options.
+func New(opts Options) (*Workflow, error) {
 	if opts.Name == "" {
 		return nil, fmt.Errorf("workflow name required")
 	}

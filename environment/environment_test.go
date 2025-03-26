@@ -39,7 +39,7 @@ func TestNewEnvironment(t *testing.T) {
 		},
 	})
 
-	w, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	w, err := workflow.New(workflow.Options{
 		Name: "Poetry Writing",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -64,7 +64,7 @@ func TestNewEnvironment(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test",
 		Agents:    []dive.Agent{a},
 		Workflows: []*workflow.Workflow{w},
@@ -133,7 +133,7 @@ func TestEnvironmentWithMultipleAgents(t *testing.T) {
 		},
 	})
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:   "test-multi-agent",
 		Agents: []dive.Agent{agent1, agent2},
 		Logger: logger,
@@ -166,7 +166,7 @@ func TestEnvironmentGetAgent(t *testing.T) {
 		Name: "TestAgent",
 	})
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:   "test-get-agent",
 		Agents: []dive.Agent{mockAgent},
 		Logger: logger,
@@ -205,7 +205,7 @@ func TestExecutionStats(t *testing.T) {
 		},
 	})
 
-	w, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	w, err := workflow.New(workflow.Options{
 		Name: "Stats Test",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -220,7 +220,7 @@ func TestExecutionStats(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test-stats",
 		Agents:    []dive.Agent{mockAgent},
 		Workflows: []*workflow.Workflow{w},
@@ -275,7 +275,7 @@ func TestExecutionCancellation(t *testing.T) {
 		},
 	})
 
-	w, err := workflow.NewWorkflow(workflow.WorkflowOptions{
+	w, err := workflow.New(workflow.Options{
 		Name: "Cancellation Test",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
@@ -290,7 +290,7 @@ func TestExecutionCancellation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	env, err := New(EnvironmentOptions{
+	env, err := New(Options{
 		Name:      "test-cancellation",
 		Agents:    []dive.Agent{mockAgent},
 		Workflows: []*workflow.Workflow{w},

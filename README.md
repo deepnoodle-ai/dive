@@ -76,11 +76,11 @@ Here's a simple example of creating a chat agent:
 provider := anthropic.New()
 googleClient, _ := google.New()
 
-agent, err := agent.NewAgent(agent.AgentOptions{
-    Name: "Assistant",
-    Backstory: "You are a helpful assistant.",
-    LLM: provider,
-    Tools: []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
+agent, err := agent.New(agent.Options{
+    Name:         "Assistant",
+    Backstory:    "You are a helpful assistant.",
+    LLM:          provider,
+    Tools:        []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
     CacheControl: "ephemeral",
 })
 

@@ -12,9 +12,9 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/providers/anthropic"
-	"github.com/diveagents/dive/providers/groq"
-	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/groq"
+	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
@@ -50,7 +50,7 @@ func main() {
 
 	logger := slogger.New(slogger.LevelInfo)
 
-	a, err := agent.NewAgent(agent.AgentOptions{
+	a, err := agent.New(agent.Options{
 		Name: "Dr. Smith",
 		Backstory: `
 You are a virtual doctor for role-playing purposes only. You can discuss general
@@ -86,7 +86,7 @@ to answer non-medical questions. Use maximum medical jargon.`,
 			continue
 		}
 
-		iterator, err := a.Stream(ctx, llm.NewUserMessage(message), dive.WithThreadID("1"))
+		iterator, err := a.Stream(ctx, llm.NewSingleUserMessage(message), dive.WithThreadID("1"))
 		if err != nil {
 			log.Fatal(err)
 		}

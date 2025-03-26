@@ -125,7 +125,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 
 	outputFormat := dive.OutputFormat(params.OutputFormat)
 	if outputFormat == "" {
-		outputFormat = dive.OutputMarkdown
+		outputFormat = dive.OutputFormatMarkdown
 	}
 
 	var context []*dive.PromptContext
@@ -140,7 +140,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 		Prompt: &dive.Prompt{
 			Text:         params.Description,
 			Output:       params.ExpectedOutput,
-			OutputFormat: string(outputFormat),
+			OutputFormat: outputFormat,
 			Context:      context,
 		},
 	})
