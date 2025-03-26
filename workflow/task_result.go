@@ -9,9 +9,6 @@ import (
 
 // TaskResult holds the output of a completed task
 type TaskResult struct {
-	// Task is the task that was executed
-	Task *dive.Task
-
 	// Raw content of the output
 	Content string
 
