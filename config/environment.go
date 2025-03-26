@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -132,6 +133,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		triggers = append(triggers, trigger)
 	}
 
+	// Documents
 	if buildOpts.DocumentsDir != "" && buildOpts.DocumentsRepo != nil {
 		return nil, fmt.Errorf("documents dir and repo cannot both be set")
 	}
@@ -150,6 +152,20 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		repo, err = document.NewFileSysRepository(dir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create document repository: %w", err)
+		}
+	}
+	if repo != nil {
+		namedDocuments := make(map[string]*document.Metadata, len(env.Documents))
+		for _, doc := range env.Documents {
+			namedDocuments[doc.Name] = &document.Metadata{
+				Name: doc.Name,
+				Path: doc.Path,
+			}
+		}
+		for _, doc := range env.Documents {
+			if err := repo.RegisterDocument(context.Background(), doc.Name, doc.Path); err != nil {
+				return nil, fmt.Errorf("failed to register document %s: %w", doc.Name, err)
+			}
 		}
 	}
 

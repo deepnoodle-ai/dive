@@ -14,7 +14,7 @@ var _ Repository = &FileSysRepository{}
 // FileSysRepository implements DocumentStore using the local file system
 type FileSysRepository struct {
 	rootDir        string
-	knownDocuments map[string]string
+	namedDocuments map[string]string
 	mutex          sync.RWMutex
 }
 
@@ -23,25 +23,40 @@ func NewFileSysRepository(rootDir string) (*FileSysRepository, error) {
 	if rootDir == "" {
 		rootDir = "."
 	}
-
 	// Clean and get absolute path for root directory
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve absolute path for root directory: %w", err)
 	}
-
 	if err := os.MkdirAll(absRoot, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create root directory: %w", err)
 	}
-
 	return &FileSysRepository{
 		rootDir:        absRoot,
-		knownDocuments: make(map[string]string),
+		namedDocuments: make(map[string]string),
 	}, nil
 }
 
+// RegisterDocument assigns a name to a document path
+func (r *FileSysRepository) RegisterDocument(ctx context.Context, name, path string) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	sanitizedPath, err := r.sanitizePath(path)
+	if err != nil {
+		return fmt.Errorf("failed to sanitize path: %w", err)
+	}
+	// Convert the sanitized absolute path back to a relative path from root
+	relPath, err := filepath.Rel(r.rootDir, sanitizedPath)
+	if err != nil {
+		return fmt.Errorf("failed to get relative path: %w", err)
+	}
+	r.namedDocuments[name] = relPath
+	return nil
+}
+
 // sanitizePath ensures a path is safe and within the root directory
-func (s *FileSysRepository) sanitizePath(path string) (string, error) {
+func (r *FileSysRepository) sanitizePath(path string) (string, error) {
 	// Clean the path to remove any . or .. components
 	path = filepath.Clean(path)
 
@@ -52,32 +67,36 @@ func (s *FileSysRepository) sanitizePath(path string) (string, error) {
 	}
 
 	// Join with root and clean again
-	fullPath := filepath.Join(s.rootDir, path)
+	fullPath := filepath.Join(r.rootDir, path)
 
 	// Verify the path is within root directory
-	if !strings.HasPrefix(filepath.Clean(fullPath), s.rootDir) {
+	if !strings.HasPrefix(filepath.Clean(fullPath), r.rootDir) {
 		return "", fmt.Errorf("path %q attempts to escape root directory", path)
 	}
-
 	return fullPath, nil
 }
 
 // GetDocument returns a document by name (which is treated as a path)
-func (s *FileSysRepository) GetDocument(ctx context.Context, name string) (Document, error) {
-	fullPath, err := s.sanitizePath(name)
+func (r *FileSysRepository) GetDocument(ctx context.Context, name string) (Document, error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	// Look up the path if this is the name of a registered document
+	if registeredPath, ok := r.namedDocuments[name]; ok {
+		name = registeredPath
+	}
+
+	fullPath, err := r.sanitizePath(name)
 	if err != nil {
 		return nil, err
 	}
-
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("document %q does not exist", name)
 	}
-
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read document %q: %w", name, err)
 	}
-
 	return New(Options{
 		Name:        name,
 		Path:        name, // Keep original path for reference
@@ -87,10 +106,10 @@ func (s *FileSysRepository) GetDocument(ctx context.Context, name string) (Docum
 }
 
 // ListDocuments lists documents matching the input criteria
-func (s *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
+func (r *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
 	var docs []Document
 
-	startPath, err := s.sanitizePath(input.PathPrefix)
+	startPath, err := r.sanitizePath(input.PathPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -99,17 +118,14 @@ func (s *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocume
 		if err != nil {
 			return err
 		}
-
 		// Get path relative to root dir for storage
-		relPath, err := filepath.Rel(s.rootDir, path)
+		relPath, err := filepath.Rel(r.rootDir, path)
 		if err != nil {
 			return err
 		}
-
 		if input.PathPrefix != "" && !strings.HasPrefix(relPath, input.PathPrefix) {
 			return nil
 		}
-
 		// Skip directories unless this is the start dir
 		if info.IsDir() {
 			// If not recursive and this isn't the start dir, skip this directory
@@ -118,12 +134,10 @@ func (s *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocume
 			}
 			return nil
 		}
-
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil // Skip files we can't read
 		}
-
 		doc := New(Options{
 			Name:        filepath.Base(relPath),
 			Path:        relPath,
@@ -138,53 +152,52 @@ func (s *FileSysRepository) ListDocuments(ctx context.Context, input *ListDocume
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to walk directory %q: %w", input.PathPrefix, err)
 	}
-
 	return &ListDocumentOutput{Items: docs}, nil
 }
 
 // PutDocument puts a document into the store
-func (s *FileSysRepository) PutDocument(ctx context.Context, doc Document) error {
+func (r *FileSysRepository) PutDocument(ctx context.Context, doc Document) error {
 	if doc.Path() == "" {
 		return fmt.Errorf("document path is required")
 	}
-
-	fullPath, err := s.sanitizePath(doc.Path())
+	fullPath, err := r.sanitizePath(doc.Path())
 	if err != nil {
 		return err
 	}
-
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory for document: %w", err)
 	}
-
 	if err := os.WriteFile(fullPath, []byte(doc.Content()), 0644); err != nil {
 		return fmt.Errorf("failed to write document to file: %w", err)
 	}
-
 	return nil
 }
 
 // DeleteDocument deletes a document from the store
-func (s *FileSysRepository) DeleteDocument(ctx context.Context, doc Document) error {
+func (r *FileSysRepository) DeleteDocument(ctx context.Context, doc Document) error {
 	if doc.Path() == "" {
 		return fmt.Errorf("document path is required")
 	}
-
-	fullPath, err := s.sanitizePath(doc.Path())
+	fullPath, err := r.sanitizePath(doc.Path())
 	if err != nil {
 		return err
 	}
-
 	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete document file: %w", err)
 	}
-
 	return nil
 }
 
 // Exists checks if a document exists by name
-func (s *FileSysRepository) Exists(ctx context.Context, name string) (bool, error) {
-	fullPath, err := s.sanitizePath(name)
+func (r *FileSysRepository) Exists(ctx context.Context, name string) (bool, error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	// Look up the path if this is the name of a registered document
+	if registeredPath, ok := r.namedDocuments[name]; ok {
+		name = registeredPath
+	}
+	fullPath, err := r.sanitizePath(name)
 	if err != nil {
 		return false, err
 	}
@@ -216,25 +229,4 @@ func detectContentType(path string) string {
 	default:
 		return "text/plain"
 	}
-}
-
-func hasAllTags(docTags, searchTags []string) bool {
-	if len(searchTags) == 0 {
-		return true
-	}
-	if len(docTags) == 0 {
-		return false
-	}
-
-	tagSet := make(map[string]bool)
-	for _, tag := range docTags {
-		tagSet[tag] = true
-	}
-
-	for _, tag := range searchTags {
-		if !tagSet[tag] {
-			return false
-		}
-	}
-	return true
 }

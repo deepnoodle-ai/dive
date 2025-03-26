@@ -11,6 +11,7 @@ import (
 	"github.com/getstingrai/dive"
 	"github.com/getstingrai/dive/eval"
 	"github.com/getstingrai/dive/llm"
+	"github.com/getstingrai/dive/objects"
 	"github.com/getstingrai/dive/slogger"
 	"github.com/getstingrai/dive/workflow"
 	"github.com/risor-io/risor"
@@ -125,25 +126,32 @@ func NewExecution(opts ExecutionOptions) *Execution {
 	if opts.Logger == nil {
 		opts.Logger = slogger.NewDevNullLogger()
 	}
-	execution := &Execution{
-		id:            opts.ID,
-		environment:   opts.Environment,
-		workflow:      opts.Workflow,
-		status:        opts.Status,
-		startTime:     opts.StartTime,
-		endTime:       opts.EndTime,
-		inputs:        opts.Inputs,
-		outputs:       opts.Outputs,
-		parentID:      opts.ParentID,
-		childIDs:      opts.ChildIDs,
-		metadata:      opts.Metadata,
-		logger:        opts.Logger,
-		scriptGlobals: make(map[string]any),
-		paths:         make(map[string]*PathState),
-		mutex:         sync.RWMutex{},
-		doneWg:        sync.WaitGroup{},
+	if opts.Environment == nil {
+		panic("environment is required")
 	}
-	execution.scriptGlobals["inputs"] = execution.inputs
+	execution := &Execution{
+		id:          opts.ID,
+		environment: opts.Environment,
+		workflow:    opts.Workflow,
+		status:      opts.Status,
+		startTime:   opts.StartTime,
+		endTime:     opts.EndTime,
+		inputs:      opts.Inputs,
+		outputs:     opts.Outputs,
+		parentID:    opts.ParentID,
+		childIDs:    opts.ChildIDs,
+		metadata:    opts.Metadata,
+		logger:      opts.Logger,
+		paths:       make(map[string]*PathState),
+		mutex:       sync.RWMutex{},
+		doneWg:      sync.WaitGroup{},
+	}
+	execution.scriptGlobals = map[string]any{
+		"inputs": execution.inputs,
+	}
+	if repo := opts.Environment.DocumentRepository(); repo != nil {
+		execution.scriptGlobals["documents"] = objects.NewDocumentRepository(repo)
+	}
 	execution.doneWg.Add(1)
 	return execution
 }
@@ -394,17 +402,12 @@ func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string)
 	code := strings.TrimPrefix(codeStr, "$(")
 	code = strings.TrimSuffix(code, ")")
 
-	compiledCode, err := compileScript(ctx, code, map[string]any{
-		"inputs": e.inputs,
-	})
+	compiledCode, err := compileScript(ctx, code, e.scriptGlobals)
 	if err != nil {
 		e.logger.Error("failed to compile each array expression", "error", err)
 		return nil, fmt.Errorf("failed to compile expression: %w", err)
 	}
-
-	result, err := evalCode(ctx, compiledCode, map[string]any{
-		"inputs": e.inputs,
-	})
+	result, err := evalCode(ctx, compiledCode, e.scriptGlobals)
 	if err != nil {
 		e.logger.Error("failed to evaluate each array expression", "error", err)
 		return nil, fmt.Errorf("failed to evaluate expression: %w", err)
@@ -821,17 +824,16 @@ func evalCode(ctx context.Context, code *compiler.Code, globals map[string]any) 
 
 // evaluateRisorCondition evaluates a risor condition and returns the result as a boolean
 func (e *Execution) evaluateRisorCondition(ctx context.Context, codeStr string, logger slogger.Logger) (bool, error) {
-	code := strings.TrimPrefix(codeStr, "$(")
-	code = strings.TrimSuffix(code, ")")
-	globals := map[string]any{
-		"inputs": e.inputs,
+	if strings.HasPrefix(codeStr, "$(") && strings.HasSuffix(codeStr, ")") {
+		codeStr = strings.TrimPrefix(codeStr, "$(")
+		codeStr = strings.TrimSuffix(codeStr, ")")
 	}
-	compiledCode, err := compileScript(ctx, code, globals)
+	compiledCode, err := compileScript(ctx, codeStr, e.scriptGlobals)
 	if err != nil {
 		logger.Error("failed to compile condition", "error", err)
 		return false, fmt.Errorf("failed to compile expression: %w", err)
 	}
-	result, err := risor.EvalCode(ctx, compiledCode, risor.WithGlobals(globals))
+	result, err := risor.EvalCode(ctx, compiledCode, risor.WithGlobals(e.scriptGlobals))
 	if err != nil {
 		return false, fmt.Errorf("failed to evaluate code: %w", err)
 	}

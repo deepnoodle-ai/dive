@@ -24,7 +24,6 @@ type Environment struct {
 	logger          slogger.Logger
 	defaultWorkflow string
 	documentRepo    document.Repository
-	knownDocuments  map[string]*document.Metadata
 	actions         map[string]Action
 	started         bool
 }
@@ -41,7 +40,6 @@ type EnvironmentOptions struct {
 	Logger          slogger.Logger
 	DefaultWorkflow string
 	DocumentRepo    document.Repository
-	KnownDocuments  map[string]*document.Metadata
 	Actions         []Action
 }
 
@@ -111,7 +109,6 @@ func New(opts EnvironmentOptions) (*Environment, error) {
 		logger:          opts.Logger,
 		defaultWorkflow: opts.DefaultWorkflow,
 		documentRepo:    opts.DocumentRepo,
-		knownDocuments:  opts.KnownDocuments,
 		actions:         actions,
 	}
 	for _, trigger := range env.triggers {
@@ -137,10 +134,6 @@ func (e *Environment) Description() string {
 
 func (e *Environment) DocumentRepository() document.Repository {
 	return e.documentRepo
-}
-
-func (e *Environment) KnownDocuments() map[string]*document.Metadata {
-	return e.knownDocuments
 }
 
 func (e *Environment) Start(ctx context.Context) error {
