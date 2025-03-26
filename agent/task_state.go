@@ -3,8 +3,8 @@ package agent
 import (
 	"time"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm"
 )
 
 type taskState struct {

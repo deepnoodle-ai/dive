@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	"github.com/getstingrai/dive"
+	"github.com/diveagents/dive"
 )
 
 type StructuredResponse struct {

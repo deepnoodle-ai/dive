@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/agent"
-	"github.com/getstingrai/dive/slogger"
-	"github.com/getstingrai/dive/workflow"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/agent"
+	"github.com/diveagents/dive/slogger"
+	"github.com/diveagents/dive/workflow"
 	"github.com/stretchr/testify/require"
 )
 

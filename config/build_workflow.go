@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/workflow"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/workflow"
 )
 
 func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Prompt) (*workflow.Workflow, error) {

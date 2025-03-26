@@ -3,7 +3,7 @@ package llm
 import (
 	"net/http"
 
-	"github.com/getstingrai/dive/slogger"
+	"github.com/diveagents/dive/slogger"
 )
 
 const CacheControlEphemeral = "ephemeral"

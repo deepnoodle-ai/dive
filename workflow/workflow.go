@@ -3,7 +3,7 @@ package workflow
 import (
 	"fmt"
 
-	"github.com/getstingrai/dive"
+	"github.com/diveagents/dive"
 )
 
 type Trigger struct {

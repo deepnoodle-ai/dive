@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm"
 )
 
 var _ llm.Tool = &AssignWorkTool{}

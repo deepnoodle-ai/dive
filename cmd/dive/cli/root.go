@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/getstingrai/dive/slogger"
+	"github.com/diveagents/dive/slogger"
 	"github.com/spf13/cobra"
 )
 

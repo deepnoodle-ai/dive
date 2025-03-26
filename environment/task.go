@@ -3,7 +3,7 @@ package environment
 import (
 	"time"
 
-	"github.com/getstingrai/dive"
+	"github.com/diveagents/dive"
 )
 
 type Task struct {

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/getstingrai/dive/cmd/dive/cli"
+	"github.com/diveagents/dive/cmd/dive/cli"
 )
 
 func main() {

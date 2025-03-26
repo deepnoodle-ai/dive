@@ -1,4 +1,4 @@
-module github.com/getstingrai/dive
+module github.com/diveagents/dive
 
 go 1.23.2
 

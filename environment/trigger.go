@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/getstingrai/dive/workflow"
+	"github.com/diveagents/dive/workflow"
 )
 
 type Trigger struct {

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/providers"
-	"github.com/getstingrai/dive/retry"
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/providers"
+	"github.com/diveagents/dive/retry"
 )
 
 var (

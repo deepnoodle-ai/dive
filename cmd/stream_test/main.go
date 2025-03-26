@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/providers/anthropic"
+	"github.com/diveagents/dive/providers/openai"
+	"github.com/diveagents/dive/toolkit"
+	"github.com/diveagents/dive/toolkit/google"
 	"github.com/fatih/color"
-	"github.com/getstingrai/dive/llm"
-	"github.com/getstingrai/dive/providers/anthropic"
-	"github.com/getstingrai/dive/providers/openai"
-	"github.com/getstingrai/dive/toolkit"
-	"github.com/getstingrai/dive/toolkit/google"
 )
 
 var (

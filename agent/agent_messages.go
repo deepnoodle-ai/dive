@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm"
 )
 
 // messageWork represents a task assignment message sent to an agent

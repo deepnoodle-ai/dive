@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive/llm"
 )
 
 const DefaultDirectoryListMaxEntries = 250

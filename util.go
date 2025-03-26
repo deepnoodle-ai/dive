@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diveagents/dive/llm"
 	petname "github.com/dustinkirkland/golang-petname"
-	"github.com/getstingrai/dive/llm"
 )
 
 func init() {

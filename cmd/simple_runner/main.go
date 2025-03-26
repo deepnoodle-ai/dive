@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/diveagents/dive/config"
+	"github.com/diveagents/dive/slogger"
+	"github.com/diveagents/dive/workflow"
 	"github.com/fatih/color"
-	"github.com/getstingrai/dive/config"
-	"github.com/getstingrai/dive/slogger"
-	"github.com/getstingrai/dive/workflow"
 )
 
 var (

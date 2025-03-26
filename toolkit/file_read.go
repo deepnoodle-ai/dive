@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/getstingrai/dive/llm"
+	"github.com/diveagents/dive/llm"
 )
 
 const DefaultFileReadMaxSize = 1024 * 200 // 200KB

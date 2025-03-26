@@ -1,8 +1,8 @@
 package config
 
 import (
-	"github.com/getstingrai/dive"
-	"github.com/getstingrai/dive/environment"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/environment"
 )
 
 func buildTrigger(triggerDef Trigger) (*environment.Trigger, error) {
