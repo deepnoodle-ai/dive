@@ -681,15 +681,44 @@ func (a *Agent) generate(
 				"tool_name", toolCall.Name,
 				"tool_input", toolCall.Input)
 
+			if err := safePublish(&dive.Event{
+				Type:    "llm.tool_call",
+				Origin:  a.eventOrigin(),
+				Payload: toolCall,
+			}); err != nil {
+				return nil, nil, err
+			}
+
 			result, err := tool.Call(ctx, toolCall.Input)
 			if err != nil {
+				if err := safePublish(&dive.Event{
+					Type:   "llm.tool_error",
+					Origin: a.eventOrigin(),
+					Payload: &llm.ToolError{
+						ID:    toolCall.ID,
+						Name:  toolCall.Name,
+						Error: err.Error(),
+					},
+				}); err != nil {
+					return nil, nil, err
+				}
 				return nil, nil, fmt.Errorf("tool call error: %w", err)
 			}
+
 			toolResults[i] = &llm.ToolResult{
 				ID:     toolCall.ID,
 				Name:   toolCall.Name,
 				Result: result,
 			}
+
+			if err := safePublish(&dive.Event{
+				Type:    "llm.tool_result",
+				Origin:  a.eventOrigin(),
+				Payload: toolResults[i],
+			}); err != nil {
+				return nil, nil, err
+			}
+
 			if tool.ShouldReturnResult() {
 				shouldReturnResult = true
 			}

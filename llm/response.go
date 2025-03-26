@@ -59,14 +59,23 @@ func NewResponse(opts ResponseOptions) *Response {
 	}
 }
 
+// ToolCall is a call made by an LLM
 type ToolCall struct {
-	ID    string
-	Name  string
-	Input string
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Input string `json:"input"`
 }
 
+// ToolResult contains the result of a tool call
 type ToolResult struct {
-	ID     string
-	Name   string
-	Result string
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Result string `json:"result"`
+}
+
+// ToolError is an error that occurred during a tool call
+type ToolError struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Error string `json:"error"`
 }
