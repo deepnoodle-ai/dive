@@ -47,7 +47,7 @@ func TestAgentChat(t *testing.T) {
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	response, err := agent.Generate(ctx, llm.NewUserMessage("Hello, world!"))
+	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Hello, world!"))
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
@@ -93,7 +93,7 @@ func TestAgentChatWithTools(t *testing.T) {
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	response, err := agent.Generate(ctx, llm.NewUserMessage("Please use the echo tool to echo 'hello world'"))
+	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
@@ -125,7 +125,7 @@ func TestAgentTask(t *testing.T) {
 		prompt: &dive.Prompt{
 			Text:         "Write a limerick about a cat",
 			Output:       "A limerick about a cat",
-			OutputFormat: string(dive.OutputMarkdown),
+			OutputFormat: dive.OutputFormatMarkdown,
 		},
 	})
 	require.NoError(t, err)

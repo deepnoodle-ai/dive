@@ -96,6 +96,15 @@ func NewUserMessage(text string) *Message {
 	}
 }
 
+func NewSingleUserMessage(text string) []*Message {
+	return []*Message{
+		{
+			Role:    User,
+			Content: []*Content{{Type: ContentTypeText, Text: text}},
+		},
+	}
+}
+
 func NewAssistantMessage(text string) *Message {
 	return &Message{
 		Role:    Assistant,

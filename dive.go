@@ -11,9 +11,9 @@ import (
 type OutputFormat string
 
 const (
-	OutputText     OutputFormat = "text"
-	OutputMarkdown OutputFormat = "markdown"
-	OutputJSON     OutputFormat = "json"
+	OutputFormatText     OutputFormat = "text"
+	OutputFormatMarkdown OutputFormat = "markdown"
+	OutputFormatJSON     OutputFormat = "json"
 )
 
 // TaskStatus indicates a Task's execution status
@@ -48,18 +48,20 @@ type Output struct {
 	Document    string      `json:"document,omitempty"`
 }
 
+// PromptContext is a named block of information carried by a Prompt
 type PromptContext struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Text        string `json:"text,omitempty"`
 }
 
+// Prompt is a structured representation of an LLM prompt
 type Prompt struct {
 	Name         string           `json:"name"`
 	Text         string           `json:"text,omitempty"`
 	Context      []*PromptContext `json:"context,omitempty"`
 	Output       string           `json:"output,omitempty"`
-	OutputFormat string           `json:"output_format,omitempty"`
+	OutputFormat OutputFormat     `json:"output_format,omitempty"`
 }
 
 // Agent represents an AI agent that can perform tasks
@@ -77,11 +79,11 @@ type Agent interface {
 	// SetEnvironment sets the runtime Environment to which this Agent belongs
 	SetEnvironment(env Environment)
 
-	// Generate gives the agent a message to respond to
-	Generate(ctx context.Context, message *llm.Message, opts ...GenerateOption) (*llm.Response, error)
+	// Generate gives the agent messages to respond to
+	Generate(ctx context.Context, messages []*llm.Message, opts ...GenerateOption) (*llm.Response, error)
 
-	// Stream gives the agent a message to respond to and returns a stream of events
-	Stream(ctx context.Context, message *llm.Message, opts ...GenerateOption) (Stream, error)
+	// Stream gives the agent messages to respond to and returns a stream of events
+	Stream(ctx context.Context, messages []*llm.Message, opts ...GenerateOption) (Stream, error)
 
 	// Work gives the agent a task to complete
 	Work(ctx context.Context, task Task) (Stream, error)

@@ -13,12 +13,11 @@ type messageWork struct {
 	publisher dive.Publisher
 }
 
-// messageChat represents a direct chat message sent to an agent
-// The agent will process this message immediately and respond through
-// the provided channels, without converting it to a task
+// messageChat conveys chat message(s) sent to an agent. The agent will process
+// this message and respond through the provided channel or stream.
 type messageChat struct {
-	message *llm.Message
-	options dive.GenerateOptions
+	messages []*llm.Message
+	options  dive.GenerateOptions
 
 	// For synchronous responses:
 	resultChan chan *llm.Response

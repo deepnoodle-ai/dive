@@ -36,11 +36,11 @@ func (m *mockAgent) IsSupervisor() bool {
 
 func (m *mockAgent) SetEnvironment(env dive.Environment) {}
 
-func (m *mockAgent) Generate(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
+func (m *mockAgent) Generate(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
 	return &llm.Response{}, nil
 }
 
-func (m *mockAgent) Stream(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
+func (m *mockAgent) Stream(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
 	return dive.NewStream(), nil
 }
 

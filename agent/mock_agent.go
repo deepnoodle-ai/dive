@@ -9,8 +9,6 @@ import (
 
 type WorkFunc func(ctx context.Context, task dive.Task) (dive.Stream, error)
 
-type HandleEventFunc func(ctx context.Context, event *dive.Event) error
-
 type MockAgentOptions struct {
 	Name           string
 	Goal           string
@@ -19,7 +17,6 @@ type MockAgentOptions struct {
 	Subordinates   []string
 	Work           WorkFunc
 	AcceptedEvents []string
-	HandleEvent    HandleEventFunc
 	Response       *llm.Response
 }
 
@@ -32,7 +29,6 @@ type MockAgent struct {
 	environment    dive.Environment
 	work           WorkFunc
 	acceptedEvents []string
-	handleEvent    HandleEventFunc
 	response       *llm.Response
 }
 
@@ -45,7 +41,6 @@ func NewMockAgent(opts MockAgentOptions) *MockAgent {
 		subordinates:   opts.Subordinates,
 		work:           opts.Work,
 		acceptedEvents: opts.AcceptedEvents,
-		handleEvent:    opts.HandleEvent,
 		response:       opts.Response,
 	}
 }
@@ -62,10 +57,6 @@ func (a *MockAgent) Backstory() string {
 	return a.backstory
 }
 
-func (a *MockAgent) HandleEvent(ctx context.Context, event *dive.Event) error {
-	return a.handleEvent(ctx, event)
-}
-
 func (a *MockAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
@@ -78,11 +69,11 @@ func (a *MockAgent) Work(ctx context.Context, task dive.Task) (dive.Stream, erro
 	return a.work(ctx, task)
 }
 
-func (a *MockAgent) Generate(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
+func (a *MockAgent) Generate(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
 	return a.response, nil
 }
 
-func (a *MockAgent) Stream(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
+func (a *MockAgent) Stream(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
 	return nil, nil
 }
 

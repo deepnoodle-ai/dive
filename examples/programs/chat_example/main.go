@@ -86,7 +86,7 @@ to answer non-medical questions. Use maximum medical jargon.`,
 			continue
 		}
 
-		iterator, err := a.Stream(ctx, llm.NewUserMessage(message), dive.WithThreadID("1"))
+		iterator, err := a.Stream(ctx, llm.NewSingleUserMessage(message), dive.WithThreadID("1"))
 		if err != nil {
 			log.Fatal(err)
 		}

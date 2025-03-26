@@ -28,7 +28,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
 
 	iterator, err := agent.Stream(ctx,
-		llm.NewUserMessage(message),
+		llm.NewSingleUserMessage(message),
 		dive.WithThreadID("chat"),
 	)
 	if err != nil {

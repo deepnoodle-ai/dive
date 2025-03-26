@@ -313,7 +313,7 @@ func (a *Agent) IsRunning() bool {
 	return a.running
 }
 
-func (a *Agent) Generate(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
+func (a *Agent) Generate(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
 	if !a.IsRunning() {
 		return nil, fmt.Errorf("agent is not running")
 	}
@@ -325,7 +325,7 @@ func (a *Agent) Generate(ctx context.Context, message *llm.Message, opts ...dive
 	errChan := make(chan error, 1)
 
 	chatMessage := messageChat{
-		message:    message,
+		messages:   messages,
 		options:    generateOptions,
 		resultChan: resultChan,
 		errChan:    errChan,
@@ -350,7 +350,7 @@ func (a *Agent) Generate(ctx context.Context, message *llm.Message, opts ...dive
 	}
 }
 
-func (a *Agent) Stream(ctx context.Context, message *llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
+func (a *Agent) Stream(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
 	if !a.IsRunning() {
 		return nil, fmt.Errorf("agent is not running")
 	}
@@ -361,9 +361,9 @@ func (a *Agent) Stream(ctx context.Context, message *llm.Message, opts ...dive.G
 	stream := dive.NewStream()
 
 	chatMessage := messageChat{
-		message: message,
-		options: generateOptions,
-		stream:  stream,
+		messages: messages,
+		options:  generateOptions,
+		stream:   stream,
 	}
 
 	// Send the chat message to the agent's mailbox, but make sure we timeout
@@ -487,7 +487,7 @@ func (a *Agent) handleChat(m messageChat) {
 			messages = append(messages, thread.Messages...)
 		}
 	}
-	messages = append(messages, m.message)
+	messages = append(messages, m.messages...)
 
 	response, updatedMessages, err := a.generate(ctx, messages, systemPrompt, publisher)
 	if err != nil {

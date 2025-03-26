@@ -501,7 +501,7 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, ag
 
 	return &dive.TaskResult{
 		Content: strings.Join(itemTexts, "\n\n"),
-		Format:  dive.OutputMarkdown,
+		Format:  dive.OutputFormatMarkdown,
 	}, nil
 }
 

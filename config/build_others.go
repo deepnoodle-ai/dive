@@ -14,6 +14,6 @@ func buildPrompt(promptDef Prompt) (*dive.Prompt, error) {
 		Name:         promptDef.Name,
 		Text:         promptDef.Text,
 		Output:       promptDef.Output,
-		OutputFormat: promptDef.OutputFormat,
+		OutputFormat: dive.OutputFormat(promptDef.OutputFormat),
 	}, nil
 }

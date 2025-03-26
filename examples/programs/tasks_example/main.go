@@ -83,7 +83,7 @@ func main() {
 		Prompt: &dive.Prompt{
 			Text:         "Research the history of beer",
 			Output:       "The history of beer",
-			OutputFormat: string(dive.OutputMarkdown),
+			OutputFormat: dive.OutputFormatMarkdown,
 		},
 	})
 

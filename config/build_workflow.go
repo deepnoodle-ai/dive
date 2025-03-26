@@ -73,7 +73,7 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 					Name:         promptObj.Name,
 					Text:         promptObj.Text,
 					Output:       promptObj.Output,
-					OutputFormat: promptObj.OutputFormat,
+					OutputFormat: dive.OutputFormat(promptObj.OutputFormat),
 					Context:      context,
 				}
 			default:
