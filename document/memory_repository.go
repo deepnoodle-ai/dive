@@ -11,21 +11,37 @@ var _ Repository = &MemoryRepository{}
 
 // MemoryRepository implements Repository interface using an in-memory map
 type MemoryRepository struct {
-	mu        sync.RWMutex
-	documents map[string]*TextDocument
+	mu             sync.RWMutex
+	documents      map[string]*TextDocument
+	namedDocuments map[string]string
 }
 
 // NewMemoryRepository creates a new MemoryRepository
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		documents: make(map[string]*TextDocument),
+		documents:      make(map[string]*TextDocument),
+		namedDocuments: make(map[string]string),
 	}
+}
+
+// RegisterDocument assigns a name to a document path
+func (r *MemoryRepository) RegisterDocument(ctx context.Context, name, path string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.namedDocuments[name] = path
+	return nil
 }
 
 // GetDocument returns a document by name
 func (r *MemoryRepository) GetDocument(ctx context.Context, name string) (Document, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// Look up the path if this is the name of a registered document
+	if registeredPath, ok := r.namedDocuments[name]; ok {
+		name = registeredPath
+	}
 
 	doc, exists := r.documents[name]
 	if !exists {
@@ -101,6 +117,11 @@ func (r *MemoryRepository) DeleteDocument(ctx context.Context, doc Document) err
 func (r *MemoryRepository) Exists(ctx context.Context, name string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// Look up the path if this is the name of a registered document
+	if registeredPath, ok := r.namedDocuments[name]; ok {
+		name = registeredPath
+	}
 
 	_, exists := r.documents[name]
 	return exists, nil

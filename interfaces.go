@@ -131,9 +131,6 @@ type Environment interface {
 
 	// DocumentRepository returns the DocumentRepository for this Environment
 	DocumentRepository() document.Repository
-
-	// KnownDocuments returns a map of all documents known to this Environment
-	KnownDocuments() map[string]*document.Metadata
 }
 
 // GenerateOptions contains configuration for LLM generations.

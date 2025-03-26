@@ -31,4 +31,7 @@ type Repository interface {
 
 	// Exists checks if a document exists by name
 	Exists(ctx context.Context, name string) (bool, error)
+
+	// RegisterDocument assigns a name to a document path
+	RegisterDocument(ctx context.Context, name, path string) error
 }
