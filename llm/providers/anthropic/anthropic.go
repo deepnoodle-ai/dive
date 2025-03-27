@@ -62,31 +62,15 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	config := &llm.Config{}
 	config.Apply(opts...)
 
-	model := config.Model
-	if model == "" {
-		model = p.model
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
-	}
-
-	messageCount := len(messages)
-	if messageCount == 0 {
-		return nil, fmt.Errorf("no messages provided")
-	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
-		}
+	var request Request
+	if err := p.applyRequestConfig(&request, config); err != nil {
+		return nil, err
 	}
 
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-
 	if config.Caching == nil || *config.Caching {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
@@ -94,46 +78,15 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			lastContent.SetCacheControl(string(llm.CacheControlEphemeral))
 		}
 	}
-
 	if config.Prefill != "" {
 		msgs = append(msgs, &Message{
 			Role:    "assistant",
 			Content: []*ContentBlock{{Type: "text", Text: config.Prefill}},
 		})
 	}
+	request.Messages = msgs
 
-	reqBody := Request{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   maxTokens,
-		Temperature: config.Temperature,
-		System:      config.SystemPrompt,
-	}
-
-	if len(config.Tools) > 0 {
-		var tools []*Tool
-		for _, tool := range config.Tools {
-			toolDef := tool.Definition()
-			tools = append(tools, &Tool{
-				Name:        toolDef.Name,
-				Description: toolDef.Description,
-				InputSchema: toolDef.Parameters,
-			})
-		}
-		reqBody.Tools = tools
-	}
-
-	if config.ToolChoice != "" {
-		reqBody.ToolChoice = &ToolChoice{
-			Type: ToolChoiceType(config.ToolChoice),
-			Name: config.ToolChoiceName,
-		}
-		if config.ParallelToolCalls != nil && !*config.ParallelToolCalls {
-			reqBody.ToolChoice.DisableParallelUse = true
-		}
-	}
-
-	jsonBody, err := json.MarshalIndent(reqBody, "", "  ")
+	body, err := json.MarshalIndent(request, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
@@ -143,7 +96,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		Request: &llm.Request{
 			Messages: messages,
 			Config:   config,
-			Body:     jsonBody,
+			Body:     body,
 		},
 	}); err != nil {
 		return nil, err
@@ -151,14 +104,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	var result Response
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
 		req.Header.Set("x-api-key", p.apiKey)
 		req.Header.Set("anthropic-version", p.version)
 		req.Header.Set("content-type", "application/json")
-		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		req.Header.Add("anthropic-beta", "prompt-caching-2024-07-31")
+		if config.IsFeatureEnabled(FeatureOutput128k) {
+			req.Header.Add("anthropic-beta", FeatureOutput128k)
+		}
 		resp, err := p.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("error making request: %w", err)
@@ -180,22 +136,21 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 		return nil
 	}, retry.WithMaxRetries(6))
+
 	if err != nil {
 		return nil, err
 	}
-
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
 	if config.Prefill != "" {
 		addPrefill(result.Content, config.Prefill, config.PrefillClosingTag)
 	}
-
 	toolCalls, contentBlocks := processContentBlocks(result.Content)
 
 	response := &llm.Response{
 		ID:         result.ID,
-		Model:      model,
+		Model:      result.Model,
 		Role:       llm.Assistant,
 		StopReason: result.StopReason,
 		ToolCalls:  toolCalls,
@@ -216,7 +171,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		Request: &llm.Request{
 			Messages: messages,
 			Config:   config,
-			Body:     jsonBody,
+			Body:     body,
 		},
 		Response: response,
 	}); err != nil {
@@ -276,31 +231,15 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	config := &llm.Config{}
 	config.Apply(opts...)
 
-	model := config.Model
-	if model == "" {
-		model = p.model
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
-	}
-
-	messageCount := len(messages)
-	if messageCount == 0 {
-		return nil, fmt.Errorf("no messages provided")
-	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
-		}
+	var request Request
+	if err := p.applyRequestConfig(&request, config); err != nil {
+		return nil, err
 	}
 
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-
 	if config.Caching == nil || *config.Caching {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
@@ -308,47 +247,16 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 			lastContent.SetCacheControl(string(llm.CacheControlEphemeral))
 		}
 	}
-
 	if config.Prefill != "" {
 		msgs = append(msgs, &Message{
 			Role:    "assistant",
 			Content: []*ContentBlock{{Type: "text", Text: config.Prefill}},
 		})
 	}
+	request.Messages = msgs
+	request.Stream = true
 
-	reqBody := Request{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   maxTokens,
-		Temperature: config.Temperature,
-		System:      config.SystemPrompt,
-		Stream:      true,
-	}
-
-	if len(config.Tools) > 0 {
-		var tools []*Tool
-		for _, tool := range config.Tools {
-			toolDef := tool.Definition()
-			tools = append(tools, &Tool{
-				Name:        toolDef.Name,
-				Description: toolDef.Description,
-				InputSchema: toolDef.Parameters,
-			})
-		}
-		reqBody.Tools = tools
-	}
-
-	if config.ToolChoice != "" {
-		reqBody.ToolChoice = &ToolChoice{
-			Type: ToolChoiceType(config.ToolChoice),
-			Name: config.ToolChoiceName,
-		}
-		if config.ParallelToolCalls != nil && !*config.ParallelToolCalls {
-			reqBody.ToolChoice.DisableParallelUse = true
-		}
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
@@ -358,7 +266,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		Request: &llm.Request{
 			Messages: messages,
 			Config:   config,
-			Body:     jsonBody,
+			Body:     body,
 		},
 	}); err != nil {
 		return nil, err
@@ -366,7 +274,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 
 	var stream *StreamIterator
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
@@ -374,7 +282,10 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		req.Header.Set("anthropic-version", p.version)
 		req.Header.Set("content-type", "application/json")
 		req.Header.Set("accept", "text/event-stream")
-		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		req.Header.Add("anthropic-beta", "prompt-caching-2024-07-31")
+		if config.IsFeatureEnabled(FeatureOutput128k) {
+			req.Header.Add("anthropic-beta", FeatureOutput128k)
+		}
 
 		resp, err := p.client.Do(req)
 		if err != nil {
@@ -414,6 +325,17 @@ func (p *Provider) SupportsStreaming() bool {
 }
 
 func convertMessages(messages []*llm.Message) ([]*Message, error) {
+	// Validations
+	messageCount := len(messages)
+	if messageCount == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+	for i, message := range messages {
+		if len(message.Content) == 0 {
+			return nil, fmt.Errorf("empty message detected (index %d)", i)
+		}
+	}
+	// Convert generic messages to Anthropic messages
 	var result []*Message
 	for _, msg := range messages {
 		var blocks []*ContentBlock
@@ -456,9 +378,82 @@ func convertMessages(messages []*llm.Message) ([]*Message, error) {
 		})
 	}
 
+	// Workaround for Anthropic bug
 	reorderMessageContent(result)
 
 	return result, nil
+}
+
+func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
+
+	if model := config.Model; model != "" {
+		req.Model = model
+	} else {
+		req.Model = p.model
+	}
+
+	if maxTokens := config.MaxTokens; maxTokens != nil {
+		req.MaxTokens = maxTokens
+	} else {
+		req.MaxTokens = &p.maxTokens
+	}
+
+	req.Temperature = config.Temperature
+	req.System = config.SystemPrompt
+
+	if config.ReasoningBudget != nil {
+		budget := *config.ReasoningBudget
+		if budget < 1024 {
+			return fmt.Errorf("reasoning budget must be at least 1024")
+		}
+		req.Thinking = &Thinking{
+			Type:         "enabled",
+			BudgetTokens: budget,
+		}
+	}
+
+	// Compatibility with the OpenAI "effort" parameter
+	if config.ReasoningEffort != "" {
+		if req.Thinking != nil {
+			return fmt.Errorf("cannot set both reasoning budget and effort")
+		}
+		req.Thinking = &Thinking{Type: "enabled"}
+		switch config.ReasoningEffort {
+		case "low":
+			req.Thinking.BudgetTokens = 1024
+		case "medium":
+			req.Thinking.BudgetTokens = 4096
+		case "high":
+			req.Thinking.BudgetTokens = 16384
+		default:
+			return fmt.Errorf("invalid reasoning effort: %s", config.ReasoningEffort)
+		}
+	}
+
+	if len(config.Tools) > 0 {
+		var tools []*Tool
+		for _, tool := range config.Tools {
+			toolDef := tool.Definition()
+			tools = append(tools, &Tool{
+				Name:        toolDef.Name,
+				Description: toolDef.Description,
+				InputSchema: toolDef.Parameters,
+			})
+		}
+		req.Tools = tools
+	}
+
+	if config.ToolChoice != "" {
+		req.ToolChoice = &ToolChoice{
+			Type: ToolChoiceType(config.ToolChoice),
+			Name: config.ToolChoiceName,
+		}
+		if config.ParallelToolCalls != nil && !*config.ParallelToolCalls {
+			req.ToolChoice.DisableParallelUse = true
+		}
+	}
+
+	return nil
 }
 
 func reorderMessageContent(messages []*Message) {

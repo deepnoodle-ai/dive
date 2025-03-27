@@ -120,7 +120,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		ToolChoice:       toolChoice,
 		PresencePenalty:  config.PresencePenalty,
 		FrequencyPenalty: config.FrequencyPenalty,
-		ReasoningFormat:  config.ReasoningFormat,
 		ReasoningEffort:  ReasoningEffort(config.ReasoningEffort),
 	}
 
@@ -322,7 +321,6 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		ToolChoice:       toolChoice,
 		PresencePenalty:  config.PresencePenalty,
 		FrequencyPenalty: config.FrequencyPenalty,
-		ReasoningFormat:  config.ReasoningFormat,
 		ReasoningEffort:  ReasoningEffort(config.ReasoningEffort),
 	}
 

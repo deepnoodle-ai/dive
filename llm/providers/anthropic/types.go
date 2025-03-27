@@ -30,6 +30,8 @@ type ContentBlock struct {
 	Content      string          `json:"content,omitempty"`
 	Input        json.RawMessage `json:"input,omitempty"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+	Thinking     string          `json:"thinking,omitempty"`
+	Signature    string          `json:"signature,omitempty"`
 }
 
 func (c *ContentBlock) SetCacheControl(cacheControlType string) {
@@ -42,6 +44,15 @@ type ImageSource struct {
 	Data      string `json:"data"`
 }
 
+//	"thinking": {
+//		"type": "enabled",
+//		"budget_tokens": 16000
+//	},
+type Thinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
 type Request struct {
 	Model       string      `json:"model"`
 	Messages    []*Message  `json:"messages"`
@@ -51,6 +62,7 @@ type Request struct {
 	Stream      bool        `json:"stream,omitempty"`
 	Tools       []*Tool     `json:"tools,omitempty"`
 	ToolChoice  *ToolChoice `json:"tool_choice,omitempty"`
+	Thinking    *Thinking   `json:"thinking,omitempty"`
 }
 
 type ToolChoiceType string

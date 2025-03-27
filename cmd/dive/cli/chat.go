@@ -116,16 +116,13 @@ func runChat(backstory, agentName string) error {
 		Name:             agentName,
 		Backstory:        backstory,
 		Model:            model,
-		CacheControl:     llm.CacheControlEphemeral,
 		Logger:           logger,
 		Tools:            theTools,
 		ThreadRepository: dive.NewMemoryThreadRepository(),
+		AutoStart:        true,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating agent: %v", err)
-	}
-	if err := chatAgent.Start(ctx); err != nil {
-		return fmt.Errorf("error starting agent: %v", err)
 	}
 	defer chatAgent.Stop(ctx)
 

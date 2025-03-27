@@ -37,7 +37,7 @@ type ModelSettings struct {
 	Temperature       *float64
 	PresencePenalty   *float64
 	FrequencyPenalty  *float64
-	ReasoningFormat   string
+	ReasoningBudget   *int
 	ReasoningEffort   string
 	MaxTokens         int
 	ToolChoice        llm.ToolChoice
@@ -745,8 +745,8 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 		if settings.FrequencyPenalty != nil {
 			generateOpts = append(generateOpts, llm.WithFrequencyPenalty(*settings.FrequencyPenalty))
 		}
-		if settings.ReasoningFormat != "" {
-			generateOpts = append(generateOpts, llm.WithReasoningFormat(settings.ReasoningFormat))
+		if settings.ReasoningBudget != nil {
+			generateOpts = append(generateOpts, llm.WithReasoningBudget(*settings.ReasoningBudget))
 		}
 		if settings.ReasoningEffort != "" {
 			generateOpts = append(generateOpts, llm.WithReasoningEffort(settings.ReasoningEffort))

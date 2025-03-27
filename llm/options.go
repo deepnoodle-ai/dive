@@ -35,7 +35,7 @@ type Config struct {
 	Temperature       *float64       `json:"temperature,omitempty"`
 	PresencePenalty   *float64       `json:"presence_penalty,omitempty"`
 	FrequencyPenalty  *float64       `json:"frequency_penalty,omitempty"`
-	ReasoningFormat   string         `json:"reasoning_format,omitempty"`
+	ReasoningBudget   *int           `json:"reasoning_budget,omitempty"`
 	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	Tools             []Tool         `json:"tools,omitempty"`
 	ToolChoice        ToolChoice     `json:"tool_choice,omitempty"`
@@ -66,8 +66,8 @@ func (c *Config) FireHooks(ctx context.Context, hookCtx *HookContext) error {
 	return nil
 }
 
-// HasFeature returns true if the feature is enabled.
-func (c *Config) HasFeature(feature string) bool {
+// IsFeatureEnabled returns true if the feature is enabled.
+func (c *Config) IsFeatureEnabled(feature string) bool {
 	for _, f := range c.Features {
 		if f == feature {
 			return true
@@ -206,10 +206,10 @@ func WithFrequencyPenalty(frequencyPenalty float64) Option {
 	}
 }
 
-// WithReasoningFormat sets the reasoning format for the interaction.
-func WithReasoningFormat(reasoningFormat string) Option {
+// WithReasoningBudget sets the reasoning budget for the interaction.
+func WithReasoningBudget(reasoningBudget int) Option {
 	return func(config *Config) {
-		config.ReasoningFormat = reasoningFormat
+		config.ReasoningBudget = &reasoningBudget
 	}
 }
 
