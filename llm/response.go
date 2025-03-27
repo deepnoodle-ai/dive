@@ -1,5 +1,7 @@
 package llm
 
+// TODO: maybe make these fields public?
+
 // Response represents an LLM response
 type Response struct {
 	id         string

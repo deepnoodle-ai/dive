@@ -7,7 +7,8 @@ import (
 	"github.com/diveagents/dive/llm"
 )
 
-type WorkFunc func(ctx context.Context, task dive.Task) (dive.Stream, error)
+// WorkFunc is a function that returns a dive.EventStream.
+type WorkFunc func(ctx context.Context, task dive.Task) (dive.EventStream, error)
 
 type MockAgentOptions struct {
 	Name           string
@@ -65,16 +66,17 @@ func (a *MockAgent) SetEnvironment(env dive.Environment) {
 	a.environment = env
 }
 
-func (a *MockAgent) Work(ctx context.Context, task dive.Task) (dive.Stream, error) {
+func (a *MockAgent) Work(ctx context.Context, task dive.Task) (dive.EventStream, error) {
 	return a.work(ctx, task)
 }
 
-func (a *MockAgent) Generate(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
-	return a.response, nil
-}
-
-func (a *MockAgent) Stream(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
-	return nil, nil
+func (a *MockAgent) Chat(ctx context.Context, messages []*llm.Message, opts ...dive.ChatOption) (dive.EventStream, error) {
+	stream, publisher := dive.NewEventStream()
+	publisher.Send(ctx, &dive.Event{
+		Type:    "llm.response",
+		Payload: a.response,
+	})
+	return stream, nil
 }
 
 func (a *MockAgent) Start(ctx context.Context) error {

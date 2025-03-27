@@ -10,21 +10,22 @@ import (
 // messageWork represents a task assignment message sent to an agent
 type messageWork struct {
 	task      dive.Task
-	publisher dive.Publisher
+	publisher dive.EventPublisher
 }
 
 // messageChat conveys chat message(s) sent to an agent. The agent will process
 // this message and respond through the provided channel or stream.
 type messageChat struct {
-	messages []*llm.Message
-	options  dive.GenerateOptions
+	messages  []*llm.Message
+	options   dive.ChatOptions
+	publisher dive.EventPublisher
 
 	// For synchronous responses:
-	resultChan chan *llm.Response
-	errChan    chan error
+	// resultChan chan *llm.Response
+	// errChan    chan error
 
 	// For streaming responses:
-	stream dive.Stream
+	// stream dive.EventStream
 }
 
 // messageStop represents a request to stop the agent

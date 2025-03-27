@@ -86,19 +86,19 @@ to answer non-medical questions. Use maximum medical jargon.`,
 			continue
 		}
 
-		iterator, err := a.Stream(ctx, llm.NewSingleUserMessage(message), dive.WithThreadID("1"))
+		stream, err := a.Chat(ctx, llm.NewSingleUserMessage(message), dive.WithThreadID("1"))
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer iterator.Close()
+		defer stream.Close()
 
 		var inToolUse bool
 		toolUseAccum := ""
 		toolName := ""
 		toolID := ""
 
-		for iterator.Next(ctx) {
-			event := iterator.Event()
+		for stream.Next(ctx) {
+			event := stream.Event()
 			switch payload := event.Payload.(type) {
 			case *llm.Event:
 				if payload.ContentBlock != nil {

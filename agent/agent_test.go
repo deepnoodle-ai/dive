@@ -47,7 +47,10 @@ func TestAgentChat(t *testing.T) {
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Hello, world!"))
+	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Hello, world!"))
+	require.NoError(t, err)
+
+	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
@@ -92,8 +95,12 @@ func TestAgentChatWithTools(t *testing.T) {
 
 	err = agent.Start(ctx)
 	require.NoError(t, err)
+	defer agent.Stop(ctx)
 
-	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
+	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
+	require.NoError(t, err)
+
+	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())
@@ -154,7 +161,7 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get the chat system prompt
-	chatSystemPrompt, err := agent.getSystemPromptForMode("chat")
+	chatSystemPrompt, err := agent.buildSystemPrompt("chat")
 	require.NoError(t, err)
 
 	// Verify that the chat system prompt doesn't contain the status section
@@ -166,7 +173,7 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 	require.NotContains(t, chatSystemPrompt, "error")
 
 	// Get the task system prompt
-	taskSystemPrompt, err := agent.getSystemPromptForMode("task")
+	taskSystemPrompt, err := agent.buildSystemPrompt("task")
 	require.NoError(t, err)
 
 	// Verify that the task system prompt contains the status section

@@ -7,9 +7,10 @@ import (
 	"github.com/diveagents/dive/llm"
 )
 
+// taskState holds the state of a task.
 type taskState struct {
 	Task               dive.Task
-	Publisher          dive.Publisher
+	Publisher          dive.EventPublisher
 	Status             dive.TaskStatus
 	Inputs             map[string]any
 	Iterations         int
