@@ -32,7 +32,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	var theTools []llm.Tool
+	var tools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
 		app, err := firecrawl.NewFirecrawlApp(key, "")
@@ -42,7 +42,7 @@ func main() {
 		scraper := toolkit.NewFirecrawlScrapeTool(toolkit.FirecrawlScrapeToolOptions{
 			App: app,
 		})
-		theTools = append(theTools, scraper)
+		tools = append(tools, scraper)
 
 		log.Println("firecrawl enabled")
 	}
@@ -52,7 +52,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, toolkit.NewGoogleSearch(googleClient))
+		tools = append(tools, toolkit.NewGoogleSearch(googleClient))
 
 		log.Println("google search enabled")
 	}
@@ -60,16 +60,13 @@ func main() {
 	logger := slogger.New(slogger.LevelDebug)
 
 	a, err := agent.New(agent.Options{
-		Name:         "Research Assistant",
-		CacheControl: llm.CacheControlEphemeral,
-		Model:        model,
-		Tools:        theTools,
-		Logger:       logger,
+		Name:      "Research Assistant",
+		Model:     model,
+		Tools:     tools,
+		Logger:    logger,
+		AutoStart: true,
 	})
 	if err != nil {
-		log.Fatal(err)
-	}
-	if err := a.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
 	defer a.Stop(ctx)

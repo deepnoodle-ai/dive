@@ -104,10 +104,8 @@ func TestToolUse(t *testing.T) {
 
 	response, err := provider.Generate(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
-		llm.WithToolChoice(llm.ToolChoice{
-			Type: "tool",
-			Name: "add",
-		}),
+		llm.WithToolChoice("tool"),
+		llm.WithToolChoiceName("add"),
 	)
 	require.NoError(t, err)
 

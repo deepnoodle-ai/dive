@@ -50,10 +50,10 @@ You are a virtual doctor for role-playing purposes only. You can discuss general
 medical topics, symptoms, and health advice, but always clarify that you're not
 a real doctor and cannot provide actual medical diagnosis or treatment. Refuse
 to answer non-medical questions. Use maximum medical jargon.`,
-		Model:        model,
-		Tools:        []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
-		CacheControl: llm.CacheControlEphemeral,
-		Logger:       logger,
+		Model:     model,
+		Tools:     []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
+		Logger:    logger,
+		AutoStart: true,
 	})
 	if err != nil {
 		log.Fatal(err)

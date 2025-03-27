@@ -97,9 +97,7 @@ func TestToolUse(t *testing.T) {
 
 	response, err := provider.Generate(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
-		llm.WithToolChoice(llm.ToolChoice{
-			Type: "auto",
-		}),
+		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
 
@@ -135,7 +133,7 @@ func TestMultipleToolUse(t *testing.T) {
 
 	response, err := provider.Generate(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
-		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
+		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(response.Message.Content))
@@ -176,7 +174,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 
 	iterator, err := provider.Stream(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
-		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
+		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
 
@@ -236,7 +234,7 @@ func TestToolUseStream(t *testing.T) {
 
 	iterator, err := provider.Stream(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
-		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
+		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
 

@@ -101,8 +101,8 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 
 	var toolChoice string
-	if config.ToolChoice.Type != "" {
-		toolChoice = config.ToolChoice.Type
+	if config.ToolChoice != "" {
+		toolChoice = string(config.ToolChoice)
 	} else if len(tools) > 0 {
 		toolChoice = "auto"
 	}
@@ -305,8 +305,8 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	}
 
 	var toolChoice string
-	if config.ToolChoice.Type != "" {
-		toolChoice = config.ToolChoice.Type
+	if config.ToolChoice != "" {
+		toolChoice = string(config.ToolChoice)
 	} else if len(tools) > 0 {
 		toolChoice = "auto"
 	}

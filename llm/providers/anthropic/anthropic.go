@@ -87,11 +87,11 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
-	if config.CacheControl != "" && len(msgs) > 0 {
+	if config.Caching == nil || *config.Caching {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.SetCacheControl(string(config.CacheControl))
+			lastContent.SetCacheControl(string(llm.CacheControlEphemeral))
 		}
 	}
 
@@ -122,8 +122,15 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 		reqBody.Tools = tools
 	}
-	if config.ToolChoice.Type != "" {
-		reqBody.ToolChoice = &config.ToolChoice
+
+	if config.ToolChoice != "" {
+		reqBody.ToolChoice = &ToolChoice{
+			Type: ToolChoiceType(config.ToolChoice),
+			Name: config.ToolChoiceName,
+		}
+		if config.ParallelToolCalls != nil && !*config.ParallelToolCalls {
+			reqBody.ToolChoice.DisableParallelUse = true
+		}
 	}
 
 	jsonBody, err := json.MarshalIndent(reqBody, "", "  ")
@@ -294,11 +301,11 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
 
-	if config.CacheControl != "" && len(msgs) > 0 {
+	if config.Caching == nil || *config.Caching {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.SetCacheControl(string(config.CacheControl))
+			lastContent.SetCacheControl(string(llm.CacheControlEphemeral))
 		}
 	}
 
@@ -330,8 +337,15 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		}
 		reqBody.Tools = tools
 	}
-	if config.ToolChoice.Type != "" {
-		reqBody.ToolChoice = &config.ToolChoice
+
+	if config.ToolChoice != "" {
+		reqBody.ToolChoice = &ToolChoice{
+			Type: ToolChoiceType(config.ToolChoice),
+			Name: config.ToolChoiceName,
+		}
+		if config.ParallelToolCalls != nil && !*config.ParallelToolCalls {
+			reqBody.ToolChoice.DisableParallelUse = true
+		}
 	}
 
 	jsonBody, err := json.Marshal(reqBody)

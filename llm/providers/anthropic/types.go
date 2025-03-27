@@ -43,14 +43,28 @@ type ImageSource struct {
 }
 
 type Request struct {
-	Model       string          `json:"model"`
-	Messages    []*Message      `json:"messages"`
-	MaxTokens   *int            `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	System      string          `json:"system,omitempty"`
-	Stream      bool            `json:"stream,omitempty"`
-	Tools       []*Tool         `json:"tools,omitempty"`
-	ToolChoice  *llm.ToolChoice `json:"tool_choice,omitempty"`
+	Model       string      `json:"model"`
+	Messages    []*Message  `json:"messages"`
+	MaxTokens   *int        `json:"max_tokens,omitempty"`
+	Temperature *float64    `json:"temperature,omitempty"`
+	System      string      `json:"system,omitempty"`
+	Stream      bool        `json:"stream,omitempty"`
+	Tools       []*Tool     `json:"tools,omitempty"`
+	ToolChoice  *ToolChoice `json:"tool_choice,omitempty"`
+}
+
+type ToolChoiceType string
+
+const (
+	ToolChoiceTypeAuto ToolChoiceType = "auto"
+	ToolChoiceTypeAny  ToolChoiceType = "any"
+	ToolChoiceTypeTool ToolChoiceType = "tool"
+)
+
+type ToolChoice struct {
+	Type               ToolChoiceType `json:"type"`
+	Name               string         `json:"name,omitempty"`
+	DisableParallelUse bool           `json:"disable_parallel_tool_use,omitempty"`
 }
 
 type Tool struct {

@@ -26,7 +26,7 @@ type Option func(*Config)
 type Config struct {
 	Model             string         `json:"model,omitempty"`
 	SystemPrompt      string         `json:"system_prompt,omitempty"`
-	CacheControl      CacheControl   `json:"cache_control,omitempty"`
+	Caching           *bool          `json:"caching,omitempty"`
 	Endpoint          string         `json:"endpoint,omitempty"`
 	APIKey            string         `json:"api_key,omitempty"`
 	Prefill           string         `json:"prefill,omitempty"`
@@ -39,6 +39,9 @@ type Config struct {
 	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	Tools             []Tool         `json:"tools,omitempty"`
 	ToolChoice        ToolChoice     `json:"tool_choice,omitempty"`
+	ToolChoiceName    string         `json:"tool_choice_name,omitempty"`
+	ParallelToolCalls *bool          `json:"parallel_tool_calls,omitempty"`
+	Features          []string       `json:"features,omitempty"`
 	Hooks             Hooks          `json:"-"`
 	Client            *http.Client   `json:"-"`
 	Logger            slogger.Logger `json:"-"`
@@ -61,6 +64,16 @@ func (c *Config) FireHooks(ctx context.Context, hookCtx *HookContext) error {
 		}
 	}
 	return nil
+}
+
+// HasFeature returns true if the feature is enabled.
+func (c *Config) HasFeature(feature string) bool {
+	for _, f := range c.Features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
 }
 
 // WithModel sets the LLM model for the generation.
@@ -126,10 +139,24 @@ func WithToolChoice(toolChoice ToolChoice) Option {
 	}
 }
 
-// WithCacheControl sets the cache control for the interaction.
-func WithCacheControl(cacheControl CacheControl) Option {
+// WithToolChoiceName sets the tool choice name for the interaction.
+func WithToolChoiceName(toolChoiceName string) Option {
 	return func(config *Config) {
-		config.CacheControl = cacheControl
+		config.ToolChoiceName = toolChoiceName
+	}
+}
+
+// WithParallelToolCalls sets whether to allow parallel tool calls.
+func WithParallelToolCalls(parallelToolCalls bool) Option {
+	return func(config *Config) {
+		config.ParallelToolCalls = &parallelToolCalls
+	}
+}
+
+// WithCaching sets the caching for the interaction.
+func WithCaching(caching bool) Option {
+	return func(config *Config) {
+		config.Caching = &caching
 	}
 }
 
@@ -190,5 +217,12 @@ func WithReasoningFormat(reasoningFormat string) Option {
 func WithReasoningEffort(reasoningEffort string) Option {
 	return func(config *Config) {
 		config.ReasoningEffort = reasoningEffort
+	}
+}
+
+// WithFeatures sets the features for the interaction.
+func WithFeatures(features ...string) Option {
+	return func(config *Config) {
+		config.Features = append(config.Features, features...)
 	}
 }

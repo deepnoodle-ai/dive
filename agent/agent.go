@@ -32,6 +32,18 @@ var (
 	_ dive.RunnableAgent = &Agent{}
 )
 
+// ModelSettings are used to configure details of the LLM for an Agent.
+type ModelSettings struct {
+	Temperature       *float64
+	PresencePenalty   *float64
+	FrequencyPenalty  *float64
+	ReasoningFormat   string
+	ReasoningEffort   string
+	MaxTokens         int
+	ToolChoice        llm.ToolChoice
+	ParallelToolCalls *bool
+}
+
 // Options are used to configure an Agent.
 type Options struct {
 	Name                 string
@@ -44,20 +56,17 @@ type Options struct {
 	TickFrequency        time.Duration
 	TaskTimeout          time.Duration
 	ChatTimeout          time.Duration
-	CacheControl         llm.CacheControl
+	Caching              *bool
 	Hooks                llm.Hooks
 	Logger               slogger.Logger
 	ToolIterationLimit   int
-	Temperature          *float64
-	PresencePenalty      *float64
-	FrequencyPenalty     *float64
-	ReasoningFormat      string
-	ReasoningEffort      string
+	ModelSettings        *ModelSettings
 	DateAwareness        *bool
 	Environment          dive.Environment
 	DocumentRepository   dive.DocumentRepository
 	ThreadRepository     dive.ThreadRepository
 	SystemPromptTemplate string
+	AutoStart            bool
 }
 
 // Agent is the standard implementation of the Agent interface.
@@ -74,7 +83,7 @@ type Agent struct {
 	tickFrequency        time.Duration
 	taskTimeout          time.Duration
 	chatTimeout          time.Duration
-	cacheControl         llm.CacheControl
+	caching              *bool
 	taskQueue            []*taskState
 	recentTasks          []*taskState
 	activeTask           *taskState
@@ -82,11 +91,7 @@ type Agent struct {
 	hooks                llm.Hooks
 	logger               slogger.Logger
 	toolIterationLimit   int
-	temperature          *float64
-	presencePenalty      *float64
-	frequencyPenalty     *float64
-	reasoningFormat      string
-	reasoningEffort      string
+	modelSettings        *ModelSettings
 	dateAwareness        *bool
 	environment          dive.Environment
 	documentRepository   dive.DocumentRepository
@@ -147,7 +152,7 @@ func New(opts Options) (*Agent, error) {
 		taskTimeout:          opts.TaskTimeout,
 		chatTimeout:          opts.ChatTimeout,
 		toolIterationLimit:   opts.ToolIterationLimit,
-		cacheControl:         opts.CacheControl,
+		caching:              opts.Caching,
 		hooks:                opts.Hooks,
 		mailbox:              make(chan interface{}, 16),
 		logger:               opts.Logger,
@@ -192,6 +197,12 @@ func New(opts Options) (*Agent, error) {
 	if opts.Environment != nil {
 		if err := opts.Environment.RegisterAgent(agent); err != nil {
 			return nil, fmt.Errorf("failed to register agent with environment: %w", err)
+		}
+	}
+
+	if opts.AutoStart {
+		if err := agent.Start(context.Background()); err != nil {
+			return nil, fmt.Errorf("failed to start agent: %w", err)
 		}
 	}
 
@@ -272,7 +283,6 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.logger.Debug("agent started",
 		"name", a.name,
 		"goal", a.goal,
-		"cache_control", a.cacheControl,
 		"is_supervisor", a.isSupervisor,
 		"subordinates", a.subordinates,
 		"task_timeout", a.taskTimeout,
@@ -705,10 +715,12 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall,
 }
 
 func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
-	generateOpts := []llm.Option{
-		llm.WithSystemPrompt(systemPrompt),
-		llm.WithCacheControl(a.cacheControl),
-		llm.WithTools(a.tools...),
+	var generateOpts []llm.Option
+	if systemPrompt != "" {
+		generateOpts = append(generateOpts, llm.WithSystemPrompt(systemPrompt))
+	}
+	if len(a.tools) > 0 {
+		generateOpts = append(generateOpts, llm.WithTools(a.tools...))
 	}
 	if a.hooks != nil {
 		generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
@@ -716,20 +728,38 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 	if a.logger != nil {
 		generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 	}
-	if a.temperature != nil {
-		generateOpts = append(generateOpts, llm.WithTemperature(*a.temperature))
+	if a.caching != nil {
+		generateOpts = append(generateOpts, llm.WithCaching(*a.caching))
+	} else {
+		// Caching defaults to on
+		generateOpts = append(generateOpts, llm.WithCaching(true))
 	}
-	if a.presencePenalty != nil {
-		generateOpts = append(generateOpts, llm.WithPresencePenalty(*a.presencePenalty))
-	}
-	if a.frequencyPenalty != nil {
-		generateOpts = append(generateOpts, llm.WithFrequencyPenalty(*a.frequencyPenalty))
-	}
-	if a.reasoningFormat != "" {
-		generateOpts = append(generateOpts, llm.WithReasoningFormat(a.reasoningFormat))
-	}
-	if a.reasoningEffort != "" {
-		generateOpts = append(generateOpts, llm.WithReasoningEffort(a.reasoningEffort))
+	if a.modelSettings != nil {
+		settings := a.modelSettings
+		if settings.Temperature != nil {
+			generateOpts = append(generateOpts, llm.WithTemperature(*settings.Temperature))
+		}
+		if settings.PresencePenalty != nil {
+			generateOpts = append(generateOpts, llm.WithPresencePenalty(*settings.PresencePenalty))
+		}
+		if settings.FrequencyPenalty != nil {
+			generateOpts = append(generateOpts, llm.WithFrequencyPenalty(*settings.FrequencyPenalty))
+		}
+		if settings.ReasoningFormat != "" {
+			generateOpts = append(generateOpts, llm.WithReasoningFormat(settings.ReasoningFormat))
+		}
+		if settings.ReasoningEffort != "" {
+			generateOpts = append(generateOpts, llm.WithReasoningEffort(settings.ReasoningEffort))
+		}
+		if settings.MaxTokens != 0 {
+			generateOpts = append(generateOpts, llm.WithMaxTokens(settings.MaxTokens))
+		}
+		if settings.ToolChoice != "" {
+			generateOpts = append(generateOpts, llm.WithToolChoice(settings.ToolChoice))
+		}
+		if settings.ParallelToolCalls != nil {
+			generateOpts = append(generateOpts, llm.WithParallelToolCalls(*settings.ParallelToolCalls))
+		}
 	}
 	return generateOpts
 }

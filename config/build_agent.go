@@ -76,7 +76,6 @@ func buildAgent(
 		Tools:              agentTools,
 		ChatTimeout:        chatTimeout,
 		TaskTimeout:        taskTimeout,
-		CacheControl:       llm.CacheControl(cacheControl),
 		Logger:             logger,
 		ToolIterationLimit: agentDef.ToolIterationLimit,
 	})

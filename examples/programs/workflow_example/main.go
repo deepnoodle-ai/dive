@@ -76,7 +76,6 @@ func main() {
 		Backstory:    "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
 		IsSupervisor: true,
 		Subordinates: []string{"Research Assistant"},
-		CacheControl: llm.CacheControlEphemeral,
 		Model:        model,
 		Logger:       logger,
 	})
@@ -85,12 +84,11 @@ func main() {
 	}
 
 	researcher, err := agent.New(agent.Options{
-		Name:         "Research Assistant",
-		Backstory:    "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
-		CacheControl: llm.CacheControlEphemeral,
-		Model:        model,
-		Tools:        theTools,
-		Logger:       logger,
+		Name:      "Research Assistant",
+		Backstory: "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
+		Model:     model,
+		Tools:     theTools,
+		Logger:    logger,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -117,10 +115,12 @@ func main() {
 		Description: "A research environment for the research assistant. The supervisor will assign tasks to the research assistant.",
 		Agents:      []dive.Agent{supervisor, researcher},
 		Workflows:   []*workflow.Workflow{w},
+		AutoStart:   true,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer env.Stop(ctx)
 
 	execution, err := env.ExecuteWorkflow(ctx, w.Name(), map[string]interface{}{})
 	if err != nil {
