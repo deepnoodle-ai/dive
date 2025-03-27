@@ -77,6 +77,15 @@ func buildAgent(
 		}
 	}
 
+	var taskTimeout time.Duration
+	if agentDef.TaskTimeout != "" {
+		var err error
+		taskTimeout, err = time.ParseDuration(agentDef.TaskTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid task timeout: %w", err)
+		}
+	}
+
 	cacheControl := agentDef.CacheControl
 	if cacheControl == "" {
 		cacheControl = config.LLM.CacheControl
@@ -91,6 +100,7 @@ func buildAgent(
 		LLM:                llmProvider,
 		Tools:              agentTools,
 		ChatTimeout:        chatTimeout,
+		TaskTimeout:        taskTimeout,
 		CacheControl:       cacheControl,
 		Logger:             logger,
 		ToolIterationLimit: agentDef.ToolIterationLimit,
