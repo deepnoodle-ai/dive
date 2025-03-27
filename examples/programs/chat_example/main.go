@@ -11,10 +11,8 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
+	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/groq"
-	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
@@ -33,14 +31,9 @@ func main() {
 
 	ctx := context.Background()
 
-	var provider llm.LLM
-	switch providerName {
-	case "anthropic":
-		provider = anthropic.New()
-	case "openai":
-		provider = openai.New()
-	case "groq":
-		provider = groq.New(groq.WithModel("deepseek-r1-distill-llama-70b"))
+	model, err := config.GetModel(providerName, modelName)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	googleClient, err := google.New()
@@ -57,9 +50,9 @@ You are a virtual doctor for role-playing purposes only. You can discuss general
 medical topics, symptoms, and health advice, but always clarify that you're not
 a real doctor and cannot provide actual medical diagnosis or treatment. Refuse
 to answer non-medical questions. Use maximum medical jargon.`,
-		LLM:          provider,
+		Model:        model,
 		Tools:        []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
-		CacheControl: "ephemeral",
+		CacheControl: llm.CacheControlEphemeral,
 		Logger:       logger,
 	})
 	if err != nil {

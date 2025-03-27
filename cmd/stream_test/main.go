@@ -70,8 +70,7 @@ func stream(model llm.StreamingLLM, messages []*llm.Message) {
 		fmt.Printf("Delta: %+v\n", event.Delta)
 		if event.Response != nil {
 			fmt.Printf("Response: %+v\n", event.Response)
-			message := event.Response.Message()
-			fmt.Printf("Message: %+v\n", message.CompleteText())
+			fmt.Printf("Message: %+v\n", event.Response.Message.CompleteText())
 		}
 		fmt.Println()
 	}

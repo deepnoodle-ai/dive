@@ -39,12 +39,12 @@ type Options struct {
 	Backstory            string
 	IsSupervisor         bool
 	Subordinates         []string
-	LLM                  llm.LLM
+	Model                llm.LLM
 	Tools                []llm.Tool
 	TickFrequency        time.Duration
 	TaskTimeout          time.Duration
 	ChatTimeout          time.Duration
-	CacheControl         string
+	CacheControl         llm.CacheControl
 	Hooks                llm.Hooks
 	Logger               slogger.Logger
 	ToolIterationLimit   int
@@ -65,7 +65,7 @@ type Agent struct {
 	name                 string
 	goal                 string
 	backstory            string
-	llm                  llm.LLM
+	model                llm.LLM
 	running              bool
 	tools                []llm.Tool
 	toolsByName          map[string]llm.Tool
@@ -74,7 +74,7 @@ type Agent struct {
 	tickFrequency        time.Duration
 	taskTimeout          time.Duration
 	chatTimeout          time.Duration
-	cacheControl         string
+	cacheControl         llm.CacheControl
 	taskQueue            []*taskState
 	recentTasks          []*taskState
 	activeTask           *taskState
@@ -117,9 +117,9 @@ func New(opts Options) (*Agent, error) {
 	if opts.Logger == nil {
 		opts.Logger = slogger.DefaultLogger
 	}
-	if opts.LLM == nil {
+	if opts.Model == nil {
 		if llm, ok := detectProvider(); ok {
-			opts.LLM = llm
+			opts.Model = llm
 		} else {
 			return nil, ErrNoLLM
 		}
@@ -139,7 +139,7 @@ func New(opts Options) (*Agent, error) {
 		name:                 strings.TrimSpace(opts.Name),
 		goal:                 strings.TrimSpace(opts.Goal),
 		backstory:            strings.TrimSpace(opts.Backstory),
-		llm:                  opts.LLM,
+		model:                opts.Model,
 		environment:          opts.Environment,
 		isSupervisor:         opts.IsSupervisor,
 		subordinates:         opts.Subordinates,
@@ -279,7 +279,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		"chat_timeout", a.chatTimeout,
 		"tick_frequency", a.tickFrequency,
 		"tool_iteration_limit", a.toolIterationLimit,
-		"model", a.llm.Name(),
+		"model", a.model.Name(),
 	)
 	return nil
 }
@@ -526,41 +526,51 @@ func (a *Agent) generate(
 	updatedMessages := make([]*llm.Message, len(messages))
 	copy(updatedMessages, messages)
 
+	// Options passed to the LLM
+	generateOpts := a.getGenerationOptions(systemPrompt)
+
 	// The loop is used to run and respond to the primary generation request
 	// and then automatically run any tool-use invocations. The first time
 	// through, we submit the primary generation. On subsequent loops, we are
 	// running tool-uses and responding with the results.
 	generationLimit := a.toolIterationLimit + 1
 	for i := range generationLimit {
-		generateOpts := a.getGenerationOptions(systemPrompt)
+
+		if err := publisher.Send(ctx, &dive.Event{
+			Type:    dive.EventTypeLLMRequest,
+			Origin:  a.eventOrigin(),
+			Payload: &llm.Request{Messages: updatedMessages},
+		}); err != nil {
+			return nil, nil, err
+		}
 
 		// Generate a response in either streaming or non-streaming mode
-		if streamingLLM, ok := a.llm.(llm.StreamingLLM); ok {
-			iterator, err := streamingLLM.Stream(ctx, updatedMessages, generateOpts...)
+		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
+			iter, err := streamingLLM.Stream(ctx, updatedMessages, generateOpts...)
 			if err != nil {
 				return nil, nil, err
 			}
-			for iterator.Next() {
-				event := iterator.Event()
+			for iter.Next() {
+				event := iter.Event()
 				if err := publisher.Send(ctx, &dive.Event{
-					Type:    "llm.event",
+					Type:    dive.EventTypeLLMEvent,
 					Origin:  a.eventOrigin(),
 					Payload: event,
 				}); err != nil {
-					iterator.Close()
+					iter.Close()
 					return nil, nil, err
 				}
 				if event.Response != nil {
 					response = event.Response
 				}
 			}
-			iterator.Close()
-			if err := iterator.Err(); err != nil {
+			iter.Close()
+			if err := iter.Err(); err != nil {
 				return nil, nil, err
 			}
 		} else {
 			var err error
-			response, err = a.llm.Generate(ctx, updatedMessages, generateOpts...)
+			response, err = a.model.Generate(ctx, updatedMessages, generateOpts...)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -572,7 +582,7 @@ func (a *Agent) generate(
 		}
 
 		if err := publisher.Send(ctx, &dive.Event{
-			Type:    "llm.response",
+			Type:    dive.EventTypeLLMResponse,
 			Origin:  a.eventOrigin(),
 			Payload: response,
 		}); err != nil {
@@ -581,24 +591,24 @@ func (a *Agent) generate(
 
 		a.logger.Debug("llm response",
 			"agent", a.name,
-			"usage_input_tokens", response.Usage().InputTokens,
-			"usage_output_tokens", response.Usage().OutputTokens,
-			"cache_creation_input_tokens", response.Usage().CacheCreationInputTokens,
-			"cache_read_input_tokens", response.Usage().CacheReadInputTokens,
-			"response_text", response.Message().Text(),
+			"usage_input_tokens", response.Usage.InputTokens,
+			"usage_output_tokens", response.Usage.OutputTokens,
+			"cache_creation_input_tokens", response.Usage.CacheCreationInputTokens,
+			"cache_read_input_tokens", response.Usage.CacheReadInputTokens,
+			"response_text", response.Message.Text(),
 			"generation_number", i+1,
 		)
 
 		// Remember the assistant response message
-		updatedMessages = append(updatedMessages, response.Message())
+		updatedMessages = append(updatedMessages, &response.Message)
 
 		// We're done if there are no tool calls
-		if len(response.ToolCalls()) == 0 {
+		if len(response.ToolCalls) == 0 {
 			break
 		}
 
 		// Execute all requested tool calls
-		toolResults, err := a.executeToolCalls(ctx, response.ToolCalls(), publisher)
+		toolResults, err := a.executeToolCalls(ctx, response.ToolCalls, publisher)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -609,7 +619,7 @@ func (a *Agent) generate(
 		}
 
 		// Capture results in a new message to send to LLM on the next iteration
-		resultMessage := llm.NewToolResultMessage(toolResults)
+		resultMessage := llm.NewToolOutputMessage(toolResults)
 
 		// Add instructions to the message to not use any more tools if we have
 		// only one generation left. Claude 3.7 Sonnet can keep going forever!
@@ -618,15 +628,10 @@ func (a *Agent) generate(
 				Type: llm.ContentTypeText,
 				Text: FinishNow,
 			})
-			a.logger.Debug("added finish now statement", "agent", a.name, "generation_number", i+1)
-		}
-
-		if err := publisher.Send(ctx, &dive.Event{
-			Type:    "llm.tool_result_message",
-			Origin:  a.eventOrigin(),
-			Payload: resultMessage,
-		}); err != nil {
-			return nil, nil, err
+			a.logger.Debug("added finish now statement",
+				"agent", a.name,
+				"generation_number", i+1,
+			)
 		}
 
 		// Messages to be sent to the LLM on the next iteration
@@ -638,8 +643,8 @@ func (a *Agent) generate(
 
 // executeToolCalls executes all tool calls and returns the results. If the
 // tools are configured to not return results, (nil, nil) is returned.
-func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall, publisher dive.EventPublisher) ([]*llm.ToolResult, error) {
-	results := make([]*llm.ToolResult, len(toolCalls))
+func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall, publisher dive.EventPublisher) ([]*llm.ToolOutput, error) {
+	outputs := make([]*llm.ToolOutput, len(toolCalls))
 	shouldReturnResult := false
 	for i, toolCall := range toolCalls {
 		tool, ok := a.toolsByName[toolCall.Name]
@@ -652,7 +657,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall, 
 			"tool_input", toolCall.Input)
 
 		if err := publisher.Send(ctx, &dive.Event{
-			Type:    "llm.tool_call",
+			Type:    dive.EventTypeToolCalled,
 			Origin:  a.eventOrigin(),
 			Payload: toolCall,
 		}); err != nil {
@@ -662,7 +667,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall, 
 		result, err := tool.Call(ctx, toolCall.Input)
 		if err != nil {
 			if err := publisher.Send(ctx, &dive.Event{
-				Type:   "llm.tool_error",
+				Type:   dive.EventTypeToolError,
 				Origin: a.eventOrigin(),
 				Payload: &llm.ToolError{
 					ID:    toolCall.ID,
@@ -675,16 +680,16 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall, 
 			return nil, fmt.Errorf("tool call error: %w", err)
 		}
 
-		results[i] = &llm.ToolResult{
+		outputs[i] = &llm.ToolOutput{
 			ID:     toolCall.ID,
 			Name:   toolCall.Name,
-			Result: result,
+			Output: result,
 		}
 
 		if err := publisher.Send(ctx, &dive.Event{
-			Type:    "llm.tool_result",
+			Type:    dive.EventTypeToolOutput,
 			Origin:  a.eventOrigin(),
-			Payload: results[i],
+			Payload: outputs[i],
 		}); err != nil {
 			return nil, err
 		}
@@ -694,7 +699,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall, 
 		}
 	}
 	if shouldReturnResult {
-		return results, nil
+		return outputs, nil
 	}
 	return nil, nil
 }
@@ -818,6 +823,13 @@ func (a *Agent) handleTask(ctx context.Context, state *taskState) error {
 	return nil
 }
 
+func (a *Agent) environmentName() string {
+	if a.environment == nil {
+		return ""
+	}
+	return a.environment.Name()
+}
+
 func (a *Agent) doSomeWork() {
 	ctx := context.Background()
 	logger := a.logger.With("agent", a.name)
@@ -834,8 +846,12 @@ func (a *Agent) doSomeWork() {
 			a.activeTask.Paused = false
 		}
 		a.activeTask.Publisher.Send(ctx, &dive.Event{
-			Type:   "task.started",
-			Origin: a.eventOrigin(),
+			Type: dive.EventTypeTaskActivated,
+			Origin: dive.EventOrigin{
+				AgentName:       a.name,
+				EnvironmentName: a.environmentName(),
+				TaskName:        a.activeTask.Task.Name(),
+			},
 		})
 		logger.Info("task started", "task", a.activeTask.Task.Name())
 	}
@@ -855,9 +871,13 @@ func (a *Agent) doSomeWork() {
 		taskState.Status = dive.TaskStatusError
 		a.rememberTask(taskState)
 		taskState.Publisher.Send(ctx, &dive.Event{
-			Type:   "task.error",
-			Origin: a.eventOrigin(),
-			Error:  err,
+			Type: dive.EventTypeTaskError,
+			Origin: dive.EventOrigin{
+				AgentName:       a.name,
+				EnvironmentName: a.environmentName(),
+				TaskName:        taskName,
+			},
+			Error: err,
 		})
 		logger.Error("task error", "task", taskName, "error", err)
 		taskState.Publisher.Close()
@@ -876,8 +896,12 @@ func (a *Agent) doSomeWork() {
 			"status_description", taskState.StatusDescription,
 		)
 		taskState.Publisher.Send(ctx, &dive.Event{
-			Type:   "task.progress",
-			Origin: a.eventOrigin(),
+			Type: dive.EventTypeTaskProgress,
+			Origin: dive.EventOrigin{
+				AgentName:       a.name,
+				EnvironmentName: a.environmentName(),
+				TaskName:        taskName,
+			},
 		})
 
 	case dive.TaskStatusCompleted:
@@ -886,8 +910,12 @@ func (a *Agent) doSomeWork() {
 		a.rememberTask(taskState)
 		logger.Info("task completed", "task", taskName)
 		taskState.Publisher.Send(ctx, &dive.Event{
-			Type:   "task.completed",
-			Origin: a.eventOrigin(),
+			Type: dive.EventTypeTaskCompleted,
+			Origin: dive.EventOrigin{
+				AgentName:       a.name,
+				EnvironmentName: a.environmentName(),
+				TaskName:        taskName,
+			},
 			Payload: &dive.TaskResult{
 				Task:    taskState.Task,
 				Usage:   taskState.Usage,
@@ -903,8 +931,12 @@ func (a *Agent) doSomeWork() {
 		logger.Info("task paused", "task", taskName)
 		taskState.Paused = true
 		taskState.Publisher.Send(ctx, &dive.Event{
-			Type:   "task.paused",
-			Origin: a.eventOrigin(),
+			Type: dive.EventTypeTaskPaused,
+			Origin: dive.EventOrigin{
+				AgentName:       a.name,
+				EnvironmentName: a.environmentName(),
+				TaskName:        taskName,
+			},
 		})
 		a.taskQueue = append(a.taskQueue, taskState)
 
@@ -917,9 +949,13 @@ func (a *Agent) doSomeWork() {
 			"status_description", taskState.StatusDescription,
 		)
 		taskState.Publisher.Send(ctx, &dive.Event{
-			Type:   "task.error",
-			Origin: a.eventOrigin(),
-			Error:  fmt.Errorf("task status: %s", taskState.Status),
+			Type: dive.EventTypeTaskError,
+			Origin: dive.EventOrigin{
+				AgentName:       a.name,
+				EnvironmentName: a.environmentName(),
+				TaskName:        taskName,
+			},
+			Error: fmt.Errorf("task status: %s", taskState.Status),
 		})
 		taskState.Publisher.Close()
 		taskState.Publisher = nil
@@ -981,7 +1017,7 @@ func (a *Agent) eventOrigin() dive.EventOrigin {
 
 func (a *Agent) errorEvent(err error) *dive.Event {
 	return &dive.Event{
-		Type:   "error",
+		Type:   dive.EventTypeError,
 		Error:  err,
 		Origin: a.eventOrigin(),
 	}

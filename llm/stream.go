@@ -22,13 +22,13 @@ const (
 // Event represents a single streaming event from the LLM. A successfully
 // run stream will end with a final message containing the complete Response.
 type Event struct {
-	Type         EventType     `json:"type"`
-	Index        int           `json:"index"`
-	Message      *Message      `json:"message,omitempty"`
-	ContentBlock *ContentBlock `json:"content_block,omitempty"`
-	Delta        *Delta        `json:"delta,omitempty"`
-	Usage        *Usage        `json:"usage,omitempty"`
-	Response     *Response     `json:"response,omitempty"`
+	Type         EventType          `json:"type"`
+	Index        int                `json:"index"`
+	Message      *Message           `json:"message,omitempty"`
+	ContentBlock *EventContentBlock `json:"content_block,omitempty"`
+	Delta        *Delta             `json:"delta,omitempty"`
+	Usage        *Usage             `json:"usage,omitempty"`
+	Response     *Response          `json:"response,omitempty"`
 }
 
 // Stream represents a stream of LLM generation events
@@ -44,13 +44,15 @@ type Stream interface {
 	Close() error
 }
 
-type ContentBlock struct {
+// EventContentBlock carries the start of a content block in an LLM event.
+type EventContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
 }
 
+// Delta carries a portion of an LLM response.
 type Delta struct {
 	Type         string  `json:"type,omitempty"`
 	Text         string  `json:"text,omitempty"`

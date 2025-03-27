@@ -60,16 +60,7 @@ func (p *Provider) Name() string {
 
 func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
-
-	if hooks := config.Hooks[llm.BeforeGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.BeforeGenerate,
-			Messages: messages,
-		})
-	}
+	config.Apply(opts...)
 
 	model := config.Model
 	if model == "" {
@@ -100,7 +91,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.SetCacheControl(config.CacheControl)
+			lastContent.SetCacheControl(string(config.CacheControl))
 		}
 	}
 
@@ -138,6 +129,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	jsonBody, err := json.MarshalIndent(reqBody, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
+	}
+
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     jsonBody,
+		},
+	}); err != nil {
+		return nil, err
 	}
 
 	var result Response
@@ -184,35 +186,42 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	toolCalls, contentBlocks := processContentBlocks(result.Content)
 
-	response := llm.NewResponse(llm.ResponseOptions{
+	response := &llm.Response{
 		ID:         result.ID,
 		Model:      model,
 		Role:       llm.Assistant,
 		StopReason: result.StopReason,
+		ToolCalls:  toolCalls,
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
 		Usage: llm.Usage{
 			InputTokens:              result.Usage.InputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 		},
-		ToolCalls: toolCalls,
-		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
-	})
+	}
 
-	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.AfterGenerate,
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.AfterGenerate,
+		Request: &llm.Request{
 			Messages: messages,
-			Response: response,
-		})
+			Config:   config,
+			Body:     jsonBody,
+		},
+		Response: response,
+	}); err != nil {
+		return nil, err
 	}
 
 	return response, nil
 }
 
 // processContentBlocks converts Anthropic content blocks to LLM content blocks and tool calls
-func processContentBlocks(blocks []*ContentBlock) ([]llm.ToolCall, []*llm.Content) {
-	var toolCalls []llm.ToolCall
+func processContentBlocks(blocks []*ContentBlock) ([]*llm.ToolCall, []*llm.Content) {
+	var toolCalls []*llm.ToolCall
 	var contentBlocks []*llm.Content
 
 	for _, block := range blocks {
@@ -223,7 +232,7 @@ func processContentBlocks(blocks []*ContentBlock) ([]llm.ToolCall, []*llm.Conten
 				Text: block.Text,
 			})
 		case "tool_use":
-			toolCalls = append(toolCalls, llm.ToolCall{
+			toolCalls = append(toolCalls, &llm.ToolCall{
 				ID:    block.ID, // e.g. "toolu_01A09q90qw90lq917835lq9"
 				Name:  block.Name,
 				Input: string(block.Input),
@@ -258,9 +267,7 @@ func addPrefill(blocks []*ContentBlock, prefill, closingTag string) error {
 
 func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
+	config.Apply(opts...)
 
 	model := config.Model
 	if model == "" {
@@ -291,7 +298,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.SetCacheControl(config.CacheControl)
+			lastContent.SetCacheControl(string(config.CacheControl))
 		}
 	}
 
@@ -330,6 +337,17 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
+	}
+
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     jsonBody,
+		},
+	}); err != nil {
+		return nil, err
 	}
 
 	var stream *StreamIterator
@@ -612,7 +630,7 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 		events = append(events, &llm.Event{
 			Type:  llm.EventContentBlockStart,
 			Index: event.Index,
-			ContentBlock: &llm.ContentBlock{
+			ContentBlock: &llm.EventContentBlock{
 				ID:   event.ContentBlock.ID,
 				Name: event.ContentBlock.Name,
 				Type: event.ContentBlock.Type,
@@ -685,20 +703,23 @@ func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
 	}
 	toolCalls, contentBlocks := processContentBlocks(blocks)
 
-	return llm.NewResponse(llm.ResponseOptions{
+	return &llm.Response{
 		ID:         s.responseID,
 		Model:      s.responseModel,
 		Role:       llm.Assistant,
 		StopReason: stopReason,
 		ToolCalls:  toolCalls,
-		Message:    llm.NewMessage(llm.Assistant, contentBlocks),
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
 		Usage: llm.Usage{
 			InputTokens:              s.usage.InputTokens,
 			OutputTokens:             s.usage.OutputTokens,
 			CacheCreationInputTokens: s.usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     s.usage.CacheReadInputTokens,
 		},
-	})
+	}
 }
 
 func (s *StreamIterator) Close() error {

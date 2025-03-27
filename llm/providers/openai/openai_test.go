@@ -19,7 +19,7 @@ func TestHelloWorld(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// The model might respond with "Hello!" or other variations, so we check case-insensitive
-	require.Contains(t, strings.ToLower(response.Message().Text()), "hello")
+	require.Contains(t, strings.ToLower(response.Message.Text()), "hello")
 }
 
 func TestHelloWorldStream(t *testing.T) {
@@ -63,11 +63,7 @@ func TestHelloWorldStream(t *testing.T) {
 	}
 
 	require.NotNil(t, finalResponse)
-	require.Equal(t, llm.Assistant, finalResponse.Role())
-
-	// usage := finalResponse.Usage()
-	// require.True(t, usage.InputTokens > 0)
-	// require.True(t, usage.OutputTokens > 0)
+	require.Equal(t, llm.Assistant, finalResponse.Role)
 }
 
 func addFunc(ctx context.Context, input string) (string, error) {
@@ -107,8 +103,8 @@ func TestToolUse(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(response.Message().Content))
-	content := response.Message().Content[0]
+	require.Equal(t, 1, len(response.Message.Content))
+	content := response.Message.Content[0]
 	require.Equal(t, llm.ContentTypeToolUse, content.Type)
 	require.Equal(t, "add", content.Name)
 	// The exact format of the arguments may vary, so we just check that it contains the numbers
@@ -142,15 +138,15 @@ func TestMultipleToolUse(t *testing.T) {
 		llm.WithToolChoice(llm.ToolChoice{Type: "auto"}),
 	)
 	require.NoError(t, err)
-	require.Equal(t, 2, len(response.Message().Content))
+	require.Equal(t, 2, len(response.Message.Content))
 
-	c1 := response.Message().Content[0]
+	c1 := response.Message.Content[0]
 	require.Equal(t, llm.ContentTypeToolUse, c1.Type)
 	require.Equal(t, "add", c1.Name)
 	require.Contains(t, string(c1.Input), "567")
 	require.Contains(t, string(c1.Input), "111")
 
-	c2 := response.Message().Content[1]
+	c2 := response.Message.Content[1]
 	require.Equal(t, llm.ContentTypeToolUse, c2.Type)
 	require.Equal(t, "add", c2.Name)
 	require.Contains(t, string(c2.Input), "233")
@@ -184,21 +180,21 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	var toolCalls []llm.ToolCall
+	var toolCalls []*llm.ToolCall
 	for iterator.Next() {
 		event := iterator.Event()
 		if event.Response != nil {
 			// fmt.Printf("response: %+v\n", event.Response)
 			// fmt.Println("tool call count:", len(event.Response.ToolCalls()))
-			toolCalls = append(toolCalls, event.Response.ToolCalls()...)
+			toolCalls = append(toolCalls, event.Response.ToolCalls...)
 		}
 	}
 	require.Equal(t, 2, len(toolCalls))
 
 	// The two calls can be in any order, so we need to check both
 
-	var c1 llm.ToolCall
-	var c2 llm.ToolCall
+	var c1 *llm.ToolCall
+	var c2 *llm.ToolCall
 
 	if strings.Contains(string(toolCalls[0].Input), "567") {
 		c1 = toolCalls[0]
@@ -266,13 +262,13 @@ func TestToolUseStream(t *testing.T) {
 	}
 
 	require.NotNil(t, finalResponse)
-	require.Equal(t, llm.Assistant, finalResponse.Role())
+	require.Equal(t, llm.Assistant, finalResponse.Role)
 
 	// Check that we have at least one tool call
-	require.GreaterOrEqual(t, len(finalResponse.ToolCalls()), 1)
+	require.GreaterOrEqual(t, len(finalResponse.ToolCalls), 1)
 
 	// Check that the tool call is for the add function
-	toolCall := finalResponse.ToolCalls()[0]
+	toolCall := finalResponse.ToolCalls[0]
 	require.Equal(t, "add", toolCall.Name)
 
 	// Check that the arguments contain the numbers

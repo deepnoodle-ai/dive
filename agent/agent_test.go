@@ -23,7 +23,7 @@ func TestAgent(t *testing.T) {
 		Goal:         "Test the agent",
 		Backstory:    "You are a testing agent",
 		IsSupervisor: false,
-		LLM:          anthropic.New(),
+		Model:        anthropic.New(),
 	})
 	require.NoError(t, err)
 
@@ -39,8 +39,8 @@ func TestAgentChat(t *testing.T) {
 	defer cancel()
 
 	agent, err := New(Options{
-		Name: "Testing Agent",
-		LLM:  anthropic.New(),
+		Name:  "Testing Agent",
+		Model: anthropic.New(),
 	})
 	require.NoError(t, err)
 
@@ -53,7 +53,7 @@ func TestAgentChat(t *testing.T) {
 	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
 	require.NoError(t, err)
 
-	text := strings.ToLower(response.Message().Text())
+	text := strings.ToLower(response.Message.Text())
 	matches := strings.Contains(text, "hello") || strings.Contains(text, "hi")
 	require.True(t, matches)
 
@@ -88,7 +88,7 @@ func TestAgentChatWithTools(t *testing.T) {
 	}
 
 	agent, err := New(Options{
-		LLM:   anthropic.New(),
+		Model: anthropic.New(),
 		Tools: []llm.Tool{llm.NewTool(&echoToolDef, echoFunc)},
 	})
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestAgentChatWithTools(t *testing.T) {
 	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
 	require.NoError(t, err)
 
-	text := strings.ToLower(response.Message().Text())
+	text := strings.ToLower(response.Message.Text())
 	require.Contains(t, text, "echo")
 	require.Equal(t, "hello world", echoInput)
 
@@ -120,7 +120,7 @@ func TestAgentTask(t *testing.T) {
 	agent, err := New(Options{
 		Name:      "Poet",
 		Backstory: "You're a poet that loves writing limericks",
-		LLM:       anthropic.New(),
+		Model:     anthropic.New(),
 		Logger:    logger,
 	})
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 		Goal:         "Help research a topic.",
 		Backstory:    "You are a research assistant.",
 		IsSupervisor: false,
-		LLM:          anthropic.New(),
+		Model:        anthropic.New(),
 	})
 	require.NoError(t, err)
 

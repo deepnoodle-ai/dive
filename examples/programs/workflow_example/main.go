@@ -9,11 +9,9 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
+	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/groq"
-	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
@@ -31,26 +29,9 @@ func main() {
 
 	ctx := context.Background()
 
-	var provider llm.LLM
-	switch providerName {
-	case "anthropic":
-		var opts []anthropic.Option
-		if modelName != "" {
-			opts = append(opts, anthropic.WithModel(modelName))
-		}
-		provider = anthropic.New(opts...)
-	case "openai":
-		var opts []openai.Option
-		if modelName != "" {
-			opts = append(opts, openai.WithModel(modelName))
-		}
-		provider = openai.New(opts...)
-	case "groq":
-		var opts []groq.Option
-		if modelName != "" {
-			opts = append(opts, groq.WithModel(modelName))
-		}
-		provider = groq.New(opts...)
+	model, err := config.GetModel(providerName, modelName)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	logLevel := "info"
@@ -95,8 +76,8 @@ func main() {
 		Backstory:    "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
 		IsSupervisor: true,
 		Subordinates: []string{"Research Assistant"},
-		CacheControl: "ephemeral",
-		LLM:          provider,
+		CacheControl: llm.CacheControlEphemeral,
+		Model:        model,
 		Logger:       logger,
 	})
 	if err != nil {
@@ -106,8 +87,8 @@ func main() {
 	researcher, err := agent.New(agent.Options{
 		Name:         "Research Assistant",
 		Backstory:    "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
-		CacheControl: "ephemeral",
-		LLM:          provider,
+		CacheControl: llm.CacheControlEphemeral,
+		Model:        model,
 		Tools:        theTools,
 		Logger:       logger,
 	})

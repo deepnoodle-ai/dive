@@ -1,35 +1,66 @@
 package llm
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/diveagents/dive/slogger"
 )
 
-const CacheControlEphemeral = "ephemeral"
+// CacheControl is used to control how the LLM caches responses.
+type CacheControl string
 
-// Option is a function that configures LLM calls.
+const (
+	CacheControlEphemeral CacheControl = "ephemeral"
+)
+
+func (c CacheControl) String() string {
+	return string(c)
+}
+
+// Option is a function that is used to adjust LLM configuration.
 type Option func(*Config)
 
+// Config is used to configure LLM calls. Not all providers support all options.
+// If a provider doesn't support a given option, it will be ignored.
 type Config struct {
-	Model             string
-	SystemPrompt      string
-	CacheControl      string
-	Endpoint          string
-	APIKey            string
-	Prefill           string
-	PrefillClosingTag string
-	MaxTokens         *int
-	Temperature       *float64
-	PresencePenalty   *float64
-	FrequencyPenalty  *float64
-	ReasoningFormat   string
-	ReasoningEffort   string
-	Tools             []Tool
-	ToolChoice        ToolChoice
-	Hooks             Hooks
-	Client            *http.Client
-	Logger            slogger.Logger
+	Model             string         `json:"model,omitempty"`
+	SystemPrompt      string         `json:"system_prompt,omitempty"`
+	CacheControl      CacheControl   `json:"cache_control,omitempty"`
+	Endpoint          string         `json:"endpoint,omitempty"`
+	APIKey            string         `json:"api_key,omitempty"`
+	Prefill           string         `json:"prefill,omitempty"`
+	PrefillClosingTag string         `json:"prefill_closing_tag,omitempty"`
+	MaxTokens         *int           `json:"max_tokens,omitempty"`
+	Temperature       *float64       `json:"temperature,omitempty"`
+	PresencePenalty   *float64       `json:"presence_penalty,omitempty"`
+	FrequencyPenalty  *float64       `json:"frequency_penalty,omitempty"`
+	ReasoningFormat   string         `json:"reasoning_format,omitempty"`
+	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
+	Tools             []Tool         `json:"tools,omitempty"`
+	ToolChoice        ToolChoice     `json:"tool_choice,omitempty"`
+	Hooks             Hooks          `json:"-"`
+	Client            *http.Client   `json:"-"`
+	Logger            slogger.Logger `json:"-"`
+}
+
+// Apply applies the given options to the config.
+func (c *Config) Apply(opts ...Option) {
+	for _, opt := range opts {
+		opt(c)
+	}
+}
+
+// FireHooks fires the configured hooks for the matching hook type.
+func (c *Config) FireHooks(ctx context.Context, hookCtx *HookContext) error {
+	for _, hook := range c.Hooks {
+		if hook.Type == hookCtx.Type {
+			if err := hook.Func(ctx, hookCtx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // WithModel sets the LLM model for the generation.
@@ -96,19 +127,19 @@ func WithToolChoice(toolChoice ToolChoice) Option {
 }
 
 // WithCacheControl sets the cache control for the interaction.
-func WithCacheControl(cacheControl string) Option {
+func WithCacheControl(cacheControl CacheControl) Option {
 	return func(config *Config) {
 		config.CacheControl = cacheControl
 	}
 }
 
-// WithHook adds a hook for the specified event type
-func WithHook(hookType HookType, hook Hook) Option {
+// WithHook adds a callback for the specified hook type
+func WithHook(hookType HookType, hookFunc HookFunc) Option {
 	return func(config *Config) {
-		if config.Hooks == nil {
-			config.Hooks = make(Hooks)
-		}
-		config.Hooks[hookType] = hook
+		config.Hooks = append(config.Hooks, Hook{
+			Type: hookType,
+			Func: hookFunc,
+		})
 	}
 }
 

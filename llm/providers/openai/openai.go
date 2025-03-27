@@ -61,16 +61,7 @@ func (p *Provider) Name() string {
 
 func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
-
-	if hooks := config.Hooks[llm.BeforeGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.BeforeGenerate,
-			Messages: messages,
-		})
-	}
+	config.Apply(opts...)
 
 	model := config.Model
 	if model == "" {
@@ -145,6 +136,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     jsonBody,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
 	var result Response
 	err = retry.Do(ctx, func() error {
 		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
@@ -183,11 +185,11 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 	choice := result.Choices[0]
 
-	var toolCalls []llm.ToolCall
+	var toolCalls []*llm.ToolCall
 	var contentBlocks []*llm.Content
 	if len(choice.Message.ToolCalls) > 0 {
 		for _, toolCall := range choice.Message.ToolCalls {
-			toolCalls = append(toolCalls, llm.ToolCall{
+			toolCalls = append(toolCalls, &llm.ToolCall{
 				ID:    toolCall.ID,
 				Name:  toolCall.Function.Name,
 				Input: toolCall.Function.Arguments,
@@ -218,24 +220,31 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
-	response := llm.NewResponse(llm.ResponseOptions{
+	response := &llm.Response{
 		ID:    result.ID,
 		Model: model,
 		Role:  llm.Assistant,
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
+		ToolCalls: toolCalls,
 		Usage: llm.Usage{
 			InputTokens:  result.Usage.PromptTokens,
 			OutputTokens: result.Usage.CompletionTokens,
 		},
-		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
-		ToolCalls: toolCalls,
-	})
+	}
 
-	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.AfterGenerate,
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.AfterGenerate,
+		Request: &llm.Request{
 			Messages: messages,
-			Response: response,
-		})
+			Config:   config,
+			Body:     jsonBody,
+		},
+		Response: response,
+	}); err != nil {
+		return nil, err
 	}
 
 	return response, nil
@@ -252,9 +261,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 // https://platform.openai.com/docs/api-reference/chat/create
 func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
+	config.Apply(opts...)
 
 	model := config.Model
 	if model == "" {
@@ -329,6 +336,17 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
+	}
+
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     jsonBody,
+		},
+	}); err != nil {
+		return nil, err
 	}
 
 	var stream *StreamIterator
@@ -600,7 +618,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 			events = append(events, &llm.Event{
 				Type:         llm.EventContentBlockStart,
 				Index:        index,
-				ContentBlock: &llm.ContentBlock{Type: "text", Text: ""},
+				ContentBlock: &llm.EventContentBlock{Type: "text", Text: ""},
 			})
 		}
 		// Accumulate the text
@@ -624,7 +642,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				events = append(events, &llm.Event{
 					Type:  llm.EventContentBlockStart,
 					Index: index,
-					ContentBlock: &llm.ContentBlock{
+					ContentBlock: &llm.EventContentBlock{
 						ID:   toolCallDelta.ID,
 						Name: toolCallDelta.Function.Name,
 						Type: "tool_use",
@@ -638,7 +656,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				for _, queuedEvent := range s.eventQueue {
 					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
 						if queuedEvent.ContentBlock == nil {
-							queuedEvent.ContentBlock = &llm.ContentBlock{Type: "tool_use"}
+							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
 						}
 						queuedEvent.ContentBlock.ID = toolCallDelta.ID
 					}
@@ -653,7 +671,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				for _, queuedEvent := range s.eventQueue {
 					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
 						if queuedEvent.ContentBlock == nil {
-							queuedEvent.ContentBlock = &llm.ContentBlock{Type: "tool_use"}
+							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
 						}
 						queuedEvent.ContentBlock.Name = toolCallDelta.Function.Name
 					}
@@ -693,11 +711,11 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 // by the llm package. This is called when the stream ends or a finish reason
 // is received.
 func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
-	var toolCalls []llm.ToolCall
+	var toolCalls []*llm.ToolCall
 	var contentBlocks []*llm.Content
 	for _, toolCall := range s.toolCalls {
 		if toolCall.Name != "" {
-			toolCalls = append(toolCalls, llm.ToolCall{
+			toolCalls = append(toolCalls, &llm.ToolCall{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
 				Input: toolCall.Arguments,
@@ -718,18 +736,21 @@ func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
 			})
 		}
 	}
-	return llm.NewResponse(llm.ResponseOptions{
+	return &llm.Response{
 		ID:         s.responseID,
 		Model:      s.responseModel,
 		Role:       llm.Assistant,
 		StopReason: stopReason,
-		Message:    llm.NewMessage(llm.Assistant, contentBlocks),
-		ToolCalls:  toolCalls,
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
+		ToolCalls: toolCalls,
 		Usage: llm.Usage{
 			InputTokens:  s.usage.PromptTokens,
 			OutputTokens: s.usage.CompletionTokens,
 		},
-	})
+	}
 }
 
 func (s *StreamIterator) Close() error {
@@ -740,9 +761,4 @@ func (s *StreamIterator) Close() error {
 
 func (s *StreamIterator) Err() error {
 	return s.err
-}
-
-type stopBlock struct {
-	Index int
-	Type  string
 }

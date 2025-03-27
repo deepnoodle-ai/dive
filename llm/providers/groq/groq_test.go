@@ -17,6 +17,6 @@ func TestHelloWorld(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	text := strings.ToLower(response.Message().Text())
+	text := strings.ToLower(response.Message.Text())
 	require.Contains(t, text, "hello")
 }
