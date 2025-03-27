@@ -15,12 +15,14 @@ import (
 )
 
 var (
-	DefaultTaskTimeout        = time.Minute * 5
-	DefaultChatTimeout        = time.Minute * 1
+	DefaultTaskTimeout        = time.Minute * 4
+	DefaultChatTimeout        = time.Minute * 2
 	DefaultTickFrequency      = time.Second * 1
 	DefaultToolIterationLimit = 8
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
+	ErrNoInstructions         = errors.New("no instructions provided")
+	ErrNoLLM                  = errors.New("no llm provided")
 	FinishNow                 = "Do not use any more tools. You must respond with your final answer now."
 )
 
@@ -35,7 +37,6 @@ type Options struct {
 	Name                 string
 	Goal                 string
 	Backstory            string
-	AcceptedEvents       []string
 	IsSupervisor         bool
 	Subordinates         []string
 	LLM                  llm.LLM
@@ -68,7 +69,6 @@ type Agent struct {
 	running              bool
 	tools                []llm.Tool
 	toolsByName          map[string]llm.Tool
-	acceptedEvents       []string
 	isSupervisor         bool
 	subordinates         []string
 	tickFrequency        time.Duration
@@ -121,7 +121,7 @@ func New(opts Options) (*Agent, error) {
 		if llm, ok := detectProvider(); ok {
 			opts.LLM = llm
 		} else {
-			return nil, fmt.Errorf("no llm provided")
+			return nil, ErrNoLLM
 		}
 	}
 	if opts.Name == "" {
@@ -141,7 +141,6 @@ func New(opts Options) (*Agent, error) {
 		backstory:            strings.TrimSpace(opts.Backstory),
 		llm:                  opts.LLM,
 		environment:          opts.Environment,
-		acceptedEvents:       opts.AcceptedEvents,
 		isSupervisor:         opts.IsSupervisor,
 		subordinates:         opts.Subordinates,
 		tickFrequency:        opts.TickFrequency,
@@ -211,10 +210,6 @@ func (a *Agent) Backstory() string {
 	return a.backstory
 }
 
-func (a *Agent) AcceptedEvents() []string {
-	return a.acceptedEvents
-}
-
 func (a *Agent) IsSupervisor() bool {
 	return a.isSupervisor
 }
@@ -247,11 +242,18 @@ func (a *Agent) Subordinates() []string {
 	return others
 }
 
-func (a *Agent) SetEnvironment(env dive.Environment) {
+func (a *Agent) SetEnvironment(env dive.Environment) error {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 
+	if a.running {
+		return fmt.Errorf("agent is already running")
+	}
+	if a.environment != nil {
+		return fmt.Errorf("agent is already associated with an environment")
+	}
 	a.environment = env
+	return nil
 }
 
 func (a *Agent) Start(ctx context.Context) error {
@@ -988,11 +990,14 @@ func (a *Agent) errorEvent(err error) *dive.Event {
 func taskPromptMessages(prompt *dive.Prompt) ([]*llm.Message, error) {
 	messages := []*llm.Message{}
 
+	if prompt.Text == "" {
+		return nil, ErrNoInstructions
+	}
+
 	// Add context information if available
 	if len(prompt.Context) > 0 {
 		contextLines := []string{
-			"Important: The following context may contain relevant information to help you complete the task. " +
-				"Review and incorporate this information into your approach:",
+			"Important: The following context may contain relevant information to help you complete the task.",
 		}
 		for _, context := range prompt.Context {
 			var contextBlock string
@@ -1010,13 +1015,10 @@ func taskPromptMessages(prompt *dive.Prompt) ([]*llm.Message, error) {
 
 	// Add task instructions
 	lines = append(lines, "You must complete the following task:")
-
-	if prompt.Text != "" {
-		if prompt.Name != "" {
-			lines = append(lines, fmt.Sprintf("<task name=%q>\n%s\n</task>", prompt.Name, prompt.Text))
-		} else {
-			lines = append(lines, fmt.Sprintf("<task>\n%s\n</task>", prompt.Text))
-		}
+	if prompt.Name != "" {
+		lines = append(lines, fmt.Sprintf("<task name=%q>\n%s\n</task>", prompt.Name, prompt.Text))
+	} else {
+		lines = append(lines, fmt.Sprintf("<task>\n%s\n</task>", prompt.Text))
 	}
 
 	// Add output expectations if specified
@@ -1028,9 +1030,6 @@ func taskPromptMessages(prompt *dive.Prompt) ([]*llm.Message, error) {
 		lines = append(lines, output)
 	}
 
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("no instructions provided")
-	}
 	messages = append(messages, llm.NewUserMessage(strings.Join(lines, "\n\n")))
 	return messages, nil
 }

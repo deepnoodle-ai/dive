@@ -78,7 +78,7 @@ type Agent interface {
 	IsSupervisor() bool
 
 	// SetEnvironment sets the runtime Environment to which this Agent belongs
-	SetEnvironment(env Environment)
+	SetEnvironment(env Environment) error
 
 	// Chat gives the agent messages to respond to and returns a stream of events
 	Chat(ctx context.Context, messages []*llm.Message, opts ...ChatOption) (EventStream, error)

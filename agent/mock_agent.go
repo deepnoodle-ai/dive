@@ -62,8 +62,9 @@ func (a *MockAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
 
-func (a *MockAgent) SetEnvironment(env dive.Environment) {
+func (a *MockAgent) SetEnvironment(env dive.Environment) error {
 	a.environment = env
+	return nil
 }
 
 func (a *MockAgent) Work(ctx context.Context, task dive.Task) (dive.EventStream, error) {

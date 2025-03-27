@@ -34,7 +34,9 @@ func (m *mockAgent) IsSupervisor() bool {
 	return false
 }
 
-func (m *mockAgent) SetEnvironment(env dive.Environment) {}
+func (m *mockAgent) SetEnvironment(env dive.Environment) error {
+	return nil
+}
 
 func (m *mockAgent) Chat(ctx context.Context, messages []*llm.Message, opts ...dive.ChatOption) (dive.EventStream, error) {
 	return m.workFn(ctx, nil)

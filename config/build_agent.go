@@ -88,7 +88,6 @@ func buildAgent(
 		Backstory:          agentDef.Backstory,
 		IsSupervisor:       agentDef.IsSupervisor,
 		Subordinates:       agentDef.Subordinates,
-		AcceptedEvents:     agentDef.AcceptedEvents,
 		LLM:                llmProvider,
 		Tools:              agentTools,
 		ChatTimeout:        chatTimeout,
