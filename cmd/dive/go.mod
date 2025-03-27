@@ -7,6 +7,7 @@ replace github.com/diveagents/dive => ../..
 require (
 	github.com/diveagents/dive v0.0.0-00010101000000-000000000000
 	github.com/fatih/color v1.18.0
+	github.com/mendableai/firecrawl-go v1.0.0
 	github.com/spf13/cobra v1.8.0
 )
 
@@ -18,7 +19,6 @@ require (
 	github.com/lmittmann/tint v1.0.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mendableai/firecrawl-go v1.0.0 // indirect
 	github.com/risor-io/risor v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	golang.org/x/sys v0.30.0 // indirect
