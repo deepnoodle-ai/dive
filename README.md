@@ -248,9 +248,9 @@ func (t *WeatherTool) Definition() *llm.ToolDefinition {
 We're looking for contributors! Whether you're fixing bugs, adding features,
 improving documentation, or spreading the word, your help is appreciated.
 
-<a href="https://github.com/diveagents/dive/graphs/contributors">
+<!-- <a href="https://github.com/diveagents/dive/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=diveagents/dive" width="100%"/>
-</a>
+</a> -->
 
 ## Roadmap
 
