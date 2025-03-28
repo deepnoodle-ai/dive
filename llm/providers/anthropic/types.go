@@ -30,8 +30,9 @@ type ContentBlock struct {
 	Content      string          `json:"content,omitempty"`
 	Input        json.RawMessage `json:"input,omitempty"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
-	Thinking     string          `json:"thinking,omitempty"`
-	Signature    string          `json:"signature,omitempty"`
+	Thinking     string          `json:"thinking,omitempty"`  // "Let me analyze this step by step..."
+	Signature    string          `json:"signature,omitempty"` // in "thinking" blocks
+	Data         string          `json:"data,omitempty"`      // in "redacted_thinking" blocks
 }
 
 func (c *ContentBlock) SetCacheControl(cacheControlType string) {
@@ -129,4 +130,6 @@ type StreamDelta struct {
 	StopReason   string  `json:"stop_reason,omitempty"`
 	StopSequence *string `json:"stop_sequence,omitempty"`
 	PartialJSON  string  `json:"partial_json,omitempty"`
+	Thinking     string  `json:"thinking,omitempty"`
+	Signature    string  `json:"signature,omitempty"`
 }

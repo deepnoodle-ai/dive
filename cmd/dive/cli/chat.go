@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	boldStyle    = color.New(color.Bold)
-	successStyle = color.New(color.FgGreen)
-	errorStyle   = color.New(color.FgRed)
-	yellowStyle  = color.New(color.FgYellow)
+	boldStyle     = color.New(color.Bold)
+	successStyle  = color.New(color.FgGreen)
+	errorStyle    = color.New(color.FgRed)
+	yellowStyle   = color.New(color.FgYellow)
+	thinkingStyle = color.New(color.FgMagenta)
 )
 
 func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
@@ -45,6 +46,9 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 		event := iterator.Event()
 		switch payload := event.Payload.(type) {
 		case *llm.Event:
+			if payload.Type == llm.EventContentBlockStop {
+				fmt.Printf("\n\n")
+			}
 			if payload.ContentBlock != nil {
 				cb := payload.ContentBlock
 				if cb.Type == "tool_use" {
@@ -70,6 +74,8 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 						toolUseAccum = ""
 					}
 					fmt.Print(successStyle.Sprint(delta.Text))
+				} else if delta.Thinking != "" {
+					fmt.Print(thinkingStyle.Sprint(delta.Thinking))
 				}
 			}
 		}
@@ -81,7 +87,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 
 var DefaultChatBackstory = `You are a helpful AI assistant. You aim to be direct, clear, and helpful in your responses.`
 
-func runChat(backstory, agentName string) error {
+func runChat(backstory, agentName string, reasoningBudget int) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -112,6 +118,14 @@ func runChat(backstory, agentName string) error {
 		theTools = append(theTools, toolkit.NewGoogleSearch(googleClient))
 	}
 
+	modelSettings := &agent.ModelSettings{}
+	if reasoningBudget > 0 {
+		modelSettings.ReasoningBudget = &reasoningBudget
+		if reasoningBudget > modelSettings.MaxTokens+4096 {
+			modelSettings.MaxTokens = reasoningBudget + 4096
+		}
+	}
+
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,
 		Backstory:        backstory,
@@ -120,6 +134,7 @@ func runChat(backstory, agentName string) error {
 		Tools:            theTools,
 		ThreadRepository: dive.NewMemoryThreadRepository(),
 		AutoStart:        true,
+		ModelSettings:    modelSettings,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating agent: %v", err)
@@ -162,6 +177,7 @@ var chatCmd = &cobra.Command{
 	Long:  "Start an interactive chat with an AI agent",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+
 		systemPrompt, err := cmd.Flags().GetString("system-prompt")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
@@ -170,12 +186,22 @@ var chatCmd = &cobra.Command{
 		if systemPrompt == "" {
 			systemPrompt = DefaultChatBackstory
 		}
+
 		agentName, err := cmd.Flags().GetString("agent-name")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		if err := runChat(systemPrompt, agentName); err != nil {
+
+		var reasoningBudget int
+		if value, err := cmd.Flags().GetInt("reasoning-budget"); err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		} else {
+			reasoningBudget = value
+		}
+
+		if err := runChat(systemPrompt, agentName, reasoningBudget); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -185,6 +211,7 @@ var chatCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(chatCmd)
 
-	chatCmd.Flags().StringP("agent-name", "n", "Assistant", "Name of the chat agent")
-	chatCmd.Flags().StringP("system-prompt", "s", "", "System prompt for the chat agent")
+	chatCmd.Flags().StringP("agent-name", "", "Assistant", "Name of the chat agent")
+	chatCmd.Flags().StringP("system-prompt", "", "", "System prompt for the chat agent")
+	chatCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
 }

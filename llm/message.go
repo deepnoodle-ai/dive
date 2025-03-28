@@ -61,6 +61,7 @@ const (
 	ContentTypeImage      ContentType = "image"
 	ContentTypeToolUse    ContentType = "tool_use"
 	ContentTypeToolResult ContentType = "tool_result"
+	ContentTypeThinking   ContentType = "thinking"
 )
 
 // Content is a single block of content in a message. A message may contain
@@ -89,6 +90,12 @@ type Content struct {
 
 	// ToolUseID is used when passing a tool result back to the LLM
 	ToolUseID string `json:"tool_use_id,omitempty"`
+
+	// Thinking is the thinking of the content
+	Thinking string `json:"thinking,omitempty"`
+
+	// Signature is the signature of the content
+	Signature string `json:"signature,omitempty"`
 }
 
 // Message containing content passed to or from an LLM.

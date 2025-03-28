@@ -21,7 +21,7 @@ var (
 	DefaultModel     = ModelClaude37Sonnet
 	DefaultEndpoint  = "https://api.anthropic.com/v1/messages"
 	DefaultVersion   = "2023-06-01"
-	DefaultMaxTokens = 4096
+	DefaultMaxTokens = 8192
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -205,6 +205,12 @@ func processContentBlocks(blocks []*ContentBlock) ([]*llm.ToolCall, []*llm.Conte
 				Name:  block.Name,
 				Input: block.Input,
 			})
+		case "thinking":
+			contentBlocks = append(contentBlocks, &llm.Content{
+				Type:      llm.ContentTypeThinking,
+				Thinking:  block.Thinking,
+				Signature: block.Signature,
+			})
 		}
 	}
 
@@ -368,6 +374,12 @@ func convertMessages(messages []*llm.Message) ([]*Message, error) {
 					ToolUseID: c.ToolUseID,
 					Content:   c.Text, // oddly we have to rename to "content"
 				})
+			case llm.ContentTypeThinking:
+				blocks = append(blocks, &ContentBlock{
+					Type:      "thinking",
+					Thinking:  c.Thinking,
+					Signature: c.Signature,
+				})
 			default:
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type)
 			}
@@ -457,14 +469,26 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 }
 
 func reorderMessageContent(messages []*Message) {
-	// Any assistant message with two content blocks where the first is a tool use
-	// and the second is a text block should be reordered so the text block is first.
-	// See https://github.com/anthropics/claude-code/issues/473#issuecomment-2738842746
+	// For each assistant message, reorder content blocks so that all tool_use blocks
+	// appear after non-tool-use blocks, while preserving relative ordering within each group
 	for _, msg := range messages {
-		if msg.Role == "assistant" && len(msg.Content) == 2 {
-			if msg.Content[0].Type == "tool_use" && msg.Content[1].Type == "text" {
-				msg.Content = []*ContentBlock{msg.Content[1], msg.Content[0]}
+		if msg.Role != "assistant" || len(msg.Content) < 2 {
+			continue
+		}
+		// Separate blocks into tool use and non-tool use
+		var toolUseBlocks []*ContentBlock
+		var otherBlocks []*ContentBlock
+		for _, block := range msg.Content {
+			if block.Type == "tool_use" {
+				toolUseBlocks = append(toolUseBlocks, block)
+			} else {
+				otherBlocks = append(otherBlocks, block)
 			}
+		}
+		// If we found any tool use blocks and other blocks, reorder them
+		if len(toolUseBlocks) > 0 && len(otherBlocks) > 0 {
+			// Combine slices with non-tool-use blocks first
+			msg.Content = append(otherBlocks, toolUseBlocks...)
 		}
 	}
 }
@@ -490,6 +514,8 @@ type ContentBlockAccumulator struct {
 	Text        string
 	PartialJSON string
 	ToolUse     *ToolUse
+	Thinking    string
+	Signature   string
 }
 
 type ToolUse struct {
@@ -623,12 +649,16 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 		})
 
 	case llm.EventMessageStop:
-		// noop
+		events = append(events, &llm.Event{
+			Type: llm.EventMessageStop,
+		})
 
 	case llm.EventContentBlockStart:
 		s.contentBlocks[event.Index] = &ContentBlockAccumulator{
-			Type: event.ContentBlock.Type,
-			Text: event.ContentBlock.Text,
+			Type:      event.ContentBlock.Type,
+			Text:      event.ContentBlock.Text,
+			Thinking:  event.ContentBlock.Thinking,
+			Signature: event.ContentBlock.Signature,
 		}
 		if event.ContentBlock.Type == "tool_use" {
 			s.contentBlocks[event.Index].ToolUse = &ToolUse{
@@ -640,10 +670,12 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 			Type:  llm.EventContentBlockStart,
 			Index: event.Index,
 			ContentBlock: &llm.EventContentBlock{
-				ID:   event.ContentBlock.ID,
-				Name: event.ContentBlock.Name,
-				Type: event.ContentBlock.Type,
-				Text: event.ContentBlock.Text,
+				ID:        event.ContentBlock.ID,
+				Name:      event.ContentBlock.Name,
+				Type:      event.ContentBlock.Type,
+				Text:      event.ContentBlock.Text,
+				Thinking:  event.ContentBlock.Thinking,
+				Signature: event.ContentBlock.Signature,
 			},
 		})
 
@@ -653,13 +685,21 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 			block = &ContentBlockAccumulator{Type: event.Delta.Type}
 			s.contentBlocks[event.Index] = block
 		}
-		if s.prefill != "" {
-			event.Delta.Text = s.prefill + event.Delta.Text
-			s.prefill = ""
-		}
-		block.Text += event.Delta.Text
-		if event.Delta.Type == "input_json_delta" {
+		switch event.Delta.Type {
+		case "text_delta":
+			if s.prefill != "" {
+				event.Delta.Text = s.prefill + event.Delta.Text
+				s.prefill = ""
+			}
+			block.Text += event.Delta.Text
+		case "input_json_delta":
 			block.PartialJSON += event.Delta.PartialJSON
+		case "thinking_delta":
+			block.Thinking += event.Delta.Thinking
+		case "signature_delta":
+			block.Signature += event.Delta.Signature
+		default:
+			// fmt.Printf("unhandled delta type: %s %+v\n", event.Delta.Type, event)
 		}
 		if block.Type == "tool_use" && block.ToolUse == nil {
 			block.ToolUse = &ToolUse{}
@@ -671,11 +711,16 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 				Type:        event.Delta.Type,
 				Text:        event.Delta.Text,
 				PartialJSON: event.Delta.PartialJSON,
+				Thinking:    event.Delta.Thinking,
+				Signature:   event.Delta.Signature,
 			},
 		})
 
 	case llm.EventContentBlockStop:
-		// noop
+		events = append(events, &llm.Event{
+			Type:  llm.EventContentBlockStop,
+			Index: event.Index,
+		})
 
 	case llm.EventMessageDelta:
 		s.usage.InputTokens += event.Usage.InputTokens
@@ -700,8 +745,10 @@ func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
 	blocks := make([]*ContentBlock, 0, len(s.contentBlocks))
 	for _, block := range s.contentBlocks {
 		contentBlock := &ContentBlock{
-			Type: block.Type,
-			Text: block.Text,
+			Type:      block.Type,
+			Text:      block.Text,
+			Thinking:  block.Thinking,
+			Signature: block.Signature,
 		}
 		if block.Type == "tool_use" && block.ToolUse != nil {
 			contentBlock.ID = block.ToolUse.ID

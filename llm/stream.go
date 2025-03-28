@@ -46,10 +46,12 @@ type Stream interface {
 
 // EventContentBlock carries the start of a content block in an LLM event.
 type EventContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 // Delta carries a portion of an LLM response.
@@ -60,4 +62,6 @@ type Delta struct {
 	StopReason   string  `json:"stop_reason,omitempty"`
 	StopSequence *string `json:"stop_sequence,omitempty"`
 	PartialJSON  string  `json:"partial_json,omitempty"`
+	Thinking     string  `json:"thinking,omitempty"`
+	Signature    string  `json:"signature,omitempty"`
 }

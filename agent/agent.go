@@ -160,6 +160,7 @@ func New(opts Options) (*Agent, error) {
 		documentRepository:   opts.DocumentRepository,
 		threadRepository:     opts.ThreadRepository,
 		systemPromptTemplate: systemPromptTemplate,
+		modelSettings:        opts.ModelSettings,
 	}
 
 	tools := make([]llm.Tool, len(opts.Tools))
