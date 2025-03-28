@@ -37,6 +37,8 @@ You can also use [GitHub Discussions](https://github.com/diveagents/dive/discuss
 
 We welcome your input! 🙌
 
+Please leave a GitHub star if you're interested in the project!
+
 ## Features
 
 * **Agents**: Chat or assign work to specialized agents
@@ -154,6 +156,22 @@ Run a workflow using the Dive CLI:
 dive run workflow.yaml --vars "topic=history of the internet"
 ```
 
+### Use the Dive CLI
+
+For the moment, you'll need to build the CLI yourself:
+
+```bash
+git clone git@github.com:diveagents/dive.git
+cd dive/cmd/dive
+go install .
+```
+
+Available CLI commands include:
+
+* `dive run /path/to/workflow.yaml`: Run a workflow
+* `dive chat --provider anthropic --model claude-3-7-sonnet-20250219`: Chat with an agent
+* `dive config check /path/to/workflow.yaml`: Validate a Dive configuration
+
 ## LLM Providers
 
 Dive provides a unified interface for working with different LLM providers:
@@ -225,13 +243,14 @@ func (t *WeatherTool) Definition() *llm.ToolDefinition {
 }
 ```
 
-## Contributing
+## Contributors
 
-We welcome contributions to Dive! Whether you're fixing bugs, adding features,
+We're looking for contributors! Whether you're fixing bugs, adding features,
 improving documentation, or spreading the word, your help is appreciated.
 
-At this early stage, we're particularly interested in feedback on the workflow
-system, API design, and any use cases you'd like to see supported.
+<a href="https://github.com/diveagents/dive/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=diveagents/dive" width="100%"/>
+</a>
 
 ## Roadmap
 
