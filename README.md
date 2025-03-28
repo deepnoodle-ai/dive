@@ -1,28 +1,22 @@
-<p align="center">
-  <img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
-  <h1 align="center">
-    <a href="https://github.com/diveagents/dive">Dive - AI Agent Framework</a>
-  </h1>
-</p>
+## Dive
 
-## Introduction
+Dive is a flexible Go framework for building AI agent systems.
 
-Dive is a flexible Go framework for building AI agent systems. Whether you need
-a single specialized agent or a complex workflow of AI tasks, Dive makes it
-easy to accomplish tasks with AI.
+Whether you need a single specialized agent or a complex workflow of AI tasks,
+Dive makes it easy to accomplish tasks with AI.
 
-Dive can be embedded into existing Go applications or run standalone using workflow definitions.
+Dive can be embedded into existing Go applications or run standalone using
+workflow definitions.
 
 ## Project Status
 
 **⚠️ Early Development Stage ⚠️**
 
-Dive is in early development. While much core functionality is in place, the
-project is still evolving rapidly.
+Dive is shaping up nicely, but is still a young project.
 
-- **Not recommended for production use** at this time
-- **Breaking changes will happen** as the API matures
 - **Feedback is highly valued** on concepts, APIs, and usability
+- **Breaking changes will happen** as the API matures
+- **Not yet recommended for production use**
 
 We welcome your input! Please reach out in
 [GitHub Discussions](https://github.com/diveagents/dive/discussions) with
@@ -30,36 +24,33 @@ questions, suggestions, or feedback.
 
 ## Features
 
-* **Workflow-Based Architecture**: Define complex AI tasks as workflows with multiple steps
-* **Flexible Agent System**: Create specialized agents with different roles and capabilities
-* **Declarative Configuration**: Define workflows, agents, and tasks using YAML or programmatically in Go
-* **Multi-Provider Support**: Unified Go interface for multiple LLM providers (Anthropic, OpenAI, Groq)
-* **Tool System**: Extend agent capabilities with tools like web search, document retrieval, and more
-* **Streaming Support**: Stream events for chats and task progress in real-time
-* **Variable Support**: Pass variables into workflows for dynamic execution
+* **Agents**: Chat or assign work to specialized agents
+* **Workflows**: Define multi-step workflows for automation
+* **Declarative Configuration**: Define agents and workflows using YAML
+* **Multiple LLMs**: Switch between Anthropic, OpenAI, Groq, and others
+* **Tools**: Give agents the ability to interact with the world
+* **Streaming**: Stream agent and workflow events for realtime UI updates
+* **CLI**: Run workflows, chat with agents, and more
+* **Scripting**: Embed scripts in workflows for extensibility
+* **Deep Research**: Use multiple agents to perform deep research
 
 ## Quick Start
 
-### Prerequisites
-
-- Go 1.20 or higher
-- API keys for any LLM providers you plan to use (Anthropic, OpenAI, Groq)
-- API keys for any external tools you plan to use (Google Search, Firecrawl, etc.)
-
 ### Environment Setup
 
-Set up your shell environment:
+You will need some environment variables set to use the Dive CLI, both for
+the LLM provider and for any tools that you'd like your agents to use.
 
 ```bash
 # LLM Provider API Keys
-export ANTHROPIC_API_KEY="your-key"
-export OPENAI_API_KEY="your-key"
-export GROQ_API_KEY="your-key"
+export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"
+export GROQ_API_KEY="your-key-here"
 
 # Tool API Keys
-export GOOGLE_SEARCH_API_KEY="your-key"
-export GOOGLE_SEARCH_CX="your-key"
-export FIRECRAWL_API_KEY="your-key"
+export GOOGLE_SEARCH_API_KEY="your-key-here"
+export GOOGLE_SEARCH_CX="your-key-here"
+export FIRECRAWL_API_KEY="your-key-here"
 ```
 
 ### As a Library
@@ -211,36 +202,38 @@ Actions can be extended by registering custom implementations in the environment
 
 Dive provides a unified interface for working with different LLM providers:
 
-* **Anthropic** (Claude 3)
-* **OpenAI** (GPT-4)
-* **Groq** (Llama, DeepSeek)
+* **Anthropic** (Claude Sonnet, Haiku)
+* **OpenAI** (GPT-4, o1, o3)
+* **Groq** (Llama, DeepSeek, Qwen)
 
-Each provider implementation handles API communication, token counting, and streaming:
+Each provider implementation handles API communication, token counting,
+tool calling, and other details.
 
 ```go
-provider := anthropic.New(
-    anthropic.WithModel("claude-3-7-sonnet-20250219"),
-)
+provider := anthropic.New(anthropic.WithModel("claude-3-7-sonnet-20250219"))
 
-provider := openai.New(
-    openai.WithModel("gpt-4"),
-)
+provider := openai.New(openai.WithModel("gpt-4o"))
 
-provider := groq.New(
-    groq.WithModel("deepseek-r1-distill-llama-70b"),
-)
+provider := groq.New(groq.WithModel("deepseek-r1-distill-llama-70b"))
 ```
 
-### Tested Models
+### Verified Models
 
-These are the models that have been tested with Dive:
+These are the models that have been verified to work in Dive:
 
-| Provider  | Model                           |
-| --------- | ------------------------------- |
-| Anthropic | `claude-3-7-sonnet-20250219`    |
-| OpenAI    | `gpt-4`                         |
-| Groq      | `deepseek-r1-distill-llama-70b` |
-| Groq      | `llama-3.3-70b-versatile`       |
+| Provider  | Model                           | Tools Supported |
+| --------- | ------------------------------- | --------------- |
+| Anthropic | `claude-3-7-sonnet-20250219`    | Yes             |
+| Anthropic | `claude-3-5-sonnet-20241022`    | Yes             |
+| Anthropic | `claude-3-5-haiku-20241022`     | Yes             |
+| Groq      | `deepseek-r1-distill-llama-70b` | Yes             |
+| Groq      | `llama-3.3-70b-versatile`       | Yes             |
+| Groq      | `qwen-2.5-32b`                  | Yes             |
+| OpenAI    | `gpt-4o`                        | Yes             |
+| OpenAI    | `gpt-4.5-preview`               | Yes             |
+| OpenAI    | `o1`                            | Yes             |
+| OpenAI    | `o1-mini`                       | No              |
+| OpenAI    | `o3-mini`                       | Yes             |
 
 ### Tool Use
 
@@ -281,18 +274,19 @@ func (t *WeatherTool) Definition() *llm.ToolDefinition {
 We welcome contributions to Dive! Whether you're fixing bugs, adding features,
 improving documentation, or spreading the word, your help is appreciated.
 
-At this early stage, we're particularly interested in feedback on the workflow system,
-API design, and any use cases you'd like to see supported.
+At this early stage, we're particularly interested in feedback on the workflow
+system, API design, and any use cases you'd like to see supported.
 
 ## Roadmap
 
-- Enhanced workflow capabilities
-- More built-in tools
-- Agent memory systems
+- AWS Bedrock support
+- Google Cloud Vertex AI support
+- MCP support
+- Voice interactions
+- Agent memory interface
 - Workflow persistence
-- Integration with popular services (Slack, Google Drive, etc.)
-- Expanded testing coverage
-- CLI improvements
+- Integrations (Slack, Google Drive, etc.)
+- Expanded CLI
 
 ## FAQ
 
@@ -304,9 +298,9 @@ Key differentiators include:
 - Workflow-first approach for complex AI tasks
 - Simple but powerful configuration system
 - Strong streaming support for real-time updates
-- Easy integration with existing Go applications
 - Built-in support for popular LLM providers
 - Flexible tool system for extending capabilities
+- Easy integration with existing Go applications
 
 ### How do I handle LLM rate limits?
 

@@ -1,7 +1,5 @@
 package llm
 
-import "context"
-
 // EventType represents the type of streaming event
 type EventType string
 
@@ -29,19 +27,6 @@ type Event struct {
 	Delta        *Delta             `json:"delta,omitempty"`
 	Usage        *Usage             `json:"usage,omitempty"`
 	Response     *Response          `json:"response,omitempty"`
-}
-
-// Stream represents a stream of LLM generation events
-type Stream interface {
-	// Next returns the next event in the stream. Returns nil when the stream is
-	// complete or if an error occurs. Errors can be retrieved via the Err method.
-	Next(ctx context.Context) (*Event, bool)
-
-	// Err returns any error that occurred while reading from the stream
-	Err() error
-
-	// Close closes the stream and releases any associated resources
-	Close() error
 }
 
 // EventContentBlock carries the start of a content block in an LLM event.

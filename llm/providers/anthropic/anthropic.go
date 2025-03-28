@@ -86,7 +86,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 	request.Messages = msgs
 
-	body, err := json.MarshalIndent(request, "", "  ")
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
@@ -397,21 +397,16 @@ func convertMessages(messages []*llm.Message) ([]*Message, error) {
 }
 
 func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
-
 	if model := config.Model; model != "" {
 		req.Model = model
 	} else {
 		req.Model = p.model
 	}
-
 	if maxTokens := config.MaxTokens; maxTokens != nil {
 		req.MaxTokens = maxTokens
 	} else {
 		req.MaxTokens = &p.maxTokens
 	}
-
-	req.Temperature = config.Temperature
-	req.System = config.SystemPrompt
 
 	if config.ReasoningBudget != nil {
 		budget := *config.ReasoningBudget
@@ -465,6 +460,8 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		}
 	}
 
+	req.Temperature = config.Temperature
+	req.System = config.SystemPrompt
 	return nil
 }
 

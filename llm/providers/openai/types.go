@@ -15,18 +15,19 @@ type StreamOptions struct {
 }
 
 type Request struct {
-	Model            string          `json:"model"`
-	Messages         []Message       `json:"messages"`
-	MaxTokens        *int            `json:"max_tokens,omitempty"`
-	Temperature      *float64        `json:"temperature,omitempty"`
-	Stream           bool            `json:"stream,omitempty"`
-	StreamOptions    *StreamOptions  `json:"stream_options,omitempty"`
-	Tools            []Tool          `json:"tools,omitempty"`
-	ToolChoice       string          `json:"tool_choice,omitempty"`
-	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`  // -2 to 2, default 0
-	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"` // -2 to 2, default 0
-	ReasoningEffort  ReasoningEffort `json:"reasoning_effort,omitempty"`  // o1 and o3-mini models only
-	ReasoningFormat  string          `json:"reasoning_format,omitempty"`  // groq only?
+	Model               string          `json:"model"`
+	Messages            []Message       `json:"messages"`
+	MaxTokens           *int            `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int            `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64        `json:"temperature,omitempty"`
+	Stream              bool            `json:"stream,omitempty"`
+	StreamOptions       *StreamOptions  `json:"stream_options,omitempty"`
+	Tools               []Tool          `json:"tools,omitempty"`
+	ToolChoice          string          `json:"tool_choice,omitempty"`
+	PresencePenalty     *float64        `json:"presence_penalty,omitempty"`  // -2 to 2, default 0
+	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"` // -2 to 2, default 0
+	ReasoningEffort     ReasoningEffort `json:"reasoning_effort,omitempty"`  // o1 and o3-mini models only
+	ReasoningFormat     string          `json:"reasoning_format,omitempty"`  // groq only?
 }
 
 type Message struct {
