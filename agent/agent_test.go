@@ -23,7 +23,7 @@ func TestAgent(t *testing.T) {
 		Goal:         "Test the agent",
 		Backstory:    "You are a testing agent",
 		IsSupervisor: false,
-		LLM:          anthropic.New(),
+		Model:        anthropic.New(),
 	})
 	require.NoError(t, err)
 
@@ -39,18 +39,21 @@ func TestAgentChat(t *testing.T) {
 	defer cancel()
 
 	agent, err := New(Options{
-		Name: "Testing Agent",
-		LLM:  anthropic.New(),
+		Name:  "Testing Agent",
+		Model: anthropic.New(),
 	})
 	require.NoError(t, err)
 
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Hello, world!"))
+	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Hello, world!"))
 	require.NoError(t, err)
 
-	text := strings.ToLower(response.Message().Text())
+	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
+	require.NoError(t, err)
+
+	text := strings.ToLower(response.Message.Text())
 	matches := strings.Contains(text, "hello") || strings.Contains(text, "hi")
 	require.True(t, matches)
 
@@ -85,18 +88,22 @@ func TestAgentChatWithTools(t *testing.T) {
 	}
 
 	agent, err := New(Options{
-		LLM:   anthropic.New(),
+		Model: anthropic.New(),
 		Tools: []llm.Tool{llm.NewTool(&echoToolDef, echoFunc)},
 	})
 	require.NoError(t, err)
 
 	err = agent.Start(ctx)
 	require.NoError(t, err)
+	defer agent.Stop(ctx)
 
-	response, err := agent.Generate(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
+	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
 	require.NoError(t, err)
 
-	text := strings.ToLower(response.Message().Text())
+	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
+	require.NoError(t, err)
+
+	text := strings.ToLower(response.Message.Text())
 	require.Contains(t, text, "echo")
 	require.Equal(t, "hello world", echoInput)
 
@@ -113,7 +120,7 @@ func TestAgentTask(t *testing.T) {
 	agent, err := New(Options{
 		Name:      "Poet",
 		Backstory: "You're a poet that loves writing limericks",
-		LLM:       anthropic.New(),
+		Model:     anthropic.New(),
 		Logger:    logger,
 	})
 	require.NoError(t, err)
@@ -149,12 +156,12 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 		Goal:         "Help research a topic.",
 		Backstory:    "You are a research assistant.",
 		IsSupervisor: false,
-		LLM:          anthropic.New(),
+		Model:        anthropic.New(),
 	})
 	require.NoError(t, err)
 
 	// Get the chat system prompt
-	chatSystemPrompt, err := agent.getSystemPromptForMode("chat")
+	chatSystemPrompt, err := agent.buildSystemPrompt("chat")
 	require.NoError(t, err)
 
 	// Verify that the chat system prompt doesn't contain the status section
@@ -166,7 +173,7 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 	require.NotContains(t, chatSystemPrompt, "error")
 
 	// Get the task system prompt
-	taskSystemPrompt, err := agent.getSystemPromptForMode("task")
+	taskSystemPrompt, err := agent.buildSystemPrompt("task")
 	require.NoError(t, err)
 
 	// Verify that the task system prompt contains the status section

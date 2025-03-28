@@ -30,6 +30,9 @@ type ContentBlock struct {
 	Content      string          `json:"content,omitempty"`
 	Input        json.RawMessage `json:"input,omitempty"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+	Thinking     string          `json:"thinking,omitempty"`  // "Let me analyze this step by step..."
+	Signature    string          `json:"signature,omitempty"` // in "thinking" blocks
+	Data         string          `json:"data,omitempty"`      // in "redacted_thinking" blocks
 }
 
 func (c *ContentBlock) SetCacheControl(cacheControlType string) {
@@ -42,15 +45,39 @@ type ImageSource struct {
 	Data      string `json:"data"`
 }
 
+//	"thinking": {
+//		"type": "enabled",
+//		"budget_tokens": 16000
+//	},
+type Thinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
 type Request struct {
-	Model       string          `json:"model"`
-	Messages    []*Message      `json:"messages"`
-	MaxTokens   *int            `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	System      string          `json:"system,omitempty"`
-	Stream      bool            `json:"stream,omitempty"`
-	Tools       []*Tool         `json:"tools,omitempty"`
-	ToolChoice  *llm.ToolChoice `json:"tool_choice,omitempty"`
+	Model       string      `json:"model"`
+	Messages    []*Message  `json:"messages"`
+	MaxTokens   *int        `json:"max_tokens,omitempty"`
+	Temperature *float64    `json:"temperature,omitempty"`
+	System      string      `json:"system,omitempty"`
+	Stream      bool        `json:"stream,omitempty"`
+	Tools       []*Tool     `json:"tools,omitempty"`
+	ToolChoice  *ToolChoice `json:"tool_choice,omitempty"`
+	Thinking    *Thinking   `json:"thinking,omitempty"`
+}
+
+type ToolChoiceType string
+
+const (
+	ToolChoiceTypeAuto ToolChoiceType = "auto"
+	ToolChoiceTypeAny  ToolChoiceType = "any"
+	ToolChoiceTypeTool ToolChoiceType = "tool"
+)
+
+type ToolChoice struct {
+	Type               ToolChoiceType `json:"type"`
+	Name               string         `json:"name,omitempty"`
+	DisableParallelUse bool           `json:"disable_parallel_tool_use,omitempty"`
 }
 
 type Tool struct {
@@ -103,4 +130,6 @@ type StreamDelta struct {
 	StopReason   string  `json:"stop_reason,omitempty"`
 	StopSequence *string `json:"stop_sequence,omitempty"`
 	PartialJSON  string  `json:"partial_json,omitempty"`
+	Thinking     string  `json:"thinking,omitempty"`
+	Signature    string  `json:"signature,omitempty"`
 }

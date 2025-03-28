@@ -1,68 +1,76 @@
-<p align="center">
-  <img src="https://getstingrai-public.s3.us-east-1.amazonaws.com/static/images/dive/dive-logo-2025-02-25-1024.jpg" width="200" height="200">
-  <h1 align="center">
-    <a href="https://github.com/diveagents/dive">Dive - AI Agent Framework</a>
-  </h1>
-</p>
+<div align="center">
 
-## Introduction
+<h1>Dive - The AI Toolkit for Go</h1>
 
-Dive is a flexible Go framework for building AI agent systems. Whether you need
-a single specialized agent or a complex workflow of AI tasks, Dive makes it
-easy to accomplish tasks with AI.
+<a href="https://www.anthropic.com"><img alt="Claude" src="https://img.shields.io/badge/Claude-6B48FF.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://www.openai.com"><img alt="GPT-4" src="https://img.shields.io/badge/GPT--4o%20|%20o1%20|%20o3-10A37F.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://www.groq.com"><img alt="Groq Models" src="https://img.shields.io/badge/DeepSeek%20|%20Llama%20|%20Qwen-FF6B4A.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://www.getstingrai.com"><img alt="Made by Stingrai" src="https://img.shields.io/badge/MADE%20BY%20Stingrai-000000.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://discord.gg/yrcuURWk"><img alt="Join our Discord community" src="https://img.shields.io/badge/Join%20our%20community-5865F2.svg?style=for-the-badge&logo=discord&labelColor=000000&logoWidth=20"></a>
 
-Dive can be embedded into existing Go applications or run standalone using workflow definitions.
+</div>
+
+Dive is an AI toolkit for Go. Use it to create specialized AI agents, automate
+workflows, quickly integrate with the leading LLMs.
+
+- 🚀 Embed it in your Go apps
+- 🤖 Create specialized agents
+- 🪄 Define multi-step workflows
+- 🛠️ Arm agents with tools
+- ⚡ Stream responses in real-time
+
+Dive includes a CLI and a polished set of Go APIs for easy integration into your
+existing Go applications. It takes a batteries-included approach, but also has
+the modularity you need to customize it to your needs.
 
 ## Project Status
 
-**⚠️ Early Development Stage ⚠️**
+Dive is shaping up nicely, but is still a young project.
 
-Dive is in early development. While much core functionality is in place, the
-project is still evolving rapidly.
-
-- **Not recommended for production use** at this time
-- **Breaking changes will happen** as the API matures
 - **Feedback is highly valued** on concepts, APIs, and usability
+- **Some breaking changes will happen** as the API matures
+- **Not yet recommended for production use**
 
-We welcome your input! Please reach out in
-[GitHub Discussions](https://github.com/diveagents/dive/discussions) with
-questions, suggestions, or feedback.
+Please reach out in
+[GitHub Discussions](https://github.com/diveagents/dive/discussions) with questions, suggestions, or feedback.
+
+Also, join our [Discord community](https://discord.gg/yrcuURWk) to chat with the team and other users.
+
+We welcome your input! 
 
 ## Features
 
-* **Workflow-Based Architecture**: Define complex AI tasks as workflows with multiple steps
-* **Flexible Agent System**: Create specialized agents with different roles and capabilities
-* **Declarative Configuration**: Define workflows, agents, and tasks using YAML or programmatically in Go
-* **Multi-Provider Support**: Unified Go interface for multiple LLM providers (Anthropic, OpenAI, Groq)
-* **Tool System**: Extend agent capabilities with tools like web search, document retrieval, and more
-* **Streaming Support**: Stream events for chats and task progress in real-time
-* **Variable Support**: Pass variables into workflows for dynamic execution
+* **Agents**: Chat or assign work to specialized agents
+* **Workflows**: Define multi-step workflows for automation
+* **Declarative Configuration**: Define agents and workflows using YAML
+* **Multiple LLMs**: Switch between Anthropic, OpenAI, Groq, and others
+* **Extended Reasoning**: Configure the effort level for Agent reasoning
+* **Tools**: Give agents the ability to interact with the world
+* **Streaming**: Stream agent and workflow events for realtime UI updates
+* **CLI**: Run workflows, chat with agents, and more
+* **Scripting**: Embed scripts in workflows for extensibility
+* **Deep Research**: Use multiple agents to perform deep research
 
 ## Quick Start
 
-### Prerequisites
-
-- Go 1.20 or higher
-- API keys for any LLM providers you plan to use (Anthropic, OpenAI, Groq)
-- API keys for any external tools you plan to use (Google Search, Firecrawl, etc.)
-
 ### Environment Setup
 
-Set up your shell environment:
+You will need some environment variables set to use the Dive CLI, both for
+the LLM provider and for any tools that you'd like your agents to use.
 
 ```bash
 # LLM Provider API Keys
-export ANTHROPIC_API_KEY="your-key"
-export OPENAI_API_KEY="your-key"
-export GROQ_API_KEY="your-key"
+export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"
+export GROQ_API_KEY="your-key-here"
 
 # Tool API Keys
-export GOOGLE_SEARCH_API_KEY="your-key"
-export GOOGLE_SEARCH_CX="your-key"
-export FIRECRAWL_API_KEY="your-key"
+export GOOGLE_SEARCH_API_KEY="your-key-here"
+export GOOGLE_SEARCH_CX="your-key-here"
+export FIRECRAWL_API_KEY="your-key-here"
 ```
 
-### As a Library
+### Using the Library
 
 To get started with Dive as a library, use go get:
 
@@ -70,35 +78,42 @@ To get started with Dive as a library, use go get:
 go get github.com/diveagents/dive
 ```
 
-Here's a simple example of creating a chat agent:
+Here's a quick example of creating a chat agent:
 
 ```go
-provider := anthropic.New()
-googleClient, _ := google.New()
-
 agent, err := agent.New(agent.Options{
-    Name:         "Assistant",
-    Backstory:    "You are a helpful assistant.",
-    LLM:          provider,
-    Tools:        []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
-    CacheControl: "ephemeral",
+    Name:      "Research Assistant",
+    Backstory: "You are an enthusiastic and deeply curious researcher.",
+    Model:     anthropic.New(),
+    AutoStart: true,
 })
 
-if err := agent.Start(ctx); err != nil {
-    log.Fatal(err)
-}
-defer agent.Stop(ctx)
-
 // Start chatting with the agent
-iterator, err := agent.Stream(ctx, llm.NewUserMessage("Hello!"))
-// Handle the streaming response...
+iterator, err := agent.Chat(ctx, llm.NewSingleUserMessage("Hello there!"))
+// Iterate over the events...
+```
+
+Or use the Dive LLM interface directly:
+
+```go
+model := anthropic.New()
+response, err := model.Generate(
+  context.Background(),
+  llm.NewSingleUserMessage("Hello there!"),
+  llm.WithMaxTokens(2048),
+  llm.WithTemperature(0.7),
+)
+if err != nil {
+  log.Fatal(err)
+}
+fmt.Println(response.Message.Text())
 ```
 
 ### Using Workflows
 
-Dive supports defining complex AI tasks as workflows. Here's an example workflow in YAML:
+Workflows offer a declarative approach to automating multi-step processes:
 
-```yaml
+```yaml title="workflow.yaml"
 Name: Research
 Description: Research a Topic
 
@@ -108,8 +123,8 @@ Config:
     DefaultModel: claude-3-7-sonnet-20250219
 
 Agents:
-  - Name: Research Analyst
-    Description: Research Analyst who specializes in topic research
+  - Name: Research Assistant
+    Backstory: You are an enthusiastic and deeply curious researcher.
     Tools:
       - Google.Search
       - Firecrawl.Scrape
@@ -120,129 +135,64 @@ Workflows:
       - Name: topic
         Type: string
     Steps:
-      - Name: Historical Research
-        Agent: Research Analyst
+      - Name: Research the Topic
+        Agent: Research Assistant
         Prompt:
-          Text: "Research the history of: ${inputs.topic}"
-          Output: A historical overview
-          OutputFormat: Markdown
-        Store: historical_research
+          Text: "Research the following topic: ${inputs.topic}"
+          Output: A three paragraph overview of the topic
+          OutputFormat: markdown
+        Store: overview
+      - Name: Save the Research
+        Action: Document.Write
+        Parameters:
+          Path: research/${inputs.topic}.md
+          Content: ${overview}
 ```
 
-Run a workflow using the simple runner:
+Run a workflow using the Dive CLI:
 
 ```bash
 dive run workflow.yaml --vars "topic=history of the internet"
 ```
 
-### Scripting and Variables
-
-Each workflow execution maintains its own scripting environment with variables that can be read and written. Variables can be used in:
-
-1. **Step Prompts**: Use `${variable_name}` syntax to include variables in prompts
-2. **Action Parameters**: Parameters can reference variables using the same syntax
-3. **Conditional Logic**: Use variables in edge conditions to control workflow branching
-
-Variables can come from several sources:
-
-- **Workflow Inputs**: Available as `${inputs.name}`
-- **Step Outputs**: Use `Store: variable_name` to save a step's output
-- **Action Results**: Some actions may store their results in variables
-
-Example of variable usage:
-
-```yaml
-Steps:
-  - Name: Get Current Time
-    Action: Time.Now
-    Store: current_time
-
-  - Name: Analyze Files
-    Agent: Analyst
-    Prompt:
-      Text: |
-        The current time is: ${current_time}
-        
-        Respond with the current wall clock time.
-```
-
-### Available Actions
-
-Actions are pre-defined operations that can be used in workflow steps. The core actions include:
-
-#### Document.Write
-Writes content to a document in the document repository.
-
-Parameters:
-- `Path`: Target path for the document
-- `Content`: Content to write (supports variable templates)
-
-Example:
-```yaml
-- Name: Save Report
-  Action: Document.Write
-  Parameters:
-    Path: reports/analysis.md
-    Content: ${analysis_result}
-```
-
-#### Document.Read
-Reads content from a document in the document repository.
-
-Parameters:
-- `Path`: Path of the document to read
-
-Example:
-```yaml
-- Name: Load Previous Report
-  Action: Document.Read
-  Parameters:
-    Path: reports/previous.md
-  Store: previous_report
-```
-
-Actions can be extended by registering custom implementations in the environment. Each action:
-- Has a unique name
-- Accepts a set of parameters
-- Can read from and write to the execution's variable environment
-- May interact with external systems or resources
-
-## LLM Integration
+## LLM Providers
 
 Dive provides a unified interface for working with different LLM providers:
 
-* **Anthropic** (Claude 3)
-* **OpenAI** (GPT-4)
-* **Groq** (Llama, DeepSeek)
+* **Anthropic** (Claude Sonnet, Haiku)
+* **OpenAI** (GPT-4, o1, o3)
+* **Groq** (Llama, DeepSeek, Qwen)
 
-Each provider implementation handles API communication, token counting, and streaming:
+Each provider implementation handles API communication, token counting,
+tool calling, and other details.
 
 ```go
-provider := anthropic.New(
-    anthropic.WithModel("claude-3-7-sonnet-20250219"),
-)
+provider := anthropic.New(anthropic.WithModel("claude-3-7-sonnet-20250219"))
 
-provider := openai.New(
-    openai.WithModel("gpt-4"),
-)
+provider := openai.New(openai.WithModel("gpt-4o"))
 
-provider := groq.New(
-    groq.WithModel("deepseek-r1-distill-llama-70b"),
-)
+provider := groq.New(groq.WithModel("deepseek-r1-distill-llama-70b"))
 ```
 
-### Tested Models
+### Verified Models
 
-These are the models that have been tested with Dive:
+These are the models that have been verified to work in Dive:
 
-| Provider  | Model                           |
-| --------- | ------------------------------- |
-| Anthropic | `claude-3-7-sonnet-20250219`    |
-| OpenAI    | `gpt-4`                         |
-| Groq      | `deepseek-r1-distill-llama-70b` |
-| Groq      | `llama-3.3-70b-versatile`       |
+| Provider  | Model                           | Tools Supported |
+| --------- | ------------------------------- | --------------- |
+| Anthropic | `claude-3-7-sonnet-20250219`    | Yes             |
+| Anthropic | `claude-3-5-sonnet-20241022`    | Yes             |
+| Anthropic | `claude-3-5-haiku-20241022`     | Yes             |
+| Groq      | `deepseek-r1-distill-llama-70b` | Yes             |
+| Groq      | `llama-3.3-70b-versatile`       | Yes             |
+| Groq      | `qwen-2.5-32b`                  | Yes             |
+| OpenAI    | `gpt-4o`                        | Yes             |
+| OpenAI    | `gpt-4.5-preview`               | Yes             |
+| OpenAI    | `o1`                            | Yes             |
+| OpenAI    | `o1-mini`                       | No              |
+| OpenAI    | `o3-mini`                       | Yes             |
 
-### Tool Use
+## Tool Use
 
 Tools extend agent capabilities. Dive includes these built-in tools:
 
@@ -281,62 +231,37 @@ func (t *WeatherTool) Definition() *llm.ToolDefinition {
 We welcome contributions to Dive! Whether you're fixing bugs, adding features,
 improving documentation, or spreading the word, your help is appreciated.
 
-At this early stage, we're particularly interested in feedback on the workflow system,
-API design, and any use cases you'd like to see supported.
+At this early stage, we're particularly interested in feedback on the workflow
+system, API design, and any use cases you'd like to see supported.
 
 ## Roadmap
 
-- Enhanced workflow capabilities
-- More built-in tools
-- Agent memory systems
+- Docs site
+- MCP support
+- Server mode
+- Documented approach for RAG
+- AWS Bedrock support
+- Google Cloud Vertex AI support
+- Workflow actions with Risor scripts
+- Voice interactions
+- Agent memory interface
 - Workflow persistence
-- Integration with popular services (Slack, Google Drive, etc.)
-- Expanded testing coverage
-- CLI improvements
+- Integrations (Slack, Google Drive, etc.)
+- Expanded CLI
+- Ollama support
+- Hugging Face support
 
 ## FAQ
 
-### What makes Dive different from other agent frameworks?
+### Can I use Dive with Ollama?
 
-Dive is meant to be a highly practical, batteries-included agent framework.
-Key differentiators include:
-
-- Workflow-first approach for complex AI tasks
-- Simple but powerful configuration system
-- Strong streaming support for real-time updates
-- Easy integration with existing Go applications
-- Built-in support for popular LLM providers
-- Flexible tool system for extending capabilities
-
-### How do I handle LLM rate limits?
-
-Dive includes built-in retry mechanisms for handling rate limits. This includes
-exponential backoff and jitter.
-
-### Should I use Dive in production?
-
-No, Dive is not recommended for production use at this time. As mentioned in the
-Project Status section, Dive is in its early development stages and breaking
-changes will occur as the API matures.
-
-We recommend using it for experimentation, prototyping, and providing feedback
-during this early stage. Once the project reaches a more stable state, we'll
-provide clear guidance on production readiness.
-
-### How can I extend or customize Dive?
-
-Dive is designed to be highly extensible:
-
-- Create custom tools by implementing the `llm.Tool` interface
-- Add support for new LLM providers by implementing the `llm.Provider` interface
-- Create custom workflow actions
-- Define your own agent behaviors
+Soon!
 
 ### Is there a hosted or managed version available?
 
 Not at this time. Dive is provided as an open-source framework that you can
 self-host and integrate into your own applications.
 
-## Who is Behind Dive?
+### Who is Behind Dive?
 
 Dive is developed by [Stingrai](https://www.getstingrai.com).

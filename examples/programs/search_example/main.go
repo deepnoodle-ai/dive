@@ -39,7 +39,7 @@ func main() {
 	researcher, err := agent.New(agent.Options{
 		Name:   "Research Assistant",
 		Goal:   "Use Google to research assigned topics",
-		LLM:    anthropic.New(),
+		Model:  anthropic.New(),
 		Logger: slogger.New(slogger.LevelFromString(logLevel)),
 		Tools:  []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
 	})

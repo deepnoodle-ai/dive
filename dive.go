@@ -64,7 +64,8 @@ type Prompt struct {
 	OutputFormat OutputFormat     `json:"output_format,omitempty"`
 }
 
-// Agent represents an AI agent that can perform tasks
+// Agent represents an intelligent agent that can work on tasks and respond to
+// chat messages.
 type Agent interface {
 
 	// Name of the Agent
@@ -77,19 +78,16 @@ type Agent interface {
 	IsSupervisor() bool
 
 	// SetEnvironment sets the runtime Environment to which this Agent belongs
-	SetEnvironment(env Environment)
+	SetEnvironment(env Environment) error
 
-	// Generate gives the agent messages to respond to
-	Generate(ctx context.Context, messages []*llm.Message, opts ...GenerateOption) (*llm.Response, error)
-
-	// Stream gives the agent messages to respond to and returns a stream of events
-	Stream(ctx context.Context, messages []*llm.Message, opts ...GenerateOption) (Stream, error)
+	// Chat gives the agent messages to respond to and returns a stream of events
+	Chat(ctx context.Context, messages []*llm.Message, opts ...ChatOption) (EventStream, error)
 
 	// Work gives the agent a task to complete
-	Work(ctx context.Context, task Task) (Stream, error)
+	Work(ctx context.Context, task Task) (EventStream, error)
 }
 
-// RunnableAgent is an AI Agent that can be started and stopped
+// RunnableAgent is an agent that must be started and stopped.
 type RunnableAgent interface {
 	Agent
 
@@ -103,8 +101,8 @@ type RunnableAgent interface {
 	IsRunning() bool
 }
 
-// Environment is a container for running Agents and Workflow Executions.
-// Interactivity between Agents is scoped to a single Environment.
+// Environment is a container for running Agents and Workflows. Interactivity
+// between Agents is generally scoped to a single Environment.
 type Environment interface {
 
 	// Name of the Environment
@@ -126,17 +124,17 @@ type Environment interface {
 	ThreadRepository() ThreadRepository
 }
 
-// GenerateOptions contains configuration for LLM generations.
-type GenerateOptions struct {
+// ChatOptions contains configuration for LLM generations.
+type ChatOptions struct {
 	ThreadID string
 	UserID   string
 }
 
-// GenerateOption is a type signature for defining new LLM generation options.
-type GenerateOption func(*GenerateOptions)
+// ChatOption is a type signature for defining new LLM generation options.
+type ChatOption func(*ChatOptions)
 
 // Apply invokes any supplied options. Used internally in Dive.
-func (o *GenerateOptions) Apply(opts []GenerateOption) {
+func (o *ChatOptions) Apply(opts []ChatOption) {
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -144,21 +142,21 @@ func (o *GenerateOptions) Apply(opts []GenerateOption) {
 
 // WithThreadID associates the given conversation thread ID with a generation.
 // This appends the new messages to any previous messages belonging to this thread.
-func WithThreadID(threadID string) GenerateOption {
-	return func(opts *GenerateOptions) {
+func WithThreadID(threadID string) ChatOption {
+	return func(opts *ChatOptions) {
 		opts.ThreadID = threadID
 	}
 }
 
 // WithUserID associates the given user ID with a generation, indicating what
 // person is the speaker in the conversation.
-func WithUserID(userID string) GenerateOption {
-	return func(opts *GenerateOptions) {
+func WithUserID(userID string) ChatOption {
+	return func(opts *ChatOptions) {
 		opts.UserID = userID
 	}
 }
 
-// Task represents a unit of work that can be executed by an Agent
+// Task represents a unit of work that can be executed by an Agent.
 type Task interface {
 	// Name returns the name of the task
 	Name() string
@@ -170,7 +168,7 @@ type Task interface {
 	Prompt() (*Prompt, error)
 }
 
-// TaskResult holds the output of a completed task
+// TaskResult holds the output of a completed task.
 type TaskResult struct {
 	// Task is the task that was executed
 	Task Task

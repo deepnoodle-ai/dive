@@ -7,9 +7,10 @@ import (
 	"github.com/diveagents/dive/llm"
 )
 
+// taskState holds the state of a task.
 type taskState struct {
 	Task               dive.Task
-	Publisher          dive.Publisher
+	Publisher          dive.EventPublisher
 	Status             dive.TaskStatus
 	Inputs             map[string]any
 	Iterations         int
@@ -25,13 +26,13 @@ func (s *taskState) TrackResponse(response *llm.Response, updatedMessages []*llm
 	// contain thinking, primary output, then status. We could concatenate
 	// the new output with prior output, but for now it seems like it's better
 	// not to, and to request a full final response instead.
-	taskResponse := ParseStructuredResponse(response.Message().Text())
+	taskResponse := ParseStructuredResponse(response.Message.Text())
 	// s.Output = taskResponse.Text
 	// s.Reasoning = taskResponse.Thinking
 	// s.StatusDescription = taskResponse.StatusDescription
 	s.Messages = updatedMessages
 	s.StructuredResponse = taskResponse
-	s.trackUsage(response.Usage())
+	s.trackUsage(&response.Usage)
 
 	// For now, if the status description is empty, let's assume it is complete.
 	// We may need to make this configurable in the future.
@@ -42,7 +43,7 @@ func (s *taskState) TrackResponse(response *llm.Response, updatedMessages []*llm
 	}
 }
 
-func (s *taskState) trackUsage(usage llm.Usage) {
+func (s *taskState) trackUsage(usage *llm.Usage) {
 	s.Usage.InputTokens += usage.InputTokens
 	s.Usage.OutputTokens += usage.OutputTokens
 	s.Usage.CacheCreationInputTokens += usage.CacheCreationInputTokens

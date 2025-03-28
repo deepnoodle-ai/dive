@@ -4,6 +4,35 @@ import (
 	"context"
 )
 
+// ToolOutput contains the output of a tool call
+type ToolOutput struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Output string `json:"output"`
+}
+
+// ToolError is an error that occurred during a tool call
+type ToolError struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
+type Schema struct {
+	Type       string                     `json:"type"`
+	Properties map[string]*SchemaProperty `json:"properties"`
+	Required   []string                   `json:"required,omitempty"`
+}
+
+type SchemaProperty struct {
+	Type        string                     `json:"type"`
+	Description string                     `json:"description"`
+	Enum        []string                   `json:"enum,omitempty"`
+	Items       *SchemaProperty            `json:"items,omitempty"`
+	Required    []string                   `json:"required,omitempty"`
+	Properties  map[string]*SchemaProperty `json:"properties,omitempty"`
+}
+
 type ToolDefinition struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -16,11 +45,13 @@ func (t *ToolDefinition) ParametersCount() int {
 
 type ToolFunc func(ctx context.Context, input string) (string, error)
 
-type ToolChoice struct {
-	Type                   string `json:"type"`
-	Name                   string `json:"name,omitempty"`
-	DisableParallelToolUse bool   `json:"disable_parallel_tool_use,omitempty"`
-}
+type ToolChoice string
+
+const (
+	ToolChoiceAuto     ToolChoice = "auto"
+	ToolChoiceNone     ToolChoice = "none"
+	ToolChoiceRequired ToolChoice = "required"
+)
 
 type Tool interface {
 	Definition() *ToolDefinition

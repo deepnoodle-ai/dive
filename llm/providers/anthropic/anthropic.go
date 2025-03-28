@@ -21,7 +21,7 @@ var (
 	DefaultModel     = ModelClaude37Sonnet
 	DefaultEndpoint  = "https://api.anthropic.com/v1/messages"
 	DefaultVersion   = "2023-06-01"
-	DefaultMaxTokens = 4096
+	DefaultMaxTokens = 8192
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -60,96 +60,61 @@ func (p *Provider) Name() string {
 
 func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
+	config.Apply(opts...)
 
-	if hooks := config.Hooks[llm.BeforeGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.BeforeGenerate,
-			Messages: messages,
-		})
-	}
-
-	model := config.Model
-	if model == "" {
-		model = p.model
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
-	}
-
-	messageCount := len(messages)
-	if messageCount == 0 {
-		return nil, fmt.Errorf("no messages provided")
-	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
-		}
+	var request Request
+	if err := p.applyRequestConfig(&request, config); err != nil {
+		return nil, err
 	}
 
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-
-	if config.CacheControl != "" && len(msgs) > 0 {
+	if config.Caching == nil || *config.Caching {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.SetCacheControl(config.CacheControl)
+			lastContent.SetCacheControl(string(llm.CacheControlEphemeral))
 		}
 	}
-
 	if config.Prefill != "" {
 		msgs = append(msgs, &Message{
 			Role:    "assistant",
 			Content: []*ContentBlock{{Type: "text", Text: config.Prefill}},
 		})
 	}
+	request.Messages = msgs
 
-	reqBody := Request{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   maxTokens,
-		Temperature: config.Temperature,
-		System:      config.SystemPrompt,
-	}
-
-	if len(config.Tools) > 0 {
-		var tools []*Tool
-		for _, tool := range config.Tools {
-			toolDef := tool.Definition()
-			tools = append(tools, &Tool{
-				Name:        toolDef.Name,
-				Description: toolDef.Description,
-				InputSchema: toolDef.Parameters,
-			})
-		}
-		reqBody.Tools = tools
-	}
-	if config.ToolChoice.Type != "" {
-		reqBody.ToolChoice = &config.ToolChoice
-	}
-
-	jsonBody, err := json.MarshalIndent(reqBody, "", "  ")
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     body,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
 	var result Response
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
 		req.Header.Set("x-api-key", p.apiKey)
 		req.Header.Set("anthropic-version", p.version)
 		req.Header.Set("content-type", "application/json")
-		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		req.Header.Add("anthropic-beta", "prompt-caching-2024-07-31")
+		if config.IsFeatureEnabled(FeatureOutput128k) {
+			req.Header.Add("anthropic-beta", FeatureOutput128k)
+		}
 		resp, err := p.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("error making request: %w", err)
@@ -171,48 +136,54 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 		return nil
 	}, retry.WithMaxRetries(6))
+
 	if err != nil {
 		return nil, err
 	}
-
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
 	if config.Prefill != "" {
 		addPrefill(result.Content, config.Prefill, config.PrefillClosingTag)
 	}
-
 	toolCalls, contentBlocks := processContentBlocks(result.Content)
 
-	response := llm.NewResponse(llm.ResponseOptions{
+	response := &llm.Response{
 		ID:         result.ID,
-		Model:      model,
+		Model:      result.Model,
 		Role:       llm.Assistant,
 		StopReason: result.StopReason,
+		ToolCalls:  toolCalls,
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
 		Usage: llm.Usage{
 			InputTokens:              result.Usage.InputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
 		},
-		ToolCalls: toolCalls,
-		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
-	})
+	}
 
-	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.AfterGenerate,
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.AfterGenerate,
+		Request: &llm.Request{
 			Messages: messages,
-			Response: response,
-		})
+			Config:   config,
+			Body:     body,
+		},
+		Response: response,
+	}); err != nil {
+		return nil, err
 	}
 
 	return response, nil
 }
 
 // processContentBlocks converts Anthropic content blocks to LLM content blocks and tool calls
-func processContentBlocks(blocks []*ContentBlock) ([]llm.ToolCall, []*llm.Content) {
-	var toolCalls []llm.ToolCall
+func processContentBlocks(blocks []*ContentBlock) ([]*llm.ToolCall, []*llm.Content) {
+	var toolCalls []*llm.ToolCall
 	var contentBlocks []*llm.Content
 
 	for _, block := range blocks {
@@ -223,7 +194,7 @@ func processContentBlocks(blocks []*ContentBlock) ([]llm.ToolCall, []*llm.Conten
 				Text: block.Text,
 			})
 		case "tool_use":
-			toolCalls = append(toolCalls, llm.ToolCall{
+			toolCalls = append(toolCalls, &llm.ToolCall{
 				ID:    block.ID, // e.g. "toolu_01A09q90qw90lq917835lq9"
 				Name:  block.Name,
 				Input: string(block.Input),
@@ -233,6 +204,12 @@ func processContentBlocks(blocks []*ContentBlock) ([]llm.ToolCall, []*llm.Conten
 				ID:    block.ID,
 				Name:  block.Name,
 				Input: block.Input,
+			})
+		case "thinking":
+			contentBlocks = append(contentBlocks, &llm.Content{
+				Type:      llm.ContentTypeThinking,
+				Thinking:  block.Thinking,
+				Signature: block.Signature,
 			})
 		}
 	}
@@ -258,83 +235,52 @@ func addPrefill(blocks []*ContentBlock, prefill, closingTag string) error {
 
 func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
+	config.Apply(opts...)
 
-	model := config.Model
-	if model == "" {
-		model = p.model
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
-	}
-
-	messageCount := len(messages)
-	if messageCount == 0 {
-		return nil, fmt.Errorf("no messages provided")
-	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
-		}
+	var request Request
+	if err := p.applyRequestConfig(&request, config); err != nil {
+		return nil, err
 	}
 
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-
-	if config.CacheControl != "" && len(msgs) > 0 {
+	if config.Caching == nil || *config.Caching {
 		lastMessage := msgs[len(msgs)-1]
 		if len(lastMessage.Content) > 0 {
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.SetCacheControl(config.CacheControl)
+			lastContent.SetCacheControl(string(llm.CacheControlEphemeral))
 		}
 	}
-
 	if config.Prefill != "" {
 		msgs = append(msgs, &Message{
 			Role:    "assistant",
 			Content: []*ContentBlock{{Type: "text", Text: config.Prefill}},
 		})
 	}
+	request.Messages = msgs
+	request.Stream = true
 
-	reqBody := Request{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   maxTokens,
-		Temperature: config.Temperature,
-		System:      config.SystemPrompt,
-		Stream:      true,
-	}
-
-	if len(config.Tools) > 0 {
-		var tools []*Tool
-		for _, tool := range config.Tools {
-			toolDef := tool.Definition()
-			tools = append(tools, &Tool{
-				Name:        toolDef.Name,
-				Description: toolDef.Description,
-				InputSchema: toolDef.Parameters,
-			})
-		}
-		reqBody.Tools = tools
-	}
-	if config.ToolChoice.Type != "" {
-		reqBody.ToolChoice = &config.ToolChoice
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     body,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
 	var stream *StreamIterator
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
@@ -342,7 +288,10 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		req.Header.Set("anthropic-version", p.version)
 		req.Header.Set("content-type", "application/json")
 		req.Header.Set("accept", "text/event-stream")
-		req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		req.Header.Add("anthropic-beta", "prompt-caching-2024-07-31")
+		if config.IsFeatureEnabled(FeatureOutput128k) {
+			req.Header.Add("anthropic-beta", FeatureOutput128k)
+		}
 
 		resp, err := p.client.Do(req)
 		if err != nil {
@@ -382,6 +331,17 @@ func (p *Provider) SupportsStreaming() bool {
 }
 
 func convertMessages(messages []*llm.Message) ([]*Message, error) {
+	// Validations
+	messageCount := len(messages)
+	if messageCount == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+	for i, message := range messages {
+		if len(message.Content) == 0 {
+			return nil, fmt.Errorf("empty message detected (index %d)", i)
+		}
+	}
+	// Convert generic messages to Anthropic messages
 	var result []*Message
 	for _, msg := range messages {
 		var blocks []*ContentBlock
@@ -414,6 +374,12 @@ func convertMessages(messages []*llm.Message) ([]*Message, error) {
 					ToolUseID: c.ToolUseID,
 					Content:   c.Text, // oddly we have to rename to "content"
 				})
+			case llm.ContentTypeThinking:
+				blocks = append(blocks, &ContentBlock{
+					Type:      "thinking",
+					Thinking:  c.Thinking,
+					Signature: c.Signature,
+				})
 			default:
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type)
 			}
@@ -424,20 +390,102 @@ func convertMessages(messages []*llm.Message) ([]*Message, error) {
 		})
 	}
 
+	// Workaround for Anthropic bug
 	reorderMessageContent(result)
 
 	return result, nil
 }
 
+func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
+	if model := config.Model; model != "" {
+		req.Model = model
+	} else {
+		req.Model = p.model
+	}
+	if maxTokens := config.MaxTokens; maxTokens != nil {
+		req.MaxTokens = maxTokens
+	} else {
+		req.MaxTokens = &p.maxTokens
+	}
+
+	if config.ReasoningBudget != nil {
+		budget := *config.ReasoningBudget
+		if budget < 1024 {
+			return fmt.Errorf("reasoning budget must be at least 1024")
+		}
+		req.Thinking = &Thinking{
+			Type:         "enabled",
+			BudgetTokens: budget,
+		}
+	}
+
+	// Compatibility with the OpenAI "effort" parameter
+	if config.ReasoningEffort != "" {
+		if req.Thinking != nil {
+			return fmt.Errorf("cannot set both reasoning budget and effort")
+		}
+		req.Thinking = &Thinking{Type: "enabled"}
+		switch config.ReasoningEffort {
+		case "low":
+			req.Thinking.BudgetTokens = 1024
+		case "medium":
+			req.Thinking.BudgetTokens = 4096
+		case "high":
+			req.Thinking.BudgetTokens = 16384
+		default:
+			return fmt.Errorf("invalid reasoning effort: %s", config.ReasoningEffort)
+		}
+	}
+
+	if len(config.Tools) > 0 {
+		var tools []*Tool
+		for _, tool := range config.Tools {
+			toolDef := tool.Definition()
+			tools = append(tools, &Tool{
+				Name:        toolDef.Name,
+				Description: toolDef.Description,
+				InputSchema: toolDef.Parameters,
+			})
+		}
+		req.Tools = tools
+	}
+
+	if config.ToolChoice != "" {
+		req.ToolChoice = &ToolChoice{
+			Type: ToolChoiceType(config.ToolChoice),
+			Name: config.ToolChoiceName,
+		}
+		if config.ParallelToolCalls != nil && !*config.ParallelToolCalls {
+			req.ToolChoice.DisableParallelUse = true
+		}
+	}
+
+	req.Temperature = config.Temperature
+	req.System = config.SystemPrompt
+	return nil
+}
+
 func reorderMessageContent(messages []*Message) {
-	// Any assistant message with two content blocks where the first is a tool use
-	// and the second is a text block should be reordered so the text block is first.
-	// See https://github.com/anthropics/claude-code/issues/473#issuecomment-2738842746
+	// For each assistant message, reorder content blocks so that all tool_use blocks
+	// appear after non-tool-use blocks, while preserving relative ordering within each group
 	for _, msg := range messages {
-		if msg.Role == "assistant" && len(msg.Content) == 2 {
-			if msg.Content[0].Type == "tool_use" && msg.Content[1].Type == "text" {
-				msg.Content = []*ContentBlock{msg.Content[1], msg.Content[0]}
+		if msg.Role != "assistant" || len(msg.Content) < 2 {
+			continue
+		}
+		// Separate blocks into tool use and non-tool use
+		var toolUseBlocks []*ContentBlock
+		var otherBlocks []*ContentBlock
+		for _, block := range msg.Content {
+			if block.Type == "tool_use" {
+				toolUseBlocks = append(toolUseBlocks, block)
+			} else {
+				otherBlocks = append(otherBlocks, block)
 			}
+		}
+		// If we found any tool use blocks and other blocks, reorder them
+		if len(toolUseBlocks) > 0 && len(otherBlocks) > 0 {
+			// Combine slices with non-tool-use blocks first
+			msg.Content = append(otherBlocks, toolUseBlocks...)
 		}
 	}
 }
@@ -463,6 +511,8 @@ type ContentBlockAccumulator struct {
 	Text        string
 	PartialJSON string
 	ToolUse     *ToolUse
+	Thinking    string
+	Signature   string
 }
 
 type ToolUse struct {
@@ -596,12 +646,16 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 		})
 
 	case llm.EventMessageStop:
-		// noop
+		events = append(events, &llm.Event{
+			Type: llm.EventMessageStop,
+		})
 
 	case llm.EventContentBlockStart:
 		s.contentBlocks[event.Index] = &ContentBlockAccumulator{
-			Type: event.ContentBlock.Type,
-			Text: event.ContentBlock.Text,
+			Type:      event.ContentBlock.Type,
+			Text:      event.ContentBlock.Text,
+			Thinking:  event.ContentBlock.Thinking,
+			Signature: event.ContentBlock.Signature,
 		}
 		if event.ContentBlock.Type == "tool_use" {
 			s.contentBlocks[event.Index].ToolUse = &ToolUse{
@@ -612,11 +666,13 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 		events = append(events, &llm.Event{
 			Type:  llm.EventContentBlockStart,
 			Index: event.Index,
-			ContentBlock: &llm.ContentBlock{
-				ID:   event.ContentBlock.ID,
-				Name: event.ContentBlock.Name,
-				Type: event.ContentBlock.Type,
-				Text: event.ContentBlock.Text,
+			ContentBlock: &llm.EventContentBlock{
+				ID:        event.ContentBlock.ID,
+				Name:      event.ContentBlock.Name,
+				Type:      event.ContentBlock.Type,
+				Text:      event.ContentBlock.Text,
+				Thinking:  event.ContentBlock.Thinking,
+				Signature: event.ContentBlock.Signature,
 			},
 		})
 
@@ -626,13 +682,21 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 			block = &ContentBlockAccumulator{Type: event.Delta.Type}
 			s.contentBlocks[event.Index] = block
 		}
-		if s.prefill != "" {
-			event.Delta.Text = s.prefill + event.Delta.Text
-			s.prefill = ""
-		}
-		block.Text += event.Delta.Text
-		if event.Delta.Type == "input_json_delta" {
+		switch event.Delta.Type {
+		case "text_delta":
+			if s.prefill != "" {
+				event.Delta.Text = s.prefill + event.Delta.Text
+				s.prefill = ""
+			}
+			block.Text += event.Delta.Text
+		case "input_json_delta":
 			block.PartialJSON += event.Delta.PartialJSON
+		case "thinking_delta":
+			block.Thinking += event.Delta.Thinking
+		case "signature_delta":
+			block.Signature += event.Delta.Signature
+		default:
+			// fmt.Printf("unhandled delta type: %s %+v\n", event.Delta.Type, event)
 		}
 		if block.Type == "tool_use" && block.ToolUse == nil {
 			block.ToolUse = &ToolUse{}
@@ -644,11 +708,16 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 				Type:        event.Delta.Type,
 				Text:        event.Delta.Text,
 				PartialJSON: event.Delta.PartialJSON,
+				Thinking:    event.Delta.Thinking,
+				Signature:   event.Delta.Signature,
 			},
 		})
 
 	case llm.EventContentBlockStop:
-		// noop
+		events = append(events, &llm.Event{
+			Type:  llm.EventContentBlockStop,
+			Index: event.Index,
+		})
 
 	case llm.EventMessageDelta:
 		s.usage.InputTokens += event.Usage.InputTokens
@@ -673,8 +742,10 @@ func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
 	blocks := make([]*ContentBlock, 0, len(s.contentBlocks))
 	for _, block := range s.contentBlocks {
 		contentBlock := &ContentBlock{
-			Type: block.Type,
-			Text: block.Text,
+			Type:      block.Type,
+			Text:      block.Text,
+			Thinking:  block.Thinking,
+			Signature: block.Signature,
 		}
 		if block.Type == "tool_use" && block.ToolUse != nil {
 			contentBlock.ID = block.ToolUse.ID
@@ -685,20 +756,23 @@ func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
 	}
 	toolCalls, contentBlocks := processContentBlocks(blocks)
 
-	return llm.NewResponse(llm.ResponseOptions{
+	return &llm.Response{
 		ID:         s.responseID,
 		Model:      s.responseModel,
 		Role:       llm.Assistant,
 		StopReason: stopReason,
 		ToolCalls:  toolCalls,
-		Message:    llm.NewMessage(llm.Assistant, contentBlocks),
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
 		Usage: llm.Usage{
 			InputTokens:              s.usage.InputTokens,
 			OutputTokens:             s.usage.OutputTokens,
 			CacheCreationInputTokens: s.usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     s.usage.CacheReadInputTokens,
 		},
-	})
+	}
 }
 
 func (s *StreamIterator) Close() error {

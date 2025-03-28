@@ -9,10 +9,8 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
+	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/groq"
-	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
@@ -21,24 +19,20 @@ import (
 
 func main() {
 	var verbose bool
-	var providerName string
+	var providerName, modelName string
 	flag.StringVar(&providerName, "provider", "anthropic", "provider to use")
+	flag.StringVar(&modelName, "model", "", "model to use")
 	flag.BoolVar(&verbose, "verbose", false, "verbose output")
 	flag.Parse()
 
 	ctx := context.Background()
 
-	var provider llm.LLM
-	switch providerName {
-	case "anthropic":
-		provider = anthropic.New()
-	case "openai":
-		provider = openai.New()
-	case "groq":
-		provider = groq.New(groq.WithModel("deepseek-r1-distill-llama-70b"))
+	model, err := config.GetModel(providerName, modelName)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	var theTools []llm.Tool
+	var tools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
 		app, err := firecrawl.NewFirecrawlApp(key, "")
@@ -48,7 +42,7 @@ func main() {
 		scraper := toolkit.NewFirecrawlScrapeTool(toolkit.FirecrawlScrapeToolOptions{
 			App: app,
 		})
-		theTools = append(theTools, scraper)
+		tools = append(tools, scraper)
 
 		log.Println("firecrawl enabled")
 	}
@@ -58,22 +52,21 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, toolkit.NewGoogleSearch(googleClient))
+		tools = append(tools, toolkit.NewGoogleSearch(googleClient))
 
 		log.Println("google search enabled")
 	}
 
+	logger := slogger.New(slogger.LevelDebug)
+
 	a, err := agent.New(agent.Options{
-		Name:         "Research Assistant",
-		CacheControl: "ephemeral",
-		LLM:          provider,
-		Tools:        theTools,
-		Logger:       slogger.New(slogger.LevelDebug),
+		Name:      "Research Assistant",
+		Model:     model,
+		Tools:     tools,
+		Logger:    logger,
+		AutoStart: true,
 	})
 	if err != nil {
-		log.Fatal(err)
-	}
-	if err := a.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
 	defer a.Stop(ctx)

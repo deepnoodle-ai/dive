@@ -52,7 +52,6 @@ type Agent struct {
 	Backstory          string         `yaml:"Backstory,omitempty" json:"Backstory,omitempty"`
 	Provider           string         `yaml:"Provider,omitempty" json:"Provider,omitempty"`
 	Model              string         `yaml:"Model,omitempty" json:"Model,omitempty"`
-	AcceptedEvents     []string       `yaml:"AcceptedEvents,omitempty" json:"AcceptedEvents,omitempty"`
 	CacheControl       string         `yaml:"CacheControl,omitempty" json:"CacheControl,omitempty"`
 	Tools              []string       `yaml:"Tools,omitempty" json:"Tools,omitempty"`
 	IsSupervisor       bool           `yaml:"IsSupervisor,omitempty" json:"IsSupervisor,omitempty"`

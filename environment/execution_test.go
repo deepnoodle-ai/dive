@@ -15,7 +15,7 @@ import (
 
 // mockAgent implements dive.Agent for testing
 type mockAgent struct {
-	workFn func(ctx context.Context, task dive.Task) (dive.Stream, error)
+	workFn func(ctx context.Context, task dive.Task) (dive.EventStream, error)
 }
 
 func (m *mockAgent) Name() string {
@@ -34,28 +34,26 @@ func (m *mockAgent) IsSupervisor() bool {
 	return false
 }
 
-func (m *mockAgent) SetEnvironment(env dive.Environment) {}
-
-func (m *mockAgent) Generate(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (*llm.Response, error) {
-	return &llm.Response{}, nil
+func (m *mockAgent) SetEnvironment(env dive.Environment) error {
+	return nil
 }
 
-func (m *mockAgent) Stream(ctx context.Context, messages []*llm.Message, opts ...dive.GenerateOption) (dive.Stream, error) {
-	return dive.NewStream(), nil
+func (m *mockAgent) Chat(ctx context.Context, messages []*llm.Message, opts ...dive.ChatOption) (dive.EventStream, error) {
+	return m.workFn(ctx, nil)
 }
 
-func (m *mockAgent) Work(ctx context.Context, task dive.Task) (dive.Stream, error) {
+func (m *mockAgent) Work(ctx context.Context, task dive.Task) (dive.EventStream, error) {
 	if m.workFn != nil {
 		return m.workFn(ctx, task)
 	}
-	stream := dive.NewStream()
-	pub := stream.Publisher()
-	pub.Send(ctx, &dive.Event{
+	stream, publisher := dive.NewEventStream()
+	publisher.Send(ctx, &dive.Event{
 		Type: "task.completed",
 		Payload: &dive.TaskResult{
 			Content: "test output",
 		},
 	})
+	publisher.Close()
 	return stream, nil
 }
 
@@ -203,7 +201,7 @@ func TestExecutionWithError(t *testing.T) {
 	require.NoError(t, err)
 
 	mockAgent := &mockAgent{
-		workFn: func(ctx context.Context, task dive.Task) (dive.Stream, error) {
+		workFn: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
 			return nil, fmt.Errorf("simulated error")
 		},
 	}
@@ -299,12 +297,12 @@ func TestExecutionContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 
 	mockAgent := &mockAgent{
-		workFn: func(ctx context.Context, task dive.Task) (dive.Stream, error) {
-			stream := dive.NewStream()
+		workFn: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
+			stream, publisher := dive.NewEventStream()
 			go func() {
+				defer publisher.Close()
 				time.Sleep(100 * time.Millisecond)
-				pub := stream.Publisher()
-				pub.Send(ctx, &dive.Event{
+				publisher.Send(ctx, &dive.Event{
 					Type: "task.completed",
 					Payload: &dive.TaskResult{
 						Content: "completed",

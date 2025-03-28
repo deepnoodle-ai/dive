@@ -18,10 +18,9 @@ func TestNewEnvironment(t *testing.T) {
 
 	a := agent.NewMockAgent(agent.MockAgentOptions{
 		Name: "Poet Laureate",
-		Work: func(ctx context.Context, task dive.Task) (dive.Stream, error) {
+		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
 			tasks = append(tasks, task)
-			stream := dive.NewStream()
-			publisher := stream.Publisher()
+			stream, publisher := dive.NewEventStream()
 			defer publisher.Close()
 			var content string
 			if task.Name() == "Write a Poem" {
@@ -103,10 +102,9 @@ func TestEnvironmentWithMultipleAgents(t *testing.T) {
 
 	agent1 := agent.NewMockAgent(agent.MockAgentOptions{
 		Name: "Writer",
-		Work: func(ctx context.Context, task dive.Task) (dive.Stream, error) {
-			stream := dive.NewStream()
+		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
+			stream, publisher := dive.NewEventStream()
 			go func() {
-				publisher := stream.Publisher()
 				defer publisher.Close()
 				publisher.Send(ctx, &dive.Event{
 					Type:    "task.result",
@@ -119,10 +117,9 @@ func TestEnvironmentWithMultipleAgents(t *testing.T) {
 
 	agent2 := agent.NewMockAgent(agent.MockAgentOptions{
 		Name: "Editor",
-		Work: func(ctx context.Context, task dive.Task) (dive.Stream, error) {
-			stream := dive.NewStream()
+		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
+			stream, publisher := dive.NewEventStream()
 			go func() {
-				publisher := stream.Publisher()
 				defer publisher.Close()
 				publisher.Send(ctx, &dive.Event{
 					Type:    "task.result",
@@ -191,10 +188,9 @@ func TestExecutionStats(t *testing.T) {
 
 	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
 		Name: "StatsAgent",
-		Work: func(ctx context.Context, task dive.Task) (dive.Stream, error) {
-			stream := dive.NewStream()
+		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
+			stream, publisher := dive.NewEventStream()
 			go func() {
-				publisher := stream.Publisher()
 				defer publisher.Close()
 				publisher.Send(ctx, &dive.Event{
 					Type:    "task.result",
@@ -253,10 +249,9 @@ func TestExecutionCancellation(t *testing.T) {
 
 	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
 		Name: "SlowAgent",
-		Work: func(ctx context.Context, task dive.Task) (dive.Stream, error) {
-			stream := dive.NewStream()
+		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
+			stream, publisher := dive.NewEventStream()
 			go func() {
-				publisher := stream.Publisher()
 				defer publisher.Close()
 
 				select {

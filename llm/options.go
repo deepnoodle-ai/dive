@@ -1,35 +1,79 @@
 package llm
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/diveagents/dive/slogger"
 )
 
-const CacheControlEphemeral = "ephemeral"
+// CacheControl is used to control how the LLM caches responses.
+type CacheControl string
 
-// Option is a function that configures LLM calls.
+const (
+	CacheControlEphemeral CacheControl = "ephemeral"
+)
+
+func (c CacheControl) String() string {
+	return string(c)
+}
+
+// Option is a function that is used to adjust LLM configuration.
 type Option func(*Config)
 
+// Config is used to configure LLM calls. Not all providers support all options.
+// If a provider doesn't support a given option, it will be ignored.
 type Config struct {
-	Model             string
-	SystemPrompt      string
-	CacheControl      string
-	Endpoint          string
-	APIKey            string
-	Prefill           string
-	PrefillClosingTag string
-	MaxTokens         *int
-	Temperature       *float64
-	PresencePenalty   *float64
-	FrequencyPenalty  *float64
-	ReasoningFormat   string
-	ReasoningEffort   string
-	Tools             []Tool
-	ToolChoice        ToolChoice
-	Hooks             Hooks
-	Client            *http.Client
-	Logger            slogger.Logger
+	Model             string         `json:"model,omitempty"`
+	SystemPrompt      string         `json:"system_prompt,omitempty"`
+	Caching           *bool          `json:"caching,omitempty"`
+	Endpoint          string         `json:"endpoint,omitempty"`
+	APIKey            string         `json:"api_key,omitempty"`
+	Prefill           string         `json:"prefill,omitempty"`
+	PrefillClosingTag string         `json:"prefill_closing_tag,omitempty"`
+	MaxTokens         *int           `json:"max_tokens,omitempty"`
+	Temperature       *float64       `json:"temperature,omitempty"`
+	PresencePenalty   *float64       `json:"presence_penalty,omitempty"`
+	FrequencyPenalty  *float64       `json:"frequency_penalty,omitempty"`
+	ReasoningBudget   *int           `json:"reasoning_budget,omitempty"`
+	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
+	Tools             []Tool         `json:"tools,omitempty"`
+	ToolChoice        ToolChoice     `json:"tool_choice,omitempty"`
+	ToolChoiceName    string         `json:"tool_choice_name,omitempty"`
+	ParallelToolCalls *bool          `json:"parallel_tool_calls,omitempty"`
+	Features          []string       `json:"features,omitempty"`
+	Hooks             Hooks          `json:"-"`
+	Client            *http.Client   `json:"-"`
+	Logger            slogger.Logger `json:"-"`
+}
+
+// Apply applies the given options to the config.
+func (c *Config) Apply(opts ...Option) {
+	for _, opt := range opts {
+		opt(c)
+	}
+}
+
+// FireHooks fires the configured hooks for the matching hook type.
+func (c *Config) FireHooks(ctx context.Context, hookCtx *HookContext) error {
+	for _, hook := range c.Hooks {
+		if hook.Type == hookCtx.Type {
+			if err := hook.Func(ctx, hookCtx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// IsFeatureEnabled returns true if the feature is enabled.
+func (c *Config) IsFeatureEnabled(feature string) bool {
+	for _, f := range c.Features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
 }
 
 // WithModel sets the LLM model for the generation.
@@ -95,20 +139,34 @@ func WithToolChoice(toolChoice ToolChoice) Option {
 	}
 }
 
-// WithCacheControl sets the cache control for the interaction.
-func WithCacheControl(cacheControl string) Option {
+// WithToolChoiceName sets the tool choice name for the interaction.
+func WithToolChoiceName(toolChoiceName string) Option {
 	return func(config *Config) {
-		config.CacheControl = cacheControl
+		config.ToolChoiceName = toolChoiceName
 	}
 }
 
-// WithHook adds a hook for the specified event type
-func WithHook(hookType HookType, hook Hook) Option {
+// WithParallelToolCalls sets whether to allow parallel tool calls.
+func WithParallelToolCalls(parallelToolCalls bool) Option {
 	return func(config *Config) {
-		if config.Hooks == nil {
-			config.Hooks = make(Hooks)
-		}
-		config.Hooks[hookType] = hook
+		config.ParallelToolCalls = &parallelToolCalls
+	}
+}
+
+// WithCaching sets the caching for the interaction.
+func WithCaching(caching bool) Option {
+	return func(config *Config) {
+		config.Caching = &caching
+	}
+}
+
+// WithHook adds a callback for the specified hook type
+func WithHook(hookType HookType, hookFunc HookFunc) Option {
+	return func(config *Config) {
+		config.Hooks = append(config.Hooks, Hook{
+			Type: hookType,
+			Func: hookFunc,
+		})
 	}
 }
 
@@ -148,10 +206,10 @@ func WithFrequencyPenalty(frequencyPenalty float64) Option {
 	}
 }
 
-// WithReasoningFormat sets the reasoning format for the interaction.
-func WithReasoningFormat(reasoningFormat string) Option {
+// WithReasoningBudget sets the reasoning budget for the interaction.
+func WithReasoningBudget(reasoningBudget int) Option {
 	return func(config *Config) {
-		config.ReasoningFormat = reasoningFormat
+		config.ReasoningBudget = &reasoningBudget
 	}
 }
 
@@ -159,5 +217,12 @@ func WithReasoningFormat(reasoningFormat string) Option {
 func WithReasoningEffort(reasoningEffort string) Option {
 	return func(config *Config) {
 		config.ReasoningEffort = reasoningEffort
+	}
+}
+
+// WithFeatures sets the features for the interaction.
+func WithFeatures(features ...string) Option {
+	return func(config *Config) {
+		config.Features = append(config.Features, features...)
 	}
 }

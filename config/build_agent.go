@@ -7,9 +7,6 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/groq"
-	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/slogger"
 )
 
@@ -27,36 +24,14 @@ func buildAgent(
 		}
 	}
 
-	model := agentDef.Model
-	if model == "" {
-		model = config.LLM.DefaultModel
+	modelName := agentDef.Model
+	if modelName == "" {
+		modelName = config.LLM.DefaultModel
 	}
 
-	var llmProvider llm.LLM
-	switch providerName {
-	case "anthropic":
-		opts := []anthropic.Option{}
-		if model != "" {
-			opts = append(opts, anthropic.WithModel(model))
-		}
-		llmProvider = anthropic.New(opts...)
-
-	case "openai":
-		opts := []openai.Option{}
-		if model != "" {
-			opts = append(opts, openai.WithModel(model))
-		}
-		llmProvider = openai.New(opts...)
-
-	case "groq":
-		opts := []groq.Option{}
-		if model != "" {
-			opts = append(opts, groq.WithModel(model))
-		}
-		llmProvider = groq.New(opts...)
-
-	default:
-		return nil, fmt.Errorf("unsupported provider: %q", providerName)
+	model, err := GetModel(providerName, modelName)
+	if err != nil {
+		return nil, fmt.Errorf("error getting model: %w", err)
 	}
 
 	var agentTools []llm.Tool
@@ -77,6 +52,15 @@ func buildAgent(
 		}
 	}
 
+	var taskTimeout time.Duration
+	if agentDef.TaskTimeout != "" {
+		var err error
+		taskTimeout, err = time.ParseDuration(agentDef.TaskTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid task timeout: %w", err)
+		}
+	}
+
 	cacheControl := agentDef.CacheControl
 	if cacheControl == "" {
 		cacheControl = config.LLM.CacheControl
@@ -88,11 +72,10 @@ func buildAgent(
 		Backstory:          agentDef.Backstory,
 		IsSupervisor:       agentDef.IsSupervisor,
 		Subordinates:       agentDef.Subordinates,
-		AcceptedEvents:     agentDef.AcceptedEvents,
-		LLM:                llmProvider,
+		Model:              model,
 		Tools:              agentTools,
 		ChatTimeout:        chatTimeout,
-		CacheControl:       cacheControl,
+		TaskTimeout:        taskTimeout,
 		Logger:             logger,
 		ToolIterationLimit: agentDef.ToolIterationLimit,
 	})

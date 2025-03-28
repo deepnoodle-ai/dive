@@ -17,11 +17,39 @@ import (
 	"github.com/diveagents/dive/retry"
 )
 
+// SystemPromptBehavior describes how the system prompt should be handled for a
+// given model.
+type SystemPromptBehavior string
+
+const (
+	// SystemPromptBehaviorOmit instructs the provider to omit the system prompt
+	// from the request.
+	SystemPromptBehaviorOmit SystemPromptBehavior = "omit"
+
+	// SystemPromptBehaviorUser instructs the provider to add a user message with
+	// the system prompt to the beginning of the request.
+	SystemPromptBehaviorUser SystemPromptBehavior = "user"
+)
+
+// ToolBehavior describes how tools should be handled for a given model.
+type ToolBehavior string
+
+const (
+	ToolBehaviorOmit  ToolBehavior = "omit"
+	ToolBehaviorError ToolBehavior = "error"
+)
+
 var (
-	DefaultModel            = "gpt-4o"
-	DefaultMessagesEndpoint = "https://api.openai.com/v1/chat/completions"
-	DefaultMaxTokens        = 4096
-	DefaultSystemRole       = "developer"
+	DefaultModel              = "gpt-4o"
+	DefaultMessagesEndpoint   = "https://api.openai.com/v1/chat/completions"
+	DefaultMaxTokens          = 4096
+	DefaultSystemRole         = "developer"
+	ModelSystemPromptBehavior = map[string]SystemPromptBehavior{
+		"o1-mini": SystemPromptBehaviorOmit,
+	}
+	ModelToolBehavior = map[string]ToolBehavior{
+		"o1-mini": ToolBehaviorOmit,
+	}
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -61,93 +89,43 @@ func (p *Provider) Name() string {
 
 func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
+	config.Apply(opts...)
 
-	if hooks := config.Hooks[llm.BeforeGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.BeforeGenerate,
-			Messages: messages,
-		})
-	}
-
-	model := config.Model
-	if model == "" {
-		model = p.model
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
-	}
-
-	messageCount := len(messages)
-	if messageCount == 0 {
-		return nil, fmt.Errorf("no messages provided")
-	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
-		}
+	var request Request
+	if err := p.applyRequestConfig(&request, config); err != nil {
+		return nil, err
 	}
 
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-
-	var tools []Tool
-	for _, tool := range config.Tools {
-		tools = append(tools, Tool{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        tool.Definition().Name,
-				Description: tool.Definition().Description,
-				Parameters:  tool.Definition().Parameters,
-			},
-		})
-	}
-
-	var toolChoice string
-	if config.ToolChoice.Type != "" {
-		toolChoice = config.ToolChoice.Type
-	} else if len(tools) > 0 {
-		toolChoice = "auto"
-	}
-
 	if config.Prefill != "" {
 		msgs = append(msgs, Message{Role: "assistant", Content: config.Prefill})
 	}
 
-	reqBody := Request{
-		Model:            model,
-		Messages:         msgs,
-		MaxTokens:        maxTokens,
-		Temperature:      config.Temperature,
-		Tools:            tools,
-		ToolChoice:       toolChoice,
-		PresencePenalty:  config.PresencePenalty,
-		FrequencyPenalty: config.FrequencyPenalty,
-		ReasoningFormat:  config.ReasoningFormat,
-		ReasoningEffort:  ReasoningEffort(config.ReasoningEffort),
-	}
+	request.Messages = msgs
+	addSystemPrompt(&request, p.GetSystemPrompt(config), p.systemRole)
 
-	if systemPrompt := p.GetSystemPrompt(config); systemPrompt != "" {
-		reqBody.Messages = append([]Message{{
-			Role:    p.systemRole,
-			Content: systemPrompt,
-		}}, reqBody.Messages...)
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     body,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
 	var result Response
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
@@ -174,20 +152,20 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 		return nil
 	}, retry.WithMaxRetries(6))
+
 	if err != nil {
 		return nil, err
 	}
-
 	if len(result.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from openai api")
 	}
 	choice := result.Choices[0]
 
-	var toolCalls []llm.ToolCall
+	var toolCalls []*llm.ToolCall
 	var contentBlocks []*llm.Content
 	if len(choice.Message.ToolCalls) > 0 {
 		for _, toolCall := range choice.Message.ToolCalls {
-			toolCalls = append(toolCalls, llm.ToolCall{
+			toolCalls = append(toolCalls, &llm.ToolCall{
 				ID:    toolCall.ID,
 				Name:  toolCall.Function.Name,
 				Input: toolCall.Function.Arguments,
@@ -218,122 +196,80 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		}
 	}
 
-	response := llm.NewResponse(llm.ResponseOptions{
+	response := &llm.Response{
 		ID:    result.ID,
-		Model: model,
+		Model: p.model,
 		Role:  llm.Assistant,
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
+		ToolCalls: toolCalls,
 		Usage: llm.Usage{
 			InputTokens:  result.Usage.PromptTokens,
 			OutputTokens: result.Usage.CompletionTokens,
 		},
-		Message:   llm.NewMessage(llm.Assistant, contentBlocks),
-		ToolCalls: toolCalls,
-	})
+	}
 
-	if hooks := config.Hooks[llm.AfterGenerate]; hooks != nil {
-		hooks(ctx, &llm.HookContext{
-			Type:     llm.AfterGenerate,
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.AfterGenerate,
+		Request: &llm.Request{
 			Messages: messages,
-			Response: response,
-		})
+			Config:   config,
+			Body:     body,
+		},
+		Response: response,
+	}); err != nil {
+		return nil, err
 	}
 
 	return response, nil
 }
 
-// Stream implements the llm.Stream interface for OpenAI streaming responses.
-// It supports both text responses and tool calls.
-//
-// For tool calls, the implementation accumulates the tool call information
-// as it arrives in chunks and builds a final response when the stream ends.
-// This is necessary because tool calls can be split across multiple chunks.
-//
-// The implementation is based on the OpenAI API documentation:
-// https://platform.openai.com/docs/api-reference/chat/create
 func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
+	// Relevant OpenAI API documentation:
+	// https://platform.openai.com/docs/api-reference/chat/create
+
 	config := &llm.Config{}
-	for _, opt := range opts {
-		opt(config)
-	}
+	config.Apply(opts...)
 
-	model := config.Model
-	if model == "" {
-		model = p.model
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens == nil {
-		maxTokens = &p.maxTokens
-	}
-
-	messageCount := len(messages)
-	if messageCount == 0 {
-		return nil, fmt.Errorf("no messages provided")
-	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
-		}
+	var request Request
+	if err := p.applyRequestConfig(&request, config); err != nil {
+		return nil, err
 	}
 
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-
 	if config.Prefill != "" {
 		msgs = append(msgs, Message{Role: "assistant", Content: config.Prefill})
 	}
 
-	var tools []Tool
-	for _, tool := range config.Tools {
-		tools = append(tools, Tool{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        tool.Definition().Name,
-				Description: tool.Definition().Description,
-				Parameters:  tool.Definition().Parameters,
-			},
-		})
-	}
+	request.Messages = msgs
+	request.Stream = true
+	request.StreamOptions = &StreamOptions{IncludeUsage: true}
+	addSystemPrompt(&request, p.GetSystemPrompt(config), p.systemRole)
 
-	var toolChoice string
-	if config.ToolChoice.Type != "" {
-		toolChoice = config.ToolChoice.Type
-	} else if len(tools) > 0 {
-		toolChoice = "auto"
-	}
-
-	reqBody := Request{
-		Model:            model,
-		Messages:         msgs,
-		MaxTokens:        maxTokens,
-		Temperature:      config.Temperature,
-		Stream:           true,
-		StreamOptions:    &StreamOptions{IncludeUsage: true},
-		Tools:            tools,
-		ToolChoice:       toolChoice,
-		PresencePenalty:  config.PresencePenalty,
-		FrequencyPenalty: config.FrequencyPenalty,
-		ReasoningFormat:  config.ReasoningFormat,
-		ReasoningEffort:  ReasoningEffort(config.ReasoningEffort),
-	}
-
-	if systemPrompt := p.GetSystemPrompt(config); systemPrompt != "" {
-		reqBody.Messages = append([]Message{{
-			Role:    p.systemRole,
-			Content: systemPrompt,
-		}}, reqBody.Messages...)
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
+	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.Request{
+			Messages: messages,
+			Config:   config,
+			Body:     body,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
 	var stream *StreamIterator
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(jsonBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
 		if err != nil {
 			return fmt.Errorf("error creating request: %w", err)
 		}
@@ -390,6 +326,17 @@ func (p *Provider) GetSystemPrompt(c *llm.Config) string {
 }
 
 func convertMessages(messages []*llm.Message) ([]Message, error) {
+
+	messageCount := len(messages)
+	if messageCount == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+	for i, message := range messages {
+		if len(message.Content) == 0 {
+			return nil, fmt.Errorf("empty message detected (index %d)", i)
+		}
+	}
+
 	var result []Message
 	for _, msg := range messages {
 		role := strings.ToLower(string(msg.Role))
@@ -453,6 +400,69 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		}
 	}
 	return result, nil
+}
+
+func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
+	if model := config.Model; model != "" {
+		req.Model = model
+	} else {
+		req.Model = p.model
+	}
+
+	var maxTokens int
+	if ptr := config.MaxTokens; ptr != nil {
+		maxTokens = *ptr
+	} else {
+		maxTokens = p.maxTokens
+	}
+
+	if maxTokens > 0 {
+		switch req.Model {
+		case "o1-mini", "o3-mini", "o1":
+			req.MaxCompletionTokens = &maxTokens
+		default:
+			req.MaxTokens = &maxTokens
+		}
+	}
+
+	var tools []Tool
+	for _, tool := range config.Tools {
+		tools = append(tools, Tool{
+			Type: "function",
+			Function: ToolFunction{
+				Name:        tool.Definition().Name,
+				Description: tool.Definition().Description,
+				Parameters:  tool.Definition().Parameters,
+			},
+		})
+	}
+
+	if behavior, ok := ModelToolBehavior[req.Model]; ok {
+		if behavior == ToolBehaviorError {
+			if len(config.Tools) > 0 {
+				return fmt.Errorf("model %q does not support tools", req.Model)
+			}
+		} else if behavior == ToolBehaviorOmit {
+			tools = []Tool{}
+		}
+	}
+
+	var toolChoice string
+	if len(tools) > 0 {
+		if config.ToolChoice != "" {
+			toolChoice = string(config.ToolChoice)
+		} else if len(tools) > 0 {
+			toolChoice = "auto"
+		}
+	}
+
+	req.Tools = tools
+	req.ToolChoice = toolChoice
+	req.Temperature = config.Temperature
+	req.PresencePenalty = config.PresencePenalty
+	req.FrequencyPenalty = config.FrequencyPenalty
+	req.ReasoningEffort = ReasoningEffort(config.ReasoningEffort)
+	return nil
 }
 
 type StreamIterator struct {
@@ -600,7 +610,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 			events = append(events, &llm.Event{
 				Type:         llm.EventContentBlockStart,
 				Index:        index,
-				ContentBlock: &llm.ContentBlock{Type: "text", Text: ""},
+				ContentBlock: &llm.EventContentBlock{Type: "text", Text: ""},
 			})
 		}
 		// Accumulate the text
@@ -624,7 +634,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				events = append(events, &llm.Event{
 					Type:  llm.EventContentBlockStart,
 					Index: index,
-					ContentBlock: &llm.ContentBlock{
+					ContentBlock: &llm.EventContentBlock{
 						ID:   toolCallDelta.ID,
 						Name: toolCallDelta.Function.Name,
 						Type: "tool_use",
@@ -638,7 +648,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				for _, queuedEvent := range s.eventQueue {
 					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
 						if queuedEvent.ContentBlock == nil {
-							queuedEvent.ContentBlock = &llm.ContentBlock{Type: "tool_use"}
+							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
 						}
 						queuedEvent.ContentBlock.ID = toolCallDelta.ID
 					}
@@ -653,7 +663,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				for _, queuedEvent := range s.eventQueue {
 					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
 						if queuedEvent.ContentBlock == nil {
-							queuedEvent.ContentBlock = &llm.ContentBlock{Type: "tool_use"}
+							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
 						}
 						queuedEvent.ContentBlock.Name = toolCallDelta.Function.Name
 					}
@@ -693,11 +703,11 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 // by the llm package. This is called when the stream ends or a finish reason
 // is received.
 func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
-	var toolCalls []llm.ToolCall
+	var toolCalls []*llm.ToolCall
 	var contentBlocks []*llm.Content
 	for _, toolCall := range s.toolCalls {
 		if toolCall.Name != "" {
-			toolCalls = append(toolCalls, llm.ToolCall{
+			toolCalls = append(toolCalls, &llm.ToolCall{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
 				Input: toolCall.Arguments,
@@ -718,18 +728,21 @@ func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
 			})
 		}
 	}
-	return llm.NewResponse(llm.ResponseOptions{
+	return &llm.Response{
 		ID:         s.responseID,
 		Model:      s.responseModel,
 		Role:       llm.Assistant,
 		StopReason: stopReason,
-		Message:    llm.NewMessage(llm.Assistant, contentBlocks),
-		ToolCalls:  toolCalls,
+		Message: llm.Message{
+			Role:    llm.Assistant,
+			Content: contentBlocks,
+		},
+		ToolCalls: toolCalls,
 		Usage: llm.Usage{
 			InputTokens:  s.usage.PromptTokens,
 			OutputTokens: s.usage.CompletionTokens,
 		},
-	})
+	}
 }
 
 func (s *StreamIterator) Close() error {
@@ -742,7 +755,25 @@ func (s *StreamIterator) Err() error {
 	return s.err
 }
 
-type stopBlock struct {
-	Index int
-	Type  string
+func addSystemPrompt(request *Request, systemPrompt, defaultSystemRole string) {
+	if systemPrompt == "" {
+		return
+	}
+	if behavior, ok := ModelSystemPromptBehavior[request.Model]; ok {
+		switch behavior {
+		case SystemPromptBehaviorOmit:
+			return
+		case SystemPromptBehaviorUser:
+			message := Message{
+				Role:    "user",
+				Content: systemPrompt,
+			}
+			request.Messages = append([]Message{message}, request.Messages...)
+		}
+		return
+	}
+	request.Messages = append([]Message{{
+		Role:    defaultSystemRole,
+		Content: systemPrompt,
+	}}, request.Messages...)
 }

@@ -18,7 +18,7 @@ func TestHelloWorld(t *testing.T) {
 		llm.NewUserMessage("respond with \"hello\""),
 	})
 	require.NoError(t, err)
-	require.Equal(t, "hello", response.Message().Text())
+	require.Equal(t, "hello", response.Message.Text())
 }
 
 func TestHelloWorldStream(t *testing.T) {
@@ -60,14 +60,15 @@ func TestHelloWorldStream(t *testing.T) {
 	require.Equal(t, expectedOutput, normalizedFinalText)
 	require.Equal(t, expectedOutput, normalizedTexts)
 	require.NotNil(t, finalResponse)
-	require.Equal(t, llm.Assistant, finalResponse.Role())
+	require.Equal(t, llm.Assistant, finalResponse.Role)
 
-	require.Len(t, finalResponse.Message().Content, 1)
-	content := finalResponse.Message().Content[0]
+	require.Len(t, finalResponse.Message.Content, 1)
+	content := finalResponse.Message.Content[0]
 	require.Equal(t, llm.ContentTypeText, content.Type)
 	require.Equal(t, finalText, content.Text)
 
-	usage := finalResponse.Usage()
+	usage := finalResponse.Usage
+	require.NotNil(t, usage)
 	require.True(t, usage.OutputTokens > 0)
 	require.True(t, usage.InputTokens > 0)
 }
@@ -103,15 +104,13 @@ func TestToolUse(t *testing.T) {
 
 	response, err := provider.Generate(ctx, messages,
 		llm.WithTools(llm.NewTool(&add, addFunc)),
-		llm.WithToolChoice(llm.ToolChoice{
-			Type: "tool",
-			Name: "add",
-		}),
+		llm.WithToolChoice("tool"),
+		llm.WithToolChoiceName("add"),
 	)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(response.Message().Content))
-	content := response.Message().Content[0]
+	require.Equal(t, 1, len(response.Message.Content))
+	content := response.Message.Content[0]
 	require.Equal(t, llm.ContentTypeToolUse, content.Type)
 	require.Equal(t, "add", content.Name)
 	require.Equal(t, `{"a":567,"b":111}`, string(content.Input))
@@ -167,7 +166,7 @@ func TestToolCallStream(t *testing.T) {
 	require.NotNil(t, finalResponse, "Should have received a final response")
 
 	// Check if tool calls were properly processed
-	toolCalls := finalResponse.ToolCalls()
+	toolCalls := finalResponse.ToolCalls
 	require.Equal(t, 1, len(toolCalls))
 
 	toolCall := toolCalls[0]

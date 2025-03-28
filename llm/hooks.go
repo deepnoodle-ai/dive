@@ -9,21 +9,24 @@ const (
 	BeforeGenerate HookType = "before_generate"
 	AfterGenerate  HookType = "after_generate"
 	OnError        HookType = "on_error"
-	BeforeStream   HookType = "before_stream"
-	OnStreamChunk  HookType = "on_stream_chunk"
-	AfterStream    HookType = "after_stream"
 )
 
-// HookContext contains information passed to hooks
+// HookContext contains information passed to hooks.
 type HookContext struct {
 	Type     HookType
-	Messages []*Message
-	Response *Response // Only set for AfterGenerate and OnStreamChunk
-	Error    error     // Only set for OnError
-	Stream   Stream    // Only set for stream-related hooks
+	Request  *Request
+	Response *Response
+	Error    error
 }
 
 // Hook is a function that gets called during LLM operations
-type Hook func(ctx context.Context, hookCtx *HookContext)
+type HookFunc func(ctx context.Context, hookCtx *HookContext) error
 
-type Hooks map[HookType]Hook
+// Hook is used to register callbacks for different LLM events.
+type Hook struct {
+	Type HookType
+	Func HookFunc
+}
+
+// Hooks is a list of hooks.
+type Hooks []Hook

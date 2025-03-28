@@ -42,6 +42,7 @@ type Options struct {
 	DocumentRepository dive.DocumentRepository
 	ThreadRepository   dive.ThreadRepository
 	Actions            []Action
+	AutoStart          bool
 }
 
 // New returns a new Environment configured with the given options.
@@ -119,6 +120,13 @@ func New(opts Options) (*Environment, error) {
 	for _, agent := range env.Agents() {
 		agent.SetEnvironment(env)
 	}
+
+	if opts.AutoStart {
+		if err := env.Start(context.Background()); err != nil {
+			return nil, fmt.Errorf("failed to start environment: %w", err)
+		}
+	}
+
 	return env, nil
 }
 
