@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
@@ -148,7 +149,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 				dir = "."
 			}
 		}
-		docRepo, err = dive.NewFileDocumentRepository(dir)
+		docRepo, err = agent.NewFileDocumentRepository(dir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create document repository: %w", err)
 		}
@@ -172,7 +173,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	if buildOpts.ThreadRepo != nil {
 		threadRepo = buildOpts.ThreadRepo
 	} else {
-		threadRepo = dive.NewMemoryThreadRepository()
+		threadRepo = agent.NewMemoryThreadRepository()
 	}
 
 	// Environment

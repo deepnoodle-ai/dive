@@ -132,7 +132,7 @@ func runChat(backstory, agentName string, reasoningBudget int) error {
 		Model:            model,
 		Logger:           logger,
 		Tools:            theTools,
-		ThreadRepository: dive.NewMemoryThreadRepository(),
+		ThreadRepository: agent.NewMemoryThreadRepository(),
 		AutoStart:        true,
 		ModelSettings:    modelSettings,
 	})

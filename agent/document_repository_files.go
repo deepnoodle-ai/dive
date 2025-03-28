@@ -1,4 +1,4 @@
-package dive
+package agent
 
 import (
 	"context"
@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/diveagents/dive"
 )
 
-var _ DocumentRepository = &FileDocumentRepository{}
+var _ dive.DocumentRepository = &FileDocumentRepository{}
 
-// FileDocumentRepository implements DocumentRepository using the local file system
+// FileDocumentRepository implements dive.DocumentRepository using the local file system
 type FileDocumentRepository struct {
 	rootDir        string
 	namedDocuments map[string]string
@@ -77,7 +79,7 @@ func (r *FileDocumentRepository) sanitizePath(path string) (string, error) {
 }
 
 // GetDocument returns a document by name (which is treated as a path)
-func (r *FileDocumentRepository) GetDocument(ctx context.Context, name string) (Document, error) {
+func (r *FileDocumentRepository) GetDocument(ctx context.Context, name string) (dive.Document, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -97,7 +99,7 @@ func (r *FileDocumentRepository) GetDocument(ctx context.Context, name string) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to read document %q: %w", name, err)
 	}
-	return NewTextDocument(TextDocumentOptions{
+	return dive.NewTextDocument(dive.TextDocumentOptions{
 		Name:        name,
 		Path:        name, // Keep original path for reference
 		Content:     string(content),
@@ -106,8 +108,8 @@ func (r *FileDocumentRepository) GetDocument(ctx context.Context, name string) (
 }
 
 // ListDocuments lists documents matching the input criteria
-func (r *FileDocumentRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
-	var docs []Document
+func (r *FileDocumentRepository) ListDocuments(ctx context.Context, input *dive.ListDocumentInput) (*dive.ListDocumentOutput, error) {
+	var docs []dive.Document
 
 	startPath, err := r.sanitizePath(input.PathPrefix)
 	if err != nil {
@@ -138,7 +140,7 @@ func (r *FileDocumentRepository) ListDocuments(ctx context.Context, input *ListD
 		if err != nil {
 			return nil // Skip files we can't read
 		}
-		doc := NewTextDocument(TextDocumentOptions{
+		doc := dive.NewTextDocument(dive.TextDocumentOptions{
 			Name:        filepath.Base(relPath),
 			Path:        relPath,
 			Content:     string(content),
@@ -152,11 +154,11 @@ func (r *FileDocumentRepository) ListDocuments(ctx context.Context, input *ListD
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to walk directory %q: %w", input.PathPrefix, err)
 	}
-	return &ListDocumentOutput{Items: docs}, nil
+	return &dive.ListDocumentOutput{Items: docs}, nil
 }
 
 // PutDocument puts a document into the store
-func (r *FileDocumentRepository) PutDocument(ctx context.Context, doc Document) error {
+func (r *FileDocumentRepository) PutDocument(ctx context.Context, doc dive.Document) error {
 	if doc.Path() == "" {
 		return fmt.Errorf("document path is required")
 	}
@@ -174,7 +176,7 @@ func (r *FileDocumentRepository) PutDocument(ctx context.Context, doc Document) 
 }
 
 // DeleteDocument deletes a document from the store
-func (r *FileDocumentRepository) DeleteDocument(ctx context.Context, doc Document) error {
+func (r *FileDocumentRepository) DeleteDocument(ctx context.Context, doc dive.Document) error {
 	if doc.Path() == "" {
 		return fmt.Errorf("document path is required")
 	}
