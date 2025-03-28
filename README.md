@@ -10,8 +10,8 @@
 
 </div>
 
-Dive is an AI toolkit for Go. Use it to create specialized AI agents, automate
-workflows, quickly integrate with the leading LLMs.
+Dive is an AI toolkit for Go that can be used to create specialized AI agents, automate
+workflows, and quickly integrate with the leading LLMs.
 
 - 🚀 Embed it in your Go apps
 - 🤖 Create specialized agents
@@ -19,9 +19,9 @@ workflows, quickly integrate with the leading LLMs.
 - 🛠️ Arm agents with tools
 - ⚡ Stream responses in real-time
 
-Dive includes a CLI and a polished set of Go APIs for easy integration into your
-existing Go applications. It takes a batteries-included approach, but also has
-the modularity you need to customize it to your needs.
+Dive includes both a CLI and a polished set of APIs for easy integration into
+existing Go applications. It comes batteries-included, but also has the
+modularity you need for extensive customization.
 
 ## Project Status
 
@@ -31,12 +31,11 @@ Dive is shaping up nicely, but is still a young project.
 - **Some breaking changes will happen** as the API matures
 - **Not yet recommended for production use**
 
-Please reach out in
-[GitHub Discussions](https://github.com/diveagents/dive/discussions) with questions, suggestions, or feedback.
+Join our [Discord community](https://discord.gg/yrcuURWk) to chat with the team and other users.
 
-Also, join our [Discord community](https://discord.gg/yrcuURWk) to chat with the team and other users.
+You can also use [GitHub Discussions](https://github.com/diveagents/dive/discussions) for questions, suggestions, or feedback.
 
-We welcome your input! 
+We welcome your input! 🙌
 
 ## Features
 
