@@ -1,4 +1,4 @@
-package dive
+package agent
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/diveagents/dive"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +23,7 @@ func TestFileDocumentRepository(t *testing.T) {
 
 	// Test PutDocument
 	t.Run("PutDocument", func(t *testing.T) {
-		doc := NewTextDocument(TextDocumentOptions{
+		doc := dive.NewTextDocument(dive.TextDocumentOptions{
 			Name:    "test.txt",
 			Path:    "docs/test.txt",
 			Content: "test content",
@@ -56,7 +57,7 @@ func TestFileDocumentRepository(t *testing.T) {
 		require.NoError(t, err, "Failed to create docs directory")
 
 		// Add test document that should already exist
-		doc := NewTextDocument(TextDocumentOptions{
+		doc := dive.NewTextDocument(dive.TextDocumentOptions{
 			Name:    "test.txt",
 			Path:    "docs/test.txt",
 			Content: "test content",
@@ -74,7 +75,7 @@ func TestFileDocumentRepository(t *testing.T) {
 		}
 
 		for _, d := range docs {
-			doc := NewTextDocument(TextDocumentOptions{
+			doc := dive.NewTextDocument(dive.TextDocumentOptions{
 				Name:    filepath.Base(d.uri),
 				Path:    d.uri,
 				Content: d.content,
@@ -84,25 +85,25 @@ func TestFileDocumentRepository(t *testing.T) {
 
 		tests := []struct {
 			name         string
-			input        *ListDocumentInput
+			input        *dive.ListDocumentInput
 			wantCount    int
 			wantContains string
 		}{
 			{
 				name:         "List all recursively",
-				input:        &ListDocumentInput{PathPrefix: "docs", Recursive: true},
+				input:        &dive.ListDocumentInput{PathPrefix: "docs", Recursive: true},
 				wantCount:    4, // including the original test.txt
 				wantContains: "docs/sub1/a.txt",
 			},
 			{
 				name:         "List without recursion",
-				input:        &ListDocumentInput{PathPrefix: "docs", Recursive: false},
+				input:        &dive.ListDocumentInput{PathPrefix: "docs", Recursive: false},
 				wantCount:    1, // only test.txt in root docs/
 				wantContains: "test.txt",
 			},
 			{
 				name:         "List specific subdirectory",
-				input:        &ListDocumentInput{PathPrefix: "docs/sub1", Recursive: true},
+				input:        &dive.ListDocumentInput{PathPrefix: "docs/sub1", Recursive: true},
 				wantCount:    2,
 				wantContains: "a.txt",
 			},
@@ -128,7 +129,7 @@ func TestFileDocumentRepository(t *testing.T) {
 
 	// Test DeleteDocument
 	t.Run("DeleteDocument", func(t *testing.T) {
-		doc := NewTextDocument(TextDocumentOptions{
+		doc := dive.NewTextDocument(dive.TextDocumentOptions{
 			Name:    "delete-test.txt",
 			Path:    "docs/delete-test.txt",
 			Content: "to be deleted",
@@ -152,7 +153,7 @@ func TestFileDocumentRepository(t *testing.T) {
 		require.Error(t, err, "Expected error getting non-existent document")
 
 		// Test putting document without URI
-		doc := NewTextDocument(TextDocumentOptions{
+		doc := dive.NewTextDocument(dive.TextDocumentOptions{
 			Name:    "no-uri.txt",
 			Content: "test",
 		})

@@ -1,25 +1,27 @@
-package dive
+package agent
 
 import (
 	"context"
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/diveagents/dive"
 )
 
-var _ DocumentRepository = &MemoryDocumentRepository{}
+var _ dive.DocumentRepository = &MemoryDocumentRepository{}
 
 // MemoryDocumentRepository implements DocumentRepository interface using an in-memory map
 type MemoryDocumentRepository struct {
 	mu             sync.RWMutex
-	documents      map[string]*TextDocument
+	documents      map[string]*dive.TextDocument
 	namedDocuments map[string]string
 }
 
 // NewMemoryDocumentRepository creates a new MemoryDocumentRepository
 func NewMemoryDocumentRepository() *MemoryDocumentRepository {
 	return &MemoryDocumentRepository{
-		documents:      make(map[string]*TextDocument),
+		documents:      make(map[string]*dive.TextDocument),
 		namedDocuments: make(map[string]string),
 	}
 }
@@ -34,7 +36,7 @@ func (r *MemoryDocumentRepository) RegisterDocument(ctx context.Context, name, p
 }
 
 // GetDocument returns a document by name
-func (r *MemoryDocumentRepository) GetDocument(ctx context.Context, name string) (Document, error) {
+func (r *MemoryDocumentRepository) GetDocument(ctx context.Context, name string) (dive.Document, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -51,11 +53,11 @@ func (r *MemoryDocumentRepository) GetDocument(ctx context.Context, name string)
 }
 
 // ListDocuments lists documents matching the given criteria
-func (r *MemoryDocumentRepository) ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error) {
+func (r *MemoryDocumentRepository) ListDocuments(ctx context.Context, input *dive.ListDocumentInput) (*dive.ListDocumentOutput, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var items []Document
+	var items []dive.Document
 
 	for _, doc := range r.documents {
 		// Check path prefix if specified
@@ -74,18 +76,18 @@ func (r *MemoryDocumentRepository) ListDocuments(ctx context.Context, input *Lis
 		items = append(items, doc)
 	}
 
-	return &ListDocumentOutput{Items: items}, nil
+	return &dive.ListDocumentOutput{Items: items}, nil
 }
 
 // PutDocument stores a document
-func (r *MemoryDocumentRepository) PutDocument(ctx context.Context, doc Document) error {
+func (r *MemoryDocumentRepository) PutDocument(ctx context.Context, doc dive.Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	textDoc, ok := doc.(*TextDocument)
+	textDoc, ok := doc.(*dive.TextDocument)
 	if !ok {
 		// If not already a TextDocument, create a new one with the same properties
-		textDoc = NewTextDocument(TextDocumentOptions{
+		textDoc = dive.NewTextDocument(dive.TextDocumentOptions{
 			ID:          doc.ID(),
 			Name:        doc.Name(),
 			Description: doc.Description(),
@@ -101,7 +103,7 @@ func (r *MemoryDocumentRepository) PutDocument(ctx context.Context, doc Document
 }
 
 // DeleteDocument removes a document
-func (r *MemoryDocumentRepository) DeleteDocument(ctx context.Context, doc Document) error {
+func (r *MemoryDocumentRepository) DeleteDocument(ctx context.Context, doc dive.Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
