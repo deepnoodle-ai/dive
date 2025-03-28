@@ -71,6 +71,12 @@ export GOOGLE_SEARCH_CX="your-key-here"
 export FIRECRAWL_API_KEY="your-key-here"
 ```
 
+Firecrawl is used to retrieve webpage content. Create an account with
+[Firecrawl](https://firecrawl.com) to get a free key to experiment with.
+
+Generating a Google Custom Search key is also quite easy, assuming you have a
+Google Cloud account. See the [Google Custom Search documentation](https://developers.google.com/custom-search/v1/overview).
+
 ### Using the Library
 
 To get started with Dive as a library, use go get:
