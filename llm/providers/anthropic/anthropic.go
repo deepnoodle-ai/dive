@@ -646,9 +646,7 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 		})
 
 	case llm.EventMessageStop:
-		events = append(events, &llm.Event{
-			Type: llm.EventMessageStop,
-		})
+		// Pass
 
 	case llm.EventContentBlockStart:
 		s.contentBlocks[event.Index] = &ContentBlockAccumulator{
@@ -725,7 +723,7 @@ func (s *StreamIterator) readNext() ([]*llm.Event, error) {
 		s.usage.CacheCreationInputTokens += event.Usage.CacheCreationInputTokens
 		s.usage.CacheReadInputTokens += event.Usage.CacheReadInputTokens
 		events = append(events, &llm.Event{
-			Type:  llm.EventMessageDelta,
+			Type:  llm.EventMessageStop,
 			Index: event.Index,
 			Delta: &llm.Delta{
 				Type:         "message_delta",

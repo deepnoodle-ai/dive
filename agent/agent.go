@@ -559,6 +559,11 @@ func (a *Agent) generate(
 		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
 			iter, err := streamingLLM.Stream(ctx, updatedMessages, generateOpts...)
 			if err != nil {
+				publisher.Send(ctx, &dive.Event{
+					Type:    dive.EventTypeError,
+					Origin:  a.eventOrigin(),
+					Payload: err,
+				})
 				return nil, nil, err
 			}
 			for iter.Next() {
@@ -577,12 +582,22 @@ func (a *Agent) generate(
 			}
 			iter.Close()
 			if err := iter.Err(); err != nil {
+				publisher.Send(ctx, &dive.Event{
+					Type:    dive.EventTypeError,
+					Origin:  a.eventOrigin(),
+					Payload: err,
+				})
 				return nil, nil, err
 			}
 		} else {
 			var err error
 			response, err = a.model.Generate(ctx, updatedMessages, generateOpts...)
 			if err != nil {
+				publisher.Send(ctx, &dive.Event{
+					Type:    dive.EventTypeError,
+					Origin:  a.eventOrigin(),
+					Payload: err,
+				})
 				return nil, nil, err
 			}
 		}
