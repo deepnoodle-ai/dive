@@ -53,6 +53,7 @@ type Options struct {
 	Subordinates         []string
 	Model                llm.LLM
 	Tools                []llm.Tool
+	ToolChoice           llm.ToolChoice
 	TickFrequency        time.Duration
 	TaskTimeout          time.Duration
 	ChatTimeout          time.Duration
@@ -78,6 +79,7 @@ type Agent struct {
 	running              bool
 	tools                []llm.Tool
 	toolsByName          map[string]llm.Tool
+	toolChoice           llm.ToolChoice
 	isSupervisor         bool
 	subordinates         []string
 	tickFrequency        time.Duration
@@ -161,6 +163,7 @@ func New(opts Options) (*Agent, error) {
 		threadRepository:     opts.ThreadRepository,
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
+		toolChoice:           opts.ToolChoice,
 	}
 
 	tools := make([]llm.Tool, len(opts.Tools))
@@ -457,20 +460,18 @@ func (a *Agent) handleChat(m messageChat) {
 			threadMessages = append(threadMessages, thread.Messages...)
 		}
 	}
-
-	// Prepend the existing thread messages with the new messages
 	threadMessages = append(threadMessages, m.messages...)
 
-	// Generate the response using the LLM
-	response, updatedMessages, err := a.generate(ctx, threadMessages, systemPrompt, publisher)
+	// Generate the response
+	_, updatedMessages, err := a.generate(ctx, threadMessages, systemPrompt, publisher)
 	if err != nil {
 		logger.Error("error generating response", "error", err)
 		publisher.Send(ctx, a.errorEvent(err))
 		return
 	}
 
+	// Save the updated thread messages
 	if thread != nil {
-		// Save the new thread messages
 		thread.Messages = updatedMessages
 		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
 			logger.Error("error saving thread", "error", err)
@@ -478,13 +479,6 @@ func (a *Agent) handleChat(m messageChat) {
 			return
 		}
 	}
-
-	// Publish the response to the client
-	publisher.Send(ctx, &dive.Event{
-		Type:    "llm.response",
-		Origin:  a.eventOrigin(),
-		Payload: response,
-	})
 }
 
 func (a *Agent) getOrCreateThread(ctx context.Context, threadID string) (*dive.Thread, error) {
@@ -547,73 +541,39 @@ func (a *Agent) generate(
 	generationLimit := a.toolIterationLimit + 1
 	for i := range generationLimit {
 
-		if err := publisher.Send(ctx, &dive.Event{
+		// Publish an event indicating that a request is starting
+		publisher.Send(ctx, &dive.Event{
 			Type:    dive.EventTypeLLMRequest,
 			Origin:  a.eventOrigin(),
 			Payload: &llm.Request{Messages: updatedMessages},
-		}); err != nil {
+		})
+
+		// Generate a response in either streaming or non-streaming mode
+		var err error
+		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
+			response, err = a.generateStreaming(ctx, streamingLLM, updatedMessages, generateOpts, publisher)
+		} else {
+			response, err = a.model.Generate(ctx, updatedMessages, generateOpts...)
+		}
+		if err == nil && response == nil {
+			// This indicates a bug in the LLM provider implementation
+			err = ErrLLMNoResponse
+		}
+		if err != nil {
+			publisher.Send(ctx, &dive.Event{
+				Type:    dive.EventTypeError,
+				Origin:  a.eventOrigin(),
+				Payload: err,
+			})
 			return nil, nil, err
 		}
 
-		// Generate a response in either streaming or non-streaming mode
-		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
-			iter, err := streamingLLM.Stream(ctx, updatedMessages, generateOpts...)
-			if err != nil {
-				publisher.Send(ctx, &dive.Event{
-					Type:    dive.EventTypeError,
-					Origin:  a.eventOrigin(),
-					Payload: err,
-				})
-				return nil, nil, err
-			}
-			for iter.Next() {
-				event := iter.Event()
-				if err := publisher.Send(ctx, &dive.Event{
-					Type:    dive.EventTypeLLMEvent,
-					Origin:  a.eventOrigin(),
-					Payload: event,
-				}); err != nil {
-					iter.Close()
-					return nil, nil, err
-				}
-				if event.Response != nil {
-					response = event.Response
-				}
-			}
-			iter.Close()
-			if err := iter.Err(); err != nil {
-				publisher.Send(ctx, &dive.Event{
-					Type:    dive.EventTypeError,
-					Origin:  a.eventOrigin(),
-					Payload: err,
-				})
-				return nil, nil, err
-			}
-		} else {
-			var err error
-			response, err = a.model.Generate(ctx, updatedMessages, generateOpts...)
-			if err != nil {
-				publisher.Send(ctx, &dive.Event{
-					Type:    dive.EventTypeError,
-					Origin:  a.eventOrigin(),
-					Payload: err,
-				})
-				return nil, nil, err
-			}
-		}
-
-		if response == nil {
-			// This indicates a bug in the LLM provider implementation
-			return nil, nil, ErrLLMNoResponse
-		}
-
-		if err := publisher.Send(ctx, &dive.Event{
+		// Publish an event indicating that the response was fully generated
+		publisher.Send(ctx, &dive.Event{
 			Type:    dive.EventTypeLLMResponse,
 			Origin:  a.eventOrigin(),
 			Payload: response,
-		}); err != nil {
-			return nil, nil, err
-		}
+		})
 
 		a.logger.Debug("llm response",
 			"agent", a.name,
@@ -621,20 +581,20 @@ func (a *Agent) generate(
 			"usage_output_tokens", response.Usage.OutputTokens,
 			"cache_creation_input_tokens", response.Usage.CacheCreationInputTokens,
 			"cache_read_input_tokens", response.Usage.CacheReadInputTokens,
-			"response_text", response.Message.Text(),
+			"response_text", response.Message().Text(),
 			"generation_number", i+1,
 		)
 
 		// Remember the assistant response message
-		updatedMessages = append(updatedMessages, &response.Message)
+		updatedMessages = append(updatedMessages, response.Message())
 
 		// We're done if there are no tool calls
-		if len(response.ToolCalls) == 0 {
+		if len(response.ToolCalls()) == 0 {
 			break
 		}
 
 		// Execute all requested tool calls
-		toolResults, err := a.executeToolCalls(ctx, response.ToolCalls, publisher)
+		toolResults, err := a.executeToolCalls(ctx, response.ToolCalls(), publisher)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -648,11 +608,12 @@ func (a *Agent) generate(
 		resultMessage := llm.NewToolOutputMessage(toolResults)
 
 		// Add instructions to the message to not use any more tools if we have
-		// only one generation left. Claude 3.7 Sonnet can keep going forever!
+		// only one generation left
 		if i == generationLimit-2 {
+			generateOpts = append(generateOpts, llm.WithToolChoice(llm.ToolChoiceNone))
 			resultMessage.Content = append(resultMessage.Content, &llm.Content{
-				Type: llm.ContentTypeText,
-				Text: FinishNow,
+				Type:    llm.ContentTypeText,
+				Content: FinishNow,
 			})
 			a.logger.Debug("added finish now statement",
 				"agent", a.name,
@@ -667,9 +628,45 @@ func (a *Agent) generate(
 	return response, updatedMessages, nil
 }
 
+// generateStreaming handles streaming generation with an LLM, including
+// receiving and republishing events, and accumulating a complete response.
+func (a *Agent) generateStreaming(
+	ctx context.Context,
+	streamingLLM llm.StreamingLLM,
+	messages []*llm.Message,
+	generateOpts []llm.Option,
+	publisher dive.EventPublisher,
+) (*llm.Response, error) {
+	accum := llm.NewResponseAccumulator()
+	iter, err := streamingLLM.Stream(ctx, messages, generateOpts...)
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+	for iter.Next() {
+		event := iter.Event()
+		if err := accum.AddEvent(event); err != nil {
+			return nil, err
+		}
+		publisher.Send(ctx, &dive.Event{
+			Type:    dive.EventTypeLLMEvent,
+			Origin:  a.eventOrigin(),
+			Payload: event,
+		})
+	}
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+	return accum.Response(), nil
+}
+
 // executeToolCalls executes all tool calls and returns the results. If the
 // tools are configured to not return results, (nil, nil) is returned.
-func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall, publisher dive.EventPublisher) ([]*llm.ToolOutput, error) {
+func (a *Agent) executeToolCalls(
+	ctx context.Context,
+	toolCalls []*llm.ToolCall,
+	publisher dive.EventPublisher,
+) ([]*llm.ToolOutput, error) {
 	outputs := make([]*llm.ToolOutput, len(toolCalls))
 	shouldReturnResult := false
 	for i, toolCall := range toolCalls {
@@ -681,18 +678,14 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall,
 			"tool_id", toolCall.ID,
 			"tool_name", toolCall.Name,
 			"tool_input", toolCall.Input)
-
-		if err := publisher.Send(ctx, &dive.Event{
+		publisher.Send(ctx, &dive.Event{
 			Type:    dive.EventTypeToolCalled,
 			Origin:  a.eventOrigin(),
 			Payload: toolCall,
-		}); err != nil {
-			return nil, err
-		}
-
-		result, err := tool.Call(ctx, toolCall.Input)
+		})
+		toolOutput, err := tool.Call(ctx, toolCall.Input)
 		if err != nil {
-			if err := publisher.Send(ctx, &dive.Event{
+			publisher.Send(ctx, &dive.Event{
 				Type:   dive.EventTypeToolError,
 				Origin: a.eventOrigin(),
 				Payload: &llm.ToolError{
@@ -700,26 +693,19 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall,
 					Name:  toolCall.Name,
 					Error: err.Error(),
 				},
-			}); err != nil {
-				return nil, err
-			}
+			})
 			return nil, fmt.Errorf("tool call error: %w", err)
 		}
-
 		outputs[i] = &llm.ToolOutput{
 			ID:     toolCall.ID,
 			Name:   toolCall.Name,
-			Output: result,
+			Output: toolOutput,
 		}
-
-		if err := publisher.Send(ctx, &dive.Event{
+		publisher.Send(ctx, &dive.Event{
 			Type:    dive.EventTypeToolOutput,
 			Origin:  a.eventOrigin(),
 			Payload: outputs[i],
-		}); err != nil {
-			return nil, err
-		}
-
+		})
 		if tool.ShouldReturnResult() {
 			shouldReturnResult = true
 		}
@@ -737,6 +723,9 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 	}
 	if len(a.tools) > 0 {
 		generateOpts = append(generateOpts, llm.WithTools(a.tools...))
+	}
+	if a.toolChoice != "" {
+		generateOpts = append(generateOpts, llm.WithToolChoice(a.toolChoice))
 	}
 	if a.hooks != nil {
 		generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
@@ -808,63 +797,66 @@ func (a *Agent) TeamOverview() string {
 }
 
 func (a *Agent) handleTask(ctx context.Context, state *taskState) error {
-	task := state.Task
-	timeout := a.taskTimeout
-	if timeout > 0 {
+	// Chat timeout is used to limit the time spent on one generation
+	if a.chatTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
+		ctx, cancel = context.WithTimeout(ctx, a.chatTimeout)
 		defer cancel()
 	}
-
-	logger := a.logger.With(
-		"agent", a.name,
-		"task", task.Name(),
-		"timeout", timeout.String(),
-	)
-
+	// Check the task timeout, which is tracked since the task was started
+	if a.taskTimeout > 0 {
+		since := time.Since(state.Started)
+		if since > a.taskTimeout {
+			return fmt.Errorf("task timed out after %s", since)
+		}
+	}
 	systemPrompt, err := a.buildSystemPrompt("task")
 	if err != nil {
-		logger.Error("failed to build system prompt", "error", err)
-		state.Publisher.Send(ctx, a.errorEvent(err))
 		return err
 	}
-
-	messages := []*llm.Message{}
+	var messages, truncatedMessages llm.Messages
 
 	if len(state.Messages) == 0 {
 		// Starting a task
 		if recentTasksMessage, ok := a.getTasksHistoryMessage(); ok {
 			messages = append(messages, recentTasksMessage)
 		}
-		prompt, err := task.Prompt()
+		prompt, err := state.Task.Prompt()
 		if err != nil {
-			logger.Error("failed to get task prompt", "error", err)
-			state.Publisher.Send(ctx, a.errorEvent(err))
 			return err
 		}
 		promptMessages, err := taskPromptMessages(prompt)
 		if err != nil {
-			logger.Error("failed to get task prompt messages", "error", err)
-			state.Publisher.Send(ctx, a.errorEvent(err))
 			return err
 		}
 		messages = append(messages, promptMessages...)
 	} else {
-		// Resuming a task
+		// Resuming a task. Pass up to the last 32 messages to the LLM.
 		messages = append(messages, state.Messages...)
-		if len(messages) < 32 {
-			messages = append(messages, llm.NewUserMessage(PromptContinue))
-		} else {
-			messages = append(messages, llm.NewUserMessage(PromptFinishNow))
+		messages = append(messages, llm.NewUserMessage(PromptContinue))
+		if len(messages) > 32 {
+			truncatedMessages = messages[len(messages)-32:]
 		}
 	}
 
-	response, updatedMessages, err := a.generate(ctx, messages, systemPrompt, state.Publisher)
+	messagesToSend := messages
+	if len(truncatedMessages) > 0 {
+		messagesToSend = truncatedMessages
+	}
+	response, updatedMessages, err := a.generate(ctx, messagesToSend, systemPrompt, state.Publisher)
 	if err != nil {
-		logger.Error("failed to generate response", "error", err)
-		state.Publisher.Send(ctx, a.errorEvent(err))
 		return err
 	}
+
+	// If we truncated messages, we need to reassemble the complete message list
+	if len(truncatedMessages) > 0 {
+		// Messages before truncation point
+		completeMessages := messages[:len(messages)-len(truncatedMessages)]
+		// Add all messages after truncation point
+		completeMessages = append(completeMessages, updatedMessages...)
+		updatedMessages = completeMessages
+	}
+
 	state.TrackResponse(response, updatedMessages)
 	return nil
 }

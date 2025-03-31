@@ -55,15 +55,15 @@ type Thinking struct {
 }
 
 type Request struct {
-	Model       string      `json:"model"`
-	Messages    []*Message  `json:"messages"`
-	MaxTokens   *int        `json:"max_tokens,omitempty"`
-	Temperature *float64    `json:"temperature,omitempty"`
-	System      string      `json:"system,omitempty"`
-	Stream      bool        `json:"stream,omitempty"`
-	Tools       []*Tool     `json:"tools,omitempty"`
-	ToolChoice  *ToolChoice `json:"tool_choice,omitempty"`
-	Thinking    *Thinking   `json:"thinking,omitempty"`
+	Model       string         `json:"model"`
+	Messages    []*llm.Message `json:"messages"`
+	MaxTokens   *int           `json:"max_tokens,omitempty"`
+	Temperature *float64       `json:"temperature,omitempty"`
+	System      string         `json:"system,omitempty"`
+	Stream      bool           `json:"stream,omitempty"`
+	Tools       []*Tool        `json:"tools,omitempty"`
+	ToolChoice  *ToolChoice    `json:"tool_choice,omitempty"`
+	Thinking    *Thinking      `json:"thinking,omitempty"`
 }
 
 type ToolChoiceType string
@@ -104,32 +104,32 @@ type Usage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
-type StreamEvent struct {
-	Type         string        `json:"type"`
-	Index        int           `json:"index"`
-	Message      StreamMessage `json:"message"`
-	Delta        StreamDelta   `json:"delta"`
-	ContentBlock ContentBlock  `json:"content_block"`
-	Usage        Usage         `json:"usage"`
-}
+// type StreamEvent struct {
+// 	Type         string        `json:"type"`
+// 	Index        int           `json:"index"`
+// 	Message      StreamMessage `json:"message"`
+// 	Delta        StreamDelta   `json:"delta"`
+// 	ContentBlock ContentBlock  `json:"content_block"`
+// 	Usage        Usage         `json:"usage"`
+// }
 
-type StreamMessage struct {
-	ID           string         `json:"id"`
-	Role         string         `json:"role"`
-	Type         string         `json:"type"`
-	Model        string         `json:"model"`
-	StopSequence *string        `json:"stop_sequence"`
-	StopReason   *string        `json:"stop_reason"`
-	Content      []ContentBlock `json:"content"`
-	Usage        Usage          `json:"usage"`
-}
+// type StreamMessage struct {
+// 	ID           string         `json:"id"`
+// 	Role         string         `json:"role"`
+// 	Type         string         `json:"type"`
+// 	Model        string         `json:"model"`
+// 	StopSequence *string        `json:"stop_sequence"`
+// 	StopReason   *string        `json:"stop_reason"`
+// 	Content      []ContentBlock `json:"content"`
+// 	Usage        Usage          `json:"usage"`
+// }
 
-type StreamDelta struct {
-	Type         string  `json:"type"`
-	Text         string  `json:"text"`
-	StopReason   string  `json:"stop_reason,omitempty"`
-	StopSequence *string `json:"stop_sequence,omitempty"`
-	PartialJSON  string  `json:"partial_json,omitempty"`
-	Thinking     string  `json:"thinking,omitempty"`
-	Signature    string  `json:"signature,omitempty"`
-}
+// type StreamDelta struct {
+// 	Type         string  `json:"type"`
+// 	Text         string  `json:"text"`
+// 	StopReason   string  `json:"stop_reason,omitempty"`
+// 	StopSequence *string `json:"stop_sequence,omitempty"`
+// 	PartialJSON  string  `json:"partial_json,omitempty"`
+// 	Thinking     string  `json:"thinking,omitempty"`
+// 	Signature    string  `json:"signature,omitempty"`
+// }

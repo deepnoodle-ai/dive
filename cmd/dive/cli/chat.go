@@ -31,7 +31,7 @@ var (
 func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
 
-	iterator, err := agent.Chat(ctx, llm.NewSingleUserMessage(message), dive.WithThreadID("chat"))
+	iterator, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage(message)}, dive.WithThreadID("chat"))
 	if err != nil {
 		return fmt.Errorf("error generating response: %v", err)
 	}
@@ -46,7 +46,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 		event := iterator.Event()
 		switch payload := event.Payload.(type) {
 		case *llm.Event:
-			if payload.Type == llm.EventContentBlockStop {
+			if payload.Type == llm.EventTypeContentBlockStop {
 				fmt.Printf("\n\n")
 			}
 			if payload.ContentBlock != nil {

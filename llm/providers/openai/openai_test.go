@@ -19,7 +19,7 @@ func TestHelloWorld(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// The model might respond with "Hello!" or other variations, so we check case-insensitive
-	require.Contains(t, strings.ToLower(response.Message.Text()), "hello")
+	require.Contains(t, strings.ToLower(response.Message().Text()), "hello")
 }
 
 func TestHelloWorldStream(t *testing.T) {
@@ -30,40 +30,20 @@ func TestHelloWorldStream(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var events []*llm.Event
+	accum := llm.NewResponseAccumulator()
 	for iterator.Next() {
 		event := iterator.Event()
-		events = append(events, event)
+		if err := accum.AddEvent(event); err != nil {
+			require.NoError(t, err)
+		}
 	}
 	require.NoError(t, iterator.Err())
+	require.True(t, accum.IsComplete())
 
-	var finalResponse *llm.Response
-	var finalText string
-	var texts []string
-	for _, event := range events {
-		if event.Response != nil {
-			finalResponse = event.Response
-		}
-		switch event.Type {
-		case llm.EventContentBlockDelta:
-			if event.Delta.Type == "text_delta" {
-				texts = append(texts, event.Delta.Text)
-				finalText += event.Delta.Text
-			}
-		}
-	}
-
-	// We don't check the exact output since the model might format it differently
-	require.NotEmpty(t, finalText)
-	require.NotEmpty(t, texts)
-
-	// Check that the response contains numbers 1-10 in some form
-	for i := 1; i <= 10; i++ {
-		require.Contains(t, finalText, fmt.Sprintf("%d", i))
-	}
-
-	require.NotNil(t, finalResponse)
-	require.Equal(t, llm.Assistant, finalResponse.Role)
+	response := accum.Response()
+	require.NotNil(t, response)
+	require.Equal(t, llm.Assistant, response.Role)
+	require.Equal(t, "1 2 3 4 5 6 7 8 9 10", response.Message().Text())
 }
 
 func addFunc(ctx context.Context, input string) (string, error) {
@@ -101,8 +81,8 @@ func TestToolUse(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(response.Message.Content))
-	content := response.Message.Content[0]
+	require.Equal(t, 1, len(response.Message().Content))
+	content := response.Message().Content[0]
 	require.Equal(t, llm.ContentTypeToolUse, content.Type)
 	require.Equal(t, "add", content.Name)
 	// The exact format of the arguments may vary, so we just check that it contains the numbers
@@ -136,15 +116,15 @@ func TestMultipleToolUse(t *testing.T) {
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
-	require.Equal(t, 2, len(response.Message.Content))
+	require.Equal(t, 2, len(response.Message().Content))
 
-	c1 := response.Message.Content[0]
+	c1 := response.Message().Content[0]
 	require.Equal(t, llm.ContentTypeToolUse, c1.Type)
 	require.Equal(t, "add", c1.Name)
 	require.Contains(t, string(c1.Input), "567")
 	require.Contains(t, string(c1.Input), "111")
 
-	c2 := response.Message.Content[1]
+	c2 := response.Message().Content[1]
 	require.Equal(t, llm.ContentTypeToolUse, c2.Type)
 	require.Equal(t, "add", c2.Name)
 	require.Contains(t, string(c2.Input), "233")
@@ -155,7 +135,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
-	messages := []*llm.Message{
+	messages := llm.Messages{
 		llm.NewUserMessage("Calculate two results for me: add 567 and 111, and add 233 and 444"),
 	}
 
@@ -178,15 +158,18 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	var toolCalls []*llm.ToolCall
+	accumulator := llm.NewResponseAccumulator()
 	for iterator.Next() {
 		event := iterator.Event()
-		if event.Response != nil {
-			// fmt.Printf("response: %+v\n", event.Response)
-			// fmt.Println("tool call count:", len(event.Response.ToolCalls()))
-			toolCalls = append(toolCalls, event.Response.ToolCalls...)
+		if err := accumulator.AddEvent(event); err != nil {
+			require.NoError(t, err)
 		}
 	}
+	require.NoError(t, iterator.Err())
+	require.True(t, accumulator.IsComplete())
+
+	response := accumulator.Response()
+	toolCalls := response.ToolCalls()
 	require.Equal(t, 2, len(toolCalls))
 
 	// The two calls can be in any order, so we need to check both
@@ -238,53 +221,33 @@ func TestToolUseStream(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	var events []*llm.Event
+	accumulator := llm.NewResponseAccumulator()
 	for iterator.Next() {
 		event := iterator.Event()
-		events = append(events, event)
+		if err := accumulator.AddEvent(event); err != nil {
+			require.NoError(t, err)
+		}
 	}
 	require.NoError(t, iterator.Err())
+	require.True(t, accumulator.IsComplete())
 
-	var finalResponse *llm.Response
-	var jsonParts []string
-	for _, event := range events {
-		if event.Response != nil {
-			finalResponse = event.Response
-		}
-		switch event.Type {
-		case llm.EventContentBlockDelta:
-			if event.Delta.Type == "input_json_delta" {
-				jsonParts = append(jsonParts, event.Delta.PartialJSON)
-			}
-		}
-	}
+	response := accumulator.Response()
+	toolCalls := response.ToolCalls()
+	require.Equal(t, 1, len(toolCalls))
 
-	require.NotNil(t, finalResponse)
-	require.Equal(t, llm.Assistant, finalResponse.Role)
+	require.NotNil(t, response)
+	require.Equal(t, llm.Assistant, response.Role)
 
 	// Check that we have at least one tool call
-	require.GreaterOrEqual(t, len(finalResponse.ToolCalls), 1)
+	require.GreaterOrEqual(t, len(response.ToolCalls()), 1)
 
 	// Check that the tool call is for the add function
-	toolCall := finalResponse.ToolCalls[0]
+	toolCall := response.ToolCalls()[0]
 	require.Equal(t, "add", toolCall.Name)
 
 	// Check that the arguments contain the numbers
 	require.Contains(t, toolCall.Input, "567")
 	require.Contains(t, toolCall.Input, "111")
-
-	// Check that we received JSON parts
-	require.Greater(t, len(jsonParts), 0)
-
-	// Combine the JSON parts and check that they form valid JSON
-	combinedJSON := strings.Join(jsonParts, "")
-	var parsedJSON map[string]interface{}
-	err = json.Unmarshal([]byte(combinedJSON), &parsedJSON)
-	require.NoError(t, err)
-
-	// Check that the parsed JSON contains the correct values
-	require.Equal(t, float64(567), parsedJSON["a"])
-	require.Equal(t, float64(111), parsedJSON["b"])
 }
 
 func TestConvertMessages(t *testing.T) {
@@ -339,12 +302,12 @@ func TestConvertToolResultMessages(t *testing.T) {
 		Content: []*llm.Content{
 			{
 				Type:      llm.ContentTypeToolResult,
-				Text:      "4",
+				Content:   "4",
 				ToolUseID: "call_123",
 			},
 			{
 				Type:      llm.ContentTypeToolResult,
-				Text:      "Found math formulas",
+				Content:   "Found math formulas",
 				ToolUseID: "call_456",
 			},
 		},
@@ -368,8 +331,8 @@ func TestConvertToolResultMessages(t *testing.T) {
 	require.Equal(t, "call_456", converted[1].ToolCallID)
 }
 
-// Add a test for mixed content types
-func TestConvertMixedContentMessages(t *testing.T) {
+// Test for messages containing both text and tool use content
+func TestConvertTextAndToolUseMessage(t *testing.T) {
 	// Create a message with both text and tool use content blocks
 	message := &llm.Message{
 		Role: llm.Assistant,
@@ -388,7 +351,7 @@ func TestConvertMixedContentMessages(t *testing.T) {
 	}
 
 	// Convert the message
-	converted, err := convertMessages([]*llm.Message{message})
+	converted, err := convertMessages(llm.Messages{message})
 	require.NoError(t, err)
 
 	// Verify the conversion - should be a single message with text and tool call
@@ -397,45 +360,63 @@ func TestConvertMixedContentMessages(t *testing.T) {
 	require.Equal(t, "I'll help you calculate that", converted[0].Content)
 	require.Len(t, converted[0].ToolCalls, 1)
 	require.Equal(t, "Calculator", converted[0].ToolCalls[0].Function.Name)
+}
 
-	// Create a message with text, tool use, and tool result content blocks
-	mixedMessage := &llm.Message{
-		Role: llm.Assistant,
-		Content: []*llm.Content{
-			{
-				Type: llm.ContentTypeText,
-				Text: "Here's the calculation",
+// Test for tool use followed by tool result
+func TestConvertToolUseAndResultMessages(t *testing.T) {
+	// Create sequence of messages: first the assistant's tool use, then the tool result
+	messages := []*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []*llm.Content{
+				{
+					Type:  llm.ContentTypeToolUse,
+					ID:    "call_111",
+					Name:  "Calculator",
+					Input: json.RawMessage(`{"expression":"1 + 1"}`),
+				},
+				{
+					Type:  llm.ContentTypeToolUse,
+					ID:    "call_999",
+					Name:  "Calculator",
+					Input: json.RawMessage(`{"expression":"2 + 2"}`),
+				},
 			},
-			{
-				Type:  llm.ContentTypeToolUse,
-				ID:    "call_789",
-				Name:  "Calculator",
-				Input: json.RawMessage(`{"expression":"3 + 3"}`),
-			},
-			{
-				Type:      llm.ContentTypeToolResult,
-				Text:      "6",
-				ToolUseID: "call_789",
+		},
+		{
+			Role: llm.User,
+			Content: []*llm.Content{
+				{
+					Type:      llm.ContentTypeToolResult,
+					Content:   "1",
+					ToolUseID: "call_111",
+				},
+				{
+					Type:      llm.ContentTypeToolResult,
+					Content:   "2",
+					ToolUseID: "call_999",
+				},
 			},
 		},
 	}
 
-	// Convert the message
-	mixedConverted, err := convertMessages([]*llm.Message{mixedMessage})
+	// Convert the messages. The tool result content blocks are split across
+	// two messages (how OpenAI does it).
+	converted, err := convertMessages(messages)
 	require.NoError(t, err)
+	require.Len(t, converted, 3)
 
-	// Verify the conversion - should be two messages:
-	// 1. Assistant message with text and tool call
-	// 2. Tool message with result
-	require.Len(t, mixedConverted, 2)
+	require.Equal(t, "assistant", converted[0].Role)
+	require.Len(t, converted[0].ToolCalls, 2)
+	require.Equal(t, "call_111", converted[0].ToolCalls[0].ID)
+	require.Equal(t, "call_999", converted[0].ToolCalls[1].ID)
 
-	// Check first message
-	require.Equal(t, "assistant", mixedConverted[0].Role)
-	require.Equal(t, "Here's the calculation", mixedConverted[0].Content)
-	require.Len(t, mixedConverted[0].ToolCalls, 1)
+	require.Equal(t, "tool", converted[1].Role)
+	require.Equal(t, "1", converted[1].Content)
+	require.Equal(t, "call_111", converted[1].ToolCallID)
 
-	// Check second message (tool result)
-	require.Equal(t, "tool", mixedConverted[1].Role)
-	require.Equal(t, "6", mixedConverted[1].Content)
-	require.Equal(t, "call_789", mixedConverted[1].ToolCallID)
+	require.Equal(t, "tool", converted[2].Role)
+	require.Equal(t, "2", converted[2].Content)
+	require.Equal(t, "call_999", converted[2].ToolCallID)
+
 }

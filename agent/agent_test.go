@@ -47,13 +47,13 @@ func TestAgentChat(t *testing.T) {
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Hello, world!"))
+	stream, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage("Hello, world!")})
 	require.NoError(t, err)
 
 	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
 	require.NoError(t, err)
 
-	text := strings.ToLower(response.Message.Text())
+	text := strings.ToLower(response.Message().Text())
 	matches := strings.Contains(text, "hello") || strings.Contains(text, "hi")
 	require.True(t, matches)
 
@@ -97,13 +97,13 @@ func TestAgentChatWithTools(t *testing.T) {
 	require.NoError(t, err)
 	defer agent.Stop(ctx)
 
-	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
+	stream, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage("Please use the echo tool to echo 'hello world'")})
 	require.NoError(t, err)
 
 	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
 	require.NoError(t, err)
 
-	text := strings.ToLower(response.Message.Text())
+	text := strings.ToLower(response.Message().Text())
 	require.Contains(t, text, "echo")
 	require.Equal(t, "hello world", echoInput)
 

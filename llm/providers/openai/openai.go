@@ -96,6 +96,9 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, err
 	}
 
+	if err := validateMessages(messages); err != nil {
+		return nil, err
+	}
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
@@ -161,15 +164,17 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 	choice := result.Choices[0]
 
-	var toolCalls []*llm.ToolCall
 	var contentBlocks []*llm.Content
+	if choice.Message.Content != "" {
+		contentBlocks = append(contentBlocks, &llm.Content{
+			Type: llm.ContentTypeText,
+			Text: choice.Message.Content,
+		})
+	}
+
+	// Transform tool calls into content blocks (like Anthropic)
 	if len(choice.Message.ToolCalls) > 0 {
 		for _, toolCall := range choice.Message.ToolCalls {
-			toolCalls = append(toolCalls, &llm.ToolCall{
-				ID:    toolCall.ID,
-				Name:  toolCall.Function.Name,
-				Input: toolCall.Function.Arguments,
-			})
 			contentBlocks = append(contentBlocks, &llm.Content{
 				Type:  llm.ContentTypeToolUse,
 				ID:    toolCall.ID, // e.g. call_12345xyz
@@ -177,11 +182,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 				Input: json.RawMessage(toolCall.Function.Arguments),
 			})
 		}
-	} else {
-		contentBlocks = append(contentBlocks, &llm.Content{
-			Type: llm.ContentTypeText,
-			Text: choice.Message.Content,
-		})
 	}
 
 	if config.Prefill != "" {
@@ -197,14 +197,10 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 
 	response := &llm.Response{
-		ID:    result.ID,
-		Model: p.model,
-		Role:  llm.Assistant,
-		Message: llm.Message{
-			Role:    llm.Assistant,
-			Content: contentBlocks,
-		},
-		ToolCalls: toolCalls,
+		ID:      result.ID,
+		Model:   p.model,
+		Role:    llm.Assistant,
+		Content: contentBlocks,
 		Usage: llm.Usage{
 			InputTokens:  result.Usage.PromptTokens,
 			OutputTokens: result.Usage.CompletionTokens,
@@ -222,7 +218,6 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}); err != nil {
 		return nil, err
 	}
-
 	return response, nil
 }
 
@@ -238,6 +233,9 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		return nil, err
 	}
 
+	if err := validateMessages(messages); err != nil {
+		return nil, err
+	}
 	msgs, err := convertMessages(messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
@@ -295,11 +293,10 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		stream = &StreamIterator{
 			body:              resp.Body,
 			reader:            bufio.NewReader(resp.Body),
-			toolCalls:         map[int]*ToolCallAccumulator{},
 			contentBlocks:     map[int]*ContentBlockAccumulator{},
+			toolCalls:         map[int]*ToolCallAccumulator{},
 			prefill:           config.Prefill,
 			prefillClosingTag: config.PrefillClosingTag,
-			closeOnce:         sync.Once{},
 		}
 		return nil
 	}, retry.WithMaxRetries(6))
@@ -325,18 +322,20 @@ func (p *Provider) GetSystemPrompt(c *llm.Config) string {
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-func convertMessages(messages []*llm.Message) ([]Message, error) {
-
+func validateMessages(messages []*llm.Message) error {
 	messageCount := len(messages)
 	if messageCount == 0 {
-		return nil, fmt.Errorf("no messages provided")
+		return fmt.Errorf("no messages provided")
 	}
 	for i, message := range messages {
 		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
+			return fmt.Errorf("empty message detected (index %d)", i)
 		}
 	}
+	return nil
+}
 
+func convertMessages(messages []*llm.Message) ([]Message, error) {
 	var result []Message
 	for _, msg := range messages {
 		role := strings.ToLower(string(msg.Role))
@@ -381,14 +380,13 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 				switch c.Type {
 				case llm.ContentTypeText:
 					if !hasToolUse {
-						// Only add text content if not already added with tool calls
 						result = append(result, Message{Role: role, Content: c.Text})
 					}
 				case llm.ContentTypeToolResult:
 					// Each tool result goes in its own message
 					result = append(result, Message{
 						Role:       "tool",
-						Content:    c.Text,
+						Content:    c.Content,
 						ToolCallID: c.ToolUseID,
 					})
 				case llm.ContentTypeToolUse:
@@ -477,6 +475,7 @@ type StreamIterator struct {
 	usage             Usage
 	prefill           string
 	prefillClosingTag string
+	eventCount        int
 	closeOnce         sync.Once
 	eventQueue        []*llm.Event
 }
@@ -549,12 +548,11 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 	// Remove "data: " prefix if present
 	line = bytes.TrimPrefix(line, []byte("data: "))
-
 	// Check for stream end
 	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
 		return nil, nil
 	}
-
+	// Unmarshal the event
 	var event StreamResponse
 	if err := json.Unmarshal(line, &event); err != nil {
 		return nil, err
@@ -574,18 +572,21 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	choice := event.Choices[0]
 	var events []*llm.Event
 
-	// Emit message start event if this is the first chunk
-	if s.responseID != "" && s.currentEvent == nil {
+	// Emit message start event if this is the first event
+	if s.eventCount == 0 {
+		s.eventCount++
 		events = append(events, &llm.Event{
-			Type: llm.EventMessageStart,
-			Message: &llm.Message{
+			Type: llm.EventTypeMessageStart,
+			Message: &llm.Response{
 				ID:      s.responseID,
+				Type:    "message",
 				Role:    llm.Assistant,
+				Model:   s.responseModel,
 				Content: []*llm.Content{},
-			},
-			Usage: &llm.Usage{
-				InputTokens:  s.usage.PromptTokens,
-				OutputTokens: s.usage.CompletionTokens,
+				Usage: llm.Usage{
+					InputTokens:  s.usage.PromptTokens,
+					OutputTokens: s.usage.CompletionTokens,
+				},
 			},
 		})
 	}
@@ -604,23 +605,45 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 			}
 			s.prefill = ""
 		}
+		// If this is a new content block, stop any open content blocks and
+		// generate a content_block_start event
 		index := choice.Index
 		if _, exists := s.contentBlocks[index]; !exists {
-			s.contentBlocks[index] = &ContentBlockAccumulator{Type: "text", Text: ""}
+			// Stop any previous content blocks that are still open
+			for prevIndex, prev := range s.contentBlocks {
+				if !prev.IsComplete {
+					stopIndex := prevIndex
+					events = append(events, &llm.Event{
+						Type:  llm.EventTypeContentBlockStop,
+						Index: &stopIndex,
+					})
+					prev.IsComplete = true
+				}
+			}
+			// Stop any previous tool calls that are still open
+			for prevIndex, prev := range s.toolCalls {
+				if !prev.IsComplete {
+					stopIndex := prevIndex
+					events = append(events, &llm.Event{
+						Type:  llm.EventTypeContentBlockStop,
+						Index: &stopIndex,
+					})
+					prev.IsComplete = true
+				}
+			}
+			s.contentBlocks[index] = &ContentBlockAccumulator{Type: "text"}
 			events = append(events, &llm.Event{
-				Type:         llm.EventContentBlockStart,
-				Index:        index,
-				ContentBlock: &llm.EventContentBlock{Type: "text", Text: ""},
+				Type:         llm.EventTypeContentBlockStart,
+				Index:        &index,
+				ContentBlock: &llm.EventContentBlock{Type: "text"},
 			})
 		}
-		// Accumulate the text
-		block := s.contentBlocks[index]
-		block.Text += choice.Delta.Content
+		// Generate a content_block_delta event
 		events = append(events, &llm.Event{
-			Type:  llm.EventContentBlockDelta,
-			Index: index,
-			Delta: &llm.Delta{
-				Type: "text_delta",
+			Type:  llm.EventTypeContentBlockDelta,
+			Index: &index,
+			Delta: &llm.EventDelta{
+				Type: llm.EventDeltaTypeText,
 				Text: choice.Delta.Content,
 			},
 		})
@@ -629,15 +652,38 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	if len(choice.Delta.ToolCalls) > 0 {
 		for _, toolCallDelta := range choice.Delta.ToolCalls {
 			index := toolCallDelta.Index
+			// If this is a new tool call, generate a content_block_start event
 			if _, exists := s.toolCalls[index]; !exists {
+				// Stop any previous content blocks that are still open
+				for prevIndex, prev := range s.contentBlocks {
+					if !prev.IsComplete {
+						stopIndex := prevIndex
+						events = append(events, &llm.Event{
+							Type:  llm.EventTypeContentBlockStop,
+							Index: &stopIndex,
+						})
+						prev.IsComplete = true
+					}
+				}
+				// Stop any previous tool calls that are still open
+				for prevIndex, prev := range s.toolCalls {
+					if !prev.IsComplete {
+						stopIndex := prevIndex
+						events = append(events, &llm.Event{
+							Type:  llm.EventTypeContentBlockStop,
+							Index: &stopIndex,
+						})
+						prev.IsComplete = true
+					}
+				}
 				s.toolCalls[index] = &ToolCallAccumulator{Type: "function"}
 				events = append(events, &llm.Event{
-					Type:  llm.EventContentBlockStart,
-					Index: index,
+					Type:  llm.EventTypeContentBlockStart,
+					Index: &index,
 					ContentBlock: &llm.EventContentBlock{
 						ID:   toolCallDelta.ID,
 						Name: toolCallDelta.Function.Name,
-						Type: "tool_use",
+						Type: llm.ContentTypeToolUse,
 					},
 				})
 			}
@@ -646,7 +692,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				toolCall.ID = toolCallDelta.ID
 				// Update the ContentBlock in the event queue if it exists
 				for _, queuedEvent := range s.eventQueue {
-					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
+					if queuedEvent.Type == llm.EventTypeContentBlockStart && queuedEvent.Index != nil && *queuedEvent.Index == index {
 						if queuedEvent.ContentBlock == nil {
 							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
 						}
@@ -661,7 +707,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				toolCall.Name = toolCallDelta.Function.Name
 				// Update the ContentBlock in the event queue if it exists
 				for _, queuedEvent := range s.eventQueue {
-					if queuedEvent.Type == llm.EventContentBlockStart && queuedEvent.Index == index {
+					if queuedEvent.Type == llm.EventTypeContentBlockStart && queuedEvent.Index != nil && *queuedEvent.Index == index {
 						if queuedEvent.ContentBlock == nil {
 							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
 						}
@@ -672,10 +718,10 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 			if toolCallDelta.Function.Arguments != "" {
 				toolCall.Arguments += toolCallDelta.Function.Arguments
 				events = append(events, &llm.Event{
-					Type:  llm.EventContentBlockDelta,
-					Index: index,
-					Delta: &llm.Delta{
-						Type:        "input_json_delta",
+					Type:  llm.EventTypeContentBlockDelta,
+					Index: &index,
+					Delta: &llm.EventDelta{
+						Type:        llm.EventDeltaTypeInputJSON,
 						PartialJSON: toolCallDelta.Function.Arguments,
 					},
 				})
@@ -684,65 +730,47 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 
 	if choice.FinishReason != "" {
+		// Stop any open content blocks
+		for index, block := range s.contentBlocks {
+			blockIndex := index
+			if !block.IsComplete {
+				events = append(events, &llm.Event{
+					Type:  llm.EventTypeContentBlockStop,
+					Index: &blockIndex,
+				})
+				block.IsComplete = true
+			}
+		}
+		// Stop any open tool calls
+		for index, toolCall := range s.toolCalls {
+			blockIndex := index
+			if !toolCall.IsComplete {
+				events = append(events, &llm.Event{
+					Type:  llm.EventTypeContentBlockStop,
+					Index: &blockIndex,
+				})
+				toolCall.IsComplete = true
+			}
+		}
 		// Add message_delta event with stop reason
+		stopReason := choice.FinishReason
+		if stopReason == "tool_calls" {
+			stopReason = "tool_use" // Match Anthropic
+		}
 		events = append(events, &llm.Event{
-			Type:     llm.EventMessageDelta,
-			Response: s.buildFinalResponse(choice.FinishReason),
-			Delta: &llm.Delta{
-				Type:       "message_delta",
-				StopReason: choice.FinishReason,
+			Type:  llm.EventTypeMessageDelta,
+			Delta: &llm.EventDelta{StopReason: stopReason},
+			Usage: &llm.Usage{
+				InputTokens:  s.usage.PromptTokens,
+				OutputTokens: s.usage.CompletionTokens,
 			},
+		})
+		events = append(events, &llm.Event{
+			Type: llm.EventTypeMessageStop,
 		})
 	}
 
 	return events, nil
-}
-
-// buildFinalResponse creates a final response with all accumulated tool calls
-// and content blocks. It converts the accumulated data to the format expected
-// by the llm package. This is called when the stream ends or a finish reason
-// is received.
-func (s *StreamIterator) buildFinalResponse(stopReason string) *llm.Response {
-	var toolCalls []*llm.ToolCall
-	var contentBlocks []*llm.Content
-	for _, toolCall := range s.toolCalls {
-		if toolCall.Name != "" {
-			toolCalls = append(toolCalls, &llm.ToolCall{
-				ID:    toolCall.ID,
-				Name:  toolCall.Name,
-				Input: toolCall.Arguments,
-			})
-			contentBlocks = append(contentBlocks, &llm.Content{
-				Type:  llm.ContentTypeToolUse,
-				ID:    toolCall.ID,
-				Name:  toolCall.Name,
-				Input: json.RawMessage(toolCall.Arguments),
-			})
-		}
-	}
-	for _, block := range s.contentBlocks {
-		if block.Type == "text" {
-			contentBlocks = append(contentBlocks, &llm.Content{
-				Type: llm.ContentTypeText,
-				Text: block.Text,
-			})
-		}
-	}
-	return &llm.Response{
-		ID:         s.responseID,
-		Model:      s.responseModel,
-		Role:       llm.Assistant,
-		StopReason: stopReason,
-		Message: llm.Message{
-			Role:    llm.Assistant,
-			Content: contentBlocks,
-		},
-		ToolCalls: toolCalls,
-		Usage: llm.Usage{
-			InputTokens:  s.usage.PromptTokens,
-			OutputTokens: s.usage.CompletionTokens,
-		},
-	}
 }
 
 func (s *StreamIterator) Close() error {

@@ -21,17 +21,17 @@ type EventOrigin struct {
 type EventType string
 
 const (
-	EventTypeLLMRequest    EventType = "llm_request"
-	EventTypeLLMResponse   EventType = "llm_response"
-	EventTypeLLMEvent      EventType = "llm_event"
-	EventTypeToolCalled    EventType = "tool_called"
-	EventTypeToolOutput    EventType = "tool_output"
-	EventTypeToolError     EventType = "tool_error"
-	EventTypeTaskActivated EventType = "task_activated"
-	EventTypeTaskProgress  EventType = "task_progress"
-	EventTypeTaskPaused    EventType = "task_paused"
-	EventTypeTaskCompleted EventType = "task_completed"
-	EventTypeTaskError     EventType = "task_error"
+	EventTypeLLMRequest    EventType = "llm.request"
+	EventTypeLLMResponse   EventType = "llm.response"
+	EventTypeLLMEvent      EventType = "llm.event"
+	EventTypeToolCalled    EventType = "tool.called"
+	EventTypeToolOutput    EventType = "tool.output"
+	EventTypeToolError     EventType = "tool.error"
+	EventTypeTaskActivated EventType = "task.activated"
+	EventTypeTaskProgress  EventType = "task.progress"
+	EventTypeTaskPaused    EventType = "task.paused"
+	EventTypeTaskCompleted EventType = "task.completed"
+	EventTypeTaskError     EventType = "task.error"
 	EventTypeError         EventType = "error"
 )
 
