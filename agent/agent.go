@@ -17,7 +17,7 @@ import (
 var (
 	DefaultTaskTimeout        = time.Minute * 20
 	DefaultChatTimeout        = time.Minute * 4
-	DefaultTickFrequency      = time.Second * 1
+	DefaultTickFrequency      = time.Second * 5
 	DefaultToolIterationLimit = 8
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
