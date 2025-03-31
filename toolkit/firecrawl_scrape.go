@@ -65,11 +65,25 @@ func (t *FirecrawlScrapeTool) Call(ctx context.Context, input string) (string, e
 	}
 
 	response, err := t.app.ScrapeURL(s.URL, &firecrawl.ScrapeParams{
-		Timeout:         ptr(15000),
-		OnlyMainContent: ptr(true),
-		Formats:         []string{"markdown"},
-		ExcludeTags:     []string{"script", "style", "a", "img", "iframe"},
+		Timeout: ptr(15000),
+		Formats: []string{"markdown"},
+		ExcludeTags: []string{
+			"script",
+			"style",
+			"hr",
+			"noscript",
+			"iframe",
+			"select",
+			"input",
+			"button",
+			"svg",
+			"form",
+			"header",
+			"nav",
+			"footer",
+		},
 	})
+
 	if err != nil {
 		if strings.Contains(err.Error(), "403") {
 			return "Scraping this website is not supported.", nil
