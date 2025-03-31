@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	DefaultTaskTimeout        = time.Minute * 4
-	DefaultChatTimeout        = time.Minute * 2
+	DefaultTaskTimeout        = time.Minute * 20
+	DefaultChatTimeout        = time.Minute * 4
 	DefaultTickFrequency      = time.Second * 1
 	DefaultToolIterationLimit = 8
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
@@ -612,8 +612,8 @@ func (a *Agent) generate(
 		if i == generationLimit-2 {
 			generateOpts = append(generateOpts, llm.WithToolChoice(llm.ToolChoiceNone))
 			resultMessage.Content = append(resultMessage.Content, &llm.Content{
-				Type:    llm.ContentTypeText,
-				Content: FinishNow,
+				Type: llm.ContentTypeText,
+				Text: FinishNow,
 			})
 			a.logger.Debug("added finish now statement",
 				"agent", a.name,
