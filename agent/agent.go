@@ -597,21 +597,21 @@ func (a *Agent) generate(
 
 		// Remember the assistant response message
 		addMessage(response.Message())
-
-		// Publish an event indicating progress
 		generation.AccumulateUsage(response.Usage)
 		generation.ActiveToolCalls = len(response.ToolCalls())
-		publisher.Send(ctx, &dive.Event{
-			Type:    dive.EventTypeGenerationProgress,
-			Origin:  eventOrigin,
-			Payload: generation,
-		})
 
 		// We're done if there are no tool calls
 		toolCalls := response.ToolCalls()
 		if len(toolCalls) == 0 {
 			break
 		}
+
+		// Publish an event indicating progress
+		publisher.Send(ctx, &dive.Event{
+			Type:    dive.EventTypeGenerationProgress,
+			Origin:  eventOrigin,
+			Payload: generation,
+		})
 
 		// Execute all requested tool calls
 		toolResults, shouldReturnResult, err := a.executeToolCalls(ctx, toolCalls, publisher)
