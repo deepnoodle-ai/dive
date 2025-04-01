@@ -27,6 +27,8 @@ func main() {
 
 	ctx := context.Background()
 
+	logger := slogger.New(slogger.LevelDebug)
+
 	model, err := config.GetModel(providerName, modelName)
 	if err != nil {
 		log.Fatal(err)
@@ -44,7 +46,7 @@ func main() {
 		})
 		tools = append(tools, scraper)
 
-		log.Println("firecrawl enabled")
+		logger.Info("firecrawl enabled")
 	}
 
 	if key := os.Getenv("GOOGLE_SEARCH_CX"); key != "" {
@@ -54,10 +56,8 @@ func main() {
 		}
 		tools = append(tools, toolkit.NewGoogleSearch(googleClient))
 
-		log.Println("google search enabled")
+		logger.Info("google search enabled")
 	}
-
-	logger := slogger.New(slogger.LevelDebug)
 
 	a, err := agent.New(agent.Options{
 		Name:      "Research Assistant",
@@ -74,7 +74,7 @@ func main() {
 	task := agent.NewTask(agent.TaskOptions{
 		Name: "Research the history of beer",
 		Prompt: &dive.Prompt{
-			Text:         "Research the history of beer",
+			Text:         "Briefly research the history of beer",
 			Output:       "The history of beer",
 			OutputFormat: dive.OutputFormatMarkdown,
 		},

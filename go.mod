@@ -6,6 +6,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/dustinkirkland/golang-petname v0.0.0-20240428194347-eebcea082ee0
 	github.com/fatih/color v1.18.0
+	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	github.com/lmittmann/tint v1.0.7
 	github.com/mattn/go-isatty v0.0.20

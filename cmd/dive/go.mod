@@ -14,6 +14,7 @@ require (
 require (
 	github.com/bmatcuk/doublestar/v4 v4.8.1 // indirect
 	github.com/dustinkirkland/golang-petname v0.0.0-20240428194347-eebcea082ee0 // indirect
+	github.com/gofrs/uuid/v5 v5.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lmittmann/tint v1.0.7 // indirect

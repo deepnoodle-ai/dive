@@ -533,6 +533,28 @@ func (a *Agent) generate(
 
 	// Options passed to the LLM
 	generateOpts := a.getGenerationOptions(systemPrompt)
+	generateCfg := &llm.Config{}
+	generateCfg.Apply(generateOpts...)
+
+	// Publish an event indicating that generation is starting
+	eventOrigin := a.eventOrigin()
+	generation := &dive.Generation{
+		ID:            dive.NewID(),
+		StartedAt:     time.Now(),
+		Config:        generateCfg,
+		InputMessages: messages,
+	}
+	publisher.Send(ctx, &dive.Event{
+		Type:    dive.EventTypeGenerationStarted,
+		Origin:  eventOrigin,
+		Payload: generation,
+	})
+
+	// Helper to keep track of new messages
+	addMessage := func(msg *llm.Message) {
+		updatedMessages = append(updatedMessages, msg)
+		generation.OutputMessages = append(generation.OutputMessages, msg)
+	}
 
 	// The loop is used to run and respond to the primary generation request
 	// and then automatically run any tool-use invocations. The first time
@@ -540,14 +562,6 @@ func (a *Agent) generate(
 	// running tool-uses and responding with the results.
 	generationLimit := a.toolIterationLimit + 1
 	for i := range generationLimit {
-
-		// Publish an event indicating that a request is starting
-		publisher.Send(ctx, &dive.Event{
-			Type:    dive.EventTypeLLMRequest,
-			Origin:  a.eventOrigin(),
-			Payload: &llm.Request{Messages: updatedMessages},
-		})
-
 		// Generate a response in either streaming or non-streaming mode
 		var err error
 		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
@@ -560,20 +574,16 @@ func (a *Agent) generate(
 			err = ErrLLMNoResponse
 		}
 		if err != nil {
+			now := time.Now()
+			generation.Error = err
+			generation.CompletedAt = &now
 			publisher.Send(ctx, &dive.Event{
-				Type:    dive.EventTypeError,
-				Origin:  a.eventOrigin(),
-				Payload: err,
+				Type:    dive.EventTypeGenerationError,
+				Origin:  eventOrigin,
+				Payload: generation,
 			})
 			return nil, nil, err
 		}
-
-		// Publish an event indicating that the response was fully generated
-		publisher.Send(ctx, &dive.Event{
-			Type:    dive.EventTypeLLMResponse,
-			Origin:  a.eventOrigin(),
-			Payload: response,
-		})
 
 		a.logger.Debug("llm response",
 			"agent", a.name,
@@ -586,44 +596,76 @@ func (a *Agent) generate(
 		)
 
 		// Remember the assistant response message
-		updatedMessages = append(updatedMessages, response.Message())
+		addMessage(response.Message())
+
+		// Publish an event indicating progress
+		generation.AccumulateUsage(response.Usage)
+		generation.ActiveToolCalls = len(response.ToolCalls())
+		publisher.Send(ctx, &dive.Event{
+			Type:    dive.EventTypeGenerationProgress,
+			Origin:  eventOrigin,
+			Payload: generation,
+		})
 
 		// We're done if there are no tool calls
-		if len(response.ToolCalls()) == 0 {
+		toolCalls := response.ToolCalls()
+		if len(toolCalls) == 0 {
 			break
 		}
 
 		// Execute all requested tool calls
-		toolResults, err := a.executeToolCalls(ctx, response.ToolCalls(), publisher)
+		toolResults, shouldReturnResult, err := a.executeToolCalls(ctx, toolCalls, publisher)
 		if err != nil {
+			now := time.Now()
+			generation.Error = err
+			generation.IsDone = true
+			generation.CompletedAt = &now
+			publisher.Send(ctx, &dive.Event{
+				Type:    dive.EventTypeGenerationError,
+				Origin:  eventOrigin,
+				Payload: generation,
+			})
 			return nil, nil, err
 		}
 
+		// Remember all tool results
+		generation.ToolResults = append(generation.ToolResults, toolResults...)
+
 		// We're done if the results don't need to be provided to the LLM
-		if len(toolResults) == 0 {
+		if !shouldReturnResult {
 			break
 		}
 
 		// Capture results in a new message to send to LLM on the next iteration
-		resultMessage := llm.NewToolOutputMessage(toolResults)
+		toolResultMessage := llm.NewToolOutputMessage(toolResults)
 
 		// Add instructions to the message to not use any more tools if we have
 		// only one generation left
 		if i == generationLimit-2 {
 			generateOpts = append(generateOpts, llm.WithToolChoice(llm.ToolChoiceNone))
-			resultMessage.Content = append(resultMessage.Content, &llm.Content{
-				Type: llm.ContentTypeText,
-				Text: FinishNow,
+			toolResultMessage.Content = append(toolResultMessage.Content, &llm.Content{
+				Type:   llm.ContentTypeText,
+				Text:   FinishNow,
+				Hidden: true,
 			})
 			a.logger.Debug("added finish now statement",
 				"agent", a.name,
 				"generation_number", i+1,
 			)
 		}
-
-		// Messages to be sent to the LLM on the next iteration
-		updatedMessages = append(updatedMessages, resultMessage)
+		addMessage(toolResultMessage)
 	}
+
+	// Publish an event indicating that the response was fully generated
+	now := time.Now()
+	generation.CompletedAt = &now
+	generation.IsDone = true
+	generation.ActiveToolCalls = 0
+	publisher.Send(ctx, &dive.Event{
+		Type:    dive.EventTypeGenerationCompleted,
+		Origin:  eventOrigin,
+		Payload: generation,
+	})
 
 	return response, updatedMessages, nil
 }
@@ -666,54 +708,61 @@ func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	toolCalls []*llm.ToolCall,
 	publisher dive.EventPublisher,
-) ([]*llm.ToolOutput, error) {
-	outputs := make([]*llm.ToolOutput, len(toolCalls))
+) ([]*llm.ToolResult, bool, error) {
+	results := make([]*llm.ToolResult, len(toolCalls))
 	shouldReturnResult := false
 	for i, toolCall := range toolCalls {
 		tool, ok := a.toolsByName[toolCall.Name]
 		if !ok {
-			return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
+			return nil, false, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
 		}
 		a.logger.Debug("executing tool call",
 			"tool_id", toolCall.ID,
 			"tool_name", toolCall.Name,
 			"tool_input", toolCall.Input)
+
+		now := time.Now()
+		result := &llm.ToolResult{
+			ID:        toolCall.ID,
+			Name:      toolCall.Name,
+			Input:     toolCall.Input,
+			StartedAt: &now,
+		}
 		publisher.Send(ctx, &dive.Event{
 			Type:    dive.EventTypeToolCalled,
 			Origin:  a.eventOrigin(),
-			Payload: toolCall,
+			Payload: result,
 		})
-		toolOutput, err := tool.Call(ctx, toolCall.Input)
+
+		output, err := tool.Call(ctx, toolCall.Input)
+		finishedAt := time.Now()
+		result.CompletedAt = &finishedAt
 		if err != nil {
+			result.Error = err
 			publisher.Send(ctx, &dive.Event{
-				Type:   dive.EventTypeToolError,
-				Origin: a.eventOrigin(),
-				Payload: &llm.ToolError{
-					ID:    toolCall.ID,
-					Name:  toolCall.Name,
-					Error: err.Error(),
-				},
+				Type:    dive.EventTypeToolError,
+				Origin:  a.eventOrigin(),
+				Payload: result,
 			})
-			return nil, fmt.Errorf("tool call error: %w", err)
+			return nil, false, fmt.Errorf("tool call error: %w", err)
 		}
-		outputs[i] = &llm.ToolOutput{
-			ID:     toolCall.ID,
-			Name:   toolCall.Name,
-			Output: toolOutput,
-		}
+		result.Output = output
+		results[i] = result
+
 		publisher.Send(ctx, &dive.Event{
 			Type:    dive.EventTypeToolOutput,
 			Origin:  a.eventOrigin(),
-			Payload: outputs[i],
+			Payload: result,
 		})
+
 		if tool.ShouldReturnResult() {
 			shouldReturnResult = true
 		}
 	}
 	if shouldReturnResult {
-		return outputs, nil
+		return results, true, nil
 	}
-	return nil, nil
+	return results, false, nil
 }
 
 func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {

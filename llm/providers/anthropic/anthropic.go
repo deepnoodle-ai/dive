@@ -92,7 +92,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
-		Request: &llm.Request{
+		Request: &llm.HookRequestContext{
 			Messages: messages,
 			Config:   config,
 			Body:     body,
@@ -148,12 +148,14 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.AfterGenerate,
-		Request: &llm.Request{
+		Request: &llm.HookRequestContext{
 			Messages: messages,
 			Config:   config,
 			Body:     body,
 		},
-		Response: &result,
+		Response: &llm.HookResponseContext{
+			Response: &result,
+		},
 	}); err != nil {
 		return nil, err
 	}
@@ -211,7 +213,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
-		Request: &llm.Request{
+		Request: &llm.HookRequestContext{
 			Messages: messages,
 			Config:   config,
 			Body:     body,

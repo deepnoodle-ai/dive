@@ -46,9 +46,6 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 		event := iterator.Event()
 		switch payload := event.Payload.(type) {
 		case *llm.Event:
-			if payload.Type == llm.EventTypeContentBlockStop {
-				fmt.Printf("\n\n")
-			}
 			if payload.ContentBlock != nil {
 				cb := payload.ContentBlock
 				if cb.Type == "tool_use" {
@@ -61,15 +58,14 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 				if delta.PartialJSON != "" {
 					if !inToolUse {
 						inToolUse = true
-						fmt.Println("\n\n----")
+						fmt.Print("\n----\n")
 					}
 					toolUseAccum += delta.PartialJSON
 				} else if delta.Text != "" {
 					if inToolUse {
 						fmt.Println(yellowStyle.Sprint(toolName), yellowStyle.Sprint(toolID))
 						fmt.Println(yellowStyle.Sprint(toolUseAccum))
-						fmt.Println("----")
-						fmt.Println()
+						fmt.Print("----\n")
 						inToolUse = false
 						toolUseAccum = ""
 					}

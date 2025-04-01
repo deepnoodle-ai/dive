@@ -11,12 +11,24 @@ const (
 	OnError        HookType = "on_error"
 )
 
+// HookRequestContext contains information about a request to an LLM.
+type HookRequestContext struct {
+	Messages []*Message `json:"messages"`
+	Config   *Config    `json:"config,omitempty"`
+	Body     []byte     `json:"-"`
+}
+
+// HookResponseContext contains information about a response from an LLM.
+type HookResponseContext struct {
+	Response *Response `json:"response,omitempty"`
+	Error    error     `json:"error,omitempty"`
+}
+
 // HookContext contains information passed to hooks.
 type HookContext struct {
-	Type     HookType
-	Request  *Request
-	Response *Response
-	Error    error
+	Type     HookType             `json:"type"`
+	Request  *HookRequestContext  `json:"request,omitempty"`
+	Response *HookResponseContext `json:"response,omitempty"`
 }
 
 // Hook is a function that gets called during LLM operations

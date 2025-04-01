@@ -27,14 +27,6 @@ type Usage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
-// Request conveys information about a request to an LLM. This is used primarily
-// for hooks and isn't used to interact with the actual LLM providers.
-type Request struct {
-	Messages []*Message `json:"messages"`
-	Config   *Config    `json:"config,omitempty"`
-	Body     []byte     `json:"-"`
-}
-
 // Response is the generated response from an LLM. Matches the Anthropic
 // response format documented here:
 // https://docs.anthropic.com/en/api/messages#response-content
@@ -160,6 +152,9 @@ type Content struct {
 
 	// Marks a cacheable content block
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+
+	// Hidden indicates that the content should not be shown to the user
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // Message containing content passed to or from an LLM.
@@ -241,7 +236,7 @@ func NewAssistantMessage(text string) *Message {
 
 // NewToolOutputMessage creates a new message with the user role and a list of
 // tool outputs. Used to pass the results of tool calls back to an LLM.
-func NewToolOutputMessage(outputs []*ToolOutput) *Message {
+func NewToolOutputMessage(outputs []*ToolResult) *Message {
 	content := make([]*Content, len(outputs))
 	for i, output := range outputs {
 		content[i] = &Content{

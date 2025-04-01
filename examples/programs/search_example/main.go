@@ -22,7 +22,7 @@ func main() {
 	if os.Getenv("LOG_LEVEL") != "" {
 		logLevel = os.Getenv("LOG_LEVEL")
 	} else {
-		logLevel = "info"
+		logLevel = "debug"
 	}
 
 	ctx := context.Background()

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/diveagents/dive/llm"
+	"github.com/gofrs/uuid/v5"
 )
 
 // OutputFormat defines the desired output format for a Task
@@ -246,4 +247,13 @@ type ThreadRepository interface {
 
 	// DeleteThread deletes a thread by ID
 	DeleteThread(ctx context.Context, id string) error
+}
+
+// NewID returns a new UUID
+func NewID() string {
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err)
+	}
+	return id.String()
 }
