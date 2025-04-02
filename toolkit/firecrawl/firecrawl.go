@@ -221,7 +221,8 @@ func (c *Client) WaitForBatchScrape(ctx context.Context, jobID string, pollInter
 		case <-ticker.C:
 			status, err := c.CheckBatchScrapeStatus(ctx, jobID)
 			if err != nil {
-				return nil, err
+				fmt.Println("error checking batch scrape status", err)
+				continue
 			}
 			switch status.Status {
 			case "completed":
