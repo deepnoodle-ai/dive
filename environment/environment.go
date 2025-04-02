@@ -8,7 +8,6 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
-	"github.com/google/uuid"
 )
 
 // Environment is a container for running agents and workflow executions
@@ -262,7 +261,7 @@ func (e *Environment) ExecuteWorkflow(ctx context.Context, name string, inputs m
 	}
 
 	execution := NewExecution(ExecutionOptions{
-		ID:          uuid.New().String(),
+		ID:          dive.NewID(),
 		Environment: e,
 		Workflow:    workflow,
 		Status:      StatusPending,

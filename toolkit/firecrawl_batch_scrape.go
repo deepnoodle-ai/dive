@@ -8,24 +8,43 @@ import (
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/toolkit/firecrawl"
+	"github.com/goccy/go-yaml"
 )
 
 var _ llm.Tool = &FirecrawlBatchScrapeTool{}
+
+var DefaultFirecrawlExcludeTags = []string{
+	"script",
+	"style",
+	"hr",
+	"noscript",
+	"iframe",
+	"select",
+	"input",
+	"button",
+	"svg",
+	"form",
+	"header",
+	"nav",
+	"footer",
+}
 
 type FirecrawlBatchScrapeInput struct {
 	URLs []string `json:"urls"`
 }
 
 type FirecrawlBatchScrapeToolOptions struct {
-	Client     *firecrawl.Client `json:"-"`
-	MaxSize    int               `json:"max_size,omitempty"`
-	MaxRetries int               `json:"max_retries,omitempty"`
+	Client      *firecrawl.Client `json:"-"`
+	MaxSize     int               `json:"max_size,omitempty"`
+	MaxRetries  int               `json:"max_retries,omitempty"`
+	ExcludeTags []string          `json:"exclude_tags,omitempty"`
 }
 
 type FirecrawlBatchScrapeTool struct {
-	client     *firecrawl.Client
-	maxSize    int
-	maxRetries int
+	client      *firecrawl.Client
+	maxSize     int
+	maxRetries  int
+	excludeTags []string
 }
 
 func NewFirecrawlBatchScrapeTool(options FirecrawlBatchScrapeToolOptions) *FirecrawlBatchScrapeTool {
@@ -38,17 +57,21 @@ func NewFirecrawlBatchScrapeTool(options FirecrawlBatchScrapeToolOptions) *Firec
 	if options.Client == nil {
 		panic("firecrawl client is required")
 	}
+	if options.ExcludeTags == nil {
+		options.ExcludeTags = DefaultFirecrawlExcludeTags
+	}
 	return &FirecrawlBatchScrapeTool{
-		client:     options.Client,
-		maxSize:    options.MaxSize,
-		maxRetries: options.MaxRetries,
+		client:      options.Client,
+		maxSize:     options.MaxSize,
+		maxRetries:  options.MaxRetries,
+		excludeTags: options.ExcludeTags,
 	}
 }
 
 func (t *FirecrawlBatchScrapeTool) Definition() *llm.ToolDefinition {
 	return &llm.ToolDefinition{
 		Name:        "firecrawl_batch_scrape",
-		Description: "Retrieves the contents of the webpages at the given URLs. The content will be truncated if it is overly long. If that happens, don't try to retrieve more content, just use what you have.",
+		Description: "Efficiently scrapes and retrieves content from multiple webpages simultaneously. This tool accepts a list of URLs and returns their contents in markdown format, along with metadata such as title, description, and status code. Use this when you need to gather information from several web sources at once, as it's significantly faster than sequential scraping.",
 		Parameters: llm.Schema{
 			Type:     "object",
 			Required: []string{"urls"},
@@ -71,23 +94,9 @@ func (t *FirecrawlBatchScrapeTool) Call(ctx context.Context, input string) (stri
 		return "", fmt.Errorf("no urls were provided")
 	}
 	response, err := t.client.BatchScrape(ctx, s.URLs, &firecrawl.ScrapeOptions{
-		Timeout: 15000,
-		Formats: []string{"markdown"},
-		ExcludeTags: []string{
-			"script",
-			"style",
-			"hr",
-			"noscript",
-			"iframe",
-			"select",
-			"input",
-			"button",
-			"svg",
-			"form",
-			"header",
-			"nav",
-			"footer",
-		},
+		Timeout:     15000,
+		Formats:     []string{"markdown"},
+		ExcludeTags: t.excludeTags,
 	})
 	if err != nil {
 		return "", err
@@ -96,60 +105,40 @@ func (t *FirecrawlBatchScrapeTool) Call(ctx context.Context, input string) (stri
 	// Create a structured output with metadata and content sections
 	var sb strings.Builder
 
-	// Write metadata section
-	sb.WriteString("<scrape-metadata>\n")
-	metadataMap := map[string]interface{}{
-		"total_pages":  len(response.Data),
-		"status":       response.Status,
-		"credits_used": response.CreditsUsed,
-		"source_urls":  s.URLs,
-	}
-	metadataJSON, err := json.MarshalIndent(metadataMap, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-	sb.Write(metadataJSON)
-	sb.WriteString("\n</scrape-metadata>\n\n")
-	sb.WriteString("---\n\n")
-
 	// Write each page's content
 	for i, doc := range response.Data {
 		if doc.Metadata == nil {
 			continue
 		}
 		// Page metadata section
-		sb.WriteString(fmt.Sprintf("<page-metadata url=%q>\n", doc.Metadata.SourceURL))
 		pageMetadata := map[string]interface{}{
+			"url":         doc.Metadata.SourceURL,
 			"title":       doc.Metadata.Title,
 			"description": doc.Metadata.Description,
+			"keywords":    doc.Metadata.Keywords,
 			"language":    doc.Metadata.Language,
 			"status_code": doc.Metadata.StatusCode,
 		}
 		if doc.Metadata.Error != "" {
 			pageMetadata["error"] = doc.Metadata.Error
 		}
-		pageMetadataJSON, err := json.MarshalIndent(pageMetadata, "", "  ")
+		pageMetadataYAML, err := yaml.Marshal(pageMetadata)
 		if err != nil {
-			return "", fmt.Errorf("failed to marshal page metadata: %w", err)
+			return "", fmt.Errorf("failed to marshal page metadata to YAML: %w", err)
 		}
-		sb.Write(pageMetadataJSON)
-		sb.WriteString("\n</page-metadata>\n\n")
-
-		// Page content section
-		sb.WriteString("<page-content>\n")
+		sb.Write(pageMetadataYAML)
+		sb.WriteString("\n---\n\n")
+		sb.WriteString("# " + doc.Metadata.Title + "\n\n")
 		if doc.Markdown != "" {
 			sb.WriteString(doc.Markdown)
 		} else {
 			sb.WriteString("No content available")
 		}
-		sb.WriteString("\n</page-content>\n\n")
-
 		// Add separator between pages except for the last one
 		if i < len(response.Data)-1 {
 			sb.WriteString("---\n\n")
 		}
 	}
-
 	return sb.String(), nil
 }
 
