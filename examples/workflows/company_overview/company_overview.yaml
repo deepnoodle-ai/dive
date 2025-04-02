@@ -12,7 +12,7 @@ Config:
 Tools:
   - Name: Google.Search
     Enabled: true
-  - Name: Firecrawl.Scrape
+  - Name: Firecrawl.BatchScrape
     Enabled: true
 
 Agents:
@@ -20,7 +20,7 @@ Agents:
     Goal: Analyze company websites to understand their products, market position, and messaging
     Tools:
       - Google.Search
-      - Firecrawl.Scrape
+      - Firecrawl.BatchScrape
 
 Workflows:
   - Name: Company Analysis

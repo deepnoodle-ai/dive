@@ -75,7 +75,7 @@ func (t *DirectoryListTool) Definition() *llm.ToolDefinition {
 	}
 
 	return &llm.ToolDefinition{
-		Name:        "ListDirectory",
+		Name:        "directory_list",
 		Description: description,
 		Parameters: llm.Schema{
 			Type:     "object",

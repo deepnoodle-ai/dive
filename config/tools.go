@@ -7,6 +7,7 @@ import (
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/toolkit"
+	diveFirecrawl "github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
 	"github.com/mendableai/firecrawl-go"
 )
@@ -65,6 +66,20 @@ func initializeTools(tools []Tool) (map[string]llm.Tool, error) {
 		}
 		options.App = app
 		toolsMap["Firecrawl.Scrape"] = toolkit.NewFirecrawlScrapeTool(options)
+	}
+
+	if _, ok := configsByName["Firecrawl.BatchScrape"]; ok {
+		key := os.Getenv("FIRECRAWL_API_KEY")
+		if key == "" {
+			return nil, fmt.Errorf("firecrawl requested but FIRECRAWL_API_KEY not set")
+		}
+		batchScrapeClient, err := diveFirecrawl.NewClient(diveFirecrawl.WithAPIKey(key))
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize Firecrawl: %w", err)
+		}
+		toolsMap["Firecrawl.BatchScrape"] = toolkit.NewFirecrawlBatchScrapeTool(toolkit.FirecrawlBatchScrapeToolOptions{
+			Client: batchScrapeClient,
+		})
 	}
 
 	if _, ok := configsByName["File.Read"]; ok {
