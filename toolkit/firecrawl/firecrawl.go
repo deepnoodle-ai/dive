@@ -200,6 +200,9 @@ func (c *Client) CheckBatchScrapeStatus(ctx context.Context, jobID string) (*Bat
 	if err != nil {
 		return nil, fmt.Errorf("check batch scrape status failed: %w", err)
 	}
+	fmt.Println("--------------------------------")
+	fmt.Println(string(resp))
+	fmt.Println("--------------------------------")
 	var status BatchScrapeStatus
 	if err := json.Unmarshal(resp, &status); err != nil {
 		return nil, fmt.Errorf("failed to parse batch scrape status: %w", err)
