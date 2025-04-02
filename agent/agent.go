@@ -643,12 +643,7 @@ func (a *Agent) generate(
 		// only one generation left
 		if i == generationLimit-2 {
 			generateOpts = append(generateOpts, llm.WithToolChoice(llm.ToolChoiceNone))
-			toolResultMessage.Content = append(toolResultMessage.Content, &llm.Content{
-				Type:   llm.ContentTypeText,
-				Text:   FinishNow,
-				Hidden: true,
-			})
-			a.logger.Debug("added finish now statement",
+			a.logger.Debug("set tool choice to none",
 				"agent", a.name,
 				"generation_number", i+1,
 			)
