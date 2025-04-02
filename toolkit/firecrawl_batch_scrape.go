@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/diveagents/dive/llm"
@@ -150,8 +149,6 @@ func (t *FirecrawlBatchScrapeTool) Call(ctx context.Context, input string) (stri
 			sb.WriteString("---\n\n")
 		}
 	}
-
-	os.WriteFile("firecrawl_batch_scrape.json", []byte(sb.String()), 0644)
 
 	return sb.String(), nil
 }
