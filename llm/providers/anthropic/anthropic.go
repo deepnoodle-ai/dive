@@ -76,6 +76,13 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
 			lastContent.CacheControl = &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}
 		}
+		// Remove cache control from prior messages if present
+		for i := 0; i < len(msgs)-1; i++ {
+			message := msgs[i]
+			for _, content := range message.Content {
+				content.CacheControl = nil
+			}
+		}
 	}
 	if config.Prefill != "" {
 		msgs = append(msgs, &llm.Message{
@@ -195,6 +202,13 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		if len(lastMessage.Content) > 0 {
 			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
 			lastContent.CacheControl = &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}
+		}
+		// Remove cache control from prior messages if present
+		for i := 0; i < len(msgs)-1; i++ {
+			message := msgs[i]
+			for _, content := range message.Content {
+				content.CacheControl = nil
+			}
 		}
 	}
 	if config.Prefill != "" {
