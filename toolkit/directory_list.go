@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/diveagents/dive/llm"
@@ -155,7 +156,11 @@ func (t *DirectoryListTool) resolvePath(path string) (string, error) {
 	}
 
 	// Check if the resolved path is within the root directory
-	if !filepath.HasPrefix(absPath, absRoot) {
+	cleanRoot := filepath.Clean(absRoot)
+	cleanPath := filepath.Clean(absPath)
+
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return "", fmt.Errorf("path attempts to access location outside of root directory")
 	}
 
