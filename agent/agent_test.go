@@ -47,13 +47,18 @@ func TestAgentChat(t *testing.T) {
 	err = agent.Start(ctx)
 	require.NoError(t, err)
 
-	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Hello, world!"))
+	stream, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage("Hello, world!")})
 	require.NoError(t, err)
 
-	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
+	generations, err := dive.ReadEventPayloads[*dive.Generation](ctx, stream)
 	require.NoError(t, err)
+	require.Greater(t, len(generations), 0)
 
-	text := strings.ToLower(response.Message.Text())
+	lastGeneration := generations[len(generations)-1]
+	lastMessage, ok := lastGeneration.LastMessage()
+	require.True(t, ok)
+
+	text := strings.ToLower(lastMessage.Text())
 	matches := strings.Contains(text, "hello") || strings.Contains(text, "hi")
 	require.True(t, matches)
 
@@ -97,13 +102,15 @@ func TestAgentChatWithTools(t *testing.T) {
 	require.NoError(t, err)
 	defer agent.Stop(ctx)
 
-	stream, err := agent.Chat(ctx, llm.NewSingleUserMessage("Please use the echo tool to echo 'hello world'"))
+	stream, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage("Please use the echo tool to echo 'hello world'")})
 	require.NoError(t, err)
 
-	response, err := dive.WaitForEvent[*llm.Response](ctx, stream)
+	messages, err := dive.ReadMessages(ctx, stream)
 	require.NoError(t, err)
+	require.Greater(t, len(messages), 0)
 
-	text := strings.ToLower(response.Message.Text())
+	lastMessage := messages[len(messages)-1]
+	text := strings.ToLower(lastMessage.Text())
 	require.Contains(t, text, "echo")
 	require.Equal(t, "hello world", echoInput)
 
@@ -137,10 +144,12 @@ func TestAgentTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	event, err := dive.WaitForEvent[*dive.TaskResult](ctx, stream)
+	results, err := dive.ReadEventPayloads[*dive.TaskResult](ctx, stream)
 	require.NoError(t, err)
+	require.Greater(t, len(results), 0)
 
-	content := strings.ToLower(event.Content)
+	lastResult := results[len(results)-1]
+	content := strings.ToLower(lastResult.Content)
 	matches := 0
 	for _, word := range []string{"cat", "whiskers", "paws"} {
 		if strings.Contains(content, word) {

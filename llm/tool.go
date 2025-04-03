@@ -2,20 +2,18 @@ package llm
 
 import (
 	"context"
+	"time"
 )
 
-// ToolOutput contains the output of a tool call
-type ToolOutput struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Output string `json:"output"`
-}
-
-// ToolError is an error that occurred during a tool call
-type ToolError struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Error string `json:"error"`
+// ToolResult contains the input and output of a tool call
+type ToolResult struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Input       string     `json:"input,omitempty"`
+	Output      string     `json:"output,omitempty"`
+	Error       error      `json:"error,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 type Schema struct {

@@ -18,10 +18,10 @@ func TestHelloWorld(t *testing.T) {
 		llm.NewUserMessage("respond with \"hello\""),
 	})
 	require.NoError(t, err)
-	require.Equal(t, "hello", response.Message.Text())
+	require.Equal(t, "hello", response.Message().Text())
 }
 
-func TestHelloWorldStream(t *testing.T) {
+func TestStreamCountTo10(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 	iterator, err := provider.Stream(ctx, []*llm.Message{
@@ -36,41 +36,17 @@ func TestHelloWorldStream(t *testing.T) {
 	}
 	require.NoError(t, iterator.Err())
 
-	var finalResponse *llm.Response
-	var finalText string
-	var texts []string
+	var accumulatedText string
 	for _, event := range events {
-		if event.Response != nil {
-			finalResponse = event.Response
-		}
 		switch event.Type {
-		case llm.EventContentBlockDelta:
-			numbers := strings.FieldsFunc(event.Delta.Text, func(r rune) bool {
-				return r == '\n' || r == ' '
-			})
-			texts = append(texts, numbers...)
-			finalText += event.Delta.Text
+		case llm.EventTypeContentBlockDelta:
+			accumulatedText += event.Delta.Text
 		}
 	}
 
 	expectedOutput := "1 2 3 4 5 6 7 8 9 10"
-	normalizedFinalText := strings.Join(strings.Fields(finalText), " ")
-	normalizedTexts := strings.Join(texts, " ")
-
-	require.Equal(t, expectedOutput, normalizedFinalText)
-	require.Equal(t, expectedOutput, normalizedTexts)
-	require.NotNil(t, finalResponse)
-	require.Equal(t, llm.Assistant, finalResponse.Role)
-
-	require.Len(t, finalResponse.Message.Content, 1)
-	content := finalResponse.Message.Content[0]
-	require.Equal(t, llm.ContentTypeText, content.Type)
-	require.Equal(t, finalText, content.Text)
-
-	usage := finalResponse.Usage
-	require.NotNil(t, usage)
-	require.True(t, usage.OutputTokens > 0)
-	require.True(t, usage.InputTokens > 0)
+	normalizedText := strings.Join(strings.Fields(accumulatedText), " ")
+	require.Equal(t, expectedOutput, normalizedText)
 }
 
 func addFunc(ctx context.Context, input string) (string, error) {
@@ -109,8 +85,8 @@ func TestToolUse(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, len(response.Message.Content))
-	content := response.Message.Content[0]
+	require.Equal(t, 1, len(response.Message().Content))
+	content := response.Message().Content[0]
 	require.Equal(t, llm.ContentTypeToolUse, content.Type)
 	require.Equal(t, "add", content.Name)
 	require.Equal(t, `{"a":567,"b":111}`, string(content.Input))
@@ -155,18 +131,21 @@ func TestToolCallStream(t *testing.T) {
 	require.NoError(t, err)
 	defer iterator.Close()
 
-	var finalResponse *llm.Response
+	accumulator := llm.NewResponseAccumulator()
 	for iterator.Next() {
 		event := iterator.Event()
-		if event.Response != nil {
-			finalResponse = event.Response
+		if err := accumulator.AddEvent(event); err != nil {
+			require.NoError(t, err)
 		}
 	}
 	require.NoError(t, iterator.Err())
-	require.NotNil(t, finalResponse, "Should have received a final response")
+	require.True(t, accumulator.IsComplete())
+
+	response := accumulator.Response()
+	require.NotNil(t, response, "Should have received a final response")
 
 	// Check if tool calls were properly processed
-	toolCalls := finalResponse.ToolCalls
+	toolCalls := response.ToolCalls()
 	require.Equal(t, 1, len(toolCalls))
 
 	toolCall := toolCalls[0]

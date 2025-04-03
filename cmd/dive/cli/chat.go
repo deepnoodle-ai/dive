@@ -14,9 +14,9 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
+	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
 	"github.com/fatih/color"
-	"github.com/mendableai/firecrawl-go"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +31,7 @@ var (
 func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
 
-	iterator, err := agent.Chat(ctx, llm.NewSingleUserMessage(message), dive.WithThreadID("chat"))
+	iterator, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage(message)}, dive.WithThreadID("chat"))
 	if err != nil {
 		return fmt.Errorf("error generating response: %v", err)
 	}
@@ -46,9 +46,6 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 		event := iterator.Event()
 		switch payload := event.Payload.(type) {
 		case *llm.Event:
-			if payload.Type == llm.EventContentBlockStop {
-				fmt.Printf("\n\n")
-			}
 			if payload.ContentBlock != nil {
 				cb := payload.ContentBlock
 				if cb.Type == "tool_use" {
@@ -61,15 +58,14 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 				if delta.PartialJSON != "" {
 					if !inToolUse {
 						inToolUse = true
-						fmt.Println("\n\n----")
+						fmt.Print("\n----\n")
 					}
 					toolUseAccum += delta.PartialJSON
 				} else if delta.Text != "" {
 					if inToolUse {
 						fmt.Println(yellowStyle.Sprint(toolName), yellowStyle.Sprint(toolID))
 						fmt.Println(yellowStyle.Sprint(toolUseAccum))
-						fmt.Println("----")
-						fmt.Println()
+						fmt.Print("----\n")
 						inToolUse = false
 						toolUseAccum = ""
 					}
@@ -100,13 +96,11 @@ func runChat(backstory, agentName string, reasoningBudget int) error {
 	var theTools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		app, err := firecrawl.NewFirecrawlApp(key, "")
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
 		if err != nil {
 			log.Fatal(err)
 		}
-		scraper := toolkit.NewFirecrawlScrapeTool(toolkit.FirecrawlScrapeToolOptions{
-			App: app,
-		})
+		scraper := toolkit.NewFetchTool(client)
 		theTools = append(theTools, scraper)
 	}
 
@@ -115,7 +109,7 @@ func runChat(backstory, agentName string, reasoningBudget int) error {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, toolkit.NewGoogleSearch(googleClient))
+		theTools = append(theTools, toolkit.NewSearchTool(googleClient))
 	}
 
 	modelSettings := &agent.ModelSettings{}

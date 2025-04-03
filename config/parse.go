@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 )
 
 // ParseFile loads an Environment configuration from a file. The file extension

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
+
+	"github.com/diveagents/dive/llm"
 )
 
 var ErrStreamClosed = errors.New("stream is closed")
@@ -21,18 +24,20 @@ type EventOrigin struct {
 type EventType string
 
 const (
-	EventTypeLLMRequest    EventType = "llm_request"
-	EventTypeLLMResponse   EventType = "llm_response"
-	EventTypeLLMEvent      EventType = "llm_event"
-	EventTypeToolCalled    EventType = "tool_called"
-	EventTypeToolOutput    EventType = "tool_output"
-	EventTypeToolError     EventType = "tool_error"
-	EventTypeTaskActivated EventType = "task_activated"
-	EventTypeTaskProgress  EventType = "task_progress"
-	EventTypeTaskPaused    EventType = "task_paused"
-	EventTypeTaskCompleted EventType = "task_completed"
-	EventTypeTaskError     EventType = "task_error"
-	EventTypeError         EventType = "error"
+	EventTypeGenerationStarted   EventType = "generation.started"
+	EventTypeGenerationProgress  EventType = "generation.progress"
+	EventTypeGenerationCompleted EventType = "generation.completed"
+	EventTypeGenerationError     EventType = "generation.error"
+	EventTypeLLMEvent            EventType = "llm.event"
+	EventTypeToolCalled          EventType = "tool.called"
+	EventTypeToolOutput          EventType = "tool.output"
+	EventTypeToolError           EventType = "tool.error"
+	EventTypeTaskActivated       EventType = "task.activated"
+	EventTypeTaskProgress        EventType = "task.progress"
+	EventTypeTaskPaused          EventType = "task.paused"
+	EventTypeTaskCompleted       EventType = "task.completed"
+	EventTypeTaskError           EventType = "task.error"
+	EventTypeError               EventType = "error"
 )
 
 func (t EventType) String() string {
@@ -86,31 +91,48 @@ type EventPublisher interface {
 	Close()
 }
 
-// WaitForEvent waits for an event with a payload of the specified type and returns it.
+// ReadEventPayloads waits for and returns all events with a payload of the specified type.
 // It will return an error if the context is canceled or if an error event is received.
-func WaitForEvent[T any](ctx context.Context, stream EventStream) (T, error) {
-	var result T
+func ReadEventPayloads[T any](ctx context.Context, stream EventStream) ([]T, error) {
+	var results []T
 	for stream.Next(ctx) {
 		event := stream.Event()
 		if event == nil {
-			return result, fmt.Errorf("received nil event from stream")
+			return results, fmt.Errorf("received nil event from stream")
 		}
 		if event.Error != nil {
-			return result, fmt.Errorf("received error event from stream: %w", event.Error)
+			return results, fmt.Errorf("received error event from stream: %w", event.Error)
 		}
 		if payload, ok := event.Payload.(T); ok {
-			return payload, nil
+			results = append(results, payload)
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return result, err
+		return results, err
 	}
-	select {
-	case <-ctx.Done():
-		return result, ctx.Err()
-	default:
-		return result, fmt.Errorf("stream completed without finding matching event")
+	return results, nil
+}
+
+// ReadMessages returns all messages generated in an interaction. This will include
+// both assistant messages and tool result messages.
+func ReadMessages(ctx context.Context, stream EventStream) ([]*llm.Message, error) {
+	for stream.Next(ctx) {
+		event := stream.Event()
+		if event == nil {
+			return nil, fmt.Errorf("received nil event from stream")
+		}
+		if event.Error != nil {
+			return nil, fmt.Errorf("received error event from stream: %w", event.Error)
+		}
+		if event.Type == EventTypeGenerationCompleted {
+			generation := event.Payload.(*Generation)
+			return generation.OutputMessages, nil
+		}
 	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("stream ended without a generation completed event")
 }
 
 type eventStream struct {
@@ -194,4 +216,37 @@ func (p *eventPublisher) Close() {
 		close(p.done)
 		close(p.stream.ch)
 	}
+}
+
+// Generation contains information about a Dive LLM interaction. This may have
+// involved one or more underlying LLM calls, since follow up calls may be made
+// to pass tool results back to the LLM.
+type Generation struct {
+	ID              string            `json:"id,omitempty"`
+	StartedAt       time.Time         `json:"started_at,omitempty"`
+	CompletedAt     *time.Time        `json:"completed_at,omitempty"`
+	Config          *llm.Config       `json:"config,omitempty"`
+	InputMessages   []*llm.Message    `json:"input_messages,omitempty"`
+	OutputMessages  []*llm.Message    `json:"output_messages,omitempty"`
+	ToolResults     []*llm.ToolResult `json:"tool_results,omitempty"`
+	ActiveToolCalls int               `json:"active_tool_calls,omitempty"`
+	TotalUsage      llm.Usage         `json:"total_usage,omitempty"`
+	Error           error             `json:"error,omitempty"`
+	IsDone          bool              `json:"is_done,omitempty"`
+	Model           string            `json:"model,omitempty"`
+}
+
+func (g *Generation) AccumulateUsage(usage llm.Usage) {
+	g.TotalUsage.InputTokens += usage.InputTokens
+	g.TotalUsage.OutputTokens += usage.OutputTokens
+	g.TotalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
+	g.TotalUsage.CacheReadInputTokens += usage.CacheReadInputTokens
+}
+
+func (g *Generation) LastMessage() (*llm.Message, bool) {
+	mLen := len(g.OutputMessages)
+	if mLen == 0 {
+		return nil, false
+	}
+	return g.OutputMessages[mLen-1], true
 }

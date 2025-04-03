@@ -87,22 +87,10 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	if err := execution.Wait(); err != nil {
 		return fmt.Errorf("error waiting for workflow: %v", err)
 	}
-
-	// // Monitor execution events
-	// for event := range execution.Events() {
-	// 	switch e := event.(type) {
-	// 	case *dive.StepStartEvent:
-	// 		fmt.Printf("\nStarting step: %s\n", boldStyle.Sprint(e.Name))
-	// 	case *dive.StepCompleteEvent:
-	// 		fmt.Printf("\nCompleted step: %s\n", boldStyle.Sprint(e.Name))
-	// 		if e.Result != nil {
-	// 			fmt.Printf("\nResult:\n%s\n", e.Result)
-	// 		}
-	// 	case *dive.StepErrorEvent:
-	// 		fmt.Printf("\nStep failed: %s\nError: %v\n", errorStyle.Sprint(e.Name), e.Error)
-	// 	}
-	// }
-
+	outputs := execution.StepOutputs()
+	for stepName, output := range outputs {
+		fmt.Printf("\nStep %s:\n%s\n", stepName, output)
+	}
 	return nil
 }
 

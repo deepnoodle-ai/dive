@@ -22,7 +22,7 @@ func main() {
 	if os.Getenv("LOG_LEVEL") != "" {
 		logLevel = os.Getenv("LOG_LEVEL")
 	} else {
-		logLevel = "info"
+		logLevel = "debug"
 	}
 
 	ctx := context.Background()
@@ -41,7 +41,7 @@ func main() {
 		Goal:   "Use Google to research assigned topics",
 		Model:  anthropic.New(),
 		Logger: slogger.New(slogger.LevelFromString(logLevel)),
-		Tools:  []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
+		Tools:  []llm.Tool{toolkit.NewSearchTool(googleClient)},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -64,10 +64,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer stream.Close()
 
-	result, err := dive.WaitForEvent[*dive.TaskResult](ctx, stream)
+	results, err := dive.ReadEventPayloads[*dive.TaskResult](ctx, stream)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(result.Content)
+	if len(results) == 0 {
+		log.Fatal("stream ended without a task result")
+	}
+	fmt.Println(results[0].Content)
 }

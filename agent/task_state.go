@@ -26,7 +26,7 @@ func (s *taskState) TrackResponse(response *llm.Response, updatedMessages []*llm
 	// contain thinking, primary output, then status. We could concatenate
 	// the new output with prior output, but for now it seems like it's better
 	// not to, and to request a full final response instead.
-	taskResponse := ParseStructuredResponse(response.Message.Text())
+	taskResponse := ParseStructuredResponse(response.Message().Text())
 	// s.Output = taskResponse.Text
 	// s.Reasoning = taskResponse.Thinking
 	// s.StatusDescription = taskResponse.StatusDescription

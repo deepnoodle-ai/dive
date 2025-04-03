@@ -7,8 +7,8 @@ import (
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/toolkit"
+	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
-	"github.com/mendableai/firecrawl-go"
 )
 
 func convertToolConfig(config map[string]interface{}, options interface{}) error {
@@ -36,7 +36,7 @@ func initializeTools(tools []Tool) (map[string]llm.Tool, error) {
 		configsByName[name] = tool.Parameters
 	}
 
-	if _, ok := configsByName["Google.Search"]; ok {
+	if _, ok := configsByName["Web.Search"]; ok {
 		key := os.Getenv("GOOGLE_SEARCH_CX")
 		if key == "" {
 			return nil, fmt.Errorf("google search requested but GOOGLE_SEARCH_CX not set")
@@ -45,26 +45,19 @@ func initializeTools(tools []Tool) (map[string]llm.Tool, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize Google Search: %w", err)
 		}
-		toolsMap["Google.Search"] = toolkit.NewGoogleSearch(googleClient)
+		toolsMap["Web.Search"] = toolkit.NewSearchTool(googleClient)
 	}
 
-	if _, ok := configsByName["Firecrawl.Scrape"]; ok {
+	if _, ok := configsByName["Web.Fetch"]; ok {
 		key := os.Getenv("FIRECRAWL_API_KEY")
 		if key == "" {
 			return nil, fmt.Errorf("firecrawl requested but FIRECRAWL_API_KEY not set")
 		}
-		app, err := firecrawl.NewFirecrawlApp(key, "")
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize Firecrawl: %w", err)
 		}
-		var options toolkit.FirecrawlScrapeToolOptions
-		if config, ok := configsByName["Firecrawl.Scrape"]; ok {
-			if err := convertToolConfig(config, &options); err != nil {
-				return nil, fmt.Errorf("failed to populate firecrawl tool config: %w", err)
-			}
-		}
-		options.App = app
-		toolsMap["Firecrawl.Scrape"] = toolkit.NewFirecrawlScrapeTool(options)
+		toolsMap["Web.Fetch"] = toolkit.NewFetchTool(client)
 	}
 
 	if _, ok := configsByName["File.Read"]; ok {

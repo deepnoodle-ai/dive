@@ -24,12 +24,12 @@ func main() {
 	model := anthropic.New()
 	response, err := model.Generate(
 		context.Background(),
-		llm.NewSingleUserMessage(prompt),
+		llm.Messages{llm.NewUserMessage(prompt)},
 		llm.WithMaxTokens(2048),
 		llm.WithTemperature(0.7),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(response.Message.Text())
+	fmt.Println(response.Message().Text())
 }

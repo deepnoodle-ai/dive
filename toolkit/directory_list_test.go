@@ -232,7 +232,7 @@ func TestDirectoryListTool(t *testing.T) {
 		})
 
 		def := tool.Definition()
-		require.Equal(t, "ListDirectory", def.Name)
+		require.Equal(t, "directory_list", def.Name)
 		require.Contains(t, def.Description, "/default/path")
 		require.Contains(t, def.Description, "/root/dir")
 		require.Contains(t, def.Description, "restricted based on configured allowlist and denylist patterns")

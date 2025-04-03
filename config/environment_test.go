@@ -25,7 +25,7 @@ func TestEnvironment_Build(t *testing.T) {
 		},
 		Tools: []Tool{
 			{
-				Name:    "Google.Search",
+				Name:    "Web.Search",
 				Enabled: true,
 			},
 			{
@@ -39,7 +39,7 @@ func TestEnvironment_Build(t *testing.T) {
 				Goal:     "Assist with research",
 				Provider: "anthropic",
 				Model:    "claude-3-sonnet-20240229",
-				Tools:    []string{"Google.Search", "File.Read"},
+				Tools:    []string{"Web.Search", "File.Read"},
 			},
 			{
 				Name:     "writer",

@@ -10,9 +10,9 @@ Config:
     Level: info
 
 Tools:
-  - Name: Google.Search
+  - Name: Web.Search
     Enabled: true
-  - Name: Firecrawl.Scrape
+  - Name: Web.Fetch
     Enabled: true
   - Name: Directory.List
     Enabled: true
@@ -23,8 +23,8 @@ Agents:
   - Name: Engineer
     Goal: Analyze codebases and generate project overviews
     Tools:
-      - Google.Search
-      - Firecrawl.Scrape
+      - Web.Search
+      - Web.Fetch
       - Directory.List
       - File.Read
 

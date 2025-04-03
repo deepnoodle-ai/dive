@@ -7,14 +7,14 @@ import (
 	"github.com/diveagents/dive/slogger"
 )
 
-// CacheControl is used to control how the LLM caches responses.
-type CacheControl string
+// CacheControlType is used to control how the LLM caches responses.
+type CacheControlType string
 
 const (
-	CacheControlEphemeral CacheControl = "ephemeral"
+	CacheControlTypeEphemeral CacheControlType = "ephemeral"
 )
 
-func (c CacheControl) String() string {
+func (c CacheControlType) String() string {
 	return string(c)
 }
 

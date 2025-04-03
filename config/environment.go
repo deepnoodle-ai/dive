@@ -14,7 +14,7 @@ import (
 	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 )
 
 // Environment is a serializable representation of an AI agent environment
