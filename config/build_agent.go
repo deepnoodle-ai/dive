@@ -10,12 +10,7 @@ import (
 	"github.com/diveagents/dive/slogger"
 )
 
-func buildAgent(
-	agentDef Agent,
-	config Config,
-	tools map[string]llm.Tool,
-	logger slogger.Logger,
-) (dive.Agent, error) {
+func buildAgent(agentDef Agent, config Config, tools map[string]llm.Tool, logger slogger.Logger) (dive.Agent, error) {
 	providerName := agentDef.Provider
 	if providerName == "" {
 		providerName = config.LLM.DefaultProvider
@@ -43,40 +38,59 @@ func buildAgent(
 		agentTools = append(agentTools, tool)
 	}
 
-	var chatTimeout time.Duration
-	if agentDef.ChatTimeout != "" {
+	var responseTimeout time.Duration
+	if agentDef.ResponseTimeout != nil {
 		var err error
-		chatTimeout, err = time.ParseDuration(agentDef.ChatTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("invalid chat timeout: %w", err)
+		switch v := agentDef.ResponseTimeout.(type) {
+		case string:
+			responseTimeout, err = time.ParseDuration(v)
+			if err != nil {
+				return nil, fmt.Errorf("invalid response timeout: %w", err)
+			}
+		case int:
+			responseTimeout = time.Duration(v) * time.Second
+		case float64:
+			responseTimeout = time.Duration(int64(v)) * time.Second
+		default:
+			return nil, fmt.Errorf("invalid response timeout: %v", v)
 		}
 	}
 
-	var taskTimeout time.Duration
-	if agentDef.TaskTimeout != "" {
-		var err error
-		taskTimeout, err = time.ParseDuration(agentDef.TaskTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("invalid task timeout: %w", err)
+	var modelSettings *agent.ModelSettings
+	if agentDef.ModelSettings != nil {
+		var toolChoice llm.ToolChoice
+		if agentDef.ModelSettings.ToolChoice != "" {
+			toolChoice = llm.ToolChoice(agentDef.ModelSettings.ToolChoice)
+			if !toolChoice.IsValid() {
+				return nil, fmt.Errorf("invalid tool choice: %q", agentDef.ModelSettings.ToolChoice)
+			}
 		}
-	}
-
-	cacheControl := agentDef.CacheControl
-	if cacheControl == "" {
-		cacheControl = config.LLM.CacheControl
+		modelSettings = &agent.ModelSettings{
+			Temperature:       agentDef.ModelSettings.Temperature,
+			PresencePenalty:   agentDef.ModelSettings.PresencePenalty,
+			FrequencyPenalty:  agentDef.ModelSettings.FrequencyPenalty,
+			ReasoningBudget:   agentDef.ModelSettings.ReasoningBudget,
+			ReasoningEffort:   agentDef.ModelSettings.ReasoningEffort,
+			MaxTokens:         agentDef.ModelSettings.MaxTokens,
+			ParallelToolCalls: agentDef.ModelSettings.ParallelToolCalls,
+			ToolChoice:        toolChoice,
+		}
 	}
 
 	return agent.New(agent.Options{
-		Name:               agentDef.Name,
-		Goal:               agentDef.Goal,
-		Backstory:          agentDef.Backstory,
-		IsSupervisor:       agentDef.IsSupervisor,
-		Subordinates:       agentDef.Subordinates,
-		Model:              model,
-		Tools:              agentTools,
-		ChatTimeout:        chatTimeout,
-		TaskTimeout:        taskTimeout,
-		Logger:             logger,
-		ToolIterationLimit: agentDef.ToolIterationLimit,
+		Name:                 agentDef.Name,
+		Goal:                 agentDef.Goal,
+		Instructions:         agentDef.Instructions,
+		IsSupervisor:         agentDef.IsSupervisor,
+		Subordinates:         agentDef.Subordinates,
+		Model:                model,
+		Tools:                agentTools,
+		ToolChoice:           llm.ToolChoice(agentDef.ToolChoice),
+		ResponseTimeout:      responseTimeout,
+		ToolIterationLimit:   agentDef.ToolIterationLimit,
+		DateAwareness:        agentDef.DateAwareness,
+		SystemPromptTemplate: agentDef.SystemPrompt,
+		ModelSettings:        modelSettings,
+		Logger:               logger,
 	})
 }

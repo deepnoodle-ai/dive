@@ -31,21 +31,21 @@ var (
 func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
 
-	iterator, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage(message)}, dive.WithThreadID("chat"))
+	stream, err := agent.StreamResponse(ctx, dive.WithInput(message), dive.WithThreadID("cli-chat"))
 	if err != nil {
 		return fmt.Errorf("error generating response: %v", err)
 	}
-	defer iterator.Close()
+	defer stream.Close()
 
 	var inToolUse bool
 	toolUseAccum := ""
 	toolName := ""
 	toolID := ""
 
-	for iterator.Next(ctx) {
-		event := iterator.Event()
-		switch payload := event.Payload.(type) {
-		case *llm.Event:
+	for stream.Next(ctx) {
+		event := stream.Event()
+		if event.Type == dive.EventTypeLLMEvent {
+			payload := event.Item.Event
 			if payload.ContentBlock != nil {
 				cb := payload.ContentBlock
 				if cb.Type == "tool_use" {
@@ -83,7 +83,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 
 var DefaultChatBackstory = `You are a helpful AI assistant. You aim to be direct, clear, and helpful in your responses.`
 
-func runChat(backstory, agentName string, reasoningBudget int) error {
+func runChat(instructions, agentName string, reasoningBudget int) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -122,18 +122,16 @@ func runChat(backstory, agentName string, reasoningBudget int) error {
 
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,
-		Backstory:        backstory,
+		Instructions:     instructions,
 		Model:            model,
 		Logger:           logger,
 		Tools:            theTools,
 		ThreadRepository: agent.NewMemoryThreadRepository(),
-		AutoStart:        true,
 		ModelSettings:    modelSettings,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating agent: %v", err)
 	}
-	defer chatAgent.Stop(ctx)
 
 	fmt.Println(boldStyle.Sprint("Chat Session"))
 	fmt.Println()

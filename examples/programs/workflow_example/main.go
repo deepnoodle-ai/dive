@@ -71,7 +71,7 @@ func main() {
 
 	supervisor, err := agent.New(agent.Options{
 		Name:         "Supervisor",
-		Backstory:    "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
+		Instructions: "Research Supervisor and Renowned Author. Assign research tasks to the research assistant, but prepare the final reports or biographies yourself.",
 		IsSupervisor: true,
 		Subordinates: []string{"Research Assistant"},
 		Model:        model,
@@ -82,11 +82,11 @@ func main() {
 	}
 
 	researcher, err := agent.New(agent.Options{
-		Name:      "Research Assistant",
-		Backstory: "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
-		Model:     model,
-		Tools:     theTools,
-		Logger:    logger,
+		Name:         "Research Assistant",
+		Instructions: "You are an expert research assistant. Don't go too deep into the details unless specifically asked.",
+		Model:        model,
+		Tools:        theTools,
+		Logger:       logger,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -97,10 +97,8 @@ func main() {
 		Description: "A workflow for the research assistant. The supervisor will assign tasks to the research assistant.",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
-				Name: "Research Step",
-				Prompt: &dive.Prompt{
-					Text: "Research the history of maple syrup production in Vermont.",
-				},
+				Name:   "Research Step",
+				Prompt: "Research the history of maple syrup production in Vermont.",
 			}),
 		},
 	})
@@ -120,7 +118,9 @@ func main() {
 	}
 	defer env.Stop(ctx)
 
-	execution, err := env.ExecuteWorkflow(ctx, w.Name(), map[string]interface{}{})
+	execution, err := env.ExecuteWorkflow(ctx, environment.ExecutionOptions{
+		WorkflowName: w.Name(),
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

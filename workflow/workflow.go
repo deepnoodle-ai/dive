@@ -2,9 +2,26 @@ package workflow
 
 import (
 	"fmt"
-
-	"github.com/diveagents/dive"
 )
+
+// Input defines an expected input parameter
+type Input struct {
+	Name        string      `json:"name"`
+	Type        string      `json:"type,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Required    bool        `json:"required,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
+}
+
+// Output defines an expected output parameter
+type Output struct {
+	Name        string      `json:"name"`
+	Type        string      `json:"type,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Format      string      `json:"format,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
+	Document    string      `json:"document,omitempty"`
+}
 
 type Trigger struct {
 	Name   string
@@ -16,8 +33,8 @@ type Trigger struct {
 type Workflow struct {
 	name        string
 	description string
-	inputs      []*dive.Input
-	output      *dive.Output
+	inputs      []*Input
+	output      *Output
 	steps       []*Step
 	graph       *Graph
 	triggers    []*Trigger
@@ -27,8 +44,8 @@ type Workflow struct {
 type Options struct {
 	Name        string
 	Description string
-	Inputs      []*dive.Input
-	Output      *dive.Output
+	Inputs      []*Input
+	Output      *Output
 	Steps       []*Step
 	Triggers    []*Trigger
 }
@@ -68,11 +85,11 @@ func (w *Workflow) Description() string {
 	return w.description
 }
 
-func (w *Workflow) Inputs() []*dive.Input {
+func (w *Workflow) Inputs() []*Input {
 	return w.inputs
 }
 
-func (w *Workflow) Output() *dive.Output {
+func (w *Workflow) Output() *Output {
 	return w.output
 }
 

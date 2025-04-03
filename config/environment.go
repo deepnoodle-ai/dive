@@ -29,7 +29,6 @@ type Environment struct {
 	Workflows   []Workflow `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
 	Triggers    []Trigger  `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
 	Schedules   []Schedule `yaml:"Schedules,omitempty" json:"Schedules,omitempty"`
-	Prompts     []Prompt   `yaml:"Prompts,omitempty" json:"Prompts,omitempty"`
 }
 
 // Save writes an Environment configuration to a file. The file extension is used to
@@ -83,7 +82,11 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	if buildOpts.Logger != nil {
 		logger = buildOpts.Logger
 	} else if env.Config.Logging.Level != "" {
-		level := slogger.LevelFromString(env.Config.Logging.Level)
+		levelStr := env.Config.Logging.Level
+		if !isValidLogLevel(levelStr) {
+			return nil, fmt.Errorf("invalid log level: %s", levelStr)
+		}
+		level := slogger.LevelFromString(levelStr)
 		logger = slogger.New(level)
 	}
 
@@ -103,20 +106,10 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		agents = append(agents, agent)
 	}
 
-	// Prompts
-	var prompts []*dive.Prompt
-	for _, promptDef := range env.Prompts {
-		prompt, err := buildPrompt(promptDef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build prompt %s: %w", promptDef.Name, err)
-		}
-		prompts = append(prompts, prompt)
-	}
-
 	// Workflows
 	var workflows []*workflow.Workflow
 	for _, workflowDef := range env.Workflows {
-		workflow, err := buildWorkflow(workflowDef, agents, prompts)
+		workflow, err := buildWorkflow(workflowDef, agents)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build workflow %s: %w", workflowDef.Name, err)
 		}

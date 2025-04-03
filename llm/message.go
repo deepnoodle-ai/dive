@@ -27,6 +27,22 @@ type Usage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
+func (u *Usage) Copy() *Usage {
+	return &Usage{
+		InputTokens:              u.InputTokens,
+		OutputTokens:             u.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens,
+	}
+}
+
+func (u *Usage) Add(other *Usage) {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.CacheCreationInputTokens += other.CacheCreationInputTokens
+	u.CacheReadInputTokens += other.CacheReadInputTokens
+}
+
 // Response is the generated response from an LLM. Matches the Anthropic
 // response format documented here:
 // https://docs.anthropic.com/en/api/messages#response-content

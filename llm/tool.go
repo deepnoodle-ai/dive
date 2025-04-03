@@ -45,10 +45,18 @@ type ToolFunc func(ctx context.Context, input string) (string, error)
 
 type ToolChoice string
 
+func (t ToolChoice) IsValid() bool {
+	return t == ToolChoiceAuto ||
+		t == ToolChoiceAny ||
+		t == ToolChoiceNone ||
+		t == ToolChoiceTool
+}
+
 const (
-	ToolChoiceAuto     ToolChoice = "auto"
-	ToolChoiceNone     ToolChoice = "none"
-	ToolChoiceRequired ToolChoice = "required"
+	ToolChoiceAuto ToolChoice = "auto"
+	ToolChoiceAny  ToolChoice = "any"
+	ToolChoiceNone ToolChoice = "none"
+	ToolChoiceTool ToolChoice = "tool"
 )
 
 type Tool interface {

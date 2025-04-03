@@ -175,22 +175,22 @@ func TestLoadDirectory(t *testing.T) {
 		{
 			name: "01-base.yaml",
 			content: `
-name: test-env
-description: Base Environment
+Name: test-env
+Description: Base Environment
 `,
 		},
 		{
 			name: "02-override.yaml",
 			content: `
-name: test-env
-description: Overridden Environment
+Name: test-env2
+Description: Override 1
 `,
 		},
 		{
 			name: "03-additional.json",
 			content: `{
-				"name": "test-env",
-				"description": "JSON Override"
+"Name": "test-env3",
+"Description": "Override 2"
 			}`,
 		},
 	}
@@ -232,8 +232,8 @@ description: Overridden Environment
 			assert.NoError(t, err)
 			assert.NotNil(t, env)
 			// The last file (JSON) should override previous values
-			assert.Equal(t, "test-env", env.Name())
-			assert.Equal(t, "JSON Override", env.Description())
+			assert.Equal(t, "test-env3", env.Name())
+			assert.Equal(t, "Override 2", env.Description())
 		})
 	}
 }

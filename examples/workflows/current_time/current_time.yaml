@@ -1,27 +1,14 @@
 Name: Current Time
 Description: Show the current time
-
-Config:
-  LLM:
-    DefaultProvider: anthropic
-    DefaultModel: claude-3-7-sonnet-20250219
-    CacheControl: ephemeral
-  Logging:
-    Level: info
-
 Agents:
-  - Name: Assistant
-    Description: A helpful assistant that can respond to questions and provide information
-
+  - Name: Basic Agent
+    Goal: Resond kindly to any requests
 Workflows:
   - Name: Show Current Time
     Steps:
       - Name: Get Current Time
         Action: Time.Now
         Store: current_time
-
-      - Name: Print Current Time
-        Prompt:
-          Text: |
-            The current time is: ${current_time}
-            Respond with the current wall clock time.
+      - Name: Greetings with Time
+        Prompt: |
+          Say hello to the user and mention that it is currently ${current_time}.

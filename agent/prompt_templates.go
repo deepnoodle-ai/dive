@@ -33,11 +33,11 @@ Your goal: "{{ .Goal }}"
 
 Keep this goal in mind as you work on tasks and respond to messages.
 {{- end }}
-{{- if .Backstory }}
+{{- if .Instructions }}
 
-Your backstory: "{{ .Backstory }}"
+Your instructions: "{{ .Instructions }}"
 
-Use this backstory to shape your actions and responses.
+Follow these instructions when working on tasks and responding to messages.
 {{- end }}
 
 # Team Overview

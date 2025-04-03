@@ -15,9 +15,7 @@ import (
 )
 
 var (
-	DefaultTaskTimeout        = time.Minute * 20
-	DefaultChatTimeout        = time.Minute * 4
-	DefaultTickFrequency      = time.Second * 5
+	DefaultResponseTimeout    = time.Minute * 4
 	DefaultToolIterationLimit = 16
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
@@ -28,8 +26,7 @@ var (
 
 // Confirm our standard implementation satisfies the different Agent interfaces
 var (
-	_ dive.Agent         = &Agent{}
-	_ dive.RunnableAgent = &Agent{}
+	_ dive.Agent = &Agent{}
 )
 
 // ModelSettings are used to configure details of the LLM for an Agent.
@@ -48,15 +45,13 @@ type ModelSettings struct {
 type Options struct {
 	Name                 string
 	Goal                 string
-	Backstory            string
+	Instructions         string
 	IsSupervisor         bool
 	Subordinates         []string
 	Model                llm.LLM
 	Tools                []llm.Tool
 	ToolChoice           llm.ToolChoice
-	TickFrequency        time.Duration
-	TaskTimeout          time.Duration
-	ChatTimeout          time.Duration
+	ResponseTimeout      time.Duration
 	Caching              *bool
 	Hooks                llm.Hooks
 	Logger               slogger.Logger
@@ -67,29 +62,21 @@ type Options struct {
 	DocumentRepository   dive.DocumentRepository
 	ThreadRepository     dive.ThreadRepository
 	SystemPromptTemplate string
-	AutoStart            bool
 }
 
 // Agent is the standard implementation of the Agent interface.
 type Agent struct {
 	name                 string
 	goal                 string
-	backstory            string
+	instructions         string
 	model                llm.LLM
-	running              bool
 	tools                []llm.Tool
 	toolsByName          map[string]llm.Tool
 	toolChoice           llm.ToolChoice
 	isSupervisor         bool
 	subordinates         []string
-	tickFrequency        time.Duration
-	taskTimeout          time.Duration
-	chatTimeout          time.Duration
+	responseTimeout      time.Duration
 	caching              *bool
-	taskQueue            []*taskState
-	recentTasks          []*taskState
-	activeTask           *taskState
-	ticker               *time.Ticker
 	hooks                llm.Hooks
 	logger               slogger.Logger
 	toolIterationLimit   int
@@ -99,24 +86,13 @@ type Agent struct {
 	documentRepository   dive.DocumentRepository
 	threadRepository     dive.ThreadRepository
 	systemPromptTemplate *template.Template
-
-	// Holds incoming messages to be processed by the agent's run loop
-	mailbox chan interface{}
-
-	mutex sync.Mutex
-	wg    sync.WaitGroup
+	mutex                sync.Mutex
 }
 
 // New returns a new Agent configured with the given options.
 func New(opts Options) (*Agent, error) {
-	if opts.TickFrequency <= 0 {
-		opts.TickFrequency = DefaultTickFrequency
-	}
-	if opts.TaskTimeout <= 0 {
-		opts.TaskTimeout = DefaultTaskTimeout
-	}
-	if opts.ChatTimeout <= 0 {
-		opts.ChatTimeout = DefaultChatTimeout
+	if opts.ResponseTimeout <= 0 {
+		opts.ResponseTimeout = DefaultResponseTimeout
 	}
 	if opts.ToolIterationLimit <= 0 {
 		opts.ToolIterationLimit = DefaultToolIterationLimit
@@ -145,18 +121,15 @@ func New(opts Options) (*Agent, error) {
 	agent := &Agent{
 		name:                 strings.TrimSpace(opts.Name),
 		goal:                 strings.TrimSpace(opts.Goal),
-		backstory:            strings.TrimSpace(opts.Backstory),
+		instructions:         strings.TrimSpace(opts.Instructions),
 		model:                opts.Model,
 		environment:          opts.Environment,
 		isSupervisor:         opts.IsSupervisor,
 		subordinates:         opts.Subordinates,
-		tickFrequency:        opts.TickFrequency,
-		taskTimeout:          opts.TaskTimeout,
-		chatTimeout:          opts.ChatTimeout,
+		responseTimeout:      opts.ResponseTimeout,
 		toolIterationLimit:   opts.ToolIterationLimit,
 		caching:              opts.Caching,
 		hooks:                opts.Hooks,
-		mailbox:              make(chan interface{}, 16),
 		logger:               opts.Logger,
 		dateAwareness:        opts.DateAwareness,
 		documentRepository:   opts.DocumentRepository,
@@ -184,7 +157,7 @@ func New(opts Options) (*Agent, error) {
 		if !foundAssignWorkTool {
 			tools = append(tools, NewAssignWorkTool(AssignWorkToolOptions{
 				Self:               agent,
-				DefaultTaskTimeout: opts.TaskTimeout,
+				DefaultTaskTimeout: opts.ResponseTimeout,
 			}))
 		}
 	}
@@ -199,14 +172,8 @@ func New(opts Options) (*Agent, error) {
 
 	// Register with environment if provided
 	if opts.Environment != nil {
-		if err := opts.Environment.RegisterAgent(agent); err != nil {
+		if err := opts.Environment.AddAgent(agent); err != nil {
 			return nil, fmt.Errorf("failed to register agent with environment: %w", err)
-		}
-	}
-
-	if opts.AutoStart {
-		if err := agent.Start(context.Background()); err != nil {
-			return nil, fmt.Errorf("failed to start agent: %w", err)
 		}
 	}
 
@@ -221,8 +188,8 @@ func (a *Agent) Goal() string {
 	return a.goal
 }
 
-func (a *Agent) Backstory() string {
-	return a.backstory
+func (a *Agent) Instructions() string {
+	return a.instructions
 }
 
 func (a *Agent) IsSupervisor() bool {
@@ -261,9 +228,6 @@ func (a *Agent) SetEnvironment(env dive.Environment) error {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 
-	if a.running {
-		return fmt.Errorf("agent is already running")
-	}
 	if a.environment != nil {
 		return fmt.Errorf("agent is already associated with an environment")
 	}
@@ -271,214 +235,228 @@ func (a *Agent) SetEnvironment(env dive.Environment) error {
 	return nil
 }
 
-func (a *Agent) Start(ctx context.Context) error {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-
-	if a.running {
-		return fmt.Errorf("agent is already running")
+func (a *Agent) prepareThreadMessages(
+	ctx context.Context,
+	threadID string,
+	messages []*llm.Message,
+) (*dive.Thread, []*llm.Message, error) {
+	if threadID == "" {
+		return nil, messages, nil
 	}
-
-	a.running = true
-	a.wg = sync.WaitGroup{}
-	a.wg.Add(1)
-	go a.run()
-
-	a.logger.Debug("agent started",
-		"name", a.name,
-		"goal", a.goal,
-		"is_supervisor", a.isSupervisor,
-		"subordinates", a.subordinates,
-		"task_timeout", a.taskTimeout,
-		"chat_timeout", a.chatTimeout,
-		"tick_frequency", a.tickFrequency,
-		"tool_iteration_limit", a.toolIterationLimit,
-		"model", a.model.Name(),
-	)
-	return nil
+	if a.threadRepository == nil {
+		return nil, nil, ErrThreadsAreNotEnabled
+	}
+	thread, err := a.getOrCreateThread(ctx, threadID)
+	if err != nil {
+		return nil, nil, err
+	}
+	threadMessages := append(thread.Messages, messages...)
+	return thread, threadMessages, nil
 }
 
-func (a *Agent) Stop(ctx context.Context) error {
-	a.mutex.Lock()
-	defer func() {
-		a.running = false
-		a.mutex.Unlock()
-		a.logger.Debug("agent stopped", "name", a.name)
-	}()
-
-	if !a.running {
-		return fmt.Errorf("agent is not running")
-	}
-	done := make(chan error)
-
-	a.mailbox <- messageStop{ctx: ctx, done: done}
-	close(a.mailbox)
-
-	select {
-	case err := <-done:
-		a.wg.Wait()
-		return err
-	case <-ctx.Done():
-		return fmt.Errorf("timeout waiting for agent to stop: %w", ctx.Err())
-	}
-}
-
-func (a *Agent) IsRunning() bool {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-
-	return a.running
-}
-
-func (a *Agent) Chat(ctx context.Context, messages []*llm.Message, opts ...dive.ChatOption) (dive.EventStream, error) {
-	if !a.IsRunning() {
-		return nil, fmt.Errorf("agent is not running")
-	}
-
-	var chatOptions dive.ChatOptions
+func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
+	var chatOptions dive.Options
 	chatOptions.Apply(opts)
 
-	stream, publisher := dive.NewEventStream()
-
-	chatMessage := messageChat{
-		messages:  messages,
-		options:   chatOptions,
-		publisher: publisher,
-	}
-
-	select {
-	case a.mailbox <- chatMessage:
-		return stream, nil
-	case <-ctx.Done():
-		stream.Close()
-		return nil, ctx.Err()
-	}
-}
-
-func (a *Agent) Work(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-	if !a.IsRunning() {
-		return nil, fmt.Errorf("agent is not running")
-	}
-
-	stream, publisher := dive.NewEventStream()
-
-	message := messageWork{
-		task:      task,
-		publisher: publisher,
-	}
-
-	select {
-	case a.mailbox <- message:
-		return stream, nil
-	case <-ctx.Done():
-		stream.Close()
-		return nil, ctx.Err()
-	}
-}
-
-// This is the agent's main run loop. It dispatches incoming messages and runs
-// a ticker that wakes the agent up periodically even if there are no messages.
-func (a *Agent) run() error {
-	defer a.wg.Done()
-
-	a.ticker = time.NewTicker(a.tickFrequency)
-	defer a.ticker.Stop()
-
-	for {
-		select {
-		case <-a.ticker.C:
-		case msg := <-a.mailbox:
-			switch msg := msg.(type) {
-			case messageWork:
-				a.handleWork(msg)
-
-			case messageChat:
-				a.handleChat(msg)
-
-			case messageStop:
-				msg.done <- nil
-				return nil
-			}
-		}
-		// Make progress on any active tasks
-		a.doSomeWork()
-	}
-}
-
-func (a *Agent) handleWork(m messageWork) {
-	a.taskQueue = append(a.taskQueue, &taskState{
-		Task:      m.task,
-		Publisher: m.publisher,
-		Status:    dive.TaskStatusQueued,
-	})
-}
-
-func (a *Agent) handleChat(m messageChat) {
-	var ctx context.Context
-	if a.chatTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), a.chatTimeout)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
+	responseID := dive.NewID()
 
 	logger := a.logger.With(
 		"agent", a.name,
-		"thread_id", m.options.ThreadID,
-		"user_id", m.options.UserID,
+		"thread_id", chatOptions.ThreadID,
+		"user_id", chatOptions.UserID,
+		"response_id", responseID,
 	)
-	logger.Info("handling chat")
+	logger.Info("creating response")
 
-	publisher := m.publisher
+	messages := a.prepareMessages(chatOptions)
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+
+	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages)
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt, err := a.buildSystemPrompt()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build system prompt: %w", err)
+	}
+
+	var publisher dive.EventPublisher
+	if chatOptions.EventCallback != nil {
+		publisher = &callbackPublisher{callback: chatOptions.EventCallback}
+	} else {
+		publisher = &nullEventPublisher{}
+	}
 	defer publisher.Close()
 
-	// Build the system prompt for a chat
-	systemPrompt, err := a.buildSystemPrompt("chat")
+	var cancel context.CancelFunc
+	if a.responseTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, a.responseTimeout)
+		defer cancel()
+	}
+
+	response := &dive.Response{
+		ID:        responseID,
+		Model:     a.model.Name(),
+		CreatedAt: time.Now(),
+	}
+
+	publisher.Send(ctx, &dive.ResponseEvent{
+		Type:     dive.EventTypeResponseCreated,
+		Response: response,
+	})
+
+	genResult, err := a.generate(ctx, threadMessages, systemPrompt, publisher)
 	if err != nil {
-		publisher.Send(ctx, a.errorEvent(err))
-		return
+		logger.Error("failed to generate response", "error", err)
+		publisher.Send(ctx, &dive.ResponseEvent{
+			Type:  dive.EventTypeResponseFailed,
+			Error: err,
+		})
+		return nil, err
 	}
 
-	// Append the new messages to the thread history if there is a thread ID
-	var thread *dive.Thread
-	var threadMessages []*llm.Message
-	if m.options.ThreadID != "" {
-		if a.threadRepository == nil {
-			logger.Error("threads are not enabled")
-			publisher.Send(ctx, a.errorEvent(ErrThreadsAreNotEnabled))
-			return
-		}
-		var err error
-		thread, err = a.getOrCreateThread(ctx, m.options.ThreadID)
-		if err != nil {
-			logger.Error("error retrieving thread", "error", err)
-			publisher.Send(ctx, a.errorEvent(err))
-			return
-		}
-		if len(thread.Messages) > 0 {
-			threadMessages = append(threadMessages, thread.Messages...)
-		}
-	}
-	threadMessages = append(threadMessages, m.messages...)
-
-	// Generate the response
-	_, updatedMessages, err := a.generate(ctx, threadMessages, systemPrompt, publisher)
-	if err != nil {
-		logger.Error("error generating response", "error", err)
-		publisher.Send(ctx, a.errorEvent(err))
-		return
-	}
-
-	// Save the updated thread messages
 	if thread != nil {
-		thread.Messages = updatedMessages
+		thread.Messages = append(thread.Messages, genResult.OutputMessages...)
 		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
-			logger.Error("error saving thread", "error", err)
-			publisher.Send(ctx, a.errorEvent(err))
-			return
+			logger.Error("failed to save thread", "error", err)
+			publisher.Send(ctx, &dive.ResponseEvent{
+				Type:  dive.EventTypeResponseFailed,
+				Error: err,
+			})
+			return nil, err
 		}
 	}
+
+	response.FinishedAt = ptr(time.Now())
+	response.Usage = genResult.Usage
+
+	for _, msg := range genResult.OutputMessages {
+		response.Items = append(response.Items, &dive.ResponseItem{
+			Type:    dive.ResponseItemTypeMessage,
+			Message: msg,
+		})
+	}
+
+	publisher.Send(ctx, &dive.ResponseEvent{
+		Type:     dive.EventTypeResponseCompleted,
+		Response: response,
+	})
+	return response, nil
+}
+
+func (a *Agent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.ResponseStream, error) {
+	var chatOptions dive.Options
+	chatOptions.Apply(opts)
+
+	responseID := dive.NewID()
+
+	logger := a.logger.With(
+		"agent", a.name,
+		"thread_id", chatOptions.ThreadID,
+		"user_id", chatOptions.UserID,
+		"response_id", responseID,
+	)
+	logger.Info("streaming response")
+
+	messages := a.prepareMessages(chatOptions)
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("no messages provided")
+	}
+
+	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages)
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt, err := a.buildSystemPrompt()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build system prompt: %w", err)
+	}
+
+	stream, publisher := dive.NewEventStream()
+
+	go func() {
+		defer publisher.Close()
+
+		var cancel context.CancelFunc
+		if a.responseTimeout > 0 {
+			ctx, cancel = context.WithTimeout(ctx, a.responseTimeout)
+			defer cancel()
+		}
+
+		response := &dive.Response{
+			ID:        responseID,
+			Model:     a.model.Name(),
+			CreatedAt: time.Now(),
+			Usage:     &llm.Usage{},
+			Items:     []*dive.ResponseItem{},
+		}
+
+		publisher.Send(ctx, &dive.ResponseEvent{
+			Type:     dive.EventTypeResponseCreated,
+			Response: response,
+		})
+
+		genResult, err := a.generate(ctx, threadMessages, systemPrompt, publisher)
+		if err != nil {
+			logger.Error("failed to generate response", "error", err)
+			publisher.Send(ctx, &dive.ResponseEvent{
+				Type:  dive.EventTypeResponseFailed,
+				Error: err,
+			})
+			return
+		}
+
+		if thread != nil {
+			thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+			if err := a.threadRepository.PutThread(ctx, thread); err != nil {
+				logger.Error("failed to save thread", "error", err)
+				publisher.Send(ctx, &dive.ResponseEvent{
+					Type:  dive.EventTypeResponseFailed,
+					Error: err,
+				})
+				return
+			}
+		}
+
+		response.FinishedAt = ptr(time.Now())
+		response.Usage = genResult.Usage
+
+		for _, msg := range genResult.OutputMessages {
+			response.Items = append(response.Items, &dive.ResponseItem{
+				Type:    dive.ResponseItemTypeMessage,
+				Message: msg,
+			})
+		}
+
+		publisher.Send(ctx, &dive.ResponseEvent{
+			Type:     dive.EventTypeResponseCompleted,
+			Response: response,
+		})
+	}()
+
+	return stream, nil
+}
+
+func ptr[T any](t T) *T {
+	return &t
+}
+
+// prepareMessages processes the ChatOptions to create messages for the LLM.
+// It handles both WithMessages and WithInput options.
+func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
+	var messages []*llm.Message
+	if len(options.Messages) > 0 {
+		messages = make([]*llm.Message, len(options.Messages))
+		copy(messages, options.Messages)
+	}
+	if options.Input != "" {
+		messages = append(messages, llm.NewUserMessage(options.Input))
+	}
+	return messages
 }
 
 func (a *Agent) getOrCreateThread(ctx context.Context, threadID string) (*dive.Thread, error) {
@@ -498,11 +476,8 @@ func (a *Agent) getOrCreateThread(ctx context.Context, threadID string) (*dive.T
 	}, nil
 }
 
-func (a *Agent) buildSystemPrompt(mode string) (string, error) {
+func (a *Agent) buildSystemPrompt() (string, error) {
 	var responseGuidelines string
-	if mode == "task" {
-		responseGuidelines = PromptForTaskResponses
-	}
 	data := newAgentTemplateData(a, responseGuidelines)
 	prompt, err := executeTemplate(a.systemPromptTemplate, data)
 	if err != nil {
@@ -516,46 +491,31 @@ func (a *Agent) buildSystemPrompt(mode string) (string, error) {
 
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
-// final LLM response and any error that occurred.
+// final LLM response, updated messages, and any error that occurred.
 func (a *Agent) generate(
 	ctx context.Context,
 	messages []*llm.Message,
 	systemPrompt string,
 	publisher dive.EventPublisher,
-) (*llm.Response, []*llm.Message, error) {
+) (*generateResult, error) {
 
-	// Holds the most recent response from the LLM
-	var response *llm.Response
-
-	// Contains the message history. We'll append to this and return it when done.
+	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
 	copy(updatedMessages, messages)
 
+	// New messages that are the output
+	var outputMessages []*llm.Message
+
+	// Accumulates usage across multiple LLM calls
+	totalUsage := &llm.Usage{}
+
+	newMessage := func(msg *llm.Message) {
+		updatedMessages = append(updatedMessages, msg)
+		outputMessages = append(outputMessages, msg)
+	}
+
 	// Options passed to the LLM
 	generateOpts := a.getGenerationOptions(systemPrompt)
-	generateCfg := &llm.Config{}
-	generateCfg.Apply(generateOpts...)
-
-	// Publish an event indicating that generation is starting
-	eventOrigin := a.eventOrigin()
-	generation := &dive.Generation{
-		ID:            dive.NewID(),
-		StartedAt:     time.Now(),
-		Config:        generateCfg,
-		InputMessages: messages,
-		Model:         a.model.Name(),
-	}
-	publisher.Send(ctx, &dive.Event{
-		Type:    dive.EventTypeGenerationStarted,
-		Origin:  eventOrigin,
-		Payload: generation,
-	})
-
-	// Helper to keep track of new messages
-	addMessage := func(msg *llm.Message) {
-		updatedMessages = append(updatedMessages, msg)
-		generation.OutputMessages = append(generation.OutputMessages, msg)
-	}
 
 	// The loop is used to run and respond to the primary generation request
 	// and then automatically run any tool-use invocations. The first time
@@ -565,6 +525,7 @@ func (a *Agent) generate(
 	for i := range generationLimit {
 		// Generate a response in either streaming or non-streaming mode
 		var err error
+		var response *llm.Response
 		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
 			response, err = a.generateStreaming(ctx, streamingLLM, updatedMessages, generateOpts, publisher)
 		} else {
@@ -575,15 +536,7 @@ func (a *Agent) generate(
 			err = ErrLLMNoResponse
 		}
 		if err != nil {
-			now := time.Now()
-			generation.Error = err
-			generation.CompletedAt = &now
-			publisher.Send(ctx, &dive.Event{
-				Type:    dive.EventTypeGenerationError,
-				Origin:  eventOrigin,
-				Payload: generation,
-			})
-			return nil, nil, err
+			return nil, err
 		}
 
 		a.logger.Debug("llm response",
@@ -597,9 +550,11 @@ func (a *Agent) generate(
 		)
 
 		// Remember the assistant response message
-		addMessage(response.Message())
-		generation.AccumulateUsage(response.Usage)
-		generation.ActiveToolCalls = len(response.ToolCalls())
+		assistantMsg := response.Message()
+		newMessage(assistantMsg)
+
+		// Track total token usage
+		totalUsage.Add(&response.Usage)
 
 		// We're done if there are no tool calls
 		toolCalls := response.ToolCalls()
@@ -607,30 +562,20 @@ func (a *Agent) generate(
 			break
 		}
 
-		// Publish an event indicating progress
-		publisher.Send(ctx, &dive.Event{
-			Type:    dive.EventTypeGenerationProgress,
-			Origin:  eventOrigin,
-			Payload: generation,
+		publisher.Send(ctx, &dive.ResponseEvent{
+			Type: dive.EventTypeResponseInProgress,
+			Item: &dive.ResponseItem{
+				Type:    dive.ResponseItemTypeMessage,
+				Message: assistantMsg,
+				Usage:   response.Usage.Copy(),
+			},
 		})
 
 		// Execute all requested tool calls
 		toolResults, shouldReturnResult, err := a.executeToolCalls(ctx, toolCalls, publisher)
 		if err != nil {
-			now := time.Now()
-			generation.Error = err
-			generation.IsDone = true
-			generation.CompletedAt = &now
-			publisher.Send(ctx, &dive.Event{
-				Type:    dive.EventTypeGenerationError,
-				Origin:  eventOrigin,
-				Payload: generation,
-			})
-			return nil, nil, err
+			return nil, err
 		}
-
-		// Remember all tool results
-		generation.ToolResults = append(generation.ToolResults, toolResults...)
 
 		// We're done if the results don't need to be provided to the LLM
 		if !shouldReturnResult {
@@ -639,31 +584,27 @@ func (a *Agent) generate(
 
 		// Capture results in a new message to send to LLM on the next iteration
 		toolResultMessage := llm.NewToolOutputMessage(toolResults)
+		newMessage(toolResultMessage)
 
 		// Add instructions to the message to not use any more tools if we have
 		// only one generation left
 		if i == generationLimit-2 {
 			generateOpts = append(generateOpts, llm.WithToolChoice(llm.ToolChoiceNone))
+			toolResultMessage.Content = append(toolResultMessage.Content, &llm.Content{
+				Type: llm.ContentTypeText,
+				Text: "Your tool calls are complete. You must respond with a final answer now.",
+			})
 			a.logger.Debug("set tool choice to none",
 				"agent", a.name,
 				"generation_number", i+1,
 			)
 		}
-		addMessage(toolResultMessage)
 	}
 
-	// Publish an event indicating that the response was fully generated
-	now := time.Now()
-	generation.CompletedAt = &now
-	generation.IsDone = true
-	generation.ActiveToolCalls = 0
-	publisher.Send(ctx, &dive.Event{
-		Type:    dive.EventTypeGenerationCompleted,
-		Origin:  eventOrigin,
-		Payload: generation,
-	})
-
-	return response, updatedMessages, nil
+	return &generateResult{
+		OutputMessages: outputMessages,
+		Usage:          totalUsage,
+	}, nil
 }
 
 // generateStreaming handles streaming generation with an LLM, including
@@ -681,15 +622,19 @@ func (a *Agent) generateStreaming(
 		return nil, err
 	}
 	defer iter.Close()
+
 	for iter.Next() {
 		event := iter.Event()
 		if err := accum.AddEvent(event); err != nil {
 			return nil, err
 		}
-		publisher.Send(ctx, &dive.Event{
-			Type:    dive.EventTypeLLMEvent,
-			Origin:  a.eventOrigin(),
-			Payload: event,
+		// Forward LLM events
+		publisher.Send(ctx, &dive.ResponseEvent{
+			Type: dive.EventTypeLLMEvent,
+			Item: &dive.ResponseItem{
+				Type:  dive.ResponseItemTypeMessage,
+				Event: event,
+			},
 		})
 	}
 	if err := iter.Err(); err != nil {
@@ -699,7 +644,7 @@ func (a *Agent) generateStreaming(
 }
 
 // executeToolCalls executes all tool calls and returns the results. If the
-// tools are configured to not return results, (nil, nil) is returned.
+// tools are configured to not return results, (nil, false, nil) is returned.
 func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	toolCalls []*llm.ToolCall,
@@ -717,48 +662,44 @@ func (a *Agent) executeToolCalls(
 			"tool_name", toolCall.Name,
 			"tool_input", toolCall.Input)
 
-		now := time.Now()
-		result := &llm.ToolResult{
-			ID:        toolCall.ID,
-			Name:      toolCall.Name,
-			Input:     toolCall.Input,
-			StartedAt: &now,
-		}
-		publisher.Send(ctx, &dive.Event{
-			Type:    dive.EventTypeToolCalled,
-			Origin:  a.eventOrigin(),
-			Payload: result,
+		publisher.Send(ctx, &dive.ResponseEvent{
+			Type: dive.EventTypeResponseToolCall,
+			Item: &dive.ResponseItem{
+				Type:     dive.ResponseItemTypeToolCall,
+				ToolCall: toolCall,
+			},
 		})
 
+		startTime := time.Now()
 		output, err := tool.Call(ctx, toolCall.Input)
-		finishedAt := time.Now()
-		result.CompletedAt = &finishedAt
 		if err != nil {
-			result.Error = err
-			publisher.Send(ctx, &dive.Event{
-				Type:    dive.EventTypeToolError,
-				Origin:  a.eventOrigin(),
-				Payload: result,
-			})
 			return nil, false, fmt.Errorf("tool call error: %w", err)
 		}
-		result.Output = output
+		endTime := time.Now()
+
+		result := &llm.ToolResult{
+			ID:          toolCall.ID,
+			Name:        toolCall.Name,
+			Input:       toolCall.Input,
+			StartedAt:   &startTime,
+			CompletedAt: &endTime,
+			Output:      output,
+		}
 		results[i] = result
 
-		publisher.Send(ctx, &dive.Event{
-			Type:    dive.EventTypeToolOutput,
-			Origin:  a.eventOrigin(),
-			Payload: result,
+		publisher.Send(ctx, &dive.ResponseEvent{
+			Type: dive.EventTypeResponseToolResult,
+			Item: &dive.ResponseItem{
+				Type:       dive.ResponseItemTypeToolResult,
+				ToolResult: result,
+			},
 		})
 
 		if tool.ShouldReturnResult() {
 			shouldReturnResult = true
 		}
 	}
-	if shouldReturnResult {
-		return results, true, nil
-	}
-	return results, false, nil
+	return results, shouldReturnResult, nil
 }
 
 func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
@@ -830,9 +771,6 @@ func (a *Agent) TeamOverview() string {
 	}
 	for _, agent := range agents {
 		description := fmt.Sprintf("- Name: %s", agent.Name())
-		if goal := agent.Goal(); goal != "" {
-			description += fmt.Sprintf(" Goal: %s", goal)
-		}
 		if agent.Name() == a.name {
 			description += " (You)"
 		}
@@ -841,314 +779,54 @@ func (a *Agent) TeamOverview() string {
 	return strings.Join(lines, "\n")
 }
 
-func (a *Agent) handleTask(ctx context.Context, state *taskState) error {
-	// Chat timeout is used to limit the time spent on one generation
-	if a.chatTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, a.chatTimeout)
-		defer cancel()
-	}
-	// Check the task timeout, which is tracked since the task was started
-	if a.taskTimeout > 0 {
-		since := time.Since(state.Started)
-		if since > a.taskTimeout {
-			return fmt.Errorf("task timed out after %s", since)
-		}
-	}
-	systemPrompt, err := a.buildSystemPrompt("task")
-	if err != nil {
-		return err
-	}
-	var messages, truncatedMessages llm.Messages
+// func taskPromptMessages(prompt *dive.Prompt) ([]*llm.Message, error) {
+// 	messages := []*llm.Message{}
 
-	if len(state.Messages) == 0 {
-		// Starting a task
-		if recentTasksMessage, ok := a.getTasksHistoryMessage(); ok {
-			messages = append(messages, recentTasksMessage)
-		}
-		prompt, err := state.Task.Prompt()
-		if err != nil {
-			return err
-		}
-		promptMessages, err := taskPromptMessages(prompt)
-		if err != nil {
-			return err
-		}
-		messages = append(messages, promptMessages...)
-	} else {
-		// Resuming a task. Pass up to the last 32 messages to the LLM.
-		messages = append(messages, state.Messages...)
-		messages = append(messages, llm.NewUserMessage(PromptContinue))
-		if len(messages) > 32 {
-			truncatedMessages = messages[len(messages)-32:]
-		}
-	}
+// 	if prompt.Text == "" {
+// 		return nil, ErrNoInstructions
+// 	}
 
-	messagesToSend := messages
-	if len(truncatedMessages) > 0 {
-		messagesToSend = truncatedMessages
-	}
-	response, updatedMessages, err := a.generate(ctx, messagesToSend, systemPrompt, state.Publisher)
-	if err != nil {
-		return err
-	}
+// 	// Add context information if available
+// 	if len(prompt.Context) > 0 {
+// 		contextLines := []string{
+// 			"Important: The following context may contain relevant information to help you complete the task.",
+// 		}
+// 		for _, context := range prompt.Context {
+// 			var contextBlock string
+// 			if context.Name != "" {
+// 				contextBlock = fmt.Sprintf("<context name=%q>\n%s\n</context>", context.Name, context.Text)
+// 			} else {
+// 				contextBlock = fmt.Sprintf("<context>\n%s\n</context>", context.Text)
+// 			}
+// 			contextLines = append(contextLines, contextBlock)
+// 		}
+// 		messages = append(messages, llm.NewUserMessage(strings.Join(contextLines, "\n\n")))
+// 	}
 
-	// If we truncated messages, we need to reassemble the complete message list
-	if len(truncatedMessages) > 0 {
-		// Messages before truncation point
-		completeMessages := messages[:len(messages)-len(truncatedMessages)]
-		// Add all messages after truncation point
-		completeMessages = append(completeMessages, updatedMessages...)
-		updatedMessages = completeMessages
-	}
+// 	var lines []string
 
-	state.TrackResponse(response, updatedMessages)
-	return nil
-}
+// 	// Add task instructions
+// 	lines = append(lines, "You must complete the following task:")
+// 	if prompt.Name != "" {
+// 		lines = append(lines, fmt.Sprintf("<task name=%q>\n%s\n</task>", prompt.Name, prompt.Text))
+// 	} else {
+// 		lines = append(lines, fmt.Sprintf("<task>\n%s\n</task>", prompt.Text))
+// 	}
 
-func (a *Agent) environmentName() string {
-	if a.environment == nil {
-		return ""
-	}
-	return a.environment.Name()
-}
+// 	// Add output expectations if specified
+// 	if prompt.Output != "" {
+// 		output := "Response requirements: " + prompt.Output
+// 		if prompt.OutputFormat != "" {
+// 			output += fmt.Sprintf("\n\nFormat your response in %s format.", prompt.OutputFormat)
+// 		}
+// 		lines = append(lines, output)
+// 	}
 
-func (a *Agent) doSomeWork() {
-	ctx := context.Background()
-	logger := a.logger.With("agent", a.name)
+// 	messages = append(messages, llm.NewUserMessage(strings.Join(lines, "\n\n")))
+// 	return messages, nil
+// }
 
-	// Activate the next task if there is one and we're idle
-	if a.activeTask == nil && len(a.taskQueue) > 0 {
-		// Pop and activate the first task in queue
-		a.activeTask = a.taskQueue[0]
-		a.taskQueue = a.taskQueue[1:]
-		a.activeTask.Status = dive.TaskStatusActive
-		if !a.activeTask.Paused {
-			a.activeTask.Started = time.Now()
-		} else {
-			a.activeTask.Paused = false
-		}
-		a.activeTask.Publisher.Send(ctx, &dive.Event{
-			Type: dive.EventTypeTaskActivated,
-			Origin: dive.EventOrigin{
-				AgentName:       a.name,
-				EnvironmentName: a.environmentName(),
-				TaskName:        a.activeTask.Task.Name(),
-			},
-		})
-		logger.Info("task started", "task", a.activeTask.Task.Name())
-	}
-
-	// Return if there's nothing to do
-	if a.activeTask == nil {
-		return
-	}
-
-	// Make progress on the active task
-	taskState := a.activeTask
-	taskName := taskState.Task.Name()
-	err := a.handleTask(context.Background(), taskState)
-
-	// An error deactivates the task and pushes an error event on the stream
-	if err != nil {
-		taskState.Status = dive.TaskStatusError
-		a.rememberTask(taskState)
-		taskState.Publisher.Send(ctx, &dive.Event{
-			Type: dive.EventTypeTaskError,
-			Origin: dive.EventOrigin{
-				AgentName:       a.name,
-				EnvironmentName: a.environmentName(),
-				TaskName:        taskName,
-			},
-			Error: err,
-		})
-		logger.Error("task error", "task", taskName, "error", err)
-		taskState.Publisher.Close()
-		taskState.Publisher = nil
-		a.activeTask = nil
-		return
-	}
-
-	// Handle task state transitions
-	switch taskState.Status {
-
-	case dive.TaskStatusActive:
-		// The task will remain active so that the agent can continue working
-		logger.Info("task progress",
-			"task", taskName,
-			"status_description", taskState.StatusDescription,
-		)
-		taskState.Publisher.Send(ctx, &dive.Event{
-			Type: dive.EventTypeTaskProgress,
-			Origin: dive.EventOrigin{
-				AgentName:       a.name,
-				EnvironmentName: a.environmentName(),
-				TaskName:        taskName,
-			},
-		})
-
-	case dive.TaskStatusCompleted:
-		// The task is now finished, so clear the active task
-		a.activeTask = nil
-		a.rememberTask(taskState)
-		logger.Info("task completed", "task", taskName)
-		taskState.Publisher.Send(ctx, &dive.Event{
-			Type: dive.EventTypeTaskCompleted,
-			Origin: dive.EventOrigin{
-				AgentName:       a.name,
-				EnvironmentName: a.environmentName(),
-				TaskName:        taskName,
-			},
-			Payload: &dive.TaskResult{
-				Task:    taskState.Task,
-				Usage:   taskState.Usage,
-				Content: taskState.LastOutput(),
-			},
-		})
-		taskState.Publisher.Close()
-		taskState.Publisher = nil
-
-	case dive.TaskStatusPaused:
-		// The task is now paused, so return it to the task queue
-		a.activeTask = nil
-		logger.Info("task paused", "task", taskName)
-		taskState.Paused = true
-		taskState.Publisher.Send(ctx, &dive.Event{
-			Type: dive.EventTypeTaskPaused,
-			Origin: dive.EventOrigin{
-				AgentName:       a.name,
-				EnvironmentName: a.environmentName(),
-				TaskName:        taskName,
-			},
-		})
-		a.taskQueue = append(a.taskQueue, taskState)
-
-	case dive.TaskStatusBlocked, dive.TaskStatusError, dive.TaskStatusInvalid:
-		// The task failed, so clear the active task
-		a.activeTask = nil
-		logger.Warn("task error",
-			"task", taskName,
-			"status", taskState.Status,
-			"status_description", taskState.StatusDescription,
-		)
-		taskState.Publisher.Send(ctx, &dive.Event{
-			Type: dive.EventTypeTaskError,
-			Origin: dive.EventOrigin{
-				AgentName:       a.name,
-				EnvironmentName: a.environmentName(),
-				TaskName:        taskName,
-			},
-			Error: fmt.Errorf("task status: %s", taskState.Status),
-		})
-		taskState.Publisher.Close()
-		taskState.Publisher = nil
-	}
-}
-
-// Remember the last 10 tasks that were worked on, so that the agent can use
-// them as context for future tasks.
-func (a *Agent) rememberTask(task *taskState) {
-	a.recentTasks = append(a.recentTasks, task)
-	if len(a.recentTasks) > 10 {
-		a.recentTasks = a.recentTasks[1:]
-	}
-}
-
-// Returns a block of text that summarizes the most recent tasks worked on by
-// the agent. The text is truncated if needed to avoid using a lot of tokens.
-func (a *Agent) getTasksHistory() string {
-	if len(a.recentTasks) == 0 {
-		return ""
-	}
-	history := make([]string, len(a.recentTasks))
-	for i, status := range a.recentTasks {
-		title := status.Task.Name()
-		history[i] = fmt.Sprintf("- task: %q status: %q output: %q\n",
-			dive.TruncateText(title, 8),
-			status.Status,
-			dive.TruncateText(replaceNewlines(status.LastOutput()), 10),
-		)
-	}
-	result := strings.Join(history, "\n")
-	if len(result) > 200 {
-		result = result[:200]
-	}
-	return result
-}
-
-// Returns a user message that contains a summary of the most recent tasks
-// worked on by the agent.
-func (a *Agent) getTasksHistoryMessage() (*llm.Message, bool) {
-	history := a.getTasksHistory()
-	if history == "" {
-		return nil, false
-	}
-	text := fmt.Sprintf("Recently completed tasks:\n\n%s", history)
-	return llm.NewUserMessage(text), true
-}
-
-func (a *Agent) eventOrigin() dive.EventOrigin {
-	var environmentName string
-	if a.environment != nil {
-		environmentName = a.environment.Name()
-	}
-	return dive.EventOrigin{
-		AgentName:       a.name,
-		EnvironmentName: environmentName,
-	}
-}
-
-func (a *Agent) errorEvent(err error) *dive.Event {
-	return &dive.Event{
-		Type:   dive.EventTypeError,
-		Error:  err,
-		Origin: a.eventOrigin(),
-	}
-}
-
-func taskPromptMessages(prompt *dive.Prompt) ([]*llm.Message, error) {
-	messages := []*llm.Message{}
-
-	if prompt.Text == "" {
-		return nil, ErrNoInstructions
-	}
-
-	// Add context information if available
-	if len(prompt.Context) > 0 {
-		contextLines := []string{
-			"Important: The following context may contain relevant information to help you complete the task.",
-		}
-		for _, context := range prompt.Context {
-			var contextBlock string
-			if context.Name != "" {
-				contextBlock = fmt.Sprintf("<context name=%q>\n%s\n</context>", context.Name, context.Text)
-			} else {
-				contextBlock = fmt.Sprintf("<context>\n%s\n</context>", context.Text)
-			}
-			contextLines = append(contextLines, contextBlock)
-		}
-		messages = append(messages, llm.NewUserMessage(strings.Join(contextLines, "\n\n")))
-	}
-
-	var lines []string
-
-	// Add task instructions
-	lines = append(lines, "You must complete the following task:")
-	if prompt.Name != "" {
-		lines = append(lines, fmt.Sprintf("<task name=%q>\n%s\n</task>", prompt.Name, prompt.Text))
-	} else {
-		lines = append(lines, fmt.Sprintf("<task>\n%s\n</task>", prompt.Text))
-	}
-
-	// Add output expectations if specified
-	if prompt.Output != "" {
-		output := "Response requirements: " + prompt.Output
-		if prompt.OutputFormat != "" {
-			output += fmt.Sprintf("\n\nFormat your response in %s format.", prompt.OutputFormat)
-		}
-		lines = append(lines, output)
-	}
-
-	messages = append(messages, llm.NewUserMessage(strings.Join(lines, "\n\n")))
-	return messages, nil
+type generateResult struct {
+	OutputMessages []*llm.Message
+	Usage          *llm.Usage
 }

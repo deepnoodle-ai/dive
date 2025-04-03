@@ -17,8 +17,8 @@ func Merge(base, override *Environment) *Environment {
 	}
 
 	// Merge config
-	if override.Config.LLM.CacheControl != "" {
-		result.Config.LLM.CacheControl = override.Config.LLM.CacheControl
+	if override.Config.LLM.Caching != nil {
+		result.Config.LLM.Caching = override.Config.LLM.Caching
 	}
 	if override.Config.LLM.DefaultProvider != "" {
 		result.Config.LLM.DefaultProvider = override.Config.LLM.DefaultProvider
@@ -83,23 +83,6 @@ func Merge(base, override *Environment) *Environment {
 		return workflows[i].Name < workflows[j].Name
 	})
 	result.Workflows = workflows
-
-	// Merge prompts
-	promptMap := make(map[string]Prompt)
-	for _, prompt := range result.Prompts {
-		promptMap[prompt.Name] = prompt
-	}
-	for _, prompt := range override.Prompts {
-		promptMap[prompt.Name] = prompt
-	}
-	prompts := make([]Prompt, 0, len(promptMap))
-	for _, p := range promptMap {
-		prompts = append(prompts, p)
-	}
-	sort.Slice(prompts, func(i, j int) bool {
-		return prompts[i].Name < prompts[j].Name
-	})
-	result.Prompts = prompts
 
 	// Merge schedules
 	scheduleMap := make(map[string]Schedule)

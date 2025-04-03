@@ -51,7 +51,7 @@ func main() {
 
 	a, err := agent.New(agent.Options{
 		Name: "Dr. Smith",
-		Backstory: `
+		Instructions: `
 You are a virtual doctor for role-playing purposes only. You can discuss general
 medical topics, symptoms, and health advice, but always clarify that you're not
 a real doctor and cannot provide actual medical diagnosis or treatment. Refuse
@@ -63,12 +63,10 @@ to answer non-medical questions. Use maximum medical jargon.`,
 		},
 		ThreadRepository: agent.NewMemoryThreadRepository(),
 		Logger:           logger,
-		AutoStart:        true,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer a.Stop(ctx)
 
 	for {
 		reader := bufio.NewReader(os.Stdin)
@@ -85,7 +83,10 @@ to answer non-medical questions. Use maximum medical jargon.`,
 			continue
 		}
 		messages := llm.Messages{llm.NewUserMessage(message)}
-		stream, err := a.Chat(ctx, messages, dive.WithThreadID("1"))
+		stream, err := a.StreamResponse(ctx,
+			dive.WithMessages(messages),
+			dive.WithThreadID("1"),
+		)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -98,17 +99,23 @@ to answer non-medical questions. Use maximum medical jargon.`,
 
 		for stream.Next(ctx) {
 			event := stream.Event()
-			switch payload := event.Payload.(type) {
-			case *llm.Event:
-				if payload.ContentBlock != nil {
-					cb := payload.ContentBlock
+			// fmt.Println(event.Type)
+			if event.Type == dive.EventTypeResponseFailed {
+				log.Fatal(event.Error)
+			}
+			if event.Type != dive.EventTypeLLMEvent {
+				continue
+			}
+			if llmEvent := event.Item.Event; llmEvent != nil {
+				if llmEvent.ContentBlock != nil {
+					cb := llmEvent.ContentBlock
 					if cb.Type == "tool_use" {
 						toolName = cb.Name
 						toolID = cb.ID
 					}
 				}
-				if payload.Delta != nil {
-					delta := payload.Delta
+				if llmEvent.Delta != nil {
+					delta := llmEvent.Delta
 					if delta.PartialJSON != "" {
 						if !inToolUse {
 							inToolUse = true
