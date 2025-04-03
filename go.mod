@@ -10,7 +10,6 @@ require (
 	github.com/gofrs/uuid/v5 v5.3.2
 	github.com/lmittmann/tint v1.0.7
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mendableai/firecrawl-go v1.0.0
 	github.com/risor-io/risor v1.7.0
 	github.com/stretchr/testify v1.10.0
 )
