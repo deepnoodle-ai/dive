@@ -13,8 +13,8 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
+	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
-	"github.com/mendableai/firecrawl-go"
 )
 
 func main() {
@@ -37,12 +37,12 @@ func main() {
 	var tools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		app, err := firecrawl.NewFirecrawlApp(key, "")
+		client, err := firecrawl.NewClient(firecrawl.WithAPIKey(key))
 		if err != nil {
 			log.Fatal(err)
 		}
 		scraper := toolkit.NewFirecrawlScrapeTool(toolkit.FirecrawlScrapeToolOptions{
-			App: app,
+			Client: client,
 		})
 		tools = append(tools, scraper)
 

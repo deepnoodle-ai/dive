@@ -49,10 +49,10 @@ type FirecrawlBatchScrapeTool struct {
 
 func NewFirecrawlBatchScrapeTool(options FirecrawlBatchScrapeToolOptions) *FirecrawlBatchScrapeTool {
 	if options.MaxSize <= 0 {
-		options.MaxSize = DefaultFirecrawlScrapeMaxSize
+		options.MaxSize = 500 * 1024
 	}
 	if options.MaxRetries <= 0 {
-		options.MaxRetries = DefaultMaxRetries
+		options.MaxRetries = 2
 	}
 	if options.Client == nil {
 		panic("firecrawl client is required")
