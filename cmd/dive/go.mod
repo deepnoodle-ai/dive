@@ -7,7 +7,6 @@ replace github.com/diveagents/dive => ../..
 require (
 	github.com/diveagents/dive v0.0.0-00010101000000-000000000000
 	github.com/fatih/color v1.18.0
-	github.com/mendableai/firecrawl-go v1.0.0
 	github.com/spf13/cobra v1.8.0
 )
 

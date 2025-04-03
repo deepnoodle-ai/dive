@@ -10,17 +10,17 @@ Config:
     Level: debug
 
 Tools:
-  - Name: Google.Search
+  - Name: Web.Search
     Enabled: true
-  - Name: Firecrawl.BatchScrape
+  - Name: Web.Fetch
     Enabled: true
 
 Agents:
   - Name: Analyst
     Goal: Analyze company websites to understand their products, market position, and messaging
     Tools:
-      - Google.Search
-      - Firecrawl.BatchScrape
+      - Web.Search
+      - Web.Fetch
 
 Workflows:
   - Name: Company Analysis

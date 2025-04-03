@@ -14,9 +14,9 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
+	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
 	"github.com/fatih/color"
-	"github.com/mendableai/firecrawl-go"
 	"github.com/spf13/cobra"
 )
 
@@ -96,13 +96,11 @@ func runChat(backstory, agentName string, reasoningBudget int) error {
 	var theTools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		app, err := firecrawl.NewFirecrawlApp(key, "")
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
 		if err != nil {
 			log.Fatal(err)
 		}
-		scraper := toolkit.NewFirecrawlScrapeTool(toolkit.FirecrawlScrapeToolOptions{
-			App: app,
-		})
+		scraper := toolkit.NewFetchTool(client)
 		theTools = append(theTools, scraper)
 	}
 
@@ -111,7 +109,7 @@ func runChat(backstory, agentName string, reasoningBudget int) error {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, toolkit.NewGoogleSearch(googleClient))
+		theTools = append(theTools, toolkit.NewSearchTool(googleClient))
 	}
 
 	modelSettings := &agent.ModelSettings{}

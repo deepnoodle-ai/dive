@@ -96,7 +96,7 @@ agent, err := agent.New(agent.Options{
 })
 
 // Start chatting with the agent
-iterator, err := agent.Chat(ctx, llm.NewSingleUserMessage("Hello there!"))
+iterator, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage("Hello there!")})
 // Iterate over the events...
 ```
 
@@ -106,7 +106,7 @@ Or use the Dive LLM interface directly:
 model := anthropic.New()
 response, err := model.Generate(
   context.Background(),
-  llm.NewSingleUserMessage("Hello there!"),
+  llm.Messages{llm.NewUserMessage("Hello there!")},
   llm.WithMaxTokens(2048),
   llm.WithTemperature(0.7),
 )
@@ -133,8 +133,8 @@ Agents:
   - Name: Research Assistant
     Backstory: You are an enthusiastic and deeply curious researcher.
     Tools:
-      - Google.Search
-      - Firecrawl.Scrape
+      - Web.Search
+      - Web.Fetch
 
 Workflows:
   - Name: Research
@@ -219,10 +219,14 @@ These are the models that have been verified to work in Dive:
 
 Tools extend agent capabilities. Dive includes these built-in tools:
 
-* **Google.Search**: Web search using Google Custom Search
-* **Firecrawl.Scrape**: Web scraping with content extraction
+* **Web.Search**: Use a search engine (currently supports Google Custom Search)
+* **Web.Fetch**: Fetch a webpage and extract the content (currently supports Firecrawl)
 * **Document.Write**: Write content to files
 * **Document.Read**: Read content from files
+
+Go interfaces are in-place to support swapping in different tool implementations
+while keeping the same workflows and usage. For example, Brave Search could be
+added as an alternative Web.Search tool backend.
 
 Creating custom tools is straightforward:
 
