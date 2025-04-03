@@ -64,10 +64,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer stream.Close()
 
-	result, err := dive.WaitForEvent[*dive.TaskResult](ctx, stream)
+	results, err := dive.ReadEventPayloads[*dive.TaskResult](ctx, stream)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(result.Content)
+	if len(results) == 0 {
+		log.Fatal("stream ended without a task result")
+	}
+	fmt.Println(results[0].Content)
 }

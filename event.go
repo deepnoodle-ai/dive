@@ -91,31 +91,48 @@ type EventPublisher interface {
 	Close()
 }
 
-// WaitForEvent waits for an event with a payload of the specified type and returns it.
+// ReadEventPayloads waits for and returns all events with a payload of the specified type.
 // It will return an error if the context is canceled or if an error event is received.
-func WaitForEvent[T any](ctx context.Context, stream EventStream) (T, error) {
-	var result T
+func ReadEventPayloads[T any](ctx context.Context, stream EventStream) ([]T, error) {
+	var results []T
 	for stream.Next(ctx) {
 		event := stream.Event()
 		if event == nil {
-			return result, fmt.Errorf("received nil event from stream")
+			return results, fmt.Errorf("received nil event from stream")
 		}
 		if event.Error != nil {
-			return result, fmt.Errorf("received error event from stream: %w", event.Error)
+			return results, fmt.Errorf("received error event from stream: %w", event.Error)
 		}
 		if payload, ok := event.Payload.(T); ok {
-			return payload, nil
+			results = append(results, payload)
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return result, err
+		return results, err
 	}
-	select {
-	case <-ctx.Done():
-		return result, ctx.Err()
-	default:
-		return result, fmt.Errorf("stream completed without finding matching event")
+	return results, nil
+}
+
+// ReadMessages returns all messages generated in an interaction. This will include
+// both assistant messages and tool result messages.
+func ReadMessages(ctx context.Context, stream EventStream) ([]*llm.Message, error) {
+	for stream.Next(ctx) {
+		event := stream.Event()
+		if event == nil {
+			return nil, fmt.Errorf("received nil event from stream")
+		}
+		if event.Error != nil {
+			return nil, fmt.Errorf("received error event from stream: %w", event.Error)
+		}
+		if event.Type == EventTypeGenerationCompleted {
+			generation := event.Payload.(*Generation)
+			return generation.OutputMessages, nil
+		}
 	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("stream ended without a generation completed event")
 }
 
 type eventStream struct {
@@ -216,6 +233,7 @@ type Generation struct {
 	TotalUsage      llm.Usage         `json:"total_usage,omitempty"`
 	Error           error             `json:"error,omitempty"`
 	IsDone          bool              `json:"is_done,omitempty"`
+	Model           string            `json:"model,omitempty"`
 }
 
 func (g *Generation) AccumulateUsage(usage llm.Usage) {
@@ -223,4 +241,12 @@ func (g *Generation) AccumulateUsage(usage llm.Usage) {
 	g.TotalUsage.OutputTokens += usage.OutputTokens
 	g.TotalUsage.CacheCreationInputTokens += usage.CacheCreationInputTokens
 	g.TotalUsage.CacheReadInputTokens += usage.CacheReadInputTokens
+}
+
+func (g *Generation) LastMessage() (*llm.Message, bool) {
+	mLen := len(g.OutputMessages)
+	if mLen == 0 {
+		return nil, false
+	}
+	return g.OutputMessages[mLen-1], true
 }

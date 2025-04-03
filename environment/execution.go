@@ -796,11 +796,14 @@ func executeTask(ctx context.Context, agent dive.Agent, task dive.Task) (*dive.T
 	}
 	defer iterator.Close()
 
-	taskResult, err := dive.WaitForEvent[*dive.TaskResult](ctx, iterator)
+	taskResults, err := dive.ReadEventPayloads[*dive.TaskResult](ctx, iterator)
 	if err != nil {
 		return nil, fmt.Errorf("failed to wait for task result: %w", err)
 	}
-	return taskResult, nil
+	if len(taskResults) == 0 {
+		return nil, fmt.Errorf("stream ended without a task result")
+	}
+	return taskResults[len(taskResults)-1], nil
 }
 
 func evalCode(ctx context.Context, code *compiler.Code, globals map[string]any) (any, error) {

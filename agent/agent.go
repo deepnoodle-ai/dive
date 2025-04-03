@@ -543,6 +543,7 @@ func (a *Agent) generate(
 		StartedAt:     time.Now(),
 		Config:        generateCfg,
 		InputMessages: messages,
+		Model:         a.model.Name(),
 	}
 	publisher.Send(ctx, &dive.Event{
 		Type:    dive.EventTypeGenerationStarted,

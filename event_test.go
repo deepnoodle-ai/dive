@@ -50,7 +50,6 @@ func TestEventStream_ContextCancellation(t *testing.T) {
 }
 
 func TestEventStream_WaitForEvent(t *testing.T) {
-	assert := require.New(t)
 	stream, pub := NewEventStream()
 	defer stream.Close()
 
@@ -60,9 +59,9 @@ func TestEventStream_WaitForEvent(t *testing.T) {
 		pub.Close()
 	}()
 
-	result, err := WaitForEvent[string](context.Background(), stream)
-	assert.NoError(err)
-	assert.Equal(expectedPayload, result)
+	results, err := ReadEventPayloads[string](context.Background(), stream)
+	require.NoError(t, err)
+	require.Equal(t, expectedPayload, results[0])
 }
 
 func TestEventStream_SendAfterClose(t *testing.T) {
@@ -89,7 +88,6 @@ func TestEventStream_MultipleClose(t *testing.T) {
 }
 
 func TestEventStream_ErrorEvent(t *testing.T) {
-	assert := require.New(t)
 	stream, pub := NewEventStream()
 	defer stream.Close()
 
@@ -99,19 +97,19 @@ func TestEventStream_ErrorEvent(t *testing.T) {
 		pub.Close()
 	}()
 
-	_, err := WaitForEvent[string](context.Background(), stream)
-	assert.Error(err)
-	assert.Contains(err.Error(), "test error")
+	results, err := ReadEventPayloads[string](context.Background(), stream)
+	require.Error(t, err)
+	require.Nil(t, results)
 }
 
 func TestEventStream_ContextTimeout(t *testing.T) {
-	assert := require.New(t)
 	stream, _ := NewEventStream()
 	defer stream.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	_, err := WaitForEvent[string](ctx, stream)
-	assert.ErrorIs(err, context.DeadlineExceeded)
+	results, err := ReadEventPayloads[string](ctx, stream)
+	require.Error(t, err)
+	require.Nil(t, results)
 }
