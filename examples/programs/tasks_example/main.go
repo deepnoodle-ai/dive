@@ -37,13 +37,11 @@ func main() {
 	var tools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		client, err := firecrawl.NewClient(firecrawl.WithAPIKey(key))
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
 		if err != nil {
 			log.Fatal(err)
 		}
-		scraper := toolkit.NewFirecrawlScrapeTool(toolkit.FirecrawlScrapeToolOptions{
-			Client: client,
-		})
+		scraper := toolkit.NewFetchTool(client)
 		tools = append(tools, scraper)
 
 		logger.Info("firecrawl enabled")
@@ -54,7 +52,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		tools = append(tools, toolkit.NewGoogleSearch(googleClient))
+		tools = append(tools, toolkit.NewSearchTool(googleClient))
 
 		logger.Info("google search enabled")
 	}

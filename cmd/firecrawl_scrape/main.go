@@ -5,39 +5,35 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"strings"
 
 	"github.com/diveagents/dive/toolkit/firecrawl"
+	"github.com/diveagents/dive/web"
 )
 
 func main() {
 
-	var urlSpec string
-	flag.StringVar(&urlSpec, "urls", "", "comma separated list of urls to scrape")
+	var url string
+	flag.StringVar(&url, "url", "", "url to scrape")
 	flag.Parse()
 
-	if urlSpec == "" {
-		log.Fatalf("urls flag is required")
+	if url == "" {
+		log.Fatalf("url flag is required")
 	}
 
-	urls := strings.Split(urlSpec, ",")
-
-	client, err := firecrawl.NewClient()
+	client, err := firecrawl.New()
 	if err != nil {
 		log.Fatalf("failed to create firecrawl client: %v", err)
 	}
 
-	response, err := client.BatchScrape(context.Background(), urls, nil)
+	response, err := client.Fetch(context.Background(), &web.FetchInput{
+		URL: url,
+	})
 	if err != nil {
-		log.Fatalf("failed to scrape urls: %v", err)
+		log.Fatalf("failed to scrape url: %v", err)
 	}
 
-	fmt.Printf("scraped %d urls\n", len(response.Data))
-
-	for _, doc := range response.Data {
-		log.Printf("scraped url: %s", doc.Metadata.SourceURL)
-		log.Printf("scraped title: %s", doc.Metadata.Title)
-		log.Printf("scraped description: %s", doc.Metadata.Description)
-		log.Printf("scraped content: %s", doc.Markdown)
-	}
+	fmt.Printf("scraped url: %s\n", response.Metadata.URL)
+	fmt.Printf("scraped title: %s\n", response.Metadata.Title)
+	fmt.Printf("scraped description: %s\n", response.Metadata.Description)
+	fmt.Printf("scraped content: %s\n", response.Markdown)
 }

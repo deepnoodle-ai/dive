@@ -10,7 +10,11 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/diveagents/dive/web"
 )
+
+var _ web.Fetcher = &Client{}
 
 // ClientOption is a function that modifies the client configuration.
 type ClientOption func(*Client)
@@ -55,75 +59,8 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// Document represents a scraped document from Firecrawl.
-type Document struct {
-	Markdown   string            `json:"markdown,omitempty"`
-	HTML       string            `json:"html,omitempty"`
-	RawHTML    string            `json:"rawHtml,omitempty"`
-	Screenshot string            `json:"screenshot,omitempty"`
-	Links      []string          `json:"links,omitempty"`
-	Metadata   *DocumentMetadata `json:"metadata,omitempty"`
-}
-
-// DocumentMetadata contains metadata about a scraped document.
-type DocumentMetadata struct {
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Language    string `json:"language,omitempty"`
-	Keywords    string `json:"keywords,omitempty"`
-	SourceURL   string `json:"sourceURL,omitempty"`
-	StatusCode  int    `json:"statusCode,omitempty"`
-	Error       string `json:"error,omitempty"`
-}
-
-// ScrapeOptions configures how a URL should be scraped.
-type ScrapeOptions struct {
-	Formats         []string          `json:"formats,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	IncludeTags     []string          `json:"includeTags,omitempty"`
-	ExcludeTags     []string          `json:"excludeTags,omitempty"`
-	OnlyMainContent bool              `json:"onlyMainContent,omitempty"`
-	WaitFor         int               `json:"waitFor,omitempty"`
-	ParsePDF        bool              `json:"parsePDF,omitempty"`
-	Timeout         int               `json:"timeout,omitempty"`
-}
-
-// BatchScrapeResponse represents the response from a batch scrape request.
-type BatchScrapeResponse struct {
-	Success     bool     `json:"success"`
-	ID          string   `json:"id,omitempty"`
-	URL         string   `json:"url,omitempty"`
-	InvalidURLs []string `json:"invalidURLs,omitempty"`
-}
-
-// BatchScrapeStatus represents the status of a batch scrape job.
-type BatchScrapeStatus struct {
-	Status      string      `json:"status"`
-	Total       int         `json:"total,omitempty"`
-	Completed   int         `json:"completed,omitempty"`
-	CreditsUsed int         `json:"creditsUsed,omitempty"`
-	ExpiresAt   string      `json:"expiresAt,omitempty"`
-	Next        *string     `json:"next,omitempty"`
-	Data        []*Document `json:"data,omitempty"`
-}
-
-type scrapeRequestBody struct {
-	URL string `json:"url"`
-	*ScrapeOptions
-}
-
-type batchScrapeRequestBody struct {
-	URLs []string `json:"urls"`
-	*ScrapeOptions
-}
-
-type scrapeResponse struct {
-	Success bool      `json:"success"`
-	Data    *Document `json:"data,omitempty"`
-}
-
-// NewClient creates a new Firecrawl client with the provided options.
-func NewClient(opts ...ClientOption) (*Client, error) {
+// New creates a new Firecrawl client with the provided options.
+func New(opts ...ClientOption) (*Client, error) {
 	c := &Client{
 		apiKey:  os.Getenv("FIRECRAWL_API_KEY"),
 		baseURL: "https://api.firecrawl.dev",
@@ -143,11 +80,16 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 	return c, nil
 }
 
-// Scrape performs a single URL scrape.
-func (c *Client) Scrape(ctx context.Context, url string, opts *ScrapeOptions) (*Document, error) {
+// Fetch a web page.
+func (c *Client) Fetch(ctx context.Context, input *web.FetchInput) (*web.Document, error) {
 	body := scrapeRequestBody{
-		URL:           url,
-		ScrapeOptions: opts,
+		URL:             input.URL,
+		Formats:         input.Formats,
+		Headers:         input.Headers,
+		IncludeTags:     input.IncludeTags,
+		ExcludeTags:     input.ExcludeTags,
+		OnlyMainContent: input.OnlyMainContent,
+		Timeout:         30000,
 	}
 	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/scrape", &body)
 	if err != nil {
@@ -160,85 +102,19 @@ func (c *Client) Scrape(ctx context.Context, url string, opts *ScrapeOptions) (*
 	if !scrapeResp.Success {
 		return nil, fmt.Errorf("scrape operation failed")
 	}
-	return scrapeResp.Data, nil
-}
-
-// BatchScrape performs a synchronous batch scrape of multiple URLs.
-func (c *Client) BatchScrape(ctx context.Context, urls []string, opts *ScrapeOptions) (*BatchScrapeStatus, error) {
-	if len(urls) == 0 {
-		return nil, fmt.Errorf("no URLs provided")
-	}
-	body := batchScrapeRequestBody{
-		URLs:          urls,
-		ScrapeOptions: opts,
-	}
-	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/batch/scrape", &body)
-	if err != nil {
-		return nil, fmt.Errorf("batch scrape request failed: %w", err)
-	}
-	var batchResp BatchScrapeResponse
-	if err := json.Unmarshal(resp, &batchResp); err != nil {
-		return nil, fmt.Errorf("failed to parse batch scrape response: %w", err)
-	}
-	if !batchResp.Success {
-		return nil, fmt.Errorf("batch scrape operation failed")
-	}
-	// Poll for the job to complete
-	status, err := c.WaitForBatchScrape(ctx, batchResp.ID, 2*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for batch scrape job to complete: %w", err)
-	}
-	return status, nil
-}
-
-// CheckBatchScrapeStatus checks the status of an asynchronous batch scrape job.
-func (c *Client) CheckBatchScrapeStatus(ctx context.Context, jobID string) (*BatchScrapeStatus, error) {
-	if jobID == "" {
-		return nil, fmt.Errorf("no job id provided")
-	}
-	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/v1/batch/scrape/%s", jobID), nil)
-	if err != nil {
-		return nil, fmt.Errorf("check batch scrape status failed: %w", err)
-	}
-	fmt.Println("--------------------------------")
-	fmt.Println(string(resp))
-	fmt.Println("--------------------------------")
-	var status BatchScrapeStatus
-	if err := json.Unmarshal(resp, &status); err != nil {
-		return nil, fmt.Errorf("failed to parse batch scrape status: %w", err)
-	}
-	return &status, nil
-}
-
-// WaitForBatchScrape waits for an asynchronous batch scrape job to complete.
-func (c *Client) WaitForBatchScrape(ctx context.Context, jobID string, pollInterval time.Duration) (*BatchScrapeStatus, error) {
-	if pollInterval == 0 {
-		pollInterval = 2 * time.Second
-	}
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-			status, err := c.CheckBatchScrapeStatus(ctx, jobID)
-			if err != nil {
-				fmt.Println("error checking batch scrape status", err)
-				continue
-			}
-			switch status.Status {
-			case "completed":
-				return status, nil
-			case "failed":
-				return nil, fmt.Errorf("batch scrape job failed")
-			case "active", "paused", "pending", "queued", "waiting", "scraping":
-				continue
-			default:
-				return nil, fmt.Errorf("unknown batch scrape status: %s", status.Status)
-			}
-		}
-	}
+	return &web.Document{
+		Content:    scrapeResp.Data.HTML,
+		Markdown:   scrapeResp.Data.Markdown,
+		Screenshot: scrapeResp.Data.Screenshot,
+		Links:      scrapeResp.Data.Links,
+		Metadata: &web.DocumentMetadata{
+			URL:         scrapeResp.Data.Metadata.SourceURL,
+			Title:       scrapeResp.Data.Metadata.Title,
+			Description: scrapeResp.Data.Metadata.Description,
+			Language:    scrapeResp.Data.Metadata.Language,
+			Keywords:    scrapeResp.Data.Metadata.Keywords,
+		},
+	}, nil
 }
 
 // doRequest performs an HTTP request to the Firecrawl API.

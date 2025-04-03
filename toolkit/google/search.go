@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/diveagents/dive/web"
 )
 
 var baseURL = "https://www.googleapis.com/customsearch/v1"
@@ -18,45 +20,58 @@ func SetBaseURL(url string) {
 	baseURL = url
 }
 
-type Query struct {
-	Text  string `json:"text"`
-	Limit int    `json:"limit,omitempty"`
-	// TimeRange string `json:"time_range,omitempty"`
-	// Category  string `json:"category,omitempty"`
-	// Offset    int    `json:"offset,omitempty"`
+// ClientOption is a function that modifies the client configuration.
+type ClientOption func(*Client)
+
+// WithCredentials sets both the CX and API key for the client.
+func WithCredentials(cx, apiKey string) ClientOption {
+	return func(c *Client) {
+		c.cx = cx
+		c.key = apiKey
+	}
 }
 
-type Item struct {
-	Rank        int    `json:"rank"`
-	URL         string `json:"url"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-	Icon        string `json:"icon,omitempty"`
-	Image       string `json:"image,omitempty"`
+// WithBaseURL sets the base URL for the client.
+func WithBaseURL(url string) ClientOption {
+	return func(c *Client) {
+		baseURL = url
+	}
 }
 
-type Results struct {
-	Items []*Item `json:"items"`
+// WithHTTPClient sets the HTTP client for the client.
+func WithHTTPClient(httpClient *http.Client) ClientOption {
+	return func(c *Client) {
+		c.httpClient = httpClient
+	}
 }
 
 type Client struct {
-	cx  string
-	key string
+	cx         string
+	key        string
+	httpClient *http.Client
 }
 
-func New() (*Client, error) {
-	cx := os.Getenv("GOOGLE_SEARCH_CX")
-	if cx == "" {
-		return nil, fmt.Errorf("missing GOOGLE_SEARCH_CX")
+func New(opts ...ClientOption) (*Client, error) {
+	c := &Client{
+		cx:  os.Getenv("GOOGLE_SEARCH_CX"),
+		key: os.Getenv("GOOGLE_SEARCH_API_KEY"),
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
-	key := os.Getenv("GOOGLE_SEARCH_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("missing GOOGLE_SEARCH_API_KEY")
+	for _, opt := range opts {
+		opt(c)
 	}
-	return &Client{cx: cx, key: key}, nil
+	if c.cx == "" {
+		return nil, fmt.Errorf("missing google search cx")
+	}
+	if c.key == "" {
+		return nil, fmt.Errorf("missing google search api key")
+	}
+	return c, nil
 }
 
-func (s *Client) Search(ctx context.Context, q *Query) (*Results, error) {
+func (s *Client) Search(ctx context.Context, q *web.SearchInput) (*web.SearchOutput, error) {
 	if q.Limit < 0 || q.Limit > 100 {
 		return nil, fmt.Errorf("invalid limit: %d", q.Limit)
 	}
@@ -64,22 +79,22 @@ func (s *Client) Search(ctx context.Context, q *Query) (*Results, error) {
 		q.Limit = 10
 	}
 	pageCount := (q.Limit + 9) / 10 // Google always returns 10 results per page
-	var items []*Item
+	var items []*web.SearchItem
 	var curPage, curRank int
 	for curPage < pageCount {
 		params := url.Values{}
 		params.Set("key", s.key)
 		params.Set("cx", s.cx)
-		params.Set("q", q.Text)
+		params.Set("q", q.Query)
 		params.Set("start", fmt.Sprintf("%d", curPage*10+1))
 		rawURL := baseURL + "?" + params.Encode()
-		crs, err := fetchResultsWithRetries(ctx, rawURL, 3)
+		crs, err := s.fetchResultsWithRetries(ctx, rawURL, 3)
 		if err != nil {
 			return nil, err
 		}
 		for _, item := range crs.Items {
 			curRank++
-			items = append(items, &Item{
+			items = append(items, &web.SearchItem{
 				Rank:        curRank,
 				URL:         item.Link,
 				Title:       item.Title,
@@ -90,14 +105,14 @@ func (s *Client) Search(ctx context.Context, q *Query) (*Results, error) {
 		}
 		curPage++
 	}
-	return &Results{Items: items}, nil
+	return &web.SearchOutput{Items: items}, nil
 }
 
-func fetchResultsWithRetries(ctx context.Context, url string, retries int) (*results, error) {
+func (s *Client) fetchResultsWithRetries(ctx context.Context, url string, retries int) (*results, error) {
 	var err error
 	for i := 0; i < retries; i++ {
 		var results *results
-		results, err = fetchResults(ctx, url)
+		results, err = s.fetchResults(ctx, url)
 		if err == nil {
 			return results, nil
 		}
@@ -109,13 +124,12 @@ func fetchResultsWithRetries(ctx context.Context, url string, retries int) (*res
 	return nil, fmt.Errorf("failed to fetch %q after %d retries: %w", url, retries, err)
 }
 
-func fetchResults(ctx context.Context, url string) (*results, error) {
-	client := &http.Client{}
+func (s *Client) fetchResults(ctx context.Context, url string) (*results, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

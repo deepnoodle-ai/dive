@@ -13,7 +13,6 @@ type FetchInput struct {
 	ExcludeTags     []string          `json:"exclude_tags,omitempty"`
 	OnlyMainContent bool              `json:"only_main_content,omitempty"`
 	WaitFor         int               `json:"wait_for,omitempty"`
-	Timeout         int               `json:"timeout,omitempty"`
 	ParsePDF        bool              `json:"parse_pdf,omitempty"`
 }
 

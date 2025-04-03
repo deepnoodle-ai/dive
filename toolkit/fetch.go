@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/retry"
@@ -13,8 +14,25 @@ import (
 
 const (
 	DefaultFetchMaxSize    = 1024 * 500 // 500k runes
-	DefaultFetchMaxRetries = 2
+	DefaultFetchMaxRetries = 1
+	DefaultFetchTimeout    = 15 * time.Second
 )
+
+var DefaultFetchExcludeTags = []string{
+	"script",
+	"style",
+	"hr",
+	"noscript",
+	"iframe",
+	"select",
+	"input",
+	"button",
+	"svg",
+	"form",
+	"header",
+	"nav",
+	"footer",
+}
 
 var _ llm.Tool = &FetchTool{}
 
@@ -22,6 +40,7 @@ type FetchTool struct {
 	fetcher    web.Fetcher
 	maxSize    int
 	maxRetries int
+	timeout    time.Duration
 }
 
 func NewFetchTool(fetcher web.Fetcher) *FetchTool {
@@ -29,6 +48,7 @@ func NewFetchTool(fetcher web.Fetcher) *FetchTool {
 		fetcher:    fetcher,
 		maxSize:    DefaultFetchMaxSize,
 		maxRetries: DefaultFetchMaxRetries,
+		timeout:    DefaultFetchTimeout,
 	}
 }
 
@@ -39,6 +59,11 @@ func (t *FetchTool) WithMaxSize(maxSize int) *FetchTool {
 
 func (t *FetchTool) WithMaxRetries(maxRetries int) *FetchTool {
 	t.maxRetries = maxRetries
+	return t
+}
+
+func (t *FetchTool) WithTimeout(timeout time.Duration) *FetchTool {
+	t.timeout = timeout
 	return t
 }
 
@@ -63,6 +88,18 @@ func (t *FetchTool) Call(ctx context.Context, input string) (string, error) {
 	var s web.FetchInput
 	if err := json.Unmarshal([]byte(input), &s); err != nil {
 		return "", err
+	}
+
+	s.Formats = []string{"markdown"}
+
+	if s.ExcludeTags == nil {
+		s.ExcludeTags = DefaultFetchExcludeTags
+	}
+
+	if t.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, t.timeout)
+		defer cancel()
 	}
 
 	var response *web.Document

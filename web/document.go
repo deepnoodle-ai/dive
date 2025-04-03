@@ -11,14 +11,9 @@ type Document struct {
 
 // DocumentMetadata contains metadata about a web page.
 type DocumentMetadata struct {
-	URL             string `json:"url,omitempty"`
-	Title           string `json:"title,omitempty"`
-	Description     string `json:"description,omitempty"`
-	Language        string `json:"language,omitempty"`
-	Keywords        string `json:"keywords,omitempty"`
-	ContentType     string `json:"content_type,omitempty"`
-	ContentLength   int64  `json:"content_length,omitempty"`
-	ContentEncoding string `json:"content_encoding,omitempty"`
-	ETag            string `json:"etag,omitempty"`
-	LastModified    string `json:"last_modified,omitempty"`
+	URL         string `json:"url,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Language    string `json:"language,omitempty"`
+	Keywords    string `json:"keywords,omitempty"`
 }

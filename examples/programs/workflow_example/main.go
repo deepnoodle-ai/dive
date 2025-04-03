@@ -14,9 +14,9 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
+	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
 	"github.com/diveagents/dive/workflow"
-	"github.com/mendableai/firecrawl-go"
 )
 
 func main() {
@@ -43,13 +43,11 @@ func main() {
 	var theTools []llm.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		app, err := firecrawl.NewFirecrawlApp(key, "")
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
 		if err != nil {
 			log.Fatal(err)
 		}
-		scraper := toolkit.NewFirecrawlScrapeTool(toolkit.FirecrawlScrapeToolOptions{
-			App: app,
-		})
+		scraper := toolkit.NewFetchTool(client)
 		theTools = append(theTools, scraper)
 		logger.Info("firecrawl enabled")
 	} else {
@@ -61,7 +59,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, toolkit.NewGoogleSearch(googleClient))
+		theTools = append(theTools, toolkit.NewSearchTool(googleClient))
 		logger.Info("google search enabled")
 	} else {
 		logger.Info("google search is not enabled")

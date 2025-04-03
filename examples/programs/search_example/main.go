@@ -41,7 +41,7 @@ func main() {
 		Goal:   "Use Google to research assigned topics",
 		Model:  anthropic.New(),
 		Logger: slogger.New(slogger.LevelFromString(logLevel)),
-		Tools:  []llm.Tool{toolkit.NewGoogleSearch(googleClient)},
+		Tools:  []llm.Tool{toolkit.NewSearchTool(googleClient)},
 	})
 	if err != nil {
 		log.Fatal(err)
