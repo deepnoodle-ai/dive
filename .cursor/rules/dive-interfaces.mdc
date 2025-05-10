@@ -11,9 +11,8 @@ alwaysApply: true
 
 The `dive` package defines the core Go interfaces used throughout Dive:
 
-- `Task` - Unit of work that can be executed
-- `Agent` - AI agent that works on tasks
-- `Environment` - Agents run within an Environment
+- `Agent` - AI agent that can use tools and generate responses using an LLM
+- `Environment` - Agents may operate within an Environment
 
 ### LLM Package (`github.com/diveagents/dive/llm`)
 

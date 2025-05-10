@@ -2,7 +2,7 @@ package environment
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,7 +15,7 @@ import (
 
 // mockAgent implements dive.Agent for testing
 type mockAgent struct {
-	workFn func(ctx context.Context, task dive.Task) (dive.EventStream, error)
+	err error
 }
 
 func (m *mockAgent) Name() string {
@@ -38,19 +38,40 @@ func (m *mockAgent) SetEnvironment(env dive.Environment) error {
 	return nil
 }
 
-func (m *mockAgent) Chat(ctx context.Context, messages []*llm.Message, opts ...dive.ChatOption) (dive.EventStream, error) {
-	return m.workFn(ctx, nil)
+func (m *mockAgent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &dive.Response{
+		ID:        "test-response",
+		Model:     "mock-model",
+		CreatedAt: time.Now(),
+		Items: []*dive.ResponseItem{
+			{
+				Type: dive.ResponseItemTypeMessage,
+				Message: &llm.Message{
+					Role: llm.Assistant,
+					Content: []*llm.Content{
+						{Type: llm.ContentTypeText, Text: "test output"},
+					},
+				},
+			},
+		},
+	}, nil
 }
 
-func (m *mockAgent) Work(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-	if m.workFn != nil {
-		return m.workFn(ctx, task)
+func (m *mockAgent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.ResponseStream, error) {
+	if m.err != nil {
+		return nil, m.err
 	}
 	stream, publisher := dive.NewEventStream()
-	publisher.Send(ctx, &dive.Event{
-		Type: "task.completed",
-		Payload: &dive.TaskResult{
-			Content: "test output",
+	publisher.Send(ctx, &dive.ResponseEvent{
+		Type: dive.EventTypeResponseCompleted,
+		Response: &dive.Response{
+			ID:        "test-response",
+			Model:     "mock-model",
+			CreatedAt: time.Now(),
+			Items:     []*dive.ResponseItem{},
 		},
 	})
 	publisher.Close()
@@ -62,42 +83,9 @@ func TestNewExecution(t *testing.T) {
 		Name: "test-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
-				Name:  "test-step",
-				Agent: &mockAgent{},
-				Prompt: &dive.Prompt{
-					Name: "test-task",
-					Text: "test description",
-				},
-			}),
-		},
-	})
-	require.NoError(t, err)
-
-	env := &Environment{}
-	require.NoError(t, env.Start(context.Background()))
-	exec := NewExecution(ExecutionOptions{
-		ID:          "test-exec",
-		Environment: env,
-		Workflow:    wf,
-		Logger:      slogger.NewDevNullLogger(),
-	})
-	require.Equal(t, "test-exec", exec.ID())
-	require.Equal(t, wf, exec.Workflow())
-	require.Equal(t, env, exec.Environment())
-	require.Equal(t, StatusPending, exec.Status())
-}
-
-func TestExecutionBasicFlow(t *testing.T) {
-	wf, err := workflow.New(workflow.Options{
-		Name: "test-workflow",
-		Steps: []*workflow.Step{
-			workflow.NewStep(workflow.StepOptions{
-				Name:  "test-step",
-				Agent: &mockAgent{},
-				Prompt: &dive.Prompt{
-					Name: "test-task",
-					Text: "test description",
-				},
+				Name:   "test-step",
+				Agent:  &mockAgent{},
+				Prompt: "test description",
 			}),
 		},
 	})
@@ -112,7 +100,44 @@ func TestExecutionBasicFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, env.Start(context.Background()))
 
-	execution, err := env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
+	execution, err := env.ExecuteWorkflow(context.Background(), ExecutionOptions{
+		WorkflowName: wf.Name(),
+		Inputs:       map[string]interface{}{},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, execution)
+
+	require.Equal(t, wf, execution.Workflow())
+	require.Equal(t, env, execution.Environment())
+	require.Equal(t, StatusRunning, execution.Status())
+}
+
+func TestExecutionBasicFlow(t *testing.T) {
+	wf, err := workflow.New(workflow.Options{
+		Name: "test-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "test-step",
+				Agent:  &mockAgent{},
+				Prompt: "test description",
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	env, err := New(Options{
+		Name:      "test-env",
+		Agents:    []dive.Agent{&mockAgent{}},
+		Workflows: []*workflow.Workflow{wf},
+		Logger:    slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
+
+	execution, err := env.ExecuteWorkflow(context.Background(), ExecutionOptions{
+		WorkflowName: wf.Name(),
+		Inputs:       map[string]interface{}{},
+	})
 	require.NoError(t, err)
 	require.NotNil(t, execution)
 
@@ -128,32 +153,23 @@ func TestExecutionWithBranching(t *testing.T) {
 		Name: "branching-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
-				Name:  "start",
-				Agent: &mockAgent{},
-				Prompt: &dive.Prompt{
-					Name: "start-task",
-					Text: "Start Task",
-				},
+				Name:   "start",
+				Agent:  &mockAgent{},
+				Prompt: "Start Task",
 				Next: []*workflow.Edge{
 					{Step: "branch1"},
 					{Step: "branch2"},
 				},
 			}),
 			workflow.NewStep(workflow.StepOptions{
-				Name:  "branch1",
-				Agent: &mockAgent{},
-				Prompt: &dive.Prompt{
-					Name: "branch1-task",
-					Text: "Branch 1 Task",
-				},
+				Name:   "branch1",
+				Agent:  &mockAgent{},
+				Prompt: "Branch 1 Task",
 			}),
 			workflow.NewStep(workflow.StepOptions{
-				Name:  "branch2",
-				Agent: &mockAgent{},
-				Prompt: &dive.Prompt{
-					Name: "branch2-task",
-					Text: "Branch 2 Task",
-				},
+				Name:   "branch2",
+				Agent:  &mockAgent{},
+				Prompt: "Branch 2 Task",
 			}),
 		},
 	})
@@ -167,7 +183,10 @@ func TestExecutionWithBranching(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, env.Start(context.Background()))
 
-	execution, err := env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
+	execution, err := env.ExecuteWorkflow(context.Background(), ExecutionOptions{
+		WorkflowName: wf.Name(),
+		Inputs:       map[string]interface{}{},
+	})
 	require.NoError(t, err)
 
 	require.NoError(t, execution.Wait())
@@ -190,20 +209,15 @@ func TestExecutionWithError(t *testing.T) {
 		Name: "error-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
-				Name: "error-step",
-				Prompt: &dive.Prompt{
-					Name: "error-task",
-					Text: "Error Task",
-				},
+				Name:   "error-step",
+				Prompt: "Error Task",
 			}),
 		},
 	})
 	require.NoError(t, err)
 
 	mockAgent := &mockAgent{
-		workFn: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-			return nil, fmt.Errorf("simulated error")
-		},
+		err: errors.New("simulated error"),
 	}
 
 	env, err := New(Options{
@@ -214,7 +228,10 @@ func TestExecutionWithError(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, env.Start(context.Background()))
 
-	execution, err := env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
+	execution, err := env.ExecuteWorkflow(context.Background(), ExecutionOptions{
+		WorkflowName: wf.Name(),
+		Inputs:       map[string]interface{}{},
+	})
 	require.NoError(t, err)
 
 	err = execution.Wait()
@@ -232,7 +249,7 @@ func TestExecutionWithError(t *testing.T) {
 func TestExecutionWithInputs(t *testing.T) {
 	wf, err := workflow.New(workflow.Options{
 		Name: "input-workflow",
-		Inputs: []*dive.Input{
+		Inputs: []*workflow.Input{
 			{
 				Name:     "required_input",
 				Type:     "string",
@@ -247,12 +264,9 @@ func TestExecutionWithInputs(t *testing.T) {
 		},
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
-				Name:  "input-step",
-				Agent: &mockAgent{},
-				Prompt: &dive.Prompt{
-					Name: "input-task",
-					Text: "Input Task",
-				},
+				Name:   "input-step",
+				Agent:  &mockAgent{},
+				Prompt: "Input Task",
 			}),
 		},
 	})
@@ -267,13 +281,18 @@ func TestExecutionWithInputs(t *testing.T) {
 	require.NoError(t, env.Start(context.Background()))
 
 	// Test missing required input
-	_, err = env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{})
+	_, err = env.ExecuteWorkflow(context.Background(), ExecutionOptions{
+		WorkflowName: wf.Name(),
+	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "required input")
 
 	// Test with required input
-	execution, err := env.ExecuteWorkflow(context.Background(), wf.Name(), map[string]interface{}{
-		"required_input": "test_value",
+	execution, err := env.ExecuteWorkflow(context.Background(), ExecutionOptions{
+		WorkflowName: wf.Name(),
+		Inputs: map[string]interface{}{
+			"required_input": "test_value",
+		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, execution.Wait())
@@ -285,32 +304,29 @@ func TestExecutionContextCancellation(t *testing.T) {
 		Name: "cancellation-workflow",
 		Steps: []*workflow.Step{
 			workflow.NewStep(workflow.StepOptions{
-				Name:  "slow-step",
-				Agent: &mockAgent{},
-				Prompt: &dive.Prompt{
-					Name: "slow-task",
-					Text: "Slow Task",
-				},
+				Name:   "slow-step",
+				Agent:  &mockAgent{},
+				Prompt: "Slow Task",
 			}),
 		},
 	})
 	require.NoError(t, err)
 
 	mockAgent := &mockAgent{
-		workFn: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-			stream, publisher := dive.NewEventStream()
-			go func() {
-				defer publisher.Close()
-				time.Sleep(100 * time.Millisecond)
-				publisher.Send(ctx, &dive.Event{
-					Type: "task.completed",
-					Payload: &dive.TaskResult{
-						Content: "completed",
-					},
-				})
-			}()
-			return stream, nil
-		},
+		// workFn: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
+		// 	stream, publisher := dive.NewEventStream()
+		// 	go func() {
+		// 		defer publisher.Close()
+		// 		time.Sleep(100 * time.Millisecond)
+		// 		publisher.Send(ctx, &dive.Event{
+		// 			Type: "task.completed",
+		// 			Payload: &dive.StepResult{
+		// 				Content: "completed",
+		// 			},
+		// 		})
+		// 	}()
+		// 	return stream, nil
+		// },
 	}
 
 	env, err := New(Options{
@@ -322,7 +338,9 @@ func TestExecutionContextCancellation(t *testing.T) {
 	require.NoError(t, env.Start(context.Background()))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	execution, err := env.ExecuteWorkflow(ctx, wf.Name(), map[string]interface{}{})
+	execution, err := env.ExecuteWorkflow(ctx, ExecutionOptions{
+		WorkflowName: wf.Name(),
+	})
 	require.NoError(t, err)
 
 	// Cancel the context before the task completes

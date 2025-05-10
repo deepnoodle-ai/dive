@@ -2,8 +2,6 @@ package dive
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/gofrs/uuid/v5"
@@ -18,63 +16,14 @@ const (
 	OutputFormatJSON     OutputFormat = "json"
 )
 
-// TaskStatus indicates a Task's execution status
-type TaskStatus string
-
-const (
-	TaskStatusQueued    TaskStatus = "queued"
-	TaskStatusActive    TaskStatus = "active"
-	TaskStatusPaused    TaskStatus = "paused"
-	TaskStatusCompleted TaskStatus = "completed"
-	TaskStatusBlocked   TaskStatus = "blocked"
-	TaskStatusError     TaskStatus = "error"
-	TaskStatusInvalid   TaskStatus = "invalid"
-)
-
-// Input defines an expected input parameter
-type Input struct {
-	Name        string      `json:"name"`
-	Type        string      `json:"type,omitempty"`
-	Description string      `json:"description,omitempty"`
-	Required    bool        `json:"required,omitempty"`
-	Default     interface{} `json:"default,omitempty"`
-}
-
-// Output defines an expected output parameter
-type Output struct {
-	Name        string      `json:"name"`
-	Type        string      `json:"type,omitempty"`
-	Description string      `json:"description,omitempty"`
-	Format      string      `json:"format,omitempty"`
-	Default     interface{} `json:"default,omitempty"`
-	Document    string      `json:"document,omitempty"`
-}
-
-// PromptContext is a named block of information carried by a Prompt
-type PromptContext struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Text        string `json:"text,omitempty"`
-}
-
-// Prompt is a structured representation of an LLM prompt
-type Prompt struct {
-	Name         string           `json:"name"`
-	Text         string           `json:"text,omitempty"`
-	Context      []*PromptContext `json:"context,omitempty"`
-	Output       string           `json:"output,omitempty"`
-	OutputFormat OutputFormat     `json:"output_format,omitempty"`
-}
-
-// Agent represents an intelligent agent that can work on tasks and respond to
-// chat messages.
+// Agent represents an intelligent AI entity that can autonomously execute tasks,
+// respond to chat messages, and process information. Agents can work with documents,
+// generate responses using LLMs, and interact with users through natural language.
+// They may have specialized capabilities depending on their implementation.
 type Agent interface {
 
 	// Name of the Agent
 	Name() string
-
-	// Goal of the Agent
-	Goal() string
 
 	// IsSupervisor indicates whether the Agent can assign work to other Agents
 	IsSupervisor() bool
@@ -82,25 +31,11 @@ type Agent interface {
 	// SetEnvironment sets the runtime Environment to which this Agent belongs
 	SetEnvironment(env Environment) error
 
-	// Chat gives the agent messages to respond to and returns a stream of events
-	Chat(ctx context.Context, messages []*llm.Message, opts ...ChatOption) (EventStream, error)
+	// CreateResponse creates a new Response from the Agent
+	CreateResponse(ctx context.Context, opts ...Option) (*Response, error)
 
-	// Work gives the agent a task to complete
-	Work(ctx context.Context, task Task) (EventStream, error)
-}
-
-// RunnableAgent is an agent that must be started and stopped.
-type RunnableAgent interface {
-	Agent
-
-	// Start the agent
-	Start(ctx context.Context) error
-
-	// Stop the agent
-	Stop(ctx context.Context) error
-
-	// IsRunning returns true if the agent is running
-	IsRunning() bool
+	// StreamResponse streams a new Response from the Agent
+	StreamResponse(ctx context.Context, opts ...Option) (ResponseStream, error)
 }
 
 // Environment is a container for running Agents and Workflows. Interactivity
@@ -113,8 +48,8 @@ type Environment interface {
 	// Agents returns the list of all Agents belonging to this Environment
 	Agents() []Agent
 
-	// RegisterAgent adds an Agent to this Environment
-	RegisterAgent(agent Agent) error
+	// AddAgent adds an Agent to this Environment
+	AddAgent(agent Agent) error
 
 	// GetAgent returns the Agent with the given name, if found
 	GetAgent(name string) (Agent, error)
@@ -126,17 +61,23 @@ type Environment interface {
 	ThreadRepository() ThreadRepository
 }
 
-// ChatOptions contains configuration for LLM generations.
-type ChatOptions struct {
-	ThreadID string
-	UserID   string
+// Options contains configuration for LLM generations.
+type Options struct {
+	ThreadID      string
+	UserID        string
+	Input         string
+	Messages      []*llm.Message
+	EventCallback EventCallback
 }
 
-// ChatOption is a type signature for defining new LLM generation options.
-type ChatOption func(*ChatOptions)
+// EventCallback is a function that processes streaming events during response generation.
+type EventCallback func(ctx context.Context, event *ResponseEvent) error
+
+// Option is a type signature for defining new LLM generation options.
+type Option func(*Options)
 
 // Apply invokes any supplied options. Used internally in Dive.
-func (o *ChatOptions) Apply(opts []ChatOption) {
+func (o *Options) Apply(opts []Option) {
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -144,109 +85,41 @@ func (o *ChatOptions) Apply(opts []ChatOption) {
 
 // WithThreadID associates the given conversation thread ID with a generation.
 // This appends the new messages to any previous messages belonging to this thread.
-func WithThreadID(threadID string) ChatOption {
-	return func(opts *ChatOptions) {
+func WithThreadID(threadID string) Option {
+	return func(opts *Options) {
 		opts.ThreadID = threadID
 	}
 }
 
 // WithUserID associates the given user ID with a generation, indicating what
 // person is the speaker in the conversation.
-func WithUserID(userID string) ChatOption {
-	return func(opts *ChatOptions) {
+func WithUserID(userID string) Option {
+	return func(opts *Options) {
 		opts.UserID = userID
 	}
 }
 
-// Task represents a unit of work that can be executed by an Agent.
-type Task interface {
-	// Name returns the name of the task
-	Name() string
-
-	// Timeout returns the maximum duration allowed for task execution
-	Timeout() time.Duration
-
-	// Prompt returns the LLM prompt for the task
-	Prompt() (*Prompt, error)
+// WithMessages specifies the messages to be used in the generation.
+func WithMessages(messages []*llm.Message) Option {
+	return func(opts *Options) {
+		opts.Messages = messages
+	}
 }
 
-// TaskResult holds the output of a completed task.
-type TaskResult struct {
-	// Task is the task that was executed
-	Task Task
-
-	// Content contains the raw output
-	Content string
-
-	// Format specifies how to interpret the content
-	Format OutputFormat
-
-	// Object holds parsed JSON output if applicable
-	Object interface{}
-
-	// Error is set if task execution failed
-	Error error
-
-	// Usage tracks LLM token usage
-	Usage llm.Usage
+// WithInput specifies a simple text input string to be used in the generation.
+// This is a convenience wrapper that creates a single user message.
+func WithInput(input string) Option {
+	return func(opts *Options) {
+		opts.Input = input
+	}
 }
 
-// ListDocumentInput specifies search criteria for documents in a document store
-type ListDocumentInput struct {
-	PathPrefix string
-	Recursive  bool
-}
-
-// ListDocumentOutput is the output for listing documents
-type ListDocumentOutput struct {
-	Items []Document
-}
-
-// DocumentRepository provides read/write access to a set of documents. This could be
-// backed by a local file system, a remote API, or a database.
-type DocumentRepository interface {
-
-	// GetDocument returns a document by name
-	GetDocument(ctx context.Context, name string) (Document, error)
-
-	// ListDocuments lists documents
-	ListDocuments(ctx context.Context, input *ListDocumentInput) (*ListDocumentOutput, error)
-
-	// PutDocument puts a document
-	PutDocument(ctx context.Context, doc Document) error
-
-	// DeleteDocument deletes a document
-	DeleteDocument(ctx context.Context, doc Document) error
-
-	// Exists checks if a document exists by name
-	Exists(ctx context.Context, name string) (bool, error)
-
-	// RegisterDocument assigns a name to a document path
-	RegisterDocument(ctx context.Context, name, path string) error
-}
-
-var ErrThreadNotFound = fmt.Errorf("thread not found")
-
-// Thread represents a chat thread
-type Thread struct {
-	ID        string         `json:"id"`
-	UserID    string         `json:"user_id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	Messages  []*llm.Message `json:"messages"`
-}
-
-// ThreadRepository is an interface for storing and retrieving chat threads
-type ThreadRepository interface {
-
-	// PutThread creates or updates a thread
-	PutThread(ctx context.Context, thread *Thread) error
-
-	// GetThread retrieves a thread by ID
-	GetThread(ctx context.Context, id string) (*Thread, error)
-
-	// DeleteThread deletes a thread by ID
-	DeleteThread(ctx context.Context, id string) error
+// WithEventCallback specifies a callback function that will be invoked for each
+// event generated during response creation.
+func WithEventCallback(callback EventCallback) Option {
+	return func(opts *Options) {
+		opts.EventCallback = callback
+	}
 }
 
 // NewID returns a new UUID

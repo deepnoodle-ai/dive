@@ -5,9 +5,8 @@ Config:
   LLM:
     DefaultProvider: anthropic
     DefaultModel: claude-3-7-sonnet-20250219
-    CacheControl: ephemeral
   Logging:
-    Level: info
+    Level: warn
 
 Tools:
   - Name: Web.Search
@@ -27,6 +26,9 @@ Agents:
       - Web.Fetch
       - Directory.List
       - File.Read
+    ModelSettings:
+      MaxTokens: 16384
+      ReasoningEffort: medium
 
 Workflows:
   - Name: Code Overview
@@ -39,42 +41,32 @@ Workflows:
     Steps:
       - Name: List Files
         Agent: Engineer
-        Prompt:
-          Text: |
-            List all files in the directory: "${inputs.directory}"
-          Output: The list of file names
-          OutputFormat: Markdown
+        Prompt: |
+          List all files in the directory: "${inputs.directory}"
         Store: file_list
 
       - Name: Read Key Files
         Agent: Engineer
-        Prompt:
-          Text: |
-            Here are the files we discovered:
-            ${file_list}
+        Prompt: |
+          Here are the files we discovered:
+          ${file_list}
 
-            Read what look like the most important 2 files and summarize them.
-          Output: The key files in the codebase
-          OutputFormat: Markdown
+          Read what look like the most important 2 files and summarize them.
         Store: key_files
 
       - Name: Generate Code Overview
         Agent: Engineer
-        Prompt:
-          Text: |
-            Generate a code overview for the codebase.
+        Prompt: |
+          Generate a code overview for the codebase.
 
-            The files are:
-            ${file_list}
+          The files are:
+          ${file_list}
 
-            Information about key files:
+          Information about key files:
 
-            ${key_files}
+          ${key_files}
 
-            Keep it short and concise.
-
-          Output: The code overview
-          OutputFormat: Markdown
+          Keep it short and concise.
         Store: code_overview
 
       - Name: Write Document

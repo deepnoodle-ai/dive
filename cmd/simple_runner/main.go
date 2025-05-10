@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/diveagents/dive/config"
+	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
 	"github.com/fatih/color"
@@ -77,7 +78,10 @@ func main() {
 	}
 
 	// Start the workflow
-	execution, err := env.ExecuteWorkflow(ctx, workflow.Name(), vars)
+	execution, err := env.ExecuteWorkflow(ctx, environment.ExecutionOptions{
+		WorkflowName: workflow.Name(),
+		Inputs:       vars,
+	})
 	if err != nil {
 		fatal(err.Error())
 	}

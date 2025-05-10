@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
@@ -46,32 +45,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := researcher.Start(ctx); err != nil {
-		log.Fatal(err)
-	}
-	defer researcher.Stop(ctx)
 
-	task := agent.NewTask(agent.TaskOptions{
-		Timeout: 10 * time.Second,
-		Prompt: &dive.Prompt{
-			Text:         "Research the history of computing",
-			Output:       "A brief report",
-			OutputFormat: "markdown",
-		},
-	})
+	prompt := "Research the history of computing. Respond with a brief markdown-formatted report."
 
-	stream, err := researcher.Work(ctx, task)
+	response, err := researcher.CreateResponse(ctx, dive.WithInput(prompt))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer stream.Close()
-
-	results, err := dive.ReadEventPayloads[*dive.TaskResult](ctx, stream)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if len(results) == 0 {
-		log.Fatal("stream ended without a task result")
-	}
-	fmt.Println(results[0].Content)
+	fmt.Println(response.OutputText())
 }

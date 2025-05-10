@@ -31,7 +31,7 @@ func ParseFile(path string) (*Environment, error) {
 // ParseYAML loads an Environment configuration from YAML
 func ParseYAML(data []byte) (*Environment, error) {
 	var env Environment
-	if err := yaml.Unmarshal(data, &env); err != nil {
+	if err := yaml.UnmarshalWithOptions(data, &env, yaml.Strict()); err != nil {
 		return nil, err
 	}
 	return &env, nil

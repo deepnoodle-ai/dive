@@ -1,14 +1,13 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/workflow"
 )
 
-func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Prompt) (*workflow.Workflow, error) {
+func buildWorkflow(workflowDef Workflow, agents []dive.Agent) (*workflow.Workflow, error) {
 	if len(workflowDef.Steps) == 0 {
 		return nil, fmt.Errorf("no steps found")
 	}
@@ -16,11 +15,6 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 	agentsByName := make(map[string]dive.Agent)
 	for _, agent := range agents {
 		agentsByName[agent.Name()] = agent
-	}
-
-	promptsByName := make(map[string]*dive.Prompt)
-	for _, prompt := range prompts {
-		promptsByName[prompt.Name] = prompt
 	}
 
 	steps := []*workflow.Step{}
@@ -50,37 +44,6 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 			}
 		}
 
-		// Handle Prompt if present
-		var prompt *dive.Prompt
-		if step.Prompt != nil {
-			switch promptDef := step.Prompt.(type) {
-			case string:
-				prompt = &dive.Prompt{Text: promptDef}
-			case map[string]any:
-				var promptObj Prompt
-				data, err := json.Marshal(promptDef)
-				if err != nil {
-					return nil, fmt.Errorf("failed to marshal prompt: %w", err)
-				}
-				if err := json.Unmarshal(data, &promptObj); err != nil {
-					return nil, fmt.Errorf("failed to unmarshal prompt: %w", err)
-				}
-				var context []*dive.PromptContext
-				for _, contextObj := range promptObj.Context {
-					context = append(context, &dive.PromptContext{Text: contextObj})
-				}
-				prompt = &dive.Prompt{
-					Name:         promptObj.Name,
-					Text:         promptObj.Text,
-					Output:       promptObj.Output,
-					OutputFormat: dive.OutputFormat(promptObj.OutputFormat),
-					Context:      context,
-				}
-			default:
-				return nil, fmt.Errorf("invalid prompt: %v", step.Prompt)
-			}
-		}
-
 		// Handle Agent if present
 		var agent dive.Agent
 		if step.Agent != "" {
@@ -94,7 +57,7 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 		if stepType == "" {
 			if step.Action != "" {
 				stepType = "action"
-			} else if step.Prompt != nil {
+			} else if step.Prompt != "" {
 				stepType = "prompt"
 			}
 		}
@@ -103,7 +66,7 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 			Type:       stepType,
 			Name:       step.Name,
 			Agent:      agent,
-			Prompt:     prompt,
+			Prompt:     step.Prompt,
 			Next:       edges,
 			Each:       each,
 			Action:     step.Action,
@@ -122,9 +85,9 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 		})
 	}
 
-	var inputs []*dive.Input
+	var inputs []*workflow.Input
 	for _, input := range workflowDef.Inputs {
-		inputs = append(inputs, &dive.Input{
+		inputs = append(inputs, &workflow.Input{
 			Name:        input.Name,
 			Type:        input.Type,
 			Description: input.Description,
@@ -133,9 +96,9 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent, prompts []*dive.Pr
 		})
 	}
 
-	var output *dive.Output
+	var output *workflow.Output
 	if workflowDef.Output != nil {
-		output = &dive.Output{
+		output = &workflow.Output{
 			Name:        workflowDef.Output.Name,
 			Type:        workflowDef.Output.Type,
 			Description: workflowDef.Output.Description,

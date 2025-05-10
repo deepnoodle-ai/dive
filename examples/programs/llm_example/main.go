@@ -11,19 +11,18 @@ import (
 )
 
 func main() {
-	var verbose bool
 	var prompt string
 	flag.StringVar(&prompt, "prompt", "", "prompt to use")
-	flag.BoolVar(&verbose, "verbose", false, "verbose output")
 	flag.Parse()
 
 	if prompt == "" {
 		log.Fatal("provide a prompt with -prompt")
 	}
 
-	model := anthropic.New()
-	response, err := model.Generate(
-		context.Background(),
+	ctx := context.Background()
+
+	response, err := anthropic.New().Generate(
+		ctx,
 		llm.Messages{llm.NewUserMessage(prompt)},
 		llm.WithMaxTokens(2048),
 		llm.WithTemperature(0.7),

@@ -32,7 +32,7 @@ type Step struct {
 	name        string
 	description string
 	agent       dive.Agent
-	prompt      *dive.Prompt
+	prompt      string
 	store       string
 	action      string
 	parameters  map[string]any
@@ -48,7 +48,7 @@ type StepOptions struct {
 	Name        string
 	Description string
 	Agent       dive.Agent
-	Prompt      *dive.Prompt
+	Prompt      string
 	Store       string
 	Action      string
 	Parameters  map[string]any
@@ -59,10 +59,8 @@ type StepOptions struct {
 }
 
 func NewStep(opts StepOptions) *Step {
-	if opts.Type == "" {
-		if opts.Agent != nil || opts.Prompt != nil {
-			opts.Type = "prompt"
-		}
+	if opts.Type == "" && opts.Prompt != "" {
+		opts.Type = "prompt"
 	}
 	return &Step{
 		stepType:    opts.Type,
@@ -96,7 +94,7 @@ func (s *Step) Agent() dive.Agent {
 	return s.agent
 }
 
-func (s *Step) Prompt() *dive.Prompt {
+func (s *Step) Prompt() string {
 	return s.prompt
 }
 

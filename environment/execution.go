@@ -11,13 +11,18 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/eval"
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/objects"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
+	"github.com/fatih/color"
 	"github.com/risor-io/risor"
 	"github.com/risor-io/risor/compiler"
 	"github.com/risor-io/risor/object"
 	"github.com/risor-io/risor/parser"
+)
+
+var (
+	colorGreen = color.New(color.FgGreen)
+	colorBold  = color.New(color.Bold)
 )
 
 // PathStatus represents the current state of an execution path
@@ -82,78 +87,30 @@ type pathUpdate struct {
 
 // Execution represents a single run of a workflow
 type Execution struct {
-	id            string                 // Unique identifier for this execution
-	environment   *Environment           // Environment that the execution belongs to
-	workflow      *workflow.Workflow     // Workflow being executed
-	status        Status                 // Current status of the execution
-	startTime     time.Time              // When the execution started
-	endTime       time.Time              // When the execution completed (or failed/canceled)
-	inputs        map[string]interface{} // Input parameters for the workflow
-	outputs       map[string]interface{} // Output values from the workflow
-	err           error                  // Error if execution failed
-	parentID      string                 // ID of parent execution (for sub-executions)
-	childIDs      []string               // IDs of child executions
-	metadata      map[string]string      // Additional metadata about the execution
-	logger        slogger.Logger         // Logger for the execution
-	paths         map[string]*PathState  // Track all paths by ID
-	scriptGlobals map[string]any
-	mutex         sync.RWMutex   // Mutex for thread-safe operations
-	doneWg        sync.WaitGroup // Wait group for the execution
+	id             string                 // Unique identifier for this execution
+	environment    *Environment           // Environment that the execution belongs to
+	workflow       *workflow.Workflow     // Workflow being executed
+	status         Status                 // Current status of the execution
+	startTime      time.Time              // When the execution started
+	endTime        time.Time              // When the execution completed (or failed/canceled)
+	inputs         map[string]interface{} // Input parameters for the workflow
+	outputs        map[string]interface{} // Output values from the workflow
+	err            error                  // Error if execution failed
+	logger         slogger.Logger         // Logger for the execution
+	paths          map[string]*PathState  // Track all paths by ID
+	scriptGlobals  map[string]any
+	showStepOutput bool           // Whether to show step output
+	mutex          sync.RWMutex   // Mutex for thread-safe operations
+	doneWg         sync.WaitGroup // Wait group for the execution
 }
 
 // ExecutionOptions are the options for creating a new execution.
 type ExecutionOptions struct {
-	ID          string
-	Environment *Environment
-	Workflow    *workflow.Workflow
-	Status      Status
-	StartTime   time.Time
-	EndTime     time.Time
-	Inputs      map[string]interface{}
-	Outputs     map[string]interface{}
-	ParentID    string
-	ChildIDs    []string
-	Metadata    map[string]string
-	Logger      slogger.Logger
-}
-
-// NewExecution creates a new execution of a workflow. Begin the execution by
-// calling execution.Run().
-func NewExecution(opts ExecutionOptions) *Execution {
-	if opts.Status == "" {
-		opts.Status = StatusPending
-	}
-	if opts.Logger == nil {
-		opts.Logger = slogger.NewDevNullLogger()
-	}
-	if opts.Environment == nil {
-		panic("environment is required")
-	}
-	execution := &Execution{
-		id:          opts.ID,
-		environment: opts.Environment,
-		workflow:    opts.Workflow,
-		status:      opts.Status,
-		startTime:   opts.StartTime,
-		endTime:     opts.EndTime,
-		inputs:      opts.Inputs,
-		outputs:     opts.Outputs,
-		parentID:    opts.ParentID,
-		childIDs:    opts.ChildIDs,
-		metadata:    opts.Metadata,
-		logger:      opts.Logger,
-		paths:       make(map[string]*PathState),
-		mutex:       sync.RWMutex{},
-		doneWg:      sync.WaitGroup{},
-	}
-	execution.scriptGlobals = map[string]any{
-		"inputs": execution.inputs,
-	}
-	if repo := opts.Environment.DocumentRepository(); repo != nil {
-		execution.scriptGlobals["documents"] = objects.NewDocumentRepository(repo)
-	}
-	execution.doneWg.Add(1)
-	return execution
+	WorkflowName   string
+	Inputs         map[string]interface{}
+	Outputs        map[string]interface{}
+	Logger         slogger.Logger
+	ShowStepOutput bool
 }
 
 func (e *Execution) ID() string {
@@ -194,35 +151,54 @@ func (e *Execution) Wait() error {
 	return e.err
 }
 
-// Run the execution until completion in a blocking manner.
+// Run starts the execution in a goroutine and returns immediately.
+// Any validation errors are returned before the goroutine is started.
+// Use Wait() to wait for completion and get the final error, if any.
 func (e *Execution) Run(ctx context.Context) error {
 	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
 	if e.status != StatusPending {
-		e.mutex.Unlock()
 		return fmt.Errorf("execution can only be run from pending state, current status: %s", e.status)
 	}
+
+	requiresAgent := false
+	for _, step := range e.workflow.Steps() {
+		if step.Type() == "prompt" {
+			requiresAgent = true
+		}
+	}
+	if requiresAgent && len(e.environment.Agents()) == 0 {
+		return fmt.Errorf("execution requires an agent")
+	}
+
 	e.status = StatusRunning
 	e.startTime = time.Now()
-	e.mutex.Unlock()
+	e.doneWg.Add(1)
+	go e.runSync(ctx)
+	return nil
+}
 
-	defer e.doneWg.Done() // Ensure we always mark as done when execution completes
+func (e *Execution) runSync(ctx context.Context) error {
+	defer e.doneWg.Done()
 
 	err := e.run(ctx)
 
 	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
 	e.endTime = time.Now()
 	if err != nil {
 		e.logger.Error("workflow execution failed", "error", err)
 		e.status = StatusFailed
 		e.err = err
-	} else {
-		e.logger.Info("workflow execution completed", "execution_id", e.id)
-		e.status = StatusCompleted
-		e.err = nil
+		return err
 	}
-	e.mutex.Unlock()
 
-	return err
+	e.logger.Info("workflow execution completed", "execution_id", e.id)
+	e.status = StatusCompleted
+	e.err = nil
+	return nil
 }
 
 func (e *Execution) run(ctx context.Context) error {
@@ -427,10 +403,10 @@ func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string)
 	return resultItems, nil
 }
 
-// executeStepCore handles the core execution of a single step without "Each" logic
-func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.TaskResult, error) {
-	var result *dive.TaskResult
+func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
 	var err error
+	var result *dive.StepResult
+
 	// Handle different step types
 	switch step.Type() {
 	case "prompt":
@@ -444,6 +420,17 @@ func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, ag
 		return nil, err
 	}
 
+	if e.showStepOutput {
+		trimmedContent := strings.TrimSpace(result.Content)
+		if trimmedContent != "" {
+			fmt.Printf("Step %q output:\n", step.Name())
+			fmt.Println(colorGreen.Sprint(trimmedContent))
+			fmt.Println()
+		} else {
+			fmt.Printf("Step %q completed with no output\n", step.Name())
+		}
+	}
+
 	// Store the output in a variable if specified
 	if varName := step.Store(); varName != "" {
 		e.scriptGlobals[varName] = object.NewString(result.Content)
@@ -453,7 +440,7 @@ func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, ag
 }
 
 // handleStepExecution executes a single step and returns the result
-func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath, agent dive.Agent) (*dive.TaskResult, error) {
+func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath, agent dive.Agent) (*dive.StepResult, error) {
 	step := path.currentStep
 	e.updatePathState(path.id, func(state *PathState) {
 		state.CurrentStep = step
@@ -465,7 +452,7 @@ func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath
 }
 
 // executeStepEach handles the execution of a step that has an each block
-func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.TaskResult, error) {
+func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
 	each := step.Each()
 
 	// Resolve the items to iterate over
@@ -475,7 +462,7 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, ag
 	}
 
 	// Execute the step for each item and capture the results
-	var results []*dive.TaskResult
+	var results []*dive.StepResult
 	for _, item := range items {
 		if varName := each.As; varName != "" {
 			e.scriptGlobals[varName] = object.NewString(item)
@@ -499,62 +486,58 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, ag
 		itemTexts = append(itemTexts, itemText)
 	}
 
-	return &dive.TaskResult{
+	return &dive.StepResult{
 		Content: strings.Join(itemTexts, "\n\n"),
 		Format:  dive.OutputFormatMarkdown,
 	}, nil
 }
 
-// handlePromptStep handles a prompt step by creating a task and assigning it to an agent
-func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.TaskResult, error) {
-	// Create a task from the prompt
-	prompt := step.Prompt()
-	if prompt == nil {
+func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
+	promptTemplate := step.Prompt()
+	if promptTemplate == "" {
 		return nil, fmt.Errorf("prompt step %q has no prompt", step.Name())
 	}
 
-	// Evaluate the prompt text as a template
-	promptText, err := eval.Eval(ctx, prompt.Text, e.scriptGlobals)
+	prompt, err := e.evalString(ctx, promptTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create prompt template: %w", err)
 	}
-	task := &Task{
-		name: step.Name(),
-		prompt: &dive.Prompt{
-			Name:         prompt.Name,
-			Text:         promptText,
-			Context:      prompt.Context,
-			Output:       prompt.Output,
-			OutputFormat: prompt.OutputFormat,
-		},
-	}
 
-	// Execute the task
-	result, err := executeTask(ctx, agent, task)
+	result, err := agent.CreateResponse(ctx, dive.WithInput(prompt))
 	if err != nil {
-		e.logger.Error("task execution failed", "task", task.Name(), "error", err)
+		e.logger.Error("task execution failed", "step", step.Name(), "error", err)
 		return nil, err
 	}
-	return result, nil
+
+	var usage llm.Usage
+	for _, item := range result.Items {
+		if item.Type == dive.ResponseItemTypeMessage && item.Usage != nil {
+			usage.Add(item.Usage)
+		}
+	}
+
+	return &dive.StepResult{
+		Content: result.OutputText(),
+		Usage:   usage,
+	}, nil
 }
 
-// handleActionStep handles an action step by looking up and executing the action
-func (e *Execution) handleActionStep(ctx context.Context, step *workflow.Step) (*dive.TaskResult, error) {
+func (e *Execution) handleActionStep(ctx context.Context, step *workflow.Step) (*dive.StepResult, error) {
 	actionName := step.Action()
 	if actionName == "" {
 		return nil, fmt.Errorf("action step %q has no action name", step.Name())
 	}
+
 	action, ok := e.environment.GetAction(actionName)
 	if !ok {
 		return nil, fmt.Errorf("action %q not found", actionName)
 	}
 
-	// Process parameters
 	params := make(map[string]interface{})
 	for name, value := range step.Parameters() {
 		// If the value is a string that looks like a template, evaluate it
 		if strValue, ok := value.(string); ok && strings.Contains(strValue, "${") {
-			evaluated, err := eval.Eval(ctx, strValue, e.scriptGlobals)
+			evaluated, err := e.evalString(ctx, strValue)
 			if err != nil {
 				return nil, fmt.Errorf("failed to evaluate parameter template: %w", err)
 			}
@@ -564,19 +547,17 @@ func (e *Execution) handleActionStep(ctx context.Context, step *workflow.Step) (
 		}
 	}
 
-	// Execute the action
 	result, err := action.Execute(ctx, params)
 	if err != nil {
 		e.logger.Error("action execution failed", "action", actionName, "error", err)
 		return nil, err
 	}
 
-	// Convert action result to task result
 	var content string
 	if result != nil {
 		content = fmt.Sprintf("%v", result)
 	}
-	return &dive.TaskResult{Content: content}, nil
+	return &dive.StepResult{Content: content}, nil
 }
 
 // updatePathError updates the path state with an error
@@ -602,14 +583,6 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath, updates ch
 		With("execution_id", e.id)
 
 	logger.Info("running path", "step", path.currentStep.Name())
-
-	defer func() {
-		if r := recover(); r != nil {
-			err := fmt.Errorf("path %s panicked: %v", path.id, r)
-			e.updatePathError(path.id, err)
-			updates <- pathUpdate{pathID: path.id, err: err}
-		}
-	}()
 
 	for {
 		// Update path state to running
@@ -717,6 +690,17 @@ func (e *Execution) addPath(path *executionPath) *PathState {
 	return state
 }
 
+func (e *Execution) evalString(ctx context.Context, s string) (string, error) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	result, err := eval.Eval(ctx, s, e.scriptGlobals)
+	if err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
 // GetError returns the top-level execution error, if any.
 func (e *Execution) GetError() error {
 	e.mutex.RLock()
@@ -787,23 +771,6 @@ func (e *Execution) StepOutputs() map[string]string {
 		}
 	}
 	return outputs
-}
-
-func executeTask(ctx context.Context, agent dive.Agent, task dive.Task) (*dive.TaskResult, error) {
-	iterator, err := agent.Work(ctx, task)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start task %q: %w", task.Name(), err)
-	}
-	defer iterator.Close()
-
-	taskResults, err := dive.ReadEventPayloads[*dive.TaskResult](ctx, iterator)
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for task result: %w", err)
-	}
-	if len(taskResults) == 0 {
-		return nil, fmt.Errorf("stream ended without a task result")
-	}
-	return taskResults[len(taskResults)-1], nil
 }
 
 func evalCode(ctx context.Context, code *compiler.Code, globals map[string]any) (any, error) {
