@@ -46,12 +46,12 @@ func TestHelloWorldStream(t *testing.T) {
 	require.Equal(t, "1 2 3 4 5 6 7 8 9 10", response.Message().Text())
 }
 
-func addFunc(ctx context.Context, input string) (string, error) {
+func addFunc(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
 	var params map[string]interface{}
-	if err := json.Unmarshal([]byte(input), &params); err != nil {
-		return "", err
+	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
+		return nil, err
 	}
-	return fmt.Sprintf("%d", int(params["a"].(float64))+int(params["b"].(float64))), nil
+	return llm.NewToolCallOutput(fmt.Sprintf("%d", int(params["a"].(float64))+int(params["b"].(float64)))), nil
 }
 
 func TestToolUse(t *testing.T) {
@@ -62,21 +62,20 @@ func TestToolUse(t *testing.T) {
 		llm.NewUserMessage("add 567 and 111"),
 	}
 
-	add := llm.ToolDefinition{
-		Name:        "add",
-		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
-		Parameters: llm.Schema{
+	add := llm.NewFunctionTool(addFunc).
+		WithName("add").
+		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
+		WithSchema(llm.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*llm.SchemaProperty{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
-		},
-	}
+		})
 
 	response, err := provider.Generate(ctx, messages,
-		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
@@ -98,21 +97,20 @@ func TestMultipleToolUse(t *testing.T) {
 		llm.NewUserMessage("Calculate two results for me: add 567 and 111, and add 233 and 444"),
 	}
 
-	add := llm.ToolDefinition{
-		Name:        "add",
-		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
-		Parameters: llm.Schema{
+	add := llm.NewFunctionTool(addFunc).
+		WithName("add").
+		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
+		WithSchema(llm.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*llm.SchemaProperty{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
-		},
-	}
+		})
 
 	response, err := provider.Generate(ctx, messages,
-		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
@@ -139,21 +137,20 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 		llm.NewUserMessage("Calculate two results for me: add 567 and 111, and add 233 and 444"),
 	}
 
-	add := llm.ToolDefinition{
-		Name:        "add",
-		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
-		Parameters: llm.Schema{
+	add := llm.NewFunctionTool(addFunc).
+		WithName("add").
+		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
+		WithSchema(llm.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*llm.SchemaProperty{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
-		},
-	}
+		})
 
 	iterator, err := provider.Stream(ctx, messages,
-		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)
@@ -202,21 +199,20 @@ func TestToolUseStream(t *testing.T) {
 		llm.NewUserMessage("add 567 and 111"),
 	}
 
-	add := llm.ToolDefinition{
-		Name:        "add",
-		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
-		Parameters: llm.Schema{
+	add := llm.NewFunctionTool(addFunc).
+		WithName("add").
+		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
+		WithSchema(llm.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*llm.SchemaProperty{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
-		},
-	}
+		})
 
 	iterator, err := provider.Stream(ctx, messages,
-		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
 	require.NoError(t, err)

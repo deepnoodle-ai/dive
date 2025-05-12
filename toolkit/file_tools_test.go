@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/diveagents/dive/llm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,38 +39,36 @@ func TestFileReadTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Equal(t, testContent, result, "Content mismatch")
 	})
 
 	t.Run("ReadWithDefaultPath", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{
-			DefaultFilePath: testFilePath,
-			MaxSize:         10000,
-		})
-		input := FileReadInput{
-			Path: "",
-		}
+		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
+		input := FileReadInput{}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
-
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 		require.Equal(t, testContent, result, "Content mismatch")
 	})
 
 	t.Run("ReadNonExistentFile", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{
-			MaxSize: 10000,
-		})
+		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
 		input := FileReadInput{
 			Path: filepath.Join(tempDir, "nonexistent.txt"),
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: File not found", "Expected 'file not found' error")
@@ -77,15 +76,15 @@ func TestFileReadTool(t *testing.T) {
 
 	t.Run("ReadLargeFileTruncated", func(t *testing.T) {
 		maxSize := 100
-		tool := NewFileReadTool(FileReadToolOptions{
-			MaxSize: maxSize,
-		})
+		tool := NewFileReadTool(FileReadToolOptions{MaxSize: maxSize})
 		input := FileReadInput{
 			Path: largeFilePath,
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: File", "Expected error about file size")
@@ -93,39 +92,33 @@ func TestFileReadTool(t *testing.T) {
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{
-			MaxSize: 10000,
-		})
+		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
 
-		_, err := tool.Call(context.Background(), "{invalid json")
+		_, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: "{invalid json",
+		})
 
 		require.Error(t, err, "Expected error for invalid JSON")
 	})
 
 	t.Run("NoPathProvided", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{
-			MaxSize: 10000,
-		})
+		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
 		input := FileReadInput{
 			Path: "",
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: No file path provided", "Expected 'no file path provided' error")
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{
-			DefaultFilePath: "default.txt",
-			MaxSize:         10000,
-		})
-		def := tool.Definition()
-
-		require.Equal(t, "file_read", def.Name, "Tool name mismatch")
-		require.Contains(t, def.Description, "default.txt", "Description should contain default file path")
+		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
+		require.Equal(t, "file_read", tool.Name(), "Tool name mismatch")
 	})
 
 	t.Run("RootDirectoryBehavior", func(t *testing.T) {
@@ -140,16 +133,15 @@ func TestFileReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(fullRootFilePath, []byte(rootFileContent), 0644), "Failed to create test file in root")
 
 		// Test reading a file inside the root directory
-		tool := NewFileReadTool(FileReadToolOptions{
-			RootDirectory: rootDir,
-			MaxSize:       10000,
-		})
+		tool := NewFileReadTool(FileReadToolOptions{RootDirectory: rootDir, MaxSize: 10000})
 		input := FileReadInput{
 			Path: rootFilePath, // Only the relative path
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 		require.Equal(t, rootFileContent, result, "Content mismatch")
 
@@ -159,7 +151,9 @@ func TestFileReadTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error:", "Expected error for path outside root")
 		require.Contains(t, result, "outside of root directory", "Expected error about path outside root")
@@ -192,7 +186,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -205,9 +201,7 @@ func TestFileWriteTool(t *testing.T) {
 
 	t.Run("WriteWithDefaultPath", func(t *testing.T) {
 		defaultPath := filepath.Join(tempDir, "default_write.txt")
-		tool := NewFileWriteTool(FileWriteToolOptions{
-			DefaultFilePath: defaultPath,
-		})
+		tool := NewFileWriteTool(FileWriteToolOptions{})
 		testContent := "This is default path content"
 
 		input := FileWriteInput{
@@ -216,7 +210,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -238,7 +234,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -257,7 +255,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: No file path provided", "Expected 'no file path provided' error")
@@ -266,7 +266,9 @@ func TestFileWriteTool(t *testing.T) {
 	t.Run("InvalidJSON", func(t *testing.T) {
 		tool := NewFileWriteTool(FileWriteToolOptions{})
 
-		_, err := tool.Call(context.Background(), "{invalid json")
+		_, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: "{invalid json",
+		})
 
 		require.Error(t, err, "Expected error for invalid JSON")
 	})
@@ -287,7 +289,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -299,7 +303,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
@@ -321,7 +327,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -333,7 +341,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
@@ -354,7 +364,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -367,7 +379,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
@@ -388,7 +402,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -401,7 +417,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -414,7 +432,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
@@ -437,7 +457,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
@@ -449,7 +471,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
@@ -457,15 +481,10 @@ func TestFileWriteTool(t *testing.T) {
 
 	t.Run("ToolDefinition", func(t *testing.T) {
 		tool := NewFileWriteTool(FileWriteToolOptions{
-			DefaultFilePath: "default.txt",
-			AllowList:       []string{"/allowed/**"},
-			DenyList:        []string{"/denied/**"},
+			AllowList: []string{"/allowed/**"},
+			DenyList:  []string{"/denied/**"},
 		})
-		def := tool.Definition()
-
-		require.Equal(t, "file_write", def.Name, "Tool name mismatch")
-		require.Contains(t, def.Description, "default.txt", "Description should contain default file path")
-		require.Contains(t, def.Description, "restricted", "Description should mention path restrictions")
+		require.Equal(t, "file_write", tool.Name(), "Tool name mismatch")
 	})
 
 	t.Run("RootDirectoryBehavior", func(t *testing.T) {
@@ -488,7 +507,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Successfully wrote", "Expected success message")
 
@@ -505,7 +526,9 @@ func TestFileWriteTool(t *testing.T) {
 		}
 		inputJSON, _ = json.Marshal(input)
 
-		result, err = tool.Call(context.Background(), string(inputJSON))
+		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result, "Error:", "Expected error for path outside root")
 		require.Contains(t, result, "outside of root directory", "Expected error about path outside root")

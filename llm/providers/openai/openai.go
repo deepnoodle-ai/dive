@@ -430,9 +430,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		tools = append(tools, Tool{
 			Type: "function",
 			Function: ToolFunction{
-				Name:        tool.Definition().Name,
-				Description: tool.Definition().Description,
-				Parameters:  tool.Definition().Parameters,
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				Parameters:  tool.Schema(),
 			},
 		})
 	}

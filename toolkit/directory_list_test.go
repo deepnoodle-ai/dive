@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/diveagents/dive/llm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,13 +45,12 @@ func TestDirectoryListTool(t *testing.T) {
 			DefaultPath: tempDir,
 			MaxEntries:  100,
 		})
+		inputJSON, err := json.Marshal(DirectoryListInput{})
+		require.NoError(t, err, "Failed to marshal input")
 
-		input := DirectoryListInput{
-			Path: "",
-		}
-		inputJSON, _ := json.Marshal(input)
-
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 
 		// Check that the result contains all expected entries
@@ -65,13 +65,12 @@ func TestDirectoryListTool(t *testing.T) {
 		tool := NewDirectoryListTool(DirectoryListToolOptions{
 			MaxEntries: 100,
 		})
-
-		input := DirectoryListInput{
+		inputJSON, _ := json.Marshal(DirectoryListInput{
 			Path: subDir1,
-		}
-		inputJSON, _ := json.Marshal(input)
-
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		})
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 
 		// Check that the result contains only the expected entry
@@ -84,15 +83,14 @@ func TestDirectoryListTool(t *testing.T) {
 		tool := NewDirectoryListTool(DirectoryListToolOptions{
 			MaxEntries: 100,
 		})
-
-		input := DirectoryListInput{
+		inputJSON, _ := json.Marshal(DirectoryListInput{
 			Path: filepath.Join(tempDir, "nonexistent"),
-		}
-		inputJSON, _ := json.Marshal(input)
-
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		})
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result, "Error: Directory not found")
+		require.Contains(t, result.Output, "Error: Directory not found")
 	})
 
 	t.Run("ListDirectoryWithMaxEntries", func(t *testing.T) {
@@ -114,7 +112,9 @@ func TestDirectoryListTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 
 		// Check that the result mentions the limit
@@ -122,9 +122,9 @@ func TestDirectoryListTool(t *testing.T) {
 
 		// Count the number of entries in the JSON response
 		var entries []DirectoryEntry
-		jsonStart := strings.Index(result, "[")
-		jsonEnd := strings.LastIndex(result, "]") + 1
-		require.NoError(t, json.Unmarshal([]byte(result[jsonStart:jsonEnd]), &entries))
+		jsonStart := strings.Index(result.Output, "[")
+		jsonEnd := strings.LastIndex(result.Output, "]") + 1
+		require.NoError(t, json.Unmarshal([]byte(result.Output[jsonStart:jsonEnd]), &entries))
 		require.Len(t, entries, 5, "Expected exactly 5 entries due to MaxEntries limit")
 	})
 
@@ -139,7 +139,9 @@ func TestDirectoryListTool(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result, err := tool.Call(context.Background(), string(inputJSON))
+		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON),
+		})
 		require.NoError(t, err, "Unexpected error")
 
 		// Check that the result contains the expected entry
@@ -147,9 +149,9 @@ func TestDirectoryListTool(t *testing.T) {
 
 		// Check that the path is relative to the root directory
 		var entries []DirectoryEntry
-		jsonStart := strings.Index(result, "[")
-		jsonEnd := strings.LastIndex(result, "]") + 1
-		require.NoError(t, json.Unmarshal([]byte(result[jsonStart:jsonEnd]), &entries))
+		jsonStart := strings.Index(result.Output, "[")
+		jsonEnd := strings.LastIndex(result.Output, "]") + 1
+		require.NoError(t, json.Unmarshal([]byte(result.Output[jsonStart:jsonEnd]), &entries))
 
 		for _, entry := range entries {
 			require.Equal(t, "subdir1/test2.txt", entry.Path)
@@ -172,7 +174,9 @@ func TestDirectoryListTool(t *testing.T) {
 		}
 		inputJSON1, _ := json.Marshal(input1)
 
-		result1, err := tool.Call(context.Background(), string(inputJSON1))
+		result1, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON1),
+		})
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result1, "test2.txt")
 
@@ -182,7 +186,9 @@ func TestDirectoryListTool(t *testing.T) {
 		}
 		inputJSON2, _ := json.Marshal(input2)
 
-		result2, err := tool.Call(context.Background(), string(inputJSON2))
+		result2, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON2),
+		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
 		require.Contains(t, result2, "Access denied")
 	})
@@ -199,7 +205,9 @@ func TestDirectoryListTool(t *testing.T) {
 		}
 		inputJSON1, _ := json.Marshal(input1)
 
-		result1, err := tool.Call(context.Background(), string(inputJSON1))
+		result1, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON1),
+		})
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result1, "test2.txt")
 
@@ -209,7 +217,9 @@ func TestDirectoryListTool(t *testing.T) {
 		}
 		inputJSON2, _ := json.Marshal(input2)
 
-		result2, err := tool.Call(context.Background(), string(inputJSON2))
+		result2, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: string(inputJSON2),
+		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
 		require.Contains(t, result2, "Access denied")
 	})
@@ -219,7 +229,9 @@ func TestDirectoryListTool(t *testing.T) {
 			MaxEntries: 100,
 		})
 
-		_, err := tool.Call(context.Background(), "{invalid json")
+		_, err := tool.Call(context.Background(), &llm.ToolCallInput{
+			Input: "{invalid json",
+		})
 		require.Error(t, err, "Expected error for invalid JSON")
 	})
 
@@ -230,18 +242,8 @@ func TestDirectoryListTool(t *testing.T) {
 			AllowList:     []string{"/allowed/*"},
 			DenyList:      []string{"/denied/*"},
 		})
-
-		def := tool.Definition()
-		require.Equal(t, "directory_list", def.Name)
-		require.Contains(t, def.Description, "/default/path")
-		require.Contains(t, def.Description, "/root/dir")
-		require.Contains(t, def.Description, "restricted based on configured allowlist and denylist patterns")
-		require.Equal(t, "path", def.Parameters.Required[0])
-	})
-
-	t.Run("ShouldReturnResult", func(t *testing.T) {
-		tool := NewDirectoryListTool(DirectoryListToolOptions{})
-		require.True(t, tool.ShouldReturnResult())
+		require.Equal(t, "directory_list", tool.Name())
+		require.Equal(t, "path", tool.Schema().Required[0])
 	})
 }
 
@@ -264,14 +266,16 @@ func TestDirectoryEntryFields(t *testing.T) {
 	}
 	inputJSON, _ := json.Marshal(input)
 
-	result, err := tool.Call(context.Background(), string(inputJSON))
+	result, err := tool.Call(context.Background(), &llm.ToolCallInput{
+		Input: string(inputJSON),
+	})
 	require.NoError(t, err, "Unexpected error")
 
 	// Parse the JSON response
 	var entries []DirectoryEntry
-	jsonStart := strings.Index(result, "[")
-	jsonEnd := strings.LastIndex(result, "]") + 1
-	require.NoError(t, json.Unmarshal([]byte(result[jsonStart:jsonEnd]), &entries))
+	jsonStart := strings.Index(result.Output, "[")
+	jsonEnd := strings.LastIndex(result.Output, "]") + 1
+	require.NoError(t, json.Unmarshal([]byte(result.Output[jsonStart:jsonEnd]), &entries))
 
 	// Verify that we have one entry for the test file
 	require.Len(t, entries, 1, "Expected one entry")

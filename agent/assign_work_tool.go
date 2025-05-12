@@ -56,72 +56,76 @@ func NewAssignWorkTool(opts AssignWorkToolOptions) *AssignWorkTool {
 
 var AssignWorkToolDescription = `Assigns work to another team member. Provide a complete and detailed request for the agent to fulfill. It will respond with the result of the request. You must assume the response is not visible to anyone else, so you are responsible for relaying the information in your own responses as needed. The team member you are assigning work to may have limited or no situational context, so provide them with any relevant information you have available using the "context" parameter. Keep the tasks focused and avoid asking for multiple things at once.`
 
-func (t *AssignWorkTool) Definition() *llm.ToolDefinition {
-	return &llm.ToolDefinition{
-		Name:        "assign_work",
-		Description: AssignWorkToolDescription,
-		Parameters: llm.Schema{
-			Type: "object",
-			Required: []string{
-				"agent",
-				"name",
-				"description",
-				"expected_output",
+func (t *AssignWorkTool) Name() string {
+	return "assign_work"
+}
+
+func (t *AssignWorkTool) Description() string {
+	return AssignWorkToolDescription
+}
+
+func (t *AssignWorkTool) Schema() llm.Schema {
+	return llm.Schema{
+		Type: "object",
+		Required: []string{
+			"agent",
+			"name",
+			"description",
+			"expected_output",
+		},
+		Properties: map[string]*llm.SchemaProperty{
+			"agent": {
+				Type:        "string",
+				Description: "The name of the agent that should do the work.",
 			},
-			Properties: map[string]*llm.SchemaProperty{
-				"agent": {
-					Type:        "string",
-					Description: "The name of the agent that should do the work.",
-				},
-				"name": {
-					Type:        "string",
-					Description: "The name of the job to be done (e.g. 'Research Company Reviews').",
-				},
-				"description": {
-					Type:        "string",
-					Description: "The complete description of the job to be done (e.g. 'Find reviews for a company online').",
-				},
-				"expected_output": {
-					Type:        "string",
-					Description: "What the output of the work should look like (e.g. a list of URLs, a list of companies, etc.)",
-				},
-				"output_format": {
-					Type:        "string",
-					Description: "The desired output format: text, markdown, or json (optional).",
-				},
-				"context": {
-					Type:        "string",
-					Description: "Any additional context that may be relevant and aid the agent in completing the work (optional).",
-				},
+			"name": {
+				Type:        "string",
+				Description: "The name of the job to be done (e.g. 'Research Company Reviews').",
+			},
+			"description": {
+				Type:        "string",
+				Description: "The complete description of the job to be done (e.g. 'Find reviews for a company online').",
+			},
+			"expected_output": {
+				Type:        "string",
+				Description: "What the output of the work should look like (e.g. a list of URLs, a list of companies, etc.)",
+			},
+			"output_format": {
+				Type:        "string",
+				Description: "The desired output format: text, markdown, or json (optional).",
+			},
+			"context": {
+				Type:        "string",
+				Description: "Any additional context that may be relevant and aid the agent in completing the work (optional).",
 			},
 		},
 	}
 }
 
-func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error) {
+func (t *AssignWorkTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
 	var params AssignWorkToolInput
-	if err := json.Unmarshal([]byte(input), &params); err != nil {
-		return "", err
+	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
+		return nil, err
 	}
 
 	if params.AgentName == "" {
-		return "", fmt.Errorf("agent name is required")
+		return nil, fmt.Errorf("agent name is required")
 	}
 	if params.Name == "" {
-		return "", fmt.Errorf("name is required")
+		return nil, fmt.Errorf("name is required")
 	}
 	if params.Description == "" {
-		return "", fmt.Errorf("description is required")
+		return nil, fmt.Errorf("description is required")
 	}
 	if params.ExpectedOutput == "" {
-		return "", fmt.Errorf("expected output is required")
+		return nil, fmt.Errorf("expected output is required")
 	}
 	if params.AgentName == t.self.Name() {
-		return "", fmt.Errorf("cannot delegate task to self")
+		return nil, fmt.Errorf("cannot delegate task to self")
 	}
 	agent, err := t.self.environment.GetAgent(params.AgentName)
 	if err != nil {
-		return fmt.Sprintf("I couldn't find an agent named %q", params.AgentName), nil
+		return nil, fmt.Errorf("I couldn't find an agent named %q", params.AgentName)
 	}
 
 	outputFormat := dive.OutputFormat(params.OutputFormat)
@@ -150,31 +154,33 @@ func (t *AssignWorkTool) Call(ctx context.Context, input string) (string, error)
 
 	stream, err := agent.StreamResponse(ctx, dive.WithInput(prompt))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer stream.Close()
 
 	for stream.Next(ctx) {
 		event := stream.Event()
 		if event.Error != nil {
-			return "", event.Error
+			return nil, event.Error
 		}
 		if event.Type == dive.EventTypeResponseCompleted {
 			for _, item := range event.Response.Items {
 				if item.Type == dive.ResponseItemTypeMessage {
-					return item.Message.Text(), nil
+					return &llm.ToolCallOutput{
+						Output: item.Message.Text(),
+					}, nil
 				}
 			}
 		}
 	}
 
 	if err := stream.Err(); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// We shouldn't reach this point. The agent should have returned the result
 	// or an error instead.
-	return "", errors.New("agent did not return a result from a work assignment")
+	return nil, errors.New("agent did not return a result from a work assignment")
 }
 
 func (t *AssignWorkTool) ShouldReturnResult() bool {

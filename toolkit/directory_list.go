@@ -12,6 +12,8 @@ import (
 	"github.com/diveagents/dive/llm"
 )
 
+var _ llm.ToolWithMetadata = &DirectoryListTool{}
+
 const DefaultDirectoryListMaxEntries = 250
 
 type DirectoryListInput struct {
@@ -60,32 +62,21 @@ func NewDirectoryListTool(options DirectoryListToolOptions) *DirectoryListTool {
 	}
 }
 
-func (t *DirectoryListTool) Definition() *llm.ToolDefinition {
-	description := "A tool that lists the contents of a directory. To use this tool, provide a 'path' parameter with the path to the directory you want to list."
+func (t *DirectoryListTool) Name() string {
+	return "directory_list"
+}
 
-	if t.defaultPath != "" {
-		description = fmt.Sprintf("A tool that lists the contents of a directory. The default directory is %s, but you can provide a different 'path' parameter to list another directory.", t.defaultPath)
-	}
+func (t *DirectoryListTool) Description() string {
+	return "A tool that lists the contents of a directory. To use this tool, provide a 'path' parameter with the path to the directory you want to list."
+}
 
-	if t.rootDirectory != "" {
-		description += fmt.Sprintf(" All paths are relative to %s.", t.rootDirectory)
-	}
-
-	if len(t.allowList) > 0 || len(t.denyList) > 0 {
-		description += " Directory paths are restricted based on configured allowlist and denylist patterns."
-	}
-
-	return &llm.ToolDefinition{
-		Name:        "directory_list",
-		Description: description,
-		Parameters: llm.Schema{
-			Type:     "object",
-			Required: []string{"path"},
-			Properties: map[string]*llm.SchemaProperty{
-				"path": {
-					Type:        "string",
-					Description: "Path to the directory to be listed",
-				},
+func (t *DirectoryListTool) Schema() llm.Schema {
+	return llm.Schema{
+		Type: "object",
+		Properties: map[string]*llm.SchemaProperty{
+			"path": {
+				Type:        "string",
+				Description: "The path to the directory you want to list.",
 			},
 		},
 	}
@@ -167,10 +158,10 @@ func (t *DirectoryListTool) resolvePath(path string) (string, error) {
 	return resolvedPath, nil
 }
 
-func (t *DirectoryListTool) Call(ctx context.Context, input string) (string, error) {
+func (t *DirectoryListTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
 	var params DirectoryListInput
-	if err := json.Unmarshal([]byte(input), &params); err != nil {
-		return "", err
+	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
+		return nil, err
 	}
 
 	dirPath := params.Path
@@ -179,20 +170,20 @@ func (t *DirectoryListTool) Call(ctx context.Context, input string) (string, err
 	}
 
 	if dirPath == "" {
-		return "Error: No directory path provided. Please provide a directory path either in the constructor or as an argument.", nil
+		return llm.NewToolCallOutput("Error: No directory path provided. Please provide a directory path either in the constructor or as an argument."), nil
 	}
 
 	// Resolve the path (apply rootDirectory if configured)
 	resolvedPath, err := t.resolvePath(dirPath)
 	if err != nil {
-		return fmt.Sprintf("Error: %s", err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: %s", err.Error())), nil
 	}
 
 	// Check if the path is allowed
 	if len(t.allowList) > 0 || len(t.denyList) > 0 {
 		allowed, reason := t.isPathAllowed(resolvedPath)
 		if !allowed {
-			return fmt.Sprintf("Error: Access denied. %s", reason), nil
+			return llm.NewToolCallOutput(fmt.Sprintf("Error: Access denied. %s", reason)), nil
 		}
 	}
 
@@ -200,22 +191,22 @@ func (t *DirectoryListTool) Call(ctx context.Context, input string) (string, err
 	fileInfo, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Sprintf("Error: Directory not found at path: %s", dirPath), nil
+			return llm.NewToolCallOutput(fmt.Sprintf("Error: Directory not found at path: %s", dirPath)), nil
 		} else if os.IsPermission(err) {
-			return fmt.Sprintf("Error: Permission denied when trying to access directory: %s", dirPath), nil
+			return llm.NewToolCallOutput(fmt.Sprintf("Error: Permission denied when trying to access directory: %s", dirPath)), nil
 		}
-		return fmt.Sprintf("Error: Failed to access directory %s. %s", dirPath, err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to access directory %s. %s", dirPath, err.Error())), nil
 	}
 
 	// Check if it's actually a directory
 	if !fileInfo.IsDir() {
-		return fmt.Sprintf("Error: Path %s is not a directory", dirPath), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Path %s is not a directory", dirPath)), nil
 	}
 
 	// Read directory entries
 	entries, err := os.ReadDir(resolvedPath)
 	if err != nil {
-		return fmt.Sprintf("Error: Failed to read directory %s. %s", dirPath, err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to read directory %s. %s", dirPath, err.Error())), nil
 	}
 
 	// Limit the number of entries to avoid overwhelming responses
@@ -262,7 +253,7 @@ func (t *DirectoryListTool) Call(ctx context.Context, input string) (string, err
 	// Convert to JSON for the response
 	jsonResult, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return fmt.Sprintf("Error: Failed to format directory listing. %s", err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to format directory listing. %s", err.Error())), nil
 	}
 
 	// Add a message if we limited the entries
@@ -271,9 +262,12 @@ func (t *DirectoryListTool) Call(ctx context.Context, input string) (string, err
 		message += fmt.Sprintf(" (limited to %d entries)", t.maxEntries)
 	}
 
-	return fmt.Sprintf("%s:\n\n%s", message, string(jsonResult)), nil
+	return llm.NewToolCallOutput(fmt.Sprintf("%s:\n\n%s", message, string(jsonResult))), nil
 }
 
-func (t *DirectoryListTool) ShouldReturnResult() bool {
-	return true
+func (t *DirectoryListTool) Metadata() llm.ToolMetadata {
+	return llm.ToolMetadata{
+		Version:    "0.0.1",
+		Capability: llm.ToolCapabilityReadOnly,
+	}
 }

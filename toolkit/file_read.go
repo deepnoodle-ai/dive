@@ -12,6 +12,8 @@ import (
 	"github.com/diveagents/dive/llm"
 )
 
+var _ llm.ToolWithMetadata = &FileReadTool{}
+
 const DefaultFileReadMaxSize = 1024 * 200 // 200KB
 
 type FileReadInput struct {
@@ -19,15 +21,13 @@ type FileReadInput struct {
 }
 
 type FileReadToolOptions struct {
-	DefaultFilePath string `json:"default_file_path,omitempty"`
-	MaxSize         int    `json:"max_size,omitempty"`
-	RootDirectory   string `json:"root_directory,omitempty"`
+	MaxSize       int    `json:"max_size,omitempty"`
+	RootDirectory string `json:"root_directory,omitempty"`
 }
 
 type FileReadTool struct {
-	defaultFilePath string
-	maxSize         int
-	rootDirectory   string
+	maxSize       int
+	rootDirectory string
 }
 
 // NewFileReadTool creates a new tool for reading file contents
@@ -36,34 +36,27 @@ func NewFileReadTool(options FileReadToolOptions) *FileReadTool {
 		options.MaxSize = DefaultFileReadMaxSize
 	}
 	return &FileReadTool{
-		defaultFilePath: options.DefaultFilePath,
-		maxSize:         options.MaxSize,
-		rootDirectory:   options.RootDirectory,
+		maxSize:       options.MaxSize,
+		rootDirectory: options.RootDirectory,
 	}
 }
 
-func (t *FileReadTool) Definition() *llm.ToolDefinition {
-	description := "A tool that reads the content of a file. To use this tool, provide a 'path' parameter with the path to the file you want to read."
+func (t *FileReadTool) Name() string {
+	return "file_read"
+}
 
-	if t.defaultFilePath != "" {
-		description = fmt.Sprintf("A tool that reads file content. The default file is %s, but you can provide a different 'path' parameter to read another file.", t.defaultFilePath)
-	}
+func (t *FileReadTool) Description() string {
+	return "A tool that reads the content of a file. To use this tool, provide a 'path' parameter with the path to the file you want to read."
+}
 
-	if t.rootDirectory != "" {
-		description += fmt.Sprintf(" All paths are relative to %s.", t.rootDirectory)
-	}
-
-	return &llm.ToolDefinition{
-		Name:        "file_read",
-		Description: description,
-		Parameters: llm.Schema{
-			Type:     "object",
-			Required: []string{"path"},
-			Properties: map[string]*llm.SchemaProperty{
-				"path": {
-					Type:        "string",
-					Description: "Path to the file to be read",
-				},
+func (t *FileReadTool) Schema() llm.Schema {
+	return llm.Schema{
+		Type:     "object",
+		Required: []string{"path"},
+		Properties: map[string]*llm.SchemaProperty{
+			"path": {
+				Type:        "string",
+				Description: "Path to the file to be read",
 			},
 		},
 	}
@@ -73,24 +66,18 @@ func (t *FileReadTool) Definition() *llm.ToolDefinition {
 // and preventing directory traversal attacks
 func (t *FileReadTool) resolvePath(path string) (string, error) {
 	if t.rootDirectory == "" {
-		// If no root directory is set, use the path as is
 		return path, nil
 	}
-
-	// Join the root directory and the provided path
 	resolvedPath := filepath.Join(t.rootDirectory, path)
 
-	// Get the absolute paths to check for directory traversal
 	absRoot, err := filepath.Abs(t.rootDirectory)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve absolute path for root directory: %w", err)
 	}
-
 	absPath, err := filepath.Abs(resolvedPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
-
 	// Check if the resolved path is within the root directory
 	cleanRoot := filepath.Clean(absRoot)
 	cleanPath := filepath.Clean(absPath)
@@ -99,60 +86,44 @@ func (t *FileReadTool) resolvePath(path string) (string, error) {
 	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return "", fmt.Errorf("path attempts to access location outside of root directory")
 	}
-
 	return resolvedPath, nil
 }
 
-func (t *FileReadTool) Call(ctx context.Context, input string) (string, error) {
+func (t *FileReadTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
 	var params FileReadInput
-	if err := json.Unmarshal([]byte(input), &params); err != nil {
-		return "", err
+	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
+		return nil, err
 	}
-
 	filePath := params.Path
 	if filePath == "" {
-		filePath = t.defaultFilePath
+		return llm.NewToolCallOutput("Error: No file path provided."), nil
 	}
-
-	if filePath == "" {
-		return "Error: No file path provided. Please provide a file path either in the constructor or as an argument.", nil
-	}
-
-	// Resolve the path (apply rootDirectory if configured)
 	resolvedPath, err := t.resolvePath(filePath)
 	if err != nil {
-		return fmt.Sprintf("Error: %s", err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: %s", err.Error())), nil
 	}
-
-	// Get file info to check size before reading
 	fileInfo, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Sprintf("Error: File not found at path: %s", filePath), nil
+			return llm.NewToolCallOutput(fmt.Sprintf("Error: File not found at path: %s", filePath)), nil
 		} else if os.IsPermission(err) {
-			return fmt.Sprintf("Error: Permission denied when trying to access file: %s", filePath), nil
+			return llm.NewToolCallOutput(fmt.Sprintf("Error: Permission denied when trying to access file: %s", filePath)), nil
 		}
-		return fmt.Sprintf("Error: Failed to access file %s. %s", filePath, err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to access file %s. %s", filePath, err.Error())), nil
 	}
-
-	// Check if file size exceeds the maximum size before reading it
 	if fileInfo.Size() > int64(t.maxSize) {
-		return fmt.Sprintf("Error: File %s is too large (%d bytes). Maximum allowed size is %d bytes.", filePath, fileInfo.Size(), t.maxSize), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: File %s is too large (%d bytes). Maximum allowed size is %d bytes.",
+			filePath, fileInfo.Size(), t.maxSize)), nil
 	}
-
-	// Now that we know the file is not too large, read its content
 	content, err := os.ReadFile(resolvedPath)
 	if err != nil {
-		return fmt.Sprintf("Error: Failed to read file %s. %s", filePath, err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to read file %s. %s", filePath, err.Error())), nil
 	}
-
-	// Check if the file appears to be binary
 	if isBinaryContent(content) {
-		return fmt.Sprintf("Warning: File %s appears to be a binary file. The content may not display correctly:\n\n%s",
-			filePath, string(content)), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Warning: File %s appears to be a binary file. The content may not display correctly:\n\n%s",
+			filePath, string(content))), nil
 	}
-
-	return string(content), nil
+	return llm.NewToolCallOutput(string(content)), nil
 }
 
 // isBinaryContent attempts to determine if the content is binary by checking for null bytes
@@ -183,6 +154,9 @@ func isBinaryContent(content []byte) bool {
 	return controlCount > sampleSize/10
 }
 
-func (t *FileReadTool) ShouldReturnResult() bool {
-	return true
+func (t *FileReadTool) Metadata() llm.ToolMetadata {
+	return llm.ToolMetadata{
+		Version:    "0.0.1",
+		Capability: llm.ToolCapabilityReadOnly,
+	}
 }
