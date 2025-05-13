@@ -79,6 +79,7 @@ func (t *DirectoryListTool) Schema() llm.Schema {
 				Description: "The path to the directory you want to list.",
 			},
 		},
+		Required: []string{"path"},
 	}
 }
 

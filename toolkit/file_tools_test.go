@@ -44,19 +44,7 @@ func TestFileReadTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Equal(t, testContent, result, "Content mismatch")
-	})
-
-	t.Run("ReadWithDefaultPath", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
-		input := FileReadInput{}
-		inputJSON, _ := json.Marshal(input)
-
-		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
-			Input: string(inputJSON),
-		})
-		require.NoError(t, err, "Unexpected error")
-		require.Equal(t, testContent, result, "Content mismatch")
+		require.Equal(t, testContent, result.Output, "Content mismatch")
 	})
 
 	t.Run("ReadNonExistentFile", func(t *testing.T) {
@@ -70,8 +58,8 @@ func TestFileReadTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: File not found", "Expected 'file not found' error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: File not found", "Expected 'file not found' error")
 	})
 
 	t.Run("ReadLargeFileTruncated", func(t *testing.T) {
@@ -86,9 +74,9 @@ func TestFileReadTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: File", "Expected error about file size")
-		require.Contains(t, result, "is too large", "Expected error about file size")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: File", "Expected error about file size")
+		require.Contains(t, result.Output, "is too large", "Expected error about file size")
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
@@ -112,8 +100,8 @@ func TestFileReadTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: No file path provided", "Expected 'no file path provided' error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: No file path provided", "Expected 'no file path provided' error")
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
@@ -143,7 +131,7 @@ func TestFileReadTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 		require.NoError(t, err, "Unexpected error")
-		require.Equal(t, rootFileContent, result, "Content mismatch")
+		require.Equal(t, rootFileContent, result.Output, "Content mismatch")
 
 		// Test attempting to read a file outside the root directory
 		input = FileReadInput{
@@ -154,9 +142,9 @@ func TestFileReadTool(t *testing.T) {
 		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
 			Input: string(inputJSON),
 		})
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error:", "Expected error for path outside root")
-		require.Contains(t, result, "outside of root directory", "Expected error about path outside root")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error:", "Expected error for path outside root")
+		require.Contains(t, result.Output, "outside of root directory", "Expected error about path outside root")
 	})
 }
 
@@ -191,34 +179,10 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Verify file was created with correct content
 		content, err := os.ReadFile(testFilePath)
-		require.NoError(t, err, "Failed to read written file")
-		require.Equal(t, testContent, string(content), "Content mismatch")
-	})
-
-	t.Run("WriteWithDefaultPath", func(t *testing.T) {
-		defaultPath := filepath.Join(tempDir, "default_write.txt")
-		tool := NewFileWriteTool(FileWriteToolOptions{})
-		testContent := "This is default path content"
-
-		input := FileWriteInput{
-			Path:    "",
-			Content: testContent,
-		}
-		inputJSON, _ := json.Marshal(input)
-
-		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
-			Input: string(inputJSON),
-		})
-
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
-
-		// Verify file was created with correct content
-		content, err := os.ReadFile(defaultPath)
 		require.NoError(t, err, "Failed to read written file")
 		require.Equal(t, testContent, string(content), "Content mismatch")
 	})
@@ -239,7 +203,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Verify file was created with correct content
 		content, err := os.ReadFile(testFilePath)
@@ -259,8 +223,8 @@ func TestFileWriteTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: No file path provided", "Expected 'no file path provided' error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: No file path provided", "Expected 'no file path provided' error")
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
@@ -294,7 +258,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Test denied path
 		input = FileWriteInput{
@@ -307,8 +271,8 @@ func TestFileWriteTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: Access denied", "Expected access denied error")
 	})
 
 	t.Run("DenylistExactMatch", func(t *testing.T) {
@@ -332,7 +296,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Test denied path
 		input = FileWriteInput{
@@ -345,8 +309,8 @@ func TestFileWriteTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: Access denied", "Expected access denied error")
 	})
 
 	t.Run("AllowlistWildcard", func(t *testing.T) {
@@ -369,7 +333,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Should be denied (wrong extension)
 		deniedPath := filepath.Join(allowedDir, "wildcard.json")
@@ -383,8 +347,8 @@ func TestFileWriteTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: Access denied", "Expected access denied error")
 	})
 
 	t.Run("AllowlistDoubleWildcard", func(t *testing.T) {
@@ -407,7 +371,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Should be allowed (in nested dir)
 		nestedPath := filepath.Join(nestedDir, "nested_wildcard.txt")
@@ -422,7 +386,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Should be denied (outside allowed dir)
 		deniedPath := filepath.Join(deniedDir, "outside_wildcard.txt")
@@ -436,8 +400,8 @@ func TestFileWriteTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: Access denied", "Expected access denied error")
 	})
 
 	t.Run("DenylistOverridesAllowlist", func(t *testing.T) {
@@ -462,7 +426,7 @@ func TestFileWriteTool(t *testing.T) {
 		})
 
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Should be denied (specifically denied)
 		input = FileWriteInput{
@@ -475,8 +439,8 @@ func TestFileWriteTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error: Access denied", "Expected access denied error")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error: Access denied", "Expected access denied error")
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
@@ -511,7 +475,7 @@ func TestFileWriteTool(t *testing.T) {
 			Input: string(inputJSON),
 		})
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Successfully wrote", "Expected success message")
+		require.Contains(t, result.Output, "Successfully wrote", "Expected success message")
 
 		// Verify the file was created in the root directory
 		fullPath := filepath.Join(rootDir, relativeFilePath)
@@ -529,9 +493,9 @@ func TestFileWriteTool(t *testing.T) {
 		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
 			Input: string(inputJSON),
 		})
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result, "Error:", "Expected error for path outside root")
-		require.Contains(t, result, "outside of root directory", "Expected error about path outside root")
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error:", "Expected error for path outside root")
+		require.Contains(t, result.Output, "outside of root directory", "Expected error about path outside root")
 	})
 }
 

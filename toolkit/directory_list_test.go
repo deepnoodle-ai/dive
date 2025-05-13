@@ -40,27 +40,6 @@ func TestDirectoryListTool(t *testing.T) {
 	require.NoError(t, os.WriteFile(testFile3, []byte("test content 3"), 0644), "Failed to create test file 3")
 	require.NoError(t, os.WriteFile(hiddenFile, []byte("hidden content"), 0644), "Failed to create hidden file")
 
-	t.Run("ListDirectoryWithDefaultPath", func(t *testing.T) {
-		tool := NewDirectoryListTool(DirectoryListToolOptions{
-			DefaultPath: tempDir,
-			MaxEntries:  100,
-		})
-		inputJSON, err := json.Marshal(DirectoryListInput{})
-		require.NoError(t, err, "Failed to marshal input")
-
-		result, err := tool.Call(context.Background(), &llm.ToolCallInput{
-			Input: string(inputJSON),
-		})
-		require.NoError(t, err, "Unexpected error")
-
-		// Check that the result contains all expected entries
-		require.Contains(t, result, "subdir1")
-		require.Contains(t, result, "subdir2")
-		require.Contains(t, result, ".hidden")
-		require.Contains(t, result, "test1.txt")
-		require.Contains(t, result, ".hidden_file")
-	})
-
 	t.Run("ListDirectoryWithExplicitPath", func(t *testing.T) {
 		tool := NewDirectoryListTool(DirectoryListToolOptions{
 			MaxEntries: 100,
@@ -74,9 +53,9 @@ func TestDirectoryListTool(t *testing.T) {
 		require.NoError(t, err, "Unexpected error")
 
 		// Check that the result contains only the expected entry
-		require.Contains(t, result, "test2.txt")
-		require.NotContains(t, result, "test1.txt")
-		require.NotContains(t, result, "test3.log")
+		require.Contains(t, result.Output, "test2.txt")
+		require.NotContains(t, result.Output, "test1.txt")
+		require.NotContains(t, result.Output, "test3.log")
 	})
 
 	t.Run("ListNonExistentDirectory", func(t *testing.T) {
@@ -118,7 +97,7 @@ func TestDirectoryListTool(t *testing.T) {
 		require.NoError(t, err, "Unexpected error")
 
 		// Check that the result mentions the limit
-		require.Contains(t, result, "limited to 5 entries")
+		require.Contains(t, result.Output, "limited to 5 entries")
 
 		// Count the number of entries in the JSON response
 		var entries []DirectoryEntry
@@ -145,7 +124,7 @@ func TestDirectoryListTool(t *testing.T) {
 		require.NoError(t, err, "Unexpected error")
 
 		// Check that the result contains the expected entry
-		require.Contains(t, result, "test2.txt")
+		require.Contains(t, result.Output, "test2.txt")
 
 		// Check that the path is relative to the root directory
 		var entries []DirectoryEntry
@@ -178,7 +157,7 @@ func TestDirectoryListTool(t *testing.T) {
 			Input: string(inputJSON1),
 		})
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result1, "test2.txt")
+		require.Contains(t, result1.Output, "test2.txt")
 
 		// This should be denied
 		input2 := DirectoryListInput{
@@ -190,7 +169,7 @@ func TestDirectoryListTool(t *testing.T) {
 			Input: string(inputJSON2),
 		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result2, "Access denied")
+		require.Contains(t, result2.Output, "Access denied")
 	})
 
 	t.Run("ListDirectoryWithDenyList", func(t *testing.T) {
@@ -209,7 +188,7 @@ func TestDirectoryListTool(t *testing.T) {
 			Input: string(inputJSON1),
 		})
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result1, "test2.txt")
+		require.Contains(t, result1.Output, "test2.txt")
 
 		// This should be denied
 		input2 := DirectoryListInput{
@@ -221,7 +200,7 @@ func TestDirectoryListTool(t *testing.T) {
 			Input: string(inputJSON2),
 		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result2, "Access denied")
+		require.Contains(t, result2.Output, "Access denied")
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
