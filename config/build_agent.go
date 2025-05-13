@@ -10,7 +10,7 @@ import (
 	"github.com/diveagents/dive/slogger"
 )
 
-func buildAgent(agentDef Agent, config Config, tools map[string]llm.Tool, logger slogger.Logger) (dive.Agent, error) {
+func buildAgent(agentDef Agent, config Config, tools map[string]llm.Tool, logger slogger.Logger, confirmer llm.Confirmer) (dive.Agent, error) {
 	providerName := agentDef.Provider
 	if providerName == "" {
 		providerName = config.LLM.DefaultProvider
@@ -92,5 +92,6 @@ func buildAgent(agentDef Agent, config Config, tools map[string]llm.Tool, logger
 		SystemPromptTemplate: agentDef.SystemPrompt,
 		ModelSettings:        modelSettings,
 		Logger:               logger,
+		Confirmer:            confirmer,
 	})
 }

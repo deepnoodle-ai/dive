@@ -493,6 +493,11 @@ func TestFileWriteTool(t *testing.T) {
 		result, err = tool.Call(context.Background(), &llm.ToolCallInput{
 			Input: string(inputJSON),
 		})
+
+		require.NoError(t, err, "Expected error to be returned in result, not as an error")
+		require.Contains(t, result.Output, "Error:", "Expected error for path outside root")
+		require.Contains(t, result.Output, "outside of root directory", "Expected error about path outside root")
+
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
 		require.Contains(t, result.Output, "Error:", "Expected error for path outside root")
 		require.Contains(t, result.Output, "outside of root directory", "Expected error about path outside root")

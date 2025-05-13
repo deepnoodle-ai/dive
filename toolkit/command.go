@@ -117,7 +117,7 @@ func (c *CommandTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.
 	if input.Confirmer != nil {
 		confirmed, err := input.Confirmer.Confirm(ctx, llm.ConfirmationRequest{
 			Prompt:  "Do you want to run this command?",
-			Details: fmt.Sprintf("Command: %s\nArgs: %v", name, args),
+			Details: strings.Join(append([]string{name}, args...), " "),
 			Data:    map[string]interface{}{"name": name, "args": args},
 		})
 		if err != nil {
