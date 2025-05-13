@@ -16,6 +16,16 @@ const (
 	OutputFormatJSON     OutputFormat = "json"
 )
 
+// Type aliases for easy access to LLM types
+type (
+	ToolSchema          = llm.Schema
+	ToolCallInput       = llm.ToolCallInput
+	ToolCallOutput      = llm.ToolCallOutput
+	Tool                = llm.Tool
+	Confirmer           = llm.Confirmer
+	ConfirmationRequest = llm.ConfirmationRequest
+)
+
 // Agent represents an intelligent AI entity that can autonomously execute tasks,
 // respond to chat messages, and process information. Agents can work with documents,
 // generate responses using LLMs, and interact with users through natural language.

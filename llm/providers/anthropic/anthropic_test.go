@@ -49,12 +49,12 @@ func TestStreamCountTo10(t *testing.T) {
 	require.Equal(t, expectedOutput, normalizedText)
 }
 
-func addFunc(ctx context.Context, input string) (string, error) {
+func addFunc(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
 	var params map[string]interface{}
-	if err := json.Unmarshal([]byte(input), &params); err != nil {
-		return "", err
+	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
+		return nil, err
 	}
-	return fmt.Sprintf("%d", params["a"].(int)+params["b"].(int)), nil
+	return llm.NewToolCallOutput(fmt.Sprintf("%d", params["a"].(int)+params["b"].(int))), nil
 }
 
 func TestToolUse(t *testing.T) {
@@ -65,21 +65,20 @@ func TestToolUse(t *testing.T) {
 		llm.NewUserMessage("add 567 and 111"),
 	}
 
-	add := llm.ToolDefinition{
-		Name:        "add",
-		Description: "Returns the sum of two numbers, \"a\" and \"b\"",
-		Parameters: llm.Schema{
+	add := llm.NewFunctionTool(addFunc).
+		WithName("add").
+		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
+		WithSchema(llm.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*llm.SchemaProperty{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
-		},
-	}
+		})
 
 	response, err := provider.Generate(ctx, messages,
-		llm.WithTools(llm.NewTool(&add, addFunc)),
+		llm.WithTools(add),
 		llm.WithToolChoice("tool"),
 		llm.WithToolChoiceName("add"),
 	)
@@ -98,10 +97,12 @@ func TestToolCallStream(t *testing.T) {
 	provider := New()
 
 	// Define a simple calculator tool
-	calculatorTool := llm.NewTool(&llm.ToolDefinition{
-		Name:        "calculator",
-		Description: "Perform a calculation",
-		Parameters: llm.Schema{
+	calculatorTool := llm.NewFunctionTool(func(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
+		return llm.NewToolCallOutput("4"), nil // Mock result
+	}).
+		WithName("calculator").
+		WithDescription("Perform a calculation").
+		WithSchema(llm.Schema{
 			Type:     "object",
 			Required: []string{"operation", "a", "b"},
 			Properties: map[string]*llm.SchemaProperty{
@@ -119,10 +120,7 @@ func TestToolCallStream(t *testing.T) {
 					Description: "The second operand",
 				},
 			},
-		},
-	}, func(ctx context.Context, input string) (string, error) {
-		return "4", nil // Mock result
-	})
+		})
 
 	iterator, err := provider.Stream(ctx,
 		[]*llm.Message{llm.NewUserMessage("What is 2+2?")},

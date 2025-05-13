@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	DefaultResponseTimeout    = time.Minute * 4
+	DefaultResponseTimeout    = time.Minute * 10
 	DefaultToolIterationLimit = 16
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
@@ -150,7 +150,7 @@ func New(opts Options) (*Agent, error) {
 		// a custom assign_work implementation to be used.
 		var foundAssignWorkTool bool
 		for _, tool := range tools {
-			if tool.Definition().Name == "assign_work" {
+			if tool.Name() == "assign_work" {
 				foundAssignWorkTool = true
 			}
 		}
@@ -166,7 +166,7 @@ func New(opts Options) (*Agent, error) {
 	if len(tools) > 0 {
 		agent.toolsByName = make(map[string]llm.Tool, len(tools))
 		for _, tool := range tools {
-			agent.toolsByName[tool.Definition().Name] = tool
+			agent.toolsByName[tool.Name()] = tool
 		}
 	}
 
@@ -572,14 +572,9 @@ func (a *Agent) generate(
 		})
 
 		// Execute all requested tool calls
-		toolResults, shouldReturnResult, err := a.executeToolCalls(ctx, toolCalls, publisher)
+		toolResults, err := a.executeToolCalls(ctx, toolCalls, publisher)
 		if err != nil {
 			return nil, err
-		}
-
-		// We're done if the results don't need to be provided to the LLM
-		if !shouldReturnResult {
-			break
 		}
 
 		// Capture results in a new message to send to LLM on the next iteration
@@ -643,19 +638,13 @@ func (a *Agent) generateStreaming(
 	return accum.Response(), nil
 }
 
-// executeToolCalls executes all tool calls and returns the results. If the
-// tools are configured to not return results, (nil, false, nil) is returned.
-func (a *Agent) executeToolCalls(
-	ctx context.Context,
-	toolCalls []*llm.ToolCall,
-	publisher dive.EventPublisher,
-) ([]*llm.ToolResult, bool, error) {
+// executeToolCalls executes all tool calls and returns the results.
+func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall, publisher dive.EventPublisher) ([]*llm.ToolResult, error) {
 	results := make([]*llm.ToolResult, len(toolCalls))
-	shouldReturnResult := false
 	for i, toolCall := range toolCalls {
 		tool, ok := a.toolsByName[toolCall.Name]
 		if !ok {
-			return nil, false, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
+			return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
 		}
 		a.logger.Debug("executing tool call",
 			"tool_id", toolCall.ID,
@@ -671,9 +660,9 @@ func (a *Agent) executeToolCalls(
 		})
 
 		startTime := time.Now()
-		output, err := tool.Call(ctx, toolCall.Input)
+		output, err := tool.Call(ctx, &llm.ToolCallInput{Input: toolCall.Input})
 		if err != nil {
-			return nil, false, fmt.Errorf("tool call error: %w", err)
+			return nil, fmt.Errorf("tool call error: %w", err)
 		}
 		endTime := time.Now()
 
@@ -683,7 +672,7 @@ func (a *Agent) executeToolCalls(
 			Input:       toolCall.Input,
 			StartedAt:   &startTime,
 			CompletedAt: &endTime,
-			Output:      output,
+			Output:      output.Output,
 		}
 		results[i] = result
 
@@ -694,12 +683,8 @@ func (a *Agent) executeToolCalls(
 				ToolResult: result,
 			},
 		})
-
-		if tool.ShouldReturnResult() {
-			shouldReturnResult = true
-		}
 	}
-	return results, shouldReturnResult, nil
+	return results, nil
 }
 
 func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
@@ -778,53 +763,6 @@ func (a *Agent) TeamOverview() string {
 	}
 	return strings.Join(lines, "\n")
 }
-
-// func taskPromptMessages(prompt *dive.Prompt) ([]*llm.Message, error) {
-// 	messages := []*llm.Message{}
-
-// 	if prompt.Text == "" {
-// 		return nil, ErrNoInstructions
-// 	}
-
-// 	// Add context information if available
-// 	if len(prompt.Context) > 0 {
-// 		contextLines := []string{
-// 			"Important: The following context may contain relevant information to help you complete the task.",
-// 		}
-// 		for _, context := range prompt.Context {
-// 			var contextBlock string
-// 			if context.Name != "" {
-// 				contextBlock = fmt.Sprintf("<context name=%q>\n%s\n</context>", context.Name, context.Text)
-// 			} else {
-// 				contextBlock = fmt.Sprintf("<context>\n%s\n</context>", context.Text)
-// 			}
-// 			contextLines = append(contextLines, contextBlock)
-// 		}
-// 		messages = append(messages, llm.NewUserMessage(strings.Join(contextLines, "\n\n")))
-// 	}
-
-// 	var lines []string
-
-// 	// Add task instructions
-// 	lines = append(lines, "You must complete the following task:")
-// 	if prompt.Name != "" {
-// 		lines = append(lines, fmt.Sprintf("<task name=%q>\n%s\n</task>", prompt.Name, prompt.Text))
-// 	} else {
-// 		lines = append(lines, fmt.Sprintf("<task>\n%s\n</task>", prompt.Text))
-// 	}
-
-// 	// Add output expectations if specified
-// 	if prompt.Output != "" {
-// 		output := "Response requirements: " + prompt.Output
-// 		if prompt.OutputFormat != "" {
-// 			output += fmt.Sprintf("\n\nFormat your response in %s format.", prompt.OutputFormat)
-// 		}
-// 		lines = append(lines, output)
-// 	}
-
-// 	messages = append(messages, llm.NewUserMessage(strings.Join(lines, "\n\n")))
-// 	return messages, nil
-// }
 
 type generateResult struct {
 	OutputMessages []*llm.Message

@@ -1,0 +1,69 @@
+Name: 'Go Program Skeleton'
+Description: 'Create a skeleton for a new Go main program based on user intent, and ensure it compiles and lints cleanly.'
+
+Config:
+  LLM:
+    DefaultProvider: anthropic
+    DefaultModel: claude-3-7-sonnet-20250219
+  Logging:
+    Level: debug
+
+Tools:
+  - Name: Directory.List
+    Enabled: true
+  - Name: File.Write
+    Enabled: true
+  - Name: File.Read
+    Enabled: true
+  - Name: Command
+    Enabled: true
+
+Agents:
+  - Name: Engineer
+    Goal: Generate Go programs from user intent and ensure they compile and lint cleanly
+    Tools:
+      - Directory.List
+      - File.Write
+      - File.Read
+      - Command
+
+Workflows:
+  - Name: Go Program Skeleton
+    Description: 'Create a Go main program skeleton from user intent'
+    Inputs:
+      - Name: intent
+        Type: string
+        Description: 'Describe what the Go program should do'
+      - Name: directory
+        Type: string
+        Description: 'Directory to create the Go program in'
+        Default: '.'
+    Steps:
+      - Name: Generate main.go
+        Agent: Engineer
+        Prompt: |
+          Based on the following intent, generate a minimal but idiomatic Go
+          main program in a file called main.go:
+
+          "${inputs.intent}"
+
+          Create the program in the directory: ${inputs.directory}.
+
+      - Name: Compile Program
+        Agent: Engineer
+        Prompt: |
+          Compile the Go program in the directory: ${inputs.directory}.
+
+      - Name: Lint Program
+        Agent: Engineer
+        Prompt: |
+          Run `go vet ./...` in the program directory: ${inputs.directory}.
+        Store: lint_output
+
+      - Name: Summarize Results
+        Agent: Engineer
+        Prompt: |
+          Here is the lint output:
+          ${lint_output}
+
+          Summarize whether the program compiled and linted cleanly. If there were errors, list them.

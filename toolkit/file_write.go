@@ -12,32 +12,31 @@ import (
 	"github.com/diveagents/dive/llm"
 )
 
+var _ llm.ToolWithMetadata = &FileWriteTool{}
+
 type FileWriteInput struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
 type FileWriteToolOptions struct {
-	DefaultFilePath string
-	AllowList       []string // Patterns of allowed paths
-	DenyList        []string // Patterns of denied paths
-	RootDirectory   string   // If set, all paths will be relative to this directory
+	AllowList     []string // Patterns of allowed paths
+	DenyList      []string // Patterns of denied paths
+	RootDirectory string   // If set, all paths will be relative to this directory
 }
 
 type FileWriteTool struct {
-	defaultFilePath string
-	allowList       []string // Patterns of allowed paths
-	denyList        []string // Patterns of denied paths
-	rootDirectory   string   // If set, all paths will be relative to this directory
+	allowList     []string // Patterns of allowed paths
+	denyList      []string // Patterns of denied paths
+	rootDirectory string   // If set, all paths will be relative to this directory
 }
 
 // NewFileWriteTool creates a new tool for writing content to files
 func NewFileWriteTool(options FileWriteToolOptions) *FileWriteTool {
 	return &FileWriteTool{
-		defaultFilePath: options.DefaultFilePath,
-		allowList:       options.AllowList,
-		denyList:        options.DenyList,
-		rootDirectory:   options.RootDirectory,
+		allowList:     options.AllowList,
+		denyList:      options.DenyList,
+		rootDirectory: options.RootDirectory,
 	}
 }
 
@@ -121,86 +120,65 @@ func matchesPattern(path, pattern string) (bool, error) {
 	return doublestar.PathMatch(pattern, path)
 }
 
-func (t *FileWriteTool) Definition() *llm.ToolDefinition {
-	description := "A tool that writes content to a file. To use this tool, provide a 'path' parameter with the path to the file you want to write to, and a 'content' parameter with the content to write."
+func (t *FileWriteTool) Name() string {
+	return "file_write"
+}
 
-	if t.defaultFilePath != "" {
-		description = fmt.Sprintf("A tool that writes content to a file. The default file is %s, but you can provide a different 'path' parameter to write to another file.", t.defaultFilePath)
-	}
+func (t *FileWriteTool) Description() string {
+	return "A tool that writes content to a file. To use this tool, provide a 'path' parameter with the path to the file you want to write to, and a 'content' parameter with the content to write."
+}
 
-	if t.rootDirectory != "" {
-		description += fmt.Sprintf(" All paths are relative to %s.", t.rootDirectory)
-	}
-
-	if len(t.allowList) > 0 || len(t.denyList) > 0 {
-		description += " File paths are restricted based on configured allowlist and denylist patterns."
-	}
-
-	return &llm.ToolDefinition{
-		Name:        "file_write",
-		Description: description,
-		Parameters: llm.Schema{
-			Type:     "object",
-			Required: []string{"path", "content"},
-			Properties: map[string]*llm.SchemaProperty{
-				"path": {
-					Type:        "string",
-					Description: "Path to the file to be written",
-				},
-				"content": {
-					Type:        "string",
-					Description: "Content to write to the file",
-				},
+func (t *FileWriteTool) Schema() llm.Schema {
+	return llm.Schema{
+		Type:     "object",
+		Required: []string{"path", "content"},
+		Properties: map[string]*llm.SchemaProperty{
+			"path": {
+				Type:        "string",
+				Description: "Path to the file to be written",
+			},
+			"content": {
+				Type:        "string",
+				Description: "Content to write to the file",
 			},
 		},
 	}
 }
 
-func (t *FileWriteTool) Call(ctx context.Context, input string) (string, error) {
+func (t *FileWriteTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
 	var params FileWriteInput
-	if err := json.Unmarshal([]byte(input), &params); err != nil {
-		return "", err
+	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
+		return nil, err
 	}
-
 	filePath := params.Path
 	if filePath == "" {
-		filePath = t.defaultFilePath
+		return llm.NewToolCallOutput("Error: No file path provided. Please provide a file path either in the constructor or as an argument."), nil
 	}
-
-	if filePath == "" {
-		return "Error: No file path provided. Please provide a file path either in the constructor or as an argument.", nil
-	}
-
-	// Resolve the path (apply rootDirectory if configured)
 	resolvedPath, err := t.resolvePath(filePath)
 	if err != nil {
-		return fmt.Sprintf("Error: %s", err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: %s", err.Error())), nil
 	}
-
-	// Check if the path is allowed
 	allowed, reason := t.isPathAllowed(resolvedPath)
 	if !allowed {
-		return fmt.Sprintf("Error: Access denied. %s", reason), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Access denied. %s", reason)), nil
 	}
-
-	// Ensure the directory exists
 	dir := filepath.Dir(resolvedPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Sprintf("Error: Failed to create directory structure for %s. %s", filePath, err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to create directory structure for %s. %s", filePath, err.Error())), nil
 	}
-
-	// Write the content to the file
 	err = os.WriteFile(resolvedPath, []byte(params.Content), 0644)
 	if err != nil {
 		if os.IsPermission(err) {
-			return fmt.Sprintf("Error: Permission denied when trying to write to file: %s", filePath), nil
+			return llm.NewToolCallOutput(fmt.Sprintf("Error: Permission denied when trying to write to file: %s", filePath)), nil
 		}
-		return fmt.Sprintf("Error: Failed to write to file %s. %s", filePath, err.Error()), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to write to file %s. %s", filePath, err.Error())), nil
 	}
-
-	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(params.Content), filePath), nil
+	return llm.NewToolCallOutput(fmt.Sprintf("Successfully wrote %d bytes to %s", len(params.Content), filePath)), nil
 }
 
-func (t *FileWriteTool) ShouldReturnResult() bool {
-	return true
+func (t *FileWriteTool) Metadata() llm.ToolMetadata {
+	return llm.ToolMetadata{
+		Version:    "0.0.1",
+		Capability: llm.ToolCapabilityReadWrite,
+	}
 }

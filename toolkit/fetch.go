@@ -34,7 +34,7 @@ var DefaultFetchExcludeTags = []string{
 	"footer",
 }
 
-var _ llm.Tool = &FetchTool{}
+var _ llm.ToolWithMetadata = &FetchTool{}
 
 type FetchTool struct {
 	fetcher    web.Fetcher
@@ -67,27 +67,31 @@ func (t *FetchTool) WithTimeout(timeout time.Duration) *FetchTool {
 	return t
 }
 
-func (t *FetchTool) Definition() *llm.ToolDefinition {
-	return &llm.ToolDefinition{
-		Name:        "fetch",
-		Description: "Retrieves the contents of the webpage at the given URL.",
-		Parameters: llm.Schema{
-			Type:     "object",
-			Required: []string{"url"},
-			Properties: map[string]*llm.SchemaProperty{
-				"url": {
-					Type:        "string",
-					Description: "The URL of the webpage to retrieve, e.g. 'https://www.example.com'",
-				},
+func (t *FetchTool) Name() string {
+	return "fetch"
+}
+
+func (t *FetchTool) Description() string {
+	return "Retrieves the contents of the webpage at the given URL."
+}
+
+func (t *FetchTool) Schema() llm.Schema {
+	return llm.Schema{
+		Type:     "object",
+		Required: []string{"url"},
+		Properties: map[string]*llm.SchemaProperty{
+			"url": {
+				Type:        "string",
+				Description: "The URL of the webpage to retrieve, e.g. 'https://www.example.com'",
 			},
 		},
 	}
 }
 
-func (t *FetchTool) Call(ctx context.Context, input string) (string, error) {
+func (t *FetchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
 	var s web.FetchInput
-	if err := json.Unmarshal([]byte(input), &s); err != nil {
-		return "", err
+	if err := json.Unmarshal([]byte(input.Input), &s); err != nil {
+		return nil, err
 	}
 
 	s.Formats = []string{"markdown"}
@@ -113,7 +117,7 @@ func (t *FetchTool) Call(ctx context.Context, input string) (string, error) {
 	}, retry.WithMaxRetries(t.maxRetries))
 
 	if err != nil {
-		return fmt.Sprintf("failed to fetch url after %d attempts: %s", t.maxRetries, err), nil
+		return llm.NewToolCallOutput(fmt.Sprintf("failed to fetch url after %d attempts: %s", t.maxRetries, err)), nil
 	}
 
 	var sb strings.Builder
@@ -129,11 +133,14 @@ func (t *FetchTool) Call(ctx context.Context, input string) (string, error) {
 	sb.WriteString(response.Markdown)
 
 	result := truncateText(sb.String(), t.maxSize)
-	return result, nil
+	return llm.NewToolCallOutput(result), nil
 }
 
-func (t *FetchTool) ShouldReturnResult() bool {
-	return true
+func (t *FetchTool) Metadata() llm.ToolMetadata {
+	return llm.ToolMetadata{
+		Version:    "0.0.1",
+		Capability: llm.ToolCapabilityReadOnly,
+	}
 }
 
 func truncateText(text string, maxSize int) string {

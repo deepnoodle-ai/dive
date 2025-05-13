@@ -367,11 +367,10 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	if len(config.Tools) > 0 {
 		var tools []*Tool
 		for _, tool := range config.Tools {
-			toolDef := tool.Definition()
 			tools = append(tools, &Tool{
-				Name:        toolDef.Name,
-				Description: toolDef.Description,
-				InputSchema: toolDef.Parameters,
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				InputSchema: tool.Schema(),
 			})
 		}
 		req.Tools = tools
