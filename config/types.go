@@ -12,6 +12,11 @@ type LoggingConfig struct {
 	Level string `yaml:"Level,omitempty" json:"Level,omitempty"`
 }
 
+// ConfirmationConfig is used to configure confirmation related settings
+type ConfirmationConfig struct {
+	Mode string `yaml:"Mode,omitempty" json:"Mode,omitempty"`
+}
+
 // WorkflowConfig is used to configure Workflow related settings
 type WorkflowConfig struct {
 	DefaultWorkflow string `yaml:"DefaultWorkflow,omitempty" json:"DefaultWorkflow,omitempty"`
@@ -24,10 +29,11 @@ type DocumentsConfig struct {
 
 // Config represents global configuration settings
 type Config struct {
-	LLM       LLMConfig       `yaml:"LLM,omitempty" json:"LLM,omitempty"`
-	Logging   LoggingConfig   `yaml:"Logging,omitempty" json:"Logging,omitempty"`
-	Workflows WorkflowConfig  `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
-	Documents DocumentsConfig `yaml:"Documents,omitempty" json:"Documents,omitempty"`
+	LLM          LLMConfig          `yaml:"LLM,omitempty" json:"LLM,omitempty"`
+	Logging      LoggingConfig      `yaml:"Logging,omitempty" json:"Logging,omitempty"`
+	Workflows    WorkflowConfig     `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
+	Documents    DocumentsConfig    `yaml:"Documents,omitempty" json:"Documents,omitempty"`
+	Confirmation ConfirmationConfig `yaml:"Confirmation,omitempty" json:"Confirmation,omitempty"`
 }
 
 // Variable represents a workflow-level input parameter

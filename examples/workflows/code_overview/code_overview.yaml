@@ -6,7 +6,9 @@ Config:
     DefaultProvider: anthropic
     DefaultModel: claude-3-7-sonnet-20250219
   Logging:
-    Level: warn
+    Level: info
+  Confirmation:
+    Mode: never
 
 Tools:
   - Name: Web.Search

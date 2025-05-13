@@ -90,6 +90,10 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		logger = slogger.New(level)
 	}
 
+	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
+		Mode: env.Config.Confirmation.Mode,
+	})
+
 	// Tools
 	toolsMap, err := initializeTools(env.Tools)
 	if err != nil {
@@ -99,7 +103,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	// Agents
 	agents := make([]dive.Agent, 0, len(env.Agents))
 	for _, agentDef := range env.Agents {
-		agent, err := buildAgent(agentDef, env.Config, toolsMap, logger)
+		agent, err := buildAgent(agentDef, env.Config, toolsMap, logger, confirmer)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
 		}
@@ -179,6 +183,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		Logger:             logger,
 		DocumentRepository: docRepo,
 		ThreadRepository:   threadRepo,
+		Confirmer:          confirmer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create environment: %w", err)

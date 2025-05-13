@@ -62,6 +62,7 @@ type Options struct {
 	DocumentRepository   dive.DocumentRepository
 	ThreadRepository     dive.ThreadRepository
 	SystemPromptTemplate string
+	Confirmer            llm.Confirmer
 }
 
 // Agent is the standard implementation of the Agent interface.
@@ -86,6 +87,7 @@ type Agent struct {
 	documentRepository   dive.DocumentRepository
 	threadRepository     dive.ThreadRepository
 	systemPromptTemplate *template.Template
+	confirmer            llm.Confirmer
 	mutex                sync.Mutex
 }
 
@@ -137,6 +139,7 @@ func New(opts Options) (*Agent, error) {
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
 		toolChoice:           opts.ToolChoice,
+		confirmer:            opts.Confirmer,
 	}
 
 	tools := make([]llm.Tool, len(opts.Tools))
@@ -660,10 +663,15 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall,
 		})
 
 		startTime := time.Now()
-		output, err := tool.Call(ctx, &llm.ToolCallInput{Input: toolCall.Input})
+
+		output, err := tool.Call(ctx, &llm.ToolCallInput{
+			Input:     toolCall.Input,
+			Confirmer: a.confirmer,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("tool call error: %w", err)
 		}
+
 		endTime := time.Now()
 
 		result := &llm.ToolResult{
