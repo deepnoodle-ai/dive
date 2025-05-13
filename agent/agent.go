@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	DefaultResponseTimeout    = time.Minute * 4
+	DefaultResponseTimeout    = time.Minute * 10
 	DefaultToolIterationLimit = 16
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")

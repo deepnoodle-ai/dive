@@ -90,14 +90,14 @@ func initializeTools(tools []Tool) (map[string]llm.Tool, error) {
 		toolsMap["Directory.List"] = toolkit.NewDirectoryListTool(options)
 	}
 
-	if _, ok := configsByName["Shell"]; ok {
-		var options toolkit.ShellToolOptions
-		if config, ok := configsByName["Shell"]; ok {
+	if _, ok := configsByName["Command"]; ok {
+		var options toolkit.CommandToolOptions
+		if config, ok := configsByName["Command"]; ok {
 			if err := convertToolConfig(config, &options); err != nil {
-				return nil, fmt.Errorf("failed to populate shell tool config: %w", err)
+				return nil, fmt.Errorf("failed to populate command tool config: %w", err)
 			}
 		}
-		toolsMap["Shell"] = toolkit.NewShellTool(options)
+		toolsMap["Command"] = toolkit.NewCommandTool(options)
 	}
 
 	// Add more tools here as needed

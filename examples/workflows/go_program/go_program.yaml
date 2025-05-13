@@ -6,7 +6,7 @@ Config:
     DefaultProvider: anthropic
     DefaultModel: claude-3-7-sonnet-20250219
   Logging:
-    Level: warn
+    Level: debug
 
 Tools:
   - Name: Directory.List
@@ -15,7 +15,7 @@ Tools:
     Enabled: true
   - Name: File.Read
     Enabled: true
-  - Name: Shell
+  - Name: Command
     Enabled: true
 
 Agents:
@@ -25,7 +25,7 @@ Agents:
       - Directory.List
       - File.Write
       - File.Read
-      - Shell
+      - Command
 
 Workflows:
   - Name: Go Program Skeleton
@@ -42,27 +42,22 @@ Workflows:
       - Name: Generate main.go
         Agent: Engineer
         Prompt: |
-          Based on the following intent, generate a minimal but idiomatic Go main program in a file called main.go:
+          Based on the following intent, generate a minimal but idiomatic Go
+          main program in a file called main.go:
+
           "${inputs.intent}"
 
-          The program should compile and pass linting. Only include the main.go file content.
-
-      - Name: Initialize go.mod
-        Agent: Engineer
-        Prompt: |
-          Write the content for a minimal go.mod file for a Go program in the current directory, using module name "example.com/main".
+          Create the program in the directory: ${inputs.directory}.
 
       - Name: Compile Program
         Agent: Engineer
         Prompt: |
-          Compile the program in the current directory.
+          Compile the Go program in the directory: ${inputs.directory}.
 
       - Name: Lint Program
         Agent: Engineer
         Prompt: |
-          Lint the program in the current directory.
-
-          Command: cd ${inputs.directory} && (golint ./... || go vet ./...)
+          Run `go vet ./...` in the program directory: ${inputs.directory}.
         Store: lint_output
 
       - Name: Summarize Results
