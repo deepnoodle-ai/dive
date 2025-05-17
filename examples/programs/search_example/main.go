@@ -12,13 +12,9 @@ import (
 	"github.com/diveagents/dive/llm/providers/anthropic"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
-	"github.com/diveagents/dive/toolkit/kagi"
+	"github.com/diveagents/dive/toolkit/google"
 )
 
-// You'll need to have these set:
-// - KAGI_API_KEY
-// - OPEN
-// https://developers.google.com/custom-search/v1/introduction
 func main() {
 
 	var logLevel string
@@ -30,7 +26,11 @@ func main() {
 
 	ctx := context.Background()
 
-	googleClient, err := kagi.New()
+	// You'll need to have these set:
+	// - GOOGLE_SEARCH_CX
+	// - GOOGLE_SEARCH_API_KEY
+	// https://developers.google.com/custom-search/v1/introduction
+	googleClient, err := google.New()
 	if err != nil {
 		log.Fatal(err)
 	}
