@@ -45,7 +45,14 @@ func initializeTools(tools []Tool) (map[string]dive.Tool, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize Google Search: %w", err)
 		}
-		toolsMap["Web.Search"] = toolkit.NewSearchTool(googleClient)
+		var options toolkit.SearchToolOptions
+		if config, ok := configsByName["Web.Search"]; ok {
+			if err := convertToolConfig(config, &options); err != nil {
+				return nil, fmt.Errorf("failed to populate web_search tool config: %w", err)
+			}
+		}
+		options.Searcher = googleClient
+		toolsMap["Web.Search"] = toolkit.NewSearchTool(options)
 	}
 
 	if _, ok := configsByName["Web.Fetch"]; ok {
@@ -57,7 +64,14 @@ func initializeTools(tools []Tool) (map[string]dive.Tool, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize Firecrawl: %w", err)
 		}
-		toolsMap["Web.Fetch"] = toolkit.NewFetchTool(client)
+		var options toolkit.FetchToolOptions
+		if config, ok := configsByName["Web.Fetch"]; ok {
+			if err := convertToolConfig(config, &options); err != nil {
+				return nil, fmt.Errorf("failed to populate web_fetch tool config: %w", err)
+			}
+		}
+		options.Fetcher = client
+		toolsMap["Web.Fetch"] = toolkit.NewFetchTool(options)
 	}
 
 	if _, ok := configsByName["File.Read"]; ok {

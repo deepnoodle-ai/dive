@@ -1,7 +1,12 @@
 package llm
 
-// Messages is shorthand for a slice of messages.
-type Messages []*Message
+// MessageSlice is a slice of messages.
+type MessageSlice []*Message
+
+// Messages implements the Messages interface.
+func (m MessageSlice) Messages() []*Message {
+	return m
+}
 
 // NewMessage creates a new message with the given role and content blocks.
 func NewMessage(role Role, content []Content) *Message {

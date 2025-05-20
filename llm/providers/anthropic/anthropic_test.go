@@ -14,9 +14,9 @@ import (
 func TestHelloWorld(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	response, err := provider.Generate(ctx, []*llm.Message{
+	response, err := provider.Generate(ctx, llm.WithMessage(
 		llm.NewUserTextMessage("respond with \"hello\""),
-	})
+	))
 	require.NoError(t, err)
 	require.Equal(t, "hello", response.Message().Text())
 }
@@ -24,9 +24,9 @@ func TestHelloWorld(t *testing.T) {
 func TestStreamCountTo10(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	iterator, err := provider.Stream(ctx, []*llm.Message{
+	iterator, err := provider.Stream(ctx, llm.WithMessage(
 		llm.NewUserTextMessage("count to 10. respond with the integers only, separated by spaces."),
-	})
+	))
 	require.NoError(t, err)
 	defer iterator.Close()
 
@@ -53,10 +53,6 @@ func TestToolUse(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
-	messages := []*llm.Message{
-		llm.NewUserTextMessage("add 567 and 111"),
-	}
-
 	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
@@ -69,7 +65,8 @@ func TestToolUse(t *testing.T) {
 			},
 		})
 
-	response, err := provider.Generate(ctx, messages,
+	response, err := provider.Generate(ctx,
+		llm.WithMessage(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
 		llm.WithToolChoice("tool"),
 		llm.WithToolChoiceName("add"),
@@ -116,8 +113,9 @@ func TestToolCallStream(t *testing.T) {
 		})
 
 	iterator, err := provider.Stream(ctx,
-		[]*llm.Message{llm.NewUserTextMessage("What is 2+2?")},
-		llm.WithTools(calculatorTool))
+		llm.WithMessage(llm.NewUserTextMessage("What is 2+2?")),
+		llm.WithTools(calculatorTool),
+	)
 
 	require.NoError(t, err)
 	defer iterator.Close()

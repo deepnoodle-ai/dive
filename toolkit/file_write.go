@@ -34,13 +34,13 @@ type FileWriteTool struct {
 }
 
 // NewFileWriteTool creates a new tool for writing content to files
-func NewFileWriteTool(options FileWriteToolOptions) *FileWriteTool {
-	return &FileWriteTool{
+func NewFileWriteTool(options FileWriteToolOptions) *dive.TypedToolAdapter[*FileWriteInput] {
+	return dive.ToolAdapter(&FileWriteTool{
 		allowList:     options.AllowList,
 		denyList:      options.DenyList,
 		rootDirectory: options.RootDirectory,
 		confirmer:     options.Confirmer,
-	}
+	})
 }
 
 // resolvePath resolves the provided path, applying rootDirectory if configured

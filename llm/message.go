@@ -18,6 +18,9 @@ func (r Role) String() string {
 	return string(r)
 }
 
+// Messages is shorthand for a slice of messages.
+type Messages []*Message
+
 // Message containing content passed to or from an LLM.
 type Message struct {
 	ID      string    `json:"id,omitempty"`
@@ -28,7 +31,10 @@ type Message struct {
 // LastText returns the last text content in the message.
 func (m *Message) LastText() string {
 	for i := len(m.Content) - 1; i >= 0; i-- {
-		if content, ok := m.Content[i].(*TextContent); ok {
+		switch content := m.Content[i].(type) {
+		case *TextContent:
+			return content.Text
+		case *AssistantTextContent:
 			return content.Text
 		}
 	}
@@ -41,11 +47,18 @@ func (m *Message) Text() string {
 	var textCount int
 	var sb strings.Builder
 	for _, content := range m.Content {
-		if textContent, ok := content.(*TextContent); ok {
+		switch content := content.(type) {
+		case *TextContent:
 			if textCount > 0 {
 				sb.WriteString("\n\n")
 			}
-			sb.WriteString(textContent.Text)
+			sb.WriteString(content.Text)
+			textCount++
+		case *AssistantTextContent:
+			if textCount > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString(content.Text)
 			textCount++
 		}
 	}
@@ -68,4 +81,10 @@ func (m *Message) WithImageData(mediaType, base64Data string) *Message {
 		},
 	})
 	return m
+}
+
+// Messages implements the Messages interface, allowing a single message to
+// be provided to Agent generation methods.
+func (m *Message) Messages() []*Message {
+	return []*Message{m}
 }

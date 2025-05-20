@@ -29,13 +29,11 @@ type TextEditorToolOptions struct {
 }
 
 // NewTextEditorTool creates a new TextEditorTool with the given options.
-func NewTextEditorTool(opts TextEditorToolOptions) *TextEditorTool {
+func NewTextEditorTool(opts TextEditorToolOptions) *dive.TypedToolAdapter[*TextEditorToolInput] {
 	if opts.Type == "" {
 		opts.Type = "text_editor_20250124"
 	}
-	return &TextEditorTool{
-		typeString: opts.Type,
-	}
+	return dive.ToolAdapter(&TextEditorTool{typeString: opts.Type})
 }
 
 // TextEditorTool is a tool that allows Claude to edit files.

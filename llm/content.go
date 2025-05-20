@@ -1,5 +1,7 @@
 package llm
 
+import "encoding/json"
+
 // ContentType indicates the type of a content block in a message
 type ContentType string
 
@@ -87,6 +89,14 @@ type TextContent struct {
 
 func (c *TextContent) Type() ContentType {
 	return ContentTypeText
+}
+
+func (c *TextContent) MarshalJSON() ([]byte, error) {
+	m := map[string]any{"type": c.Type(), "text": c.Text}
+	if c.CacheControl != nil && c.CacheControl.Type != "" {
+		m["cache_control"] = map[string]any{"type": c.CacheControl.Type}
+	}
+	return json.Marshal(m)
 }
 
 //// AssistantTextContent //////////////////////////////////////////////////////
@@ -230,6 +240,22 @@ type ToolUseContent struct {
 
 func (c *ToolUseContent) Type() ContentType {
 	return ContentTypeToolUse
+}
+
+func (c *ToolUseContent) UnmarshalJSON(data []byte) error {
+	type temp struct {
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	var raw temp
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.ID = raw.ID
+	c.Name = raw.Name
+	c.Input = string(raw.Input)
+	return nil
 }
 
 //// ToolResultContent ////////////////////////////////////////////////////////

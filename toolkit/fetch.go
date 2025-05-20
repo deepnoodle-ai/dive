@@ -45,21 +45,21 @@ type FetchTool struct {
 }
 
 type FetchToolOptions struct {
-	MaxSize    int
-	MaxRetries int
-	Timeout    time.Duration
-	Fetcher    web.Fetcher
-	Confirmer  dive.Confirmer
+	MaxSize    int            `json:"max_size,omitempty"`
+	MaxRetries int            `json:"max_retries,omitempty"`
+	Timeout    time.Duration  `json:"timeout,omitempty"`
+	Fetcher    web.Fetcher    `json:"-"`
+	Confirmer  dive.Confirmer `json:"-"`
 }
 
-func NewFetchTool(options FetchToolOptions) *FetchTool {
-	return &FetchTool{
+func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInput] {
+	return dive.ToolAdapter(&FetchTool{
 		fetcher:    options.Fetcher,
 		maxSize:    options.MaxSize,
 		maxRetries: options.MaxRetries,
 		timeout:    options.Timeout,
 		confirmer:  options.Confirmer,
-	}
+	})
 }
 
 func (t *FetchTool) Name() string {

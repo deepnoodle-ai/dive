@@ -11,6 +11,10 @@ import (
 
 var _ dive.TypedTool[*SearchInput] = &SearchTool{}
 
+type SearchToolOptions struct {
+	Searcher web.Searcher
+}
+
 type SearchInput struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit"`
@@ -20,8 +24,10 @@ type SearchTool struct {
 	searcher web.Searcher
 }
 
-func NewSearchTool(searcher web.Searcher) *SearchTool {
-	return &SearchTool{searcher: searcher}
+func NewSearchTool(options SearchToolOptions) *dive.TypedToolAdapter[*SearchInput] {
+	return dive.ToolAdapter(&SearchTool{
+		searcher: options.Searcher,
+	})
 }
 
 func (t *SearchTool) Name() string {

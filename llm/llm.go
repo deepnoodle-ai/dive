@@ -9,7 +9,7 @@ type LLM interface {
 	Name() string
 
 	// Generate a response from the LLM by passing messages.
-	Generate(ctx context.Context, messages []*Message, opts ...Option) (*Response, error)
+	Generate(ctx context.Context, opts ...Option) (*Response, error)
 }
 
 type StreamingLLM interface {
@@ -17,7 +17,7 @@ type StreamingLLM interface {
 
 	// Stream starts a streaming response from the LLM by passing messages.
 	// The caller should call Close on the returned Stream when done.
-	Stream(ctx context.Context, messages []*Message, opts ...Option) (StreamIterator, error)
+	Stream(ctx context.Context, opts ...Option) (StreamIterator, error)
 }
 
 type StreamIterator interface {

@@ -25,7 +25,7 @@ func TestAgent(t *testing.T) {
 func TestAgentChat(t *testing.T) {
 	// Use a mock LLM instead of Anthropic to prevent timing out
 	mockLLM := &mockLLM{
-		generateFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 			return &llm.Response{
 				ID:         "resp_mock",
 				Model:      "test-model",
@@ -137,7 +137,7 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 func TestAgentCreateResponse(t *testing.T) {
 	// Setup a simple mock LLM
 	mockLLM := &mockLLM{
-		generateFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 			return &llm.Response{
 				ID:         "resp_123",
 				Model:      "test-model", // This is the model name that will be used
@@ -346,7 +346,7 @@ func TestAgentCreateResponse(t *testing.T) {
 // Mock types for testing
 
 type mockLLM struct {
-	generateFunc func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error)
+	generateFunc func(ctx context.Context, opts ...llm.Option) (*llm.Response, error)
 	nameFunc     func() string
 }
 
@@ -357,17 +357,17 @@ func (m *mockLLM) Name() string {
 	return "mock-llm"
 }
 
-func (m *mockLLM) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
-	return m.generateFunc(ctx, messages, opts...)
+func (m *mockLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+	return m.generateFunc(ctx, opts...)
 }
 
 type mockStreamingLLM struct {
 	mockLLM
-	streamFunc func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error)
+	streamFunc func(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error)
 }
 
-func (m *mockStreamingLLM) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
-	return m.streamFunc(ctx, messages, opts...)
+func (m *mockStreamingLLM) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
+	return m.streamFunc(ctx, opts...)
 }
 
 type mockStreamIterator struct {

@@ -48,18 +48,14 @@ type DirectoryListTool struct {
 }
 
 // NewDirectoryListTool creates a new tool for listing directory contents
-func NewDirectoryListTool(options DirectoryListToolOptions) *DirectoryListTool {
-	maxEntries := options.MaxEntries
-	if maxEntries <= 0 {
-		maxEntries = DefaultDirectoryListMaxEntries
-	}
-	return &DirectoryListTool{
+func NewDirectoryListTool(options DirectoryListToolOptions) *dive.TypedToolAdapter[*DirectoryListInput] {
+	return dive.ToolAdapter(&DirectoryListTool{
 		defaultPath:   options.DefaultPath,
-		maxEntries:    maxEntries,
+		maxEntries:    options.MaxEntries,
 		rootDirectory: options.RootDirectory,
 		allowList:     options.AllowList,
 		denyList:      options.DenyList,
-	}
+	})
 }
 
 func (t *DirectoryListTool) Name() string {

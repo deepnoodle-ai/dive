@@ -45,6 +45,7 @@ type Config struct {
 	Hooks             Hooks          `json:"-"`
 	Client            *http.Client   `json:"-"`
 	Logger            slogger.Logger `json:"-"`
+	Messages          Messages       `json:"-"`
 }
 
 // Apply applies the given options to the config.
@@ -224,5 +225,26 @@ func WithReasoningEffort(reasoningEffort string) Option {
 func WithFeatures(features ...string) Option {
 	return func(config *Config) {
 		config.Features = append(config.Features, features...)
+	}
+}
+
+// WithMessages sets the messages for the interaction.
+func WithMessages(messages Messages) Option {
+	return func(config *Config) {
+		config.Messages = messages
+	}
+}
+
+// WithMessage sets a single message for the interaction.
+func WithMessage(message *Message) Option {
+	return func(config *Config) {
+		config.Messages = Messages{message}
+	}
+}
+
+// WithUserTextMessage sets a single user text message for the interaction.
+func WithUserTextMessage(text string) Option {
+	return func(config *Config) {
+		config.Messages = Messages{NewUserTextMessage(text)}
 	}
 }

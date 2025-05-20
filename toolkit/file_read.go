@@ -31,14 +31,11 @@ type FileReadTool struct {
 }
 
 // NewFileReadTool creates a new tool for reading file contents
-func NewFileReadTool(options FileReadToolOptions) *FileReadTool {
-	if options.MaxSize <= 0 {
-		options.MaxSize = DefaultFileReadMaxSize
-	}
-	return &FileReadTool{
+func NewFileReadTool(options FileReadToolOptions) *dive.TypedToolAdapter[*FileReadInput] {
+	return dive.ToolAdapter(&FileReadTool{
 		maxSize:       options.MaxSize,
 		rootDirectory: options.RootDirectory,
-	}
+	})
 }
 
 func (t *FileReadTool) Name() string {

@@ -58,7 +58,7 @@ func (p *Provider) Name() string {
 	return fmt.Sprintf("anthropic-%s", p.model)
 }
 
-func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)
 
@@ -66,7 +66,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(messages)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, err
 	}
@@ -94,10 +94,12 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
+	fmt.Printf("request body: %s\n", string(body))
+
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -153,7 +155,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.AfterGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -183,7 +185,7 @@ func addPrefill(blocks []llm.Content, prefill, closingTag string) error {
 	return fmt.Errorf("no text content found in message")
 }
 
-func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
+func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)
 
@@ -191,7 +193,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(messages)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -223,7 +225,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},

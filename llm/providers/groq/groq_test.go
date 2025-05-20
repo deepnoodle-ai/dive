@@ -12,9 +12,9 @@ import (
 func TestHelloWorld(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	response, err := provider.Generate(ctx, []*llm.Message{
-		llm.NewUserMessage("respond with \"hello\""),
-	})
+
+	message := llm.NewUserTextMessage("respond with \"hello\"")
+	response, err := provider.Generate(ctx, llm.WithMessage(message))
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())

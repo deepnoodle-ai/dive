@@ -57,9 +57,9 @@ medical topics, symptoms, and health advice, but always clarify that you're not
 a real doctor and cannot provide actual medical diagnosis or treatment. Refuse
 to answer non-medical questions. Use maximum medical jargon.`,
 		Model: model,
-		Tools: []llm.Tool{
-			toolkit.NewSearchTool(googleClient),
-			toolkit.NewFetchTool(firecrawlClient),
+		Tools: []dive.Tool{
+			toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}),
+			toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: firecrawlClient}),
 		},
 		ThreadRepository: agent.NewMemoryThreadRepository(),
 		Logger:           logger,
@@ -82,9 +82,8 @@ to answer non-medical questions. Use maximum medical jargon.`,
 		if message == "" {
 			continue
 		}
-		messages := llm.Messages{llm.NewUserMessage(message)}
 		stream, err := a.StreamResponse(ctx,
-			dive.WithMessages(messages),
+			dive.WithMessage(llm.NewUserTextMessage(message)),
 			dive.WithThreadID("1"),
 		)
 		if err != nil {

@@ -158,7 +158,7 @@ func New(opts Options) (*Agent, error) {
 			}
 		}
 		if !foundAssignWorkTool {
-			tools = append(tools, dive.NewTypedToolAdapter(
+			tools = append(tools, dive.ToolAdapter(
 				NewAssignWorkTool(AssignWorkToolOptions{
 					Self:               agent,
 					DefaultTaskTimeout: opts.ResponseTimeout,
@@ -458,9 +458,6 @@ func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
 		messages = make([]*llm.Message, len(options.Messages))
 		copy(messages, options.Messages)
 	}
-	if options.Input != "" {
-		messages = append(messages, llm.NewUserTextMessage(options.Input))
-	}
 	return messages
 }
 
@@ -529,12 +526,13 @@ func (a *Agent) generate(
 	generationLimit := a.toolIterationLimit + 1
 	for i := range generationLimit {
 		// Generate a response in either streaming or non-streaming mode
+		generateOpts = append(generateOpts, llm.WithMessages(updatedMessages))
 		var err error
 		var response *llm.Response
 		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
-			response, err = a.generateStreaming(ctx, streamingLLM, updatedMessages, generateOpts, publisher)
+			response, err = a.generateStreaming(ctx, streamingLLM, generateOpts, publisher)
 		} else {
-			response, err = a.model.Generate(ctx, updatedMessages, generateOpts...)
+			response, err = a.model.Generate(ctx, generateOpts...)
 		}
 		if err == nil && response == nil {
 			// This indicates a bug in the LLM provider implementation
@@ -611,12 +609,11 @@ func (a *Agent) generate(
 func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
-	messages []*llm.Message,
 	generateOpts []llm.Option,
 	publisher dive.EventPublisher,
 ) (*llm.Response, error) {
 	accum := llm.NewResponseAccumulator()
-	iter, err := streamingLLM.Stream(ctx, messages, generateOpts...)
+	iter, err := streamingLLM.Stream(ctx, generateOpts...)
 	if err != nil {
 		return nil, err
 	}

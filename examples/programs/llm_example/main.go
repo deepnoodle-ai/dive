@@ -23,7 +23,7 @@ func main() {
 
 	response, err := anthropic.New().Generate(
 		ctx,
-		llm.Messages{llm.NewUserMessage(prompt)},
+		llm.WithUserTextMessage(prompt),
 		llm.WithMaxTokens(2048),
 		llm.WithTemperature(0.7),
 	)

@@ -154,8 +154,8 @@ type TypedTool[T any] interface {
 	Call(ctx context.Context, input T) (*ToolResult, error)
 }
 
-// NewTypedToolAdapter creates a new TypedToolAdapter for the given tool.
-func NewTypedToolAdapter[T any](tool TypedTool[T]) *TypedToolAdapter[T] {
+// ToolAdapter creates a new TypedToolAdapter for the given tool.
+func ToolAdapter[T any](tool TypedTool[T]) *TypedToolAdapter[T] {
 	return &TypedToolAdapter[T]{tool: tool}
 }
 
@@ -211,6 +211,11 @@ func (t *TypedToolAdapter[T]) Call(ctx context.Context, input any) (*ToolResult,
 		return NewToolResultError(errMessage), nil
 	}
 	return t.tool.Call(ctx, typedInput)
+}
+
+// Unwrap returns the underlying TypedTool.
+func (t *TypedToolAdapter[T]) Unwrap() TypedTool[T] {
+	return t.tool
 }
 
 // ToolCallResult is a tool call that has been made. This is used to understand

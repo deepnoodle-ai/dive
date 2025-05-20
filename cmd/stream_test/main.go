@@ -48,12 +48,12 @@ func stream(model llm.StreamingLLM, messages llm.Messages) {
 		if err != nil {
 			fatal("failed to initialize Google Search: %s", err)
 		}
-		modelTools = append(modelTools, toolkit.NewSearchTool(googleClient))
+		modelTools = append(modelTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
 	}
 
 	stream, err := model.Stream(
 		context.Background(),
-		messages,
+		llm.WithMessages(messages),
 		llm.WithTools(modelTools...),
 		llm.WithTemperature(0.1),
 		llm.WithSystemPrompt("You are a helpful assistant."),

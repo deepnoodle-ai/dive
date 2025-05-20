@@ -85,12 +85,12 @@ func (r *Response) OutputText() string {
 	return ""
 }
 
-// ToolResults returns all tool results from the response.
-func (r *Response) ToolResults() []*ToolResult {
-	var results []*ToolResult
+// ToolCallResults returns all tool call results from the response.
+func (r *Response) ToolCallResults() []*ToolCallResult {
+	var results []*ToolCallResult
 	for _, item := range r.Items {
-		if item.Type == ResponseItemTypeToolResult {
-			results = append(results, item.ToolResult)
+		if item.Type == ResponseItemTypeToolCallResult {
+			results = append(results, item.ToolCallResult)
 		}
 	}
 	return results
