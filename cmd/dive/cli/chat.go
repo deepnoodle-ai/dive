@@ -11,7 +11,6 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/config"
-	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/firecrawl"
@@ -93,14 +92,14 @@ func runChat(instructions, agentName string, reasoningBudget int) error {
 		return fmt.Errorf("error getting model: %v", err)
 	}
 
-	var theTools []llm.Tool
+	var theTools []dive.Tool
 
 	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
 		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
 		if err != nil {
 			log.Fatal(err)
 		}
-		scraper := toolkit.NewFetchTool(client)
+		scraper := toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: client})
 		theTools = append(theTools, scraper)
 	}
 
@@ -109,7 +108,7 @@ func runChat(instructions, agentName string, reasoningBudget int) error {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, toolkit.NewSearchTool(googleClient))
+		theTools = append(theTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
 	}
 
 	modelSettings := &agent.ModelSettings{}
