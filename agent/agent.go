@@ -49,7 +49,7 @@ type Options struct {
 	IsSupervisor         bool
 	Subordinates         []string
 	Model                llm.LLM
-	Tools                []llm.Tool
+	Tools                []dive.Tool
 	ToolChoice           llm.ToolChoice
 	ResponseTimeout      time.Duration
 	Caching              *bool
@@ -61,8 +61,8 @@ type Options struct {
 	Environment          dive.Environment
 	DocumentRepository   dive.DocumentRepository
 	ThreadRepository     dive.ThreadRepository
+	Confirmer            dive.Confirmer
 	SystemPromptTemplate string
-	Confirmer            llm.Confirmer
 }
 
 // Agent is the standard implementation of the Agent interface.
@@ -71,8 +71,8 @@ type Agent struct {
 	goal                 string
 	instructions         string
 	model                llm.LLM
-	tools                []llm.Tool
-	toolsByName          map[string]llm.Tool
+	tools                []dive.Tool
+	toolsByName          map[string]dive.Tool
 	toolChoice           llm.ToolChoice
 	isSupervisor         bool
 	subordinates         []string
@@ -86,8 +86,8 @@ type Agent struct {
 	environment          dive.Environment
 	documentRepository   dive.DocumentRepository
 	threadRepository     dive.ThreadRepository
+	confirmer            dive.Confirmer
 	systemPromptTemplate *template.Template
-	confirmer            llm.Confirmer
 	mutex                sync.Mutex
 }
 
@@ -142,7 +142,7 @@ func New(opts Options) (*Agent, error) {
 		confirmer:            opts.Confirmer,
 	}
 
-	tools := make([]llm.Tool, len(opts.Tools))
+	tools := make([]dive.Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
 		copy(tools, opts.Tools)
 	}
@@ -158,16 +158,18 @@ func New(opts Options) (*Agent, error) {
 			}
 		}
 		if !foundAssignWorkTool {
-			tools = append(tools, NewAssignWorkTool(AssignWorkToolOptions{
-				Self:               agent,
-				DefaultTaskTimeout: opts.ResponseTimeout,
-			}))
+			tools = append(tools, dive.NewTypedToolAdapter(
+				NewAssignWorkTool(AssignWorkToolOptions{
+					Self:               agent,
+					DefaultTaskTimeout: opts.ResponseTimeout,
+				}),
+			))
 		}
 	}
 
 	agent.tools = tools
 	if len(tools) > 0 {
-		agent.toolsByName = make(map[string]llm.Tool, len(tools))
+		agent.toolsByName = make(map[string]dive.Tool, len(tools))
 		for _, tool := range tools {
 			agent.toolsByName[tool.Name()] = tool
 		}
@@ -457,7 +459,7 @@ func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
 		copy(messages, options.Messages)
 	}
 	if options.Input != "" {
-		messages = append(messages, llm.NewUserMessage(options.Input))
+		messages = append(messages, llm.NewUserTextMessage(options.Input))
 	}
 	return messages
 }
@@ -581,15 +583,14 @@ func (a *Agent) generate(
 		}
 
 		// Capture results in a new message to send to LLM on the next iteration
-		toolResultMessage := llm.NewToolOutputMessage(toolResults)
+		toolResultMessage := llm.NewToolResultMessage(getToolResultContent(toolResults))
 		newMessage(toolResultMessage)
 
 		// Add instructions to the message to not use any more tools if we have
 		// only one generation left
 		if i == generationLimit-2 {
 			generateOpts = append(generateOpts, llm.WithToolChoice(llm.ToolChoiceNone))
-			toolResultMessage.Content = append(toolResultMessage.Content, &llm.Content{
-				Type: llm.ContentTypeText,
+			toolResultMessage.Content = append(toolResultMessage.Content, &llm.TextContent{
 				Text: "Your tool calls are complete. You must respond with a final answer now.",
 			})
 			a.logger.Debug("set tool choice to none",
@@ -641,9 +642,9 @@ func (a *Agent) generateStreaming(
 	return accum.Response(), nil
 }
 
-// executeToolCalls executes all tool calls and returns the results.
-func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall, publisher dive.EventPublisher) ([]*llm.ToolResult, error) {
-	results := make([]*llm.ToolResult, len(toolCalls))
+// executeToolCalls executes all tool calls and returns the tool call results.
+func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall, publisher dive.EventPublisher) ([]*dive.ToolCallResult, error) {
+	results := make([]*dive.ToolCallResult, len(toolCalls))
 	for i, toolCall := range toolCalls {
 		tool, ok := a.toolsByName[toolCall.Name]
 		if !ok {
@@ -662,37 +663,37 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall,
 			},
 		})
 
-		startTime := time.Now()
-
-		output, err := tool.Call(ctx, &llm.ToolCallInput{
-			Input:     toolCall.Input,
-			Confirmer: a.confirmer,
-		})
+		output, err := tool.Call(ctx, toolCall.Input)
 		if err != nil {
 			return nil, fmt.Errorf("tool call error: %w", err)
 		}
 
-		endTime := time.Now()
-
-		result := &llm.ToolResult{
-			ID:          toolCall.ID,
-			Name:        toolCall.Name,
-			Input:       toolCall.Input,
-			StartedAt:   &startTime,
-			CompletedAt: &endTime,
-			Output:      output.Output,
+		result := &dive.ToolCallResult{
+			ID:     toolCall.ID,
+			Name:   toolCall.Name,
+			Input:  toolCall.Input,
+			Result: output,
+			Error:  err,
 		}
 		results[i] = result
 
 		publisher.Send(ctx, &dive.ResponseEvent{
 			Type: dive.EventTypeResponseToolResult,
 			Item: &dive.ResponseItem{
-				Type:       dive.ResponseItemTypeToolResult,
-				ToolResult: result,
+				Type:           dive.ResponseItemTypeToolCallResult,
+				ToolCallResult: result,
 			},
 		})
 	}
 	return results, nil
+}
+
+func (a *Agent) getToolDefinitions() []llm.Tool {
+	definitions := make([]llm.Tool, len(a.tools))
+	for i, tool := range a.tools {
+		definitions[i] = tool
+	}
+	return definitions
 }
 
 func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
@@ -701,7 +702,7 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 		generateOpts = append(generateOpts, llm.WithSystemPrompt(systemPrompt))
 	}
 	if len(a.tools) > 0 {
-		generateOpts = append(generateOpts, llm.WithTools(a.tools...))
+		generateOpts = append(generateOpts, llm.WithTools(a.getToolDefinitions()...))
 	}
 	if a.toolChoice != "" {
 		generateOpts = append(generateOpts, llm.WithToolChoice(a.toolChoice))

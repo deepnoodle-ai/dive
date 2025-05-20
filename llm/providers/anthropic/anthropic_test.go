@@ -3,11 +3,11 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/schema"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +15,7 @@ func TestHelloWorld(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 	response, err := provider.Generate(ctx, []*llm.Message{
-		llm.NewUserMessage("respond with \"hello\""),
+		llm.NewUserTextMessage("respond with \"hello\""),
 	})
 	require.NoError(t, err)
 	require.Equal(t, "hello", response.Message().Text())
@@ -25,7 +25,7 @@ func TestStreamCountTo10(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 	iterator, err := provider.Stream(ctx, []*llm.Message{
-		llm.NewUserMessage("count to 10. respond with the integers only, separated by spaces."),
+		llm.NewUserTextMessage("count to 10. respond with the integers only, separated by spaces."),
 	})
 	require.NoError(t, err)
 	defer iterator.Close()
@@ -49,29 +49,21 @@ func TestStreamCountTo10(t *testing.T) {
 	require.Equal(t, expectedOutput, normalizedText)
 }
 
-func addFunc(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var params map[string]interface{}
-	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
-		return nil, err
-	}
-	return llm.NewToolCallOutput(fmt.Sprintf("%d", params["a"].(int)+params["b"].(int))), nil
-}
-
 func TestToolUse(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
 	messages := []*llm.Message{
-		llm.NewUserMessage("add 567 and 111"),
+		llm.NewUserTextMessage("add 567 and 111"),
 	}
 
-	add := llm.NewFunctionTool(addFunc).
+	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(llm.Schema{
+		WithSchema(schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
-			Properties: map[string]*llm.SchemaProperty{
+			Properties: map[string]*schema.Property{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
@@ -86,9 +78,12 @@ func TestToolUse(t *testing.T) {
 
 	require.Equal(t, 1, len(response.Message().Content))
 	content := response.Message().Content[0]
-	require.Equal(t, llm.ContentTypeToolUse, content.Type)
-	require.Equal(t, "add", content.Name)
-	require.Equal(t, `{"a":567,"b":111}`, string(content.Input))
+	require.Equal(t, llm.ContentTypeToolUse, content.Type())
+
+	toolUse, ok := content.(*llm.ToolUseContent)
+	require.True(t, ok)
+	require.Equal(t, "add", toolUse.Name)
+	require.Equal(t, `{"a":567,"b":111}`, string(toolUse.Input))
 }
 
 func TestToolCallStream(t *testing.T) {
@@ -97,15 +92,13 @@ func TestToolCallStream(t *testing.T) {
 	provider := New()
 
 	// Define a simple calculator tool
-	calculatorTool := llm.NewFunctionTool(func(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-		return llm.NewToolCallOutput("4"), nil // Mock result
-	}).
+	calculatorTool := llm.NewToolDefinition().
 		WithName("calculator").
 		WithDescription("Perform a calculation").
-		WithSchema(llm.Schema{
+		WithSchema(schema.Schema{
 			Type:     "object",
 			Required: []string{"operation", "a", "b"},
-			Properties: map[string]*llm.SchemaProperty{
+			Properties: map[string]*schema.Property{
 				"operation": {
 					Type:        "string",
 					Description: "The operation to perform",
@@ -123,7 +116,7 @@ func TestToolCallStream(t *testing.T) {
 		})
 
 	iterator, err := provider.Stream(ctx,
-		[]*llm.Message{llm.NewUserMessage("What is 2+2?")},
+		[]*llm.Message{llm.NewUserTextMessage("What is 2+2?")},
 		llm.WithTools(calculatorTool))
 
 	require.NoError(t, err)

@@ -3,16 +3,16 @@ package toolkit
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/schema"
 )
 
-var _ llm.ToolWithMetadata = &FileReadTool{}
+var _ dive.TypedTool[*FileReadInput] = &FileReadTool{}
 
 const DefaultFileReadMaxSize = 1024 * 200 // 200KB
 
@@ -49,11 +49,11 @@ func (t *FileReadTool) Description() string {
 	return "A tool that reads the content of a file. To use this tool, provide a 'path' parameter with the path to the file you want to read."
 }
 
-func (t *FileReadTool) Schema() llm.Schema {
-	return llm.Schema{
+func (t *FileReadTool) Schema() schema.Schema {
+	return schema.Schema{
 		Type:     "object",
 		Required: []string{"path"},
-		Properties: map[string]*llm.SchemaProperty{
+		Properties: map[string]*schema.Property{
 			"path": {
 				Type:        "string",
 				Description: "Path to the file to be read",
@@ -89,41 +89,37 @@ func (t *FileReadTool) resolvePath(path string) (string, error) {
 	return resolvedPath, nil
 }
 
-func (t *FileReadTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var params FileReadInput
-	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
-		return nil, err
-	}
-	filePath := params.Path
+func (t *FileReadTool) Call(ctx context.Context, input *FileReadInput) (*dive.ToolResult, error) {
+	filePath := input.Path
 	if filePath == "" {
-		return llm.NewToolCallOutput("Error: No file path provided."), nil
+		return NewToolResultError("Error: No file path provided."), nil
 	}
 	resolvedPath, err := t.resolvePath(filePath)
 	if err != nil {
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: %s", err.Error())), nil
+		return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 	}
 	fileInfo, err := os.Stat(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return llm.NewToolCallOutput(fmt.Sprintf("Error: File not found at path: %s", filePath)), nil
+			return NewToolResultError(fmt.Sprintf("Error: File not found at path: %s", filePath)), nil
 		} else if os.IsPermission(err) {
-			return llm.NewToolCallOutput(fmt.Sprintf("Error: Permission denied when trying to access file: %s", filePath)), nil
+			return NewToolResultError(fmt.Sprintf("Error: Permission denied when trying to access file: %s", filePath)), nil
 		}
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to access file %s. %s", filePath, err.Error())), nil
+		return NewToolResultError(fmt.Sprintf("Error: Failed to access file %s. %s", filePath, err.Error())), nil
 	}
 	if fileInfo.Size() > int64(t.maxSize) {
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: File %s is too large (%d bytes). Maximum allowed size is %d bytes.",
+		return NewToolResultError(fmt.Sprintf("Error: File %s is too large (%d bytes). Maximum allowed size is %d bytes.",
 			filePath, fileInfo.Size(), t.maxSize)), nil
 	}
 	content, err := os.ReadFile(resolvedPath)
 	if err != nil {
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to read file %s. %s", filePath, err.Error())), nil
+		return NewToolResultError(fmt.Sprintf("Error: Failed to read file %s. %s", filePath, err.Error())), nil
 	}
 	if isBinaryContent(content) {
-		return llm.NewToolCallOutput(fmt.Sprintf("Warning: File %s appears to be a binary file. The content may not display correctly:\n\n%s",
+		return NewToolResultError(fmt.Sprintf("Warning: File %s appears to be a binary file. The content may not display correctly:\n\n%s",
 			filePath, string(content))), nil
 	}
-	return llm.NewToolCallOutput(string(content)), nil
+	return NewToolResultText(string(content)), nil
 }
 
 // isBinaryContent attempts to determine if the content is binary by checking for null bytes
@@ -154,9 +150,12 @@ func isBinaryContent(content []byte) bool {
 	return controlCount > sampleSize/10
 }
 
-func (t *FileReadTool) Metadata() llm.ToolMetadata {
-	return llm.ToolMetadata{
-		Version:    "0.0.1",
-		Capability: llm.ToolCapabilityReadOnly,
+func (t *FileReadTool) Annotations() dive.ToolAnnotations {
+	return dive.ToolAnnotations{
+		Title:           "File Read",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  true,
+		OpenWorldHint:   false,
 	}
 }

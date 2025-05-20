@@ -3,13 +3,18 @@ package toolkit
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/schema"
 	"github.com/diveagents/dive/web"
 )
 
-var _ llm.ToolWithMetadata = &SearchTool{}
+var _ dive.TypedTool[*SearchInput] = &SearchTool{}
+
+type SearchInput struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit"`
+}
 
 type SearchTool struct {
 	searcher web.Searcher
@@ -27,11 +32,11 @@ func (t *SearchTool) Description() string {
 	return "Searches the web using the given query. The response includes the url, title, and description of each webpage in the search results."
 }
 
-func (t *SearchTool) Schema() llm.Schema {
-	return llm.Schema{
+func (t *SearchTool) Schema() schema.Schema {
+	return schema.Schema{
 		Type:     "object",
 		Required: []string{"query"},
-		Properties: map[string]*llm.SchemaProperty{
+		Properties: map[string]*schema.Property{
 			"query": {
 				Type:        "string",
 				Description: "The search query, e.g. 'cloud security companies'",
@@ -44,11 +49,7 @@ func (t *SearchTool) Schema() llm.Schema {
 	}
 }
 
-func (t *SearchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var s web.SearchInput
-	if err := json.Unmarshal([]byte(input.Input), &s); err != nil {
-		return nil, err
-	}
+func (t *SearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolResult, error) {
 	limit := 10
 	if limit <= 0 {
 		limit = 10
@@ -56,12 +57,15 @@ func (t *SearchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.T
 	if limit > 30 {
 		limit = 30
 	}
-	results, err := t.searcher.Search(ctx, &s)
+	results, err := t.searcher.Search(ctx, &web.SearchInput{
+		Query: input.Query,
+		Limit: limit,
+	})
 	if err != nil {
 		return nil, err
 	}
 	if len(results.Items) == 0 {
-		return llm.NewToolCallOutput("No search results found"), nil
+		return NewToolResultError("No search results found"), nil
 	}
 	if len(results.Items) > limit {
 		results.Items = results.Items[:limit]
@@ -70,14 +74,15 @@ func (t *SearchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.T
 	if err != nil {
 		return nil, err
 	}
-	return llm.NewToolCallOutput(string(data)).
-		WithSummary(fmt.Sprintf("Searched the web for %s and found %d results",
-			s.Query, len(results.Items))), nil
+	return NewToolResultText(string(data)), nil
 }
 
-func (t *SearchTool) Metadata() llm.ToolMetadata {
-	return llm.ToolMetadata{
-		Version:    "0.0.1",
-		Capability: llm.ToolCapabilityReadOnly,
+func (t *SearchTool) Annotations() dive.ToolAnnotations {
+	return dive.ToolAnnotations{
+		Title:           "Search",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  true,
+		OpenWorldHint:   true,
 	}
 }

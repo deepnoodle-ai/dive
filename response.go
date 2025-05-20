@@ -10,9 +10,9 @@ import (
 type ResponseItemType string
 
 const (
-	ResponseItemTypeMessage    ResponseItemType = "message"
-	ResponseItemTypeToolCall   ResponseItemType = "tool_call"
-	ResponseItemTypeToolResult ResponseItemType = "tool_result"
+	ResponseItemTypeMessage        ResponseItemType = "message"
+	ResponseItemTypeToolCall       ResponseItemType = "tool_call"
+	ResponseItemTypeToolCallResult ResponseItemType = "tool_call_result"
 )
 
 // ResponseItem contains either a message, tool call, or tool result. Multiple
@@ -30,8 +30,8 @@ type ResponseItem struct {
 	// ToolCall is set if the response item is a tool call
 	ToolCall *llm.ToolCall `json:"tool_call,omitempty"`
 
-	// ToolResult is set if the response item is a tool result
-	ToolResult *llm.ToolResult `json:"tool_result,omitempty"`
+	// ToolCallResult is set if the response item is a tool call result
+	ToolCallResult *ToolCallResult `json:"tool_call_result,omitempty"`
 
 	// Usage contains token usage information, if applicable
 	Usage *llm.Usage `json:"usage,omitempty"`
@@ -77,8 +77,8 @@ func (r *Response) OutputText() string {
 	// Find the last text content
 	for i := len(lastMessage.Content) - 1; i >= 0; i-- {
 		content := lastMessage.Content[i]
-		if content.Type == llm.ContentTypeText {
-			return content.Text
+		if textContent, ok := content.(*llm.AssistantTextContent); ok {
+			return textContent.Text
 		}
 	}
 
@@ -86,8 +86,8 @@ func (r *Response) OutputText() string {
 }
 
 // ToolResults returns all tool results from the response.
-func (r *Response) ToolResults() []*llm.ToolResult {
-	var results []*llm.ToolResult
+func (r *Response) ToolResults() []*ToolResult {
+	var results []*ToolResult
 	for _, item := range r.Items {
 		if item.Type == ResponseItemTypeToolResult {
 			results = append(results, item.ToolResult)

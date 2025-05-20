@@ -27,15 +27,10 @@ func TestAgentChat(t *testing.T) {
 	mockLLM := &mockLLM{
 		generateFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
 			return &llm.Response{
-				ID:    "resp_mock",
-				Model: "test-model",
-				Role:  llm.Assistant,
-				Content: []*llm.Content{
-					{
-						Type: llm.ContentTypeText,
-						Text: "Hello there! How can I help you today?",
-					},
-				},
+				ID:         "resp_mock",
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Hello there! How can I help you today?"}},
 				Type:       "message",
 				StopReason: "stop",
 				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
@@ -144,12 +139,10 @@ func TestAgentCreateResponse(t *testing.T) {
 	mockLLM := &mockLLM{
 		generateFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
 			return &llm.Response{
-				ID:    "resp_123",
-				Model: "test-model", // This is the model name that will be used
-				Role:  llm.Assistant,
-				Content: []*llm.Content{
-					{Type: llm.ContentTypeText, Text: "This is a test response"},
-				},
+				ID:         "resp_123",
+				Model:      "test-model", // This is the model name that will be used
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "This is a test response"}},
 				Type:       "message",
 				StopReason: "stop",
 				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
@@ -215,7 +208,7 @@ func TestAgentCreateResponse(t *testing.T) {
 	t.Run("CreateResponse with messages", func(t *testing.T) {
 		// Test with explicit messages
 		messages := []*llm.Message{
-			llm.NewUserMessage("Here's a more complex message"),
+			llm.NewUserTextMessage("Here's a more complex message"),
 		}
 
 		resp, err := agent.CreateResponse(context.Background(), dive.WithMessages(messages))

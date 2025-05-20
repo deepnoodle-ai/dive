@@ -2,17 +2,16 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/schema"
 )
 
-var _ llm.Tool = &AssignWorkTool{}
+var _ dive.TypedTool[*AssignWorkToolInput] = &AssignWorkTool{}
 
 // AssignWorkToolInput is the input for the AssignWorkTool.
 type AssignWorkToolInput struct {
@@ -64,8 +63,8 @@ func (t *AssignWorkTool) Description() string {
 	return AssignWorkToolDescription
 }
 
-func (t *AssignWorkTool) Schema() llm.Schema {
-	return llm.Schema{
+func (t *AssignWorkTool) Schema() schema.Schema {
+	return schema.Schema{
 		Type: "object",
 		Required: []string{
 			"agent",
@@ -73,7 +72,7 @@ func (t *AssignWorkTool) Schema() llm.Schema {
 			"description",
 			"expected_output",
 		},
-		Properties: map[string]*llm.SchemaProperty{
+		Properties: map[string]*schema.Property{
 			"agent": {
 				Type:        "string",
 				Description: "The name of the agent that should do the work.",
@@ -102,51 +101,59 @@ func (t *AssignWorkTool) Schema() llm.Schema {
 	}
 }
 
-func (t *AssignWorkTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var params AssignWorkToolInput
-	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
-		return nil, err
+func (t *AssignWorkTool) Annotations() dive.ToolAnnotations {
+	// This tool may indirectly be destructive or non-read-only, however this
+	// action itself is not. Downstream tool calls will need to be checked for
+	// safety.
+	return dive.ToolAnnotations{
+		Title:           "Assign Work",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  false,
+		OpenWorldHint:   false,
 	}
+}
 
-	if params.AgentName == "" {
-		return nil, fmt.Errorf("agent name is required")
+func (t *AssignWorkTool) Call(ctx context.Context, input *AssignWorkToolInput) (*dive.ToolResult, error) {
+	if input.AgentName == "" {
+		return dive.NewToolResultError("agent name is required"), nil
 	}
-	if params.Name == "" {
-		return nil, fmt.Errorf("name is required")
+	if input.Name == "" {
+		return dive.NewToolResultError("name is required"), nil
 	}
-	if params.Description == "" {
-		return nil, fmt.Errorf("description is required")
+	if input.Description == "" {
+		return dive.NewToolResultError("description is required"), nil
 	}
-	if params.ExpectedOutput == "" {
-		return nil, fmt.Errorf("expected output is required")
+	if input.ExpectedOutput == "" {
+		return dive.NewToolResultError("expected output is required"), nil
 	}
-	if params.AgentName == t.self.Name() {
-		return nil, fmt.Errorf("cannot delegate task to self")
+	if input.AgentName == t.self.Name() {
+		return dive.NewToolResultError("cannot delegate task to self"), nil
 	}
-	agent, err := t.self.environment.GetAgent(params.AgentName)
+	agent, err := t.self.environment.GetAgent(input.AgentName)
 	if err != nil {
-		return nil, fmt.Errorf("I couldn't find an agent named %q", params.AgentName)
+		return dive.NewToolResultError(fmt.Sprintf("I couldn't find an agent named %q", input.AgentName)), nil
 	}
 
-	outputFormat := dive.OutputFormat(params.OutputFormat)
+	outputFormat := dive.OutputFormat(input.OutputFormat)
 	if outputFormat == "" {
 		outputFormat = dive.OutputFormatMarkdown
 	}
 
 	var promptLines []string
-	if params.Context != "" {
+	if input.Context != "" {
 		promptLines = append(promptLines, "Context:")
-		promptLines = append(promptLines, fmt.Sprintf("<context>\n%s\n</context>", params.Context))
+		promptLines = append(promptLines, fmt.Sprintf("<context>\n%s\n</context>", input.Context))
 	}
-	if params.Description != "" {
+	if input.Description != "" {
 		promptLines = append(promptLines, "Please complete the following task:")
-		promptLines = append(promptLines, fmt.Sprintf("<task>\n%s\n</task>", params.Description))
+		promptLines = append(promptLines, fmt.Sprintf("<task>\n%s\n</task>", input.Description))
 	}
-	if params.ExpectedOutput != "" {
-		promptLines = append(promptLines, "Expected output: "+params.ExpectedOutput)
+	if input.ExpectedOutput != "" {
+		promptLines = append(promptLines, "Expected output: "+input.ExpectedOutput)
 	}
-	if params.OutputFormat != "" {
-		promptLines = append(promptLines, "Desired output format: "+params.OutputFormat)
+	if input.OutputFormat != "" {
+		promptLines = append(promptLines, "Desired output format: "+input.OutputFormat)
 	}
 	promptLines = append(promptLines, "Please work on the task now and respond with the requested output only.")
 
@@ -166,9 +173,7 @@ func (t *AssignWorkTool) Call(ctx context.Context, input *llm.ToolCallInput) (*l
 		if event.Type == dive.EventTypeResponseCompleted {
 			for _, item := range event.Response.Items {
 				if item.Type == dive.ResponseItemTypeMessage {
-					return &llm.ToolCallOutput{
-						Output: item.Message.Text(),
-					}, nil
+					return dive.NewToolResultText(item.Message.Text()), nil
 				}
 			}
 		}

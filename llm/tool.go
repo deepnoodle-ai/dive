@@ -1,36 +1,14 @@
 package llm
 
 import (
-	"context"
-	"time"
+	"github.com/diveagents/dive/schema"
 )
 
-// ToolResult contains the input and output of a tool call
+// ToolResult contains the result of a tool call
 type ToolResult struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Input       string     `json:"input,omitempty"`
-	Output      string     `json:"output,omitempty"`
-	Error       error      `json:"error,omitempty"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-}
-
-// Schema describes the structure of the parameters used to call a tool.
-type Schema struct {
-	Type       string                     `json:"type"`
-	Properties map[string]*SchemaProperty `json:"properties"`
-	Required   []string                   `json:"required,omitempty"`
-}
-
-// SchemaProperty describes a property of a schema.
-type SchemaProperty struct {
-	Type        string                     `json:"type"`
-	Description string                     `json:"description"`
-	Enum        []string                   `json:"enum,omitempty"`
-	Items       *SchemaProperty            `json:"items,omitempty"`
-	Required    []string                   `json:"required,omitempty"`
-	Properties  map[string]*SchemaProperty `json:"properties,omitempty"`
+	ToolUseID string `json:"tool_use_id"`
+	Output    string `json:"output,omitempty"`
+	Error     error  `json:"error,omitempty"`
 }
 
 // ToolChoice influences the behavior of the LLM when choosing which tool to use.
@@ -51,25 +29,7 @@ const (
 	ToolChoiceTool ToolChoice = "tool"
 )
 
-// ToolCallInput is the input for a tool call.
-type ToolCallInput struct {
-	Input     string
-	Confirmer Confirmer
-}
-
-// ToolCallOutput is the output from a tool call.
-type ToolCallOutput struct {
-	Output  string
-	Summary string
-}
-
-// WithSummary sets the summary of the ToolCallOutput.
-func (o *ToolCallOutput) WithSummary(summary string) *ToolCallOutput {
-	o.Summary = summary
-	return o
-}
-
-// Tool is an interface for a tool that can be called by an LLM.
+// Tool is an interface that defines a tool that can be called by an LLM.
 type Tool interface {
 	// Name of the tool.
 	Name() string
@@ -78,34 +38,53 @@ type Tool interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() Schema
-
-	// Call is the function that is called to use the tool.
-	Call(ctx context.Context, input *ToolCallInput) (*ToolCallOutput, error)
+	Schema() schema.Schema
 }
 
-// ToolCapability indicates whether a tool is read-only or not.
-type ToolCapability string
-
-const (
-	ToolCapabilityReadOnly  ToolCapability = "read-only"
-	ToolCapabilityReadWrite ToolCapability = "read-write"
-)
-
-// ToolMetadata is a struct that contains metadata about a tool.
-type ToolMetadata struct {
-	Version    string
-	Capability ToolCapability
+// NewToolDefinition creates a new ToolDefinition.
+func NewToolDefinition() *ToolDefinition {
+	return &ToolDefinition{}
 }
 
-func (m *ToolMetadata) IsReadOnly() bool {
-	return m.Capability == ToolCapabilityReadOnly
+// ToolDefinition is a concrete implementation of the Tool interface. Note this
+// does not provide a mechanism for calling the tool, but only for describing
+// what the tool does so the LLM can understand it. You might not use this
+// implementation if you use a full dive.Tool implementation in your app.
+type ToolDefinition struct {
+	name        string
+	description string
+	schema      schema.Schema
 }
 
-// ToolWithMetadata is an interface that extends the Tool interface with metadata.
-type ToolWithMetadata interface {
-	Tool
+// Name returns the name of the tool, per the Tool interface.
+func (t *ToolDefinition) Name() string {
+	return t.name
+}
 
-	// Metadata returns metadata about the tool.
-	Metadata() ToolMetadata
+// Description returns the description of the tool, per the Tool interface.
+func (t *ToolDefinition) Description() string {
+	return t.description
+}
+
+// Schema returns the schema of the tool, per the Tool interface.
+func (t *ToolDefinition) Schema() schema.Schema {
+	return t.schema
+}
+
+// WithName sets the name of the tool.
+func (t *ToolDefinition) WithName(name string) *ToolDefinition {
+	t.name = name
+	return t
+}
+
+// WithDescription sets the description of the tool.
+func (t *ToolDefinition) WithDescription(description string) *ToolDefinition {
+	t.description = description
+	return t
+}
+
+// WithSchema sets the schema of the tool.
+func (t *ToolDefinition) WithSchema(schema schema.Schema) *ToolDefinition {
+	t.schema = schema
+	return t
 }

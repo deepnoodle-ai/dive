@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/schema"
 	"github.com/gofrs/uuid/v5"
 )
 
@@ -18,12 +19,8 @@ const (
 
 // Type aliases for easy access to LLM types
 type (
-	ToolSchema          = llm.Schema
-	ToolCallInput       = llm.ToolCallInput
-	ToolCallOutput      = llm.ToolCallOutput
-	Tool                = llm.Tool
-	Confirmer           = llm.Confirmer
-	ConfirmationRequest = llm.ConfirmationRequest
+	Schema   = schema.Schema
+	Property = schema.Property
 )
 
 // Agent represents an intelligent AI entity that can autonomously execute tasks,

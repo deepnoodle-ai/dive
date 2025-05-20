@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
@@ -23,9 +23,9 @@ func convertToolConfig(config map[string]interface{}, options interface{}) error
 }
 
 // initializeTools initializes tools with custom configurations
-func initializeTools(tools []Tool) (map[string]llm.Tool, error) {
+func initializeTools(tools []Tool) (map[string]dive.Tool, error) {
 
-	toolsMap := make(map[string]llm.Tool)
+	toolsMap := make(map[string]dive.Tool)
 
 	configsByName := make(map[string]map[string]interface{})
 	for _, tool := range tools {

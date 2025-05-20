@@ -417,10 +417,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	if maxTokens > 0 {
-		switch req.Model {
-		case "o1-mini", "o3-mini", "o1":
+		if strings.HasPrefix(req.Model, "o") {
 			req.MaxCompletionTokens = &maxTokens
-		default:
+		} else {
 			req.MaxTokens = &maxTokens
 		}
 	}

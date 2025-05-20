@@ -30,7 +30,7 @@ func main() {
 	flag.StringVar(&prompt, "prompt", "Count to 5", "Prompt to send to the LLM")
 	flag.Parse()
 
-	messages := llm.Messages{llm.NewUserMessage(prompt)}
+	messages := llm.Messages{llm.NewUserTextMessage(prompt)}
 
 	fmt.Println("====")
 	fmt.Println("Anthropic")

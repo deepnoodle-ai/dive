@@ -2,17 +2,17 @@ package toolkit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/schema"
 )
 
-var _ llm.ToolWithMetadata = &FileWriteTool{}
+var _ dive.TypedTool[*FileWriteInput] = &FileWriteTool{}
 
 type FileWriteInput struct {
 	Path    string `json:"path"`
@@ -23,12 +23,14 @@ type FileWriteToolOptions struct {
 	AllowList     []string // Patterns of allowed paths
 	DenyList      []string // Patterns of denied paths
 	RootDirectory string   // If set, all paths will be relative to this directory
+	Confirmer     dive.Confirmer
 }
 
 type FileWriteTool struct {
 	allowList     []string // Patterns of allowed paths
 	denyList      []string // Patterns of denied paths
 	rootDirectory string   // If set, all paths will be relative to this directory
+	confirmer     dive.Confirmer
 }
 
 // NewFileWriteTool creates a new tool for writing content to files
@@ -37,6 +39,7 @@ func NewFileWriteTool(options FileWriteToolOptions) *FileWriteTool {
 		allowList:     options.AllowList,
 		denyList:      options.DenyList,
 		rootDirectory: options.RootDirectory,
+		confirmer:     options.Confirmer,
 	}
 }
 
@@ -128,11 +131,11 @@ func (t *FileWriteTool) Description() string {
 	return "A tool that writes content to a file. To use this tool, provide a 'path' parameter with the path to the file you want to write to, and a 'content' parameter with the content to write."
 }
 
-func (t *FileWriteTool) Schema() llm.Schema {
-	return llm.Schema{
+func (t *FileWriteTool) Schema() dive.Schema {
+	return dive.Schema{
 		Type:     "object",
 		Required: []string{"path", "content"},
-		Properties: map[string]*llm.SchemaProperty{
+		Properties: map[string]*schema.Property{
 			"path": {
 				Type:        "string",
 				Description: "Path to the file to be written",
@@ -145,40 +148,39 @@ func (t *FileWriteTool) Schema() llm.Schema {
 	}
 }
 
-func (t *FileWriteTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var params FileWriteInput
-	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
-		return nil, err
-	}
-	filePath := params.Path
+func (t *FileWriteTool) Call(ctx context.Context, input *FileWriteInput) (*dive.ToolResult, error) {
+	filePath := input.Path
 	if filePath == "" {
-		return llm.NewToolCallOutput("Error: No file path provided. Please provide a file path either in the constructor or as an argument."), nil
+		return dive.NewToolResultError("Error: No file path provided. Please provide a file path either in the constructor or as an argument."), nil
 	}
 	resolvedPath, err := t.resolvePath(filePath)
 	if err != nil {
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: %s", err.Error())), nil
+		return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 	}
 	allowed, reason := t.isPathAllowed(resolvedPath)
 	if !allowed {
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: Access denied. %s", reason)), nil
+		return dive.NewToolResultError(fmt.Sprintf("Error: Access denied. %s", reason)), nil
 	}
 	dir := filepath.Dir(resolvedPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to create directory structure for %s. %s", filePath, err.Error())), nil
+		return dive.NewToolResultError(fmt.Sprintf("Error: Failed to create directory structure for %s. %s", filePath, err.Error())), nil
 	}
-	err = os.WriteFile(resolvedPath, []byte(params.Content), 0644)
+	err = os.WriteFile(resolvedPath, []byte(input.Content), 0644)
 	if err != nil {
 		if os.IsPermission(err) {
-			return llm.NewToolCallOutput(fmt.Sprintf("Error: Permission denied when trying to write to file: %s", filePath)), nil
+			return dive.NewToolResultError(fmt.Sprintf("Error: Permission denied when trying to write to file: %s", filePath)), nil
 		}
-		return llm.NewToolCallOutput(fmt.Sprintf("Error: Failed to write to file %s. %s", filePath, err.Error())), nil
+		return dive.NewToolResultError(fmt.Sprintf("Error: Failed to write to file %s. %s", filePath, err.Error())), nil
 	}
-	return llm.NewToolCallOutput(fmt.Sprintf("Successfully wrote %d bytes to %s", len(params.Content), filePath)), nil
+	return dive.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(input.Content), filePath)), nil
 }
 
-func (t *FileWriteTool) Metadata() llm.ToolMetadata {
-	return llm.ToolMetadata{
-		Version:    "0.0.1",
-		Capability: llm.ToolCapabilityReadWrite,
+func (t *FileWriteTool) Annotations() dive.ToolAnnotations {
+	return dive.ToolAnnotations{
+		Title:           "File Write",
+		ReadOnlyHint:    false,
+		DestructiveHint: true,
+		IdempotentHint:  false,
+		OpenWorldHint:   false,
 	}
 }
