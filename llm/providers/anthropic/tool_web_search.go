@@ -5,7 +5,10 @@ import (
 	"github.com/diveagents/dive/schema"
 )
 
-var _ llm.Tool = &WebSearchTool{}
+var (
+	_ llm.Tool              = &WebSearchTool{}
+	_ llm.ToolConfiguration = &WebSearchTool{}
+)
 
 /* A tool definition must be added in the request that looks like this:
    "tools": [{
@@ -38,7 +41,7 @@ func NewWebSearchTool(opts WebSearchToolOptions) *WebSearchTool {
 	if opts.Type == "" {
 		opts.Type = "web_search_20250305"
 	}
-	if opts.MaxUses == 0 {
+	if opts.MaxUses <= 0 {
 		opts.MaxUses = 5
 	}
 	return &WebSearchTool{
@@ -73,4 +76,22 @@ func (t *WebSearchTool) Description() string {
 
 func (t *WebSearchTool) Schema() schema.Schema {
 	return schema.Schema{} // Empty for server-side tools
+}
+
+func (t *WebSearchTool) ToolConfiguration(providerName string) map[string]any {
+	config := map[string]any{
+		"type":     t.typeString,
+		"name":     t.name,
+		"max_uses": t.maxUses,
+	}
+	if t.allowedDomains != nil {
+		config["allowed_domains"] = t.allowedDomains
+	}
+	if t.blockedDomains != nil {
+		config["blocked_domains"] = t.blockedDomains
+	}
+	if t.userLocation != nil {
+		config["user_location"] = t.userLocation
+	}
+	return config
 }

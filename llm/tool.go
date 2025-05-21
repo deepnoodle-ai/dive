@@ -41,6 +41,15 @@ type Tool interface {
 	Schema() schema.Schema
 }
 
+// ToolConfiguration is an interface that may be implemented by a Tool to
+// provide explicit JSON configuration to pass to the LLM provider.
+type ToolConfiguration interface {
+
+	// ToolConfiguration returns a map of configuration for the tool, when used
+	// with the given provider.
+	ToolConfiguration(providerName string) map[string]any
+}
+
 // NewToolDefinition creates a new ToolDefinition.
 func NewToolDefinition() *ToolDefinition {
 	return &ToolDefinition{}

@@ -5,7 +5,10 @@ import (
 	"github.com/diveagents/dive/schema"
 )
 
-var _ llm.Tool = &ComputerTool{}
+var (
+	_ llm.Tool              = &ComputerTool{}
+	_ llm.ToolConfiguration = &ComputerTool{}
+)
 
 // computer_20241022 - Claude 3.5 Sonnet
 // computer_20250124 - Claude 3.7 Sonnet
@@ -62,4 +65,14 @@ func (t *ComputerTool) Description() string {
 
 func (t *ComputerTool) Schema() schema.Schema {
 	return schema.Schema{} // Empty for server-side tools
+}
+
+func (t *ComputerTool) ToolConfiguration(providerName string) map[string]any {
+	return map[string]any{
+		"type":              t.typeString,
+		"name":              t.name,
+		"display_width_px":  t.displayWidthPx,
+		"display_height_px": t.displayHeightPx,
+		"display_number":    t.displayNumber,
+	}
 }

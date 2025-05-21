@@ -334,11 +334,22 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	if len(config.Tools) > 0 {
 		var tools []map[string]any
 		for _, tool := range config.Tools {
-			tools = append(tools, map[string]any{
-				"name":         tool.Name(),
-				"description":  tool.Description(),
-				"input_schema": tool.Schema(),
-			})
+			// Handle tools that explicitly provide a configuration
+			if toolWithConfig, ok := tool.(llm.ToolConfiguration); ok {
+				toolConfig := toolWithConfig.ToolConfiguration(p.Name())
+				tools = append(tools, toolConfig)
+				continue
+			}
+			// Handle tools with the default configuration behavior
+			schema := tool.Schema()
+			toolConfig := map[string]any{
+				"name":        tool.Name(),
+				"description": tool.Description(),
+			}
+			if schema.Type != "" {
+				toolConfig["input_schema"] = schema
+			}
+			tools = append(tools, toolConfig)
 		}
 		req.Tools = tools
 	}
