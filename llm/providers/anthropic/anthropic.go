@@ -70,20 +70,6 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
-	if config.Caching == nil || *config.Caching {
-		// lastMessage := msgs[len(msgs)-1]
-		// if len(lastMessage.Content) > 0 {
-		// 	lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-		// 	lastContent.CacheControl = &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}
-		// }
-		// Remove cache control from prior messages if present
-		// for i := 0; i < len(msgs)-1; i++ {
-		// 	message := msgs[i]
-		// 	for _, content := range message.Content {
-		// 		content.CacheControl = nil
-		// 	}
-		// }
-	}
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
@@ -93,8 +79,6 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
-
-	fmt.Printf("request body: %s\n", string(body))
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
@@ -196,20 +180,6 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
-	}
-	if config.Caching == nil || *config.Caching {
-		// lastMessage := msgs[len(msgs)-1]
-		// if len(lastMessage.Content) > 0 {
-		// 	lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-		// 	lastContent.CacheControl = &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}
-		// }
-		// Remove cache control from prior messages if present
-		// for i := 0; i < len(msgs)-1; i++ {
-		// 	message := msgs[i]
-		// 	for _, content := range message.Content {
-		// 		content.CacheControl = nil
-		// 	}
-		// }
 	}
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))

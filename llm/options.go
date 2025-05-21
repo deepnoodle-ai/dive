@@ -26,7 +26,6 @@ type Option func(*Config)
 type Config struct {
 	Model             string         `json:"model,omitempty"`
 	SystemPrompt      string         `json:"system_prompt,omitempty"`
-	Caching           *bool          `json:"caching,omitempty"`
 	Endpoint          string         `json:"endpoint,omitempty"`
 	APIKey            string         `json:"api_key,omitempty"`
 	Prefill           string         `json:"prefill,omitempty"`
@@ -151,13 +150,6 @@ func WithToolChoiceName(toolChoiceName string) Option {
 func WithParallelToolCalls(parallelToolCalls bool) Option {
 	return func(config *Config) {
 		config.ParallelToolCalls = &parallelToolCalls
-	}
-}
-
-// WithCaching sets the caching for the interaction.
-func WithCaching(caching bool) Option {
-	return func(config *Config) {
-		config.Caching = &caching
 	}
 }
 

@@ -52,7 +52,6 @@ type Options struct {
 	Tools                []dive.Tool
 	ToolChoice           llm.ToolChoice
 	ResponseTimeout      time.Duration
-	Caching              *bool
 	Hooks                llm.Hooks
 	Logger               slogger.Logger
 	ToolIterationLimit   int
@@ -77,7 +76,6 @@ type Agent struct {
 	isSupervisor         bool
 	subordinates         []string
 	responseTimeout      time.Duration
-	caching              *bool
 	hooks                llm.Hooks
 	logger               slogger.Logger
 	toolIterationLimit   int
@@ -130,7 +128,6 @@ func New(opts Options) (*Agent, error) {
 		subordinates:         opts.Subordinates,
 		responseTimeout:      opts.ResponseTimeout,
 		toolIterationLimit:   opts.ToolIterationLimit,
-		caching:              opts.Caching,
 		hooks:                opts.Hooks,
 		logger:               opts.Logger,
 		dateAwareness:        opts.DateAwareness,
@@ -709,12 +706,6 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 	}
 	if a.logger != nil {
 		generateOpts = append(generateOpts, llm.WithLogger(a.logger))
-	}
-	if a.caching != nil {
-		generateOpts = append(generateOpts, llm.WithCaching(*a.caching))
-	} else {
-		// Caching defaults to on
-		generateOpts = append(generateOpts, llm.WithCaching(true))
 	}
 	if a.modelSettings != nil {
 		settings := a.modelSettings
