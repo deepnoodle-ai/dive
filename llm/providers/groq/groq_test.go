@@ -14,7 +14,7 @@ func TestHelloWorld(t *testing.T) {
 	provider := New()
 
 	message := llm.NewUserTextMessage("respond with \"hello\"")
-	response, err := provider.Generate(ctx, llm.WithMessage(message))
+	response, err := provider.Generate(ctx, llm.WithMessages(message))
 	require.NoError(t, err)
 
 	text := strings.ToLower(response.Message().Text())

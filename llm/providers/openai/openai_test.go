@@ -13,7 +13,7 @@ import (
 func TestHelloWorld(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	response, err := provider.Generate(ctx, llm.WithMessage(
+	response, err := provider.Generate(ctx, llm.WithMessages(
 		llm.NewUserTextMessage("respond with \"hello\""),
 	))
 	require.NoError(t, err)
@@ -24,7 +24,7 @@ func TestHelloWorld(t *testing.T) {
 func TestHelloWorldStream(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	iterator, err := provider.Stream(ctx, llm.WithMessage(
+	iterator, err := provider.Stream(ctx, llm.WithMessages(
 		llm.NewUserTextMessage("count to 10. respond with the integers only, separated by spaces."),
 	))
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestToolUse(t *testing.T) {
 		})
 
 	response, err := provider.Generate(ctx,
-		llm.WithMessage(llm.NewUserTextMessage("add 567 and 111")),
+		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
@@ -98,7 +98,7 @@ func TestMultipleToolUse(t *testing.T) {
 		})
 
 	response, err := provider.Generate(ctx,
-		llm.WithMessage(llm.NewUserTextMessage("Calculate two results for me: add 567 and 111, and add 233 and 444")),
+		llm.WithMessages(llm.NewUserTextMessage("Calculate two results for me: add 567 and 111, and add 233 and 444")),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
@@ -143,7 +143,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	message := llm.NewUserTextMessage("Calculate two results for me: add 567 and 111, and add 233 and 444")
 
 	iterator, err := provider.Stream(ctx,
-		llm.WithMessage(message),
+		llm.WithMessages(message),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
@@ -202,7 +202,7 @@ func TestToolUseStream(t *testing.T) {
 		})
 
 	iterator, err := provider.Stream(ctx,
-		llm.WithMessage(llm.NewUserTextMessage("add 567 and 111")),
+		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)

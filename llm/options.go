@@ -221,16 +221,9 @@ func WithFeatures(features ...string) Option {
 }
 
 // WithMessages sets the messages for the interaction.
-func WithMessages(messages Messages) Option {
+func WithMessages(messages ...*Message) Option {
 	return func(config *Config) {
 		config.Messages = messages
-	}
-}
-
-// WithMessage sets a single message for the interaction.
-func WithMessage(message *Message) Option {
-	return func(config *Config) {
-		config.Messages = Messages{message}
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/slogger"
 )
 
 func main() {
@@ -17,12 +16,9 @@ func main() {
 	flag.StringVar(&url, "url", "https://pdfa.org/norm-refs/warnock_camelot.pdf", "url to use")
 	flag.Parse()
 
-	logger := slogger.New(slogger.LevelDebug)
-
 	response, err := anthropic.New().Generate(
 		context.Background(),
-		llm.WithLogger(logger),
-		llm.WithMessages(llm.Messages{
+		llm.WithMessages(
 			llm.NewUserTextMessage(prompt),
 			llm.NewUserMessage(
 				&llm.DocumentContent{
@@ -36,7 +32,7 @@ func main() {
 					},
 				},
 			),
-		}),
+		),
 	)
 	if err != nil {
 		log.Fatal(err)

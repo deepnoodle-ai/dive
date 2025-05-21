@@ -26,6 +26,7 @@ type ContentSourceType string
 const (
 	ContentSourceTypeBase64 ContentSourceType = "base64"
 	ContentSourceTypeURL    ContentSourceType = "url"
+	ContentSourceTypeText   ContentSourceType = "text"
 )
 
 func (c ContentSourceType) String() string {
@@ -36,13 +37,6 @@ func (c ContentSourceType) String() string {
 type CacheControl struct {
 	Type CacheControlType `json:"type"`
 }
-
-// ToolCall is a call made by an LLM
-// type ToolCall struct {
-// 	ID    string `json:"id"`
-// 	Name  string `json:"name"`
-// 	Input string `json:"input"`
-// }
 
 // ContentChunk is used to pass pre-chunked document content to the LLM. These
 // should only be used within a DocumentContent block.
@@ -97,6 +91,19 @@ type Content interface {
     }
   ]
 }
+
+{
+  "type": "text",
+  "text": "the grass is green",
+  "citations": [{
+    "type": "char_location",
+    "cited_text": "The grass is green.",
+    "document_index": 0,
+    "document_title": "Example Document",
+    "start_char_index": 0,
+    "end_char_index": 20
+  }]
+}
 */
 
 type TextContent struct {
@@ -110,13 +117,35 @@ func (c *TextContent) Type() ContentType {
 }
 
 func (c *TextContent) MarshalJSON() ([]byte, error) {
-	type Alias TextContent
+	// Create a struct with Citations as json.RawMessage to handle custom marshaling
+	type TextWithRawCitations struct {
+		Text         string          `json:"text"`
+		CacheControl *CacheControl   `json:"cache_control,omitempty"`
+		Citations    json.RawMessage `json:"citations,omitempty"`
+	}
+
+	// Start with base fields
+	twc := TextWithRawCitations{
+		Text:         c.Text,
+		CacheControl: c.CacheControl,
+	}
+
+	// Marshal Citations if present
+	if len(c.Citations) > 0 {
+		citationsJSON, err := json.Marshal(c.Citations)
+		if err != nil {
+			return nil, err
+		}
+		twc.Citations = citationsJSON
+	}
+
+	// Marshal with type field
 	return json.Marshal(struct {
 		Type ContentType `json:"type"`
-		*Alias
+		TextWithRawCitations
 	}{
-		Type:  ContentTypeText,
-		Alias: (*Alias)(c),
+		Type:                 ContentTypeText,
+		TextWithRawCitations: twc,
 	})
 }
 
@@ -290,9 +319,10 @@ func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
 */
 
 type ToolResultContent struct {
-	ToolUseID string `json:"tool_use_id"`
-	Content   any    `json:"content"`
-	IsError   bool   `json:"is_error,omitempty"`
+	ToolUseID    string        `json:"tool_use_id"`
+	Content      any           `json:"content"`
+	IsError      bool          `json:"is_error,omitempty"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 func (c *ToolResultContent) Type() ContentType {
@@ -487,7 +517,28 @@ func UnmarshalContent(data []byte) (Content, error) {
 	var content Content
 	switch ct.Type {
 	case ContentTypeText:
-		content = &TextContent{}
+		text := &TextContent{}
+		type textContent struct {
+			Text         string          `json:"text"`
+			CacheControl *CacheControl   `json:"cache_control"`
+			Citations    json.RawMessage `json:"citations"`
+		}
+		var tc textContent
+		if err := json.Unmarshal(data, &tc); err != nil {
+			return nil, err
+		}
+		text.Text = tc.Text
+		if tc.CacheControl != nil {
+			text.CacheControl = tc.CacheControl
+		}
+		if tc.Citations != nil {
+			citations, err := unmarshalCitations(tc.Citations)
+			if err != nil {
+				return nil, err
+			}
+			text.Citations = citations
+		}
+		return text, nil
 	case ContentTypeImage:
 		content = &ImageContent{}
 	case ContentTypeDocument:

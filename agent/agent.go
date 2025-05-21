@@ -523,7 +523,7 @@ func (a *Agent) generate(
 	generationLimit := a.toolIterationLimit + 1
 	for i := range generationLimit {
 		// Generate a response in either streaming or non-streaming mode
-		generateOpts = append(generateOpts, llm.WithMessages(updatedMessages))
+		generateOpts = append(generateOpts, llm.WithMessages(updatedMessages...))
 		var err error
 		var response *llm.Response
 		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {

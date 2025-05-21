@@ -53,7 +53,7 @@ func stream(model llm.StreamingLLM, messages llm.Messages) {
 
 	stream, err := model.Stream(
 		context.Background(),
-		llm.WithMessages(messages),
+		llm.WithMessages(messages...),
 		llm.WithTools(modelTools...),
 		llm.WithTemperature(0.1),
 		llm.WithSystemPrompt("You are a helpful assistant."),
