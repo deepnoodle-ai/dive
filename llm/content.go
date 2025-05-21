@@ -1,6 +1,9 @@
 package llm
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // ContentType indicates the type of a content block in a message
 type ContentType string
@@ -35,11 +38,11 @@ type CacheControl struct {
 }
 
 // ToolCall is a call made by an LLM
-type ToolCall struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Input string `json:"input"`
-}
+// type ToolCall struct {
+// 	ID    string `json:"id"`
+// 	Name  string `json:"name"`
+// 	Input string `json:"input"`
+// }
 
 // ContentChunk is used to pass pre-chunked document content to the LLM. These
 // should only be used within a DocumentContent block.
@@ -80,11 +83,26 @@ type Content interface {
   "type": "text",
   "text": "What color is the grass and sky?"
 }
+
+{
+  "text": "Claude Shannon was born on April 30, 1916, in Petoskey, Michigan",
+  "type": "text",
+  "citations": [
+    {
+      "type": "web_search_result_location",
+      "url": "https://en.wikipedia.org/wiki/Claude_Shannon",
+      "title": "Claude Shannon - Wikipedia",
+      "encrypted_index": "Eo8BCioIAhgBIiQyYjQ0OWJmZi1lNm..",
+      "cited_text": "Claude Elwood Shannon (April 30, 1916 – February 24, ..."
+    }
+  ]
+}
 */
 
 type TextContent struct {
 	Text         string        `json:"text"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+	Citations    []Citation    `json:"citations,omitempty"`
 }
 
 func (c *TextContent) Type() ContentType {
@@ -92,44 +110,14 @@ func (c *TextContent) Type() ContentType {
 }
 
 func (c *TextContent) MarshalJSON() ([]byte, error) {
-	m := map[string]any{"type": c.Type(), "text": c.Text}
-	if c.CacheControl != nil && c.CacheControl.Type != "" {
-		m["cache_control"] = map[string]any{"type": c.CacheControl.Type}
-	}
-	return json.Marshal(m)
-}
-
-//// AssistantTextContent //////////////////////////////////////////////////////
-
-/*
-{
-  "type": "text",
-  "text": "According to the document, ..."
-}
-
-{
-  "type": "text",
-  "text": "the grass is green",
-  "citations": [{
-    "type": "char_location",
-    "cited_text": "The grass is green.",
-    "document_index": 0,
-    "document_title": "Example Document",
-    "start_char_index": 0,
-    "end_char_index": 20
-  }]
-}
-*/
-
-// AssistantTextContent is a text content block received from an Assistant.
-// Unlike TextContent, this content block may contain citations.
-type AssistantTextContent struct {
-	Text      string     `json:"text"`
-	Citations []Citation `json:"citations,omitempty"`
-}
-
-func (c *AssistantTextContent) Type() ContentType {
-	return ContentTypeText
+	type Alias TextContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeText,
+		Alias: (*Alias)(c),
+	})
 }
 
 //// ImageContent //////////////////////////////////////////////////////////////
@@ -160,6 +148,17 @@ type ImageContent struct {
 
 func (c *ImageContent) Type() ContentType {
 	return ContentTypeImage
+}
+
+func (c *ImageContent) MarshalJSON() ([]byte, error) {
+	type Alias ImageContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeImage,
+		Alias: (*Alias)(c),
+	})
 }
 
 //// DocumentContent ///////////////////////////////////////////////////////////
@@ -221,6 +220,17 @@ func (c *DocumentContent) Type() ContentType {
 	return ContentTypeDocument
 }
 
+func (c *DocumentContent) MarshalJSON() ([]byte, error) {
+	type Alias DocumentContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeDocument,
+		Alias: (*Alias)(c),
+	})
+}
+
 //// ToolUseContent ////////////////////////////////////////////////////////////
 
 /* Examples:
@@ -233,32 +243,27 @@ func (c *DocumentContent) Type() ContentType {
 */
 
 type ToolUseContent struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Input string `json:"input"`
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
 }
 
 func (c *ToolUseContent) Type() ContentType {
 	return ContentTypeToolUse
 }
 
-func (c *ToolUseContent) UnmarshalJSON(data []byte) error {
-	type temp struct {
-		ID    string          `json:"id"`
-		Name  string          `json:"name"`
-		Input json.RawMessage `json:"input"`
-	}
-	var raw temp
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	c.ID = raw.ID
-	c.Name = raw.Name
-	c.Input = string(raw.Input)
-	return nil
+func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
+	type Alias ToolUseContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeToolUse,
+		Alias: (*Alias)(c),
+	})
 }
 
-//// ToolResultContent ////////////////////////////////////////////////////////
+//// ToolResultContent /////////////////////////////////////////////////////////
 
 /* Examples:
 {
@@ -294,7 +299,18 @@ func (c *ToolResultContent) Type() ContentType {
 	return ContentTypeToolResult
 }
 
-//// ServerToolUseContent ////////////////////////////////////////////////////
+func (c *ToolResultContent) MarshalJSON() ([]byte, error) {
+	type Alias ToolResultContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeToolResult,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// ServerToolUseContent //////////////////////////////////////////////////////
 
 /* Examples:
 {
@@ -317,7 +333,18 @@ func (c *ServerToolUseContent) Type() ContentType {
 	return ContentTypeServerToolUse
 }
 
-//// WebSearchToolResultContent ///////////////////////////////////////////////
+func (c *ServerToolUseContent) MarshalJSON() ([]byte, error) {
+	type Alias ServerToolUseContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeServerToolUse,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// WebSearchToolResultContent ////////////////////////////////////////////////
 
 /* Examples:
 {
@@ -362,7 +389,18 @@ func (c *WebSearchToolResultContent) Type() ContentType {
 	return ContentTypeWebSearchToolResult
 }
 
-//// ThinkingContent //////////////////////////////////////////////////////////
+func (c *WebSearchToolResultContent) MarshalJSON() ([]byte, error) {
+	type Alias WebSearchToolResultContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeWebSearchToolResult,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// ThinkingContent ///////////////////////////////////////////////////////////
 
 /* Examples:
 {
@@ -389,7 +427,18 @@ func (c *ThinkingContent) Type() ContentType {
 	return ContentTypeThinking
 }
 
-//// RedactedThinkingContent //////////////////////////////////////////////////
+func (c *ThinkingContent) MarshalJSON() ([]byte, error) {
+	type Alias ThinkingContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeThinking,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// RedactedThinkingContent ///////////////////////////////////////////////////
 
 /* Examples:
 {
@@ -407,4 +456,60 @@ type RedactedThinkingContent struct {
 
 func (c *RedactedThinkingContent) Type() ContentType {
 	return ContentTypeRedactedThinking
+}
+
+func (c *RedactedThinkingContent) MarshalJSON() ([]byte, error) {
+	type Alias RedactedThinkingContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeRedactedThinking,
+		Alias: (*Alias)(c),
+	})
+}
+
+type contentTypeIndicator struct {
+	Type ContentType `json:"type"`
+}
+
+//// Unmarshalling /////////////////////////////////////////////////////////////
+
+// UnmarshalContent unmarshals the JSON of one content block into the
+// appropriate concrete Content type.
+func UnmarshalContent(data []byte) (Content, error) {
+	// Extract the type field
+	var ct contentTypeIndicator
+	if err := json.Unmarshal(data, &ct); err != nil {
+		return nil, err
+	}
+	// Create and unmarshal the appropriate concrete type
+	var content Content
+	switch ct.Type {
+	case ContentTypeText:
+		content = &TextContent{}
+	case ContentTypeImage:
+		content = &ImageContent{}
+	case ContentTypeDocument:
+		content = &DocumentContent{}
+	case ContentTypeToolUse:
+		content = &ToolUseContent{}
+	case ContentTypeToolResult:
+		content = &ToolResultContent{}
+	case ContentTypeThinking:
+		content = &ThinkingContent{}
+	case ContentTypeRedactedThinking:
+		content = &RedactedThinkingContent{}
+	case ContentTypeServerToolUse:
+		content = &ServerToolUseContent{}
+	case ContentTypeWebSearchToolResult:
+		content = &WebSearchToolResultContent{}
+	default:
+		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
+	}
+	// Unmarshal into the concrete type
+	if err := json.Unmarshal(data, content); err != nil {
+		return nil, err
+	}
+	return content, nil
 }

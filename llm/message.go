@@ -34,8 +34,6 @@ func (m *Message) LastText() string {
 		switch content := m.Content[i].(type) {
 		case *TextContent:
 			return content.Text
-		case *AssistantTextContent:
-			return content.Text
 		}
 	}
 	return ""
@@ -49,12 +47,6 @@ func (m *Message) Text() string {
 	for _, content := range m.Content {
 		switch content := content.(type) {
 		case *TextContent:
-			if textCount > 0 {
-				sb.WriteString("\n\n")
-			}
-			sb.WriteString(content.Text)
-			textCount++
-		case *AssistantTextContent:
 			if textCount > 0 {
 				sb.WriteString("\n\n")
 			}

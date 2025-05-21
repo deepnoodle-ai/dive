@@ -173,7 +173,7 @@ func addPrefill(blocks []llm.Content, prefill, closingTag string) error {
 		return nil
 	}
 	for _, block := range blocks {
-		content, ok := block.(*llm.AssistantTextContent)
+		content, ok := block.(*llm.TextContent)
 		if ok {
 			if closingTag == "" || strings.Contains(content.Text, closingTag) {
 				content.Text = prefill + content.Text

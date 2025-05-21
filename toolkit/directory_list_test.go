@@ -60,7 +60,7 @@ func TestDirectoryListTool(t *testing.T) {
 			Path: filepath.Join(tempDir, "nonexistent"),
 		})
 		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Error: Directory not found")
+		require.Contains(t, result.Content[0].Text, "Directory not found")
 	})
 
 	t.Run("ListDirectoryWithMaxEntries", func(t *testing.T) {

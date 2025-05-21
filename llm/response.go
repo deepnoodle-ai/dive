@@ -2,7 +2,6 @@ package llm
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // Response is the generated response from an LLM. Matches the Anthropic
@@ -32,14 +31,14 @@ func (r *Response) Message() *Message {
 }
 
 // ToolCalls extracts and returns all tool calls from the response.
-func (r *Response) ToolCalls() []*ToolCall {
-	var toolCalls []*ToolCall
+func (r *Response) ToolCalls() []*ToolUseContent {
+	var toolCalls []*ToolUseContent
 	for _, content := range r.Content {
 		if toolUse, ok := content.(*ToolUseContent); ok {
-			toolCalls = append(toolCalls, &ToolCall{
+			toolCalls = append(toolCalls, &ToolUseContent{
 				ID:    toolUse.ID,    // e.g. "toolu_01A09q90qw90lq917835lq9"
 				Name:  toolUse.Name,  // tool name e.g. "get_weather"
-				Input: toolUse.Input, // tool call input (JSON as text)
+				Input: toolUse.Input, // tool call input JSON
 			})
 		}
 	}
@@ -78,59 +77,11 @@ func (r *Response) UnmarshalJSON(data []byte) error {
 	// Process each content item
 	r.Content = make([]Content, 0, len(tmp.Content))
 	for _, rawContent := range tmp.Content {
-		content, err := UnmarshalContent(r.Role, rawContent)
+		content, err := UnmarshalContent(rawContent)
 		if err != nil {
 			return err
 		}
 		r.Content = append(r.Content, content)
 	}
 	return nil
-}
-
-type contentTypeIndicator struct {
-	Type ContentType `json:"type"`
-}
-
-// UnmarshalContent unmarshals the JSON of one content block into the
-// appropriate concrete Content type.
-func UnmarshalContent(role Role, data []byte) (Content, error) {
-	// Extract the type field
-	var ct contentTypeIndicator
-	if err := json.Unmarshal(data, &ct); err != nil {
-		return nil, err
-	}
-	// Create and unmarshal the appropriate concrete type
-	var content Content
-	switch ct.Type {
-	case ContentTypeText:
-		if role == Assistant {
-			content = &AssistantTextContent{}
-		} else {
-			content = &TextContent{}
-		}
-	case ContentTypeImage:
-		content = &ImageContent{}
-	case ContentTypeDocument:
-		content = &DocumentContent{}
-	case ContentTypeToolUse:
-		content = &ToolUseContent{}
-	case ContentTypeToolResult:
-		content = &ToolResultContent{}
-	case ContentTypeThinking:
-		content = &ThinkingContent{}
-	case ContentTypeRedactedThinking:
-		content = &RedactedThinkingContent{}
-	case ContentTypeServerToolUse:
-		content = &ServerToolUseContent{}
-	case ContentTypeWebSearchToolResult:
-		content = &WebSearchToolResultContent{}
-	default:
-		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
-	}
-	// Unmarshal into the concrete type
-	if err := json.Unmarshal(data, content); err != nil {
-		return nil, err
-	}
-	fmt.Printf("unmarshalled content: %+v\n", content)
-	return content, nil
 }

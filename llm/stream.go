@@ -147,7 +147,7 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			}
 		case EventDeltaTypeInputJSON:
 			if toolUseContent, ok := content.(*ToolUseContent); ok {
-				toolUseContent.Input += event.Delta.PartialJSON
+				toolUseContent.Input = append(toolUseContent.Input, []byte(event.Delta.PartialJSON)...)
 			} else {
 				return errors.New("in-progress block is not a tool use content")
 			}

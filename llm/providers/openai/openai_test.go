@@ -77,8 +77,8 @@ func TestToolUse(t *testing.T) {
 	require.Equal(t, "add", toolUse.Name)
 
 	// The exact format of the arguments may vary, so we just check that it contains the numbers
-	require.Contains(t, toolUse.Input, "567")
-	require.Contains(t, toolUse.Input, "111")
+	require.Contains(t, string(toolUse.Input), "567")
+	require.Contains(t, string(toolUse.Input), "111")
 }
 
 func TestMultipleToolUse(t *testing.T) {
@@ -111,8 +111,8 @@ func TestMultipleToolUse(t *testing.T) {
 	toolUse, ok := c1.(*llm.ToolUseContent)
 	require.True(t, ok)
 	require.Equal(t, "add", toolUse.Name)
-	require.Contains(t, toolUse.Input, "567")
-	require.Contains(t, toolUse.Input, "111")
+	require.Contains(t, string(toolUse.Input), "567")
+	require.Contains(t, string(toolUse.Input), "111")
 
 	c2 := response.Message().Content[1]
 	require.Equal(t, llm.ContentTypeToolUse, c2.Type())
@@ -120,8 +120,8 @@ func TestMultipleToolUse(t *testing.T) {
 	toolUse, ok = c2.(*llm.ToolUseContent)
 	require.True(t, ok)
 	require.Equal(t, "add", toolUse.Name)
-	require.Contains(t, toolUse.Input, "233")
-	require.Contains(t, toolUse.Input, "444")
+	require.Contains(t, string(toolUse.Input), "233")
+	require.Contains(t, string(toolUse.Input), "444")
 }
 
 func TestMultipleToolUseStreaming(t *testing.T) {
@@ -165,8 +165,8 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 
 	// The two calls can be in any order, so we need to check both
 
-	var c1 *llm.ToolCall
-	var c2 *llm.ToolCall
+	var c1 *llm.ToolUseContent
+	var c2 *llm.ToolUseContent
 
 	if strings.Contains(string(toolCalls[0].Input), "567") {
 		c1 = toolCalls[0]
@@ -177,12 +177,12 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	}
 
 	require.Equal(t, "add", c1.Name)
-	require.Contains(t, c1.Input, "567")
-	require.Contains(t, c1.Input, "111")
+	require.Contains(t, string(c1.Input), "567")
+	require.Contains(t, string(c1.Input), "111")
 
 	require.Equal(t, "add", c2.Name)
-	require.Contains(t, c2.Input, "233")
-	require.Contains(t, c2.Input, "444")
+	require.Contains(t, string(c2.Input), "233")
+	require.Contains(t, string(c2.Input), "444")
 }
 
 func TestToolUseStream(t *testing.T) {
@@ -233,8 +233,8 @@ func TestToolUseStream(t *testing.T) {
 	require.Equal(t, "add", toolCall.Name)
 
 	// Check that the arguments contain the numbers
-	require.Contains(t, toolCall.Input, "567")
-	require.Contains(t, toolCall.Input, "111")
+	require.Contains(t, string(toolCall.Input), "567")
+	require.Contains(t, string(toolCall.Input), "111")
 }
 
 func TestConvertMessages(t *testing.T) {
@@ -245,12 +245,12 @@ func TestConvertMessages(t *testing.T) {
 			&llm.ToolUseContent{
 				ID:    "call_123",
 				Name:  "Calculator",
-				Input: `{"expression":"2 + 2"}`,
+				Input: []byte(`{"expression":"2 + 2"}`),
 			},
 			&llm.ToolUseContent{
 				ID:    "call_456",
 				Name:  "GoogleSearch",
-				Input: `{"query":"math formulas"}`,
+				Input: []byte(`{"query":"math formulas"}`),
 			},
 		},
 	}
@@ -326,7 +326,7 @@ func TestConvertTextAndToolUseMessage(t *testing.T) {
 			&llm.ToolUseContent{
 				ID:    "call_123",
 				Name:  "Calculator",
-				Input: `{"expression":"2 + 2"}`,
+				Input: []byte(`{"expression":"2 + 2"}`),
 			},
 		},
 	}
@@ -353,12 +353,12 @@ func TestConvertToolUseAndResultMessages(t *testing.T) {
 				&llm.ToolUseContent{
 					ID:    "call_111",
 					Name:  "Calculator",
-					Input: `{"expression":"1 + 1"}`,
+					Input: []byte(`{"expression":"1 + 1"}`),
 				},
 				&llm.ToolUseContent{
 					ID:    "call_999",
 					Name:  "Calculator",
-					Input: `{"expression":"2 + 2"}`,
+					Input: []byte(`{"expression":"2 + 2"}`),
 				},
 			},
 		},

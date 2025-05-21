@@ -640,7 +640,7 @@ func (a *Agent) generateStreaming(
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
-func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolCall, publisher dive.EventPublisher) ([]*dive.ToolCallResult, error) {
+func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolUseContent, publisher dive.EventPublisher) ([]*dive.ToolCallResult, error) {
 	results := make([]*dive.ToolCallResult, len(toolCalls))
 	for i, toolCall := range toolCalls {
 		tool, ok := a.toolsByName[toolCall.Name]

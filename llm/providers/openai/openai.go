@@ -175,7 +175,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			contentBlocks = append(contentBlocks, &llm.ToolUseContent{
 				ID:    toolCall.ID, // e.g. call_12345xyz
 				Name:  toolCall.Function.Name,
-				Input: toolCall.Function.Arguments,
+				Input: []byte(toolCall.Function.Arguments),
 			})
 		}
 	}
@@ -350,9 +350,12 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 			case *llm.ToolUseContent:
 				hasToolUse = true
 				toolCalls = append(toolCalls, ToolCall{
-					ID:       c.ID,
-					Type:     "function",
-					Function: ToolCallFunction{Name: c.Name, Arguments: c.Input},
+					ID:   c.ID,
+					Type: "function",
+					Function: ToolCallFunction{
+						Name:      c.Name,
+						Arguments: string(c.Input),
+					},
 				})
 			case *llm.TextContent:
 				textContent = c.Text

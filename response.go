@@ -28,7 +28,7 @@ type ResponseItem struct {
 	Message *llm.Message `json:"message,omitempty"`
 
 	// ToolCall is set if the response item is a tool call
-	ToolCall *llm.ToolCall `json:"tool_call,omitempty"`
+	ToolCall *llm.ToolUseContent `json:"tool_call,omitempty"`
 
 	// ToolCallResult is set if the response item is a tool call result
 	ToolCallResult *ToolCallResult `json:"tool_call_result,omitempty"`
@@ -77,7 +77,7 @@ func (r *Response) OutputText() string {
 	// Find the last text content
 	for i := len(lastMessage.Content) - 1; i >= 0; i-- {
 		content := lastMessage.Content[i]
-		if textContent, ok := content.(*llm.AssistantTextContent); ok {
+		if textContent, ok := content.(*llm.TextContent); ok {
 			return textContent.Text
 		}
 	}
