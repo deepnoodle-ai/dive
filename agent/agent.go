@@ -581,7 +581,7 @@ func (a *Agent) generate(
 		}
 
 		// Capture results in a new message to send to LLM on the next iteration
-		toolResultMessage := llm.NewToolResultMessage(getToolResultContent(toolResults))
+		toolResultMessage := llm.NewToolResultMessage(getToolResultContent(toolResults)...)
 		newMessage(toolResultMessage)
 
 		// Add instructions to the message to not use any more tools if we have
