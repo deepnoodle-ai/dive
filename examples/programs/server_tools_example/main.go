@@ -10,14 +10,16 @@ import (
 	"github.com/diveagents/dive/llm/providers/anthropic"
 )
 
+const DefaultPrompt = "What is the capital of Tanzania? Respond with a name and approximate population only."
+
 func main() {
 	var prompt string
-	flag.StringVar(&prompt, "prompt", "What are top Go projects on GitHub?", "prompt to use")
+	flag.StringVar(&prompt, "prompt", DefaultPrompt, "prompt to use")
 	flag.Parse()
 
 	webSearchTool := anthropic.NewWebSearchTool(anthropic.WebSearchToolOptions{})
 
-	response, err := anthropic.New().Generate(
+	iterator, err := anthropic.New().Stream(
 		context.Background(),
 		llm.WithTools(webSearchTool),
 		llm.WithMessages(llm.NewUserTextMessage(prompt)),
@@ -26,41 +28,23 @@ func main() {
 		log.Fatal(err)
 	}
 
-	message := response.Message()
-
-	for _, content := range message.Content {
-		fmt.Println("================")
-		switch content := content.(type) {
-		case *llm.TextContent:
-			fmt.Println("Text:")
-			fmt.Println(content.Text)
-			for _, citation := range content.Citations {
-				switch citation := citation.(type) {
-				case *llm.WebSearchResultLocation:
-					fmt.Println("Citation:")
-					fmt.Println(citation.URL)
-					fmt.Println("Cited text:", citation.CitedText)
-				}
+	for iterator.Next() {
+		event := iterator.Event()
+		switch event.Type {
+		case llm.EventTypeMessageStart:
+			fmt.Println("----")
+		case llm.EventTypeContentBlockDelta:
+			if event.Delta.PartialJSON != "" {
+				fmt.Print(event.Delta.PartialJSON)
+			} else if event.Delta.Text != "" {
+				fmt.Print(event.Delta.Text)
+			} else if event.Delta.Thinking != "" {
+				fmt.Print(event.Delta.Thinking)
 			}
-		case *llm.ToolUseContent:
-			fmt.Println("Tool use:")
-			fmt.Println(content.Name)
-			fmt.Println(content.Input)
-		case *llm.ToolResultContent:
-			fmt.Println("Tool result:")
-			fmt.Println(content.ToolUseID)
-			fmt.Println(content.Content)
-		case *llm.ServerToolUseContent:
-			fmt.Println("Server tool use:")
-			fmt.Println(content.Name)
-			fmt.Println(content.Input)
-		case *llm.WebSearchToolResultContent:
-			fmt.Println("Web search tool result:")
-			fmt.Println(content.ToolUseID)
-			for _, item := range content.Content {
-				fmt.Println(item.Title)
-				fmt.Println(item.URL)
-			}
+		case llm.EventTypeContentBlockStop:
+			fmt.Println()
+		case llm.EventTypeMessageStop:
+			fmt.Println("----")
 		}
 	}
 }

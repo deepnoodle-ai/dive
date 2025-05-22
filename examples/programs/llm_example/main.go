@@ -10,19 +10,18 @@ import (
 	"github.com/diveagents/dive/llm/providers/anthropic"
 )
 
+const DefaultPrompt = "What is the scientific name of the largest animal on Earth?"
+
 func main() {
 	var prompt string
-	flag.StringVar(&prompt, "prompt", "", "prompt to use")
+	flag.StringVar(&prompt, "p", DefaultPrompt, "prompt to use")
 	flag.Parse()
-
-	if prompt == "" {
-		log.Fatal("provide a prompt with -prompt")
-	}
 
 	ctx := context.Background()
 
 	response, err := anthropic.New().Generate(
 		ctx,
+		llm.WithModel(anthropic.ModelClaudeSonnet4),
 		llm.WithUserTextMessage(prompt),
 		llm.WithMaxTokens(2048),
 		llm.WithTemperature(0.7),
