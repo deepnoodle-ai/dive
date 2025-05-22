@@ -26,7 +26,6 @@ type Option func(*Config)
 type Config struct {
 	Model             string         `json:"model,omitempty"`
 	SystemPrompt      string         `json:"system_prompt,omitempty"`
-	Caching           *bool          `json:"caching,omitempty"`
 	Endpoint          string         `json:"endpoint,omitempty"`
 	APIKey            string         `json:"api_key,omitempty"`
 	Prefill           string         `json:"prefill,omitempty"`
@@ -45,6 +44,7 @@ type Config struct {
 	Hooks             Hooks          `json:"-"`
 	Client            *http.Client   `json:"-"`
 	Logger            slogger.Logger `json:"-"`
+	Messages          Messages       `json:"-"`
 }
 
 // Apply applies the given options to the config.
@@ -153,13 +153,6 @@ func WithParallelToolCalls(parallelToolCalls bool) Option {
 	}
 }
 
-// WithCaching sets the caching for the interaction.
-func WithCaching(caching bool) Option {
-	return func(config *Config) {
-		config.Caching = &caching
-	}
-}
-
 // WithHook adds a callback for the specified hook type
 func WithHook(hookType HookType, hookFunc HookFunc) Option {
 	return func(config *Config) {
@@ -224,5 +217,19 @@ func WithReasoningEffort(reasoningEffort string) Option {
 func WithFeatures(features ...string) Option {
 	return func(config *Config) {
 		config.Features = append(config.Features, features...)
+	}
+}
+
+// WithMessages sets the messages for the interaction.
+func WithMessages(messages ...*Message) Option {
+	return func(config *Config) {
+		config.Messages = messages
+	}
+}
+
+// WithUserTextMessage sets a single user text message for the interaction.
+func WithUserTextMessage(text string) Option {
+	return func(config *Config) {
+		config.Messages = Messages{NewUserTextMessage(text)}
 	}
 }

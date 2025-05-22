@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/schema"
 	"github.com/gofrs/uuid/v5"
 )
 
@@ -18,12 +19,8 @@ const (
 
 // Type aliases for easy access to LLM types
 type (
-	ToolSchema          = llm.Schema
-	ToolCallInput       = llm.ToolCallInput
-	ToolCallOutput      = llm.ToolCallOutput
-	Tool                = llm.Tool
-	Confirmer           = llm.Confirmer
-	ConfirmationRequest = llm.ConfirmationRequest
+	Schema   = schema.Schema
+	Property = schema.Property
 )
 
 // Agent represents an intelligent AI entity that can autonomously execute tasks,
@@ -75,7 +72,6 @@ type Environment interface {
 type Options struct {
 	ThreadID      string
 	UserID        string
-	Input         string
 	Messages      []*llm.Message
 	EventCallback EventCallback
 }
@@ -109,6 +105,13 @@ func WithUserID(userID string) Option {
 	}
 }
 
+// WithMessage specifies a single message to be used in the generation.
+func WithMessage(message *llm.Message) Option {
+	return func(opts *Options) {
+		opts.Messages = []*llm.Message{message}
+	}
+}
+
 // WithMessages specifies the messages to be used in the generation.
 func WithMessages(messages []*llm.Message) Option {
 	return func(opts *Options) {
@@ -120,7 +123,7 @@ func WithMessages(messages []*llm.Message) Option {
 // This is a convenience wrapper that creates a single user message.
 func WithInput(input string) Option {
 	return func(opts *Options) {
-		opts.Input = input
+		opts.Messages = []*llm.Message{llm.NewUserTextMessage(input)}
 	}
 }
 

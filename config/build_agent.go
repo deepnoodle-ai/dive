@@ -10,7 +10,7 @@ import (
 	"github.com/diveagents/dive/slogger"
 )
 
-func buildAgent(agentDef Agent, config Config, tools map[string]llm.Tool, logger slogger.Logger, confirmer llm.Confirmer) (dive.Agent, error) {
+func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logger slogger.Logger, confirmer dive.Confirmer) (dive.Agent, error) {
 	providerName := agentDef.Provider
 	if providerName == "" {
 		providerName = config.LLM.DefaultProvider
@@ -29,7 +29,7 @@ func buildAgent(agentDef Agent, config Config, tools map[string]llm.Tool, logger
 		return nil, fmt.Errorf("error getting model: %w", err)
 	}
 
-	var agentTools []llm.Tool
+	var agentTools []dive.Tool
 	for _, toolName := range agentDef.Tools {
 		tool, ok := tools[toolName]
 		if !ok {

@@ -2,21 +2,20 @@ package openai
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/schema"
 	"github.com/stretchr/testify/require"
 )
 
 func TestHelloWorld(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	response, err := provider.Generate(ctx, []*llm.Message{
-		llm.NewUserMessage("respond with \"hello\""),
-	})
+	response, err := provider.Generate(ctx, llm.WithMessages(
+		llm.NewUserTextMessage("respond with \"hello\""),
+	))
 	require.NoError(t, err)
 	// The model might respond with "Hello!" or other variations, so we check case-insensitive
 	require.Contains(t, strings.ToLower(response.Message().Text()), "hello")
@@ -25,9 +24,9 @@ func TestHelloWorld(t *testing.T) {
 func TestHelloWorldStream(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
-	iterator, err := provider.Stream(ctx, []*llm.Message{
-		llm.NewUserMessage("count to 10. respond with the integers only, separated by spaces."),
-	})
+	iterator, err := provider.Stream(ctx, llm.WithMessages(
+		llm.NewUserTextMessage("count to 10. respond with the integers only, separated by spaces."),
+	))
 	require.NoError(t, err)
 
 	accum := llm.NewResponseAccumulator()
@@ -46,35 +45,24 @@ func TestHelloWorldStream(t *testing.T) {
 	require.Equal(t, "1 2 3 4 5 6 7 8 9 10", response.Message().Text())
 }
 
-func addFunc(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var params map[string]interface{}
-	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
-		return nil, err
-	}
-	return llm.NewToolCallOutput(fmt.Sprintf("%d", int(params["a"].(float64))+int(params["b"].(float64)))), nil
-}
-
 func TestToolUse(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
-	messages := []*llm.Message{
-		llm.NewUserMessage("add 567 and 111"),
-	}
-
-	add := llm.NewFunctionTool(addFunc).
+	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(llm.Schema{
+		WithSchema(schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
-			Properties: map[string]*llm.SchemaProperty{
+			Properties: map[string]*schema.Property{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
 		})
 
-	response, err := provider.Generate(ctx, messages,
+	response, err := provider.Generate(ctx,
+		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
@@ -82,34 +70,35 @@ func TestToolUse(t *testing.T) {
 
 	require.Equal(t, 1, len(response.Message().Content))
 	content := response.Message().Content[0]
-	require.Equal(t, llm.ContentTypeToolUse, content.Type)
-	require.Equal(t, "add", content.Name)
+	require.Equal(t, llm.ContentTypeToolUse, content.Type())
+
+	toolUse, ok := content.(*llm.ToolUseContent)
+	require.True(t, ok)
+	require.Equal(t, "add", toolUse.Name)
+
 	// The exact format of the arguments may vary, so we just check that it contains the numbers
-	require.Contains(t, string(content.Input), "567")
-	require.Contains(t, string(content.Input), "111")
+	require.Contains(t, string(toolUse.Input), "567")
+	require.Contains(t, string(toolUse.Input), "111")
 }
 
 func TestMultipleToolUse(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
-	messages := []*llm.Message{
-		llm.NewUserMessage("Calculate two results for me: add 567 and 111, and add 233 and 444"),
-	}
-
-	add := llm.NewFunctionTool(addFunc).
+	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(llm.Schema{
+		WithSchema(schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
-			Properties: map[string]*llm.SchemaProperty{
+			Properties: map[string]*schema.Property{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
 		})
 
-	response, err := provider.Generate(ctx, messages,
+	response, err := provider.Generate(ctx,
+		llm.WithMessages(llm.NewUserTextMessage("Calculate two results for me: add 567 and 111, and add 233 and 444")),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
@@ -117,39 +106,44 @@ func TestMultipleToolUse(t *testing.T) {
 	require.Equal(t, 2, len(response.Message().Content))
 
 	c1 := response.Message().Content[0]
-	require.Equal(t, llm.ContentTypeToolUse, c1.Type)
-	require.Equal(t, "add", c1.Name)
-	require.Contains(t, string(c1.Input), "567")
-	require.Contains(t, string(c1.Input), "111")
+	require.Equal(t, llm.ContentTypeToolUse, c1.Type())
+
+	toolUse, ok := c1.(*llm.ToolUseContent)
+	require.True(t, ok)
+	require.Equal(t, "add", toolUse.Name)
+	require.Contains(t, string(toolUse.Input), "567")
+	require.Contains(t, string(toolUse.Input), "111")
 
 	c2 := response.Message().Content[1]
-	require.Equal(t, llm.ContentTypeToolUse, c2.Type)
-	require.Equal(t, "add", c2.Name)
-	require.Contains(t, string(c2.Input), "233")
-	require.Contains(t, string(c2.Input), "444")
+	require.Equal(t, llm.ContentTypeToolUse, c2.Type())
+
+	toolUse, ok = c2.(*llm.ToolUseContent)
+	require.True(t, ok)
+	require.Equal(t, "add", toolUse.Name)
+	require.Contains(t, string(toolUse.Input), "233")
+	require.Contains(t, string(toolUse.Input), "444")
 }
 
 func TestMultipleToolUseStreaming(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
-	messages := llm.Messages{
-		llm.NewUserMessage("Calculate two results for me: add 567 and 111, and add 233 and 444"),
-	}
-
-	add := llm.NewFunctionTool(addFunc).
+	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(llm.Schema{
+		WithSchema(schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
-			Properties: map[string]*llm.SchemaProperty{
+			Properties: map[string]*schema.Property{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
 		})
 
-	iterator, err := provider.Stream(ctx, messages,
+	message := llm.NewUserTextMessage("Calculate two results for me: add 567 and 111, and add 233 and 444")
+
+	iterator, err := provider.Stream(ctx,
+		llm.WithMessages(message),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
@@ -171,8 +165,8 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 
 	// The two calls can be in any order, so we need to check both
 
-	var c1 *llm.ToolCall
-	var c2 *llm.ToolCall
+	var c1 *llm.ToolUseContent
+	var c2 *llm.ToolUseContent
 
 	if strings.Contains(string(toolCalls[0].Input), "567") {
 		c1 = toolCalls[0]
@@ -195,23 +189,20 @@ func TestToolUseStream(t *testing.T) {
 	ctx := context.Background()
 	provider := New()
 
-	messages := []*llm.Message{
-		llm.NewUserMessage("add 567 and 111"),
-	}
-
-	add := llm.NewFunctionTool(addFunc).
+	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(llm.Schema{
+		WithSchema(schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
-			Properties: map[string]*llm.SchemaProperty{
+			Properties: map[string]*schema.Property{
 				"a": {Type: "number", Description: "The first number"},
 				"b": {Type: "number", Description: "The second number"},
 			},
 		})
 
-	iterator, err := provider.Stream(ctx, messages,
+	iterator, err := provider.Stream(ctx,
+		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 	)
@@ -242,26 +233,24 @@ func TestToolUseStream(t *testing.T) {
 	require.Equal(t, "add", toolCall.Name)
 
 	// Check that the arguments contain the numbers
-	require.Contains(t, toolCall.Input, "567")
-	require.Contains(t, toolCall.Input, "111")
+	require.Contains(t, string(toolCall.Input), "567")
+	require.Contains(t, string(toolCall.Input), "111")
 }
 
 func TestConvertMessages(t *testing.T) {
 	// Create a message with two ContentTypeToolUse content blocks
 	message := &llm.Message{
 		Role: llm.Assistant,
-		Content: []*llm.Content{
-			{
-				Type:  llm.ContentTypeToolUse,
+		Content: []llm.Content{
+			&llm.ToolUseContent{
 				ID:    "call_123",
 				Name:  "Calculator",
-				Input: json.RawMessage(`{"expression":"2 + 2"}`),
+				Input: []byte(`{"expression":"2 + 2"}`),
 			},
-			{
-				Type:  llm.ContentTypeToolUse,
+			&llm.ToolUseContent{
 				ID:    "call_456",
 				Name:  "GoogleSearch",
-				Input: json.RawMessage(`{"query":"math formulas"}`),
+				Input: []byte(`{"query":"math formulas"}`),
 			},
 		},
 	}
@@ -295,14 +284,12 @@ func TestConvertToolResultMessages(t *testing.T) {
 	// Create a message with two ContentTypeToolResult content blocks
 	message := &llm.Message{
 		Role: "tool",
-		Content: []*llm.Content{
-			{
-				Type:      llm.ContentTypeToolResult,
+		Content: []llm.Content{
+			&llm.ToolResultContent{
 				Content:   "4",
 				ToolUseID: "call_123",
 			},
-			{
-				Type:      llm.ContentTypeToolResult,
+			&llm.ToolResultContent{
 				Content:   "Found math formulas",
 				ToolUseID: "call_456",
 			},
@@ -332,16 +319,14 @@ func TestConvertTextAndToolUseMessage(t *testing.T) {
 	// Create a message with both text and tool use content blocks
 	message := &llm.Message{
 		Role: llm.Assistant,
-		Content: []*llm.Content{
-			{
-				Type: llm.ContentTypeText,
+		Content: []llm.Content{
+			&llm.TextContent{
 				Text: "I'll help you calculate that",
 			},
-			{
-				Type:  llm.ContentTypeToolUse,
+			&llm.ToolUseContent{
 				ID:    "call_123",
 				Name:  "Calculator",
-				Input: json.RawMessage(`{"expression":"2 + 2"}`),
+				Input: []byte(`{"expression":"2 + 2"}`),
 			},
 		},
 	}
@@ -364,31 +349,27 @@ func TestConvertToolUseAndResultMessages(t *testing.T) {
 	messages := []*llm.Message{
 		{
 			Role: llm.Assistant,
-			Content: []*llm.Content{
-				{
-					Type:  llm.ContentTypeToolUse,
+			Content: []llm.Content{
+				&llm.ToolUseContent{
 					ID:    "call_111",
 					Name:  "Calculator",
-					Input: json.RawMessage(`{"expression":"1 + 1"}`),
+					Input: []byte(`{"expression":"1 + 1"}`),
 				},
-				{
-					Type:  llm.ContentTypeToolUse,
+				&llm.ToolUseContent{
 					ID:    "call_999",
 					Name:  "Calculator",
-					Input: json.RawMessage(`{"expression":"2 + 2"}`),
+					Input: []byte(`{"expression":"2 + 2"}`),
 				},
 			},
 		},
 		{
 			Role: llm.User,
-			Content: []*llm.Content{
-				{
-					Type:      llm.ContentTypeToolResult,
+			Content: []llm.Content{
+				&llm.ToolResultContent{
 					Content:   "1",
 					ToolUseID: "call_111",
 				},
-				{
-					Type:      llm.ContentTypeToolResult,
+				&llm.ToolResultContent{
 					Content:   "2",
 					ToolUseID: "call_999",
 				},

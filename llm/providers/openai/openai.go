@@ -87,7 +87,7 @@ func (p *Provider) Name() string {
 	return fmt.Sprintf("openai-%s", p.model)
 }
 
-func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)
 
@@ -96,10 +96,10 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 		return nil, err
 	}
 
-	if err := validateMessages(messages); err != nil {
+	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(messages)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -118,7 +118,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -164,32 +164,28 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	}
 	choice := result.Choices[0]
 
-	var contentBlocks []*llm.Content
+	var contentBlocks []llm.Content
 	if choice.Message.Content != "" {
-		contentBlocks = append(contentBlocks, &llm.Content{
-			Type: llm.ContentTypeText,
-			Text: choice.Message.Content,
-		})
+		contentBlocks = append(contentBlocks, &llm.TextContent{Text: choice.Message.Content})
 	}
 
 	// Transform tool calls into content blocks (like Anthropic)
 	if len(choice.Message.ToolCalls) > 0 {
 		for _, toolCall := range choice.Message.ToolCalls {
-			contentBlocks = append(contentBlocks, &llm.Content{
-				Type:  llm.ContentTypeToolUse,
+			contentBlocks = append(contentBlocks, &llm.ToolUseContent{
 				ID:    toolCall.ID, // e.g. call_12345xyz
 				Name:  toolCall.Function.Name,
-				Input: json.RawMessage(toolCall.Function.Arguments),
+				Input: []byte(toolCall.Function.Arguments),
 			})
 		}
 	}
 
 	if config.Prefill != "" {
 		for _, block := range contentBlocks {
-			if block.Type == llm.ContentTypeText {
+			if textContent, ok := block.(*llm.TextContent); ok {
 				if config.PrefillClosingTag == "" ||
-					strings.Contains(block.Text, config.PrefillClosingTag) {
-					block.Text = config.Prefill + block.Text
+					strings.Contains(textContent.Text, config.PrefillClosingTag) {
+					textContent.Text = config.Prefill + textContent.Text
 				}
 				break
 			}
@@ -210,7 +206,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.AfterGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -223,7 +219,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	return response, nil
 }
 
-func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
+func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
 	// Relevant OpenAI API documentation:
 	// https://platform.openai.com/docs/api-reference/chat/create
 
@@ -235,10 +231,10 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 		return nil, err
 	}
 
-	if err := validateMessages(messages); err != nil {
+	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(messages)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -259,7 +255,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -350,7 +346,8 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 
 		// First pass: collect all tool use content blocks and check for tool results
 		for _, c := range msg.Content {
-			if c.Type == llm.ContentTypeToolUse {
+			switch c := c.(type) {
+			case *llm.ToolUseContent:
 				hasToolUse = true
 				toolCalls = append(toolCalls, ToolCall{
 					ID:   c.ID,
@@ -360,9 +357,9 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 						Arguments: string(c.Input),
 					},
 				})
-			} else if c.Type == llm.ContentTypeText {
+			case *llm.TextContent:
 				textContent = c.Text
-			} else if c.Type == llm.ContentTypeToolResult {
+			case *llm.ToolResultContent:
 				hasToolResult = true
 			}
 		}
@@ -379,22 +376,23 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		// Process non-tool-use content blocks
 		if !hasToolUse || hasToolResult {
 			for _, c := range msg.Content {
-				switch c.Type {
-				case llm.ContentTypeText:
+				switch c := c.(type) {
+				case *llm.TextContent:
 					if !hasToolUse {
 						result = append(result, Message{Role: role, Content: c.Text})
 					}
-				case llm.ContentTypeToolResult:
+				case *llm.ToolResultContent:
 					// Each tool result goes in its own message
+					contentStr, _ := c.Content.(string)
 					result = append(result, Message{
 						Role:       "tool",
-						Content:    c.Content,
+						Content:    contentStr,
 						ToolCallID: c.ToolUseID,
 					})
-				case llm.ContentTypeToolUse:
+				case *llm.ToolUseContent:
 					// Already handled above
 				default:
-					return nil, fmt.Errorf("unsupported content type: %s", c.Type)
+					return nil, fmt.Errorf("unsupported content type: %s", c.Type())
 				}
 			}
 		}
@@ -417,10 +415,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	if maxTokens > 0 {
-		switch req.Model {
-		case "o1-mini", "o3-mini", "o1":
+		if strings.HasPrefix(req.Model, "o") {
 			req.MaxCompletionTokens = &maxTokens
-		default:
+		} else {
 			req.MaxTokens = &maxTokens
 		}
 	}
@@ -584,7 +581,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				Type:    "message",
 				Role:    llm.Assistant,
 				Model:   s.responseModel,
-				Content: []*llm.Content{},
+				Content: []llm.Content{},
 				Usage: llm.Usage{
 					InputTokens:  s.usage.PromptTokens,
 					OutputTokens: s.usage.CompletionTokens,

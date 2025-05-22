@@ -2,7 +2,6 @@ package toolkit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,12 +10,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/schema"
 )
 
-var _ llm.ToolWithMetadata = &CommandTool{}
+var _ dive.TypedTool[*CommandInput] = &CommandTool{}
 
-type commandInput struct {
+type CommandInput struct {
 	Name             string `json:"name"`
 	Args             []any  `json:"args"`
 	StdoutFile       string `json:"stdout_file"`
@@ -27,6 +27,7 @@ type commandInput struct {
 type CommandToolOptions struct {
 	AllowList []string
 	DenyList  []string
+	Confirmer dive.Confirmer
 }
 
 // CommandTool is a tool that executes external commands. This could run `cat`,
@@ -35,14 +36,16 @@ type CommandToolOptions struct {
 type CommandTool struct {
 	allowList []string
 	denyList  []string
+	confirmer dive.Confirmer
 }
 
 // NewCommandTool creates a new tool that executes external commands.
-func NewCommandTool(options CommandToolOptions) *CommandTool {
-	return &CommandTool{
+func NewCommandTool(options CommandToolOptions) *dive.TypedToolAdapter[*CommandInput] {
+	return dive.ToolAdapter(&CommandTool{
 		allowList: options.AllowList,
 		denyList:  options.DenyList,
-	}
+		confirmer: options.Confirmer,
+	})
 }
 
 func (c *CommandTool) Name() string {
@@ -65,11 +68,11 @@ func (c *CommandTool) Description() string {
 	return strings.TrimSpace(desc)
 }
 
-func (c *CommandTool) Schema() llm.Schema {
-	return llm.Schema{
+func (c *CommandTool) Schema() schema.Schema {
+	return schema.Schema{
 		Type:     "object",
 		Required: []string{"name"},
-		Properties: map[string]*llm.SchemaProperty{
+		Properties: map[string]*schema.Property{
 			"name": {
 				Type:        "string",
 				Description: "The name of the command to run",
@@ -77,7 +80,7 @@ func (c *CommandTool) Schema() llm.Schema {
 			"args": {
 				Type:        "array",
 				Description: "The arguments to pass to the command",
-				Items:       &llm.SchemaProperty{Type: "string"},
+				Items:       &schema.Property{Type: "string"},
 			},
 			"stdout_file": {
 				Type:        "string",
@@ -91,71 +94,70 @@ func (c *CommandTool) Schema() llm.Schema {
 	}
 }
 
-func (c *CommandTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var params commandInput
-	if err := json.Unmarshal([]byte(input.Input), &params); err != nil {
-		return nil, err
+func (c *CommandTool) Annotations() dive.ToolAnnotations {
+	return dive.ToolAnnotations{
+		Title:           "Command",
+		ReadOnlyHint:    false,
+		IdempotentHint:  false,
+		DestructiveHint: true,
+		OpenWorldHint:   true,
 	}
+}
 
-	name := params.Name
+func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.ToolResult, error) {
+
+	name := input.Name
 
 	var args []string
-	for _, arg := range params.Args {
+	for _, arg := range input.Args {
 		args = append(args, fmt.Sprintf("%v", arg))
 	}
 
 	if name == "" {
-		return llm.NewToolCallOutput("error: no command name provided."), nil
+		return NewToolResultError("error: no command name provided."), nil
 	}
 	if c.denyList != nil && slices.Contains(c.denyList, name) {
-		return llm.NewToolCallOutput(fmt.Sprintf("error: command name %q is not allowed.", name)), nil
+		return NewToolResultError(fmt.Sprintf("error: command name %q is not allowed.", name)), nil
 	}
 	if c.allowList != nil && !slices.Contains(c.allowList, name) {
-		return llm.NewToolCallOutput(fmt.Sprintf("error: command name %q is not allowed.", name)), nil
+		return NewToolResultError(fmt.Sprintf("error: command name %q is not allowed.", name)), nil
 	}
 
-	if input.Confirmer != nil {
-		confirmed, err := input.Confirmer.Confirm(ctx, llm.ConfirmationRequest{
+	if c.confirmer != nil {
+		confirmed, err := c.confirmer.Confirm(ctx, dive.ConfirmationRequest{
 			Prompt:  "Do you want to run this command?",
 			Details: strings.Join(append([]string{name}, args...), " "),
 			Data:    map[string]interface{}{"name": name, "args": args},
 		})
 		if err != nil {
-			return llm.NewToolCallOutput(fmt.Sprintf("error: user confirmation failed: %s", err.Error())), nil
+			return NewToolResultError(fmt.Sprintf("error: user confirmation failed: %s", err.Error())), nil
 		}
 		if !confirmed {
-			return llm.NewToolCallOutput("error: command cancelled by user."), nil
+			return NewToolResultError("error: command cancelled by user."), nil
 		}
 	}
 
 	cmd := exec.CommandContext(ctx, name, args...)
-	if params.WorkingDirectory != "" {
-		cmd.Dir = params.WorkingDirectory
+	if input.WorkingDirectory != "" {
+		cmd.Dir = input.WorkingDirectory
 	}
 
 	output, err := cmd.Output()
 	if err != nil {
-		return llm.NewToolCallOutput(fmt.Sprintf("error: command execution failed: %s", err.Error())), nil
+		return NewToolResultError(fmt.Sprintf("error: command execution failed: %s", err.Error())), nil
 	}
 
-	if params.StdoutFile != "" {
+	if input.StdoutFile != "" {
 		// create directory if it doesn't exist
-		dir := filepath.Dir(params.StdoutFile)
+		dir := filepath.Dir(input.StdoutFile)
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return llm.NewToolCallOutput(fmt.Sprintf("error: failed to create directory: %s", err.Error())), nil
+			return NewToolResultError(fmt.Sprintf("error: failed to create directory: %s", err.Error())), nil
 		}
-		if err := os.WriteFile(params.StdoutFile, output, 0644); err != nil {
-			return llm.NewToolCallOutput(fmt.Sprintf("error: failed to write command output to file: %s", err.Error())), nil
+		if err := os.WriteFile(input.StdoutFile, output, 0644); err != nil {
+			return NewToolResultError(fmt.Sprintf("error: failed to write command output to file: %s", err.Error())), nil
 		}
-		return llm.NewToolCallOutput(fmt.Sprintf("Command output written to file: %s", params.StdoutFile)), nil
+		return NewToolResultText(fmt.Sprintf("Command output written to file: %s", input.StdoutFile)), nil
 	}
 
-	return llm.NewToolCallOutput(string(output)), nil
-}
-
-func (c *CommandTool) Metadata() llm.ToolMetadata {
-	return llm.ToolMetadata{
-		Version:    "0.0.1",
-		Capability: llm.ToolCapabilityReadWrite,
-	}
+	return NewToolResultText(string(output)), nil
 }

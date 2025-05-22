@@ -4,7 +4,7 @@ Description: 'Generate a company overview by analyzing their website'
 Config:
   LLM:
     DefaultProvider: anthropic
-    DefaultModel: claude-3-7-sonnet-20250219
+    DefaultModel: claude-sonnet-4-20250514
   Logging:
     Level: debug
 

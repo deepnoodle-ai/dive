@@ -25,17 +25,12 @@ func TestAgent(t *testing.T) {
 func TestAgentChat(t *testing.T) {
 	// Use a mock LLM instead of Anthropic to prevent timing out
 	mockLLM := &mockLLM{
-		generateFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 			return &llm.Response{
-				ID:    "resp_mock",
-				Model: "test-model",
-				Role:  llm.Assistant,
-				Content: []*llm.Content{
-					{
-						Type: llm.ContentTypeText,
-						Text: "Hello there! How can I help you today?",
-					},
-				},
+				ID:         "resp_mock",
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Hello there! How can I help you today?"}},
 				Type:       "message",
 				StopReason: "stop",
 				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
@@ -142,14 +137,12 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 func TestAgentCreateResponse(t *testing.T) {
 	// Setup a simple mock LLM
 	mockLLM := &mockLLM{
-		generateFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 			return &llm.Response{
-				ID:    "resp_123",
-				Model: "test-model", // This is the model name that will be used
-				Role:  llm.Assistant,
-				Content: []*llm.Content{
-					{Type: llm.ContentTypeText, Text: "This is a test response"},
-				},
+				ID:         "resp_123",
+				Model:      "test-model", // This is the model name that will be used
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "This is a test response"}},
 				Type:       "message",
 				StopReason: "stop",
 				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
@@ -215,7 +208,7 @@ func TestAgentCreateResponse(t *testing.T) {
 	t.Run("CreateResponse with messages", func(t *testing.T) {
 		// Test with explicit messages
 		messages := []*llm.Message{
-			llm.NewUserMessage("Here's a more complex message"),
+			llm.NewUserTextMessage("Here's a more complex message"),
 		}
 
 		resp, err := agent.CreateResponse(context.Background(), dive.WithMessages(messages))
@@ -244,116 +237,10 @@ func TestAgentCreateResponse(t *testing.T) {
 	})
 }
 
-// // TestAgentStreamResponse demonstrates using the StreamResponse API
-// func TestAgentStreamResponse(t *testing.T) {
-// 	// Setup a mock streaming LLM
-// 	mockStreamingLLM := &mockStreamingLLM{
-// 		generateFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
-// 			return &llm.Response{
-// 				ID:    "resp_123",
-// 				Model: "test-model",
-// 				Role:  llm.Assistant,
-// 				Content: []*llm.Content{
-// 					{Type: llm.ContentTypeText, Text: "This is a test response"},
-// 				},
-// 				Type:       "message",
-// 				StopReason: "stop",
-// 				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
-// 			}, nil
-// 		},
-// 		streamFunc: func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
-// 			return &mockStreamIterator{
-// 				events: []*llm.Event{
-// 					{
-// 						Type: llm.EventTypeMessageStart,
-// 						Message: &llm.Response{
-// 							ID:    "resp_123",
-// 							Model: "test-model",
-// 							Role:  llm.Assistant,
-// 							Type:  "message",
-// 						},
-// 					},
-// 					{
-// 						Type: llm.EventTypeContentBlockStart,
-// 						Index: func() *int {
-// 							i := 0
-// 							return &i
-// 						}(),
-// 						ContentBlock: &llm.EventContentBlock{
-// 							Type: llm.ContentTypeText,
-// 						},
-// 					},
-// 					{
-// 						Type: llm.EventTypeContentBlockDelta,
-// 						Index: func() *int {
-// 							i := 0
-// 							return &i
-// 						}(),
-// 						Delta: &llm.EventDelta{
-// 							Type: llm.EventDeltaTypeText,
-// 							Text: "This is a ",
-// 						},
-// 					},
-// 					{
-// 						Type: llm.EventTypeContentBlockDelta,
-// 						Index: func() *int {
-// 							i := 0
-// 							return &i
-// 						}(),
-// 						Delta: &llm.EventDelta{
-// 							Type: llm.EventDeltaTypeText,
-// 							Text: "test response",
-// 						},
-// 					},
-// 					{
-// 						Type: llm.EventTypeMessageStop,
-// 						Usage: &llm.Usage{
-// 							InputTokens:  10,
-// 							OutputTokens: 5,
-// 						},
-// 					},
-// 				},
-// 			}, nil
-// 		},
-// 	}
-
-// 	// Create a simple agent with the mock streaming LLM
-// 	agent, err := New(Options{
-// 		Name:  "TestStreamingAgent",
-// 		Goal:  "To test the StreamResponse API",
-// 		Model: mockStreamingLLM,
-// 	})
-// 	if err != nil {
-// 		t.Fatalf("Failed to create streaming agent: %v", err)
-// 	}
-
-// 	t.Run("StreamResponse with input string", func(t *testing.T) {
-// 		// Test with a simple string input
-// 		stream, err := agent.StreamResponse(context.Background(), dive.WithInput("Hello, agent!"))
-// 		if err != nil {
-// 			t.Fatalf("StreamResponse failed: %v", err)
-// 		}
-
-// 		// Consume the stream to verify it works
-// 		var events []*dive.Event
-// 		for stream.Next(context.Background()) {
-// 			events = append(events, stream.Event())
-// 		}
-
-// 		if err := stream.Err(); err != nil {
-// 			t.Fatalf("Stream error: %v", err)
-// 		}
-
-// 		if len(events) == 0 {
-// 			t.Errorf("Expected events from stream, got none")
-// 		}
-// 	})
-// }
-
 // Mock types for testing
 
 type mockLLM struct {
-	generateFunc func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error)
+	generateFunc func(ctx context.Context, opts ...llm.Option) (*llm.Response, error)
 	nameFunc     func() string
 }
 
@@ -364,44 +251,6 @@ func (m *mockLLM) Name() string {
 	return "mock-llm"
 }
 
-func (m *mockLLM) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
-	return m.generateFunc(ctx, messages, opts...)
-}
-
-type mockStreamingLLM struct {
-	mockLLM
-	streamFunc func(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error)
-}
-
-func (m *mockStreamingLLM) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
-	return m.streamFunc(ctx, messages, opts...)
-}
-
-type mockStreamIterator struct {
-	events  []*llm.Event
-	current int
-	err     error
-}
-
-func (m *mockStreamIterator) Next() bool {
-	if m.current >= len(m.events) {
-		return false
-	}
-	m.current++
-	return true
-}
-
-func (m *mockStreamIterator) Event() *llm.Event {
-	if m.current == 0 || m.current > len(m.events) {
-		return nil
-	}
-	return m.events[m.current-1]
-}
-
-func (m *mockStreamIterator) Err() error {
-	return m.err
-}
-
-func (m *mockStreamIterator) Close() error {
-	return nil
+func (m *mockLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+	return m.generateFunc(ctx, opts...)
 }

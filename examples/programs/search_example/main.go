@@ -35,7 +35,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	
+
 	var searchClient web.Searcher
 	var model llm.LLM
 	var err error
@@ -63,7 +63,7 @@ func main() {
 	default:
 		log.Fatalf("Unknown search provider: %s. Use 'google' or 'kagi'", *searchProvider)
 	}
-	
+
 	// Initialize LLM model
 	switch *modelProvider {
 	case "anthropic":
@@ -90,7 +90,9 @@ func main() {
 		Goal:   "Use " + *searchProvider + " search with " + *modelProvider + " to research assigned topics",
 		Model:  model,
 		Logger: slogger.New(slogger.LevelFromString(*logLevel)),
-		Tools:  []llm.Tool{toolkit.NewSearchTool(searchClient)},
+		Tools: []dive.Tool{
+			toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: searchClient}),
+		},
 	})
 	if err != nil {
 		log.Fatalf("Failed to create research agent: %v", err)

@@ -1,6 +1,9 @@
 package llm
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // EventType represents the type of streaming event
 type EventType string
@@ -32,12 +35,13 @@ type Event struct {
 
 // EventContentBlock carries the start of a content block in an LLM event.
 type EventContentBlock struct {
-	Type      ContentType `json:"type"`
-	Text      string      `json:"text,omitempty"`
-	ID        string      `json:"id,omitempty"`
-	Name      string      `json:"name,omitempty"`
-	Thinking  string      `json:"thinking,omitempty"`
-	Signature string      `json:"signature,omitempty"`
+	Type      ContentType     `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
 }
 
 // EventDeltaType indicates the type of delta in an LLM event.
@@ -52,6 +56,7 @@ const (
 	EventDeltaTypeInputJSON EventDeltaType = "input_json_delta"
 	EventDeltaTypeThinking  EventDeltaType = "thinking_delta"
 	EventDeltaTypeSignature EventDeltaType = "signature_delta"
+	EventDeltaTypeCitations EventDeltaType = "citations_delta"
 )
 
 // EventDelta carries a portion of an LLM response.
@@ -93,13 +98,24 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		if event.ContentBlock == nil {
 			return errors.New("no content block found in event")
 		}
-		content := &Content{
-			Type:      event.ContentBlock.Type,
-			Text:      event.ContentBlock.Text,
-			ID:        event.ContentBlock.ID,
-			Name:      event.ContentBlock.Name,
-			Thinking:  event.ContentBlock.Thinking,
-			Signature: event.ContentBlock.Signature,
+		var content Content
+		switch event.ContentBlock.Type {
+		case ContentTypeText:
+			content = &TextContent{
+				Text: event.ContentBlock.Text,
+			}
+		case ContentTypeToolUse:
+			content = &ToolUseContent{
+				ID:   event.ContentBlock.ID,
+				Name: event.ContentBlock.Name,
+			}
+		case ContentTypeThinking:
+			content = &ThinkingContent{
+				Thinking:  event.ContentBlock.Thinking,
+				Signature: event.ContentBlock.Signature,
+			}
+		case ContentTypeRedactedThinking:
+			content = &RedactedThinkingContent{}
 		}
 		if event.Index != nil {
 			// Ensure slice has enough capacity
@@ -124,17 +140,24 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		}
 		switch event.Delta.Type {
 		case EventDeltaTypeText:
-			content.Text += event.Delta.Text
-		case EventDeltaTypeInputJSON:
-			if content.Input == nil {
-				content.Input = []byte(event.Delta.PartialJSON)
+			if textContent, ok := content.(*TextContent); ok {
+				textContent.Text += event.Delta.Text
 			} else {
-				content.Input = append(content.Input, []byte(event.Delta.PartialJSON)...)
+				return errors.New("in-progress block is not a text content")
 			}
-		case EventDeltaTypeThinking:
-			content.Thinking += event.Delta.Thinking
-		case EventDeltaTypeSignature:
-			content.Signature += event.Delta.Signature
+		case EventDeltaTypeInputJSON:
+			if toolUseContent, ok := content.(*ToolUseContent); ok {
+				toolUseContent.Input = append(toolUseContent.Input, []byte(event.Delta.PartialJSON)...)
+			} else {
+				return errors.New("in-progress block is not a tool use content")
+			}
+		case EventDeltaTypeThinking, EventDeltaTypeSignature:
+			if thinkingContent, ok := content.(*ThinkingContent); ok {
+				thinkingContent.Thinking += event.Delta.Thinking
+				thinkingContent.Signature += event.Delta.Signature
+			} else {
+				return errors.New("in-progress block is not a thinking content")
+			}
 		}
 
 	case EventTypeMessageDelta:

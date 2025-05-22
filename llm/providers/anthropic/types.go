@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/schema"
 )
 
 const (
@@ -25,15 +26,15 @@ type Thinking struct {
 }
 
 type Request struct {
-	Model       string         `json:"model"`
-	Messages    []*llm.Message `json:"messages"`
-	MaxTokens   *int           `json:"max_tokens,omitempty"`
-	Temperature *float64       `json:"temperature,omitempty"`
-	System      string         `json:"system,omitempty"`
-	Stream      bool           `json:"stream,omitempty"`
-	Tools       []*Tool        `json:"tools,omitempty"`
-	ToolChoice  *ToolChoice    `json:"tool_choice,omitempty"`
-	Thinking    *Thinking      `json:"thinking,omitempty"`
+	Model       string           `json:"model"`
+	Messages    []*llm.Message   `json:"messages"`
+	MaxTokens   *int             `json:"max_tokens,omitempty"`
+	Temperature *float64         `json:"temperature,omitempty"`
+	System      string           `json:"system,omitempty"`
+	Stream      bool             `json:"stream,omitempty"`
+	Tools       []map[string]any `json:"tools,omitempty"`
+	ToolChoice  *ToolChoice      `json:"tool_choice,omitempty"`
+	Thinking    *Thinking        `json:"thinking,omitempty"`
 }
 
 type ToolChoiceType string
@@ -51,7 +52,7 @@ type ToolChoice struct {
 }
 
 type Tool struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description,omitempty"`
-	InputSchema llm.Schema `json:"input_schema"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	InputSchema schema.Schema `json:"input_schema"`
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/objects"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
@@ -27,7 +26,7 @@ type Environment struct {
 	threadRepo      dive.ThreadRepository
 	actions         map[string]Action
 	started         bool
-	confirmer       llm.Confirmer
+	confirmer       dive.Confirmer
 }
 
 // Options are used to configure an Environment.
@@ -45,7 +44,7 @@ type Options struct {
 	ThreadRepository   dive.ThreadRepository
 	Actions            []Action
 	AutoStart          bool
-	Confirmer          llm.Confirmer
+	Confirmer          dive.Confirmer
 }
 
 // New returns a new Environment configured with the given options.

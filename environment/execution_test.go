@@ -50,10 +50,8 @@ func (m *mockAgent) CreateResponse(ctx context.Context, opts ...dive.Option) (*d
 			{
 				Type: dive.ResponseItemTypeMessage,
 				Message: &llm.Message{
-					Role: llm.Assistant,
-					Content: []*llm.Content{
-						{Type: llm.ContentTypeText, Text: "test output"},
-					},
+					Role:    llm.Assistant,
+					Content: []llm.Content{&llm.TextContent{Text: "test output"}},
 				},
 			},
 		},

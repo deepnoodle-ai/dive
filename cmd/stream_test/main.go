@@ -30,7 +30,7 @@ func main() {
 	flag.StringVar(&prompt, "prompt", "Count to 5", "Prompt to send to the LLM")
 	flag.Parse()
 
-	messages := llm.Messages{llm.NewUserMessage(prompt)}
+	messages := llm.Messages{llm.NewUserTextMessage(prompt)}
 
 	fmt.Println("====")
 	fmt.Println("Anthropic")
@@ -48,12 +48,12 @@ func stream(model llm.StreamingLLM, messages llm.Messages) {
 		if err != nil {
 			fatal("failed to initialize Google Search: %s", err)
 		}
-		modelTools = append(modelTools, toolkit.NewSearchTool(googleClient))
+		modelTools = append(modelTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
 	}
 
 	stream, err := model.Stream(
 		context.Background(),
-		messages,
+		llm.WithMessages(messages...),
 		llm.WithTools(modelTools...),
 		llm.WithTemperature(0.1),
 		llm.WithSystemPrompt("You are a helpful assistant."),

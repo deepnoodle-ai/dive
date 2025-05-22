@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	DefaultModel     = ModelClaude37Sonnet
+	DefaultModel     = ModelClaudeSonnet4
 	DefaultEndpoint  = "https://api.anthropic.com/v1/messages"
 	DefaultVersion   = "2023-06-01"
 	DefaultMaxTokens = 8192
@@ -58,7 +58,7 @@ func (p *Provider) Name() string {
 	return fmt.Sprintf("anthropic-%s", p.model)
 }
 
-func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (*llm.Response, error) {
+func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)
 
@@ -66,29 +66,12 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(messages)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, err
 	}
-	if config.Caching == nil || *config.Caching {
-		lastMessage := msgs[len(msgs)-1]
-		if len(lastMessage.Content) > 0 {
-			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.CacheControl = &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}
-		}
-		// Remove cache control from prior messages if present
-		for i := 0; i < len(msgs)-1; i++ {
-			message := msgs[i]
-			for _, content := range message.Content {
-				content.CacheControl = nil
-			}
-		}
-	}
 	if config.Prefill != "" {
-		msgs = append(msgs, &llm.Message{
-			Role:    llm.Assistant,
-			Content: []*llm.Content{{Type: llm.ContentTypeText, Text: config.Prefill}},
-		})
+		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
 	request.Messages = msgs
 
@@ -100,7 +83,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -156,7 +139,7 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.AfterGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -169,14 +152,15 @@ func (p *Provider) Generate(ctx context.Context, messages []*llm.Message, opts .
 	return &result, nil
 }
 
-func addPrefill(blocks []*llm.Content, prefill, closingTag string) error {
+func addPrefill(blocks []llm.Content, prefill, closingTag string) error {
 	if prefill == "" {
 		return nil
 	}
 	for _, block := range blocks {
-		if block.Type == llm.ContentTypeText {
-			if closingTag == "" || strings.Contains(block.Text, closingTag) {
-				block.Text = prefill + block.Text
+		content, ok := block.(*llm.TextContent)
+		if ok {
+			if closingTag == "" || strings.Contains(content.Text, closingTag) {
+				content.Text = prefill + content.Text
 				return nil
 			}
 			return fmt.Errorf("prefill closing tag not found")
@@ -185,7 +169,7 @@ func addPrefill(blocks []*llm.Content, prefill, closingTag string) error {
 	return fmt.Errorf("no text content found in message")
 }
 
-func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...llm.Option) (llm.StreamIterator, error) {
+func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)
 
@@ -193,29 +177,12 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(messages)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-	if config.Caching == nil || *config.Caching {
-		lastMessage := msgs[len(msgs)-1]
-		if len(lastMessage.Content) > 0 {
-			lastContent := lastMessage.Content[len(lastMessage.Content)-1]
-			lastContent.CacheControl = &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}
-		}
-		// Remove cache control from prior messages if present
-		for i := 0; i < len(msgs)-1; i++ {
-			message := msgs[i]
-			for _, content := range message.Content {
-				content.CacheControl = nil
-			}
-		}
-	}
 	if config.Prefill != "" {
-		msgs = append(msgs, &llm.Message{
-			Role:    llm.Assistant,
-			Content: []*llm.Content{{Type: llm.ContentTypeText, Text: config.Prefill}},
-		})
+		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
 	request.Messages = msgs
 	request.Stream = true
@@ -228,7 +195,7 @@ func (p *Provider) Stream(ctx context.Context, messages []*llm.Message, opts ...
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: messages,
+			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
@@ -303,13 +270,13 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	copied := make([]*llm.Message, len(messages))
 	for i, message := range messages {
 		// The "name" field in tool results can't be set either
-		var copiedContent []*llm.Content
+		var copiedContent []llm.Content
 		for _, content := range message.Content {
-			if content.Type == llm.ContentTypeToolResult {
-				copiedContent = append(copiedContent, &llm.Content{
-					Type:      content.Type,
-					Content:   content.Content,
-					ToolUseID: content.ToolUseID,
+			toolResultContent, ok := content.(*llm.ToolResultContent)
+			if ok {
+				copiedContent = append(copiedContent, &llm.ToolResultContent{
+					Content:   toolResultContent.Content,
+					ToolUseID: toolResultContent.ToolUseID,
 				})
 			} else {
 				copiedContent = append(copiedContent, content)
@@ -365,13 +332,24 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	if len(config.Tools) > 0 {
-		var tools []*Tool
+		var tools []map[string]any
 		for _, tool := range config.Tools {
-			tools = append(tools, &Tool{
-				Name:        tool.Name(),
-				Description: tool.Description(),
-				InputSchema: tool.Schema(),
-			})
+			// Handle tools that explicitly provide a configuration
+			if toolWithConfig, ok := tool.(llm.ToolConfiguration); ok {
+				toolConfig := toolWithConfig.ToolConfiguration(p.Name())
+				tools = append(tools, toolConfig)
+				continue
+			}
+			// Handle tools with the default configuration behavior
+			schema := tool.Schema()
+			toolConfig := map[string]any{
+				"name":        tool.Name(),
+				"description": tool.Description(),
+			}
+			if schema.Type != "" {
+				toolConfig["input_schema"] = schema
+			}
+			tools = append(tools, toolConfig)
 		}
 		req.Tools = tools
 	}
@@ -400,10 +378,10 @@ func reorderMessageContent(messages []*llm.Message) {
 			continue
 		}
 		// Separate blocks into tool use and non-tool use
-		var toolUseBlocks []*llm.Content
-		var otherBlocks []*llm.Content
+		var toolUseBlocks []llm.Content
+		var otherBlocks []llm.Content
 		for _, block := range msg.Content {
-			if block.Type == llm.ContentTypeToolUse {
+			if block.Type() == llm.ContentTypeToolUse {
 				toolUseBlocks = append(toolUseBlocks, block)
 			} else {
 				otherBlocks = append(otherBlocks, block)

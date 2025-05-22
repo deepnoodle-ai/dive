@@ -1,6 +1,6 @@
 package openai
 
-import "github.com/diveagents/dive/llm"
+import "github.com/diveagents/dive/schema"
 
 type ReasoningEffort string
 
@@ -39,10 +39,10 @@ type Message struct {
 }
 
 type ToolFunction struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Parameters  llm.Schema `json:"parameters"`
-	Strict      bool       `json:"strict,omitempty"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Parameters  schema.Schema `json:"parameters"`
+	Strict      bool          `json:"strict,omitempty"`
 }
 
 type Tool struct {

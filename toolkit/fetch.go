@@ -2,13 +2,13 @@ package toolkit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/retry"
+	"github.com/diveagents/dive/schema"
 	"github.com/diveagents/dive/web"
 )
 
@@ -34,37 +34,32 @@ var DefaultFetchExcludeTags = []string{
 	"footer",
 }
 
-var _ llm.ToolWithMetadata = &FetchTool{}
+var _ dive.TypedTool[*web.FetchInput] = &FetchTool{}
 
 type FetchTool struct {
 	fetcher    web.Fetcher
 	maxSize    int
 	maxRetries int
 	timeout    time.Duration
+	confirmer  dive.Confirmer
 }
 
-func NewFetchTool(fetcher web.Fetcher) *FetchTool {
-	return &FetchTool{
-		fetcher:    fetcher,
-		maxSize:    DefaultFetchMaxSize,
-		maxRetries: DefaultFetchMaxRetries,
-		timeout:    DefaultFetchTimeout,
-	}
+type FetchToolOptions struct {
+	MaxSize    int            `json:"max_size,omitempty"`
+	MaxRetries int            `json:"max_retries,omitempty"`
+	Timeout    time.Duration  `json:"timeout,omitempty"`
+	Fetcher    web.Fetcher    `json:"-"`
+	Confirmer  dive.Confirmer `json:"-"`
 }
 
-func (t *FetchTool) WithMaxSize(maxSize int) *FetchTool {
-	t.maxSize = maxSize
-	return t
-}
-
-func (t *FetchTool) WithMaxRetries(maxRetries int) *FetchTool {
-	t.maxRetries = maxRetries
-	return t
-}
-
-func (t *FetchTool) WithTimeout(timeout time.Duration) *FetchTool {
-	t.timeout = timeout
-	return t
+func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInput] {
+	return dive.ToolAdapter(&FetchTool{
+		fetcher:    options.Fetcher,
+		maxSize:    options.MaxSize,
+		maxRetries: options.MaxRetries,
+		timeout:    options.Timeout,
+		confirmer:  options.Confirmer,
+	})
 }
 
 func (t *FetchTool) Name() string {
@@ -75,11 +70,11 @@ func (t *FetchTool) Description() string {
 	return "Retrieves the contents of the webpage at the given URL."
 }
 
-func (t *FetchTool) Schema() llm.Schema {
-	return llm.Schema{
+func (t *FetchTool) Schema() schema.Schema {
+	return schema.Schema{
 		Type:     "object",
 		Required: []string{"url"},
-		Properties: map[string]*llm.SchemaProperty{
+		Properties: map[string]*schema.Property{
 			"url": {
 				Type:        "string",
 				Description: "The URL of the webpage to retrieve, e.g. 'https://www.example.com'",
@@ -88,16 +83,25 @@ func (t *FetchTool) Schema() llm.Schema {
 	}
 }
 
-func (t *FetchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	var s web.FetchInput
-	if err := json.Unmarshal([]byte(input.Input), &s); err != nil {
-		return nil, err
+func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.ToolResult, error) {
+	input.Formats = []string{"markdown"}
+
+	if input.ExcludeTags == nil {
+		input.ExcludeTags = DefaultFetchExcludeTags
 	}
 
-	s.Formats = []string{"markdown"}
-
-	if s.ExcludeTags == nil {
-		s.ExcludeTags = DefaultFetchExcludeTags
+	if t.confirmer != nil {
+		confirmed, err := t.confirmer.Confirm(ctx, dive.ConfirmationRequest{
+			Prompt:  "Do you want to fetch the URL?",
+			Details: input.URL,
+			Data:    map[string]interface{}{"url": input.URL},
+		})
+		if err != nil {
+			return NewToolResultError(fmt.Sprintf("error: user confirmation failed: %s", err.Error())), nil
+		}
+		if !confirmed {
+			return NewToolResultError("error: user confirmation failed."), nil
+		}
 	}
 
 	if t.timeout > 0 {
@@ -109,7 +113,7 @@ func (t *FetchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.To
 	var response *web.Document
 	err := retry.Do(ctx, func() error {
 		var err error
-		response, err = t.fetcher.Fetch(ctx, &s)
+		response, err = t.fetcher.Fetch(ctx, input)
 		if err != nil {
 			return err
 		}
@@ -117,7 +121,7 @@ func (t *FetchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.To
 	}, retry.WithMaxRetries(t.maxRetries))
 
 	if err != nil {
-		return llm.NewToolCallOutput(fmt.Sprintf("failed to fetch url after %d attempts: %s", t.maxRetries, err)), nil
+		return NewToolResultError(fmt.Sprintf("failed to fetch url after %d attempts: %s", t.maxRetries, err)), nil
 	}
 
 	var sb strings.Builder
@@ -133,13 +137,16 @@ func (t *FetchTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.To
 	sb.WriteString(response.Markdown)
 
 	result := truncateText(sb.String(), t.maxSize)
-	return llm.NewToolCallOutput(result), nil
+	return NewToolResultText(result), nil
 }
 
-func (t *FetchTool) Metadata() llm.ToolMetadata {
-	return llm.ToolMetadata{
-		Version:    "0.0.1",
-		Capability: llm.ToolCapabilityReadOnly,
+func (t *FetchTool) Annotations() dive.ToolAnnotations {
+	return dive.ToolAnnotations{
+		Title:           "Fetch",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  true,
+		OpenWorldHint:   true,
 	}
 }
 

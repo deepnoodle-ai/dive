@@ -3,15 +3,20 @@ package toolkit
 import (
 	"context"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/schema"
 )
 
-var _ llm.ToolWithMetadata = &MockCalculatorTool{}
+var _ dive.TypedTool[*MockCalculatorInput] = &MockCalculatorTool{}
+
+type MockCalculatorInput struct {
+	Expression string `json:"expression"`
+}
 
 type MockCalculatorTool struct {
-	Result string
-	Error  error
-	Input  string
+	Result        string
+	Error         error
+	CapturedInput *MockCalculatorInput
 }
 
 func (t *MockCalculatorTool) Name() string {
@@ -22,11 +27,11 @@ func (t *MockCalculatorTool) Description() string {
 	return "Performs basic arithmetic calculations"
 }
 
-func (t *MockCalculatorTool) Schema() llm.Schema {
-	return llm.Schema{
+func (t *MockCalculatorTool) Schema() dive.Schema {
+	return dive.Schema{
 		Type:     "object",
 		Required: []string{"expression"},
-		Properties: map[string]*llm.SchemaProperty{
+		Properties: map[string]*schema.Property{
 			"expression": {
 				Type:        "string",
 				Description: "The arithmetic expression to evaluate (e.g., '2 + 2')",
@@ -35,14 +40,17 @@ func (t *MockCalculatorTool) Schema() llm.Schema {
 	}
 }
 
-func (t *MockCalculatorTool) Call(ctx context.Context, input *llm.ToolCallInput) (*llm.ToolCallOutput, error) {
-	t.Input = input.Input
-	return llm.NewToolCallOutput(t.Result), t.Error
+func (t *MockCalculatorTool) Call(ctx context.Context, input *MockCalculatorInput) (*dive.ToolResult, error) {
+	t.CapturedInput = input
+	return dive.NewToolResultText(t.Result), t.Error
 }
 
-func (t *MockCalculatorTool) Metadata() llm.ToolMetadata {
-	return llm.ToolMetadata{
-		Version:    "0.0.1",
-		Capability: llm.ToolCapabilityReadOnly,
+func (t *MockCalculatorTool) Annotations() dive.ToolAnnotations {
+	return dive.ToolAnnotations{
+		Title:           "Calculator",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  true,
+		OpenWorldHint:   false,
 	}
 }
