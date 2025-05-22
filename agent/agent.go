@@ -647,7 +647,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolUseCo
 		a.logger.Debug("executing tool call",
 			"tool_id", toolCall.ID,
 			"tool_name", toolCall.Name,
-			"tool_input", toolCall.Input)
+			"tool_input", string(toolCall.Input))
 
 		publisher.Send(ctx, &dive.ResponseEvent{
 			Type: dive.EventTypeResponseToolCall,
