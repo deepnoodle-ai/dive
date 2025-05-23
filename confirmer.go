@@ -70,6 +70,14 @@ const (
 	ConfirmNever ConfirmationMode = "never"
 )
 
+func (c ConfirmationMode) String() string {
+	return string(c)
+}
+
+func (c ConfirmationMode) IsValid() bool {
+	return c == ConfirmAlways || c == ConfirmIfNotReadOnly || c == ConfirmIfDestructive || c == ConfirmNever
+}
+
 var _ Confirmer = &TerminalConfirmer{}
 
 type TerminalConfirmer struct {
@@ -77,11 +85,7 @@ type TerminalConfirmer struct {
 }
 
 type TerminalConfirmerOptions struct {
-	// Mode controls when confirmation is required:
-	// - "always": confirm all operations (default)
-	// - "read-write": only confirm operations that modify state
-	// - "never": never confirm
-	Mode string
+	Mode ConfirmationMode
 }
 
 func NewTerminalConfirmer(opts TerminalConfirmerOptions) *TerminalConfirmer {

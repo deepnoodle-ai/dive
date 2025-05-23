@@ -43,6 +43,7 @@ type Config struct {
 	Features          []string          `json:"features,omitempty"`
 	RequestHeaders    http.Header       `json:"request_headers,omitempty"`
 	MCPServers        []MCPServerConfig `json:"mcp_servers,omitempty"`
+	Caching           *bool             `json:"caching,omitempty"`
 	Hooks             Hooks             `json:"-"`
 	Client            *http.Client      `json:"-"`
 	Logger            slogger.Logger    `json:"-"`

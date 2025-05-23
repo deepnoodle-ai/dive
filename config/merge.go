@@ -17,21 +17,35 @@ func Merge(base, override *Environment) *Environment {
 	}
 
 	// Merge config
-	if override.Config.LLM.Caching != nil {
-		result.Config.LLM.Caching = override.Config.LLM.Caching
+	if override.Config.DefaultProvider != "" {
+		result.Config.DefaultProvider = override.Config.DefaultProvider
 	}
-	if override.Config.LLM.DefaultProvider != "" {
-		result.Config.LLM.DefaultProvider = override.Config.LLM.DefaultProvider
+	if override.Config.DefaultModel != "" {
+		result.Config.DefaultModel = override.Config.DefaultModel
 	}
-	if override.Config.LLM.DefaultModel != "" {
-		result.Config.LLM.DefaultModel = override.Config.LLM.DefaultModel
+	if override.Config.LogLevel != "" {
+		result.Config.LogLevel = override.Config.LogLevel
 	}
-	if override.Config.Logging.Level != "" {
-		result.Config.Logging.Level = override.Config.Logging.Level
+	if override.Config.DefaultWorkflow != "" {
+		result.Config.DefaultWorkflow = override.Config.DefaultWorkflow
 	}
-	if override.Config.Workflows.DefaultWorkflow != "" {
-		result.Config.Workflows.DefaultWorkflow = override.Config.Workflows.DefaultWorkflow
+
+	// Merge providers
+	providersByName := make(map[string]Provider)
+	for _, p := range result.Config.Providers {
+		providersByName[p.Name] = p
 	}
+	for _, p := range override.Config.Providers {
+		providersByName[p.Name] = p
+	}
+	providers := make([]Provider, 0, len(providersByName))
+	for _, p := range providersByName {
+		providers = append(providers, p)
+	}
+	sort.Slice(providers, func(i, j int) bool {
+		return providers[i].Name < providers[j].Name
+	})
+	result.Config.Providers = providers
 
 	// Merge tools
 	toolMap := make(map[string]Tool)

@@ -495,7 +495,9 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 
 	if config.IsFeatureEnabled(FeatureExtendedCache) {
 		req.Header.Add("anthropic-beta", FeatureExtendedCache)
-	} else {
+	} else if config.IsFeatureEnabled(FeaturePromptCaching) {
+		req.Header.Add("anthropic-beta", FeaturePromptCaching)
+	} else if config.Caching == nil || *config.Caching {
 		req.Header.Add("anthropic-beta", FeaturePromptCaching)
 	}
 

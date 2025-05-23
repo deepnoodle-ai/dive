@@ -71,6 +71,7 @@ func initializeTools(tools []Tool) (map[string]dive.Tool, error) {
 			}
 		}
 		options.Fetcher = client
+		fmt.Println("Web.Fetch", client, options)
 		toolsMap["Web.Fetch"] = toolkit.NewFetchTool(options)
 	}
 

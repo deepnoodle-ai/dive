@@ -1,39 +1,35 @@
 package config
 
-// LLMConfig is used to configure LLM related settings
-type LLMConfig struct {
-	Caching         *bool  `yaml:"Caching,omitempty" json:"Caching,omitempty"`
-	DefaultProvider string `yaml:"DefaultProvider,omitempty" json:"DefaultProvider,omitempty"`
-	DefaultModel    string `yaml:"DefaultModel,omitempty" json:"DefaultModel,omitempty"`
+type MCPToolConfiguration struct {
+	Enabled      bool     `yaml:"Enabled" json:"Enabled"`
+	AllowedTools []string `yaml:"AllowedTools" json:"AllowedTools"`
 }
 
-// LoggingConfig is used to configure logging related settings
-type LoggingConfig struct {
-	Level string `yaml:"Level,omitempty" json:"Level,omitempty"`
+type MCPServer struct {
+	Type               string                `yaml:"Type" json:"Type"`
+	Name               string                `yaml:"Name" json:"Name"`
+	URL                string                `yaml:"URL,omitempty" json:"URL,omitempty"`
+	AuthorizationToken string                `yaml:"AuthorizationToken,omitempty" json:"AuthorizationToken,omitempty"`
+	ToolConfiguration  *MCPToolConfiguration `yaml:"ToolConfiguration,omitempty" json:"ToolConfiguration,omitempty"`
 }
 
-// ConfirmationConfig is used to configure confirmation related settings
-type ConfirmationConfig struct {
-	Mode string `yaml:"Mode,omitempty" json:"Mode,omitempty"`
-}
-
-// WorkflowConfig is used to configure Workflow related settings
-type WorkflowConfig struct {
-	DefaultWorkflow string `yaml:"DefaultWorkflow,omitempty" json:"DefaultWorkflow,omitempty"`
-}
-
-// DocumentsConfig is used to configure Documents related settings
-type DocumentsConfig struct {
-	Root string `yaml:"Root,omitempty" json:"Root,omitempty"`
+// Provider is used to configure an LLM provider
+type Provider struct {
+	Name           string            `yaml:"Name" json:"Name"`
+	Caching        *bool             `yaml:"Caching,omitempty" json:"Caching,omitempty"`
+	Features       []string          `yaml:"Features,omitempty" json:"Features,omitempty"`
+	RequestHeaders map[string]string `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
+	MCPServers     []MCPServer       `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
 }
 
 // Config represents global configuration settings
 type Config struct {
-	LLM          LLMConfig          `yaml:"LLM,omitempty" json:"LLM,omitempty"`
-	Logging      LoggingConfig      `yaml:"Logging,omitempty" json:"Logging,omitempty"`
-	Workflows    WorkflowConfig     `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
-	Documents    DocumentsConfig    `yaml:"Documents,omitempty" json:"Documents,omitempty"`
-	Confirmation ConfirmationConfig `yaml:"Confirmation,omitempty" json:"Confirmation,omitempty"`
+	DefaultProvider  string     `yaml:"DefaultProvider,omitempty" json:"DefaultProvider,omitempty"`
+	DefaultModel     string     `yaml:"DefaultModel,omitempty" json:"DefaultModel,omitempty"`
+	DefaultWorkflow  string     `yaml:"DefaultWorkflow,omitempty" json:"DefaultWorkflow,omitempty"`
+	ConfirmationMode string     `yaml:"ConfirmationMode,omitempty" json:"ConfirmationMode,omitempty"`
+	LogLevel         string     `yaml:"LogLevel,omitempty" json:"LogLevel,omitempty"`
+	Providers        []Provider `yaml:"Providers,omitempty" json:"Providers,omitempty"`
 }
 
 // Variable represents a workflow-level input parameter
@@ -72,14 +68,18 @@ type Agent struct {
 
 // ModelSettings is used to configure an Agent LLM
 type ModelSettings struct {
-	Temperature       *float64 `yaml:"Temperature,omitempty" json:"Temperature,omitempty"`
-	PresencePenalty   *float64 `yaml:"PresencePenalty,omitempty" json:"PresencePenalty,omitempty"`
-	FrequencyPenalty  *float64 `yaml:"FrequencyPenalty,omitempty" json:"FrequencyPenalty,omitempty"`
-	ReasoningBudget   *int     `yaml:"ReasoningBudget,omitempty" json:"ReasoningBudget,omitempty"`
-	ReasoningEffort   string   `yaml:"ReasoningEffort,omitempty" json:"ReasoningEffort,omitempty"`
-	MaxTokens         int      `yaml:"MaxTokens,omitempty" json:"MaxTokens,omitempty"`
-	ToolChoice        string   `yaml:"ToolChoice,omitempty" json:"ToolChoice,omitempty"`
-	ParallelToolCalls *bool    `yaml:"ParallelToolCalls,omitempty" json:"ParallelToolCalls,omitempty"`
+	Temperature       *float64          `yaml:"Temperature,omitempty" json:"Temperature,omitempty"`
+	PresencePenalty   *float64          `yaml:"PresencePenalty,omitempty" json:"PresencePenalty,omitempty"`
+	FrequencyPenalty  *float64          `yaml:"FrequencyPenalty,omitempty" json:"FrequencyPenalty,omitempty"`
+	ReasoningBudget   *int              `yaml:"ReasoningBudget,omitempty" json:"ReasoningBudget,omitempty"`
+	ReasoningEffort   string            `yaml:"ReasoningEffort,omitempty" json:"ReasoningEffort,omitempty"`
+	MaxTokens         int               `yaml:"MaxTokens,omitempty" json:"MaxTokens,omitempty"`
+	ToolChoice        string            `yaml:"ToolChoice,omitempty" json:"ToolChoice,omitempty"`
+	ParallelToolCalls *bool             `yaml:"ParallelToolCalls,omitempty" json:"ParallelToolCalls,omitempty"`
+	Features          []string          `yaml:"Features,omitempty" json:"Features,omitempty"`
+	RequestHeaders    map[string]string `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
+	MCPServers        []MCPServer       `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
+	Caching           *bool             `yaml:"Caching,omitempty" json:"Caching,omitempty"`
 }
 
 // Input represents an input parameter for a task or workflow

@@ -149,6 +149,10 @@ func (e *Environment) ThreadRepository() dive.ThreadRepository {
 	return e.threadRepo
 }
 
+func (e *Environment) Confirmer() dive.Confirmer {
+	return e.confirmer
+}
+
 func (e *Environment) Start(ctx context.Context) error {
 	if e.started {
 		return fmt.Errorf("environment already started")

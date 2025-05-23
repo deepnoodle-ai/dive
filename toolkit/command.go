@@ -1,13 +1,16 @@
 package toolkit
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/diveagents/dive"
@@ -137,14 +140,30 @@ func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.Tool
 		}
 	}
 
+	var stdoutBuf, stderrBuf bytes.Buffer
+
 	cmd := exec.CommandContext(ctx, name, args...)
 	if input.WorkingDirectory != "" {
 		cmd.Dir = input.WorkingDirectory
 	}
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
 
-	output, err := cmd.Output()
+	runErr := cmd.Run()
+
+	output := stdoutBuf.String()
+	stderr := stderrBuf.String()
+
+	resultText, err := json.Marshal(map[string]string{
+		"stdout":      output,
+		"stderr":      stderr,
+		"return_code": strconv.Itoa(cmd.ProcessState.ExitCode()),
+	})
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("error: command execution failed: %s", err.Error())), nil
+		return NewToolResultError(fmt.Sprintf("error: failed to marshal command output: %s", err.Error())), nil
+	}
+	if runErr != nil {
+		return NewToolResultError(string(resultText)), nil
 	}
 
 	if input.StdoutFile != "" {
@@ -153,11 +172,11 @@ func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.Tool
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return NewToolResultError(fmt.Sprintf("error: failed to create directory: %s", err.Error())), nil
 		}
-		if err := os.WriteFile(input.StdoutFile, output, 0644); err != nil {
+		if err := os.WriteFile(input.StdoutFile, []byte(output), 0644); err != nil {
 			return NewToolResultError(fmt.Sprintf("error: failed to write command output to file: %s", err.Error())), nil
 		}
 		return NewToolResultText(fmt.Sprintf("Command output written to file: %s", input.StdoutFile)), nil
 	}
 
-	return NewToolResultText(string(output)), nil
+	return NewToolResultText(string(resultText)), nil
 }

@@ -46,7 +46,7 @@ func Do(ctx context.Context, f RetryableFunc, opts ...Option) error {
 		opt(config)
 	}
 
-	for attempt := 0; attempt < config.MaxRetries; attempt++ {
+	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
 		if attempt > 0 {
 			// Exponential backoff with jitter
 			backoff := time.Duration(float64(config.BaseWait) * math.Pow(2, float64(attempt-1)))

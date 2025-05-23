@@ -66,6 +66,9 @@ type Environment interface {
 
 	// ThreadRepository returns the ThreadRepository for this Environment
 	ThreadRepository() ThreadRepository
+
+	// Confirmer returns the Confirmer for this Environment
+	Confirmer() Confirmer
 }
 
 // Options contains configuration for LLM generations.

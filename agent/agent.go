@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"text/template"
@@ -39,6 +40,10 @@ type ModelSettings struct {
 	MaxTokens         int
 	ToolChoice        llm.ToolChoice
 	ParallelToolCalls *bool
+	Features          []string
+	RequestHeaders    http.Header
+	MCPServers        []llm.MCPServerConfig
+	Caching           *bool
 }
 
 // Options are used to configure an Agent.
@@ -636,6 +641,19 @@ func (a *Agent) generateStreaming(
 	return accum.Response(), nil
 }
 
+func (a *Agent) getConfirmer() (dive.Confirmer, bool) {
+	if a.confirmer != nil {
+		return a.confirmer, true
+	}
+	if a.environment != nil {
+		confirmer := a.environment.Confirmer()
+		if confirmer != nil {
+			return confirmer, true
+		}
+	}
+	return nil, false
+}
+
 // executeToolCalls executes all tool calls and returns the tool call results.
 func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolUseContent, publisher dive.EventPublisher) ([]*dive.ToolCallResult, error) {
 	results := make([]*dive.ToolCallResult, len(toolCalls))
@@ -657,25 +675,55 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolUseCo
 			},
 		})
 
-		output, err := tool.Call(ctx, toolCall.Input)
-		if err != nil {
-			return nil, fmt.Errorf("tool call error: %w", err)
+		isConfirmed := true
+		if confirmer, ok := a.getConfirmer(); ok {
+			confirmed, err := confirmer.Confirm(ctx, dive.ConfirmationRequest{
+				Prompt:  fmt.Sprintf("Do you want to run the %s tool?", toolCall.Name),
+				Details: fmt.Sprintf("The tool will be called with the following input: %s", toolCall.Input),
+				Tool:    tool,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("tool call confirmation error: %w", err)
+			}
+			if !confirmed {
+				isConfirmed = false
+			}
 		}
 
-		result := &dive.ToolCallResult{
-			ID:     toolCall.ID,
-			Name:   toolCall.Name,
-			Input:  toolCall.Input,
-			Result: output,
-			Error:  err,
+		if isConfirmed {
+			output, err := tool.Call(ctx, toolCall.Input)
+			if err != nil {
+				return nil, fmt.Errorf("tool call error: %w", err)
+			}
+			results[i] = &dive.ToolCallResult{
+				ID:     toolCall.ID,
+				Name:   toolCall.Name,
+				Input:  toolCall.Input,
+				Result: output,
+				Error:  err,
+			}
+		} else {
+			results[i] = &dive.ToolCallResult{
+				ID:    toolCall.ID,
+				Name:  toolCall.Name,
+				Input: toolCall.Input,
+				Result: &dive.ToolResult{
+					Content: []*dive.ToolResultContent{
+						{
+							Type: dive.ToolResultContentTypeText,
+							Text: "User denied tool call",
+						},
+					},
+					IsError: true,
+				},
+			}
 		}
-		results[i] = result
 
 		publisher.Send(ctx, &dive.ResponseEvent{
 			Type: dive.EventTypeResponseToolResult,
 			Item: &dive.ResponseItem{
 				Type:           dive.ResponseItemTypeToolCallResult,
-				ToolCallResult: result,
+				ToolCallResult: results[i],
 			},
 		})
 	}
@@ -732,6 +780,15 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 		}
 		if settings.ParallelToolCalls != nil {
 			generateOpts = append(generateOpts, llm.WithParallelToolCalls(*settings.ParallelToolCalls))
+		}
+		if len(settings.Features) > 0 {
+			generateOpts = append(generateOpts, llm.WithFeatures(settings.Features...))
+		}
+		if len(settings.RequestHeaders) > 0 {
+			generateOpts = append(generateOpts, llm.WithRequestHeaders(settings.RequestHeaders))
+		}
+		if len(settings.MCPServers) > 0 {
+			generateOpts = append(generateOpts, llm.WithMCPServers(settings.MCPServers...))
 		}
 	}
 	return generateOpts

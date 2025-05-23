@@ -2,13 +2,15 @@ Name: 'Code Overview'
 Description: 'Generate a code overview for a given codebase'
 
 Config:
-  LLM:
-    DefaultProvider: anthropic
-    DefaultModel: claude-sonnet-4-20250514
-  Logging:
-    Level: info
-  Confirmation:
-    Mode: never
+  LogLevel: info
+  ConfirmationMode: never
+  DefaultProvider: anthropic
+  DefaultModel: claude-sonnet-4-20250514
+  Providers:
+    - Name: anthropic
+      Features:
+        - code-execution-2025-05-22
+        - extended-cache-ttl-2025-04-11
 
 Tools:
   - Name: Web.Search

@@ -1,11 +1,10 @@
 Name: Current Time
 Description: Show the current time
 Config:
-  LLM:
-    DefaultProvider: anthropic
-    DefaultModel: claude-sonnet-4-20250514
-  Logging:
-    Level: debug
+  DefaultProvider: anthropic
+  DefaultModel: claude-sonnet-4-20250514
+  LogLevel: debug
+  ConfirmationMode: never
 Agents:
   - Name: Basic Agent
     Goal: Resond kindly to any requests

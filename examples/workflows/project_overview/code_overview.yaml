@@ -2,13 +2,10 @@ Name: 'Project Overview'
 Description: 'Generate a comprehensive project overview for a given codebase'
 
 Config:
-  LLM:
-    DefaultProvider: openai
-    DefaultModel: o4-mini
-  Logging:
-    Level: debug
-  Confirmation:
-    Mode: read-write
+  DefaultProvider: openai
+  DefaultModel: o4-mini
+  LogLevel: debug
+  ConfirmationMode: if-destructive
 
 Tools:
   - Name: Web.Search

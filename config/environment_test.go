@@ -15,13 +15,10 @@ func TestEnvironment_Build(t *testing.T) {
 		Name:        "test-env",
 		Description: "Test Environment",
 		Config: Config{
-			LLM: LLMConfig{
-				DefaultProvider: "anthropic",
-				DefaultModel:    "claude-3-sonnet-20240229",
-			},
-			Logging: LoggingConfig{
-				Level: "info",
-			},
+			DefaultProvider:  "anthropic",
+			DefaultModel:     "claude-3-sonnet-20240229",
+			LogLevel:         "info",
+			ConfirmationMode: "never",
 		},
 		Tools: []Tool{
 			{
