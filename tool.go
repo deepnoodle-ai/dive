@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/schema"
 )
 
@@ -216,6 +217,13 @@ func (t *TypedToolAdapter[T]) Call(ctx context.Context, input any) (*ToolResult,
 // Unwrap returns the underlying TypedTool.
 func (t *TypedToolAdapter[T]) Unwrap() TypedTool[T] {
 	return t.tool
+}
+
+func (t *TypedToolAdapter[T]) ToolConfiguration(providerName string) map[string]any {
+	if toolWithConfig, ok := t.tool.(llm.ToolConfiguration); ok {
+		return toolWithConfig.ToolConfiguration(providerName)
+	}
+	return nil
 }
 
 // ToolCallResult is a tool call that has been made. This is used to understand
