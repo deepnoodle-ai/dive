@@ -81,8 +81,8 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	var logger slogger.Logger = slogger.DefaultLogger
 	if buildOpts.Logger != nil {
 		logger = buildOpts.Logger
-	} else if env.Config.Logging.Level != "" {
-		levelStr := env.Config.Logging.Level
+	} else if env.Config.LogLevel != "" {
+		levelStr := env.Config.LogLevel
 		if !isValidLogLevel(levelStr) {
 			return nil, fmt.Errorf("invalid log level: %s", levelStr)
 		}
@@ -90,8 +90,16 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		logger = slogger.New(level)
 	}
 
+	confirmationMode := dive.ConfirmIfNotReadOnly
+	if env.Config.ConfirmationMode != "" {
+		confirmationMode = dive.ConfirmationMode(env.Config.ConfirmationMode)
+		if !confirmationMode.IsValid() {
+			return nil, fmt.Errorf("invalid confirmation mode: %s", env.Config.ConfirmationMode)
+		}
+	}
+
 	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: env.Config.Confirmation.Mode,
+		Mode: confirmationMode,
 	})
 
 	// Tools
@@ -140,11 +148,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	} else {
 		dir := buildOpts.DocumentsDir
 		if dir == "" {
-			if env.Config.Documents.Root != "" {
-				dir = env.Config.Documents.Root
-			} else {
-				dir = "."
-			}
+			dir = "."
 		}
 		docRepo, err = agent.NewFileDocumentRepository(dir)
 		if err != nil {

@@ -2,13 +2,10 @@ Name: 'Go Program Skeleton'
 Description: 'Create a skeleton for a new Go main program based on user intent, and ensure it compiles and lints cleanly.'
 
 Config:
-  LLM:
-    DefaultProvider: anthropic
-    DefaultModel: claude-sonnet-4-20250514
-  Logging:
-    Level: debug
-  Confirmation:
-    Mode: always
+  DefaultProvider: anthropic
+  DefaultModel: claude-3-7-sonnet-20250219
+  LogLevel: debug
+  ConfirmationMode: if-destructive
 
 Tools:
   - Name: Directory.List
@@ -39,7 +36,7 @@ Workflows:
       - Name: directory
         Type: string
         Description: 'Directory to create the Go program in'
-        Default: '.'
+        Default: 'The current directory'
     Steps:
       - Name: Generate main.go
         Agent: Engineer

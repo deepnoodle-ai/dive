@@ -25,5 +25,17 @@ func TestRetry(t *testing.T) {
 	}, WithMaxRetries(3), WithBaseWait(time.Millisecond*20))
 	assert.Error(t, err)
 	assert.Equal(t, "test error", err.Error())
-	assert.Equal(t, 3, count)
+	assert.Equal(t, 4, count)
+}
+
+func TestRetryZeroMaxRetries(t *testing.T) {
+	ctx := context.Background()
+	count := 0
+	err := Do(ctx, func() error {
+		count++
+		return NewRecoverableError(errors.New("test error"))
+	}, WithMaxRetries(0), WithBaseWait(time.Millisecond*20))
+	assert.Error(t, err)
+	assert.Equal(t, "test error", err.Error())
+	assert.Equal(t, 1, count) // Should still try once even with 0 retries
 }

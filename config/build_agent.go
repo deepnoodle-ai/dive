@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net/http"
+	"sort"
 	"time"
 
 	"github.com/diveagents/dive"
@@ -10,10 +12,28 @@ import (
 	"github.com/diveagents/dive/slogger"
 )
 
+// convertMCPServer converts a config.MCPServer to llm.MCPServerConfig
+func convertMCPServer(mcpServer MCPServer) llm.MCPServerConfig {
+	var toolConfiguration *llm.MCPToolConfiguration
+	if mcpServer.ToolConfiguration != nil {
+		toolConfiguration = &llm.MCPToolConfiguration{
+			Enabled:      mcpServer.ToolConfiguration.Enabled,
+			AllowedTools: mcpServer.ToolConfiguration.AllowedTools,
+		}
+	}
+	return llm.MCPServerConfig{
+		Type:               mcpServer.Type,
+		URL:                mcpServer.URL,
+		Name:               mcpServer.Name,
+		AuthorizationToken: mcpServer.AuthorizationToken,
+		ToolConfiguration:  toolConfiguration,
+	}
+}
+
 func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logger slogger.Logger, confirmer dive.Confirmer) (dive.Agent, error) {
 	providerName := agentDef.Provider
 	if providerName == "" {
-		providerName = config.LLM.DefaultProvider
+		providerName = config.DefaultProvider
 		if providerName == "" {
 			providerName = "anthropic"
 		}
@@ -21,8 +41,14 @@ func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logge
 
 	modelName := agentDef.Model
 	if modelName == "" {
-		modelName = config.LLM.DefaultModel
+		modelName = config.DefaultModel
 	}
+
+	providerConfigByName := make(map[string]*Provider)
+	for _, p := range config.Providers {
+		providerConfigByName[p.Name] = &p
+	}
+	providerConfig := providerConfigByName[providerName]
 
 	model, err := GetModel(providerName, modelName)
 	if err != nil {
@@ -74,6 +100,56 @@ func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logge
 			MaxTokens:         agentDef.ModelSettings.MaxTokens,
 			ParallelToolCalls: agentDef.ModelSettings.ParallelToolCalls,
 			ToolChoice:        toolChoice,
+			RequestHeaders:    make(http.Header),
+		}
+
+		if providerConfig != nil {
+			modelSettings.Caching = providerConfig.Caching
+		} else if agentDef.ModelSettings.Caching != nil {
+			modelSettings.Caching = agentDef.ModelSettings.Caching
+		}
+
+		// Combine enabled features from provider and agent
+		featuresByName := make(map[string]bool)
+		if providerConfig != nil {
+			for _, feature := range providerConfig.Features {
+				featuresByName[feature] = true
+			}
+		}
+		for _, feature := range agentDef.ModelSettings.Features {
+			featuresByName[feature] = true
+		}
+		features := make([]string, 0, len(featuresByName))
+		for feature := range featuresByName {
+			features = append(features, feature)
+		}
+		sort.Strings(features)
+		modelSettings.Features = features
+
+		// Combine request headers from provider and agent
+		requestHeaders := make(http.Header)
+		if providerConfig != nil {
+			for key, value := range providerConfig.RequestHeaders {
+				requestHeaders.Add(key, value)
+			}
+		}
+		for key, value := range agentDef.ModelSettings.RequestHeaders {
+			requestHeaders.Add(key, value)
+		}
+		modelSettings.RequestHeaders = requestHeaders
+
+		// MCP servers use override logic. If agent has them specified, use those.
+		// Otherwise, use the provider's MCP servers.
+		if agentDef.ModelSettings.MCPServers != nil {
+			modelSettings.MCPServers = make([]llm.MCPServerConfig, len(agentDef.ModelSettings.MCPServers))
+			for i, mcpServer := range agentDef.ModelSettings.MCPServers {
+				modelSettings.MCPServers[i] = convertMCPServer(mcpServer)
+			}
+		} else if providerConfig != nil {
+			modelSettings.MCPServers = make([]llm.MCPServerConfig, len(providerConfig.MCPServers))
+			for i, mcpServer := range providerConfig.MCPServers {
+				modelSettings.MCPServers[i] = convertMCPServer(mcpServer)
+			}
 		}
 	}
 

@@ -2,11 +2,13 @@ Name: 'Company Analysis'
 Description: 'Generate a company overview by analyzing their website'
 
 Config:
-  LLM:
-    DefaultProvider: anthropic
-    DefaultModel: claude-sonnet-4-20250514
-  Logging:
-    Level: debug
+  DefaultProvider: anthropic
+  DefaultModel: claude-sonnet-4-20250514
+  LogLevel: debug
+  ConfirmationMode: never
+  Providers:
+    - Name: anthropic
+      Caching: true
 
 Tools:
   - Name: Web.Search

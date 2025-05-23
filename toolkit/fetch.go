@@ -41,15 +41,13 @@ type FetchTool struct {
 	maxSize    int
 	maxRetries int
 	timeout    time.Duration
-	confirmer  dive.Confirmer
 }
 
 type FetchToolOptions struct {
-	MaxSize    int            `json:"max_size,omitempty"`
-	MaxRetries int            `json:"max_retries,omitempty"`
-	Timeout    time.Duration  `json:"timeout,omitempty"`
-	Fetcher    web.Fetcher    `json:"-"`
-	Confirmer  dive.Confirmer `json:"-"`
+	MaxSize    int           `json:"max_size,omitempty"`
+	MaxRetries int           `json:"max_retries,omitempty"`
+	Timeout    time.Duration `json:"timeout,omitempty"`
+	Fetcher    web.Fetcher   `json:"-"`
 }
 
 func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInput] {
@@ -58,7 +56,6 @@ func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInp
 		maxSize:    options.MaxSize,
 		maxRetries: options.MaxRetries,
 		timeout:    options.Timeout,
-		confirmer:  options.Confirmer,
 	})
 }
 
@@ -88,20 +85,6 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 
 	if input.ExcludeTags == nil {
 		input.ExcludeTags = DefaultFetchExcludeTags
-	}
-
-	if t.confirmer != nil {
-		confirmed, err := t.confirmer.Confirm(ctx, dive.ConfirmationRequest{
-			Prompt:  "Do you want to fetch the URL?",
-			Details: input.URL,
-			Data:    map[string]interface{}{"url": input.URL},
-		})
-		if err != nil {
-			return NewToolResultError(fmt.Sprintf("error: user confirmation failed: %s", err.Error())), nil
-		}
-		if !confirmed {
-			return NewToolResultError("error: user confirmation failed."), nil
-		}
 	}
 
 	if t.timeout > 0 {
