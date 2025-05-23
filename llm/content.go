@@ -18,6 +18,8 @@ const (
 	ContentTypeRedactedThinking    ContentType = "redacted_thinking"
 	ContentTypeServerToolUse       ContentType = "server_tool_use"
 	ContentTypeWebSearchToolResult ContentType = "web_search_tool_result"
+	ContentTypeMCPToolUse          ContentType = "mcp_tool_use"
+	ContentTypeMCPToolResult       ContentType = "mcp_tool_result"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -38,11 +40,10 @@ type CacheControl struct {
 	Type CacheControlType `json:"type"`
 }
 
-// ContentChunk is used to pass pre-chunked document content to the LLM. These
-// should only be used within a DocumentContent block.
+// ContentChunk is used within a Content block to pass chunks of content.
 type ContentChunk struct {
-	Type string `json:"type"` // always "text"
-	Text string `json:"text"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }
 
 // ContentSource conveys information about media content in a message.
@@ -499,11 +500,82 @@ func (c *RedactedThinkingContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-type contentTypeIndicator struct {
-	Type ContentType `json:"type"`
+//// MCPToolUse ////////////////////////////////////////////////////////////////
+
+/* Examples:
+{
+  "type": "mcp_tool_use",
+  "id": "mcptoolu_014Q35RayjACSWkSj4X2yov1",
+  "name": "echo",
+  "server_name": "example-mcp",
+  "input": { "param1": "value1", "param2": "value2" }
+}
+*/
+
+type MCPToolUseContent struct {
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	ServerName string          `json:"server_name"`
+	Input      json.RawMessage `json:"input"`
+}
+
+func (c *MCPToolUseContent) Type() ContentType {
+	return ContentTypeMCPToolUse
+}
+
+func (c *MCPToolUseContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPToolUseContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPToolUse,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// MCPToolResult //////////////////////////////////////////////////////////////
+
+/* Examples:
+{
+  "type": "mcp_tool_result",
+  "tool_use_id": "mcptoolu_014Q35RayjACSWkSj4X2yov1",
+  "is_error": false,
+  "content": [
+    {
+      "type": "text",
+      "text": "Hello"
+    }
+  ]
+}
+*/
+
+type MCPToolResultContent struct {
+	ToolUseID string          `json:"tool_use_id"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Content   []*ContentChunk `json:"content,omitempty"`
+}
+
+func (c *MCPToolResultContent) Type() ContentType {
+	return ContentTypeMCPToolResult
+}
+
+func (c *MCPToolResultContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPToolResultContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPToolResult,
+		Alias: (*Alias)(c),
+	})
 }
 
 //// Unmarshalling /////////////////////////////////////////////////////////////
+
+type contentTypeIndicator struct {
+	Type ContentType `json:"type"`
+}
 
 // UnmarshalContent unmarshals the JSON of one content block into the
 // appropriate concrete Content type.
@@ -555,6 +627,10 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &ServerToolUseContent{}
 	case ContentTypeWebSearchToolResult:
 		content = &WebSearchToolResultContent{}
+	case ContentTypeMCPToolUse:
+		content = &MCPToolUseContent{}
+	case ContentTypeMCPToolResult:
+		content = &MCPToolResultContent{}
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
 	}

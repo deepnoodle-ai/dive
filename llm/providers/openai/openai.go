@@ -128,12 +128,10 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 
 	var result Response
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
+		req, err := p.createRequest(ctx, body, config, false)
 		if err != nil {
-			return fmt.Errorf("error creating request: %w", err)
+			return err
 		}
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
-		req.Header.Set("Content-Type", "application/json")
 		resp, err := p.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("error making request: %w", err)
@@ -265,13 +263,10 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 
 	var stream *StreamIterator
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
+		req, err := p.createRequest(ctx, body, config, true)
 		if err != nil {
-			return fmt.Errorf("error creating request: %w", err)
+			return err
 		}
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "text/event-stream")
 
 		resp, err := p.client.Do(req)
 		if err != nil {
@@ -803,4 +798,25 @@ func addSystemPrompt(request *Request, systemPrompt, defaultSystemRole string) {
 		Role:    defaultSystemRole,
 		Content: systemPrompt,
 	}}, request.Messages...)
+}
+
+// createRequest creates an HTTP request with appropriate headers for OpenAI API calls
+func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.Config, isStreaming bool) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	if isStreaming {
+		req.Header.Set("Accept", "text/event-stream")
+	}
+
+	for key, values := range config.RequestHeaders {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	return req, nil
 }

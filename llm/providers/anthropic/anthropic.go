@@ -18,10 +18,13 @@ import (
 )
 
 var (
-	DefaultModel     = ModelClaudeSonnet4
-	DefaultEndpoint  = "https://api.anthropic.com/v1/messages"
-	DefaultVersion   = "2023-06-01"
-	DefaultMaxTokens = 8192
+	DefaultModel         = ModelClaudeSonnet4
+	DefaultEndpoint      = "https://api.anthropic.com/v1/messages"
+	DefaultVersion       = "2023-06-01"
+	DefaultMaxTokens     = 8192
+	FeatureExtendedCache = "extended-cache-ttl-2025-04-11"
+	FeaturePromptCaching = "prompt-caching-2024-07-31"
+	FeatureMCPClient     = "mcp-client-2025-04-04"
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -93,16 +96,9 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 
 	var result llm.Response
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
+		req, err := p.createRequest(ctx, body, config, false)
 		if err != nil {
-			return fmt.Errorf("error creating request: %w", err)
-		}
-		req.Header.Set("x-api-key", p.apiKey)
-		req.Header.Set("anthropic-version", p.version)
-		req.Header.Set("content-type", "application/json")
-		req.Header.Add("anthropic-beta", "prompt-caching-2024-07-31")
-		if config.IsFeatureEnabled(FeatureOutput128k) {
-			req.Header.Add("anthropic-beta", FeatureOutput128k)
+			return err
 		}
 		resp, err := p.client.Do(req)
 		if err != nil {
@@ -205,19 +201,10 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 
 	var stream *StreamIterator
 	err = retry.Do(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
+		req, err := p.createRequest(ctx, body, config, true)
 		if err != nil {
-			return fmt.Errorf("error creating request: %w", err)
+			return err
 		}
-		req.Header.Set("x-api-key", p.apiKey)
-		req.Header.Set("anthropic-version", p.version)
-		req.Header.Set("content-type", "application/json")
-		req.Header.Set("accept", "text/event-stream")
-		req.Header.Add("anthropic-beta", "prompt-caching-2024-07-31")
-		if config.IsFeatureEnabled(FeatureOutput128k) {
-			req.Header.Add("anthropic-beta", FeatureOutput128k)
-		}
-
 		resp, err := p.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("error making request: %w", err)
@@ -364,6 +351,10 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		}
 	}
 
+	if len(config.MCPServers) > 0 {
+		req.MCPServers = config.MCPServers
+	}
+
 	req.Temperature = config.Temperature
 	req.System = config.SystemPrompt
 	return nil
@@ -485,4 +476,40 @@ func (s *StreamIterator) Close() error {
 
 func (s *StreamIterator) Err() error {
 	return s.err
+}
+
+// createRequest creates an HTTP request with appropriate headers for Anthropic API calls
+func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.Config, isStreaming bool) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+	req.Header.Set("x-api-key", p.apiKey)
+	req.Header.Set("anthropic-version", p.version)
+	req.Header.Set("content-type", "application/json")
+
+	if isStreaming {
+		req.Header.Set("accept", "text/event-stream")
+	}
+
+	if config.IsFeatureEnabled(FeatureExtendedCache) {
+		req.Header.Add("anthropic-beta", FeatureExtendedCache)
+	} else {
+		req.Header.Add("anthropic-beta", FeaturePromptCaching)
+	}
+
+	if config.IsFeatureEnabled(FeatureOutput128k) {
+		req.Header.Add("anthropic-beta", FeatureOutput128k)
+	}
+
+	if config.IsFeatureEnabled(FeatureMCPClient) || len(config.MCPServers) > 0 {
+		req.Header.Add("anthropic-beta", FeatureMCPClient)
+	}
+
+	for key, values := range config.RequestHeaders {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	return req, nil
 }
