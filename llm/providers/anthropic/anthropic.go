@@ -25,6 +25,7 @@ var (
 	FeatureExtendedCache = "extended-cache-ttl-2025-04-11"
 	FeaturePromptCaching = "prompt-caching-2024-07-31"
 	FeatureMCPClient     = "mcp-client-2025-04-04"
+	FeatureCodeExecution = "code-execution-2025-05-22"
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -504,6 +505,10 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 
 	if config.IsFeatureEnabled(FeatureMCPClient) || len(config.MCPServers) > 0 {
 		req.Header.Add("anthropic-beta", FeatureMCPClient)
+	}
+
+	if config.IsFeatureEnabled(FeatureCodeExecution) {
+		req.Header.Add("anthropic-beta", FeatureCodeExecution)
 	}
 
 	for key, values := range config.RequestHeaders {

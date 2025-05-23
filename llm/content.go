@@ -9,17 +9,18 @@ import (
 type ContentType string
 
 const (
-	ContentTypeText                ContentType = "text"
-	ContentTypeImage               ContentType = "image"
-	ContentTypeDocument            ContentType = "document"
-	ContentTypeToolUse             ContentType = "tool_use"
-	ContentTypeToolResult          ContentType = "tool_result"
-	ContentTypeThinking            ContentType = "thinking"
-	ContentTypeRedactedThinking    ContentType = "redacted_thinking"
-	ContentTypeServerToolUse       ContentType = "server_tool_use"
-	ContentTypeWebSearchToolResult ContentType = "web_search_tool_result"
-	ContentTypeMCPToolUse          ContentType = "mcp_tool_use"
-	ContentTypeMCPToolResult       ContentType = "mcp_tool_result"
+	ContentTypeText                    ContentType = "text"
+	ContentTypeImage                   ContentType = "image"
+	ContentTypeDocument                ContentType = "document"
+	ContentTypeToolUse                 ContentType = "tool_use"
+	ContentTypeToolResult              ContentType = "tool_result"
+	ContentTypeThinking                ContentType = "thinking"
+	ContentTypeRedactedThinking        ContentType = "redacted_thinking"
+	ContentTypeServerToolUse           ContentType = "server_tool_use"
+	ContentTypeWebSearchToolResult     ContentType = "web_search_tool_result"
+	ContentTypeMCPToolUse              ContentType = "mcp_tool_use"
+	ContentTypeMCPToolResult           ContentType = "mcp_tool_result"
+	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -571,6 +572,48 @@ func (c *MCPToolResultContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
+//// CodeExecutionToolResult ///////////////////////////////////////////////////
+
+/* Examples:
+   {
+     "type": "code_execution_tool_result",
+     "tool_use_id": "srvtoolu_01A2B3C4D5E6F7G8H9I0J1K2",
+     "content": {
+       "type": "code_execution_result",
+       "stdout": "Mean: 5.5\nStandard deviation: 2.8722813232690143\n",
+       "stderr": "",
+       "return_code": 0
+     }
+   }
+*/
+
+type CodeExecutionResult struct {
+	Type       string `json:"type"`
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
+	ReturnCode int    `json:"return_code"`
+}
+
+type CodeExecutionToolResultContent struct {
+	ToolUseID string              `json:"tool_use_id"`
+	Content   CodeExecutionResult `json:"content"`
+}
+
+func (c *CodeExecutionToolResultContent) Type() ContentType {
+	return ContentTypeCodeExecutionToolResult
+}
+
+func (c *CodeExecutionToolResultContent) MarshalJSON() ([]byte, error) {
+	type Alias CodeExecutionToolResultContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeCodeExecutionToolResult,
+		Alias: (*Alias)(c),
+	})
+}
+
 //// Unmarshalling /////////////////////////////////////////////////////////////
 
 type contentTypeIndicator struct {
@@ -631,6 +674,8 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &MCPToolUseContent{}
 	case ContentTypeMCPToolResult:
 		content = &MCPToolResultContent{}
+	case ContentTypeCodeExecutionToolResult:
+		content = &CodeExecutionToolResultContent{}
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
 	}
