@@ -325,8 +325,11 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 			// Handle tools that explicitly provide a configuration
 			if toolWithConfig, ok := tool.(llm.ToolConfiguration); ok {
 				toolConfig := toolWithConfig.ToolConfiguration(p.Name())
-				tools = append(tools, toolConfig)
-				continue
+				// nil means no configuration is specified and to use the default
+				if toolConfig != nil {
+					tools = append(tools, toolConfig)
+					continue
+				}
 			}
 			// Handle tools with the default configuration behavior
 			schema := tool.Schema()
