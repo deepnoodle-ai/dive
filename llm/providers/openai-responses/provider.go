@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
@@ -28,6 +29,9 @@ type Provider struct {
 	endpoint string
 	model    string
 	client   *http.Client
+	// Retry configuration
+	maxRetries int
+	baseWait   time.Duration
 	// Responses API specific fields
 	store      *bool
 	background *bool
@@ -40,9 +44,11 @@ type Provider struct {
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:   os.Getenv("OPENAI_API_KEY"),
-		endpoint: DefaultEndpoint,
-		client:   http.DefaultClient,
+		apiKey:     os.Getenv("OPENAI_API_KEY"),
+		endpoint:   DefaultEndpoint,
+		client:     http.DefaultClient,
+		maxRetries: 6,               // Default to 6 retries as before
+		baseWait:   2 * time.Second, // Default base wait time
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -175,7 +181,7 @@ func (p *Provider) makeRequest(ctx context.Context, request *Request, config *ll
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.baseWait))
 
 	if err != nil {
 		return nil, err
@@ -229,7 +235,7 @@ func (p *Provider) makeStreamRequest(ctx context.Context, request *Request, conf
 			reader: bufio.NewReader(resp.Body),
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.baseWait))
 
 	if err != nil {
 		return nil, err
@@ -414,13 +420,152 @@ type StreamIterator struct {
 	body         io.ReadCloser
 	err          error
 	currentEvent *llm.Event
+	eventCount   int
+	// Track previous state for delta detection
+	previousText      string
+	hasStartedContent bool
 }
 
 // Next advances to the next event in the stream
 func (s *StreamIterator) Next() bool {
-	// TODO: Implement streaming event parsing for Responses API
-	// This would parse server-sent events and convert them to llm.Event format
-	return false
+	for {
+		line, err := s.reader.ReadBytes('\n')
+		if err != nil {
+			if err != io.EOF {
+				s.err = err
+			}
+			return false
+		}
+
+		// Skip empty lines
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+
+		// Remove "data: " prefix if present
+		line = bytes.TrimPrefix(line, []byte("data: "))
+		line = bytes.TrimSpace(line)
+
+		// Check for stream end
+		if bytes.Equal(line, []byte("[DONE]")) {
+			return false
+		}
+
+		// Skip non-JSON lines (like "event: " lines or other SSE metadata)
+		if !bytes.HasPrefix(line, []byte("{")) {
+			continue
+		}
+
+		// Parse the streaming event
+		var streamEvent StreamEvent
+		if err := json.Unmarshal(line, &streamEvent); err != nil {
+			// Log the problematic line for debugging but continue processing
+			s.err = fmt.Errorf("error parsing stream event (line: %q): %w", string(line), err)
+			return false
+		}
+
+		// Convert to llm.Event
+		if event := s.convertStreamEvent(&streamEvent); event != nil {
+			s.currentEvent = event
+			return true
+		}
+	}
+}
+
+// convertStreamEvent converts a StreamEvent to an llm.Event
+func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event {
+	if streamEvent.Response == nil {
+		return nil
+	}
+
+	response := streamEvent.Response
+
+	// Emit message start event if this is the first event
+	if s.eventCount == 0 {
+		s.eventCount++
+		return &llm.Event{
+			Type: llm.EventTypeMessageStart,
+			Message: &llm.Response{
+				ID:      response.ID,
+				Type:    "message",
+				Role:    llm.Assistant,
+				Model:   response.Model,
+				Content: []llm.Content{},
+				Usage:   llm.Usage{},
+			},
+		}
+	}
+
+	// Process output items for content deltas
+	for _, item := range response.Output {
+		switch item.Type {
+		case "message":
+			// Handle text content deltas
+			for _, content := range item.Content {
+				if content.Type == "text" || content.Type == "output_text" {
+					currentText := content.Text
+
+					// If this is the first time we see content, emit a content block start event
+					if !s.hasStartedContent {
+						s.hasStartedContent = true
+						s.previousText = currentText
+						index := 0
+						return &llm.Event{
+							Type:  llm.EventTypeContentBlockStart,
+							Index: &index,
+							ContentBlock: &llm.EventContentBlock{
+								Type: llm.ContentTypeText,
+								Text: currentText,
+							},
+						}
+					}
+
+					// If the text has changed, emit a delta event with the new text
+					if currentText != s.previousText {
+						deltaText := currentText
+						// For simplicity, we'll send the full text as delta
+						// In a real streaming scenario, we'd calculate the actual delta
+						s.previousText = currentText
+						index := 0
+						return &llm.Event{
+							Type:  llm.EventTypeContentBlockDelta,
+							Index: &index,
+							Delta: &llm.EventDelta{
+								Type: llm.EventDeltaTypeText,
+								Text: deltaText,
+							},
+						}
+					}
+				}
+			}
+		case "function_call":
+			// Handle tool call events
+			index := 0 // For simplicity, use index 0
+			return &llm.Event{
+				Type:  llm.EventTypeContentBlockStart,
+				Index: &index,
+				ContentBlock: &llm.EventContentBlock{
+					Type: "tool_use",
+					ID:   item.CallID,
+					Name: item.Name,
+				},
+			}
+		}
+	}
+
+	// If we have usage information, emit a message delta event
+	if response.Usage != nil {
+		return &llm.Event{
+			Type:  llm.EventTypeMessageDelta,
+			Delta: &llm.EventDelta{}, // Empty delta is required for message delta events
+			Usage: &llm.Usage{
+				InputTokens:  response.Usage.InputTokens,
+				OutputTokens: response.Usage.OutputTokens,
+			},
+		}
+	}
+
+	return nil
 }
 
 // Event returns the current event

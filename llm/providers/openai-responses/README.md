@@ -1,6 +1,151 @@
 # OpenAI Responses API Provider
 
-This provider implements support for OpenAI's new Responses API, which offers advanced features like built-in web search, image generation, and MCP server integration.
+This package provides a Dive LLM provider for the OpenAI Responses API, which offers advanced features like web search, image generation, and MCP server integration.
+
+## Key Improvements
+
+The provider has been refactored to properly separate **provider-creation-time options** from **generation-time options**, following the same pattern as other Dive LLM providers.
+
+### Provider-Creation-Time Options
+
+These options are set once when creating the provider and cannot be changed per request:
+
+```go
+provider := openairesponses.New(
+    openairesponses.WithAPIKey("your-api-key"),
+    openairesponses.WithModel("gpt-4.1"),
+    openairesponses.WithEndpoint("https://api.openai.com/v1/responses"),
+    openairesponses.WithClient(customHTTPClient),
+)
+```
+
+### Generation-Time Options
+
+These options can be configured differently for each request using `llm.Option` functions:
+
+#### Basic Options
+```go
+response, err := provider.Generate(ctx,
+    llm.WithUserTextMessage("Your message"),
+    llm.WithTemperature(0.7),
+    llm.WithMaxTokens(1000),
+    // OpenAI Responses specific options:
+    openairesponses.LLMWithStore(true),
+    openairesponses.LLMWithBackground(false),
+    openairesponses.LLMWithInstructions("Custom instructions"),
+    openairesponses.LLMWithServiceTier("premium"),
+    openairesponses.LLMWithUser("user-123"),
+)
+```
+
+#### Web Search
+```go
+response, err := provider.Generate(ctx,
+    llm.WithUserTextMessage("What are the latest AI developments?"),
+    // Enable web search with default options
+    openairesponses.LLMWithWebSearch(),
+    // Or with custom options
+    openairesponses.LLMWithWebSearchOptions(openairesponses.WebSearchOptions{
+        Domains:           []string{"arxiv.org", "openai.com"},
+        SearchContextSize: "medium",
+        UserLocation: &openairesponses.UserLocation{
+            Type:    "approximate",
+            Country: "US",
+        },
+    }),
+)
+```
+
+#### Image Generation
+```go
+response, err := provider.Generate(ctx,
+    llm.WithUserTextMessage("Generate an image of a sunset"),
+    // Enable image generation with default options
+    openairesponses.LLMWithImageGeneration(),
+    // Or with custom options
+    openairesponses.LLMWithImageGenerationOptions(openairesponses.ImageGenerationOptions{
+        Size:       "1024x1024",
+        Quality:    "high",
+        Background: "auto",
+    }),
+)
+```
+
+#### JSON Schema Output
+```go
+schema := map[string]interface{}{
+    "type": "object",
+    "properties": map[string]interface{}{
+        "name": map[string]interface{}{"type": "string"},
+        "age":  map[string]interface{}{"type": "integer"},
+    },
+    "required": []string{"name", "age"},
+}
+
+response, err := provider.Generate(ctx,
+    llm.WithUserTextMessage("Generate person data"),
+    openairesponses.LLMWithJSONSchema(schema),
+)
+```
+
+#### MCP Server Integration
+```go
+response, err := provider.Generate(ctx,
+    llm.WithUserTextMessage("Query the database"),
+    openairesponses.LLMWithMCPServer("database", "http://localhost:8080/mcp", map[string]string{
+        "Authorization": "Bearer token123",
+    }),
+)
+```
+
+#### Advanced Options
+```go
+response, err := provider.Generate(ctx,
+    llm.WithUserTextMessage("Complex reasoning task"),
+    openairesponses.LLMWithReasoningEffort("high"),
+    openairesponses.LLMWithTopP(0.9),
+    openairesponses.LLMWithTruncation("auto"),
+)
+```
+
+## Benefits of This Approach
+
+1. **Flexibility**: Tools and options can be configured differently for each request
+2. **Consistency**: Follows the same pattern as other Dive LLM providers
+3. **Composability**: Multiple tools can be enabled for a single request
+4. **Maintainability**: Clear separation between provider-level and request-level configuration
+
+## Migration from Previous Version
+
+If you were using the old provider-creation-time tool options:
+
+```go
+// OLD - Don't do this anymore
+provider := openairesponses.New(
+    openairesponses.WithWebSearch(true),
+    openairesponses.WithImageGeneration(true),
+)
+```
+
+Change to generation-time options:
+
+```go
+// NEW - Do this instead
+provider := openairesponses.New(
+    openairesponses.WithAPIKey("your-api-key"),
+    openairesponses.WithModel("gpt-4.1"),
+)
+
+response, err := provider.Generate(ctx,
+    llm.WithUserTextMessage("Your message"),
+    openairesponses.LLMWithWebSearch(),
+    openairesponses.LLMWithImageGeneration(),
+)
+```
+
+## Complete Example
+
+See `examples/programs/openai_responses_example/main.go` for a comprehensive example demonstrating all features.
 
 ## Features
 
