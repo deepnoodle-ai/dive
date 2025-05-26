@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	DefaultModel    = "gpt-4.1"
+	DefaultModel    = "gpt-4o"
 	DefaultEndpoint = "https://api.openai.com/v1/responses"
 )
 
@@ -44,9 +44,11 @@ type Provider struct {
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:     os.Getenv("OPENAI_API_KEY"),
-		endpoint:   DefaultEndpoint,
-		client:     http.DefaultClient,
+		apiKey:   os.Getenv("OPENAI_API_KEY"),
+		endpoint: DefaultEndpoint,
+		client: &http.Client{
+			Timeout: 30 * time.Second, // Add reasonable timeout
+		},
 		maxRetries: 6,               // Default to 6 retries as before
 		baseWait:   2 * time.Second, // Default base wait time
 	}
@@ -253,7 +255,7 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 		case "message":
 			// Convert message content
 			for _, content := range item.Content {
-				if content.Type == "output_text" {
+				if content.Type == "output_text" || content.Type == "text" {
 					contentBlocks = append(contentBlocks, &llm.TextContent{
 						Text: content.Text,
 					})
@@ -269,10 +271,13 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 		case "image_generation_call":
 			// Handle image generation results
 			if item.Result != "" {
-				// For now, we'll represent this as text content with the base64 data
-				// In a real implementation, you might want a specific ImageContent type
-				contentBlocks = append(contentBlocks, &llm.TextContent{
-					Text: fmt.Sprintf("Generated image (base64): %s", item.Result[:50]+"..."),
+				// Create proper ImageContent with base64 data
+				contentBlocks = append(contentBlocks, &llm.ImageContent{
+					Source: &llm.ContentSource{
+						Type:      llm.ContentSourceTypeBase64,
+						MediaType: "image/png", // Default to PNG, could be configurable
+						Data:      item.Result,
+					},
 				})
 			}
 		case "web_search_call":
@@ -358,7 +363,23 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) (interface{},
 					Type: "input_text",
 					Text: c.Text,
 				})
-				// TODO: Handle other content types (images, etc.)
+			case *llm.ImageContent:
+				// Handle image content
+				if c.Source != nil {
+					inputMsg.Content = append(inputMsg.Content, InputContent{
+						Type:     "image",
+						ImageURL: c.Source.URL,
+					})
+				}
+			case *llm.ToolResultContent:
+				// Handle tool result content - convert to text for now
+				if contentStr, ok := c.Content.(string); ok {
+					inputMsg.Content = append(inputMsg.Content, InputContent{
+						Type: "input_text",
+						Text: fmt.Sprintf("Tool result: %s", contentStr),
+					})
+				}
+				// Add more content types as needed
 			}
 		}
 
@@ -424,6 +445,10 @@ type StreamIterator struct {
 	// Track previous state for delta detection
 	previousText      string
 	hasStartedContent bool
+	hasEmittedStop    bool
+	// Track content block indices
+	nextContentIndex int
+	textContentIndex int
 }
 
 // Next advances to the next event in the stream
@@ -448,6 +473,14 @@ func (s *StreamIterator) Next() bool {
 
 		// Check for stream end
 		if bytes.Equal(line, []byte("[DONE]")) {
+			if !s.hasEmittedStop {
+				// Emit message stop event before ending
+				s.hasEmittedStop = true
+				s.currentEvent = &llm.Event{
+					Type: llm.EventTypeMessageStop,
+				}
+				return true
+			}
 			return false
 		}
 
@@ -509,10 +542,11 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 					if !s.hasStartedContent {
 						s.hasStartedContent = true
 						s.previousText = currentText
-						index := 0
+						s.textContentIndex = s.nextContentIndex
+						s.nextContentIndex++
 						return &llm.Event{
 							Type:  llm.EventTypeContentBlockStart,
-							Index: &index,
+							Index: &s.textContentIndex,
 							ContentBlock: &llm.EventContentBlock{
 								Type: llm.ContentTypeText,
 								Text: currentText,
@@ -520,16 +554,14 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 						}
 					}
 
-					// If the text has changed, emit a delta event with the new text
+					// If the text has changed, emit a delta event with only the new text
 					if currentText != s.previousText {
-						deltaText := currentText
-						// For simplicity, we'll send the full text as delta
-						// In a real streaming scenario, we'd calculate the actual delta
+						// Calculate the actual delta - only the newly added text
+						deltaText := currentText[len(s.previousText):]
 						s.previousText = currentText
-						index := 0
 						return &llm.Event{
 							Type:  llm.EventTypeContentBlockDelta,
-							Index: &index,
+							Index: &s.textContentIndex,
 							Delta: &llm.EventDelta{
 								Type: llm.EventDeltaTypeText,
 								Text: deltaText,
@@ -540,12 +572,13 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 			}
 		case "function_call":
 			// Handle tool call events
-			index := 0 // For simplicity, use index 0
+			toolIndex := s.nextContentIndex
+			s.nextContentIndex++
 			return &llm.Event{
 				Type:  llm.EventTypeContentBlockStart,
-				Index: &index,
+				Index: &toolIndex,
 				ContentBlock: &llm.EventContentBlock{
-					Type: "tool_use",
+					Type: llm.ContentTypeToolUse,
 					ID:   item.CallID,
 					Name: item.Name,
 				},

@@ -12,7 +12,6 @@ import (
 func main() {
 	// Create provider with only provider-level configuration
 	provider := openairesponses.New(
-		openairesponses.WithAPIKey("your-api-key"),
 		openairesponses.WithModel("gpt-4.1"),
 		// Note: No tool configuration here - tools are now configured per request
 	)
