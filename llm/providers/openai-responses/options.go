@@ -215,7 +215,7 @@ type RequestConfig struct {
 // WebSearchOptions configures web search behavior
 type WebSearchOptions struct {
 	Domains           []string
-	SearchContextSize string // "small", "medium", "large"
+	SearchContextSize string // "low", "medium", "high"
 	UserLocation      *UserLocation
 }
 

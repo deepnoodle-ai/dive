@@ -180,7 +180,7 @@ Enable web search to allow the model to search the internet for current informat
 provider := openairesponses.New(
     openairesponses.WithModel("gpt-4.1"),
     openairesponses.WithWebSearchOptions(openairesponses.WebSearchOptions{
-        SearchContextSize: "medium", // "small", "medium", "large"
+        SearchContextSize: "medium", // "low", "medium", "high"
         UserLocation: &openairesponses.UserLocation{
             Type:    "approximate",
             Country: "US",
