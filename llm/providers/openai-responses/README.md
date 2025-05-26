@@ -214,18 +214,89 @@ response, err := provider.Generate(context.Background(),
 
 ### MCP Server Integration
 
-Connect to remote MCP servers for extended functionality:
+Connect to remote MCP servers for extended functionality. The provider supports the full OpenAI Responses API MCP feature set including:
+
+- Remote MCP server connections
+- Tool filtering with `allowed_tools`
+- Approval workflows for security
+- Authentication via headers
+- Streaming support for MCP events
+
+#### Basic MCP Usage
 
 ```go
 provider := openairesponses.New(
     openairesponses.WithModel("gpt-4.1"),
-    openairesponses.WithMCPServer("deepwiki", "https://mcp.deepwiki.com/mcp", nil),
-    openairesponses.WithMCPServerOptions("stripe", openairesponses.MCPServerConfig{
-        ServerURL: "https://mcp.stripe.com",
-        Headers: map[string]string{
-            "Authorization": "Bearer " + os.Getenv("STRIPE_API_KEY"),
+)
+
+response, err := provider.Generate(context.Background(),
+    llm.WithUserTextMessage("What transport protocols are supported in the 2025-03-26 version of the MCP spec?"),
+    llm.WithMCPServers(llm.MCPServerConfig{
+        Type: "url",
+        Name: "deepwiki",
+        URL:  "https://mcp.deepwiki.com/mcp",
+        ToolConfiguration: &llm.MCPToolConfiguration{
+            Enabled:      true,
+            AllowedTools: []string{"ask_question"}, // Filter to specific tools
         },
-        RequireApproval: "never",
+    }),
+)
+```
+
+#### Authenticated MCP Servers
+
+```go
+response, err := provider.Generate(context.Background(),
+    llm.WithUserTextMessage("Create a payment link for $20"),
+    llm.WithMCPServers(llm.MCPServerConfig{
+        Type:               "url",
+        Name:               "stripe",
+        URL:                "https://mcp.stripe.com",
+        AuthorizationToken: os.Getenv("STRIPE_API_KEY"),
+        ToolConfiguration: &llm.MCPToolConfiguration{
+            Enabled: true,
+        },
+    }),
+)
+```
+
+#### MCP Approval Workflow
+
+By default, MCP tool calls require approval for security. You can handle approval requests:
+
+```go
+// First request that triggers an approval request
+response1, err := provider.Generate(ctx, 
+    llm.WithUserTextMessage("Query the database"),
+    llm.WithMCPServers(/* MCP config */),
+)
+
+// Check for approval requests in the response
+for _, content := range response1.Content {
+    if textContent, ok := content.(*llm.TextContent); ok {
+        if strings.Contains(textContent.Text, "MCP approval required") {
+            // Handle approval - in practice, you'd extract the approval request ID
+            approvalRequestID := "mcpr_example_id"
+            
+            // Approve the request
+            response2, err := provider.Generate(ctx,
+                openairesponses.LLMWithMCPApprovalResponse(approvalRequestID, true),
+            )
+        }
+    }
+}
+```
+
+#### Provider-Level MCP Configuration
+
+You can also configure MCP servers at the provider level:
+
+```go
+provider := openairesponses.New(
+    openairesponses.WithModel("gpt-4.1"),
+    openairesponses.WithMCPServerOptions("deepwiki", openairesponses.MCPServerConfig{
+        ServerURL: "https://mcp.deepwiki.com/mcp",
+        RequireApproval: "never", // Skip approvals for trusted servers
     }),
 )
 ```

@@ -115,6 +115,14 @@ func WithMCPServerOptions(label string, config MCPServerConfig) func(*RequestCon
 	}
 }
 
+// WithMCPApprovalResponse creates an MCP approval response input
+func WithMCPApprovalResponse(approvalRequestID string, approve bool) func(*RequestConfig) {
+	return func(rc *RequestConfig) {
+		// This would typically be used with a specific input format
+		// The actual implementation would depend on how the provider handles input
+	}
+}
+
 // WithInstructions sets custom instructions for the request
 func WithInstructions(instructions string) func(*RequestConfig) {
 	return func(rc *RequestConfig) {

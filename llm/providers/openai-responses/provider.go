@@ -136,6 +136,35 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 		})
 	}
 
+	// Add MCP servers from llm.Config (request-level configuration)
+	for _, mcpServer := range config.MCPServers {
+		tool := Tool{
+			Type:        "mcp",
+			ServerLabel: mcpServer.Name,
+			ServerURL:   mcpServer.URL,
+		}
+
+		// Handle tool configuration
+		if mcpServer.ToolConfiguration != nil {
+			tool.AllowedTools = mcpServer.ToolConfiguration.AllowedTools
+		}
+
+		// Handle authorization
+		if mcpServer.AuthorizationToken != "" {
+			if tool.Headers == nil {
+				tool.Headers = make(map[string]string)
+			}
+			tool.Headers["Authorization"] = "Bearer " + mcpServer.AuthorizationToken
+		}
+
+		// Set default approval requirement if not specified
+		if tool.RequireApproval == nil {
+			tool.RequireApproval = "always" // Default to requiring approval for security
+		}
+
+		request.Tools = append(request.Tools, tool)
+	}
+
 	return request, nil
 }
 
@@ -299,6 +328,23 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 					Text: fmt.Sprintf("MCP tool result: %s", item.Output),
 				})
 			}
+		case "mcp_list_tools":
+			// Handle MCP tool list results
+			if len(item.Tools) > 0 {
+				var toolsText strings.Builder
+				toolsText.WriteString(fmt.Sprintf("MCP server '%s' tools:\n", item.ServerLabel))
+				for _, tool := range item.Tools {
+					toolsText.WriteString(fmt.Sprintf("- %s\n", tool.Name))
+				}
+				contentBlocks = append(contentBlocks, &llm.TextContent{
+					Text: toolsText.String(),
+				})
+			}
+		case "mcp_approval_request":
+			// Handle MCP approval requests
+			contentBlocks = append(contentBlocks, &llm.TextContent{
+				Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", item.Name, item.ServerLabel),
+			})
 		}
 	}
 
@@ -359,10 +405,24 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) (interface{},
 		for _, content := range msg.Content {
 			switch c := content.(type) {
 			case *llm.TextContent:
-				inputMsg.Content = append(inputMsg.Content, InputContent{
-					Type: "input_text",
-					Text: c.Text,
-				})
+				// Check if this is an MCP approval response
+				if strings.HasPrefix(c.Text, "MCP_APPROVAL_RESPONSE:") {
+					parts := strings.Split(c.Text, ":")
+					if len(parts) == 3 {
+						approvalRequestID := parts[1]
+						approve := parts[2] == "true"
+						inputMsg.Content = append(inputMsg.Content, InputContent{
+							Type:              "mcp_approval_response",
+							ApprovalRequestID: approvalRequestID,
+							Approve:           &approve,
+						})
+					}
+				} else {
+					inputMsg.Content = append(inputMsg.Content, InputContent{
+						Type: "input_text",
+						Text: c.Text,
+					})
+				}
 			case *llm.ImageContent:
 				// Handle image content
 				if c.Source != nil {
@@ -581,6 +641,50 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 					Type: llm.ContentTypeToolUse,
 					ID:   item.CallID,
 					Name: item.Name,
+				},
+			}
+		case "mcp_call":
+			// Handle MCP tool call events
+			toolIndex := s.nextContentIndex
+			s.nextContentIndex++
+			return &llm.Event{
+				Type:  llm.EventTypeContentBlockStart,
+				Index: &toolIndex,
+				ContentBlock: &llm.EventContentBlock{
+					Type: llm.ContentTypeToolUse,
+					ID:   item.ID,
+					Name: item.Name,
+				},
+			}
+		case "mcp_list_tools":
+			// Handle MCP tool list events - emit as text content
+			if len(item.Tools) > 0 {
+				toolIndex := s.nextContentIndex
+				s.nextContentIndex++
+				var toolsText strings.Builder
+				toolsText.WriteString(fmt.Sprintf("MCP server '%s' tools:\n", item.ServerLabel))
+				for _, tool := range item.Tools {
+					toolsText.WriteString(fmt.Sprintf("- %s\n", tool.Name))
+				}
+				return &llm.Event{
+					Type:  llm.EventTypeContentBlockStart,
+					Index: &toolIndex,
+					ContentBlock: &llm.EventContentBlock{
+						Type: llm.ContentTypeText,
+						Text: toolsText.String(),
+					},
+				}
+			}
+		case "mcp_approval_request":
+			// Handle MCP approval request events - emit as text content
+			toolIndex := s.nextContentIndex
+			s.nextContentIndex++
+			return &llm.Event{
+				Type:  llm.EventTypeContentBlockStart,
+				Index: &toolIndex,
+				ContentBlock: &llm.EventContentBlock{
+					Type: llm.ContentTypeText,
+					Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", item.Name, item.ServerLabel),
 				},
 			}
 		}

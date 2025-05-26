@@ -55,6 +55,9 @@ type InputContent struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
+	// MCP approval response fields
+	Approve           *bool  `json:"approve,omitempty"`
+	ApprovalRequestID string `json:"approval_request_id,omitempty"`
 }
 
 // Tool represents a tool that can be used by the model

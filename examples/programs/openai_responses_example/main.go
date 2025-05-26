@@ -114,16 +114,43 @@ func main() {
 	// Example 6: MCP server integration
 	fmt.Println("=== Example 6: MCP server integration ===")
 	response6, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Use the database tool to query user information"),
-		// Add MCP server configuration
-		openairesponses.LLMWithMCPServer("database", "http://localhost:8080/mcp", map[string]string{
-			"Authorization": "Bearer token123",
+		llm.WithUserTextMessage("What transport protocols are supported in the 2025-03-26 version of the MCP spec?"),
+		// Add MCP server configuration using the proper llm.Config approach
+		llm.WithMCPServers(llm.MCPServerConfig{
+			Type: "url",
+			Name: "deepwiki",
+			URL:  "https://mcp.deepwiki.com/mcp",
+			ToolConfiguration: &llm.MCPToolConfiguration{
+				Enabled:      true,
+				AllowedTools: []string{"ask_question"},
+			},
 		}),
 	)
 	if err != nil {
 		log.Printf("Error in example 6: %v", err)
 	} else {
 		fmt.Printf("MCP response: %s\n\n", response6.Content[0].(*llm.TextContent).Text)
+	}
+
+	// Example 6b: MCP server with authentication
+	fmt.Println("=== Example 6b: MCP server with authentication ===")
+	response6b, err := provider.Generate(ctx,
+		llm.WithUserTextMessage("Create a payment link for $20"),
+		// Add authenticated MCP server
+		llm.WithMCPServers(llm.MCPServerConfig{
+			Type:               "url",
+			Name:               "stripe",
+			URL:                "https://mcp.stripe.com",
+			AuthorizationToken: "sk_test_example", // In practice, use os.Getenv("STRIPE_API_KEY")
+			ToolConfiguration: &llm.MCPToolConfiguration{
+				Enabled: true,
+			},
+		}),
+	)
+	if err != nil {
+		log.Printf("Error in example 6b: %v", err)
+	} else {
+		fmt.Printf("Stripe MCP response: %s\n\n", response6b.Content[0].(*llm.TextContent).Text)
 	}
 
 	// Example 7: Streaming with multiple tools

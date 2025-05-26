@@ -114,6 +114,22 @@ func LLMWithMCPServer(label, serverURL string, headers map[string]string) llm.Op
 	}
 }
 
+// LLMWithMCPApprovalResponse creates an MCP approval response
+func LLMWithMCPApprovalResponse(approvalRequestID string, approve bool) llm.Option {
+	return func(config *llm.Config) {
+		// Create a special message for MCP approval response
+		approvalMessage := &llm.Message{
+			Role: llm.User,
+			Content: []llm.Content{
+				&llm.TextContent{
+					Text: fmt.Sprintf("MCP_APPROVAL_RESPONSE:%s:%t", approvalRequestID, approve),
+				},
+			},
+		}
+		config.Messages = append(config.Messages, approvalMessage)
+	}
+}
+
 // LLMWithInstructions sets custom instructions for the request
 func LLMWithInstructions(instructions string) llm.Option {
 	return func(config *llm.Config) {
