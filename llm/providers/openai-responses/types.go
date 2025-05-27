@@ -55,6 +55,10 @@ type InputContent struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
+	// File fields for input_file type
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
 	// MCP approval response fields
 	Approve           *bool  `json:"approve,omitempty"`
 	ApprovalRequestID string `json:"approval_request_id,omitempty"`

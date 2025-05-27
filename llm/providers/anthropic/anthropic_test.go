@@ -151,3 +151,115 @@ func TestToolCallStream(t *testing.T) {
 	require.Equal(t, 2.0, params["a"])
 	require.Equal(t, 2.0, params["b"])
 }
+
+func TestFileContentToDocumentContentConversion(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    *llm.Message
+		expected func(*testing.T, *llm.Message)
+	}{
+		{
+			name: "FileContent with base64 data URI",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.FileContent{
+						Filename: "test.pdf",
+						FileData: "data:application/pdf;base64,JVBERi0xLjQK...",
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 1)
+				docContent, ok := msg.Content[0].(*llm.DocumentContent)
+				require.True(t, ok, "Expected DocumentContent, got %T", msg.Content[0])
+				require.Equal(t, "test.pdf", docContent.Title)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceTypeBase64, docContent.Source.Type)
+				require.Equal(t, "application/pdf", docContent.Source.MediaType)
+				require.Equal(t, "JVBERi0xLjQK...", docContent.Source.Data)
+			},
+		},
+		{
+			name: "FileContent with raw base64 data",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.FileContent{
+						Filename: "document.pdf",
+						FileData: "JVBERi0xLjQK...",
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 1)
+				docContent, ok := msg.Content[0].(*llm.DocumentContent)
+				require.True(t, ok)
+				require.Equal(t, "document.pdf", docContent.Title)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceTypeBase64, docContent.Source.Type)
+				require.Equal(t, "application/pdf", docContent.Source.MediaType)
+				require.Equal(t, "JVBERi0xLjQK...", docContent.Source.Data)
+			},
+		},
+		{
+			name: "FileContent with file ID",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.FileContent{
+						FileID: "file-abc123",
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 1)
+				docContent, ok := msg.Content[0].(*llm.DocumentContent)
+				require.True(t, ok)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceType("file"), docContent.Source.Type)
+				require.Equal(t, "file-abc123", docContent.Source.URL)
+			},
+		},
+		{
+			name: "Mixed content with FileContent and TextContent",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.TextContent{Text: "Please analyze this document:"},
+					&llm.FileContent{
+						Filename: "report.pdf",
+						FileData: "data:application/pdf;base64,JVBERi0xLjQK...",
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 2)
+
+				// First content should remain as TextContent
+				textContent, ok := msg.Content[0].(*llm.TextContent)
+				require.True(t, ok)
+				require.Equal(t, "Please analyze this document:", textContent.Text)
+
+				// Second content should be converted to DocumentContent
+				docContent, ok := msg.Content[1].(*llm.DocumentContent)
+				require.True(t, ok)
+				require.Equal(t, "report.pdf", docContent.Title)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceTypeBase64, docContent.Source.Type)
+				require.Equal(t, "application/pdf", docContent.Source.MediaType)
+				require.Equal(t, "JVBERi0xLjQK...", docContent.Source.Data)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			messages := []*llm.Message{tt.input}
+			converted, err := convertMessages(messages)
+			require.NoError(t, err)
+			require.Len(t, converted, 1)
+			tt.expected(t, converted[0])
+		})
+	}
+}

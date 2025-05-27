@@ -46,3 +46,72 @@ func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 	}
 	return &Message{Role: User, Content: content}
 }
+
+// NewUserFileMessage creates a new user message with a file content block
+// using base64-encoded file data.
+func NewUserFileMessage(filename, fileData string) *Message {
+	return &Message{
+		Role: User,
+		Content: []Content{&FileContent{
+			Filename: filename,
+			FileData: fileData,
+		}},
+	}
+}
+
+// NewUserFileIDMessage creates a new user message with a file content block
+// using an OpenAI file ID.
+func NewUserFileIDMessage(fileID string) *Message {
+	return &Message{
+		Role: User,
+		Content: []Content{&FileContent{
+			FileID: fileID,
+		}},
+	}
+}
+
+// NewUserDocumentMessage creates a new user message with a document content block
+// using base64-encoded document data. This is the preferred method for Anthropic PDF support.
+func NewUserDocumentMessage(title, mediaType, base64Data string) *Message {
+	return &Message{
+		Role: User,
+		Content: []Content{&DocumentContent{
+			Title: title,
+			Source: &ContentSource{
+				Type:      ContentSourceTypeBase64,
+				MediaType: mediaType,
+				Data:      base64Data,
+			},
+		}},
+	}
+}
+
+// NewUserDocumentURLMessage creates a new user message with a document content block
+// using a URL reference to a PDF.
+func NewUserDocumentURLMessage(title, url string) *Message {
+	return &Message{
+		Role: User,
+		Content: []Content{&DocumentContent{
+			Title: title,
+			Source: &ContentSource{
+				Type: ContentSourceTypeURL,
+				URL:  url,
+			},
+		}},
+	}
+}
+
+// NewUserDocumentFileIDMessage creates a new user message with a document content block
+// using an Anthropic Files API file ID.
+func NewUserDocumentFileIDMessage(title, fileID string) *Message {
+	return &Message{
+		Role: User,
+		Content: []Content{&DocumentContent{
+			Title: title,
+			Source: &ContentSource{
+				Type: "file",
+				URL:  fileID, // Anthropic stores file ID in URL field
+			},
+		}},
+	}
+}

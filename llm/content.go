@@ -12,6 +12,7 @@ const (
 	ContentTypeText                    ContentType = "text"
 	ContentTypeImage                   ContentType = "image"
 	ContentTypeDocument                ContentType = "document"
+	ContentTypeFile                    ContentType = "file"
 	ContentTypeToolUse                 ContentType = "tool_use"
 	ContentTypeToolResult              ContentType = "tool_result"
 	ContentTypeThinking                ContentType = "thinking"
@@ -278,6 +279,52 @@ func (c *DocumentContent) MarshalJSON() ([]byte, error) {
 
 func (c *DocumentContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
+}
+
+//// FileContent ///////////////////////////////////////////////////////////////
+
+/* Examples:
+{
+  "type": "file",
+  "filename": "draconomicon.pdf",
+  "file_data": "data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCg==",
+  "cache_control": {"type": "ephemeral"}
+}
+
+{
+  "type": "file",
+  "file_id": "file-abc123",
+  "cache_control": {"type": "ephemeral"}
+}
+*/
+
+type FileContent struct {
+	// Filename is the name of the file (required when using file_data)
+	Filename string `json:"filename,omitempty"`
+
+	// FileData is the base64-encoded file data with data URI format
+	// e.g., "data:application/pdf;base64,JVBERi0xLjQK..."
+	FileData string `json:"file_data,omitempty"`
+
+	// FileID is the OpenAI file ID (alternative to file_data)
+	FileID string `json:"file_id,omitempty"`
+
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+func (c *FileContent) Type() ContentType {
+	return ContentTypeFile
+}
+
+func (c *FileContent) MarshalJSON() ([]byte, error) {
+	type Alias FileContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeFile,
+		Alias: (*Alias)(c),
+	})
 }
 
 //// ToolUseContent ////////////////////////////////////////////////////////////
@@ -680,6 +727,8 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &ImageContent{}
 	case ContentTypeDocument:
 		content = &DocumentContent{}
+	case ContentTypeFile:
+		content = &FileContent{}
 	case ContentTypeToolUse:
 		content = &ToolUseContent{}
 	case ContentTypeToolResult:

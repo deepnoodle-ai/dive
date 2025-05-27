@@ -431,6 +431,21 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) (interface{},
 						ImageURL: c.Source.URL,
 					})
 				}
+			case *llm.FileContent:
+				// Handle file content
+				inputContent := InputContent{
+					Type: "input_file",
+				}
+				if c.Filename != "" {
+					inputContent.Filename = c.Filename
+				}
+				if c.FileData != "" {
+					inputContent.FileData = c.FileData
+				}
+				if c.FileID != "" {
+					inputContent.FileID = c.FileID
+				}
+				inputMsg.Content = append(inputMsg.Content, inputContent)
 			case *llm.ToolResultContent:
 				// Handle tool result content - convert to text for now
 				if contentStr, ok := c.Content.(string); ok {

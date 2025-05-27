@@ -821,3 +821,80 @@ func mustMarshal(v interface{}) string {
 	}
 	return string(data)
 }
+
+func TestConvertFileContentToInput(t *testing.T) {
+	provider := New()
+
+	// Test with file data
+	messages := []*llm.Message{
+		{
+			Role: llm.User,
+			Content: []llm.Content{
+				&llm.TextContent{Text: "What is this document about?"},
+				&llm.FileContent{
+					Filename: "test.pdf",
+					FileData: "data:application/pdf;base64,JVBERi0xLjQK...",
+				},
+			},
+		},
+	}
+
+	input, err := provider.convertMessagesToInput(messages)
+	require.NoError(t, err)
+
+	inputMessages, ok := input.([]InputMessage)
+	require.True(t, ok)
+	require.Len(t, inputMessages, 1)
+
+	msg := inputMessages[0]
+	require.Equal(t, "user", msg.Role)
+	require.Len(t, msg.Content, 2)
+
+	// Check text content
+	require.Equal(t, "input_text", msg.Content[0].Type)
+	require.Equal(t, "What is this document about?", msg.Content[0].Text)
+
+	// Check file content
+	require.Equal(t, "input_file", msg.Content[1].Type)
+	require.Equal(t, "test.pdf", msg.Content[1].Filename)
+	require.Equal(t, "data:application/pdf;base64,JVBERi0xLjQK...", msg.Content[1].FileData)
+	require.Empty(t, msg.Content[1].FileID)
+}
+
+func TestConvertFileContentWithFileIDToInput(t *testing.T) {
+	provider := New()
+
+	// Test with file ID
+	messages := []*llm.Message{
+		{
+			Role: llm.User,
+			Content: []llm.Content{
+				&llm.TextContent{Text: "Analyze this document"},
+				&llm.FileContent{
+					FileID: "file-abc123",
+				},
+			},
+		},
+	}
+
+	input, err := provider.convertMessagesToInput(messages)
+	require.NoError(t, err)
+
+	inputMessages, ok := input.([]InputMessage)
+	require.True(t, ok)
+	require.Len(t, inputMessages, 1)
+
+	msg := inputMessages[0]
+	require.Equal(t, "user", msg.Role)
+	require.Len(t, msg.Content, 2)
+
+	// Check text content
+	require.Equal(t, "input_text", msg.Content[0].Type)
+	require.Equal(t, "Analyze this document", msg.Content[0].Text)
+
+	// Check file content
+	require.Equal(t, "input_file", msg.Content[1].Type)
+	require.Equal(t, "file-abc123", msg.Content[1].FileID)
+	require.Empty(t, msg.Content[1].Filename)
+	require.Empty(t, msg.Content[1].FileData)
+}
