@@ -31,6 +31,7 @@ const (
 	ContentSourceTypeBase64 ContentSourceType = "base64"
 	ContentSourceTypeURL    ContentSourceType = "url"
 	ContentSourceTypeText   ContentSourceType = "text"
+	ContentSourceTypeFile   ContentSourceType = "file"
 )
 
 func (c ContentSourceType) String() string {
@@ -50,17 +51,20 @@ type ContentChunk struct {
 
 // ContentSource conveys information about media content in a message.
 type ContentSource struct {
-	// Type is the type of the content source ("base64", "url", or "content")
+	// Type is the type of the content source ("base64", "url", "text", or "file")
 	Type ContentSourceType `json:"type"`
 
-	// MediaType is the media type of the content. E.g. "image/jpeg"
+	// MediaType is the media type of the content. E.g. "image/jpeg", "application/pdf"
 	MediaType string `json:"media_type,omitempty"`
 
-	// Data is base64 encoded data
+	// Data is base64 encoded data (used with ContentSourceTypeBase64)
 	Data string `json:"data,omitempty"`
 
-	// URL is the URL of the content
+	// URL is the URL of the content (used with ContentSourceTypeURL)
 	URL string `json:"url,omitempty"`
+
+	// FileID is the file ID from the Files API (used with ContentSourceTypeFile)
+	FileID string `json:"file_id,omitempty"`
 
 	// Chunks of content. Only use if chunking on the client side, for use
 	// within a DocumentContent block.
@@ -250,6 +254,14 @@ func (c *ImageContent) SetCacheControl(cacheControl *CacheControl) {
     "type": "base64",
     "media_type": "application/pdf",
     "data": "$PDF_BASE64"
+  }
+}
+
+{
+  "type": "document",
+  "source": {
+    "type": "file",
+    "file_id": "file_abc123"
   }
 }
 */
@@ -727,8 +739,6 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &ImageContent{}
 	case ContentTypeDocument:
 		content = &DocumentContent{}
-	case ContentTypeFile:
-		content = &FileContent{}
 	case ContentTypeToolUse:
 		content = &ToolUseContent{}
 	case ContentTypeToolResult:

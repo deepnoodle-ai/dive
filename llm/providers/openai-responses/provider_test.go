@@ -822,18 +822,22 @@ func mustMarshal(v interface{}) string {
 	return string(data)
 }
 
-func TestConvertFileContentToInput(t *testing.T) {
+func TestConvertDocumentContentToInput(t *testing.T) {
 	provider := New()
 
-	// Test with file data
+	// Test with base64 data
 	messages := []*llm.Message{
 		{
 			Role: llm.User,
 			Content: []llm.Content{
 				&llm.TextContent{Text: "What is this document about?"},
-				&llm.FileContent{
-					Filename: "test.pdf",
-					FileData: "data:application/pdf;base64,JVBERi0xLjQK...",
+				&llm.DocumentContent{
+					Title: "test.pdf",
+					Source: &llm.ContentSource{
+						Type:      llm.ContentSourceTypeBase64,
+						MediaType: "application/pdf",
+						Data:      "JVBERi0xLjQK...",
+					},
 				},
 			},
 		},
@@ -861,7 +865,7 @@ func TestConvertFileContentToInput(t *testing.T) {
 	require.Empty(t, msg.Content[1].FileID)
 }
 
-func TestConvertFileContentWithFileIDToInput(t *testing.T) {
+func TestConvertDocumentContentWithFileIDToInput(t *testing.T) {
 	provider := New()
 
 	// Test with file ID
@@ -870,8 +874,12 @@ func TestConvertFileContentWithFileIDToInput(t *testing.T) {
 			Role: llm.User,
 			Content: []llm.Content{
 				&llm.TextContent{Text: "Analyze this document"},
-				&llm.FileContent{
-					FileID: "file-abc123",
+				&llm.DocumentContent{
+					Title: "document.pdf",
+					Source: &llm.ContentSource{
+						Type:   llm.ContentSourceTypeFile,
+						FileID: "file-abc123",
+					},
 				},
 			},
 		},
@@ -895,6 +903,6 @@ func TestConvertFileContentWithFileIDToInput(t *testing.T) {
 	// Check file content
 	require.Equal(t, "input_file", msg.Content[1].Type)
 	require.Equal(t, "file-abc123", msg.Content[1].FileID)
-	require.Empty(t, msg.Content[1].Filename)
+	require.Equal(t, "document.pdf", msg.Content[1].Filename)
 	require.Empty(t, msg.Content[1].FileData)
 }

@@ -266,52 +266,25 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 					Content:   c.Content,
 					ToolUseID: c.ToolUseID,
 				})
-			case *llm.FileContent:
-				// Convert FileContent to DocumentContent for Anthropic API
-				docContent := &llm.DocumentContent{}
-
-				if c.FileID != "" {
-					// Use Files API reference - Anthropic uses "file" type with file_id
-					docContent.Source = &llm.ContentSource{
-						Type: "file",
-						URL:  c.FileID, // Store file ID in URL field for Files API
+			case *llm.DocumentContent:
+				// Handle DocumentContent with file IDs for Anthropic API compatibility
+				if c.Source != nil && c.Source.Type == llm.ContentSourceTypeFile && c.Source.FileID != "" {
+					// For Anthropic API, file IDs are passed in the source structure
+					docContent := &llm.DocumentContent{
+						Title:        c.Title,
+						Context:      c.Context,
+						Citations:    c.Citations,
+						CacheControl: c.CacheControl,
+						Source: &llm.ContentSource{
+							Type:   c.Source.Type,
+							FileID: c.Source.FileID,
+						},
 					}
-				} else if c.FileData != "" {
-					// Parse data URI format: "data:application/pdf;base64,..."
-					if strings.HasPrefix(c.FileData, "data:") {
-						parts := strings.SplitN(c.FileData, ",", 2)
-						if len(parts) == 2 {
-							// Extract media type from data URI
-							mediaTypePart := strings.TrimPrefix(parts[0], "data:")
-							mediaType := strings.Split(mediaTypePart, ";")[0]
-
-							docContent.Source = &llm.ContentSource{
-								Type:      llm.ContentSourceTypeBase64,
-								MediaType: mediaType,
-								Data:      parts[1],
-							}
-						}
-					} else {
-						// Assume it's raw base64 data for PDF
-						docContent.Source = &llm.ContentSource{
-							Type:      llm.ContentSourceTypeBase64,
-							MediaType: "application/pdf",
-							Data:      c.FileData,
-						}
-					}
+					copiedContent = append(copiedContent, docContent)
+				} else {
+					// Pass through other DocumentContent as-is
+					copiedContent = append(copiedContent, content)
 				}
-
-				// Set filename as title if available
-				if c.Filename != "" {
-					docContent.Title = c.Filename
-				}
-
-				// Copy cache control if present
-				if c.CacheControl != nil {
-					docContent.CacheControl = c.CacheControl
-				}
-
-				copiedContent = append(copiedContent, docContent)
 			default:
 				copiedContent = append(copiedContent, content)
 			}

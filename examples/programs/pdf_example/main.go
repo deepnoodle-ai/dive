@@ -134,14 +134,18 @@ func createMessageFromFile(provider, filePath, prompt string) *llm.Message {
 			},
 		}
 	case "openai-responses":
-		// Use FileContent for OpenAI Responses API
+		// Use DocumentContent for unified approach across providers
 		return &llm.Message{
 			Role: llm.User,
 			Content: []llm.Content{
 				&llm.TextContent{Text: prompt},
-				&llm.FileContent{
-					Filename: filename,
-					FileData: fmt.Sprintf("data:application/pdf;base64,%s", base64Data),
+				&llm.DocumentContent{
+					Title: filename,
+					Source: &llm.ContentSource{
+						Type:      llm.ContentSourceTypeBase64,
+						MediaType: "application/pdf",
+						Data:      base64Data,
+					},
 				},
 			},
 		}

@@ -219,6 +219,28 @@ func TestDocumentContent(t *testing.T) {
 				},
 				expected: `{"type":"document","source":{"type":"content","content":[{"type":"text","text":"Chunk 1"},{"type":"text","text":"Chunk 2"}]},"title":"Document Title"}`,
 			},
+			{
+				name: "document with file ID",
+				content: &DocumentContent{
+					Source: &ContentSource{
+						Type:   ContentSourceTypeFile,
+						FileID: "file-abc123",
+					},
+					Title: "PDF Document",
+				},
+				expected: `{"type":"document","source":{"type":"file","file_id":"file-abc123"},"title":"PDF Document"}`,
+			},
+			{
+				name: "document with URL",
+				content: &DocumentContent{
+					Source: &ContentSource{
+						Type: ContentSourceTypeURL,
+						URL:  "https://example.com/document.pdf",
+					},
+					Title: "Remote PDF",
+				},
+				expected: `{"type":"document","source":{"type":"url","url":"https://example.com/document.pdf"},"title":"Remote PDF"}`,
+			},
 		}
 
 		for _, tt := range tests {
@@ -551,75 +573,4 @@ func (c *MockCitation) MarshalJSON() ([]byte, error) {
 
 func (c *MockCitation) IsCitation() bool {
 	return true
-}
-
-func TestFileContentMarshalUnmarshal(t *testing.T) {
-	// Test FileContent with file data
-	fileContent := &FileContent{
-		Filename: "test.pdf",
-		FileData: "data:application/pdf;base64,JVBERi0xLjQK...",
-		CacheControl: &CacheControl{
-			Type: CacheControlTypeEphemeral,
-		},
-	}
-
-	// Marshal to JSON
-	data, err := json.Marshal(fileContent)
-	require.NoError(t, err)
-
-	// Verify the JSON structure
-	var jsonData map[string]interface{}
-	err = json.Unmarshal(data, &jsonData)
-	require.NoError(t, err)
-	require.Equal(t, "file", jsonData["type"])
-	require.Equal(t, "test.pdf", jsonData["filename"])
-	require.Equal(t, "data:application/pdf;base64,JVBERi0xLjQK...", jsonData["file_data"])
-
-	// Unmarshal back to Content interface
-	content, err := UnmarshalContent(data)
-	require.NoError(t, err)
-	require.Equal(t, ContentTypeFile, content.Type())
-
-	// Cast back to FileContent and verify fields
-	fc, ok := content.(*FileContent)
-	require.True(t, ok)
-	require.Equal(t, "test.pdf", fc.Filename)
-	require.Equal(t, "data:application/pdf;base64,JVBERi0xLjQK...", fc.FileData)
-	require.NotNil(t, fc.CacheControl)
-	require.Equal(t, CacheControlTypeEphemeral, fc.CacheControl.Type)
-}
-
-func TestFileContentWithFileID(t *testing.T) {
-	// Test FileContent with file ID
-	fileContent := &FileContent{
-		FileID: "file-abc123",
-		CacheControl: &CacheControl{
-			Type: CacheControlTypeEphemeral,
-		},
-	}
-
-	// Marshal to JSON
-	data, err := json.Marshal(fileContent)
-	require.NoError(t, err)
-
-	// Verify the JSON structure
-	var jsonData map[string]interface{}
-	err = json.Unmarshal(data, &jsonData)
-	require.NoError(t, err)
-	require.Equal(t, "file", jsonData["type"])
-	require.Equal(t, "file-abc123", jsonData["file_id"])
-	require.Nil(t, jsonData["filename"])
-	require.Nil(t, jsonData["file_data"])
-
-	// Unmarshal back to Content interface
-	content, err := UnmarshalContent(data)
-	require.NoError(t, err)
-	require.Equal(t, ContentTypeFile, content.Type())
-
-	// Cast back to FileContent and verify fields
-	fc, ok := content.(*FileContent)
-	require.True(t, ok)
-	require.Equal(t, "file-abc123", fc.FileID)
-	require.Empty(t, fc.Filename)
-	require.Empty(t, fc.FileData)
 }

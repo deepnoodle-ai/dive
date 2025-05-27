@@ -47,25 +47,34 @@ func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 	return &Message{Role: User, Content: content}
 }
 
-// NewUserFileMessage creates a new user message with a file content block
-// using base64-encoded file data.
+// NewUserFileMessage creates a new user message with a document content block
+// using base64-encoded file data. This function is deprecated in favor of
+// NewUserDocumentMessage which follows Anthropic's unified document approach.
 func NewUserFileMessage(filename, fileData string) *Message {
 	return &Message{
 		Role: User,
-		Content: []Content{&FileContent{
-			Filename: filename,
-			FileData: fileData,
+		Content: []Content{&DocumentContent{
+			Title: filename,
+			Source: &ContentSource{
+				Type:      ContentSourceTypeBase64,
+				MediaType: "application/octet-stream", // Default, should be set appropriately
+				Data:      fileData,
+			},
 		}},
 	}
 }
 
-// NewUserFileIDMessage creates a new user message with a file content block
-// using an OpenAI file ID.
+// NewUserFileIDMessage creates a new user message with a document content block
+// using a file ID from the Files API. This function is deprecated in favor of
+// NewUserDocumentFileIDMessage which follows Anthropic's unified document approach.
 func NewUserFileIDMessage(fileID string) *Message {
 	return &Message{
 		Role: User,
-		Content: []Content{&FileContent{
-			FileID: fileID,
+		Content: []Content{&DocumentContent{
+			Source: &ContentSource{
+				Type:   ContentSourceTypeFile,
+				FileID: fileID,
+			},
 		}},
 	}
 }
@@ -102,15 +111,15 @@ func NewUserDocumentURLMessage(title, url string) *Message {
 }
 
 // NewUserDocumentFileIDMessage creates a new user message with a document content block
-// using an Anthropic Files API file ID.
+// using a Files API file ID.
 func NewUserDocumentFileIDMessage(title, fileID string) *Message {
 	return &Message{
 		Role: User,
 		Content: []Content{&DocumentContent{
 			Title: title,
 			Source: &ContentSource{
-				Type: "file",
-				URL:  fileID, // Anthropic stores file ID in URL field
+				Type:   ContentSourceTypeFile,
+				FileID: fileID,
 			},
 		}},
 	}

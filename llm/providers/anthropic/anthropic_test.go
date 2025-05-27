@@ -152,20 +152,24 @@ func TestToolCallStream(t *testing.T) {
 	require.Equal(t, 2.0, params["b"])
 }
 
-func TestFileContentToDocumentContentConversion(t *testing.T) {
+func TestDocumentContentHandling(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    *llm.Message
 		expected func(*testing.T, *llm.Message)
 	}{
 		{
-			name: "FileContent with base64 data URI",
+			name: "DocumentContent with base64 data",
 			input: &llm.Message{
 				Role: llm.User,
 				Content: []llm.Content{
-					&llm.FileContent{
-						Filename: "test.pdf",
-						FileData: "data:application/pdf;base64,JVBERi0xLjQK...",
+					&llm.DocumentContent{
+						Title: "test.pdf",
+						Source: &llm.ContentSource{
+							Type:      llm.ContentSourceTypeBase64,
+							MediaType: "application/pdf",
+							Data:      "JVBERi0xLjQK...",
+						},
 					},
 				},
 			},
@@ -181,13 +185,16 @@ func TestFileContentToDocumentContentConversion(t *testing.T) {
 			},
 		},
 		{
-			name: "FileContent with raw base64 data",
+			name: "DocumentContent with URL",
 			input: &llm.Message{
 				Role: llm.User,
 				Content: []llm.Content{
-					&llm.FileContent{
-						Filename: "document.pdf",
-						FileData: "JVBERi0xLjQK...",
+					&llm.DocumentContent{
+						Title: "remote.pdf",
+						Source: &llm.ContentSource{
+							Type: llm.ContentSourceTypeURL,
+							URL:  "https://example.com/document.pdf",
+						},
 					},
 				},
 			},
@@ -195,20 +202,23 @@ func TestFileContentToDocumentContentConversion(t *testing.T) {
 				require.Len(t, msg.Content, 1)
 				docContent, ok := msg.Content[0].(*llm.DocumentContent)
 				require.True(t, ok)
-				require.Equal(t, "document.pdf", docContent.Title)
+				require.Equal(t, "remote.pdf", docContent.Title)
 				require.NotNil(t, docContent.Source)
-				require.Equal(t, llm.ContentSourceTypeBase64, docContent.Source.Type)
-				require.Equal(t, "application/pdf", docContent.Source.MediaType)
-				require.Equal(t, "JVBERi0xLjQK...", docContent.Source.Data)
+				require.Equal(t, llm.ContentSourceTypeURL, docContent.Source.Type)
+				require.Equal(t, "https://example.com/document.pdf", docContent.Source.URL)
 			},
 		},
 		{
-			name: "FileContent with file ID",
+			name: "DocumentContent with file ID",
 			input: &llm.Message{
 				Role: llm.User,
 				Content: []llm.Content{
-					&llm.FileContent{
-						FileID: "file-abc123",
+					&llm.DocumentContent{
+						Title: "api-file.pdf",
+						Source: &llm.ContentSource{
+							Type:   llm.ContentSourceTypeFile,
+							FileID: "file-abc123",
+						},
 					},
 				},
 			},
@@ -216,20 +226,25 @@ func TestFileContentToDocumentContentConversion(t *testing.T) {
 				require.Len(t, msg.Content, 1)
 				docContent, ok := msg.Content[0].(*llm.DocumentContent)
 				require.True(t, ok)
+				require.Equal(t, "api-file.pdf", docContent.Title)
 				require.NotNil(t, docContent.Source)
-				require.Equal(t, llm.ContentSourceType("file"), docContent.Source.Type)
-				require.Equal(t, "file-abc123", docContent.Source.URL)
+				require.Equal(t, llm.ContentSourceTypeFile, docContent.Source.Type)
+				require.Equal(t, "file-abc123", docContent.Source.FileID)
 			},
 		},
 		{
-			name: "Mixed content with FileContent and TextContent",
+			name: "Mixed content with DocumentContent and TextContent",
 			input: &llm.Message{
 				Role: llm.User,
 				Content: []llm.Content{
 					&llm.TextContent{Text: "Please analyze this document:"},
-					&llm.FileContent{
-						Filename: "report.pdf",
-						FileData: "data:application/pdf;base64,JVBERi0xLjQK...",
+					&llm.DocumentContent{
+						Title: "report.pdf",
+						Source: &llm.ContentSource{
+							Type:      llm.ContentSourceTypeBase64,
+							MediaType: "application/pdf",
+							Data:      "JVBERi0xLjQK...",
+						},
 					},
 				},
 			},
@@ -241,7 +256,7 @@ func TestFileContentToDocumentContentConversion(t *testing.T) {
 				require.True(t, ok)
 				require.Equal(t, "Please analyze this document:", textContent.Text)
 
-				// Second content should be converted to DocumentContent
+				// Second content should remain as DocumentContent
 				docContent, ok := msg.Content[1].(*llm.DocumentContent)
 				require.True(t, ok)
 				require.Equal(t, "report.pdf", docContent.Title)

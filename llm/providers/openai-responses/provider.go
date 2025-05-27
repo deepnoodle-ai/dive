@@ -431,21 +431,38 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) (interface{},
 						ImageURL: c.Source.URL,
 					})
 				}
-			case *llm.FileContent:
-				// Handle file content
-				inputContent := InputContent{
-					Type: "input_file",
+			case *llm.DocumentContent:
+				// Handle document content - convert to file input for OpenAI Responses API
+				if c.Source != nil {
+					inputContent := InputContent{
+						Type: "input_file",
+					}
+
+					// Set filename from title if available
+					if c.Title != "" {
+						inputContent.Filename = c.Title
+					}
+
+					switch c.Source.Type {
+					case llm.ContentSourceTypeBase64:
+						// Convert base64 data to data URI format expected by OpenAI
+						if c.Source.MediaType != "" && c.Source.Data != "" {
+							inputContent.FileData = fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
+						}
+					case llm.ContentSourceTypeFile:
+						// Use file ID directly
+						if c.Source.FileID != "" {
+							inputContent.FileID = c.Source.FileID
+						}
+					case llm.ContentSourceTypeURL:
+						// OpenAI Responses API doesn't support URL references directly
+						// This would need to be downloaded and converted to base64 or file ID
+						// For now, we'll skip this case or could add a warning
+						continue
+					}
+
+					inputMsg.Content = append(inputMsg.Content, inputContent)
 				}
-				if c.Filename != "" {
-					inputContent.Filename = c.Filename
-				}
-				if c.FileData != "" {
-					inputContent.FileData = c.FileData
-				}
-				if c.FileID != "" {
-					inputContent.FileID = c.FileID
-				}
-				inputMsg.Content = append(inputMsg.Content, inputContent)
 			case *llm.ToolResultContent:
 				// Handle tool result content - convert to text for now
 				if contentStr, ok := c.Content.(string); ok {

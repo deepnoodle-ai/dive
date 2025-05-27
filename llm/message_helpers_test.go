@@ -15,11 +15,13 @@ func TestNewUserFileMessage(t *testing.T) {
 	require.Equal(t, User, message.Role)
 	require.Len(t, message.Content, 1)
 
-	fileContent, ok := message.Content[0].(*FileContent)
+	docContent, ok := message.Content[0].(*DocumentContent)
 	require.True(t, ok)
-	require.Equal(t, filename, fileContent.Filename)
-	require.Equal(t, fileData, fileContent.FileData)
-	require.Empty(t, fileContent.FileID)
+	require.Equal(t, filename, docContent.Title)
+	require.NotNil(t, docContent.Source)
+	require.Equal(t, ContentSourceTypeBase64, docContent.Source.Type)
+	require.Equal(t, "application/octet-stream", docContent.Source.MediaType)
+	require.Equal(t, fileData, docContent.Source.Data)
 }
 
 func TestNewUserFileIDMessage(t *testing.T) {
@@ -30,11 +32,11 @@ func TestNewUserFileIDMessage(t *testing.T) {
 	require.Equal(t, User, message.Role)
 	require.Len(t, message.Content, 1)
 
-	fileContent, ok := message.Content[0].(*FileContent)
+	docContent, ok := message.Content[0].(*DocumentContent)
 	require.True(t, ok)
-	require.Equal(t, fileID, fileContent.FileID)
-	require.Empty(t, fileContent.Filename)
-	require.Empty(t, fileContent.FileData)
+	require.NotNil(t, docContent.Source)
+	require.Equal(t, ContentSourceTypeFile, docContent.Source.Type)
+	require.Equal(t, fileID, docContent.Source.FileID)
 }
 
 func TestNewUserDocumentMessage(t *testing.T) {
@@ -86,6 +88,6 @@ func TestNewUserDocumentFileIDMessage(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, title, docContent.Title)
 	require.NotNil(t, docContent.Source)
-	require.Equal(t, ContentSourceType("file"), docContent.Source.Type)
-	require.Equal(t, fileID, docContent.Source.URL)
+	require.Equal(t, ContentSourceTypeFile, docContent.Source.Type)
+	require.Equal(t, fileID, docContent.Source.FileID)
 }

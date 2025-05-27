@@ -1,13 +1,13 @@
 # PDF Support Example
 
-This example demonstrates how to use PDF support with both Anthropic and OpenAI Responses API providers in the Dive framework.
+This example demonstrates how to use PDF support with both Anthropic and OpenAI Responses API providers in the Dive framework using the unified `DocumentContent` approach.
 
 ## Features
 
-- **Anthropic PDF Support**: Uses `DocumentContent` with base64, URL, or Files API references
-- **OpenAI Responses API Support**: Uses `FileContent` with base64 data or file IDs
+- **Unified PDF Support**: Uses `DocumentContent` with base64, URL, or Files API references across all providers
 - **Multiple Input Methods**: Support for local files and remote URLs
 - **Cross-Provider Compatibility**: Same interface works with both providers
+- **Anthropic API Alignment**: Follows Anthropic's PDF support specification
 
 ## Usage
 
@@ -41,36 +41,37 @@ go run main.go -provider openai-responses -pdf "./document.pdf" -prompt "List th
 
 ## Implementation Details
 
-### Anthropic API
+### Unified DocumentContent Approach
 
-The Anthropic provider converts `FileContent` to `DocumentContent` automatically:
+Both providers now use the same `DocumentContent` structure, following Anthropic's API specification:
 
 ```go
-// FileContent with base64 data
-&llm.FileContent{
-    Filename: "document.pdf",
-    FileData: "data:application/pdf;base64,JVBERi0x...",
-}
-
-// Becomes DocumentContent
+// Base64 encoded PDF
 &llm.DocumentContent{
     Title: "document.pdf",
     Source: &llm.ContentSource{
         Type:      llm.ContentSourceTypeBase64,
         MediaType: "application/pdf",
-        Data:      "JVBERi0x...",
+        Data:      "JVBERi0x...", // base64 data without data URI prefix
     },
 }
-```
 
-### OpenAI Responses API
+// URL reference
+&llm.DocumentContent{
+    Title: "Remote Document",
+    Source: &llm.ContentSource{
+        Type: llm.ContentSourceTypeURL,
+        URL:  "https://example.com/document.pdf",
+    },
+}
 
-The OpenAI Responses API provider uses `FileContent` directly:
-
-```go
-&llm.FileContent{
-    Filename: "document.pdf",
-    FileData: "data:application/pdf;base64,JVBERi0x...",
+// Files API reference
+&llm.DocumentContent{
+    Title: "API Document",
+    Source: &llm.ContentSource{
+        Type:   llm.ContentSourceTypeFile,
+        FileID: "file-abc123",
+    },
 }
 ```
 
@@ -79,12 +80,12 @@ The OpenAI Responses API provider uses `FileContent` directly:
 The framework provides several helper functions for creating PDF messages:
 
 ```go
-// For Anthropic (preferred)
+// Preferred unified approach
 llm.NewUserDocumentMessage("title", "application/pdf", base64Data)
 llm.NewUserDocumentURLMessage("title", "https://example.com/doc.pdf")
 llm.NewUserDocumentFileIDMessage("title", "file-abc123")
 
-// For OpenAI Responses API
+// Legacy functions (deprecated but still supported)
 llm.NewUserFileMessage("filename.pdf", "data:application/pdf;base64,...")
 llm.NewUserFileIDMessage("file-abc123")
 ```

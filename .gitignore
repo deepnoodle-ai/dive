@@ -32,3 +32,7 @@ output
 tmp.json
 
 /private
+
+/examples/programs/pdf_example/pdf_example
+/examples/programs/openai_responses_example/openai_responses_example
+/openai_responses_example
