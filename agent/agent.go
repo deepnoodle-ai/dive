@@ -527,6 +527,9 @@ func (a *Agent) generate(
 	// running tool-uses and responding with the results.
 	generationLimit := a.toolIterationLimit + 1
 	for i := range generationLimit {
+		// Add cache control flag to messages if appropriate
+		a.configureCacheControl(updatedMessages)
+
 		// Generate a response in either streaming or non-streaming mode
 		generateOpts = append(generateOpts, llm.WithMessages(updatedMessages...))
 		var err error
@@ -604,6 +607,34 @@ func (a *Agent) generate(
 		OutputMessages: outputMessages,
 		Usage:          totalUsage,
 	}, nil
+}
+
+func (a *Agent) isCachingEnabled() bool {
+	if a.modelSettings == nil || a.modelSettings.Caching == nil {
+		return true // default to caching enabled
+	}
+	return *a.modelSettings.Caching
+}
+
+func (a *Agent) configureCacheControl(messages []*llm.Message) {
+	if !a.isCachingEnabled() || len(messages) == 0 {
+		return
+	}
+	// Clear cache control from all messages
+	for _, message := range messages {
+		for _, content := range message.Content {
+			if setter, ok := content.(llm.CacheControlSetter); ok {
+				setter.SetCacheControl(nil)
+			}
+		}
+	}
+	// Add cache control to the last message
+	lastMessage := messages[len(messages)-1]
+	if contents := lastMessage.Content; len(contents) > 0 {
+		if setter, ok := contents[len(contents)-1].(llm.CacheControlSetter); ok {
+			setter.SetCacheControl(&llm.CacheControl{Type: llm.CacheControlTypeEphemeral})
+		}
+	}
 }
 
 // generateStreaming handles streaming generation with an LLM, including

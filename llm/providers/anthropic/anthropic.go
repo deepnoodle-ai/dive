@@ -257,22 +257,9 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	// and omit the ID field
 	copied := make([]*llm.Message, len(messages))
 	for i, message := range messages {
-		// The "name" field in tool results can't be set either
-		var copiedContent []llm.Content
-		for _, content := range message.Content {
-			toolResultContent, ok := content.(*llm.ToolResultContent)
-			if ok {
-				copiedContent = append(copiedContent, &llm.ToolResultContent{
-					Content:   toolResultContent.Content,
-					ToolUseID: toolResultContent.ToolUseID,
-				})
-			} else {
-				copiedContent = append(copiedContent, content)
-			}
-		}
 		copied[i] = &llm.Message{
 			Role:    message.Role,
-			Content: copiedContent,
+			Content: message.Content,
 		}
 	}
 	return copied, nil

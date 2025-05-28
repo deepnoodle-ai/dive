@@ -72,6 +72,12 @@ type Content interface {
 	Type() ContentType
 }
 
+// CacheControlSetter is an interface that allows setting the cache control for
+// a content block.
+type CacheControlSetter interface {
+	SetCacheControl(cacheControl *CacheControl)
+}
+
 //// TextContent ///////////////////////////////////////////////////////////////
 
 /* Examples:
@@ -151,6 +157,10 @@ func (c *TextContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (c *TextContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
+}
+
 //// ImageContent //////////////////////////////////////////////////////////////
 
 /* Examples:
@@ -190,6 +200,10 @@ func (c *ImageContent) MarshalJSON() ([]byte, error) {
 		Type:  ContentTypeImage,
 		Alias: (*Alias)(c),
 	})
+}
+
+func (c *ImageContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
 }
 
 //// DocumentContent ///////////////////////////////////////////////////////////
@@ -260,6 +274,10 @@ func (c *DocumentContent) MarshalJSON() ([]byte, error) {
 		Type:  ContentTypeDocument,
 		Alias: (*Alias)(c),
 	})
+}
+
+func (c *DocumentContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
 }
 
 //// ToolUseContent ////////////////////////////////////////////////////////////
@@ -340,6 +358,10 @@ func (c *ToolResultContent) MarshalJSON() ([]byte, error) {
 		Type:  ContentTypeToolResult,
 		Alias: (*Alias)(c),
 	})
+}
+
+func (c *ToolResultContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
 }
 
 //// ServerToolUseContent //////////////////////////////////////////////////////

@@ -51,6 +51,12 @@ type FetchToolOptions struct {
 }
 
 func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInput] {
+	if options.MaxSize <= 0 {
+		options.MaxSize = DefaultFetchMaxSize
+	}
+	if options.Timeout <= 0 {
+		options.Timeout = DefaultFetchTimeout
+	}
 	return dive.ToolAdapter(&FetchTool{
 		fetcher:    options.Fetcher,
 		maxSize:    options.MaxSize,
