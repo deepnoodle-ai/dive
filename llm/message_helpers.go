@@ -41,7 +41,7 @@ func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 		content[i] = &ToolResultContent{
 			ToolUseID: output.ToolUseID,
 			Content:   output.Content,
-			// Name:      output.Name,
+			IsError:   false,
 		}
 	}
 	return &Message{Role: User, Content: content}
