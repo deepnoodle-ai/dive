@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/diveagents/dive/llm"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProvider_ImplementsInterfaces(t *testing.T) {
@@ -20,16 +21,12 @@ func TestProvider_Name(t *testing.T) {
 	provider := New()
 	name := provider.Name()
 	expected := "ollama-llama3.2"
-	if name != expected {
-		t.Errorf("Expected name %s, got %s", expected, name)
-	}
+	require.Equal(t, expected, name)
 }
 
 func TestProvider_SupportsStreaming(t *testing.T) {
 	provider := New()
-	if !provider.SupportsStreaming() {
-		t.Error("Expected provider to support streaming")
-	}
+	require.True(t, provider.SupportsStreaming())
 }
 
 func TestProvider_WithOptions(t *testing.T) {
@@ -40,19 +37,8 @@ func TestProvider_WithOptions(t *testing.T) {
 		WithMaxTokens(8192),
 	)
 
-	if provider.model != "llama3.1" {
-		t.Errorf("Expected model llama3.1, got %s", provider.model)
-	}
-
-	if provider.endpoint != "http://custom:11434/v1/chat/completions" {
-		t.Errorf("Expected custom endpoint, got %s", provider.endpoint)
-	}
-
-	if provider.apiKey != "custom-key" {
-		t.Errorf("Expected custom API key, got %s", provider.apiKey)
-	}
-
-	if provider.maxTokens != 8192 {
-		t.Errorf("Expected max tokens 8192, got %d", provider.maxTokens)
-	}
+	require.Equal(t, "llama3.1", provider.model)
+	require.Equal(t, "http://custom:11434/v1/chat/completions", provider.endpoint)
+	require.Equal(t, "custom-key", provider.apiKey)
+	require.Equal(t, 8192, provider.maxTokens)
 }
