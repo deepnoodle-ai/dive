@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/diveagents/dive/schema"
 	"github.com/diveagents/dive/slogger"
 )
 
@@ -72,19 +73,12 @@ type Config struct {
 	RequestHeaders    http.Header       `json:"request_headers,omitempty"`
 	MCPServers        []MCPServerConfig `json:"mcp_servers,omitempty"`
 	Caching           *bool             `json:"caching,omitempty"`
-
-	// New generic options promoted from provider-specific implementations
-	TopP               *float64    `json:"top_p,omitempty"`
-	User               string      `json:"user,omitempty"`
-	Instructions       string      `json:"instructions,omitempty"`
-	ServiceTier        string      `json:"service_tier,omitempty"`
-	TruncationStrategy string      `json:"truncation_strategy,omitempty"`
-	Background         *bool       `json:"background,omitempty"`
-	JSONSchema         interface{} `json:"json_schema,omitempty"`
+	ServiceTier       string            `json:"service_tier,omitempty"`
+	JSONSchema        schema.Schema     `json:"json_schema,omitempty"`
 
 	// Structured configuration for complex features
-	WebSearch       *WebSearchConfig       `json:"web_search,omitempty"`
-	ImageGeneration *ImageGenerationConfig `json:"image_generation,omitempty"`
+	// WebSearch       *WebSearchConfig       `json:"web_search,omitempty"`
+	// ImageGeneration *ImageGenerationConfig `json:"image_generation,omitempty"`
 
 	// Provider-specific options that don't fit into generic categories
 	ProviderOptions map[string]interface{} `json:"provider_options,omitempty"`
@@ -299,27 +293,6 @@ func WithMCPServers(servers ...MCPServerConfig) Option {
 	}
 }
 
-// WithTopP sets the top-p sampling parameter for the interaction.
-func WithTopP(topP float64) Option {
-	return func(config *Config) {
-		config.TopP = &topP
-	}
-}
-
-// WithUser sets the user identifier for the interaction.
-func WithUser(user string) Option {
-	return func(config *Config) {
-		config.User = user
-	}
-}
-
-// WithInstructions sets additional instructions for the interaction.
-func WithInstructions(instructions string) Option {
-	return func(config *Config) {
-		config.Instructions = instructions
-	}
-}
-
 // WithServiceTier sets the service tier for the interaction.
 func WithServiceTier(tier string) Option {
 	return func(config *Config) {
@@ -327,54 +300,40 @@ func WithServiceTier(tier string) Option {
 	}
 }
 
-// WithTruncationStrategy sets the truncation strategy for the interaction.
-func WithTruncationStrategy(strategy string) Option {
-	return func(config *Config) {
-		config.TruncationStrategy = strategy
-	}
-}
-
-// WithBackground sets whether to process the request in the background.
-func WithBackground(background bool) Option {
-	return func(config *Config) {
-		config.Background = &background
-	}
-}
-
 // WithJSONSchema sets the JSON schema for structured output.
-func WithJSONSchema(schema interface{}) Option {
+func WithJSONSchema(jsonSchema schema.Schema) Option {
 	return func(config *Config) {
-		config.JSONSchema = schema
+		config.JSONSchema = jsonSchema
 	}
 }
 
-// WithWebSearch enables web search with the specified configuration.
-func WithWebSearch(webSearchConfig WebSearchConfig) Option {
-	return func(config *Config) {
-		config.WebSearch = &webSearchConfig
-	}
-}
+// // WithWebSearch enables web search with the specified configuration.
+// func WithWebSearch(webSearchConfig WebSearchConfig) Option {
+// 	return func(config *Config) {
+// 		config.WebSearch = &webSearchConfig
+// 	}
+// }
 
-// WithWebSearchEnabled enables web search with default configuration.
-func WithWebSearchEnabled() Option {
-	return func(config *Config) {
-		config.WebSearch = &WebSearchConfig{Enabled: true}
-	}
-}
+// // WithWebSearchEnabled enables web search with default configuration.
+// func WithWebSearchEnabled() Option {
+// 	return func(config *Config) {
+// 		config.WebSearch = &WebSearchConfig{Enabled: true}
+// 	}
+// }
 
-// WithImageGeneration enables image generation with the specified configuration.
-func WithImageGeneration(imageConfig ImageGenerationConfig) Option {
-	return func(config *Config) {
-		config.ImageGeneration = &imageConfig
-	}
-}
+// // WithImageGeneration enables image generation with the specified configuration.
+// func WithImageGeneration(imageConfig ImageGenerationConfig) Option {
+// 	return func(config *Config) {
+// 		config.ImageGeneration = &imageConfig
+// 	}
+// }
 
-// WithImageGenerationEnabled enables image generation with default configuration.
-func WithImageGenerationEnabled() Option {
-	return func(config *Config) {
-		config.ImageGeneration = &ImageGenerationConfig{Enabled: true}
-	}
-}
+// // WithImageGenerationEnabled enables image generation with default configuration.
+// func WithImageGenerationEnabled() Option {
+// 	return func(config *Config) {
+// 		config.ImageGeneration = &ImageGenerationConfig{Enabled: true}
+// 	}
+// }
 
 // WithProviderOption sets a provider-specific option.
 func WithProviderOption(key string, value interface{}) Option {

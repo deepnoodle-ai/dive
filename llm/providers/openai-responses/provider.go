@@ -124,16 +124,38 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 	}
 	request.Tools = tools
 
-	// Add custom function tools
+	// Add custom tools (check if they implement ToolConfiguration interface)
 	for _, tool := range config.Tools {
-		request.Tools = append(request.Tools, Tool{
-			Type: "function",
-			Function: &FunctionTool{
-				Name:        tool.Name(),
-				Description: tool.Description(),
-				Parameters:  tool.Schema(),
-			},
-		})
+		// Check if this tool implements ToolConfiguration for provider-specific handling
+		if toolConfig, ok := tool.(llm.ToolConfiguration); ok {
+			// Get provider-specific configuration
+			providerConfig := toolConfig.ToolConfiguration("openai-responses")
+
+			// Convert the configuration map to our Tool struct
+			toolDef := Tool{}
+
+			// Use JSON marshaling/unmarshaling for easy conversion
+			configBytes, err := json.Marshal(providerConfig)
+			if err != nil {
+				return nil, fmt.Errorf("error marshaling tool configuration: %w", err)
+			}
+
+			if err := json.Unmarshal(configBytes, &toolDef); err != nil {
+				return nil, fmt.Errorf("error unmarshaling tool configuration: %w", err)
+			}
+
+			request.Tools = append(request.Tools, toolDef)
+		} else {
+			// Handle as regular function tool
+			request.Tools = append(request.Tools, Tool{
+				Type: "function",
+				Function: &FunctionTool{
+					Name:        tool.Name(),
+					Description: tool.Description(),
+					Parameters:  tool.Schema(),
+				},
+			})
+		}
 	}
 
 	// Add MCP servers from llm.Config (request-level configuration)
@@ -157,9 +179,12 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 			tool.Headers["Authorization"] = "Bearer " + mcpServer.AuthorizationToken
 		}
 
-		// Set default approval requirement if not specified
-		if tool.RequireApproval == nil {
-			tool.RequireApproval = "always" // Default to requiring approval for security
+		// Handle approval requirements - support OpenAI's full approval modes
+		if mcpServer.ApprovalRequirement != nil {
+			tool.RequireApproval = mcpServer.ApprovalRequirement
+		} else {
+			// Default to requiring approval for security if not specified
+			tool.RequireApproval = "always"
 		}
 
 		request.Tools = append(request.Tools, tool)
