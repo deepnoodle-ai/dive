@@ -21,7 +21,7 @@ func main() {
 	ctx := context.Background()
 
 	// Create output directory for generated images
-	outputDir := "generated_images"
+	outputDir := "output"
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}

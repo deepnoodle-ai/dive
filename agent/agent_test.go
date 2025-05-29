@@ -245,6 +245,10 @@ type mockLLM struct {
 }
 
 func (m *mockLLM) Name() string {
+	return "mock-llm"
+}
+
+func (m *mockLLM) ModelName() string {
 	if m.nameFunc != nil {
 		return m.nameFunc()
 	}
