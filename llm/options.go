@@ -53,40 +53,33 @@ type Option func(*Config)
 // Config is used to configure LLM calls. Not all providers support all options.
 // If a provider doesn't support a given option, it will be ignored.
 type Config struct {
-	Model             string            `json:"model,omitempty"`
-	SystemPrompt      string            `json:"system_prompt,omitempty"`
-	Endpoint          string            `json:"endpoint,omitempty"`
-	APIKey            string            `json:"api_key,omitempty"`
-	Prefill           string            `json:"prefill,omitempty"`
-	PrefillClosingTag string            `json:"prefill_closing_tag,omitempty"`
-	MaxTokens         *int              `json:"max_tokens,omitempty"`
-	Temperature       *float64          `json:"temperature,omitempty"`
-	PresencePenalty   *float64          `json:"presence_penalty,omitempty"`
-	FrequencyPenalty  *float64          `json:"frequency_penalty,omitempty"`
-	ReasoningBudget   *int              `json:"reasoning_budget,omitempty"`
-	ReasoningEffort   string            `json:"reasoning_effort,omitempty"`
-	Tools             []Tool            `json:"tools,omitempty"`
-	ToolChoice        ToolChoice        `json:"tool_choice,omitempty"`
-	ToolChoiceName    string            `json:"tool_choice_name,omitempty"`
-	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
-	Features          []string          `json:"features,omitempty"`
-	RequestHeaders    http.Header       `json:"request_headers,omitempty"`
-	MCPServers        []MCPServerConfig `json:"mcp_servers,omitempty"`
-	Caching           *bool             `json:"caching,omitempty"`
-	ServiceTier       string            `json:"service_tier,omitempty"`
-	JSONSchema        schema.Schema     `json:"json_schema,omitempty"`
-
-	// Structured configuration for complex features
-	// WebSearch       *WebSearchConfig       `json:"web_search,omitempty"`
-	// ImageGeneration *ImageGenerationConfig `json:"image_generation,omitempty"`
-
-	// Provider-specific options that don't fit into generic categories
-	ProviderOptions map[string]interface{} `json:"provider_options,omitempty"`
-
-	Hooks    Hooks          `json:"-"`
-	Client   *http.Client   `json:"-"`
-	Logger   slogger.Logger `json:"-"`
-	Messages Messages       `json:"-"`
+	Model              string                 `json:"model,omitempty"`
+	SystemPrompt       string                 `json:"system_prompt,omitempty"`
+	Endpoint           string                 `json:"endpoint,omitempty"`
+	APIKey             string                 `json:"api_key,omitempty"`
+	Prefill            string                 `json:"prefill,omitempty"`
+	PrefillClosingTag  string                 `json:"prefill_closing_tag,omitempty"`
+	MaxTokens          *int                   `json:"max_tokens,omitempty"`
+	Temperature        *float64               `json:"temperature,omitempty"`
+	PresencePenalty    *float64               `json:"presence_penalty,omitempty"`
+	FrequencyPenalty   *float64               `json:"frequency_penalty,omitempty"`
+	ReasoningBudget    *int                   `json:"reasoning_budget,omitempty"`
+	ReasoningEffort    string                 `json:"reasoning_effort,omitempty"`
+	Tools              []Tool                 `json:"tools,omitempty"`
+	ToolChoice         ToolChoice             `json:"tool_choice,omitempty"`
+	ToolChoiceName     string                 `json:"tool_choice_name,omitempty"`
+	ParallelToolCalls  *bool                  `json:"parallel_tool_calls,omitempty"`
+	Features           []string               `json:"features,omitempty"`
+	RequestHeaders     http.Header            `json:"request_headers,omitempty"`
+	MCPServers         []MCPServerConfig      `json:"mcp_servers,omitempty"`
+	Caching            *bool                  `json:"caching,omitempty"`
+	JSONSchema         schema.Schema          `json:"json_schema,omitempty"`
+	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
+	ProviderOptions    map[string]interface{} `json:"provider_options,omitempty"`
+	Hooks              Hooks                  `json:"-"`
+	Client             *http.Client           `json:"-"`
+	Logger             slogger.Logger         `json:"-"`
+	Messages           Messages               `json:"-"`
 }
 
 // Apply applies the given options to the config.
@@ -293,10 +286,9 @@ func WithMCPServers(servers ...MCPServerConfig) Option {
 	}
 }
 
-// WithServiceTier sets the service tier for the interaction.
-func WithServiceTier(tier string) Option {
+func WithPreviousResponseID(previousResponseID string) Option {
 	return func(config *Config) {
-		config.ServiceTier = tier
+		config.PreviousResponseID = previousResponseID
 	}
 }
 
@@ -306,34 +298,6 @@ func WithJSONSchema(jsonSchema schema.Schema) Option {
 		config.JSONSchema = jsonSchema
 	}
 }
-
-// // WithWebSearch enables web search with the specified configuration.
-// func WithWebSearch(webSearchConfig WebSearchConfig) Option {
-// 	return func(config *Config) {
-// 		config.WebSearch = &webSearchConfig
-// 	}
-// }
-
-// // WithWebSearchEnabled enables web search with default configuration.
-// func WithWebSearchEnabled() Option {
-// 	return func(config *Config) {
-// 		config.WebSearch = &WebSearchConfig{Enabled: true}
-// 	}
-// }
-
-// // WithImageGeneration enables image generation with the specified configuration.
-// func WithImageGeneration(imageConfig ImageGenerationConfig) Option {
-// 	return func(config *Config) {
-// 		config.ImageGeneration = &imageConfig
-// 	}
-// }
-
-// // WithImageGenerationEnabled enables image generation with default configuration.
-// func WithImageGenerationEnabled() Option {
-// 	return func(config *Config) {
-// 		config.ImageGeneration = &ImageGenerationConfig{Enabled: true}
-// 	}
-// }
 
 // WithProviderOption sets a provider-specific option.
 func WithProviderOption(key string, value interface{}) Option {

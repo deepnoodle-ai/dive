@@ -96,7 +96,6 @@ func main() {
 		llm.WithUserTextMessage("Solve this complex math problem: What is the derivative of x^3 + 2x^2 - 5x + 1?"),
 		llm.WithTemperature(0.1), // Low temperature for precise math
 		llm.WithReasoningEffort("high"),
-		llm.WithServiceTier("premium"),
 	)
 	if err != nil {
 		log.Printf("Error in example 5: %v", err)

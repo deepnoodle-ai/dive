@@ -59,26 +59,26 @@ type InputContent struct {
 }
 
 // Tool represents a tool that can be used by the model
-type Tool struct {
-	Type     string        `json:"type"`
-	Function *FunctionTool `json:"function,omitempty"`
-	// Built-in tool fields for different tool types
-	Domains           []string          `json:"domains,omitempty"`
-	SearchContextSize string            `json:"search_context_size,omitempty"`
-	UserLocation      *UserLocation     `json:"user_location,omitempty"`
-	ServerLabel       string            `json:"server_label,omitempty"`
-	ServerURL         string            `json:"server_url,omitempty"`
-	AllowedTools      []string          `json:"allowed_tools,omitempty"`
-	RequireApproval   interface{}       `json:"require_approval,omitempty"`
-	Headers           map[string]string `json:"headers,omitempty"`
-	Size              string            `json:"size,omitempty"`
-	Quality           string            `json:"quality,omitempty"`
-	// Format field is not supported by the OpenAI Responses API
-	// Format            string            `json:"format,omitempty"`
-	Compression   *int   `json:"compression,omitempty"`
-	Background    string `json:"background,omitempty"`
-	PartialImages *int   `json:"partial_images,omitempty"`
-}
+// type Tool struct {
+// 	Type     string        `json:"type"`
+// 	Function *FunctionTool `json:"function,omitempty"`
+// 	// Built-in tool fields for different tool types
+// 	Domains           []string          `json:"domains,omitempty"`
+// 	SearchContextSize string            `json:"search_context_size,omitempty"`
+// 	UserLocation      *UserLocation     `json:"user_location,omitempty"`
+// 	ServerLabel       string            `json:"server_label,omitempty"`
+// 	ServerURL         string            `json:"server_url,omitempty"`
+// 	AllowedTools      []string          `json:"allowed_tools,omitempty"`
+// 	RequireApproval   interface{}       `json:"require_approval,omitempty"`
+// 	Headers           map[string]string `json:"headers,omitempty"`
+// 	Size              string            `json:"size,omitempty"`
+// 	Quality           string            `json:"quality,omitempty"`
+// 	// Format field is not supported by the OpenAI Responses API
+// 	// Format            string            `json:"format,omitempty"`
+// 	Compression   *int   `json:"compression,omitempty"`
+// 	Background    string `json:"background,omitempty"`
+// 	PartialImages *int   `json:"partial_images,omitempty"`
+// }
 
 // FunctionTool defines a function the model can choose to call
 type FunctionTool struct {

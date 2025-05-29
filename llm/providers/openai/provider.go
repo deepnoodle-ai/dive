@@ -114,6 +114,10 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 		request.ParallelToolCalls = config.ParallelToolCalls
 	}
 
+	if config.PreviousResponseID != "" {
+		request.PreviousResponseID = &config.PreviousResponseID
+	}
+
 	// Handle tool choice
 	if config.ToolChoice != "" {
 		// Map from common tool choice names to OpenAI Responses format
