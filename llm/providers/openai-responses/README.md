@@ -89,11 +89,20 @@ response, err := provider.Generate(ctx,
 ```
 
 #### MCP Server Integration
+
+MCP servers are configured per-request using the unified `llm.WithMCPServers()` approach (same as Anthropic):
+
 ```go
 response, err := provider.Generate(ctx,
-    llm.WithUserTextMessage("Query the database"),
-    openairesponses.LLMWithMCPServer("database", "http://localhost:8080/mcp", map[string]string{
-        "Authorization": "Bearer token123",
+    llm.WithUserTextMessage("What transport protocols are supported in the 2025-03-26 version of the MCP spec?"),
+    llm.WithMCPServers(llm.MCPServerConfig{
+        Type: "url",
+        Name: "deepwiki",
+        URL:  "https://mcp.deepwiki.com/mcp",
+        ToolConfiguration: &llm.MCPToolConfiguration{
+            Enabled:      true,
+            AllowedTools: []string{"ask_question"}, // Optional: filter to specific tools
+        },
     }),
 )
 ```
@@ -200,21 +209,17 @@ Generate images directly within conversations:
 ```go
 provider := openairesponses.New(
     openairesponses.WithModel("gpt-4.1"),
-    openairesponses.WithImageGenerationOptions(openairesponses.ImageGenerationOptions{
-        Size:    "1024x1024",
-        Quality: "high",
-        // Format field is not supported by the OpenAI Responses API
-    }),
 )
 
 response, err := provider.Generate(context.Background(),
     llm.WithUserTextMessage("Generate an image of a sunset over mountains."),
+    openairesponses.LLMWithImageGeneration(),
 )
 ```
 
 ### MCP Server Integration
 
-Connect to remote MCP servers for extended functionality. The provider supports the full OpenAI Responses API MCP feature set including:
+Connect to remote MCP servers for extended functionality using the unified `llm.WithMCPServers()` approach (same as Anthropic). The provider supports the full OpenAI Responses API MCP feature set including:
 
 - Remote MCP server connections
 - Tool filtering with `allowed_tools`
@@ -260,6 +265,36 @@ response, err := provider.Generate(context.Background(),
 )
 ```
 
+#### Multiple MCP Servers
+
+You can configure multiple MCP servers in a single request:
+
+```go
+response, err := provider.Generate(context.Background(),
+    llm.WithUserTextMessage("Search for Linear tickets and create a payment link"),
+    llm.WithMCPServers(
+        llm.MCPServerConfig{
+            Type:               "url",
+            Name:               "linear",
+            URL:                "https://mcp.linear.app/sse",
+            AuthorizationToken: os.Getenv("LINEAR_API_KEY"),
+            ToolConfiguration: &llm.MCPToolConfiguration{
+                Enabled: true,
+            },
+        },
+        llm.MCPServerConfig{
+            Type:               "url",
+            Name:               "stripe",
+            URL:                "https://mcp.stripe.com",
+            AuthorizationToken: os.Getenv("STRIPE_API_KEY"),
+            ToolConfiguration: &llm.MCPToolConfiguration{
+                Enabled: true,
+            },
+        },
+    ),
+)
+```
+
 #### MCP Approval Workflow
 
 By default, MCP tool calls require approval for security. You can handle approval requests:
@@ -268,7 +303,12 @@ By default, MCP tool calls require approval for security. You can handle approva
 // First request that triggers an approval request
 response1, err := provider.Generate(ctx, 
     llm.WithUserTextMessage("Query the database"),
-    llm.WithMCPServers(/* MCP config */),
+    llm.WithMCPServers(llm.MCPServerConfig{
+        Type: "url",
+        Name: "database",
+        URL:  "http://localhost:8080/mcp",
+        // Default approval requirement is "always"
+    }),
 )
 
 // Check for approval requests in the response
@@ -278,27 +318,14 @@ for _, content := range response1.Content {
             // Handle approval - in practice, you'd extract the approval request ID
             approvalRequestID := "mcpr_example_id"
             
-            // Approve the request
+            // Approve the request (this would be a follow-up request)
             response2, err := provider.Generate(ctx,
-                openairesponses.LLMWithMCPApprovalResponse(approvalRequestID, true),
+                // Implementation of approval response would go here
+                // The exact mechanism depends on the MCP server's approval flow
             )
         }
     }
 }
-```
-
-#### Provider-Level MCP Configuration
-
-You can also configure MCP servers at the provider level:
-
-```go
-provider := openairesponses.New(
-    openairesponses.WithModel("gpt-4.1"),
-    openairesponses.WithMCPServerOptions("deepwiki", openairesponses.MCPServerConfig{
-        ServerURL: "https://mcp.deepwiki.com/mcp",
-        RequireApproval: "never", // Skip approvals for trusted servers
-    }),
-)
 ```
 
 ### Streaming
@@ -327,22 +354,23 @@ for stream.Next() {
 - `WithAPIKey(string)`: Set OpenAI API key (defaults to `OPENAI_API_KEY` env var)
 - `WithEndpoint(string)`: Set custom endpoint (defaults to OpenAI Responses API)
 - `WithModel(string)`: Set model (defaults to "gpt-4.1")
-- `WithStore(bool)`: Enable/disable response storage
-- `WithBackground(bool)`: Run requests in background
 
-### Built-in Tools
+### Generation-Time Options
 
-#### Web Search
-- `WithWebSearch(bool)`: Enable basic web search
-- `WithWebSearchOptions(WebSearchOptions)`: Configure web search behavior
+#### Request Configuration
+- `LLMWithStore(bool)`: Enable/disable response storage
+- `LLMWithBackground(bool)`: Run requests in background
+- `LLMWithInstructions(string)`: Set custom instructions
+- `LLMWithServiceTier(string)`: Set service tier
 
-#### Image Generation
-- `WithImageGeneration(bool)`: Enable basic image generation
-- `WithImageGenerationOptions(ImageGenerationOptions)`: Configure image generation
+#### Built-in Tools
+- `LLMWithWebSearch()`: Enable basic web search
+- `LLMWithWebSearchOptions(WebSearchOptions)`: Configure web search behavior
+- `LLMWithImageGeneration()`: Enable basic image generation
+- `LLMWithImageGenerationOptions(ImageGenerationOptions)`: Configure image generation
 
 #### MCP Servers
-- `WithMCPServer(label, url, headers)`: Add an MCP server
-- `WithMCPServerOptions(label, config)`: Add MCP server with full configuration
+Use the unified `llm.WithMCPServers()` approach (same as all other providers).
 
 ## Differences from Standard OpenAI Provider
 
@@ -368,4 +396,6 @@ The following models are supported:
 
 ## Examples
 
-See the [examples/programs/openai_responses_example](../../../examples/programs/openai_responses_example/) directory for complete working examples. 
+See the [examples/programs/openai_responses_example](../../../examples/programs/openai_responses_example/) directory for complete working examples.
+
+For a side-by-side comparison of Anthropic and OpenAI Responses MCP usage, see [examples/programs/mcp_connector_example](../../../examples/programs/mcp_connector_example/). 

@@ -104,7 +104,7 @@ func main() {
 		fmt.Printf("Math response: %s\n\n", response5.Message().Text())
 	}
 
-	// Example 6: MCP server integration
+	// Example 6: MCP server integration (unified approach - same as Anthropic)
 	fmt.Println("=== Example 6: MCP server integration ===")
 	response6, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("What transport protocols are supported in the 2025-03-26 version of the MCP spec?"),
@@ -125,49 +125,41 @@ func main() {
 		fmt.Printf("MCP response: %s\n\n", response6.Message().Text())
 	}
 
-	// Example 6b: MCP server with authentication and complex approval requirements
-	fmt.Println("=== Example 6b: MCP server with complex approval ===")
+	// Example 6b: Multiple MCP servers with authentication
+	fmt.Println("=== Example 6b: Multiple MCP servers ===")
 	response6b, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Create a payment link for $20"),
-		llm.WithMCPServers(llm.MCPServerConfig{
-			Type:               "url",
-			Name:               "stripe",
-			URL:                "https://mcp.stripe.com",
-			AuthorizationToken: "sk_test_example", // In practice, use os.Getenv("STRIPE_API_KEY")
-			ToolConfiguration: &llm.MCPToolConfiguration{
-				Enabled: true,
-			},
-			// Example of selective approval - never require approval for read-only tools
-			ApprovalRequirement: llm.MCPApprovalRequirement{
-				Never: &llm.MCPNeverApproval{
-					ToolNames: []string{"list_products", "get_balance", "list_customers"},
+		llm.WithUserTextMessage("Search for Linear tickets and create a payment link"),
+		llm.WithMCPServers(
+			llm.MCPServerConfig{
+				Type:               "url",
+				Name:               "linear",
+				URL:                "https://mcp.linear.app/sse",
+				AuthorizationToken: "lin_api_example", // In practice, use os.Getenv("LINEAR_API_KEY")
+				ToolConfiguration: &llm.MCPToolConfiguration{
+					Enabled: true,
 				},
 			},
-		}),
+			llm.MCPServerConfig{
+				Type:               "url",
+				Name:               "stripe",
+				URL:                "https://mcp.stripe.com",
+				AuthorizationToken: "sk_test_example", // In practice, use os.Getenv("STRIPE_API_KEY")
+				ToolConfiguration: &llm.MCPToolConfiguration{
+					Enabled: true,
+				},
+				// Example of selective approval - never require approval for read-only tools
+				ApprovalRequirement: llm.MCPApprovalRequirement{
+					Never: &llm.MCPNeverApproval{
+						ToolNames: []string{"list_products", "get_balance", "list_customers"},
+					},
+				},
+			},
+		),
 	)
 	if err != nil {
 		log.Printf("Error in example 6b: %v", err)
 	} else {
-		fmt.Printf("Stripe MCP response: %s\n\n", response6b.Message().Text())
-	}
-
-	// Example 6c: Using the dedicated MCP tool for more complex configuration
-	fmt.Println("=== Example 6c: Using dedicated MCP tool ===")
-	mcpTool := openairesponses.NewMCPTool(openairesponses.MCPToolOptions{
-		ServerLabel:     "deepwiki",
-		ServerURL:       "https://mcp.deepwiki.com/mcp",
-		AllowedTools:    []string{"ask_question", "read_wiki_structure"},
-		RequireApproval: "never",
-	})
-
-	response6c, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Analyze the MCP protocol documentation structure"),
-		llm.WithTools(mcpTool),
-	)
-	if err != nil {
-		log.Printf("Error in example 6c: %v", err)
-	} else {
-		fmt.Printf("MCP tool response: %s\n\n", response6c.Message().Text())
+		fmt.Printf("Multiple MCP servers response: %s\n\n", response6b.Message().Text())
 	}
 
 	// Example 7: Streaming with multiple tools
