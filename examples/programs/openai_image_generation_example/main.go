@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/diveagents/dive/llm"
-	openairesponses "github.com/diveagents/dive/llm/providers/openai-responses"
+	"github.com/diveagents/dive/llm/providers/openai"
 )
 
 func main() {
-	provider := openairesponses.New(
-		openairesponses.WithModel("gpt-4.1"),
+	provider := openai.New(
+		openai.WithModel("gpt-4.1"),
 	)
 
 	ctx := context.Background()
@@ -28,7 +28,7 @@ func main() {
 
 	// Example 1: Basic image generation
 	fmt.Println("=== Example 1: Basic image generation ===")
-	basicImageTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{})
+	basicImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{})
 
 	response1, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Generate an image of a majestic mountain landscape at sunset"),
@@ -48,7 +48,7 @@ func main() {
 
 	// Example 2: High-quality image with specific dimensions
 	fmt.Println("=== Example 2: High-quality image with custom options ===")
-	hqImageTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	hqImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:       "1024x1536", // Portrait orientation
 		Quality:    "high",
 		Background: "auto",
@@ -72,7 +72,7 @@ func main() {
 
 	// Example 3: Square image with transparent background
 	fmt.Println("=== Example 3: Square image with transparent background ===")
-	squareImageTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	squareImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:       "1024x1024",
 		Quality:    "high",
 		Background: "transparent",
@@ -96,7 +96,7 @@ func main() {
 
 	// Example 4: Multi-turn editing - Generate then modify
 	fmt.Println("=== Example 4: Multi-turn editing ===")
-	editImageTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	editImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:    "1024x1024",
 		Quality: "high",
 	})
@@ -139,7 +139,7 @@ func main() {
 
 	// Example 5: Forced image generation with tool_choice
 	fmt.Println("=== Example 5: Forced image generation ===")
-	forcedImageTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	forcedImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:    "1024x1024",
 		Quality: "medium",
 	})
@@ -164,7 +164,7 @@ func main() {
 	// Example 6: Streaming image generation (simplified)
 	fmt.Println("=== Example 6: Streaming image generation ===")
 	partialImagesCount := 2
-	streamImageTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	streamImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:          "1024x1024",
 		Quality:       "high",
 		PartialImages: &partialImagesCount, // Get 2 partial images during generation
@@ -204,7 +204,7 @@ func main() {
 
 	// Example 7: Multiple images in sequence
 	fmt.Println("=== Example 7: Generate a series of related images ===")
-	seriesImageTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	seriesImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:    "1024x1024",
 		Quality: "medium",
 	})

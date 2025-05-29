@@ -6,13 +6,13 @@ import (
 	"log"
 
 	"github.com/diveagents/dive/llm"
-	openairesponses "github.com/diveagents/dive/llm/providers/openai-responses"
+	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/schema"
 )
 
 func main() {
-	provider := openairesponses.New(
-		openairesponses.WithModel("gpt-4o"),
+	provider := openai.New(
+		openai.WithModel("gpt-4o"),
 	)
 
 	ctx := context.Background()
@@ -32,9 +32,9 @@ func main() {
 
 	// Example 2: Web search with custom options using proper tool
 	fmt.Println("=== Example 2: Web search with custom options ===")
-	webSearchTool := openairesponses.NewWebSearchTool(openairesponses.WebSearchToolOptions{
+	webSearchTool := openai.NewWebSearchTool(openai.WebSearchToolOptions{
 		SearchContextSize: "medium",
-		UserLocation: &openairesponses.UserLocation{
+		UserLocation: &openai.UserLocation{
 			Type:    "approximate",
 			Country: "US",
 		},
@@ -53,7 +53,7 @@ func main() {
 
 	// Example 3: Image generation using proper tool
 	fmt.Println("=== Example 3: Image generation ===")
-	imageGenTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	imageGenTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:       "1024x1024",
 		Quality:    "high",
 		Background: "auto",
@@ -166,10 +166,10 @@ func main() {
 	fmt.Println("=== Example 7: Streaming with multiple tools ===")
 
 	// Create both tools for this request
-	webSearchStreamTool := openairesponses.NewWebSearchTool(openairesponses.WebSearchToolOptions{
+	webSearchStreamTool := openai.NewWebSearchTool(openai.WebSearchToolOptions{
 		SearchContextSize: "medium",
 	})
-	imageGenStreamTool := openairesponses.NewImageGenerationTool(openairesponses.ImageGenerationToolOptions{
+	imageGenStreamTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:    "1024x1024",
 		Quality: "high",
 	})

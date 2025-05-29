@@ -5,15 +5,14 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers/anthropic"
-	openairesponses "github.com/diveagents/dive/llm/providers/openai-responses"
+	"github.com/diveagents/dive/llm/providers/openai"
+	openaic "github.com/diveagents/dive/llm/providers/openaicompletions"
 	"github.com/diveagents/dive/slogger"
 )
 
@@ -39,8 +38,10 @@ func main() {
 	switch *provider {
 	case "anthropic":
 		model = anthropic.New()
-	case "openai-responses":
-		model = openairesponses.New()
+	case "openai":
+		model = openai.New()
+	case "openai-completions":
+		model = openaic.New()
 	default:
 		log.Fatalf("Unknown provider: %s. Use 'anthropic' or 'openai-responses'", *provider)
 	}
@@ -153,18 +154,4 @@ func createMessageFromFile(provider, filePath, prompt string) *llm.Message {
 		log.Fatalf("Unsupported provider: %s", provider)
 		return nil
 	}
-}
-
-func downloadPDF(url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download PDF: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to download PDF: status %d", resp.StatusCode)
-	}
-
-	return io.ReadAll(resp.Body)
 }

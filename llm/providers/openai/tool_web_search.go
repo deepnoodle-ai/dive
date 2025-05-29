@@ -1,4 +1,4 @@
-package openairesponses
+package openai
 
 import (
 	"github.com/diveagents/dive/llm"

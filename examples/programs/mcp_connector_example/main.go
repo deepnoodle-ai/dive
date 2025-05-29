@@ -8,7 +8,7 @@ import (
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers/anthropic"
-	openairesponses "github.com/diveagents/dive/llm/providers/openai-responses"
+	"github.com/diveagents/dive/llm/providers/openai"
 )
 
 const DefaultPrompt = "What are a few open tickets in Linear?"
@@ -45,8 +45,8 @@ func main() {
 		)
 	case "openai-responses":
 		fmt.Println("Using OpenAI Responses API provider...")
-		response, err = openairesponses.New(
-			openairesponses.WithModel("gpt-4o"),
+		response, err = openai.New(
+			openai.WithModel("gpt-4o"),
 		).Generate(
 			context.Background(),
 			llm.WithMessages(llm.NewUserTextMessage(prompt)),

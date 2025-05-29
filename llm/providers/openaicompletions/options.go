@@ -1,14 +1,9 @@
-package openairesponses
+package openaicompletions
 
-import (
-	"net/http"
-	"time"
-)
+import "net/http"
 
-// Provider creation options (set once when creating the provider)
 type Option func(*Provider)
 
-// Infrastructure options - set once per provider instance
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
 		p.apiKey = apiKey
@@ -27,21 +22,26 @@ func WithClient(client *http.Client) Option {
 	}
 }
 
+func WithMaxTokens(maxTokens int) Option {
+	return func(p *Provider) {
+		p.maxTokens = maxTokens
+	}
+}
+
 func WithModel(model string) Option {
 	return func(p *Provider) {
 		p.model = model
 	}
 }
 
-// Retry configuration
-func WithMaxRetries(maxRetries int) Option {
+func WithSystemRole(systemRole string) Option {
 	return func(p *Provider) {
-		p.maxRetries = maxRetries
+		p.systemRole = systemRole
 	}
 }
 
-func WithBaseWait(baseWait time.Duration) Option {
+func WithCorePrompt(corePrompt string) Option {
 	return func(p *Provider) {
-		p.baseWait = baseWait
+		p.corePrompt = corePrompt
 	}
 }

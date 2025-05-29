@@ -8,7 +8,7 @@ import (
 	"github.com/diveagents/dive/llm/providers/groq"
 	"github.com/diveagents/dive/llm/providers/ollama"
 	"github.com/diveagents/dive/llm/providers/openai"
-	openairesponses "github.com/diveagents/dive/llm/providers/openai-responses"
+	"github.com/diveagents/dive/llm/providers/openaicompletions"
 )
 
 var DefaultProvider = "anthropic"
@@ -34,13 +34,13 @@ func GetModel(providerName, modelName string) (llm.LLM, error) {
 		}
 		return openai.New(opts...), nil
 
-	case "openai-responses":
+	case "openai-completions":
 		// New Responses API
-		opts := []openairesponses.Option{}
+		opts := []openaicompletions.Option{}
 		if modelName != "" {
-			opts = append(opts, openairesponses.WithModel(modelName))
+			opts = append(opts, openaicompletions.WithModel(modelName))
 		}
-		return openairesponses.New(opts...), nil
+		return openaicompletions.New(opts...), nil
 
 	case "groq":
 		opts := []groq.Option{}

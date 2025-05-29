@@ -1,4 +1,4 @@
-package openairesponses
+package openai
 
 import (
 	"bufio"

@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/openai"
+	openaic "github.com/diveagents/dive/llm/providers/openaicompletions"
 )
 
 var (
@@ -25,7 +25,7 @@ type Provider struct {
 	client    *http.Client
 
 	// Embedded OpenAI provider
-	*openai.Provider
+	*openaic.Provider
 }
 
 func New(opts ...Option) *Provider {
@@ -45,13 +45,13 @@ func New(opts ...Option) *Provider {
 	}
 
 	// Pass the options through to the wrapped OpenAI provider
-	oai := openai.New(
-		openai.WithAPIKey(p.apiKey),
-		openai.WithClient(p.client),
-		openai.WithEndpoint(p.endpoint),
-		openai.WithMaxTokens(p.maxTokens),
-		openai.WithModel(p.model),
-		openai.WithSystemRole("system"),
+	oai := openaic.New(
+		openaic.WithAPIKey(p.apiKey),
+		openaic.WithClient(p.client),
+		openaic.WithEndpoint(p.endpoint),
+		openaic.WithMaxTokens(p.maxTokens),
+		openaic.WithModel(p.model),
+		openaic.WithSystemRole("system"),
 	)
 	p.Provider = oai
 	return p

@@ -1,9 +1,14 @@
 package openai
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
+// Provider creation options (set once when creating the provider)
 type Option func(*Provider)
 
+// Infrastructure options - set once per provider instance
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
 		p.apiKey = apiKey
@@ -22,26 +27,21 @@ func WithClient(client *http.Client) Option {
 	}
 }
 
-func WithMaxTokens(maxTokens int) Option {
-	return func(p *Provider) {
-		p.maxTokens = maxTokens
-	}
-}
-
 func WithModel(model string) Option {
 	return func(p *Provider) {
 		p.model = model
 	}
 }
 
-func WithSystemRole(systemRole string) Option {
+// Retry configuration
+func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
-		p.systemRole = systemRole
+		p.maxRetries = maxRetries
 	}
 }
 
-func WithCorePrompt(corePrompt string) Option {
+func WithBaseWait(baseWait time.Duration) Option {
 	return func(p *Provider) {
-		p.corePrompt = corePrompt
+		p.baseWait = baseWait
 	}
 }
