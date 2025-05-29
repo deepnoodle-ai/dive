@@ -6,6 +6,7 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers/anthropic"
 	"github.com/diveagents/dive/llm/providers/groq"
+	"github.com/diveagents/dive/llm/providers/ollama"
 	"github.com/diveagents/dive/llm/providers/openai"
 )
 
@@ -38,6 +39,13 @@ func GetModel(providerName, modelName string) (llm.LLM, error) {
 			opts = append(opts, groq.WithModel(modelName))
 		}
 		return groq.New(opts...), nil
+
+	case "ollama":
+		opts := []ollama.Option{}
+		if modelName != "" {
+			opts = append(opts, ollama.WithModel(modelName))
+		}
+		return ollama.New(opts...), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported provider: %q", providerName)

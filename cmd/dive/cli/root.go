@@ -56,11 +56,11 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(
 		&llmProvider, "provider", "", "",
-		"LLM provider to use (e.g., 'anthropic', 'openai', 'groq')")
+		"LLM provider to use (e.g., 'anthropic', 'openai', 'groq', 'ollama')")
 
 	rootCmd.PersistentFlags().StringVarP(
 		&llmModel, "model", "m", "",
-		"Model to use (e.g. 'claude-3-7-sonnet-20250219')")
+		"Model to use (e.g. 'claude-sonnet-4-20250514')")
 
 	rootCmd.PersistentFlags().StringArrayVarP(
 		&userVarFlags, "var", "", []string{},
