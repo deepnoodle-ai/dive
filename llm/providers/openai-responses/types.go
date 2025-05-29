@@ -8,7 +8,6 @@ import (
 type Request struct {
 	Model              string            `json:"model"`
 	Input              interface{}       `json:"input"`
-	Background         *bool             `json:"background,omitempty"`
 	Include            []string          `json:"include,omitempty"`
 	Instructions       *string           `json:"instructions,omitempty"`
 	MaxOutputTokens    *int              `json:"max_output_tokens,omitempty"`
@@ -16,16 +15,11 @@ type Request struct {
 	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
 	PreviousResponseID *string           `json:"previous_response_id,omitempty"`
 	Reasoning          *ReasoningConfig  `json:"reasoning,omitempty"`
-	ServiceTier        *string           `json:"service_tier,omitempty"`
-	Store              *bool             `json:"store,omitempty"`
 	Stream             bool              `json:"stream,omitempty"`
 	Temperature        *float64          `json:"temperature,omitempty"`
 	Text               *TextConfig       `json:"text,omitempty"`
 	ToolChoice         interface{}       `json:"tool_choice,omitempty"`
 	Tools              []Tool            `json:"tools,omitempty"`
-	TopP               *float64          `json:"top_p,omitempty"`
-	Truncation         *string           `json:"truncation,omitempty"`
-	User               *string           `json:"user,omitempty"`
 }
 
 // ReasoningConfig for o-series models

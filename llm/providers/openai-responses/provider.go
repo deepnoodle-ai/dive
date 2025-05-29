@@ -106,14 +106,63 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 		Temperature: config.Temperature,
 	}
 
-	// Handle store setting: per-request config takes precedence over provider default
-	if storeValue, found := getFeatureBoolValue(config.Features, FeatureStore); found {
-		request.Store = &storeValue
+	// Handle MaxTokens
+	if config.MaxTokens != nil && *config.MaxTokens > 0 {
+		maxTokens := *config.MaxTokens
+		request.MaxOutputTokens = &maxTokens
 	}
 
-	// Handle background setting: per-request config takes precedence over provider default
-	if backgroundValue, found := getFeatureBoolValue(config.Features, FeatureBackground); found {
-		request.Background = &backgroundValue
+	// Handle reasoning effort (for o-series models)
+	if config.ReasoningEffort != "" {
+		request.Reasoning = &ReasoningConfig{
+			Effort: &config.ReasoningEffort,
+		}
+	}
+
+	// Handle tool choice
+	if config.ToolChoice != "" {
+		// Map from common tool choice names to OpenAI Responses format
+		switch string(config.ToolChoice) {
+		case "auto":
+			request.ToolChoice = "auto"
+		case "none":
+			request.ToolChoice = "none"
+		case "required", "any":
+			request.ToolChoice = "required"
+		default:
+			// Assume it's a specific tool name
+			request.ToolChoice = map[string]interface{}{
+				"type": "function",
+				"function": map[string]string{
+					"name": string(config.ToolChoice),
+				},
+			}
+		}
+	}
+
+	// Handle parallel tool calls
+	if config.ParallelToolCalls != nil {
+		request.ParallelToolCalls = config.ParallelToolCalls
+	}
+
+	// Handle JSON schema output format
+	if jsonSchema := config.RequestHeaders.Get("X-OpenAI-Responses-JSON-Schema"); jsonSchema != "" {
+		var schema interface{}
+		if err := json.Unmarshal([]byte(jsonSchema), &schema); err == nil {
+			request.Text = &TextConfig{
+				Format: TextFormat{
+					Type:   "json_schema",
+					Schema: schema,
+				},
+			}
+		}
+	}
+
+	// Handle metadata from provider options
+	if config.ProviderOptions != nil {
+		if metadata, ok := config.ProviderOptions["metadata"].(map[string]string); ok {
+			request.Metadata = metadata
+		}
 	}
 
 	// Convert messages to input format
@@ -236,13 +285,25 @@ func (p *Provider) makeRequest(ctx context.Context, request *Request, config *ll
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			if resp.StatusCode == 429 {
+			statusCode := resp.StatusCode
+
+			if statusCode == 429 {
 				if config.Logger != nil {
 					config.Logger.Warn("rate limit exceeded",
-						"status", resp.StatusCode, "body", string(body))
+						"status", statusCode, "body", string(body))
+				}
+
+				// Check for Retry-After header
+				if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+					// Parse Retry-After header and wait accordingly
+					if waitDuration, err := time.ParseDuration(retryAfter + "s"); err == nil {
+						time.Sleep(waitDuration)
+					}
 				}
 			}
-			return fmt.Errorf("API error (status %d): %w", resp.StatusCode, providers.NewError(resp.StatusCode, string(body)))
+
+			// Use shared provider error type with proper retry logic
+			return providers.NewError(statusCode, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
@@ -289,13 +350,25 @@ func (p *Provider) makeStreamRequest(ctx context.Context, request *Request, conf
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode == 429 {
+			statusCode := resp.StatusCode
+
+			if statusCode == 429 {
 				if config.Logger != nil {
 					config.Logger.Warn("rate limit exceeded",
-						"status", resp.StatusCode, "body", string(body))
+						"status", statusCode, "body", string(body))
+				}
+
+				// Check for Retry-After header
+				if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+					// Parse Retry-After header and wait accordingly
+					if waitDuration, err := time.ParseDuration(retryAfter + "s"); err == nil {
+						time.Sleep(waitDuration)
+					}
 				}
 			}
-			return fmt.Errorf("API error (status %d): %w", resp.StatusCode, providers.NewError(resp.StatusCode, string(body)))
+
+			// Use shared provider error type with proper retry logic
+			return providers.NewError(statusCode, string(body))
 		}
 		stream = &StreamIterator{
 			body:   resp.Body,
@@ -492,15 +565,8 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message, config *llm.C
 						}
 					case llm.ContentSourceTypeURL:
 						// OpenAI Responses API doesn't support URL references directly
-						// This would need to be downloaded and converted to base64 or file ID
-						// For now, log a warning and skip this content
-						if config.Logger != nil {
-							config.Logger.Warn("URL-based document content is not yet supported by OpenAI Responses provider",
-								"url", c.Source.URL,
-								"filename", c.Title,
-								"suggestion", "consider downloading the file and using base64 content instead")
-						}
-						continue
+						// Return an error instead of silently skipping
+						return nil, fmt.Errorf("URL-based document content is not supported by OpenAI Responses provider. Please download the file and use base64 content instead. URL: %s", c.Source.URL)
 					}
 
 					inputMsg.Content = append(inputMsg.Content, inputContent)
@@ -600,10 +666,19 @@ type StreamIterator struct {
 	// Track content block indices
 	nextContentIndex int
 	textContentIndex int
+	// Event queue to handle multiple events from a single stream chunk
+	eventQueue []*llm.Event
 }
 
 // Next advances to the next event in the stream
 func (s *StreamIterator) Next() bool {
+	// If we have events in the queue, return the next one
+	if len(s.eventQueue) > 0 {
+		s.currentEvent = s.eventQueue[0]
+		s.eventQueue = s.eventQueue[1:]
+		return true
+	}
+
 	for {
 		line, err := s.reader.ReadBytes('\n')
 		if err != nil {
@@ -648,16 +723,21 @@ func (s *StreamIterator) Next() bool {
 			return false
 		}
 
-		// Convert to llm.Event
-		if event := s.convertStreamEvent(&streamEvent); event != nil {
-			s.currentEvent = event
+		// Convert to llm.Event(s)
+		events := s.convertStreamEvent(&streamEvent)
+		if len(events) > 0 {
+			// Return the first event and queue the rest
+			s.currentEvent = events[0]
+			if len(events) > 1 {
+				s.eventQueue = append(s.eventQueue, events[1:]...)
+			}
 			return true
 		}
 	}
 }
 
-// convertStreamEvent converts a StreamEvent to an llm.Event
-func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event {
+// convertStreamEvent converts a StreamEvent to a slice of llm.Event
+func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Event {
 	if streamEvent.Response == nil {
 		return nil
 	}
@@ -667,7 +747,7 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 	// Emit message start event if this is the first event
 	if s.eventCount == 0 {
 		s.eventCount++
-		return &llm.Event{
+		return []*llm.Event{{
 			Type: llm.EventTypeMessageStart,
 			Message: &llm.Response{
 				ID:      response.ID,
@@ -677,10 +757,13 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 				Content: []llm.Content{},
 				Usage:   llm.Usage{},
 			},
-		}
+		}}
 	}
 
-	// Process output items for content deltas
+	// Create a queue to hold all events from this stream event
+	var events []*llm.Event
+
+	// Process ALL output items for content deltas
 	for _, item := range response.Output {
 		switch item.Type {
 		case "message":
@@ -695,29 +778,26 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 						s.previousText = currentText
 						s.textContentIndex = s.nextContentIndex
 						s.nextContentIndex++
-						return &llm.Event{
+						events = append(events, &llm.Event{
 							Type:  llm.EventTypeContentBlockStart,
 							Index: &s.textContentIndex,
 							ContentBlock: &llm.EventContentBlock{
 								Type: llm.ContentTypeText,
 								Text: currentText,
 							},
-						}
-					}
-
-					// If the text has changed, emit a delta event with only the new text
-					if currentText != s.previousText {
-						// Calculate the actual delta - only the newly added text
+						})
+					} else if currentText != s.previousText {
+						// If the text has changed, emit a delta event with only the new text
 						deltaText := currentText[len(s.previousText):]
 						s.previousText = currentText
-						return &llm.Event{
+						events = append(events, &llm.Event{
 							Type:  llm.EventTypeContentBlockDelta,
 							Index: &s.textContentIndex,
 							Delta: &llm.EventDelta{
 								Type: llm.EventDeltaTypeText,
 								Text: deltaText,
 							},
-						}
+						})
 					}
 				}
 			}
@@ -725,7 +805,7 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 			// Handle tool call events
 			toolIndex := s.nextContentIndex
 			s.nextContentIndex++
-			return &llm.Event{
+			events = append(events, &llm.Event{
 				Type:  llm.EventTypeContentBlockStart,
 				Index: &toolIndex,
 				ContentBlock: &llm.EventContentBlock{
@@ -733,12 +813,46 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 					ID:   item.CallID,
 					Name: item.Name,
 				},
+			})
+		case "image_generation_call":
+			// Handle image generation events
+			if item.Result != "" {
+				imageIndex := s.nextContentIndex
+				s.nextContentIndex++
+				// For now, convert image to text content since EventContentBlock doesn't support images directly
+				events = append(events, &llm.Event{
+					Type:  llm.EventTypeContentBlockStart,
+					Index: &imageIndex,
+					ContentBlock: &llm.EventContentBlock{
+						Type: llm.ContentTypeText,
+						Text: fmt.Sprintf("[Generated image - base64 data: %d bytes]", len(item.Result)),
+					},
+				})
+			}
+		case "web_search_call":
+			// Handle web search results
+			if len(item.Results) > 0 {
+				searchIndex := s.nextContentIndex
+				s.nextContentIndex++
+				var resultText strings.Builder
+				resultText.WriteString("Web search results:\n")
+				for _, result := range item.Results {
+					resultText.WriteString(fmt.Sprintf("- %s: %s\n", result.Title, result.Description))
+				}
+				events = append(events, &llm.Event{
+					Type:  llm.EventTypeContentBlockStart,
+					Index: &searchIndex,
+					ContentBlock: &llm.EventContentBlock{
+						Type: llm.ContentTypeText,
+						Text: resultText.String(),
+					},
+				})
 			}
 		case "mcp_call":
 			// Handle MCP tool call events
 			toolIndex := s.nextContentIndex
 			s.nextContentIndex++
-			return &llm.Event{
+			events = append(events, &llm.Event{
 				Type:  llm.EventTypeContentBlockStart,
 				Index: &toolIndex,
 				ContentBlock: &llm.EventContentBlock{
@@ -746,7 +860,7 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 					ID:   item.ID,
 					Name: item.Name,
 				},
-			}
+			})
 		case "mcp_list_tools":
 			// Handle MCP tool list events - emit as text content
 			if len(item.Tools) > 0 {
@@ -757,43 +871,57 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) *llm.Event
 				for _, tool := range item.Tools {
 					toolsText.WriteString(fmt.Sprintf("- %s\n", tool.Name))
 				}
-				return &llm.Event{
+				events = append(events, &llm.Event{
 					Type:  llm.EventTypeContentBlockStart,
 					Index: &toolIndex,
 					ContentBlock: &llm.EventContentBlock{
 						Type: llm.ContentTypeText,
 						Text: toolsText.String(),
 					},
-				}
+				})
 			}
 		case "mcp_approval_request":
 			// Handle MCP approval request events - emit as text content
 			toolIndex := s.nextContentIndex
 			s.nextContentIndex++
-			return &llm.Event{
+			events = append(events, &llm.Event{
 				Type:  llm.EventTypeContentBlockStart,
 				Index: &toolIndex,
 				ContentBlock: &llm.EventContentBlock{
 					Type: llm.ContentTypeText,
 					Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", item.Name, item.ServerLabel),
 				},
+			})
+		case "partial_image":
+			// Handle partial image events for streaming image generation
+			if item.Result != "" {
+				imageIndex := s.nextContentIndex - 1 // Use the existing image index
+				events = append(events, &llm.Event{
+					Type:  llm.EventTypeContentBlockDelta,
+					Index: &imageIndex,
+					Delta: &llm.EventDelta{
+						Type:        llm.EventDeltaTypeText,
+						Text:        fmt.Sprintf("[Partial image update - %d bytes]", len(item.Result)),
+						PartialJSON: item.Result, // Store the partial image data in PartialJSON field
+					},
+				})
 			}
 		}
 	}
 
 	// If we have usage information, emit a message delta event
-	if response.Usage != nil {
-		return &llm.Event{
+	if response.Usage != nil && len(events) == 0 {
+		events = append(events, &llm.Event{
 			Type:  llm.EventTypeMessageDelta,
 			Delta: &llm.EventDelta{}, // Empty delta is required for message delta events
 			Usage: &llm.Usage{
 				InputTokens:  response.Usage.InputTokens,
 				OutputTokens: response.Usage.OutputTokens,
 			},
-		}
+		})
 	}
 
-	return nil
+	return events
 }
 
 // Event returns the current event

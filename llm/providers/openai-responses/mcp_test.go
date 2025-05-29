@@ -151,14 +151,15 @@ func TestMCPStreamingEvents(t *testing.T) {
 			},
 		}
 
-		event := iterator.convertStreamEvent(streamEvent)
-		require.NotNil(t, event)
-		assert.Equal(t, llm.EventTypeContentBlockStart, event.Type)
-		assert.NotNil(t, event.Index)
-		assert.Equal(t, 0, *event.Index)
-		assert.Equal(t, llm.ContentTypeToolUse, event.ContentBlock.Type)
-		assert.Equal(t, "mcp_456", event.ContentBlock.ID)
-		assert.Equal(t, "query", event.ContentBlock.Name)
+		events := iterator.convertStreamEvent(streamEvent)
+		require.NotNil(t, events)
+		require.Len(t, events, 1)
+		assert.Equal(t, llm.EventTypeContentBlockStart, events[0].Type)
+		assert.NotNil(t, events[0].Index)
+		assert.Equal(t, 0, *events[0].Index)
+		assert.Equal(t, llm.ContentTypeToolUse, events[0].ContentBlock.Type)
+		assert.Equal(t, "mcp_456", events[0].ContentBlock.ID)
+		assert.Equal(t, "query", events[0].ContentBlock.Name)
 	})
 
 	t.Run("MCP list tools streaming event", func(t *testing.T) {
@@ -184,15 +185,15 @@ func TestMCPStreamingEvents(t *testing.T) {
 			},
 		}
 
-		event := iterator.convertStreamEvent(streamEvent)
-		require.NotNil(t, event)
-		assert.Equal(t, llm.EventTypeContentBlockStart, event.Type)
-		assert.NotNil(t, event.Index)
-		assert.Equal(t, 0, *event.Index)
-		assert.Equal(t, llm.ContentTypeText, event.ContentBlock.Type)
-		assert.Contains(t, event.ContentBlock.Text, "MCP server 'test-server' tools:")
-		assert.Contains(t, event.ContentBlock.Text, "- query")
-		assert.Contains(t, event.ContentBlock.Text, "- search")
+		events := iterator.convertStreamEvent(streamEvent)
+		require.NotNil(t, events)
+		require.Len(t, events, 1)
+		assert.Equal(t, llm.EventTypeContentBlockStart, events[0].Type)
+		assert.Equal(t, 0, *events[0].Index)
+		assert.Equal(t, llm.ContentTypeText, events[0].ContentBlock.Type)
+		assert.Contains(t, events[0].ContentBlock.Text, "MCP server 'test-server' tools:")
+		assert.Contains(t, events[0].ContentBlock.Text, "- query")
+		assert.Contains(t, events[0].ContentBlock.Text, "- search")
 	})
 
 	t.Run("MCP approval request streaming event", func(t *testing.T) {
@@ -215,12 +216,13 @@ func TestMCPStreamingEvents(t *testing.T) {
 			},
 		}
 
-		event := iterator.convertStreamEvent(streamEvent)
-		require.NotNil(t, event)
-		assert.Equal(t, llm.EventTypeContentBlockStart, event.Type)
-		assert.NotNil(t, event.Index)
-		assert.Equal(t, 0, *event.Index)
-		assert.Equal(t, llm.ContentTypeText, event.ContentBlock.Type)
-		assert.Contains(t, event.ContentBlock.Text, "MCP approval required for tool 'dangerous_tool' on server 'test-server'")
+		events := iterator.convertStreamEvent(streamEvent)
+		require.NotNil(t, events)
+		require.Len(t, events, 1)
+		assert.Equal(t, llm.EventTypeContentBlockStart, events[0].Type)
+		assert.NotNil(t, events[0].Index)
+		assert.Equal(t, 0, *events[0].Index)
+		assert.Equal(t, llm.ContentTypeText, events[0].ContentBlock.Type)
+		assert.Contains(t, events[0].ContentBlock.Text, "MCP approval required for tool 'dangerous_tool' on server 'test-server'")
 	})
 }
