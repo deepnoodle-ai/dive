@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	DefaultModel     = "llama3.2"
+	DefaultModel     = "llama3.2:3b"
 	DefaultEndpoint  = "http://localhost:11434/v1/chat/completions"
 	DefaultMaxTokens = 4096
 )

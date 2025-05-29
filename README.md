@@ -41,14 +41,20 @@ Please leave a GitHub star if you're interested in the project!
 
 ## Features
 
-* **Agents**: Chat or assign work to specialized agents
+* **Agents**: Chat or assign work to specialized agents with configurable reasoning
+* **Supervisor Patterns**: Create hierarchical agent systems with work delegation
 * **Workflows**: Define multi-step workflows for automation
 * **Declarative Configuration**: Define agents and workflows using YAML
-* **Multiple LLMs**: Switch between Anthropic, OpenAI, Groq, and others
-* **Extended Reasoning**: Configure the effort level for Agent reasoning
-* **Tools**: Give agents the ability to interact with the world
+* **Multiple LLMs**: Switch between Anthropic, OpenAI, Groq, Ollama, and others
+* **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
+* **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
+* **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
+* **Tools**: Give agents rich capabilities to interact with the world
+* **Tool Annotations**: Semantic hints about tool behavior (read-only, destructive, etc.)
 * **Streaming**: Stream agent and workflow events for realtime UI updates
 * **CLI**: Run workflows, chat with agents, and more
+* **Thread Management**: Persistent conversation threads with memory
+* **Confirmation System**: Built-in confirmation system for destructive operations
 * **Scripting**: Embed scripts in workflows for extensibility
 * **Deep Research**: Use multiple agents to perform deep research
 
@@ -89,15 +95,15 @@ Here's a quick example of creating a chat agent:
 
 ```go
 agent, err := agent.New(agent.Options{
-    Name:      "Research Assistant",
-    Backstory: "You are an enthusiastic and deeply curious researcher.",
-    Model:     anthropic.New(),
-    AutoStart: true,
+    Name:         "Research Assistant",
+    Instructions: "You are an enthusiastic and deeply curious researcher.",
+    Model:        anthropic.New(),
 })
 
 // Start chatting with the agent
-iterator, err := agent.Chat(ctx, llm.Messages{llm.NewUserMessage("Hello there!")})
-// Iterate over the events...
+response, err := agent.CreateResponse(ctx, dive.WithInput("Hello there!"))
+// Or stream the response
+stream, err := agent.StreamResponse(ctx, dive.WithInput("Hello there!"))
 ```
 
 Or use the Dive LLM interface directly:
@@ -106,7 +112,7 @@ Or use the Dive LLM interface directly:
 model := anthropic.New()
 response, err := model.Generate(
   context.Background(),
-  llm.Messages{llm.NewUserMessage("Hello there!")},
+  llm.WithMessages(llm.NewUserTextMessage("Hello there!")),
   llm.WithMaxTokens(2048),
   llm.WithTemperature(0.7),
 )
@@ -125,9 +131,16 @@ Name: Research
 Description: Research a Topic
 
 Config:
-  LLM:
-    DefaultProvider: anthropic
-    DefaultModel: claude-3-7-sonnet-20250219
+  LogLevel: debug
+  DefaultProvider: anthropic
+  DefaultModel: claude-sonnet-4-20250514
+  ConfirmationMode: if-destructive
+
+Tools:
+  - Name: Web.Search
+    Enabled: true
+  - Name: Web.Fetch
+    Enabled: true
 
 Agents:
   - Name: Research Assistant
@@ -175,7 +188,7 @@ go install .
 Available CLI commands include:
 
 * `dive run /path/to/workflow.yaml`: Run a workflow
-* `dive chat --provider anthropic --model claude-3-7-sonnet-20250219`: Chat with an agent
+* `dive chat --provider anthropic --model claude-sonnet-4-20250514`: Chat with an agent
 * `dive config check /path/to/workflow.yaml`: Validate a Dive configuration
 
 ## LLM Providers
@@ -190,12 +203,33 @@ Each provider implementation handles API communication, token counting,
 tool calling, and other details.
 
 ```go
-provider := anthropic.New(anthropic.WithModel("claude-3-7-sonnet-20250219"))
+provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-20250514"))
 
 provider := openai.New(openai.WithModel("gpt-4o"))
 
 provider := groq.New(groq.WithModel("deepseek-r1-distill-llama-70b"))
 ```
+
+## Model Context Protocol (MCP)
+
+Dive supports the Model Context Protocol (MCP) for connecting to external tools and services:
+
+```go
+response, err := anthropic.New().Generate(
+    context.Background(),
+    llm.WithMessages(llm.NewUserTextMessage("What are the open tickets?")),
+    llm.WithMCPServers(
+        llm.MCPServerConfig{
+            Type:               "url",
+            Name:               "linear",
+            URL:                "https://mcp.linear.app/sse",
+            AuthorizationToken: "your-token-here",
+        },
+    ),
+)
+```
+
+MCP servers can also be configured in YAML workflows and agent definitions for declarative setup.
 
 ### Verified Models
 
@@ -203,6 +237,7 @@ These are the models that have been verified to work in Dive:
 
 | Provider  | Model                           | Tools Supported |
 | --------- | ------------------------------- | --------------- |
+| Anthropic | `claude-sonnet-4-20250514`      | Yes             |
 | Anthropic | `claude-3-7-sonnet-20250219`    | Yes             |
 | Anthropic | `claude-3-5-sonnet-20241022`    | Yes             |
 | Anthropic | `claude-3-5-haiku-20241022`     | Yes             |
@@ -214,58 +249,68 @@ These are the models that have been verified to work in Dive:
 | OpenAI    | `o1`                            | Yes             |
 | OpenAI    | `o1-mini`                       | No              |
 | OpenAI    | `o3-mini`                       | Yes             |
+| Ollama    | `llama3.2:*`                    | Yes             |
+| Ollama    | `mistral:*`                     | No              |
 
 ## Tool Use
 
 Tools extend agent capabilities. Dive includes these built-in tools:
 
-* **Web.Search**: Use a search engine (currently supports Google Custom Search)
-* **Web.Fetch**: Fetch a webpage and extract the content (currently supports Firecrawl)
-* **Document.Write**: Write content to files
-* **Document.Read**: Read content from files
+* **Web.Search**: Search the web using Google Custom Search or Kagi Search
+* **Web.Fetch**: Fetch and extract content from webpages using Firecrawl
+* **Document.Write**: Write content to files with path validation and confirmations
+* **Document.Read**: Read content from files with binary detection and size limits
+* **Directory.List**: List directory contents with permission controls
+* **Text.Editor**: Advanced file editing with view, create, replace, and insert operations
+* **Command**: Execute external commands with allow/deny list controls
+
+### Tool Annotations
+
+Dive's tool system includes rich annotations that provide hints about tool behavior:
+
+```go
+type ToolAnnotations struct {
+    Title           string      // Human-readable title
+    ReadOnlyHint    bool        // Tool only reads, doesn't modify
+    DestructiveHint bool        // Tool may make destructive changes
+    IdempotentHint  bool        // Tool is safe to call multiple times
+    OpenWorldHint   bool        // Tool accesses external resources
+}
+```
+
+### Custom Tools
+
+Creating custom tools is straightforward using the `TypedTool` interface:
+
+```go
+type SearchTool struct{}
+
+func (t *SearchTool) Name() string { return "search" }
+func (t *SearchTool) Description() string { return "Search for information" }
+func (t *SearchTool) Schema() schema.Schema { /* define parameters */ }
+func (t *SearchTool) Annotations() dive.ToolAnnotations { /* tool hints */ }
+func (t *SearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolResult, error) {
+    // Tool implementation
+}
+
+// Use with ToolAdapter for type safety
+tool := dive.ToolAdapter(searchTool)
+```
 
 Go interfaces are in-place to support swapping in different tool implementations
 while keeping the same workflows and usage. For example, Brave Search could be
 added as an alternative Web.Search tool backend.
-
-Creating custom tools is straightforward:
-
-```go
-type WeatherTool struct {
-    apiKey string
-}
-
-func (t *WeatherTool) Definition() *llm.ToolDefinition {
-    return &llm.ToolDefinition{
-        Name: "GetWeather",
-        Description: "Get the current weather for a location",
-        Parameters: llm.Schema{
-            Type: "object",
-            Required: []string{"location"},
-            Properties: map[string]*llm.SchemaProperty{
-                "location": {
-                    Type: "string",
-                    Description: "The city and state/country",
-                },
-            },
-        },
-    }
-}
-```
 
 ## Contributors
 
 We're looking for contributors! Whether you're fixing bugs, adding features,
 improving documentation, or spreading the word, your help is appreciated.
 
-<!-- <a href="https://github.com/diveagents/dive/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=diveagents/dive" width="100%"/>
-</a> -->
-
 ## Roadmap
 
+- ✅ Ollama support
+- ✅ MCP support
 - Docs site
-- MCP support
 - Server mode
 - Documented approach for RAG
 - AWS Bedrock support
@@ -276,14 +321,9 @@ improving documentation, or spreading the word, your help is appreciated.
 - Workflow persistence
 - Integrations (Slack, Google Drive, etc.)
 - Expanded CLI
-- Ollama support
 - Hugging Face support
 
 ## FAQ
-
-### Can I use Dive with Ollama?
-
-Soon!
 
 ### Is there a hosted or managed version available?
 
@@ -293,3 +333,86 @@ self-host and integrate into your own applications.
 ### Who is Behind Dive?
 
 Dive is developed by [Stingrai](https://www.getstingrai.com).
+
+## Advanced Agent Features
+
+### Supervisor Patterns
+
+Agents can be configured as supervisors to delegate work to other agents:
+
+```go
+supervisor, err := agent.New(agent.Options{
+    Name:         "Research Manager",
+    Instructions: "You coordinate research tasks across multiple specialists.",
+    IsSupervisor: true,
+    Subordinates: []string{"Data Analyst", "Web Researcher"},
+    Model:        anthropic.New(),
+})
+```
+
+Supervisor agents automatically get an `assign_work` tool for delegating tasks.
+
+### Model Settings
+
+Fine-tune LLM behavior with advanced model settings:
+
+```go
+agent, err := agent.New(agent.Options{
+    Name: "Assistant",
+    ModelSettings: &agent.ModelSettings{
+        Temperature:       ptr(0.7),
+        ReasoningBudget:   ptr(50000),
+        ReasoningEffort:   "high",
+        MaxTokens:         4096,
+        ParallelToolCalls: ptr(true),
+        Caching:           ptr(true),
+    },
+    Model: anthropic.New(),
+})
+```
+
+### Thread Management
+
+Agents support persistent conversation threads:
+
+```go
+response, err := agent.CreateResponse(ctx,
+    dive.WithThreadID("conversation-123"),
+    dive.WithInput("Continue our discussion"),
+)
+```
+
+## Environment System
+
+Dive uses an Environment to orchestrate agents and manage shared resources:
+
+```go
+import "github.com/diveagents/dive/environment"
+
+env := environment.New(environment.Options{
+    Name: "Research Lab",
+})
+
+// Add multiple agents to the environment
+researcher, _ := agent.New(agent.Options{
+    Name:        "Researcher",
+    Environment: env,
+})
+
+analyst, _ := agent.New(agent.Options{
+    Name:        "Data Analyst",
+    Environment: env,
+})
+
+// Agents can now reference each other and share resources
+```
+
+The Environment provides:
+- **Agent Discovery**: Agents can find and delegate to each other
+- **Shared Document Repository**: Common file system access
+- **Thread Management**: Persistent conversation storage
+- **Confirmation System**: Centralized user confirmation handling
+
+### Use the Dive CLI
+
+For the moment, you'll need to build the CLI yourself:
