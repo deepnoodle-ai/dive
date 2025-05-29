@@ -194,7 +194,7 @@ func main() {
 	if err := stream.Err(); err != nil {
 		log.Printf("Stream error: %v", err)
 	}
-	fmt.Println("\n")
+	fmt.Println()
 
 	// Example 8: Provider-specific options using the generic provider options mechanism
 	fmt.Println("=== Example 8: Provider-specific options ===")
