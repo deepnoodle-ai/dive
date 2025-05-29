@@ -12,7 +12,7 @@ import (
 
 func main() {
 	provider := openairesponses.New(
-		openairesponses.WithModel("gpt-4.1"),
+		openairesponses.WithModel("gpt-4o"),
 	)
 
 	ctx := context.Background()

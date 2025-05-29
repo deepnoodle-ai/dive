@@ -22,6 +22,14 @@ var (
 	DefaultEndpoint = "https://api.openai.com/v1/responses"
 )
 
+// Feature flag constants for better maintainability
+const (
+	FeatureStore           = "openai-responses:store"
+	FeatureBackground      = "openai-responses:background"
+	FeatureWebSearch       = "openai-responses:web_search"
+	FeatureImageGeneration = "openai-responses:image_generation"
+)
+
 var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
@@ -99,22 +107,25 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 	}
 
 	// Handle store setting: per-request config takes precedence over provider default
-	if storeValue, found := getFeatureBoolValue(config.Features, "openai-responses:store"); found {
+	if storeValue, found := getFeatureBoolValue(config.Features, FeatureStore); found {
 		request.Store = &storeValue
 	}
 
 	// Handle background setting: per-request config takes precedence over provider default
-	if backgroundValue, found := getFeatureBoolValue(config.Features, "openai-responses:background"); found {
+	if backgroundValue, found := getFeatureBoolValue(config.Features, FeatureBackground); found {
 		request.Background = &backgroundValue
 	}
 
 	// Convert messages to input format
 	if len(config.Messages) > 0 {
-		input, err := p.convertMessagesToInput(config.Messages)
+		input, err := p.convertMessagesToInput(config.Messages, config)
 		if err != nil {
 			return nil, err
 		}
 		request.Input = input
+	} else {
+		// Ensure Input is not nil - provide empty string as default when only tools are used
+		request.Input = ""
 	}
 
 	// Add built-in tools
@@ -231,7 +242,7 @@ func (p *Provider) makeRequest(ctx context.Context, request *Request, config *ll
 						"status", resp.StatusCode, "body", string(body))
 				}
 			}
-			return providers.NewError(resp.StatusCode, string(body))
+			return fmt.Errorf("API error (status %d): %w", resp.StatusCode, providers.NewError(resp.StatusCode, string(body)))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
@@ -284,7 +295,7 @@ func (p *Provider) makeStreamRequest(ctx context.Context, request *Request, conf
 						"status", resp.StatusCode, "body", string(body))
 				}
 			}
-			return providers.NewError(resp.StatusCode, string(body))
+			return fmt.Errorf("API error (status %d): %w", resp.StatusCode, providers.NewError(resp.StatusCode, string(body)))
 		}
 		stream = &StreamIterator{
 			body:   resp.Body,
@@ -410,7 +421,7 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 }
 
 // convertMessagesToInput converts llm.Message slice to Responses API input format
-func (p *Provider) convertMessagesToInput(messages []*llm.Message) (interface{}, error) {
+func (p *Provider) convertMessagesToInput(messages []*llm.Message, config *llm.Config) (interface{}, error) {
 	// Simple case: single user message becomes string input
 	if len(messages) == 1 && messages[0].Role == llm.User {
 		if len(messages[0].Content) == 1 {
@@ -482,7 +493,13 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) (interface{},
 					case llm.ContentSourceTypeURL:
 						// OpenAI Responses API doesn't support URL references directly
 						// This would need to be downloaded and converted to base64 or file ID
-						// For now, we'll skip this case or could add a warning
+						// For now, log a warning and skip this content
+						if config.Logger != nil {
+							config.Logger.Warn("URL-based document content is not yet supported by OpenAI Responses provider",
+								"url", c.Source.URL,
+								"filename", c.Title,
+								"suggestion", "consider downloading the file and using base64 content instead")
+						}
 						continue
 					}
 
@@ -511,7 +528,7 @@ func (p *Provider) buildTools(config *llm.Config) ([]Tool, error) {
 	var tools []Tool
 
 	// Build tools based on per-request features
-	if hasFeature(config.Features, "openai-responses:web_search") {
+	if hasFeature(config.Features, FeatureWebSearch) {
 		tool := Tool{Type: "web_search_preview"}
 
 		// Use per-request options from headers
@@ -525,7 +542,7 @@ func (p *Provider) buildTools(config *llm.Config) ([]Tool, error) {
 		tools = append(tools, tool)
 	}
 
-	if hasFeature(config.Features, "openai-responses:image_generation") {
+	if hasFeature(config.Features, FeatureImageGeneration) {
 		tool := Tool{Type: "image_generation"}
 
 		// Use per-request options from headers

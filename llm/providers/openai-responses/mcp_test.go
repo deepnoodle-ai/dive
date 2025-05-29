@@ -63,7 +63,7 @@ func TestMCPIntegration(t *testing.T) {
 			},
 		}
 
-		input, err := provider.convertMessagesToInput(messages)
+		input, err := provider.convertMessagesToInput(messages, &llm.Config{})
 		require.NoError(t, err)
 
 		inputMessages, ok := input.([]InputMessage)

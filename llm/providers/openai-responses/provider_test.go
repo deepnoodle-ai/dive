@@ -250,7 +250,7 @@ func TestProvider_convertMessagesToInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := provider.convertMessagesToInput(tt.messages)
+			result, err := provider.convertMessagesToInput(tt.messages, &llm.Config{})
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -545,8 +545,8 @@ func TestProvider_buildTools(t *testing.T) {
 			provider: New(), // Provider has no tools enabled by default
 			config: &llm.Config{
 				Features: []string{
-					"openai-responses:web_search",
-					"openai-responses:image_generation",
+					FeatureWebSearch,
+					FeatureImageGeneration,
 				},
 			},
 			expected: func(t *testing.T, tools []Tool) {
@@ -713,7 +713,7 @@ func TestConvertDocumentContentToInput(t *testing.T) {
 		},
 	}
 
-	input, err := provider.convertMessagesToInput(messages)
+	input, err := provider.convertMessagesToInput(messages, &llm.Config{})
 	require.NoError(t, err)
 
 	inputMessages, ok := input.([]InputMessage)
@@ -755,7 +755,7 @@ func TestConvertDocumentContentWithFileIDToInput(t *testing.T) {
 		},
 	}
 
-	input, err := provider.convertMessagesToInput(messages)
+	input, err := provider.convertMessagesToInput(messages, &llm.Config{})
 	require.NoError(t, err)
 
 	inputMessages, ok := input.([]InputMessage)
