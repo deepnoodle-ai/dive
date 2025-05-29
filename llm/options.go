@@ -18,6 +18,34 @@ func (c CacheControlType) String() string {
 	return string(c)
 }
 
+// WebSearchConfig configures web search behavior for providers that support it
+type WebSearchConfig struct {
+	Enabled      bool          `json:"enabled"`
+	Domains      []string      `json:"domains,omitempty"`
+	ContextSize  string        `json:"context_size,omitempty"` // "low", "medium", "high"
+	UserLocation *UserLocation `json:"user_location,omitempty"`
+}
+
+// UserLocation represents geographical information for web search
+type UserLocation struct {
+	Country string  `json:"country,omitempty"`
+	Region  string  `json:"region,omitempty"`
+	City    string  `json:"city,omitempty"`
+	Lat     float64 `json:"lat,omitempty"`
+	Lon     float64 `json:"lon,omitempty"`
+}
+
+// ImageGenerationConfig configures image generation behavior for providers that support it
+type ImageGenerationConfig struct {
+	Enabled       bool   `json:"enabled"`
+	Size          string `json:"size,omitempty"`           // "1024x1024", "1024x1536", etc.
+	Quality       string `json:"quality,omitempty"`        // "low", "medium", "high", "auto"
+	Format        string `json:"format,omitempty"`         // "png", "jpeg", "webp"
+	Compression   *int   `json:"compression,omitempty"`    // 0-100 for JPEG/WebP
+	Background    string `json:"background,omitempty"`     // "transparent", "opaque", "auto"
+	PartialImages *int   `json:"partial_images,omitempty"` // 1-3 for streaming
+}
+
 // Option is a function that is used to adjust LLM configuration.
 type Option func(*Config)
 
@@ -44,10 +72,27 @@ type Config struct {
 	RequestHeaders    http.Header       `json:"request_headers,omitempty"`
 	MCPServers        []MCPServerConfig `json:"mcp_servers,omitempty"`
 	Caching           *bool             `json:"caching,omitempty"`
-	Hooks             Hooks             `json:"-"`
-	Client            *http.Client      `json:"-"`
-	Logger            slogger.Logger    `json:"-"`
-	Messages          Messages          `json:"-"`
+
+	// New generic options promoted from provider-specific implementations
+	TopP               *float64    `json:"top_p,omitempty"`
+	User               string      `json:"user,omitempty"`
+	Instructions       string      `json:"instructions,omitempty"`
+	ServiceTier        string      `json:"service_tier,omitempty"`
+	TruncationStrategy string      `json:"truncation_strategy,omitempty"`
+	Background         *bool       `json:"background,omitempty"`
+	JSONSchema         interface{} `json:"json_schema,omitempty"`
+
+	// Structured configuration for complex features
+	WebSearch       *WebSearchConfig       `json:"web_search,omitempty"`
+	ImageGeneration *ImageGenerationConfig `json:"image_generation,omitempty"`
+
+	// Provider-specific options that don't fit into generic categories
+	ProviderOptions map[string]interface{} `json:"provider_options,omitempty"`
+
+	Hooks    Hooks          `json:"-"`
+	Client   *http.Client   `json:"-"`
+	Logger   slogger.Logger `json:"-"`
+	Messages Messages       `json:"-"`
 }
 
 // Apply applies the given options to the config.
@@ -251,5 +296,104 @@ func WithRequestHeaders(headers http.Header) Option {
 func WithMCPServers(servers ...MCPServerConfig) Option {
 	return func(config *Config) {
 		config.MCPServers = append(config.MCPServers, servers...)
+	}
+}
+
+// WithTopP sets the top-p sampling parameter for the interaction.
+func WithTopP(topP float64) Option {
+	return func(config *Config) {
+		config.TopP = &topP
+	}
+}
+
+// WithUser sets the user identifier for the interaction.
+func WithUser(user string) Option {
+	return func(config *Config) {
+		config.User = user
+	}
+}
+
+// WithInstructions sets additional instructions for the interaction.
+func WithInstructions(instructions string) Option {
+	return func(config *Config) {
+		config.Instructions = instructions
+	}
+}
+
+// WithServiceTier sets the service tier for the interaction.
+func WithServiceTier(tier string) Option {
+	return func(config *Config) {
+		config.ServiceTier = tier
+	}
+}
+
+// WithTruncationStrategy sets the truncation strategy for the interaction.
+func WithTruncationStrategy(strategy string) Option {
+	return func(config *Config) {
+		config.TruncationStrategy = strategy
+	}
+}
+
+// WithBackground sets whether to process the request in the background.
+func WithBackground(background bool) Option {
+	return func(config *Config) {
+		config.Background = &background
+	}
+}
+
+// WithJSONSchema sets the JSON schema for structured output.
+func WithJSONSchema(schema interface{}) Option {
+	return func(config *Config) {
+		config.JSONSchema = schema
+	}
+}
+
+// WithWebSearch enables web search with the specified configuration.
+func WithWebSearch(webSearchConfig WebSearchConfig) Option {
+	return func(config *Config) {
+		config.WebSearch = &webSearchConfig
+	}
+}
+
+// WithWebSearchEnabled enables web search with default configuration.
+func WithWebSearchEnabled() Option {
+	return func(config *Config) {
+		config.WebSearch = &WebSearchConfig{Enabled: true}
+	}
+}
+
+// WithImageGeneration enables image generation with the specified configuration.
+func WithImageGeneration(imageConfig ImageGenerationConfig) Option {
+	return func(config *Config) {
+		config.ImageGeneration = &imageConfig
+	}
+}
+
+// WithImageGenerationEnabled enables image generation with default configuration.
+func WithImageGenerationEnabled() Option {
+	return func(config *Config) {
+		config.ImageGeneration = &ImageGenerationConfig{Enabled: true}
+	}
+}
+
+// WithProviderOption sets a provider-specific option.
+func WithProviderOption(key string, value interface{}) Option {
+	return func(config *Config) {
+		if config.ProviderOptions == nil {
+			config.ProviderOptions = make(map[string]interface{})
+		}
+		config.ProviderOptions[key] = value
+	}
+}
+
+// WithProviderOptions sets multiple provider-specific options.
+func WithProviderOptions(options map[string]interface{}) Option {
+	return func(config *Config) {
+		if config.ProviderOptions == nil {
+			config.ProviderOptions = make(map[string]interface{})
+		}
+		for k, v := range options {
+			config.ProviderOptions[k] = v
+		}
 	}
 }

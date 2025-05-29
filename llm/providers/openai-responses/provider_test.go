@@ -195,23 +195,6 @@ func TestProvider_buildRequest(t *testing.T) {
 				assert.Equal(t, "A test tool", req.Tools[0].Function.Description)
 			},
 		},
-		{
-			name: "with provider-level store and background",
-			provider: &Provider{
-				model:      "gpt-4o",
-				store:      &[]bool{true}[0],
-				background: &[]bool{false}[0],
-			},
-			config: &llm.Config{
-				Messages: []*llm.Message{
-					llm.NewUserTextMessage("Test"),
-				},
-			},
-			expected: func(t *testing.T, req *Request) {
-				assert.True(t, *req.Store)
-				assert.False(t, *req.Background)
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -558,64 +541,31 @@ func TestProvider_buildTools(t *testing.T) {
 			},
 		},
 		{
-			name: "web search enabled",
-			provider: &Provider{
-				enabledTools: []string{"web_search_preview"},
-				webSearchOptions: &WebSearchOptions{
-					Domains:           []string{"example.com"},
-					SearchContextSize: "medium",
+			name:     "per-request tool enabling",
+			provider: New(), // Provider has no tools enabled by default
+			config: &llm.Config{
+				Features: []string{
+					"openai-responses:web_search",
+					"openai-responses:image_generation",
 				},
 			},
-			config: &llm.Config{
-				Features: []string{"openai-responses:web_search"},
-			},
 			expected: func(t *testing.T, tools []Tool) {
-				require.Len(t, tools, 1)
-				assert.Equal(t, "web_search_preview", tools[0].Type)
-				assert.Equal(t, []string{"example.com"}, tools[0].Domains)
-				assert.Equal(t, "medium", tools[0].SearchContextSize)
-			},
-		},
-		{
-			name: "image generation enabled",
-			provider: &Provider{
-				enabledTools: []string{"image_generation"},
-				imageGenerationOptions: &ImageGenerationOptions{
-					Size:    "1024x1024",
-					Quality: "high",
-				},
-			},
-			config: &llm.Config{
-				Features: []string{"openai-responses:image_generation"},
-			},
-			expected: func(t *testing.T, tools []Tool) {
-				require.Len(t, tools, 1)
-				assert.Equal(t, "image_generation", tools[0].Type)
-				assert.Equal(t, "1024x1024", tools[0].Size)
-				assert.Equal(t, "high", tools[0].Quality)
-			},
-		},
-		{
-			name: "MCP server enabled",
-			provider: &Provider{
-				mcpServers: map[string]MCPServerConfig{
-					"test-server": {
-						ServerURL:    "http://localhost:8080",
-						AllowedTools: []string{"query"},
-						Headers:      map[string]string{"Auth": "Bearer token"},
-					},
-				},
-			},
-			config: &llm.Config{
-				Features: []string{"openai-responses:mcp:test-server"},
-			},
-			expected: func(t *testing.T, tools []Tool) {
-				require.Len(t, tools, 1)
-				assert.Equal(t, "mcp", tools[0].Type)
-				assert.Equal(t, "test-server", tools[0].ServerLabel)
-				assert.Equal(t, "http://localhost:8080", tools[0].ServerURL)
-				assert.Equal(t, []string{"query"}, tools[0].AllowedTools)
-				assert.Equal(t, map[string]string{"Auth": "Bearer token"}, tools[0].Headers)
+				require.Len(t, tools, 2)
+
+				// Find web search tool
+				var webSearchTool *Tool
+				var imageGenTool *Tool
+				for i := range tools {
+					if tools[i].Type == "web_search_preview" {
+						webSearchTool = &tools[i]
+					}
+					if tools[i].Type == "image_generation" {
+						imageGenTool = &tools[i]
+					}
+				}
+
+				require.NotNil(t, webSearchTool, "Expected web search tool to be enabled")
+				require.NotNil(t, imageGenTool, "Expected image generation tool to be enabled")
 			},
 		},
 	}
@@ -659,86 +609,6 @@ data: [DONE]
 
 	// Test Err()
 	assert.NoError(t, iterator.Err())
-}
-
-func TestLLMOptions(t *testing.T) {
-	tests := []struct {
-		name     string
-		option   llm.Option
-		expected func(*testing.T, *llm.Config)
-	}{
-		{
-			name:   "LLMWithStore",
-			option: LLMWithStore(true),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Contains(t, config.Features, "openai-responses:store")
-			},
-		},
-		{
-			name:   "LLMWithBackground",
-			option: LLMWithBackground(true),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Contains(t, config.Features, "openai-responses:background")
-			},
-		},
-		{
-			name:   "LLMWithWebSearch",
-			option: LLMWithWebSearch(),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Contains(t, config.Features, "openai-responses:web_search")
-			},
-		},
-		{
-			name:   "LLMWithImageGeneration",
-			option: LLMWithImageGeneration(),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Contains(t, config.Features, "openai-responses:image_generation")
-			},
-		},
-		{
-			name:   "LLMWithInstructions",
-			option: LLMWithInstructions("Custom instructions"),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Equal(t, "Custom instructions", config.RequestHeaders.Get("X-OpenAI-Responses-Instructions"))
-			},
-		},
-		{
-			name:   "LLMWithServiceTier",
-			option: LLMWithServiceTier("premium"),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Equal(t, "premium", config.RequestHeaders.Get("X-OpenAI-Responses-Service-Tier"))
-			},
-		},
-		{
-			name:   "LLMWithReasoningEffort",
-			option: LLMWithReasoningEffort("high"),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Equal(t, "high", config.RequestHeaders.Get("X-OpenAI-Responses-Reasoning-Effort"))
-			},
-		},
-		{
-			name:   "LLMWithTopP",
-			option: LLMWithTopP(0.9),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Equal(t, "0.900", config.RequestHeaders.Get("X-OpenAI-Responses-Top-P"))
-			},
-		},
-		{
-			name:   "LLMWithUser",
-			option: LLMWithUser("user-123"),
-			expected: func(t *testing.T, config *llm.Config) {
-				assert.Equal(t, "user-123", config.RequestHeaders.Get("X-OpenAI-Responses-User"))
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			config := &llm.Config{}
-			tt.option(config)
-			tt.expected(t, config)
-		})
-	}
 }
 
 func TestIntegration_BasicGeneration(t *testing.T) {

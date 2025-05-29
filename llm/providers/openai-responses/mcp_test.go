@@ -130,22 +130,6 @@ func TestMCPIntegration(t *testing.T) {
 	})
 }
 
-func TestMCPLLMOptions(t *testing.T) {
-	t.Run("LLMWithMCPApprovalResponse", func(t *testing.T) {
-		config := &llm.Config{}
-
-		option := LLMWithMCPApprovalResponse("mcpr_123", true)
-		option(config)
-
-		require.Len(t, config.Messages, 1)
-		require.Len(t, config.Messages[0].Content, 1)
-
-		textContent, ok := config.Messages[0].Content[0].(*llm.TextContent)
-		require.True(t, ok)
-		assert.Equal(t, "MCP_APPROVAL_RESPONSE:mcpr_123:true", textContent.Text)
-	})
-}
-
 func TestMCPStreamingEvents(t *testing.T) {
 	t.Run("MCP call streaming event", func(t *testing.T) {
 		iterator := &StreamIterator{

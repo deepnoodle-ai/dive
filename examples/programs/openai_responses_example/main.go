@@ -14,19 +14,19 @@ func main() {
 	provider := openairesponses.New(
 		openairesponses.WithModel("gpt-4.1"),
 		// Note: No tool configuration here - tools are now configured per request
+		// You can still set provider-level defaults that will be used when no per-request options are specified
 	)
 
 	ctx := context.Background()
 
-	// Example 1: Basic generation with store and background options
-	fmt.Println("=== Example 1: Basic generation with store and background ===")
+	// Example 1: Basic generation with background option
+	fmt.Println("=== Example 1: Basic generation with background processing ===")
 	response1, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("What is the capital of France?"),
 		llm.WithTemperature(0.7),
 		llm.WithMaxTokens(100),
-		// Provider-specific options using the new LLM functions
-		openairesponses.LLMWithStore(true),
-		openairesponses.LLMWithBackground(false),
+		// Generic options now available to all providers
+		llm.WithBackground(false),
 	)
 	if err != nil {
 		log.Printf("Error in example 1: %v", err)
@@ -39,12 +39,12 @@ func main() {
 	response2, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("What are the latest developments in AI?"),
 		llm.WithTemperature(0.5),
-		// Enable web search with specific configuration
-		openairesponses.LLMWithWebSearchOptions(openairesponses.WebSearchOptions{
-			Domains:           []string{"arxiv.org", "openai.com"},
-			SearchContextSize: "medium",
+		// Enable web search with specific configuration using generic options
+		llm.WithWebSearch(llm.WebSearchConfig{
+			Enabled:     true,
+			Domains:     []string{"arxiv.org", "openai.com"},
+			ContextSize: "medium",
 		}),
-		openairesponses.LLMWithStore(true),
 	)
 	if err != nil {
 		log.Printf("Error in example 2: %v", err)
@@ -56,8 +56,9 @@ func main() {
 	fmt.Println("=== Example 3: Image generation ===")
 	response3, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Generate an image of a sunset over mountains"),
-		// Enable image generation with specific options
-		openairesponses.LLMWithImageGenerationOptions(openairesponses.ImageGenerationOptions{
+		// Enable image generation with specific options using generic config
+		llm.WithImageGeneration(llm.ImageGenerationConfig{
+			Enabled:    true,
 			Size:       "1024x1024",
 			Quality:    "high",
 			Background: "auto",
@@ -86,8 +87,8 @@ func main() {
 
 	response4, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Generate a person's information"),
-		openairesponses.LLMWithJSONSchema(schema),
-		openairesponses.LLMWithInstructions("Return the data in the specified JSON format"),
+		llm.WithJSONSchema(schema),
+		llm.WithInstructions("Return the data in the specified JSON format"),
 	)
 	if err != nil {
 		log.Printf("Error in example 4: %v", err)
@@ -100,10 +101,10 @@ func main() {
 	response5, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Solve this complex math problem: What is the derivative of x^3 + 2x^2 - 5x + 1?"),
 		llm.WithTemperature(0.1), // Low temperature for precise math
-		openairesponses.LLMWithReasoningEffort("high"),
-		openairesponses.LLMWithServiceTier("premium"),
-		openairesponses.LLMWithTopP(0.9),
-		openairesponses.LLMWithUser("math-student-123"),
+		llm.WithReasoningEffort("high"),
+		llm.WithServiceTier("premium"),
+		llm.WithTopP(0.9),
+		llm.WithUser("math-student-123"),
 	)
 	if err != nil {
 		log.Printf("Error in example 5: %v", err)
@@ -157,11 +158,10 @@ func main() {
 	fmt.Println("=== Example 7: Streaming with multiple tools ===")
 	stream, err := provider.Stream(ctx,
 		llm.WithUserTextMessage("Research the latest AI papers and generate a summary image"),
-		// Enable multiple tools for this request
-		openairesponses.LLMWithWebSearch(),
-		openairesponses.LLMWithImageGeneration(),
-		openairesponses.LLMWithStore(true),
-		openairesponses.LLMWithTruncation("auto"),
+		// Enable multiple tools for this request using generic options
+		llm.WithWebSearchEnabled(),
+		llm.WithImageGenerationEnabled(),
+		llm.WithTruncationStrategy("auto"),
 	)
 	if err != nil {
 		log.Printf("Error starting stream: %v", err)
@@ -180,6 +180,24 @@ func main() {
 		log.Printf("Stream error: %v", err)
 	}
 	fmt.Println("\n")
+
+	// Example 8: Provider-specific options using the generic provider options mechanism
+	fmt.Println("=== Example 8: Provider-specific options ===")
+	response8, err := provider.Generate(ctx,
+		llm.WithUserTextMessage("Tell me about quantum computing"),
+		llm.WithTemperature(0.8),
+		// Example of using provider-specific options for features unique to OpenAI Responses
+		llm.WithProviderOption("openai-responses:custom_feature", true),
+		llm.WithProviderOptions(map[string]interface{}{
+			"openai-responses:experimental_mode":   "enhanced",
+			"openai-responses:processing_priority": "high",
+		}),
+	)
+	if err != nil {
+		log.Printf("Error in example 8: %v", err)
+	} else {
+		fmt.Printf("Response with provider options: %s\n\n", response8.Content[0].(*llm.TextContent).Text)
+	}
 
 	fmt.Println("=== All examples completed ===")
 }

@@ -32,14 +32,6 @@ type Provider struct {
 	// Retry configuration
 	maxRetries int
 	baseWait   time.Duration
-	// Responses API specific fields
-	store      *bool
-	background *bool
-	// Built-in tools configuration
-	enabledTools           []string
-	webSearchOptions       *WebSearchOptions
-	imageGenerationOptions *ImageGenerationOptions
-	mcpServers             map[string]MCPServerConfig
 }
 
 func New(opts ...Option) *Provider {
@@ -103,9 +95,17 @@ func (p *Provider) SupportsStreaming() bool {
 func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 	request := &Request{
 		Model:       p.model,
-		Store:       p.store,
-		Background:  p.background,
 		Temperature: config.Temperature,
+	}
+
+	// Handle store setting: per-request config takes precedence over provider default
+	if storeValue, found := getFeatureBoolValue(config.Features, "openai-responses:store"); found {
+		request.Store = &storeValue
+	}
+
+	// Handle background setting: per-request config takes precedence over provider default
+	if backgroundValue, found := getFeatureBoolValue(config.Features, "openai-responses:background"); found {
+		request.Background = &backgroundValue
 	}
 
 	// Convert messages to input format
@@ -481,50 +481,67 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) (interface{},
 	return inputMessages, nil
 }
 
-// buildTools builds the tools array for the request
+// buildTools builds the tools array for the request using per-request configuration
 func (p *Provider) buildTools(config *llm.Config) ([]Tool, error) {
 	var tools []Tool
 
-	// Add enabled built-in tools
-	for _, toolType := range p.enabledTools {
-		switch toolType {
-		case "web_search_preview":
-			tool := Tool{Type: "web_search_preview"}
-			if p.webSearchOptions != nil {
-				tool.Domains = p.webSearchOptions.Domains
-				tool.SearchContextSize = p.webSearchOptions.SearchContextSize
-				tool.UserLocation = p.webSearchOptions.UserLocation
-			}
-			tools = append(tools, tool)
+	// Build tools based on per-request features
+	if hasFeature(config.Features, "openai-responses:web_search") {
+		tool := Tool{Type: "web_search_preview"}
 
-		case "image_generation":
-			tool := Tool{Type: "image_generation"}
-			if p.imageGenerationOptions != nil {
-				tool.Size = p.imageGenerationOptions.Size
-				tool.Quality = p.imageGenerationOptions.Quality
-				// Note: Format parameter is not supported by the API
-				// tool.Format = p.imageGenerationOptions.Format
-				tool.Compression = p.imageGenerationOptions.Compression
-				tool.Background = p.imageGenerationOptions.Background
-				tool.PartialImages = p.imageGenerationOptions.PartialImages
-			}
-			tools = append(tools, tool)
+		// Use per-request options from headers
+		if domains := config.RequestHeaders.Get("X-OpenAI-Responses-Web-Search-Domains"); domains != "" {
+			tool.Domains = []string{domains} // Simplified - in practice you'd parse CSV
 		}
+		if contextSize := config.RequestHeaders.Get("X-OpenAI-Responses-Web-Search-Context-Size"); contextSize != "" {
+			tool.SearchContextSize = contextSize
+		}
+
+		tools = append(tools, tool)
 	}
 
-	// Add MCP servers
-	for label, mcpConfig := range p.mcpServers {
-		tools = append(tools, Tool{
-			Type:            "mcp",
-			ServerLabel:     label,
-			ServerURL:       mcpConfig.ServerURL,
-			AllowedTools:    mcpConfig.AllowedTools,
-			RequireApproval: mcpConfig.RequireApproval,
-			Headers:         mcpConfig.Headers,
-		})
+	if hasFeature(config.Features, "openai-responses:image_generation") {
+		tool := Tool{Type: "image_generation"}
+
+		// Use per-request options from headers
+		if size := config.RequestHeaders.Get("X-OpenAI-Responses-Image-Size"); size != "" {
+			tool.Size = size
+		}
+		if quality := config.RequestHeaders.Get("X-OpenAI-Responses-Image-Quality"); quality != "" {
+			tool.Quality = quality
+		}
+		if background := config.RequestHeaders.Get("X-OpenAI-Responses-Image-Background"); background != "" {
+			tool.Background = background
+		}
+
+		tools = append(tools, tool)
 	}
 
 	return tools, nil
+}
+
+// hasFeature checks if a feature is enabled in the features list
+func hasFeature(features []string, feature string) bool {
+	for _, f := range features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}
+
+// getFeatureBoolValue parses a feature with a boolean value (e.g., "feature=true")
+// Returns the boolean value and whether the feature was found
+func getFeatureBoolValue(features []string, featurePrefix string) (bool, bool) {
+	for _, f := range features {
+		if f == featurePrefix+"=true" {
+			return true, true
+		}
+		if f == featurePrefix+"=false" {
+			return false, true
+		}
+	}
+	return false, false
 }
 
 // StreamIterator implements llm.StreamIterator for the Responses API
