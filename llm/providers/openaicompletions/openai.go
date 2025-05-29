@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
@@ -41,9 +42,12 @@ const (
 
 var (
 	DefaultModel              = "gpt-4o"
-	DefaultMessagesEndpoint   = "https://api.openai.com/v1/chat/completions"
+	DefaultEndpoint           = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens          = 4096
 	DefaultSystemRole         = "developer"
+	DefaultClient             = &http.Client{Timeout: 300 * time.Second}
+	DefaultMaxRetries         = 6
+	DefaultRetryBaseWait      = 2 * time.Second
 	ModelSystemPromptBehavior = map[string]SystemPromptBehavior{
 		"o1-mini": SystemPromptBehaviorOmit,
 	}
@@ -55,36 +59,39 @@ var (
 var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
-	apiKey     string
-	endpoint   string
-	model      string
-	systemRole string
-	corePrompt string
-	maxTokens  int
-	client     *http.Client
+	client        *http.Client
+	apiKey        string
+	endpoint      string
+	model         string
+	maxTokens     int
+	maxRetries    int
+	retryBaseWait time.Duration
+	systemRole    string
 }
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:     os.Getenv("OPENAI_API_KEY"),
-		endpoint:   DefaultMessagesEndpoint,
-		client:     http.DefaultClient,
-		systemRole: DefaultSystemRole,
+		apiKey:        os.Getenv("OPENAI_API_KEY"),
+		endpoint:      DefaultEndpoint,
+		client:        DefaultClient,
+		model:         DefaultModel,
+		maxTokens:     DefaultMaxTokens,
+		maxRetries:    DefaultMaxRetries,
+		retryBaseWait: DefaultRetryBaseWait,
+		systemRole:    DefaultSystemRole,
 	}
 	for _, opt := range opts {
 		opt(p)
-	}
-	if p.model == "" {
-		p.model = DefaultModel
-	}
-	if p.maxTokens == 0 {
-		p.maxTokens = DefaultMaxTokens
 	}
 	return p
 }
 
 func (p *Provider) Name() string {
-	return fmt.Sprintf("openai-%s", p.model)
+	return "openaicompletions"
+}
+
+func (p *Provider) ModelName() string {
+	return p.model
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
@@ -108,7 +115,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	request.Messages = msgs
-	addSystemPrompt(&request, p.GetSystemPrompt(config), p.systemRole)
+	addSystemPrompt(&request, config.SystemPrompt, p.systemRole)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -152,7 +159,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
@@ -243,7 +250,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	request.Messages = msgs
 	request.Stream = true
 	request.StreamOptions = &StreamOptions{IncludeUsage: true}
-	addSystemPrompt(&request, p.GetSystemPrompt(config), p.systemRole)
+	addSystemPrompt(&request, config.SystemPrompt, p.systemRole)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -292,27 +299,12 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			prefillClosingTag: config.PrefillClosingTag,
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
 	}
 	return stream, nil
-}
-
-func (p *Provider) SupportsStreaming() bool {
-	return true
-}
-
-func (p *Provider) GetSystemPrompt(c *llm.Config) string {
-	var parts []string
-	if p.corePrompt != "" {
-		parts = append(parts, p.corePrompt)
-	}
-	if c.SystemPrompt != "" {
-		parts = append(parts, c.SystemPrompt)
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
 func validateMessages(messages []*llm.Message) error {

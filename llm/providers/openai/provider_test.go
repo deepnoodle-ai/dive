@@ -88,8 +88,8 @@ func TestNew(t *testing.T) {
 				assert.Equal(t, DefaultModel, p.model)
 				assert.Equal(t, DefaultEndpoint, p.endpoint)
 				assert.NotNil(t, p.client)
-				assert.Equal(t, 6, p.maxRetries)           // Default retry count
-				assert.Equal(t, 2*time.Second, p.baseWait) // Default base wait
+				assert.Equal(t, 6, p.maxRetries)
+				assert.Equal(t, 2*time.Second, p.retryBaseWait)
 			},
 		},
 		{
@@ -122,7 +122,7 @@ func TestNew(t *testing.T) {
 			},
 			expected: func(t *testing.T, p *Provider) {
 				assert.Equal(t, 3, p.maxRetries)
-				assert.Equal(t, 500*time.Millisecond, p.baseWait)
+				assert.Equal(t, 500*time.Millisecond, p.retryBaseWait)
 			},
 		},
 	}
@@ -138,11 +138,6 @@ func TestNew(t *testing.T) {
 func TestProvider_Name(t *testing.T) {
 	provider := New(WithModel("gpt-4o"))
 	assert.Equal(t, "openai-responses-gpt-4o", provider.Name())
-}
-
-func TestProvider_SupportsStreaming(t *testing.T) {
-	provider := New()
-	assert.True(t, provider.SupportsStreaming())
 }
 
 func TestProvider_buildRequest(t *testing.T) {
@@ -190,9 +185,12 @@ func TestProvider_buildRequest(t *testing.T) {
 			},
 			expected: func(t *testing.T, req *Request) {
 				assert.Len(t, req.Tools, 1)
-				assert.Equal(t, "function", req.Tools[0].Type)
-				assert.Equal(t, "test_tool", req.Tools[0].Function.Name)
-				assert.Equal(t, "A test tool", req.Tools[0].Function.Description)
+				tool := req.Tools[0].(map[string]any)
+				assert.Equal(t, "function", tool["type"])
+				assert.Equal(t, "test_tool", tool["name"])
+				assert.Equal(t, "A test tool", tool["description"])
+				assert.Equal(t, "object", tool["parameters"].(map[string]any)["type"])
+				assert.Equal(t, "string", tool["parameters"].(map[string]any)["properties"].(map[string]any)["param"].(map[string]any)["type"])
 			},
 		},
 	}
@@ -518,67 +516,6 @@ func TestProvider_convertResponse(t *testing.T) {
 			}
 			require.NoError(t, err)
 			tt.expected(t, result)
-		})
-	}
-}
-
-func TestProvider_buildTools(t *testing.T) {
-	tests := []struct {
-		name     string
-		provider *Provider
-		config   *llm.Config
-		expected func(*testing.T, []Tool)
-		wantErr  bool
-	}{
-		{
-			name:     "no tools enabled",
-			provider: New(),
-			config: &llm.Config{
-				Features: []string{},
-			},
-			expected: func(t *testing.T, tools []Tool) {
-				assert.Empty(t, tools)
-			},
-		},
-		{
-			name:     "per-request tool enabling",
-			provider: New(), // Provider has no tools enabled by default
-			config: &llm.Config{
-				Features: []string{
-					FeatureWebSearch,
-					FeatureImageGeneration,
-				},
-			},
-			expected: func(t *testing.T, tools []Tool) {
-				require.Len(t, tools, 2)
-
-				// Find web search tool
-				var webSearchTool *Tool
-				var imageGenTool *Tool
-				for i := range tools {
-					if tools[i].Type == "web_search_preview" {
-						webSearchTool = &tools[i]
-					}
-					if tools[i].Type == "image_generation" {
-						imageGenTool = &tools[i]
-					}
-				}
-
-				require.NotNil(t, webSearchTool, "Expected web search tool to be enabled")
-				require.NotNil(t, imageGenTool, "Expected image generation tool to be enabled")
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tools, err := tt.provider.buildTools(tt.config)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			tt.expected(t, tools)
 		})
 	}
 }

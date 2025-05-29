@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
@@ -20,8 +21,14 @@ import (
 var (
 	DefaultModel         = ModelClaudeSonnet4
 	DefaultEndpoint      = "https://api.anthropic.com/v1/messages"
+	DefaultMaxTokens     = 4096
+	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
+	DefaultMaxRetries    = 6
+	DefaultRetryBaseWait = 2 * time.Second
 	DefaultVersion       = "2023-06-01"
-	DefaultMaxTokens     = 8192
+)
+
+const (
 	FeatureExtendedCache = "extended-cache-ttl-2025-04-11"
 	FeaturePromptCaching = "prompt-caching-2024-07-31"
 	FeatureMCPClient     = "mcp-client-2025-04-04"
@@ -31,35 +38,39 @@ var (
 var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
-	apiKey    string
-	client    *http.Client
-	endpoint  string
-	model     string
-	version   string
-	maxTokens int
+	client        *http.Client
+	apiKey        string
+	endpoint      string
+	model         string
+	maxTokens     int
+	maxRetries    int
+	retryBaseWait time.Duration
+	version       string
 }
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:   os.Getenv("ANTHROPIC_API_KEY"),
-		endpoint: DefaultEndpoint,
-		client:   http.DefaultClient,
-		version:  DefaultVersion,
+		apiKey:        os.Getenv("ANTHROPIC_API_KEY"),
+		endpoint:      DefaultEndpoint,
+		client:        DefaultClient,
+		model:         DefaultModel,
+		maxTokens:     DefaultMaxTokens,
+		maxRetries:    DefaultMaxRetries,
+		retryBaseWait: DefaultRetryBaseWait,
+		version:       DefaultVersion,
 	}
 	for _, opt := range opts {
 		opt(p)
-	}
-	if p.model == "" {
-		p.model = DefaultModel
-	}
-	if p.maxTokens == 0 {
-		p.maxTokens = DefaultMaxTokens
 	}
 	return p
 }
 
 func (p *Provider) Name() string {
-	return fmt.Sprintf("anthropic-%s", p.model)
+	return "anthropic"
+}
+
+func (p *Provider) ModelName() string {
+	return p.model
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
@@ -121,7 +132,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
@@ -229,16 +240,12 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			prefillClosingTag: config.PrefillClosingTag,
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
 	}
 	return stream, nil
-}
-
-func (p *Provider) SupportsStreaming() bool {
-	return true
 }
 
 func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {

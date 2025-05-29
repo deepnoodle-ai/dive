@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-// Provider creation options (set once when creating the provider)
+// Option is a function that configures the Provider
 type Option func(*Provider)
 
-// Infrastructure options - set once per provider instance
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
 		p.apiKey = apiKey
@@ -33,7 +32,6 @@ func WithModel(model string) Option {
 	}
 }
 
-// Retry configuration
 func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
 		p.maxRetries = maxRetries
@@ -42,6 +40,6 @@ func WithMaxRetries(maxRetries int) Option {
 
 func WithBaseWait(baseWait time.Duration) Option {
 	return func(p *Provider) {
-		p.baseWait = baseWait
+		p.retryBaseWait = baseWait
 	}
 }

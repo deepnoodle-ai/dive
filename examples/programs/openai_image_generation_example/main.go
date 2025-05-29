@@ -163,11 +163,10 @@ func main() {
 
 	// Example 6: Streaming image generation (simplified)
 	fmt.Println("=== Example 6: Streaming image generation ===")
-	partialImagesCount := 2
 	streamImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
 		Size:          "1024x1024",
 		Quality:       "high",
-		PartialImages: &partialImagesCount, // Get 2 partial images during generation
+		PartialImages: 2,
 	})
 
 	stream, err := provider.Stream(ctx,

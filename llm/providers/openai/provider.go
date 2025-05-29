@@ -18,51 +18,48 @@ import (
 )
 
 var (
-	DefaultModel    = "gpt-4o"
-	DefaultEndpoint = "https://api.openai.com/v1/responses"
-)
-
-// Feature flag constants for better maintainability
-const (
-	FeatureStore           = "openai-responses:store"
-	FeatureBackground      = "openai-responses:background"
-	FeatureWebSearch       = "openai-responses:web_search"
-	FeatureImageGeneration = "openai-responses:image_generation"
+	DefaultModel         = "gpt-4o"
+	DefaultEndpoint      = "https://api.openai.com/v1/responses"
+	DefaultMaxTokens     = 4096
+	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
+	DefaultMaxRetries    = 6
+	DefaultRetryBaseWait = 2 * time.Second
 )
 
 var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
-	apiKey   string
-	endpoint string
-	model    string
-	client   *http.Client
-	// Retry configuration
-	maxRetries int
-	baseWait   time.Duration
+	client        *http.Client
+	apiKey        string
+	endpoint      string
+	model         string
+	maxTokens     int
+	maxRetries    int
+	retryBaseWait time.Duration
 }
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:   os.Getenv("OPENAI_API_KEY"),
-		endpoint: DefaultEndpoint,
-		client: &http.Client{
-			Timeout: 30 * time.Second, // Add reasonable timeout
-		},
-		maxRetries: 6,               // Default to 6 retries as before
-		baseWait:   2 * time.Second, // Default base wait time
+		apiKey:        os.Getenv("OPENAI_API_KEY"),
+		endpoint:      DefaultEndpoint,
+		client:        DefaultClient,
+		model:         DefaultModel,
+		maxTokens:     DefaultMaxTokens,
+		maxRetries:    DefaultMaxRetries,
+		retryBaseWait: DefaultRetryBaseWait,
 	}
 	for _, opt := range opts {
 		opt(p)
-	}
-	if p.model == "" {
-		p.model = DefaultModel
 	}
 	return p
 }
 
 func (p *Provider) Name() string {
-	return "openai-responses-" + p.model
+	return "openai"
+}
+
+func (p *Provider) ModelName() string {
+	return p.model
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
@@ -73,12 +70,10 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
-
 	response, err := p.makeRequest(ctx, request, config)
 	if err != nil {
 		return nil, err
 	}
-
 	return p.convertResponse(response)
 }
 
@@ -91,12 +86,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 	request.Stream = true
-
 	return p.makeStreamRequest(ctx, request, config)
-}
-
-func (p *Provider) SupportsStreaming() bool {
-	return true
 }
 
 // buildRequest converts llm.Config to Responses API request format
@@ -106,17 +96,22 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 		Temperature: config.Temperature,
 	}
 
-	// Handle MaxTokens
 	if config.MaxTokens != nil && *config.MaxTokens > 0 {
 		maxTokens := *config.MaxTokens
 		request.MaxOutputTokens = &maxTokens
+	} else if p.maxTokens > 0 {
+		request.MaxOutputTokens = &p.maxTokens
 	}
 
 	// Handle reasoning effort (for o-series models)
-	if config.ReasoningEffort != "" {
+	if config.ReasoningEffort != "" && strings.HasPrefix(p.model, "o-") {
 		request.Reasoning = &ReasoningConfig{
 			Effort: &config.ReasoningEffort,
 		}
+	}
+
+	if config.ParallelToolCalls != nil {
+		request.ParallelToolCalls = config.ParallelToolCalls
 	}
 
 	// Handle tool choice
@@ -140,11 +135,6 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 		}
 	}
 
-	// Handle parallel tool calls
-	if config.ParallelToolCalls != nil {
-		request.ParallelToolCalls = config.ParallelToolCalls
-	}
-
 	// Handle JSON schema output format
 	if jsonSchema := config.RequestHeaders.Get("X-OpenAI-Responses-JSON-Schema"); jsonSchema != "" {
 		var schema interface{}
@@ -158,13 +148,6 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 		}
 	}
 
-	// Handle metadata from provider options
-	if config.ProviderOptions != nil {
-		if metadata, ok := config.ProviderOptions["metadata"].(map[string]string); ok {
-			request.Metadata = metadata
-		}
-	}
-
 	// Convert messages to input format
 	if len(config.Messages) > 0 {
 		input, err := p.convertMessagesToInput(config.Messages, config)
@@ -173,83 +156,62 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 		}
 		request.Input = input
 	} else {
-		// Ensure Input is not nil - provide empty string as default when only tools are used
 		request.Input = ""
 	}
 
-	// Add built-in tools
-	tools, err := p.buildTools(config)
-	if err != nil {
-		return nil, err
-	}
-	request.Tools = tools
-
-	// Add custom tools (check if they implement ToolConfiguration interface)
-	for _, tool := range config.Tools {
-		// Check if this tool implements ToolConfiguration for provider-specific handling
-		if toolConfig, ok := tool.(llm.ToolConfiguration); ok {
-			// Get provider-specific configuration
-			providerConfig := toolConfig.ToolConfiguration("openai-responses")
-
-			// Convert the configuration map to our Tool struct
-			toolDef := Tool{}
-
-			// Use JSON marshaling/unmarshaling for easy conversion
-			configBytes, err := json.Marshal(providerConfig)
-			if err != nil {
-				return nil, fmt.Errorf("error marshaling tool configuration: %w", err)
+	if len(config.Tools) > 0 {
+		var tools []any
+		for _, tool := range config.Tools {
+			// Handle tools that explicitly provide a configuration
+			if toolWithConfig, ok := tool.(llm.ToolConfiguration); ok {
+				toolConfig := toolWithConfig.ToolConfiguration(p.Name())
+				// nil means no configuration is specified and to use the default
+				if toolConfig != nil {
+					tools = append(tools, toolConfig)
+					continue
+				}
 			}
-
-			if err := json.Unmarshal(configBytes, &toolDef); err != nil {
-				return nil, fmt.Errorf("error unmarshaling tool configuration: %w", err)
-			}
-
-			request.Tools = append(request.Tools, toolDef)
-		} else {
-			// Handle as regular function tool
-			request.Tools = append(request.Tools, Tool{
-				Type: "function",
-				Function: &FunctionTool{
-					Name:        tool.Name(),
-					Description: tool.Description(),
-					Parameters:  tool.Schema(),
-				},
+			// Handle tools with the default configuration behavior
+			tools = append(tools, map[string]any{
+				"name":        tool.Name(),
+				"parameters":  tool.Schema(),
+				"strict":      true,
+				"type":        "function",
+				"description": tool.Description(),
 			})
 		}
+		request.Tools = tools
 	}
 
-	// Add MCP servers from llm.Config (request-level configuration)
 	for _, mcpServer := range config.MCPServers {
-		tool := Tool{
-			Type:        "mcp",
-			ServerLabel: mcpServer.Name,
-			ServerURL:   mcpServer.URL,
+		tool := map[string]any{
+			"type":         "mcp",
+			"server_label": mcpServer.Name,
+			"server_url":   mcpServer.URL,
 		}
-
-		// Handle tool configuration
+		headers := map[string]string{}
 		if mcpServer.ToolConfiguration != nil {
-			tool.AllowedTools = mcpServer.ToolConfiguration.AllowedTools
+			tool["allowed_tools"] = mcpServer.ToolConfiguration.AllowedTools
 		}
-
-		// Handle authorization
 		if mcpServer.AuthorizationToken != "" {
-			if tool.Headers == nil {
-				tool.Headers = make(map[string]string)
-			}
-			tool.Headers["Authorization"] = "Bearer " + mcpServer.AuthorizationToken
+			headers["Authorization"] = "Bearer " + mcpServer.AuthorizationToken
 		}
-
-		// Handle approval requirements - support OpenAI's full approval modes
+		if len(mcpServer.Headers) > 0 {
+			for key, value := range mcpServer.Headers {
+				headers[key] = value
+			}
+		}
+		if len(headers) > 0 {
+			tool["headers"] = headers
+		}
 		if mcpServer.ApprovalRequirement != nil {
-			tool.RequireApproval = mcpServer.ApprovalRequirement
+			tool["require_approval"] = mcpServer.ApprovalRequirement
 		} else {
 			// Default to requiring approval for security if not specified
-			tool.RequireApproval = "always"
+			tool["require_approval"] = "always"
 		}
-
 		request.Tools = append(request.Tools, tool)
 	}
-
 	return request, nil
 }
 
@@ -301,20 +263,17 @@ func (p *Provider) makeRequest(ctx context.Context, request *Request, config *ll
 					}
 				}
 			}
-
-			// Use shared provider error type with proper retry logic
 			return providers.NewError(statusCode, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.baseWait))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
 	}
-
 	return &result, nil
 }
 
@@ -375,7 +334,7 @@ func (p *Provider) makeStreamRequest(ctx context.Context, request *Request, conf
 			reader: bufio.NewReader(resp.Body),
 		}
 		return nil
-	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.baseWait))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
@@ -589,45 +548,6 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message, config *llm.C
 	return inputMessages, nil
 }
 
-// buildTools builds the tools array for the request using per-request configuration
-func (p *Provider) buildTools(config *llm.Config) ([]Tool, error) {
-	var tools []Tool
-
-	// Build tools based on per-request features
-	if hasFeature(config.Features, FeatureWebSearch) {
-		tool := Tool{Type: "web_search_preview"}
-
-		// Use per-request options from headers
-		if domains := config.RequestHeaders.Get("X-OpenAI-Responses-Web-Search-Domains"); domains != "" {
-			tool.Domains = []string{domains} // Simplified - in practice you'd parse CSV
-		}
-		if contextSize := config.RequestHeaders.Get("X-OpenAI-Responses-Web-Search-Context-Size"); contextSize != "" {
-			tool.SearchContextSize = contextSize
-		}
-
-		tools = append(tools, tool)
-	}
-
-	if hasFeature(config.Features, FeatureImageGeneration) {
-		tool := Tool{Type: "image_generation"}
-
-		// Use per-request options from headers
-		if size := config.RequestHeaders.Get("X-OpenAI-Responses-Image-Size"); size != "" {
-			tool.Size = size
-		}
-		if quality := config.RequestHeaders.Get("X-OpenAI-Responses-Image-Quality"); quality != "" {
-			tool.Quality = quality
-		}
-		if background := config.RequestHeaders.Get("X-OpenAI-Responses-Image-Background"); background != "" {
-			tool.Background = background
-		}
-
-		tools = append(tools, tool)
-	}
-
-	return tools, nil
-}
-
 // hasFeature checks if a feature is enabled in the features list
 func hasFeature(features []string, feature string) bool {
 	for _, f := range features {
@@ -638,36 +558,19 @@ func hasFeature(features []string, feature string) bool {
 	return false
 }
 
-// getFeatureBoolValue parses a feature with a boolean value (e.g., "feature=true")
-// Returns the boolean value and whether the feature was found
-func getFeatureBoolValue(features []string, featurePrefix string) (bool, bool) {
-	for _, f := range features {
-		if f == featurePrefix+"=true" {
-			return true, true
-		}
-		if f == featurePrefix+"=false" {
-			return false, true
-		}
-	}
-	return false, false
-}
-
 // StreamIterator implements llm.StreamIterator for the Responses API
 type StreamIterator struct {
-	reader       *bufio.Reader
-	body         io.ReadCloser
-	err          error
-	currentEvent *llm.Event
-	eventCount   int
-	// Track previous state for delta detection
+	reader            *bufio.Reader
+	body              io.ReadCloser
+	err               error
+	currentEvent      *llm.Event
+	eventCount        int
 	previousText      string
 	hasStartedContent bool
 	hasEmittedStop    bool
-	// Track content block indices
-	nextContentIndex int
-	textContentIndex int
-	// Event queue to handle multiple events from a single stream chunk
-	eventQueue []*llm.Event
+	nextContentIndex  int
+	textContentIndex  int
+	eventQueue        []*llm.Event
 }
 
 // Next advances to the next event in the stream

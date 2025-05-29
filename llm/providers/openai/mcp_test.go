@@ -34,20 +34,21 @@ func TestMCPIntegration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Check that MCP server was added to tools
-		var mcpTool *Tool
+		var mcpTool map[string]any
 		for _, tool := range request.Tools {
-			if tool.Type == "mcp" && tool.ServerLabel == "test-server" {
-				mcpTool = &tool
+			t := tool.(map[string]any)
+			if t["type"] == "mcp" && t["server_label"] == "test-server" {
+				mcpTool = t
 				break
 			}
 		}
 
 		require.NotNil(t, mcpTool, "MCP tool should be present")
-		assert.Equal(t, "test-server", mcpTool.ServerLabel)
-		assert.Equal(t, "https://example.com/mcp", mcpTool.ServerURL)
-		assert.Equal(t, []string{"query", "search"}, mcpTool.AllowedTools)
-		assert.Equal(t, "always", mcpTool.RequireApproval) // Default value
-		assert.Equal(t, "Bearer test-token", mcpTool.Headers["Authorization"])
+		assert.Equal(t, "test-server", mcpTool["server_label"])
+		assert.Equal(t, "https://example.com/mcp", mcpTool["server_url"])
+		assert.Equal(t, []string{"query", "search"}, mcpTool["allowed_tools"])
+		assert.Equal(t, "always", mcpTool["require_approval"]) // Default value
+		assert.Equal(t, "Bearer test-token", mcpTool["headers"].(map[string]string)["Authorization"])
 	})
 
 	t.Run("MCP approval response handling", func(t *testing.T) {

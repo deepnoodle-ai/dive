@@ -19,7 +19,7 @@ type Request struct {
 	Temperature        *float64          `json:"temperature,omitempty"`
 	Text               *TextConfig       `json:"text,omitempty"`
 	ToolChoice         interface{}       `json:"tool_choice,omitempty"`
-	Tools              []Tool            `json:"tools,omitempty"`
+	Tools              []any             `json:"tools,omitempty"`
 }
 
 // ReasoningConfig for o-series models
@@ -80,21 +80,36 @@ type Tool struct {
 	PartialImages *int   `json:"partial_images,omitempty"`
 }
 
-// FunctionTool represents a custom function tool
+// FunctionTool defines a function the model can choose to call
 type FunctionTool struct {
+	Type        string        `json:"type"` // "function"
 	Name        string        `json:"name"`
-	Description string        `json:"description"`
 	Parameters  schema.Schema `json:"parameters"`
-	Strict      bool          `json:"strict,omitempty"`
+	Strict      bool          `json:"strict"`
+	Description string        `json:"description,omitempty"`
+}
+
+// FileSearchTool searches for relevant content from uploaded files
+type FileSearchTool struct {
+	Type           string   `json:"type"` // "file_search"
+	VectorStoreIDs []string `json:"vector_store_ids"`
+	MaxNumResults  int      `json:"max_num_results,omitempty"`
+}
+
+// WebSearchPreviewTool searches the web for relevant results to use in a response
+type WebSearchPreviewTool struct {
+	Type              string        `json:"type"`                          // "web_search_preview" or "web_search_preview_2025_03_11"
+	SearchContextSize string        `json:"search_context_size,omitempty"` // "low", "medium", or "high"
+	UserLocation      *UserLocation `json:"user_location,omitempty"`
 }
 
 // UserLocation represents user location for web search
 type UserLocation struct {
 	Type     string `json:"type"`
-	City     string `json:"city,omitempty"`
-	Country  string `json:"country,omitempty"`
-	Region   string `json:"region,omitempty"`
-	Timezone string `json:"timezone,omitempty"`
+	City     string `json:"city,omitempty"`     // e.g. "San Francisco"
+	Country  string `json:"country,omitempty"`  // two letter ISO code e.g. "US"
+	Region   string `json:"region,omitempty"`   // e.g. "California"
+	Timezone string `json:"timezone,omitempty"` // e.g. "America/Los_Angeles"
 }
 
 // Response represents the OpenAI Responses API response structure
@@ -116,7 +131,7 @@ type Response struct {
 	Temperature        float64            `json:"temperature"`
 	Text               *TextConfig        `json:"text,omitempty"`
 	ToolChoice         interface{}        `json:"tool_choice,omitempty"`
-	Tools              []Tool             `json:"tools"`
+	Tools              []any              `json:"tools"`
 	TopP               float64            `json:"top_p"`
 	Truncation         string             `json:"truncation"`
 	Usage              *Usage             `json:"usage,omitempty"`

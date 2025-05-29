@@ -22,21 +22,25 @@ var (
 
 // ImageGenerationToolOptions are the options used to configure an ImageGenerationTool.
 type ImageGenerationToolOptions struct {
-	Size          string // "1024x1024", "1024x1536", etc. or "auto"
-	Quality       string // "low", "medium", "high", or "auto"
-	Background    string // "transparent", "opaque", or "auto"
-	Compression   *int   // 0-100 for JPEG/WebP formats
-	PartialImages *int   // 1-3 for streaming partial images
+	Model             string // "gpt-image-1"
+	Size              string // "1024x1024", "1024x1536", etc. or "auto"
+	Quality           string // "low", "medium", "high", or "auto"
+	Background        string // "transparent", "opaque", or "auto"
+	OutputCompression *int   // 0-100 for JPEG/WebP formats
+	OutputFormat      string // "jpeg", "webp", or "png"
+	PartialImages     int    // 0-3 for streaming partial images
 }
 
 // NewImageGenerationTool creates a new ImageGenerationTool with the given options.
 func NewImageGenerationTool(opts ImageGenerationToolOptions) *ImageGenerationTool {
 	return &ImageGenerationTool{
-		size:          opts.Size,
-		quality:       opts.Quality,
-		background:    opts.Background,
-		compression:   opts.Compression,
-		partialImages: opts.PartialImages,
+		model:             opts.Model,
+		size:              opts.Size,
+		quality:           opts.Quality,
+		background:        opts.Background,
+		partialImages:     opts.PartialImages,
+		outputCompression: opts.OutputCompression,
+		outputFormat:      opts.OutputFormat,
 	}
 }
 
@@ -44,11 +48,13 @@ func NewImageGenerationTool(opts ImageGenerationToolOptions) *ImageGenerationToo
 // provided by OpenAI as a server-side tool. Learn more:
 // https://platform.openai.com/docs/guides/image-generation
 type ImageGenerationTool struct {
-	size          string
-	quality       string
-	background    string
-	compression   *int
-	partialImages *int
+	model             string
+	size              string
+	quality           string
+	background        string
+	outputCompression *int
+	outputFormat      string
+	partialImages     int
 }
 
 func (t *ImageGenerationTool) Name() string {
@@ -67,7 +73,9 @@ func (t *ImageGenerationTool) ToolConfiguration(providerName string) map[string]
 	config := map[string]any{
 		"type": "image_generation",
 	}
-
+	if t.model != "" {
+		config["model"] = t.model
+	}
 	if t.size != "" {
 		config["size"] = t.size
 	}
@@ -77,12 +85,14 @@ func (t *ImageGenerationTool) ToolConfiguration(providerName string) map[string]
 	if t.background != "" {
 		config["background"] = t.background
 	}
-	if t.compression != nil {
-		config["compression"] = *t.compression
+	if t.outputCompression != nil {
+		config["compression"] = *t.outputCompression
 	}
-	if t.partialImages != nil {
-		config["partial_images"] = *t.partialImages
+	if t.partialImages > 0 {
+		config["partial_images"] = t.partialImages
 	}
-
+	if t.outputFormat != "" {
+		config["format"] = t.outputFormat
+	}
 	return config
 }

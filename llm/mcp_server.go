@@ -26,6 +26,7 @@ type MCPServerConfig struct {
 	Name               string                `json:"name,omitempty"`
 	AuthorizationToken string                `json:"authorization_token,omitempty"`
 	ToolConfiguration  *MCPToolConfiguration `json:"tool_configuration,omitempty"`
+	Headers            map[string]string     `json:"headers,omitempty"`
 
 	// OpenAI-specific approval requirement options
 	// Can be "always", "never", or a complex object specifying tool-specific approvals

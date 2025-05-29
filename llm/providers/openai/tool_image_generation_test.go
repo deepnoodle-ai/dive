@@ -26,6 +26,7 @@ func TestImageGenerationTool_Basic(t *testing.T) {
 }
 
 func TestImageGenerationTool_ToolConfiguration(t *testing.T) {
+	compression := 80
 	tests := []struct {
 		name     string
 		opts     ImageGenerationToolOptions
@@ -41,18 +42,18 @@ func TestImageGenerationTool_ToolConfiguration(t *testing.T) {
 		{
 			name: "full configuration",
 			opts: ImageGenerationToolOptions{
-				Size:          "1024x1024",
-				Quality:       "high",
-				Background:    "auto",
-				Compression:   &[]int{80}[0],
-				PartialImages: &[]int{2}[0],
+				Size:              "1024x1024",
+				Quality:           "high",
+				Background:        "auto",
+				OutputCompression: &compression,
+				PartialImages:     2,
 			},
 			expected: map[string]any{
 				"type":           "image_generation",
 				"size":           "1024x1024",
 				"quality":        "high",
 				"background":     "auto",
-				"compression":    80,
+				"compression":    compression,
 				"partial_images": 2,
 			},
 		},

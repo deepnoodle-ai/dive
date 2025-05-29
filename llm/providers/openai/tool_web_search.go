@@ -62,7 +62,6 @@ func (t *WebSearchTool) ToolConfiguration(providerName string) map[string]any {
 	config := map[string]any{
 		"type": "web_search_preview",
 	}
-
 	if len(t.domains) > 0 {
 		config["domains"] = t.domains
 	}
@@ -72,6 +71,5 @@ func (t *WebSearchTool) ToolConfiguration(providerName string) map[string]any {
 	if t.userLocation != nil {
 		config["user_location"] = t.userLocation
 	}
-
 	return config
 }
