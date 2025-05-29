@@ -20,7 +20,7 @@ func TestProvider_ImplementsInterfaces(t *testing.T) {
 func TestProvider_Name(t *testing.T) {
 	provider := New()
 	name := provider.Name()
-	expected := "ollama-llama3.2"
+	expected := "ollama-llama3.2:3b"
 	require.Equal(t, expected, name)
 }
 
