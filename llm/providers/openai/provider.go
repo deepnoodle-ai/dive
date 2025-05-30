@@ -14,7 +14,6 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
 	"github.com/diveagents/dive/retry"
-	"github.com/diveagents/dive/schema"
 )
 
 var (
@@ -62,10 +61,14 @@ func (p *Provider) ModelName() string {
 	return p.model
 }
 
-func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+func (p *Provider) buildConfig(opts ...llm.Option) *llm.Config {
 	config := &llm.Config{}
 	config.Apply(opts...)
+	return config
+}
 
+func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+	config := p.buildConfig(opts...)
 	request, err := p.buildRequest(config)
 	if err != nil {
 		return nil, err
@@ -78,9 +81,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 }
 
 func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
-	config := &llm.Config{}
-	config.Apply(opts...)
-
+	config := p.buildConfig(opts...)
 	request, err := p.buildRequest(config)
 	if err != nil {
 		return nil, err
@@ -337,7 +338,7 @@ func (p *Provider) makeStreamRequest(ctx context.Context, request *Request, conf
 			// Use shared provider error type with proper retry logic
 			return providers.NewError(statusCode, string(body))
 		}
-		stream = NewStreamIterator(resp.Body)
+		stream = NewStreamIterator(resp.Body, config.SSECallback)
 		return nil
 	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
@@ -541,49 +542,11 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) ([]*InputMess
 
 // NewStreamIterator creates a new StreamIterator for a Responses API response
 // body. Typically this is not called directly, but rather by the provider.
-func NewStreamIterator(body io.ReadCloser) *StreamIterator {
-	reader := llm.NewServerSentEventsReader[StreamEvent](body)
+func NewStreamIterator(body io.ReadCloser, callback llm.ServerSentEventsCallback) *StreamIterator {
+	reader := llm.NewServerSentEventsReader[StreamEvent](body).
+		WithSSECallback(callback)
 	return &StreamIterator{
 		body:   body,
 		reader: reader,
 	}
-}
-
-// ensureSchemaAdditionalPropertiesFalse ensures that the schema has additionalProperties set to false for OpenAI compatibility
-func (p *Provider) ensureSchemaAdditionalPropertiesFalse(s schema.Schema) schema.Schema {
-	// Set additionalProperties to false if not already set
-	if s.AdditionalProperties == nil {
-		falseValue := false
-		s.AdditionalProperties = &falseValue
-	}
-
-	// Recursively apply to nested properties
-	if s.Properties != nil {
-		for key, prop := range s.Properties {
-			s.Properties[key] = p.ensurePropertyAdditionalPropertiesFalse(prop)
-		}
-	}
-
-	return s
-}
-
-// ensurePropertyAdditionalPropertiesFalse ensures that property schemas have additionalProperties set to false
-func (p *Provider) ensurePropertyAdditionalPropertiesFalse(prop *schema.Property) *schema.Property {
-	if prop == nil {
-		return prop
-	}
-
-	// Recursively apply to nested properties
-	if prop.Properties != nil {
-		for key, nestedProp := range prop.Properties {
-			prop.Properties[key] = p.ensurePropertyAdditionalPropertiesFalse(nestedProp)
-		}
-	}
-
-	// Apply to array items
-	if prop.Items != nil {
-		prop.Items = p.ensurePropertyAdditionalPropertiesFalse(prop.Items)
-	}
-
-	return prop
 }

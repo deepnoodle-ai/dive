@@ -8,9 +8,10 @@ import (
 )
 
 type ServerSentEventsReader[T any] struct {
-	body   io.ReadCloser
-	reader *bufio.Reader
-	err    error
+	body        io.ReadCloser
+	reader      *bufio.Reader
+	err         error
+	sseCallback ServerSentEventsCallback
 }
 
 func NewServerSentEventsReader[T any](stream io.ReadCloser) *ServerSentEventsReader[T] {
@@ -18,6 +19,11 @@ func NewServerSentEventsReader[T any](stream io.ReadCloser) *ServerSentEventsRea
 		body:   stream,
 		reader: bufio.NewReader(stream),
 	}
+}
+
+func (s *ServerSentEventsReader[T]) WithSSECallback(callback ServerSentEventsCallback) *ServerSentEventsReader[T] {
+	s.sseCallback = callback
+	return s
 }
 
 func (s *ServerSentEventsReader[T]) Err() error {
@@ -34,6 +40,14 @@ func (s *ServerSentEventsReader[T]) Next() (T, bool) {
 				return zero, false
 			}
 			return zero, false
+		}
+
+		// Fire callback if set
+		if s.sseCallback != nil {
+			if err := s.sseCallback(string(line)); err != nil {
+				s.err = err
+				return zero, false
+			}
 		}
 
 		// Skip empty lines

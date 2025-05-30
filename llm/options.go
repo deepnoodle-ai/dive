@@ -19,6 +19,10 @@ func (c CacheControlType) String() string {
 	return string(c)
 }
 
+// ServerSentEventsCallback is a callback that is called for each line of the
+// server-sent events stream.
+type ServerSentEventsCallback func(line string) error
+
 // WebSearchConfig configures web search behavior for providers that support it
 type WebSearchConfig struct {
 	Enabled      bool          `json:"enabled"`
@@ -53,34 +57,35 @@ type Option func(*Config)
 // Config is used to configure LLM calls. Not all providers support all options.
 // If a provider doesn't support a given option, it will be ignored.
 type Config struct {
-	Model              string                 `json:"model,omitempty"`
-	SystemPrompt       string                 `json:"system_prompt,omitempty"`
-	Endpoint           string                 `json:"endpoint,omitempty"`
-	APIKey             string                 `json:"api_key,omitempty"`
-	Prefill            string                 `json:"prefill,omitempty"`
-	PrefillClosingTag  string                 `json:"prefill_closing_tag,omitempty"`
-	MaxTokens          *int                   `json:"max_tokens,omitempty"`
-	Temperature        *float64               `json:"temperature,omitempty"`
-	PresencePenalty    *float64               `json:"presence_penalty,omitempty"`
-	FrequencyPenalty   *float64               `json:"frequency_penalty,omitempty"`
-	ReasoningBudget    *int                   `json:"reasoning_budget,omitempty"`
-	ReasoningEffort    string                 `json:"reasoning_effort,omitempty"`
-	Tools              []Tool                 `json:"tools,omitempty"`
-	ToolChoice         ToolChoice             `json:"tool_choice,omitempty"`
-	ToolChoiceName     string                 `json:"tool_choice_name,omitempty"`
-	ParallelToolCalls  *bool                  `json:"parallel_tool_calls,omitempty"`
-	Features           []string               `json:"features,omitempty"`
-	RequestHeaders     http.Header            `json:"request_headers,omitempty"`
-	MCPServers         []MCPServerConfig      `json:"mcp_servers,omitempty"`
-	Caching            *bool                  `json:"caching,omitempty"`
-	JSONSchema         schema.Schema          `json:"json_schema,omitempty"`
-	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
-	ServiceTier        string                 `json:"service_tier,omitempty"`
-	ProviderOptions    map[string]interface{} `json:"provider_options,omitempty"`
-	Hooks              Hooks                  `json:"-"`
-	Client             *http.Client           `json:"-"`
-	Logger             slogger.Logger         `json:"-"`
-	Messages           Messages               `json:"-"`
+	Model              string                   `json:"model,omitempty"`
+	SystemPrompt       string                   `json:"system_prompt,omitempty"`
+	Endpoint           string                   `json:"endpoint,omitempty"`
+	APIKey             string                   `json:"api_key,omitempty"`
+	Prefill            string                   `json:"prefill,omitempty"`
+	PrefillClosingTag  string                   `json:"prefill_closing_tag,omitempty"`
+	MaxTokens          *int                     `json:"max_tokens,omitempty"`
+	Temperature        *float64                 `json:"temperature,omitempty"`
+	PresencePenalty    *float64                 `json:"presence_penalty,omitempty"`
+	FrequencyPenalty   *float64                 `json:"frequency_penalty,omitempty"`
+	ReasoningBudget    *int                     `json:"reasoning_budget,omitempty"`
+	ReasoningEffort    string                   `json:"reasoning_effort,omitempty"`
+	Tools              []Tool                   `json:"tools,omitempty"`
+	ToolChoice         ToolChoice               `json:"tool_choice,omitempty"`
+	ToolChoiceName     string                   `json:"tool_choice_name,omitempty"`
+	ParallelToolCalls  *bool                    `json:"parallel_tool_calls,omitempty"`
+	Features           []string                 `json:"features,omitempty"`
+	RequestHeaders     http.Header              `json:"request_headers,omitempty"`
+	MCPServers         []MCPServerConfig        `json:"mcp_servers,omitempty"`
+	Caching            *bool                    `json:"caching,omitempty"`
+	JSONSchema         schema.Schema            `json:"json_schema,omitempty"`
+	PreviousResponseID string                   `json:"previous_response_id,omitempty"`
+	ServiceTier        string                   `json:"service_tier,omitempty"`
+	ProviderOptions    map[string]interface{}   `json:"provider_options,omitempty"`
+	Hooks              Hooks                    `json:"-"`
+	Client             *http.Client             `json:"-"`
+	Logger             slogger.Logger           `json:"-"`
+	Messages           Messages                 `json:"-"`
+	SSECallback        ServerSentEventsCallback `json:"-"`
 }
 
 // Apply applies the given options to the config.
@@ -325,5 +330,12 @@ func WithProviderOptions(options map[string]interface{}) Option {
 		for k, v := range options {
 			config.ProviderOptions[k] = v
 		}
+	}
+}
+
+// WithServerSentEventsCallback sets the callback for the server-sent events stream.
+func WithServerSentEventsCallback(callback ServerSentEventsCallback) Option {
+	return func(config *Config) {
+		config.SSECallback = callback
 	}
 }

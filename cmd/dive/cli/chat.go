@@ -80,8 +80,6 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	return nil
 }
 
-var DefaultChatBackstory = `You are a helpful AI assistant. You aim to be direct, clear, and helpful in your responses.`
-
 func runChat(instructions, agentName string, reasoningBudget int) error {
 	ctx := context.Background()
 
@@ -173,9 +171,6 @@ var chatCmd = &cobra.Command{
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
-		}
-		if systemPrompt == "" {
-			systemPrompt = DefaultChatBackstory
 		}
 
 		agentName, err := cmd.Flags().GetString("agent-name")
