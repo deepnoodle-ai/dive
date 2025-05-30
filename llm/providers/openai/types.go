@@ -7,7 +7,7 @@ import (
 // Request represents the OpenAI Responses API request structure
 type Request struct {
 	Model              string            `json:"model"`
-	Input              interface{}       `json:"input"`
+	Input              []*InputMessage   `json:"input"`
 	Include            []string          `json:"include,omitempty"`
 	Instructions       string            `json:"instructions,omitempty"`
 	MaxOutputTokens    int               `json:"max_output_tokens,omitempty"`

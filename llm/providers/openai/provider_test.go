@@ -137,7 +137,8 @@ func TestNew(t *testing.T) {
 
 func TestProvider_Name(t *testing.T) {
 	provider := New(WithModel("gpt-4o"))
-	assert.Equal(t, "openai-responses-gpt-4o", provider.Name())
+	assert.Equal(t, "openai", provider.Name())
+	assert.Equal(t, "gpt-4o", provider.ModelName())
 }
 
 func TestProvider_buildRequest(t *testing.T) {
@@ -160,7 +161,12 @@ func TestProvider_buildRequest(t *testing.T) {
 			expected: func(t *testing.T, req *Request) {
 				assert.Equal(t, "gpt-4o", req.Model)
 				assert.Equal(t, 0.7, *req.Temperature)
-				assert.Equal(t, "Hello, world!", req.Input)
+				assert.Equal(t, []*InputMessage{{
+					Role: "user",
+					Content: []*InputContent{
+						{Type: "input_text", Text: "Hello, world!"},
+					},
+				}}, req.Input)
 			},
 		},
 		{
@@ -189,8 +195,9 @@ func TestProvider_buildRequest(t *testing.T) {
 				assert.Equal(t, "function", tool["type"])
 				assert.Equal(t, "test_tool", tool["name"])
 				assert.Equal(t, "A test tool", tool["description"])
-				assert.Equal(t, "object", tool["parameters"].(map[string]any)["type"])
-				assert.Equal(t, "string", tool["parameters"].(map[string]any)["properties"].(map[string]any)["param"].(map[string]any)["type"])
+				paramSchema := tool["parameters"].(schema.Schema)
+				assert.Equal(t, "object", paramSchema.Type)
+				assert.Equal(t, "string", paramSchema.Properties["param"].Type)
 			},
 		},
 	}
@@ -221,7 +228,14 @@ func TestProvider_convertMessagesToInput(t *testing.T) {
 			messages: []*llm.Message{
 				llm.NewUserTextMessage("Hello"),
 			},
-			expected: "Hello",
+			expected: []*InputMessage{
+				{
+					Role: "user",
+					Content: []*InputContent{
+						{Type: "input_text", Text: "Hello"},
+					},
+				},
+			},
 		},
 		{
 			name: "multiple messages",
@@ -229,17 +243,17 @@ func TestProvider_convertMessagesToInput(t *testing.T) {
 				llm.NewUserTextMessage("Hello"),
 				llm.NewAssistantTextMessage("Hi there"),
 			},
-			expected: []InputMessage{
+			expected: []*InputMessage{
 				{
 					Role: "user",
 					Content: []*InputContent{
-						&InputContent{Type: "input_text", Text: "Hello"},
+						{Type: "input_text", Text: "Hello"},
 					},
 				},
 				{
 					Role: "assistant",
 					Content: []*InputContent{
-						&InputContent{Type: "input_text", Text: "Hi there"},
+						{Type: "input_text", Text: "Hi there"},
 					},
 				},
 			},

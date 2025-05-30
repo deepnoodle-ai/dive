@@ -156,15 +156,14 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 	}
 
 	// Convert messages to input format
-	if len(config.Messages) > 0 {
-		input, err := p.convertMessagesToInput(config.Messages)
-		if err != nil {
-			return nil, err
-		}
-		request.Input = input
-	} else {
-		request.Input = ""
+	if len(config.Messages) == 0 {
+		return nil, fmt.Errorf("no messages provided")
 	}
+	input, err := p.convertMessagesToInput(config.Messages)
+	if err != nil {
+		return nil, err
+	}
+	request.Input = input
 
 	if len(config.Tools) > 0 {
 		var tools []any
