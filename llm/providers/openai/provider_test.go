@@ -253,7 +253,7 @@ func TestProvider_convertMessagesToInput(t *testing.T) {
 				{
 					Role: "assistant",
 					Content: []*InputContent{
-						{Type: "input_text", Text: "Hi there"},
+						{Type: "output_text", Text: "Hi there"},
 					},
 				},
 			},

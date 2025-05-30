@@ -32,6 +32,12 @@ func WithModel(model string) Option {
 	}
 }
 
+func WithMaxTokens(maxTokens int) Option {
+	return func(p *Provider) {
+		p.maxTokens = maxTokens
+	}
+}
+
 func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
 		p.maxRetries = maxRetries

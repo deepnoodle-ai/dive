@@ -478,8 +478,13 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) ([]*InputMess
 						})
 					}
 				} else {
+					// Use the correct content type based on message role
+					contentType := "input_text"
+					if msg.Role == llm.Assistant {
+						contentType = "output_text"
+					}
 					inputMsg.Content = append(inputMsg.Content, &InputContent{
-						Type: "input_text",
+						Type: contentType,
 						Text: c.Text,
 					})
 				}
