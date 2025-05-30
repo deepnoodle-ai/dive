@@ -2,15 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 
 	"github.com/diveagents/dive/llm"
-	openairesponses "github.com/diveagents/dive/llm/providers/openai-responses"
+	"github.com/diveagents/dive/llm/providers/openai"
 )
 
 func main() {
@@ -24,54 +22,30 @@ func main() {
 		log.Fatal("Either -pdf or -file-id must be provided")
 	}
 
-	provider := openairesponses.New()
+	ctx := context.Background()
+	provider := openai.New()
 
-	var messages []*llm.Message
+	var content []llm.Content
 
 	if fileID != "" {
-		// Use existing file ID
-		messages = []*llm.Message{
-			llm.NewUserTextMessage(prompt),
-			llm.NewUserFileIDMessage(fileID),
-		}
+		// Pass existing file ID
+		content = append(content,
+			llm.NewTextContent(prompt),
+			llm.NewDocumentContent(llm.FileID(fileID)),
+		)
 	} else {
-		// Read and encode PDF file
-		file, err := os.Open(pdfPath)
+		// Pass PDF file contents directly
+		data, err := os.ReadFile(pdfPath)
 		if err != nil {
 			log.Fatalf("Error opening PDF file: %v", err)
 		}
-		defer file.Close()
-
-		data, err := io.ReadAll(file)
-		if err != nil {
-			log.Fatalf("Error reading PDF file: %v", err)
-		}
-
-		// Encode to base64 with data URI format
-		base64Data := base64.StdEncoding.EncodeToString(data)
-		fileData := fmt.Sprintf("data:application/pdf;base64,%s", base64Data)
-
-		// Get filename from path
-		filename := pdfPath
-		if lastSlash := len(pdfPath) - 1; lastSlash >= 0 {
-			for i := lastSlash; i >= 0; i-- {
-				if pdfPath[i] == '/' || pdfPath[i] == '\\' {
-					filename = pdfPath[i+1:]
-					break
-				}
-			}
-		}
-
-		messages = []*llm.Message{
-			llm.NewUserTextMessage(prompt),
-			llm.NewUserFileMessage(filename, fileData),
-		}
+		content = append(content,
+			llm.NewTextContent(prompt),
+			llm.NewDocumentContent(llm.RawData("application/pdf", data)),
+		)
 	}
 
-	response, err := provider.Generate(
-		context.Background(),
-		llm.WithMessages(messages...),
-	)
+	response, err := provider.Generate(ctx, llm.WithMessages(llm.NewUserMessage(content...)))
 	if err != nil {
 		log.Fatalf("Error generating response: %v", err)
 	}

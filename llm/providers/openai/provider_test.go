@@ -232,14 +232,14 @@ func TestProvider_convertMessagesToInput(t *testing.T) {
 			expected: []InputMessage{
 				{
 					Role: "user",
-					Content: []InputContent{
-						{Type: "input_text", Text: "Hello"},
+					Content: []*InputContent{
+						&InputContent{Type: "input_text", Text: "Hello"},
 					},
 				},
 				{
 					Role: "assistant",
-					Content: []InputContent{
-						{Type: "input_text", Text: "Hi there"},
+					Content: []*InputContent{
+						&InputContent{Type: "input_text", Text: "Hi there"},
 					},
 				},
 			},
@@ -248,7 +248,7 @@ func TestProvider_convertMessagesToInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := provider.convertMessagesToInput(tt.messages, &llm.Config{})
+			result, err := provider.convertMessagesToInput(tt.messages)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -631,8 +631,6 @@ func mustMarshal(v interface{}) string {
 
 func TestConvertDocumentContentToInput(t *testing.T) {
 	provider := New()
-
-	// Test with base64 data
 	messages := []*llm.Message{
 		{
 			Role: llm.User,
@@ -650,11 +648,8 @@ func TestConvertDocumentContentToInput(t *testing.T) {
 		},
 	}
 
-	input, err := provider.convertMessagesToInput(messages, &llm.Config{})
+	inputMessages, err := provider.convertMessagesToInput(messages)
 	require.NoError(t, err)
-
-	inputMessages, ok := input.([]InputMessage)
-	require.True(t, ok)
 	require.Len(t, inputMessages, 1)
 
 	msg := inputMessages[0]
@@ -674,8 +669,6 @@ func TestConvertDocumentContentToInput(t *testing.T) {
 
 func TestConvertDocumentContentWithFileIDToInput(t *testing.T) {
 	provider := New()
-
-	// Test with file ID
 	messages := []*llm.Message{
 		{
 			Role: llm.User,
@@ -691,12 +684,8 @@ func TestConvertDocumentContentWithFileIDToInput(t *testing.T) {
 			},
 		},
 	}
-
-	input, err := provider.convertMessagesToInput(messages, &llm.Config{})
+	inputMessages, err := provider.convertMessagesToInput(messages)
 	require.NoError(t, err)
-
-	inputMessages, ok := input.([]InputMessage)
-	require.True(t, ok)
 	require.Len(t, inputMessages, 1)
 
 	msg := inputMessages[0]

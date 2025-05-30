@@ -1,17 +1,18 @@
 package llm
 
-// NewMessage creates a new message with the given role and content blocks.
+import "encoding/base64"
+
+// NewMessage creates a message with the given role and content blocks.
 func NewMessage(role Role, content []Content) *Message {
 	return &Message{Role: role, Content: content}
 }
 
-// NewUserMessage creates a new user message with the given content blocks.
+// NewUserMessage creates a user message with the given content blocks.
 func NewUserMessage(content ...Content) *Message {
 	return &Message{Role: User, Content: content}
 }
 
-// NewUserTextMessage creates a new user message with a single text content
-// block.
+// NewUserTextMessage creates a user message with a single text content block.
 func NewUserTextMessage(text string) *Message {
 	return &Message{
 		Role:    User,
@@ -19,12 +20,17 @@ func NewUserTextMessage(text string) *Message {
 	}
 }
 
-// NewAssistantMessage creates a new assistant message with the given content blocks.
+// NewTextContent creates a text content block with the given text.
+func NewTextContent(text string) *TextContent {
+	return &TextContent{Text: text}
+}
+
+// NewAssistantMessage creates an assistant message with the given content.
 func NewAssistantMessage(content ...Content) *Message {
 	return &Message{Role: Assistant, Content: content}
 }
 
-// NewAssistantTextMessage creates a new assistant message with a single text
+// NewAssistantTextMessage creates an assistant message with a single text
 // content block.
 func NewAssistantTextMessage(text string) *Message {
 	return &Message{
@@ -33,7 +39,7 @@ func NewAssistantTextMessage(text string) *Message {
 	}
 }
 
-// NewToolResultMessage creates a new message with the user role and a list of
+// NewToolResultMessage creates a message with the user role and a list of
 // tool outputs. Used to pass the results of tool calls back to an LLM.
 func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 	content := make([]Content, len(outputs))
@@ -47,80 +53,45 @@ func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 	return &Message{Role: User, Content: content}
 }
 
-// NewUserFileMessage creates a new user message with a document content block
-// using base64-encoded file data. This function is deprecated in favor of
-// NewUserDocumentMessage which follows Anthropic's unified document approach.
-func NewUserFileMessage(filename, fileData string) *Message {
-	return &Message{
-		Role: User,
-		Content: []Content{&DocumentContent{
-			Title: filename,
-			Source: &ContentSource{
-				Type:      ContentSourceTypeBase64,
-				MediaType: "application/octet-stream", // Default, should be set appropriately
-				Data:      fileData,
-			},
-		}},
+// NewDocumentContent creates a document content block with the given
+// content source.
+func NewDocumentContent(source *ContentSource) *DocumentContent {
+	return &DocumentContent{Source: source}
+}
+
+// EncodedData creates a content source with the given media type and
+// base64-encoded data.
+func EncodedData(mediaType, base64Data string) *ContentSource {
+	return &ContentSource{
+		Type:      ContentSourceTypeBase64,
+		MediaType: mediaType,
+		Data:      base64Data,
 	}
 }
 
-// NewUserFileIDMessage creates a new user message with a document content block
-// using a file ID from the Files API. This function is deprecated in favor of
-// NewUserDocumentFileIDMessage which follows Anthropic's unified document approach.
-func NewUserFileIDMessage(fileID string) *Message {
-	return &Message{
-		Role: User,
-		Content: []Content{&DocumentContent{
-			Source: &ContentSource{
-				Type:   ContentSourceTypeFile,
-				FileID: fileID,
-			},
-		}},
+// RawData creates a content source with the given media type and raw data.
+// Automatically base64 encodes the provided data.
+func RawData(mediaType string, data []byte) *ContentSource {
+	base64Data := base64.StdEncoding.EncodeToString(data)
+	return &ContentSource{
+		Type:      ContentSourceTypeBase64,
+		MediaType: mediaType,
+		Data:      base64Data,
 	}
 }
 
-// NewUserDocumentMessage creates a new user message with a document content block
-// using base64-encoded document data. This is the preferred method for Anthropic PDF support.
-func NewUserDocumentMessage(title, mediaType, base64Data string) *Message {
-	return &Message{
-		Role: User,
-		Content: []Content{&DocumentContent{
-			Title: title,
-			Source: &ContentSource{
-				Type:      ContentSourceTypeBase64,
-				MediaType: mediaType,
-				Data:      base64Data,
-			},
-		}},
+// ContentURL creates a content source with the given URL.
+func ContentURL(url string) *ContentSource {
+	return &ContentSource{
+		Type: ContentSourceTypeURL,
+		URL:  url,
 	}
 }
 
-// NewUserDocumentURLMessage creates a new user message with a document content block
-// using a URL reference to a PDF.
-func NewUserDocumentURLMessage(title, url string) *Message {
-	return &Message{
-		Role: User,
-		Content: []Content{&DocumentContent{
-			Title: title,
-			Source: &ContentSource{
-				Type: ContentSourceTypeURL,
-				URL:  url,
-			},
-		}},
-	}
-}
-
-// NewUserDocumentFileIDMessage creates a new user message with a document content block
-// using a Files API file ID.
-func NewUserDocumentFileIDMessage(title, fileID string) *Message {
-	return &Message{
-		Role: User,
-		Content: []Content{&DocumentContent{
-			Title: title,
-			Source: &ContentSource{
-				Type:   ContentSourceTypeFile,
-				FileID: fileID,
-			},
-		}},
+// FileID creates a content source with the given file ID.
+func FileID(id string) *ContentSource {
+	return &ContentSource{
+		Type:   ContentSourceTypeFile,
+		FileID: id,
 	}
 }

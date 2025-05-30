@@ -85,7 +85,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err != nil {
 		return nil, err
 	}
-	request.Stream = true
+	stream := true
+	request.Stream = &stream
 	return p.makeStreamRequest(ctx, request, config)
 }
 
@@ -98,9 +99,9 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 
 	if config.MaxTokens != nil && *config.MaxTokens > 0 {
 		maxTokens := *config.MaxTokens
-		request.MaxOutputTokens = &maxTokens
+		request.MaxOutputTokens = maxTokens
 	} else if p.maxTokens > 0 {
-		request.MaxOutputTokens = &p.maxTokens
+		request.MaxOutputTokens = p.maxTokens
 	}
 
 	// Handle reasoning effort (for o-series models)
@@ -113,9 +114,11 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 	if config.ParallelToolCalls != nil {
 		request.ParallelToolCalls = config.ParallelToolCalls
 	}
-
 	if config.PreviousResponseID != "" {
-		request.PreviousResponseID = &config.PreviousResponseID
+		request.PreviousResponseID = config.PreviousResponseID
+	}
+	if config.ServiceTier != "" {
+		request.ServiceTier = config.ServiceTier
 	}
 
 	// Handle tool choice
@@ -154,7 +157,7 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 
 	// Convert messages to input format
 	if len(config.Messages) > 0 {
-		input, err := p.convertMessagesToInput(config.Messages, config)
+		input, err := p.convertMessagesToInput(config.Messages)
 		if err != nil {
 			return nil, err
 		}
@@ -349,12 +352,9 @@ func (p *Provider) makeStreamRequest(ctx context.Context, request *Request, conf
 // convertResponse converts Responses API response to llm.Response
 func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 	var contentBlocks []llm.Content
-
-	// Process output items
 	for _, item := range response.Output {
 		switch item.Type {
 		case "message":
-			// Convert message content
 			for _, content := range item.Content {
 				if content.Type == "output_text" || content.Type == "text" {
 					contentBlocks = append(contentBlocks, &llm.TextContent{
@@ -362,15 +362,15 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 					})
 				}
 			}
+
 		case "function_call":
-			// Convert function calls to tool use content
 			contentBlocks = append(contentBlocks, &llm.ToolUseContent{
 				ID:    item.CallID,
 				Name:  item.Name,
 				Input: []byte(item.Arguments),
 			})
+
 		case "image_generation_call":
-			// Handle image generation results
 			if item.Result != "" {
 				// Create proper ImageContent with base64 data
 				contentBlocks = append(contentBlocks, &llm.ImageContent{
@@ -381,8 +381,8 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 					},
 				})
 			}
+
 		case "web_search_call":
-			// Handle web search results
 			if len(item.Results) > 0 {
 				var resultText strings.Builder
 				resultText.WriteString("Web search results:\n")
@@ -393,15 +393,15 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 					Text: resultText.String(),
 				})
 			}
+
 		case "mcp_call":
-			// Handle MCP tool results
 			if item.Output != "" {
 				contentBlocks = append(contentBlocks, &llm.TextContent{
 					Text: fmt.Sprintf("MCP tool result: %s", item.Output),
 				})
 			}
+
 		case "mcp_list_tools":
-			// Handle MCP tool list results
 			if len(item.Tools) > 0 {
 				var toolsText strings.Builder
 				toolsText.WriteString(fmt.Sprintf("MCP server '%s' tools:\n", item.ServerLabel))
@@ -412,8 +412,8 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 					Text: toolsText.String(),
 				})
 			}
+
 		case "mcp_approval_request":
-			// Handle MCP approval requests
 			contentBlocks = append(contentBlocks, &llm.TextContent{
 				Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", item.Name, item.ServerLabel),
 			})
@@ -457,109 +457,83 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 }
 
 // convertMessagesToInput converts llm.Message slice to Responses API input format
-func (p *Provider) convertMessagesToInput(messages []*llm.Message, config *llm.Config) (interface{}, error) {
-	// Simple case: single user message becomes string input
-	if len(messages) == 1 && messages[0].Role == llm.User {
-		if len(messages[0].Content) == 1 {
-			if textContent, ok := messages[0].Content[0].(*llm.TextContent); ok {
-				return textContent.Text, nil
-			}
-		}
-	}
-
-	// Complex case: convert to message array format
-	var inputMessages []InputMessage
+func (p *Provider) convertMessagesToInput(messages []*llm.Message) ([]*InputMessage, error) {
+	var inputMessages []*InputMessage
 	for _, msg := range messages {
-		inputMsg := InputMessage{
+		inputMsg := &InputMessage{
 			Role: string(msg.Role),
 		}
-
 		for _, content := range msg.Content {
 			switch c := content.(type) {
+
 			case *llm.TextContent:
-				// Check if this is an MCP approval response
 				if strings.HasPrefix(c.Text, "MCP_APPROVAL_RESPONSE:") {
 					parts := strings.Split(c.Text, ":")
 					if len(parts) == 3 {
 						approvalRequestID := parts[1]
 						approve := parts[2] == "true"
-						inputMsg.Content = append(inputMsg.Content, InputContent{
+						inputMsg.Content = append(inputMsg.Content, &InputContent{
 							Type:              "mcp_approval_response",
 							ApprovalRequestID: approvalRequestID,
 							Approve:           &approve,
 						})
 					}
 				} else {
-					inputMsg.Content = append(inputMsg.Content, InputContent{
+					inputMsg.Content = append(inputMsg.Content, &InputContent{
 						Type: "input_text",
 						Text: c.Text,
 					})
 				}
+
 			case *llm.ImageContent:
-				// Handle image content
 				if c.Source != nil {
-					inputMsg.Content = append(inputMsg.Content, InputContent{
+					inputMsg.Content = append(inputMsg.Content, &InputContent{
 						Type:     "image",
 						ImageURL: c.Source.URL,
 					})
 				}
-			case *llm.DocumentContent:
-				// Handle document content - convert to file input for OpenAI Responses API
-				if c.Source != nil {
-					inputContent := InputContent{
-						Type: "input_file",
-					}
 
-					// Set filename from title if available
+			case *llm.DocumentContent:
+				if c.Source != nil {
+					inputContent := &InputContent{Type: "input_file"}
+					// Set filename from title if available. Otherwise, use
+					// a default filename since this is required by the API.
 					if c.Title != "" {
 						inputContent.Filename = c.Title
+					} else {
+						inputContent.Filename = "document"
 					}
-
 					switch c.Source.Type {
 					case llm.ContentSourceTypeBase64:
-						// Convert base64 data to data URI format expected by OpenAI
-						if c.Source.MediaType != "" && c.Source.Data != "" {
-							inputContent.FileData = fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
+						if c.Source.MediaType == "" || c.Source.Data == "" {
+							return nil, fmt.Errorf("media type and data are required for base64 document content")
 						}
+						inputContent.FileData = fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
 					case llm.ContentSourceTypeFile:
-						// Use file ID directly
-						if c.Source.FileID != "" {
-							inputContent.FileID = c.Source.FileID
+						if c.Source.FileID == "" {
+							return nil, fmt.Errorf("file id is required file document content")
 						}
+						inputContent.FileID = c.Source.FileID
 					case llm.ContentSourceTypeURL:
 						// OpenAI Responses API doesn't support URL references directly
 						// Return an error instead of silently skipping
 						return nil, fmt.Errorf("URL-based document content is not supported by OpenAI Responses provider. Please download the file and use base64 content instead. URL: %s", c.Source.URL)
 					}
-
 					inputMsg.Content = append(inputMsg.Content, inputContent)
 				}
+
 			case *llm.ToolResultContent:
-				// Handle tool result content - convert to text for now
 				if contentStr, ok := c.Content.(string); ok {
-					inputMsg.Content = append(inputMsg.Content, InputContent{
+					inputMsg.Content = append(inputMsg.Content, &InputContent{
 						Type: "input_text",
 						Text: fmt.Sprintf("Tool result: %s", contentStr),
 					})
 				}
-				// Add more content types as needed
 			}
 		}
-
 		inputMessages = append(inputMessages, inputMsg)
 	}
-
 	return inputMessages, nil
-}
-
-// hasFeature checks if a feature is enabled in the features list
-func hasFeature(features []string, feature string) bool {
-	for _, f := range features {
-		if f == feature {
-			return true
-		}
-	}
-	return false
 }
 
 // StreamIterator implements llm.StreamIterator for the Responses API

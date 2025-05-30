@@ -75,6 +75,7 @@ type Config struct {
 	Caching            *bool                  `json:"caching,omitempty"`
 	JSONSchema         schema.Schema          `json:"json_schema,omitempty"`
 	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
+	ServiceTier        string                 `json:"service_tier,omitempty"`
 	ProviderOptions    map[string]interface{} `json:"provider_options,omitempty"`
 	Hooks              Hooks                  `json:"-"`
 	Client             *http.Client           `json:"-"`
@@ -289,6 +290,12 @@ func WithMCPServers(servers ...MCPServerConfig) Option {
 func WithPreviousResponseID(previousResponseID string) Option {
 	return func(config *Config) {
 		config.PreviousResponseID = previousResponseID
+	}
+}
+
+func WithServiceTier(serviceTier string) Option {
+	return func(config *Config) {
+		config.ServiceTier = serviceTier
 	}
 }
 

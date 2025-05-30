@@ -64,11 +64,8 @@ func TestMCPIntegration(t *testing.T) {
 			},
 		}
 
-		input, err := provider.convertMessagesToInput(messages, &llm.Config{})
+		inputMessages, err := provider.convertMessagesToInput(messages)
 		require.NoError(t, err)
-
-		inputMessages, ok := input.([]InputMessage)
-		require.True(t, ok, "Input should be converted to message array when multiple messages")
 		require.Len(t, inputMessages, 2)
 		require.Len(t, inputMessages[1].Content, 1)
 

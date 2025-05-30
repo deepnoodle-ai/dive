@@ -57,9 +57,17 @@ func (m *Message) Text() string {
 	return sb.String()
 }
 
-// WithText appends a text content block to the message.
-func (m *Message) WithText(text string) *Message {
-	m.Content = append(m.Content, &TextContent{Text: text})
+// WithText appends text content block(s) to the message.
+func (m *Message) WithText(text ...string) *Message {
+	for _, t := range text {
+		m.Content = append(m.Content, &TextContent{Text: t})
+	}
+	return m
+}
+
+// WithContent appends content block(s) to the message.
+func (m *Message) WithContent(content ...Content) *Message {
+	m.Content = append(m.Content, content...)
 	return m
 }
 
@@ -73,10 +81,4 @@ func (m *Message) WithImageData(mediaType, base64Data string) *Message {
 		},
 	})
 	return m
-}
-
-// Messages implements the Messages interface, allowing a single message to
-// be provided to Agent generation methods.
-func (m *Message) Messages() []*Message {
-	return []*Message{m}
 }

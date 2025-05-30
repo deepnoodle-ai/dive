@@ -9,13 +9,14 @@ type Request struct {
 	Model              string            `json:"model"`
 	Input              interface{}       `json:"input"`
 	Include            []string          `json:"include,omitempty"`
-	Instructions       *string           `json:"instructions,omitempty"`
-	MaxOutputTokens    *int              `json:"max_output_tokens,omitempty"`
+	Instructions       string            `json:"instructions,omitempty"`
+	MaxOutputTokens    int               `json:"max_output_tokens,omitempty"`
 	Metadata           map[string]string `json:"metadata,omitempty"`
-	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
-	PreviousResponseID *string           `json:"previous_response_id,omitempty"`
+	PreviousResponseID string            `json:"previous_response_id,omitempty"`
+	ServiceTier        string            `json:"service_tier,omitempty"`
 	Reasoning          *ReasoningConfig  `json:"reasoning,omitempty"`
-	Stream             bool              `json:"stream,omitempty"`
+	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
+	Stream             *bool             `json:"stream,omitempty"`
 	Temperature        *float64          `json:"temperature,omitempty"`
 	Text               *TextConfig       `json:"text,omitempty"`
 	ToolChoice         interface{}       `json:"tool_choice,omitempty"`
@@ -40,45 +41,21 @@ type TextFormat struct {
 
 // InputMessage represents a message in the input
 type InputMessage struct {
-	Role    string         `json:"role"`
-	Content []InputContent `json:"content"`
+	Role    string          `json:"role"`
+	Content []*InputContent `json:"content"`
 }
 
 // InputContent represents content within a message
 type InputContent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
-	// File fields for input_file type
-	Filename string `json:"filename,omitempty"`
-	FileData string `json:"file_data,omitempty"`
-	FileID   string `json:"file_id,omitempty"`
-	// MCP approval response fields
+	Type              string `json:"type"`
+	Text              string `json:"text,omitempty"`
+	ImageURL          string `json:"image_url,omitempty"`
+	Filename          string `json:"filename,omitempty"`
+	FileData          string `json:"file_data,omitempty"`
+	FileID            string `json:"file_id,omitempty"`
 	Approve           *bool  `json:"approve,omitempty"`
 	ApprovalRequestID string `json:"approval_request_id,omitempty"`
 }
-
-// Tool represents a tool that can be used by the model
-// type Tool struct {
-// 	Type     string        `json:"type"`
-// 	Function *FunctionTool `json:"function,omitempty"`
-// 	// Built-in tool fields for different tool types
-// 	Domains           []string          `json:"domains,omitempty"`
-// 	SearchContextSize string            `json:"search_context_size,omitempty"`
-// 	UserLocation      *UserLocation     `json:"user_location,omitempty"`
-// 	ServerLabel       string            `json:"server_label,omitempty"`
-// 	ServerURL         string            `json:"server_url,omitempty"`
-// 	AllowedTools      []string          `json:"allowed_tools,omitempty"`
-// 	RequireApproval   interface{}       `json:"require_approval,omitempty"`
-// 	Headers           map[string]string `json:"headers,omitempty"`
-// 	Size              string            `json:"size,omitempty"`
-// 	Quality           string            `json:"quality,omitempty"`
-// 	// Format field is not supported by the OpenAI Responses API
-// 	// Format            string            `json:"format,omitempty"`
-// 	Compression   *int   `json:"compression,omitempty"`
-// 	Background    string `json:"background,omitempty"`
-// 	PartialImages *int   `json:"partial_images,omitempty"`
-// }
 
 // FunctionTool defines a function the model can choose to call
 type FunctionTool struct {
@@ -120,12 +97,13 @@ type Response struct {
 	Status             string             `json:"status"`
 	Error              *ResponseError     `json:"error,omitempty"`
 	IncompleteDetails  *IncompleteDetails `json:"incomplete_details,omitempty"`
-	Instructions       *string            `json:"instructions,omitempty"`
-	MaxOutputTokens    *int               `json:"max_output_tokens,omitempty"`
+	Instructions       string             `json:"instructions,omitempty"`
+	MaxOutputTokens    int                `json:"max_output_tokens,omitempty"`
 	Model              string             `json:"model"`
 	Output             []OutputItem       `json:"output"`
 	ParallelToolCalls  bool               `json:"parallel_tool_calls"`
-	PreviousResponseID *string            `json:"previous_response_id,omitempty"`
+	PreviousResponseID string             `json:"previous_response_id,omitempty"`
+	ServiceTier        string             `json:"service_tier,omitempty"`
 	Reasoning          *ReasoningResult   `json:"reasoning,omitempty"`
 	Store              bool               `json:"store"`
 	Temperature        float64            `json:"temperature"`
@@ -135,7 +113,7 @@ type Response struct {
 	TopP               float64            `json:"top_p"`
 	Truncation         string             `json:"truncation"`
 	Usage              *Usage             `json:"usage,omitempty"`
-	User               *string            `json:"user,omitempty"`
+	User               string             `json:"user,omitempty"`
 	Metadata           map[string]string  `json:"metadata,omitempty"`
 }
 
