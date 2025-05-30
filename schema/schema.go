@@ -2,9 +2,10 @@ package schema
 
 // Schema describes the structure of a JSON object.
 type Schema struct {
-	Type       string               `json:"type"`
-	Properties map[string]*Property `json:"properties"`
-	Required   []string             `json:"required,omitempty"`
+	Type                 string               `json:"type"`
+	Properties           map[string]*Property `json:"properties"`
+	Required             []string             `json:"required,omitempty"`
+	AdditionalProperties *bool                `json:"additionalProperties,omitempty"`
 }
 
 // Property of a schema.

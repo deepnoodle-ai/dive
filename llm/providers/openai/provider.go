@@ -1,7 +1,6 @@
 package openai
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,6 +14,7 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
 	"github.com/diveagents/dive/retry"
+	"github.com/diveagents/dive/schema"
 )
 
 var (
@@ -178,10 +178,12 @@ func (p *Provider) buildRequest(config *llm.Config) (*Request, error) {
 				}
 			}
 			// Handle tools with the default configuration behavior
+			// Ensure the schema has additionalProperties set to false for OpenAI compatibility
+			schema := tool.Schema()
+			// schema = p.ensureSchemaAdditionalPropertiesFalse(schema)
 			tools = append(tools, map[string]any{
 				"name":        tool.Name(),
-				"parameters":  tool.Schema(),
-				"strict":      true,
+				"parameters":  schema,
 				"type":        "function",
 				"description": tool.Description(),
 			})
@@ -335,10 +337,7 @@ func (p *Provider) makeStreamRequest(ctx context.Context, request *Request, conf
 			// Use shared provider error type with proper retry logic
 			return providers.NewError(statusCode, string(body))
 		}
-		stream = &StreamIterator{
-			body:   resp.Body,
-			reader: bufio.NewReader(resp.Body),
-		}
+		stream = NewStreamIterator(resp.Body)
 		return nil
 	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
@@ -540,289 +539,51 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) ([]*InputMess
 	return inputMessages, nil
 }
 
-// StreamIterator implements llm.StreamIterator for the Responses API
-type StreamIterator struct {
-	reader            *bufio.Reader
-	body              io.ReadCloser
-	err               error
-	currentEvent      *llm.Event
-	eventCount        int
-	previousText      string
-	hasStartedContent bool
-	hasEmittedStop    bool
-	nextContentIndex  int
-	textContentIndex  int
-	eventQueue        []*llm.Event
-}
-
-// Next advances to the next event in the stream
-func (s *StreamIterator) Next() bool {
-	// If we have events in the queue, return the next one
-	if len(s.eventQueue) > 0 {
-		s.currentEvent = s.eventQueue[0]
-		s.eventQueue = s.eventQueue[1:]
-		return true
-	}
-
-	for {
-		line, err := s.reader.ReadBytes('\n')
-		if err != nil {
-			if err != io.EOF {
-				s.err = err
-			}
-			return false
-		}
-
-		// Skip empty lines
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-
-		// Remove "data: " prefix if present
-		line = bytes.TrimPrefix(line, []byte("data: "))
-		line = bytes.TrimSpace(line)
-
-		// Check for stream end
-		if bytes.Equal(line, []byte("[DONE]")) {
-			if !s.hasEmittedStop {
-				// Emit message stop event before ending
-				s.hasEmittedStop = true
-				s.currentEvent = &llm.Event{
-					Type: llm.EventTypeMessageStop,
-				}
-				return true
-			}
-			return false
-		}
-
-		// Skip non-JSON lines (like "event: " lines or other SSE metadata)
-		if !bytes.HasPrefix(line, []byte("{")) {
-			continue
-		}
-
-		// Parse the streaming event
-		var streamEvent StreamEvent
-		if err := json.Unmarshal(line, &streamEvent); err != nil {
-			// Log the problematic line for debugging but continue processing
-			s.err = fmt.Errorf("error parsing stream event (line: %q): %w", string(line), err)
-			return false
-		}
-
-		// Convert to llm.Event(s)
-		events := s.convertStreamEvent(&streamEvent)
-		if len(events) > 0 {
-			// Return the first event and queue the rest
-			s.currentEvent = events[0]
-			if len(events) > 1 {
-				s.eventQueue = append(s.eventQueue, events[1:]...)
-			}
-			return true
-		}
+// NewStreamIterator creates a new StreamIterator for a Responses API response
+// body. Typically this is not called directly, but rather by the provider.
+func NewStreamIterator(body io.ReadCloser) *StreamIterator {
+	reader := llm.NewServerSentEventsReader[StreamEvent](body)
+	return &StreamIterator{
+		body:   body,
+		reader: reader,
 	}
 }
 
-// convertStreamEvent converts a StreamEvent to a slice of llm.Event
-func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Event {
-	if streamEvent.Response == nil {
-		return nil
+// ensureSchemaAdditionalPropertiesFalse ensures that the schema has additionalProperties set to false for OpenAI compatibility
+func (p *Provider) ensureSchemaAdditionalPropertiesFalse(s schema.Schema) schema.Schema {
+	// Set additionalProperties to false if not already set
+	if s.AdditionalProperties == nil {
+		falseValue := false
+		s.AdditionalProperties = &falseValue
 	}
 
-	response := streamEvent.Response
-
-	// Emit message start event if this is the first event
-	if s.eventCount == 0 {
-		s.eventCount++
-		return []*llm.Event{{
-			Type: llm.EventTypeMessageStart,
-			Message: &llm.Response{
-				ID:      response.ID,
-				Type:    "message",
-				Role:    llm.Assistant,
-				Model:   response.Model,
-				Content: []llm.Content{},
-				Usage:   llm.Usage{},
-			},
-		}}
-	}
-
-	// Create a queue to hold all events from this stream event
-	var events []*llm.Event
-
-	// Process ALL output items for content deltas
-	for _, item := range response.Output {
-		switch item.Type {
-		case "message":
-			// Handle text content deltas
-			for _, content := range item.Content {
-				if content.Type == "text" || content.Type == "output_text" {
-					currentText := content.Text
-
-					// If this is the first time we see content, emit a content block start event
-					if !s.hasStartedContent {
-						s.hasStartedContent = true
-						s.previousText = currentText
-						s.textContentIndex = s.nextContentIndex
-						s.nextContentIndex++
-						events = append(events, &llm.Event{
-							Type:  llm.EventTypeContentBlockStart,
-							Index: &s.textContentIndex,
-							ContentBlock: &llm.EventContentBlock{
-								Type: llm.ContentTypeText,
-								Text: currentText,
-							},
-						})
-					} else if currentText != s.previousText {
-						// If the text has changed, emit a delta event with only the new text
-						deltaText := currentText[len(s.previousText):]
-						s.previousText = currentText
-						events = append(events, &llm.Event{
-							Type:  llm.EventTypeContentBlockDelta,
-							Index: &s.textContentIndex,
-							Delta: &llm.EventDelta{
-								Type: llm.EventDeltaTypeText,
-								Text: deltaText,
-							},
-						})
-					}
-				}
-			}
-		case "function_call":
-			// Handle tool call events
-			toolIndex := s.nextContentIndex
-			s.nextContentIndex++
-			events = append(events, &llm.Event{
-				Type:  llm.EventTypeContentBlockStart,
-				Index: &toolIndex,
-				ContentBlock: &llm.EventContentBlock{
-					Type: llm.ContentTypeToolUse,
-					ID:   item.CallID,
-					Name: item.Name,
-				},
-			})
-		case "image_generation_call":
-			// Handle image generation events
-			if item.Result != "" {
-				imageIndex := s.nextContentIndex
-				s.nextContentIndex++
-				// For now, convert image to text content since EventContentBlock doesn't support images directly
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStart,
-					Index: &imageIndex,
-					ContentBlock: &llm.EventContentBlock{
-						Type: llm.ContentTypeText,
-						Text: fmt.Sprintf("[Generated image - base64 data: %d bytes]", len(item.Result)),
-					},
-				})
-			}
-		case "web_search_call":
-			// Handle web search results
-			if len(item.Results) > 0 {
-				searchIndex := s.nextContentIndex
-				s.nextContentIndex++
-				var resultText strings.Builder
-				resultText.WriteString("Web search results:\n")
-				for _, result := range item.Results {
-					resultText.WriteString(fmt.Sprintf("- %s: %s\n", result.Title, result.Description))
-				}
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStart,
-					Index: &searchIndex,
-					ContentBlock: &llm.EventContentBlock{
-						Type: llm.ContentTypeText,
-						Text: resultText.String(),
-					},
-				})
-			}
-		case "mcp_call":
-			// Handle MCP tool call events
-			toolIndex := s.nextContentIndex
-			s.nextContentIndex++
-			events = append(events, &llm.Event{
-				Type:  llm.EventTypeContentBlockStart,
-				Index: &toolIndex,
-				ContentBlock: &llm.EventContentBlock{
-					Type: llm.ContentTypeToolUse,
-					ID:   item.ID,
-					Name: item.Name,
-				},
-			})
-		case "mcp_list_tools":
-			// Handle MCP tool list events - emit as text content
-			if len(item.Tools) > 0 {
-				toolIndex := s.nextContentIndex
-				s.nextContentIndex++
-				var toolsText strings.Builder
-				toolsText.WriteString(fmt.Sprintf("MCP server '%s' tools:\n", item.ServerLabel))
-				for _, tool := range item.Tools {
-					toolsText.WriteString(fmt.Sprintf("- %s\n", tool.Name))
-				}
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStart,
-					Index: &toolIndex,
-					ContentBlock: &llm.EventContentBlock{
-						Type: llm.ContentTypeText,
-						Text: toolsText.String(),
-					},
-				})
-			}
-		case "mcp_approval_request":
-			// Handle MCP approval request events - emit as text content
-			toolIndex := s.nextContentIndex
-			s.nextContentIndex++
-			events = append(events, &llm.Event{
-				Type:  llm.EventTypeContentBlockStart,
-				Index: &toolIndex,
-				ContentBlock: &llm.EventContentBlock{
-					Type: llm.ContentTypeText,
-					Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", item.Name, item.ServerLabel),
-				},
-			})
-		case "partial_image":
-			// Handle partial image events for streaming image generation
-			if item.Result != "" {
-				imageIndex := s.nextContentIndex - 1 // Use the existing image index
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockDelta,
-					Index: &imageIndex,
-					Delta: &llm.EventDelta{
-						Type:        llm.EventDeltaTypeText,
-						Text:        fmt.Sprintf("[Partial image update - %d bytes]", len(item.Result)),
-						PartialJSON: item.Result, // Store the partial image data in PartialJSON field
-					},
-				})
-			}
+	// Recursively apply to nested properties
+	if s.Properties != nil {
+		for key, prop := range s.Properties {
+			s.Properties[key] = p.ensurePropertyAdditionalPropertiesFalse(prop)
 		}
 	}
 
-	// If we have usage information, emit a message delta event
-	if response.Usage != nil && len(events) == 0 {
-		events = append(events, &llm.Event{
-			Type:  llm.EventTypeMessageDelta,
-			Delta: &llm.EventDelta{}, // Empty delta is required for message delta events
-			Usage: &llm.Usage{
-				InputTokens:  response.Usage.InputTokens,
-				OutputTokens: response.Usage.OutputTokens,
-			},
-		})
+	return s
+}
+
+// ensurePropertyAdditionalPropertiesFalse ensures that property schemas have additionalProperties set to false
+func (p *Provider) ensurePropertyAdditionalPropertiesFalse(prop *schema.Property) *schema.Property {
+	if prop == nil {
+		return prop
 	}
 
-	return events
-}
-
-// Event returns the current event
-func (s *StreamIterator) Event() *llm.Event {
-	return s.currentEvent
-}
-
-// Err returns any error that occurred
-func (s *StreamIterator) Err() error {
-	return s.err
-}
-
-// Close closes the stream
-func (s *StreamIterator) Close() error {
-	if s.body != nil {
-		return s.body.Close()
+	// Recursively apply to nested properties
+	if prop.Properties != nil {
+		for key, nestedProp := range prop.Properties {
+			prop.Properties[key] = p.ensurePropertyAdditionalPropertiesFalse(nestedProp)
+		}
 	}
-	return nil
+
+	// Apply to array items
+	if prop.Items != nil {
+		prop.Items = p.ensurePropertyAdditionalPropertiesFalse(prop.Items)
+	}
+
+	return prop
 }

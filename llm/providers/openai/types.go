@@ -207,9 +207,31 @@ type MCPToolDefinition struct {
 
 // StreamEvent represents a streaming event from the Responses API
 type StreamEvent struct {
-	Type     string    `json:"type"`
-	Response *Response `json:"response,omitempty"`
-	// Additional streaming-specific fields would go here
+	Type           string    `json:"type"`
+	SequenceNumber int       `json:"sequence_number,omitempty"`
+	Response       *Response `json:"response,omitempty"`
+
+	// Fields for output_item events
+	OutputIndex int         `json:"output_index,omitempty"`
+	Item        *OutputItem `json:"item,omitempty"`
+
+	// Fields for content_part events
+	ItemID       string             `json:"item_id,omitempty"`
+	ContentIndex int                `json:"content_index,omitempty"`
+	Part         *StreamContentPart `json:"part,omitempty"`
+
+	// Fields for delta events
+	Delta string `json:"delta,omitempty"`
+
+	// Fields for done events
+	Text string `json:"text,omitempty"`
+}
+
+// StreamContentPart represents a content part in streaming events
+type StreamContentPart struct {
+	Type        string       `json:"type"`
+	Text        string       `json:"text,omitempty"`
+	Annotations []Annotation `json:"annotations,omitempty"`
 }
 
 // StreamResponse represents the structure of streaming responses
