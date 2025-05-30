@@ -80,6 +80,26 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	return nil
 }
 
+func getTools() []dive.Tool {
+	var theTools []dive.Tool
+	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
+		if err != nil {
+			log.Fatal(err)
+		}
+		scraper := toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: client})
+		theTools = append(theTools, scraper)
+	}
+	if key := os.Getenv("GOOGLE_SEARCH_CX"); key != "" {
+		googleClient, err := google.New()
+		if err != nil {
+			log.Fatal(err)
+		}
+		theTools = append(theTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
+	}
+	return theTools
+}
+
 func runChat(instructions, agentName string, reasoningBudget int) error {
 	ctx := context.Background()
 
@@ -90,24 +110,7 @@ func runChat(instructions, agentName string, reasoningBudget int) error {
 		return fmt.Errorf("error getting model: %v", err)
 	}
 
-	var theTools []dive.Tool
-
-	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
-		if err != nil {
-			log.Fatal(err)
-		}
-		scraper := toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: client})
-		theTools = append(theTools, scraper)
-	}
-
-	if key := os.Getenv("GOOGLE_SEARCH_CX"); key != "" {
-		googleClient, err := google.New()
-		if err != nil {
-			log.Fatal(err)
-		}
-		theTools = append(theTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
-	}
+	theTools := getTools()
 
 	modelSettings := &agent.ModelSettings{}
 	if reasoningBudget > 0 {

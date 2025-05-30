@@ -391,9 +391,7 @@ func TestProvider_Generate_Error(t *testing.T) {
 func TestProvider_Stream(t *testing.T) {
 	// Mock streaming response
 	streamData := []string{
-		`data: {"type": "response", "response": {"id": "resp-123", "object": "response", "model": "gpt-4o", "status": "in_progress", "output": []}}`,
-		`data: {"type": "response", "response": {"id": "resp-123", "output": [{"type": "message", "role": "assistant", "content": [{"type": "text", "text": "Hello"}]}]}}`,
-		`data: {"type": "response", "response": {"id": "resp-123", "output": [{"type": "message", "role": "assistant", "content": [{"type": "text", "text": "Hello, world!"}]}], "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}}`,
+		`data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_stream_123","object":"response","created_at":1748624909,"status":"in_progress","model":"gpt-4o","output":[],"usage":null}}`,
 		`data: [DONE]`,
 	}
 
@@ -425,7 +423,7 @@ func TestProvider_Stream(t *testing.T) {
 	}
 
 	require.NoError(t, iterator.Err())
-	assert.NotEmpty(t, events)
+	require.NotEmpty(t, events)
 
 	// Verify we got at least a message start event
 	assert.Equal(t, llm.EventTypeMessageStart, events[0].Type)
@@ -534,31 +532,21 @@ func TestProvider_convertResponse(t *testing.T) {
 }
 
 func TestStreamIterator(t *testing.T) {
-	// Test stream iterator with mock data
-	streamData := `data: {"type": "response", "response": {"id": "resp-123", "output": [{"type": "message", "role": "assistant", "content": [{"type": "text", "text": "Hello"}]}]}}
-data: [DONE]
-`
-
-	reader := strings.NewReader(streamData)
+	streamData := `data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_stream_123","object":"response","created_at":1748624909,"status":"in_progress","model":"gpt-4o","output":[],"usage":null}}`
+	reader := strings.NewReader(streamData + "\n")
 	iterator := &StreamIterator{
 		reader: llm.NewServerSentEventsReader[StreamEvent](io.NopCloser(reader)),
 		body:   io.NopCloser(reader),
 	}
-
 	// Test Next() and Event()
 	hasNext := iterator.Next()
-	assert.True(t, hasNext)
-
+	require.True(t, hasNext)
 	event := iterator.Event()
-	assert.NotNil(t, event)
-	assert.Equal(t, llm.EventTypeMessageStart, event.Type)
-
-	// Test Close()
+	require.NotNil(t, event)
+	require.Equal(t, llm.EventTypeMessageStart, event.Type)
 	err := iterator.Close()
-	assert.NoError(t, err)
-
-	// Test Err()
-	assert.NoError(t, iterator.Err())
+	require.NoError(t, err)
+	require.NoError(t, iterator.Err())
 }
 
 func TestIntegration_BasicGeneration(t *testing.T) {

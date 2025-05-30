@@ -353,15 +353,54 @@ func TestProvider_CompleteEndToEndRequest(t *testing.T) {
 }
 
 func TestProvider_StreamingEndToEnd(t *testing.T) {
-	streamingResponse := `data: {"type": "response", "response": {"id": "resp_stream_123", "model": "gpt-4o", "output": []}}
+	streamingResponse := `event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_stream_123","object":"response","created_at":1748624909,"status":"in_progress","model":"gpt-4o","output":[],"usage":null}}
 
-data: {"type": "response", "response": {"id": "resp_stream_123", "model": "gpt-4o", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hello"}]}]}}
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"msg_stream_123","type":"message","status":"in_progress","content":[],"role":"assistant"}}
 
-data: {"type": "response", "response": {"id": "resp_stream_123", "model": "gpt-4o", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hello there!"}]}]}}
+event: response.content_part.added
+data: {"type":"response.content_part.added","sequence_number":2,"item_id":"msg_stream_123","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"text":""}}
 
-data: {"type": "response", "response": {"id": "resp_stream_123", "model": "gpt-4o", "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hello there!"}]}], "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}}
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":"Hello"}
 
-data: [DONE]
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":"!"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":5,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":" How"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":6,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":" can"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":7,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":" I"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":8,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":" assist"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":9,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":" you"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":10,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":" today"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":11,"item_id":"msg_stream_123","output_index":0,"content_index":0,"delta":"?"}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","sequence_number":12,"item_id":"msg_stream_123","output_index":0,"content_index":0,"text":"Hello! How can I assist you today?"}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","sequence_number":13,"item_id":"msg_stream_123","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"text":"Hello! How can I assist you today?"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":14,"output_index":0,"item":{"id":"msg_stream_123","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"text":"Hello! How can I assist you today?"}],"role":"assistant"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":15,"response":{"id":"resp_stream_123","object":"response","created_at":1748624909,"status":"completed","model":"gpt-4o","output":[{"id":"msg_stream_123","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"text":"Hello! How can I assist you today?"}],"role":"assistant"}],"usage":{"input_tokens":10,"output_tokens":11,"total_tokens":21}}}
+
 `
 
 	client, mock := newEnhancedMockClient(enhancedMockResponse{
@@ -396,20 +435,42 @@ data: [DONE]
 	// Validate we received the expected events
 	assert.NotEmpty(t, events)
 
-	// Should have response created, content events, and response done
+	// Should have message_start, content_block_start, content_block_delta, content_block_stop, message_delta, and message_stop
 	hasMessageStart := false
 	hasContentBlockStart := false
 	hasContentDelta := false
+	hasContentBlockStop := false
+	hasMessageDelta := false
 	hasMessageStop := false
 
 	for _, event := range events {
 		switch event.Type {
 		case llm.EventTypeMessageStart:
 			hasMessageStart = true
+			// Validate the message start event
+			require.NotNil(t, event.Message)
+			assert.Equal(t, "resp_stream_123", event.Message.ID)
+			assert.Equal(t, "gpt-4o", event.Message.Model)
+			assert.Equal(t, llm.Assistant, event.Message.Role)
 		case llm.EventTypeContentBlockStart:
 			hasContentBlockStart = true
+			// Validate content block start event
+			require.NotNil(t, event.ContentBlock)
+			assert.Equal(t, llm.ContentTypeText, event.ContentBlock.Type)
 		case llm.EventTypeContentBlockDelta:
 			hasContentDelta = true
+			// Validate delta event
+			require.NotNil(t, event.Delta)
+			assert.Equal(t, llm.EventDeltaTypeText, event.Delta.Type)
+			assert.NotEmpty(t, event.Delta.Text)
+		case llm.EventTypeContentBlockStop:
+			hasContentBlockStop = true
+		case llm.EventTypeMessageDelta:
+			hasMessageDelta = true
+			// Validate usage information
+			require.NotNil(t, event.Usage)
+			assert.Equal(t, 10, event.Usage.InputTokens)
+			assert.Equal(t, 11, event.Usage.OutputTokens)
 		case llm.EventTypeMessageStop:
 			hasMessageStop = true
 		}
@@ -418,6 +479,8 @@ data: [DONE]
 	assert.True(t, hasMessageStart, "Should have message_start event")
 	assert.True(t, hasContentBlockStart, "Should have content_block_start event")
 	assert.True(t, hasContentDelta, "Should have content delta events")
+	assert.True(t, hasContentBlockStop, "Should have content_block_stop event")
+	assert.True(t, hasMessageDelta, "Should have message_delta event")
 	assert.True(t, hasMessageStop, "Should have message_stop event")
 }
 

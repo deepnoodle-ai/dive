@@ -43,15 +43,6 @@ func (s *StreamIterator) Close() error {
 	return nil
 }
 
-func (s *StreamIterator) emitDone() bool {
-	if !s.hasEmittedStop {
-		s.hasEmittedStop = true
-		s.currentEvent = &llm.Event{Type: llm.EventTypeMessageStop}
-		return true
-	}
-	return false
-}
-
 // Next advances to the next event in the stream
 func (s *StreamIterator) Next() bool {
 	// If we have events in the queue, return the next one
@@ -66,9 +57,8 @@ func (s *StreamIterator) Next() bool {
 		event, ok := s.reader.Next()
 		if !ok {
 			s.err = s.reader.Err()
-			return s.emitDone()
+			return false
 		}
-		fmt.Println(event)
 		events := s.convertStreamEvent(&event)
 		if len(events) > 0 {
 			// Return the first event and queue the rest
@@ -125,45 +115,58 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Eve
 				initialText = streamEvent.Part.Text
 			}
 			s.previousText = initialText
-			events = append(events, &llm.Event{
+			return []*llm.Event{{
 				Type:  llm.EventTypeContentBlockStart,
 				Index: &s.textContentIndex,
 				ContentBlock: &llm.EventContentBlock{
 					Type: llm.ContentTypeText,
 					Text: initialText,
 				},
-			})
+			}}
 		}
 
 	case "response.output_text.delta":
 		// Emit "content_block_delta"
 		if delta := streamEvent.Delta; delta != "" {
-			events = append(events, &llm.Event{
+			s.previousText += delta
+			return []*llm.Event{{
 				Type:  llm.EventTypeContentBlockDelta,
 				Index: &s.textContentIndex,
 				Delta: &llm.EventDelta{
 					Type: llm.EventDeltaTypeText,
 					Text: delta,
 				},
-			})
-			s.previousText += delta
+			}}
 		}
 
 	case "response.content_part.done":
 		// Emit "content_block_stop"
-		events = append(events, &llm.Event{
+		return []*llm.Event{{
 			Type:  llm.EventTypeContentBlockStop,
 			Index: &s.textContentIndex,
-		})
+		}}
 
-	case "function_call_arguments.delta":
-		return nil // No event needed
+	case "response.function_call_arguments.delta":
+		// fmt.Printf("function_call_arguments.delta: %+v\n", streamEvent)
+		return []*llm.Event{{
+			Type: llm.EventTypeContentBlockDelta,
+			Delta: &llm.EventDelta{
+				Type:        llm.EventDeltaTypeInputJSON,
+				PartialJSON: streamEvent.Delta,
+			},
+		}}
 
-	case "function_call_arguments.done":
-		return nil // No event needed
+	case "response.function_call_arguments.done":
+		// fmt.Printf("function_call_arguments.done: %+v\n", streamEvent)
+		contentIndex := s.nextContentIndex
+		s.nextContentIndex++
+		return []*llm.Event{{
+			Type:  llm.EventTypeContentBlockStop,
+			Index: &contentIndex,
+		}}
 
 	case "response.completed":
-		// Emit "message_delta"
+		// Emit both "message_delta" and "message_stop" events
 		if response := streamEvent.Response; response != nil {
 			usage := &llm.Usage{}
 			if response.Usage != nil {
@@ -178,8 +181,13 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Eve
 					OutputTokens: usage.OutputTokens,
 				},
 			})
+			// Immediately emit message_stop instead of deferring it
+			events = append(events, &llm.Event{
+				Type: llm.EventTypeMessageStop,
+			})
+			s.hasEmittedStop = true
 		}
-		s.emitDone()
+		return events
 
 	default:
 		fmt.Printf("unknown event: %s\n", streamEvent.Type)

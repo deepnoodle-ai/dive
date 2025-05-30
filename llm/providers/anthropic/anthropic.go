@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -233,9 +232,9 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			return providers.NewError(resp.StatusCode, string(body))
 		}
 		stream = &StreamIterator{
-			body:              resp.Body,
-			reader:            bufio.NewReader(resp.Body),
-			contentBlocks:     map[int]*ContentBlockAccumulator{},
+			body: resp.Body,
+			reader: llm.NewServerSentEventsReader[llm.Event](resp.Body).
+				WithSSECallback(config.SSECallback),
 			prefill:           config.Prefill,
 			prefillClosingTag: config.PrefillClosingTag,
 		}
@@ -418,45 +417,28 @@ func reorderMessageContent(messages []*llm.Message) {
 
 // StreamIterator implements the llm.StreamIterator interface for Anthropic streaming responses
 type StreamIterator struct {
-	reader            *bufio.Reader
+	reader            *llm.ServerSentEventsReader[llm.Event]
 	body              io.ReadCloser
 	err               error
 	currentEvent      *llm.Event
-	contentBlocks     map[int]*ContentBlockAccumulator
 	prefill           string
 	prefillClosingTag string
 	closeOnce         sync.Once
-}
-
-type ContentBlockAccumulator struct {
-	Type        string
-	Text        string
-	PartialJSON string
-	ToolUse     *ToolUse
-	Thinking    string
-	Signature   string
-}
-
-type ToolUse struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
 }
 
 // Next advances to the next event in the stream. Returns true if an event was
 // successfully read, false when the stream is complete or an error occurs.
 func (s *StreamIterator) Next() bool {
 	for {
-		event, err := s.readNext()
-		if err != nil {
-			if err != io.EOF {
-				s.err = err
-			}
+		event, ok := s.reader.Next()
+		if !ok {
+			s.err = s.reader.Err()
 			s.Close()
 			return false
 		}
-		if event != nil {
-			s.currentEvent = event
+		processedEvent := s.processEvent(&event)
+		if processedEvent != nil {
+			s.currentEvent = processedEvent
 			return true
 		}
 	}
@@ -467,35 +449,24 @@ func (s *StreamIterator) Event() *llm.Event {
 	return s.currentEvent
 }
 
-// readNext processes a single line from the stream and returns an event
-func (s *StreamIterator) readNext() (*llm.Event, error) {
-	line, err := s.reader.ReadBytes('\n')
-	if err != nil {
-		return nil, err
-	}
-	// Skip empty lines
-	if len(bytes.TrimSpace(line)) == 0 {
-		return nil, nil
-	}
-	// Parse the event type from the SSE format
-	if bytes.HasPrefix(line, []byte("event: ")) {
-		return nil, nil
-	}
-	// Remove "data: " prefix if present
-	line = bytes.TrimPrefix(line, []byte("data: "))
-	// Check for stream end
-	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-		return nil, nil
-	}
-	// Unmarshal the event
-	var event llm.Event
-	if err := json.Unmarshal(line, &event); err != nil {
-		return nil, err
-	}
+// processEvent processes an Anthropic event and applies prefill logic if needed
+func (s *StreamIterator) processEvent(event *llm.Event) *llm.Event {
 	if event.Type == "" {
-		return nil, fmt.Errorf("invalid event detected")
+		return nil
 	}
-	return &event, nil
+
+	// Apply prefill logic for the first text content block
+	if s.prefill != "" && event.Type == llm.EventTypeContentBlockStart {
+		if event.ContentBlock != nil && event.ContentBlock.Type == llm.ContentTypeText {
+			// Add prefill to the beginning of the text
+			if s.prefillClosingTag == "" || strings.Contains(event.ContentBlock.Text, s.prefillClosingTag) {
+				event.ContentBlock.Text = s.prefill + event.ContentBlock.Text
+				s.prefill = "" // Only apply prefill once
+			}
+		}
+	}
+
+	return event
 }
 
 func (s *StreamIterator) Close() error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/llm"
@@ -17,23 +18,43 @@ func streamLLM(ctx context.Context, model llm.StreamingLLM, opts ...llm.Option) 
 	}
 	defer stream.Close()
 
-	var response *llm.Response
+	accum := llm.NewResponseAccumulator()
+	printNewline := false
+
 	for stream.Next() {
 		event := stream.Event()
-		if event.Message != nil {
-			response = event.Message
-		}
-		if event.Type == llm.EventTypeMessageDelta {
-			fmt.Print(successStyle.Sprint(event.Delta.Text))
-		} else if event.Type == llm.EventTypeMessageStop {
+		accum.AddEvent(event)
+		if printNewline {
 			fmt.Println()
+			printNewline = false
+		}
+		switch event.Type {
+		case llm.EventTypeContentBlockStart:
+			if event.ContentBlock.Type == llm.ContentTypeToolUse {
+				fmt.Print(yellowStyle.Sprint(event.ContentBlock.ID + ": " + event.ContentBlock.Name + " "))
+			}
+		case llm.EventTypeContentBlockDelta:
+			switch event.Delta.Type {
+			case llm.EventDeltaTypeText:
+				fmt.Print(successStyle.Sprint(event.Delta.Text))
+			case llm.EventDeltaTypeInputJSON:
+				fmt.Print(yellowStyle.Sprint(event.Delta.PartialJSON))
+			case llm.EventDeltaTypeSignature:
+				fmt.Print(thinkingStyle.Sprint(event.Delta.Signature))
+			case llm.EventDeltaTypeThinking:
+				fmt.Print(thinkingStyle.Sprint(event.Delta.Thinking))
+			}
+		case llm.EventTypeContentBlockStop:
+			printNewline = true
+		case llm.EventTypeMessageStop:
+			printNewline = true
 		}
 	}
 
 	if stream.Err() != nil {
 		return nil, fmt.Errorf("error streaming response: %v", stream.Err())
 	}
-	return response, nil
+	return accum.Response(), nil
 }
 
 func generateLLM(ctx context.Context, model llm.LLM, opts ...llm.Option) (*llm.Response, error) {
@@ -174,12 +195,39 @@ var llmCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		var tools []llm.Tool
+		toolsStr, err := cmd.Flags().GetString("tools")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		if toolsStr != "" {
+			toolNames := strings.Split(toolsStr, ",")
+			for _, toolName := range toolNames {
+				switch toolName {
+				case "Web.Search":
+					tool, err := config.InitializeWebSearchTool(nil)
+					if err != nil {
+						fmt.Println(errorStyle.Sprint(err))
+						os.Exit(1)
+					}
+					tools = append(tools, tool)
+				default:
+					fmt.Println(errorStyle.Sprintf("Unknown tool: %s", toolName))
+					os.Exit(1)
+				}
+			}
+		}
+
 		var options []llm.Option
 
 		// Add user message
 		options = append(options, llm.WithUserTextMessage(message))
 
 		// Add conditional options
+		if len(tools) > 0 {
+			options = append(options, llm.WithTools(tools...))
+		}
 		if systemPrompt != "" {
 			options = append(options, llm.WithSystemPrompt(systemPrompt))
 		}
@@ -237,23 +285,9 @@ var llmCmd = &cobra.Command{
 				fmt.Println(errorStyle.Sprint("Model does not support streaming"))
 				os.Exit(1)
 			}
-			response, err := streamLLM(ctx, streamingModel, options...)
-			if err != nil {
+			if _, err := streamLLM(ctx, streamingModel, options...); err != nil {
 				fmt.Println(errorStyle.Sprint(err))
 				os.Exit(1)
-			}
-			if response == nil {
-				fmt.Println(errorStyle.Sprint("No response from the LLM"))
-				os.Exit(1)
-			}
-			for _, content := range response.Content {
-				switch content := content.(type) {
-				case *llm.TextContent:
-					fmt.Println(content.Text)
-				case *llm.ToolUseContent:
-					fmt.Println(content.Name)
-					fmt.Println(content.Input)
-				}
 			}
 		} else {
 			response, err := generateLLM(ctx, model, options...)
@@ -290,6 +324,7 @@ func init() {
 	llmCmd.Flags().Float64P("temperature", "", -1, "Temperature for randomness (0.0 to 2.0)")
 	llmCmd.Flags().Float64P("presence-penalty", "", 0, "Presence penalty (-2.0 to 2.0)")
 	llmCmd.Flags().Float64P("frequency-penalty", "", 0, "Frequency penalty (-2.0 to 2.0)")
+	llmCmd.Flags().StringP("tools", "", "", "Tools to use (comma separated list of tool names)")
 
 	// Provider options
 	llmCmd.Flags().StringP("api-key", "", "", "API key for the LLM provider")
