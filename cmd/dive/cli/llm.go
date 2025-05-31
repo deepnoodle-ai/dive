@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/diveagents/dive/config"
@@ -242,10 +244,34 @@ var llmCmd = &cobra.Command{
 		// Add PDF content blocks
 		if pdfURLsStr != "" {
 			pdfURLs := strings.Split(pdfURLsStr, ",")
-			for _, pdfURL := range pdfURLs {
-				pdfURL = strings.TrimSpace(pdfURL)
-				if pdfURL != "" {
-					contentBlocks = append(contentBlocks, llm.NewDocumentContent(llm.ContentURL(pdfURL)))
+			for _, pdfPath := range pdfURLs {
+				pdfPath = strings.TrimSpace(pdfPath)
+				if pdfPath != "" {
+					if strings.HasPrefix(pdfPath, "http") {
+						// Handle as URL
+						contentBlocks = append(contentBlocks, llm.NewDocumentContent(llm.ContentURL(pdfPath)))
+					} else {
+						// Handle as local file path
+						data, err := os.ReadFile(pdfPath)
+						if err != nil {
+							fmt.Println(errorStyle.Sprintf("Failed to read PDF file %s: %v", pdfPath, err))
+							os.Exit(1)
+						}
+						base64Data := base64.StdEncoding.EncodeToString(data)
+						filename := filepath.Base(pdfPath)
+
+						contentBlocks = append(contentBlocks, llm.NewDocumentContent(&llm.ContentSource{
+							Type:      llm.ContentSourceTypeBase64,
+							MediaType: "application/pdf",
+							Data:      base64Data,
+						}))
+						// Set title for the document
+						if len(contentBlocks) > 0 {
+							if docContent, ok := contentBlocks[len(contentBlocks)-1].(*llm.DocumentContent); ok {
+								docContent.Title = filename
+							}
+						}
+					}
 				}
 			}
 		}
@@ -253,12 +279,34 @@ var llmCmd = &cobra.Command{
 		// Add image content blocks
 		if imageURLsStr != "" {
 			imageURLs := strings.Split(imageURLsStr, ",")
-			for _, imageURL := range imageURLs {
-				imageURL = strings.TrimSpace(imageURL)
-				if imageURL != "" {
-					contentBlocks = append(contentBlocks, &llm.ImageContent{
-						Source: llm.ContentURL(imageURL),
-					})
+			for _, imagePath := range imageURLs {
+				imagePath = strings.TrimSpace(imagePath)
+				if imagePath != "" {
+					if strings.HasPrefix(imagePath, "http") {
+						// Handle as URL
+						contentBlocks = append(contentBlocks, &llm.ImageContent{
+							Source: llm.ContentURL(imagePath),
+						})
+					} else {
+						// Handle as local file path
+						data, err := os.ReadFile(imagePath)
+						if err != nil {
+							fmt.Println(errorStyle.Sprintf("Failed to read image file %s: %v", imagePath, err))
+							os.Exit(1)
+						}
+						base64Data := base64.StdEncoding.EncodeToString(data)
+
+						// Detect media type based on file extension
+						mediaType := detectImageMediaType(imagePath)
+
+						contentBlocks = append(contentBlocks, &llm.ImageContent{
+							Source: &llm.ContentSource{
+								Type:      llm.ContentSourceTypeBase64,
+								MediaType: mediaType,
+								Data:      base64Data,
+							},
+						})
+					}
 				}
 			}
 		}
@@ -363,8 +411,8 @@ func init() {
 	llmCmd.Flags().BoolP("stream", "s", false, "Stream the response")
 
 	// Content options
-	llmCmd.Flags().StringP("pdfs", "", "", "Comma-separated list of PDF URLs to include as document content")
-	llmCmd.Flags().StringP("images", "", "", "Comma-separated list of image URLs to include as image content")
+	llmCmd.Flags().StringP("pdfs", "", "", "Comma-separated list of PDF URLs or file paths to include as document content")
+	llmCmd.Flags().StringP("images", "", "", "Comma-separated list of image URLs or file paths to include as image content")
 
 	// LLM configuration options
 	llmCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
@@ -385,4 +433,25 @@ func init() {
 	llmCmd.Flags().StringP("previous-response-id", "", "", "Previous response ID for continuation")
 
 	llmCmd.Flags().StringP("write-events", "", "", "Write events to a file")
+}
+
+// detectImageMediaType returns the media type based on file extension
+func detectImageMediaType(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".tiff", ".tif":
+		return "image/tiff"
+	default:
+		return "image/jpeg" // Default fallback
+	}
 }
