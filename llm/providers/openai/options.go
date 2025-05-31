@@ -2,7 +2,8 @@ package openai
 
 import (
 	"net/http"
-	"time"
+
+	"github.com/openai/openai-go/option"
 )
 
 // Option is a function that configures the Provider
@@ -10,19 +11,19 @@ type Option func(*Provider)
 
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
-		p.apiKey = apiKey
+		p.options = append(p.options, option.WithAPIKey(apiKey))
 	}
 }
 
 func WithEndpoint(endpoint string) Option {
 	return func(p *Provider) {
-		p.endpoint = endpoint
+		p.options = append(p.options, option.WithBaseURL(endpoint))
 	}
 }
 
 func WithClient(client *http.Client) Option {
 	return func(p *Provider) {
-		p.client = client
+		p.options = append(p.options, option.WithHTTPClient(client))
 	}
 }
 
@@ -40,12 +41,6 @@ func WithMaxTokens(maxTokens int) Option {
 
 func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
-		p.maxRetries = maxRetries
-	}
-}
-
-func WithBaseWait(baseWait time.Duration) Option {
-	return func(p *Provider) {
-		p.retryBaseWait = baseWait
+		p.options = append(p.options, option.WithMaxRetries(maxRetries))
 	}
 }

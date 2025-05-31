@@ -161,40 +161,6 @@ func main() {
 		fmt.Printf("Multiple MCP servers response: %s\n\n", response6b.Message().Text())
 	}
 
-	// Example 7: Streaming with multiple tools
-	fmt.Println("=== Example 7: Streaming with multiple tools ===")
-
-	// Create both tools for this request
-	webSearchStreamTool := openai.NewWebSearchTool(openai.WebSearchToolOptions{
-		SearchContextSize: "medium",
-	})
-	imageGenStreamTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
-		Size:    "1024x1024",
-		Quality: "high",
-	})
-
-	stream, err := provider.Stream(ctx,
-		llm.WithUserTextMessage("Research the latest AI papers and generate a summary image"),
-		llm.WithTools(webSearchStreamTool, imageGenStreamTool),
-	)
-	if err != nil {
-		log.Printf("Error starting stream: %v", err)
-		return
-	}
-	defer stream.Close()
-
-	fmt.Println("Streaming response:")
-	for stream.Next() {
-		event := stream.Event()
-		if event.Type == llm.EventTypeContentBlockDelta && event.Delta != nil {
-			fmt.Print(event.Delta.Text)
-		}
-	}
-	if err := stream.Err(); err != nil {
-		log.Printf("Stream error: %v", err)
-	}
-	fmt.Println()
-
 	// Example 8: Provider-specific options using the generic provider options mechanism
 	fmt.Println("=== Example 8: Provider-specific options ===")
 	response8, err := provider.Generate(ctx,

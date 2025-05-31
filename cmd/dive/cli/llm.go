@@ -394,7 +394,7 @@ var llmCmd = &cobra.Command{
 					fmt.Println(content.Text)
 				case *llm.ToolUseContent:
 					fmt.Println(content.Name)
-					fmt.Println(content.Input)
+					fmt.Println(string(content.Input))
 				}
 			}
 		}

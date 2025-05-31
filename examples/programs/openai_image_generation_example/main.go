@@ -161,46 +161,6 @@ func main() {
 	}
 	fmt.Println()
 
-	// Example 6: Streaming image generation (simplified)
-	fmt.Println("=== Example 6: Streaming image generation ===")
-	streamImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
-		Size:          "1024x1024",
-		Quality:       "high",
-		PartialImages: 2,
-	})
-
-	stream, err := provider.Stream(ctx,
-		llm.WithUserTextMessage("Draw a beautiful Japanese garden with a koi pond, cherry blossoms, and a traditional bridge"),
-		llm.WithTools(streamImageTool),
-	)
-	if err != nil {
-		log.Printf("Error starting stream: %v", err)
-	} else {
-		fmt.Println("Streaming image generation...")
-
-		for stream.Next() {
-			event := stream.Event()
-			switch event.Type {
-			case llm.EventTypeContentBlockDelta:
-				if event.Delta != nil && event.Delta.Text != "" {
-					fmt.Print(event.Delta.Text)
-				}
-			case llm.EventTypeContentBlockStart:
-				if event.ContentBlock != nil && event.ContentBlock.Type == llm.ContentTypeToolUse {
-					fmt.Printf("\n🎨 Image generation tool called: %s\n", event.ContentBlock.Name)
-				}
-			}
-		}
-
-		if err := stream.Err(); err != nil {
-			log.Printf("Stream error: %v", err)
-		} else {
-			fmt.Println("\n✓ Streaming completed")
-		}
-		stream.Close()
-	}
-	fmt.Println()
-
 	// Example 7: Multiple images in sequence
 	fmt.Println("=== Example 7: Generate a series of related images ===")
 	seriesImageTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{

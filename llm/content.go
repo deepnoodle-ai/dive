@@ -22,6 +22,7 @@ const (
 	ContentTypeMCPToolUse              ContentType = "mcp_tool_use"
 	ContentTypeMCPToolResult           ContentType = "mcp_tool_result"
 	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
+	ContentTypeRefusal                 ContentType = "refusal"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -163,6 +164,32 @@ func (c *TextContent) MarshalJSON() ([]byte, error) {
 }
 
 func (c *TextContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
+}
+
+//// RefusalContent ////////////////////////////////////////////////////////////
+
+type RefusalContent struct {
+	Text         string        `json:"text"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+func (c *RefusalContent) Type() ContentType {
+	return ContentTypeRefusal
+}
+
+func (c *RefusalContent) MarshalJSON() ([]byte, error) {
+	type Alias RefusalContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeRefusal,
+		Alias: (*Alias)(c),
+	})
+}
+
+func (c *RefusalContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
