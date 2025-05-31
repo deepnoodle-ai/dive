@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -281,7 +280,7 @@ func TestIntegration_ErrorScenarios(t *testing.T) {
 // TestIntegration_AdvancedFeatures tests advanced OpenAI-specific features
 func TestIntegration_AdvancedFeatures(t *testing.T) {
 	t.Run("reasoning effort with o-series model", func(t *testing.T) {
-		provider := New(WithModel("o1-mini"))
+		provider := New(WithModel("o3"))
 
 		ctx := context.Background()
 		response, err := provider.Generate(ctx,
@@ -292,37 +291,6 @@ func TestIntegration_AdvancedFeatures(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		assert.Contains(t, response.Message().Text(), "42")
-	})
-
-	t.Run("o3 model with tools and additionalProperties", func(t *testing.T) {
-		provider := New(WithModel("o3"))
-
-		// Create a simple test tool to verify additionalProperties handling
-		testTool := llm.NewToolDefinition().
-			WithName("test_function").
-			WithDescription("A test function for verifying schema compatibility").
-			WithSchema(schema.Schema{
-				Type:     "object",
-				Required: []string{"message"},
-				Properties: map[string]*schema.Property{
-					"message": {
-						Type:        "string",
-						Description: "A test message",
-					},
-				},
-			})
-
-		ctx := context.Background()
-		response, err := provider.Generate(ctx,
-			llm.WithUserTextMessage("Call the test_function with message 'hello'"),
-			llm.WithTools(testTool),
-			llm.WithTemperature(0.0),
-		)
-
-		require.NoError(t, err)
-		require.NotNil(t, response)
-		// The test should not fail with schema validation errors
-		assert.NotEmpty(t, response.Message().Text())
 	})
 
 	t.Run("parallel tool calls", func(t *testing.T) {

@@ -563,8 +563,22 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) ([]*InputMess
 						Text: fmt.Sprintf("Tool result: %s", contentStr),
 					})
 				}
+
+			case *llm.ToolUseContent:
+				inputMsg.Content = append(inputMsg.Content, &InputContent{
+					Type: "input_text",
+					Text: fmt.Sprintf("Tool use: %s", c.Name),
+				})
+
+			default:
+				return nil, fmt.Errorf("unsupported content type: %T", c)
 			}
 		}
+
+		for _, content := range inputMsg.Content {
+			fmt.Printf("xxx content: %+v\n", content)
+		}
+
 		inputMessages = append(inputMessages, inputMsg)
 	}
 	return inputMessages, nil

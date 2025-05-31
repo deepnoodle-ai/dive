@@ -74,6 +74,7 @@ func (s *StreamIterator) Next() bool {
 
 // convertStreamEvent converts a StreamEvent to a slice of llm.Event
 func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Event {
+	// response.incomplete (TODO?)
 	var events []*llm.Event
 	switch streamEvent.Type {
 	case "response.in_progress":
