@@ -195,6 +195,20 @@ var llmCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Get PDF URLs
+		pdfURLsStr, err := cmd.Flags().GetString("pdfs")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+
+		// Get image URLs
+		imageURLsStr, err := cmd.Flags().GetString("images")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+
 		var tools []llm.Tool
 		toolsStr, err := cmd.Flags().GetString("tools")
 		if err != nil {
@@ -219,10 +233,41 @@ var llmCmd = &cobra.Command{
 			}
 		}
 
+		// Build content blocks for the user message
+		var contentBlocks []llm.Content
+
+		// Add text content block
+		contentBlocks = append(contentBlocks, llm.NewTextContent(message))
+
+		// Add PDF content blocks
+		if pdfURLsStr != "" {
+			pdfURLs := strings.Split(pdfURLsStr, ",")
+			for _, pdfURL := range pdfURLs {
+				pdfURL = strings.TrimSpace(pdfURL)
+				if pdfURL != "" {
+					contentBlocks = append(contentBlocks, llm.NewDocumentContent(llm.ContentURL(pdfURL)))
+				}
+			}
+		}
+
+		// Add image content blocks
+		if imageURLsStr != "" {
+			imageURLs := strings.Split(imageURLsStr, ",")
+			for _, imageURL := range imageURLs {
+				imageURL = strings.TrimSpace(imageURL)
+				if imageURL != "" {
+					contentBlocks = append(contentBlocks, &llm.ImageContent{
+						Source: llm.ContentURL(imageURL),
+					})
+				}
+			}
+		}
+
 		var options []llm.Option
 
-		// Add user message
-		options = append(options, llm.WithUserTextMessage(message))
+		// Add user message with content blocks
+		userMessage := llm.NewUserMessage(contentBlocks...)
+		options = append(options, llm.WithMessages(userMessage))
 
 		// Add conditional options
 		if len(tools) > 0 {
@@ -316,6 +361,10 @@ func init() {
 	llmCmd.Flags().StringP("model", "", "", "Model to use")
 	llmCmd.Flags().StringP("system-prompt", "", "", "System prompt for the chat agent")
 	llmCmd.Flags().BoolP("stream", "s", false, "Stream the response")
+
+	// Content options
+	llmCmd.Flags().StringP("pdfs", "", "", "Comma-separated list of PDF URLs to include as document content")
+	llmCmd.Flags().StringP("images", "", "", "Comma-separated list of image URLs to include as image content")
 
 	// LLM configuration options
 	llmCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
