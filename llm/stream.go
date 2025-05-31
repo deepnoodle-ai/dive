@@ -74,7 +74,6 @@ type EventDelta struct {
 // ResponseAccumulator builds up a complete response from a stream of events.
 type ResponseAccumulator struct {
 	response *Response
-	usage    *Usage
 	complete bool
 }
 
@@ -177,7 +176,10 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 
 	// Update usage information if provided
 	if event.Usage != nil {
-		r.usage = event.Usage
+		r.response.Usage.InputTokens += event.Usage.InputTokens
+		r.response.Usage.OutputTokens += event.Usage.OutputTokens
+		r.response.Usage.CacheReadInputTokens += event.Usage.CacheReadInputTokens
+		r.response.Usage.CacheCreationInputTokens += event.Usage.CacheCreationInputTokens
 	}
 	return nil
 }
@@ -191,5 +193,5 @@ func (r *ResponseAccumulator) Response() *Response {
 }
 
 func (r *ResponseAccumulator) Usage() *Usage {
-	return r.usage
+	return &r.response.Usage
 }

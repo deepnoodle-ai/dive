@@ -225,3 +225,252 @@ func TestBugReproduction_MissingStreamEventFields(t *testing.T) {
 	//
 	// But StreamEvent only has Type and Response fields.
 }
+
+// TestStreamIterator_UsageCapture tests that usage information is properly
+// captured in streaming responses, including detailed token breakdowns.
+func TestStreamIterator_UsageCapture(t *testing.T) {
+	// Create a mock response.completed event with detailed usage (single line JSON format)
+	completedEventJSON := `{"type":"response.completed","sequence_number":16,"response":{"id":"resp_test123","object":"response","status":"completed","model":"gpt-4o","usage":{"input_tokens":36,"input_tokens_details":{"cached_tokens":15},"output_tokens":87,"output_tokens_details":{"reasoning_tokens":25},"total_tokens":123}}}`
+
+	sseData := "data: " + completedEventJSON + "\n\ndata: [DONE]\n\n"
+
+	reader := strings.NewReader(sseData)
+	iterator := &StreamIterator{
+		reader: llm.NewServerSentEventsReader[StreamEvent](io.NopCloser(reader)),
+		body:   io.NopCloser(reader),
+	}
+	defer iterator.Close()
+
+	// Collect all events
+	var events []*llm.Event
+	for iterator.Next() {
+		event := iterator.Event()
+		require.NotNil(t, event, "Event should not be nil")
+		events = append(events, event)
+	}
+
+	require.NoError(t, iterator.Err(), "Iterator should not have an error")
+	require.NotEmpty(t, events, "Should receive at least one event")
+
+	// Find the message_delta event with usage information
+	var usageEvent *llm.Event
+	for _, event := range events {
+		if event.Type == llm.EventTypeMessageDelta && event.Usage != nil {
+			usageEvent = event
+			break
+		}
+	}
+
+	require.NotNil(t, usageEvent, "Should have a message_delta event with usage")
+	require.NotNil(t, usageEvent.Usage, "Usage should not be nil")
+
+	// Verify the usage information is properly mapped
+	usage := usageEvent.Usage
+	assert.Equal(t, 36, usage.InputTokens, "Input tokens should be correctly mapped")
+	assert.Equal(t, 87, usage.OutputTokens, "Output tokens should be correctly mapped")
+	assert.Equal(t, 15, usage.CacheReadInputTokens, "Cached tokens should be mapped to CacheReadInputTokens")
+	assert.Equal(t, 0, usage.CacheCreationInputTokens, "CacheCreationInputTokens should be 0 (not provided by OpenAI)")
+
+	// Verify the stop_reason is included in the delta
+	require.NotNil(t, usageEvent.Delta, "Delta should not be nil")
+	assert.Equal(t, "end_turn", usageEvent.Delta.StopReason, "Stop reason should be 'end_turn' for completed response")
+}
+
+// TestStreamIterator_StopReasonCapture tests that stop_reason is properly included
+// in streaming responses for both text completion and tool use scenarios.
+func TestStreamIterator_StopReasonCapture(t *testing.T) {
+	tests := []struct {
+		name               string
+		completedEventJSON string
+		expectedStopReason string
+	}{
+		{
+			name:               "text_completion_stop_reason",
+			completedEventJSON: `{"type":"response.completed","sequence_number":16,"response":{"id":"resp_test123","object":"response","status":"completed","model":"gpt-4o","output":[{"id":"msg_123","type":"message","status":"completed","content":[{"type":"output_text","text":"Hello!"}],"role":"assistant"}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`,
+			expectedStopReason: "end_turn",
+		},
+		{
+			name:               "tool_use_stop_reason",
+			completedEventJSON: `{"type":"response.completed","sequence_number":16,"response":{"id":"resp_test123","object":"response","status":"completed","model":"gpt-4o","output":[{"type":"function_call","call_id":"call_123","name":"get_weather","arguments":"{\"location\":\"New York\"}"}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`,
+			expectedStopReason: "tool_use",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sseData := "data: " + tt.completedEventJSON + "\n\ndata: [DONE]\n\n"
+
+			reader := strings.NewReader(sseData)
+			iterator := &StreamIterator{
+				reader: llm.NewServerSentEventsReader[StreamEvent](io.NopCloser(reader)),
+				body:   io.NopCloser(reader),
+			}
+			defer iterator.Close()
+
+			// Collect all events
+			var events []*llm.Event
+			for iterator.Next() {
+				event := iterator.Event()
+				require.NotNil(t, event, "Event should not be nil")
+				events = append(events, event)
+			}
+
+			require.NoError(t, iterator.Err(), "Iterator should not have an error")
+			require.NotEmpty(t, events, "Should receive at least one event")
+
+			// Find the message_delta event
+			var messageDeltaEvent *llm.Event
+			for _, event := range events {
+				if event.Type == llm.EventTypeMessageDelta {
+					messageDeltaEvent = event
+					break
+				}
+			}
+
+			require.NotNil(t, messageDeltaEvent, "Should have a message_delta event")
+			require.NotNil(t, messageDeltaEvent.Delta, "Delta should not be nil")
+			assert.Equal(t, tt.expectedStopReason, messageDeltaEvent.Delta.StopReason, "Stop reason should match expected value")
+		})
+	}
+}
+
+// TestStreamIterator_FunctionCallEvents tests parsing and validation of function call events
+func TestStreamIterator_FunctionCallEvents(t *testing.T) {
+	// Create SSE-formatted events that simulate a function call
+	sseData := `data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_test123","object":"response","status":"in_progress","model":"gpt-4o","output":[]}}
+data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"fc_test123","type":"function_call","status":"in_progress","arguments":"","call_id":"call_test123","name":"search"}}
+data: {"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_test123","output_index":0,"delta":"{\""}
+data: {"type":"response.function_call_arguments.delta","sequence_number":4,"item_id":"fc_test123","output_index":0,"delta":"query"}
+data: {"type":"response.function_call_arguments.delta","sequence_number":5,"item_id":"fc_test123","output_index":0,"delta":"\":\""}
+data: {"type":"response.function_call_arguments.delta","sequence_number":6,"item_id":"fc_test123","output_index":0,"delta":"test"}
+data: {"type":"response.function_call_arguments.delta","sequence_number":7,"item_id":"fc_test123","output_index":0,"delta":"\"}"}
+data: {"type":"response.function_call_arguments.done","sequence_number":8,"item_id":"fc_test123","output_index":0}
+data: {"type":"response.completed","sequence_number":9,"response":{"id":"resp_test123","status":"completed","model":"gpt-4o","usage":{"input_tokens":36,"output_tokens":87}}}
+data: [DONE]
+`
+
+	reader := strings.NewReader(sseData)
+	iterator := &StreamIterator{
+		reader: llm.NewServerSentEventsReader[StreamEvent](io.NopCloser(reader)),
+		body:   io.NopCloser(reader),
+	}
+	defer iterator.Close()
+
+	// Collect all events
+	var events []*llm.Event
+	for iterator.Next() {
+		event := iterator.Event()
+		require.NotNil(t, event, "Event should not be nil")
+		events = append(events, event)
+	}
+
+	require.NoError(t, iterator.Err(), "Iterator should not have an error")
+	require.NotEmpty(t, events, "Should receive at least one event")
+
+	t.Run("function call event sequence validation", func(t *testing.T) {
+		var eventTypes []llm.EventType
+		for _, event := range events {
+			eventTypes = append(eventTypes, event.Type)
+		}
+
+		t.Logf("Function call event types: %v", eventTypes)
+
+		// Should start with message_start
+		assert.Equal(t, llm.EventTypeMessageStart, eventTypes[0], "First event should be message_start")
+
+		// Should have a content_block_start for the function call
+		hasContentBlockStart := false
+		hasFunctionCallDeltas := false
+		hasContentBlockStop := false
+		hasMessageStop := false
+
+		for _, eventType := range eventTypes {
+			switch eventType {
+			case llm.EventTypeContentBlockStart:
+				hasContentBlockStart = true
+			case llm.EventTypeContentBlockDelta:
+				hasFunctionCallDeltas = true
+			case llm.EventTypeContentBlockStop:
+				hasContentBlockStop = true
+			case llm.EventTypeMessageStop:
+				hasMessageStop = true
+			}
+		}
+
+		assert.True(t, hasContentBlockStart, "Should have content_block_start event for function call")
+		assert.True(t, hasFunctionCallDeltas, "Should have content_block_delta events for function arguments")
+		assert.True(t, hasContentBlockStop, "Should have content_block_stop event")
+		assert.True(t, hasMessageStop, "Should have message_stop event")
+	})
+
+	t.Run("function call content_block_start validation", func(t *testing.T) {
+		// Find the content_block_start event
+		var contentBlockStartEvent *llm.Event
+		for _, event := range events {
+			if event.Type == llm.EventTypeContentBlockStart {
+				contentBlockStartEvent = event
+				break
+			}
+		}
+
+		require.NotNil(t, contentBlockStartEvent, "Should have content_block_start event")
+		require.NotNil(t, contentBlockStartEvent.ContentBlock, "ContentBlock should not be nil")
+		require.NotNil(t, contentBlockStartEvent.Index, "Index should not be nil")
+
+		assert.Equal(t, llm.ContentTypeToolUse, contentBlockStartEvent.ContentBlock.Type, "Should be tool_use type")
+		assert.Equal(t, "fc_test123", contentBlockStartEvent.ContentBlock.ID, "Should have correct function call ID")
+		assert.Equal(t, "search", contentBlockStartEvent.ContentBlock.Name, "Should have correct function name")
+		assert.Equal(t, 0, *contentBlockStartEvent.Index, "Should have index 0")
+	})
+
+	t.Run("function call delta events validation", func(t *testing.T) {
+		// Find all content_block_delta events
+		var deltaEvents []*llm.Event
+		for _, event := range events {
+			if event.Type == llm.EventTypeContentBlockDelta {
+				deltaEvents = append(deltaEvents, event)
+			}
+		}
+
+		require.NotEmpty(t, deltaEvents, "Should have delta events")
+
+		// Verify all delta events have required fields
+		for i, deltaEvent := range deltaEvents {
+			require.NotNil(t, deltaEvent.Delta, "Delta should not be nil for event %d", i)
+			require.NotNil(t, deltaEvent.Index, "Index should not be nil for event %d", i)
+
+			assert.Equal(t, 0, *deltaEvent.Index, "Delta event should reference function call content block index")
+			assert.Equal(t, llm.EventDeltaTypeInputJSON, deltaEvent.Delta.Type, "Should be input_json_delta type")
+			assert.NotEmpty(t, deltaEvent.Delta.PartialJSON, "Should have partial JSON content")
+		}
+
+		// Verify the delta content makes sense
+		var fullArgs string
+		for _, deltaEvent := range deltaEvents {
+			fullArgs += deltaEvent.Delta.PartialJSON
+		}
+		assert.Equal(t, `{"query":"test"}`, fullArgs, "Combined deltas should form valid JSON")
+	})
+
+	t.Run("response accumulator validation", func(t *testing.T) {
+		// Test that the response accumulator can handle these events without error
+		accum := llm.NewResponseAccumulator()
+		for _, event := range events {
+			err := accum.AddEvent(event)
+			require.NoError(t, err, "Accumulator should handle function call events without error")
+		}
+
+		assert.True(t, accum.IsComplete(), "Accumulator should be complete after all events")
+
+		response := accum.Response()
+		require.NotNil(t, response, "Final response should not be nil")
+		require.NotEmpty(t, response.Content, "Response should have content")
+
+		// Verify the function call content
+		toolUseContent, ok := response.Content[0].(*llm.ToolUseContent)
+		require.True(t, ok, "First content block should be tool use content")
+		assert.Equal(t, "fc_test123", toolUseContent.ID, "Tool use ID should match")
+		assert.Equal(t, "search", toolUseContent.Name, "Tool use name should match")
+		assert.Equal(t, `{"query":"test"}`, string(toolUseContent.Input), "Tool use input should be accumulated correctly")
+	})
+}

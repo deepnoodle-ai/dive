@@ -9,17 +9,18 @@ import (
 
 // StreamIterator implements llm.StreamIterator for the Responses API
 type StreamIterator struct {
-	reader            *llm.ServerSentEventsReader[StreamEvent]
-	body              io.ReadCloser
-	err               error
-	currentEvent      *llm.Event
-	eventCount        int
-	previousText      string
-	hasStartedContent bool
-	hasEmittedStop    bool
-	nextContentIndex  int
-	textContentIndex  int
-	eventQueue        []*llm.Event
+	reader               *llm.ServerSentEventsReader[StreamEvent]
+	body                 io.ReadCloser
+	err                  error
+	currentEvent         *llm.Event
+	eventCount           int
+	previousText         string
+	hasStartedContent    bool
+	nextContentIndex     int
+	textContentIndex     int
+	functionCallIndex    int
+	hasFunctionCallStart bool
+	eventQueue           []*llm.Event
 }
 
 // Event returns the current event. Guaranteed to be non-nil if called after
@@ -79,7 +80,23 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Eve
 		return nil // No event needed
 
 	case "response.output_item.added":
-		return nil // No event needed
+		// Check if this is a function call
+		if streamEvent.Item != nil && streamEvent.Item.Type == "function_call" {
+			// Emit "content_block_start" for function call
+			s.functionCallIndex = s.nextContentIndex
+			s.nextContentIndex++
+			s.hasFunctionCallStart = true
+			return []*llm.Event{{
+				Type:  llm.EventTypeContentBlockStart,
+				Index: &s.functionCallIndex,
+				ContentBlock: &llm.EventContentBlock{
+					Type: llm.ContentTypeToolUse,
+					ID:   streamEvent.Item.ID,
+					Name: streamEvent.Item.Name,
+				},
+			}}
+		}
+		return nil // No event needed for non-function-call items
 
 	case "response.output_text.done":
 		return nil // No event needed
@@ -147,23 +164,26 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Eve
 		}}
 
 	case "response.function_call_arguments.delta":
-		// fmt.Printf("function_call_arguments.delta: %+v\n", streamEvent)
-		return []*llm.Event{{
-			Type: llm.EventTypeContentBlockDelta,
-			Delta: &llm.EventDelta{
-				Type:        llm.EventDeltaTypeInputJSON,
-				PartialJSON: streamEvent.Delta,
-			},
-		}}
+		// Emit "content_block_delta" with proper index
+		if delta := streamEvent.Delta; delta != "" && s.hasFunctionCallStart {
+			return []*llm.Event{{
+				Type:  llm.EventTypeContentBlockDelta,
+				Index: &s.functionCallIndex,
+				Delta: &llm.EventDelta{
+					Type:        llm.EventDeltaTypeInputJSON,
+					PartialJSON: delta,
+				},
+			}}
+		}
 
 	case "response.function_call_arguments.done":
-		// fmt.Printf("function_call_arguments.done: %+v\n", streamEvent)
-		contentIndex := s.nextContentIndex
-		s.nextContentIndex++
-		return []*llm.Event{{
-			Type:  llm.EventTypeContentBlockStop,
-			Index: &contentIndex,
-		}}
+		// Emit "content_block_stop"
+		if s.hasFunctionCallStart {
+			return []*llm.Event{{
+				Type:  llm.EventTypeContentBlockStop,
+				Index: &s.functionCallIndex,
+			}}
+		}
 
 	case "response.completed":
 		// Emit both "message_delta" and "message_stop" events
@@ -172,20 +192,25 @@ func (s *StreamIterator) convertStreamEvent(streamEvent *StreamEvent) []*llm.Eve
 			if response.Usage != nil {
 				usage.InputTokens = response.Usage.InputTokens
 				usage.OutputTokens = response.Usage.OutputTokens
+				if response.Usage.InputTokensDetails != nil {
+					usage.CacheReadInputTokens = response.Usage.InputTokensDetails.CachedTokens
+				}
 			}
+
+			// Determine stop_reason based on the response content and status
+			stopReason := determineStopReason(response)
+
 			events = append(events, &llm.Event{
-				Type:  llm.EventTypeMessageDelta,
-				Delta: &llm.EventDelta{},
-				Usage: &llm.Usage{
-					InputTokens:  usage.InputTokens,
-					OutputTokens: usage.OutputTokens,
+				Type: llm.EventTypeMessageDelta,
+				Delta: &llm.EventDelta{
+					StopReason: stopReason,
 				},
+				Usage: usage,
 			})
 			// Immediately emit message_stop instead of deferring it
 			events = append(events, &llm.Event{
 				Type: llm.EventTypeMessageStop,
 			})
-			s.hasEmittedStop = true
 		}
 		return events
 

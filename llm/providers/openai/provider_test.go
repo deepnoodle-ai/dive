@@ -498,6 +498,44 @@ func TestProvider_convertResponse(t *testing.T) {
 			},
 		},
 		{
+			name: "response with detailed usage including cached tokens",
+			response: &Response{
+				ID:     "resp-789",
+				Object: "response",
+				Model:  "gpt-4o",
+				Status: "completed",
+				Output: []OutputItem{
+					{
+						Type: "message",
+						Role: "assistant",
+						Content: []OutputContent{
+							{Type: "output_text", Text: "Test response"},
+						},
+					},
+				},
+				Usage: &Usage{
+					InputTokens:  36,
+					OutputTokens: 87,
+					TotalTokens:  123,
+					InputTokensDetails: &InputTokensDetails{
+						CachedTokens: 15,
+					},
+					OutputTokensDetails: &OutputTokensDetails{
+						ReasoningTokens: 25,
+					},
+				},
+			},
+			expected: func(t *testing.T, resp *llm.Response) {
+				assert.Equal(t, "resp-789", resp.ID)
+				assert.Equal(t, llm.Assistant, resp.Role)
+				assert.Equal(t, "Test response", resp.Message().Text())
+				assert.Equal(t, 36, resp.Usage.InputTokens)
+				assert.Equal(t, 87, resp.Usage.OutputTokens)
+				assert.Equal(t, 15, resp.Usage.CacheReadInputTokens)
+				assert.Equal(t, 0, resp.Usage.CacheCreationInputTokens) // OpenAI doesn't provide this
+			},
+		},
+		{
 			name: "error response",
 			response: &Response{
 				ID:     "resp-error",

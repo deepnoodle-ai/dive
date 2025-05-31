@@ -423,15 +423,45 @@ func (p *Provider) convertResponse(response *Response) (*llm.Response, error) {
 	if response.Usage != nil {
 		usage.InputTokens = response.Usage.InputTokens
 		usage.OutputTokens = response.Usage.OutputTokens
+
+		// Map cached tokens from input details to cache read tokens
+		if response.Usage.InputTokensDetails != nil {
+			usage.CacheReadInputTokens = response.Usage.InputTokensDetails.CachedTokens
+		}
+
+		// Note: OpenAI doesn't provide cache creation tokens in their usage data,
+		// so we leave CacheCreationInputTokens at 0
 	}
 
+	// Determine stop_reason based on the response content and status
+	stopReason := determineStopReason(response)
+
 	return &llm.Response{
-		ID:      response.ID,
-		Model:   response.Model,
-		Role:    llm.Assistant,
-		Content: contentBlocks,
-		Usage:   usage,
+		ID:         response.ID,
+		Model:      response.Model,
+		Role:       llm.Assistant,
+		Content:    contentBlocks,
+		StopReason: stopReason,
+		Usage:      usage,
 	}, nil
+}
+
+// determineStopReason maps OpenAI response data to standard stop reasons
+func determineStopReason(response *Response) string {
+	// Check if the response contains any tool calls (function_call items)
+	for _, item := range response.Output {
+		if item.Type == "function_call" {
+			return "tool_use"
+		}
+	}
+
+	// If response is completed without tool calls, it's an end_turn
+	if response.Status == "completed" {
+		return "end_turn"
+	}
+
+	// Default to end_turn for other completion scenarios
+	return "end_turn"
 }
 
 // createRequest creates an HTTP request with appropriate headers
