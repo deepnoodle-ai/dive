@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/stretchr/testify/require"
@@ -85,251 +86,104 @@ func TestIntegration_WebSearchTool(t *testing.T) {
 		"Response should contain stock market content: %s", response.Message().Text())
 }
 
-// // TestIntegration_ImageGenerationTool tests the image generation tool functionality
-// func TestIntegration_ImageGenerationTool(t *testing.T) {
-// 	provider := setupIntegrationProvider(t)
+// TestIntegration_ImageGenerationTool tests the image generation tool functionality
+func TestIntegration_ImageGenerationTool(t *testing.T) {
+	provider := setupIntegrationProvider(t)
 
-// 	imageGenTool := NewImageGenerationTool(ImageGenerationToolOptions{
-// 		Size:    "1024x1024",
-// 		Quality: "medium",
-// 	})
+	imageGenTool := NewImageGenerationTool(ImageGenerationToolOptions{
+		Size:       "1024x1024",
+		Quality:    "low",
+		Moderation: "low",
+	})
 
-// 	ctx := context.Background()
-// 	response, err := provider.Generate(ctx,
-// 		llm.WithUserTextMessage("Generate a simple image of a red circle on a white background"),
-// 		llm.WithTools(imageGenTool),
-// 		llm.WithTemperature(0.3),
-// 	)
+	ctx := context.Background()
+	response, err := provider.Generate(ctx,
+		llm.WithUserTextMessage("Generate a simple image of a red circle on a white background"),
+		llm.WithTools(imageGenTool),
+		llm.WithTemperature(0.3),
+	)
 
-// 	require.NoError(t, err)
-// 	require.NotNil(t, response)
-// 	assert.NotEmpty(t, response.Message().Text())
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.NotEmpty(t, response.Message().Text())
 
-// 	// The response should mention image generation
-// 	text := strings.ToLower(response.Message().Text())
-// 	assert.True(t,
-// 		strings.Contains(text, "image") ||
-// 			strings.Contains(text, "generated") ||
-// 			strings.Contains(text, "created"),
-// 		"Response should mention image generation: %s", response.Message().Text())
-// }
+	// The response should mention image generation
+	text := strings.ToLower(response.Message().Text())
+	require.True(t,
+		strings.Contains(text, "image") ||
+			strings.Contains(text, "generated") ||
+			strings.Contains(text, "created"),
+		"Response should mention image generation: %s", response.Message().Text())
+}
 
-// // TestIntegration_StreamingResponse tests streaming response functionality
-// func TestIntegration_StreamingResponse(t *testing.T) {
-// 	provider := setupIntegrationProvider(t)
+// TestIntegration_ErrorScenarios tests various error conditions
+func TestIntegration_ErrorScenarios(t *testing.T) {
+	t.Run("invalid API key", func(t *testing.T) {
+		provider := New(WithAPIKey("invalid-key"))
 
-// 	ctx := context.Background()
-// 	iterator, err := provider.Stream(ctx,
-// 		llm.WithUserTextMessage("Count from 1 to 5, with each number on a separate line. Be concise."),
-// 		llm.WithTemperature(0.0),
-// 	)
+		ctx := context.Background()
+		_, err := provider.Generate(ctx, llm.WithUserTextMessage("This should fail"))
 
-// 	require.NoError(t, err)
-// 	require.NotNil(t, iterator)
-// 	defer iterator.Close()
+		require.Error(t, err)
+		require.Contains(t, strings.ToLower(err.Error()), "401")
+	})
 
-// 	// Accumulate events and verify streaming works
-// 	accum := llm.NewResponseAccumulator()
-// 	eventCount := 0
-// 	var hasMessageStart, hasContentBlockStart bool
+	t.Run("empty messages", func(t *testing.T) {
+		provider := setupIntegrationProvider(t)
 
-// 	for iterator.Next() {
-// 		event := iterator.Event()
-// 		require.NotNil(t, event)
+		_, err := provider.Generate(context.Background())
 
-// 		switch event.Type {
-// 		case llm.EventTypeMessageStart:
-// 			hasMessageStart = true
-// 		case llm.EventTypeContentBlockStart:
-// 			hasContentBlockStart = true
-// 		}
+		require.Error(t, err)
+		require.Contains(t, strings.ToLower(err.Error()), "no messages")
+	})
 
-// 		require.NoError(t, accum.AddEvent(event))
-// 		eventCount++
-// 	}
+	t.Run("context timeout", func(t *testing.T) {
+		provider := setupIntegrationProvider(t)
 
-// 	require.NoError(t, iterator.Err())
-// 	assert.Greater(t, eventCount, 0, "Should receive at least one event")
-// 	assert.True(t, hasMessageStart, "Should receive message start event")
-// 	assert.True(t, hasContentBlockStart, "Should receive content block start event")
-// 	// Note: OpenAI Responses API appears to send complete text in one go rather than streaming deltas
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+		defer cancel()
 
-// 	response := accum.Response()
-// 	require.NotNil(t, response)
-// 	assert.NotEmpty(t, response.Message().Text())
+		_, err := provider.Generate(ctx, llm.WithUserTextMessage("This should timeout"))
+		require.Error(t, err)
 
-// 	// Verify the response contains numbers 1-5
-// 	text := response.Message().Text()
-// 	for i := 1; i <= 5; i++ {
-// 		assert.Contains(t, text, string(rune('0'+i)), "Response should contain number %d", i)
-// 	}
-// }
+		errMessage := strings.ToLower(err.Error())
+		ok := strings.Contains(errMessage, "timeout") ||
+			strings.Contains(errMessage, "context deadline exceeded")
+		require.True(t, ok, "Error should indicate timeout: %s", err.Error())
+	})
+}
 
-// // TestIntegration_StreamingWithTools tests streaming response with tool usage
-// func TestIntegration_StreamingWithTools(t *testing.T) {
-// 	provider := setupIntegrationProvider(t)
+// TestIntegration_AdvancedFeatures tests advanced OpenAI-specific features
+func TestIntegration_AdvancedFeatures(t *testing.T) {
+	t.Run("reasoning effort with o-series model", func(t *testing.T) {
+		provider := New(WithModel("o3"))
 
-// 	webSearchTool := NewWebSearchTool(WebSearchToolOptions{
-// 		SearchContextSize: "low",
-// 		UserLocation: &UserLocation{
-// 			Type:    "approximate",
-// 			Country: "US",
-// 		},
-// 	})
+		response, err := provider.Generate(
+			context.Background(),
+			llm.WithUserTextMessage("Solve this simple math problem: 15 + 27"),
+			llm.WithReasoningEffort("medium"),
+		)
 
-// 	ctx := context.Background()
-// 	iterator, err := provider.Stream(ctx,
-// 		llm.WithUserTextMessage("Search for the current weather in San Francisco and tell me what it is like today"),
-// 		llm.WithTools(webSearchTool),
-// 		llm.WithTemperature(0.3),
-// 	)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.Contains(t, response.Message().Text(), "42")
+	})
 
-// 	require.NoError(t, err)
-// 	require.NotNil(t, iterator)
-// 	defer iterator.Close()
+	t.Run("service tier configuration", func(t *testing.T) {
+		provider := setupIntegrationProvider(t)
 
-// 	// Accumulate events and verify tool usage in streaming
-// 	accum := llm.NewResponseAccumulator()
-// 	eventCount := 0
-// 	var hasToolUse bool
-// 	var hasContentBlockStart bool
+		response, err := provider.Generate(
+			context.Background(),
+			llm.WithUserTextMessage("Say 'Service tier test'"),
+			llm.WithServiceTier("default"),
+			llm.WithTemperature(0.0),
+		)
 
-// 	for iterator.Next() {
-// 		event := iterator.Event()
-// 		require.NotNil(t, event)
-
-// 		switch event.Type {
-// 		case llm.EventTypeContentBlockStart:
-// 			hasContentBlockStart = true
-// 			if event.ContentBlock != nil && event.ContentBlock.Type == llm.ContentTypeToolUse {
-// 				hasToolUse = true
-// 			}
-// 		}
-
-// 		require.NoError(t, accum.AddEvent(event))
-// 		eventCount++
-// 	}
-
-// 	require.NoError(t, iterator.Err())
-// 	assert.Greater(t, eventCount, 0)
-
-// 	response := accum.Response()
-// 	require.NotNil(t, response)
-
-// 	// Either we should use the web search tool, OR we should get a meaningful response
-// 	// (The model might decide it doesn't need to search for some queries)
-// 	if hasToolUse {
-// 		t.Log("Web search tool was used successfully")
-// 		assert.NotEmpty(t, response.Message().Text())
-// 	} else {
-// 		t.Log("Web search tool was not used, but we should still get a response")
-// 		assert.True(t, hasContentBlockStart, "Should receive at least content block start event")
-// 		// For weather queries without search, the model should indicate it cannot access real-time data
-// 		responseText := strings.ToLower(response.Message().Text())
-// 		assert.True(t,
-// 			strings.Contains(responseText, "cannot") ||
-// 				strings.Contains(responseText, "don't have") ||
-// 				strings.Contains(responseText, "unable") ||
-// 				strings.Contains(responseText, "weather") ||
-// 				len(responseText) > 10, // Any substantial response
-// 			"Should either use tool or indicate inability to access real-time data: %s", response.Message().Text())
-// 	}
-// }
-
-// // TestIntegration_ErrorScenarios tests various error conditions
-// func TestIntegration_ErrorScenarios(t *testing.T) {
-// 	t.Run("invalid API key", func(t *testing.T) {
-// 		provider := New(WithAPIKey("invalid-key"))
-
-// 		ctx := context.Background()
-// 		_, err := provider.Generate(ctx,
-// 			llm.WithUserTextMessage("This should fail"),
-// 		)
-
-// 		require.Error(t, err)
-// 		assert.Contains(t, strings.ToLower(err.Error()), "401")
-// 	})
-
-// 	t.Run("empty messages", func(t *testing.T) {
-// 		provider := setupIntegrationProvider(t)
-
-// 		ctx := context.Background()
-// 		_, err := provider.Generate(ctx)
-
-// 		require.Error(t, err)
-// 		assert.Contains(t, strings.ToLower(err.Error()), "no messages")
-// 	})
-
-// 	t.Run("context timeout", func(t *testing.T) {
-// 		provider := setupIntegrationProvider(t)
-
-// 		// Create a context that times out very quickly
-// 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
-// 		defer cancel()
-
-// 		_, err := provider.Generate(ctx,
-// 			llm.WithUserTextMessage("This should timeout"),
-// 		)
-
-// 		require.Error(t, err)
-// 		assert.True(t,
-// 			strings.Contains(strings.ToLower(err.Error()), "timeout") ||
-// 				strings.Contains(strings.ToLower(err.Error()), "context deadline exceeded"),
-// 			"Error should indicate timeout: %s", err.Error())
-// 	})
-// }
-
-// // TestIntegration_AdvancedFeatures tests advanced OpenAI-specific features
-// func TestIntegration_AdvancedFeatures(t *testing.T) {
-// 	t.Run("reasoning effort with o-series model", func(t *testing.T) {
-// 		provider := New(WithModel("o3"))
-
-// 		ctx := context.Background()
-// 		response, err := provider.Generate(ctx,
-// 			llm.WithUserTextMessage("Solve this simple math problem: 15 + 27"),
-// 			llm.WithReasoningEffort("medium"),
-// 		)
-
-// 		require.NoError(t, err)
-// 		require.NotNil(t, response)
-// 		assert.Contains(t, response.Message().Text(), "42")
-// 	})
-
-// 	t.Run("parallel tool calls", func(t *testing.T) {
-// 		provider := setupIntegrationProvider(t)
-
-// 		webSearchTool := NewWebSearchTool(WebSearchToolOptions{
-// 			SearchContextSize: "low",
-// 		})
-
-// 		ctx := context.Background()
-// 		response, err := provider.Generate(ctx,
-// 			llm.WithUserTextMessage("Search for information about both 'OpenAI' and 'artificial intelligence' separately"),
-// 			llm.WithTools(webSearchTool),
-// 			llm.WithParallelToolCalls(true),
-// 			llm.WithTemperature(0.3),
-// 		)
-
-// 		require.NoError(t, err)
-// 		require.NotNil(t, response)
-// 		assert.NotEmpty(t, response.Message().Text())
-// 	})
-
-// 	t.Run("service tier configuration", func(t *testing.T) {
-// 		provider := setupIntegrationProvider(t)
-
-// 		ctx := context.Background()
-// 		response, err := provider.Generate(ctx,
-// 			llm.WithUserTextMessage("Say 'Service tier test'"),
-// 			llm.WithServiceTier("default"),
-// 			llm.WithTemperature(0.0),
-// 		)
-
-// 		require.NoError(t, err)
-// 		require.NotNil(t, response)
-// 		assert.NotEmpty(t, response.Message().Text())
-// 	})
-// }
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.NotEmpty(t, response.Message().Text())
+	})
+}
 
 // setupIntegrationProvider creates a provider for integration testing
 func setupIntegrationProvider(t *testing.T) *Provider {

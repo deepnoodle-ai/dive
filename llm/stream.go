@@ -77,10 +77,12 @@ type ResponseAccumulator struct {
 	complete bool
 }
 
+// NewResponseAccumulator creates a new ResponseAccumulator.
 func NewResponseAccumulator() *ResponseAccumulator {
 	return &ResponseAccumulator{}
 }
 
+// AddEvent adds an event to the ResponseAccumulator.
 func (r *ResponseAccumulator) AddEvent(event *Event) error {
 	switch event.Type {
 	case EventTypeMessageStart:

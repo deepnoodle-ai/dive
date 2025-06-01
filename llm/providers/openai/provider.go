@@ -454,7 +454,8 @@ func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, erro
 
 // convertResponse converts SDK response to llm.Response
 func convertResponse(response *responses.Response) (*llm.Response, error) {
-	var contentBlocks []llm.Content
+	// Initialize as empty slice to ensure Content is never nil
+	contentBlocks := make([]llm.Content, 0)
 
 	for _, item := range response.Output {
 		switch item.Type {
@@ -508,7 +509,6 @@ func convertResponse(response *responses.Response) (*llm.Response, error) {
 				ToolUseID: call.ID,
 				Content:   nil,
 			})
-			fmt.Println("web_search_call", item)
 
 		case "mcp_call":
 			mcpCall := item.AsMcpCall()
@@ -536,7 +536,7 @@ func convertResponse(response *responses.Response) (*llm.Response, error) {
 			})
 
 		default:
-			fmt.Println("unknown item type", item.Type)
+			// fmt.Println("unknown item type", item.Type)
 		}
 	}
 
@@ -547,10 +547,6 @@ func convertResponse(response *responses.Response) (*llm.Response, error) {
 
 	// Determine stop reason based on the response content and status
 	stopReason := determineStopReason(response)
-
-	for _, content := range contentBlocks {
-		fmt.Printf("content BLOCK: %+v\n", content)
-	}
 
 	return &llm.Response{
 		ID:         response.ID,

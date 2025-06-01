@@ -68,10 +68,6 @@ func (p *Provider) Name() string {
 	return "anthropic"
 }
 
-func (p *Provider) ModelName() string {
-	return p.model
-}
-
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)

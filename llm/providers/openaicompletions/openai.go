@@ -87,11 +87,7 @@ func New(opts ...Option) *Provider {
 }
 
 func (p *Provider) Name() string {
-	return "openaicompletions"
-}
-
-func (p *Provider) ModelName() string {
-	return p.model
+	return "openai-completions"
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {

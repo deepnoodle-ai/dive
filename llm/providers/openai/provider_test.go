@@ -25,6 +25,30 @@ func newInputMessage(role string, content string) *responses.EasyInputMessagePar
 	}
 }
 
+func newInputMessageV2(content string) responses.ResponseInputItemUnionParam {
+	textParam := &responses.ResponseInputTextParam{
+		Text: content,
+	}
+	contentArray := []responses.ResponseInputContentUnionParam{{
+		OfInputText: textParam,
+	}}
+	return responses.ResponseInputItemParamOfInputMessage(contentArray, "user")
+}
+
+func newOutputMessage(content string) responses.ResponseInputItemUnionParam {
+	textParam := &responses.ResponseOutputTextParam{
+		Text: content,
+		Type: "output_text",
+	}
+	// Create content array with the output text
+	contentArray := []responses.ResponseOutputMessageContentUnionParam{
+		{OfOutputText: textParam},
+	}
+	// Create a message with this content and role using the helper function
+	// Passing empty string for ID and no status
+	return responses.ResponseInputItemParamOfOutputMessage(contentArray, "", "")
+}
+
 func newInputImage(imageURL string) *responses.EasyInputMessageParam {
 	return &responses.EasyInputMessageParam{
 		Role: responses.EasyInputMessageRole("user"),
@@ -81,12 +105,11 @@ func TestConvertRequest(t *testing.T) {
 			},
 			wantLen: 2,
 			wantInputs: responses.ResponseInputParam{
-				responses.ResponseInputItemUnionParam{
-					OfMessage: newInputMessage("user", "First message"),
-				},
-				responses.ResponseInputItemUnionParam{
-					OfMessage: newInputMessage("assistant", "Second message"),
-				},
+				newInputMessageV2("First message"),
+				// responses.ResponseInputItemUnionParam{
+				// 	OfMessage: newInputMessage("user", "First message"),
+				// },
+				newOutputMessage("Second message"),
 			},
 		},
 		{
@@ -532,6 +555,7 @@ func TestConvertResponseBasicFields(t *testing.T) {
 	assert.Equal(t, llm.Assistant, result.Role)
 	assert.Equal(t, "end_turn", result.StopReason)
 	assert.NotNil(t, result.Content)
+	assert.Len(t, result.Content, 0) // Empty content array since mock doesn't have actual message content
 	assert.Equal(t, 15, result.Usage.InputTokens)
 	assert.Equal(t, 12, result.Usage.OutputTokens)
 	assert.Equal(t, 3, result.Usage.CacheReadInputTokens)

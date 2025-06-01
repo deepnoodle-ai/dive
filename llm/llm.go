@@ -8,9 +8,6 @@ type LLM interface {
 	// Name of the LLM provider
 	Name() string
 
-	// Name of the configured LLM model
-	ModelName() string
-
 	// Generate a response from the LLM by passing messages.
 	Generate(ctx context.Context, opts ...Option) (*Response, error)
 }

@@ -70,15 +70,3 @@ func (m *Message) WithContent(content ...Content) *Message {
 	m.Content = append(m.Content, content...)
 	return m
 }
-
-// WithImageData appends an image content block to the message.
-func (m *Message) WithImageData(mediaType, base64Data string) *Message {
-	m.Content = append(m.Content, &ImageContent{
-		Source: &ContentSource{
-			Type:      ContentSourceTypeBase64,
-			MediaType: mediaType,
-			Data:      base64Data,
-		},
-	})
-	return m
-}

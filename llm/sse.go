@@ -7,6 +7,12 @@ import (
 	"io"
 )
 
+// ServerSentEventsCallback is a callback that is called for each line of the
+// server-sent events stream.
+type ServerSentEventsCallback func(line string) error
+
+// ServerSentEventsReader reads SSE events from a reader a decodes them into
+// the parameter type T.
 type ServerSentEventsReader[T any] struct {
 	body        io.ReadCloser
 	reader      *bufio.Reader
@@ -14,6 +20,7 @@ type ServerSentEventsReader[T any] struct {
 	sseCallback ServerSentEventsCallback
 }
 
+// NewServerSentEventsReader creates a new ServerSentEventsReader.
 func NewServerSentEventsReader[T any](stream io.ReadCloser) *ServerSentEventsReader[T] {
 	return &ServerSentEventsReader[T]{
 		body:   stream,
@@ -21,15 +28,19 @@ func NewServerSentEventsReader[T any](stream io.ReadCloser) *ServerSentEventsRea
 	}
 }
 
+// WithSSECallback sets an optional callback that is called for each line of the
+// server-sent events stream.
 func (s *ServerSentEventsReader[T]) WithSSECallback(callback ServerSentEventsCallback) *ServerSentEventsReader[T] {
 	s.sseCallback = callback
 	return s
 }
 
+// Err returns the error that occurred while reading the SSE stream.
 func (s *ServerSentEventsReader[T]) Err() error {
 	return s.err
 }
 
+// Next reads the next event from the SSE stream.
 func (s *ServerSentEventsReader[T]) Next() (T, bool) {
 	var zero T
 	for {

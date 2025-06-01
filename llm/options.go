@@ -8,49 +8,6 @@ import (
 	"github.com/diveagents/dive/slogger"
 )
 
-// CacheControlType is used to control how the LLM caches responses.
-type CacheControlType string
-
-const (
-	CacheControlTypeEphemeral CacheControlType = "ephemeral"
-)
-
-func (c CacheControlType) String() string {
-	return string(c)
-}
-
-// ServerSentEventsCallback is a callback that is called for each line of the
-// server-sent events stream.
-type ServerSentEventsCallback func(line string) error
-
-// WebSearchConfig configures web search behavior for providers that support it
-type WebSearchConfig struct {
-	Enabled      bool          `json:"enabled"`
-	Domains      []string      `json:"domains,omitempty"`
-	ContextSize  string        `json:"context_size,omitempty"` // "low", "medium", "high"
-	UserLocation *UserLocation `json:"user_location,omitempty"`
-}
-
-// UserLocation represents geographical information for web search
-type UserLocation struct {
-	Country string  `json:"country,omitempty"`
-	Region  string  `json:"region,omitempty"`
-	City    string  `json:"city,omitempty"`
-	Lat     float64 `json:"lat,omitempty"`
-	Lon     float64 `json:"lon,omitempty"`
-}
-
-// ImageGenerationConfig configures image generation behavior for providers that support it
-type ImageGenerationConfig struct {
-	Enabled       bool   `json:"enabled"`
-	Size          string `json:"size,omitempty"`           // "1024x1024", "1024x1536", etc.
-	Quality       string `json:"quality,omitempty"`        // "low", "medium", "high", "auto"
-	Format        string `json:"format,omitempty"`         // "png", "jpeg", "webp"
-	Compression   *int   `json:"compression,omitempty"`    // 0-100 for JPEG/WebP
-	Background    string `json:"background,omitempty"`     // "transparent", "opaque", "auto"
-	PartialImages *int   `json:"partial_images,omitempty"` // 1-3 for streaming
-}
-
 // Option is a function that is used to adjust LLM configuration.
 type Option func(*Config)
 

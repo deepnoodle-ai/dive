@@ -244,10 +244,6 @@ func (m *mockLLM) Name() string {
 	return "mock-llm"
 }
 
-func (m *mockLLM) ModelName() string {
-	return "mock-model"
-}
-
 func (m *mockLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	return m.generateFunc(ctx, opts...)
 }
