@@ -277,6 +277,7 @@ func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, erro
 		var toolUseContent *llm.ToolUseContent
 		var toolResultContent *llm.ToolResultContent
 		var imgGenContent *llm.ImageContent
+		var assistantTextContent *llm.TextContent
 
 		for _, content := range msg.Content {
 			switch c := content.(type) {
@@ -287,6 +288,10 @@ func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, erro
 			case *llm.ImageContent:
 				if c.Source != nil && c.Source.GenerationID != "" {
 					imgGenContent = c
+				}
+			case *llm.TextContent:
+				if msg.Role == llm.Assistant {
+					assistantTextContent = c
 				}
 			}
 		}
@@ -312,6 +317,19 @@ func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, erro
 				"", // result, leave empty intentionally
 				imgGenContent.Source.GenerationStatus,
 			))
+		} else if assistantTextContent != nil {
+			textParam := &responses.ResponseOutputTextParam{
+				Text: assistantTextContent.Text,
+				Type: "output_text",
+			}
+			// Create content array with the output text
+			content := []responses.ResponseOutputMessageContentUnionParam{
+				{OfOutputText: textParam},
+			}
+			// Create a message with this content and role "assistant"
+			// Passing empty string for ID and no status
+			item := responses.ResponseInputItemParamOfOutputMessage(content, "", "")
+			inputItems = append(inputItems, item)
 		} else {
 			// Create OfMessage item with regular content
 			var contentItems []responses.ResponseInputContentUnionParam
@@ -319,11 +337,15 @@ func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, erro
 			for _, content := range msg.Content {
 				switch c := content.(type) {
 				case *llm.TextContent:
-					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-						OfInputText: &responses.ResponseInputTextParam{
-							Text: c.Text,
-						},
-					})
+					if msg.Role == llm.User {
+						contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
+							OfInputText: &responses.ResponseInputTextParam{
+								Text: c.Text,
+							},
+						})
+					} else {
+						// panic?
+					}
 
 				case *llm.RefusalContent:
 					// Unclear if this is the correct way to handle refusals.
@@ -481,11 +503,11 @@ func convertResponse(response *responses.Response) (*llm.Response, error) {
 			}
 
 		case "web_search_call":
-			// call := item.AsWebSearchCall()
-			// contentBlocks = append(contentBlocks, &llm.ToolResultContent{
-			// 	ToolUseID: call.CallID,
-			// 	Content:   call.Result,
-			// })
+			call := item.AsWebSearchCall()
+			contentBlocks = append(contentBlocks, &llm.WebSearchToolResultContent{
+				ToolUseID: call.ID,
+				Content:   nil,
+			})
 			fmt.Println("web_search_call", item)
 
 		case "mcp_call":
@@ -512,6 +534,9 @@ func convertResponse(response *responses.Response) (*llm.Response, error) {
 			contentBlocks = append(contentBlocks, &llm.TextContent{
 				Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", mcpApproval.Name, mcpApproval.ServerLabel),
 			})
+
+		default:
+			fmt.Println("unknown item type", item.Type)
 		}
 	}
 
@@ -522,6 +547,10 @@ func convertResponse(response *responses.Response) (*llm.Response, error) {
 
 	// Determine stop reason based on the response content and status
 	stopReason := determineStopReason(response)
+
+	for _, content := range contentBlocks {
+		fmt.Printf("content BLOCK: %+v\n", content)
+	}
 
 	return &llm.Response{
 		ID:         response.ID,

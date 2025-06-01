@@ -2,74 +2,88 @@
 
 package openai
 
-// // TestIntegration_SimpleTextGeneration tests basic text generation with real API calls
-// func TestIntegration_SimpleTextGeneration(t *testing.T) {
-// 	provider := setupIntegrationProvider(t)
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
 
-// 	ctx := context.Background()
-// 	response, err := provider.Generate(ctx,
-// 		llm.WithUserTextMessage("Say 'Integration test successful' and nothing else"),
-// 		llm.WithTemperature(0.0),
-// 	)
+	"github.com/diveagents/dive/llm"
+	"github.com/stretchr/testify/require"
+)
 
-// 	require.NoError(t, err)
-// 	require.NotNil(t, response)
-// 	assert.NotEmpty(t, response.ID)
-// 	assert.Equal(t, llm.Assistant, response.Role)
-// 	assert.NotEmpty(t, response.Message().Text())
-// 	assert.Contains(t, strings.ToLower(response.Message().Text()), "integration test successful")
-// }
+func TestIntegration_SimpleTextGeneration(t *testing.T) {
+	provider := setupIntegrationProvider(t)
 
-// // TestIntegration_MultipleMessages tests conversation with multiple messages
-// func TestIntegration_MultipleMessages(t *testing.T) {
-// 	provider := setupIntegrationProvider(t)
+	response, err := provider.Generate(
+		context.Background(),
+		llm.WithUserTextMessage("Say 'Integration test successful' and nothing else"),
+		llm.WithTemperature(0.0),
+	)
 
-// 	ctx := context.Background()
-// 	response, err := provider.Generate(ctx,
-// 		llm.WithMessages(
-// 			llm.NewUserTextMessage("I will ask you to remember a number. The number is: 42"),
-// 			llm.NewAssistantTextMessage("I will remember that the number is 42."),
-// 			llm.NewUserTextMessage("What was the number I asked you to remember?"),
-// 		),
-// 		llm.WithTemperature(0.0),
-// 	)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.NotEmpty(t, response.ID)
+	require.Equal(t, llm.Assistant, response.Role)
 
-// 	require.NoError(t, err)
-// 	require.NotNil(t, response)
-// 	assert.Contains(t, response.Message().Text(), "42")
-// }
+	text := response.Message().Text()
+	require.NotEmpty(t, text)
+	require.Equal(t,
+		"integration test successful",
+		strings.TrimSpace(strings.ToLower(text)))
+}
 
-// // TestIntegration_WebSearchTool tests the web search tool functionality
-// func TestIntegration_WebSearchTool(t *testing.T) {
-// 	provider := setupIntegrationProvider(t)
+func TestIntegration_MultipleMessages(t *testing.T) {
+	provider := setupIntegrationProvider(t)
 
-// 	webSearchTool := NewWebSearchTool(WebSearchToolOptions{
-// 		SearchContextSize: "medium",
-// 		UserLocation: &UserLocation{
-// 			Type:    "approximate",
-// 			Country: "US",
-// 		},
-// 	})
+	response, err := provider.Generate(
+		context.Background(),
+		llm.WithMessages(
+			llm.NewUserTextMessage("Respond with a totally random word"),
+			llm.NewAssistantTextMessage("The word is 'flabbergasted'"),
+			llm.NewUserTextMessage("Now respond with that word only"),
+		),
+		llm.WithTemperature(0.0),
+	)
 
-// 	ctx := context.Background()
-// 	response, err := provider.Generate(ctx,
-// 		llm.WithUserTextMessage("Search for the latest news about artificial intelligence and summarize one recent development"),
-// 		llm.WithTools(webSearchTool),
-// 		llm.WithTemperature(0.3),
-// 	)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	text := strings.TrimSpace(strings.ToLower(response.Message().Text()))
+	require.NotEmpty(t, text)
+	require.Equal(t, "flabbergasted", text)
+}
 
-// 	require.NoError(t, err)
-// 	require.NotNil(t, response)
-// 	assert.NotEmpty(t, response.Message().Text())
+// TestIntegration_WebSearchTool tests the web search tool functionality
+func TestIntegration_WebSearchTool(t *testing.T) {
+	provider := setupIntegrationProvider(t)
 
-// 	// The response should contain some information about AI news
-// 	text := strings.ToLower(response.Message().Text())
-// 	assert.True(t,
-// 		strings.Contains(text, "artificial intelligence") ||
-// 			strings.Contains(text, "ai") ||
-// 			strings.Contains(text, "machine learning"),
-// 		"Response should contain AI-related content: %s", response.Message().Text())
-// }
+	webSearchTool := NewWebSearchPreviewTool(
+		WebSearchPreviewToolOptions{
+			SearchContextSize: "medium",
+			UserLocation: &UserLocation{
+				Type:    "approximate",
+				Country: "US",
+			},
+		})
+
+	response, err := provider.Generate(
+		context.Background(),
+		llm.WithUserTextMessage("Search for the latest news on cryptocurrency"),
+		llm.WithTools(webSearchTool),
+		llm.WithTemperature(0.0),
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.NotEmpty(t, response.Message().Text())
+
+	// The response should contain some information about AI news
+	text := strings.ToLower(response.Message().Text())
+	require.True(t,
+		strings.Contains(text, "stock market") ||
+			strings.Contains(text, "stocks"),
+		"Response should contain stock market content: %s", response.Message().Text())
+}
 
 // // TestIntegration_ImageGenerationTool tests the image generation tool functionality
 // func TestIntegration_ImageGenerationTool(t *testing.T) {
@@ -317,25 +331,25 @@ package openai
 // 	})
 // }
 
-// // setupIntegrationProvider creates a provider for integration testing
-// func setupIntegrationProvider(t *testing.T) *Provider {
-// 	t.Helper()
+// setupIntegrationProvider creates a provider for integration testing
+func setupIntegrationProvider(t *testing.T) *Provider {
+	t.Helper()
 
-// 	// Skip if running in short mode
-// 	if testing.Short() {
-// 		t.Skip("Skipping integration test in short mode")
-// 	}
+	// Skip if running in short mode
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
 
-// 	// Check for API key
-// 	apiKey := os.Getenv("OPENAI_API_KEY")
-// 	if apiKey == "" {
-// 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
-// 	}
+	// Check for API key
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
 
-// 	// Create provider with reasonable defaults for testing
-// 	return New(
-// 		WithAPIKey(apiKey),
-// 		WithModel("gpt-4o"),
-// 		WithMaxTokens(1000),
-// 	)
-// }
+	// Create provider with reasonable defaults for testing
+	return New(
+		WithAPIKey(apiKey),
+		WithModel("gpt-4o"),
+		WithMaxTokens(1000),
+	)
+}
