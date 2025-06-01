@@ -74,7 +74,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, fmt.Errorf("error making request: %w", err)
 	}
 
-	return p.convertResponse(response)
+	return convertResponse(response)
 }
 
 // buildRequestParams converts llm.Config to responses.ResponseNewParams
@@ -83,17 +83,22 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		return responses.ResponseNewParams{}, fmt.Errorf("no messages provided")
 	}
 
-	// Convert messages to input format
-	input, err := p.convertMessagesToInput(config.Messages)
+	// Convert input messages to the OpenAI SDK input type
+	input, err := convertRequest(config.Messages)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
 
 	params := responses.ResponseNewParams{
-		Model: p.model,
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: input,
 		},
+	}
+
+	if config.Model != "" {
+		params.Model = config.Model
+	} else {
+		params.Model = p.model
 	}
 
 	if config.SystemPrompt != "" {
@@ -167,6 +172,18 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	if len(config.Tools) > 0 {
 		var tools []responses.ToolUnionParam
 		for _, tool := range config.Tools {
+			if toolImageGen, ok := tool.(*ImageGenerationTool); ok {
+				tools = append(tools, responses.ToolUnionParam{
+					OfImageGeneration: toolImageGen.Param(),
+				})
+				continue
+			}
+			if toolWebSearch, ok := tool.(*WebSearchPreviewTool); ok {
+				tools = append(tools, responses.ToolUnionParam{
+					OfWebSearchPreview: toolWebSearch.Param(),
+				})
+				continue
+			}
 			// Handle tools that explicitly provide a configuration
 			if toolWithConfig, ok := tool.(llm.ToolConfiguration); ok {
 				toolConfig := toolWithConfig.ToolConfiguration(p.Name())
@@ -247,33 +264,80 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	return params, nil
 }
 
-// convertMessagesToInput converts llm.Message slice to SDK input format
-func (p *Provider) convertMessagesToInput(messages []*llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
-	var inputItems []responses.ResponseInputItemUnionParam
+// convertRequest input messages to the OpenAI SDK input type
+func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, error) {
+	var inputItems responses.ResponseInputParam
 
 	for _, msg := range messages {
-		var contentItems []responses.ResponseInputContentUnionParam
+		if len(msg.Content) == 0 {
+			continue // Skip empty messages
+		}
+
+		// We have to separate out some types of content for special treatment
+		var toolUseContent *llm.ToolUseContent
+		var toolResultContent *llm.ToolResultContent
+		var imgGenContent *llm.ImageContent
 
 		for _, content := range msg.Content {
 			switch c := content.(type) {
-			case *llm.TextContent:
-				contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-					OfInputText: &responses.ResponseInputTextParam{
-						Text: c.Text,
-					},
-				})
-
-			case *llm.RefusalContent:
-				// Unclear if this is the correct way to handle refusals.
-				// OpenAI does not support refusals in the input?
-				contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-					OfInputText: &responses.ResponseInputTextParam{
-						Text: c.Text,
-					},
-				})
-
+			case *llm.ToolUseContent:
+				toolUseContent = c
+			case *llm.ToolResultContent:
+				toolResultContent = c
 			case *llm.ImageContent:
-				if c.Source != nil {
+				if c.Source != nil && c.Source.GenerationID != "" {
+					imgGenContent = c
+				}
+			}
+		}
+
+		if toolUseContent != nil {
+			inputItems = append(inputItems, responses.ResponseInputItemParamOfFunctionCall(
+				string(toolUseContent.Input), // arguments
+				toolUseContent.ID,            // callID
+				toolUseContent.Name,          // name
+			))
+		} else if toolResultContent != nil {
+			var output string
+			if contentStr, ok := toolResultContent.Content.(string); ok {
+				output = contentStr
+			}
+			inputItems = append(inputItems, responses.ResponseInputItemParamOfFunctionCallOutput(
+				toolResultContent.ToolUseID,
+				output,
+			))
+		} else if imgGenContent != nil {
+			inputItems = append(inputItems, responses.ResponseInputItemParamOfImageGenerationCall(
+				imgGenContent.Source.GenerationID,
+				"", // result, leave empty intentionally
+				imgGenContent.Source.GenerationStatus,
+			))
+		} else {
+			// Create OfMessage item with regular content
+			var contentItems []responses.ResponseInputContentUnionParam
+
+			for _, content := range msg.Content {
+				switch c := content.(type) {
+				case *llm.TextContent:
+					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
+						OfInputText: &responses.ResponseInputTextParam{
+							Text: c.Text,
+						},
+					})
+
+				case *llm.RefusalContent:
+					// Unclear if this is the correct way to handle refusals.
+					// OpenAI does not support refusals in the input?
+					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
+						OfInputText: &responses.ResponseInputTextParam{
+							Text: c.Text,
+						},
+					})
+
+				case *llm.ImageContent:
+					if c.Source == nil {
+						return nil, fmt.Errorf("image content source is required")
+					}
 					inputImage := &responses.ResponseInputImageParam{
 						Detail: responses.ResponseInputImageDetailAuto,
 					}
@@ -305,86 +369,69 @@ func (p *Provider) convertMessagesToInput(messages []*llm.Message) ([]responses.
 					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
 						OfInputImage: inputImage,
 					})
-				}
 
-			case *llm.DocumentContent:
-				if c.Source == nil {
-					return nil, fmt.Errorf("document content source is required")
-				}
-
-				var fileParam responses.ResponseInputFileParam
-
-				// Handle filename - preserve empty titles if explicitly set, otherwise default
-				if c.Title != "" {
-					fileParam.Filename = openai.String(c.Title)
-				} else {
-					fileParam.Filename = openai.String("document")
-				}
-
-				switch c.Source.Type {
-				case llm.ContentSourceTypeBase64:
-					if c.Source.MediaType == "" {
-						return nil, fmt.Errorf("media type is required for base64 document content")
+				case *llm.DocumentContent:
+					if c.Source == nil {
+						return nil, fmt.Errorf("document content source is required")
 					}
-					if c.Source.Data == "" {
-						return nil, fmt.Errorf("data is required for base64 document content")
-					}
-					// Create data URL format expected by OpenAI
-					dataURL := fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
-					fileParam.FileData = openai.String(dataURL)
+					var fileParam responses.ResponseInputFileParam
 
-				case llm.ContentSourceTypeFile:
-					if c.Source.FileID == "" {
-						return nil, fmt.Errorf("file ID is required for file-based document content")
+					// Handle filename - preserve empty titles if explicitly set, otherwise default
+					if c.Title != "" {
+						fileParam.Filename = openai.String(c.Title)
+					} else {
+						fileParam.Filename = openai.String("document")
 					}
-					fileParam.FileID = openai.String(c.Source.FileID)
 
-				case llm.ContentSourceTypeURL:
-					return nil, fmt.Errorf("URL-based document content is not supported by OpenAI Responses API - use file upload or base64 encoding instead")
+					switch c.Source.Type {
+					case llm.ContentSourceTypeBase64:
+						if c.Source.MediaType == "" {
+							return nil, fmt.Errorf("media type is required for base64 document content")
+						}
+						if c.Source.Data == "" {
+							return nil, fmt.Errorf("data is required for base64 document content")
+						}
+						// Create data URL format expected by OpenAI
+						dataURL := fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
+						fileParam.FileData = openai.String(dataURL)
+
+					case llm.ContentSourceTypeFile:
+						if c.Source.FileID == "" {
+							return nil, fmt.Errorf("file ID is required for file-based document content")
+						}
+						fileParam.FileID = openai.String(c.Source.FileID)
+
+					case llm.ContentSourceTypeURL:
+						return nil, fmt.Errorf("URL-based document content is not supported by OpenAI Responses API - use file upload or base64 encoding instead")
+
+					default:
+						return nil, fmt.Errorf("unsupported content source type for document: %v", c.Source.Type)
+					}
+
+					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
+						OfInputFile: &fileParam,
+					})
 
 				default:
-					return nil, fmt.Errorf("unsupported content source type for document: %v", c.Source.Type)
+					return nil, fmt.Errorf("unsupported content type: %T", c)
 				}
-
-				contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-					OfInputFile: &fileParam,
-				})
-
-			case *llm.ToolResultContent:
-				if contentStr, ok := c.Content.(string); ok {
-					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-						OfInputText: &responses.ResponseInputTextParam{
-							Text: contentStr,
-						},
-					})
-				}
-
-			case *llm.ToolUseContent:
-				contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-					OfInputText: &responses.ResponseInputTextParam{
-						Text: fmt.Sprintf("Tool use: %s", c.Name),
-					},
-				})
-
-			default:
-				return nil, fmt.Errorf("unsupported content type: %T", c)
 			}
-		}
 
-		inputItems = append(inputItems, responses.ResponseInputItemUnionParam{
-			OfMessage: &responses.EasyInputMessageParam{
-				Role: responses.EasyInputMessageRole(msg.Role),
-				Content: responses.EasyInputMessageContentUnionParam{
-					OfInputItemContentList: contentItems,
+			inputItems = append(inputItems, responses.ResponseInputItemUnionParam{
+				OfMessage: &responses.EasyInputMessageParam{
+					Role: responses.EasyInputMessageRole(msg.Role),
+					Content: responses.EasyInputMessageContentUnionParam{
+						OfInputItemContentList: contentItems,
+					},
 				},
-			},
-		})
+			})
+		}
 	}
 	return inputItems, nil
 }
 
 // convertResponse converts SDK response to llm.Response
-func (p *Provider) convertResponse(response *responses.Response) (*llm.Response, error) {
+func convertResponse(response *responses.Response) (*llm.Response, error) {
 	var contentBlocks []llm.Content
 
 	for _, item := range response.Output {
@@ -415,20 +462,31 @@ func (p *Provider) convertResponse(response *responses.Response) (*llm.Response,
 		case "image_generation_call":
 			imgCall := item.AsImageGenerationCall()
 			if imgCall.Result != "" {
+				imageType, err := llm.DetectImageType(imgCall.Result)
+				if err != nil {
+					// PNG is the default for OpenAI, so we'll use that if we
+					// can't detect the type. Sadly, the OpenAI response doesn't
+					// just include the image type in this block.
+					imageType = llm.ImageTypePNG
+				}
 				contentBlocks = append(contentBlocks, &llm.ImageContent{
 					Source: &llm.ContentSource{
-						Type:      llm.ContentSourceTypeBase64,
-						MediaType: "image/png",
-						Data:      imgCall.Result,
+						Type:             llm.ContentSourceTypeBase64,
+						GenerationID:     imgCall.ID,
+						GenerationStatus: imgCall.Status,
+						MediaType:        string(imageType),
+						Data:             imgCall.Result,
 					},
 				})
 			}
 
 		case "web_search_call":
-			// Handle web search results if they exist
-			contentBlocks = append(contentBlocks, &llm.TextContent{
-				Text: "Web search completed",
-			})
+			// call := item.AsWebSearchCall()
+			// contentBlocks = append(contentBlocks, &llm.ToolResultContent{
+			// 	ToolUseID: call.CallID,
+			// 	Content:   call.Result,
+			// })
+			fmt.Println("web_search_call", item)
 
 		case "mcp_call":
 			mcpCall := item.AsMcpCall()
@@ -463,7 +521,7 @@ func (p *Provider) convertResponse(response *responses.Response) (*llm.Response,
 	usage.CacheReadInputTokens = int(response.Usage.InputTokensDetails.CachedTokens)
 
 	// Determine stop reason based on the response content and status
-	stopReason := p.determineStopReason(response)
+	stopReason := determineStopReason(response)
 
 	return &llm.Response{
 		ID:         response.ID,
@@ -476,7 +534,7 @@ func (p *Provider) convertResponse(response *responses.Response) (*llm.Response,
 }
 
 // determineStopReason maps SDK response data to standard stop reasons
-func (p *Provider) determineStopReason(response *responses.Response) string {
+func determineStopReason(response *responses.Response) string {
 	// Check if the response contains any tool calls
 	for _, item := range response.Output {
 		if strings.HasSuffix(item.Type, "_call") {

@@ -13,7 +13,7 @@ import (
 
 func main() {
 	var modelName string
-	flag.StringVar(&modelName, "model", ollama.ModelMistral_7B, "The model to use")
+	flag.StringVar(&modelName, "model", ollama.ModelLlama32_3B, "The model to use")
 	flag.Parse()
 
 	// Create an Ollama provider. Assumes Ollama is running locally on the
@@ -27,7 +27,14 @@ func main() {
 
 	ctx := context.Background()
 
-	// Example 1: Simple text generation
+	// Run each example
+	simpleTextGeneration(ctx, provider)
+	streamingResponse(ctx, provider)
+	toolUsageExample(ctx, provider)
+}
+
+// simpleTextGeneration demonstrates basic text generation
+func simpleTextGeneration(ctx context.Context, provider llm.StreamingLLM) {
 	fmt.Println("=== Simple Text Generation ===")
 	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Explain quantum computing in two sentences."),
@@ -42,8 +49,10 @@ func main() {
 	fmt.Printf("Response: %s\n", response.Message().Text())
 	fmt.Printf("Usage: %d input tokens, %d output tokens\n\n",
 		response.Usage.InputTokens, response.Usage.OutputTokens)
+}
 
-	// Example 2: Streaming response
+// streamingResponse demonstrates streaming text generation
+func streamingResponse(ctx context.Context, provider llm.StreamingLLM) {
 	fmt.Println("=== Streaming Response ===")
 	iterator, err := provider.Stream(ctx,
 		llm.WithUserTextMessage("Write a short poem about artificial intelligence."),
@@ -72,8 +81,10 @@ func main() {
 	if err := iterator.Err(); err != nil {
 		log.Fatalf("Error during streaming: %v", err)
 	}
+}
 
-	// Example 3: Using tools (if your Ollama model supports function calling)
+// toolUsageExample demonstrates using tools with function calling
+func toolUsageExample(ctx context.Context, provider llm.StreamingLLM) {
 	fmt.Println("=== Tool Usage Example ===")
 
 	// Define a simple tool

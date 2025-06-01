@@ -3,74 +3,111 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"os"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/schema"
+	"github.com/fatih/color"
 )
 
 func main() {
-	provider := openai.New(
-		openai.WithModel("gpt-4o"),
-	)
+	provider := openai.New(openai.WithModel("gpt-4o"))
 
 	ctx := context.Background()
 
-	// Example 1: Basic generation
-	fmt.Println("=== Example 1: Basic generation ===")
-	response1, err := provider.Generate(ctx,
+	exampleBasicGeneration(ctx, provider)
+	// exampleWebSearch(ctx, provider)
+	exampleImageGeneration(ctx, provider)
+	exampleJSONSchema(ctx, provider)
+	exampleReasoning(ctx, provider)
+	exampleMCPIntegration(ctx, provider)
+	exampleMultipleMCPServers(ctx, provider)
+
+	fmt.Println("=== All examples completed ===")
+}
+
+func fatal(err error) {
+	if err != nil {
+		fmt.Println(color.RedString("Error: %s", err))
+		os.Exit(1)
+	}
+}
+
+func exampleBasicGeneration(ctx context.Context, provider llm.LLM) {
+	fmt.Println("=== Basic Generation ===")
+
+	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("What is the capital of France?"),
-		llm.WithTemperature(0.7),
 		llm.WithMaxTokens(100),
 	)
 	if err != nil {
-		log.Printf("Error in example 1: %v", err)
-	} else {
-		fmt.Printf("Response: %s\n\n", response1.Message().Text())
+		fatal(err)
 	}
+	fmt.Println(response.Message().Text())
+}
 
-	// Example 2: Web search with custom options using proper tool
-	fmt.Println("=== Example 2: Web search with custom options ===")
-	webSearchTool := openai.NewWebSearchTool(openai.WebSearchToolOptions{
-		SearchContextSize: "medium",
-		UserLocation: &openai.UserLocation{
-			Type:    "approximate",
-			Country: "US",
-		},
-	})
+func exampleWebSearch(ctx context.Context, provider llm.LLM) {
+	fmt.Println("=== Web Search Preview Tool ===")
 
-	response2, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("What are the latest developments in AI?"),
-		llm.WithTemperature(0.5),
-		llm.WithTools(webSearchTool),
+	tool := openai.NewWebSearchPreviewTool(
+		openai.WebSearchPreviewToolOptions{
+			SearchContextSize: "medium",
+			UserLocation: &openai.UserLocation{
+				Type:    "approximate",
+				Country: "US",
+			},
+		})
+
+	response, err := provider.Generate(ctx,
+		llm.WithUserTextMessage("What is the population of Spain?"),
+		llm.WithTools(tool),
 	)
 	if err != nil {
-		log.Printf("Error in example 2: %v", err)
-	} else {
-		fmt.Printf("Response with web search: %s\n\n", response2.Message().Text())
+		fatal(err)
 	}
+	fmt.Println(response.Message().Text())
+}
 
-	// Example 3: Image generation using proper tool
-	fmt.Println("=== Example 3: Image generation ===")
-	imageGenTool := openai.NewImageGenerationTool(openai.ImageGenerationToolOptions{
-		Size:       "1024x1024",
-		Quality:    "high",
-		Background: "auto",
-	})
+func exampleImageGeneration(ctx context.Context, provider llm.LLM) {
+	fmt.Println("=== Image Generation ===")
 
-	response3, err := provider.Generate(ctx,
+	tool := openai.NewImageGenerationTool(
+		openai.ImageGenerationToolOptions{
+			Size:       "1024x1024",
+			Quality:    "low",
+			Moderation: "low",
+		})
+
+	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Generate an image of a sunset over mountains"),
-		llm.WithTools(imageGenTool),
+		llm.WithTools(tool),
 	)
 	if err != nil {
-		log.Printf("Error in example 3: %v", err)
-	} else {
-		fmt.Printf("Image generation response: %s\n\n", response3.Message().Text())
+		fatal(err)
 	}
 
-	// Example 4: JSON schema output
-	fmt.Println("=== Example 4: JSON schema output ===")
+	message := response.Message()
+	fmt.Println(message.Text())
+
+	for _, content := range message.Content {
+		switch content := content.(type) {
+		case *llm.ImageContent:
+			imageData, err := content.Source.DecodedData()
+			if err != nil {
+				fatal(err)
+			}
+			if err := os.WriteFile("sunset.png", imageData, 0644); err != nil {
+				fatal(err)
+			}
+			fmt.Println(color.GreenString("Image written to sunset.png"))
+		}
+	}
+}
+
+func exampleJSONSchema(ctx context.Context, provider llm.LLM) {
+	fmt.Println("=== JSON Schema Output ===")
+
 	schema := schema.Schema{
 		Type: "object",
 		Properties: map[string]*schema.Property{
@@ -80,33 +117,36 @@ func main() {
 		Required: []string{"name", "age"},
 	}
 
-	response4, err := provider.Generate(ctx,
+	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Generate a person's information"),
 		llm.WithJSONSchema(schema),
 	)
 	if err != nil {
-		log.Printf("Error in example 4: %v", err)
-	} else {
-		fmt.Printf("JSON response: %s\n\n", response4.Message().Text())
+		fatal(err)
 	}
+	fmt.Println(response.Message().Text())
+}
 
-	// Example 5: Advanced configuration with reasoning
-	fmt.Println("=== Example 5: Advanced configuration ===")
-	response5, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Solve this complex math problem: What is the derivative of x^3 + 2x^2 - 5x + 1?"),
-		llm.WithTemperature(0.1), // Low temperature for precise math
+func exampleReasoning(ctx context.Context, provider llm.LLM) {
+	fmt.Println("=== Reasoning ===")
+
+	response, err := provider.Generate(ctx,
+		llm.WithModel("o3"),
 		llm.WithReasoningEffort("high"),
+		llm.WithUserTextMessage("What is the derivative of x^3 + 2x^2 - 5x + 1?"),
+		llm.WithMaxTokens(20000),
 	)
 	if err != nil {
-		log.Printf("Error in example 5: %v", err)
-	} else {
-		fmt.Printf("Math response: %s\n\n", response5.Message().Text())
+		fatal(err)
 	}
+	fmt.Println(response.Message().Text())
+}
 
-	// Example 6: MCP server integration (unified approach - same as Anthropic)
-	fmt.Println("=== Example 6: MCP server integration ===")
-	response6, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("What transport protocols are supported in the 2025-03-26 version of the MCP spec?"),
+func exampleMCPIntegration(ctx context.Context, provider llm.LLM) {
+	fmt.Println("=== MCP Server Integration ===")
+
+	response, err := provider.Generate(ctx,
+		llm.WithUserTextMessage("Name three Stephen King books"),
 		llm.WithMCPServers(llm.MCPServerConfig{
 			Type: "url",
 			Name: "deepwiki",
@@ -115,25 +155,26 @@ func main() {
 				Enabled:      true,
 				AllowedTools: []string{"ask_question"},
 			},
-			ApprovalRequirement: "never", // Skip approvals for this trusted server
+			ToolApproval: "never",
 		}),
 	)
 	if err != nil {
-		log.Printf("Error in example 6: %v", err)
-	} else {
-		fmt.Printf("MCP response: %s\n\n", response6.Message().Text())
+		fatal(err)
 	}
+	fmt.Println(response.Message().Text())
+}
 
-	// Example 6b: Multiple MCP servers with authentication
-	fmt.Println("=== Example 6b: Multiple MCP servers ===")
-	response6b, err := provider.Generate(ctx,
+func exampleMultipleMCPServers(ctx context.Context, provider llm.LLM) {
+	fmt.Println("=== Multiple MCP Servers ===")
+
+	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Search for Linear tickets and create a payment link"),
 		llm.WithMCPServers(
 			llm.MCPServerConfig{
 				Type:               "url",
 				Name:               "linear",
 				URL:                "https://mcp.linear.app/sse",
-				AuthorizationToken: "lin_api_example", // In practice, use os.Getenv("LINEAR_API_KEY")
+				AuthorizationToken: "lin_api_example",
 				ToolConfiguration: &llm.MCPToolConfiguration{
 					Enabled: true,
 				},
@@ -142,42 +183,19 @@ func main() {
 				Type:               "url",
 				Name:               "stripe",
 				URL:                "https://mcp.stripe.com",
-				AuthorizationToken: "sk_test_example", // In practice, use os.Getenv("STRIPE_API_KEY")
+				AuthorizationToken: "sk_test_example",
 				ToolConfiguration: &llm.MCPToolConfiguration{
 					Enabled: true,
 				},
-				// Example of selective approval - never require approval for read-only tools
-				ApprovalRequirement: llm.MCPApprovalRequirement{
-					Never: &llm.MCPNeverApproval{
-						ToolNames: []string{"list_products", "get_balance", "list_customers"},
-					},
+				ToolApprovalFilter: &llm.MCPToolApprovalFilter{
+					Always: []string{"list_products", "get_balance"},
+					Never:  []string{"list_customers"},
 				},
 			},
 		),
 	)
 	if err != nil {
-		log.Printf("Error in example 6b: %v", err)
-	} else {
-		fmt.Printf("Multiple MCP servers response: %s\n\n", response6b.Message().Text())
+		fatal(err)
 	}
-
-	// Example 8: Provider-specific options using the generic provider options mechanism
-	fmt.Println("=== Example 8: Provider-specific options ===")
-	response8, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Tell me about quantum computing"),
-		llm.WithTemperature(0.8),
-		// Example of using provider-specific options for features unique to OpenAI Responses
-		llm.WithProviderOption("openai-responses:custom_feature", true),
-		llm.WithProviderOptions(map[string]interface{}{
-			"openai-responses:experimental_mode":   "enhanced",
-			"openai-responses:processing_priority": "high",
-		}),
-	)
-	if err != nil {
-		log.Printf("Error in example 8: %v", err)
-	} else {
-		fmt.Printf("Response with provider options: %s\n\n", response8.Message().Text())
-	}
-
-	fmt.Println("=== All examples completed ===")
+	fmt.Println(response.Message().Text())
 }

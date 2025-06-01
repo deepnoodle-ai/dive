@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 )
@@ -70,6 +71,24 @@ type ContentSource struct {
 	// Chunks of content. Only use if chunking on the client side, for use
 	// within a DocumentContent block.
 	Content []*ContentChunk `json:"content,omitempty"`
+
+	// GenerationID is an ID associated with the generation of this content,
+	// if any. This may be set on content returned from image generation, for
+	// example. Used for OpenAI image generation results.
+	GenerationID string `json:"generation_id,omitempty"`
+
+	// GenerationStatus is the status of the generation of this content,
+	// if any. This may be set on content returned from image generation, for
+	// example. Used for OpenAI image generation results.
+	GenerationStatus string `json:"generation_status,omitempty"`
+}
+
+// DecodedData returns the decoded data if this content carries base64 encoded data.
+func (c *ContentSource) DecodedData() ([]byte, error) {
+	if c.Type == ContentSourceTypeBase64 {
+		return base64.StdEncoding.DecodeString(c.Data)
+	}
+	return nil, fmt.Errorf("cannot decode data content source type: %s", c.Type)
 }
 
 // Content is a single block of content in a message. A message may contain
@@ -195,6 +214,8 @@ func (c *RefusalContent) SetCacheControl(cacheControl *CacheControl) {
 
 //// ImageContent //////////////////////////////////////////////////////////////
 
+// https://docs.anthropic.com/en/docs/build-with-claude/vision
+
 /* Examples:
 {
   "type": "image",
@@ -210,6 +231,14 @@ func (c *RefusalContent) SetCacheControl(cacheControl *CacheControl) {
   "source": {
     "type": "url",
     "url": "https://upload.wikimedia.org/foo.jpg"
+  }
+}
+
+{
+  "type": "image",
+  "source": {
+    "type": "file",
+    "file_id": "file_abc123"
   }
 }
 */
@@ -452,6 +481,8 @@ func (c *ToolResultContent) SetCacheControl(cacheControl *CacheControl) {
 
 //// ServerToolUseContent //////////////////////////////////////////////////////
 
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool#response
+
 /* Examples:
 {
   "type": "server_tool_use",
@@ -485,6 +516,8 @@ func (c *ServerToolUseContent) MarshalJSON() ([]byte, error) {
 }
 
 //// WebSearchToolResultContent ////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool#response
 
 /* Examples:
 {
@@ -541,6 +574,8 @@ func (c *WebSearchToolResultContent) MarshalJSON() ([]byte, error) {
 }
 
 //// ThinkingContent ///////////////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking
 
 /* Examples:
 {
@@ -611,6 +646,8 @@ func (c *RedactedThinkingContent) MarshalJSON() ([]byte, error) {
 
 //// MCPToolUse ////////////////////////////////////////////////////////////////
 
+// https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector#mcp-tool-use-block
+
 /* Examples:
 {
   "type": "mcp_tool_use",
@@ -644,6 +681,8 @@ func (c *MCPToolUseContent) MarshalJSON() ([]byte, error) {
 }
 
 //// MCPToolResult //////////////////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector#mcp-tool-result-block
 
 /* Examples:
 {
@@ -681,6 +720,8 @@ func (c *MCPToolResultContent) MarshalJSON() ([]byte, error) {
 }
 
 //// CodeExecutionToolResult ///////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
 
 /* Examples:
    {

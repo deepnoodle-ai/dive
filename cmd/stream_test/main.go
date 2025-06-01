@@ -10,7 +10,7 @@ import (
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/openai"
+	openaic "github.com/diveagents/dive/llm/providers/openaicompletions"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/google"
 	"github.com/fatih/color"
@@ -107,7 +107,7 @@ func main() {
 	fmt.Println("")
 
 	// Capture OpenAI LLM events and response
-	events, response = stream(openai.New(), messages)
+	events, response = stream(openaic.New(), messages)
 	sb2.WriteString("---\n# OpenAI\n\n")
 	sb2.WriteString("## Events:\n")
 	sb2.WriteString(events)

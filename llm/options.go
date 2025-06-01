@@ -312,26 +312,26 @@ func WithJSONSchema(jsonSchema schema.Schema) Option {
 }
 
 // WithProviderOption sets a provider-specific option.
-func WithProviderOption(key string, value interface{}) Option {
-	return func(config *Config) {
-		if config.ProviderOptions == nil {
-			config.ProviderOptions = make(map[string]interface{})
-		}
-		config.ProviderOptions[key] = value
-	}
-}
+// func WithProviderOption(key string, value interface{}) Option {
+// 	return func(config *Config) {
+// 		if config.ProviderOptions == nil {
+// 			config.ProviderOptions = make(map[string]interface{})
+// 		}
+// 		config.ProviderOptions[key] = value
+// 	}
+// }
 
-// WithProviderOptions sets multiple provider-specific options.
-func WithProviderOptions(options map[string]interface{}) Option {
-	return func(config *Config) {
-		if config.ProviderOptions == nil {
-			config.ProviderOptions = make(map[string]interface{})
-		}
-		for k, v := range options {
-			config.ProviderOptions[k] = v
-		}
-	}
-}
+// // WithProviderOptions sets multiple provider-specific options.
+// func WithProviderOptions(options map[string]interface{}) Option {
+// 	return func(config *Config) {
+// 		if config.ProviderOptions == nil {
+// 			config.ProviderOptions = make(map[string]interface{})
+// 		}
+// 		for k, v := range options {
+// 			config.ProviderOptions[k] = v
+// 		}
+// 	}
+// }
 
 // WithServerSentEventsCallback sets the callback for the server-sent events stream.
 func WithServerSentEventsCallback(callback ServerSentEventsCallback) Option {

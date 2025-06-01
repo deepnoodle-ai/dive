@@ -3,11 +3,12 @@ package openai
 import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/schema"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/responses"
 )
 
 var (
-	_ llm.Tool              = &ImageGenerationTool{}
-	_ llm.ToolConfiguration = &ImageGenerationTool{}
+	_ llm.Tool = &ImageGenerationTool{}
 )
 
 /* A tool definition must be added in the request that looks like this:
@@ -20,6 +21,11 @@ var (
    }]
 */
 
+type ImageGenerationImageMask struct {
+	FileID   string
+	ImageURL string
+}
+
 // ImageGenerationToolOptions are the options used to configure an ImageGenerationTool.
 type ImageGenerationToolOptions struct {
 	Model             string // "gpt-image-1"
@@ -29,6 +35,8 @@ type ImageGenerationToolOptions struct {
 	OutputCompression *int   // 0-100 for JPEG/WebP formats
 	OutputFormat      string // "jpeg", "webp", or "png"
 	PartialImages     int    // 0-3 for streaming partial images
+	Moderation        string // "auto", "low"
+	ImageMask         *ImageGenerationImageMask
 }
 
 // NewImageGenerationTool creates a new ImageGenerationTool with the given options.
@@ -41,6 +49,8 @@ func NewImageGenerationTool(opts ImageGenerationToolOptions) *ImageGenerationToo
 		partialImages:     opts.PartialImages,
 		outputCompression: opts.OutputCompression,
 		outputFormat:      opts.OutputFormat,
+		moderation:        opts.Moderation,
+		imageMask:         opts.ImageMask,
 	}
 }
 
@@ -55,6 +65,8 @@ type ImageGenerationTool struct {
 	outputCompression *int
 	outputFormat      string
 	partialImages     int
+	moderation        string
+	imageMask         *ImageGenerationImageMask
 }
 
 func (t *ImageGenerationTool) Name() string {
@@ -69,30 +81,56 @@ func (t *ImageGenerationTool) Schema() schema.Schema {
 	return schema.Schema{} // Empty for server-side tools
 }
 
-func (t *ImageGenerationTool) ToolConfiguration(providerName string) map[string]any {
-	config := map[string]any{
-		"type": "image_generation",
-	}
-	if t.model != "" {
-		config["model"] = t.model
-	}
-	if t.size != "" {
-		config["size"] = t.size
-	}
-	if t.quality != "" {
-		config["quality"] = t.quality
-	}
-	if t.background != "" {
-		config["background"] = t.background
-	}
-	if t.outputCompression != nil {
-		config["compression"] = *t.outputCompression
+// func (t *ImageGenerationTool) ToolConfiguration(providerName string) map[string]any {
+// 	config := map[string]any{
+// 		"type": "image_generation",
+// 	}
+// 	if t.model != "" {
+// 		config["model"] = t.model
+// 	}
+// 	if t.size != "" {
+// 		config["size"] = t.size
+// 	}
+// 	if t.quality != "" {
+// 		config["quality"] = t.quality
+// 	}
+// 	if t.background != "" {
+// 		config["background"] = t.background
+// 	}
+// 	if t.partialImages > 0 {
+// 		config["partial_images"] = t.partialImages
+// 	}
+// 	if t.outputCompression != nil {
+// 		config["output_compression"] = *t.outputCompression
+// 	}
+// 	if t.outputFormat != "" {
+// 		config["output_format"] = t.outputFormat
+// 	}
+// 	return config
+// }
+
+func (t *ImageGenerationTool) Param() *responses.ToolImageGenerationParam {
+	param := &responses.ToolImageGenerationParam{
+		Model:        t.model,
+		Size:         t.size,
+		Quality:      t.quality,
+		Background:   t.background,
+		Moderation:   t.moderation,
+		OutputFormat: t.outputFormat,
 	}
 	if t.partialImages > 0 {
-		config["partial_images"] = t.partialImages
+		value := int64(t.partialImages)
+		param.PartialImages = openai.Int(value)
 	}
-	if t.outputFormat != "" {
-		config["format"] = t.outputFormat
+	if t.outputCompression != nil {
+		value := int64(*t.outputCompression)
+		param.OutputCompression = openai.Int(value)
 	}
-	return config
+	if t.imageMask != nil {
+		param.InputImageMask = responses.ToolImageGenerationInputImageMaskParam{
+			ImageURL: openai.String(t.imageMask.ImageURL),
+			FileID:   openai.String(t.imageMask.FileID),
+		}
+	}
+	return param
 }

@@ -66,19 +66,19 @@ type FunctionTool struct {
 	Description string        `json:"description,omitempty"`
 }
 
-// FileSearchTool searches for relevant content from uploaded files
-type FileSearchTool struct {
-	Type           string   `json:"type"` // "file_search"
-	VectorStoreIDs []string `json:"vector_store_ids"`
-	MaxNumResults  int      `json:"max_num_results,omitempty"`
-}
+// // FileSearchTool searches for relevant content from uploaded files
+// type FileSearchTool struct {
+// 	Type           string   `json:"type"` // "file_search"
+// 	VectorStoreIDs []string `json:"vector_store_ids"`
+// 	MaxNumResults  int      `json:"max_num_results,omitempty"`
+// }
 
-// WebSearchPreviewTool searches the web for relevant results to use in a response
-type WebSearchPreviewTool struct {
-	Type              string        `json:"type"`                          // "web_search_preview" or "web_search_preview_2025_03_11"
-	SearchContextSize string        `json:"search_context_size,omitempty"` // "low", "medium", or "high"
-	UserLocation      *UserLocation `json:"user_location,omitempty"`
-}
+// // WebSearchPreviewTool searches the web for relevant results to use in a response
+// type WebSearchPreviewTool struct {
+// 	Type              string        `json:"type"`                          // "web_search_preview" or "web_search_preview_2025_03_11"
+// 	SearchContextSize string        `json:"search_context_size,omitempty"` // "low", "medium", or "high"
+// 	UserLocation      *UserLocation `json:"user_location,omitempty"`
+// }
 
 // UserLocation represents user location for web search
 type UserLocation struct {

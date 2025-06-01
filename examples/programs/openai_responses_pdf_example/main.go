@@ -23,7 +23,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	provider := openai.New()
+	provider := openai.New(openai.WithModel("o3"))
 
 	var content []llm.Content
 
@@ -45,7 +45,8 @@ func main() {
 		)
 	}
 
-	response, err := provider.Generate(ctx, llm.WithMessages(llm.NewUserMessage(content...)))
+	response, err := provider.Generate(ctx,
+		llm.WithMessages(llm.NewUserMessage(content...)))
 	if err != nil {
 		log.Fatalf("Error generating response: %v", err)
 	}

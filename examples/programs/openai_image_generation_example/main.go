@@ -122,7 +122,7 @@ func main() {
 		editResponse, err := provider.Generate(ctx,
 			llm.WithUserTextMessage("Now add snow falling and make it a winter scene with warm light glowing from the cabin windows"),
 			llm.WithTools(editImageTool),
-			llm.WithProviderOption("openai-responses:previous_response_id", initialResponse.ID),
+			llm.WithPreviousResponseID(initialResponse.ID),
 		)
 		if err != nil {
 			log.Printf("Error in editing: %v", err)

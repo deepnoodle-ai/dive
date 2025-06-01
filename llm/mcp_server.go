@@ -6,14 +6,14 @@ type MCPToolConfiguration struct {
 }
 
 // MCPApprovalRequirement represents the approval requirements for MCP tools
-type MCPApprovalRequirement struct {
-	Never *MCPNeverApproval `json:"never,omitempty"`
-}
+// type MCPApprovalRequirement struct {
+// 	Never *MCPNeverApproval `json:"never,omitempty"`
+// }
 
-// MCPNeverApproval specifies tools that never require approval
-type MCPNeverApproval struct {
-	ToolNames []string `json:"tool_names"`
-}
+// // MCPNeverApproval specifies tools that never require approval
+// type MCPNeverApproval struct {
+// 	ToolNames []string `json:"tool_names"`
+// }
 
 // MCPServerConfig is used to configure an MCP server.
 // Corresponds to this Anthropic feature:
