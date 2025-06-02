@@ -69,24 +69,10 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, err
 	}
 
-	// data, err := json.MarshalIndent(params, "", "  ")
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error marshalling params: %w", err)
-	// }
-	// fmt.Println(string(data))
-
 	response, err := p.client.Responses.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("error making request: %w", err)
 	}
-	// fmt.Println("--------------------------------")
-
-	// data, err = json.MarshalIndent(response, "", "  ")
-	// if err != nil {
-	// 	return nil, fmt.Errorf("error marshalling response: %w", err)
-	// }
-	// fmt.Println(string(data))
-
 	return convertResponse(response)
 }
 
@@ -97,7 +83,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	}
 
 	// Convert input messages to the OpenAI SDK input type
-	input, err := convertRequest(config.Messages)
+	input, err := encodeMessages(config.Messages)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -275,204 +261,6 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		params.Tools = append(params.Tools, tool)
 	}
 	return params, nil
-}
-
-// convertRequest input messages to the OpenAI SDK input type
-func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, error) {
-
-	// reqData, err := json.MarshalIndent(messages, "", "  ")
-	// if err != nil {
-	// 	return responses.ResponseInputParam{}, fmt.Errorf("error marshalling messages: %w", err)
-	// }
-	// fmt.Println("--------------------------------")
-	// fmt.Println("CONVERT REQUEST")
-	// fmt.Println(string(reqData))
-	// fmt.Println("--------------------------------")
-
-	var inputItems responses.ResponseInputParam
-
-	for _, msg := range messages {
-		if len(msg.Content) == 0 {
-			continue // Skip empty messages
-		}
-
-		// We have to separate out some types of content for special treatment
-		var toolUseContent *llm.ToolUseContent
-		var toolResultContent *llm.ToolResultContent
-		var imgGenContent *llm.ImageContent
-		var assistantTextContent *llm.TextContent
-
-		for _, content := range msg.Content {
-			switch c := content.(type) {
-			case *llm.ToolUseContent:
-				toolUseContent = c
-			case *llm.ToolResultContent:
-				toolResultContent = c
-			case *llm.ImageContent:
-				if c.Source != nil && c.Source.GenerationID != "" {
-					imgGenContent = c
-				}
-			case *llm.TextContent:
-				if msg.Role == llm.Assistant {
-					assistantTextContent = c
-				}
-			}
-		}
-
-		if toolUseContent != nil {
-			inputItems = append(inputItems, responses.ResponseInputItemParamOfFunctionCall(
-				string(toolUseContent.Input), // arguments
-				toolUseContent.ID,            // callID
-				toolUseContent.Name,          // name
-			))
-		} else if toolResultContent != nil {
-			var output string
-			if contentStr, ok := toolResultContent.Content.(string); ok {
-				output = contentStr
-			}
-			inputItems = append(inputItems, responses.ResponseInputItemParamOfFunctionCallOutput(
-				toolResultContent.ToolUseID,
-				output,
-			))
-		} else if imgGenContent != nil {
-			inputItems = append(inputItems, responses.ResponseInputItemParamOfImageGenerationCall(
-				imgGenContent.Source.GenerationID,
-				"", // result, leave empty intentionally
-				imgGenContent.Source.GenerationStatus,
-			))
-		} else if assistantTextContent != nil {
-			textParam := &responses.ResponseOutputTextParam{
-				Text: assistantTextContent.Text,
-				Type: "output_text",
-			}
-			// Create content array with the output text
-			content := []responses.ResponseOutputMessageContentUnionParam{
-				{OfOutputText: textParam},
-			}
-			// Create a message with this content and role "assistant"
-			// Passing empty string for ID and no status
-			item := responses.ResponseInputItemParamOfOutputMessage(content, "", "")
-			inputItems = append(inputItems, item)
-		} else {
-			// Create OfMessage item with regular content
-			var contentItems []responses.ResponseInputContentUnionParam
-
-			for _, content := range msg.Content {
-				switch c := content.(type) {
-				case *llm.TextContent:
-					if msg.Role == llm.User {
-						contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-							OfInputText: &responses.ResponseInputTextParam{
-								Text: c.Text,
-							},
-						})
-					} else {
-						// panic?
-					}
-
-				case *llm.RefusalContent:
-					// Unclear if this is the correct way to handle refusals.
-					// OpenAI does not support refusals in the input?
-					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-						OfInputText: &responses.ResponseInputTextParam{
-							Text: c.Text,
-						},
-					})
-
-				case *llm.ImageContent:
-					if c.Source == nil {
-						return nil, fmt.Errorf("image content source is required")
-					}
-					inputImage := &responses.ResponseInputImageParam{
-						Detail: responses.ResponseInputImageDetailAuto,
-					}
-					switch c.Source.Type {
-					case llm.ContentSourceTypeBase64:
-						if c.Source.MediaType == "" || c.Source.Data == "" {
-							return nil, fmt.Errorf("media type and data are required for base64 image content")
-						}
-						// Create data URL for base64 image data
-						dataURL := fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
-						inputImage.ImageURL = openai.String(dataURL)
-
-					case llm.ContentSourceTypeURL:
-						if c.Source.URL == "" {
-							return nil, fmt.Errorf("URL is required for URL-based image content")
-						}
-						inputImage.ImageURL = openai.String(c.Source.URL)
-
-					case llm.ContentSourceTypeFile:
-						if c.Source.FileID == "" {
-							return nil, fmt.Errorf("file ID is required for file-based image content")
-						}
-						inputImage.FileID = openai.String(c.Source.FileID)
-
-					default:
-						return nil, fmt.Errorf("unsupported content source type for image: %v", c.Source.Type)
-					}
-
-					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-						OfInputImage: inputImage,
-					})
-
-				case *llm.DocumentContent:
-					if c.Source == nil {
-						return nil, fmt.Errorf("document content source is required")
-					}
-					var fileParam responses.ResponseInputFileParam
-
-					// Handle filename - preserve empty titles if explicitly set, otherwise default
-					if c.Title != "" {
-						fileParam.Filename = openai.String(c.Title)
-					} else {
-						fileParam.Filename = openai.String("document")
-					}
-
-					switch c.Source.Type {
-					case llm.ContentSourceTypeBase64:
-						if c.Source.MediaType == "" {
-							return nil, fmt.Errorf("media type is required for base64 document content")
-						}
-						if c.Source.Data == "" {
-							return nil, fmt.Errorf("data is required for base64 document content")
-						}
-						// Create data URL format expected by OpenAI
-						dataURL := fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
-						fileParam.FileData = openai.String(dataURL)
-
-					case llm.ContentSourceTypeFile:
-						if c.Source.FileID == "" {
-							return nil, fmt.Errorf("file ID is required for file-based document content")
-						}
-						fileParam.FileID = openai.String(c.Source.FileID)
-
-					case llm.ContentSourceTypeURL:
-						return nil, fmt.Errorf("URL-based document content is not supported by OpenAI Responses API - use file upload or base64 encoding instead")
-
-					default:
-						return nil, fmt.Errorf("unsupported content source type for document: %v", c.Source.Type)
-					}
-
-					contentItems = append(contentItems, responses.ResponseInputContentUnionParam{
-						OfInputFile: &fileParam,
-					})
-
-				default:
-					return nil, fmt.Errorf("unsupported content type: %T", c)
-				}
-			}
-
-			inputItems = append(inputItems, responses.ResponseInputItemUnionParam{
-				OfMessage: &responses.EasyInputMessageParam{
-					Role: responses.EasyInputMessageRole(msg.Role),
-					Content: responses.EasyInputMessageContentUnionParam{
-						OfInputItemContentList: contentItems,
-					},
-				},
-			})
-		}
-	}
-	return inputItems, nil
 }
 
 // convertResponse converts SDK response to llm.Response

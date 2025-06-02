@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/diveagents/dive/llm"
@@ -10,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newInputMessage(role string, content string) *responses.EasyInputMessageParam {
-	return &responses.EasyInputMessageParam{
-		Role: responses.EasyInputMessageRole(role),
-		Content: responses.EasyInputMessageContentUnionParam{
-			OfInputItemContentList: []responses.ResponseInputContentUnionParam{
+func newInputMessage(role string, content string) responses.ResponseInputItemUnionParam {
+	return responses.ResponseInputItemUnionParam{
+		OfInputMessage: &responses.ResponseInputItemMessageParam{
+			Role: role,
+			Content: responses.ResponseInputMessageContentListParam{
 				{
 					OfInputText: &responses.ResponseInputTextParam{
 						Text: content,
@@ -23,30 +24,6 @@ func newInputMessage(role string, content string) *responses.EasyInputMessagePar
 			},
 		},
 	}
-}
-
-func newInputMessageV2(content string) responses.ResponseInputItemUnionParam {
-	textParam := &responses.ResponseInputTextParam{
-		Text: content,
-	}
-	contentArray := []responses.ResponseInputContentUnionParam{{
-		OfInputText: textParam,
-	}}
-	return responses.ResponseInputItemParamOfInputMessage(contentArray, "user")
-}
-
-func newOutputMessage(content string) responses.ResponseInputItemUnionParam {
-	textParam := &responses.ResponseOutputTextParam{
-		Text: content,
-		Type: "output_text",
-	}
-	// Create content array with the output text
-	contentArray := []responses.ResponseOutputMessageContentUnionParam{
-		{OfOutputText: textParam},
-	}
-	// Create a message with this content and role using the helper function
-	// Passing empty string for ID and no status
-	return responses.ResponseInputItemParamOfOutputMessage(contentArray, "", "")
 }
 
 func newInputImage(imageURL string) *responses.EasyInputMessageParam {
@@ -63,12 +40,11 @@ func newInputImage(imageURL string) *responses.EasyInputMessageParam {
 	}
 }
 
-func TestConvertRequest(t *testing.T) {
+func TestEncodeMessages(t *testing.T) {
 	tests := []struct {
-		name       string
-		messages   []*llm.Message
-		wantLen    int
-		wantInputs responses.ResponseInputParam
+		name     string
+		messages []*llm.Message
+		want     string
 	}{
 		{
 			name: "basic text message",
@@ -80,37 +56,7 @@ func TestConvertRequest(t *testing.T) {
 					},
 				},
 			},
-			wantLen: 1,
-			wantInputs: responses.ResponseInputParam{
-				responses.ResponseInputItemUnionParam{
-					OfMessage: newInputMessage("user", "Hello, world!"),
-				},
-			},
-		},
-		{
-			name: "multiple messages",
-			messages: []*llm.Message{
-				{
-					Role: llm.User,
-					Content: []llm.Content{
-						&llm.TextContent{Text: "First message"},
-					},
-				},
-				{
-					Role: llm.Assistant,
-					Content: []llm.Content{
-						&llm.TextContent{Text: "Second message"},
-					},
-				},
-			},
-			wantLen: 2,
-			wantInputs: responses.ResponseInputParam{
-				newInputMessageV2("First message"),
-				// responses.ResponseInputItemUnionParam{
-				// 	OfMessage: newInputMessage("user", "First message"),
-				// },
-				newOutputMessage("Second message"),
-			},
+			want: `[{"content":[{"text":"Hello, world!","type":"input_text"}],"role":"user"}]`,
 		},
 		{
 			name: "image content via URL",
@@ -127,12 +73,7 @@ func TestConvertRequest(t *testing.T) {
 					},
 				},
 			},
-			wantLen: 1,
-			wantInputs: responses.ResponseInputParam{
-				responses.ResponseInputItemUnionParam{
-					OfMessage: newInputImage("https://example.com/image.jpg"),
-				},
-			},
+			want: `[{"content":[{"detail":"auto","image_url":"https://example.com/image.jpg","type":"input_image"}],"role":"user"}]`,
 		},
 		{
 			name: "image generation content",
@@ -152,37 +93,24 @@ func TestConvertRequest(t *testing.T) {
 					},
 				},
 			},
-			wantLen: 1,
-			wantInputs: responses.ResponseInputParam{
-				responses.ResponseInputItemParamOfImageGenerationCall(
-					"ig_888",
-					"",
-					"completed",
-				),
-			},
+			want: `[{"content":[{"detail":"auto","image_url":"data:image/jpeg;base64,base64data","type":"input_image"}],"role":"user"}]`,
 		},
 		{
 			name: "tool use content",
 			messages: []*llm.Message{
 				{
+					ID:   "fc_12345xyz",
 					Role: llm.Assistant,
 					Content: []llm.Content{
 						&llm.ToolUseContent{
-							ID:    "tool_123",
+							ID:    "call_12345xyz",
 							Name:  "get_weather",
 							Input: []byte(`{"city": "NYC"}`),
 						},
 					},
 				},
 			},
-			wantLen: 1,
-			wantInputs: responses.ResponseInputParam{
-				responses.ResponseInputItemParamOfFunctionCall(
-					`{"city": "NYC"}`, // arguments
-					"tool_123",        // callID
-					"get_weather",     // name
-				),
-			},
+			want: `[{"arguments":"{\"city\": \"NYC\"}","call_id":"call_12345xyz","name":"get_weather","type":"function_call"}]`,
 		},
 		{
 			name: "tool result content",
@@ -197,13 +125,7 @@ func TestConvertRequest(t *testing.T) {
 					},
 				},
 			},
-			wantLen: 1,
-			wantInputs: responses.ResponseInputParam{
-				responses.ResponseInputItemParamOfFunctionCallOutput(
-					"tool_123",             // toolUseID
-					"The weather is sunny", // output
-				),
-			},
+			want: `[{"call_id":"tool_123","output":"The weather is sunny","type":"function_call_output"}]`,
 		},
 		{
 			name: "empty messages are skipped",
@@ -219,28 +141,24 @@ func TestConvertRequest(t *testing.T) {
 					},
 				},
 			},
-			wantLen: 1,
-			wantInputs: responses.ResponseInputParam{
-				responses.ResponseInputItemUnionParam{
-					OfMessage: newInputMessage("user", "Non-empty message"),
-				},
-			},
+			want: `[{"content":[{"text":"Non-empty message","type":"input_text"}],"role":"user"}]`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := convertRequest(tt.messages)
+			result, err := encodeMessages(tt.messages)
 			require.NoError(t, err)
-			require.Len(t, result, tt.wantLen)
-			if tt.wantInputs != nil {
-				require.Equal(t, tt.wantInputs, result)
+			data, err := json.Marshal(result)
+			if err != nil {
+				t.Fatalf("error marshalling result: %v", err)
 			}
+			require.Equal(t, tt.want, string(data))
 		})
 	}
 }
 
-func TestConvertRequestErrors(t *testing.T) {
+func TestEncodeMessagesErrors(t *testing.T) {
 	tests := []struct {
 		name     string
 		messages []*llm.Message
@@ -302,13 +220,13 @@ func TestConvertRequestErrors(t *testing.T) {
 					},
 				},
 			},
-			wantErr: "URL-based document content is not supported by OpenAI Responses API",
+			wantErr: "url-based document content is not supported by openai",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := convertRequest(tt.messages)
+			_, err := encodeMessages(tt.messages)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
