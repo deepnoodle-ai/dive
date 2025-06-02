@@ -11,31 +11,40 @@ import (
 	"github.com/fatih/color"
 )
 
+var (
+	green  = color.New(color.FgGreen)
+	red    = color.New(color.FgRed)
+	cyan   = color.New(color.FgCyan)
+	italic = color.New(color.Italic)
+	bold   = color.New(color.Bold)
+)
+
 func main() {
 	provider := openai.New(openai.WithModel("gpt-4o"))
 
 	ctx := context.Background()
 
 	exampleBasicGeneration(ctx, provider)
-	// exampleWebSearch(ctx, provider)
-	exampleImageGeneration(ctx, provider)
-	exampleJSONSchema(ctx, provider)
+	exampleWebSearch(ctx, provider)
 	exampleReasoning(ctx, provider)
 	exampleMCPIntegration(ctx, provider)
-	exampleMultipleMCPServers(ctx, provider)
-
-	fmt.Println("=== All examples completed ===")
+	exampleImageGeneration(ctx, provider)
+	exampleJSONSchema(ctx, provider)
 }
 
 func fatal(err error) {
 	if err != nil {
-		fmt.Println(color.RedString("Error: %s", err))
+		fmt.Println(red.Sprintf("Error: %s", err))
 		os.Exit(1)
 	}
 }
 
+func header(text string) {
+	fmt.Println("\n" + bold.Sprintf("==== %s ====", text))
+}
+
 func exampleBasicGeneration(ctx context.Context, provider llm.LLM) {
-	fmt.Println("=== Basic Generation ===")
+	header("Basic Generation")
 
 	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("What is the capital of France?"),
@@ -44,11 +53,11 @@ func exampleBasicGeneration(ctx context.Context, provider llm.LLM) {
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Println(response.Message().Text())
+	fmt.Println(green.Sprint(response.Message().Text()))
 }
 
 func exampleWebSearch(ctx context.Context, provider llm.LLM) {
-	fmt.Println("=== Web Search Preview Tool ===")
+	header("Web Search Tool")
 
 	tool := openai.NewWebSearchPreviewTool(
 		openai.WebSearchPreviewToolOptions{
@@ -61,16 +70,17 @@ func exampleWebSearch(ctx context.Context, provider llm.LLM) {
 
 	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("What is the population of Spain?"),
+		llm.WithTemperature(0.0),
 		llm.WithTools(tool),
 	)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Println(response.Message().Text())
+	fmt.Println(green.Sprint(response.Message().Text()))
 }
 
 func exampleImageGeneration(ctx context.Context, provider llm.LLM) {
-	fmt.Println("=== Image Generation ===")
+	header("Image Generation")
 
 	tool := openai.NewImageGenerationTool(
 		openai.ImageGenerationToolOptions{
@@ -88,114 +98,98 @@ func exampleImageGeneration(ctx context.Context, provider llm.LLM) {
 	}
 
 	message := response.Message()
-	fmt.Println(message.Text())
+	fmt.Println(green.Sprint(message.Text()))
 
-	for _, content := range message.Content {
-		switch content := content.(type) {
-		case *llm.ImageContent:
-			imageData, err := content.Source.DecodedData()
-			if err != nil {
-				fatal(err)
-			}
-			if err := os.WriteFile("sunset.png", imageData, 0644); err != nil {
-				fatal(err)
-			}
-			fmt.Println(color.GreenString("Image written to sunset.png"))
+	if image, ok := message.ImageContent(); ok {
+		imageData, err := image.Source.DecodedData()
+		if err != nil {
+			fatal(err)
 		}
+		if err := os.WriteFile("sunset.png", imageData, 0644); err != nil {
+			fatal(err)
+		}
+		fmt.Println(italic.Sprint("Image written to sunset.png"))
+	} else {
+		fatal(fmt.Errorf("no image content found"))
 	}
 }
 
 func exampleJSONSchema(ctx context.Context, provider llm.LLM) {
-	fmt.Println("=== JSON Schema Output ===")
+	header("JSON Schema Output")
 
-	schema := schema.Schema{
-		Type: "object",
-		Properties: map[string]*schema.Property{
-			"name": {Type: "string"},
-			"age":  {Type: "integer"},
-		},
-		Required: []string{"name", "age"},
+	type Person struct {
+		Name string `json:"name" description:"The person's name"`
+		Age  int    `json:"age" description:"The person's age"`
+	}
+
+	schema, err := schema.Generate(Person{})
+	if err != nil {
+		fatal(err)
 	}
 
 	response, err := provider.Generate(ctx,
 		llm.WithUserTextMessage("Generate a person's information"),
-		llm.WithJSONSchema(schema),
+		llm.WithResponseFormat(&llm.ResponseFormat{
+			Name:        "person",
+			Description: "A person's information",
+			Type:        llm.ResponseFormatTypeJSONSchema,
+			Schema:      schema,
+		}),
 	)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Println(response.Message().Text())
+
+	var output Person
+	if err := response.Message().DecodeInto(&output); err != nil {
+		fatal(err)
+	}
+	fmt.Println(green.Sprintf("Output: %+v", output))
 }
 
 func exampleReasoning(ctx context.Context, provider llm.LLM) {
-	fmt.Println("=== Reasoning ===")
+	header("Reasoning")
 
 	response, err := provider.Generate(ctx,
 		llm.WithModel("o3"),
 		llm.WithReasoningEffort("high"),
+		llm.WithReasoningSummary("detailed"),
 		llm.WithUserTextMessage("What is the derivative of x^3 + 2x^2 - 5x + 1?"),
 		llm.WithMaxTokens(20000),
 	)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Println(response.Message().Text())
+	fmt.Println(green.Sprint(response.Message().Text()))
+
+	if thinking, ok := response.Message().ThinkingContent(); ok {
+		if thinking.Thinking != "" {
+			fmt.Println()
+			fmt.Println("Reasoning:", italic.Sprint(thinking.Thinking))
+		}
+		if thinking.Signature != "" {
+			fmt.Println()
+			fmt.Println("Reasoning signature:", cyan.Sprint(thinking.Signature))
+		}
+	}
 }
 
 func exampleMCPIntegration(ctx context.Context, provider llm.LLM) {
-	fmt.Println("=== MCP Server Integration ===")
+	header("MCP Server Integration")
+
+	question := "What are key components of the Risor VM? (github.com/risor-io/risor)"
 
 	response, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Name three Stephen King books"),
+		llm.WithModel("o3-mini"),
+		llm.WithUserTextMessage(question),
 		llm.WithMCPServers(llm.MCPServerConfig{
-			Type: "url",
-			Name: "deepwiki",
-			URL:  "https://mcp.deepwiki.com/mcp",
-			ToolConfiguration: &llm.MCPToolConfiguration{
-				Enabled:      true,
-				AllowedTools: []string{"ask_question"},
-			},
+			Name:         "deepwiki",
+			URL:          "https://mcp.deepwiki.com/mcp",
 			ToolApproval: "never",
 		}),
 	)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Println(response.Message().Text())
-}
-
-func exampleMultipleMCPServers(ctx context.Context, provider llm.LLM) {
-	fmt.Println("=== Multiple MCP Servers ===")
-
-	response, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Search for Linear tickets and create a payment link"),
-		llm.WithMCPServers(
-			llm.MCPServerConfig{
-				Type:               "url",
-				Name:               "linear",
-				URL:                "https://mcp.linear.app/sse",
-				AuthorizationToken: "lin_api_example",
-				ToolConfiguration: &llm.MCPToolConfiguration{
-					Enabled: true,
-				},
-			},
-			llm.MCPServerConfig{
-				Type:               "url",
-				Name:               "stripe",
-				URL:                "https://mcp.stripe.com",
-				AuthorizationToken: "sk_test_example",
-				ToolConfiguration: &llm.MCPToolConfiguration{
-					Enabled: true,
-				},
-				ToolApprovalFilter: &llm.MCPToolApprovalFilter{
-					Always: []string{"list_products", "get_balance"},
-					Never:  []string{"list_customers"},
-				},
-			},
-		),
-	)
-	if err != nil {
-		fatal(err)
-	}
-	fmt.Println(response.Message().Text())
+	fmt.Println(green.Sprint(response.Message().Text()))
 }

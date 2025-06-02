@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	DefaultModel     = openai.ChatModelGPT4
+	DefaultModel     = openai.ChatModelGPT4o
 	DefaultMaxTokens = 4096
 )
 
@@ -87,11 +87,9 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
-
 	params := responses.ResponseNewParams{
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: input,
-		},
+		Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input},
+		Store: openai.Bool(false),
 	}
 
 	if config.Model != "" {
@@ -116,10 +114,34 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		params.Temperature = openai.Float(*config.Temperature)
 	}
 
+	includes := map[Include]bool{}
+
 	// Handle reasoning effort
 	if config.ReasoningEffort != "" {
 		params.Reasoning = responses.ReasoningParam{
 			Effort: responses.ReasoningEffort(config.ReasoningEffort),
+		}
+		if config.ReasoningSummary != "" {
+			switch config.ReasoningSummary {
+			case "auto":
+				params.Reasoning.Summary = responses.ReasoningSummaryAuto
+			case "concise":
+				params.Reasoning.Summary = responses.ReasoningSummaryConcise
+			case "detailed":
+				params.Reasoning.Summary = responses.ReasoningSummaryDetailed
+			default:
+				return responses.ResponseNewParams{},
+					fmt.Errorf("invalid reasoning summary: %s", config.ReasoningSummary)
+			}
+		}
+		includes[IncludeReasoningEncryptedContent] = true
+	}
+
+	// Includes are used to include additional data in the response
+	if len(includes) > 0 {
+		params.Include = make([]responses.ResponseIncludable, 0, len(includes))
+		for include := range includes {
+			params.Include = append(params.Include, responses.ResponseIncludable(include))
 		}
 	}
 
@@ -144,6 +166,13 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 			params.ServiceTier = responses.ResponseNewParamsServiceTierFlex
 		default:
 			return responses.ResponseNewParams{}, fmt.Errorf("invalid service tier: %s", config.ServiceTier)
+		}
+	}
+
+	// Handle response format
+	if config.ResponseFormat != nil {
+		if err := applyResponseFormat(&params, config); err != nil {
+			return responses.ResponseNewParams{}, err
 		}
 	}
 
@@ -263,6 +292,54 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	return params, nil
 }
 
+// applyResponseFormat handles setting up response format options
+func applyResponseFormat(params *responses.ResponseNewParams, config *llm.Config) error {
+	format := config.ResponseFormat
+
+	switch format.Type {
+	case llm.ResponseFormatTypeJSONSchema:
+		if format.Schema == nil {
+			return fmt.Errorf("schema is required for json_schema response format")
+		}
+		if format.Name == "" {
+			return fmt.Errorf("name is required for json_schema response format")
+		}
+		schemaMap := format.Schema.AsMap()
+		schemaMap["additionalProperties"] = false
+		schema := &responses.ResponseFormatTextJSONSchemaConfigParam{
+			Type:   "json_schema",
+			Name:   format.Name,
+			Schema: schemaMap,
+			Strict: openai.Bool(true),
+		}
+		if format.Description != "" {
+			schema.Description = openai.String(format.Description)
+		}
+		params.Text = responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONSchema: schema,
+			},
+		}
+
+	case llm.ResponseFormatTypeJSON:
+		params.Text = responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONObject: &responses.ResponseFormatJSONObjectParam{
+					Type: "json_object",
+				},
+			},
+		}
+
+	case llm.ResponseFormatTypeText:
+		// Text is the default format, no need to set anything
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported response format type: %s", format.Type)
+	}
+	return nil
+}
+
 // convertResponse converts SDK response to llm.Response
 func convertResponse(response *responses.Response) (*llm.Response, error) {
 	// Initialize as empty slice to ensure Content is never nil
@@ -344,6 +421,18 @@ func convertResponse(response *responses.Response) (*llm.Response, error) {
 			mcpApproval := item.AsMcpApprovalRequest()
 			contentBlocks = append(contentBlocks, &llm.TextContent{
 				Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", mcpApproval.Name, mcpApproval.ServerLabel),
+			})
+
+		case "reasoning":
+			reasoning := item.AsReasoning()
+			var summaryItems []string
+			for _, summary := range reasoning.Summary {
+				summaryItems = append(summaryItems, summary.Text)
+			}
+			// Do we need to capture the reasoning.ID field?
+			contentBlocks = append(contentBlocks, &llm.ThinkingContent{
+				Thinking:  strings.Join(summaryItems, "\n\n"),
+				Signature: reasoning.EncryptedContent,
 			})
 
 		default:

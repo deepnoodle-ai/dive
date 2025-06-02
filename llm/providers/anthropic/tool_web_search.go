@@ -74,8 +74,8 @@ func (t *WebSearchTool) Description() string {
 	return "Uses Anthropic's web search feature to give Claude direct access to real-time web content."
 }
 
-func (t *WebSearchTool) Schema() schema.Schema {
-	return schema.Schema{} // Empty for server-side tools
+func (t *WebSearchTool) Schema() *schema.Schema {
+	return nil // Empty for server-side tools
 }
 
 func (t *WebSearchTool) ToolConfiguration(providerName string) map[string]any {

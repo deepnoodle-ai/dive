@@ -94,8 +94,8 @@ func (t *TextEditorTool) Description() string {
 	return "A filesystem editor tool that allows the agent to view, create, and edit files."
 }
 
-func (t *TextEditorTool) Schema() schema.Schema {
-	return schema.Schema{
+func (t *TextEditorTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type: "object",
 		Properties: map[string]*schema.Property{
 			"command": {
@@ -135,8 +135,8 @@ func (t *TextEditorTool) Schema() schema.Schema {
 	}
 }
 
-func (t *TextEditorTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "File Editor",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,

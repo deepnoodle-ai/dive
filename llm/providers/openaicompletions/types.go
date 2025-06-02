@@ -39,10 +39,10 @@ type Message struct {
 }
 
 type ToolFunction struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Parameters  schema.Schema `json:"parameters"`
-	Strict      bool          `json:"strict,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  *schema.Schema `json:"parameters"`
+	Strict      bool           `json:"strict,omitempty"`
 }
 
 type Tool struct {

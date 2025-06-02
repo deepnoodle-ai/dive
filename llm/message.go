@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -69,4 +71,36 @@ func (m *Message) WithText(text ...string) *Message {
 func (m *Message) WithContent(content ...Content) *Message {
 	m.Content = append(m.Content, content...)
 	return m
+}
+
+// ImageContent returns the first image content in the message, if any.
+func (m *Message) ImageContent() (*ImageContent, bool) {
+	for _, content := range m.Content {
+		if image, ok := content.(*ImageContent); ok {
+			return image, true
+		}
+	}
+	return nil, false
+}
+
+// ThinkingContent returns the first thinking content in the message, if any.
+func (m *Message) ThinkingContent() (*ThinkingContent, bool) {
+	for _, content := range m.Content {
+		if thinking, ok := content.(*ThinkingContent); ok {
+			return thinking, true
+		}
+	}
+	return nil, false
+}
+
+// DecodeInto decodes the last text content in the message as JSON into a given
+// Go object. This pairs with the WithResponseFormat request option.
+func (m *Message) DecodeInto(v any) error {
+	for i := len(m.Content) - 1; i >= 0; i-- {
+		switch content := m.Content[i].(type) {
+		case *TextContent:
+			return json.Unmarshal([]byte(content.Text), v)
+		}
+	}
+	return fmt.Errorf("no text content found")
 }

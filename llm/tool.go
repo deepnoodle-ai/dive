@@ -38,7 +38,7 @@ type Tool interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() schema.Schema
+	Schema() *schema.Schema
 }
 
 // ToolConfiguration is an interface that may be implemented by a Tool to
@@ -62,7 +62,7 @@ func NewToolDefinition() *ToolDefinition {
 type ToolDefinition struct {
 	name        string
 	description string
-	schema      schema.Schema
+	schema      *schema.Schema
 }
 
 // Name returns the name of the tool, per the Tool interface.
@@ -76,7 +76,7 @@ func (t *ToolDefinition) Description() string {
 }
 
 // Schema returns the schema of the tool, per the Tool interface.
-func (t *ToolDefinition) Schema() schema.Schema {
+func (t *ToolDefinition) Schema() *schema.Schema {
 	return t.schema
 }
 
@@ -93,7 +93,7 @@ func (t *ToolDefinition) WithDescription(description string) *ToolDefinition {
 }
 
 // WithSchema sets the schema of the tool.
-func (t *ToolDefinition) WithSchema(schema schema.Schema) *ToolDefinition {
+func (t *ToolDefinition) WithSchema(schema *schema.Schema) *ToolDefinition {
 	t.schema = schema
 	return t
 }

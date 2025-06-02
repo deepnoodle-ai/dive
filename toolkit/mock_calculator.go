@@ -27,8 +27,8 @@ func (t *MockCalculatorTool) Description() string {
 	return "Performs basic arithmetic calculations"
 }
 
-func (t *MockCalculatorTool) Schema() dive.Schema {
-	return dive.Schema{
+func (t *MockCalculatorTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"expression"},
 		Properties: map[string]*schema.Property{
@@ -45,8 +45,8 @@ func (t *MockCalculatorTool) Call(ctx context.Context, input *MockCalculatorInpu
 	return dive.NewToolResultText(t.Result), t.Error
 }
 
-func (t *MockCalculatorTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (t *MockCalculatorTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "Calculator",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,

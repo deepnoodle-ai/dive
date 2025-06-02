@@ -4,29 +4,41 @@ import (
 	"github.com/diveagents/dive/schema"
 )
 
-// Request represents the OpenAI Responses API request structure
-type Request struct {
-	Model              string            `json:"model"`
-	Input              []*InputMessage   `json:"input"`
-	Include            []string          `json:"include,omitempty"`
-	Instructions       string            `json:"instructions,omitempty"`
-	MaxOutputTokens    int               `json:"max_output_tokens,omitempty"`
-	Metadata           map[string]string `json:"metadata,omitempty"`
-	PreviousResponseID string            `json:"previous_response_id,omitempty"`
-	ServiceTier        string            `json:"service_tier,omitempty"`
-	Reasoning          *ReasoningConfig  `json:"reasoning,omitempty"`
-	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
-	Stream             *bool             `json:"stream,omitempty"`
-	Temperature        *float64          `json:"temperature,omitempty"`
-	Text               *TextConfig       `json:"text,omitempty"`
-	ToolChoice         interface{}       `json:"tool_choice,omitempty"`
-	Tools              []any             `json:"tools,omitempty"`
-}
+// Include is a type that represents different types of content that can be
+// optionally requested in OpenAI Responses API responses.
+type Include string
 
-// ReasoningConfig for o-series models
-type ReasoningConfig struct {
-	Effort *string `json:"effort,omitempty"` // "low", "medium", "high"
-}
+const (
+	IncludeReasoningEncryptedContent  Include = "reasoning.encrypted_content"
+	IncludeFileSearchCallResults      Include = "file_search_call.results"
+	IncludeInputImageURL              Include = "message.input_image.image_url"
+	IncludeComputerCallOutputImageURL Include = "computer_call_output.output.image_url"
+	IncludeCodeInterpreterCallOutputs Include = "code_interpreter_call.outputs"
+)
+
+// // Request represents the OpenAI Responses API request structure
+// type Request struct {
+// 	Model              string            `json:"model"`
+// 	Input              []*InputMessage   `json:"input"`
+// 	Include            []Include         `json:"include,omitempty"`
+// 	Instructions       string            `json:"instructions,omitempty"`
+// 	MaxOutputTokens    int               `json:"max_output_tokens,omitempty"`
+// 	Metadata           map[string]string `json:"metadata,omitempty"`
+// 	PreviousResponseID string            `json:"previous_response_id,omitempty"`
+// 	ServiceTier        string            `json:"service_tier,omitempty"`
+// 	Reasoning          *ReasoningConfig  `json:"reasoning,omitempty"`
+// 	ParallelToolCalls  *bool             `json:"parallel_tool_calls,omitempty"`
+// 	Stream             *bool             `json:"stream,omitempty"`
+// 	Temperature        *float64          `json:"temperature,omitempty"`
+// 	Text               *TextConfig       `json:"text,omitempty"`
+// 	ToolChoice         interface{}       `json:"tool_choice,omitempty"`
+// 	Tools              []any             `json:"tools,omitempty"`
+// }
+
+// // ReasoningConfig for o-series models
+// type ReasoningConfig struct {
+// 	Effort *string `json:"effort,omitempty"` // "low", "medium", "high"
+// }
 
 // TextConfig for text response configuration
 type TextConfig struct {
@@ -40,44 +52,21 @@ type TextFormat struct {
 }
 
 // InputMessage represents a message in the input
-type InputMessage struct {
-	Role    string          `json:"role"`
-	Content []*InputContent `json:"content"`
-}
-
-// InputContent represents content within a message
-type InputContent struct {
-	Type              string `json:"type"`
-	Text              string `json:"text,omitempty"`
-	ImageURL          string `json:"image_url,omitempty"`
-	Filename          string `json:"filename,omitempty"`
-	FileData          string `json:"file_data,omitempty"`
-	FileID            string `json:"file_id,omitempty"`
-	Approve           *bool  `json:"approve,omitempty"`
-	ApprovalRequestID string `json:"approval_request_id,omitempty"`
-}
-
-// FunctionTool defines a function the model can choose to call
-type FunctionTool struct {
-	Type        string        `json:"type"` // "function"
-	Name        string        `json:"name"`
-	Parameters  schema.Schema `json:"parameters"`
-	Strict      bool          `json:"strict"`
-	Description string        `json:"description,omitempty"`
-}
-
-// // FileSearchTool searches for relevant content from uploaded files
-// type FileSearchTool struct {
-// 	Type           string   `json:"type"` // "file_search"
-// 	VectorStoreIDs []string `json:"vector_store_ids"`
-// 	MaxNumResults  int      `json:"max_num_results,omitempty"`
+// type InputMessage struct {
+// 	Role    string          `json:"role"`
+// 	Content []*InputContent `json:"content"`
 // }
 
-// // WebSearchPreviewTool searches the web for relevant results to use in a response
-// type WebSearchPreviewTool struct {
-// 	Type              string        `json:"type"`                          // "web_search_preview" or "web_search_preview_2025_03_11"
-// 	SearchContextSize string        `json:"search_context_size,omitempty"` // "low", "medium", or "high"
-// 	UserLocation      *UserLocation `json:"user_location,omitempty"`
+// InputContent represents content within a message
+// type InputContent struct {
+// 	Type              string `json:"type"`
+// 	Text              string `json:"text,omitempty"`
+// 	ImageURL          string `json:"image_url,omitempty"`
+// 	Filename          string `json:"filename,omitempty"`
+// 	FileData          string `json:"file_data,omitempty"`
+// 	FileID            string `json:"file_id,omitempty"`
+// 	Approve           *bool  `json:"approve,omitempty"`
+// 	ApprovalRequestID string `json:"approval_request_id,omitempty"`
 // }
 
 // UserLocation represents user location for web search
@@ -89,50 +78,50 @@ type UserLocation struct {
 	Timezone string `json:"timezone,omitempty"` // e.g. "America/Los_Angeles"
 }
 
-// Response represents the OpenAI Responses API response structure
-type Response struct {
-	ID                 string             `json:"id"`
-	Object             string             `json:"object"`
-	CreatedAt          int64              `json:"created_at"`
-	Status             string             `json:"status"`
-	Error              *ResponseError     `json:"error,omitempty"`
-	IncompleteDetails  *IncompleteDetails `json:"incomplete_details,omitempty"`
-	Instructions       string             `json:"instructions,omitempty"`
-	MaxOutputTokens    int                `json:"max_output_tokens,omitempty"`
-	Model              string             `json:"model"`
-	Output             []OutputItem       `json:"output"`
-	ParallelToolCalls  bool               `json:"parallel_tool_calls"`
-	PreviousResponseID string             `json:"previous_response_id,omitempty"`
-	ServiceTier        string             `json:"service_tier,omitempty"`
-	Reasoning          *ReasoningResult   `json:"reasoning,omitempty"`
-	Store              bool               `json:"store"`
-	Temperature        float64            `json:"temperature"`
-	Text               *TextConfig        `json:"text,omitempty"`
-	ToolChoice         interface{}        `json:"tool_choice,omitempty"`
-	Tools              []any              `json:"tools"`
-	TopP               float64            `json:"top_p"`
-	Truncation         string             `json:"truncation"`
-	Usage              *Usage             `json:"usage,omitempty"`
-	User               string             `json:"user,omitempty"`
-	Metadata           map[string]string  `json:"metadata,omitempty"`
-}
+// // Response represents the OpenAI Responses API response structure
+// type Response struct {
+// 	ID                 string             `json:"id"`
+// 	Object             string             `json:"object"`
+// 	CreatedAt          int64              `json:"created_at"`
+// 	Status             string             `json:"status"`
+// 	Error              *ResponseError     `json:"error,omitempty"`
+// 	IncompleteDetails  *IncompleteDetails `json:"incomplete_details,omitempty"`
+// 	Instructions       string             `json:"instructions,omitempty"`
+// 	MaxOutputTokens    int                `json:"max_output_tokens,omitempty"`
+// 	Model              string             `json:"model"`
+// 	Output             []OutputItem       `json:"output"`
+// 	ParallelToolCalls  bool               `json:"parallel_tool_calls"`
+// 	PreviousResponseID string             `json:"previous_response_id,omitempty"`
+// 	ServiceTier        string             `json:"service_tier,omitempty"`
+// 	Reasoning          *ReasoningResult   `json:"reasoning,omitempty"`
+// 	Store              bool               `json:"store"`
+// 	Temperature        float64            `json:"temperature"`
+// 	Text               *TextConfig        `json:"text,omitempty"`
+// 	ToolChoice         interface{}        `json:"tool_choice,omitempty"`
+// 	Tools              []any              `json:"tools"`
+// 	TopP               float64            `json:"top_p"`
+// 	Truncation         string             `json:"truncation"`
+// 	Usage              *Usage             `json:"usage,omitempty"`
+// 	User               string             `json:"user,omitempty"`
+// 	Metadata           map[string]string  `json:"metadata,omitempty"`
+// }
 
-// ResponseError represents an error in the response
-type ResponseError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
+// // ResponseError represents an error in the response
+// type ResponseError struct {
+// 	Type    string `json:"type"`
+// 	Message string `json:"message"`
+// }
 
-// IncompleteDetails provides details about incomplete responses
-type IncompleteDetails struct {
-	Reason string `json:"reason"`
-}
+// // IncompleteDetails provides details about incomplete responses
+// type IncompleteDetails struct {
+// 	Reason string `json:"reason"`
+// }
 
-// ReasoningResult contains reasoning information for o-series models
-type ReasoningResult struct {
-	Effort  *string `json:"effort,omitempty"`
-	Summary *string `json:"summary,omitempty"`
-}
+// // ReasoningResult contains reasoning information for o-series models
+// type ReasoningResult struct {
+// 	Effort  *string `json:"effort,omitempty"`
+// 	Summary *string `json:"summary,omitempty"`
+// }
 
 // Usage represents token usage information
 type Usage struct {
@@ -205,37 +194,37 @@ type MCPToolDefinition struct {
 	InputSchema schema.Schema `json:"input_schema"`
 }
 
-// StreamEvent represents a streaming event from the Responses API
-type StreamEvent struct {
-	Type           string    `json:"type"`
-	SequenceNumber int       `json:"sequence_number,omitempty"`
-	Response       *Response `json:"response,omitempty"`
+// // StreamEvent represents a streaming event from the Responses API
+// type StreamEvent struct {
+// 	Type           string    `json:"type"`
+// 	SequenceNumber int       `json:"sequence_number,omitempty"`
+// 	Response       *Response `json:"response,omitempty"`
 
-	// Fields for output_item events
-	OutputIndex int         `json:"output_index,omitempty"`
-	Item        *OutputItem `json:"item,omitempty"`
+// 	// Fields for output_item events
+// 	OutputIndex int         `json:"output_index,omitempty"`
+// 	Item        *OutputItem `json:"item,omitempty"`
 
-	// Fields for content_part events
-	ItemID       string             `json:"item_id,omitempty"`
-	ContentIndex int                `json:"content_index,omitempty"`
-	Part         *StreamContentPart `json:"part,omitempty"`
+// 	// Fields for content_part events
+// 	ItemID       string             `json:"item_id,omitempty"`
+// 	ContentIndex int                `json:"content_index,omitempty"`
+// 	Part         *StreamContentPart `json:"part,omitempty"`
 
-	// Fields for delta events
-	Delta string `json:"delta,omitempty"`
+// 	// Fields for delta events
+// 	Delta string `json:"delta,omitempty"`
 
-	// Fields for done events
-	Text string `json:"text,omitempty"`
-}
+// 	// Fields for done events
+// 	Text string `json:"text,omitempty"`
+// }
 
-// StreamContentPart represents a content part in streaming events
-type StreamContentPart struct {
-	Type        string       `json:"type"`
-	Text        string       `json:"text,omitempty"`
-	Annotations []Annotation `json:"annotations,omitempty"`
-}
+// // StreamContentPart represents a content part in streaming events
+// type StreamContentPart struct {
+// 	Type        string       `json:"type"`
+// 	Text        string       `json:"text,omitempty"`
+// 	Annotations []Annotation `json:"annotations,omitempty"`
+// }
 
-// StreamResponse represents the structure of streaming responses
-type StreamResponse struct {
-	Type     string    `json:"type"`
-	Response *Response `json:"response,omitempty"`
-}
+// // StreamResponse represents the structure of streaming responses
+// type StreamResponse struct {
+// 	Type     string    `json:"type"`
+// 	Response *Response `json:"response,omitempty"`
+// }

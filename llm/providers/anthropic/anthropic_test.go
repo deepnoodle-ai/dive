@@ -56,7 +56,7 @@ func TestToolUse(t *testing.T) {
 	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*schema.Property{
@@ -92,7 +92,7 @@ func TestToolCallStream(t *testing.T) {
 	calculatorTool := llm.NewToolDefinition().
 		WithName("calculator").
 		WithDescription("Perform a calculation").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"operation", "a", "b"},
 			Properties: map[string]*schema.Property{

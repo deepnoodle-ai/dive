@@ -55,25 +55,9 @@ func (t *WebSearchPreviewTool) Description() string {
 	return "Uses OpenAI's web search feature to give models direct access to real-time web content."
 }
 
-func (t *WebSearchPreviewTool) Schema() schema.Schema {
-	return schema.Schema{} // Empty for server-side tools
+func (t *WebSearchPreviewTool) Schema() *schema.Schema {
+	return nil // Empty for server-side tools
 }
-
-// func (t *WebSearchPreviewTool) ToolConfiguration(providerName string) map[string]any {
-// 	config := map[string]any{
-// 		"type": "web_search_preview",
-// 	}
-// 	if len(t.domains) > 0 {
-// 		config["domains"] = t.domains
-// 	}
-// 	if t.searchContextSize != "" {
-// 		config["search_context_size"] = t.searchContextSize
-// 	}
-// 	if t.userLocation != nil {
-// 		config["user_location"] = t.userLocation
-// 	}
-// 	return config
-// }
 
 func (t *WebSearchPreviewTool) Param() *responses.WebSearchToolParam {
 	param := &responses.WebSearchToolParam{
@@ -89,10 +73,18 @@ func (t *WebSearchPreviewTool) Param() *responses.WebSearchToolParam {
 	}
 	if t.userLocation != nil {
 		param.UserLocation.Type = "approximate"
-		param.UserLocation.City = openai.String(t.userLocation.City)
-		param.UserLocation.Country = openai.String(t.userLocation.Country)
-		param.UserLocation.Region = openai.String(t.userLocation.Region)
-		param.UserLocation.Timezone = openai.String(t.userLocation.Timezone)
+		if t.userLocation.City != "" {
+			param.UserLocation.City = openai.String(t.userLocation.City)
+		}
+		if t.userLocation.Country != "" {
+			param.UserLocation.Country = openai.String(t.userLocation.Country)
+		}
+		if t.userLocation.Region != "" {
+			param.UserLocation.Region = openai.String(t.userLocation.Region)
+		}
+		if t.userLocation.Timezone != "" {
+			param.UserLocation.Timezone = openai.String(t.userLocation.Timezone)
+		}
 	}
 	return param
 }

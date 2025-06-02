@@ -63,8 +63,8 @@ func (t *ComputerTool) Description() string {
 	return "Uses Anthropic's computer feature to give Claude the ability to use a computer."
 }
 
-func (t *ComputerTool) Schema() schema.Schema {
-	return schema.Schema{} // Empty for server-side tools
+func (t *ComputerTool) Schema() *schema.Schema {
+	return nil // Empty for server-side tools
 }
 
 func (t *ComputerTool) ToolConfiguration(providerName string) map[string]any {

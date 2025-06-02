@@ -77,37 +77,9 @@ func (t *ImageGenerationTool) Description() string {
 	return "Uses OpenAI's image generation feature to create images from text prompts using the GPT Image model."
 }
 
-func (t *ImageGenerationTool) Schema() schema.Schema {
-	return schema.Schema{} // Empty for server-side tools
+func (t *ImageGenerationTool) Schema() *schema.Schema {
+	return nil // Empty for server-side tools
 }
-
-// func (t *ImageGenerationTool) ToolConfiguration(providerName string) map[string]any {
-// 	config := map[string]any{
-// 		"type": "image_generation",
-// 	}
-// 	if t.model != "" {
-// 		config["model"] = t.model
-// 	}
-// 	if t.size != "" {
-// 		config["size"] = t.size
-// 	}
-// 	if t.quality != "" {
-// 		config["quality"] = t.quality
-// 	}
-// 	if t.background != "" {
-// 		config["background"] = t.background
-// 	}
-// 	if t.partialImages > 0 {
-// 		config["partial_images"] = t.partialImages
-// 	}
-// 	if t.outputCompression != nil {
-// 		config["output_compression"] = *t.outputCompression
-// 	}
-// 	if t.outputFormat != "" {
-// 		config["output_format"] = t.outputFormat
-// 	}
-// 	return config
-// }
 
 func (t *ImageGenerationTool) Param() *responses.ToolImageGenerationParam {
 	param := &responses.ToolImageGenerationParam{

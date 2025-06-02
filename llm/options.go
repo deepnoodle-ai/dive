@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/diveagents/dive/schema"
 	"github.com/diveagents/dive/slogger"
 )
 
@@ -26,6 +25,7 @@ type Config struct {
 	FrequencyPenalty   *float64                 `json:"frequency_penalty,omitempty"`
 	ReasoningBudget    *int                     `json:"reasoning_budget,omitempty"`
 	ReasoningEffort    string                   `json:"reasoning_effort,omitempty"`
+	ReasoningSummary   string                   `json:"reasoning_summary,omitempty"`
 	Tools              []Tool                   `json:"tools,omitempty"`
 	ToolChoice         ToolChoice               `json:"tool_choice,omitempty"`
 	ToolChoiceName     string                   `json:"tool_choice_name,omitempty"`
@@ -34,14 +34,14 @@ type Config struct {
 	RequestHeaders     http.Header              `json:"request_headers,omitempty"`
 	MCPServers         []MCPServerConfig        `json:"mcp_servers,omitempty"`
 	Caching            *bool                    `json:"caching,omitempty"`
-	JSONSchema         schema.Schema            `json:"json_schema,omitempty"`
 	PreviousResponseID string                   `json:"previous_response_id,omitempty"`
 	ServiceTier        string                   `json:"service_tier,omitempty"`
 	ProviderOptions    map[string]interface{}   `json:"provider_options,omitempty"`
+	ResponseFormat     *ResponseFormat          `json:"response_format,omitempty"`
+	Messages           Messages                 `json:"messages"`
 	Hooks              Hooks                    `json:"-"`
 	Client             *http.Client             `json:"-"`
 	Logger             slogger.Logger           `json:"-"`
-	Messages           Messages                 `json:"-"`
 	SSECallback        ServerSentEventsCallback `json:"-"`
 }
 
@@ -102,8 +102,8 @@ func WithEndpoint(endpoint string) Option {
 	}
 }
 
-// WithClient sets the client.
-func WithClient(client *http.Client) Option {
+// WithHTTPClient sets the HTTP client.
+func WithHTTPClient(client *http.Client) Option {
 	return func(config *Config) {
 		config.Client = client
 	}
@@ -211,6 +211,13 @@ func WithReasoningEffort(reasoningEffort string) Option {
 	}
 }
 
+// WithReasoningSummary sets the reasoning summary for the interaction.
+func WithReasoningSummary(reasoningSummary string) Option {
+	return func(config *Config) {
+		config.ReasoningSummary = reasoningSummary
+	}
+}
+
 // WithFeatures sets the features for the interaction.
 func WithFeatures(features ...string) Option {
 	return func(config *Config) {
@@ -249,46 +256,30 @@ func WithMCPServers(servers ...MCPServerConfig) Option {
 	}
 }
 
+// WithResponseFormat sets the response format for the interaction.
+func WithResponseFormat(responseFormat *ResponseFormat) Option {
+	return func(config *Config) {
+		config.ResponseFormat = responseFormat
+	}
+}
+
+// WithPreviousResponseID sets the previous response ID for the interaction.
+// OpenAI only.
+// https://platform.openai.com/docs/guides/conversation-state?api-mode=responses#openai-apis-for-conversation-state
 func WithPreviousResponseID(previousResponseID string) Option {
 	return func(config *Config) {
 		config.PreviousResponseID = previousResponseID
 	}
 }
 
+// WithServiceTier sets the service tier for the interaction.
+// OpenAI only.
+// https://platform.openai.com/docs/api-reference/responses/create#responses-create-service_tier
 func WithServiceTier(serviceTier string) Option {
 	return func(config *Config) {
 		config.ServiceTier = serviceTier
 	}
 }
-
-// WithJSONSchema sets the JSON schema for structured output.
-func WithJSONSchema(jsonSchema schema.Schema) Option {
-	return func(config *Config) {
-		config.JSONSchema = jsonSchema
-	}
-}
-
-// WithProviderOption sets a provider-specific option.
-// func WithProviderOption(key string, value interface{}) Option {
-// 	return func(config *Config) {
-// 		if config.ProviderOptions == nil {
-// 			config.ProviderOptions = make(map[string]interface{})
-// 		}
-// 		config.ProviderOptions[key] = value
-// 	}
-// }
-
-// // WithProviderOptions sets multiple provider-specific options.
-// func WithProviderOptions(options map[string]interface{}) Option {
-// 	return func(config *Config) {
-// 		if config.ProviderOptions == nil {
-// 			config.ProviderOptions = make(map[string]interface{})
-// 		}
-// 		for k, v := range options {
-// 			config.ProviderOptions[k] = v
-// 		}
-// 	}
-// }
 
 // WithServerSentEventsCallback sets the callback for the server-sent events stream.
 func WithServerSentEventsCallback(callback ServerSentEventsCallback) Option {

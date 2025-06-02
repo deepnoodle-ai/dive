@@ -91,7 +91,7 @@ func toolUsageExample(ctx context.Context, provider llm.StreamingLLM) {
 	weatherTool := llm.NewToolDefinition().
 		WithName("get_weather").
 		WithDescription("Get the current weather for a location").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"location"},
 			Properties: map[string]*schema.Property{
