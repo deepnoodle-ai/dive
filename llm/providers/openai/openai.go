@@ -164,7 +164,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 
 	var contentBlocks []llm.Content
 	if choice.Message.Content != "" {
-		contentBlocks = append(contentBlocks, &llm.TextContent{Text: choice.Message.Content})
+		contentBlocks = append(contentBlocks, &llm.TextContent{Text: choice.Message.Content.(string)})
 	}
 
 	// Transform tool calls into content blocks (like Anthropic)
@@ -338,6 +338,8 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		var textContent string
 		var hasToolUse bool
 		var hasToolResult bool
+		var hasFile bool
+		var fileContent []map[string]any
 
 		// First pass: collect all tool use content blocks and check for tool results
 		for _, c := range msg.Content {
@@ -352,6 +354,16 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 						Arguments: string(c.Input),
 					},
 				})
+			case *llm.DocumentContent:
+				fileMap := map[string]interface{}{
+					"file_data": fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data),
+					"filename":  c.Title,
+				}
+				fileContent = append(fileContent, map[string]any{
+					"type": "file",
+					"file": fileMap,
+				})
+				hasFile = true
 			case *llm.TextContent:
 				textContent = c.Text
 			case *llm.ToolResultContent:
@@ -375,6 +387,13 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 				case *llm.TextContent:
 					if !hasToolUse {
 						result = append(result, Message{Role: role, Content: c.Text})
+					}
+				case *llm.DocumentContent:
+					if hasFile {
+						result = append(result, Message{
+							Role:    role,
+							Content: fileContent,
+						})
 					}
 				case *llm.ToolResultContent:
 					// Each tool result goes in its own message
