@@ -69,10 +69,23 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, err
 	}
 
+	// data, err := json.MarshalIndent(params, "", "  ")
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error marshalling params: %w", err)
+	// }
+	// fmt.Println(string(data))
+
 	response, err := p.client.Responses.New(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("error making request: %w", err)
 	}
+	// fmt.Println("--------------------------------")
+
+	// data, err = json.MarshalIndent(response, "", "  ")
+	// if err != nil {
+	// 	return nil, fmt.Errorf("error marshalling response: %w", err)
+	// }
+	// fmt.Println(string(data))
 
 	return convertResponse(response)
 }
@@ -266,6 +279,16 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 
 // convertRequest input messages to the OpenAI SDK input type
 func convertRequest(messages []*llm.Message) (responses.ResponseInputParam, error) {
+
+	// reqData, err := json.MarshalIndent(messages, "", "  ")
+	// if err != nil {
+	// 	return responses.ResponseInputParam{}, fmt.Errorf("error marshalling messages: %w", err)
+	// }
+	// fmt.Println("--------------------------------")
+	// fmt.Println("CONVERT REQUEST")
+	// fmt.Println(string(reqData))
+	// fmt.Println("--------------------------------")
+
 	var inputItems responses.ResponseInputParam
 
 	for _, msg := range messages {

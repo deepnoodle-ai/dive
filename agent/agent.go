@@ -257,8 +257,8 @@ func (a *Agent) prepareThreadMessages(
 	if err != nil {
 		return nil, nil, err
 	}
-	threadMessages := append(thread.Messages, messages...)
-	return thread, threadMessages, nil
+	thread.Messages = append(thread.Messages, messages...)
+	return thread, thread.Messages, nil
 }
 
 func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {

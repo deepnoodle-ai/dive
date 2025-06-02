@@ -36,7 +36,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	}
 	defer stream.Close()
 
-	var inToolUse bool
+	var inToolUse, incremental bool
 	toolUseAccum := ""
 	toolName := ""
 	toolID := ""
@@ -44,6 +44,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	for stream.Next(ctx) {
 		event := stream.Event()
 		if event.Type == dive.EventTypeLLMEvent {
+			incremental = true
 			payload := event.Item.Event
 			if payload.ContentBlock != nil {
 				cb := payload.ContentBlock
@@ -72,6 +73,11 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 				} else if delta.Thinking != "" {
 					fmt.Print(thinkingStyle.Sprint(delta.Thinking))
 				}
+			}
+		} else if event.Type == dive.EventTypeResponseCompleted {
+			if !incremental {
+				text := strings.TrimSpace(event.Response.OutputText())
+				fmt.Println(successStyle.Sprint(text))
 			}
 		}
 	}
