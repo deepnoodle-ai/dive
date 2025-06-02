@@ -2,6 +2,8 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
+	"os"
 	"strings"
 	"testing"
 
@@ -19,6 +21,31 @@ func TestHelloWorld(t *testing.T) {
 	require.NoError(t, err)
 	// The model might respond with "Hello!" or other variations, so we check case-insensitive
 	require.Contains(t, strings.ToLower(response.Message().Text()), "hello")
+}
+
+func TestFileInput(t *testing.T) {
+	ctx := context.Background()
+	provider := New()
+
+	content, err := os.ReadFile("testdata/hola.pdf")
+	require.NoError(t, err)
+	response, err := provider.Generate(ctx, llm.WithMessages(
+		llm.NewUserMessage(
+			&llm.DocumentContent{
+				Title: "file.pdf",
+				Source: &llm.ContentSource{
+					Type:      llm.ContentSourceTypeBase64,
+					MediaType: "application/pdf",
+					Data:      base64.StdEncoding.EncodeToString(content),
+				},
+				CacheControl: &llm.CacheControl{
+					Type: llm.CacheControlTypeEphemeral,
+				},
+			},
+		),
+	))
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(response.Message().Text()), "hola")
 }
 
 func TestHelloWorldStream(t *testing.T) {
