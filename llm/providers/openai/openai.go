@@ -163,8 +163,8 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	choice := result.Choices[0]
 
 	var contentBlocks []llm.Content
-	if choice.Message.Content != "" {
-		contentBlocks = append(contentBlocks, &llm.TextContent{Text: choice.Message.Content.(string)})
+	if t, ok := choice.Message.Content.(string); ok {
+		contentBlocks = append(contentBlocks, &llm.TextContent{Text: t})
 	}
 
 	// Transform tool calls into content blocks (like Anthropic)
@@ -355,7 +355,7 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 					},
 				})
 			case *llm.DocumentContent:
-				fileMap := map[string]interface{}{
+				fileMap := map[string]any{
 					"file_data": fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data),
 					"filename":  c.Title,
 				}
