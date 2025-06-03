@@ -251,7 +251,7 @@ func TestConvertResponse(t *testing.T) {
 		},
 	}
 
-	result, err := convertResponse(mockResponse)
+	result, err := decodeAssistantResponse(mockResponse)
 
 	require.NoError(t, err)
 	assert.Equal(t, "resp_123", result.ID)
@@ -293,7 +293,7 @@ func TestConvertResponseWithDifferentModels(t *testing.T) {
 				},
 			}
 
-			result, err := convertResponse(mockResponse)
+			result, err := decodeAssistantResponse(mockResponse)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, result.Model)
 		})
@@ -346,7 +346,7 @@ func TestConvertResponseWithVariedUsage(t *testing.T) {
 				},
 			}
 
-			result, err := convertResponse(mockResponse)
+			result, err := decodeAssistantResponse(mockResponse)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedInput, result.Usage.InputTokens)
 			assert.Equal(t, tt.expectedOutput, result.Usage.OutputTokens)
@@ -369,7 +369,7 @@ func TestConvertResponseWithCompletedStatus(t *testing.T) {
 		},
 	}
 
-	result, err := convertResponse(mockResponse)
+	result, err := decodeAssistantResponse(mockResponse)
 	require.NoError(t, err)
 	assert.Equal(t, "end_turn", result.StopReason)
 }
@@ -399,7 +399,7 @@ func TestConvertResponseWithToolCalls(t *testing.T) {
 				},
 			}
 
-			result, err := convertResponse(mockResponse)
+			result, err := decodeAssistantResponse(mockResponse)
 			require.NoError(t, err)
 			assert.Equal(t, "tool_use", result.StopReason)
 		})
@@ -422,7 +422,7 @@ func TestConvertResponseWithMultipleOutputItems(t *testing.T) {
 		},
 	}
 
-	result, err := convertResponse(mockResponse)
+	result, err := decodeAssistantResponse(mockResponse)
 	require.NoError(t, err)
 	assert.Equal(t, "resp_multi_test", result.ID)
 	// Should be tool_use because there are function and image generation calls
@@ -441,7 +441,7 @@ func TestConvertResponseWithEmptyOutput(t *testing.T) {
 		},
 	}
 
-	result, err := convertResponse(mockResponse)
+	result, err := decodeAssistantResponse(mockResponse)
 	require.NoError(t, err)
 	assert.Equal(t, "resp_empty_test", result.ID)
 	assert.Equal(t, "end_turn", result.StopReason)
@@ -465,7 +465,7 @@ func TestConvertResponseBasicFields(t *testing.T) {
 		},
 	}
 
-	result, err := convertResponse(mockResponse)
+	result, err := decodeAssistantResponse(mockResponse)
 
 	require.NoError(t, err)
 	assert.Equal(t, "resp_fields_test", result.ID)

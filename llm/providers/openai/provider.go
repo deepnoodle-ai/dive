@@ -73,7 +73,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, fmt.Errorf("error making request: %w", err)
 	}
-	return convertResponse(response)
+	return decodeAssistantResponse(response)
 }
 
 // buildRequestParams converts llm.Config to responses.ResponseNewParams
@@ -338,124 +338,6 @@ func applyResponseFormat(params *responses.ResponseNewParams, config *llm.Config
 		return fmt.Errorf("unsupported response format type: %s", format.Type)
 	}
 	return nil
-}
-
-// convertResponse converts SDK response to llm.Response
-func convertResponse(response *responses.Response) (*llm.Response, error) {
-	// Initialize as empty slice to ensure Content is never nil
-	contentBlocks := make([]llm.Content, 0)
-
-	for _, item := range response.Output {
-		switch item.Type {
-		case "message":
-			outputMsg := item.AsMessage()
-			for _, content := range outputMsg.Content {
-				switch content.Type {
-				case "output_text":
-					contentBlocks = append(contentBlocks, &llm.TextContent{
-						Text: content.AsOutputText().Text,
-					})
-				case "refusal":
-					contentBlocks = append(contentBlocks, &llm.RefusalContent{
-						Text: content.AsRefusal().Refusal,
-					})
-				}
-			}
-
-		case "function_call":
-			functionCall := item.AsFunctionCall()
-			contentBlocks = append(contentBlocks, &llm.ToolUseContent{
-				ID:    functionCall.CallID,
-				Name:  functionCall.Name,
-				Input: []byte(functionCall.Arguments),
-			})
-
-		case "image_generation_call":
-			imgCall := item.AsImageGenerationCall()
-			if imgCall.Result != "" {
-				imageType, err := llm.DetectImageType(imgCall.Result)
-				if err != nil {
-					// PNG is the default for OpenAI, so we'll use that if we
-					// can't detect the type. Sadly, the OpenAI response doesn't
-					// just include the image type in this block.
-					imageType = llm.ImageTypePNG
-				}
-				contentBlocks = append(contentBlocks, &llm.ImageContent{
-					Source: &llm.ContentSource{
-						Type:             llm.ContentSourceTypeBase64,
-						GenerationID:     imgCall.ID,
-						GenerationStatus: imgCall.Status,
-						MediaType:        string(imageType),
-						Data:             imgCall.Result,
-					},
-				})
-			}
-
-		case "web_search_call":
-			call := item.AsWebSearchCall()
-			contentBlocks = append(contentBlocks, &llm.WebSearchToolResultContent{
-				ToolUseID: call.ID,
-				Content:   nil,
-			})
-
-		case "mcp_call":
-			mcpCall := item.AsMcpCall()
-			if mcpCall.Output != "" {
-				contentBlocks = append(contentBlocks, &llm.TextContent{
-					Text: fmt.Sprintf("MCP tool result: %s", mcpCall.Output),
-				})
-			}
-
-		case "mcp_list_tools":
-			mcpList := item.AsMcpListTools()
-			var toolsText strings.Builder
-			toolsText.WriteString(fmt.Sprintf("MCP server '%s' tools:\n", mcpList.ServerLabel))
-			for _, tool := range mcpList.Tools {
-				toolsText.WriteString(fmt.Sprintf("- %s\n", tool.Name))
-			}
-			contentBlocks = append(contentBlocks, &llm.TextContent{
-				Text: toolsText.String(),
-			})
-
-		case "mcp_approval_request":
-			mcpApproval := item.AsMcpApprovalRequest()
-			contentBlocks = append(contentBlocks, &llm.TextContent{
-				Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", mcpApproval.Name, mcpApproval.ServerLabel),
-			})
-
-		case "reasoning":
-			reasoning := item.AsReasoning()
-			var summaryItems []string
-			for _, summary := range reasoning.Summary {
-				summaryItems = append(summaryItems, summary.Text)
-			}
-			// Do we need to capture the reasoning.ID field?
-			contentBlocks = append(contentBlocks, &llm.ThinkingContent{
-				Thinking:  strings.Join(summaryItems, "\n\n"),
-				Signature: reasoning.EncryptedContent,
-			})
-
-		default:
-			// fmt.Println("unknown item type", item.Type)
-		}
-	}
-
-	usage := llm.Usage{}
-	usage.InputTokens = int(response.Usage.InputTokens)
-	usage.OutputTokens = int(response.Usage.OutputTokens)
-	usage.CacheReadInputTokens = int(response.Usage.InputTokensDetails.CachedTokens)
-
-	// Determine stop reason based on the response content and status
-	stopReason := determineStopReason(response)
-
-	return &llm.Response{
-		ID:         response.ID,
-		Model:      string(response.Model),
-		Role:       llm.Assistant,
-		Content:    contentBlocks,
-		StopReason: stopReason,
-		Usage:      usage,
-	}, nil
 }
 
 // determineStopReason maps SDK response data to standard stop reasons
