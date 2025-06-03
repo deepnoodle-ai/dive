@@ -24,9 +24,9 @@ const (
 	ContentTypeMCPToolResult           ContentType = "mcp_tool_result"
 	ContentTypeMCPListTools            ContentType = "mcp_list_tools"
 	ContentTypeMCPApprovalRequest      ContentType = "mcp_approval_request"
+	ContentTypeMCPApprovalResponse     ContentType = "mcp_approval_response"
 	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
 	ContentTypeRefusal                 ContentType = "refusal"
-	ContentTypeMCPCall                 ContentType = "mcp_call"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -352,52 +352,6 @@ func (c *DocumentContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
-//// FileContent ///////////////////////////////////////////////////////////////
-
-/* Examples:
-{
-  "type": "file",
-  "filename": "draconomicon.pdf",
-  "file_data": "data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCg==",
-  "cache_control": {"type": "ephemeral"}
-}
-
-{
-  "type": "file",
-  "file_id": "file-abc123",
-  "cache_control": {"type": "ephemeral"}
-}
-*/
-
-type FileContent struct {
-	// Filename is the name of the file (required when using file_data)
-	Filename string `json:"filename,omitempty"`
-
-	// FileData is the base64-encoded file data with data URI format
-	// e.g., "data:application/pdf;base64,JVBERi0xLjQK..."
-	FileData string `json:"file_data,omitempty"`
-
-	// FileID is the OpenAI file ID (alternative to file_data)
-	FileID string `json:"file_id,omitempty"`
-
-	CacheControl *CacheControl `json:"cache_control,omitempty"`
-}
-
-func (c *FileContent) Type() ContentType {
-	return ContentTypeFile
-}
-
-func (c *FileContent) MarshalJSON() ([]byte, error) {
-	type Alias FileContent
-	return json.Marshal(struct {
-		Type ContentType `json:"type"`
-		*Alias
-	}{
-		Type:  ContentTypeFile,
-		Alias: (*Alias)(c),
-	})
-}
-
 //// ToolUseContent ////////////////////////////////////////////////////////////
 
 /* Examples:
@@ -597,8 +551,9 @@ func (c *WebSearchToolResultContent) MarshalJSON() ([]byte, error) {
 // use with extended thinking. Otherwise you can omit thinking blocks from
 // previous turns, or let the API strip them for you if you pass them back.
 type ThinkingContent struct {
+	ID        string `json:"id,omitempty"`
 	Thinking  string `json:"thinking"`
-	Signature string `json:"signature"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func (c *ThinkingContent) Type() ContentType {
@@ -805,6 +760,38 @@ func (c *MCPApprovalRequestContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
+//// MCPApprovalResponseContent /////////////////////////////////////////////////
+
+/* Examples:
+{
+  "type": "mcp_approval_response",
+  "approval_request_id": "mcpr_682d498e3bd4819196a0ce1664f8e77b04ad1e533afccbfa",
+  "approve": true,
+  "reason": "User confirmed."
+}
+*/
+
+type MCPApprovalResponseContent struct {
+	ApprovalRequestID string `json:"approval_request_id"`
+	Approve           bool   `json:"approve"`
+	Reason            string `json:"reason,omitempty"`
+}
+
+func (c *MCPApprovalResponseContent) Type() ContentType {
+	return ContentTypeMCPApprovalResponse
+}
+
+func (c *MCPApprovalResponseContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPApprovalResponseContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPApprovalResponse,
+		Alias: (*Alias)(c),
+	})
+}
+
 //// CodeExecutionToolResult ///////////////////////////////////////////////////
 
 // https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
@@ -848,46 +835,6 @@ func (c *CodeExecutionToolResultContent) MarshalJSON() ([]byte, error) {
 		Alias: (*Alias)(c),
 	})
 }
-
-//// MCPCallContent ////////////////////////////////////////////////////////////
-
-/* Examples:
-{
-  "type": "mcp_call",
-  "id": "mcp_682d437d90a88191bf88cd03aae0c3e503937d5f622d7a90",
-  "name": "ask_question",
-  "server_name": "deepwiki",
-  "arguments": "{\"repoName\":\"modelcontextprotocol/modelcontextprotocol\",\"question\":\"What transport protocols does the 2025-03-26 version of the MCP spec support?\"}",
-  "output": "The 2025-03-26 version of the Model Context Protocol (MCP) specification supports two standard transport mechanisms...",
-  "error": null,
-  "approval_request_id": null
-}
-*/
-
-// type MCPCallContent struct {
-// 	ID                string `json:"id"`
-// 	Name              string `json:"name"`
-// 	ServerName        string `json:"server_name"`
-// 	Arguments         string `json:"arguments"`
-// 	Output            string `json:"output,omitempty"`
-// 	Error             string `json:"error,omitempty"`
-// 	ApprovalRequestID string `json:"approval_request_id,omitempty"`
-// }
-
-// func (c *MCPCallContent) Type() ContentType {
-// 	return ContentTypeMCPCall
-// }
-
-// func (c *MCPCallContent) MarshalJSON() ([]byte, error) {
-// 	type Alias MCPCallContent
-// 	return json.Marshal(struct {
-// 		Type ContentType `json:"type"`
-// 		*Alias
-// 	}{
-// 		Type:  ContentTypeMCPCall,
-// 		Alias: (*Alias)(c),
-// 	})
-// }
 
 //// Unmarshalling /////////////////////////////////////////////////////////////
 
@@ -957,6 +904,8 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &CodeExecutionToolResultContent{}
 	case ContentTypeRefusal:
 		content = &RefusalContent{}
+	case ContentTypeMCPApprovalResponse:
+		content = &MCPApprovalResponseContent{}
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
 	}

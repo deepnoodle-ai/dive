@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -65,115 +66,127 @@ func messageType(message *llm.Message) (string, error) {
 	return "user", nil
 }
 
+// findAndEncodeMCPPair looks for an MCPToolResultContent corresponding to the
+// given MCPToolUseContent in the subsequent content items. If found, it encodes
+// them as a single MCP call parameter and returns the parameter along with the
+// index of the processed result. If no corresponding result is found, it encodes
+// only the MCPToolUseContent.
+func findAndEncodeMCPPair(
+	mcpToolUse *llm.MCPToolUseContent,
+	contentList []llm.Content,
+	currentIndex int,
+	processed map[int]bool,
+) (responses.ResponseInputItemUnionParam, int, error) {
+	mcpCallParam := &responses.ResponseInputItemMcpCallParam{
+		ID:          mcpToolUse.ID,
+		Arguments:   string(mcpToolUse.Input),
+		Name:        mcpToolUse.Name,
+		ServerLabel: mcpToolUse.ServerName,
+	}
+	pairedResultIndex := -1
+
+	// Look for corresponding MCPToolResultContent
+	for j := currentIndex + 1; j < len(contentList); j++ {
+		if processed[j] {
+			continue
+		}
+		if result, ok := contentList[j].(*llm.MCPToolResultContent); ok && result.ToolUseID == mcpToolUse.ID {
+			var text strings.Builder
+			for k, chunk := range result.Content {
+				if k > 0 {
+					text.WriteString("\n")
+				}
+				text.WriteString(chunk.Text)
+			}
+			if result.IsError {
+				mcpCallParam.Error = openai.String(text.String())
+			} else {
+				mcpCallParam.Output = openai.String(text.String())
+			}
+			pairedResultIndex = j
+			break
+		}
+	}
+	return responses.ResponseInputItemUnionParam{OfMcpCall: mcpCallParam}, pairedResultIndex, nil
+}
+
 func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
 	if message.Role != llm.Assistant {
 		return nil, fmt.Errorf("message role is not assistant")
 	}
-	content := make([]responses.ResponseInputItemUnionParam, 0, len(message.Content))
+	encodedItems := make([]responses.ResponseInputItemUnionParam, 0, len(message.Content))
 
 	// Track which content items we've already processed (for MCP pairing)
 	processed := make(map[int]bool)
 
 	for i, c := range message.Content {
 		if processed[i] {
-			continue // Skip if already processed as part of MCP pair
+			continue // Skip if already processed
 		}
-
-		// Special handling for MCP tool use - look ahead for corresponding result
 		if mcpToolUse, ok := c.(*llm.MCPToolUseContent); ok {
-			// Look for corresponding MCPToolResultContent
-			var mcpToolResult *llm.MCPToolResultContent
-			var resultIndex int = -1
-
-			for j := i + 1; j < len(message.Content); j++ {
-				if processed[j] {
-					continue
-				}
-				if result, ok := message.Content[j].(*llm.MCPToolResultContent); ok && result.ToolUseID == mcpToolUse.ID {
-					mcpToolResult = result
-					resultIndex = j
-					break
-				}
+			// Handle MCP tool use, potentially pairing it with a result
+			mcpCallParam, pairedResultIndex, err := findAndEncodeMCPPair(mcpToolUse, message.Content, i, processed)
+			if err != nil {
+				return nil, fmt.Errorf("error encoding MCP pair for tool use ID %s: %w", mcpToolUse.ID, err)
 			}
-
-			// Create combined MCP call
-			mcpCallParam := &responses.ResponseInputItemMcpCallParam{
-				ID:          mcpToolUse.ID,
-				Arguments:   string(mcpToolUse.Input),
-				Name:        mcpToolUse.Name,
-				ServerLabel: mcpToolUse.ServerName,
+			encodedItems = append(encodedItems, mcpCallParam)
+			processed[i] = true // Mark the MCPToolUseContent as processed
+			if pairedResultIndex != -1 {
+				processed[pairedResultIndex] = true // Mark the corresponding MCPToolResultContent as processed
 			}
-
-			// Add result information if found
-			if mcpToolResult != nil {
-				var text strings.Builder
-				for k, chunk := range mcpToolResult.Content {
-					if k > 0 {
-						text.WriteString("\n")
-					}
-					text.WriteString(chunk.Text)
-				}
-
-				if mcpToolResult.IsError {
-					mcpCallParam.Error = openai.String(text.String())
-				} else {
-					mcpCallParam.Output = openai.String(text.String())
-				}
-
-				// Mark result as processed so we don't encode it separately
-				processed[resultIndex] = true
-			}
-
-			content = append(content, responses.ResponseInputItemUnionParam{OfMcpCall: mcpCallParam})
-			processed[i] = true
+		} else if _, ok := c.(*llm.MCPToolResultContent); ok {
+			// If we encounter an MCPToolResultContent that hasn't been processed
+			// as part of a pair, it means it's an orphaned result. The current
+			// OpenAI spec implies results are always paired with a preceding
+			// use, so this case might indicate an issue or an unexpected message
+			// structure. For now, we'll skip encoding it directly as it should
+			// have been handled by findAndEncodeMCPPair.
+			// If strict adherence to pairing is required, an error could be
+			// returned here.
+			processed[i] = true // Mark as processed to avoid re-evaluation
 			continue
+		} else {
+			// Handle all other content types normally
+			encodedContent, err := encodeAssistantContent(c)
+			if err != nil {
+				return nil, fmt.Errorf("error encoding assistant content type %T: %w", c, err)
+			}
+			encodedItems = append(encodedItems, encodedContent)
+			processed[i] = true
 		}
-
-		// Handle all other content types normally
-		encodedContent, err := encodeAssistantContent(c)
-		if err != nil {
-			return nil, fmt.Errorf("error encoding assistant content: %w", err)
-		}
-		content = append(content, encodedContent)
-		processed[i] = true
 	}
-	return content, nil
+	return encodedItems, nil
 }
 
 func encodeAssistantContent(content llm.Content) (responses.ResponseInputItemUnionParam, error) {
 	switch c := content.(type) {
 	case *llm.TextContent:
 		return encodeAssistantTextContent(c)
-	case *llm.RefusalContent:
-		return encodeAssistantRefusalContent(c)
 	case *llm.ImageContent:
 		return encodeAssistantImageContent(c)
-	case *llm.DocumentContent:
-		return encodeAssistantDocumentContent(c)
-	case *llm.FileContent:
-		return encodeAssistantFileContent(c)
 	case *llm.ToolUseContent:
 		return encodeAssistantToolUseContent(c)
 	case *llm.ToolResultContent:
 		return encodeAssistantToolResultContent(c)
 	case *llm.ServerToolUseContent:
 		return encodeAssistantServerToolUseContent(c)
-	case *llm.WebSearchToolResultContent:
-		return encodeAssistantWebSearchToolResultContent(c)
 	case *llm.ThinkingContent:
 		return encodeAssistantThinkingContent(c)
-	case *llm.RedactedThinkingContent:
-		return encodeAssistantRedactedThinkingContent(c)
-	case *llm.CodeExecutionToolResultContent:
-		return encodeAssistantCodeExecutionToolResultContent(c)
+	case *CodeInterpreterCallContent:
+		return encodeAssistantCodeInterpreterCallContent(c)
+	case *llm.RefusalContent:
+		return encodeAssistantRefusalContent()
 	case *llm.MCPToolUseContent:
 		// MCP content is handled at the message level in encodeAssistantMessage
-		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("MCPToolUseContent should be handled at message level, not here")
+		return responses.ResponseInputItemUnionParam{},
+			fmt.Errorf("MCPToolUseContent processing error")
 	case *llm.MCPToolResultContent:
 		// MCP content is handled at the message level in encodeAssistantMessage
-		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("MCPToolResultContent should be handled at message level, not here")
+		return responses.ResponseInputItemUnionParam{},
+			fmt.Errorf("MCPToolResultContent processing error")
 	}
-	return responses.ResponseInputItemUnionParam{}, fmt.Errorf("unsupported content type: %T", content)
+	return responses.ResponseInputItemUnionParam{},
+		fmt.Errorf("unsupported assistant content type: %T", content)
 }
 
 func encodeAssistantTextContent(c *llm.TextContent) (responses.ResponseInputItemUnionParam, error) {
@@ -193,17 +206,12 @@ func encodeAssistantImageContent(c *llm.ImageContent) (responses.ResponseInputIt
 	if c.Source == nil || c.Source.GenerationID == "" {
 		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("image content has no generation id")
 	}
-	// Default status to "succeeded" if not specified
-	status := c.Source.GenerationStatus
-	if status == "" {
-		status = "succeeded"
-	}
 	// Create an image generation call reference with empty result
 	// This is used to reference a previously generated image
 	return responses.ResponseInputItemParamOfImageGenerationCall(
-		c.Source.GenerationID, // generation ID from the previous call
-		"",                    // result left blank for references
-		status,                // generation status
+		c.Source.GenerationID,
+		c.Source.Data,
+		c.Source.GenerationStatus,
 	), nil
 }
 
@@ -215,75 +223,22 @@ func encodeAssistantToolUseContent(c *llm.ToolUseContent) (responses.ResponseInp
 }
 
 func encodeAssistantThinkingContent(c *llm.ThinkingContent) (responses.ResponseInputItemUnionParam, error) {
-	summaryParam := responses.ResponseReasoningItemSummaryParam{
-		Type: "summary_text",
-		Text: c.Thinking,
-	}
-	reasoning := responses.ResponseReasoningItemParam{
-		ID:               "", // Can be empty for assistant reasoning
-		Summary:          []responses.ResponseReasoningItemSummaryParam{summaryParam},
-		EncryptedContent: openai.String(c.Signature),
-	}
-	return responses.ResponseInputItemUnionParam{OfReasoning: &reasoning}, nil
+	return responses.ResponseInputItemUnionParam{
+		OfReasoning: &responses.ResponseReasoningItemParam{
+			ID: c.ID,
+			Summary: []responses.ResponseReasoningItemSummaryParam{
+				{
+					Type: "summary_text",
+					Text: c.Thinking,
+				},
+			},
+			EncryptedContent: openai.String(c.Signature),
+		},
+	}, nil
 }
 
-func encodeAssistantRefusalContent(c *llm.RefusalContent) (responses.ResponseInputItemUnionParam, error) {
-	content := []responses.ResponseOutputMessageContentUnionParam{
-		{
-			OfRefusal: &responses.ResponseOutputRefusalParam{
-				Refusal: c.Text,
-				Type:    "refusal",
-			},
-		},
-	}
-	return responses.ResponseInputItemParamOfOutputMessage(content, "", ""), nil
-}
-
-func encodeAssistantDocumentContent(c *llm.DocumentContent) (responses.ResponseInputItemUnionParam, error) {
-	// Convert document content to a text message with document information
-	var text strings.Builder
-	if c.Title != "" {
-		text.WriteString(fmt.Sprintf("Document: %s\n", c.Title))
-	}
-	if c.Context != "" {
-		text.WriteString(fmt.Sprintf("Context: %s\n", c.Context))
-	}
-	if c.Source != nil && c.Source.Type == llm.ContentSourceTypeBase64 {
-		text.WriteString("Document content available as base64 data")
-	}
-
-	content := []responses.ResponseOutputMessageContentUnionParam{
-		{
-			OfOutputText: &responses.ResponseOutputTextParam{
-				Text: text.String(),
-				Type: "output_text",
-			},
-		},
-	}
-	return responses.ResponseInputItemParamOfOutputMessage(content, "", ""), nil
-}
-
-func encodeAssistantFileContent(c *llm.FileContent) (responses.ResponseInputItemUnionParam, error) {
-	// Convert file content to a text message with file information
-	var text strings.Builder
-	if c.Filename != "" {
-		text.WriteString(fmt.Sprintf("File: %s\n", c.Filename))
-	}
-	if c.FileID != "" {
-		text.WriteString(fmt.Sprintf("File ID: %s", c.FileID))
-	} else if c.FileData != "" {
-		text.WriteString("File data available")
-	}
-
-	content := []responses.ResponseOutputMessageContentUnionParam{
-		{
-			OfOutputText: &responses.ResponseOutputTextParam{
-				Text: text.String(),
-				Type: "output_text",
-			},
-		},
-	}
-	return responses.ResponseInputItemParamOfOutputMessage(content, "", ""), nil
+func encodeAssistantRefusalContent() (responses.ResponseInputItemUnionParam, error) {
+	return responses.ResponseInputItemUnionParam{}, errors.New("cannot proceed: refusal detected")
 }
 
 func encodeAssistantToolResultContent(c *llm.ToolResultContent) (responses.ResponseInputItemUnionParam, error) {
@@ -300,61 +255,102 @@ func encodeAssistantToolResultContent(c *llm.ToolResultContent) (responses.Respo
 		}
 		output = string(resultJSON)
 	}
-
 	param := responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output)
 	return param, nil
 }
 
 func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses.ResponseInputItemUnionParam, error) {
-	inputBytes, err := json.Marshal(c.Input)
-	if err != nil {
-		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("failed to marshal server tool input: %v", err)
+	switch c.Name {
+	case "web_search_call":
+		return responses.ResponseInputItemParamOfWebSearchCall(
+			c.ID,
+			responses.ResponseFunctionWebSearchStatusCompleted,
+		), nil
 	}
-	return responses.ResponseInputItemParamOfFunctionCall(string(inputBytes), c.ID, c.Name), nil
+	return responses.ResponseInputItemUnionParam{},
+		fmt.Errorf("unsupported server tool use name: %s", c.Name)
 }
 
-func encodeAssistantWebSearchToolResultContent(c *llm.WebSearchToolResultContent) (responses.ResponseInputItemUnionParam, error) {
-	// Encode as a web search call result with completed status
-	return responses.ResponseInputItemParamOfWebSearchCall(c.ToolUseID, responses.ResponseFunctionWebSearchStatusCompleted), nil
-}
-
-func encodeAssistantRedactedThinkingContent(c *llm.RedactedThinkingContent) (responses.ResponseInputItemUnionParam, error) {
-	reasoning := responses.ResponseReasoningItemParam{
-		ID:               "",
-		Summary:          []responses.ResponseReasoningItemSummaryParam{}, // Empty for redacted content
-		EncryptedContent: openai.String(c.Data),
+func encodeAssistantCodeInterpreterCallContent(c *CodeInterpreterCallContent) (responses.ResponseInputItemUnionParam, error) {
+	param := responses.ResponseCodeInterpreterToolCallParam{}
+	param.ID = c.ID
+	param.Code = c.Code
+	param.Status = responses.ResponseCodeInterpreterToolCallStatus(c.Status)
+	param.ContainerID = openai.String(c.ContainerID)
+	for _, result := range c.Results {
+		switch result.Type {
+		case "logs":
+			param.Results = append(param.Results, responses.ResponseCodeInterpreterToolCallResultUnionParam{
+				OfLogs: &responses.ResponseCodeInterpreterToolCallResultLogsParam{
+					Logs: result.Logs,
+				},
+			})
+		case "files":
+			filesParam := responses.ResponseCodeInterpreterToolCallResultFilesParam{}
+			for _, file := range result.Files {
+				filesParam.Files = append(filesParam.Files, responses.ResponseCodeInterpreterToolCallResultFilesFileParam{
+					FileID:   file.FileID,
+					MimeType: file.MimeType,
+				})
+			}
+			param.Results = append(param.Results, responses.ResponseCodeInterpreterToolCallResultUnionParam{
+				OfFiles: &filesParam,
+			})
+		}
 	}
-	return responses.ResponseInputItemUnionParam{OfReasoning: &reasoning}, nil
-}
-
-func encodeAssistantCodeExecutionToolResultContent(c *llm.CodeExecutionToolResultContent) (responses.ResponseInputItemUnionParam, error) {
-	// Convert code execution result to function call output
-	resultBytes, err := json.Marshal(c.Content)
-	if err != nil {
-		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("failed to marshal code execution result: %v", err)
-	}
-	return responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, string(resultBytes)), nil
+	return responses.ResponseInputItemUnionParam{OfCodeInterpreterCall: &param}, nil
 }
 
 func encodeUserMessage(message *llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
 	if message.Role != llm.User {
 		return nil, fmt.Errorf("message role is not user")
 	}
-	content := make([]responses.ResponseInputContentUnionParam, 0, len(message.Content))
+	contentItems := make([]responses.ResponseInputContentUnionParam, 0, len(message.Content))
+	var standaloneItems []responses.ResponseInputItemUnionParam
+
 	for _, c := range message.Content {
-		encodedContent, err := encodeUserContent(c)
-		if err != nil {
-			return nil, fmt.Errorf("error encoding user content: %w", err)
+		switch typedContent := c.(type) {
+		case *llm.MCPApprovalRequestContent:
+			item := responses.ResponseInputItemUnionParam{
+				OfMcpApprovalRequest: &responses.ResponseInputItemMcpApprovalRequestParam{
+					ID:          typedContent.ID,
+					Arguments:   typedContent.Arguments,
+					Name:        typedContent.Name,
+					ServerLabel: typedContent.ServerLabel,
+				},
+			}
+			standaloneItems = append(standaloneItems, item)
+		case *llm.MCPApprovalResponseContent:
+			approvalResponseParam := &responses.ResponseInputItemMcpApprovalResponseParam{
+				ApprovalRequestID: typedContent.ApprovalRequestID,
+				Approve:           typedContent.Approve,
+			}
+			if typedContent.Reason != "" {
+				approvalResponseParam.Reason = openai.String(typedContent.Reason)
+			}
+			item := responses.ResponseInputItemUnionParam{
+				OfMcpApprovalResponse: approvalResponseParam,
+			}
+			standaloneItems = append(standaloneItems, item)
+		case *llm.ThinkingContent:
+			// ThinkingContent is also handled as a standalone item (Reasoning)
+			standaloneItems = append(standaloneItems, encodeReasoningContent(typedContent))
+		default:
+			encodedContent, err := encodeUserContent(c)
+			if err != nil {
+				return nil, fmt.Errorf("error encoding user content: %w", err)
+			}
+			if encodedContent != nil { // encodeUserContent might return nil for types it doesn't handle as content parts
+				contentItems = append(contentItems, *encodedContent)
+			}
 		}
-		content = append(content, *encodedContent)
 	}
+
 	var items []responses.ResponseInputItemUnionParam
-	items = append(items, responses.ResponseInputItemParamOfInputMessage(content, "user"))
-	for _, c := range message.Content {
-		if thinking, ok := c.(*llm.ThinkingContent); ok {
-			items = append(items, encodeReasoningContent(thinking))
-		}
+	if len(contentItems) > 0 {
+		items = append(items, responses.ResponseInputItemParamOfInputMessage(contentItems, "user"))
 	}
+	items = append(items, standaloneItems...)
 	return items, nil
 }
 
@@ -366,8 +362,10 @@ func encodeUserContent(content llm.Content) (*responses.ResponseInputContentUnio
 		return encodeInputImageContent(c)
 	case *llm.DocumentContent:
 		return encodeInputDocumentContent(c)
+	case *llm.MCPApprovalRequestContent, *llm.MCPApprovalResponseContent, *llm.ThinkingContent:
+		return nil, nil // Indicate that this content type is handled at a higher level
 	}
-	return nil, fmt.Errorf("unsupported content type: %T", content)
+	return nil, fmt.Errorf("unsupported content type for user message content part: %T", content)
 }
 
 func encodeInputTextContent(c *llm.TextContent) (*responses.ResponseInputContentUnionParam, error) {
@@ -376,11 +374,12 @@ func encodeInputTextContent(c *llm.TextContent) (*responses.ResponseInputContent
 }
 
 func encodeReasoningContent(c *llm.ThinkingContent) responses.ResponseInputItemUnionParam {
-	param := responses.ResponseReasoningItemParam{
-		ID:               "",
-		EncryptedContent: openai.String(c.Signature),
+	return responses.ResponseInputItemUnionParam{
+		OfReasoning: &responses.ResponseReasoningItemParam{
+			ID:               "",
+			EncryptedContent: openai.String(c.Signature),
+		},
 	}
-	return responses.ResponseInputItemUnionParam{OfReasoning: &param}
 }
 
 func encodeInputImageContent(c *llm.ImageContent) (*responses.ResponseInputContentUnionParam, error) {

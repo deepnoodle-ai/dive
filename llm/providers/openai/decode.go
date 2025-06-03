@@ -145,12 +145,11 @@ func decodeImageGenerationCallContent(imgCall responses.ResponseOutputItemImageG
 }
 
 func decodeWebSearchCallContent(call responses.ResponseFunctionWebSearch) ([]llm.Content, error) {
-	// Web search call is a tool invocation, not a result
+	// https://platform.openai.com/docs/guides/tools-web-search?api-mode=responses
 	return []llm.Content{
-		&llm.ToolUseContent{
-			ID:    call.ID,
-			Name:  "web_search",
-			Input: []byte("{}"), // OpenAI web search calls don't include the query in the call object
+		&llm.ServerToolUseContent{
+			ID:   call.ID,
+			Name: "web_search_call",
 		},
 	}, nil
 }
@@ -245,83 +244,54 @@ func decodeReasoningContent(reasoning responses.ResponseReasoningItem) ([]llm.Co
 	// Do we need to capture the reasoning.ID field?
 	return []llm.Content{
 		&llm.ThinkingContent{
+			ID:        reasoning.ID,
 			Thinking:  strings.Join(summaryItems, "\n\n"),
 			Signature: reasoning.EncryptedContent,
 		},
 	}, nil
 }
 
-func decodeFileSearchCallContent(fileSearchCall responses.ResponseFileSearchToolCall) ([]llm.Content, error) {
-	// Use the actual queries from the file search call
-	var inputBytes []byte
-	if len(fileSearchCall.Queries) > 0 {
-		queriesJSON, err := json.Marshal(map[string]interface{}{
-			"queries": fileSearchCall.Queries,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling file search queries: %w", err)
+func decodeCodeInterpreterCallContent(codeCall responses.ResponseCodeInterpreterToolCall) ([]llm.Content, error) {
+	// Convert results from ResponseCodeInterpreterToolCall to CodeInterpreterCallResult
+	var results []CodeInterpreterCallResult
+	for _, result := range codeCall.Results {
+		callResult := CodeInterpreterCallResult{Type: result.Type}
+		switch result.Type {
+		case "logs":
+			logs := result.AsLogs()
+			callResult.Logs = logs.Logs
+		case "files":
+			files := result.AsFiles()
+			var callResultFiles []CodeInterpreterCallResultFile
+			for _, file := range files.Files {
+				callResultFiles = append(callResultFiles, CodeInterpreterCallResultFile{
+					FileID:   file.FileID,
+					MimeType: file.MimeType,
+				})
+			}
+			callResult.Files = callResultFiles
 		}
-		inputBytes = queriesJSON
-	} else {
-		inputBytes = []byte("{}")
+		results = append(results, callResult)
 	}
-
 	return []llm.Content{
-		&llm.ToolUseContent{
-			ID:    fileSearchCall.ID,
-			Name:  "file_search",
-			Input: inputBytes,
+		&CodeInterpreterCallContent{
+			ID:          codeCall.ID,
+			Code:        codeCall.Code,
+			Results:     results,
+			Status:      string(codeCall.Status),
+			ContainerID: codeCall.ContainerID,
 		},
 	}, nil
+}
+
+func decodeFileSearchCallContent(fileSearchCall responses.ResponseFileSearchToolCall) ([]llm.Content, error) {
+	return nil, fmt.Errorf("file search call is not yet supported")
 }
 
 func decodeComputerCallContent(computerCall responses.ResponseComputerToolCall) ([]llm.Content, error) {
-	// Convert Action to JSON for Input field
-	actionBytes, err := json.Marshal(computerCall.Action)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling computer action: %w", err)
-	}
-	return []llm.Content{
-		&llm.ToolUseContent{
-			ID:    computerCall.ID,
-			Name:  "computer",
-			Input: actionBytes,
-		},
-	}, nil
-}
-
-func decodeCodeInterpreterCallContent(codeCall responses.ResponseCodeInterpreterToolCall) ([]llm.Content, error) {
-	// Use the actual code for Input, not the results
-	var inputBytes []byte
-	if codeCall.Code != "" {
-		codeJSON, err := json.Marshal(map[string]interface{}{
-			"code": codeCall.Code,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling code interpreter code: %w", err)
-		}
-		inputBytes = codeJSON
-	} else {
-		inputBytes = []byte("{}")
-	}
-
-	return []llm.Content{
-		&llm.ToolUseContent{
-			ID:    codeCall.ID,
-			Name:  "code_interpreter",
-			Input: inputBytes,
-		},
-	}, nil
+	return nil, fmt.Errorf("computer call is not yet supported")
 }
 
 func decodeLocalShellCallContent(shellCall responses.ResponseOutputItemLocalShellCall) ([]llm.Content, error) {
-	// For local shell calls, we'll need to check what fields are actually available
-	// This might need adjustment based on the actual structure
-	return []llm.Content{
-		&llm.ToolUseContent{
-			ID:    shellCall.ID,
-			Name:  "local_shell",
-			Input: []byte("{}"), // Placeholder until we know the actual structure
-		},
-	}, nil
+	return nil, fmt.Errorf("local shell call is not yet supported")
 }
