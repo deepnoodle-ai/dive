@@ -70,12 +70,72 @@ func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItem
 		return nil, fmt.Errorf("message role is not assistant")
 	}
 	content := make([]responses.ResponseInputItemUnionParam, 0, len(message.Content))
-	for _, c := range message.Content {
+
+	// Track which content items we've already processed (for MCP pairing)
+	processed := make(map[int]bool)
+
+	for i, c := range message.Content {
+		if processed[i] {
+			continue // Skip if already processed as part of MCP pair
+		}
+
+		// Special handling for MCP tool use - look ahead for corresponding result
+		if mcpToolUse, ok := c.(*llm.MCPToolUseContent); ok {
+			// Look for corresponding MCPToolResultContent
+			var mcpToolResult *llm.MCPToolResultContent
+			var resultIndex int = -1
+
+			for j := i + 1; j < len(message.Content); j++ {
+				if processed[j] {
+					continue
+				}
+				if result, ok := message.Content[j].(*llm.MCPToolResultContent); ok && result.ToolUseID == mcpToolUse.ID {
+					mcpToolResult = result
+					resultIndex = j
+					break
+				}
+			}
+
+			// Create combined MCP call
+			mcpCallParam := &responses.ResponseInputItemMcpCallParam{
+				ID:          mcpToolUse.ID,
+				Arguments:   string(mcpToolUse.Input),
+				Name:        mcpToolUse.Name,
+				ServerLabel: mcpToolUse.ServerName,
+			}
+
+			// Add result information if found
+			if mcpToolResult != nil {
+				var text strings.Builder
+				for k, chunk := range mcpToolResult.Content {
+					if k > 0 {
+						text.WriteString("\n")
+					}
+					text.WriteString(chunk.Text)
+				}
+
+				if mcpToolResult.IsError {
+					mcpCallParam.Error = openai.String(text.String())
+				} else {
+					mcpCallParam.Output = openai.String(text.String())
+				}
+
+				// Mark result as processed so we don't encode it separately
+				processed[resultIndex] = true
+			}
+
+			content = append(content, responses.ResponseInputItemUnionParam{OfMcpCall: mcpCallParam})
+			processed[i] = true
+			continue
+		}
+
+		// Handle all other content types normally
 		encodedContent, err := encodeAssistantContent(c)
 		if err != nil {
 			return nil, fmt.Errorf("error encoding assistant content: %w", err)
 		}
 		content = append(content, encodedContent)
+		processed[i] = true
 	}
 	return content, nil
 }
@@ -104,12 +164,14 @@ func encodeAssistantContent(content llm.Content) (responses.ResponseInputItemUni
 		return encodeAssistantThinkingContent(c)
 	case *llm.RedactedThinkingContent:
 		return encodeAssistantRedactedThinkingContent(c)
-	case *llm.MCPToolUseContent:
-		return encodeAssistantMCPToolUseContent(c)
-	case *llm.MCPToolResultContent:
-		return encodeAssistantMCPToolResultContent(c)
 	case *llm.CodeExecutionToolResultContent:
 		return encodeAssistantCodeExecutionToolResultContent(c)
+	case *llm.MCPToolUseContent:
+		// MCP content is handled at the message level in encodeAssistantMessage
+		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("MCPToolUseContent should be handled at message level, not here")
+	case *llm.MCPToolResultContent:
+		// MCP content is handled at the message level in encodeAssistantMessage
+		return responses.ResponseInputItemUnionParam{}, fmt.Errorf("MCPToolResultContent should be handled at message level, not here")
 	}
 	return responses.ResponseInputItemUnionParam{}, fmt.Errorf("unsupported content type: %T", content)
 }
@@ -263,30 +325,6 @@ func encodeAssistantRedactedThinkingContent(c *llm.RedactedThinkingContent) (res
 		EncryptedContent: openai.String(c.Data),
 	}
 	return responses.ResponseInputItemUnionParam{OfReasoning: &reasoning}, nil
-}
-
-func encodeAssistantMCPToolUseContent(c *llm.MCPToolUseContent) (responses.ResponseInputItemUnionParam, error) {
-	// Since there's no direct MCP call function, encode as a regular function call
-	return responses.ResponseInputItemParamOfFunctionCall(string(c.Input), c.ID, c.Name), nil
-}
-
-func encodeAssistantMCPToolResultContent(c *llm.MCPToolResultContent) (responses.ResponseInputItemUnionParam, error) {
-	// Convert content chunks to output text
-	var text strings.Builder
-	for i, chunk := range c.Content {
-		if i > 0 {
-			text.WriteString("\n")
-		}
-		text.WriteString(chunk.Text)
-	}
-
-	output := text.String()
-	if c.IsError {
-		output = fmt.Sprintf("Error: %s", output)
-	}
-
-	// Encode as function call output since MCP function doesn't exist
-	return responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output), nil
 }
 
 func encodeAssistantCodeExecutionToolResultContent(c *llm.CodeExecutionToolResultContent) (responses.ResponseInputItemUnionParam, error) {

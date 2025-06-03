@@ -348,10 +348,35 @@ func determineStopReason(response *responses.Response) string {
 			return "tool_use"
 		}
 	}
-	// If response is completed without tool calls, it's an end_turn
-	if response.Status == "completed" {
+
+	// Handle different response statuses
+	switch response.Status {
+	case "completed":
+		return "end_turn"
+	case "incomplete":
+		// Map specific incomplete reasons if available
+		if response.IncompleteDetails.Reason != "" {
+			switch response.IncompleteDetails.Reason {
+			case "max_output_tokens":
+				return "max_tokens"
+			case "content_filter":
+				return "content_filter"
+			case "run_cancelled":
+				return "cancelled"
+			case "run_expired":
+				return "timeout"
+			case "run_failed":
+				return "error"
+			default:
+				return "incomplete"
+			}
+		}
+		return "incomplete"
+	case "failed":
+		return "error"
+	case "in_progress":
+		return "incomplete"
+	default:
 		return "end_turn"
 	}
-	// Default to end_turn for other completion scenarios
-	return "end_turn"
 }

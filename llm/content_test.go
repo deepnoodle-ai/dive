@@ -574,3 +574,218 @@ func (c *MockCitation) MarshalJSON() ([]byte, error) {
 func (c *MockCitation) IsCitation() bool {
 	return true
 }
+
+func TestMCPContentTypes(t *testing.T) {
+	t.Run("MCPToolsListContent", func(t *testing.T) {
+		t.Run("Type", func(t *testing.T) {
+			c := &MCPListToolsContent{}
+			got := c.Type()
+			require.Equal(t, ContentTypeMCPListTools, got)
+		})
+
+		t.Run("MarshalJSON", func(t *testing.T) {
+			tests := []struct {
+				name     string
+				content  *MCPListToolsContent
+				expected string
+			}{
+				{
+					name: "basic tools list",
+					content: &MCPListToolsContent{
+						ServerLabel: "deepwiki",
+						Tools: []*MCPToolDefinition{
+							{
+								Name:        "ask_question",
+								Description: "Ask a question about a GitHub repository",
+							},
+						},
+					},
+					expected: `{"type":"mcp_tools_list","server_name":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"}]}`,
+				},
+				{
+					name: "multiple tools",
+					content: &MCPListToolsContent{
+						ServerLabel: "deepwiki",
+						Tools: []*MCPToolDefinition{
+							{
+								Name:        "ask_question",
+								Description: "Ask a question about a GitHub repository",
+							},
+							{
+								Name:        "search_repos",
+								Description: "Search for GitHub repositories",
+							},
+						},
+					},
+					expected: `{"type":"mcp_tools_list","server_name":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"},{"name":"search_repos","description":"Search for GitHub repositories"}]}`,
+				},
+				{
+					name: "tool without description",
+					content: &MCPListToolsContent{
+						ServerLabel: "simple-server",
+						Tools: []*MCPToolDefinition{
+							{
+								Name: "simple_tool",
+							},
+						},
+					},
+					expected: `{"type":"mcp_tools_list","server_name":"simple-server","tools":[{"name":"simple_tool"}]}`,
+				},
+				{
+					name: "empty tools list",
+					content: &MCPListToolsContent{
+						ServerLabel: "empty-server",
+						Tools:       []*MCPToolDefinition{},
+					},
+					expected: `{"type":"mcp_tools_list","server_name":"empty-server","tools":[]}`,
+				},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := json.Marshal(tt.content)
+					require.NoError(t, err)
+					require.Equal(t, tt.expected, string(got))
+				})
+			}
+		})
+
+		t.Run("UnmarshalContent", func(t *testing.T) {
+			data := []byte(`{"type":"mcp_tools_list","server_name":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"}]}`)
+			content, err := UnmarshalContent(data)
+			require.NoError(t, err)
+
+			toolsList, ok := content.(*MCPListToolsContent)
+			require.True(t, ok)
+			require.Equal(t, "deepwiki", toolsList.ServerLabel)
+			require.Len(t, toolsList.Tools, 1)
+			require.Equal(t, "ask_question", toolsList.Tools[0].Name)
+			require.Equal(t, "Ask a question about a GitHub repository", toolsList.Tools[0].Description)
+		})
+	})
+
+	t.Run("MCPApprovalRequestContent", func(t *testing.T) {
+		t.Run("Type", func(t *testing.T) {
+			c := &MCPApprovalRequestContent{}
+			got := c.Type()
+			require.Equal(t, ContentTypeMCPApprovalRequest, got)
+		})
+
+		t.Run("MarshalJSON", func(t *testing.T) {
+			tests := []struct {
+				name     string
+				content  *MCPApprovalRequestContent
+				expected string
+			}{
+				{
+					name: "basic approval request",
+					content: &MCPApprovalRequestContent{
+						Arguments:   "{\"repoName\":\"modelcontextprot ... \"}",
+						Name:        "ask_question",
+						ServerLabel: "deepwiki",
+					},
+					expected: `{"type":"mcp_approval_request","tool_name":"ask_question","server_name":"deepwiki","request_id":"mcpr_123456"}`,
+				},
+				{
+					name: "approval request without request ID",
+					content: &MCPApprovalRequestContent{
+						Arguments:   "{\"repoName\":\"modelcontextprot ... \"}",
+						Name:        "search_repos",
+						ServerLabel: "github-server",
+					},
+					expected: `{"type":"mcp_approval_request","tool_name":"search_repos","server_name":"github-server"}`,
+				},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := json.Marshal(tt.content)
+					require.NoError(t, err)
+					require.Equal(t, tt.expected, string(got))
+				})
+			}
+		})
+
+		t.Run("UnmarshalContent", func(t *testing.T) {
+			data := []byte(`{"type":"mcp_approval_request","tool_name":"ask_question","server_name":"deepwiki","request_id":"mcpr_123456"}`)
+			content, err := UnmarshalContent(data)
+			require.NoError(t, err)
+
+			approvalRequest, ok := content.(*MCPApprovalRequestContent)
+			require.True(t, ok)
+			require.Equal(t, "ask_question", approvalRequest.Name)
+			require.Equal(t, "deepwiki", approvalRequest.ServerLabel)
+			require.Equal(t, "mcpr_123456", approvalRequest.ID)
+		})
+	})
+
+	t.Run("MCPToolDefinition with InputSchema", func(t *testing.T) {
+		t.Run("MarshalJSON with schema", func(t *testing.T) {
+			tool := &MCPToolDefinition{
+				Name:        "test_tool",
+				Description: "A test tool",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"param1": map[string]interface{}{
+							"type":        "string",
+							"description": "First parameter",
+						},
+					},
+					"required": []string{"param1"},
+				},
+			}
+
+			data, err := json.Marshal(tool)
+			require.NoError(t, err)
+
+			// Unmarshal back to verify structure
+			var result map[string]interface{}
+			err = json.Unmarshal(data, &result)
+			require.NoError(t, err)
+
+			require.Equal(t, "test_tool", result["name"])
+			require.Equal(t, "A test tool", result["description"])
+			require.NotNil(t, result["input_schema"])
+
+			schema, ok := result["input_schema"].(map[string]interface{})
+			require.True(t, ok)
+			require.Equal(t, "object", schema["type"])
+		})
+
+		t.Run("MCPToolsListContent with enhanced tools", func(t *testing.T) {
+			toolsList := &MCPListToolsContent{
+				ServerLabel: "enhanced-server",
+				Tools: []*MCPToolDefinition{
+					{
+						Name:        "enhanced_tool",
+						Description: "An enhanced tool with schema",
+						InputSchema: map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"query": map[string]interface{}{
+									"type":        "string",
+									"description": "Search query",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			data, err := json.Marshal(toolsList)
+			require.NoError(t, err)
+
+			// Verify it can be unmarshaled
+			content, err := UnmarshalContent(data)
+			require.NoError(t, err)
+
+			parsedList, ok := content.(*MCPListToolsContent)
+			require.True(t, ok)
+			require.Equal(t, "enhanced-server", parsedList.ServerLabel)
+			require.Len(t, parsedList.Tools, 1)
+			require.Equal(t, "enhanced_tool", parsedList.Tools[0].Name)
+			require.NotNil(t, parsedList.Tools[0].InputSchema)
+		})
+	})
+}

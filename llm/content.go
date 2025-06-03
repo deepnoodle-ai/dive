@@ -22,8 +22,11 @@ const (
 	ContentTypeWebSearchToolResult     ContentType = "web_search_tool_result"
 	ContentTypeMCPToolUse              ContentType = "mcp_tool_use"
 	ContentTypeMCPToolResult           ContentType = "mcp_tool_result"
+	ContentTypeMCPListTools            ContentType = "mcp_list_tools"
+	ContentTypeMCPApprovalRequest      ContentType = "mcp_approval_request"
 	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
 	ContentTypeRefusal                 ContentType = "refusal"
+	ContentTypeMCPCall                 ContentType = "mcp_call"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -719,6 +722,89 @@ func (c *MCPToolResultContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
+//// MCPListToolsContent ///////////////////////////////////////////////////////
+
+// https://platform.openai.com/docs/guides/tools-remote-mcp
+
+/* Examples:
+{
+  "type": "mcp_list_tools",
+  "server_label": "deepwiki",
+  "tools": [
+    {
+      "name": "ask_question",
+      "input_schema": {...}
+    },
+    {
+      "name": "search_repos",
+      "input_schema": {...}
+    }
+  ]
+}
+*/
+
+type MCPToolDefinition struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
+}
+
+type MCPListToolsContent struct {
+	ServerLabel string               `json:"server_label"`
+	Tools       []*MCPToolDefinition `json:"tools"`
+}
+
+func (c *MCPListToolsContent) Type() ContentType {
+	return ContentTypeMCPListTools
+}
+
+func (c *MCPListToolsContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPListToolsContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPListTools,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// MCPApprovalRequestContent /////////////////////////////////////////////////
+
+// https://platform.openai.com/docs/guides/tools-remote-mcp#approvals
+
+/* Examples:
+{
+  "id": "mcpr_682d498e3bd4819196a0ce1664f8e77b04ad1e533afccbfa",
+  "type": "mcp_approval_request",
+  "arguments": "{\"repoName\":\"modelcontextprot ... \"}",
+  "name": "ask_question",
+  "server_label": "deepwiki"
+}
+*/
+
+type MCPApprovalRequestContent struct {
+	ID          string `json:"id"`
+	Arguments   string `json:"arguments"`
+	Name        string `json:"name"`
+	ServerLabel string `json:"server_label"`
+}
+
+func (c *MCPApprovalRequestContent) Type() ContentType {
+	return ContentTypeMCPApprovalRequest
+}
+
+func (c *MCPApprovalRequestContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPApprovalRequestContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPApprovalRequest,
+		Alias: (*Alias)(c),
+	})
+}
+
 //// CodeExecutionToolResult ///////////////////////////////////////////////////
 
 // https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
@@ -762,6 +848,46 @@ func (c *CodeExecutionToolResultContent) MarshalJSON() ([]byte, error) {
 		Alias: (*Alias)(c),
 	})
 }
+
+//// MCPCallContent ////////////////////////////////////////////////////////////
+
+/* Examples:
+{
+  "type": "mcp_call",
+  "id": "mcp_682d437d90a88191bf88cd03aae0c3e503937d5f622d7a90",
+  "name": "ask_question",
+  "server_name": "deepwiki",
+  "arguments": "{\"repoName\":\"modelcontextprotocol/modelcontextprotocol\",\"question\":\"What transport protocols does the 2025-03-26 version of the MCP spec support?\"}",
+  "output": "The 2025-03-26 version of the Model Context Protocol (MCP) specification supports two standard transport mechanisms...",
+  "error": null,
+  "approval_request_id": null
+}
+*/
+
+// type MCPCallContent struct {
+// 	ID                string `json:"id"`
+// 	Name              string `json:"name"`
+// 	ServerName        string `json:"server_name"`
+// 	Arguments         string `json:"arguments"`
+// 	Output            string `json:"output,omitempty"`
+// 	Error             string `json:"error,omitempty"`
+// 	ApprovalRequestID string `json:"approval_request_id,omitempty"`
+// }
+
+// func (c *MCPCallContent) Type() ContentType {
+// 	return ContentTypeMCPCall
+// }
+
+// func (c *MCPCallContent) MarshalJSON() ([]byte, error) {
+// 	type Alias MCPCallContent
+// 	return json.Marshal(struct {
+// 		Type ContentType `json:"type"`
+// 		*Alias
+// 	}{
+// 		Type:  ContentTypeMCPCall,
+// 		Alias: (*Alias)(c),
+// 	})
+// }
 
 //// Unmarshalling /////////////////////////////////////////////////////////////
 
@@ -823,8 +949,14 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &MCPToolUseContent{}
 	case ContentTypeMCPToolResult:
 		content = &MCPToolResultContent{}
+	case ContentTypeMCPListTools:
+		content = &MCPListToolsContent{}
+	case ContentTypeMCPApprovalRequest:
+		content = &MCPApprovalRequestContent{}
 	case ContentTypeCodeExecutionToolResult:
 		content = &CodeExecutionToolResultContent{}
+	case ContentTypeRefusal:
+		content = &RefusalContent{}
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
 	}

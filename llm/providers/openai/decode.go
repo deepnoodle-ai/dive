@@ -145,35 +145,94 @@ func decodeImageGenerationCallContent(imgCall responses.ResponseOutputItemImageG
 }
 
 func decodeWebSearchCallContent(call responses.ResponseFunctionWebSearch) ([]llm.Content, error) {
+	// Web search call is a tool invocation, not a result
 	return []llm.Content{
-		&llm.WebSearchToolResultContent{ToolUseID: call.ID, Content: nil},
+		&llm.ToolUseContent{
+			ID:    call.ID,
+			Name:  "web_search",
+			Input: []byte("{}"), // OpenAI web search calls don't include the query in the call object
+		},
 	}, nil
 }
 
 func decodeMcpCallContent(mcpCall responses.ResponseOutputItemMcpCall) ([]llm.Content, error) {
-	if mcpCall.Output == "" {
-		return nil, nil
+	var contentBlocks []llm.Content
+
+	// Always create the tool use content block
+	toolUseContent := &llm.MCPToolUseContent{
+		ID:         mcpCall.ID,
+		Name:       mcpCall.Name,
+		ServerName: mcpCall.ServerLabel,
+		Input:      []byte(mcpCall.Arguments),
 	}
-	return []llm.Content{
-		&llm.TextContent{Text: fmt.Sprintf("MCP tool result: %s", mcpCall.Output)},
-	}, nil
+	contentBlocks = append(contentBlocks, toolUseContent)
+
+	// Create tool result content block if there's output or error
+	if mcpCall.Output != "" || mcpCall.Error != "" {
+		var resultContent []*llm.ContentChunk
+		isError := false
+
+		if mcpCall.Error != "" {
+			// If there's an error, add it as text content and mark as error
+			resultContent = append(resultContent, &llm.ContentChunk{
+				Type: "text",
+				Text: mcpCall.Error,
+			})
+			isError = true
+		} else if mcpCall.Output != "" {
+			// If there's output, add it as text content
+			resultContent = append(resultContent, &llm.ContentChunk{
+				Type: "text",
+				Text: mcpCall.Output,
+			})
+		}
+
+		toolResultContent := &llm.MCPToolResultContent{
+			ToolUseID: mcpCall.ID,
+			IsError:   isError,
+			Content:   resultContent,
+		}
+		contentBlocks = append(contentBlocks, toolResultContent)
+	}
+
+	return contentBlocks, nil
 }
 
 func decodeMcpListToolsContent(mcpList responses.ResponseOutputItemMcpListTools) ([]llm.Content, error) {
-	var toolsText strings.Builder
-	toolsText.WriteString(fmt.Sprintf("MCP server '%s' tools:\n", mcpList.ServerLabel))
+	tools := make([]*llm.MCPToolDefinition, 0, len(mcpList.Tools))
 	for _, tool := range mcpList.Tools {
-		toolsText.WriteString(fmt.Sprintf("- %s\n", tool.Name))
+		toolDef := &llm.MCPToolDefinition{
+			Name:        tool.Name,
+			Description: tool.Description,
+		}
+		// Include the input schema if available
+		if tool.InputSchema != nil {
+			// Convert the input schema to map[string]interface{}
+			schemaBytes, err := json.Marshal(tool.InputSchema)
+			if err == nil {
+				var schemaMap map[string]interface{}
+				if err := json.Unmarshal(schemaBytes, &schemaMap); err == nil {
+					toolDef.InputSchema = schemaMap
+				}
+			}
+		}
+		tools = append(tools, toolDef)
 	}
 	return []llm.Content{
-		&llm.TextContent{Text: toolsText.String()},
+		&llm.MCPListToolsContent{
+			ServerLabel: mcpList.ServerLabel,
+			Tools:       tools,
+		},
 	}, nil
 }
 
 func decodeMcpApprovalRequestContent(mcpApproval responses.ResponseOutputItemMcpApprovalRequest) ([]llm.Content, error) {
 	return []llm.Content{
-		&llm.TextContent{
-			Text: fmt.Sprintf("MCP approval required for tool '%s' on server '%s'", mcpApproval.Name, mcpApproval.ServerLabel),
+		&llm.MCPApprovalRequestContent{
+			ID:          mcpApproval.ID,
+			Arguments:   mcpApproval.Arguments,
+			Name:        mcpApproval.Name,
+			ServerLabel: mcpApproval.ServerLabel,
 		},
 	}, nil
 }
@@ -193,11 +252,25 @@ func decodeReasoningContent(reasoning responses.ResponseReasoningItem) ([]llm.Co
 }
 
 func decodeFileSearchCallContent(fileSearchCall responses.ResponseFileSearchToolCall) ([]llm.Content, error) {
+	// Use the actual queries from the file search call
+	var inputBytes []byte
+	if len(fileSearchCall.Queries) > 0 {
+		queriesJSON, err := json.Marshal(map[string]interface{}{
+			"queries": fileSearchCall.Queries,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling file search queries: %w", err)
+		}
+		inputBytes = queriesJSON
+	} else {
+		inputBytes = []byte("{}")
+	}
+
 	return []llm.Content{
 		&llm.ToolUseContent{
 			ID:    fileSearchCall.ID,
 			Name:  "file_search",
-			Input: []byte("{}"), // File search calls typically have empty input
+			Input: inputBytes,
 		},
 	}, nil
 }
@@ -218,17 +291,20 @@ func decodeComputerCallContent(computerCall responses.ResponseComputerToolCall) 
 }
 
 func decodeCodeInterpreterCallContent(codeCall responses.ResponseCodeInterpreterToolCall) ([]llm.Content, error) {
-	// Convert Results to JSON for Input field if available
+	// Use the actual code for Input, not the results
 	var inputBytes []byte
-	if len(codeCall.Results) > 0 {
-		var err error
-		inputBytes, err = json.Marshal(codeCall.Results)
+	if codeCall.Code != "" {
+		codeJSON, err := json.Marshal(map[string]interface{}{
+			"code": codeCall.Code,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("error marshaling code interpreter results: %w", err)
+			return nil, fmt.Errorf("error marshaling code interpreter code: %w", err)
 		}
+		inputBytes = codeJSON
 	} else {
 		inputBytes = []byte("{}")
 	}
+
 	return []llm.Content{
 		&llm.ToolUseContent{
 			ID:    codeCall.ID,
