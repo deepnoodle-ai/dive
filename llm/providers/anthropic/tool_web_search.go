@@ -1,6 +1,10 @@
 package anthropic
 
 import (
+	"context"
+	"errors"
+
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/schema"
 )
@@ -94,4 +98,18 @@ func (t *WebSearchTool) ToolConfiguration(providerName string) map[string]any {
 		config["user_location"] = t.userLocation
 	}
 	return config
+}
+
+func (t *WebSearchTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
+		Title:           "Web Search",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  false,
+		OpenWorldHint:   true,
+	}
+}
+
+func (t *WebSearchTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return nil, errors.New("server-side tool does not implement local calls")
 }

@@ -2,10 +2,10 @@ Name: 'Code Overview'
 Description: 'Generate a code overview for a given codebase'
 
 Config:
-  LogLevel: info
+  LogLevel: debug
   ConfirmationMode: never
-  DefaultProvider: anthropic
-  DefaultModel: claude-sonnet-4-20250514
+  DefaultProvider: openai
+  DefaultModel: o3-mini
   Providers:
     - Name: anthropic
       Features:

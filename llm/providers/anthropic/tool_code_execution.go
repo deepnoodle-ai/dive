@@ -1,6 +1,10 @@
 package anthropic
 
 import (
+	"context"
+	"errors"
+
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/schema"
 )
@@ -55,4 +59,18 @@ func (t *CodeExecutionTool) Schema() *schema.Schema {
 
 func (t *CodeExecutionTool) ToolConfiguration(providerName string) map[string]any {
 	return map[string]any{"type": t.typeString, "name": t.name}
+}
+
+func (t *CodeExecutionTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
+		Title:           "Code Execution",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  false,
+		OpenWorldHint:   false,
+	}
+}
+
+func (t *CodeExecutionTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return nil, errors.New("server-side tool does not implement local calls")
 }

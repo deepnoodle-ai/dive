@@ -1,6 +1,10 @@
 package openai
 
 import (
+	"context"
+	"errors"
+
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/schema"
 	"github.com/openai/openai-go"
@@ -87,4 +91,18 @@ func (t *WebSearchPreviewTool) Param() *responses.WebSearchToolParam {
 		}
 	}
 	return param
+}
+
+func (t *WebSearchPreviewTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
+		Title:           "Web Search",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  false,
+		OpenWorldHint:   false,
+	}
+}
+
+func (t *WebSearchPreviewTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return nil, errors.New("server-side tool does not implement local calls")
 }

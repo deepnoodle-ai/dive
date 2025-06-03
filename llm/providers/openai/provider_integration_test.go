@@ -81,9 +81,8 @@ func TestIntegration_WebSearchTool(t *testing.T) {
 	// The response should contain some information about AI news
 	text := strings.ToLower(response.Message().Text())
 	require.True(t,
-		strings.Contains(text, "stock market") ||
-			strings.Contains(text, "stocks"),
-		"Response should contain stock market content: %s", response.Message().Text())
+		strings.Contains(text, "bitcoin") || strings.Contains(text, "ethereum"),
+		"Response should contain crypto content: %s", response.Message().Text())
 }
 
 // TestIntegration_ImageGenerationTool tests the image generation tool functionality

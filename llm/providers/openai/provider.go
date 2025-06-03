@@ -2,33 +2,47 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/llm/providers"
+	"github.com/diveagents/dive/retry"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"
 )
 
 var (
-	DefaultModel     = openai.ChatModelGPT4o
-	DefaultMaxTokens = 4096
+	DefaultModel         = openai.ChatModelGPT4o
+	DefaultMaxTokens     = 4096
+	DefaultMaxRetries    = 2
+	DefaultRetryBaseWait = 1 * time.Second
+	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
 )
 
 var _ llm.LLM = &Provider{}
 
 type Provider struct {
-	client    openai.Client
-	model     openai.ChatModel
-	maxTokens int
-	options   []option.RequestOption
+	client        openai.Client
+	model         openai.ChatModel
+	maxTokens     int
+	maxRetries    int
+	retryBaseWait time.Duration
+	httpClient    *http.Client
+	options       []option.RequestOption
 }
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		model:     DefaultModel,
-		maxTokens: DefaultMaxTokens,
+		model:         DefaultModel,
+		maxTokens:     DefaultMaxTokens,
+		maxRetries:    DefaultMaxRetries,
+		retryBaseWait: DefaultRetryBaseWait,
+		httpClient:    DefaultClient,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -69,11 +83,25 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, err
 	}
 
-	response, err := p.client.Responses.New(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("error making request: %w", err)
-	}
-	return decodeAssistantResponse(response)
+	var resp *responses.Response
+	err = retry.Do(ctx, func() error {
+		resp, err = p.client.Responses.New(
+			ctx,
+			params,
+			option.WithRequestTimeout(5*time.Minute),
+			option.WithHTTPClient(p.httpClient),
+		)
+		if err != nil {
+			var apierr *openai.Error
+			if errors.As(err, &apierr) {
+				return providers.NewError(apierr.StatusCode, apierr.Message)
+			}
+			return err
+		}
+		return nil
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
+
+	return decodeAssistantResponse(resp)
 }
 
 // buildRequestParams converts llm.Config to responses.ResponseNewParams

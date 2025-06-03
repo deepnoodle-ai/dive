@@ -1,6 +1,10 @@
 package anthropic
 
 import (
+	"context"
+	"errors"
+
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/schema"
 )
@@ -75,4 +79,18 @@ func (t *ComputerTool) ToolConfiguration(providerName string) map[string]any {
 		"display_height_px": t.displayHeightPx,
 		"display_number":    t.displayNumber,
 	}
+}
+
+func (t *ComputerTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
+		Title:           "Computer",
+		ReadOnlyHint:    false,
+		DestructiveHint: true,
+		IdempotentHint:  false,
+		OpenWorldHint:   false,
+	}
+}
+
+func (t *ComputerTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return nil, errors.New("server-side tool does not implement local calls")
 }

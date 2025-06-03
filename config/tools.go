@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
@@ -106,14 +108,79 @@ func InitializeCommandTool(config map[string]interface{}) (dive.Tool, error) {
 	return toolkit.NewCommandTool(options), nil
 }
 
+// InitializeOpenAIImageGenerationTool initializes the OpenAI Image Generation tool with the given configuration
+func InitializeOpenAIImageGenerationTool(config map[string]interface{}) (dive.Tool, error) {
+	var options openai.ImageGenerationToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("failed to populate OpenAI image generation tool config: %w", err)
+		}
+	}
+	return openai.NewImageGenerationTool(options), nil
+}
+
+// InitializeOpenAIWebSearchPreviewTool initializes the OpenAI Web Search Preview tool with the given configuration
+func InitializeOpenAIWebSearchPreviewTool(config map[string]interface{}) (dive.Tool, error) {
+	var options openai.WebSearchPreviewToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("failed to populate OpenAI web search preview tool config: %w", err)
+		}
+	}
+	return openai.NewWebSearchPreviewTool(options), nil
+}
+
+// InitializeAnthropicCodeExecutionTool initializes the Anthropic Code Execution tool with the given configuration
+func InitializeAnthropicCodeExecutionTool(config map[string]interface{}) (dive.Tool, error) {
+	var options anthropic.CodeExecutionToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("failed to populate Anthropic code execution tool config: %w", err)
+		}
+	}
+	return anthropic.NewCodeExecutionTool(options), nil
+}
+
+// InitializeAnthropicComputerTool initializes the Anthropic Computer tool with the given configuration
+func InitializeAnthropicComputerTool(config map[string]interface{}) (dive.Tool, error) {
+	var options anthropic.ComputerToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("failed to populate Anthropic computer tool config: %w", err)
+		}
+	}
+	return anthropic.NewComputerTool(options), nil
+}
+
+// InitializeAnthropicWebSearchTool initializes the Anthropic Web Search tool with the given configuration
+func InitializeAnthropicWebSearchTool(config map[string]interface{}) (dive.Tool, error) {
+	var options anthropic.WebSearchToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("failed to populate Anthropic web search tool config: %w", err)
+		}
+	}
+	return anthropic.NewWebSearchTool(options), nil
+}
+
 // ToolInitializers maps tool names to their initialization functions
 var ToolInitializers = map[string]func(map[string]interface{}) (dive.Tool, error){
+	// Generic tools
 	"Web.Search":     InitializeWebSearchTool,
 	"Web.Fetch":      InitializeWebFetchTool,
 	"File.Read":      InitializeFileReadTool,
 	"File.Write":     InitializeFileWriteTool,
 	"Directory.List": InitializeDirectoryListTool,
 	"Command":        InitializeCommandTool,
+
+	// OpenAI-specific tools
+	"OpenAI.GenerateImage": InitializeOpenAIImageGenerationTool,
+	"OpenAI.WebSearch":     InitializeOpenAIWebSearchPreviewTool,
+
+	// Anthropic-specific tools
+	"Anthropic.CodeExecution": InitializeAnthropicCodeExecutionTool,
+	"Anthropic.Computer":      InitializeAnthropicComputerTool,
+	"Anthropic.WebSearch":     InitializeAnthropicWebSearchTool,
 }
 
 // InitializeToolByName initializes a tool by its name with the given configuration

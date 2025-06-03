@@ -600,7 +600,7 @@ func TestMCPContentTypes(t *testing.T) {
 							},
 						},
 					},
-					expected: `{"type":"mcp_tools_list","server_name":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"}]}`,
+					expected: `{"type":"mcp_list_tools","server_label":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"}]}`,
 				},
 				{
 					name: "multiple tools",
@@ -617,7 +617,7 @@ func TestMCPContentTypes(t *testing.T) {
 							},
 						},
 					},
-					expected: `{"type":"mcp_tools_list","server_name":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"},{"name":"search_repos","description":"Search for GitHub repositories"}]}`,
+					expected: `{"type":"mcp_list_tools","server_label":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"},{"name":"search_repos","description":"Search for GitHub repositories"}]}`,
 				},
 				{
 					name: "tool without description",
@@ -629,7 +629,7 @@ func TestMCPContentTypes(t *testing.T) {
 							},
 						},
 					},
-					expected: `{"type":"mcp_tools_list","server_name":"simple-server","tools":[{"name":"simple_tool"}]}`,
+					expected: `{"type":"mcp_list_tools","server_label":"simple-server","tools":[{"name":"simple_tool"}]}`,
 				},
 				{
 					name: "empty tools list",
@@ -637,7 +637,7 @@ func TestMCPContentTypes(t *testing.T) {
 						ServerLabel: "empty-server",
 						Tools:       []*MCPToolDefinition{},
 					},
-					expected: `{"type":"mcp_tools_list","server_name":"empty-server","tools":[]}`,
+					expected: `{"type":"mcp_list_tools","server_label":"empty-server","tools":[]}`,
 				},
 			}
 
@@ -651,7 +651,7 @@ func TestMCPContentTypes(t *testing.T) {
 		})
 
 		t.Run("UnmarshalContent", func(t *testing.T) {
-			data := []byte(`{"type":"mcp_tools_list","server_name":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"}]}`)
+			data := []byte(`{"type":"mcp_list_tools","server_label":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"}]}`)
 			content, err := UnmarshalContent(data)
 			require.NoError(t, err)
 
@@ -680,20 +680,12 @@ func TestMCPContentTypes(t *testing.T) {
 				{
 					name: "basic approval request",
 					content: &MCPApprovalRequestContent{
-						Arguments:   "{\"repoName\":\"modelcontextprot ... \"}",
+						ID:          "ID",
+						Arguments:   "ARG",
 						Name:        "ask_question",
 						ServerLabel: "deepwiki",
 					},
-					expected: `{"type":"mcp_approval_request","tool_name":"ask_question","server_name":"deepwiki","request_id":"mcpr_123456"}`,
-				},
-				{
-					name: "approval request without request ID",
-					content: &MCPApprovalRequestContent{
-						Arguments:   "{\"repoName\":\"modelcontextprot ... \"}",
-						Name:        "search_repos",
-						ServerLabel: "github-server",
-					},
-					expected: `{"type":"mcp_approval_request","tool_name":"search_repos","server_name":"github-server"}`,
+					expected: `{"type":"mcp_approval_request","id":"ID","arguments":"ARG","name":"ask_question","server_label":"deepwiki"}`,
 				},
 			}
 
@@ -707,7 +699,7 @@ func TestMCPContentTypes(t *testing.T) {
 		})
 
 		t.Run("UnmarshalContent", func(t *testing.T) {
-			data := []byte(`{"type":"mcp_approval_request","tool_name":"ask_question","server_name":"deepwiki","request_id":"mcpr_123456"}`)
+			data := []byte(`{"type":"mcp_approval_request","name":"ask_question","server_label":"deepwiki","id":"mcpr_123456"}`)
 			content, err := UnmarshalContent(data)
 			require.NoError(t, err)
 
