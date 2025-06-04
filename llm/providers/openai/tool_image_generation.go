@@ -11,6 +11,12 @@ import (
 	"github.com/openai/openai-go/responses"
 )
 
+// Only use this tool if you are looking for OpenAI's built-in tool for image
+// generation. This is fine for returning the image as a content block in the
+// LLM response, but it doesn't integrate that easily with Dive AI agents.
+// I'd recommend using the image generation tool in Dive's toolkit package
+// instead, unless you know about the pros/cons already.
+
 var (
 	_ llm.Tool = &ImageGenerationTool{}
 )

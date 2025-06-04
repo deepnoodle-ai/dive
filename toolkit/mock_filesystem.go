@@ -1,6 +1,9 @@
 package toolkit
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // mockFileSystem implements FileSystem for testing
 type mockFileSystem struct {
@@ -88,6 +91,11 @@ func (fs *mockFileSystem) ListDir(path string) (string, error) {
 		}
 	}
 	return strings.Join(result, "\n"), nil
+}
+
+func (fs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	fs.directories[path] = true
+	return nil
 }
 
 type mockError struct {

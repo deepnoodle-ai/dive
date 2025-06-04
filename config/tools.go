@@ -11,6 +11,7 @@ import (
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
+	openaisdk "github.com/openai/openai-go"
 )
 
 func convertToolConfig(config map[string]interface{}, options interface{}) error {
@@ -163,6 +164,18 @@ func InitializeAnthropicWebSearchTool(config map[string]interface{}) (dive.Tool,
 	return anthropic.NewWebSearchTool(options), nil
 }
 
+func InitializemageGenTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.ImageGenToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("failed to populate OpenAI image generation tool config: %w", err)
+		}
+	}
+	client := openaisdk.NewClient()
+	options.Client = &client
+	return toolkit.NewImageGenTool(options), nil
+}
+
 // ToolInitializers maps tool names to their initialization functions
 var ToolInitializers = map[string]func(map[string]interface{}) (dive.Tool, error){
 	// Generic tools
@@ -172,6 +185,7 @@ var ToolInitializers = map[string]func(map[string]interface{}) (dive.Tool, error
 	"File.Write":     InitializeFileWriteTool,
 	"Directory.List": InitializeDirectoryListTool,
 	"Command":        InitializeCommandTool,
+	"Image.Generate": InitializemageGenTool,
 
 	// OpenAI-specific tools
 	"OpenAI.GenerateImage": InitializeOpenAIImageGenerationTool,

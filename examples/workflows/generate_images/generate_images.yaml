@@ -7,14 +7,14 @@ Config:
   DefaultProvider: openai
 
 Tools:
-  - Name: OpenAI.GenerateImage
+  - Name: Image.Generate
     Enabled: true
 
 Agents:
   - Name: Artist
     Goal: Generate images
     Tools:
-      - OpenAI.GenerateImage
+      - Image.Generate
 
 Workflows:
   - Name: Generate Artistic Images
@@ -25,6 +25,8 @@ Workflows:
         Agent: Artist
         Prompt: |
           Come up with 3 unique and creative artistic image concepts. Make each one distinct and interesting.
+
+          Focus on portraits of people.
 
           For each idea, provide:
           1. A detailed description of the image concept
@@ -46,6 +48,8 @@ Workflows:
           ${image_ideas}
 
           Create the first artistic image (Idea 1). Use the image generation tool to generate this image.
+
+          Use the gpt-image-1 model.
         Store: image1_result
 
       - Name: Generate Image 2
@@ -55,6 +59,8 @@ Workflows:
           ${image_ideas}
 
           Create the second artistic image (Idea 2). Use the image generation tool to generate this image.
+
+          Use the gpt-image-1 model.
         Store: image2_result
 
       - Name: Generate Image 3
@@ -64,4 +70,6 @@ Workflows:
           ${image_ideas}
 
           Create the third artistic image (Idea 3). Use the image generation tool to generate this image.
+
+          Use the gpt-image-1 model.
         Store: image3_result
