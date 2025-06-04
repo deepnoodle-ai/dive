@@ -7,12 +7,13 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/openai"
 	"github.com/diveagents/dive/toolkit"
 	"github.com/diveagents/dive/toolkit/firecrawl"
 	"github.com/diveagents/dive/toolkit/google"
 	openaisdk "github.com/openai/openai-go"
 )
+
+type ToolInitializer func(config map[string]interface{}) (dive.Tool, error)
 
 func convertToolConfig(config map[string]interface{}, options interface{}) error {
 	configJSON, err := json.Marshal(config)
@@ -109,28 +110,6 @@ func InitializeCommandTool(config map[string]interface{}) (dive.Tool, error) {
 	return toolkit.NewCommandTool(options), nil
 }
 
-// InitializeOpenAIImageGenerationTool initializes the OpenAI Image Generation tool with the given configuration
-func InitializeOpenAIImageGenerationTool(config map[string]interface{}) (dive.Tool, error) {
-	var options openai.ImageGenerationToolOptions
-	if config != nil {
-		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate OpenAI image generation tool config: %w", err)
-		}
-	}
-	return openai.NewImageGenerationTool(options), nil
-}
-
-// InitializeOpenAIWebSearchPreviewTool initializes the OpenAI Web Search Preview tool with the given configuration
-func InitializeOpenAIWebSearchPreviewTool(config map[string]interface{}) (dive.Tool, error) {
-	var options openai.WebSearchPreviewToolOptions
-	if config != nil {
-		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate OpenAI web search preview tool config: %w", err)
-		}
-	}
-	return openai.NewWebSearchPreviewTool(options), nil
-}
-
 // InitializeAnthropicCodeExecutionTool initializes the Anthropic Code Execution tool with the given configuration
 func InitializeAnthropicCodeExecutionTool(config map[string]interface{}) (dive.Tool, error) {
 	var options anthropic.CodeExecutionToolOptions
@@ -164,34 +143,22 @@ func InitializeAnthropicWebSearchTool(config map[string]interface{}) (dive.Tool,
 	return anthropic.NewWebSearchTool(options), nil
 }
 
-func InitializemageGenTool(config map[string]interface{}) (dive.Tool, error) {
-	var options toolkit.ImageGenToolOptions
-	if config != nil {
-		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate OpenAI image generation tool config: %w", err)
-		}
-	}
+func InitializeImageGenerationTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.ImageGenerationToolOptions
 	client := openaisdk.NewClient()
 	options.Client = &client
-	return toolkit.NewImageGenTool(options), nil
+	return toolkit.NewImageGenerationTool(options), nil
 }
 
 // ToolInitializers maps tool names to their initialization functions
-var ToolInitializers = map[string]func(map[string]interface{}) (dive.Tool, error){
-	// Generic tools
-	"Web.Search":     InitializeWebSearchTool,
-	"Web.Fetch":      InitializeWebFetchTool,
-	"File.Read":      InitializeFileReadTool,
-	"File.Write":     InitializeFileWriteTool,
-	"Directory.List": InitializeDirectoryListTool,
-	"Command":        InitializeCommandTool,
-	"Image.Generate": InitializemageGenTool,
-
-	// OpenAI-specific tools
-	"OpenAI.GenerateImage": InitializeOpenAIImageGenerationTool,
-	"OpenAI.WebSearch":     InitializeOpenAIWebSearchPreviewTool,
-
-	// Anthropic-specific tools
+var ToolInitializers = map[string]ToolInitializer{
+	"Web.Search":              InitializeWebSearchTool,
+	"Web.Fetch":               InitializeWebFetchTool,
+	"File.Read":               InitializeFileReadTool,
+	"File.Write":              InitializeFileWriteTool,
+	"Directory.List":          InitializeDirectoryListTool,
+	"Command":                 InitializeCommandTool,
+	"Image.Generate":          InitializeImageGenerationTool,
 	"Anthropic.CodeExecution": InitializeAnthropicCodeExecutionTool,
 	"Anthropic.Computer":      InitializeAnthropicComputerTool,
 	"Anthropic.WebSearch":     InitializeAnthropicWebSearchTool,
@@ -218,19 +185,15 @@ func GetAvailableToolNames() []string {
 // initializeTools initializes tools with custom configurations
 func initializeTools(tools []Tool) (map[string]dive.Tool, error) {
 	toolsMap := make(map[string]dive.Tool)
-
 	for _, tool := range tools {
 		if tool.Name == "" {
 			return nil, fmt.Errorf("tool name is required")
 		}
-
 		initializedTool, err := InitializeToolByName(tool.Name, tool.Parameters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize tool %s: %w", tool.Name, err)
 		}
-
 		toolsMap[tool.Name] = initializedTool
 	}
-
 	return toolsMap, nil
 }
