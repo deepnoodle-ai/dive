@@ -328,7 +328,12 @@ var llmCmd = &cobra.Command{
 			options = append(options, llm.WithReasoningBudget(reasoningBudget))
 		}
 		if reasoningEffort != "" {
-			options = append(options, llm.WithReasoningEffort(reasoningEffort))
+			effort := llm.ReasoningEffort(reasoningEffort)
+			if !effort.IsValid() {
+				fmt.Println(errorStyle.Sprintf("Invalid reasoning effort: %s", reasoningEffort))
+				os.Exit(1)
+			}
+			options = append(options, llm.WithReasoningEffort(effort))
 		}
 		if maxTokens > 0 {
 			options = append(options, llm.WithMaxTokens(maxTokens))

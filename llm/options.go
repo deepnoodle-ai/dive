@@ -205,6 +205,13 @@ const (
 	ReasoningEffortHigh   ReasoningEffort = "high"
 )
 
+// IsValid returns true if the reasoning effort is a known, valid value.
+func (r ReasoningEffort) IsValid() bool {
+	return r == ReasoningEffortLow ||
+		r == ReasoningEffortMedium ||
+		r == ReasoningEffortHigh
+}
+
 // WithReasoningEffort sets the reasoning effort for the interaction.
 func WithReasoningEffort(reasoningEffort ReasoningEffort) Option {
 	return func(config *Config) {

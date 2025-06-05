@@ -4,13 +4,7 @@ Description: 'Generate a code overview for a given codebase'
 Config:
   LogLevel: debug
   ConfirmationMode: never
-  DefaultProvider: openai
-  DefaultModel: o3-mini
-  Providers:
-    - Name: anthropic
-      Features:
-        - code-execution-2025-05-22
-        - extended-cache-ttl-2025-04-11
+  DefaultProvider: anthropic
 
 Tools:
   - Name: Web.Search

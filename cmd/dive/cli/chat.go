@@ -121,8 +121,13 @@ func runChat(instructions, agentName string, reasoningBudget int) error {
 	modelSettings := &agent.ModelSettings{}
 	if reasoningBudget > 0 {
 		modelSettings.ReasoningBudget = &reasoningBudget
-		if reasoningBudget > modelSettings.MaxTokens+4096 {
-			modelSettings.MaxTokens = reasoningBudget + 4096
+		maxTokens := 0
+		if modelSettings.MaxTokens != nil {
+			maxTokens = *modelSettings.MaxTokens
+		}
+		if reasoningBudget > maxTokens+4096 {
+			newLimit := reasoningBudget + 4096
+			modelSettings.MaxTokens = &newLimit
 		}
 	}
 
