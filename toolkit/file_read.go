@@ -46,8 +46,8 @@ func (t *FileReadTool) Description() string {
 	return "A tool that reads the content of a file. To use this tool, provide a 'path' parameter with the path to the file you want to read."
 }
 
-func (t *FileReadTool) Schema() schema.Schema {
-	return schema.Schema{
+func (t *FileReadTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"path"},
 		Properties: map[string]*schema.Property{
@@ -147,8 +147,8 @@ func isBinaryContent(content []byte) bool {
 	return controlCount > sampleSize/10
 }
 
-func (t *FileReadTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (t *FileReadTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "File Read",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,

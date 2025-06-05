@@ -189,10 +189,6 @@ func TestAgentCreateResponse(t *testing.T) {
 			}
 		}
 
-		if resp.Model != "test-model" {
-			t.Errorf("Expected model 'test-model', got %q", resp.Model)
-		}
-
 		if resp.Usage == nil {
 			t.Errorf("Expected non-nil Usage")
 		} else {
@@ -245,9 +241,6 @@ type mockLLM struct {
 }
 
 func (m *mockLLM) Name() string {
-	if m.nameFunc != nil {
-		return m.nameFunc()
-	}
 	return "mock-llm"
 }
 

@@ -36,7 +36,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	}
 	defer stream.Close()
 
-	var inToolUse bool
+	var inToolUse, incremental bool
 	toolUseAccum := ""
 	toolName := ""
 	toolID := ""
@@ -44,6 +44,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	for stream.Next(ctx) {
 		event := stream.Event()
 		if event.Type == dive.EventTypeLLMEvent {
+			incremental = true
 			payload := event.Item.Event
 			if payload.ContentBlock != nil {
 				cb := payload.ContentBlock
@@ -73,6 +74,11 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 					fmt.Print(thinkingStyle.Sprint(delta.Thinking))
 				}
 			}
+		} else if event.Type == dive.EventTypeResponseCompleted {
+			if !incremental {
+				text := strings.TrimSpace(event.Response.OutputText())
+				fmt.Println(successStyle.Sprint(text))
+			}
 		}
 	}
 
@@ -80,7 +86,25 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	return nil
 }
 
-var DefaultChatBackstory = `You are a helpful AI assistant. You aim to be direct, clear, and helpful in your responses.`
+func getTools() []dive.Tool {
+	var theTools []dive.Tool
+	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
+		if err != nil {
+			log.Fatal(err)
+		}
+		scraper := toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: client})
+		theTools = append(theTools, scraper)
+	}
+	if key := os.Getenv("GOOGLE_SEARCH_CX"); key != "" {
+		googleClient, err := google.New()
+		if err != nil {
+			log.Fatal(err)
+		}
+		theTools = append(theTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
+	}
+	return theTools
+}
 
 func runChat(instructions, agentName string, reasoningBudget int) error {
 	ctx := context.Background()
@@ -92,30 +116,18 @@ func runChat(instructions, agentName string, reasoningBudget int) error {
 		return fmt.Errorf("error getting model: %v", err)
 	}
 
-	var theTools []dive.Tool
-
-	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
-		if err != nil {
-			log.Fatal(err)
-		}
-		scraper := toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: client})
-		theTools = append(theTools, scraper)
-	}
-
-	if key := os.Getenv("GOOGLE_SEARCH_CX"); key != "" {
-		googleClient, err := google.New()
-		if err != nil {
-			log.Fatal(err)
-		}
-		theTools = append(theTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
-	}
+	theTools := getTools()
 
 	modelSettings := &agent.ModelSettings{}
 	if reasoningBudget > 0 {
 		modelSettings.ReasoningBudget = &reasoningBudget
-		if reasoningBudget > modelSettings.MaxTokens+4096 {
-			modelSettings.MaxTokens = reasoningBudget + 4096
+		maxTokens := 0
+		if modelSettings.MaxTokens != nil {
+			maxTokens = *modelSettings.MaxTokens
+		}
+		if reasoningBudget > maxTokens+4096 {
+			newLimit := reasoningBudget + 4096
+			modelSettings.MaxTokens = &newLimit
 		}
 	}
 
@@ -173,9 +185,6 @@ var chatCmd = &cobra.Command{
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
-		}
-		if systemPrompt == "" {
-			systemPrompt = DefaultChatBackstory
 		}
 
 		agentName, err := cmd.Flags().GetString("agent-name")

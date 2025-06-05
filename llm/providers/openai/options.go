@@ -1,30 +1,29 @@
 package openai
 
-import "net/http"
+import (
+	"net/http"
 
+	"github.com/openai/openai-go/option"
+)
+
+// Option is a function that configures the Provider
 type Option func(*Provider)
 
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
-		p.apiKey = apiKey
+		p.options = append(p.options, option.WithAPIKey(apiKey))
 	}
 }
 
 func WithEndpoint(endpoint string) Option {
 	return func(p *Provider) {
-		p.endpoint = endpoint
+		p.options = append(p.options, option.WithBaseURL(endpoint))
 	}
 }
 
 func WithClient(client *http.Client) Option {
 	return func(p *Provider) {
-		p.client = client
-	}
-}
-
-func WithMaxTokens(maxTokens int) Option {
-	return func(p *Provider) {
-		p.maxTokens = maxTokens
+		p.options = append(p.options, option.WithHTTPClient(client))
 	}
 }
 
@@ -34,14 +33,14 @@ func WithModel(model string) Option {
 	}
 }
 
-func WithSystemRole(systemRole string) Option {
+func WithMaxTokens(maxTokens int) Option {
 	return func(p *Provider) {
-		p.systemRole = systemRole
+		p.maxTokens = maxTokens
 	}
 }
 
-func WithCorePrompt(corePrompt string) Option {
+func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
-		p.corePrompt = corePrompt
+		p.options = append(p.options, option.WithMaxRetries(maxRetries))
 	}
 }

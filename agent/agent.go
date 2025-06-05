@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -25,25 +24,23 @@ var (
 	FinishNow                 = "Do not use any more tools. You must respond with your final answer now."
 )
 
-// Confirm our standard implementation satisfies the different Agent interfaces
-var (
-	_ dive.Agent = &Agent{}
-)
+// Confirm our standard implementation satisfies the dive.Agent interface.
+var _ dive.Agent = &Agent{}
 
 // ModelSettings are used to configure details of the LLM for an Agent.
 type ModelSettings struct {
 	Temperature       *float64
 	PresencePenalty   *float64
 	FrequencyPenalty  *float64
-	ReasoningBudget   *int
-	ReasoningEffort   string
-	MaxTokens         int
-	ToolChoice        llm.ToolChoice
 	ParallelToolCalls *bool
+	Caching           *bool
+	MaxTokens         *int
+	ReasoningBudget   *int
+	ReasoningEffort   llm.ReasoningEffort
+	ToolChoice        *llm.ToolChoice
 	Features          []string
 	RequestHeaders    http.Header
 	MCPServers        []llm.MCPServerConfig
-	Caching           *bool
 }
 
 // Options are used to configure an Agent.
@@ -55,7 +52,6 @@ type Options struct {
 	Subordinates         []string
 	Model                llm.LLM
 	Tools                []dive.Tool
-	ToolChoice           llm.ToolChoice
 	ResponseTimeout      time.Duration
 	Hooks                llm.Hooks
 	Logger               slogger.Logger
@@ -77,7 +73,6 @@ type Agent struct {
 	model                llm.LLM
 	tools                []dive.Tool
 	toolsByName          map[string]dive.Tool
-	toolChoice           llm.ToolChoice
 	isSupervisor         bool
 	subordinates         []string
 	responseTimeout      time.Duration
@@ -91,7 +86,6 @@ type Agent struct {
 	threadRepository     dive.ThreadRepository
 	confirmer            dive.Confirmer
 	systemPromptTemplate *template.Template
-	mutex                sync.Mutex
 }
 
 // New returns a new Agent configured with the given options.
@@ -140,7 +134,6 @@ func New(opts Options) (*Agent, error) {
 		threadRepository:     opts.ThreadRepository,
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
-		toolChoice:           opts.ToolChoice,
 		confirmer:            opts.Confirmer,
 	}
 
@@ -232,9 +225,6 @@ func (a *Agent) Subordinates() []string {
 }
 
 func (a *Agent) SetEnvironment(env dive.Environment) error {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-
 	if a.environment != nil {
 		return fmt.Errorf("agent is already associated with an environment")
 	}
@@ -257,8 +247,8 @@ func (a *Agent) prepareThreadMessages(
 	if err != nil {
 		return nil, nil, err
 	}
-	threadMessages := append(thread.Messages, messages...)
-	return thread, threadMessages, nil
+	thread.Messages = append(thread.Messages, messages...)
+	return thread, thread.Messages, nil
 }
 
 func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
@@ -777,9 +767,6 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 	if len(a.tools) > 0 {
 		generateOpts = append(generateOpts, llm.WithTools(a.getToolDefinitions()...))
 	}
-	if a.toolChoice != "" {
-		generateOpts = append(generateOpts, llm.WithToolChoice(a.toolChoice))
-	}
 	if a.hooks != nil {
 		generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
 	}
@@ -803,10 +790,10 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 		if settings.ReasoningEffort != "" {
 			generateOpts = append(generateOpts, llm.WithReasoningEffort(settings.ReasoningEffort))
 		}
-		if settings.MaxTokens != 0 {
-			generateOpts = append(generateOpts, llm.WithMaxTokens(settings.MaxTokens))
+		if settings.MaxTokens != nil {
+			generateOpts = append(generateOpts, llm.WithMaxTokens(*settings.MaxTokens))
 		}
-		if settings.ToolChoice != "" {
+		if settings.ToolChoice != nil {
 			generateOpts = append(generateOpts, llm.WithToolChoice(settings.ToolChoice))
 		}
 		if settings.ParallelToolCalls != nil {

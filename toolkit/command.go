@@ -71,8 +71,8 @@ func (c *CommandTool) Description() string {
 	return strings.TrimSpace(desc)
 }
 
-func (c *CommandTool) Schema() schema.Schema {
-	return schema.Schema{
+func (c *CommandTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"name"},
 		Properties: map[string]*schema.Property{
@@ -97,8 +97,8 @@ func (c *CommandTool) Schema() schema.Schema {
 	}
 }
 
-func (c *CommandTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (c *CommandTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "Command",
 		ReadOnlyHint:    false,
 		IdempotentHint:  false,

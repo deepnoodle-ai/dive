@@ -1,7 +1,9 @@
 package config
 
+import "github.com/diveagents/dive/llm"
+
 type MCPToolConfiguration struct {
-	Enabled      bool     `yaml:"Enabled" json:"Enabled"`
+	Enabled      *bool    `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
 	AllowedTools []string `yaml:"AllowedTools" json:"AllowedTools"`
 }
 
@@ -43,7 +45,7 @@ type Variable struct {
 // Tool represents an external capability that can be used by agents
 type Tool struct {
 	Name       string         `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Enabled    bool           `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
+	Enabled    *bool          `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
 	Parameters map[string]any `yaml:"Parameters,omitempty" json:"Parameters,omitempty"`
 }
 
@@ -57,7 +59,6 @@ type Agent struct {
 	Provider           string         `yaml:"Provider,omitempty" json:"Provider,omitempty"`
 	Model              string         `yaml:"Model,omitempty" json:"Model,omitempty"`
 	Tools              []string       `yaml:"Tools,omitempty" json:"Tools,omitempty"`
-	ToolChoice         string         `yaml:"ToolChoice,omitempty" json:"ToolChoice,omitempty"`
 	ResponseTimeout    any            `yaml:"ResponseTimeout,omitempty" json:"ResponseTimeout,omitempty"`
 	ToolConfig         map[string]any `yaml:"ToolConfig,omitempty" json:"ToolConfig,omitempty"`
 	ToolIterationLimit int            `yaml:"ToolIterationLimit,omitempty" json:"ToolIterationLimit,omitempty"`
@@ -68,18 +69,18 @@ type Agent struct {
 
 // ModelSettings is used to configure an Agent LLM
 type ModelSettings struct {
-	Temperature       *float64          `yaml:"Temperature,omitempty" json:"Temperature,omitempty"`
-	PresencePenalty   *float64          `yaml:"PresencePenalty,omitempty" json:"PresencePenalty,omitempty"`
-	FrequencyPenalty  *float64          `yaml:"FrequencyPenalty,omitempty" json:"FrequencyPenalty,omitempty"`
-	ReasoningBudget   *int              `yaml:"ReasoningBudget,omitempty" json:"ReasoningBudget,omitempty"`
-	ReasoningEffort   string            `yaml:"ReasoningEffort,omitempty" json:"ReasoningEffort,omitempty"`
-	MaxTokens         int               `yaml:"MaxTokens,omitempty" json:"MaxTokens,omitempty"`
-	ToolChoice        string            `yaml:"ToolChoice,omitempty" json:"ToolChoice,omitempty"`
-	ParallelToolCalls *bool             `yaml:"ParallelToolCalls,omitempty" json:"ParallelToolCalls,omitempty"`
-	Features          []string          `yaml:"Features,omitempty" json:"Features,omitempty"`
-	RequestHeaders    map[string]string `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
-	MCPServers        []MCPServer       `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
-	Caching           *bool             `yaml:"Caching,omitempty" json:"Caching,omitempty"`
+	Temperature       *float64            `yaml:"Temperature,omitempty" json:"Temperature,omitempty"`
+	PresencePenalty   *float64            `yaml:"PresencePenalty,omitempty" json:"PresencePenalty,omitempty"`
+	FrequencyPenalty  *float64            `yaml:"FrequencyPenalty,omitempty" json:"FrequencyPenalty,omitempty"`
+	ReasoningBudget   *int                `yaml:"ReasoningBudget,omitempty" json:"ReasoningBudget,omitempty"`
+	ReasoningEffort   llm.ReasoningEffort `yaml:"ReasoningEffort,omitempty" json:"ReasoningEffort,omitempty"`
+	MaxTokens         *int                `yaml:"MaxTokens,omitempty" json:"MaxTokens,omitempty"`
+	ToolChoice        *llm.ToolChoice     `yaml:"ToolChoice,omitempty" json:"ToolChoice,omitempty"`
+	ParallelToolCalls *bool               `yaml:"ParallelToolCalls,omitempty" json:"ParallelToolCalls,omitempty"`
+	Features          []string            `yaml:"Features,omitempty" json:"Features,omitempty"`
+	RequestHeaders    map[string]string   `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
+	MCPServers        []MCPServer         `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
+	Caching           *bool               `yaml:"Caching,omitempty" json:"Caching,omitempty"`
 }
 
 // Input represents an input parameter for a task or workflow
@@ -151,7 +152,7 @@ type Schedule struct {
 	Name     string `yaml:"Name,omitempty" json:"Name,omitempty"`
 	Cron     string `yaml:"Cron,omitempty" json:"Cron,omitempty"`
 	Workflow string `yaml:"Workflow,omitempty" json:"Workflow,omitempty"`
-	Enabled  bool   `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
+	Enabled  *bool  `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
 }
 
 // Document represents a document that can be referenced by agents and tasks
@@ -166,4 +167,8 @@ type Document struct {
 
 func isValidLogLevel(level string) bool {
 	return level == "debug" || level == "info" || level == "warn" || level == "error"
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }

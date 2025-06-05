@@ -14,6 +14,7 @@ type FileSystem interface {
 	IsDir(path string) bool
 	IsAbs(path string) bool
 	ListDir(path string) (string, error)
+	MkdirAll(path string, perm os.FileMode) error
 }
 
 // RealFileSystem implements FileSystem using actual file operations
@@ -60,4 +61,8 @@ func (fs *RealFileSystem) ListDir(path string) (string, error) {
 		return "", err
 	}
 	return string(output), nil
+}
+
+func (fs *RealFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
 }

@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 )
 
 // EventType represents the type of streaming event
@@ -73,15 +74,19 @@ type EventDelta struct {
 
 // ResponseAccumulator builds up a complete response from a stream of events.
 type ResponseAccumulator struct {
-	response *Response
-	usage    *Usage
-	complete bool
+	response      *Response
+	contentBlocks map[int]Content // Map of content blocks by index
+	complete      bool
 }
 
+// NewResponseAccumulator creates a new ResponseAccumulator.
 func NewResponseAccumulator() *ResponseAccumulator {
-	return &ResponseAccumulator{}
+	return &ResponseAccumulator{
+		contentBlocks: make(map[int]Content),
+	}
 }
 
+// AddEvent adds an event to the ResponseAccumulator.
 func (r *ResponseAccumulator) AddEvent(event *Event) error {
 	switch event.Type {
 	case EventTypeMessageStart:
@@ -117,27 +122,26 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		case ContentTypeRedactedThinking:
 			content = &RedactedThinkingContent{}
 		}
+
 		if event.Index != nil {
-			// Ensure slice has enough capacity
-			for len(r.response.Content) <= *event.Index {
-				r.response.Content = append(r.response.Content, nil)
-			}
-			r.response.Content[*event.Index] = content
+			// Store content by index in map
+			r.contentBlocks[*event.Index] = content
 		} else {
-			r.response.Content = append(r.response.Content, content)
+			// If no index provided, use the next available index
+			nextIndex := len(r.contentBlocks)
+			r.contentBlocks[nextIndex] = content
 		}
 
 	case EventTypeContentBlockDelta:
 		if r.response == nil || event.Delta == nil || event.Index == nil {
 			return errors.New("invalid content block delta event")
 		}
-		if *event.Index >= len(r.response.Content) {
-			return errors.New("content block index out of bounds")
+
+		content, exists := r.contentBlocks[*event.Index]
+		if !exists {
+			return errors.New("content block not found for index")
 		}
-		content := r.response.Content[*event.Index]
-		if content == nil {
-			return errors.New("content block not found")
-		}
+
 		switch event.Delta.Type {
 		case EventDeltaTypeText:
 			if textContent, ok := content.(*TextContent); ok {
@@ -173,13 +177,40 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 
 	case EventTypeMessageStop:
 		r.complete = true
+		// Convert map to sorted slice when complete
+		r.finalizeContent()
 	}
 
 	// Update usage information if provided
 	if event.Usage != nil {
-		r.usage = event.Usage
+		r.response.Usage.InputTokens += event.Usage.InputTokens
+		r.response.Usage.OutputTokens += event.Usage.OutputTokens
+		r.response.Usage.CacheReadInputTokens += event.Usage.CacheReadInputTokens
+		r.response.Usage.CacheCreationInputTokens += event.Usage.CacheCreationInputTokens
 	}
 	return nil
+}
+
+// finalizeContent converts the content blocks map to a sorted slice
+func (r *ResponseAccumulator) finalizeContent() {
+	if r.response == nil || len(r.contentBlocks) == 0 {
+		return
+	}
+
+	// Get sorted indices
+	indices := make([]int, 0, len(r.contentBlocks))
+	for index := range r.contentBlocks {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+
+	// Create content slice in sorted order
+	content := make([]Content, len(indices))
+	for i, index := range indices {
+		content[i] = r.contentBlocks[index]
+	}
+
+	r.response.Content = content
 }
 
 func (r *ResponseAccumulator) IsComplete() bool {
@@ -187,9 +218,13 @@ func (r *ResponseAccumulator) IsComplete() bool {
 }
 
 func (r *ResponseAccumulator) Response() *Response {
+	// Ensure content is finalized even if called before completion
+	if r.response != nil && len(r.contentBlocks) > 0 && len(r.response.Content) == 0 {
+		r.finalizeContent()
+	}
 	return r.response
 }
 
 func (r *ResponseAccumulator) Usage() *Usage {
-	return r.usage
+	return &r.response.Usage
 }

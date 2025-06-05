@@ -6,15 +6,6 @@ Config:
   DefaultModel: claude-sonnet-4-20250514
   LogLevel: debug
   ConfirmationMode: never
-  Providers:
-    - Name: anthropic
-      Caching: true
-
-Tools:
-  - Name: Web.Search
-    Enabled: true
-  - Name: Web.Fetch
-    Enabled: true
 
 Agents:
   - Name: Analyst

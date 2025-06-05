@@ -38,8 +38,8 @@ func (t *SearchTool) Description() string {
 	return "Searches the web using the given query. The response includes the url, title, and description of each webpage in the search results."
 }
 
-func (t *SearchTool) Schema() schema.Schema {
-	return schema.Schema{
+func (t *SearchTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"query"},
 		Properties: map[string]*schema.Property{
@@ -83,8 +83,8 @@ func (t *SearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolRe
 	return NewToolResultText(string(data)), nil
 }
 
-func (t *SearchTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (t *SearchTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "Search",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,

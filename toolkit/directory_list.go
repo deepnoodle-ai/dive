@@ -49,6 +49,9 @@ type DirectoryListTool struct {
 
 // NewDirectoryListTool creates a new tool for listing directory contents
 func NewDirectoryListTool(options DirectoryListToolOptions) *dive.TypedToolAdapter[*DirectoryListInput] {
+	if options.MaxEntries == 0 {
+		options.MaxEntries = DefaultDirectoryListMaxEntries
+	}
 	return dive.ToolAdapter(&DirectoryListTool{
 		defaultPath:   options.DefaultPath,
 		maxEntries:    options.MaxEntries,
@@ -66,8 +69,8 @@ func (t *DirectoryListTool) Description() string {
 	return "A tool that lists the contents of a directory. To use this tool, provide a 'path' parameter with the path to the directory you want to list."
 }
 
-func (t *DirectoryListTool) Schema() schema.Schema {
-	return schema.Schema{
+func (t *DirectoryListTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type: "object",
 		Properties: map[string]*schema.Property{
 			"path": {
@@ -79,8 +82,8 @@ func (t *DirectoryListTool) Schema() schema.Schema {
 	}
 }
 
-func (t *DirectoryListTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (t *DirectoryListTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "Directory List",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,

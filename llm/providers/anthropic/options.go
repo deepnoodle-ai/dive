@@ -1,6 +1,9 @@
 package anthropic
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
 type Option func(*Provider)
 
@@ -22,12 +25,6 @@ func WithClient(client *http.Client) Option {
 	}
 }
 
-func WithVersion(version string) Option {
-	return func(p *Provider) {
-		p.version = version
-	}
-}
-
 func WithMaxTokens(maxTokens int) Option {
 	return func(p *Provider) {
 		p.maxTokens = maxTokens
@@ -37,5 +34,23 @@ func WithMaxTokens(maxTokens int) Option {
 func WithModel(model string) Option {
 	return func(p *Provider) {
 		p.model = model
+	}
+}
+
+func WithMaxRetries(maxRetries int) Option {
+	return func(p *Provider) {
+		p.maxRetries = maxRetries
+	}
+}
+
+func WithBaseWait(baseWait time.Duration) Option {
+	return func(p *Provider) {
+		p.retryBaseWait = baseWait
+	}
+}
+
+func WithVersion(version string) Option {
+	return func(p *Provider) {
+		p.version = version
 	}
 }

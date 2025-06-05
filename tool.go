@@ -128,10 +128,10 @@ type Tool interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() schema.Schema
+	Schema() *schema.Schema
 
 	// Annotations returns optional properties that describe tool behavior.
-	Annotations() ToolAnnotations
+	Annotations() *ToolAnnotations
 
 	// Call is the function that is called to use the tool.
 	Call(ctx context.Context, input any) (*ToolResult, error)
@@ -146,10 +146,10 @@ type TypedTool[T any] interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() schema.Schema
+	Schema() *schema.Schema
 
 	// Annotations returns optional properties that describe tool behavior.
-	Annotations() ToolAnnotations
+	Annotations() *ToolAnnotations
 
 	// Call is the function that is called to use the tool.
 	Call(ctx context.Context, input T) (*ToolResult, error)
@@ -175,11 +175,11 @@ func (t *TypedToolAdapter[T]) Description() string {
 	return t.tool.Description()
 }
 
-func (t *TypedToolAdapter[T]) Schema() schema.Schema {
+func (t *TypedToolAdapter[T]) Schema() *schema.Schema {
 	return t.tool.Schema()
 }
 
-func (t *TypedToolAdapter[T]) Annotations() ToolAnnotations {
+func (t *TypedToolAdapter[T]) Annotations() *ToolAnnotations {
 	return t.tool.Annotations()
 }
 

@@ -1,13 +1,17 @@
 package anthropic
 
 import (
+	"context"
+	"errors"
+
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/schema"
 )
 
 var (
-	_ llm.Tool              = &WebSearchTool{}
-	_ llm.ToolConfiguration = &WebSearchTool{}
+	_ llm.Tool              = &CodeExecutionTool{}
+	_ llm.ToolConfiguration = &CodeExecutionTool{}
 )
 
 /* A tool definition must be added in the request that looks like this:
@@ -49,10 +53,24 @@ func (t *CodeExecutionTool) Description() string {
 	return "The code execution tool allows Claude to execute Python code in a secure, sandboxed environment. Claude can analyze data, create visualizations, perform complex calculations, and process uploaded files directly within the API conversation."
 }
 
-func (t *CodeExecutionTool) Schema() schema.Schema {
-	return schema.Schema{} // Empty for server-side tools
+func (t *CodeExecutionTool) Schema() *schema.Schema {
+	return nil // Empty for server-side tools
 }
 
 func (t *CodeExecutionTool) ToolConfiguration(providerName string) map[string]any {
 	return map[string]any{"type": t.typeString, "name": t.name}
+}
+
+func (t *CodeExecutionTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
+		Title:           "Code Execution",
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		IdempotentHint:  false,
+		OpenWorldHint:   false,
+	}
+}
+
+func (t *CodeExecutionTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return nil, errors.New("server-side tool does not implement local calls")
 }

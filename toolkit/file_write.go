@@ -131,8 +131,8 @@ func (t *FileWriteTool) Description() string {
 	return "A tool that writes content to a file. To use this tool, provide a 'path' parameter with the path to the file you want to write to, and a 'content' parameter with the content to write."
 }
 
-func (t *FileWriteTool) Schema() dive.Schema {
-	return dive.Schema{
+func (t *FileWriteTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"path", "content"},
 		Properties: map[string]*schema.Property{
@@ -175,8 +175,8 @@ func (t *FileWriteTool) Call(ctx context.Context, input *FileWriteInput) (*dive.
 	return dive.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(input.Content), filePath)), nil
 }
 
-func (t *FileWriteTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (t *FileWriteTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "File Write",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,

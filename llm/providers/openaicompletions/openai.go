@@ -1,4 +1,4 @@
-package openai
+package openaicompletions
 
 import (
 	"bufio"
@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
@@ -41,9 +41,12 @@ const (
 
 var (
 	DefaultModel              = "gpt-4o"
-	DefaultMessagesEndpoint   = "https://api.openai.com/v1/chat/completions"
+	DefaultEndpoint           = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens          = 4096
 	DefaultSystemRole         = "developer"
+	DefaultClient             = &http.Client{Timeout: 300 * time.Second}
+	DefaultMaxRetries         = 6
+	DefaultRetryBaseWait      = 2 * time.Second
 	ModelSystemPromptBehavior = map[string]SystemPromptBehavior{
 		"o1-mini": SystemPromptBehaviorOmit,
 	}
@@ -55,36 +58,35 @@ var (
 var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
-	apiKey     string
-	endpoint   string
-	model      string
-	systemRole string
-	corePrompt string
-	maxTokens  int
-	client     *http.Client
+	client        *http.Client
+	apiKey        string
+	endpoint      string
+	model         string
+	maxTokens     int
+	maxRetries    int
+	retryBaseWait time.Duration
+	systemRole    string
 }
 
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:     os.Getenv("OPENAI_API_KEY"),
-		endpoint:   DefaultMessagesEndpoint,
-		client:     http.DefaultClient,
-		systemRole: DefaultSystemRole,
+		apiKey:        os.Getenv("OPENAI_API_KEY"),
+		endpoint:      DefaultEndpoint,
+		client:        DefaultClient,
+		model:         DefaultModel,
+		maxTokens:     DefaultMaxTokens,
+		maxRetries:    DefaultMaxRetries,
+		retryBaseWait: DefaultRetryBaseWait,
+		systemRole:    DefaultSystemRole,
 	}
 	for _, opt := range opts {
 		opt(p)
-	}
-	if p.model == "" {
-		p.model = DefaultModel
-	}
-	if p.maxTokens == 0 {
-		p.maxTokens = DefaultMaxTokens
 	}
 	return p
 }
 
 func (p *Provider) Name() string {
-	return fmt.Sprintf("openai-%s", p.model)
+	return "openai-completions"
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
@@ -108,7 +110,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	request.Messages = msgs
-	addSystemPrompt(&request, p.GetSystemPrompt(config), p.systemRole)
+	addSystemPrompt(&request, config.SystemPrompt, p.systemRole)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -152,7 +154,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
@@ -243,7 +245,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	request.Messages = msgs
 	request.Stream = true
 	request.StreamOptions = &StreamOptions{IncludeUsage: true}
-	addSystemPrompt(&request, p.GetSystemPrompt(config), p.systemRole)
+	addSystemPrompt(&request, config.SystemPrompt, p.systemRole)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -292,27 +294,12 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			prefillClosingTag: config.PrefillClosingTag,
 		}
 		return nil
-	}, retry.WithMaxRetries(6))
+	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
 	if err != nil {
 		return nil, err
 	}
 	return stream, nil
-}
-
-func (p *Provider) SupportsStreaming() bool {
-	return true
-}
-
-func (p *Provider) GetSystemPrompt(c *llm.Config) string {
-	var parts []string
-	if p.corePrompt != "" {
-		parts = append(parts, p.corePrompt)
-	}
-	if c.SystemPrompt != "" {
-		parts = append(parts, c.SystemPrompt)
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
 func validateMessages(messages []*llm.Message) error {
@@ -439,342 +426,35 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		}
 	}
 
-	var toolChoice string
+	var toolChoice any
 	if len(tools) > 0 {
-		if config.ToolChoice != "" {
-			toolChoice = string(config.ToolChoice)
-		} else if len(tools) > 0 {
-			toolChoice = "auto"
+		toolChoice = "auto"
+		if config.ToolChoice != nil {
+			switch config.ToolChoice.Type {
+			case llm.ToolChoiceTypeAny:
+				toolChoice = "required"
+			case llm.ToolChoiceTypeNone:
+				toolChoice = "none"
+			case llm.ToolChoiceTypeAuto:
+				toolChoice = "auto"
+			case llm.ToolChoiceTypeTool:
+				toolChoice = map[string]any{
+					"type":     "function",
+					"function": map[string]any{"name": config.ToolChoice.Name},
+				}
+			default:
+				return fmt.Errorf("invalid tool choice type: %s", config.ToolChoice.Type)
+			}
 		}
+		req.ToolChoice = toolChoice
 	}
 
 	req.Tools = tools
-	req.ToolChoice = toolChoice
 	req.Temperature = config.Temperature
 	req.PresencePenalty = config.PresencePenalty
 	req.FrequencyPenalty = config.FrequencyPenalty
 	req.ReasoningEffort = ReasoningEffort(config.ReasoningEffort)
 	return nil
-}
-
-type StreamIterator struct {
-	reader            *bufio.Reader
-	body              io.ReadCloser
-	err               error
-	currentEvent      *llm.Event
-	toolCalls         map[int]*ToolCallAccumulator
-	contentBlocks     map[int]*ContentBlockAccumulator
-	responseID        string
-	responseModel     string
-	usage             Usage
-	prefill           string
-	prefillClosingTag string
-	eventCount        int
-	closeOnce         sync.Once
-	eventQueue        []*llm.Event
-}
-
-type ToolCallAccumulator struct {
-	ID         string
-	Type       string
-	Name       string
-	Arguments  string
-	IsComplete bool
-}
-
-type ContentBlockAccumulator struct {
-	Type       string
-	Text       string
-	IsComplete bool
-}
-
-// Next advances to the next event in the stream. Returns false when the stream
-// is complete or an error occurs.
-func (s *StreamIterator) Next() bool {
-	// If we have events in the queue, use the first one
-	if len(s.eventQueue) > 0 {
-		s.currentEvent = s.eventQueue[0]
-		s.eventQueue = s.eventQueue[1:]
-		return true
-	}
-
-	// Try to get more events
-	for {
-		events, err := s.next()
-		if err != nil {
-			if err != io.EOF {
-				// EOF is expected when stream ends
-				s.Close()
-				s.err = err
-			}
-			return false
-		}
-
-		// If we got events, use the first one and queue the rest
-		if len(events) > 0 {
-			s.currentEvent = events[0]
-			if len(events) > 1 {
-				s.eventQueue = append(s.eventQueue, events[1:]...)
-			}
-			return true
-		}
-	}
-}
-
-// Event returns the current event. Should only be called after a successful Next().
-func (s *StreamIterator) Event() *llm.Event {
-	return s.currentEvent
-}
-
-// next processes a single line from the stream and returns events if any are ready
-func (s *StreamIterator) next() ([]*llm.Event, error) {
-	line, err := s.reader.ReadBytes('\n')
-	if err != nil {
-		return nil, err
-	}
-	// Skip empty lines
-	if len(bytes.TrimSpace(line)) == 0 {
-		return nil, nil
-	}
-	// Parse the event type from the SSE format
-	if bytes.HasPrefix(line, []byte("event: ")) {
-		return nil, nil
-	}
-	// Remove "data: " prefix if present
-	line = bytes.TrimPrefix(line, []byte("data: "))
-	// Check for stream end
-	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-		return nil, nil
-	}
-	// Unmarshal the event
-	var event StreamResponse
-	if err := json.Unmarshal(line, &event); err != nil {
-		return nil, err
-	}
-	if event.ID != "" {
-		s.responseID = event.ID
-	}
-	if event.Model != "" {
-		s.responseModel = event.Model
-	}
-	if event.Usage.TotalTokens > 0 {
-		s.usage = event.Usage
-	}
-	if len(event.Choices) == 0 {
-		return nil, nil
-	}
-	choice := event.Choices[0]
-	var events []*llm.Event
-
-	// Emit message start event if this is the first event
-	if s.eventCount == 0 {
-		s.eventCount++
-		events = append(events, &llm.Event{
-			Type: llm.EventTypeMessageStart,
-			Message: &llm.Response{
-				ID:      s.responseID,
-				Type:    "message",
-				Role:    llm.Assistant,
-				Model:   s.responseModel,
-				Content: []llm.Content{},
-				Usage: llm.Usage{
-					InputTokens:  s.usage.PromptTokens,
-					OutputTokens: s.usage.CompletionTokens,
-				},
-			},
-		})
-	}
-
-	if choice.Delta.Reasoning != "" {
-		// TODO: handle accumulated reasoning
-	}
-
-	// Handle text content
-	if choice.Delta.Content != "" {
-		// Apply and clear prefill if there is one
-		if s.prefill != "" {
-			if !strings.HasPrefix(choice.Delta.Content, s.prefill) &&
-				!strings.HasPrefix(s.prefill, choice.Delta.Content) {
-				choice.Delta.Content = s.prefill + choice.Delta.Content
-			}
-			s.prefill = ""
-		}
-		// If this is a new content block, stop any open content blocks and
-		// generate a content_block_start event
-		index := choice.Index
-		if _, exists := s.contentBlocks[index]; !exists {
-			// Stop any previous content blocks that are still open
-			for prevIndex, prev := range s.contentBlocks {
-				if !prev.IsComplete {
-					stopIndex := prevIndex
-					events = append(events, &llm.Event{
-						Type:  llm.EventTypeContentBlockStop,
-						Index: &stopIndex,
-					})
-					prev.IsComplete = true
-				}
-			}
-			// Stop any previous tool calls that are still open
-			for prevIndex, prev := range s.toolCalls {
-				if !prev.IsComplete {
-					stopIndex := prevIndex
-					events = append(events, &llm.Event{
-						Type:  llm.EventTypeContentBlockStop,
-						Index: &stopIndex,
-					})
-					prev.IsComplete = true
-				}
-			}
-			s.contentBlocks[index] = &ContentBlockAccumulator{Type: "text"}
-			events = append(events, &llm.Event{
-				Type:         llm.EventTypeContentBlockStart,
-				Index:        &index,
-				ContentBlock: &llm.EventContentBlock{Type: "text"},
-			})
-		}
-		// Generate a content_block_delta event
-		events = append(events, &llm.Event{
-			Type:  llm.EventTypeContentBlockDelta,
-			Index: &index,
-			Delta: &llm.EventDelta{
-				Type: llm.EventDeltaTypeText,
-				Text: choice.Delta.Content,
-			},
-		})
-	}
-
-	if len(choice.Delta.ToolCalls) > 0 {
-		for _, toolCallDelta := range choice.Delta.ToolCalls {
-			index := toolCallDelta.Index
-			// If this is a new tool call, generate a content_block_start event
-			if _, exists := s.toolCalls[index]; !exists {
-				// Stop any previous content blocks that are still open
-				for prevIndex, prev := range s.contentBlocks {
-					if !prev.IsComplete {
-						stopIndex := prevIndex
-						events = append(events, &llm.Event{
-							Type:  llm.EventTypeContentBlockStop,
-							Index: &stopIndex,
-						})
-						prev.IsComplete = true
-					}
-				}
-				// Stop any previous tool calls that are still open
-				for prevIndex, prev := range s.toolCalls {
-					if !prev.IsComplete {
-						stopIndex := prevIndex
-						events = append(events, &llm.Event{
-							Type:  llm.EventTypeContentBlockStop,
-							Index: &stopIndex,
-						})
-						prev.IsComplete = true
-					}
-				}
-				s.toolCalls[index] = &ToolCallAccumulator{Type: "function"}
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStart,
-					Index: &index,
-					ContentBlock: &llm.EventContentBlock{
-						ID:   toolCallDelta.ID,
-						Name: toolCallDelta.Function.Name,
-						Type: llm.ContentTypeToolUse,
-					},
-				})
-			}
-			toolCall := s.toolCalls[index]
-			if toolCallDelta.ID != "" {
-				toolCall.ID = toolCallDelta.ID
-				// Update the ContentBlock in the event queue if it exists
-				for _, queuedEvent := range s.eventQueue {
-					if queuedEvent.Type == llm.EventTypeContentBlockStart && queuedEvent.Index != nil && *queuedEvent.Index == index {
-						if queuedEvent.ContentBlock == nil {
-							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
-						}
-						queuedEvent.ContentBlock.ID = toolCallDelta.ID
-					}
-				}
-			}
-			if toolCallDelta.Type != "" {
-				toolCall.Type = toolCallDelta.Type
-			}
-			if toolCallDelta.Function.Name != "" {
-				toolCall.Name = toolCallDelta.Function.Name
-				// Update the ContentBlock in the event queue if it exists
-				for _, queuedEvent := range s.eventQueue {
-					if queuedEvent.Type == llm.EventTypeContentBlockStart && queuedEvent.Index != nil && *queuedEvent.Index == index {
-						if queuedEvent.ContentBlock == nil {
-							queuedEvent.ContentBlock = &llm.EventContentBlock{Type: "tool_use"}
-						}
-						queuedEvent.ContentBlock.Name = toolCallDelta.Function.Name
-					}
-				}
-			}
-			if toolCallDelta.Function.Arguments != "" {
-				toolCall.Arguments += toolCallDelta.Function.Arguments
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockDelta,
-					Index: &index,
-					Delta: &llm.EventDelta{
-						Type:        llm.EventDeltaTypeInputJSON,
-						PartialJSON: toolCallDelta.Function.Arguments,
-					},
-				})
-			}
-		}
-	}
-
-	if choice.FinishReason != "" {
-		// Stop any open content blocks
-		for index, block := range s.contentBlocks {
-			blockIndex := index
-			if !block.IsComplete {
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &blockIndex,
-				})
-				block.IsComplete = true
-			}
-		}
-		// Stop any open tool calls
-		for index, toolCall := range s.toolCalls {
-			blockIndex := index
-			if !toolCall.IsComplete {
-				events = append(events, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &blockIndex,
-				})
-				toolCall.IsComplete = true
-			}
-		}
-		// Add message_delta event with stop reason
-		stopReason := choice.FinishReason
-		if stopReason == "tool_calls" {
-			stopReason = "tool_use" // Match Anthropic
-		}
-		events = append(events, &llm.Event{
-			Type:  llm.EventTypeMessageDelta,
-			Delta: &llm.EventDelta{StopReason: stopReason},
-			Usage: &llm.Usage{
-				InputTokens:  s.usage.PromptTokens,
-				OutputTokens: s.usage.CompletionTokens,
-			},
-		})
-		events = append(events, &llm.Event{
-			Type: llm.EventTypeMessageStop,
-		})
-	}
-
-	return events, nil
-}
-
-func (s *StreamIterator) Close() error {
-	var err error
-	s.closeOnce.Do(func() { err = s.body.Close() })
-	return err
-}
-
-func (s *StreamIterator) Err() error {
-	return s.err
 }
 
 func addSystemPrompt(request *Request, systemPrompt, defaultSystemRole string) {

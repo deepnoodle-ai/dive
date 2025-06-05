@@ -2,25 +2,9 @@ Name: 'Code Overview'
 Description: 'Generate a code overview for a given codebase'
 
 Config:
-  LogLevel: info
+  LogLevel: debug
   ConfirmationMode: never
   DefaultProvider: anthropic
-  DefaultModel: claude-sonnet-4-20250514
-  Providers:
-    - Name: anthropic
-      Features:
-        - code-execution-2025-05-22
-        - extended-cache-ttl-2025-04-11
-
-Tools:
-  - Name: Web.Search
-    Enabled: true
-  - Name: Web.Fetch
-    Enabled: true
-  - Name: Directory.List
-    Enabled: true
-  - Name: File.Read
-    Enabled: true
 
 Agents:
   - Name: Engineer

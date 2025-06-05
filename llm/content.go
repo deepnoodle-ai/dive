@@ -1,8 +1,13 @@
 package llm
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 )
 
 // ContentType indicates the type of a content block in a message
@@ -12,6 +17,7 @@ const (
 	ContentTypeText                    ContentType = "text"
 	ContentTypeImage                   ContentType = "image"
 	ContentTypeDocument                ContentType = "document"
+	ContentTypeFile                    ContentType = "file"
 	ContentTypeToolUse                 ContentType = "tool_use"
 	ContentTypeToolResult              ContentType = "tool_result"
 	ContentTypeThinking                ContentType = "thinking"
@@ -20,7 +26,11 @@ const (
 	ContentTypeWebSearchToolResult     ContentType = "web_search_tool_result"
 	ContentTypeMCPToolUse              ContentType = "mcp_tool_use"
 	ContentTypeMCPToolResult           ContentType = "mcp_tool_result"
+	ContentTypeMCPListTools            ContentType = "mcp_list_tools"
+	ContentTypeMCPApprovalRequest      ContentType = "mcp_approval_request"
+	ContentTypeMCPApprovalResponse     ContentType = "mcp_approval_response"
 	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
+	ContentTypeRefusal                 ContentType = "refusal"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -30,6 +40,7 @@ const (
 	ContentSourceTypeBase64 ContentSourceType = "base64"
 	ContentSourceTypeURL    ContentSourceType = "url"
 	ContentSourceTypeText   ContentSourceType = "text"
+	ContentSourceTypeFile   ContentSourceType = "file"
 )
 
 func (c ContentSourceType) String() string {
@@ -49,21 +60,42 @@ type ContentChunk struct {
 
 // ContentSource conveys information about media content in a message.
 type ContentSource struct {
-	// Type is the type of the content source ("base64", "url", or "content")
+	// Type is the type of the content source ("base64", "url", "text", or "file")
 	Type ContentSourceType `json:"type"`
 
-	// MediaType is the media type of the content. E.g. "image/jpeg"
+	// MediaType is the media type of the content. E.g. "image/jpeg", "application/pdf"
 	MediaType string `json:"media_type,omitempty"`
 
-	// Data is base64 encoded data
+	// Data is base64 encoded data (used with ContentSourceTypeBase64)
 	Data string `json:"data,omitempty"`
 
-	// URL is the URL of the content
+	// URL is the URL of the content (used with ContentSourceTypeURL)
 	URL string `json:"url,omitempty"`
+
+	// FileID is the file ID from the Files API (used with ContentSourceTypeFile)
+	FileID string `json:"file_id,omitempty"`
 
 	// Chunks of content. Only use if chunking on the client side, for use
 	// within a DocumentContent block.
 	Content []*ContentChunk `json:"content,omitempty"`
+
+	// GenerationID is an ID associated with the generation of this content,
+	// if any. This may be set on content returned from image generation, for
+	// example. Used for OpenAI image generation results.
+	GenerationID string `json:"generation_id,omitempty"`
+
+	// GenerationStatus is the status of the generation of this content,
+	// if any. This may be set on content returned from image generation, for
+	// example. Used for OpenAI image generation results.
+	GenerationStatus string `json:"generation_status,omitempty"`
+}
+
+// DecodedData returns the decoded data if this content carries base64 encoded data.
+func (c *ContentSource) DecodedData() ([]byte, error) {
+	if c.Type == ContentSourceTypeBase64 {
+		return base64.StdEncoding.DecodeString(c.Data)
+	}
+	return nil, fmt.Errorf("cannot decode data content source type: %s", c.Type)
 }
 
 // Content is a single block of content in a message. A message may contain
@@ -161,7 +193,35 @@ func (c *TextContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
+//// RefusalContent ////////////////////////////////////////////////////////////
+
+type RefusalContent struct {
+	Text         string        `json:"text"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+func (c *RefusalContent) Type() ContentType {
+	return ContentTypeRefusal
+}
+
+func (c *RefusalContent) MarshalJSON() ([]byte, error) {
+	type Alias RefusalContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeRefusal,
+		Alias: (*Alias)(c),
+	})
+}
+
+func (c *RefusalContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
+}
+
 //// ImageContent //////////////////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/build-with-claude/vision
 
 /* Examples:
 {
@@ -178,6 +238,14 @@ func (c *TextContent) SetCacheControl(cacheControl *CacheControl) {
   "source": {
     "type": "url",
     "url": "https://upload.wikimedia.org/foo.jpg"
+  }
+}
+
+{
+  "type": "image",
+  "source": {
+    "type": "file",
+    "file_id": "file_abc123"
   }
 }
 */
@@ -204,6 +272,22 @@ func (c *ImageContent) MarshalJSON() ([]byte, error) {
 
 func (c *ImageContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
+}
+
+// Image returns the image content as an image.Image.
+func (c *ImageContent) Image() (image.Image, error) {
+	if c.Source.Type != ContentSourceTypeBase64 {
+		return nil, fmt.Errorf("image content source type is not base64: %s", c.Source.Type)
+	}
+	decoded, err := c.Source.DecodedData()
+	if err != nil {
+		return nil, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(decoded))
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
 }
 
 //// DocumentContent ///////////////////////////////////////////////////////////
@@ -249,6 +333,14 @@ func (c *ImageContent) SetCacheControl(cacheControl *CacheControl) {
     "type": "base64",
     "media_type": "application/pdf",
     "data": "$PDF_BASE64"
+  }
+}
+
+{
+  "type": "document",
+  "source": {
+    "type": "file",
+    "file_id": "file_abc123"
   }
 }
 */
@@ -366,6 +458,8 @@ func (c *ToolResultContent) SetCacheControl(cacheControl *CacheControl) {
 
 //// ServerToolUseContent //////////////////////////////////////////////////////
 
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool#response
+
 /* Examples:
 {
   "type": "server_tool_use",
@@ -399,6 +493,8 @@ func (c *ServerToolUseContent) MarshalJSON() ([]byte, error) {
 }
 
 //// WebSearchToolResultContent ////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool#response
 
 /* Examples:
 {
@@ -456,6 +552,8 @@ func (c *WebSearchToolResultContent) MarshalJSON() ([]byte, error) {
 
 //// ThinkingContent ///////////////////////////////////////////////////////////
 
+// https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking
+
 /* Examples:
 {
   "type": "thinking",
@@ -473,8 +571,9 @@ func (c *WebSearchToolResultContent) MarshalJSON() ([]byte, error) {
 // use with extended thinking. Otherwise you can omit thinking blocks from
 // previous turns, or let the API strip them for you if you pass them back.
 type ThinkingContent struct {
+	ID        string `json:"id,omitempty"`
 	Thinking  string `json:"thinking"`
-	Signature string `json:"signature"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func (c *ThinkingContent) Type() ContentType {
@@ -525,6 +624,8 @@ func (c *RedactedThinkingContent) MarshalJSON() ([]byte, error) {
 
 //// MCPToolUse ////////////////////////////////////////////////////////////////
 
+// https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector#mcp-tool-use-block
+
 /* Examples:
 {
   "type": "mcp_tool_use",
@@ -558,6 +659,8 @@ func (c *MCPToolUseContent) MarshalJSON() ([]byte, error) {
 }
 
 //// MCPToolResult //////////////////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector#mcp-tool-result-block
 
 /* Examples:
 {
@@ -594,7 +697,124 @@ func (c *MCPToolResultContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
+//// MCPListToolsContent ///////////////////////////////////////////////////////
+
+// https://platform.openai.com/docs/guides/tools-remote-mcp
+
+/* Examples:
+{
+  "type": "mcp_list_tools",
+  "server_label": "deepwiki",
+  "tools": [
+    {
+      "name": "ask_question",
+      "input_schema": {...}
+    },
+    {
+      "name": "search_repos",
+      "input_schema": {...}
+    }
+  ]
+}
+*/
+
+type MCPToolDefinition struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
+}
+
+type MCPListToolsContent struct {
+	ServerLabel string               `json:"server_label"`
+	Tools       []*MCPToolDefinition `json:"tools"`
+}
+
+func (c *MCPListToolsContent) Type() ContentType {
+	return ContentTypeMCPListTools
+}
+
+func (c *MCPListToolsContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPListToolsContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPListTools,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// MCPApprovalRequestContent /////////////////////////////////////////////////
+
+// https://platform.openai.com/docs/guides/tools-remote-mcp#approvals
+
+/* Examples:
+{
+  "id": "mcpr_682d498e3bd4819196a0ce1664f8e77b04ad1e533afccbfa",
+  "type": "mcp_approval_request",
+  "arguments": "{\"repoName\":\"modelcontextprot ... \"}",
+  "name": "ask_question",
+  "server_label": "deepwiki"
+}
+*/
+
+type MCPApprovalRequestContent struct {
+	ID          string `json:"id"`
+	Arguments   string `json:"arguments"`
+	Name        string `json:"name"`
+	ServerLabel string `json:"server_label"`
+}
+
+func (c *MCPApprovalRequestContent) Type() ContentType {
+	return ContentTypeMCPApprovalRequest
+}
+
+func (c *MCPApprovalRequestContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPApprovalRequestContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPApprovalRequest,
+		Alias: (*Alias)(c),
+	})
+}
+
+//// MCPApprovalResponseContent /////////////////////////////////////////////////
+
+/* Examples:
+{
+  "type": "mcp_approval_response",
+  "approval_request_id": "mcpr_682d498e3bd4819196a0ce1664f8e77b04ad1e533afccbfa",
+  "approve": true,
+  "reason": "User confirmed."
+}
+*/
+
+type MCPApprovalResponseContent struct {
+	ApprovalRequestID string `json:"approval_request_id"`
+	Approve           bool   `json:"approve"`
+	Reason            string `json:"reason,omitempty"`
+}
+
+func (c *MCPApprovalResponseContent) Type() ContentType {
+	return ContentTypeMCPApprovalResponse
+}
+
+func (c *MCPApprovalResponseContent) MarshalJSON() ([]byte, error) {
+	type Alias MCPApprovalResponseContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeMCPApprovalResponse,
+		Alias: (*Alias)(c),
+	})
+}
+
 //// CodeExecutionToolResult ///////////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
 
 /* Examples:
    {
@@ -696,8 +916,16 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &MCPToolUseContent{}
 	case ContentTypeMCPToolResult:
 		content = &MCPToolResultContent{}
+	case ContentTypeMCPListTools:
+		content = &MCPListToolsContent{}
+	case ContentTypeMCPApprovalRequest:
+		content = &MCPApprovalRequestContent{}
 	case ContentTypeCodeExecutionToolResult:
 		content = &CodeExecutionToolResultContent{}
+	case ContentTypeRefusal:
+		content = &RefusalContent{}
+	case ContentTypeMCPApprovalResponse:
+		content = &MCPApprovalResponseContent{}
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
 	}

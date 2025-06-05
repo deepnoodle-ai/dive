@@ -1,0 +1,71 @@
+Name: 'Generate Artistic Images'
+Description: 'Generate 3 artistic images with different creative topics'
+
+Config:
+  LogLevel: debug
+  ConfirmationMode: never
+  DefaultProvider: anthropic
+
+Agents:
+  - Name: Artist
+    Goal: Generate images
+    Tools:
+      - Image.Generate
+
+Workflows:
+  - Name: Generate Artistic Images
+    Description: 'Generate 3 artistic images with different creative topics'
+    Inputs: []
+    Steps:
+      - Name: Generate Ideas
+        Agent: Artist
+        Prompt: |
+          Come up with 3 unique and creative artistic image concepts. Make each one distinct and interesting.
+
+          Focus on portraits of people.
+
+          For each idea, provide:
+          1. A detailed description of the image concept
+          2. The artistic style or medium
+          3. Key visual elements to include
+
+          Present them as:
+          Idea 1: [description]
+          Idea 2: [description] 
+          Idea 3: [description]
+
+          Be creative and diverse in your concepts!
+        Store: image_ideas
+
+      - Name: Generate Image 1
+        Agent: Artist
+        Prompt: |
+          Based on the ideas we generated:
+          ${image_ideas}
+
+          Create the first artistic image (Idea 1). Use the image generation tool to generate this image.
+
+          Use the gpt-image-1 model.
+        Store: image1_result
+
+      - Name: Generate Image 2
+        Agent: Artist
+        Prompt: |
+          Based on the ideas we generated:
+          ${image_ideas}
+
+          Create the second artistic image (Idea 2). Use the image generation tool to generate this image.
+
+          Use the gpt-image-1 model.
+        Store: image2_result
+
+      - Name: Generate Image 3
+        Agent: Artist
+        Prompt: |
+          Based on the ideas we generated:
+          ${image_ideas}
+
+          Create the third artistic image (Idea 3). Use the image generation tool to generate this image.
+
+          Use the gpt-image-1 model.
+        Store: image3_result

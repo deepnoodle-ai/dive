@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/diveagents/dive/schema"
 	"github.com/stretchr/testify/require"
 )
 
@@ -313,21 +314,21 @@ func TestTextEditorTool_ValidationErrors(t *testing.T) {
 
 func TestTextEditorTool_Schema(t *testing.T) {
 	tool := &TextEditorTool{}
-	schema := tool.Schema()
+	sch := tool.Schema()
 
 	// Verify schema structure
-	require.Equal(t, "object", schema.Type, "Expected schema type to be 'object'")
+	require.Equal(t, schema.Object, sch.Type, "Expected schema type to be 'object'")
 
 	// Verify required fields
 	expectedRequired := []string{"command", "path"}
-	require.Len(t, schema.Required, len(expectedRequired), "Expected %d required fields", len(expectedRequired))
+	require.Len(t, sch.Required, len(expectedRequired), "Expected %d required fields", len(expectedRequired))
 
 	for _, field := range expectedRequired {
-		require.Contains(t, schema.Required, field, "Expected required field %s to be present", field)
+		require.Contains(t, sch.Required, field, "Expected required field %s to be present", field)
 	}
 
 	// Verify command enum values
-	commandProp := schema.Properties["command"]
+	commandProp := sch.Properties["command"]
 	require.NotNil(t, commandProp, "Expected command property in schema")
 
 	expectedCommands := []string{"view", "create", "str_replace", "insert"}

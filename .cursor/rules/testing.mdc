@@ -1,0 +1,16 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+All tests should use the Go package "github.com/stretchr/testify/require".
+
+Its functions include:
+
+- func Equal(t TestingT, expected interface{}, actual interface{}, msgAndArgs ...interface{})
+- func NoError(t TestingT, err error, msgAndArgs ...interface{})
+- func NotEmpty(t TestingT, object interface{}, msgAndArgs ...interface{})
+
+Among others. Use the full set of require functions to keep tests concise.
+
+Strongly prefer using the `require` package functions instead of the `assert` package, unless it's important to allow multiple assertions to fail for a given case.

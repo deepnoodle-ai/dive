@@ -10,6 +10,7 @@ type CitationType string
 const (
 	CitationTypeCharLocation            CitationType = "char_location"
 	CitationTypeWebSearchResultLocation CitationType = "web_search_result_location"
+	CitationTypeURLCitation             CitationType = "url_citation"
 )
 
 // CitationSettings contains settings for citations in a message.
@@ -50,8 +51,8 @@ type WebSearchResultLocation struct {
 	Type           string `json:"type"` // "web_search_result_location"
 	URL            string `json:"url"`
 	Title          string `json:"title"`
-	EncryptedIndex string `json:"encrypted_index"`
-	CitedText      string `json:"cited_text"`
+	EncryptedIndex string `json:"encrypted_index,omitempty"`
+	CitedText      string `json:"cited_text,omitempty"`
 }
 
 func (c *WebSearchResultLocation) IsCitation() bool {

@@ -56,7 +56,7 @@ func TestToolUse(t *testing.T) {
 	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*schema.Property{
@@ -68,8 +68,10 @@ func TestToolUse(t *testing.T) {
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
-		llm.WithToolChoice("tool"),
-		llm.WithToolChoiceName("add"),
+		llm.WithToolChoice(&llm.ToolChoice{
+			Type: llm.ToolChoiceTypeTool,
+			Name: "add",
+		}),
 	)
 	require.NoError(t, err)
 
@@ -92,7 +94,7 @@ func TestToolCallStream(t *testing.T) {
 	calculatorTool := llm.NewToolDefinition().
 		WithName("calculator").
 		WithDescription("Perform a calculation").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"operation", "a", "b"},
 			Properties: map[string]*schema.Property{
@@ -150,4 +152,131 @@ func TestToolCallStream(t *testing.T) {
 	require.Equal(t, "add", params["operation"])
 	require.Equal(t, 2.0, params["a"])
 	require.Equal(t, 2.0, params["b"])
+}
+
+func TestDocumentContentHandling(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    *llm.Message
+		expected func(*testing.T, *llm.Message)
+	}{
+		{
+			name: "DocumentContent with base64 data",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.DocumentContent{
+						Title: "test.pdf",
+						Source: &llm.ContentSource{
+							Type:      llm.ContentSourceTypeBase64,
+							MediaType: "application/pdf",
+							Data:      "JVBERi0xLjQK...",
+						},
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 1)
+				docContent, ok := msg.Content[0].(*llm.DocumentContent)
+				require.True(t, ok, "Expected DocumentContent, got %T", msg.Content[0])
+				require.Equal(t, "test.pdf", docContent.Title)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceTypeBase64, docContent.Source.Type)
+				require.Equal(t, "application/pdf", docContent.Source.MediaType)
+				require.Equal(t, "JVBERi0xLjQK...", docContent.Source.Data)
+			},
+		},
+		{
+			name: "DocumentContent with URL",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.DocumentContent{
+						Title: "remote.pdf",
+						Source: &llm.ContentSource{
+							Type: llm.ContentSourceTypeURL,
+							URL:  "https://example.com/document.pdf",
+						},
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 1)
+				docContent, ok := msg.Content[0].(*llm.DocumentContent)
+				require.True(t, ok)
+				require.Equal(t, "remote.pdf", docContent.Title)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceTypeURL, docContent.Source.Type)
+				require.Equal(t, "https://example.com/document.pdf", docContent.Source.URL)
+			},
+		},
+		{
+			name: "DocumentContent with file ID",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.DocumentContent{
+						Title: "api-file.pdf",
+						Source: &llm.ContentSource{
+							Type:   llm.ContentSourceTypeFile,
+							FileID: "file-abc123",
+						},
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 1)
+				docContent, ok := msg.Content[0].(*llm.DocumentContent)
+				require.True(t, ok)
+				require.Equal(t, "api-file.pdf", docContent.Title)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceTypeFile, docContent.Source.Type)
+				require.Equal(t, "file-abc123", docContent.Source.FileID)
+			},
+		},
+		{
+			name: "Mixed content with DocumentContent and TextContent",
+			input: &llm.Message{
+				Role: llm.User,
+				Content: []llm.Content{
+					&llm.TextContent{Text: "Please analyze this document:"},
+					&llm.DocumentContent{
+						Title: "report.pdf",
+						Source: &llm.ContentSource{
+							Type:      llm.ContentSourceTypeBase64,
+							MediaType: "application/pdf",
+							Data:      "JVBERi0xLjQK...",
+						},
+					},
+				},
+			},
+			expected: func(t *testing.T, msg *llm.Message) {
+				require.Len(t, msg.Content, 2)
+
+				// First content should remain as TextContent
+				textContent, ok := msg.Content[0].(*llm.TextContent)
+				require.True(t, ok)
+				require.Equal(t, "Please analyze this document:", textContent.Text)
+
+				// Second content should remain as DocumentContent
+				docContent, ok := msg.Content[1].(*llm.DocumentContent)
+				require.True(t, ok)
+				require.Equal(t, "report.pdf", docContent.Title)
+				require.NotNil(t, docContent.Source)
+				require.Equal(t, llm.ContentSourceTypeBase64, docContent.Source.Type)
+				require.Equal(t, "application/pdf", docContent.Source.MediaType)
+				require.Equal(t, "JVBERi0xLjQK...", docContent.Source.Data)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			messages := []*llm.Message{tt.input}
+			converted, err := convertMessages(messages)
+			require.NoError(t, err)
+			require.Len(t, converted, 1)
+			tt.expected(t, converted[0])
+		})
+	}
 }

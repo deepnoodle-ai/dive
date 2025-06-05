@@ -11,23 +11,38 @@ type ToolResult struct {
 	Error     error  `json:"error,omitempty"`
 }
 
-// ToolChoice influences the behavior of the LLM when choosing which tool to use.
-type ToolChoice string
-
-// IsValid returns true if the ToolChoice is a known, valid value.
-func (t ToolChoice) IsValid() bool {
-	return t == ToolChoiceAuto ||
-		t == ToolChoiceAny ||
-		t == ToolChoiceNone ||
-		t == ToolChoiceTool
-}
+// ToolChoiceType is used to guide the LLM's choice of which tool to use.
+type ToolChoiceType string
 
 const (
-	ToolChoiceAuto ToolChoice = "auto"
-	ToolChoiceAny  ToolChoice = "any"
-	ToolChoiceNone ToolChoice = "none"
-	ToolChoiceTool ToolChoice = "tool"
+	ToolChoiceTypeAuto ToolChoiceType = "auto"
+	ToolChoiceTypeAny  ToolChoiceType = "any"
+	ToolChoiceTypeTool ToolChoiceType = "tool"
+	ToolChoiceTypeNone ToolChoiceType = "none"
 )
+
+// IsValid returns true if the ToolChoiceType is a known, valid value.
+func (t ToolChoiceType) IsValid() bool {
+	return t == ToolChoiceTypeAuto ||
+		t == ToolChoiceTypeAny ||
+		t == ToolChoiceTypeTool ||
+		t == ToolChoiceTypeNone
+}
+
+// ToolChoiceAuto is a ToolChoice with type "auto".
+var ToolChoiceAuto = &ToolChoice{Type: ToolChoiceTypeAuto}
+
+// ToolChoiceAny is a ToolChoice with type "any".
+var ToolChoiceAny = &ToolChoice{Type: ToolChoiceTypeAny}
+
+// ToolChoiceNone is a ToolChoice with type "none".
+var ToolChoiceNone = &ToolChoice{Type: ToolChoiceTypeNone}
+
+// ToolChoice influences the behavior of the LLM when choosing which tool to use.
+type ToolChoice struct {
+	Type ToolChoiceType `json:"type"`
+	Name string         `json:"name,omitempty"`
+}
 
 // Tool is an interface that defines a tool that can be called by an LLM.
 type Tool interface {
@@ -38,7 +53,7 @@ type Tool interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() schema.Schema
+	Schema() *schema.Schema
 }
 
 // ToolConfiguration is an interface that may be implemented by a Tool to
@@ -62,7 +77,7 @@ func NewToolDefinition() *ToolDefinition {
 type ToolDefinition struct {
 	name        string
 	description string
-	schema      schema.Schema
+	schema      *schema.Schema
 }
 
 // Name returns the name of the tool, per the Tool interface.
@@ -76,7 +91,7 @@ func (t *ToolDefinition) Description() string {
 }
 
 // Schema returns the schema of the tool, per the Tool interface.
-func (t *ToolDefinition) Schema() schema.Schema {
+func (t *ToolDefinition) Schema() *schema.Schema {
 	return t.schema
 }
 
@@ -93,7 +108,7 @@ func (t *ToolDefinition) WithDescription(description string) *ToolDefinition {
 }
 
 // WithSchema sets the schema of the tool.
-func (t *ToolDefinition) WithSchema(schema schema.Schema) *ToolDefinition {
+func (t *ToolDefinition) WithSchema(schema *schema.Schema) *ToolDefinition {
 	t.schema = schema
 	return t
 }

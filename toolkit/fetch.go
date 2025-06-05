@@ -73,8 +73,8 @@ func (t *FetchTool) Description() string {
 	return "Retrieves the contents of the webpage at the given URL."
 }
 
-func (t *FetchTool) Schema() schema.Schema {
-	return schema.Schema{
+func (t *FetchTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"url"},
 		Properties: map[string]*schema.Property{
@@ -129,8 +129,8 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 	return NewToolResultText(result), nil
 }
 
-func (t *FetchTool) Annotations() dive.ToolAnnotations {
-	return dive.ToolAnnotations{
+func (t *FetchTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{
 		Title:           "Fetch",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,

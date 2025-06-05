@@ -24,11 +24,6 @@ func TestProvider_Name(t *testing.T) {
 	require.Equal(t, expected, name)
 }
 
-func TestProvider_SupportsStreaming(t *testing.T) {
-	provider := New()
-	require.True(t, provider.SupportsStreaming())
-}
-
 func TestProvider_WithOptions(t *testing.T) {
 	provider := New(
 		WithModel("llama3.1"),

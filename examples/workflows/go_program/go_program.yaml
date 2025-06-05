@@ -3,7 +3,6 @@ Description: 'Create a skeleton for a new Go main program based on user intent, 
 
 Config:
   DefaultProvider: anthropic
-  DefaultModel: claude-3-7-sonnet-20250219
   LogLevel: debug
   ConfirmationMode: if-destructive
 

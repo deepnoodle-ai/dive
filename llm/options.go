@@ -7,47 +7,41 @@ import (
 	"github.com/diveagents/dive/slogger"
 )
 
-// CacheControlType is used to control how the LLM caches responses.
-type CacheControlType string
-
-const (
-	CacheControlTypeEphemeral CacheControlType = "ephemeral"
-)
-
-func (c CacheControlType) String() string {
-	return string(c)
-}
-
 // Option is a function that is used to adjust LLM configuration.
 type Option func(*Config)
 
 // Config is used to configure LLM calls. Not all providers support all options.
 // If a provider doesn't support a given option, it will be ignored.
 type Config struct {
-	Model             string            `json:"model,omitempty"`
-	SystemPrompt      string            `json:"system_prompt,omitempty"`
-	Endpoint          string            `json:"endpoint,omitempty"`
-	APIKey            string            `json:"api_key,omitempty"`
-	Prefill           string            `json:"prefill,omitempty"`
-	PrefillClosingTag string            `json:"prefill_closing_tag,omitempty"`
-	MaxTokens         *int              `json:"max_tokens,omitempty"`
-	Temperature       *float64          `json:"temperature,omitempty"`
-	PresencePenalty   *float64          `json:"presence_penalty,omitempty"`
-	FrequencyPenalty  *float64          `json:"frequency_penalty,omitempty"`
-	ReasoningBudget   *int              `json:"reasoning_budget,omitempty"`
-	ReasoningEffort   string            `json:"reasoning_effort,omitempty"`
-	Tools             []Tool            `json:"tools,omitempty"`
-	ToolChoice        ToolChoice        `json:"tool_choice,omitempty"`
-	ToolChoiceName    string            `json:"tool_choice_name,omitempty"`
-	ParallelToolCalls *bool             `json:"parallel_tool_calls,omitempty"`
-	Features          []string          `json:"features,omitempty"`
-	RequestHeaders    http.Header       `json:"request_headers,omitempty"`
-	MCPServers        []MCPServerConfig `json:"mcp_servers,omitempty"`
-	Caching           *bool             `json:"caching,omitempty"`
-	Hooks             Hooks             `json:"-"`
-	Client            *http.Client      `json:"-"`
-	Logger            slogger.Logger    `json:"-"`
-	Messages          Messages          `json:"-"`
+	Model              string                   `json:"model,omitempty"`
+	SystemPrompt       string                   `json:"system_prompt,omitempty"`
+	Endpoint           string                   `json:"endpoint,omitempty"`
+	APIKey             string                   `json:"api_key,omitempty"`
+	Prefill            string                   `json:"prefill,omitempty"`
+	PrefillClosingTag  string                   `json:"prefill_closing_tag,omitempty"`
+	MaxTokens          *int                     `json:"max_tokens,omitempty"`
+	Temperature        *float64                 `json:"temperature,omitempty"`
+	PresencePenalty    *float64                 `json:"presence_penalty,omitempty"`
+	FrequencyPenalty   *float64                 `json:"frequency_penalty,omitempty"`
+	ReasoningBudget    *int                     `json:"reasoning_budget,omitempty"`
+	ReasoningEffort    ReasoningEffort          `json:"reasoning_effort,omitempty"`
+	ReasoningSummary   ReasoningSummary         `json:"reasoning_summary,omitempty"`
+	Tools              []Tool                   `json:"tools,omitempty"`
+	ToolChoice         *ToolChoice              `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool                    `json:"parallel_tool_calls,omitempty"`
+	Features           []string                 `json:"features,omitempty"`
+	RequestHeaders     http.Header              `json:"request_headers,omitempty"`
+	MCPServers         []MCPServerConfig        `json:"mcp_servers,omitempty"`
+	Caching            *bool                    `json:"caching,omitempty"`
+	PreviousResponseID string                   `json:"previous_response_id,omitempty"`
+	ServiceTier        string                   `json:"service_tier,omitempty"`
+	ProviderOptions    map[string]interface{}   `json:"provider_options,omitempty"`
+	ResponseFormat     *ResponseFormat          `json:"response_format,omitempty"`
+	Messages           Messages                 `json:"messages"`
+	Hooks              Hooks                    `json:"-"`
+	Client             *http.Client             `json:"-"`
+	Logger             slogger.Logger           `json:"-"`
+	SSECallback        ServerSentEventsCallback `json:"-"`
 }
 
 // Apply applies the given options to the config.
@@ -107,8 +101,8 @@ func WithEndpoint(endpoint string) Option {
 	}
 }
 
-// WithClient sets the client.
-func WithClient(client *http.Client) Option {
+// WithHTTPClient sets the HTTP client.
+func WithHTTPClient(client *http.Client) Option {
 	return func(config *Config) {
 		config.Client = client
 	}
@@ -136,16 +130,9 @@ func WithTools(tools ...Tool) Option {
 }
 
 // WithToolChoice sets the tool choice for the interaction.
-func WithToolChoice(toolChoice ToolChoice) Option {
+func WithToolChoice(toolChoice *ToolChoice) Option {
 	return func(config *Config) {
 		config.ToolChoice = toolChoice
-	}
-}
-
-// WithToolChoiceName sets the tool choice name for the interaction.
-func WithToolChoiceName(toolChoiceName string) Option {
-	return func(config *Config) {
-		config.ToolChoiceName = toolChoiceName
 	}
 }
 
@@ -209,10 +196,41 @@ func WithReasoningBudget(reasoningBudget int) Option {
 	}
 }
 
+// ReasoningEffort defines the effort level for reasoning aka extended thinking.
+type ReasoningEffort string
+
+const (
+	ReasoningEffortLow    ReasoningEffort = "low"
+	ReasoningEffortMedium ReasoningEffort = "medium"
+	ReasoningEffortHigh   ReasoningEffort = "high"
+)
+
+// IsValid returns true if the reasoning effort is a known, valid value.
+func (r ReasoningEffort) IsValid() bool {
+	return r == ReasoningEffortLow ||
+		r == ReasoningEffortMedium ||
+		r == ReasoningEffortHigh
+}
+
 // WithReasoningEffort sets the reasoning effort for the interaction.
-func WithReasoningEffort(reasoningEffort string) Option {
+func WithReasoningEffort(reasoningEffort ReasoningEffort) Option {
 	return func(config *Config) {
 		config.ReasoningEffort = reasoningEffort
+	}
+}
+
+type ReasoningSummary string
+
+const (
+	ReasoningSummaryAuto     ReasoningSummary = "auto"
+	ReasoningSummaryConcise  ReasoningSummary = "concise"
+	ReasoningSummaryDetailed ReasoningSummary = "detailed"
+)
+
+// WithReasoningSummary sets the reasoning summary for the interaction.
+func WithReasoningSummary(reasoningSummary ReasoningSummary) Option {
+	return func(config *Config) {
+		config.ReasoningSummary = reasoningSummary
 	}
 }
 
@@ -251,5 +269,37 @@ func WithRequestHeaders(headers http.Header) Option {
 func WithMCPServers(servers ...MCPServerConfig) Option {
 	return func(config *Config) {
 		config.MCPServers = append(config.MCPServers, servers...)
+	}
+}
+
+// WithResponseFormat sets the response format for the interaction.
+func WithResponseFormat(responseFormat *ResponseFormat) Option {
+	return func(config *Config) {
+		config.ResponseFormat = responseFormat
+	}
+}
+
+// WithPreviousResponseID sets the previous response ID for the interaction.
+// OpenAI only.
+// https://platform.openai.com/docs/guides/conversation-state?api-mode=responses#openai-apis-for-conversation-state
+func WithPreviousResponseID(previousResponseID string) Option {
+	return func(config *Config) {
+		config.PreviousResponseID = previousResponseID
+	}
+}
+
+// WithServiceTier sets the service tier for the interaction.
+// OpenAI only.
+// https://platform.openai.com/docs/api-reference/responses/create#responses-create-service_tier
+func WithServiceTier(serviceTier string) Option {
+	return func(config *Config) {
+		config.ServiceTier = serviceTier
+	}
+}
+
+// WithServerSentEventsCallback sets the callback for the server-sent events stream.
+func WithServerSentEventsCallback(callback ServerSentEventsCallback) Option {
+	return func(config *Config) {
+		config.SSECallback = callback
 	}
 }

@@ -63,8 +63,8 @@ func (t *AssignWorkTool) Description() string {
 	return AssignWorkToolDescription
 }
 
-func (t *AssignWorkTool) Schema() schema.Schema {
-	return schema.Schema{
+func (t *AssignWorkTool) Schema() *schema.Schema {
+	return &schema.Schema{
 		Type: "object",
 		Required: []string{
 			"agent",
@@ -101,11 +101,11 @@ func (t *AssignWorkTool) Schema() schema.Schema {
 	}
 }
 
-func (t *AssignWorkTool) Annotations() dive.ToolAnnotations {
+func (t *AssignWorkTool) Annotations() *dive.ToolAnnotations {
 	// This tool may indirectly be destructive or non-read-only, however this
 	// action itself is not. Downstream tool calls will need to be checked for
 	// safety.
-	return dive.ToolAnnotations{
+	return &dive.ToolAnnotations{
 		Title:           "Assign Work",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,

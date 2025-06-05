@@ -1,4 +1,4 @@
-package openai
+package openaicompletions
 
 import (
 	"context"
@@ -52,7 +52,7 @@ func TestToolUse(t *testing.T) {
 	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*schema.Property{
@@ -88,7 +88,7 @@ func TestMultipleToolUse(t *testing.T) {
 	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*schema.Property{
@@ -131,7 +131,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*schema.Property{
@@ -145,7 +145,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(message),
 		llm.WithTools(add),
-		llm.WithToolChoice(llm.ToolChoiceAuto),
+		llm.WithToolChoice(&llm.ToolChoice{Type: llm.ToolChoiceTypeAny}),
 	)
 	require.NoError(t, err)
 
@@ -192,7 +192,7 @@ func TestToolUseStream(t *testing.T) {
 	add := llm.NewToolDefinition().
 		WithName("add").
 		WithDescription("Returns the sum of two numbers, \"a\" and \"b\"").
-		WithSchema(schema.Schema{
+		WithSchema(&schema.Schema{
 			Type:     "object",
 			Required: []string{"a", "b"},
 			Properties: map[string]*schema.Property{
@@ -203,8 +203,8 @@ func TestToolUseStream(t *testing.T) {
 
 	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
-		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
+		llm.WithTools(add),
 	)
 	require.NoError(t, err)
 
