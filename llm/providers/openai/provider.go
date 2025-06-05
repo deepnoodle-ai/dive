@@ -25,6 +25,7 @@ var (
 )
 
 var _ llm.LLM = &Provider{}
+var _ llm.StreamingLLM = &Provider{}
 
 type Provider struct {
 	client        openai.Client
@@ -101,7 +102,39 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil
 	}, retry.WithMaxRetries(p.maxRetries), retry.WithBaseWait(p.retryBaseWait))
 
+	if err != nil {
+		return nil, err
+	}
+
 	return decodeAssistantResponse(resp)
+}
+
+func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
+	config := p.buildConfig(opts...)
+
+	params, err := p.buildRequestParams(config)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.HookRequestContext{
+			Messages: config.Messages,
+			Config:   config,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	streamSDK := p.client.Responses.NewStreaming(
+		ctx,
+		params,
+		option.WithRequestTimeout(5*time.Minute),
+		option.WithHTTPClient(p.httpClient),
+	)
+
+	return newOpenAIStreamIterator(streamSDK, config), nil
 }
 
 // buildRequestParams converts llm.Config to responses.ResponseNewParams
