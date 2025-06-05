@@ -189,6 +189,9 @@ func initializeTools(tools []Tool) (map[string]dive.Tool, error) {
 		if tool.Name == "" {
 			return nil, fmt.Errorf("tool name is required")
 		}
+		if tool.Enabled != nil && !*tool.Enabled {
+			continue
+		}
 		initializedTool, err := InitializeToolByName(tool.Name, tool.Parameters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize tool %s: %w", tool.Name, err)

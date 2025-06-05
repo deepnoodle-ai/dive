@@ -3,7 +3,7 @@ package config
 import "github.com/diveagents/dive/llm"
 
 type MCPToolConfiguration struct {
-	Enabled      bool     `yaml:"Enabled" json:"Enabled"`
+	Enabled      *bool    `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
 	AllowedTools []string `yaml:"AllowedTools" json:"AllowedTools"`
 }
 
@@ -45,7 +45,7 @@ type Variable struct {
 // Tool represents an external capability that can be used by agents
 type Tool struct {
 	Name       string         `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Enabled    bool           `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
+	Enabled    *bool          `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
 	Parameters map[string]any `yaml:"Parameters,omitempty" json:"Parameters,omitempty"`
 }
 
@@ -152,7 +152,7 @@ type Schedule struct {
 	Name     string `yaml:"Name,omitempty" json:"Name,omitempty"`
 	Cron     string `yaml:"Cron,omitempty" json:"Cron,omitempty"`
 	Workflow string `yaml:"Workflow,omitempty" json:"Workflow,omitempty"`
-	Enabled  bool   `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
+	Enabled  *bool  `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
 }
 
 // Document represents a document that can be referenced by agents and tasks
@@ -167,4 +167,8 @@ type Document struct {
 
 func isValidLogLevel(level string) bool {
 	return level == "debug" || level == "info" || level == "warn" || level == "error"
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }

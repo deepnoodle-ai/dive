@@ -23,11 +23,10 @@ func TestEnvironment_Build(t *testing.T) {
 		Tools: []Tool{
 			{
 				Name:    "Web.Search",
-				Enabled: true,
+				Enabled: boolPtr(true),
 			},
 			{
-				Name:    "File.Read",
-				Enabled: true,
+				Name: "File.Read",
 			},
 		},
 		Agents: []Agent{

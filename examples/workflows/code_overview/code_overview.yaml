@@ -6,16 +6,6 @@ Config:
   ConfirmationMode: never
   DefaultProvider: anthropic
 
-Tools:
-  - Name: Web.Search
-    Enabled: true
-  - Name: Web.Fetch
-    Enabled: true
-  - Name: Directory.List
-    Enabled: true
-  - Name: File.Read
-    Enabled: true
-
 Agents:
   - Name: Engineer
     Goal: Analyze codebases and generate project overviews

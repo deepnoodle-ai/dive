@@ -102,8 +102,27 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		Mode: confirmationMode,
 	})
 
+	toolDefsByName := make(map[string]Tool)
+	for _, toolDef := range env.Tools {
+		toolDefsByName[toolDef.Name] = toolDef
+	}
+	// Auto-add any tools mentioned in agents by name. This will be otherwise
+	// unconfigured, so it the tool needs to be configured it should be added
+	// to the environment / YAML definition.
+	for _, agentDef := range env.Agents {
+		for _, toolName := range agentDef.Tools {
+			if _, ok := toolDefsByName[toolName]; !ok {
+				toolDefsByName[toolName] = Tool{Name: toolName}
+			}
+		}
+	}
+	toolDefs := make([]Tool, 0, len(toolDefsByName))
+	for _, toolDef := range toolDefsByName {
+		toolDefs = append(toolDefs, toolDef)
+	}
+
 	// Tools
-	toolsMap, err := initializeTools(env.Tools)
+	toolsMap, err := initializeTools(toolDefs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize tools: %w", err)
 	}

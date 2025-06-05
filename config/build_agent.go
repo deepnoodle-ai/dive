@@ -16,8 +16,12 @@ import (
 func convertMCPServer(mcpServer MCPServer) llm.MCPServerConfig {
 	var toolConfiguration *llm.MCPToolConfiguration
 	if mcpServer.ToolConfiguration != nil {
+		enabled := true
+		if mcpServer.ToolConfiguration.Enabled != nil {
+			enabled = *mcpServer.ToolConfiguration.Enabled
+		}
 		toolConfiguration = &llm.MCPToolConfiguration{
-			Enabled:      mcpServer.ToolConfiguration.Enabled,
+			Enabled:      enabled,
 			AllowedTools: mcpServer.ToolConfiguration.AllowedTools,
 		}
 	}
