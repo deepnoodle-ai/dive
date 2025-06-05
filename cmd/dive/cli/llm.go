@@ -220,18 +220,12 @@ var llmCmd = &cobra.Command{
 		if toolsStr != "" {
 			toolNames := strings.Split(toolsStr, ",")
 			for _, toolName := range toolNames {
-				switch toolName {
-				case "Web.Search":
-					tool, err := config.InitializeWebSearchTool(nil)
-					if err != nil {
-						fmt.Println(errorStyle.Sprint(err))
-						os.Exit(1)
-					}
-					tools = append(tools, tool)
-				default:
-					fmt.Println(errorStyle.Sprintf("Unknown tool: %s", toolName))
+				tool, err := config.InitializeToolByName(toolName, nil)
+				if err != nil {
+					fmt.Println(errorStyle.Sprintf("Failed to initialize tool: %s", err))
 					os.Exit(1)
 				}
+				tools = append(tools, tool)
 			}
 		}
 

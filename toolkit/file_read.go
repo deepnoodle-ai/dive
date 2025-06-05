@@ -14,7 +14,7 @@ import (
 
 var _ dive.TypedTool[*FileReadInput] = &FileReadTool{}
 
-const DefaultFileReadMaxSize = 1024 * 200 // 200KB
+const DefaultFileReadMaxSize = 1024 * 100 // 100KB
 
 type FileReadInput struct {
 	Path string `json:"path"`
@@ -32,6 +32,9 @@ type FileReadTool struct {
 
 // NewFileReadTool creates a new tool for reading file contents
 func NewFileReadTool(options FileReadToolOptions) *dive.TypedToolAdapter[*FileReadInput] {
+	if options.MaxSize == 0 {
+		options.MaxSize = DefaultFileReadMaxSize
+	}
 	return dive.ToolAdapter(&FileReadTool{
 		maxSize:       options.MaxSize,
 		rootDirectory: options.RootDirectory,

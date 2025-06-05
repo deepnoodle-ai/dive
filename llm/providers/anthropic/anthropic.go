@@ -241,8 +241,10 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 			switch c := content.(type) {
 			case *llm.ToolResultContent:
 				copiedContent = append(copiedContent, &llm.ToolResultContent{
-					Content:   c.Content,
-					ToolUseID: c.ToolUseID,
+					Content:      c.Content,
+					ToolUseID:    c.ToolUseID,
+					IsError:      c.IsError,
+					CacheControl: c.CacheControl,
 				})
 			case *llm.DocumentContent:
 				// Handle DocumentContent with file IDs for Anthropic API compatibility
