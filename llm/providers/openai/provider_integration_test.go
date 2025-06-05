@@ -85,36 +85,6 @@ func TestIntegration_WebSearchTool(t *testing.T) {
 		"Response should contain crypto content: %s", response.Message().Text())
 }
 
-// TestIntegration_ImageGenerationTool tests the image generation tool functionality
-func TestIntegration_ImageGenerationTool(t *testing.T) {
-	provider := setupIntegrationProvider(t)
-
-	imageGenTool := NewImageGenerationTool(ImageGenerationToolOptions{
-		Size:       "1024x1024",
-		Quality:    "low",
-		Moderation: "low",
-	})
-
-	ctx := context.Background()
-	response, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Generate a simple image of a red circle on a white background"),
-		llm.WithTools(imageGenTool),
-		llm.WithTemperature(0.3),
-	)
-
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	require.NotEmpty(t, response.Message().Text())
-
-	// The response should mention image generation
-	text := strings.ToLower(response.Message().Text())
-	require.True(t,
-		strings.Contains(text, "image") ||
-			strings.Contains(text, "generated") ||
-			strings.Contains(text, "created"),
-		"Response should mention image generation: %s", response.Message().Text())
-}
-
 // TestIntegration_ErrorScenarios tests various error conditions
 func TestIntegration_ErrorScenarios(t *testing.T) {
 	t.Run("invalid API key", func(t *testing.T) {

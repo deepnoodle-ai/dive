@@ -1,9 +1,13 @@
 package llm
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 )
 
 // ContentType indicates the type of a content block in a message
@@ -268,6 +272,22 @@ func (c *ImageContent) MarshalJSON() ([]byte, error) {
 
 func (c *ImageContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
+}
+
+// Image returns the image content as an image.Image.
+func (c *ImageContent) Image() (image.Image, error) {
+	if c.Source.Type != ContentSourceTypeBase64 {
+		return nil, fmt.Errorf("image content source type is not base64: %s", c.Source.Type)
+	}
+	decoded, err := c.Source.DecodedData()
+	if err != nil {
+		return nil, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(decoded))
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
 }
 
 //// DocumentContent ///////////////////////////////////////////////////////////

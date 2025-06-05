@@ -145,7 +145,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(message),
 		llm.WithTools(add),
-		llm.WithToolChoice(llm.ToolChoiceAuto),
+		llm.WithToolChoice(&llm.ToolChoice{Type: llm.ToolChoiceTypeAny}),
 	)
 	require.NoError(t, err)
 
@@ -203,8 +203,8 @@ func TestToolUseStream(t *testing.T) {
 
 	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
-		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
+		llm.WithTools(add),
 	)
 	require.NoError(t, err)
 

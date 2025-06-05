@@ -30,7 +30,13 @@ func convertMCPServer(mcpServer MCPServer) llm.MCPServerConfig {
 	}
 }
 
-func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logger slogger.Logger, confirmer dive.Confirmer) (dive.Agent, error) {
+func buildAgent(
+	agentDef Agent,
+	config Config,
+	tools map[string]dive.Tool,
+	logger slogger.Logger,
+	confirmer dive.Confirmer,
+) (dive.Agent, error) {
 	providerName := agentDef.Provider
 	if providerName == "" {
 		providerName = config.DefaultProvider
@@ -84,13 +90,6 @@ func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logge
 
 	var modelSettings *agent.ModelSettings
 	if agentDef.ModelSettings != nil {
-		var toolChoice llm.ToolChoice
-		if agentDef.ModelSettings.ToolChoice != "" {
-			toolChoice = llm.ToolChoice(agentDef.ModelSettings.ToolChoice)
-			if !toolChoice.IsValid() {
-				return nil, fmt.Errorf("invalid tool choice: %q", agentDef.ModelSettings.ToolChoice)
-			}
-		}
 		modelSettings = &agent.ModelSettings{
 			Temperature:       agentDef.ModelSettings.Temperature,
 			PresencePenalty:   agentDef.ModelSettings.PresencePenalty,
@@ -99,7 +98,7 @@ func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logge
 			ReasoningEffort:   agentDef.ModelSettings.ReasoningEffort,
 			MaxTokens:         agentDef.ModelSettings.MaxTokens,
 			ParallelToolCalls: agentDef.ModelSettings.ParallelToolCalls,
-			ToolChoice:        toolChoice,
+			ToolChoice:        agentDef.ModelSettings.ToolChoice,
 			RequestHeaders:    make(http.Header),
 		}
 
@@ -161,7 +160,6 @@ func buildAgent(agentDef Agent, config Config, tools map[string]dive.Tool, logge
 		Subordinates:         agentDef.Subordinates,
 		Model:                model,
 		Tools:                agentTools,
-		ToolChoice:           llm.ToolChoice(agentDef.ToolChoice),
 		ResponseTimeout:      responseTimeout,
 		ToolIterationLimit:   agentDef.ToolIterationLimit,
 		DateAwareness:        agentDef.DateAwareness,

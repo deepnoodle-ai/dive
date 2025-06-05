@@ -16,6 +16,8 @@ import (
 	"github.com/openai/openai-go/responses"
 )
 
+const ProviderName = "openai"
+
 var (
 	DefaultModel         = openai.ChatModelGPT4o
 	DefaultMaxTokens     = 4096
@@ -53,11 +55,7 @@ func New(opts ...Option) *Provider {
 }
 
 func (p *Provider) Name() string {
-	return "openai"
-}
-
-func (p *Provider) ModelName() string {
-	return string(p.model)
+	return ProviderName
 }
 
 func (p *Provider) buildConfig(opts ...llm.Option) *llm.Config {
@@ -184,11 +182,11 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		}
 		if config.ReasoningSummary != "" {
 			switch config.ReasoningSummary {
-			case "auto":
+			case llm.ReasoningSummaryAuto:
 				params.Reasoning.Summary = responses.ReasoningSummaryAuto
-			case "concise":
+			case llm.ReasoningSummaryConcise:
 				params.Reasoning.Summary = responses.ReasoningSummaryConcise
-			case "detailed":
+			case llm.ReasoningSummaryDetailed:
 				params.Reasoning.Summary = responses.ReasoningSummaryDetailed
 			default:
 				return responses.ResponseNewParams{},
@@ -226,7 +224,8 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		case "flex":
 			params.ServiceTier = responses.ResponseNewParamsServiceTierFlex
 		default:
-			return responses.ResponseNewParams{}, fmt.Errorf("invalid service tier: %s", config.ServiceTier)
+			return responses.ResponseNewParams{},
+				fmt.Errorf("invalid service tier: %s", config.ServiceTier)
 		}
 	}
 
@@ -238,22 +237,29 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	}
 
 	// Handle tool choice
-	if config.ToolChoice != "" {
-		switch string(config.ToolChoice) {
-		case "auto":
+	if config.ToolChoice != nil && len(config.Tools) > 0 {
+		switch config.ToolChoice.Type {
+		case llm.ToolChoiceTypeAuto:
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptionsAuto),
 			}
-		case "none":
+		case llm.ToolChoiceTypeNone:
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptionsNone),
 			}
-		case "required", "any":
+		case llm.ToolChoiceTypeAny:
 			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
 				OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptionsRequired),
 			}
+		case llm.ToolChoiceTypeTool:
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfFunctionTool: &responses.ToolChoiceFunctionParam{
+					Name: config.ToolChoice.Name,
+				},
+			}
 		default:
-			return responses.ResponseNewParams{}, fmt.Errorf("invalid tool choice: %s", config.ToolChoice)
+			return responses.ResponseNewParams{},
+				fmt.Errorf("invalid tool choice: %s", config.ToolChoice)
 		}
 	}
 
@@ -261,12 +267,6 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	if len(config.Tools) > 0 {
 		var tools []responses.ToolUnionParam
 		for _, tool := range config.Tools {
-			if toolImageGen, ok := tool.(*ImageGenerationTool); ok {
-				tools = append(tools, responses.ToolUnionParam{
-					OfImageGeneration: toolImageGen.Param(),
-				})
-				continue
-			}
 			if toolWebSearch, ok := tool.(*WebSearchPreviewTool); ok {
 				tools = append(tools, responses.ToolUnionParam{
 					OfWebSearchPreview: toolWebSearch.Param(),

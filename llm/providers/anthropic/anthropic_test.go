@@ -68,8 +68,10 @@ func TestToolUse(t *testing.T) {
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
-		llm.WithToolChoice("tool"),
-		llm.WithToolChoiceName("add"),
+		llm.WithToolChoice(&llm.ToolChoice{
+			Type: llm.ToolChoiceTypeTool,
+			Name: "add",
+		}),
 	)
 	require.NoError(t, err)
 

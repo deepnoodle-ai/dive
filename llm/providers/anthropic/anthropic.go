@@ -8,14 +8,14 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
 	"github.com/diveagents/dive/retry"
 )
+
+const ProviderName = "anthropic"
 
 var (
 	DefaultModel         = ModelClaudeSonnet4
@@ -25,13 +25,6 @@ var (
 	DefaultMaxRetries    = 6
 	DefaultRetryBaseWait = 2 * time.Second
 	DefaultVersion       = "2023-06-01"
-)
-
-const (
-	FeatureExtendedCache = "extended-cache-ttl-2025-04-11"
-	FeaturePromptCaching = "prompt-caching-2024-07-31"
-	FeatureMCPClient     = "mcp-client-2025-04-04"
-	FeatureCodeExecution = "code-execution-2025-05-22"
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -65,7 +58,7 @@ func New(opts ...Option) *Provider {
 }
 
 func (p *Provider) Name() string {
-	return "anthropic"
+	return ProviderName
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
@@ -153,23 +146,6 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, err
 	}
 	return &result, nil
-}
-
-func addPrefill(blocks []llm.Content, prefill, closingTag string) error {
-	if prefill == "" {
-		return nil
-	}
-	for _, block := range blocks {
-		content, ok := block.(*llm.TextContent)
-		if ok {
-			if closingTag == "" || strings.Contains(content.Text, closingTag) {
-				content.Text = prefill + content.Text
-				return nil
-			}
-			return fmt.Errorf("prefill closing tag not found")
-		}
-	}
-	return fmt.Errorf("no text content found in message")
 }
 
 func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
@@ -329,11 +305,11 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		}
 		req.Thinking = &Thinking{Type: "enabled"}
 		switch config.ReasoningEffort {
-		case "low":
+		case llm.ReasoningEffortLow:
 			req.Thinking.BudgetTokens = 1024
-		case "medium":
+		case llm.ReasoningEffortMedium:
 			req.Thinking.BudgetTokens = 4096
-		case "high":
+		case llm.ReasoningEffortHigh:
 			req.Thinking.BudgetTokens = 16384
 		default:
 			return fmt.Errorf("invalid reasoning effort: %s", config.ReasoningEffort)
@@ -366,13 +342,13 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.Tools = tools
 	}
 
-	if config.ToolChoice != "" {
+	if config.ToolChoice != nil && len(config.Tools) > 0 {
 		req.ToolChoice = &ToolChoice{
-			Type: ToolChoiceType(config.ToolChoice),
-			Name: config.ToolChoiceName,
+			Type: ToolChoiceType(config.ToolChoice.Type),
+			Name: config.ToolChoice.Name,
 		}
 		if config.ParallelToolCalls != nil && !*config.ParallelToolCalls {
-			req.ToolChoice.DisableParallelUse = true
+			req.ToolChoice.DisableParallelToolUse = true
 		}
 	}
 
@@ -383,96 +359,6 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	req.Temperature = config.Temperature
 	req.System = config.SystemPrompt
 	return nil
-}
-
-func reorderMessageContent(messages []*llm.Message) {
-	// For each assistant message, reorder content blocks so that all tool_use
-	// content blocks appear after non-tool_use content blocks, while preserving
-	// relative ordering within each group. This works-around an Anthropic bug.
-	for _, msg := range messages {
-		if msg.Role != llm.Assistant || len(msg.Content) < 2 {
-			continue
-		}
-		// Separate blocks into tool use and non-tool use
-		var toolUseBlocks []llm.Content
-		var otherBlocks []llm.Content
-		for _, block := range msg.Content {
-			if block.Type() == llm.ContentTypeToolUse {
-				toolUseBlocks = append(toolUseBlocks, block)
-			} else {
-				otherBlocks = append(otherBlocks, block)
-			}
-		}
-		// If we found any tool use blocks and other blocks, reorder them
-		if len(toolUseBlocks) > 0 && len(otherBlocks) > 0 {
-			// Combine slices with non-tool-use blocks first
-			msg.Content = append(otherBlocks, toolUseBlocks...)
-		}
-	}
-}
-
-// StreamIterator implements the llm.StreamIterator interface for Anthropic streaming responses
-type StreamIterator struct {
-	reader            *llm.ServerSentEventsReader[llm.Event]
-	body              io.ReadCloser
-	err               error
-	currentEvent      *llm.Event
-	prefill           string
-	prefillClosingTag string
-	closeOnce         sync.Once
-}
-
-// Next advances to the next event in the stream. Returns true if an event was
-// successfully read, false when the stream is complete or an error occurs.
-func (s *StreamIterator) Next() bool {
-	for {
-		event, ok := s.reader.Next()
-		if !ok {
-			s.err = s.reader.Err()
-			s.Close()
-			return false
-		}
-		processedEvent := s.processEvent(&event)
-		if processedEvent != nil {
-			s.currentEvent = processedEvent
-			return true
-		}
-	}
-}
-
-// Event returns the current event. Should only be called after a successful Next().
-func (s *StreamIterator) Event() *llm.Event {
-	return s.currentEvent
-}
-
-// processEvent processes an Anthropic event and applies prefill logic if needed
-func (s *StreamIterator) processEvent(event *llm.Event) *llm.Event {
-	if event.Type == "" {
-		return nil
-	}
-
-	// Apply prefill logic for the first text content block
-	if s.prefill != "" && event.Type == llm.EventTypeContentBlockStart {
-		if event.ContentBlock != nil && event.ContentBlock.Type == llm.ContentTypeText {
-			// Add prefill to the beginning of the text
-			if s.prefillClosingTag == "" || strings.Contains(event.ContentBlock.Text, s.prefillClosingTag) {
-				event.ContentBlock.Text = s.prefill + event.ContentBlock.Text
-				s.prefill = "" // Only apply prefill once
-			}
-		}
-	}
-
-	return event
-}
-
-func (s *StreamIterator) Close() error {
-	var err error
-	s.closeOnce.Do(func() { err = s.body.Close() })
-	return err
-}
-
-func (s *StreamIterator) Err() error {
-	return s.err
 }
 
 // createRequest creates an HTTP request with appropriate headers for Anthropic API calls

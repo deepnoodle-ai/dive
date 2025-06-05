@@ -20,7 +20,7 @@ func TestImageGenerationTool_Schema(t *testing.T) {
 	require.Contains(t, schema.Required, "prompt")
 
 	// Check that all expected properties exist
-	expectedProps := []string{"prompt", "model", "size", "quality", "style", "response_format", "n", "save_to_file"}
+	expectedProps := []string{"prompt", "model", "size", "quality", "n", "output_path"}
 	for _, prop := range expectedProps {
 		require.Contains(t, schema.Properties, prop, "Schema should contain property: %s", prop)
 	}
@@ -32,40 +32,23 @@ func TestImageGenerationTool_Schema(t *testing.T) {
 
 	// Verify model enum values
 	modelProp := schema.Properties["model"]
-	require.Equal(t, []string{"dall-e-2", "dall-e-3"}, modelProp.Enum)
-
-	// Verify size enum values
-	sizeProp := schema.Properties["size"]
-	expectedSizes := []string{"256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"}
-	require.Equal(t, expectedSizes, sizeProp.Enum)
+	require.Equal(t, []string{"gpt-image-1", "dall-e-2", "dall-e-3"}, modelProp.Enum)
 
 	// Verify quality enum values
 	qualityProp := schema.Properties["quality"]
-	require.Equal(t, []string{"standard", "hd"}, qualityProp.Enum)
-
-	// Verify style enum values
-	styleProp := schema.Properties["style"]
-	require.Equal(t, []string{"vivid", "natural"}, styleProp.Enum)
-
-	// Verify response_format enum values
-	formatProp := schema.Properties["response_format"]
-	require.Equal(t, []string{"url", "b64_json"}, formatProp.Enum)
+	require.Equal(t, []string{"high", "medium", "low", "auto"}, qualityProp.Enum)
 
 	// Verify n constraints
 	nProp := schema.Properties["n"]
 	require.Equal(t, "integer", string(nProp.Type))
-	require.NotNil(t, nProp.Minimum)
-	require.Equal(t, 1.0, *nProp.Minimum)
-	require.NotNil(t, nProp.Maximum)
-	require.Equal(t, 10.0, *nProp.Maximum)
 }
 
 func TestImageGenerationTool_Metadata(t *testing.T) {
 	client := openai.NewClient()
 	tool := &ImageGenerationTool{client: &client}
 
-	require.Equal(t, "openai_image_gen", tool.Name())
-	require.Contains(t, tool.Description(), "DALL-E")
+	require.Equal(t, "openai_image_generation", tool.Name())
+	require.Contains(t, tool.Description(), "Generate images")
 
 	annotations := tool.Annotations()
 	require.NotNil(t, annotations)
@@ -85,27 +68,15 @@ func TestImageGenerationTool_InputValidation(t *testing.T) {
 	result, err := tool.Call(ctx, &ImageGenerationInput{})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "Prompt is required")
+	require.Contains(t, result.Content[0].Text, "prompt is required")
 
-	// Test invalid model
-	invalidModel := "invalid-model"
+	// Test invalid call
 	result, err = tool.Call(ctx, &ImageGenerationInput{
 		Prompt: "test prompt",
-		Model:  invalidModel,
 	})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "Invalid model")
-
-	// Test invalid quality
-	invalidQuality := "invalid-quality"
-	result, err = tool.Call(ctx, &ImageGenerationInput{
-		Prompt:  "test prompt",
-		Quality: invalidQuality,
-	})
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "Invalid quality")
+	require.Contains(t, result.Content[0].Text, "output_path is required")
 }
 
 func TestImageGenInput_JSONSerialization(t *testing.T) {

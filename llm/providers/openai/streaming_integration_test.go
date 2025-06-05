@@ -225,3 +225,52 @@ func TestStreamingWithToolCall(t *testing.T) {
 	require.Equal(t, "calculator", toolName)
 	require.Equal(t, `{"a":15,"b":27,"operation":"add"}`, toolInput)
 }
+
+func TestStreamingReasoning(t *testing.T) {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+
+	provider := New(
+		WithAPIKey(apiKey),
+		WithModel("o3"),
+	)
+
+	stream, err := provider.Stream(
+		context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("What is the derivative of x^3 + 2x^2 - 5x + 1?")),
+		llm.WithReasoningEffort(llm.ReasoningEffortHigh),
+		llm.WithReasoningSummary(llm.ReasoningSummaryDetailed),
+		llm.WithMaxTokens(16000),
+	)
+	require.NoError(t, err)
+	defer stream.Close()
+
+	var thinkingAccum, responseAccum string
+	for stream.Next() {
+		event := stream.Event()
+		if event.Delta != nil {
+			if event.Delta.Type == llm.EventDeltaTypeThinking {
+				thinkingAccum += event.Delta.Thinking
+			} else if event.Delta.Type == llm.EventDeltaTypeText {
+				responseAccum += event.Delta.Text
+			}
+		}
+	}
+
+	require.NoError(t, stream.Err())
+	require.NotEmpty(t, thinkingAccum, "Expected to receive thinking content")
+	// It should be "3x² + 4x − 5" but leave off the last bit because sometimes
+	// emdash is used instead of minus sign
+	require.True(t, strings.Contains(thinkingAccum, "3x² + 4x"),
+		"Expected to find derivative result, got: %s", thinkingAccum)
+	require.Contains(t, strings.ToLower(thinkingAccum), "derivative")
+
+	require.True(t, strings.Contains(responseAccum, "3x² + 4x"),
+		"Expected to find derivative result, got: %s", responseAccum)
+	require.Contains(t, strings.ToLower(responseAccum), "derivative")
+
+	t.Logf("Received %d characters of thinking content", len(thinkingAccum))
+	t.Logf("Final response: %s", responseAccum)
+}

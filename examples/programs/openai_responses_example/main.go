@@ -14,7 +14,6 @@ import (
 var (
 	green  = color.New(color.FgGreen)
 	red    = color.New(color.FgRed)
-	cyan   = color.New(color.FgCyan)
 	italic = color.New(color.Italic)
 	bold   = color.New(color.Bold)
 )
@@ -28,8 +27,8 @@ func main() {
 	exampleWebSearch(ctx, provider)
 	exampleReasoning(ctx, provider)
 	exampleMCPIntegration(ctx, provider)
-	exampleImageGeneration(ctx, provider)
 	exampleJSONSchema(ctx, provider)
+	exampleStreaming(ctx, provider)
 }
 
 func fatal(err error) {
@@ -77,41 +76,6 @@ func exampleWebSearch(ctx context.Context, provider llm.LLM) {
 		fatal(err)
 	}
 	fmt.Println(green.Sprint(response.Message().Text()))
-}
-
-func exampleImageGeneration(ctx context.Context, provider llm.LLM) {
-	header("Image Generation")
-
-	tool := openai.NewImageGenerationTool(
-		openai.ImageGenerationToolOptions{
-			Size:       "1024x1024",
-			Quality:    "low",
-			Moderation: "low",
-		})
-
-	response, err := provider.Generate(ctx,
-		llm.WithUserTextMessage("Generate an image of a sunset over mountains"),
-		llm.WithTools(tool),
-	)
-	if err != nil {
-		fatal(err)
-	}
-
-	message := response.Message()
-	fmt.Println(green.Sprint(message.Text()))
-
-	if image, ok := message.ImageContent(); ok {
-		imageData, err := image.Source.DecodedData()
-		if err != nil {
-			fatal(err)
-		}
-		if err := os.WriteFile("sunset.png", imageData, 0644); err != nil {
-			fatal(err)
-		}
-		fmt.Println(italic.Sprint("Image written to sunset.png"))
-	} else {
-		fatal(fmt.Errorf("no image content found"))
-	}
 }
 
 func exampleJSONSchema(ctx context.Context, provider llm.LLM) {
@@ -167,10 +131,6 @@ func exampleReasoning(ctx context.Context, provider llm.LLM) {
 			fmt.Println()
 			fmt.Println("Reasoning:", italic.Sprint(thinking.Thinking))
 		}
-		if thinking.Signature != "" {
-			fmt.Println()
-			fmt.Println("Reasoning signature:", cyan.Sprint(thinking.Signature))
-		}
 	}
 }
 
@@ -192,4 +152,22 @@ func exampleMCPIntegration(ctx context.Context, provider llm.LLM) {
 		fatal(err)
 	}
 	fmt.Println(green.Sprint(response.Message().Text()))
+}
+
+func exampleStreaming(ctx context.Context, provider llm.StreamingLLM) {
+	header("Streaming")
+
+	iterator, err := provider.Stream(ctx,
+		llm.WithUserTextMessage("Explain Docker containers in 3 sentences"),
+	)
+	if err != nil {
+		fatal(err)
+	}
+	for iterator.Next() {
+		event := iterator.Event()
+		if event.Delta != nil && event.Delta.Text != "" {
+			fmt.Print(green.Sprint(event.Delta.Text))
+		}
+	}
+	fmt.Println()
 }

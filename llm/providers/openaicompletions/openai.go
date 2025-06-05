@@ -426,17 +426,30 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		}
 	}
 
-	var toolChoice string
+	var toolChoice any
 	if len(tools) > 0 {
-		if config.ToolChoice != "" {
-			toolChoice = string(config.ToolChoice)
-		} else if len(tools) > 0 {
-			toolChoice = "auto"
+		toolChoice = "auto"
+		if config.ToolChoice != nil {
+			switch config.ToolChoice.Type {
+			case llm.ToolChoiceTypeAny:
+				toolChoice = "required"
+			case llm.ToolChoiceTypeNone:
+				toolChoice = "none"
+			case llm.ToolChoiceTypeAuto:
+				toolChoice = "auto"
+			case llm.ToolChoiceTypeTool:
+				toolChoice = map[string]any{
+					"type":     "function",
+					"function": map[string]any{"name": config.ToolChoice.Name},
+				}
+			default:
+				return fmt.Errorf("invalid tool choice type: %s", config.ToolChoice.Type)
+			}
 		}
+		req.ToolChoice = toolChoice
 	}
 
 	req.Tools = tools
-	req.ToolChoice = toolChoice
 	req.Temperature = config.Temperature
 	req.PresencePenalty = config.PresencePenalty
 	req.FrequencyPenalty = config.FrequencyPenalty

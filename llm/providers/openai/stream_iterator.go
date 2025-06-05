@@ -261,6 +261,104 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			},
 		})
 
+	case responses.ResponseReasoningSummaryPartAddedEvent:
+		// This indicates the start of reasoning summary content
+		if data.Part.Type == "summary_text" {
+			// We need to track this as a thinking content block
+			// Use a special index for reasoning summary (e.g., -1 to distinguish from regular output items)
+			summaryIndex := -1
+
+			// Create state for the summary content
+			s.outputItemsState[summaryIndex] = &outputItemState{
+				OutputIndex:  summaryIndex,
+				ItemID:       fmt.Sprintf("reasoning_summary_%d", s.eventCount),
+				ItemType:     "reasoning_summary",
+				ContentParts: make(map[int]*contentPartState),
+			}
+
+			// Add the content part state
+			s.outputItemsState[summaryIndex].ContentParts[0] = &contentPartState{
+				ContentIndex: 0,
+				PartType:     "thinking",
+				Text:         data.Part.Text,
+			}
+
+			diveEvents = append(diveEvents, &llm.Event{
+				Type:  llm.EventTypeContentBlockStart,
+				Index: &summaryIndex,
+				ContentBlock: &llm.EventContentBlock{
+					Type:     llm.ContentTypeThinking,
+					Thinking: data.Part.Text,
+				},
+			})
+		}
+
+	case responses.ResponseReasoningSummaryTextDeltaEvent:
+		// Handle incremental text for reasoning summary
+		summaryIndex := -1
+
+		// Get or create the state for reasoning summary
+		itemState, exists := s.outputItemsState[summaryIndex]
+		if !exists {
+			// Create state if it doesn't exist (shouldn't happen normally)
+			s.outputItemsState[summaryIndex] = &outputItemState{
+				OutputIndex:  summaryIndex,
+				ItemID:       fmt.Sprintf("reasoning_summary_%d", s.eventCount),
+				ItemType:     "reasoning_summary",
+				ContentParts: make(map[int]*contentPartState),
+			}
+			s.outputItemsState[summaryIndex].ContentParts[0] = &contentPartState{
+				ContentIndex: 0,
+				PartType:     "thinking",
+			}
+			itemState = s.outputItemsState[summaryIndex]
+
+			// Emit a start event if we haven't already
+			diveEvents = append(diveEvents, &llm.Event{
+				Type:  llm.EventTypeContentBlockStart,
+				Index: &summaryIndex,
+				ContentBlock: &llm.EventContentBlock{
+					Type: llm.ContentTypeThinking,
+				},
+			})
+		}
+
+		// Accumulate the text
+		if partState, ok := itemState.ContentParts[0]; ok {
+			partState.Text += data.Delta
+		}
+
+		// Emit the delta event
+		diveEvents = append(diveEvents, &llm.Event{
+			Type:  llm.EventTypeContentBlockDelta,
+			Index: &summaryIndex,
+			Delta: &llm.EventDelta{
+				Type:     llm.EventDeltaTypeThinking,
+				Thinking: data.Delta,
+			},
+		})
+
+	case responses.ResponseReasoningSummaryPartDoneEvent:
+		// Handle completion of reasoning summary part
+		summaryIndex := -1
+		if itemState, exists := s.outputItemsState[summaryIndex]; exists {
+			if partState, ok := itemState.ContentParts[0]; ok {
+				partState.IsComplete = true
+				partState.Text = data.Part.Text // Set final text
+			}
+		}
+
+	case responses.ResponseReasoningSummaryDoneEvent:
+		// Handle completion of entire reasoning summary
+		summaryIndex := -1
+		if itemState, exists := s.outputItemsState[summaryIndex]; exists {
+			itemState.IsComplete = true
+			diveEvents = append(diveEvents, &llm.Event{
+				Type:  llm.EventTypeContentBlockStop,
+				Index: &summaryIndex,
+			})
+		}
+
 	case responses.ResponseReasoningDeltaEvent:
 		outputIdx := int(data.OutputIndex)
 		contentIdx := int(data.ContentIndex)
@@ -274,7 +372,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		if !partOk {
 			partState = &contentPartState{
 				ContentIndex: contentIdx,
-				PartType:     "reasoning",
+				PartType:     "thinking",
 			}
 			itemState.ContentParts[contentIdx] = partState
 
@@ -301,8 +399,8 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			Type:  llm.EventTypeContentBlockDelta,
 			Index: &outputIdx,
 			Delta: &llm.EventDelta{
-				Type: llm.EventDeltaTypeText,
-				Text: reasoningTextChunk,
+				Type:     llm.EventDeltaTypeThinking,
+				Thinking: reasoningTextChunk,
 			},
 		})
 

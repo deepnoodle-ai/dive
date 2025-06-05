@@ -11,23 +11,38 @@ type ToolResult struct {
 	Error     error  `json:"error,omitempty"`
 }
 
-// ToolChoice influences the behavior of the LLM when choosing which tool to use.
-type ToolChoice string
-
-// IsValid returns true if the ToolChoice is a known, valid value.
-func (t ToolChoice) IsValid() bool {
-	return t == ToolChoiceAuto ||
-		t == ToolChoiceAny ||
-		t == ToolChoiceNone ||
-		t == ToolChoiceTool
-}
+// ToolChoiceType is used to guide the LLM's choice of which tool to use.
+type ToolChoiceType string
 
 const (
-	ToolChoiceAuto ToolChoice = "auto"
-	ToolChoiceAny  ToolChoice = "any"
-	ToolChoiceNone ToolChoice = "none"
-	ToolChoiceTool ToolChoice = "tool"
+	ToolChoiceTypeAuto ToolChoiceType = "auto"
+	ToolChoiceTypeAny  ToolChoiceType = "any"
+	ToolChoiceTypeTool ToolChoiceType = "tool"
+	ToolChoiceTypeNone ToolChoiceType = "none"
 )
+
+// IsValid returns true if the ToolChoiceType is a known, valid value.
+func (t ToolChoiceType) IsValid() bool {
+	return t == ToolChoiceTypeAuto ||
+		t == ToolChoiceTypeAny ||
+		t == ToolChoiceTypeTool ||
+		t == ToolChoiceTypeNone
+}
+
+// ToolChoiceAuto is a ToolChoice with type "auto".
+var ToolChoiceAuto = &ToolChoice{Type: ToolChoiceTypeAuto}
+
+// ToolChoiceAny is a ToolChoice with type "any".
+var ToolChoiceAny = &ToolChoice{Type: ToolChoiceTypeAny}
+
+// ToolChoiceNone is a ToolChoice with type "none".
+var ToolChoiceNone = &ToolChoice{Type: ToolChoiceTypeNone}
+
+// ToolChoice influences the behavior of the LLM when choosing which tool to use.
+type ToolChoice struct {
+	Type ToolChoiceType `json:"type"`
+	Name string         `json:"name,omitempty"`
+}
 
 // Tool is an interface that defines a tool that can be called by an LLM.
 type Tool interface {

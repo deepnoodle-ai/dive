@@ -23,7 +23,7 @@ type Request struct {
 	Stream              bool            `json:"stream,omitempty"`
 	StreamOptions       *StreamOptions  `json:"stream_options,omitempty"`
 	Tools               []Tool          `json:"tools,omitempty"`
-	ToolChoice          string          `json:"tool_choice,omitempty"`
+	ToolChoice          any             `json:"tool_choice,omitempty"`
 	PresencePenalty     *float64        `json:"presence_penalty,omitempty"`  // -2 to 2, default 0
 	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"` // -2 to 2, default 0
 	ReasoningEffort     ReasoningEffort `json:"reasoning_effort,omitempty"`  // o1 and o3-mini models only

@@ -16,12 +16,8 @@ type ImageSource struct {
 	Data      string `json:"data"`
 }
 
-//	"thinking": {
-//		"type": "enabled",
-//		"budget_tokens": 16000
-//	},
 type Thinking struct {
-	Type         string `json:"type"`
+	Type         string `json:"type"` // "enabled"
 	BudgetTokens int    `json:"budget_tokens"`
 }
 
@@ -44,12 +40,13 @@ const (
 	ToolChoiceTypeAuto ToolChoiceType = "auto"
 	ToolChoiceTypeAny  ToolChoiceType = "any"
 	ToolChoiceTypeTool ToolChoiceType = "tool"
+	ToolChoiceTypeNone ToolChoiceType = "none"
 )
 
 type ToolChoice struct {
-	Type               ToolChoiceType `json:"type"`
-	Name               string         `json:"name,omitempty"`
-	DisableParallelUse bool           `json:"disable_parallel_tool_use,omitempty"`
+	Type                   ToolChoiceType `json:"type"`
+	Name                   string         `json:"name,omitempty"`
+	DisableParallelToolUse bool           `json:"disable_parallel_tool_use,omitempty"`
 }
 
 type Tool struct {
