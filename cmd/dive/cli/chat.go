@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
@@ -12,9 +11,6 @@ import (
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/slogger"
-	"github.com/diveagents/dive/toolkit"
-	"github.com/diveagents/dive/toolkit/firecrawl"
-	"github.com/diveagents/dive/toolkit/google"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -86,27 +82,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	return nil
 }
 
-func getTools() []dive.Tool {
-	var theTools []dive.Tool
-	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
-		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
-		if err != nil {
-			log.Fatal(err)
-		}
-		scraper := toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: client})
-		theTools = append(theTools, scraper)
-	}
-	if key := os.Getenv("GOOGLE_SEARCH_CX"); key != "" {
-		googleClient, err := google.New()
-		if err != nil {
-			log.Fatal(err)
-		}
-		theTools = append(theTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
-	}
-	return theTools
-}
-
-func runChat(instructions, agentName string, reasoningBudget int) error {
+func runChat(instructions, agentName string, reasoningBudget int, tools []dive.Tool) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -115,8 +91,6 @@ func runChat(instructions, agentName string, reasoningBudget int) error {
 	if err != nil {
 		return fmt.Errorf("error getting model: %v", err)
 	}
-
-	theTools := getTools()
 
 	modelSettings := &agent.ModelSettings{}
 	if reasoningBudget > 0 {
@@ -131,14 +105,19 @@ func runChat(instructions, agentName string, reasoningBudget int) error {
 		}
 	}
 
+	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
+		Mode: dive.ConfirmIfNotReadOnly,
+	})
+
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,
 		Instructions:     instructions,
 		Model:            model,
 		Logger:           logger,
-		Tools:            theTools,
+		Tools:            tools,
 		ThreadRepository: agent.NewMemoryThreadRepository(),
 		ModelSettings:    modelSettings,
+		Confirmer:        confirmer,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating agent: %v", err)
@@ -201,7 +180,25 @@ var chatCmd = &cobra.Command{
 			reasoningBudget = value
 		}
 
-		if err := runChat(systemPrompt, agentName, reasoningBudget); err != nil {
+		var tools []dive.Tool
+		toolsStr, err := cmd.Flags().GetString("tools")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		if toolsStr != "" {
+			toolNames := strings.Split(toolsStr, ",")
+			for _, toolName := range toolNames {
+				tool, err := config.InitializeToolByName(toolName, nil)
+				if err != nil {
+					fmt.Println(errorStyle.Sprintf("Failed to initialize tool: %s", err))
+					os.Exit(1)
+				}
+				tools = append(tools, tool)
+			}
+		}
+
+		if err := runChat(systemPrompt, agentName, reasoningBudget, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -213,5 +210,6 @@ func init() {
 
 	chatCmd.Flags().StringP("agent-name", "", "Assistant", "Name of the chat agent")
 	chatCmd.Flags().StringP("system-prompt", "", "", "System prompt for the chat agent")
+	chatCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the chat agent")
 	chatCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
 }

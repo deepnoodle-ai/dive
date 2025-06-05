@@ -195,7 +195,7 @@ Available CLI commands include:
 
 Dive provides a unified interface for working with different LLM providers:
 
-* **Anthropic** (Claude Sonnet, Haiku)
+* **Anthropic** (Claude Sonnet, Haiku, Opus)
 * **OpenAI** (GPT-4, o1, o3)
 * **Groq** (Llama, DeepSeek, Qwen)
 
@@ -238,6 +238,7 @@ These are the models that have been verified to work in Dive:
 | Provider  | Model                           | Tools Supported |
 | --------- | ------------------------------- | --------------- |
 | Anthropic | `claude-sonnet-4-20250514`      | Yes             |
+| Anthropic | `claude-opus-4-20250514`        | Yes             |
 | Anthropic | `claude-3-7-sonnet-20250219`    | Yes             |
 | Anthropic | `claude-3-5-sonnet-20241022`    | Yes             |
 | Anthropic | `claude-3-5-haiku-20241022`     | Yes             |
@@ -412,7 +413,3 @@ The Environment provides:
 - **Shared Document Repository**: Common file system access
 - **Thread Management**: Persistent conversation storage
 - **Confirmation System**: Centralized user confirmation handling
-
-### Use the Dive CLI
-
-For the moment, you'll need to build the CLI yourself:

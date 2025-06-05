@@ -23,14 +23,12 @@ type FileWriteToolOptions struct {
 	AllowList     []string // Patterns of allowed paths
 	DenyList      []string // Patterns of denied paths
 	RootDirectory string   // If set, all paths will be relative to this directory
-	Confirmer     dive.Confirmer
 }
 
 type FileWriteTool struct {
 	allowList     []string // Patterns of allowed paths
 	denyList      []string // Patterns of denied paths
 	rootDirectory string   // If set, all paths will be relative to this directory
-	confirmer     dive.Confirmer
 }
 
 // NewFileWriteTool creates a new tool for writing content to files
@@ -39,7 +37,6 @@ func NewFileWriteTool(options FileWriteToolOptions) *dive.TypedToolAdapter[*File
 		allowList:     options.AllowList,
 		denyList:      options.DenyList,
 		rootDirectory: options.RootDirectory,
-		confirmer:     options.Confirmer,
 	})
 }
 
