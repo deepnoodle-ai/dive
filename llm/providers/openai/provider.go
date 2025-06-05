@@ -310,13 +310,32 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		tool := responses.ToolUnionParam{OfMcp: mcpParam}
 
 		if mcpServer.ToolConfiguration != nil {
-			if len(mcpServer.ToolConfiguration.AllowedTools) > 0 {
+			toolConfig := mcpServer.ToolConfiguration
+			if len(toolConfig.AllowedTools) > 0 {
 				mcpParam.AllowedTools = responses.ToolMcpAllowedToolsUnionParam{
-					OfMcpAllowedTools: mcpServer.ToolConfiguration.AllowedTools,
+					OfMcpAllowedTools: toolConfig.AllowedTools,
+				}
+			}
+			if toolConfig.ApprovalMode != "" && toolConfig.ApprovalFilter != nil {
+				return responses.ResponseNewParams{}, fmt.Errorf("tool approval and tool approval filter cannot be used together")
+			}
+			if toolConfig.ApprovalMode != "" {
+				mcpParam.RequireApproval = responses.ToolMcpRequireApprovalUnionParam{
+					OfMcpToolApprovalSetting: openai.String(toolConfig.ApprovalMode),
+				}
+			} else if toolConfig.ApprovalFilter != nil {
+				mcpParam.RequireApproval = responses.ToolMcpRequireApprovalUnionParam{
+					OfMcpToolApprovalFilter: &responses.ToolMcpRequireApprovalMcpToolApprovalFilterParam{
+						Always: responses.ToolMcpRequireApprovalMcpToolApprovalFilterAlwaysParam{
+							ToolNames: toolConfig.ApprovalFilter.Always,
+						},
+						Never: responses.ToolMcpRequireApprovalMcpToolApprovalFilterNeverParam{
+							ToolNames: toolConfig.ApprovalFilter.Never,
+						},
+					},
 				}
 			}
 		}
-
 		if mcpServer.AuthorizationToken != "" || len(mcpServer.Headers) > 0 {
 			headers := make(map[string]string)
 			if mcpServer.AuthorizationToken != "" {
@@ -326,27 +345,6 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 				headers[key] = value
 			}
 			mcpParam.Headers = headers
-		}
-
-		if mcpServer.ToolApproval != "" && mcpServer.ToolApprovalFilter != nil {
-			return responses.ResponseNewParams{}, fmt.Errorf("tool approval and tool approval filter cannot be used together")
-		}
-
-		if mcpServer.ToolApproval != "" {
-			mcpParam.RequireApproval = responses.ToolMcpRequireApprovalUnionParam{
-				OfMcpToolApprovalSetting: openai.String(mcpServer.ToolApproval),
-			}
-		} else if mcpServer.ToolApprovalFilter != nil {
-			mcpParam.RequireApproval = responses.ToolMcpRequireApprovalUnionParam{
-				OfMcpToolApprovalFilter: &responses.ToolMcpRequireApprovalMcpToolApprovalFilterParam{
-					Always: responses.ToolMcpRequireApprovalMcpToolApprovalFilterAlwaysParam{
-						ToolNames: mcpServer.ToolApprovalFilter.Always,
-					},
-					Never: responses.ToolMcpRequireApprovalMcpToolApprovalFilterNeverParam{
-						ToolNames: mcpServer.ToolApprovalFilter.Never,
-					},
-				},
-			}
 		}
 		params.Tools = append(params.Tools, tool)
 	}

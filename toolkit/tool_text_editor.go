@@ -91,7 +91,40 @@ func (t *TextEditorTool) Name() string {
 }
 
 func (t *TextEditorTool) Description() string {
-	return "A filesystem editor tool that allows the agent to view, create, and edit files."
+	return `A comprehensive filesystem editor tool for viewing, creating, and editing files. This tool provides four main commands:
+
+1. view: Read file contents or list directory contents
+   - Use absolute paths (starting with /)
+   - For files: optionally specify view_range [start_line, end_line] to see specific lines
+   - For directories: lists files and subdirectories up to 2 levels deep
+   - Returns numbered lines for easy reference
+
+2. create: Create new files with specified content
+   - Requires absolute path and file_text parameter
+   - Will fail if file already exists (cannot overwrite)
+   - Use for creating entirely new files
+
+3. str_replace: Replace exact text matches in existing files
+   - Requires old_str (exact text to find) and new_str (replacement text)
+   - The old_str must appear exactly once in the file (unique match required)
+   - Preserves formatting and indentation
+   - Shows a snippet of the changes made for verification
+   - Best for precise edits when you know the exact text to replace
+
+4. insert: Insert text at a specific line number
+   - Requires insert_line (0-based line number) and new_str (text to insert)
+   - Line 0 inserts at beginning, line N inserts after line N
+   - Shows context around the insertion point
+   - Use when you need to add content at a specific location
+
+IMPORTANT USAGE NOTES:
+- All paths must be absolute (start with /)
+- Tab characters are normalized to 4 spaces
+- Large files are truncated in output for readability
+- Always review the returned snippets to verify changes are correct
+- For complex edits, prefer multiple small str_replace operations over large ones
+
+This tool is ideal for code editing, configuration file updates, and file system exploration tasks.`
 }
 
 func (t *TextEditorTool) Schema() *schema.Schema {

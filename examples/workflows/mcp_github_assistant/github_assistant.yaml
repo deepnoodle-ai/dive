@@ -1,0 +1,62 @@
+Name: GitHub Assistant
+Description: |
+  A comprehensive GitHub workflow using MCP tools for repository management and
+  issue handling.
+
+Config:
+  DefaultProvider: anthropic
+  DefaultModel: claude-sonnet-4-20250514
+  ConfirmationMode: if-destructive
+  LogLevel: debug
+
+# Prerequisites:
+# - You need to have GITHUB_PERSONAL_ACCESS_TOKEN set in your environment
+# - You need to have docker installed and running
+MCPServers:
+  - Type: stdio
+    Name: github
+    Command: docker
+    Args:
+      - 'run'
+      - '-i'
+      - '--rm'
+      - '-e'
+      - 'GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}'
+      - 'ghcr.io/github/github-mcp-server'
+    ToolConfiguration:
+      AllowedTools:
+        - get_issue
+        - list_issues
+
+Agents:
+  - Name: GitHub Assistant
+    Goal: Analyze GitHub repositories and manage issues
+    Tools:
+      - get_issue
+      - list_issues
+    Instructions: |
+      You are a GitHub repository analyst and issue manager. You have access to
+      GitHub MCP tools that allow you to interact with repositories, read code,
+      manage issues, and perform searches.
+
+Workflows:
+  - Name: Summarize Repository Issues
+    Description: |
+      Summarize the issues in a GitHub repository.
+    Inputs:
+      - Name: repository
+        Type: string
+        Description: The GitHub repository, e.g. diveagents/dive
+        Default: 'diveagents/dive'
+    Steps:
+      - Name: Get Repository Info
+        Agent: GitHub Assistant
+        Prompt: |
+          Provide a summary of the issues in the repository ${inputs.repository}.
+        Store: issues_summary
+
+      - Name: Write Issues Summary Document
+        Action: Document.Write
+        Parameters:
+          Path: output/issues_summary.md
+          Content: ${issues_summary}

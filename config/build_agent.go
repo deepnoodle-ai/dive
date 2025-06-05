@@ -8,31 +8,8 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
-	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 )
-
-// convertMCPServer converts a config.MCPServer to llm.MCPServerConfig
-func convertMCPServer(mcpServer MCPServer) llm.MCPServerConfig {
-	var toolConfiguration *llm.MCPToolConfiguration
-	if mcpServer.ToolConfiguration != nil {
-		enabled := true
-		if mcpServer.ToolConfiguration.Enabled != nil {
-			enabled = *mcpServer.ToolConfiguration.Enabled
-		}
-		toolConfiguration = &llm.MCPToolConfiguration{
-			Enabled:      enabled,
-			AllowedTools: mcpServer.ToolConfiguration.AllowedTools,
-		}
-	}
-	return llm.MCPServerConfig{
-		Type:               mcpServer.Type,
-		URL:                mcpServer.URL,
-		Name:               mcpServer.Name,
-		AuthorizationToken: mcpServer.AuthorizationToken,
-		ToolConfiguration:  toolConfiguration,
-	}
-}
 
 func buildAgent(
 	agentDef Agent,
@@ -69,7 +46,7 @@ func buildAgent(
 	for _, toolName := range agentDef.Tools {
 		tool, ok := tools[toolName]
 		if !ok {
-			return nil, fmt.Errorf("tool %q not found or not enabled", toolName)
+			return nil, fmt.Errorf("agent references unknown tool %q", toolName)
 		}
 		agentTools = append(agentTools, tool)
 	}
@@ -141,19 +118,7 @@ func buildAgent(
 		}
 		modelSettings.RequestHeaders = requestHeaders
 
-		// MCP servers use override logic. If agent has them specified, use those.
-		// Otherwise, use the provider's MCP servers.
-		if agentDef.ModelSettings.MCPServers != nil {
-			modelSettings.MCPServers = make([]llm.MCPServerConfig, len(agentDef.ModelSettings.MCPServers))
-			for i, mcpServer := range agentDef.ModelSettings.MCPServers {
-				modelSettings.MCPServers[i] = convertMCPServer(mcpServer)
-			}
-		} else if providerConfig != nil {
-			modelSettings.MCPServers = make([]llm.MCPServerConfig, len(providerConfig.MCPServers))
-			for i, mcpServer := range providerConfig.MCPServers {
-				modelSettings.MCPServers[i] = convertMCPServer(mcpServer)
-			}
-		}
+		// Note: MCP servers are configured at the environment level, not agent level
 	}
 
 	return agent.New(agent.Options{

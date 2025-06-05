@@ -143,9 +143,9 @@ func exampleMCPIntegration(ctx context.Context, provider llm.LLM) {
 		llm.WithModel("o3-mini"),
 		llm.WithUserTextMessage(question),
 		llm.WithMCPServers(llm.MCPServerConfig{
-			Name:         "deepwiki",
-			URL:          "https://mcp.deepwiki.com/mcp",
-			ToolApproval: "never",
+			Name:              "deepwiki",
+			URL:               "https://mcp.deepwiki.com/mcp",
+			ToolConfiguration: &llm.MCPToolConfiguration{ApprovalMode: "never"},
 		}),
 	)
 	if err != nil {

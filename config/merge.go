@@ -132,5 +132,22 @@ func Merge(base, override *Environment) *Environment {
 	})
 	result.Triggers = triggers
 
+	// Merge mcp servers
+	mcpServerMap := make(map[string]MCPServer)
+	for _, mcpServer := range result.MCPServers {
+		mcpServerMap[mcpServer.Name] = mcpServer
+	}
+	for _, mcpServer := range override.MCPServers {
+		mcpServerMap[mcpServer.Name] = mcpServer
+	}
+	mcpServers := make([]MCPServer, 0, len(mcpServerMap))
+	for _, mcpServer := range mcpServerMap {
+		mcpServers = append(mcpServers, mcpServer)
+	}
+	sort.Slice(mcpServers, func(i, j int) bool {
+		return mcpServers[i].Name < mcpServers[j].Name
+	})
+	result.MCPServers = mcpServers
+
 	return &result
 }

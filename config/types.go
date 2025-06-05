@@ -1,18 +1,53 @@
 package config
 
-import "github.com/diveagents/dive/llm"
+import (
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/mcp"
+)
 
-type MCPToolConfiguration struct {
-	Enabled      *bool    `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
-	AllowedTools []string `yaml:"AllowedTools" json:"AllowedTools"`
+// MCPToolApprovalFilter is used to configure the approval filter for MCP tools.
+type MCPToolApprovalFilter struct {
+	Always []string `yaml:"Always,omitempty" json:"Always,omitempty"`
+	Never  []string `yaml:"Never,omitempty" json:"Never,omitempty"`
 }
 
+// MCPToolConfiguration customizes tool behavior for MCP servers.
+type MCPToolConfiguration struct {
+	Enabled        *bool                  `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
+	AllowedTools   []string               `yaml:"AllowedTools" json:"AllowedTools"`
+	ApprovalMode   string                 `yaml:"ApprovalMode,omitempty" json:"ApprovalMode,omitempty"`
+	ApprovalFilter *MCPToolApprovalFilter `yaml:"ApprovalFilter,omitempty" json:"ApprovalFilter,omitempty"`
+}
+
+// MCPOAuthConfig represents OAuth 2.0 configuration for MCP servers
+type MCPOAuthConfig struct {
+	ClientID     string            `yaml:"ClientID" json:"ClientID"`
+	ClientSecret string            `yaml:"ClientSecret,omitempty" json:"ClientSecret,omitempty"`
+	RedirectURI  string            `yaml:"RedirectURI" json:"RedirectURI"`
+	Scopes       []string          `yaml:"Scopes,omitempty" json:"Scopes,omitempty"`
+	PKCEEnabled  *bool             `yaml:"PKCEEnabled,omitempty" json:"PKCEEnabled,omitempty"`
+	TokenStore   *MCPTokenStore    `yaml:"TokenStore,omitempty" json:"TokenStore,omitempty"`
+	ExtraParams  map[string]string `yaml:"ExtraParams,omitempty" json:"ExtraParams,omitempty"`
+}
+
+// MCPTokenStore represents token storage configuration
+type MCPTokenStore struct {
+	Type string `yaml:"Type" json:"Type"`                     // "memory", "file", "keychain"
+	Path string `yaml:"Path,omitempty" json:"Path,omitempty"` // For file storage
+}
+
+// MCPServer represents a server that can be used to provide tools to agents.
 type MCPServer struct {
 	Type               string                `yaml:"Type" json:"Type"`
 	Name               string                `yaml:"Name" json:"Name"`
+	Command            string                `yaml:"Command,omitempty" json:"Command,omitempty"`
 	URL                string                `yaml:"URL,omitempty" json:"URL,omitempty"`
+	Env                map[string]string     `yaml:"Env,omitempty" json:"Env,omitempty"`
+	Args               []string              `yaml:"Args,omitempty" json:"Args,omitempty"`
 	AuthorizationToken string                `yaml:"AuthorizationToken,omitempty" json:"AuthorizationToken,omitempty"`
+	OAuth              *MCPOAuthConfig       `yaml:"OAuth,omitempty" json:"OAuth,omitempty"`
 	ToolConfiguration  *MCPToolConfiguration `yaml:"ToolConfiguration,omitempty" json:"ToolConfiguration,omitempty"`
+	Headers            map[string]string     `yaml:"Headers,omitempty" json:"Headers,omitempty"`
 }
 
 // Provider is used to configure an LLM provider
@@ -21,7 +56,6 @@ type Provider struct {
 	Caching        *bool             `yaml:"Caching,omitempty" json:"Caching,omitempty"`
 	Features       []string          `yaml:"Features,omitempty" json:"Features,omitempty"`
 	RequestHeaders map[string]string `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
-	MCPServers     []MCPServer       `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
 }
 
 // Config represents global configuration settings
@@ -79,7 +113,6 @@ type ModelSettings struct {
 	ParallelToolCalls *bool               `yaml:"ParallelToolCalls,omitempty" json:"ParallelToolCalls,omitempty"`
 	Features          []string            `yaml:"Features,omitempty" json:"Features,omitempty"`
 	RequestHeaders    map[string]string   `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
-	MCPServers        []MCPServer         `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
 	Caching           *bool               `yaml:"Caching,omitempty" json:"Caching,omitempty"`
 }
 
@@ -163,6 +196,97 @@ type Document struct {
 	Path        string `yaml:"Path,omitempty" json:"Path,omitempty"`
 	Content     string `yaml:"Content,omitempty" json:"Content,omitempty"`
 	ContentType string `yaml:"ContentType,omitempty" json:"ContentType,omitempty"`
+}
+
+// ToLLMConfig converts config.MCPServer to llm.MCPServerConfig
+func (s MCPServer) ToLLMConfig() *llm.MCPServerConfig {
+	config := &llm.MCPServerConfig{
+		Type:               s.Type,
+		Command:            s.Command,
+		URL:                s.URL,
+		Name:               s.Name,
+		AuthorizationToken: s.AuthorizationToken,
+		Headers:            s.Headers,
+	}
+	if s.OAuth != nil {
+		config.OAuth = &llm.MCPOAuthConfig{
+			ClientID:     s.OAuth.ClientID,
+			ClientSecret: s.OAuth.ClientSecret,
+			RedirectURI:  s.OAuth.RedirectURI,
+			Scopes:       s.OAuth.Scopes,
+			PKCEEnabled:  s.OAuth.PKCEEnabled != nil && *s.OAuth.PKCEEnabled,
+			ExtraParams:  s.OAuth.ExtraParams,
+		}
+		if s.OAuth.TokenStore != nil {
+			config.OAuth.TokenStore = &llm.MCPTokenStore{
+				Type: s.OAuth.TokenStore.Type,
+				Path: s.OAuth.TokenStore.Path,
+			}
+		}
+	}
+	if s.ToolConfiguration != nil {
+		config.ToolConfiguration = &llm.MCPToolConfiguration{
+			Enabled:      s.ToolConfiguration.Enabled == nil || *s.ToolConfiguration.Enabled,
+			AllowedTools: s.ToolConfiguration.AllowedTools,
+		}
+		if s.ToolConfiguration.ApprovalFilter != nil {
+			config.ToolConfiguration.ApprovalFilter = &llm.MCPToolApprovalFilter{
+				Always: s.ToolConfiguration.ApprovalFilter.Always,
+				Never:  s.ToolConfiguration.ApprovalFilter.Never,
+			}
+		}
+		config.ToolConfiguration.ApprovalMode = s.ToolConfiguration.ApprovalMode
+	}
+	return config
+}
+
+// ToMCPConfig converts config.MCPServer to mcp.ServerConfig
+func (s MCPServer) ToMCPConfig() *mcp.ServerConfig {
+	config := &mcp.ServerConfig{
+		Type:               s.Type,
+		Command:            s.Command,
+		URL:                s.URL,
+		Name:               s.Name,
+		Env:                s.Env,
+		Args:               s.Args,
+		AuthorizationToken: s.AuthorizationToken,
+		Headers:            s.Headers,
+	}
+	if s.OAuth != nil {
+		config.OAuth = &mcp.OAuthConfig{
+			ClientID:     s.OAuth.ClientID,
+			ClientSecret: s.OAuth.ClientSecret,
+			RedirectURI:  s.OAuth.RedirectURI,
+			Scopes:       s.OAuth.Scopes,
+			PKCEEnabled:  s.OAuth.PKCEEnabled != nil && *s.OAuth.PKCEEnabled,
+			ExtraParams:  s.OAuth.ExtraParams,
+		}
+		if s.OAuth.TokenStore != nil {
+			config.OAuth.TokenStore = &mcp.TokenStore{
+				Type: s.OAuth.TokenStore.Type,
+				Path: s.OAuth.TokenStore.Path,
+			}
+		}
+	}
+	if s.ToolConfiguration != nil {
+		config.ToolConfiguration = &mcp.ToolConfiguration{
+			Enabled:      s.ToolConfiguration.Enabled == nil || *s.ToolConfiguration.Enabled,
+			AllowedTools: s.ToolConfiguration.AllowedTools,
+		}
+		if s.ToolConfiguration.ApprovalFilter != nil {
+			config.ToolConfiguration.ApprovalFilter = &mcp.ToolApprovalFilter{
+				Always: s.ToolConfiguration.ApprovalFilter.Always,
+				Never:  s.ToolConfiguration.ApprovalFilter.Never,
+			}
+		}
+		config.ToolConfiguration.ApprovalMode = s.ToolConfiguration.ApprovalMode
+	}
+	return config
+}
+
+// IsOAuthEnabled returns true if OAuth is configured for this server
+func (s MCPServer) IsOAuthEnabled() bool {
+	return s.OAuth != nil
 }
 
 func isValidLogLevel(level string) bool {
