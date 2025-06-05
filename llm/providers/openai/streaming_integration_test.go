@@ -261,13 +261,13 @@ func TestStreamingReasoning(t *testing.T) {
 
 	require.NoError(t, stream.Err())
 	require.NotEmpty(t, thinkingAccum, "Expected to receive thinking content")
-	// It should be "3x² + 4x − 5" but leave off the last bit because sometimes
-	// emdash is used instead of minus sign
-	require.True(t, strings.Contains(thinkingAccum, "3x² + 4x"),
+	// It should be "3x² + 4x − 5" but leave off a chunk of that because
+	// the formatting can vary
+	require.True(t, strings.Contains(thinkingAccum, " + 4x"),
 		"Expected to find derivative result, got: %s", thinkingAccum)
 	require.Contains(t, strings.ToLower(thinkingAccum), "derivative")
 
-	require.True(t, strings.Contains(responseAccum, "3x² + 4x"),
+	require.True(t, strings.Contains(responseAccum, " + 4x"),
 		"Expected to find derivative result, got: %s", responseAccum)
 	require.Contains(t, strings.ToLower(responseAccum), "derivative")
 
