@@ -6,10 +6,6 @@ Config:
   ConfirmationMode: never
   DefaultProvider: anthropic
 
-Tools:
-  - Name: Image.Generate
-    Enabled: true
-
 Agents:
   - Name: Artist
     Goal: Generate images
