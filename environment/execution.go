@@ -22,7 +22,6 @@ import (
 
 var (
 	colorGreen = color.New(color.FgGreen)
-	colorBold  = color.New(color.Bold)
 )
 
 // PathStatus represents the current state of an execution path

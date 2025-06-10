@@ -9,6 +9,7 @@ import (
 	"github.com/diveagents/dive/objects"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
+	"github.com/risor-io/risor/modules/all"
 )
 
 // Environment is a container for running agents and workflow executions
@@ -280,6 +281,11 @@ func (e *Environment) ExecuteWorkflow(ctx context.Context, opts ExecutionOptions
 		execution.scriptGlobals["documents"] = objects.NewDocumentRepository(e.documentRepo)
 	}
 	e.executions[execution.ID()] = execution
+
+	// Make Risor's default builtins available to embedded scripts
+	for k, v := range all.Builtins() {
+		execution.scriptGlobals[k] = v
+	}
 
 	if err := execution.Run(ctx); err != nil {
 		logger.Error("failed to start workflow", "error", err)
