@@ -1,0 +1,30 @@
+Name: Minimal Dynamic Content Example
+Description: Demonstrates dynamic content generation with inline scripts and script paths
+Config:
+  LogLevel: debug
+
+Agents:
+  - Name: Assistant
+    Provider: anthropic
+    Model: claude-sonnet-4-20250514
+
+Workflows:
+  - Name: DynamicContentDemo
+    Steps:
+      # Step 1: Inline Risor script generating dynamic content
+      - Name: Inline Script Content
+        Type: prompt
+        Prompt: What information do you see in the dynamic content?
+        Content:
+          - Dynamic: |
+              {
+                "type": "text",
+                "text": "Generated at: " + string(time.now()) + "\nRandom number: " + string(rand.intn(100))
+              }
+
+      # Step 2: External script generating content
+      - Name: External Script Content
+        Type: prompt
+        Prompt: Process the external script output.
+        Content:
+          - DynamicFrom: ./simple_generator.py

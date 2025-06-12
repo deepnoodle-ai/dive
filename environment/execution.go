@@ -505,7 +505,11 @@ func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, a
 	if stepContent := step.Content(); len(stepContent) > 0 {
 		for _, item := range stepContent {
 			if dynamicContent, ok := item.(DynamicContent); ok {
-				processedContent, err := dynamicContent.Content(ctx, e.scriptGlobals)
+				processedContent, err := dynamicContent.Content(ctx, map[string]any{
+					"workflow": e.workflow.Name(),
+					"step":     step.Name(),
+					"agent":    agent.Name(),
+				})
 				if err != nil {
 					return nil, fmt.Errorf("failed to process dynamic content: %w", err)
 				}

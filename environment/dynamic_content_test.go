@@ -56,7 +56,7 @@ func TestRisorContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			risorContent := &RisorContent{
-				Script: tt.script,
+				Dynamic: tt.script,
 			}
 
 			content, err := risorContent.Content(context.Background(), tt.globals)
@@ -111,8 +111,8 @@ echo '"Hello from shell script"'`), 0755)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scriptContent := &ScriptPathContent{
-				ScriptPath: tt.scriptPath,
-				BasePath:   tempDir,
+				DynamicFrom: tt.scriptPath,
+				BasePath:    tempDir,
 			}
 
 			content, err := scriptContent.Content(context.Background(), nil)
@@ -128,12 +128,12 @@ echo '"Hello from shell script"'`), 0755)
 }
 
 func TestRisorContentType(t *testing.T) {
-	risorContent := &RisorContent{Script: `"test"`}
+	risorContent := &RisorContent{Dynamic: `"test"`}
 	require.Equal(t, llm.ContentTypeDynamic, risorContent.Type())
 }
 
 func TestScriptPathContentType(t *testing.T) {
-	scriptContent := &ScriptPathContent{ScriptPath: "test.sh"}
+	scriptContent := &ScriptPathContent{DynamicFrom: "test.sh"}
 	require.Equal(t, llm.ContentTypeDynamic, scriptContent.Type())
 }
 

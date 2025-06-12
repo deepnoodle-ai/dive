@@ -43,18 +43,18 @@ func buildContextContent(ctx context.Context, repo dive.DocumentRepository, base
 		if entry.Document != "" {
 			fieldsSet++
 		}
-		if entry.Script != "" {
+		if entry.Dynamic != "" {
 			fieldsSet++
 		}
-		if entry.ScriptPath != "" {
+		if entry.DynamicFrom != "" {
 			fieldsSet++
 		}
 
 		if fieldsSet == 0 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Script, or ScriptPath")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Dynamic, or DynamicFrom")
 		}
 		if fieldsSet > 1 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Script, or ScriptPath, but multiple were set")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Dynamic, or DynamicFrom, but multiple were set")
 		}
 
 		switch {
@@ -102,17 +102,17 @@ func buildContextContent(ctx context.Context, repo dive.DocumentRepository, base
 				return nil, err
 			}
 			contents = append(contents, content)
-		case entry.Script != "":
+		case entry.Dynamic != "":
 			// Create RisorContent for dynamic script evaluation
 			contents = append(contents, &environment.RisorContent{
-				Script:   entry.Script,
+				Dynamic:  entry.Dynamic,
 				BasePath: basePath,
 			})
-		case entry.ScriptPath != "":
+		case entry.DynamicFrom != "":
 			// Create ScriptPathContent for dynamic script evaluation
 			contents = append(contents, &environment.ScriptPathContent{
-				ScriptPath: entry.ScriptPath,
-				BasePath:   basePath,
+				DynamicFrom: entry.DynamicFrom,
+				BasePath:    basePath,
 			})
 		}
 	}

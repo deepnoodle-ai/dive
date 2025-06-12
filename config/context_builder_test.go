@@ -408,26 +408,26 @@ func TestBuildContextContentWithScript(t *testing.T) {
 		{
 			name: "inline risor script",
 			entries: []Content{
-				{Script: `{"type": "text", "text": "Hello from script"}`},
+				{Dynamic: `{"type": "text", "text": "Hello from script"}`},
 			},
 			expected: 1,
 			checkFn: func(t *testing.T, content []llm.Content) {
 				risorContent, ok := content[0].(*environment.RisorContent)
 				require.True(t, ok, "Expected RisorContent")
-				require.Equal(t, `{"type": "text", "text": "Hello from script"}`, risorContent.Script)
+				require.Equal(t, `{"type": "text", "text": "Hello from script"}`, risorContent.Dynamic)
 				require.Equal(t, llm.ContentTypeDynamic, risorContent.Type())
 			},
 		},
 		{
 			name: "script path",
 			entries: []Content{
-				{ScriptPath: "./test_script.py"},
+				{DynamicFrom: "./test_script.py"},
 			},
 			expected: 1,
 			checkFn: func(t *testing.T, content []llm.Content) {
 				scriptContent, ok := content[0].(*environment.ScriptPathContent)
 				require.True(t, ok, "Expected ScriptPathContent")
-				require.Equal(t, "./test_script.py", scriptContent.ScriptPath)
+				require.Equal(t, "./test_script.py", scriptContent.DynamicFrom)
 				require.Equal(t, llm.ContentTypeDynamic, scriptContent.Type())
 			},
 		},
@@ -435,7 +435,7 @@ func TestBuildContextContentWithScript(t *testing.T) {
 			name: "mixed content with script",
 			entries: []Content{
 				{Text: "Static text"},
-				{Script: `"Dynamic text"`},
+				{Dynamic: `"Dynamic text"`},
 			},
 			expected: 2,
 			checkFn: func(t *testing.T, content []llm.Content) {
@@ -447,7 +447,7 @@ func TestBuildContextContentWithScript(t *testing.T) {
 				// Second should be RisorContent
 				risorContent, ok := content[1].(*environment.RisorContent)
 				require.True(t, ok, "Expected RisorContent")
-				require.Equal(t, `"Dynamic text"`, risorContent.Script)
+				require.Equal(t, `"Dynamic text"`, risorContent.Dynamic)
 			},
 		},
 	}
@@ -474,7 +474,7 @@ func TestBuildContextContentScriptValidation(t *testing.T) {
 		{
 			name: "multiple fields set should error",
 			entries: []Content{
-				{Text: "Some text", Script: "Some script"},
+				{Text: "Some text", Dynamic: "Some script"},
 			},
 			expectError: true,
 			errorMsg:    "must specify exactly one",
@@ -482,7 +482,7 @@ func TestBuildContextContentScriptValidation(t *testing.T) {
 		{
 			name: "script and script path both set should error",
 			entries: []Content{
-				{Script: "Some script", ScriptPath: "./script.py"},
+				{Dynamic: "Some script", DynamicFrom: "./script.py"},
 			},
 			expectError: true,
 			errorMsg:    "must specify exactly one",

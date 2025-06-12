@@ -1,7 +1,7 @@
 Name: Example Workflow that Uses Files for Context
 Description: |
   Demonstrates how to use files for context in agents and workflow steps,
-  including wildcard patterns and dynamic script content.
+  including wildcard patterns.
 Config:
   LogLevel: debug
 
@@ -41,21 +41,3 @@ Workflows:
         Prompt: Give a summary of these markdown files.
         Content:
           - Path: '*.md'
-
-      # Example of inline Risor script that generates dynamic content
-      - Name: Dynamic Script Content
-        Type: prompt
-        Prompt: Review this dynamically generated content.
-        Content:
-          - Script: |
-              {
-                "type": "text",
-                "text": "Current timestamp: " + string(time.now())
-              }
-
-      # Example of external script that generates content
-      - Name: External Script Content
-        Type: prompt
-        Prompt: Process this external script output.
-        Content:
-          - ScriptPath: ./generate_content.py
