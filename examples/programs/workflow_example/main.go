@@ -58,7 +58,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		theTools = append(theTools, toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}))
+		theTools = append(theTools, toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{Searcher: googleClient}))
 		logger.Info("google search enabled")
 	} else {
 		logger.Info("google search is not enabled")

@@ -64,8 +64,8 @@ func NewTextEditorTool(opts TextEditorToolOptions) *dive.TypedToolAdapter[*TextE
 	if opts.Type == "" {
 		opts.Type = "text_editor_20250429"
 	}
-	if opts.Name == "" {
-		opts.Name = "str_replace_based_edit_tool"
+	if opts.Name == "" { // "str_replace_based_edit_tool"
+		opts.Name = "text_editor"
 	}
 	if opts.FileSystem == nil {
 		opts.FileSystem = &RealFileSystem{}
@@ -170,7 +170,7 @@ func (t *TextEditorTool) Schema() *schema.Schema {
 
 func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "File Editor",
+		Title:           "text_editor",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  false,

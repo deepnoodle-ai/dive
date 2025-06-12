@@ -7,27 +7,15 @@ Config:
   LogLevel: debug
   ConfirmationMode: if-destructive
 
-Tools:
-  - Name: Web.Search
-    Enabled: true
-  - Name: Web.Fetch
-    Enabled: true
-  - Name: Directory.List
-    Enabled: true
-  - Name: File.Read
-    Enabled: true
-  - Name: Command
-    Enabled: true
-
 Agents:
   - Name: Engineer
     Goal: Analyze codebases and generate project overviews
     Tools:
-      - Web.Search
-      - Web.Fetch
-      - Directory.List
-      - File.Read
-      - Command
+      - web_search
+      - fetch
+      - list_directory
+      - read_file
+      - command
 
 Workflows:
   - Name: Project Overview

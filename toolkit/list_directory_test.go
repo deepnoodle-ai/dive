@@ -40,8 +40,8 @@ func TestDirectoryListTool(t *testing.T) {
 	require.NoError(t, os.WriteFile(hiddenFile, []byte("hidden content"), 0644), "Failed to create hidden file")
 
 	t.Run("ListDirectoryWithExplicitPath", func(t *testing.T) {
-		tool := NewDirectoryListTool(DirectoryListToolOptions{MaxEntries: 100})
-		result, err := tool.Call(context.Background(), &DirectoryListInput{
+		tool := NewListDirectoryTool(ListDirectoryToolOptions{MaxEntries: 100})
+		result, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: subDir1,
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -55,8 +55,8 @@ func TestDirectoryListTool(t *testing.T) {
 	})
 
 	t.Run("ListNonExistentDirectory", func(t *testing.T) {
-		tool := NewDirectoryListTool(DirectoryListToolOptions{MaxEntries: 100})
-		result, err := tool.Call(context.Background(), &DirectoryListInput{
+		tool := NewListDirectoryTool(ListDirectoryToolOptions{MaxEntries: 100})
+		result, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: filepath.Join(tempDir, "nonexistent"),
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -73,9 +73,9 @@ func TestDirectoryListTool(t *testing.T) {
 			require.NoError(t, os.WriteFile(filename, []byte("content"), 0644), "Failed to create file")
 		}
 
-		tool := NewDirectoryListTool(DirectoryListToolOptions{MaxEntries: 5})
+		tool := NewListDirectoryTool(ListDirectoryToolOptions{MaxEntries: 5})
 
-		result, err := tool.Call(context.Background(), &DirectoryListInput{
+		result, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: manyFilesDir,
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -94,11 +94,11 @@ func TestDirectoryListTool(t *testing.T) {
 	})
 
 	t.Run("ListDirectoryWithRootDirectory", func(t *testing.T) {
-		tool := NewDirectoryListTool(DirectoryListToolOptions{
+		tool := NewListDirectoryTool(ListDirectoryToolOptions{
 			RootDirectory: tempDir,
 			MaxEntries:    100,
 		})
-		result, err := tool.Call(context.Background(), &DirectoryListInput{
+		result, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: "subdir1",
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -124,13 +124,13 @@ func TestDirectoryListTool(t *testing.T) {
 		absSubDir1, err := filepath.Abs(subDir1)
 		require.NoError(t, err, "Failed to get absolute path")
 
-		tool := NewDirectoryListTool(DirectoryListToolOptions{
+		tool := NewListDirectoryTool(ListDirectoryToolOptions{
 			MaxEntries: 100,
 			AllowList:  []string{absSubDir1},
 		})
 
 		// This should be allowed
-		result1, err := tool.Call(context.Background(), &DirectoryListInput{
+		result1, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: subDir1,
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -139,7 +139,7 @@ func TestDirectoryListTool(t *testing.T) {
 		require.Contains(t, output, "test2.txt")
 
 		// This should be denied
-		result2, err := tool.Call(context.Background(), &DirectoryListInput{
+		result2, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: subDir2,
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -149,12 +149,12 @@ func TestDirectoryListTool(t *testing.T) {
 	})
 
 	t.Run("ListDirectoryWithDenyList", func(t *testing.T) {
-		tool := NewDirectoryListTool(DirectoryListToolOptions{
+		tool := NewListDirectoryTool(ListDirectoryToolOptions{
 			MaxEntries: 100,
 			DenyList:   []string{filepath.Join(tempDir, "**/.hidden*")},
 		})
 		// This should be allowed
-		result1, err := tool.Call(context.Background(), &DirectoryListInput{
+		result1, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: subDir1,
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -163,7 +163,7 @@ func TestDirectoryListTool(t *testing.T) {
 		require.Contains(t, output, "test2.txt")
 
 		// This should be denied
-		result2, err := tool.Call(context.Background(), &DirectoryListInput{
+		result2, err := tool.Call(context.Background(), &ListDirectoryInput{
 			Path: hiddenDir,
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -173,13 +173,13 @@ func TestDirectoryListTool(t *testing.T) {
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
-		tool := NewDirectoryListTool(DirectoryListToolOptions{
+		tool := NewListDirectoryTool(ListDirectoryToolOptions{
 			DefaultPath:   "/default/path",
 			RootDirectory: "/root/dir",
 			AllowList:     []string{"/allowed/*"},
 			DenyList:      []string{"/denied/*"},
 		})
-		require.Equal(t, "directory_list", tool.Name())
+		require.Equal(t, "list_directory", tool.Name())
 		require.Equal(t, "path", tool.Schema().Required[0])
 	})
 }
@@ -194,11 +194,11 @@ func TestDirectoryEntryFields(t *testing.T) {
 	require.NoError(t, os.WriteFile(testFile, []byte("test content"), 0644), "Failed to create test file")
 
 	// Create a tool and list the directory
-	tool := NewDirectoryListTool(DirectoryListToolOptions{
+	tool := NewListDirectoryTool(ListDirectoryToolOptions{
 		MaxEntries: 100,
 	})
 
-	result, err := tool.Call(context.Background(), &DirectoryListInput{
+	result, err := tool.Call(context.Background(), &ListDirectoryInput{
 		Path: tempDir,
 	})
 	require.NoError(t, err, "Unexpected error")

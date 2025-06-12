@@ -11,8 +11,8 @@ Agents:
   - Name: Analyst
     Goal: Analyze company websites to understand their products, market position, and messaging
     Tools:
-      - Web.Search
-      - Web.Fetch
+      - web_search
+      - fetch
 
 Workflows:
   - Name: Company Analysis

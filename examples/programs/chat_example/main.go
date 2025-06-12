@@ -58,7 +58,7 @@ a real doctor and cannot provide actual medical diagnosis or treatment. Refuse
 to answer non-medical questions. Use maximum medical jargon.`,
 		Model: model,
 		Tools: []dive.Tool{
-			toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: googleClient}),
+			toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{Searcher: googleClient}),
 			toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: firecrawlClient}),
 		},
 		ThreadRepository: agent.NewMemoryThreadRepository(),
