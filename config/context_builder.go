@@ -13,6 +13,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/llm"
 )
 
@@ -42,12 +43,18 @@ func buildContextContent(ctx context.Context, repo dive.DocumentRepository, base
 		if entry.Document != "" {
 			fieldsSet++
 		}
+		if entry.Script != "" {
+			fieldsSet++
+		}
+		if entry.ScriptPath != "" {
+			fieldsSet++
+		}
 
 		if fieldsSet == 0 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, or Document")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Script, or ScriptPath")
 		}
 		if fieldsSet > 1 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, or Document, but multiple were set")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Script, or ScriptPath, but multiple were set")
 		}
 
 		switch {
@@ -95,6 +102,18 @@ func buildContextContent(ctx context.Context, repo dive.DocumentRepository, base
 				return nil, err
 			}
 			contents = append(contents, content)
+		case entry.Script != "":
+			// Create RisorContent for dynamic script evaluation
+			contents = append(contents, &environment.RisorContent{
+				Script:   entry.Script,
+				BasePath: basePath,
+			})
+		case entry.ScriptPath != "":
+			// Create ScriptPathContent for dynamic script evaluation
+			contents = append(contents, &environment.ScriptPathContent{
+				ScriptPath: entry.ScriptPath,
+				BasePath:   basePath,
+			})
 		}
 	}
 	return contents, nil

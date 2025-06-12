@@ -31,6 +31,7 @@ const (
 	ContentTypeMCPApprovalResponse     ContentType = "mcp_approval_response"
 	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
 	ContentTypeRefusal                 ContentType = "refusal"
+	ContentTypeDynamic                 ContentType = "dynamic"
 )
 
 // ContentSourceType indicates the location of the media content.

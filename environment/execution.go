@@ -503,7 +503,17 @@ func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, a
 
 	var content []llm.Content
 	if stepContent := step.Content(); len(stepContent) > 0 {
-		content = append(content, stepContent...)
+		for _, item := range stepContent {
+			if dynamicContent, ok := item.(DynamicContent); ok {
+				processedContent, err := dynamicContent.Content(ctx, e.scriptGlobals)
+				if err != nil {
+					return nil, fmt.Errorf("failed to process dynamic content: %w", err)
+				}
+				content = append(content, processedContent...)
+			} else {
+				content = append(content, item)
+			}
+		}
 	}
 	if promptTemplate != "" {
 		content = append(content, &llm.TextContent{Text: prompt})
