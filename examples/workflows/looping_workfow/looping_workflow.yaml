@@ -4,7 +4,7 @@ Description: |
   over collections.
 
 Config:
-  LogLevel: debug
+  LogLevel: warn
   ConfirmationMode: never
   DefaultProvider: anthropic
 

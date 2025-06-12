@@ -86,30 +86,37 @@ type pathUpdate struct {
 
 // Execution represents a single run of a workflow
 type Execution struct {
-	id             string                 // Unique identifier for this execution
-	environment    *Environment           // Environment that the execution belongs to
-	workflow       *workflow.Workflow     // Workflow being executed
-	status         Status                 // Current status of the execution
-	startTime      time.Time              // When the execution started
-	endTime        time.Time              // When the execution completed (or failed/canceled)
-	inputs         map[string]interface{} // Input parameters for the workflow
-	outputs        map[string]interface{} // Output values from the workflow
-	err            error                  // Error if execution failed
-	logger         slogger.Logger         // Logger for the execution
-	paths          map[string]*PathState  // Track all paths by ID
-	scriptGlobals  map[string]any
-	showStepOutput bool           // Whether to show step output
-	mutex          sync.RWMutex   // Mutex for thread-safe operations
-	doneWg         sync.WaitGroup // Wait group for the execution
+	id            string                 // Unique identifier for this execution
+	environment   *Environment           // Environment that the execution belongs to
+	workflow      *workflow.Workflow     // Workflow being executed
+	status        Status                 // Current status of the execution
+	startTime     time.Time              // When the execution started
+	endTime       time.Time              // When the execution completed (or failed/canceled)
+	inputs        map[string]interface{} // Input parameters for the workflow
+	outputs       map[string]interface{} // Output values from the workflow
+	err           error                  // Error if execution failed
+	logger        slogger.Logger         // Logger for the execution
+	paths         map[string]*PathState  // Track all paths by ID
+	scriptGlobals map[string]any
+	formatter     WorkflowFormatter
+	mutex         sync.RWMutex
+	doneWg        sync.WaitGroup
 }
 
 // ExecutionOptions are the options for creating a new execution.
 type ExecutionOptions struct {
-	WorkflowName   string
-	Inputs         map[string]interface{}
-	Outputs        map[string]interface{}
-	Logger         slogger.Logger
-	ShowStepOutput bool
+	WorkflowName string
+	Inputs       map[string]interface{}
+	Outputs      map[string]interface{}
+	Logger       slogger.Logger
+	Formatter    WorkflowFormatter
+}
+
+// WorkflowFormatter interface for pretty output
+type WorkflowFormatter interface {
+	PrintStepStart(stepName, stepType string)
+	PrintStepOutput(stepName, content string)
+	PrintStepError(stepName string, err error)
 }
 
 func (e *Execution) ID() string {
@@ -387,6 +394,10 @@ func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, ag
 	var err error
 	var result *dive.StepResult
 
+	if e.formatter != nil {
+		e.formatter.PrintStepStart(step.Name(), step.Type())
+	}
+
 	// Handle different step types
 	switch step.Type() {
 	case "prompt":
@@ -397,20 +408,15 @@ func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, ag
 		return nil, fmt.Errorf("unknown step type: %s", step.Type())
 	}
 	if err != nil {
+		if e.formatter != nil {
+			e.formatter.PrintStepError(step.Name(), err)
+		}
 		return nil, err
 	}
 
-	if e.showStepOutput {
-		trimmedContent := strings.TrimSpace(result.Content)
-		if trimmedContent != "" {
-			fmt.Printf("Step %q output:\n", step.Name())
-			fmt.Println(colorGreen.Sprint(trimmedContent))
-			fmt.Println()
-		} else {
-			fmt.Printf("Step %q completed with no output\n", step.Name())
-		}
+	if e.formatter != nil {
+		e.formatter.PrintStepOutput(step.Name(), result.Content)
 	}
-
 	return result, nil
 }
 

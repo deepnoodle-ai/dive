@@ -3,7 +3,7 @@ Description: Show the current time
 Config:
   DefaultProvider: anthropic
   DefaultModel: claude-sonnet-4-20250514
-  LogLevel: debug
+  LogLevel: warn
   ConfirmationMode: never
 Agents:
   - Name: Basic Agent

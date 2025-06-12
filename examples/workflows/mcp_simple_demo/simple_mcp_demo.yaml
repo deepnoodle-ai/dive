@@ -4,7 +4,7 @@ Description: A basic demonstration of MCP integration in Dive workflows
 Config:
   DefaultProvider: anthropic
   ConfirmationMode: always
-  LogLevel: debug
+  LogLevel: warn
 
 MCPServers:
   - Type: stdio
