@@ -4,6 +4,7 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -152,6 +153,55 @@ func TestIntegration_AdvancedFeatures(t *testing.T) {
 		require.NotNil(t, response)
 		require.NotEmpty(t, response.Message().Text())
 	})
+}
+
+func TestIntegration_FileInput(t *testing.T) {
+	ctx := context.Background()
+	provider := setupIntegrationProvider(t)
+
+	content, err := os.ReadFile("../../../fixtures/hola.pdf")
+	require.NoError(t, err)
+	response, err := provider.Generate(ctx, llm.WithMessages(
+		llm.NewUserMessage(
+			&llm.TextContent{
+				Text: "What does the PDF say?",
+			},
+			&llm.DocumentContent{
+				Title: "file.pdf",
+				Source: &llm.ContentSource{
+					Type:      llm.ContentSourceTypeBase64,
+					MediaType: "application/pdf",
+					Data:      base64.StdEncoding.EncodeToString(content),
+				},
+			},
+		),
+	))
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(response.Message().Text()), "hola")
+}
+
+func TestIntegration_Vision(t *testing.T) {
+	ctx := context.Background()
+	provider := setupIntegrationProvider(t)
+
+	content, err := os.ReadFile("../../../fixtures/go.png")
+	require.NoError(t, err)
+	response, err := provider.Generate(ctx, llm.WithMessages(
+		llm.NewUserMessage(
+			&llm.TextContent{
+				Text: "What is this image? Is there a word written on it?",
+			},
+			&llm.ImageContent{
+				Source: &llm.ContentSource{
+					Type:      llm.ContentSourceTypeBase64,
+					MediaType: "image/png",
+					Data:      base64.StdEncoding.EncodeToString(content),
+				},
+			},
+		),
+	))
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(response.Message().Text()), "go")
 }
 
 // setupIntegrationProvider creates a provider for integration testing
