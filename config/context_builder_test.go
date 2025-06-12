@@ -155,33 +155,27 @@ func TestBuildMessageFromString(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "remote URL",
-			input:       "https://example.com/doc.pdf",
-			expectType:  "document",
-			expectError: false,
-		},
-		{
-			name:        "remote image URL",
-			input:       "https://example.com/image.png",
-			expectType:  "image",
-			expectError: false,
-		},
-		{
-			name:        "non-existent file (treated as literal)",
+			name:        "non-existent file",
 			input:       "/non/existent/path.txt",
-			expectType:  "text",
-			expectError: false,
+			expectType:  "",
+			expectError: true, // Non-existent files now cause errors
 		},
 		{
-			name:        "plain text literal",
-			input:       "Just some text",
-			expectType:  "text",
-			expectError: false,
+			name:        "unsupported extension",
+			input:       filepath.Join(tmpDir, "file.xyz"),
+			expectType:  "",
+			expectError: true, // Unsupported extensions cause errors
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create the file for unsupported extension test
+			if tt.name == "unsupported extension" {
+				err := os.WriteFile(tt.input, []byte("content"), 0644)
+				require.NoError(t, err)
+			}
+
 			msg, err := buildMessageFromLocalFile(tt.input)
 			if tt.expectError {
 				require.Error(t, err)
@@ -218,7 +212,8 @@ func TestBuildMessageFromLocalFile(t *testing.T) {
 
 	textContentBlock, ok := msg.(*llm.TextContent)
 	require.True(t, ok)
-	require.Equal(t, textContent, textContentBlock.Text)
+	expectedWrapped := "<file name=\"test.txt\">\n" + textContent + "\n</file>"
+	require.Equal(t, expectedWrapped, textContentBlock.Text)
 
 	// Test image file (fake PNG)
 	imageFile := filepath.Join(tmpDir, "test.png")
@@ -230,21 +225,18 @@ func TestBuildMessageFromLocalFile(t *testing.T) {
 
 	imageContent, ok := msg.(*llm.ImageContent)
 	require.True(t, ok)
-	require.Equal(t, llm.ContentSourceTypeURL, imageContent.Source.Type)
-	require.Contains(t, imageContent.Source.URL, "file://")
+	require.Equal(t, llm.ContentSourceTypeBase64, imageContent.Source.Type)
+	require.Equal(t, "image/png", imageContent.Source.MediaType)
+	require.NotEmpty(t, imageContent.Source.Data)
 
-	// Test unknown extension (should become document)
+	// Test unknown extension (should return error)
 	unknownFile := filepath.Join(tmpDir, "test.xyz")
 	err = os.WriteFile(unknownFile, []byte("unknown content"), 0644)
 	require.NoError(t, err)
 
-	msg, err = buildMessageFromLocalFile(unknownFile)
-	require.NoError(t, err)
-
-	docContent, ok := msg.(*llm.DocumentContent)
-	require.True(t, ok)
-	require.Equal(t, llm.ContentSourceTypeURL, docContent.Source.Type)
-	require.Contains(t, docContent.Source.URL, "file://")
+	_, err = buildMessageFromLocalFile(unknownFile)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported local file extension")
 }
 
 func TestIsImageExt(t *testing.T) {

@@ -49,11 +49,12 @@ func TestAgentContextMessages(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
 
-	// First message should be the file content
+	// First message should be the file content wrapped in XML tags
 	firstContent := messages[0]
 	textContent, ok := firstContent.(*llm.TextContent)
 	require.True(t, ok)
-	require.Equal(t, contextContent, textContent.Text)
+	expectedWrapped := "<file name=\"context.txt\">\n" + contextContent + "\n</file>"
+	require.Equal(t, expectedWrapped, textContent.Text)
 
 	// Second message should be the inline content
 	secondContent := messages[1]
@@ -127,11 +128,12 @@ func TestWorkflowStepWithContext(t *testing.T) {
 	stepContent := step.Content()
 	require.Len(t, stepContent, 2)
 
-	// First message should be the file content
+	// First message should be the file content wrapped in XML tags
 	firstMsg := stepContent[0]
 	textContent, ok := firstMsg.(*llm.TextContent)
 	require.True(t, ok)
-	require.Equal(t, stepContextContent, textContent.Text)
+	expectedWrapped := "<file name=\"step_context.md\">\n" + stepContextContent + "\n</file>"
+	require.Equal(t, expectedWrapped, textContent.Text)
 
 	// Second message should be the inline content
 	secondMsg := stepContent[1]
@@ -156,15 +158,15 @@ func TestMixedContextTypes(t *testing.T) {
 	err = os.WriteFile(imageFile, []byte("fake-png-data"), 0644)
 	require.NoError(t, err)
 
-	unknownFile := filepath.Join(tmpDir, "data.bin")
-	err = os.WriteFile(unknownFile, []byte("binary data"), 0644)
+	csvFile := filepath.Join(tmpDir, "data.csv")
+	err = os.WriteFile(csvFile, []byte("name,age\nJohn,30"), 0644)
 	require.NoError(t, err)
 
 	entries := []Content{
 		{Path: textFile},
 		{Path: markdownFile},
 		{Path: imageFile},
-		{Path: unknownFile},
+		{Path: csvFile},
 		{URL: "https://example.com/remote.pdf"},
 		{URL: "https://example.com/image.jpg"},
 		{Text: "Text text context"},
@@ -189,7 +191,7 @@ func TestMixedContextTypes(t *testing.T) {
 		}
 	}
 
-	expected := []string{"text", "text", "image", "document", "document", "image", "text"}
+	expected := []string{"text", "text", "image", "text", "document", "image", "text"}
 	require.Equal(t, expected, contentTypes)
 }
 
@@ -229,7 +231,7 @@ func TestErrorHandling(t *testing.T) {
 			entries: []Content{
 				{Path: "/definitely/non/existent/file.txt"},
 			},
-			expectErr: false, // Non-existent files are handled gracefully
+			expectErr: true, // Non-existent files now throw an error
 		},
 	}
 
