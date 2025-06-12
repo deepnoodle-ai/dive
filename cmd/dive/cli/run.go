@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/environment"
@@ -32,8 +33,9 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, showStepOutput bool) error {
+func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	ctx := context.Background()
+	startTime := time.Now()
 
 	// Check if path is a directory or file
 	fi, err := os.Stat(path)
@@ -81,17 +83,36 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, showStepO
 		workflowName = workflows[0].Name()
 	}
 
+	// Get the workflow for display
+	workflow, err := env.GetWorkflow(workflowName)
+	if err != nil {
+		return fmt.Errorf("error getting workflow: %v", err)
+	}
+
+	// Create formatter and display workflow header
+	formatter := NewWorkflowFormatter()
+	formatter.PrintWorkflowHeader(workflow, getUserVariables())
+
 	execution, err := env.ExecuteWorkflow(ctx, environment.ExecutionOptions{
-		WorkflowName:   workflowName,
-		Inputs:         getUserVariables(),
-		ShowStepOutput: showStepOutput,
+		WorkflowName: workflowName,
+		Inputs:       getUserVariables(),
+		Formatter:    formatter, // Pass formatter to execution
 	})
 	if err != nil {
+		duration := time.Since(startTime)
+		formatter.PrintWorkflowError(err, duration)
 		return fmt.Errorf("error executing workflow: %v", err)
 	}
+
 	if err := execution.Wait(); err != nil {
+		duration := time.Since(startTime)
+		formatter.PrintWorkflowError(err, duration)
 		return fmt.Errorf("error waiting for workflow: %v", err)
 	}
+
+	duration := time.Since(startTime)
+	formatter.PrintWorkflowComplete(duration)
+	formatter.PrintExecutionStats(execution.GetStats())
 	return nil
 }
 
@@ -107,12 +128,7 @@ var runCmd = &cobra.Command{
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		showStepOutput, err := cmd.Flags().GetBool("show-step-output")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if err := runWorkflow(filePath, workflowName, getLogLevel(), showStepOutput); err != nil {
+		if err := runWorkflow(filePath, workflowName, getLogLevel()); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -123,5 +139,4 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 
 	runCmd.Flags().StringP("workflow", "w", "", "Name of the workflow to run")
-	runCmd.Flags().BoolP("show-step-output", "", false, "Show output from workflow steps")
 }

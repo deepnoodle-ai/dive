@@ -289,16 +289,16 @@ func (e *Environment) ExecuteWorkflow(ctx context.Context, opts ExecutionOptions
 	}
 
 	execution := &Execution{
-		id:             dive.NewID(),
-		environment:    e,
-		workflow:       workflow,
-		status:         StatusPending,
-		startTime:      time.Now(),
-		inputs:         processedInputs,
-		logger:         logger,
-		paths:          make(map[string]*PathState),
-		showStepOutput: opts.ShowStepOutput,
-		scriptGlobals:  map[string]any{"inputs": processedInputs},
+		id:            dive.NewID(),
+		environment:   e,
+		workflow:      workflow,
+		status:        StatusPending,
+		startTime:     time.Now(),
+		inputs:        processedInputs,
+		logger:        logger,
+		paths:         make(map[string]*PathState),
+		formatter:     opts.Formatter,
+		scriptGlobals: map[string]any{"inputs": processedInputs},
 	}
 	if e.documentRepo != nil {
 		execution.scriptGlobals["documents"] = objects.NewDocumentRepository(e.documentRepo)
