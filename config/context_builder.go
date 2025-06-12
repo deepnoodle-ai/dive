@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 )
@@ -51,31 +52,50 @@ func buildContextContent(ctx context.Context, repo dive.DocumentRepository, base
 
 		switch {
 		case entry.Text != "":
-			content = &llm.TextContent{Text: strings.TrimSpace(entry.Text)}
+			contents = append(contents, &llm.TextContent{Text: strings.TrimSpace(entry.Text)})
 		case entry.Path != "":
 			resolvedPath := entry.Path
 			if !filepath.IsAbs(entry.Path) && basePath != "" {
 				resolvedPath = filepath.Join(basePath, entry.Path)
 			}
-			if _, statErr := os.Stat(resolvedPath); statErr != nil {
-				return nil, fmt.Errorf("unable to read file %s: %w", resolvedPath, statErr)
-			}
-			content, err = buildMessageFromLocalFile(resolvedPath)
-			if err != nil {
-				return nil, err
+			if containsWildcards(entry.Path) {
+				// Handle wildcard pattern
+				matches, err := doublestar.FilepathGlob(resolvedPath)
+				if err != nil {
+					return nil, fmt.Errorf("failed to expand wildcard pattern %s: %w", entry.Path, err)
+				}
+				// Create content for each matching file
+				for _, match := range matches {
+					fileContent, err := buildMessageFromLocalFile(match)
+					if err != nil {
+						return nil, fmt.Errorf("failed to process file %s from pattern %s: %w", match, entry.Path, err)
+					}
+					contents = append(contents, fileContent)
+				}
+			} else {
+				// Handle single file path
+				if _, statErr := os.Stat(resolvedPath); statErr != nil {
+					return nil, fmt.Errorf("unable to read file %s: %w", resolvedPath, statErr)
+				}
+				content, err = buildMessageFromLocalFile(resolvedPath)
+				if err != nil {
+					return nil, err
+				}
+				contents = append(contents, content)
 			}
 		case entry.URL != "":
 			content, err = buildMessageFromRemote(entry.URL)
 			if err != nil {
 				return nil, err
 			}
+			contents = append(contents, content)
 		case entry.Document != "":
 			content, err = buildMessageFromDocument(ctx, repo, entry.Document)
 			if err != nil {
 				return nil, err
 			}
+			contents = append(contents, content)
 		}
-		contents = append(contents, content)
 	}
 	return contents, nil
 }
@@ -234,4 +254,9 @@ func wrapContextText(name, text string) string {
 
 func wrapRemoteContextText(url, text string) string {
 	return fmt.Sprintf("<file url=%q>\n%s\n</file>", url, text)
+}
+
+// containsWildcards checks if a path contains wildcard characters
+func containsWildcards(path string) bool {
+	return strings.ContainsAny(path, "*?[{")
 }

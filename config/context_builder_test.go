@@ -277,3 +277,122 @@ func TestFileURI(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildContextContentWithWildcards(t *testing.T) {
+	// Create a temporary directory with test files
+	tempDir, err := os.MkdirTemp("", "context_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create test files
+	testFiles := []string{
+		"file1.txt",
+		"file2.txt",
+		"file3.md",
+		"subdir/nested.txt",
+	}
+
+	for _, file := range testFiles {
+		fullPath := filepath.Join(tempDir, file)
+		dir := filepath.Dir(fullPath)
+		err := os.MkdirAll(dir, 0755)
+		require.NoError(t, err)
+
+		content := "Content of " + file
+		err = os.WriteFile(fullPath, []byte(content), 0644)
+		require.NoError(t, err)
+	}
+
+	tests := []struct {
+		name            string
+		entries         []Content
+		expectedCount   int
+		expectedPattern string
+	}{
+		{
+			name: "wildcard matches multiple txt files",
+			entries: []Content{
+				{Path: "*.txt"},
+			},
+			expectedCount:   2, // file1.txt, file2.txt
+			expectedPattern: "Content of file",
+		},
+		{
+			name: "doublestar matches nested files",
+			entries: []Content{
+				{Path: "**/*.txt"},
+			},
+			expectedCount:   3, // file1.txt, file2.txt, subdir/nested.txt
+			expectedPattern: "Content of",
+		},
+		{
+			name: "specific pattern matches single file",
+			entries: []Content{
+				{Path: "file1.txt"},
+			},
+			expectedCount:   1,
+			expectedPattern: "Content of file1.txt",
+		},
+		{
+			name: "mixed wildcard and non-wildcard",
+			entries: []Content{
+				{Path: "*.md"},
+				{Path: "file1.txt"},
+			},
+			expectedCount:   2, // file3.md + file1.txt
+			expectedPattern: "Content of",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			contents, err := buildContextContent(ctx, nil, tempDir, tt.entries)
+			require.NoError(t, err)
+			require.Len(t, contents, tt.expectedCount)
+
+			// Verify all contents are TextContent and contain expected pattern
+			for _, content := range contents {
+				textContent, ok := content.(*llm.TextContent)
+				require.True(t, ok, "Expected TextContent")
+				require.Contains(t, textContent.Text, tt.expectedPattern)
+			}
+		})
+	}
+}
+
+func TestBuildContextContentWildcardErrors(t *testing.T) {
+	ctx := context.Background()
+
+	// Test with non-existent directory pattern
+	entries := []Content{
+		{Path: "nonexistent/*.txt"},
+	}
+
+	contents, err := buildContextContent(ctx, nil, "", entries)
+	require.NoError(t, err) // FilepathGlob returns empty result for non-matching patterns, not error
+	require.Empty(t, contents)
+}
+
+func TestContainsWildcards(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"simple.txt", false},
+		{"*.txt", true},
+		{"file?.txt", true},
+		{"[abc].txt", true},
+		{"{a,b}.txt", true},
+		{"dir/**/*.txt", true},
+		{"normal/path/file.txt", false},
+		{"path/with*wildcard.txt", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := containsWildcards(tt.path)
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}

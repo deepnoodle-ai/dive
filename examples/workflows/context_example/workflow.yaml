@@ -1,5 +1,7 @@
 Name: Example Workflow that Uses Files for Context
-Description: Demonstrates how to use files for context in agents and workflow steps
+Description: |
+  Demonstrates how to use files for context in agents and workflow steps,
+  including wildcard patterns.
 Config:
   LogLevel: debug
 
@@ -8,19 +10,34 @@ Agents:
     Provider: anthropic
     Model: claude-sonnet-4-20250514
     Context:
-      - Path: ./reminders.txt
+      - Path: ./opening-procedures.txt
 
 Workflows:
   - Name: Example
     Steps:
-      - Name: Review our Reminders
+      # The "opening procedures" information will always be available since it
+      # is in the agent's context
+      - Name: Review our Opening Procedures
         Type: prompt
-        Prompt: Give me an overview of our reminders.
-        Content:
-          - Text: Respond in ALL CAPS.
+        Prompt: Give me an overview of our opening procedures.
 
+      # Attach the quality standards content to the prompt
+      - Name: Review our Quality Standards
+        Type: prompt
+        Prompt: Give me an overview of our quality standards.
+        Content:
+          - Path: ./quality-standards.txt
+
+      # Attach the go.png image to the prompt
       - Name: Review an Image
         Type: prompt
         Content:
           - Path: ../../../fixtures/go.png
           - Text: What is in the image?
+
+      # Attach all the markdown files in this directory to the prompt
+      - Name: Process Multiple Files with Wildcards
+        Type: prompt
+        Prompt: Give a summary of these markdown files.
+        Content:
+          - Path: '*.md'
