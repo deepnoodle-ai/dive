@@ -1,0 +1,54 @@
+Name: Simple MCP Demo
+Description: A basic demonstration of MCP integration in Dive workflows
+
+Config:
+  DefaultProvider: anthropic
+  ConfirmationMode: if-destructive
+  LogLevel: debug
+
+MCPServers:
+  - Type: stdio
+    Name: git-server
+    Command: 'uvx'
+    Env:
+      DEBUG: 'true'
+    Args:
+      - 'mcp-server-git'
+      - '--verbose'
+
+Tools:
+  - Name: Web.Search
+  - Name: Command
+
+Agents:
+  - Name: MCP Explorer
+    Goal: Demonstrate MCP tool usage
+    Instructions: |
+      You are an AI assistant that demonstrates how to use MCP
+      (Model Context Protocol) tools within Dive workflows.
+    Tools:
+      - Web.Search
+      - Command
+      - git_status
+      - git_diff
+
+Workflows:
+  - Name: MCP Tool Discovery
+    Description: Test available MCP tools
+    Steps:
+      - Name: Discover MCP Tools
+        Agent: MCP Explorer
+        Prompt: |
+          Demonstrate MCP Git tools by:
+          1. Running git_status on this repository
+          2. Running git_diff to show any changes
+          3. Explain what you found
+
+          The repository path is the current working directory.
+        Store: tool_discovery
+
+      - Name: Write MCP Tools Document
+        Action: Document.Write
+        Parameters:
+          Path: output/mcp_tools.md
+          Content: ${tool_discovery}

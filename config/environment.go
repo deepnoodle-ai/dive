@@ -12,6 +12,7 @@ import (
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/environment"
+	"github.com/diveagents/dive/mcp"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
 	"github.com/goccy/go-yaml"
@@ -19,16 +20,17 @@ import (
 
 // Environment is a serializable representation of an AI agent environment
 type Environment struct {
-	Name        string     `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Description string     `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Version     string     `yaml:"Version,omitempty" json:"Version,omitempty"`
-	Config      Config     `yaml:"Config,omitempty" json:"Config,omitempty"`
-	Tools       []Tool     `yaml:"Tools,omitempty" json:"Tools,omitempty"`
-	Documents   []Document `yaml:"Documents,omitempty" json:"Documents,omitempty"`
-	Agents      []Agent    `yaml:"Agents,omitempty" json:"Agents,omitempty"`
-	Workflows   []Workflow `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
-	Triggers    []Trigger  `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
-	Schedules   []Schedule `yaml:"Schedules,omitempty" json:"Schedules,omitempty"`
+	Name        string      `yaml:"Name,omitempty" json:"Name,omitempty"`
+	Description string      `yaml:"Description,omitempty" json:"Description,omitempty"`
+	Version     string      `yaml:"Version,omitempty" json:"Version,omitempty"`
+	Config      Config      `yaml:"Config,omitempty" json:"Config,omitempty"`
+	Tools       []Tool      `yaml:"Tools,omitempty" json:"Tools,omitempty"`
+	Documents   []Document  `yaml:"Documents,omitempty" json:"Documents,omitempty"`
+	Agents      []Agent     `yaml:"Agents,omitempty" json:"Agents,omitempty"`
+	Workflows   []Workflow  `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
+	Triggers    []Trigger   `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
+	Schedules   []Schedule  `yaml:"Schedules,omitempty" json:"Schedules,omitempty"`
+	MCPServers  []MCPServer `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
 }
 
 // Save writes an Environment configuration to a file. The file extension is used to
@@ -73,6 +75,8 @@ func (env *Environment) Write(w io.Writer) error {
 
 // Build creates a new Environment from the configuration
 func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, error) {
+	ctx := context.Background()
+
 	buildOpts := &BuildOptions{}
 	for _, opt := range opts {
 		opt(buildOpts)
@@ -102,13 +106,29 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		Mode: confirmationMode,
 	})
 
+	// Initialize MCP manager to discover tools
+	var mcpServers []*mcp.ServerConfig
+	for _, mcpServer := range env.MCPServers {
+		mcpServers = append(mcpServers, mcpServer.ToMCPConfig())
+	}
+	mcpManager := mcp.NewManager(mcp.ManagerOptions{Logger: logger})
+	var mcpTools map[string]dive.Tool
+	if len(mcpServers) > 0 {
+		if err := mcpManager.InitializeServers(ctx, mcpServers); err != nil {
+			return nil, fmt.Errorf("failed to initialize mcp servers: %w", err)
+		}
+		mcpTools = mcpManager.GetAllTools()
+	} else {
+		mcpTools = map[string]dive.Tool{}
+	}
+
 	toolDefsByName := make(map[string]Tool)
 	for _, toolDef := range env.Tools {
 		toolDefsByName[toolDef.Name] = toolDef
 	}
-	// Auto-add any tools mentioned in agents by name. This will be otherwise
-	// unconfigured, so it the tool needs to be configured it should be added
-	// to the environment / YAML definition.
+
+	// Auto-add any tool definitions mentioned in agents by name that were
+	// otherwise unconfigured. These will use the tool's default configuration.
 	for _, agentDef := range env.Agents {
 		for _, toolName := range agentDef.Tools {
 			if _, ok := toolDefsByName[toolName]; !ok {
@@ -116,15 +136,27 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 			}
 		}
 	}
-	toolDefs := make([]Tool, 0, len(toolDefsByName))
-	for _, toolDef := range toolDefsByName {
-		toolDefs = append(toolDefs, toolDef)
+
+	// Start building a map of tools that will be passed to agents
+	toolsMap := map[string]dive.Tool{}
+	for _, mcpTool := range mcpTools {
+		toolsMap[mcpTool.Name()] = mcpTool
 	}
 
-	// Tools
-	toolsMap, err := initializeTools(toolDefs)
+	// Identify which tools were NOT provided by MCP servers, initialize them,
+	// and then add them to the tools map
+	regularToolDefs := make([]Tool, 0, len(toolDefsByName))
+	for _, toolDef := range toolDefsByName {
+		if _, isMCPTool := mcpTools[toolDef.Name]; !isMCPTool {
+			regularToolDefs = append(regularToolDefs, toolDef)
+		}
+	}
+	regularTools, err := initializeTools(regularToolDefs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize tools: %w", err)
+	}
+	for toolName, tool := range regularTools {
+		toolsMap[toolName] = tool
 	}
 
 	// Agents
@@ -207,6 +239,8 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		DocumentRepository: docRepo,
 		ThreadRepository:   threadRepo,
 		Confirmer:          confirmer,
+		MCPServers:         mcpServers,
+		MCPManager:         mcpManager,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create environment: %w", err)

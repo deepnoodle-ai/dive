@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/mcp"
 	"github.com/diveagents/dive/objects"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
@@ -28,6 +29,8 @@ type Environment struct {
 	actions         map[string]Action
 	started         bool
 	confirmer       dive.Confirmer
+	mcpManager      *mcp.Manager
+	mcpServers      []*mcp.ServerConfig
 }
 
 // Options are used to configure an Environment.
@@ -46,6 +49,8 @@ type Options struct {
 	Actions            []Action
 	AutoStart          bool
 	Confirmer          dive.Confirmer
+	MCPServers         []*mcp.ServerConfig
+	MCPManager         *mcp.Manager
 }
 
 // New returns a new Environment configured with the given options.
@@ -113,6 +118,8 @@ func New(opts Options) (*Environment, error) {
 		documentRepo:    opts.DocumentRepository,
 		threadRepo:      opts.ThreadRepository,
 		actions:         actions,
+		mcpManager:      opts.MCPManager,
+		mcpServers:      opts.MCPServers,
 	}
 	for _, trigger := range env.triggers {
 		trigger.SetEnvironment(env)
@@ -158,6 +165,14 @@ func (e *Environment) Start(ctx context.Context) error {
 	if e.started {
 		return fmt.Errorf("environment already started")
 	}
+
+	if e.mcpManager != nil {
+		if err := e.mcpManager.InitializeServers(ctx, e.mcpServers); err != nil {
+			e.logger.Error("failed to initialize MCP servers", "error", err)
+			return err
+		}
+	}
+
 	e.started = true
 	return nil
 }
@@ -166,6 +181,14 @@ func (e *Environment) Stop(ctx context.Context) error {
 	if !e.started {
 		return fmt.Errorf("environment not started")
 	}
+
+	if e.mcpManager != nil {
+		if err := e.mcpManager.Close(); err != nil {
+			e.logger.Error("failed to close MCP connections", "error", err)
+			return err
+		}
+	}
+
 	// TODO: stop executions?
 	e.started = false
 	return nil
@@ -298,4 +321,36 @@ func (e *Environment) ExecuteWorkflow(ctx context.Context, opts ExecutionOptions
 func (e *Environment) GetAction(name string) (Action, bool) {
 	action, ok := e.actions[name]
 	return action, ok
+}
+
+// GetMCPTools returns all MCP tools from all connected servers
+func (e *Environment) GetMCPTools() map[string]dive.Tool {
+	if e.mcpManager == nil {
+		return make(map[string]dive.Tool)
+	}
+	return e.mcpManager.GetAllTools()
+}
+
+// GetMCPToolsByServer returns MCP tools from a specific server
+func (e *Environment) GetMCPToolsByServer(serverName string) []dive.Tool {
+	if e.mcpManager == nil {
+		return nil
+	}
+	return e.mcpManager.GetToolsByServer(serverName)
+}
+
+// GetMCPTool returns a specific MCP tool by name (with server prefix)
+func (e *Environment) GetMCPTool(toolKey string) dive.Tool {
+	if e.mcpManager == nil {
+		return nil
+	}
+	return e.mcpManager.GetTool(toolKey)
+}
+
+// GetMCPServerStatus returns the connection status of all MCP servers
+func (e *Environment) GetMCPServerStatus() map[string]bool {
+	if e.mcpManager == nil {
+		return make(map[string]bool)
+	}
+	return e.mcpManager.GetServerStatus()
 }

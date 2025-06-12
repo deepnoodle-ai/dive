@@ -150,6 +150,16 @@ func InitializeImageGenerationTool(config map[string]interface{}) (dive.Tool, er
 	return toolkit.NewImageGenerationTool(options), nil
 }
 
+func InitializeTextEditorTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.TextEditorToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("failed to populate text_editor tool config: %w", err)
+		}
+	}
+	return toolkit.NewTextEditorTool(options), nil
+}
+
 // ToolInitializers maps tool names to their initialization functions
 var ToolInitializers = map[string]ToolInitializer{
 	"Web.Search":              InitializeWebSearchTool,
@@ -162,6 +172,7 @@ var ToolInitializers = map[string]ToolInitializer{
 	"Anthropic.CodeExecution": InitializeAnthropicCodeExecutionTool,
 	"Anthropic.Computer":      InitializeAnthropicComputerTool,
 	"Anthropic.WebSearch":     InitializeAnthropicWebSearchTool,
+	"Text.Editor":             InitializeTextEditorTool,
 }
 
 // InitializeToolByName initializes a tool by its name with the given configuration

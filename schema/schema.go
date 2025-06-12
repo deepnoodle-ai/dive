@@ -18,6 +18,8 @@ const (
 // Schema describes the structure of a JSON object.
 type Schema struct {
 	Type                 SchemaType           `json:"type"`
+	Description          string               `json:"description,omitempty"`
+	Title                string               `json:"title,omitempty"`
 	Properties           map[string]*Property `json:"properties"`
 	Required             []string             `json:"required,omitempty"`
 	AdditionalProperties *bool                `json:"additionalProperties,omitempty"`
