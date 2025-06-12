@@ -185,7 +185,7 @@ func TestMCPToolAdapter_Annotations(t *testing.T) {
 	require.False(t, annotations.ReadOnlyHint)
 	require.False(t, annotations.DestructiveHint)
 	require.False(t, annotations.IdempotentHint)
-	require.True(t, annotations.OpenWorldHint)
+	require.False(t, annotations.OpenWorldHint)
 }
 
 func TestMCPToolAdapter_Call_NotConnected(t *testing.T) {

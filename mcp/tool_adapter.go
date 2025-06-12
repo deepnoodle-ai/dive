@@ -65,17 +65,26 @@ func (t *ToolAdapter) Schema() *schema.Schema {
 
 // Annotations returns tool annotations
 func (t *ToolAdapter) Annotations() *dive.ToolAnnotations {
-	annotations := &dive.ToolAnnotations{
+	annotations := t.toolInfo.Annotations
+	result := &dive.ToolAnnotations{
 		Title: fmt.Sprintf("%s (MCP:%s)", t.toolInfo.Name, t.serverName),
 	}
-	// Set hints based on MCP tool properties if available
-	// These would need to be extracted from the MCP tool definition
-	// For now, we'll set conservative defaults
-	annotations.ReadOnlyHint = false
-	annotations.DestructiveHint = false
-	annotations.IdempotentHint = false
-	annotations.OpenWorldHint = true
-	return annotations
+	if annotations.Title != "" {
+		result.Title = annotations.Title
+	}
+	if annotations.ReadOnlyHint != nil {
+		result.ReadOnlyHint = *t.toolInfo.Annotations.ReadOnlyHint
+	}
+	if annotations.DestructiveHint != nil {
+		result.DestructiveHint = *annotations.DestructiveHint
+	}
+	if annotations.IdempotentHint != nil {
+		result.IdempotentHint = *annotations.IdempotentHint
+	}
+	if annotations.OpenWorldHint != nil {
+		result.OpenWorldHint = *annotations.OpenWorldHint
+	}
+	return result
 }
 
 // Call executes the MCP tool
@@ -260,26 +269,3 @@ func ConvertMCPResultToDive(mcpResult *mcp.CallToolResult) (*dive.ToolResult, er
 		IsError: mcpResult.IsError,
 	}, nil
 }
-
-// // convertMCPAnnotations converts MCP annotations to Dive annotations format
-// func convertMCPAnnotations(mcpAnnotations *mcp.Annotations) map[string]any {
-// 	if mcpAnnotations == nil {
-// 		return nil
-// 	}
-
-// 	annotations := make(map[string]any)
-
-// 	if len(mcpAnnotations.Audience) > 0 {
-// 		audience := make([]string, len(mcpAnnotations.Audience))
-// 		for i, role := range mcpAnnotations.Audience {
-// 			audience[i] = string(role)
-// 		}
-// 		annotations["mcp_audience"] = audience
-// 	}
-
-// 	if mcpAnnotations.Priority > 0 {
-// 		annotations["mcp_priority"] = mcpAnnotations.Priority
-// 	}
-
-// 	return annotations
-// }

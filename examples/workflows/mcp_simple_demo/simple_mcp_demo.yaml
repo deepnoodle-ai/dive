@@ -3,7 +3,7 @@ Description: A basic demonstration of MCP integration in Dive workflows
 
 Config:
   DefaultProvider: anthropic
-  ConfirmationMode: if-destructive
+  ConfirmationMode: always
   LogLevel: debug
 
 MCPServers:
@@ -16,10 +16,6 @@ MCPServers:
       - 'mcp-server-git'
       - '--verbose'
 
-Tools:
-  - Name: Web.Search
-  - Name: Command
-
 Agents:
   - Name: MCP Explorer
     Goal: Demonstrate MCP tool usage
@@ -27,8 +23,6 @@ Agents:
       You are an AI assistant that demonstrates how to use MCP
       (Model Context Protocol) tools within Dive workflows.
     Tools:
-      - Web.Search
-      - Command
       - git_status
       - git_diff
 
