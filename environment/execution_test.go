@@ -10,6 +10,7 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
+	"github.com/risor-io/risor/object"
 	"github.com/stretchr/testify/require"
 )
 
@@ -348,4 +349,60 @@ func TestExecutionContextCancellation(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "context canceled")
 	require.Equal(t, StatusFailed, execution.Status())
+}
+
+func TestEachStepStoreArray(t *testing.T) {
+	// Create a workflow with an each step that has a store variable
+	each := &workflow.EachBlock{
+		Items: []string{"item1", "item2", "item3"},
+		As:    "item",
+	}
+
+	wf, err := workflow.New(workflow.Options{
+		Name: "test-each-store",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "process-items",
+				Agent:  &mockAgent{},
+				Prompt: "Process item",
+				Each:   each,
+				Store:  "results",
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	env, err := New(Options{
+		Name:      "test-env",
+		Agents:    []dive.Agent{&mockAgent{}},
+		Workflows: []*workflow.Workflow{wf},
+		Logger:    slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
+
+	execution, err := env.ExecuteWorkflow(context.Background(), ExecutionOptions{
+		WorkflowName: wf.Name(),
+		Inputs:       map[string]interface{}{},
+	})
+	require.NoError(t, err)
+	require.NoError(t, execution.Wait())
+	require.Equal(t, StatusCompleted, execution.Status())
+
+	// Check that the stored variable is an array with 3 items
+	storedValue, exists := execution.scriptGlobals["results"]
+	require.True(t, exists, "results variable should be stored")
+
+	list, ok := storedValue.(*object.List)
+	require.True(t, ok, "stored value should be a list/array")
+
+	items := list.Value()
+	require.Len(t, items, 3, "should have 3 items in the array")
+
+	// Check that each item is a string containing "test output"
+	for _, item := range items {
+		str, ok := item.(*object.String)
+		require.True(t, ok, "each item should be a string")
+		require.Equal(t, "test output", str.Value())
+	}
 }

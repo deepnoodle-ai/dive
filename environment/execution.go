@@ -342,64 +342,45 @@ func (e *Execution) handlePathBranching(
 }
 
 // resolveEachItems resolves the array of items from either a direct array or a risor expression
-func (e *Execution) resolveEachItems(ctx context.Context, each *workflow.EachBlock) ([]string, error) {
-	// Handle array of strings directly
+func (e *Execution) resolveEachItems(ctx context.Context, each *workflow.EachBlock) ([]any, error) {
+	// Array of strings
 	if strArray, ok := each.Items.([]string); ok {
-		return strArray, nil
-	}
-
-	// Handle interface array by converting to strings
-	if ifaceArray, ok := each.Items.([]interface{}); ok {
-		strArray := make([]string, len(ifaceArray))
-		for i, v := range ifaceArray {
-			switch val := v.(type) {
-			case string:
-				strArray[i] = val
-			case fmt.Stringer:
-				strArray[i] = val.String()
-			default:
-				strArray[i] = fmt.Sprintf("%v", val)
-			}
+		var items []any
+		for _, item := range strArray {
+			items = append(items, item)
 		}
-		return strArray, nil
+		return items, nil
 	}
 
-	// Handle risor expression
+	// Array of any
+	if items, ok := each.Items.([]any); ok {
+		return items, nil
+	}
+
+	// Handle Risor script expression
 	if codeStr, ok := each.Items.(string); ok && strings.HasPrefix(codeStr, "$(") && strings.HasSuffix(codeStr, ")") {
 		return e.evaluateRisorExpression(ctx, codeStr)
 	}
 
-	return nil, fmt.Errorf("each items must be []string, []interface{}, or risor expression, got %T", each.Items)
+	return nil, fmt.Errorf("unsupported value for 'each' block (got %T)", each.Items)
 }
 
 // evaluateRisorExpression evaluates a risor expression and returns the result as a string array
-func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string) ([]string, error) {
-	code := strings.TrimPrefix(codeStr, "$(")
-	code = strings.TrimSuffix(code, ")")
+func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string) ([]any, error) {
+	code := strings.TrimSuffix(strings.TrimPrefix(codeStr, "$("), ")")
 
 	compiledCode, err := compileScript(ctx, code, e.scriptGlobals)
 	if err != nil {
-		e.logger.Error("failed to compile each array expression", "error", err)
+		e.logger.Error("failed to compile 'each' expression", "error", err)
 		return nil, fmt.Errorf("failed to compile expression: %w", err)
 	}
-	result, err := evalCode(ctx, compiledCode, e.scriptGlobals)
+
+	result, err := evalEachScript(ctx, compiledCode, e.scriptGlobals)
 	if err != nil {
-		e.logger.Error("failed to evaluate each array expression", "error", err)
+		e.logger.Error("failed to evaluate 'each' expression", "error", err)
 		return nil, fmt.Errorf("failed to evaluate expression: %w", err)
 	}
-
-	var resultItems []string
-	switch v := result.(type) {
-	case *object.List:
-		for _, item := range v.Value() {
-			resultItems = append(resultItems, item.Inspect())
-		}
-	case *object.String:
-		resultItems = []string{v.Value()}
-	default:
-		return nil, fmt.Errorf("expression must evaluate to string or []string, got %T", result)
-	}
-	return resultItems, nil
+	return result, nil
 }
 
 func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
@@ -430,11 +411,6 @@ func (e *Execution) executeStepCore(ctx context.Context, step *workflow.Step, ag
 		}
 	}
 
-	// Store the output in a variable if specified
-	if varName := step.Store(); varName != "" {
-		e.scriptGlobals[varName] = object.NewString(result.Content)
-		e.logger.Info("stored step result", "variable_name", varName)
-	}
 	return result, nil
 }
 
@@ -447,7 +423,17 @@ func (e *Execution) handleStepExecution(ctx context.Context, path *executionPath
 	if step.Each() != nil {
 		return e.executeStepEach(ctx, step, agent)
 	}
-	return e.executeStepCore(ctx, step, agent)
+	result, err := e.executeStepCore(ctx, step, agent)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store the output in a variable if specified (only for non-each steps)
+	if varName := step.Store(); varName != "" {
+		e.scriptGlobals[varName] = object.NewString(result.Content)
+		e.logger.Info("stored step result", "variable_name", varName)
+	}
+	return result, nil
 }
 
 // executeStepEach handles the execution of a step that has an each block
@@ -461,20 +447,33 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, ag
 	}
 
 	// Execute the step for each item and capture the results
-	var results []*dive.StepResult
+	results := make([]*dive.StepResult, 0, len(items))
 	for _, item := range items {
 		if varName := each.As; varName != "" {
-			e.scriptGlobals[varName] = object.NewString(item)
+			e.scriptGlobals[varName] = item
 		}
 		result, err := e.executeStepCore(ctx, step, agent)
 		if err != nil {
-			return nil, fmt.Errorf("failed to handle step execution: %w", err)
+			return nil, err
 		}
 		results = append(results, result)
 	}
 
+	// Store the array of results if a store variable is specified
+	if varName := step.Store(); varName != "" {
+		resultContents := make([]object.Object, 0, len(results))
+		for _, result := range results {
+			resultContents = append(resultContents, object.NewString(result.Content))
+		}
+		e.scriptGlobals[varName] = object.NewList(resultContents)
+		e.logger.Info("stored results list",
+			"variable_name", varName,
+			"item_count", len(resultContents),
+		)
+	}
+
 	// Combine the results into one string which we put in a single task result
-	var itemTexts []string
+	itemTexts := make([]string, 0, len(results))
 	for i, result := range results {
 		var itemText string
 		if each.As != "" {
@@ -772,23 +771,12 @@ func (e *Execution) StepOutputs() map[string]string {
 	return outputs
 }
 
-func evalCode(ctx context.Context, code *compiler.Code, globals map[string]any) (any, error) {
+func evalEachScript(ctx context.Context, code *compiler.Code, globals map[string]any) ([]any, error) {
 	result, err := risor.EvalCode(ctx, code, risor.WithGlobals(globals))
 	if err != nil {
-		return nil, fmt.Errorf("failed to evaluate code: %w", err)
+		return nil, err
 	}
-	switch result := result.(type) {
-	case *object.String:
-		return result.Value(), nil
-	case *object.Int:
-		return result.Value(), nil
-	case *object.Float:
-		return result.Value(), nil
-	case *object.Bool:
-		return result.Value(), nil
-	default:
-		return nil, fmt.Errorf("unsupported result type: %T", result)
-	}
+	return convertRisorEachValue(result)
 }
 
 // evaluateRisorCondition evaluates a risor condition and returns the result as a boolean
@@ -807,4 +795,51 @@ func (e *Execution) evaluateRisorCondition(ctx context.Context, codeStr string, 
 		return false, fmt.Errorf("failed to evaluate code: %w", err)
 	}
 	return result.IsTruthy(), nil
+}
+
+func convertRisorEachValue(obj object.Object) ([]any, error) {
+	switch obj := obj.(type) {
+	case *object.String:
+		return []any{obj.Value()}, nil
+	case *object.Int:
+		return []any{obj.Value()}, nil
+	case *object.Float:
+		return []any{obj.Value()}, nil
+	case *object.Bool:
+		return []any{obj.Value()}, nil
+	case *object.Time:
+		return []any{obj.Value()}, nil
+	case *object.List:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	case *object.Set:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	case *object.Map:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		return values, nil
+	default:
+		return nil, fmt.Errorf("unsupported risor result type: %T", obj)
+	}
 }

@@ -120,6 +120,8 @@ func (e *Expr) Eval(ctx context.Context, globals map[string]any) (string, error)
 			strValue = fmt.Sprintf("%t", v.Value())
 		case *object.NilType:
 			strValue = ""
+		case fmt.Stringer:
+			strValue = v.String()
 		default:
 			return "", fmt.Errorf("unsupported result type for template expression: %T", result)
 		}
