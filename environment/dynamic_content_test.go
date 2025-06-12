@@ -74,15 +74,10 @@ func TestRisorContent(t *testing.T) {
 func TestScriptPathContent(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Create a test Risor script
-	risorScript := filepath.Join(tempDir, "test.risor")
-	err := os.WriteFile(risorScript, []byte(`"Hello from Risor file"`), 0644)
-	require.NoError(t, err)
-
 	// Create a test shell script that outputs JSON
 	shellScript := filepath.Join(tempDir, "test.sh")
-	err = os.WriteFile(shellScript, []byte(`#!/bin/bash
-echo '"Hello from shell script"'`), 0755)
+	err := os.WriteFile(shellScript, []byte(`#!/bin/bash
+echo '[{"type": "text", "text": "Hello from shell script"}]'`), 0755)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -91,11 +86,6 @@ echo '"Hello from shell script"'`), 0755)
 		expected    int
 		expectError bool
 	}{
-		{
-			name:       "risor script",
-			scriptPath: risorScript,
-			expected:   1,
-		},
 		{
 			name:       "shell script",
 			scriptPath: shellScript,
@@ -135,52 +125,4 @@ func TestRisorContentType(t *testing.T) {
 func TestScriptPathContentType(t *testing.T) {
 	scriptContent := &ScriptPathContent{DynamicFrom: "test.sh"}
 	require.Equal(t, llm.ContentTypeDynamic, scriptContent.Type())
-}
-
-func TestFilterSerializableGlobals(t *testing.T) {
-	globals := map[string]any{
-		"string":   "value",
-		"number":   42,
-		"boolean":  true,
-		"array":    []string{"a", "b"},
-		"map":      map[string]string{"key": "value"},
-		"function": func() {},      // This should be filtered out
-		"channel":  make(chan int), // This should be filtered out
-	}
-
-	filtered := filterSerializableGlobals(globals)
-
-	// Should contain serializable types
-	require.Contains(t, filtered, "string")
-	require.Contains(t, filtered, "number")
-	require.Contains(t, filtered, "boolean")
-	require.Contains(t, filtered, "array")
-	require.Contains(t, filtered, "map")
-
-	// Should not contain non-serializable types
-	require.NotContains(t, filtered, "function")
-	require.NotContains(t, filtered, "channel")
-}
-
-func TestIsJSONSerializable(t *testing.T) {
-	tests := []struct {
-		name   string
-		value  any
-		serial bool
-	}{
-		{"string", "hello", true},
-		{"int", 42, true},
-		{"bool", true, true},
-		{"slice", []int{1, 2, 3}, true},
-		{"map", map[string]int{"a": 1}, true},
-		{"function", func() {}, false},
-		{"channel", make(chan int), false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isJSONSerializable(tt.value)
-			require.Equal(t, tt.serial, result)
-		})
-	}
 }
