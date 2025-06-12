@@ -1,7 +1,7 @@
 Name: GitHub Assistant
 Description: |
-  A comprehensive GitHub workflow using MCP tools for repository management and
-  issue handling.
+  A simple workflow demonstrating how to use GitHub MCP tools for viewing
+  issues in a GitHub repository.
 
 Config:
   DefaultProvider: anthropic
@@ -30,14 +30,13 @@ MCPServers:
 
 Agents:
   - Name: GitHub Assistant
-    Goal: Analyze GitHub repositories and manage issues
+    Goal: Review issues in a GitHub repository.
     Tools:
       - get_issue
       - list_issues
     Instructions: |
       You are a GitHub repository analyst and issue manager. You have access to
-      GitHub MCP tools that allow you to interact with repositories, read code,
-      manage issues, and perform searches.
+      GitHub MCP tools that allow you to interact with list and retrieve issues.
 
 Workflows:
   - Name: Summarize Repository Issues

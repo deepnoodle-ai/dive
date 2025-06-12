@@ -30,7 +30,6 @@ type CommandInput struct {
 type CommandToolOptions struct {
 	AllowList []string
 	DenyList  []string
-	Confirmer dive.Confirmer
 }
 
 // CommandTool is a tool that executes external commands. This could run `cat`,
@@ -39,7 +38,6 @@ type CommandToolOptions struct {
 type CommandTool struct {
 	allowList []string
 	denyList  []string
-	confirmer dive.Confirmer
 }
 
 // NewCommandTool creates a new tool that executes external commands.
@@ -47,7 +45,6 @@ func NewCommandTool(options CommandToolOptions) *dive.TypedToolAdapter[*CommandI
 	return dive.ToolAdapter(&CommandTool{
 		allowList: options.AllowList,
 		denyList:  options.DenyList,
-		confirmer: options.Confirmer,
 	})
 }
 
@@ -124,20 +121,6 @@ func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.Tool
 	}
 	if c.allowList != nil && !slices.Contains(c.allowList, name) {
 		return NewToolResultError(fmt.Sprintf("error: command name %q is not allowed.", name)), nil
-	}
-
-	if c.confirmer != nil {
-		confirmed, err := c.confirmer.Confirm(ctx, dive.ConfirmationRequest{
-			Prompt:  "Do you want to run this command?",
-			Details: strings.Join(append([]string{name}, args...), " "),
-			Data:    map[string]interface{}{"name": name, "args": args},
-		})
-		if err != nil {
-			return NewToolResultError(fmt.Sprintf("error: user confirmation failed: %s", err.Error())), nil
-		}
-		if !confirmed {
-			return NewToolResultError("error: command cancelled by user."), nil
-		}
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
