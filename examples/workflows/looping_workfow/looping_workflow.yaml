@@ -1,0 +1,49 @@
+Name: Dive Looping Workflow Example
+Description: |
+  Example workflow demonstrating Dive's each loop functionality for iterating
+  over collections.
+
+Config:
+  LogLevel: debug
+  ConfirmationMode: never
+  DefaultProvider: anthropic
+
+Agents:
+  - Name: Analyst
+    Goal: Analyze items using each loops
+
+Workflows:
+  - Name: Looping Workflow Demo
+    Description: |
+      Demonstrates Dive's each loop feature by iterating over a collection of
+      programming languages.
+    Steps:
+      # Step 1: Loop over the array of languages
+      - Name: Analyze Each Programming Language
+        Agent: Analyst
+        Prompt: |
+          Provide a brief, one paragraph description of the ${language}
+          programming language.
+        Each:
+          Items: ['Python', 'Go', 'JavaScript', 'Rust']
+          As: language
+        Store: language_descriptions
+
+      # Step 2: Generate summary
+      - Name: Create Combined Summary
+        Agent: Analyst
+        Prompt: |
+          Create a combined summary of the following programming languages and
+          then briefly contrast them with each other.
+
+          <languages>
+          ${language_descriptions}
+          </languages>
+        Store: summary
+
+      # Step 3: Save the results
+      - Name: Save Results to File
+        Action: Document.Write
+        Parameters:
+          Path: output/languages.md
+          Content: ${summary}
