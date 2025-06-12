@@ -6,24 +6,14 @@ Config:
   LogLevel: debug
   ConfirmationMode: if-destructive
 
-Tools:
-  - Name: Directory.List
-    Enabled: true
-  - Name: File.Write
-    Enabled: true
-  - Name: File.Read
-    Enabled: true
-  - Name: Command
-    Enabled: true
-
 Agents:
   - Name: Engineer
     Goal: Generate Go programs from user intent and ensure they compile and lint cleanly
     Tools:
-      - Directory.List
-      - File.Write
-      - File.Read
-      - Command
+      - list_directory
+      - write_file
+      - read_file
+      - command
 
 Workflows:
   - Name: Go Program Skeleton
@@ -47,21 +37,20 @@ Workflows:
 
           Create the program in the directory: ${inputs.directory}.
 
-      - Name: Compile Program
-        Agent: Engineer
-        Prompt: |
-          Compile the Go program in the directory: ${inputs.directory}.
+          Make sure the program is formatted and linted.
 
-      - Name: Lint Program
-        Agent: Engineer
-        Prompt: |
-          Run `go vet ./...` in the program directory: ${inputs.directory}.
-        Store: lint_output
+          Confirm it compiles cleanly.
+        Store: results
 
       - Name: Summarize Results
         Agent: Engineer
         Prompt: |
-          Here is the lint output:
-          ${lint_output}
+          We were working on creating a Go program based on the following intent:
+
+          "${inputs.intent}"
+
+          Here is the results of our work:
+
+          ${results}
 
           Summarize whether the program compiled and linted cleanly. If there were errors, list them.

@@ -91,7 +91,7 @@ func main() {
 		Model:  model,
 		Logger: slogger.New(slogger.LevelFromString(*logLevel)),
 		Tools: []dive.Tool{
-			toolkit.NewSearchTool(toolkit.SearchToolOptions{Searcher: searchClient}),
+			toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{Searcher: searchClient}),
 		},
 	})
 	if err != nil {

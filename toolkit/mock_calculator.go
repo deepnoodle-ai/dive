@@ -20,7 +20,7 @@ type MockCalculatorTool struct {
 }
 
 func (t *MockCalculatorTool) Name() string {
-	return "Calculator"
+	return "calculator"
 }
 
 func (t *MockCalculatorTool) Description() string {
@@ -47,7 +47,7 @@ func (t *MockCalculatorTool) Call(ctx context.Context, input *MockCalculatorInpu
 
 func (t *MockCalculatorTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Calculator",
+		Title:           "calculator",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

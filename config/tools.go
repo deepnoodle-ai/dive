@@ -26,135 +26,126 @@ func convertToolConfig(config map[string]interface{}, options interface{}) error
 	return nil
 }
 
-// InitializeWebSearchTool initializes the Web.Search tool with the given configuration
-func InitializeWebSearchTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeWebSearchTool(config map[string]interface{}) (dive.Tool, error) {
 	key := os.Getenv("GOOGLE_SEARCH_CX")
 	if key == "" {
 		return nil, fmt.Errorf("google search requested but GOOGLE_SEARCH_CX not set")
 	}
 	googleClient, err := google.New()
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Google Search: %w", err)
+		return nil, fmt.Errorf("failed to initialize google search client: %w", err)
 	}
-	var options toolkit.SearchToolOptions
+	var options toolkit.WebSearchToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate web_search tool config: %w", err)
+			return nil, fmt.Errorf("invalid web_search tool configuration: %w", err)
 		}
 	}
 	options.Searcher = googleClient
-	return toolkit.NewSearchTool(options), nil
+	return toolkit.NewWebSearchTool(options), nil
 }
 
-// InitializeWebFetchTool initializes the Web.Fetch tool with the given configuration
-func InitializeWebFetchTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeFetchTool(config map[string]interface{}) (dive.Tool, error) {
 	key := os.Getenv("FIRECRAWL_API_KEY")
 	if key == "" {
 		return nil, fmt.Errorf("firecrawl requested but FIRECRAWL_API_KEY not set")
 	}
 	client, err := firecrawl.New(firecrawl.WithAPIKey(key))
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize Firecrawl: %w", err)
+		return nil, fmt.Errorf("failed to initialize firecrawl: %w", err)
 	}
 	var options toolkit.FetchToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate web_fetch tool config: %w", err)
+			return nil, fmt.Errorf("invalid fetch tool configuration: %w", err)
 		}
 	}
 	options.Fetcher = client
 	return toolkit.NewFetchTool(options), nil
 }
 
-// InitializeFileReadTool initializes the File.Read tool with the given configuration
-func InitializeFileReadTool(config map[string]interface{}) (dive.Tool, error) {
-	var options toolkit.FileReadToolOptions
+func initializeReadFileTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.ReadFileToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate file_read tool config: %w", err)
+			return nil, fmt.Errorf("invalid read_file tool configuration: %w", err)
 		}
 	}
-	return toolkit.NewFileReadTool(options), nil
+	return toolkit.NewReadFileTool(options), nil
 }
 
-// InitializeFileWriteTool initializes the File.Write tool with the given configuration
-func InitializeFileWriteTool(config map[string]interface{}) (dive.Tool, error) {
-	var options toolkit.FileWriteToolOptions
+func initializeWriteFileTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.WriteFileToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate file_write tool config: %w", err)
+			return nil, fmt.Errorf("invalid write_file tool configuration: %w", err)
 		}
 	}
-	return toolkit.NewFileWriteTool(options), nil
+	return toolkit.NewWriteFileTool(options), nil
 }
 
-// InitializeDirectoryListTool initializes the Directory.List tool with the given configuration
-func InitializeDirectoryListTool(config map[string]interface{}) (dive.Tool, error) {
-	var options toolkit.DirectoryListToolOptions
+func initializeListDirectoryTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.ListDirectoryToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate directory_list tool config: %w", err)
+			return nil, fmt.Errorf("invalid list_directory tool configuration: %w", err)
 		}
 	}
-	return toolkit.NewDirectoryListTool(options), nil
+	return toolkit.NewListDirectoryTool(options), nil
 }
 
-// InitializeCommandTool initializes the Command tool with the given configuration
-func InitializeCommandTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeCommandTool(config map[string]interface{}) (dive.Tool, error) {
 	var options toolkit.CommandToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate command tool config: %w", err)
+			return nil, fmt.Errorf("invalid command tool configuration: %w", err)
 		}
 	}
 	return toolkit.NewCommandTool(options), nil
 }
 
-// InitializeAnthropicCodeExecutionTool initializes the Anthropic Code Execution tool with the given configuration
-func InitializeAnthropicCodeExecutionTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeAnthropicCodeExecutionTool(config map[string]interface{}) (dive.Tool, error) {
 	var options anthropic.CodeExecutionToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate Anthropic code execution tool config: %w", err)
+			return nil, fmt.Errorf("invalid anthropic code execution tool configuration: %w", err)
 		}
 	}
 	return anthropic.NewCodeExecutionTool(options), nil
 }
 
-// InitializeAnthropicComputerTool initializes the Anthropic Computer tool with the given configuration
-func InitializeAnthropicComputerTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeAnthropicComputerTool(config map[string]interface{}) (dive.Tool, error) {
 	var options anthropic.ComputerToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate Anthropic computer tool config: %w", err)
+			return nil, fmt.Errorf("invalid anthropic computer tool configuration: %w", err)
 		}
 	}
 	return anthropic.NewComputerTool(options), nil
 }
 
-// InitializeAnthropicWebSearchTool initializes the Anthropic Web Search tool with the given configuration
-func InitializeAnthropicWebSearchTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeAnthropicWebSearchTool(config map[string]interface{}) (dive.Tool, error) {
 	var options anthropic.WebSearchToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate Anthropic web search tool config: %w", err)
+			return nil, fmt.Errorf("invalid anthropic web search tool configuration: %w", err)
 		}
 	}
 	return anthropic.NewWebSearchTool(options), nil
 }
 
-func InitializeImageGenerationTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeGenerateImageTool(config map[string]interface{}) (dive.Tool, error) {
 	var options toolkit.ImageGenerationToolOptions
 	client := openaisdk.NewClient()
 	options.Client = &client
 	return toolkit.NewImageGenerationTool(options), nil
 }
 
-func InitializeTextEditorTool(config map[string]interface{}) (dive.Tool, error) {
+func initializeTextEditorTool(config map[string]interface{}) (dive.Tool, error) {
 	var options toolkit.TextEditorToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
-			return nil, fmt.Errorf("failed to populate text_editor tool config: %w", err)
+			return nil, fmt.Errorf("invalid text_editor tool configuration: %w", err)
 		}
 	}
 	return toolkit.NewTextEditorTool(options), nil
@@ -162,17 +153,17 @@ func InitializeTextEditorTool(config map[string]interface{}) (dive.Tool, error) 
 
 // ToolInitializers maps tool names to their initialization functions
 var ToolInitializers = map[string]ToolInitializer{
-	"Web.Search":              InitializeWebSearchTool,
-	"Web.Fetch":               InitializeWebFetchTool,
-	"File.Read":               InitializeFileReadTool,
-	"File.Write":              InitializeFileWriteTool,
-	"Directory.List":          InitializeDirectoryListTool,
-	"Command":                 InitializeCommandTool,
-	"Image.Generate":          InitializeImageGenerationTool,
-	"Anthropic.CodeExecution": InitializeAnthropicCodeExecutionTool,
-	"Anthropic.Computer":      InitializeAnthropicComputerTool,
-	"Anthropic.WebSearch":     InitializeAnthropicWebSearchTool,
-	"Text.Editor":             InitializeTextEditorTool,
+	"web_search":               initializeWebSearchTool,
+	"fetch":                    initializeFetchTool,
+	"read_file":                initializeReadFileTool,
+	"write_file":               initializeWriteFileTool,
+	"list_directory":           initializeListDirectoryTool,
+	"command":                  initializeCommandTool,
+	"generate_image":           initializeGenerateImageTool,
+	"anthropic_code_execution": initializeAnthropicCodeExecutionTool,
+	"anthropic_computer":       initializeAnthropicComputerTool,
+	"anthropic_web_search":     initializeAnthropicWebSearchTool,
+	"text_editor":              initializeTextEditorTool,
 }
 
 // InitializeToolByName initializes a tool by its name with the given configuration

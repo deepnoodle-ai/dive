@@ -13,11 +13,11 @@ import (
 	"github.com/diveagents/dive/schema"
 )
 
-var _ dive.TypedTool[*DirectoryListInput] = &DirectoryListTool{}
+var _ dive.TypedTool[*ListDirectoryInput] = &ListDirectoryTool{}
 
-const DefaultDirectoryListMaxEntries = 250
+const DefaultListDirectoryMaxEntries = 100
 
-type DirectoryListInput struct {
+type ListDirectoryInput struct {
 	Path string `json:"path"`
 }
 
@@ -31,7 +31,7 @@ type DirectoryEntry struct {
 	Extension string    `json:"extension,omitempty"`
 }
 
-type DirectoryListToolOptions struct {
+type ListDirectoryToolOptions struct {
 	DefaultPath   string
 	MaxEntries    int
 	RootDirectory string   // If set, all paths will be relative to this directory
@@ -39,7 +39,7 @@ type DirectoryListToolOptions struct {
 	DenyList      []string // Patterns of denied paths
 }
 
-type DirectoryListTool struct {
+type ListDirectoryTool struct {
 	defaultPath   string
 	maxEntries    int
 	rootDirectory string
@@ -47,12 +47,12 @@ type DirectoryListTool struct {
 	denyList      []string
 }
 
-// NewDirectoryListTool creates a new tool for listing directory contents
-func NewDirectoryListTool(options DirectoryListToolOptions) *dive.TypedToolAdapter[*DirectoryListInput] {
+// NewListDirectoryTool creates a new tool for listing directory contents
+func NewListDirectoryTool(options ListDirectoryToolOptions) *dive.TypedToolAdapter[*ListDirectoryInput] {
 	if options.MaxEntries == 0 {
-		options.MaxEntries = DefaultDirectoryListMaxEntries
+		options.MaxEntries = DefaultListDirectoryMaxEntries
 	}
-	return dive.ToolAdapter(&DirectoryListTool{
+	return dive.ToolAdapter(&ListDirectoryTool{
 		defaultPath:   options.DefaultPath,
 		maxEntries:    options.MaxEntries,
 		rootDirectory: options.RootDirectory,
@@ -61,15 +61,15 @@ func NewDirectoryListTool(options DirectoryListToolOptions) *dive.TypedToolAdapt
 	})
 }
 
-func (t *DirectoryListTool) Name() string {
-	return "directory_list"
+func (t *ListDirectoryTool) Name() string {
+	return "list_directory"
 }
 
-func (t *DirectoryListTool) Description() string {
+func (t *ListDirectoryTool) Description() string {
 	return "A tool that lists the contents of a directory. To use this tool, provide a 'path' parameter with the path to the directory you want to list."
 }
 
-func (t *DirectoryListTool) Schema() *schema.Schema {
+func (t *ListDirectoryTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type: "object",
 		Properties: map[string]*schema.Property{
@@ -82,9 +82,9 @@ func (t *DirectoryListTool) Schema() *schema.Schema {
 	}
 }
 
-func (t *DirectoryListTool) Annotations() *dive.ToolAnnotations {
+func (t *ListDirectoryTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Directory List",
+		Title:           "list_directory",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,
@@ -93,7 +93,7 @@ func (t *DirectoryListTool) Annotations() *dive.ToolAnnotations {
 }
 
 // isPathAllowed checks if the given path is allowed based on allowList and denyList
-func (t *DirectoryListTool) isPathAllowed(path string) (bool, string) {
+func (t *ListDirectoryTool) isPathAllowed(path string) (bool, string) {
 	// Convert to absolute path for consistent checking
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -136,7 +136,7 @@ func (t *DirectoryListTool) isPathAllowed(path string) (bool, string) {
 
 // resolvePath resolves the provided path, applying rootDirectory if configured
 // and preventing directory traversal attacks
-func (t *DirectoryListTool) resolvePath(path string) (string, error) {
+func (t *ListDirectoryTool) resolvePath(path string) (string, error) {
 	if t.rootDirectory == "" {
 		// If no root directory is set, use the path as is
 		return path, nil
@@ -168,7 +168,7 @@ func (t *DirectoryListTool) resolvePath(path string) (string, error) {
 	return resolvedPath, nil
 }
 
-func (t *DirectoryListTool) Call(ctx context.Context, input *DirectoryListInput) (*dive.ToolResult, error) {
+func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput) (*dive.ToolResult, error) {
 	dirPath := input.Path
 	if dirPath == "" {
 		dirPath = t.defaultPath

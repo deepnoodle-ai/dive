@@ -136,18 +136,12 @@ Config:
   DefaultModel: claude-sonnet-4-20250514
   ConfirmationMode: if-destructive
 
-Tools:
-  - Name: Web.Search
-    Enabled: true
-  - Name: Web.Fetch
-    Enabled: true
-
 Agents:
   - Name: Research Assistant
     Backstory: You are an enthusiastic and deeply curious researcher.
     Tools:
-      - Web.Search
-      - Web.Fetch
+      - web_search
+      - fetch
 
 Workflows:
   - Name: Research
@@ -257,13 +251,14 @@ These are the models that have been verified to work in Dive:
 
 Tools extend agent capabilities. Dive includes these built-in tools:
 
-* **Web.Search**: Search the web using Google Custom Search or Kagi Search
-* **Web.Fetch**: Fetch and extract content from webpages using Firecrawl
-* **Document.Write**: Write content to files with path validation and confirmations
-* **Document.Read**: Read content from files with binary detection and size limits
-* **Directory.List**: List directory contents with permission controls
-* **Text.Editor**: Advanced file editing with view, create, replace, and insert operations
-* **Command**: Execute external commands with allow/deny list controls
+* **list_directory**: List directory contents
+* **read_file**: Read content from files
+* **write_file**: Write content to files
+* **text_editor**: Advanced file editing with view, create, replace, and insert operations
+* **web_search**: Search the web using Google Custom Search or Kagi Search
+* **fetch**: Fetch and extract content from webpages using Firecrawl
+* **command**: Execute external commands
+* **generate_image**: Generate images using OpenAI's gpt-image-1
 
 ### Tool Annotations
 

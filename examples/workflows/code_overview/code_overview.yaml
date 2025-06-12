@@ -10,10 +10,10 @@ Agents:
   - Name: Engineer
     Goal: Analyze codebases and generate project overviews
     Tools:
-      - Web.Search
-      - Web.Fetch
-      - Directory.List
-      - File.Read
+      - web_search
+      - fetch
+      - list_directory
+      - read_file
     ModelSettings:
       MaxTokens: 16384
       ReasoningEffort: medium

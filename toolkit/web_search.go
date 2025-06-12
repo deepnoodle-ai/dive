@@ -9,9 +9,9 @@ import (
 	"github.com/diveagents/dive/web"
 )
 
-var _ dive.TypedTool[*SearchInput] = &SearchTool{}
+var _ dive.TypedTool[*SearchInput] = &WebSearchTool{}
 
-type SearchToolOptions struct {
+type WebSearchToolOptions struct {
 	Searcher web.Searcher
 }
 
@@ -20,25 +20,25 @@ type SearchInput struct {
 	Limit int    `json:"limit"`
 }
 
-type SearchTool struct {
+type WebSearchTool struct {
 	searcher web.Searcher
 }
 
-func NewSearchTool(options SearchToolOptions) *dive.TypedToolAdapter[*SearchInput] {
-	return dive.ToolAdapter(&SearchTool{
+func NewWebSearchTool(options WebSearchToolOptions) *dive.TypedToolAdapter[*SearchInput] {
+	return dive.ToolAdapter(&WebSearchTool{
 		searcher: options.Searcher,
 	})
 }
 
-func (t *SearchTool) Name() string {
-	return "search"
+func (t *WebSearchTool) Name() string {
+	return "web_search"
 }
 
-func (t *SearchTool) Description() string {
+func (t *WebSearchTool) Description() string {
 	return "Searches the web using the given query. The response includes the url, title, and description of each webpage in the search results."
 }
 
-func (t *SearchTool) Schema() *schema.Schema {
+func (t *WebSearchTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"query"},
@@ -55,7 +55,7 @@ func (t *SearchTool) Schema() *schema.Schema {
 	}
 }
 
-func (t *SearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolResult, error) {
+func (t *WebSearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolResult, error) {
 	limit := 10
 	if limit <= 0 {
 		limit = 10
@@ -83,9 +83,9 @@ func (t *SearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolRe
 	return NewToolResultText(string(data)), nil
 }
 
-func (t *SearchTool) Annotations() *dive.ToolAnnotations {
+func (t *WebSearchTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Search",
+		Title:           "web_search",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

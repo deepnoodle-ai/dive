@@ -10,7 +10,7 @@ Agents:
   - Name: Artist
     Goal: Generate images
     Tools:
-      - Image.Generate
+      - generate_image
 
 Workflows:
   - Name: Generate Artistic Images

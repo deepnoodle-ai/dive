@@ -7,18 +7,12 @@ Config:
   LogLevel: debug
   ConfirmationMode: if-destructive
 
-Tools:
-  - Name: Web.Search
-    Enabled: true
-  - Name: Web.Fetch
-    Enabled: true
-
 Agents:
   - Name: Research Analyst
     Goal: Conduct comprehensive research on a given topic
     Tools:
-      - Web.Search
-      - Web.Fetch
+      - web_search
+      - fetch
 
 Workflows:
   - Name: Research

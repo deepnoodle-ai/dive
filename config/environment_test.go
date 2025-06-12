@@ -22,11 +22,11 @@ func TestEnvironment_Build(t *testing.T) {
 		},
 		Tools: []Tool{
 			{
-				Name:    "Web.Search",
+				Name:    "web_search",
 				Enabled: boolPtr(true),
 			},
 			{
-				Name: "File.Read",
+				Name: "read_file",
 			},
 		},
 		Agents: []Agent{
@@ -35,14 +35,14 @@ func TestEnvironment_Build(t *testing.T) {
 				Goal:     "Assist with research",
 				Provider: "anthropic",
 				Model:    "claude-3-sonnet-20240229",
-				Tools:    []string{"Web.Search", "File.Read"},
+				Tools:    []string{"web_search", "read_file"},
 			},
 			{
 				Name:     "writer",
 				Goal:     "Write compelling content",
 				Provider: "anthropic",
 				Model:    "claude-3-sonnet-20240229",
-				Tools:    []string{"File.Read"},
+				Tools:    []string{"read_file"},
 			},
 		},
 		Workflows: []Workflow{

@@ -6,50 +6,46 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/schema"
 )
 
-var _ dive.TypedTool[*FileReadInput] = &FileReadTool{}
+var _ dive.TypedTool[*ReadFileInput] = &ReadFileTool{}
 
-const DefaultFileReadMaxSize = 1024 * 100 // 100KB
+const DefaultReadFileMaxSize = 1024 * 100 // 100KB
 
-type FileReadInput struct {
+type ReadFileInput struct {
 	Path string `json:"path"`
 }
 
-type FileReadToolOptions struct {
-	MaxSize       int    `json:"max_size,omitempty"`
-	RootDirectory string `json:"root_directory,omitempty"`
+type ReadFileToolOptions struct {
+	MaxSize int `json:"max_size,omitempty"`
 }
 
-type FileReadTool struct {
-	maxSize       int
-	rootDirectory string
+type ReadFileTool struct {
+	maxSize int
 }
 
-// NewFileReadTool creates a new tool for reading file contents
-func NewFileReadTool(options FileReadToolOptions) *dive.TypedToolAdapter[*FileReadInput] {
+// NewReadFileTool creates a new tool for reading file contents
+func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFileInput] {
 	if options.MaxSize == 0 {
-		options.MaxSize = DefaultFileReadMaxSize
+		options.MaxSize = DefaultReadFileMaxSize
 	}
-	return dive.ToolAdapter(&FileReadTool{
-		maxSize:       options.MaxSize,
-		rootDirectory: options.RootDirectory,
+	return dive.ToolAdapter(&ReadFileTool{
+		maxSize: options.MaxSize,
 	})
 }
 
-func (t *FileReadTool) Name() string {
-	return "file_read"
+func (t *ReadFileTool) Name() string {
+	return "read_file"
 }
 
-func (t *FileReadTool) Description() string {
+func (t *ReadFileTool) Description() string {
 	return "A tool that reads the content of a file. To use this tool, provide a 'path' parameter with the path to the file you want to read."
 }
 
-func (t *FileReadTool) Schema() *schema.Schema {
+func (t *ReadFileTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"path"},
@@ -62,43 +58,18 @@ func (t *FileReadTool) Schema() *schema.Schema {
 	}
 }
 
-// resolvePath resolves the provided path, applying rootDirectory if configured
-// and preventing directory traversal attacks
-func (t *FileReadTool) resolvePath(path string) (string, error) {
-	if t.rootDirectory == "" {
-		return path, nil
-	}
-	resolvedPath := filepath.Join(t.rootDirectory, path)
-
-	absRoot, err := filepath.Abs(t.rootDirectory)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve absolute path for root directory: %w", err)
-	}
-	absPath, err := filepath.Abs(resolvedPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
-	}
-	// Check if the resolved path is within the root directory
-	cleanRoot := filepath.Clean(absRoot)
-	cleanPath := filepath.Clean(absPath)
-
-	rel, err := filepath.Rel(cleanRoot, cleanPath)
-	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return "", fmt.Errorf("path attempts to access location outside of root directory")
-	}
-	return resolvedPath, nil
-}
-
-func (t *FileReadTool) Call(ctx context.Context, input *FileReadInput) (*dive.ToolResult, error) {
+func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.ToolResult, error) {
 	filePath := input.Path
 	if filePath == "" {
 		return NewToolResultError("Error: No file path provided."), nil
 	}
-	resolvedPath, err := t.resolvePath(filePath)
+
+	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		return NewToolResultError(fmt.Sprintf("failed to resolve absolute path: %s", err.Error())), nil
 	}
-	fileInfo, err := os.Stat(resolvedPath)
+
+	fileInfo, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return NewToolResultError(fmt.Sprintf("Error: File not found at path: %s", filePath)), nil
@@ -107,14 +78,17 @@ func (t *FileReadTool) Call(ctx context.Context, input *FileReadInput) (*dive.To
 		}
 		return NewToolResultError(fmt.Sprintf("Error: Failed to access file %s. %s", filePath, err.Error())), nil
 	}
+
 	if fileInfo.Size() > int64(t.maxSize) {
 		return NewToolResultError(fmt.Sprintf("Error: File %s is too large (%d bytes). Maximum allowed size is %d bytes.",
 			filePath, fileInfo.Size(), t.maxSize)), nil
 	}
-	content, err := os.ReadFile(resolvedPath)
+
+	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("Error: Failed to read file %s. %s", filePath, err.Error())), nil
 	}
+
 	if isBinaryContent(content) {
 		return NewToolResultError(fmt.Sprintf("Warning: File %s appears to be a binary file. The content may not display correctly:\n\n%s",
 			filePath, string(content))), nil
@@ -150,9 +124,9 @@ func isBinaryContent(content []byte) bool {
 	return controlCount > sampleSize/10
 }
 
-func (t *FileReadTool) Annotations() *dive.ToolAnnotations {
+func (t *ReadFileTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "File Read",
+		Title:           "read_file",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

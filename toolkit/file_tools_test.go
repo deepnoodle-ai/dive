@@ -10,14 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFileReadTool(t *testing.T) {
+func TestReadFileTool(t *testing.T) {
 	// Create a temporary directory for test files
-	tempDir, err := os.MkdirTemp("", "file_read_test")
+	tempDir, err := os.MkdirTemp("", "read_file_test")
 	require.NoError(t, err, "Failed to create temp directory")
 	defer os.RemoveAll(tempDir)
 
 	// Create a test file
-	testContent := "This is test content for FileReadTool"
+	testContent := "This is test content for the read_file tool"
 	testFilePath := filepath.Join(tempDir, "test_read.txt")
 	err = os.WriteFile(testFilePath, []byte(testContent), 0644)
 	require.NoError(t, err, "Failed to create test file")
@@ -29,10 +29,10 @@ func TestFileReadTool(t *testing.T) {
 	require.NoError(t, err, "Failed to create large test file")
 
 	t.Run("ReadExistingFile", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{
+		tool := NewReadFileTool(ReadFileToolOptions{
 			MaxSize: 10000,
 		})
-		result, err := tool.Call(context.Background(), &FileReadInput{
+		result, err := tool.Call(context.Background(), &ReadFileInput{
 			Path: testFilePath,
 		})
 		require.NoError(t, err, "Unexpected error")
@@ -42,8 +42,8 @@ func TestFileReadTool(t *testing.T) {
 	})
 
 	t.Run("ReadNonExistentFile", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
-		result, err := tool.Call(context.Background(), &FileReadInput{
+		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+		result, err := tool.Call(context.Background(), &ReadFileInput{
 			Path: filepath.Join(tempDir, "nonexistent.txt"),
 		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
@@ -54,9 +54,9 @@ func TestFileReadTool(t *testing.T) {
 
 	t.Run("ReadLargeFileTruncated", func(t *testing.T) {
 		maxSize := 100
-		tool := NewFileReadTool(FileReadToolOptions{MaxSize: maxSize})
+		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: maxSize})
 
-		result, err := tool.Call(context.Background(), &FileReadInput{
+		result, err := tool.Call(context.Background(), &ReadFileInput{
 			Path: largeFilePath,
 		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
@@ -67,8 +67,8 @@ func TestFileReadTool(t *testing.T) {
 	})
 
 	t.Run("NoPathProvided", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
-		result, err := tool.Call(context.Background(), &FileReadInput{})
+		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+		result, err := tool.Call(context.Background(), &ReadFileInput{})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
 		require.True(t, result.IsError)
 		require.Len(t, result.Content, 1)
@@ -77,41 +77,12 @@ func TestFileReadTool(t *testing.T) {
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
-		tool := NewFileReadTool(FileReadToolOptions{MaxSize: 10000})
-		require.Equal(t, "file_read", tool.Name(), "Tool name mismatch")
-	})
-
-	t.Run("RootDirectoryBehavior", func(t *testing.T) {
-		// Create a subdirectory for testing root directory behavior
-		rootDir := filepath.Join(tempDir, "root")
-		require.NoError(t, os.MkdirAll(rootDir, 0755), "Failed to create root directory")
-
-		// Create a test file inside the root directory
-		rootFileContent := "This is a file inside the root directory"
-		rootFilePath := "test_in_root.txt"
-		fullRootFilePath := filepath.Join(rootDir, rootFilePath)
-		require.NoError(t, os.WriteFile(fullRootFilePath, []byte(rootFileContent), 0644), "Failed to create test file in root")
-
-		// Test reading a file inside the root directory
-		tool := NewFileReadTool(FileReadToolOptions{RootDirectory: rootDir, MaxSize: 10000})
-
-		result, err := tool.Call(context.Background(), &FileReadInput{
-			Path: rootFilePath,
-		})
-		require.NoError(t, err, "Unexpected error")
-		require.Equal(t, rootFileContent, result.Content[0].Text, "Content mismatch")
-
-		// Test attempting to read a file outside the root directory
-		result, err = tool.Call(context.Background(), &FileReadInput{
-			Path: "../test_read.txt", // Try to access parent directory
-		})
-		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result.Content[0].Text, "Error:", "Expected error for path outside root")
-		require.Contains(t, result.Content[0].Text, "outside of root directory", "Expected error about path outside root")
+		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+		require.Equal(t, "read_file", tool.Name(), "Tool name mismatch")
 	})
 }
 
-func TestFileWriteTool(t *testing.T) {
+func TestWriteFileTool(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "file_write_test")
 	require.NoError(t, err, "Failed to create temp directory")
@@ -127,11 +98,11 @@ func TestFileWriteTool(t *testing.T) {
 	}
 
 	t.Run("WriteToNewFile", func(t *testing.T) {
-		tool := NewFileWriteTool(FileWriteToolOptions{})
+		tool := NewWriteFileTool(WriteFileToolOptions{})
 		testFilePath := filepath.Join(tempDir, "test_write.txt")
-		testContent := "This is test content for FileWriteTool"
+		testContent := "This is test content for write_file tool"
 
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    testFilePath,
 			Content: testContent,
 		})
@@ -146,11 +117,11 @@ func TestFileWriteTool(t *testing.T) {
 	})
 
 	t.Run("WriteToNonExistentDirectory", func(t *testing.T) {
-		tool := NewFileWriteTool(FileWriteToolOptions{})
+		tool := NewWriteFileTool(WriteFileToolOptions{})
 		testFilePath := filepath.Join(tempDir, "new_dir", "test_write.txt")
 		testContent := "This should create the directory"
 
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    testFilePath,
 			Content: testContent,
 		})
@@ -165,8 +136,8 @@ func TestFileWriteTool(t *testing.T) {
 	})
 
 	t.Run("NoPathProvided", func(t *testing.T) {
-		tool := NewFileWriteTool(FileWriteToolOptions{})
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		tool := NewWriteFileTool(WriteFileToolOptions{})
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    "",
 			Content: "Some content",
 		})
@@ -179,13 +150,13 @@ func TestFileWriteTool(t *testing.T) {
 		allowedPath := filepath.Join(allowedDir, "allowed.txt")
 		deniedPath := filepath.Join(deniedDir, "denied.txt")
 
-		tool := NewFileWriteTool(FileWriteToolOptions{
+		tool := NewWriteFileTool(WriteFileToolOptions{
 			AllowList: []string{allowedPath},
 		})
 		testContent := "This should be allowed"
 
 		// Test allowed path
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    allowedPath,
 			Content: testContent,
 		})
@@ -193,7 +164,7 @@ func TestFileWriteTool(t *testing.T) {
 		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
 
 		// Test denied path
-		result, err = tool.Call(context.Background(), &FileWriteInput{
+		result, err = tool.Call(context.Background(), &WriteFileInput{
 			Path:    deniedPath,
 			Content: testContent,
 		})
@@ -205,13 +176,13 @@ func TestFileWriteTool(t *testing.T) {
 		allowedPath := filepath.Join(allowedDir, "allowed.txt")
 		deniedPath := filepath.Join(deniedDir, "denied.txt")
 
-		tool := NewFileWriteTool(FileWriteToolOptions{
+		tool := NewWriteFileTool(WriteFileToolOptions{
 			DenyList: []string{deniedPath},
 		})
 		testContent := "This should be denied"
 
 		// Test allowed path
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    allowedPath,
 			Content: testContent,
 		})
@@ -219,7 +190,7 @@ func TestFileWriteTool(t *testing.T) {
 		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
 
 		// Test denied path
-		result, err = tool.Call(context.Background(), &FileWriteInput{
+		result, err = tool.Call(context.Background(), &WriteFileInput{
 			Path:    deniedPath,
 			Content: testContent,
 		})
@@ -229,7 +200,7 @@ func TestFileWriteTool(t *testing.T) {
 
 	t.Run("AllowlistWildcard", func(t *testing.T) {
 		// Test with * wildcard
-		tool := NewFileWriteTool(FileWriteToolOptions{
+		tool := NewWriteFileTool(WriteFileToolOptions{
 			AllowList: []string{filepath.Join(allowedDir, "*.txt")},
 		})
 		testContent := "Testing wildcard"
@@ -237,7 +208,7 @@ func TestFileWriteTool(t *testing.T) {
 		// Should be allowed
 		allowedPath := filepath.Join(allowedDir, "wildcard.txt")
 
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    allowedPath,
 			Content: testContent,
 		})
@@ -247,7 +218,7 @@ func TestFileWriteTool(t *testing.T) {
 
 		// Should be denied (wrong extension)
 		deniedPath := filepath.Join(allowedDir, "wildcard.json")
-		result, err = tool.Call(context.Background(), &FileWriteInput{
+		result, err = tool.Call(context.Background(), &WriteFileInput{
 			Path:    deniedPath,
 			Content: testContent,
 		})
@@ -258,14 +229,14 @@ func TestFileWriteTool(t *testing.T) {
 
 	t.Run("AllowlistDoubleWildcard", func(t *testing.T) {
 		// Test with ** wildcard
-		tool := NewFileWriteTool(FileWriteToolOptions{
+		tool := NewWriteFileTool(WriteFileToolOptions{
 			AllowList: []string{filepath.Join(allowedDir, "**")},
 		})
 		testContent := "Testing double wildcard"
 
 		// Should be allowed (in allowed dir)
 		allowedPath := filepath.Join(allowedDir, "double_wildcard.txt")
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    allowedPath,
 			Content: testContent,
 		})
@@ -275,7 +246,7 @@ func TestFileWriteTool(t *testing.T) {
 
 		// Should be allowed (in nested dir)
 		nestedPath := filepath.Join(nestedDir, "nested_wildcard.txt")
-		result, err = tool.Call(context.Background(), &FileWriteInput{
+		result, err = tool.Call(context.Background(), &WriteFileInput{
 			Path:    nestedPath,
 			Content: testContent,
 		})
@@ -285,7 +256,7 @@ func TestFileWriteTool(t *testing.T) {
 
 		// Should be denied (outside allowed dir)
 		deniedPath := filepath.Join(deniedDir, "outside_wildcard.txt")
-		result, err = tool.Call(context.Background(), &FileWriteInput{
+		result, err = tool.Call(context.Background(), &WriteFileInput{
 			Path:    deniedPath,
 			Content: testContent,
 		})
@@ -297,7 +268,7 @@ func TestFileWriteTool(t *testing.T) {
 	t.Run("DenylistOverridesAllowlist", func(t *testing.T) {
 		// Allow all files in allowed dir, but deny specific file
 		specificPath := filepath.Join(allowedDir, "specific.txt")
-		tool := NewFileWriteTool(FileWriteToolOptions{
+		tool := NewWriteFileTool(WriteFileToolOptions{
 			AllowList: []string{filepath.Join(allowedDir, "**")},
 			DenyList:  []string{specificPath},
 		})
@@ -305,7 +276,7 @@ func TestFileWriteTool(t *testing.T) {
 
 		// Should be allowed (in allowed dir)
 		allowedPath := filepath.Join(allowedDir, "not_denied.txt")
-		result, err := tool.Call(context.Background(), &FileWriteInput{
+		result, err := tool.Call(context.Background(), &WriteFileInput{
 			Path:    allowedPath,
 			Content: testContent,
 		})
@@ -314,7 +285,7 @@ func TestFileWriteTool(t *testing.T) {
 		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
 
 		// Should be denied (specifically denied)
-		result, err = tool.Call(context.Background(), &FileWriteInput{
+		result, err = tool.Call(context.Background(), &WriteFileInput{
 			Path:    specificPath,
 			Content: testContent,
 		})
@@ -324,49 +295,11 @@ func TestFileWriteTool(t *testing.T) {
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
-		tool := NewFileWriteTool(FileWriteToolOptions{
+		tool := NewWriteFileTool(WriteFileToolOptions{
 			AllowList: []string{"/allowed/**"},
 			DenyList:  []string{"/denied/**"},
 		})
-		require.Equal(t, "file_write", tool.Name(), "Tool name mismatch")
-	})
-
-	t.Run("RootDirectoryBehavior", func(t *testing.T) {
-		// Create a subdirectory for testing root directory behavior
-		rootDir := filepath.Join(tempDir, "write_root")
-		require.NoError(t, os.MkdirAll(rootDir, 0755), "Failed to create root directory")
-
-		// Test writing a file inside the root directory
-		tool := NewFileWriteTool(FileWriteToolOptions{
-			RootDirectory: rootDir,
-		})
-
-		// Write to a file using a relative path
-		relativeFilePath := "test_in_root.txt"
-		testContent := "This is a file inside the root directory"
-
-		result, err := tool.Call(context.Background(), &FileWriteInput{
-			Path:    relativeFilePath,
-			Content: testContent,
-		})
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
-
-		// Verify the file was created in the root directory
-		fullPath := filepath.Join(rootDir, relativeFilePath)
-		content, err := os.ReadFile(fullPath)
-		require.NoError(t, err, "Failed to read written file")
-		require.Equal(t, testContent, string(content), "Content mismatch")
-
-		// Test attempting to write a file outside the root directory
-		result, err = tool.Call(context.Background(), &FileWriteInput{
-			Path:    "../outside_root.txt", // Try to access parent directory
-			Content: "This should be denied",
-		})
-
-		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result.Content[0].Text, "Error:", "Expected error for path outside root")
-		require.Contains(t, result.Content[0].Text, "outside of root directory", "Expected error about path outside root")
+		require.Equal(t, "write_file", tool.Name(), "Tool name mismatch")
 	})
 }
 
