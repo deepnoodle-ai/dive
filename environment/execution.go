@@ -492,7 +492,7 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, ag
 
 func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
 	promptTemplate := step.Prompt()
-	if promptTemplate == "" {
+	if promptTemplate == "" && len(step.Content()) == 0 {
 		return nil, fmt.Errorf("prompt step %q has no prompt", step.Name())
 	}
 
@@ -501,7 +501,15 @@ func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, a
 		return nil, fmt.Errorf("failed to create prompt template: %w", err)
 	}
 
-	result, err := agent.CreateResponse(ctx, dive.WithInput(prompt))
+	var content []llm.Content
+	if stepContent := step.Content(); len(stepContent) > 0 {
+		content = append(content, stepContent...)
+	}
+	if promptTemplate != "" {
+		content = append(content, &llm.TextContent{Text: prompt})
+	}
+
+	result, err := agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(content...)))
 	if err != nil {
 		e.logger.Error("task execution failed", "step", step.Name(), "error", err)
 		return nil, err

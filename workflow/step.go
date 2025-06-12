@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm"
 )
 
 type Condition interface {
@@ -40,6 +41,7 @@ type Step struct {
 	next        []*Edge
 	seconds     float64
 	end         bool
+	content     []llm.Content
 }
 
 // StepOptions configures a new workflow step
@@ -56,6 +58,7 @@ type StepOptions struct {
 	Next        []*Edge
 	Seconds     float64
 	End         bool
+	Content     []llm.Content
 }
 
 func NewStep(opts StepOptions) *Step {
@@ -75,6 +78,7 @@ func NewStep(opts StepOptions) *Step {
 		next:        opts.Next,
 		seconds:     opts.Seconds,
 		end:         opts.End,
+		content:     opts.Content,
 	}
 }
 
@@ -151,7 +155,6 @@ func (s *Step) Compile(ctx context.Context) error {
 	return errors.New("not implemented")
 }
 
-// func (s *Step) Code(name string) (*compiler.Code, bool) {
-// 	code, ok := s.withCode[name]
-// 	return code, ok
-// }
+func (s *Step) Content() []llm.Content {
+	return s.content
+}

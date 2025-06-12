@@ -14,6 +14,7 @@ type BuildOptions struct {
 	DocumentsDir  string
 	DocumentsRepo dive.DocumentRepository
 	ThreadRepo    dive.ThreadRepository
+	BasePath      string
 }
 
 type BuildOption func(*BuildOptions)
@@ -51,5 +52,11 @@ func WithDocumentsRepo(repo dive.DocumentRepository) BuildOption {
 func WithThreadRepo(repo dive.ThreadRepository) BuildOption {
 	return func(opts *BuildOptions) {
 		opts.ThreadRepo = repo
+	}
+}
+
+func WithBasePath(basePath string) BuildOption {
+	return func(opts *BuildOptions) {
+		opts.BasePath = basePath
 	}
 }

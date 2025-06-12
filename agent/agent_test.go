@@ -207,7 +207,7 @@ func TestAgentCreateResponse(t *testing.T) {
 			llm.NewUserTextMessage("Here's a more complex message"),
 		}
 
-		resp, err := agent.CreateResponse(context.Background(), dive.WithMessages(messages))
+		resp, err := agent.CreateResponse(context.Background(), dive.WithMessages(messages...))
 		if err != nil {
 			t.Fatalf("CreateResponse with messages failed: %v", err)
 		}

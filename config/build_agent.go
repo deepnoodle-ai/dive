@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -8,15 +9,19 @@ import (
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
+	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 )
 
 func buildAgent(
+	ctx context.Context,
+	repo dive.DocumentRepository,
 	agentDef Agent,
 	config Config,
 	tools map[string]dive.Tool,
 	logger slogger.Logger,
 	confirmer dive.Confirmer,
+	basePath string,
 ) (dive.Agent, error) {
 	providerName := agentDef.Provider
 	if providerName == "" {
@@ -121,6 +126,16 @@ func buildAgent(
 		// Note: MCP servers are configured at the environment level, not agent level
 	}
 
+	// Build static context messages if provided
+	var contextContent []llm.Content
+	if len(agentDef.Context) > 0 {
+		var err error
+		contextContent, err = buildContextContent(ctx, repo, basePath, agentDef.Context)
+		if err != nil {
+			return nil, fmt.Errorf("error building agent context: %w", err)
+		}
+	}
+
 	return agent.New(agent.Options{
 		Name:                 agentDef.Name,
 		Goal:                 agentDef.Goal,
@@ -136,5 +151,6 @@ func buildAgent(
 		ModelSettings:        modelSettings,
 		Logger:               logger,
 		Confirmer:            confirmer,
+		Context:              contextContent,
 	})
 }

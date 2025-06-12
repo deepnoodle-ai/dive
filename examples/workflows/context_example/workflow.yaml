@@ -1,0 +1,26 @@
+Name: Example Workflow that Uses Files for Context
+Description: Demonstrates how to use files for context in agents and workflow steps
+Config:
+  LogLevel: debug
+
+Agents:
+  - Name: Assistant
+    Provider: anthropic
+    Model: claude-sonnet-4-20250514
+    Context:
+      - Path: ./reminders.txt
+
+Workflows:
+  - Name: Example
+    Steps:
+      - Name: Review our Reminders
+        Type: prompt
+        Prompt: Give me an overview of our reminders.
+        Content:
+          - Text: Respond in ALL CAPS.
+
+      - Name: Review an Image
+        Type: prompt
+        Content:
+          - Path: ../../../fixtures/go.png
+          - Text: What is in the image?

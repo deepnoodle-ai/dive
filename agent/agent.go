@@ -63,6 +63,7 @@ type Options struct {
 	ThreadRepository     dive.ThreadRepository
 	Confirmer            dive.Confirmer
 	SystemPromptTemplate string
+	Context              []llm.Content
 }
 
 // Agent is the standard implementation of the Agent interface.
@@ -86,6 +87,7 @@ type Agent struct {
 	threadRepository     dive.ThreadRepository
 	confirmer            dive.Confirmer
 	systemPromptTemplate *template.Template
+	context              []llm.Content
 }
 
 // New returns a new Agent configured with the given options.
@@ -135,6 +137,7 @@ func New(opts Options) (*Agent, error) {
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
 		confirmer:            opts.Confirmer,
+		context:              opts.Context,
 	}
 
 	tools := make([]dive.Tool, len(opts.Tools))
@@ -446,9 +449,11 @@ func ptr[T any](t T) *T {
 // It handles both WithMessages and WithInput options.
 func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
 	var messages []*llm.Message
+	if len(a.context) > 0 {
+		messages = append(messages, llm.NewUserMessage(a.context...))
+	}
 	if len(options.Messages) > 0 {
-		messages = make([]*llm.Message, len(options.Messages))
-		copy(messages, options.Messages)
+		messages = append(messages, options.Messages...)
 	}
 	return messages
 }
@@ -834,6 +839,10 @@ func (a *Agent) TeamOverview() string {
 		lines = append(lines, description)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (a *Agent) Context() []llm.Content {
+	return a.context
 }
 
 type generateResult struct {

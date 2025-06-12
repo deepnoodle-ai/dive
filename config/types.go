@@ -83,6 +83,14 @@ type Tool struct {
 	Parameters map[string]any `yaml:"Parameters,omitempty" json:"Parameters,omitempty"`
 }
 
+// Content carries or points to a piece of content that can be used as context.
+type Content struct {
+	Text     string `yaml:"Text,omitempty" json:"Text,omitempty"`
+	Path     string `yaml:"Path,omitempty" json:"Path,omitempty"`
+	URL      string `yaml:"URL,omitempty" json:"URL,omitempty"`
+	Document string `yaml:"Document,omitempty" json:"Document,omitempty"`
+}
+
 // Agent is a serializable representation of an Agent
 type Agent struct {
 	Name               string         `yaml:"Name,omitempty" json:"Name,omitempty"`
@@ -99,6 +107,7 @@ type Agent struct {
 	DateAwareness      *bool          `yaml:"DateAwareness,omitempty" json:"DateAwareness,omitempty"`
 	SystemPrompt       string         `yaml:"SystemPrompt,omitempty" json:"SystemPrompt,omitempty"`
 	ModelSettings      *ModelSettings `yaml:"ModelSettings,omitempty" json:"ModelSettings,omitempty"`
+	Context            []Content      `yaml:"Context,omitempty" json:"Context,omitempty"`
 }
 
 // ModelSettings is used to configure an Agent LLM
@@ -149,6 +158,7 @@ type Step struct {
 	Next       []NextStep     `yaml:"Next,omitempty" json:"Next,omitempty"`
 	Seconds    float64        `yaml:"Seconds,omitempty" json:"Seconds,omitempty"`
 	End        bool           `yaml:"End,omitempty" json:"End,omitempty"`
+	Content    []Content      `yaml:"Content,omitempty" json:"Content,omitempty"`
 }
 
 // EachBlock represents iteration configuration for a step
