@@ -1,13 +1,21 @@
 package config
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/workflow"
 )
 
-func buildWorkflow(workflowDef Workflow, agents []dive.Agent) (*workflow.Workflow, error) {
+func buildWorkflow(
+	ctx context.Context,
+	repo dive.DocumentRepository,
+	workflowDef Workflow,
+	agents []dive.Agent,
+	basePath string,
+) (*workflow.Workflow, error) {
 	if len(workflowDef.Steps) == 0 {
 		return nil, fmt.Errorf("no steps found")
 	}
@@ -62,6 +70,16 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent) (*workflow.Workflo
 			}
 		}
 
+		// Build context content for the step if any
+		var contextContent []llm.Content
+		if len(step.Content) > 0 {
+			var err error
+			contextContent, err = buildContextContent(ctx, repo, basePath, step.Content)
+			if err != nil {
+				return nil, fmt.Errorf("error building step context: %w", err)
+			}
+		}
+
 		workflowStep := workflow.NewStep(workflow.StepOptions{
 			Type:       stepType,
 			Name:       step.Name,
@@ -72,6 +90,7 @@ func buildWorkflow(workflowDef Workflow, agents []dive.Agent) (*workflow.Workflo
 			Action:     step.Action,
 			Parameters: step.Parameters,
 			Store:      step.Store,
+			Content:    contextContent,
 		})
 		steps = append(steps, workflowStep)
 	}

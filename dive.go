@@ -116,7 +116,7 @@ func WithMessage(message *llm.Message) Option {
 }
 
 // WithMessages specifies the messages to be used in the generation.
-func WithMessages(messages []*llm.Message) Option {
+func WithMessages(messages ...*llm.Message) Option {
 	return func(opts *Options) {
 		opts.Messages = messages
 	}

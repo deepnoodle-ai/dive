@@ -498,7 +498,7 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, ag
 
 func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
 	promptTemplate := step.Prompt()
-	if promptTemplate == "" {
+	if promptTemplate == "" && len(step.Content()) == 0 {
 		return nil, fmt.Errorf("prompt step %q has no prompt", step.Name())
 	}
 
@@ -507,7 +507,29 @@ func (e *Execution) handlePromptStep(ctx context.Context, step *workflow.Step, a
 		return nil, fmt.Errorf("failed to create prompt template: %w", err)
 	}
 
-	result, err := agent.CreateResponse(ctx, dive.WithInput(prompt))
+	var content []llm.Content
+	if stepContent := step.Content(); len(stepContent) > 0 {
+		for _, item := range stepContent {
+			if dynamicContent, ok := item.(DynamicContent); ok {
+				processedContent, err := dynamicContent.Content(ctx, map[string]any{
+					"workflow": e.workflow.Name(),
+					"step":     step.Name(),
+					"agent":    agent.Name(),
+				})
+				if err != nil {
+					return nil, fmt.Errorf("failed to process dynamic content: %w", err)
+				}
+				content = append(content, processedContent...)
+			} else {
+				content = append(content, item)
+			}
+		}
+	}
+	if promptTemplate != "" {
+		content = append(content, &llm.TextContent{Text: prompt})
+	}
+
+	result, err := agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(content...)))
 	if err != nil {
 		e.logger.Error("task execution failed", "step", step.Name(), "error", err)
 		return nil, err

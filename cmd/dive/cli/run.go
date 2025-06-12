@@ -44,6 +44,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	}
 
 	configDir := path
+	basePath := ""
 
 	// If a single file is provided, copy it to a temporary directory
 	// and use that as the config directory.
@@ -59,6 +60,10 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 			return err
 		}
 		configDir = tmpDir
+		// base path should be the original directory containing the file
+		basePath = filepath.Dir(path)
+	} else {
+		basePath = path
 	}
 
 	buildOpts := []config.BuildOption{}
@@ -66,7 +71,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 		logger := slogger.New(logLevel)
 		buildOpts = append(buildOpts, config.WithLogger(logger))
 	}
-	env, err := config.LoadDirectory(configDir, buildOpts...)
+	env, err := config.LoadDirectory(configDir, append(buildOpts, config.WithBasePath(basePath))...)
 	if err != nil {
 		return fmt.Errorf("error loading environment: %v", err)
 	}

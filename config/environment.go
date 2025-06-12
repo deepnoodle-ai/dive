@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/agent"
@@ -75,7 +76,8 @@ func (env *Environment) Write(w io.Writer) error {
 
 // Build creates a new Environment from the configuration
 func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	buildOpts := &BuildOptions{}
 	for _, opt := range opts {
@@ -159,36 +161,6 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		toolsMap[toolName] = tool
 	}
 
-	// Agents
-	agents := make([]dive.Agent, 0, len(env.Agents))
-	for _, agentDef := range env.Agents {
-		agent, err := buildAgent(agentDef, env.Config, toolsMap, logger, confirmer)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
-		}
-		agents = append(agents, agent)
-	}
-
-	// Workflows
-	var workflows []*workflow.Workflow
-	for _, workflowDef := range env.Workflows {
-		workflow, err := buildWorkflow(workflowDef, agents)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build workflow %s: %w", workflowDef.Name, err)
-		}
-		workflows = append(workflows, workflow)
-	}
-
-	// Triggers
-	var triggers []*environment.Trigger
-	for _, triggerDef := range env.Triggers {
-		trigger, err := buildTrigger(triggerDef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build trigger %s: %w", triggerDef.Name, err)
-		}
-		triggers = append(triggers, trigger)
-	}
-
 	// Documents
 	if buildOpts.DocumentsDir != "" && buildOpts.DocumentsRepo != nil {
 		return nil, fmt.Errorf("documents dir and repo cannot both be set")
@@ -215,10 +187,50 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 			}
 		}
 		for _, doc := range env.Documents {
-			if err := docRepo.RegisterDocument(context.Background(), doc.Name, doc.Path); err != nil {
+			if err := docRepo.RegisterDocument(ctx, doc.Name, doc.Path); err != nil {
 				return nil, fmt.Errorf("failed to register document %s: %w", doc.Name, err)
 			}
 		}
+	}
+
+	// This path will be used to resolve relative paths as needed
+	basePath := "."
+	if buildOpts.BasePath != "" {
+		basePath = buildOpts.BasePath
+	} else {
+		if wd, err := os.Getwd(); err == nil {
+			basePath = wd
+		}
+	}
+
+	// Agents
+	agents := make([]dive.Agent, 0, len(env.Agents))
+	for _, agentDef := range env.Agents {
+		agent, err := buildAgent(ctx, docRepo, agentDef, env.Config, toolsMap, logger, confirmer, basePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
+		}
+		agents = append(agents, agent)
+	}
+
+	// Workflows
+	var workflows []*workflow.Workflow
+	for _, workflowDef := range env.Workflows {
+		workflow, err := buildWorkflow(ctx, docRepo, workflowDef, agents, basePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build workflow %s: %w", workflowDef.Name, err)
+		}
+		workflows = append(workflows, workflow)
+	}
+
+	// Triggers
+	var triggers []*environment.Trigger
+	for _, triggerDef := range env.Triggers {
+		trigger, err := buildTrigger(triggerDef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build trigger %s: %w", triggerDef.Name, err)
+		}
+		triggers = append(triggers, trigger)
 	}
 
 	var threadRepo dive.ThreadRepository
