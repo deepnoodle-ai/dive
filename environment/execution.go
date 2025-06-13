@@ -2,8 +2,6 @@ package environment
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -183,7 +181,7 @@ func (e *EventBasedExecution) recordEvent(eventType ExecutionEventType, pathID, 
 	}
 
 	event := &ExecutionEvent{
-		ID:          generateEventID(),
+		ID:          NewEventID(),
 		ExecutionID: e.id,
 		PathID:      pathID,
 		Sequence:    atomic.AddInt64(&e.eventSequence, 1),
@@ -412,13 +410,6 @@ func (e *EventBasedExecution) saveSnapshot() error {
 	defer cancel()
 
 	return e.eventStore.SaveSnapshot(ctx, snapshot)
-}
-
-// generateEventID generates a unique event ID
-func generateEventID() string {
-	bytes := make([]byte, 8)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
 }
 
 // Override runPath to add event recording
