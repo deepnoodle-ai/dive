@@ -1,9 +1,7 @@
-package workflow
+package environment
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"time"
 )
@@ -247,7 +245,7 @@ func (m *ContinueAsNewManager) ExecuteContinuation(ctx context.Context, executio
 
 	// Record continue-as-new event in current execution
 	continueEvent := &ExecutionEvent{
-		ID:          generateEventID(),
+		ID:          NewEventID(),
 		ExecutionID: executionID,
 		Sequence:    snapshot.LastEventSeq + 1,
 		Timestamp:   time.Now(),
@@ -265,7 +263,7 @@ func (m *ContinueAsNewManager) ExecuteContinuation(ctx context.Context, executio
 	}
 
 	// Create new execution ID
-	newExecutionID := generateEventID() + "-continued"
+	newExecutionID := NewExecutionID()
 
 	// Prepare inputs for new execution
 	newInputs := snapshot.Inputs
@@ -295,7 +293,7 @@ func (m *ContinueAsNewManager) ExecuteContinuation(ctx context.Context, executio
 
 	// Record initial event for new execution with continuation info
 	startEvent := &ExecutionEvent{
-		ID:          generateEventID(),
+		ID:          NewEventID(),
 		ExecutionID: newExecutionID,
 		Sequence:    1,
 		Timestamp:   time.Now(),
@@ -421,11 +419,4 @@ func (o *ContinueAsNewOptions) Validate() error {
 		return fmt.Errorf("continuation delay cannot be negative")
 	}
 	return nil
-}
-
-// generateEventID generates a unique event ID for continue-as-new operations
-func generateEventID() string {
-	bytes := make([]byte, 8)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
 }

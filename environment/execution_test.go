@@ -35,7 +35,7 @@ func TestNewExecution(t *testing.T) {
 	execution, err := NewEventBasedExecution(env, ExecutionOptions{
 		WorkflowName:   wf.Name(),
 		Inputs:         map[string]interface{}{},
-		EventStore:     workflow.NewNullEventStore(),
+		EventStore:     NewNullEventStore(),
 		EventBatchSize: 10,
 	})
 	require.NoError(t, err)
@@ -45,8 +45,14 @@ func TestNewExecution(t *testing.T) {
 	require.Equal(t, env, execution.Environment())
 	require.Equal(t, StatusPending, execution.Status())
 
+	var runErr error
+	go func() {
+		runErr = execution.Run(context.Background())
+	}()
+
 	require.NoError(t, execution.Wait())
 	require.Equal(t, StatusCompleted, execution.Status())
+	require.NoError(t, runErr)
 }
 
 // func TestExecutionBasicFlow(t *testing.T) {

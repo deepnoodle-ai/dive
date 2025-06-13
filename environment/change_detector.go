@@ -1,12 +1,16 @@
-package workflow
+package environment
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/diveagents/dive/workflow"
+)
 
 // ChangeDetector analyzes workflow and input changes for replay compatibility
 type ChangeDetector interface {
-	DetectWorkflowChanges(events []*ExecutionEvent, currentWorkflow *Workflow) (*WorkflowCompatibility, error)
+	DetectWorkflowChanges(events []*ExecutionEvent, currentWorkflow *workflow.Workflow) (*WorkflowCompatibility, error)
 	DetectInputChanges(oldInputs, newInputs map[string]interface{}) ([]string, error)
-	FindAffectedSteps(changedInputs []string, workflow *Workflow) ([]string, error)
+	FindAffectedSteps(changedInputs []string, workflow *workflow.Workflow) ([]string, error)
 }
 
 // BasicChangeDetector provides a simple implementation of ChangeDetector
@@ -20,7 +24,7 @@ func NewBasicChangeDetector(hasher WorkflowHasher) *BasicChangeDetector {
 }
 
 // DetectWorkflowChanges analyzes event history to detect workflow changes
-func (d *BasicChangeDetector) DetectWorkflowChanges(events []*ExecutionEvent, currentWorkflow *Workflow) (*WorkflowCompatibility, error) {
+func (d *BasicChangeDetector) DetectWorkflowChanges(events []*ExecutionEvent, currentWorkflow *workflow.Workflow) (*WorkflowCompatibility, error) {
 	// Find the workflow hash from execution start event
 	var originalHash string
 	for _, event := range events {
@@ -92,7 +96,7 @@ func (d *BasicChangeDetector) DetectInputChanges(oldInputs, newInputs map[string
 }
 
 // FindAffectedSteps determines which steps might be affected by input changes
-func (d *BasicChangeDetector) FindAffectedSteps(changedInputs []string, workflow *Workflow) ([]string, error) {
+func (d *BasicChangeDetector) FindAffectedSteps(changedInputs []string, workflow *workflow.Workflow) ([]string, error) {
 	// Conservative approach - assume all steps might be affected by any input change
 	// In a more sophisticated implementation, this would analyze step dependencies
 	if len(changedInputs) == 0 {

@@ -12,16 +12,15 @@ import (
 
 // ExecutionOrchestrator orchestrates execution lifecycle with persistence
 type ExecutionOrchestrator struct {
-	eventStore  workflow.ExecutionEventStore
-	replayer    workflow.ExecutionReplayer
+	eventStore  ExecutionEventStore
+	replayer    ExecutionReplayer
 	environment *Environment
 	logger      slogger.Logger
 }
 
 // NewExecutionOrchestrator creates a new execution orchestrator
-func NewExecutionOrchestrator(eventStore workflow.ExecutionEventStore, env *Environment) *ExecutionOrchestrator {
-	replayer := workflow.NewBasicExecutionReplayer(env.logger)
-
+func NewExecutionOrchestrator(eventStore ExecutionEventStore, env *Environment) *ExecutionOrchestrator {
+	replayer := NewBasicExecutionReplayer(env.logger)
 	return &ExecutionOrchestrator{
 		eventStore:  eventStore,
 		replayer:    replayer,
@@ -44,7 +43,7 @@ func (eo *ExecutionOrchestrator) CreateExecution(ctx context.Context, opts Execu
 }
 
 // RetryExecution retries an existing execution using the specified strategy
-func (eo *ExecutionOrchestrator) RetryExecution(ctx context.Context, executionID string, opts workflow.RetryOptions) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) RetryExecution(ctx context.Context, executionID string, opts RetryOptions) (*EventBasedExecution, error) {
 	snapshot, err := eo.eventStore.GetSnapshot(ctx, executionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load execution snapshot: %w", err)
@@ -54,7 +53,7 @@ func (eo *ExecutionOrchestrator) RetryExecution(ctx context.Context, executionID
 	events, err := eo.eventStore.GetEventHistory(ctx, executionID)
 	if err != nil {
 		eo.logger.Warn("failed to load event history, using snapshot-only retry", "error", err)
-		return eo.retryFromStart(ctx, snapshot, opts.NewInputs)
+		return eo.retryFromStart(ctx, snapshot)
 	}
 
 	// Get workflow definition
@@ -64,13 +63,11 @@ func (eo *ExecutionOrchestrator) RetryExecution(ctx context.Context, executionID
 	}
 
 	switch opts.Strategy {
-	case workflow.RetryFromStart:
-		return eo.retryFromStart(ctx, snapshot, opts.NewInputs)
-	case workflow.RetryFromFailure:
+	case RetryFromStart:
+		return eo.retryFromStart(ctx, snapshot)
+	case RetryFromFailure:
 		return eo.retryFromFailure(ctx, snapshot, events, wf)
-	case workflow.RetryWithNewInputs:
-		return eo.retryWithNewInputs(ctx, snapshot, events, wf, opts.NewInputs)
-	case workflow.RetrySkipFailed:
+	case RetrySkipFailed:
 		return eo.retrySkipFailed(ctx, snapshot, events, wf)
 	default:
 		return nil, fmt.Errorf("unsupported retry strategy: %s", opts.Strategy)
@@ -83,6 +80,7 @@ func (eo *ExecutionOrchestrator) RecoverExecution(ctx context.Context, execution
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %w", err)
 	}
+
 	// Only recover executions that were running when interrupted
 	if snapshot.Status != string(StatusRunning) {
 		return nil, fmt.Errorf("execution %s is not in recoverable state (status: %s)", executionID, snapshot.Status)
@@ -92,6 +90,7 @@ func (eo *ExecutionOrchestrator) RecoverExecution(ctx context.Context, execution
 		eo.logger.Warn("failed to load event history, attempting snapshot-only recovery", "error", err)
 		return eo.recoverFromSnapshotOnly(ctx, snapshot)
 	}
+
 	// Validate event history compatibility
 	wf, err := eo.getWorkflow(snapshot.WorkflowName)
 	if err != nil {
@@ -101,13 +100,14 @@ func (eo *ExecutionOrchestrator) RecoverExecution(ctx context.Context, execution
 		eo.logger.Warn("event history incompatible with current workflow, attempting degraded recovery", "error", err)
 		return eo.recoverFromSnapshotOnly(ctx, snapshot)
 	}
+
 	// Perform full replay
 	return eo.replayFromEvents(ctx, snapshot, events, wf)
 }
 
 // ListRecoverableExecutions returns executions that can be recovered
-func (eo *ExecutionOrchestrator) ListRecoverableExecutions(ctx context.Context) ([]*workflow.ExecutionSnapshot, error) {
-	filter := workflow.ExecutionFilter{
+func (eo *ExecutionOrchestrator) ListRecoverableExecutions(ctx context.Context) ([]*ExecutionSnapshot, error) {
+	filter := ExecutionFilter{
 		Status: string(StatusRunning),
 		Limit:  100, // Reasonable limit for recoverable executions
 	}
@@ -120,16 +120,15 @@ func (eo *ExecutionOrchestrator) ListRecoverableExecutions(ctx context.Context) 
 }
 
 // retryFromStart creates a new execution with the same workflow and inputs
-func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *workflow.ExecutionSnapshot, newInputs map[string]interface{}) (*EventBasedExecution, error) {
-	inputs := snapshot.Inputs
-	if newInputs != nil {
-		inputs = newInputs
-	}
+func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *ExecutionSnapshot) (*EventBasedExecution, error) {
 	execution, err := eo.CreateExecution(ctx, ExecutionOptions{
-		WorkflowName: snapshot.WorkflowName,
-		Inputs:       inputs,
-		Outputs:      snapshot.Outputs,
-		Logger:       eo.logger,
+		WorkflowName:   snapshot.WorkflowName,
+		Inputs:         snapshot.Inputs,
+		Outputs:        snapshot.Outputs,
+		Logger:         eo.logger,
+		Formatter:      eo.environment.formatter,
+		EventStore:     eo.eventStore,
+		EventBatchSize: 10,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create retry execution: %w", err)
@@ -137,12 +136,11 @@ func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *w
 	eo.logger.Info("created retry from start",
 		"original_execution", snapshot.ID,
 		"new_execution", execution.ID())
-
 	return execution, nil
 }
 
 // retryFromFailure implements intelligent retry from the point of failure
-func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot *workflow.ExecutionSnapshot, events []*workflow.ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
 	eo.logger.Info("retrying from failure point",
 		"execution_id", snapshot.ID,
 		"workflow", snapshot.WorkflowName,
@@ -152,9 +150,8 @@ func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot 
 	failureInfo, err := eo.findFailurePoint(events)
 	if err != nil {
 		eo.logger.Warn("could not determine failure point, falling back to retry from start", "error", err)
-		return eo.retryFromStart(ctx, snapshot, nil)
+		return eo.retryFromStart(ctx, snapshot)
 	}
-
 	eo.logger.Info("found failure point",
 		"failed_step", failureInfo.FailedStep,
 		"failed_path", failureInfo.FailedPath,
@@ -163,7 +160,7 @@ func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot 
 	// Validate that we can resume from this point
 	if err := eo.validateResumePoint(failureInfo, wf); err != nil {
 		eo.logger.Warn("cannot resume from failure point, falling back to retry from start", "error", err)
-		return eo.retryFromStart(ctx, snapshot, nil)
+		return eo.retryFromStart(ctx, snapshot)
 	}
 
 	// Replay events up to the failure point to reconstruct state
@@ -192,59 +189,8 @@ func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot 
 	return newExecution, nil
 }
 
-// retryWithNewInputs implements retry with new inputs
-func (eo *ExecutionOrchestrator) retryWithNewInputs(ctx context.Context, snapshot *workflow.ExecutionSnapshot, events []*workflow.ExecutionEvent, wf *workflow.Workflow, newInputs map[string]interface{}) (*EventBasedExecution, error) {
-	eo.logger.Info("retrying with new inputs", "execution_id", snapshot.ID)
-
-	if len(newInputs) == 0 {
-		return nil, fmt.Errorf("new inputs are required for RetryWithNewInputs strategy")
-	}
-
-	// Detect which steps might be affected by input changes
-	affectedSteps, err := eo.detectInputAffectedSteps(events, newInputs, wf)
-	if err != nil {
-		eo.logger.Warn("could not detect affected steps, performing full retry", "error", err)
-		return eo.retryFromStart(ctx, snapshot, newInputs)
-	}
-
-	eo.logger.Info("detected input-affected steps", "affected_steps", affectedSteps)
-
-	// Find the earliest affected step to determine replay point
-	replayFromSequence, err := eo.findEarliestAffectedStep(events, affectedSteps)
-	if err != nil {
-		eo.logger.Warn("could not find replay point, performing full retry", "error", err)
-		return eo.retryFromStart(ctx, snapshot, newInputs)
-	}
-
-	// Replay events up to the replay point
-	preReplayEvents := eo.getEventsBeforeSequence(events, replayFromSequence)
-	replayResult, err := eo.replayer.ReplayExecution(ctx, preReplayEvents, wf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to replay execution: %w", err)
-	}
-
-	// Update inputs in replay result
-	replayResult.ScriptGlobals["inputs"] = newInputs
-
-	// Create new execution with updated inputs
-	newSnapshot := *snapshot
-	newSnapshot.Inputs = newInputs
-	newSnapshot.InputsHash = eo.hashInputs(newInputs)
-
-	newExecution, err := eo.createExecutionFromReplay(ctx, &newSnapshot, replayResult, wf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create execution from replay: %w", err)
-	}
-
-	eo.logger.Info("created execution for retry with new inputs",
-		"new_execution_id", newExecution.ID(),
-		"replay_from_sequence", replayFromSequence)
-
-	return newExecution, nil
-}
-
 // retrySkipFailed implements retry that skips failed steps
-func (eo *ExecutionOrchestrator) retrySkipFailed(ctx context.Context, snapshot *workflow.ExecutionSnapshot, events []*workflow.ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) retrySkipFailed(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
 	eo.logger.Info("retrying with skip failed steps", "execution_id", snapshot.ID)
 
 	// Find all failed steps
@@ -284,13 +230,13 @@ type FailureInfo struct {
 }
 
 // findFailurePoint analyzes events to find the failure point
-func (eo *ExecutionOrchestrator) findFailurePoint(events []*workflow.ExecutionEvent) (*FailureInfo, error) {
+func (eo *ExecutionOrchestrator) findFailurePoint(events []*ExecutionEvent) (*FailureInfo, error) {
 	// Look for the last step failure or execution failure
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
 
 		switch event.EventType {
-		case workflow.EventStepFailed:
+		case EventStepFailed:
 			return &FailureInfo{
 				FailedStep:      event.StepName,
 				FailedPath:      event.PathID,
@@ -298,10 +244,10 @@ func (eo *ExecutionOrchestrator) findFailurePoint(events []*workflow.ExecutionEv
 				ErrorMessage:    getStringFromData(event.Data, "error"),
 				CanResume:       true,
 			}, nil
-		case workflow.EventExecutionFailed:
+		case EventExecutionFailed:
 			// Find the step that caused execution failure
 			for j := i - 1; j >= 0; j-- {
-				if events[j].EventType == workflow.EventStepFailed {
+				if events[j].EventType == EventStepFailed {
 					return &FailureInfo{
 						FailedStep:      events[j].StepName,
 						FailedPath:      events[j].PathID,
@@ -331,8 +277,8 @@ func (eo *ExecutionOrchestrator) validateResumePoint(failureInfo *FailureInfo, w
 }
 
 // getEventsBeforeFailure returns events that occurred before the failure
-func (eo *ExecutionOrchestrator) getEventsBeforeFailure(events []*workflow.ExecutionEvent, failureSequence int64) []*workflow.ExecutionEvent {
-	var preFailureEvents []*workflow.ExecutionEvent
+func (eo *ExecutionOrchestrator) getEventsBeforeFailure(events []*ExecutionEvent, failureSequence int64) []*ExecutionEvent {
+	var preFailureEvents []*ExecutionEvent
 
 	for _, event := range events {
 		if event.Sequence < failureSequence {
@@ -344,8 +290,8 @@ func (eo *ExecutionOrchestrator) getEventsBeforeFailure(events []*workflow.Execu
 }
 
 // getEventsBeforeSequence returns events that occurred before the given sequence
-func (eo *ExecutionOrchestrator) getEventsBeforeSequence(events []*workflow.ExecutionEvent, sequence int64) []*workflow.ExecutionEvent {
-	var preEvents []*workflow.ExecutionEvent
+func (eo *ExecutionOrchestrator) getEventsBeforeSequence(events []*ExecutionEvent, sequence int64) []*ExecutionEvent {
+	var preEvents []*ExecutionEvent
 
 	for _, event := range events {
 		if event.Sequence < sequence {
@@ -357,12 +303,13 @@ func (eo *ExecutionOrchestrator) getEventsBeforeSequence(events []*workflow.Exec
 }
 
 // createExecutionFromReplay creates a new execution from replay results
-func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, snapshot *workflow.ExecutionSnapshot, replayResult *workflow.ReplayResult, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, snapshot *ExecutionSnapshot, replayResult *ReplayResult, wf *workflow.Workflow) (*EventBasedExecution, error) {
 	// Create new execution with fresh ID
 	newExecution, err := NewEventBasedExecution(eo.environment, ExecutionOptions{
 		WorkflowName:   snapshot.WorkflowName,
 		Inputs:         snapshot.Inputs,
 		Logger:         eo.logger,
+		Formatter:      eo.environment.formatter,
 		EventStore:     eo.eventStore,
 		EventBatchSize: 10,
 	})
@@ -387,9 +334,9 @@ func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, 
 }
 
 // setupResumeFromFailure prepares execution to resume from a failed step
-func (eo *ExecutionOrchestrator) setupResumeFromFailure(execution *EventBasedExecution, failureInfo *FailureInfo, replayResult *workflow.ReplayResult) error {
+func (eo *ExecutionOrchestrator) setupResumeFromFailure(execution *EventBasedExecution, failureInfo *FailureInfo, replayResult *ReplayResult) error {
 	// Find the active path that needs to resume
-	var resumePath *workflow.ReplayPathState
+	var resumePath *ReplayPathState
 	for _, path := range replayResult.ActivePaths {
 		if path.ID == failureInfo.FailedPath {
 			resumePath = path
@@ -417,7 +364,7 @@ func (eo *ExecutionOrchestrator) setupResumeFromFailure(execution *EventBasedExe
 }
 
 // detectInputAffectedSteps determines which steps might be affected by input changes
-func (eo *ExecutionOrchestrator) detectInputAffectedSteps(events []*workflow.ExecutionEvent, newInputs map[string]interface{}, wf *workflow.Workflow) ([]string, error) {
+func (eo *ExecutionOrchestrator) detectInputAffectedSteps(events []*ExecutionEvent, newInputs map[string]interface{}, wf *workflow.Workflow) ([]string, error) {
 	// For now, conservatively assume all steps might be affected
 	// Future enhancement: analyze step dependencies and input usage
 	var allSteps []string
@@ -428,14 +375,14 @@ func (eo *ExecutionOrchestrator) detectInputAffectedSteps(events []*workflow.Exe
 }
 
 // findEarliestAffectedStep finds the earliest step that might be affected by changes
-func (eo *ExecutionOrchestrator) findEarliestAffectedStep(events []*workflow.ExecutionEvent, affectedSteps []string) (int64, error) {
+func (eo *ExecutionOrchestrator) findEarliestAffectedStep(events []*ExecutionEvent, affectedSteps []string) (int64, error) {
 	affectedStepMap := make(map[string]bool)
 	for _, step := range affectedSteps {
 		affectedStepMap[step] = true
 	}
 
 	for _, event := range events {
-		if event.EventType == workflow.EventStepStarted {
+		if event.EventType == EventStepStarted {
 			if affectedStepMap[event.StepName] {
 				return event.Sequence, nil
 			}
@@ -446,11 +393,11 @@ func (eo *ExecutionOrchestrator) findEarliestAffectedStep(events []*workflow.Exe
 }
 
 // findAllFailedSteps returns all steps that failed during execution
-func (eo *ExecutionOrchestrator) findAllFailedSteps(events []*workflow.ExecutionEvent) []string {
+func (eo *ExecutionOrchestrator) findAllFailedSteps(events []*ExecutionEvent) []string {
 	var failedSteps []string
 
 	for _, event := range events {
-		if event.EventType == workflow.EventStepFailed {
+		if event.EventType == EventStepFailed {
 			failedSteps = append(failedSteps, event.StepName)
 		}
 	}
@@ -459,24 +406,24 @@ func (eo *ExecutionOrchestrator) findAllFailedSteps(events []*workflow.Execution
 }
 
 // replayWithSkippedSteps replays events while treating specified steps as skipped
-func (eo *ExecutionOrchestrator) replayWithSkippedSteps(ctx context.Context, events []*workflow.ExecutionEvent, wf *workflow.Workflow, skippedSteps []string) (*workflow.ReplayResult, error) {
+func (eo *ExecutionOrchestrator) replayWithSkippedSteps(ctx context.Context, events []*ExecutionEvent, wf *workflow.Workflow, skippedSteps []string) (*ReplayResult, error) {
 	// Create a modified event list that converts failed steps to completed steps
 	skippedStepMap := make(map[string]bool)
 	for _, step := range skippedSteps {
 		skippedStepMap[step] = true
 	}
 
-	var modifiedEvents []*workflow.ExecutionEvent
+	var modifiedEvents []*ExecutionEvent
 	for _, event := range events {
-		if event.EventType == workflow.EventStepFailed && skippedStepMap[event.StepName] {
+		if event.EventType == EventStepFailed && skippedStepMap[event.StepName] {
 			// Convert failed step to completed step with placeholder output
-			completedEvent := &workflow.ExecutionEvent{
+			completedEvent := &ExecutionEvent{
 				ID:          event.ID + "_skipped",
 				ExecutionID: event.ExecutionID,
 				PathID:      event.PathID,
 				Sequence:    event.Sequence,
 				Timestamp:   event.Timestamp,
-				EventType:   workflow.EventStepCompleted,
+				EventType:   EventStepCompleted,
 				StepName:    event.StepName,
 				Data: map[string]interface{}{
 					"output":         "SKIPPED: " + getStringFromData(event.Data, "error"),
@@ -502,18 +449,8 @@ func (eo *ExecutionOrchestrator) hashInputs(inputs map[string]interface{}) strin
 	return fmt.Sprintf("%x", hash[:8]) // Use first 8 bytes for brevity
 }
 
-// Helper function for extracting string data from event data maps
-func getStringFromData(data map[string]interface{}, key string) string {
-	if value, ok := data[key]; ok {
-		if str, ok := value.(string); ok {
-			return str
-		}
-	}
-	return ""
-}
-
 // replayFromEvents performs full replay from event history
-func (eo *ExecutionOrchestrator) replayFromEvents(ctx context.Context, snapshot *workflow.ExecutionSnapshot, events []*workflow.ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) replayFromEvents(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
 	eo.logger.Info("performing full replay", "execution_id", snapshot.ID, "event_count", len(events))
 
 	// Replay events to reconstruct state
@@ -585,7 +522,7 @@ func (eo *ExecutionOrchestrator) computeInputsHash(inputs map[string]interface{}
 }
 
 // recoverFromSnapshotOnly recovers using only snapshot data (degraded mode)
-func (eo *ExecutionOrchestrator) recoverFromSnapshotOnly(ctx context.Context, snapshot *workflow.ExecutionSnapshot) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) recoverFromSnapshotOnly(ctx context.Context, snapshot *ExecutionSnapshot) (*EventBasedExecution, error) {
 	eo.logger.Warn("recovering from snapshot only (degraded mode)", "execution_id", snapshot.ID)
 
 	// Load execution from snapshot

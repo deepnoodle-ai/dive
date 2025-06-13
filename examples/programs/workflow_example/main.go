@@ -119,7 +119,7 @@ func main() {
 
 	execution, err := environment.NewEventBasedExecution(env, environment.ExecutionOptions{
 		WorkflowName:   w.Name(),
-		EventStore:     workflow.NewNullEventStore(),
+		EventStore:     environment.NewNullEventStore(),
 		EventBatchSize: 10,
 	})
 	if err != nil {

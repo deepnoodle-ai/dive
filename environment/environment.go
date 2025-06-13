@@ -28,6 +28,7 @@ type Environment struct {
 	confirmer       dive.Confirmer
 	mcpManager      *mcp.Manager
 	mcpServers      []*mcp.ServerConfig
+	formatter       WorkflowFormatter
 }
 
 // Options are used to configure an Environment.
@@ -48,6 +49,7 @@ type Options struct {
 	Confirmer          dive.Confirmer
 	MCPServers         []*mcp.ServerConfig
 	MCPManager         *mcp.Manager
+	Formatter          WorkflowFormatter
 }
 
 // New returns a new Environment configured with the given options.
@@ -117,6 +119,7 @@ func New(opts Options) (*Environment, error) {
 		actions:         actions,
 		mcpManager:      opts.MCPManager,
 		mcpServers:      opts.MCPServers,
+		formatter:       opts.Formatter,
 	}
 	for _, trigger := range env.triggers {
 		trigger.SetEnvironment(env)
@@ -144,6 +147,10 @@ func (e *Environment) Name() string {
 
 func (e *Environment) Description() string {
 	return e.description
+}
+
+func (e *Environment) Formatter() WorkflowFormatter {
+	return e.formatter
 }
 
 func (e *Environment) DocumentRepository() dive.DocumentRepository {

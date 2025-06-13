@@ -1,8 +1,10 @@
-package workflow
+package environment
 
 import (
 	"context"
 	"fmt"
+
+	"github.com/diveagents/dive/workflow"
 )
 
 // ReplayResult contains the result of replaying an execution history
@@ -22,8 +24,8 @@ type ReplayPathState struct {
 
 // ExecutionReplayer handles event history replay for state reconstruction
 type ExecutionReplayer interface {
-	ReplayExecution(ctx context.Context, events []*ExecutionEvent, workflow *Workflow) (*ReplayResult, error)
-	ValidateEventHistory(ctx context.Context, events []*ExecutionEvent, workflow *Workflow) error
+	ReplayExecution(ctx context.Context, events []*ExecutionEvent, workflow *workflow.Workflow) (*ReplayResult, error)
+	ValidateEventHistory(ctx context.Context, events []*ExecutionEvent, workflow *workflow.Workflow) error
 }
 
 // BasicExecutionReplayer provides a basic implementation of ExecutionReplayer
@@ -45,7 +47,7 @@ func NewBasicExecutionReplayer(logger interface {
 }
 
 // ReplayExecution replays an event history to reconstruct execution state
-func (r *BasicExecutionReplayer) ReplayExecution(ctx context.Context, events []*ExecutionEvent, workflow *Workflow) (*ReplayResult, error) {
+func (r *BasicExecutionReplayer) ReplayExecution(ctx context.Context, events []*ExecutionEvent, workflow *workflow.Workflow) (*ReplayResult, error) {
 	result := &ReplayResult{
 		CompletedSteps: make(map[string]string),
 		ScriptGlobals:  make(map[string]any),
@@ -281,7 +283,7 @@ func (r *BasicExecutionReplayer) createBranchedPath(pathMap map[string]interface
 }
 
 // validatePathState ensures a path state is consistent with workflow definition
-func (r *BasicExecutionReplayer) validatePathState(pathState *ReplayPathState, workflow *Workflow) error {
+func (r *BasicExecutionReplayer) validatePathState(pathState *ReplayPathState, workflow *workflow.Workflow) error {
 	if pathState.CurrentStepName == "" {
 		return nil // Empty step name is valid for completed paths
 	}
@@ -296,7 +298,7 @@ func (r *BasicExecutionReplayer) validatePathState(pathState *ReplayPathState, w
 }
 
 // reconstructScriptGlobals rebuilds script globals from event history
-func (r *BasicExecutionReplayer) reconstructScriptGlobals(result *ReplayResult, events []*ExecutionEvent, workflow *Workflow) error {
+func (r *BasicExecutionReplayer) reconstructScriptGlobals(result *ReplayResult, events []*ExecutionEvent, workflow *workflow.Workflow) error {
 	// Initialize with workflow inputs if available
 	for _, event := range events {
 		if event.EventType == EventExecutionStarted {
@@ -332,10 +334,10 @@ func (r *BasicExecutionReplayer) reconstructScriptGlobals(result *ReplayResult, 
 }
 
 // ValidateEventHistory validates an event history for compatibility with a workflow
-func (r *BasicExecutionReplayer) ValidateEventHistory(ctx context.Context, events []*ExecutionEvent, workflow *Workflow) error {
+func (r *BasicExecutionReplayer) ValidateEventHistory(ctx context.Context, events []*ExecutionEvent, w *workflow.Workflow) error {
 	// Build a map of steps in the current workflow
-	workflowSteps := make(map[string]*Step)
-	for _, step := range workflow.Steps() {
+	workflowSteps := make(map[string]*workflow.Step)
+	for _, step := range w.Steps() {
 		workflowSteps[step.Name()] = step
 	}
 

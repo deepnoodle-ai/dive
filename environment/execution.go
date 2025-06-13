@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -23,17 +22,7 @@ import (
 	"github.com/risor-io/risor/modules/all"
 	"github.com/risor-io/risor/object"
 	"github.com/risor-io/risor/parser"
-	"go.jetify.com/typeid"
 )
-
-// NewExecutionID creates a new execution id
-func NewExecutionID() string {
-	value, err := typeid.WithPrefix("exec")
-	if err != nil {
-		log.Fatalf("error creating new id: %v", err)
-	}
-	return value.String()
-}
 
 // ExecutionOptions are the options for creating a new execution.
 type ExecutionOptions struct {
@@ -42,7 +31,7 @@ type ExecutionOptions struct {
 	Outputs        map[string]interface{}
 	Logger         slogger.Logger
 	Formatter      WorkflowFormatter
-	EventStore     workflow.ExecutionEventStore
+	EventStore     ExecutionEventStore
 	EventBatchSize int
 }
 
@@ -63,8 +52,8 @@ type EventBasedExecution struct {
 	formatter     WorkflowFormatter
 	mutex         sync.RWMutex
 	doneWg        sync.WaitGroup
-	eventStore    workflow.ExecutionEventStore
-	eventBuffer   []*workflow.ExecutionEvent
+	eventStore    ExecutionEventStore
+	eventBuffer   []*ExecutionEvent
 	eventSequence int64
 	replayMode    bool
 	batchSize     int
@@ -140,7 +129,7 @@ func NewEventBasedExecution(env *Environment, opts ExecutionOptions) (*EventBase
 		formatter:     opts.Formatter,
 		scriptGlobals: scriptGlobals,
 		eventStore:    opts.EventStore,
-		eventBuffer:   make([]*workflow.ExecutionEvent, 0, batchSize),
+		eventBuffer:   make([]*ExecutionEvent, 0, batchSize),
 		eventSequence: 0,
 		replayMode:    false,
 		batchSize:     batchSize,
@@ -188,12 +177,12 @@ func (e *EventBasedExecution) Wait() error {
 }
 
 // recordEvent records an execution event
-func (e *EventBasedExecution) recordEvent(eventType workflow.ExecutionEventType, pathID, stepName string, data map[string]interface{}) {
+func (e *EventBasedExecution) recordEvent(eventType ExecutionEventType, pathID, stepName string, data map[string]interface{}) {
 	if e.replayMode {
 		return // Don't record events during replay
 	}
 
-	event := &workflow.ExecutionEvent{
+	event := &ExecutionEvent{
 		ID:          generateEventID(),
 		ExecutionID: e.id,
 		PathID:      pathID,
@@ -223,7 +212,7 @@ func (e *EventBasedExecution) flushEvents() error {
 	}
 
 	// We'll work with a copy of the buffer and clear the primary one
-	events := make([]*workflow.ExecutionEvent, len(e.eventBuffer))
+	events := make([]*ExecutionEvent, len(e.eventBuffer))
 	copy(events, e.eventBuffer)
 	e.eventBuffer = e.eventBuffer[:0]
 	e.bufferMutex.Unlock()
@@ -254,7 +243,7 @@ func (e *EventBasedExecution) Run(ctx context.Context) error {
 	defer e.doneWg.Done()
 
 	// Record execution started event
-	e.recordEvent(workflow.EventExecutionStarted, "", "", map[string]interface{}{
+	e.recordEvent(EventExecutionStarted, "", "", map[string]interface{}{
 		"workflow_name": e.workflow.Name(),
 		"inputs":        e.inputs,
 	})
@@ -271,14 +260,14 @@ func (e *EventBasedExecution) Run(ctx context.Context) error {
 		e.logger.Error("workflow execution failed", "error", err)
 		e.status = StatusFailed
 		e.err = err
-		e.recordEvent(workflow.EventExecutionFailed, "", "", map[string]interface{}{
+		e.recordEvent(EventExecutionFailed, "", "", map[string]interface{}{
 			"error": err.Error(),
 		})
 	} else {
 		e.logger.Info("workflow execution completed", "execution_id", e.id)
 		e.status = StatusCompleted
 		e.err = nil
-		e.recordEvent(workflow.EventExecutionCompleted, "", "", map[string]interface{}{
+		e.recordEvent(EventExecutionCompleted, "", "", map[string]interface{}{
 			"outputs": e.outputs,
 		})
 	}
@@ -402,7 +391,7 @@ func (e *EventBasedExecution) addPath(path *executionPath) *PathState {
 
 // saveSnapshot saves the current execution state as a snapshot
 func (e *EventBasedExecution) saveSnapshot() error {
-	snapshot := &workflow.ExecutionSnapshot{
+	snapshot := &ExecutionSnapshot{
 		ID:           e.id,
 		WorkflowName: e.workflow.Name(),
 		Status:       string(e.status), // Use direct field access to avoid mutex lock
@@ -435,7 +424,7 @@ func generateEventID() string {
 // Override runPath to add event recording
 func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, updates chan<- pathUpdate) {
 	// Record path started event
-	e.recordEvent(workflow.EventPathStarted, path.id, "", map[string]interface{}{
+	e.recordEvent(EventPathStarted, path.id, "", map[string]interface{}{
 		"current_step": path.currentStep.Name(),
 	})
 
@@ -474,14 +463,14 @@ func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, 
 		result, err := e.handleStepExecution(ctx, path, agent)
 		if err != nil {
 			// Record step failed event
-			e.recordEvent(workflow.EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
+			e.recordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
 				"error": err.Error(),
 			})
 
 			e.updatePathError(path.id, err)
 
 			// Record path failed event
-			e.recordEvent(workflow.EventPathFailed, path.id, "", map[string]interface{}{
+			e.recordEvent(EventPathFailed, path.id, "", map[string]interface{}{
 				"error": err.Error(),
 			})
 
@@ -492,11 +481,11 @@ func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, 
 		// Handle path branching
 		newPaths, err := e.handlePathBranching(ctx, currentStep, path.id, getNextPathID)
 		if err != nil {
-			e.recordEvent(workflow.EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
+			e.recordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
 				"error": err.Error(),
 			})
 			e.updatePathError(path.id, err)
-			e.recordEvent(workflow.EventPathFailed, path.id, "", map[string]interface{}{
+			e.recordEvent(EventPathFailed, path.id, "", map[string]interface{}{
 				"error": err.Error(),
 			})
 			updates <- pathUpdate{pathID: path.id, err: err}
@@ -513,7 +502,7 @@ func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, 
 				}
 			}
 
-			e.recordEvent(workflow.EventPathBranched, path.id, currentStep.Name(), map[string]interface{}{
+			e.recordEvent(EventPathBranched, path.id, currentStep.Name(), map[string]interface{}{
 				"new_paths": pathData,
 			})
 		}
@@ -541,7 +530,7 @@ func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, 
 			})
 
 			// Record path completed event
-			e.recordEvent(workflow.EventPathCompleted, path.id, "", map[string]interface{}{
+			e.recordEvent(EventPathCompleted, path.id, "", map[string]interface{}{
 				"final_step": currentStep.Name(),
 			})
 			return
@@ -616,7 +605,7 @@ func (e *EventBasedExecution) handleStepExecution(ctx context.Context, path *exe
 	step := path.currentStep
 
 	// Record step started event
-	e.recordEvent(workflow.EventStepStarted, path.id, step.Name(), map[string]interface{}{
+	e.recordEvent(EventStepStarted, path.id, step.Name(), map[string]interface{}{
 		"step_type":   step.Type(),
 		"step_params": step.Parameters(),
 	})
@@ -657,7 +646,7 @@ func (e *EventBasedExecution) handleStepExecution(ctx context.Context, path *exe
 	if varName := step.Store(); varName != "" {
 		eventData["stored_variable"] = varName
 	}
-	e.recordEvent(workflow.EventStepCompleted, path.id, step.Name(), eventData)
+	e.recordEvent(EventStepCompleted, path.id, step.Name(), eventData)
 
 	return result, nil
 }
@@ -1011,7 +1000,7 @@ func (e *EventBasedExecution) PathStates() []*PathState {
 }
 
 // LoadFromSnapshot loads execution state from a snapshot and event history
-func LoadFromSnapshot(ctx context.Context, env *Environment, snapshot *workflow.ExecutionSnapshot, eventStore workflow.ExecutionEventStore) (*EventBasedExecution, error) {
+func LoadFromSnapshot(ctx context.Context, env *Environment, snapshot *ExecutionSnapshot, eventStore ExecutionEventStore) (*EventBasedExecution, error) {
 	// Verify the workflow exists
 	if _, exists := env.workflows[snapshot.WorkflowName]; !exists {
 		return nil, fmt.Errorf("workflow not found: %s", snapshot.WorkflowName)
