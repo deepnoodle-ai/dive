@@ -11,7 +11,6 @@ import (
 	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/slogger"
-	"github.com/diveagents/dive/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -122,23 +121,23 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	}
 	dbPath := filepath.Join(diveDir, "executions.db")
 
-	eventStore, err := workflow.NewSQLiteExecutionEventStore(dbPath, workflow.DefaultSQLiteStoreOptions())
+	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, environment.DefaultSQLiteStoreOptions())
 	if err != nil {
 		return fmt.Errorf("error creating event store: %v", err)
 	}
 	defer eventStore.Close()
 
 	// Create execution orchestrator
-	orchestrator := environment.NewExecutionOrchestrator(eventStore, env)
+	// orchestrator := environment.NewExecutionOrchestrator(eventStore, env)
 
 	// Create execution with persistence
-	execution, err := orchestrator.CreateExecution(ctx, environment.ExecutionOptions{
-		WorkflowName:   workflowName,
-		Inputs:         getUserVariables(),
-		Formatter:      formatter,
-		EventStore:     eventStore,
-		EventBatchSize: 10,
-		Logger:         logger,
+	execution, err := environment.NewExecution(environment.ExecutionV2Options{
+		Workflow:    wf,
+		Environment: env,
+		Inputs:      getUserVariables(),
+		EventStore:  eventStore,
+		Logger:      logger,
+		ReplayMode:  false,
 	})
 	if err != nil {
 		duration := time.Since(startTime)
@@ -154,7 +153,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 
 	duration := time.Since(startTime)
 	formatter.PrintWorkflowComplete(duration)
-	formatter.PrintExecutionStats(execution.GetStats())
+	// formatter.PrintExecutionStats(execution.GetStats())
 	return nil
 }
 

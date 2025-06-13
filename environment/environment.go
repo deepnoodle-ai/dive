@@ -149,6 +149,15 @@ func (e *Environment) Description() string {
 	return e.description
 }
 
+func (e *Environment) DefaultAgent() (dive.Agent, bool) {
+	if len(e.agents) == 1 {
+		for _, agent := range e.agents {
+			return agent, true
+		}
+	}
+	return nil, false
+}
+
 func (e *Environment) Formatter() WorkflowFormatter {
 	return e.formatter
 }

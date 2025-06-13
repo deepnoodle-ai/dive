@@ -45,15 +45,18 @@ type Execution struct {
 	state    *WorkflowState
 	recorder ExecutionRecorder
 
-	// Current execution context
-	currentStep   *workflow.Step
-	currentPathID string
+	// Path management for parallel execution
+	paths       map[string]*PathState
+	activePaths map[string]*executionPath
+	pathUpdates chan pathUpdate
+	pathCounter int
 
 	// Logging
 	logger slogger.Logger
 
 	// Synchronization
-	mutex sync.RWMutex
+	mutex  sync.RWMutex
+	doneWg sync.WaitGroup
 }
 
 // ExecutionV2Options configures a new Execution
@@ -105,9 +108,90 @@ func NewExecution(opts ExecutionV2Options) (*Execution, error) {
 		replayMode:       opts.ReplayMode,
 		state:            state,
 		recorder:         recorder,
-		currentPathID:    "main", // Simple single-path execution for now
+		paths:            make(map[string]*PathState),
+		activePaths:      make(map[string]*executionPath),
+		pathUpdates:      make(chan pathUpdate, 100),
 		logger:           opts.Logger.With("execution_id", executionID),
 	}, nil
+}
+
+// NewExecutionFromReplay creates a new execution and loads it from recorded events
+func NewExecutionFromReplay(opts ExecutionV2Options) (*Execution, error) {
+	if opts.EventStore == nil {
+		return nil, fmt.Errorf("event store is required for replay")
+	}
+
+	execution, err := NewExecution(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load and replay events
+	if err := execution.LoadFromEvents(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to load events for replay: %w", err)
+	}
+
+	return execution, nil
+}
+
+// LoadFromEvents loads operation results from previously recorded events
+func (e *Execution) LoadFromEvents(ctx context.Context) error {
+	events, err := e.recorder.(*BufferedExecutionRecorder).eventStore.GetEventHistory(ctx, e.id)
+	if err != nil {
+		return fmt.Errorf("failed to get event history: %w", err)
+	}
+
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	// Collect state mutations
+	stateValues := make(map[string]interface{})
+
+	// Process events to reconstruct operation results and state
+	for _, event := range events {
+		switch event.EventType {
+		case EventOperationCompleted:
+			if opID, ok := event.Data["operation_id"].(string); ok {
+				if result, ok := event.Data["result"]; ok {
+					e.operationResults[OperationID(opID)] = &OperationResult{
+						OperationID: OperationID(opID),
+						Result:      result,
+						Error:       nil,
+						ExecutedAt:  event.Timestamp,
+					}
+				}
+			}
+		case EventOperationFailed:
+			if opID, ok := event.Data["operation_id"].(string); ok {
+				var err error
+				if errStr, ok := event.Data["error"].(string); ok {
+					err = fmt.Errorf("%s", errStr)
+				}
+				e.operationResults[OperationID(opID)] = &OperationResult{
+					OperationID: OperationID(opID),
+					Result:      nil,
+					Error:       err,
+					ExecutedAt:  event.Timestamp,
+				}
+			}
+		case EventStateSet:
+			if key, ok := event.Data["key"].(string); ok {
+				if value, ok := event.Data["value"]; ok {
+					stateValues[key] = value
+				}
+			}
+		case EventStateDeleted:
+			if key, ok := event.Data["key"].(string); ok {
+				delete(stateValues, key)
+			}
+		}
+	}
+
+	// Load all state values at once
+	e.state.LoadFromMap(stateValues)
+
+	e.logger.Info("loaded from events", "operations", len(e.operationResults), "state_keys", len(stateValues))
+	return nil
 }
 
 // ID returns the execution ID
@@ -129,9 +213,9 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 		op.ID = op.GenerateID()
 	}
 
-	// Set current path ID
+	// PathID should always be set by caller - no fallback needed
 	if op.PathID == "" {
-		op.PathID = e.currentPathID
+		return nil, fmt.Errorf("operation PathID is required")
 	}
 
 	e.mutex.Lock()
@@ -159,8 +243,9 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 
 	// Record operation completion
 	eventData := map[string]interface{}{
-		"operation_id": string(op.ID),
-		"duration":     duration,
+		"operation_id":   string(op.ID),
+		"operation_type": op.Type,
+		"duration":       duration,
 	}
 
 	var eventType ExecutionEventType
@@ -204,11 +289,24 @@ func (e *Execution) Run(ctx context.Context) error {
 	// Record execution started
 	e.recorder.RecordExecutionStarted(e.workflow.Name(), e.inputs)
 
-	// Record path started
-	e.recorder.RecordPathStarted(e.currentPathID, e.workflow.Steps()[0].Name())
+	// Start with initial path
+	startStep := e.workflow.Start()
+	initialPath := &executionPath{
+		id:          "start",
+		currentStep: startStep,
+	}
 
-	// Execute workflow steps sequentially (simplified approach)
-	err := e.executeSteps(ctx)
+	e.addPath(initialPath)
+
+	// Record path started
+	e.recorder.RecordPathStarted(initialPath.id, startStep.Name())
+
+	// Start parallel execution
+	e.doneWg.Add(1)
+	go e.runPath(ctx, initialPath)
+
+	// Process path updates
+	err := e.processPathUpdates(ctx)
 
 	// Update final status
 	e.mutex.Lock()
@@ -231,66 +329,269 @@ func (e *Execution) Run(ctx context.Context) error {
 	return err
 }
 
-// executeSteps executes all workflow steps sequentially
-func (e *Execution) executeSteps(ctx context.Context) error {
-	steps := e.workflow.Steps()
+// addPath adds a new execution path
+func (e *Execution) addPath(path *executionPath) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
 
-	for i, step := range steps {
-		e.currentStep = step
+	state := &PathState{
+		ID:          path.id,
+		Status:      PathStatusPending,
+		CurrentStep: path.currentStep,
+		StartTime:   time.Now(),
+		StepOutputs: make(map[string]string),
+	}
 
-		e.logger.Info("executing step", "step_name", step.Name(), "step_type", step.Type())
+	e.paths[path.id] = state
+	e.activePaths[path.id] = path
+}
 
-		// Record step started
-		e.recorder.RecordStepStarted(e.currentPathID, step.Name(), step.Type(), step.Parameters())
+// processPathUpdates handles updates from running paths
+func (e *Execution) processPathUpdates(ctx context.Context) error {
+	for len(e.activePaths) > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case update := <-e.pathUpdates:
+			if update.err != nil {
+				e.updatePathState(update.pathID, func(state *PathState) {
+					state.Status = PathStatusFailed
+					state.Error = update.err
+					state.EndTime = time.Now()
+				})
+				return update.err
+			}
 
-		// Execute the step based on its type
-		result, err := e.executeStep(ctx, step)
-		if err != nil {
-			e.recorder.RecordStepFailed(e.currentPathID, step.Name(), err)
-			return fmt.Errorf("step %q failed: %w", step.Name(), err)
-		}
+			// Store step output
+			e.updatePathState(update.pathID, func(state *PathState) {
+				state.StepOutputs[update.stepName] = update.stepOutput
+				if update.isDone {
+					state.Status = PathStatusCompleted
+					state.EndTime = time.Now()
+				}
+			})
 
-		// Store step result in state if it's not the last step
-		if i < len(steps)-1 {
-			e.state.Set(step.Name(), result.Content)
-		} else {
-			// Last step result goes to outputs
-			e.outputs["result"] = result.Content
-		}
+			// Remove completed path
+			if update.isDone {
+				e.mutex.Lock()
+				delete(e.activePaths, update.pathID)
+				e.mutex.Unlock()
+			}
 
-		// Record step completed
-		e.recorder.RecordStepCompleted(e.currentPathID, step.Name(), result.Content, step.Name())
+			// Start new paths from branching
+			for _, newPath := range update.newPaths {
+				e.addPath(newPath)
+				e.doneWg.Add(1)
+				go e.runPath(ctx, newPath)
+			}
 
-		// If this is an end step, break
-		if step.Type() == "end" {
-			break
+			e.logger.Info("path update processed",
+				"active_paths", len(e.activePaths),
+				"completed_path", update.isDone,
+				"new_paths", len(update.newPaths))
 		}
 	}
 
-	// Record path completed
-	e.recorder.RecordPathCompleted(e.currentPathID, e.currentStep.Name())
+	// Wait for all paths to complete
+	e.doneWg.Wait()
+
+	// Check for failed paths
+	e.mutex.RLock()
+	var failedPaths []string
+	for _, state := range e.paths {
+		if state.Status == PathStatusFailed {
+			failedPaths = append(failedPaths, state.ID)
+		}
+	}
+	e.mutex.RUnlock()
+
+	if len(failedPaths) > 0 {
+		return fmt.Errorf("execution completed with failed paths: %v", failedPaths)
+	}
 
 	return nil
 }
 
-// executeStep executes a single workflow step
-func (e *Execution) executeStep(ctx context.Context, step *workflow.Step) (*dive.StepResult, error) {
-	switch step.Type() {
-	case "prompt":
-		return e.executePromptStep(ctx, step)
-	case "action":
-		return e.executeActionStep(ctx, step)
-	default:
-		return nil, fmt.Errorf("unsupported step type: %s", step.Type())
+// runPath executes a single path
+func (e *Execution) runPath(ctx context.Context, path *executionPath) {
+	defer e.doneWg.Done()
+
+	logger := e.logger.With("path_id", path.id)
+	logger.Info("running path", "step", path.currentStep.Name())
+
+	for {
+		// Update path state to running
+		e.updatePathState(path.id, func(state *PathState) {
+			state.Status = PathStatusRunning
+		})
+
+		currentStep := path.currentStep
+
+		// Execute the step with pathID
+		result, err := e.executeStep(ctx, currentStep, path.id)
+		if err != nil {
+			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
+			logger.Error("step failed", "step", currentStep.Name(), "error", err)
+
+			e.recorder.RecordPathFailed(path.id, err)
+			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
+			return
+		}
+
+		// Handle path branching
+		newPaths, err := e.handlePathBranching(ctx, currentStep, path.id)
+		if err != nil {
+			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
+			e.recorder.RecordPathFailed(path.id, err)
+			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
+			return
+		}
+
+		// Record path branching if multiple paths created
+		if len(newPaths) > 1 {
+			branchInfo := make([]PathBranchInfo, len(newPaths))
+			for i, newPath := range newPaths {
+				branchInfo[i] = PathBranchInfo{
+					ID:             newPath.id,
+					CurrentStep:    newPath.currentStep.Name(),
+					InheritOutputs: true,
+				}
+			}
+
+			e.recorder.RecordPathBranched(path.id, currentStep.Name(), branchInfo)
+		}
+
+		// Path is complete if there are no new paths or multiple paths (branching)
+		isDone := len(newPaths) == 0 || len(newPaths) > 1
+
+		// Send update
+		var executeNewPaths []*executionPath
+		if len(newPaths) > 1 {
+			executeNewPaths = newPaths
+		}
+
+		e.pathUpdates <- pathUpdate{
+			pathID:     path.id,
+			stepName:   currentStep.Name(),
+			stepOutput: result.Content,
+			newPaths:   executeNewPaths,
+			isDone:     isDone,
+		}
+
+		if isDone {
+			e.recorder.RecordPathCompleted(path.id, currentStep.Name())
+			logger.Info("path completed", "step", currentStep.Name())
+			return
+		}
+
+		// Continue with the single path
+		path = newPaths[0]
 	}
 }
 
+// handlePathBranching processes the next steps and creates new paths if needed
+func (e *Execution) handlePathBranching(ctx context.Context, step *workflow.Step, currentPathID string) ([]*executionPath, error) {
+	nextEdges := step.Next()
+	if len(nextEdges) == 0 {
+		return nil, nil // Path is complete
+	}
+
+	// Evaluate conditions and collect matching edges
+	var matchingEdges []*workflow.Edge
+	for _, edge := range nextEdges {
+		if edge.Condition == "" {
+			matchingEdges = append(matchingEdges, edge)
+			continue
+		}
+
+		// Simple condition evaluation - just check if it's "true" for now
+		// TODO: Implement proper condition evaluation
+		match := edge.Condition == "true"
+		if match {
+			matchingEdges = append(matchingEdges, edge)
+		}
+	}
+
+	// Create new paths for each matching edge
+	var newPaths []*executionPath
+	for _, edge := range matchingEdges {
+		nextStep, ok := e.workflow.Graph().Get(edge.Step)
+		if !ok {
+			return nil, fmt.Errorf("next step not found: %s", edge.Step)
+		}
+
+		var nextPathID string
+		if len(matchingEdges) > 1 {
+			// Generate new path ID for branching
+			e.mutex.Lock()
+			e.pathCounter++
+			nextPathID = fmt.Sprintf("%s-%d", currentPathID, e.pathCounter)
+			e.mutex.Unlock()
+		} else {
+			nextPathID = currentPathID
+		}
+
+		newPaths = append(newPaths, &executionPath{
+			id:          nextPathID,
+			currentStep: nextStep,
+		})
+	}
+
+	return newPaths, nil
+}
+
+// updatePathState updates the state of a path
+func (e *Execution) updatePathState(pathID string, updateFn func(*PathState)) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	if state, exists := e.paths[pathID]; exists {
+		updateFn(state)
+	}
+}
+
+// executeStep executes a single workflow step
+func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
+	e.logger.Info("executing step", "step_name", step.Name(), "step_type", step.Type())
+
+	// Record step started
+	e.recorder.RecordStepStarted(pathID, step.Name(), step.Type(), step.Parameters())
+
+	var result *dive.StepResult
+	var err error
+
+	switch step.Type() {
+	case "prompt":
+		result, err = e.executePromptStep(ctx, step, pathID)
+	case "action":
+		result, err = e.executeActionStep(ctx, step, pathID)
+	default:
+		err = fmt.Errorf("unsupported step type: %s", step.Type())
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Store step result in state
+	e.state.Set(step.Name(), result.Content)
+
+	// Record step completed
+	e.recorder.RecordStepCompleted(pathID, step.Name(), result.Content, step.Name())
+
+	return result, nil
+}
+
 // executePromptStep executes a prompt step using an agent
-func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step) (*dive.StepResult, error) {
+func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
 	// Deterministic: get agent
 	agent := step.Agent()
 	if agent == nil {
-		return nil, fmt.Errorf("no agent specified for prompt step %q", step.Name())
+		var found bool
+		agent, found = e.environment.DefaultAgent()
+		if !found {
+			return nil, fmt.Errorf("no agent specified for prompt step %q", step.Name())
+		}
 	}
 
 	// Deterministic: prepare prompt by evaluating template
@@ -310,14 +611,15 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step) 
 	}
 
 	// Operation: LLM call (non-deterministic)
+	// Use deterministic parameters for operation ID generation
 	op := Operation{
 		Type:     "agent_response",
 		StepName: step.Name(),
-		PathID:   e.currentPathID,
+		PathID:   pathID,
 		Parameters: map[string]interface{}{
-			"agent":   agent.Name(),
-			"prompt":  prompt,
-			"content": content,
+			"agent":  agent.Name(),
+			"prompt": prompt,
+			// Don't include content array in parameters as it contains memory addresses
 		},
 	}
 
@@ -342,13 +644,11 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step) 
 }
 
 // executeActionStep executes an action step
-func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step) (*dive.StepResult, error) {
+func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
 	actionName := step.Action()
 	if actionName == "" {
 		return nil, fmt.Errorf("no action specified for action step %q", step.Name())
 	}
-
-	// Deterministic: get action
 	action, ok := e.environment.GetAction(actionName)
 	if !ok {
 		return nil, fmt.Errorf("action %q not found", actionName)
@@ -372,7 +672,7 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step) 
 	op := Operation{
 		Type:     "action_execution",
 		StepName: step.Name(),
-		PathID:   e.currentPathID,
+		PathID:   pathID,
 		Parameters: map[string]interface{}{
 			"action_name": actionName,
 			"params":      params,
@@ -382,17 +682,13 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step) 
 	result, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
 		return action.Execute(ctx, params)
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("action execution operation failed: %w", err)
 	}
-
-	// Deterministic: process result
 	var content string
 	if result != nil {
 		content = fmt.Sprintf("%v", result)
 	}
-
 	return &dive.StepResult{Content: content}, nil
 }
 

@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diveagents/dive/workflow"
+	"github.com/diveagents/dive/environment"
 	"github.com/spf13/cobra"
 )
 
 // getEventStore creates an event store instance for the given database path
-func getEventStore(persistenceDB string) (workflow.ExecutionEventStore, error) {
+func getEventStore(persistenceDB string) (environment.ExecutionEventStore, error) {
 	dbPath := persistenceDB
 	if dbPath == "" {
 		diveDir, err := getDiveConfigDir()
@@ -28,7 +28,7 @@ func getEventStore(persistenceDB string) (workflow.ExecutionEventStore, error) {
 		return nil, fmt.Errorf("database not found: %s\nRun some workflows with 'dive run' to create execution history", dbPath)
 	}
 
-	eventStore, err := workflow.NewSQLiteExecutionEventStore(dbPath, workflow.DefaultSQLiteStoreOptions())
+	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, environment.DefaultSQLiteStoreOptions())
 	if err != nil {
 		return nil, fmt.Errorf("error opening database: %v", err)
 	}
@@ -43,7 +43,7 @@ func listExecutions(persistenceDB string, status, workflowName string, limit int
 	}
 	ctx := context.Background()
 
-	executions, err := eventStore.ListExecutions(ctx, workflow.ExecutionFilter{
+	executions, err := eventStore.ListExecutions(ctx, environment.ExecutionFilter{
 		Limit:        limit,
 		Status:       status,
 		WorkflowName: workflowName,
@@ -241,7 +241,7 @@ func cleanupExecutions(persistenceDB string, olderThanDays int, confirm bool) er
 	olderThan := time.Now().AddDate(0, 0, -olderThanDays)
 
 	// First, see what would be deleted
-	filter := workflow.ExecutionFilter{
+	filter := environment.ExecutionFilter{
 		Status: "completed",
 		Limit:  1000,
 	}
@@ -250,7 +250,7 @@ func cleanupExecutions(persistenceDB string, olderThanDays int, confirm bool) er
 		return fmt.Errorf("error listing executions: %v", err)
 	}
 
-	var toDelete []*workflow.ExecutionSnapshot
+	var toDelete []*environment.ExecutionSnapshot
 	for _, exec := range allCompleted {
 		if exec.UpdatedAt.Before(olderThan) {
 			toDelete = append(toDelete, exec)

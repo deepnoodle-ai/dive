@@ -97,6 +97,10 @@ func (w *Workflow) Steps() []*Step {
 	return w.steps
 }
 
+func (w *Workflow) Start() *Step {
+	return w.graph.Start()
+}
+
 func (w *Workflow) Graph() *Graph {
 	return w.graph
 }
