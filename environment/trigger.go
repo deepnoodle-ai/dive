@@ -47,9 +47,12 @@ func (t *Trigger) Fire(ctx context.Context, input map[string]interface{}) ([]*Ev
 	}
 	var executions []*EventBasedExecution
 	for _, w := range t.workflows {
-		execution, err := t.env.ExecuteWorkflow(ctx, ExecutionOptions{
+		execution, err := NewEventBasedExecution(t.env, ExecutionOptions{
 			WorkflowName: w.Name(),
 			Inputs:       input,
+			// FIXME
+			// EventStore:     t.env.eventStore,
+			EventBatchSize: 10,
 		})
 		if err != nil {
 			return nil, err

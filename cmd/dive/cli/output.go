@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	// Enhanced color scheme for workflow output
+	// Color scheme for workflow output
 	headerStyle     = color.New(color.FgCyan, color.Bold)
 	workflowSuccess = color.New(color.FgGreen, color.Bold)
 	workflowError   = color.New(color.FgRed, color.Bold)
@@ -25,12 +25,10 @@ var (
 	outputStyle     = color.New(color.FgGreen)
 	timeStyle       = color.New(color.FgWhite, color.Faint)
 	borderStyle     = color.New(color.FgWhite, color.Faint)
-	promptStyle     = color.New(color.FgYellow)
-	actionStyle     = color.New(color.FgBlue)
 )
 
 const (
-	// Unicode box drawing characters for attractive borders
+	// Special characters for styling workflow output
 	boxTopLeft     = "┌"
 	boxTopRight    = "┐"
 	boxBottomLeft  = "└"
@@ -245,7 +243,7 @@ func (f *WorkflowFormatter) PrintStepError(stepName string, err error) {
 func (f *WorkflowFormatter) PrintWorkflowComplete(duration time.Duration) {
 	fmt.Println()
 	f.printBox(fmt.Sprintf("%s %s", checkmark, workflowSuccess.Sprintf("Workflow Completed Successfully")))
-	fmt.Printf("   %s Total time: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond)))
+	fmt.Printf("   %s Total time: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond*100)))
 	fmt.Println()
 }
 
@@ -254,7 +252,7 @@ func (f *WorkflowFormatter) PrintWorkflowError(err error, duration time.Duration
 	fmt.Println()
 	f.printBox(fmt.Sprintf("%s %s", xmark, workflowError.Sprintf("Workflow Failed")))
 	fmt.Printf("   %s Error: %s\n", xmark, workflowError.Sprint(err.Error()))
-	fmt.Printf("   %s Time elapsed: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond)))
+	fmt.Printf("   %s Time elapsed: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond*100)))
 	fmt.Println()
 }
 

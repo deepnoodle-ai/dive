@@ -2,7 +2,10 @@ package workflow
 
 import (
 	"fmt"
+	"log"
 	"time"
+
+	"go.jetify.com/typeid"
 )
 
 // ExecutionEventType represents the type of execution event
@@ -54,4 +57,13 @@ func (e *ExecutionEvent) Validate() error {
 		return fmt.Errorf("timestamp is required")
 	}
 	return nil
+}
+
+// NewEventID creates a new event id
+func NewEventID() string {
+	value, err := typeid.WithPrefix("event")
+	if err != nil {
+		log.Fatalf("error creating new id: %v", err)
+	}
+	return value.String()
 }

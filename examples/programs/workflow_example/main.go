@@ -117,8 +117,10 @@ func main() {
 	}
 	defer env.Stop(ctx)
 
-	execution, err := env.ExecuteWorkflow(ctx, environment.ExecutionOptions{
-		WorkflowName: w.Name(),
+	execution, err := environment.NewEventBasedExecution(env, environment.ExecutionOptions{
+		WorkflowName:   w.Name(),
+		EventStore:     workflow.NewNullEventStore(),
+		EventBatchSize: 10,
 	})
 	if err != nil {
 		log.Fatal(err)

@@ -15,6 +15,7 @@ require (
 	github.com/openai/openai-go v1.2.0
 	github.com/risor-io/risor v1.8.1
 	github.com/stretchr/testify v1.10.0
+	go.jetify.com/typeid v1.3.0
 )
 
 require (

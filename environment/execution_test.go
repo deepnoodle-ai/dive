@@ -1,38 +1,53 @@
 package environment
 
-// func TestNewExecution(t *testing.T) {
-// 	wf, err := workflow.New(workflow.Options{
-// 		Name: "test-workflow",
-// 		Steps: []*workflow.Step{
-// 			workflow.NewStep(workflow.StepOptions{
-// 				Name:   "test-step",
-// 				Agent:  &mockAgent{},
-// 				Prompt: "test description",
-// 			}),
-// 		},
-// 	})
-// 	require.NoError(t, err)
+import (
+	"context"
+	"testing"
 
-// 	env, err := New(Options{
-// 		Name:      "test-env",
-// 		Agents:    []dive.Agent{&mockAgent{}},
-// 		Workflows: []*workflow.Workflow{wf},
-// 		Logger:    slogger.NewDevNullLogger(),
-// 	})
-// 	require.NoError(t, err)
-// 	require.NoError(t, env.Start(context.Background()))
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/slogger"
+	"github.com/diveagents/dive/workflow"
+	"github.com/stretchr/testify/require"
+)
 
-// 	execution, err := env.ExecuteWorkflow(context.Background(), ExecutionOptions{
-// 		WorkflowName: wf.Name(),
-// 		Inputs:       map[string]interface{}{},
-// 	})
-// 	require.NoError(t, err)
-// 	require.NotNil(t, execution)
+func TestNewExecution(t *testing.T) {
+	wf, err := workflow.New(workflow.Options{
+		Name: "test-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "test-step",
+				Agent:  &mockAgent{},
+				Prompt: "test description",
+			}),
+		},
+	})
+	require.NoError(t, err)
 
-// 	require.Equal(t, wf, execution.Workflow())
-// 	require.Equal(t, env, execution.Environment())
-// 	require.Equal(t, StatusRunning, execution.Status())
-// }
+	env, err := New(Options{
+		Name:      "test-env",
+		Agents:    []dive.Agent{&mockAgent{}},
+		Workflows: []*workflow.Workflow{wf},
+		Logger:    slogger.New(slogger.LevelDebug),
+	})
+	require.NoError(t, err)
+	require.NoError(t, env.Start(context.Background()))
+
+	execution, err := NewEventBasedExecution(env, ExecutionOptions{
+		WorkflowName:   wf.Name(),
+		Inputs:         map[string]interface{}{},
+		EventStore:     workflow.NewNullEventStore(),
+		EventBatchSize: 10,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, execution)
+
+	require.Equal(t, wf, execution.Workflow())
+	require.Equal(t, env, execution.Environment())
+	require.Equal(t, StatusPending, execution.Status())
+
+	require.NoError(t, execution.Wait())
+	require.Equal(t, StatusCompleted, execution.Status())
+}
 
 // func TestExecutionBasicFlow(t *testing.T) {
 // 	wf, err := workflow.New(workflow.Options{

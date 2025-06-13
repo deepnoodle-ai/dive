@@ -3,14 +3,11 @@ package environment
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/mcp"
-	"github.com/diveagents/dive/objects"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
-	"github.com/risor-io/risor/modules/all"
 )
 
 // Environment is a container for running agents and workflow executions
@@ -242,79 +239,6 @@ func (e *Environment) AddWorkflow(workflow *workflow.Workflow) error {
 	}
 	e.workflows[workflow.Name()] = workflow
 	return nil
-}
-
-// ExecuteWorkflow starts a new workflow and immediately returns the execution,
-// which will be running in the background.
-func (e *Environment) ExecuteWorkflow(ctx context.Context, opts ExecutionOptions) (*EventBasedExecution, error) {
-	if !e.started {
-		return nil, fmt.Errorf("environment not started")
-	}
-	if opts.WorkflowName == "" {
-		if e.defaultWorkflow == "" {
-			return nil, fmt.Errorf("a workflow name is required")
-		}
-		opts.WorkflowName = e.defaultWorkflow
-	}
-
-	workflow, exists := e.workflows[opts.WorkflowName]
-	if !exists {
-		return nil, fmt.Errorf("workflow not found: %s", opts.WorkflowName)
-	}
-
-	inputs := opts.Inputs
-	if inputs == nil {
-		inputs = make(map[string]interface{})
-	}
-
-	logger := opts.Logger
-	if logger == nil {
-		logger = e.logger
-	}
-
-	// Build up the input variables with defaults and validation
-	processedInputs := make(map[string]interface{})
-	for _, input := range workflow.Inputs() {
-		value, exists := inputs[input.Name]
-		if !exists {
-			// If input doesn't exist, check if it has a default value
-			if input.Default != nil {
-				processedInputs[input.Name] = input.Default
-				continue
-			}
-			return nil, fmt.Errorf("required input %q not provided", input.Name)
-		}
-		// Input exists, use the provided value
-		processedInputs[input.Name] = value
-	}
-
-	execution := &EventBasedExecution{
-		id:            dive.NewID(),
-		environment:   e,
-		workflow:      workflow,
-		status:        StatusPending,
-		startTime:     time.Now(),
-		inputs:        processedInputs,
-		logger:        logger,
-		paths:         make(map[string]*PathState),
-		formatter:     opts.Formatter,
-		scriptGlobals: map[string]any{"inputs": processedInputs},
-	}
-	if e.documentRepo != nil {
-		execution.scriptGlobals["documents"] = objects.NewDocumentRepository(e.documentRepo)
-	}
-	e.executions[execution.ID()] = execution
-
-	// Make Risor's default builtins available to embedded scripts
-	for k, v := range all.Builtins() {
-		execution.scriptGlobals[k] = v
-	}
-
-	if err := execution.Run(ctx); err != nil {
-		logger.Error("failed to start workflow", "error", err)
-		return nil, err
-	}
-	return execution, nil
 }
 
 // GetAction returns an action by name

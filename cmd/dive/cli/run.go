@@ -82,9 +82,10 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 		basePath = path
 	}
 
+	var logger slogger.Logger
 	buildOpts := []config.BuildOption{}
 	if logLevel != 0 {
-		logger := slogger.New(logLevel)
+		logger = slogger.New(logLevel)
 		buildOpts = append(buildOpts, config.WithLogger(logger))
 	}
 	env, err := config.LoadDirectory(configDir, append(buildOpts, config.WithBasePath(basePath))...)
@@ -132,9 +133,12 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 
 	// Create execution with persistence
 	execution, err := orchestrator.CreateExecution(ctx, environment.ExecutionOptions{
-		WorkflowName: workflowName,
-		Inputs:       getUserVariables(),
-		Formatter:    formatter,
+		WorkflowName:   workflowName,
+		Inputs:         getUserVariables(),
+		Formatter:      formatter,
+		EventStore:     eventStore,
+		EventBatchSize: 10,
+		Logger:         logger,
 	})
 	if err != nil {
 		duration := time.Since(startTime)
@@ -146,12 +150,6 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 		duration := time.Since(startTime)
 		formatter.PrintWorkflowError(err, duration)
 		return fmt.Errorf("error running workflow: %v", err)
-	}
-
-	if err := execution.Wait(); err != nil {
-		duration := time.Since(startTime)
-		formatter.PrintWorkflowError(err, duration)
-		return fmt.Errorf("error waiting for workflow: %v", err)
 	}
 
 	duration := time.Since(startTime)

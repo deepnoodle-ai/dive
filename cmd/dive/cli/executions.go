@@ -66,7 +66,7 @@ func listExecutions(persistenceDB string, status, workflowName string, limit int
 	for _, exec := range executions {
 		duration := ""
 		if !exec.EndTime.IsZero() && !exec.StartTime.IsZero() {
-			duration = exec.EndTime.Sub(exec.StartTime).Round(time.Millisecond).String()
+			duration = exec.EndTime.Sub(exec.StartTime).Round(time.Millisecond * 100).String()
 		} else if !exec.StartTime.IsZero() {
 			duration = time.Since(exec.StartTime).Round(time.Second).String() + " (running)"
 		}

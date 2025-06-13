@@ -30,18 +30,12 @@ func NewExecutionOrchestrator(eventStore workflow.ExecutionEventStore, env *Envi
 	}
 }
 
-// CreateExecution creates a new event-based execution
+// CreateExecution creates a new execution
 func (eo *ExecutionOrchestrator) CreateExecution(ctx context.Context, opts ExecutionOptions) (*EventBasedExecution, error) {
-	opts.Persistence = &PersistenceConfig{
-		EventStore: eo.eventStore,
-		BatchSize:  10,
-	}
-
 	execution, err := NewEventBasedExecution(eo.environment, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event-based execution: %w", err)
 	}
-
 	eo.logger.Info("created new execution",
 		"execution_id", execution.ID(),
 		"workflow", opts.WorkflowName,
@@ -366,13 +360,11 @@ func (eo *ExecutionOrchestrator) getEventsBeforeSequence(events []*workflow.Exec
 func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, snapshot *workflow.ExecutionSnapshot, replayResult *workflow.ReplayResult, wf *workflow.Workflow) (*EventBasedExecution, error) {
 	// Create new execution with fresh ID
 	newExecution, err := NewEventBasedExecution(eo.environment, ExecutionOptions{
-		WorkflowName: snapshot.WorkflowName,
-		Inputs:       snapshot.Inputs,
-		Logger:       eo.logger,
-		Persistence: &PersistenceConfig{
-			EventStore: eo.eventStore,
-			BatchSize:  10,
-		},
+		WorkflowName:   snapshot.WorkflowName,
+		Inputs:         snapshot.Inputs,
+		Logger:         eo.logger,
+		EventStore:     eo.eventStore,
+		EventBatchSize: 10,
 	})
 	if err != nil {
 		return nil, err

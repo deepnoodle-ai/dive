@@ -113,13 +113,11 @@ func TestEventBasedExecution(t *testing.T) {
 	t.Run("EventRecordingDuringExecution", func(t *testing.T) {
 		// Create event-based execution
 		execution, err := NewEventBasedExecution(env, ExecutionOptions{
-			WorkflowName: "test-workflow",
-			Inputs:       map[string]interface{}{"input1": "test value"},
-			Logger:       env.logger,
-			Persistence: &PersistenceConfig{
-				EventStore: eventStore,
-				BatchSize:  5,
-			},
+			WorkflowName:   "test-workflow",
+			Inputs:         map[string]interface{}{"input1": "test value"},
+			Logger:         env.logger,
+			EventStore:     eventStore,
+			EventBatchSize: 5,
 		})
 		require.NoError(t, err)
 
@@ -367,13 +365,11 @@ func TestEventBasedExecution(t *testing.T) {
 		t.Run("EnhancedReplayWithPathBranching", func(t *testing.T) {
 			// Create execution with path branching scenario
 			execution, err := NewEventBasedExecution(env, ExecutionOptions{
-				WorkflowName: "test-workflow",
-				Inputs:       map[string]interface{}{"input1": "branch test"},
-				Logger:       env.logger,
-				Persistence: &PersistenceConfig{
-					EventStore: eventStore,
-					BatchSize:  5,
-				},
+				WorkflowName:   "test-workflow",
+				Inputs:         map[string]interface{}{"input1": "branch test"},
+				Logger:         env.logger,
+				EventStore:     eventStore,
+				EventBatchSize: 5,
 			})
 			require.NoError(t, err)
 
@@ -496,15 +492,11 @@ func TestEventRecordingEdgeCases(t *testing.T) {
 
 		env.workflows["replay-test-workflow"] = testWorkflow
 
-		config := &PersistenceConfig{
-			EventStore: eventStore,
-			BatchSize:  1,
-		}
-
 		execution, err := NewEventBasedExecution(env, ExecutionOptions{
-			WorkflowName: "replay-test-workflow",
-			Logger:       env.logger,
-			Persistence:  config,
+			WorkflowName:   "replay-test-workflow",
+			Logger:         env.logger,
+			EventStore:     eventStore,
+			EventBatchSize: 1,
 		})
 		require.NoError(t, err)
 
@@ -526,12 +518,10 @@ func TestEventRecordingEdgeCases(t *testing.T) {
 
 	t.Run("EventBufferFlushing", func(t *testing.T) {
 		execution, err := NewEventBasedExecution(env, ExecutionOptions{
-			WorkflowName: "replay-test-workflow",
-			Logger:       env.logger,
-			Persistence: &PersistenceConfig{
-				EventStore: eventStore,
-				BatchSize:  2, // Small batch size to test flushing
-			},
+			WorkflowName:   "replay-test-workflow",
+			Logger:         env.logger,
+			EventStore:     eventStore,
+			EventBatchSize: 2, // Small batch size to test flushing
 		})
 		require.NoError(t, err)
 
