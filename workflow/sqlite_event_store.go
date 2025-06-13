@@ -29,7 +29,7 @@ type SQLiteStoreOptions struct {
 	MaxConnections    int           // Maximum number of connections in pool
 }
 
-// DefaultSQLiteStoreOptions returns sensible defaults for production use
+// DefaultSQLiteStoreOptions returns sensible defaults
 func DefaultSQLiteStoreOptions() SQLiteStoreOptions {
 	return SQLiteStoreOptions{
 		BatchSize:         100,
@@ -374,27 +374,23 @@ func (s *SQLiteExecutionEventStore) ListExecutions(ctx context.Context, filter E
 	var conditions []string
 	var args []interface{}
 
-	if filter.Status != nil {
+	if filter.Status != "" {
 		conditions = append(conditions, "status = ?")
-		args = append(args, *filter.Status)
+		args = append(args, filter.Status)
 	}
-
-	if filter.WorkflowName != nil {
+	if filter.WorkflowName != "" {
 		conditions = append(conditions, "workflow_name = ?")
-		args = append(args, *filter.WorkflowName)
+		args = append(args, filter.WorkflowName)
 	}
-
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-
 	query += " ORDER BY created_at DESC"
 
 	if filter.Limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, filter.Limit)
 	}
-
 	if filter.Offset > 0 {
 		query += " OFFSET ?"
 		args = append(args, filter.Offset)
@@ -418,7 +414,6 @@ func (s *SQLiteExecutionEventStore) ListExecutions(ctx context.Context, filter E
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
-
 	return snapshots, nil
 }
 
@@ -438,17 +433,14 @@ func (s *SQLiteExecutionEventStore) DeleteExecution(ctx context.Context, executi
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
 	}
-
 	// Delete snapshot
 	_, err = tx.ExecContext(ctx, "DELETE FROM execution_snapshots WHERE execution_id = ?", executionID)
 	if err != nil {
 		return fmt.Errorf("failed to delete snapshot: %w", err)
 	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit deletion: %w", err)
 	}
-
 	return nil
 }
 
@@ -508,7 +500,6 @@ func (s *SQLiteExecutionEventStore) CleanupCompletedExecutions(ctx context.Conte
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit cleanup: %w", err)
 	}
-
 	return nil
 }
 
@@ -523,7 +514,7 @@ func (s *SQLiteExecutionEventStore) Close() error {
 	return nil
 }
 
-// Helper functions for scanning and nullable types
+// Helper functions for scanning
 
 func (s *SQLiteExecutionEventStore) scanEvent(rows *sql.Rows) (*ExecutionEvent, error) {
 	event := &ExecutionEvent{}

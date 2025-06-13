@@ -183,9 +183,8 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 		require.GreaterOrEqual(t, len(allExecutions), 2)
 
 		// Filter by status
-		statusFilter := "completed"
 		completedExecutions, err := store.ListExecutions(ctx, ExecutionFilter{
-			Status: &statusFilter,
+			Status: "completed",
 		})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(completedExecutions), 1)
@@ -196,9 +195,8 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 		}
 
 		// Filter by workflow name
-		workflowName := "workflow-a"
 		workflowExecutions, err := store.ListExecutions(ctx, ExecutionFilter{
-			WorkflowName: &workflowName,
+			WorkflowName: "workflow-a",
 		})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(workflowExecutions), 1)

@@ -3,6 +3,7 @@ package environment
 import (
 	"context"
 	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -74,7 +75,9 @@ func TestEventBasedExecution(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create event store
-	eventStore := workflow.NewFileExecutionEventStore(tempDir)
+	eventStore, err := workflow.NewSQLiteExecutionEventStore(path.Join(tempDir, "executions.db"),
+		workflow.DefaultSQLiteStoreOptions())
+	require.NoError(t, err)
 
 	// Create test environment
 	env := &Environment{
@@ -109,16 +112,15 @@ func TestEventBasedExecution(t *testing.T) {
 
 	t.Run("EventRecordingDuringExecution", func(t *testing.T) {
 		// Create event-based execution
-		config := &PersistenceConfig{
-			EventStore: eventStore,
-			BatchSize:  5,
-		}
-
 		execution, err := NewEventBasedExecution(env, ExecutionOptions{
 			WorkflowName: "test-workflow",
 			Inputs:       map[string]interface{}{"input1": "test value"},
 			Logger:       env.logger,
-		}, config)
+			Persistence: &PersistenceConfig{
+				EventStore: eventStore,
+				BatchSize:  5,
+			},
+		})
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -127,8 +129,7 @@ func TestEventBasedExecution(t *testing.T) {
 		err = execution.Run(ctx)
 		require.NoError(t, err)
 
-		// Force flush events
-		err = execution.ForceFlush()
+		err = execution.Flush()
 		require.NoError(t, err)
 
 		// Verify events were recorded
@@ -369,9 +370,10 @@ func TestEventBasedExecution(t *testing.T) {
 				WorkflowName: "test-workflow",
 				Inputs:       map[string]interface{}{"input1": "branch test"},
 				Logger:       env.logger,
-			}, &PersistenceConfig{
-				EventStore: eventStore,
-				BatchSize:  5,
+				Persistence: &PersistenceConfig{
+					EventStore: eventStore,
+					BatchSize:  5,
+				},
 			})
 			require.NoError(t, err)
 
@@ -472,7 +474,10 @@ func TestEventRecordingEdgeCases(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	eventStore := workflow.NewFileExecutionEventStore(tempDir)
+	eventStore, err := workflow.NewSQLiteExecutionEventStore(path.Join(tempDir, "executions.db"),
+		workflow.DefaultSQLiteStoreOptions())
+	require.NoError(t, err)
+
 	env := &Environment{
 		agents:    map[string]dive.Agent{"test-agent": &MockAgent{name: "test-agent", responses: []string{"output"}}},
 		workflows: make(map[string]*workflow.Workflow),
@@ -499,7 +504,8 @@ func TestEventRecordingEdgeCases(t *testing.T) {
 		execution, err := NewEventBasedExecution(env, ExecutionOptions{
 			WorkflowName: "replay-test-workflow",
 			Logger:       env.logger,
-		}, config)
+			Persistence:  config,
+		})
 		require.NoError(t, err)
 
 		// Set replay mode
@@ -509,7 +515,7 @@ func TestEventRecordingEdgeCases(t *testing.T) {
 		execution.recordEvent(workflow.EventStepStarted, "path-1", "step1", map[string]interface{}{})
 
 		// Force flush
-		err = execution.ForceFlush()
+		err = execution.Flush()
 		require.NoError(t, err)
 
 		// Check that no events were recorded
@@ -519,15 +525,14 @@ func TestEventRecordingEdgeCases(t *testing.T) {
 	})
 
 	t.Run("EventBufferFlushing", func(t *testing.T) {
-		config := &PersistenceConfig{
-			EventStore: eventStore,
-			BatchSize:  2, // Small batch size to test flushing
-		}
-
 		execution, err := NewEventBasedExecution(env, ExecutionOptions{
 			WorkflowName: "replay-test-workflow",
 			Logger:       env.logger,
-		}, config)
+			Persistence: &PersistenceConfig{
+				EventStore: eventStore,
+				BatchSize:  2, // Small batch size to test flushing
+			},
+		})
 		require.NoError(t, err)
 
 		// Record events that should trigger flush

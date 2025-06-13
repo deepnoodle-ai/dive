@@ -41,20 +41,13 @@ func listExecutions(persistenceDB string, status, workflowName string, limit int
 	if err != nil {
 		return err
 	}
-
 	ctx := context.Background()
-	filter := workflow.ExecutionFilter{
-		Limit: limit,
-	}
 
-	if status != "" {
-		filter.Status = &status
-	}
-	if workflowName != "" {
-		filter.WorkflowName = &workflowName
-	}
-
-	executions, err := eventStore.ListExecutions(ctx, filter)
+	executions, err := eventStore.ListExecutions(ctx, workflow.ExecutionFilter{
+		Limit:        limit,
+		Status:       status,
+		WorkflowName: workflowName,
+	})
 	if err != nil {
 		return fmt.Errorf("error listing executions: %v", err)
 	}
@@ -249,7 +242,7 @@ func cleanupExecutions(persistenceDB string, olderThanDays int, confirm bool) er
 
 	// First, see what would be deleted
 	filter := workflow.ExecutionFilter{
-		Status: stringPtr("completed"),
+		Status: "completed",
 		Limit:  1000,
 	}
 	allCompleted, err := eventStore.ListExecutions(ctx, filter)
@@ -302,10 +295,6 @@ func truncate(s string, length int) string {
 		return s[:length]
 	}
 	return s[:length-3] + "..."
-}
-
-func stringPtr(s string) *string {
-	return &s
 }
 
 // Executions command

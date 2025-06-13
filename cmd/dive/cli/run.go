@@ -49,7 +49,7 @@ func getDiveConfigDir() (string, error) {
 	return diveDir, nil
 }
 
-func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, persistenceDB string) error {
+func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	ctx := context.Background()
 	startTime := time.Now()
 
@@ -114,17 +114,13 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, persisten
 	formatter := NewWorkflowFormatter()
 	formatter.PrintWorkflowHeader(wf, getUserVariables())
 
-	// Set up persistence with SQLite event store
-	dbPath := persistenceDB
-	if dbPath == "" {
-		diveDir, err := getDiveConfigDir()
-		if err != nil {
-			return fmt.Errorf("error getting dive config directory: %v", err)
-		}
-		dbPath = filepath.Join(diveDir, "executions.db")
+	// Set up persistence via SQLite
+	diveDir, err := getDiveConfigDir()
+	if err != nil {
+		return fmt.Errorf("error getting dive config directory: %v", err)
 	}
+	dbPath := filepath.Join(diveDir, "executions.db")
 
-	// Create SQLite event store
 	eventStore, err := workflow.NewSQLiteExecutionEventStore(dbPath, workflow.DefaultSQLiteStoreOptions())
 	if err != nil {
 		return fmt.Errorf("error creating event store: %v", err)
@@ -146,12 +142,6 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, persisten
 		return fmt.Errorf("error creating execution: %v", err)
 	}
 
-	fmt.Printf("🔄 Execution started (ID: %s)\n", execution.ID())
-	if persistenceDB != "" {
-		fmt.Printf("📄 Database: %s\n", dbPath)
-	}
-
-	// Start the execution
 	if err := execution.Run(ctx); err != nil {
 		duration := time.Since(startTime)
 		formatter.PrintWorkflowError(err, duration)
@@ -182,14 +172,7 @@ var runCmd = &cobra.Command{
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-
-		persistenceDB, err := cmd.Flags().GetString("persist-db")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		if err := runWorkflow(filePath, workflowName, getLogLevel(), persistenceDB); err != nil {
+		if err := runWorkflow(filePath, workflowName, getLogLevel()); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -200,5 +183,4 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 
 	runCmd.Flags().StringP("workflow", "w", "", "Name of the workflow to run")
-	runCmd.Flags().String("persist-db", "", "Path to SQLite database for persistence (default: ~/.dive/executions.db)")
 }

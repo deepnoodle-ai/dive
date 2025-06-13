@@ -21,7 +21,7 @@ type Environment struct {
 	agents          map[string]dive.Agent
 	workflows       map[string]*workflow.Workflow
 	triggers        []*Trigger
-	executions      map[string]*Execution
+	executions      map[string]*EventBasedExecution
 	logger          slogger.Logger
 	defaultWorkflow string
 	documentRepo    dive.DocumentRepository
@@ -41,7 +41,7 @@ type Options struct {
 	Agents             []dive.Agent
 	Workflows          []*workflow.Workflow
 	Triggers           []*Trigger
-	Executions         []*Execution
+	Executions         []*EventBasedExecution
 	Logger             slogger.Logger
 	DefaultWorkflow    string
 	DocumentRepository dive.DocumentRepository
@@ -78,7 +78,7 @@ func New(opts Options) (*Environment, error) {
 		workflows[workflow.Name()] = workflow
 	}
 
-	executions := make(map[string]*Execution, len(opts.Executions))
+	executions := make(map[string]*EventBasedExecution, len(opts.Executions))
 	for _, execution := range opts.Executions {
 		executions[execution.ID()] = execution
 	}
@@ -246,7 +246,7 @@ func (e *Environment) AddWorkflow(workflow *workflow.Workflow) error {
 
 // ExecuteWorkflow starts a new workflow and immediately returns the execution,
 // which will be running in the background.
-func (e *Environment) ExecuteWorkflow(ctx context.Context, opts ExecutionOptions) (*Execution, error) {
+func (e *Environment) ExecuteWorkflow(ctx context.Context, opts ExecutionOptions) (*EventBasedExecution, error) {
 	if !e.started {
 		return nil, fmt.Errorf("environment not started")
 	}
@@ -288,7 +288,7 @@ func (e *Environment) ExecuteWorkflow(ctx context.Context, opts ExecutionOptions
 		processedInputs[input.Name] = value
 	}
 
-	execution := &Execution{
+	execution := &EventBasedExecution{
 		id:            dive.NewID(),
 		environment:   e,
 		workflow:      workflow,

@@ -32,17 +32,20 @@ func NewExecutionOrchestrator(eventStore workflow.ExecutionEventStore, env *Envi
 
 // CreateExecution creates a new event-based execution
 func (eo *ExecutionOrchestrator) CreateExecution(ctx context.Context, opts ExecutionOptions) (*EventBasedExecution, error) {
-	config := &PersistenceConfig{
+	opts.Persistence = &PersistenceConfig{
 		EventStore: eo.eventStore,
 		BatchSize:  10,
 	}
 
-	execution, err := NewEventBasedExecution(eo.environment, opts, config)
+	execution, err := NewEventBasedExecution(eo.environment, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event-based execution: %w", err)
 	}
 
-	eo.logger.Info("created new execution", "execution_id", execution.ID(), "workflow", opts.WorkflowName)
+	eo.logger.Info("created new execution",
+		"execution_id", execution.ID(),
+		"workflow", opts.WorkflowName,
+	)
 	return execution, nil
 }
 
@@ -86,46 +89,38 @@ func (eo *ExecutionOrchestrator) RecoverExecution(ctx context.Context, execution
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %w", err)
 	}
-
 	// Only recover executions that were running when interrupted
 	if snapshot.Status != string(StatusRunning) {
 		return nil, fmt.Errorf("execution %s is not in recoverable state (status: %s)", executionID, snapshot.Status)
 	}
-
 	events, err := eo.eventStore.GetEventHistory(ctx, executionID)
 	if err != nil {
 		eo.logger.Warn("failed to load event history, attempting snapshot-only recovery", "error", err)
 		return eo.recoverFromSnapshotOnly(ctx, snapshot)
 	}
-
 	// Validate event history compatibility
 	wf, err := eo.getWorkflow(snapshot.WorkflowName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load workflow definition: %w", err)
 	}
-
 	if err := eo.replayer.ValidateEventHistory(ctx, events, wf); err != nil {
 		eo.logger.Warn("event history incompatible with current workflow, attempting degraded recovery", "error", err)
 		return eo.recoverFromSnapshotOnly(ctx, snapshot)
 	}
-
 	// Perform full replay
 	return eo.replayFromEvents(ctx, snapshot, events, wf)
 }
 
 // ListRecoverableExecutions returns executions that can be recovered
 func (eo *ExecutionOrchestrator) ListRecoverableExecutions(ctx context.Context) ([]*workflow.ExecutionSnapshot, error) {
-	status := string(StatusRunning)
 	filter := workflow.ExecutionFilter{
-		Status: &status,
+		Status: string(StatusRunning),
 		Limit:  100, // Reasonable limit for recoverable executions
 	}
-
 	executions, err := eo.eventStore.ListExecutions(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list executions: %w", err)
 	}
-
 	eo.logger.Info("found recoverable executions", "count", len(executions))
 	return executions, nil
 }
@@ -136,19 +131,15 @@ func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *w
 	if newInputs != nil {
 		inputs = newInputs
 	}
-
-	opts := ExecutionOptions{
+	execution, err := eo.CreateExecution(ctx, ExecutionOptions{
 		WorkflowName: snapshot.WorkflowName,
 		Inputs:       inputs,
 		Outputs:      snapshot.Outputs,
 		Logger:       eo.logger,
-	}
-
-	execution, err := eo.CreateExecution(ctx, opts)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create retry execution: %w", err)
 	}
-
 	eo.logger.Info("created retry from start",
 		"original_execution", snapshot.ID,
 		"new_execution", execution.ID())
@@ -158,7 +149,10 @@ func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *w
 
 // retryFromFailure implements intelligent retry from the point of failure
 func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot *workflow.ExecutionSnapshot, events []*workflow.ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
-	eo.logger.Info("retrying from failure point", "execution_id", snapshot.ID)
+	eo.logger.Info("retrying from failure point",
+		"execution_id", snapshot.ID,
+		"workflow", snapshot.WorkflowName,
+	)
 
 	// Find the failure point in the event history
 	failureInfo, err := eo.findFailurePoint(events)
@@ -208,7 +202,7 @@ func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot 
 func (eo *ExecutionOrchestrator) retryWithNewInputs(ctx context.Context, snapshot *workflow.ExecutionSnapshot, events []*workflow.ExecutionEvent, wf *workflow.Workflow, newInputs map[string]interface{}) (*EventBasedExecution, error) {
 	eo.logger.Info("retrying with new inputs", "execution_id", snapshot.ID)
 
-	if newInputs == nil || len(newInputs) == 0 {
+	if len(newInputs) == 0 {
 		return nil, fmt.Errorf("new inputs are required for RetryWithNewInputs strategy")
 	}
 
@@ -370,17 +364,16 @@ func (eo *ExecutionOrchestrator) getEventsBeforeSequence(events []*workflow.Exec
 
 // createExecutionFromReplay creates a new execution from replay results
 func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, snapshot *workflow.ExecutionSnapshot, replayResult *workflow.ReplayResult, wf *workflow.Workflow) (*EventBasedExecution, error) {
-	config := &PersistenceConfig{
-		EventStore: eo.eventStore,
-		BatchSize:  10,
-	}
-
 	// Create new execution with fresh ID
 	newExecution, err := NewEventBasedExecution(eo.environment, ExecutionOptions{
 		WorkflowName: snapshot.WorkflowName,
 		Inputs:       snapshot.Inputs,
 		Logger:       eo.logger,
-	}, config)
+		Persistence: &PersistenceConfig{
+			EventStore: eo.eventStore,
+			BatchSize:  10,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
@@ -160,7 +161,8 @@ func TestDefaultContinueAsNewEvaluator(t *testing.T) {
 func TestContinueAsNewManager(t *testing.T) {
 	// Setup
 	tempDir := t.TempDir()
-	eventStore := NewFileExecutionEventStore(tempDir)
+	eventStore, err := NewSQLiteExecutionEventStore(path.Join(tempDir, "executions.db"), DefaultSQLiteStoreOptions())
+	require.NoError(t, err)
 	logger := &mockLogger{}
 	evaluator := NewDefaultContinueAsNewEvaluator(logger)
 	options := DefaultContinueAsNewOptions()
@@ -185,7 +187,7 @@ func TestContinueAsNewManager(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := eventStore.SaveSnapshot(ctx, snapshot)
+	err = eventStore.SaveSnapshot(ctx, snapshot)
 	require.NoError(t, err)
 
 	// Create test events
