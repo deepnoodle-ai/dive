@@ -898,9 +898,26 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 	}
 
 	// Deterministic: prepare content
-	content := []llm.Content{&llm.TextContent{Text: prompt}}
+	var content []llm.Content
 	if stepContent := step.Content(); len(stepContent) > 0 {
-		content = append(content, stepContent...)
+		for _, item := range stepContent {
+			if dynamicContent, ok := item.(DynamicContent); ok {
+				processedContent, err := dynamicContent.Content(ctx, map[string]any{
+					"workflow": e.workflow.Name(),
+					"step":     step.Name(),
+					"agent":    agent.Name(),
+				})
+				if err != nil {
+					return nil, fmt.Errorf("failed to process dynamic content: %w", err)
+				}
+				content = append(content, processedContent...)
+			} else {
+				content = append(content, item)
+			}
+		}
+	}
+	if prompt != "" {
+		content = append(content, &llm.TextContent{Text: prompt})
 	}
 
 	// Operation: LLM call (non-deterministic)
