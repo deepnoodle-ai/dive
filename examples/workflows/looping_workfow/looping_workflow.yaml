@@ -14,15 +14,13 @@ Agents:
 
 Workflows:
   - Name: Looping Workflow Demo
-    Description: |
-      Demonstrates Dive's each loop feature by iterating over a collection of
-      programming languages.
+    Description: Describe and compare programming languages.
     Steps:
       # Step 1: Loop over the array of languages
       - Name: Analyze Each Programming Language
         Agent: Analyst
         Prompt: |
-          Provide a brief, one paragraph description of the ${language}
+          Provide a brief, one paragraph description of the ${state.language}
           programming language.
         Each:
           Items: ['Python', 'Go', 'JavaScript', 'Rust']
@@ -37,7 +35,7 @@ Workflows:
           then briefly contrast them with each other.
 
           <languages>
-          ${language_descriptions}
+          ${state.language_descriptions}
           </languages>
         Store: summary
 
@@ -46,4 +44,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/languages.md
-          Content: ${summary}
+          Content: ${state.summary}

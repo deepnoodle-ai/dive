@@ -138,6 +138,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 		EventStore:  eventStore,
 		Logger:      logger,
 		ReplayMode:  false,
+		Formatter:   formatter,
 	})
 	if err != nil {
 		duration := time.Since(startTime)

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/eval"
 	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/objects"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
 	"github.com/risor-io/risor"
@@ -28,6 +30,17 @@ const (
 	ExecutionStatusCompleted ExecutionStatus = "completed"
 	ExecutionStatusFailed    ExecutionStatus = "failed"
 )
+
+// ExecutionV2Options configures a new Execution
+type ExecutionV2Options struct {
+	Workflow    *workflow.Workflow
+	Environment *Environment
+	Inputs      map[string]interface{}
+	EventStore  ExecutionEventStore
+	Logger      slogger.Logger
+	ReplayMode  bool
+	Formatter   WorkflowFormatter
+}
 
 // Execution represents a deterministic workflow execution using operations
 type Execution struct {
@@ -57,22 +70,13 @@ type Execution struct {
 	pathUpdates chan pathUpdate
 	pathCounter int
 
-	// Logging
-	logger slogger.Logger
+	// Logging and formatting
+	logger    slogger.Logger
+	formatter WorkflowFormatter
 
 	// Synchronization
 	mutex  sync.RWMutex
 	doneWg sync.WaitGroup
-}
-
-// ExecutionV2Options configures a new Execution
-type ExecutionV2Options struct {
-	Workflow    *workflow.Workflow
-	Environment *Environment
-	Inputs      map[string]interface{}
-	EventStore  ExecutionEventStore
-	Logger      slogger.Logger
-	ReplayMode  bool
 }
 
 // NewExecution creates a new deterministic execution
@@ -118,6 +122,7 @@ func NewExecution(opts ExecutionV2Options) (*Execution, error) {
 		activePaths:      make(map[string]*executionPath),
 		pathUpdates:      make(chan pathUpdate, 100),
 		logger:           opts.Logger.With("execution_id", executionID),
+		formatter:        opts.Formatter,
 	}, nil
 }
 
@@ -562,32 +567,312 @@ func (e *Execution) updatePathState(pathID string, updateFn func(*PathState)) {
 func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
 	e.logger.Info("executing step", "step_name", step.Name(), "step_type", step.Type())
 
+	// Print step start if formatter is available
+	if e.formatter != nil {
+		e.formatter.PrintStepStart(step.Name(), step.Type())
+	}
+
 	// Record step started
 	e.recorder.RecordStepStarted(pathID, step.Name(), step.Type(), step.Parameters())
 
 	var result *dive.StepResult
 	var err error
 
-	switch step.Type() {
-	case "prompt":
-		result, err = e.executePromptStep(ctx, step, pathID)
-	case "action":
-		result, err = e.executeActionStep(ctx, step, pathID)
-	default:
-		err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
+	// Handle steps with "each" blocks
+	if step.Each() != nil {
+		result, err = e.executeStepEach(ctx, step, pathID)
+	} else {
+		switch step.Type() {
+		case "prompt":
+			result, err = e.executePromptStep(ctx, step, pathID)
+		case "action":
+			result, err = e.executeActionStep(ctx, step, pathID)
+		default:
+			err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
+		}
 	}
 
 	if err != nil {
+		// Print step error if formatter is available
+		if e.formatter != nil {
+			e.formatter.PrintStepError(step.Name(), err)
+		}
 		return nil, err
 	}
 
-	// Store step result in state
-	e.state.Set(step.Name(), result.Content)
+	// Store step result in state if not an each step (each steps handle their own storage)
+	if step.Each() == nil {
+		// Store the result in a state variable if specified
+		if varName := step.Store(); varName != "" {
+			e.state.Set(varName, result.Content)
+			e.logger.Info("stored step result", "variable_name", varName)
+		}
+	}
+
+	// Print step output if formatter is available
+	if e.formatter != nil {
+		e.formatter.PrintStepOutput(step.Name(), result.Content)
+	}
 
 	// Record step completed
 	e.recorder.RecordStepCompleted(pathID, step.Name(), result.Content, step.Name())
 
 	return result, nil
+}
+
+// executeStepEach handles the execution of a step that has an each block
+func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
+	each := step.Each()
+
+	// Resolve the items to iterate over
+	items, err := e.resolveEachItems(ctx, each)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve each items: %w", err)
+	}
+
+	// Execute the step for each item and capture the results
+	results := make([]*dive.StepResult, 0, len(items))
+
+	// Store original state if we're setting a variable
+	var originalValue interface{}
+	var hasOriginalValue bool
+	if each.As != "" {
+		originalValue, hasOriginalValue = e.state.Get(each.As)
+	}
+
+	for _, item := range items {
+		// Set the loop variable if specified
+		if each.As != "" {
+			e.state.Set(each.As, item)
+		}
+
+		// Execute the step for this item
+		var result *dive.StepResult
+		switch step.Type() {
+		case "prompt":
+			result, err = e.executePromptStep(ctx, step, pathID)
+		case "action":
+			result, err = e.executeActionStep(ctx, step, pathID)
+		default:
+			err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
+		}
+
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+
+	// Restore original loop variable value
+	if each.As != "" {
+		if hasOriginalValue {
+			e.state.Set(each.As, originalValue)
+		} else {
+			e.state.Delete(each.As)
+		}
+	}
+
+	// Store the array of results if a store variable is specified
+	if varName := step.Store(); varName != "" {
+		resultContents := make([]string, 0, len(results))
+		for _, result := range results {
+			resultContents = append(resultContents, result.Content)
+		}
+		e.state.Set(varName, resultContents)
+		e.logger.Info("stored results list",
+			"variable_name", varName,
+			"item_count", len(resultContents),
+		)
+	}
+
+	// Combine the results into one string which we put in a single task result
+	itemTexts := make([]string, 0, len(results))
+	for i, result := range results {
+		var itemText string
+		if each.As != "" {
+			itemText = fmt.Sprintf("# %s: %s\n\n%s", each.As, items[i], result.Content)
+		} else {
+			itemText = fmt.Sprintf("# %s\n\n%s", items[i], result.Content)
+		}
+		itemTexts = append(itemTexts, itemText)
+	}
+
+	return &dive.StepResult{
+		Content: strings.Join(itemTexts, "\n\n"),
+		Format:  dive.OutputFormatMarkdown,
+	}, nil
+}
+
+// resolveEachItems resolves the array of items from either a direct array or a risor expression
+func (e *Execution) resolveEachItems(ctx context.Context, each *workflow.EachBlock) ([]any, error) {
+	// Array of strings
+	if strArray, ok := each.Items.([]string); ok {
+		var items []any
+		for _, item := range strArray {
+			items = append(items, item)
+		}
+		return items, nil
+	}
+
+	// Array of any
+	if items, ok := each.Items.([]any); ok {
+		return items, nil
+	}
+
+	// Handle Risor script expression
+	if codeStr, ok := each.Items.(string); ok && strings.HasPrefix(codeStr, "$(") && strings.HasSuffix(codeStr, ")") {
+		return e.evaluateRisorExpression(ctx, codeStr)
+	}
+
+	return nil, fmt.Errorf("unsupported value for 'each' block (got %T)", each.Items)
+}
+
+// evaluateRisorExpression evaluates a risor expression and returns the result as an array
+func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string) ([]any, error) {
+	code := strings.TrimSuffix(strings.TrimPrefix(codeStr, "$("), ")")
+
+	// Build safe globals for the expression evaluation
+	globals := e.buildEachGlobals()
+
+	compiledCode, err := e.compileEachScript(ctx, code, globals)
+	if err != nil {
+		e.logger.Error("failed to compile 'each' expression", "error", err)
+		return nil, fmt.Errorf("failed to compile expression: %w", err)
+	}
+
+	result, err := e.evalEachScript(ctx, compiledCode, globals)
+	if err != nil {
+		e.logger.Error("failed to evaluate 'each' expression", "error", err)
+		return nil, fmt.Errorf("failed to evaluate expression: %w", err)
+	}
+	return result, nil
+}
+
+// buildEachGlobals creates globals for "each" expression evaluation
+func (e *Execution) buildEachGlobals() map[string]any {
+	globals := make(map[string]any)
+
+	// Add safe built-in functions (same filtering as conditions)
+	// unsafeFunctions := map[string]bool{
+	// 	"read":    true,
+	// 	"write":   true,
+	// 	"exec":    true,
+	// 	"open":    true,
+	// 	"file":    true,
+	// 	"http":    true,
+	// 	"fetch":   true,
+	// 	"request": true,
+	// 	"system":  true,
+	// 	"shell":   true,
+	// 	"env":     true,
+	// 	"getenv":  true,
+	// 	"setenv":  true,
+	// 	"command": true,
+	// 	"proc":    true,
+	// 	"process": true,
+	// 	"socket":  true,
+	// 	"network": true,
+	// 	"tcp":     true,
+	// 	"udp":     true,
+	// 	"tls":     true,
+	// 	"crypto":  true,
+	// 	"hash":    true,
+	// 	"rand":    true, // exclude random functions for determinism
+	// 	"random":  true,
+	// }
+
+	for k, v := range all.Builtins() {
+		globals[k] = v
+	}
+
+	// Add workflow inputs (read-only)
+	globals["inputs"] = e.inputs
+
+	// Add current state variables (read-only snapshot)
+	globals["state"] = e.state.Copy()
+
+	// Add documents if available
+	if e.environment.documentRepo != nil {
+		globals["documents"] = objects.NewDocumentRepository(e.environment.documentRepo)
+	}
+
+	return globals
+}
+
+// compileEachScript compiles a script for "each" expression evaluation
+func (e *Execution) compileEachScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
+	// Parse the script
+	ast, err := parser.Parse(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse script: %w", err)
+	}
+
+	// Get sorted global names for deterministic compilation
+	var globalNames []string
+	for name := range globals {
+		globalNames = append(globalNames, name)
+	}
+	sort.Strings(globalNames)
+
+	// Compile with global names
+	return compiler.Compile(ast, compiler.WithGlobalNames(globalNames))
+}
+
+// evalEachScript evaluates a compiled script and returns the result as an array
+func (e *Execution) evalEachScript(ctx context.Context, code *compiler.Code, globals map[string]any) ([]any, error) {
+	result, err := risor.EvalCode(ctx, code, risor.WithGlobals(globals))
+	if err != nil {
+		return nil, err
+	}
+	return e.convertRisorEachValue(result)
+}
+
+// convertRisorEachValue converts a Risor object to an array of values
+func (e *Execution) convertRisorEachValue(obj object.Object) ([]any, error) {
+	switch obj := obj.(type) {
+	case *object.String:
+		return []any{obj.Value()}, nil
+	case *object.Int:
+		return []any{obj.Value()}, nil
+	case *object.Float:
+		return []any{obj.Value()}, nil
+	case *object.Bool:
+		return []any{obj.Value()}, nil
+	case *object.Time:
+		return []any{obj.Value()}, nil
+	case *object.List:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := e.convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value...)
+		}
+		return values, nil
+	case *object.Set:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := e.convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value...)
+		}
+		return values, nil
+	case *object.Map:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := e.convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value...)
+		}
+		return values, nil
+	default:
+		return nil, fmt.Errorf("unsupported risor result type for 'each': %T", obj)
+	}
 }
 
 // executePromptStep executes a prompt step using an agent
@@ -605,7 +890,7 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 	// Deterministic: prepare prompt by evaluating template
 	prompt := step.Prompt()
 	if strings.Contains(prompt, "${") {
-		evaluatedPrompt, err := e.evaluateTemplate(prompt)
+		evaluatedPrompt, err := e.evaluateTemplate(ctx, prompt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to evaluate prompt template in step %q (type: %s): %w", step.Name(), step.Type(), err)
 		}
@@ -666,9 +951,10 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, 
 	params := make(map[string]interface{})
 	for name, value := range step.Parameters() {
 		if strValue, ok := value.(string); ok && strings.Contains(strValue, "${") {
-			evaluated, err := e.evaluateTemplate(strValue)
+			evaluated, err := e.evaluateTemplate(ctx, strValue)
 			if err != nil {
-				return nil, fmt.Errorf("failed to evaluate parameter template %q in step %q (action: %s): %w", name, step.Name(), actionName, err)
+				return nil, fmt.Errorf("failed to evaluate parameter template %q in step %q (action: %s): %w",
+					name, step.Name(), actionName, err)
 			}
 			params[name] = evaluated
 		} else {
@@ -825,49 +1111,33 @@ func (e *Execution) convertToBool(obj object.Object) bool {
 	}
 }
 
-// evaluateTemplate evaluates a template string using the current state
-func (e *Execution) evaluateTemplate(template string) (string, error) {
-	// Simple template evaluation for ${var} patterns
-	result := template
-
-	// Find all ${...} patterns
-	start := 0
-	for {
-		startIdx := strings.Index(result[start:], "${")
-		if startIdx == -1 {
-			break
-		}
-		startIdx += start
-
-		endIdx := strings.Index(result[startIdx:], "}")
-		if endIdx == -1 {
-			return "", fmt.Errorf("unclosed template variable in: %s", template)
-		}
-		endIdx += startIdx
-
-		// Extract variable name
-		varName := result[startIdx+2 : endIdx]
-
-		// Get value from state
-		value, exists := e.state.Get(varName)
-		if !exists {
-			// Get available variable names for better error reporting
-			availableVars := e.state.Keys()
-			if len(availableVars) > 0 {
-				sort.Strings(availableVars)
-				return "", fmt.Errorf("variable %q not found in state (available variables: %s)", varName, strings.Join(availableVars, ", "))
-			} else {
-				return "", fmt.Errorf("variable %q not found in state (no variables currently available)", varName)
-			}
-		}
-
-		// Replace ${var} with the value
-		valueStr := fmt.Sprintf("%v", value)
-		result = result[:startIdx] + valueStr + result[endIdx+1:]
-
-		// Update start position
-		start = startIdx + len(valueStr)
+func (e *Execution) evaluateTemplate(ctx context.Context, s string) (string, error) {
+	if strings.HasPrefix(s, "$(") && strings.HasSuffix(s, ")") {
+		s = strings.TrimPrefix(s, "$(")
+		s = strings.TrimSuffix(s, ")")
 	}
 
-	return result, nil
+	builtins := all.Builtins()
+
+	globals := make(map[string]any, len(builtins)+len(e.inputs)+2)
+
+	// Add current state variables (read-only snapshot)
+	globals["state"] = e.state.Copy()
+
+	for k, v := range builtins {
+		globals[k] = v
+	}
+	for k, v := range e.inputs {
+		globals[k] = v
+	}
+	if e.environment.documentRepo != nil {
+		globals["documents"] = objects.NewDocumentRepository(e.environment.documentRepo)
+	}
+	inputs := map[string]any{}
+	for k, v := range e.inputs {
+		inputs[k] = v
+	}
+	globals["inputs"] = inputs
+
+	return eval.Eval(ctx, s, globals)
 }
