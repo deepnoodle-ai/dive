@@ -43,6 +43,19 @@ const (
 	EventSignalReceived         ExecutionEventType = "signal_received"
 	EventVersionDecision        ExecutionEventType = "version_decision"
 	EventExecutionContinueAsNew ExecutionEventType = "execution_continue_as_new"
+
+	// Operation events
+	EventOperationStarted   ExecutionEventType = "operation_started"
+	EventOperationCompleted ExecutionEventType = "operation_completed"
+	EventOperationFailed    ExecutionEventType = "operation_failed"
+
+	// State events
+	EventStateSet     ExecutionEventType = "state_set"
+	EventStateDeleted ExecutionEventType = "state_deleted"
+
+	// Deterministic access events
+	EventTimeAccessed    ExecutionEventType = "time_accessed"
+	EventRandomGenerated ExecutionEventType = "random_generated"
 )
 
 // ExecutionEvent represents a single event in the execution history

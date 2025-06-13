@@ -56,6 +56,12 @@ type EventBasedExecution struct {
 	replayMode    bool
 	batchSize     int
 	bufferMutex   sync.Mutex
+
+	// Operation support
+	operationResults     map[OperationID]*OperationResult
+	workflowState        *WorkflowState
+	currentPathID        string
+	deterministicRuntime *DeterministicRuntime
 }
 
 // NewEventBasedExecution creates a new event-based execution
@@ -131,7 +137,29 @@ func NewEventBasedExecution(env *Environment, opts ExecutionOptions) (*EventBase
 		eventSequence: 0,
 		replayMode:    false,
 		batchSize:     batchSize,
+
+		// Initialize operation support
+		operationResults: make(map[OperationID]*OperationResult),
 	}
+
+	// Create execution recorder for state management
+	recorder := NewBufferedExecutionRecorder(execution.id, opts.EventStore, batchSize)
+	execution.workflowState = NewWorkflowState(execution.id, recorder)
+
+	// Create deterministic runtime
+	execution.deterministicRuntime = NewDeterministicRuntime(execution)
+
+	// Add state object to script globals for Risor access
+	execution.scriptGlobals["state"] = NewRisorStateObject(execution.workflowState)
+
+	// Add deterministic runtime to script globals
+	// For now, we'll add individual functions rather than the complex object
+	execution.scriptGlobals["deterministicNow"] = execution.deterministicRuntime.Now
+	execution.scriptGlobals["deterministicRandom"] = execution.deterministicRuntime.Random
+	execution.scriptGlobals["deterministicRandomInt"] = execution.deterministicRuntime.RandomInt
+	execution.scriptGlobals["deterministicRandomString"] = execution.deterministicRuntime.RandomString
+	execution.scriptGlobals["deterministicSleep"] = execution.deterministicRuntime.Sleep
+
 	execution.doneWg.Add(1)
 	return execution, nil
 }
@@ -234,6 +262,76 @@ func (e *EventBasedExecution) flushEvents() error {
 // Flush any buffered events immediately
 func (e *EventBasedExecution) Flush() error {
 	return e.flushEvents()
+}
+
+// ExecuteOperation implements the OperationExecutor interface
+func (e *EventBasedExecution) ExecuteOperation(ctx context.Context, op Operation, fn func() (interface{}, error)) (interface{}, error) {
+	// Generate deterministic operation ID if not set
+	if op.ID == "" {
+		op.ID = op.GenerateID()
+	}
+
+	// Set current path ID if not specified
+	if op.PathID == "" {
+		op.PathID = e.currentPathID
+	}
+
+	if e.replayMode {
+		// During replay: return recorded result
+		if result, found := e.operationResults[op.ID]; found {
+			if result.Error != nil {
+				return nil, result.Error
+			}
+			return result.Result, nil
+		}
+		panic(fmt.Sprintf("Operation %s not found during replay", op.ID))
+	}
+
+	// Record operation start
+	e.recordEvent(EventOperationStarted, op.PathID, op.StepName, map[string]interface{}{
+		"operation_id":   string(op.ID),
+		"operation_type": op.Type,
+		"parameters":     op.Parameters,
+	})
+
+	// Execute the operation
+	startTime := time.Now()
+	result, err := fn()
+	executedAt := time.Now()
+
+	// Record operation completion or failure
+	if err != nil {
+		e.recordEvent(EventOperationFailed, op.PathID, op.StepName, map[string]interface{}{
+			"operation_id": string(op.ID),
+			"error":        err.Error(),
+			"duration":     executedAt.Sub(startTime),
+		})
+	} else {
+		e.recordEvent(EventOperationCompleted, op.PathID, op.StepName, map[string]interface{}{
+			"operation_id": string(op.ID),
+			"result":       result,
+			"duration":     executedAt.Sub(startTime),
+		})
+	}
+
+	// Cache result for potential replay
+	e.operationResults[op.ID] = &OperationResult{
+		OperationID: op.ID,
+		Result:      result,
+		Error:       err,
+		ExecutedAt:  executedAt,
+	}
+
+	return result, err
+}
+
+// FindOperationResult implements the OperationExecutor interface
+func (e *EventBasedExecution) FindOperationResult(opID OperationID) (*OperationResult, bool) {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	result, found := e.operationResults[opID]
+	return result, found
 }
 
 // Run the execution to completion. This is a blocking call.
@@ -414,6 +512,11 @@ func (e *EventBasedExecution) saveSnapshot() error {
 
 // Override runPath to add event recording
 func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, updates chan<- pathUpdate) {
+	// Set current path ID for operations
+	e.mutex.Lock()
+	e.currentPathID = path.id
+	e.mutex.Unlock()
+
 	// Record path started event
 	e.recordEvent(EventPathStarted, path.id, "", map[string]interface{}{
 		"current_step": path.currentStep.Name(),
@@ -732,11 +835,13 @@ func (e *EventBasedExecution) handlePromptStep(ctx context.Context, step *workfl
 		return nil, fmt.Errorf("prompt step %q has no prompt", step.Name())
 	}
 
+	// Deterministic: prepare prompt
 	prompt, err := e.evalString(ctx, promptTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create prompt template: %w", err)
 	}
 
+	// Deterministic: prepare content
 	var content []llm.Content
 	if stepContent := step.Content(); len(stepContent) > 0 {
 		for _, item := range stepContent {
@@ -759,21 +864,39 @@ func (e *EventBasedExecution) handlePromptStep(ctx context.Context, step *workfl
 		content = append(content, &llm.TextContent{Text: prompt})
 	}
 
-	result, err := agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(content...)))
+	// Operation: LLM call (non-deterministic)
+	op := NewOperation(
+		"agent_response",
+		step.Name(),
+		e.currentPathID,
+		map[string]interface{}{
+			"agent":   agent.Name(),
+			"prompt":  prompt,
+			"content": fmt.Sprintf("%d_items", len(content)),
+		},
+	)
+
+	responseInterface, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
+		return agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(content...)))
+	})
+
 	if err != nil {
-		e.logger.Error("task execution failed", "step", step.Name(), "error", err)
+		e.logger.Error("agent response operation failed", "step", step.Name(), "error", err)
 		return nil, err
 	}
 
+	// Deterministic: process result
+	response := responseInterface.(*dive.Response)
+
 	var usage llm.Usage
-	for _, item := range result.Items {
+	for _, item := range response.Items {
 		if item.Type == dive.ResponseItemTypeMessage && item.Usage != nil {
 			usage.Add(item.Usage)
 		}
 	}
 
 	return &dive.StepResult{
-		Content: result.OutputText(),
+		Content: response.OutputText(),
 		Usage:   usage,
 	}, nil
 }
@@ -789,6 +912,7 @@ func (e *EventBasedExecution) handleActionStep(ctx context.Context, step *workfl
 		return nil, fmt.Errorf("action %q not found", actionName)
 	}
 
+	// Deterministic: prepare parameters
 	params := make(map[string]interface{})
 	for name, value := range step.Parameters() {
 		// If the value is a string that looks like a template, evaluate it
@@ -803,12 +927,27 @@ func (e *EventBasedExecution) handleActionStep(ctx context.Context, step *workfl
 		}
 	}
 
-	result, err := action.Execute(ctx, params)
+	// Operation: execute action (non-deterministic)
+	op := NewOperation(
+		"action_execution",
+		step.Name(),
+		e.currentPathID,
+		map[string]interface{}{
+			"action_name": actionName,
+			"params":      params,
+		},
+	)
+
+	result, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
+		return action.Execute(ctx, params)
+	})
+
 	if err != nil {
-		e.logger.Error("action execution failed", "action", actionName, "error", err)
+		e.logger.Error("action execution operation failed", "action", actionName, "error", err)
 		return nil, err
 	}
 
+	// Deterministic: process result
 	var content string
 	if result != nil {
 		content = fmt.Sprintf("%v", result)
