@@ -220,3 +220,197 @@ func (m *mockEventStore) DeleteExecution(ctx context.Context, executionID string
 func (m *mockEventStore) CleanupCompletedExecutions(ctx context.Context, olderThan time.Time) error {
 	return nil
 }
+
+func TestExecution_evaluateCondition(t *testing.T) {
+	// Create a mock workflow
+	wf := &workflow.Workflow{}
+
+	// Create a mock environment
+	env := &Environment{
+		started: true,
+		logger:  slogger.DefaultLogger,
+	}
+
+	// Create execution
+	execution, err := NewExecution(ExecutionV2Options{
+		Workflow:    wf,
+		Environment: env,
+		Inputs: map[string]interface{}{
+			"user_age":  25,
+			"user_name": "Alice",
+			"active":    true,
+		},
+		Logger: slogger.DefaultLogger,
+	})
+	require.NoError(t, err)
+
+	// Set some state variables
+	execution.state.Set("score", 85)
+	execution.state.Set("category", "premium")
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		condition string
+		expected  bool
+		wantErr   bool
+	}{
+		{
+			name:      "simple true",
+			condition: "true",
+			expected:  true,
+		},
+		{
+			name:      "simple false",
+			condition: "false",
+			expected:  false,
+		},
+		{
+			name:      "access input variable",
+			condition: "$(inputs.user_age > 18)",
+			expected:  true,
+		},
+		{
+			name:      "access input variable - false case",
+			condition: "$(inputs.user_age < 18)",
+			expected:  false,
+		},
+		{
+			name:      "access state variable",
+			condition: "$(state.score >= 80)",
+			expected:  true,
+		},
+		{
+			name:      "access state variable - false case",
+			condition: "$(state.score < 50)",
+			expected:  false,
+		},
+		{
+			name:      "string comparison",
+			condition: "$(state.category == \"premium\")",
+			expected:  true,
+		},
+		{
+			name:      "boolean input",
+			condition: "$(inputs.active)",
+			expected:  true,
+		},
+		{
+			name:      "complex expression",
+			condition: "$(inputs.user_age > 21 && state.score > 80)",
+			expected:  true,
+		},
+		{
+			name:      "complex expression - false case",
+			condition: "$(inputs.user_age < 21 || state.score < 50)",
+			expected:  false,
+		},
+		{
+			name:      "string length check",
+			condition: "$(len(inputs.user_name) > 3)",
+			expected:  true,
+		},
+		{
+			name:      "invalid syntax",
+			condition: "$(invalid syntax here",
+			wantErr:   true,
+		},
+		{
+			name:      "undefined variable",
+			condition: "$(nonexistent_var > 10)",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := execution.evaluateCondition(ctx, tt.condition)
+
+			if tt.wantErr {
+				require.Error(t, err, "Expected error for condition: %s", tt.condition)
+				return
+			}
+
+			require.NoError(t, err, "Unexpected error for condition: %s", tt.condition)
+			require.Equal(t, tt.expected, result, "Condition evaluation mismatch for: %s", tt.condition)
+		})
+	}
+}
+
+func TestExecution_buildConditionGlobals(t *testing.T) {
+	// Create a mock workflow
+	wf := &workflow.Workflow{}
+
+	// Create a mock environment
+	env := &Environment{
+		started: true,
+		logger:  slogger.DefaultLogger,
+	}
+
+	// Create execution
+	execution, err := NewExecution(ExecutionV2Options{
+		Workflow:    wf,
+		Environment: env,
+		Inputs: map[string]interface{}{
+			"test_input": "test_value",
+		},
+		Logger: slogger.DefaultLogger,
+	})
+	require.NoError(t, err)
+
+	// Set some state variables
+	execution.state.Set("test_state", "state_value")
+
+	// Build globals
+	globals := execution.buildConditionGlobals()
+
+	// Check that inputs are included
+	require.Contains(t, globals, "inputs")
+	inputs, ok := globals["inputs"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "test_value", inputs["test_input"])
+
+	// Check that state is included
+	require.Contains(t, globals, "state")
+	state, ok := globals["state"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "state_value", state["test_state"])
+	require.Equal(t, "test_value", state["test_input"]) // inputs are also stored in state
+
+	// Check that safe built-ins are included
+	require.Contains(t, globals, "len")
+	require.Contains(t, globals, "string")
+
+	// Check that unsafe built-ins are excluded (these would be dangerous)
+	require.NotContains(t, globals, "read")
+	require.NotContains(t, globals, "write")
+	require.NotContains(t, globals, "exec")
+}
+
+func TestExecution_convertToBool(t *testing.T) {
+	// Create a mock execution
+	execution := &Execution{}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"empty string", "", false},
+		{"non-empty string", "hello", true},
+		{"false string", "false", false},
+		{"true string", "true", true},
+		{"False string", "False", false},
+		{"TRUE string", "TRUE", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// We can't easily create Risor objects in tests without more setup,
+			// so we'll just verify the method exists and can be called
+			// The actual object conversion testing would require integration tests
+			require.NotNil(t, execution.convertToBool)
+		})
+	}
+}

@@ -3,6 +3,7 @@ package environment
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,11 @@ import (
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
+	"github.com/risor-io/risor"
+	"github.com/risor-io/risor/compiler"
+	"github.com/risor-io/risor/modules/all"
+	"github.com/risor-io/risor/object"
+	"github.com/risor-io/risor/parser"
 )
 
 // Status represents the execution status
@@ -504,9 +510,11 @@ func (e *Execution) handlePathBranching(ctx context.Context, step *workflow.Step
 			continue
 		}
 
-		// Simple condition evaluation - just check if it's "true" for now
-		// TODO: Implement proper condition evaluation
-		match := edge.Condition == "true"
+		// Evaluate condition using safe Risor scripting
+		match, err := e.evaluateCondition(ctx, edge.Condition)
+		if err != nil {
+			return nil, fmt.Errorf("failed to evaluate condition %q in step %q: %w", edge.Condition, step.Name(), err)
+		}
 		if match {
 			matchingEdges = append(matchingEdges, edge)
 		}
@@ -566,7 +574,7 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	case "action":
 		result, err = e.executeActionStep(ctx, step, pathID)
 	default:
-		err = fmt.Errorf("unsupported step type: %s", step.Type())
+		err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
 	}
 
 	if err != nil {
@@ -599,7 +607,7 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 	if strings.Contains(prompt, "${") {
 		evaluatedPrompt, err := e.evaluateTemplate(prompt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to evaluate prompt template: %w", err)
+			return nil, fmt.Errorf("failed to evaluate prompt template in step %q (type: %s): %w", step.Name(), step.Type(), err)
 		}
 		prompt = evaluatedPrompt
 	}
@@ -660,7 +668,7 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, 
 		if strValue, ok := value.(string); ok && strings.Contains(strValue, "${") {
 			evaluated, err := e.evaluateTemplate(strValue)
 			if err != nil {
-				return nil, fmt.Errorf("failed to evaluate parameter template: %w", err)
+				return nil, fmt.Errorf("failed to evaluate parameter template %q in step %q (action: %s): %w", name, step.Name(), actionName, err)
 			}
 			params[name] = evaluated
 		} else {
@@ -692,6 +700,131 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, 
 	return &dive.StepResult{Content: content}, nil
 }
 
+// buildConditionGlobals creates a safe, read-only globals map for condition evaluation
+func (e *Execution) buildConditionGlobals() map[string]any {
+	globals := make(map[string]any)
+
+	// Add safe built-in functions (exclude potentially dangerous ones)
+	unsafeFunctions := map[string]bool{
+		"read":    true,
+		"write":   true,
+		"exec":    true,
+		"open":    true,
+		"file":    true,
+		"http":    true,
+		"fetch":   true,
+		"request": true,
+		"system":  true,
+		"shell":   true,
+		"env":     true,
+		"getenv":  true,
+		"setenv":  true,
+		"command": true,
+		"proc":    true,
+		"process": true,
+		"socket":  true,
+		"network": true,
+		"tcp":     true,
+		"udp":     true,
+		"tls":     true,
+		"crypto":  true,
+		"hash":    true,
+		"rand":    true, // exclude random functions for determinism
+		"random":  true,
+	}
+
+	for k, v := range all.Builtins() {
+		if !unsafeFunctions[k] {
+			globals[k] = v
+		}
+	}
+
+	// Add workflow inputs (read-only)
+	globals["inputs"] = e.inputs
+
+	// Add current state variables (read-only snapshot)
+	globals["state"] = e.state.Copy()
+
+	return globals
+}
+
+// evaluateCondition evaluates a workflow condition using Risor scripting
+func (e *Execution) evaluateCondition(ctx context.Context, condition string) (bool, error) {
+	// Handle simple boolean conditions
+	switch strings.ToLower(strings.TrimSpace(condition)) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+
+	// Handle Risor expressions wrapped in $()
+	codeStr := condition
+	if strings.HasPrefix(codeStr, "$(") && strings.HasSuffix(codeStr, ")") {
+		codeStr = strings.TrimPrefix(codeStr, "$(")
+		codeStr = strings.TrimSuffix(codeStr, ")")
+	}
+
+	// Build safe globals for condition evaluation
+	globals := e.buildConditionGlobals()
+
+	// Compile the script
+	compiledCode, err := e.compileConditionScript(ctx, codeStr, globals)
+	if err != nil {
+		return false, fmt.Errorf("failed to compile condition: %w", err)
+	}
+
+	// Evaluate the condition
+	result, err := risor.EvalCode(ctx, compiledCode, risor.WithGlobals(globals))
+	if err != nil {
+		return false, fmt.Errorf("failed to evaluate condition: %w", err)
+	}
+
+	// Convert result to boolean
+	return e.convertToBool(result), nil
+}
+
+// compileConditionScript compiles a condition script with deterministic global names
+func (e *Execution) compileConditionScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
+	// Parse the script
+	ast, err := parser.Parse(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse script: %w", err)
+	}
+
+	// Get sorted global names for deterministic compilation
+	var globalNames []string
+	for name := range globals {
+		globalNames = append(globalNames, name)
+	}
+	sort.Strings(globalNames)
+
+	// Compile with global names
+	return compiler.Compile(ast, compiler.WithGlobalNames(globalNames))
+}
+
+// convertToBool safely converts a Risor object to a boolean
+func (e *Execution) convertToBool(obj object.Object) bool {
+	switch obj := obj.(type) {
+	case *object.Bool:
+		return obj.Value()
+	case *object.Int:
+		return obj.Value() != 0
+	case *object.Float:
+		return obj.Value() != 0.0
+	case *object.String:
+		val := obj.Value()
+		return val != "" && strings.ToLower(val) != "false"
+	case *object.List:
+		return len(obj.Value()) > 0
+	case *object.Map:
+		return len(obj.Value()) > 0
+	default:
+		// Use Risor's built-in truthiness evaluation
+		return obj.IsTruthy()
+	}
+}
+
 // evaluateTemplate evaluates a template string using the current state
 func (e *Execution) evaluateTemplate(template string) (string, error) {
 	// Simple template evaluation for ${var} patterns
@@ -718,7 +851,14 @@ func (e *Execution) evaluateTemplate(template string) (string, error) {
 		// Get value from state
 		value, exists := e.state.Get(varName)
 		if !exists {
-			return "", fmt.Errorf("variable %q not found in state", varName)
+			// Get available variable names for better error reporting
+			availableVars := e.state.Keys()
+			if len(availableVars) > 0 {
+				sort.Strings(availableVars)
+				return "", fmt.Errorf("variable %q not found in state (available variables: %s)", varName, strings.Join(availableVars, ", "))
+			} else {
+				return "", fmt.Errorf("variable %q not found in state (no variables currently available)", varName)
+			}
 		}
 
 		// Replace ${var} with the value
