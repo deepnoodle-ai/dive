@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -115,6 +117,37 @@ type ReplayPathState struct {
 	StepOutputs     map[string]string `json:"step_outputs"`
 }
 
+// WorkflowVersion defines a version decision point in workflow evolution
+type WorkflowVersion struct {
+	ChangeID     string `json:"change_id"`     // Unique identifier for this version decision
+	Version      int    `json:"version"`       // Selected version number
+	MinVersion   int    `json:"min_version"`   // Minimum supported version
+	MaxVersion   int    `json:"max_version"`   // Maximum available version
+	ChangeReason string `json:"change_reason"` // Description of what changed
+}
+
+// WorkflowCompatibility represents compatibility between workflow versions
+type WorkflowCompatibility struct {
+	IsCompatible      bool     `json:"is_compatible"`
+	IncompatibleSteps []string `json:"incompatible_steps,omitempty"`
+	ChangedInputs     []string `json:"changed_inputs,omitempty"`
+	ChangesSummary    string   `json:"changes_summary"`
+}
+
+// WorkflowHasher provides methods for generating workflow hashes
+type WorkflowHasher interface {
+	HashWorkflow(workflow *Workflow) (string, error)
+	HashInputs(inputs map[string]interface{}) (string, error)
+	CompareWorkflows(oldHash, newHash string, oldWorkflow, newWorkflow *Workflow) (*WorkflowCompatibility, error)
+}
+
+// ChangeDetector analyzes workflow and input changes for replay compatibility
+type ChangeDetector interface {
+	DetectWorkflowChanges(events []*ExecutionEvent, currentWorkflow *Workflow) (*WorkflowCompatibility, error)
+	DetectInputChanges(oldInputs, newInputs map[string]interface{}) ([]string, error)
+	FindAffectedSteps(changedInputs []string, workflow *Workflow) ([]string, error)
+}
+
 // Validate validates the execution event
 func (e *ExecutionEvent) Validate() error {
 	if e.ID == "" {
@@ -182,34 +215,61 @@ func (r *BasicExecutionReplayer) ReplayExecution(ctx context.Context, events []*
 	// Track active paths during replay
 	activePaths := make(map[string]*ReplayPathState)
 
+	// Track workflow state for proper reconstruction
+	pathHistory := make(map[string][]*ExecutionEvent) // Track events per path
+	stepExecutionOrder := make([]string, 0)           // Track order of step execution
+
 	r.logger.Info("starting replay", "event_count", len(events))
 
-	// Replay events in sequence
+	// First pass: collect and organize events by path
+	for _, event := range events {
+		if event.PathID != "" {
+			pathHistory[event.PathID] = append(pathHistory[event.PathID], event)
+		}
+	}
+
+	// Second pass: replay events in sequence with enhanced logic
 	for i, event := range events {
-		if err := r.replayEvent(ctx, event, result, activePaths); err != nil {
+		if err := r.replayEventEnhanced(ctx, event, result, activePaths, &stepExecutionOrder); err != nil {
 			r.logger.Error("replay failed", "event_sequence", event.Sequence, "error", err)
 			return nil, fmt.Errorf("replay failed at event %d: %w", i, err)
 		}
 	}
 
-	// Convert active paths map to slice
-	for _, pathState := range activePaths {
+	// Convert active paths map to slice and validate state
+	for pathID, pathState := range activePaths {
+		// Ensure path state is consistent
+		if err := r.validatePathState(pathState, workflow); err != nil {
+			r.logger.Error("invalid path state after replay", "path_id", pathID, "error", err)
+			// Continue with warning rather than failing completely
+		}
 		result.ActivePaths = append(result.ActivePaths, pathState)
+	}
+
+	// Reconstruct script globals from step outputs and stored variables
+	if err := r.reconstructScriptGlobals(result, events, workflow); err != nil {
+		r.logger.Error("failed to reconstruct script globals", "error", err)
+		// Continue - this is not fatal for basic replay
 	}
 
 	r.logger.Info("replay completed",
 		"completed_steps", len(result.CompletedSteps),
 		"active_paths", len(result.ActivePaths),
-		"status", result.Status)
+		"status", result.Status,
+		"script_variables", len(result.ScriptGlobals))
 
 	return result, nil
 }
 
-// replayEvent processes a single event during replay
-func (r *BasicExecutionReplayer) replayEvent(ctx context.Context, event *ExecutionEvent, result *ReplayResult, activePaths map[string]*ReplayPathState) error {
+// replayEventEnhanced processes a single event with enhanced logic for complex scenarios
+func (r *BasicExecutionReplayer) replayEventEnhanced(ctx context.Context, event *ExecutionEvent, result *ReplayResult, activePaths map[string]*ReplayPathState, stepOrder *[]string) error {
 	switch event.EventType {
 	case EventExecutionStarted:
 		result.Status = "running"
+		// Initialize script globals with inputs if available
+		if inputs, ok := event.Data["inputs"].(map[string]interface{}); ok {
+			result.ScriptGlobals["inputs"] = inputs
+		}
 		r.logger.Info("execution started", "execution_id", event.ExecutionID)
 
 	case EventPathStarted:
@@ -225,65 +285,206 @@ func (r *BasicExecutionReplayer) replayEvent(ctx context.Context, event *Executi
 		if pathState, exists := activePaths[event.PathID]; exists {
 			pathState.CurrentStepName = event.StepName
 		}
+		*stepOrder = append(*stepOrder, event.StepName)
 		r.logger.Info("step started", "path_id", event.PathID, "step", event.StepName)
 
 	case EventStepCompleted:
 		stepOutput := getStringFromData(event.Data, "output")
 		result.CompletedSteps[event.StepName] = stepOutput
 
-		// Update path state
+		// Update path state with step output
 		if pathState, exists := activePaths[event.PathID]; exists {
 			pathState.StepOutputs[event.StepName] = stepOutput
 		}
 
-		// Handle stored variables
+		// Handle stored variables with proper type preservation
 		if varName := getStringFromData(event.Data, "stored_variable"); varName != "" {
-			result.ScriptGlobals[varName] = stepOutput
+			// Try to preserve the original data type if available
+			if storedValue, ok := event.Data["stored_value"]; ok {
+				result.ScriptGlobals[varName] = storedValue
+			} else {
+				result.ScriptGlobals[varName] = stepOutput
+			}
+		}
+
+		// Handle conditional step results
+		if condition := getStringFromData(event.Data, "condition_result"); condition == "true" || condition == "false" {
+			result.ScriptGlobals[event.StepName+"_condition"] = condition == "true"
+		}
+
+		// Handle each block iteration state
+		if iterationData, ok := event.Data["iteration_state"]; ok {
+			if iterMap, ok := iterationData.(map[string]interface{}); ok {
+				result.ScriptGlobals[event.StepName+"_iteration"] = iterMap
+			}
 		}
 
 		r.logger.Info("step completed", "path_id", event.PathID, "step", event.StepName)
 
 	case EventStepFailed:
 		errorMsg := getStringFromData(event.Data, "error")
+
+		// Mark the step as failed but continue replay
+		result.CompletedSteps[event.StepName+"_error"] = errorMsg
+
+		// Update path state
+		if pathState, exists := activePaths[event.PathID]; exists {
+			pathState.StepOutputs[event.StepName+"_error"] = errorMsg
+		}
+
 		r.logger.Info("step failed", "path_id", event.PathID, "step", event.StepName, "error", errorMsg)
 
 	case EventPathBranched:
-		// Handle path branching - create new path states
-		if newPathsData, ok := event.Data["new_paths"].([]interface{}); ok {
-			for _, pathData := range newPathsData {
-				if pathMap, ok := pathData.(map[string]interface{}); ok {
-					pathID := getStringFromMap(pathMap, "id")
-					currentStep := getStringFromMap(pathMap, "current_step")
-
-					newPathState := &ReplayPathState{
-						ID:              pathID,
-						CurrentStepName: currentStep,
-						StepOutputs:     make(map[string]string),
-					}
-					activePaths[pathID] = newPathState
-				}
+		// Enhanced path branching handling
+		if newPathsData, ok := event.Data["new_paths"]; ok {
+			if err := r.handlePathBranching(event, newPathsData, activePaths, result); err != nil {
+				return fmt.Errorf("failed to handle path branching: %w", err)
 			}
 		}
 		r.logger.Info("path branched", "parent_path", event.PathID, "step", event.StepName)
 
 	case EventPathCompleted:
+		// Before removing, capture final path state
+		if _, exists := activePaths[event.PathID]; exists {
+			// Store any final path outputs
+			if finalOutput := getStringFromData(event.Data, "final_output"); finalOutput != "" {
+				result.ScriptGlobals["path_"+event.PathID+"_output"] = finalOutput
+			}
+		}
 		delete(activePaths, event.PathID)
 		r.logger.Info("path completed", "path_id", event.PathID)
 
 	case EventPathFailed:
+		// Capture failure reason before removing path
+		if _, exists := activePaths[event.PathID]; exists {
+			if failureReason := getStringFromData(event.Data, "failure_reason"); failureReason != "" {
+				result.ScriptGlobals["path_"+event.PathID+"_error"] = failureReason
+			}
+		}
 		delete(activePaths, event.PathID)
 		r.logger.Info("path failed", "path_id", event.PathID)
 
 	case EventExecutionCompleted:
 		result.Status = "completed"
+		// Capture final execution outputs
+		if outputs, ok := event.Data["outputs"]; ok {
+			result.ScriptGlobals["outputs"] = outputs
+		}
 		r.logger.Info("execution completed", "execution_id", event.ExecutionID)
 
 	case EventExecutionFailed:
 		result.Status = "failed"
+		if errorMsg := getStringFromData(event.Data, "error"); errorMsg != "" {
+			result.ScriptGlobals["execution_error"] = errorMsg
+		}
 		r.logger.Info("execution failed", "execution_id", event.ExecutionID)
 
 	default:
 		r.logger.Info("unknown event type", "event_type", event.EventType, "event_id", event.ID)
+	}
+
+	return nil
+}
+
+// handlePathBranching processes path branching events with enhanced logic
+func (r *BasicExecutionReplayer) handlePathBranching(event *ExecutionEvent, newPathsData interface{}, activePaths map[string]*ReplayPathState, result *ReplayResult) error {
+	switch pathsData := newPathsData.(type) {
+	case []interface{}:
+		// Standard array format
+		for _, pathData := range pathsData {
+			if pathMap, ok := pathData.(map[string]interface{}); ok {
+				if err := r.createBranchedPath(pathMap, activePaths, event.PathID); err != nil {
+					return err
+				}
+			}
+		}
+	case map[string]interface{}:
+		// Single path format
+		if err := r.createBranchedPath(pathsData, activePaths, event.PathID); err != nil {
+			return err
+		}
+	default:
+		r.logger.Error("unrecognized path branching data format", "type", fmt.Sprintf("%T", pathsData))
+		return fmt.Errorf("unrecognized path branching data format")
+	}
+
+	return nil
+}
+
+// createBranchedPath creates a new path state from branching data
+func (r *BasicExecutionReplayer) createBranchedPath(pathMap map[string]interface{}, activePaths map[string]*ReplayPathState, parentPathID string) error {
+	pathID := getStringFromMap(pathMap, "id")
+	if pathID == "" {
+		return fmt.Errorf("missing path ID in branch data")
+	}
+
+	currentStep := getStringFromMap(pathMap, "current_step")
+
+	newPathState := &ReplayPathState{
+		ID:              pathID,
+		CurrentStepName: currentStep,
+		StepOutputs:     make(map[string]string),
+	}
+
+	// Inherit outputs from parent path if specified
+	if parentPath, exists := activePaths[parentPathID]; exists {
+		if inherit, ok := pathMap["inherit_outputs"].(bool); ok && inherit {
+			for stepName, output := range parentPath.StepOutputs {
+				newPathState.StepOutputs[stepName] = output
+			}
+		}
+	}
+
+	activePaths[pathID] = newPathState
+	return nil
+}
+
+// validatePathState ensures a path state is consistent with workflow definition
+func (r *BasicExecutionReplayer) validatePathState(pathState *ReplayPathState, workflow *Workflow) error {
+	if pathState.CurrentStepName == "" {
+		return nil // Empty step name is valid for completed paths
+	}
+
+	// Check if current step exists in workflow
+	step, exists := workflow.Graph().Get(pathState.CurrentStepName)
+	if !exists || step == nil {
+		return fmt.Errorf("current step %s not found in workflow", pathState.CurrentStepName)
+	}
+
+	return nil
+}
+
+// reconstructScriptGlobals rebuilds script globals from event history
+func (r *BasicExecutionReplayer) reconstructScriptGlobals(result *ReplayResult, events []*ExecutionEvent, workflow *Workflow) error {
+	// Initialize with workflow inputs if available
+	for _, event := range events {
+		if event.EventType == EventExecutionStarted {
+			if inputs, ok := event.Data["inputs"].(map[string]interface{}); ok {
+				result.ScriptGlobals["inputs"] = inputs
+			}
+			break
+		}
+	}
+
+	// Reconstruct variables from step completions in execution order
+	for _, event := range events {
+		if event.EventType == EventStepCompleted {
+			// Restore stored variables
+			if varName := getStringFromData(event.Data, "stored_variable"); varName != "" {
+				if storedValue, ok := event.Data["stored_value"]; ok {
+					result.ScriptGlobals[varName] = storedValue
+				} else {
+					result.ScriptGlobals[varName] = getStringFromData(event.Data, "output")
+				}
+			}
+
+			// Restore step-specific globals
+			if globals, ok := event.Data["script_globals"].(map[string]interface{}); ok {
+				for key, value := range globals {
+					result.ScriptGlobals[key] = value
+				}
+			}
+		}
 	}
 
 	return nil
@@ -341,4 +542,302 @@ func getStringFromMap(data map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// BasicWorkflowHasher provides a simple implementation of WorkflowHasher
+type BasicWorkflowHasher struct{}
+
+// NewBasicWorkflowHasher creates a new basic workflow hasher
+func NewBasicWorkflowHasher() *BasicWorkflowHasher {
+	return &BasicWorkflowHasher{}
+}
+
+// HashWorkflow generates a deterministic hash of a workflow definition
+func (h *BasicWorkflowHasher) HashWorkflow(workflow *Workflow) (string, error) {
+	// Create a normalized representation of the workflow for hashing
+	workflowData := map[string]interface{}{
+		"name":        workflow.Name(),
+		"description": workflow.Description(),
+		"inputs":      h.normalizeInputs(workflow.Inputs()),
+		"output":      h.normalizeOutput(workflow.Output()),
+		"steps":       h.normalizeSteps(workflow.Steps()),
+		"graph_edges": h.normalizeGraph(workflow.Graph()),
+	}
+
+	// Convert to JSON for consistent hashing
+	jsonData, err := json.Marshal(workflowData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal workflow data: %w", err)
+	}
+
+	// Generate hash
+	hash := sha256.Sum256(jsonData)
+	return fmt.Sprintf("%x", hash), nil
+}
+
+// HashInputs generates a hash of input parameters
+func (h *BasicWorkflowHasher) HashInputs(inputs map[string]interface{}) (string, error) {
+	// Normalize inputs for consistent hashing
+	normalizedInputs := make(map[string]interface{})
+	for key, value := range inputs {
+		normalizedInputs[key] = value
+	}
+
+	jsonData, err := json.Marshal(normalizedInputs)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal inputs: %w", err)
+	}
+
+	hash := sha256.Sum256(jsonData)
+	return fmt.Sprintf("%x", hash), nil
+}
+
+// CompareWorkflows compares two workflows and determines compatibility
+func (h *BasicWorkflowHasher) CompareWorkflows(oldHash, newHash string, oldWorkflow, newWorkflow *Workflow) (*WorkflowCompatibility, error) {
+	if oldHash == newHash {
+		return &WorkflowCompatibility{
+			IsCompatible:   true,
+			ChangesSummary: "No changes detected",
+		}, nil
+	}
+
+	// Analyze specific changes
+	incompatibleSteps := h.findIncompatibleSteps(oldWorkflow, newWorkflow)
+	changedInputs := h.findChangedInputs(oldWorkflow, newWorkflow)
+
+	isCompatible := len(incompatibleSteps) == 0
+
+	summary := fmt.Sprintf("Workflow changed: %d incompatible steps, %d input changes",
+		len(incompatibleSteps), len(changedInputs))
+
+	return &WorkflowCompatibility{
+		IsCompatible:      isCompatible,
+		IncompatibleSteps: incompatibleSteps,
+		ChangedInputs:     changedInputs,
+		ChangesSummary:    summary,
+	}, nil
+}
+
+// normalizeInputs creates a normalized representation of workflow inputs
+func (h *BasicWorkflowHasher) normalizeInputs(inputs []*Input) []map[string]interface{} {
+	var normalized []map[string]interface{}
+	for _, input := range inputs {
+		normalized = append(normalized, map[string]interface{}{
+			"name":        input.Name,
+			"type":        input.Type,
+			"required":    input.Required,
+			"description": input.Description,
+			"default":     input.Default,
+		})
+	}
+	return normalized
+}
+
+// normalizeOutput creates a normalized representation of workflow output
+func (h *BasicWorkflowHasher) normalizeOutput(output *Output) map[string]interface{} {
+	if output == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"name":        output.Name,
+		"type":        output.Type,
+		"description": output.Description,
+		"format":      output.Format,
+		"document":    output.Document,
+	}
+}
+
+// normalizeSteps creates a normalized representation of workflow steps
+func (h *BasicWorkflowHasher) normalizeSteps(steps []*Step) []map[string]interface{} {
+	var normalized []map[string]interface{}
+	for _, step := range steps {
+		normalized = append(normalized, map[string]interface{}{
+			"name":       step.Name(),
+			"type":       step.Type(),
+			"parameters": step.Parameters(),
+		})
+	}
+	return normalized
+}
+
+// normalizeGraph creates a normalized representation of the workflow graph
+func (h *BasicWorkflowHasher) normalizeGraph(graph *Graph) map[string]interface{} {
+	// Simple representation - in a full implementation this would be more detailed
+	stepNames := graph.Names()
+	return map[string]interface{}{
+		"start_step": graph.Start().Name(),
+		"step_count": len(stepNames),
+		"step_names": stepNames,
+	}
+}
+
+// findIncompatibleSteps identifies steps that have changed in incompatible ways
+func (h *BasicWorkflowHasher) findIncompatibleSteps(oldWorkflow, newWorkflow *Workflow) []string {
+	var incompatible []string
+
+	oldSteps := make(map[string]*Step)
+	for _, step := range oldWorkflow.Steps() {
+		oldSteps[step.Name()] = step
+	}
+
+	newSteps := make(map[string]*Step)
+	for _, step := range newWorkflow.Steps() {
+		newSteps[step.Name()] = step
+	}
+
+	// Check for removed steps
+	for name := range oldSteps {
+		if _, exists := newSteps[name]; !exists {
+			incompatible = append(incompatible, name+" (removed)")
+		}
+	}
+
+	// Check for changed step types
+	for name, newStep := range newSteps {
+		if oldStep, exists := oldSteps[name]; exists {
+			if oldStep.Type() != newStep.Type() {
+				incompatible = append(incompatible, name+" (type changed)")
+			}
+		}
+	}
+
+	return incompatible
+}
+
+// findChangedInputs identifies inputs that have changed between workflow versions
+func (h *BasicWorkflowHasher) findChangedInputs(oldWorkflow, newWorkflow *Workflow) []string {
+	var changed []string
+
+	oldInputs := make(map[string]*Input)
+	for _, input := range oldWorkflow.Inputs() {
+		oldInputs[input.Name] = input
+	}
+
+	newInputs := make(map[string]*Input)
+	for _, input := range newWorkflow.Inputs() {
+		newInputs[input.Name] = input
+	}
+
+	// Check for removed inputs
+	for name := range oldInputs {
+		if _, exists := newInputs[name]; !exists {
+			changed = append(changed, name+" (removed)")
+		}
+	}
+
+	// Check for new inputs
+	for name := range newInputs {
+		if _, exists := oldInputs[name]; !exists {
+			changed = append(changed, name+" (added)")
+		}
+	}
+
+	// Check for type changes
+	for name, newInput := range newInputs {
+		if oldInput, exists := oldInputs[name]; exists {
+			if oldInput.Type != newInput.Type || oldInput.Required != newInput.Required {
+				changed = append(changed, name+" (modified)")
+			}
+		}
+	}
+
+	return changed
+}
+
+// BasicChangeDetector provides a simple implementation of ChangeDetector
+type BasicChangeDetector struct {
+	hasher WorkflowHasher
+}
+
+// NewBasicChangeDetector creates a new basic change detector
+func NewBasicChangeDetector(hasher WorkflowHasher) *BasicChangeDetector {
+	return &BasicChangeDetector{hasher: hasher}
+}
+
+// DetectWorkflowChanges analyzes event history to detect workflow changes
+func (d *BasicChangeDetector) DetectWorkflowChanges(events []*ExecutionEvent, currentWorkflow *Workflow) (*WorkflowCompatibility, error) {
+	// Find the workflow hash from execution start event
+	var originalHash string
+	for _, event := range events {
+		if event.EventType == EventExecutionStarted {
+			if hash, ok := event.Data["workflow_hash"].(string); ok {
+				originalHash = hash
+				break
+			}
+		}
+	}
+
+	if originalHash == "" {
+		return &WorkflowCompatibility{
+			IsCompatible:   false,
+			ChangesSummary: "No original workflow hash found in event history",
+		}, nil
+	}
+
+	// Get current workflow hash
+	currentHash, err := d.hasher.HashWorkflow(currentWorkflow)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash current workflow: %w", err)
+	}
+
+	// For now, we can't reconstruct the original workflow from just the hash
+	// In a full implementation, we'd store workflow definitions alongside events
+	if originalHash == currentHash {
+		return &WorkflowCompatibility{
+			IsCompatible:   true,
+			ChangesSummary: "Workflow unchanged",
+		}, nil
+	}
+
+	return &WorkflowCompatibility{
+		IsCompatible:   false,
+		ChangesSummary: "Workflow hash changed (detailed comparison not available)",
+	}, nil
+}
+
+// DetectInputChanges compares old and new inputs to find changes
+func (d *BasicChangeDetector) DetectInputChanges(oldInputs, newInputs map[string]interface{}) ([]string, error) {
+	var changed []string
+
+	// Check for removed inputs
+	for key := range oldInputs {
+		if _, exists := newInputs[key]; !exists {
+			changed = append(changed, key+" (removed)")
+		}
+	}
+
+	// Check for new inputs
+	for key := range newInputs {
+		if _, exists := oldInputs[key]; !exists {
+			changed = append(changed, key+" (added)")
+		}
+	}
+
+	// Check for changed values
+	for key, newValue := range newInputs {
+		if oldValue, exists := oldInputs[key]; exists {
+			// Simple comparison - in production this should handle complex types better
+			if fmt.Sprintf("%v", oldValue) != fmt.Sprintf("%v", newValue) {
+				changed = append(changed, key+" (value changed)")
+			}
+		}
+	}
+
+	return changed, nil
+}
+
+// FindAffectedSteps determines which steps might be affected by input changes
+func (d *BasicChangeDetector) FindAffectedSteps(changedInputs []string, workflow *Workflow) ([]string, error) {
+	// Conservative approach - assume all steps might be affected by any input change
+	// In a more sophisticated implementation, this would analyze step dependencies
+	if len(changedInputs) == 0 {
+		return []string{}, nil
+	}
+
+	var allSteps []string
+	for _, step := range workflow.Steps() {
+		allSteps = append(allSteps, step.Name())
+	}
+
+	return allSteps, nil
 }

@@ -7,7 +7,9 @@ replace github.com/diveagents/dive => ../..
 require (
 	github.com/diveagents/dive v0.0.0-00010101000000-000000000000
 	github.com/fatih/color v1.18.0
+	github.com/mattn/go-runewidth v0.0.16
 	github.com/spf13/cobra v1.8.0
+	golang.org/x/term v0.32.0
 )
 
 require (
@@ -21,7 +23,7 @@ require (
 	github.com/mark3labs/mcp-go v0.31.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/mattn/go-sqlite3 v1.14.28 // indirect
 	github.com/openai/openai-go v1.2.0 // indirect
 	github.com/risor-io/risor v1.8.1 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
@@ -33,5 +35,4 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/term v0.32.0 // indirect
 )

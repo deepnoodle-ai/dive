@@ -219,6 +219,252 @@ func TestEventBasedExecution(t *testing.T) {
 		require.Equal(t, snapshot.ID, loadedExecution.ID())
 		require.Equal(t, snapshot.WorkflowName, loadedExecution.workflow.Name())
 	})
+
+	t.Run("Phase2Integration", func(t *testing.T) {
+		// Test enhanced replay, retry from failure, and change detection
+		t.Run("RetryFromFailure", func(t *testing.T) {
+			orchestrator := NewExecutionOrchestrator(eventStore, env)
+
+			// Create an execution that will fail
+			failingExecution, err := orchestrator.CreateExecution(context.Background(), ExecutionOptions{
+				WorkflowName: "test-workflow",
+				Inputs:       map[string]interface{}{"input1": "fail please"},
+				Logger:       env.logger,
+			})
+			require.NoError(t, err)
+
+			// Simulate execution failure by manually creating failure events
+			failingExecution.recordEvent(workflow.EventExecutionStarted, "", "", map[string]interface{}{
+				"inputs":        map[string]interface{}{"input1": "fail please"},
+				"workflow_hash": "test-hash-123",
+			})
+
+			pathID := "path-1"
+			failingExecution.recordEvent(workflow.EventPathStarted, pathID, "", map[string]interface{}{
+				"current_step": "step1",
+			})
+
+			failingExecution.recordEvent(workflow.EventStepStarted, pathID, "step1", map[string]interface{}{
+				"step_type": "agent_step",
+			})
+
+			failingExecution.recordEvent(workflow.EventStepFailed, pathID, "step1", map[string]interface{}{
+				"error": "simulated failure",
+			})
+
+			failingExecution.recordEvent(workflow.EventExecutionFailed, pathID, "", map[string]interface{}{
+				"error": "execution failed due to step failure",
+			})
+
+			// Flush events and save snapshot
+			err = failingExecution.flushEvents()
+			require.NoError(t, err)
+
+			snapshot := &workflow.ExecutionSnapshot{
+				ID:           failingExecution.ID(),
+				WorkflowName: "test-workflow",
+				Status:       "failed",
+				Inputs:       map[string]interface{}{"input1": "fail please"},
+				Error:        "execution failed due to step failure",
+			}
+			err = eventStore.SaveSnapshot(context.Background(), snapshot)
+			require.NoError(t, err)
+
+			// Now test retry from failure
+			retryExecution, err := orchestrator.RetryExecution(context.Background(), failingExecution.ID(), workflow.RetryOptions{
+				Strategy: workflow.RetryFromFailure,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, retryExecution)
+			require.NotEqual(t, failingExecution.ID(), retryExecution.ID(), "Retry should create new execution")
+
+			// Verify the retry execution has proper state
+			require.Contains(t, retryExecution.scriptGlobals, "__resume_from_failure", "Should have resume information")
+			resumeInfo := retryExecution.scriptGlobals["__resume_from_failure"].(map[string]interface{})
+			require.Equal(t, "step1", resumeInfo["failed_step"])
+			require.Equal(t, pathID, resumeInfo["failed_path"])
+		})
+
+		t.Run("RetryWithNewInputs", func(t *testing.T) {
+			orchestrator := NewExecutionOrchestrator(eventStore, env)
+
+			// Get an existing execution
+			executions, err := eventStore.ListExecutions(context.Background(), workflow.ExecutionFilter{Limit: 1})
+			require.NoError(t, err)
+			require.NotEmpty(t, executions, "Should have at least one execution")
+
+			originalExecution := executions[0]
+			newInputs := map[string]interface{}{
+				"input1": "new value",
+				"input2": "additional input",
+			}
+
+			// Test retry with new inputs
+			retryExecution, err := orchestrator.RetryExecution(context.Background(), originalExecution.ID, workflow.RetryOptions{
+				Strategy:  workflow.RetryWithNewInputs,
+				NewInputs: newInputs,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, retryExecution)
+
+			// Verify new inputs are applied
+			require.Equal(t, newInputs, retryExecution.inputs)
+			require.Contains(t, retryExecution.scriptGlobals, "inputs")
+			require.Equal(t, newInputs, retryExecution.scriptGlobals["inputs"])
+		})
+
+		t.Run("WorkflowHashingAndChangeDetection", func(t *testing.T) {
+			hasher := workflow.NewBasicWorkflowHasher()
+
+			// Test workflow hashing
+			hash1, err := hasher.HashWorkflow(testWorkflow)
+			require.NoError(t, err)
+			require.NotEmpty(t, hash1)
+
+			// Same workflow should produce same hash
+			hash2, err := hasher.HashWorkflow(testWorkflow)
+			require.NoError(t, err)
+			require.Equal(t, hash1, hash2, "Same workflow should produce same hash")
+
+			// Test input hashing
+			inputs1 := map[string]interface{}{"key1": "value1", "key2": 42}
+			inputHash1, err := hasher.HashInputs(inputs1)
+			require.NoError(t, err)
+			require.NotEmpty(t, inputHash1)
+
+			inputs2 := map[string]interface{}{"key1": "value1", "key2": 42}
+			inputHash2, err := hasher.HashInputs(inputs2)
+			require.NoError(t, err)
+			require.Equal(t, inputHash1, inputHash2, "Same inputs should produce same hash")
+
+			inputs3 := map[string]interface{}{"key1": "different", "key2": 42}
+			inputHash3, err := hasher.HashInputs(inputs3)
+			require.NoError(t, err)
+			require.NotEqual(t, inputHash1, inputHash3, "Different inputs should produce different hash")
+		})
+
+		t.Run("ChangeDetector", func(t *testing.T) {
+			hasher := workflow.NewBasicWorkflowHasher()
+			detector := workflow.NewBasicChangeDetector(hasher)
+
+			// Test input change detection
+			oldInputs := map[string]interface{}{"key1": "value1", "key2": 42}
+			newInputs := map[string]interface{}{"key1": "new_value", "key3": "added"}
+
+			changes, err := detector.DetectInputChanges(oldInputs, newInputs)
+			require.NoError(t, err)
+			require.Contains(t, changes, "key2 (removed)")
+			require.Contains(t, changes, "key3 (added)")
+			require.Contains(t, changes, "key1 (value changed)")
+
+			// Test affected steps detection
+			affectedSteps, err := detector.FindAffectedSteps(changes, testWorkflow)
+			require.NoError(t, err)
+			require.NotEmpty(t, affectedSteps, "Should identify affected steps")
+		})
+
+		t.Run("EnhancedReplayWithPathBranching", func(t *testing.T) {
+			// Create execution with path branching scenario
+			execution, err := NewEventBasedExecution(env, ExecutionOptions{
+				WorkflowName: "test-workflow",
+				Inputs:       map[string]interface{}{"input1": "branch test"},
+				Logger:       env.logger,
+			}, &PersistenceConfig{
+				EventStore: eventStore,
+				BatchSize:  5,
+			})
+			require.NoError(t, err)
+
+			// Record execution with path branching
+			execution.recordEvent(workflow.EventExecutionStarted, "", "", map[string]interface{}{
+				"inputs": execution.inputs,
+			})
+
+			// Main path
+			mainPathID := "main-path"
+			execution.recordEvent(workflow.EventPathStarted, mainPathID, "", map[string]interface{}{
+				"current_step": "initial_step",
+			})
+
+			execution.recordEvent(workflow.EventStepStarted, mainPathID, "initial_step", map[string]interface{}{
+				"step_type": "agent_step",
+			})
+
+			execution.recordEvent(workflow.EventStepCompleted, mainPathID, "initial_step", map[string]interface{}{
+				"output":           "initial output",
+				"stored_variable":  "initial_result",
+				"stored_value":     "initial output",
+				"condition_result": "true",
+			})
+
+			// Path branching
+			branchPath1 := "branch-path-1"
+			branchPath2 := "branch-path-2"
+			execution.recordEvent(workflow.EventPathBranched, mainPathID, "initial_step", map[string]interface{}{
+				"new_paths": []map[string]interface{}{
+					{
+						"id":              branchPath1,
+						"current_step":    "branch_step_1",
+						"inherit_outputs": true,
+					},
+					{
+						"id":           branchPath2,
+						"current_step": "branch_step_2",
+					},
+				},
+			})
+
+			// Complete branch paths
+			execution.recordEvent(workflow.EventStepStarted, branchPath1, "branch_step_1", map[string]interface{}{})
+			execution.recordEvent(workflow.EventStepCompleted, branchPath1, "branch_step_1", map[string]interface{}{
+				"output": "branch 1 output",
+			})
+			execution.recordEvent(workflow.EventPathCompleted, branchPath1, "", map[string]interface{}{
+				"final_output": "branch 1 final",
+			})
+
+			execution.recordEvent(workflow.EventStepStarted, branchPath2, "branch_step_2", map[string]interface{}{})
+			execution.recordEvent(workflow.EventStepCompleted, branchPath2, "branch_step_2", map[string]interface{}{
+				"output": "branch 2 output",
+			})
+			execution.recordEvent(workflow.EventPathCompleted, branchPath2, "", map[string]interface{}{
+				"final_output": "branch 2 final",
+			})
+
+			execution.recordEvent(workflow.EventExecutionCompleted, "", "", map[string]interface{}{
+				"outputs": map[string]interface{}{"final": "completed"},
+			})
+
+			// Flush events
+			err = execution.flushEvents()
+			require.NoError(t, err)
+
+			// Test enhanced replay
+			events, err := eventStore.GetEventHistory(context.Background(), execution.ID())
+			require.NoError(t, err)
+
+			replayer := workflow.NewBasicExecutionReplayer(env.logger)
+			replayResult, err := replayer.ReplayExecution(context.Background(), events, testWorkflow)
+			require.NoError(t, err)
+
+			// Verify enhanced replay results
+			require.Equal(t, "completed", replayResult.Status)
+			require.NotEmpty(t, replayResult.CompletedSteps)
+			require.Contains(t, replayResult.CompletedSteps, "initial_step")
+			require.Contains(t, replayResult.CompletedSteps, "branch_step_1")
+			require.Contains(t, replayResult.CompletedSteps, "branch_step_2")
+
+			// Verify script globals reconstruction
+			require.Contains(t, replayResult.ScriptGlobals, "initial_result")
+			require.Equal(t, "initial output", replayResult.ScriptGlobals["initial_result"])
+			require.Contains(t, replayResult.ScriptGlobals, "initial_step_condition")
+			require.Equal(t, true, replayResult.ScriptGlobals["initial_step_condition"])
+			require.Contains(t, replayResult.ScriptGlobals, "outputs")
+
+			// Verify path state tracking
+			require.Empty(t, replayResult.ActivePaths, "All paths should be completed")
+		})
+	})
 }
 
 func TestEventRecordingEdgeCases(t *testing.T) {

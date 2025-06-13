@@ -37,3 +37,4 @@ tmp.json
 /examples/programs/openai_responses_example/openai_responses_example
 /openai_responses_example
 /*.png
+*.db-*
