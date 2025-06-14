@@ -1,0 +1,68 @@
+Name: Script Contexts Test
+Description: Test workflow demonstrating deterministic vs non-deterministic script contexts
+
+Config:
+  LogLevel: info
+
+Agents:
+  - Name: TestAgent
+    Provider: anthropic
+    Model: claude-sonnet-4-20250514
+
+Workflows:
+  - Name: ScriptContextsDemo
+    Inputs:
+      - Name: test_input
+        Type: string
+        Default: 'Hello World'
+
+    Steps:
+      # Template Script (deterministic - should filter unsafe functions)
+      - Name: Template Script Test
+        Type: prompt
+        Agent: TestAgent
+        Prompt: |
+          Process this input: ${state}
+          Current time would be: ${len(string(inputs.test_input)) > 0 ? "available" : "not available"}
+        Store: template_result
+
+      # Conditional Script (deterministic - should filter unsafe functions)
+      - Name: Conditional Branch
+        Type: prompt
+        Agent: TestAgent
+        Prompt: 'Continue with next step'
+        Store: conditional_result
+        Next:
+          - Step: Script Activity Test
+            Condition: $(len(state.template_result) > 0)
+
+      # Script Activity (non-deterministic - should allow all functions)
+      - Name: Script Activity Test
+        Type: script
+        Script: |
+          # This can use non-deterministic functions
+          result := "Script executed at: " + string(time.now())
+          result = result + "\nInput was: " + inputs.test_input
+          result + "\nTemplate result length: " + string(len(state.template_result))
+        Store: script_result
+
+      # Each Script (deterministic - should filter unsafe functions)
+      - Name: Each Script Test
+        Type: prompt
+        Agent: TestAgent
+        Prompt: 'Process item: ${state.item}'
+        Each:
+          Items: $(["item1", "item2", "item3"])
+          As: item
+        Store: each_results
+
+      # Final step
+      - Name: Summary
+        Type: prompt
+        Agent: TestAgent
+        Prompt: |
+          Summarize the results:
+          Template: ${state.template_result}
+          Script: ${state.script_result}
+          Each: ${state.each_results}
+        End: true

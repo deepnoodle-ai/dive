@@ -43,7 +43,7 @@ This document captures the key architectural decisions for designing a YAML-defi
 **3. Activity Scripts** - Can be non-deterministic
 ```yaml
 - Name: Fetch External Data
-  Type: ScriptActivity
+  Type: script
   Script: |
     response = http.get("https://api.example.com/data")
     return process_response(response)
@@ -104,7 +104,7 @@ This document captures the key architectural decisions for designing a YAML-defi
 **Example**:
 ```yaml
 - Name: Process With External Data
-  Type: ScriptActivity
+  Type: script
   Script: |
     external_data = fetch_data(state.user_id)
     return process(external_data)
@@ -160,7 +160,7 @@ Steps:
 **Final Pattern**:
 ```yaml
 - Name: Complex Processing
-  Type: ScriptActivity
+  Type: script
   Script: |
     # Workflow inputs (immutable)
     user_id = inputs.user_id

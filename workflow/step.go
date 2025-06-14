@@ -34,6 +34,7 @@ type Step struct {
 	description string
 	agent       dive.Agent
 	prompt      string
+	script      string
 	store       string
 	action      string
 	parameters  map[string]any
@@ -51,6 +52,7 @@ type StepOptions struct {
 	Description string
 	Agent       dive.Agent
 	Prompt      string
+	Script      string
 	Store       string
 	Action      string
 	Parameters  map[string]any
@@ -71,6 +73,7 @@ func NewStep(opts StepOptions) *Step {
 		description: opts.Description,
 		agent:       opts.Agent,
 		prompt:      opts.Prompt,
+		script:      opts.Script,
 		store:       opts.Store,
 		action:      opts.Action,
 		parameters:  opts.Parameters,
@@ -100,6 +103,10 @@ func (s *Step) Agent() dive.Agent {
 
 func (s *Step) Prompt() string {
 	return s.prompt
+}
+
+func (s *Step) Script() string {
+	return s.script
 }
 
 func (s *Step) Store() string {

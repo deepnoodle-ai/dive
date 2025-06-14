@@ -104,25 +104,37 @@ func NewExecution(opts ExecutionV2Options) (*Execution, error) {
 
 	executionID := NewExecutionID()
 
-	// Create event recorder
 	recorder := NewBufferedExecutionRecorder(executionID, opts.EventStore, 10)
 	recorder.SetReplayMode(opts.ReplayMode)
 
-	// Create workflow state
 	state := NewWorkflowState(executionID, recorder)
 
-	// Initialize inputs in state
-	processedInputs := make(map[string]interface{})
-	for k, v := range opts.Inputs {
-		processedInputs[k] = v
-		state.Set(k, v) // Store inputs in workflow state
+	inputs := make(map[string]any, len(opts.Inputs))
+
+	// Determine input values from inputs map or defaults
+	for _, input := range opts.Workflow.Inputs() {
+		if v, ok := opts.Inputs[input.Name]; ok {
+			inputs[input.Name] = v
+		} else {
+			if input.Default == nil {
+				return nil, fmt.Errorf("input %q is required", input.Name)
+			}
+			inputs[input.Name] = input.Default
+		}
+	}
+
+	// Return error for unknown inputs
+	for k := range opts.Inputs {
+		if _, ok := inputs[k]; !ok {
+			return nil, fmt.Errorf("unknown input %q", k)
+		}
 	}
 
 	return &Execution{
 		id:               executionID,
 		workflow:         opts.Workflow,
 		environment:      opts.Environment,
-		inputs:           processedInputs,
+		inputs:           inputs,
 		outputs:          make(map[string]interface{}),
 		status:           ExecutionStatusPending,
 		operationResults: make(map[OperationID]*OperationResult),
@@ -598,6 +610,8 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 			result, err = e.executePromptStep(ctx, step, pathID)
 		case "action":
 			result, err = e.executeActionStep(ctx, step, pathID)
+		case "script":
+			result, err = e.executeScriptStep(ctx, step, pathID)
 		default:
 			err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
 		}
@@ -615,7 +629,14 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	if step.Each() == nil {
 		// Store the result in a state variable if specified
 		if varName := step.Store(); varName != "" {
-			e.state.Set(varName, result.Content)
+			// For script steps, store the actual converted value; for other steps, store the content
+			var valueToStore interface{}
+			if step.Type() == "script" && result.Object != nil {
+				valueToStore = result.Object
+			} else {
+				valueToStore = result.Content
+			}
+			e.state.Set(varName, valueToStore)
 			e.logger.Info("stored step result", "variable_name", varName)
 		}
 	}
@@ -664,6 +685,8 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, pa
 			result, err = e.executePromptStep(ctx, step, pathID)
 		case "action":
 			result, err = e.executeActionStep(ctx, step, pathID)
+		case "script":
+			result, err = e.executeScriptStep(ctx, step, pathID)
 		default:
 			err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
 		}
@@ -761,53 +784,7 @@ func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string)
 
 // buildEachGlobals creates globals for "each" expression evaluation
 func (e *Execution) buildEachGlobals() map[string]any {
-	globals := make(map[string]any)
-
-	// Add safe built-in functions (same filtering as conditions)
-	// unsafeFunctions := map[string]bool{
-	// 	"read":    true,
-	// 	"write":   true,
-	// 	"exec":    true,
-	// 	"open":    true,
-	// 	"file":    true,
-	// 	"http":    true,
-	// 	"fetch":   true,
-	// 	"request": true,
-	// 	"system":  true,
-	// 	"shell":   true,
-	// 	"env":     true,
-	// 	"getenv":  true,
-	// 	"setenv":  true,
-	// 	"command": true,
-	// 	"proc":    true,
-	// 	"process": true,
-	// 	"socket":  true,
-	// 	"network": true,
-	// 	"tcp":     true,
-	// 	"udp":     true,
-	// 	"tls":     true,
-	// 	"crypto":  true,
-	// 	"hash":    true,
-	// 	"rand":    true, // exclude random functions for determinism
-	// 	"random":  true,
-	// }
-
-	for k, v := range all.Builtins() {
-		globals[k] = v
-	}
-
-	// Add workflow inputs (read-only)
-	globals["inputs"] = e.inputs
-
-	// Add current state variables (read-only snapshot)
-	globals["state"] = e.state.Copy()
-
-	// Add documents if available
-	if e.environment.documentRepo != nil {
-		globals["documents"] = objects.NewDocumentRepository(e.environment.documentRepo)
-	}
-
-	return globals
+	return e.buildGlobalsForContext(ScriptContextEach)
 }
 
 // compileEachScript compiles a script for "each" expression evaluation
@@ -1014,52 +991,56 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, 
 	return &dive.StepResult{Content: content}, nil
 }
 
+// executeScriptStep executes a script activity step
+func (e *Execution) executeScriptStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
+	script := step.Script()
+	if script == "" {
+		return nil, fmt.Errorf("no script specified for script activity step %q", step.Name())
+	}
+
+	// Deterministic: prepare script globals with non-deterministic context (allows all functions)
+	globals := e.buildGlobalsForContext(ScriptContextActivity)
+
+	// Operation: execute script (non-deterministic)
+	op := Operation{
+		Type:     "script_execution",
+		StepName: step.Name(),
+		PathID:   pathID,
+		Parameters: map[string]interface{}{
+			"script": script,
+		},
+	}
+
+	result, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
+		// Compile the script
+		compiledCode, err := e.compileActivityScript(ctx, script, globals)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile script: %w", err)
+		}
+
+		// Execute the compiled script
+		risorResult, err := risor.EvalCode(ctx, compiledCode, risor.WithGlobals(globals))
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute script: %w", err)
+		}
+
+		// Convert Risor object to Go type
+		return e.convertRisorValue(risorResult), nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("script execution operation failed: %w", err)
+	}
+
+	var content string
+	if result != nil {
+		content = fmt.Sprintf("%v", result)
+	}
+	return &dive.StepResult{Content: content, Object: result}, nil
+}
+
 // buildConditionGlobals creates a safe, read-only globals map for condition evaluation
 func (e *Execution) buildConditionGlobals() map[string]any {
-	globals := make(map[string]any)
-
-	// Add safe built-in functions (exclude potentially dangerous ones)
-	unsafeFunctions := map[string]bool{
-		"read":    true,
-		"write":   true,
-		"exec":    true,
-		"open":    true,
-		"file":    true,
-		"http":    true,
-		"fetch":   true,
-		"request": true,
-		"system":  true,
-		"shell":   true,
-		"env":     true,
-		"getenv":  true,
-		"setenv":  true,
-		"command": true,
-		"proc":    true,
-		"process": true,
-		"socket":  true,
-		"network": true,
-		"tcp":     true,
-		"udp":     true,
-		"tls":     true,
-		"crypto":  true,
-		"hash":    true,
-		"rand":    true, // exclude random functions for determinism
-		"random":  true,
-	}
-
-	for k, v := range all.Builtins() {
-		if !unsafeFunctions[k] {
-			globals[k] = v
-		}
-	}
-
-	// Add workflow inputs (read-only)
-	globals["inputs"] = e.inputs
-
-	// Add current state variables (read-only snapshot)
-	globals["state"] = e.state.Copy()
-
-	return globals
+	return e.buildGlobalsForContext(ScriptContextCondition)
 }
 
 // evaluateCondition evaluates a workflow condition using Risor scripting
@@ -1145,27 +1126,156 @@ func (e *Execution) evaluateTemplate(ctx context.Context, s string) (string, err
 		s = strings.TrimSuffix(s, ")")
 	}
 
-	builtins := all.Builtins()
+	// Use deterministic context for template evaluation
+	globals := e.buildGlobalsForContext(ScriptContextTemplate)
 
-	globals := make(map[string]any, len(builtins)+len(e.inputs)+2)
+	return eval.Eval(ctx, s, globals)
+}
+
+// ScriptContext represents different contexts where scripts can run
+type ScriptContext int
+
+const (
+	ScriptContextCondition ScriptContext = iota
+	ScriptContextTemplate
+	ScriptContextEach
+	ScriptContextActivity
+)
+
+// getSafeGlobals returns the map of safe globals for deterministic contexts
+func (e *Execution) getSafeGlobals() map[string]bool {
+	return map[string]bool{
+		"all":         true,
+		"any":         true,
+		"base64":      true,
+		"bool":        true,
+		"buffer":      true,
+		"byte_slice":  true,
+		"byte":        true,
+		"bytes":       true,
+		"call":        true,
+		"chr":         true,
+		"chunk":       true,
+		"coalesce":    true,
+		"decode":      true,
+		"encode":      true,
+		"error":       true,
+		"errorf":      true,
+		"errors":      true,
+		"filepath":    true,
+		"float_slice": true,
+		"float":       true,
+		"fmt":         true,
+		"getattr":     true,
+		"int":         true,
+		"is_hashable": true,
+		"iter":        true,
+		"json":        true,
+		"keys":        true,
+		"len":         true,
+		"list":        true,
+		"map":         true,
+		"math":        true,
+		"ord":         true,
+		"regexp":      true,
+		"reversed":    true,
+		"set":         true,
+		"sorted":      true,
+		"sprintf":     true,
+		"string":      true,
+		"strings":     true,
+		"try":         true,
+		"type":        true,
+	}
+}
+
+// buildGlobalsForContext creates globals appropriate for the given script context
+func (e *Execution) buildGlobalsForContext(ctx ScriptContext) map[string]any {
+	globals := make(map[string]any)
+
+	// Add built-in functions based on context
+	switch ctx {
+	case ScriptContextCondition, ScriptContextTemplate, ScriptContextEach:
+		// Deterministic contexts - only include safe functions
+		safeGlobals := e.getSafeGlobals()
+		for k, v := range all.Builtins() {
+			if safeGlobals[k] {
+				globals[k] = v
+			}
+		}
+	case ScriptContextActivity:
+		// Non-deterministic context - allow all functions
+		for k, v := range all.Builtins() {
+			globals[k] = v
+		}
+	}
+
+	// Add workflow inputs (read-only)
+	globals["inputs"] = e.inputs
 
 	// Add current state variables (read-only snapshot)
 	globals["state"] = e.state.Copy()
 
-	for k, v := range builtins {
-		globals[k] = v
-	}
-	for k, v := range e.inputs {
-		globals[k] = v
-	}
+	// Add documents if available
 	if e.environment.documentRepo != nil {
 		globals["documents"] = objects.NewDocumentRepository(e.environment.documentRepo)
 	}
-	inputs := map[string]any{}
-	for k, v := range e.inputs {
-		inputs[k] = v
-	}
-	globals["inputs"] = inputs
 
-	return eval.Eval(ctx, s, globals)
+	return globals
+}
+
+// compileActivityScript compiles a script for activity step execution
+func (e *Execution) compileActivityScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
+	// Parse the script
+	ast, err := parser.Parse(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse script: %w", err)
+	}
+
+	// Get sorted global names for deterministic compilation
+	var globalNames []string
+	for name := range globals {
+		globalNames = append(globalNames, name)
+	}
+	sort.Strings(globalNames)
+
+	// Compile with global names
+	return compiler.Compile(ast, compiler.WithGlobalNames(globalNames))
+}
+
+// convertRisorValue converts a Risor object to a Go type
+func (e *Execution) convertRisorValue(obj object.Object) interface{} {
+	switch o := obj.(type) {
+	case *object.String:
+		return o.Value()
+	case *object.Int:
+		return o.Value()
+	case *object.Float:
+		return o.Value()
+	case *object.Bool:
+		return o.Value()
+	case *object.Time:
+		return o.Value()
+	case *object.List:
+		var result []interface{}
+		for _, item := range o.Value() {
+			result = append(result, e.convertRisorValue(item))
+		}
+		return result
+	case *object.Map:
+		result := make(map[string]interface{})
+		for key, value := range o.Value() {
+			result[key] = e.convertRisorValue(value)
+		}
+		return result
+	case *object.Set:
+		var result []interface{}
+		for _, item := range o.Value() {
+			result = append(result, e.convertRisorValue(item))
+		}
+		return result
+	default:
+		// Fallback to string representation
+		return obj.Inspect()
+	}
 }
