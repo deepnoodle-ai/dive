@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 
@@ -117,22 +116,19 @@ func main() {
 	}
 	defer env.Stop(ctx)
 
-	execution, err := environment.NewEventBasedExecution(env, environment.ExecutionOptions{
-		WorkflowName:   w.Name(),
-		EventStore:     environment.NewNullEventStore(),
-		EventBatchSize: 10,
+	execution, err := environment.NewExecution(environment.ExecutionV2Options{
+		Workflow:    w,
+		Environment: env,
+		Inputs:      map[string]interface{}{},
+		EventStore:  environment.NewNullEventStore(),
+		Logger:      slogger.DefaultLogger,
+		ReplayMode:  false,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := execution.Wait(); err != nil {
+	if err := execution.Run(ctx); err != nil {
 		log.Fatal(err)
-	}
-
-	for stepName, output := range execution.StepOutputs() {
-		fmt.Printf("---- step %s ----\n", stepName)
-		fmt.Println(output)
-		fmt.Println()
 	}
 }

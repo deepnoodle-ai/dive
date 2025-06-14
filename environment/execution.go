@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/diveagents/dive"
@@ -22,6 +21,16 @@ import (
 	"github.com/risor-io/risor/parser"
 )
 
+// Status represents the execution status
+type ExecutionStatus string
+
+const (
+	ExecutionStatusPending   ExecutionStatus = "pending"
+	ExecutionStatusRunning   ExecutionStatus = "running"
+	ExecutionStatusCompleted ExecutionStatus = "completed"
+	ExecutionStatusFailed    ExecutionStatus = "failed"
+)
+
 // ExecutionOptions are the options for creating a new execution.
 type ExecutionOptions struct {
 	WorkflowName   string
@@ -33,262 +42,217 @@ type ExecutionOptions struct {
 	EventBatchSize int
 }
 
-// EventBasedExecution extends Execution with event recording capabilities
-type EventBasedExecution struct {
-	id            string
-	environment   *Environment
-	workflow      *workflow.Workflow
-	status        Status
-	startTime     time.Time
-	endTime       time.Time
-	inputs        map[string]interface{}
-	outputs       map[string]interface{}
-	err           error
-	logger        slogger.Logger
-	paths         map[string]*PathState
-	scriptGlobals map[string]any
-	formatter     WorkflowFormatter
-	mutex         sync.RWMutex
-	doneWg        sync.WaitGroup
-	eventStore    ExecutionEventStore
-	eventBuffer   []*ExecutionEvent
-	eventSequence int64
-	replayMode    bool
-	batchSize     int
-	bufferMutex   sync.Mutex
-
-	// Operation support
-	operationResults     map[OperationID]*OperationResult
-	workflowState        *WorkflowState
-	currentPathID        string
-	deterministicRuntime *DeterministicRuntime
+// ExecutionV2Options configures a new Execution
+type ExecutionV2Options struct {
+	Workflow    *workflow.Workflow
+	Environment *Environment
+	Inputs      map[string]interface{}
+	EventStore  ExecutionEventStore
+	Logger      slogger.Logger
+	ReplayMode  bool
+	Formatter   WorkflowFormatter
 }
 
-// NewEventBasedExecution creates a new event-based execution
-func NewEventBasedExecution(env *Environment, opts ExecutionOptions) (*EventBasedExecution, error) {
-	if opts.EventStore == nil {
-		return nil, fmt.Errorf("event store is required")
+// Execution represents a deterministic workflow execution using operations
+type Execution struct {
+	id          string
+	workflow    *workflow.Workflow
+	environment *Environment
+	inputs      map[string]interface{}
+	outputs     map[string]interface{}
+
+	// Status and timing
+	status    ExecutionStatus
+	startTime time.Time
+	endTime   time.Time
+	err       error
+
+	// Operation management
+	operationResults map[OperationID]*OperationResult
+	replayMode       bool
+
+	// State management
+	state    *WorkflowState
+	recorder ExecutionRecorder
+
+	// Path management for parallel execution
+	paths       map[string]*PathState
+	activePaths map[string]*executionPath
+	pathUpdates chan pathUpdate
+	pathCounter int
+
+	// Logging and formatting
+	logger    slogger.Logger
+	formatter WorkflowFormatter
+
+	// Synchronization
+	mutex  sync.RWMutex
+	doneWg sync.WaitGroup
+}
+
+// NewExecution creates a new deterministic execution
+func NewExecution(opts ExecutionV2Options) (*Execution, error) {
+	if opts.Workflow == nil {
+		return nil, fmt.Errorf("workflow is required")
 	}
-	if opts.WorkflowName == "" {
-		return nil, fmt.Errorf("workflow name is required")
+	if opts.Environment == nil {
+		return nil, fmt.Errorf("environment is required")
 	}
-	if !env.started {
-		return nil, fmt.Errorf("environment not started")
+	if opts.Logger == nil {
+		opts.Logger = slogger.DefaultLogger
 	}
 
-	workflowName := opts.WorkflowName
-	wf, exists := env.workflows[workflowName]
-	if !exists {
-		return nil, fmt.Errorf("workflow not found: %s", workflowName)
+	executionID := NewExecutionID()
+
+	// Create event recorder
+	recorder := NewBufferedExecutionRecorder(executionID, opts.EventStore, 10)
+	recorder.SetReplayMode(opts.ReplayMode)
+
+	// Create workflow state
+	state := NewWorkflowState(executionID, recorder)
+
+	// Initialize inputs in state
+	processedInputs := make(map[string]interface{})
+	for k, v := range opts.Inputs {
+		processedInputs[k] = v
+		state.Set(k, v) // Store inputs in workflow state
 	}
 
-	inputs := opts.Inputs
-	if inputs == nil {
-		inputs = make(map[string]interface{})
-	}
-
-	logger := opts.Logger
-	if logger == nil {
-		logger = env.logger
-	}
-
-	batchSize := opts.EventBatchSize
-	if batchSize <= 0 {
-		batchSize = 10
-	}
-
-	processedInputs := make(map[string]interface{}, len(wf.Inputs()))
-	for _, input := range wf.Inputs() {
-		value, exists := inputs[input.Name]
-		if !exists {
-			if input.Default != nil {
-				processedInputs[input.Name] = input.Default
-				continue
-			}
-			return nil, fmt.Errorf("required input %q not provided", input.Name)
-		}
-		processedInputs[input.Name] = value
-	}
-
-	// Set up global variables for execution scripting
-	scriptGlobals := map[string]any{
-		"inputs": processedInputs,
-	}
-	for k, v := range all.Builtins() {
-		scriptGlobals[k] = v
-	}
-	if env.documentRepo != nil {
-		scriptGlobals["documents"] = objects.NewDocumentRepository(env.documentRepo)
-	}
-
-	execution := &EventBasedExecution{
-		id:            NewExecutionID(),
-		environment:   env,
-		workflow:      wf,
-		status:        StatusPending,
-		startTime:     time.Now(),
-		inputs:        processedInputs,
-		logger:        logger,
-		paths:         make(map[string]*PathState),
-		formatter:     opts.Formatter,
-		scriptGlobals: scriptGlobals,
-		eventStore:    opts.EventStore,
-		eventBuffer:   make([]*ExecutionEvent, 0, batchSize),
-		eventSequence: 0,
-		replayMode:    false,
-		batchSize:     batchSize,
-
-		// Initialize operation support
+	return &Execution{
+		id:               executionID,
+		workflow:         opts.Workflow,
+		environment:      opts.Environment,
+		inputs:           processedInputs,
+		outputs:          make(map[string]interface{}),
+		status:           ExecutionStatusPending,
 		operationResults: make(map[OperationID]*OperationResult),
+		replayMode:       opts.ReplayMode,
+		state:            state,
+		recorder:         recorder,
+		paths:            make(map[string]*PathState),
+		activePaths:      make(map[string]*executionPath),
+		pathUpdates:      make(chan pathUpdate, 100),
+		logger:           opts.Logger.With("execution_id", executionID),
+		formatter:        opts.Formatter,
+	}, nil
+}
+
+// NewExecutionFromReplay creates a new execution and loads it from recorded events
+func NewExecutionFromReplay(opts ExecutionV2Options) (*Execution, error) {
+	if opts.EventStore == nil {
+		return nil, fmt.Errorf("event store is required for replay")
 	}
 
-	// Create execution recorder for state management
-	recorder := NewBufferedExecutionRecorder(execution.id, opts.EventStore, batchSize)
-	execution.workflowState = NewWorkflowState(execution.id, recorder)
+	execution, err := NewExecution(opts)
+	if err != nil {
+		return nil, err
+	}
 
-	// Create deterministic runtime
-	execution.deterministicRuntime = NewDeterministicRuntime(execution)
+	// Load and replay events
+	if err := execution.LoadFromEvents(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to load events for replay: %w", err)
+	}
 
-	// Add state object to script globals for Risor access
-	execution.scriptGlobals["state"] = NewRisorStateObject(execution.workflowState)
-
-	// Add deterministic runtime to script globals
-	// For now, we'll add individual functions rather than the complex object
-	execution.scriptGlobals["deterministicNow"] = execution.deterministicRuntime.Now
-	execution.scriptGlobals["deterministicRandom"] = execution.deterministicRuntime.Random
-	execution.scriptGlobals["deterministicRandomInt"] = execution.deterministicRuntime.RandomInt
-	execution.scriptGlobals["deterministicRandomString"] = execution.deterministicRuntime.RandomString
-	execution.scriptGlobals["deterministicSleep"] = execution.deterministicRuntime.Sleep
-
-	execution.doneWg.Add(1)
 	return execution, nil
 }
 
-func (e *EventBasedExecution) ID() string {
-	return e.id
-}
-
-func (e *EventBasedExecution) Workflow() *workflow.Workflow {
-	return e.workflow
-}
-
-func (e *EventBasedExecution) Environment() *Environment {
-	return e.environment
-}
-
-func (e *EventBasedExecution) Status() Status {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
-
-	return e.status
-}
-
-func (e *EventBasedExecution) StartTime() time.Time {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
-
-	return e.startTime
-}
-
-func (e *EventBasedExecution) EndTime() time.Time {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
-
-	return e.endTime
-}
-
-func (e *EventBasedExecution) Wait() error {
-	e.doneWg.Wait()
-	return e.err
-}
-
-// recordEvent records an execution event
-func (e *EventBasedExecution) recordEvent(eventType ExecutionEventType, pathID, stepName string, data map[string]interface{}) {
-	if e.replayMode {
-		return // Don't record events during replay
+// LoadFromEvents loads operation results from previously recorded events
+func (e *Execution) LoadFromEvents(ctx context.Context) error {
+	events, err := e.recorder.(*BufferedExecutionRecorder).eventStore.GetEventHistory(ctx, e.id)
+	if err != nil {
+		return fmt.Errorf("failed to get event history: %w", err)
 	}
 
-	event := &ExecutionEvent{
-		ID:          NewEventID(),
-		ExecutionID: e.id,
-		PathID:      pathID,
-		Sequence:    atomic.AddInt64(&e.eventSequence, 1),
-		Timestamp:   time.Now(),
-		EventType:   eventType,
-		StepName:    stepName,
-		Data:        data,
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	// Collect state mutations
+	stateValues := make(map[string]interface{})
+
+	// Process events to reconstruct operation results and state
+	for _, event := range events {
+		switch event.EventType {
+		case EventOperationCompleted:
+			if opID, ok := event.Data["operation_id"].(string); ok {
+				if result, ok := event.Data["result"]; ok {
+					e.operationResults[OperationID(opID)] = &OperationResult{
+						OperationID: OperationID(opID),
+						Result:      result,
+						Error:       nil,
+						ExecutedAt:  event.Timestamp,
+					}
+				}
+			}
+		case EventOperationFailed:
+			if opID, ok := event.Data["operation_id"].(string); ok {
+				var err error
+				if errStr, ok := event.Data["error"].(string); ok {
+					err = fmt.Errorf("%s", errStr)
+				}
+				e.operationResults[OperationID(opID)] = &OperationResult{
+					OperationID: OperationID(opID),
+					Result:      nil,
+					Error:       err,
+					ExecutedAt:  event.Timestamp,
+				}
+			}
+		case EventStateSet:
+			if key, ok := event.Data["key"].(string); ok {
+				if value, ok := event.Data["value"]; ok {
+					stateValues[key] = value
+				}
+			}
+		case EventStateDeleted:
+			if key, ok := event.Data["key"].(string); ok {
+				delete(stateValues, key)
+			}
+		}
 	}
 
-	e.bufferMutex.Lock()
-	e.eventBuffer = append(e.eventBuffer, event)
-	shouldFlush := len(e.eventBuffer) >= e.batchSize
-	e.bufferMutex.Unlock()
+	// Load all state values at once
+	e.state.LoadFromMap(stateValues)
 
-	if shouldFlush {
-		e.flushEvents()
-	}
-}
-
-// flushEvents writes buffered events to the event store
-func (e *EventBasedExecution) flushEvents() error {
-	e.bufferMutex.Lock()
-	if len(e.eventBuffer) == 0 {
-		e.bufferMutex.Unlock()
-		return nil
-	}
-
-	// We'll work with a copy of the buffer and clear the primary one
-	events := make([]*ExecutionEvent, len(e.eventBuffer))
-	copy(events, e.eventBuffer)
-	e.eventBuffer = e.eventBuffer[:0]
-	e.bufferMutex.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if e.eventStore == nil {
-		fmt.Println("WTF")
-	}
-
-	if err := e.eventStore.AppendEvents(ctx, events); err != nil {
-		e.logger.Error("failed to flush events", "error", err, "event_count", len(events))
-		return err
-	}
-
-	e.logger.Debug("flushed events", "event_count", len(events))
+	e.logger.Info("loaded from events", "operations", len(e.operationResults), "state_keys", len(stateValues))
 	return nil
 }
 
-// Flush any buffered events immediately
-func (e *EventBasedExecution) Flush() error {
-	return e.flushEvents()
+// ID returns the execution ID
+func (e *Execution) ID() string {
+	return e.id
+}
+
+// Status returns the current execution status
+func (e *Execution) Status() ExecutionStatus {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.status
 }
 
 // ExecuteOperation implements the OperationExecutor interface
-func (e *EventBasedExecution) ExecuteOperation(ctx context.Context, op Operation, fn func() (interface{}, error)) (interface{}, error) {
-	// Generate deterministic operation ID if not set
+func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func() (interface{}, error)) (interface{}, error) {
+	// Generate operation ID if not set
 	if op.ID == "" {
 		op.ID = op.GenerateID()
 	}
 
-	// Set current path ID if not specified
+	// PathID should always be set by caller - no fallback needed
 	if op.PathID == "" {
-		op.PathID = e.currentPathID
+		return nil, fmt.Errorf("operation PathID is required")
 	}
 
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	// During replay, return recorded result
 	if e.replayMode {
-		// During replay: return recorded result
 		if result, found := e.operationResults[op.ID]; found {
-			if result.Error != nil {
-				return nil, result.Error
-			}
-			return result.Result, nil
+			return result.Result, result.Error
 		}
-		panic(fmt.Sprintf("Operation %s not found during replay", op.ID))
+		return nil, fmt.Errorf("operation %s not found during replay", op.ID)
 	}
 
-	// Record operation start
-	e.recordEvent(EventOperationStarted, op.PathID, op.StepName, map[string]interface{}{
+	// Record operation started
+	e.recorder.RecordCustomEvent(EventOperationStarted, op.PathID, op.StepName, map[string]interface{}{
 		"operation_id":   string(op.ID),
 		"operation_type": op.Type,
 		"parameters":     op.Parameters,
@@ -297,36 +261,39 @@ func (e *EventBasedExecution) ExecuteOperation(ctx context.Context, op Operation
 	// Execute the operation
 	startTime := time.Now()
 	result, err := fn()
-	executedAt := time.Now()
+	duration := time.Since(startTime)
 
-	// Record operation completion or failure
-	if err != nil {
-		e.recordEvent(EventOperationFailed, op.PathID, op.StepName, map[string]interface{}{
-			"operation_id": string(op.ID),
-			"error":        err.Error(),
-			"duration":     executedAt.Sub(startTime),
-		})
-	} else {
-		e.recordEvent(EventOperationCompleted, op.PathID, op.StepName, map[string]interface{}{
-			"operation_id": string(op.ID),
-			"result":       result,
-			"duration":     executedAt.Sub(startTime),
-		})
+	// Record operation completion
+	eventData := map[string]interface{}{
+		"operation_id":   string(op.ID),
+		"operation_type": op.Type,
+		"duration":       duration,
 	}
+
+	var eventType ExecutionEventType
+	if err != nil {
+		eventType = EventOperationFailed
+		eventData["error"] = err.Error()
+	} else {
+		eventType = EventOperationCompleted
+		eventData["result"] = result
+	}
+
+	e.recorder.RecordCustomEvent(eventType, op.PathID, op.StepName, eventData)
 
 	// Cache result for potential replay
 	e.operationResults[op.ID] = &OperationResult{
 		OperationID: op.ID,
 		Result:      result,
 		Error:       err,
-		ExecutedAt:  executedAt,
+		ExecutedAt:  startTime,
 	}
 
 	return result, err
 }
 
 // FindOperationResult implements the OperationExecutor interface
-func (e *EventBasedExecution) FindOperationResult(opID OperationID) (*OperationResult, bool) {
+func (e *Execution) FindOperationResult(opID OperationID) (*OperationResult, bool) {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
 
@@ -334,82 +301,80 @@ func (e *EventBasedExecution) FindOperationResult(opID OperationID) (*OperationR
 	return result, found
 }
 
-// Run the execution to completion. This is a blocking call.
-func (e *EventBasedExecution) Run(ctx context.Context) error {
-	defer e.doneWg.Done()
-
-	// Record execution started event
-	e.recordEvent(EventExecutionStarted, "", "", map[string]interface{}{
-		"workflow_name": e.workflow.Name(),
-		"inputs":        e.inputs,
-	})
-
-	// Run the workflow to completion
-	err := e.run(ctx)
-
-	// Lock while we do post-execution cleanup
+// Run executes the workflow to completion
+func (e *Execution) Run(ctx context.Context) error {
 	e.mutex.Lock()
-	defer e.mutex.Unlock()
+	e.status = ExecutionStatusRunning
+	e.startTime = time.Now()
+	e.mutex.Unlock()
 
+	// Record execution started
+	e.recorder.RecordExecutionStarted(e.workflow.Name(), e.inputs)
+
+	// Start with initial path
+	startStep := e.workflow.Start()
+	initialPath := &executionPath{
+		id:          "start",
+		currentStep: startStep,
+	}
+
+	e.addPath(initialPath)
+
+	// Record path started
+	e.recorder.RecordPathStarted(initialPath.id, startStep.Name())
+
+	// Start parallel execution
+	e.doneWg.Add(1)
+	go e.runPath(ctx, initialPath)
+
+	// Process path updates
+	err := e.processPathUpdates(ctx)
+
+	// Update final status
+	e.mutex.Lock()
 	e.endTime = time.Now()
 	if err != nil {
-		e.logger.Error("workflow execution failed", "error", err)
-		e.status = StatusFailed
+		e.status = ExecutionStatusFailed
 		e.err = err
-		e.recordEvent(EventExecutionFailed, "", "", map[string]interface{}{
-			"error": err.Error(),
-		})
+		e.recorder.RecordExecutionFailed(err)
+		e.logger.Error("workflow execution failed", "error", err)
 	} else {
-		e.logger.Info("workflow execution completed", "execution_id", e.id)
-		e.status = StatusCompleted
-		e.err = nil
-		e.recordEvent(EventExecutionCompleted, "", "", map[string]interface{}{
-			"outputs": e.outputs,
-		})
+		e.status = ExecutionStatusCompleted
+		e.recorder.RecordExecutionCompleted(e.outputs)
+		e.logger.Info("workflow execution completed")
 	}
+	e.mutex.Unlock()
 
-	if flushErr := e.Flush(); flushErr != nil {
-		e.logger.Error("failed to flush final events", "error", flushErr)
-	}
-	if snapshotErr := e.saveSnapshot(); snapshotErr != nil {
-		e.logger.Error("failed to save final snapshot", "error", snapshotErr)
-	}
+	// Flush any remaining events
+	e.recorder.Flush()
+
 	return err
 }
 
-// run is our custom implementation that uses event recording
-func (e *EventBasedExecution) run(ctx context.Context) error {
-	graph := e.workflow.Graph()
-	totalUsage := llm.Usage{}
+// addPath adds a new execution path
+func (e *Execution) addPath(path *executionPath) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
 
-	e.logger.Info(
-		"workflow execution started",
-		"workflow_name", e.workflow.Name(),
-		"start_step", graph.Start().Name(),
-	)
-
-	// Channel for path updates
-	updates := make(chan pathUpdate)
-	activePaths := make(map[string]*executionPath)
-
-	// Start initial path
-	startStep := graph.Start()
-	initialPath := &executionPath{
-		id:          fmt.Sprintf("path-%d", 1),
-		currentStep: startStep,
+	state := &PathState{
+		ID:          path.id,
+		Status:      PathStatusPending,
+		CurrentStep: path.currentStep,
+		StartTime:   time.Now(),
+		StepOutputs: make(map[string]string),
 	}
-	activePaths[initialPath.id] = initialPath
-	e.addPath(initialPath)
-	go e.runPath(ctx, initialPath, updates)
 
-	e.logger.Info("started initial path", "path_id", initialPath.id)
+	e.paths[path.id] = state
+	e.activePaths[path.id] = path
+}
 
-	// Main control loop
-	for len(activePaths) > 0 {
+// processPathUpdates handles updates from running paths
+func (e *Execution) processPathUpdates(ctx context.Context) error {
+	for len(e.activePaths) > 0 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case update := <-updates:
+		case update := <-e.pathUpdates:
 			if update.err != nil {
 				e.updatePathState(update.pathID, func(state *PathState) {
 					state.Status = PathStatusFailed
@@ -419,7 +384,7 @@ func (e *EventBasedExecution) run(ctx context.Context) error {
 				return update.err
 			}
 
-			// Store task output and update path state
+			// Store step output
 			e.updatePathState(update.pathID, func(state *PathState) {
 				state.StepOutputs[update.stepName] = update.stepOutput
 				if update.isDone {
@@ -428,26 +393,31 @@ func (e *EventBasedExecution) run(ctx context.Context) error {
 				}
 			})
 
-			// Remove path if it's done
+			// Remove completed path
 			if update.isDone {
-				delete(activePaths, update.pathID)
+				e.mutex.Lock()
+				delete(e.activePaths, update.pathID)
+				e.mutex.Unlock()
 			}
 
-			// Start any new paths
+			// Start new paths from branching
 			for _, newPath := range update.newPaths {
-				activePaths[newPath.id] = newPath
 				e.addPath(newPath)
-				go e.runPath(ctx, newPath, updates)
+				e.doneWg.Add(1)
+				go e.runPath(ctx, newPath)
 			}
 
 			e.logger.Info("path update processed",
-				"active_paths", len(activePaths),
+				"active_paths", len(e.activePaths),
 				"completed_path", update.isDone,
 				"new_paths", len(update.newPaths))
 		}
 	}
 
-	// Check if any paths failed
+	// Wait for all paths to complete
+	e.doneWg.Wait()
+
+	// Check for failed paths
 	e.mutex.RLock()
 	var failedPaths []string
 	for _, state := range e.paths {
@@ -461,147 +431,59 @@ func (e *EventBasedExecution) run(ctx context.Context) error {
 		return fmt.Errorf("execution completed with failed paths: %v", failedPaths)
 	}
 
-	e.logger.Info(
-		"workflow execution completed",
-		"workflow_name", e.workflow.Name(),
-		"total_usage", totalUsage,
-	)
 	return nil
 }
 
-// addPath adds a new path to the execution
-func (e *EventBasedExecution) addPath(path *executionPath) *PathState {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
+// runPath executes a single path
+func (e *Execution) runPath(ctx context.Context, path *executionPath) {
+	defer e.doneWg.Done()
 
-	state := &PathState{
-		ID:          path.id,
-		Status:      PathStatusPending,
-		CurrentStep: path.currentStep,
-		StartTime:   time.Now(),
-		StepOutputs: make(map[string]string),
-	}
-	e.paths[path.id] = state
-	return state
-}
-
-// saveSnapshot saves the current execution state as a snapshot
-func (e *EventBasedExecution) saveSnapshot() error {
-	snapshot := &ExecutionSnapshot{
-		ID:           e.id,
-		WorkflowName: e.workflow.Name(),
-		Status:       string(e.status), // Use direct field access to avoid mutex lock
-		StartTime:    e.startTime,      // Use direct field access
-		EndTime:      e.endTime,        // Use direct field access
-		LastEventSeq: atomic.LoadInt64(&e.eventSequence),
-		Inputs:       e.inputs,
-		Outputs:      e.outputs,
-	}
-
-	if e.err != nil {
-		snapshot.Error = e.err.Error()
-	}
-
-	// TODO: Add workflow hash and inputs hash computation
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return e.eventStore.SaveSnapshot(ctx, snapshot)
-}
-
-// Override runPath to add event recording
-func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, updates chan<- pathUpdate) {
-	// Set current path ID for operations
-	e.mutex.Lock()
-	e.currentPathID = path.id
-	e.mutex.Unlock()
-
-	// Record path started event
-	e.recordEvent(EventPathStarted, path.id, "", map[string]interface{}{
-		"current_step": path.currentStep.Name(),
-	})
-
-	nextPathID := 0
-	getNextPathID := func() string {
-		nextPathID++
-		return fmt.Sprintf("%s-%d", path.id, nextPathID)
-	}
-
-	logger := e.logger.
-		With("path_id", path.id).
-		With("execution_id", e.id)
-
+	logger := e.logger.With("path_id", path.id)
 	logger.Info("running path", "step", path.currentStep.Name())
 
 	for {
 		// Update path state to running
 		e.updatePathState(path.id, func(state *PathState) {
 			state.Status = PathStatusRunning
-			state.StartTime = time.Now()
 		})
 
 		currentStep := path.currentStep
 
-		// Get agent for current task if it's a prompt step
-		var agent dive.Agent
-		if currentStep.Type() == "prompt" {
-			if currentStep.Agent() != nil {
-				agent = currentStep.Agent()
-			} else {
-				agent = e.environment.Agents()[0]
-			}
-		}
-
-		// Execute the step with event recording
-		result, err := e.handleStepExecution(ctx, path, agent)
+		// Execute the step with pathID
+		result, err := e.executeStep(ctx, currentStep, path.id)
 		if err != nil {
-			// Record step failed event
-			e.recordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
-				"error": err.Error(),
-			})
+			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
+			logger.Error("step failed", "step", currentStep.Name(), "error", err)
 
-			e.updatePathError(path.id, err)
-
-			// Record path failed event
-			e.recordEvent(EventPathFailed, path.id, "", map[string]interface{}{
-				"error": err.Error(),
-			})
-
-			updates <- pathUpdate{pathID: path.id, err: err}
+			e.recorder.RecordPathFailed(path.id, err)
+			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
 
 		// Handle path branching
-		newPaths, err := e.handlePathBranching(ctx, currentStep, path.id, getNextPathID)
+		newPaths, err := e.handlePathBranching(ctx, currentStep, path.id)
 		if err != nil {
-			e.recordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
-				"error": err.Error(),
-			})
-			e.updatePathError(path.id, err)
-			e.recordEvent(EventPathFailed, path.id, "", map[string]interface{}{
-				"error": err.Error(),
-			})
-			updates <- pathUpdate{pathID: path.id, err: err}
+			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
+			e.recorder.RecordPathFailed(path.id, err)
+			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
 
 		// Record path branching if multiple paths created
 		if len(newPaths) > 1 {
-			pathData := make([]map[string]interface{}, len(newPaths))
+			branchInfo := make([]PathBranchInfo, len(newPaths))
 			for i, newPath := range newPaths {
-				pathData[i] = map[string]interface{}{
-					"id":           newPath.id,
-					"current_step": newPath.currentStep.Name(),
+				branchInfo[i] = PathBranchInfo{
+					ID:             newPath.id,
+					CurrentStep:    newPath.currentStep.Name(),
+					InheritOutputs: true,
 				}
 			}
 
-			e.recordEvent(EventPathBranched, path.id, currentStep.Name(), map[string]interface{}{
-				"new_paths": pathData,
-			})
+			e.recorder.RecordPathBranched(path.id, currentStep.Name(), branchInfo)
 		}
 
-		// Path is complete if there are no new paths
+		// Path is complete if there are no new paths or multiple paths (branching)
 		isDone := len(newPaths) == 0 || len(newPaths) > 1
 
 		// Send update
@@ -609,7 +491,8 @@ func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, 
 		if len(newPaths) > 1 {
 			executeNewPaths = newPaths
 		}
-		updates <- pathUpdate{
+
+		e.pathUpdates <- pathUpdate{
 			pathID:     path.id,
 			stepName:   currentStep.Name(),
 			stepOutput: result.Content,
@@ -618,39 +501,18 @@ func (e *EventBasedExecution) runPath(ctx context.Context, path *executionPath, 
 		}
 
 		if isDone {
-			e.updatePathState(path.id, func(state *PathState) {
-				state.Status = PathStatusCompleted
-				state.EndTime = time.Now()
-			})
-
-			// Record path completed event
-			e.recordEvent(EventPathCompleted, path.id, "", map[string]interface{}{
-				"final_step": currentStep.Name(),
-			})
+			e.recorder.RecordPathCompleted(path.id, currentStep.Name())
+			logger.Info("path completed", "step", currentStep.Name())
 			return
 		}
 
-		// We have exactly one path still. Continue running it.
+		// Continue with the single path
 		path = newPaths[0]
 	}
 }
 
-// updatePathError updates the path state with an error
-func (e *EventBasedExecution) updatePathError(pathID string, err error) {
-	e.updatePathState(pathID, func(state *PathState) {
-		state.Status = PathStatusFailed
-		state.Error = err
-		state.EndTime = time.Now()
-	})
-}
-
 // handlePathBranching processes the next steps and creates new paths if needed
-func (e *EventBasedExecution) handlePathBranching(
-	ctx context.Context,
-	step *workflow.Step,
-	currentPathID string,
-	getNextPathID func() string,
-) ([]*executionPath, error) {
+func (e *Execution) handlePathBranching(ctx context.Context, step *workflow.Step, currentPathID string) ([]*executionPath, error) {
 	nextEdges := step.Next()
 	if len(nextEdges) == 0 {
 		return nil, nil // Path is complete
@@ -663,9 +525,11 @@ func (e *EventBasedExecution) handlePathBranching(
 			matchingEdges = append(matchingEdges, edge)
 			continue
 		}
-		match, err := e.evaluateRisorCondition(ctx, edge.Condition, e.logger)
+
+		// Evaluate condition using safe Risor scripting
+		match, err := e.evaluateCondition(ctx, edge.Condition)
 		if err != nil {
-			return nil, fmt.Errorf("failed to evaluate condition: %w", err)
+			return nil, fmt.Errorf("failed to evaluate condition %q in step %q: %w", edge.Condition, step.Name(), err)
 		}
 		if match {
 			matchingEdges = append(matchingEdges, edge)
@@ -679,12 +543,18 @@ func (e *EventBasedExecution) handlePathBranching(
 		if !ok {
 			return nil, fmt.Errorf("next step not found: %s", edge.Step)
 		}
+
 		var nextPathID string
 		if len(matchingEdges) > 1 {
-			nextPathID = getNextPathID()
+			// Generate new path ID for branching
+			e.mutex.Lock()
+			e.pathCounter++
+			nextPathID = fmt.Sprintf("%s-%d", currentPathID, e.pathCounter)
+			e.mutex.Unlock()
 		} else {
 			nextPathID = currentPathID
 		}
+
 		newPaths = append(newPaths, &executionPath{
 			id:          nextPathID,
 			currentStep: nextStep,
@@ -694,89 +564,75 @@ func (e *EventBasedExecution) handlePathBranching(
 	return newPaths, nil
 }
 
-// Override handleStepExecution to add event recording
-func (e *EventBasedExecution) handleStepExecution(ctx context.Context, path *executionPath, agent dive.Agent) (*dive.StepResult, error) {
-	step := path.currentStep
+// updatePathState updates the state of a path
+func (e *Execution) updatePathState(pathID string, updateFn func(*PathState)) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
 
-	// Record step started event
-	e.recordEvent(EventStepStarted, path.id, step.Name(), map[string]interface{}{
-		"step_type":   step.Type(),
-		"step_params": step.Parameters(),
-	})
-
-	e.updatePathState(path.id, func(state *PathState) { state.CurrentStep = step })
-
-	var err error
-	var result *dive.StepResult
-
-	if step.Each() != nil {
-		result, err = e.executeStepEach(ctx, step, agent)
-	} else {
-		result, err = e.executeStepCore(ctx, step, agent)
+	if state, exists := e.paths[pathID]; exists {
+		updateFn(state)
 	}
-	if err != nil {
-		return nil, err
-	}
-
-	if step.Each() == nil {
-		// Store the output in a variable if specified
-		if varName := step.Store(); varName != "" {
-			e.scriptGlobals[varName] = result.Content
-			e.logger.Debug("stored step result", "variable_name", varName)
-		}
-		// Update path state with step output
-		e.updatePathState(path.id, func(state *PathState) {
-			if state.StepOutputs == nil {
-				state.StepOutputs = make(map[string]string)
-			}
-			state.StepOutputs[step.Name()] = result.Content
-		})
-	}
-
-	// Record step completed event
-	eventData := map[string]interface{}{
-		"output": result.Content,
-	}
-	if varName := step.Store(); varName != "" {
-		eventData["stored_variable"] = varName
-	}
-	e.recordEvent(EventStepCompleted, path.id, step.Name(), eventData)
-
-	return result, nil
 }
 
-func (e *EventBasedExecution) executeStepCore(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
-	var err error
-	var result *dive.StepResult
+// executeStep executes a single workflow step
+func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
+	e.logger.Info("executing step", "step_name", step.Name(), "step_type", step.Type())
 
+	// Print step start if formatter is available
 	if e.formatter != nil {
 		e.formatter.PrintStepStart(step.Name(), step.Type())
 	}
 
-	// Handle different step types
-	switch step.Type() {
-	case "prompt":
-		result, err = e.handlePromptStep(ctx, step, agent)
-	case "action":
-		result, err = e.handleActionStep(ctx, step)
-	default:
-		return nil, fmt.Errorf("unknown step type: %s", step.Type())
+	// Record step started
+	e.recorder.RecordStepStarted(pathID, step.Name(), step.Type(), step.Parameters())
+
+	var result *dive.StepResult
+	var err error
+
+	// Handle steps with "each" blocks
+	if step.Each() != nil {
+		result, err = e.executeStepEach(ctx, step, pathID)
+	} else {
+		switch step.Type() {
+		case "prompt":
+			result, err = e.executePromptStep(ctx, step, pathID)
+		case "action":
+			result, err = e.executeActionStep(ctx, step, pathID)
+		default:
+			err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
+		}
 	}
+
 	if err != nil {
+		// Print step error if formatter is available
 		if e.formatter != nil {
 			e.formatter.PrintStepError(step.Name(), err)
 		}
 		return nil, err
 	}
 
+	// Store step result in state if not an each step (each steps handle their own storage)
+	if step.Each() == nil {
+		// Store the result in a state variable if specified
+		if varName := step.Store(); varName != "" {
+			e.state.Set(varName, result.Content)
+			e.logger.Info("stored step result", "variable_name", varName)
+		}
+	}
+
+	// Print step output if formatter is available
 	if e.formatter != nil {
 		e.formatter.PrintStepOutput(step.Name(), result.Content)
 	}
+
+	// Record step completed
+	e.recorder.RecordStepCompleted(pathID, step.Name(), result.Content, step.Name())
+
 	return result, nil
 }
 
 // executeStepEach handles the execution of a step that has an each block
-func (e *EventBasedExecution) executeStepEach(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
+func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
 	each := step.Each()
 
 	// Resolve the items to iterate over
@@ -787,24 +643,53 @@ func (e *EventBasedExecution) executeStepEach(ctx context.Context, step *workflo
 
 	// Execute the step for each item and capture the results
 	results := make([]*dive.StepResult, 0, len(items))
+
+	// Store original state if we're setting a variable
+	var originalValue interface{}
+	var hasOriginalValue bool
+	if each.As != "" {
+		originalValue, hasOriginalValue = e.state.Get(each.As)
+	}
+
 	for _, item := range items {
-		if varName := each.As; varName != "" {
-			e.scriptGlobals[varName] = item
+		// Set the loop variable if specified
+		if each.As != "" {
+			e.state.Set(each.As, item)
 		}
-		result, err := e.executeStepCore(ctx, step, agent)
+
+		// Execute the step for this item
+		var result *dive.StepResult
+		switch step.Type() {
+		case "prompt":
+			result, err = e.executePromptStep(ctx, step, pathID)
+		case "action":
+			result, err = e.executeActionStep(ctx, step, pathID)
+		default:
+			err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
+		}
+
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, result)
 	}
 
+	// Restore original loop variable value
+	if each.As != "" {
+		if hasOriginalValue {
+			e.state.Set(each.As, originalValue)
+		} else {
+			e.state.Delete(each.As)
+		}
+	}
+
 	// Store the array of results if a store variable is specified
 	if varName := step.Store(); varName != "" {
-		resultContents := make([]object.Object, 0, len(results))
+		resultContents := make([]string, 0, len(results))
 		for _, result := range results {
-			resultContents = append(resultContents, object.NewString(result.Content))
+			resultContents = append(resultContents, result.Content)
 		}
-		e.scriptGlobals[varName] = object.NewList(resultContents)
+		e.state.Set(varName, resultContents)
 		e.logger.Info("stored results list",
 			"variable_name", varName,
 			"item_count", len(resultContents),
@@ -829,246 +714,8 @@ func (e *EventBasedExecution) executeStepEach(ctx context.Context, step *workflo
 	}, nil
 }
 
-func (e *EventBasedExecution) handlePromptStep(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
-	promptTemplate := step.Prompt()
-	if promptTemplate == "" && len(step.Content()) == 0 {
-		return nil, fmt.Errorf("prompt step %q has no prompt", step.Name())
-	}
-
-	// Deterministic: prepare prompt
-	prompt, err := e.evalString(ctx, promptTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create prompt template: %w", err)
-	}
-
-	// Deterministic: prepare content
-	var content []llm.Content
-	if stepContent := step.Content(); len(stepContent) > 0 {
-		for _, item := range stepContent {
-			if dynamicContent, ok := item.(DynamicContent); ok {
-				processedContent, err := dynamicContent.Content(ctx, map[string]any{
-					"workflow": e.workflow.Name(),
-					"step":     step.Name(),
-					"agent":    agent.Name(),
-				})
-				if err != nil {
-					return nil, fmt.Errorf("failed to process dynamic content: %w", err)
-				}
-				content = append(content, processedContent...)
-			} else {
-				content = append(content, item)
-			}
-		}
-	}
-	if promptTemplate != "" {
-		content = append(content, &llm.TextContent{Text: prompt})
-	}
-
-	// Operation: LLM call (non-deterministic)
-	op := NewOperation(
-		"agent_response",
-		step.Name(),
-		e.currentPathID,
-		map[string]interface{}{
-			"agent":   agent.Name(),
-			"prompt":  prompt,
-			"content": fmt.Sprintf("%d_items", len(content)),
-		},
-	)
-
-	responseInterface, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
-		return agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(content...)))
-	})
-
-	if err != nil {
-		e.logger.Error("agent response operation failed", "step", step.Name(), "error", err)
-		return nil, err
-	}
-
-	// Deterministic: process result
-	response := responseInterface.(*dive.Response)
-
-	var usage llm.Usage
-	for _, item := range response.Items {
-		if item.Type == dive.ResponseItemTypeMessage && item.Usage != nil {
-			usage.Add(item.Usage)
-		}
-	}
-
-	return &dive.StepResult{
-		Content: response.OutputText(),
-		Usage:   usage,
-	}, nil
-}
-
-func (e *EventBasedExecution) handleActionStep(ctx context.Context, step *workflow.Step) (*dive.StepResult, error) {
-	actionName := step.Action()
-	if actionName == "" {
-		return nil, fmt.Errorf("action step %q has no action name", step.Name())
-	}
-
-	action, ok := e.environment.GetAction(actionName)
-	if !ok {
-		return nil, fmt.Errorf("action %q not found", actionName)
-	}
-
-	// Deterministic: prepare parameters
-	params := make(map[string]interface{})
-	for name, value := range step.Parameters() {
-		// If the value is a string that looks like a template, evaluate it
-		if strValue, ok := value.(string); ok && strings.Contains(strValue, "${") {
-			evaluated, err := e.evalString(ctx, strValue)
-			if err != nil {
-				return nil, fmt.Errorf("failed to evaluate parameter template: %w", err)
-			}
-			params[name] = evaluated
-		} else {
-			params[name] = value
-		}
-	}
-
-	// Operation: execute action (non-deterministic)
-	op := NewOperation(
-		"action_execution",
-		step.Name(),
-		e.currentPathID,
-		map[string]interface{}{
-			"action_name": actionName,
-			"params":      params,
-		},
-	)
-
-	result, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
-		return action.Execute(ctx, params)
-	})
-
-	if err != nil {
-		e.logger.Error("action execution operation failed", "action", actionName, "error", err)
-		return nil, err
-	}
-
-	// Deterministic: process result
-	var content string
-	if result != nil {
-		content = fmt.Sprintf("%v", result)
-	}
-	return &dive.StepResult{Content: content}, nil
-}
-
-// updatePathState updates the state of a path
-func (e *EventBasedExecution) updatePathState(pathID string, updateFn func(*PathState)) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-
-	if state, exists := e.paths[pathID]; exists {
-		updateFn(state)
-	}
-}
-
-// SaveSnapshot saves the current execution state
-func (e *EventBasedExecution) SaveSnapshot() error {
-	return e.saveSnapshot()
-}
-
-func (e *EventBasedExecution) StepOutputs() map[string]string {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
-
-	outputs := make(map[string]string)
-	for _, pathState := range e.paths {
-		for stepName, output := range pathState.StepOutputs {
-			outputs[stepName] = output
-		}
-	}
-	return outputs
-}
-
-func evalEachScript(ctx context.Context, code *compiler.Code, globals map[string]any) ([]any, error) {
-	result, err := risor.EvalCode(ctx, code, risor.WithGlobals(globals))
-	if err != nil {
-		return nil, err
-	}
-	return convertRisorEachValue(result)
-}
-
-// evaluateRisorCondition evaluates a risor condition and returns the result as a boolean
-func (e *EventBasedExecution) evaluateRisorCondition(ctx context.Context, codeStr string, logger slogger.Logger) (bool, error) {
-	if strings.HasPrefix(codeStr, "$(") && strings.HasSuffix(codeStr, ")") {
-		codeStr = strings.TrimPrefix(codeStr, "$(")
-		codeStr = strings.TrimSuffix(codeStr, ")")
-	}
-	compiledCode, err := compileScript(ctx, codeStr, e.scriptGlobals)
-	if err != nil {
-		logger.Error("failed to compile condition", "error", err)
-		return false, fmt.Errorf("failed to compile expression: %w", err)
-	}
-	result, err := risor.EvalCode(ctx, compiledCode, risor.WithGlobals(e.scriptGlobals))
-	if err != nil {
-		return false, fmt.Errorf("failed to evaluate code: %w", err)
-	}
-	return result.IsTruthy(), nil
-}
-
-func convertRisorEachValue(obj object.Object) ([]any, error) {
-	switch obj := obj.(type) {
-	case *object.String:
-		return []any{obj.Value()}, nil
-	case *object.Int:
-		return []any{obj.Value()}, nil
-	case *object.Float:
-		return []any{obj.Value()}, nil
-	case *object.Bool:
-		return []any{obj.Value()}, nil
-	case *object.Time:
-		return []any{obj.Value()}, nil
-	case *object.List:
-		var values []any
-		for _, item := range obj.Value() {
-			value, err := convertRisorEachValue(item)
-			if err != nil {
-				return nil, err
-			}
-			values = append(values, value)
-		}
-		return values, nil
-	case *object.Set:
-		var values []any
-		for _, item := range obj.Value() {
-			value, err := convertRisorEachValue(item)
-			if err != nil {
-				return nil, err
-			}
-			values = append(values, value)
-		}
-		return values, nil
-	case *object.Map:
-		var values []any
-		for _, item := range obj.Value() {
-			value, err := convertRisorEachValue(item)
-			if err != nil {
-				return nil, err
-			}
-			values = append(values, value)
-		}
-		return values, nil
-	default:
-		return nil, fmt.Errorf("unsupported risor result type: %T", obj)
-	}
-}
-
-func (e *EventBasedExecution) evalString(ctx context.Context, s string) (string, error) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-
-	result, err := eval.Eval(ctx, s, e.scriptGlobals)
-	if err != nil {
-		return "", err
-	}
-	return result, nil
-}
-
 // resolveEachItems resolves the array of items from either a direct array or a risor expression
-func (e *EventBasedExecution) resolveEachItems(ctx context.Context, each *workflow.EachBlock) ([]any, error) {
+func (e *Execution) resolveEachItems(ctx context.Context, each *workflow.EachBlock) ([]any, error) {
 	// Array of strings
 	if strArray, ok := each.Items.([]string); ok {
 		var items []any
@@ -1091,17 +738,20 @@ func (e *EventBasedExecution) resolveEachItems(ctx context.Context, each *workfl
 	return nil, fmt.Errorf("unsupported value for 'each' block (got %T)", each.Items)
 }
 
-// evaluateRisorExpression evaluates a risor expression and returns the result as a string array
-func (e *EventBasedExecution) evaluateRisorExpression(ctx context.Context, codeStr string) ([]any, error) {
+// evaluateRisorExpression evaluates a risor expression and returns the result as an array
+func (e *Execution) evaluateRisorExpression(ctx context.Context, codeStr string) ([]any, error) {
 	code := strings.TrimSuffix(strings.TrimPrefix(codeStr, "$("), ")")
 
-	compiledCode, err := compileScript(ctx, code, e.scriptGlobals)
+	// Build safe globals for the expression evaluation
+	globals := e.buildEachGlobals()
+
+	compiledCode, err := e.compileEachScript(ctx, code, globals)
 	if err != nil {
 		e.logger.Error("failed to compile 'each' expression", "error", err)
 		return nil, fmt.Errorf("failed to compile expression: %w", err)
 	}
 
-	result, err := evalEachScript(ctx, compiledCode, e.scriptGlobals)
+	result, err := e.evalEachScript(ctx, compiledCode, globals)
 	if err != nil {
 		e.logger.Error("failed to evaluate 'each' expression", "error", err)
 		return nil, fmt.Errorf("failed to evaluate expression: %w", err)
@@ -1109,72 +759,413 @@ func (e *EventBasedExecution) evaluateRisorExpression(ctx context.Context, codeS
 	return result, nil
 }
 
-// GetError returns the top-level execution error, if any.
-func (e *EventBasedExecution) GetError() error {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
+// buildEachGlobals creates globals for "each" expression evaluation
+func (e *Execution) buildEachGlobals() map[string]any {
+	globals := make(map[string]any)
 
-	return e.err
+	// Add safe built-in functions (same filtering as conditions)
+	// unsafeFunctions := map[string]bool{
+	// 	"read":    true,
+	// 	"write":   true,
+	// 	"exec":    true,
+	// 	"open":    true,
+	// 	"file":    true,
+	// 	"http":    true,
+	// 	"fetch":   true,
+	// 	"request": true,
+	// 	"system":  true,
+	// 	"shell":   true,
+	// 	"env":     true,
+	// 	"getenv":  true,
+	// 	"setenv":  true,
+	// 	"command": true,
+	// 	"proc":    true,
+	// 	"process": true,
+	// 	"socket":  true,
+	// 	"network": true,
+	// 	"tcp":     true,
+	// 	"udp":     true,
+	// 	"tls":     true,
+	// 	"crypto":  true,
+	// 	"hash":    true,
+	// 	"rand":    true, // exclude random functions for determinism
+	// 	"random":  true,
+	// }
+
+	for k, v := range all.Builtins() {
+		globals[k] = v
+	}
+
+	// Add workflow inputs (read-only)
+	globals["inputs"] = e.inputs
+
+	// Add current state variables (read-only snapshot)
+	globals["state"] = e.state.Copy()
+
+	// Add documents if available
+	if e.environment.documentRepo != nil {
+		globals["documents"] = objects.NewDocumentRepository(e.environment.documentRepo)
+	}
+
+	return globals
 }
 
-// PathStates returns a copy of all path states in the execution.
-func (e *EventBasedExecution) PathStates() []*PathState {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
-
-	paths := make([]*PathState, 0, len(e.paths))
-	for _, state := range e.paths {
-		paths = append(paths, state.Copy())
-	}
-	return paths
-}
-
-// LoadFromSnapshot loads execution state from a snapshot and event history
-func LoadFromSnapshot(ctx context.Context, env *Environment, snapshot *ExecutionSnapshot, eventStore ExecutionEventStore) (*EventBasedExecution, error) {
-	// Verify the workflow exists
-	if _, exists := env.workflows[snapshot.WorkflowName]; !exists {
-		return nil, fmt.Errorf("workflow not found: %s", snapshot.WorkflowName)
-	}
-
-	exec, err := NewEventBasedExecution(env, ExecutionOptions{
-		WorkflowName:   snapshot.WorkflowName,
-		Inputs:         snapshot.Inputs,
-		Outputs:        snapshot.Outputs,
-		Logger:         env.logger,
-		EventStore:     eventStore,
-		EventBatchSize: 10,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Restore state from snapshot
-	exec.id = snapshot.ID
-	exec.status = Status(snapshot.Status)
-	exec.startTime = snapshot.StartTime
-	exec.endTime = snapshot.EndTime
-	exec.inputs = snapshot.Inputs
-	exec.outputs = snapshot.Outputs
-	exec.eventSequence = snapshot.LastEventSeq
-
-	if snapshot.Error != "" {
-		exec.err = fmt.Errorf(snapshot.Error)
-	}
-	return exec, nil
-}
-
-// compileScript compiles a risor script with the given globals
-func compileScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
+// compileEachScript compiles a script for "each" expression evaluation
+func (e *Execution) compileEachScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
+	// Parse the script
 	ast, err := parser.Parse(ctx, code)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse script: %w", err)
 	}
 
+	// Get sorted global names for deterministic compilation
 	var globalNames []string
 	for name := range globals {
 		globalNames = append(globalNames, name)
 	}
 	sort.Strings(globalNames)
 
+	// Compile with global names
 	return compiler.Compile(ast, compiler.WithGlobalNames(globalNames))
+}
+
+// evalEachScript evaluates a compiled script and returns the result as an array
+func (e *Execution) evalEachScript(ctx context.Context, code *compiler.Code, globals map[string]any) ([]any, error) {
+	result, err := risor.EvalCode(ctx, code, risor.WithGlobals(globals))
+	if err != nil {
+		return nil, err
+	}
+	return e.convertRisorEachValue(result)
+}
+
+// convertRisorEachValue converts a Risor object to an array of values
+func (e *Execution) convertRisorEachValue(obj object.Object) ([]any, error) {
+	switch obj := obj.(type) {
+	case *object.String:
+		return []any{obj.Value()}, nil
+	case *object.Int:
+		return []any{obj.Value()}, nil
+	case *object.Float:
+		return []any{obj.Value()}, nil
+	case *object.Bool:
+		return []any{obj.Value()}, nil
+	case *object.Time:
+		return []any{obj.Value()}, nil
+	case *object.List:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := e.convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value...)
+		}
+		return values, nil
+	case *object.Set:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := e.convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value...)
+		}
+		return values, nil
+	case *object.Map:
+		var values []any
+		for _, item := range obj.Value() {
+			value, err := e.convertRisorEachValue(item)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value...)
+		}
+		return values, nil
+	default:
+		return nil, fmt.Errorf("unsupported risor result type for 'each': %T", obj)
+	}
+}
+
+// executePromptStep executes a prompt step using an agent
+func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
+	// Deterministic: get agent
+	agent := step.Agent()
+	if agent == nil {
+		var found bool
+		agent, found = e.environment.DefaultAgent()
+		if !found {
+			return nil, fmt.Errorf("no agent specified for prompt step %q", step.Name())
+		}
+	}
+
+	// Deterministic: prepare prompt by evaluating template
+	prompt := step.Prompt()
+	if strings.Contains(prompt, "${") {
+		evaluatedPrompt, err := e.evaluateTemplate(ctx, prompt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to evaluate prompt template in step %q (type: %s): %w", step.Name(), step.Type(), err)
+		}
+		prompt = evaluatedPrompt
+	}
+
+	// Deterministic: prepare content
+	var content []llm.Content
+	if stepContent := step.Content(); len(stepContent) > 0 {
+		for _, item := range stepContent {
+			if dynamicContent, ok := item.(DynamicContent); ok {
+				processedContent, err := dynamicContent.Content(ctx, map[string]any{
+					"workflow": e.workflow.Name(),
+					"step":     step.Name(),
+					"agent":    agent.Name(),
+				})
+				if err != nil {
+					return nil, fmt.Errorf("failed to process dynamic content: %w", err)
+				}
+				content = append(content, processedContent...)
+			} else {
+				content = append(content, item)
+			}
+		}
+	}
+	if prompt != "" {
+		content = append(content, &llm.TextContent{Text: prompt})
+	}
+
+	// Operation: LLM call (non-deterministic)
+	// Use deterministic parameters for operation ID generation
+	op := Operation{
+		Type:     "agent_response",
+		StepName: step.Name(),
+		PathID:   pathID,
+		Parameters: map[string]interface{}{
+			"agent":  agent.Name(),
+			"prompt": prompt,
+			// Don't include content array in parameters as it contains memory addresses
+		},
+	}
+
+	responseInterface, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
+		return agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(content...)))
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("agent response operation failed: %w", err)
+	}
+
+	// Deterministic: process result
+	response := responseInterface.(*dive.Response)
+	var usage llm.Usage
+	if response.Usage != nil {
+		usage = *response.Usage
+	}
+	return &dive.StepResult{
+		Content: response.OutputText(),
+		Usage:   usage,
+	}, nil
+}
+
+// executeActionStep executes an action step
+func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
+	actionName := step.Action()
+	if actionName == "" {
+		return nil, fmt.Errorf("no action specified for action step %q", step.Name())
+	}
+	action, ok := e.environment.GetAction(actionName)
+	if !ok {
+		return nil, fmt.Errorf("action %q not found", actionName)
+	}
+
+	// Deterministic: prepare parameters by evaluating templates
+	params := make(map[string]interface{})
+	for name, value := range step.Parameters() {
+		if strValue, ok := value.(string); ok && strings.Contains(strValue, "${") {
+			evaluated, err := e.evaluateTemplate(ctx, strValue)
+			if err != nil {
+				return nil, fmt.Errorf("failed to evaluate parameter template %q in step %q (action: %s): %w",
+					name, step.Name(), actionName, err)
+			}
+			params[name] = evaluated
+		} else {
+			params[name] = value
+		}
+	}
+
+	// Operation: execute action (non-deterministic)
+	op := Operation{
+		Type:     "action_execution",
+		StepName: step.Name(),
+		PathID:   pathID,
+		Parameters: map[string]interface{}{
+			"action_name": actionName,
+			"params":      params,
+		},
+	}
+
+	result, err := e.ExecuteOperation(ctx, op, func() (interface{}, error) {
+		return action.Execute(ctx, params)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("action execution operation failed: %w", err)
+	}
+	var content string
+	if result != nil {
+		content = fmt.Sprintf("%v", result)
+	}
+	return &dive.StepResult{Content: content}, nil
+}
+
+// buildConditionGlobals creates a safe, read-only globals map for condition evaluation
+func (e *Execution) buildConditionGlobals() map[string]any {
+	globals := make(map[string]any)
+
+	// Add safe built-in functions (exclude potentially dangerous ones)
+	unsafeFunctions := map[string]bool{
+		"read":    true,
+		"write":   true,
+		"exec":    true,
+		"open":    true,
+		"file":    true,
+		"http":    true,
+		"fetch":   true,
+		"request": true,
+		"system":  true,
+		"shell":   true,
+		"env":     true,
+		"getenv":  true,
+		"setenv":  true,
+		"command": true,
+		"proc":    true,
+		"process": true,
+		"socket":  true,
+		"network": true,
+		"tcp":     true,
+		"udp":     true,
+		"tls":     true,
+		"crypto":  true,
+		"hash":    true,
+		"rand":    true, // exclude random functions for determinism
+		"random":  true,
+	}
+
+	for k, v := range all.Builtins() {
+		if !unsafeFunctions[k] {
+			globals[k] = v
+		}
+	}
+
+	// Add workflow inputs (read-only)
+	globals["inputs"] = e.inputs
+
+	// Add current state variables (read-only snapshot)
+	globals["state"] = e.state.Copy()
+
+	return globals
+}
+
+// evaluateCondition evaluates a workflow condition using Risor scripting
+func (e *Execution) evaluateCondition(ctx context.Context, condition string) (bool, error) {
+	// Handle simple boolean conditions
+	switch strings.ToLower(strings.TrimSpace(condition)) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+
+	// Handle Risor expressions wrapped in $()
+	codeStr := condition
+	if strings.HasPrefix(codeStr, "$(") && strings.HasSuffix(codeStr, ")") {
+		codeStr = strings.TrimPrefix(codeStr, "$(")
+		codeStr = strings.TrimSuffix(codeStr, ")")
+	}
+
+	// Build safe globals for condition evaluation
+	globals := e.buildConditionGlobals()
+
+	// Compile the script
+	compiledCode, err := e.compileConditionScript(ctx, codeStr, globals)
+	if err != nil {
+		return false, fmt.Errorf("failed to compile condition: %w", err)
+	}
+
+	// Evaluate the condition
+	result, err := risor.EvalCode(ctx, compiledCode, risor.WithGlobals(globals))
+	if err != nil {
+		return false, fmt.Errorf("failed to evaluate condition: %w", err)
+	}
+
+	// Convert result to boolean
+	return e.convertToBool(result), nil
+}
+
+// compileConditionScript compiles a condition script with deterministic global names
+func (e *Execution) compileConditionScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
+	// Parse the script
+	ast, err := parser.Parse(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse script: %w", err)
+	}
+
+	// Get sorted global names for deterministic compilation
+	var globalNames []string
+	for name := range globals {
+		globalNames = append(globalNames, name)
+	}
+	sort.Strings(globalNames)
+
+	// Compile with global names
+	return compiler.Compile(ast, compiler.WithGlobalNames(globalNames))
+}
+
+// convertToBool safely converts a Risor object to a boolean
+func (e *Execution) convertToBool(obj object.Object) bool {
+	switch obj := obj.(type) {
+	case *object.Bool:
+		return obj.Value()
+	case *object.Int:
+		return obj.Value() != 0
+	case *object.Float:
+		return obj.Value() != 0.0
+	case *object.String:
+		val := obj.Value()
+		return val != "" && strings.ToLower(val) != "false"
+	case *object.List:
+		return len(obj.Value()) > 0
+	case *object.Map:
+		return len(obj.Value()) > 0
+	default:
+		// Use Risor's built-in truthiness evaluation
+		return obj.IsTruthy()
+	}
+}
+
+func (e *Execution) evaluateTemplate(ctx context.Context, s string) (string, error) {
+	if strings.HasPrefix(s, "$(") && strings.HasSuffix(s, ")") {
+		s = strings.TrimPrefix(s, "$(")
+		s = strings.TrimSuffix(s, ")")
+	}
+
+	builtins := all.Builtins()
+
+	globals := make(map[string]any, len(builtins)+len(e.inputs)+2)
+
+	// Add current state variables (read-only snapshot)
+	globals["state"] = e.state.Copy()
+
+	for k, v := range builtins {
+		globals[k] = v
+	}
+	for k, v := range e.inputs {
+		globals[k] = v
+	}
+	if e.environment.documentRepo != nil {
+		globals["documents"] = objects.NewDocumentRepository(e.environment.documentRepo)
+	}
+	inputs := map[string]any{}
+	for k, v := range e.inputs {
+		inputs[k] = v
+	}
+	globals["inputs"] = inputs
+
+	return eval.Eval(ctx, s, globals)
 }

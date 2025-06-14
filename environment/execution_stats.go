@@ -14,7 +14,7 @@ type ExecutionStats struct {
 }
 
 // GetStats returns current execution statistics
-func (e *EventBasedExecution) GetStats() ExecutionStats {
+func (e *Execution) GetStats() ExecutionStats {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
 

@@ -41,18 +41,16 @@ func (t *Trigger) Unsubscribe(workflow *workflow.Workflow) error {
 	return nil
 }
 
-func (t *Trigger) Fire(ctx context.Context, input map[string]interface{}) ([]*EventBasedExecution, error) {
+func (t *Trigger) Fire(ctx context.Context, input map[string]interface{}) ([]*Execution, error) {
 	if t.env == nil {
 		return nil, errors.New("trigger not associated with an environment")
 	}
-	var executions []*EventBasedExecution
+	var executions []*Execution
 	for _, w := range t.workflows {
-		execution, err := NewEventBasedExecution(t.env, ExecutionOptions{
-			WorkflowName: w.Name(),
-			Inputs:       input,
-			// FIXME
-			// EventStore:     t.env.eventStore,
-			EventBatchSize: 10,
+		execution, err := NewExecution(ExecutionV2Options{
+			Environment: t.env,
+			Workflow:    w,
+			Inputs:      input,
 		})
 		if err != nil {
 			return nil, err

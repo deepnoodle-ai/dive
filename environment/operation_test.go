@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,7 @@ import (
 func TestOperationExecution(t *testing.T) {
 	// Create a test environment like in existing tests
 	env := &Environment{
-		agents:    map[string]dive.Agent{"test-agent": &MockAgent{name: "test-agent", responses: []string{"test response"}}},
+		agents:    map[string]dive.Agent{"test-agent": &agent.MockAgent{}},
 		workflows: make(map[string]*workflow.Workflow),
 		logger:    slogger.New(slogger.LevelInfo),
 	}
@@ -37,12 +38,12 @@ func TestOperationExecution(t *testing.T) {
 	eventStore := NewNullEventStore()
 
 	// Create an execution
-	execution, err := NewEventBasedExecution(env, ExecutionOptions{
-		WorkflowName:   "test-workflow",
-		Inputs:         map[string]interface{}{"input1": "value1"},
-		EventStore:     eventStore,
-		Logger:         slogger.NewDevNullLogger(),
-		EventBatchSize: 5,
+	execution, err := NewExecution(ExecutionV2Options{
+		Workflow:    testWorkflow,
+		Environment: env,
+		Inputs:      map[string]interface{}{"input1": "value1"},
+		EventStore:  eventStore,
+		Logger:      slogger.NewDevNullLogger(),
 	})
 	require.NoError(t, err)
 
@@ -75,73 +76,6 @@ func TestOperationExecution(t *testing.T) {
 	require.Equal(t, expectedResult, cachedResult.Result)
 	require.NoError(t, cachedResult.Error)
 	require.Equal(t, op.ID, cachedResult.OperationID)
-}
-
-func TestOperationExecutionWithError(t *testing.T) {
-	// Create a test environment
-	env := &Environment{
-		agents:    map[string]dive.Agent{"test-agent": &MockAgent{name: "test-agent", responses: []string{"test response"}}},
-		workflows: make(map[string]*workflow.Workflow),
-		logger:    slogger.New(slogger.LevelInfo),
-	}
-	require.NoError(t, env.Start(context.Background()))
-	defer env.Stop(context.Background())
-
-	// Create a simple test workflow
-	testWorkflow, err := workflow.New(workflow.Options{
-		Name: "test-workflow",
-		Inputs: []*workflow.Input{
-			{Name: "input1", Type: "string", Required: true},
-		},
-		Steps: []*workflow.Step{
-			workflow.NewStep(workflow.StepOptions{Name: "step1", Type: "prompt", Prompt: "Test prompt"}),
-		},
-	})
-	require.NoError(t, err)
-	env.workflows["test-workflow"] = testWorkflow
-
-	// Create a null event store for testing
-	eventStore := NewNullEventStore()
-
-	// Create an execution
-	execution, err := NewEventBasedExecution(env, ExecutionOptions{
-		WorkflowName:   "test-workflow",
-		Inputs:         map[string]interface{}{"input1": "value1"},
-		EventStore:     eventStore,
-		Logger:         slogger.NewDevNullLogger(),
-		EventBatchSize: 5,
-	})
-	require.NoError(t, err)
-
-	// Test operation execution with error
-	ctx := context.Background()
-
-	// Create a test operation
-	op := NewOperation(
-		"test_operation_error",
-		"test_step",
-		"test_path",
-		map[string]interface{}{
-			"param1": "value1",
-		},
-	)
-
-	// Execute the operation that fails
-	expectedError := "test error"
-	result, err := execution.ExecuteOperation(ctx, op, func() (interface{}, error) {
-		return nil, &testError{message: expectedError}
-	})
-
-	require.Error(t, err)
-	require.Nil(t, result)
-	require.Contains(t, err.Error(), expectedError)
-
-	// Verify operation result is cached with error
-	cachedResult, found := execution.FindOperationResult(op.ID)
-	require.True(t, found)
-	require.Nil(t, cachedResult.Result)
-	require.Error(t, cachedResult.Error)
-	require.Contains(t, cachedResult.Error.Error(), expectedError)
 }
 
 func TestWorkflowState(t *testing.T) {

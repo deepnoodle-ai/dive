@@ -78,26 +78,20 @@ func main() {
 	}
 
 	// Start the workflow
-	execution, err := environment.NewEventBasedExecution(env, environment.ExecutionOptions{
-		WorkflowName:   w.Name(),
-		Inputs:         vars,
-		EventStore:     environment.NewNullEventStore(),
-		EventBatchSize: 10,
+	execution, err := environment.NewExecution(environment.ExecutionV2Options{
+		Workflow:    w,
+		Environment: env,
+		Inputs:      vars,
+		EventStore:  environment.NewNullEventStore(),
+		Logger:      slogger.DefaultLogger,
+		ReplayMode:  false,
 	})
 	if err != nil {
 		fatal(err.Error())
 	}
 
 	// Wait for the workflow to complete
-	if err := execution.Wait(); err != nil {
+	if err := execution.Run(ctx); err != nil {
 		fatal(err.Error())
-	}
-
-	// Print the outputs
-	outputs := execution.StepOutputs()
-	for name, output := range outputs {
-		if output != "" {
-			fmt.Printf("%q output:\n\n%s\n\n", name, output)
-		}
 	}
 }

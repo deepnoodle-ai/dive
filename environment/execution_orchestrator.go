@@ -30,20 +30,20 @@ func NewExecutionOrchestrator(eventStore ExecutionEventStore, env *Environment) 
 }
 
 // CreateExecution creates a new execution
-func (eo *ExecutionOrchestrator) CreateExecution(ctx context.Context, opts ExecutionOptions) (*EventBasedExecution, error) {
-	execution, err := NewEventBasedExecution(eo.environment, opts)
+func (eo *ExecutionOrchestrator) CreateExecution(ctx context.Context, opts ExecutionV2Options) (*Execution, error) {
+	execution, err := NewExecution(opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event-based execution: %w", err)
 	}
 	eo.logger.Info("created new execution",
 		"execution_id", execution.ID(),
-		"workflow", opts.WorkflowName,
+		"workflow", opts.Workflow.Name(),
 	)
 	return execution, nil
 }
 
 // RetryExecution retries an existing execution using the specified strategy
-func (eo *ExecutionOrchestrator) RetryExecution(ctx context.Context, executionID string, opts RetryOptions) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) RetryExecution(ctx context.Context, executionID string, opts RetryOptions) (*Execution, error) {
 	snapshot, err := eo.eventStore.GetSnapshot(ctx, executionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load execution snapshot: %w", err)
@@ -75,7 +75,7 @@ func (eo *ExecutionOrchestrator) RetryExecution(ctx context.Context, executionID
 }
 
 // RecoverExecution recovers an interrupted execution from its last known state
-func (eo *ExecutionOrchestrator) RecoverExecution(ctx context.Context, executionID string) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) RecoverExecution(ctx context.Context, executionID string) (*Execution, error) {
 	snapshot, err := eo.eventStore.GetSnapshot(ctx, executionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load snapshot: %w", err)
@@ -120,15 +120,15 @@ func (eo *ExecutionOrchestrator) ListRecoverableExecutions(ctx context.Context) 
 }
 
 // retryFromStart creates a new execution with the same workflow and inputs
-func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *ExecutionSnapshot) (*EventBasedExecution, error) {
-	execution, err := eo.CreateExecution(ctx, ExecutionOptions{
-		WorkflowName:   snapshot.WorkflowName,
-		Inputs:         snapshot.Inputs,
-		Outputs:        snapshot.Outputs,
-		Logger:         eo.logger,
-		Formatter:      eo.environment.formatter,
-		EventStore:     eo.eventStore,
-		EventBatchSize: 10,
+func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *ExecutionSnapshot) (*Execution, error) {
+	// FIXME
+	execution, err := eo.CreateExecution(ctx, ExecutionV2Options{
+		// Workflow:    wf,
+		// Environment: env,
+		Inputs: map[string]interface{}{},
+		// EventStore:  eventStore,
+		Logger:     slogger.DefaultLogger,
+		ReplayMode: false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create retry execution: %w", err)
@@ -140,7 +140,7 @@ func (eo *ExecutionOrchestrator) retryFromStart(ctx context.Context, snapshot *E
 }
 
 // retryFromFailure implements intelligent retry from the point of failure
-func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*Execution, error) {
 	eo.logger.Info("retrying from failure point",
 		"execution_id", snapshot.ID,
 		"workflow", snapshot.WorkflowName,
@@ -190,7 +190,7 @@ func (eo *ExecutionOrchestrator) retryFromFailure(ctx context.Context, snapshot 
 }
 
 // retrySkipFailed implements retry that skips failed steps
-func (eo *ExecutionOrchestrator) retrySkipFailed(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) retrySkipFailed(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*Execution, error) {
 	eo.logger.Info("retrying with skip failed steps", "execution_id", snapshot.ID)
 
 	// Find all failed steps
@@ -303,15 +303,14 @@ func (eo *ExecutionOrchestrator) getEventsBeforeSequence(events []*ExecutionEven
 }
 
 // createExecutionFromReplay creates a new execution from replay results
-func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, snapshot *ExecutionSnapshot, replayResult *ReplayResult, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, snapshot *ExecutionSnapshot, replayResult *ReplayResult, wf *workflow.Workflow) (*Execution, error) {
 	// Create new execution with fresh ID
-	newExecution, err := NewEventBasedExecution(eo.environment, ExecutionOptions{
-		WorkflowName:   snapshot.WorkflowName,
-		Inputs:         snapshot.Inputs,
-		Logger:         eo.logger,
-		Formatter:      eo.environment.formatter,
-		EventStore:     eo.eventStore,
-		EventBatchSize: 10,
+	newExecution, err := NewExecution(ExecutionV2Options{
+		Environment: eo.environment,
+		Workflow:    wf,
+		Inputs:      snapshot.Inputs,
+		EventStore:  eo.eventStore,
+		Logger:      eo.logger,
 	})
 	if err != nil {
 		return nil, err
@@ -320,10 +319,10 @@ func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, 
 	// Apply replayed state
 	newExecution.replayMode = true // Prevent event recording during state setup
 
-	// Restore script globals
-	for key, value := range replayResult.ScriptGlobals {
-		newExecution.scriptGlobals[key] = value
-	}
+	// Restore script globals FIXME
+	// for key, value := range replayResult.ScriptGlobals {
+	// 	newExecution.scriptGlobals[key] = value
+	// }
 
 	// Restore completed steps state (this would need integration with the actual execution state)
 	// For now, we'll rely on the script globals containing the necessary state
@@ -334,7 +333,7 @@ func (eo *ExecutionOrchestrator) createExecutionFromReplay(ctx context.Context, 
 }
 
 // setupResumeFromFailure prepares execution to resume from a failed step
-func (eo *ExecutionOrchestrator) setupResumeFromFailure(execution *EventBasedExecution, failureInfo *FailureInfo, replayResult *ReplayResult) error {
+func (eo *ExecutionOrchestrator) setupResumeFromFailure(execution *Execution, failureInfo *FailureInfo, replayResult *ReplayResult) error {
 	// Find the active path that needs to resume
 	var resumePath *ReplayPathState
 	for _, path := range replayResult.ActivePaths {
@@ -350,11 +349,11 @@ func (eo *ExecutionOrchestrator) setupResumeFromFailure(execution *EventBasedExe
 
 	// Set up path state for resume (this would need integration with actual execution paths)
 	// For now, we'll ensure the script globals contain the failure information
-	execution.scriptGlobals["__resume_from_failure"] = map[string]interface{}{
-		"failed_step": failureInfo.FailedStep,
-		"failed_path": failureInfo.FailedPath,
-		"error":       failureInfo.ErrorMessage,
-	}
+	// execution.scriptGlobals["__resume_from_failure"] = map[string]interface{}{
+	// 	"failed_step": failureInfo.FailedStep,
+	// 	"failed_path": failureInfo.FailedPath,
+	// 	"error":       failureInfo.ErrorMessage,
+	// }
 
 	eo.logger.Info("setup resume from failure",
 		"step", failureInfo.FailedStep,
@@ -450,7 +449,7 @@ func (eo *ExecutionOrchestrator) hashInputs(inputs map[string]interface{}) strin
 }
 
 // replayFromEvents performs full replay from event history
-func (eo *ExecutionOrchestrator) replayFromEvents(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) replayFromEvents(ctx context.Context, snapshot *ExecutionSnapshot, events []*ExecutionEvent, wf *workflow.Workflow) (*Execution, error) {
 	eo.logger.Info("performing full replay", "execution_id", snapshot.ID, "event_count", len(events))
 
 	// Replay events to reconstruct state
@@ -468,10 +467,10 @@ func (eo *ExecutionOrchestrator) replayFromEvents(ctx context.Context, snapshot 
 	// Apply replayed state
 	execution.replayMode = true // Set replay mode to prevent duplicate events
 
-	// Restore script globals
-	for key, value := range replayResult.ScriptGlobals {
-		execution.scriptGlobals[key] = value
-	}
+	// Restore script globals FIXME
+	// for key, value := range replayResult.ScriptGlobals {
+	// 	execution.scriptGlobals[key] = value
+	// }
 
 	execution.replayMode = false // Re-enable event recording
 
@@ -522,7 +521,7 @@ func (eo *ExecutionOrchestrator) computeInputsHash(inputs map[string]interface{}
 }
 
 // recoverFromSnapshotOnly recovers using only snapshot data (degraded mode)
-func (eo *ExecutionOrchestrator) recoverFromSnapshotOnly(ctx context.Context, snapshot *ExecutionSnapshot) (*EventBasedExecution, error) {
+func (eo *ExecutionOrchestrator) recoverFromSnapshotOnly(ctx context.Context, snapshot *ExecutionSnapshot) (*Execution, error) {
 	eo.logger.Warn("recovering from snapshot only (degraded mode)", "execution_id", snapshot.ID)
 
 	// Load execution from snapshot

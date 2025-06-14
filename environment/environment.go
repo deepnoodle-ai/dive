@@ -18,7 +18,7 @@ type Environment struct {
 	agents          map[string]dive.Agent
 	workflows       map[string]*workflow.Workflow
 	triggers        []*Trigger
-	executions      map[string]*EventBasedExecution
+	executions      map[string]*Execution
 	logger          slogger.Logger
 	defaultWorkflow string
 	documentRepo    dive.DocumentRepository
@@ -39,7 +39,7 @@ type Options struct {
 	Agents             []dive.Agent
 	Workflows          []*workflow.Workflow
 	Triggers           []*Trigger
-	Executions         []*EventBasedExecution
+	Executions         []*Execution
 	Logger             slogger.Logger
 	DefaultWorkflow    string
 	DocumentRepository dive.DocumentRepository
@@ -77,7 +77,7 @@ func New(opts Options) (*Environment, error) {
 		workflows[workflow.Name()] = workflow
 	}
 
-	executions := make(map[string]*EventBasedExecution, len(opts.Executions))
+	executions := make(map[string]*Execution, len(opts.Executions))
 	for _, execution := range opts.Executions {
 		executions[execution.ID()] = execution
 	}
