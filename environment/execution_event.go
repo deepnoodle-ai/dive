@@ -50,8 +50,7 @@ const (
 	EventOperationFailed    ExecutionEventType = "operation_failed"
 
 	// State events
-	EventStateSet     ExecutionEventType = "state_set"
-	EventStateDeleted ExecutionEventType = "state_deleted"
+	EventStateMutated ExecutionEventType = "state_mutated"
 
 	// Deterministic access events
 	EventTimeAccessed    ExecutionEventType = "time_accessed"

@@ -2,6 +2,8 @@ package environment
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -88,6 +90,21 @@ type Execution struct {
 	// Synchronization
 	mutex  sync.RWMutex
 	doneWg sync.WaitGroup
+}
+
+// ContentFingerprint represents a hash of content for deterministic tracking
+type ContentFingerprint struct {
+	Hash    string `json:"hash"`
+	Source  string `json:"source"`  // file path, URL, or content type
+	Size    int64  `json:"size"`    // content size in bytes
+	ModTime string `json:"modtime"` // modification time for files
+}
+
+// ContentSnapshot captures content and its fingerprint for replay
+type ContentSnapshot struct {
+	Fingerprint ContentFingerprint `json:"fingerprint"`
+	Content     []llm.Content      `json:"content"`
+	Raw         []byte             `json:"raw,omitempty"` // raw bytes for binary content
 }
 
 // NewExecution creates a new deterministic execution
@@ -208,15 +225,15 @@ func (e *Execution) LoadFromEvents(ctx context.Context) error {
 					ExecutedAt:  event.Timestamp,
 				}
 			}
-		case EventStateSet:
-			if key, ok := event.Data["key"].(string); ok {
-				if value, ok := event.Data["value"]; ok {
-					stateValues[key] = value
+		case EventStateMutated:
+			if mutations, ok := event.Data["mutations"].([]StateMutation); ok {
+				for _, mutation := range mutations {
+					if mutation.Type == StateMutationTypeDelete {
+						delete(stateValues, mutation.Key)
+					} else if mutation.Type == StateMutationTypeSet {
+						stateValues[mutation.Key] = mutation.Value
+					}
 				}
-			}
-		case EventStateDeleted:
-			if key, ok := event.Data["key"].(string); ok {
-				delete(stateValues, key)
 			}
 		}
 	}
@@ -264,7 +281,7 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 	}
 
 	// Record operation started
-	e.recorder.RecordCustomEvent(EventOperationStarted, op.PathID, op.StepName, map[string]interface{}{
+	e.recorder.RecordEvent(EventOperationStarted, op.PathID, "", map[string]interface{}{
 		"operation_id":   string(op.ID),
 		"operation_type": op.Type,
 		"parameters":     op.Parameters,
@@ -282,16 +299,13 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 		"duration":       duration,
 	}
 
-	var eventType ExecutionEventType
 	if err != nil {
-		eventType = EventOperationFailed
 		eventData["error"] = err.Error()
+		e.recorder.RecordEvent(EventOperationFailed, op.PathID, "", eventData)
 	} else {
-		eventType = EventOperationCompleted
 		eventData["result"] = result
+		e.recorder.RecordEvent(EventOperationCompleted, op.PathID, "", eventData)
 	}
-
-	e.recorder.RecordCustomEvent(eventType, op.PathID, op.StepName, eventData)
 
 	// Cache result for potential replay
 	e.operationResults[op.ID] = &OperationResult{
@@ -321,7 +335,10 @@ func (e *Execution) Run(ctx context.Context) error {
 	e.mutex.Unlock()
 
 	// Record execution started
-	e.recorder.RecordExecutionStarted(e.workflow.Name(), e.inputs)
+	e.recorder.RecordEvent(EventExecutionStarted, "", "", map[string]interface{}{
+		"workflow_name": e.workflow.Name(),
+		"inputs":        e.inputs,
+	})
 
 	// Start with initial path
 	startStep := e.workflow.Start()
@@ -333,7 +350,9 @@ func (e *Execution) Run(ctx context.Context) error {
 	e.addPath(initialPath)
 
 	// Record path started
-	e.recorder.RecordPathStarted(initialPath.id, startStep.Name())
+	e.recorder.RecordEvent(EventPathStarted, initialPath.id, "", map[string]interface{}{
+		"current_step": startStep.Name(),
+	})
 
 	// Start parallel execution
 	e.doneWg.Add(1)
@@ -348,11 +367,15 @@ func (e *Execution) Run(ctx context.Context) error {
 	if err != nil {
 		e.status = ExecutionStatusFailed
 		e.err = err
-		e.recorder.RecordExecutionFailed(err)
+		e.recorder.RecordEvent(EventExecutionFailed, "", "", map[string]interface{}{
+			"error": err.Error(),
+		})
 		e.logger.Error("workflow execution failed", "error", err)
 	} else {
 		e.status = ExecutionStatusCompleted
-		e.recorder.RecordExecutionCompleted(e.outputs)
+		e.recorder.RecordEvent(EventExecutionCompleted, "", "", map[string]interface{}{
+			"outputs": e.outputs,
+		})
 		e.logger.Info("workflow execution completed")
 	}
 	e.mutex.Unlock()
@@ -464,10 +487,14 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		// Execute the step with pathID
 		result, err := e.executeStep(ctx, currentStep, path.id)
 		if err != nil {
-			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
+			e.recorder.RecordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
+				"error": err.Error(),
+			})
 			logger.Error("step failed", "step", currentStep.Name(), "error", err)
 
-			e.recorder.RecordPathFailed(path.id, err)
+			e.recorder.RecordEvent(EventPathFailed, path.id, "", map[string]interface{}{
+				"error": err.Error(),
+			})
 			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
@@ -475,8 +502,12 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		// Handle path branching
 		newPaths, err := e.handlePathBranching(ctx, currentStep, path.id)
 		if err != nil {
-			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
-			e.recorder.RecordPathFailed(path.id, err)
+			e.recorder.RecordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
+				"error": err.Error(),
+			})
+			e.recorder.RecordEvent(EventPathFailed, path.id, "", map[string]interface{}{
+				"error": err.Error(),
+			})
 			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
@@ -492,7 +523,18 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 				}
 			}
 
-			e.recorder.RecordPathBranched(path.id, currentStep.Name(), branchInfo)
+			pathData := make([]map[string]interface{}, len(newPaths))
+			for i, path := range newPaths {
+				pathData[i] = map[string]interface{}{
+					"id":              path.id,
+					"current_step":    path.currentStep.Name(),
+					"inherit_outputs": true,
+				}
+			}
+
+			e.recorder.RecordEvent(EventPathBranched, path.id, currentStep.Name(), map[string]interface{}{
+				"new_paths": pathData,
+			})
 		}
 
 		// Path is complete if there are no new paths or multiple paths (branching)
@@ -513,7 +555,9 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		}
 
 		if isDone {
-			e.recorder.RecordPathCompleted(path.id, currentStep.Name())
+			e.recorder.RecordEvent(EventPathCompleted, path.id, "", map[string]interface{}{
+				"final_step": currentStep.Name(),
+			})
 			logger.Info("path completed", "step", currentStep.Name())
 			return
 		}
@@ -596,7 +640,10 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	}
 
 	// Record step started
-	e.recorder.RecordStepStarted(pathID, step.Name(), step.Type(), step.Parameters())
+	e.recorder.RecordEvent(EventStepStarted, pathID, step.Name(), map[string]interface{}{
+		"step_type":   step.Type(),
+		"step_params": step.Parameters(),
+	})
 
 	var result *dive.StepResult
 	var err error
@@ -647,7 +694,13 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	}
 
 	// Record step completed
-	e.recorder.RecordStepCompleted(pathID, step.Name(), result.Content, step.Name())
+	data := map[string]interface{}{
+		"output": result.Content,
+	}
+	if step.Store() != "" {
+		data["stored_variable"] = step.Store()
+	}
+	e.recorder.RecordEvent(EventStepCompleted, pathID, step.Name(), data)
 
 	return result, nil
 }
@@ -909,15 +962,23 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 	}
 
 	// Operation: LLM call (non-deterministic)
+	// Create content snapshot for deterministic tracking
+	contentSnapshot, err := e.createContentSnapshot(ctx, content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create content snapshot: %w", err)
+	}
+
 	// Use deterministic parameters for operation ID generation
 	op := Operation{
 		Type:     "agent_response",
 		StepName: step.Name(),
 		PathID:   pathID,
 		Parameters: map[string]interface{}{
-			"agent":  agent.Name(),
-			"prompt": prompt,
-			// Don't include content array in parameters as it contains memory addresses
+			"agent":           agent.Name(),
+			"prompt":          prompt,
+			"content_hash":    contentSnapshot.Fingerprint.Hash,
+			"content_sources": contentSnapshot.Fingerprint.Source,
+			"content_size":    contentSnapshot.Fingerprint.Size,
 		},
 	}
 
@@ -1278,4 +1339,131 @@ func (e *Execution) convertRisorValue(obj object.Object) interface{} {
 		// Fallback to string representation
 		return obj.Inspect()
 	}
+}
+
+// calculateContentFingerprints calculates fingerprints for all content items
+func (e *Execution) calculateContentFingerprints(ctx context.Context, content []llm.Content) ([]ContentFingerprint, error) {
+	var fingerprints []ContentFingerprint
+
+	for _, item := range content {
+		fingerprint, err := e.calculateContentFingerprint(ctx, item)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate content fingerprint: %w", err)
+		}
+		fingerprints = append(fingerprints, fingerprint)
+	}
+
+	return fingerprints, nil
+}
+
+// calculateContentFingerprint calculates a fingerprint for a single content item
+func (e *Execution) calculateContentFingerprint(ctx context.Context, content llm.Content) (ContentFingerprint, error) {
+	switch c := content.(type) {
+	case *llm.TextContent:
+		hash := sha256.Sum256([]byte(c.Text))
+		return ContentFingerprint{
+			Hash:   hex.EncodeToString(hash[:]),
+			Source: "text",
+			Size:   int64(len(c.Text)),
+		}, nil
+	case *llm.ImageContent:
+		if c.Source != nil {
+			return e.calculateSourceFingerprint(ctx, c.Source, "image")
+		}
+		return ContentFingerprint{Hash: "empty-image", Source: "image"}, nil
+	case *llm.DocumentContent:
+		if c.Source != nil {
+			return e.calculateSourceFingerprint(ctx, c.Source, "document")
+		}
+		return ContentFingerprint{Hash: "empty-document", Source: "document"}, nil
+	case DynamicContent:
+		// For dynamic content, we need to resolve it first to get the actual content
+		resolvedContent, err := c.Content(ctx, map[string]any{
+			"workflow": e.workflow.Name(),
+			"step":     "fingerprint",
+		})
+		if err != nil {
+			return ContentFingerprint{}, fmt.Errorf("failed to resolve dynamic content for fingerprinting: %w", err)
+		}
+
+		// Calculate fingerprint of the resolved content
+		var allText strings.Builder
+		for _, resolved := range resolvedContent {
+			if textContent, ok := resolved.(*llm.TextContent); ok {
+				allText.WriteString(textContent.Text)
+			}
+		}
+
+		hash := sha256.Sum256([]byte(allText.String()))
+		return ContentFingerprint{
+			Hash:   hex.EncodeToString(hash[:]),
+			Source: "dynamic",
+			Size:   int64(allText.Len()),
+		}, nil
+	default:
+		// Fallback for unknown content types
+		hash := sha256.Sum256([]byte(fmt.Sprintf("%T", content)))
+		return ContentFingerprint{
+			Hash:   hex.EncodeToString(hash[:]),
+			Source: "unknown",
+			Size:   0,
+		}, nil
+	}
+}
+
+// calculateSourceFingerprint calculates a fingerprint for content with a source
+func (e *Execution) calculateSourceFingerprint(ctx context.Context, source *llm.ContentSource, contentType string) (ContentFingerprint, error) {
+	switch source.Type {
+	case llm.ContentSourceTypeBase64:
+		hash := sha256.Sum256([]byte(source.Data))
+		return ContentFingerprint{
+			Hash:   hex.EncodeToString(hash[:]),
+			Source: contentType + "-base64",
+			Size:   int64(len(source.Data)),
+		}, nil
+	case llm.ContentSourceTypeURL:
+		// For URLs, we hash the URL itself since we can't guarantee the remote content
+		hash := sha256.Sum256([]byte(source.URL))
+		return ContentFingerprint{
+			Hash:   hex.EncodeToString(hash[:]),
+			Source: contentType + "-url:" + source.URL,
+			Size:   0, // Unknown size for remote content
+		}, nil
+	default:
+		hash := sha256.Sum256([]byte(fmt.Sprintf("%s-%s", contentType, source.Type)))
+		return ContentFingerprint{
+			Hash:   hex.EncodeToString(hash[:]),
+			Source: contentType + "-" + string(source.Type),
+			Size:   0,
+		}, nil
+	}
+}
+
+// createContentSnapshot creates a snapshot of content with its fingerprint
+func (e *Execution) createContentSnapshot(ctx context.Context, content []llm.Content) (*ContentSnapshot, error) {
+	fingerprints, err := e.calculateContentFingerprints(ctx, content)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a combined hash from all fingerprints
+	var hashBuilder strings.Builder
+	for _, fp := range fingerprints {
+		hashBuilder.WriteString(fp.Hash)
+		hashBuilder.WriteString(":")
+		hashBuilder.WriteString(fp.Source)
+		hashBuilder.WriteString(":")
+	}
+
+	combinedHash := sha256.Sum256([]byte(hashBuilder.String()))
+	combinedFingerprint := ContentFingerprint{
+		Hash:   hex.EncodeToString(combinedHash[:]),
+		Source: "combined",
+		Size:   int64(hashBuilder.Len()),
+	}
+
+	return &ContentSnapshot{
+		Fingerprint: combinedFingerprint,
+		Content:     content,
+	}, nil
 }

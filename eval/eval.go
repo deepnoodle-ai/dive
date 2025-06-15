@@ -120,6 +120,20 @@ func (e *Expr) Eval(ctx context.Context, globals map[string]any) (string, error)
 			strValue = fmt.Sprintf("%t", v.Value())
 		case *object.NilType:
 			strValue = ""
+		case *object.List:
+			// Double newline between each item
+			var items []string
+			for _, item := range v.Value() {
+				items = append(items, fmt.Sprintf("%v", item))
+			}
+			strValue = strings.Join(items, "\n\n")
+		case *object.Map:
+			// Double newline between each key-value pair
+			var items []string
+			for k, v := range v.Value() {
+				items = append(items, fmt.Sprintf("%s: %v", k, v))
+			}
+			strValue = strings.Join(items, "\n\n")
 		case fmt.Stringer:
 			strValue = v.String()
 		default:
