@@ -131,7 +131,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	// orchestrator := environment.NewExecutionOrchestrator(eventStore, env)
 
 	// Create execution with persistence
-	execution, err := environment.NewExecution(environment.ExecutionV2Options{
+	execution, err := environment.NewExecution(environment.ExecutionOptions{
 		Workflow:    wf,
 		Environment: env,
 		Inputs:      getUserVariables(),

@@ -46,7 +46,7 @@ func TestNewExecution(t *testing.T) {
 	eventStore := NewNullEventStore()
 
 	t.Run("valid execution creation", func(t *testing.T) {
-		execution, err := NewExecution(ExecutionV2Options{
+		execution, err := NewExecution(ExecutionOptions{
 			Workflow:    testWorkflow,
 			Environment: env,
 			Inputs:      map[string]interface{}{"input1": "test_value"},
@@ -63,7 +63,7 @@ func TestNewExecution(t *testing.T) {
 	})
 
 	t.Run("missing required input", func(t *testing.T) {
-		_, err := NewExecution(ExecutionV2Options{
+		_, err := NewExecution(ExecutionOptions{
 			Workflow:    testWorkflow,
 			Environment: env,
 			Inputs:      map[string]interface{}{}, // Missing required input1
@@ -76,7 +76,7 @@ func TestNewExecution(t *testing.T) {
 	})
 
 	t.Run("unknown input", func(t *testing.T) {
-		_, err := NewExecution(ExecutionV2Options{
+		_, err := NewExecution(ExecutionOptions{
 			Workflow:    testWorkflow,
 			Environment: env,
 			Inputs:      map[string]interface{}{"input1": "test", "unknown": "value"},
@@ -89,7 +89,7 @@ func TestNewExecution(t *testing.T) {
 	})
 
 	t.Run("missing workflow", func(t *testing.T) {
-		_, err := NewExecution(ExecutionV2Options{
+		_, err := NewExecution(ExecutionOptions{
 			Workflow:    nil,
 			Environment: env,
 			Inputs:      map[string]interface{}{"input1": "test"},
@@ -122,7 +122,7 @@ func TestExecutionOperations(t *testing.T) {
 	defer env.Stop(context.Background())
 
 	// Create execution
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{},
@@ -216,7 +216,7 @@ func TestExecutionPromptStep(t *testing.T) {
 	defer env.Stop(context.Background())
 
 	// Create execution
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{"topic": "artificial intelligence"},
@@ -261,7 +261,7 @@ func TestExecutionScriptStep(t *testing.T) {
 	defer env.Stop(context.Background())
 
 	// Create execution
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{},
@@ -299,7 +299,7 @@ func TestExecutionStateManagement(t *testing.T) {
 	require.NoError(t, env.Start(context.Background()))
 	defer env.Stop(context.Background())
 
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{},
@@ -346,7 +346,7 @@ func TestExecutionConditionEvaluation(t *testing.T) {
 	require.NoError(t, env.Start(context.Background()))
 	defer env.Stop(context.Background())
 
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{},
@@ -400,7 +400,7 @@ func TestExecutionReplayMode(t *testing.T) {
 	defer env.Stop(context.Background())
 
 	// Create execution in replay mode
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{},
@@ -454,7 +454,7 @@ func TestExecutionTemplateEvaluation(t *testing.T) {
 	require.NoError(t, env.Start(context.Background()))
 	defer env.Stop(context.Background())
 
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{"name": "Alice"},
@@ -518,7 +518,7 @@ func TestExecutionEachBlock(t *testing.T) {
 	require.NoError(t, env.Start(context.Background()))
 	defer env.Stop(context.Background())
 
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{},
@@ -657,7 +657,7 @@ func TestExecutionEventSequence(t *testing.T) {
 	mockEventStore := NewMockEventStore()
 
 	// Create execution
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{"message": "world"},
@@ -767,7 +767,7 @@ func TestExecutionEventSequenceWithFailure(t *testing.T) {
 	mockEventStore := NewMockEventStore()
 
 	// Create execution
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{},

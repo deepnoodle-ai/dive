@@ -38,7 +38,7 @@ func TestOperationExecution(t *testing.T) {
 	eventStore := NewNullEventStore()
 
 	// Create an execution
-	execution, err := NewExecution(ExecutionV2Options{
+	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
 		Inputs:      map[string]interface{}{"input1": "value1"},

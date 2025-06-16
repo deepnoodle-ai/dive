@@ -47,7 +47,7 @@ func (t *Trigger) Fire(ctx context.Context, input map[string]interface{}) ([]*Ex
 	}
 	var executions []*Execution
 	for _, w := range t.workflows {
-		execution, err := NewExecution(ExecutionV2Options{
+		execution, err := NewExecution(ExecutionOptions{
 			Environment: t.env,
 			Workflow:    w,
 			Inputs:      input,

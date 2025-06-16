@@ -64,7 +64,7 @@ func LoadFromSnapshot(ctx context.Context, env *Environment, snapshot *Execution
 		return nil, fmt.Errorf("workflow not found: %s", snapshot.WorkflowName)
 	}
 
-	exec, err := NewExecution(ExecutionV2Options{
+	exec, err := NewExecution(ExecutionOptions{
 		Environment: env,
 		Workflow:    env.workflows[snapshot.WorkflowName],
 		Inputs:      snapshot.Inputs,
