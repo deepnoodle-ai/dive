@@ -3,6 +3,7 @@ package environment
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -543,4 +544,283 @@ func TestExecutionEachBlock(t *testing.T) {
 	require.IsType(t, []string{}, storedResults)
 	resultsList := storedResults.([]string)
 	require.Len(t, resultsList, 3)
+}
+
+// MockEventStore captures events for testing verification
+type MockEventStore struct {
+	events []*ExecutionEvent
+	mu     sync.Mutex
+}
+
+func NewMockEventStore() *MockEventStore {
+	return &MockEventStore{
+		events: make([]*ExecutionEvent, 0),
+	}
+}
+
+func (m *MockEventStore) AppendEvents(ctx context.Context, events []*ExecutionEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, events...)
+	return nil
+}
+
+func (m *MockEventStore) GetEvents(ctx context.Context, executionID string, fromSeq int64) ([]*ExecutionEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var filtered []*ExecutionEvent
+	for _, event := range m.events {
+		if event.ExecutionID == executionID && event.Sequence >= fromSeq {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered, nil
+}
+
+func (m *MockEventStore) GetEventHistory(ctx context.Context, executionID string) ([]*ExecutionEvent, error) {
+	return m.GetEvents(ctx, executionID, 0)
+}
+
+func (m *MockEventStore) SaveSnapshot(ctx context.Context, snapshot *ExecutionSnapshot) error {
+	return nil
+}
+
+func (m *MockEventStore) GetSnapshot(ctx context.Context, executionID string) (*ExecutionSnapshot, error) {
+	return nil, fmt.Errorf("snapshot not found")
+}
+
+func (m *MockEventStore) ListExecutions(ctx context.Context, filter ExecutionFilter) ([]*ExecutionSnapshot, error) {
+	return nil, nil
+}
+
+func (m *MockEventStore) DeleteExecution(ctx context.Context, executionID string) error {
+	return nil
+}
+
+func (m *MockEventStore) CleanupCompletedExecutions(ctx context.Context, olderThan time.Time) error {
+	return nil
+}
+
+func (m *MockEventStore) GetAllEvents() []*ExecutionEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Return a copy to avoid race conditions
+	events := make([]*ExecutionEvent, len(m.events))
+	copy(events, m.events)
+	return events
+}
+
+func TestExecutionEventSequence(t *testing.T) {
+	// Create mock agent
+	mockResponse := &dive.Response{
+		Items: []*dive.ResponseItem{
+			{
+				Type:    dive.ResponseItemTypeMessage,
+				Message: llm.NewAssistantMessage(&llm.TextContent{Text: "Mock response"}),
+			},
+		},
+		Usage: &llm.Usage{InputTokens: 10, OutputTokens: 5},
+	}
+
+	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
+		Name:     "TestAgent",
+		Response: mockResponse,
+	})
+
+	// Create simple workflow with one prompt step
+	testWorkflow, err := workflow.New(workflow.Options{
+		Name: "event-test-workflow",
+		Inputs: []*workflow.Input{
+			{Name: "message", Type: "string", Required: true},
+		},
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "greet",
+				Type:   "prompt",
+				Prompt: "Say hello to ${inputs.message}",
+				Agent:  mockAgent,
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	// Create environment with agent
+	env := &Environment{
+		agents:    map[string]dive.Agent{"TestAgent": mockAgent},
+		workflows: make(map[string]*workflow.Workflow),
+		logger:    slogger.NewDevNullLogger(),
+	}
+	require.NoError(t, env.Start(context.Background()))
+	defer env.Stop(context.Background())
+
+	// Create mock event store to capture events
+	mockEventStore := NewMockEventStore()
+
+	// Create execution
+	execution, err := NewExecution(ExecutionV2Options{
+		Workflow:    testWorkflow,
+		Environment: env,
+		Inputs:      map[string]interface{}{"message": "world"},
+		EventStore:  mockEventStore,
+		Logger:      slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
+
+	// Run the execution
+	ctx := context.Background()
+	err = execution.Run(ctx)
+	require.NoError(t, err)
+
+	// Verify execution completed successfully
+	require.Equal(t, ExecutionStatusCompleted, execution.Status())
+
+	// Get all captured events
+	events := mockEventStore.GetAllEvents()
+	require.NotEmpty(t, events, "should have captured events")
+
+	// Verify event sequence - we expect at least these core events:
+	// 1. ExecutionStarted
+	// 2. PathStarted
+	// 3. StepStarted
+	// 4. OperationStarted (agent response)
+	// 5. OperationCompleted (agent response)
+	// 6. StepCompleted
+	// 7. PathCompleted
+	// 8. ExecutionCompleted
+
+	var eventTypes []string
+	for _, event := range events {
+		eventTypes = append(eventTypes, string(event.EventType))
+	}
+
+	// Check for required events in sequence
+	require.Contains(t, eventTypes, "execution_started", "should contain ExecutionStarted event")
+	require.Contains(t, eventTypes, "path_started", "should contain PathStarted event")
+	require.Contains(t, eventTypes, "step_started", "should contain StepStarted event")
+	require.Contains(t, eventTypes, "operation_started", "should contain OperationStarted event")
+	require.Contains(t, eventTypes, "operation_completed", "should contain OperationCompleted event")
+	require.Contains(t, eventTypes, "step_completed", "should contain StepCompleted event")
+	require.Contains(t, eventTypes, "path_completed", "should contain PathCompleted event")
+	require.Contains(t, eventTypes, "execution_completed", "should contain ExecutionCompleted event")
+
+	// Verify ExecutionStarted event has correct data
+	var executionStartedEvent *ExecutionEvent
+	for _, event := range events {
+		if event.EventType == "execution_started" {
+			executionStartedEvent = event
+			break
+		}
+	}
+	require.NotNil(t, executionStartedEvent, "should have ExecutionStarted event")
+	require.Equal(t, "event-test-workflow", executionStartedEvent.Data["workflow_name"])
+	require.NotNil(t, executionStartedEvent.Data["inputs"])
+
+	// Verify StepStarted event has correct data
+	var stepStartedEvent *ExecutionEvent
+	for _, event := range events {
+		if event.EventType == "step_started" {
+			stepStartedEvent = event
+			break
+		}
+	}
+	require.NotNil(t, stepStartedEvent, "should have StepStarted event")
+	require.Equal(t, "greet", stepStartedEvent.StepName)
+	require.Equal(t, "prompt", stepStartedEvent.Data["step_type"])
+
+	// Verify StepCompleted event has output
+	var stepCompletedEvent *ExecutionEvent
+	for _, event := range events {
+		if event.EventType == "step_completed" {
+			stepCompletedEvent = event
+			break
+		}
+	}
+	require.NotNil(t, stepCompletedEvent, "should have StepCompleted event")
+	require.Equal(t, "greet", stepCompletedEvent.StepName)
+	require.NotEmpty(t, stepCompletedEvent.Data["output"])
+}
+
+func TestExecutionEventSequenceWithFailure(t *testing.T) {
+	// Create simple workflow with a script that will fail
+	testWorkflow, err := workflow.New(workflow.Options{
+		Name: "failing-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "fail_step",
+				Type:   "script",
+				Script: "this_function_does_not_exist()", // This will cause a script error
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	// Create environment
+	env := &Environment{
+		agents:    make(map[string]dive.Agent),
+		workflows: make(map[string]*workflow.Workflow),
+		logger:    slogger.NewDevNullLogger(),
+	}
+	require.NoError(t, env.Start(context.Background()))
+	defer env.Stop(context.Background())
+
+	// Create mock event store
+	mockEventStore := NewMockEventStore()
+
+	// Create execution
+	execution, err := NewExecution(ExecutionV2Options{
+		Workflow:    testWorkflow,
+		Environment: env,
+		Inputs:      map[string]interface{}{},
+		EventStore:  mockEventStore,
+		Logger:      slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
+
+	// Run the execution (should fail)
+	ctx := context.Background()
+	err = execution.Run(ctx)
+	require.Error(t, err, "execution should fail")
+
+	// Verify execution failed
+	require.Equal(t, ExecutionStatusFailed, execution.Status())
+
+	// Get all captured events
+	events := mockEventStore.GetAllEvents()
+	require.NotEmpty(t, events, "should have captured events even on failure")
+
+	var eventTypes []string
+	for _, event := range events {
+		eventTypes = append(eventTypes, string(event.EventType))
+	}
+
+	// Check for failure-related events
+	require.Contains(t, eventTypes, "execution_started", "should contain ExecutionStarted event")
+	require.Contains(t, eventTypes, "step_started", "should contain StepStarted event")
+	require.Contains(t, eventTypes, "operation_started", "should contain OperationStarted event")
+	require.Contains(t, eventTypes, "operation_failed", "should contain OperationFailed event")
+	require.Contains(t, eventTypes, "step_failed", "should contain StepFailed event")
+	require.Contains(t, eventTypes, "path_failed", "should contain PathFailed event")
+	require.Contains(t, eventTypes, "execution_failed", "should contain ExecutionFailed event")
+
+	// Verify OperationFailed event has error details
+	var operationFailedEvent *ExecutionEvent
+	for _, event := range events {
+		if event.EventType == "operation_failed" {
+			operationFailedEvent = event
+			break
+		}
+	}
+	require.NotNil(t, operationFailedEvent, "should have OperationFailed event")
+	require.NotEmpty(t, operationFailedEvent.Data["error"])
+
+	// Verify ExecutionFailed event has error details
+	var executionFailedEvent *ExecutionEvent
+	for _, event := range events {
+		if event.EventType == "execution_failed" {
+			executionFailedEvent = event
+			break
+		}
+	}
+	require.NotNil(t, executionFailedEvent, "should have ExecutionFailed event")
+	require.NotEmpty(t, executionFailedEvent.Data["error"])
 }
