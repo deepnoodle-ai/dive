@@ -116,7 +116,7 @@ func main() {
 	}
 	defer env.Stop(ctx)
 
-	execution, err := environment.NewExecution(environment.ExecutionV2Options{
+	execution, err := environment.NewExecution(environment.ExecutionOptions{
 		Workflow:    w,
 		Environment: env,
 		Inputs:      map[string]interface{}{},

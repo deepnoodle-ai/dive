@@ -150,11 +150,29 @@ func (e *Environment) Description() string {
 }
 
 func (e *Environment) DefaultAgent() (dive.Agent, bool) {
+	if len(e.agents) == 0 {
+		return nil, false
+	}
+
+	// If there is one agent, that is the default
 	if len(e.agents) == 1 {
 		for _, agent := range e.agents {
 			return agent, true
 		}
 	}
+
+	// If there are 2+ agents, pick the first supervisor
+	for _, agent := range e.agents {
+		if agent.IsSupervisor() {
+			return agent, true
+		}
+	}
+
+	// If no supervisor found, return the first agent
+	for _, agent := range e.agents {
+		return agent, true
+	}
+
 	return nil, false
 }
 
