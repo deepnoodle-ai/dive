@@ -16,4 +16,4 @@ Workflows:
         Store: current_time
       - Name: Greetings with Time
         Prompt: |
-          Say hello to the user and mention that it is currently ${current_time}.
+          Say hello to the user and mention that it is currently ${state.current_time}.

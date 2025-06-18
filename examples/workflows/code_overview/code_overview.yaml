@@ -37,7 +37,7 @@ Workflows:
         Agent: Engineer
         Prompt: |
           Here are the files we discovered:
-          ${file_list}
+          ${state.file_list}
 
           Read what look like the most important 2 files and summarize them.
         Store: key_files
@@ -48,11 +48,11 @@ Workflows:
           Generate a code overview for the codebase.
 
           The files are:
-          ${file_list}
+          ${state.file_list}
 
           Information about key files:
 
-          ${key_files}
+          ${state.key_files}
 
           Keep it short and concise.
         Store: code_overview
@@ -61,4 +61,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/code_overview.md
-          Content: ${code_overview}
+          Content: ${state.code_overview}

@@ -36,7 +36,7 @@ Workflows:
       - Name: Scrape Website
         Agent: Analyst
         Prompt: |
-          Analyze the content from this company homepage: ${homepage_url}
+          Analyze the content from this company homepage: ${state.homepage_url}
 
           The company is: ${inputs.company}
 
@@ -57,7 +57,7 @@ Workflows:
           The company is: ${inputs.company}
 
           Website content and observations:
-          ${website_content}
+          ${state.website_content}
 
           Please provide:
           1. Core Products/Services: What are their main offerings?
@@ -72,4 +72,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/company_analysis.md
-          Content: ${company_analysis}
+          Content: ${state.company_analysis}

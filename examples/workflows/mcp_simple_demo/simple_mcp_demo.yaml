@@ -45,4 +45,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/mcp_tools.md
-          Content: ${tool_discovery}
+          Content: ${state.tool_discovery}

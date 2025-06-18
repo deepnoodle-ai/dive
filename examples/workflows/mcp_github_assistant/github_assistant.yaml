@@ -58,4 +58,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/issues_summary.md
-          Content: ${issues_summary}
+          Content: ${state.issues_summary}

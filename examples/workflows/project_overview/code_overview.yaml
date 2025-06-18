@@ -54,7 +54,7 @@ Workflows:
           Your goal is to generate a project overview for a given codebase.
 
           Here is some initial information about the project to get you started:
-          ${initial_summary}
+          ${state.initial_summary}
 
           Continue researching the project as needed to gather more information.
 
@@ -73,4 +73,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/project_overview.md
-          Content: ${project_overview}
+          Content: ${state.project_overview}

@@ -51,6 +51,6 @@ Workflows:
 
           Here is the results of our work:
 
-          ${results}
+          ${state.results}
 
           Summarize whether the program compiled and linted cleanly. If there were errors, list them.
