@@ -20,16 +20,16 @@ func main() {
 	// https://github.com/modelcontextprotocol/servers
 	configs := []*mcp.ServerConfig{
 		{
-			Type: "stdio",
-			Name: "filesystem-server",
-			URL:  "npx",
-			Args: []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+			Type:    "stdio",
+			Name:    "filesystem-server",
+			Command: "npx",
+			Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
 		},
 		{
-			Type: "stdio",
-			Name: "git-server",
-			URL:  "uvx",
-			Args: []string{"mcp-server-git"},
+			Type:    "stdio",
+			Name:    "git-server",
+			Command: "uvx",
+			Args:    []string{"mcp-server-git"},
 		},
 	}
 
