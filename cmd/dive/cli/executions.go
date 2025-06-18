@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,14 +12,10 @@ import (
 )
 
 // getEventStore creates an event store instance for the given database path
-func getEventStore(persistenceDB string) (environment.ExecutionEventStore, error) {
-	dbPath := persistenceDB
-	if dbPath == "" {
-		diveDir, err := getDiveConfigDir()
-		if err != nil {
-			return nil, fmt.Errorf("error getting dive config directory: %v", err)
-		}
-		dbPath = filepath.Join(diveDir, "executions.db")
+func getEventStore(databaseFlag string) (environment.ExecutionEventStore, error) {
+	dbPath, err := getDatabasePath(databaseFlag)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check if database exists
@@ -36,8 +31,8 @@ func getEventStore(persistenceDB string) (environment.ExecutionEventStore, error
 	return eventStore, nil
 }
 
-func listExecutions(persistenceDB string, status, workflowName string, limit int) error {
-	eventStore, err := getEventStore(persistenceDB)
+func listExecutions(databaseFlag string, status, workflowName string, limit int) error {
+	eventStore, err := getEventStore(databaseFlag)
 	if err != nil {
 		return err
 	}
@@ -99,8 +94,8 @@ func listExecutions(persistenceDB string, status, workflowName string, limit int
 	return nil
 }
 
-func showExecution(persistenceDB, executionID string, showEvents bool) error {
-	eventStore, err := getEventStore(persistenceDB)
+func showExecution(databaseFlag, executionID string, showEvents bool) error {
+	eventStore, err := getEventStore(databaseFlag)
 	if err != nil {
 		return err
 	}
@@ -198,8 +193,8 @@ func showExecution(persistenceDB, executionID string, showEvents bool) error {
 	return nil
 }
 
-func deleteExecution(persistenceDB, executionID string, confirm bool) error {
-	eventStore, err := getEventStore(persistenceDB)
+func deleteExecution(databaseFlag, executionID string, confirm bool) error {
+	eventStore, err := getEventStore(databaseFlag)
 	if err != nil {
 		return err
 	}
@@ -231,8 +226,8 @@ func deleteExecution(persistenceDB, executionID string, confirm bool) error {
 	return nil
 }
 
-func cleanupExecutions(persistenceDB string, olderThanDays int, confirm bool) error {
-	eventStore, err := getEventStore(persistenceDB)
+func cleanupExecutions(databaseFlag string, olderThanDays int, confirm bool) error {
+	eventStore, err := getEventStore(databaseFlag)
 	if err != nil {
 		return err
 	}
@@ -310,12 +305,12 @@ var listCmd = &cobra.Command{
 	Short: "List workflow executions",
 	Long:  "List workflow executions with optional filtering by status and workflow name",
 	Run: func(cmd *cobra.Command, args []string) {
-		persistenceDB, _ := cmd.Flags().GetString("persist-db")
+		databasePath, _ := cmd.Flags().GetString("database")
 		status, _ := cmd.Flags().GetString("status")
 		workflowName, _ := cmd.Flags().GetString("workflow")
 		limit, _ := cmd.Flags().GetInt("limit")
 
-		if err := listExecutions(persistenceDB, status, workflowName, limit); err != nil {
+		if err := listExecutions(databasePath, status, workflowName, limit); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -330,10 +325,10 @@ var showCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		executionID := args[0]
-		persistenceDB, _ := cmd.Flags().GetString("persist-db")
+		databasePath, _ := cmd.Flags().GetString("database")
 		showEvents, _ := cmd.Flags().GetBool("events")
 
-		if err := showExecution(persistenceDB, executionID, showEvents); err != nil {
+		if err := showExecution(databasePath, executionID, showEvents); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -348,10 +343,10 @@ var deleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		executionID := args[0]
-		persistenceDB, _ := cmd.Flags().GetString("persist-db")
+		databasePath, _ := cmd.Flags().GetString("database")
 		confirm, _ := cmd.Flags().GetBool("yes")
 
-		if err := deleteExecution(persistenceDB, executionID, confirm); err != nil {
+		if err := deleteExecution(databasePath, executionID, confirm); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -364,11 +359,11 @@ var cleanupCmd = &cobra.Command{
 	Short: "Clean up old completed executions",
 	Long:  "Remove completed executions older than the specified number of days",
 	Run: func(cmd *cobra.Command, args []string) {
-		persistenceDB, _ := cmd.Flags().GetString("persist-db")
+		databasePath, _ := cmd.Flags().GetString("database")
 		olderThanDays, _ := cmd.Flags().GetInt("older-than")
 		confirm, _ := cmd.Flags().GetBool("yes")
 
-		if err := cleanupExecutions(persistenceDB, olderThanDays, confirm); err != nil {
+		if err := cleanupExecutions(databasePath, olderThanDays, confirm); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -385,7 +380,7 @@ func init() {
 	executionsCmd.AddCommand(cleanupCmd)
 
 	// Global flags for all execution commands
-	executionsCmd.PersistentFlags().String("persist-db", "", "Path to SQLite database (default: ~/.dive/executions.db)")
+	executionsCmd.PersistentFlags().String("database", "", "Path to SQLite database (default: ~/.dive/executions.db)")
 
 	// List command flags
 	listCmd.Flags().StringP("status", "s", "", "Filter by status (pending, running, completed, failed)")

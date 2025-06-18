@@ -608,7 +608,48 @@ func (e *Execution) Run(ctx context.Context) error {
 	// Flush any remaining events
 	e.recorder.Flush()
 
+	// Save execution snapshot for listing
+	if err := e.saveSnapshot(); err != nil {
+		e.logger.Error("failed to save execution snapshot", "error", err)
+		// Don't return error as execution completed successfully
+	}
+
 	return err
+}
+
+// saveSnapshot saves the current execution state as a snapshot
+func (e *Execution) saveSnapshot() error {
+	// Get the event store from the recorder
+	recorder, ok := e.recorder.(*BufferedExecutionRecorder)
+	if !ok {
+		return fmt.Errorf("recorder is not a BufferedExecutionRecorder")
+	}
+
+	// Create snapshot
+	snapshot := &ExecutionSnapshot{
+		ID:           e.id,
+		WorkflowName: e.workflow.Name(),
+		WorkflowHash: "", // TODO: Could compute workflow hash if needed
+		InputsHash:   "", // TODO: Could compute hash of inputs if needed
+		Status:       string(e.status),
+		StartTime:    e.startTime,
+		EndTime:      e.endTime,
+		CreatedAt:    e.startTime,
+		UpdatedAt:    time.Now(),
+		LastEventSeq: recorder.eventSequence,
+		WorkflowData: nil, // TODO: Could serialize workflow if needed
+		Inputs:       e.inputs,
+		Outputs:      e.outputs,
+		Error:        "",
+	}
+
+	if e.err != nil {
+		snapshot.Error = e.err.Error()
+	}
+
+	// Save to event store
+	ctx := context.Background()
+	return recorder.eventStore.SaveSnapshot(ctx, snapshot)
 }
 
 // addPath adds a new execution path

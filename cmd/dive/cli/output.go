@@ -155,6 +155,7 @@ func wrapText(text string, width int) []string {
 // PrintStepOutput displays step output with attractive formatting
 func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 	if strings.TrimSpace(content) == "" {
+		fmt.Println()
 		fmt.Printf("     %s %s\n", checkmark, workflowSuccess.Sprint("Completed (no output)"))
 		fmt.Println() // Add spacing after step completion
 		return
@@ -241,7 +242,6 @@ func (f *WorkflowFormatter) PrintStepError(stepName string, err error) {
 
 // PrintWorkflowComplete displays successful completion
 func (f *WorkflowFormatter) PrintWorkflowComplete(duration time.Duration) {
-	fmt.Println()
 	f.printBox(fmt.Sprintf("%s %s", checkmark, workflowSuccess.Sprintf("Workflow Completed Successfully")))
 	fmt.Printf("   %s Total time: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond*100)))
 	fmt.Println()

@@ -48,7 +48,21 @@ func getDiveConfigDir() (string, error) {
 	return diveDir, nil
 }
 
-func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
+// getDatabasePath returns the database path, using the provided override or defaulting to ~/.dive/executions.db
+func getDatabasePath(databaseFlag string) (string, error) {
+	if databaseFlag != "" {
+		return databaseFlag, nil
+	}
+
+	diveDir, err := getDiveConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("error getting dive config directory: %v", err)
+	}
+
+	return filepath.Join(diveDir, "executions.db"), nil
+}
+
+func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databasePath string) error {
 	ctx := context.Background()
 	startTime := time.Now()
 
@@ -104,33 +118,26 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 		workflowName = workflows[0].Name()
 	}
 
-	// Get the workflow for display
 	wf, err := env.GetWorkflow(workflowName)
 	if err != nil {
 		return fmt.Errorf("error getting workflow: %v", err)
 	}
 
-	// Create formatter and display workflow header
 	formatter := NewWorkflowFormatter()
 	formatter.PrintWorkflowHeader(wf, getUserVariables())
 
-	// Set up persistence via SQLite
-	diveDir, err := getDiveConfigDir()
+	dbPath, err := getDatabasePath(databasePath)
 	if err != nil {
-		return fmt.Errorf("error getting dive config directory: %v", err)
+		return fmt.Errorf("error getting database path: %v", err)
 	}
-	dbPath := filepath.Join(diveDir, "executions.db")
 
-	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, environment.DefaultSQLiteStoreOptions())
+	eventStoreOpts := environment.DefaultSQLiteStoreOptions()
+	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, eventStoreOpts)
 	if err != nil {
 		return fmt.Errorf("error creating event store: %v", err)
 	}
 	defer eventStore.Close()
 
-	// Create execution orchestrator
-	// orchestrator := environment.NewExecutionOrchestrator(eventStore, env)
-
-	// Create execution with persistence
 	execution, err := environment.NewExecution(environment.ExecutionOptions{
 		Workflow:    wf,
 		Environment: env,
@@ -154,7 +161,6 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 
 	duration := time.Since(startTime)
 	formatter.PrintWorkflowComplete(duration)
-	// formatter.PrintExecutionStats(execution.GetStats())
 	return nil
 }
 
@@ -170,7 +176,12 @@ var runCmd = &cobra.Command{
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		if err := runWorkflow(filePath, workflowName, getLogLevel()); err != nil {
+		databasePath, err := cmd.Flags().GetString("database")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		if err := runWorkflow(filePath, workflowName, getLogLevel(), databasePath); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -181,4 +192,5 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 
 	runCmd.Flags().StringP("workflow", "w", "", "Name of the workflow to run")
+	runCmd.Flags().String("database", "", "Path to SQLite database (default: ~/.dive/executions.db)")
 }
