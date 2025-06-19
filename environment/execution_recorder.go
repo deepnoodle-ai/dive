@@ -58,6 +58,9 @@ type ExecutionRecorder interface {
 	RecordOperationCompleted(pathID, operationID, operationType string, duration time.Duration, result interface{})
 	RecordOperationFailed(pathID, operationID, operationType string, duration time.Duration, err error)
 	RecordStateMutated(mutations []StateMutation)
+	RecordSignalReceived(signalType, source string, payload map[string]interface{})
+	RecordVersionDecision(decisionType, selectedVersion, reason string, availableVersions []string)
+	RecordExecutionContinueAsNew(newExecutionID, reason string, newInputs, stateTransfer map[string]interface{})
 }
 
 // PathBranchInfo contains information about a branched path
@@ -223,6 +226,51 @@ func (r *BufferedExecutionRecorder) convertMapToTypedEvent(eventType ExecutionEv
 		}
 		return result
 
+	case EventSignalReceived:
+		result := &SignalReceivedData{}
+		if signalType, ok := data["signal_type"].(string); ok {
+			result.SignalType = signalType
+		}
+		if payload, ok := data["payload"].(map[string]interface{}); ok {
+			result.Payload = payload
+		}
+		if source, ok := data["source"].(string); ok {
+			result.Source = source
+		}
+		return result
+
+	case EventVersionDecision:
+		result := &VersionDecisionData{}
+		if decisionType, ok := data["decision_type"].(string); ok {
+			result.DecisionType = decisionType
+		}
+		if selectedVersion, ok := data["selected_version"].(string); ok {
+			result.SelectedVersion = selectedVersion
+		}
+		if availableVersions, ok := data["available_versions"].([]string); ok {
+			result.AvailableVersions = availableVersions
+		}
+		if reason, ok := data["reason"].(string); ok {
+			result.Reason = reason
+		}
+		return result
+
+	case EventExecutionContinueAsNew:
+		result := &ExecutionContinueAsNewData{}
+		if newExecutionID, ok := data["new_execution_id"].(string); ok {
+			result.NewExecutionID = newExecutionID
+		}
+		if newInputs, ok := data["new_inputs"].(map[string]interface{}); ok {
+			result.NewInputs = newInputs
+		}
+		if reason, ok := data["reason"].(string); ok {
+			result.Reason = reason
+		}
+		if stateTransfer, ok := data["state_transfer"].(map[string]interface{}); ok {
+			result.StateTransfer = stateTransfer
+		}
+		return result
+
 	default:
 		// For unknown event types, we can't create typed data
 		// This should be rare and only happen during transitions
@@ -353,5 +401,34 @@ func (r *BufferedExecutionRecorder) RecordOperationFailed(pathID, operationID, o
 func (r *BufferedExecutionRecorder) RecordStateMutated(mutations []StateMutation) {
 	r.RecordEvent("", "", &StateMutatedData{
 		Mutations: mutations,
+	})
+}
+
+// RecordSignalReceived records a signal received event
+func (r *BufferedExecutionRecorder) RecordSignalReceived(signalType, source string, payload map[string]interface{}) {
+	r.RecordEvent("", "", &SignalReceivedData{
+		SignalType: signalType,
+		Source:     source,
+		Payload:    payload,
+	})
+}
+
+// RecordVersionDecision records a version decision event
+func (r *BufferedExecutionRecorder) RecordVersionDecision(decisionType, selectedVersion, reason string, availableVersions []string) {
+	r.RecordEvent("", "", &VersionDecisionData{
+		DecisionType:      decisionType,
+		SelectedVersion:   selectedVersion,
+		AvailableVersions: availableVersions,
+		Reason:            reason,
+	})
+}
+
+// RecordExecutionContinueAsNew records an execution continue as new event
+func (r *BufferedExecutionRecorder) RecordExecutionContinueAsNew(newExecutionID, reason string, newInputs, stateTransfer map[string]interface{}) {
+	r.RecordEvent("", "", &ExecutionContinueAsNewData{
+		NewExecutionID: newExecutionID,
+		NewInputs:      newInputs,
+		Reason:         reason,
+		StateTransfer:  stateTransfer,
 	})
 }

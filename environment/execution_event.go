@@ -394,6 +394,61 @@ func (d *IterationCompletedData) Validate() error {
 	return nil
 }
 
+// SignalReceivedData contains data for signal received events
+type SignalReceivedData struct {
+	SignalType string                 `json:"signal_type"` // Type of signal received (e.g., "interrupt", "pause", "resume")
+	Payload    map[string]interface{} `json:"payload"`     // Signal-specific data
+	Source     string                 `json:"source"`      // Source of the signal
+}
+
+func (d *SignalReceivedData) EventType() ExecutionEventType { return EventSignalReceived }
+func (d *SignalReceivedData) Validate() error {
+	if d.SignalType == "" {
+		return fmt.Errorf("signal_type is required")
+	}
+	return nil
+}
+
+// VersionDecisionData contains data for version decision events
+type VersionDecisionData struct {
+	DecisionType      string   `json:"decision_type"`      // Type of version decision (e.g., "workflow_version", "agent_version")
+	SelectedVersion   string   `json:"selected_version"`   // Version that was selected
+	AvailableVersions []string `json:"available_versions"` // Versions that were available for selection
+	Reason            string   `json:"reason"`             // Reason for the version selection
+}
+
+func (d *VersionDecisionData) EventType() ExecutionEventType { return EventVersionDecision }
+func (d *VersionDecisionData) Validate() error {
+	if d.DecisionType == "" {
+		return fmt.Errorf("decision_type is required")
+	}
+	if d.SelectedVersion == "" {
+		return fmt.Errorf("selected_version is required")
+	}
+	return nil
+}
+
+// ExecutionContinueAsNewData contains data for execution continue as new events
+type ExecutionContinueAsNewData struct {
+	NewExecutionID string                 `json:"new_execution_id"` // ID of the new execution
+	NewInputs      map[string]interface{} `json:"new_inputs"`       // Inputs for the new execution
+	Reason         string                 `json:"reason"`           // Reason for continuing as new
+	StateTransfer  map[string]interface{} `json:"state_transfer"`   // State data transferred to new execution
+}
+
+func (d *ExecutionContinueAsNewData) EventType() ExecutionEventType {
+	return EventExecutionContinueAsNew
+}
+func (d *ExecutionContinueAsNewData) Validate() error {
+	if d.NewExecutionID == "" {
+		return fmt.Errorf("new_execution_id is required")
+	}
+	if d.Reason == "" {
+		return fmt.Errorf("reason is required")
+	}
+	return nil
+}
+
 // ExecutionEvent represents a single event in the execution history
 // This maintains backward compatibility while allowing for typed event data
 type ExecutionEvent struct {
@@ -663,6 +718,51 @@ func (e *ExecutionEvent) convertLegacyData() (ExecutionEventData, error) {
 		}
 		return data, nil
 
+	case EventSignalReceived:
+		data := &SignalReceivedData{}
+		if signalType, ok := e.Data["signal_type"].(string); ok {
+			data.SignalType = signalType
+		}
+		if payload, ok := e.Data["payload"].(map[string]interface{}); ok {
+			data.Payload = payload
+		}
+		if source, ok := e.Data["source"].(string); ok {
+			data.Source = source
+		}
+		return data, nil
+
+	case EventVersionDecision:
+		data := &VersionDecisionData{}
+		if decisionType, ok := e.Data["decision_type"].(string); ok {
+			data.DecisionType = decisionType
+		}
+		if selectedVersion, ok := e.Data["selected_version"].(string); ok {
+			data.SelectedVersion = selectedVersion
+		}
+		if availableVersions, ok := e.Data["available_versions"].([]string); ok {
+			data.AvailableVersions = availableVersions
+		}
+		if reason, ok := e.Data["reason"].(string); ok {
+			data.Reason = reason
+		}
+		return data, nil
+
+	case EventExecutionContinueAsNew:
+		data := &ExecutionContinueAsNewData{}
+		if newExecutionID, ok := e.Data["new_execution_id"].(string); ok {
+			data.NewExecutionID = newExecutionID
+		}
+		if newInputs, ok := e.Data["new_inputs"].(map[string]interface{}); ok {
+			data.NewInputs = newInputs
+		}
+		if reason, ok := e.Data["reason"].(string); ok {
+			data.Reason = reason
+		}
+		if stateTransfer, ok := e.Data["state_transfer"].(map[string]interface{}); ok {
+			data.StateTransfer = stateTransfer
+		}
+		return data, nil
+
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", e.EventType)
 	}
@@ -778,6 +878,20 @@ func (e *ExecutionEvent) updateLegacyData() {
 		e.Data["item"] = data.Item
 		e.Data["item_key"] = data.ItemKey
 		e.Data["result"] = data.Result
+	case *SignalReceivedData:
+		e.Data["signal_type"] = data.SignalType
+		e.Data["payload"] = data.Payload
+		e.Data["source"] = data.Source
+	case *VersionDecisionData:
+		e.Data["decision_type"] = data.DecisionType
+		e.Data["selected_version"] = data.SelectedVersion
+		e.Data["available_versions"] = data.AvailableVersions
+		e.Data["reason"] = data.Reason
+	case *ExecutionContinueAsNewData:
+		e.Data["new_execution_id"] = data.NewExecutionID
+		e.Data["new_inputs"] = data.NewInputs
+		e.Data["reason"] = data.Reason
+		e.Data["state_transfer"] = data.StateTransfer
 	}
 }
 

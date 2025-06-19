@@ -203,49 +203,315 @@ execution, err := environment.NewExecutionFromReplay(environment.ExecutionOption
 
 ## Event System
 
-### Event Types
+The event system provides comprehensive visibility into workflow execution through a rich set of event types that capture every aspect of execution flow, state changes, and operations. Events enable deterministic replay, debugging, monitoring, and audit trails.
 
+### Event Categories
+
+#### 1. Execution Lifecycle Events
+
+These events track the overall execution lifecycle of a workflow.
+
+**`execution_started`** - Emitted when a workflow execution begins
 ```go
-const (
-    // Execution lifecycle
-    EventExecutionStarted   ExecutionEventType = "execution_started"
-    EventExecutionCompleted ExecutionEventType = "execution_completed"
-    EventExecutionFailed    ExecutionEventType = "execution_failed"
-    
-    // Path management
-    EventPathStarted   ExecutionEventType = "path_started"
-    EventPathCompleted ExecutionEventType = "path_completed"
-    EventPathBranched  ExecutionEventType = "path_branched"
-    
-    // Step execution
-    EventStepStarted   ExecutionEventType = "step_started"
-    EventStepCompleted ExecutionEventType = "step_completed"
-    EventStepFailed    ExecutionEventType = "step_failed"
-    
-    // Operations
-    EventOperationStarted   ExecutionEventType = "operation_started"
-    EventOperationCompleted ExecutionEventType = "operation_completed"
-    EventOperationFailed    ExecutionEventType = "operation_failed"
-    
-    // State changes
-    EventStateMutated ExecutionEventType = "state_mutated"
-)
+type ExecutionStartedData struct {
+    WorkflowName string                 `json:"workflow_name"` // Name of the workflow being executed
+    Inputs       map[string]interface{} `json:"inputs"`        // Initial inputs to the workflow
+}
 ```
+*Occurs*: At the very beginning of workflow execution, before any paths or steps are started.
+*Purpose*: Establishes the execution context and captures initial state for replay.
+
+**`execution_completed`** - Emitted when a workflow execution completes successfully
+```go
+type ExecutionCompletedData struct {
+    Outputs map[string]interface{} `json:"outputs"` // Final outputs produced by the workflow
+}
+```
+*Occurs*: When all execution paths have completed successfully and final outputs are collected.
+*Purpose*: Records successful completion and final results.
+
+**`execution_failed`** - Emitted when a workflow execution fails
+```go
+type ExecutionFailedData struct {
+    Error string `json:"error"` // Error message describing the failure
+}
+```
+*Occurs*: When execution encounters an unrecoverable error that prevents completion.
+*Purpose*: Records failure reason for debugging and monitoring.
+
+**`execution_continue_as_new`** - Emitted for workflow continuation patterns
+*Purpose*: Supports long-running workflows that need to restart with new state.
+
+#### 2. Path Management Events
+
+These events track the execution paths within a workflow, including parallel execution and branching.
+
+**`path_started`** - Emitted when a new execution path begins
+```go
+type PathStartedData struct {
+    CurrentStep string `json:"current_step"` // Name of the first step in this path
+}
+```
+*Occurs*: When a new execution path is created, either at workflow start or due to branching.
+*Purpose*: Tracks the beginning of independent execution paths for parallel processing.
+
+**`path_completed`** - Emitted when an execution path completes successfully
+```go
+type PathCompletedData struct {
+    FinalStep string `json:"final_step"` // Name of the last step executed in this path
+}
+```
+*Occurs*: When all steps in a path have completed successfully.
+*Purpose*: Records successful path completion for synchronization and monitoring.
+
+**`path_failed`** - Emitted when an execution path fails
+```go
+type PathFailedData struct {
+    Error string `json:"error"` // Error message describing the path failure
+}
+```
+*Occurs*: When a path encounters an error that prevents further execution.
+*Purpose*: Records path-specific failures for debugging while other paths may continue.
+
+**`path_branched`** - Emitted when execution creates multiple parallel paths
+```go
+type PathBranchedData struct {
+    NewPaths []PathBranchInfo `json:"new_paths"` // Information about newly created paths
+}
+
+type PathBranchInfo struct {
+    ID             string `json:"id"`              // Unique identifier for the new path
+    CurrentStep    string `json:"current_step"`    // First step in the new path
+    InheritOutputs bool   `json:"inherit_outputs"` // Whether the path inherits parent outputs
+}
+```
+*Occurs*: When conditional logic or parallel steps create multiple execution paths.
+*Purpose*: Records branching decisions for replay and tracks parallel execution structure.
+
+#### 3. Step Execution Events
+
+These events track individual workflow step execution, providing detailed visibility into step-by-step progress.
+
+**`step_started`** - Emitted when a workflow step begins execution
+```go
+type StepStartedData struct {
+    StepType   string                 `json:"step_type"`   // Type of step (e.g., "agent", "script", "condition")
+    StepParams map[string]interface{} `json:"step_params"` // Parameters configured for this step
+}
+```
+*Occurs*: Just before a step's execution logic is invoked.
+*Purpose*: Records step initiation with configuration for debugging and replay.
+
+**`step_completed`** - Emitted when a workflow step completes successfully
+```go
+type StepCompletedData struct {
+    Output         string `json:"output"`                    // Result output from the step
+    StoredVariable string `json:"stored_variable,omitempty"` // Variable name if output was stored
+}
+```
+*Occurs*: When a step finishes execution successfully and produces output.
+*Purpose*: Records step results and variable assignments for state tracking.
+
+**`step_failed`** - Emitted when a workflow step fails
+```go
+type StepFailedData struct {
+    Error string `json:"error"` // Error message describing the step failure
+}
+```
+*Occurs*: When a step encounters an error during execution.
+*Purpose*: Records step-level failures with detailed error information.
+
+#### 4. Operation Events
+
+These events track deterministic operations that need to be recorded for replay, such as LLM calls, file I/O, and external API calls.
+
+**`operation_started`** - Emitted when a deterministic operation begins
+```go
+type OperationStartedData struct {
+    OperationID   string                 `json:"operation_id"`   // Unique identifier for this operation
+    OperationType string                 `json:"operation_type"` // Type of operation (e.g., "agent_response", "file_read")
+    Parameters    map[string]interface{} `json:"parameters"`     // Operation parameters for deterministic replay
+}
+```
+*Occurs*: Before executing any non-deterministic operation that affects execution flow.
+*Purpose*: Records operation parameters for deterministic replay and caching.
+
+**`operation_completed`** - Emitted when a deterministic operation completes successfully
+```go
+type OperationCompletedData struct {
+    OperationID   string        `json:"operation_id"`   // Unique identifier matching the started event
+    OperationType string        `json:"operation_type"` // Type of operation completed
+    Duration      time.Duration `json:"duration"`       // Time taken to complete the operation
+    Result        interface{}   `json:"result"`         // Result data from the operation
+}
+```
+*Occurs*: When a deterministic operation finishes successfully.
+*Purpose*: Records operation results for replay and performance monitoring.
+
+**`operation_failed`** - Emitted when a deterministic operation fails
+```go
+type OperationFailedData struct {
+    OperationID   string        `json:"operation_id"`   // Unique identifier matching the started event
+    OperationType string        `json:"operation_type"` // Type of operation that failed
+    Duration      time.Duration `json:"duration"`       // Time taken before failure
+    Error         string        `json:"error"`          // Error message describing the failure
+}
+```
+*Occurs*: When a deterministic operation encounters an error.
+*Purpose*: Records operation failures for debugging and retry logic.
+
+#### 5. State Management Events
+
+These events track changes to workflow state and variable assignments.
+
+**`state_mutated`** - Emitted when workflow state is modified
+```go
+type StateMutatedData struct {
+    Mutations []StateMutation `json:"mutations"` // List of state changes made
+}
+
+type StateMutation struct {
+    Type  StateMutationType `json:"type"`            // "set" or "delete"
+    Key   string            `json:"key,omitempty"`   // Variable name being modified
+    Value interface{}       `json:"value,omitempty"` // New value (for set operations)
+}
+```
+*Occurs*: When workflow variables are set, updated, or deleted.
+*Purpose*: Tracks state changes for replay and debugging variable flow.
+
+#### 6. Deterministic Access Events
+
+These events ensure deterministic behavior by recording access to non-deterministic system resources.
+
+**`time_accessed`** - Emitted when current time is accessed during execution
+```go
+type TimeAccessedData struct {
+    AccessedAt time.Time `json:"accessed_at"` // When the time access occurred
+    Value      time.Time `json:"value"`       // The time value that was returned
+}
+```
+*Occurs*: When workflow logic accesses current time (e.g., for timestamps, delays).
+*Purpose*: Ensures deterministic replay by recording exact time values used.
+
+**`random_generated`** - Emitted when random values are generated during execution
+```go
+type RandomGeneratedData struct {
+    Seed   int64       `json:"seed"`   // Seed used for random generation
+    Value  interface{} `json:"value"`  // The random value that was generated
+    Method string      `json:"method"` // Method used ("int", "float", "string", etc.)
+}
+```
+*Occurs*: When workflow logic generates random numbers, strings, or other random data.
+*Purpose*: Ensures deterministic replay by recording exact random values used.
+
+#### 7. Script State Management Events
+
+These events track scripting operations within workflow steps, providing visibility into template evaluation, condition checking, and iteration.
+
+**`variable_changed`** - Emitted when a script variable is modified
+```go
+type VariableChangedData struct {
+    VariableName string      `json:"variable_name"` // Name of the variable that changed
+    OldValue     interface{} `json:"old_value"`     // Previous value (nil if variable didn't exist)
+    NewValue     interface{} `json:"new_value"`     // New value being set
+    Existed      bool        `json:"existed"`       // Whether the variable existed before this change
+}
+```
+*Occurs*: When script execution modifies variables in the workflow state.
+*Purpose*: Tracks fine-grained variable changes for debugging script logic.
+
+**`template_evaluated`** - Emitted when a template is processed and evaluated
+```go
+type TemplateEvaluatedData struct {
+    Template string `json:"template"` // The template string that was evaluated
+    Result   string `json:"result"`   // The result after template evaluation
+}
+```
+*Occurs*: When workflow steps use templating to generate dynamic content.
+*Purpose*: Records template processing for debugging and replay consistency.
+
+**`condition_evaluated`** - Emitted when a conditional expression is evaluated
+```go
+type ConditionEvaluatedData struct {
+    Condition string `json:"condition"` // The condition expression that was evaluated
+    Result    bool   `json:"result"`    // The boolean result of the condition
+}
+```
+*Occurs*: When workflow conditional logic (if/else, while loops, etc.) evaluates conditions.
+*Purpose*: Records condition evaluation results for debugging branching logic.
+
+**`iteration_started`** - Emitted when a loop iteration begins
+```go
+type IterationStartedData struct {
+    IterationIndex int         `json:"iteration_index"`     // Zero-based index of this iteration
+    Item           interface{} `json:"item"`                // The item being processed in this iteration
+    ItemKey        string      `json:"item_key,omitempty"`  // Key for the item (if iterating over a map)
+}
+```
+*Occurs*: At the start of each iteration in loops (for, while, each).
+*Purpose*: Tracks loop execution progress for debugging and replay.
+
+**`iteration_completed`** - Emitted when a loop iteration completes
+```go
+type IterationCompletedData struct {
+    IterationIndex int         `json:"iteration_index"`     // Zero-based index of the completed iteration
+    Item           interface{} `json:"item"`                // The item that was processed
+    ItemKey        string      `json:"item_key,omitempty"`  // Key for the item (if iterating over a map)
+    Result         interface{} `json:"result"`              // Result produced by this iteration
+}
+```
+*Occurs*: When each iteration in loops completes successfully.
+*Purpose*: Records iteration results for debugging and state tracking.
+
+#### 8. Control Flow Events
+
+**`signal_received`** - Emitted when external signals are received during execution
+*Purpose*: Tracks external control signals that may affect execution flow.
+
+**`version_decision`** - Emitted when workflow versioning decisions are made
+*Purpose*: Records workflow version selection for compatibility tracking.
 
 ### Event Structure
 
+All events share a common structure with typed data:
+
 ```go
 type ExecutionEvent struct {
-    ID          string                 `json:"id"`
-    ExecutionID string                 `json:"execution_id"`
-    Sequence    int64                  `json:"sequence"`
-    Timestamp   time.Time              `json:"timestamp"`
-    EventType   ExecutionEventType     `json:"event_type"`
-    Path        string                 `json:"path,omitempty"`
-    Step        string                 `json:"step,omitempty"`
-    Data        map[string]interface{} `json:"data,omitempty"`
+    ID          string             `json:"id"`          // Unique event identifier
+    ExecutionID string             `json:"execution_id"` // Execution this event belongs to
+    Sequence    int64              `json:"sequence"`     // Sequential event number within execution
+    Timestamp   time.Time          `json:"timestamp"`    // When the event occurred
+    EventType   ExecutionEventType `json:"event_type"`   // Type of event (see above)
+    Path        string             `json:"path,omitempty"` // Execution path identifier (if applicable)
+    Step        string             `json:"step,omitempty"` // Step name (if applicable)
+    
+    // Legacy field for backward compatibility
+    Data map[string]interface{} `json:"data,omitempty"`
+    
+    // Strongly typed event data
+    TypedData ExecutionEventData `json:"typed_data,omitempty"`
 }
 ```
+
+### Event Flow Example
+
+A typical workflow execution generates events in this sequence:
+
+1. `execution_started` - Workflow begins
+2. `path_started` - Initial execution path starts
+3. `step_started` - First step begins
+4. `operation_started` - LLM call initiated
+5. `operation_completed` - LLM call completes
+6. `step_completed` - First step completes
+7. `condition_evaluated` - Conditional logic evaluated
+8. `path_branched` - Multiple paths created based on condition
+9. `path_started` - New parallel paths begin
+10. `step_started` - Steps in parallel paths begin
+11. ... (more step and operation events)
+12. `path_completed` - Parallel paths complete
+13. `execution_completed` - Workflow completes
+
+This event stream provides complete visibility into execution flow and enables perfect replay of workflow behavior.
 
 ## Operations & Determinism
 
