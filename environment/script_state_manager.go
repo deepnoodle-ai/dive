@@ -131,12 +131,3 @@ func (m *TrackedScriptStateManager) RestoreFromSnapshot(snapshot map[string]inte
 		m.globals[k] = v
 	}
 }
-
-// Additional event types for script state tracking
-const (
-	EventVariableChanged    ExecutionEventType = "variable_changed"
-	EventTemplateEvaluated  ExecutionEventType = "template_evaluated"
-	EventConditionEvaluated ExecutionEventType = "condition_evaluated"
-	EventIterationStarted   ExecutionEventType = "iteration_started"
-	EventIterationCompleted ExecutionEventType = "iteration_completed"
-)

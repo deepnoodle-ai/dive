@@ -26,13 +26,11 @@ func (s *WorkflowState) Set(key string, value interface{}) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.recorder.RecordEvent(EventStateMutated, "", "", map[string]interface{}{
-		"mutations": []StateMutation{
-			{
-				Type:  StateMutationTypeSet,
-				Key:   key,
-				Value: value,
-			},
+	s.recorder.RecordStateMutated([]StateMutation{
+		{
+			Type:  StateMutationTypeSet,
+			Key:   key,
+			Value: value,
 		},
 	})
 	s.values[key] = value
@@ -53,12 +51,10 @@ func (s *WorkflowState) Delete(key string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.recorder.RecordEvent(EventStateMutated, "", "", map[string]interface{}{
-		"mutations": []StateMutation{
-			{
-				Type: StateMutationTypeDelete,
-				Key:  key,
-			},
+	s.recorder.RecordStateMutated([]StateMutation{
+		{
+			Type: StateMutationTypeDelete,
+			Key:  key,
 		},
 	})
 	delete(s.values, key)

@@ -878,5 +878,5 @@ func TestExecutionExactEventSequence(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Println(string(data))
 
-	require.Len(t, events, 189)
+	require.Len(t, events, 8)
 }

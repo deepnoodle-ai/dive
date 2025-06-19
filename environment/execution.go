@@ -506,11 +506,7 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 	}
 
 	// Record operation started
-	e.recorder.RecordEvent(EventOperationStarted, op.PathID, "", map[string]interface{}{
-		"operation_id":   string(op.ID),
-		"operation_type": op.Type,
-		"parameters":     op.Parameters,
-	})
+	e.recorder.RecordOperationStarted(op.PathID, string(op.ID), op.Type, op.Parameters)
 
 	// Execute the operation
 	startTime := time.Now()
@@ -518,18 +514,10 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 	duration := time.Since(startTime)
 
 	// Record operation completion
-	eventData := map[string]interface{}{
-		"operation_id":   string(op.ID),
-		"operation_type": op.Type,
-		"duration":       duration,
-	}
-
 	if err != nil {
-		eventData["error"] = err.Error()
-		e.recorder.RecordEvent(EventOperationFailed, op.PathID, "", eventData)
+		e.recorder.RecordOperationFailed(op.PathID, string(op.ID), op.Type, duration, err)
 	} else {
-		eventData["result"] = result
-		e.recorder.RecordEvent(EventOperationCompleted, op.PathID, "", eventData)
+		e.recorder.RecordOperationCompleted(op.PathID, string(op.ID), op.Type, duration, result)
 	}
 
 	// Cache result for potential replay
@@ -560,10 +548,7 @@ func (e *Execution) Run(ctx context.Context) error {
 	e.mutex.Unlock()
 
 	// Record execution started
-	e.recorder.RecordEvent(EventExecutionStarted, "", "", map[string]interface{}{
-		"workflow_name": e.workflow.Name(),
-		"inputs":        e.inputs,
-	})
+	e.recorder.RecordExecutionStarted(e.workflow.Name(), e.inputs)
 
 	// Start with initial path
 	startStep := e.workflow.Start()
@@ -575,9 +560,7 @@ func (e *Execution) Run(ctx context.Context) error {
 	e.addPath(initialPath)
 
 	// Record path started
-	e.recorder.RecordEvent(EventPathStarted, initialPath.id, "", map[string]interface{}{
-		"current_step": startStep.Name(),
-	})
+	e.recorder.RecordPathStarted(initialPath.id, startStep.Name())
 
 	// Start parallel execution
 	e.doneWg.Add(1)
@@ -592,15 +575,11 @@ func (e *Execution) Run(ctx context.Context) error {
 	if err != nil {
 		e.status = ExecutionStatusFailed
 		e.err = err
-		e.recorder.RecordEvent(EventExecutionFailed, "", "", map[string]interface{}{
-			"error": err.Error(),
-		})
+		e.recorder.RecordExecutionFailed(err)
 		e.logger.Error("workflow execution failed", "error", err)
 	} else {
 		e.status = ExecutionStatusCompleted
-		e.recorder.RecordEvent(EventExecutionCompleted, "", "", map[string]interface{}{
-			"outputs": e.outputs,
-		})
+		e.recorder.RecordExecutionCompleted(e.outputs)
 		e.logger.Info("workflow execution completed")
 	}
 	e.mutex.Unlock()
@@ -742,14 +721,10 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		// Execute the step with pathID
 		result, err := e.executeStep(ctx, currentStep, path.id)
 		if err != nil {
-			e.recorder.RecordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
-				"error": err.Error(),
-			})
+			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
 			logger.Error("step failed", "step", currentStep.Name(), "error", err)
 
-			e.recorder.RecordEvent(EventPathFailed, path.id, "", map[string]interface{}{
-				"error": err.Error(),
-			})
+			e.recorder.RecordPathFailed(path.id, err)
 			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
@@ -757,12 +732,8 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		// Handle path branching
 		newPaths, err := e.handlePathBranching(ctx, currentStep, path.id)
 		if err != nil {
-			e.recorder.RecordEvent(EventStepFailed, path.id, currentStep.Name(), map[string]interface{}{
-				"error": err.Error(),
-			})
-			e.recorder.RecordEvent(EventPathFailed, path.id, "", map[string]interface{}{
-				"error": err.Error(),
-			})
+			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
+			e.recorder.RecordPathFailed(path.id, err)
 			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
@@ -778,18 +749,7 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 				}
 			}
 
-			pathData := make([]map[string]interface{}, len(newPaths))
-			for i, path := range newPaths {
-				pathData[i] = map[string]interface{}{
-					"id":              path.id,
-					"current_step":    path.currentStep.Name(),
-					"inherit_outputs": true,
-				}
-			}
-
-			e.recorder.RecordEvent(EventPathBranched, path.id, currentStep.Name(), map[string]interface{}{
-				"new_paths": pathData,
-			})
+			e.recorder.RecordPathBranched(path.id, currentStep.Name(), branchInfo)
 		}
 
 		// Path is complete if there are no new paths or multiple paths (branching)
@@ -810,9 +770,7 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		}
 
 		if isDone {
-			e.recorder.RecordEvent(EventPathCompleted, path.id, "", map[string]interface{}{
-				"final_step": currentStep.Name(),
-			})
+			e.recorder.RecordPathCompleted(path.id, currentStep.Name())
 			logger.Info("path completed", "step", currentStep.Name())
 			return
 		}
@@ -895,10 +853,7 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	}
 
 	// Record step started
-	e.recorder.RecordEvent(EventStepStarted, pathID, step.Name(), map[string]interface{}{
-		"step_type":   step.Type(),
-		"step_params": step.Parameters(),
-	})
+	e.recorder.RecordStepStarted(pathID, step.Name(), step.Type(), step.Parameters())
 
 	var result *dive.StepResult
 	var err error
@@ -949,13 +904,7 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	}
 
 	// Record step completed
-	data := map[string]interface{}{
-		"output": result.Content,
-	}
-	if step.Store() != "" {
-		data["stored_variable"] = step.Store()
-	}
-	e.recorder.RecordEvent(EventStepCompleted, pathID, step.Name(), data)
+	e.recorder.RecordStepCompleted(pathID, step.Name(), result.Content, step.Store())
 
 	return result, nil
 }
