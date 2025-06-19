@@ -61,11 +61,11 @@ const (
 type ExecutionEvent struct {
 	ID          string                 `json:"id"`
 	ExecutionID string                 `json:"execution_id"`
-	PathID      string                 `json:"path_id"`
 	Sequence    int64                  `json:"sequence"`
 	Timestamp   time.Time              `json:"timestamp"`
 	EventType   ExecutionEventType     `json:"event_type"`
-	StepName    string                 `json:"step_name,omitempty"`
+	Path        string                 `json:"path,omitempty"`
+	Step        string                 `json:"step,omitempty"`
 	Data        map[string]interface{} `json:"data,omitempty"`
 }
 

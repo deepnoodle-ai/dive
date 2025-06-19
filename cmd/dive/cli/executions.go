@@ -181,8 +181,8 @@ func showExecution(databaseFlag, executionID string, showEvents bool) error {
 			}
 
 			stepInfo := ""
-			if event.StepName != "" {
-				stepInfo = fmt.Sprintf(" [%s]", event.StepName)
+			if event.Step != "" {
+				stepInfo = fmt.Sprintf(" [%s]", event.Step)
 			}
 
 			fmt.Printf("  %3d. [%s] %s%s\n",

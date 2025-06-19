@@ -2,6 +2,7 @@ package environment
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -724,7 +725,7 @@ func TestExecutionEventSequence(t *testing.T) {
 		}
 	}
 	require.NotNil(t, stepStartedEvent, "should have StepStarted event")
-	require.Equal(t, "greet", stepStartedEvent.StepName)
+	require.Equal(t, "greet", stepStartedEvent.Step)
 	require.Equal(t, "prompt", stepStartedEvent.Data["step_type"])
 
 	// Verify StepCompleted event has output
@@ -736,7 +737,7 @@ func TestExecutionEventSequence(t *testing.T) {
 		}
 	}
 	require.NotNil(t, stepCompletedEvent, "should have StepCompleted event")
-	require.Equal(t, "greet", stepCompletedEvent.StepName)
+	require.Equal(t, "greet", stepCompletedEvent.Step)
 	require.NotEmpty(t, stepCompletedEvent.Data["output"])
 }
 
@@ -823,4 +824,59 @@ func TestExecutionEventSequenceWithFailure(t *testing.T) {
 	}
 	require.NotNil(t, executionFailedEvent, "should have ExecutionFailed event")
 	require.NotEmpty(t, executionFailedEvent.Data["error"])
+}
+
+func TestExecutionExactEventSequence(t *testing.T) {
+	// Create simple workflow with a single script step
+	testWorkflow, err := workflow.New(workflow.Options{
+		Name: "simple-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "calculate",
+				Type:   "script",
+				Script: "1 + 1",
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	// Create environment
+	env := &Environment{
+		agents:    make(map[string]dive.Agent),
+		workflows: make(map[string]*workflow.Workflow),
+		logger:    slogger.NewDevNullLogger(),
+	}
+	require.NoError(t, env.Start(context.Background()))
+	defer env.Stop(context.Background())
+
+	// Create mock event store
+	mockEventStore := NewMockEventStore()
+
+	// Create execution
+	execution, err := NewExecution(ExecutionOptions{
+		Workflow:    testWorkflow,
+		Environment: env,
+		Inputs:      map[string]interface{}{},
+		EventStore:  mockEventStore,
+		Logger:      slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
+
+	// Run the execution
+	ctx := context.Background()
+	err = execution.Run(ctx)
+	require.NoError(t, err)
+
+	// Verify execution completed successfully
+	require.Equal(t, ExecutionStatusCompleted, execution.Status())
+
+	// Get all captured events in order
+	events := mockEventStore.GetAllEvents()
+	require.NotEmpty(t, events, "should have captured events")
+
+	data, err := json.MarshalIndent(events, "", "  ")
+	require.NoError(t, err)
+	fmt.Println(string(data))
+
+	require.Len(t, events, 189)
 }

@@ -176,7 +176,7 @@ func NewExecutionFromReplay(opts ExecutionOptions) (*Execution, error) {
 
 // LoadFromEvents loads execution state from previously recorded events
 func (e *Execution) LoadFromEvents(ctx context.Context) error {
-	events, err := e.recorder.(*BufferedExecutionRecorder).eventStore.GetEventHistory(ctx, e.id)
+	events, err := e.recorder.GetEventHistory(ctx, e.id)
 	if err != nil {
 		return fmt.Errorf("failed to get event history: %w", err)
 	}
@@ -214,26 +214,26 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 		case EventPathStarted:
 			// Create path state
 			currentStep := getStringFromData(event.Data, "current_step")
-			e.paths[event.PathID] = &PathState{
-				ID:          event.PathID,
+			e.paths[event.Path] = &PathState{
+				ID:          event.Path,
 				Status:      PathStatusPending,
 				CurrentStep: nil, // Will be set when we find the step
 				StartTime:   event.Timestamp,
 				StepOutputs: make(map[string]string),
 			}
-			pathOutputs[event.PathID] = make(map[string]string)
+			pathOutputs[event.Path] = make(map[string]string)
 
 			// Find the current step
 			if currentStep != "" {
 				if step, exists := e.workflow.Graph().Get(currentStep); exists {
-					e.paths[event.PathID].CurrentStep = step
+					e.paths[event.Path].CurrentStep = step
 				}
 			}
 
 		case EventStepStarted:
 			// Update path current step
-			if pathState, exists := e.paths[event.PathID]; exists {
-				if step, exists := e.workflow.Graph().Get(event.StepName); exists {
+			if pathState, exists := e.paths[event.Path]; exists {
+				if step, exists := e.workflow.Graph().Get(event.Step); exists {
 					pathState.CurrentStep = step
 					pathState.Status = PathStatusRunning
 				}
@@ -241,14 +241,14 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 
 		case EventStepCompleted:
 			stepOutput := getStringFromData(event.Data, "output")
-			completedSteps[event.StepName] = stepOutput
+			completedSteps[event.Step] = stepOutput
 
 			// Update path state with step output
-			if pathState, exists := e.paths[event.PathID]; exists {
-				pathState.StepOutputs[event.StepName] = stepOutput
+			if pathState, exists := e.paths[event.Path]; exists {
+				pathState.StepOutputs[event.Step] = stepOutput
 			}
-			if pathOutputMap, exists := pathOutputs[event.PathID]; exists {
-				pathOutputMap[event.StepName] = stepOutput
+			if pathOutputMap, exists := pathOutputs[event.Path]; exists {
+				pathOutputMap[event.Step] = stepOutput
 			}
 
 			// Handle stored variables
@@ -262,11 +262,11 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 
 		case EventStepFailed:
 			errorMsg := getStringFromData(event.Data, "error")
-			completedSteps[event.StepName+"_error"] = errorMsg
+			completedSteps[event.Step+"_error"] = errorMsg
 
 			// Update path state
-			if pathState, exists := e.paths[event.PathID]; exists {
-				pathState.StepOutputs[event.StepName+"_error"] = errorMsg
+			if pathState, exists := e.paths[event.Path]; exists {
+				pathState.StepOutputs[event.Step+"_error"] = errorMsg
 				pathState.Status = PathStatusFailed
 				pathState.Error = fmt.Errorf("%s", errorMsg)
 			}
@@ -279,25 +279,25 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 
 		case EventPathCompleted:
 			// Mark path as completed
-			if pathState, exists := e.paths[event.PathID]; exists {
+			if pathState, exists := e.paths[event.Path]; exists {
 				pathState.Status = PathStatusCompleted
 				pathState.EndTime = event.Timestamp
 
 				// Capture final path outputs
 				if finalOutput := getStringFromData(event.Data, "final_output"); finalOutput != "" {
-					stateValues["path_"+event.PathID+"_output"] = finalOutput
+					stateValues["path_"+event.Path+"_output"] = finalOutput
 				}
 			}
 
 		case EventPathFailed:
 			// Mark path as failed
-			if pathState, exists := e.paths[event.PathID]; exists {
+			if pathState, exists := e.paths[event.Path]; exists {
 				pathState.Status = PathStatusFailed
 				pathState.EndTime = event.Timestamp
 
 				// Capture failure reason
 				if failureReason := getStringFromData(event.Data, "failure_reason"); failureReason != "" {
-					stateValues["path_"+event.PathID+"_error"] = failureReason
+					stateValues["path_"+event.Path+"_error"] = failureReason
 					pathState.Error = fmt.Errorf("%s", failureReason)
 				}
 			}
@@ -376,17 +376,17 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 
 // handleReplayPathBranching processes path branching during replay
 func (e *Execution) handleReplayPathBranching(event *ExecutionEvent, newPathsData interface{}, pathOutputs map[string]map[string]string) {
-	parentPathOutputs := pathOutputs[event.PathID]
+	parentPathOutputs := pathOutputs[event.Path]
 
 	switch pathsData := newPathsData.(type) {
 	case []interface{}:
 		for _, pathData := range pathsData {
 			if pathMap, ok := pathData.(map[string]interface{}); ok {
-				e.createReplayBranchedPath(pathMap, event.PathID, parentPathOutputs, pathOutputs)
+				e.createReplayBranchedPath(pathMap, event.Path, parentPathOutputs, pathOutputs)
 			}
 		}
 	case map[string]interface{}:
-		e.createReplayBranchedPath(pathsData, event.PathID, parentPathOutputs, pathOutputs)
+		e.createReplayBranchedPath(pathsData, event.Path, parentPathOutputs, pathOutputs)
 	default:
 		e.logger.Warn("unrecognized path branching data format during replay", "type", fmt.Sprintf("%T", pathsData))
 	}
@@ -450,17 +450,17 @@ func (e *Execution) ValidateEventHistory(ctx context.Context, events []*Executio
 		}
 
 		// Check step-related events
-		if event.StepName != "" {
-			step, exists := workflowSteps[event.StepName]
+		if event.Step != "" {
+			step, exists := workflowSteps[event.Step]
 			if !exists {
-				return fmt.Errorf("step %s no longer exists in workflow (event %d)", event.StepName, i)
+				return fmt.Errorf("step %s no longer exists in workflow (event %d)", event.Step, i)
 			}
 
 			// Validate step type if recorded
 			if expectedType := getStringFromData(event.Data, "step_type"); expectedType != "" {
 				if step.Type() != expectedType {
 					return fmt.Errorf("step %s changed type from %s to %s (event %d)",
-						event.StepName, expectedType, step.Type(), i)
+						event.Step, expectedType, step.Type(), i)
 				}
 			}
 		}
@@ -605,51 +605,40 @@ func (e *Execution) Run(ctx context.Context) error {
 	}
 	e.mutex.Unlock()
 
-	// Flush any remaining events
 	e.recorder.Flush()
 
-	// Save execution snapshot for listing
-	if err := e.saveSnapshot(); err != nil {
+	if err := e.saveSnapshot(ctx); err != nil {
 		e.logger.Error("failed to save execution snapshot", "error", err)
-		// Don't return error as execution completed successfully
+		return err
 	}
-
 	return err
 }
 
 // saveSnapshot saves the current execution state as a snapshot
-func (e *Execution) saveSnapshot() error {
-	// Get the event store from the recorder
-	recorder, ok := e.recorder.(*BufferedExecutionRecorder)
-	if !ok {
-		return fmt.Errorf("recorder is not a BufferedExecutionRecorder")
+func (e *Execution) saveSnapshot(ctx context.Context) error {
+	hasher := NewBasicWorkflowHasher()
+	workflowHash, err := hasher.HashWorkflow(e.workflow)
+	if err != nil {
+		return fmt.Errorf("failed to hash workflow: %w", err)
 	}
-
-	// Create snapshot
 	snapshot := &ExecutionSnapshot{
 		ID:           e.id,
 		WorkflowName: e.workflow.Name(),
-		WorkflowHash: "", // TODO: Could compute workflow hash if needed
-		InputsHash:   "", // TODO: Could compute hash of inputs if needed
+		WorkflowHash: workflowHash,
+		InputsHash:   HashMapToString(e.inputs),
 		Status:       string(e.status),
 		StartTime:    e.startTime,
 		EndTime:      e.endTime,
 		CreatedAt:    e.startTime,
 		UpdatedAt:    time.Now(),
-		LastEventSeq: recorder.eventSequence,
-		WorkflowData: nil, // TODO: Could serialize workflow if needed
+		LastEventSeq: e.recorder.GetEventSequence(),
 		Inputs:       e.inputs,
 		Outputs:      e.outputs,
-		Error:        "",
 	}
-
 	if e.err != nil {
 		snapshot.Error = e.err.Error()
 	}
-
-	// Save to event store
-	ctx := context.Background()
-	return recorder.eventStore.SaveSnapshot(ctx, snapshot)
+	return e.recorder.SaveSnapshot(ctx, snapshot)
 }
 
 // addPath adds a new execution path

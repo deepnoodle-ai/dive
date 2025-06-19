@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"hash"
+	"sort"
 	"time"
 )
 
@@ -36,6 +38,29 @@ type OperationExecutor interface {
 	FindOperationResult(opID OperationID) (*OperationResult, bool)
 }
 
+// hashMapToWriter writes a map[string]interface{} to a hash.Hash in deterministic order
+func hashMapToWriter(h hash.Hash, m map[string]interface{}) {
+	if m == nil {
+		return
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		h.Write([]byte(k))
+		h.Write([]byte(fmt.Sprintf("%v", m[k])))
+	}
+}
+
+// HashMapToString creates a deterministic SHA256 hash string from a map[string]interface{}
+func HashMapToString(m map[string]interface{}) string {
+	hash := sha256.New()
+	hashMapToWriter(hash, m)
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
 // generateOperationID creates a deterministic operation ID based on operation properties
 func (op *Operation) GenerateID() OperationID {
 	// Create a deterministic hash from operation properties
@@ -45,26 +70,7 @@ func (op *Operation) GenerateID() OperationID {
 	hash.Write([]byte(op.PathID))
 
 	// Include parameters in hash in deterministic order
-	if op.Parameters != nil {
-		// Sort keys to ensure deterministic order
-		keys := make([]string, 0, len(op.Parameters))
-		for k := range op.Parameters {
-			keys = append(keys, k)
-		}
-		// Sort keys for deterministic iteration
-		for i := 0; i < len(keys); i++ {
-			for j := i + 1; j < len(keys); j++ {
-				if keys[i] > keys[j] {
-					keys[i], keys[j] = keys[j], keys[i]
-				}
-			}
-		}
-
-		for _, k := range keys {
-			hash.Write([]byte(k))
-			hash.Write([]byte(fmt.Sprintf("%v", op.Parameters[k])))
-		}
-	}
+	hashMapToWriter(hash, op.Parameters)
 
 	return OperationID(fmt.Sprintf("op_%x", hash.Sum(nil)[:16]))
 }

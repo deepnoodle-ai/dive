@@ -94,11 +94,11 @@ func TestExecutionEvent_JSONSerialization(t *testing.T) {
 	event := ExecutionEvent{
 		ID:          "test-id-123",
 		ExecutionID: "exec-456",
-		PathID:      "path-789",
+		Path:        "path-789",
 		Sequence:    42,
 		Timestamp:   time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
 		EventType:   EventStepCompleted,
-		StepName:    "test-step",
+		Step:        "test-step",
 		Data: map[string]interface{}{
 			"output": "test output",
 			"count":  5,
@@ -117,10 +117,10 @@ func TestExecutionEvent_JSONSerialization(t *testing.T) {
 	// Verify fields
 	require.Equal(t, event.ID, decoded.ID)
 	require.Equal(t, event.ExecutionID, decoded.ExecutionID)
-	require.Equal(t, event.PathID, decoded.PathID)
+	require.Equal(t, event.Path, decoded.Path)
 	require.Equal(t, event.Sequence, decoded.Sequence)
 	require.Equal(t, event.EventType, decoded.EventType)
-	require.Equal(t, event.StepName, decoded.StepName)
+	require.Equal(t, event.Step, decoded.Step)
 	require.Equal(t, event.Data["output"], decoded.Data["output"])
 	require.Equal(t, float64(5), decoded.Data["count"]) // JSON numbers become float64
 }

@@ -204,11 +204,11 @@ func (s *SQLiteExecutionEventStore) AppendEvents(ctx context.Context, events []*
 		_, err := stmt.ExecContext(ctx,
 			event.ID,
 			event.ExecutionID,
-			nullableString(event.PathID),
+			nullableString(event.Path),
 			event.Sequence,
 			event.Timestamp,
 			event.EventType,
-			nullableString(event.StepName),
+			nullableString(event.Step),
 			nullableBytes(dataJSON),
 		)
 		if err != nil {
@@ -537,10 +537,10 @@ func (s *SQLiteExecutionEventStore) scanEvent(rows *sql.Rows) (*ExecutionEvent, 
 
 	// Handle nullable fields
 	if pathID.Valid {
-		event.PathID = pathID.String
+		event.Path = pathID.String
 	}
 	if stepName.Valid {
-		event.StepName = stepName.String
+		event.Step = stepName.String
 	}
 	if dataJSON.Valid && dataJSON.String != "" {
 		if err := json.Unmarshal([]byte(dataJSON.String), &event.Data); err != nil {

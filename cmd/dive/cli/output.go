@@ -164,8 +164,8 @@ func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 	fmt.Println() // Add spacing before output
 	fmt.Printf("     %s %s\n", arrow, outputStyle.Sprint("Output:"))
 
-	// Calculate box width based on terminal width
 	termWidth := getTerminalWidth()
+
 	// Account for indentation (5 spaces) and borders (2 chars) and some padding
 	maxContentWidth := termWidth - 10
 	if maxContentWidth < 40 {
@@ -206,7 +206,7 @@ func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 		boxWidth = maxContentWidth
 	}
 
-	// Create top border
+	// Top border
 	fmt.Printf("     %s%s%s\n",
 		borderStyle.Sprint("╭"),
 		borderStyle.Sprint(strings.Repeat("─", boxWidth+2)), // +2 for padding
@@ -224,20 +224,20 @@ func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 			borderStyle.Sprint("│"))
 	}
 
-	// Create bottom border
+	// Bottom border
 	fmt.Printf("     %s%s%s\n",
 		borderStyle.Sprint("╰"),
 		borderStyle.Sprint(strings.Repeat("─", boxWidth+2)),
 		borderStyle.Sprint("╯"))
 
 	fmt.Printf("     %s %s\n", checkmark, workflowSuccess.Sprint("Step completed"))
-	fmt.Println() // Add spacing after step completion
+	fmt.Println()
 }
 
 // PrintStepError displays step error
 func (f *WorkflowFormatter) PrintStepError(stepName string, err error) {
 	fmt.Printf("     %s %s: %s\n", xmark, workflowError.Sprint("Error"), err.Error())
-	fmt.Println() // Add spacing after step error
+	fmt.Println()
 }
 
 // PrintWorkflowComplete displays successful completion

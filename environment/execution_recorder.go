@@ -33,6 +33,15 @@ type ExecutionRecorder interface {
 
 	// GetExecutionID returns the execution ID
 	GetExecutionID() string
+
+	// SaveSnapshot saves an execution snapshot
+	SaveSnapshot(ctx context.Context, snapshot *ExecutionSnapshot) error
+
+	// GetEventHistory retrieves all events for replay
+	GetEventHistory(ctx context.Context, executionID string) ([]*ExecutionEvent, error)
+
+	// GetEventSequence returns the current event sequence number
+	GetEventSequence() int64
 }
 
 // PathBranchInfo contains information about a branched path
@@ -83,11 +92,11 @@ func (r *BufferedExecutionRecorder) RecordEvent(eventType ExecutionEventType, pa
 	event := &ExecutionEvent{
 		ID:          NewEventID(),
 		ExecutionID: r.executionID,
-		PathID:      pathID,
 		Sequence:    atomic.AddInt64(&r.eventSequence, 1),
 		Timestamp:   time.Now(),
 		EventType:   eventType,
-		StepName:    stepName,
+		Path:        pathID,
+		Step:        stepName,
 		Data:        data,
 	}
 
@@ -122,4 +131,19 @@ func (r *BufferedExecutionRecorder) Flush() error {
 // EmitEvent implements EventEmitter for ScriptStateManager integration
 func (r *BufferedExecutionRecorder) EmitEvent(eventType ExecutionEventType, pathID, stepName string, data map[string]interface{}) {
 	r.RecordEvent(eventType, pathID, stepName, data)
+}
+
+// SaveSnapshot saves an execution snapshot via the event store
+func (r *BufferedExecutionRecorder) SaveSnapshot(ctx context.Context, snapshot *ExecutionSnapshot) error {
+	return r.eventStore.SaveSnapshot(ctx, snapshot)
+}
+
+// GetEventHistory retrieves all events for replay via the event store
+func (r *BufferedExecutionRecorder) GetEventHistory(ctx context.Context, executionID string) ([]*ExecutionEvent, error) {
+	return r.eventStore.GetEventHistory(ctx, executionID)
+}
+
+// GetEventSequence returns the current event sequence number
+func (r *BufferedExecutionRecorder) GetEventSequence() int64 {
+	return atomic.LoadInt64(&r.eventSequence)
 }

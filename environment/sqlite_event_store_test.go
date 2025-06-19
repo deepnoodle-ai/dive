@@ -30,7 +30,7 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 			{
 				ID:          "event-1",
 				ExecutionID: executionID,
-				PathID:      "path-1",
+				Path:        "path-1",
 				Sequence:    1,
 				Timestamp:   time.Now(),
 				EventType:   EventExecutionStarted,
@@ -42,11 +42,11 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 			{
 				ID:          "event-2",
 				ExecutionID: executionID,
-				PathID:      "path-1",
+				Path:        "path-1",
 				Sequence:    2,
 				Timestamp:   time.Now(),
 				EventType:   EventStepStarted,
-				StepName:    "step1",
+				Step:        "step1",
 				Data: map[string]interface{}{
 					"step_type": "prompt",
 				},
@@ -54,11 +54,11 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 			{
 				ID:          "event-3",
 				ExecutionID: executionID,
-				PathID:      "path-1",
+				Path:        "path-1",
 				Sequence:    3,
 				Timestamp:   time.Now(),
 				EventType:   EventStepCompleted,
-				StepName:    "step1",
+				Step:        "step1",
 				Data: map[string]interface{}{
 					"output":          "step output",
 					"stored_variable": "var1",
@@ -355,11 +355,11 @@ func TestSQLiteExecutionEventStore_ConcurrentAccess(t *testing.T) {
 					event := &ExecutionEvent{
 						ID:          eventID,
 						ExecutionID: executionID,
-						PathID:      fmt.Sprintf("path-%d", goroutineID),
+						Path:        fmt.Sprintf("path-%d", goroutineID),
 						Sequence:    int64(goroutineID*eventsPerGoroutine + j + 1),
 						Timestamp:   time.Now(),
 						EventType:   EventStepCompleted,
-						StepName:    fmt.Sprintf("step-%d-%d", goroutineID, j),
+						Step:        fmt.Sprintf("step-%d-%d", goroutineID, j),
 						Data: map[string]interface{}{
 							"goroutine_id": goroutineID,
 							"event_index":  j,
@@ -505,11 +505,11 @@ func TestSQLiteExecutionEventStore_Performance(t *testing.T) {
 			event := &ExecutionEvent{
 				ID:          fmt.Sprintf("perf-event-%d", i),
 				ExecutionID: executionID,
-				PathID:      fmt.Sprintf("path-%d", i%10),
+				Path:        fmt.Sprintf("path-%d", i%10),
 				Sequence:    int64(i + 1),
 				Timestamp:   time.Now(),
 				EventType:   EventStepCompleted,
-				StepName:    fmt.Sprintf("step-%d", i),
+				Step:        fmt.Sprintf("step-%d", i),
 				Data: map[string]interface{}{
 					"index":  i,
 					"output": fmt.Sprintf("output for step %d", i),

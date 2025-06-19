@@ -258,8 +258,8 @@ func (eo *ExecutionOrchestrator) findFailurePoint(events []*ExecutionEvent) (*Fa
 		switch event.EventType {
 		case EventStepFailed:
 			return &FailureInfo{
-				FailedStep:      event.StepName,
-				FailedPath:      event.PathID,
+				FailedStep:      event.Step,
+				FailedPath:      event.Path,
 				FailureSequence: event.Sequence,
 				ErrorMessage:    getStringFromData(event.Data, "error"),
 				CanResume:       true,
@@ -269,8 +269,8 @@ func (eo *ExecutionOrchestrator) findFailurePoint(events []*ExecutionEvent) (*Fa
 			for j := i - 1; j >= 0; j-- {
 				if events[j].EventType == EventStepFailed {
 					return &FailureInfo{
-						FailedStep:      events[j].StepName,
-						FailedPath:      events[j].PathID,
+						FailedStep:      events[j].Step,
+						FailedPath:      events[j].Path,
 						FailureSequence: events[j].Sequence,
 						ErrorMessage:    getStringFromData(events[j].Data, "error"),
 						CanResume:       true,
@@ -332,7 +332,7 @@ func (eo *ExecutionOrchestrator) findAllFailedSteps(events []*ExecutionEvent) []
 
 	for _, event := range events {
 		if event.EventType == EventStepFailed {
-			failedSteps = append(failedSteps, event.StepName)
+			failedSteps = append(failedSteps, event.Step)
 		}
 	}
 
@@ -348,16 +348,16 @@ func (eo *ExecutionOrchestrator) createSkippedEvents(events []*ExecutionEvent, s
 
 	var modifiedEvents []*ExecutionEvent
 	for _, event := range events {
-		if event.EventType == EventStepFailed && skippedStepMap[event.StepName] {
+		if event.EventType == EventStepFailed && skippedStepMap[event.Step] {
 			// Convert failed step to completed step with placeholder output
 			completedEvent := &ExecutionEvent{
 				ID:          event.ID + "_skipped",
 				ExecutionID: event.ExecutionID,
-				PathID:      event.PathID,
+				Path:        event.Path,
 				Sequence:    event.Sequence,
 				Timestamp:   event.Timestamp,
 				EventType:   EventStepCompleted,
-				StepName:    event.StepName,
+				Step:        event.Step,
 				Data: map[string]interface{}{
 					"output":         "SKIPPED: " + getStringFromData(event.Data, "error"),
 					"skipped":        true,
