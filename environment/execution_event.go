@@ -406,7 +406,6 @@ func (d *ExecutionContinueAsNewData) Validate() error {
 }
 
 // ExecutionEvent represents a single event in the execution history
-// This maintains backward compatibility while allowing for typed event data
 type ExecutionEvent struct {
 	ID          string             `json:"id"`
 	ExecutionID string             `json:"execution_id"`
@@ -416,445 +415,31 @@ type ExecutionEvent struct {
 	Path        string             `json:"path,omitempty"`
 	Step        string             `json:"step,omitempty"`
 
-	// Legacy field for backward compatibility
-	Data map[string]interface{} `json:"data,omitempty"`
-
-	// New typed data field
-	TypedData ExecutionEventData `json:"typed_data,omitempty"`
+	// Typed event data
+	Data ExecutionEventData `json:"data"`
 }
 
-// GetTypedData returns the typed event data, converting from legacy Data if needed
-func (e *ExecutionEvent) GetTypedData() (ExecutionEventData, error) {
-	if e.TypedData != nil {
-		return e.TypedData, nil
-	}
-
-	// Convert from legacy Data map
-	return e.convertLegacyData()
+// GetData returns the typed event data
+func (e *ExecutionEvent) GetData() ExecutionEventData {
+	return e.Data
 }
 
-// convertLegacyData converts the legacy Data map to typed event data
-func (e *ExecutionEvent) convertLegacyData() (ExecutionEventData, error) {
-	if e.Data == nil {
-		return nil, nil
-	}
-
-	switch e.EventType {
-	case EventExecutionStarted:
-		data := &ExecutionStartedData{}
-		if workflowName, ok := e.Data["workflow_name"].(string); ok {
-			data.WorkflowName = workflowName
-		}
-		if inputs, ok := e.Data["inputs"].(map[string]interface{}); ok {
-			data.Inputs = inputs
-		}
-		return data, nil
-
-	case EventExecutionCompleted:
-		data := &ExecutionCompletedData{}
-		if outputs, ok := e.Data["outputs"].(map[string]interface{}); ok {
-			data.Outputs = outputs
-		}
-		if usageData, ok := e.Data["usage"]; ok {
-			if usageMap, ok := usageData.(map[string]interface{}); ok {
-				usage := &llm.Usage{}
-				if inputTokens, ok := usageMap["input_tokens"].(float64); ok {
-					usage.InputTokens = int(inputTokens)
-				}
-				if outputTokens, ok := usageMap["output_tokens"].(float64); ok {
-					usage.OutputTokens = int(outputTokens)
-				}
-				if cacheCreationTokens, ok := usageMap["cache_creation_input_tokens"].(float64); ok {
-					usage.CacheCreationInputTokens = int(cacheCreationTokens)
-				}
-				if cacheReadTokens, ok := usageMap["cache_read_input_tokens"].(float64); ok {
-					usage.CacheReadInputTokens = int(cacheReadTokens)
-				}
-				data.Usage = usage
-			}
-		}
-		return data, nil
-
-	case EventExecutionFailed:
-		data := &ExecutionFailedData{}
-		if errorStr, ok := e.Data["error"].(string); ok {
-			data.Error = errorStr
-		}
-		return data, nil
-
-	case EventPathStarted:
-		data := &PathStartedData{}
-		if currentStep, ok := e.Data["current_step"].(string); ok {
-			data.CurrentStep = currentStep
-		}
-		return data, nil
-
-	case EventPathCompleted:
-		data := &PathCompletedData{}
-		if finalStep, ok := e.Data["final_step"].(string); ok {
-			data.FinalStep = finalStep
-		}
-		return data, nil
-
-	case EventPathFailed:
-		data := &PathFailedData{}
-		if errorStr, ok := e.Data["error"].(string); ok {
-			data.Error = errorStr
-		}
-		return data, nil
-
-	case EventPathBranched:
-		data := &PathBranchedData{}
-		if newPathsData, ok := e.Data["new_paths"].([]interface{}); ok {
-			data.NewPaths = make([]PathBranchInfo, 0, len(newPathsData))
-			for _, pathData := range newPathsData {
-				if pathMap, ok := pathData.(map[string]interface{}); ok {
-					pathInfo := PathBranchInfo{}
-					if id, ok := pathMap["id"].(string); ok {
-						pathInfo.ID = id
-					}
-					if currentStep, ok := pathMap["current_step"].(string); ok {
-						pathInfo.CurrentStep = currentStep
-					}
-					if inheritOutputs, ok := pathMap["inherit_outputs"].(bool); ok {
-						pathInfo.InheritOutputs = inheritOutputs
-					}
-					data.NewPaths = append(data.NewPaths, pathInfo)
-				}
-			}
-		}
-		return data, nil
-
-	case EventStepStarted:
-		data := &StepStartedData{}
-		if stepType, ok := e.Data["step_type"].(string); ok {
-			data.StepType = stepType
-		}
-		if stepParams, ok := e.Data["step_params"].(map[string]interface{}); ok {
-			data.StepParams = stepParams
-		}
-		return data, nil
-
-	case EventStepCompleted:
-		data := &StepCompletedData{}
-		if output, ok := e.Data["output"].(string); ok {
-			data.Output = output
-		}
-		if storedVariable, ok := e.Data["stored_variable"].(string); ok {
-			data.StoredVariable = storedVariable
-		}
-		if usageData, ok := e.Data["usage"]; ok {
-			if usageMap, ok := usageData.(map[string]interface{}); ok {
-				usage := &llm.Usage{}
-				if inputTokens, ok := usageMap["input_tokens"].(float64); ok {
-					usage.InputTokens = int(inputTokens)
-				}
-				if outputTokens, ok := usageMap["output_tokens"].(float64); ok {
-					usage.OutputTokens = int(outputTokens)
-				}
-				if cacheCreationTokens, ok := usageMap["cache_creation_input_tokens"].(float64); ok {
-					usage.CacheCreationInputTokens = int(cacheCreationTokens)
-				}
-				if cacheReadTokens, ok := usageMap["cache_read_input_tokens"].(float64); ok {
-					usage.CacheReadInputTokens = int(cacheReadTokens)
-				}
-				data.Usage = usage
-			}
-		}
-		return data, nil
-
-	case EventStepFailed:
-		data := &StepFailedData{}
-		if errorStr, ok := e.Data["error"].(string); ok {
-			data.Error = errorStr
-		}
-		return data, nil
-
-	case EventOperationStarted:
-		data := &OperationStartedData{}
-		if operationID, ok := e.Data["operation_id"].(string); ok {
-			data.OperationID = operationID
-		}
-		if operationType, ok := e.Data["operation_type"].(string); ok {
-			data.OperationType = operationType
-		}
-		if parameters, ok := e.Data["parameters"].(map[string]interface{}); ok {
-			data.Parameters = parameters
-		}
-		return data, nil
-
-	case EventOperationCompleted:
-		data := &OperationCompletedData{}
-		if operationID, ok := e.Data["operation_id"].(string); ok {
-			data.OperationID = operationID
-		}
-		if operationType, ok := e.Data["operation_type"].(string); ok {
-			data.OperationType = operationType
-		}
-		if duration, ok := e.Data["duration"].(time.Duration); ok {
-			data.Duration = duration
-		}
-		if result, ok := e.Data["result"]; ok {
-			data.Result = result
-		}
-		return data, nil
-
-	case EventOperationFailed:
-		data := &OperationFailedData{}
-		if operationID, ok := e.Data["operation_id"].(string); ok {
-			data.OperationID = operationID
-		}
-		if operationType, ok := e.Data["operation_type"].(string); ok {
-			data.OperationType = operationType
-		}
-		if duration, ok := e.Data["duration"].(time.Duration); ok {
-			data.Duration = duration
-		}
-		if errorStr, ok := e.Data["error"].(string); ok {
-			data.Error = errorStr
-		}
-		return data, nil
-
-	case EventStateMutated:
-		data := &StateMutatedData{}
-		if mutations, ok := e.Data["mutations"].([]StateMutation); ok {
-			data.Mutations = mutations
-		}
-		return data, nil
-
-	case EventTimeAccessed:
-		data := &TimeAccessedData{}
-		if accessedAt, ok := e.Data["accessed_at"].(time.Time); ok {
-			data.AccessedAt = accessedAt
-		}
-		if value, ok := e.Data["value"].(time.Time); ok {
-			data.Value = value
-		}
-		return data, nil
-
-	case EventRandomGenerated:
-		data := &RandomGeneratedData{}
-		if seed, ok := e.Data["seed"].(int64); ok {
-			data.Seed = seed
-		}
-		if value, ok := e.Data["value"]; ok {
-			data.Value = value
-		}
-		if method, ok := e.Data["method"].(string); ok {
-			data.Method = method
-		}
-		return data, nil
-
-	case EventIterationStarted:
-		data := &IterationStartedData{}
-		if iterationIndex, ok := e.Data["iteration_index"].(int); ok {
-			data.IterationIndex = iterationIndex
-		}
-		if item, ok := e.Data["item"]; ok {
-			data.Item = item
-		}
-		if itemKey, ok := e.Data["item_key"].(string); ok {
-			data.ItemKey = itemKey
-		}
-		return data, nil
-
-	case EventIterationCompleted:
-		data := &IterationCompletedData{}
-		if iterationIndex, ok := e.Data["iteration_index"].(int); ok {
-			data.IterationIndex = iterationIndex
-		}
-		if item, ok := e.Data["item"]; ok {
-			data.Item = item
-		}
-		if itemKey, ok := e.Data["item_key"].(string); ok {
-			data.ItemKey = itemKey
-		}
-		if result, ok := e.Data["result"]; ok {
-			data.Result = result
-		}
-		return data, nil
-
-	case EventSignalReceived:
-		data := &SignalReceivedData{}
-		if signalType, ok := e.Data["signal_type"].(string); ok {
-			data.SignalType = signalType
-		}
-		if payload, ok := e.Data["payload"].(map[string]interface{}); ok {
-			data.Payload = payload
-		}
-		if source, ok := e.Data["source"].(string); ok {
-			data.Source = source
-		}
-		return data, nil
-
-	case EventVersionDecision:
-		data := &VersionDecisionData{}
-		if decisionType, ok := e.Data["decision_type"].(string); ok {
-			data.DecisionType = decisionType
-		}
-		if selectedVersion, ok := e.Data["selected_version"].(string); ok {
-			data.SelectedVersion = selectedVersion
-		}
-		if availableVersions, ok := e.Data["available_versions"].([]string); ok {
-			data.AvailableVersions = availableVersions
-		}
-		if reason, ok := e.Data["reason"].(string); ok {
-			data.Reason = reason
-		}
-		return data, nil
-
-	case EventExecutionContinueAsNew:
-		data := &ExecutionContinueAsNewData{}
-		if newExecutionID, ok := e.Data["new_execution_id"].(string); ok {
-			data.NewExecutionID = newExecutionID
-		}
-		if newInputs, ok := e.Data["new_inputs"].(map[string]interface{}); ok {
-			data.NewInputs = newInputs
-		}
-		if reason, ok := e.Data["reason"].(string); ok {
-			data.Reason = reason
-		}
-		if stateTransfer, ok := e.Data["state_transfer"].(map[string]interface{}); ok {
-			data.StateTransfer = stateTransfer
-		}
-		return data, nil
-
-	default:
-		return nil, fmt.Errorf("unknown event type: %s", e.EventType)
-	}
-}
-
-// SetTypedData sets the typed event data and updates the legacy Data field for compatibility
-func (e *ExecutionEvent) SetTypedData(data ExecutionEventData) error {
+// SetData sets the typed event data
+func (e *ExecutionEvent) SetData(data ExecutionEventData) error {
 	if data == nil {
-		return fmt.Errorf("typed data cannot be nil")
+		return fmt.Errorf("data cannot be nil")
 	}
 
 	if err := data.Validate(); err != nil {
-		return fmt.Errorf("typed data validation failed: %w", err)
+		return fmt.Errorf("data validation failed: %w", err)
 	}
 
 	if data.EventType() != e.EventType {
-		return fmt.Errorf("typed data event type %s does not match event type %s", data.EventType(), e.EventType)
+		return fmt.Errorf("data event type %s does not match event type %s", data.EventType(), e.EventType)
 	}
 
-	e.TypedData = data
-
-	// Update legacy Data field for backward compatibility
-	e.updateLegacyData()
-
+	e.Data = data
 	return nil
-}
-
-// updateLegacyData updates the legacy Data field from the typed data
-func (e *ExecutionEvent) updateLegacyData() {
-	if e.TypedData == nil {
-		return
-	}
-
-	// Use reflection or type assertion to convert typed data back to map
-	// This is a simplified implementation - in practice you might want to use reflection
-	// or a more sophisticated marshaling approach
-	e.Data = make(map[string]interface{})
-
-	switch data := e.TypedData.(type) {
-	case *ExecutionStartedData:
-		e.Data["workflow_name"] = data.WorkflowName
-		e.Data["inputs"] = data.Inputs
-	case *ExecutionCompletedData:
-		e.Data["outputs"] = data.Outputs
-		if data.Usage != nil {
-			e.Data["usage"] = map[string]interface{}{
-				"input_tokens":                data.Usage.InputTokens,
-				"output_tokens":               data.Usage.OutputTokens,
-				"cache_creation_input_tokens": data.Usage.CacheCreationInputTokens,
-				"cache_read_input_tokens":     data.Usage.CacheReadInputTokens,
-			}
-		}
-	case *ExecutionFailedData:
-		e.Data["error"] = data.Error
-	case *PathStartedData:
-		e.Data["current_step"] = data.CurrentStep
-	case *PathCompletedData:
-		e.Data["final_step"] = data.FinalStep
-	case *PathFailedData:
-		e.Data["error"] = data.Error
-	case *PathBranchedData:
-		pathData := make([]map[string]interface{}, 0, len(data.NewPaths))
-		for _, path := range data.NewPaths {
-			pathData = append(pathData, map[string]interface{}{
-				"id":              path.ID,
-				"current_step":    path.CurrentStep,
-				"inherit_outputs": path.InheritOutputs,
-			})
-		}
-		e.Data["new_paths"] = pathData
-	case *StepStartedData:
-		e.Data["step_type"] = data.StepType
-		e.Data["step_params"] = data.StepParams
-	case *StepCompletedData:
-		e.Data["output"] = data.Output
-		if data.StoredVariable != "" {
-			e.Data["stored_variable"] = data.StoredVariable
-		}
-		if data.Usage != nil {
-			e.Data["usage"] = map[string]interface{}{
-				"input_tokens":                data.Usage.InputTokens,
-				"output_tokens":               data.Usage.OutputTokens,
-				"cache_creation_input_tokens": data.Usage.CacheCreationInputTokens,
-				"cache_read_input_tokens":     data.Usage.CacheReadInputTokens,
-			}
-		}
-	case *StepFailedData:
-		e.Data["error"] = data.Error
-	case *OperationStartedData:
-		e.Data["operation_id"] = data.OperationID
-		e.Data["operation_type"] = data.OperationType
-		e.Data["parameters"] = data.Parameters
-	case *OperationCompletedData:
-		e.Data["operation_id"] = data.OperationID
-		e.Data["operation_type"] = data.OperationType
-		e.Data["duration"] = data.Duration
-		e.Data["result"] = data.Result
-	case *OperationFailedData:
-		e.Data["operation_id"] = data.OperationID
-		e.Data["operation_type"] = data.OperationType
-		e.Data["duration"] = data.Duration
-		e.Data["error"] = data.Error
-	case *StateMutatedData:
-		e.Data["mutations"] = data.Mutations
-	case *TimeAccessedData:
-		e.Data["accessed_at"] = data.AccessedAt
-		e.Data["value"] = data.Value
-	case *RandomGeneratedData:
-		e.Data["seed"] = data.Seed
-		e.Data["value"] = data.Value
-		e.Data["method"] = data.Method
-
-	case *IterationStartedData:
-		e.Data["iteration_index"] = data.IterationIndex
-		e.Data["item"] = data.Item
-		e.Data["item_key"] = data.ItemKey
-	case *IterationCompletedData:
-		e.Data["iteration_index"] = data.IterationIndex
-		e.Data["item"] = data.Item
-		e.Data["item_key"] = data.ItemKey
-		e.Data["result"] = data.Result
-	case *SignalReceivedData:
-		e.Data["signal_type"] = data.SignalType
-		e.Data["payload"] = data.Payload
-		e.Data["source"] = data.Source
-	case *VersionDecisionData:
-		e.Data["decision_type"] = data.DecisionType
-		e.Data["selected_version"] = data.SelectedVersion
-		e.Data["available_versions"] = data.AvailableVersions
-		e.Data["reason"] = data.Reason
-	case *ExecutionContinueAsNewData:
-		e.Data["new_execution_id"] = data.NewExecutionID
-		e.Data["new_inputs"] = data.NewInputs
-		e.Data["reason"] = data.Reason
-		e.Data["state_transfer"] = data.StateTransfer
-	}
 }
 
 // Validate validates the execution event
@@ -875,14 +460,17 @@ func (e *ExecutionEvent) Validate() error {
 		return fmt.Errorf("timestamp is required")
 	}
 
-	// Validate typed data if present
-	if e.TypedData != nil {
-		if err := e.TypedData.Validate(); err != nil {
-			return fmt.Errorf("typed data validation failed: %w", err)
-		}
-		if e.TypedData.EventType() != e.EventType {
-			return fmt.Errorf("typed data event type %s does not match event type %s", e.TypedData.EventType(), e.EventType)
-		}
+	// Validate typed data
+	if e.Data == nil {
+		return fmt.Errorf("data is required")
+	}
+
+	if err := e.Data.Validate(); err != nil {
+		return fmt.Errorf("data validation failed: %w", err)
+	}
+
+	if e.Data.EventType() != e.EventType {
+		return fmt.Errorf("data event type %s does not match event type %s", e.Data.EventType(), e.EventType)
 	}
 
 	return nil

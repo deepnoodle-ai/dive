@@ -257,22 +257,30 @@ func (eo *ExecutionOrchestrator) findFailurePoint(events []*ExecutionEvent) (*Fa
 
 		switch event.EventType {
 		case EventStepFailed:
+			var errorMessage string
+			if data, ok := event.Data.(*StepFailedData); ok {
+				errorMessage = data.Error
+			}
 			return &FailureInfo{
 				FailedStep:      event.Step,
 				FailedPath:      event.Path,
 				FailureSequence: event.Sequence,
-				ErrorMessage:    getStringFromData(event.Data, "error"),
+				ErrorMessage:    errorMessage,
 				CanResume:       true,
 			}, nil
 		case EventExecutionFailed:
 			// Find the step that caused execution failure
 			for j := i - 1; j >= 0; j-- {
 				if events[j].EventType == EventStepFailed {
+					var errorMessage string
+					if data, ok := events[j].Data.(*StepFailedData); ok {
+						errorMessage = data.Error
+					}
 					return &FailureInfo{
 						FailedStep:      events[j].Step,
 						FailedPath:      events[j].Path,
 						FailureSequence: events[j].Sequence,
-						ErrorMessage:    getStringFromData(events[j].Data, "error"),
+						ErrorMessage:    errorMessage,
 						CanResume:       true,
 					}, nil
 				}
@@ -350,6 +358,11 @@ func (eo *ExecutionOrchestrator) createSkippedEvents(events []*ExecutionEvent, s
 	for _, event := range events {
 		if event.EventType == EventStepFailed && skippedStepMap[event.Step] {
 			// Convert failed step to completed step with placeholder output
+			var originalError string
+			if data, ok := event.Data.(*StepFailedData); ok {
+				originalError = data.Error
+			}
+
 			completedEvent := &ExecutionEvent{
 				ID:          event.ID + "_skipped",
 				ExecutionID: event.ExecutionID,
@@ -358,10 +371,10 @@ func (eo *ExecutionOrchestrator) createSkippedEvents(events []*ExecutionEvent, s
 				Timestamp:   event.Timestamp,
 				EventType:   EventStepCompleted,
 				Step:        event.Step,
-				Data: map[string]interface{}{
-					"output":         "SKIPPED: " + getStringFromData(event.Data, "error"),
-					"skipped":        true,
-					"original_error": getStringFromData(event.Data, "error"),
+				Data: &StepCompletedData{
+					Output:         "SKIPPED: " + originalError,
+					StoredVariable: "",
+					Usage:          nil,
 				},
 			}
 			modifiedEvents = append(modifiedEvents, completedEvent)

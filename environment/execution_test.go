@@ -713,8 +713,11 @@ func TestExecutionEventSequence(t *testing.T) {
 		}
 	}
 	require.NotNil(t, executionStartedEvent, "should have ExecutionStarted event")
-	require.Equal(t, "event-test-workflow", executionStartedEvent.Data["workflow_name"])
-	require.NotNil(t, executionStartedEvent.Data["inputs"])
+
+	executionStartedData, ok := executionStartedEvent.Data.(*ExecutionStartedData)
+	require.True(t, ok, "should have ExecutionStartedData")
+	require.Equal(t, "event-test-workflow", executionStartedData.WorkflowName)
+	require.NotNil(t, executionStartedData.Inputs)
 
 	// Verify StepStarted event has correct data
 	var stepStartedEvent *ExecutionEvent
@@ -726,7 +729,10 @@ func TestExecutionEventSequence(t *testing.T) {
 	}
 	require.NotNil(t, stepStartedEvent, "should have StepStarted event")
 	require.Equal(t, "greet", stepStartedEvent.Step)
-	require.Equal(t, "prompt", stepStartedEvent.Data["step_type"])
+
+	stepStartedData, ok := stepStartedEvent.Data.(*StepStartedData)
+	require.True(t, ok, "should have StepStartedData")
+	require.Equal(t, "prompt", stepStartedData.StepType)
 
 	// Verify StepCompleted event has output
 	var stepCompletedEvent *ExecutionEvent
@@ -738,7 +744,10 @@ func TestExecutionEventSequence(t *testing.T) {
 	}
 	require.NotNil(t, stepCompletedEvent, "should have StepCompleted event")
 	require.Equal(t, "greet", stepCompletedEvent.Step)
-	require.NotEmpty(t, stepCompletedEvent.Data["output"])
+
+	stepCompletedData, ok := stepCompletedEvent.Data.(*StepCompletedData)
+	require.True(t, ok, "should have StepCompletedData")
+	require.NotEmpty(t, stepCompletedData.Output)
 }
 
 func TestExecutionEventSequenceWithFailure(t *testing.T) {
@@ -812,7 +821,10 @@ func TestExecutionEventSequenceWithFailure(t *testing.T) {
 		}
 	}
 	require.NotNil(t, operationFailedEvent, "should have OperationFailed event")
-	require.NotEmpty(t, operationFailedEvent.Data["error"])
+
+	operationFailedData, ok := operationFailedEvent.Data.(*OperationFailedData)
+	require.True(t, ok, "should have OperationFailedData")
+	require.NotEmpty(t, operationFailedData.Error)
 
 	// Verify ExecutionFailed event has error details
 	var executionFailedEvent *ExecutionEvent
@@ -823,7 +835,10 @@ func TestExecutionEventSequenceWithFailure(t *testing.T) {
 		}
 	}
 	require.NotNil(t, executionFailedEvent, "should have ExecutionFailed event")
-	require.NotEmpty(t, executionFailedEvent.Data["error"])
+
+	executionFailedData, ok := executionFailedEvent.Data.(*ExecutionFailedData)
+	require.True(t, ok, "should have ExecutionFailedData")
+	require.NotEmpty(t, executionFailedData.Error)
 }
 
 func TestExecutionExactEventSequence(t *testing.T) {

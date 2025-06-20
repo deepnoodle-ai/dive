@@ -75,7 +75,7 @@ func TestTypedEventData(t *testing.T) {
 }
 
 func TestExecutionEventTypedData(t *testing.T) {
-	t.Run("SetTypedData", func(t *testing.T) {
+	t.Run("SetData", func(t *testing.T) {
 		event := &ExecutionEvent{
 			ID:          "event-123",
 			ExecutionID: "exec-456",
@@ -89,18 +89,14 @@ func TestExecutionEventTypedData(t *testing.T) {
 			StoredVariable: "result_var",
 		}
 
-		err := event.SetTypedData(data)
+		err := event.SetData(data)
 		require.NoError(t, err)
 
-		// Check that TypedData is set
-		require.Equal(t, data, event.TypedData)
-
-		// Check that legacy Data field is populated for backward compatibility
-		require.Equal(t, "Step output", event.Data["output"])
-		require.Equal(t, "result_var", event.Data["stored_variable"])
+		// Check that Data is set
+		require.Equal(t, data, event.Data)
 	})
 
-	t.Run("SetTypedData validation", func(t *testing.T) {
+	t.Run("SetData validation", func(t *testing.T) {
 		event := &ExecutionEvent{
 			ID:          "event-123",
 			ExecutionID: "exec-456",
@@ -110,7 +106,7 @@ func TestExecutionEventTypedData(t *testing.T) {
 		}
 
 		// Test nil data
-		err := event.SetTypedData(nil)
+		err := event.SetData(nil)
 		require.Error(t, err)
 
 		// Test mismatched event type
@@ -118,7 +114,7 @@ func TestExecutionEventTypedData(t *testing.T) {
 			WorkflowName: "test",
 			Inputs:       map[string]interface{}{},
 		}
-		err = event.SetTypedData(data)
+		err = event.SetData(data)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "does not match event type")
 
@@ -126,12 +122,12 @@ func TestExecutionEventTypedData(t *testing.T) {
 		invalidData := &StepFailedData{
 			Error: "", // required field is empty
 		}
-		err = event.SetTypedData(invalidData)
+		err = event.SetData(invalidData)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "validation failed")
 	})
 
-	t.Run("GetTypedData with TypedData set", func(t *testing.T) {
+	t.Run("GetData with Data set", func(t *testing.T) {
 		event := &ExecutionEvent{
 			ID:          "event-123",
 			ExecutionID: "exec-456",
@@ -146,36 +142,11 @@ func TestExecutionEventTypedData(t *testing.T) {
 			Parameters:    map[string]interface{}{"param1": "value1"},
 		}
 
-		err := event.SetTypedData(originalData)
+		err := event.SetData(originalData)
 		require.NoError(t, err)
 
-		retrievedData, err := event.GetTypedData()
-		require.NoError(t, err)
+		retrievedData := event.GetData()
 		require.Equal(t, originalData, retrievedData)
-	})
-
-	t.Run("GetTypedData legacy conversion", func(t *testing.T) {
-		event := &ExecutionEvent{
-			ID:          "event-123",
-			ExecutionID: "exec-456",
-			Sequence:    1,
-			Timestamp:   time.Now(),
-			EventType:   EventExecutionStarted,
-			Data: map[string]interface{}{
-				"workflow_name": "test-workflow",
-				"inputs":        map[string]interface{}{"key": "value"},
-			},
-		}
-
-		// TypedData is nil, should convert from legacy Data
-		retrievedData, err := event.GetTypedData()
-		require.NoError(t, err)
-		require.NotNil(t, retrievedData)
-
-		typedData, ok := retrievedData.(*ExecutionStartedData)
-		require.True(t, ok)
-		require.Equal(t, "test-workflow", typedData.WorkflowName)
-		require.Equal(t, map[string]interface{}{"key": "value"}, typedData.Inputs)
 	})
 }
 
@@ -204,11 +175,13 @@ func TestBufferedExecutionRecorderTypedEvents(t *testing.T) {
 		require.Equal(t, EventStepStarted, event.EventType)
 		require.Equal(t, "path-1", event.Path)
 		require.Equal(t, "step-1", event.Step)
-		require.Equal(t, data, event.TypedData)
+		require.Equal(t, data, event.Data)
 
-		// Check legacy Data field is populated
-		require.Equal(t, "prompt", event.Data["step_type"])
-		require.Equal(t, map[string]interface{}{"agent": "test-agent"}, event.Data["step_params"])
+		// Check typed data fields
+		typedData, ok := event.Data.(*StepStartedData)
+		require.True(t, ok)
+		require.Equal(t, "prompt", typedData.StepType)
+		require.Equal(t, map[string]interface{}{"agent": "test-agent"}, typedData.StepParams)
 	})
 
 	t.Run("Convenience methods", func(t *testing.T) {
@@ -229,7 +202,7 @@ func TestBufferedExecutionRecorderTypedEvents(t *testing.T) {
 
 		require.Equal(t, EventExecutionStarted, event.EventType)
 
-		typedData, ok := event.TypedData.(*ExecutionStartedData)
+		typedData, ok := event.Data.(*ExecutionStartedData)
 		require.True(t, ok)
 		require.Equal(t, "test-workflow", typedData.WorkflowName)
 		require.Equal(t, map[string]interface{}{"input": "test"}, typedData.Inputs)

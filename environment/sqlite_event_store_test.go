@@ -34,9 +34,9 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 				Sequence:    1,
 				Timestamp:   time.Now(),
 				EventType:   EventExecutionStarted,
-				Data: map[string]interface{}{
-					"workflow_name": "test-workflow",
-					"inputs":        map[string]interface{}{"key": "value"},
+				Data: &ExecutionStartedData{
+					WorkflowName: "test-workflow",
+					Inputs:       map[string]interface{}{"key": "value"},
 				},
 			},
 			{
@@ -47,8 +47,9 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 				Timestamp:   time.Now(),
 				EventType:   EventStepStarted,
 				Step:        "step1",
-				Data: map[string]interface{}{
-					"step_type": "prompt",
+				Data: &StepStartedData{
+					StepType:   "prompt",
+					StepParams: map[string]interface{}{},
 				},
 			},
 			{
@@ -59,9 +60,10 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 				Timestamp:   time.Now(),
 				EventType:   EventStepCompleted,
 				Step:        "step1",
-				Data: map[string]interface{}{
-					"output":          "step output",
-					"stored_variable": "var1",
+				Data: &StepCompletedData{
+					Output:         "step output",
+					StoredVariable: "var1",
+					Usage:          nil,
 				},
 			},
 		}
@@ -79,7 +81,13 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 		require.Equal(t, events[0].ID, retrievedEvents[0].ID)
 		require.Equal(t, events[0].ExecutionID, retrievedEvents[0].ExecutionID)
 		require.Equal(t, events[0].EventType, retrievedEvents[0].EventType)
-		require.Equal(t, events[0].Data["workflow_name"], retrievedEvents[0].Data["workflow_name"])
+
+		// Verify typed data
+		originalData, ok := events[0].Data.(*ExecutionStartedData)
+		require.True(t, ok)
+		retrievedData, ok := retrievedEvents[0].Data.(*ExecutionStartedData)
+		require.True(t, ok)
+		require.Equal(t, originalData.WorkflowName, retrievedData.WorkflowName)
 
 		// Get events from sequence 2
 		partialEvents, err := store.GetEvents(ctx, executionID, 2)
@@ -226,6 +234,10 @@ func TestSQLiteExecutionEventStore(t *testing.T) {
 				Sequence:    1,
 				Timestamp:   time.Now(),
 				EventType:   EventExecutionStarted,
+				Data: &ExecutionStartedData{
+					WorkflowName: "delete-workflow",
+					Inputs:       map[string]interface{}{},
+				},
 			},
 		}
 
@@ -360,9 +372,10 @@ func TestSQLiteExecutionEventStore_ConcurrentAccess(t *testing.T) {
 						Timestamp:   time.Now(),
 						EventType:   EventStepCompleted,
 						Step:        fmt.Sprintf("step-%d-%d", goroutineID, j),
-						Data: map[string]interface{}{
-							"goroutine_id": goroutineID,
-							"event_index":  j,
+						Data: &StepCompletedData{
+							Output:         fmt.Sprintf("output from goroutine %d, event %d", goroutineID, j),
+							StoredVariable: "",
+							Usage:          nil,
 						},
 					}
 					events = append(events, event)
@@ -510,9 +523,10 @@ func TestSQLiteExecutionEventStore_Performance(t *testing.T) {
 				Timestamp:   time.Now(),
 				EventType:   EventStepCompleted,
 				Step:        fmt.Sprintf("step-%d", i),
-				Data: map[string]interface{}{
-					"index":  i,
-					"output": fmt.Sprintf("output for step %d", i),
+				Data: &StepCompletedData{
+					Output:         fmt.Sprintf("output for step %d", i),
+					StoredVariable: "",
+					Usage:          nil,
 				},
 			}
 			events = append(events, event)

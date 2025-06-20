@@ -31,13 +31,8 @@ func TestTypeSafetyBenefits(t *testing.T) {
 	events := eventStore.events
 
 	for _, event := range events {
-		typedData, err := event.GetTypedData()
-		if err != nil {
-			t.Fatalf("Error getting typed data: %v", err)
-		}
-
 		// Type-safe access to event data
-		switch data := typedData.(type) {
+		switch data := event.GetData().(type) {
 		case *OperationCompletedData:
 			t.Logf("Operation %s completed in %v", data.OperationID, data.Duration)
 			if data.OperationID != "op-123" {
@@ -69,27 +64,15 @@ func TestBackwardCompatibility(t *testing.T) {
 	// Read it back with the new typed system
 	event := eventStore.events[0]
 
-	// Legacy access still works
-	workflowName := event.Data["workflow_name"].(string)
-	if workflowName != "test-workflow" {
-		t.Errorf("Expected workflow name 'test-workflow', got '%s'", workflowName)
-	}
-	t.Logf("Legacy access - Workflow: %s", workflowName)
-
-	// New typed access also works (converts automatically)
-	typedData, err := event.GetTypedData()
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
-
-	if executionData, ok := typedData.(*ExecutionStartedData); ok {
+	// Access the typed data directly
+	if executionData, ok := event.GetData().(*ExecutionStartedData); ok {
 		if executionData.WorkflowName != "test-workflow" {
 			t.Errorf("Expected workflow name 'test-workflow', got '%s'", executionData.WorkflowName)
 		}
 		t.Logf("Typed access - Workflow: %s", executionData.WorkflowName)
 		t.Logf("Typed access - Inputs: %v", executionData.Inputs)
 	} else {
-		t.Errorf("Expected ExecutionStartedData, got %T", typedData)
+		t.Errorf("Expected ExecutionStartedData, got %T", event.GetData())
 	}
 }
 

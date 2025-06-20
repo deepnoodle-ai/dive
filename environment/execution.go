@@ -217,13 +217,16 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 			e.status = ExecutionStatusRunning
 			e.startTime = event.Timestamp
 			// Initialize inputs from event if available
-			if inputs, ok := event.Data["inputs"].(map[string]interface{}); ok {
-				stateValues["inputs"] = inputs
+			if data, ok := event.Data.(*ExecutionStartedData); ok {
+				stateValues["inputs"] = data.Inputs
 			}
 
 		case EventPathStarted:
 			// Create path state
-			currentStep := getStringFromData(event.Data, "current_step")
+			var currentStep string
+			if data, ok := event.Data.(*PathStartedData); ok {
+				currentStep = data.CurrentStep
+			}
 			e.paths[event.Path] = &PathState{
 				ID:          event.Path,
 				Status:      PathStatusPending,
@@ -250,7 +253,14 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 			}
 
 		case EventStepCompleted:
-			stepOutput := getStringFromData(event.Data, "output")
+			var stepOutput, varName string
+			var stepUsage *llm.Usage
+			if data, ok := event.Data.(*StepCompletedData); ok {
+				stepOutput = data.Output
+				varName = data.StoredVariable
+				stepUsage = data.Usage
+			}
+
 			completedSteps[event.Step] = stepOutput
 
 			// Update path state with step output
@@ -262,41 +272,20 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 			}
 
 			// Handle stored variables
-			if varName := getStringFromData(event.Data, "stored_variable"); varName != "" {
-				if storedValue, ok := event.Data["stored_value"]; ok {
-					stateValues[varName] = storedValue
-				} else {
-					stateValues[varName] = stepOutput
-				}
+			if varName != "" {
+				stateValues[varName] = stepOutput
 			}
 
 			// Aggregate token usage from step completion events
-			if usageData, ok := event.Data["usage"]; ok {
-				if usageMap, ok := usageData.(map[string]interface{}); ok {
-					var stepUsage llm.Usage
-					if inputTokens, ok := usageMap["input_tokens"].(float64); ok {
-						stepUsage.InputTokens = int(inputTokens)
-					}
-					if outputTokens, ok := usageMap["output_tokens"].(float64); ok {
-						stepUsage.OutputTokens = int(outputTokens)
-					}
-					if cacheCreationTokens, ok := usageMap["cache_creation_input_tokens"].(float64); ok {
-						stepUsage.CacheCreationInputTokens = int(cacheCreationTokens)
-					}
-					if cacheReadTokens, ok := usageMap["cache_read_input_tokens"].(float64); ok {
-						stepUsage.CacheReadInputTokens = int(cacheReadTokens)
-					}
-
-					// Add to total usage
-					if stepUsage.InputTokens > 0 || stepUsage.OutputTokens > 0 ||
-						stepUsage.CacheCreationInputTokens > 0 || stepUsage.CacheReadInputTokens > 0 {
-						e.totalUsage.Add(&stepUsage)
-					}
-				}
+			if stepUsage != nil {
+				e.totalUsage.Add(stepUsage)
 			}
 
 		case EventStepFailed:
-			errorMsg := getStringFromData(event.Data, "error")
+			var errorMsg string
+			if data, ok := event.Data.(*StepFailedData); ok {
+				errorMsg = data.Error
+			}
 			completedSteps[event.Step+"_error"] = errorMsg
 
 			// Update path state
@@ -308,8 +297,8 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 
 		case EventPathBranched:
 			// Handle path branching - create new path states
-			if newPathsData, ok := event.Data["new_paths"]; ok {
-				e.handleReplayPathBranching(event, newPathsData, pathOutputs)
+			if data, ok := event.Data.(*PathBranchedData); ok {
+				e.handleReplayPathBranching(event, data.NewPaths, pathOutputs)
 			}
 
 		case EventPathCompleted:
@@ -319,8 +308,8 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 				pathState.EndTime = event.Timestamp
 
 				// Capture final path outputs
-				if finalOutput := getStringFromData(event.Data, "final_output"); finalOutput != "" {
-					stateValues["path_"+event.Path+"_output"] = finalOutput
+				if data, ok := event.Data.(*PathCompletedData); ok && data.FinalStep != "" {
+					stateValues["path_"+event.Path+"_output"] = data.FinalStep
 				}
 			}
 
@@ -331,9 +320,9 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 				pathState.EndTime = event.Timestamp
 
 				// Capture failure reason
-				if failureReason := getStringFromData(event.Data, "failure_reason"); failureReason != "" {
-					stateValues["path_"+event.Path+"_error"] = failureReason
-					pathState.Error = fmt.Errorf("%s", failureReason)
+				if data, ok := event.Data.(*PathFailedData); ok {
+					stateValues["path_"+event.Path+"_error"] = data.Error
+					pathState.Error = fmt.Errorf("%s", data.Error)
 				}
 			}
 
@@ -341,48 +330,42 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 			e.status = ExecutionStatusCompleted
 			e.endTime = event.Timestamp
 			// Capture final execution outputs
-			if outputs, ok := event.Data["outputs"].(map[string]interface{}); ok {
-				e.outputs = outputs
-				stateValues["outputs"] = outputs
+			if data, ok := event.Data.(*ExecutionCompletedData); ok {
+				e.outputs = data.Outputs
+				stateValues["outputs"] = data.Outputs
 			}
 
 		case EventExecutionFailed:
 			e.status = ExecutionStatusFailed
 			e.endTime = event.Timestamp
-			if errorMsg := getStringFromData(event.Data, "error"); errorMsg != "" {
-				e.err = fmt.Errorf("%s", errorMsg)
-				stateValues["execution_error"] = errorMsg
+			if data, ok := event.Data.(*ExecutionFailedData); ok {
+				e.err = fmt.Errorf("%s", data.Error)
+				stateValues["execution_error"] = data.Error
 			}
 
 		case EventOperationCompleted:
-			if opID, ok := event.Data["operation_id"].(string); ok {
-				if result, ok := event.Data["result"]; ok {
-					e.operationResults[OperationID(opID)] = &OperationResult{
-						OperationID: OperationID(opID),
-						Result:      result,
-						Error:       nil,
-						ExecutedAt:  event.Timestamp,
-					}
+			if data, ok := event.Data.(*OperationCompletedData); ok {
+				e.operationResults[OperationID(data.OperationID)] = &OperationResult{
+					OperationID: OperationID(data.OperationID),
+					Result:      data.Result,
+					Error:       nil,
+					ExecutedAt:  event.Timestamp,
 				}
 			}
 
 		case EventOperationFailed:
-			if opID, ok := event.Data["operation_id"].(string); ok {
-				var err error
-				if errStr, ok := event.Data["error"].(string); ok {
-					err = fmt.Errorf("%s", errStr)
-				}
-				e.operationResults[OperationID(opID)] = &OperationResult{
-					OperationID: OperationID(opID),
+			if data, ok := event.Data.(*OperationFailedData); ok {
+				e.operationResults[OperationID(data.OperationID)] = &OperationResult{
+					OperationID: OperationID(data.OperationID),
 					Result:      nil,
-					Error:       err,
+					Error:       fmt.Errorf("%s", data.Error),
 					ExecutedAt:  event.Timestamp,
 				}
 			}
 
 		case EventStateMutated:
-			if mutations, ok := event.Data["mutations"].([]StateMutation); ok {
-				for _, mutation := range mutations {
+			if data, ok := event.Data.(*StateMutatedData); ok {
+				for _, mutation := range data.Mutations {
 					if mutation.Type == StateMutationTypeDelete {
 						delete(stateValues, mutation.Key)
 					} else if mutation.Type == StateMutationTypeSet {
@@ -410,35 +393,23 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 }
 
 // handleReplayPathBranching processes path branching during replay
-func (e *Execution) handleReplayPathBranching(event *ExecutionEvent, newPathsData interface{}, pathOutputs map[string]map[string]string) {
+func (e *Execution) handleReplayPathBranching(event *ExecutionEvent, newPaths []PathBranchInfo, pathOutputs map[string]map[string]string) {
 	parentPathOutputs := pathOutputs[event.Path]
 
-	switch pathsData := newPathsData.(type) {
-	case []interface{}:
-		for _, pathData := range pathsData {
-			if pathMap, ok := pathData.(map[string]interface{}); ok {
-				e.createReplayBranchedPath(pathMap, event.Path, parentPathOutputs, pathOutputs)
-			}
-		}
-	case map[string]interface{}:
-		e.createReplayBranchedPath(pathsData, event.Path, parentPathOutputs, pathOutputs)
-	default:
-		e.logger.Warn("unrecognized path branching data format during replay", "type", fmt.Sprintf("%T", pathsData))
+	for _, pathInfo := range newPaths {
+		e.createReplayBranchedPath(pathInfo, event.Path, parentPathOutputs, pathOutputs)
 	}
 }
 
 // createReplayBranchedPath creates a new path state during replay
-func (e *Execution) createReplayBranchedPath(pathMap map[string]interface{}, parentPathID string, parentOutputs map[string]string, pathOutputs map[string]map[string]string) {
-	pathID := getStringFromMap(pathMap, "id")
-	if pathID == "" {
+func (e *Execution) createReplayBranchedPath(pathInfo PathBranchInfo, parentPathID string, parentOutputs map[string]string, pathOutputs map[string]map[string]string) {
+	if pathInfo.ID == "" {
 		e.logger.Warn("missing path ID in branch data during replay")
 		return
 	}
 
-	currentStepName := getStringFromMap(pathMap, "current_step")
-
 	newPathState := &PathState{
-		ID:          pathID,
+		ID:          pathInfo.ID,
 		Status:      PathStatusPending,
 		CurrentStep: nil,
 		StartTime:   time.Now(), // Use current time for replay
@@ -446,26 +417,26 @@ func (e *Execution) createReplayBranchedPath(pathMap map[string]interface{}, par
 	}
 
 	// Find the current step
-	if currentStepName != "" {
-		if step, exists := e.workflow.Graph().Get(currentStepName); exists {
+	if pathInfo.CurrentStep != "" {
+		if step, exists := e.workflow.Graph().Get(pathInfo.CurrentStep); exists {
 			newPathState.CurrentStep = step
 		}
 	}
 
 	// Inherit outputs from parent path if specified
-	if inherit, ok := pathMap["inherit_outputs"].(bool); ok && inherit && parentOutputs != nil {
+	if pathInfo.InheritOutputs && parentOutputs != nil {
 		for stepName, output := range parentOutputs {
 			newPathState.StepOutputs[stepName] = output
 		}
 	}
 
-	e.paths[pathID] = newPathState
-	pathOutputs[pathID] = make(map[string]string)
+	e.paths[pathInfo.ID] = newPathState
+	pathOutputs[pathInfo.ID] = make(map[string]string)
 
 	// Copy parent outputs if inheriting
-	if inherit, ok := pathMap["inherit_outputs"].(bool); ok && inherit && parentOutputs != nil {
+	if pathInfo.InheritOutputs && parentOutputs != nil {
 		for stepName, output := range parentOutputs {
-			pathOutputs[pathID][stepName] = output
+			pathOutputs[pathInfo.ID][stepName] = output
 		}
 	}
 }
@@ -492,11 +463,13 @@ func (e *Execution) ValidateEventHistory(ctx context.Context, events []*Executio
 			}
 
 			// Validate step type if recorded
-			if expectedType := getStringFromData(event.Data, "step_type"); expectedType != "" {
-				if step.Type() != expectedType {
-					return fmt.Errorf("step %s changed type from %s to %s (event %d)",
-						event.Step, expectedType, step.Type(), i)
-				}
+			var expectedType string
+			if data, ok := event.Data.(*StepStartedData); ok {
+				expectedType = data.StepType
+			}
+			if expectedType != "" && step.Type() != expectedType {
+				return fmt.Errorf("step %s changed type from %s to %s (event %d)",
+					event.Step, expectedType, step.Type(), i)
 			}
 		}
 	}

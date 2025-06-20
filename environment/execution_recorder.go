@@ -97,11 +97,8 @@ func (r *BufferedExecutionRecorder) RecordEvent(pathID, stepName string, data Ex
 		EventType:   data.EventType(),
 		Path:        pathID,
 		Step:        stepName,
-		TypedData:   data,
+		Data:        data,
 	}
-
-	// Set the legacy Data field for backward compatibility
-	event.updateLegacyData()
 
 	r.bufferMutex.Lock()
 	r.eventBuffer = append(r.eventBuffer, event)
@@ -129,98 +126,6 @@ func (r *BufferedExecutionRecorder) Flush() error {
 	defer cancel()
 
 	return r.eventStore.AppendEvents(ctx, events)
-}
-
-// EmitEvent provides backward compatibility for legacy event emission
-func (r *BufferedExecutionRecorder) EmitEvent(eventType ExecutionEventType, pathID, stepName string, data map[string]interface{}) {
-	typedData := r.convertMapToTypedEvent(eventType, data)
-	if typedData != nil {
-		r.RecordEvent(pathID, stepName, typedData)
-	}
-}
-
-// convertMapToTypedEvent converts legacy map data to typed event data
-func (r *BufferedExecutionRecorder) convertMapToTypedEvent(eventType ExecutionEventType, data map[string]interface{}) ExecutionEventData {
-	switch eventType {
-	case EventIterationStarted:
-		result := &IterationStartedData{}
-		if iterationIndex, ok := data["iteration_index"].(int); ok {
-			result.IterationIndex = iterationIndex
-		}
-		if item, ok := data["item"]; ok {
-			result.Item = item
-		}
-		if itemKey, ok := data["item_key"].(string); ok {
-			result.ItemKey = itemKey
-		}
-		return result
-
-	case EventIterationCompleted:
-		result := &IterationCompletedData{}
-		if iterationIndex, ok := data["iteration_index"].(int); ok {
-			result.IterationIndex = iterationIndex
-		}
-		if item, ok := data["item"]; ok {
-			result.Item = item
-		}
-		if itemKey, ok := data["item_key"].(string); ok {
-			result.ItemKey = itemKey
-		}
-		if resultData, ok := data["result"]; ok {
-			result.Result = resultData
-		}
-		return result
-
-	case EventSignalReceived:
-		result := &SignalReceivedData{}
-		if signalType, ok := data["signal_type"].(string); ok {
-			result.SignalType = signalType
-		}
-		if payload, ok := data["payload"].(map[string]interface{}); ok {
-			result.Payload = payload
-		}
-		if source, ok := data["source"].(string); ok {
-			result.Source = source
-		}
-		return result
-
-	case EventVersionDecision:
-		result := &VersionDecisionData{}
-		if decisionType, ok := data["decision_type"].(string); ok {
-			result.DecisionType = decisionType
-		}
-		if selectedVersion, ok := data["selected_version"].(string); ok {
-			result.SelectedVersion = selectedVersion
-		}
-		if availableVersions, ok := data["available_versions"].([]string); ok {
-			result.AvailableVersions = availableVersions
-		}
-		if reason, ok := data["reason"].(string); ok {
-			result.Reason = reason
-		}
-		return result
-
-	case EventExecutionContinueAsNew:
-		result := &ExecutionContinueAsNewData{}
-		if newExecutionID, ok := data["new_execution_id"].(string); ok {
-			result.NewExecutionID = newExecutionID
-		}
-		if newInputs, ok := data["new_inputs"].(map[string]interface{}); ok {
-			result.NewInputs = newInputs
-		}
-		if reason, ok := data["reason"].(string); ok {
-			result.Reason = reason
-		}
-		if stateTransfer, ok := data["state_transfer"].(map[string]interface{}); ok {
-			result.StateTransfer = stateTransfer
-		}
-		return result
-
-	default:
-		// For unknown event types, we can't create typed data
-		// This should be rare and only happen during transitions
-		return nil
-	}
 }
 
 // SaveSnapshot saves an execution snapshot via the event store
