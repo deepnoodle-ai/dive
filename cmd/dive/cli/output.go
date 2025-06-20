@@ -19,12 +19,13 @@ var (
 	workflowSuccess = color.New(color.FgGreen, color.Bold)
 	workflowError   = color.New(color.FgRed, color.Bold)
 	warningStyle    = color.New(color.FgYellow, color.Bold)
-	infoStyle       = color.New(color.FgBlue)
+	infoStyle       = color.New(color.FgCyan)
 	stepStyle       = color.New(color.FgMagenta, color.Bold)
 	inputStyle      = color.New(color.FgCyan)
 	outputStyle     = color.New(color.FgGreen)
 	timeStyle       = color.New(color.FgWhite, color.Faint)
 	borderStyle     = color.New(color.FgWhite, color.Faint)
+	mutedStyle      = color.New(color.FgHiBlack)
 )
 
 const (
@@ -249,11 +250,8 @@ func (f *WorkflowFormatter) PrintWorkflowComplete(duration time.Duration) {
 
 // PrintWorkflowError displays workflow failure
 func (f *WorkflowFormatter) PrintWorkflowError(err error, duration time.Duration) {
-	fmt.Println()
-	f.printBox(fmt.Sprintf("%s %s", xmark, workflowError.Sprintf("Workflow Failed")))
-	fmt.Printf("   %s Error: %s\n", xmark, workflowError.Sprint(err.Error()))
-	fmt.Printf("   %s Time elapsed: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond*100)))
-	fmt.Println()
+	fmt.Printf("\n💥 %s (%s)\n", workflowError.Sprint("Workflow failed"), duration.Round(time.Millisecond))
+	fmt.Println(workflowError.Sprint(err))
 }
 
 // stripANSI removes ANSI escape sequences from text for length calculation
@@ -338,4 +336,21 @@ func (f *WorkflowFormatter) PrintExecutionStats(stats environment.ExecutionStats
 			stats.CompletedPaths,
 			stats.FailedPaths)
 	}
+}
+
+func (f *WorkflowFormatter) PrintExecutionID(id string) {
+	fmt.Printf("🚀 Execution ID: %s\n", id)
+}
+
+func (f *WorkflowFormatter) PrintExecutionNextSteps(id string) {
+	fmt.Printf("\n🔎 To inspect the execution, run:\n")
+	fmt.Printf("   %s\n", mutedStyle.Sprintf("dive executions show %s --events", id))
+}
+
+// Implement the environment.WorkflowPathFormatter interface
+func (f *WorkflowFormatter) OnPathStart(path *environment.PathState) {
+	// Let's not print path start events for now, it's too noisy
+}
+
+func (f *WorkflowFormatter) OnPathComplete(path *environment.PathState, err error) {
 }

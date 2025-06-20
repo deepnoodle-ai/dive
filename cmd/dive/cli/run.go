@@ -33,35 +33,6 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-// getDiveConfigDir returns the dive configuration directory, creating it if it doesn't exist
-func getDiveConfigDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %w", err)
-	}
-
-	diveDir := filepath.Join(homeDir, ".dive")
-	if err := os.MkdirAll(diveDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create dive config directory: %w", err)
-	}
-
-	return diveDir, nil
-}
-
-// getDatabasePath returns the database path, using the provided override or defaulting to ~/.dive/executions.db
-func getDatabasePath(databaseFlag string) (string, error) {
-	if databaseFlag != "" {
-		return databaseFlag, nil
-	}
-
-	diveDir, err := getDiveConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("error getting dive config directory: %v", err)
-	}
-
-	return filepath.Join(diveDir, "executions.db"), nil
-}
-
 func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databasePath string) error {
 	ctx := context.Background()
 	startTime := time.Now()
@@ -126,13 +97,13 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 	formatter := NewWorkflowFormatter()
 	formatter.PrintWorkflowHeader(wf, getUserVariables())
 
+	// Create a new event store. We don't use getEventStore because we want to
+	// be able to create the database if it doesn't exist.
 	dbPath, err := getDatabasePath(databasePath)
 	if err != nil {
 		return fmt.Errorf("error getting database path: %v", err)
 	}
-
-	eventStoreOpts := environment.DefaultSQLiteStoreOptions()
-	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, eventStoreOpts)
+	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, environment.DefaultSQLiteStoreOptions())
 	if err != nil {
 		return fmt.Errorf("error creating event store: %v", err)
 	}
@@ -153,9 +124,12 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 		return fmt.Errorf("error creating execution: %v", err)
 	}
 
+	formatter.PrintExecutionID(execution.ID())
+
 	if err := execution.Run(ctx); err != nil {
 		duration := time.Since(startTime)
 		formatter.PrintWorkflowError(err, duration)
+		formatter.PrintExecutionNextSteps(execution.ID())
 		return fmt.Errorf("error running workflow: %v", err)
 	}
 

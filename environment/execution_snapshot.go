@@ -6,6 +6,7 @@ import "time"
 type ExecutionSnapshot struct {
 	ID           string    `json:"id"`
 	WorkflowName string    `json:"workflow_name"`
+	WorkflowPath string    `json:"workflow_path"`
 	WorkflowHash string    `json:"workflow_hash"`
 	InputsHash   string    `json:"inputs_hash"`
 	Status       string    `json:"status"`

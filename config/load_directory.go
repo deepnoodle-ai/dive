@@ -59,6 +59,10 @@ func LoadDirectory(dirPath string, opts ...BuildOption) (*environment.Environmen
 			return nil, fmt.Errorf("failed to parse file %s: %w", file, err)
 		}
 
+		for i := range env.Workflows {
+			env.Workflows[i].Path = file
+		}
+
 		if merged == nil {
 			merged = env
 		} else {

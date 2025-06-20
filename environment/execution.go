@@ -35,13 +35,15 @@ const (
 
 // ExecutionOptions configures a new Execution
 type ExecutionOptions struct {
-	Workflow    *workflow.Workflow
-	Environment *Environment
-	Inputs      map[string]interface{}
-	EventStore  ExecutionEventStore
-	Logger      slogger.Logger
-	ReplayMode  bool
-	Formatter   WorkflowFormatter
+	Workflow        *workflow.Workflow
+	Environment     *Environment
+	Inputs          map[string]interface{}
+	EventStore      ExecutionEventStore
+	Logger          slogger.Logger
+	ReplayMode      bool
+	Formatter       WorkflowFormatter
+	ExecutionID     string
+	InitialSnapshot *ExecutionSnapshot
 }
 
 // Execution represents a deterministic workflow execution using operations
@@ -106,7 +108,10 @@ func NewExecution(opts ExecutionOptions) (*Execution, error) {
 		opts.Logger = slogger.DefaultLogger
 	}
 
-	executionID := NewExecutionID()
+	executionID := opts.ExecutionID
+	if executionID == "" {
+		executionID = NewExecutionID()
+	}
 
 	recorder := NewBufferedExecutionRecorder(executionID, opts.EventStore, 10)
 	recorder.SetReplayMode(opts.ReplayMode)
@@ -134,7 +139,7 @@ func NewExecution(opts ExecutionOptions) (*Execution, error) {
 		}
 	}
 
-	return &Execution{
+	exec := &Execution{
 		id:               executionID,
 		workflow:         opts.Workflow,
 		environment:      opts.Environment,
@@ -150,7 +155,15 @@ func NewExecution(opts ExecutionOptions) (*Execution, error) {
 		pathUpdates:      make(chan pathUpdate, 100),
 		logger:           opts.Logger.With("execution_id", executionID),
 		formatter:        opts.Formatter,
-	}, nil
+	}
+
+	if opts.InitialSnapshot != nil {
+		if err := exec.loadFromSnapshot(opts.InitialSnapshot); err != nil {
+			return nil, fmt.Errorf("failed to load from snapshot: %w", err)
+		}
+	}
+
+	return exec, nil
 }
 
 // NewExecutionFromReplay creates a new execution and loads it from recorded events
@@ -620,6 +633,7 @@ func (e *Execution) saveSnapshot(ctx context.Context) error {
 	snapshot := &ExecutionSnapshot{
 		ID:           e.id,
 		WorkflowName: e.workflow.Name(),
+		WorkflowPath: e.workflow.Path(),
 		WorkflowHash: workflowHash,
 		InputsHash:   HashMapToString(e.inputs),
 		Status:       string(e.status),
@@ -1769,4 +1783,26 @@ func (e *Execution) createContentSnapshot(ctx context.Context, content []llm.Con
 		Fingerprint: combinedFingerprint,
 		Content:     content,
 	}, nil
+}
+
+// loadFromSnapshot loads the execution state from a snapshot
+func (e *Execution) loadFromSnapshot(snapshot *ExecutionSnapshot) error {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	e.status = ExecutionStatus(snapshot.Status)
+	e.outputs = snapshot.Outputs
+	e.startTime = snapshot.StartTime
+
+	// We need to reconstruct operation results, path states, and internal state
+	// from the event history, as the snapshot doesn't contain everything.
+	if e.recorder != nil {
+		events, err := e.recorder.GetEventHistory(context.Background(), e.id)
+		if err != nil {
+			return fmt.Errorf("could not get event history for snapshot load: %w", err)
+		}
+		return e.ReplayFromEvents(context.Background(), events)
+	}
+
+	return nil
 }

@@ -184,6 +184,7 @@ type Workflow struct {
 	Output      *Output   `yaml:"Output,omitempty" json:"Output,omitempty"`
 	Triggers    []Trigger `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
 	Steps       []Step    `yaml:"Steps,omitempty" json:"Steps,omitempty"`
+	Path        string    `yaml:"-" json:"-"`
 }
 
 // Trigger represents a trigger definition

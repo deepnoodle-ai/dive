@@ -4,32 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/diveagents/dive/config"
 	"github.com/diveagents/dive/environment"
+	"github.com/diveagents/dive/slogger"
 	"github.com/spf13/cobra"
 )
-
-// getEventStore creates an event store instance for the given database path
-func getEventStore(databaseFlag string) (environment.ExecutionEventStore, error) {
-	dbPath, err := getDatabasePath(databaseFlag)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if database exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("database not found: %s\nRun some workflows with 'dive run' to create execution history", dbPath)
-	}
-
-	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, environment.DefaultSQLiteStoreOptions())
-	if err != nil {
-		return nil, fmt.Errorf("error opening database: %v", err)
-	}
-
-	return eventStore, nil
-}
 
 func listExecutions(databaseFlag string, status, workflowName string, limit int) error {
 	eventStore, err := getEventStore(databaseFlag)
@@ -292,6 +275,100 @@ func truncate(s string, length int) string {
 	return s[:length-3] + "..."
 }
 
+func resumeExecution(executionID, databasePath string, logLevel slogger.LogLevel) error {
+	ctx := context.Background()
+	startTime := time.Now()
+
+	eventStore, err := getEventStore(databasePath)
+	if err != nil {
+		return err
+	}
+
+	snapshot, err := eventStore.GetSnapshot(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("error getting execution snapshot: %v", err)
+	}
+
+	if snapshot.Status == "completed" {
+		return fmt.Errorf("cannot resume a completed execution")
+	}
+
+	// For now, we need to load the workflow from the original path.
+	// This assumes the file is still available at the same location.
+	// A future improvement could be to store the workflow definition itself.
+	if snapshot.WorkflowPath == "" {
+		return fmt.Errorf("cannot resume execution: workflow path not recorded")
+	}
+
+	fi, err := os.Stat(snapshot.WorkflowPath)
+	if err != nil {
+		return fmt.Errorf("error accessing workflow path '%s': %v", snapshot.WorkflowPath, err)
+	}
+
+	configDir := snapshot.WorkflowPath
+	basePath := ""
+	if !fi.IsDir() {
+		configDir = filepath.Dir(snapshot.WorkflowPath)
+		basePath = filepath.Dir(snapshot.WorkflowPath)
+	} else {
+		basePath = snapshot.WorkflowPath
+	}
+
+	var logger slogger.Logger
+	buildOpts := []config.BuildOption{}
+	if logLevel != 0 {
+		logger = slogger.New(logLevel)
+		buildOpts = append(buildOpts, config.WithLogger(logger))
+	}
+	env, err := config.LoadDirectory(configDir, append(buildOpts, config.WithBasePath(basePath))...)
+	if err != nil {
+		return fmt.Errorf("error loading environment from '%s': %v", configDir, err)
+	}
+	if err := env.Start(ctx); err != nil {
+		return fmt.Errorf("error starting environment: %v", err)
+	}
+	defer env.Stop(ctx)
+
+	wf, err := env.GetWorkflow(snapshot.WorkflowName)
+	if err != nil {
+		return fmt.Errorf("error getting workflow '%s': %v", snapshot.WorkflowName, err)
+	}
+
+	formatter := NewWorkflowFormatter()
+	fmt.Printf("Resuming execution %s for workflow %s...\n", executionID, wf.Name())
+
+	execution, err := environment.NewExecution(environment.ExecutionOptions{
+		Workflow:        wf,
+		Environment:     env,
+		Inputs:          snapshot.Inputs,
+		EventStore:      eventStore,
+		Logger:          logger,
+		ReplayMode:      true,
+		ExecutionID:     executionID,
+		Formatter:       formatter,
+		InitialSnapshot: snapshot,
+	})
+	if err != nil {
+		duration := time.Since(startTime)
+		formatter.PrintWorkflowError(err, duration)
+		return fmt.Errorf("error creating execution for resume: %v", err)
+	}
+
+	formatter.PrintExecutionID(execution.ID())
+
+	if err := execution.Run(ctx); err != nil {
+		duration := time.Since(startTime)
+		formatter.PrintWorkflowError(err, duration)
+		formatter.PrintExecutionNextSteps(execution.ID())
+		return fmt.Errorf("error resuming workflow: %v", err)
+	}
+
+	duration := time.Since(startTime)
+	formatter.PrintWorkflowComplete(duration)
+
+	return nil
+}
+
 // Executions command
 var executionsCmd = &cobra.Command{
 	Use:   "executions",
@@ -370,6 +447,23 @@ var cleanupCmd = &cobra.Command{
 	},
 }
 
+// Resume execution
+var resumeCmd = &cobra.Command{
+	Use:   "resume <execution-id>",
+	Short: "Resume a failed or pending execution",
+	Long:  "Resumes a workflow from its last known state based on the execution history",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		executionID := args[0]
+		databasePath, _ := cmd.Flags().GetString("database")
+
+		if err := resumeExecution(executionID, databasePath, getLogLevel()); err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(executionsCmd)
 
@@ -378,6 +472,7 @@ func init() {
 	executionsCmd.AddCommand(showCmd)
 	executionsCmd.AddCommand(deleteCmd)
 	executionsCmd.AddCommand(cleanupCmd)
+	executionsCmd.AddCommand(resumeCmd)
 
 	// Global flags for all execution commands
 	executionsCmd.PersistentFlags().String("database", "", "Path to SQLite database (default: ~/.dive/executions.db)")

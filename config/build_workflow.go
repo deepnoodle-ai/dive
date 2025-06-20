@@ -132,6 +132,7 @@ func buildWorkflow(
 	return workflow.New(workflow.Options{
 		Name:        workflowDef.Name,
 		Description: workflowDef.Description,
+		Path:        workflowDef.Path,
 		Inputs:      inputs,
 		Output:      output,
 		Steps:       steps,
