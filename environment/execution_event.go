@@ -56,10 +56,7 @@ const (
 	EventTimeAccessed    ExecutionEventType = "time_accessed"
 	EventRandomGenerated ExecutionEventType = "random_generated"
 
-	// Script state management events
-	EventVariableChanged    ExecutionEventType = "variable_changed"
-	EventTemplateEvaluated  ExecutionEventType = "template_evaluated"
-	EventConditionEvaluated ExecutionEventType = "condition_evaluated"
+	// Script state management events (removed unused events)
 	EventIterationStarted   ExecutionEventType = "iteration_started"
 	EventIterationCompleted ExecutionEventType = "iteration_completed"
 )
@@ -315,50 +312,6 @@ func (d *RandomGeneratedData) Validate() error {
 	}
 	if d.Value == nil {
 		return fmt.Errorf("value is required")
-	}
-	return nil
-}
-
-// VariableChangedData contains data for variable changed events
-type VariableChangedData struct {
-	VariableName string      `json:"variable_name"`
-	OldValue     interface{} `json:"old_value"`
-	NewValue     interface{} `json:"new_value"`
-	Existed      bool        `json:"existed"`
-}
-
-func (d *VariableChangedData) EventType() ExecutionEventType { return EventVariableChanged }
-func (d *VariableChangedData) Validate() error {
-	if d.VariableName == "" {
-		return fmt.Errorf("variable_name is required")
-	}
-	return nil
-}
-
-// TemplateEvaluatedData contains data for template evaluated events
-type TemplateEvaluatedData struct {
-	Template string `json:"template"`
-	Result   string `json:"result"`
-}
-
-func (d *TemplateEvaluatedData) EventType() ExecutionEventType { return EventTemplateEvaluated }
-func (d *TemplateEvaluatedData) Validate() error {
-	if d.Template == "" {
-		return fmt.Errorf("template is required")
-	}
-	return nil
-}
-
-// ConditionEvaluatedData contains data for condition evaluated events
-type ConditionEvaluatedData struct {
-	Condition string `json:"condition"`
-	Result    bool   `json:"result"`
-}
-
-func (d *ConditionEvaluatedData) EventType() ExecutionEventType { return EventConditionEvaluated }
-func (d *ConditionEvaluatedData) Validate() error {
-	if d.Condition == "" {
-		return fmt.Errorf("condition is required")
 	}
 	return nil
 }
@@ -653,42 +606,6 @@ func (e *ExecutionEvent) convertLegacyData() (ExecutionEventData, error) {
 		}
 		return data, nil
 
-	case EventVariableChanged:
-		data := &VariableChangedData{}
-		if variableName, ok := e.Data["variable_name"].(string); ok {
-			data.VariableName = variableName
-		}
-		if oldValue, ok := e.Data["old_value"]; ok {
-			data.OldValue = oldValue
-		}
-		if newValue, ok := e.Data["new_value"]; ok {
-			data.NewValue = newValue
-		}
-		if existed, ok := e.Data["existed"].(bool); ok {
-			data.Existed = existed
-		}
-		return data, nil
-
-	case EventTemplateEvaluated:
-		data := &TemplateEvaluatedData{}
-		if template, ok := e.Data["template"].(string); ok {
-			data.Template = template
-		}
-		if result, ok := e.Data["result"].(string); ok {
-			data.Result = result
-		}
-		return data, nil
-
-	case EventConditionEvaluated:
-		data := &ConditionEvaluatedData{}
-		if condition, ok := e.Data["condition"].(string); ok {
-			data.Condition = condition
-		}
-		if result, ok := e.Data["result"].(bool); ok {
-			data.Result = result
-		}
-		return data, nil
-
 	case EventIterationStarted:
 		data := &IterationStartedData{}
 		if iterationIndex, ok := e.Data["iteration_index"].(int); ok {
@@ -858,17 +775,7 @@ func (e *ExecutionEvent) updateLegacyData() {
 		e.Data["seed"] = data.Seed
 		e.Data["value"] = data.Value
 		e.Data["method"] = data.Method
-	case *VariableChangedData:
-		e.Data["variable_name"] = data.VariableName
-		e.Data["old_value"] = data.OldValue
-		e.Data["new_value"] = data.NewValue
-		e.Data["existed"] = data.Existed
-	case *TemplateEvaluatedData:
-		e.Data["template"] = data.Template
-		e.Data["result"] = data.Result
-	case *ConditionEvaluatedData:
-		e.Data["condition"] = data.Condition
-		e.Data["result"] = data.Result
+
 	case *IterationStartedData:
 		e.Data["iteration_index"] = data.IterationIndex
 		e.Data["item"] = data.Item

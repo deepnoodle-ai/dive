@@ -406,39 +406,7 @@ type RandomGeneratedData struct {
 
 #### 7. Script State Management Events
 
-These events track scripting operations within workflow steps, providing visibility into template evaluation, condition checking, and iteration.
-
-**`variable_changed`** - Emitted when a script variable is modified
-```go
-type VariableChangedData struct {
-    VariableName string      `json:"variable_name"` // Name of the variable that changed
-    OldValue     interface{} `json:"old_value"`     // Previous value (nil if variable didn't exist)
-    NewValue     interface{} `json:"new_value"`     // New value being set
-    Existed      bool        `json:"existed"`       // Whether the variable existed before this change
-}
-```
-*Occurs*: When script execution modifies variables in the workflow state.
-*Purpose*: Tracks fine-grained variable changes for debugging script logic.
-
-**`template_evaluated`** - Emitted when a template is processed and evaluated
-```go
-type TemplateEvaluatedData struct {
-    Template string `json:"template"` // The template string that was evaluated
-    Result   string `json:"result"`   // The result after template evaluation
-}
-```
-*Occurs*: When workflow steps use templating to generate dynamic content.
-*Purpose*: Records template processing for debugging and replay consistency.
-
-**`condition_evaluated`** - Emitted when a conditional expression is evaluated
-```go
-type ConditionEvaluatedData struct {
-    Condition string `json:"condition"` // The condition expression that was evaluated
-    Result    bool   `json:"result"`    // The boolean result of the condition
-}
-```
-*Occurs*: When workflow conditional logic (if/else, while loops, etc.) evaluates conditions.
-*Purpose*: Records condition evaluation results for debugging branching logic.
+These events track scripting operations within workflow steps, providing visibility into iteration loops.
 
 **`iteration_started`** - Emitted when a loop iteration begins
 ```go

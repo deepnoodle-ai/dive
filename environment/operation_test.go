@@ -189,12 +189,3 @@ func TestOperationDeterministicID(t *testing.T) {
 	// ID should be different
 	require.NotEqual(t, op1.ID, op3.ID)
 }
-
-// testError is a simple error type for testing
-type testError struct {
-	message string
-}
-
-func (e *testError) Error() string {
-	return e.message
-}

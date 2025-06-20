@@ -160,17 +160,13 @@ func NewExecutionFromReplay(opts ExecutionOptions) (*Execution, error) {
 	if opts.EventStore == nil {
 		return nil, fmt.Errorf("event store is required for replay")
 	}
-
 	execution, err := NewExecution(opts)
 	if err != nil {
 		return nil, err
 	}
-
-	// Load and replay events
 	if err := execution.LoadFromEvents(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to load events for replay: %w", err)
 	}
-
 	return execution, nil
 }
 
@@ -506,7 +502,11 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 	}
 
 	// Record operation started
-	e.recorder.RecordOperationStarted(op.PathID, string(op.ID), op.Type, op.Parameters)
+	e.recorder.RecordEvent(op.PathID, string(op.ID), &OperationStartedData{
+		OperationID:   string(op.ID),
+		OperationType: op.Type,
+		Parameters:    op.Parameters,
+	})
 
 	// Execute the operation
 	startTime := time.Now()
@@ -515,9 +515,19 @@ func (e *Execution) ExecuteOperation(ctx context.Context, op Operation, fn func(
 
 	// Record operation completion
 	if err != nil {
-		e.recorder.RecordOperationFailed(op.PathID, string(op.ID), op.Type, duration, err)
+		e.recorder.RecordEvent(op.PathID, string(op.ID), &OperationFailedData{
+			OperationID:   string(op.ID),
+			OperationType: op.Type,
+			Duration:      duration,
+			Error:         err.Error(),
+		})
 	} else {
-		e.recorder.RecordOperationCompleted(op.PathID, string(op.ID), op.Type, duration, result)
+		e.recorder.RecordEvent(op.PathID, string(op.ID), &OperationCompletedData{
+			OperationID:   string(op.ID),
+			OperationType: op.Type,
+			Duration:      duration,
+			Result:        result,
+		})
 	}
 
 	// Cache result for potential replay
@@ -548,19 +558,24 @@ func (e *Execution) Run(ctx context.Context) error {
 	e.mutex.Unlock()
 
 	// Record execution started
-	e.recorder.RecordExecutionStarted(e.workflow.Name(), e.inputs)
+	e.recorder.RecordEvent("main", "", &ExecutionStartedData{
+		WorkflowName: e.workflow.Name(),
+		Inputs:       e.inputs,
+	})
 
 	// Start with initial path
 	startStep := e.workflow.Start()
 	initialPath := &executionPath{
-		id:          "start",
+		id:          "main",
 		currentStep: startStep,
 	}
 
 	e.addPath(initialPath)
 
 	// Record path started
-	e.recorder.RecordPathStarted(initialPath.id, startStep.Name())
+	e.recorder.RecordEvent(initialPath.id, startStep.Name(), &PathStartedData{
+		CurrentStep: startStep.Name(),
+	})
 
 	// Start parallel execution
 	e.doneWg.Add(1)
@@ -575,11 +590,15 @@ func (e *Execution) Run(ctx context.Context) error {
 	if err != nil {
 		e.status = ExecutionStatusFailed
 		e.err = err
-		e.recorder.RecordExecutionFailed(err)
+		e.recorder.RecordEvent(e.workflow.Name(), "", &ExecutionFailedData{
+			Error: err.Error(),
+		})
 		e.logger.Error("workflow execution failed", "error", err)
 	} else {
 		e.status = ExecutionStatusCompleted
-		e.recorder.RecordExecutionCompleted(e.outputs)
+		e.recorder.RecordEvent(e.workflow.Name(), "", &ExecutionCompletedData{
+			Outputs: e.outputs,
+		})
 		e.logger.Info("workflow execution completed")
 	}
 	e.mutex.Unlock()
@@ -721,10 +740,14 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		// Execute the step with pathID
 		result, err := e.executeStep(ctx, currentStep, path.id)
 		if err != nil {
-			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
+			e.recorder.RecordEvent(path.id, currentStep.Name(), &StepFailedData{
+				Error: err.Error(),
+			})
 			logger.Error("step failed", "step", currentStep.Name(), "error", err)
 
-			e.recorder.RecordPathFailed(path.id, err)
+			e.recorder.RecordEvent(path.id, "", &PathFailedData{
+				Error: err.Error(),
+			})
 			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
@@ -732,8 +755,12 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		// Handle path branching
 		newPaths, err := e.handlePathBranching(ctx, currentStep, path.id)
 		if err != nil {
-			e.recorder.RecordStepFailed(path.id, currentStep.Name(), err)
-			e.recorder.RecordPathFailed(path.id, err)
+			e.recorder.RecordEvent(path.id, currentStep.Name(), &StepFailedData{
+				Error: err.Error(),
+			})
+			e.recorder.RecordEvent(path.id, "", &PathFailedData{
+				Error: err.Error(),
+			})
 			e.pathUpdates <- pathUpdate{pathID: path.id, err: err}
 			return
 		}
@@ -748,8 +775,9 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 					InheritOutputs: true,
 				}
 			}
-
-			e.recorder.RecordPathBranched(path.id, currentStep.Name(), branchInfo)
+			e.recorder.RecordEvent(path.id, currentStep.Name(), &PathBranchedData{
+				NewPaths: branchInfo,
+			})
 		}
 
 		// Path is complete if there are no new paths or multiple paths (branching)
@@ -770,7 +798,9 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 		}
 
 		if isDone {
-			e.recorder.RecordPathCompleted(path.id, currentStep.Name())
+			e.recorder.RecordEvent(path.id, currentStep.Name(), &PathCompletedData{
+				FinalStep: currentStep.Name(),
+			})
 			logger.Info("path completed", "step", currentStep.Name())
 			return
 		}
@@ -853,7 +883,10 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	}
 
 	// Record step started
-	e.recorder.RecordStepStarted(pathID, step.Name(), step.Type(), step.Parameters())
+	e.recorder.RecordEvent(pathID, step.Name(), &StepStartedData{
+		StepType:   step.Type(),
+		StepParams: step.Parameters(),
+	})
 
 	var result *dive.StepResult
 	var err error
@@ -904,7 +937,10 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 	}
 
 	// Record step completed
-	e.recorder.RecordStepCompleted(pathID, step.Name(), result.Content, step.Store())
+	e.recorder.RecordEvent(pathID, step.Name(), &StepCompletedData{
+		Output:         result.Content,
+		StoredVariable: step.Store(),
+	})
 
 	return result, nil
 }

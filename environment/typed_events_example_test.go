@@ -6,60 +6,6 @@ import (
 	"time"
 )
 
-// TestTypedEventsUsage demonstrates how to use the new typed event system
-func TestTypedEventsUsage(t *testing.T) {
-	// Create an event store and recorder
-	eventStore := &mockEventStore{events: []*ExecutionEvent{}}
-	recorder := NewBufferedExecutionRecorder("exec-123", eventStore, 5)
-
-	// Using typed events (recommended)
-	stepStartedData := &StepStartedData{
-		StepType:   "prompt",
-		StepParams: map[string]interface{}{"agent": "assistant"},
-	}
-	recorder.RecordEvent("path-1", "step-1", stepStartedData)
-
-	// Even better: using convenience methods
-	recorder.RecordStepStarted("path-1", "step-1", "prompt", map[string]interface{}{"agent": "assistant"})
-
-	// Record a complex event with multiple paths
-	recorder.RecordPathBranched("path-1", "decision-step", []PathBranchInfo{
-		{
-			ID:             "path-1-a",
-			CurrentStep:    "branch-a-step",
-			InheritOutputs: true,
-		},
-		{
-			ID:             "path-1-b",
-			CurrentStep:    "branch-b-step",
-			InheritOutputs: false,
-		},
-	})
-
-	// Record operation events with precise typing
-	recorder.RecordOperationStarted("path-1", "op-456", "agent_response", map[string]interface{}{
-		"agent":  "assistant",
-		"prompt": "Hello, world!",
-	})
-
-	recorder.RecordOperationCompleted(
-		"path-1",
-		"op-456",
-		"agent_response",
-		2*time.Second,
-		"Hello! How can I help you today?",
-	)
-
-	// Flush events to store
-	recorder.Flush()
-
-	if len(eventStore.events) != 5 {
-		t.Errorf("Expected 5 events, got %d", len(eventStore.events))
-	}
-
-	t.Logf("Successfully recorded %d events with type safety", len(eventStore.events))
-}
-
 // TestTypeSafetyBenefits demonstrates the benefits of typed events
 func TestTypeSafetyBenefits(t *testing.T) {
 	eventStore := &mockEventStore{events: []*ExecutionEvent{}}
@@ -113,7 +59,10 @@ func TestBackwardCompatibility(t *testing.T) {
 	recorder := NewBufferedExecutionRecorder("exec-789", eventStore, 1)
 
 	// Record an event using convenience method
-	recorder.RecordExecutionStarted("test-workflow", map[string]interface{}{"query": "Hello"})
+	recorder.RecordEvent("path-1", "step-1", &ExecutionStartedData{
+		WorkflowName: "test-workflow",
+		Inputs:       map[string]interface{}{"query": "Hello"},
+	})
 
 	recorder.Flush()
 

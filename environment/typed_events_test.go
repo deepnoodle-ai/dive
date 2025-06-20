@@ -216,7 +216,10 @@ func TestBufferedExecutionRecorderTypedEvents(t *testing.T) {
 		eventStore.events = []*ExecutionEvent{}
 
 		// Test convenience method
-		recorder.RecordExecutionStarted("test-workflow", map[string]interface{}{"input": "test"})
+		recorder.RecordEvent("path-1", "step-1", &ExecutionStartedData{
+			WorkflowName: "test-workflow",
+			Inputs:       map[string]interface{}{"input": "test"},
+		})
 
 		err := recorder.Flush()
 		require.NoError(t, err)
