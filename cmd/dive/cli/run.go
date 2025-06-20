@@ -40,7 +40,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 	// Check if path is a directory or file
 	fi, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("error accessing path: %v", err)
+		return fmt.Errorf("❌ Cannot access workflow path '%s': %v%s", path, err, suggestWorkflowPaths())
 	}
 
 	configDir := path
@@ -74,7 +74,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 	}
 	env, err := config.LoadDirectory(configDir, append(buildOpts, config.WithBasePath(basePath))...)
 	if err != nil {
-		return fmt.Errorf("error loading environment: %v", err)
+		return fmt.Errorf("❌ Failed to load workflow configuration: %v\n\n💡 Check that your YAML syntax is correct and all required fields are present", err)
 	}
 	if err := env.Start(ctx); err != nil {
 		return fmt.Errorf("error starting environment: %v", err)
@@ -84,14 +84,29 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 	if workflowName == "" {
 		workflows := env.Workflows()
 		if len(workflows) != 1 {
-			return fmt.Errorf("you must specify a workflow name")
+			if len(workflows) == 0 {
+				return fmt.Errorf("❌ No workflows found in the configuration\n\n💡 Make sure your YAML file contains a workflow definition")
+			}
+			var workflowNames []string
+			for _, wf := range workflows {
+				workflowNames = append(workflowNames, wf.Name())
+			}
+			return fmt.Errorf("❌ Multiple workflows found. Specify which one to run with --workflow:\n   Available workflows: %v", workflowNames)
 		}
 		workflowName = workflows[0].Name()
 	}
 
 	wf, err := env.GetWorkflow(workflowName)
 	if err != nil {
-		return fmt.Errorf("error getting workflow: %v", err)
+		workflows := env.Workflows()
+		var workflowNames []string
+		for _, wf := range workflows {
+			workflowNames = append(workflowNames, wf.Name())
+		}
+		if len(workflowNames) > 0 {
+			return fmt.Errorf("❌ Workflow '%s' not found\n\n💡 Available workflows: %v", workflowName, workflowNames)
+		}
+		return fmt.Errorf("❌ Workflow '%s' not found: %v", workflowName, err)
 	}
 
 	formatter := NewWorkflowFormatter()

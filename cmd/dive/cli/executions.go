@@ -15,6 +15,11 @@ import (
 )
 
 func listExecutions(databaseFlag string, status, workflowName string, limit int) error {
+	// Validate status filter
+	if err := validateExecutionStatus(status); err != nil {
+		return err
+	}
+
 	eventStore, err := getEventStore(databaseFlag)
 	if err != nil {
 		return err
@@ -54,17 +59,7 @@ func listExecutions(databaseFlag string, status, workflowName string, limit int)
 			startTime = exec.StartTime.Format("2006-01-02 15:04:05")
 		}
 
-		statusText := exec.Status
-		switch statusText {
-		case "completed":
-			statusText = successStyle.Sprint("✓ " + statusText)
-		case "failed":
-			statusText = errorStyle.Sprint("✗ " + statusText)
-		case "running":
-			statusText = warningStyle.Sprint("⚠ " + statusText)
-		default:
-			statusText = infoStyle.Sprint("• " + statusText)
-		}
+		statusText := formatExecutionStatus(exec.Status)
 
 		fmt.Printf("%-40s %-20s %-12s %-20s %-20s\n",
 			exec.ID,
@@ -96,18 +91,7 @@ func showExecution(databaseFlag, executionID string, showEvents bool) error {
 	fmt.Printf("ID:           %s\n", snapshot.ID)
 	fmt.Printf("Workflow:     %s\n", snapshot.WorkflowName)
 
-	statusText := snapshot.Status
-	switch statusText {
-	case "completed":
-		statusText = successStyle.Sprint("✓ " + statusText)
-	case "failed":
-		statusText = errorStyle.Sprint("✗ " + statusText)
-	case "running":
-		statusText = warningStyle.Sprint("⚠ " + statusText)
-	default:
-		statusText = infoStyle.Sprint("• " + statusText)
-	}
-	fmt.Printf("Status:       %s\n", statusText)
+	fmt.Printf("Status:       %s\n", formatExecutionStatus(snapshot.Status))
 
 	if !snapshot.StartTime.IsZero() {
 		fmt.Printf("Started:      %s\n", snapshot.StartTime.Format("2006-01-02 15:04:05"))
@@ -191,11 +175,8 @@ func deleteExecution(databaseFlag, executionID string, confirm bool) error {
 	}
 
 	if !confirm {
-		fmt.Printf("Are you sure you want to delete execution %s? [y/N]: ", executionID)
-		var response string
-		fmt.Scanln(&response)
-		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
-			fmt.Println("Deletion cancelled.")
+		if !confirmAction("delete execution", executionID) {
+			fmt.Println("❌ Deletion cancelled.")
 			return nil
 		}
 	}
@@ -247,11 +228,8 @@ func cleanupExecutions(databaseFlag string, olderThanDays int, confirm bool) err
 	}
 
 	if !confirm {
-		fmt.Printf("\nDelete these %d executions? [y/N]: ", len(toDelete))
-		var response string
-		fmt.Scanln(&response)
-		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
-			fmt.Println("Cleanup cancelled.")
+		if !confirmAction("delete", fmt.Sprintf("these %d executions", len(toDelete))) {
+			fmt.Println("❌ Cleanup cancelled.")
 			return nil
 		}
 	}
@@ -290,19 +268,19 @@ func resumeExecution(executionID, databasePath string, logLevel slogger.LogLevel
 	}
 
 	if snapshot.Status == "completed" {
-		return fmt.Errorf("cannot resume a completed execution")
+		return fmt.Errorf("❌ Cannot resume a completed execution\n\n💡 Tip: Use 'dive executions show %s' to view the results", executionID)
 	}
 
 	// For now, we need to load the workflow from the original path.
 	// This assumes the file is still available at the same location.
 	// A future improvement could be to store the workflow definition itself.
 	if snapshot.WorkflowPath == "" {
-		return fmt.Errorf("cannot resume execution: workflow path not recorded")
+		return fmt.Errorf("❌ Cannot resume execution: workflow path not recorded\n\n💡 This execution was created with an older version of Dive.\n   Try running the workflow again with 'dive run <workflow-path>'%s", suggestWorkflowPaths())
 	}
 
 	fi, err := os.Stat(snapshot.WorkflowPath)
 	if err != nil {
-		return fmt.Errorf("error accessing workflow path '%s': %v", snapshot.WorkflowPath, err)
+		return fmt.Errorf("❌ Cannot access workflow file '%s': %v\n\n💡 The workflow file may have been moved or deleted.\n   Make sure the file exists at the original location, or run the workflow again%s", snapshot.WorkflowPath, err, suggestWorkflowPaths())
 	}
 
 	configDir := snapshot.WorkflowPath
@@ -331,11 +309,26 @@ func resumeExecution(executionID, databasePath string, logLevel slogger.LogLevel
 
 	wf, err := env.GetWorkflow(snapshot.WorkflowName)
 	if err != nil {
-		return fmt.Errorf("error getting workflow '%s': %v", snapshot.WorkflowName, err)
+		return fmt.Errorf("❌ Workflow '%s' not found: %v\n\n💡 The workflow may have been renamed or removed since this execution was created", snapshot.WorkflowName, err)
+	}
+
+	// Validate that the workflow hasn't changed significantly since the execution was started
+	hasher := environment.NewBasicWorkflowHasher()
+	workflowHash, err := hasher.HashWorkflow(wf)
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Unable to verify if workflow has changed: %v\n", err)
+	} else if snapshot.WorkflowHash != "" && workflowHash != snapshot.WorkflowHash {
+		fmt.Printf("⚠️  Warning: The workflow definition has changed since this execution was started.\n")
+		fmt.Printf("   Original hash: %s\n", snapshot.WorkflowHash)
+		fmt.Printf("   Current hash:  %s\n", workflowHash)
+		fmt.Printf("\n")
+		if !confirmAction("resume with changed workflow", "this execution") {
+			return fmt.Errorf("❌ Resume cancelled due to workflow changes")
+		}
 	}
 
 	formatter := NewWorkflowFormatter()
-	fmt.Printf("Resuming execution %s for workflow %s...\n", executionID, wf.Name())
+	fmt.Printf("🔄 Resuming execution %s for workflow %s...\n", executionID, wf.Name())
 
 	execution, err := environment.NewExecution(environment.ExecutionOptions{
 		Workflow:        wf,
@@ -365,6 +358,93 @@ func resumeExecution(executionID, databasePath string, logLevel slogger.LogLevel
 
 	duration := time.Since(startTime)
 	formatter.PrintWorkflowComplete(duration)
+
+	return nil
+}
+
+func showExecutionStats(databaseFlag string) error {
+	eventStore, err := getEventStore(databaseFlag)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	// Get all executions to calculate statistics
+	executions, err := eventStore.ListExecutions(ctx, environment.ExecutionFilter{
+		Limit: 1000, // Get a reasonable number for stats
+	})
+	if err != nil {
+		return fmt.Errorf("error listing executions: %v", err)
+	}
+
+	if len(executions) == 0 {
+		fmt.Println("📊 No executions found.")
+		return nil
+	}
+
+	// Calculate statistics
+	statusCounts := make(map[string]int)
+	workflowCounts := make(map[string]int)
+	var totalDuration time.Duration
+	var completedCount int
+
+	for _, exec := range executions {
+		statusCounts[exec.Status]++
+		workflowCounts[exec.WorkflowName]++
+
+		if !exec.EndTime.IsZero() && !exec.StartTime.IsZero() {
+			totalDuration += exec.EndTime.Sub(exec.StartTime)
+			completedCount++
+		}
+	}
+
+	// Print statistics
+	fmt.Printf("📊 Execution Statistics\n\n")
+
+	fmt.Printf("📈 Total Executions: %d\n", len(executions))
+
+	fmt.Printf("\n📋 Status Breakdown:\n")
+	for status, count := range statusCounts {
+		percentage := float64(count) / float64(len(executions)) * 100
+		fmt.Printf("   %s: %d (%.1f%%)\n", formatExecutionStatus(status), count, percentage)
+	}
+
+	if completedCount > 0 {
+		avgDuration := totalDuration / time.Duration(completedCount)
+		fmt.Printf("\n⏱️  Average Duration: %s\n", avgDuration.Round(time.Millisecond))
+	}
+
+	fmt.Printf("\n🔧 Most Used Workflows:\n")
+	// Sort workflows by usage count
+	type workflowUsage struct {
+		name  string
+		count int
+	}
+	var workflows []workflowUsage
+	for name, count := range workflowCounts {
+		workflows = append(workflows, workflowUsage{name, count})
+	}
+
+	// Simple sort by count (descending)
+	for i := 0; i < len(workflows)-1; i++ {
+		for j := i + 1; j < len(workflows); j++ {
+			if workflows[j].count > workflows[i].count {
+				workflows[i], workflows[j] = workflows[j], workflows[i]
+			}
+		}
+	}
+
+	// Show top 5 workflows
+	limit := 5
+	if len(workflows) < limit {
+		limit = len(workflows)
+	}
+	for i := 0; i < limit; i++ {
+		wf := workflows[i]
+		percentage := float64(wf.count) / float64(len(executions)) * 100
+		fmt.Printf("   %s: %d executions (%.1f%%)\n", wf.name, wf.count, percentage)
+	}
 
 	return nil
 }
@@ -464,6 +544,21 @@ var resumeCmd = &cobra.Command{
 	},
 }
 
+// Stats command
+var statsCmd = &cobra.Command{
+	Use:   "stats",
+	Short: "Show execution statistics",
+	Long:  "Display statistical information about workflow executions including status breakdown and usage patterns",
+	Run: func(cmd *cobra.Command, args []string) {
+		databasePath, _ := cmd.Flags().GetString("database")
+
+		if err := showExecutionStats(databasePath); err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(executionsCmd)
 
@@ -473,6 +568,7 @@ func init() {
 	executionsCmd.AddCommand(deleteCmd)
 	executionsCmd.AddCommand(cleanupCmd)
 	executionsCmd.AddCommand(resumeCmd)
+	executionsCmd.AddCommand(statsCmd)
 
 	// Global flags for all execution commands
 	executionsCmd.PersistentFlags().String("database", "", "Path to SQLite database (default: ~/.dive/executions.db)")

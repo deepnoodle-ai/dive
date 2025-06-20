@@ -339,12 +339,14 @@ func (f *WorkflowFormatter) PrintExecutionStats(stats environment.ExecutionStats
 }
 
 func (f *WorkflowFormatter) PrintExecutionID(id string) {
-	fmt.Printf("🚀 Execution ID: %s\n", id)
+	fmt.Printf("🚀 Execution ID: %s\n", infoStyle.Sprint(id))
 }
 
 func (f *WorkflowFormatter) PrintExecutionNextSteps(id string) {
-	fmt.Printf("\n🔎 To inspect the execution, run:\n")
+	fmt.Printf("\n🔎 To inspect this execution:\n")
 	fmt.Printf("   %s\n", mutedStyle.Sprintf("dive executions show %s --events", id))
+	fmt.Printf("\n💡 To resume if it failed:\n")
+	fmt.Printf("   %s\n", mutedStyle.Sprintf("dive executions resume %s", id))
 }
 
 // Implement the environment.WorkflowPathFormatter interface
