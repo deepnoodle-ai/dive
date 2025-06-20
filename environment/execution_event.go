@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/diveagents/dive/llm"
 	"go.jetify.com/typeid"
 )
 
@@ -84,6 +85,7 @@ func (d *ExecutionStartedData) Validate() error {
 // ExecutionCompletedData contains data for execution completed events
 type ExecutionCompletedData struct {
 	Outputs map[string]interface{} `json:"outputs"`
+	Usage   *llm.Usage             `json:"usage,omitempty"`
 }
 
 func (d *ExecutionCompletedData) EventType() ExecutionEventType { return EventExecutionCompleted }
@@ -178,8 +180,9 @@ func (d *StepStartedData) Validate() error {
 
 // StepCompletedData contains data for step completed events
 type StepCompletedData struct {
-	Output         string `json:"output"`
-	StoredVariable string `json:"stored_variable,omitempty"`
+	Output         string     `json:"output"`
+	StoredVariable string     `json:"stored_variable,omitempty"`
+	Usage          *llm.Usage `json:"usage,omitempty"`
 }
 
 func (d *StepCompletedData) EventType() ExecutionEventType { return EventStepCompleted }
@@ -452,6 +455,24 @@ func (e *ExecutionEvent) convertLegacyData() (ExecutionEventData, error) {
 		if outputs, ok := e.Data["outputs"].(map[string]interface{}); ok {
 			data.Outputs = outputs
 		}
+		if usageData, ok := e.Data["usage"]; ok {
+			if usageMap, ok := usageData.(map[string]interface{}); ok {
+				usage := &llm.Usage{}
+				if inputTokens, ok := usageMap["input_tokens"].(float64); ok {
+					usage.InputTokens = int(inputTokens)
+				}
+				if outputTokens, ok := usageMap["output_tokens"].(float64); ok {
+					usage.OutputTokens = int(outputTokens)
+				}
+				if cacheCreationTokens, ok := usageMap["cache_creation_input_tokens"].(float64); ok {
+					usage.CacheCreationInputTokens = int(cacheCreationTokens)
+				}
+				if cacheReadTokens, ok := usageMap["cache_read_input_tokens"].(float64); ok {
+					usage.CacheReadInputTokens = int(cacheReadTokens)
+				}
+				data.Usage = usage
+			}
+		}
 		return data, nil
 
 	case EventExecutionFailed:
@@ -521,6 +542,24 @@ func (e *ExecutionEvent) convertLegacyData() (ExecutionEventData, error) {
 		}
 		if storedVariable, ok := e.Data["stored_variable"].(string); ok {
 			data.StoredVariable = storedVariable
+		}
+		if usageData, ok := e.Data["usage"]; ok {
+			if usageMap, ok := usageData.(map[string]interface{}); ok {
+				usage := &llm.Usage{}
+				if inputTokens, ok := usageMap["input_tokens"].(float64); ok {
+					usage.InputTokens = int(inputTokens)
+				}
+				if outputTokens, ok := usageMap["output_tokens"].(float64); ok {
+					usage.OutputTokens = int(outputTokens)
+				}
+				if cacheCreationTokens, ok := usageMap["cache_creation_input_tokens"].(float64); ok {
+					usage.CacheCreationInputTokens = int(cacheCreationTokens)
+				}
+				if cacheReadTokens, ok := usageMap["cache_read_input_tokens"].(float64); ok {
+					usage.CacheReadInputTokens = int(cacheReadTokens)
+				}
+				data.Usage = usage
+			}
 		}
 		return data, nil
 
@@ -724,6 +763,14 @@ func (e *ExecutionEvent) updateLegacyData() {
 		e.Data["inputs"] = data.Inputs
 	case *ExecutionCompletedData:
 		e.Data["outputs"] = data.Outputs
+		if data.Usage != nil {
+			e.Data["usage"] = map[string]interface{}{
+				"input_tokens":                data.Usage.InputTokens,
+				"output_tokens":               data.Usage.OutputTokens,
+				"cache_creation_input_tokens": data.Usage.CacheCreationInputTokens,
+				"cache_read_input_tokens":     data.Usage.CacheReadInputTokens,
+			}
+		}
 	case *ExecutionFailedData:
 		e.Data["error"] = data.Error
 	case *PathStartedData:
@@ -749,6 +796,14 @@ func (e *ExecutionEvent) updateLegacyData() {
 		e.Data["output"] = data.Output
 		if data.StoredVariable != "" {
 			e.Data["stored_variable"] = data.StoredVariable
+		}
+		if data.Usage != nil {
+			e.Data["usage"] = map[string]interface{}{
+				"input_tokens":                data.Usage.InputTokens,
+				"output_tokens":               data.Usage.OutputTokens,
+				"cache_creation_input_tokens": data.Usage.CacheCreationInputTokens,
+				"cache_read_input_tokens":     data.Usage.CacheReadInputTokens,
+			}
 		}
 	case *StepFailedData:
 		e.Data["error"] = data.Error

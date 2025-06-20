@@ -1,6 +1,10 @@
 package environment
 
-import "time"
+import (
+	"time"
+
+	"github.com/diveagents/dive/llm"
+)
 
 // ExecutionSnapshot represents the complete state of an execution
 type ExecutionSnapshot struct {
@@ -21,4 +25,7 @@ type ExecutionSnapshot struct {
 	Inputs       map[string]interface{} `json:"inputs"`
 	Outputs      map[string]interface{} `json:"outputs"`
 	Error        string                 `json:"error,omitempty"`
+
+	// Token usage information
+	TotalUsage *llm.Usage `json:"total_usage,omitempty"`
 }

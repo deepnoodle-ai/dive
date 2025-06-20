@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,9 +42,9 @@ func listExecutions(databaseFlag string, status, workflowName string, limit int)
 	}
 
 	// Print header
-	fmt.Printf("%-40s %-20s %-12s %-20s %-20s\n",
-		"EXECUTION ID", "WORKFLOW", "STATUS", "STARTED", "DURATION")
-	fmt.Println(strings.Repeat("-", 115))
+	fmt.Printf("%-40s %-20s %-12s %-20s %-20s %-15s\n",
+		"EXECUTION ID", "WORKFLOW", "STATUS", "STARTED", "DURATION", "TOKENS")
+	fmt.Println(strings.Repeat("-", 130))
 
 	// Print executions
 	for _, exec := range executions {
@@ -61,12 +62,21 @@ func listExecutions(databaseFlag string, status, workflowName string, limit int)
 
 		statusText := formatExecutionStatus(exec.Status)
 
-		fmt.Printf("%-40s %-20s %-12s %-20s %-20s\n",
+		// Format token usage
+		tokenUsage := "-"
+		if exec.TotalUsage != nil && (exec.TotalUsage.InputTokens > 0 || exec.TotalUsage.OutputTokens > 0) {
+			totalTokens := exec.TotalUsage.InputTokens + exec.TotalUsage.OutputTokens +
+				exec.TotalUsage.CacheReadInputTokens + exec.TotalUsage.CacheCreationInputTokens
+			tokenUsage = formatNumber(totalTokens)
+		}
+
+		fmt.Printf("%-40s %-20s %-12s %-20s %-20s %-15s\n",
 			exec.ID,
 			truncate(exec.WorkflowName, 20),
 			statusText,
 			startTime,
-			duration)
+			duration,
+			tokenUsage)
 	}
 
 	return nil
@@ -106,6 +116,22 @@ func showExecution(databaseFlag, executionID string, showEvents bool) error {
 
 	if snapshot.Error != "" {
 		fmt.Printf("Error:        %s\n", errorStyle.Sprint(snapshot.Error))
+	}
+
+	// Print token usage information
+	if snapshot.TotalUsage != nil && (snapshot.TotalUsage.InputTokens > 0 || snapshot.TotalUsage.OutputTokens > 0) {
+		fmt.Printf("\n🔢 Token Usage:\n")
+		fmt.Printf("  Input tokens:  %s\n", formatNumber(snapshot.TotalUsage.InputTokens))
+		fmt.Printf("  Output tokens: %s\n", formatNumber(snapshot.TotalUsage.OutputTokens))
+		if snapshot.TotalUsage.CacheReadInputTokens > 0 {
+			fmt.Printf("  Cache read tokens: %s\n", formatNumber(snapshot.TotalUsage.CacheReadInputTokens))
+		}
+		if snapshot.TotalUsage.CacheCreationInputTokens > 0 {
+			fmt.Printf("  Cache creation tokens: %s\n", formatNumber(snapshot.TotalUsage.CacheCreationInputTokens))
+		}
+		totalTokens := snapshot.TotalUsage.InputTokens + snapshot.TotalUsage.OutputTokens +
+			snapshot.TotalUsage.CacheReadInputTokens + snapshot.TotalUsage.CacheCreationInputTokens
+		fmt.Printf("  Total tokens:  %s\n", warningStyle.Sprint(formatNumber(totalTokens)))
 	}
 
 	// Print inputs
@@ -253,6 +279,24 @@ func truncate(s string, length int) string {
 	return s[:length-3] + "..."
 }
 
+// formatNumber formats a number with comma separators for readability
+func formatNumber(n int) string {
+	s := strconv.Itoa(n)
+	if len(s) <= 3 {
+		return s
+	}
+
+	// Add commas every 3 digits from the right
+	var result strings.Builder
+	for i, digit := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result.WriteRune(',')
+		}
+		result.WriteRune(digit)
+	}
+	return result.String()
+}
+
 func resumeExecution(executionID, databasePath string, logLevel slogger.LogLevel) error {
 	ctx := context.Background()
 	startTime := time.Now()
@@ -389,6 +433,11 @@ func showExecutionStats(databaseFlag string) error {
 	var totalDuration time.Duration
 	var completedCount int
 
+	// Token usage statistics
+	var totalInputTokens, totalOutputTokens int
+	var totalCacheReadTokens, totalCacheCreationTokens int
+	var executionsWithUsage int
+
 	for _, exec := range executions {
 		statusCounts[exec.Status]++
 		workflowCounts[exec.WorkflowName]++
@@ -396,6 +445,18 @@ func showExecutionStats(databaseFlag string) error {
 		if !exec.EndTime.IsZero() && !exec.StartTime.IsZero() {
 			totalDuration += exec.EndTime.Sub(exec.StartTime)
 			completedCount++
+		}
+
+		// Aggregate token usage
+		if exec.TotalUsage != nil {
+			if exec.TotalUsage.InputTokens > 0 || exec.TotalUsage.OutputTokens > 0 ||
+				exec.TotalUsage.CacheReadInputTokens > 0 || exec.TotalUsage.CacheCreationInputTokens > 0 {
+				executionsWithUsage++
+				totalInputTokens += exec.TotalUsage.InputTokens
+				totalOutputTokens += exec.TotalUsage.OutputTokens
+				totalCacheReadTokens += exec.TotalUsage.CacheReadInputTokens
+				totalCacheCreationTokens += exec.TotalUsage.CacheCreationInputTokens
+			}
 		}
 	}
 
@@ -413,6 +474,31 @@ func showExecutionStats(databaseFlag string) error {
 	if completedCount > 0 {
 		avgDuration := totalDuration / time.Duration(completedCount)
 		fmt.Printf("\n⏱️  Average Duration: %s\n", avgDuration.Round(time.Millisecond))
+	}
+
+	// Print token usage statistics
+	if executionsWithUsage > 0 {
+		fmt.Printf("\n🔢 Token Usage Summary:\n")
+		fmt.Printf("   Executions with usage data: %d (%.1f%%)\n",
+			executionsWithUsage,
+			float64(executionsWithUsage)/float64(len(executions))*100)
+		fmt.Printf("   Total input tokens:         %s\n", formatNumber(totalInputTokens))
+		fmt.Printf("   Total output tokens:        %s\n", formatNumber(totalOutputTokens))
+		if totalCacheReadTokens > 0 {
+			fmt.Printf("   Total cache read tokens:    %s\n", formatNumber(totalCacheReadTokens))
+		}
+		if totalCacheCreationTokens > 0 {
+			fmt.Printf("   Total cache creation tokens: %s\n", formatNumber(totalCacheCreationTokens))
+		}
+		totalAllTokens := totalInputTokens + totalOutputTokens + totalCacheReadTokens + totalCacheCreationTokens
+		fmt.Printf("   Total tokens across all:    %s\n", warningStyle.Sprint(formatNumber(totalAllTokens)))
+
+		if executionsWithUsage > 0 {
+			avgInputTokens := totalInputTokens / executionsWithUsage
+			avgOutputTokens := totalOutputTokens / executionsWithUsage
+			fmt.Printf("   Average per execution:       %s input, %s output\n",
+				formatNumber(avgInputTokens), formatNumber(avgOutputTokens))
+		}
 	}
 
 	fmt.Printf("\n🔧 Most Used Workflows:\n")

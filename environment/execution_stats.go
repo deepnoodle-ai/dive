@@ -1,6 +1,10 @@
 package environment
 
-import "time"
+import (
+	"time"
+
+	"github.com/diveagents/dive/llm"
+)
 
 // ExecutionStats provides statistics about the execution
 type ExecutionStats struct {
@@ -11,6 +15,9 @@ type ExecutionStats struct {
 	StartTime      time.Time     `json:"start_time"`
 	EndTime        time.Time     `json:"end_time"`
 	Duration       time.Duration `json:"duration"`
+
+	// Token usage information
+	TotalUsage *llm.Usage `json:"total_usage,omitempty"`
 }
 
 // GetStats returns current execution statistics
@@ -22,6 +29,7 @@ func (e *Execution) GetStats() ExecutionStats {
 		TotalPaths: len(e.paths),
 		StartTime:  e.startTime,
 		EndTime:    e.endTime,
+		TotalUsage: &e.totalUsage,
 	}
 	for _, state := range e.paths {
 		switch state.Status {

@@ -74,6 +74,9 @@ type Execution struct {
 	pathUpdates chan pathUpdate
 	pathCounter int
 
+	// Token usage tracking
+	totalUsage llm.Usage
+
 	// Logging and formatting
 	logger    slogger.Logger
 	formatter WorkflowFormatter
@@ -264,6 +267,31 @@ func (e *Execution) ReplayFromEvents(ctx context.Context, events []*ExecutionEve
 					stateValues[varName] = storedValue
 				} else {
 					stateValues[varName] = stepOutput
+				}
+			}
+
+			// Aggregate token usage from step completion events
+			if usageData, ok := event.Data["usage"]; ok {
+				if usageMap, ok := usageData.(map[string]interface{}); ok {
+					var stepUsage llm.Usage
+					if inputTokens, ok := usageMap["input_tokens"].(float64); ok {
+						stepUsage.InputTokens = int(inputTokens)
+					}
+					if outputTokens, ok := usageMap["output_tokens"].(float64); ok {
+						stepUsage.OutputTokens = int(outputTokens)
+					}
+					if cacheCreationTokens, ok := usageMap["cache_creation_input_tokens"].(float64); ok {
+						stepUsage.CacheCreationInputTokens = int(cacheCreationTokens)
+					}
+					if cacheReadTokens, ok := usageMap["cache_read_input_tokens"].(float64); ok {
+						stepUsage.CacheReadInputTokens = int(cacheReadTokens)
+					}
+
+					// Add to total usage
+					if stepUsage.InputTokens > 0 || stepUsage.OutputTokens > 0 ||
+						stepUsage.CacheCreationInputTokens > 0 || stepUsage.CacheReadInputTokens > 0 {
+						e.totalUsage.Add(&stepUsage)
+					}
 				}
 			}
 
@@ -609,6 +637,7 @@ func (e *Execution) Run(ctx context.Context) error {
 		e.status = ExecutionStatusCompleted
 		e.recorder.RecordEvent(e.workflow.Name(), "", &ExecutionCompletedData{
 			Outputs: e.outputs,
+			Usage:   &e.totalUsage,
 		})
 		e.logger.Info("workflow execution completed")
 	}
@@ -644,6 +673,7 @@ func (e *Execution) saveSnapshot(ctx context.Context) error {
 		LastEventSeq: e.recorder.GetEventSequence(),
 		Inputs:       e.inputs,
 		Outputs:      e.outputs,
+		TotalUsage:   &e.totalUsage,
 	}
 	if e.err != nil {
 		snapshot.Error = e.err.Error()
@@ -948,10 +978,19 @@ func (e *Execution) executeStep(ctx context.Context, step *workflow.Step, pathID
 		e.formatter.PrintStepOutput(step.Name(), result.Content)
 	}
 
+	// Update total usage if step has usage information
+	if result.Usage.InputTokens > 0 || result.Usage.OutputTokens > 0 ||
+		result.Usage.CacheCreationInputTokens > 0 || result.Usage.CacheReadInputTokens > 0 {
+		e.mutex.Lock()
+		e.totalUsage.Add(&result.Usage)
+		e.mutex.Unlock()
+	}
+
 	// Record step completed
 	e.recorder.RecordEvent(pathID, step.Name(), &StepCompletedData{
 		Output:         result.Content,
 		StoredVariable: step.Store(),
+		Usage:          &result.Usage,
 	})
 
 	return result, nil
@@ -1026,6 +1065,7 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, pa
 
 	// Combine the results into one string which we put in a single task result
 	itemTexts := make([]string, 0, len(results))
+	var combinedUsage llm.Usage
 	for i, result := range results {
 		var itemText string
 		if each.As != "" {
@@ -1034,11 +1074,15 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, pa
 			itemText = fmt.Sprintf("# %s\n\n%s", items[i], result.Content)
 		}
 		itemTexts = append(itemTexts, itemText)
+
+		// Aggregate token usage from each iteration
+		combinedUsage.Add(&result.Usage)
 	}
 
 	return &dive.StepResult{
 		Content: strings.Join(itemTexts, "\n\n"),
 		Format:  dive.OutputFormatMarkdown,
+		Usage:   combinedUsage,
 	}, nil
 }
 
@@ -1347,7 +1391,10 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, 
 	if result != nil {
 		content = fmt.Sprintf("%v", result)
 	}
-	return &dive.StepResult{Content: content}, nil
+	return &dive.StepResult{
+		Content: content,
+		Usage:   llm.Usage{}, // Explicitly initialize usage as zero
+	}, nil
 }
 
 // executeScriptStep executes a script activity step
@@ -1394,7 +1441,11 @@ func (e *Execution) executeScriptStep(ctx context.Context, step *workflow.Step, 
 	if result != nil {
 		content = fmt.Sprintf("%v", result)
 	}
-	return &dive.StepResult{Content: content, Object: result}, nil
+	return &dive.StepResult{
+		Content: content,
+		Object:  result,
+		Usage:   llm.Usage{}, // Explicitly initialize usage as zero
+	}, nil
 }
 
 // evaluateCondition evaluates a workflow condition using Risor scripting
@@ -1793,6 +1844,11 @@ func (e *Execution) loadFromSnapshot(snapshot *ExecutionSnapshot) error {
 	e.status = ExecutionStatus(snapshot.Status)
 	e.outputs = snapshot.Outputs
 	e.startTime = snapshot.StartTime
+
+	// Load total usage if available in snapshot
+	if snapshot.TotalUsage != nil {
+		e.totalUsage = *snapshot.TotalUsage
+	}
 
 	// We need to reconstruct operation results, path states, and internal state
 	// from the event history, as the snapshot doesn't contain everything.

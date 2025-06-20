@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diveagents/dive/llm"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -140,7 +141,8 @@ func (s *SQLiteExecutionEventStore) createSchema() error {
 		workflow_data BLOB,
 		inputs JSON,
 		outputs JSON,
-		error TEXT
+		error TEXT,
+		total_usage JSON
 	);
 
 	-- Indexes for querying
@@ -153,6 +155,14 @@ func (s *SQLiteExecutionEventStore) createSchema() error {
 	if _, err := s.db.ExecContext(ctx, snapshotsSchema); err != nil {
 		return fmt.Errorf("failed to create snapshots table: %w", err)
 	}
+
+	// Add total_usage column to existing snapshots table if it doesn't exist
+	migrationSchema := `
+	ALTER TABLE execution_snapshots ADD COLUMN total_usage JSON;
+	`
+
+	// This will fail if the column already exists, which is fine
+	s.db.ExecContext(ctx, migrationSchema)
 
 	return nil
 }
@@ -279,13 +289,21 @@ func (s *SQLiteExecutionEventStore) SaveSnapshot(ctx context.Context, snapshot *
 		return fmt.Errorf("failed to marshal outputs: %w", err)
 	}
 
+	var totalUsageJSON []byte
+	if snapshot.TotalUsage != nil {
+		totalUsageJSON, err = json.Marshal(snapshot.TotalUsage)
+		if err != nil {
+			return fmt.Errorf("failed to marshal total usage: %w", err)
+		}
+	}
+
 	// Upsert query
 	query := `
 		INSERT INTO execution_snapshots 
 		(execution_id, workflow_name, workflow_hash, inputs_hash, status, 
 		 start_time, end_time, created_at, updated_at, last_event_seq,
-		 workflow_data, inputs, outputs, error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 workflow_data, inputs, outputs, error, total_usage)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(execution_id) DO UPDATE SET
 			workflow_name = excluded.workflow_name,
 			workflow_hash = excluded.workflow_hash,
@@ -298,7 +316,8 @@ func (s *SQLiteExecutionEventStore) SaveSnapshot(ctx context.Context, snapshot *
 			workflow_data = excluded.workflow_data,
 			inputs = excluded.inputs,
 			outputs = excluded.outputs,
-			error = excluded.error
+			error = excluded.error,
+			total_usage = excluded.total_usage
 	`
 
 	now := time.Now()
@@ -327,6 +346,7 @@ func (s *SQLiteExecutionEventStore) SaveSnapshot(ctx context.Context, snapshot *
 		inputsJSON,
 		outputsJSON,
 		nullableString(snapshot.Error),
+		nullableBytes(totalUsageJSON),
 	)
 
 	if err != nil {
@@ -344,7 +364,7 @@ func (s *SQLiteExecutionEventStore) GetSnapshot(ctx context.Context, executionID
 	query := `
 		SELECT execution_id, workflow_name, workflow_hash, inputs_hash, status,
 			   start_time, end_time, created_at, updated_at, last_event_seq,
-			   workflow_data, inputs, outputs, error
+			   workflow_data, inputs, outputs, error, total_usage
 		FROM execution_snapshots
 		WHERE execution_id = ?
 	`
@@ -367,7 +387,7 @@ func (s *SQLiteExecutionEventStore) ListExecutions(ctx context.Context, filter E
 	query := `
 		SELECT execution_id, workflow_name, workflow_hash, inputs_hash, status,
 			   start_time, end_time, created_at, updated_at, last_event_seq,
-			   workflow_data, inputs, outputs, error
+			   workflow_data, inputs, outputs, error, total_usage
 		FROM execution_snapshots
 	`
 
@@ -557,6 +577,7 @@ func (s *SQLiteExecutionEventStore) scanSnapshot(rows *sql.Rows) (*ExecutionSnap
 	var workflowData sql.NullString
 	var inputsJSON, outputsJSON []byte
 	var errorMsg sql.NullString
+	var totalUsageJSON sql.NullString
 
 	err := rows.Scan(
 		&snapshot.ID,
@@ -573,6 +594,7 @@ func (s *SQLiteExecutionEventStore) scanSnapshot(rows *sql.Rows) (*ExecutionSnap
 		&inputsJSON,
 		&outputsJSON,
 		&errorMsg,
+		&totalUsageJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -600,6 +622,14 @@ func (s *SQLiteExecutionEventStore) scanSnapshot(rows *sql.Rows) (*ExecutionSnap
 		return nil, fmt.Errorf("failed to unmarshal outputs: %w", err)
 	}
 
+	// Deserialize total usage if present
+	if totalUsageJSON.Valid && totalUsageJSON.String != "" {
+		snapshot.TotalUsage = &llm.Usage{}
+		if err := json.Unmarshal([]byte(totalUsageJSON.String), snapshot.TotalUsage); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal total usage: %w", err)
+		}
+	}
+
 	return snapshot, nil
 }
 
@@ -609,6 +639,7 @@ func (s *SQLiteExecutionEventStore) scanSnapshotRow(row *sql.Row) (*ExecutionSna
 	var workflowData sql.NullString
 	var inputsJSON, outputsJSON []byte
 	var errorMsg sql.NullString
+	var totalUsageJSON sql.NullString
 
 	err := row.Scan(
 		&snapshot.ID,
@@ -625,6 +656,7 @@ func (s *SQLiteExecutionEventStore) scanSnapshotRow(row *sql.Row) (*ExecutionSna
 		&inputsJSON,
 		&outputsJSON,
 		&errorMsg,
+		&totalUsageJSON,
 	)
 
 	if err != nil {
@@ -654,6 +686,14 @@ func (s *SQLiteExecutionEventStore) scanSnapshotRow(row *sql.Row) (*ExecutionSna
 	}
 	if err := json.Unmarshal(outputsJSON, &snapshot.Outputs); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal outputs: %w", err)
+	}
+
+	// Deserialize total usage if present
+	if totalUsageJSON.Valid && totalUsageJSON.String != "" {
+		snapshot.TotalUsage = &llm.Usage{}
+		if err := json.Unmarshal([]byte(totalUsageJSON.String), snapshot.TotalUsage); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal total usage: %w", err)
+		}
 	}
 
 	return snapshot, nil
