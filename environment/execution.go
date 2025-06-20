@@ -83,17 +83,15 @@ type Execution struct {
 
 // ContentFingerprint represents a hash of content for deterministic tracking
 type ContentFingerprint struct {
-	Hash    string `json:"hash"`
-	Source  string `json:"source"`  // file path, URL, or content type
-	Size    int64  `json:"size"`    // content size in bytes
-	ModTime string `json:"modtime"` // modification time for files
+	Hash   string `json:"hash"`
+	Source string `json:"source"` // file path, URL, or content type
+	Size   int64  `json:"size"`   // content size in bytes
 }
 
 // ContentSnapshot captures content and its fingerprint for replay
 type ContentSnapshot struct {
 	Fingerprint ContentFingerprint `json:"fingerprint"`
 	Content     []llm.Content      `json:"content"`
-	Raw         []byte             `json:"raw,omitempty"` // raw bytes for binary content
 }
 
 // NewExecution creates a new deterministic execution
@@ -1158,7 +1156,36 @@ func (e *Execution) convertRisorEachValue(obj object.Object) ([]any, error) {
 
 // executePromptStep executes a prompt step using an agent
 func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
-	// Deterministic: get agent
+	// Get agent for this step
+	agent, err := e.getStepAgent(step)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare prompt content
+	prompt, err := e.preparePrompt(ctx, step)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare all content for the LLM call
+	content, err := e.preparePromptContent(ctx, step, agent, prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Execute the agent response operation
+	response, err := e.executeAgentResponse(ctx, step, pathID, agent, prompt, content)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process and return the result
+	return e.processAgentResponse(response), nil
+}
+
+// getStepAgent gets the agent for a step, falling back to the default agent if none specified
+func (e *Execution) getStepAgent(step *workflow.Step) (dive.Agent, error) {
 	agent := step.Agent()
 	if agent == nil {
 		var found bool
@@ -1167,19 +1194,27 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 			return nil, fmt.Errorf("no agent specified for prompt step %q", step.Name())
 		}
 	}
+	return agent, nil
+}
 
-	// Deterministic: prepare prompt by evaluating template
+// preparePrompt evaluates the prompt template if needed
+func (e *Execution) preparePrompt(ctx context.Context, step *workflow.Step) (string, error) {
 	prompt := step.Prompt()
 	if strings.Contains(prompt, "${") {
 		evaluatedPrompt, err := e.evaluateTemplate(ctx, prompt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to evaluate prompt template in step %q (type: %s): %w", step.Name(), step.Type(), err)
+			return "", fmt.Errorf("failed to evaluate prompt template in step %q (type: %s): %w", step.Name(), step.Type(), err)
 		}
 		prompt = evaluatedPrompt
 	}
+	return prompt, nil
+}
 
-	// Deterministic: prepare content
+// preparePromptContent prepares all content for the LLM call
+func (e *Execution) preparePromptContent(ctx context.Context, step *workflow.Step, agent dive.Agent, prompt string) ([]llm.Content, error) {
 	var content []llm.Content
+
+	// Process step content
 	if stepContent := step.Content(); len(stepContent) > 0 {
 		for _, item := range stepContent {
 			if dynamicContent, ok := item.(DynamicContent); ok {
@@ -1197,15 +1232,21 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 			}
 		}
 	}
+
+	// Add prompt as text content
 	if prompt != "" {
 		content = append(content, &llm.TextContent{Text: prompt})
 	}
 
-	// Operation: LLM call (non-deterministic)
-	// Create content snapshot for deterministic tracking
-	contentSnapshot, err := e.createContentSnapshot(ctx, content)
+	return content, nil
+}
+
+// executeAgentResponse executes the agent response operation
+func (e *Execution) executeAgentResponse(ctx context.Context, step *workflow.Step, pathID string, agent dive.Agent, prompt string, content []llm.Content) (*dive.Response, error) {
+	// Create content fingerprint for deterministic tracking
+	contentFingerprint, err := e.createContentFingerprint(ctx, content)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create content snapshot: %w", err)
+		return nil, fmt.Errorf("failed to create content fingerprint: %w", err)
 	}
 
 	// Use deterministic parameters for operation ID generation
@@ -1216,9 +1257,9 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 		Parameters: map[string]interface{}{
 			"agent":           agent.Name(),
 			"prompt":          prompt,
-			"content_hash":    contentSnapshot.Fingerprint.Hash,
-			"content_sources": contentSnapshot.Fingerprint.Source,
-			"content_size":    contentSnapshot.Fingerprint.Size,
+			"content_hash":    contentFingerprint.Hash,
+			"content_sources": contentFingerprint.Source,
+			"content_size":    contentFingerprint.Size,
 		},
 	}
 
@@ -1230,8 +1271,11 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 		return nil, fmt.Errorf("agent response operation failed: %w", err)
 	}
 
-	// Deterministic: process result
-	response := responseInterface.(*dive.Response)
+	return responseInterface.(*dive.Response), nil
+}
+
+// processAgentResponse processes the agent response and returns a StepResult
+func (e *Execution) processAgentResponse(response *dive.Response) *dive.StepResult {
 	var usage llm.Usage
 	if response.Usage != nil {
 		usage = *response.Usage
@@ -1239,7 +1283,7 @@ func (e *Execution) executePromptStep(ctx context.Context, step *workflow.Step, 
 	return &dive.StepResult{
 		Content: response.OutputText(),
 		Usage:   usage,
-	}, nil
+	}
 }
 
 // executeActionStep executes an action step
@@ -1339,11 +1383,6 @@ func (e *Execution) executeScriptStep(ctx context.Context, step *workflow.Step, 
 	return &dive.StepResult{Content: content, Object: result}, nil
 }
 
-// buildConditionGlobals creates a safe, read-only globals map for condition evaluation
-func (e *Execution) buildConditionGlobals() map[string]any {
-	return e.buildGlobalsForContext(ScriptContextCondition)
-}
-
 // evaluateCondition evaluates a workflow condition using Risor scripting
 func (e *Execution) evaluateCondition(ctx context.Context, condition string) (bool, error) {
 	// Handle simple boolean conditions
@@ -1362,7 +1401,7 @@ func (e *Execution) evaluateCondition(ctx context.Context, condition string) (bo
 	}
 
 	// Build safe globals for condition evaluation
-	globals := e.buildConditionGlobals()
+	globals := e.buildGlobalsForContext(ScriptContextCondition)
 
 	// Compile the script
 	compiledCode, err := e.compileConditionScript(ctx, codeStr, globals)
@@ -1579,6 +1618,30 @@ func (e *Execution) convertRisorValue(obj object.Object) interface{} {
 		// Fallback to string representation
 		return obj.Inspect()
 	}
+}
+
+// createContentFingerprint creates a combined fingerprint for content items
+func (e *Execution) createContentFingerprint(ctx context.Context, content []llm.Content) (ContentFingerprint, error) {
+	fingerprints, err := e.calculateContentFingerprints(ctx, content)
+	if err != nil {
+		return ContentFingerprint{}, err
+	}
+
+	// Create a combined hash from all fingerprints
+	var hashBuilder strings.Builder
+	for _, fp := range fingerprints {
+		hashBuilder.WriteString(fp.Hash)
+		hashBuilder.WriteString(":")
+		hashBuilder.WriteString(fp.Source)
+		hashBuilder.WriteString(":")
+	}
+
+	combinedHash := sha256.Sum256([]byte(hashBuilder.String()))
+	return ContentFingerprint{
+		Hash:   hex.EncodeToString(combinedHash[:]),
+		Source: "combined",
+		Size:   int64(hashBuilder.Len()),
+	}, nil
 }
 
 // calculateContentFingerprints calculates fingerprints for all content items

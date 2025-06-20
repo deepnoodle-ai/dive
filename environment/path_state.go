@@ -40,18 +40,6 @@ func (p *PathState) Copy() *PathState {
 	}
 }
 
-// Status represents the current state of an execution
-type Status string
-
-const (
-	StatusPending   Status = "pending"
-	StatusRunning   Status = "running"
-	StatusPaused    Status = "paused"
-	StatusCompleted Status = "completed"
-	StatusFailed    Status = "failed"
-	StatusCanceled  Status = "canceled"
-)
-
 type executionPath struct {
 	id          string
 	currentStep *workflow.Step
