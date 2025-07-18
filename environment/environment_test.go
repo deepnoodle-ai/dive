@@ -1,301 +1,340 @@
 package environment
 
-// func TestNewEnvironment(t *testing.T) {
-// 	logger := slogger.New(slogger.LevelDebug)
+import (
+	"context"
+	"testing"
 
-// 	var tasks []dive.Task
+	"github.com/diveagents/dive"
+	"github.com/diveagents/dive/agent"
+	"github.com/diveagents/dive/llm"
+	"github.com/diveagents/dive/slogger"
+	"github.com/diveagents/dive/workflow"
+	"github.com/stretchr/testify/require"
+)
 
-// 	a := agent.NewMockAgent(agent.MockAgentOptions{
-// 		Name: "Poet Laureate",
-// 		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-// 			tasks = append(tasks, task)
-// 			stream, publisher := dive.NewEventStream()
-// 			defer publisher.Close()
-// 			var content string
-// 			if task.Name() == "Write a Poem" {
-// 				content = "A haiku about the fall"
-// 			} else if task.Name() == "Summary" {
-// 				content = "A summary of that great poem"
-// 			} else {
-// 				t.Fatalf("unexpected task: %s", task.Name())
-// 			}
-// 			publisher.Send(ctx, &dive.Event{
-// 				Type:    "task.result",
-// 				Payload: &dive.StepResult{Content: content},
-// 			})
-// 			return stream, nil
-// 		},
-// 	})
+// TestNewEnvironment tests basic environment creation and setup
+func TestNewEnvironment(t *testing.T) {
+	// Create a simple agent and workflow
+	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
+		Name: "test-agent",
+		Response: &dive.Response{
+			ID:    "test-response",
+			Model: "test-model",
+		},
+	})
 
-// 	w, err := workflow.New(workflow.Options{
-// 		Name: "Poetry Writing",
-// 		Steps: []*workflow.Step{
-// 			workflow.NewStep(workflow.StepOptions{
-// 				Name:  "Write a Poem",
-// 				Agent: a,
-// 				Prompt: &dive.Prompt{
-// 					Name: "Write a Poem",
-// 					Text: "Write a limerick about cabbage",
-// 				},
-// 				Next: []*workflow.Edge{{Step: "Summary"}},
-// 			}),
-// 			workflow.NewStep(workflow.StepOptions{
-// 				Name:  "Summary",
-// 				Agent: a,
-// 				Prompt: &dive.Prompt{
-// 					Name: "Summary",
-// 					Text: "Summarize the poem",
-// 				},
-// 				End: true,
-// 			}),
-// 		},
-// 	})
-// 	require.NoError(t, err)
+	simpleWorkflow, err := workflow.New(workflow.Options{
+		Name: "simple-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "simple_step",
+				Type:   "script",
+				Script: `"Hello from workflow"`,
+			}),
+		},
+	})
+	require.NoError(t, err)
 
-// 	env, err := New(Options{
-// 		Name:      "test",
-// 		Agents:    []dive.Agent{a},
-// 		Workflows: []*workflow.Workflow{w},
-// 		Logger:    logger,
-// 	})
-// 	require.NoError(t, err)
-// 	require.NotNil(t, env)
-// 	require.NoError(t, env.Start(context.Background()))
+	t.Run("successful environment creation", func(t *testing.T) {
+		env, err := New(Options{
+			Name:      "test-env",
+			Agents:    []dive.Agent{mockAgent},
+			Workflows: []*workflow.Workflow{simpleWorkflow},
+			Logger:    slogger.NewDevNullLogger(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, env)
+		require.Equal(t, "test-env", env.Name())
+		require.Len(t, env.Agents(), 1)
+		require.Len(t, env.Workflows(), 1)
+	})
 
-// 	require.Equal(t, "test", env.Name())
+	t.Run("environment requires name", func(t *testing.T) {
+		_, err := New(Options{
+			Agents:    []dive.Agent{mockAgent},
+			Workflows: []*workflow.Workflow{simpleWorkflow},
+			Logger:    slogger.NewDevNullLogger(),
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "environment name is required")
+	})
 
-// 	execution, err := env.ExecuteWorkflow(context.Background(), w.Name(), map[string]interface{}{})
-// 	require.NoError(t, err)
-// 	require.NotNil(t, execution)
+	t.Run("duplicate agent names not allowed", func(t *testing.T) {
+		duplicateAgent := agent.NewMockAgent(agent.MockAgentOptions{
+			Name: "test-agent", // Same name as mockAgent
+		})
 
-// 	err = execution.Wait()
-// 	require.NoError(t, err)
+		_, err := New(Options{
+			Name:      "test-env",
+			Agents:    []dive.Agent{mockAgent, duplicateAgent},
+			Workflows: []*workflow.Workflow{simpleWorkflow},
+			Logger:    slogger.NewDevNullLogger(),
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "agent already registered")
+	})
+}
 
-// 	require.Equal(t, 2, len(tasks))
-// 	t1 := tasks[0]
-// 	t2 := tasks[1]
-// 	require.Equal(t, "Write a Poem", t1.Name())
-// 	require.Equal(t, "Summary", t2.Name())
+// TestEnvironmentStartStop tests environment lifecycle
+func TestEnvironmentStartStop(t *testing.T) {
+	env, err := New(Options{
+		Name:   "lifecycle-test",
+		Logger: slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
 
-// 	pathStates := execution.PathStates()
-// 	require.Equal(t, 1, len(pathStates))
-// 	s0 := pathStates[0]
-// 	require.Equal(t, PathStatusCompleted, s0.Status)
-// 	require.Equal(t, "Summary", s0.CurrentStep.Name())
-// 	require.Equal(t, "A summary of that great poem", s0.StepOutputs["Summary"])
-// 	require.Equal(t, "A haiku about the fall", s0.StepOutputs["Write a Poem"])
-// }
+	ctx := context.Background()
 
-// func TestEnvironmentWithMultipleAgents(t *testing.T) {
-// 	logger := slogger.New(slogger.LevelDebug)
+	// Initially not running
+	require.False(t, env.IsRunning())
 
-// 	agent1 := agent.NewMockAgent(agent.MockAgentOptions{
-// 		Name: "Writer",
-// 		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-// 			stream, publisher := dive.NewEventStream()
-// 			go func() {
-// 				defer publisher.Close()
-// 				publisher.Send(ctx, &dive.Event{
-// 					Type:    "task.result",
-// 					Payload: &dive.StepResult{Content: "Written content"},
-// 				})
-// 			}()
-// 			return stream, nil
-// 		},
-// 	})
+	// Start the environment
+	err = env.Start(ctx)
+	require.NoError(t, err)
+	require.True(t, env.IsRunning())
 
-// 	agent2 := agent.NewMockAgent(agent.MockAgentOptions{
-// 		Name: "Editor",
-// 		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-// 			stream, publisher := dive.NewEventStream()
-// 			go func() {
-// 				defer publisher.Close()
-// 				publisher.Send(ctx, &dive.Event{
-// 					Type:    "task.result",
-// 					Payload: &dive.StepResult{Content: "Edited content"},
-// 				})
-// 			}()
-// 			return stream, nil
-// 		},
-// 	})
+	// Can't start twice
+	err = env.Start(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already started")
 
-// 	env, err := New(Options{
-// 		Name:   "test-multi-agent",
-// 		Agents: []dive.Agent{agent1, agent2},
-// 		Logger: logger,
-// 	})
-// 	require.NoError(t, err)
-// 	require.NotNil(t, env)
+	// Stop the environment
+	err = env.Stop(ctx)
+	require.NoError(t, err)
+	require.False(t, env.IsRunning())
 
-// 	defer env.Stop(context.Background())
+	// Can't stop twice
+	err = env.Stop(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not started")
+}
 
-// 	require.Equal(t, 2, len(env.Agents()))
+// TestEnvironmentDefaultAgent tests default agent selection
+func TestEnvironmentDefaultAgent(t *testing.T) {
+	t.Run("no agents", func(t *testing.T) {
+		env, err := New(Options{
+			Name:   "no-agents",
+			Logger: slogger.NewDevNullLogger(),
+		})
+		require.NoError(t, err)
 
-// 	foundWriter := false
-// 	foundEditor := false
-// 	for _, a := range env.Agents() {
-// 		if a.Name() == "Writer" {
-// 			foundWriter = true
-// 		}
-// 		if a.Name() == "Editor" {
-// 			foundEditor = true
-// 		}
-// 	}
-// 	require.True(t, foundWriter, "Writer agent should be present")
-// 	require.True(t, foundEditor, "Editor agent should be present")
-// }
+		agent, found := env.DefaultAgent()
+		require.False(t, found)
+		require.Nil(t, agent)
+	})
 
-// func TestEnvironmentGetAgent(t *testing.T) {
-// 	logger := slogger.New(slogger.LevelDebug)
+	t.Run("single agent becomes default", func(t *testing.T) {
+		mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
+			Name: "solo-agent",
+		})
 
-// 	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
-// 		Name: "TestAgent",
-// 	})
+		env, err := New(Options{
+			Name:   "single-agent",
+			Agents: []dive.Agent{mockAgent},
+			Logger: slogger.NewDevNullLogger(),
+		})
+		require.NoError(t, err)
 
-// 	env, err := New(Options{
-// 		Name:   "test-get-agent",
-// 		Agents: []dive.Agent{mockAgent},
-// 		Logger: logger,
-// 	})
-// 	require.NoError(t, err)
+		defaultAgent, found := env.DefaultAgent()
+		require.True(t, found)
+		require.Equal(t, "solo-agent", defaultAgent.Name())
+	})
 
-// 	// Test getting existing agent
-// 	agent, err := env.GetAgent("TestAgent")
-// 	require.NoError(t, err)
-// 	require.NotNil(t, agent)
-// 	require.Equal(t, "TestAgent", agent.Name())
+	t.Run("supervisor agent is preferred as default", func(t *testing.T) {
+		regularAgent := agent.NewMockAgent(agent.MockAgentOptions{
+			Name:         "regular-agent",
+			IsSupervisor: false,
+		})
 
-// 	// Test getting non-existent agent
-// 	agent, err = env.GetAgent("NonExistentAgent")
-// 	require.Error(t, err)
-// 	require.Nil(t, agent)
-// 	require.Contains(t, err.Error(), "agent not found")
-// }
+		supervisorAgent := agent.NewMockAgent(agent.MockAgentOptions{
+			Name:         "supervisor-agent",
+			IsSupervisor: true,
+		})
 
-// func TestExecutionStats(t *testing.T) {
-// 	logger := slogger.New(slogger.LevelDebug)
+		env, err := New(Options{
+			Name:   "multi-agent",
+			Agents: []dive.Agent{regularAgent, supervisorAgent},
+			Logger: slogger.NewDevNullLogger(),
+		})
+		require.NoError(t, err)
 
-// 	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
-// 		Name: "StatsAgent",
-// 		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-// 			stream, publisher := dive.NewEventStream()
-// 			go func() {
-// 				defer publisher.Close()
-// 				publisher.Send(ctx, &dive.Event{
-// 					Type:    "task.result",
-// 					Payload: &dive.StepResult{Content: "Task completed"},
-// 				})
-// 			}()
-// 			return stream, nil
-// 		},
-// 	})
+		defaultAgent, found := env.DefaultAgent()
+		require.True(t, found)
+		require.Equal(t, "supervisor-agent", defaultAgent.Name())
+	})
+}
 
-// 	w, err := workflow.New(workflow.Options{
-// 		Name: "Stats Test",
-// 		Steps: []*workflow.Step{
-// 			workflow.NewStep(workflow.StepOptions{
-// 				Name:  "Task1",
-// 				Agent: mockAgent,
-// 				Prompt: &dive.Prompt{
-// 					Name: "Test Task",
-// 					Text: "Test Task",
-// 				},
-// 			}),
-// 		},
-// 	})
-// 	require.NoError(t, err)
+// TestEnvironmentAgentManagement tests agent addition and retrieval
+func TestEnvironmentAgentManagement(t *testing.T) {
+	env, err := New(Options{
+		Name:   "agent-management",
+		Logger: slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
 
-// 	env, err := New(Options{
-// 		Name:      "test-stats",
-// 		Agents:    []dive.Agent{mockAgent},
-// 		Workflows: []*workflow.Workflow{w},
-// 		Logger:    logger,
-// 	})
-// 	require.NoError(t, err)
-// 	require.NoError(t, env.Start(context.Background()))
+	// Initially no agents
+	require.Len(t, env.Agents(), 0)
 
-// 	execution, err := env.ExecuteWorkflow(context.Background(), w.Name(), map[string]interface{}{})
-// 	require.NoError(t, err)
+	// Add an agent
+	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
+		Name: "new-agent",
+	})
 
-// 	err = execution.Wait()
-// 	require.NoError(t, err)
+	err = env.AddAgent(mockAgent)
+	require.NoError(t, err)
+	require.Len(t, env.Agents(), 1)
 
-// 	stats := execution.GetStats()
-// 	require.Equal(t, 1, stats.TotalPaths)
-// 	require.Equal(t, 0, stats.ActivePaths)
-// 	require.Equal(t, 1, stats.CompletedPaths)
-// 	require.Equal(t, 0, stats.FailedPaths)
-// 	require.False(t, stats.StartTime.IsZero())
-// 	require.False(t, stats.EndTime.IsZero())
-// 	require.True(t, stats.Duration > 0)
-// }
+	// Can retrieve the agent
+	retrievedAgent, err := env.GetAgent("new-agent")
+	require.NoError(t, err)
+	require.Equal(t, "new-agent", retrievedAgent.Name())
 
-// func TestExecutionCancellation(t *testing.T) {
-// 	logger := slogger.New(slogger.LevelDebug)
+	// Can't retrieve non-existent agent
+	_, err = env.GetAgent("missing-agent")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "agent not found")
 
-// 	// Create a channel to control when the task completes
-// 	taskControl := make(chan struct{})
+	// Can't add duplicate agent
+	duplicateAgent := agent.NewMockAgent(agent.MockAgentOptions{
+		Name: "new-agent",
+	})
+	err = env.AddAgent(duplicateAgent)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "agent already present")
+}
 
-// 	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
-// 		Name: "SlowAgent",
-// 		Work: func(ctx context.Context, task dive.Task) (dive.EventStream, error) {
-// 			stream, publisher := dive.NewEventStream()
-// 			go func() {
-// 				defer publisher.Close()
+// TestEnvironmentWorkflowManagement tests workflow addition and retrieval
+func TestEnvironmentWorkflowManagement(t *testing.T) {
+	env, err := New(Options{
+		Name:   "workflow-management",
+		Logger: slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
 
-// 				select {
-// 				case <-ctx.Done():
-// 					// Context was cancelled
-// 					return
-// 				case <-taskControl:
-// 					// Task was allowed to complete
-// 					publisher.Send(ctx, &dive.Event{
-// 						Type:    "task.result",
-// 						Payload: &dive.StepResult{Content: "Completed"},
-// 					})
-// 				}
-// 			}()
-// 			return stream, nil
-// 		},
-// 	})
+	// Initially no workflows
+	require.Len(t, env.Workflows(), 0)
 
-// 	w, err := workflow.New(workflow.Options{
-// 		Name: "Cancellation Test",
-// 		Steps: []*workflow.Step{
-// 			workflow.NewStep(workflow.StepOptions{
-// 				Name:  "SlowTask",
-// 				Agent: mockAgent,
-// 				Prompt: &dive.Prompt{
-// 					Name: "Slow Task",
-// 					Text: "Slow Task",
-// 				},
-// 			}),
-// 		},
-// 	})
-// 	require.NoError(t, err)
+	// Add a workflow
+	testWorkflow, err := workflow.New(workflow.Options{
+		Name: "test-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "test_step",
+				Type:   "script",
+				Script: `"test"`,
+			}),
+		},
+	})
+	require.NoError(t, err)
 
-// 	env, err := New(Options{
-// 		Name:      "test-cancellation",
-// 		Agents:    []dive.Agent{mockAgent},
-// 		Workflows: []*workflow.Workflow{w},
-// 		Logger:    logger,
-// 	})
-// 	require.NoError(t, err)
-// 	require.NoError(t, env.Start(context.Background()))
+	err = env.AddWorkflow(testWorkflow)
+	require.NoError(t, err)
+	require.Len(t, env.Workflows(), 1)
 
-// 	// Create a context that we can cancel
-// 	ctx, cancel := context.WithCancel(context.Background())
+	// Can retrieve the workflow
+	retrievedWorkflow, err := env.GetWorkflow("test-workflow")
+	require.NoError(t, err)
+	require.Equal(t, "test-workflow", retrievedWorkflow.Name())
 
-// 	execution, err := env.ExecuteWorkflow(ctx, w.Name(), map[string]interface{}{})
-// 	require.NoError(t, err)
+	// Can't retrieve non-existent workflow
+	_, err = env.GetWorkflow("missing-workflow")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "workflow not found")
 
-// 	// Cancel the context before allowing the task to complete
-// 	cancel()
+	// Can't add duplicate workflow
+	duplicateWorkflow, err := workflow.New(workflow.Options{
+		Name: "test-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "another_step",
+				Type:   "script",
+				Script: `"duplicate"`,
+			}),
+		},
+	})
+	require.NoError(t, err)
 
-// 	err = execution.Wait()
-// 	require.Error(t, err)
-// 	require.Contains(t, err.Error(), "context canceled")
+	err = env.AddWorkflow(duplicateWorkflow)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "workflow already present")
+}
 
-// 	// Clean up
-// 	close(taskControl)
-// }
+// TestEnvironmentWithWorkflowExecution demonstrates executing a workflow in an environment
+func TestEnvironmentWithWorkflowExecution(t *testing.T) {
+	// Create a mock agent with proper response
+	mockAgent := agent.NewMockAgent(agent.MockAgentOptions{
+		Name: "execution-agent",
+		Response: &dive.Response{
+			ID:    "test-response",
+			Model: "test-model",
+			Items: []*dive.ResponseItem{
+				{
+					Type: dive.ResponseItemTypeMessage,
+					Message: &llm.Message{
+						Role:    llm.Assistant,
+						Content: []llm.Content{&llm.TextContent{Text: "Agent executed successfully"}},
+					},
+				},
+			},
+		},
+	})
+
+	// Create a workflow with both script and prompt steps
+	testWorkflow, err := workflow.New(workflow.Options{
+		Name: "execution-workflow",
+		Steps: []*workflow.Step{
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "script_step",
+				Type:   "script",
+				Script: `"Script executed"`,
+				Store:  "script_result",
+				Next:   []*workflow.Edge{{Step: "prompt_step"}},
+			}),
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "prompt_step",
+				Type:   "prompt",
+				Agent:  mockAgent,
+				Prompt: "Execute this prompt",
+				Store:  "prompt_result",
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	// Create environment with agent and workflow
+	env, err := New(Options{
+		Name:      "execution-env",
+		Agents:    []dive.Agent{mockAgent},
+		Workflows: []*workflow.Workflow{testWorkflow},
+		Logger:    slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
+
+	// Start the environment
+	ctx := context.Background()
+	err = env.Start(ctx)
+	require.NoError(t, err)
+	defer env.Stop(ctx)
+
+	// Create and run an execution
+	execution, err := NewExecution(ExecutionOptions{
+		Workflow:    testWorkflow,
+		Environment: env,
+		Inputs:      map[string]interface{}{},
+		Logger:      slogger.NewDevNullLogger(),
+	})
+	require.NoError(t, err)
+
+	err = execution.Run(ctx)
+	require.NoError(t, err)
+	require.Equal(t, ExecutionStatusCompleted, execution.Status())
+
+	// Verify both steps executed and stored results
+	scriptResult, exists := execution.state.Get("script_result")
+	require.True(t, exists)
+	require.Equal(t, "Script executed", scriptResult)
+
+	promptResult, exists := execution.state.Get("prompt_result")
+	require.True(t, exists)
+	require.Equal(t, "Agent executed successfully", promptResult)
+}

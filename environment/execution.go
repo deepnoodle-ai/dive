@@ -1003,6 +1003,11 @@ func (e *Execution) executeActionStep(ctx context.Context, step *workflow.Step, 
 
 // executeScriptStep executes a script activity step
 func (e *Execution) executeScriptStep(ctx context.Context, step *workflow.Step, pathID string) (*dive.StepResult, error) {
+	return e.executeScriptStepWithLoopVar(ctx, step, pathID, "", nil)
+}
+
+// executeScriptStepWithLoopVar executes a script activity step with an optional loop variable
+func (e *Execution) executeScriptStepWithLoopVar(ctx context.Context, step *workflow.Step, pathID string, loopVarName string, loopVarValue interface{}) (*dive.StepResult, error) {
 	script := step.Script()
 	if script == "" {
 		return nil, fmt.Errorf("no script specified for script activity step %q", step.Name())
@@ -1010,6 +1015,11 @@ func (e *Execution) executeScriptStep(ctx context.Context, step *workflow.Step, 
 
 	// Prepare script globals
 	globals := e.buildGlobalsForContext(ScriptContextActivity)
+
+	// Add loop variable if specified
+	if loopVarName != "" && loopVarValue != nil {
+		globals[loopVarName] = loopVarValue
+	}
 
 	// Operation: execute script
 	op := Operation{
@@ -1142,7 +1152,8 @@ func (e *Execution) executeStepEach(ctx context.Context, step *workflow.Step, pa
 		case "action":
 			result, err = e.executeActionStep(ctx, step, pathID)
 		case "script":
-			result, err = e.executeScriptStep(ctx, step, pathID)
+			// For script steps in each blocks, we need to include the loop variable
+			result, err = e.executeScriptStepWithLoopVar(ctx, step, pathID, each.As, item)
 		default:
 			err = fmt.Errorf("unsupported step type %q in step %q", step.Type(), step.Name())
 		}

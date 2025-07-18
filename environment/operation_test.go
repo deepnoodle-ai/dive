@@ -6,16 +6,16 @@ import (
 	"testing"
 
 	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/agent"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
 	"github.com/stretchr/testify/require"
 )
 
+// TestOperationExecution tests the execution of operations with logging
 func TestOperationExecution(t *testing.T) {
 	// Create a test environment
 	env := &Environment{
-		agents:    map[string]dive.Agent{"test-agent": &agent.MockAgent{}},
+		agents:    make(map[string]dive.Agent),
 		workflows: make(map[string]*workflow.Workflow),
 		logger:    slogger.NewDevNullLogger(),
 	}
@@ -24,12 +24,13 @@ func TestOperationExecution(t *testing.T) {
 
 	// Create a simple test workflow
 	testWorkflow, err := workflow.New(workflow.Options{
-		Name: "test-workflow",
-		Inputs: []*workflow.Input{
-			{Name: "input1", Type: "string", Required: true},
-		},
+		Name: "operation-test-workflow",
 		Steps: []*workflow.Step{
-			workflow.NewStep(workflow.StepOptions{Name: "step1", Type: "script", Script: `"test result"`}),
+			workflow.NewStep(workflow.StepOptions{
+				Name:   "test_step",
+				Type:   "script",
+				Script: `"operation test result"`,
+			}),
 		},
 	})
 	require.NoError(t, err)
@@ -38,26 +39,23 @@ func TestOperationExecution(t *testing.T) {
 	execution, err := NewExecution(ExecutionOptions{
 		Workflow:    testWorkflow,
 		Environment: env,
-		Inputs:      map[string]interface{}{"input1": "value1"},
+		Inputs:      map[string]interface{}{},
 		Logger:      slogger.NewDevNullLogger(),
 	})
 	require.NoError(t, err)
 
-	t.Run("operation execution with logging", func(t *testing.T) {
+	t.Run("successful operation execution", func(t *testing.T) {
 		ctx := context.Background()
 
 		// Create a test operation
 		op := Operation{
 			Type:     "test_operation",
-			StepName: "step1",
+			StepName: "test_step",
 			PathID:   "main",
 			Parameters: map[string]interface{}{
 				"test_param": "test_value",
 			},
 		}
-
-		// Verify ID is empty initially
-		require.Empty(t, op.ID)
 
 		// Execute the operation
 		result, err := execution.ExecuteOperation(ctx, op, func() (interface{}, error) {
@@ -66,38 +64,14 @@ func TestOperationExecution(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, "operation_result", result)
-
-		// Note: Since Go passes structs by value, the ID changes inside ExecuteOperation
-		// won't be reflected in our local op variable. This is expected behavior.
-		// What's important is that the operation executed successfully.
-	})
-
-	t.Run("operation ID generation", func(t *testing.T) {
-		op := Operation{
-			Type:     "test_operation",
-			StepName: "step1",
-			PathID:   "main",
-			Parameters: map[string]interface{}{
-				"param1": "value1",
-			},
-		}
-
-		// Generate ID
-		id := op.GenerateID()
-		require.NotEmpty(t, id)
-		require.Contains(t, string(id), "op_")
-
-		// Same operation should generate same ID
-		id2 := op.GenerateID()
-		require.Equal(t, id, id2)
 	})
 
 	t.Run("operation with error", func(t *testing.T) {
 		ctx := context.Background()
 
 		op := Operation{
-			Type:     "test_operation",
-			StepName: "step1",
+			Type:     "failing_operation",
+			StepName: "test_step",
 			PathID:   "main",
 		}
 
@@ -111,4 +85,105 @@ func TestOperationExecution(t *testing.T) {
 		require.Error(t, err)
 		require.Equal(t, testError, err)
 	})
+
+	t.Run("operation requires path ID", func(t *testing.T) {
+		ctx := context.Background()
+
+		op := Operation{
+			Type:     "no_path_operation",
+			StepName: "test_step",
+			// PathID is missing
+		}
+
+		_, err := execution.ExecuteOperation(ctx, op, func() (interface{}, error) {
+			return "result", nil
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "operation PathID is required")
+	})
+}
+
+// TestOperationIDGeneration tests deterministic operation ID generation
+func TestOperationIDGeneration(t *testing.T) {
+	t.Run("consistent ID generation", func(t *testing.T) {
+		op := Operation{
+			Type:     "test_operation",
+			StepName: "test_step",
+			PathID:   "main",
+			Parameters: map[string]interface{}{
+				"param1": "value1",
+				"param2": 42,
+			},
+		}
+
+		// Generate ID multiple times
+		id1 := op.GenerateID()
+		id2 := op.GenerateID()
+
+		require.NotEmpty(t, id1)
+		require.NotEmpty(t, id2)
+		require.Equal(t, id1, id2) // Should be deterministic
+		require.Contains(t, string(id1), "op_")
+	})
+
+	t.Run("different operations have different IDs", func(t *testing.T) {
+		op1 := Operation{
+			Type:     "test_operation_1",
+			StepName: "step1",
+			PathID:   "main",
+		}
+
+		op2 := Operation{
+			Type:     "test_operation_2",
+			StepName: "step1",
+			PathID:   "main",
+		}
+
+		id1 := op1.GenerateID()
+		id2 := op2.GenerateID()
+
+		require.NotEqual(t, id1, id2)
+	})
+
+	t.Run("parameter order doesn't affect ID", func(t *testing.T) {
+		op1 := Operation{
+			Type:     "test_operation",
+			StepName: "test_step",
+			PathID:   "main",
+			Parameters: map[string]interface{}{
+				"param_a": "value_a",
+				"param_b": "value_b",
+			},
+		}
+
+		op2 := Operation{
+			Type:     "test_operation",
+			StepName: "test_step",
+			PathID:   "main",
+			Parameters: map[string]interface{}{
+				"param_b": "value_b",
+				"param_a": "value_a",
+			},
+		}
+
+		id1 := op1.GenerateID()
+		id2 := op2.GenerateID()
+
+		require.Equal(t, id1, id2) // Should be same regardless of parameter order
+	})
+}
+
+// TestNewOperation tests the NewOperation constructor function
+func TestNewOperation(t *testing.T) {
+	op := NewOperation("test_type", "test_step", "test_path", map[string]interface{}{
+		"key": "value",
+	})
+
+	require.Equal(t, "test_type", op.Type)
+	require.Equal(t, "test_step", op.StepName)
+	require.Equal(t, "test_path", op.PathID)
+	require.Equal(t, "value", op.Parameters["key"])
+	require.NotEmpty(t, op.ID) // Should have generated an ID
+	require.Contains(t, string(op.ID), "op_")
 }
