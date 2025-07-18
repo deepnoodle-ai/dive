@@ -11,11 +11,9 @@ require (
 	github.com/lmittmann/tint v1.1.0
 	github.com/mark3labs/mcp-go v0.31.0
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/openai/openai-go v1.2.0
 	github.com/risor-io/risor v1.8.1
 	github.com/stretchr/testify v1.10.0
-	go.jetify.com/typeid v1.3.0
 )
 
 require (
