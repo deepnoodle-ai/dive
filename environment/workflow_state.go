@@ -4,37 +4,26 @@ import (
 	"sync"
 )
 
-// WorkflowState provides controlled access to workflow state with event recording
+// WorkflowState provides controlled access to workflow state
 type WorkflowState struct {
 	executionID string
-	recorder    ExecutionRecorder
 	values      map[string]interface{}
 	mutex       sync.RWMutex
 }
 
 // NewWorkflowState creates a new workflow state instance
-func NewWorkflowState(executionID string, recorder ExecutionRecorder) *WorkflowState {
+func NewWorkflowState(executionID string, recorder interface{}) *WorkflowState {
 	return &WorkflowState{
 		executionID: executionID,
-		recorder:    recorder,
 		values:      make(map[string]interface{}),
 	}
 }
 
-// Set sets a value in the workflow state and records the mutation
+// Set sets a value in the workflow state
 func (s *WorkflowState) Set(key string, value interface{}) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.recorder.RecordEvent(s.executionID, "", &StateMutatedData{
-		Mutations: []StateMutation{
-			{
-				Type:  StateMutationTypeSet,
-				Key:   key,
-				Value: value,
-			},
-		},
-	})
 	s.values[key] = value
 	return nil
 }
@@ -48,19 +37,11 @@ func (s *WorkflowState) Get(key string) (interface{}, bool) {
 	return value, exists
 }
 
-// Delete removes a key from the workflow state and records the mutation
+// Delete removes a key from the workflow state
 func (s *WorkflowState) Delete(key string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.recorder.RecordEvent(s.executionID, "", &StateMutatedData{
-		Mutations: []StateMutation{
-			{
-				Type: StateMutationTypeDelete,
-				Key:  key,
-			},
-		},
-	})
 	delete(s.values, key)
 	return nil
 }
