@@ -115,7 +115,7 @@ func NewExecution(opts ExecutionOptions) (*Execution, error) {
 		executionID = NewExecutionID()
 	}
 
-	state := NewWorkflowState(executionID, nil) // No recorder needed
+	state := NewWorkflowState(executionID)
 
 	inputs := make(map[string]any, len(opts.Inputs))
 
@@ -232,6 +232,7 @@ func (e *Execution) saveCheckpoint(ctx context.Context) error {
 		Outputs:      e.outputs,
 		State:        e.state.Copy(),
 		PathStates:   e.copyPathStates(),
+		PathCounter:  e.pathCounter,
 		TotalUsage:   &e.totalUsage,
 		StartTime:    e.startTime,
 		EndTime:      e.endTime,
@@ -249,20 +250,8 @@ func (e *Execution) saveCheckpoint(ctx context.Context) error {
 func (e *Execution) copyPathStates() map[string]*PathState {
 	pathStates := make(map[string]*PathState)
 	for id, state := range e.paths {
-		// Create a copy of the path state
-		pathStates[id] = &PathState{
-			ID:          state.ID,
-			Status:      state.Status,
-			CurrentStep: state.CurrentStep,
-			StartTime:   state.StartTime,
-			EndTime:     state.EndTime,
-			StepOutputs: make(map[string]string),
-			Error:       state.Error,
-		}
-		// Copy step outputs
-		for stepName, output := range state.StepOutputs {
-			pathStates[id].StepOutputs[stepName] = output
-		}
+		// Create a copy of the path state (already fully serializable)
+		pathStates[id] = state.Copy()
 	}
 	return pathStates
 }
@@ -298,15 +287,40 @@ func (e *Execution) LoadFromCheckpoint(ctx context.Context) error {
 	// Load state
 	e.state.LoadFromMap(checkpoint.State)
 
-	// Load path states
+	// Load path counter
+	e.pathCounter = checkpoint.PathCounter
+
+	// Load and restore path states
 	e.paths = make(map[string]*PathState)
+	e.activePaths = make(map[string]*executionPath)
+
 	for id, pathState := range checkpoint.PathStates {
 		e.paths[id] = pathState
+
+		// Rebuild active paths for paths that were still running
+		if pathState.Status == PathStatusRunning || pathState.Status == PathStatusPending {
+			// Look up the current step from the workflow graph
+			var currentStep *workflow.Step
+			if pathState.CurrentStep != "" {
+				var ok bool
+				currentStep, ok = e.workflow.Graph().Get(pathState.CurrentStep)
+				if !ok {
+					return fmt.Errorf("step %q not found in workflow for path %s", pathState.CurrentStep, id)
+				}
+			}
+
+			e.activePaths[id] = &executionPath{
+				id:          id,
+				currentStep: currentStep,
+			}
+		}
 	}
 
 	e.logger.Info("loaded execution from checkpoint",
 		"status", e.status,
 		"paths", len(e.paths),
+		"active_paths", len(e.activePaths),
+		"path_counter", e.pathCounter,
 		"state_keys", len(checkpoint.State))
 
 	return nil
@@ -336,18 +350,28 @@ func (e *Execution) Run(ctx context.Context) error {
 		return e.err
 	}
 
-	// Start with initial path
-	startStep := e.workflow.Start()
-	initialPath := &executionPath{
-		id:          "main",
-		currentStep: startStep,
+	// Start execution paths
+	if len(e.activePaths) == 0 {
+		// Starting fresh - create initial path
+		startStep := e.workflow.Start()
+		initialPath := &executionPath{
+			id:          "main",
+			currentStep: startStep,
+		}
+
+		e.addPath(initialPath)
+
+		// Start parallel execution
+		e.doneWg.Add(1)
+		go e.runPath(ctx, initialPath)
+	} else {
+		// Resuming from checkpoint - restart active paths
+		e.logger.Info("resuming execution from checkpoint", "active_paths", len(e.activePaths))
+		for _, path := range e.activePaths {
+			e.doneWg.Add(1)
+			go e.runPath(ctx, path)
+		}
 	}
-
-	e.addPath(initialPath)
-
-	// Start parallel execution
-	e.doneWg.Add(1)
-	go e.runPath(ctx, initialPath)
 
 	// Process path updates
 	err := e.processPathUpdates(ctx)
@@ -381,7 +405,7 @@ func (e *Execution) addPath(path *executionPath) {
 	state := &PathState{
 		ID:          path.id,
 		Status:      PathStatusPending,
-		CurrentStep: path.currentStep,
+		CurrentStep: path.currentStep.Name(),
 		StartTime:   time.Now(),
 		StepOutputs: make(map[string]string),
 	}
@@ -400,7 +424,7 @@ func (e *Execution) processPathUpdates(ctx context.Context) error {
 			if update.err != nil {
 				e.updatePathState(update.pathID, func(state *PathState) {
 					state.Status = PathStatusFailed
-					state.Error = update.err
+					state.ErrorMessage = update.err.Error()
 					state.EndTime = time.Now()
 				})
 				return update.err
@@ -510,6 +534,11 @@ func (e *Execution) runPath(ctx context.Context, path *executionPath) {
 
 		// Continue with the single path
 		path = newPaths[0]
+
+		// Update path state to reflect the new current step
+		e.updatePathState(path.id, func(state *PathState) {
+			state.CurrentStep = path.currentStep.Name()
+		})
 	}
 }
 

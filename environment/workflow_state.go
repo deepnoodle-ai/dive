@@ -11,8 +11,15 @@ type WorkflowState struct {
 	mutex       sync.RWMutex
 }
 
+// ExecutionID returns the execution ID for this workflow state
+func (s *WorkflowState) ExecutionID() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.executionID
+}
+
 // NewWorkflowState creates a new workflow state instance
-func NewWorkflowState(executionID string, recorder interface{}) *WorkflowState {
+func NewWorkflowState(executionID string) *WorkflowState {
 	return &WorkflowState{
 		executionID: executionID,
 		values:      make(map[string]interface{}),

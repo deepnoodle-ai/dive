@@ -15,8 +15,9 @@ type ExecutionCheckpoint struct {
 	Status       string                 `json:"status"`
 	Inputs       map[string]interface{} `json:"inputs"`
 	Outputs      map[string]interface{} `json:"outputs"`
-	State        map[string]interface{} `json:"state"`       // Current workflow state variables
-	PathStates   map[string]*PathState  `json:"path_states"` // Current path states
+	State        map[string]interface{} `json:"state"`        // Current workflow state variables
+	PathStates   map[string]*PathState  `json:"path_states"`  // Current path states
+	PathCounter  int                    `json:"path_counter"` // Counter for generating unique path IDs
 	TotalUsage   *llm.Usage             `json:"total_usage,omitempty"`
 	Error        string                 `json:"error,omitempty"`
 	StartTime    time.Time              `json:"start_time"`
