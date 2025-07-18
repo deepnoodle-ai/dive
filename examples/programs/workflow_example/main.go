@@ -120,9 +120,7 @@ func main() {
 		Workflow:    w,
 		Environment: env,
 		Inputs:      map[string]interface{}{},
-		EventStore:  environment.NewNullEventStore(),
 		Logger:      slogger.DefaultLogger,
-		ReplayMode:  false,
 	})
 	if err != nil {
 		log.Fatal(err)

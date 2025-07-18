@@ -82,9 +82,7 @@ func main() {
 		Workflow:    w,
 		Environment: env,
 		Inputs:      vars,
-		EventStore:  environment.NewNullEventStore(),
 		Logger:      slogger.DefaultLogger,
-		ReplayMode:  false,
 	})
 	if err != nil {
 		fatal(err.Error())

@@ -57,39 +57,6 @@ func convertRisorEachValue(obj object.Object) ([]any, error) {
 	}
 }
 
-// LoadFromSnapshot loads execution state from a snapshot and event history
-func LoadFromSnapshot(ctx context.Context, env *Environment, snapshot *ExecutionSnapshot, eventStore ExecutionEventStore) (*Execution, error) {
-	// Verify the workflow exists
-	if _, exists := env.workflows[snapshot.WorkflowName]; !exists {
-		return nil, fmt.Errorf("workflow not found: %s", snapshot.WorkflowName)
-	}
-
-	exec, err := NewExecution(ExecutionOptions{
-		Environment: env,
-		Workflow:    env.workflows[snapshot.WorkflowName],
-		Inputs:      snapshot.Inputs,
-		EventStore:  eventStore,
-		Logger:      env.logger,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Restore state from snapshot
-	exec.id = snapshot.ID
-	exec.status = ExecutionStatus(snapshot.Status)
-	exec.startTime = snapshot.StartTime
-	exec.endTime = snapshot.EndTime
-	exec.inputs = snapshot.Inputs
-	exec.outputs = snapshot.Outputs
-	// exec.eventSequence = snapshot.LastEventSeq
-
-	if snapshot.Error != "" {
-		exec.err = fmt.Errorf(snapshot.Error)
-	}
-	return exec, nil
-}
-
 // compileScript compiles a risor script with the given globals
 func compileScript(ctx context.Context, code string, globals map[string]any) (*compiler.Code, error) {
 	ast, err := parser.Parse(ctx, code)

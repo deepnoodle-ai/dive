@@ -14,12 +14,22 @@ import (
 	"github.com/diveagents/dive/objects"
 	"github.com/diveagents/dive/slogger"
 	"github.com/diveagents/dive/workflow"
+	"github.com/gofrs/uuid/v5"
 	"github.com/risor-io/risor"
 	"github.com/risor-io/risor/compiler"
 	"github.com/risor-io/risor/modules/all"
 	"github.com/risor-io/risor/object"
 	"github.com/risor-io/risor/parser"
 )
+
+// NewExecutionID returns a new UUID for execution identification
+func NewExecutionID() string {
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic(err)
+	}
+	return id.String()
+}
 
 // ExecutionStatus represents the execution status
 type ExecutionStatus string

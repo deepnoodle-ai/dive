@@ -8,6 +8,14 @@ import (
 	"github.com/diveagents/dive/workflow"
 )
 
+// WorkflowCompatibility represents the compatibility status between two workflow versions
+type WorkflowCompatibility struct {
+	IsCompatible      bool     `json:"is_compatible"`
+	IncompatibleSteps []string `json:"incompatible_steps"`
+	ChangedInputs     []string `json:"changed_inputs"`
+	ChangesSummary    string   `json:"changes_summary"`
+}
+
 // WorkflowHasher provides methods for generating workflow hashes
 type WorkflowHasher interface {
 	HashWorkflow(workflow *workflow.Workflow) (string, error)
