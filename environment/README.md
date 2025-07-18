@@ -1,6 +1,6 @@
 # Environment Package Documentation
 
-The `environment` package provides a comprehensive runtime container for executing AI-powered workflows with deterministic execution, event streaming, and replay capabilities. It orchestrates agents, workflows, and operations while maintaining full execution history for debugging and replay.
+The `environment` package provides a comprehensive runtime container for executing AI-powered workflows with **checkpoint-based execution**, **operation tracking**, and **state management**. It orchestrates agents, workflows, and operations while maintaining execution state through simple, reliable checkpointing for recovery and debugging.
 
 ## Table of Contents
 
@@ -8,7 +8,7 @@ The `environment` package provides a comprehensive runtime container for executi
 - [Core Concepts](#core-concepts)
 - [Key Interfaces & Structs](#key-interfaces--structs)
 - [Execution System](#execution-system)
-- [Event System](#event-system)
+- [Checkpoint System](#checkpoint-system)
 - [Operations & Determinism](#operations--determinism)
 - [Path Management](#path-management)
 - [State Management](#state-management)
@@ -19,8 +19,7 @@ The `environment` package provides a comprehensive runtime container for executi
 
 The environment package serves as the orchestration layer for the Dive framework, providing:
 
-- **Deterministic Execution**: Reproducible workflow runs with full replay capabilities
-- **Event Streaming**: Real-time execution events for monitoring and debugging
+- **Checkpoint-Based Execution**: Simple, reliable state persistence with automatic recovery
 - **Operation Tracking**: Deterministic handling of non-deterministic operations (LLM calls, file I/O)
 - **Path Management**: Support for parallel execution paths and conditional branching
 - **State Management**: Safe, scriptable state with Risor integration
@@ -40,20 +39,22 @@ An `Environment` is a container that manages:
 
 ### Execution
 
-An `Execution` represents a single deterministic run of a workflow, featuring:
-- **Deterministic Operations**: Non-deterministic calls (LLM, I/O) are tracked and replayable
+An `Execution` represents a single run of a workflow, featuring:
+- **Checkpoint-Based State**: Simple state persistence with automatic recovery
+- **Operation Tracking**: Non-deterministic calls (LLM, I/O) are logged for debugging
 - **Path Branching**: Support for parallel execution paths
-- **Event Recording**: Complete execution history
 - **State Management**: Safe scripting environment with Risor
-- **Content Fingerprinting**: Deterministic tracking of dynamic content
+- **Token Usage Tracking**: Comprehensive LLM usage monitoring
 
 ### Operations
 
-Operations represent non-deterministic function calls that need to be tracked for replay:
+Operations represent non-deterministic function calls that need to be tracked:
 - LLM agent responses
 - File I/O operations  
 - External API calls
 - Script executions
+
+Each operation is logged with its parameters, results, and timing for debugging and analysis.
 
 ## Key Interfaces & Structs
 
@@ -108,17 +109,17 @@ type Execution struct {
     inputs      map[string]interface{}
     outputs     map[string]interface{}
     
-    // Deterministic execution
-    operationResults map[OperationID]*OperationResult
-    replayMode       bool
+    // Checkpoint-based persistence
+    operationLogger OperationLogger
+    checkpointer    ExecutionCheckpointer
     
     // Path management
     paths       map[string]*PathState
     activePaths map[string]*executionPath
     
-    // Event recording
-    recorder ExecutionRecorder
+    // State management
     state    *WorkflowState
+    totalUsage llm.Usage
 }
 ```
 
@@ -126,7 +127,7 @@ type Execution struct {
 - `NewExecution(opts ExecutionOptions) (*Execution, error)` - Create execution
 - `Run(ctx context.Context) error` - Execute workflow to completion
 - `ExecuteOperation(ctx context.Context, op Operation, fn func() (interface{}, error)) (interface{}, error)` - Execute tracked operation
-- `LoadFromEvents(ctx context.Context) error` - Replay from recorded events
+- `LoadFromCheckpoint(ctx context.Context) error` - Load state from latest checkpoint
 
 ### ExecutionStatus
 
@@ -160,10 +161,10 @@ type Operation struct {
 ```go
 // Create environment
 env, err := environment.New(environment.Options{
-    Name:    "MyEnvironment",
-    Agents:  []dive.Agent{myAgent},
+    Name:      "MyEnvironment",
+    Agents:    []dive.Agent{myAgent},
     Workflows: []*workflow.Workflow{myWorkflow},
-    Logger:  slogger.DefaultLogger,
+    Logger:    slogger.DefaultLogger,
 })
 if err != nil {
     return err
@@ -174,7 +175,6 @@ execution, err := environment.NewExecution(environment.ExecutionOptions{
     Workflow:    myWorkflow,
     Environment: env,
     Inputs:      map[string]interface{}{"query": "Hello"},
-    EventStore:  myEventStore,
     Logger:      env.logger,
 })
 if err != nil {
@@ -188,320 +188,83 @@ if err := execution.Run(ctx); err != nil {
 }
 ```
 
-### Replay Mode
+### Execution Recovery
 
 ```go
-// Create execution in replay mode
-execution, err := environment.NewExecutionFromReplay(environment.ExecutionOptions{
-    Workflow:    myWorkflow,
-    Environment: env,
-    Inputs:      originalInputs,
-    EventStore:  myEventStore,
-    ReplayMode:  true,
+// Execution automatically attempts to load from latest checkpoint
+execution, err := environment.NewExecution(environment.ExecutionOptions{
+    Workflow:     myWorkflow,
+    Environment:  env,
+    Inputs:       originalInputs,
+    ExecutionID:  existingExecutionID, // Resume specific execution
 })
+
+// Run will automatically continue from last checkpoint
+if err := execution.Run(ctx); err != nil {
+    return fmt.Errorf("execution failed: %w", err)
+}
 ```
 
-## Event System
+## Checkpoint System
 
-The event system provides comprehensive visibility into workflow execution through a rich set of event types that capture every aspect of execution flow, state changes, and operations. Events enable deterministic replay, debugging, monitoring, and audit trails.
+The checkpoint system provides simple, reliable state persistence for workflow executions.
 
-### Event Categories
+### Checkpoint Components
 
-#### 1. Execution Lifecycle Events
-
-These events track the overall execution lifecycle of a workflow.
-
-**`execution_started`** - Emitted when a workflow execution begins
+**ExecutionCheckpoint** - Complete execution state snapshot
 ```go
-type ExecutionStartedData struct {
-    WorkflowName string                 `json:"workflow_name"` // Name of the workflow being executed
-    Inputs       map[string]interface{} `json:"inputs"`        // Initial inputs to the workflow
+type ExecutionCheckpoint struct {
+    ID           string                     `json:"id"`
+    ExecutionID  string                     `json:"execution_id"`
+    WorkflowName string                     `json:"workflow_name"`
+    Status       string                     `json:"status"`
+    Inputs       map[string]interface{}     `json:"inputs"`
+    Outputs      map[string]interface{}     `json:"outputs"`
+    State        map[string]interface{}     `json:"state"`
+    PathStates   map[string]*PathState      `json:"path_states"`
+    TotalUsage   *llm.Usage                 `json:"total_usage"`
+    StartTime    time.Time                  `json:"start_time"`
+    EndTime      time.Time                  `json:"end_time"`
+    CheckpointAt time.Time                  `json:"checkpoint_at"`
+    Error        string                     `json:"error,omitempty"`
 }
 ```
-*Occurs*: At the very beginning of workflow execution, before any paths or steps are started.
-*Purpose*: Establishes the execution context and captures initial state for replay.
 
-**`execution_completed`** - Emitted when a workflow execution completes successfully
+**ExecutionCheckpointer** - Interface for checkpoint persistence
 ```go
-type ExecutionCompletedData struct {
-    Outputs map[string]interface{} `json:"outputs"` // Final outputs produced by the workflow
-}
-```
-*Occurs*: When all execution paths have completed successfully and final outputs are collected.
-*Purpose*: Records successful completion and final results.
-
-**`execution_failed`** - Emitted when a workflow execution fails
-```go
-type ExecutionFailedData struct {
-    Error string `json:"error"` // Error message describing the failure
-}
-```
-*Occurs*: When execution encounters an unrecoverable error that prevents completion.
-*Purpose*: Records failure reason for debugging and monitoring.
-
-**`execution_continue_as_new`** - Emitted for workflow continuation patterns
-*Purpose*: Supports long-running workflows that need to restart with new state.
-
-#### 2. Path Management Events
-
-These events track the execution paths within a workflow, including parallel execution and branching.
-
-**`path_started`** - Emitted when a new execution path begins
-```go
-type PathStartedData struct {
-    CurrentStep string `json:"current_step"` // Name of the first step in this path
-}
-```
-*Occurs*: When a new execution path is created, either at workflow start or due to branching.
-*Purpose*: Tracks the beginning of independent execution paths for parallel processing.
-
-**`path_completed`** - Emitted when an execution path completes successfully
-```go
-type PathCompletedData struct {
-    FinalStep string `json:"final_step"` // Name of the last step executed in this path
-}
-```
-*Occurs*: When all steps in a path have completed successfully.
-*Purpose*: Records successful path completion for synchronization and monitoring.
-
-**`path_failed`** - Emitted when an execution path fails
-```go
-type PathFailedData struct {
-    Error string `json:"error"` // Error message describing the path failure
-}
-```
-*Occurs*: When a path encounters an error that prevents further execution.
-*Purpose*: Records path-specific failures for debugging while other paths may continue.
-
-**`path_branched`** - Emitted when execution creates multiple parallel paths
-```go
-type PathBranchedData struct {
-    NewPaths []PathBranchInfo `json:"new_paths"` // Information about newly created paths
-}
-
-type PathBranchInfo struct {
-    ID             string `json:"id"`              // Unique identifier for the new path
-    CurrentStep    string `json:"current_step"`    // First step in the new path
-    InheritOutputs bool   `json:"inherit_outputs"` // Whether the path inherits parent outputs
-}
-```
-*Occurs*: When conditional logic or parallel steps create multiple execution paths.
-*Purpose*: Records branching decisions for replay and tracks parallel execution structure.
-
-#### 3. Step Execution Events
-
-These events track individual workflow step execution, providing detailed visibility into step-by-step progress.
-
-**`step_started`** - Emitted when a workflow step begins execution
-```go
-type StepStartedData struct {
-    StepType   string                 `json:"step_type"`   // Type of step (e.g., "agent", "script", "condition")
-    StepParams map[string]interface{} `json:"step_params"` // Parameters configured for this step
-}
-```
-*Occurs*: Just before a step's execution logic is invoked.
-*Purpose*: Records step initiation with configuration for debugging and replay.
-
-**`step_completed`** - Emitted when a workflow step completes successfully
-```go
-type StepCompletedData struct {
-    Output         string `json:"output"`                    // Result output from the step
-    StoredVariable string `json:"stored_variable,omitempty"` // Variable name if output was stored
-}
-```
-*Occurs*: When a step finishes execution successfully and produces output.
-*Purpose*: Records step results and variable assignments for state tracking.
-
-**`step_failed`** - Emitted when a workflow step fails
-```go
-type StepFailedData struct {
-    Error string `json:"error"` // Error message describing the step failure
-}
-```
-*Occurs*: When a step encounters an error during execution.
-*Purpose*: Records step-level failures with detailed error information.
-
-#### 4. Operation Events
-
-These events track deterministic operations that need to be recorded for replay, such as LLM calls, file I/O, and external API calls.
-
-**`operation_started`** - Emitted when a deterministic operation begins
-```go
-type OperationStartedData struct {
-    OperationID   string                 `json:"operation_id"`   // Unique identifier for this operation
-    OperationType string                 `json:"operation_type"` // Type of operation (e.g., "agent_response", "file_read")
-    Parameters    map[string]interface{} `json:"parameters"`     // Operation parameters for deterministic replay
-}
-```
-*Occurs*: Before executing any non-deterministic operation that affects execution flow.
-*Purpose*: Records operation parameters for deterministic replay and caching.
-
-**`operation_completed`** - Emitted when a deterministic operation completes successfully
-```go
-type OperationCompletedData struct {
-    OperationID   string        `json:"operation_id"`   // Unique identifier matching the started event
-    OperationType string        `json:"operation_type"` // Type of operation completed
-    Duration      time.Duration `json:"duration"`       // Time taken to complete the operation
-    Result        interface{}   `json:"result"`         // Result data from the operation
-}
-```
-*Occurs*: When a deterministic operation finishes successfully.
-*Purpose*: Records operation results for replay and performance monitoring.
-
-**`operation_failed`** - Emitted when a deterministic operation fails
-```go
-type OperationFailedData struct {
-    OperationID   string        `json:"operation_id"`   // Unique identifier matching the started event
-    OperationType string        `json:"operation_type"` // Type of operation that failed
-    Duration      time.Duration `json:"duration"`       // Time taken before failure
-    Error         string        `json:"error"`          // Error message describing the failure
-}
-```
-*Occurs*: When a deterministic operation encounters an error.
-*Purpose*: Records operation failures for debugging and retry logic.
-
-#### 5. State Management Events
-
-These events track changes to workflow state and variable assignments.
-
-**`state_mutated`** - Emitted when workflow state is modified
-```go
-type StateMutatedData struct {
-    Mutations []StateMutation `json:"mutations"` // List of state changes made
-}
-
-type StateMutation struct {
-    Type  StateMutationType `json:"type"`            // "set" or "delete"
-    Key   string            `json:"key,omitempty"`   // Variable name being modified
-    Value interface{}       `json:"value,omitempty"` // New value (for set operations)
-}
-```
-*Occurs*: When workflow variables are set, updated, or deleted.
-*Purpose*: Tracks state changes for replay and debugging variable flow.
-
-#### 6. Deterministic Access Events
-
-These events ensure deterministic behavior by recording access to non-deterministic system resources.
-
-**`time_accessed`** - Emitted when current time is accessed during execution
-```go
-type TimeAccessedData struct {
-    AccessedAt time.Time `json:"accessed_at"` // When the time access occurred
-    Value      time.Time `json:"value"`       // The time value that was returned
-}
-```
-*Occurs*: When workflow logic accesses current time (e.g., for timestamps, delays).
-*Purpose*: Ensures deterministic replay by recording exact time values used.
-
-**`random_generated`** - Emitted when random values are generated during execution
-```go
-type RandomGeneratedData struct {
-    Seed   int64       `json:"seed"`   // Seed used for random generation
-    Value  interface{} `json:"value"`  // The random value that was generated
-    Method string      `json:"method"` // Method used ("int", "float", "string", etc.)
-}
-```
-*Occurs*: When workflow logic generates random numbers, strings, or other random data.
-*Purpose*: Ensures deterministic replay by recording exact random values used.
-
-#### 7. Script State Management Events
-
-These events track scripting operations within workflow steps, providing visibility into iteration loops.
-
-**`iteration_started`** - Emitted when a loop iteration begins
-```go
-type IterationStartedData struct {
-    IterationIndex int         `json:"iteration_index"`     // Zero-based index of this iteration
-    Item           interface{} `json:"item"`                // The item being processed in this iteration
-    ItemKey        string      `json:"item_key,omitempty"`  // Key for the item (if iterating over a map)
-}
-```
-*Occurs*: At the start of each iteration in loops (for, while, each).
-*Purpose*: Tracks loop execution progress for debugging and replay.
-
-**`iteration_completed`** - Emitted when a loop iteration completes
-```go
-type IterationCompletedData struct {
-    IterationIndex int         `json:"iteration_index"`     // Zero-based index of the completed iteration
-    Item           interface{} `json:"item"`                // The item that was processed
-    ItemKey        string      `json:"item_key,omitempty"`  // Key for the item (if iterating over a map)
-    Result         interface{} `json:"result"`              // Result produced by this iteration
-}
-```
-*Occurs*: When each iteration in loops completes successfully.
-*Purpose*: Records iteration results for debugging and state tracking.
-
-#### 8. Control Flow Events
-
-**`signal_received`** - Emitted when external signals are received during execution
-*Purpose*: Tracks external control signals that may affect execution flow.
-
-**`version_decision`** - Emitted when workflow versioning decisions are made
-*Purpose*: Records workflow version selection for compatibility tracking.
-
-### Event Structure
-
-All events share a common structure with typed data:
-
-```go
-type ExecutionEvent struct {
-    ID          string             `json:"id"`          // Unique event identifier
-    ExecutionID string             `json:"execution_id"` // Execution this event belongs to
-    Sequence    int64              `json:"sequence"`     // Sequential event number within execution
-    Timestamp   time.Time          `json:"timestamp"`    // When the event occurred
-    EventType   ExecutionEventType `json:"event_type"`   // Type of event (see above)
-    Path        string             `json:"path,omitempty"` // Execution path identifier (if applicable)
-    Step        string             `json:"step,omitempty"` // Step name (if applicable)
-    
-    // Legacy field for backward compatibility
-    Data map[string]interface{} `json:"data,omitempty"`
-    
-    // Strongly typed event data
-    TypedData ExecutionEventData `json:"typed_data,omitempty"`
+type ExecutionCheckpointer interface {
+    SaveCheckpoint(ctx context.Context, checkpoint *ExecutionCheckpoint) error
+    LoadCheckpoint(ctx context.Context, executionID string) (*ExecutionCheckpoint, error)
 }
 ```
 
-### Event Flow Example
+### Checkpoint Behavior
 
-A typical workflow execution generates events in this sequence:
-
-1. `execution_started` - Workflow begins
-2. `path_started` - Initial execution path starts
-3. `step_started` - First step begins
-4. `operation_started` - LLM call initiated
-5. `operation_completed` - LLM call completes
-6. `step_completed` - First step completes
-7. `condition_evaluated` - Conditional logic evaluated
-8. `path_branched` - Multiple paths created based on condition
-9. `path_started` - New parallel paths begin
-10. `step_started` - Steps in parallel paths begin
-11. ... (more step and operation events)
-12. `path_completed` - Parallel paths complete
-13. `execution_completed` - Workflow completes
-
-This event stream provides complete visibility into execution flow and enables perfect replay of workflow behavior.
+- **Automatic Checkpointing**: Checkpoint saved after every operation for maximum reliability
+- **Recovery on Start**: Executions automatically attempt to load from latest checkpoint
+- **Idempotent Operations**: Operations are designed to be safely retried from checkpoints
+- **State Consistency**: Complete execution state captured in each checkpoint
 
 ## Operations & Determinism
 
-### Deterministic Operation Execution
+### Operation Execution
 
-Operations ensure deterministic execution by:
+Operations ensure reliable execution tracking by:
 
-1. **ID Generation**: Deterministic IDs based on operation parameters
-2. **Result Caching**: Results cached for replay
-3. **Content Fingerprinting**: Dynamic content tracked by hash
-4. **Event Recording**: All operations recorded with full context
+1. **Unique ID Generation**: Deterministic IDs based on operation parameters
+2. **Comprehensive Logging**: All operations logged with parameters, results, and timing
+3. **Checkpoint Integration**: State saved after each operation
+4. **Error Tracking**: Failed operations logged with detailed error information
 
 ```go
-// Execute a deterministic operation
+// Execute a tracked operation
 op := Operation{
     Type:     "agent_response",
     StepName: step.Name(),
     PathID:   pathID,
     Parameters: map[string]interface{}{
-        "agent":           agent.Name(),
-        "prompt":          prompt,
-        "content_hash":    contentSnapshot.Fingerprint.Hash,
+        "agent":  agent.Name(),
+        "prompt": prompt,
     },
 }
 
@@ -510,20 +273,20 @@ result, err := execution.ExecuteOperation(ctx, op, func() (interface{}, error) {
 })
 ```
 
-### Content Fingerprinting
+### Operation Logging
 
 ```go
-type ContentFingerprint struct {
-    Hash    string `json:"hash"`    // SHA256 hash of content
-    Source  string `json:"source"`  // Content source identifier
-    Size    int64  `json:"size"`    // Content size in bytes
-    ModTime string `json:"modtime"` // Modification time for files
-}
-
-type ContentSnapshot struct {
-    Fingerprint ContentFingerprint `json:"fingerprint"`
-    Content     []llm.Content      `json:"content"`
-    Raw         []byte             `json:"raw,omitempty"`
+type OperationLogEntry struct {
+    ID            string                 `json:"id"`
+    ExecutionID   string                 `json:"execution_id"`
+    StepName      string                 `json:"step_name"`
+    PathID        string                 `json:"path_id"`
+    OperationType string                 `json:"operation_type"`
+    Parameters    map[string]interface{} `json:"parameters"`
+    Result        interface{}            `json:"result"`
+    StartTime     time.Time              `json:"start_time"`
+    Duration      time.Duration          `json:"duration"`
+    Error         string                 `json:"error,omitempty"`
 }
 ```
 
@@ -544,7 +307,7 @@ const (
 type PathState struct {
     ID          string            `json:"id"`
     Status      PathStatus        `json:"status"`
-    CurrentStep *workflow.Step    `json:"current_step,omitempty"`
+    CurrentStep string            `json:"current_step"`
     StartTime   time.Time         `json:"start_time"`
     EndTime     time.Time         `json:"end_time,omitempty"`
     StepOutputs map[string]string `json:"step_outputs"`
@@ -565,13 +328,9 @@ if err != nil {
 
 // Multiple paths indicate branching
 if len(newPaths) > 1 {
-    // Record branching event
-    execution.recorder.RecordEvent(EventPathBranched, pathID, stepName, map[string]interface{}{
-        "new_paths": pathData,
-    })
-    
     // Start new paths concurrently
     for _, newPath := range newPaths {
+        execution.addPath(newPath)
         go execution.runPath(ctx, newPath)
     }
 }
@@ -706,28 +465,48 @@ env, err := environment.New(environment.Options{
 })
 ```
 
-### Event Streaming
+### Custom Checkpointing
 
 ```go
-// Implement custom event store
-type MyEventStore struct{}
+// Implement custom checkpointer
+type MyCheckpointer struct{}
 
-func (s *MyEventStore) RecordEvent(event *environment.ExecutionEvent) error {
-    // Store event in your preferred backend
-    log.Printf("Event: %s - %s", event.EventType, event.Step)
+func (c *MyCheckpointer) SaveCheckpoint(ctx context.Context, checkpoint *environment.ExecutionCheckpoint) error {
+    // Store checkpoint in your preferred backend
+    log.Printf("Saving checkpoint: %s", checkpoint.ID)
     return nil
 }
 
-func (s *MyEventStore) GetEvents(ctx context.Context, executionID string) ([]*environment.ExecutionEvent, error) {
-    // Retrieve events from storage  
-    return events, nil
+func (c *MyCheckpointer) LoadCheckpoint(ctx context.Context, executionID string) (*environment.ExecutionCheckpoint, error) {
+    // Load checkpoint from storage  
+    return checkpoint, nil
 }
 
 // Use with execution
 execution, err := environment.NewExecution(environment.ExecutionOptions{
-    Workflow:   myWorkflow,
-    Environment: env,
-    EventStore: &MyEventStore{},
+    Workflow:     myWorkflow,
+    Environment:  env,
+    Checkpointer: &MyCheckpointer{},
+})
+```
+
+### Operation Logging
+
+```go
+// Implement custom operation logger
+type MyOperationLogger struct{}
+
+func (l *MyOperationLogger) LogOperation(ctx context.Context, entry *environment.OperationLogEntry) error {
+    // Log operation to your preferred system
+    log.Printf("Operation: %s - %s took %v", entry.OperationType, entry.StepName, entry.Duration)
+    return nil
+}
+
+// Use with execution
+execution, err := environment.NewExecution(environment.ExecutionOptions{
+    Workflow:        myWorkflow,
+    Environment:     env,
+    OperationLogger: &MyOperationLogger{},
 })
 ```
 
@@ -793,4 +572,24 @@ env, err := environment.New(environment.Options{
 // Actions: "document.read", "document.write"
 ```
 
-The environment package provides a robust foundation for building deterministic, observable, and replayable AI workflow systems. Its event-driven architecture and operation tracking enable sophisticated debugging, testing, and production monitoring capabilities.
+## Key Design Principles
+
+### Simplicity
+
+The checkpoint-based design prioritizes simplicity and reliability over complex event sourcing patterns. Checkpoints provide sufficient state recovery capabilities while being much easier to understand, debug, and maintain.
+
+### Reliability
+
+- **Automatic Recovery**: Executions automatically resume from the latest checkpoint
+- **Operation Tracking**: All non-deterministic operations are logged for debugging
+- **State Consistency**: Complete execution state is captured in each checkpoint
+- **Error Handling**: Comprehensive error tracking and recovery mechanisms
+
+### Observability
+
+- **Operation Logging**: Detailed logging of all operations with timing and results
+- **State Snapshots**: Complete state visibility through checkpoints
+- **Path Tracking**: Visibility into parallel execution paths and their states
+- **Token Usage**: Comprehensive LLM usage tracking across all operations
+
+The environment package provides a robust foundation for building reliable, observable, and recoverable AI workflow systems. Its checkpoint-based architecture enables sophisticated debugging, testing, and production monitoring capabilities while maintaining simplicity and ease of use.

@@ -14,36 +14,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("error opening source file: %v", err)
+		return err
 	}
 	defer srcFile.Close()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("error creating destination file: %v", err)
+		return err
 	}
 	defer dstFile.Close()
 
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		return fmt.Errorf("error copying file: %v", err)
-	}
-	return nil
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }
 
-func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databasePath string) error {
-	ctx := context.Background()
+func runWorkflow(filePath string, workflowName string, logLevel slogger.LogLevel) error {
 	startTime := time.Now()
 
+	ctx := context.Background()
+	logger := slogger.New(logLevel)
+
 	// Check if path is a directory or file
-	fi, err := os.Stat(path)
+	fi, err := os.Stat(filePath)
 	if err != nil {
-		return fmt.Errorf("❌ Cannot access workflow path '%s': %v%s", path, err, suggestWorkflowPaths())
+		return fmt.Errorf("❌ Cannot access workflow path '%s': %v", filePath, err)
 	}
 
-	configDir := path
+	configDir := filePath
 	basePath := ""
 
 	// If a single file is provided, copy it to a temporary directory
@@ -55,24 +56,24 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 		}
 		defer os.RemoveAll(tmpDir)
 
-		dst := filepath.Join(tmpDir, filepath.Base(path))
-		if err := copyFile(path, dst); err != nil {
+		dst := filepath.Join(tmpDir, filepath.Base(filePath))
+		if err := copyFile(filePath, dst); err != nil {
 			return err
 		}
 		configDir = tmpDir
 		// base path should be the original directory containing the file
-		basePath = filepath.Dir(path)
+		basePath = filepath.Dir(filePath)
 	} else {
-		basePath = path
+		basePath = filePath
 	}
 
-	var logger slogger.Logger
-	buildOpts := []config.BuildOption{}
-	if logLevel != 0 {
-		logger = slogger.New(logLevel)
-		buildOpts = append(buildOpts, config.WithLogger(logger))
+	buildOptions := []config.BuildOption{
+		config.WithLogger(logger),
+		config.WithBasePath(basePath),
 	}
-	env, err := config.LoadDirectory(configDir, append(buildOpts, config.WithBasePath(basePath))...)
+
+	// Load and build environment from directory
+	env, err := config.LoadDirectory(configDir, buildOptions...)
 	if err != nil {
 		return fmt.Errorf("❌ Failed to load workflow configuration: %v\n\n💡 Check that your YAML syntax is correct and all required fields are present", err)
 	}
@@ -112,25 +113,12 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 	formatter := NewWorkflowFormatter()
 	formatter.PrintWorkflowHeader(wf, getUserVariables())
 
-	// Create a new event store. We don't use getEventStore because we want to
-	// be able to create the database if it doesn't exist.
-	dbPath, err := getDatabasePath(databasePath)
-	if err != nil {
-		return fmt.Errorf("error getting database path: %v", err)
-	}
-	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, environment.DefaultSQLiteStoreOptions())
-	if err != nil {
-		return fmt.Errorf("error creating event store: %v", err)
-	}
-	defer eventStore.Close()
-
+	// Create execution with simplified checkpoint-based model
 	execution, err := environment.NewExecution(environment.ExecutionOptions{
 		Workflow:    wf,
 		Environment: env,
 		Inputs:      getUserVariables(),
-		EventStore:  eventStore,
 		Logger:      logger,
-		ReplayMode:  false,
 		Formatter:   formatter,
 	})
 	if err != nil {
@@ -156,7 +144,7 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel, databaseP
 var runCmd = &cobra.Command{
 	Use:   "run [file or directory]",
 	Short: "Run a workflow",
-	Long:  "Run a workflow with automatic persistence for retry and recovery",
+	Long:  "Run a workflow with automatic checkpoint-based state management",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		filePath := args[0]
@@ -165,12 +153,7 @@ var runCmd = &cobra.Command{
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		databasePath, err := cmd.Flags().GetString("database")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if err := runWorkflow(filePath, workflowName, getLogLevel(), databasePath); err != nil {
+		if err := runWorkflow(filePath, workflowName, getLogLevel()); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -181,5 +164,4 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 
 	runCmd.Flags().StringP("workflow", "w", "", "Name of the workflow to run")
-	runCmd.Flags().String("database", "", "Path to SQLite database (default: ~/.dive/executions.db)")
 }

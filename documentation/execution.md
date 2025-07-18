@@ -1,3 +1,11 @@
+# ⚠️ DEPRECATED: EventBasedExecution Documentation
+
+> **Note**: This document describes the legacy `EventBasedExecution` system that has been replaced by a simpler checkpoint-based execution model. This documentation is preserved for historical reference only.
+>
+> **Current System**: The environment package now uses a simplified `Execution` model with checkpoint-based state persistence. See `environment/README.md` for current documentation.
+
+---
+
 # EventBasedExecution Internal State Analysis
 
 ## Overview

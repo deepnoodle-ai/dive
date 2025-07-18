@@ -2,19 +2,21 @@
 
 ## Overview
 
-This document describes the design and implementation of deterministic workflow execution in Dive, inspired by Temporal's architecture. The key insight is separating deterministic workflow logic from non-deterministic operations, enabling reliable replay, recovery, and debugging.
+This document describes the design and implementation of deterministic workflow execution in Dive, using a checkpoint-based architecture. The key insight is separating deterministic workflow logic from non-deterministic operations, enabling reliable state recovery, operation tracking, and debugging.
 
 ## The Problem
 
 When a workflow execution crashes or needs to be resumed, we need to reconstruct its exact state. There are two approaches:
 
 1. **State Snapshots**: Save the current state periodically
-   - Problem: Partial updates, inconsistent views, no audit trail
-   - Risk: State corruption during crashes
+   - Benefit: Simple implementation, fast recovery
+   - Challenge: Must ensure state consistency
 
 2. **Event Sourcing**: Record immutable events and replay them
    - Benefit: Complete history, deterministic replay, perfect audit trail
-   - Challenge: Requires separating deterministic and non-deterministic code
+   - Challenge: Complex implementation, requires separating deterministic and non-deterministic code
+
+**Dive's Approach**: We use **checkpoint-based state persistence** combined with **operation tracking**. This provides the reliability benefits of event sourcing while maintaining the simplicity of state snapshots.
 
 ## Core Concepts
 
@@ -26,7 +28,7 @@ When a workflow execution crashes or needs to be resumed, we need to reconstruct
 - Variable assignments
 - Path management
 
-**Non-Deterministic** (Must be recorded once):
+**Non-Deterministic** (Must be tracked for debugging):
 - LLM/Agent responses
 - External API calls
 - File/document operations
@@ -50,320 +52,152 @@ Side Effects (Non-Deterministic)
 ### Operation Definition
 
 ```go
-// OperationID uniquely identifies an operation for replay
-type OperationID string
-
-// Operation represents a non-deterministic operation that produces side effects
 type Operation struct {
-    ID         OperationID    // Unique identifier
-    Type       string         // "agent_response", "action", "external_call"
-    StepName   string         // Which workflow step triggered this
-    Parameters interface{}    // Input parameters
-}
-
-// OperationResult captures the result of an operation execution
-type OperationResult struct {
-    OperationID OperationID
-    Result      interface{}
-    Error       error
-    ExecutedAt  time.Time
+    ID         OperationID            // Unique operation identifier
+    Type       string                 // Operation type (e.g., "agent_response")
+    StepName   string                 // Associated workflow step
+    PathID     string                 // Execution path identifier
+    Parameters map[string]interface{} // Operation parameters
 }
 ```
 
-### Event Types
+### Checkpoint-Based Execution
 
-New event types for operation tracking:
+Instead of event sourcing, Dive uses a simplified checkpoint-based approach:
+
+1. **Operation Tracking**: All non-deterministic operations are logged with their parameters, results, and timing
+2. **Automatic Checkpointing**: Complete execution state is saved after every operation
+3. **State Recovery**: Executions automatically resume from the latest checkpoint
+4. **Debugging Support**: Operation logs provide detailed execution history
+
+### Execution State Management
 
 ```go
-const (
-    // Operation lifecycle events
-    EventOperationStarted   ExecutionEventType = "operation_started"
-    EventOperationCompleted ExecutionEventType = "operation_completed"
-    EventOperationFailed    ExecutionEventType = "operation_failed"
+type Execution struct {
+    // Core state
+    id          string
+    workflow    *workflow.Workflow
+    status      ExecutionStatus
+    inputs      map[string]interface{}
+    outputs     map[string]interface{}
     
-    // Deterministic value access events
-    EventTimeAccessed       ExecutionEventType = "time_accessed"
-    EventRandomGenerated    ExecutionEventType = "random_generated"
-    EventVariableSet        ExecutionEventType = "variable_set"
-)
+    // Checkpoint-based persistence
+    operationLogger OperationLogger
+    checkpointer    ExecutionCheckpointer
+    
+    // Runtime state
+    state       *WorkflowState
+    paths       map[string]*PathState
+    totalUsage  llm.Usage
+}
 ```
 
-### Operation Executor
+## Implementation Patterns
 
-The execution engine provides operation execution with recording/replay:
+### Operation Execution Pattern
 
 ```go
-type OperationExecutor interface {
-    // ExecuteOperation runs an operation with automatic recording/replay
-    ExecuteOperation(op Operation, fn func() (interface{}, error)) (interface{}, error)
+// Execute a tracked operation
+op := Operation{
+    Type:     "agent_response",
+    StepName: step.Name(),
+    PathID:   pathID,
+    Parameters: map[string]interface{}{
+        "agent":  agent.Name(),
+        "prompt": prompt,
+    },
 }
+
+result, err := execution.ExecuteOperation(ctx, op, func() (interface{}, error) {
+    return agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(content...)))
+})
 ```
 
-Implementation in `EventBasedExecution`:
+### State Management Pattern
 
 ```go
-func (e *EventBasedExecution) ExecuteOperation(op Operation, fn func() (interface{}, error)) (interface{}, error) {
-    if e.replayMode {
-        // During replay: return recorded result
-        event := e.findOperationResult(op.ID)
-        if event == nil {
-            panic(fmt.Sprintf("Operation %s not found in replay", op.ID))
-        }
-        return event.Data["result"], event.Data["error"].(error)
-    }
-    
-    // First execution: run and record
-    e.recordEvent(EventOperationStarted, "", op.StepName, map[string]interface{}{
-        "operation_id":   string(op.ID),
-        "operation_type": op.Type,
-        "parameters":     op.Parameters,
-    })
-    
-    result, err := fn()
-    
-    e.recordEvent(EventOperationCompleted, "", op.StepName, map[string]interface{}{
-        "operation_id": string(op.ID),
-        "result":       result,
-        "error":        err,
-    })
-    
-    return result, err
+// Deterministic state updates
+state.Set("variable_name", value)
+
+// State is automatically included in checkpoints
+checkpoint := &ExecutionCheckpoint{
+    State: state.Copy(), // Complete state snapshot
+    // ... other execution data
 }
 ```
 
-## Implementation Examples
-
-### Agent Response (LLM Call)
+### Recovery Pattern
 
 ```go
-func (e *EventBasedExecution) handlePromptStep(ctx context.Context, step *workflow.Step, agent dive.Agent) (*dive.StepResult, error) {
-    // Deterministic: prepare prompt
-    prompt, err := e.evalString(ctx, step.Prompt())
-    if err != nil {
-        return nil, err
-    }
-    
-    // Operation: LLM call
-    op := Operation{
-        ID:       OperationID(fmt.Sprintf("agent:%s:%d", step.Name(), e.eventSequence)),
-        Type:     "agent_response",
-        StepName: step.Name(),
-        Parameters: map[string]interface{}{
-            "prompt": prompt,
-            "agent":  agent.Name(),
-        },
-    }
-    
-    responseInterface, err := e.ExecuteOperation(op, func() (interface{}, error) {
-        return agent.CreateResponse(ctx, dive.WithMessage(llm.NewUserMessage(prompt)))
-    })
-    
-    if err != nil {
-        return nil, err
-    }
-    
-    // Deterministic: process result
-    response := responseInterface.(*dive.Response)
-    return &dive.StepResult{
-        Content: response.OutputText(),
-    }, nil
+// Automatic recovery on execution start
+execution, err := NewExecution(opts)
+if err != nil {
+    return err
 }
+
+// Automatically attempts to load from latest checkpoint
+err = execution.Run(ctx)
 ```
 
-### Action Execution
+## Benefits of Checkpoint-Based Approach
 
-```go
-func (e *EventBasedExecution) handleActionStep(ctx context.Context, step *workflow.Step) (*dive.StepResult, error) {
-    // Deterministic: prepare parameters
-    params := e.evaluateParams(step.Parameters())
-    
-    // Operation: execute action
-    op := Operation{
-        ID:       OperationID(fmt.Sprintf("action:%s:%s:%d", step.Action(), step.Name(), e.eventSequence)),
-        Type:     "action",
-        StepName: step.Name(),
-        Parameters: map[string]interface{}{
-            "action": step.Action(),
-            "params": params,
-        },
-    }
-    
-    result, err := e.ExecuteOperation(op, func() (interface{}, error) {
-        action, _ := e.environment.GetAction(step.Action())
-        return action.Execute(ctx, params)
-    })
-    
-    if err != nil {
-        return nil, err
-    }
-    
-    return &dive.StepResult{Content: fmt.Sprintf("%v", result)}, nil
-}
-```
+### Simplicity
+- **Easy to Understand**: Straightforward state snapshots instead of complex event replay
+- **Simple Debugging**: Direct state inspection without event reconstruction
+- **Easier Testing**: Test against actual state rather than event sequences
 
-### Deterministic Time Access
+### Reliability
+- **Automatic Recovery**: Executions resume seamlessly from checkpoints
+- **State Consistency**: Complete state captured in each checkpoint
+- **Operation Tracking**: Detailed operation logs for debugging and analysis
 
-```go
-func (e *EventBasedExecution) Now() time.Time {
-    if e.replayMode {
-        // Return recorded time
-        event := e.findTimeAccessEvent()
-        return event.Data["time"].(time.Time)
-    }
-    
-    // Record current time
-    now := time.Now()
-    e.recordEvent(EventTimeAccessed, "", "", map[string]interface{}{
-        "time": now,
-    })
-    return now
-}
-```
+### Performance
+- **Fast Recovery**: Direct state loading instead of event replay
+- **Predictable Memory**: State size is bounded and predictable
+- **Simple Storage**: Straightforward checkpoint serialization
 
-## Workflow Versioning
+## Migration from Event Sourcing
 
-Operations enable safe workflow evolution through version decisions:
+The system previously used event sourcing but has migrated to the checkpoint-based approach for the following reasons:
 
-```go
-func (e *EventBasedExecution) GetVersion(changeID string, minVersion, maxVersion int) int {
-    // Check if version decision already recorded
-    for _, event := range e.eventHistory {
-        if event.EventType == EventVersionDecision {
-            if event.Data["change_id"] == changeID {
-                return event.Data["version"].(int)
-            }
-        }
-    }
-    
-    // Record new version decision
-    version := maxVersion // Use latest for new executions
-    e.recordEvent(EventVersionDecision, "", "", map[string]interface{}{
-        "change_id":   changeID,
-        "version":     version,
-        "min_version": minVersion,
-        "max_version": maxVersion,
-    })
-    
-    return version
-}
+1. **Reduced Complexity**: Checkpoint-based execution is significantly simpler to implement and maintain
+2. **Sufficient Recovery**: Checkpoints provide adequate recovery capabilities for workflow execution
+3. **Better Debugging**: Direct state inspection is more intuitive than event replay
+4. **Operational Simplicity**: Checkpoint management is more straightforward than event store management
 
-// Usage in workflow
-func (e *EventBasedExecution) executeStepWithVersioning(step *workflow.Step) error {
-    version := e.GetVersion("add_fraud_check_v2", 1, 2)
-    
-    if version >= 2 {
-        // New version: includes fraud check
-        if err := e.executeFraudCheck(step); err != nil {
-            return err
-        }
-    }
-    // Version 1: skip fraud check
-    
-    return e.executeMainLogic(step)
-}
-```
+### Preserved Benefits
+- **Operation Tracking**: Non-deterministic operations are still logged for debugging
+- **State Recovery**: Executions can still be resumed from failure points
+- **Debugging Support**: Comprehensive logging provides execution visibility
+- **Deterministic Design**: Clear separation between deterministic and non-deterministic code
 
-## Benefits
+### Simplified Implementation
+- **No Event Replay**: Direct state loading eliminates replay complexity
+- **Unified State Model**: Single state representation instead of event sequences
+- **Streamlined Recovery**: Simple checkpoint loading instead of event processing
 
-1. **Deterministic Replay**: Workflow logic replays identically every time
-2. **Failure Recovery**: Resume from any point using event history
-3. **Perfect Debugging**: Step through execution deterministically
-4. **Testability**: Test workflows with mocked operation results
-5. **Observability**: Complete audit trail of all decisions and operations
-6. **Safe Evolution**: Workflows can evolve without breaking running instances
+## Best Practices
 
-## Implementation Phases
+### Operation Design
+1. **Keep Operations Atomic**: Each operation should be a single, complete unit of work
+2. **Parameterize Properly**: Include all necessary parameters for operation identification
+3. **Handle Errors Gracefully**: Operations should be designed to handle and report errors cleanly
 
-### Phase 1: Core Operation Framework (Week 1-2)
-- [ ] Implement Operation and OperationResult types
-- [ ] Add ExecuteOperation to EventBasedExecution
-- [ ] Create operation event types
-- [ ] Update event recording/replay
+### State Management
+1. **Minimize State Size**: Keep workflow state focused on essential data
+2. **Use Immutable Data**: Prefer immutable data structures where possible
+3. **Clear Variable Names**: Use descriptive names for state variables
 
-### Phase 2: Refactor Existing Code (Week 3-4)
-- [ ] Wrap agent.CreateResponse calls in operations
-- [ ] Wrap action.Execute calls in operations
-- [ ] Add deterministic time/random access
-- [ ] Update script variable mutations to record events
+### Debugging
+1. **Use Operation Logs**: Leverage operation logs for debugging non-deterministic behavior
+2. **Inspect Checkpoints**: Use checkpoint data to understand execution state
+3. **Monitor Performance**: Track operation timing and resource usage
 
-### Phase 3: Enhanced Replay (Week 5-6)
-- [ ] Implement operation-aware replay
-- [ ] Add replay validation
-- [ ] Create debugging tools
-- [ ] Performance optimization
+## Future Considerations
 
-### Phase 4: Workflow Versioning (Week 7-8)
-- [ ] Implement GetVersion mechanism
-- [ ] Add version decision events
-- [ ] Create migration patterns
-- [ ] Document versioning best practices
+While the current checkpoint-based approach meets our needs, future enhancements could include:
 
-### Phase 5: Testing & Validation (Week 9-10)
-- [ ] Comprehensive test suite
-- [ ] Determinism validators
-- [ ] Performance benchmarks
-- [ ] Documentation and examples
-
-## Design Principles
-
-1. **Never call non-deterministic functions directly in workflow code**
-2. **Always wrap external calls in operations**
-3. **Record all operation results in event history**
-4. **During replay, use recorded results instead of re-executing**
-5. **Keep workflow logic pure and side-effect free**
-6. **Make operation IDs deterministic and unique**
-7. **Fail fast if replay diverges from recorded history**
-
-## Testing Strategy
-
-### Determinism Tests
-
-```go
-func TestDeterministicReplay(t *testing.T) {
-    workflow := loadWorkflow("test_workflow")
-    inputs := map[string]interface{}{"value": 42}
-    
-    // Run twice with same inputs
-    events1 := runExecution(workflow, inputs)
-    events2 := runExecution(workflow, inputs)
-    
-    // Operation results will differ, but the sequence must be identical
-    require.Equal(t, extractOperationSequence(events1), extractOperationSequence(events2))
-}
-```
-
-### Replay Tests
-
-```go
-func TestReplayRecovery(t *testing.T) {
-    // Run partial execution
-    events := runExecutionUntilStep(workflow, inputs, "step3")
-    
-    // Replay from history
-    execution := replayFromEvents(events)
-    
-    // Continue execution
-    execution.Resume()
-    
-    // Verify completion
-    require.Equal(t, "completed", execution.Status())
-}
-```
-
-## Migration Path
-
-For existing Dive workflows:
-
-1. **Audit**: Identify all non-deterministic operations
-2. **Wrap**: Convert to use ExecuteOperation
-3. **Test**: Verify deterministic replay
-4. **Deploy**: Enable event-based execution
-5. **Monitor**: Track replay success rates
-
-## Future Enhancements
-
-- **Operation Batching**: Execute multiple operations in parallel
-- **Operation Caching**: Cache frequently used operation results
-- **Distributed Execution**: Run operations on different workers
-- **Operation Timeouts**: Configurable timeouts per operation type
-- **Operation Retries**: Built-in retry logic with exponential backoff
+- **Configurable Checkpoint Frequency**: Allow tuning checkpoint frequency based on workload
+- **Checkpoint Compression**: Compress large state for storage efficiency
+- **Selective State Snapshots**: Checkpoint only changed state portions
+- **Distributed Checkpointing**: Support for distributed execution environments

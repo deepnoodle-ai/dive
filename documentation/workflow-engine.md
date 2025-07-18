@@ -2,23 +2,25 @@
 
 ## Overview
 
-This document captures the key architectural decisions for designing a YAML-defined workflow engine that uses LLM interactions as activities, inspired by event-centric systems like Temporal.
+This document captures the key architectural decisions for designing a YAML-defined workflow engine that uses LLM interactions as activities, with a **checkpoint-based execution model** for reliability and simplicity.
 
 ## Core Architecture
 
-### Event-Centric Design with Activities Pattern
+### Checkpoint-Based Design with Operation Tracking
 
-**Decision**: Treat LLM prompt steps as activities (non-deterministic) while keeping workflow orchestration deterministic.
+**Decision**: Use checkpoint-based state persistence combined with operation tracking for non-deterministic activities (LLM calls, external operations).
 
 **Rationale**: 
-- Provides fault tolerance and replay capabilities
+- Provides fault tolerance and recovery capabilities
+- Much simpler than event sourcing while maintaining reliability
 - Clear separation between orchestration logic and external interactions
-- Follows proven patterns from Temporal
+- Easy to understand and debug
 
 **Implementation**:
-- Each YAML prompt step = one activity execution
-- Workflow coordination logic must be deterministic
-- Activities (LLM calls) can be non-deterministic and are treated as black boxes
+- Each workflow step execution is tracked and logged
+- Complete execution state is checkpointed after every operation
+- Activities (LLM calls, actions) are tracked for debugging and analysis
+- Automatic recovery from checkpoints on execution restart
 
 ## Script Usage Categories
 
@@ -52,7 +54,7 @@ This document captures the key architectural decisions for designing a YAML-defi
 
 **Rationale**: 
 - Conditional and template scripts affect workflow decisions and must be replayable
-- Activity scripts are isolated and their results are recorded, not their execution process
+- Activity scripts are isolated and their results are stored in checkpoints
 - Clear boundaries prevent accidental non-determinism in critical paths
 
 ### Script Enforcement Strategy
@@ -63,9 +65,9 @@ This document captures the key architectural decisions for designing a YAML-defi
 
 ## State Management
 
-### Event Sourcing via Store Pattern
+### Checkpoint-Based Store Pattern
 
-**Decision**: Use `Store:` syntax that internally generates "VariableSet" events
+**Decision**: Use `Store:` syntax that updates workflow state with automatic checkpointing
 
 **User Interface**:
 ```yaml
@@ -76,19 +78,21 @@ This document captures the key architectural decisions for designing a YAML-defi
 ```
 
 **Internal Implementation**:
-```json
-{
-  "type": "VariableSet",
-  "step_id": "analyze_language_step_1", 
-  "variable": "language_analysis",
-  "value": "Python is a high-level...",
-  "timestamp": "2025-06-13T10:30:00Z"
+```go
+// State update tracked in checkpoint
+state.Set("language_analysis", "Python is a high-level...")
+
+// Automatic checkpoint after operation
+checkpoint := &ExecutionCheckpoint{
+    State: state.Copy(),
+    // ... complete execution state
 }
+checkpointer.SaveCheckpoint(ctx, checkpoint)
 ```
 
 **Benefits**:
 - Users get simple mental model (set variable)
-- Engine gets event sourcing benefits (replay, audit trail, fault tolerance)
+- Engine gets reliability benefits (recovery, audit trail, fault tolerance)
 - Clean abstraction hides complexity while preserving power
 
 ### Script Activity State Updates
@@ -98,106 +102,141 @@ This document captures the key architectural decisions for designing a YAML-defi
 **Rationale**:
 - Consistent user experience across all step types
 - Maintains activity pattern (input → output → store)
-- Preserves event sourcing benefits
-- Activities remain pure functions
+- State updates are automatically checkpointed
 
-**Example**:
-```yaml
-- Name: Process With External Data
-  Type: script
-  Script: |
-    external_data = fetch_data(state.user_id)
-    return process(external_data)
-  Store: processed_result
-```
+### Operation Tracking
 
-## Variable Access Patterns
-
-### Workflow Inputs
-
-**Decision**: Use `inputs.<name>` pattern for accessing workflow inputs
+**Decision**: Track all non-deterministic operations for debugging and analysis
 
 **Implementation**:
-```yaml
-# Workflow definition
-Inputs:
-  user_id: string
-  config:
-    threshold: float
-
-Steps:
-  - Name: Process
-    Script: |
-      user_id = inputs.user_id
-      threshold = inputs.config.threshold
+```go
+type OperationLogEntry struct {
+    ID            string
+    ExecutionID   string
+    StepName      string
+    OperationType string
+    Parameters    map[string]interface{}
+    Result        interface{}
+    StartTime     time.Time
+    Duration      time.Duration
+    Error         string
+}
 ```
 
-**Rationale**:
-- Clear distinction from state variables
-- Explicit and unambiguous
-- Prevents name conflicts
+**Benefits**:
+- Complete visibility into execution behavior
+- Detailed debugging information
+- Performance monitoring
+- Audit trail for compliance
 
-### State Variables
+## Execution Model
 
-**Decision**: Use `state.<name>` pattern for accessing blackboard state
+### Checkpoint-Based Recovery
 
-**Alternatives Considered**:
-- `store.<name>` - Rejected due to verb/noun confusion with `Store:` YAML key
-- `vars.<name>` - Good but less semantically accurate
-- `data.<name>` - Too generic
-- `blackboard.<name>` - More verbose, less familiar
-
-**Final Choice**: `state.<name>`
+**Decision**: Save complete execution state after every operation
 
 **Rationale**:
-- Most semantically accurate (represents workflow state)
-- Familiar concept across many domains (state machines, UI frameworks)
-- Clear distinction from inputs and local variables
-- Prevents accidental assignment (read-only in scripts)
+- Simple and reliable recovery mechanism
+- No complex event replay logic needed
+- Fast recovery with direct state loading
+- Predictable memory and storage requirements
 
-### Complete Access Pattern
-
-**Final Pattern**:
-```yaml
-- Name: Complex Processing
-  Type: script
-  Script: |
-    # Workflow inputs (immutable)
-    user_id = inputs.user_id
-    config = inputs.processing_config
-    
-    # Workflow state (read-only)
-    previous_analysis = state.last_analysis
-    current_step = state.current_step
-    
-    # Local variables
-    external_data = fetch_external(user_id)
-    
-    return process_all(previous_analysis, external_data, config)
-  Store: final_result
+**Implementation**:
+```go
+type ExecutionCheckpoint struct {
+    ID           string
+    ExecutionID  string
+    Status       string
+    Inputs       map[string]interface{}
+    Outputs      map[string]interface{}
+    State        map[string]interface{}  // Complete workflow state
+    PathStates   map[string]*PathState   // Parallel execution paths
+    TotalUsage   *llm.Usage             // LLM usage tracking
+    CheckpointAt time.Time
+}
 ```
 
-## Key Design Principles
+### Path Management
 
-1. **Deterministic Core**: Workflow orchestration and decision logic must be deterministic for replay
-2. **Activity Isolation**: External interactions happen in activities that can be non-deterministic
-3. **Event Sourcing**: All state changes via events for replay capability and audit trails
-4. **Clear Abstractions**: Hide complexity (event sourcing) while preserving power
-5. **Consistent Patterns**: Same mental models across all step types (Store, inputs, state)
-6. **Safe Defaults**: Prevent accidental non-determinism through restricted script contexts
+**Decision**: Support parallel execution paths with individual state tracking
 
-## Benefits of This Design
+**Implementation**:
+- Each path maintains its own state and execution context
+- Paths can branch based on conditional logic
+- All paths are tracked in the checkpoint
+- Failed paths don't affect other paths
 
-- **Reliability**: Event sourcing provides fault tolerance and replay capabilities
-- **Usability**: Simple YAML interface hides implementation complexity
-- **Flexibility**: Script activities allow non-deterministic work when needed
-- **Debuggability**: Complete audit trail of all state changes
-- **Consistency**: Uniform patterns across all workflow operations
-- **Safety**: Clear boundaries prevent common mistakes
+### Deterministic Design
 
-## Implementation Notes
+**Decision**: Maintain clear separation between deterministic and non-deterministic code
 
-- Script execution contexts must be set up differently based on usage (conditional vs activity)
-- State objects should be read-only proxies in script contexts
-- Event replay mechanism needed for workflow recovery
-- Consider state validation schemas to prevent corruption
+**Deterministic Components**:
+- Workflow orchestration logic
+- Condition evaluation
+- State variable assignments
+- Path management decisions
+
+**Non-Deterministic Components** (Tracked via Operations):
+- LLM/Agent responses
+- External API calls
+- File I/O operations
+- Time-dependent operations
+- Random value generation
+
+## Benefits of Current Architecture
+
+### Simplicity
+- **Easy to understand**: Checkpoint-based model is intuitive
+- **Simple debugging**: Direct state inspection
+- **Straightforward testing**: Test against actual state snapshots
+
+### Reliability
+- **Automatic recovery**: Executions resume from latest checkpoint
+- **Complete state capture**: No partial or inconsistent state
+- **Operation tracking**: Full visibility into non-deterministic operations
+
+### Performance
+- **Fast recovery**: Direct state loading vs. event replay
+- **Bounded memory**: Predictable state size
+- **Efficient storage**: Simple checkpoint serialization
+
+### Operational Benefits
+- **Easy monitoring**: Clear execution state visibility
+- **Simple backup**: Checkpoint-based backup strategies
+- **Debugging support**: Rich operation logs and state snapshots
+
+## Design Principles
+
+### State Management
+1. **Explicit State Updates**: All state changes go through the state interface
+2. **Automatic Checkpointing**: State persisted after every operation
+3. **Immutable Operations**: Operations are logged but not replayed
+
+### Operation Tracking
+1. **Track All Side Effects**: Every non-deterministic operation is logged
+2. **Complete Parameter Capture**: All operation inputs are recorded
+3. **Result and Error Tracking**: Both success and failure cases are logged
+
+### Recovery Model
+1. **Checkpoint-First**: Always attempt recovery from latest checkpoint
+2. **Graceful Degradation**: Handle checkpoint corruption gracefully
+3. **Operation Awareness**: Use operation logs for debugging recovery issues
+
+## Future Enhancements
+
+### Enhanced Checkpointing
+- **Configurable Frequency**: Allow tuning checkpoint frequency
+- **Compression**: Compress large state for storage efficiency
+- **Incremental Checkpoints**: Only save changed state portions
+
+### Advanced Operation Tracking
+- **Operation Metrics**: Track performance and resource usage
+- **Operation Grouping**: Batch related operations for efficiency
+- **Retry Logic**: Built-in retry mechanisms for failed operations
+
+### Distributed Execution
+- **Distributed Checkpoints**: Support for distributed execution environments
+- **Path Partitioning**: Execute different paths on different workers
+- **Shared State Management**: Coordinated state updates across workers
+
+This checkpoint-based architecture provides a robust foundation for reliable workflow execution while maintaining simplicity and ease of use.

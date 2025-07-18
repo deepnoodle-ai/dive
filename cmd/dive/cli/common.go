@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/diveagents/dive/environment"
 )
 
 // getDiveConfigDir returns the dive configuration directory, creating it if it doesn't exist
@@ -38,26 +36,6 @@ func getDatabasePath(databaseFlag string) (string, error) {
 	return filepath.Join(diveDir, "executions.db"), nil
 }
 
-// getEventStore creates an event store instance for the given database path
-func getEventStore(databaseFlag string) (environment.ExecutionEventStore, error) {
-	dbPath, err := getDatabasePath(databaseFlag)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if database exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("database not found: %s\n\n💡 Tip: Run a workflow first to create execution history:\n   dive run examples/workflows/current_time", dbPath)
-	}
-
-	eventStore, err := environment.NewSQLiteExecutionEventStore(dbPath, environment.DefaultSQLiteStoreOptions())
-	if err != nil {
-		return nil, fmt.Errorf("error opening database: %v", err)
-	}
-
-	return eventStore, nil
-}
-
 // validateExecutionStatus validates and suggests valid status values
 func validateExecutionStatus(status string) error {
 	if status == "" {
@@ -65,15 +43,13 @@ func validateExecutionStatus(status string) error {
 	}
 
 	validStatuses := []string{"pending", "running", "completed", "failed"}
-	status = strings.ToLower(status)
-
-	for _, valid := range validStatuses {
-		if status == valid {
+	for _, validStatus := range validStatuses {
+		if status == validStatus {
 			return nil
 		}
 	}
 
-	return fmt.Errorf("invalid status '%s'. Valid statuses are: %s", status, strings.Join(validStatuses, ", "))
+	return fmt.Errorf("❌ Invalid status '%s'\n\n💡 Valid status values: %s", status, strings.Join(validStatuses, ", "))
 }
 
 // confirmAction prompts the user for confirmation with a standardized message

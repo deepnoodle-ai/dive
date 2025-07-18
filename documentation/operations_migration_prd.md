@@ -1,3 +1,13 @@
+# ✅ COMPLETED: Operations-Based Workflow Execution Migration
+
+> **Status**: This migration has been **completed**. The system now uses a simplified checkpoint-based execution model instead of the full event sourcing approach described in this document.
+>
+> **Current Implementation**: The environment package implements operation tracking with checkpoint-based state persistence, providing the reliability benefits described here while maintaining simplicity.
+>
+> **See**: `environment/README.md` and `environment/execution.go` for the current implementation.
+
+---
+
 # Product Requirements Document: Operations-Based Workflow Execution
 
 ## Executive Summary
