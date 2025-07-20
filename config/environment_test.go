@@ -22,10 +22,6 @@ func TestEnvironment_Build(t *testing.T) {
 		},
 		Tools: []Tool{
 			{
-				Name:    "web_search",
-				Enabled: boolPtr(true),
-			},
-			{
 				Name: "read_file",
 			},
 		},
@@ -35,7 +31,7 @@ func TestEnvironment_Build(t *testing.T) {
 				Goal:     "Assist with research",
 				Provider: "anthropic",
 				Model:    "claude-3-sonnet-20240229",
-				Tools:    []string{"web_search", "read_file"},
+				Tools:    []string{"read_file"},
 			},
 			{
 				Name:     "writer",
