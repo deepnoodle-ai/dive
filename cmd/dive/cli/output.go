@@ -14,23 +14,22 @@ import (
 )
 
 var (
-	// Enhanced color scheme for workflow output
+	// Color scheme for workflow output
 	headerStyle     = color.New(color.FgCyan, color.Bold)
 	workflowSuccess = color.New(color.FgGreen, color.Bold)
 	workflowError   = color.New(color.FgRed, color.Bold)
 	warningStyle    = color.New(color.FgYellow, color.Bold)
-	infoStyle       = color.New(color.FgBlue)
+	infoStyle       = color.New(color.FgCyan)
 	stepStyle       = color.New(color.FgMagenta, color.Bold)
 	inputStyle      = color.New(color.FgCyan)
 	outputStyle     = color.New(color.FgGreen)
 	timeStyle       = color.New(color.FgWhite, color.Faint)
 	borderStyle     = color.New(color.FgWhite, color.Faint)
-	promptStyle     = color.New(color.FgYellow)
-	actionStyle     = color.New(color.FgBlue)
+	mutedStyle      = color.New(color.FgHiBlack)
 )
 
 const (
-	// Unicode box drawing characters for attractive borders
+	// Special characters for styling workflow output
 	boxTopLeft     = "┌"
 	boxTopRight    = "┐"
 	boxBottomLeft  = "└"
@@ -157,6 +156,7 @@ func wrapText(text string, width int) []string {
 // PrintStepOutput displays step output with attractive formatting
 func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 	if strings.TrimSpace(content) == "" {
+		fmt.Println()
 		fmt.Printf("     %s %s\n", checkmark, workflowSuccess.Sprint("Completed (no output)"))
 		fmt.Println() // Add spacing after step completion
 		return
@@ -165,8 +165,8 @@ func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 	fmt.Println() // Add spacing before output
 	fmt.Printf("     %s %s\n", arrow, outputStyle.Sprint("Output:"))
 
-	// Calculate box width based on terminal width
 	termWidth := getTerminalWidth()
+
 	// Account for indentation (5 spaces) and borders (2 chars) and some padding
 	maxContentWidth := termWidth - 10
 	if maxContentWidth < 40 {
@@ -207,7 +207,7 @@ func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 		boxWidth = maxContentWidth
 	}
 
-	// Create top border
+	// Top border
 	fmt.Printf("     %s%s%s\n",
 		borderStyle.Sprint("╭"),
 		borderStyle.Sprint(strings.Repeat("─", boxWidth+2)), // +2 for padding
@@ -225,37 +225,33 @@ func (f *WorkflowFormatter) PrintStepOutput(stepName, content string) {
 			borderStyle.Sprint("│"))
 	}
 
-	// Create bottom border
+	// Bottom border
 	fmt.Printf("     %s%s%s\n",
 		borderStyle.Sprint("╰"),
 		borderStyle.Sprint(strings.Repeat("─", boxWidth+2)),
 		borderStyle.Sprint("╯"))
 
 	fmt.Printf("     %s %s\n", checkmark, workflowSuccess.Sprint("Step completed"))
-	fmt.Println() // Add spacing after step completion
+	fmt.Println()
 }
 
 // PrintStepError displays step error
 func (f *WorkflowFormatter) PrintStepError(stepName string, err error) {
 	fmt.Printf("     %s %s: %s\n", xmark, workflowError.Sprint("Error"), err.Error())
-	fmt.Println() // Add spacing after step error
+	fmt.Println()
 }
 
 // PrintWorkflowComplete displays successful completion
 func (f *WorkflowFormatter) PrintWorkflowComplete(duration time.Duration) {
-	fmt.Println()
 	f.printBox(fmt.Sprintf("%s %s", checkmark, workflowSuccess.Sprintf("Workflow Completed Successfully")))
-	fmt.Printf("   %s Total time: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond)))
+	fmt.Printf("   %s Total time: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond*100)))
 	fmt.Println()
 }
 
 // PrintWorkflowError displays workflow failure
 func (f *WorkflowFormatter) PrintWorkflowError(err error, duration time.Duration) {
-	fmt.Println()
-	f.printBox(fmt.Sprintf("%s %s", xmark, workflowError.Sprintf("Workflow Failed")))
-	fmt.Printf("   %s Error: %s\n", xmark, workflowError.Sprint(err.Error()))
-	fmt.Printf("   %s Time elapsed: %s\n", hourglass, timeStyle.Sprint(duration.Round(time.Millisecond)))
-	fmt.Println()
+	fmt.Printf("\n💥 %s (%s)\n", workflowError.Sprint("Workflow failed"), duration.Round(time.Millisecond))
+	fmt.Println(workflowError.Sprint(err))
 }
 
 // stripANSI removes ANSI escape sequences from text for length calculation
@@ -340,4 +336,23 @@ func (f *WorkflowFormatter) PrintExecutionStats(stats environment.ExecutionStats
 			stats.CompletedPaths,
 			stats.FailedPaths)
 	}
+}
+
+func (f *WorkflowFormatter) PrintExecutionID(id string) {
+	fmt.Printf("🚀 Execution ID: %s\n", infoStyle.Sprint(id))
+}
+
+func (f *WorkflowFormatter) PrintExecutionNextSteps(id string) {
+	fmt.Printf("\n🔎 To inspect this execution:\n")
+	fmt.Printf("   %s\n", mutedStyle.Sprintf("dive executions show %s --events", id))
+	fmt.Printf("\n💡 To resume if it failed:\n")
+	fmt.Printf("   %s\n", mutedStyle.Sprintf("dive executions resume %s", id))
+}
+
+// Implement the environment.WorkflowPathFormatter interface
+func (f *WorkflowFormatter) OnPathStart(path *environment.PathState) {
+	// Let's not print path start events for now, it's too noisy
+}
+
+func (f *WorkflowFormatter) OnPathComplete(path *environment.PathState, err error) {
 }

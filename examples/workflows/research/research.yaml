@@ -57,13 +57,13 @@ Workflows:
           Combine and organize the following research components into a short overview document:
 
           Historical Background:
-          ${historical_research}
+          ${state.historical_research}
 
           Recent Developments:
-          ${recent_news}
+          ${state.recent_news}
 
           Interesting Facts:
-          ${interesting_facts}
+          ${state.interesting_facts}
 
           Respond with a well-structured research document with clear sections in markdown format.
         Store: final_research
@@ -72,4 +72,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/research.md
-          Content: ${final_research}
+          Content: ${state.final_research}

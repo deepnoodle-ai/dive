@@ -41,7 +41,7 @@ Workflows:
         Agent: Artist
         Prompt: |
           Based on the ideas we generated:
-          ${image_ideas}
+          ${state.image_ideas}
 
           Create the first artistic image (Idea 1). Use the image generation tool to generate this image.
 
@@ -52,7 +52,7 @@ Workflows:
         Agent: Artist
         Prompt: |
           Based on the ideas we generated:
-          ${image_ideas}
+          ${state.image_ideas}
 
           Create the second artistic image (Idea 2). Use the image generation tool to generate this image.
 
@@ -63,7 +63,7 @@ Workflows:
         Agent: Artist
         Prompt: |
           Based on the ideas we generated:
-          ${image_ideas}
+          ${state.image_ideas}
 
           Create the third artistic image (Idea 3). Use the image generation tool to generate this image.
 

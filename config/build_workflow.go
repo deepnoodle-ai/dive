@@ -67,6 +67,8 @@ func buildWorkflow(
 				stepType = "action"
 			} else if step.Prompt != "" {
 				stepType = "prompt"
+			} else if step.Script != "" {
+				stepType = "script"
 			}
 		}
 
@@ -85,6 +87,7 @@ func buildWorkflow(
 			Name:       step.Name,
 			Agent:      agent,
 			Prompt:     step.Prompt,
+			Script:     step.Script,
 			Next:       edges,
 			Each:       each,
 			Action:     step.Action,
@@ -129,6 +132,7 @@ func buildWorkflow(
 	return workflow.New(workflow.Options{
 		Name:        workflowDef.Name,
 		Description: workflowDef.Description,
+		Path:        workflowDef.Path,
 		Inputs:      inputs,
 		Output:      output,
 		Steps:       steps,

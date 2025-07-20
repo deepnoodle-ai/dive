@@ -14,36 +14,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("error opening source file: %v", err)
+		return err
 	}
 	defer srcFile.Close()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("error creating destination file: %v", err)
+		return err
 	}
 	defer dstFile.Close()
 
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		return fmt.Errorf("error copying file: %v", err)
-	}
-	return nil
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }
 
-func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
-	ctx := context.Background()
+func runWorkflow(filePath string, workflowName string, logLevel slogger.LogLevel) error {
 	startTime := time.Now()
 
+	ctx := context.Background()
+	logger := slogger.New(logLevel)
+
 	// Check if path is a directory or file
-	fi, err := os.Stat(path)
+	fi, err := os.Stat(filePath)
 	if err != nil {
-		return fmt.Errorf("error accessing path: %v", err)
+		return fmt.Errorf("❌ Cannot access workflow path '%s': %v", filePath, err)
 	}
 
-	configDir := path
+	configDir := filePath
 	basePath := ""
 
 	// If a single file is provided, copy it to a temporary directory
@@ -55,25 +56,26 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 		}
 		defer os.RemoveAll(tmpDir)
 
-		dst := filepath.Join(tmpDir, filepath.Base(path))
-		if err := copyFile(path, dst); err != nil {
+		dst := filepath.Join(tmpDir, filepath.Base(filePath))
+		if err := copyFile(filePath, dst); err != nil {
 			return err
 		}
 		configDir = tmpDir
 		// base path should be the original directory containing the file
-		basePath = filepath.Dir(path)
+		basePath = filepath.Dir(filePath)
 	} else {
-		basePath = path
+		basePath = filePath
 	}
 
-	buildOpts := []config.BuildOption{}
-	if logLevel != 0 {
-		logger := slogger.New(logLevel)
-		buildOpts = append(buildOpts, config.WithLogger(logger))
+	buildOptions := []config.BuildOption{
+		config.WithLogger(logger),
+		config.WithBasePath(basePath),
 	}
-	env, err := config.LoadDirectory(configDir, append(buildOpts, config.WithBasePath(basePath))...)
+
+	// Load and build environment from directory
+	env, err := config.LoadDirectory(configDir, buildOptions...)
 	if err != nil {
-		return fmt.Errorf("error loading environment: %v", err)
+		return fmt.Errorf("❌ Failed to load workflow configuration: %v\n\n💡 Check that your YAML syntax is correct and all required fields are present", err)
 	}
 	if err := env.Start(ctx); err != nil {
 		return fmt.Errorf("error starting environment: %v", err)
@@ -83,48 +85,66 @@ func runWorkflow(path, workflowName string, logLevel slogger.LogLevel) error {
 	if workflowName == "" {
 		workflows := env.Workflows()
 		if len(workflows) != 1 {
-			return fmt.Errorf("you must specify a workflow name")
+			if len(workflows) == 0 {
+				return fmt.Errorf("❌ No workflows found in the configuration\n\n💡 Make sure your YAML file contains a workflow definition")
+			}
+			var workflowNames []string
+			for _, wf := range workflows {
+				workflowNames = append(workflowNames, wf.Name())
+			}
+			return fmt.Errorf("❌ Multiple workflows found. Specify which one to run with --workflow:\n   Available workflows: %v", workflowNames)
 		}
 		workflowName = workflows[0].Name()
 	}
 
-	// Get the workflow for display
-	workflow, err := env.GetWorkflow(workflowName)
+	wf, err := env.GetWorkflow(workflowName)
 	if err != nil {
-		return fmt.Errorf("error getting workflow: %v", err)
+		workflows := env.Workflows()
+		var workflowNames []string
+		for _, wf := range workflows {
+			workflowNames = append(workflowNames, wf.Name())
+		}
+		if len(workflowNames) > 0 {
+			return fmt.Errorf("❌ Workflow '%s' not found\n\n💡 Available workflows: %v", workflowName, workflowNames)
+		}
+		return fmt.Errorf("❌ Workflow '%s' not found: %v", workflowName, err)
 	}
 
-	// Create formatter and display workflow header
 	formatter := NewWorkflowFormatter()
-	formatter.PrintWorkflowHeader(workflow, getUserVariables())
+	formatter.PrintWorkflowHeader(wf, getUserVariables())
 
-	execution, err := env.ExecuteWorkflow(ctx, environment.ExecutionOptions{
-		WorkflowName: workflowName,
-		Inputs:       getUserVariables(),
-		Formatter:    formatter, // Pass formatter to execution
+	// Create execution with simplified checkpoint-based model
+	execution, err := environment.NewExecution(environment.ExecutionOptions{
+		Workflow:    wf,
+		Environment: env,
+		Inputs:      getUserVariables(),
+		Logger:      logger,
+		Formatter:   formatter,
 	})
 	if err != nil {
 		duration := time.Since(startTime)
 		formatter.PrintWorkflowError(err, duration)
-		return fmt.Errorf("error executing workflow: %v", err)
+		return fmt.Errorf("error creating execution: %v", err)
 	}
 
-	if err := execution.Wait(); err != nil {
+	formatter.PrintExecutionID(execution.ID())
+
+	if err := execution.Run(ctx); err != nil {
 		duration := time.Since(startTime)
 		formatter.PrintWorkflowError(err, duration)
-		return fmt.Errorf("error waiting for workflow: %v", err)
+		formatter.PrintExecutionNextSteps(execution.ID())
+		return fmt.Errorf("error running workflow: %v", err)
 	}
 
 	duration := time.Since(startTime)
 	formatter.PrintWorkflowComplete(duration)
-	formatter.PrintExecutionStats(execution.GetStats())
 	return nil
 }
 
 var runCmd = &cobra.Command{
 	Use:   "run [file or directory]",
 	Short: "Run a workflow",
-	Long:  "Run a workflow",
+	Long:  "Run a workflow with automatic checkpoint-based state management",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		filePath := args[0]

@@ -63,9 +63,9 @@ func main() {
 	}
 
 	// Choose the workflow to run
-	var workflow *workflow.Workflow
+	var w *workflow.Workflow
 	if workflowName != "" {
-		workflow, err = env.GetWorkflow(workflowName)
+		w, err = env.GetWorkflow(workflowName)
 		if err != nil {
 			fatal(err.Error())
 		}
@@ -74,28 +74,22 @@ func main() {
 		if len(workflows) != 1 {
 			fatal("You must specify a workflow name")
 		}
-		workflow = workflows[0]
+		w = workflows[0]
 	}
 
 	// Start the workflow
-	execution, err := env.ExecuteWorkflow(ctx, environment.ExecutionOptions{
-		WorkflowName: workflow.Name(),
-		Inputs:       vars,
+	execution, err := environment.NewExecution(environment.ExecutionOptions{
+		Workflow:    w,
+		Environment: env,
+		Inputs:      vars,
+		Logger:      slogger.DefaultLogger,
 	})
 	if err != nil {
 		fatal(err.Error())
 	}
 
 	// Wait for the workflow to complete
-	if err := execution.Wait(); err != nil {
+	if err := execution.Run(ctx); err != nil {
 		fatal(err.Error())
-	}
-
-	// Print the outputs
-	outputs := execution.StepOutputs()
-	for name, output := range outputs {
-		if output != "" {
-			fmt.Printf("%q output:\n\n%s\n\n", name, output)
-		}
 	}
 }

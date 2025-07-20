@@ -33,6 +33,7 @@ type Trigger struct {
 type Workflow struct {
 	name        string
 	description string
+	path        string
 	inputs      []*Input
 	output      *Output
 	steps       []*Step
@@ -44,6 +45,7 @@ type Workflow struct {
 type Options struct {
 	Name        string
 	Description string
+	Path        string
 	Inputs      []*Input
 	Output      *Output
 	Steps       []*Step
@@ -65,6 +67,7 @@ func New(opts Options) (*Workflow, error) {
 	w := &Workflow{
 		name:        opts.Name,
 		description: opts.Description,
+		path:        opts.Path,
 		inputs:      opts.Inputs,
 		output:      opts.Output,
 		steps:       opts.Steps,
@@ -75,6 +78,10 @@ func New(opts Options) (*Workflow, error) {
 		return nil, err
 	}
 	return w, nil
+}
+
+func (w *Workflow) Path() string {
+	return w.path
 }
 
 func (w *Workflow) Name() string {
@@ -95,6 +102,10 @@ func (w *Workflow) Output() *Output {
 
 func (w *Workflow) Steps() []*Step {
 	return w.steps
+}
+
+func (w *Workflow) Start() *Step {
+	return w.graph.Start()
 }
 
 func (w *Workflow) Graph() *Graph {

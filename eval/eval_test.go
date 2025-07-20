@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewString(t *testing.T) {
@@ -147,12 +148,18 @@ func TestStringEval(t *testing.T) {
 			wantErr:     true,
 			errContains: "integer divide by zero",
 		},
+		{
+			name:    "list",
+			input:   "Hello ${[1, 'two', true]} There",
+			globals: nil,
+			want:    "Hello 1\n\ntwo\n\ntrue There",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, err := Compile(tt.input, tt.globals)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			evalGlobals := tt.evalGlobals
 			if evalGlobals == nil {

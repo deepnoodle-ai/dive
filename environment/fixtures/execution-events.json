@@ -1,0 +1,101 @@
+[
+  {
+    "id": "event_01jy2xdb79fyn9w6tc240n967f",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "",
+    "sequence": 1,
+    "timestamp": "2025-06-18T21:38:48.169728-04:00",
+    "event_type": "execution_started",
+    "data": {
+      "inputs": {},
+      "workflow_name": "simple-workflow"
+    }
+  },
+  {
+    "id": "event_01jy2xdb79fyns0brzev0sqg13",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "start",
+    "sequence": 2,
+    "timestamp": "2025-06-18T21:38:48.169839-04:00",
+    "event_type": "path_started",
+    "data": {
+      "current_step": "calculate"
+    }
+  },
+  {
+    "id": "event_01jy2xdb7afynttsv6gtyzn31v",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "start",
+    "sequence": 3,
+    "timestamp": "2025-06-18T21:38:48.170055-04:00",
+    "event_type": "step_started",
+    "step_name": "calculate",
+    "data": {
+      "step_params": null,
+      "step_type": "script"
+    }
+  },
+  {
+    "id": "event_01jy2xdb7afyp9akdvk4tjvkk6",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "start",
+    "sequence": 4,
+    "timestamp": "2025-06-18T21:38:48.170637-04:00",
+    "event_type": "operation_started",
+    "data": {
+      "operation_id": "op_8e74ca97e9133ef2c461742f2427b638",
+      "operation_type": "script_execution",
+      "parameters": {
+        "script": "1 + 1"
+      }
+    }
+  },
+  {
+    "id": "event_01jy2xdb7bfyp9y1wfz4gtje93",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "start",
+    "sequence": 5,
+    "timestamp": "2025-06-18T21:38:48.171423-04:00",
+    "event_type": "operation_completed",
+    "data": {
+      "duration": 781917,
+      "operation_id": "op_8e74ca97e9133ef2c461742f2427b638",
+      "operation_type": "script_execution",
+      "result": 2
+    }
+  },
+  {
+    "id": "event_01jy2xdb7bfyprgndcy03awq7q",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "start",
+    "sequence": 6,
+    "timestamp": "2025-06-18T21:38:48.171425-04:00",
+    "event_type": "step_completed",
+    "step_name": "calculate",
+    "data": {
+      "output": "2"
+    }
+  },
+  {
+    "id": "event_01jy2xdb7bfyqbxjwrtccsxy9f",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "start",
+    "sequence": 7,
+    "timestamp": "2025-06-18T21:38:48.171431-04:00",
+    "event_type": "path_completed",
+    "data": {
+      "final_step": "calculate"
+    }
+  },
+  {
+    "id": "event_01jy2xdb7bfyqs8kj52kfecjf6",
+    "execution_id": "exec_01jy2xdb79fymshchx8jdmerg2",
+    "path_id": "",
+    "sequence": 8,
+    "timestamp": "2025-06-18T21:38:48.171436-04:00",
+    "event_type": "execution_completed",
+    "data": {
+      "outputs": {}
+    }
+  }
+]

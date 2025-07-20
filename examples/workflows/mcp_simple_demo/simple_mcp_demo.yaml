@@ -1,5 +1,8 @@
 Name: Simple MCP Demo
-Description: A basic demonstration of MCP integration in Dive workflows
+Description: |
+  A basic demonstration of MCP integration in Dive workflows.
+
+  IMPORTANT: You must have installed `uv` using `brew install uv` or `pip install uv`.
 
 Config:
   DefaultProvider: anthropic
@@ -45,4 +48,4 @@ Workflows:
         Action: Document.Write
         Parameters:
           Path: output/mcp_tools.md
-          Content: ${tool_discovery}
+          Content: ${state.tool_discovery}

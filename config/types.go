@@ -153,6 +153,7 @@ type Step struct {
 	Name       string         `yaml:"Name,omitempty" json:"Name,omitempty"`
 	Agent      string         `yaml:"Agent,omitempty" json:"Agent,omitempty"`
 	Prompt     string         `yaml:"Prompt,omitempty" json:"Prompt,omitempty"`
+	Script     string         `yaml:"Script,omitempty" json:"Script,omitempty"`
 	Store      string         `yaml:"Store,omitempty" json:"Store,omitempty"`
 	Action     string         `yaml:"Action,omitempty" json:"Action,omitempty"`
 	Parameters map[string]any `yaml:"Parameters,omitempty" json:"Parameters,omitempty"`
@@ -183,6 +184,7 @@ type Workflow struct {
 	Output      *Output   `yaml:"Output,omitempty" json:"Output,omitempty"`
 	Triggers    []Trigger `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
 	Steps       []Step    `yaml:"Steps,omitempty" json:"Steps,omitempty"`
+	Path        string    `yaml:"-" json:"-"`
 }
 
 // Trigger represents a trigger definition
