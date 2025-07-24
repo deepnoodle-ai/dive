@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diveagents/dive"
 	"github.com/diveagents/dive/llm"
 	"github.com/diveagents/dive/llm/providers"
 	"github.com/diveagents/dive/retry"
@@ -365,7 +366,21 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 					}
 				case *llm.ToolResultContent:
 					// Each tool result goes in its own message
-					contentStr, _ := c.Content.(string)
+					var contentStr string
+					switch content := c.Content.(type) {
+					case string:
+						contentStr = content
+					case []*dive.ToolResultContent:
+						var texts []string
+						for _, c := range content {
+							if c.Text != "" {
+								texts = append(texts, c.Text)
+							}
+						}
+						contentStr = strings.Join(texts, "\n")
+					default:
+						return nil, fmt.Errorf("unsupported tool result content type")
+					}
 					result = append(result, Message{
 						Role:       "tool",
 						Content:    contentStr,
