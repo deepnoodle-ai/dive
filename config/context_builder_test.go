@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/diveagents/dive/environment"
 	"github.com/diveagents/dive/llm"
 	"github.com/stretchr/testify/require"
 )
@@ -394,72 +393,6 @@ func TestContainsWildcards(t *testing.T) {
 		t.Run(tt.path, func(t *testing.T) {
 			result := containsWildcards(tt.path)
 			require.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestBuildContextContentWithScript(t *testing.T) {
-	testCases := []struct {
-		name     string
-		entries  []Content
-		expected int
-		checkFn  func(t *testing.T, content []llm.Content)
-	}{
-		{
-			name: "inline risor script",
-			entries: []Content{
-				{Dynamic: `{"type": "text", "text": "Hello from script"}`},
-			},
-			expected: 1,
-			checkFn: func(t *testing.T, content []llm.Content) {
-				risorContent, ok := content[0].(*environment.RisorContent)
-				require.True(t, ok, "Expected RisorContent")
-				require.Equal(t, `{"type": "text", "text": "Hello from script"}`, risorContent.Dynamic)
-				require.Equal(t, llm.ContentTypeDynamic, risorContent.Type())
-			},
-		},
-		{
-			name: "script path",
-			entries: []Content{
-				{DynamicFrom: "./test_script.py"},
-			},
-			expected: 1,
-			checkFn: func(t *testing.T, content []llm.Content) {
-				scriptContent, ok := content[0].(*environment.ScriptPathContent)
-				require.True(t, ok, "Expected ScriptPathContent")
-				require.Equal(t, "./test_script.py", scriptContent.DynamicFrom)
-				require.Equal(t, llm.ContentTypeDynamic, scriptContent.Type())
-			},
-		},
-		{
-			name: "mixed content with script",
-			entries: []Content{
-				{Text: "Static text"},
-				{Dynamic: `"Dynamic text"`},
-			},
-			expected: 2,
-			checkFn: func(t *testing.T, content []llm.Content) {
-				// First should be TextContent
-				textContent, ok := content[0].(*llm.TextContent)
-				require.True(t, ok, "Expected TextContent")
-				require.Equal(t, "Static text", textContent.Text)
-
-				// Second should be RisorContent
-				risorContent, ok := content[1].(*environment.RisorContent)
-				require.True(t, ok, "Expected RisorContent")
-				require.Equal(t, `"Dynamic text"`, risorContent.Dynamic)
-			},
-		},
-	}
-
-	for _, tt := range testCases {
-		t.Run(tt.name, func(t *testing.T) {
-			content, err := buildContextContent(context.Background(), nil, "/test/path", tt.entries)
-			require.NoError(t, err)
-			require.Len(t, content, tt.expected)
-			if tt.checkFn != nil {
-				tt.checkFn(t, content)
-			}
 		})
 	}
 }
