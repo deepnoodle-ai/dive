@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/responses"
 )

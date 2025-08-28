@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/diveagents/dive/toolkit/firecrawl"
-	"github.com/diveagents/dive/web"
+	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
+	"github.com/deepnoodle-ai/dive/web"
 )
 
 func main() {

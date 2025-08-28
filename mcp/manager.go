@@ -6,8 +6,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/slogger"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/slogger"
 )
 
 // MCPServerConnection represents a connection to an MCP server

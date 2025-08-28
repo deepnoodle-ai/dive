@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/diveagents/dive/config"
-	"github.com/diveagents/dive/environment"
-	"github.com/diveagents/dive/slogger"
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive/config"
+	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/workflow"
 	"github.com/fatih/color"
 )
 

@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/diveagents/dive/llm"
-	openaic "github.com/diveagents/dive/llm/providers/openaicompletions"
+	"github.com/deepnoodle-ai/dive/llm"
+	openaic "github.com/deepnoodle-ai/dive/llm/providers/openaicompletions"
 )
 
 var (

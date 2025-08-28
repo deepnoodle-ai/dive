@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive/schema"
 	"github.com/stretchr/testify/require"
 )
 

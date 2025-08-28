@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/schema"
 )
 
 var _ dive.TypedTool[*CommandInput] = &CommandTool{}

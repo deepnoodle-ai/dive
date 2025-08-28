@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 )
 
 // // ResponseEventStream interface for streaming response events

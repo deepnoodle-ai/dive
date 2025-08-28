@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers"
-	"github.com/diveagents/dive/retry"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers"
+	"github.com/deepnoodle-ai/dive/retry"
 )
 
 // SystemPromptBehavior describes how the system prompt should be handled for a

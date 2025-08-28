@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // StreamIterator implements the llm.StreamIterator interface for Anthropic streaming responses

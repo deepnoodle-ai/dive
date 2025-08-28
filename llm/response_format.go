@@ -1,6 +1,6 @@
 package llm
 
-import "github.com/diveagents/dive/schema"
+import "github.com/deepnoodle-ai/dive/schema"
 
 type ResponseFormatType string
 

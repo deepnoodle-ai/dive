@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/schema"
 )
 
 var _ dive.TypedTool[*ListDirectoryInput] = &ListDirectoryTool{}

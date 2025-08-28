@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 	"github.com/openai/openai-go"
 	"github.com/stretchr/testify/require"
 )

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 type Condition interface {

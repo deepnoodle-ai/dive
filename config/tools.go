@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/toolkit"
-	"github.com/diveagents/dive/toolkit/firecrawl"
-	"github.com/diveagents/dive/toolkit/google"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/toolkit"
+	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
+	"github.com/deepnoodle-ai/dive/toolkit/google"
 	openaisdk "github.com/openai/openai-go"
 )
 

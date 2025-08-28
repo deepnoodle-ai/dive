@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/openai/openai-go/responses"
 )
 

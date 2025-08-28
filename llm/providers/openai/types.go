@@ -1,7 +1,7 @@
 package openai
 
 import (
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive/schema"
 )
 
 // Include is a type that represents different types of content that can be

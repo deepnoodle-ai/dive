@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 const DefaultPrompt = "Using Python, calculate 53^4."

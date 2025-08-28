@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/ollama"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
+	"github.com/deepnoodle-ai/dive/schema"
 )
 
 func main() {

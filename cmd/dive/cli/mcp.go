@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/diveagents/dive/config"
-	"github.com/diveagents/dive/mcp"
+	"github.com/deepnoodle-ai/dive/config"
+	"github.com/deepnoodle-ai/dive/mcp"
 )
 
 // loadConfigFromPath loads configuration from a file or directory path

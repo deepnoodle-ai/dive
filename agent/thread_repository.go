@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 )
 
 var _ dive.ThreadRepository = &MemoryThreadRepository{}

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 var ErrStreamClosed = errors.New("stream is closed")

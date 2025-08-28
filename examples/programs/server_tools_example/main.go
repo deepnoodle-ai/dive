@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 const DefaultPrompt = "What is the capital of Tanzania? Respond with a name and approximate population only."

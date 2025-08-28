@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/slogger"
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/workflow"
 	"github.com/stretchr/testify/require"
 )
 

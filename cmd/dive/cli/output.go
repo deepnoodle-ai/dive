@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diveagents/dive/environment"
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive/workflow"
 	"github.com/fatih/color"
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"

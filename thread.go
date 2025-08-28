@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 var ErrThreadNotFound = fmt.Errorf("thread not found")

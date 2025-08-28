@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 type StreamIterator struct {

@@ -1,4 +1,4 @@
-module github.com/diveagents/dive
+module github.com/deepnoodle-ai/dive
 
 go 1.23.2
 

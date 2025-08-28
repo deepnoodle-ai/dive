@@ -3,8 +3,8 @@ package dive
 import (
 	"context"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/schema"
 	"github.com/gofrs/uuid/v5"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/diveagents/dive/config"
+	"github.com/deepnoodle-ai/dive/config"
 	"github.com/spf13/cobra"
 )
 

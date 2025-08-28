@@ -3,7 +3,7 @@ package openai
 import (
 	"encoding/json"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 const ContentTypeCodeInterpreterCall llm.ContentType = "code_interpreter_call"

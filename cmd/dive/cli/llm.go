@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/diveagents/dive/config"
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/config"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/spf13/cobra"
 )
 
