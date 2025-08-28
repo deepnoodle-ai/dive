@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/risor-io/risor"
 	"github.com/risor-io/risor/compiler"
 	"github.com/risor-io/risor/modules/all"

@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/diveagents/dive/environment"
+	"github.com/deepnoodle-ai/dive/environment"
 )
 
 func buildTrigger(triggerDef Trigger) (*environment.Trigger, error) {

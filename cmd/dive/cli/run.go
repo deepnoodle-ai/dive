@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/diveagents/dive/config"
-	"github.com/diveagents/dive/environment"
-	"github.com/diveagents/dive/slogger"
+	"github.com/deepnoodle-ai/dive/config"
+	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive/slogger"
 	"github.com/spf13/cobra"
 )
 

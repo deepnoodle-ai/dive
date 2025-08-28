@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 )
 
 // WorkFunc is a function that returns a dive.EventStream.

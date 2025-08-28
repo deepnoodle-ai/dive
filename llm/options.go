@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/diveagents/dive/slogger"
+	"github.com/deepnoodle-ai/dive/slogger"
 )
 
 // Option is a function that is used to adjust LLM configuration.

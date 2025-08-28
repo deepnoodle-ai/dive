@@ -6,7 +6,7 @@ import (
 	"log"
 	"sort"
 
-	"github.com/diveagents/dive/mcp"
+	"github.com/deepnoodle-ai/dive/mcp"
 	"github.com/fatih/color"
 )
 

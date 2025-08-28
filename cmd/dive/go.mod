@@ -1,11 +1,11 @@
-module github.com/diveagents/dive/cmd/dive
+module github.com/deepnoodle-ai/dive/cmd/dive
 
 go 1.23.2
 
-replace github.com/diveagents/dive => ../..
+replace github.com/deepnoodle-ai/dive => ../..
 
 require (
-	github.com/diveagents/dive v0.0.0-00010101000000-000000000000
+	github.com/deepnoodle-ai/dive v0.0.0-00010101000000-000000000000
 	github.com/fatih/color v1.18.0
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/spf13/cobra v1.8.0

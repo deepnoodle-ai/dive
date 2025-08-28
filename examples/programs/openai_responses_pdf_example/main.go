@@ -7,8 +7,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/openai"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/openai"
 )
 
 func main() {

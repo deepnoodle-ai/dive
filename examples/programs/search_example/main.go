@@ -7,16 +7,16 @@ import (
 	"log"
 	"os"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/agent"
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/openai"
-	"github.com/diveagents/dive/slogger"
-	"github.com/diveagents/dive/toolkit"
-	"github.com/diveagents/dive/toolkit/google"
-	"github.com/diveagents/dive/toolkit/kagi"
-	"github.com/diveagents/dive/web"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/agent"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/llm/providers/openai"
+	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/toolkit"
+	"github.com/deepnoodle-ai/dive/toolkit/google"
+	"github.com/deepnoodle-ai/dive/toolkit/kagi"
+	"github.com/deepnoodle-ai/dive/web"
 )
 
 func main() {

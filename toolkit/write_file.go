@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/schema"
 )
 
 var _ dive.TypedTool[*WriteFileInput] = &WriteFileTool{}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 type ResponseItemType string

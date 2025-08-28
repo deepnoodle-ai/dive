@@ -31,9 +31,7 @@ Dive is shaping up nicely, but is still a young project.
 - **Some breaking changes will happen** as the API matures
 - **Not yet recommended for production use**
 
-Join our [Discord community](https://discord.gg/yrcuURWk) to chat with the team and other users.
-
-You can also use [GitHub Discussions](https://github.com/diveagents/dive/discussions) for questions, suggestions, or feedback.
+You can also use [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions) for questions, suggestions, or feedback.
 
 We welcome your input! 🙌
 
@@ -88,7 +86,7 @@ Google Cloud account. See the [Google Custom Search documentation](https://devel
 To get started with Dive as a library, use go get:
 
 ```
-go get github.com/diveagents/dive
+go get github.com/deepnoodle-ai/dive
 ```
 
 Here's a quick example of creating a chat agent:
@@ -174,7 +172,7 @@ dive run workflow.yaml --vars "topic=history of the internet"
 For the moment, you'll need to build the CLI yourself:
 
 ```bash
-git clone git@github.com:diveagents/dive.git
+git clone git@github.com:deepnoodle-ai/dive.git
 cd dive/cmd/dive
 go install .
 ```
@@ -383,7 +381,7 @@ response, err := agent.CreateResponse(ctx,
 Dive uses an Environment to orchestrate agents and manage shared resources:
 
 ```go
-import "github.com/diveagents/dive/environment"
+import "github.com/deepnoodle-ai/dive/environment"
 
 env := environment.New(environment.Options{
     Name: "Research Lab",

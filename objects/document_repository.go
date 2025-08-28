@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 	"github.com/risor-io/risor/object"
 	"github.com/risor-io/risor/op"
 )

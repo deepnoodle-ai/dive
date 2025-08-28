@@ -1,8 +1,8 @@
 package config
 
 import (
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/mcp"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/mcp"
 )
 
 // MCPToolApprovalFilter is used to configure the approval filter for MCP tools.

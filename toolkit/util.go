@@ -1,6 +1,6 @@
 package toolkit
 
-import "github.com/diveagents/dive"
+import "github.com/deepnoodle-ai/dive"
 
 var (
 	NewToolResultError = dive.NewToolResultError

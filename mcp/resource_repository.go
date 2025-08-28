@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 

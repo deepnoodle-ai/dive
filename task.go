@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // TaskStatus is used to convey the status of a Task that an Agent is working on

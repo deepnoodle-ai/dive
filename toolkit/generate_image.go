@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/schema"
 	"github.com/openai/openai-go"
 )
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/stretchr/testify/require"
 )
 

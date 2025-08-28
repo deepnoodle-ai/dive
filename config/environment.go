@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/agent"
-	"github.com/diveagents/dive/environment"
-	"github.com/diveagents/dive/mcp"
-	"github.com/diveagents/dive/slogger"
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/agent"
+	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive/mcp"
+	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/workflow"
 	"github.com/goccy/go-yaml"
 )
 

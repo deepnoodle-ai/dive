@@ -1,7 +1,7 @@
 package llm
 
 import (
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive/schema"
 )
 
 // ToolResult contains the result of a tool call

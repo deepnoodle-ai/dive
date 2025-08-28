@@ -3,7 +3,7 @@ package environment
 import (
 	"time"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // ExecutionStats provides statistics about the execution

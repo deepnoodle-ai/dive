@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 )
 
 var (

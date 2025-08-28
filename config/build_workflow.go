@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/workflow"
 )
 
 func buildWorkflow(

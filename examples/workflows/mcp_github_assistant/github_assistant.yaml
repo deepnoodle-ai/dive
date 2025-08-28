@@ -45,8 +45,8 @@ Workflows:
     Inputs:
       - Name: repository
         Type: string
-        Description: The GitHub repository, e.g. diveagents/dive
-        Default: 'diveagents/dive'
+        Description: The GitHub repository, e.g. deepnoodle-ai/dive
+        Default: 'deepnoodle-ai/dive'
     Steps:
       - Name: Get Repository Info
         Agent: GitHub Assistant

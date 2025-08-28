@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/web"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/web"
 )
 
 const DefaultImageURL = "https://upload.wikimedia.org/wikipedia/commons/f/f1/Kusuma_bike_large.jpg"

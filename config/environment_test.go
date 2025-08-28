@@ -3,9 +3,9 @@ package config
 import (
 	"testing"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/agent"
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/agent"
+	"github.com/deepnoodle-ai/dive/workflow"
 	"github.com/stretchr/testify/assert"
 )
 

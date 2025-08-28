@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // ExecutionCheckpoint represents a complete snapshot of execution state

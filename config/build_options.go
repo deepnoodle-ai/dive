@@ -1,9 +1,9 @@
 package config
 
 import (
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/slogger"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/slogger"
 )
 
 type BuildOptions struct {

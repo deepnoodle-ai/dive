@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 )
 
 var _ dive.DocumentRepository = &MemoryDocumentRepository{}

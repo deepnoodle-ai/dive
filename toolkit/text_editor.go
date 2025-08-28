@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/schema"
 )
 
 var (

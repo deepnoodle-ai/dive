@@ -383,9 +383,9 @@ import (
     "context"
     "log"
     
-    "github.com/diveagents/dive/environment"
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/workflow"
+    "github.com/deepnoodle-ai/dive/environment"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/workflow"
 )
 
 func main() {

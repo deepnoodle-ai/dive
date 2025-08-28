@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/diveagents/dive/cmd/dive/cli"
+	"github.com/deepnoodle-ai/dive/cmd/dive/cli"
 )
 
 func main() {

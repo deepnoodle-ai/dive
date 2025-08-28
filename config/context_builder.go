@@ -12,9 +12,9 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/environment"
-	"github.com/diveagents/dive/llm"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // buildContextContent converts a list of context entries (string paths/URLs or

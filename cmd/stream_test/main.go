@@ -8,11 +8,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	openaic "github.com/diveagents/dive/llm/providers/openaicompletions"
-	"github.com/diveagents/dive/toolkit"
-	"github.com/diveagents/dive/toolkit/google"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	openaic "github.com/deepnoodle-ai/dive/llm/providers/openaicompletions"
+	"github.com/deepnoodle-ai/dive/toolkit"
+	"github.com/deepnoodle-ai/dive/toolkit/google"
 	"github.com/fatih/color"
 )
 

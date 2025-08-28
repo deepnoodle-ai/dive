@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/openai"
-	"github.com/diveagents/dive/schema"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/openai"
+	"github.com/deepnoodle-ai/dive/schema"
 	"github.com/fatih/color"
 )
 

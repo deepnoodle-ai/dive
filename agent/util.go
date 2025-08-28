@@ -3,11 +3,11 @@ package agent
 import (
 	"os"
 
-	"github.com/diveagents/dive"
-	"github.com/diveagents/dive/llm"
-	"github.com/diveagents/dive/llm/providers/anthropic"
-	"github.com/diveagents/dive/llm/providers/groq"
-	"github.com/diveagents/dive/llm/providers/openai"
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/llm/providers/groq"
+	"github.com/deepnoodle-ai/dive/llm/providers/openai"
 )
 
 func detectProvider() (llm.LLM, bool) {

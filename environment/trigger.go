@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive/workflow"
 )
 
 type Trigger struct {

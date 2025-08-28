@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/diveagents/dive/web"
+	"github.com/deepnoodle-ai/dive/web"
 )
 
 var _ web.Fetcher = &Client{}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/diveagents/dive"
+	"github.com/deepnoodle-ai/dive"
 	"github.com/stretchr/testify/require"
 )
 

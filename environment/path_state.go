@@ -3,7 +3,7 @@ package environment
 import (
 	"time"
 
-	"github.com/diveagents/dive/workflow"
+	"github.com/deepnoodle-ai/dive/workflow"
 )
 
 // PathStatus represents the current state of an execution path

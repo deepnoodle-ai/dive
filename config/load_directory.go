@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/diveagents/dive/environment"
+	"github.com/deepnoodle-ai/dive/environment"
 )
 
 // LoadDirectory loads all YAML and JSON files from a directory and combines
