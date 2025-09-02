@@ -16,7 +16,6 @@ require (
 	github.com/risor-io/risor v1.8.1
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/term v0.34.0
 )
 
 require (
