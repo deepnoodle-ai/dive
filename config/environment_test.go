@@ -5,7 +5,6 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/agent"
-	"github.com/deepnoodle-ai/dive/workflow"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -90,42 +89,12 @@ func TestEnvironment_Build(t *testing.T) {
 	writer := findAgentByName(agents, "writer")
 	assert.NotNil(t, writer)
 	assert.False(t, writer.(*agent.Agent).IsSupervisor())
-
-	// Verify workflows
-	workflows := result.Workflows()
-	assert.Len(t, workflows, 1)
-
-	// Verify research-and-write workflow
-	researchWorkflow := findWorkflowByName(workflows, "Research and Write")
-	assert.NotNil(t, researchWorkflow)
-	assert.Equal(t, "Research and write workflow", researchWorkflow.Description())
-
-	// Verify workflow steps
-	steps := researchWorkflow.Steps()
-	assert.Len(t, steps, 2)
-
-	// Verify step names
-	stepNames := make([]string, len(steps))
-	for i, step := range steps {
-		stepNames[i] = step.Name()
-	}
-	assert.Contains(t, stepNames, "Research")
-	assert.Contains(t, stepNames, "Write")
 }
 
 func findAgentByName(agents []dive.Agent, name string) dive.Agent {
 	for _, agent := range agents {
 		if agent.Name() == name {
 			return agent
-		}
-	}
-	return nil
-}
-
-func findWorkflowByName(workflows []*workflow.Workflow, name string) *workflow.Workflow {
-	for _, wf := range workflows {
-		if wf.Name() == name {
-			return wf
 		}
 	}
 	return nil

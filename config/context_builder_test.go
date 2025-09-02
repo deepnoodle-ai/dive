@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive/eval"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/stretchr/testify/require"
 )
@@ -412,7 +412,7 @@ func TestBuildContextContentWithScript(t *testing.T) {
 			},
 			expected: 1,
 			checkFn: func(t *testing.T, content []llm.Content) {
-				risorContent, ok := content[0].(*environment.RisorContent)
+				risorContent, ok := content[0].(*eval.RisorContent)
 				require.True(t, ok, "Expected RisorContent")
 				require.Equal(t, `{"type": "text", "text": "Hello from script"}`, risorContent.Dynamic)
 				require.Equal(t, llm.ContentTypeDynamic, risorContent.Type())
@@ -425,7 +425,7 @@ func TestBuildContextContentWithScript(t *testing.T) {
 			},
 			expected: 1,
 			checkFn: func(t *testing.T, content []llm.Content) {
-				scriptContent, ok := content[0].(*environment.ScriptPathContent)
+				scriptContent, ok := content[0].(*eval.ScriptPathContent)
 				require.True(t, ok, "Expected ScriptPathContent")
 				require.Equal(t, "./test_script.py", scriptContent.DynamicFrom)
 				require.Equal(t, llm.ContentTypeDynamic, scriptContent.Type())
@@ -445,7 +445,7 @@ func TestBuildContextContentWithScript(t *testing.T) {
 				require.Equal(t, "Static text", textContent.Text)
 
 				// Second should be RisorContent
-				risorContent, ok := content[1].(*environment.RisorContent)
+				risorContent, ok := content[1].(*eval.RisorContent)
 				require.True(t, ok, "Expected RisorContent")
 				require.Equal(t, `"Dynamic text"`, risorContent.Dynamic)
 			},

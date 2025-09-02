@@ -15,7 +15,6 @@ import (
 	"github.com/deepnoodle-ai/dive/environment"
 	"github.com/deepnoodle-ai/dive/mcp"
 	"github.com/deepnoodle-ai/dive/slogger"
-	"github.com/deepnoodle-ai/dive/workflow"
 	"github.com/goccy/go-yaml"
 )
 
@@ -213,26 +212,6 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		agents = append(agents, agent)
 	}
 
-	// Workflows
-	var workflows []*workflow.Workflow
-	for _, workflowDef := range env.Workflows {
-		workflow, err := buildWorkflow(ctx, docRepo, workflowDef, agents, basePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build workflow %s: %w", workflowDef.Name, err)
-		}
-		workflows = append(workflows, workflow)
-	}
-
-	// Triggers
-	var triggers []*environment.Trigger
-	for _, triggerDef := range env.Triggers {
-		trigger, err := buildTrigger(triggerDef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build trigger %s: %w", triggerDef.Name, err)
-		}
-		triggers = append(triggers, trigger)
-	}
-
 	var threadRepo dive.ThreadRepository
 	if buildOpts.ThreadRepo != nil {
 		threadRepo = buildOpts.ThreadRepo
@@ -245,8 +224,6 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		Name:               env.Name,
 		Description:        env.Description,
 		Agents:             agents,
-		Workflows:          workflows,
-		Triggers:           triggers,
 		Logger:             logger,
 		DocumentRepository: docRepo,
 		ThreadRepository:   threadRepo,
