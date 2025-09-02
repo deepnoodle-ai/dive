@@ -1,6 +1,6 @@
 <div align="center">
 
-<h1>Dive - The AI Toolkit for Go</h1>
+<h1>Dive</h1>
 
 <a href="https://www.anthropic.com"><img alt="Claude" src="https://img.shields.io/badge/Claude-6B48FF.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://www.openai.com"><img alt="GPT-4" src="https://img.shields.io/badge/GPT--4o%20|%20o1%20|%20o3-10A37F.svg?style=for-the-badge&labelColor=000000"></a>
@@ -10,12 +10,11 @@
 
 </div>
 
-Dive is an AI toolkit for Go that can be used to create specialized AI agents, automate
-workflows, and quickly integrate with the leading LLMs.
+Dive is an AI toolkit for Go that can be used to create specialized teams of AI
+agents and quickly integrate with the leading LLMs.
 
 - 🚀 Embed it in your Go apps
 - 🤖 Create specialized agents
-- 🪄 Define multi-step workflows
 - 🛠️ Arm agents with tools
 - ⚡ Stream responses in real-time
 
@@ -41,19 +40,17 @@ Please leave a GitHub star if you're interested in the project!
 
 * **Agents**: Chat or assign work to specialized agents with configurable reasoning
 * **Supervisor Patterns**: Create hierarchical agent systems with work delegation
-* **Workflows**: Define multi-step workflows for automation
-* **Declarative Configuration**: Define agents and workflows using YAML
+* **Declarative Configuration**: Define agents using YAML
 * **Multiple LLMs**: Switch between Anthropic, OpenAI, Groq, Ollama, and others
 * **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
 * **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
 * **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
 * **Tools**: Give agents rich capabilities to interact with the world
 * **Tool Annotations**: Semantic hints about tool behavior (read-only, destructive, etc.)
-* **Streaming**: Stream agent and workflow events for realtime UI updates
-* **CLI**: Run workflows, chat with agents, and more
+* **Streaming**: Stream agent events for realtime UI updates
+* **CLI**: Run agents, chat with agents, and more
 * **Thread Management**: Persistent conversation threads with memory
 * **Confirmation System**: Built-in confirmation system for destructive operations
-* **Scripting**: Embed scripts in workflows for extensibility
 * **Deep Research**: Use multiple agents to perform deep research
 
 ## Quick Start
@@ -120,13 +117,13 @@ if err != nil {
 fmt.Println(response.Message.Text())
 ```
 
-### Using Workflows
+### Dive Configurations
 
-Workflows offer a declarative approach to automating multi-step processes:
+Dive configurations offer a declarative approach to defining agents and MCP servers:
 
-```yaml title="workflow.yaml"
+```yaml title="config.yaml"
 Name: Research
-Description: Research a Topic
+Description: Research a topic
 
 Config:
   LogLevel: debug
@@ -140,31 +137,6 @@ Agents:
     Tools:
       - web_search
       - fetch
-
-Workflows:
-  - Name: Research
-    Inputs:
-      - Name: topic
-        Type: string
-    Steps:
-      - Name: Research the Topic
-        Agent: Research Assistant
-        Prompt:
-          Text: "Research the following topic: ${inputs.topic}"
-          Output: A three paragraph overview of the topic
-          OutputFormat: markdown
-        Store: overview
-      - Name: Save the Research
-        Action: Document.Write
-        Parameters:
-          Path: research/${inputs.topic}.md
-          Content: ${overview}
-```
-
-Run a workflow using the Dive CLI:
-
-```bash
-dive run workflow.yaml --vars "topic=history of the internet"
 ```
 
 ### Use the Dive CLI
@@ -179,9 +151,8 @@ go install .
 
 Available CLI commands include:
 
-* `dive run /path/to/workflow.yaml`: Run a workflow
 * `dive chat --provider anthropic --model claude-sonnet-4-20250514`: Chat with an agent
-* `dive config check /path/to/workflow.yaml`: Validate a Dive configuration
+* `dive config check /path/to/config.yaml`: Validate a Dive configuration
 
 ## LLM Providers
 
@@ -221,7 +192,7 @@ response, err := anthropic.New().Generate(
 )
 ```
 
-MCP servers can also be configured in YAML workflows and agent definitions for declarative setup.
+MCP servers can also be configured in YAML configurations for declarative setup.
 
 ### Verified Models
 
@@ -291,9 +262,7 @@ func (t *SearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolRe
 tool := dive.ToolAdapter(searchTool)
 ```
 
-Go interfaces are in-place to support swapping in different tool implementations
-while keeping the same workflows and usage. For example, Brave Search could be
-added as an alternative Web.Search tool backend.
+Go interfaces are in-place to support swapping in different tool implementations.
 
 ## Contributors
 
@@ -309,10 +278,8 @@ improving documentation, or spreading the word, your help is appreciated.
 - Documented approach for RAG
 - AWS Bedrock support
 - Google Cloud Vertex AI support
-- Workflow actions with Risor scripts
 - Voice interactions
 - Agent memory interface
-- Workflow persistence
 - Integrations (Slack, Google Drive, etc.)
 - Expanded CLI
 - Hugging Face support
@@ -323,10 +290,6 @@ improving documentation, or spreading the word, your help is appreciated.
 
 Not at this time. Dive is provided as an open-source framework that you can
 self-host and integrate into your own applications.
-
-### Who is Behind Dive?
-
-Dive is developed by [Stingrai](https://www.getstingrai.com).
 
 ## Advanced Agent Features
 
@@ -375,34 +338,3 @@ response, err := agent.CreateResponse(ctx,
     dive.WithInput("Continue our discussion"),
 )
 ```
-
-## Environment System
-
-Dive uses an Environment to orchestrate agents and manage shared resources:
-
-```go
-import "github.com/deepnoodle-ai/dive/environment"
-
-env := environment.New(environment.Options{
-    Name: "Research Lab",
-})
-
-// Add multiple agents to the environment
-researcher, _ := agent.New(agent.Options{
-    Name:        "Researcher",
-    Environment: env,
-})
-
-analyst, _ := agent.New(agent.Options{
-    Name:        "Data Analyst",
-    Environment: env,
-})
-
-// Agents can now reference each other and share resources
-```
-
-The Environment provides:
-- **Agent Discovery**: Agents can find and delegate to each other
-- **Shared Document Repository**: Common file system access
-- **Thread Management**: Persistent conversation storage
-- **Confirmation System**: Centralized user confirmation handling
