@@ -5,8 +5,7 @@
 <a href="https://www.anthropic.com"><img alt="Claude" src="https://img.shields.io/badge/Claude-6B48FF.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://www.openai.com"><img alt="GPT-4" src="https://img.shields.io/badge/GPT--4o%20|%20o1%20|%20o3-10A37F.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://www.groq.com"><img alt="Groq Models" src="https://img.shields.io/badge/DeepSeek%20|%20Llama%20|%20Qwen-FF6B4A.svg?style=for-the-badge&labelColor=000000"></a>
-<a href="https://www.getstingrai.com"><img alt="Made by Stingrai" src="https://img.shields.io/badge/MADE%20BY%20Stingrai-000000.svg?style=for-the-badge&labelColor=000000"></a>
-<a href="https://discord.gg/yrcuURWk"><img alt="Join our Discord community" src="https://img.shields.io/badge/Join%20our%20community-5865F2.svg?style=for-the-badge&logo=discord&labelColor=000000&logoWidth=20"></a>
+<a href="https://deepnoodle.ai"><img alt="Made by Deep Noodle" src="https://img.shields.io/badge/MADE%20BY%20Deep%20Noodle-000000.svg?style=for-the-badge&labelColor=000000"></a>
 
 </div>
 
