@@ -13,7 +13,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive/eval"
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
@@ -104,13 +104,13 @@ func buildContextContent(ctx context.Context, repo dive.DocumentRepository, base
 			contents = append(contents, content)
 		case entry.Dynamic != "":
 			// Create RisorContent for dynamic script evaluation
-			contents = append(contents, &environment.RisorContent{
+			contents = append(contents, &eval.RisorContent{
 				Dynamic:  entry.Dynamic,
 				BasePath: basePath,
 			})
 		case entry.DynamicFrom != "":
 			// Create ScriptPathContent for dynamic script evaluation
-			contents = append(contents, &environment.ScriptPathContent{
+			contents = append(contents, &eval.ScriptPathContent{
 				DynamicFrom: entry.DynamicFrom,
 				BasePath:    basePath,
 			})

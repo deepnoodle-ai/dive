@@ -7,7 +7,6 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/mcp"
 	"github.com/deepnoodle-ai/dive/slogger"
-	"github.com/deepnoodle-ai/dive/workflow"
 )
 
 // Environment is a container for running agents and workflow executions
@@ -16,9 +15,6 @@ type Environment struct {
 	name            string
 	description     string
 	agents          map[string]dive.Agent
-	workflows       map[string]*workflow.Workflow
-	triggers        []*Trigger
-	executions      map[string]*Execution
 	logger          slogger.Logger
 	defaultWorkflow string
 	documentRepo    dive.DocumentRepository
@@ -28,7 +24,6 @@ type Environment struct {
 	confirmer       dive.Confirmer
 	mcpManager      *mcp.Manager
 	mcpServers      []*mcp.ServerConfig
-	formatter       WorkflowFormatter
 }
 
 // Options are used to configure an Environment.
@@ -37,9 +32,6 @@ type Options struct {
 	Name               string
 	Description        string
 	Agents             []dive.Agent
-	Workflows          []*workflow.Workflow
-	Triggers           []*Trigger
-	Executions         []*Execution
 	Logger             slogger.Logger
 	DefaultWorkflow    string
 	DocumentRepository dive.DocumentRepository
@@ -49,7 +41,6 @@ type Options struct {
 	Confirmer          dive.Confirmer
 	MCPServers         []*mcp.ServerConfig
 	MCPManager         *mcp.Manager
-	Formatter          WorkflowFormatter
 }
 
 // New returns a new Environment configured with the given options.
@@ -69,19 +60,6 @@ func New(opts Options) (*Environment, error) {
 		agents[agent.Name()] = agent
 	}
 
-	workflows := make(map[string]*workflow.Workflow, len(opts.Workflows))
-	for _, workflow := range opts.Workflows {
-		if _, exists := workflows[workflow.Name()]; exists {
-			return nil, fmt.Errorf("workflow already registered: %s", workflow.Name())
-		}
-		workflows[workflow.Name()] = workflow
-	}
-
-	executions := make(map[string]*Execution, len(opts.Executions))
-	for _, execution := range opts.Executions {
-		executions[execution.ID()] = execution
-	}
-
 	actions := make(map[string]Action, len(opts.Actions))
 
 	// Register document actions if we have a document repository
@@ -98,20 +76,11 @@ func New(opts Options) (*Environment, error) {
 		actions[action.Name()] = action
 	}
 
-	if opts.DefaultWorkflow != "" {
-		if _, exists := workflows[opts.DefaultWorkflow]; !exists {
-			return nil, fmt.Errorf("default workflow not found: %s", opts.DefaultWorkflow)
-		}
-	}
-
 	env := &Environment{
 		id:              opts.ID,
 		name:            opts.Name,
 		description:     opts.Description,
 		agents:          agents,
-		workflows:       workflows,
-		triggers:        opts.Triggers,
-		executions:      executions,
 		logger:          opts.Logger,
 		defaultWorkflow: opts.DefaultWorkflow,
 		documentRepo:    opts.DocumentRepository,
@@ -119,10 +88,6 @@ func New(opts Options) (*Environment, error) {
 		actions:         actions,
 		mcpManager:      opts.MCPManager,
 		mcpServers:      opts.MCPServers,
-		formatter:       opts.Formatter,
-	}
-	for _, trigger := range env.triggers {
-		trigger.SetEnvironment(env)
 	}
 	for _, agent := range env.Agents() {
 		agent.SetEnvironment(env)
@@ -174,10 +139,6 @@ func (e *Environment) DefaultAgent() (dive.Agent, bool) {
 	}
 
 	return nil, false
-}
-
-func (e *Environment) Formatter() WorkflowFormatter {
-	return e.formatter
 }
 
 func (e *Environment) DocumentRepository() dive.DocumentRepository {
@@ -249,29 +210,6 @@ func (e *Environment) AddAgent(agent dive.Agent) error {
 		return fmt.Errorf("agent already present: %s", agent.Name())
 	}
 	e.agents[agent.Name()] = agent
-	return nil
-}
-
-func (e *Environment) Workflows() []*workflow.Workflow {
-	workflows := make([]*workflow.Workflow, 0, len(e.workflows))
-	for _, workflow := range e.workflows {
-		workflows = append(workflows, workflow)
-	}
-	return workflows
-}
-
-func (e *Environment) GetWorkflow(name string) (*workflow.Workflow, error) {
-	if workflow, exists := e.workflows[name]; exists {
-		return workflow, nil
-	}
-	return nil, fmt.Errorf("workflow not found: %s", name)
-}
-
-func (e *Environment) AddWorkflow(workflow *workflow.Workflow) error {
-	if _, exists := e.workflows[workflow.Name()]; exists {
-		return fmt.Errorf("workflow already present: %s", workflow.Name())
-	}
-	e.workflows[workflow.Name()] = workflow
 	return nil
 }
 

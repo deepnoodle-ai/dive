@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/stretchr/testify/require"
@@ -77,69 +76,6 @@ func TestAgentContextMessages(t *testing.T) {
 	contextMsgs := agentWithContext.Context()
 	require.Len(t, contextMsgs, 2)
 	require.Equal(t, messages, contextMsgs)
-}
-
-func TestWorkflowStepWithContext(t *testing.T) {
-	// Create test files
-	tmpDir := t.TempDir()
-	stepContextFile := filepath.Join(tmpDir, "step_context.md")
-	stepContextContent := "# Step Context\nThis is step-specific context."
-	err := os.WriteFile(stepContextFile, []byte(stepContextContent), 0644)
-	require.NoError(t, err)
-
-	// Create mock agent
-	mockLLM := &MockLLM{responses: []string{"Step response with context"}}
-	mockAgent, err := agent.New(agent.Options{
-		Name:  "MockAgent",
-		Model: mockLLM,
-	})
-	require.NoError(t, err)
-
-	// Build context messages for step
-	contextEntries := []Content{
-		{Path: stepContextFile},
-		{Text: "Step inline context"},
-	}
-
-	contextMessages, err := buildContextContent(context.Background(), nil, "", contextEntries)
-	require.NoError(t, err)
-	require.Len(t, contextMessages, 2)
-
-	// Build workflow with step context using buildWorkflow
-	workflowDef := Workflow{
-		Name: "TestWorkflow",
-		Steps: []Step{
-			{
-				Name:    "TestStep",
-				Type:    "prompt",
-				Prompt:  "Process the context and respond",
-				Content: contextEntries,
-			},
-		},
-	}
-
-	builtWorkflow, err := buildWorkflow(context.Background(), nil, workflowDef, []dive.Agent{mockAgent}, "")
-	require.NoError(t, err)
-	require.NotNil(t, builtWorkflow)
-	require.Len(t, builtWorkflow.Steps(), 1)
-
-	// Verify step has context messages
-	step := builtWorkflow.Steps()[0]
-	stepContent := step.Content()
-	require.Len(t, stepContent, 2)
-
-	// First message should be the file content wrapped in XML tags
-	firstMsg := stepContent[0]
-	textContent, ok := firstMsg.(*llm.TextContent)
-	require.True(t, ok)
-	expectedWrapped := "<file name=\"step_context.md\">\n" + stepContextContent + "\n</file>"
-	require.Equal(t, expectedWrapped, textContent.Text)
-
-	// Second message should be the inline content
-	secondMsg := stepContent[1]
-	inlineContent, ok := secondMsg.(*llm.TextContent)
-	require.True(t, ok)
-	require.Equal(t, "Step inline context", inlineContent.Text)
 }
 
 func TestMixedContextTypes(t *testing.T) {
