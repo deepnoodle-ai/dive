@@ -56,7 +56,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(
 		&llmProvider, "provider", "", "",
-		"LLM provider to use (e.g., 'anthropic', 'openai', 'groq', 'ollama')")
+		"LLM provider to use (e.g., 'anthropic', 'openai', 'groq', 'ollama', 'google')")
 
 	rootCmd.PersistentFlags().StringVarP(
 		&llmModel, "model", "m", "",

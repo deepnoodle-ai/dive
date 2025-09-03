@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"sync"
@@ -32,6 +33,10 @@ type StreamIterator struct {
 	messageStartSent      bool
 	contentBlockStartSent bool
 	contentBlockStopSent  bool
+	toolCallsSent         bool
+	toolInputSent         bool
+	isToolCall            bool
+	pendingToolInput      json.RawMessage
 
 	mu sync.Mutex
 }
@@ -60,6 +65,7 @@ func (s *StreamIterator) Next() bool {
 	if !s.started {
 		s.started = true
 		if err := s.startStream(); err != nil {
+			fmt.Println("START STREAM FAILED: ", err)
 			s.err = err
 			s.done = true
 			s.mu.Unlock()
@@ -84,14 +90,29 @@ func (s *StreamIterator) Next() bool {
 		return true
 	}
 
-	// Send content block start event
-	if !s.contentBlockStartSent {
+	// Send content block start event (only for text, tool calls are handled differently)
+	if !s.contentBlockStartSent && !s.isToolCall {
 		s.contentBlockStartSent = true
 		s.currentEvent = &llm.Event{
 			Type:  llm.EventTypeContentBlockStart,
 			Index: &s.contentIndex,
 			ContentBlock: &llm.EventContentBlock{
 				Type: llm.ContentTypeText,
+			},
+		}
+		s.mu.Unlock()
+		return true
+	}
+
+	// Send tool input as delta event if we have pending tool input
+	if s.isToolCall && !s.toolInputSent && s.pendingToolInput != nil {
+		s.toolInputSent = true
+		s.currentEvent = &llm.Event{
+			Type:  llm.EventTypeContentBlockDelta,
+			Index: &s.contentIndex,
+			Delta: &llm.EventDelta{
+				Type:        llm.EventDeltaTypeInputJSON,
+				PartialJSON: string(s.pendingToolInput),
 			},
 		}
 		s.mu.Unlock()
@@ -112,6 +133,7 @@ func (s *StreamIterator) Next() bool {
 	if s.streamNext != nil {
 		response, err, hasMore := s.streamNext()
 		if err != nil {
+			fmt.Println("STREAM NEXT FAILED: ", err)
 			s.err = err
 			s.done = true
 			s.mu.Unlock()
@@ -127,6 +149,39 @@ func (s *StreamIterator) Next() bool {
 
 		// Process the response
 		if response != nil {
+			// Check for function calls first
+			calls := response.FunctionCalls()
+			if len(calls) > 0 && !s.toolCallsSent {
+				s.toolCallsSent = true
+				s.isToolCall = true
+
+				// Send tool use event - only handle the first call for now
+				call := calls[0]
+				args, err := json.Marshal(call.Args)
+				if err != nil {
+					s.err = fmt.Errorf("error marshaling function call args: %w", err)
+					s.done = true
+					s.mu.Unlock()
+					return false
+				}
+
+				// Store the tool input to be sent as a delta event
+				s.pendingToolInput = json.RawMessage(args)
+
+				s.currentEvent = &llm.Event{
+					Type:  llm.EventTypeContentBlockStart,
+					Index: &s.contentIndex,
+					ContentBlock: &llm.EventContentBlock{
+						Type: llm.ContentTypeToolUse,
+						ID:   generateToolCallID(call.Name),
+						Name: call.Name,
+					},
+				}
+				s.mu.Unlock()
+				return true
+			}
+
+			// Handle text content
 			text := response.Text()
 			if text != "" {
 				s.currentEvent = &llm.Event{

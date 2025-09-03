@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -16,12 +17,11 @@ import (
 const ProviderName = "google"
 
 var (
-	DefaultModel         = "gemini-2.0-flash-exp"
-	DefaultEndpoint      = ""
+	DefaultModel         = ModelGemini25FlashPro
 	DefaultMaxTokens     = 4096
 	DefaultClient        *http.Client
-	DefaultMaxRetries    = 6
-	DefaultRetryBaseWait = 2 * time.Second
+	DefaultMaxRetries    = 3
+	DefaultRetryBaseWait = 1 * time.Second
 	DefaultVersion       = "v1"
 )
 
@@ -37,18 +37,17 @@ type Provider struct {
 	maxRetries    int
 	retryBaseWait time.Duration
 	version       string
+	mutex         sync.Mutex
 }
 
 func New(opts ...Option) *Provider {
 	var apiKey string
-	if value := os.Getenv("GOOGLE_API_KEY"); value != "" {
+	if value := os.Getenv("GEMINI_API_KEY"); value != "" {
 		apiKey = value
-	} else if value := os.Getenv("GEMINI_API_KEY"); value != "" {
+	} else if value := os.Getenv("GOOGLE_API_KEY"); value != "" {
 		apiKey = value
 	}
 	p := &Provider{
-		projectID:     os.Getenv("GOOGLE_CLOUD_PROJECT"),
-		location:      os.Getenv("GOOGLE_CLOUD_LOCATION"),
 		apiKey:        apiKey,
 		model:         DefaultModel,
 		maxTokens:     DefaultMaxTokens,
@@ -59,19 +58,26 @@ func New(opts ...Option) *Provider {
 	for _, opt := range opts {
 		opt(p)
 	}
+	return p
+}
 
-	// Initialize the genai client
-	ctx := context.Background()
+func (p *Provider) initClient(ctx context.Context) (*genai.Client, error) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.client != nil {
+		return p.client, nil
+	}
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:   p.apiKey,
 		Project:  p.projectID,
 		Location: p.location,
 	})
 	if err != nil {
-		panic(fmt.Sprintf("failed to create Google GenAI client: %v", err))
+		return nil, fmt.Errorf("failed to create google genai client: %v", err)
 	}
 	p.client = client
-
-	return p
+	return p.client, nil
 }
 
 func (p *Provider) Name() string {
@@ -79,6 +85,10 @@ func (p *Provider) Name() string {
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+	if _, err := p.initClient(ctx); err != nil {
+		return nil, err
+	}
+
 	config := &llm.Config{}
 	config.Apply(opts...)
 
@@ -117,9 +127,8 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		for _, tool := range request.Tools {
 			var schema *genai.Schema
 			if inputSchema, ok := tool["input_schema"]; ok && inputSchema != nil {
-				// Convert the input schema if it's provided
-				// For now, we'll skip the schema conversion - this would need more work
-				// to properly convert from the Dive schema format to genai.Schema
+				// Convert the input schema from Dive format to genai.Schema
+				schema = convertAnySchemaToGenAI(inputSchema)
 			}
 
 			genaiTool := &genai.Tool{
@@ -134,6 +143,13 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			tools = append(tools, genaiTool)
 		}
 		genConfig.Tools = tools
+
+		// Enable function calling
+		genConfig.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingConfigModeAuto,
+			},
+		}
 	}
 
 	body, err := json.Marshal(request)
@@ -281,6 +297,10 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 }
 
 func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
+	if _, err := p.initClient(ctx); err != nil {
+		return nil, err
+	}
+
 	config := &llm.Config{}
 	config.Apply(opts...)
 
@@ -319,9 +339,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		for _, tool := range request.Tools {
 			var schema *genai.Schema
 			if inputSchema, ok := tool["input_schema"]; ok && inputSchema != nil {
-				// Convert the input schema if it's provided
-				// For now, we'll skip the schema conversion - this would need more work
-				// to properly convert from the Dive schema format to genai.Schema
+				// Convert the input schema from Dive format to genai.Schema
+				schema = convertAnySchemaToGenAI(inputSchema)
 			}
 
 			genaiTool := &genai.Tool{
@@ -336,6 +355,13 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			tools = append(tools, genaiTool)
 		}
 		genConfig.Tools = tools
+
+		// Enable function calling
+		genConfig.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingConfigModeAuto,
+			},
+		}
 	}
 
 	var stream *StreamIterator
@@ -369,6 +395,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 
 			chat, err = p.client.Chats.Create(ctx, request.Model, genConfig, history)
 			if err != nil {
+				fmt.Println("CREATE FAILED: ", err)
 				return fmt.Errorf("error creating chat: %w", err)
 			}
 
@@ -390,6 +417,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			// Single message, create chat without history
 			chat, err = p.client.Chats.Create(ctx, request.Model, genConfig, nil)
 			if err != nil {
+				fmt.Println("CREATE FAILED: ", err)
 				return fmt.Errorf("error creating chat: %w", err)
 			}
 
