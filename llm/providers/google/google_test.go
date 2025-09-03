@@ -328,6 +328,68 @@ func TestToolCall(t *testing.T) {
 	require.Contains(t, string(calls[0].Input), "Tokyo", "Tool call should be for Tokyo")
 }
 
+func TestToolCallWithResult(t *testing.T) {
+	ctx := context.Background()
+	provider := createProvider(t)
+
+	// Create a simple tool for testing
+	tool := llm.NewToolDefinition().
+		WithName("get_weather").
+		WithDescription("Get weather information").
+		WithSchema(&schema.Schema{
+			Type:     "object",
+			Required: []string{"location"},
+			Properties: map[string]*schema.Property{
+				"location": {Type: "string", Description: "The location to get weather for"},
+			},
+		})
+
+	// First call - should generate a tool call
+	response1, err := provider.Generate(ctx,
+		llm.WithMessages(llm.NewUserTextMessage("What's the weather in Tokyo?")),
+		llm.WithTools(tool),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, response1)
+
+	calls := response1.ToolCalls()
+	require.Len(t, calls, 1, "Should have 1 tool call")
+	require.Equal(t, "get_weather", calls[0].Name)
+
+	// Create a conversation with the tool result
+	toolResult := &llm.ToolResultContent{
+		ToolUseID: calls[0].ID,
+		Content:   `{"temperature": "22°C", "condition": "sunny"}`, // Use string, not []byte
+		IsError:   false,
+	}
+
+	messages := []*llm.Message{
+		llm.NewUserTextMessage("What's the weather in Tokyo?"),
+		response1.Message(), // The assistant message with tool call
+		llm.NewToolResultMessage(toolResult),
+	}
+
+	// Second call - should handle the tool result and continue the conversation
+	// This is where the bug was occurring
+	response2, err := provider.Generate(ctx,
+		llm.WithMessages(messages...),
+		llm.WithTools(tool),
+	)
+	require.NoError(t, err, "Should handle tool results without error")
+	require.NotNil(t, response2)
+	require.Equal(t, llm.Assistant, response2.Role)
+
+	// The response should contain text describing the weather
+	textContent := ""
+	for _, content := range response2.Content {
+		if text, ok := content.(*llm.TextContent); ok {
+			textContent += text.Text
+		}
+	}
+	require.NotEmpty(t, textContent, "Should have text response after tool result")
+	require.Contains(t, strings.ToLower(textContent), "tokyo", "Response should mention Tokyo")
+}
+
 func TestStreamingToolCalls(t *testing.T) {
 	ctx := context.Background()
 	provider := createProvider(t)

@@ -4,10 +4,87 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/schema"
 	"google.golang.org/genai"
 )
+
+// GoogleFunctionResponseContent is a special content type for handling tool results in Google format
+type GoogleFunctionResponseContent struct {
+	ToolUseID string `json:"tool_use_id"`
+	Content   any    `json:"content"`
+	IsError   bool   `json:"is_error,omitempty"`
+}
+
+func (c *GoogleFunctionResponseContent) Type() llm.ContentType {
+	return "google_function_response"
+}
+
+// convertToolResultToFunctionResponse converts a GoogleFunctionResponseContent to a genai.Part with FunctionResponse
+func convertToolResultToFunctionResponse(content *GoogleFunctionResponseContent) *genai.Part {
+	// Extract function name from tool use ID (format: call_functionName_X)
+	functionName := extractFunctionNameFromToolID(content.ToolUseID)
+
+	// Convert the content to a map for the response
+	var responseData map[string]any
+
+	switch c := content.Content.(type) {
+	case string:
+		responseData = map[string]any{"result": c}
+	case []*dive.ToolResultContent:
+		// Combine all text results
+		var textResults []string
+		for _, toolResult := range c {
+			if toolResult.Text != "" {
+				textResults = append(textResults, toolResult.Text)
+			}
+		}
+		if len(textResults) > 0 {
+			responseData = map[string]any{"result": textResults}
+		} else {
+			responseData = map[string]any{"result": "No content"}
+		}
+	default:
+		responseData = map[string]any{"result": fmt.Sprintf("%v", c)}
+	}
+
+	// Add error information if present
+	if content.IsError {
+		responseData["is_error"] = true
+	}
+
+	part := &genai.Part{
+		FunctionResponse: &genai.FunctionResponse{
+			Name:     functionName,
+			Response: responseData,
+		},
+	}
+	return part
+}
+
+// extractFunctionNameFromToolID extracts the function name from a tool use ID
+// Expected format: call_functionName_X where X is a number
+func extractFunctionNameFromToolID(toolID string) string {
+	// Simple extraction - assumes format call_functionName_X
+	if len(toolID) > 5 && toolID[:5] == "call_" {
+		// Find the last underscore to separate the function name from the suffix
+		lastUnderscore := -1
+		for i := len(toolID) - 1; i >= 5; i-- {
+			if toolID[i] == '_' {
+				lastUnderscore = i
+				break
+			}
+		}
+		if lastUnderscore > 5 {
+			return toolID[5:lastUnderscore]
+		}
+		// If no underscore found after "call_", return everything after "call_"
+		return toolID[5:]
+	}
+	// Fallback: return the whole ID
+	return toolID
+}
 
 // convertGoogleResponse converts a Google GenAI response to a Dive LLM response
 func convertGoogleResponse(resp *genai.GenerateContentResponse) (*llm.Response, error) {
@@ -31,8 +108,9 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse) (*llm.Response, 
 			if err != nil {
 				return nil, fmt.Errorf("error marshaling function call args: %w", err)
 			}
+			toolCallID := generateToolCallID(part.FunctionCall.Name)
 			content = append(content, &llm.ToolUseContent{
-				ID:    generateToolCallID(part.FunctionCall.Name),
+				ID:    toolCallID,
 				Name:  part.FunctionCall.Name,
 				Input: json.RawMessage(args),
 			})
@@ -77,6 +155,31 @@ func generateToolCallID(toolName string) string {
 	return fmt.Sprintf("call_%s_%d", toolName, len(toolName))
 }
 
+// convertToolUseToFunctionCall converts a Dive ToolUseContent back to Google FunctionCall format
+func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) *genai.Part {
+	if toolUse == nil {
+		return nil
+	}
+
+	// Parse the input JSON to a map
+	var args map[string]any
+	if len(toolUse.Input) > 0 {
+		if err := json.Unmarshal(toolUse.Input, &args); err != nil {
+			fmt.Printf("Error unmarshaling tool input: %v\n", err)
+			args = map[string]any{}
+		}
+	} else {
+		args = map[string]any{}
+	}
+
+	return &genai.Part{
+		FunctionCall: &genai.FunctionCall{
+			Name: toolUse.Name,
+			Args: args,
+		},
+	}
+}
+
 // convertMessages converts Dive messages to the format expected by Google GenAI
 func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	messageCount := len(messages)
@@ -99,11 +202,21 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 		}
 
 		// Handle tool result messages - they should be sent as user messages in Google
-		convertedContent := message.Content
+		convertedContent := make([]llm.Content, 0, len(message.Content))
+
 		for _, content := range message.Content {
-			if _, ok := content.(*llm.ToolResultContent); ok {
+			if toolResult, ok := content.(*llm.ToolResultContent); ok {
 				role = llm.User // Tool results are always sent as user messages
-				break
+
+				// Convert ToolResultContent to a format that can be handled properly
+				// We'll create a special GoogleFunctionResponseContent that gets converted later
+				convertedContent = append(convertedContent, &GoogleFunctionResponseContent{
+					ToolUseID: toolResult.ToolUseID,
+					Content:   toolResult.Content,
+					IsError:   toolResult.IsError,
+				})
+			} else {
+				convertedContent = append(convertedContent, content)
 			}
 		}
 

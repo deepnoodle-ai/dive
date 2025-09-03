@@ -65,7 +65,6 @@ func (s *StreamIterator) Next() bool {
 	if !s.started {
 		s.started = true
 		if err := s.startStream(); err != nil {
-			fmt.Println("START STREAM FAILED: ", err)
 			s.err = err
 			s.done = true
 			s.mu.Unlock()
@@ -133,7 +132,6 @@ func (s *StreamIterator) Next() bool {
 	if s.streamNext != nil {
 		response, err, hasMore := s.streamNext()
 		if err != nil {
-			fmt.Println("STREAM NEXT FAILED: ", err)
 			s.err = err
 			s.done = true
 			s.mu.Unlock()
@@ -213,8 +211,9 @@ func (s *StreamIterator) startStream() error {
 	if s.chat == nil {
 		return fmt.Errorf("chat is nil - streaming cannot proceed")
 	}
+	// Allow empty parts for continuation after function responses
 	if len(s.parts) == 0 {
-		return fmt.Errorf("no parts to send - streaming cannot proceed")
+		s.parts = []genai.Part{*genai.NewPartFromText("")}
 	}
 
 	// Start the stream using the iterator pattern

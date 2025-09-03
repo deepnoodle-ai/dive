@@ -175,9 +175,30 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		var parts []*genai.Part
 
 		if len(msgs) > 1 {
-			// Create chat with history
+			// Check if the last message contains tool results
+			lastMsg := msgs[len(msgs)-1]
+			hasToolResults := false
+			for _, c := range lastMsg.Content {
+				if _, ok := c.(*GoogleFunctionResponseContent); ok {
+					hasToolResults = true
+					break
+				}
+			}
+
 			var history []*genai.Content
-			for _, msg := range msgs[:len(msgs)-1] {
+			var messagesToInclude []*llm.Message
+
+			if hasToolResults {
+				// If the last message has tool results, include ALL messages in history
+				// and send an empty current message to continue the conversation
+				messagesToInclude = msgs
+			} else {
+				// Normal case: include all but the last message in history
+				messagesToInclude = msgs[:len(msgs)-1]
+			}
+
+			// Build history from the selected messages
+			for _, msg := range messagesToInclude {
 				content := &genai.Content{
 					Role:  string(msg.Role),
 					Parts: make([]*genai.Part, 0, len(msg.Content)),
@@ -192,6 +213,18 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 							// and use genai.NewPartFromBytes
 							content.Parts = append(content.Parts, genai.NewPartFromText("[Image content]"))
 						}
+					case *llm.ToolUseContent:
+						// Convert ToolUseContent back to Google FunctionCall format
+						functionCallPart := convertToolUseToFunctionCall(ct)
+						if functionCallPart != nil {
+							content.Parts = append(content.Parts, functionCallPart)
+						}
+					case *GoogleFunctionResponseContent:
+						// Convert tool result to Google FunctionResponse format
+						functionResponse := convertToolResultToFunctionResponse(ct)
+						if functionResponse != nil {
+							content.Parts = append(content.Parts, functionResponse)
+						}
 					}
 				}
 				history = append(history, content)
@@ -202,20 +235,29 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 				return fmt.Errorf("error creating chat: %w", err)
 			}
 
-			// Use the last message as the current input
-			lastMsg := msgs[len(msgs)-1]
-			for _, c := range lastMsg.Content {
-				switch ct := c.(type) {
-				case *llm.TextContent:
-					parts = append(parts, genai.NewPartFromText(ct.Text))
-				case *llm.ImageContent:
-					if ct.Source != nil && ct.Source.Data != "" {
-						// For now, skip image handling - would need proper base64 decoding
-						// and use genai.NewPartFromBytes
-						parts = append(parts, genai.NewPartFromText("[Image content]"))
+			// Set up current input
+			if !hasToolResults {
+				// Normal case: use the last message as current input
+				for _, c := range lastMsg.Content {
+					switch ct := c.(type) {
+					case *llm.TextContent:
+						parts = append(parts, genai.NewPartFromText(ct.Text))
+					case *llm.ImageContent:
+						if ct.Source != nil && ct.Source.Data != "" {
+							// For now, skip image handling - would need proper base64 decoding
+							// and use genai.NewPartFromBytes
+							parts = append(parts, genai.NewPartFromText("[Image content]"))
+						}
+					case *GoogleFunctionResponseContent:
+						// Convert tool result to Google FunctionResponse format
+						functionResponse := convertToolResultToFunctionResponse(ct)
+						if functionResponse != nil {
+							parts = append(parts, functionResponse)
+						}
 					}
 				}
 			}
+			// If hasToolResults is true, we don't send any current parts - the model should continue based on history
 
 			// Convert []*genai.Part to []genai.Part for variadic function
 			partValues := make([]genai.Part, len(parts))
@@ -249,6 +291,12 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 						// For now, skip image handling - would need proper base64 decoding
 						// and use genai.NewPartFromBytes
 						parts = append(parts, genai.NewPartFromText("[Image content]"))
+					}
+				case *GoogleFunctionResponseContent:
+					// Convert tool result to Google FunctionResponse format
+					functionResponse := convertToolResultToFunctionResponse(ct)
+					if functionResponse != nil {
+						parts = append(parts, functionResponse)
 					}
 				}
 			}
@@ -371,9 +419,30 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		var parts []*genai.Part
 
 		if len(msgs) > 1 {
-			// Create chat with history
+			// Check if the last message contains tool results
+			lastMsg := msgs[len(msgs)-1]
+			hasToolResults := false
+			for _, c := range lastMsg.Content {
+				if _, ok := c.(*GoogleFunctionResponseContent); ok {
+					hasToolResults = true
+					break
+				}
+			}
+
 			var history []*genai.Content
-			for _, msg := range msgs[:len(msgs)-1] {
+			var messagesToInclude []*llm.Message
+
+			if hasToolResults {
+				// If the last message has tool results, include ALL messages in history
+				// and send an empty current message to continue the conversation
+				messagesToInclude = msgs
+			} else {
+				// Normal case: include all but the last message in history
+				messagesToInclude = msgs[:len(msgs)-1]
+			}
+
+			// Build history from the selected messages
+			for _, msg := range messagesToInclude {
 				content := &genai.Content{
 					Role:  string(msg.Role),
 					Parts: make([]*genai.Part, 0, len(msg.Content)),
@@ -388,6 +457,18 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 							// and use genai.NewPartFromBytes
 							content.Parts = append(content.Parts, genai.NewPartFromText("[Image content]"))
 						}
+					case *llm.ToolUseContent:
+						// Convert ToolUseContent back to Google FunctionCall format
+						functionCallPart := convertToolUseToFunctionCall(ct)
+						if functionCallPart != nil {
+							content.Parts = append(content.Parts, functionCallPart)
+						}
+					case *GoogleFunctionResponseContent:
+						// Convert tool result to Google FunctionResponse format
+						functionResponse := convertToolResultToFunctionResponse(ct)
+						if functionResponse != nil {
+							content.Parts = append(content.Parts, functionResponse)
+						}
 					}
 				}
 				history = append(history, content)
@@ -395,29 +476,36 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 
 			chat, err = p.client.Chats.Create(ctx, request.Model, genConfig, history)
 			if err != nil {
-				fmt.Println("CREATE FAILED: ", err)
 				return fmt.Errorf("error creating chat: %w", err)
 			}
 
-			// Use the last message as the current input
-			lastMsg := msgs[len(msgs)-1]
-			for _, c := range lastMsg.Content {
-				switch ct := c.(type) {
-				case *llm.TextContent:
-					parts = append(parts, genai.NewPartFromText(ct.Text))
-				case *llm.ImageContent:
-					if ct.Source != nil && ct.Source.Data != "" {
-						// For now, skip image handling - would need proper base64 decoding
-						// and use genai.NewPartFromBytes
-						parts = append(parts, genai.NewPartFromText("[Image content]"))
+			// Set up current input
+			if !hasToolResults {
+				// Normal case: use the last message as current input
+				for _, c := range lastMsg.Content {
+					switch ct := c.(type) {
+					case *llm.TextContent:
+						parts = append(parts, genai.NewPartFromText(ct.Text))
+					case *llm.ImageContent:
+						if ct.Source != nil && ct.Source.Data != "" {
+							// For now, skip image handling - would need proper base64 decoding
+							// and use genai.NewPartFromBytes
+							parts = append(parts, genai.NewPartFromText("[Image content]"))
+						}
+					case *GoogleFunctionResponseContent:
+						// Convert tool result to Google FunctionResponse format
+						functionResponse := convertToolResultToFunctionResponse(ct)
+						if functionResponse != nil {
+							parts = append(parts, functionResponse)
+						}
 					}
 				}
 			}
+			// If hasToolResults is true, we don't send any current parts - the model should continue based on history
 		} else if len(msgs) == 1 {
 			// Single message, create chat without history
 			chat, err = p.client.Chats.Create(ctx, request.Model, genConfig, nil)
 			if err != nil {
-				fmt.Println("CREATE FAILED: ", err)
 				return fmt.Errorf("error creating chat: %w", err)
 			}
 
@@ -431,6 +519,12 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 						// For now, skip image handling - would need proper base64 decoding
 						// and use genai.NewPartFromBytes
 						parts = append(parts, genai.NewPartFromText("[Image content]"))
+					}
+				case *GoogleFunctionResponseContent:
+					// Convert tool result to Google FunctionResponse format
+					functionResponse := convertToolResultToFunctionResponse(ct)
+					if functionResponse != nil {
+						parts = append(parts, functionResponse)
 					}
 				}
 			}
