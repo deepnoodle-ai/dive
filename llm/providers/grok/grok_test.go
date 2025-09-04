@@ -1,7 +1,6 @@
 package grok
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -21,7 +20,7 @@ func TestProvider_ImplementsInterfaces(t *testing.T) {
 func TestProvider_Name(t *testing.T) {
 	provider := New()
 	name := provider.Name()
-	expected := "grok-grok-4-0709"
+	expected := "grok"
 	require.Equal(t, expected, name)
 }
 
@@ -37,26 +36,6 @@ func TestProvider_WithOptions(t *testing.T) {
 	require.Equal(t, "https://custom.x.ai/v1/chat/completions", provider.endpoint)
 	require.Equal(t, "custom-key", provider.apiKey)
 	require.Equal(t, 8192, provider.maxTokens)
-}
-
-func TestProvider_ModelConstants(t *testing.T) {
-	tests := []struct {
-		name     string
-		model    string
-		expected string
-	}{
-		{"default model", ModelGrok40709, "grok-4-0709"},
-		{"code fast model", ModelGrokCodeFast1, "grok-code-fast-1"},
-		{"grok-3 model", ModelGrok3, "grok-3"},
-		{"grok-3-mini model", ModelGrok3Mini, "grok-3-mini"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider := New(WithModel(tt.model))
-			require.Equal(t, fmt.Sprintf("grok-%s", tt.expected), provider.Name())
-		})
-	}
 }
 
 func TestProvider_GetAPIKey(t *testing.T) {

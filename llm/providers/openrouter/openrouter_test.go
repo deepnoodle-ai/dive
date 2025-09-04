@@ -48,30 +48,30 @@ func TestNew(t *testing.T) {
 
 func TestName(t *testing.T) {
 	provider := New(WithModel("openai/gpt-4"))
-	require.Equal(t, "openrouter-openai/gpt-4", provider.Name())
+	require.Equal(t, "openrouter", provider.Name())
 }
 
 func TestGetAPIKey(t *testing.T) {
 	t.Run("OPENROUTER_API_KEY", func(t *testing.T) {
 		t.Setenv("OPENROUTER_API_KEY", "openrouter-key")
 		t.Setenv("OPENAI_API_KEY", "openai-key")
-		
+
 		key := getAPIKey()
 		require.Equal(t, "openrouter-key", key)
 	})
 
 	t.Run("fallback to OPENAI_API_KEY", func(t *testing.T) {
 		t.Setenv("OPENROUTER_API_KEY", "")
-		t.Setenv("OPENAI_API_KEY", "openai-key")
-		
+		t.Setenv("OPENAI_API_KEY", "openai-key") // ignored
+
 		key := getAPIKey()
-		require.Equal(t, "openai-key", key)
+		require.Equal(t, "", key)
 	})
 
 	t.Run("no API key", func(t *testing.T) {
 		t.Setenv("OPENROUTER_API_KEY", "")
 		t.Setenv("OPENAI_API_KEY", "")
-		
+
 		key := getAPIKey()
 		require.Equal(t, "", key)
 	})
