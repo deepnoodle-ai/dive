@@ -15,8 +15,6 @@ func main() {
 	// Create OpenRouter provider with optional site information for rankings
 	provider := openrouter.New(
 		openrouter.WithModel("openai/gpt-4o"),
-		openrouter.WithSiteURL("https://myapp.com"),
-		openrouter.WithSiteName("My App"),
 	)
 
 	// Generate a response
