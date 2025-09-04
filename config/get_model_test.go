@@ -11,7 +11,7 @@ func TestGetModel_GrokProvider(t *testing.T) {
 	provider, err := GetModel("grok", "")
 	require.NoError(t, err)
 	require.NotNil(t, provider)
-	require.Equal(t, "grok-grok-4", provider.Name())
+	require.Equal(t, "grok-grok-4-0709", provider.Name())
 
 	// Test custom grok model
 	provider, err = GetModel("grok", "grok-3")
