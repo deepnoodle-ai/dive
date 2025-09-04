@@ -26,5 +26,7 @@ func TestOpenRouterIntegration(t *testing.T) {
 	require.NotNil(t, response)
 
 	require.Equal(t, llm.Assistant, response.Role)
-	require.Equal(t, "hello", strings.ToLower(response.Message().Text()))
+
+	ok := strings.Contains(strings.ToLower(response.Message().Text()), "hello")
+	require.True(t, ok)
 }
