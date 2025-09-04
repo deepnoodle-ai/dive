@@ -1,0 +1,32 @@
+{
+  "status": "success",
+  "data": {
+    "users": [
+      {
+        "id": 1,
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "role": "admin",
+        "last_login": "2024-01-15T10:30:00Z"
+      },
+      {
+        "id": 2,
+        "name": "Jane Smith",
+        "email": "jane@example.com",
+        "role": "user",
+        "last_login": "2024-01-14T15:45:00Z"
+      },
+      {
+        "id": 3,
+        "name": "Bob Johnson",
+        "email": "bob@example.com",
+        "role": "user",
+        "last_login": "2024-01-13T09:20:00Z"
+      }
+    ],
+    "total_count": 3,
+    "page": 1,
+    "has_more": false
+  },
+  "version": "2.1"
+}
