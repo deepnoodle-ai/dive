@@ -54,6 +54,7 @@ Please leave a GitHub star if you're interested in the project!
 * **Thread Management**: Persistent conversation threads with memory
 * **Confirmation System**: Built-in confirmation system for destructive operations
 * **Deep Research**: Use multiple agents to perform deep research
+* **Semantic Diff**: AI-powered analysis of text differences for output drift detection
 
 ## Quick Start
 
@@ -157,6 +158,33 @@ Available CLI commands include:
 
 * `dive chat --provider anthropic --model claude-sonnet-4-20250514`: Chat with an agent
 * `dive config check /path/to/config.yaml`: Validate a Dive configuration
+* `dive diff old.txt new.txt --explain-changes`: Semantic diff between texts using LLMs to explain changes
+
+### Semantic Diff
+
+The `dive diff` command provides AI-powered semantic analysis of differences between text files, which is especially useful for detecting output drift and understanding meaningful changes:
+
+```bash
+# Basic diff - shows file size changes and suggests AI analysis
+dive diff old_output.txt new_output.txt
+
+# AI-powered semantic analysis with detailed explanations
+dive diff old_output.txt new_output.txt --explain-changes
+
+# Different output formats
+dive diff old.txt new.txt --explain-changes --format markdown
+dive diff old.txt new.txt --explain-changes --format json
+
+# Use with different LLM providers
+dive diff old.txt new.txt --explain-changes --provider openai --model gpt-4o
+dive diff old.txt new.txt --explain-changes --provider anthropic --model claude-sonnet-4-20250514
+```
+
+This is particularly useful for:
+- **Output Drift Detection**: Comparing AI-generated outputs over time
+- **Code Review**: Understanding semantic changes in generated code
+- **Content Analysis**: Analyzing changes in documentation or text content
+- **Quality Assurance**: Detecting meaningful changes in test outputs
 
 ## LLM Providers
 
