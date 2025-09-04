@@ -13,124 +13,113 @@ import (
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 )
 
 var diffCmd = &cobra.Command{
 	Use:   "diff [old_file] [new_file]",
-	Short: "Semantic diff between texts using LLMs to explain changes",
-	Long: `Semantic diff between texts using LLMs to explain changes, useful for output drift detection.
+	Short: "AI-powered semantic diff between files",
+	Long: `AI-powered semantic diff that analyzes and explains changes between two files.
 
-This command compares two text files and uses AI to provide a semantic analysis of the differences,
-explaining what has changed in natural language rather than just showing line-by-line differences.
+This command generates a unified diff and uses an LLM to provide semantic analysis,
+explaining what has changed in natural language with context and significance.
 
 Files can be regular files or "-" to read from stdin.
 
 Examples:
-  dive diff old.txt new.txt                    # Basic size comparison
-  dive diff old.txt new.txt --explain-changes # AI-powered semantic analysis
-  dive diff - new.txt --explain-changes       # Compare stdin with file
-  dive diff old.txt new.txt --explain-changes --format markdown
-  dive diff old.txt new.txt --explain-changes --provider openai`,
+  dive diff old.txt new.txt                    # Analyze changes with AI
+  dive diff - new.txt                          # Compare stdin with file
+  dive diff old.txt new.txt --format markdown  # Output in markdown format
+  dive diff old.txt new.txt --provider openai  # Use specific LLM provider
+  dive diff old.txt new.txt --context 5        # Include 5 lines of context in diff`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		
+
 		oldFile := args[0]
 		newFile := args[1]
-		
-		// Read the explain-changes flag
-		explainChanges, err := cmd.Flags().GetBool("explain-changes")
-		if err != nil {
-			return fmt.Errorf("error getting explain-changes flag: %w", err)
-		}
-		
+
 		// Get output format
 		outputFormat, err := cmd.Flags().GetString("format")
 		if err != nil {
 			return fmt.Errorf("error getting format flag: %w", err)
 		}
-		
+
+		// Get context lines for diff
+		contextLines, err := cmd.Flags().GetInt("context")
+		if err != nil {
+			return fmt.Errorf("error getting context flag: %w", err)
+		}
+
 		// Get model configuration from global flags
 		provider := llmProvider
 		if provider == "" {
 			provider = "anthropic" // Default provider
 		}
-		
+
 		model := llmModel
 		if model == "" {
 			// Use default model for provider
 		}
-		
-		// Run the diff
-		return runDiff(ctx, oldFile, newFile, explainChanges, outputFormat, provider, model)
+
+		// Run the diff with AI analysis
+		return runDiff(ctx, oldFile, newFile, outputFormat, contextLines, provider, model)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(diffCmd)
-	
-	diffCmd.Flags().Bool("explain-changes", false, "Provide detailed explanation of changes using AI analysis")
+
 	diffCmd.Flags().StringP("format", "f", "text", "Output format (text, markdown, json)")
+	diffCmd.Flags().IntP("context", "c", 3, "Number of context lines to show around changes in diff")
 }
 
-func runDiff(ctx context.Context, oldFile, newFile string, explainChanges bool, outputFormat, provider, modelName string) error {
+func runDiff(ctx context.Context, oldFile, newFile string, outputFormat string, contextLines int, provider, modelName string) error {
 	// Read file contents
 	oldContent, err := readFileContent(oldFile)
 	if err != nil {
 		return fmt.Errorf("error reading old file %q: %w", oldFile, err)
 	}
-	
+
 	newContent, err := readFileContent(newFile)
 	if err != nil {
 		return fmt.Errorf("error reading new file %q: %w", newFile, err)
 	}
-	
+
 	// If files are identical, report that
 	if oldContent == newContent {
 		fmt.Println(successStyle.Sprint("✓ Files are identical - no changes detected"))
 		return nil
 	}
-	
-	// Show basic diff information
-	fmt.Printf("%s Comparing files:\n", infoStyle.Sprint("📄"))
-	fmt.Printf("  Old: %s\n", oldFile)
-	fmt.Printf("  New: %s\n", newFile)
-	fmt.Println()
-	
-	if !explainChanges {
-		// Simple diff output without AI analysis
-		fmt.Println(headerStyle.Sprint("Changes detected:"))
-		fmt.Printf("Old file length: %d characters\n", len(oldContent))
-		fmt.Printf("New file length: %d characters\n", len(newContent))
-		
-		if len(oldContent) != len(newContent) {
-			diff := len(newContent) - len(oldContent)
-			if diff > 0 {
-				fmt.Printf("Size change: +%d characters\n", diff)
-			} else {
-				fmt.Printf("Size change: %d characters\n", diff)
-			}
-		}
-		
-		fmt.Println("\n💡 Use --explain-changes to get AI-powered semantic analysis of the differences")
+
+	// Generate unified diff
+	diff := generateUnifiedDiff(oldContent, newContent, oldFile, newFile, contextLines)
+	if diff == "" {
+		fmt.Println(successStyle.Sprint("✓ Files are functionally identical (only whitespace differences)"))
 		return nil
 	}
-	
+
+	// Show basic diff information
+	fmt.Printf("%s Analyzing differences between:\n", infoStyle.Sprint("📄"))
+	fmt.Printf("  Old: %s (%d lines)\n", oldFile, countLines(oldContent))
+	fmt.Printf("  New: %s (%d lines)\n", newFile, countLines(newContent))
+	fmt.Println()
+
 	// Get LLM model for analysis
 	model, err := config.GetModel(provider, modelName)
 	if err != nil {
 		return fmt.Errorf("error getting LLM model: %w", err)
 	}
-	
+
 	// Create agent for diff analysis
 	diffAgent, err := createDiffAgent(model)
 	if err != nil {
 		return fmt.Errorf("error creating diff agent: %w", err)
 	}
-	
-	// Perform semantic diff analysis
-	return performSemanticDiff(ctx, diffAgent, oldContent, newContent, oldFile, newFile, outputFormat)
+
+	// Perform semantic diff analysis using the unified diff
+	return performSemanticDiff(ctx, diffAgent, diff, oldFile, newFile, outputFormat)
 }
 
 func readFileContent(filePath string) (string, error) {
@@ -142,76 +131,76 @@ func readFileContent(filePath string) (string, error) {
 		}
 		return string(content), nil
 	}
-	
+
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("file does not exist: %s", filePath)
 	}
-	
+
 	// Read file content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("error reading file: %w", err)
 	}
-	
+
 	return string(content), nil
 }
 
 func createDiffAgent(model llm.LLM) (*agent.Agent, error) {
 	logger := slogger.New(getLogLevel())
-	
+
 	agentOpts := agent.Options{
-		Name:         "DiffAnalyzer",
-		Goal:         "Analyze and explain semantic differences between text files",
-		Instructions: buildDiffSystemPrompt(),
-		Model:        model,
-		Tools:        []dive.Tool{}, // No external tools needed for diff analysis
-		Logger:       logger,
+		Name:            "DiffAnalyzer",
+		Goal:            "Analyze and explain semantic differences between text files",
+		Instructions:    buildDiffSystemPrompt(),
+		Model:           model,
+		Tools:           []dive.Tool{}, // No external tools needed for diff analysis
+		Logger:          logger,
 		ResponseTimeout: defaultDiffTimeout,
 		ModelSettings: &agent.ModelSettings{
 			Temperature: floatPtr(0.1), // Low temperature for consistent analysis
 			MaxTokens:   intPtr(4000),  // Sufficient for detailed analysis
 		},
 	}
-	
+
 	return agent.New(agentOpts)
 }
 
 func buildDiffSystemPrompt() string {
-	return `You are a semantic diff analyzer. Your job is to compare two text files and explain the meaningful differences between them.
+	return `You are an expert diff analyzer. You will be provided with a unified diff (git-style) and your task is to explain the changes in a meaningful way.
 
-When analyzing differences, focus on:
+When analyzing the diff:
 
-1. **Content Changes**: What information was added, removed, or modified
-2. **Structural Changes**: How the organization or format changed
-3. **Semantic Meaning**: What the changes mean in context
-4. **Impact Assessment**: How significant these changes are
+1. **Understand the Format**: Lines starting with '+' are additions, '-' are deletions, ' ' are unchanged context lines
+2. **Content Analysis**: Explain what was added, removed, or modified and why it matters
+3. **Semantic Impact**: Describe the functional or logical impact of the changes
+4. **Pattern Recognition**: Identify patterns in the changes (refactoring, bug fixes, feature additions, etc.)
+5. **Code Quality**: If applicable, comment on improvements or potential issues introduced
 
 Provide your analysis in a clear, structured format that helps users understand:
-- What changed and where
-- Why the changes might be significant
-- Any patterns or themes in the modifications
+- The nature and purpose of the changes
+- The scope and significance of modifications
+- Any potential implications or side effects
+- Recommendations if you spot issues or opportunities for improvement
 
-Be concise but thorough. Focus on meaningful differences rather than minor formatting changes unless they affect readability or structure significantly.
-
-If the files are very similar with only minor changes, acknowledge this but still highlight what did change.
-If the files are completely different, provide a high-level summary of the major differences.`
+Focus on the meaningful aspects of the changes rather than just restating the diff.
+Be concise but thorough, and tailor your explanation to the type of content being diffed.`
 }
 
-func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, oldContent, newContent, oldFile, newFile string, outputFormat string) error {
+func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDiff, oldFile, newFile string, outputFormat string) error {
 	// Prepare the prompt for the LLM
-	prompt := buildDiffPrompt(oldContent, newContent, oldFile, newFile, outputFormat)
-	
+	prompt := buildDiffPrompt(unifiedDiff, oldFile, newFile, outputFormat)
+
 	fmt.Println(headerStyle.Sprint("🔍 Analyzing semantic differences..."))
 	fmt.Println()
-	
+
 	// Stream the response
 	stream, err := diffAgent.StreamResponse(ctx, dive.WithInput(prompt))
 	if err != nil {
 		return fmt.Errorf("error generating diff analysis: %w", err)
 	}
 	defer stream.Close()
-	
+
 	// Process the streaming response
 	var incremental bool
 	for stream.Next(ctx) {
@@ -247,38 +236,78 @@ func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, oldContent
 			}
 		}
 	}
-	
+
 	if err := stream.Err(); err != nil {
 		return fmt.Errorf("error during diff analysis: %w", err)
 	}
-	
+
 	fmt.Println() // Add final newline
 	return nil
 }
 
-func buildDiffPrompt(oldContent, newContent, oldFile, newFile string, outputFormat string) string {
+func buildDiffPrompt(unifiedDiff, oldFile, newFile string, outputFormat string) string {
 	var formatInstruction string
 	switch outputFormat {
 	case "markdown":
-		formatInstruction = "Format your response using Markdown with clear headings and structure."
+		formatInstruction = "Format your response using Markdown with clear headings, bullet points, and code blocks where appropriate."
 	case "json":
-		formatInstruction = "Format your response as a JSON object with fields: summary, changes (array), impact_assessment."
+		formatInstruction = "Format your response as a JSON object with fields: summary (string), changes (array of objects with 'type', 'description', 'impact'), patterns (array of strings), recommendations (array of strings)."
 	default:
-		formatInstruction = "Format your response as clear, readable text."
+		formatInstruction = "Format your response as clear, readable text with appropriate sections."
 	}
-	
-	return fmt.Sprintf(`Please analyze the semantic differences between these two files:
 
-OLD FILE (%s):
+	return fmt.Sprintf(`Analyze this unified diff between two files and explain the changes:
+
+Files being compared:
+- Original: %s
+- Modified: %s
+
+Unified Diff:
 %s
 
-NEW FILE (%s):
 %s
 
-%s
+Provide a comprehensive analysis that helps understand:
+1. What changed and why it matters
+2. The overall purpose/theme of the changes
+3. Any potential issues or improvements
+4. The significance and impact of the modifications`,
+		oldFile, newFile, unifiedDiff, formatInstruction)
+}
 
-Provide a comprehensive analysis of the differences, focusing on semantic meaning rather than just textual changes.`, 
-		oldFile, oldContent, newFile, newContent, formatInstruction)
+// generateUnifiedDiff creates a git-style unified diff between two strings
+func generateUnifiedDiff(oldContent, newContent, oldFile, newFile string, contextLines int) string {
+	oldLines := strings.Split(oldContent, "\n")
+	newLines := strings.Split(newContent, "\n")
+
+	// Generate the unified diff
+	diff := difflib.UnifiedDiff{
+		A:        oldLines,
+		B:        newLines,
+		FromFile: oldFile,
+		ToFile:   newFile,
+		FromDate: "original",
+		ToDate:   "modified",
+		Context:  contextLines,
+	}
+
+	result, err := difflib.GetUnifiedDiffString(diff)
+	if err != nil {
+		// If there's an error generating the diff, return a simple comparison
+		return fmt.Sprintf("Error generating diff: %v\n\nFile sizes: old=%d bytes, new=%d bytes",
+			err, len(oldContent), len(newContent))
+	}
+
+	return result
+}
+
+// countLines counts the number of lines in a string
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	lines := strings.Split(s, "\n")
+	return len(lines)
 }
 
 // Helper functions
