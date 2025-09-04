@@ -1,0 +1,21 @@
+Contact Information
+
+Dr. Sarah Williams
+Senior Research Scientist
+Email: sarah.williams@university.edu
+Phone: (555) 123-4567
+Address: 789 Research Blvd, Boston, MA 02101
+
+Prof. Michael Chen
+Department Head
+Email: m.chen@university.edu  
+Phone: (555) 234-5678
+Age: 45
+Office: Room 301, Science Building
+
+Ms. Lisa Rodriguez
+Graduate Student
+Email: l.rodriguez@student.university.edu
+Phone: (555) 345-6789
+Age: 26
+Research Focus: Machine Learning
