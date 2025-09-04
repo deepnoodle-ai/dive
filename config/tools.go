@@ -151,6 +151,16 @@ func initializeTextEditorTool(config map[string]interface{}) (dive.Tool, error) 
 	return toolkit.NewTextEditorTool(options), nil
 }
 
+func initializeExtractTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.ExtractToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("invalid extract tool configuration: %w", err)
+		}
+	}
+	return toolkit.NewExtractTool(options), nil
+}
+
 // ToolInitializers maps tool names to their initialization functions
 var ToolInitializers = map[string]ToolInitializer{
 	"web_search":               initializeWebSearchTool,
@@ -164,6 +174,7 @@ var ToolInitializers = map[string]ToolInitializer{
 	"anthropic_computer":       initializeAnthropicComputerTool,
 	"anthropic_web_search":     initializeAnthropicWebSearchTool,
 	"text_editor":              initializeTextEditorTool,
+	"extract":                  initializeExtractTool,
 }
 
 // InitializeToolByName initializes a tool by its name with the given configuration
