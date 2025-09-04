@@ -28,7 +28,7 @@ func TestGetModel_GrokProvider(t *testing.T) {
 
 func TestGetModel_AllProviders(t *testing.T) {
 	providers := []string{"anthropic", "openai", "openai-completions", "groq", "grok", "ollama", "google"}
-	
+
 	for _, providerName := range providers {
 		t.Run(providerName, func(t *testing.T) {
 			provider, err := GetModel(providerName, "")
@@ -37,4 +37,26 @@ func TestGetModel_AllProviders(t *testing.T) {
 			require.NotEmpty(t, provider.Name(), "provider %s should have a non-empty name", providerName)
 		})
 	}
+}
+
+func TestGetModel_OpenRouter(t *testing.T) {
+	t.Run("openrouter provider", func(t *testing.T) {
+		llm, err := GetModel("openrouter", "")
+		require.NoError(t, err)
+		require.NotNil(t, llm)
+		require.Contains(t, llm.Name(), "openrouter")
+	})
+
+	t.Run("openrouter with model", func(t *testing.T) {
+		llm, err := GetModel("openrouter", "anthropic/claude-3-sonnet")
+		require.NoError(t, err)
+		require.NotNil(t, llm)
+		require.Contains(t, llm.Name(), "anthropic/claude-3-sonnet")
+	})
+
+	t.Run("unsupported provider", func(t *testing.T) {
+		_, err := GetModel("invalid-provider", "")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unsupported provider")
+	})
 }

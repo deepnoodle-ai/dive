@@ -1,0 +1,39 @@
+Name: OpenRouter Example
+Description: Example configuration using OpenRouter as LLM provider
+
+Config:
+  LogLevel: info
+  DefaultProvider: openrouter
+  DefaultModel: openai/gpt-4o
+
+Agents:
+  - Name: "OpenRouter Assistant"
+    Instructions: |
+      You are a helpful AI assistant powered by OpenRouter. 
+      You have access to multiple LLM providers through OpenRouter's unified API.
+      Be concise and helpful in your responses.
+    Provider: openrouter
+    Model: openai/gpt-4o
+    ModelSettings:
+      Temperature: 0.7
+      MaxTokens: 2048
+
+  - Name: "Claude via OpenRouter"
+    Instructions: |
+      You are Claude, accessed through OpenRouter.
+      Provide thoughtful and detailed responses.
+    Provider: openrouter
+    Model: anthropic/claude-3-5-sonnet-20241022
+    ModelSettings:
+      Temperature: 0.5
+      MaxTokens: 4096
+
+  - Name: "Llama via OpenRouter"
+    Instructions: |
+      You are a helpful assistant using Llama through OpenRouter.
+      Focus on being practical and efficient.
+    Provider: openrouter
+    Model: meta-llama/llama-3.2-90b-vision-instruct
+    ModelSettings:
+      Temperature: 0.8
+      MaxTokens: 2048
