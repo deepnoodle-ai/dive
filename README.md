@@ -4,6 +4,7 @@
 
 <a href="https://www.anthropic.com"><img alt="Claude" src="https://img.shields.io/badge/Claude-6B48FF.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://www.openai.com"><img alt="GPT-4" src="https://img.shields.io/badge/GPT--4o%20|%20o1%20|%20o3-10A37F.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://cloud.google.com/vertex-ai"><img alt="Google Gemini" src="https://img.shields.io/badge/Gemini-4285F4.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://www.groq.com"><img alt="Groq Models" src="https://img.shields.io/badge/DeepSeek%20|%20Llama%20|%20Qwen-FF6B4A.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://deepnoodle.ai"><img alt="Made by Deep Noodle" src="https://img.shields.io/badge/MADE%20BY%20Deep%20Noodle-000000.svg?style=for-the-badge&labelColor=000000"></a>
 
@@ -40,7 +41,7 @@ Please leave a GitHub star if you're interested in the project!
 * **Agents**: Chat or assign work to specialized agents with configurable reasoning
 * **Supervisor Patterns**: Create hierarchical agent systems with work delegation
 * **Declarative Configuration**: Define agents using YAML
-* **Multiple LLMs**: Switch between Anthropic, OpenAI, Groq, Ollama, and others
+* **Multiple LLMs**: Switch between Anthropic, OpenAI, Google, Groq, Ollama, and others
 * **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
 * **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
 * **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
@@ -64,6 +65,7 @@ the LLM provider and for any tools that you'd like your agents to use.
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
 export GROQ_API_KEY="your-key-here"
+export GEMINI_API_KEY="your-key-here"
 
 # Tool API Keys
 export GOOGLE_SEARCH_API_KEY="your-key-here"
@@ -204,6 +206,9 @@ These are the models that have been verified to work in Dive:
 | Anthropic | `claude-3-7-sonnet-20250219`    | Yes             |
 | Anthropic | `claude-3-5-sonnet-20241022`    | Yes             |
 | Anthropic | `claude-3-5-haiku-20241022`     | Yes             |
+| Google    | `gemini-2.5-flash`              | Yes             |
+| Google    | `gemini-2.5-flash-lite`         | Yes             |
+| Google    | `gemini-2.5-pro`                | Yes             |
 | Groq      | `deepseek-r1-distill-llama-70b` | Yes             |
 | Groq      | `llama-3.3-70b-versatile`       | Yes             |
 | Groq      | `qwen-2.5-32b`                  | Yes             |
@@ -272,11 +277,11 @@ improving documentation, or spreading the word, your help is appreciated.
 
 - ✅ Ollama support
 - ✅ MCP support
+- ✅ Google Cloud Vertex AI support
 - Docs site
 - Server mode
 - Documented approach for RAG
 - AWS Bedrock support
-- Google Cloud Vertex AI support
 - Voice interactions
 - Agent memory interface
 - Integrations (Slack, Google Drive, etc.)

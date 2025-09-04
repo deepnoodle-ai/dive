@@ -5,6 +5,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/llm/providers/google"
 	"github.com/deepnoodle-ai/dive/llm/providers/groq"
 	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
@@ -55,6 +56,13 @@ func GetModel(providerName, modelName string) (llm.LLM, error) {
 			opts = append(opts, ollama.WithModel(modelName))
 		}
 		return ollama.New(opts...), nil
+
+	case "google":
+		opts := []google.Option{}
+		if modelName != "" {
+			opts = append(opts, google.WithModel(modelName))
+		}
+		return google.New(opts...), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported provider: %q", providerName)

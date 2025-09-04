@@ -153,11 +153,59 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 	return nil
 }
 
+func runSingleMessage(message, instructions, agentName string, reasoningBudget int, tools []dive.Tool) error {
+	ctx := context.Background()
+
+	logger := slogger.New(slogger.LevelFromString("warn"))
+
+	model, err := config.GetModel(llmProvider, llmModel)
+	if err != nil {
+		return fmt.Errorf("error getting model: %v", err)
+	}
+
+	modelSettings := &agent.ModelSettings{}
+	if reasoningBudget > 0 {
+		modelSettings.ReasoningBudget = &reasoningBudget
+		maxTokens := 0
+		if modelSettings.MaxTokens != nil {
+			maxTokens = *modelSettings.MaxTokens
+		}
+		if reasoningBudget > maxTokens+4096 {
+			newLimit := reasoningBudget + 4096
+			modelSettings.MaxTokens = &newLimit
+		}
+	}
+
+	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
+		Mode: dive.ConfirmIfNotReadOnly,
+	})
+
+	chatAgent, err := agent.New(agent.Options{
+		Name:             agentName,
+		Instructions:     instructions,
+		Model:            model,
+		Logger:           logger,
+		Tools:            tools,
+		ThreadRepository: agent.NewMemoryThreadRepository(),
+		ModelSettings:    modelSettings,
+		Confirmer:        confirmer,
+	})
+	if err != nil {
+		return fmt.Errorf("error creating agent: %v", err)
+	}
+
+	fmt.Print(boldStyle.Sprint("You: "))
+	fmt.Println(message)
+	fmt.Println()
+
+	return chatMessage(ctx, message, chatAgent)
+}
+
 var chatCmd = &cobra.Command{
-	Use:   "chat",
-	Short: "Start an interactive chat with an AI agent",
-	Long:  "Start an interactive chat with an AI agent",
-	Args:  cobra.NoArgs,
+	Use:   "chat [message]",
+	Short: "Start an interactive chat with an AI agent or send a single message",
+	Long:  "Start an interactive chat with an AI agent. If a message is provided as an argument, send that message, show the response, and exit.",
+	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 
 		systemPrompt, err := cmd.Flags().GetString("system-prompt")
@@ -198,6 +246,17 @@ var chatCmd = &cobra.Command{
 			}
 		}
 
+		// If a message argument is provided, send it and exit
+		if len(args) > 0 {
+			message := args[0]
+			if err := runSingleMessage(message, systemPrompt, agentName, reasoningBudget, tools); err != nil {
+				fmt.Println(errorStyle.Sprint(err))
+				os.Exit(1)
+			}
+			return
+		}
+
+		// Otherwise, start interactive chat
 		if err := runChat(systemPrompt, agentName, reasoningBudget, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
