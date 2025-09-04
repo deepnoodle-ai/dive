@@ -163,10 +163,10 @@ Available CLI commands include:
 Dive provides a unified interface for working with different LLM providers:
 
 * **Anthropic** (Claude Sonnet, Haiku, Opus)
-* **OpenAI** (GPT-4, o1, o3)
+* **OpenAI** (GPT-5, GPT-4, o1, o3)
 * **OpenRouter** (Access to 200+ models from multiple providers with unified API)
 * **Google** (Gemini models)
-* **Groq** (Llama, DeepSeek, Qwen)
+* **Grok** (Grok 4, Grok Code Fast)
 * **Ollama** (Local model serving)
 
 Each provider implementation handles API communication, token counting,
@@ -175,17 +175,11 @@ tool calling, and other details.
 ```go
 provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-20250514"))
 
-provider := openai.New(openai.WithModel("gpt-4o"))
+provider := openai.New(openai.WithModel("gpt-5-2025-08-07"))
 
-provider := openrouter.New(
-    openrouter.WithModel("openai/gpt-4o"),
-    openrouter.WithSiteURL("https://myapp.com"),
-    openrouter.WithSiteName("My App"),
-)
+provider := openrouter.New(openrouter.WithModel("openai/gpt-4o"))
 
-provider := google.New(google.WithModel("gemini-2.0-flash-exp"))
-
-provider := groq.New(groq.WithModel("deepseek-r1-distill-llama-70b"))
+provider := google.New(google.WithModel("gemini-2.5-flash"))
 
 provider := ollama.New(ollama.WithModel("llama3.2:3b"))
 ```
@@ -225,9 +219,9 @@ These are the models that have been verified to work in Dive:
 | Google    | `gemini-2.5-flash`              | Yes             |
 | Google    | `gemini-2.5-flash-lite`         | Yes             |
 | Google    | `gemini-2.5-pro`                | Yes             |
-| Groq      | `deepseek-r1-distill-llama-70b` | Yes             |
-| Groq      | `llama-3.3-70b-versatile`       | Yes             |
-| Groq      | `qwen-2.5-32b`                  | Yes             |
+| Grok      | `grok-4-0709`                   | Yes             |
+| Grok      | `grok-code-fast-1`              | Yes             |
+| OpenAI    | `gpt-5-2025-08-07`              | Yes             |
 | OpenAI    | `gpt-4o`                        | Yes             |
 | OpenAI    | `gpt-4.5-preview`               | Yes             |
 | OpenAI    | `o1`                            | Yes             |

@@ -38,7 +38,6 @@ func GetModel(providerName, modelName string) (llm.LLM, error) {
 		return openai.New(opts...), nil
 
 	case "openai-completions":
-		// New Responses API
 		opts := []openaicompletions.Option{}
 		if modelName != "" {
 			opts = append(opts, openaicompletions.WithModel(modelName))

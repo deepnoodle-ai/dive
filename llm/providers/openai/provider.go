@@ -19,7 +19,7 @@ import (
 const ProviderName = "openai"
 
 var (
-	DefaultModel         = openai.ChatModelGPT4o
+	DefaultModel         = "gpt-5-2025-08-07"
 	DefaultMaxTokens     = 4096
 	DefaultMaxRetries    = 2
 	DefaultRetryBaseWait = 1 * time.Second

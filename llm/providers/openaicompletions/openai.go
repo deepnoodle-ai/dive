@@ -41,7 +41,7 @@ const (
 )
 
 var (
-	DefaultModel              = "gpt-4o"
+	DefaultModel              = "gpt-5-2025-08-07"
 	DefaultEndpoint           = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens          = 4096
 	DefaultSystemRole         = "developer"
@@ -412,7 +412,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	if maxTokens > 0 {
-		if strings.HasPrefix(req.Model, "o") {
+		if strings.HasPrefix(req.Model, "o") || strings.HasPrefix(req.Model, "gpt-5") {
 			req.MaxCompletionTokens = &maxTokens
 		} else {
 			req.MaxTokens = &maxTokens
