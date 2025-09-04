@@ -21,25 +21,25 @@ const (
 	EmbeddingOutputVector EmbeddingOutputFormat = "vector"
 )
 
-func runEmbedding(text, model, outputFormat string) error {
+func runEmbedding(model, outputFormat string, inputs []string) error {
 	ctx := context.Background()
 
 	// Create embedding provider
 	provider := openai.NewEmbeddingProvider()
 
 	// Set up embedding options
-	var opts []embedding.EmbeddingOption
-	opts = append(opts, embedding.WithEmbeddingInput(text))
+	var opts []embedding.Option
+	opts = append(opts, embedding.WithInputs(inputs))
 
 	if model != "" {
-		opts = append(opts, embedding.WithEmbeddingModel(model))
+		opts = append(opts, embedding.WithModel(model))
 	}
 
 	// Always use float encoding format for consistency
-	opts = append(opts, embedding.WithEncodingFormat("float"))
+	opts = append(opts, embedding.WithDimensions(1536))
 
 	// Generate embedding
-	response, err := provider.GenerateEmbedding(ctx, opts...)
+	response, err := provider.Embed(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("error generating embedding: %w", err)
 	}
@@ -55,22 +55,45 @@ func runEmbedding(text, model, outputFormat string) error {
 		fmt.Println(string(jsonData))
 
 	case EmbeddingOutputVector:
-		// Output just the vector values
-		if len(response.Data) > 0 {
-			vector := response.Data[0].Vector
-			vectorStrs := make([]string, len(vector))
-			for i, val := range vector {
-				vectorStrs[i] = fmt.Sprintf("%.6f", val)
+		// Output JSON representation of the vector(s)
+		if len(response.Floats) > 0 {
+			if len(response.Floats) == 1 {
+				// Single vector: output as JSON array
+				jsonData, err := json.Marshal(response.Floats[0])
+				if err != nil {
+					return fmt.Errorf("error marshaling float vector to JSON: %w", err)
+				}
+				fmt.Println(string(jsonData))
+			} else {
+				// Multiple vectors: output as JSON array of arrays
+				jsonData, err := json.Marshal(response.Floats)
+				if err != nil {
+					return fmt.Errorf("error marshaling float vectors to JSON: %w", err)
+				}
+				fmt.Println(string(jsonData))
 			}
-			fmt.Printf("[%s]\n", strings.Join(vectorStrs, ", "))
+		} else if len(response.Ints) > 0 {
+			if len(response.Ints) == 1 {
+				// Single vector: output as JSON array
+				jsonData, err := json.Marshal(response.Ints[0])
+				if err != nil {
+					return fmt.Errorf("error marshaling int vector to JSON: %w", err)
+				}
+				fmt.Println(string(jsonData))
+			} else {
+				// Multiple vectors: output as JSON array of arrays
+				jsonData, err := json.Marshal(response.Ints)
+				if err != nil {
+					return fmt.Errorf("error marshaling int vectors to JSON: %w", err)
+				}
+				fmt.Println(string(jsonData))
+			}
 		} else {
 			return fmt.Errorf("no embeddings returned")
 		}
-
 	default:
 		return fmt.Errorf("unsupported output format: %s (supported: json, vector)", outputFormat)
 	}
-
 	return nil
 }
 
@@ -98,8 +121,8 @@ The text input can be provided via the --text flag or through stdin.
 Output can be formatted as JSON (full response) or vector (just the embedding values).
 
 Examples:
-  dive embed --text "Hello, world!" --model text-embedding-ada-002 --output json
-  echo "Hello, world!" | dive embed --model text-embedding-ada-002 --output vector
+  dive embed --text "Hello, world!" --output json
+  echo "Hello, world!" | dive embed --model text-embedding-3-small --output vector
   dive embed --text "Some text" --output json`,
 	Run: func(cmd *cobra.Command, args []string) {
 		text, err := cmd.Flags().GetString("text")
@@ -153,7 +176,7 @@ Examples:
 		}
 
 		// Run embedding generation
-		if err := runEmbedding(text, model, outputFormat); err != nil {
+		if err := runEmbedding(model, outputFormat, []string{text}); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -164,6 +187,6 @@ func init() {
 	rootCmd.AddCommand(embedCmd)
 
 	embedCmd.Flags().StringP("text", "t", "", "Input text to embed (if not provided, reads from stdin)")
-	embedCmd.Flags().StringP("model", "m", "text-embedding-ada-002", "Embedding model to use")
+	embedCmd.Flags().StringP("model", "m", "", "Embedding model to use (if not provided, uses the default model)")
 	embedCmd.Flags().StringP("output", "o", "json", "Output format: json (full response) or vector (embedding values only)")
 }
