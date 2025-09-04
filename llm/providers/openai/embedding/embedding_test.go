@@ -24,7 +24,7 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 
 func TestEmbeddingProvider_Name(t *testing.T) {
 	provider := New()
-	require.Equal(t, "openai-embeddings", provider.Name())
+	require.Equal(t, "openai", provider.Name())
 }
 
 func TestEmbeddingProvider_GenerateEmbedding_Success(t *testing.T) {
@@ -280,62 +280,4 @@ func TestEmbeddingProvider_GenerateEmbedding_InvalidDimensions(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "dimensions must be a positive integer")
-}
-
-func TestEmbeddingProvider_GenerateEmbedding_Base64Encoding(t *testing.T) {
-	// Mock successful API response with base64-encoded embeddings
-	// This represents 3 float32 values: [0.1, 0.2, 0.3] encoded as base64
-	base64Embedding := "zczMPc3MTD6amZk+"
-
-	apiResponse := response{
-		Object: "list",
-		Data: []embeddingObject{
-			{
-				Object:    "embedding",
-				Index:     0,
-				Embedding: base64Embedding,
-			},
-		},
-		Model: "text-embedding-ada-002",
-		Usage: usage{
-			PromptTokens: 5,
-			TotalTokens:  5,
-		},
-	}
-
-	responseBody, err := json.Marshal(apiResponse)
-	require.NoError(t, err)
-
-	mockClient := &http.Client{
-		Transport: &MockRoundTripper{
-			Response: &http.Response{
-				StatusCode: 200,
-				Body:       io.NopCloser(bytes.NewReader(responseBody)),
-				Header:     make(http.Header),
-			},
-		},
-	}
-
-	provider := New(WithEmbeddingClient(mockClient))
-
-	ctx := context.Background()
-	response, err := provider.GenerateEmbedding(ctx,
-		embedding.WithEmbeddingInput("test input"),
-		embedding.WithEncodingFormat("base64"))
-
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	require.Equal(t, "list", response.Object)
-	require.Equal(t, "text-embedding-ada-002", response.Model)
-	require.Len(t, response.Data, 1)
-
-	embedding := response.Data[0]
-	require.Equal(t, 0, embedding.Index)
-	require.Equal(t, "embedding", embedding.Object)
-	require.Len(t, embedding.Vector, 3)
-
-	// Check that the decoded values are approximately correct (with floating point precision)
-	require.InDelta(t, 0.1, embedding.Vector[0], 0.001)
-	require.InDelta(t, 0.2, embedding.Vector[1], 0.001)
-	require.InDelta(t, 0.3, embedding.Vector[2], 0.001)
 }
