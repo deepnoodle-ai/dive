@@ -156,6 +156,7 @@ go install .
 Available CLI commands include:
 
 * `dive chat --provider anthropic --model claude-sonnet-4-20250514`: Chat with an agent
+* `dive classify --text "input text" --labels "label1,label2,label3"`: Classify text with confidence scores
 * `dive config check /path/to/config.yaml`: Validate a Dive configuration
 
 ## LLM Providers
