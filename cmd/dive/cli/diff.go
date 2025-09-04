@@ -101,7 +101,7 @@ func runDiff(ctx context.Context, oldFile, newFile string, outputFormat string, 
 	}
 
 	// Show basic diff information
-	fmt.Printf("%s Analyzing differences between:\n", infoStyle.Sprint("📄"))
+	fmt.Printf("Analyzing differences between:\n")
 	fmt.Printf("  Old: %s (%d lines)\n", oldFile, countLines(oldContent))
 	fmt.Printf("  New: %s (%d lines)\n", newFile, countLines(newContent))
 	fmt.Println()
@@ -191,7 +191,7 @@ func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDif
 	// Prepare the prompt for the LLM
 	prompt := buildDiffPrompt(unifiedDiff, oldFile, newFile, outputFormat)
 
-	fmt.Println(headerStyle.Sprint("🔍 Analyzing semantic differences..."))
+	fmt.Println("Analyzing semantic differences...")
 	fmt.Println()
 
 	// Stream the response
@@ -205,7 +205,8 @@ func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDif
 	var incremental bool
 	for stream.Next(ctx) {
 		event := stream.Event()
-		if event.Type == dive.EventTypeLLMEvent {
+		switch event.Type {
+		case dive.EventTypeLLMEvent:
 			incremental = true
 			payload := event.Item.Event
 			if payload.Delta != nil {
@@ -215,12 +216,12 @@ func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDif
 					fmt.Print(thinkingStyle.Sprint(payload.Delta.Thinking))
 				}
 			}
-		} else if event.Type == dive.EventTypeResponseCompleted {
+		case dive.EventTypeResponseCompleted:
 			if !incremental {
 				text := strings.TrimSpace(event.Response.OutputText())
 				fmt.Println(successStyle.Sprint(text))
 			}
-		} else if event.Type == dive.EventTypeResponseFailed {
+		case dive.EventTypeResponseFailed:
 			// Handle failed response event
 			if event.Error != nil {
 				// Check if it's an authentication error and provide helpful message

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -95,21 +94,6 @@ func runEmbedding(model, outputFormat string, inputs []string) error {
 		return fmt.Errorf("unsupported output format: %s (supported: json, vector)", outputFormat)
 	}
 	return nil
-}
-
-func readStdin() (string, error) {
-	var lines []string
-	scanner := bufio.NewScanner(os.Stdin)
-
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading from stdin: %w", err)
-	}
-
-	return strings.Join(lines, "\n"), nil
 }
 
 var embedCmd = &cobra.Command{
