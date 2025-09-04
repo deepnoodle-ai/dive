@@ -62,6 +62,7 @@ func TestToolUse(t *testing.T) {
 		})
 
 	response, err := provider.Generate(ctx,
+		llm.WithModel("gpt-4o-2024-08-06"),
 		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithTools(add),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
@@ -202,6 +203,7 @@ func TestToolUseStream(t *testing.T) {
 		})
 
 	iterator, err := provider.Stream(ctx,
+		llm.WithModel("gpt-4o-2024-08-06"),
 		llm.WithMessages(llm.NewUserTextMessage("add 567 and 111")),
 		llm.WithToolChoice(llm.ToolChoiceAuto),
 		llm.WithTools(add),
