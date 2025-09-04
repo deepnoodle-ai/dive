@@ -6,6 +6,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/llm/providers/google"
+	"github.com/deepnoodle-ai/dive/llm/providers/grok"
 	"github.com/deepnoodle-ai/dive/llm/providers/groq"
 	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
@@ -49,6 +50,13 @@ func GetModel(providerName, modelName string) (llm.LLM, error) {
 			opts = append(opts, groq.WithModel(modelName))
 		}
 		return groq.New(opts...), nil
+
+	case "grok":
+		opts := []grok.Option{}
+		if modelName != "" {
+			opts = append(opts, grok.WithModel(modelName))
+		}
+		return grok.New(opts...), nil
 
 	case "ollama":
 		opts := []ollama.Option{}
