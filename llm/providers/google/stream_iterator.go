@@ -14,8 +14,6 @@ import (
 
 type StreamIterator struct {
 	ctx          context.Context
-	chat         *genai.Chat
-	parts        []genai.Part
 	model        string
 	responseID   string
 	contentIndex int
@@ -41,11 +39,28 @@ type StreamIterator struct {
 	mu sync.Mutex
 }
 
-func NewStreamIterator(ctx context.Context, chat *genai.Chat, parts []genai.Part, model string) *StreamIterator {
+// NewStreamIteratorFromSeq creates a new StreamIterator from a streaming sequence
+func NewStreamIteratorFromSeq(ctx context.Context, streamSeq iter.Seq2[*genai.GenerateContentResponse, error], model string) *StreamIterator {
 	return &StreamIterator{
 		ctx:          ctx,
-		chat:         chat,
-		parts:        parts,
+		streamSeq:    streamSeq,
+		model:        model,
+		responseID:   fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano()),
+		contentIndex: 0,
+	}
+}
+
+// NewStreamIterator creates a new StreamIterator (deprecated, use NewStreamIteratorFromSeq)
+func NewStreamIterator(ctx context.Context, chat *genai.Chat, parts []genai.Part, model string) *StreamIterator {
+	// Legacy constructor for backward compatibility
+	// Start the stream using the chat API
+	var streamSeq iter.Seq2[*genai.GenerateContentResponse, error]
+	if chat != nil && len(parts) > 0 {
+		streamSeq = chat.SendMessageStream(ctx, parts...)
+	}
+	return &StreamIterator{
+		ctx:          ctx,
+		streamSeq:    streamSeq,
 		model:        model,
 		responseID:   fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano()),
 		contentIndex: 0,
@@ -208,16 +223,9 @@ func (s *StreamIterator) Next() bool {
 
 func (s *StreamIterator) startStream() error {
 	// Validate preconditions
-	if s.chat == nil {
-		return fmt.Errorf("chat is nil - streaming cannot proceed")
+	if s.streamSeq == nil {
+		return fmt.Errorf("stream sequence is nil - streaming cannot proceed")
 	}
-	// Allow empty parts for continuation after function responses
-	if len(s.parts) == 0 {
-		s.parts = []genai.Part{*genai.NewPartFromText("")}
-	}
-
-	// Start the stream using the iterator pattern
-	s.streamSeq = s.chat.SendMessageStream(s.ctx, s.parts...)
 
 	// Create a next function from the iterator
 	s.streamNext, s.streamStop = iter.Pull2(s.streamSeq)
