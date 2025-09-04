@@ -1,12 +1,9 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"strings"
 
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -25,28 +22,6 @@ func summarizationPrompts(length string) string {
 	default:
 		return "You are a summarization assistant. Create a clear, well-organized summary of the provided text that captures the main points and key details."
 	}
-}
-
-// readStdin reads all content from standard input
-func readStdin() (string, error) {
-	var content strings.Builder
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				if line != "" {
-					content.WriteString(line)
-				}
-				break
-			}
-			return "", fmt.Errorf("error reading from stdin: %v", err)
-		}
-		content.WriteString(line)
-	}
-
-	return strings.TrimSpace(content.String()), nil
 }
 
 // runSummarize executes the summarization process

@@ -3,47 +3,11 @@ package cli
 import (
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/mattn/go-runewidth"
 )
 
-var (
-	// Color scheme for workflow output
-	headerStyle  = color.New(color.FgCyan, color.Bold)
-	warningStyle = color.New(color.FgYellow, color.Bold)
-	infoStyle    = color.New(color.FgCyan)
-	stepStyle    = color.New(color.FgMagenta, color.Bold)
-	inputStyle   = color.New(color.FgCyan)
-	outputStyle  = color.New(color.FgGreen)
-	timeStyle    = color.New(color.FgWhite, color.Faint)
-	borderStyle  = color.New(color.FgWhite, color.Faint)
-	mutedStyle   = color.New(color.FgHiBlack)
-)
-
-const (
-	// Special characters for styling workflow output
-	boxTopLeft     = "┌"
-	boxTopRight    = "┐"
-	boxBottomLeft  = "└"
-	boxBottomRight = "┘"
-	boxHorizontal  = "─"
-	boxVertical    = "│"
-	boxTeeDown     = "┬"
-	boxTeeUp       = "┴"
-	boxTeeRight    = "├"
-	boxTeeLeft     = "┤"
-	boxCross       = "┼"
-	bullet         = "•"
-	arrow          = "→"
-	checkmark      = "✓"
-	xmark          = "✗"
-	hourglass      = "⏳"
-	rocket         = "🚀"
-	gear           = "⚙️"
-)
-
-// stripANSI removes ANSI escape sequences from text for length calculation
-func stripANSI(text string) string {
+// StripANSI removes ANSI escape sequences from text for length calculation
+func StripANSI(text string) string {
 	// Improved ANSI escape sequence removal
 	result := strings.Builder{}
 	inEscape := false
@@ -73,8 +37,8 @@ func stripANSI(text string) string {
 	return result.String()
 }
 
-// displayWidth calculates the actual display width of text, accounting for wide characters
-func displayWidth(text string) int {
-	plainText := stripANSI(text)
+// DisplayWidth calculates the actual display width of text, accounting for wide characters
+func DisplayWidth(text string) int {
+	plainText := StripANSI(text)
 	return runewidth.StringWidth(plainText)
 }
