@@ -71,8 +71,8 @@ func TestEmbeddingProvider_GenerateEmbedding_Success(t *testing.T) {
 	require.Equal(t, "text-embedding-ada-002", response.Model)
 	require.Len(t, response.Floats, 1)
 
-	embedding := response.Floats[0]
-	require.Equal(t, []float64{0.1, 0.2, 0.3, 0.4, 0.5}, embedding)
+	vector := response.Floats[0]
+	require.Equal(t, embedding.FloatVector{0.1, 0.2, 0.3, 0.4, 0.5}, vector)
 
 	require.Equal(t, 5, response.Usage.PromptTokens)
 	require.Equal(t, 5, response.Usage.TotalTokens)
