@@ -104,3 +104,62 @@ func (m *Message) DecodeInto(v any) error {
 	}
 	return fmt.Errorf("no text content found")
 }
+
+// MarshalJSON implements custom marshaling for Message to properly handle
+// the polymorphic Content field.
+func (m *Message) MarshalJSON() ([]byte, error) {
+	type tempMessage struct {
+		ID      string            `json:"id,omitempty"`
+		Role    Role              `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	}
+
+	// Marshal each content item individually
+	var contentRaw []json.RawMessage
+	for _, content := range m.Content {
+		contentBytes, err := json.Marshal(content)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal content: %v", err)
+		}
+		contentRaw = append(contentRaw, contentBytes)
+	}
+
+	tmp := tempMessage{
+		ID:      m.ID,
+		Role:    m.Role,
+		Content: contentRaw,
+	}
+
+	return json.Marshal(tmp)
+}
+
+// UnmarshalJSON implements custom unmarshaling for Message to properly handle
+// the polymorphic Content field.
+func (m *Message) UnmarshalJSON(data []byte) error {
+	type tempMessage struct {
+		ID      string            `json:"id,omitempty"`
+		Role    Role              `json:"role"`
+		Content []json.RawMessage `json:"content"`
+	}
+
+	// Unmarshal JSON into the temporary struct
+	var tmp tempMessage
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+
+	// Copy all fields except Content
+	m.ID = tmp.ID
+	m.Role = tmp.Role
+
+	// Process each content item
+	m.Content = make([]Content, 0, len(tmp.Content))
+	for _, rawContent := range tmp.Content {
+		content, err := UnmarshalContent(rawContent)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal content: %v", err)
+		}
+		m.Content = append(m.Content, content)
+	}
+	return nil
+}

@@ -82,7 +82,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	return nil
 }
 
-func runChat(instructions, agentName string, reasoningBudget int, tools []dive.Tool) error {
+func runChat(instructions, agentName, sessionFile string, reasoningBudget int, tools []dive.Tool) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -109,13 +109,26 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 		Mode: dive.ConfirmIfNotReadOnly,
 	})
 
+	// Create appropriate thread repository
+	var threadRepo dive.ThreadRepository
+	if sessionFile != "" {
+		fileRepo := agent.NewFileThreadRepository(sessionFile)
+		if err := fileRepo.Load(ctx); err != nil {
+			return fmt.Errorf("error loading session file: %v", err)
+		}
+		threadRepo = fileRepo
+		fmt.Println(boldStyle.Sprintf("Using session file: %s", sessionFile))
+	} else {
+		threadRepo = agent.NewMemoryThreadRepository()
+	}
+
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,
 		Instructions:     instructions,
 		Model:            model,
 		Logger:           logger,
 		Tools:            tools,
-		ThreadRepository: agent.NewMemoryThreadRepository(),
+		ThreadRepository: threadRepo,
 		ModelSettings:    modelSettings,
 		Confirmer:        confirmer,
 	})
@@ -124,6 +137,9 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 	}
 
 	fmt.Println(boldStyle.Sprint("Chat Session"))
+	if sessionFile != "" {
+		fmt.Println(boldStyle.Sprintf("Session will be saved to: %s", sessionFile))
+	}
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -153,7 +169,7 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 	return nil
 }
 
-func runSingleMessage(message, instructions, agentName string, reasoningBudget int, tools []dive.Tool) error {
+func runSingleMessage(message, instructions, agentName, sessionFile string, reasoningBudget int, tools []dive.Tool) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -180,13 +196,25 @@ func runSingleMessage(message, instructions, agentName string, reasoningBudget i
 		Mode: dive.ConfirmIfNotReadOnly,
 	})
 
+	// Create appropriate thread repository
+	var threadRepo dive.ThreadRepository
+	if sessionFile != "" {
+		fileRepo := agent.NewFileThreadRepository(sessionFile)
+		if err := fileRepo.Load(ctx); err != nil {
+			return fmt.Errorf("error loading session file: %v", err)
+		}
+		threadRepo = fileRepo
+	} else {
+		threadRepo = agent.NewMemoryThreadRepository()
+	}
+
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,
 		Instructions:     instructions,
 		Model:            model,
 		Logger:           logger,
 		Tools:            tools,
-		ThreadRepository: agent.NewMemoryThreadRepository(),
+		ThreadRepository: threadRepo,
 		ModelSettings:    modelSettings,
 		Confirmer:        confirmer,
 	})
@@ -204,7 +232,7 @@ func runSingleMessage(message, instructions, agentName string, reasoningBudget i
 var chatCmd = &cobra.Command{
 	Use:   "chat [message]",
 	Short: "Start an interactive chat with an AI agent or send a single message",
-	Long:  "Start an interactive chat with an AI agent. If a message is provided as an argument, send that message, show the response, and exit.",
+	Long:  "Start an interactive chat with an AI agent. If a message is provided as an argument, send that message, show the response, and exit. Use --session to persist conversation history to a file for resuming later.",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 
@@ -215,6 +243,12 @@ var chatCmd = &cobra.Command{
 		}
 
 		agentName, err := cmd.Flags().GetString("agent-name")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+
+		sessionFile, err := cmd.Flags().GetString("session")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
@@ -249,7 +283,7 @@ var chatCmd = &cobra.Command{
 		// If a message argument is provided, send it and exit
 		if len(args) > 0 {
 			message := args[0]
-			if err := runSingleMessage(message, systemPrompt, agentName, reasoningBudget, tools); err != nil {
+			if err := runSingleMessage(message, systemPrompt, agentName, sessionFile, reasoningBudget, tools); err != nil {
 				fmt.Println(errorStyle.Sprint(err))
 				os.Exit(1)
 			}
@@ -257,7 +291,7 @@ var chatCmd = &cobra.Command{
 		}
 
 		// Otherwise, start interactive chat
-		if err := runChat(systemPrompt, agentName, reasoningBudget, tools); err != nil {
+		if err := runChat(systemPrompt, agentName, sessionFile, reasoningBudget, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -270,5 +304,6 @@ func init() {
 	chatCmd.Flags().StringP("agent-name", "", "Assistant", "Name of the chat agent")
 	chatCmd.Flags().StringP("system-prompt", "", "", "System prompt for the chat agent")
 	chatCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the chat agent")
+	chatCmd.Flags().StringP("session", "s", "", "Path to session file for persistent conversation history (e.g., ~/.dive/sessions/my-chat.json)")
 	chatCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
 }
