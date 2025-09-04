@@ -15,15 +15,15 @@ func TestOpenRouterIntegration(t *testing.T) {
 		t.Skip("Skipping integration test: no OPENROUTER_API_KEY set")
 	}
 
-	provider := New(WithModel("openai/gpt-3.5-turbo"))
+	provider := New(WithModel(ModelOpenAIGPT4o))
 
 	// This would require an actual API key to work
 	ctx := context.Background()
 	response, err := provider.Generate(ctx, llm.WithMessages(
 		llm.NewUserTextMessage("Say 'hello' and nothing else."),
 	))
-	require.NotNil(t, response)
 	require.NoError(t, err)
+	require.NotNil(t, response)
 
 	require.Equal(t, llm.Assistant, response.Role)
 	require.Equal(t, "hello", strings.ToLower(response.Message().Text()))
