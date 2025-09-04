@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/embedding"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
 	"github.com/spf13/cobra"
 )
@@ -28,15 +28,15 @@ func runEmbedding(text, model, outputFormat string) error {
 	provider := openai.NewEmbeddingProvider()
 
 	// Set up embedding options
-	var opts []dive.EmbeddingOption
-	opts = append(opts, dive.WithEmbeddingInput(text))
+	var opts []embedding.EmbeddingOption
+	opts = append(opts, embedding.WithEmbeddingInput(text))
 
 	if model != "" {
-		opts = append(opts, dive.WithEmbeddingModel(model))
+		opts = append(opts, embedding.WithEmbeddingModel(model))
 	}
 
 	// Always use float encoding format for consistency
-	opts = append(opts, dive.WithEncodingFormat("float"))
+	opts = append(opts, embedding.WithEncodingFormat("float"))
 
 	// Generate embedding
 	response, err := provider.GenerateEmbedding(ctx, opts...)
@@ -56,8 +56,8 @@ func runEmbedding(text, model, outputFormat string) error {
 
 	case EmbeddingOutputVector:
 		// Output just the vector values
-		if len(response.Embeddings) > 0 {
-			vector := response.Embeddings[0].Vector
+		if len(response.Data) > 0 {
+			vector := response.Data[0].Vector
 			vectorStrs := make([]string, len(vector))
 			for i, val := range vector {
 				vectorStrs[i] = fmt.Sprintf("%.6f", val)
@@ -77,15 +77,15 @@ func runEmbedding(text, model, outputFormat string) error {
 func readStdin() (string, error) {
 	var lines []string
 	scanner := bufio.NewScanner(os.Stdin)
-	
+
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("error reading from stdin: %w", err)
 	}
-	
+
 	return strings.Join(lines, "\n"), nil
 }
 
