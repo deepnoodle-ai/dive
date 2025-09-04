@@ -1,7 +1,6 @@
 package grok
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -65,5 +64,5 @@ func getAPIKey() string {
 }
 
 func (p *Provider) Name() string {
-	return fmt.Sprintf("grok-%s", p.model)
+	return "grok"
 }

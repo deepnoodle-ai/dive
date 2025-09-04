@@ -11,6 +11,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
 	"github.com/deepnoodle-ai/dive/llm/providers/openaicompletions"
+	"github.com/deepnoodle-ai/dive/llm/providers/openrouter"
 )
 
 var DefaultProvider = "anthropic"
@@ -71,6 +72,13 @@ func GetModel(providerName, modelName string) (llm.LLM, error) {
 			opts = append(opts, google.WithModel(modelName))
 		}
 		return google.New(opts...), nil
+
+	case "openrouter":
+		opts := []openrouter.Option{}
+		if modelName != "" {
+			opts = append(opts, openrouter.WithModel(modelName))
+		}
+		return openrouter.New(opts...), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported provider: %q", providerName)

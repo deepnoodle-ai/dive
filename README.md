@@ -7,6 +7,7 @@
 <a href="https://cloud.google.com/vertex-ai"><img alt="Gemini" src="https://img.shields.io/badge/Gemini-4285F4.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://x.ai"><img alt="Grok" src="https://img.shields.io/badge/Grok-1DA1F2.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://ollama.ai"><img alt="Ollama" src="https://img.shields.io/badge/Ollama-1E2952.svg?style=for-the-badge&labelColor=000000"></a>
+<a href="https://openrouter.ai"><img alt="OpenRouter" src="https://img.shields.io/badge/OpenRouter-7C3AED.svg?style=for-the-badge&labelColor=000000"></a>
 <a href="https://deepnoodle.ai"><img alt="Made by Deep Noodle" src="https://img.shields.io/badge/MADE%20BY%20Deep%20Noodle-000000.svg?style=for-the-badge&labelColor=000000"></a>
 
 </div>
@@ -42,7 +43,7 @@ Please leave a GitHub star if you're interested in the project!
 * **Agents**: Chat or assign work to specialized agents with configurable reasoning
 * **Supervisor Patterns**: Create hierarchical agent systems with work delegation
 * **Declarative Configuration**: Define agents using YAML
-* **Multiple LLMs**: Switch between Anthropic, OpenAI, Google, Grok, Ollama, and others
+* **Multiple LLMs**: Switch between Anthropic, OpenAI, Google, OpenRouter, Grok, Ollama, and others
 * **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
 * **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
 * **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
@@ -65,8 +66,9 @@ the LLM provider and for any tools that you'd like your agents to use.
 # LLM Provider API Keys
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
-export GROK_API_KEY="your-key-here"
 export GEMINI_API_KEY="your-key-here"
+export GROK_API_KEY="your-key-here"
+export OPENROUTER_API_KEY="your-key-here"
 
 # Tool API Keys
 export GOOGLE_SEARCH_API_KEY="your-key-here"
@@ -162,7 +164,10 @@ Dive provides a unified interface for working with different LLM providers:
 
 * **Anthropic** (Claude Sonnet, Haiku, Opus)
 * **OpenAI** (GPT-4, o1, o3)
+* **OpenRouter** (Access to 200+ models from multiple providers with unified API)
+* **Google** (Gemini models)
 * **Groq** (Llama, DeepSeek, Qwen)
+* **Ollama** (Local model serving)
 
 Each provider implementation handles API communication, token counting,
 tool calling, and other details.
@@ -172,7 +177,17 @@ provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-20250514"))
 
 provider := openai.New(openai.WithModel("gpt-4o"))
 
+provider := openrouter.New(
+    openrouter.WithModel("openai/gpt-4o"),
+    openrouter.WithSiteURL("https://myapp.com"),
+    openrouter.WithSiteName("My App"),
+)
+
+provider := google.New(google.WithModel("gemini-2.0-flash-exp"))
+
 provider := groq.New(groq.WithModel("deepseek-r1-distill-llama-70b"))
+
+provider := ollama.New(ollama.WithModel("llama3.2:3b"))
 ```
 
 ## Model Context Protocol (MCP)
