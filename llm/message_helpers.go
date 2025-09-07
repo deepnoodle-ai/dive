@@ -1,6 +1,9 @@
 package llm
 
-import "encoding/base64"
+import (
+	"encoding/base64"
+	"encoding/json"
+)
 
 // NewMessage creates a message with the given role and content blocks.
 func NewMessage(role Role, content []Content) *Message {
@@ -20,9 +23,35 @@ func NewUserTextMessage(text string) *Message {
 	}
 }
 
+// NewSystemMessage creates a system message with a single text content block.
+func NewSystemMessage(text string) *Message {
+	return &Message{
+		Role:    System,
+		Content: []Content{&TextContent{Text: text}},
+	}
+}
+
 // NewTextContent creates a text content block with the given text.
 func NewTextContent(text string) *TextContent {
 	return &TextContent{Text: text}
+}
+
+// NewToolUseContent creates a tool use content block.
+func NewToolUseContent(id, name string, input json.RawMessage) *ToolUseContent {
+	return &ToolUseContent{
+		ID:    id,
+		Name:  name,
+		Input: input,
+	}
+}
+
+// NewToolResultContent creates a tool result content block.
+func NewToolResultContent(toolUseID string, content any, isError bool) *ToolResultContent {
+	return &ToolResultContent{
+		ToolUseID: toolUseID,
+		Content:   content,
+		IsError:   isError,
+	}
 }
 
 // NewAssistantMessage creates an assistant message with the given content.
