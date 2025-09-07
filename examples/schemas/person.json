@@ -1,0 +1,61 @@
+{
+  "type": "object",
+  "title": "Person Information",
+  "description": "Schema for extracting person information from documents",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Full name of the person"
+    },
+    "age": {
+      "type": "integer",
+      "description": "Age of the person in years",
+      "minimum": 0,
+      "maximum": 150
+    },
+    "email": {
+      "type": "string",
+      "description": "Email address",
+      "format": "email"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Phone number"
+    },
+    "address": {
+      "type": "object",
+      "description": "Physical address",
+      "properties": {
+        "street": {
+          "type": "string",
+          "description": "Street address"
+        },
+        "city": {
+          "type": "string",
+          "description": "City name"
+        },
+        "state": {
+          "type": "string",
+          "description": "State or province"
+        },
+        "zip_code": {
+          "type": "string",
+          "description": "Postal code"
+        },
+        "country": {
+          "type": "string",
+          "description": "Country name"
+        }
+      }
+    },
+    "occupation": {
+      "type": "string",
+      "description": "Job title or profession"
+    },
+    "company": {
+      "type": "string",
+      "description": "Company or organization name"
+    }
+  },
+  "required": ["name"]
+}

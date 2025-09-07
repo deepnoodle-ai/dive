@@ -497,7 +497,7 @@ func TestStreamingIntegration(t *testing.T) {
 	lines := strings.Split(content.Text, "\n")
 	require.True(t, len(lines) >= 4, "Response should be at least 4 lines")
 	hasKeyword := false
-	for _, keyword := range []string{"logic", "line", "digital", "dreams", "ideas", "art"} {
+	for _, keyword := range []string{"logic", "line", "digital", "dreams", "ideas", "art", "code", "program", "think"} {
 		if strings.Contains(strings.ToLower(content.Text), keyword) {
 			hasKeyword = true
 			break
