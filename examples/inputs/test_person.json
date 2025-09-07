@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Person's name"
+    },
+    "age": {
+      "type": "integer", 
+      "description": "Person's age"
+    },
+    "city": {
+      "type": "string",
+      "description": "City where the person lives"
+    }
+  },
+  "required": ["name"]
+}

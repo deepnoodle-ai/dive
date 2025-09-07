@@ -58,7 +58,13 @@ Examples:
   dive extract --schema person.json --input image.jpg --bias-filter "avoid gender assumptions"
 
   # With custom instructions
-  dive extract --schema data.json --input document.txt --instructions "focus on financial data"`,
+  dive extract --schema data.json --input document.txt --instructions "focus on financial data"
+
+  # Extract multiple items (returns JSON array)
+  dive extract --schema person.json --input group_photo.jpg --multi --output people.json
+
+  # Extract multiple items with fields
+  dive extract --fields "name:string,age:int" --input team_roster.txt --multi`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		schemaPath, err := cmd.Flags().GetString("schema")
@@ -107,6 +113,12 @@ Examples:
 			os.Exit(1)
 		}
 
+		multi, err := cmd.Flags().GetBool("multi")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+
 		// Handle stdin input if no input file provided
 		var inputContent string
 		var stdinErr error
@@ -121,29 +133,53 @@ Examples:
 			inputContent = inputPath
 		}
 
-		if runErr := runExtract(schemaPath, fields, inputContent, outputPath, biasFilter, instructions, inputPath == ""); runErr != nil {
+		if runErr := runExtract(schemaPath, fields, inputContent, outputPath, biasFilter, instructions, multi, inputPath == ""); runErr != nil {
 			fmt.Println(errorStyle.Sprint(runErr))
 			os.Exit(1)
 		}
 	},
 }
 
-func runExtract(schemaPath, fields, inputContent, outputPath, biasFilter, instructions string, isStdin bool) error {
+func runExtract(schemaPath, fields, inputContent, outputPath, biasFilter, instructions string, multi, isStdin bool) error {
 	ctx := context.Background()
 
 	// Load schema from file or create from fields
-	var extractionSchema *schema.Schema
+	var itemSchema *schema.Schema
 	var schemaErr error
 	if schemaPath != "" {
-		extractionSchema, schemaErr = loadSchemaFromFile(schemaPath)
+		itemSchema, schemaErr = loadSchemaFromFile(schemaPath)
 		if schemaErr != nil {
 			return fmt.Errorf("error loading schema: %v", schemaErr)
 		}
 	} else {
-		extractionSchema, schemaErr = createSchemaFromFields(fields)
+		itemSchema, schemaErr = createSchemaFromFields(fields)
 		if schemaErr != nil {
 			return fmt.Errorf("error creating schema from fields: %v", schemaErr)
 		}
+	}
+
+	// Wrap in array schema if multi mode is enabled
+	var extractionSchema *schema.Schema
+	if multi {
+		// For multi mode, we need to create a schema that represents an array of the item schema
+		// Since Schema doesn't have an Items field, we'll create a wrapper object with an array property
+		extractionSchema = &schema.Schema{
+			Type: schema.Object,
+			Properties: map[string]*schema.Property{
+				"data": {
+					Type: schema.Array,
+					Items: &schema.Property{
+						Type:                 schema.Object,
+						Properties:           itemSchema.Properties,
+						Required:             itemSchema.Required,
+						AdditionalProperties: itemSchema.AdditionalProperties,
+					},
+				},
+			},
+			Required: []string{"data"},
+		}
+	} else {
+		extractionSchema = itemSchema
 	}
 
 	// Get model for extraction
@@ -153,7 +189,7 @@ func runExtract(schemaPath, fields, inputContent, outputPath, biasFilter, instru
 	}
 
 	// Execute extraction using LLM tools
-	extractedData, err := performExtraction(ctx, model, extractionSchema, inputContent, biasFilter, instructions)
+	extractedData, err := performExtraction(ctx, model, extractionSchema, inputContent, biasFilter, instructions, multi)
 	if err != nil {
 		return fmt.Errorf("error during extraction: %v", err)
 	}
@@ -162,6 +198,26 @@ func runExtract(schemaPath, fields, inputContent, outputPath, biasFilter, instru
 	var jsonData interface{}
 	if err := json.Unmarshal([]byte(extractedData), &jsonData); err != nil {
 		return fmt.Errorf("extraction did not produce valid JSON: %v", err)
+	}
+
+	// For multi mode, extract the data array from the wrapper object
+	if multi {
+		if objData, ok := jsonData.(map[string]interface{}); ok {
+			if dataArray, exists := objData["data"]; exists {
+				jsonData = dataArray
+			} else {
+				// If the data field doesn't exist, wrap the whole object in an array
+				jsonData = []interface{}{jsonData}
+			}
+		} else {
+			// If it's not an object, wrap it in an array
+			jsonData = []interface{}{jsonData}
+		}
+
+		// Ensure the result is an array
+		if _, isArray := jsonData.([]interface{}); !isArray {
+			jsonData = []interface{}{jsonData}
+		}
 	}
 
 	// Pretty print the result
@@ -184,12 +240,16 @@ func runExtract(schemaPath, fields, inputContent, outputPath, biasFilter, instru
 }
 
 // performExtraction executes the extraction using LLM tools
-func performExtraction(ctx context.Context, model llm.LLM, extractionSchema *schema.Schema, content, biasFilter, instructions string) (string, error) {
+func performExtraction(ctx context.Context, model llm.LLM, extractionSchema *schema.Schema, content, biasFilter, instructions string, multi bool) (string, error) {
 	// Create the extraction tool
 	extractTool := createExtractTool(extractionSchema)
 
 	// Create system prompt
 	systemPrompt := "You are a data extraction specialist. Your task is to analyze the provided content and extract structured information using the extract_data tool. Extract only the information that is clearly present in the content. Do not make assumptions or add placeholder values like '<UNKNOWN>'. If information is not available, simply omit those fields from the result."
+
+	if multi {
+		systemPrompt += " You are extracting multiple items from the content - identify all relevant instances and return them as an array of objects. Each object should follow the specified schema structure."
+	}
 
 	if biasFilter != "" {
 		systemPrompt += fmt.Sprintf(" Apply the following bias filter: %s", biasFilter)
@@ -437,6 +497,7 @@ func init() {
 	extractCmd.Flags().StringP("output", "o", "", "Path to save extracted JSON data (optional)")
 	extractCmd.Flags().StringP("bias-filter", "b", "", "Instructions for filtering or avoiding bias in extraction")
 	extractCmd.Flags().StringP("instructions", "", "", "Additional instructions for the extraction process")
+	extractCmd.Flags().Bool("multi", false, "Extract multiple items from the input and return as JSON array")
 
 	// schema and fields are mutually exclusive, but at least one is required
 	// input flag is now optional
