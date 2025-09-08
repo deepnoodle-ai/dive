@@ -23,6 +23,16 @@ type Thread struct {
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
+// ListThreadsInput specifies search criteria for threads in a thread repository
+type ListThreadsInput struct {
+	ThreadID string
+}
+
+// ListThreadsOutput is the output for listing threads
+type ListThreadsOutput struct {
+	Items []*Thread
+}
+
 // ThreadRepository is an interface for storing and retrieving conversation threads
 type ThreadRepository interface {
 
@@ -34,4 +44,7 @@ type ThreadRepository interface {
 
 	// DeleteThread deletes a thread by ID
 	DeleteThread(ctx context.Context, id string) error
+
+	// ListThreads returns all threads (used for session management)
+	ListThreads(ctx context.Context, input *ListThreadsInput) (*ListThreadsOutput, error)
 }

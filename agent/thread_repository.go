@@ -59,3 +59,14 @@ func (r *MemoryThreadRepository) DeleteThread(ctx context.Context, id string) er
 	delete(r.threads, id)
 	return nil
 }
+
+func (r *MemoryThreadRepository) ListThreads(ctx context.Context, input *dive.ListThreadsInput) (*dive.ListThreadsOutput, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var threads []*dive.Thread
+	for _, thread := range r.threads {
+		threads = append(threads, thread)
+	}
+	return &dive.ListThreadsOutput{Items: threads}, nil
+}

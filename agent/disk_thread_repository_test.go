@@ -12,18 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFileThreadRepository(t *testing.T) {
+func TestDiskThreadRepository(t *testing.T) {
 	ctx := context.Background()
 
-	// Create temporary file for testing
+	// Create temporary directory for testing
 	tmpDir := t.TempDir()
-	sessionFile := filepath.Join(tmpDir, "test_session.json")
 
-	repo := NewFileThreadRepository(sessionFile)
-
-	// Load should work even if file doesn't exist
-	err := repo.Load(ctx)
-	require.NoError(t, err)
+	repo := NewDiskThreadRepository(tmpDir)
 
 	// Create a test thread
 	thread := &dive.Thread{
@@ -48,11 +43,12 @@ func TestFileThreadRepository(t *testing.T) {
 	}
 
 	// Put thread should save to file
-	err = repo.PutThread(ctx, thread)
+	err := repo.PutThread(ctx, thread)
 	require.NoError(t, err)
 
-	// File should exist now
-	_, err = os.Stat(sessionFile)
+	// Thread file should exist now
+	threadFile := filepath.Join(tmpDir, "thread-test-thread-1.json")
+	_, err = os.Stat(threadFile)
 	require.NoError(t, err)
 
 	// Get thread should work
@@ -64,10 +60,8 @@ func TestFileThreadRepository(t *testing.T) {
 	require.Equal(t, "Hello, world!", retrievedThread.Messages[0].Text())
 	require.Equal(t, "Hello! How can I help you today?", retrievedThread.Messages[1].Text())
 
-	// Test persistence by creating new repository and loading
-	newRepo := NewFileThreadRepository(sessionFile)
-	err = newRepo.Load(ctx)
-	require.NoError(t, err)
+	// Test persistence by creating new repository
+	newRepo := NewDiskThreadRepository(tmpDir)
 
 	persistedThread, err := newRepo.GetThread(ctx, "test-thread-1")
 	require.NoError(t, err)
@@ -76,10 +70,10 @@ func TestFileThreadRepository(t *testing.T) {
 	require.Len(t, persistedThread.Messages, 2)
 
 	// Test ListThreads
-	threads, err := newRepo.ListThreads(ctx)
+	output, err := newRepo.ListThreads(ctx, nil)
 	require.NoError(t, err)
-	require.Len(t, threads, 1)
-	require.Equal(t, "test-thread-1", threads[0].ID)
+	require.Len(t, output.Items, 1)
+	require.Equal(t, "test-thread-1", output.Items[0].ID)
 
 	// Test DeleteThread
 	err = newRepo.DeleteThread(ctx, "test-thread-1")
@@ -94,14 +88,11 @@ func TestFileThreadRepository(t *testing.T) {
 	require.Equal(t, dive.ErrThreadNotFound, err)
 }
 
-func TestFileThreadRepository_MultipleThreads(t *testing.T) {
+func TestDiskThreadRepository_MultipleThreads(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	sessionFile := filepath.Join(tmpDir, "multi_session.json")
 
-	repo := NewFileThreadRepository(sessionFile)
-	err := repo.Load(ctx)
-	require.NoError(t, err)
+	repo := NewDiskThreadRepository(tmpDir)
 
 	// Add multiple threads
 	for i := 0; i < 3; i++ {
@@ -118,33 +109,28 @@ func TestFileThreadRepository_MultipleThreads(t *testing.T) {
 				},
 			},
 		}
-		err = repo.PutThread(ctx, thread)
+		err := repo.PutThread(ctx, thread)
 		require.NoError(t, err)
 	}
 
 	// List all threads
-	threads, err := repo.ListThreads(ctx)
+	output, err := repo.ListThreads(ctx, nil)
 	require.NoError(t, err)
-	require.Len(t, threads, 3)
+	require.Len(t, output.Items, 3)
 
 	// Test persistence
-	newRepo := NewFileThreadRepository(sessionFile)
-	err = newRepo.Load(ctx)
-	require.NoError(t, err)
+	newRepo := NewDiskThreadRepository(tmpDir)
 
-	threads, err = newRepo.ListThreads(ctx)
+	output, err = newRepo.ListThreads(ctx, nil)
 	require.NoError(t, err)
-	require.Len(t, threads, 3)
+	require.Len(t, output.Items, 3)
 }
 
-func TestFileThreadRepository_UpdateExistingThread(t *testing.T) {
+func TestDiskThreadRepository_UpdateExistingThread(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	sessionFile := filepath.Join(tmpDir, "update_session.json")
 
-	repo := NewFileThreadRepository(sessionFile)
-	err := repo.Load(ctx)
-	require.NoError(t, err)
+	repo := NewDiskThreadRepository(tmpDir)
 
 	// Create initial thread
 	thread := &dive.Thread{
@@ -161,7 +147,7 @@ func TestFileThreadRepository_UpdateExistingThread(t *testing.T) {
 		},
 	}
 
-	err = repo.PutThread(ctx, thread)
+	err := repo.PutThread(ctx, thread)
 	require.NoError(t, err)
 
 	// Update thread with more messages
@@ -184,17 +170,19 @@ func TestFileThreadRepository_UpdateExistingThread(t *testing.T) {
 	require.Equal(t, "Response to first message", retrievedThread.Messages[1].Text())
 }
 
-func TestFileThreadRepository_InvalidFile(t *testing.T) {
+func TestDiskThreadRepository_InvalidFile(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	sessionFile := filepath.Join(tmpDir, "invalid_session.json")
 
-	// Create invalid JSON file
-	err := os.WriteFile(sessionFile, []byte("invalid json"), 0644)
+	// Create invalid JSON file with thread naming pattern
+	invalidFile := filepath.Join(tmpDir, "thread-invalid.json")
+	err := os.WriteFile(invalidFile, []byte("invalid json"), 0644)
 	require.NoError(t, err)
 
-	repo := NewFileThreadRepository(sessionFile)
-	err = repo.Load(ctx)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to parse session file")
+	repo := NewDiskThreadRepository(tmpDir)
+
+	// Should have no threads since the invalid file was skipped
+	output, err := repo.ListThreads(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, output.Items, 0)
 }

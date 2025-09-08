@@ -26,12 +26,10 @@ var (
 
 // saveRecentThreadID saves the most recent thread ID to ~/.dive/threads/recent
 func saveRecentThreadID(threadID string) error {
-	homeDir, err := os.UserHomeDir()
+	threadsDir, err := diveThreadsDirectory()
 	if err != nil {
-		return fmt.Errorf("error getting user home directory: %v", err)
+		return fmt.Errorf("error getting dive threads directory: %v", err)
 	}
-
-	threadsDir := filepath.Join(homeDir, ".dive", "threads")
 	if err := os.MkdirAll(threadsDir, 0755); err != nil {
 		return fmt.Errorf("error creating threads directory: %v", err)
 	}
@@ -119,7 +117,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID
 	return nil
 }
 
-func runChat(instructions, agentName, threadFile string, tools []dive.Tool) error {
+func runChat(instructions, agentName, threadID string, tools []dive.Tool) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -135,18 +133,11 @@ func runChat(instructions, agentName, threadFile string, tools []dive.Tool) erro
 		Mode: dive.ConfirmIfNotReadOnly,
 	})
 
-	// Create appropriate thread repository
-	var threadRepo dive.ThreadRepository
-	if threadFile != "" {
-		fileRepo := agent.NewFileThreadRepository(threadFile)
-		if err := fileRepo.Load(ctx); err != nil {
-			return fmt.Errorf("error loading session file: %v", err)
-		}
-		threadRepo = fileRepo
-		fmt.Println(boldStyle.Sprintf("Using session file: %s", threadFile))
-	} else {
-		threadRepo = agent.NewMemoryThreadRepository()
+	threadsDir, err := diveThreadsDirectory()
+	if err != nil {
+		return fmt.Errorf("error getting dive threads directory: %v", err)
 	}
+	threadRepo := agent.NewDiskThreadRepository(threadsDir)
 
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,
@@ -163,9 +154,6 @@ func runChat(instructions, agentName, threadFile string, tools []dive.Tool) erro
 	}
 
 	fmt.Println(boldStyle.Sprint("Chat Session"))
-	if threadFile != "" {
-		fmt.Println(boldStyle.Sprintf("Session will be saved to: %s", threadFile))
-	}
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -214,30 +202,10 @@ var chatCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		threadFile, err := cmd.Flags().GetString("thread-file")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
 		thread, err := cmd.Flags().GetString("thread")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
-		}
-
-		if threadFile != "" && thread != "" {
-			fmt.Println(errorStyle.Sprint("Cannot use both --thread-file and --thread"))
-			os.Exit(1)
-		}
-
-		if thread != "" {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				fmt.Println(errorStyle.Sprintf("Error getting user home directory: %v", err))
-				os.Exit(1)
-			}
-			threadFile = filepath.Join(homeDir, ".dive", "threads", thread+".json")
 		}
 
 		var tools []dive.Tool
@@ -261,7 +229,7 @@ var chatCmd = &cobra.Command{
 		// If a message argument is provided, send it and exit
 		if len(args) > 0 {
 			message := args[0]
-			if err := runSingleMessage(message, systemPrompt, agentName, threadFile, "", tools); err != nil {
+			if err := runSingleMessage(message, systemPrompt, agentName, thread, tools); err != nil {
 				fmt.Println(errorStyle.Sprint(err))
 				os.Exit(1)
 			}
@@ -269,7 +237,7 @@ var chatCmd = &cobra.Command{
 		}
 
 		// Otherwise, start interactive chat
-		if err := runChat(systemPrompt, agentName, threadFile, tools); err != nil {
+		if err := runChat(systemPrompt, agentName, thread, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -282,6 +250,5 @@ func init() {
 	chatCmd.Flags().StringP("agent-name", "", "Assistant", "Name of the chat agent")
 	chatCmd.Flags().StringP("system", "", "", "System prompt for the chat agent")
 	chatCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the chat agent")
-	chatCmd.Flags().StringP("thread-file", "", "", "Path to a thread file for persistent conversation history (e.g., my-chat.json)")
 	chatCmd.Flags().StringP("thread", "", "", "ID or name of the thread to use for the chat agent")
 }
