@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/media"
+	"github.com/deepnoodle-ai/dive/media/providers"
 	"github.com/deepnoodle-ai/dive/schema"
 	"github.com/openai/openai-go"
 )
@@ -17,6 +19,7 @@ var _ dive.TypedTool[*ImageGenerationInput] = &ImageGenerationTool{}
 type ImageGenerationInput struct {
 	Prompt            string `json:"prompt"`
 	Model             string `json:"model,omitempty"`
+	Provider          string `json:"provider,omitempty"`
 	Size              string `json:"size,omitempty"`
 	Quality           string `json:"quality,omitempty"`
 	N                 int    `json:"n,omitempty"`
@@ -30,6 +33,7 @@ type ImageGenerationInput struct {
 type ImageGenerationToolOptions struct {
 	Client     *openai.Client
 	FileSystem FileSystem
+	Registry   *providers.Registry
 }
 
 // NewImageGenerationTool creates a new ImageGenerationTool with the given options.
@@ -37,25 +41,32 @@ func NewImageGenerationTool(opts ImageGenerationToolOptions) *dive.TypedToolAdap
 	if opts.FileSystem == nil {
 		opts.FileSystem = &RealFileSystem{}
 	}
+	if opts.Registry == nil {
+		// Create default registry
+		registry, _ := providers.DefaultRegistry()
+		opts.Registry = registry
+	}
 	return dive.ToolAdapter(&ImageGenerationTool{
-		client: opts.Client,
-		fs:     opts.FileSystem,
+		client:   opts.Client,
+		fs:       opts.FileSystem,
+		registry: opts.Registry,
 	})
 }
 
-// ImageGenerationTool is a tool that allows models to generate images using one of
-// OpenAI's image generation models, including DALL-E and gpt-image-1.
+// ImageGenerationTool is a tool that allows models to generate images using various
+// providers including OpenAI DALL-E, gpt-image-1, and Google Imagen.
 type ImageGenerationTool struct {
-	client *openai.Client
-	fs     FileSystem
+	client   *openai.Client
+	fs       FileSystem
+	registry *providers.Registry
 }
 
 func (t *ImageGenerationTool) Name() string {
-	return "openai_image_generation"
+	return "image_generation"
 }
 
 func (t *ImageGenerationTool) Description() string {
-	return "Generate images using OpenAI's image generation API. Provide a text prompt to create an image. Saves the images to the file system at the path specified in the `output_path` parameter. Specify the `gpt-image-1` model for best results."
+	return "Generate images using various AI providers (OpenAI DALL-E, gpt-image-1, Google Imagen). Provide a text prompt to create an image. Saves the images to the file system at the path specified in the `output_path` parameter. Specify provider and model for best results."
 }
 
 func (t *ImageGenerationTool) Schema() *schema.Schema {
@@ -67,10 +78,15 @@ func (t *ImageGenerationTool) Schema() *schema.Schema {
 				Type:        "string",
 				Description: "A text description of the desired image(s).",
 			},
+			"provider": {
+				Type:        "string",
+				Description: "The AI provider to use for image generation.",
+				Enum:        []string{"openai", "google"},
+			},
 			"model": {
 				Type:        "string",
-				Description: "The model to use for image generation. Prefer `gpt-image-1` for best results.",
-				Enum:        []string{"gpt-image-1", "dall-e-2", "dall-e-3"},
+				Description: "The model to use for image generation. For OpenAI: gpt-image-1, dall-e-2, dall-e-3. For Google: imagen-3.0-generate-001, imagen-3.0-generate-002.",
+				Enum:        []string{"gpt-image-1", "dall-e-2", "dall-e-3", "imagen-3.0-generate-001", "imagen-3.0-generate-002"},
 			},
 			"size": {
 				Type:        "string",
@@ -119,6 +135,7 @@ func (t *ImageGenerationTool) Annotations() *dive.ToolAnnotations {
 }
 
 func (t *ImageGenerationTool) Call(ctx context.Context, input *ImageGenerationInput) (*dive.ToolResult, error) {
+	// Validate inputs
 	if input.Prompt == "" {
 		return dive.NewToolResultError("Error: prompt is required for image generation"), nil
 	}
@@ -126,116 +143,111 @@ func (t *ImageGenerationTool) Call(ctx context.Context, input *ImageGenerationIn
 		return dive.NewToolResultError("Error: output_path is required for image generation"), nil
 	}
 
-	// Set up parameters with defaults
-	params := openai.ImageGenerateParams{
-		Prompt:     input.Prompt,
-		Model:      openai.ImageModelGPTImage1,
-		Size:       openai.ImageGenerateParamsSizeAuto,
-		Moderation: openai.ImageGenerateParamsModerationAuto,
+	// Validate and set defaults
+	provider := input.Provider
+	if provider == "" {
+		provider = "openai" // Default to OpenAI
 	}
 
-	if input.Model != "" {
-		switch input.Model {
-		case "dall-e-2":
-			params.Model = openai.ImageModelDallE2
-		case "dall-e-3":
-			params.Model = openai.ImageModelDallE3
-		case "gpt-image-1":
-			params.Model = openai.ImageModelGPTImage1
-		default:
-			return dive.NewToolResultError(fmt.Sprintf("Error: Invalid model '%s'. Must be 'dall-e-2', 'dall-e-3', or 'gpt-image-1'", input.Model)), nil
-		}
+	// Validate provider
+	if provider != "openai" && provider != "google" {
+		return dive.NewToolResultError(fmt.Sprintf("Error: unsupported provider '%s', must be 'openai' or 'google'", provider)), nil
 	}
 
-	// Allow certain customizations, depending on which model was selected
-	if params.Model != openai.ImageModelGPTImage1 {
-		params.ResponseFormat = openai.ImageGenerateParamsResponseFormatB64JSON
-	} else {
-		if input.OutputFormat != "" {
-			params.OutputFormat = openai.ImageGenerateParamsOutputFormat(input.OutputFormat)
-		}
-		if input.OutputCompression > 0 {
-			params.OutputCompression = openai.Int(int64(input.OutputCompression))
-		}
+	// Validate count
+	if input.N < 0 {
+		return dive.NewToolResultError("Error: count cannot be negative"), nil
 	}
+	if input.N > 10 {
+		return dive.NewToolResultError("Error: count cannot exceed 10"), nil
+	}
+
+	// Get the image generator from registry
+	generator, err := t.registry.GetImageGenerator(provider)
+	if err != nil {
+		return dive.NewToolResultError(fmt.Sprintf("Error: Failed to get provider %s: %s", provider, err.Error())), nil
+	}
+
+	// Create the media request
+	req := &media.ImageGenerationRequest{
+		Prompt:  input.Prompt,
+		Model:   input.Model,
+		Size:    input.Size,
+		Quality: input.Quality,
+		Count:   input.N,
+	}
+
+	// Add provider-specific parameters
+	if req.Count == 0 {
+		req.Count = 1
+	}
+
+	providerSpecific := make(map[string]interface{})
 	if input.Moderation != "" {
-		params.Moderation = openai.ImageGenerateParamsModeration(input.Moderation)
+		providerSpecific["moderation"] = input.Moderation
 	}
-	if input.Size != "" {
-		params.Size = openai.ImageGenerateParamsSize(input.Size)
+	if input.OutputFormat != "" {
+		providerSpecific["output_format"] = input.OutputFormat
 	}
-	if input.N > 0 {
-		if params.Model != openai.ImageModelGPTImage1 {
-			return dive.NewToolResultError("Error: n > 1 is only supported for gpt-image-1"), nil
-		}
-		params.N = openai.Int(int64(input.N))
+	if input.OutputCompression > 0 {
+		providerSpecific["output_compression"] = input.OutputCompression
 	}
-
-	if input.Quality != "" {
-		// Translate quality as needed, since the valid values differ by model
-		if params.Model == openai.ImageModelGPTImage1 {
-			switch input.Quality {
-			case "high":
-				params.Quality = openai.ImageGenerateParamsQualityHigh
-			case "medium":
-				params.Quality = openai.ImageGenerateParamsQualityMedium
-			case "low":
-				params.Quality = openai.ImageGenerateParamsQualityLow
-			case "auto":
-				params.Quality = openai.ImageGenerateParamsQualityAuto
-			default: // Translate everything else to auto
-				params.Quality = openai.ImageGenerateParamsQualityAuto
-			}
-		} else if params.Model == openai.ImageModelDallE3 {
-			switch input.Quality {
-			case "standard":
-				params.Quality = openai.ImageGenerateParamsQualityStandard
-			case "hd":
-				params.Quality = openai.ImageGenerateParamsQualityHD
-			default: // Translate everything else to hd
-				params.Quality = openai.ImageGenerateParamsQualityHD
-			}
-		} else {
-			params.Quality = openai.ImageGenerateParamsQualityAuto
-		}
+	if len(providerSpecific) > 0 {
+		req.ProviderSpecific = providerSpecific
 	}
 
-	// Make the API call
-	response, err := t.client.Images.Generate(ctx, params)
+	// Make the API call using the media package
+	response, err := generator.GenerateImage(ctx, req)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("Error generating image: %s", err.Error())), nil
 	}
 
-	if len(response.Data) == 0 {
+	if len(response.Images) == 0 {
 		return dive.NewToolResultError("Error: No images were generated"), nil
 	}
 
 	var results []string
-	for i, imageData := range response.Data {
-		// Save base64 image to file
-		imageBytes, err := base64.StdEncoding.DecodeString(imageData.B64JSON)
-		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error decoding base64 image: %s", err.Error())), nil
+	for i, imageData := range response.Images {
+		// Decode image data
+		var imageBytes []byte
+		if imageData.B64JSON != "" {
+			imageBytes, err = base64.StdEncoding.DecodeString(imageData.B64JSON)
+			if err != nil {
+				return dive.NewToolResultError(fmt.Sprintf("Error decoding base64 image: %s", err.Error())), nil
+			}
+		} else {
+			return dive.NewToolResultError("Error: No image data in response"), nil
 		}
+
+		// Determine output path
 		filePath := input.OutputPath
-		if input.N > 1 {
+		if req.Count > 1 {
 			ext := filepath.Ext(filePath)
 			name := filePath[:len(filePath)-len(ext)]
 			filePath = fmt.Sprintf("%s_%d%s", name, i+1, ext)
 		}
+
+		// Create directory and save file
 		dir := filepath.Dir(filePath)
 		if err := t.fs.MkdirAll(dir, 0755); err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error creating directory: %s", err.Error())), nil
+			return dive.NewToolResultError(fmt.Sprintf("Error creating directory '%s': %s", dir, err.Error())), nil
 		}
+
+		// Validate file path is writable by checking if directory exists
+		if !t.fs.IsDir(dir) {
+			return dive.NewToolResultError(fmt.Sprintf("Error: directory '%s' is not accessible", dir)), nil
+		}
+
 		err = t.fs.WriteFile(filePath, string(imageBytes))
 		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error saving image to file: %s", err.Error())), nil
+			return dive.NewToolResultError(fmt.Sprintf("Error saving image to file '%s': %s", filePath, err.Error())), nil
 		}
 		results = append(results, fmt.Sprintf("Image %d saved to: %s", i+1, filePath))
 	}
 
-	resultText := fmt.Sprintf("Successfully generated %d image(s):\n%s",
-		len(response.Data),
+	resultText := fmt.Sprintf("Successfully generated %d image(s) using %s:\n%s",
+		len(response.Images),
+		provider,
 		fmt.Sprintf("• %s", results[0]))
 
 	if len(results) > 1 {
