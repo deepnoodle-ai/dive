@@ -131,7 +131,7 @@ func TestGenerateImageValidationLogic(t *testing.T) {
 
 		err := runImageGenerate(nil, nil)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "provider invalid not found")
+		require.Contains(t, err.Error(), "invalid provider 'invalid', must be one of: openai, dalle, google")
 	})
 
 	t.Run("grok provider not supported", func(t *testing.T) {
@@ -140,7 +140,7 @@ func TestGenerateImageValidationLogic(t *testing.T) {
 
 		err := runImageGenerate(nil, nil)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "provider grok not found")
+		require.Contains(t, err.Error(), "invalid provider 'grok', must be one of: openai, dalle, google")
 	})
 }
 
@@ -174,6 +174,6 @@ func TestEditImageValidationLogic(t *testing.T) {
 
 		err := runImageEdit(nil, nil)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "provider invalid not found")
+		require.Contains(t, err.Error(), "invalid provider 'invalid', must be one of: openai, dalle (Google does not support image editing)")
 	})
 }
