@@ -45,6 +45,7 @@ type ModelSettings struct {
 
 // Options are used to configure an Agent.
 type Options struct {
+	ID                   string
 	Name                 string
 	Goal                 string
 	Instructions         string
@@ -59,7 +60,6 @@ type Options struct {
 	ModelSettings        *ModelSettings
 	DateAwareness        *bool
 	Environment          dive.Environment
-	DocumentRepository   dive.DocumentRepository
 	ThreadRepository     dive.ThreadRepository
 	Confirmer            dive.Confirmer
 	SystemPromptTemplate string
@@ -68,6 +68,7 @@ type Options struct {
 
 // Agent is the standard implementation of the Agent interface.
 type Agent struct {
+	id                   string
 	name                 string
 	goal                 string
 	instructions         string
@@ -83,7 +84,6 @@ type Agent struct {
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
 	environment          dive.Environment
-	documentRepository   dive.DocumentRepository
 	threadRepository     dive.ThreadRepository
 	confirmer            dive.Confirmer
 	systemPromptTemplate *template.Template
@@ -108,6 +108,9 @@ func New(opts Options) (*Agent, error) {
 			return nil, ErrNoLLM
 		}
 	}
+	if opts.ID == "" {
+		opts.ID = dive.NewID()
+	}
 	if opts.Name == "" {
 		opts.Name = dive.RandomName()
 	}
@@ -120,6 +123,7 @@ func New(opts Options) (*Agent, error) {
 	}
 
 	agent := &Agent{
+		id:                   opts.ID,
 		name:                 strings.TrimSpace(opts.Name),
 		goal:                 strings.TrimSpace(opts.Goal),
 		instructions:         strings.TrimSpace(opts.Instructions),
@@ -132,7 +136,6 @@ func New(opts Options) (*Agent, error) {
 		hooks:                opts.Hooks,
 		logger:               opts.Logger,
 		dateAwareness:        opts.DateAwareness,
-		documentRepository:   opts.DocumentRepository,
 		threadRepository:     opts.ThreadRepository,
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
@@ -239,6 +242,7 @@ func (a *Agent) prepareThreadMessages(
 	ctx context.Context,
 	threadID string,
 	messages []*llm.Message,
+	options dive.Options,
 ) (*dive.Thread, []*llm.Message, error) {
 	if threadID == "" {
 		return nil, messages, nil
@@ -246,7 +250,7 @@ func (a *Agent) prepareThreadMessages(
 	if a.threadRepository == nil {
 		return nil, nil, ErrThreadsAreNotEnabled
 	}
-	thread, err := a.getOrCreateThread(ctx, threadID)
+	thread, err := a.getOrCreateThread(ctx, threadID, options)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -273,7 +277,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages)
+	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages, chatOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +370,7 @@ func (a *Agent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.R
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages)
+	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages, chatOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +462,7 @@ func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
 	return messages
 }
 
-func (a *Agent) getOrCreateThread(ctx context.Context, threadID string) (*dive.Thread, error) {
+func (a *Agent) getOrCreateThread(ctx context.Context, threadID string, options dive.Options) (*dive.Thread, error) {
 	if a.threadRepository == nil {
 		return nil, ErrThreadsAreNotEnabled
 	}
@@ -469,9 +473,13 @@ func (a *Agent) getOrCreateThread(ctx context.Context, threadID string) (*dive.T
 	if err != dive.ErrThreadNotFound {
 		return nil, err
 	}
+	// Create new thread with populated fields
 	return &dive.Thread{
-		ID:       threadID,
-		Messages: []*llm.Message{},
+		ID:        threadID,
+		UserID:    options.UserID,
+		AgentID:   a.id,
+		AgentName: a.name,
+		Messages:  []*llm.Message{},
 	}, nil
 }
 

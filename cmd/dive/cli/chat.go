@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
@@ -23,10 +24,38 @@ var (
 	thinkingStyle = color.New(color.FgMagenta)
 )
 
-func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
-	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
+// saveRecentThreadID saves the most recent thread ID to ~/.dive/threads/recent
+func saveRecentThreadID(threadID string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("error getting user home directory: %v", err)
+	}
 
-	stream, err := agent.StreamResponse(ctx, dive.WithInput(message), dive.WithThreadID("cli-chat"))
+	threadsDir := filepath.Join(homeDir, ".dive", "threads")
+	if err := os.MkdirAll(threadsDir, 0755); err != nil {
+		return fmt.Errorf("error creating threads directory: %v", err)
+	}
+
+	recentFile := filepath.Join(threadsDir, "recent")
+	if err := os.WriteFile(recentFile, []byte(threadID), 0644); err != nil {
+		return fmt.Errorf("error writing recent thread ID: %v", err)
+	}
+
+	return nil
+}
+
+func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID string, showName bool) error {
+	if showName {
+		fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
+	}
+
+	// Generate a thread ID if none was provided
+	actualThreadID := threadID
+	if actualThreadID == "" {
+		actualThreadID = dive.NewID()
+	}
+
+	stream, err := agent.StreamResponse(ctx, dive.WithInput(message), dive.WithThreadID(actualThreadID))
 	if err != nil {
 		return fmt.Errorf("error generating response: %v", err)
 	}
@@ -39,7 +68,8 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 
 	for stream.Next(ctx) {
 		event := stream.Event()
-		if event.Type == dive.EventTypeLLMEvent {
+		switch event.Type {
+		case dive.EventTypeLLMEvent:
 			incremental = true
 			payload := event.Item.Event
 			if payload.ContentBlock != nil {
@@ -70,7 +100,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 					fmt.Print(thinkingStyle.Sprint(delta.Thinking))
 				}
 			}
-		} else if event.Type == dive.EventTypeResponseCompleted {
+		case dive.EventTypeResponseCompleted:
 			if !incremental {
 				text := strings.TrimSpace(event.Response.OutputText())
 				fmt.Println(successStyle.Sprint(text))
@@ -79,10 +109,17 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	}
 
 	fmt.Println()
+
+	// Save the thread ID for future use
+	if err := saveRecentThreadID(actualThreadID); err != nil {
+		// Don't fail the whole operation if we can't save the thread ID
+		fmt.Fprintf(os.Stderr, "Warning: Failed to save recent thread ID: %v\n", err)
+	}
+
 	return nil
 }
 
-func runChat(instructions, agentName, sessionFile string, reasoningBudget int, tools []dive.Tool) error {
+func runChat(instructions, agentName, threadFile string, tools []dive.Tool) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -93,17 +130,6 @@ func runChat(instructions, agentName, sessionFile string, reasoningBudget int, t
 	}
 
 	modelSettings := &agent.ModelSettings{}
-	if reasoningBudget > 0 {
-		modelSettings.ReasoningBudget = &reasoningBudget
-		maxTokens := 0
-		if modelSettings.MaxTokens != nil {
-			maxTokens = *modelSettings.MaxTokens
-		}
-		if reasoningBudget > maxTokens+4096 {
-			newLimit := reasoningBudget + 4096
-			modelSettings.MaxTokens = &newLimit
-		}
-	}
 
 	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
 		Mode: dive.ConfirmIfNotReadOnly,
@@ -111,13 +137,13 @@ func runChat(instructions, agentName, sessionFile string, reasoningBudget int, t
 
 	// Create appropriate thread repository
 	var threadRepo dive.ThreadRepository
-	if sessionFile != "" {
-		fileRepo := agent.NewFileThreadRepository(sessionFile)
+	if threadFile != "" {
+		fileRepo := agent.NewFileThreadRepository(threadFile)
 		if err := fileRepo.Load(ctx); err != nil {
 			return fmt.Errorf("error loading session file: %v", err)
 		}
 		threadRepo = fileRepo
-		fmt.Println(boldStyle.Sprintf("Using session file: %s", sessionFile))
+		fmt.Println(boldStyle.Sprintf("Using session file: %s", threadFile))
 	} else {
 		threadRepo = agent.NewMemoryThreadRepository()
 	}
@@ -137,8 +163,8 @@ func runChat(instructions, agentName, sessionFile string, reasoningBudget int, t
 	}
 
 	fmt.Println(boldStyle.Sprint("Chat Session"))
-	if sessionFile != "" {
-		fmt.Println(boldStyle.Sprintf("Session will be saved to: %s", sessionFile))
+	if threadFile != "" {
+		fmt.Println(boldStyle.Sprintf("Session will be saved to: %s", threadFile))
 	}
 	fmt.Println()
 
@@ -161,72 +187,12 @@ func runChat(instructions, agentName, sessionFile string, reasoningBudget int, t
 		}
 		fmt.Println()
 
-		if err := chatMessage(ctx, userInput, chatAgent); err != nil {
+		if err := chatMessage(ctx, userInput, chatAgent, "", true); err != nil {
 			return fmt.Errorf("error processing message: %v", err)
 		}
 		fmt.Println()
 	}
 	return nil
-}
-
-func runSingleMessage(message, instructions, agentName, sessionFile string, reasoningBudget int, tools []dive.Tool) error {
-	ctx := context.Background()
-
-	logger := slogger.New(slogger.LevelFromString("warn"))
-
-	model, err := config.GetModel(llmProvider, llmModel)
-	if err != nil {
-		return fmt.Errorf("error getting model: %v", err)
-	}
-
-	modelSettings := &agent.ModelSettings{}
-	if reasoningBudget > 0 {
-		modelSettings.ReasoningBudget = &reasoningBudget
-		maxTokens := 0
-		if modelSettings.MaxTokens != nil {
-			maxTokens = *modelSettings.MaxTokens
-		}
-		if reasoningBudget > maxTokens+4096 {
-			newLimit := reasoningBudget + 4096
-			modelSettings.MaxTokens = &newLimit
-		}
-	}
-
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
-	})
-
-	// Create appropriate thread repository
-	var threadRepo dive.ThreadRepository
-	if sessionFile != "" {
-		fileRepo := agent.NewFileThreadRepository(sessionFile)
-		if err := fileRepo.Load(ctx); err != nil {
-			return fmt.Errorf("error loading session file: %v", err)
-		}
-		threadRepo = fileRepo
-	} else {
-		threadRepo = agent.NewMemoryThreadRepository()
-	}
-
-	chatAgent, err := agent.New(agent.Options{
-		Name:             agentName,
-		Instructions:     instructions,
-		Model:            model,
-		Logger:           logger,
-		Tools:            tools,
-		ThreadRepository: threadRepo,
-		ModelSettings:    modelSettings,
-		Confirmer:        confirmer,
-	})
-	if err != nil {
-		return fmt.Errorf("error creating agent: %v", err)
-	}
-
-	fmt.Print(boldStyle.Sprint("You: "))
-	fmt.Println(message)
-	fmt.Println()
-
-	return chatMessage(ctx, message, chatAgent)
 }
 
 var chatCmd = &cobra.Command{
@@ -236,7 +202,7 @@ var chatCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 
-		systemPrompt, err := cmd.Flags().GetString("system-prompt")
+		systemPrompt, err := cmd.Flags().GetString("system")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
@@ -248,18 +214,30 @@ var chatCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		sessionFile, err := cmd.Flags().GetString("session")
+		threadFile, err := cmd.Flags().GetString("thread-file")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
 
-		var reasoningBudget int
-		if value, err := cmd.Flags().GetInt("reasoning-budget"); err != nil {
+		thread, err := cmd.Flags().GetString("thread")
+		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
-		} else {
-			reasoningBudget = value
+		}
+
+		if threadFile != "" && thread != "" {
+			fmt.Println(errorStyle.Sprint("Cannot use both --thread-file and --thread"))
+			os.Exit(1)
+		}
+
+		if thread != "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				fmt.Println(errorStyle.Sprintf("Error getting user home directory: %v", err))
+				os.Exit(1)
+			}
+			threadFile = filepath.Join(homeDir, ".dive", "threads", thread+".json")
 		}
 
 		var tools []dive.Tool
@@ -283,7 +261,7 @@ var chatCmd = &cobra.Command{
 		// If a message argument is provided, send it and exit
 		if len(args) > 0 {
 			message := args[0]
-			if err := runSingleMessage(message, systemPrompt, agentName, sessionFile, reasoningBudget, tools); err != nil {
+			if err := runSingleMessage(message, systemPrompt, agentName, threadFile, "", tools); err != nil {
 				fmt.Println(errorStyle.Sprint(err))
 				os.Exit(1)
 			}
@@ -291,7 +269,7 @@ var chatCmd = &cobra.Command{
 		}
 
 		// Otherwise, start interactive chat
-		if err := runChat(systemPrompt, agentName, sessionFile, reasoningBudget, tools); err != nil {
+		if err := runChat(systemPrompt, agentName, threadFile, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -302,8 +280,8 @@ func init() {
 	rootCmd.AddCommand(chatCmd)
 
 	chatCmd.Flags().StringP("agent-name", "", "Assistant", "Name of the chat agent")
-	chatCmd.Flags().StringP("system-prompt", "", "", "System prompt for the chat agent")
+	chatCmd.Flags().StringP("system", "", "", "System prompt for the chat agent")
 	chatCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the chat agent")
-	chatCmd.Flags().StringP("session", "s", "", "Path to session file for persistent conversation history (e.g., ~/.dive/sessions/my-chat.json)")
-	chatCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
+	chatCmd.Flags().StringP("thread-file", "", "", "Path to a thread file for persistent conversation history (e.g., my-chat.json)")
+	chatCmd.Flags().StringP("thread", "", "", "ID or name of the thread to use for the chat agent")
 }

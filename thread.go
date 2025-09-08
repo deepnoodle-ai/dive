@@ -12,11 +12,15 @@ var ErrThreadNotFound = fmt.Errorf("thread not found")
 
 // Thread represents a conversation thread
 type Thread struct {
-	ID        string         `json:"id"`
-	UserID    string         `json:"user_id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	Messages  []*llm.Message `json:"messages"`
+	ID        string                 `json:"id"`
+	UserID    string                 `json:"user_id,omitempty"`
+	AgentID   string                 `json:"agent_id,omitempty"`
+	AgentName string                 `json:"agent_name,omitempty"`
+	Title     string                 `json:"title,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
+	Messages  []*llm.Message         `json:"messages"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // ThreadRepository is an interface for storing and retrieving conversation threads
