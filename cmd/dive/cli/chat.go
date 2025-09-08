@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
@@ -23,10 +24,36 @@ var (
 	thinkingStyle = color.New(color.FgMagenta)
 )
 
-func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
-	fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
+// saveRecentThreadID saves the most recent thread ID to ~/.dive/threads/recent
+func saveRecentThreadID(threadID string) error {
+	threadsDir, err := diveThreadsDirectory()
+	if err != nil {
+		return fmt.Errorf("error getting dive threads directory: %v", err)
+	}
+	if err := os.MkdirAll(threadsDir, 0755); err != nil {
+		return fmt.Errorf("error creating threads directory: %v", err)
+	}
 
-	stream, err := agent.StreamResponse(ctx, dive.WithInput(message), dive.WithThreadID("cli-chat"))
+	recentFile := filepath.Join(threadsDir, "recent")
+	if err := os.WriteFile(recentFile, []byte(threadID), 0644); err != nil {
+		return fmt.Errorf("error writing recent thread ID: %v", err)
+	}
+
+	return nil
+}
+
+func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID string, showName bool) error {
+	if showName {
+		fmt.Print(boldStyle.Sprintf("%s: ", agent.Name()))
+	}
+
+	// Generate a thread ID if none was provided
+	actualThreadID := threadID
+	if actualThreadID == "" {
+		actualThreadID = dive.NewID()
+	}
+
+	stream, err := agent.StreamResponse(ctx, dive.WithInput(message), dive.WithThreadID(actualThreadID))
 	if err != nil {
 		return fmt.Errorf("error generating response: %v", err)
 	}
@@ -39,7 +66,8 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 
 	for stream.Next(ctx) {
 		event := stream.Event()
-		if event.Type == dive.EventTypeLLMEvent {
+		switch event.Type {
+		case dive.EventTypeLLMEvent:
 			incremental = true
 			payload := event.Item.Event
 			if payload.ContentBlock != nil {
@@ -70,7 +98,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 					fmt.Print(thinkingStyle.Sprint(delta.Thinking))
 				}
 			}
-		} else if event.Type == dive.EventTypeResponseCompleted {
+		case dive.EventTypeResponseCompleted:
 			if !incremental {
 				text := strings.TrimSpace(event.Response.OutputText())
 				fmt.Println(successStyle.Sprint(text))
@@ -79,10 +107,17 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent) error {
 	}
 
 	fmt.Println()
+
+	// Save the thread ID for future use
+	if err := saveRecentThreadID(actualThreadID); err != nil {
+		// Don't fail the whole operation if we can't save the thread ID
+		fmt.Fprintf(os.Stderr, "Warning: Failed to save recent thread ID: %v\n", err)
+	}
+
 	return nil
 }
 
-func runChat(instructions, agentName string, reasoningBudget int, tools []dive.Tool) error {
+func runChat(instructions, agentName, threadID string, tools []dive.Tool) error {
 	ctx := context.Background()
 
 	logger := slogger.New(slogger.LevelFromString("warn"))
@@ -93,21 +128,16 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 	}
 
 	modelSettings := &agent.ModelSettings{}
-	if reasoningBudget > 0 {
-		modelSettings.ReasoningBudget = &reasoningBudget
-		maxTokens := 0
-		if modelSettings.MaxTokens != nil {
-			maxTokens = *modelSettings.MaxTokens
-		}
-		if reasoningBudget > maxTokens+4096 {
-			newLimit := reasoningBudget + 4096
-			modelSettings.MaxTokens = &newLimit
-		}
-	}
 
 	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
 		Mode: dive.ConfirmIfNotReadOnly,
 	})
+
+	threadsDir, err := diveThreadsDirectory()
+	if err != nil {
+		return fmt.Errorf("error getting dive threads directory: %v", err)
+	}
+	threadRepo := agent.NewDiskThreadRepository(threadsDir)
 
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,
@@ -115,7 +145,7 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 		Model:            model,
 		Logger:           logger,
 		Tools:            tools,
-		ThreadRepository: agent.NewMemoryThreadRepository(),
+		ThreadRepository: threadRepo,
 		ModelSettings:    modelSettings,
 		Confirmer:        confirmer,
 	})
@@ -145,7 +175,7 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 		}
 		fmt.Println()
 
-		if err := chatMessage(ctx, userInput, chatAgent); err != nil {
+		if err := chatMessage(ctx, userInput, chatAgent, "", true); err != nil {
 			return fmt.Errorf("error processing message: %v", err)
 		}
 		fmt.Println()
@@ -153,62 +183,14 @@ func runChat(instructions, agentName string, reasoningBudget int, tools []dive.T
 	return nil
 }
 
-func runSingleMessage(message, instructions, agentName string, reasoningBudget int, tools []dive.Tool) error {
-	ctx := context.Background()
-
-	logger := slogger.New(slogger.LevelFromString("warn"))
-
-	model, err := config.GetModel(llmProvider, llmModel)
-	if err != nil {
-		return fmt.Errorf("error getting model: %v", err)
-	}
-
-	modelSettings := &agent.ModelSettings{}
-	if reasoningBudget > 0 {
-		modelSettings.ReasoningBudget = &reasoningBudget
-		maxTokens := 0
-		if modelSettings.MaxTokens != nil {
-			maxTokens = *modelSettings.MaxTokens
-		}
-		if reasoningBudget > maxTokens+4096 {
-			newLimit := reasoningBudget + 4096
-			modelSettings.MaxTokens = &newLimit
-		}
-	}
-
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
-	})
-
-	chatAgent, err := agent.New(agent.Options{
-		Name:             agentName,
-		Instructions:     instructions,
-		Model:            model,
-		Logger:           logger,
-		Tools:            tools,
-		ThreadRepository: agent.NewMemoryThreadRepository(),
-		ModelSettings:    modelSettings,
-		Confirmer:        confirmer,
-	})
-	if err != nil {
-		return fmt.Errorf("error creating agent: %v", err)
-	}
-
-	fmt.Print(boldStyle.Sprint("You: "))
-	fmt.Println(message)
-	fmt.Println()
-
-	return chatMessage(ctx, message, chatAgent)
-}
-
 var chatCmd = &cobra.Command{
 	Use:   "chat [message]",
 	Short: "Start an interactive chat with an AI agent or send a single message",
-	Long:  "Start an interactive chat with an AI agent. If a message is provided as an argument, send that message, show the response, and exit.",
+	Long:  "Start an interactive chat with an AI agent. If a message is provided as an argument, send that message, show the response, and exit. Use --session to persist conversation history to a file for resuming later.",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 
-		systemPrompt, err := cmd.Flags().GetString("system-prompt")
+		systemPrompt, err := cmd.Flags().GetString("system")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
@@ -220,12 +202,10 @@ var chatCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		var reasoningBudget int
-		if value, err := cmd.Flags().GetInt("reasoning-budget"); err != nil {
+		thread, err := cmd.Flags().GetString("thread")
+		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
-		} else {
-			reasoningBudget = value
 		}
 
 		var tools []dive.Tool
@@ -249,7 +229,7 @@ var chatCmd = &cobra.Command{
 		// If a message argument is provided, send it and exit
 		if len(args) > 0 {
 			message := args[0]
-			if err := runSingleMessage(message, systemPrompt, agentName, reasoningBudget, tools); err != nil {
+			if err := runSingleMessage(message, systemPrompt, agentName, thread, tools); err != nil {
 				fmt.Println(errorStyle.Sprint(err))
 				os.Exit(1)
 			}
@@ -257,7 +237,7 @@ var chatCmd = &cobra.Command{
 		}
 
 		// Otherwise, start interactive chat
-		if err := runChat(systemPrompt, agentName, reasoningBudget, tools); err != nil {
+		if err := runChat(systemPrompt, agentName, thread, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -268,7 +248,7 @@ func init() {
 	rootCmd.AddCommand(chatCmd)
 
 	chatCmd.Flags().StringP("agent-name", "", "Assistant", "Name of the chat agent")
-	chatCmd.Flags().StringP("system-prompt", "", "", "System prompt for the chat agent")
+	chatCmd.Flags().StringP("system", "", "", "System prompt for the chat agent")
 	chatCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the chat agent")
-	chatCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
+	chatCmd.Flags().StringP("thread", "", "", "ID or name of the thread to use for the chat agent")
 }

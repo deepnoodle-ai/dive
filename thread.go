@@ -12,11 +12,25 @@ var ErrThreadNotFound = fmt.Errorf("thread not found")
 
 // Thread represents a conversation thread
 type Thread struct {
-	ID        string         `json:"id"`
-	UserID    string         `json:"user_id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	Messages  []*llm.Message `json:"messages"`
+	ID        string                 `json:"id"`
+	UserID    string                 `json:"user_id,omitempty"`
+	AgentID   string                 `json:"agent_id,omitempty"`
+	AgentName string                 `json:"agent_name,omitempty"`
+	Title     string                 `json:"title,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
+	Messages  []*llm.Message         `json:"messages"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ListThreadsInput specifies search criteria for threads in a thread repository
+type ListThreadsInput struct {
+	ThreadID string
+}
+
+// ListThreadsOutput is the output for listing threads
+type ListThreadsOutput struct {
+	Items []*Thread
 }
 
 // ThreadRepository is an interface for storing and retrieving conversation threads
@@ -30,4 +44,7 @@ type ThreadRepository interface {
 
 	// DeleteThread deletes a thread by ID
 	DeleteThread(ctx context.Context, id string) error
+
+	// ListThreads returns all threads (used for session management)
+	ListThreads(ctx context.Context, input *ListThreadsInput) (*ListThreadsOutput, error)
 }
