@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,12 +30,12 @@ func TestImageEditCommand(t *testing.T) {
 func TestImageGenerateValidation(t *testing.T) {
 	// Test that prompt is required - this should be caught by cobra's required flag validation
 	// We'll test this by checking if the command would fail when executed without setting the flag
-	
+
 	// Reset the command to clear any previous state
 	imageGenerateCmd.ResetFlags()
 	imageGenerateCmd.Flags().StringVarP(&generatePrompt, "prompt", "p", "", "Text description of the desired image (required)")
 	imageGenerateCmd.MarkFlagRequired("prompt")
-	
+
 	// Test execution without prompt
 	err := runImageGenerate(imageGenerateCmd, []string{})
 	require.Error(t, err)
@@ -45,12 +44,12 @@ func TestImageGenerateValidation(t *testing.T) {
 
 func TestImageEditValidation(t *testing.T) {
 	// Test that prompt is required
-	
+
 	// Reset the command to clear any previous state
 	imageEditCmd.ResetFlags()
 	imageEditCmd.Flags().StringVarP(&editPrompt, "prompt", "p", "", "Text instructions for editing the image (required)")
 	imageEditCmd.MarkFlagRequired("prompt")
-	
+
 	// Test execution without prompt
 	err := runImageEdit(imageEditCmd, []string{})
 	require.Error(t, err)
@@ -120,7 +119,7 @@ func TestGenerateImageValidationLogic(t *testing.T) {
 	t.Run("missing prompt", func(t *testing.T) {
 		generatePrompt = ""
 		generateProvider = "dalle"
-		
+
 		err := runImageGenerate(nil, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "prompt is required")
@@ -129,19 +128,19 @@ func TestGenerateImageValidationLogic(t *testing.T) {
 	t.Run("invalid provider", func(t *testing.T) {
 		generatePrompt = "test prompt"
 		generateProvider = "invalid"
-		
+
 		err := runImageGenerate(nil, nil)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported provider")
+		require.Contains(t, err.Error(), "provider invalid not found")
 	})
 
 	t.Run("grok provider not supported", func(t *testing.T) {
 		generatePrompt = "test prompt"
 		generateProvider = "grok"
-		
+
 		err := runImageGenerate(nil, nil)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "grok does not currently support image generation")
+		require.Contains(t, err.Error(), "provider grok not found")
 	})
 }
 
@@ -162,7 +161,7 @@ func TestEditImageValidationLogic(t *testing.T) {
 		editPrompt = ""
 		editInput = "test.png"
 		editProvider = "dalle"
-		
+
 		err := runImageEdit(nil, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "prompt is required")
@@ -172,58 +171,9 @@ func TestEditImageValidationLogic(t *testing.T) {
 		editPrompt = "test prompt"
 		editInput = "test.png"
 		editProvider = "invalid"
-		
+
 		err := runImageEdit(nil, nil)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported provider")
+		require.Contains(t, err.Error(), "provider invalid not found")
 	})
-}
-
-func TestGenerateImageWithoutAPIKey(t *testing.T) {
-	// Save original values
-	origPrompt := generatePrompt
-	origProvider := generateProvider
-	origAPIKey := os.Getenv("OPENAI_API_KEY")
-
-	defer func() {
-		// Restore original values
-		generatePrompt = origPrompt
-		generateProvider = origProvider
-		if origAPIKey != "" {
-			os.Setenv("OPENAI_API_KEY", origAPIKey)
-		} else {
-			os.Unsetenv("OPENAI_API_KEY")
-		}
-	}()
-
-	// Clear API key
-	os.Unsetenv("OPENAI_API_KEY")
-
-	generatePrompt = "test prompt"
-	generateProvider = "dalle"
-
-	err := generateImageWithDALLE()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "OPENAI_API_KEY environment variable is required")
-}
-
-func TestEditImageWithoutAPIKey(t *testing.T) {
-	// Save original API key
-	origAPIKey := os.Getenv("OPENAI_API_KEY")
-
-	defer func() {
-		// Restore original API key
-		if origAPIKey != "" {
-			os.Setenv("OPENAI_API_KEY", origAPIKey)
-		} else {
-			os.Unsetenv("OPENAI_API_KEY")
-		}
-	}()
-
-	// Clear API key
-	os.Unsetenv("OPENAI_API_KEY")
-
-	err := editImageWithDALLE("test.png")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "OPENAI_API_KEY environment variable is required")
 }

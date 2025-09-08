@@ -9,14 +9,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/deepnoodle-ai/dive/media"
+	"github.com/deepnoodle-ai/dive/media/providers/google"
+	"github.com/deepnoodle-ai/dive/media/providers/openai"
 	openaiapi "github.com/openai/openai-go"
 	"github.com/spf13/cobra"
+	"google.golang.org/genai"
 )
 
 var imageCmd = &cobra.Command{
 	Use:   "image",
 	Short: "Image generation and editing commands",
-	Long:  "Commands for generating and editing images using AI providers like DALL-E and Grok.",
+	Long:  "Commands for generating and editing images using AI providers like OpenAI DALL-E, gpt-image-1, and Google Imagen.",
 }
 
 var imageGenerateCmd = &cobra.Command{
@@ -35,148 +39,119 @@ var imageEditCmd = &cobra.Command{
 
 var (
 	// Generate flags
-	generatePrompt   string
-	generateSize     string
-	generateProvider string
-	generateOutput   string
-	generateStdout   bool
-	generateModel    string
-	generateQuality  string
-	generateN        int
+	generatePrompt            string
+	generateSize              string
+	generateProvider          string
+	generateOutput            string
+	generateStdout            bool
+	generateModel             string
+	generateQuality           string
+	generateN                 int
+	generateModeration        string
+	generateOutputFormat      string
+	generateOutputCompression int
+	generateIncludeRAI        bool
+	generateIncludeSafety     bool
+	generateOutputMIMEType    string
 
 	// Edit flags
-	editInput    string
-	editPrompt   string
-	editMask     string
-	editProvider string
-	editOutput   string
-	editStdout   bool
-	editModel    string
-	editSize     string
+	editInput      string
+	editPrompt     string
+	editMask       string
+	editProvider   string
+	editOutput     string
+	editStdout     bool
+	editModel      string
+	editSize       string
+	editModeration string
 )
 
 func runImageGenerate(cmd *cobra.Command, args []string) error {
 	// Validate required parameters
-	if generatePrompt == "" {
-		return fmt.Errorf("prompt is required")
+	if err := validateGenerateImageParams(); err != nil {
+		return fmt.Errorf("validation error: %w", err)
 	}
 
 	// Set defaults
-	if generateProvider == "" {
-		generateProvider = "dalle"
-	}
-	if generateSize == "" {
-		generateSize = "1024x1024"
-	}
-	if generateModel == "" {
-		if generateProvider == "dalle" {
-			generateModel = "gpt-image-1"
-		}
+	if err := setGenerateImageDefaults(); err != nil {
+		return fmt.Errorf("error setting defaults: %w", err)
 	}
 
-	// Create output path if not using stdout
-	if !generateStdout && generateOutput == "" {
-		generateOutput = "generated_image.png"
-	}
-
-	switch strings.ToLower(generateProvider) {
-	case "dalle":
-		return generateImageWithDALLE()
-	case "grok":
-		return fmt.Errorf("grok does not currently support image generation. Please use 'dalle' provider")
-	default:
-		return fmt.Errorf("unsupported provider: %s. Supported providers: dalle", generateProvider)
-	}
+	return generateImageWithMediaPackage()
 }
 
-func generateImageWithDALLE() error {
-	// Get API key
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY environment variable is required")
+func generateImageWithMediaPackage() error {
+	// Normalize provider name
+	provider := strings.ToLower(generateProvider)
+	if provider == "dalle" {
+		provider = "openai" // Map dalle to openai for backward compatibility
 	}
 
-	// Create OpenAI client
-	client := openaiapi.NewClient()
-
-	// Set up parameters
-	params := openaiapi.ImageGenerateParams{
-		Prompt: generatePrompt,
-		Model:  openaiapi.ImageModelGPTImage1,
-		Size:   openaiapi.ImageGenerateParamsSize(generateSize),
-		N:      openaiapi.Int(int64(generateN)),
+	// Create the image generator directly
+	generator, cleanup, err := createImageGenerator(provider)
+	if err != nil {
+		return fmt.Errorf("error creating provider %s: %v", provider, err)
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 
-	// Set model
-	if generateModel != "" {
-		switch generateModel {
-		case "dall-e-2":
-			params.Model = openaiapi.ImageModelDallE2
-		case "dall-e-3":
-			params.Model = openaiapi.ImageModelDallE3
-		case "gpt-image-1":
-			params.Model = openaiapi.ImageModelGPTImage1
-		default:
-			return fmt.Errorf("invalid model: %s. Supported models: dall-e-2, dall-e-3, gpt-image-1", generateModel)
-		}
+	// Create the media request
+	req := &media.ImageGenerationRequest{
+		Prompt:  generatePrompt,
+		Model:   generateModel,
+		Size:    generateSize,
+		Quality: generateQuality,
+		Count:   generateN,
 	}
 
-	// Set quality
-	if generateQuality != "" {
-		if params.Model == openaiapi.ImageModelGPTImage1 {
-			switch generateQuality {
-			case "high":
-				params.Quality = openaiapi.ImageGenerateParamsQualityHigh
-			case "medium":
-				params.Quality = openaiapi.ImageGenerateParamsQualityMedium
-			case "low":
-				params.Quality = openaiapi.ImageGenerateParamsQualityLow
-			case "auto":
-				params.Quality = openaiapi.ImageGenerateParamsQualityAuto
-			default:
-				params.Quality = openaiapi.ImageGenerateParamsQualityAuto
-			}
-		} else if params.Model == openaiapi.ImageModelDallE3 {
-			switch generateQuality {
-			case "standard":
-				params.Quality = openaiapi.ImageGenerateParamsQualityStandard
-			case "hd":
-				params.Quality = openaiapi.ImageGenerateParamsQualityHD
-			default:
-				params.Quality = openaiapi.ImageGenerateParamsQualityHD
-			}
-		}
+	if req.Count == 0 {
+		req.Count = 1
 	}
 
-	// Set response format for non-gpt-image-1 models
-	if params.Model != openaiapi.ImageModelGPTImage1 {
-		params.ResponseFormat = openaiapi.ImageGenerateParamsResponseFormatB64JSON
+	// Set response format for base64 output
+	req.ResponseFormat = "b64_json"
+
+	// Add provider-specific parameters
+	providerSpecific := make(map[string]interface{})
+
+	if generateModeration != "" {
+		providerSpecific["moderation"] = generateModeration
+	}
+	if generateOutputFormat != "" {
+		providerSpecific["output_format"] = generateOutputFormat
+	}
+	if generateOutputCompression > 0 {
+		providerSpecific["output_compression"] = generateOutputCompression
+	}
+	if generateIncludeRAI {
+		providerSpecific["include_rai_reason"] = generateIncludeRAI
+	}
+	if generateIncludeSafety {
+		providerSpecific["include_safety_attributes"] = generateIncludeSafety
+	}
+	if generateOutputMIMEType != "" {
+		providerSpecific["output_mime_type"] = generateOutputMIMEType
+	}
+
+	if len(providerSpecific) > 0 {
+		req.ProviderSpecific = providerSpecific
 	}
 
 	// Generate image
 	ctx := context.Background()
-	response, err := client.Images.Generate(ctx, params)
+	response, err := generator.GenerateImage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error generating image: %v", err)
 	}
 
-	if len(response.Data) == 0 {
+	if len(response.Images) == 0 {
 		return fmt.Errorf("no images were generated")
 	}
 
 	// Handle output
-	for i, imageData := range response.Data {
-		var imageBytes []byte
-		var err error
-
-		if imageData.B64JSON != "" {
-			imageBytes, err = base64.StdEncoding.DecodeString(imageData.B64JSON)
-			if err != nil {
-				return fmt.Errorf("error decoding base64 image: %v", err)
-			}
-		} else if imageData.URL != "" {
-			return fmt.Errorf("URL response format not supported yet")
-		} else {
+	for i, imageData := range response.Images {
+		if imageData.B64JSON == "" {
 			return fmt.Errorf("no image data in response")
 		}
 
@@ -184,7 +159,12 @@ func generateImageWithDALLE() error {
 			// Output base64 to stdout
 			fmt.Print(imageData.B64JSON)
 		} else {
-			// Save to file
+			// Decode and save to file
+			imageBytes, err := base64.StdEncoding.DecodeString(imageData.B64JSON)
+			if err != nil {
+				return fmt.Errorf("error decoding base64 image: %v", err)
+			}
+
 			outputPath := generateOutput
 			if generateN > 1 {
 				ext := filepath.Ext(outputPath)
@@ -212,123 +192,61 @@ func generateImageWithDALLE() error {
 
 func runImageEdit(cmd *cobra.Command, args []string) error {
 	// Validate required parameters
-	if editPrompt == "" {
-		return fmt.Errorf("prompt is required")
+	if err := validateEditImageParams(); err != nil {
+		return fmt.Errorf("validation error: %w", err)
 	}
 
 	// Handle input from stdin or file
-	var inputImagePath string
-	if editInput == "" {
-		// Check if input is coming from stdin
-		stat, err := os.Stdin.Stat()
-		if err != nil {
-			return fmt.Errorf("error checking stdin: %v", err)
-		}
-
-		if (stat.Mode() & os.ModeCharDevice) == 0 {
-			// Data is being piped in, read from stdin
-			inputData, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("error reading from stdin: %v", err)
-			}
-
-			// Create temporary file
-			tmpFile, err := os.CreateTemp("", "dive_image_edit_*.png")
-			if err != nil {
-				return fmt.Errorf("error creating temporary file: %v", err)
-			}
-			defer os.Remove(tmpFile.Name())
-
-			// Check if input is base64
-			if isBase64(string(inputData)) {
-				// Decode base64
-				imageBytes, err := base64.StdEncoding.DecodeString(string(inputData))
-				if err != nil {
-					return fmt.Errorf("error decoding base64 input: %v", err)
-				}
-				if _, err := tmpFile.Write(imageBytes); err != nil {
-					return fmt.Errorf("error writing to temporary file: %v", err)
-				}
-			} else {
-				// Assume it's raw image data
-				if _, err := tmpFile.Write(inputData); err != nil {
-					return fmt.Errorf("error writing to temporary file: %v", err)
-				}
-			}
-
-			tmpFile.Close()
-			inputImagePath = tmpFile.Name()
-		} else {
-			return fmt.Errorf("input image path is required (use --input flag or pipe data to stdin)")
-		}
-	} else {
-		inputImagePath = editInput
+	inputImagePath, cleanupFunc, err := prepareEditInputImage()
+	if err != nil {
+		return fmt.Errorf("error preparing input image: %w", err)
+	}
+	if cleanupFunc != nil {
+		defer cleanupFunc()
 	}
 
 	// Set defaults
-	if editProvider == "" {
-		editProvider = "dalle"
-	}
-	if editOutput == "" && !editStdout {
-		editOutput = "edited_image.png"
+	if err := setEditImageDefaults(); err != nil {
+		return fmt.Errorf("error setting defaults: %w", err)
 	}
 
-	switch strings.ToLower(editProvider) {
-	case "dalle":
-		return editImageWithDALLE(inputImagePath)
-	default:
-		return fmt.Errorf("unsupported provider: %s. Supported providers: dalle", editProvider)
-	}
+	return editImageWithMediaPackage(inputImagePath)
 }
 
-func editImageWithDALLE(inputImagePath string) error {
-	// Get API key
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY environment variable is required")
+func editImageWithMediaPackage(inputImagePath string) error {
+	// Normalize provider name
+	provider := strings.ToLower(editProvider)
+	if provider == "dalle" {
+		provider = "openai" // Map dalle to openai for backward compatibility
 	}
 
-	// Create OpenAI client
-	client := openaiapi.NewClient()
+	// Create the image generator directly
+	generator, cleanup, err := createImageGenerator(provider)
+	if err != nil {
+		return fmt.Errorf("error creating provider %s: %v", provider, err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 
-	// Read input image
+	// Open input image
 	imageFile, err := os.Open(inputImagePath)
 	if err != nil {
 		return fmt.Errorf("error opening input image: %v", err)
 	}
 	defer imageFile.Close()
 
-	// Set up parameters
-	params := openaiapi.ImageEditParams{
-		Image:  openaiapi.ImageEditParamsImageUnion{OfFile: imageFile},
+	// Create the media request
+	req := &media.ImageEditRequest{
+		Image:  imageFile,
 		Prompt: editPrompt,
-		Model:  openaiapi.ImageModelDallE2, // DALL-E 2 is the only model that supports editing
-		Size:   openaiapi.ImageEditParamsSize1024x1024,
+		Model:  editModel,
+		Size:   editSize,
+		Count:  1,
 	}
 
-	// Set model if specified
-	if editModel != "" {
-		switch editModel {
-		case "dall-e-2":
-			params.Model = openaiapi.ImageModelDallE2
-		default:
-			return fmt.Errorf("invalid model for editing: %s. Only dall-e-2 supports image editing", editModel)
-		}
-	}
-
-	// Set size if specified
-	if editSize != "" {
-		switch editSize {
-		case "256x256":
-			params.Size = openaiapi.ImageEditParamsSize256x256
-		case "512x512":
-			params.Size = openaiapi.ImageEditParamsSize512x512
-		case "1024x1024":
-			params.Size = openaiapi.ImageEditParamsSize1024x1024
-		default:
-			return fmt.Errorf("invalid size: %s. Supported sizes: 256x256, 512x512, 1024x1024", editSize)
-		}
-	}
+	// Set response format for base64 output
+	req.ResponseFormat = "b64_json"
 
 	// Add mask if provided
 	if editMask != "" {
@@ -337,25 +255,30 @@ func editImageWithDALLE(inputImagePath string) error {
 			return fmt.Errorf("error opening mask image: %v", err)
 		}
 		defer maskFile.Close()
-		params.Mask = maskFile
+		req.Mask = maskFile
 	}
 
-	// Set response format
-	params.ResponseFormat = openaiapi.ImageEditParamsResponseFormatB64JSON
+	// Add provider-specific parameters
+	if editModeration != "" {
+		if req.ProviderSpecific == nil {
+			req.ProviderSpecific = make(map[string]interface{})
+		}
+		req.ProviderSpecific["moderation"] = editModeration
+	}
 
 	// Edit image
 	ctx := context.Background()
-	response, err := client.Images.Edit(ctx, params)
+	response, err := generator.EditImage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error editing image: %v", err)
 	}
 
-	if len(response.Data) == 0 {
+	if len(response.Images) == 0 {
 		return fmt.Errorf("no edited images were returned")
 	}
 
 	// Handle output
-	imageData := response.Data[0]
+	imageData := response.Images[0]
 	if imageData.B64JSON == "" {
 		return fmt.Errorf("no image data in response")
 	}
@@ -387,6 +310,216 @@ func editImageWithDALLE(inputImagePath string) error {
 	return nil
 }
 
+// validateGenerateImageParams validates the parameters for image generation
+func validateGenerateImageParams() error {
+	if strings.TrimSpace(generatePrompt) == "" {
+		return fmt.Errorf("prompt is required and cannot be empty")
+	}
+
+	if generateProvider != "" {
+		validProviders := []string{"openai", "dalle", "google"}
+		isValid := false
+		for _, provider := range validProviders {
+			if generateProvider == provider {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("invalid provider '%s', must be one of: %s", generateProvider, strings.Join(validProviders, ", "))
+		}
+	}
+
+	if generateSize != "" {
+		validSizes := []string{"256x256", "512x512", "1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792", "auto"}
+		isValid := false
+		for _, size := range validSizes {
+			if generateSize == size {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("invalid size '%s', must be one of: %s", generateSize, strings.Join(validSizes, ", "))
+		}
+	}
+
+	if generateN < 1 || generateN > 10 {
+		return fmt.Errorf("count must be between 1 and 10, got %d", generateN)
+	}
+
+	if generateQuality != "" {
+		validQualities := []string{"high", "medium", "low", "auto", "standard", "hd"}
+		isValid := false
+		for _, quality := range validQualities {
+			if generateQuality == quality {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("invalid quality '%s', must be one of: %s", generateQuality, strings.Join(validQualities, ", "))
+		}
+	}
+
+	return nil
+}
+
+// setGenerateImageDefaults sets default values for image generation parameters
+func setGenerateImageDefaults() error {
+	if generateProvider == "" {
+		generateProvider = "openai"
+	}
+
+	if generateSize == "" {
+		generateSize = "1024x1024"
+	}
+
+	if generateModel == "" {
+		switch strings.ToLower(generateProvider) {
+		case "openai", "dalle":
+			generateModel = "gpt-image-1"
+		case "google":
+			generateModel = "imagen-3.0-generate-002"
+		default:
+			return fmt.Errorf("unsupported provider: %s", generateProvider)
+		}
+	}
+
+	// Create output path if not using stdout
+	if !generateStdout && generateOutput == "" {
+		generateOutput = "generated_image.png"
+	}
+
+	return nil
+}
+
+// validateEditImageParams validates the parameters for image editing
+func validateEditImageParams() error {
+	if strings.TrimSpace(editPrompt) == "" {
+		return fmt.Errorf("prompt is required and cannot be empty")
+	}
+
+	if editProvider != "" {
+		validProviders := []string{"openai", "dalle"}
+		isValid := false
+		for _, provider := range validProviders {
+			if editProvider == provider {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("invalid provider '%s', must be one of: %s (Google does not support image editing)", editProvider, strings.Join(validProviders, ", "))
+		}
+	}
+
+	if editSize != "" {
+		validSizes := []string{"256x256", "512x512", "1024x1024"}
+		isValid := false
+		for _, size := range validSizes {
+			if editSize == size {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return fmt.Errorf("invalid size '%s', must be one of: %s", editSize, strings.Join(validSizes, ", "))
+		}
+	}
+
+	if editModel != "" && editModel != "dall-e-2" {
+		return fmt.Errorf("invalid model '%s', only dall-e-2 supports image editing", editModel)
+	}
+
+	return nil
+}
+
+// setEditImageDefaults sets default values for image editing parameters
+func setEditImageDefaults() error {
+	if editProvider == "" {
+		editProvider = "openai"
+	}
+
+	if editModel == "" {
+		editModel = "dall-e-2"
+	}
+
+	if editSize == "" {
+		editSize = "1024x1024"
+	}
+
+	if editOutput == "" && !editStdout {
+		editOutput = "edited_image.png"
+	}
+
+	return nil
+}
+
+// prepareEditInputImage handles input image preparation from file or stdin
+func prepareEditInputImage() (string, func(), error) {
+	if editInput != "" {
+		// Check if input file exists
+		if _, err := os.Stat(editInput); os.IsNotExist(err) {
+			return "", nil, fmt.Errorf("input file does not exist: %s", editInput)
+		}
+		return editInput, nil, nil
+	}
+
+	// Handle stdin input
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return "", nil, fmt.Errorf("error checking stdin: %w", err)
+	}
+
+	if (stat.Mode() & os.ModeCharDevice) != 0 {
+		return "", nil, fmt.Errorf("input image path is required (use --input flag or pipe image data to stdin)")
+	}
+
+	// Data is being piped in, read from stdin
+	inputData, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", nil, fmt.Errorf("error reading from stdin: %w", err)
+	}
+
+	if len(inputData) == 0 {
+		return "", nil, fmt.Errorf("no data received from stdin")
+	}
+
+	// Create temporary file
+	tmpFile, err := os.CreateTemp("", "dive_image_edit_*.png")
+	if err != nil {
+		return "", nil, fmt.Errorf("error creating temporary file: %w", err)
+	}
+
+	cleanupFunc := func() {
+		os.Remove(tmpFile.Name())
+	}
+
+	// Check if input is base64
+	if isBase64(string(inputData)) {
+		// Decode base64
+		imageBytes, err := base64.StdEncoding.DecodeString(string(inputData))
+		if err != nil {
+			tmpFile.Close()
+			return "", cleanupFunc, fmt.Errorf("error decoding base64 input: %w", err)
+		}
+		if _, err := tmpFile.Write(imageBytes); err != nil {
+			tmpFile.Close()
+			return "", cleanupFunc, fmt.Errorf("error writing to temporary file: %w", err)
+		}
+	} else {
+		// Assume it's raw image data
+		if _, err := tmpFile.Write(inputData); err != nil {
+			tmpFile.Close()
+			return "", cleanupFunc, fmt.Errorf("error writing to temporary file: %w", err)
+		}
+	}
+
+	tmpFile.Close()
+	return tmpFile.Name(), cleanupFunc, nil
+}
+
 // isBase64 checks if a string is valid base64
 func isBase64(s string) bool {
 	s = strings.TrimSpace(s)
@@ -395,6 +528,65 @@ func isBase64(s string) bool {
 	}
 	_, err := base64.StdEncoding.DecodeString(s)
 	return err == nil
+}
+
+// createImageGenerator creates an image generator for the specified provider
+func createImageGenerator(provider string) (media.ImageGenerator, func(), error) {
+	switch provider {
+	case "openai", "dalle":
+		return createOpenAIProvider()
+	case "google":
+		return createGoogleProvider()
+	default:
+		return nil, nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
+}
+
+// createOpenAIProvider creates an OpenAI provider instance
+func createOpenAIProvider() (media.ImageGenerator, func(), error) {
+	// Check for API key
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		return nil, nil, fmt.Errorf("OPENAI_API_KEY environment variable is required")
+	}
+
+	client := openaiapi.NewClient()
+	provider := openai.NewProvider(&client)
+	return provider, nil, nil
+}
+
+// createGoogleProvider creates a Google GenAI provider instance
+func createGoogleProvider() (media.ImageGenerator, func(), error) {
+	// Check for Google credentials
+	if !hasGoogleCredentials() {
+		return nil, nil, fmt.Errorf("google GenAI credentials are required (GEMINI_API_KEY, GOOGLE_API_KEY, or Vertex AI credentials)")
+	}
+
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create Google GenAI client: %w", err)
+	}
+
+	provider := google.NewProvider(client)
+	cleanup := func() {
+		// Google GenAI client doesn't require explicit cleanup in current version
+	}
+	return provider, cleanup, nil
+}
+
+// hasGoogleCredentials checks if Google GenAI credentials are available
+func hasGoogleCredentials() bool {
+	// Check for Gemini API key
+	if os.Getenv("GEMINI_API_KEY") != "" || os.Getenv("GOOGLE_API_KEY") != "" {
+		return true
+	}
+
+	// Check for Vertex AI credentials
+	if os.Getenv("GOOGLE_GENAI_USE_VERTEXAI") != "" && os.Getenv("GOOGLE_CLOUD_PROJECT") != "" {
+		return true
+	}
+
+	return false
 }
 
 func init() {
@@ -407,12 +599,20 @@ func init() {
 	// Generate command flags
 	imageGenerateCmd.Flags().StringVarP(&generatePrompt, "prompt", "p", "", "Text description of the desired image (required)")
 	imageGenerateCmd.Flags().StringVarP(&generateSize, "size", "s", "1024x1024", "Image resolution (e.g., 1024x1024, 1536x1024, 1024x1536)")
-	imageGenerateCmd.Flags().StringVarP(&generateProvider, "provider", "", "dalle", "AI provider to use (dalle)")
+	imageGenerateCmd.Flags().StringVarP(&generateProvider, "provider", "", "openai", "AI provider to use (openai, google)")
 	imageGenerateCmd.Flags().StringVarP(&generateOutput, "output", "o", "", "Output file path (defaults to generated_image.png)")
 	imageGenerateCmd.Flags().BoolVarP(&generateStdout, "stdout", "", false, "Output base64 image to stdout instead of saving to file")
-	imageGenerateCmd.Flags().StringVarP(&generateModel, "model", "m", "", "Model to use (dall-e-2, dall-e-3, gpt-image-1)")
+	imageGenerateCmd.Flags().StringVarP(&generateModel, "model", "m", "", "Model to use (OpenAI: dall-e-2, dall-e-3, gpt-image-1; Google: imagen-3.0-generate-001, imagen-3.0-generate-002)")
 	imageGenerateCmd.Flags().StringVarP(&generateQuality, "quality", "q", "", "Image quality (high, medium, low, auto for gpt-image-1; standard, hd for dall-e-3)")
 	imageGenerateCmd.Flags().IntVarP(&generateN, "count", "n", 1, "Number of images to generate (1-10, only 1 supported for dall-e-3)")
+
+	// Provider-specific flags for generation
+	imageGenerateCmd.Flags().StringVar(&generateModeration, "moderation", "", "Moderation level (low, auto) - OpenAI only")
+	imageGenerateCmd.Flags().StringVar(&generateOutputFormat, "output-format", "", "Output format (png, jpeg, webp) - gpt-image-1 only")
+	imageGenerateCmd.Flags().IntVar(&generateOutputCompression, "output-compression", 0, "Output compression level (0-100) - gpt-image-1 with jpeg/webp only")
+	imageGenerateCmd.Flags().BoolVar(&generateIncludeRAI, "include-rai", false, "Include Responsible AI filter reasons - Google only")
+	imageGenerateCmd.Flags().BoolVar(&generateIncludeSafety, "include-safety", false, "Include safety attributes - Google only")
+	imageGenerateCmd.Flags().StringVar(&generateOutputMIMEType, "output-mime-type", "", "Output MIME type (e.g., image/jpeg) - Google only")
 
 	// Mark required flags
 	imageGenerateCmd.MarkFlagRequired("prompt")
@@ -421,11 +621,14 @@ func init() {
 	imageEditCmd.Flags().StringVarP(&editInput, "input", "i", "", "Input image file path (or read from stdin)")
 	imageEditCmd.Flags().StringVarP(&editPrompt, "prompt", "p", "", "Text instructions for editing the image (required)")
 	imageEditCmd.Flags().StringVarP(&editMask, "mask", "", "", "Mask image file path (optional)")
-	imageEditCmd.Flags().StringVarP(&editProvider, "provider", "", "dalle", "AI provider to use (dalle)")
+	imageEditCmd.Flags().StringVarP(&editProvider, "provider", "", "openai", "AI provider to use (openai - only OpenAI supports image editing)")
 	imageEditCmd.Flags().StringVarP(&editOutput, "output", "o", "", "Output file path (defaults to edited_image.png)")
 	imageEditCmd.Flags().BoolVarP(&editStdout, "stdout", "", false, "Output base64 image to stdout instead of saving to file")
 	imageEditCmd.Flags().StringVarP(&editModel, "model", "m", "dall-e-2", "Model to use (only dall-e-2 supports image editing)")
 	imageEditCmd.Flags().StringVarP(&editSize, "size", "s", "1024x1024", "Output image size (256x256, 512x512, 1024x1024)")
+
+	// Provider-specific flags for editing
+	imageEditCmd.Flags().StringVar(&editModeration, "moderation", "", "Moderation level (low, auto) - OpenAI only")
 
 	// Mark required flags
 	imageEditCmd.MarkFlagRequired("prompt")

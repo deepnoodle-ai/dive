@@ -30,9 +30,13 @@ func TestImageGenerationTool_Schema(t *testing.T) {
 	require.Equal(t, "string", string(promptProp.Type))
 	require.NotEmpty(t, promptProp.Description)
 
-	// Verify model enum values
+	// Verify model enum values (should include both OpenAI and Google models)
 	modelProp := schema.Properties["model"]
-	require.Equal(t, []string{"gpt-image-1", "dall-e-2", "dall-e-3"}, modelProp.Enum)
+	require.Contains(t, modelProp.Enum, "gpt-image-1")
+	require.Contains(t, modelProp.Enum, "dall-e-2")
+	require.Contains(t, modelProp.Enum, "dall-e-3")
+	require.Contains(t, modelProp.Enum, "imagen-3.0-generate-001")
+	require.Contains(t, modelProp.Enum, "imagen-3.0-generate-002")
 
 	// Verify quality enum values
 	qualityProp := schema.Properties["quality"]
@@ -47,7 +51,7 @@ func TestImageGenerationTool_Metadata(t *testing.T) {
 	client := openai.NewClient()
 	tool := &ImageGenerationTool{client: &client}
 
-	require.Equal(t, "openai_image_generation", tool.Name())
+	require.Equal(t, "image_generation", tool.Name())
 	require.Contains(t, tool.Description(), "Generate images")
 
 	annotations := tool.Annotations()
