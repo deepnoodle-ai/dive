@@ -6,8 +6,7 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
-// WorkFunc is a function that returns a dive.EventStream.
-// type WorkFunc func(ctx context.Context, task dive.Task) (dive.EventStream, error)
+var _ dive.Agent = &MockAgent{}
 
 type MockAgentOptions struct {
 	Name           string
@@ -56,7 +55,6 @@ func (a *MockAgent) Backstory() string {
 func (a *MockAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
-
 
 func (a *MockAgent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
 	return a.response, nil

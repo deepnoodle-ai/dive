@@ -24,28 +24,24 @@ func parseTemplate(name string, text string) (*template.Template, error) {
 
 var SystemPromptTemplate = `# About You
 {{- if .Name }}
-
+<name>
 Your name is "{{ .Name }}".
+</name>
 {{- end }}
 {{- if .Goal }}
-
+<goal>
 Your goal: "{{ .Goal }}"
 
-Keep this goal in mind as you work on tasks and respond to messages.
+Keep this goal in mind as you work and respond to messages.
+</goal>
 {{- end }}
 {{- if .Instructions }}
-
+<instructions>
 Your instructions: "{{ .Instructions }}"
 
 Follow these instructions when working on tasks and responding to messages.
+</instructions>
 {{- end }}
-
-# Team Overview
-
-You belong to a team. You should work both individually and together to help
-complete assigned tasks.
-
-{{ .TeamOverview -}}
 
 {{- if .IsSupervisor }}
 
@@ -83,14 +79,6 @@ Have multiple interactions instead, if you need to.
 
 You may be provided with tools to use to complete your tasks. Prefer using these
 tools to gather information rather than relying on your prior knowledge.
-
-# Context
-
-Context you are given may be helpful to you when answering questions. If the
-context doesn't fully help answer a question, please use the available tools
-to gather more information.
-
-{{ .ResponseGuidelines -}}
 `
 
 var PromptFinishNow = "Finish the task to the best of your ability now. Do not use any more tools. Respond with your complete response for the task."

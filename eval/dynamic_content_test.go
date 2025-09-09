@@ -41,7 +41,7 @@ echo '[{"type": "text", "text": "Hello from shell script"}]'`), 0755)
 		t.Run(tt.name, func(t *testing.T) {
 			scriptContent := &ScriptPathContent{
 				DynamicFrom: tt.scriptPath,
-				BasePath:    tempDir,
+				Directory:   tempDir,
 			}
 
 			content, err := scriptContent.Content(context.Background(), nil)

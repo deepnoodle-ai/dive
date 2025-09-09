@@ -1,10 +1,13 @@
-package agent
+package toolkit
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/schema"
 )
 
@@ -23,10 +26,10 @@ type AssignWorkToolInput struct {
 // AssignWorkToolOptions is used to configure a new AssignWorkTool.
 type AssignWorkToolOptions struct {
 	// Self indicates which agent owns this tool
-	Self *Agent
+	Self dive.Agent
 
 	// Others contains the other agents that can be assigned work to.
-	Others []*Agent
+	Others []dive.Agent
 
 	// DefaultTaskTimeout is the default timeout for tasks assigned using this tool
 	DefaultTaskTimeout time.Duration
@@ -36,8 +39,8 @@ type AssignWorkToolOptions struct {
 // The tool call blocks until the work is complete. The result of the call is
 // the output of the task.
 type AssignWorkTool struct {
-	self               *Agent
-	others             []*Agent
+	self               dive.Agent
+	others             []dive.Agent
 	defaultTaskTimeout time.Duration
 }
 
@@ -132,9 +135,47 @@ func (t *AssignWorkTool) Call(ctx context.Context, input *AssignWorkToolInput) (
 	if input.AgentName == t.self.Name() {
 		return dive.NewToolResultError("cannot delegate task to self"), nil
 	}
-	// With Environment removed, agent delegation is no longer supported
-	// This functionality would need to be reimplemented with a different approach
-	return dive.NewToolResultError("Agent delegation is no longer supported after removing Environment concept"), nil
+	var assignee dive.Agent
+	for _, other := range t.others {
+		if other.Name() == input.AgentName {
+			assignee = other
+			break
+		}
+	}
+	if assignee == nil {
+		return dive.NewToolResultError("agent not found"), nil
+	}
+	prompt := strings.Builder{}
+	prompt.WriteString(input.Description)
+	prompt.WriteString("\n\n")
+	if input.ExpectedOutput != "" {
+		prompt.WriteString("<expected_output>\n")
+		prompt.WriteString("Please respond with the following:\n")
+		prompt.WriteString(input.ExpectedOutput)
+		prompt.WriteString("</expected_output>")
+		prompt.WriteString("\n\n")
+	}
+	if input.OutputFormat != "" {
+		prompt.WriteString("<output_format>\n")
+		prompt.WriteString("Please respond with the following format:\n")
+		prompt.WriteString(string(input.OutputFormat))
+		prompt.WriteString("</output_format>")
+		prompt.WriteString("\n\n")
+	}
+
+	message := &llm.Message{Role: llm.User}
+	message.Content = append(message.Content, &llm.TextContent{Text: prompt.String()})
+
+	if input.Context != "" {
+		context := fmt.Sprintf("<context>\n%s\n</context>", input.Context)
+		message.Content = append(message.Content, &llm.TextContent{Text: context})
+	}
+
+	response, err := assignee.CreateResponse(ctx, dive.WithMessage(message))
+	if err != nil {
+		return dive.NewToolResultError("failed to create response: " + err.Error()), nil
+	}
+	return dive.NewToolResultText(response.OutputText()), nil
 }
 
 func (t *AssignWorkTool) ShouldReturnResult() bool {

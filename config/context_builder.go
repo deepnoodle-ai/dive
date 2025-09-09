@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -18,7 +17,7 @@ import (
 
 // buildContextContent converts a list of context entries (string paths/URLs or
 // objects with an "Inline" key) into []llm.Content that can be added to a chat.
-func buildContextContent(ctx context.Context, baseDir string, basePath string, entries []Content) ([]llm.Content, error) {
+func buildContextContent(directory string, entries []Content) ([]llm.Content, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -39,21 +38,14 @@ func buildContextContent(ctx context.Context, baseDir string, basePath string, e
 		if entry.URL != "" {
 			fieldsSet++
 		}
-		if entry.Document != "" {
+		if entry.Script != "" {
 			fieldsSet++
 		}
-		if entry.Dynamic != "" {
-			fieldsSet++
-		}
-		if entry.DynamicFrom != "" {
-			fieldsSet++
-		}
-
 		if fieldsSet == 0 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Dynamic, or DynamicFrom")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Script")
 		}
 		if fieldsSet > 1 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Document, Dynamic, or DynamicFrom, but multiple were set")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Script, but multiple were set")
 		}
 
 		switch {
@@ -61,8 +53,8 @@ func buildContextContent(ctx context.Context, baseDir string, basePath string, e
 			contents = append(contents, &llm.TextContent{Text: strings.TrimSpace(entry.Text)})
 		case entry.Path != "":
 			resolvedPath := entry.Path
-			if !filepath.IsAbs(entry.Path) && basePath != "" {
-				resolvedPath = filepath.Join(basePath, entry.Path)
+			if !filepath.IsAbs(entry.Path) && directory != "" {
+				resolvedPath = filepath.Join(directory, entry.Path)
 			}
 			if containsWildcards(entry.Path) {
 				// Handle wildcard pattern
@@ -72,7 +64,7 @@ func buildContextContent(ctx context.Context, baseDir string, basePath string, e
 				}
 				// Create content for each matching file
 				for _, match := range matches {
-					fileContent, err := buildMessageFromLocalFile(match)
+					fileContent, err := getContentFromLocalFile(match)
 					if err != nil {
 						return nil, fmt.Errorf("failed to process file %s from pattern %s: %w", match, entry.Path, err)
 					}
@@ -83,36 +75,30 @@ func buildContextContent(ctx context.Context, baseDir string, basePath string, e
 				if _, statErr := os.Stat(resolvedPath); statErr != nil {
 					return nil, fmt.Errorf("unable to read file %s: %w", resolvedPath, statErr)
 				}
-				content, err = buildMessageFromLocalFile(resolvedPath)
+				content, err = getContentFromLocalFile(resolvedPath)
 				if err != nil {
 					return nil, err
 				}
 				contents = append(contents, content)
 			}
 		case entry.URL != "":
-			content, err = buildMessageFromRemote(entry.URL)
+			content, err = getContentFromURL(entry.URL)
 			if err != nil {
 				return nil, err
 			}
 			contents = append(contents, content)
-		case entry.Document != "":
-			content, err = buildMessageFromFile(ctx, baseDir, entry.Document)
-			if err != nil {
-				return nil, err
-			}
-			contents = append(contents, content)
-		case entry.DynamicFrom != "":
+		case entry.Script != "":
 			// Create ScriptPathContent for dynamic script evaluation
 			contents = append(contents, &eval.ScriptPathContent{
-				DynamicFrom: entry.DynamicFrom,
-				BasePath:    basePath,
+				DynamicFrom: entry.Script,
+				Directory:   directory,
 			})
 		}
 	}
 	return contents, nil
 }
 
-func buildMessageFromRemote(remote string) (llm.Content, error) {
+func getContentFromURL(remote string) (llm.Content, error) {
 	if !strings.HasPrefix(remote, "http") {
 		return nil, fmt.Errorf("remote content url must start with http:// or https://")
 	}
@@ -193,19 +179,7 @@ func buildMessageFromRemote(remote string) (llm.Content, error) {
 	}, nil
 }
 
-func buildMessageFromFile(ctx context.Context, baseDir string, filePath string) (llm.Content, error) {
-	fullPath := filePath
-	if !filepath.IsAbs(filePath) {
-		fullPath = filepath.Join(baseDir, filePath)
-	}
-	content, err := os.ReadFile(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file %s: %w", fullPath, err)
-	}
-	return &llm.TextContent{Text: string(content)}, nil
-}
-
-func buildMessageFromLocalFile(path string) (llm.Content, error) {
+func getContentFromLocalFile(path string) (llm.Content, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch {
 	case isImageExt(ext):

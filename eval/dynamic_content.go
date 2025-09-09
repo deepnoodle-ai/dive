@@ -25,7 +25,7 @@ type DynamicContent interface {
 // an external script at runtime.
 type ScriptPathContent struct {
 	DynamicFrom string `json:"dynamic_from"`
-	BasePath    string `json:"base_path,omitempty"`
+	Directory   string `json:"directory,omitempty"`
 }
 
 func (c *ScriptPathContent) Type() llm.ContentType {
@@ -38,8 +38,8 @@ func (c *ScriptPathContent) Content(ctx context.Context, globals map[string]any)
 	}
 	// Resolve the script path
 	resolvedPath := c.DynamicFrom
-	if !filepath.IsAbs(c.DynamicFrom) && c.BasePath != "" {
-		resolvedPath = filepath.Join(c.BasePath, c.DynamicFrom)
+	if !filepath.IsAbs(c.DynamicFrom) && c.Directory != "" {
+		resolvedPath = filepath.Join(c.Directory, c.DynamicFrom)
 	}
 	// Check if file exists
 	if _, err := os.Stat(resolvedPath); err != nil {

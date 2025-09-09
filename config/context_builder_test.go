@@ -1,12 +1,10 @@
 package config
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/eval"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/stretchr/testify/require"
 )
@@ -124,7 +122,7 @@ func TestBuildContextContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			messages, err := buildContextContent(context.Background(), "", "", tt.entries)
+			messages, err := buildContextContent("", tt.entries)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -177,7 +175,7 @@ func TestBuildMessageFromString(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			msg, err := buildMessageFromLocalFile(tt.input)
+			msg, err := getContentFromLocalFile(tt.input)
 			if tt.expectError {
 				require.Error(t, err)
 				return
@@ -208,7 +206,7 @@ func TestBuildMessageFromLocalFile(t *testing.T) {
 	err := os.WriteFile(textFile, []byte(textContent), 0644)
 	require.NoError(t, err)
 
-	msg, err := buildMessageFromLocalFile(textFile)
+	msg, err := getContentFromLocalFile(textFile)
 	require.NoError(t, err)
 
 	textContentBlock, ok := msg.(*llm.TextContent)
@@ -221,7 +219,7 @@ func TestBuildMessageFromLocalFile(t *testing.T) {
 	err = os.WriteFile(imageFile, []byte("fake-png-data"), 0644)
 	require.NoError(t, err)
 
-	msg, err = buildMessageFromLocalFile(imageFile)
+	msg, err = getContentFromLocalFile(imageFile)
 	require.NoError(t, err)
 
 	imageContent, ok := msg.(*llm.ImageContent)
@@ -235,7 +233,7 @@ func TestBuildMessageFromLocalFile(t *testing.T) {
 	err = os.WriteFile(unknownFile, []byte("unknown content"), 0644)
 	require.NoError(t, err)
 
-	_, err = buildMessageFromLocalFile(unknownFile)
+	_, err = getContentFromLocalFile(unknownFile)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported local file extension")
 }
@@ -347,8 +345,7 @@ func TestBuildContextContentWithWildcards(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			contents, err := buildContextContent(ctx, "", tempDir, tt.entries)
+			contents, err := buildContextContent(tempDir, tt.entries)
 			require.NoError(t, err)
 			require.Len(t, contents, tt.expectedCount)
 
@@ -363,14 +360,12 @@ func TestBuildContextContentWithWildcards(t *testing.T) {
 }
 
 func TestBuildContextContentWildcardErrors(t *testing.T) {
-	ctx := context.Background()
-
 	// Test with non-existent directory pattern
 	entries := []Content{
 		{Path: "nonexistent/*.txt"},
 	}
 
-	contents, err := buildContextContent(ctx, "", "", entries)
+	contents, err := buildContextContent("", entries)
 	require.NoError(t, err) // FilepathGlob returns empty result for non-matching patterns, not error
 	require.Empty(t, contents)
 }
@@ -398,53 +393,6 @@ func TestContainsWildcards(t *testing.T) {
 	}
 }
 
-func TestBuildContextContentWithScript(t *testing.T) {
-	testCases := []struct {
-		name     string
-		entries  []Content
-		expected int
-		checkFn  func(t *testing.T, content []llm.Content)
-	}{
-		{
-			name: "script path",
-			entries: []Content{
-				{DynamicFrom: "./test_script.py"},
-			},
-			expected: 1,
-			checkFn: func(t *testing.T, content []llm.Content) {
-				scriptContent, ok := content[0].(*eval.ScriptPathContent)
-				require.True(t, ok, "Expected ScriptPathContent")
-				require.Equal(t, "./test_script.py", scriptContent.DynamicFrom)
-				require.Equal(t, llm.ContentTypeDynamic, scriptContent.Type())
-			},
-		},
-		{
-			name: "mixed content with script",
-			entries: []Content{
-				{Text: "Static text"},
-			},
-			expected: 2,
-			checkFn: func(t *testing.T, content []llm.Content) {
-				// First should be TextContent
-				textContent, ok := content[0].(*llm.TextContent)
-				require.True(t, ok, "Expected TextContent")
-				require.Equal(t, "Static text", textContent.Text)
-			},
-		},
-	}
-
-	for _, tt := range testCases {
-		t.Run(tt.name, func(t *testing.T) {
-			content, err := buildContextContent(context.Background(), "", "/test/path", tt.entries)
-			require.NoError(t, err)
-			require.Len(t, content, tt.expected)
-			if tt.checkFn != nil {
-				tt.checkFn(t, content)
-			}
-		})
-	}
-}
-
 func TestBuildContextContentScriptValidation(t *testing.T) {
 	testCases := []struct {
 		name        string
@@ -455,15 +403,7 @@ func TestBuildContextContentScriptValidation(t *testing.T) {
 		{
 			name: "multiple fields set should error",
 			entries: []Content{
-				{Text: "Some text", Dynamic: "Some script"},
-			},
-			expectError: true,
-			errorMsg:    "must specify exactly one",
-		},
-		{
-			name: "script and script path both set should error",
-			entries: []Content{
-				{Dynamic: "Some script", DynamicFrom: "./script.py"},
+				{Text: "Some text", Script: "Some script"},
 			},
 			expectError: true,
 			errorMsg:    "must specify exactly one",
@@ -480,7 +420,7 @@ func TestBuildContextContentScriptValidation(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildContextContent(context.Background(), "", "", tt.entries)
+			_, err := buildContextContent("", tt.entries)
 			if tt.expectError {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.errorMsg)

@@ -45,24 +45,24 @@ type ModelSettings struct {
 
 // Options are used to configure an Agent.
 type Options struct {
-	ID                   string
-	Name                 string
-	Goal                 string
-	Instructions         string
-	IsSupervisor         bool
-	Subordinates         []string
-	Model                llm.LLM
-	Tools                []dive.Tool
-	ResponseTimeout      time.Duration
-	Hooks                llm.Hooks
-	Logger               slogger.Logger
-	ToolIterationLimit   int
-	ModelSettings        *ModelSettings
-	DateAwareness        *bool
-	ThreadRepository     dive.ThreadRepository
-	Confirmer            dive.Confirmer
-	SystemPromptTemplate string
-	Context              []llm.Content
+	ID                 string
+	Name               string
+	Goal               string
+	Instructions       string
+	IsSupervisor       bool
+	Subordinates       []string
+	Model              llm.LLM
+	Tools              []dive.Tool
+	ResponseTimeout    time.Duration
+	Hooks              llm.Hooks
+	Logger             slogger.Logger
+	ToolIterationLimit int
+	ModelSettings      *ModelSettings
+	DateAwareness      *bool
+	ThreadRepository   dive.ThreadRepository
+	Confirmer          dive.Confirmer
+	SystemPrompt       string
+	Context            []llm.Content
 }
 
 // Agent is the standard implementation of the Agent interface.
@@ -108,18 +108,18 @@ func New(opts Options) (*Agent, error) {
 	if opts.Name == "" {
 		opts.Name = dive.RandomName()
 	}
-	if opts.SystemPromptTemplate == "" {
-		opts.SystemPromptTemplate = SystemPromptTemplate
+	if opts.SystemPrompt == "" {
+		opts.SystemPrompt = SystemPromptTemplate
 	}
-	systemPromptTemplate, err := parseTemplate("agent", opts.SystemPromptTemplate)
+	systemPromptTemplate, err := parseTemplate("agent", opts.SystemPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid system prompt template: %w", err)
 	}
 	agent := &Agent{
 		id:                   opts.ID,
-		name:                 strings.TrimSpace(opts.Name),
-		goal:                 strings.TrimSpace(opts.Goal),
-		instructions:         strings.TrimSpace(opts.Instructions),
+		name:                 opts.Name,
+		goal:                 opts.Goal,
+		instructions:         opts.Instructions,
 		model:                opts.Model,
 		isSupervisor:         opts.IsSupervisor,
 		subordinates:         opts.Subordinates,
@@ -171,24 +171,13 @@ func (a *Agent) Subordinates() []string {
 	return a.subordinates
 }
 
-func (a *Agent) prepareThreadMessages(
-	ctx context.Context,
-	threadID string,
-	messages []*llm.Message,
-	options dive.Options,
-) (*dive.Thread, []*llm.Message, error) {
-	if threadID == "" {
-		return nil, messages, nil
-	}
-	if a.threadRepository == nil {
-		return nil, nil, ErrThreadsAreNotEnabled
-	}
-	thread, err := a.getOrCreateThread(ctx, threadID, options)
+func (a *Agent) prepareThread(ctx context.Context, messages []*llm.Message, options dive.Options) (*dive.Thread, error) {
+	thread, err := a.getOrCreateThread(ctx, options.ThreadID, options)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	thread.Messages = append(thread.Messages, messages...)
-	return thread, thread.Messages, nil
+	return thread, nil
 }
 
 func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
@@ -210,7 +199,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages, chatOptions)
+	thread, err := a.prepareThread(ctx, messages, chatOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +234,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 		Response: response,
 	})
 
-	genResult, err := a.generate(ctx, threadMessages, systemPrompt, publisher)
+	genResult, err := a.generate(ctx, thread.Messages, systemPrompt, publisher)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
 		publisher.Send(ctx, &dive.ResponseEvent{
@@ -255,8 +244,8 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 		return nil, err
 	}
 
-	if thread != nil {
-		thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+	thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+	if a.threadRepository != nil {
 		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
 			logger.Error("failed to save thread", "error", err)
 			publisher.Send(ctx, &dive.ResponseEvent{
@@ -303,7 +292,7 @@ func (a *Agent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.R
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	thread, threadMessages, err := a.prepareThreadMessages(ctx, chatOptions.ThreadID, messages, chatOptions)
+	thread, err := a.prepareThread(ctx, messages, chatOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +326,7 @@ func (a *Agent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.R
 			Response: response,
 		})
 
-		genResult, err := a.generate(ctx, threadMessages, systemPrompt, publisher)
+		genResult, err := a.generate(ctx, thread.Messages, systemPrompt, publisher)
 		if err != nil {
 			logger.Error("failed to generate response", "error", err)
 			publisher.Send(ctx, &dive.ResponseEvent{
@@ -347,8 +336,8 @@ func (a *Agent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.R
 			return
 		}
 
-		if thread != nil {
-			thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+		thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+		if a.threadRepository != nil {
 			if err := a.threadRepository.PutThread(ctx, thread); err != nil {
 				logger.Error("failed to save thread", "error", err)
 				publisher.Send(ctx, &dive.ResponseEvent{
@@ -392,17 +381,16 @@ func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
 }
 
 func (a *Agent) getOrCreateThread(ctx context.Context, threadID string, options dive.Options) (*dive.Thread, error) {
-	if a.threadRepository == nil {
-		return nil, ErrThreadsAreNotEnabled
+	if a.threadRepository != nil {
+		thread, err := a.threadRepository.GetThread(ctx, threadID)
+		if err != nil {
+			if err != dive.ErrThreadNotFound {
+				return nil, err
+			}
+		} else {
+			return thread, nil
+		}
 	}
-	thread, err := a.threadRepository.GetThread(ctx, threadID)
-	if err == nil {
-		return thread, nil
-	}
-	if err != dive.ErrThreadNotFound {
-		return nil, err
-	}
-	// Create new thread with populated fields
 	return &dive.Thread{
 		ID:        threadID,
 		UserID:    options.UserID,
@@ -413,9 +401,7 @@ func (a *Agent) getOrCreateThread(ctx context.Context, threadID string, options 
 }
 
 func (a *Agent) buildSystemPrompt() (string, error) {
-	var responseGuidelines string
-	data := newAgentTemplateData(a, responseGuidelines)
-	prompt, err := executeTemplate(a.systemPromptTemplate, data)
+	prompt, err := executeTemplate(a.systemPromptTemplate, a)
 	if err != nil {
 		return "", err
 	}
@@ -746,12 +732,6 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 		}
 	}
 	return generateOpts
-}
-
-func (a *Agent) TeamOverview() string {
-	// With Environment removed, agents don't have visibility into other agents
-	// This could be enhanced by passing team info directly to agents if needed
-	return "You are working independently."
 }
 
 func (a *Agent) Context() []llm.Content {

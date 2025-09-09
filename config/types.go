@@ -88,16 +88,15 @@ type Tool struct {
 
 // Content carries or points to a piece of content that can be used as context.
 type Content struct {
-	Text        string `yaml:"Text,omitempty" json:"Text,omitempty"`
-	Path        string `yaml:"Path,omitempty" json:"Path,omitempty"`
-	URL         string `yaml:"URL,omitempty" json:"URL,omitempty"`
-	Document    string `yaml:"Document,omitempty" json:"Document,omitempty"`
-	Dynamic     string `yaml:"Dynamic,omitempty" json:"Dynamic,omitempty"`
-	DynamicFrom string `yaml:"DynamicFrom,omitempty" json:"DynamicFrom,omitempty"`
+	Text   string `yaml:"Text,omitempty" json:"Text,omitempty"`
+	Path   string `yaml:"Path,omitempty" json:"Path,omitempty"`
+	URL    string `yaml:"URL,omitempty" json:"URL,omitempty"`
+	Script string `yaml:"Script,omitempty" json:"Script,omitempty"`
 }
 
 // Agent is a serializable representation of an Agent
 type Agent struct {
+	ID                 string         `yaml:"ID,omitempty" json:"ID,omitempty"`
 	Name               string         `yaml:"Name,omitempty" json:"Name,omitempty"`
 	Goal               string         `yaml:"Goal,omitempty" json:"Goal,omitempty"`
 	Instructions       string         `yaml:"Instructions,omitempty" json:"Instructions,omitempty"`
