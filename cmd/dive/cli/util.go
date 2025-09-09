@@ -8,6 +8,18 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/config"
+	"github.com/fatih/color"
+)
+
+var (
+	boldStyle     = color.New(color.Bold)
+	successStyle  = color.New(color.FgGreen)
+	errorStyle    = color.New(color.FgRed)
+	yellowStyle   = color.New(color.FgYellow)
+	thinkingStyle = color.New(color.FgMagenta)
 )
 
 // readStdin reads all content from standard input
@@ -92,4 +104,34 @@ func formatTimeAgo(t time.Time) string {
 		}
 		return fmt.Sprintf("%d years ago", years)
 	}
+}
+
+// saveRecentThreadID saves the most recent thread ID to ~/.dive/threads/recent
+func saveRecentThreadID(threadID string) error {
+	threadsDir, err := diveThreadsDirectory()
+	if err != nil {
+		return fmt.Errorf("error getting dive threads directory: %v", err)
+	}
+	if err := os.MkdirAll(threadsDir, 0755); err != nil {
+		return fmt.Errorf("error creating threads directory: %v", err)
+	}
+
+	recentFile := filepath.Join(threadsDir, "recent")
+	if err := os.WriteFile(recentFile, []byte(threadID), 0644); err != nil {
+		return fmt.Errorf("error writing recent thread ID: %v", err)
+	}
+
+	return nil
+}
+
+func initializeTools(toolNames []string) ([]dive.Tool, error) {
+	tools := make([]dive.Tool, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		tool, err := config.InitializeToolByName(toolName, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize tool: %s", err)
+		}
+		tools = append(tools, tool)
+	}
+	return tools, nil
 }
