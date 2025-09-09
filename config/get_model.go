@@ -17,11 +17,9 @@ import (
 var DefaultProvider = "anthropic"
 
 func GetModel(providerName, modelName string) (llm.LLM, error) {
-
 	if providerName == "" {
 		providerName = DefaultProvider
 	}
-
 	switch providerName {
 	case "anthropic":
 		opts := []anthropic.Option{}

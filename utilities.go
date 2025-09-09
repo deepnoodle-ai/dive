@@ -52,6 +52,7 @@ func RandomName() string {
 
 func DateString(t time.Time) string {
 	prompt := "The current date is " + t.Format("January 2, 2006") + "."
+	prompt += " The current time is " + t.Format("3:04 PM") + "."
 	prompt += " It is a " + t.Format("Monday") + "."
 	return prompt
 }

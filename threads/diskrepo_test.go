@@ -1,4 +1,4 @@
-package agent
+package threads
 
 import (
 	"context"
@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDiskThreadRepository(t *testing.T) {
+func TestDiskRepository(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary directory for testing
 	tmpDir := t.TempDir()
 
-	repo := NewDiskThreadRepository(tmpDir)
+	repo := NewDiskRepository(tmpDir)
 
 	// Create a test thread
 	thread := &dive.Thread{
@@ -61,7 +61,7 @@ func TestDiskThreadRepository(t *testing.T) {
 	require.Equal(t, "Hello! How can I help you today?", retrievedThread.Messages[1].Text())
 
 	// Test persistence by creating new repository
-	newRepo := NewDiskThreadRepository(tmpDir)
+	newRepo := NewDiskRepository(tmpDir)
 
 	persistedThread, err := newRepo.GetThread(ctx, "test-thread-1")
 	require.NoError(t, err)
@@ -88,11 +88,11 @@ func TestDiskThreadRepository(t *testing.T) {
 	require.Equal(t, dive.ErrThreadNotFound, err)
 }
 
-func TestDiskThreadRepository_MultipleThreads(t *testing.T) {
+func TestDiskRepository_MultipleThreads(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	repo := NewDiskThreadRepository(tmpDir)
+	repo := NewDiskRepository(tmpDir)
 
 	// Add multiple threads
 	for i := 0; i < 3; i++ {
@@ -119,18 +119,18 @@ func TestDiskThreadRepository_MultipleThreads(t *testing.T) {
 	require.Len(t, output.Items, 3)
 
 	// Test persistence
-	newRepo := NewDiskThreadRepository(tmpDir)
+	newRepo := NewDiskRepository(tmpDir)
 
 	output, err = newRepo.ListThreads(ctx, nil)
 	require.NoError(t, err)
 	require.Len(t, output.Items, 3)
 }
 
-func TestDiskThreadRepository_UpdateExistingThread(t *testing.T) {
+func TestDiskRepository_UpdateExistingThread(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	repo := NewDiskThreadRepository(tmpDir)
+	repo := NewDiskRepository(tmpDir)
 
 	// Create initial thread
 	thread := &dive.Thread{
@@ -170,7 +170,7 @@ func TestDiskThreadRepository_UpdateExistingThread(t *testing.T) {
 	require.Equal(t, "Response to first message", retrievedThread.Messages[1].Text())
 }
 
-func TestDiskThreadRepository_InvalidFile(t *testing.T) {
+func TestDiskRepository_InvalidFile(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
@@ -179,7 +179,7 @@ func TestDiskThreadRepository_InvalidFile(t *testing.T) {
 	err := os.WriteFile(invalidFile, []byte("invalid json"), 0644)
 	require.NoError(t, err)
 
-	repo := NewDiskThreadRepository(tmpDir)
+	repo := NewDiskRepository(tmpDir)
 
 	// Should have no threads since the invalid file was skipped
 	output, err := repo.ListThreads(ctx, nil)

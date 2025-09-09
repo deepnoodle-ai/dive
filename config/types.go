@@ -5,19 +5,15 @@ import (
 	"github.com/deepnoodle-ai/dive/mcp"
 )
 
-// DiveConfig is the main configuration structure that replaces Environment
-type DiveConfig struct {
-	Name        string      `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Description string      `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Version     string      `yaml:"Version,omitempty" json:"Version,omitempty"`
-	Config      Config      `yaml:"Config,omitempty" json:"Config,omitempty"`
-	Tools       []Tool      `yaml:"Tools,omitempty" json:"Tools,omitempty"`
-	Documents   []Document  `yaml:"Documents,omitempty" json:"Documents,omitempty"`
-	Agents      []Agent     `yaml:"Agents,omitempty" json:"Agents,omitempty"`
-	Workflows   []Workflow  `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
-	Triggers    []Trigger   `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
-	Schedules   []Schedule  `yaml:"Schedules,omitempty" json:"Schedules,omitempty"`
-	MCPServers  []MCPServer `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
+// Config is used to configure Agents, Tools, and MCP servers.
+type Config struct {
+	Name        string       `yaml:"Name,omitempty" json:"Name,omitempty"`
+	Description string       `yaml:"Description,omitempty" json:"Description,omitempty"`
+	Version     string       `yaml:"Version,omitempty" json:"Version,omitempty"`
+	Config      GlobalConfig `yaml:"Config,omitempty" json:"Config,omitempty"`
+	Tools       []Tool       `yaml:"Tools,omitempty" json:"Tools,omitempty"`
+	Agents      []Agent      `yaml:"Agents,omitempty" json:"Agents,omitempty"`
+	MCPServers  []MCPServer  `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
 }
 
 // MCPToolApprovalFilter is used to configure the approval filter for MCP tools.
@@ -73,22 +69,14 @@ type Provider struct {
 	RequestHeaders map[string]string `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
 }
 
-// Config represents global configuration settings
-type Config struct {
+// GlobalConfig represents global configuration settings
+type GlobalConfig struct {
 	DefaultProvider  string     `yaml:"DefaultProvider,omitempty" json:"DefaultProvider,omitempty"`
 	DefaultModel     string     `yaml:"DefaultModel,omitempty" json:"DefaultModel,omitempty"`
 	DefaultWorkflow  string     `yaml:"DefaultWorkflow,omitempty" json:"DefaultWorkflow,omitempty"`
 	ConfirmationMode string     `yaml:"ConfirmationMode,omitempty" json:"ConfirmationMode,omitempty"`
 	LogLevel         string     `yaml:"LogLevel,omitempty" json:"LogLevel,omitempty"`
 	Providers        []Provider `yaml:"Providers,omitempty" json:"Providers,omitempty"`
-}
-
-// Variable represents a workflow-level input parameter
-type Variable struct {
-	Name        string `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Type        string `yaml:"Type,omitempty" json:"Type,omitempty"`
-	Description string `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Default     string `yaml:"Default,omitempty" json:"Default,omitempty"`
 }
 
 // Tool represents an external capability that can be used by agents
@@ -100,16 +88,15 @@ type Tool struct {
 
 // Content carries or points to a piece of content that can be used as context.
 type Content struct {
-	Text        string `yaml:"Text,omitempty" json:"Text,omitempty"`
-	Path        string `yaml:"Path,omitempty" json:"Path,omitempty"`
-	URL         string `yaml:"URL,omitempty" json:"URL,omitempty"`
-	Document    string `yaml:"Document,omitempty" json:"Document,omitempty"`
-	Dynamic     string `yaml:"Dynamic,omitempty" json:"Dynamic,omitempty"`
-	DynamicFrom string `yaml:"DynamicFrom,omitempty" json:"DynamicFrom,omitempty"`
+	Text   string `yaml:"Text,omitempty" json:"Text,omitempty"`
+	Path   string `yaml:"Path,omitempty" json:"Path,omitempty"`
+	URL    string `yaml:"URL,omitempty" json:"URL,omitempty"`
+	Script string `yaml:"Script,omitempty" json:"Script,omitempty"`
 }
 
 // Agent is a serializable representation of an Agent
 type Agent struct {
+	ID                 string         `yaml:"ID,omitempty" json:"ID,omitempty"`
 	Name               string         `yaml:"Name,omitempty" json:"Name,omitempty"`
 	Goal               string         `yaml:"Goal,omitempty" json:"Goal,omitempty"`
 	Instructions       string         `yaml:"Instructions,omitempty" json:"Instructions,omitempty"`
@@ -140,91 +127,6 @@ type ModelSettings struct {
 	Features          []string            `yaml:"Features,omitempty" json:"Features,omitempty"`
 	RequestHeaders    map[string]string   `yaml:"RequestHeaders,omitempty" json:"RequestHeaders,omitempty"`
 	Caching           *bool               `yaml:"Caching,omitempty" json:"Caching,omitempty"`
-}
-
-// Input represents an input parameter for a task or workflow
-type Input struct {
-	Name        string `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Type        string `yaml:"Type,omitempty" json:"Type,omitempty"`
-	Description string `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Required    bool   `yaml:"Required,omitempty" json:"Required,omitempty"`
-	Default     any    `yaml:"Default,omitempty" json:"Default,omitempty"`
-	As          string `yaml:"As,omitempty" json:"As,omitempty"`
-}
-
-// Output represents an output parameter for a task or workflow
-type Output struct {
-	Name        string `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Type        string `yaml:"Type,omitempty" json:"Type,omitempty"`
-	Description string `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Format      string `yaml:"Format,omitempty" json:"Format,omitempty"`
-	Default     any    `yaml:"Default,omitempty" json:"Default,omitempty"`
-	Document    string `yaml:"Document,omitempty" json:"Document,omitempty"`
-}
-
-// Step represents a single step in a workflow
-type Step struct {
-	Type       string         `yaml:"Type,omitempty" json:"Type,omitempty"`
-	Name       string         `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Agent      string         `yaml:"Agent,omitempty" json:"Agent,omitempty"`
-	Prompt     string         `yaml:"Prompt,omitempty" json:"Prompt,omitempty"`
-	Script     string         `yaml:"Script,omitempty" json:"Script,omitempty"`
-	Store      string         `yaml:"Store,omitempty" json:"Store,omitempty"`
-	Action     string         `yaml:"Action,omitempty" json:"Action,omitempty"`
-	Parameters map[string]any `yaml:"Parameters,omitempty" json:"Parameters,omitempty"`
-	Each       *EachBlock     `yaml:"Each,omitempty" json:"Each,omitempty"`
-	Next       []NextStep     `yaml:"Next,omitempty" json:"Next,omitempty"`
-	Seconds    float64        `yaml:"Seconds,omitempty" json:"Seconds,omitempty"`
-	End        bool           `yaml:"End,omitempty" json:"End,omitempty"`
-	Content    []Content      `yaml:"Content,omitempty" json:"Content,omitempty"`
-}
-
-// EachBlock represents iteration configuration for a step
-type EachBlock struct {
-	Items any    `yaml:"Items,omitempty" json:"Items,omitempty"`
-	As    string `yaml:"As,omitempty" json:"As,omitempty"`
-}
-
-// NextStep represents the next step in a workflow with optional conditions
-type NextStep struct {
-	Step      string `yaml:"Step,omitempty" json:"Step,omitempty"`
-	Condition string `yaml:"Condition,omitempty" json:"Condition,omitempty"`
-}
-
-// Workflow represents a workflow definition
-type Workflow struct {
-	Name        string    `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Description string    `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Inputs      []Input   `yaml:"Inputs,omitempty" json:"Inputs,omitempty"`
-	Output      *Output   `yaml:"Output,omitempty" json:"Output,omitempty"`
-	Triggers    []Trigger `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
-	Steps       []Step    `yaml:"Steps,omitempty" json:"Steps,omitempty"`
-	Path        string    `yaml:"-" json:"-"`
-}
-
-// Trigger represents a trigger definition
-type Trigger struct {
-	Name   string                 `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Type   string                 `yaml:"Type,omitempty" json:"Type,omitempty"`
-	Config map[string]interface{} `yaml:"Config,omitempty" json:"Config,omitempty"`
-}
-
-// Schedule represents a schedule definition
-type Schedule struct {
-	Name     string `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Cron     string `yaml:"Cron,omitempty" json:"Cron,omitempty"`
-	Workflow string `yaml:"Workflow,omitempty" json:"Workflow,omitempty"`
-	Enabled  *bool  `yaml:"Enabled,omitempty" json:"Enabled,omitempty"`
-}
-
-// Document represents a document that can be referenced by agents and tasks
-type Document struct {
-	ID          string `yaml:"ID,omitempty" json:"ID,omitempty"`
-	Name        string `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Description string `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Path        string `yaml:"Path,omitempty" json:"Path,omitempty"`
-	Content     string `yaml:"Content,omitempty" json:"Content,omitempty"`
-	ContentType string `yaml:"ContentType,omitempty" json:"ContentType,omitempty"`
 }
 
 // ToLLMConfig converts config.MCPServer to llm.MCPServerConfig
@@ -317,4 +219,3 @@ func (s MCPServer) ToMCPConfig() *mcp.ServerConfig {
 func (s MCPServer) IsOAuthEnabled() bool {
 	return s.OAuth != nil
 }
-

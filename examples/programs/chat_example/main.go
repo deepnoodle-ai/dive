@@ -61,8 +61,7 @@ to answer non-medical questions. Use maximum medical jargon.`,
 			toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{Searcher: googleClient}),
 			toolkit.NewFetchTool(toolkit.FetchToolOptions{Fetcher: firecrawlClient}),
 		},
-		ThreadRepository: agent.NewMemoryThreadRepository(),
-		Logger:           logger,
+		Logger: logger,
 	})
 	if err != nil {
 		log.Fatal(err)

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deepnoodle-ai/dive/agent"
+	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -39,7 +39,7 @@ var threadListCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		repo := agent.NewDiskThreadRepository(directory)
+		repo := threads.NewDiskRepository(directory)
 
 		output, err := repo.ListThreads(ctx, nil)
 		if err != nil {
@@ -108,7 +108,7 @@ var threadShowCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		repo := agent.NewDiskThreadRepository(threadsDir)
+		repo := threads.NewDiskRepository(threadsDir)
 
 		// Get the specific thread by ID
 		thread, err := repo.GetThread(ctx, threadID)
@@ -161,7 +161,7 @@ var threadCleanCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 
 		ctx := context.Background()
-		repo := agent.NewDiskThreadRepository(directory)
+		repo := threads.NewDiskRepository(directory)
 
 		output, err := repo.ListThreads(ctx, nil)
 		if err != nil {

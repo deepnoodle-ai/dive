@@ -7,112 +7,110 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
-	"github.com/deepnoodle-ai/dive/config"
-	"github.com/deepnoodle-ai/dive/slogger"
 	"github.com/spf13/cobra"
 )
 
-func runSingleMessage(message, instructions, agentName, threadID string, tools []dive.Tool) error {
+func runAsk(message, systemPrompt, goal, instructions, threadID, configFlag, agentFlag string, noConfig bool, tools []dive.Tool) error {
 	ctx := context.Background()
 
-	logger := slogger.New(slogger.LevelFromString("warn"))
-
-	model, err := config.GetModel(llmProvider, llmModel)
+	// Try to discover and load configuration
+	configResult, err := discoverConfiguration(ctx, configFlag, noConfig, agentFlag)
 	if err != nil {
-		return fmt.Errorf("error getting model: %v", err)
+		return fmt.Errorf("error loading configuration: %v", err)
+	}
+	var chatAgent dive.Agent
+
+	if configResult != nil {
+		// Report configuration usage
+		reportConfigurationUsage(configResult.SourcePath, configResult.AgentName)
+
+		// Use config-based agent with potential flag overrides
+		if systemPrompt != "" || goal != "" || instructions != "" || len(tools) > 0 {
+			// Apply flag overrides
+			chatAgent, err = applyFlagOverrides(configResult.SelectedAgent, systemPrompt, goal, instructions, tools)
+			if err != nil {
+				return fmt.Errorf("error applying flag overrides: %v", err)
+			}
+		} else {
+			// Use config agent as-is
+			chatAgent = configResult.SelectedAgent
+		}
+	} else {
+		// No configuration found, use traditional flag-based approach
+		chatAgent, err = createAgentFromFlags(systemPrompt, goal, instructions, tools)
+		if err != nil {
+			return fmt.Errorf("error creating agent: %v", err)
+		}
 	}
 
-	modelSettings := &agent.ModelSettings{}
-
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
-	})
-
-	threadsDir, err := diveThreadsDirectory()
-	if err != nil {
-		return fmt.Errorf("error getting dive threads directory: %v", err)
+	if threadID == "" {
+		threadID = dive.NewID()
 	}
-	threadRepo := agent.NewDiskThreadRepository(threadsDir)
-
-	chatAgent, err := agent.New(agent.Options{
-		Name:             agentName,
-		Instructions:     instructions,
-		Model:            model,
-		Logger:           logger,
-		Tools:            tools,
-		ThreadRepository: threadRepo,
-		ModelSettings:    modelSettings,
-		Confirmer:        confirmer,
-	})
-	if err != nil {
-		return fmt.Errorf("error creating agent: %v", err)
-	}
-	// Generate a thread ID if none was provided
-	actualThreadID := threadID
-	if actualThreadID == "" {
-		actualThreadID = dive.NewID()
-	}
-
-	err = chatMessage(ctx, message, chatAgent, actualThreadID, false)
-	if err != nil {
+	if err := chatMessage(ctx, message, chatAgent, threadID); err != nil {
 		return err
 	}
-
-	// Save the thread ID for future use
-	if err := saveRecentThreadID(actualThreadID); err != nil {
-		// Don't fail the whole operation if we can't save the thread ID
-		fmt.Fprintf(os.Stderr, "Warning: Failed to save recent thread ID: %v\n", err)
+	if err := saveRecentThreadID(threadID); err != nil {
+		return fmt.Errorf("error saving recent thread: %v", err)
 	}
-
 	return nil
 }
 
 var askCmd = &cobra.Command{
 	Use:   "ask [message]",
-	Short: "Ask an AI agent a question and show the response",
-	Long:  "Ask an AI agent a question and show the response",
+	Short: "Ask an agent a question",
+	Long:  "Ask an agent a question",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-
 		systemPrompt, err := cmd.Flags().GetString("system")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-
-		agentName, err := cmd.Flags().GetString("agent-name")
+		goal, err := cmd.Flags().GetString("goal")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-
+		instructions, err := cmd.Flags().GetString("instructions")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
 		thread, err := cmd.Flags().GetString("thread")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-
-		var tools []dive.Tool
-		toolsStr, err := cmd.Flags().GetString("tools")
+		toolsSpec, err := cmd.Flags().GetString("tools")
 		if err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		if toolsStr != "" {
-			toolNames := strings.Split(toolsStr, ",")
-			for _, toolName := range toolNames {
-				tool, err := config.InitializeToolByName(toolName, nil)
-				if err != nil {
-					fmt.Println(errorStyle.Sprintf("Failed to initialize tool: %s", err))
-					os.Exit(1)
-				}
-				tools = append(tools, tool)
+		configFlag, err := cmd.Flags().GetString("config")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		agentFlag, err := cmd.Flags().GetString("agent")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		noConfig, err := cmd.Flags().GetBool("no-config")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		var tools []dive.Tool
+		if toolsSpec != "" {
+			tools, err = initializeTools(strings.Split(toolsSpec, ","))
+			if err != nil {
+				fmt.Println(errorStyle.Sprintf("Failed to initialize tools: %s", err))
+				os.Exit(1)
 			}
 		}
-
 		message := args[0]
-		if err := runSingleMessage(message, systemPrompt, agentName, thread, tools); err != nil {
+		if err := runAsk(message, systemPrompt, goal, instructions, thread, configFlag, agentFlag, noConfig, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -122,8 +120,12 @@ var askCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(askCmd)
 
-	askCmd.Flags().StringP("agent-name", "", "Assistant", "Name of the agent")
 	askCmd.Flags().StringP("system", "", "", "System prompt for the agent")
+	askCmd.Flags().StringP("goal", "", "", "Goal for the agent")
+	askCmd.Flags().StringP("instructions", "", "", "Instructions for the agent")
 	askCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the agent")
-	askCmd.Flags().StringP("thread", "t", "", "Name of the thread to use for the agent")
+	askCmd.Flags().StringP("thread", "", "", "Name of the thread to use for the agent")
+	askCmd.Flags().StringP("config", "", "", "Path to configuration file or directory")
+	askCmd.Flags().StringP("agent", "", "", "Name of the agent to use from configuration")
+	askCmd.Flags().BoolP("no-config", "", false, "Disable automatic configuration loading")
 }

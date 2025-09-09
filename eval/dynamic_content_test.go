@@ -10,67 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRisorContent(t *testing.T) {
-	tests := []struct {
-		name        string
-		script      string
-		globals     map[string]any
-		expected    int
-		expectError bool
-	}{
-		{
-			name:     "simple text output",
-			script:   `"Hello, World!"`,
-			globals:  nil,
-			expected: 1,
-		},
-		{
-			name:     "text content block",
-			script:   `{"type": "text", "text": "Hello from script"}`,
-			globals:  nil,
-			expected: 1,
-		},
-		{
-			name: "multiple content blocks",
-			script: `[
-				{"type": "text", "text": "First block"},
-				{"type": "text", "text": "Second block"}
-			]`,
-			globals:  nil,
-			expected: 2,
-		},
-		{
-			name:     "with globals",
-			script:   `"Hello, " + name + "!"`,
-			globals:  map[string]any{"name": "Alice"},
-			expected: 1,
-		},
-		{
-			name:        "invalid script",
-			script:      `invalid syntax`,
-			globals:     nil,
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			risorContent := &RisorContent{
-				Dynamic: tt.script,
-			}
-
-			content, err := risorContent.Content(context.Background(), tt.globals)
-			if tt.expectError {
-				require.Error(t, err)
-				return
-			}
-
-			require.NoError(t, err)
-			require.Len(t, content, tt.expected)
-		})
-	}
-}
-
 func TestScriptPathContent(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -102,7 +41,7 @@ echo '[{"type": "text", "text": "Hello from shell script"}]'`), 0755)
 		t.Run(tt.name, func(t *testing.T) {
 			scriptContent := &ScriptPathContent{
 				DynamicFrom: tt.scriptPath,
-				BasePath:    tempDir,
+				Directory:   tempDir,
 			}
 
 			content, err := scriptContent.Content(context.Background(), nil)
@@ -115,11 +54,6 @@ echo '[{"type": "text", "text": "Hello from shell script"}]'`), 0755)
 			require.Len(t, content, tt.expected)
 		})
 	}
-}
-
-func TestRisorContentType(t *testing.T) {
-	risorContent := &RisorContent{Dynamic: `"test"`}
-	require.Equal(t, llm.ContentTypeDynamic, risorContent.Type())
 }
 
 func TestScriptPathContentType(t *testing.T) {
