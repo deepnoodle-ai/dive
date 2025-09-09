@@ -15,7 +15,7 @@ import (
 
 func buildAgent(
 	ctx context.Context,
-	repo dive.DocumentRepository,
+	baseDir string,
 	agentDef Agent,
 	config Config,
 	tools map[string]dive.Tool,
@@ -130,7 +130,7 @@ func buildAgent(
 	var contextContent []llm.Content
 	if len(agentDef.Context) > 0 {
 		var err error
-		contextContent, err = buildContextContent(ctx, repo, basePath, agentDef.Context)
+		contextContent, err = buildContextContent(ctx, baseDir, basePath, agentDef.Context)
 		if err != nil {
 			return nil, fmt.Errorf("error building agent context: %w", err)
 		}

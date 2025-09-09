@@ -160,36 +160,10 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		toolsMap[toolName] = tool
 	}
 
-	// Documents
-	if buildOpts.DocumentsDir != "" && buildOpts.DocumentsRepo != nil {
-		return nil, fmt.Errorf("documents dir and repo cannot both be set")
-	}
-	var docRepo dive.DocumentRepository
-	if buildOpts.DocumentsRepo != nil {
-		docRepo = buildOpts.DocumentsRepo
-	} else {
-		dir := buildOpts.DocumentsDir
-		if dir == "" {
-			dir = "."
-		}
-		docRepo, err = agent.NewFileDocumentRepository(dir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create document repository: %w", err)
-		}
-	}
-	if docRepo != nil {
-		namedDocuments := make(map[string]*dive.DocumentMetadata, len(env.Documents))
-		for _, doc := range env.Documents {
-			namedDocuments[doc.Name] = &dive.DocumentMetadata{
-				Name: doc.Name,
-				Path: doc.Path,
-			}
-		}
-		for _, doc := range env.Documents {
-			if err := docRepo.RegisterDocument(ctx, doc.Name, doc.Path); err != nil {
-				return nil, fmt.Errorf("failed to register document %s: %w", doc.Name, err)
-			}
-		}
+	// Documents directory
+	baseDir := buildOpts.DocumentsDir
+	if baseDir == "" {
+		baseDir = "."
 	}
 
 	// This path will be used to resolve relative paths as needed
@@ -205,7 +179,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	// Agents
 	agents := make([]dive.Agent, 0, len(env.Agents))
 	for _, agentDef := range env.Agents {
-		agent, err := buildAgent(ctx, docRepo, agentDef, env.Config, toolsMap, logger, confirmer, basePath)
+		agent, err := buildAgent(ctx, baseDir, agentDef, env.Config, toolsMap, logger, confirmer, basePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
 		}
@@ -221,15 +195,14 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 
 	// Environment
 	result, err := environment.New(environment.Options{
-		Name:               env.Name,
-		Description:        env.Description,
-		Agents:             agents,
-		Logger:             logger,
-		DocumentRepository: docRepo,
-		ThreadRepository:   threadRepo,
-		Confirmer:          confirmer,
-		MCPServers:         mcpServers,
-		MCPManager:         mcpManager,
+		Name:             env.Name,
+		Description:      env.Description,
+		Agents:           agents,
+		Logger:           logger,
+		ThreadRepository: threadRepo,
+		Confirmer:        confirmer,
+		MCPServers:       mcpServers,
+		MCPManager:       mcpManager,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create environment: %w", err)

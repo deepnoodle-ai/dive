@@ -15,7 +15,6 @@ type MCPServerConnection struct {
 	Client             *Client
 	Config             *ServerConfig
 	Tools              []dive.Tool
-	ResourceRepository dive.DocumentRepository
 }
 
 // Manager manages multiple MCP server connections and tool discovery
@@ -108,11 +107,6 @@ func (m *Manager) initializeServer(ctx context.Context, serverConfig *ServerConf
 		m.tools[mcpTool.Name] = adapter
 	}
 
-	// Create resource repository if server supports resources
-	var resourceRepo dive.DocumentRepository
-	if client.GetServerCapabilities() != nil && client.GetServerCapabilities().Resources != nil {
-		resourceRepo = NewResourceRepository(client, serverConfig.Name)
-	}
 
 	if m.logger != nil {
 		var toolNames []string
@@ -125,7 +119,6 @@ func (m *Manager) initializeServer(ctx context.Context, serverConfig *ServerConf
 			"type", serverConfig.Type,
 			"tool_count", len(tools),
 			"tool_names", toolNames,
-			"has_resources", resourceRepo != nil,
 		)
 	}
 
@@ -134,7 +127,6 @@ func (m *Manager) initializeServer(ctx context.Context, serverConfig *ServerConf
 		Client:             client,
 		Config:             serverConfig,
 		Tools:              tools,
-		ResourceRepository: resourceRepo,
 	}
 	return nil
 }
@@ -275,27 +267,4 @@ func (m *Manager) GetServerNames() []string {
 	return names
 }
 
-// GetResourceRepository returns the resource repository for a specific server
-func (m *Manager) GetResourceRepository(serverName string) dive.DocumentRepository {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
 
-	if server, exists := m.servers[serverName]; exists {
-		return server.ResourceRepository
-	}
-	return nil
-}
-
-// GetAllResourceRepositories returns a map of all resource repositories by server name
-func (m *Manager) GetAllResourceRepositories() map[string]dive.DocumentRepository {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	repositories := make(map[string]dive.DocumentRepository)
-	for serverName, server := range m.servers {
-		if server.ResourceRepository != nil {
-			repositories[serverName] = server.ResourceRepository
-		}
-	}
-	return repositories
-}
