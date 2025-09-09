@@ -25,7 +25,6 @@ type MockAgent struct {
 	backstory      string
 	isSupervisor   bool
 	subordinates   []string
-	environment    dive.Environment
 	acceptedEvents []string
 	response       *dive.Response
 }
@@ -58,10 +57,6 @@ func (a *MockAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
 
-func (a *MockAgent) SetEnvironment(env dive.Environment) error {
-	a.environment = env
-	return nil
-}
 
 func (a *MockAgent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
 	return a.response, nil

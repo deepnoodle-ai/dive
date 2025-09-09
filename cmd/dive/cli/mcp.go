@@ -14,14 +14,14 @@ import (
 )
 
 // loadConfigFromPath loads configuration from a file or directory path
-func loadConfigFromPath(path string) (*config.Environment, error) {
+func loadConfigFromPath(path string) (*config.DiveConfig, error) {
 	// Check if path is a directory or file
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("error accessing path: %v", err)
 	}
 
-	var configEnv *config.Environment
+	var configEnv *config.DiveConfig
 
 	if fi.IsDir() {
 		// For directories, we need to read all YAML/JSON files and merge them
@@ -52,7 +52,7 @@ func loadConfigFromPath(path string) (*config.Environment, error) {
 				return nil, fmt.Errorf("failed to read file %s: %w", file, err)
 			}
 
-			var env *config.Environment
+			var env *config.DiveConfig
 			ext := strings.ToLower(filepath.Ext(file))
 			if ext == ".json" {
 				env, err = config.ParseJSON(data)

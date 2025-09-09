@@ -22,6 +22,7 @@ func buildAgent(
 	logger slogger.Logger,
 	confirmer dive.Confirmer,
 	basePath string,
+	threadRepo dive.ThreadRepository,
 ) (dive.Agent, error) {
 	providerName := agentDef.Provider
 	if providerName == "" {
@@ -151,6 +152,7 @@ func buildAgent(
 		ModelSettings:        modelSettings,
 		Logger:               logger,
 		Confirmer:            confirmer,
+		ThreadRepository:     threadRepo,
 		Context:              contextContent,
 	})
 }

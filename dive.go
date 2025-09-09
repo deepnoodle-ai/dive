@@ -35,38 +35,11 @@ type Agent interface {
 	// IsSupervisor indicates whether the Agent can assign work to other Agents
 	IsSupervisor() bool
 
-	// SetEnvironment sets the runtime Environment to which this Agent belongs
-	SetEnvironment(env Environment) error
-
 	// CreateResponse creates a new Response from the Agent
 	CreateResponse(ctx context.Context, opts ...Option) (*Response, error)
 
 	// StreamResponse streams a new Response from the Agent
 	StreamResponse(ctx context.Context, opts ...Option) (ResponseStream, error)
-}
-
-// Environment is a container for running Agents and Workflows. Interactivity
-// between Agents is generally scoped to a single Environment.
-type Environment interface {
-
-	// Name of the Environment
-	Name() string
-
-	// Agents returns the list of all Agents belonging to this Environment
-	Agents() []Agent
-
-	// AddAgent adds an Agent to this Environment
-	AddAgent(agent Agent) error
-
-	// GetAgent returns the Agent with the given name, if found
-	GetAgent(name string) (Agent, error)
-
-
-	// ThreadRepository returns the ThreadRepository for this Environment
-	ThreadRepository() ThreadRepository
-
-	// Confirmer returns the Confirmer for this Environment
-	Confirmer() Confirmer
 }
 
 // Options contains configuration for LLM generations.

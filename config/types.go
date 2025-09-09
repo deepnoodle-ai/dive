@@ -5,6 +5,21 @@ import (
 	"github.com/deepnoodle-ai/dive/mcp"
 )
 
+// DiveConfig is the main configuration structure that replaces Environment
+type DiveConfig struct {
+	Name        string      `yaml:"Name,omitempty" json:"Name,omitempty"`
+	Description string      `yaml:"Description,omitempty" json:"Description,omitempty"`
+	Version     string      `yaml:"Version,omitempty" json:"Version,omitempty"`
+	Config      Config      `yaml:"Config,omitempty" json:"Config,omitempty"`
+	Tools       []Tool      `yaml:"Tools,omitempty" json:"Tools,omitempty"`
+	Documents   []Document  `yaml:"Documents,omitempty" json:"Documents,omitempty"`
+	Agents      []Agent     `yaml:"Agents,omitempty" json:"Agents,omitempty"`
+	Workflows   []Workflow  `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
+	Triggers    []Trigger   `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
+	Schedules   []Schedule  `yaml:"Schedules,omitempty" json:"Schedules,omitempty"`
+	MCPServers  []MCPServer `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
+}
+
 // MCPToolApprovalFilter is used to configure the approval filter for MCP tools.
 type MCPToolApprovalFilter struct {
 	Always []string `yaml:"Always,omitempty" json:"Always,omitempty"`
@@ -303,10 +318,3 @@ func (s MCPServer) IsOAuthEnabled() bool {
 	return s.OAuth != nil
 }
 
-func isValidLogLevel(level string) bool {
-	return level == "debug" || level == "info" || level == "warn" || level == "error"
-}
-
-func boolPtr(b bool) *bool {
-	return &b
-}

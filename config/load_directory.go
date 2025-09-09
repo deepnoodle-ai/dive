@@ -7,13 +7,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/deepnoodle-ai/dive/environment"
+	"github.com/deepnoodle-ai/dive"
 )
 
 // LoadDirectory loads all YAML and JSON files from a directory and combines
-// them into a single Environment. Files are loaded in lexicographical order.
+// them into a single DiveConfig. Files are loaded in lexicographical order.
 // Later files can override values from earlier files.
-func LoadDirectory(dirPath string, opts ...BuildOption) (*environment.Environment, error) {
+func LoadDirectory(dirPath string, opts ...BuildOption) ([]dive.Agent, error) {
 	// Read all files in the directory
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -40,35 +40,35 @@ func LoadDirectory(dirPath string, opts ...BuildOption) (*environment.Environmen
 	}
 
 	// Merge all configuration files
-	var merged *Environment
+	var merged *DiveConfig
 	for _, file := range configFiles {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read file %s: %w", file, err)
 		}
 
-		var env *Environment
+		var config *DiveConfig
 		ext := strings.ToLower(filepath.Ext(file))
 		if ext == ".json" {
-			env, err = ParseJSON(data)
+			config, err = ParseJSON(data)
 		} else {
-			env, err = ParseYAML(data)
+			config, err = ParseYAML(data)
 		}
 
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse file %s: %w", file, err)
 		}
 
-		for i := range env.Workflows {
-			env.Workflows[i].Path = file
+		for i := range config.Workflows {
+			config.Workflows[i].Path = file
 		}
 
 		if merged == nil {
-			merged = env
+			merged = config
 		} else {
-			merged = Merge(merged, env)
+			merged = Merge(merged, config)
 		}
 	}
 
-	return merged.Build(opts...)
+	return merged.BuildAgents(opts...)
 }

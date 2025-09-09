@@ -11,26 +11,12 @@ type agentTemplateData struct {
 }
 
 func newAgentTemplateData(agent *Agent, responseGuidelines string) *agentTemplateData {
+	// With Environment removed, agents can only delegate to explicitly configured subordinates
+	// In the future, this could be enhanced by passing team info directly to agents
 	var delegateTargets []dive.Agent
-	if agent.isSupervisor {
-		if agent.subordinates == nil {
-			if agent.environment != nil {
-				// Unspecified means we can delegate to all non-supervisors
-				for _, a := range agent.environment.Agents() {
-					if !a.IsSupervisor() {
-						delegateTargets = append(delegateTargets, a)
-					}
-				}
-			}
-		} else {
-			for _, name := range agent.subordinates {
-				other, err := agent.environment.GetAgent(name)
-				if err == nil {
-					delegateTargets = append(delegateTargets, other)
-				}
-			}
-		}
-	}
+	// Since we no longer have access to other agents through Environment,
+	// delegation is simplified to only work with explicitly configured subordinates
+	// This could be enhanced in the future by providing a registry or team context
 	return &agentTemplateData{
 		Agent:              agent,
 		DelegateTargets:    delegateTargets,

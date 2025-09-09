@@ -12,69 +12,53 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/agent"
-	"github.com/deepnoodle-ai/dive/environment"
 	"github.com/deepnoodle-ai/dive/mcp"
 	"github.com/deepnoodle-ai/dive/slogger"
 	"github.com/goccy/go-yaml"
 )
 
-// Environment is a serializable representation of an AI agent environment
-type Environment struct {
-	Name        string      `yaml:"Name,omitempty" json:"Name,omitempty"`
-	Description string      `yaml:"Description,omitempty" json:"Description,omitempty"`
-	Version     string      `yaml:"Version,omitempty" json:"Version,omitempty"`
-	Config      Config      `yaml:"Config,omitempty" json:"Config,omitempty"`
-	Tools       []Tool      `yaml:"Tools,omitempty" json:"Tools,omitempty"`
-	Documents   []Document  `yaml:"Documents,omitempty" json:"Documents,omitempty"`
-	Agents      []Agent     `yaml:"Agents,omitempty" json:"Agents,omitempty"`
-	Workflows   []Workflow  `yaml:"Workflows,omitempty" json:"Workflows,omitempty"`
-	Triggers    []Trigger   `yaml:"Triggers,omitempty" json:"Triggers,omitempty"`
-	Schedules   []Schedule  `yaml:"Schedules,omitempty" json:"Schedules,omitempty"`
-	MCPServers  []MCPServer `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
-}
-
-// Save writes an Environment configuration to a file. The file extension is used to
+// Save writes a DiveConfig to a file. The file extension is used to
 // determine the configuration format:
 // - .json -> JSON
 // - .yml or .yaml -> YAML
-func (env *Environment) Save(path string) error {
+func (config *DiveConfig) Save(path string) error {
 	// Determine format from extension
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".json":
-		return env.SaveJSON(path)
+		return config.SaveJSON(path)
 	case ".yml", ".yaml":
-		return env.SaveYAML(path)
+		return config.SaveYAML(path)
 	default:
 		return fmt.Errorf("unsupported file extension: %s", ext)
 	}
 }
 
-// SaveYAML writes an Environment configuration to a YAML file
-func (env *Environment) SaveYAML(path string) error {
-	data, err := yaml.Marshal(env)
+// SaveYAML writes a DiveConfig to a YAML file
+func (config *DiveConfig) SaveYAML(path string) error {
+	data, err := yaml.Marshal(config)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
 }
 
-// SaveJSON writes an Environment configuration to a JSON file
-func (env *Environment) SaveJSON(path string) error {
-	data, err := json.MarshalIndent(env, "", "  ")
+// SaveJSON writes a DiveConfig to a JSON file
+func (config *DiveConfig) SaveJSON(path string) error {
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
 }
 
-// Write an Environment configuration to a writer in YAML format
-func (env *Environment) Write(w io.Writer) error {
-	return yaml.NewEncoder(w).Encode(env)
+// Write a DiveConfig to a writer in YAML format
+func (config *DiveConfig) Write(w io.Writer) error {
+	return yaml.NewEncoder(w).Encode(config)
 }
 
-// Build creates a new Environment from the configuration
-func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, error) {
+// BuildAgents creates agents from the configuration
+func (config *DiveConfig) BuildAgents(opts ...BuildOption) ([]dive.Agent, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -86,8 +70,8 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	var logger slogger.Logger = slogger.DefaultLogger
 	if buildOpts.Logger != nil {
 		logger = buildOpts.Logger
-	} else if env.Config.LogLevel != "" {
-		levelStr := env.Config.LogLevel
+	} else if config.Config.LogLevel != "" {
+		levelStr := config.Config.LogLevel
 		if !isValidLogLevel(levelStr) {
 			return nil, fmt.Errorf("invalid log level: %s", levelStr)
 		}
@@ -96,10 +80,10 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	}
 
 	confirmationMode := dive.ConfirmIfNotReadOnly
-	if env.Config.ConfirmationMode != "" {
-		confirmationMode = dive.ConfirmationMode(env.Config.ConfirmationMode)
+	if config.Config.ConfirmationMode != "" {
+		confirmationMode = dive.ConfirmationMode(config.Config.ConfirmationMode)
 		if !confirmationMode.IsValid() {
-			return nil, fmt.Errorf("invalid confirmation mode: %s", env.Config.ConfirmationMode)
+			return nil, fmt.Errorf("invalid confirmation mode: %s", config.Config.ConfirmationMode)
 		}
 	}
 
@@ -109,7 +93,7 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 
 	// Initialize MCP manager to discover tools
 	var mcpServers []*mcp.ServerConfig
-	for _, mcpServer := range env.MCPServers {
+	for _, mcpServer := range config.MCPServers {
 		mcpServers = append(mcpServers, mcpServer.ToMCPConfig())
 	}
 	mcpManager := mcp.NewManager(mcp.ManagerOptions{Logger: logger})
@@ -124,13 +108,13 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 	}
 
 	toolDefsByName := make(map[string]Tool)
-	for _, toolDef := range env.Tools {
+	for _, toolDef := range config.Tools {
 		toolDefsByName[toolDef.Name] = toolDef
 	}
 
 	// Auto-add any tool definitions mentioned in agents by name that were
 	// otherwise unconfigured. These will use the tool's default configuration.
-	for _, agentDef := range env.Agents {
+	for _, agentDef := range config.Agents {
 		for _, toolName := range agentDef.Tools {
 			if _, ok := toolDefsByName[toolName]; !ok {
 				toolDefsByName[toolName] = Tool{Name: toolName}
@@ -176,16 +160,6 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		}
 	}
 
-	// Agents
-	agents := make([]dive.Agent, 0, len(env.Agents))
-	for _, agentDef := range env.Agents {
-		agent, err := buildAgent(ctx, baseDir, agentDef, env.Config, toolsMap, logger, confirmer, basePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
-		}
-		agents = append(agents, agent)
-	}
-
 	var threadRepo dive.ThreadRepository
 	if buildOpts.ThreadRepo != nil {
 		threadRepo = buildOpts.ThreadRepo
@@ -193,19 +167,27 @@ func (env *Environment) Build(opts ...BuildOption) (*environment.Environment, er
 		threadRepo = agent.NewMemoryThreadRepository()
 	}
 
-	// Environment
-	result, err := environment.New(environment.Options{
-		Name:             env.Name,
-		Description:      env.Description,
-		Agents:           agents,
-		Logger:           logger,
-		ThreadRepository: threadRepo,
-		Confirmer:        confirmer,
-		MCPServers:       mcpServers,
-		MCPManager:       mcpManager,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create environment: %w", err)
+	agents := make([]dive.Agent, 0, len(config.Agents))
+	for _, agentDef := range config.Agents {
+		agent, err := buildAgent(ctx, baseDir, agentDef, config.Config, toolsMap, logger, confirmer, basePath, threadRepo)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build agent %s: %w", agentDef.Name, err)
+		}
+		agents = append(agents, agent)
 	}
-	return result, nil
+
+	return agents, nil
+}
+
+// GetMCPServers returns the MCP server configurations
+func (config *DiveConfig) GetMCPServers() []MCPServer {
+	return config.MCPServers
+}
+
+func isValidLogLevel(level string) bool {
+	return level == "debug" || level == "info" || level == "warn" || level == "error"
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }
