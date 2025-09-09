@@ -7,48 +7,42 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
-	"github.com/deepnoodle-ai/dive/config"
-	"github.com/deepnoodle-ai/dive/slogger"
-	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/spf13/cobra"
 )
 
-func runAsk(message, systemPrompt, goal, instructions, threadID string, tools []dive.Tool) error {
+func runAsk(message, systemPrompt, goal, instructions, threadID, configFlag, agentFlag string, noConfig bool, tools []dive.Tool) error {
 	ctx := context.Background()
 
-	logger := slogger.New(slogger.LevelFromString("warn"))
-
-	model, err := config.GetModel(llmProvider, llmModel)
+	// Try to discover and load configuration
+	configResult, err := discoverConfiguration(ctx, configFlag, noConfig, agentFlag)
 	if err != nil {
-		return fmt.Errorf("error getting model: %v", err)
+		return fmt.Errorf("error loading configuration: %v", err)
+	}
+	var chatAgent dive.Agent
+
+	if configResult != nil {
+		// Report configuration usage
+		reportConfigurationUsage(configResult.SourcePath, configResult.AgentName)
+
+		// Use config-based agent with potential flag overrides
+		if systemPrompt != "" || goal != "" || instructions != "" || len(tools) > 0 {
+			// Apply flag overrides
+			chatAgent, err = applyFlagOverrides(configResult.SelectedAgent, systemPrompt, goal, instructions, tools)
+			if err != nil {
+				return fmt.Errorf("error applying flag overrides: %v", err)
+			}
+		} else {
+			// Use config agent as-is
+			chatAgent = configResult.SelectedAgent
+		}
+	} else {
+		// No configuration found, use traditional flag-based approach
+		chatAgent, err = createAgentFromFlags(systemPrompt, goal, instructions, tools)
+		if err != nil {
+			return fmt.Errorf("error creating agent: %v", err)
+		}
 	}
 
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
-	})
-
-	threadsDir, err := diveThreadsDirectory()
-	if err != nil {
-		return fmt.Errorf("error getting threads directory: %v", err)
-	}
-	threadRepo := threads.NewDiskRepository(threadsDir)
-
-	chatAgent, err := agent.New(agent.Options{
-		Name:             "Assistant",
-		SystemPrompt:     systemPrompt,
-		Goal:             goal,
-		Instructions:     instructions,
-		Model:            model,
-		Logger:           logger,
-		Tools:            tools,
-		ThreadRepository: threadRepo,
-		ModelSettings:    &agent.ModelSettings{},
-		Confirmer:        confirmer,
-	})
-	if err != nil {
-		return fmt.Errorf("error creating agent: %v", err)
-	}
 	if threadID == "" {
 		threadID = dive.NewID()
 	}
@@ -92,6 +86,21 @@ var askCmd = &cobra.Command{
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
+		configFlag, err := cmd.Flags().GetString("config")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		agentFlag, err := cmd.Flags().GetString("agent")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		noConfig, err := cmd.Flags().GetBool("no-config")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
 		var tools []dive.Tool
 		if toolsSpec != "" {
 			tools, err = initializeTools(strings.Split(toolsSpec, ","))
@@ -101,7 +110,7 @@ var askCmd = &cobra.Command{
 			}
 		}
 		message := args[0]
-		if err := runAsk(message, systemPrompt, goal, instructions, thread, tools); err != nil {
+		if err := runAsk(message, systemPrompt, goal, instructions, thread, configFlag, agentFlag, noConfig, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -116,4 +125,7 @@ func init() {
 	askCmd.Flags().StringP("instructions", "", "", "Instructions for the agent")
 	askCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the agent")
 	askCmd.Flags().StringP("thread", "", "", "Name of the thread to use for the agent")
+	askCmd.Flags().StringP("config", "", "", "Path to configuration file or directory")
+	askCmd.Flags().StringP("agent", "", "", "Name of the agent to use from configuration")
+	askCmd.Flags().BoolP("no-config", "", false, "Disable automatic configuration loading")
 }

@@ -8,10 +8,6 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
-	"github.com/deepnoodle-ai/dive/config"
-	"github.com/deepnoodle-ai/dive/slogger"
-	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/spf13/cobra"
 )
 
@@ -83,40 +79,37 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID
 	return nil
 }
 
-func runChat(systemPrompt, goal, instructions, threadID string, tools []dive.Tool) error {
+func runChat(systemPrompt, goal, instructions, threadID, configFlag, agentFlag string, noConfig bool, tools []dive.Tool) error {
 	ctx := context.Background()
 
-	logger := slogger.New(slogger.LevelFromString("warn"))
-
-	model, err := config.GetModel(llmProvider, llmModel)
+	// Try to discover and load configuration
+	configResult, err := discoverConfiguration(ctx, configFlag, noConfig, agentFlag)
 	if err != nil {
-		return fmt.Errorf("error getting model: %v", err)
+		return fmt.Errorf("error loading configuration: %v", err)
 	}
+	var chatAgent dive.Agent
 
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
-	})
+	if configResult != nil {
+		// Report configuration usage
+		reportConfigurationUsage(configResult.SourcePath, configResult.AgentName)
 
-	threadsDir, err := diveThreadsDirectory()
-	if err != nil {
-		return fmt.Errorf("error getting threads directory: %v", err)
-	}
-	threadRepo := threads.NewDiskRepository(threadsDir)
-
-	chatAgent, err := agent.New(agent.Options{
-		Name:             "Assistant",
-		SystemPrompt:     systemPrompt,
-		Goal:             goal,
-		Instructions:     instructions,
-		Model:            model,
-		Logger:           logger,
-		Tools:            tools,
-		ThreadRepository: threadRepo,
-		ModelSettings:    &agent.ModelSettings{},
-		Confirmer:        confirmer,
-	})
-	if err != nil {
-		return fmt.Errorf("error creating agent: %v", err)
+		// Use config-based agent with potential flag overrides
+		if systemPrompt != "" || goal != "" || instructions != "" || len(tools) > 0 {
+			// Apply flag overrides
+			chatAgent, err = applyFlagOverrides(configResult.SelectedAgent, systemPrompt, goal, instructions, tools)
+			if err != nil {
+				return fmt.Errorf("error applying flag overrides: %v", err)
+			}
+		} else {
+			// Use config agent as-is
+			chatAgent = configResult.SelectedAgent
+		}
+	} else {
+		// No configuration found, use traditional flag-based approach
+		chatAgent, err = createAgentFromFlags(systemPrompt, goal, instructions, tools)
+		if err != nil {
+			return fmt.Errorf("error creating agent: %v", err)
+		}
 	}
 
 	fmt.Println(boldStyle.Sprint("Chat Session"))
@@ -180,6 +173,21 @@ var chatCmd = &cobra.Command{
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
+		configFlag, err := cmd.Flags().GetString("config")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		agentFlag, err := cmd.Flags().GetString("agent")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
+		noConfig, err := cmd.Flags().GetBool("no-config")
+		if err != nil {
+			fmt.Println(errorStyle.Sprint(err))
+			os.Exit(1)
+		}
 		var tools []dive.Tool
 		if toolsSpec != "" {
 			tools, err = initializeTools(strings.Split(toolsSpec, ","))
@@ -188,7 +196,7 @@ var chatCmd = &cobra.Command{
 				os.Exit(1)
 			}
 		}
-		if err := runChat(systemPrompt, goal, instructions, thread, tools); err != nil {
+		if err := runChat(systemPrompt, goal, instructions, thread, configFlag, agentFlag, noConfig, tools); err != nil {
 			fmt.Println(errorStyle.Sprint(err))
 			os.Exit(1)
 		}
@@ -203,4 +211,7 @@ func init() {
 	chatCmd.Flags().StringP("instructions", "", "", "Instructions for the agent")
 	chatCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the agent")
 	chatCmd.Flags().StringP("thread", "", "", "Name of the thread to use for the agent")
+	chatCmd.Flags().StringP("config", "", "", "Path to configuration file or directory")
+	chatCmd.Flags().StringP("agent", "", "", "Name of the agent to use from configuration")
+	chatCmd.Flags().BoolP("no-config", "", false, "Disable automatic configuration loading")
 }
