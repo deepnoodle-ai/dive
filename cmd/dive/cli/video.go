@@ -38,7 +38,6 @@ var (
 	videoGenerateModel        string
 	videoGenerateOutput       string
 	videoGenerateDuration     float64
-	videoGenerateWait         bool
 	videoGenerateNoWait       bool
 	videoGeneratePollInterval time.Duration
 
@@ -51,11 +50,6 @@ func runVideoGenerate(cmd *cobra.Command, args []string) error {
 	// Validate required parameters
 	if videoGeneratePrompt == "" {
 		return fmt.Errorf("prompt is required")
-	}
-
-	// Validate conflicting flags
-	if videoGenerateWait && videoGenerateNoWait {
-		return fmt.Errorf("cannot specify both --wait and --no-wait flags")
 	}
 
 	// Set defaults
@@ -71,9 +65,6 @@ func runVideoGenerate(cmd *cobra.Command, args []string) error {
 
 	// Determine wait behavior: wait by default unless --no-wait is specified
 	shouldWait := !videoGenerateNoWait
-	if videoGenerateWait {
-		shouldWait = true // Explicit --wait overrides default behavior
-	}
 
 	return generateVideoWithMediaPackage(shouldWait)
 }
@@ -296,7 +287,6 @@ func init() {
 	videoGenerateCmd.Flags().StringVarP(&videoGenerateModel, "model", "m", "veo-2.0-generate-001", "Model to use for video generation")
 	videoGenerateCmd.Flags().StringVarP(&videoGenerateOutput, "output", "o", "generated_video.mp4", "Output file path")
 	videoGenerateCmd.Flags().Float64VarP(&videoGenerateDuration, "duration", "d", 0, "Duration of the video in seconds (optional)")
-	videoGenerateCmd.Flags().BoolVarP(&videoGenerateWait, "wait", "w", false, "Wait for video generation to complete (default: true)")
 	videoGenerateCmd.Flags().BoolVar(&videoGenerateNoWait, "no-wait", false, "Don't wait for video generation to complete")
 	videoGenerateCmd.Flags().DurationVar(&videoGeneratePollInterval, "poll-interval", 20*time.Second, "Polling interval when waiting")
 
