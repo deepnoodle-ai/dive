@@ -1,4 +1,4 @@
-package agent
+package threads
 
 import (
 	"context"
@@ -12,35 +12,35 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
-var _ dive.ThreadRepository = &DiskThreadRepository{}
+var _ dive.ThreadRepository = &DiskRepository{}
 
-// DiskThreadRepository is a disk-based implementation of ThreadRepository
+// DiskRepository is a disk-based implementation of ThreadRepository
 // that persists each thread to a separate file in the given directory.
 // It reads directly from disk files without maintaining an in-memory cache.
-type DiskThreadRepository struct {
+type DiskRepository struct {
 	mu        sync.RWMutex
 	directory string
 }
 
-// NewDiskThreadRepository creates a new DiskThreadRepository
-func NewDiskThreadRepository(directory string) *DiskThreadRepository {
-	return &DiskThreadRepository{
+// NewDiskRepository creates a new DiskRepository
+func NewDiskRepository(directory string) *DiskRepository {
+	return &DiskRepository{
 		directory: directory,
 	}
 }
 
 // ensureDirectory creates the directory if it doesn't exist
-func (r *DiskThreadRepository) ensureDirectory() error {
+func (r *DiskRepository) ensureDirectory() error {
 	return os.MkdirAll(r.directory, 0755)
 }
 
 // getThreadFilePath returns the file path for a specific thread
-func (r *DiskThreadRepository) getThreadFilePath(threadID string) string {
+func (r *DiskRepository) getThreadFilePath(threadID string) string {
 	return filepath.Join(r.directory, fmt.Sprintf("thread-%s.json", threadID))
 }
 
 // saveThread saves a single thread to its own file
-func (r *DiskThreadRepository) saveThread(thread *dive.Thread) error {
+func (r *DiskRepository) saveThread(thread *dive.Thread) error {
 	data, err := json.MarshalIndent(thread, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal thread: %v", err)
@@ -55,7 +55,7 @@ func (r *DiskThreadRepository) saveThread(thread *dive.Thread) error {
 }
 
 // PutThread creates or updates a thread
-func (r *DiskThreadRepository) PutThread(ctx context.Context, thread *dive.Thread) error {
+func (r *DiskRepository) PutThread(ctx context.Context, thread *dive.Thread) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -75,7 +75,7 @@ func (r *DiskThreadRepository) PutThread(ctx context.Context, thread *dive.Threa
 }
 
 // GetThread retrieves a thread by ID by reading from disk
-func (r *DiskThreadRepository) GetThread(ctx context.Context, id string) (*dive.Thread, error) {
+func (r *DiskRepository) GetThread(ctx context.Context, id string) (*dive.Thread, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -101,7 +101,7 @@ func (r *DiskThreadRepository) GetThread(ctx context.Context, id string) (*dive.
 }
 
 // DeleteThread deletes a thread by ID
-func (r *DiskThreadRepository) DeleteThread(ctx context.Context, id string) error {
+func (r *DiskRepository) DeleteThread(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -121,7 +121,7 @@ func (r *DiskThreadRepository) DeleteThread(ctx context.Context, id string) erro
 }
 
 // ListThreads returns all threads by scanning the directory for thread files
-func (r *DiskThreadRepository) ListThreads(ctx context.Context, input *dive.ListThreadsInput) (*dive.ListThreadsOutput, error) {
+func (r *DiskRepository) ListThreads(ctx context.Context, input *dive.ListThreadsInput) (*dive.ListThreadsOutput, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -157,6 +157,6 @@ func (r *DiskThreadRepository) ListThreads(ctx context.Context, input *dive.List
 }
 
 // GetDirectory returns the directory path used by this repository
-func (r *DiskThreadRepository) GetDirectory() string {
+func (r *DiskRepository) GetDirectory() string {
 	return r.directory
 }

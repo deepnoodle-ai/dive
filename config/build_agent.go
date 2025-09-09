@@ -17,7 +17,7 @@ func buildAgent(
 	ctx context.Context,
 	baseDir string,
 	agentDef Agent,
-	config Config,
+	config GlobalConfig,
 	tools map[string]dive.Tool,
 	logger slogger.Logger,
 	confirmer dive.Confirmer,
@@ -123,8 +123,6 @@ func buildAgent(
 			requestHeaders.Add(key, value)
 		}
 		modelSettings.RequestHeaders = requestHeaders
-
-		// Note: MCP servers are configured at the environment level, not agent level
 	}
 
 	// Build static context messages if provided

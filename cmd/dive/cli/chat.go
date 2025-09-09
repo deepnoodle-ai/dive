@@ -12,6 +12,7 @@ import (
 	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -137,7 +138,7 @@ func runChat(instructions, agentName, threadID string, tools []dive.Tool) error 
 	if err != nil {
 		return fmt.Errorf("error getting dive threads directory: %v", err)
 	}
-	threadRepo := agent.NewDiskThreadRepository(threadsDir)
+	threadRepo := threads.NewDiskRepository(threadsDir)
 
 	chatAgent, err := agent.New(agent.Options{
 		Name:             agentName,

@@ -15,6 +15,7 @@ import (
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 )
@@ -116,7 +117,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		Model:            model,
 		Logger:           logger,
 		Tools:            tools,
-		ThreadRepository: agent.NewMemoryThreadRepository(),
+		ThreadRepository: threads.NewMemoryRepository(),
 		ModelSettings:    modelSettings,
 		Confirmer:        confirmer,
 	})

@@ -12,7 +12,7 @@ import (
 
 // ParseFile loads a DiveConfig from a file. The file extension
 // is used to determine the configuration format (JSON or YAML).
-func ParseFile(path string) (*DiveConfig, error) {
+func ParseFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -29,8 +29,8 @@ func ParseFile(path string) (*DiveConfig, error) {
 }
 
 // ParseYAML loads a DiveConfig from YAML
-func ParseYAML(data []byte) (*DiveConfig, error) {
-	var config DiveConfig
+func ParseYAML(data []byte) (*Config, error) {
+	var config Config
 	if err := yaml.UnmarshalWithOptions(data, &config, yaml.Strict()); err != nil {
 		return nil, err
 	}
@@ -38,8 +38,8 @@ func ParseYAML(data []byte) (*DiveConfig, error) {
 }
 
 // ParseJSON loads a DiveConfig from JSON
-func ParseJSON(data []byte) (*DiveConfig, error) {
-	var config DiveConfig
+func ParseJSON(data []byte) (*Config, error) {
+	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}

@@ -228,15 +228,15 @@ Description: Override 1
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-		agents, err := LoadDirectory(tt.dir)
-		if tt.wantErr {
-			assert.Error(t, err)
-			return
-		}
-		assert.NoError(t, err)
-		assert.NotNil(t, agents)
-		// LoadDirectory now returns agents, so we just verify we got some agents
-		assert.Greater(t, len(agents), 0)
+			cfg, err := LoadDirectory(tt.dir)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.NotNil(t, cfg)
+			// LoadDirectory now returns agents, so we just verify we got some agents
+			assert.Greater(t, len(cfg.Agents), 0)
 		})
 	}
 }

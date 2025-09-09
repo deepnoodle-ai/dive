@@ -25,6 +25,9 @@ type AssignWorkToolOptions struct {
 	// Self indicates which agent owns this tool
 	Self *Agent
 
+	// Others contains the other agents that can be assigned work to.
+	Others []*Agent
+
 	// DefaultTaskTimeout is the default timeout for tasks assigned using this tool
 	DefaultTaskTimeout time.Duration
 }
@@ -34,6 +37,7 @@ type AssignWorkToolOptions struct {
 // the output of the task.
 type AssignWorkTool struct {
 	self               *Agent
+	others             []*Agent
 	defaultTaskTimeout time.Duration
 }
 
@@ -46,6 +50,7 @@ func NewAssignWorkTool(opts AssignWorkToolOptions) *AssignWorkTool {
 	}
 	return &AssignWorkTool{
 		self:               opts.Self,
+		others:             opts.Others,
 		defaultTaskTimeout: opts.DefaultTaskTimeout,
 	}
 }

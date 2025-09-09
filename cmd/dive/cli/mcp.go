@@ -14,14 +14,14 @@ import (
 )
 
 // loadConfigFromPath loads configuration from a file or directory path
-func loadConfigFromPath(path string) (*config.DiveConfig, error) {
+func loadConfigFromPath(path string) (*config.Config, error) {
 	// Check if path is a directory or file
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("error accessing path: %v", err)
 	}
 
-	var configEnv *config.DiveConfig
+	var configEnv *config.Config
 
 	if fi.IsDir() {
 		// For directories, we need to read all YAML/JSON files and merge them
@@ -52,7 +52,7 @@ func loadConfigFromPath(path string) (*config.DiveConfig, error) {
 				return nil, fmt.Errorf("failed to read file %s: %w", file, err)
 			}
 
-			var env *config.DiveConfig
+			var env *config.Config
 			ext := strings.ToLower(filepath.Ext(file))
 			if ext == ".json" {
 				env, err = config.ParseJSON(data)
@@ -113,7 +113,7 @@ The first argument should be a workflow YAML file or directory containing workfl
 		serverName := args[1]
 
 		// Load configuration from the specified path
-		env, err := loadConfigFromPath(configPath)
+		cfg, err := loadConfigFromPath(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
@@ -122,7 +122,7 @@ The first argument should be a workflow YAML file or directory containing workfl
 		var serverConfig config.MCPServer
 		var found bool
 
-		for _, server := range env.MCPServers {
+		for _, server := range cfg.MCPServers {
 			if server.Name == serverName {
 				serverConfig = server
 				found = true

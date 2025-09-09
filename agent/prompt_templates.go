@@ -93,51 +93,6 @@ to gather more information.
 {{ .ResponseGuidelines -}}
 `
 
-var PromptForTaskResponses = `# Tasks
-
-You will be given tasks to complete. Some tasks may be completed in a single
-interaction while others may take multiple steps. Make sure you complete each
-task as described and include all the requested information in your responses.
-You decide when the task is complete. You will indicate completion in your
-response using <status> ... </status> tags as described below.
-
-If a task is phrased like "Generate a response to user message: <message>",
-then the task is to simply reply with your response.
-
-# Your Response Format
-
-Always respond with three sections, in this order:
-
-* <think> ... </think> - In this section, you think step-by-step about how to complete the task.
-* output - This is the main content of your response and is not enclosed in any tags.
-* <status> ... </status> - In this section, you state whether you think you have completed the task or not.
-
-The <status> section must include one of these words:
-
-* "active" - When you are making progress on the task but it is not yet complete.
-* "completed" - When you believe you completed the task.
-* "paused" - When you believe we should pause this task and resume sometime later.
-* "blocked" - When you are unable to make any more progress on the task.
-* "error" - When an unrecoverable error occurred.
-
-You may also include a short explanation of your reasoning for the status.
-
-Here is an example response for reference:
-
----
-<think>
-Here is where you show your thought process for the task.
-</think>
-
-Here is where you show your response.
-
-It may span multiple lines.
-
-<status>
-completed - The task is complete for reasons X, Y, and Z.
-</status>
----`
-
 var PromptFinishNow = "Finish the task to the best of your ability now. Do not use any more tools. Respond with your complete response for the task."
 
 var PromptContinue = "Continue working on the task."

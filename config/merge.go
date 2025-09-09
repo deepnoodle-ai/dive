@@ -3,7 +3,7 @@ package config
 import "sort"
 
 // Merge merges two DiveConfig configs, with the second one taking precedence
-func Merge(base, override *DiveConfig) *DiveConfig {
+func Merge(base, override *Config) *Config {
 
 	// Copy base config
 	result := *base
@@ -25,9 +25,6 @@ func Merge(base, override *DiveConfig) *DiveConfig {
 	}
 	if override.Config.LogLevel != "" {
 		result.Config.LogLevel = override.Config.LogLevel
-	}
-	if override.Config.DefaultWorkflow != "" {
-		result.Config.DefaultWorkflow = override.Config.DefaultWorkflow
 	}
 
 	// Merge providers
@@ -80,57 +77,6 @@ func Merge(base, override *DiveConfig) *DiveConfig {
 		return agents[i].Name < agents[j].Name
 	})
 	result.Agents = agents
-
-	// Merge workflows
-	workflowMap := make(map[string]Workflow)
-	for _, workflow := range result.Workflows {
-		workflowMap[workflow.Name] = workflow
-	}
-	for _, workflow := range override.Workflows {
-		workflowMap[workflow.Name] = workflow
-	}
-	workflows := make([]Workflow, 0, len(workflowMap))
-	for _, w := range workflowMap {
-		workflows = append(workflows, w)
-	}
-	sort.Slice(workflows, func(i, j int) bool {
-		return workflows[i].Name < workflows[j].Name
-	})
-	result.Workflows = workflows
-
-	// Merge schedules
-	scheduleMap := make(map[string]Schedule)
-	for _, schedule := range result.Schedules {
-		scheduleMap[schedule.Name] = schedule
-	}
-	for _, schedule := range override.Schedules {
-		scheduleMap[schedule.Name] = schedule
-	}
-	schedules := make([]Schedule, 0, len(scheduleMap))
-	for _, s := range scheduleMap {
-		schedules = append(schedules, s)
-	}
-	sort.Slice(schedules, func(i, j int) bool {
-		return schedules[i].Name < schedules[j].Name
-	})
-	result.Schedules = schedules
-
-	// Merge triggers
-	triggerMap := make(map[string]Trigger)
-	for _, trigger := range result.Triggers {
-		triggerMap[trigger.Name] = trigger
-	}
-	for _, trigger := range override.Triggers {
-		triggerMap[trigger.Name] = trigger
-	}
-	triggers := make([]Trigger, 0, len(triggerMap))
-	for _, t := range triggerMap {
-		triggers = append(triggers, t)
-	}
-	sort.Slice(triggers, func(i, j int) bool {
-		return triggers[i].Name < triggers[j].Name
-	})
-	result.Triggers = triggers
 
 	// Merge mcp servers
 	mcpServerMap := make(map[string]MCPServer)

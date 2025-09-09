@@ -6,14 +6,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/deepnoodle-ai/dive"
 )
 
 // LoadDirectory loads all YAML and JSON files from a directory and combines
 // them into a single DiveConfig. Files are loaded in lexicographical order.
 // Later files can override values from earlier files.
-func LoadDirectory(dirPath string, opts ...BuildOption) ([]dive.Agent, error) {
+func LoadDirectory(dirPath string) (*Config, error) {
 	// Read all files in the directory
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -40,35 +38,27 @@ func LoadDirectory(dirPath string, opts ...BuildOption) ([]dive.Agent, error) {
 	}
 
 	// Merge all configuration files
-	var merged *DiveConfig
+	var merged *Config
 	for _, file := range configFiles {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read file %s: %w", file, err)
 		}
-
-		var config *DiveConfig
+		var config *Config
 		ext := strings.ToLower(filepath.Ext(file))
 		if ext == ".json" {
 			config, err = ParseJSON(data)
 		} else {
 			config, err = ParseYAML(data)
 		}
-
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse file %s: %w", file, err)
 		}
-
-		for i := range config.Workflows {
-			config.Workflows[i].Path = file
-		}
-
 		if merged == nil {
 			merged = config
 		} else {
 			merged = Merge(merged, config)
 		}
 	}
-
-	return merged.BuildAgents(opts...)
+	return merged, nil
 }

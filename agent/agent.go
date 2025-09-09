@@ -90,6 +90,9 @@ type Agent struct {
 
 // New returns a new Agent configured with the given options.
 func New(opts Options) (*Agent, error) {
+	if opts.Model == nil {
+		return nil, ErrNoLLM
+	}
 	if opts.ResponseTimeout <= 0 {
 		opts.ResponseTimeout = DefaultResponseTimeout
 	}
@@ -98,13 +101,6 @@ func New(opts Options) (*Agent, error) {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slogger.DefaultLogger
-	}
-	if opts.Model == nil {
-		if llm, ok := detectProvider(); ok {
-			opts.Model = llm
-		} else {
-			return nil, ErrNoLLM
-		}
 	}
 	if opts.ID == "" {
 		opts.ID = dive.NewID()
@@ -119,7 +115,6 @@ func New(opts Options) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid system prompt template: %w", err)
 	}
-
 	agent := &Agent{
 		id:                   opts.ID,
 		name:                 strings.TrimSpace(opts.Name),
@@ -139,32 +134,10 @@ func New(opts Options) (*Agent, error) {
 		confirmer:            opts.Confirmer,
 		context:              opts.Context,
 	}
-
 	tools := make([]dive.Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
 		copy(tools, opts.Tools)
 	}
-
-	// Supervisors need a tool to give work assignments to others
-	if opts.IsSupervisor {
-		// Only create the assign_work tool if it wasn't provided. This allows
-		// a custom assign_work implementation to be used.
-		var foundAssignWorkTool bool
-		for _, tool := range tools {
-			if tool.Name() == "assign_work" {
-				foundAssignWorkTool = true
-			}
-		}
-		if !foundAssignWorkTool {
-			tools = append(tools, dive.ToolAdapter(
-				NewAssignWorkTool(AssignWorkToolOptions{
-					Self:               agent,
-					DefaultTaskTimeout: opts.ResponseTimeout,
-				}),
-			))
-		}
-	}
-
 	agent.tools = tools
 	if len(tools) > 0 {
 		agent.toolsByName = make(map[string]dive.Tool, len(tools))
@@ -172,8 +145,6 @@ func New(opts Options) (*Agent, error) {
 			agent.toolsByName[tool.Name()] = tool
 		}
 	}
-
-
 	return agent, nil
 }
 
@@ -199,7 +170,6 @@ func (a *Agent) Subordinates() []string {
 	}
 	return a.subordinates
 }
-
 
 func (a *Agent) prepareThreadMessages(
 	ctx context.Context,
@@ -406,10 +376,6 @@ func (a *Agent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.R
 	}()
 
 	return stream, nil
-}
-
-func ptr[T any](t T) *T {
-	return &t
 }
 
 // prepareMessages processes the ChatOptions to create messages for the LLM.
