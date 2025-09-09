@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestEnvironment_Build(t *testing.T) {
-	// Create a test environment configuration
-	env := &Environment{
+func TestDiveConfig_BuildAgents(t *testing.T) {
+	// Create a test dive configuration
+	config := &DiveConfig{
 		Name:        "test-env",
 		Description: "Test Environment",
 		Config: Config{
@@ -67,17 +67,12 @@ func TestEnvironment_Build(t *testing.T) {
 		},
 	}
 
-	// Build the environment
-	result, err := env.Build()
+	// Build the agents
+	agents, err := config.BuildAgents()
 	assert.NoError(t, err)
-	assert.NotNil(t, result)
-
-	// Verify environment properties
-	assert.Equal(t, "test-env", result.Name())
-	assert.Equal(t, "Test Environment", result.Description())
+	assert.NotNil(t, agents)
 
 	// Verify agents
-	agents := result.Agents()
 	assert.Len(t, agents, 2)
 
 	// Verify researcher agent

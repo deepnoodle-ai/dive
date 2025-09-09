@@ -22,10 +22,6 @@ alwaysApply: true
 - Expose a common `Agent` interface (`dive/dive.go`) for synchronous or streaming chat
 - Support supervisory patterns where a parent agent delegates tasks to subordinates
 
-### Environment
-
-- A runtime container hosting agents, workflows, document repositories, and action handlers
-- Implements the `Environment` interface (`environment/environment.go`) to orchestrate tasks, manage state, and emit real-time events
 
 ### Workflows
 
@@ -55,7 +51,7 @@ alwaysApply: true
 ```
 .
 ├── README.md              # Project overview, quick-start, examples
-├── dive.go                # Core interfaces: Agent, Environment, Options
+├── dive.go                # Core interfaces: Agent, Options
 ├── document.go            # Document and repository abstractions
 ├── event.go               # Event streaming API
 ├── confirmer.go           # User confirmation helper
@@ -65,7 +61,7 @@ alwaysApply: true
 │       └── cli/
 ├── agent/                 # Agent implementations, templates, prompt logic
 ├── config/                # YAML parsing and builders for agents, workflows
-├── environment/           # Runtime orchestration and action handlers
+├── actions/               # Workflow actions for automation tasks
 ├── workflow/              # Workflow graph, steps, and condition evaluation
 ├── llm/                   # LLM interface, streaming, and tool hooks
 │   └── providers/         # Anthropic, OpenAI, Groq integrations

@@ -31,7 +31,6 @@ Dive is an AI toolkit for Go that enables creating specialized teams of AI agent
 
 ### Core Interfaces
 - **Agent** (`dive.go:30-46`): Main abstraction for AI entities that can execute tasks and respond to chat
-- **Environment** (`dive.go:50-72`): Container for agents with document/thread repositories
 - **LLM Interface** (`llm/llm.go`): Unified abstraction over different LLM providers
 
 ### Key Components
@@ -39,7 +38,7 @@ Dive is an AI toolkit for Go that enables creating specialized teams of AI agent
 - **LLM Providers** (`llm/providers/`): Anthropic, OpenAI, Google, Grok, Ollama integrations
 - **Tools** (`llm/tool.go`): Pluggable capabilities (web search, file operations, etc.)
 - **Configuration** (`config/`): YAML parsing and builders for declarative setup
-- **Environment** (`environment/`): Runtime orchestration and action handlers
+- **Actions** (`actions/`): Workflow actions for automation tasks
 - **Event Streaming** (`event.go`): Real-time events for UI updates and pipeline chaining
 
 ### Provider Support

@@ -2,10 +2,10 @@ package config
 
 import "sort"
 
-// Merge merges two Environment configs, with the second one taking precedence
-func Merge(base, override *Environment) *Environment {
+// Merge merges two DiveConfig configs, with the second one taking precedence
+func Merge(base, override *DiveConfig) *DiveConfig {
 
-	// Copy base environment
+	// Copy base config
 	result := *base
 
 	// Merge name and description if provided

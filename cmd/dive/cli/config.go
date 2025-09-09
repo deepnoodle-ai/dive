@@ -20,12 +20,12 @@ var checkCmd = &cobra.Command{
 	Long:  "Validate a Dive configuration",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		env, err := config.LoadDirectory(args[0])
+		agents, err := config.LoadDirectory(args[0])
 		if err != nil {
 			fmt.Printf("❌ %s\n", errorStyle.Sprint(err))
 			os.Exit(1)
 		}
-		fmt.Printf("✅ %q is valid\n", env.Name())
+		fmt.Printf("✅ Configuration is valid with %d agent(s)\n", len(agents))
 	},
 }
 

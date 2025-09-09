@@ -59,7 +59,6 @@ type Options struct {
 	ToolIterationLimit   int
 	ModelSettings        *ModelSettings
 	DateAwareness        *bool
-	Environment          dive.Environment
 	ThreadRepository     dive.ThreadRepository
 	Confirmer            dive.Confirmer
 	SystemPromptTemplate string
@@ -83,7 +82,6 @@ type Agent struct {
 	toolIterationLimit   int
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
-	environment          dive.Environment
 	threadRepository     dive.ThreadRepository
 	confirmer            dive.Confirmer
 	systemPromptTemplate *template.Template
@@ -128,7 +126,6 @@ func New(opts Options) (*Agent, error) {
 		goal:                 strings.TrimSpace(opts.Goal),
 		instructions:         strings.TrimSpace(opts.Instructions),
 		model:                opts.Model,
-		environment:          opts.Environment,
 		isSupervisor:         opts.IsSupervisor,
 		subordinates:         opts.Subordinates,
 		responseTimeout:      opts.ResponseTimeout,
@@ -176,12 +173,6 @@ func New(opts Options) (*Agent, error) {
 		}
 	}
 
-	// Register with environment if provided
-	if opts.Environment != nil {
-		if err := opts.Environment.AddAgent(agent); err != nil {
-			return nil, fmt.Errorf("failed to register agent with environment: %w", err)
-		}
-	}
 
 	return agent, nil
 }
@@ -203,40 +194,12 @@ func (a *Agent) IsSupervisor() bool {
 }
 
 func (a *Agent) Subordinates() []string {
-	if !a.isSupervisor || a.environment == nil {
+	if !a.isSupervisor {
 		return nil
 	}
-	if a.subordinates != nil {
-		return a.subordinates
-	}
-	// If there are no other supervisors, assume we are the supervisor of all
-	// agents in the environment.
-	var isAnotherSupervisor bool
-	for _, agent := range a.environment.Agents() {
-		if agent.IsSupervisor() && agent.Name() != a.name {
-			isAnotherSupervisor = true
-		}
-	}
-	if isAnotherSupervisor {
-		return nil
-	}
-	var others []string
-	for _, agent := range a.environment.Agents() {
-		if agent.Name() != a.name {
-			others = append(others, agent.Name())
-		}
-	}
-	a.subordinates = others
-	return others
+	return a.subordinates
 }
 
-func (a *Agent) SetEnvironment(env dive.Environment) error {
-	if a.environment != nil {
-		return fmt.Errorf("agent is already associated with an environment")
-	}
-	a.environment = env
-	return nil
-}
 
 func (a *Agent) prepareThreadMessages(
 	ctx context.Context,
@@ -679,12 +642,6 @@ func (a *Agent) getConfirmer() (dive.Confirmer, bool) {
 	if a.confirmer != nil {
 		return a.confirmer, true
 	}
-	if a.environment != nil {
-		confirmer := a.environment.Confirmer()
-		if confirmer != nil {
-			return confirmer, true
-		}
-	}
 	return nil, false
 }
 
@@ -826,27 +783,9 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 }
 
 func (a *Agent) TeamOverview() string {
-	if a.environment == nil {
-		return ""
-	}
-	agents := a.environment.Agents()
-	if len(agents) == 0 {
-		return ""
-	}
-	if len(agents) == 1 && agents[0].Name() == a.name {
-		return "You are the only agent on the team."
-	}
-	lines := []string{
-		"The team is comprised of the following agents:",
-	}
-	for _, agent := range agents {
-		description := fmt.Sprintf("- Name: %s", agent.Name())
-		if agent.Name() == a.name {
-			description += " (You)"
-		}
-		lines = append(lines, description)
-	}
-	return strings.Join(lines, "\n")
+	// With Environment removed, agents don't have visibility into other agents
+	// This could be enhanced by passing team info directly to agents if needed
+	return "You are working independently."
 }
 
 func (a *Agent) Context() []llm.Content {

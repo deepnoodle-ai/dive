@@ -10,9 +10,9 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// ParseFile loads an Environment configuration from a file. The file extension
+// ParseFile loads a DiveConfig from a file. The file extension
 // is used to determine the configuration format (JSON or YAML).
-func ParseFile(path string) (*Environment, error) {
+func ParseFile(path string) (*DiveConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -28,20 +28,20 @@ func ParseFile(path string) (*Environment, error) {
 	}
 }
 
-// ParseYAML loads an Environment configuration from YAML
-func ParseYAML(data []byte) (*Environment, error) {
-	var env Environment
-	if err := yaml.UnmarshalWithOptions(data, &env, yaml.Strict()); err != nil {
+// ParseYAML loads a DiveConfig from YAML
+func ParseYAML(data []byte) (*DiveConfig, error) {
+	var config DiveConfig
+	if err := yaml.UnmarshalWithOptions(data, &config, yaml.Strict()); err != nil {
 		return nil, err
 	}
-	return &env, nil
+	return &config, nil
 }
 
-// ParseJSON loads an Environment configuration from JSON
-func ParseJSON(data []byte) (*Environment, error) {
-	var env Environment
-	if err := json.Unmarshal(data, &env); err != nil {
+// ParseJSON loads a DiveConfig from JSON
+func ParseJSON(data []byte) (*DiveConfig, error) {
+	var config DiveConfig
+	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
-	return &env, nil
+	return &config, nil
 }

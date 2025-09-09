@@ -2,9 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
@@ -130,62 +127,9 @@ func (t *AssignWorkTool) Call(ctx context.Context, input *AssignWorkToolInput) (
 	if input.AgentName == t.self.Name() {
 		return dive.NewToolResultError("cannot delegate task to self"), nil
 	}
-	agent, err := t.self.environment.GetAgent(input.AgentName)
-	if err != nil {
-		return dive.NewToolResultError(fmt.Sprintf("I couldn't find an agent named %q", input.AgentName)), nil
-	}
-
-	outputFormat := dive.OutputFormat(input.OutputFormat)
-	if outputFormat == "" {
-		outputFormat = dive.OutputFormatMarkdown
-	}
-
-	var promptLines []string
-	if input.Context != "" {
-		promptLines = append(promptLines, "Context:")
-		promptLines = append(promptLines, fmt.Sprintf("<context>\n%s\n</context>", input.Context))
-	}
-	if input.Description != "" {
-		promptLines = append(promptLines, "Please complete the following task:")
-		promptLines = append(promptLines, fmt.Sprintf("<task>\n%s\n</task>", input.Description))
-	}
-	if input.ExpectedOutput != "" {
-		promptLines = append(promptLines, "Expected output: "+input.ExpectedOutput)
-	}
-	if input.OutputFormat != "" {
-		promptLines = append(promptLines, "Desired output format: "+input.OutputFormat)
-	}
-	promptLines = append(promptLines, "Please work on the task now and respond with the requested output only.")
-
-	prompt := strings.Join(promptLines, "\n\n")
-
-	stream, err := agent.StreamResponse(ctx, dive.WithInput(prompt))
-	if err != nil {
-		return nil, err
-	}
-	defer stream.Close()
-
-	for stream.Next(ctx) {
-		event := stream.Event()
-		if event.Error != nil {
-			return nil, event.Error
-		}
-		if event.Type == dive.EventTypeResponseCompleted {
-			for _, item := range event.Response.Items {
-				if item.Type == dive.ResponseItemTypeMessage {
-					return dive.NewToolResultText(item.Message.Text()), nil
-				}
-			}
-		}
-	}
-
-	if err := stream.Err(); err != nil {
-		return nil, err
-	}
-
-	// We shouldn't reach this point. The agent should have returned the result
-	// or an error instead.
-	return nil, errors.New("agent did not return a result from a work assignment")
+	// With Environment removed, agent delegation is no longer supported
+	// This functionality would need to be reimplemented with a different approach
+	return dive.NewToolResultError("Agent delegation is no longer supported after removing Environment concept"), nil
 }
 
 func (t *AssignWorkTool) ShouldReturnResult() bool {

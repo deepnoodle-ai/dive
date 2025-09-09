@@ -177,6 +177,10 @@ func TestLoadDirectory(t *testing.T) {
 			content: `
 Name: test-env
 Description: Base Environment
+Agents:
+  - Name: test-agent
+    Goal: Test agent
+    Instructions: Test instructions
 `,
 		},
 		{
@@ -224,16 +228,15 @@ Description: Override 1
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env, err := LoadDirectory(tt.dir)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
-			assert.NotNil(t, env)
-			// The last file (JSON) should override previous values
-			assert.Equal(t, "test-env3", env.Name())
-			assert.Equal(t, "Override 2", env.Description())
+		agents, err := LoadDirectory(tt.dir)
+		if tt.wantErr {
+			assert.Error(t, err)
+			return
+		}
+		assert.NoError(t, err)
+		assert.NotNil(t, agents)
+		// LoadDirectory now returns agents, so we just verify we got some agents
+		assert.Greater(t, len(agents), 0)
 		})
 	}
 }
