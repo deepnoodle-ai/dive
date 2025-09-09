@@ -406,19 +406,6 @@ func TestBuildContextContentWithScript(t *testing.T) {
 		checkFn  func(t *testing.T, content []llm.Content)
 	}{
 		{
-			name: "inline risor script",
-			entries: []Content{
-				{Dynamic: `{"type": "text", "text": "Hello from script"}`},
-			},
-			expected: 1,
-			checkFn: func(t *testing.T, content []llm.Content) {
-				risorContent, ok := content[0].(*eval.RisorContent)
-				require.True(t, ok, "Expected RisorContent")
-				require.Equal(t, `{"type": "text", "text": "Hello from script"}`, risorContent.Dynamic)
-				require.Equal(t, llm.ContentTypeDynamic, risorContent.Type())
-			},
-		},
-		{
 			name: "script path",
 			entries: []Content{
 				{DynamicFrom: "./test_script.py"},
@@ -435,7 +422,6 @@ func TestBuildContextContentWithScript(t *testing.T) {
 			name: "mixed content with script",
 			entries: []Content{
 				{Text: "Static text"},
-				{Dynamic: `"Dynamic text"`},
 			},
 			expected: 2,
 			checkFn: func(t *testing.T, content []llm.Content) {
@@ -443,11 +429,6 @@ func TestBuildContextContentWithScript(t *testing.T) {
 				textContent, ok := content[0].(*llm.TextContent)
 				require.True(t, ok, "Expected TextContent")
 				require.Equal(t, "Static text", textContent.Text)
-
-				// Second should be RisorContent
-				risorContent, ok := content[1].(*eval.RisorContent)
-				require.True(t, ok, "Expected RisorContent")
-				require.Equal(t, `"Dynamic text"`, risorContent.Dynamic)
 			},
 		},
 	}

@@ -101,12 +101,6 @@ func buildContextContent(ctx context.Context, baseDir string, basePath string, e
 				return nil, err
 			}
 			contents = append(contents, content)
-		case entry.Dynamic != "":
-			// Create RisorContent for dynamic script evaluation
-			contents = append(contents, &eval.RisorContent{
-				Dynamic:  entry.Dynamic,
-				BasePath: basePath,
-			})
 		case entry.DynamicFrom != "":
 			// Create ScriptPathContent for dynamic script evaluation
 			contents = append(contents, &eval.ScriptPathContent{
