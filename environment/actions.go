@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
-
-	"github.com/deepnoodle-ai/dive"
 )
 
 var (
@@ -29,20 +29,23 @@ type Action interface {
 	Execute(ctx context.Context, params map[string]interface{}) (interface{}, error)
 }
 
-// DocumentWriteAction implements writing to the document repository
-type DocumentWriteAction struct {
-	repo dive.DocumentRepository
+// FileWriteAction implements writing to files directly
+type FileWriteAction struct {
+	baseDir string
 }
 
-func NewDocumentWriteAction(repo dive.DocumentRepository) *DocumentWriteAction {
-	return &DocumentWriteAction{repo: repo}
+func NewFileWriteAction(baseDir string) *FileWriteAction {
+	if baseDir == "" {
+		baseDir = "."
+	}
+	return &FileWriteAction{baseDir: baseDir}
 }
 
-func (a *DocumentWriteAction) Name() string {
-	return "Document.Write"
+func (a *FileWriteAction) Name() string {
+	return "File.Write"
 }
 
-func (a *DocumentWriteAction) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (a *FileWriteAction) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	path, ok := params["Path"].(string)
 	if !ok {
 		return nil, errors.New("path parameter must be a string")
@@ -51,40 +54,60 @@ func (a *DocumentWriteAction) Execute(ctx context.Context, params map[string]int
 	if !ok {
 		return nil, errors.New("content parameter must be a string")
 	}
-	doc := dive.NewTextDocument(dive.TextDocumentOptions{
-		Path:    path,
-		Content: content,
-	})
-	if err := a.repo.PutDocument(ctx, doc); err != nil {
-		return nil, fmt.Errorf("failed to write document: %w", err)
+
+	// Resolve path relative to base directory
+	fullPath := path
+	if !filepath.IsAbs(path) {
+		fullPath = filepath.Join(a.baseDir, path)
+	}
+
+	// Ensure directory exists
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Write file
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 	return nil, nil
 }
 
-// DocumentReadAction implements reading from the document repository
-type DocumentReadAction struct {
-	repo dive.DocumentRepository
+// FileReadAction implements reading from files directly
+type FileReadAction struct {
+	baseDir string
 }
 
-func NewDocumentReadAction(repo dive.DocumentRepository) *DocumentReadAction {
-	return &DocumentReadAction{repo: repo}
+func NewFileReadAction(baseDir string) *FileReadAction {
+	if baseDir == "" {
+		baseDir = "."
+	}
+	return &FileReadAction{baseDir: baseDir}
 }
 
-func (a *DocumentReadAction) Name() string {
-	return "Document.Read"
+func (a *FileReadAction) Name() string {
+	return "File.Read"
 }
 
-func (a *DocumentReadAction) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+func (a *FileReadAction) Execute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	path, ok := params["Path"].(string)
 	if !ok {
 		return nil, fmt.Errorf("path parameter must be a string")
 	}
 
-	doc, err := a.repo.GetDocument(ctx, path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read document: %w", err)
+	// Resolve path relative to base directory
+	fullPath := path
+	if !filepath.IsAbs(path) {
+		fullPath = filepath.Join(a.baseDir, path)
 	}
-	return doc.Content(), nil
+
+	// Read file
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	return string(content), nil
 }
 
 // GetTimeAction implements getting the current time

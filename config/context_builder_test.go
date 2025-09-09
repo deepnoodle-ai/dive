@@ -124,7 +124,7 @@ func TestBuildContextContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			messages, err := buildContextContent(context.Background(), nil, "", tt.entries)
+			messages, err := buildContextContent(context.Background(), "", "", tt.entries)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -348,7 +348,7 @@ func TestBuildContextContentWithWildcards(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			contents, err := buildContextContent(ctx, nil, tempDir, tt.entries)
+			contents, err := buildContextContent(ctx, "", tempDir, tt.entries)
 			require.NoError(t, err)
 			require.Len(t, contents, tt.expectedCount)
 
@@ -370,7 +370,7 @@ func TestBuildContextContentWildcardErrors(t *testing.T) {
 		{Path: "nonexistent/*.txt"},
 	}
 
-	contents, err := buildContextContent(ctx, nil, "", entries)
+	contents, err := buildContextContent(ctx, "", "", entries)
 	require.NoError(t, err) // FilepathGlob returns empty result for non-matching patterns, not error
 	require.Empty(t, contents)
 }
@@ -454,7 +454,7 @@ func TestBuildContextContentWithScript(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			content, err := buildContextContent(context.Background(), nil, "/test/path", tt.entries)
+			content, err := buildContextContent(context.Background(), "", "/test/path", tt.entries)
 			require.NoError(t, err)
 			require.Len(t, content, tt.expected)
 			if tt.checkFn != nil {
@@ -499,7 +499,7 @@ func TestBuildContextContentScriptValidation(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildContextContent(context.Background(), nil, "", tt.entries)
+			_, err := buildContextContent(context.Background(), "", "", tt.entries)
 			if tt.expectError {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.errorMsg)

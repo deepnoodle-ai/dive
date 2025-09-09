@@ -12,7 +12,6 @@ type BuildOptions struct {
 	Logger        slogger.Logger
 	LogLevel      string
 	DocumentsDir  string
-	DocumentsRepo dive.DocumentRepository
 	ThreadRepo    dive.ThreadRepository
 	BasePath      string
 }
@@ -43,11 +42,6 @@ func WithDocumentsDir(dir string) BuildOption {
 	}
 }
 
-func WithDocumentsRepo(repo dive.DocumentRepository) BuildOption {
-	return func(opts *BuildOptions) {
-		opts.DocumentsRepo = repo
-	}
-}
 
 func WithThreadRepo(repo dive.ThreadRepository) BuildOption {
 	return func(opts *BuildOptions) {

@@ -12,14 +12,13 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/eval"
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // buildContextContent converts a list of context entries (string paths/URLs or
 // objects with an "Inline" key) into []llm.Content that can be added to a chat.
-func buildContextContent(ctx context.Context, repo dive.DocumentRepository, basePath string, entries []Content) ([]llm.Content, error) {
+func buildContextContent(ctx context.Context, baseDir string, basePath string, entries []Content) ([]llm.Content, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -97,7 +96,7 @@ func buildContextContent(ctx context.Context, repo dive.DocumentRepository, base
 			}
 			contents = append(contents, content)
 		case entry.Document != "":
-			content, err = buildMessageFromDocument(ctx, repo, entry.Document)
+			content, err = buildMessageFromFile(ctx, baseDir, entry.Document)
 			if err != nil {
 				return nil, err
 			}
@@ -200,12 +199,16 @@ func buildMessageFromRemote(remote string) (llm.Content, error) {
 	}, nil
 }
 
-func buildMessageFromDocument(ctx context.Context, repo dive.DocumentRepository, document string) (llm.Content, error) {
-	doc, err := repo.GetDocument(ctx, document)
-	if err != nil {
-		return nil, err
+func buildMessageFromFile(ctx context.Context, baseDir string, filePath string) (llm.Content, error) {
+	fullPath := filePath
+	if !filepath.IsAbs(filePath) {
+		fullPath = filepath.Join(baseDir, filePath)
 	}
-	return &llm.TextContent{Text: doc.Content()}, nil
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file %s: %w", fullPath, err)
+	}
+	return &llm.TextContent{Text: string(content)}, nil
 }
 
 func buildMessageFromLocalFile(path string) (llm.Content, error) {

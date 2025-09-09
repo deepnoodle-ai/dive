@@ -61,8 +61,6 @@ type Environment interface {
 	// GetAgent returns the Agent with the given name, if found
 	GetAgent(name string) (Agent, error)
 
-	// DocumentRepository returns the DocumentRepository for this Environment
-	DocumentRepository() DocumentRepository
 
 	// ThreadRepository returns the ThreadRepository for this Environment
 	ThreadRepository() ThreadRepository

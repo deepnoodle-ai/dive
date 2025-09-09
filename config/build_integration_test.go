@@ -44,7 +44,7 @@ func TestAgentContextMessages(t *testing.T) {
 		{Text: "Additional inline context"},
 	}
 
-	messages, err := buildContextContent(context.Background(), nil, "", contextEntries)
+	messages, err := buildContextContent(context.Background(), "", "", contextEntries)
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
 
@@ -108,7 +108,7 @@ func TestMixedContextTypes(t *testing.T) {
 		{Text: "Text text context"},
 	}
 
-	content, err := buildContextContent(context.Background(), nil, "", entries)
+	content, err := buildContextContent(context.Background(), "", "", entries)
 	require.NoError(t, err)
 	require.Len(t, content, 7)
 
@@ -173,7 +173,7 @@ func TestErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildContextContent(context.Background(), nil, "", tt.entries)
+			_, err := buildContextContent(context.Background(), "", "", tt.entries)
 			if tt.expectErr {
 				require.Error(t, err)
 			} else {

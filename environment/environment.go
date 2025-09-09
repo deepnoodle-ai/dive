@@ -17,7 +17,6 @@ type Environment struct {
 	agents          map[string]dive.Agent
 	logger          slogger.Logger
 	defaultWorkflow string
-	documentRepo    dive.DocumentRepository
 	threadRepo      dive.ThreadRepository
 	actions         map[string]Action
 	started         bool
@@ -34,7 +33,6 @@ type Options struct {
 	Agents             []dive.Agent
 	Logger             slogger.Logger
 	DefaultWorkflow    string
-	DocumentRepository dive.DocumentRepository
 	ThreadRepository   dive.ThreadRepository
 	Actions            []Action
 	AutoStart          bool
@@ -62,13 +60,6 @@ func New(opts Options) (*Environment, error) {
 
 	actions := make(map[string]Action, len(opts.Actions))
 
-	// Register document actions if we have a document repository
-	if opts.DocumentRepository != nil {
-		writeAction := NewDocumentWriteAction(opts.DocumentRepository)
-		readAction := NewDocumentReadAction(opts.DocumentRepository)
-		actions[writeAction.Name()] = writeAction
-		actions[readAction.Name()] = readAction
-	}
 	for _, action := range actionsRegistry {
 		actions[action.Name()] = action
 	}
@@ -83,7 +74,6 @@ func New(opts Options) (*Environment, error) {
 		agents:          agents,
 		logger:          opts.Logger,
 		defaultWorkflow: opts.DefaultWorkflow,
-		documentRepo:    opts.DocumentRepository,
 		threadRepo:      opts.ThreadRepository,
 		actions:         actions,
 		mcpManager:      opts.MCPManager,
@@ -141,9 +131,6 @@ func (e *Environment) DefaultAgent() (dive.Agent, bool) {
 	return nil, false
 }
 
-func (e *Environment) DocumentRepository() dive.DocumentRepository {
-	return e.documentRepo
-}
 
 func (e *Environment) ThreadRepository() dive.ThreadRepository {
 	return e.threadRepo
