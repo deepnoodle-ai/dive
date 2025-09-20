@@ -8,6 +8,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm/providers/google"
 	"github.com/deepnoodle-ai/dive/llm/providers/groq"
 	"github.com/deepnoodle-ai/dive/llm/providers/grok"
+	"github.com/deepnoodle-ai/dive/llm/providers/mistral"
 	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
 	"github.com/deepnoodle-ai/dive/llm/providers/openaicompletions"
@@ -110,6 +111,13 @@ func (c *Calculator) CalculateTextCost(provider, model string, inputTokens, outp
 		}
 	case "openrouter":
 		if pricing, ok := openrouter.TextModelPricing[model]; ok {
+			inputPrice = pricing.InputPrice
+			outputPrice = pricing.OutputPrice
+			currency = pricing.Currency
+			found = true
+		}
+	case "mistral":
+		if pricing, ok := mistral.TextModelPricing[model]; ok {
 			inputPrice = pricing.InputPrice
 			outputPrice = pricing.OutputPrice
 			currency = pricing.Currency
@@ -300,6 +308,10 @@ func (c *Calculator) GetProviderModels(provider string, serviceType ServiceType)
 			for model := range openrouter.TextModelPricing {
 				models = append(models, model)
 			}
+		case "mistral":
+			for model := range mistral.TextModelPricing {
+				models = append(models, model)
+			}
 		}
 	case ServiceTypeImage:
 		switch provider {
@@ -343,7 +355,7 @@ func (c *Calculator) GetProviderModels(provider string, serviceType ServiceType)
 // CompareCosts compares costs across multiple providers for the same usage
 func (c *Calculator) CompareCosts(serviceType ServiceType, inputTokens, outputTokens, imageCount, embeddingTokens int) ([]*CostBreakdown, error) {
 	var results []*CostBreakdown
-	providers := []string{"anthropic", "openai", "google", "groq", "grok", "ollama", "openai-completions", "openrouter"}
+	providers := []string{"anthropic", "openai", "google", "groq", "grok", "mistral", "ollama", "openai-completions", "openrouter"}
 
 	for _, provider := range providers {
 		models := c.GetProviderModels(provider, serviceType)
