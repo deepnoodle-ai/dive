@@ -8,6 +8,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm/providers/google"
 	"github.com/deepnoodle-ai/dive/llm/providers/grok"
 	"github.com/deepnoodle-ai/dive/llm/providers/groq"
+	"github.com/deepnoodle-ai/dive/llm/providers/mistral"
 	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
 	"github.com/deepnoodle-ai/dive/llm/providers/openaicompletions"
@@ -76,6 +77,13 @@ func GetModel(providerName, modelName string) (llm.LLM, error) {
 			opts = append(opts, openrouter.WithModel(modelName))
 		}
 		return openrouter.New(opts...), nil
+
+	case "mistral":
+		opts := []mistral.Option{}
+		if modelName != "" {
+			opts = append(opts, mistral.WithModel(modelName))
+		}
+		return mistral.New(opts...), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported provider: %q", providerName)
