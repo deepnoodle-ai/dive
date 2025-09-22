@@ -7,6 +7,7 @@ The Model Context Protocol (MCP) enables secure connections between AI applicati
 MCP provides a standardized interface for accessing external tools and data with built-in authentication and permission management.
 
 Benefits:
+
 - Access to specialized tools (GitHub, Linear, Slack, databases)
 - No custom integration code needed
 - Consistent tool interface across services
@@ -53,6 +54,7 @@ if err != nil {
 ## Server Types
 
 **URL Servers** (HTTP/SSE):
+
 ```yaml
 - Name: github
   Type: url
@@ -61,6 +63,7 @@ if err != nil {
 ```
 
 **Stdio Servers** (Local processes):
+
 ```yaml
 - Name: filesystem
   Type: stdio
@@ -80,6 +83,7 @@ if err != nil {
 ## Authentication
 
 ### Environment Variables
+
 ```bash
 export GITHUB_TOKEN="your-token"
 export LINEAR_API_KEY="your-key"
@@ -87,6 +91,7 @@ export SLACK_BOT_TOKEN="your-token"
 ```
 
 ### OAuth (for supported servers)
+
 ```yaml
 - Name: google-drive
   Type: url
@@ -99,6 +104,7 @@ export SLACK_BOT_TOKEN="your-token"
 ## Error Handling
 
 MCP connections are managed automatically:
+
 - Failed connections are retried
 - Unavailable servers don't block agent creation
 - Connection status is logged
@@ -114,11 +120,13 @@ MCP connections are managed automatically:
 ## Troubleshooting
 
 **Server won't connect:**
+
 - Check token permissions
 - Verify server URL/command
 - Check network connectivity
 
 **Tools not available:**
+
 - Ensure server is connected
 - Check server tool list
 - Verify agent has access to MCP tools

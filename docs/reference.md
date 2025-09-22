@@ -16,6 +16,7 @@ go install .
 ### Commands
 
 #### ask
+
 Ask a question and get an immediate response.
 
 ```bash
@@ -31,6 +32,7 @@ Options:
 ```
 
 #### chat
+
 Start an interactive chat session with an agent.
 
 ```bash
@@ -45,6 +47,7 @@ Options:
 ```
 
 #### classify
+
 Classify text into categories with confidence scores.
 
 ```bash
@@ -58,6 +61,7 @@ Options:
 ```
 
 #### diff
+
 Generate semantic diff analysis between two files or texts.
 
 ```bash
@@ -70,6 +74,7 @@ Options:
 ```
 
 #### compare
+
 Compare outputs between different LLM providers.
 
 ```bash
@@ -84,6 +89,7 @@ Options:
 ```
 
 #### extract
+
 Extract structured data from text.
 
 ```bash
@@ -96,6 +102,7 @@ Options:
 ```
 
 #### summarize
+
 Summarize text content.
 
 ```bash
@@ -108,6 +115,7 @@ Options:
 ```
 
 #### embed
+
 Generate text embeddings.
 
 ```bash
@@ -119,6 +127,7 @@ Options:
 ```
 
 #### image
+
 Generate or analyze images.
 
 ```bash
@@ -132,6 +141,7 @@ Options:
 ```
 
 #### threads
+
 Manage conversation threads.
 
 ```bash
@@ -141,6 +151,7 @@ dive threads delete <thread-id>
 ```
 
 #### mcp
+
 Manage Model Context Protocol servers.
 
 ```bash
@@ -149,6 +160,7 @@ dive mcp auth <server-name>
 ```
 
 #### config
+
 Manage configuration files.
 
 ```bash
@@ -156,6 +168,7 @@ dive config check <file>    # Validate configuration file
 ```
 
 #### Global Options
+
 - `--help, -h` - Show help
 - `--version, -v` - Show version
 
@@ -189,11 +202,11 @@ MCPServers:
 
 ```yaml
 Config:
-  DefaultProvider: anthropic     # Default LLM provider
-  DefaultModel: claude-sonnet-4  # Default model
-  LogLevel: info                 # debug, info, warn, error
+  DefaultProvider: anthropic # Default LLM provider
+  DefaultModel: claude-sonnet-4 # Default model
+  LogLevel: info # debug, info, warn, error
   ConfirmationMode: if-destructive # always, if-destructive, never
-  MaxConcurrency: 10             # Max parallel operations
+  MaxConcurrency: 10 # Max parallel operations
 ```
 
 ### Agent Configuration
@@ -201,23 +214,23 @@ Config:
 ```yaml
 Agents:
   - Name: Research Assistant
-    ID: researcher               # Optional unique ID
+    ID: researcher # Optional unique ID
     Goal: Research and analyze topics
     Instructions: |
       You are an expert researcher who provides
       thorough analysis of any topic.
-    Provider: anthropic          # Override default
-    Model: claude-sonnet-4       # Override default
-    Tools:                       # Available tools
+    Provider: anthropic # Override default
+    Model: claude-sonnet-4 # Override default
+    Tools: # Available tools
       - web_search
       - read_file
       - write_file
-    IsSupervisor: false          # Can delegate to other agents
-    Subordinates: []             # Available subordinate agents
-    DateAwareness: auto          # Include current date
-    SystemPrompt: ""             # Additional system instructions
+    IsSupervisor: false # Can delegate to other agents
+    Subordinates: [] # Available subordinate agents
+    DateAwareness: auto # Include current date
+    SystemPrompt: "" # Additional system instructions
 
-    ModelSettings:               # Model configuration
+    ModelSettings: # Model configuration
       Temperature: 0.7
       MaxTokens: 4000
       ReasoningBudget: 5000
@@ -225,7 +238,7 @@ Agents:
       ParallelToolCalls: true
       ToolChoice: auto
 
-    Context:                     # Static context files
+    Context: # Static context files
       - Type: file
         Path: ./context/guidelines.md
       - Type: file
@@ -274,7 +287,7 @@ Config:
 Tools:
   - Name: web_search
     Config:
-      Provider: google           # google, kagi
+      Provider: google # google, kagi
       MaxResults: 10
 
   - Name: fetch
@@ -286,6 +299,7 @@ Tools:
 ## Environment Variables
 
 ### Required API Keys
+
 ```bash
 # LLM Providers
 export ANTHROPIC_API_KEY="your-key"
@@ -305,6 +319,7 @@ export SLACK_BOT_TOKEN="your-token"
 ```
 
 ### Optional Settings
+
 ```bash
 export DIVE_LOG_LEVEL="info"
 export DIVE_CONFIG_PATH="./dive.yaml"
@@ -325,6 +340,7 @@ Dive looks for configuration files in this order:
 ## Examples
 
 ### Simple Agent Config
+
 ```yaml
 Agents:
   - Name: Assistant
@@ -334,6 +350,7 @@ Agents:
 ```
 
 ### Multi-Agent Setup
+
 ```yaml
 Agents:
   - Name: Supervisor
@@ -352,6 +369,7 @@ Agents:
 ```
 
 ### Development Config
+
 ```yaml
 Config:
   DefaultProvider: ollama

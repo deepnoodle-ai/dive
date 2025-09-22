@@ -22,6 +22,7 @@ Make sure you have:
    - Or [Ollama](https://ollama.ai/) running locally
 
 Set your API key:
+
 ```bash
 export ANTHROPIC_API_KEY="your-api-key-here"
 # or
@@ -150,7 +151,7 @@ func main() {
             // File operations
             dive.ToolAdapter(toolkit.NewReadFileTool()),
             dive.ToolAdapter(toolkit.NewWriteFileTool()),
-            
+
             // Web search
             dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
                 Provider: "google",
@@ -313,28 +314,32 @@ You: What's my favorite color?
 Now that you have the basics working, explore more advanced features:
 
 ### 🔧 Learn More About Core Concepts
+
 - [Agents Guide](agents.md) - Deep dive into agent capabilities
-  
 - [Tools Guide](tools.md) - Extend agent capabilities
 - [Environment Guide](environment.md) - Manage shared resources
 
 ### 🚀 Advanced Features
+
 - [LLM Providers](llm-providers.md) - Work with different AI models
 - [MCP Integration](mcp-integration.md) - Connect to external services
 - [Event Streaming](event-streaming.md) - Real-time monitoring
 - [Supervisor Patterns](supervisor-patterns.md) - Multi-agent coordination
 
 ### 📚 Examples and Use Cases
+
 - [Basic Examples](../examples/basic.md) - More code examples
 - [Advanced Examples](../examples/advanced.md) - Complex scenarios
 - [Integration Examples](../examples/integrations.md) - Real-world use cases
 
 ### 🛠️ Development
+
 - [Custom Tools](custom-tools.md) - Build your own tools
 - [Testing Guide](testing.md) - Test your Dive applications
 - [API Reference](../api/core.md) - Detailed API documentation
 
 ### 💬 Get Help
+
 - Join our [Discord community](https://discord.gg/yrcuURWk)
 - Check out [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions)
 - Browse the [GitHub Issues](https://github.com/deepnoodle-ai/dive/issues)
@@ -344,6 +349,7 @@ Now that you have the basics working, explore more advanced features:
 Here are some popular things to try next:
 
 ### 1. Add More Tools
+
 ```go
 // Add web fetching, command execution, image generation
 Tools: []dive.Tool{
@@ -355,6 +361,7 @@ Tools: []dive.Tool{
 ```
 
 ### 2. Create Specialized Agents
+
 ```go
 // Code reviewer agent
 codeReviewer, err := agent.New(agent.Options{
@@ -366,7 +373,7 @@ codeReviewer, err := agent.New(agent.Options{
     },
 })
 
-// Data analyst agent  
+// Data analyst agent
 dataAnalyst, err := agent.New(agent.Options{
     Name: "Data Analyst",
     Instructions: "You analyze data and create insights...",
@@ -378,6 +385,7 @@ dataAnalyst, err := agent.New(agent.Options{
 ```
 
 ### 4. Integrate with External Services
+
 ```yaml
 MCPServers:
   - Name: github

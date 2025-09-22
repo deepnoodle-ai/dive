@@ -5,25 +5,30 @@ Welcome to the Dive documentation! Dive is an AI toolkit for Go that enables you
 ## 📚 Documentation Structure
 
 ### Getting Started
+
 - [Overview](overview.md) - Introduction to Dive concepts and architecture
 - [Installation](guides/installation.md) - Setting up Dive in your environment
 - [Quick Start](guides/quick-start.md) - Build your first agent
 
 ### Core Concepts
+
 - [Agents](guides/agents.md) - Understanding AI agents and their capabilities
 - [Tools](guides/tools.md) - Extending agent capabilities
 - [Custom Tools](guides/custom-tools.md) - Creating your own agent tools
 
 ### LLM Integration
+
 - [LLM Guide](guides/llm-guide.md) - Working with different AI models and configuration
 - [MCP Integration](guides/mcp-integration.md) - Model Context Protocol support
 
 ### Advanced Topics
 
 ### Reference
+
 - [CLI & Configuration](reference.md) - Complete CLI and configuration reference
 
 ### API Reference
+
 - [Core Interfaces](api/core.md) - Core Dive interfaces
 - [Agent Package](api/agent.md) - Agent implementation details
 - [Config Package](api/config.md) - Configuration system APIs

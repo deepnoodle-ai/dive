@@ -68,16 +68,16 @@ Tools extend agent capabilities by providing access to external functionality.
 type Tool interface {
     // Name returns the tool identifier
     Name() string
-    
+
     // Description returns human-readable tool description
     Description() string
-    
+
     // Schema returns the JSON schema for tool parameters
     Schema() Schema
-    
+
     // Annotations provides hints about tool behavior
     Annotations() ToolAnnotations
-    
+
     // Call executes the tool with given input
     Call(ctx context.Context, input json.RawMessage) (*ToolResult, error)
 }
@@ -158,7 +158,7 @@ func (t *CalculatorTool) Call(ctx context.Context, input *CalculatorInput) (*div
             IsError: true,
         }, nil
     }
-    
+
     return &dive.ToolResult{
         Content: []*dive.ToolResultContent{{
             Type: dive.ToolResultContentTypeText,

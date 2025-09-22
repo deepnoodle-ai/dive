@@ -86,14 +86,17 @@ func main() {
 ## Troubleshooting
 
 **Import errors:**
+
 - Run `go mod tidy`
 - Ensure Go version 1.23.2+
 
 **API key issues:**
+
 - Verify key format and permissions
 - Check environment variable names
 
 **Network issues:**
+
 - Configure proxy if needed
 - Check firewall settings
 

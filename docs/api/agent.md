@@ -100,13 +100,16 @@ func New(opts Options) (*Agent, error)
 Creates a new Agent with the specified configuration options.
 
 **Parameters:**
+
 - `opts` - Configuration options for the agent
 
 **Returns:**
+
 - `*Agent` - Configured agent instance
 - `error` - Error if configuration is invalid
 
 **Example:**
+
 ```go
 agent, err := agent.New(agent.Options{
     Name:         "Assistant",
@@ -130,31 +133,31 @@ type Options struct {
     Name                 string                    // Agent name (required)
     Goal                 string                    // High-level goal description
     Instructions         string                    // Detailed behavior instructions
-    
+
     // Hierarchy and collaboration
     IsSupervisor         bool                      // Can assign work to others
     Subordinates         []string                  // Names of subordinate agents
-    
+
     // LLM configuration
     Model                llm.LLM                   // LLM provider (required)
     ModelSettings        *ModelSettings            // Model-specific settings
-    
+
     // Capabilities
     Tools                []dive.Tool               // Available tools
     DateAwareness        *bool                     // Include current date in context
     Context              []llm.Content             // Additional context content
-    
+
     // Behavior configuration
     ResponseTimeout      time.Duration             // Max response time
     ToolIterationLimit   int                       // Max tool usage iterations
     SystemPromptTemplate string                    // Custom system prompt template
-    
+
     // Integration
     Environment          dive.Environment          // Runtime environment
     DocumentRepository   dive.DocumentRepository   // Document storage
     ThreadRepository     dive.ThreadRepository     // Conversation storage
     Confirmer            dive.Confirmer            // User confirmation handler
-    
+
     // Advanced
     Hooks                llm.Hooks                 // LLM lifecycle hooks
     Logger               slogger.Logger            // Logging interface
@@ -188,23 +191,23 @@ Fine-tune LLM behavior for specific use cases.
 type ModelSettings struct {
     // Response creativity and randomness
     Temperature       *float64              // 0.0-1.0, higher = more creative
-    
+
     // Content repetition control
     PresencePenalty   *float64              // -2.0 to 2.0, reduce repetition
     FrequencyPenalty  *float64              // -2.0 to 2.0, reduce frequency
-    
+
     // Tool usage control
     ParallelToolCalls *bool                 // Allow concurrent tool calls
     ToolChoice        *llm.ToolChoice       // Control tool selection behavior
-    
+
     // Token and reasoning limits
     MaxTokens         *int                  // Maximum response tokens
     ReasoningBudget   *int                  // Reasoning token limit (o1 models)
     ReasoningEffort   llm.ReasoningEffort   // Reasoning intensity level
-    
+
     // Performance optimization
     Caching           *bool                 // Enable prompt caching
-    
+
     // Provider-specific features
     Features          []string              // Enable specific capabilities
     RequestHeaders    http.Header           // Custom HTTP headers
@@ -234,7 +237,7 @@ type ReasoningEffort string
 
 const (
     ReasoningEffortLow    ReasoningEffort = "low"
-    ReasoningEffortMedium ReasoningEffort = "medium" 
+    ReasoningEffortMedium ReasoningEffort = "medium"
     ReasoningEffortHigh   ReasoningEffort = "high"
 )
 ```
@@ -249,12 +252,12 @@ type Response interface {
     Text() string                    // Response text content
     ToolCalls() []ToolCall          // Tool calls made during generation
     Messages() []*llm.Message       // All messages in conversation
-    
+
     // Metadata
     ID() string                     // Unique response identifier
     ThreadID() string               // Associated thread identifier
     Usage() *TokenUsage             // Token usage statistics
-    
+
     // Event access
     Events() []*ResponseEvent       // All events generated
     FirstEvent() *ResponseEvent     // First event (if any)
@@ -269,7 +272,7 @@ type ResponseStream interface {
     // Stream control
     Events() <-chan *ResponseEvent  // Channel of streaming events
     Close() error                   // Close the stream
-    
+
     // Result access (after stream completion)
     Response() (*Response, error)   // Final response after streaming
 }
@@ -282,7 +285,7 @@ type ResponseEvent struct {
     Type      EventType             // Event type identifier
     Data      map[string]interface{} // Event-specific data
     Timestamp time.Time             // When event occurred
-    
+
     // Specific event data (populated based on Type)
     Message   *llm.Message          // For message events
     ToolCall  *ToolCall             // For tool call events
@@ -309,7 +312,7 @@ type Tool interface {
     // Metadata
     Name() string
     Description() string
-    
+
     // Execution
     Execute(ctx context.Context, params map[string]interface{}) (interface{}, error)
 }
@@ -324,6 +327,7 @@ func ToolAdapter(tool interface{}) dive.Tool
 ```
 
 **Supported Tool Types:**
+
 - `dive.Tool` - Native Dive tools
 - `toolkit.TypedTool` - Toolkit tools with type information
 - Custom tools implementing the Tool interface
@@ -358,11 +362,11 @@ type ThreadRepository interface {
     GetThread(ctx context.Context, threadID string) (*Thread, error)
     UpdateThread(ctx context.Context, thread *Thread) error
     DeleteThread(ctx context.Context, threadID string) error
-    
+
     // Message management
     AddMessage(ctx context.Context, threadID string, message *Message) error
     GetMessages(ctx context.Context, threadID string, limit int, offset int) ([]*Message, error)
-    
+
     // Search and filtering
     ListThreads(ctx context.Context, userID string, limit int, offset int) ([]*Thread, error)
     SearchThreads(ctx context.Context, query string, userID string) ([]*Thread, error)
@@ -401,7 +405,7 @@ func NewInMemoryThreadRepository() ThreadRepository
 // File-based repository
 func NewFileThreadRepository(basePath string) ThreadRepository
 
-// PostgreSQL repository  
+// PostgreSQL repository
 func NewPostgresThreadRepository(connectionString string) (ThreadRepository, error)
 ```
 
@@ -455,7 +459,7 @@ if err != nil {
 }
 
 // Graceful degradation
-response, err := agent.CreateResponse(ctx, 
+response, err := agent.CreateResponse(ctx,
     dive.WithInput("Complex query requiring tools"))
 if isToolError(err) {
     // Fallback to simpler approach
@@ -474,7 +478,7 @@ package main
 import (
     "context"
     "log"
-    
+
     "github.com/deepnoodle-ai/dive"
     "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
@@ -490,7 +494,7 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    
+
     // Generate response
     response, err := assistant.CreateResponse(
         context.Background(),
@@ -499,7 +503,7 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    
+
     log.Printf("Response: %s", response.Text())
 }
 ```
@@ -516,7 +520,7 @@ import (
 func createAdvancedAgent() (*agent.Agent, error) {
     // Create thread repository for memory
     threadRepo := threads.NewMemoryRepository()
-    
+
     // Create agent with tools and memory
     return agent.New(agent.Options{
         Name: "Research Assistant",
@@ -569,19 +573,19 @@ func streamingExample(agent dive.Agent) error {
         return err
     }
     defer stream.Close()
-    
+
     // Wait for completion
     for event := range stream.Events() {
         // Events are handled by callback
         _ = event
     }
-    
+
     // Get final response
     response, err := stream.Response()
     if err != nil {
         return err
     }
-    
+
     fmt.Printf("\nFinal response: %s\n", response.Text())
     return nil
 }
@@ -598,16 +602,16 @@ func createSpecializedAgent() (*agent.Agent, error) {
         ModelSettings: &agent.ModelSettings{
             // Low temperature for consistency
             Temperature: &[]float64{0.2}[0],
-            
+
             // Longer responses for detailed reviews
             MaxTokens: &[]int{8000}[0],
-            
+
             // Require tool usage for analysis
             ToolChoice: llm.RequiredToolChoice(),
-            
+
             // Enable caching for better performance
             Caching: &[]bool{true}[0],
-            
+
             // Disable parallel tools for sequential analysis
             ParallelToolCalls: &[]bool{false}[0],
         },

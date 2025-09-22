@@ -5,6 +5,7 @@ Complete guide to using Large Language Models with Dive.
 ## Supported Providers
 
 ### Anthropic (Claude)
+
 ```go
 import "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 
@@ -15,6 +16,7 @@ model := anthropic.New()
 **Features:** Tool calling, streaming, prompt caching, reasoning control
 
 ### OpenAI
+
 ```go
 import "github.com/deepnoodle-ai/dive/llm/providers/openai"
 
@@ -25,6 +27,7 @@ model := openai.New()
 **Features:** Tool calling, streaming, reasoning budget (o1/o3)
 
 ### Groq
+
 ```go
 import "github.com/deepnoodle-ai/dive/llm/providers/groq"
 
@@ -35,6 +38,7 @@ model := groq.New()
 **Features:** High-speed inference, streaming
 
 ### Grok (X.AI)
+
 ```go
 import "github.com/deepnoodle-ai/dive/llm/providers/grok"
 
@@ -45,6 +49,7 @@ model := grok.New()
 **Features:** Real-time X (Twitter) integration, reasoning
 
 ### OpenRouter
+
 ```go
 import "github.com/deepnoodle-ai/dive/llm/providers/openrouter"
 
@@ -55,6 +60,7 @@ model := openrouter.New()
 **Features:** Unified access to diverse models, cost optimization
 
 ### Google (Gemini)
+
 ```go
 import "github.com/deepnoodle-ai/dive/llm/providers/google"
 
@@ -65,6 +71,7 @@ model := google.New()
 **Features:** Multimodal capabilities, large context windows
 
 ### Ollama (Local)
+
 ```go
 import "github.com/deepnoodle-ai/dive/llm/providers/ollama"
 
@@ -77,6 +84,7 @@ model := ollama.New()
 ## Quick Setup
 
 ### Environment Variables
+
 ```bash
 export ANTHROPIC_API_KEY="your-key"
 export OPENAI_API_KEY="your-key"
@@ -88,6 +96,7 @@ export GEMINI_API_KEY="your-key"  # For Google
 ```
 
 ### Basic Usage
+
 ```go
 agent, err := agent.New(agent.Options{
     Name:         "Assistant",
@@ -99,6 +108,7 @@ agent, err := agent.New(agent.Options{
 ## Model Configuration
 
 ### Agent-Level Settings
+
 ```go
 agent, err := agent.New(agent.Options{
     Name:  "Assistant",
@@ -113,6 +123,7 @@ agent, err := agent.New(agent.Options{
 ```
 
 ### YAML Configuration
+
 ```yaml
 Agents:
   - Name: Creative Writer
@@ -134,17 +145,20 @@ Agents:
 ## Model Settings Reference
 
 ### Core Settings
+
 - **Temperature** (0.0-1.0): Creativity vs consistency
 - **MaxTokens**: Maximum response length
 - **PresencePenalty**: Reduce repetition
 - **FrequencyPenalty**: Encourage topic variety
 
 ### Provider-Specific
+
 - **ReasoningBudget** (OpenAI o1/o3): Tokens for reasoning
 - **ReasoningEffort** (OpenAI o1/o3): low, medium, high
 - **Caching** (Anthropic): Cache prompts for speed
 
 ### Tool Settings
+
 - **ParallelToolCalls**: Allow simultaneous tool use
 - **ToolChoice**: auto, required, none, or specific tool
 
@@ -153,28 +167,34 @@ Agents:
 ### Choose by Use Case
 
 **Creative Tasks:**
+
 - Claude Sonnet (high creativity)
 - Temperature: 0.7-0.9
 
 **Factual/Analysis:**
+
 - GPT-4o (reliability)
 - Temperature: 0.1-0.3
 
 **Complex Reasoning:**
+
 - OpenAI o1/o3 (reasoning)
 - High reasoning budget
 
 **Fast Response:**
+
 - Claude Haiku (speed)
 - Groq models (fastest)
 
 **Local/Private:**
+
 - Ollama (privacy)
 - Any local model
 
 ### Configuration Examples
 
 **Creative Writer:**
+
 ```yaml
 ModelSettings:
   Temperature: 0.9
@@ -183,14 +203,16 @@ ModelSettings:
 ```
 
 **Code Analyst:**
+
 ```yaml
 ModelSettings:
   Temperature: 0.2
   MaxTokens: 2000
-  ReasoningBudget: 8000  # If using o1
+  ReasoningBudget: 8000 # If using o1
 ```
 
 **Fast Chat:**
+
 ```yaml
 Provider: groq
 Model: llama-3.3-70b
@@ -220,6 +242,7 @@ if err != nil {
 ```
 
 Common errors are handled automatically:
+
 - Rate limits (automatic retry with backoff)
 - Network timeouts (configurable retry)
 - API errors (clear error messages)

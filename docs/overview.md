@@ -14,7 +14,9 @@ Dive is built around four key principles:
 ## 🧱 Key Components
 
 ### Agents
+
 Intelligent AI entities that can:
+
 - Respond to natural language conversations
 - Execute tasks autonomously using tools
 - Delegate work to other agents (supervisor pattern)
@@ -29,9 +31,10 @@ agent, err := agent.New(agent.Options{
 })
 ```
 
-
 ### Tools
+
 Extensible capabilities that agents can use:
+
 - Built-in: web search, file operations, command execution
 - Custom: implement the `Tool` interface for domain-specific needs
 - MCP: connect to Model Context Protocol servers
@@ -40,6 +43,7 @@ Extensible capabilities that agents can use:
 ## 🔄 How It Works
 
 ### 1. Agent Interaction
+
 ```
 User Input → Agent → LLM Provider → Tool Calls → Results → Response
 ```
@@ -47,6 +51,7 @@ User Input → Agent → LLM Provider → Tool Calls → Results → Response
 Agents receive input, process it through their configured LLM, potentially make tool calls to gather information or take actions, and return structured responses.
 
 ### 2. Event Flow
+
 ```
 Execution Events → Streaming → Real-time Updates → UI/Monitoring
 ```
@@ -56,12 +61,14 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 ## 🌟 Key Features
 
 ### Multi-LLM Support
+
 - **Anthropic** (Claude Sonnet, Haiku, Opus)
-- **OpenAI** (GPT-4, o1, o3)  
+- **OpenAI** (GPT-4, o1, o3)
 - **Groq** (Llama, DeepSeek, Qwen)
 - **Ollama** (Local models)
 
 ### Advanced Capabilities
+
 - **Tool Calling** - Agents can interact with external systems
 - **Streaming Responses** - Real-time output for better UX
 - **Thread Persistence** - Conversations that span multiple interactions
@@ -69,6 +76,7 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 - **MCP Integration** - Connect to external tool ecosystems
 
 ### Developer Experience
+
 - **Type Safety** - Leverages Go's type system for reliability
 - **Rich Configuration** - YAML-based declarative setup
 - **CLI Tools** - Command-line interface for testing and deployment
@@ -101,24 +109,28 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 ## 📈 Use Cases
 
 ### Research & Analysis
+
 - Automated research pipelines
 - Document analysis and summarization
 - Market intelligence gathering
 - Competitive analysis
 
 ### Development & Operations
+
 - Code review and analysis
 - Documentation generation
 - System monitoring and alerts
 - Deployment automation
 
 ### Content & Communication
+
 - Content creation workflows
 - Customer support automation
 - Email and message processing
 - Social media management
 
 ### Data Processing
+
 - ETL pipeline orchestration
 - Data validation and cleaning
 - Report generation

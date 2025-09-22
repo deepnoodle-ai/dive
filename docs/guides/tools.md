@@ -18,6 +18,7 @@ Dive provides several built-in tools covering common use cases:
 ### File System Tools
 
 #### Read File Tool
+
 ```go
 import "github.com/deepnoodle-ai/dive/toolkit"
 
@@ -31,28 +32,33 @@ agent, err := agent.New(agent.Options{
 ```
 
 **Capabilities:**
+
 - Read text files from the file system
 - Supports various file formats (text, JSON, CSV, etc.)
 - Handles encoding detection
 - Safe path validation
 
 #### Write File Tool
+
 ```go
 writeTool := dive.ToolAdapter(toolkit.NewWriteFileTool())
 ```
 
 **Capabilities:**
+
 - Create new files or overwrite existing ones
 - Supports various content types
 - Directory creation if needed
 - Safe path validation
 
 #### List Directory Tool
+
 ```go
 listTool := dive.ToolAdapter(toolkit.NewListDirectoryTool())
 ```
 
 **Capabilities:**
+
 - List files and directories
 - Filter by file type or pattern
 - Include file metadata (size, modification time)
@@ -61,6 +67,7 @@ listTool := dive.ToolAdapter(toolkit.NewListDirectoryTool())
 ### Web Tools
 
 #### Web Search Tool
+
 ```go
 searchTool := dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
     Provider: "google", // or "kagi"
@@ -68,12 +75,14 @@ searchTool := dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOpt
 ```
 
 **Capabilities:**
+
 - Search the web using Google Custom Search or Kagi
 - Configurable result count
 - Safe search options
 - Result ranking and filtering
 
 **Setup:**
+
 ```bash
 export GOOGLE_SEARCH_API_KEY="your-google-api-key"
 export GOOGLE_SEARCH_CX="your-search-engine-id"
@@ -82,17 +91,20 @@ export KAGI_API_KEY="your-kagi-api-key"
 ```
 
 #### Fetch Tool
+
 ```go
 fetchTool := dive.ToolAdapter(toolkit.NewFetchTool())
 ```
 
 **Capabilities:**
+
 - Fetch content from web pages
 - Extract clean text content using Firecrawl
 - Handle various content types
 - Respect robots.txt and rate limits
 
 **Setup:**
+
 ```bash
 export FIRECRAWL_API_KEY="your-firecrawl-api-key"
 ```
@@ -100,11 +112,13 @@ export FIRECRAWL_API_KEY="your-firecrawl-api-key"
 ### System Tools
 
 #### Command Tool
+
 ```go
 commandTool := dive.ToolAdapter(toolkit.NewCommandTool())
 ```
 
 **Capabilities:**
+
 - Execute system commands
 - Capture stdout and stderr
 - Set working directory
@@ -114,11 +128,13 @@ commandTool := dive.ToolAdapter(toolkit.NewCommandTool())
 **Security Note:** Use with caution in production environments.
 
 #### Text Editor Tool
+
 ```go
 editorTool := dive.ToolAdapter(toolkit.NewTextEditorTool())
 ```
 
 **Capabilities:**
+
 - Advanced file editing operations
 - View, create, replace, and insert operations
 - Line-based editing with context
@@ -127,17 +143,20 @@ editorTool := dive.ToolAdapter(toolkit.NewTextEditorTool())
 ### Creative Tools
 
 #### Generate Image Tool
+
 ```go
 imageTool := dive.ToolAdapter(toolkit.NewGenerateImageTool())
 ```
 
 **Capabilities:**
+
 - Generate images using OpenAI's image models
 - Configurable image size and quality
 - Save images to file system
 - Various output formats
 
 **Setup:**
+
 ```bash
 export OPENAI_API_KEY="your-openai-api-key"
 ```
@@ -196,7 +215,7 @@ import (
     "context"
     "fmt"
     "log"
-    
+
     "github.com/deepnoodle-ai/dive"
     "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
@@ -234,7 +253,7 @@ func main() {
     }
 
     fmt.Println(response.Text())
-    
+
     // Show which tools were used
     toolCalls := response.ToolCalls()
     fmt.Printf("\nTools used: %d\n", len(toolCalls))
@@ -295,6 +314,5 @@ func createSysAdmin() (*agent.Agent, error) {
     })
 }
 ```
-
 
 For creating custom tools and advanced patterns, see the [Custom Tools Guide](custom-tools.md).

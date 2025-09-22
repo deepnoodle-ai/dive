@@ -15,6 +15,7 @@ Agents are the core building blocks of Dive applications. They represent intelli
 ## What is an Agent?
 
 An agent in Dive is an autonomous AI entity that can:
+
 - **Understand** natural language input and context
 - **Reason** about problems and make decisions
 - **Act** using tools to interact with external systems
@@ -129,19 +130,19 @@ agent, err := agent.New(agent.Options{
     Name:         "Advanced Assistant",
     Instructions: "You are a specialized assistant...",
     Model:        anthropic.New(),
-    
+
     // Tool configuration
     Tools: []dive.Tool{
         webSearchTool,
         calculatorTool,
         fileSystemTool,
     },
-    
+
     // Behavior settings
     ResponseTimeout:      time.Minute * 5,
     ToolIterationLimit:   10,
     DateAwareness:        &[]bool{true}[0],
-    
+
     // Model fine-tuning
     ModelSettings: &agent.ModelSettings{
         Temperature:       &[]float64{0.7}[0],
@@ -151,10 +152,10 @@ agent, err := agent.New(agent.Options{
         ParallelToolCalls: &[]bool{true}[0],
         Caching:           &[]bool{true}[0],
     },
-    
+
     // Custom system prompt
     SystemPromptTemplate: "You are {{.Name}}. {{.Instructions}}",
-    
+
     // Additional context
     Context: []llm.Content{
         &llm.TextContent{Text: "Today's priority is data analysis."},
@@ -179,7 +180,7 @@ researcher, err := agent.New(agent.Options{
 })
 
 analyst, err := agent.New(agent.Options{
-    Name:        "Data Analyst", 
+    Name:        "Data Analyst",
     Environment: env,
 })
 ```
@@ -198,19 +199,19 @@ tools := []dive.Tool{
     dive.ToolAdapter(toolkit.NewReadFileTool()),
     dive.ToolAdapter(toolkit.NewWriteFileTool()),
     dive.ToolAdapter(toolkit.NewListDirectoryTool()),
-    
+
     // Web operations
     dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
         Provider: "google",
     })),
     dive.ToolAdapter(toolkit.NewFetchTool()),
-    
+
     // System operations
     dive.ToolAdapter(toolkit.NewCommandTool()),
-    
+
     // Text editing
     dive.ToolAdapter(toolkit.NewTextEditorTool()),
-    
+
     // Image generation
     dive.ToolAdapter(toolkit.NewGenerateImageTool()),
 }
@@ -379,7 +380,7 @@ threadRepo := threads.NewDiskRepository("./threads")
 // Good: Specific, actionable instructions
 Instructions: `You are a code review assistant. When reviewing code:
 1. Check for security vulnerabilities
-2. Suggest performance improvements  
+2. Suggest performance improvements
 3. Ensure proper error handling
 4. Verify documentation completeness
 Always explain your reasoning.`

@@ -334,7 +334,7 @@ Configuration values can reference environment variables:
 ```yaml
 Config:
   DefaultProvider: anthropic
-  
+
 Agents:
   - Name: Assistant
     Provider: ${DIVE_PROVIDER:-anthropic}
@@ -374,20 +374,20 @@ func BuildMCPServer(cfg *MCPServer) (*mcp.ServerConfig, error)
 type BuildOptions struct {
     // Override default providers
     Providers map[string]llm.LLM
-    
+
     // Override default tools
     Tools map[string]dive.Tool
-    
+
     // Custom repositories
     DocumentRepository dive.DocumentRepository
     ThreadRepository   dive.ThreadRepository
-    
+
     // Custom confirmer
     Confirmer dive.Confirmer
-    
+
     // Custom logger
     Logger slogger.Logger
-    
+
     // Auto-start environment
     AutoStart bool
 }
@@ -491,7 +491,7 @@ Config:
   DefaultModel: claude-sonnet-4-20250514
   LogLevel: info
   ConfirmationMode: auto
-  
+
   Providers:
     - Name: anthropic
       Caching: true
@@ -525,7 +525,7 @@ Agents:
     Context:
       - Text: "Today's research session context"
       - Path: "./research_guidelines.md"
-      
+
   - Name: Code Reviewer
     Goal: Review code for quality and security
     Instructions: |
@@ -543,7 +543,7 @@ Agents:
     ModelSettings:
       Temperature: 0.1
       MaxTokens: 6000
-      
+
   - Name: Project Manager
     Goal: Coordinate team activities
     Instructions: |
@@ -574,38 +574,38 @@ Workflows:
           - quick
           - standard
           - comprehensive
-    
+
     Output:
       Name: research_report
       Type: string
       Format: markdown
       Document: "reports/research-${workflow.id}.md"
-    
+
     Steps:
       - Name: Initial Research
         Agent: Research Assistant
         Prompt: |
           Research this topic: ${inputs.topic}
           Depth level: ${inputs.depth}
-          
+
           Provide a comprehensive overview with sources.
         Store: initial_research
-        
+
       - Name: Analysis
         Agent: Research Assistant
         Prompt: |
           Analyze the research findings: ${initial_research}
-          
+
           Provide insights, patterns, and conclusions.
         Store: analysis_results
-        
+
       - Name: Generate Report
         Agent: Research Assistant
         Prompt: |
           Create a comprehensive report from:
           Research: ${initial_research}
           Analysis: ${analysis_results}
-          
+
           Format as professional markdown report.
         Store: final_report
         End: true
@@ -617,7 +617,7 @@ MCPServers:
     Args:
       - "@modelcontextprotocol/server-filesystem"
       - "./workspace"
-    
+
   - Name: github
     Type: url
     URL: https://mcp.github.com/sse
@@ -630,7 +630,7 @@ MCPServers:
         - create_pr
         - get_repository
       ApprovalMode: auto
-      
+
   - Name: database
     Type: stdio
     Command: npx
@@ -653,7 +653,7 @@ Documents:
     Name: Research Guidelines
     Path: ./docs/research-guidelines.md
     Description: Guidelines for conducting research
-    
+
   - ID: style_guide
     Name: Writing Style Guide
     Path: ./docs/style-guide.md
@@ -664,7 +664,7 @@ Schedules:
     Cron: "0 17 * * MON-FRI"
     Workflow: Daily Summary Report
     Enabled: true
-    
+
   - Name: weekly_analysis
     Cron: "0 9 * * MON"
     Workflow: Weekly Analysis
@@ -679,7 +679,7 @@ package main
 import (
     "context"
     "log"
-    
+
     "github.com/deepnoodle-ai/dive/config"
     "github.com/deepnoodle-ai/dive/objects"
 )
@@ -690,7 +690,7 @@ func main() {
     if err != nil {
         log.Fatal("Failed to load config:", err)
     }
-    
+
     // Build environment with custom options
     env, err := config.BuildEnvironmentWithOptions(cfg, config.BuildOptions{
         DocumentRepository: objects.NewFileDocumentRepository("./data"),
@@ -701,27 +701,27 @@ func main() {
         log.Fatal("Failed to build environment:", err)
     }
     defer env.Stop(context.Background())
-    
-    log.Printf("Environment '%s' started with %d agents", 
+
+    log.Printf("Environment '%s' started with %d agents",
         env.Name(), len(env.Agents()))
-    
+
     // Run a workflow
     inputs := map[string]interface{}{
         "topic": "quantum computing",
         "depth": "comprehensive",
     }
-    
-    execution, err := env.RunWorkflow(context.Background(), 
+
+    execution, err := env.RunWorkflow(context.Background(),
         "Research and Analysis", inputs)
     if err != nil {
         log.Fatal("Failed to run workflow:", err)
     }
-    
+
     result, err := execution.Wait(context.Background())
     if err != nil {
         log.Fatal("Workflow failed:", err)
     }
-    
+
     log.Printf("Research completed: %v", result.Outputs)
 }
 ```
@@ -739,7 +739,7 @@ func validateConfig(cfg *config.Config) error {
             return fmt.Errorf("agent %s: instructions are required", agent.Name)
         }
     }
-    
+
     // Validate workflows
     for _, workflow := range cfg.Workflows {
         if workflow.Name == "" {
@@ -749,7 +749,7 @@ func validateConfig(cfg *config.Config) error {
             return fmt.Errorf("workflow %s: steps are required", workflow.Name)
         }
     }
-    
+
     // Validate MCP servers
     for _, server := range cfg.MCPServers {
         if server.Name == "" {
@@ -759,7 +759,7 @@ func validateConfig(cfg *config.Config) error {
             return fmt.Errorf("MCP server %s: invalid type %s", server.Name, server.Type)
         }
     }
-    
+
     return nil
 }
 ```
@@ -792,15 +792,15 @@ func buildDynamicConfig() *config.Config {
 
 func getEnabledTools() []string {
     tools := []string{"read_file", "write_file"}
-    
+
     if os.Getenv("ENABLE_WEB_SEARCH") == "true" {
         tools = append(tools, "web_search")
     }
-    
+
     if os.Getenv("ENABLE_CODE_EXECUTION") == "true" {
         tools = append(tools, "code_execution")
     }
-    
+
     return tools
 }
 ```
