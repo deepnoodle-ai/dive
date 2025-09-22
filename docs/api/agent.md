@@ -475,9 +475,9 @@ import (
     "context"
     "log"
     
-    "github.com/diveagents/dive"
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 func main() {
@@ -508,9 +508,9 @@ func main() {
 
 ```go
 import (
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/objects"
-    "github.com/diveagents/dive/toolkit"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/objects"
+    "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 func createAdvancedAgent() (*agent.Agent, error) {

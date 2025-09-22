@@ -15,16 +15,13 @@ Welcome to the Dive documentation! Dive is an AI toolkit for Go that enables you
 - [Custom Tools](guides/custom-tools.md) - Creating your own agent tools
 
 ### LLM Integration
-- [LLM Providers](guides/llm-providers.md) - Working with different AI models
-- [Model Configuration](guides/model-configuration.md) - Fine-tuning model behavior
+- [LLM Guide](guides/llm-guide.md) - Working with different AI models and configuration
 - [MCP Integration](guides/mcp-integration.md) - Model Context Protocol support
 
 ### Advanced Topics
-- [Event Streaming](guides/event-streaming.md) - Real-time monitoring and UI updates
 
-### CLI Reference
-- [Command Line Interface](reference/cli.md) - Complete CLI command reference
-- [Configuration Files](reference/configuration.md) - YAML configuration options
+### Reference
+- [CLI & Configuration](reference.md) - Complete CLI and configuration reference
 
 ### API Reference
 - [Core Interfaces](api/core.md) - Core Dive interfaces
@@ -44,6 +41,6 @@ Welcome to the Dive documentation! Dive is an AI toolkit for Go that enables you
 
 ## 📖 External Resources
 
-- [GitHub Repository](https://github.com/diveagents/dive)
+- [GitHub Repository](https://github.com/deepnoodle-ai/dive)
 - [Discord Community](https://discord.gg/yrcuURWk)
-- [GitHub Discussions](https://github.com/diveagents/dive/discussions)
+- [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions)

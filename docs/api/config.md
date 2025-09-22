@@ -680,8 +680,8 @@ import (
     "context"
     "log"
     
-    "github.com/diveagents/dive/config"
-    "github.com/diveagents/dive/objects"
+    "github.com/deepnoodle-ai/dive/config"
+    "github.com/deepnoodle-ai/dive/objects"
 )
 
 func main() {

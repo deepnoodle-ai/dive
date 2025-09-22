@@ -1,13 +1,12 @@
 # Quick Start Guide
 
-Get up and running with Dive in just a few minutes! This guide will help you create your first AI agent and run a simple workflow.
+Get up and running with Dive in just a few minutes! This guide will help you create your first AI agent.
 
 ## 📋 Table of Contents
 
 - [Before You Begin](#before-you-begin)
 - [Your First Agent](#your-first-agent)
 - [Adding Tools](#adding-tools)
-- [Creating a Workflow](#creating-a-workflow)
 - [Interactive Chat](#interactive-chat)
 - [Next Steps](#next-steps)
 
@@ -44,7 +43,7 @@ cd my-dive-project
 go mod init my-dive-project
 
 # Add Dive dependency
-go get github.com/diveagents/dive
+go get github.com/deepnoodle-ai/dive
 ```
 
 ### Step 2: Create Your First Agent
@@ -59,9 +58,9 @@ import (
     "fmt"
     "log"
 
-    "github.com/diveagents/dive"
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 func main() {
@@ -134,10 +133,10 @@ import (
     "fmt"
     "log"
 
-    "github.com/diveagents/dive"
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/llm/providers/anthropic"
-    "github.com/diveagents/dive/toolkit"
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 func main() {
@@ -193,168 +192,6 @@ go run agent-with-tools.go
 
 Your agent will now search the web and create a file with the research results!
 
-## Creating a Workflow
-
-Workflows let you define multi-step processes that can involve multiple agents and automated actions.
-
-### Step 1: Create a Workflow File
-
-Create `research-workflow.yaml`:
-
-```yaml
-Name: Research Pipeline
-Description: Research a topic and create a comprehensive report
-
-Config:
-  DefaultProvider: anthropic
-  DefaultModel: claude-sonnet-4-20250514
-  LogLevel: info
-
-Agents:
-  - Name: Researcher
-    Instructions: |
-      You are a thorough researcher who finds accurate, up-to-date information.
-      Always cite your sources and provide comprehensive analysis.
-    Tools:
-      - web_search
-      
-  - Name: Writer
-    Instructions: |
-      You are a skilled technical writer who creates clear, well-structured reports.
-      Organize information logically with proper headings and formatting.
-    Tools:
-      - write_file
-
-Workflows:
-  - Name: Research and Report
-    Inputs:
-      - Name: topic
-        Type: string
-        Description: The topic to research
-        Required: true
-        
-      - Name: depth
-        Type: string
-        Description: Research depth (basic, detailed, comprehensive)
-        Default: detailed
-        
-    Steps:
-      - Name: Conduct Research
-        Agent: Researcher
-        Prompt: |
-          Research the following topic with ${inputs.depth} depth:
-          Topic: ${inputs.topic}
-          
-          Provide comprehensive information including:
-          - Current state and recent developments
-          - Key players and organizations
-          - Technical details and implications
-          - Future outlook and trends
-        Store: research_data
-        
-      - Name: Create Report
-        Agent: Writer  
-        Prompt: |
-          Create a professional research report based on this information:
-          ${research_data}
-          
-          Structure the report with:
-          1. Executive Summary
-          2. Background and Context
-          3. Current State Analysis
-          4. Key Findings
-          5. Future Implications
-          6. Conclusion
-          
-          Use clear headings and professional formatting.
-        Store: final_report
-        
-      - Name: Save Report
-        Action: Document.Write
-        Parameters:
-          Path: "reports/${inputs.topic}-research-report.md"
-          Content: |
-            # Research Report: ${inputs.topic}
-            
-            *Generated on $(date) by Dive Research Pipeline*
-            
-            ${final_report}
-```
-
-### Step 2: Install and Run with CLI
-
-```bash
-# Install Dive CLI
-go install github.com/diveagents/dive/cmd/dive@latest
-
-# Run the workflow
-dive run research-workflow.yaml --vars "topic=artificial intelligence" --vars "depth=comprehensive"
-```
-
-### Step 3: Run Programmatically
-
-Create `workflow-runner.go`:
-
-```go
-package main
-
-import (
-    "context"
-    "log"
-
-    "github.com/diveagents/dive/config"
-)
-
-func main() {
-    // Load workflow from YAML
-    cfg, err := config.LoadFromFile("research-workflow.yaml")
-    if err != nil {
-        log.Fatal("Error loading workflow:", err)
-    }
-
-    // Build environment with agents and workflows
-    env, err := config.BuildEnvironment(cfg)
-    if err != nil {
-        log.Fatal("Error building environment:", err)
-    }
-
-    // Start the environment
-    err = env.Start(context.Background())
-    if err != nil {
-        log.Fatal("Error starting environment:", err)
-    }
-    defer env.Stop(context.Background())
-
-    // Run the workflow
-    inputs := map[string]interface{}{
-        "topic": "machine learning",
-        "depth": "detailed",
-    }
-
-    execution, err := env.RunWorkflow(context.Background(), "Research and Report", inputs)
-    if err != nil {
-        log.Fatal("Error running workflow:", err)
-    }
-
-    // Wait for completion
-    result, err := execution.Wait(context.Background())
-    if err != nil {
-        log.Fatal("Workflow execution failed:", err)
-    }
-
-    log.Printf("Workflow completed with status: %s", result.Status)
-    if result.Outputs != nil {
-        log.Printf("Outputs: %+v", result.Outputs)
-    }
-}
-```
-
-Run it:
-
-```bash
-go run workflow-runner.go
-```
-
 ## Interactive Chat
 
 Create an interactive chat session with your agent.
@@ -371,10 +208,10 @@ import (
     "os"
     "strings"
 
-    "github.com/diveagents/dive"
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/llm/providers/anthropic"
-    "github.com/diveagents/dive/threads"
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/threads"
 )
 
 func main() {
@@ -477,7 +314,7 @@ Now that you have the basics working, explore more advanced features:
 
 ### 🔧 Learn More About Core Concepts
 - [Agents Guide](agents.md) - Deep dive into agent capabilities
-- [Workflows Guide](workflows.md) - Master multi-step automation  
+  
 - [Tools Guide](tools.md) - Extend agent capabilities
 - [Environment Guide](environment.md) - Manage shared resources
 
@@ -499,8 +336,8 @@ Now that you have the basics working, explore more advanced features:
 
 ### 💬 Get Help
 - Join our [Discord community](https://discord.gg/yrcuURWk)
-- Check out [GitHub Discussions](https://github.com/diveagents/dive/discussions)
-- Browse the [GitHub Issues](https://github.com/diveagents/dive/issues)
+- Check out [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions)
+- Browse the [GitHub Issues](https://github.com/deepnoodle-ai/dive/issues)
 
 ## Common Next Steps
 
@@ -538,23 +375,6 @@ dataAnalyst, err := agent.New(agent.Options{
         customDataAnalysisTool,
     },
 })
-```
-
-### 3. Build Multi-Step Workflows
-```yaml
-Workflows:
-  - Name: Full Development Cycle
-    Steps:
-      - Name: Plan Features
-        Agent: Product Manager
-      - Name: Write Code
-        Agent: Developer  
-      - Name: Review Code
-        Agent: Code Reviewer
-      - Name: Test Code
-        Agent: QA Engineer
-      - Name: Deploy
-        Action: Deploy.ToProduction
 ```
 
 ### 4. Integrate with External Services

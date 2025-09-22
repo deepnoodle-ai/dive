@@ -130,7 +130,7 @@ Ready to start building with Dive? Here are some recommended paths:
 
 - **Developers**: Start with [Agent Guide](guides/agents.md) to understand core concepts
 - **DevOps**: Explore [CLI Reference](reference/cli.md) for automation tools
-- **Researchers**: Check out [Workflow Guide](guides/workflows.md) for process automation
+- **Researchers**: Explore [MCP Integration](guides/mcp-integration.md) for external tool access
 - **Integrators**: Review [MCP Integration](guides/mcp-integration.md) for external connections
 
-Need help? Join our [Discord community](https://discord.gg/yrcuURWk) or check [GitHub Discussions](https://github.com/diveagents/dive/discussions).
+Need help? Join our [Discord community](https://discord.gg/yrcuURWk) or check [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions).

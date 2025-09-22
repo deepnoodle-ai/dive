@@ -19,9 +19,9 @@ Dive provides several built-in tools covering common use cases:
 
 #### Read File Tool
 ```go
-import "github.com/diveagents/dive/toolkit"
+import "github.com/deepnoodle-ai/dive/toolkit"
 
-readTool := dive.ToolAdapter(toolkit.NewReadFileTool())
+readTool := toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})
 
 // Usage in agent
 agent, err := agent.New(agent.Options{
@@ -197,10 +197,10 @@ import (
     "fmt"
     "log"
     
-    "github.com/diveagents/dive"
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/llm/providers/anthropic"
-    "github.com/diveagents/dive/toolkit"
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 func main() {

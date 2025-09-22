@@ -34,9 +34,9 @@ package main
 import (
     "context"
     "fmt"
-    "github.com/diveagents/dive"
-    "github.com/diveagents/dive/agent"
-    "github.com/diveagents/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 func main() {
@@ -67,7 +67,7 @@ func main() {
 
 ```go
 import (
-    "github.com/diveagents/dive/toolkit"
+    "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 // Create an agent with file system access
@@ -165,7 +165,7 @@ agent, err := agent.New(agent.Options{
 ### Environment Integration
 
 ```go
-import "github.com/diveagents/dive/environment"
+import "github.com/deepnoodle-ai/dive/environment"
 
 // Create environment first
 env, err := environment.New(environment.Options{
@@ -191,7 +191,7 @@ analyst, err := agent.New(agent.Options{
 Dive includes several built-in tools:
 
 ```go
-import "github.com/diveagents/dive/toolkit"
+import "github.com/deepnoodle-ai/dive/toolkit"
 
 tools := []dive.Tool{
     // File operations
