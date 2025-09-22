@@ -24,16 +24,13 @@ The core agent interface that all agent implementations must satisfy.
 type Agent interface {
     // Name of the Agent
     Name() string
-    
+
     // IsSupervisor indicates whether the Agent can assign work to other Agents
     IsSupervisor() bool
-    
-    // SetEnvironment sets the runtime Environment to which this Agent belongs
-    SetEnvironment(env Environment) error
-    
+
     // CreateResponse creates a new Response from the Agent
     CreateResponse(ctx context.Context, opts ...Option) (*Response, error)
-    
+
     // StreamResponse streams a new Response from the Agent
     StreamResponse(ctx context.Context, opts ...Option) (ResponseStream, error)
 }

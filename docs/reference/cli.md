@@ -1,13 +1,12 @@
 # CLI Reference
 
-The Dive CLI provides a powerful command-line interface for running workflows, chatting with agents, and managing configurations. This reference covers all available commands and options.
+The Dive CLI provides a powerful command-line interface for chatting with agents and managing configurations. This reference covers all available commands and options.
 
 ## 📋 Table of Contents
 
 - [Installation](#installation)
 - [Global Options](#global-options)
 - [Commands](#commands)
-  - [run](#run)
   - [chat](#chat)
   - [config](#config)
 - [Configuration](#configuration)
@@ -51,76 +50,6 @@ dive [global options] command [command options] [arguments...]
 - `--version, -v` - Show version information
 
 ## Commands
-
-### run
-
-Execute a workflow from a YAML configuration file.
-
-#### Usage
-
-```bash
-dive run [options] <workflow-file>
-```
-
-#### Options
-
-- `--vars, -v <key=value>` - Set workflow input variables (can be used multiple times)
-- `--workflow, -w <name>` - Specify which workflow to run (if multiple in file)
-- `--env <file>` - Load environment variables from file
-- `--dry-run` - Validate workflow without executing it
-- `--output, -o <format>` - Output format: `text`, `json`, `yaml` (default: `text`)
-- `--verbose` - Enable verbose output
-- `--timeout <duration>` - Set execution timeout (default: `30m`)
-
-#### Examples
-
-```bash
-# Run a simple workflow
-dive run workflow.yaml
-
-# Run with input variables
-dive run workflow.yaml --vars "topic=AI research" --vars "format=markdown"
-
-# Run specific workflow from multi-workflow file
-dive run workflows.yaml --workflow "Data Analysis"
-
-# Dry run for validation
-dive run workflow.yaml --dry-run
-
-# JSON output for programmatic use
-dive run workflow.yaml --output json
-
-# With custom timeout
-dive run long-workflow.yaml --timeout 1h
-```
-
-#### Workflow File Format
-
-```yaml
-Name: Research Pipeline
-Description: Automated research and analysis
-
-Config:
-  DefaultProvider: anthropic
-  DefaultModel: claude-sonnet-4-20250514
-  LogLevel: info
-
-Agents:
-  - Name: Researcher
-    Instructions: You are a thorough researcher
-    Tools: [web_search, fetch]
-
-Workflows:
-  - Name: Research
-    Inputs:
-      - Name: topic
-        Type: string
-        Required: true
-    Steps:
-      - Name: Research Topic
-        Agent: Researcher
-        Prompt: "Research: ${inputs.topic}"
-```
 
 ### chat
 

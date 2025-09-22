@@ -29,32 +29,6 @@ agent, err := agent.New(agent.Options{
 })
 ```
 
-### Workflows
-Declarative, multi-step processes defined in YAML:
-- Conditional branching and parallel execution
-- Script integration for custom logic
-- Checkpoint-based state management
-- Real-time event streaming
-
-```yaml
-Workflows:
-  - Name: Research Pipeline
-    Steps:
-      - Name: Search Web
-        Agent: Research Assistant
-        Prompt: "Research ${inputs.topic}"
-        Store: research_data
-      - Name: Analyze Results
-        Agent: Data Analyst
-        Prompt: "Analyze this data: ${research_data}"
-```
-
-### Environment
-Runtime container that orchestrates agents and workflows:
-- Shared document repositories
-- Thread management for conversations
-- Tool and action registry
-- MCP server connections
 
 ### Tools
 Extensible capabilities that agents can use:
@@ -72,19 +46,12 @@ User Input → Agent → LLM Provider → Tool Calls → Results → Response
 
 Agents receive input, process it through their configured LLM, potentially make tool calls to gather information or take actions, and return structured responses.
 
-### 2. Workflow Execution
-```
-Inputs → Step Execution → State Updates → Checkpoints → Next Steps
-```
-
-Workflows execute steps sequentially or in parallel, updating shared state and creating checkpoints for reliability. Each step can involve agent interactions, script execution, or custom actions.
-
-### 3. Event Flow
+### 2. Event Flow
 ```
 Execution Events → Streaming → Real-time Updates → UI/Monitoring
 ```
 
-Both agents and workflows emit detailed events that can be streamed to UIs, monitoring systems, or other downstream processes.
+Agents emit detailed events that can be streamed to UIs, monitoring systems, or other downstream processes.
 
 ## 🌟 Key Features
 
@@ -100,7 +67,6 @@ Both agents and workflows emit detailed events that can be streamed to UIs, moni
 - **Thread Persistence** - Conversations that span multiple interactions
 - **Supervisor Patterns** - Hierarchical agent systems
 - **MCP Integration** - Connect to external tool ecosystems
-- **Checkpoint Recovery** - Reliable workflow execution
 
 ### Developer Experience
 - **Type Safety** - Leverages Go's type system for reliability

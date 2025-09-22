@@ -41,8 +41,6 @@ Welcome to the Dive documentation! Dive is an AI toolkit for Go that enables you
 ## 🔧 Development
 
 - [Contributing Guidelines](../README.md#contributors) - How to contribute to Dive
-- [Architecture Overview](guides/architecture.md) - Understanding the codebase
-- [Testing Guide](guides/testing.md) - Running and writing tests
 
 ## 📖 External Resources
 

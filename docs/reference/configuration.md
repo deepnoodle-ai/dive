@@ -1,13 +1,12 @@
 # Configuration Reference
 
-Complete reference for configuring Dive environments, agents, workflows, and runtime settings.
+Complete reference for configuring Dive environments, agents, and runtime settings.
 
 ## 📋 Table of Contents
 
 - [Configuration Files](#configuration-files)
 - [Environment Configuration](#environment-configuration)
 - [Agent Configuration](#agent-configuration)
-- [Workflow Configuration](#workflow-configuration)
 - [LLM Provider Configuration](#llm-provider-configuration)
 - [Tool Configuration](#tool-configuration)
 - [MCP Server Configuration](#mcp-server-configuration)
@@ -34,10 +33,6 @@ Config:
 Agents:
   - Name: Assistant
     # Agent configuration...
-
-Workflows:
-  - Name: Process Documents
-    # Workflow configuration...
 
 MCPServers:
   - Name: github
@@ -241,143 +236,6 @@ Agents:
     ModelConfig:
       Temperature: 0.4
       MaxTokens: 8000
-```
-
-## Workflow Configuration
-
-### Basic Workflow Structure
-
-```yaml
-Workflows:
-  - Name: Document Processing Pipeline
-    Description: Process and analyze documents
-    
-    # Workflow settings
-    Timeout: 300s             # Overall workflow timeout
-    MaxRetries: 2             # Retry attempts for failed steps
-    ConcurrentSteps: false    # Run steps sequentially
-    
-    # Input parameters
-    Inputs:
-      - Name: document_path
-        Type: string
-        Description: Path to document to process
-        Required: true
-        
-      - Name: analysis_depth
-        Type: string
-        Description: Level of analysis to perform
-        Enum: [basic, detailed, comprehensive]
-        Default: detailed
-        
-      - Name: output_format
-        Type: string
-        Description: Output format for results
-        Enum: [json, markdown, html]
-        Default: markdown
-    
-    # Workflow steps
-    Steps:
-      - Name: Load Document
-        Agent: Document Reader
-        Prompt: |
-          Load and parse the document at: ${inputs.document_path}
-          Extract text content and metadata.
-        Store: document_content
-        Timeout: 30s
-        
-      - Name: Analyze Content
-        Agent: Content Analyzer
-        Prompt: |
-          Analyze this document with ${inputs.analysis_depth} depth:
-          ${document_content}
-          
-          Provide insights on:
-          - Key themes and topics
-          - Sentiment and tone
-          - Important entities and concepts
-        Store: analysis_results
-        Timeout: 120s
-        
-      - Name: Generate Report
-        Agent: Report Generator
-        Prompt: |
-          Create a comprehensive report in ${inputs.output_format} format
-          based on this analysis:
-          ${analysis_results}
-          
-          Include executive summary, key findings, and recommendations.
-        Store: final_report
-        
-      - Name: Save Results
-        Action: Document.Write
-        Parameters:
-          Path: "reports/analysis-${workflow.id}.${inputs.output_format}"
-          Content: ${final_report}
-```
-
-### Conditional Workflows
-
-```yaml
-Workflows:
-  - Name: Content Moderation
-    Steps:
-      - Name: Initial Scan
-        Agent: Content Scanner
-        Prompt: "Scan content for potential issues: ${inputs.content}"
-        Store: scan_results
-        
-      - Name: Human Review Required
-        Condition: ${scan_results.risk_level} > 7
-        Agent: Human Reviewer
-        Prompt: "Review flagged content: ${inputs.content}"
-        Store: human_review
-        
-      - Name: Auto Approve
-        Condition: ${scan_results.risk_level} <= 3
-        Action: Content.Approve
-        Parameters:
-          ContentId: ${inputs.content_id}
-          
-      - Name: Enhanced Analysis
-        Condition: ${scan_results.risk_level} > 3 && ${scan_results.risk_level} <= 7
-        Agent: Deep Analyzer
-        Prompt: "Perform detailed analysis: ${inputs.content}"
-        Store: detailed_analysis
-```
-
-### Parallel Workflows
-
-```yaml
-Workflows:
-  - Name: Multi-Source Research
-    Steps:
-      - Name: Research Phase
-        Type: parallel
-        Steps:
-          - Name: Web Research
-            Agent: Web Researcher
-            Prompt: "Research ${inputs.topic} online"
-            Store: web_results
-            
-          - Name: Academic Research
-            Agent: Academic Researcher  
-            Prompt: "Find academic sources on ${inputs.topic}"
-            Store: academic_results
-            
-          - Name: News Research
-            Agent: News Researcher
-            Prompt: "Find recent news about ${inputs.topic}"
-            Store: news_results
-            
-      - Name: Synthesize Results
-        Agent: Synthesizer
-        Prompt: |
-          Synthesize research from these sources:
-          Web: ${web_results}
-          Academic: ${academic_results}
-          News: ${news_results}
-        Store: synthesis
 ```
 
 ## LLM Provider Configuration
