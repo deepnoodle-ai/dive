@@ -22,7 +22,7 @@ Benefits:
 MCPServers:
   - Name: github
     Type: url
-    URL: https://mcp.github.com/sse  # Example URL - replace with actual MCP server
+    URL: https://mcp.github.com/sse # Example URL - replace with actual MCP server
     AuthorizationToken: ${GITHUB_TOKEN}
 
   - Name: filesystem
@@ -64,7 +64,7 @@ if err != nil {
 ```yaml
 - Name: github
   Type: url
-  URL: https://mcp.github.com/sse  # Example URL - replace with actual MCP server
+  URL: https://mcp.github.com/sse # Example URL - replace with actual MCP server
   AuthorizationToken: ${GITHUB_TOKEN}
 ```
 

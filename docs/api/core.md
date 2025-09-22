@@ -73,10 +73,10 @@ type Tool interface {
     Description() string
 
     // Schema returns the JSON schema for tool parameters
-    Schema() Schema
+    Schema() *schema.Schema
 
     // Annotations provides hints about tool behavior
-    Annotations() ToolAnnotations
+    Annotations() *ToolAnnotations
 
     // Call executes the tool with given input
     Call(ctx context.Context, input json.RawMessage) (*ToolResult, error)
@@ -88,12 +88,12 @@ type Tool interface {
 For type-safe tool development:
 
 ```go
-type TypedTool[TInput any] interface {
+type TypedTool[T any] interface {
     Name() string
     Description() string
-    Schema() Schema
-    Annotations() ToolAnnotations
-    Call(ctx context.Context, input *TInput) (*ToolResult, error)
+    Schema() *schema.Schema
+    Annotations() *ToolAnnotations
+    Call(ctx context.Context, input *T) (*ToolResult, error)
 }
 ```
 
@@ -101,17 +101,26 @@ type TypedTool[TInput any] interface {
 
 ```go
 type ToolAnnotations struct {
-    Title           string  // Human-readable tool name
-    ReadOnlyHint    bool    // Tool only reads, doesn't modify data
-    DestructiveHint bool    // Tool may delete or overwrite data
-    IdempotentHint  bool    // Safe to call multiple times with same input
-    OpenWorldHint   bool    // Tool accesses external resources (network, APIs)
+    Title           string         // Human-readable tool name
+    ReadOnlyHint    bool           // Tool only reads, doesn't modify data
+    DestructiveHint bool           // Tool may delete or overwrite data
+    IdempotentHint  bool           // Safe to call multiple times with same input
+    OpenWorldHint   bool           // Tool accesses external resources (network, APIs)
+    Extra           map[string]any // Additional custom annotations
 }
 ```
 
 ### Custom Tool Example
 
 ```go
+import (
+    "context"
+    "fmt"
+
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/schema"
+)
+
 type CalculatorTool struct{}
 
 type CalculatorInput struct {
@@ -126,10 +135,10 @@ func (t *CalculatorTool) Description() string {
     return "Evaluate mathematical expressions"
 }
 
-func (t *CalculatorTool) Schema() schema.Schema {
-    return schema.Schema{
+func (t *CalculatorTool) Schema() *schema.Schema {
+    return &schema.Schema{
         Type: "object",
-        Properties: map[string]schema.Property{
+        Properties: map[string]*schema.Property{
             "expression": {
                 Type:        "string",
                 Description: "Mathematical expression to evaluate",
@@ -139,8 +148,8 @@ func (t *CalculatorTool) Schema() schema.Schema {
     }
 }
 
-func (t *CalculatorTool) Annotations() dive.ToolAnnotations {
-    return dive.ToolAnnotations{
+func (t *CalculatorTool) Annotations() *dive.ToolAnnotations {
+    return &dive.ToolAnnotations{
         Title:          "Calculator",
         ReadOnlyHint:   true,
         IdempotentHint: true,
@@ -150,21 +159,10 @@ func (t *CalculatorTool) Annotations() dive.ToolAnnotations {
 func (t *CalculatorTool) Call(ctx context.Context, input *CalculatorInput) (*dive.ToolResult, error) {
     result, err := evaluateExpression(input.Expression)
     if err != nil {
-        return &dive.ToolResult{
-            Content: []*dive.ToolResultContent{{
-                Type: dive.ToolResultContentTypeText,
-                Text: fmt.Sprintf("Error: %v", err),
-            }},
-            IsError: true,
-        }, nil
+        return dive.NewToolResultError(fmt.Sprintf("Error: %v", err)), nil
     }
 
-    return &dive.ToolResult{
-        Content: []*dive.ToolResultContent{{
-            Type: dive.ToolResultContentTypeText,
-            Text: fmt.Sprintf("Result: %v", result),
-        }},
-    }, nil
+    return dive.NewToolResultText(fmt.Sprintf("Result: %v", result)), nil
 }
 
 // Use with ToolAdapter for type safety

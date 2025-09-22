@@ -82,8 +82,6 @@ type Agent struct {
     toolIterationLimit   int
     modelSettings        *ModelSettings
     dateAwareness        *bool
-    environment          dive.Environment
-    documentRepository   dive.DocumentRepository
     threadRepository     dive.ThreadRepository
     confirmer            dive.Confirmer
     systemPromptTemplate *template.Template
@@ -111,12 +109,21 @@ Creates a new Agent with the specified configuration options.
 **Example:**
 
 ```go
+import (
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/toolkit"
+)
+
 agent, err := agent.New(agent.Options{
     Name:         "Assistant",
     Instructions: "You are a helpful AI assistant.",
     Model:        anthropic.New(),
     Tools: []dive.Tool{
-        dive.ToolAdapter(toolkit.NewWebSearchTool()),
+        dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
+            Provider: "google",
+        })),
     },
 })
 ```
@@ -153,8 +160,6 @@ type Options struct {
     SystemPromptTemplate string                    // Custom system prompt template
 
     // Integration
-    Environment          dive.Environment          // Runtime environment
-    DocumentRepository   dive.DocumentRepository   // Document storage
     ThreadRepository     dive.ThreadRepository     // Conversation storage
     Confirmer            dive.Confirmer            // User confirmation handler
 

@@ -163,7 +163,6 @@ agent, err := agent.New(agent.Options{
 })
 ```
 
-
 ## Tool Integration
 
 ### Built-in Tools

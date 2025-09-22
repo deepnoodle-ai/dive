@@ -22,9 +22,19 @@ Complete API reference for the Dive config package, covering configuration manag
 ```go
 // Top-level configuration structure
 type Config struct {
+    Name        string       `yaml:"Name,omitempty" json:"Name,omitempty"`
+    Description string       `yaml:"Description,omitempty" json:"Description,omitempty"`
+    Version     string       `yaml:"Version,omitempty" json:"Version,omitempty"`
+    Config      GlobalConfig `yaml:"Config,omitempty" json:"Config,omitempty"`
+    Tools       []Tool       `yaml:"Tools,omitempty" json:"Tools,omitempty"`
+    Agents      []Agent      `yaml:"Agents,omitempty" json:"Agents,omitempty"`
+    MCPServers  []MCPServer  `yaml:"MCPServers,omitempty" json:"MCPServers,omitempty"`
+}
+
+// GlobalConfig represents global configuration settings
+type GlobalConfig struct {
     DefaultProvider  string     `yaml:"DefaultProvider,omitempty" json:"DefaultProvider,omitempty"`
     DefaultModel     string     `yaml:"DefaultModel,omitempty" json:"DefaultModel,omitempty"`
-    DefaultWorkflow  string     `yaml:"DefaultWorkflow,omitempty" json:"DefaultWorkflow,omitempty"`
     ConfirmationMode string     `yaml:"ConfirmationMode,omitempty" json:"ConfirmationMode,omitempty"`
     LogLevel         string     `yaml:"LogLevel,omitempty" json:"LogLevel,omitempty"`
     Providers        []Provider `yaml:"Providers,omitempty" json:"Providers,omitempty"`
