@@ -22,7 +22,7 @@ Benefits:
 MCPServers:
   - Name: github
     Type: url
-    URL: https://mcp.github.com/sse
+    URL: https://mcp.github.com/sse  # Example URL - replace with actual MCP server
     AuthorizationToken: ${GITHUB_TOKEN}
 
   - Name: filesystem
@@ -34,8 +34,14 @@ MCPServers:
 ### 2. Use in Code
 
 ```go
+import (
+    "context"
+
+    "github.com/deepnoodle-ai/dive/config"
+)
+
 // Load configuration with MCP servers
-cfg, err := config.LoadFromFile("config.yaml")
+cfg, err := config.LoadDirectory("./")
 if err != nil {
     return err
 }
@@ -48,7 +54,7 @@ if err != nil {
     return err
 }
 
-// MCP tools are now available to all agents
+// MCP tools are now available to all agents through the environment
 ```
 
 ## Server Types
@@ -58,7 +64,7 @@ if err != nil {
 ```yaml
 - Name: github
   Type: url
-  URL: https://mcp.github.com/sse
+  URL: https://mcp.github.com/sse  # Example URL - replace with actual MCP server
   AuthorizationToken: ${GITHUB_TOKEN}
 ```
 

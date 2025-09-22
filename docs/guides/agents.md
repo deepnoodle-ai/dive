@@ -77,8 +77,8 @@ researcher, err := agent.New(agent.Options{
     Instructions: "You help research topics and save findings to files.",
     Model:        anthropic.New(),
     Tools: []dive.Tool{
-        dive.ToolAdapter(toolkit.NewReadFileTool()),
-        dive.ToolAdapter(toolkit.NewWriteFileTool()),
+        dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
+        dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
         dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
             Provider: "google", // or "kagi"
         })),
@@ -163,27 +163,6 @@ agent, err := agent.New(agent.Options{
 })
 ```
 
-### Environment Integration
-
-```go
-import "github.com/deepnoodle-ai/dive/environment"
-
-// Create environment first
-env, err := environment.New(environment.Options{
-    Name: "Research Lab",
-})
-
-// Create agents within the environment
-researcher, err := agent.New(agent.Options{
-    Name:        "Researcher",
-    Environment: env,  // Shared context
-})
-
-analyst, err := agent.New(agent.Options{
-    Name:        "Data Analyst",
-    Environment: env,
-})
-```
 
 ## Tool Integration
 
@@ -196,24 +175,24 @@ import "github.com/deepnoodle-ai/dive/toolkit"
 
 tools := []dive.Tool{
     // File operations
-    dive.ToolAdapter(toolkit.NewReadFileTool()),
-    dive.ToolAdapter(toolkit.NewWriteFileTool()),
-    dive.ToolAdapter(toolkit.NewListDirectoryTool()),
+    dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
+    dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
+    dive.ToolAdapter(toolkit.NewListDirectoryTool(toolkit.ListDirectoryToolOptions{})),
 
     // Web operations
     dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
         Provider: "google",
     })),
-    dive.ToolAdapter(toolkit.NewFetchTool()),
+    dive.ToolAdapter(toolkit.NewFetchTool(toolkit.FetchToolOptions{})),
 
     // System operations
-    dive.ToolAdapter(toolkit.NewCommandTool()),
+    dive.ToolAdapter(toolkit.NewCommandTool(toolkit.CommandToolOptions{})),
 
     // Text editing
-    dive.ToolAdapter(toolkit.NewTextEditorTool()),
+    dive.ToolAdapter(toolkit.NewTextEditorTool(toolkit.TextEditorToolOptions{})),
 
     // Image generation
-    dive.ToolAdapter(toolkit.NewGenerateImageTool()),
+    dive.ToolAdapter(toolkit.NewImageGenerationTool(toolkit.ImageGenerationToolOptions{})),
 }
 ```
 
@@ -224,6 +203,10 @@ Create custom tools by implementing the `TypedTool` interface:
 ```go
 type WeatherTool struct {
     APIKey string
+}
+
+type WeatherInput struct {
+    Location string `json:"location"`
 }
 
 func (t *WeatherTool) Name() string {
@@ -296,7 +279,6 @@ supervisor, err := agent.New(agent.Options{
     IsSupervisor: true,
     Subordinates: []string{"Researcher", "Writer", "Reviewer"},
     Model:        anthropic.New(),
-    Environment:  env,
 })
 ```
 
@@ -459,7 +441,7 @@ response, err := agent.CreateResponse(
 
 ## Next Steps
 
-- [Workflow Guide](workflows.md) - Orchestrate agents in multi-step processes
 - [Custom Tools](custom-tools.md) - Build domain-specific agent capabilities
-- [Event Streaming](event-streaming.md) - Monitor and respond to agent activities
+- [Tools Guide](tools.md) - Learn about built-in tools and capabilities
+- [LLM Guide](llm-guide.md) - Work with different AI models and providers
 - [API Reference](../api/agent.md) - Detailed API documentation

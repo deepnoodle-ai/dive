@@ -8,7 +8,7 @@ Dive is built around four key principles:
 
 1. **Simplicity** - Clean APIs and intuitive concepts that developers can quickly understand
 2. **Flexibility** - Modular architecture that adapts to your specific use cases
-3. **Reliability** - Checkpoint-based execution and robust error handling
+3. **Reliability** - Robust error handling and type safety
 4. **Interoperability** - Works with multiple LLM providers and external systems
 
 ## 🧱 Key Components
@@ -38,7 +38,7 @@ Extensible capabilities that agents can use:
 - Built-in: web search, file operations, command execution
 - Custom: implement the `Tool` interface for domain-specific needs
 - MCP: connect to Model Context Protocol servers
-- Type-safe with rich annotations
+- Type-safe API with rich annotations
 
 ## 🔄 How It Works
 
@@ -62,10 +62,13 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 
 ### Multi-LLM Support
 
-- **Anthropic** (Claude Sonnet, Haiku, Opus)
+- **Anthropic** (Claude 3.5 Sonnet, Haiku, Opus)
 - **OpenAI** (GPT-4, o1, o3)
-- **Groq** (Llama, DeepSeek, Qwen)
-- **Ollama** (Local models)
+- **Groq** (Llama 3.3, DeepSeek R1, Qwen)
+- **Google** (Gemini models)
+- **Grok** (xAI models)
+- **OpenRouter** (Multiple model access)
+- **Ollama** (Local model hosting)
 
 ### Advanced Capabilities
 
@@ -86,16 +89,16 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│   CLI/App   │────│ Environment  │────│   Agents    │
-└─────────────┘    └──────────────┘    └─────────────┘
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   CLI/App   │────│   Agents    │────│    LLMs     │
+└─────────────┘    └─────────────┘    └─────────────┘
                            │                    │
                    ┌───────────────┐    ┌─────────────┐
-                   │   Workflows   │    │    LLMs     │
+                   │    Tools      │    │   Threads   │
                    └───────────────┘    └─────────────┘
                            │                    │
                    ┌───────────────┐    ┌─────────────┐
-                   │    Actions    │    │    Tools    │
+                   │     MCP       │    │   Config    │
                    └───────────────┘    └─────────────┘
 ```
 
@@ -141,8 +144,7 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 Ready to start building with Dive? Here are some recommended paths:
 
 - **Developers**: Start with [Agent Guide](guides/agents.md) to understand core concepts
-- **DevOps**: Explore [CLI Reference](reference/cli.md) for automation tools
-- **Researchers**: Explore [MCP Integration](guides/mcp-integration.md) for external tool access
+- **DevOps**: Explore [CLI Reference](reference.md) for automation tools
 - **Integrators**: Review [MCP Integration](guides/mcp-integration.md) for external connections
 
 Need help? Join our [Discord community](https://discord.gg/yrcuURWk) or check [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions).

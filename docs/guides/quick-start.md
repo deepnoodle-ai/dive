@@ -149,8 +149,8 @@ func main() {
         Model: anthropic.New(),
         Tools: []dive.Tool{
             // File operations
-            dive.ToolAdapter(toolkit.NewReadFileTool()),
-            dive.ToolAdapter(toolkit.NewWriteFileTool()),
+            dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
+            dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
 
             // Web search
             dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
@@ -233,7 +233,7 @@ func main() {
 
     fmt.Println("🤖 Dive Chat Assistant")
     fmt.Println("Type 'quit' to exit, 'clear' to start new conversation")
-    fmt.Println("=" * 50)
+    fmt.Println(strings.Repeat("=", 50))
 
     scanner := bufio.NewScanner(os.Stdin)
     threadID := "chat-session-1"
@@ -316,27 +316,18 @@ Now that you have the basics working, explore more advanced features:
 ### 🔧 Learn More About Core Concepts
 
 - [Agents Guide](agents.md) - Deep dive into agent capabilities
-- [Tools Guide](tools.md) - Extend agent capabilities
-- [Environment Guide](environment.md) - Manage shared resources
+- [Tools Guide](tools.md) - Extend agent capabilities with built-in and custom tools
+- [Custom Tools](custom-tools.md) - Build your own tools
 
 ### 🚀 Advanced Features
 
-- [LLM Providers](llm-providers.md) - Work with different AI models
+- [LLM Guide](llm-guide.md) - Work with different AI models and providers
 - [MCP Integration](mcp-integration.md) - Connect to external services
-- [Event Streaming](event-streaming.md) - Real-time monitoring
-- [Supervisor Patterns](supervisor-patterns.md) - Multi-agent coordination
-
-### 📚 Examples and Use Cases
-
-- [Basic Examples](../examples/basic.md) - More code examples
-- [Advanced Examples](../examples/advanced.md) - Complex scenarios
-- [Integration Examples](../examples/integrations.md) - Real-world use cases
 
 ### 🛠️ Development
 
-- [Custom Tools](custom-tools.md) - Build your own tools
-- [Testing Guide](testing.md) - Test your Dive applications
 - [API Reference](../api/core.md) - Detailed API documentation
+- [CLI Reference](../reference.md) - Complete command-line interface guide
 
 ### 💬 Get Help
 
@@ -353,10 +344,12 @@ Here are some popular things to try next:
 ```go
 // Add web fetching, command execution, image generation
 Tools: []dive.Tool{
-    dive.ToolAdapter(toolkit.NewWebSearchTool(...)),
-    dive.ToolAdapter(toolkit.NewFetchTool()),
-    dive.ToolAdapter(toolkit.NewCommandTool()),
-    dive.ToolAdapter(toolkit.NewGenerateImageTool()),
+    dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
+        Provider: "google",
+    })),
+    dive.ToolAdapter(toolkit.NewFetchTool(toolkit.FetchToolOptions{})),
+    dive.ToolAdapter(toolkit.NewCommandTool(toolkit.CommandToolOptions{})),
+    dive.ToolAdapter(toolkit.NewImageGenerationTool(toolkit.ImageGenerationToolOptions{})),
 }
 ```
 
@@ -368,8 +361,8 @@ codeReviewer, err := agent.New(agent.Options{
     Name: "Code Reviewer",
     Instructions: "You are an expert code reviewer...",
     Tools: []dive.Tool{
-        dive.ToolAdapter(toolkit.NewReadFileTool()),
-        dive.ToolAdapter(toolkit.NewWriteFileTool()),
+        dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
+        dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
     },
 })
 
@@ -378,22 +371,10 @@ dataAnalyst, err := agent.New(agent.Options{
     Name: "Data Analyst",
     Instructions: "You analyze data and create insights...",
     Tools: []dive.Tool{
-        dive.ToolAdapter(toolkit.NewReadFileTool()),
+        dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
         customDataAnalysisTool,
     },
 })
-```
-
-### 4. Integrate with External Services
-
-```yaml
-MCPServers:
-  - Name: github
-    Type: url
-    URL: https://mcp.github.com/sse
-  - Name: linear
-    Type: url
-    URL: https://mcp.linear.app/sse
 ```
 
 Happy building with Dive! 🚀

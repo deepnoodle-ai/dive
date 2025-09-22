@@ -20,9 +20,12 @@ Dive provides several built-in tools covering common use cases:
 #### Read File Tool
 
 ```go
-import "github.com/deepnoodle-ai/dive/toolkit"
+import (
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/toolkit"
+)
 
-readTool := toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})
+readTool := dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{}))
 
 // Usage in agent
 agent, err := agent.New(agent.Options{
@@ -41,7 +44,7 @@ agent, err := agent.New(agent.Options{
 #### Write File Tool
 
 ```go
-writeTool := dive.ToolAdapter(toolkit.NewWriteFileTool())
+writeTool := dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{}))
 ```
 
 **Capabilities:**
@@ -54,7 +57,7 @@ writeTool := dive.ToolAdapter(toolkit.NewWriteFileTool())
 #### List Directory Tool
 
 ```go
-listTool := dive.ToolAdapter(toolkit.NewListDirectoryTool())
+listTool := dive.ToolAdapter(toolkit.NewListDirectoryTool(toolkit.ListDirectoryToolOptions{}))
 ```
 
 **Capabilities:**
@@ -93,7 +96,7 @@ export KAGI_API_KEY="your-kagi-api-key"
 #### Fetch Tool
 
 ```go
-fetchTool := dive.ToolAdapter(toolkit.NewFetchTool())
+fetchTool := dive.ToolAdapter(toolkit.NewFetchTool(toolkit.FetchToolOptions{}))
 ```
 
 **Capabilities:**
@@ -114,7 +117,7 @@ export FIRECRAWL_API_KEY="your-firecrawl-api-key"
 #### Command Tool
 
 ```go
-commandTool := dive.ToolAdapter(toolkit.NewCommandTool())
+commandTool := dive.ToolAdapter(toolkit.NewCommandTool(toolkit.CommandToolOptions{}))
 ```
 
 **Capabilities:**
@@ -130,7 +133,7 @@ commandTool := dive.ToolAdapter(toolkit.NewCommandTool())
 #### Text Editor Tool
 
 ```go
-editorTool := dive.ToolAdapter(toolkit.NewTextEditorTool())
+editorTool := dive.ToolAdapter(toolkit.NewTextEditorTool(toolkit.TextEditorToolOptions{}))
 ```
 
 **Capabilities:**
@@ -145,7 +148,7 @@ editorTool := dive.ToolAdapter(toolkit.NewTextEditorTool())
 #### Generate Image Tool
 
 ```go
-imageTool := dive.ToolAdapter(toolkit.NewGenerateImageTool())
+imageTool := dive.ToolAdapter(toolkit.NewImageGenerationTool(toolkit.ImageGenerationToolOptions{}))
 ```
 
 **Capabilities:**
@@ -167,11 +170,12 @@ Tool annotations provide hints about tool behavior to help agents use them effec
 
 ```go
 type ToolAnnotations struct {
-    Title           string  // Human-readable tool name
-    ReadOnlyHint    bool    // Tool only reads data
-    DestructiveHint bool    // Tool may delete/modify data
-    IdempotentHint  bool    // Safe to call multiple times
-    OpenWorldHint   bool    // Accesses external resources
+    Title           string         // Human-readable tool name
+    ReadOnlyHint    bool           // Tool only reads data
+    DestructiveHint bool           // Tool may delete/modify data
+    IdempotentHint  bool           // Safe to call multiple times
+    OpenWorldHint   bool           // Accesses external resources
+    Extra           map[string]any // Additional custom annotations
 }
 ```
 
@@ -234,9 +238,9 @@ func main() {
             dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
                 Provider: "google",
             })),
-            dive.ToolAdapter(toolkit.NewFetchTool()),
-            dive.ToolAdapter(toolkit.NewReadFileTool()),
-            dive.ToolAdapter(toolkit.NewWriteFileTool()),
+            dive.ToolAdapter(toolkit.NewFetchTool(toolkit.FetchToolOptions{})),
+            dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
+            dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
         },
     })
     if err != nil {
@@ -274,10 +278,10 @@ func createFileManager() (*agent.Agent, error) {
                       organize, and analyze files efficiently.`,
         Model: anthropic.New(),
         Tools: []dive.Tool{
-            dive.ToolAdapter(toolkit.NewReadFileTool()),
-            dive.ToolAdapter(toolkit.NewWriteFileTool()),
-            dive.ToolAdapter(toolkit.NewListDirectoryTool()),
-            dive.ToolAdapter(toolkit.NewTextEditorTool()),
+            dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
+            dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
+            dive.ToolAdapter(toolkit.NewListDirectoryTool(toolkit.ListDirectoryToolOptions{})),
+            dive.ToolAdapter(toolkit.NewTextEditorTool(toolkit.TextEditorToolOptions{})),
         },
     })
 }
@@ -293,7 +297,7 @@ func createWebResearcher() (*agent.Agent, error) {
             dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
                 Provider: "google",
             })),
-            dive.ToolAdapter(toolkit.NewFetchTool()),
+            dive.ToolAdapter(toolkit.NewFetchTool(toolkit.FetchToolOptions{})),
         },
     })
 }
@@ -306,10 +310,10 @@ func createSysAdmin() (*agent.Agent, error) {
                       and manage system resources. Be careful with destructive operations.`,
         Model: anthropic.New(),
         Tools: []dive.Tool{
-            dive.ToolAdapter(toolkit.NewCommandTool()),
-            dive.ToolAdapter(toolkit.NewReadFileTool()),
-            dive.ToolAdapter(toolkit.NewWriteFileTool()),
-            dive.ToolAdapter(toolkit.NewListDirectoryTool()),
+            dive.ToolAdapter(toolkit.NewCommandTool(toolkit.CommandToolOptions{})),
+            dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
+            dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
+            dive.ToolAdapter(toolkit.NewListDirectoryTool(toolkit.ListDirectoryToolOptions{})),
         },
     })
 }

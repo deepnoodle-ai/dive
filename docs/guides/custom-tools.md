@@ -16,18 +16,26 @@ Tools are functions that agents can call to perform specific actions:
 All custom tools implement the `TypedTool` interface:
 
 ```go
-type TypedTool[TInput any] interface {
+type TypedTool[T any] interface {
     Name() string
     Description() string
-    Schema() Schema
-    Annotations() ToolAnnotations
-    Call(ctx context.Context, input *TInput) (*ToolResult, error)
+    Schema() *schema.Schema
+    Annotations() *ToolAnnotations
+    Call(ctx context.Context, input *T) (*ToolResult, error)
 }
 ```
 
 ## Simple Tool Example
 
 ```go
+import (
+    "context"
+    "fmt"
+
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/schema"
+)
+
 type CalculatorTool struct{}
 
 type CalculatorInput struct {
@@ -42,12 +50,21 @@ func (t *CalculatorTool) Description() string {
     return "Evaluate mathematical expressions"
 }
 
-func (t *CalculatorTool) Schema() dive.Schema {
-    return dive.GenerateSchema[CalculatorInput]()
+func (t *CalculatorTool) Schema() *schema.Schema {
+    return &schema.Schema{
+        Type:     "object",
+        Required: []string{"expression"},
+        Properties: map[string]*schema.Property{
+            "expression": {
+                Type:        "string",
+                Description: "Mathematical expression to evaluate",
+            },
+        },
+    }
 }
 
-func (t *CalculatorTool) Annotations() dive.ToolAnnotations {
-    return dive.ToolAnnotations{
+func (t *CalculatorTool) Annotations() *dive.ToolAnnotations {
+    return &dive.ToolAnnotations{
         Title:          "Calculator",
         ReadOnlyHint:   true,
         IdempotentHint: true,
@@ -60,15 +77,18 @@ func (t *CalculatorTool) Call(ctx context.Context, input *CalculatorInput) (*div
         return nil, fmt.Errorf("calculation failed: %w", err)
     }
 
-    return &dive.ToolResult{
-        Content: []dive.Content{dive.NewTextContent(fmt.Sprintf("Result: %f", result))},
-    }, nil
+    return dive.NewToolResultText(fmt.Sprintf("Result: %f", result)), nil
 }
 ```
 
 ## Using Custom Tools
 
 ```go
+import (
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/agent"
+)
+
 // Create and register the tool
 calc := &CalculatorTool{}
 agent, err := agent.New(agent.Options{
@@ -85,11 +105,12 @@ Provide hints about tool behavior:
 
 ```go
 type ToolAnnotations struct {
-    Title           string  // Human-readable name
-    ReadOnlyHint    bool    // Only reads, doesn't modify
-    DestructiveHint bool    // May delete or overwrite data
-    IdempotentHint  bool    // Safe to call multiple times
-    OpenWorldHint   bool    // Accesses external resources
+    Title           string         // Human-readable name
+    ReadOnlyHint    bool           // Only reads, doesn't modify
+    DestructiveHint bool           // May delete or overwrite data
+    IdempotentHint  bool           // Safe to call multiple times
+    OpenWorldHint   bool           // Accesses external resources
+    Extra           map[string]any // Additional custom annotations
 }
 ```
 
@@ -105,9 +126,7 @@ func (t *MyTool) Call(ctx context.Context, input *MyInput) (*dive.ToolResult, er
 
     // Tool logic here
 
-    return &dive.ToolResult{
-        Content: []dive.Content{dive.NewTextContent("Success")},
-    }, nil
+    return dive.NewToolResultText("Success"), nil
 }
 ```
 

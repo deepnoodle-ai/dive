@@ -98,6 +98,11 @@ export GEMINI_API_KEY="your-key"  # For Google
 ### Basic Usage
 
 ```go
+import (
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+)
+
 agent, err := agent.New(agent.Options{
     Name:         "Assistant",
     Instructions: "You are a helpful assistant.",
@@ -110,14 +115,19 @@ agent, err := agent.New(agent.Options{
 ### Agent-Level Settings
 
 ```go
+import (
+    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+)
+
 agent, err := agent.New(agent.Options{
     Name:  "Assistant",
     Model: anthropic.New(),
     ModelSettings: &agent.ModelSettings{
-        Temperature:     0.7,
-        MaxTokens:      2000,
-        ReasoningBudget: 5000,  // For o1 models
-        Caching:        true,   // For Claude
+        Temperature:     &[]float64{0.7}[0],
+        MaxTokens:      &[]int{2000}[0],
+        ReasoningBudget: &[]int{5000}[0],  // For o1 models
+        Caching:        &[]bool{true}[0],   // For Claude
     },
 })
 ```
@@ -234,6 +244,13 @@ ModelSettings:
 All providers have automatic retry logic and consistent error handling:
 
 ```go
+import (
+    "context"
+    "log"
+
+    "github.com/deepnoodle-ai/dive"
+)
+
 response, err := agent.CreateResponse(ctx, dive.WithInput("Hello"))
 if err != nil {
     // Handle rate limits, API errors, etc.
