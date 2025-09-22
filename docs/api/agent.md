@@ -518,7 +518,7 @@ import (
 
 func createAdvancedAgent() (*agent.Agent, error) {
     // Create thread repository for memory
-    threadRepo := objects.NewInMemoryThreadRepository()
+    threadRepo := threads.NewMemoryRepository()
     
     // Create agent with tools and memory
     return agent.New(agent.Options{

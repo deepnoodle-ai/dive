@@ -5,7 +5,6 @@ This document covers the core interfaces and types that form the foundation of t
 ## 📋 Table of Contents
 
 - [Agent Interface](#agent-interface)
-- [Environment Interface](#environment-interface)
 - [Tool Interface](#tool-interface)
 - [Response Types](#response-types)
 - [Event System](#event-system)
@@ -21,16 +20,13 @@ The `Agent` interface defines the core contract for AI agents in Dive.
 type Agent interface {
     // Name returns the agent's identifier
     Name() string
-    
+
     // IsSupervisor indicates if the agent can assign work to others
     IsSupervisor() bool
-    
-    // SetEnvironment associates the agent with a runtime environment
-    SetEnvironment(env Environment) error
-    
+
     // CreateResponse generates a complete response synchronously
     CreateResponse(ctx context.Context, opts ...Option) (*Response, error)
-    
+
     // StreamResponse generates a response with real-time streaming
     StreamResponse(ctx context.Context, opts ...Option) (ResponseStream, error)
 }
@@ -60,59 +56,6 @@ stream, err := agent.StreamResponse(
         return nil
     }),
 )
-```
-
-## Environment Interface
-
-The `Environment` interface provides a container for agents and shared resources.
-
-### Interface Definition
-
-```go
-type Environment interface {
-    // Name returns the environment's identifier
-    Name() string
-    
-    // Agents returns all agents in this environment
-    Agents() []Agent
-    
-    // AddAgent registers an agent with this environment
-    AddAgent(agent Agent) error
-    
-    // GetAgent retrieves an agent by name
-    GetAgent(name string) (Agent, error)
-    
-    // DocumentRepository provides document storage access
-    DocumentRepository() DocumentRepository
-    
-    // ThreadRepository provides conversation thread storage
-    ThreadRepository() ThreadRepository
-    
-    // Confirmer provides user confirmation functionality
-    Confirmer() Confirmer
-}
-```
-
-### Usage Examples
-
-```go
-import "github.com/diveagents/dive/environment"
-
-// Create environment
-env, err := environment.New(environment.Options{
-    Name: "AI Research Lab",
-})
-
-// Add agents to environment
-researcher := createResearchAgent()
-analyst := createAnalysisAgent()
-
-env.AddAgent(researcher)
-env.AddAgent(analyst)
-
-// Agents can now discover and interact with each other
-allAgents := env.Agents()
-specificAgent, err := env.GetAgent("Research Assistant")
 ```
 
 ## Tool Interface

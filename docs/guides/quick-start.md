@@ -374,12 +374,12 @@ import (
     "github.com/diveagents/dive"
     "github.com/diveagents/dive/agent"
     "github.com/diveagents/dive/llm/providers/anthropic"
-    "github.com/diveagents/dive/objects"
+    "github.com/diveagents/dive/threads"
 )
 
 func main() {
     // Create thread repository for conversation memory
-    threadRepo := objects.NewInMemoryThreadRepository()
+    threadRepo := threads.NewMemoryRepository()
 
     // Create agent with memory
     assistant, err := agent.New(agent.Options{

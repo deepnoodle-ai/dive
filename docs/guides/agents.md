@@ -333,10 +333,9 @@ supervisor, err := agent.New(agent.Options{
 ### Persistent Conversations
 
 ```go
-import "github.com/diveagents/dive/objects"
 
 // Set up thread repository
-threadRepo := objects.NewInMemoryThreadRepository()
+threadRepo := threads.NewMemoryRepository()
 
 agent, err := agent.New(agent.Options{
     Name:             "Assistant",
@@ -363,10 +362,10 @@ response2, err := agent.CreateResponse(
 
 ```go
 // In-memory (development/testing)
-threadRepo := objects.NewInMemoryThreadRepository()
+threadRepo := threads.NewMemoryRepository()
 
 // File-based (simple persistence)
-threadRepo := objects.NewFileThreadRepository("./threads")
+threadRepo := threads.NewDiskRepository("./threads")
 
 // Database-based (production)
 // Implement dive.ThreadRepository interface
