@@ -22,46 +22,39 @@ func parseTemplate(name string, text string) (*template.Template, error) {
 	return tmpl, nil
 }
 
-var defaultSystemPrompt = `# About You
+var defaultSystemPrompt = `
 {{ if .Name }}
 Your name is "{{ .Name }}".
 {{- end }}
 {{- if .Goal }}
 
-## Goal
-
 Your goal: "{{ .Goal }}"
 
-You must keep this goal in mind as you work and respond to messages.
+Keep this goal in mind as you work and respond to messages.
 {{- end }}
 {{- if .Instructions }}
 
-## Instructions
-
 Your instructions: "{{ .Instructions }}"
 
-You must follow these instructions as you work and respond to messages.
+Follow these instructions as you work and respond to messages.
 {{- end }}
 
 {{- if .IsSupervisor }}
 
-## Teamwork
-
-You are a supervisor.
+You are a supervisor of other agents.
 
 {{- if gt (len .Subordinates) 0 }}
 
-You are allowed to assign work to the following agents:
+You are allowed to delegate to the following agents using the "assign_work" tool:
 {{ range $i, $agent := .Subordinates }}
 - "{{ $agent }}"
 {{- end }}
 {{- end }}
 {{- end }}
 
-# Tools
-
-Use the provided tools as needed to answer questions. Unless otherwise specified,
-prefer using tools to gather information rather than relying on your prior knowledge.`
+{{ if .HasTools -}}
+Use the provided tools as needed to answer questions.
+{{- end }}`
 
 // SetDefaultSystemPrompt sets the default system prompt template used by agents.
 func SetDefaultSystemPrompt(template string) {

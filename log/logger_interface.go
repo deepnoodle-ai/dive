@@ -12,7 +12,7 @@ const (
 	loggerKey contextKey = "dive.logger"
 )
 
-var defaultLevel = LevelInfo
+var defaultLevel = LevelWarn
 
 // SetDefaultLevel sets the default log level for Dive.
 func SetDefaultLevel(level Level) {

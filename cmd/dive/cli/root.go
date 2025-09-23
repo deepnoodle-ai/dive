@@ -17,10 +17,6 @@ var (
 	logLevel      string
 )
 
-func getUserVariables() map[string]interface{} {
-	return userVariables
-}
-
 func getLogLevel() log.Level {
 	return log.LevelFromString(logLevel)
 }
@@ -67,6 +63,6 @@ func init() {
 		"Set a variable (format: key=value). Can be specified multiple times")
 
 	rootCmd.PersistentFlags().StringVarP(
-		&logLevel, "log-level", "l", "info",
-		"Log level to use (debug, info, warn, error)")
+		&logLevel, "log-level", "", "warn",
+		"Log level to use (none, debug, info, warn, error)")
 }

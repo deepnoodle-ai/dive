@@ -183,6 +183,10 @@ func (a *Agent) Subordinates() []string {
 	return a.subordinates
 }
 
+func (a *Agent) HasTools() bool {
+	return len(a.tools) > 0
+}
+
 func (a *Agent) prepareThread(ctx context.Context, messages []*llm.Message, options dive.Options) (*dive.Thread, error) {
 	thread, err := a.getOrCreateThread(ctx, options.ThreadID, options)
 	if err != nil {
@@ -220,6 +224,8 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
 	}
+
+	logger.Debug("system prompt", "system_prompt", systemPrompt)
 
 	var cancel context.CancelFunc
 	if a.responseTimeout > 0 {
@@ -307,9 +313,10 @@ func (a *Agent) buildSystemPrompt() (string, error) {
 		if err != nil {
 			return "", err
 		}
+		prompt = strings.TrimSpace(prompt)
 	}
 	if a.dateAwareness == nil || *a.dateAwareness {
-		prompt = fmt.Sprintf("%s\n\n# Date and Time\n\n%s", prompt, dive.DateString(time.Now()))
+		prompt = fmt.Sprintf("%s\n\n%s", prompt, dive.DateString(time.Now()))
 	}
 	return strings.TrimSpace(prompt), nil
 }
@@ -523,11 +530,7 @@ func (a *Agent) executeToolCalls(
 
 		isConfirmed := true
 		if confirmer, ok := a.getConfirmer(); ok {
-			confirmed, err := confirmer.Confirm(ctx, dive.ConfirmationRequest{
-				Prompt:  fmt.Sprintf("Do you want to run the %s tool?", toolCall.Name),
-				Details: fmt.Sprintf("The tool will be called with the following input: %s", toolCall.Input),
-				Tool:    tool,
-			})
+			confirmed, err := confirmer.Confirm(ctx, a, tool, toolCall)
 			if err != nil {
 				return nil, fmt.Errorf("tool call confirmation error: %w", err)
 			}

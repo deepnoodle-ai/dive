@@ -49,6 +49,10 @@ func (a *MockAgent) Instructions() string {
 	return a.instructions
 }
 
+func (a *MockAgent) HasTools() bool {
+	return false
+}
+
 func (a *MockAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
