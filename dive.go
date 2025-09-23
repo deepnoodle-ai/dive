@@ -24,11 +24,11 @@ type Agent interface {
 	Name() string
 
 	// CreateResponse creates a new Response from the Agent
-	CreateResponse(ctx context.Context, opts ...Option) (*Response, error)
+	CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error)
 }
 
-// Options contains configuration for LLM generations.
-type Options struct {
+// CreateResponseOptions contains configuration for LLM generations.
+type CreateResponseOptions struct {
 	ThreadID      string
 	UserID        string
 	Messages      []*llm.Message
@@ -39,11 +39,11 @@ type Options struct {
 // is using tools or generating a response.
 type EventCallback func(ctx context.Context, item *ResponseItem) error
 
-// Option is a type signature for defining new LLM generation options.
-type Option func(*Options)
+// CreateResponseOption is a type signature for defining new LLM generation options.
+type CreateResponseOption func(*CreateResponseOptions)
 
 // Apply invokes any supplied options. Used internally in Dive.
-func (o *Options) Apply(opts []Option) {
+func (o *CreateResponseOptions) Apply(opts []CreateResponseOption) {
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -51,46 +51,46 @@ func (o *Options) Apply(opts []Option) {
 
 // WithThreadID associates the given conversation thread ID with a generation.
 // This appends the new messages to any previous messages belonging to this thread.
-func WithThreadID(threadID string) Option {
-	return func(opts *Options) {
+func WithThreadID(threadID string) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.ThreadID = threadID
 	}
 }
 
 // WithUserID associates the given user ID with a generation, indicating what
 // person is the speaker in the conversation.
-func WithUserID(userID string) Option {
-	return func(opts *Options) {
+func WithUserID(userID string) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.UserID = userID
 	}
 }
 
 // WithMessage specifies a single message to be used in the generation.
-func WithMessage(message *llm.Message) Option {
-	return func(opts *Options) {
+func WithMessage(message *llm.Message) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.Messages = []*llm.Message{message}
 	}
 }
 
 // WithMessages specifies the messages to be used in the generation.
-func WithMessages(messages ...*llm.Message) Option {
-	return func(opts *Options) {
+func WithMessages(messages ...*llm.Message) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.Messages = messages
 	}
 }
 
 // WithInput specifies a simple text input string to be used in the generation.
 // This is a convenience wrapper that creates a single user message.
-func WithInput(input string) Option {
-	return func(opts *Options) {
+func WithInput(input string) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.Messages = []*llm.Message{llm.NewUserTextMessage(input)}
 	}
 }
 
 // WithEventCallback specifies a callback function that will be invoked for each
 // item generated during response creation.
-func WithEventCallback(callback EventCallback) Option {
-	return func(opts *Options) {
+func WithEventCallback(callback EventCallback) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.EventCallback = callback
 	}
 }

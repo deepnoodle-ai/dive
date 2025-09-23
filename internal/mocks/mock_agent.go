@@ -1,10 +1,12 @@
-package dive
+package mocks
 
 import (
 	"context"
+
+	"github.com/deepnoodle-ai/dive"
 )
 
-var _ Agent = &MockAgent{}
+var _ dive.Agent = &MockAgent{}
 
 type MockAgentOptions struct {
 	Name         string
@@ -12,7 +14,7 @@ type MockAgentOptions struct {
 	Instructions string
 	IsSupervisor bool
 	Subordinates []string
-	Response     *Response
+	Response     *dive.Response
 }
 
 type MockAgent struct {
@@ -21,7 +23,7 @@ type MockAgent struct {
 	instructions string
 	isSupervisor bool
 	subordinates []string
-	response     *Response
+	response     *dive.Response
 }
 
 func NewMockAgent(opts MockAgentOptions) *MockAgent {
@@ -55,6 +57,6 @@ func (a *MockAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
 
-func (a *MockAgent) CreateResponse(ctx context.Context, opts ...Option) (*Response, error) {
+func (a *MockAgent) CreateResponse(ctx context.Context, opts ...dive.CreateResponseOption) (*dive.Response, error) {
 	return a.response, nil
 }

@@ -186,7 +186,7 @@ func (a *StandardAgent) HasTools() bool {
 	return len(a.tools) > 0
 }
 
-func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Message, options Options) (*Thread, error) {
+func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) (*Thread, error) {
 	thread, err := a.getOrCreateThread(ctx, options.ThreadID, options)
 	if err != nil {
 		return nil, err
@@ -195,8 +195,8 @@ func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Messa
 	return thread, nil
 }
 
-func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...Option) (*Response, error) {
-	var chatAgentOptions Options
+func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
+	var chatAgentOptions CreateResponseOptions
 	chatAgentOptions.Apply(opts)
 
 	logger := a.logger.With(
@@ -270,7 +270,7 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...Option) (*Re
 
 // prepareMessages processes the ChatAgentOptions to create messages for the LLM.
 // It handles both WithMessages and WithInput options.
-func (a *StandardAgent) prepareMessages(options Options) []*llm.Message {
+func (a *StandardAgent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 	var messages []*llm.Message
 	if len(a.context) > 0 {
 		messages = append(messages, llm.NewUserMessage(a.context...))
@@ -281,7 +281,7 @@ func (a *StandardAgent) prepareMessages(options Options) []*llm.Message {
 	return messages
 }
 
-func (a *StandardAgent) getOrCreateThread(ctx context.Context, threadID string, options Options) (*Thread, error) {
+func (a *StandardAgent) getOrCreateThread(ctx context.Context, threadID string, options CreateResponseOptions) (*Thread, error) {
 	if a.threadRepository != nil {
 		thread, err := a.threadRepository.GetThread(ctx, threadID)
 		if err != nil {

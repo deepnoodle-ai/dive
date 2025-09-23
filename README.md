@@ -72,8 +72,6 @@ export GROK_API_KEY="your-key-here"
 export OPENROUTER_API_KEY="your-key-here"
 
 # Tool API Keys
-export GOOGLE_SEARCH_API_KEY="your-key-here"
-export GOOGLE_SEARCH_CX="your-key-here"
 export FIRECRAWL_API_KEY="your-key-here"
 ```
 
@@ -102,8 +100,6 @@ agent, err := dive.NewAgent(dive.AgentOptions{
 
 // Start chatting with the agent
 response, err := agent.CreateResponse(ctx, dive.WithInput("Hello there!"))
-// Or stream the response
-stream, err := agent.StreamResponse(ctx, dive.WithInput("Hello there!"))
 ```
 
 Or use the Dive LLM interface directly:
@@ -341,7 +337,7 @@ self-host and integrate into your own applications.
 Agents can be configured as supervisors to delegate work to other agents:
 
 ```go
-supervisor, err := agent.New(agent.Options{
+supervisor, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Research Manager",
     Instructions: "You coordinate research tasks across multiple specialists.",
     IsSupervisor: true,
@@ -357,9 +353,9 @@ Supervisor agents automatically get an `assign_work` tool for delegating tasks.
 Fine-tune LLM behavior with advanced model settings:
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name: "Assistant",
-    ModelSettings: &agent.ModelSettings{
+    ModelSettings: &dive.ModelSettings{
         Temperature:       ptr(0.7),
         ReasoningBudget:   ptr(50000),
         ReasoningEffort:   "high",
