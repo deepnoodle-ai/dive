@@ -23,23 +23,15 @@ type (
 	Property = schema.Property
 )
 
-// Agent represents an intelligent AI entity that can autonomously execute tasks,
-// respond to chat messages, and process information. Agents can work with documents,
-// generate responses using LLMs, and interact with users through natural language.
-// They may have specialized capabilities depending on their implementation.
+// Agent represents an intelligent AI entity that can autonomously use tools to
+// process information while responding to chat messages.
 type Agent interface {
 
 	// Name of the Agent
 	Name() string
 
-	// IsSupervisor indicates whether the Agent can assign work to other Agents
-	IsSupervisor() bool
-
 	// CreateResponse creates a new Response from the Agent
 	CreateResponse(ctx context.Context, opts ...Option) (*Response, error)
-
-	// StreamResponse streams a new Response from the Agent
-	StreamResponse(ctx context.Context, opts ...Option) (ResponseStream, error)
 }
 
 // Options contains configuration for LLM generations.
@@ -50,8 +42,9 @@ type Options struct {
 	EventCallback EventCallback
 }
 
-// EventCallback is a function that processes streaming events during response generation.
-type EventCallback func(ctx context.Context, event *ResponseEvent) error
+// EventCallback is a function called with each item produced while an agent
+// is using tools or generating a response.
+type EventCallback func(ctx context.Context, item *ResponseItem) error
 
 // Option is a type signature for defining new LLM generation options.
 type Option func(*Options)
@@ -102,7 +95,7 @@ func WithInput(input string) Option {
 }
 
 // WithEventCallback specifies a callback function that will be invoked for each
-// event generated during response creation.
+// item generated during response creation.
 func WithEventCallback(callback EventCallback) Option {
 	return func(opts *Options) {
 		opts.EventCallback = callback

@@ -1,7 +1,6 @@
 package dive
 
 import (
-	"context"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -13,10 +12,11 @@ const (
 	ResponseItemTypeMessage        ResponseItemType = "message"
 	ResponseItemTypeToolCall       ResponseItemType = "tool_call"
 	ResponseItemTypeToolCallResult ResponseItemType = "tool_call_result"
+	ResponseItemTypeEvent          ResponseItemType = "event"
 )
 
-// ResponseItem contains either a message, tool call, or tool result. Multiple
-// items may be generated in response to a single prompt.
+// ResponseItem contains either a message, tool call, tool result, or LLM event.
+// Multiple items may be generated in response to a single prompt.
 type ResponseItem struct {
 	// Type of the response item
 	Type ResponseItemType `json:"type,omitempty"`
@@ -94,19 +94,4 @@ func (r *Response) ToolCallResults() []*ToolCallResult {
 		}
 	}
 	return results
-}
-
-// ResponseStream is a generic interface for streaming responses
-type ResponseStream interface {
-	// Next advances the stream to the next item
-	Next(ctx context.Context) bool
-
-	// Event returns the current event in the stream
-	Event() *ResponseEvent
-
-	// Err returns any error encountered while streaming
-	Err() error
-
-	// Close releases any resources associated with the stream
-	Close() error
 }

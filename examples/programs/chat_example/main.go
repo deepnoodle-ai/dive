@@ -81,57 +81,30 @@ to answer non-medical questions. Use maximum medical jargon.`,
 		if message == "" {
 			continue
 		}
-		stream, err := a.StreamResponse(ctx,
+		_, err = a.CreateResponse(ctx,
 			dive.WithMessage(llm.NewUserTextMessage(message)),
 			dive.WithThreadID("1"),
+			dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+				if item.Type == dive.ResponseItemTypeEvent {
+					event := item.Event
+					if event.ContentBlock != nil {
+						cb := event.ContentBlock
+						if cb.Type == "tool_use" {
+							fmt.Println("Tool used:", cb.Name)
+						}
+					}
+					if event.Delta != nil {
+						delta := event.Delta
+						if delta.Text != "" {
+							fmt.Print(delta.Text)
+						}
+					}
+				}
+				return nil
+			}),
 		)
 		if err != nil {
 			log.Fatal(err)
-		}
-		defer stream.Close()
-
-		var inToolUse bool
-		toolUseAccum := ""
-		toolName := ""
-		toolID := ""
-
-		for stream.Next(ctx) {
-			event := stream.Event()
-			// fmt.Println(event.Type)
-			if event.Type == dive.EventTypeResponseFailed {
-				log.Fatal(event.Error)
-			}
-			if event.Type != dive.EventTypeLLMEvent {
-				continue
-			}
-			if llmEvent := event.Item.Event; llmEvent != nil {
-				if llmEvent.ContentBlock != nil {
-					cb := llmEvent.ContentBlock
-					if cb.Type == "tool_use" {
-						toolName = cb.Name
-						toolID = cb.ID
-					}
-				}
-				if llmEvent.Delta != nil {
-					delta := llmEvent.Delta
-					if delta.PartialJSON != "" {
-						if !inToolUse {
-							inToolUse = true
-							fmt.Println("\n----")
-						}
-						toolUseAccum += delta.PartialJSON
-					} else if delta.Text != "" {
-						if inToolUse {
-							fmt.Println("NAME:", toolName, "ID:", toolID)
-							fmt.Println(toolUseAccum)
-							fmt.Println("----")
-							inToolUse = false
-							toolUseAccum = ""
-						}
-						fmt.Print(delta.Text)
-					}
-				}
-			}
 		}
 		fmt.Println()
 	}

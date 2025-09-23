@@ -209,14 +209,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
 	}
 
-	var publisher dive.EventPublisher
-	if chatOptions.EventCallback != nil {
-		publisher = &callbackPublisher{callback: chatOptions.EventCallback}
-	} else {
-		publisher = &nullEventPublisher{}
-	}
-	defer publisher.Close()
-
 	var cancel context.CancelFunc
 	if a.responseTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, a.responseTimeout)
@@ -229,18 +221,16 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 		CreatedAt: time.Now(),
 	}
 
-	publisher.Send(ctx, &dive.ResponseEvent{
-		Type:     dive.EventTypeResponseCreated,
-		Response: response,
-	})
+	eventCallback := func(ctx context.Context, item *dive.ResponseItem) error {
+		if chatOptions.EventCallback != nil {
+			return chatOptions.EventCallback(ctx, item)
+		}
+		return nil
+	}
 
-	genResult, err := a.generate(ctx, thread.Messages, systemPrompt, publisher)
+	genResult, err := a.generate(ctx, thread.Messages, systemPrompt, eventCallback)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
-		publisher.Send(ctx, &dive.ResponseEvent{
-			Type:  dive.EventTypeResponseFailed,
-			Error: err,
-		})
 		return nil, err
 	}
 
@@ -248,10 +238,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 	if a.threadRepository != nil {
 		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
 			logger.Error("failed to save thread", "error", err)
-			publisher.Send(ctx, &dive.ResponseEvent{
-				Type:  dive.EventTypeResponseFailed,
-				Error: err,
-			})
 			return nil, err
 		}
 	}
@@ -265,106 +251,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 			Message: msg,
 		})
 	}
-
-	publisher.Send(ctx, &dive.ResponseEvent{
-		Type:     dive.EventTypeResponseCompleted,
-		Response: response,
-	})
 	return response, nil
-}
-
-func (a *Agent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.ResponseStream, error) {
-	var chatOptions dive.Options
-	chatOptions.Apply(opts)
-
-	responseID := dive.NewID()
-
-	logger := a.logger.With(
-		"agent", a.name,
-		"thread_id", chatOptions.ThreadID,
-		"user_id", chatOptions.UserID,
-		"response_id", responseID,
-	)
-	logger.Info("streaming response")
-
-	messages := a.prepareMessages(chatOptions)
-	if len(messages) == 0 {
-		return nil, fmt.Errorf("no messages provided")
-	}
-
-	thread, err := a.prepareThread(ctx, messages, chatOptions)
-	if err != nil {
-		return nil, err
-	}
-
-	systemPrompt, err := a.buildSystemPrompt()
-	if err != nil {
-		return nil, fmt.Errorf("failed to build system prompt: %w", err)
-	}
-
-	stream, publisher := dive.NewEventStream()
-
-	go func() {
-		defer publisher.Close()
-
-		var cancel context.CancelFunc
-		if a.responseTimeout > 0 {
-			ctx, cancel = context.WithTimeout(ctx, a.responseTimeout)
-			defer cancel()
-		}
-
-		response := &dive.Response{
-			ID:        responseID,
-			Model:     a.model.Name(),
-			CreatedAt: time.Now(),
-			Usage:     &llm.Usage{},
-			Items:     []*dive.ResponseItem{},
-		}
-
-		publisher.Send(ctx, &dive.ResponseEvent{
-			Type:     dive.EventTypeResponseCreated,
-			Response: response,
-		})
-
-		genResult, err := a.generate(ctx, thread.Messages, systemPrompt, publisher)
-		if err != nil {
-			logger.Error("failed to generate response", "error", err)
-			publisher.Send(ctx, &dive.ResponseEvent{
-				Type:  dive.EventTypeResponseFailed,
-				Error: err,
-			})
-			return
-		}
-
-		thread.Messages = append(thread.Messages, genResult.OutputMessages...)
-		if a.threadRepository != nil {
-			if err := a.threadRepository.PutThread(ctx, thread); err != nil {
-				logger.Error("failed to save thread", "error", err)
-				publisher.Send(ctx, &dive.ResponseEvent{
-					Type:  dive.EventTypeResponseFailed,
-					Error: err,
-				})
-				return
-			}
-		}
-
-		response.FinishedAt = ptr(time.Now())
-		response.Usage = genResult.Usage
-
-		for _, msg := range genResult.OutputMessages {
-			response.Items = append(response.Items, &dive.ResponseItem{
-				Type:    dive.ResponseItemTypeMessage,
-				Message: msg,
-			})
-		}
-
-		publisher.Send(ctx, &dive.ResponseEvent{
-			Type:     dive.EventTypeResponseCompleted,
-			Response: response,
-		})
-	}()
-
-	return stream, nil
 }
 
 // prepareMessages processes the ChatOptions to create messages for the LLM.
@@ -418,7 +305,7 @@ func (a *Agent) generate(
 	ctx context.Context,
 	messages []*llm.Message,
 	systemPrompt string,
-	publisher dive.EventPublisher,
+	callback dive.EventCallback,
 ) (*generateResult, error) {
 
 	// Contains the message history we pass to the LLM
@@ -453,7 +340,7 @@ func (a *Agent) generate(
 		var err error
 		var response *llm.Response
 		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
-			response, err = a.generateStreaming(ctx, streamingLLM, generateOpts, publisher)
+			response, err = a.generateStreaming(ctx, streamingLLM, generateOpts, callback)
 		} else {
 			response, err = a.model.Generate(ctx, generateOpts...)
 		}
@@ -488,17 +375,16 @@ func (a *Agent) generate(
 			break
 		}
 
-		publisher.Send(ctx, &dive.ResponseEvent{
-			Type: dive.EventTypeResponseInProgress,
-			Item: &dive.ResponseItem{
-				Type:    dive.ResponseItemTypeMessage,
-				Message: assistantMsg,
-				Usage:   response.Usage.Copy(),
-			},
-		})
+		if err := callback(ctx, &dive.ResponseItem{
+			Type:    dive.ResponseItemTypeMessage,
+			Message: assistantMsg,
+			Usage:   response.Usage.Copy(),
+		}); err != nil {
+			return nil, err
+		}
 
 		// Execute all requested tool calls
-		toolResults, err := a.executeToolCalls(ctx, toolCalls, publisher)
+		toolResults, err := a.executeToolCalls(ctx, toolCalls, callback)
 		if err != nil {
 			return nil, err
 		}
@@ -561,7 +447,7 @@ func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
 	generateOpts []llm.Option,
-	publisher dive.EventPublisher,
+	callback dive.EventCallback,
 ) (*llm.Response, error) {
 	accum := llm.NewResponseAccumulator()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
@@ -575,14 +461,12 @@ func (a *Agent) generateStreaming(
 		if err := accum.AddEvent(event); err != nil {
 			return nil, err
 		}
-		// Forward LLM events
-		publisher.Send(ctx, &dive.ResponseEvent{
-			Type: dive.EventTypeLLMEvent,
-			Item: &dive.ResponseItem{
-				Type:  dive.ResponseItemTypeMessage,
-				Event: event,
-			},
-		})
+		if err := callback(ctx, &dive.ResponseItem{
+			Type:  dive.ResponseItemTypeEvent,
+			Event: event,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	if err := iter.Err(); err != nil {
 		return nil, err
@@ -598,7 +482,11 @@ func (a *Agent) getConfirmer() (dive.Confirmer, bool) {
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
-func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolUseContent, publisher dive.EventPublisher) ([]*dive.ToolCallResult, error) {
+func (a *Agent) executeToolCalls(
+	ctx context.Context,
+	toolCalls []*llm.ToolUseContent,
+	callback dive.EventCallback,
+) ([]*dive.ToolCallResult, error) {
 	results := make([]*dive.ToolCallResult, len(toolCalls))
 	for i, toolCall := range toolCalls {
 		tool, ok := a.toolsByName[toolCall.Name]
@@ -610,13 +498,12 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolUseCo
 			"tool_name", toolCall.Name,
 			"tool_input", string(toolCall.Input))
 
-		publisher.Send(ctx, &dive.ResponseEvent{
-			Type: dive.EventTypeResponseToolCall,
-			Item: &dive.ResponseItem{
-				Type:     dive.ResponseItemTypeToolCall,
-				ToolCall: toolCall,
-			},
-		})
+		if err := callback(ctx, &dive.ResponseItem{
+			Type:     dive.ResponseItemTypeToolCall,
+			ToolCall: toolCall,
+		}); err != nil {
+			return nil, err
+		}
 
 		isConfirmed := true
 		if confirmer, ok := a.getConfirmer(); ok {
@@ -662,13 +549,12 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []*llm.ToolUseCo
 			}
 		}
 
-		publisher.Send(ctx, &dive.ResponseEvent{
-			Type: dive.EventTypeResponseToolResult,
-			Item: &dive.ResponseItem{
-				Type:           dive.ResponseItemTypeToolCallResult,
-				ToolCallResult: results[i],
-			},
-		})
+		if err := callback(ctx, &dive.ResponseItem{
+			Type:           dive.ResponseItemTypeToolCallResult,
+			ToolCallResult: results[i],
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return results, nil
 }

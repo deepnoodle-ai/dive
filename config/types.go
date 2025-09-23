@@ -88,10 +88,9 @@ type Tool struct {
 
 // Content carries or points to a piece of content that can be used as context.
 type Content struct {
-	Text   string `yaml:"Text,omitempty" json:"Text,omitempty"`
-	Path   string `yaml:"Path,omitempty" json:"Path,omitempty"`
-	URL    string `yaml:"URL,omitempty" json:"URL,omitempty"`
-	Script string `yaml:"Script,omitempty" json:"Script,omitempty"`
+	Text string `yaml:"Text,omitempty" json:"Text,omitempty"`
+	Path string `yaml:"Path,omitempty" json:"Path,omitempty"`
+	URL  string `yaml:"URL,omitempty" json:"URL,omitempty"`
 }
 
 // Agent is a serializable representation of an Agent

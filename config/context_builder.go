@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/deepnoodle-ai/dive/eval"
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
@@ -38,14 +37,11 @@ func buildContextContent(directory string, entries []Content) ([]llm.Content, er
 		if entry.URL != "" {
 			fieldsSet++
 		}
-		if entry.Script != "" {
-			fieldsSet++
-		}
 		if fieldsSet == 0 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Script")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL")
 		}
 		if fieldsSet > 1 {
-			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, Script, but multiple were set")
+			return nil, fmt.Errorf("context entry must specify exactly one of Text, Path, URL, but multiple were set")
 		}
 
 		switch {
@@ -87,12 +83,6 @@ func buildContextContent(directory string, entries []Content) ([]llm.Content, er
 				return nil, err
 			}
 			contents = append(contents, content)
-		case entry.Script != "":
-			// Create ScriptPathContent for dynamic script evaluation
-			contents = append(contents, &eval.ScriptPathContent{
-				DynamicFrom: entry.Script,
-				Directory:   directory,
-			})
 		}
 	}
 	return contents, nil

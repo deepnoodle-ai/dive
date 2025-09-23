@@ -144,14 +144,7 @@ func (r *DiskRepository) ListThreads(ctx context.Context, input *dive.ListThread
 		if err := json.Unmarshal(data, &thread); err != nil {
 			continue
 		}
-		// If ThreadID is specified in input, filter for that specific thread
-		if input != nil && input.ThreadID != "" {
-			if thread.ID == input.ThreadID {
-				threads = append(threads, &thread)
-			}
-		} else {
-			threads = append(threads, &thread)
-		}
+		threads = append(threads, &thread)
 	}
 	return &dive.ListThreadsOutput{Items: threads}, nil
 }

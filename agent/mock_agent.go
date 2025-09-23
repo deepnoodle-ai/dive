@@ -59,30 +59,3 @@ func (a *MockAgent) IsSupervisor() bool {
 func (a *MockAgent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
 	return a.response, nil
 }
-
-func (a *MockAgent) StreamResponse(ctx context.Context, opts ...dive.Option) (dive.ResponseStream, error) {
-	stream, publisher := dive.NewEventStream()
-	defer publisher.Close()
-
-	// responseID := dive.NewID()
-	// responseItem := &dive.ResponseItem{
-	// 	Type:    dive.ResponseItemTypeMessage,
-	// 	Message: a.response.Items[0].Message,
-	// }
-
-	// mockResponse := &dive.Response{
-	// 	ID:         responseID,
-	// 	Model:      "mock-model",
-	// 	CreatedAt:  time.Now(),
-	// 	Items:      []*dive.ResponseItem{responseItem},
-	// 	Usage:      a.response.Usage,
-	// 	FinishedAt: timePtr(time.Now()),
-	// }
-
-	publisher.Send(ctx, &dive.ResponseEvent{
-		Type:     dive.EventTypeResponseCompleted,
-		Response: a.response,
-	})
-
-	return stream, nil
-}

@@ -25,7 +25,8 @@ type Thread struct {
 
 // ListThreadsInput specifies search criteria for threads in a thread repository
 type ListThreadsInput struct {
-	ThreadID string
+	Offset int
+	Limit  int
 }
 
 // ListThreadsOutput is the output for listing threads
