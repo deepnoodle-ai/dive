@@ -105,9 +105,6 @@ func New(opts Options) (*Agent, error) {
 	if opts.ID == "" {
 		opts.ID = dive.NewID()
 	}
-	if opts.Name == "" {
-		opts.Name = dive.RandomName()
-	}
 	if opts.SystemPrompt == "" {
 		opts.SystemPrompt = SystemPromptTemplate
 	}

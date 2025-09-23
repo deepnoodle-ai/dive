@@ -1,16 +1,9 @@
 package dive
 
 import (
-	"fmt"
 	"strings"
 	"time"
-
-	petname "github.com/dustinkirkland/golang-petname"
 )
-
-func init() {
-	petname.NonDeterministicMode()
-}
 
 func TruncateText(text string, maxWords int) string {
 	// Split into lines while preserving newlines
@@ -44,10 +37,6 @@ func TruncateText(text string, maxWords int) string {
 		truncated += " ..."
 	}
 	return truncated
-}
-
-func RandomName() string {
-	return fmt.Sprintf("%s-%s", petname.Adjective(), petname.Name())
 }
 
 func DateString(t time.Time) string {

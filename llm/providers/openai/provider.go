@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deepnoodle-ai/dive/internal/retry"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/providers"
-	"github.com/deepnoodle-ai/dive/retry"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"

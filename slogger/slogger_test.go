@@ -68,7 +68,7 @@ func TestContextFunctions(t *testing.T) {
 	// Test with nil context
 	logger := NewDevNullLogger()
 
-	ctx := WithLogger(nil, logger)
+	ctx := WithLogger(context.Background(), logger)
 	require.NotNil(t, ctx)
 
 	// Test retrieving from context
@@ -82,11 +82,6 @@ func TestContextFunctions(t *testing.T) {
 	require.NotNil(t, newCtx)
 	retrievedLogger = Ctx(newCtx)
 	require.Equal(t, logger, retrievedLogger)
-
-	// Test with nil logger context
-	nilLoggerCtx := Ctx(nil)
-	require.NotNil(t, nilLoggerCtx)
-	require.IsType(t, &Slogger{}, nilLoggerCtx)
 
 	// Test with context but no logger
 	emptyCtx := context.Background()

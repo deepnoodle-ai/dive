@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/deepnoodle-ai/dive/internal/retry"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/retry"
 	"google.golang.org/genai"
 )
 

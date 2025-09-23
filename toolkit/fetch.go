@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/retry"
+	"github.com/deepnoodle-ai/dive/internal/retry"
 	"github.com/deepnoodle-ai/dive/schema"
 	"github.com/deepnoodle-ai/dive/web"
 )
