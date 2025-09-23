@@ -194,55 +194,37 @@ func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDif
 	fmt.Println("Analyzing semantic differences...")
 	fmt.Println()
 
-	// Stream the response
-	stream, err := diffAgent.StreamResponse(ctx, dive.WithInput(prompt))
+	_, err := diffAgent.CreateResponse(ctx,
+		dive.WithInput(prompt),
+		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			if item.Type == dive.ResponseItemTypeEvent {
+				payload := item.Event
+				if payload.Delta != nil {
+					if payload.Delta.Text != "" {
+						fmt.Print(successStyle.Sprint(payload.Delta.Text))
+					} else if payload.Delta.Thinking != "" {
+						fmt.Print(thinkingStyle.Sprint(payload.Delta.Thinking))
+					}
+				}
+			}
+			return nil
+		}),
+	)
+
 	if err != nil {
+		// Check if it's an authentication error and provide helpful message
+		if strings.Contains(err.Error(), "authentication_error") || strings.Contains(err.Error(), "x-api-key header is required") {
+			fmt.Println(errorStyle.Sprint("❌ Authentication required"))
+			fmt.Println("💡 Set your API key using one of these methods:")
+			fmt.Printf("   • Environment variable: export ANTHROPIC_API_KEY=your_key_here\n")
+			fmt.Printf("   • For other providers, use: --provider openai (and set OPENAI_API_KEY)\n")
+			fmt.Printf("   • See available providers: dive llm --help\n")
+			return nil
+		}
 		return fmt.Errorf("error generating diff analysis: %w", err)
 	}
-	defer stream.Close()
 
-	// Process the streaming response
-	var incremental bool
-	for stream.Next(ctx) {
-		event := stream.Event()
-		switch event.Type {
-		case dive.EventTypeLLMEvent:
-			incremental = true
-			payload := event.Item.Event
-			if payload.Delta != nil {
-				if payload.Delta.Text != "" {
-					fmt.Print(successStyle.Sprint(payload.Delta.Text))
-				} else if payload.Delta.Thinking != "" {
-					fmt.Print(thinkingStyle.Sprint(payload.Delta.Thinking))
-				}
-			}
-		case dive.EventTypeResponseCompleted:
-			if !incremental {
-				text := strings.TrimSpace(event.Response.OutputText())
-				fmt.Println(successStyle.Sprint(text))
-			}
-		case dive.EventTypeResponseFailed:
-			// Handle failed response event
-			if event.Error != nil {
-				// Check if it's an authentication error and provide helpful message
-				if strings.Contains(event.Error.Error(), "authentication_error") || strings.Contains(event.Error.Error(), "x-api-key header is required") {
-					fmt.Println(errorStyle.Sprint("❌ Authentication required"))
-					fmt.Println("💡 Set your API key using one of these methods:")
-					fmt.Printf("   • Environment variable: export ANTHROPIC_API_KEY=your_key_here\n")
-					fmt.Printf("   • For other providers, use: --provider openai (and set OPENAI_API_KEY)\n")
-					fmt.Printf("   • See available providers: dive llm --help\n")
-					return nil
-				}
-				return fmt.Errorf("diff analysis failed: %w", event.Error)
-			}
-		}
-	}
-
-	if err := stream.Err(); err != nil {
-		return fmt.Errorf("error during diff analysis: %w", err)
-	}
-
-	fmt.Println() // Add final newline
+	fmt.Println()
 	return nil
 }
 
