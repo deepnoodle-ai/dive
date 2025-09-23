@@ -23,7 +23,7 @@ import "github.com/deepnoodle-ai/dive/llm/providers/openai"
 model := openai.New()
 ```
 
-**Models:** gpt-5-2025-08-07 (default), gpt-4o, gpt-4o-mini, o1, o3-mini, o3
+**Models:** gpt-5 (default), gpt-4o, gpt-4o-mini, o1, o3-mini, o3
 **Features:** Tool calling, streaming, reasoning budget (o1/o3)
 
 ### Groq

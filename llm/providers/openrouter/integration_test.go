@@ -15,7 +15,7 @@ func TestOpenRouterIntegration(t *testing.T) {
 		t.Skip("Skipping integration test: no OPENROUTER_API_KEY set")
 	}
 
-	provider := New(WithModel(ModelOpenAIGPT4o))
+	provider := New(WithModel(ModelGPT4o))
 
 	// This would require an actual API key to work
 	ctx := context.Background()

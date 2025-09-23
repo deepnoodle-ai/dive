@@ -41,7 +41,7 @@ const (
 )
 
 var (
-	DefaultModel              = "gpt-4o-2024-08-06"
+	DefaultModel              = ModelGPT5
 	DefaultEndpoint           = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens          = 4096
 	DefaultSystemRole         = "developer"
