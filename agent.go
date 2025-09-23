@@ -113,7 +113,7 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		opts.Logger = log.New(log.GetDefaultLevel())
 	}
 	if opts.ID == "" {
-		opts.ID = NewID()
+		opts.ID = newID()
 	}
 	var systemPromptTemplate *template.Template
 	if !opts.NoSystemPrompt {
@@ -230,7 +230,7 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 	}
 
 	response := &Response{
-		ID:        RandomInt(),
+		ID:        randomInt(),
 		Model:     a.model.Name(),
 		CreatedAt: time.Now(),
 	}
