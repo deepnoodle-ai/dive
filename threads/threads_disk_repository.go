@@ -131,6 +131,20 @@ func (r *DiskRepository) ListThreads(ctx context.Context, input *dive.ListThread
 	if err != nil {
 		return nil, fmt.Errorf("failed to find thread files in %s: %v", r.directory, err)
 	}
+
+	if input != nil {
+		if input.Offset > 0 {
+			if input.Offset < len(files) {
+				files = files[input.Offset:]
+			} else {
+				files = nil
+			}
+		}
+		if input.Limit > 0 && input.Limit < len(files) {
+			files = files[:input.Limit]
+		}
+	}
+
 	var threads []*dive.Thread
 	for _, file := range files {
 		data, err := os.ReadFile(file)

@@ -69,7 +69,7 @@ alwaysApply: true
 ├── fixtures/              # Test fixtures
 ├── scripts/               # Build and test automation scripts
 ├── retry/                 # Retry logic utilities
-└── slogger/               # Structured logging support
+└── log/               # Structured logging support
 ```
 
 ## Important Context

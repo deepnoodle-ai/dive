@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +21,8 @@ func getUserVariables() map[string]interface{} {
 	return userVariables
 }
 
-func getLogLevel() slogger.LogLevel {
-	return slogger.LevelFromString(logLevel)
+func getLogLevel() log.Level {
+	return log.LevelFromString(logLevel)
 }
 
 var rootCmd = &cobra.Command{

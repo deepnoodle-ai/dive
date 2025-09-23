@@ -396,7 +396,7 @@ type BuildOptions struct {
     Confirmer dive.Confirmer
 
     // Custom logger
-    Logger slogger.Logger
+    Logger log.Logger
 
     // Auto-start environment
     AutoStart bool
@@ -412,10 +412,10 @@ func BuildEnvironmentWithOptions(cfg *Config, opts BuildOptions) (*environment.E
 ```go
 type ContextBuilder struct {
     documents map[string]*Document
-    logger    slogger.Logger
+    logger    log.Logger
 }
 
-func NewContextBuilder(documents map[string]*Document, logger slogger.Logger) *ContextBuilder
+func NewContextBuilder(documents map[string]*Document, logger log.Logger) *ContextBuilder
 
 // BuildContext builds LLM context from configuration
 func (cb *ContextBuilder) BuildContext(ctx context.Context, contents []Content) ([]llm.Content, error)

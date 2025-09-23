@@ -1,4 +1,4 @@
-package slogger
+package log
 
 import (
 	"context"
@@ -12,7 +12,7 @@ func TestLogLevel(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected LogLevel
+		expected Level
 	}{
 		{"debug level", "debug", LevelDebug},
 		{"info level", "info", LevelInfo},
@@ -20,8 +20,8 @@ func TestLogLevel(t *testing.T) {
 		{"error level", "error", LevelError},
 		{"uppercase", "DEBUG", LevelDebug},
 		{"mixed case", "WaRn", LevelWarn},
-		{"invalid level", "invalid", DefaultLogLevel},
-		{"empty string", "", DefaultLogLevel},
+		{"invalid level", "invalid", defaultLevel},
+		{"empty string", "", defaultLevel},
 	}
 
 	for _, tc := range tests {
@@ -34,7 +34,7 @@ func TestLogLevel(t *testing.T) {
 
 // TestDevNullLogger tests the DevNullLogger implementation
 func TestDevNullLogger(t *testing.T) {
-	logger := NewDevNullLogger()
+	logger := NewNullLogger()
 
 	// These calls should not panic
 	logger.Debug("debug message", "key", "value")
@@ -44,13 +44,13 @@ func TestDevNullLogger(t *testing.T) {
 
 	withLogger := logger.With("context", "value")
 	require.NotNil(t, withLogger)
-	require.IsType(t, &DevNullLogger{}, withLogger)
+	require.IsType(t, &NullLogger{}, withLogger)
 }
 
-func TestSlogger(t *testing.T) {
+func TestStructuredLogger(t *testing.T) {
 	logger := New(LevelDebug)
 	require.NotNil(t, logger)
-	require.IsType(t, &Slogger{}, logger)
+	require.IsType(t, &StructuredLogger{}, logger)
 
 	// These calls should not panic
 	logger.Debug("debug message", "key", "value")
@@ -60,13 +60,13 @@ func TestSlogger(t *testing.T) {
 
 	withLogger := logger.With("context", "value")
 	require.NotNil(t, withLogger)
-	require.IsType(t, &Slogger{}, withLogger)
+	require.IsType(t, &StructuredLogger{}, withLogger)
 }
 
 //nolint:staticcheck // SA1012: Intentionally passing nil context for testing
 func TestContextFunctions(t *testing.T) {
 	// Test with nil context
-	logger := NewDevNullLogger()
+	logger := NewNullLogger()
 
 	ctx := WithLogger(context.Background(), logger)
 	require.NotNil(t, ctx)
@@ -87,7 +87,7 @@ func TestContextFunctions(t *testing.T) {
 	emptyCtx := context.Background()
 	emptyLogger := Ctx(emptyCtx)
 	require.NotNil(t, emptyLogger)
-	require.IsType(t, &Slogger{}, emptyLogger)
+	require.IsType(t, &StructuredLogger{}, emptyLogger)
 }
 
 // mockLogger is a simple implementation for testing
@@ -103,33 +103,33 @@ func newMockLogger() *mockLogger {
 	}
 }
 
-func (l *mockLogger) Debug(msg string, keysAndValues ...any) {
+func (l *mockLogger) Debug(msg string, args ...any) {
 	l.messages = append(l.messages, "DEBUG: "+msg)
 }
 
-func (l *mockLogger) Info(msg string, keysAndValues ...any) {
+func (l *mockLogger) Info(msg string, args ...any) {
 	l.messages = append(l.messages, "INFO: "+msg)
 }
 
-func (l *mockLogger) Warn(msg string, keysAndValues ...any) {
+func (l *mockLogger) Warn(msg string, args ...any) {
 	l.messages = append(l.messages, "WARN: "+msg)
 }
 
-func (l *mockLogger) Error(msg string, keysAndValues ...any) {
+func (l *mockLogger) Error(msg string, args ...any) {
 	l.messages = append(l.messages, "ERROR: "+msg)
 }
 
-func (l *mockLogger) With(keysAndValues ...any) Logger {
+func (l *mockLogger) With(args ...any) Logger {
 	newLogger := newMockLogger()
 	newLogger.messages = l.messages
 	newLogger.context = l.context
 
 	// Add the key-value pairs to the context
-	for i := 0; i < len(keysAndValues); i += 2 {
-		if i+1 < len(keysAndValues) {
-			key, ok := keysAndValues[i].(string)
+	for i := 0; i < len(args); i += 2 {
+		if i+1 < len(args) {
+			key, ok := args[i].(string)
 			if ok {
-				newLogger.context[key] = keysAndValues[i+1]
+				newLogger.context[key] = args[i+1]
 			}
 		}
 	}
@@ -159,9 +159,4 @@ func TestMockLogger(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "value", mockLogger.context["key"])
 	require.Equal(t, 123, mockLogger.context["another"])
-}
-
-func TestDefaultLogger(t *testing.T) {
-	require.NotNil(t, DefaultLogger)
-	require.IsType(t, &DevNullLogger{}, DefaultLogger)
 }

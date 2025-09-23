@@ -12,7 +12,7 @@ import (
 	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 )
@@ -147,7 +147,7 @@ func readFileContent(filePath string) (string, error) {
 }
 
 func createDiffAgent(model llm.LLM) (*agent.Agent, error) {
-	logger := slogger.New(getLogLevel())
+	logger := log.New(getLogLevel())
 
 	agentOpts := agent.Options{
 		Name:            "DiffAnalyzer",
@@ -197,7 +197,7 @@ func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDif
 	_, err := diffAgent.CreateResponse(ctx,
 		dive.WithInput(prompt),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-			if item.Type == dive.ResponseItemTypeEvent {
+			if item.Type == dive.ResponseItemTypeModelEvent {
 				payload := item.Event
 				if payload.Delta != nil {
 					if payload.Delta.Text != "" {

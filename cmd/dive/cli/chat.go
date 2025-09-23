@@ -27,7 +27,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID
 		dive.WithInput(message),
 		dive.WithThreadID(actualThreadID),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-			if item.Type == dive.ResponseItemTypeEvent {
+			if item.Type == dive.ResponseItemTypeModelEvent {
 				payload := item.Event
 				if payload.ContentBlock != nil {
 					cb := payload.ContentBlock

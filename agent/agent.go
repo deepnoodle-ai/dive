@@ -11,7 +11,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 )
 
 var (
@@ -55,7 +55,7 @@ type Options struct {
 	Tools              []dive.Tool
 	ResponseTimeout    time.Duration
 	Hooks              llm.Hooks
-	Logger             slogger.Logger
+	Logger             log.Logger
 	ToolIterationLimit int
 	ModelSettings      *ModelSettings
 	DateAwareness      *bool
@@ -78,7 +78,7 @@ type Agent struct {
 	subordinates         []string
 	responseTimeout      time.Duration
 	hooks                llm.Hooks
-	logger               slogger.Logger
+	logger               log.Logger
 	toolIterationLimit   int
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
@@ -100,7 +100,7 @@ func New(opts Options) (*Agent, error) {
 		opts.ToolIterationLimit = DefaultToolIterationLimit
 	}
 	if opts.Logger == nil {
-		opts.Logger = slogger.DefaultLogger
+		opts.Logger = log.New(log.GetDefaultLevel())
 	}
 	if opts.ID == "" {
 		opts.ID = dive.NewID()
@@ -459,7 +459,7 @@ func (a *Agent) generateStreaming(
 			return nil, err
 		}
 		if err := callback(ctx, &dive.ResponseItem{
-			Type:  dive.ResponseItemTypeEvent,
+			Type:  dive.ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
 			return nil, err

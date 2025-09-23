@@ -4,12 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/toolkit"
 )
 
@@ -25,7 +24,7 @@ func main() {
 	flag.StringVar(&prompt, "prompt", DefaultPrompt, "prompt to use")
 	flag.Parse()
 
-	logger := slogger.New(slogger.LevelFromString("debug"))
+	logger := log.New(log.LevelDebug)
 
 	textEditor := toolkit.NewTextEditorTool(toolkit.TextEditorToolOptions{})
 	commandTool := toolkit.NewCommandTool(toolkit.CommandToolOptions{

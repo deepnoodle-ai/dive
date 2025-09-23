@@ -68,5 +68,21 @@ func (r *MemoryRepository) ListThreads(ctx context.Context, input *dive.ListThre
 	for _, thread := range r.threads {
 		threads = append(threads, thread)
 	}
+
+	if input != nil {
+		if input.Offset > 0 {
+			if input.Offset < len(threads) {
+				threads = threads[input.Offset:]
+			} else {
+				threads = nil
+			}
+		}
+	}
+	if input != nil {
+		if input.Limit > 0 && input.Limit < len(threads) {
+			threads = threads[:input.Limit]
+		}
+	}
+
 	return &dive.ListThreadsOutput{Items: threads}, nil
 }

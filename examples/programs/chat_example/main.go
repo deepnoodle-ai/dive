@@ -5,7 +5,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
@@ -13,7 +12,7 @@ import (
 	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/toolkit/google"
@@ -47,7 +46,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	logger := slogger.New(slogger.LevelInfo)
+	logger := log.New(log.LevelInfo)
 
 	a, err := agent.New(agent.Options{
 		Name: "Dr. Smith",
@@ -85,7 +84,7 @@ to answer non-medical questions. Use maximum medical jargon.`,
 			dive.WithMessage(llm.NewUserTextMessage(message)),
 			dive.WithThreadID("1"),
 			dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-				if item.Type == dive.ResponseItemTypeEvent {
+				if item.Type == dive.ResponseItemTypeModelEvent {
 					event := item.Event
 					if event.ContentBlock != nil {
 						cb := event.ContentBlock

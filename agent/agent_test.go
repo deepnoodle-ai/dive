@@ -15,7 +15,6 @@ func TestAgent(t *testing.T) {
 		Name:         "Testing Agent",
 		Goal:         "Test the agent",
 		Instructions: "You are a testing agent",
-		IsSupervisor: false,
 		Model:        anthropic.New(),
 	})
 	require.NoError(t, err)
@@ -27,7 +26,6 @@ func TestAgentChatSystemPrompt(t *testing.T) {
 		Name:         "TestAgent",
 		Goal:         "Help research a topic.",
 		Instructions: "You are a research assistant.",
-		IsSupervisor: false,
 		Model:        anthropic.New(),
 	})
 	require.NoError(t, err)

@@ -14,7 +14,7 @@ import (
 	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -49,7 +49,7 @@ type FileWatcher struct {
 	options     WatchOptions
 	watcher     *fsnotify.Watcher
 	agent       dive.Agent
-	logger      slogger.Logger
+	logger      log.Logger
 	debouncer   map[string]time.Time
 	changeBatch []FileChange
 	batchMutex  sync.Mutex
@@ -64,7 +64,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		return nil, fmt.Errorf("failed to create file watcher: %w", err)
 	}
 
-	logger := slogger.New(getLogLevel())
+	logger := log.New(getLogLevel())
 
 	// Generate a random thread ID for this watch session
 	threadID := dive.NewID()

@@ -78,7 +78,7 @@ type Agent struct {
     subordinates         []string
     responseTimeout      time.Duration
     hooks                llm.Hooks
-    logger               slogger.Logger
+    logger               log.Logger
     toolIterationLimit   int
     modelSettings        *ModelSettings
     dateAwareness        *bool
@@ -165,7 +165,7 @@ type Options struct {
 
     // Advanced
     Hooks                llm.Hooks                 // LLM lifecycle hooks
-    Logger               slogger.Logger            // Logging interface
+    Logger               log.Logger            // Logging interface
 }
 ```
 

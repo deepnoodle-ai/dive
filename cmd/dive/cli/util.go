@@ -13,7 +13,7 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/fatih/color"
 )
@@ -201,7 +201,7 @@ func discoverConfiguration(ctx context.Context, path string, noConfig bool, agen
 	}
 
 	// Create environment from config
-	logger := slogger.New(slogger.LevelFromString("warn"))
+	logger := log.New(log.LevelFromString("warn"))
 	threadsDir, err := diveThreadsDirectory()
 	if err != nil {
 		return nil, fmt.Errorf("error getting threads directory: %v", err)
@@ -271,7 +271,7 @@ func reportConfigurationUsage(configSource string, agentName string) {
 
 // createAgentFromFlags creates an agent using the traditional flag-based approach
 func createAgentFromFlags(systemPrompt, goal, instructions string, tools []dive.Tool) (dive.Agent, error) {
-	logger := slogger.New(slogger.LevelFromString("warn"))
+	logger := log.New(log.LevelFromString("warn"))
 
 	model, err := config.GetModel(llmProvider, llmModel)
 	if err != nil {
@@ -312,7 +312,7 @@ func applyFlagOverrides(configAgent dive.Agent, systemPrompt, goal, instructions
 	// For now, we'll create a new agent with overrides
 	// This is a simplified approach - a more sophisticated implementation
 	// would merge the configurations more granularly
-	logger := slogger.New(slogger.LevelFromString("warn"))
+	logger := log.New(log.LevelFromString("warn"))
 
 	model, err := config.GetModel(llmProvider, llmModel)
 	if err != nil {
