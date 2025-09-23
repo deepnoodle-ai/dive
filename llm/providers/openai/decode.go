@@ -254,22 +254,12 @@ func decodeReasoningContent(reasoning responses.ResponseReasoningItem) ([]llm.Co
 func decodeCodeInterpreterCallContent(codeCall responses.ResponseCodeInterpreterToolCall) ([]llm.Content, error) {
 	// Convert results from ResponseCodeInterpreterToolCall to CodeInterpreterCallResult
 	var results []CodeInterpreterCallResult
-	for _, result := range codeCall.Results {
+	for _, result := range codeCall.Outputs {
 		callResult := CodeInterpreterCallResult{Type: result.Type}
 		switch result.Type {
 		case "logs":
 			logs := result.AsLogs()
 			callResult.Logs = logs.Logs
-		case "files":
-			files := result.AsFiles()
-			var callResultFiles []CodeInterpreterCallResultFile
-			for _, file := range files.Files {
-				callResultFiles = append(callResultFiles, CodeInterpreterCallResultFile{
-					FileID:   file.FileID,
-					MimeType: file.MimeType,
-				})
-			}
-			callResult.Files = callResultFiles
 		}
 		results = append(results, callResult)
 	}

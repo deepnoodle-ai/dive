@@ -2,19 +2,12 @@ package dive
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
+	"math/big"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/gofrs/uuid/v5"
-)
-
-// OutputFormat defines the desired output format for a Task
-type OutputFormat string
-
-const (
-	OutputFormatText     OutputFormat = "text"
-	OutputFormatMarkdown OutputFormat = "markdown"
-	OutputFormatJSON     OutputFormat = "json"
 )
 
 // Type aliases for easy access to LLM types
@@ -23,41 +16,34 @@ type (
 	Property = schema.Property
 )
 
-// Agent represents an intelligent AI entity that can autonomously execute tasks,
-// respond to chat messages, and process information. Agents can work with documents,
-// generate responses using LLMs, and interact with users through natural language.
-// They may have specialized capabilities depending on their implementation.
+// Agent represents an intelligent AI entity that can autonomously use tools to
+// process information while responding to chat messages.
 type Agent interface {
 
 	// Name of the Agent
 	Name() string
 
-	// IsSupervisor indicates whether the Agent can assign work to other Agents
-	IsSupervisor() bool
-
 	// CreateResponse creates a new Response from the Agent
-	CreateResponse(ctx context.Context, opts ...Option) (*Response, error)
-
-	// StreamResponse streams a new Response from the Agent
-	StreamResponse(ctx context.Context, opts ...Option) (ResponseStream, error)
+	CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error)
 }
 
-// Options contains configuration for LLM generations.
-type Options struct {
+// CreateResponseOptions contains configuration for LLM generations.
+type CreateResponseOptions struct {
 	ThreadID      string
 	UserID        string
 	Messages      []*llm.Message
 	EventCallback EventCallback
 }
 
-// EventCallback is a function that processes streaming events during response generation.
-type EventCallback func(ctx context.Context, event *ResponseEvent) error
+// EventCallback is a function called with each item produced while an agent
+// is using tools or generating a response.
+type EventCallback func(ctx context.Context, item *ResponseItem) error
 
-// Option is a type signature for defining new LLM generation options.
-type Option func(*Options)
+// CreateResponseOption is a type signature for defining new LLM generation options.
+type CreateResponseOption func(*CreateResponseOptions)
 
 // Apply invokes any supplied options. Used internally in Dive.
-func (o *Options) Apply(opts []Option) {
+func (o *CreateResponseOptions) Apply(opts []CreateResponseOption) {
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -65,55 +51,60 @@ func (o *Options) Apply(opts []Option) {
 
 // WithThreadID associates the given conversation thread ID with a generation.
 // This appends the new messages to any previous messages belonging to this thread.
-func WithThreadID(threadID string) Option {
-	return func(opts *Options) {
+func WithThreadID(threadID string) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.ThreadID = threadID
 	}
 }
 
 // WithUserID associates the given user ID with a generation, indicating what
 // person is the speaker in the conversation.
-func WithUserID(userID string) Option {
-	return func(opts *Options) {
+func WithUserID(userID string) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.UserID = userID
 	}
 }
 
 // WithMessage specifies a single message to be used in the generation.
-func WithMessage(message *llm.Message) Option {
-	return func(opts *Options) {
+func WithMessage(message *llm.Message) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.Messages = []*llm.Message{message}
 	}
 }
 
 // WithMessages specifies the messages to be used in the generation.
-func WithMessages(messages ...*llm.Message) Option {
-	return func(opts *Options) {
+func WithMessages(messages ...*llm.Message) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.Messages = messages
 	}
 }
 
 // WithInput specifies a simple text input string to be used in the generation.
 // This is a convenience wrapper that creates a single user message.
-func WithInput(input string) Option {
-	return func(opts *Options) {
+func WithInput(input string) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.Messages = []*llm.Message{llm.NewUserTextMessage(input)}
 	}
 }
 
 // WithEventCallback specifies a callback function that will be invoked for each
-// event generated during response creation.
-func WithEventCallback(callback EventCallback) Option {
-	return func(opts *Options) {
+// item generated during response creation.
+func WithEventCallback(callback EventCallback) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
 		opts.EventCallback = callback
 	}
 }
 
-// NewID returns a new UUID
+// NewID returns a new unique identifier with format "agent-<randomnum>"
 func NewID() string {
-	id, err := uuid.NewV7()
+	return fmt.Sprintf("agent-%s", RandomInt())
+}
+
+// RandomInt returns a random integer as a string
+func RandomInt() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1<<62))
 	if err != nil {
 		panic(err)
 	}
-	return id.String()
+	return fmt.Sprintf("%d", n)
 }

@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/config"
+	"github.com/deepnoodle-ai/dive/internal/tablewriter"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/pricing"
-	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
 

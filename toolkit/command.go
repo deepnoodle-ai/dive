@@ -41,10 +41,14 @@ type CommandTool struct {
 }
 
 // NewCommandTool creates a new tool that executes external commands.
-func NewCommandTool(options CommandToolOptions) *dive.TypedToolAdapter[*CommandInput] {
+func NewCommandTool(opts ...CommandToolOptions) *dive.TypedToolAdapter[*CommandInput] {
+	var resolvedOpts CommandToolOptions
+	if len(opts) > 0 {
+		resolvedOpts = opts[0]
+	}
 	return dive.ToolAdapter(&CommandTool{
-		allowList: options.AllowList,
-		denyList:  options.DenyList,
+		allowList: resolvedOpts.AllowList,
+		denyList:  resolvedOpts.DenyList,
 	})
 }
 

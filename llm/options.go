@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 )
 
 // Option is a function that is used to adjust LLM configuration.
@@ -40,7 +40,7 @@ type Config struct {
 	Messages           Messages                 `json:"messages"`
 	Hooks              Hooks                    `json:"-"`
 	Client             *http.Client             `json:"-"`
-	Logger             slogger.Logger           `json:"-"`
+	Logger             log.Logger               `json:"-"`
 	SSECallback        ServerSentEventsCallback `json:"-"`
 }
 
@@ -81,7 +81,7 @@ func WithModel(model string) Option {
 }
 
 // WithLogger sets the logger.
-func WithLogger(logger slogger.Logger) Option {
+func WithLogger(logger log.Logger) Option {
 	return func(config *Config) {
 		config.Logger = logger
 	}

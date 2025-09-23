@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/spf13/cobra"
 )
 
@@ -17,12 +17,8 @@ var (
 	logLevel      string
 )
 
-func getUserVariables() map[string]interface{} {
-	return userVariables
-}
-
-func getLogLevel() slogger.LogLevel {
-	return slogger.LevelFromString(logLevel)
+func getLogLevel() log.Level {
+	return log.LevelFromString(logLevel)
 }
 
 var rootCmd = &cobra.Command{
@@ -67,6 +63,6 @@ func init() {
 		"Set a variable (format: key=value). Can be specified multiple times")
 
 	rootCmd.PersistentFlags().StringVarP(
-		&logLevel, "log-level", "l", "info",
-		"Log level to use (debug, info, warn, error)")
+		&logLevel, "log-level", "", "warn",
+		"Log level to use (none, debug, info, warn, error)")
 }

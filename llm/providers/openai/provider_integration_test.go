@@ -159,7 +159,7 @@ func TestIntegration_FileInput(t *testing.T) {
 	ctx := context.Background()
 	provider := setupIntegrationProvider(t)
 
-	content, err := os.ReadFile("../../../fixtures/hola.pdf")
+	content, err := os.ReadFile("../../../internal/fixtures/hola.pdf")
 	require.NoError(t, err)
 	response, err := provider.Generate(ctx, llm.WithMessages(
 		llm.NewUserMessage(
@@ -184,7 +184,7 @@ func TestIntegration_Vision(t *testing.T) {
 	ctx := context.Background()
 	provider := setupIntegrationProvider(t)
 
-	content, err := os.ReadFile("../../../fixtures/go.png")
+	content, err := os.ReadFile("../../../internal/fixtures/go.png")
 	require.NoError(t, err)
 	response, err := provider.Generate(ctx, llm.WithMessages(
 		llm.NewUserMessage(

@@ -7,27 +7,27 @@ import (
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 )
 
 // MCPServerConnection represents a connection to an MCP server
 type MCPServerConnection struct {
-	Client             *Client
-	Config             *ServerConfig
-	Tools              []dive.Tool
+	Client *Client
+	Config *ServerConfig
+	Tools  []dive.Tool
 }
 
 // Manager manages multiple MCP server connections and tool discovery
 type Manager struct {
 	servers map[string]*MCPServerConnection
 	tools   map[string]dive.Tool
-	logger  slogger.Logger
+	logger  log.Logger
 	mutex   sync.RWMutex
 }
 
 // ManagerOptions configures a new MCP manager
 type ManagerOptions struct {
-	Logger slogger.Logger
+	Logger log.Logger
 }
 
 // NewManager creates a new MCP manager
@@ -107,7 +107,6 @@ func (m *Manager) initializeServer(ctx context.Context, serverConfig *ServerConf
 		m.tools[mcpTool.Name] = adapter
 	}
 
-
 	if m.logger != nil {
 		var toolNames []string
 		for _, tool := range tools {
@@ -124,9 +123,9 @@ func (m *Manager) initializeServer(ctx context.Context, serverConfig *ServerConf
 
 	// Store the server connection
 	m.servers[serverConfig.Name] = &MCPServerConnection{
-		Client:             client,
-		Config:             serverConfig,
-		Tools:              tools,
+		Client: client,
+		Config: serverConfig,
+		Tools:  tools,
 	}
 	return nil
 }
@@ -266,5 +265,3 @@ func (m *Manager) GetServerNames() []string {
 	}
 	return names
 }
-
-

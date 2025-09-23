@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/internal/retry"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/providers"
-	"github.com/deepnoodle-ai/dive/retry"
 )
 
 // SystemPromptBehavior describes how the system prompt should be handled for a
@@ -41,7 +41,7 @@ const (
 )
 
 var (
-	DefaultModel              = "gpt-4o-2024-08-06"
+	DefaultModel              = ModelGPT5
 	DefaultEndpoint           = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens          = 4096
 	DefaultSystemRole         = "developer"

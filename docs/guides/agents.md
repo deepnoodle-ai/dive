@@ -36,13 +36,12 @@ import (
     "context"
     "fmt"
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 func main() {
     // Create a basic agent
-    assistant, err := agent.New(agent.Options{
+    assistant, err := dive.NewAgent(dive.AgentOptions{
         Name:         "Assistant",
         Instructions: "You are a helpful AI assistant.",
         Model:        anthropic.New(),
@@ -72,7 +71,7 @@ import (
 )
 
 // Create an agent with file system access
-researcher, err := agent.New(agent.Options{
+researcher, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Research Assistant",
     Instructions: "You help research topics and save findings to files.",
     Model:        anthropic.New(),
@@ -115,7 +114,7 @@ for event := range stream.Events() {
 ### Basic Options
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Data Analyst",        // Agent identifier
     Goal:         "Analyze data sets",   // High-level purpose
     Instructions: "You are an expert...", // Detailed behavior instructions
@@ -126,7 +125,7 @@ agent, err := agent.New(agent.Options{
 ### Advanced Configuration
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Advanced Assistant",
     Instructions: "You are a specialized assistant...",
     Model:        anthropic.New(),
@@ -272,7 +271,7 @@ Agents can be configured as supervisors to delegate work to other agents:
 ### Creating a Supervisor
 
 ```go
-supervisor, err := agent.New(agent.Options{
+supervisor, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Project Manager",
     Instructions: "You coordinate work between team members.",
     IsSupervisor: true,
@@ -319,7 +318,7 @@ supervisor, err := agent.New(agent.Options{
 // Set up thread repository
 threadRepo := threads.NewMemoryRepository()
 
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:             "Assistant",
     ThreadRepository: threadRepo,
 })
@@ -392,7 +391,7 @@ Tools: []dive.Tool{
 ### 3. Error Handling
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name: "Assistant",
     ResponseTimeout: time.Minute * 2, // Reasonable timeout
 })

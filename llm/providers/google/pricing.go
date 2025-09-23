@@ -1,33 +1,9 @@
 package google
 
-// PricingInfo represents pricing information for a specific service
-type PricingInfo struct {
-	Model       string  `json:"model"`
-	InputPrice  float64 `json:"input_price_per_1m_tokens"`  // per 1M input tokens (USD)
-	OutputPrice float64 `json:"output_price_per_1m_tokens"` // per 1M output tokens (USD)
-	Currency    string  `json:"currency"`
-	UpdatedAt   string  `json:"updated_at"` // YYYY-MM-DD format
-}
-
-// ImagePricingInfo represents pricing for image generation services
-type ImagePricingInfo struct {
-	Model     string  `json:"model"`
-	Price     float64 `json:"price_per_image"`    // per image (USD)
-	MaxSize   string  `json:"max_size"`           // e.g., "1024x1024"
-	Currency  string  `json:"currency"`
-	UpdatedAt string  `json:"updated_at"`
-}
-
-// EmbeddingPricingInfo represents pricing for embedding services
-type EmbeddingPricingInfo struct {
-	Model     string  `json:"model"`
-	Price     float64 `json:"price_per_1m_tokens"` // per 1M tokens (USD)
-	Currency  string  `json:"currency"`
-	UpdatedAt string  `json:"updated_at"`
-}
+import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing contains pricing for all text generation models
-var TextModelPricing = map[string]PricingInfo{
+var TextModelPricing = map[string]llm.PricingInfo{
 	ModelGemini25Flash: {
 		Model:       ModelGemini25Flash,
 		InputPrice:  0.15,
@@ -80,7 +56,7 @@ var TextModelPricing = map[string]PricingInfo{
 }
 
 // ImageModelPricing contains pricing for image generation models
-var ImageModelPricing = map[string]ImagePricingInfo{
+var ImageModelPricing = map[string]llm.ImagePricingInfo{
 	"gemini-2.5-flash-image": {
 		Model:     "gemini-2.5-flash-image",
 		Price:     0.039, // $30 per 1M tokens, 1290 tokens per 1024x1024 image
@@ -91,7 +67,7 @@ var ImageModelPricing = map[string]ImagePricingInfo{
 }
 
 // EmbeddingModelPricing contains pricing for embedding models
-var EmbeddingModelPricing = map[string]EmbeddingPricingInfo{
+var EmbeddingModelPricing = map[string]llm.EmbeddingPricingInfo{
 	"text-embedding-004": {
 		Model:     "text-embedding-004",
 		Price:     0.0625, // $0.0000625 per 1K tokens = $0.0625 per 1M tokens

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deepnoodle-ai/dive/internal/retry"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/providers"
-	"github.com/deepnoodle-ai/dive/retry"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"
@@ -19,7 +19,7 @@ import (
 const ProviderName = "openai"
 
 var (
-	DefaultModel         = "gpt-5-2025-08-07"
+	DefaultModel         = ModelGPT5
 	DefaultMaxTokens     = 4096
 	DefaultMaxRetries    = 2
 	DefaultRetryBaseWait = 1 * time.Second

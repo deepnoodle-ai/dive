@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/llm/providers/openai"
 )
 
 const DefaultPrompt = "What is the scientific name of the largest animal on Earth?"
@@ -19,12 +19,11 @@ func main() {
 
 	ctx := context.Background()
 
-	response, err := anthropic.New().Generate(
+	response, err := openai.New().Generate(
 		ctx,
-		llm.WithModel(anthropic.ModelClaudeSonnet4),
+		llm.WithModel(openai.ModelGPT5),
 		llm.WithUserTextMessage(prompt),
 		llm.WithMaxTokens(2048),
-		llm.WithTemperature(0.7),
 	)
 	if err != nil {
 		log.Fatal(err)

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/embedding"
-	"github.com/deepnoodle-ai/dive/retry"
+	"github.com/deepnoodle-ai/dive/internal/retry"
 	"google.golang.org/genai"
 )
 

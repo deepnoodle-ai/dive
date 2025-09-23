@@ -4,15 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/dive/toolkit/google"
 	"github.com/deepnoodle-ai/dive/toolkit/kagi"
@@ -49,7 +47,7 @@ func main() {
 		// https://developers.google.com/custom-search/v1/introduction
 		searchClient, err = google.New()
 		if err != nil {
-			log.Fatalf("Failed to initialize Google search client: %v", err)
+			log.Fatal("Failed to initialize Google search client:", err)
 		}
 	case "kagi":
 		// Kagi requires:
@@ -58,10 +56,10 @@ func main() {
 		// See https://help.kagi.com/kagi/api/search.html to request an invite
 		searchClient, err = kagi.New()
 		if err != nil {
-			log.Fatalf("Failed to initialize Kagi search client: %v", err)
+			log.Fatal("Failed to initialize Kagi search client:", err)
 		}
 	default:
-		log.Fatalf("Unknown search provider: %s. Use 'google' or 'kagi'", *searchProvider)
+		log.Fatal("Unknown search provider:", *searchProvider, ". Use 'google' or 'kagi'")
 	}
 
 	// Initialize LLM model
@@ -82,25 +80,25 @@ func main() {
 			openai.WithEndpoint(os.Getenv("OPENAI_ENDPOINT")),
 		)
 	default:
-		log.Fatalf("Unknown model provider: %s. Use 'anthropic', 'openai', or 'azure'", *modelProvider)
+		log.Fatal("Unknown model provider:", *modelProvider, ". Use 'anthropic', 'openai', or 'azure'")
 	}
 
-	researcher, err := agent.New(agent.Options{
+	researcher, err := dive.NewAgent(dive.AgentOptions{
 		Name:   "Research Assistant",
 		Goal:   "Use " + *searchProvider + " search with " + *modelProvider + " to research assigned topics",
 		Model:  model,
-		Logger: slogger.New(slogger.LevelFromString(*logLevel)),
+		Logger: log.New(log.LevelFromString(*logLevel)),
 		Tools: []dive.Tool{
 			toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{Searcher: searchClient}),
 		},
 	})
 	if err != nil {
-		log.Fatalf("Failed to create research agent: %v", err)
+		log.Fatal("Failed to create research agent:", err)
 	}
 
 	response, err := researcher.CreateResponse(ctx, dive.WithInput(*prompt))
 	if err != nil {
-		log.Fatalf("Failed to create response: %v", err)
+		log.Fatal("Failed to create response:", err)
 	}
 	fmt.Println(response.OutputText())
 }

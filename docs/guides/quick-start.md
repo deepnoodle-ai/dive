@@ -60,13 +60,12 @@ import (
     "log"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 func main() {
     // Create an AI agent
-    assistant, err := agent.New(agent.Options{
+    assistant, err := dive.NewAgent(dive.AgentOptions{
         Name:         "My Assistant",
         Instructions: "You are a helpful AI assistant who provides clear, concise answers.",
         Model:        anthropic.New(),
@@ -135,14 +134,13 @@ import (
     "log"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
     "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 func main() {
     // Create an agent with file and web tools
-    assistant, err := agent.New(agent.Options{
+    assistant, err := dive.NewAgent(dive.AgentOptions{
         Name: "Research Assistant",
         Instructions: `You are a research assistant who can search the web and work with files.
                       Help users find information and save it to files when requested.`,
@@ -210,7 +208,6 @@ import (
     "strings"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
     "github.com/deepnoodle-ai/dive/threads"
 )
@@ -220,7 +217,7 @@ func main() {
     threadRepo := threads.NewMemoryRepository()
 
     // Create agent with memory
-    assistant, err := agent.New(agent.Options{
+    assistant, err := dive.NewAgent(dive.AgentOptions{
         Name: "Chat Assistant",
         Instructions: `You are a helpful AI assistant. Remember our conversation
                       and provide helpful, contextual responses.`,
@@ -357,7 +354,7 @@ Tools: []dive.Tool{
 
 ```go
 // Code reviewer agent
-codeReviewer, err := agent.New(agent.Options{
+codeReviewer, err := dive.NewAgent(dive.AgentOptions{
     Name: "Code Reviewer",
     Instructions: "You are an expert code reviewer...",
     Tools: []dive.Tool{
@@ -367,7 +364,7 @@ codeReviewer, err := agent.New(agent.Options{
 })
 
 // Data analyst agent
-dataAnalyst, err := agent.New(agent.Options{
+dataAnalyst, err := dive.NewAgent(dive.AgentOptions{
     Name: "Data Analyst",
     Instructions: "You analyze data and create insights...",
     Tools: []dive.Tool{

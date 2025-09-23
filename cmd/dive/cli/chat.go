@@ -18,57 +18,52 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID
 		actualThreadID = dive.NewID()
 	}
 
-	stream, err := agent.StreamResponse(ctx, dive.WithInput(message), dive.WithThreadID(actualThreadID))
-	if err != nil {
-		return fmt.Errorf("error generating response: %v", err)
-	}
-	defer stream.Close()
-
-	var inToolUse, incremental bool
+	var inToolUse bool
 	toolUseAccum := ""
 	toolName := ""
 	toolID := ""
 
-	for stream.Next(ctx) {
-		event := stream.Event()
-		switch event.Type {
-		case dive.EventTypeLLMEvent:
-			incremental = true
-			payload := event.Item.Event
-			if payload.ContentBlock != nil {
-				cb := payload.ContentBlock
-				if cb.Type == "tool_use" {
-					toolName = cb.Name
-					toolID = cb.ID
+	_, err := agent.CreateResponse(ctx,
+		dive.WithInput(message),
+		dive.WithThreadID(actualThreadID),
+		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			if item.Type == dive.ResponseItemTypeModelEvent {
+				payload := item.Event
+				if payload.ContentBlock != nil {
+					cb := payload.ContentBlock
+					if cb.Type == "tool_use" {
+						toolName = cb.Name
+						toolID = cb.ID
+					}
+				}
+				if payload.Delta != nil {
+					delta := payload.Delta
+					if delta.PartialJSON != "" {
+						if !inToolUse {
+							inToolUse = true
+							fmt.Print("\n----\n")
+						}
+						toolUseAccum += delta.PartialJSON
+					} else if delta.Text != "" {
+						if inToolUse {
+							fmt.Println(yellowStyle.Sprint(toolName), yellowStyle.Sprint(toolID))
+							fmt.Println(yellowStyle.Sprint(toolUseAccum))
+							fmt.Print("----\n")
+							inToolUse = false
+							toolUseAccum = ""
+						}
+						fmt.Print(successStyle.Sprint(delta.Text))
+					} else if delta.Thinking != "" {
+						fmt.Print(thinkingStyle.Sprint(delta.Thinking))
+					}
 				}
 			}
-			if payload.Delta != nil {
-				delta := payload.Delta
-				if delta.PartialJSON != "" {
-					if !inToolUse {
-						inToolUse = true
-						fmt.Print("\n----\n")
-					}
-					toolUseAccum += delta.PartialJSON
-				} else if delta.Text != "" {
-					if inToolUse {
-						fmt.Println(yellowStyle.Sprint(toolName), yellowStyle.Sprint(toolID))
-						fmt.Println(yellowStyle.Sprint(toolUseAccum))
-						fmt.Print("----\n")
-						inToolUse = false
-						toolUseAccum = ""
-					}
-					fmt.Print(successStyle.Sprint(delta.Text))
-				} else if delta.Thinking != "" {
-					fmt.Print(thinkingStyle.Sprint(delta.Thinking))
-				}
-			}
-		case dive.EventTypeResponseCompleted:
-			if !incremental {
-				text := strings.TrimSpace(event.Response.OutputText())
-				fmt.Println(successStyle.Sprint(text))
-			}
-		}
+			return nil
+		}),
+	)
+
+	if err != nil {
+		return fmt.Errorf("error generating response: %v", err)
 	}
 
 	fmt.Println()

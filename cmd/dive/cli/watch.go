@@ -11,10 +11,9 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/threads"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -49,7 +48,7 @@ type FileWatcher struct {
 	options     WatchOptions
 	watcher     *fsnotify.Watcher
 	agent       dive.Agent
-	logger      slogger.Logger
+	logger      log.Logger
 	debouncer   map[string]time.Time
 	changeBatch []FileChange
 	batchMutex  sync.Mutex
@@ -64,7 +63,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		return nil, fmt.Errorf("failed to create file watcher: %w", err)
 	}
 
-	logger := slogger.New(getLogLevel())
+	logger := log.New(getLogLevel())
 
 	// Generate a random thread ID for this watch session
 	threadID := dive.NewID()
@@ -94,7 +93,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		tools = append(tools, tool)
 	}
 
-	modelSettings := &agent.ModelSettings{}
+	modelSettings := &dive.ModelSettings{}
 	if options.ReasoningBudget > 0 {
 		modelSettings.ReasoningBudget = &options.ReasoningBudget
 		maxTokens := 0
@@ -111,7 +110,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		Mode: dive.ConfirmIfNotReadOnly,
 	})
 
-	watchAgent, err := agent.New(agent.Options{
+	watchAgent, err := dive.NewAgent(dive.AgentOptions{
 		Name:             options.AgentName,
 		Instructions:     options.SystemPrompt,
 		Model:            model,

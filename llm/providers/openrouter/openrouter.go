@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	DefaultModel     = ModelOpenAIGPT4o
+	DefaultModel     = ModelClaudeSonnet4
 	DefaultEndpoint  = "https://openrouter.ai/api/v1/chat/completions"
 	DefaultMaxTokens = 4096
 	DefaultClient    = &http.Client{Timeout: 300 * time.Second}

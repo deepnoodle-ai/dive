@@ -23,7 +23,7 @@ import "github.com/deepnoodle-ai/dive/llm/providers/openai"
 model := openai.New()
 ```
 
-**Models:** gpt-5-2025-08-07 (default), gpt-4o, gpt-4o-mini, o1, o3-mini, o3
+**Models:** gpt-5 (default), gpt-4o, gpt-4o-mini, o1, o3-mini, o3
 **Features:** Tool calling, streaming, reasoning budget (o1/o3)
 
 ### Groq
@@ -99,11 +99,11 @@ export GEMINI_API_KEY="your-key"  # For Google
 
 ```go
 import (
-    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Assistant",
     Instructions: "You are a helpful assistant.",
     Model:        anthropic.New(),
@@ -116,14 +116,14 @@ agent, err := agent.New(agent.Options{
 
 ```go
 import (
-    "github.com/deepnoodle-ai/dive/agent"
+    "github.com/deepnoodle-ai/dive"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:  "Assistant",
     Model: anthropic.New(),
-    ModelSettings: &agent.ModelSettings{
+    ModelSettings: &dive.ModelSettings{
         Temperature:     &[]float64{0.7}[0],
         MaxTokens:      &[]int{2000}[0],
         ReasoningBudget: &[]int{5000}[0],  // For o1 models

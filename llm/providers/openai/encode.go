@@ -263,6 +263,10 @@ func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses
 	switch c.Name {
 	case "web_search_call":
 		return responses.ResponseInputItemParamOfWebSearchCall(
+			responses.ResponseFunctionWebSearchActionSearchParam{
+				Query: "", // Empty query for completed search
+				Type:  "search",
+			},
 			c.ID,
 			responses.ResponseFunctionWebSearchStatusCompleted,
 		), nil
@@ -274,27 +278,16 @@ func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses
 func encodeAssistantCodeInterpreterCallContent(c *CodeInterpreterCallContent) (responses.ResponseInputItemUnionParam, error) {
 	param := responses.ResponseCodeInterpreterToolCallParam{}
 	param.ID = c.ID
-	param.Code = c.Code
+	param.Code = openai.String(c.Code)
 	param.Status = responses.ResponseCodeInterpreterToolCallStatus(c.Status)
-	param.ContainerID = openai.String(c.ContainerID)
+	param.ContainerID = c.ContainerID
 	for _, result := range c.Results {
 		switch result.Type {
 		case "logs":
-			param.Results = append(param.Results, responses.ResponseCodeInterpreterToolCallResultUnionParam{
-				OfLogs: &responses.ResponseCodeInterpreterToolCallResultLogsParam{
+			param.Outputs = append(param.Outputs, responses.ResponseCodeInterpreterToolCallOutputUnionParam{
+				OfLogs: &responses.ResponseCodeInterpreterToolCallOutputLogsParam{
 					Logs: result.Logs,
 				},
-			})
-		case "files":
-			filesParam := responses.ResponseCodeInterpreterToolCallResultFilesParam{}
-			for _, file := range result.Files {
-				filesParam.Files = append(filesParam.Files, responses.ResponseCodeInterpreterToolCallResultFilesFileParam{
-					FileID:   file.FileID,
-					MimeType: file.MimeType,
-				})
-			}
-			param.Results = append(param.Results, responses.ResponseCodeInterpreterToolCallResultUnionParam{
-				OfFiles: &filesParam,
 			})
 		}
 	}

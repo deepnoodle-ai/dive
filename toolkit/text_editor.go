@@ -60,20 +60,24 @@ type TextEditorToolOptions struct {
 }
 
 // NewTextEditorTool creates a new TextEditorTool with the given options.
-func NewTextEditorTool(opts TextEditorToolOptions) *dive.TypedToolAdapter[*TextEditorToolInput] {
-	if opts.Type == "" {
-		opts.Type = "text_editor_20250429"
+func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*TextEditorToolInput] {
+	var resolvedOpts TextEditorToolOptions
+	if len(opts) > 0 {
+		resolvedOpts = opts[0]
 	}
-	if opts.Name == "" { // "str_replace_based_edit_tool"
-		opts.Name = "text_editor"
+	if resolvedOpts.Type == "" {
+		resolvedOpts.Type = "text_editor_20250429"
 	}
-	if opts.FileSystem == nil {
-		opts.FileSystem = &RealFileSystem{}
+	if resolvedOpts.Name == "" { // "str_replace_based_edit_tool"
+		resolvedOpts.Name = "str_replace_based_edit_tool"
+	}
+	if resolvedOpts.FileSystem == nil {
+		resolvedOpts.FileSystem = &RealFileSystem{}
 	}
 	return dive.ToolAdapter(&TextEditorTool{
-		typeString:  opts.Type,
-		name:        opts.Name,
-		fs:          opts.FileSystem,
+		typeString:  resolvedOpts.Type,
+		name:        resolvedOpts.Name,
+		fs:          resolvedOpts.FileSystem,
 		fileHistory: make(map[string][]string),
 	})
 }

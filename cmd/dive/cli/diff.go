@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/slogger"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 )
@@ -146,10 +145,10 @@ func readFileContent(filePath string) (string, error) {
 	return string(content), nil
 }
 
-func createDiffAgent(model llm.LLM) (*agent.Agent, error) {
-	logger := slogger.New(getLogLevel())
+func createDiffAgent(model llm.LLM) (dive.Agent, error) {
+	logger := log.New(getLogLevel())
 
-	agentOpts := agent.Options{
+	agentOpts := dive.AgentOptions{
 		Name:            "DiffAnalyzer",
 		Goal:            "Analyze and explain semantic differences between text files",
 		Instructions:    buildDiffSystemPrompt(),
@@ -157,13 +156,13 @@ func createDiffAgent(model llm.LLM) (*agent.Agent, error) {
 		Tools:           []dive.Tool{}, // No external tools needed for diff analysis
 		Logger:          logger,
 		ResponseTimeout: defaultDiffTimeout,
-		ModelSettings: &agent.ModelSettings{
+		ModelSettings: &dive.ModelSettings{
 			Temperature: floatPtr(0.1), // Low temperature for consistent analysis
 			MaxTokens:   intPtr(4000),  // Sufficient for detailed analysis
 		},
 	}
 
-	return agent.New(agentOpts)
+	return dive.NewAgent(agentOpts)
 }
 
 func buildDiffSystemPrompt() string {
@@ -187,62 +186,44 @@ Focus on the meaningful aspects of the changes rather than just restating the di
 Be concise but thorough, and tailor your explanation to the type of content being diffed.`
 }
 
-func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDiff, oldFile, newFile string, outputFormat string) error {
+func performSemanticDiff(ctx context.Context, diffAgent dive.Agent, unifiedDiff, oldFile, newFile string, outputFormat string) error {
 	// Prepare the prompt for the LLM
 	prompt := buildDiffPrompt(unifiedDiff, oldFile, newFile, outputFormat)
 
 	fmt.Println("Analyzing semantic differences...")
 	fmt.Println()
 
-	// Stream the response
-	stream, err := diffAgent.StreamResponse(ctx, dive.WithInput(prompt))
+	_, err := diffAgent.CreateResponse(ctx,
+		dive.WithInput(prompt),
+		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			if item.Type == dive.ResponseItemTypeModelEvent {
+				payload := item.Event
+				if payload.Delta != nil {
+					if payload.Delta.Text != "" {
+						fmt.Print(successStyle.Sprint(payload.Delta.Text))
+					} else if payload.Delta.Thinking != "" {
+						fmt.Print(thinkingStyle.Sprint(payload.Delta.Thinking))
+					}
+				}
+			}
+			return nil
+		}),
+	)
+
 	if err != nil {
+		// Check if it's an authentication error and provide helpful message
+		if strings.Contains(err.Error(), "authentication_error") || strings.Contains(err.Error(), "x-api-key header is required") {
+			fmt.Println(errorStyle.Sprint("❌ Authentication required"))
+			fmt.Println("💡 Set your API key using one of these methods:")
+			fmt.Printf("   • Environment variable: export ANTHROPIC_API_KEY=your_key_here\n")
+			fmt.Printf("   • For other providers, use: --provider openai (and set OPENAI_API_KEY)\n")
+			fmt.Printf("   • See available providers: dive llm --help\n")
+			return nil
+		}
 		return fmt.Errorf("error generating diff analysis: %w", err)
 	}
-	defer stream.Close()
 
-	// Process the streaming response
-	var incremental bool
-	for stream.Next(ctx) {
-		event := stream.Event()
-		switch event.Type {
-		case dive.EventTypeLLMEvent:
-			incremental = true
-			payload := event.Item.Event
-			if payload.Delta != nil {
-				if payload.Delta.Text != "" {
-					fmt.Print(successStyle.Sprint(payload.Delta.Text))
-				} else if payload.Delta.Thinking != "" {
-					fmt.Print(thinkingStyle.Sprint(payload.Delta.Thinking))
-				}
-			}
-		case dive.EventTypeResponseCompleted:
-			if !incremental {
-				text := strings.TrimSpace(event.Response.OutputText())
-				fmt.Println(successStyle.Sprint(text))
-			}
-		case dive.EventTypeResponseFailed:
-			// Handle failed response event
-			if event.Error != nil {
-				// Check if it's an authentication error and provide helpful message
-				if strings.Contains(event.Error.Error(), "authentication_error") || strings.Contains(event.Error.Error(), "x-api-key header is required") {
-					fmt.Println(errorStyle.Sprint("❌ Authentication required"))
-					fmt.Println("💡 Set your API key using one of these methods:")
-					fmt.Printf("   • Environment variable: export ANTHROPIC_API_KEY=your_key_here\n")
-					fmt.Printf("   • For other providers, use: --provider openai (and set OPENAI_API_KEY)\n")
-					fmt.Printf("   • See available providers: dive llm --help\n")
-					return nil
-				}
-				return fmt.Errorf("diff analysis failed: %w", event.Error)
-			}
-		}
-	}
-
-	if err := stream.Err(); err != nil {
-		return fmt.Errorf("error during diff analysis: %w", err)
-	}
-
-	fmt.Println() // Add final newline
+	fmt.Println()
 	return nil
 }
 

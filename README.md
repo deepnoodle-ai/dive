@@ -40,21 +40,21 @@ Please leave a GitHub star if you're interested in the project!
 
 ## Features
 
-* **Agents**: Chat or assign work to specialized agents with configurable reasoning
-* **Supervisor Patterns**: Create hierarchical agent systems with work delegation
-* **Declarative Configuration**: Define agents using YAML
-* **Multiple LLMs**: Switch between Anthropic, OpenAI, Google, OpenRouter, Grok, Ollama, and others
-* **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
-* **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
-* **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
-* **Tools**: Give agents rich capabilities to interact with the world
-* **Tool Annotations**: Semantic hints about tool behavior (read-only, destructive, etc.)
-* **Streaming**: Stream agent events for realtime UI updates
-* **CLI**: Run agents, chat with agents, and more
-* **Thread Management**: Persistent conversation threads with memory
-* **Confirmation System**: Built-in confirmation system for destructive operations
-* **Deep Research**: Use multiple agents to perform deep research
-* **Semantic Diff**: AI-powered analysis of text differences for output drift detection
+- **Agents**: Chat or assign work to specialized agents with configurable reasoning
+- **Supervisor Patterns**: Create hierarchical agent systems with work delegation
+- **Declarative Configuration**: Define agents using YAML
+- **Multiple LLMs**: Switch between Anthropic, OpenAI, Google, OpenRouter, Grok, Ollama, and others
+- **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
+- **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
+- **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
+- **Tools**: Give agents rich capabilities to interact with the world
+- **Tool Annotations**: Semantic hints about tool behavior (read-only, destructive, etc.)
+- **Streaming**: Stream agent events for realtime UI updates
+- **CLI**: Run agents, chat with agents, and more
+- **Thread Management**: Persistent conversation threads with memory
+- **Confirmation System**: Built-in confirmation system for destructive operations
+- **Deep Research**: Use multiple agents to perform deep research
+- **Semantic Diff**: AI-powered analysis of text differences for output drift detection
 
 ## Quick Start
 
@@ -72,8 +72,6 @@ export GROK_API_KEY="your-key-here"
 export OPENROUTER_API_KEY="your-key-here"
 
 # Tool API Keys
-export GOOGLE_SEARCH_API_KEY="your-key-here"
-export GOOGLE_SEARCH_CX="your-key-here"
 export FIRECRAWL_API_KEY="your-key-here"
 ```
 
@@ -94,7 +92,7 @@ go get github.com/deepnoodle-ai/dive
 Here's a quick example of creating a chat agent:
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Research Assistant",
     Instructions: "You are an enthusiastic and deeply curious researcher.",
     Model:        anthropic.New(),
@@ -102,8 +100,6 @@ agent, err := agent.New(agent.Options{
 
 // Start chatting with the agent
 response, err := agent.CreateResponse(ctx, dive.WithInput("Hello there!"))
-// Or stream the response
-stream, err := agent.StreamResponse(ctx, dive.WithInput("Hello there!"))
 ```
 
 Or use the Dive LLM interface directly:
@@ -156,10 +152,10 @@ go install .
 
 Available CLI commands include:
 
-* `dive chat --provider anthropic --model claude-sonnet-4-20250514`: Chat with an agent
-* `dive classify --text "input text" --labels "label1,label2,label3"`: Classify text with confidence scores
-* `dive config check /path/to/config.yaml`: Validate a Dive configuration
-* `dive diff old.txt new.txt --explain-changes`: Semantic diff between texts using LLMs to explain changes
+- `dive chat --provider anthropic --model claude-sonnet-4-20250514`: Chat with an agent
+- `dive classify --text "input text" --labels "label1,label2,label3"`: Classify text with confidence scores
+- `dive config check /path/to/config.yaml`: Validate a Dive configuration
+- `dive diff old.txt new.txt --explain-changes`: Semantic diff between texts using LLMs to explain changes
 
 ### Semantic Diff
 
@@ -182,6 +178,7 @@ dive diff old.txt new.txt --explain-changes --provider anthropic --model claude-
 ```
 
 This is particularly useful for:
+
 - **Output Drift Detection**: Comparing AI-generated outputs over time
 - **Code Review**: Understanding semantic changes in generated code
 - **Content Analysis**: Analyzing changes in documentation or text content
@@ -191,12 +188,12 @@ This is particularly useful for:
 
 Dive provides a unified interface for working with different LLM providers:
 
-* **Anthropic** (Claude Sonnet, Haiku, Opus)
-* **OpenAI** (GPT-5, GPT-4, o1, o3)
-* **OpenRouter** (Access to 200+ models from multiple providers with unified API)
-* **Google** (Gemini models)
-* **Grok** (Grok 4, Grok Code Fast)
-* **Ollama** (Local model serving)
+- **Anthropic** (Claude Sonnet, Haiku, Opus)
+- **OpenAI** (GPT-5, GPT-4, o1, o3)
+- **OpenRouter** (Access to 200+ models from multiple providers with unified API)
+- **Google** (Gemini models)
+- **Grok** (Grok 4, Grok Code Fast)
+- **Ollama** (Local model serving)
 
 Each provider implementation handles API communication, token counting,
 tool calling, and other details.
@@ -204,7 +201,7 @@ tool calling, and other details.
 ```go
 provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-20250514"))
 
-provider := openai.New(openai.WithModel("gpt-5-2025-08-07"))
+provider := openai.New(openai.WithModel("gpt-5"))
 
 provider := openrouter.New(openrouter.WithModel("openai/gpt-4o"))
 
@@ -238,39 +235,39 @@ MCP servers can also be configured in YAML configurations for declarative setup.
 
 These are the models that have been verified to work in Dive:
 
-| Provider  | Model                           | Tools Supported |
-| --------- | ------------------------------- | --------------- |
-| Anthropic | `claude-sonnet-4-20250514`      | Yes             |
-| Anthropic | `claude-opus-4-20250514`        | Yes             |
-| Anthropic | `claude-3-7-sonnet-20250219`    | Yes             |
-| Anthropic | `claude-3-5-sonnet-20241022`    | Yes             |
-| Anthropic | `claude-3-5-haiku-20241022`     | Yes             |
-| Google    | `gemini-2.5-flash`              | Yes             |
-| Google    | `gemini-2.5-flash-lite`         | Yes             |
-| Google    | `gemini-2.5-pro`                | Yes             |
-| Grok      | `grok-4-0709`                   | Yes             |
-| Grok      | `grok-code-fast-1`              | Yes             |
-| OpenAI    | `gpt-5-2025-08-07`              | Yes             |
-| OpenAI    | `gpt-4o`                        | Yes             |
-| OpenAI    | `gpt-4.5-preview`               | Yes             |
-| OpenAI    | `o1`                            | Yes             |
-| OpenAI    | `o1-mini`                       | No              |
-| OpenAI    | `o3-mini`                       | Yes             |
-| Ollama    | `llama3.2:*`                    | Yes             |
-| Ollama    | `mistral:*`                     | No              |
+| Provider  | Model                        | Tools Supported |
+| --------- | ---------------------------- | --------------- |
+| Anthropic | `claude-sonnet-4-20250514`   | Yes             |
+| Anthropic | `claude-opus-4-1-20250805`   | Yes             |
+| Anthropic | `claude-3-7-sonnet-20250219` | Yes             |
+| Anthropic | `claude-3-5-sonnet-20241022` | Yes             |
+| Anthropic | `claude-3-5-haiku-20241022`  | Yes             |
+| Google    | `gemini-2.5-flash`           | Yes             |
+| Google    | `gemini-2.5-flash-lite`      | Yes             |
+| Google    | `gemini-2.5-pro`             | Yes             |
+| Grok      | `grok-4-0709`                | Yes             |
+| Grok      | `grok-code-fast-1`           | Yes             |
+| OpenAI    | `gpt-5`                      | Yes             |
+| OpenAI    | `gpt-4o`                     | Yes             |
+| OpenAI    | `gpt-4.5-preview`            | Yes             |
+| OpenAI    | `o1`                         | Yes             |
+| OpenAI    | `o1-mini`                    | No              |
+| OpenAI    | `o3-mini`                    | Yes             |
+| Ollama    | `llama3.2:*`                 | Yes             |
+| Ollama    | `mistral:*`                  | No              |
 
 ## Tool Use
 
 Tools extend agent capabilities. Dive includes these built-in tools:
 
-* **list_directory**: List directory contents
-* **read_file**: Read content from files
-* **write_file**: Write content to files
-* **text_editor**: Advanced file editing with view, create, replace, and insert operations
-* **web_search**: Search the web using Google Custom Search or Kagi Search
-* **fetch**: Fetch and extract content from webpages using Firecrawl
-* **command**: Execute external commands
-* **generate_image**: Generate images using OpenAI's gpt-image-1
+- **list_directory**: List directory contents
+- **read_file**: Read content from files
+- **write_file**: Write content to files
+- **text_editor**: Advanced file editing with view, create, replace, and insert operations
+- **web_search**: Search the web using Google Custom Search or Kagi Search
+- **fetch**: Fetch and extract content from webpages using Firecrawl
+- **command**: Execute external commands
+- **generate_image**: Generate images using OpenAI's gpt-image-1
 
 ### Tool Annotations
 
@@ -341,7 +338,7 @@ self-host and integrate into your own applications.
 Agents can be configured as supervisors to delegate work to other agents:
 
 ```go
-supervisor, err := agent.New(agent.Options{
+supervisor, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Research Manager",
     Instructions: "You coordinate research tasks across multiple specialists.",
     IsSupervisor: true,
@@ -357,9 +354,9 @@ Supervisor agents automatically get an `assign_work` tool for delegating tasks.
 Fine-tune LLM behavior with advanced model settings:
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name: "Assistant",
-    ModelSettings: &agent.ModelSettings{
+    ModelSettings: &dive.ModelSettings{
         Temperature:       ptr(0.7),
         ReasoningBudget:   ptr(50000),
         ReasoningEffort:   "high",

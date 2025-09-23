@@ -17,7 +17,6 @@ type SearchItem struct {
 	Description string `json:"description,omitempty"`
 	Icon        string `json:"icon,omitempty"`
 	Image       string `json:"image,omitempty"`
-	Rank        int    `json:"rank,omitempty"`
 }
 
 type Searcher interface {

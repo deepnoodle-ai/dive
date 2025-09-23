@@ -23,7 +23,7 @@ Intelligent AI entities that can:
 - Maintain persistent conversation history
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Research Assistant",
     Instructions: "You are an expert researcher who helps analyze topics thoroughly.",
     Model:        anthropic.New(),

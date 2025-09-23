@@ -1,37 +1,13 @@
 package ollama
 
-// PricingInfo represents pricing information for a specific service
-type PricingInfo struct {
-	Model       string  `json:"model"`
-	InputPrice  float64 `json:"input_price_per_1m_tokens"`  // per 1M input tokens (USD)
-	OutputPrice float64 `json:"output_price_per_1m_tokens"` // per 1M output tokens (USD)
-	Currency    string  `json:"currency"`
-	UpdatedAt   string  `json:"updated_at"` // YYYY-MM-DD format
-}
-
-// ImagePricingInfo represents pricing for image generation services
-type ImagePricingInfo struct {
-	Model     string  `json:"model"`
-	Price     float64 `json:"price_per_image"`    // per image (USD)
-	MaxSize   string  `json:"max_size"`           // e.g., "1024x1024"
-	Currency  string  `json:"currency"`
-	UpdatedAt string  `json:"updated_at"`
-}
-
-// EmbeddingPricingInfo represents pricing for embedding services
-type EmbeddingPricingInfo struct {
-	Model     string  `json:"model"`
-	Price     float64 `json:"price_per_1m_tokens"` // per 1M tokens (USD)
-	Currency  string  `json:"currency"`
-	UpdatedAt string  `json:"updated_at"`
-}
+import "github.com/deepnoodle-ai/dive/llm"
 
 // Note: Ollama is a local inference platform - all models run locally and are free
 // However, there are compute costs (electricity, hardware depreciation) that users bear
 // For consistency with the pricing structure, we maintain the same format but with zero prices
 
 // TextModelPricing contains pricing for all text generation models (free - local inference)
-var TextModelPricing = map[string]PricingInfo{
+var TextModelPricing = map[string]llm.PricingInfo{
 	"llama2": {
 		Model:       "llama2",
 		InputPrice:  0.00, // Free - runs locally
@@ -98,10 +74,10 @@ var TextModelPricing = map[string]PricingInfo{
 }
 
 // ImageModelPricing contains pricing for image generation models (currently none)
-var ImageModelPricing = map[string]ImagePricingInfo{}
+var ImageModelPricing = map[string]llm.ImagePricingInfo{}
 
 // EmbeddingModelPricing contains pricing for embedding models (free - local inference)
-var EmbeddingModelPricing = map[string]EmbeddingPricingInfo{
+var EmbeddingModelPricing = map[string]llm.EmbeddingPricingInfo{
 	"nomic-embed-text": {
 		Model:     "nomic-embed-text",
 		Price:     0.00, // Free - runs locally

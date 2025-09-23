@@ -7,36 +7,30 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
-// ConfirmationRequest represents a request for user confirmation, with optional
-// details and data.
-type ConfirmationRequest struct {
-	Prompt  string      // Main prompt or question
-	Details string      // Additional details or context (optional)
-	Data    interface{} // Arbitrary data to display to the user (optional)
-	Tool    Tool        // Tool that is requesting confirmation (optional)
-}
+// ToolUseContent is a type alias for llm.ToolUseContent.
+type ToolUseContent = llm.ToolUseContent
 
 // Confirmer abstracts user confirmation prompts.
 type Confirmer interface {
 	// Confirm presents a request to the user and returns true if the user
 	// confirms, false otherwise.
-	Confirm(ctx context.Context, req ConfirmationRequest) (bool, error)
+	Confirm(ctx context.Context, agent Agent, tool Tool, call *ToolUseContent) (bool, error)
 }
 
 // AutoApproveConfirmer always approves confirmation requests.
 type AutoApproveConfirmer struct{}
 
-func (a *AutoApproveConfirmer) Confirm(ctx context.Context, req ConfirmationRequest) (bool, error) {
+func (a *AutoApproveConfirmer) Confirm(ctx context.Context, agent Agent, tool Tool, call *ToolUseContent) (bool, error) {
 	return true, nil
 }
 
 // DenyAllConfirmer always denies confirmation requests.
 type DenyAllConfirmer struct{}
 
-func (d *DenyAllConfirmer) Confirm(ctx context.Context, req ConfirmationRequest) (bool, error) {
+func (d *DenyAllConfirmer) Confirm(ctx context.Context, agent Agent, tool Tool, call *ToolUseContent) (bool, error) {
 	return false, nil
 }
 
@@ -75,7 +69,10 @@ func (c ConfirmationMode) String() string {
 }
 
 func (c ConfirmationMode) IsValid() bool {
-	return c == ConfirmAlways || c == ConfirmIfNotReadOnly || c == ConfirmIfDestructive || c == ConfirmNever
+	return c == ConfirmAlways ||
+		c == ConfirmIfNotReadOnly ||
+		c == ConfirmIfDestructive ||
+		c == ConfirmNever
 }
 
 var _ Confirmer = &TerminalConfirmer{}
@@ -100,15 +97,15 @@ func NewTerminalConfirmer(opts TerminalConfirmerOptions) *TerminalConfirmer {
 
 // ShouldConfirm determines if confirmation is needed based on the confirmer's
 // mode and the request
-func (c *TerminalConfirmer) ShouldConfirm(req ConfirmationRequest) bool {
+func (c *TerminalConfirmer) ShouldConfirm(agent Agent, tool Tool, call *ToolUseContent) bool {
 	if c.mode == ConfirmNever {
 		return false
 	}
 	if c.mode == ConfirmAlways {
 		return true
 	}
-	if req.Tool != nil {
-		annotations := req.Tool.Annotations()
+	if call != nil {
+		annotations := tool.Annotations()
 		if c.mode == ConfirmIfDestructive && annotations.DestructiveHint {
 			// Confirm if destructive
 			return true
@@ -121,19 +118,19 @@ func (c *TerminalConfirmer) ShouldConfirm(req ConfirmationRequest) bool {
 	return false
 }
 
-func (c *TerminalConfirmer) Confirm(ctx context.Context, req ConfirmationRequest) (bool, error) {
-	if !c.ShouldConfirm(req) {
+func (c *TerminalConfirmer) Confirm(ctx context.Context, agent Agent, tool Tool, call *ToolUseContent) (bool, error) {
+	if !c.ShouldConfirm(agent, tool, call) {
 		return true, nil
 	}
 
 	fmt.Printf("\n=== Confirmation Required ===\n")
-	fmt.Printf("%s\n", req.Prompt)
-
-	if req.Details != "" {
-		fmt.Printf("\nDetails: %s\n", yellowSprintf(req.Details))
+	fmt.Println("Would you like to allow this tool call to proceed?")
+	if tool != nil {
+		fmt.Printf("\nTool: %s\n", tool.Name())
 	}
-	if req.Tool != nil {
-		fmt.Printf("\nTool: %s\n", req.Tool.Name())
+	if call != nil {
+		input := string(call.Input)
+		fmt.Printf("\nInput: %s\n", input)
 	}
 
 	fmt.Printf("\nProceed? (y/yes to confirm, anything else to deny): ")
@@ -146,8 +143,4 @@ func (c *TerminalConfirmer) Confirm(ctx context.Context, req ConfirmationRequest
 
 	input = strings.TrimSpace(strings.ToLower(input))
 	return input == "y" || input == "yes", nil
-}
-
-func yellowSprintf(s string) string {
-	return color.New(color.FgYellow).Sprintf(s)
 }

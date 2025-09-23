@@ -8,15 +8,14 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/mcp"
-	"github.com/deepnoodle-ai/dive/slogger"
 )
 
 type EnvironmentOpts struct {
 	Config     *Config
-	Logger     slogger.Logger
+	Logger     log.Logger
 	Confirmer  dive.Confirmer
 	Threads    dive.ThreadRepository
 	Directory  string
@@ -28,7 +27,7 @@ type Environment struct {
 	MCPManager *mcp.Manager
 	Threads    dive.ThreadRepository
 	Confirmer  dive.Confirmer
-	Logger     slogger.Logger
+	Logger     log.Logger
 	Directory  string
 	Agents     []dive.Agent
 	Tools      map[string]dive.Tool
@@ -40,7 +39,7 @@ func NewEnvironment(ctx context.Context, opts EnvironmentOpts) (*Environment, er
 	cfg := opts.Config
 
 	if opts.Logger == nil {
-		opts.Logger = slogger.DefaultLogger
+		opts.Logger = log.New(log.GetDefaultLevel())
 	}
 
 	confirmationMode := dive.ConfirmIfNotReadOnly
@@ -174,7 +173,7 @@ func (e *Environment) buildAgent(ctx context.Context, definition Agent) (dive.Ag
 		}
 	}
 
-	var modelSettings *agent.ModelSettings
+	var modelSettings *dive.ModelSettings
 	if definition.ModelSettings != nil {
 		modelSettings = buildModelSettings(providerConfig, definition)
 	}
@@ -189,7 +188,7 @@ func (e *Environment) buildAgent(ctx context.Context, definition Agent) (dive.Ag
 		}
 	}
 
-	return agent.New(agent.Options{
+	return dive.NewAgent(dive.AgentOptions{
 		ID:                 definition.ID,
 		Name:               definition.Name,
 		Goal:               definition.Goal,
@@ -210,8 +209,8 @@ func (e *Environment) buildAgent(ctx context.Context, definition Agent) (dive.Ag
 	})
 }
 
-func buildModelSettings(p *Provider, agentDef Agent) *agent.ModelSettings {
-	settings := &agent.ModelSettings{
+func buildModelSettings(p *Provider, agentDef Agent) *dive.ModelSettings {
+	settings := &dive.ModelSettings{
 		Temperature:       agentDef.ModelSettings.Temperature,
 		PresencePenalty:   agentDef.ModelSettings.PresencePenalty,
 		FrequencyPenalty:  agentDef.ModelSettings.FrequencyPenalty,

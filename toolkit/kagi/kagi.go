@@ -78,13 +78,10 @@ func (s *KagiClient) Search(ctx context.Context, q *web.SearchInput) (*web.Searc
 	}
 
 	var items []*web.SearchItem
-	rank := 0
 
 	for _, item := range results.Data {
 		if item.Type == 0 {
-			rank++
 			items = append(items, &web.SearchItem{
-				Rank:        rank,
 				URL:         item.URL,
 				Title:       item.Title,
 				Description: item.Snippet,
