@@ -3,6 +3,8 @@ package dive
 import (
 	"strings"
 	"time"
+
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 func TruncateText(text string, maxWords int) string {
@@ -39,17 +41,25 @@ func TruncateText(text string, maxWords int) string {
 	return truncated
 }
 
-func DateString(t time.Time) string {
+func dateString(t time.Time) string {
 	prompt := "The current date is " + t.Format("January 2, 2006") + "."
 	prompt += " The current time is " + t.Format("3:04 PM") + "."
 	prompt += " It is a " + t.Format("Monday") + "."
 	return prompt
 }
 
-func AgentNames(agents []Agent) []string {
-	var agentNames []string
-	for _, agent := range agents {
-		agentNames = append(agentNames, agent.Name())
+func getToolResultContent(callResults []*ToolCallResult) []*llm.ToolResultContent {
+	results := make([]*llm.ToolResultContent, len(callResults))
+	for i, callResult := range callResults {
+		results[i] = &llm.ToolResultContent{
+			ToolUseID: callResult.ID,
+			Content:   callResult.Result.Content,
+			IsError:   callResult.Error != nil || callResult.Result.IsError,
+		}
 	}
-	return agentNames
+	return results
+}
+
+func ptr[T any](t T) *T {
+	return &t
 }

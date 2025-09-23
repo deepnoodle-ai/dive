@@ -97,9 +97,14 @@ func WithEventCallback(callback EventCallback) Option {
 
 // NewID returns a new unique identifier with format "agent-<randomnum>"
 func NewID() string {
+	return fmt.Sprintf("agent-%s", RandomInt())
+}
+
+// RandomInt returns a random integer as a string
+func RandomInt() string {
 	n, err := rand.Int(rand.Reader, big.NewInt(1<<62))
 	if err != nil {
 		panic(err)
 	}
-	return fmt.Sprintf("agent-%d", n)
+	return fmt.Sprintf("%d", n)
 }

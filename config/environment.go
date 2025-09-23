@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/mcp"
@@ -174,7 +173,7 @@ func (e *Environment) buildAgent(ctx context.Context, definition Agent) (dive.Ag
 		}
 	}
 
-	var modelSettings *agent.ModelSettings
+	var modelSettings *dive.ModelSettings
 	if definition.ModelSettings != nil {
 		modelSettings = buildModelSettings(providerConfig, definition)
 	}
@@ -189,7 +188,7 @@ func (e *Environment) buildAgent(ctx context.Context, definition Agent) (dive.Ag
 		}
 	}
 
-	return agent.New(agent.Options{
+	return dive.NewAgent(dive.AgentOptions{
 		ID:                 definition.ID,
 		Name:               definition.Name,
 		Goal:               definition.Goal,
@@ -210,8 +209,8 @@ func (e *Environment) buildAgent(ctx context.Context, definition Agent) (dive.Ag
 	})
 }
 
-func buildModelSettings(p *Provider, agentDef Agent) *agent.ModelSettings {
-	settings := &agent.ModelSettings{
+func buildModelSettings(p *Provider, agentDef Agent) *dive.ModelSettings {
+	settings := &dive.ModelSettings{
 		Temperature:       agentDef.ModelSettings.Temperature,
 		PresencePenalty:   agentDef.ModelSettings.PresencePenalty,
 		FrequencyPenalty:  agentDef.ModelSettings.FrequencyPenalty,

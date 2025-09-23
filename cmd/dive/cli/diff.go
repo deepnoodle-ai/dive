@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
@@ -146,10 +145,10 @@ func readFileContent(filePath string) (string, error) {
 	return string(content), nil
 }
 
-func createDiffAgent(model llm.LLM) (*agent.Agent, error) {
+func createDiffAgent(model llm.LLM) (dive.Agent, error) {
 	logger := log.New(getLogLevel())
 
-	agentOpts := agent.Options{
+	agentOpts := dive.AgentOptions{
 		Name:            "DiffAnalyzer",
 		Goal:            "Analyze and explain semantic differences between text files",
 		Instructions:    buildDiffSystemPrompt(),
@@ -157,13 +156,13 @@ func createDiffAgent(model llm.LLM) (*agent.Agent, error) {
 		Tools:           []dive.Tool{}, // No external tools needed for diff analysis
 		Logger:          logger,
 		ResponseTimeout: defaultDiffTimeout,
-		ModelSettings: &agent.ModelSettings{
+		ModelSettings: &dive.ModelSettings{
 			Temperature: floatPtr(0.1), // Low temperature for consistent analysis
 			MaxTokens:   intPtr(4000),  // Sufficient for detailed analysis
 		},
 	}
 
-	return agent.New(agentOpts)
+	return dive.NewAgent(agentOpts)
 }
 
 func buildDiffSystemPrompt() string {
@@ -187,7 +186,7 @@ Focus on the meaningful aspects of the changes rather than just restating the di
 Be concise but thorough, and tailor your explanation to the type of content being diffed.`
 }
 
-func performSemanticDiff(ctx context.Context, diffAgent *agent.Agent, unifiedDiff, oldFile, newFile string, outputFormat string) error {
+func performSemanticDiff(ctx context.Context, diffAgent dive.Agent, unifiedDiff, oldFile, newFile string, outputFormat string) error {
 	// Prepare the prompt for the LLM
 	prompt := buildDiffPrompt(unifiedDiff, oldFile, newFile, outputFormat)
 

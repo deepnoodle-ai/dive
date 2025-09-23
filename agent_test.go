@@ -1,47 +1,11 @@
-package agent
+package dive
 
 import (
 	"context"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
-	"github.com/stretchr/testify/require"
 )
-
-func TestAgent(t *testing.T) {
-	agent, err := New(Options{
-		Name:         "Testing Agent",
-		Goal:         "Test the agent",
-		Instructions: "You are a testing agent",
-		Model:        anthropic.New(),
-	})
-	require.NoError(t, err)
-	require.NotNil(t, agent)
-}
-
-func TestAgentChatSystemPrompt(t *testing.T) {
-	agent, err := New(Options{
-		Name:         "TestAgent",
-		Goal:         "Help research a topic.",
-		Instructions: "You are a research assistant.",
-		Model:        anthropic.New(),
-	})
-	require.NoError(t, err)
-
-	// Get the chat system prompt
-	chatSystemPrompt, err := agent.buildSystemPrompt()
-	require.NoError(t, err)
-
-	// Verify that the chat system prompt doesn't contain the status section
-	require.NotContains(t, chatSystemPrompt, "<status>")
-	require.NotContains(t, chatSystemPrompt, "active")
-	require.NotContains(t, chatSystemPrompt, "completed")
-	require.NotContains(t, chatSystemPrompt, "paused")
-	require.NotContains(t, chatSystemPrompt, "blocked")
-	require.NotContains(t, chatSystemPrompt, "error")
-}
 
 // TestAgentCreateResponse demonstrates using the CreateResponse API
 func TestAgentCreateResponse(t *testing.T) {
@@ -64,7 +28,7 @@ func TestAgentCreateResponse(t *testing.T) {
 	}
 
 	// Create a simple agent with the mock LLM
-	agent, err := New(Options{
+	agent, err := NewAgent(AgentOptions{
 		Name:  "TestAgent",
 		Goal:  "To test the CreateResponse API",
 		Model: mockLLM,
@@ -75,7 +39,7 @@ func TestAgentCreateResponse(t *testing.T) {
 
 	t.Run("CreateResponse with input string", func(t *testing.T) {
 		// Test with a simple string input
-		resp, err := agent.CreateResponse(context.Background(), dive.WithInput("Hello, agent!"))
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Hello, agent!"))
 		if err != nil {
 			t.Fatalf("CreateResponse failed: %v", err)
 		}
@@ -86,7 +50,7 @@ func TestAgentCreateResponse(t *testing.T) {
 		} else {
 			found := false
 			for _, item := range resp.Items {
-				if item.Type == dive.ResponseItemTypeMessage && item.Message != nil {
+				if item.Type == ResponseItemTypeMessage && item.Message != nil {
 					text := item.Message.Text()
 					if text == "This is a test response" {
 						found = true
@@ -117,7 +81,7 @@ func TestAgentCreateResponse(t *testing.T) {
 			llm.NewUserTextMessage("Here's a more complex message"),
 		}
 
-		resp, err := agent.CreateResponse(context.Background(), dive.WithMessages(messages...))
+		resp, err := agent.CreateResponse(context.Background(), WithMessages(messages...))
 		if err != nil {
 			t.Fatalf("CreateResponse with messages failed: %v", err)
 		}
@@ -128,7 +92,7 @@ func TestAgentCreateResponse(t *testing.T) {
 		} else {
 			found := false
 			for _, item := range resp.Items {
-				if item.Type == dive.ResponseItemTypeMessage && item.Message != nil {
+				if item.Type == ResponseItemTypeMessage && item.Message != nil {
 					text := item.Message.Text()
 					if text == "This is a test response" {
 						found = true

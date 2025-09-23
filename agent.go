@@ -1,4 +1,4 @@
-package agent
+package dive
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
 )
@@ -34,10 +33,10 @@ func SetDefaultToolIterationLimit(limit int) {
 	defaultToolIterationLimit = limit
 }
 
-// Confirm our standard implementation satisfies the dive.Agent interface.
-var _ dive.Agent = &Agent{}
+// Confirm our standard implementation satisfies the StandardAgent interface.
+var _ Agent = &StandardAgent{}
 
-// ModelSettings are used to configure details of the LLM for an Agent.
+// ModelSettings are used to configure details of the LLM for an StandardAgent.
 type ModelSettings struct {
 	Temperature       *float64
 	PresencePenalty   *float64
@@ -53,8 +52,8 @@ type ModelSettings struct {
 	MCPServers        []llm.MCPServerConfig
 }
 
-// Options are used to configure an Agent.
-type Options struct {
+// AgentOptions are used to configure an StandardAgent.
+type AgentOptions struct {
 	ID                 string
 	Name               string
 	Goal               string
@@ -62,29 +61,29 @@ type Options struct {
 	IsSupervisor       bool
 	Subordinates       []string
 	Model              llm.LLM
-	Tools              []dive.Tool
+	Tools              []Tool
 	ResponseTimeout    time.Duration
 	Hooks              llm.Hooks
 	Logger             log.Logger
 	ToolIterationLimit int
 	ModelSettings      *ModelSettings
 	DateAwareness      *bool
-	ThreadRepository   dive.ThreadRepository
-	Confirmer          dive.Confirmer
+	ThreadRepository   ThreadRepository
+	Confirmer          Confirmer
 	SystemPrompt       string
 	NoSystemPrompt     bool
 	Context            []llm.Content
 }
 
-// Agent is the standard implementation of the Agent interface.
-type Agent struct {
+// StandardAgent is the standard implementation of the Agent interface.
+type StandardAgent struct {
 	id                   string
 	name                 string
 	goal                 string
 	instructions         string
 	model                llm.LLM
-	tools                []dive.Tool
-	toolsByName          map[string]dive.Tool
+	tools                []Tool
+	toolsByName          map[string]Tool
 	isSupervisor         bool
 	subordinates         []string
 	responseTimeout      time.Duration
@@ -93,14 +92,14 @@ type Agent struct {
 	toolIterationLimit   int
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
-	threadRepository     dive.ThreadRepository
-	confirmer            dive.Confirmer
+	threadRepository     ThreadRepository
+	confirmer            Confirmer
 	systemPromptTemplate *template.Template
 	context              []llm.Content
 }
 
-// New returns a new Agent configured with the given options.
-func New(opts Options) (*Agent, error) {
+// NewAgent returns a new StandardAgent configured with the given options.
+func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 	if opts.Model == nil {
 		return nil, ErrNoLLM
 	}
@@ -114,7 +113,7 @@ func New(opts Options) (*Agent, error) {
 		opts.Logger = log.New(log.GetDefaultLevel())
 	}
 	if opts.ID == "" {
-		opts.ID = dive.NewID()
+		opts.ID = NewID()
 	}
 	var systemPromptTemplate *template.Template
 	if !opts.NoSystemPrompt {
@@ -127,7 +126,7 @@ func New(opts Options) (*Agent, error) {
 			return nil, fmt.Errorf("invalid system prompt template: %w", err)
 		}
 	}
-	agent := &Agent{
+	agent := &StandardAgent{
 		id:                   opts.ID,
 		name:                 opts.Name,
 		goal:                 opts.Goal,
@@ -146,13 +145,13 @@ func New(opts Options) (*Agent, error) {
 		confirmer:            opts.Confirmer,
 		context:              opts.Context,
 	}
-	tools := make([]dive.Tool, len(opts.Tools))
+	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
 		copy(tools, opts.Tools)
 	}
 	agent.tools = tools
 	if len(tools) > 0 {
-		agent.toolsByName = make(map[string]dive.Tool, len(tools))
+		agent.toolsByName = make(map[string]Tool, len(tools))
 		for _, tool := range tools {
 			agent.toolsByName[tool.Name()] = tool
 		}
@@ -160,34 +159,34 @@ func New(opts Options) (*Agent, error) {
 	return agent, nil
 }
 
-func (a *Agent) Name() string {
+func (a *StandardAgent) Name() string {
 	return a.name
 }
 
-func (a *Agent) Goal() string {
+func (a *StandardAgent) Goal() string {
 	return a.goal
 }
 
-func (a *Agent) Instructions() string {
+func (a *StandardAgent) Instructions() string {
 	return a.instructions
 }
 
-func (a *Agent) IsSupervisor() bool {
+func (a *StandardAgent) IsSupervisor() bool {
 	return a.isSupervisor
 }
 
-func (a *Agent) Subordinates() []string {
+func (a *StandardAgent) Subordinates() []string {
 	if !a.isSupervisor {
 		return nil
 	}
 	return a.subordinates
 }
 
-func (a *Agent) HasTools() bool {
+func (a *StandardAgent) HasTools() bool {
 	return len(a.tools) > 0
 }
 
-func (a *Agent) prepareThread(ctx context.Context, messages []*llm.Message, options dive.Options) (*dive.Thread, error) {
+func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Message, options Options) (*Thread, error) {
 	thread, err := a.getOrCreateThread(ctx, options.ThreadID, options)
 	if err != nil {
 		return nil, err
@@ -196,26 +195,23 @@ func (a *Agent) prepareThread(ctx context.Context, messages []*llm.Message, opti
 	return thread, nil
 }
 
-func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.Response, error) {
-	var chatOptions dive.Options
-	chatOptions.Apply(opts)
-
-	responseID := dive.NewID()
+func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...Option) (*Response, error) {
+	var chatAgentOptions Options
+	chatAgentOptions.Apply(opts)
 
 	logger := a.logger.With(
-		"agent", a.name,
-		"thread_id", chatOptions.ThreadID,
-		"user_id", chatOptions.UserID,
-		"response_id", responseID,
+		"agent_name", a.name,
+		"thread_id", chatAgentOptions.ThreadID,
+		"user_id", chatAgentOptions.UserID,
 	)
 	logger.Info("creating response")
 
-	messages := a.prepareMessages(chatOptions)
+	messages := a.prepareMessages(chatAgentOptions)
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	thread, err := a.prepareThread(ctx, messages, chatOptions)
+	thread, err := a.prepareThread(ctx, messages, chatAgentOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -233,15 +229,15 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 		defer cancel()
 	}
 
-	response := &dive.Response{
-		ID:        responseID,
+	response := &Response{
+		ID:        RandomInt(),
 		Model:     a.model.Name(),
 		CreatedAt: time.Now(),
 	}
 
-	eventCallback := func(ctx context.Context, item *dive.ResponseItem) error {
-		if chatOptions.EventCallback != nil {
-			return chatOptions.EventCallback(ctx, item)
+	eventCallback := func(ctx context.Context, item *ResponseItem) error {
+		if chatAgentOptions.EventCallback != nil {
+			return chatAgentOptions.EventCallback(ctx, item)
 		}
 		return nil
 	}
@@ -264,17 +260,17 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...dive.Option) (*dive.
 	response.Usage = genResult.Usage
 
 	for _, msg := range genResult.OutputMessages {
-		response.Items = append(response.Items, &dive.ResponseItem{
-			Type:    dive.ResponseItemTypeMessage,
+		response.Items = append(response.Items, &ResponseItem{
+			Type:    ResponseItemTypeMessage,
 			Message: msg,
 		})
 	}
 	return response, nil
 }
 
-// prepareMessages processes the ChatOptions to create messages for the LLM.
+// prepareMessages processes the ChatAgentOptions to create messages for the LLM.
 // It handles both WithMessages and WithInput options.
-func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
+func (a *StandardAgent) prepareMessages(options Options) []*llm.Message {
 	var messages []*llm.Message
 	if len(a.context) > 0 {
 		messages = append(messages, llm.NewUserMessage(a.context...))
@@ -285,18 +281,18 @@ func (a *Agent) prepareMessages(options dive.Options) []*llm.Message {
 	return messages
 }
 
-func (a *Agent) getOrCreateThread(ctx context.Context, threadID string, options dive.Options) (*dive.Thread, error) {
+func (a *StandardAgent) getOrCreateThread(ctx context.Context, threadID string, options Options) (*Thread, error) {
 	if a.threadRepository != nil {
 		thread, err := a.threadRepository.GetThread(ctx, threadID)
 		if err != nil {
-			if err != dive.ErrThreadNotFound {
+			if err != ErrThreadNotFound {
 				return nil, err
 			}
 		} else {
 			return thread, nil
 		}
 	}
-	return &dive.Thread{
+	return &Thread{
 		ID:        threadID,
 		UserID:    options.UserID,
 		AgentID:   a.id,
@@ -305,7 +301,7 @@ func (a *Agent) getOrCreateThread(ctx context.Context, threadID string, options 
 	}, nil
 }
 
-func (a *Agent) buildSystemPrompt() (string, error) {
+func (a *StandardAgent) buildSystemPrompt() (string, error) {
 	var prompt string
 	if a.systemPromptTemplate != nil {
 		var err error
@@ -316,7 +312,7 @@ func (a *Agent) buildSystemPrompt() (string, error) {
 		prompt = strings.TrimSpace(prompt)
 	}
 	if a.dateAwareness == nil || *a.dateAwareness {
-		prompt = fmt.Sprintf("%s\n\n%s", prompt, dive.DateString(time.Now()))
+		prompt = fmt.Sprintf("%s\n\n%s", prompt, dateString(time.Now()))
 	}
 	return strings.TrimSpace(prompt), nil
 }
@@ -324,11 +320,11 @@ func (a *Agent) buildSystemPrompt() (string, error) {
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(
+func (a *StandardAgent) generate(
 	ctx context.Context,
 	messages []*llm.Message,
 	systemPrompt string,
-	callback dive.EventCallback,
+	callback EventCallback,
 ) (*generateResult, error) {
 
 	// Contains the message history we pass to the LLM
@@ -346,8 +342,8 @@ func (a *Agent) generate(
 		outputMessages = append(outputMessages, msg)
 	}
 
-	// Options passed to the LLM
-	generateOpts := a.getGenerationOptions(systemPrompt)
+	// AgentOptions passed to the LLM
+	generateOpts := a.getGenerationAgentOptions(systemPrompt)
 
 	// The loop is used to run and respond to the primary generation request
 	// and then automatically run any tool-use invocations. The first time
@@ -376,7 +372,7 @@ func (a *Agent) generate(
 		}
 
 		a.logger.Debug("llm response",
-			"agent", a.name,
+			"agent_name", a.name,
 			"usage_input_tokens", response.Usage.InputTokens,
 			"usage_output_tokens", response.Usage.OutputTokens,
 			"cache_creation_input_tokens", response.Usage.CacheCreationInputTokens,
@@ -398,8 +394,8 @@ func (a *Agent) generate(
 			break
 		}
 
-		if err := callback(ctx, &dive.ResponseItem{
-			Type:    dive.ResponseItemTypeMessage,
+		if err := callback(ctx, &ResponseItem{
+			Type:    ResponseItemTypeMessage,
 			Message: assistantMsg,
 			Usage:   response.Usage.Copy(),
 		}); err != nil {
@@ -436,14 +432,14 @@ func (a *Agent) generate(
 	}, nil
 }
 
-func (a *Agent) isCachingEnabled() bool {
+func (a *StandardAgent) isCachingEnabled() bool {
 	if a.modelSettings == nil || a.modelSettings.Caching == nil {
 		return true // default to caching enabled
 	}
 	return *a.modelSettings.Caching
 }
 
-func (a *Agent) configureCacheControl(messages []*llm.Message) {
+func (a *StandardAgent) configureCacheControl(messages []*llm.Message) {
 	if !a.isCachingEnabled() || len(messages) == 0 {
 		return
 	}
@@ -466,11 +462,11 @@ func (a *Agent) configureCacheControl(messages []*llm.Message) {
 
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
-func (a *Agent) generateStreaming(
+func (a *StandardAgent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
 	generateOpts []llm.Option,
-	callback dive.EventCallback,
+	callback EventCallback,
 ) (*llm.Response, error) {
 	accum := llm.NewResponseAccumulator()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
@@ -484,8 +480,8 @@ func (a *Agent) generateStreaming(
 		if err := accum.AddEvent(event); err != nil {
 			return nil, err
 		}
-		if err := callback(ctx, &dive.ResponseItem{
-			Type:  dive.ResponseItemTypeModelEvent,
+		if err := callback(ctx, &ResponseItem{
+			Type:  ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
 			return nil, err
@@ -497,7 +493,7 @@ func (a *Agent) generateStreaming(
 	return accum.Response(), nil
 }
 
-func (a *Agent) getConfirmer() (dive.Confirmer, bool) {
+func (a *StandardAgent) getConfirmer() (Confirmer, bool) {
 	if a.confirmer != nil {
 		return a.confirmer, true
 	}
@@ -505,12 +501,12 @@ func (a *Agent) getConfirmer() (dive.Confirmer, bool) {
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
-func (a *Agent) executeToolCalls(
+func (a *StandardAgent) executeToolCalls(
 	ctx context.Context,
 	toolCalls []*llm.ToolUseContent,
-	callback dive.EventCallback,
-) ([]*dive.ToolCallResult, error) {
-	results := make([]*dive.ToolCallResult, len(toolCalls))
+	callback EventCallback,
+) ([]*ToolCallResult, error) {
+	results := make([]*ToolCallResult, len(toolCalls))
 	for i, toolCall := range toolCalls {
 		tool, ok := a.toolsByName[toolCall.Name]
 		if !ok {
@@ -521,8 +517,8 @@ func (a *Agent) executeToolCalls(
 			"tool_name", toolCall.Name,
 			"tool_input", string(toolCall.Input))
 
-		if err := callback(ctx, &dive.ResponseItem{
-			Type:     dive.ResponseItemTypeToolCall,
+		if err := callback(ctx, &ResponseItem{
+			Type:     ResponseItemTypeToolCall,
 			ToolCall: toolCall,
 		}); err != nil {
 			return nil, err
@@ -544,7 +540,7 @@ func (a *Agent) executeToolCalls(
 			if err != nil {
 				return nil, fmt.Errorf("tool call error: %w", err)
 			}
-			results[i] = &dive.ToolCallResult{
+			results[i] = &ToolCallResult{
 				ID:     toolCall.ID,
 				Name:   toolCall.Name,
 				Input:  toolCall.Input,
@@ -552,14 +548,14 @@ func (a *Agent) executeToolCalls(
 				Error:  err,
 			}
 		} else {
-			results[i] = &dive.ToolCallResult{
+			results[i] = &ToolCallResult{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
 				Input: toolCall.Input,
-				Result: &dive.ToolResult{
-					Content: []*dive.ToolResultContent{
+				Result: &ToolResult{
+					Content: []*ToolResultContent{
 						{
-							Type: dive.ToolResultContentTypeText,
+							Type: ToolResultContentTypeText,
 							Text: "User denied tool call",
 						},
 					},
@@ -568,8 +564,8 @@ func (a *Agent) executeToolCalls(
 			}
 		}
 
-		if err := callback(ctx, &dive.ResponseItem{
-			Type:           dive.ResponseItemTypeToolCallResult,
+		if err := callback(ctx, &ResponseItem{
+			Type:           ResponseItemTypeToolCallResult,
 			ToolCallResult: results[i],
 		}); err != nil {
 			return nil, err
@@ -578,7 +574,7 @@ func (a *Agent) executeToolCalls(
 	return results, nil
 }
 
-func (a *Agent) getToolDefinitions() []llm.Tool {
+func (a *StandardAgent) getToolDefinitions() []llm.Tool {
 	definitions := make([]llm.Tool, len(a.tools))
 	for i, tool := range a.tools {
 		definitions[i] = tool
@@ -586,7 +582,7 @@ func (a *Agent) getToolDefinitions() []llm.Tool {
 	return definitions
 }
 
-func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
+func (a *StandardAgent) getGenerationAgentOptions(systemPrompt string) []llm.Option {
 	var generateOpts []llm.Option
 	if systemPrompt != "" {
 		generateOpts = append(generateOpts, llm.WithSystemPrompt(systemPrompt))
@@ -639,7 +635,7 @@ func (a *Agent) getGenerationOptions(systemPrompt string) []llm.Option {
 	return generateOpts
 }
 
-func (a *Agent) Context() []llm.Content {
+func (a *StandardAgent) Context() []llm.Content {
 	return a.context
 }
 

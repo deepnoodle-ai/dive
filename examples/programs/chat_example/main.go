@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
@@ -48,7 +47,7 @@ func main() {
 
 	logger := log.New(log.LevelInfo)
 
-	a, err := agent.New(agent.Options{
+	a, err := dive.NewAgent(dive.AgentOptions{
 		Name: "Dr. Smith",
 		Instructions: `
 You are a virtual doctor for role-playing purposes only. You can discuss general

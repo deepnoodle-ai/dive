@@ -11,7 +11,6 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
@@ -94,7 +93,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		tools = append(tools, tool)
 	}
 
-	modelSettings := &agent.ModelSettings{}
+	modelSettings := &dive.ModelSettings{}
 	if options.ReasoningBudget > 0 {
 		modelSettings.ReasoningBudget = &options.ReasoningBudget
 		maxTokens := 0
@@ -111,7 +110,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		Mode: dive.ConfirmIfNotReadOnly,
 	})
 
-	watchAgent, err := agent.New(agent.Options{
+	watchAgent, err := dive.NewAgent(dive.AgentOptions{
 		Name:             options.AgentName,
 		Instructions:     options.SystemPrompt,
 		Model:            model,

@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
@@ -84,7 +83,7 @@ func main() {
 		log.Fatal("Unknown model provider:", *modelProvider, ". Use 'anthropic', 'openai', or 'azure'")
 	}
 
-	researcher, err := agent.New(agent.Options{
+	researcher, err := dive.NewAgent(dive.AgentOptions{
 		Name:   "Research Assistant",
 		Goal:   "Use " + *searchProvider + " search with " + *modelProvider + " to research assigned topics",
 		Model:  model,

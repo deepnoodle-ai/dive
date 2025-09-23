@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/agent"
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/threads"
@@ -288,7 +287,7 @@ func createAgentFromFlags(systemPrompt, goal, instructions string, tools []dive.
 	}
 	threadRepo := threads.NewDiskRepository(threadsDir)
 
-	return agent.New(agent.Options{
+	return dive.NewAgent(dive.AgentOptions{
 		Name:             "Assistant",
 		SystemPrompt:     systemPrompt,
 		Goal:             goal,
@@ -297,7 +296,7 @@ func createAgentFromFlags(systemPrompt, goal, instructions string, tools []dive.
 		Logger:           logger,
 		Tools:            tools,
 		ThreadRepository: threadRepo,
-		ModelSettings:    &agent.ModelSettings{},
+		ModelSettings:    &dive.ModelSettings{},
 		Confirmer:        confirmer,
 	})
 }
@@ -345,7 +344,7 @@ func applyFlagOverrides(configAgent dive.Agent, systemPrompt, goal, instructions
 		finalTools = []dive.Tool{}
 	}
 
-	return agent.New(agent.Options{
+	return dive.NewAgent(dive.AgentOptions{
 		Name:             configAgent.Name(),
 		SystemPrompt:     finalSystemPrompt,
 		Goal:             finalGoal,
@@ -354,7 +353,7 @@ func applyFlagOverrides(configAgent dive.Agent, systemPrompt, goal, instructions
 		Logger:           logger,
 		Tools:            finalTools,
 		ThreadRepository: threadRepo,
-		ModelSettings:    &agent.ModelSettings{},
+		ModelSettings:    &dive.ModelSettings{},
 		Confirmer:        confirmer,
 	})
 }
