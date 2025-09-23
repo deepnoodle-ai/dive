@@ -15,14 +15,24 @@ import (
 )
 
 var (
-	DefaultResponseTimeout    = time.Minute * 10
-	DefaultToolIterationLimit = 16
+	defaultResponseTimeout    = time.Minute * 10
+	defaultToolIterationLimit = 16
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
 	ErrNoInstructions         = errors.New("no instructions provided")
 	ErrNoLLM                  = errors.New("no llm provided")
 	FinishNow                 = "Do not use any more tools. You must respond with your final answer now."
 )
+
+// SetDefaultResponseTimeout sets the default response timeout for agents.
+func SetDefaultResponseTimeout(timeout time.Duration) {
+	defaultResponseTimeout = timeout
+}
+
+// SetDefaultToolIterationLimit sets the default tool iteration limit for agents.
+func SetDefaultToolIterationLimit(limit int) {
+	defaultToolIterationLimit = limit
+}
 
 // Confirm our standard implementation satisfies the dive.Agent interface.
 var _ dive.Agent = &Agent{}
@@ -62,6 +72,7 @@ type Options struct {
 	ThreadRepository   dive.ThreadRepository
 	Confirmer          dive.Confirmer
 	SystemPrompt       string
+	NoSystemPrompt     bool
 	Context            []llm.Content
 }
 
@@ -94,10 +105,10 @@ func New(opts Options) (*Agent, error) {
 		return nil, ErrNoLLM
 	}
 	if opts.ResponseTimeout <= 0 {
-		opts.ResponseTimeout = DefaultResponseTimeout
+		opts.ResponseTimeout = defaultResponseTimeout
 	}
 	if opts.ToolIterationLimit <= 0 {
-		opts.ToolIterationLimit = DefaultToolIterationLimit
+		opts.ToolIterationLimit = defaultToolIterationLimit
 	}
 	if opts.Logger == nil {
 		opts.Logger = log.New(log.GetDefaultLevel())
@@ -105,12 +116,16 @@ func New(opts Options) (*Agent, error) {
 	if opts.ID == "" {
 		opts.ID = dive.NewID()
 	}
-	if opts.SystemPrompt == "" {
-		opts.SystemPrompt = SystemPromptTemplate
-	}
-	systemPromptTemplate, err := parseTemplate("agent", opts.SystemPrompt)
-	if err != nil {
-		return nil, fmt.Errorf("invalid system prompt template: %w", err)
+	var systemPromptTemplate *template.Template
+	if !opts.NoSystemPrompt {
+		if opts.SystemPrompt == "" {
+			opts.SystemPrompt = defaultSystemPrompt
+		}
+		var err error
+		systemPromptTemplate, err = parseTemplate("agent", opts.SystemPrompt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid system prompt template: %w", err)
+		}
 	}
 	agent := &Agent{
 		id:                   opts.ID,
@@ -285,9 +300,13 @@ func (a *Agent) getOrCreateThread(ctx context.Context, threadID string, options 
 }
 
 func (a *Agent) buildSystemPrompt() (string, error) {
-	prompt, err := executeTemplate(a.systemPromptTemplate, a)
-	if err != nil {
-		return "", err
+	var prompt string
+	if a.systemPromptTemplate != nil {
+		var err error
+		prompt, err = executeTemplate(a.systemPromptTemplate, a)
+		if err != nil {
+			return "", err
+		}
 	}
 	if a.dateAwareness == nil || *a.dateAwareness {
 		prompt = fmt.Sprintf("%s\n\n# Date and Time\n\n%s", prompt, dive.DateString(time.Now()))

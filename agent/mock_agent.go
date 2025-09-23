@@ -9,34 +9,31 @@ import (
 var _ dive.Agent = &MockAgent{}
 
 type MockAgentOptions struct {
-	Name           string
-	Goal           string
-	Backstory      string
-	IsSupervisor   bool
-	Subordinates   []string
-	AcceptedEvents []string
-	Response       *dive.Response
+	Name         string
+	Goal         string
+	Instructions string
+	IsSupervisor bool
+	Subordinates []string
+	Response     *dive.Response
 }
 
 type MockAgent struct {
-	name           string
-	goal           string
-	backstory      string
-	isSupervisor   bool
-	subordinates   []string
-	acceptedEvents []string
-	response       *dive.Response
+	name         string
+	goal         string
+	instructions string
+	isSupervisor bool
+	subordinates []string
+	response     *dive.Response
 }
 
 func NewMockAgent(opts MockAgentOptions) *MockAgent {
 	return &MockAgent{
-		name:           opts.Name,
-		goal:           opts.Goal,
-		backstory:      opts.Backstory,
-		isSupervisor:   opts.IsSupervisor,
-		subordinates:   opts.Subordinates,
-		acceptedEvents: opts.AcceptedEvents,
-		response:       opts.Response,
+		name:         opts.Name,
+		goal:         opts.Goal,
+		instructions: opts.Instructions,
+		isSupervisor: opts.IsSupervisor,
+		subordinates: opts.Subordinates,
+		response:     opts.Response,
 	}
 }
 
@@ -48,8 +45,8 @@ func (a *MockAgent) Goal() string {
 	return a.goal
 }
 
-func (a *MockAgent) Backstory() string {
-	return a.backstory
+func (a *MockAgent) Instructions() string {
+	return a.instructions
 }
 
 func (a *MockAgent) IsSupervisor() bool {

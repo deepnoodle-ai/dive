@@ -22,7 +22,7 @@ func parseTemplate(name string, text string) (*template.Template, error) {
 	return tmpl, nil
 }
 
-var SystemPromptTemplate = `# About You
+var defaultSystemPrompt = `# About You
 {{ if .Name }}
 Your name is "{{ .Name }}".
 {{- end }}
@@ -63,6 +63,7 @@ You are allowed to assign work to the following agents:
 Use the provided tools as needed to answer questions. Unless otherwise specified,
 prefer using tools to gather information rather than relying on your prior knowledge.`
 
-var PromptFinishNow = "Finish the task to the best of your ability now. Do not use any more tools. Respond with your complete response for the task."
-
-var PromptContinue = "Continue working on the task."
+// SetDefaultSystemPrompt sets the default system prompt template used by agents.
+func SetDefaultSystemPrompt(template string) {
+	defaultSystemPrompt = template
+}

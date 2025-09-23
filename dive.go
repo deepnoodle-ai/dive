@@ -8,15 +8,6 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
-// OutputFormat defines the desired output format for a Task
-type OutputFormat string
-
-const (
-	OutputFormatText     OutputFormat = "text"
-	OutputFormatMarkdown OutputFormat = "markdown"
-	OutputFormatJSON     OutputFormat = "json"
-)
-
 // Type aliases for easy access to LLM types
 type (
 	Schema   = schema.Schema
