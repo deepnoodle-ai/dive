@@ -2,10 +2,12 @@ package dive
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
+	"math/big"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/gofrs/uuid/v5"
 )
 
 // Type aliases for easy access to LLM types
@@ -93,11 +95,11 @@ func WithEventCallback(callback EventCallback) Option {
 	}
 }
 
-// NewID returns a new UUID
+// NewID returns a new unique identifier with format "agent-<randomnum>"
 func NewID() string {
-	id, err := uuid.NewV7()
+	n, err := rand.Int(rand.Reader, big.NewInt(1<<62))
 	if err != nil {
 		panic(err)
 	}
-	return id.String()
+	return fmt.Sprintf("agent-%d", n)
 }
