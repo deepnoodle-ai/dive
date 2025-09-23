@@ -37,17 +37,23 @@ var DefaultFetchExcludeTags = []string{
 var _ dive.TypedTool[*web.FetchInput] = &FetchTool{}
 
 type FetchTool struct {
-	fetcher    web.Fetcher
-	maxSize    int
-	maxRetries int
-	timeout    time.Duration
+	fetcher         web.Fetcher
+	maxSize         int
+	maxRetries      int
+	timeout         time.Duration
+	onlyMainContent *bool
+	storeInCache    *bool
+	maxAge          *int64
 }
 
 type FetchToolOptions struct {
-	MaxSize    int           `json:"max_size,omitempty"`
-	MaxRetries int           `json:"max_retries,omitempty"`
-	Timeout    time.Duration `json:"timeout,omitempty"`
-	Fetcher    web.Fetcher   `json:"-"`
+	MaxSize         int           `json:"max_size,omitempty"`
+	MaxRetries      int           `json:"max_retries,omitempty"`
+	Timeout         time.Duration `json:"timeout,omitempty"`
+	StoreInCache    *bool         `json:"store_in_cache,omitempty"`
+	MaxAge          *int64        `json:"max_age,omitempty"`
+	OnlyMainContent *bool         `json:"only_main_content,omitempty"`
+	Fetcher         web.Fetcher   `json:"-"`
 }
 
 func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInput] {
@@ -58,10 +64,13 @@ func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInp
 		options.Timeout = DefaultFetchTimeout
 	}
 	return dive.ToolAdapter(&FetchTool{
-		fetcher:    options.Fetcher,
-		maxSize:    options.MaxSize,
-		maxRetries: options.MaxRetries,
-		timeout:    options.Timeout,
+		fetcher:         options.Fetcher,
+		maxSize:         options.MaxSize,
+		maxRetries:      options.MaxRetries,
+		timeout:         options.Timeout,
+		onlyMainContent: options.OnlyMainContent,
+		storeInCache:    options.StoreInCache,
+		maxAge:          options.MaxAge,
 	})
 }
 
@@ -70,7 +79,7 @@ func (t *FetchTool) Name() string {
 }
 
 func (t *FetchTool) Description() string {
-	return "Retrieves the contents of the webpage at the given URL."
+	return "Fetches the contents of the webpage at the given URL."
 }
 
 func (t *FetchTool) Schema() *schema.Schema {
@@ -80,17 +89,26 @@ func (t *FetchTool) Schema() *schema.Schema {
 		Properties: map[string]*schema.Property{
 			"url": {
 				Type:        "string",
-				Description: "The URL of the webpage to retrieve, e.g. 'https://www.example.com'",
+				Description: "The URL of the webpage to fetch, e.g. https://www.example.com",
 			},
 		},
 	}
 }
 
 func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.ToolResult, error) {
-	input.Formats = []string{"markdown"}
+	input.Formats = []web.FetchFormat{web.FetchFormatMarkdown}
 
 	if input.ExcludeTags == nil {
 		input.ExcludeTags = DefaultFetchExcludeTags
+	}
+	if t.onlyMainContent != nil {
+		input.OnlyMainContent = t.onlyMainContent
+	}
+	if t.storeInCache != nil {
+		input.StoreInCache = t.storeInCache
+	}
+	if t.maxAge != nil {
+		input.MaxAge = t.maxAge
 	}
 
 	if t.timeout > 0 {
@@ -99,7 +117,7 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 		defer cancel()
 	}
 
-	var response *web.Document
+	var response *web.FetchOutput
 	err := retry.Do(ctx, func() error {
 		var err error
 		response, err = t.fetcher.Fetch(ctx, input)
@@ -114,14 +132,11 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 	}
 
 	var sb strings.Builder
-	if response.Metadata != nil {
-		metadata := *response.Metadata
-		if metadata.Title != "" {
-			sb.WriteString(fmt.Sprintf("# %s\n\n", metadata.Title))
-		}
-		if metadata.Description != "" {
-			sb.WriteString(fmt.Sprintf("## %s\n\n", metadata.Description))
-		}
+	if value := response.Metadata.Title; value != "" {
+		sb.WriteString(fmt.Sprintf("# %s\n\n", value))
+	}
+	if value := response.Metadata.Description; value != "" {
+		sb.WriteString(fmt.Sprintf("## %s\n\n", value))
 	}
 	sb.WriteString(response.Markdown)
 

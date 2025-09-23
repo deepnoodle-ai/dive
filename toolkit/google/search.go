@@ -80,7 +80,7 @@ func (s *Client) Search(ctx context.Context, q *web.SearchInput) (*web.SearchOut
 	}
 	pageCount := (q.Limit + 9) / 10 // Google always returns 10 results per page
 	var items []*web.SearchItem
-	var curPage, curRank int
+	var curPage int
 	for curPage < pageCount {
 		params := url.Values{}
 		params.Set("key", s.key)
@@ -93,9 +93,7 @@ func (s *Client) Search(ctx context.Context, q *web.SearchInput) (*web.SearchOut
 			return nil, err
 		}
 		for _, item := range crs.Items {
-			curRank++
 			items = append(items, &web.SearchItem{
-				Rank:        curRank,
 				URL:         item.Link,
 				Title:       item.Title,
 				Description: item.Snippet,
