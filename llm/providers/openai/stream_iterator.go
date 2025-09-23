@@ -359,9 +359,9 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			})
 		}
 
-	case responses.ResponseReasoningDeltaEvent:
+	case responses.ResponseReasoningSummaryDeltaEvent:
 		outputIdx := int(data.OutputIndex)
-		contentIdx := int(data.ContentIndex)
+		contentIdx := int(data.SummaryIndex)
 
 		itemState, itemOk := s.outputItemsState[outputIdx]
 		if !itemOk {
@@ -422,20 +422,6 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		outputIdx := int(data.OutputIndex)
 		if item, ok := s.outputItemsState[outputIdx]; ok && item.ItemType == "function_call" {
 			item.ToolArgumentsJson = data.Arguments
-		}
-
-	case responses.ResponseReasoningDoneEvent:
-		outputIdx := int(data.OutputIndex)
-		contentIdx := int(data.ContentIndex)
-		if item, ok := s.outputItemsState[outputIdx]; ok {
-			if part, ok2 := item.ContentParts[contentIdx]; ok2 {
-				part.Text = data.Text
-				part.IsComplete = true
-				diveEvents = append(diveEvents, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &outputIdx,
-				})
-			}
 		}
 
 	case responses.ResponseOutputItemDoneEvent:
