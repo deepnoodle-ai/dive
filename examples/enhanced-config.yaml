@@ -1,0 +1,277 @@
+# Enhanced Dive Configuration with Claude Code-inspired features
+name: "Enhanced Dive Example"
+version: "2.0"
+description: "Example configuration showing all enhanced features"
+
+# Global configuration
+Config:
+  DefaultProvider: anthropic
+  DefaultModel: claude-3-sonnet-20240229
+  LogLevel: info
+  ConfirmationMode: confirmIfNotReadOnly
+
+# Memory system configuration
+memory:
+  enabled: true
+  autoLoad: true
+  maxImportDepth: 5
+  customPaths:
+    - ./docs/context
+    - ./specifications
+  importDirectories:
+    - ~/.dive/shared-memories
+  excludePatterns:
+    - "*.test.md"
+    - "temp/*"
+
+# Permission system
+permissions:
+  defaultMode: normal  # normal, acceptEdits, bypassPermissions
+  allow:
+    - "Read(*.md)"
+    - "Read(*.txt)"
+    - "Bash(ls:*)"
+    - "Bash(cat:*)"
+    - "Grep(*)"
+  ask:
+    - "Edit(*)"
+    - "Write(*)"
+    - "Bash(git:*)"
+  deny:
+    - "Read(.env*)"
+    - "Read(*.key)"
+    - "Read(*.pem)"
+    - "Write(/etc/**)"
+    - "Bash(rm:*)"
+    - "Bash(sudo:*)"
+  additionalDirectories:
+    - ~/workspace
+    - /tmp
+  disableBypassMode: false
+  autoApproveTimeout: 30  # seconds, 0 = always ask
+
+# Hooks configuration
+hooks:
+  UserPromptSubmit:
+    - event: UserPromptSubmit
+      matcher: "*"
+      actions:
+        - type: command
+          command: "~/.dive/hooks/prompt-enhancer.sh"
+          timeout: 5
+
+  PreToolUse:
+    - event: PreToolUse
+      matcher: "Bash"
+      actions:
+        - type: command
+          command: "~/.dive/hooks/bash-validator.sh"
+          timeout: 3
+
+  PostToolUse:
+    - event: PostToolUse
+      matcher: "Write|Edit"
+      actions:
+        - type: command
+          command: "~/.dive/hooks/code-linter.sh"
+          timeout: 10
+          async: true
+
+  SessionStart:
+    - event: SessionStart
+      actions:
+        - type: command
+          command: "~/.dive/hooks/session-logger.sh start"
+
+  SessionEnd:
+    - event: SessionEnd
+      actions:
+        - type: command
+          command: "~/.dive/hooks/session-logger.sh end"
+
+# Subagent definitions
+subagents:
+  code-reviewer:
+    name: code-reviewer
+    description: "Expert code review specialist"
+    model: inherit  # or specific model
+    tools:
+      - Read
+      - Grep
+      - Glob
+    systemPrompt: |
+      You are a senior code reviewer ensuring high standards.
+      Focus on:
+      - Code clarity and readability
+      - Performance issues
+      - Security vulnerabilities
+      - Best practices
+    autoInvoke:
+      - "review this code"
+      - "check for issues"
+    maxTokens: 4096
+    temperature: 0.3
+    permissions:
+      defaultMode: normal
+      deny:
+        - "Write(*)"
+        - "Edit(*)"
+
+  debugger:
+    name: debugger
+    description: "Debugging specialist"
+    model: claude-3-opus-20240229
+    tools:
+      - Read
+      - Edit
+      - Bash
+      - Grep
+    systemPrompt: |
+      You are an expert debugger.
+      Analyze errors, find root causes, and fix issues.
+    autoInvoke:
+      - "debug this"
+      - "fix this error"
+      - "why is this failing"
+    temperature: 0.2
+
+# Enhanced MCP configuration
+mcpConfig:
+  enableAllProjectServers: false
+  enabledServers:
+    - github
+    - sentry
+    - linear
+  disabledServers:
+    - test-server
+  autoDiscovery: true
+  discoveryPaths:
+    - ~/.mcp/servers
+    - ./.mcp
+  serverConfigs:
+    github:
+      type: http
+      name: github
+      url: https://api.github.com/mcp
+      autoStart: true
+      restartOnFail: true
+      maxRetries: 3
+      oauth:
+        clientID: ${GITHUB_CLIENT_ID}
+        redirectURI: http://localhost:8080/callback
+        scopes:
+          - repo
+          - read:user
+      permissions:
+        allow:
+          - "github:list_repos"
+          - "github:get_issue"
+        deny:
+          - "github:delete_repo"
+
+    local-tools:
+      type: stdio
+      name: local-tools
+      command: ~/.dive/mcp/local-tools-server
+      args:
+        - --port
+        - "9999"
+      env:
+        DIVE_PROJECT_DIR: ${PWD}
+      autoStart: true
+      toolConfiguration:
+        enabled: true
+        allowedTools:
+          - file_reader
+          - calculator
+        approvalMode: auto
+
+# MCP servers from the base config
+MCPServers:
+  - Type: stdio
+    Name: filesystem
+    Command: npx
+    Args:
+      - -y
+      - "@modelcontextprotocol/server-filesystem"
+      - ~/.dive/allowed-files.txt
+
+# Tool definitions
+Tools:
+  - Name: calculator
+    Enabled: true
+    Parameters:
+      precision: 10
+
+  - Name: web_search
+    Enabled: true
+    Parameters:
+      api_key: ${SEARCH_API_KEY}
+      max_results: 10
+
+# Agent definitions with enhanced features
+Agents:
+  - ID: main-assistant
+    Name: "Enhanced Assistant"
+    Goal: "Help users with coding and analysis tasks"
+    Instructions: |
+      You are an AI assistant with enhanced capabilities.
+      You have access to memory, can invoke subagents, and
+      your actions are governed by permissions and hooks.
+
+    Provider: anthropic
+    Model: claude-3-sonnet-20240229
+
+    Tools:
+      - Read
+      - Write
+      - Edit
+      - Grep
+      - Glob
+      - Bash
+      - calculator
+      - web_search
+
+    DateAwareness: true
+    ToolIterationLimit: 20
+    ResponseTimeout: 5m
+
+    ModelSettings:
+      Temperature: 0.7
+      MaxTokens: 4096
+      ParallelToolCalls: true
+      Caching: true
+      Features:
+        - reasoning
+        - vision
+
+  - ID: planner
+    Name: "Planning Agent"
+    Goal: "Create detailed plans and architectures"
+    Instructions: |
+      You excel at breaking down complex problems into
+      actionable steps and creating detailed plans.
+
+    Model: claude-3-opus-20240229
+    Tools:
+      - Read
+      - Write
+
+    ModelSettings:
+      Temperature: 0.5
+      MaxTokens: 8192
+      ReasoningEffort: high
+
+# Settings (optional, can override via settings.json)
+settings:
+  model: claude-3-sonnet-20240229
+  defaultProvider: anthropic
+  outputStyle: markdown
+  statusLine:
+    type: command
+    command: "~/.dive/status-line.sh"
+  env:
+    DIVE_MODE: enhanced
+    CUSTOM_VAR: value
+  cleanupPeriodDays: 30
+  includeCoAuthoredBy: true

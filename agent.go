@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
+	"github.com/deepnoodle-ai/dive/memory"
 )
 
 var (
@@ -52,6 +54,14 @@ type ModelSettings struct {
 	MCPServers        []llm.MCPServerConfig
 }
 
+// MemoryConfig configures memory loading for an agent
+type MemoryConfig struct {
+	Enabled         bool     // Whether to load memory files
+	AutoLoad        bool     // Automatically discover and load DIVE.md files
+	CustomPaths     []string // Additional memory file paths to load
+	ExcludePatterns []string // Patterns to exclude when auto-loading
+}
+
 // AgentOptions are used to configure an StandardAgent.
 type AgentOptions struct {
 	ID                 string
@@ -73,6 +83,7 @@ type AgentOptions struct {
 	SystemPrompt       string
 	NoSystemPrompt     bool
 	Context            []llm.Content
+	Memory             *MemoryConfig // Memory configuration
 }
 
 // StandardAgent is the standard implementation of the Agent interface.
@@ -96,10 +107,16 @@ type StandardAgent struct {
 	confirmer            Confirmer
 	systemPromptTemplate *template.Template
 	context              []llm.Content
+	memoryConfig         *MemoryConfig
+	memoryContent        string // Cached memory content
 }
 
 // NewAgent returns a new StandardAgent configured with the given options.
-func NewAgent(opts AgentOptions) (*StandardAgent, error) {
+func NewAgent(opts AgentOptions, optFuncs ...func(*AgentOptions)) (*StandardAgent, error) {
+	// Apply functional options
+	for _, optFunc := range optFuncs {
+		optFunc(&opts)
+	}
 	if opts.Model == nil {
 		return nil, ErrNoLLM
 	}
@@ -144,6 +161,18 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		modelSettings:        opts.ModelSettings,
 		confirmer:            opts.Confirmer,
 		context:              opts.Context,
+		memoryConfig:         opts.Memory,
+	}
+
+	// Load memory if configured
+	if opts.Memory != nil && opts.Memory.Enabled {
+		memoryContent, err := agent.loadMemory()
+		if err != nil {
+			opts.Logger.Debug("failed to load memory", "error", err)
+			// Don't fail agent creation if memory loading fails
+		} else {
+			agent.memoryContent = memoryContent
+		}
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -269,15 +298,35 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 }
 
 // prepareMessages processes the ChatAgentOptions to create messages for the LLM.
-// It handles both WithMessages and WithInput options.
+// It handles both WithMessages and WithInput options, and integrates memory content.
 func (a *StandardAgent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 	var messages []*llm.Message
-	if len(a.context) > 0 {
-		messages = append(messages, llm.NewUserMessage(a.context...))
+
+	// Combine context and memory into a single context message
+	var contextContent []llm.Content
+
+	// Add memory content if available
+	if a.memoryContent != "" {
+		contextContent = append(contextContent, &llm.TextContent{
+			Text: a.memoryContent,
+		})
 	}
+
+	// Add existing context
+	if len(a.context) > 0 {
+		contextContent = append(contextContent, a.context...)
+	}
+
+	// Create context message if we have any context content
+	if len(contextContent) > 0 {
+		messages = append(messages, llm.NewUserMessage(contextContent...))
+	}
+
+	// Add user messages
 	if len(options.Messages) > 0 {
 		messages = append(messages, options.Messages...)
 	}
+
 	return messages
 }
 
@@ -637,6 +686,46 @@ func (a *StandardAgent) getGenerationAgentOptions(systemPrompt string) []llm.Opt
 
 func (a *StandardAgent) Context() []llm.Content {
 	return a.context
+}
+
+// loadMemory loads memory content based on the agent's memory configuration
+func (a *StandardAgent) loadMemory() (string, error) {
+	if a.memoryConfig == nil || !a.memoryConfig.Enabled {
+		return "", nil
+	}
+
+	mem := memory.NewMemory()
+
+	// Auto-load memory files if enabled
+	if a.memoryConfig.AutoLoad {
+		if err := mem.Load(); err != nil {
+			a.logger.Debug("failed to auto-load memory", "error", err)
+		}
+	}
+
+	// Load custom paths
+	for _, path := range a.memoryConfig.CustomPaths {
+		// Resolve relative paths
+		if !filepath.IsAbs(path) {
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				a.logger.Debug("failed to resolve custom memory path", "path", path, "error", err)
+				continue
+			}
+			path = absPath
+		}
+
+		content, err := mem.ReadMemoryFile(path)
+		if err != nil {
+			a.logger.Debug("failed to load custom memory file", "path", path, "error", err)
+			continue
+		}
+
+		// Add as a custom memory file
+		mem.AddCustomMemory(path, content)
+	}
+
+	return mem.GetCombinedMemory(), nil
 }
 
 type generateResult struct {

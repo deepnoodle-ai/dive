@@ -1,0 +1,31 @@
+# Basic Dive Configuration that works with both old and new system
+Config:
+  DefaultProvider: anthropic
+  DefaultModel: claude-3-5-sonnet-20241022
+  LogLevel: info
+
+# MCP servers from the base config
+MCPServers:
+  - Type: stdio
+    Name: filesystem
+    Command: npx
+    Args:
+      - -y
+      - "@modelcontextprotocol/server-filesystem"
+      - /tmp
+
+# Agent definitions
+Agents:
+  - ID: main-assistant
+    Name: "Enhanced Assistant"
+    Goal: "Help users with coding and analysis tasks"
+    Instructions: |
+      You are an AI assistant with enhanced capabilities.
+      Be helpful and concise.
+
+    Provider: anthropic
+    Model: claude-3-5-sonnet-20241022
+
+    DateAwareness: true
+    ToolIterationLimit: 20
+    ResponseTimeout: 5m

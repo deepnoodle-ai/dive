@@ -23,6 +23,7 @@ var (
 	errorStyle    = color.New(color.FgRed)
 	yellowStyle   = color.New(color.FgYellow)
 	thinkingStyle = color.New(color.FgMagenta)
+	greenStyle    = color.New(color.FgGreen)
 )
 
 // readStdin reads all content from standard input

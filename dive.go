@@ -95,6 +95,34 @@ func WithEventCallback(callback EventCallback) CreateResponseOption {
 	}
 }
 
+// WithMemory enables memory loading with default auto-discovery
+func WithMemory() func(*AgentOptions) {
+	return func(opts *AgentOptions) {
+		opts.Memory = &MemoryConfig{
+			Enabled:  true,
+			AutoLoad: true,
+		}
+	}
+}
+
+// WithMemoryConfig specifies custom memory configuration
+func WithMemoryConfig(config *MemoryConfig) func(*AgentOptions) {
+	return func(opts *AgentOptions) {
+		opts.Memory = config
+	}
+}
+
+// WithMemoryPaths enables memory loading with specific custom paths
+func WithMemoryPaths(paths ...string) func(*AgentOptions) {
+	return func(opts *AgentOptions) {
+		opts.Memory = &MemoryConfig{
+			Enabled:     true,
+			AutoLoad:    true,
+			CustomPaths: paths,
+		}
+	}
+}
+
 // newID returns a new unique identifier with format "agent-<randomnum>"
 func newID() string {
 	return fmt.Sprintf("agent-%s", randomInt())

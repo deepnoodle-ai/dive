@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/internal/random"
 	"github.com/spf13/cobra"
 )
@@ -14,30 +15,55 @@ import (
 func runAsk(message, systemPrompt, goal, instructions, threadID, configFlag, agentFlag string, noConfig bool, tools []dive.Tool) error {
 	ctx := context.Background()
 
-	// Try to discover and load configuration
-	configResult, err := discoverConfiguration(ctx, configFlag, noConfig, agentFlag)
-	if err != nil {
-		return fmt.Errorf("error loading configuration: %v", err)
-	}
 	var chatAgent dive.Agent
+	var err error
 
-	if configResult != nil {
-		// Report configuration usage
-		reportConfigurationUsage(configResult.SourcePath, configResult.AgentName)
+	// Try to use new unified config system
+	if !noConfig {
+		factory, factoryErr := config.NewAgentFactory(ctx, configFlag)
+		if factoryErr == nil {
+			// Successfully loaded unified config
+			if agentFlag != "" {
+				chatAgent, err = factory.CreateAgent(agentFlag)
+			} else if systemPrompt != "" || goal != "" || instructions != "" || len(tools) > 0 {
+				// Create custom agent with overrides
+				model, _ := config.GetModel(llmProvider, llmModel)
+				opts := dive.AgentOptions{
+					Name:         "Assistant",
+					SystemPrompt: systemPrompt,
+					Goal:        goal,
+					Instructions: instructions,
+					Model:       model,
+					Tools:       tools,
+				}
+				chatAgent, err = factory.CreateAgentWithOptions(opts)
+			} else {
+				chatAgent, err = factory.CreateDefaultAgent()
+			}
 
-		// Use config-based agent with potential flag overrides
-		if systemPrompt != "" || goal != "" || instructions != "" || len(tools) > 0 {
-			// Apply flag overrides
-			chatAgent, err = applyFlagOverrides(configResult.SelectedAgent, systemPrompt, goal, instructions, tools)
 			if err != nil {
-				return fmt.Errorf("error applying flag overrides: %v", err)
+				return fmt.Errorf("error creating agent: %v", err)
 			}
 		} else {
-			// Use config agent as-is
-			chatAgent = configResult.SelectedAgent
+			// Fall back to old config system
+			configResult, err := discoverConfiguration(ctx, configFlag, noConfig, agentFlag)
+			if err != nil {
+				return fmt.Errorf("error loading configuration: %v", err)
+			}
+
+			if configResult != nil {
+				reportConfigurationUsage(configResult.SourcePath, configResult.AgentName)
+				if systemPrompt != "" || goal != "" || instructions != "" || len(tools) > 0 {
+					chatAgent, err = applyFlagOverrides(configResult.SelectedAgent, systemPrompt, goal, instructions, tools)
+				} else {
+					chatAgent = configResult.SelectedAgent
+				}
+			}
 		}
-	} else {
-		// No configuration found, use traditional flag-based approach
+	}
+
+	// If still no agent, create from flags
+	if chatAgent == nil {
 		chatAgent, err = createAgentFromFlags(systemPrompt, goal, instructions, tools)
 		if err != nil {
 			return fmt.Errorf("error creating agent: %v", err)
