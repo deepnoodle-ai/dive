@@ -1,6 +1,6 @@
 # Agent API Reference
 
-Complete API reference for the Dive agent package, covering agent creation, configuration, and interaction patterns.
+Complete API reference for Dive agent types (now in the main dive package), covering agent creation, configuration, and interaction patterns.
 
 ## 📋 Table of Contents
 
@@ -62,12 +62,12 @@ func WithEventCallback(callback EventCallback) Option
 
 ## Agent Implementation
 
-### `agent.Agent`
+### `dive.StandardAgent`
 
 The standard implementation of the Agent interface.
 
 ```go
-type Agent struct {
+type StandardAgent struct {
     name                 string
     goal                 string
     instructions         string
@@ -92,7 +92,7 @@ type Agent struct {
 ### Constructor
 
 ```go
-func New(opts Options) (*Agent, error)
+func NewAgent(opts AgentOptions) (Agent, error)
 ```
 
 Creates a new Agent with the specified configuration options.
@@ -103,7 +103,7 @@ Creates a new Agent with the specified configuration options.
 
 **Returns:**
 
-- `*Agent` - Configured agent instance
+- `Agent` - Configured agent instance
 - `error` - Error if configuration is invalid
 
 **Example:**
@@ -111,12 +111,11 @@ Creates a new Agent with the specified configuration options.
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
     "github.com/deepnoodle-ai/dive/toolkit"
 )
 
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Assistant",
     Instructions: "You are a helpful AI assistant.",
     Model:        anthropic.New(),
@@ -130,7 +129,7 @@ agent, err := agent.New(agent.Options{
 
 ## Configuration
 
-### `agent.Options`
+### `dive.AgentOptions`
 
 Configuration structure for creating new agents.
 
@@ -188,7 +187,7 @@ const (
 
 ## Model Settings
 
-### `agent.ModelSettings`
+### `dive.ModelSettings`
 
 Fine-tune LLM behavior for specific use cases.
 
@@ -485,13 +484,12 @@ import (
     "log"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 func main() {
     // Create basic agent
-    assistant, err := agent.New(agent.Options{
+    assistant, err := dive.NewAgent(dive.AgentOptions{
         Name:         "Assistant",
         Instructions: "You are a helpful AI assistant.",
         Model:        anthropic.New(),
@@ -517,17 +515,17 @@ func main() {
 
 ```go
 import (
-    "github.com/deepnoodle-ai/dive/agent"
-    "github.com/deepnoodle-ai/dive/objects"
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/threads"
     "github.com/deepnoodle-ai/dive/toolkit"
 )
 
-func createAdvancedAgent() (*agent.Agent, error) {
+func createAdvancedAgent() (dive.Agent, error) {
     // Create thread repository for memory
     threadRepo := threads.NewMemoryRepository()
 
     // Create agent with tools and memory
-    return agent.New(agent.Options{
+    return dive.NewAgent(dive.AgentOptions{
         Name: "Research Assistant",
         Instructions: `You are a research assistant who can search the web,
                       read files, and maintain conversation history.`,
@@ -540,7 +538,7 @@ func createAdvancedAgent() (*agent.Agent, error) {
             dive.ToolAdapter(toolkit.NewWriteFileTool()),
         },
         ThreadRepository: threadRepo,
-        ModelSettings: &agent.ModelSettings{
+        ModelSettings: &dive.ModelSettings{
             Temperature:       &[]float64{0.7}[0],
             MaxTokens:         &[]int{4000}[0],
             ParallelToolCalls: &[]bool{true}[0],
@@ -599,12 +597,12 @@ func streamingExample(agent dive.Agent) error {
 ### Custom Model Settings
 
 ```go
-func createSpecializedAgent() (*agent.Agent, error) {
-    return agent.New(agent.Options{
+func createSpecializedAgent() (dive.Agent, error) {
+    return dive.NewAgent(dive.AgentOptions{
         Name: "Code Reviewer",
         Instructions: "You are a thorough code reviewer focused on quality and security.",
         Model: anthropic.New(),
-        ModelSettings: &agent.ModelSettings{
+        ModelSettings: &dive.ModelSettings{
             // Low temperature for consistency
             Temperature: &[]float64{0.2}[0],
 
@@ -632,8 +630,8 @@ func createSpecializedAgent() (*agent.Agent, error) {
 ### Supervisor Agent
 
 ```go
-func createSupervisorAgent(subordinates []string) (*agent.Agent, error) {
-    return agent.New(agent.Options{
+func createSupervisorAgent(subordinates []string) (dive.Agent, error) {
+    return dive.NewAgent(dive.AgentOptions{
         Name:         "Project Manager",
         IsSupervisor: true,
         Subordinates: subordinates, // ["Developer", "Designer", "QA Tester"]
@@ -644,7 +642,7 @@ func createSupervisorAgent(subordinates []string) (*agent.Agent, error) {
             dive.ToolAdapter(NewAssignWorkTool()),
             dive.ToolAdapter(NewProjectTrackingTool()),
         },
-        ModelSettings: &agent.ModelSettings{
+        ModelSettings: &dive.ModelSettings{
             Temperature: &[]float64{0.4}[0], // Balanced for planning
         },
     })

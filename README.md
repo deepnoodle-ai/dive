@@ -94,7 +94,7 @@ go get github.com/deepnoodle-ai/dive
 Here's a quick example of creating a chat agent:
 
 ```go
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name:         "Research Assistant",
     Instructions: "You are an enthusiastic and deeply curious researcher.",
     Model:        anthropic.New(),

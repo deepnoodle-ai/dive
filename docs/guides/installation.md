@@ -8,7 +8,6 @@ Quick setup guide for Dive.
 - **API keys** for LLM providers (optional):
   - [Anthropic](https://console.anthropic.com/)
   - [OpenAI](https://platform.openai.com/api-keys)
-  - [Groq](https://console.groq.com/keys)
 
 ## Installation
 
@@ -38,11 +37,8 @@ Set your API keys:
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
-export GROQ_API_KEY="your-key-here"
 
 # For tools (optional)
-export GOOGLE_SEARCH_API_KEY="your-key"
-export GOOGLE_SEARCH_CX="your-cx-id"
 export FIRECRAWL_API_KEY="your-key"
 ```
 
@@ -56,13 +52,12 @@ package main
 import (
     "context"
     "fmt"
-    "github.com/deepnoodle-ai/dive/agent"
-    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
     "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 )
 
 func main() {
-    agent, err := agent.New(agent.Options{
+    agent, err := dive.NewAgent(dive.AgentOptions{
         Name:         "Test Agent",
         Instructions: "You are a helpful assistant.",
         Model:        anthropic.New(),

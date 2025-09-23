@@ -29,15 +29,14 @@ Welcome to the Dive documentation! Dive is an AI toolkit for Go that enables you
 
 ### API Reference
 
-- [Core Interfaces](api/core.md) - Core Dive interfaces
-- [Agent Package](api/agent.md) - Agent implementation details
+- [Core Interfaces](api/core.md) - Core Dive interfaces including Agent types
 - [Config Package](api/config.md) - Configuration system APIs
 - [LLM Package](api/llm.md) - LLM abstraction layer
 
 ## 🚀 Quick Links
 
 - **New to Dive?** Start with the [Overview](overview.md) and [Quick Start Guide](guides/quick-start.md)
-- **Building Agents?** See [Agent Guide](guides/agents.md) and [Agent API](api/agent.md)
+- **Building Agents?** See [Agent Guide](guides/agents.md) and [Core API](api/core.md)
 - **Need Help?** Join our [Discord community](https://discord.gg/yrcuURWk)
 
 ## 🔧 Development

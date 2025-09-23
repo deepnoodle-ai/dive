@@ -28,7 +28,7 @@ import (
 readTool := dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{}))
 
 // Usage in agent
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name: "File Reader",
     Tools: []dive.Tool{readTool},
 })
@@ -221,14 +221,13 @@ import (
     "log"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
     "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
     "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 func main() {
     // Create agent with multiple tools
-    researcher, err := agent.New(agent.Options{
+    researcher, err := dive.NewAgent(dive.AgentOptions{
         Name: "Research Agent",
         Instructions: `You are a research assistant with access to web search,
                       file operations, and content fetching capabilities.
@@ -271,8 +270,8 @@ func main() {
 
 ```go
 // File management specialist
-func createFileManager() (*agent.Agent, error) {
-    return agent.New(agent.Options{
+func createFileManager() (*dive.Agent, error) {
+    return dive.NewAgent(dive.AgentOptions{
         Name: "File Manager",
         Instructions: `You are a file management specialist. You can read, write,
                       organize, and analyze files efficiently.`,
@@ -287,8 +286,8 @@ func createFileManager() (*agent.Agent, error) {
 }
 
 // Web researcher specialist
-func createWebResearcher() (*agent.Agent, error) {
-    return agent.New(agent.Options{
+func createWebResearcher() (*dive.Agent, error) {
+    return dive.NewAgent(dive.AgentOptions{
         Name: "Web Researcher",
         Instructions: `You are a web research specialist. You can search the web,
                       fetch content from URLs, and analyze web-based information.`,
@@ -303,8 +302,8 @@ func createWebResearcher() (*agent.Agent, error) {
 }
 
 // System administrator
-func createSysAdmin() (*agent.Agent, error) {
-    return agent.New(agent.Options{
+func createSysAdmin() (*dive.Agent, error) {
+    return dive.NewAgent(dive.AgentOptions{
         Name: "System Administrator",
         Instructions: `You are a system administrator who can execute commands
                       and manage system resources. Be careful with destructive operations.`,

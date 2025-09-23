@@ -86,12 +86,11 @@ func (t *CalculatorTool) Call(ctx context.Context, input *CalculatorInput) (*div
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/agent"
 )
 
 // Create and register the tool
 calc := &CalculatorTool{}
-agent, err := agent.New(agent.Options{
+agent, err := dive.NewAgent(dive.AgentOptions{
     Name: "Math Assistant",
     Tools: []dive.Tool{
         dive.ToolAdapter(calc),
