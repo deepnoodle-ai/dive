@@ -12,6 +12,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/config"
+	"github.com/deepnoodle-ai/dive/internal/random"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/threads"
@@ -66,7 +67,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 	logger := log.New(getLogLevel())
 
 	// Generate a random thread ID for this watch session
-	threadID := dive.NewID()
+	threadID := random.Integer()
 
 	// Create agent for LLM actions
 	model, err := config.GetModel(llmProvider, llmModel)

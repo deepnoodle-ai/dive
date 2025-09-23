@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/internal/random"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +45,7 @@ func runAsk(message, systemPrompt, goal, instructions, threadID, configFlag, age
 	}
 
 	if threadID == "" {
-		threadID = dive.NewID()
+		threadID = random.Integer()
 	}
 	if err := chatMessage(ctx, message, chatAgent, threadID); err != nil {
 		return err

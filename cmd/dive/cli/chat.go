@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/internal/random"
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +16,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID
 	// Generate a thread ID if none was provided
 	actualThreadID := threadID
 	if actualThreadID == "" {
-		actualThreadID = dive.NewID()
+		actualThreadID = random.Integer()
 	}
 
 	var inToolUse bool
