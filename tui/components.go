@@ -32,6 +32,10 @@ func NewButton(x, y int, label string, onClick func()) *Button {
 
 // Draw renders the button
 func (b *Button) Draw(terminal *Terminal) {
+	// Save current cursor position and hide cursor to prevent flash
+	terminal.SaveCursor()
+	terminal.HideCursor()
+
 	style := b.Style
 	if b.Hovered {
 		style = b.HoverStyle
@@ -49,6 +53,10 @@ func (b *Button) Draw(terminal *Terminal) {
 
 	terminal.MoveCursor(b.X, b.Y)
 	terminal.Print(style.Apply("[" + buttonText + "]"))
+
+	// Restore cursor position and show cursor
+	terminal.RestoreCursor()
+	terminal.ShowCursor()
 }
 
 // GetRegion returns the mouse region for this button
@@ -82,6 +90,8 @@ type TabCompleter struct {
 	selectedStyle     Style
 	normalStyle       Style
 	OnSelect          func(string)
+	clearDropdown     bool
+	lastDrawnLines    int
 }
 
 // NewTabCompleter creates a new tab completer
@@ -114,6 +124,7 @@ func (tc *TabCompleter) Show(x, y int, width int) {
 // Hide hides the completion dropdown
 func (tc *TabCompleter) Hide() {
 	tc.Visible = false
+	tc.clearDropdown = true
 }
 
 // SelectNext moves to the next suggestion
@@ -143,6 +154,17 @@ func (tc *TabCompleter) GetSelected() string {
 
 // Draw renders the tab completion dropdown
 func (tc *TabCompleter) Draw(terminal *Terminal) {
+	// Handle clearing if dropdown was hidden
+	if tc.clearDropdown && tc.lastDrawnLines > 0 {
+		for i := 0; i <= tc.lastDrawnLines; i++ {
+			terminal.MoveCursor(tc.X, tc.Y + 1 + i)
+			terminal.ClearToEndOfLine()
+		}
+		tc.clearDropdown = false
+		tc.lastDrawnLines = 0
+		return
+	}
+
 	if !tc.Visible || len(tc.suggestions) == 0 {
 		return
 	}
@@ -162,6 +184,9 @@ func (tc *TabCompleter) Draw(terminal *Terminal) {
 			start = end - tc.maxVisible
 		}
 	}
+
+	// Track how many lines we're drawing for cleanup later
+	tc.lastDrawnLines = (end - start) + 1 // +1 for bottom border
 
 	// Draw dropdown box
 	for i := start; i < end; i++ {

@@ -147,6 +147,7 @@ func (d *ComprehensiveDemo) setupTabCompleter() {
 		d.inputs[d.selectedInput] = suggestion + " "
 		d.cursorPos[d.selectedInput] = len(d.inputs[d.selectedInput])
 		d.tabCompleter.Hide()
+		d.tabCompleter.Draw(d.terminal) // Clear the dropdown
 		d.updateInputFields()
 	}
 
@@ -530,6 +531,7 @@ func (d *ComprehensiveDemo) Run() error {
 					d.inputs[d.selectedInput] = selected + " "
 					d.cursorPos[d.selectedInput] = len(d.inputs[d.selectedInput])
 					d.tabCompleter.Hide()
+					d.tabCompleter.Draw(d.terminal) // Clear the dropdown
 					d.updateInputFields()
 				}
 			} else if d.inputs[d.selectedInput] != "" {
@@ -542,6 +544,7 @@ func (d *ComprehensiveDemo) Run() error {
 		case 27: // ESC
 			if d.tabCompleter.Visible {
 				d.tabCompleter.Hide()
+				d.tabCompleter.Draw(d.terminal) // Clear the dropdown
 				d.updateClickableWords() // Re-add mouse regions
 			} else {
 				d.inputs[d.selectedInput] = ""
@@ -557,6 +560,7 @@ func (d *ComprehensiveDemo) Run() error {
 					d.cursorPos[d.selectedInput] = len(d.inputs[d.selectedInput])
 				}
 				d.tabCompleter.Hide()
+				d.tabCompleter.Draw(d.terminal) // Clear the dropdown
 			} else if d.inputs[d.selectedInput] != "" {
 				d.addNotification("Executed: " + d.inputs[d.selectedInput])
 			}
@@ -580,6 +584,7 @@ func (d *ComprehensiveDemo) Run() error {
 
 				if d.tabCompleter.Visible {
 					d.tabCompleter.Hide()
+					d.tabCompleter.Draw(d.terminal) // Clear the dropdown
 				}
 			}
 		}
