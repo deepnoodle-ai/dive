@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // Button represents a clickable button component
@@ -92,6 +94,7 @@ type TabCompleter struct {
 	OnSelect          func(string)
 	clearDropdown     bool
 	lastDrawnLines    int
+	savedContent      []string // Store content that dropdown overlays
 }
 
 // NewTabCompleter creates a new tab completer
@@ -157,17 +160,28 @@ func (tc *TabCompleter) Draw(terminal *Terminal) {
 	// Handle clearing if dropdown was hidden
 	if tc.clearDropdown && tc.lastDrawnLines > 0 {
 		for i := 0; i <= tc.lastDrawnLines; i++ {
-			terminal.MoveCursor(tc.X, tc.Y + 1 + i)
-			terminal.ClearToEndOfLine()
+			terminal.MoveCursor(0, tc.Y + 1 + i) // Clear from start of line
+			terminal.ClearLine() // Clear entire line
 		}
 		tc.clearDropdown = false
 		tc.lastDrawnLines = 0
+		tc.savedContent = nil
 		return
 	}
 
 	if !tc.Visible || len(tc.suggestions) == 0 {
 		return
 	}
+
+	// Save cursor position and hide it to prevent flashing
+	terminal.SaveCursor()
+	terminal.HideCursor()
+
+	// Force a flush to ensure any pending output is displayed first
+	terminal.Flush()
+
+	// Use a background color to ensure dropdown is visible over other content
+	dropdownBg := ColorBlack
 
 	// Calculate visible range
 	start := 0
@@ -188,44 +202,66 @@ func (tc *TabCompleter) Draw(terminal *Terminal) {
 	// Track how many lines we're drawing for cleanup later
 	tc.lastDrawnLines = (end - start) + 1 // +1 for bottom border
 
-	// Draw dropdown box
+	// Save content that will be overwritten (for proper layering)
+	if tc.savedContent == nil {
+		tc.savedContent = make([]string, tc.lastDrawnLines)
+	}
+
+	// Draw dropdown box with proper clearing
 	for i := start; i < end; i++ {
 		y := tc.Y + 1 + (i - start)
-		terminal.MoveCursor(tc.X, y)
 
-		// Clear line first
-		terminal.ClearToEndOfLine()
+		// First, save cursor and clear the entire line properly
+		terminal.SaveCursor()
+		terminal.MoveCursor(0, y) // Move to start of line
+		terminal.ClearLine() // Clear entire line
+		terminal.MoveCursor(tc.X, y) // Move back to dropdown position
+		terminal.RestoreCursor()
+		terminal.MoveCursor(tc.X, y) // Position for drawing
 
 		// Format suggestion
 		suggestion := tc.suggestions[i]
-		if len(suggestion) > tc.Width-2 {
-			suggestion = suggestion[:tc.Width-5] + "..."
+		displayWidth := runewidth.StringWidth(suggestion)
+		if displayWidth > tc.Width-4 { // account for indicator and borders
+			// Truncate to fit width
+			truncated := runewidth.Truncate(suggestion, tc.Width-7, "...")
+			suggestion = truncated
 		}
 
-		// Apply style
-		style := tc.normalStyle
+		// Apply style with solid background for visibility
+		style := tc.normalStyle.WithBackground(dropdownBg)
 		indicator := "  "
 		if i == tc.currentIndex {
-			style = tc.selectedStyle
+			style = tc.selectedStyle.WithBackground(dropdownBg)
 			indicator = "▶ "
 		}
 
 		// Draw suggestion with border
 		line := fmt.Sprintf("│%s%s", indicator, suggestion)
-		for len(line) < tc.Width-1 {
-			line += " "
+		// Calculate actual display width for proper padding
+		lineWidth := runewidth.StringWidth(line)
+		padding := tc.Width - lineWidth - 1 // -1 for the closing border
+		if padding > 0 {
+			line += strings.Repeat(" ", padding)
 		}
 		line += "│"
 
+		// Print the line, ensuring full width is covered with background
 		terminal.Print(style.Apply(line))
 	}
 
 	// Draw bottom border
 	y := tc.Y + 1 + (end - start)
+	terminal.SaveCursor()
+	terminal.MoveCursor(0, y) // Move to start of line
+	terminal.ClearLine() // Clear entire line
+	terminal.MoveCursor(tc.X, y) // Move back to dropdown position
+	terminal.RestoreCursor()
 	terminal.MoveCursor(tc.X, y)
-	terminal.ClearToEndOfLine()
 	border := "└" + strings.Repeat("─", tc.Width-2) + "┘"
-	terminal.Print(tc.normalStyle.Apply(border))
+	// Ensure border has background for visibility
+	borderStyle := tc.normalStyle.WithBackground(dropdownBg)
+	terminal.Print(borderStyle.Apply(border))
 
 	// Show scroll indicators if needed
 	if start > 0 {
@@ -236,6 +272,13 @@ func (tc *TabCompleter) Draw(terminal *Terminal) {
 		terminal.MoveCursor(tc.X+tc.Width-3, y-1)
 		terminal.Print("↓")
 	}
+
+	// Restore cursor position and visibility
+	terminal.RestoreCursor()
+	terminal.ShowCursor()
+
+	// Force flush to ensure dropdown is displayed immediately
+	terminal.Flush()
 }
 
 // GetRegions returns mouse regions for clickable suggestions

@@ -290,6 +290,17 @@ func (d *InteractiveDemo) updateInput() {
 
 	// Update cursor position
 	d.screenManager.SetCursorPosition(len(prompt)+d.cursorPos, 13)
+
+	// Always redraw overlay components last
+	d.drawOverlays()
+}
+
+func (d *InteractiveDemo) drawOverlays() {
+	// Draw any overlay components (dropdowns, modals, etc.) last
+	// This ensures they appear on top of regular content
+	if d.tabCompleter.Visible {
+		d.tabCompleter.Draw(d.terminal)
+	}
 }
 
 func (d *InteractiveDemo) handleTabCompletion() {
@@ -314,10 +325,8 @@ func (d *InteractiveDemo) handleTabCompletion() {
 		d.tabCompleter.SetSuggestions(suggestions, d.currentInput)
 		d.tabCompleter.Show(2, 13, 40)
 
-		// Draw the completer
-		go func() {
-			d.tabCompleter.Draw(d.terminal)
-		}()
+		// Draw overlays to ensure dropdown appears on top
+		d.drawOverlays()
 
 		// Add clickable regions for suggestions
 		for _, region := range d.tabCompleter.GetRegions() {
@@ -425,10 +434,10 @@ func (d *InteractiveDemo) Run() error {
 				switch buf[2] {
 				case 'A': // Up
 					d.tabCompleter.SelectPrev()
-					d.tabCompleter.Draw(d.terminal)
+					d.drawOverlays()
 				case 'B': // Down
 					d.tabCompleter.SelectNext()
-					d.tabCompleter.Draw(d.terminal)
+					d.drawOverlays()
 				}
 				continue
 			}
