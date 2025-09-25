@@ -16,16 +16,16 @@ type ScreenRegion struct {
 
 // ScreenManager coordinates all screen updates to prevent race conditions
 type ScreenManager struct {
-	terminal       *Terminal
-	regions        map[string]*ScreenRegion
-	mu             sync.RWMutex
-	drawMutex      sync.Mutex // Ensures only one draw operation at a time
-	cursorX, cursorY int       // Where the cursor should be positioned
-	cursorVisible  bool
-	running        bool
-	updateChan     chan struct{}
-	frameCounter   uint64
-	fps            int
+	terminal         *Terminal
+	regions          map[string]*ScreenRegion
+	mu               sync.RWMutex
+	drawMutex        sync.Mutex // Ensures only one draw operation at a time
+	cursorX, cursorY int        // Where the cursor should be positioned
+	cursorVisible    bool
+	running          bool
+	updateChan       chan struct{}
+	frameCounter     uint64
+	fps              int
 }
 
 // NewScreenManager creates a new screen manager
@@ -171,7 +171,7 @@ func (sm *ScreenManager) drawRegion(region *ScreenRegion, frame uint64) {
 		}
 
 		// Move to the line position
-		sm.terminal.MoveCursor(region.X, region.Y + i)
+		sm.terminal.MoveCursor(region.X, region.Y+i)
 
 		// Clear to end of line from this position
 		sm.terminal.ClearToEndOfLine()
@@ -211,8 +211,8 @@ func (sm *ScreenManager) drawAnimatedText(text string, animation TextAnimation, 
 			// Calculate pulse brightness
 			pulseTime := float64(frame) / float64(anim.Speed)
 			brightness := anim.MinBrightness +
-				(anim.MaxBrightness-anim.MinBrightness) *
-				(0.5 + 0.5 * Sine(pulseTime))
+				(anim.MaxBrightness-anim.MinBrightness)*
+					(0.5+0.5*Sine(pulseTime))
 
 			// Apply brightness to color
 			adjustedColor := RGB{
@@ -232,10 +232,10 @@ func (sm *ScreenManager) drawAnimatedText(text string, animation TextAnimation, 
 // Sine helper for pulse calculations
 func Sine(x float64) float64 {
 	// Simple sine approximation
-	x = x - float64(int(x/6.28318)) * 6.28318 // Normalize to 0-2π
+	x = x - float64(int(x/6.28318))*6.28318 // Normalize to 0-2π
 	if x < 3.14159 {
-		return 4*x*(3.14159-x) / (3.14159*3.14159)
+		return 4 * x * (3.14159 - x) / (3.14159 * 3.14159)
 	}
 	x = x - 3.14159
-	return -4*x*(3.14159-x) / (3.14159*3.14159)
+	return -4 * x * (3.14159 - x) / (3.14159 * 3.14159)
 }

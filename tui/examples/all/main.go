@@ -33,11 +33,11 @@ type ComprehensiveDemo struct {
 	mu            sync.Mutex
 
 	// Demo data
-	cpuUsage      int
-	memoryUsage   int
-	networkSpeed  float64
-	taskProgress  int
-	spinnerFrame  int
+	cpuUsage       int
+	memoryUsage    int
+	networkSpeed   float64
+	taskProgress   int
+	spinnerFrame   int
 	saveInProgress bool
 }
 
@@ -282,7 +282,7 @@ func (d *ComprehensiveDemo) updateStatusBar() {
 
 	statusText := fmt.Sprintf("Mode: %s | Field: %d/4 | Time: %s%s",
 		d.currentMode,
-		d.selectedInput + 1,
+		d.selectedInput+1,
 		time.Now().Format("15:04:05"),
 		saveIndicator)
 
@@ -412,7 +412,7 @@ func (d *ComprehensiveDemo) StartBackgroundTasks() {
 			time.Sleep(150 * time.Millisecond)
 			d.spinnerFrame++
 
-			if d.spinnerFrame % 3 == 0 {
+			if d.spinnerFrame%3 == 0 {
 				titleText := d.getSpinner() + " Dive TUI - Complete Demo with Mouse! " + d.getSpinner()
 				d.screenManager.UpdateRegion("title", 0, titleText,
 					tui.CreateRainbowText(titleText, 15))
@@ -545,7 +545,7 @@ func (d *ComprehensiveDemo) Run() error {
 			if d.tabCompleter.Visible {
 				d.tabCompleter.Hide()
 				d.tabCompleter.Draw(d.terminal) // Clear the dropdown
-				d.updateClickableWords() // Re-add mouse regions
+				d.updateClickableWords()        // Re-add mouse regions
 			} else {
 				d.inputs[d.selectedInput] = ""
 				d.cursorPos[d.selectedInput] = 0

@@ -9,39 +9,39 @@ import (
 
 // Layout manages the overall terminal layout with header, footer, and content area
 type Layout struct {
-	terminal       *Terminal
-	header         *Header
-	footer         *Footer
-	contentY       int
-	contentHeight  int
-	autoRefresh    bool
-	refreshTicker  *time.Ticker
-	stopRefresh    chan bool
+	terminal      *Terminal
+	header        *Header
+	footer        *Footer
+	contentY      int
+	contentHeight int
+	autoRefresh   bool
+	refreshTicker *time.Ticker
+	stopRefresh   chan bool
 }
 
 // Header represents the top section of the terminal
 type Header struct {
-	Left       string
-	Center     string
-	Right      string
-	Style      Style
-	Background Style
-	Border     bool
+	Left        string
+	Center      string
+	Right       string
+	Style       Style
+	Background  Style
+	Border      bool
 	BorderStyle BorderStyle
-	Height     int
+	Height      int
 }
 
 // Footer represents the bottom section of the terminal
 type Footer struct {
-	Left       string
-	Center     string
-	Right      string
-	Style      Style
-	Background Style
-	Border     bool
+	Left        string
+	Center      string
+	Right       string
+	Style       Style
+	Background  Style
+	Border      bool
 	BorderStyle BorderStyle
-	Height     int
-	StatusBar  bool
+	Height      int
+	StatusBar   bool
 	StatusItems []StatusItem
 }
 
@@ -254,7 +254,7 @@ func (l *Layout) drawFooter() {
 		frame.Draw(l.terminal)
 
 		// Draw content inside border
-		l.terminal.MoveCursor(1, footerY + 1)
+		l.terminal.MoveCursor(1, footerY+1)
 		if l.footer.StatusBar {
 			l.drawStatusBar(width - 2)
 		} else {

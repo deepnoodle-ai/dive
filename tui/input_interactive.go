@@ -35,7 +35,7 @@ func (i *Input) ReadInteractive() (string, error) {
 
 	// Reserve space for suggestions if needed
 	if i.showSuggestions && len(i.suggestions) > 0 {
-		fmt.Println() // Create space for suggestions
+		fmt.Println()              // Create space for suggestions
 		i.terminal.MoveCursorUp(1) // Move back to input line
 		i.terminal.MoveCursorRight(utf8.RuneCountInString(i.prompt))
 	}

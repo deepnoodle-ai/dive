@@ -77,47 +77,47 @@ type KeyEvent struct {
 
 // Input handles user input with borders and hotkeys
 type Input struct {
-	terminal      *Terminal
-	prompt        string
-	promptStyle   Style
-	inputStyle    Style
-	borderStyle   BorderStyle
-	borderColor   Style
-	showBorder    bool
-	history       []string
-	historyIndex  int
-	hotkeys       map[Key]func()
-	beforeLine    bool
-	afterLine     bool
-	lineStyle     Style
-	placeholder   string
-	maxLength     int
-	mask          rune
-	multiline     bool
-	suggestions   []string
+	terminal        *Terminal
+	prompt          string
+	promptStyle     Style
+	inputStyle      Style
+	borderStyle     BorderStyle
+	borderColor     Style
+	showBorder      bool
+	history         []string
+	historyIndex    int
+	hotkeys         map[Key]func()
+	beforeLine      bool
+	afterLine       bool
+	lineStyle       Style
+	placeholder     string
+	maxLength       int
+	mask            rune
+	multiline       bool
+	suggestions     []string
 	showSuggestions bool
 }
 
 // NewInput creates a new input handler
 func NewInput(terminal *Terminal) *Input {
 	return &Input{
-		terminal:      terminal,
-		prompt:        "> ",
-		promptStyle:   NewStyle().WithForeground(ColorCyan),
-		inputStyle:    NewStyle(),
-		borderStyle:   SingleBorder,
-		borderColor:   NewStyle().WithForeground(ColorBlue),
-		showBorder:    false,
-		history:       make([]string, 0),
-		historyIndex:  -1,
-		hotkeys:       make(map[Key]func()),
-		beforeLine:    false,
-		afterLine:     false,
-		lineStyle:     NewStyle().WithForeground(ColorBrightBlack),
-		maxLength:     0,
-		mask:          0,
-		multiline:     false,
-		suggestions:   make([]string, 0),
+		terminal:        terminal,
+		prompt:          "> ",
+		promptStyle:     NewStyle().WithForeground(ColorCyan),
+		inputStyle:      NewStyle(),
+		borderStyle:     SingleBorder,
+		borderColor:     NewStyle().WithForeground(ColorBlue),
+		showBorder:      false,
+		history:         make([]string, 0),
+		historyIndex:    -1,
+		hotkeys:         make(map[Key]func()),
+		beforeLine:      false,
+		afterLine:       false,
+		lineStyle:       NewStyle().WithForeground(ColorBrightBlack),
+		maxLength:       0,
+		mask:            0,
+		multiline:       false,
+		suggestions:     make([]string, 0),
 		showSuggestions: false,
 	}
 }

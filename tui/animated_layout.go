@@ -7,14 +7,14 @@ import (
 // AnimatedLayout extends Layout with animation capabilities
 type AnimatedLayout struct {
 	*Layout
-	animator         *Animator
-	animatedHeader   *AnimatedMultiLine
-	animatedFooter   *AnimatedMultiLine
-	animatedContent  *AnimatedMultiLine
-	mu               sync.RWMutex
-	headerLines      int
-	footerLines      int
-	contentLines     int
+	animator        *Animator
+	animatedHeader  *AnimatedMultiLine
+	animatedFooter  *AnimatedMultiLine
+	animatedContent *AnimatedMultiLine
+	mu              sync.RWMutex
+	headerLines     int
+	footerLines     int
+	contentLines    int
 }
 
 // NewAnimatedLayout creates a new layout with animation support
@@ -222,11 +222,11 @@ type AnimatedStatusItem struct {
 // NewAnimatedStatusBar creates a new animated status bar
 func NewAnimatedStatusBar(x, y, width int) *AnimatedStatusBar {
 	return &AnimatedStatusBar{
-		x:         x,
-		y:         y,
-		width:     width,
-		items:     make([]*AnimatedStatusItem, 0),
-		separator: " │ ",
+		x:          x,
+		y:          y,
+		width:      width,
+		items:      make([]*AnimatedStatusItem, 0),
+		separator:  " │ ",
 		background: NewRGB(40, 40, 40),
 	}
 }
@@ -411,10 +411,10 @@ func CreatePulseText(color RGB, speed int) TextAnimation {
 // AnimatedInputLayout combines animated layout with input handling
 type AnimatedInputLayout struct {
 	*AnimatedLayout
-	inputY       int
-	inputHeight  int
-	inputPrompt  string
-	promptStyle  Style
+	inputY      int
+	inputHeight int
+	inputPrompt string
+	promptStyle Style
 }
 
 // NewAnimatedInputLayout creates a layout optimized for input with animations

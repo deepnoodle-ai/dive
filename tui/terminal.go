@@ -11,14 +11,14 @@ import (
 
 // Terminal represents a terminal interface with advanced capabilities
 type Terminal struct {
-	mu           sync.Mutex
-	width        int
-	height       int
-	savedCursor  Position
-	altScreen    bool
-	rawMode      bool
-	oldState     *term.State
-	fd           int
+	mu          sync.Mutex
+	width       int
+	height      int
+	savedCursor Position
+	altScreen   bool
+	rawMode     bool
+	oldState    *term.State
+	fd          int
 }
 
 // Position represents a cursor position

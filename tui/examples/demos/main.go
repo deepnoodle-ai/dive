@@ -104,7 +104,7 @@ func (d *SynchronizedDemo) UpdateInputLines() {
 
 	// Update cursor position in screen manager
 	cursorX := 8 + d.cursorPos[d.selectedLine] // "Line N: " is 8 chars
-	cursorY := 6 + d.selectedLine // Input region starts at line 6
+	cursorY := 6 + d.selectedLine              // Input region starts at line 6
 	d.screenManager.SetCursorPosition(cursorX, cursorY)
 }
 

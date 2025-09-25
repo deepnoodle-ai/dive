@@ -34,9 +34,9 @@ func main() {
 	// Test multi-gradient
 	fmt.Println("\n3. Testing Multi-Color Gradient:")
 	stops := []tui.RGB{
-		tui.NewRGB(255, 0, 0),   // Red
-		tui.NewRGB(0, 255, 0),   // Green
-		tui.NewRGB(0, 0, 255),   // Blue
+		tui.NewRGB(255, 0, 0), // Red
+		tui.NewRGB(0, 255, 0), // Green
+		tui.NewRGB(0, 0, 255), // Blue
 	}
 	multiGrad := tui.MultiGradient(stops, 15)
 	for _, color := range multiGrad {

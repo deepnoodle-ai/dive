@@ -17,17 +17,17 @@ type InteractiveDemo struct {
 	mouseHandler  *tui.MouseHandler
 
 	// UI Components
-	buttons       []*tui.Button
-	tabCompleter  *tui.TabCompleter
-	radioGroup    *tui.RadioGroup
+	buttons      []*tui.Button
+	tabCompleter *tui.TabCompleter
+	radioGroup   *tui.RadioGroup
 
 	// State
-	currentInput  string
-	cursorPos     int
+	currentInput   string
+	cursorPos      int
 	commandHistory []string
-	notifications []string
-	clickedWords  map[string]tui.RGB
-	selectedTheme string
+	notifications  []string
+	clickedWords   map[string]tui.RGB
+	selectedTheme  string
 
 	running bool
 	mu      sync.Mutex
@@ -40,15 +40,15 @@ func NewInteractiveDemo() (*InteractiveDemo, error) {
 	}
 
 	return &InteractiveDemo{
-		terminal:      terminal,
-		screenManager: tui.NewScreenManager(terminal, 15),
-		mouseHandler:  tui.NewMouseHandler(),
-		tabCompleter:  tui.NewTabCompleter(),
-		clickedWords:  make(map[string]tui.RGB),
+		terminal:       terminal,
+		screenManager:  tui.NewScreenManager(terminal, 15),
+		mouseHandler:   tui.NewMouseHandler(),
+		tabCompleter:   tui.NewTabCompleter(),
+		clickedWords:   make(map[string]tui.RGB),
 		commandHistory: make([]string, 0),
-		notifications: make([]string, 0),
-		running:       true,
-		selectedTheme: "Default",
+		notifications:  make([]string, 0),
+		running:        true,
+		selectedTheme:  "Default",
 	}, nil
 }
 

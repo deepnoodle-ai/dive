@@ -164,7 +164,7 @@ func (r *RainbowAnimation) GetStyle(frame uint64, charIndex int, totalChars int)
 	colors := SmoothRainbow(r.Length)
 	colorIndex := rainbowPos % len(colors)
 
-	_ = colors[colorIndex] // Store for potential use
+	_ = colors[colorIndex]                         // Store for potential use
 	return NewStyle().WithForeground(ColorDefault) // We'll apply RGB directly
 }
 
@@ -207,8 +207,8 @@ func (w *WaveAnimation) GetStyle(frame uint64, charIndex int, totalChars int) St
 
 // PulseAnimation creates a pulsing brightness effect
 type PulseAnimation struct {
-	Speed int
-	Color RGB
+	Speed         int
+	Color         RGB
 	MinBrightness float64
 	MaxBrightness float64
 }
@@ -227,7 +227,7 @@ func (p *PulseAnimation) GetStyle(frame uint64, charIndex int, totalChars int) S
 
 	// Calculate pulse
 	pulseTime := float64(frame) / float64(p.Speed)
-	_ = charIndex // Store for potential use
+	_ = charIndex  // Store for potential use
 	_ = totalChars // Store for potential use
 	brightness := p.MinBrightness + (p.MaxBrightness-p.MinBrightness)*(0.5+0.5)
 
@@ -238,7 +238,7 @@ func (p *PulseAnimation) GetStyle(frame uint64, charIndex int, totalChars int) S
 		B: uint8(float64(p.Color.B) * brightness),
 	}
 
-	_ = pulseTime // Store for potential use
+	_ = pulseTime                                  // Store for potential use
 	return NewStyle().WithForeground(ColorDefault) // We'll apply RGB directly
 }
 
@@ -327,11 +327,11 @@ func (at *AnimatedText) SetPosition(x, y int) {
 
 // AnimatedMultiLine represents multiple lines of animated content
 type AnimatedMultiLine struct {
-	x, y       int
-	width      int
-	lines      []string
-	animations []TextAnimation
-	mu         sync.RWMutex
+	x, y         int
+	width        int
+	lines        []string
+	animations   []TextAnimation
+	mu           sync.RWMutex
 	currentFrame uint64
 }
 

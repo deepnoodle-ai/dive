@@ -82,19 +82,19 @@ func (b *Button) GetRegion() *MouseRegion {
 
 // TabCompleter handles tab completion functionality
 type TabCompleter struct {
-	suggestions       []string
-	currentIndex      int
-	Visible           bool
-	maxVisible        int
-	prefix            string
-	X, Y              int
-	Width             int
-	selectedStyle     Style
-	normalStyle       Style
-	OnSelect          func(string)
-	clearDropdown     bool
-	lastDrawnLines    int
-	savedContent      []string // Store content that dropdown overlays
+	suggestions    []string
+	currentIndex   int
+	Visible        bool
+	maxVisible     int
+	prefix         string
+	X, Y           int
+	Width          int
+	selectedStyle  Style
+	normalStyle    Style
+	OnSelect       func(string)
+	clearDropdown  bool
+	lastDrawnLines int
+	savedContent   []string // Store content that dropdown overlays
 }
 
 // NewTabCompleter creates a new tab completer
@@ -160,8 +160,8 @@ func (tc *TabCompleter) Draw(terminal *Terminal) {
 	// Handle clearing if dropdown was hidden
 	if tc.clearDropdown && tc.lastDrawnLines > 0 {
 		for i := 0; i <= tc.lastDrawnLines; i++ {
-			terminal.MoveCursor(0, tc.Y + 1 + i) // Clear from start of line
-			terminal.ClearLine() // Clear entire line
+			terminal.MoveCursor(0, tc.Y+1+i) // Clear from start of line
+			terminal.ClearLine()             // Clear entire line
 		}
 		tc.clearDropdown = false
 		tc.lastDrawnLines = 0
@@ -213,8 +213,8 @@ func (tc *TabCompleter) Draw(terminal *Terminal) {
 
 		// First, save cursor and clear the entire line properly
 		terminal.SaveCursor()
-		terminal.MoveCursor(0, y) // Move to start of line
-		terminal.ClearLine() // Clear entire line
+		terminal.MoveCursor(0, y)    // Move to start of line
+		terminal.ClearLine()         // Clear entire line
 		terminal.MoveCursor(tc.X, y) // Move back to dropdown position
 		terminal.RestoreCursor()
 		terminal.MoveCursor(tc.X, y) // Position for drawing
@@ -253,8 +253,8 @@ func (tc *TabCompleter) Draw(terminal *Terminal) {
 	// Draw bottom border
 	y := tc.Y + 1 + (end - start)
 	terminal.SaveCursor()
-	terminal.MoveCursor(0, y) // Move to start of line
-	terminal.ClearLine() // Clear entire line
+	terminal.MoveCursor(0, y)    // Move to start of line
+	terminal.ClearLine()         // Clear entire line
 	terminal.MoveCursor(tc.X, y) // Move back to dropdown position
 	terminal.RestoreCursor()
 	terminal.MoveCursor(tc.X, y)
@@ -335,12 +335,12 @@ func (tc *TabCompleter) GetRegions() []*MouseRegion {
 
 // RadioGroup represents a group of radio buttons
 type RadioGroup struct {
-	X, Y         int
-	Options      []string
-	Selected     int
-	Style        Style
+	X, Y          int
+	Options       []string
+	Selected      int
+	Style         Style
 	SelectedStyle Style
-	OnChange     func(int, string)
+	OnChange      func(int, string)
 }
 
 // NewRadioGroup creates a new radio button group

@@ -31,16 +31,16 @@ const (
 
 // Style represents text styling attributes
 type Style struct {
-	Foreground Color
-	Background Color
-	Bold       bool
-	Italic     bool
-	Underline  bool
+	Foreground    Color
+	Background    Color
+	Bold          bool
+	Italic        bool
+	Underline     bool
 	Strikethrough bool
-	Blink      bool
-	Reverse    bool
-	Hidden     bool
-	Dim        bool
+	Blink         bool
+	Reverse       bool
+	Hidden        bool
+	Dim           bool
 }
 
 // NewStyle creates a new style with default values
@@ -298,13 +298,13 @@ func RainbowGradient(steps int) []RGB {
 
 	// Use the classic rainbow color stops for a proper spectrum
 	rainbowStops := []RGB{
-		NewRGB(255, 0, 0),     // Red
-		NewRGB(255, 127, 0),   // Orange
-		NewRGB(255, 255, 0),   // Yellow
-		NewRGB(0, 255, 0),     // Green
-		NewRGB(0, 0, 255),     // Blue
-		NewRGB(75, 0, 130),    // Indigo
-		NewRGB(148, 0, 211),   // Violet
+		NewRGB(255, 0, 0),   // Red
+		NewRGB(255, 127, 0), // Orange
+		NewRGB(255, 255, 0), // Yellow
+		NewRGB(0, 255, 0),   // Green
+		NewRGB(0, 0, 255),   // Blue
+		NewRGB(75, 0, 130),  // Indigo
+		NewRGB(148, 0, 211), // Violet
 	}
 
 	colors := make([]RGB, steps)
