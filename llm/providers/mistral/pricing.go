@@ -30,24 +30,24 @@ type EmbeddingPricingInfo struct {
 var TextModelPricing = map[string]PricingInfo{
 	ModelMistralLarge2411: {
 		Model:       ModelMistralLarge2411,
-		InputPrice:  3.0,
-		OutputPrice: 9.0,
+		InputPrice:  2.0,
+		OutputPrice: 6.0,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2025-10-15",
 	},
 	ModelMistralLarge: {
 		Model:       ModelMistralLarge,
-		InputPrice:  3.0,
-		OutputPrice: 9.0,
+		InputPrice:  2.0,
+		OutputPrice: 6.0,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2025-10-15",
 	},
 	ModelMistralSmall: {
 		Model:       ModelMistralSmall,
-		InputPrice:  0.2,
-		OutputPrice: 0.6,
+		InputPrice:  0.1,
+		OutputPrice: 0.3,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2025-10-15",
 	},
 	ModelCodestralLatest: {
 		Model:       ModelCodestralLatest,
