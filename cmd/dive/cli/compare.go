@@ -429,7 +429,7 @@ Examples:
   # Export to JSON
   dive compare --prompt "Analysis" --providers "anthropic,openai" --export results.json
 
-Available providers: anthropic, openai, openai-completions, groq, grok, google, ollama, openrouter`,
+Available providers: anthropic, openai, openai-completions, groq, grok, mistral, google, ollama, openrouter`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.Background()
 
