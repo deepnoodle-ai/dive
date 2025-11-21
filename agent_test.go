@@ -105,6 +105,55 @@ func TestAgentCreateResponse(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("CreateResponse with callback for final message", func(t *testing.T) {
+		// Track callback invocations
+		var callbackItems []*ResponseItem
+		eventCallback := func(ctx context.Context, item *ResponseItem) error {
+			callbackItems = append(callbackItems, item)
+			return nil
+		}
+
+		// Create a response with callback
+		resp, err := agent.CreateResponse(
+			context.Background(),
+			WithInput("Hello, agent!"),
+			WithEventCallback(eventCallback),
+		)
+		if err != nil {
+			t.Fatalf("CreateResponse with callback failed: %v", err)
+		}
+
+		// Verify that the callback was called for the final message
+		if len(callbackItems) != 1 {
+			t.Errorf("Expected callback to be called once for the final message, got %d calls", len(callbackItems))
+		} else {
+			item := callbackItems[0]
+			if item.Type != ResponseItemTypeMessage {
+				t.Errorf("Expected callback item type to be %s, got %s", ResponseItemTypeMessage, item.Type)
+			}
+			if item.Message == nil {
+				t.Errorf("Expected callback item to have a message")
+			} else if item.Message.Text() != "This is a test response" {
+				t.Errorf("Expected callback message text to be 'This is a test response', got '%s'", item.Message.Text())
+			}
+			if item.Usage == nil {
+				t.Errorf("Expected callback item to have usage information")
+			} else {
+				if item.Usage.InputTokens != 10 {
+					t.Errorf("Expected callback usage InputTokens=10, got %d", item.Usage.InputTokens)
+				}
+				if item.Usage.OutputTokens != 5 {
+					t.Errorf("Expected callback usage OutputTokens=5, got %d", item.Usage.OutputTokens)
+				}
+			}
+		}
+
+		// Also verify the response itself is correct
+		if len(resp.Items) == 0 {
+			t.Errorf("Expected response to have items, got none")
+		}
+	})
 }
 
 // Mock types for testing
