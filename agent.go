@@ -388,18 +388,19 @@ func (a *StandardAgent) generate(
 		// Track total token usage
 		totalUsage.Add(&response.Usage)
 
-		// We're done if there are no tool calls
-		toolCalls := response.ToolCalls()
-		if len(toolCalls) == 0 {
-			break
-		}
-
+		// Always call callback for every LLM-generated message
 		if err := callback(ctx, &ResponseItem{
 			Type:    ResponseItemTypeMessage,
 			Message: assistantMsg,
 			Usage:   response.Usage.Copy(),
 		}); err != nil {
 			return nil, err
+		}
+
+		// We're done if there are no tool calls
+		toolCalls := response.ToolCalls()
+		if len(toolCalls) == 0 {
+			break
 		}
 
 		// Execute all requested tool calls
