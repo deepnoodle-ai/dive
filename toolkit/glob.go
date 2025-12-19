@@ -31,12 +31,15 @@ type GlobToolOptions struct {
 	DefaultExcludes []string
 	// MaxResults limits the number of files returned
 	MaxResults int
+	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+	WorkspaceDir string
 }
 
 // GlobTool is a tool for finding files using glob patterns
 type GlobTool struct {
 	defaultExcludes []string
 	maxResults      int
+	pathValidator   *PathValidator
 }
 
 // NewGlobTool creates a new GlobTool
@@ -61,9 +64,14 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 			"**/*.min.css",
 		}
 	}
+	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
+	if err != nil {
+		pathValidator = &PathValidator{}
+	}
 	return dive.ToolAdapter(&GlobTool{
 		defaultExcludes: resolvedOpts.DefaultExcludes,
 		maxResults:      resolvedOpts.MaxResults,
+		pathValidator:   pathValidator,
 	})
 }
 
@@ -144,6 +152,13 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 			return dive.NewToolResultError(fmt.Sprintf("Error getting current directory: %v", err)), nil
 		}
 		searchPath = filepath.Join(cwd, searchPath)
+	}
+
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
+			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	// Check if path exists

@@ -30,7 +30,8 @@ func TestReadFileTool(t *testing.T) {
 
 	t.Run("ReadExistingFile", func(t *testing.T) {
 		tool := NewReadFileTool(ReadFileToolOptions{
-			MaxSize: 10000,
+			MaxSize:      10000,
+			WorkspaceDir: tempDir,
 		})
 		result, err := tool.Call(context.Background(), &ReadFileInput{
 			FilePath: testFilePath,
@@ -42,7 +43,10 @@ func TestReadFileTool(t *testing.T) {
 	})
 
 	t.Run("ReadNonExistentFile", func(t *testing.T) {
-		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+		tool := NewReadFileTool(ReadFileToolOptions{
+			MaxSize:      10000,
+			WorkspaceDir: tempDir,
+		})
 		result, err := tool.Call(context.Background(), &ReadFileInput{
 			FilePath: filepath.Join(tempDir, "nonexistent.txt"),
 		})
@@ -54,7 +58,10 @@ func TestReadFileTool(t *testing.T) {
 
 	t.Run("ReadLargeFileTruncated", func(t *testing.T) {
 		maxSize := 100
-		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: maxSize})
+		tool := NewReadFileTool(ReadFileToolOptions{
+			MaxSize:      maxSize,
+			WorkspaceDir: tempDir,
+		})
 
 		result, err := tool.Call(context.Background(), &ReadFileInput{
 			FilePath: largeFilePath,
@@ -67,13 +74,38 @@ func TestReadFileTool(t *testing.T) {
 	})
 
 	t.Run("NoPathProvided", func(t *testing.T) {
-		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+		tool := NewReadFileTool(ReadFileToolOptions{
+			MaxSize:      10000,
+			WorkspaceDir: tempDir,
+		})
 		result, err := tool.Call(context.Background(), &ReadFileInput{})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
 		require.True(t, result.IsError)
 		require.Len(t, result.Content, 1)
 		output := result.Content[0].Text
 		require.Contains(t, output, "Error: No file path provided", "Expected 'no file path provided' error")
+	})
+
+	t.Run("ReadOutsideWorkspace", func(t *testing.T) {
+		// Create another temp directory outside the workspace
+		outsideDir, err := os.MkdirTemp("", "outside_workspace")
+		require.NoError(t, err)
+		defer os.RemoveAll(outsideDir)
+
+		outsideFile := filepath.Join(outsideDir, "outside.txt")
+		err = os.WriteFile(outsideFile, []byte("outside content"), 0644)
+		require.NoError(t, err)
+
+		tool := NewReadFileTool(ReadFileToolOptions{
+			MaxSize:      10000,
+			WorkspaceDir: tempDir,
+		})
+		result, err := tool.Call(context.Background(), &ReadFileInput{
+			FilePath: outsideFile,
+		})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		require.Contains(t, result.Content[0].Text, "outside workspace")
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
@@ -88,17 +120,10 @@ func TestWriteFileTool(t *testing.T) {
 	require.NoError(t, err, "Failed to create temp directory")
 	defer os.RemoveAll(tempDir)
 
-	// Create subdirectories for testing
-	allowedDir := filepath.Join(tempDir, "allowed")
-	deniedDir := filepath.Join(tempDir, "denied")
-	nestedDir := filepath.Join(allowedDir, "nested")
-
-	for _, dir := range []string{allowedDir, deniedDir, nestedDir} {
-		require.NoError(t, os.MkdirAll(dir, 0755), "Failed to create directory")
-	}
-
 	t.Run("WriteToNewFile", func(t *testing.T) {
-		tool := NewWriteFileTool(WriteFileToolOptions{})
+		tool := NewWriteFileTool(WriteFileToolOptions{
+			WorkspaceDir: tempDir,
+		})
 		testFilePath := filepath.Join(tempDir, "test_write.txt")
 		testContent := "This is test content for write_file tool"
 
@@ -117,7 +142,9 @@ func TestWriteFileTool(t *testing.T) {
 	})
 
 	t.Run("WriteToNonExistentDirectory", func(t *testing.T) {
-		tool := NewWriteFileTool(WriteFileToolOptions{})
+		tool := NewWriteFileTool(WriteFileToolOptions{
+			WorkspaceDir: tempDir,
+		})
 		testFilePath := filepath.Join(tempDir, "new_dir", "test_write.txt")
 		testContent := "This should create the directory"
 
@@ -136,7 +163,9 @@ func TestWriteFileTool(t *testing.T) {
 	})
 
 	t.Run("NoPathProvided", func(t *testing.T) {
-		tool := NewWriteFileTool(WriteFileToolOptions{})
+		tool := NewWriteFileTool(WriteFileToolOptions{
+			WorkspaceDir: tempDir,
+		})
 		result, err := tool.Call(context.Background(), &WriteFileInput{
 			FilePath: "",
 			Content:  "Some content",
@@ -146,188 +175,111 @@ func TestWriteFileTool(t *testing.T) {
 		require.Contains(t, result.Content[0].Text, "Error: No file path provided", "Expected 'no file path provided' error")
 	})
 
-	t.Run("AllowlistExactMatch", func(t *testing.T) {
-		allowedPath := filepath.Join(allowedDir, "allowed.txt")
-		deniedPath := filepath.Join(deniedDir, "denied.txt")
+	t.Run("WriteOutsideWorkspace", func(t *testing.T) {
+		// Create another temp directory outside the workspace
+		outsideDir, err := os.MkdirTemp("", "outside_workspace")
+		require.NoError(t, err)
+		defer os.RemoveAll(outsideDir)
+
+		outsideFile := filepath.Join(outsideDir, "outside.txt")
 
 		tool := NewWriteFileTool(WriteFileToolOptions{
-			AllowList: []string{allowedPath},
+			WorkspaceDir: tempDir,
 		})
-		testContent := "This should be allowed"
-
-		// Test allowed path
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath: allowedPath,
-			Content:  testContent,
+			FilePath: outsideFile,
+			Content:  "should not be written",
 		})
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		require.Contains(t, result.Content[0].Text, "outside workspace")
 
-		// Test denied path
-		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath: deniedPath,
-			Content:  testContent,
-		})
-		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result.Content[0].Text, "Error: Access denied", "Expected access denied error")
-	})
-
-	t.Run("DenylistExactMatch", func(t *testing.T) {
-		allowedPath := filepath.Join(allowedDir, "allowed.txt")
-		deniedPath := filepath.Join(deniedDir, "denied.txt")
-
-		tool := NewWriteFileTool(WriteFileToolOptions{
-			DenyList: []string{deniedPath},
-		})
-		testContent := "This should be denied"
-
-		// Test allowed path
-		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath: allowedPath,
-			Content:  testContent,
-		})
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
-
-		// Test denied path
-		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath: deniedPath,
-			Content:  testContent,
-		})
-		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result.Content[0].Text, "Error: Access denied", "Expected access denied error")
-	})
-
-	t.Run("AllowlistWildcard", func(t *testing.T) {
-		// Test with * wildcard
-		tool := NewWriteFileTool(WriteFileToolOptions{
-			AllowList: []string{filepath.Join(allowedDir, "*.txt")},
-		})
-		testContent := "Testing wildcard"
-
-		// Should be allowed
-		allowedPath := filepath.Join(allowedDir, "wildcard.txt")
-
-		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath: allowedPath,
-			Content:  testContent,
-		})
-
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
-
-		// Should be denied (wrong extension)
-		deniedPath := filepath.Join(allowedDir, "wildcard.json")
-		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath: deniedPath,
-			Content:  testContent,
-		})
-
-		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result.Content[0].Text, "Error: Access denied", "Expected access denied error")
-	})
-
-	t.Run("AllowlistDoubleWildcard", func(t *testing.T) {
-		// Test with ** wildcard
-		tool := NewWriteFileTool(WriteFileToolOptions{
-			AllowList: []string{filepath.Join(allowedDir, "**")},
-		})
-		testContent := "Testing double wildcard"
-
-		// Should be allowed (in allowed dir)
-		allowedPath := filepath.Join(allowedDir, "double_wildcard.txt")
-		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath: allowedPath,
-			Content:  testContent,
-		})
-
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
-
-		// Should be allowed (in nested dir)
-		nestedPath := filepath.Join(nestedDir, "nested_wildcard.txt")
-		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath: nestedPath,
-			Content:  testContent,
-		})
-
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
-
-		// Should be denied (outside allowed dir)
-		deniedPath := filepath.Join(deniedDir, "outside_wildcard.txt")
-		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath: deniedPath,
-			Content:  testContent,
-		})
-
-		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result.Content[0].Text, "Error: Access denied", "Expected access denied error")
-	})
-
-	t.Run("DenylistOverridesAllowlist", func(t *testing.T) {
-		// Allow all files in allowed dir, but deny specific file
-		specificPath := filepath.Join(allowedDir, "specific.txt")
-		tool := NewWriteFileTool(WriteFileToolOptions{
-			AllowList: []string{filepath.Join(allowedDir, "**")},
-			DenyList:  []string{specificPath},
-		})
-		testContent := "Testing deny override"
-
-		// Should be allowed (in allowed dir)
-		allowedPath := filepath.Join(allowedDir, "not_denied.txt")
-		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath: allowedPath,
-			Content:  testContent,
-		})
-
-		require.NoError(t, err, "Unexpected error")
-		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
-
-		// Should be denied (specifically denied)
-		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath: specificPath,
-			Content:  testContent,
-		})
-
-		require.NoError(t, err, "Expected error to be returned in result, not as an error")
-		require.Contains(t, result.Content[0].Text, "Error: Access denied", "Expected access denied error")
+		// Verify file was not created
+		_, err = os.Stat(outsideFile)
+		require.True(t, os.IsNotExist(err), "File should not have been created")
 	})
 
 	t.Run("ToolDefinition", func(t *testing.T) {
-		tool := NewWriteFileTool(WriteFileToolOptions{
-			AllowList: []string{"/allowed/**"},
-			DenyList:  []string{"/denied/**"},
-		})
+		tool := NewWriteFileTool(WriteFileToolOptions{})
 		require.Equal(t, "write_file", tool.Name(), "Tool name mismatch")
 	})
 }
 
-func TestMatchesPattern(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		pattern  string
-		expected bool
-	}{
-		{"ExactMatch", "/path/to/file.txt", "/path/to/file.txt", true},
-		{"ExactMismatch", "/path/to/file.txt", "/path/to/other.txt", false},
-		{"SingleWildcard", "/path/to/file.txt", "/path/to/*.txt", true},
-		{"SingleWildcardMismatch", "/path/to/file.txt", "/path/to/*.json", false},
-		{"DoubleWildcardPrefix", "/path/to/subdir/file.txt", "/path/to/**", true},
-		{"DoubleWildcardPrefixMismatch", "/other/path/file.txt", "/path/to/**", false},
-		{"DoubleWildcardSuffix", "/path/to/subdir/file.txt", "**/file.txt", true},
-		{"DoubleWildcardSuffixMismatch", "/path/to/subdir/other.txt", "**/file.txt", false},
-		{"DoubleWildcardMiddle", "/path/to/subdir/file.txt", "/path/**/*.txt", true},
-		{"DoubleWildcardMiddleMismatch", "/path/to/subdir/file.json", "/path/**/*.txt", false},
-		{"DoubleDoubleWildcard", "/path/to/file.txt", "/path/**/to/some/**/file.txt", false},
-	}
+func TestPathValidator(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "path_validator_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := matchesPattern(tt.path, tt.pattern)
-			require.NoError(t, err, "Unexpected error")
-			require.Equal(t, tt.expected, result, "Pattern matching result mismatch")
-		})
-	}
+	// Create a nested directory structure
+	nestedDir := filepath.Join(tempDir, "nested", "deep")
+	require.NoError(t, os.MkdirAll(nestedDir, 0755))
+
+	// Create a file in the nested directory
+	testFile := filepath.Join(nestedDir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
+
+	t.Run("PathInWorkspace", func(t *testing.T) {
+		validator, err := NewPathValidator(tempDir)
+		require.NoError(t, err)
+
+		inWorkspace, err := validator.IsInWorkspace(testFile)
+		require.NoError(t, err)
+		require.True(t, inWorkspace)
+	})
+
+	t.Run("PathOutsideWorkspace", func(t *testing.T) {
+		validator, err := NewPathValidator(tempDir)
+		require.NoError(t, err)
+
+		inWorkspace, err := validator.IsInWorkspace("/etc/passwd")
+		require.NoError(t, err)
+		require.False(t, inWorkspace)
+	})
+
+	t.Run("TraversalAttempt", func(t *testing.T) {
+		validator, err := NewPathValidator(nestedDir)
+		require.NoError(t, err)
+
+		// Try to access parent directory
+		parentPath := filepath.Join(nestedDir, "..", "..", "outside.txt")
+		inWorkspace, err := validator.IsInWorkspace(parentPath)
+		require.NoError(t, err)
+		require.False(t, inWorkspace)
+	})
+
+	t.Run("ValidateReadInWorkspace", func(t *testing.T) {
+		validator, err := NewPathValidator(tempDir)
+		require.NoError(t, err)
+
+		err = validator.ValidateRead(testFile)
+		require.NoError(t, err)
+	})
+
+	t.Run("ValidateReadOutsideWorkspace", func(t *testing.T) {
+		validator, err := NewPathValidator(tempDir)
+		require.NoError(t, err)
+
+		err = validator.ValidateRead("/etc/passwd")
+		require.Error(t, err)
+		require.True(t, IsPathAccessError(err))
+	})
+
+	t.Run("ValidateWriteInWorkspace", func(t *testing.T) {
+		validator, err := NewPathValidator(tempDir)
+		require.NoError(t, err)
+
+		newFile := filepath.Join(tempDir, "new.txt")
+		err = validator.ValidateWrite(newFile)
+		require.NoError(t, err)
+	})
+
+	t.Run("ValidateWriteOutsideWorkspace", func(t *testing.T) {
+		validator, err := NewPathValidator(tempDir)
+		require.NoError(t, err)
+
+		err = validator.ValidateWrite("/tmp/outside.txt")
+		require.Error(t, err)
+		require.True(t, IsPathAccessError(err))
+	})
 }

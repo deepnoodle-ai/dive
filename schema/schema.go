@@ -25,6 +25,24 @@ type Schema struct {
 	AdditionalProperties *bool                `json:"additionalProperties,omitempty"`
 }
 
+// MarshalJSON implements json.Marshaler to ensure Properties is always
+// marshaled as an empty object {} rather than null when nil. LLM APIs
+// require tools with no parameters to have "properties": {} not null.
+func (s *Schema) MarshalJSON() ([]byte, error) {
+	type schemaAlias Schema
+	props := s.Properties
+	if props == nil {
+		props = map[string]*Property{}
+	}
+	return json.Marshal(&struct {
+		*schemaAlias
+		Properties map[string]*Property `json:"properties"`
+	}{
+		schemaAlias: (*schemaAlias)(s),
+		Properties:  props,
+	})
+}
+
 // AsMap converts the schema to a map[string]any.
 func (s *Schema) AsMap() map[string]any {
 	var result map[string]any

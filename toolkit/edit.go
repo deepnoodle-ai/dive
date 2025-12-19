@@ -28,11 +28,14 @@ type EditInput struct {
 type EditToolOptions struct {
 	// MaxFileSize is the maximum file size to edit (default 10MB)
 	MaxFileSize int64
+	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+	WorkspaceDir string
 }
 
 // EditTool performs exact string replacements in files
 type EditTool struct {
-	maxFileSize int64
+	maxFileSize   int64
+	pathValidator *PathValidator
 }
 
 // NewEditTool creates a new EditTool
@@ -44,8 +47,13 @@ func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 	if resolvedOpts.MaxFileSize == 0 {
 		resolvedOpts.MaxFileSize = 10 * 1024 * 1024 // 10MB
 	}
+	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
+	if err != nil {
+		pathValidator = &PathValidator{}
+	}
 	return dive.ToolAdapter(&EditTool{
-		maxFileSize: resolvedOpts.MaxFileSize,
+		maxFileSize:   resolvedOpts.MaxFileSize,
+		pathValidator: pathValidator,
 	})
 }
 
@@ -136,6 +144,13 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 	// Validate path
 	if !filepath.IsAbs(input.FilePath) {
 		return dive.NewToolResultError(fmt.Sprintf("file_path must be absolute, got: %s", input.FilePath)), nil
+	}
+
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateWrite(input.FilePath); err != nil {
+			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	// Check file exists

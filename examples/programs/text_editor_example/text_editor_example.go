@@ -24,9 +24,7 @@ func main() {
 	logger := log.New(log.LevelDebug)
 
 	textEditor := toolkit.NewTextEditorTool()
-	commandTool := toolkit.NewCommandTool(toolkit.CommandToolOptions{
-		DenyList: []string{"rm"},
-	})
+	commandTool := toolkit.NewCommandTool()
 
 	interactor := dive.NewTerminalInteractor(dive.TerminalInteractorOptions{
 		Mode: dive.InteractIfNotReadOnly,

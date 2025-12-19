@@ -25,11 +25,13 @@ type ReadFileInput struct {
 }
 
 type ReadFileToolOptions struct {
-	MaxSize int `json:"max_size,omitempty"`
+	MaxSize      int    `json:"max_size,omitempty"`
+	WorkspaceDir string // Base directory for workspace validation (defaults to cwd)
 }
 
 type ReadFileTool struct {
-	maxSize int
+	maxSize       int
+	pathValidator *PathValidator
 }
 
 // NewReadFileTool creates a new tool for reading file contents
@@ -37,8 +39,14 @@ func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFi
 	if options.MaxSize == 0 {
 		options.MaxSize = DefaultReadFileMaxSize
 	}
+	pathValidator, err := NewPathValidator(options.WorkspaceDir)
+	if err != nil {
+		// Fall back to no validation if we can't determine workspace
+		pathValidator = &PathValidator{}
+	}
 	return dive.ToolAdapter(&ReadFileTool{
-		maxSize: options.MaxSize,
+		maxSize:       options.MaxSize,
+		pathValidator: pathValidator,
 	})
 }
 
@@ -86,6 +94,13 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 	filePath := input.FilePath
 	if filePath == "" {
 		return NewToolResultError("Error: No file path provided."), nil
+	}
+
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateRead(filePath); err != nil {
+			return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	absPath, err := filepath.Abs(filePath)

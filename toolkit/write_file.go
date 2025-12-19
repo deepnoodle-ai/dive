@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/schema"
 )
@@ -20,67 +19,23 @@ type WriteFileInput struct {
 }
 
 type WriteFileToolOptions struct {
-	AllowList []string // Patterns of allowed paths
-	DenyList  []string // Patterns of denied paths
+	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+	WorkspaceDir string
 }
 
 type WriteFileTool struct {
-	allowList []string // Patterns of allowed paths
-	denyList  []string // Patterns of denied paths
+	pathValidator *PathValidator
 }
 
 // NewWriteFileTool creates a new tool for writing content to files
 func NewWriteFileTool(options WriteFileToolOptions) *dive.TypedToolAdapter[*WriteFileInput] {
-	return dive.ToolAdapter(&WriteFileTool{
-		allowList: options.AllowList,
-		denyList:  options.DenyList,
-	})
-}
-
-// isPathAllowed checks if the given path is allowed based on allowList and denyList
-func (t *WriteFileTool) isPathAllowed(path string) (bool, string) {
-	// Convert to absolute path for consistent checking
-	absPath, err := filepath.Abs(path)
+	pathValidator, err := NewPathValidator(options.WorkspaceDir)
 	if err != nil {
-		return false, fmt.Sprintf("Error resolving absolute path: %s", err.Error())
+		pathValidator = &PathValidator{}
 	}
-
-	// If denyList is specified, check against it first
-	if len(t.denyList) > 0 {
-		for _, pattern := range t.denyList {
-			matched, err := matchesPattern(absPath, pattern)
-			if err != nil {
-				return false, fmt.Sprintf("Error matching pattern '%s': %s", pattern, err.Error())
-			}
-			if matched {
-				return false, fmt.Sprintf("Path '%s' matches denied pattern '%s'", path, pattern)
-			}
-		}
-	}
-
-	// If allowList is specified, path must match at least one pattern
-	if len(t.allowList) > 0 {
-		allowed := false
-		for _, pattern := range t.allowList {
-			matched, err := matchesPattern(absPath, pattern)
-			if err != nil {
-				return false, fmt.Sprintf("Error matching pattern '%s': %s", pattern, err.Error())
-			}
-			if matched {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return false, fmt.Sprintf("Path '%s' does not match any allowed patterns", path)
-		}
-	}
-
-	return true, ""
-}
-
-func matchesPattern(path, pattern string) (bool, error) {
-	return doublestar.PathMatch(pattern, path)
+	return dive.ToolAdapter(&WriteFileTool{
+		pathValidator: pathValidator,
+	})
 }
 
 func (t *WriteFileTool) Name() string {
@@ -88,7 +43,7 @@ func (t *WriteFileTool) Name() string {
 }
 
 func (t *WriteFileTool) Description() string {
-	return "A tool that writes content to a file. To use this tool, provide a 'path' parameter with the path to the file you want to write to, and a 'content' parameter with the content to write."
+	return "A tool that writes content to a file. Provide a 'file_path' parameter with the absolute path to the file you want to write to, and a 'content' parameter with the content to write."
 }
 
 func (t *WriteFileTool) Schema() *schema.Schema {
@@ -121,10 +76,11 @@ func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.
 		return dive.NewToolResultError("Error: No file path provided. Please provide a file path either in the constructor or as an argument."), nil
 	}
 
-	// Check if the path is allowed
-	allowed, reason := t.isPathAllowed(filePath)
-	if !allowed {
-		return dive.NewToolResultError(fmt.Sprintf("Error: Access denied. %s", reason)), nil
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateWrite(filePath); err != nil {
+			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	// Convert to absolute path for file operations

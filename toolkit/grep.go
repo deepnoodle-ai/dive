@@ -57,6 +57,8 @@ type GrepToolOptions struct {
 	MaxResults int
 	// UseRipgrep attempts to use ripgrep if available
 	UseRipgrep bool
+	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+	WorkspaceDir string
 }
 
 // GrepTool is a tool for searching file contents using regex patterns
@@ -65,6 +67,7 @@ type GrepTool struct {
 	maxResults      int
 	useRipgrep      bool
 	ripgrepPath     string
+	pathValidator   *PathValidator
 }
 
 // NewGrepTool creates a new GrepTool
@@ -96,11 +99,17 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 		}
 	}
 
+	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
+	if err != nil {
+		pathValidator = &PathValidator{}
+	}
+
 	return dive.ToolAdapter(&GrepTool{
 		defaultExcludes: resolvedOpts.DefaultExcludes,
 		maxResults:      resolvedOpts.MaxResults,
 		useRipgrep:      resolvedOpts.UseRipgrep,
 		ripgrepPath:     ripgrepPath,
+		pathValidator:   pathValidator,
 	})
 }
 
@@ -241,6 +250,13 @@ func (t *GrepTool) callRipgrep(ctx context.Context, input *GrepInput) (*dive.Too
 		}
 	}
 
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
+			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
+	}
+
 	args := []string{"--json"}
 
 	// Case sensitivity
@@ -365,6 +381,13 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 			return dive.NewToolResultError(fmt.Sprintf("Error getting current directory: %v", err)), nil
 		}
 		searchPath = filepath.Join(cwd, searchPath)
+	}
+
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
+			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	// Compile regex
