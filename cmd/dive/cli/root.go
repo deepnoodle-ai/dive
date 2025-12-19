@@ -1,12 +1,11 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/log"
-	"github.com/spf13/cobra"
+	"github.com/deepnoodle-ai/wonton/cli"
 )
 
 var (
@@ -15,54 +14,69 @@ var (
 	llmProvider   string
 	llmModel      string
 	logLevel      string
+	app           *cli.App
 )
 
 func getLogLevel() log.Level {
 	return log.LevelFromString(logLevel)
 }
 
-var rootCmd = &cobra.Command{
-	Use:   "dive",
-	Short: "Dive runs AI agent workflows.",
-	Long:  "Dive runs AI agent workflows.",
-
-	// Extract user-provided variables from --var flags.
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		userVariables = make(map[string]interface{}, len(userVarFlags))
-		for _, v := range userVarFlags {
-			parts := strings.SplitN(v, "=", 2)
-			if len(parts) != 2 {
-				fmt.Printf("Warning: invalid variable format: %s\n", v)
-				continue
-			}
-			userVariables[parts[0]] = parts[1]
-		}
-	},
-}
-
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+	app = cli.New("dive").
+		Description("Dive runs AI agent workflows").
+		Version("1.0.0").
+		GlobalFlags(
+			cli.String("provider", "").
+				Env("DIVE_PROVIDER").
+				Help("LLM provider to use (e.g., 'anthropic', 'openai', 'openrouter', 'groq', 'grok', 'mistral', 'ollama', 'google')"),
+			cli.String("model", "m").
+				Env("DIVE_MODEL").
+				Help("Model to use (e.g. 'claude-sonnet-4-20250514')"),
+			cli.Strings("var", "").
+				Help("Set a variable (format: key=value). Can be specified multiple times"),
+			cli.String("log-level", "").
+				Default("warn").
+				Help("Log level to use (none, debug, info, warn, error)"),
+		)
+
+	// Register all commands
+	registerAskCommand(app)
+	registerChatCommand(app)
+	registerClassifyCommand(app)
+	registerCompareCommand(app)
+	registerConfigCommand(app)
+	registerDiffCommand(app)
+	registerEmbedCommand(app)
+	registerExtractCommand(app)
+	registerImageCommand(app)
+	registerLLMCommand(app)
+	registerMCPCommand(app)
+	registerSummarizeCommand(app)
+	registerThreadsCommand(app)
+	registerVideoCommand(app)
+	registerWatchCommand(app)
+
+	if err := app.Execute(); err != nil {
+		if cli.IsHelpRequested(err) {
+			os.Exit(0)
+		}
+		os.Exit(cli.GetExitCode(err))
 	}
 }
 
-func init() {
-	rootCmd.CompletionOptions.HiddenDefaultCmd = true
+// parseGlobalFlags extracts global flag values from context
+func parseGlobalFlags(ctx *cli.Context) {
+	llmProvider = ctx.String("provider")
+	llmModel = ctx.String("model")
+	logLevel = ctx.String("log-level")
+	userVarFlags = ctx.Strings("var")
 
-	rootCmd.PersistentFlags().StringVarP(
-		&llmProvider, "provider", "", "",
-		"LLM provider to use (e.g., 'anthropic', 'openai', 'openrouter', 'groq', 'grok', 'mistral', 'ollama', 'google')")
-
-	rootCmd.PersistentFlags().StringVarP(
-		&llmModel, "model", "m", "",
-		"Model to use (e.g. 'claude-sonnet-4-20250514')")
-
-	rootCmd.PersistentFlags().StringArrayVarP(
-		&userVarFlags, "var", "", []string{},
-		"Set a variable (format: key=value). Can be specified multiple times")
-
-	rootCmd.PersistentFlags().StringVarP(
-		&logLevel, "log-level", "", "warn",
-		"Log level to use (none, debug, info, warn, error)")
+	// Parse user variables
+	userVariables = make(map[string]interface{}, len(userVarFlags))
+	for _, v := range userVarFlags {
+		parts := strings.SplitN(v, "=", 2)
+		if len(parts) == 2 {
+			userVariables[parts[0]] = parts[1]
+		}
+	}
 }

@@ -3,230 +3,214 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/threads"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
+	"github.com/deepnoodle-ai/wonton/cli"
+	"github.com/deepnoodle-ai/wonton/color"
 )
 
-var threadCmd = &cobra.Command{
-	Use:   "threads",
-	Short: "Manage chat threads in directory",
-	Long:  "Manage chat threads stored in the threads directory including listing, inspecting, and cleaning up threads.",
-}
+func registerThreadsCommand(app *cli.App) {
+	threadsGroup := app.Group("threads").
+		Description("Manage chat threads in directory")
 
-var threadListCmd = &cobra.Command{
-	Use:   "list [directory]",
-	Short: "List chat threads",
-	Long:  "List chat threads in the specified directory (defaults to ~/.dive/threads). Shows thread IDs, creation times, and message counts.",
-	Args:  cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		var directory string
-		if len(args) > 0 {
-			directory = args[0]
-		} else {
-			// Default to dive threads directory
-			var err error
-			directory, err = diveThreadsDirectory()
-			if err != nil {
-				fmt.Println(errorStyle.Sprintf("Error getting dive threads directory: %v", err))
-				os.Exit(1)
-			}
-		}
+	threadsGroup.Command("list").
+		Description("List chat threads").
+		Long("List chat threads in the specified directory (defaults to ~/.dive/threads). Shows thread IDs, creation times, and message counts.").
+		Args("directory?").
+		Run(func(ctx *cli.Context) error {
+			parseGlobalFlags(ctx)
 
-		ctx := context.Background()
-		repo := threads.NewDiskRepository(directory)
-
-		output, err := repo.ListThreads(ctx, nil)
-		if err != nil {
-			fmt.Println(errorStyle.Sprintf("Error listing threads: %v", err))
-			os.Exit(1)
-		}
-
-		if len(output.Items) == 0 {
-			fmt.Println("No thread files found in", directory)
-			return
-		}
-
-		fmt.Println(boldStyle.Sprintf("Chat Threads in directory: %s", directory))
-		fmt.Println()
-
-		// Sort by modification time (newest first)
-		sort.Slice(output.Items, func(i, j int) bool {
-			return output.Items[i].UpdatedAt.After(output.Items[j].UpdatedAt)
-		})
-
-		// Print thread information
-		for _, thread := range output.Items {
-			fmt.Printf("Thread %s\n", thread.ID)
-			if thread.Title != "" {
-				fmt.Printf(" Title: %s\n", thread.Title)
-			}
-			if thread.AgentName != "" {
-				fmt.Printf(" Agent: %s\n", thread.AgentName)
-			}
-			timeAgo := formatTimeAgo(thread.UpdatedAt)
-			fmt.Printf("  %s %s\n",
-				timeAgo,
-				thread.UpdatedAt.Format("Jan 2, 2006 at 3:04 PM"))
-
-			if len(thread.Messages) > 0 {
-				// Don't show "Threads: 1" since there's always only 1 thread per file
-				if len(thread.Messages) == 1 {
-					fmt.Printf("  %d message", len(thread.Messages))
-				} else {
-					fmt.Printf("  %d messages", len(thread.Messages))
+			var directory string
+			if ctx.NArg() > 0 {
+				directory = ctx.Arg(0)
+			} else {
+				var err error
+				directory, err = diveThreadsDirectory()
+				if err != nil {
+					return cli.Errorf("error getting dive threads directory: %v", err)
 				}
-				if thread.UserID != "" {
-					fmt.Printf(" • User: %s", thread.UserID)
+			}
+
+			goCtx := context.Background()
+			repo := threads.NewDiskRepository(directory)
+
+			output, err := repo.ListThreads(goCtx, nil)
+			if err != nil {
+				return cli.Errorf("error listing threads: %v", err)
+			}
+
+			if len(output.Items) == 0 {
+				fmt.Println("No thread files found in", directory)
+				return nil
+			}
+
+			fmt.Println(boldStyle.Sprintf("Chat Threads in directory: %s", directory))
+			fmt.Println()
+
+			// Sort by modification time (newest first)
+			sort.Slice(output.Items, func(i, j int) bool {
+				return output.Items[i].UpdatedAt.After(output.Items[j].UpdatedAt)
+			})
+
+			// Print thread information
+			for _, thread := range output.Items {
+				fmt.Printf("Thread %s\n", thread.ID)
+				if thread.Title != "" {
+					fmt.Printf(" Title: %s\n", thread.Title)
+				}
+				if thread.AgentName != "" {
+					fmt.Printf(" Agent: %s\n", thread.AgentName)
+				}
+				timeAgo := formatTimeAgo(thread.UpdatedAt)
+				fmt.Printf("  %s %s\n",
+					timeAgo,
+					thread.UpdatedAt.Format("Jan 2, 2006 at 3:04 PM"))
+
+				if len(thread.Messages) > 0 {
+					if len(thread.Messages) == 1 {
+						fmt.Printf("  %d message", len(thread.Messages))
+					} else {
+						fmt.Printf("  %d messages", len(thread.Messages))
+					}
+					if thread.UserID != "" {
+						fmt.Printf(" - User: %s", thread.UserID)
+					}
+					fmt.Println()
+				} else {
+					fmt.Printf("  %s\n", color.Yellow.Sprint("Empty thread"))
 				}
 				fmt.Println()
-			} else {
-				fmt.Printf("  %s\n", color.New(color.FgYellow).Sprint("Empty thread"))
+			}
+			return nil
+		})
+
+	threadsGroup.Command("show").
+		Description("Show details of a chat thread by ID").
+		Args("thread-id").
+		Run(func(ctx *cli.Context) error {
+			parseGlobalFlags(ctx)
+
+			threadID := ctx.Arg(0)
+
+			threadsDir, err := diveThreadsDirectory()
+			if err != nil {
+				return cli.Errorf("error getting dive threads directory: %v", err)
+			}
+
+			goCtx := context.Background()
+			repo := threads.NewDiskRepository(threadsDir)
+
+			thread, err := repo.GetThread(goCtx, threadID)
+			if err != nil {
+				return cli.Errorf("error getting thread: %v", err)
+			}
+
+			fmt.Println(boldStyle.Sprintf("Thread ID: %s", thread.ID))
+			fmt.Println()
+
+			if thread.UserID != "" {
+				fmt.Printf("User: %s\n", thread.UserID)
+			}
+			fmt.Printf("Created: %s\n", thread.CreatedAt.Format("2006-01-02 15:04:05"))
+			fmt.Printf("Updated: %s\n", thread.UpdatedAt.Format("2006-01-02 15:04:05"))
+			fmt.Println("Messages:")
+			for j, msg := range thread.Messages {
+				roleStyle := successStyle
+				if msg.Role == "user" {
+					roleStyle = boldStyle
+				}
+				fmt.Printf("  %d. %s: %s\n", j+1, roleStyle.Sprint(strings.Title(string(msg.Role))), msg.Text())
 			}
 			fmt.Println()
-		}
-	},
-}
+			return nil
+		})
 
-var threadShowCmd = &cobra.Command{
-	Use:   "show <thread-id>",
-	Short: "Show details of a chat thread by ID",
-	Long:  "Display detailed information about a chat thread by its ID.",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		threadID := args[0]
+	threadsGroup.Command("clean").
+		Description("Clean up old threads").
+		Long("Remove empty thread files or thread files older than the specified age from the directory (defaults to ~/.dive/threads).").
+		Args("directory?").
+		Flags(
+			cli.String("older-than", "").Help("Remove threads older than this duration (e.g., 168h for 7 days)"),
+			cli.Bool("dry-run", "n").Help("Show what would be deleted without actually deleting"),
+			cli.Bool("force", "f").Help("Skip confirmation prompt and delete files immediately"),
+		).
+		Run(func(ctx *cli.Context) error {
+			parseGlobalFlags(ctx)
 
-		threadsDir, err := diveThreadsDirectory()
-		if err != nil {
-			fmt.Println(errorStyle.Sprintf("Error getting dive threads directory: %v", err))
-			os.Exit(1)
-		}
-
-		ctx := context.Background()
-		repo := threads.NewDiskRepository(threadsDir)
-
-		// Get the specific thread by ID
-		thread, err := repo.GetThread(ctx, threadID)
-		if err != nil {
-			fmt.Println(errorStyle.Sprintf("Error getting thread: %v", err))
-			os.Exit(1)
-		}
-
-		fmt.Println(boldStyle.Sprintf("Thread ID: %s", thread.ID))
-		fmt.Println()
-
-		if thread.UserID != "" {
-			fmt.Printf("User: %s\n", thread.UserID)
-		}
-		fmt.Printf("Created: %s\n", thread.CreatedAt.Format("2006-01-02 15:04:05"))
-		fmt.Printf("Updated: %s\n", thread.UpdatedAt.Format("2006-01-02 15:04:05"))
-		fmt.Println("Messages:")
-		for j, msg := range thread.Messages {
-			roleColor := successStyle
-			if msg.Role == "user" {
-				roleColor = boldStyle
-			}
-			fmt.Printf("  %d. %s: %s\n", j+1, roleColor.Sprint(strings.Title(string(msg.Role))), msg.Text())
-		}
-		fmt.Println()
-	},
-}
-
-var threadCleanCmd = &cobra.Command{
-	Use:   "clean [directory]",
-	Short: "Clean up old threads",
-	Long:  "Remove empty thread files or thread files older than the specified age from the directory (defaults to ~/.dive/threads).",
-	Args:  cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		var directory string
-		if len(args) > 0 {
-			directory = args[0]
-		} else {
-			// Default to dive threads directory
-			var err error
-			directory, err = diveThreadsDirectory()
-			if err != nil {
-				fmt.Println(errorStyle.Sprintf("Error getting dive threads directory: %v", err))
-				os.Exit(1)
-			}
-		}
-
-		maxAge, _ := cmd.Flags().GetDuration("older-than")
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		force, _ := cmd.Flags().GetBool("force")
-
-		ctx := context.Background()
-		repo := threads.NewDiskRepository(directory)
-
-		output, err := repo.ListThreads(ctx, nil)
-		if err != nil {
-			fmt.Println(errorStyle.Sprintf("Error listing threads: %v", err))
-			os.Exit(1)
-		}
-
-		var toDelete []string
-
-		for _, thread := range output.Items {
-			// Check if file is too old
-			if maxAge > 0 && !thread.UpdatedAt.IsZero() && time.Since(thread.UpdatedAt) > maxAge {
-				toDelete = append(toDelete, thread.ID)
-				continue
-			}
-		}
-
-		if len(toDelete) == 0 {
-			fmt.Println("No threads to clean up")
-			return
-		}
-
-		fmt.Printf("Found %d thread files to remove:\n", len(toDelete))
-		for _, threadID := range toDelete {
-			fmt.Printf("  - %s\n", threadID)
-		}
-
-		if dryRun {
-			fmt.Println(color.New(color.FgYellow).Sprint("\nDry run - no threads were deleted"))
-			return
-		}
-
-		// Ask for confirmation unless --force is specified
-		if !force {
-			fmt.Printf("\nAre you sure you want to delete these %d threads? [y/N]: ", len(toDelete))
-			var response string
-			fmt.Scanln(&response)
-			response = strings.ToLower(strings.TrimSpace(response))
-			if response != "y" && response != "yes" {
-				fmt.Println("Operation cancelled")
-				return
-			}
-		}
-
-		fmt.Println()
-		for _, threadID := range toDelete {
-			if err := repo.DeleteThread(ctx, threadID); err != nil {
-				fmt.Printf("Failed to remove %s: %v\n", threadID, err)
+			var directory string
+			if ctx.NArg() > 0 {
+				directory = ctx.Arg(0)
 			} else {
-				fmt.Printf("Removed %s\n", threadID)
+				var err error
+				directory, err = diveThreadsDirectory()
+				if err != nil {
+					return cli.Errorf("error getting dive threads directory: %v", err)
+				}
 			}
-		}
-	},
-}
 
-func init() {
-	rootCmd.AddCommand(threadCmd)
+			var maxAge time.Duration
+			if olderThanStr := ctx.String("older-than"); olderThanStr != "" {
+				var err error
+				maxAge, err = time.ParseDuration(olderThanStr)
+				if err != nil {
+					return cli.Errorf("invalid duration format: %v", err)
+				}
+			}
+			dryRun := ctx.Bool("dry-run")
+			force := ctx.Bool("force")
 
-	// Add subcommands
-	threadCmd.AddCommand(threadListCmd)
-	threadCmd.AddCommand(threadShowCmd)
-	threadCmd.AddCommand(threadCleanCmd)
+			goCtx := context.Background()
+			repo := threads.NewDiskRepository(directory)
 
-	// Flags for clean command
-	threadCleanCmd.Flags().DurationP("older-than", "", 0, "Remove threads older than this duration (e.g., 168h for 7 days)")
-	threadCleanCmd.Flags().BoolP("dry-run", "n", false, "Show what would be deleted without actually deleting")
-	threadCleanCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt and delete files immediately")
+			output, err := repo.ListThreads(goCtx, nil)
+			if err != nil {
+				return cli.Errorf("error listing threads: %v", err)
+			}
+
+			var toDelete []string
+
+			for _, thread := range output.Items {
+				if maxAge > 0 && !thread.UpdatedAt.IsZero() && time.Since(thread.UpdatedAt) > maxAge {
+					toDelete = append(toDelete, thread.ID)
+					continue
+				}
+			}
+
+			if len(toDelete) == 0 {
+				fmt.Println("No threads to clean up")
+				return nil
+			}
+
+			fmt.Printf("Found %d thread files to remove:\n", len(toDelete))
+			for _, threadID := range toDelete {
+				fmt.Printf("  - %s\n", threadID)
+			}
+
+			if dryRun {
+				fmt.Println(color.Yellow.Sprint("\nDry run - no threads were deleted"))
+				return nil
+			}
+
+			// Ask for confirmation unless --force is specified
+			if !force {
+				confirmed, err := ctx.Confirm(fmt.Sprintf("Delete %d threads?", len(toDelete)))
+				if err != nil || !confirmed {
+					fmt.Println("Operation cancelled")
+					return nil
+				}
+			}
+
+			fmt.Println()
+			for _, threadID := range toDelete {
+				if err := repo.DeleteThread(goCtx, threadID); err != nil {
+					fmt.Printf("Failed to remove %s: %v\n", threadID, err)
+				} else {
+					fmt.Printf("Removed %s\n", threadID)
+				}
+			}
+			return nil
+		})
 }

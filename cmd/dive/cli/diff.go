@@ -12,14 +12,14 @@ import (
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
+	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/pmezard/go-difflib/difflib"
-	"github.com/spf13/cobra"
 )
 
-var diffCmd = &cobra.Command{
-	Use:   "diff [old_file] [new_file]",
-	Short: "AI-powered semantic diff between files",
-	Long: `AI-powered semantic diff that analyzes and explains changes between two files.
+func registerDiffCommand(app *cli.App) {
+	app.Command("diff").
+		Description("AI-powered semantic diff between files").
+		Long(`AI-powered semantic diff that analyzes and explains changes between two files.
 
 This command generates a unified diff and uses an LLM to provide semantic analysis,
 explaining what has changed in natural language with context and significance.
@@ -31,47 +31,28 @@ Examples:
   dive diff - new.txt                          # Compare stdin with file
   dive diff old.txt new.txt --format markdown  # Output in markdown format
   dive diff old.txt new.txt --provider openai  # Use specific LLM provider
-  dive diff old.txt new.txt --context 5        # Include 5 lines of context in diff`,
-	Args: cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+  dive diff old.txt new.txt --context 5        # Include 5 lines of context in diff`).
+		Args("old_file", "new_file").
+		Flags(
+			cli.String("format", "f").Default("text").Help("Output format (text, markdown, json)"),
+			cli.Int("context", "c").Default(3).Help("Number of context lines to show around changes in diff"),
+		).
+		Run(func(ctx *cli.Context) error {
+			parseGlobalFlags(ctx)
 
-		oldFile := args[0]
-		newFile := args[1]
+			oldFile := ctx.Arg(0)
+			newFile := ctx.Arg(1)
+			outputFormat := ctx.String("format")
+			contextLines := ctx.Int("context")
 
-		// Get output format
-		outputFormat, err := cmd.Flags().GetString("format")
-		if err != nil {
-			return fmt.Errorf("error getting format flag: %w", err)
-		}
+			provider := llmProvider
+			if provider == "" {
+				provider = "anthropic"
+			}
+			model := llmModel
 
-		// Get context lines for diff
-		contextLines, err := cmd.Flags().GetInt("context")
-		if err != nil {
-			return fmt.Errorf("error getting context flag: %w", err)
-		}
-
-		// Get model configuration from global flags
-		provider := llmProvider
-		if provider == "" {
-			provider = "anthropic" // Default provider
-		}
-
-		model := llmModel
-		if model == "" {
-			// Use default model for provider
-		}
-
-		// Run the diff with AI analysis
-		return runDiff(ctx, oldFile, newFile, outputFormat, contextLines, provider, model)
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(diffCmd)
-
-	diffCmd.Flags().StringP("format", "f", "text", "Output format (text, markdown, json)")
-	diffCmd.Flags().IntP("context", "c", 3, "Number of context lines to show around changes in diff")
+			return runDiff(ctx.Context(), oldFile, newFile, outputFormat, contextLines, provider, model)
+		})
 }
 
 func runDiff(ctx context.Context, oldFile, newFile string, outputFormat string, contextLines int, provider, modelName string) error {
@@ -88,14 +69,14 @@ func runDiff(ctx context.Context, oldFile, newFile string, outputFormat string, 
 
 	// If files are identical, report that
 	if oldContent == newContent {
-		fmt.Println(successStyle.Sprint("✓ Files are identical - no changes detected"))
+		fmt.Println(successStyle.Sprint("Files are identical - no changes detected"))
 		return nil
 	}
 
 	// Generate unified diff
 	diff := generateUnifiedDiff(oldContent, newContent, oldFile, newFile, contextLines)
 	if diff == "" {
-		fmt.Println(successStyle.Sprint("✓ Files are functionally identical (only whitespace differences)"))
+		fmt.Println(successStyle.Sprint("Files are functionally identical (only whitespace differences)"))
 		return nil
 	}
 
@@ -213,11 +194,11 @@ func performSemanticDiff(ctx context.Context, diffAgent dive.Agent, unifiedDiff,
 	if err != nil {
 		// Check if it's an authentication error and provide helpful message
 		if strings.Contains(err.Error(), "authentication_error") || strings.Contains(err.Error(), "x-api-key header is required") {
-			fmt.Println(errorStyle.Sprint("❌ Authentication required"))
-			fmt.Println("💡 Set your API key using one of these methods:")
-			fmt.Printf("   • Environment variable: export ANTHROPIC_API_KEY=your_key_here\n")
-			fmt.Printf("   • For other providers, use: --provider openai (and set OPENAI_API_KEY)\n")
-			fmt.Printf("   • See available providers: dive llm --help\n")
+			fmt.Println(errorStyle.Sprint("Authentication required"))
+			fmt.Println("Set your API key using one of these methods:")
+			fmt.Printf("   Environment variable: export ANTHROPIC_API_KEY=your_key_here\n")
+			fmt.Printf("   For other providers, use: --provider openai (and set OPENAI_API_KEY)\n")
+			fmt.Printf("   See available providers: dive llm --help\n")
 			return nil
 		}
 		return fmt.Errorf("error generating diff analysis: %w", err)

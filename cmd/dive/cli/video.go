@@ -7,73 +7,55 @@ import (
 
 	"github.com/deepnoodle-ai/dive/media"
 	"github.com/deepnoodle-ai/dive/media/providers/google"
-	"github.com/spf13/cobra"
+	wontoncli "github.com/deepnoodle-ai/wonton/cli"
 	"google.golang.org/genai"
 )
 
-var videoCmd = &cobra.Command{
-	Use:   "video",
-	Short: "Video generation commands",
-	Long:  "Commands for generating videos using AI providers like Google Veo.",
+// videoGenerateParams holds parameters for video generation
+type videoGenerateParams struct {
+	prompt       string
+	provider     string
+	model        string
+	output       string
+	duration     float64
+	noWait       bool
+	pollInterval time.Duration
 }
 
-var videoGenerateCmd = &cobra.Command{
-	Use:   "generate",
-	Short: "Generate videos from text prompts",
-	Long:  "Generate videos from text prompts using AI providers. Currently supports Google Veo models. Waits for completion by default - use --no-wait to return immediately.",
-	RunE:  runVideoGenerate,
+// videoStatusParams holds parameters for video status check
+type videoStatusParams struct {
+	operationID string
+	provider    string
 }
 
-var videoStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Check the status of a video generation operation",
-	Long:  "Check the status of a long-running video generation operation using its operation ID.",
-	RunE:  runVideoStatus,
-}
-
-var (
-	// Generate flags
-	videoGeneratePrompt       string
-	videoGenerateProvider     string
-	videoGenerateModel        string
-	videoGenerateOutput       string
-	videoGenerateDuration     float64
-	videoGenerateNoWait       bool
-	videoGeneratePollInterval time.Duration
-
-	// Status flags
-	videoStatusOperationID string
-	videoStatusProvider    string
-)
-
-func runVideoGenerate(cmd *cobra.Command, args []string) error {
+func runVideoGenerate(params videoGenerateParams) error {
 	// Validate required parameters
-	if videoGeneratePrompt == "" {
+	if params.prompt == "" {
 		return fmt.Errorf("prompt is required")
 	}
 
 	// Set defaults
-	if videoGenerateProvider == "" {
-		videoGenerateProvider = "google"
+	if params.provider == "" {
+		params.provider = "google"
 	}
-	if videoGenerateModel == "" {
-		videoGenerateModel = "veo-2.0-generate-001"
+	if params.model == "" {
+		params.model = "veo-2.0-generate-001"
 	}
-	if videoGenerateOutput == "" {
-		videoGenerateOutput = "generated_video.mp4"
+	if params.output == "" {
+		params.output = "generated_video.mp4"
 	}
 
 	// Determine wait behavior: wait by default unless --no-wait is specified
-	shouldWait := !videoGenerateNoWait
+	shouldWait := !params.noWait
 
-	return generateVideoWithMediaPackage(shouldWait)
+	return generateVideoWithMediaPackage(params, shouldWait)
 }
 
-func generateVideoWithMediaPackage(shouldWait bool) error {
+func generateVideoWithMediaPackage(params videoGenerateParams, shouldWait bool) error {
 	// Create the video generator directly
-	generator, cleanup, err := createVideoGenerator(videoGenerateProvider)
+	generator, cleanup, err := createVideoGenerator(params.provider)
 	if err != nil {
-		return fmt.Errorf("error creating provider %s: %v", videoGenerateProvider, err)
+		return fmt.Errorf("error creating provider %s: %v", params.provider, err)
 	}
 	if cleanup != nil {
 		defer cleanup()
@@ -81,9 +63,9 @@ func generateVideoWithMediaPackage(shouldWait bool) error {
 
 	// Create the media request
 	req := &media.VideoGenerationRequest{
-		Prompt:   videoGeneratePrompt,
-		Model:    videoGenerateModel,
-		Duration: videoGenerateDuration,
+		Prompt:   params.prompt,
+		Model:    params.model,
+		Duration: params.duration,
 		Format:   "mp4", // Default format
 	}
 
@@ -105,22 +87,21 @@ func generateVideoWithMediaPackage(shouldWait bool) error {
 	if shouldWait {
 		// Wait for completion
 		fmt.Println("Waiting for video generation to complete...")
-		return waitForVideoCompletion(generator, response.OperationID)
+		return waitForVideoCompletion(generator, response.OperationID, params.pollInterval)
 	}
 
 	fmt.Printf("Use 'dive video status --operation-id %s --provider %s' to check the status\n",
-		response.OperationID, videoGenerateProvider)
+		response.OperationID, params.provider)
 	return nil
 }
 
-func waitForVideoCompletion(generator media.VideoGenerator, operationID string) error {
+func waitForVideoCompletion(generator media.VideoGenerator, operationID string, pollInterval time.Duration) error {
 	// Check if the generator supports operation checking
 	checker, ok := generator.(media.VideoOperationChecker)
 	if !ok {
 		return fmt.Errorf("provider does not support operation status checking")
 	}
 
-	pollInterval := videoGeneratePollInterval
 	if pollInterval == 0 {
 		pollInterval = 20 * time.Second
 	}
@@ -186,21 +167,22 @@ func saveVideo(video media.GeneratedVideo) error {
 	return nil
 }
 
-func runVideoStatus(cmd *cobra.Command, args []string) error {
+func runVideoStatus(params videoStatusParams) error {
 	// Validate required parameters
-	if videoStatusOperationID == "" {
+	if params.operationID == "" {
 		return fmt.Errorf("operation-id is required")
 	}
 
 	// Set defaults
-	if videoStatusProvider == "" {
-		videoStatusProvider = "google"
+	provider := params.provider
+	if provider == "" {
+		provider = "google"
 	}
 
 	// Create the video generator directly
-	generator, cleanup, err := createVideoGenerator(videoStatusProvider)
+	generator, cleanup, err := createVideoGenerator(provider)
 	if err != nil {
-		return fmt.Errorf("error creating provider %s: %v", videoStatusProvider, err)
+		return fmt.Errorf("error creating provider %s: %v", provider, err)
 	}
 	if cleanup != nil {
 		defer cleanup()
@@ -209,12 +191,12 @@ func runVideoStatus(cmd *cobra.Command, args []string) error {
 	// Check if the generator supports operation checking
 	checker, ok := generator.(media.VideoOperationChecker)
 	if !ok {
-		return fmt.Errorf("provider %s does not support operation status checking", videoStatusProvider)
+		return fmt.Errorf("provider %s does not support operation status checking", provider)
 	}
 
 	// Check operation status
 	ctx := context.Background()
-	status, err := checker.CheckVideoOperation(ctx, videoStatusOperationID)
+	status, err := checker.CheckVideoOperation(ctx, params.operationID)
 	if err != nil {
 		return fmt.Errorf("error checking operation status: %v", err)
 	}
@@ -227,18 +209,18 @@ func runVideoStatus(cmd *cobra.Command, args []string) error {
 
 	switch status.Status {
 	case "completed":
-		fmt.Println("✅ Video generation completed!")
+		fmt.Println("Video generation completed!")
 		if result, ok := status.Result.(*media.VideoGenerationResponse); ok {
 			if len(result.Videos) > 0 {
 				return saveVideo(result.Videos[0])
 			}
 		}
 	case "failed":
-		fmt.Printf("❌ Video generation failed: %s\n", status.Error)
+		fmt.Printf("Video generation failed: %s\n", status.Error)
 	case "running":
-		fmt.Println("🔄 Video generation is in progress...")
+		fmt.Println("Video generation is in progress...")
 	case "pending":
-		fmt.Println("⏳ Video generation is queued...")
+		fmt.Println("Video generation is queued...")
 	}
 
 	return nil
@@ -274,29 +256,70 @@ func createGoogleVideoProvider() (media.VideoGenerator, func(), error) {
 	return provider, cleanup, nil
 }
 
-func init() {
-	rootCmd.AddCommand(videoCmd)
+func registerVideoCommand(app *wontoncli.App) {
+	videoGroup := app.Group("video").
+		Description("Video generation commands")
 
-	// Add subcommands
-	videoCmd.AddCommand(videoGenerateCmd)
-	videoCmd.AddCommand(videoStatusCmd)
+	// Generate command
+	videoGroup.Command("generate").
+		Description("Generate videos from text prompts").
+		Long("Generate videos from text prompts using AI providers. Currently supports Google Veo models. Waits for completion by default - use --no-wait to return immediately.").
+		NoArgs().
+		Flags(
+			wontoncli.String("prompt", "p").Required().Help("Text description of the desired video"),
+			wontoncli.String("provider", "").Default("google").Help("AI provider to use (currently only google)"),
+			wontoncli.String("model", "m").Default("veo-2.0-generate-001").Help("Model to use for video generation"),
+			wontoncli.String("output", "o").Default("generated_video.mp4").Help("Output file path"),
+			wontoncli.Float("duration", "d").Help("Duration of the video in seconds (optional)"),
+			wontoncli.Bool("no-wait", "").Help("Don't wait for video generation to complete"),
+			wontoncli.String("poll-interval", "").Default("20s").Help("Polling interval when waiting (e.g., 20s, 1m)"),
+		).
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
 
-	// Generate command flags
-	videoGenerateCmd.Flags().StringVarP(&videoGeneratePrompt, "prompt", "p", "", "Text description of the desired video (required)")
-	videoGenerateCmd.Flags().StringVarP(&videoGenerateProvider, "provider", "", "google", "AI provider to use (currently only google)")
-	videoGenerateCmd.Flags().StringVarP(&videoGenerateModel, "model", "m", "veo-2.0-generate-001", "Model to use for video generation")
-	videoGenerateCmd.Flags().StringVarP(&videoGenerateOutput, "output", "o", "generated_video.mp4", "Output file path")
-	videoGenerateCmd.Flags().Float64VarP(&videoGenerateDuration, "duration", "d", 0, "Duration of the video in seconds (optional)")
-	videoGenerateCmd.Flags().BoolVar(&videoGenerateNoWait, "no-wait", false, "Don't wait for video generation to complete")
-	videoGenerateCmd.Flags().DurationVar(&videoGeneratePollInterval, "poll-interval", 20*time.Second, "Polling interval when waiting")
+			// Parse poll interval
+			pollIntervalStr := ctx.String("poll-interval")
+			pollInterval, err := time.ParseDuration(pollIntervalStr)
+			if err != nil {
+				pollInterval = 20 * time.Second
+			}
 
-	// Mark required flags
-	videoGenerateCmd.MarkFlagRequired("prompt")
+			params := videoGenerateParams{
+				prompt:       ctx.String("prompt"),
+				provider:     ctx.String("provider"),
+				model:        ctx.String("model"),
+				output:       ctx.String("output"),
+				duration:     ctx.Float64("duration"),
+				noWait:       ctx.Bool("no-wait"),
+				pollInterval: pollInterval,
+			}
 
-	// Status command flags
-	videoStatusCmd.Flags().StringVarP(&videoStatusOperationID, "operation-id", "i", "", "Operation ID to check (required)")
-	videoStatusCmd.Flags().StringVarP(&videoStatusProvider, "provider", "", "google", "AI provider used for the operation")
+			if err := runVideoGenerate(params); err != nil {
+				return wontoncli.Errorf("%v", err)
+			}
+			return nil
+		})
 
-	// Mark required flags
-	videoStatusCmd.MarkFlagRequired("operation-id")
+	// Status command
+	videoGroup.Command("status").
+		Description("Check the status of a video generation operation").
+		Long("Check the status of a long-running video generation operation using its operation ID.").
+		NoArgs().
+		Flags(
+			wontoncli.String("operation-id", "i").Required().Help("Operation ID to check"),
+			wontoncli.String("provider", "").Default("google").Help("AI provider used for the operation"),
+		).
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
+
+			params := videoStatusParams{
+				operationID: ctx.String("operation-id"),
+				provider:    ctx.String("provider"),
+			}
+
+			if err := runVideoStatus(params); err != nil {
+				return wontoncli.Errorf("%v", err)
+			}
+			return nil
+		})
 }

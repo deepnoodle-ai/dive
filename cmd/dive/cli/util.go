@@ -14,15 +14,38 @@ import (
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/threads"
-	"github.com/fatih/color"
+	"github.com/deepnoodle-ai/wonton/color"
 )
 
+// Style wraps text formatting functions for CLI output
+type Style struct {
+	format func(string) string
+}
+
+func (s *Style) Sprint(a ...interface{}) string {
+	return s.format(fmt.Sprint(a...))
+}
+
+func (s *Style) Sprintf(format string, a ...interface{}) string {
+	return s.format(fmt.Sprintf(format, a...))
+}
+
 var (
-	boldStyle     = color.New(color.Bold)
-	successStyle  = color.New(color.FgGreen)
-	errorStyle    = color.New(color.FgRed)
-	yellowStyle   = color.New(color.FgYellow)
-	thinkingStyle = color.New(color.FgMagenta)
+	boldStyle = &Style{format: func(s string) string {
+		return color.Bold + s + color.Reset
+	}}
+	successStyle = &Style{format: func(s string) string {
+		return color.Green.Sprint(s)
+	}}
+	errorStyle = &Style{format: func(s string) string {
+		return color.Red.Sprint(s)
+	}}
+	yellowStyle = &Style{format: func(s string) string {
+		return color.Yellow.Sprint(s)
+	}}
+	thinkingStyle = &Style{format: func(s string) string {
+		return color.Magenta.Sprint(s)
+	}}
 )
 
 // readStdin reads all content from standard input

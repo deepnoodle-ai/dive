@@ -3,11 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/spf13/cobra"
+	"github.com/deepnoodle-ai/wonton/cli"
 )
 
 // summarizationPrompts returns system prompts for different summary lengths
@@ -75,34 +74,32 @@ func runSummarize(length string) error {
 	return nil
 }
 
-var summarizeCmd = &cobra.Command{
-	Use:   "summarize",
-	Short: "Summarize text from stdin using AI",
-	Long:  "Reads text from standard input and generates a summary using the specified AI model. Ideal for unix-style processing pipelines.",
-	Example: `  # Summarize a document
+func registerSummarizeCommand(app *cli.App) {
+	app.Command("summarize").
+		Description("Summarize text from stdin using AI").
+		Long(`Reads text from standard input and generates a summary using the specified AI model. Ideal for unix-style processing pipelines.
+
+Examples:
+  # Summarize a document
   cat document.txt | dive summarize
 
   # Create a short summary with a specific model
   cat report.md | dive summarize --length short --model claude-sonnet-4
 
   # Summarize with custom provider and model
-  echo "Long text here..." | dive summarize --length long --provider openai --model gpt-4`,
-	Run: func(cmd *cobra.Command, args []string) {
-		length, err := cmd.Flags().GetString("length")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
+  echo "Long text here..." | dive summarize --length long --provider openai --model gpt-4`).
+		NoArgs().
+		Flags(
+			cli.String("length", "").Default("medium").Help("Summary length: short, medium, or long"),
+		).
+		Run(func(ctx *cli.Context) error {
+			parseGlobalFlags(ctx)
 
-		if err := runSummarize(length); err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-	},
-}
+			length := ctx.String("length")
 
-func init() {
-	rootCmd.AddCommand(summarizeCmd)
-
-	summarizeCmd.Flags().StringP("length", "", "medium", "Summary length: short, medium, or long")
+			if err := runSummarize(length); err != nil {
+				return cli.Errorf("%v", err)
+			}
+			return nil
+		})
 }

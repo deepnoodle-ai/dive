@@ -9,7 +9,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive/embedding"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
-	"github.com/spf13/cobra"
+	wontoncli "github.com/deepnoodle-ai/wonton/cli"
 )
 
 // OutputFormat defines the output format for embeddings
@@ -96,10 +96,10 @@ func runEmbedding(model, outputFormat string, inputs []string) error {
 	return nil
 }
 
-var embedCmd = &cobra.Command{
-	Use:   "embed",
-	Short: "Generate embeddings from text input",
-	Long: `Generate embeddings from text input using OpenAI's embedding models.
+func registerEmbedCommand(app *wontoncli.App) {
+	app.Command("embed").
+		Description("Generate embeddings from text input").
+		Long(`Generate embeddings from text input using OpenAI's embedding models.
 
 The text input can be provided via the --text flag or through stdin.
 Output can be formatted as JSON (full response) or vector (just the embedding values).
@@ -107,70 +107,50 @@ Output can be formatted as JSON (full response) or vector (just the embedding va
 Examples:
   dive embed --text "Hello, world!" --output json
   echo "Hello, world!" | dive embed --model text-embedding-3-small --output vector
-  dive embed --text "Some text" --output json`,
-	Run: func(cmd *cobra.Command, args []string) {
-		text, err := cmd.Flags().GetString("text")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
+  dive embed --text "Some text" --output json`).
+		NoArgs().
+		Flags(
+			wontoncli.String("text", "t").Help("Input text to embed (if not provided, reads from stdin)"),
+			wontoncli.String("output", "o").Default("json").Help("Output format: json (full response) or vector (embedding values only)"),
+		).
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
 
-		model, err := cmd.Flags().GetString("model")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
+			text := ctx.String("text")
+			outputFormat := ctx.String("output")
 
-		outputFormat, err := cmd.Flags().GetString("output")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// If no text provided via flag, try to read from stdin
-		if text == "" {
-			// Check if stdin has data
-			stat, err := os.Stdin.Stat()
-			if err != nil {
-				fmt.Println(errorStyle.Sprintf("Error checking stdin: %v", err))
-				os.Exit(1)
-			}
-
-			// If stdin is a pipe or redirect (not a terminal)
-			if (stat.Mode() & os.ModeCharDevice) == 0 {
-				text, err = readStdin()
+			// If no text provided via flag, try to read from stdin
+			if text == "" {
+				// Check if stdin has data
+				stat, err := os.Stdin.Stat()
 				if err != nil {
-					fmt.Println(errorStyle.Sprintf("Error reading from stdin: %v", err))
-					os.Exit(1)
+					return wontoncli.Errorf("error checking stdin: %v", err)
+				}
+
+				// If stdin is a pipe or redirect (not a terminal)
+				if (stat.Mode() & os.ModeCharDevice) == 0 {
+					text, err = readStdin()
+					if err != nil {
+						return wontoncli.Errorf("error reading from stdin: %v", err)
+					}
 				}
 			}
-		}
 
-		// Validate that we have text input
-		if text == "" {
-			fmt.Println(errorStyle.Sprint("Error: no text input provided. Use --text flag or pipe text via stdin."))
-			os.Exit(1)
-		}
+			// Validate that we have text input
+			if text == "" {
+				return wontoncli.Errorf("no text input provided. Use --text flag or pipe text via stdin.")
+			}
 
-		// Trim whitespace from input
-		text = strings.TrimSpace(text)
-		if text == "" {
-			fmt.Println(errorStyle.Sprint("Error: text input is empty after trimming whitespace."))
-			os.Exit(1)
-		}
+			// Trim whitespace from input
+			text = strings.TrimSpace(text)
+			if text == "" {
+				return wontoncli.Errorf("text input is empty after trimming whitespace.")
+			}
 
-		// Run embedding generation
-		if err := runEmbedding(model, outputFormat, []string{text}); err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(embedCmd)
-
-	embedCmd.Flags().StringP("text", "t", "", "Input text to embed (if not provided, reads from stdin)")
-	embedCmd.Flags().StringP("model", "m", "", "Embedding model to use (if not provided, uses the default model)")
-	embedCmd.Flags().StringP("output", "o", "json", "Output format: json (full response) or vector (embedding values only)")
+			// Run embedding generation
+			if err := runEmbedding(llmModel, outputFormat, []string{text}); err != nil {
+				return wontoncli.Errorf("%v", err)
+			}
+			return nil
+		})
 }

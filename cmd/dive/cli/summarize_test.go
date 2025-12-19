@@ -41,20 +41,3 @@ func TestSummarizationPrompts(t *testing.T) {
 		})
 	}
 }
-
-func TestSummarizeCommand(t *testing.T) {
-	// Test that the command is properly registered
-	require.NotNil(t, summarizeCmd)
-	require.Equal(t, "summarize", summarizeCmd.Use)
-	require.Equal(t, "Summarize text from stdin using AI", summarizeCmd.Short)
-	require.NotEmpty(t, summarizeCmd.Long)
-	require.NotEmpty(t, summarizeCmd.Example)
-}
-
-func TestSummarizeCommandFlags(t *testing.T) {
-	// Test that flags are properly defined
-	lengthFlag := summarizeCmd.Flag("length")
-	require.NotNil(t, lengthFlag)
-	require.Equal(t, "medium", lengthFlag.DefValue)
-	require.Equal(t, "", lengthFlag.Shorthand) // No shorthand to avoid conflicts
-}

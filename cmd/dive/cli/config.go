@@ -2,35 +2,26 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/deepnoodle-ai/dive/config"
-	"github.com/spf13/cobra"
+	"github.com/deepnoodle-ai/wonton/cli"
 )
 
-var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Work with Dive configurations",
-	Long:  "Work with Dive configurations",
-}
+func registerConfigCommand(app *cli.App) {
+	configGroup := app.Group("config").
+		Description("Work with Dive configurations")
 
-var checkCmd = &cobra.Command{
-	Use:   "check [file]",
-	Short: "Validate a Dive configuration",
-	Long:  "Validate a Dive configuration",
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		cfg, err := config.LoadDirectory(args[0])
-		if err != nil {
-			fmt.Printf("❌ %s\n", errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		fmt.Printf("✅ Configuration is valid with %d agent(s)\n", len(cfg.Agents))
-	},
-}
+	configGroup.Command("check").
+		Description("Validate a Dive configuration").
+		Args("file").
+		Run(func(ctx *cli.Context) error {
+			parseGlobalFlags(ctx)
 
-func init() {
-	rootCmd.AddCommand(configCmd)
-
-	configCmd.AddCommand(checkCmd)
+			cfg, err := config.LoadDirectory(ctx.Arg(0))
+			if err != nil {
+				return cli.Errorf("%v", err)
+			}
+			fmt.Printf("Configuration is valid with %d agent(s)\n", len(cfg.Agents))
+			return nil
+		})
 }

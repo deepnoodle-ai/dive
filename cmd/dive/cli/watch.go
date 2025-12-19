@@ -16,8 +16,8 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/log"
 	"github.com/deepnoodle-ai/dive/threads"
+	wontoncli "github.com/deepnoodle-ai/wonton/cli"
 	"github.com/fsnotify/fsnotify"
-	"github.com/spf13/cobra"
 )
 
 // WatchOptions holds configuration for the watch command
@@ -418,143 +418,6 @@ func (fw *FileWatcher) logToFile(message string) {
 	}
 }
 
-var watchCmd = &cobra.Command{
-	Use:   "watch [patterns...] --on-change [action]",
-	Short: "Monitor files/directories and trigger LLM actions on changes",
-	Long: `Monitor files/directories for changes and trigger LLM actions when changes occur.
-Changes are batched together and processed as a group with configurable timing.
-The agent automatically has access to read_file and list_directory tools and can decide
-whether to read file contents based on the task requirements.
-
-Examples:
-  # Basic file watching with default 1-second batching
-  dive watch src/*.go --on-change "Lint and suggest fixes"
-  
-  # Custom batch timing (500ms)
-  dive watch . --recursive --batch-timer 500 --on-change "Review changes for security issues"
-  
-  # With additional tools and filtering
-  dive watch "**/*.py" --on-change "Check for PEP8 compliance" --tools "web_search"
-  
-  # CI/CD integration with logging
-  dive watch src/ --recursive --on-change "Run code review" --exit-on-error --log-file ci.log
-  
-  # Filter by extensions and ignore patterns
-  dive watch . --only-extensions "go,js" --ignore "*.test.go,node_modules/**" --on-change "Code review"`,
-	Args: cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		onChange, err := cmd.Flags().GetString("on-change")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if onChange == "" {
-			fmt.Println(errorStyle.Sprint("--on-change action is required"))
-			os.Exit(1)
-		}
-
-		recursive, err := cmd.Flags().GetBool("recursive")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		debounceMs, err := cmd.Flags().GetInt("debounce")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		batchTimerMs, err := cmd.Flags().GetInt("batch-timer")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		systemPrompt, err := cmd.Flags().GetString("system-prompt")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		agentName, err := cmd.Flags().GetString("agent-name")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		toolsStr, err := cmd.Flags().GetString("tools")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		var tools []string
-		if toolsStr != "" {
-			tools = strings.Split(toolsStr, ",")
-		}
-
-		reasoningBudget, err := cmd.Flags().GetInt("reasoning-budget")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		exitOnError, err := cmd.Flags().GetBool("exit-on-error")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		logFile, err := cmd.Flags().GetString("log-file")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		onlyExtensionsStr, err := cmd.Flags().GetString("only-extensions")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		var onlyExtensions []string
-		if onlyExtensionsStr != "" {
-			onlyExtensions = strings.Split(onlyExtensionsStr, ",")
-		}
-
-		ignorePatternsStr, err := cmd.Flags().GetString("ignore")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		var ignorePatterns []string
-		if ignorePatternsStr != "" {
-			ignorePatterns = strings.Split(ignorePatternsStr, ",")
-		}
-
-		options := WatchOptions{
-			Patterns:        args,
-			OnChange:        onChange,
-			Recursive:       recursive,
-			Debounce:        time.Duration(debounceMs) * time.Millisecond,
-			BatchTimer:      time.Duration(batchTimerMs) * time.Millisecond,
-			SystemPrompt:    systemPrompt,
-			AgentName:       agentName,
-			Tools:           tools,
-			ReasoningBudget: reasoningBudget,
-			ExitOnError:     exitOnError,
-			LogFile:         logFile,
-			OnlyExtensions:  onlyExtensions,
-			IgnorePatterns:  ignorePatterns,
-		}
-
-		if err := runWatch(cmd.Context(), options); err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-	},
-}
-
 func runWatch(ctx context.Context, options WatchOptions) error {
 	watcher, err := NewFileWatcher(options)
 	if err != nil {
@@ -564,22 +427,96 @@ func runWatch(ctx context.Context, options WatchOptions) error {
 	return watcher.Start(ctx)
 }
 
-func init() {
-	rootCmd.AddCommand(watchCmd)
+func registerWatchCommand(app *wontoncli.App) {
+	app.Command("watch").
+		Description("Monitor files/directories and trigger LLM actions on changes").
+		Long(`Monitor files/directories for changes and trigger LLM actions when changes occur.
+Changes are batched together and processed as a group with configurable timing.
+The agent automatically has access to read_file and list_directory tools and can decide
+whether to read file contents based on the task requirements.
 
-	watchCmd.Flags().StringP("on-change", "", "", "Action to perform when files change (required)")
-	watchCmd.Flags().BoolP("recursive", "r", false, "Watch directories recursively")
-	watchCmd.Flags().IntP("debounce", "", 500, "Debounce time in milliseconds to avoid rapid triggers")
-	watchCmd.Flags().IntP("batch-timer", "", 1000, "Batch timer in milliseconds to group file changes")
-	watchCmd.Flags().StringP("system-prompt", "", "", "System prompt for the watch agent")
-	watchCmd.Flags().StringP("agent-name", "", "FileWatcher", "Name of the watch agent")
-	watchCmd.Flags().StringP("tools", "", "", "Comma-separated list of additional tools to use (read_file and list_directory are always included)")
-	watchCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the watch agent")
-	watchCmd.Flags().BoolP("exit-on-error", "", false, "Exit on LLM errors (useful for CI/CD)")
-	watchCmd.Flags().StringP("log-file", "", "", "Log file path for watch events and responses")
-	watchCmd.Flags().StringP("only-extensions", "", "", "Comma-separated list of file extensions to watch (e.g., 'go,js,py')")
-	watchCmd.Flags().StringP("ignore", "", "", "Comma-separated list of patterns to ignore")
+Examples:
+  # Basic file watching with default 1-second batching
+  dive watch src/*.go --on-change "Lint and suggest fixes"
 
-	// Mark on-change as required
-	watchCmd.MarkFlagRequired("on-change")
+  # Custom batch timing (500ms)
+  dive watch . --recursive --batch-timer 500 --on-change "Review changes for security issues"
+
+  # With additional tools and filtering
+  dive watch "**/*.py" --on-change "Check for PEP8 compliance" --tools "web_search"
+
+  # CI/CD integration with logging
+  dive watch src/ --recursive --on-change "Run code review" --exit-on-error --log-file ci.log
+
+  # Filter by extensions and ignore patterns
+  dive watch . --only-extensions "go,js" --ignore "*.test.go,node_modules/**" --on-change "Code review"`).
+		Args("patterns...").
+		Flags(
+			wontoncli.String("on-change", "").Required().Help("Action to perform when files change"),
+			wontoncli.Bool("recursive", "r").Help("Watch directories recursively"),
+			wontoncli.Int("debounce", "").Default(500).Help("Debounce time in milliseconds to avoid rapid triggers"),
+			wontoncli.Int("batch-timer", "").Default(1000).Help("Batch timer in milliseconds to group file changes"),
+			wontoncli.String("system-prompt", "").Help("System prompt for the watch agent"),
+			wontoncli.String("agent-name", "").Default("FileWatcher").Help("Name of the watch agent"),
+			wontoncli.String("tools", "").Help("Comma-separated list of additional tools to use (read_file and list_directory are always included)"),
+			wontoncli.Int("reasoning-budget", "").Help("Reasoning budget for the watch agent"),
+			wontoncli.Bool("exit-on-error", "").Help("Exit on LLM errors (useful for CI/CD)"),
+			wontoncli.String("log-file", "").Help("Log file path for watch events and responses"),
+			wontoncli.String("only-extensions", "").Help("Comma-separated list of file extensions to watch (e.g., 'go,js,py')"),
+			wontoncli.String("ignore", "").Help("Comma-separated list of patterns to ignore"),
+		).
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
+			goCtx := context.Background()
+
+			// Get patterns from positional arguments
+			patterns := ctx.Args()
+			if len(patterns) == 0 {
+				return wontoncli.Errorf("at least one pattern is required")
+			}
+
+			onChange := ctx.String("on-change")
+			if onChange == "" {
+				return wontoncli.Errorf("--on-change action is required")
+			}
+
+			toolsStr := ctx.String("tools")
+			var tools []string
+			if toolsStr != "" {
+				tools = strings.Split(toolsStr, ",")
+			}
+
+			onlyExtensionsStr := ctx.String("only-extensions")
+			var onlyExtensions []string
+			if onlyExtensionsStr != "" {
+				onlyExtensions = strings.Split(onlyExtensionsStr, ",")
+			}
+
+			ignorePatternsStr := ctx.String("ignore")
+			var ignorePatterns []string
+			if ignorePatternsStr != "" {
+				ignorePatterns = strings.Split(ignorePatternsStr, ",")
+			}
+
+			options := WatchOptions{
+				Patterns:        patterns,
+				OnChange:        onChange,
+				Recursive:       ctx.Bool("recursive"),
+				Debounce:        time.Duration(ctx.Int("debounce")) * time.Millisecond,
+				BatchTimer:      time.Duration(ctx.Int("batch-timer")) * time.Millisecond,
+				SystemPrompt:    ctx.String("system-prompt"),
+				AgentName:       ctx.String("agent-name"),
+				Tools:           tools,
+				ReasoningBudget: ctx.Int("reasoning-budget"),
+				ExitOnError:     ctx.Bool("exit-on-error"),
+				LogFile:         ctx.String("log-file"),
+				OnlyExtensions:  onlyExtensions,
+				IgnorePatterns:  ignorePatterns,
+			}
+
+			if err := runWatch(goCtx, options); err != nil {
+				return wontoncli.Errorf("%v", err)
+			}
+			return nil
+		})
 }

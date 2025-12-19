@@ -196,34 +196,6 @@ func TestGenerateUnifiedDiff(t *testing.T) {
 	}
 }
 
-func TestDiffCmdFlags(t *testing.T) {
-	// Test that the diff command has the expected flags
-	require.NotNil(t, diffCmd)
-	require.Equal(t, "diff [old_file] [new_file]", diffCmd.Use)
-	require.Contains(t, diffCmd.Short, "AI-powered semantic diff")
-
-	// Check flags exist
-	formatFlag := diffCmd.Flags().Lookup("format")
-	require.NotNil(t, formatFlag)
-	require.Equal(t, "text", formatFlag.DefValue)
-
-	contextFlag := diffCmd.Flags().Lookup("context")
-	require.NotNil(t, contextFlag)
-	require.Equal(t, "3", contextFlag.DefValue)
-}
-
-func TestDiffCmdRegistration(t *testing.T) {
-	// Test that the diff command is properly registered with the root command
-	found := false
-	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == "diff" {
-			found = true
-			break
-		}
-	}
-	require.True(t, found, "diff command should be registered with root command")
-}
-
 func TestReadFileContentEdgeCases(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "dive_diff_edge_test")

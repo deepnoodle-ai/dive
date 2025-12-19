@@ -7,10 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/mcp"
+	wontoncli "github.com/deepnoodle-ai/wonton/cli"
 )
 
 // loadConfigFromPath loads configuration from a file or directory path
@@ -92,134 +91,103 @@ func loadConfigFromPath(path string) (*config.Config, error) {
 	return configEnv, nil
 }
 
-// mcpCmd represents the mcp command for managing MCP server connections
-var mcpCmd = &cobra.Command{
-	Use:   "mcp",
-	Short: "Manage MCP (Model Context Protocol) server connections",
-	Long: `Commands for managing MCP server connections, including OAuth authentication,
-token management, and server status checking.`,
-}
+func registerMCPCommand(app *wontoncli.App) {
+	mcpGroup := app.Group("mcp").
+		Description("Manage MCP (Model Context Protocol) server connections")
 
-// mcpAuthCmd handles OAuth authentication flow for MCP servers
-var mcpAuthCmd = &cobra.Command{
-	Use:   "auth [file or directory] [server-name]",
-	Short: "Authenticate with an MCP server using OAuth",
-	Long: `Start the OAuth authentication flow for the specified MCP server.
+	mcpGroup.Command("auth").
+		Description("Authenticate with an MCP server using OAuth").
+		Long(`Start the OAuth authentication flow for the specified MCP server.
 This will open a browser window for user authorization and store the resulting tokens.
-The first argument should be a workflow YAML file or directory containing workflow configuration.`,
-	Args: cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		configPath := args[0]
-		serverName := args[1]
+The first argument should be a workflow YAML file or directory containing workflow configuration.`).
+		Args("config-path", "server-name").
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
 
-		// Load configuration from the specified path
-		cfg, err := loadConfigFromPath(configPath)
-		if err != nil {
-			return fmt.Errorf("failed to load configuration: %w", err)
-		}
+			configPath := ctx.Arg(0)
+			serverName := ctx.Arg(1)
 
-		// Find the server configuration
-		var serverConfig config.MCPServer
-		var found bool
-
-		for _, server := range cfg.MCPServers {
-			if server.Name == serverName {
-				serverConfig = server
-				found = true
-				break
+			cfg, err := loadConfigFromPath(configPath)
+			if err != nil {
+				return wontoncli.Errorf("failed to load configuration: %v", err)
 			}
-		}
 
-		if !found {
-			return fmt.Errorf("MCP server '%s' not found in configuration", serverName)
-		}
+			var serverConfig config.MCPServer
+			var found bool
 
-		if !serverConfig.IsOAuthEnabled() {
-			return fmt.Errorf("OAuth is not configured for server '%s'", serverName)
-		}
+			for _, server := range cfg.MCPServers {
+				if server.Name == serverName {
+					serverConfig = server
+					found = true
+					break
+				}
+			}
 
-		// Create MCP client and trigger OAuth flow
-		client, err := mcp.NewClient(serverConfig.ToMCPConfig())
-		if err != nil {
-			return fmt.Errorf("failed to create MCP client: %w", err)
-		}
+			if !found {
+				return wontoncli.Errorf("MCP server '%s' not found in configuration", serverName)
+			}
 
-		fmt.Printf("Starting OAuth authentication for server '%s'...\n", serverName)
+			if !serverConfig.IsOAuthEnabled() {
+				return wontoncli.Errorf("OAuth is not configured for server '%s'", serverName)
+			}
 
-		ctx := context.Background()
-		if err := client.Connect(ctx); err != nil {
-			return fmt.Errorf("OAuth authentication failed: %w", err)
-		}
+			client, err := mcp.NewClient(serverConfig.ToMCPConfig())
+			if err != nil {
+				return wontoncli.Errorf("failed to create MCP client: %v", err)
+			}
 
-		fmt.Printf("✓ OAuth authentication successful for server '%s'\n", serverName)
+			fmt.Printf("Starting OAuth authentication for server '%s'...\n", serverName)
 
-		// Clean up
-		client.Close()
-		return nil
-	},
-}
+			goCtx := context.Background()
+			if err := client.Connect(goCtx); err != nil {
+				return wontoncli.Errorf("OAuth authentication failed: %v", err)
+			}
 
-// mcpTokenCmd manages OAuth tokens for MCP servers
-var mcpTokenCmd = &cobra.Command{
-	Use:   "token",
-	Short: "Manage OAuth tokens for MCP servers",
-	Long:  `Commands for managing OAuth tokens including refresh, revoke, and status checking.`,
-}
+			fmt.Printf("OAuth authentication successful for server '%s'\n", serverName)
 
-// mcpTokenRefreshCmd refreshes OAuth tokens for MCP servers
-var mcpTokenRefreshCmd = &cobra.Command{
-	Use:   "refresh [file or directory] [server-name]",
-	Short: "Refresh OAuth token for an MCP server",
-	Long: `Refresh the OAuth token for the specified MCP server.
-The first argument should be a workflow YAML file or directory containing workflow configuration.`,
-	Args: cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		configPath := args[0]
-		serverName := args[1]
-		fmt.Printf("Token refresh for server '%s' is not yet implemented\n", serverName)
-		// TODO: Implement token refresh logic using configPath
-		_ = configPath
-		return nil
-	},
-}
+			client.Close()
+			return nil
+		})
 
-// mcpTokenStatusCmd shows OAuth token status for MCP servers
-var mcpTokenStatusCmd = &cobra.Command{
-	Use:   "status [file or directory] [server-name]",
-	Short: "Show OAuth token status for MCP servers",
-	Long: `Display the OAuth token status for the specified server or all servers.
-The first argument should be a workflow YAML file or directory containing workflow configuration.
-If server-name is omitted, status for all configured servers will be shown.`,
-	Args: cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		configPath := args[0]
+	// Token commands as direct subcommands (flattened from token subgroup)
+	mcpGroup.Command("token-refresh").
+		Description("Refresh OAuth token for an MCP server").
+		Args("config-path", "server-name").
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
 
-		if len(args) == 2 {
-			serverName := args[1]
-			fmt.Printf("Token status for server '%s' is not yet implemented\n", serverName)
-		} else {
-			fmt.Println("Token status for all servers is not yet implemented")
-		}
-		// TODO: Implement token status logic using configPath
-		_ = configPath
-		return nil
-	},
-}
+			serverName := ctx.Arg(1)
+			fmt.Printf("Token refresh for server '%s' is not yet implemented\n", serverName)
+			return nil
+		})
 
-// mcpTokenClearCmd clears stored OAuth tokens
-var mcpTokenClearCmd = &cobra.Command{
-	Use:   "clear [server-name]",
-	Short: "Clear stored OAuth tokens",
-	Long:  `Clear stored OAuth tokens for the specified server or all servers.`,
-	Args:  cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 1 {
-			serverName := args[0]
-			return clearTokensForServer(serverName)
-		} else {
+	mcpGroup.Command("token-status").
+		Description("Show OAuth token status for MCP servers").
+		Args("config-path", "server-name?").
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
+
+			if ctx.NArg() >= 2 {
+				serverName := ctx.Arg(1)
+				fmt.Printf("Token status for server '%s' is not yet implemented\n", serverName)
+			} else {
+				fmt.Println("Token status for all servers is not yet implemented")
+			}
+			return nil
+		})
+
+	mcpGroup.Command("token-clear").
+		Description("Clear stored OAuth tokens").
+		Args("server-name?").
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
+
+			if ctx.NArg() >= 1 {
+				serverName := ctx.Arg(0)
+				return clearTokensForServer(serverName)
+			}
 			return clearAllTokens()
-		}
-	},
+		})
 }
 
 // clearTokensForServer clears tokens for a specific server
@@ -254,20 +222,6 @@ func clearAllTokens() error {
 		return fmt.Errorf("failed to remove token file: %w", err)
 	}
 
-	fmt.Printf("✓ Cleared all OAuth tokens from %s\n", tokenPath)
+	fmt.Printf("Cleared all OAuth tokens from %s\n", tokenPath)
 	return nil
-}
-
-func init() {
-	// Add mcp command to root
-	rootCmd.AddCommand(mcpCmd)
-
-	// Add subcommands to mcp
-	mcpCmd.AddCommand(mcpAuthCmd)
-	mcpCmd.AddCommand(mcpTokenCmd)
-
-	// Add token subcommands
-	mcpTokenCmd.AddCommand(mcpTokenRefreshCmd)
-	mcpTokenCmd.AddCommand(mcpTokenStatusCmd)
-	mcpTokenCmd.AddCommand(mcpTokenClearCmd)
 }

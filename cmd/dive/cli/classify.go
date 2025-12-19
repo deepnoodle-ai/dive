@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,15 +11,14 @@ import (
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
+	wontoncli "github.com/deepnoodle-ai/wonton/cli"
+	"github.com/deepnoodle-ai/wonton/color"
 )
 
 var (
-	classifySuccessStyle = color.New(color.FgGreen)
-	classifyErrorStyle   = color.New(color.FgRed)
-	classifyBoldStyle    = color.New(color.Bold)
-	classifyInfoStyle    = color.New(color.FgCyan)
+	classifySuccessStyle = color.Green
+	classifyErrorStyle   = color.Red
+	classifyInfoStyle    = color.Cyan
 )
 
 // ClassificationResult represents the structured output from the classification task
@@ -262,131 +260,91 @@ func runClassification(ctx context.Context, text string, labels []string, model 
 	return &result, nil
 }
 
-var classifyCmd = &cobra.Command{
-	Use:   "classify",
-	Short: "Classify text into categories with confidence scores",
-	Long: `Classify text into one or more categories using an LLM. 
+func registerClassifyCommand(app *wontoncli.App) {
+	app.Command("classify").
+		Description("Classify text into categories with confidence scores").
+		Long(`Classify text into one or more categories using an LLM.
 Returns confidence scores for each label and identifies the most likely classification.
 Useful for filtering data in scripts and automated workflows.
 
 Examples:
   dive classify --text "This movie was amazing!" --labels "positive,negative,neutral"
-  dive classify --text "Technical documentation" --labels "urgent,normal,low" --model "claude-3-5-sonnet-20241022"`,
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := context.Background()
+  dive classify --text "Technical documentation" --labels "urgent,normal,low" --model "claude-3-5-sonnet-20241022"`).
+		NoArgs().
+		Flags(
+			wontoncli.String("text", "t").Required().Help("Text to classify"),
+			wontoncli.String("labels", "").Required().Help("Comma-separated list of classification labels"),
+			wontoncli.Bool("json", "j").Help("Output result as JSON for script integration"),
+		).
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
+			goCtx := context.Background()
 
-		// Get required flags
-		text, err := cmd.Flags().GetString("text")
-		if err != nil {
-			fmt.Println(classifyErrorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if text == "" {
-			fmt.Println(classifyErrorStyle.Sprint("Text is required. Use --text flag to provide input text"))
-			os.Exit(1)
-		}
+			text := ctx.String("text")
+			labelsStr := ctx.String("labels")
+			jsonOutput := ctx.Bool("json")
 
-		labelsStr, err := cmd.Flags().GetString("labels")
-		if err != nil {
-			fmt.Println(classifyErrorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if labelsStr == "" {
-			fmt.Println(classifyErrorStyle.Sprint("Labels are required. Use --labels flag to provide comma-separated labels"))
-			os.Exit(1)
-		}
+			// Parse labels
+			labels := strings.Split(labelsStr, ",")
+			for i, label := range labels {
+				labels[i] = strings.TrimSpace(label)
+			}
+			if len(labels) == 0 {
+				return wontoncli.Errorf("at least one label must be provided")
+			}
 
-		// Parse labels
-		labels := strings.Split(labelsStr, ",")
-		for i, label := range labels {
-			labels[i] = strings.TrimSpace(label)
-		}
-		if len(labels) == 0 {
-			fmt.Println(classifyErrorStyle.Sprint("At least one label must be provided"))
-			os.Exit(1)
-		}
+			// Get provider from global flag or default
+			providerName := llmProvider
+			if providerName == "" {
+				providerName = config.DefaultProvider
+			}
 
-		// Get optional model flag
-		modelName, err := cmd.Flags().GetString("model")
-		if err != nil {
-			fmt.Println(classifyErrorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Get provider from global flag or default
-		providerName := llmProvider
-		if providerName == "" {
-			providerName = config.DefaultProvider
-		}
-
-		// Create the LLM model
-		model, err := config.GetModel(providerName, modelName)
-		if err != nil {
-			fmt.Println(classifyErrorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Perform classification
-		result, err := runClassification(ctx, text, labels, model)
-		if err != nil {
-			fmt.Println(classifyErrorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Check for JSON output flag
-		jsonOutput, err := cmd.Flags().GetBool("json")
-		if err != nil {
-			fmt.Println(classifyErrorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		if jsonOutput {
-			// Output raw JSON for script integration
-			jsonBytes, err := json.MarshalIndent(result, "", "  ")
+			// Create the LLM model
+			model, err := config.GetModel(providerName, llmModel)
 			if err != nil {
-				fmt.Println(classifyErrorStyle.Sprint(err))
-				os.Exit(1)
-			}
-			fmt.Println(string(jsonBytes))
-		} else {
-			// Output human-readable format
-			fmt.Printf("📝 %s: %s\n\n", classifyBoldStyle.Sprint("Text"), result.Text)
-
-			fmt.Printf("🏆 %s: %s (%s)\n",
-				classifyBoldStyle.Sprint("Top Classification"),
-				classifySuccessStyle.Sprint(result.TopClassification.Label),
-				classifySuccessStyle.Sprintf("%.2f%% confidence", result.TopClassification.Confidence*100))
-			if result.TopClassification.Reasoning != "" {
-				fmt.Printf("   %s: %s\n", classifyInfoStyle.Sprint("Reasoning"), result.TopClassification.Reasoning)
+				return wontoncli.Errorf("%v", err)
 			}
 
-			fmt.Printf("\n📊 %s:\n", classifyBoldStyle.Sprint("All Classifications"))
-			for _, classification := range result.Classifications {
-				confidenceColor := classifySuccessStyle
-				if classification.Confidence < 0.5 {
-					confidenceColor = classifyInfoStyle
+			// Perform classification
+			result, err := runClassification(goCtx, text, labels, model)
+			if err != nil {
+				return wontoncli.Errorf("%v", err)
+			}
+
+			if jsonOutput {
+				// Output raw JSON for script integration
+				jsonBytes, err := json.MarshalIndent(result, "", "  ")
+				if err != nil {
+					return wontoncli.Errorf("%v", err)
 				}
-				fmt.Printf("   %s: %s",
-					classification.Label,
-					confidenceColor.Sprintf("%.2f%%", classification.Confidence*100))
-				if classification.Reasoning != "" {
-					fmt.Printf(" - %s", classification.Reasoning)
+				fmt.Println(string(jsonBytes))
+			} else {
+				// Output human-readable format
+				fmt.Printf("%s: %s\n\n", boldStyle.Sprint("Text"), result.Text)
+
+				fmt.Printf("%s: %s (%s)\n",
+					boldStyle.Sprint("Top Classification"),
+					classifySuccessStyle.Sprint(result.TopClassification.Label),
+					classifySuccessStyle.Sprintf("%.2f%% confidence", result.TopClassification.Confidence*100))
+				if result.TopClassification.Reasoning != "" {
+					fmt.Printf("   %s: %s\n", classifyInfoStyle.Sprint("Reasoning"), result.TopClassification.Reasoning)
 				}
-				fmt.Println()
+
+				fmt.Printf("\n%s:\n", boldStyle.Sprint("All Classifications"))
+				for _, classification := range result.Classifications {
+					confidenceColor := classifySuccessStyle
+					if classification.Confidence < 0.5 {
+						confidenceColor = classifyInfoStyle
+					}
+					fmt.Printf("   %s: %s",
+						classification.Label,
+						confidenceColor.Sprintf("%.2f%%", classification.Confidence*100))
+					if classification.Reasoning != "" {
+						fmt.Printf(" - %s", classification.Reasoning)
+					}
+					fmt.Println()
+				}
 			}
-		}
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(classifyCmd)
-
-	classifyCmd.Flags().StringP("text", "t", "", "Text to classify (required)")
-	classifyCmd.Flags().String("labels", "", "Comma-separated list of classification labels (required)")
-	classifyCmd.Flags().StringP("model", "m", "", "LLM model to use for classification")
-	classifyCmd.Flags().BoolP("json", "j", false, "Output result as JSON for script integration")
-
-	// Mark required flags
-	classifyCmd.MarkFlagRequired("text")
-	classifyCmd.MarkFlagRequired("labels")
+			return nil
+		})
 }

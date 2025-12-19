@@ -158,28 +158,6 @@ func TestWatchCommand(t *testing.T) {
 	require.Contains(t, matches, testFile)
 }
 
-func TestWatchCommandFlags(t *testing.T) {
-	// Test that all required flags are properly configured
-	cmd := watchCmd
-	
-	// Check that on-change flag is required
-	requiredFlags := cmd.Flags().Lookup("on-change")
-	require.NotNil(t, requiredFlags, "on-change flag should exist")
-	
-	// Check default values
-	recursive, err := cmd.Flags().GetBool("recursive")
-	require.NoError(t, err)
-	require.False(t, recursive, "recursive should default to false")
-	
-	debounce, err := cmd.Flags().GetInt("debounce")
-	require.NoError(t, err)
-	require.Equal(t, 500, debounce, "debounce should default to 500ms")
-	
-	agentName, err := cmd.Flags().GetString("agent-name")
-	require.NoError(t, err)
-	require.Equal(t, "FileWatcher", agentName, "agent-name should default to FileWatcher")
-}
-
 func TestFileWatcherCreation(t *testing.T) {
 	// Test FileWatcher creation with minimal options
 	options := WatchOptions{

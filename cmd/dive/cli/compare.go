@@ -13,7 +13,7 @@ import (
 	"github.com/deepnoodle-ai/dive/internal/tablewriter"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/llm/pricing"
-	"github.com/spf13/cobra"
+	wontoncli "github.com/deepnoodle-ai/wonton/cli"
 )
 
 // ComparisonResult holds the result of running a prompt against a single provider
@@ -122,7 +122,7 @@ func exportToJSON(data []ExportResult, filename string) error {
 		return fmt.Errorf("failed to encode JSON: %w", err)
 	}
 
-	fmt.Printf("✓ Results exported to %s\n", filename)
+	fmt.Printf("Results exported to %s\n", filename)
 	return nil
 }
 
@@ -170,7 +170,7 @@ func runComparison(ctx context.Context, prompt string, providers []string, runs 
 		if err != nil {
 			errorMsg := formatError(providerName, err)
 			if !quiet {
-				fmt.Println(errorStyle.Sprintf("✗ %s\n", errorMsg))
+				fmt.Println(errorStyle.Sprintf("%s\n", errorMsg))
 			}
 			results = append(results, &ComparisonResult{
 				Provider: providerName,
@@ -210,7 +210,7 @@ func runComparison(ctx context.Context, prompt string, providers []string, runs 
 		if successfulRuns == 0 {
 			errorMsg := formatError(providerName, lastError)
 			if !quiet {
-				fmt.Println(errorStyle.Sprintf("✗ %s", errorMsg))
+				fmt.Println(errorStyle.Sprintf("%s", errorMsg))
 			}
 			results = append(results, &ComparisonResult{
 				Provider: providerName,
@@ -220,7 +220,7 @@ func runComparison(ctx context.Context, prompt string, providers []string, runs 
 		}
 
 		if !quiet {
-			fmt.Println(successStyle.Sprintf("✓ Success"))
+			fmt.Println(successStyle.Sprintf("Success"))
 		}
 
 		// Calculate averages
@@ -365,13 +365,13 @@ func displaySimpleSummary(results []*ComparisonResult) {
 	}
 
 	if successfulResults > 1 {
-		fmt.Printf("• Fastest: %s (%.2fs)\n", fastestProvider, minLatency.Seconds())
-		fmt.Printf("• Cheapest: %s (~$%.4f)\n", cheapestProvider, minCost)
-		fmt.Printf("• Total estimated cost: ~$%.4f\n", totalCost)
+		fmt.Printf("Fastest: %s (%.2fs)\n", fastestProvider, minLatency.Seconds())
+		fmt.Printf("Cheapest: %s (~$%.4f)\n", cheapestProvider, minCost)
+		fmt.Printf("Total estimated cost: ~$%.4f\n", totalCost)
 	} else if successfulResults == 1 {
-		fmt.Printf("• Estimated cost: ~$%.4f\n", totalCost)
+		fmt.Printf("Estimated cost: ~$%.4f\n", totalCost)
 	} else {
-		fmt.Println("⚠ No successful responses")
+		fmt.Println("No successful responses")
 	}
 	fmt.Println()
 }
@@ -408,10 +408,10 @@ func extractResponsePreview(response *llm.Response) string {
 	return "No text content"
 }
 
-var compareCmd = &cobra.Command{
-	Use:   "compare",
-	Short: "Compare responses from multiple LLM providers",
-	Long: `Run the same prompt across multiple providers and compare their responses, speed, and estimated costs.
+func registerCompareCommand(app *wontoncli.App) {
+	app.Command("compare").
+		Description("Compare responses from multiple LLM providers").
+		Long(`Run the same prompt across multiple providers and compare their responses, speed, and estimated costs.
 
 Examples:
   # Basic comparison
@@ -429,94 +429,48 @@ Examples:
   # Export to JSON
   dive compare --prompt "Analysis" --providers "anthropic,openai" --export results.json
 
-Available providers: anthropic, openai, openai-completions, groq, grok, mistral, google, ollama, openrouter`,
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := context.Background()
+Available providers: anthropic, openai, openai-completions, groq, grok, mistral, google, ollama, openrouter`).
+		NoArgs().
+		Flags(
+			wontoncli.String("prompt", "p").Required().Help("Prompt text to run across all providers"),
+			wontoncli.String("providers", "").Required().Help("Comma-separated list of providers to compare"),
+			wontoncli.Int("runs", "r").Default(1).Help("Number of runs per provider for averaging"),
+			wontoncli.Bool("quiet", "q").Help("Show only results table"),
+			wontoncli.Bool("show-responses", "s").Help("Show response previews"),
+			wontoncli.String("export", "e").Help("Export results to JSON file"),
+		).
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
+			goCtx := context.Background()
 
-		// Get prompt
-		prompt, err := cmd.Flags().GetString("prompt")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if prompt == "" {
-			fmt.Println(errorStyle.Sprint("Prompt is required. Use --prompt flag"))
-			os.Exit(1)
-		}
+			prompt := ctx.String("prompt")
+			providersStr := ctx.String("providers")
+			runs := ctx.Int("runs")
+			quiet := ctx.Bool("quiet")
+			showResponses := ctx.Bool("show-responses")
+			exportFile := ctx.String("export")
 
-		// Get providers
-		providersStr, err := cmd.Flags().GetString("providers")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if providersStr == "" {
-			fmt.Println(errorStyle.Sprint("Providers are required. Use --providers flag"))
-			os.Exit(1)
-		}
-
-		providers := strings.Split(providersStr, ",")
-		for i, provider := range providers {
-			providers[i] = strings.TrimSpace(provider)
-		}
-
-		// Get runs
-		runs, err := cmd.Flags().GetInt("runs")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if runs < 1 {
-			runs = 1
-		}
-
-		// Get display options
-		quiet, err := cmd.Flags().GetBool("quiet")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		showResponses, err := cmd.Flags().GetBool("show-responses")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Get export file
-		exportFile, err := cmd.Flags().GetString("export")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Run comparison
-		results, err := runComparison(ctx, prompt, providers, runs, quiet, showResponses)
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Export results if requested
-		if exportFile != "" {
-			if err := exportResults(results, prompt, runs, exportFile); err != nil {
-				fmt.Println(errorStyle.Sprintf("Export failed: %v", err))
-				os.Exit(1)
+			providers := strings.Split(providersStr, ",")
+			for i, provider := range providers {
+				providers[i] = strings.TrimSpace(provider)
 			}
-		}
-	},
-}
 
-func init() {
-	rootCmd.AddCommand(compareCmd)
+			if runs < 1 {
+				runs = 1
+			}
 
-	compareCmd.Flags().StringP("prompt", "p", "", "Prompt text to run across all providers (required)")
-	compareCmd.Flags().StringP("providers", "", "", "Comma-separated list of providers to compare (required)")
-	compareCmd.Flags().IntP("runs", "r", 1, "Number of runs per provider for averaging (default: 1)")
-	compareCmd.Flags().BoolP("quiet", "q", false, "Show only results table")
-	compareCmd.Flags().BoolP("show-responses", "s", false, "Show response previews")
-	compareCmd.Flags().StringP("export", "e", "", "Export results to JSON file")
+			// Run comparison
+			results, err := runComparison(goCtx, prompt, providers, runs, quiet, showResponses)
+			if err != nil {
+				return wontoncli.Errorf("%v", err)
+			}
 
-	compareCmd.MarkFlagRequired("prompt")
-	compareCmd.MarkFlagRequired("providers")
+			// Export results if requested
+			if exportFile != "" {
+				if err := exportResults(results, prompt, runs, exportFile); err != nil {
+					return wontoncli.Errorf("export failed: %v", err)
+				}
+			}
+			return nil
+		})
 }

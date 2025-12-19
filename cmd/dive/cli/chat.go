@@ -9,7 +9,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/internal/random"
-	"github.com/spf13/cobra"
+	"github.com/deepnoodle-ai/wonton/cli"
 )
 
 func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID string) error {
@@ -75,9 +75,7 @@ func chatMessage(ctx context.Context, message string, agent dive.Agent, threadID
 	return nil
 }
 
-func runChat(systemPrompt, goal, instructions, threadID, configFlag, agentFlag string, noConfig bool, tools []dive.Tool) error {
-	ctx := context.Background()
-
+func runChat(ctx context.Context, systemPrompt, goal, instructions, threadID, configFlag, agentFlag string, noConfig bool, tools []dive.Tool) error {
 	// Try to discover and load configuration
 	configResult, err := discoverConfiguration(ctx, configFlag, noConfig, agentFlag)
 	if err != nil {
@@ -138,76 +136,44 @@ func runChat(systemPrompt, goal, instructions, threadID, configFlag, agentFlag s
 	return nil
 }
 
-var chatCmd = &cobra.Command{
-	Use:   "chat [message]",
-	Short: "Start an interactive chat with an agent.",
-	Long:  "Start an interactive chat with an agent.",
-	Args:  cobra.ExactArgs(0),
-	Run: func(cmd *cobra.Command, args []string) {
-		systemPrompt, err := cmd.Flags().GetString("system")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		goal, err := cmd.Flags().GetString("goal")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		instructions, err := cmd.Flags().GetString("instructions")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		thread, err := cmd.Flags().GetString("thread")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		toolsSpec, err := cmd.Flags().GetString("tools")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		configFlag, err := cmd.Flags().GetString("config")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		agentFlag, err := cmd.Flags().GetString("agent")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		noConfig, err := cmd.Flags().GetBool("no-config")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		var tools []dive.Tool
-		if toolsSpec != "" {
-			tools, err = initializeTools(strings.Split(toolsSpec, ","))
-			if err != nil {
-				fmt.Println(errorStyle.Sprintf("Failed to initialize tools: %s", err))
-				os.Exit(1)
+func registerChatCommand(app *cli.App) {
+	app.Command("chat").
+		Description("Start an interactive chat with an agent").
+		NoArgs().
+		Flags(
+			cli.String("system", "").Help("System prompt for the agent"),
+			cli.String("goal", "").Help("Goal for the agent"),
+			cli.String("instructions", "").Help("Instructions for the agent"),
+			cli.String("tools", "").Help("Comma-separated list of tools to use for the agent"),
+			cli.String("thread", "").Help("Name of the thread to use for the agent"),
+			cli.String("config", "").Help("Path to configuration file or directory"),
+			cli.String("agent", "").Help("Name of the agent to use from configuration"),
+			cli.Bool("no-config", "").Help("Disable automatic configuration loading"),
+		).
+		Run(func(ctx *cli.Context) error {
+			parseGlobalFlags(ctx)
+
+			systemPrompt := ctx.String("system")
+			goal := ctx.String("goal")
+			instructions := ctx.String("instructions")
+			thread := ctx.String("thread")
+			toolsSpec := ctx.String("tools")
+			configFlag := ctx.String("config")
+			agentFlag := ctx.String("agent")
+			noConfig := ctx.Bool("no-config")
+
+			var tools []dive.Tool
+			var err error
+			if toolsSpec != "" {
+				tools, err = initializeTools(strings.Split(toolsSpec, ","))
+				if err != nil {
+					return cli.Errorf("failed to initialize tools: %s", err)
+				}
 			}
-		}
-		if err := runChat(systemPrompt, goal, instructions, thread, configFlag, agentFlag, noConfig, tools); err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-	},
-}
 
-func init() {
-	rootCmd.AddCommand(chatCmd)
-
-	chatCmd.Flags().StringP("system", "", "", "System prompt for the agent")
-	chatCmd.Flags().StringP("goal", "", "", "Goal for the agent")
-	chatCmd.Flags().StringP("instructions", "", "", "Instructions for the agent")
-	chatCmd.Flags().StringP("tools", "", "", "Comma-separated list of tools to use for the agent")
-	chatCmd.Flags().StringP("thread", "", "", "Name of the thread to use for the agent")
-	chatCmd.Flags().StringP("config", "", "", "Path to configuration file or directory")
-	chatCmd.Flags().StringP("agent", "", "", "Name of the agent to use from configuration")
-	chatCmd.Flags().BoolP("no-config", "", false, "Disable automatic configuration loading")
+			if err := runChat(ctx.Context(), systemPrompt, goal, instructions, thread, configFlag, agentFlag, noConfig, tools); err != nil {
+				return cli.Errorf("%v", err)
+			}
+			return nil
+		})
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive/config"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/spf13/cobra"
+	wontoncli "github.com/deepnoodle-ai/wonton/cli"
 )
 
 func streamLLM(ctx context.Context, model llm.StreamingLLM, opts ...llm.Option) (*llm.Response, error) {
@@ -67,371 +67,246 @@ func generateLLM(ctx context.Context, model llm.LLM, opts ...llm.Option) (*llm.R
 	return response, nil
 }
 
-var llmCmd = &cobra.Command{
-	Use:   "llm [message]",
-	Short: "Execute an LLM",
-	Long:  "Execute an LLM with various configuration options",
-	Args:  cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := context.Background()
+func registerLLMCommand(app *wontoncli.App) {
+	app.Command("llm").
+		Description("Execute an LLM with various configuration options").
+		Args("message?").
+		Flags(
+			// Basic options
+			wontoncli.String("message", "m").Help("Message to send to the LLM (alternative to positional argument)"),
+			wontoncli.String("system-prompt", "").Help("System prompt for the chat agent"),
+			wontoncli.Bool("stream", "s").Help("Stream the response"),
 
-		// Get message from args or flag
-		var message string
-		if len(args) > 0 {
-			message = args[0]
-		} else {
-			var err error
-			message, err = cmd.Flags().GetString("message")
+			// Content options
+			wontoncli.String("pdfs", "").Help("Comma-separated list of PDF URLs or file paths to include as document content"),
+			wontoncli.String("images", "").Help("Comma-separated list of image URLs or file paths to include as image content"),
+
+			// LLM configuration options
+			wontoncli.Int("reasoning-budget", "").Help("Reasoning budget for the chat agent"),
+			wontoncli.String("reasoning-effort", "").Help("Reasoning effort level (low, medium, high)"),
+			wontoncli.Int("max-tokens", "").Help("Maximum number of tokens to generate"),
+			wontoncli.Float("temperature", "").Default(-1).Help("Temperature for randomness (0.0 to 2.0)"),
+			wontoncli.Float("presence-penalty", "").Help("Presence penalty (-2.0 to 2.0)"),
+			wontoncli.Float("frequency-penalty", "").Help("Frequency penalty (-2.0 to 2.0)"),
+			wontoncli.String("tools", "").Help("Tools to use (comma separated list of tool names)"),
+
+			// Provider options
+			wontoncli.String("api-key", "").Help("API key for the LLM provider"),
+			wontoncli.String("endpoint", "").Help("Custom endpoint URL for the LLM provider"),
+			wontoncli.String("service-tier", "").Help("Service tier for the request"),
+
+			// Advanced options
+			wontoncli.String("prefill", "").Help("Prefill text for assistant response"),
+			wontoncli.String("previous-response-id", "").Help("Previous response ID for continuation"),
+			wontoncli.String("write-events", "").Help("Write events to a file"),
+		).
+		Run(func(ctx *wontoncli.Context) error {
+			parseGlobalFlags(ctx)
+			goCtx := context.Background()
+
+			// Get message from args or flag
+			var message string
+			if ctx.NArg() > 0 {
+				message = ctx.Arg(0)
+			} else {
+				message = ctx.String("message")
+			}
+
+			if message == "" {
+				return wontoncli.Errorf("no message provided. Use argument or --message flag")
+			}
+
+			systemPrompt := ctx.String("system-prompt")
+			reasoningBudget := ctx.Int("reasoning-budget")
+			reasoningEffort := ctx.String("reasoning-effort")
+			streaming := ctx.Bool("stream")
+			maxTokens := ctx.Int("max-tokens")
+			temperature := ctx.Float64("temperature")
+			presencePenalty := ctx.Float64("presence-penalty")
+			frequencyPenalty := ctx.Float64("frequency-penalty")
+			apiKey := ctx.String("api-key")
+			endpoint := ctx.String("endpoint")
+			prefill := ctx.String("prefill")
+			serviceTier := ctx.String("service-tier")
+			previousResponseID := ctx.String("previous-response-id")
+			writeEvents := ctx.String("write-events")
+			pdfURLsStr := ctx.String("pdfs")
+			imageURLsStr := ctx.String("images")
+
+			model, err := config.GetModel(llmProvider, llmModel)
 			if err != nil {
-				fmt.Println(errorStyle.Sprint(err))
-				os.Exit(1)
+				return wontoncli.Errorf("%v", err)
 			}
-		}
 
-		if message == "" {
-			fmt.Println(errorStyle.Sprint("No message provided. Use argument or --message flag"))
-			os.Exit(1)
-		}
-
-		systemPrompt, err := cmd.Flags().GetString("system-prompt")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		var reasoningBudget int
-		if value, err := cmd.Flags().GetInt("reasoning-budget"); err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		} else {
-			reasoningBudget = value
-		}
-
-		reasoningEffort, err := cmd.Flags().GetString("reasoning-effort")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		llmProvider, err := cmd.Flags().GetString("provider")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		llmModel, err := cmd.Flags().GetString("model")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		model, err := config.GetModel(llmProvider, llmModel)
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		streaming, err := cmd.Flags().GetBool("stream")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		maxTokens, err := cmd.Flags().GetInt("max-tokens")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		temperature, err := cmd.Flags().GetFloat64("temperature")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		presencePenalty, err := cmd.Flags().GetFloat64("presence-penalty")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		frequencyPenalty, err := cmd.Flags().GetFloat64("frequency-penalty")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		apiKey, err := cmd.Flags().GetString("api-key")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		endpoint, err := cmd.Flags().GetString("endpoint")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		prefill, err := cmd.Flags().GetString("prefill")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		serviceTier, err := cmd.Flags().GetString("service-tier")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		previousResponseID, err := cmd.Flags().GetString("previous-response-id")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		writeEvents, err := cmd.Flags().GetString("write-events")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Get PDF URLs
-		pdfURLsStr, err := cmd.Flags().GetString("pdfs")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		// Get image URLs
-		imageURLsStr, err := cmd.Flags().GetString("images")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-
-		var tools []llm.Tool
-		toolsStr, err := cmd.Flags().GetString("tools")
-		if err != nil {
-			fmt.Println(errorStyle.Sprint(err))
-			os.Exit(1)
-		}
-		if toolsStr != "" {
-			toolNames := strings.Split(toolsStr, ",")
-			for _, toolName := range toolNames {
-				tool, err := config.InitializeToolByName(toolName, nil)
-				if err != nil {
-					fmt.Println(errorStyle.Sprintf("Failed to initialize tool: %s", err))
-					os.Exit(1)
+			var tools []llm.Tool
+			toolsStr := ctx.String("tools")
+			if toolsStr != "" {
+				toolNames := strings.Split(toolsStr, ",")
+				for _, toolName := range toolNames {
+					tool, err := config.InitializeToolByName(toolName, nil)
+					if err != nil {
+						return wontoncli.Errorf("failed to initialize tool: %s", err)
+					}
+					tools = append(tools, tool)
 				}
-				tools = append(tools, tool)
 			}
-		}
 
-		// Build content blocks for the user message
-		var contentBlocks []llm.Content
+			// Build content blocks for the user message
+			var contentBlocks []llm.Content
 
-		// Add text content block
-		contentBlocks = append(contentBlocks, llm.NewTextContent(message))
+			// Add text content block
+			contentBlocks = append(contentBlocks, llm.NewTextContent(message))
 
-		// Add PDF content blocks
-		if pdfURLsStr != "" {
-			pdfURLs := strings.Split(pdfURLsStr, ",")
-			for _, pdfPath := range pdfURLs {
-				pdfPath = strings.TrimSpace(pdfPath)
-				if pdfPath != "" {
-					if strings.HasPrefix(pdfPath, "http") {
-						// Handle as URL
-						contentBlocks = append(contentBlocks, llm.NewDocumentContent(llm.ContentURL(pdfPath)))
-					} else {
-						// Handle as local file path
-						data, err := os.ReadFile(pdfPath)
-						if err != nil {
-							fmt.Println(errorStyle.Sprintf("Failed to read PDF file %s: %v", pdfPath, err))
-							os.Exit(1)
-						}
-						base64Data := base64.StdEncoding.EncodeToString(data)
-						filename := filepath.Base(pdfPath)
+			// Add PDF content blocks
+			if pdfURLsStr != "" {
+				pdfURLs := strings.Split(pdfURLsStr, ",")
+				for _, pdfPath := range pdfURLs {
+					pdfPath = strings.TrimSpace(pdfPath)
+					if pdfPath != "" {
+						if strings.HasPrefix(pdfPath, "http") {
+							contentBlocks = append(contentBlocks, llm.NewDocumentContent(llm.ContentURL(pdfPath)))
+						} else {
+							data, err := os.ReadFile(pdfPath)
+							if err != nil {
+								return wontoncli.Errorf("failed to read PDF file %s: %v", pdfPath, err)
+							}
+							base64Data := base64.StdEncoding.EncodeToString(data)
+							filename := filepath.Base(pdfPath)
 
-						contentBlocks = append(contentBlocks, llm.NewDocumentContent(&llm.ContentSource{
-							Type:      llm.ContentSourceTypeBase64,
-							MediaType: "application/pdf",
-							Data:      base64Data,
-						}))
-						// Set title for the document
-						if len(contentBlocks) > 0 {
-							if docContent, ok := contentBlocks[len(contentBlocks)-1].(*llm.DocumentContent); ok {
-								docContent.Title = filename
+							contentBlocks = append(contentBlocks, llm.NewDocumentContent(&llm.ContentSource{
+								Type:      llm.ContentSourceTypeBase64,
+								MediaType: "application/pdf",
+								Data:      base64Data,
+							}))
+							if len(contentBlocks) > 0 {
+								if docContent, ok := contentBlocks[len(contentBlocks)-1].(*llm.DocumentContent); ok {
+									docContent.Title = filename
+								}
 							}
 						}
 					}
 				}
 			}
-		}
 
-		// Add image content blocks
-		if imageURLsStr != "" {
-			imageURLs := strings.Split(imageURLsStr, ",")
-			for _, imagePath := range imageURLs {
-				imagePath = strings.TrimSpace(imagePath)
-				if imagePath != "" {
-					if strings.HasPrefix(imagePath, "http") {
-						// Handle as URL
-						contentBlocks = append(contentBlocks, &llm.ImageContent{
-							Source: llm.ContentURL(imagePath),
-						})
-					} else {
-						// Handle as local file path
-						data, err := os.ReadFile(imagePath)
-						if err != nil {
-							fmt.Println(errorStyle.Sprintf("Failed to read image file %s: %v", imagePath, err))
-							os.Exit(1)
+			// Add image content blocks
+			if imageURLsStr != "" {
+				imageURLs := strings.Split(imageURLsStr, ",")
+				for _, imagePath := range imageURLs {
+					imagePath = strings.TrimSpace(imagePath)
+					if imagePath != "" {
+						if strings.HasPrefix(imagePath, "http") {
+							contentBlocks = append(contentBlocks, &llm.ImageContent{
+								Source: llm.ContentURL(imagePath),
+							})
+						} else {
+							data, err := os.ReadFile(imagePath)
+							if err != nil {
+								return wontoncli.Errorf("failed to read image file %s: %v", imagePath, err)
+							}
+							base64Data := base64.StdEncoding.EncodeToString(data)
+							mediaType := detectImageMediaType(imagePath)
+
+							contentBlocks = append(contentBlocks, &llm.ImageContent{
+								Source: &llm.ContentSource{
+									Type:      llm.ContentSourceTypeBase64,
+									MediaType: mediaType,
+									Data:      base64Data,
+								},
+							})
 						}
-						base64Data := base64.StdEncoding.EncodeToString(data)
-
-						// Detect media type based on file extension
-						mediaType := detectImageMediaType(imagePath)
-
-						contentBlocks = append(contentBlocks, &llm.ImageContent{
-							Source: &llm.ContentSource{
-								Type:      llm.ContentSourceTypeBase64,
-								MediaType: mediaType,
-								Data:      base64Data,
-							},
-						})
 					}
 				}
 			}
-		}
 
-		var options []llm.Option
+			var options []llm.Option
 
-		// Add user message with content blocks
-		userMessage := llm.NewUserMessage(contentBlocks...)
-		options = append(options, llm.WithMessages(userMessage))
+			// Add user message with content blocks
+			userMessage := llm.NewUserMessage(contentBlocks...)
+			options = append(options, llm.WithMessages(userMessage))
 
-		// Add conditional options
-		if len(tools) > 0 {
-			options = append(options, llm.WithTools(tools...))
-		}
-		if systemPrompt != "" {
-			options = append(options, llm.WithSystemPrompt(systemPrompt))
-		}
-		if reasoningBudget > 0 {
-			options = append(options, llm.WithReasoningBudget(reasoningBudget))
-		}
-		if reasoningEffort != "" {
-			effort := llm.ReasoningEffort(reasoningEffort)
-			if !effort.IsValid() {
-				fmt.Println(errorStyle.Sprintf("Invalid reasoning effort: %s", reasoningEffort))
-				os.Exit(1)
+			// Add conditional options
+			if len(tools) > 0 {
+				options = append(options, llm.WithTools(tools...))
 			}
-			options = append(options, llm.WithReasoningEffort(effort))
-		}
-		if maxTokens > 0 {
-			options = append(options, llm.WithMaxTokens(maxTokens))
-		}
-		if temperature >= 0 {
-			options = append(options, llm.WithTemperature(temperature))
-		}
-		if presencePenalty != 0 {
-			options = append(options, llm.WithPresencePenalty(presencePenalty))
-		}
-		if frequencyPenalty != 0 {
-			options = append(options, llm.WithFrequencyPenalty(frequencyPenalty))
-		}
-		if apiKey != "" {
-			options = append(options, llm.WithAPIKey(apiKey))
-		}
-		if endpoint != "" {
-			options = append(options, llm.WithEndpoint(endpoint))
-		}
-		if prefill != "" {
-			options = append(options, llm.WithPrefill(prefill, ""))
-		}
-		if serviceTier != "" {
-			options = append(options, llm.WithServiceTier(serviceTier))
-		}
-		if previousResponseID != "" {
-			options = append(options, llm.WithPreviousResponseID(previousResponseID))
-		}
-		if writeEvents != "" {
-			f, err := os.Create(writeEvents)
-			if err != nil {
-				fmt.Println(errorStyle.Sprint(err))
-				os.Exit(1)
+			if systemPrompt != "" {
+				options = append(options, llm.WithSystemPrompt(systemPrompt))
 			}
-			defer f.Close()
-			options = append(options, llm.WithServerSentEventsCallback(func(line string) error {
-				if _, err := f.WriteString(line); err != nil {
-					return err
+			if reasoningBudget > 0 {
+				options = append(options, llm.WithReasoningBudget(reasoningBudget))
+			}
+			if reasoningEffort != "" {
+				effort := llm.ReasoningEffort(reasoningEffort)
+				if !effort.IsValid() {
+					return wontoncli.Errorf("invalid reasoning effort: %s", reasoningEffort)
 				}
-				return nil
-			}))
-		}
+				options = append(options, llm.WithReasoningEffort(effort))
+			}
+			if maxTokens > 0 {
+				options = append(options, llm.WithMaxTokens(maxTokens))
+			}
+			if temperature >= 0 {
+				options = append(options, llm.WithTemperature(temperature))
+			}
+			if presencePenalty != 0 {
+				options = append(options, llm.WithPresencePenalty(presencePenalty))
+			}
+			if frequencyPenalty != 0 {
+				options = append(options, llm.WithFrequencyPenalty(frequencyPenalty))
+			}
+			if apiKey != "" {
+				options = append(options, llm.WithAPIKey(apiKey))
+			}
+			if endpoint != "" {
+				options = append(options, llm.WithEndpoint(endpoint))
+			}
+			if prefill != "" {
+				options = append(options, llm.WithPrefill(prefill, ""))
+			}
+			if serviceTier != "" {
+				options = append(options, llm.WithServiceTier(serviceTier))
+			}
+			if previousResponseID != "" {
+				options = append(options, llm.WithPreviousResponseID(previousResponseID))
+			}
+			if writeEvents != "" {
+				f, err := os.Create(writeEvents)
+				if err != nil {
+					return wontoncli.Errorf("%v", err)
+				}
+				defer f.Close()
+				options = append(options, llm.WithServerSentEventsCallback(func(line string) error {
+					if _, err := f.WriteString(line); err != nil {
+						return err
+					}
+					return nil
+				}))
+			}
 
-		if streaming {
-			streamingModel, ok := model.(llm.StreamingLLM)
-			if !ok {
-				fmt.Println(errorStyle.Sprint("Model does not support streaming"))
-				os.Exit(1)
-			}
-			if _, err := streamLLM(ctx, streamingModel, options...); err != nil {
-				fmt.Println(errorStyle.Sprint(err))
-				os.Exit(1)
-			}
-		} else {
-			response, err := generateLLM(ctx, model, options...)
-			if err != nil {
-				fmt.Println(errorStyle.Sprint(err))
-				os.Exit(1)
-			}
-			for _, content := range response.Content {
-				switch content := content.(type) {
-				case *llm.TextContent:
-					fmt.Println(content.Text)
-				case *llm.ToolUseContent:
-					fmt.Println(content.Name)
-					fmt.Println(string(content.Input))
+			if streaming {
+				streamingModel, ok := model.(llm.StreamingLLM)
+				if !ok {
+					return wontoncli.Errorf("model does not support streaming")
+				}
+				if _, err := streamLLM(goCtx, streamingModel, options...); err != nil {
+					return wontoncli.Errorf("%v", err)
+				}
+			} else {
+				response, err := generateLLM(goCtx, model, options...)
+				if err != nil {
+					return wontoncli.Errorf("%v", err)
+				}
+				for _, content := range response.Content {
+					switch content := content.(type) {
+					case *llm.TextContent:
+						fmt.Println(content.Text)
+					case *llm.ToolUseContent:
+						fmt.Println(content.Name)
+						fmt.Println(string(content.Input))
+					}
 				}
 			}
-		}
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(llmCmd)
-
-	// Basic options
-	llmCmd.Flags().StringP("message", "m", "", "Message to send to the LLM (alternative to positional argument)")
-	llmCmd.Flags().StringP("model", "", "", "Model to use")
-	llmCmd.Flags().StringP("system-prompt", "", "", "System prompt for the chat agent")
-	llmCmd.Flags().BoolP("stream", "s", false, "Stream the response")
-
-	// Content options
-	llmCmd.Flags().StringP("pdfs", "", "", "Comma-separated list of PDF URLs or file paths to include as document content")
-	llmCmd.Flags().StringP("images", "", "", "Comma-separated list of image URLs or file paths to include as image content")
-
-	// LLM configuration options
-	llmCmd.Flags().IntP("reasoning-budget", "", 0, "Reasoning budget for the chat agent")
-	llmCmd.Flags().StringP("reasoning-effort", "", "", "Reasoning effort level (low, medium, high)")
-	llmCmd.Flags().IntP("max-tokens", "", 0, "Maximum number of tokens to generate")
-	llmCmd.Flags().Float64P("temperature", "", -1, "Temperature for randomness (0.0 to 2.0)")
-	llmCmd.Flags().Float64P("presence-penalty", "", 0, "Presence penalty (-2.0 to 2.0)")
-	llmCmd.Flags().Float64P("frequency-penalty", "", 0, "Frequency penalty (-2.0 to 2.0)")
-	llmCmd.Flags().StringP("tools", "", "", "Tools to use (comma separated list of tool names)")
-
-	// Provider options
-	llmCmd.Flags().StringP("api-key", "", "", "API key for the LLM provider")
-	llmCmd.Flags().StringP("endpoint", "", "", "Custom endpoint URL for the LLM provider")
-	llmCmd.Flags().StringP("service-tier", "", "", "Service tier for the request")
-
-	// Advanced options
-	llmCmd.Flags().StringP("prefill", "", "", "Prefill text for assistant response")
-	llmCmd.Flags().StringP("previous-response-id", "", "", "Previous response ID for continuation")
-
-	llmCmd.Flags().StringP("write-events", "", "", "Write events to a file")
+			return nil
+		})
 }
 
 // detectImageMediaType returns the media type based on file extension
