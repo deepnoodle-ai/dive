@@ -49,7 +49,7 @@ func (t *WebSearchTool) Schema() *schema.Schema {
 			},
 			"limit": {
 				Type:        "number",
-				Description: "The maximum number of results to return (Default: 10, Min: 10, Max: 30)",
+				Description: "The maximum number of results to return (Default: 10, Min: 10, Max: 100)",
 			},
 		},
 	}
@@ -60,8 +60,8 @@ func (t *WebSearchTool) Call(ctx context.Context, input *SearchInput) (*dive.Too
 	if limit <= 0 {
 		limit = 10
 	}
-	if limit > 30 {
-		limit = 30
+	if limit > 100 {
+		limit = 100
 	}
 	results, err := t.searcher.Search(ctx, &web.SearchInput{
 		Query: input.Query,
