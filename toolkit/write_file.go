@@ -12,10 +12,11 @@ import (
 )
 
 var _ dive.TypedTool[*WriteFileInput] = &WriteFileTool{}
+var _ dive.TypedToolPreviewer[*WriteFileInput] = &WriteFileTool{}
 
 type WriteFileInput struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	FilePath string `json:"file_path"`
+	Content  string `json:"content"`
 }
 
 type WriteFileToolOptions struct {
@@ -93,22 +94,29 @@ func (t *WriteFileTool) Description() string {
 func (t *WriteFileTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
-		Required: []string{"path", "content"},
+		Required: []string{"file_path", "content"},
 		Properties: map[string]*schema.Property{
-			"path": {
+			"file_path": {
 				Type:        "string",
-				Description: "Path to the file to be written",
+				Description: "The absolute path to the file to write (must be absolute, not relative)",
 			},
 			"content": {
 				Type:        "string",
-				Description: "Content to write to the file",
+				Description: "The content to write to the file",
 			},
 		},
 	}
 }
 
+func (t *WriteFileTool) PreviewCall(ctx context.Context, input *WriteFileInput) *dive.ToolCallPreview {
+	return &dive.ToolCallPreview{
+		Summary: fmt.Sprintf("Write to %s", input.FilePath),
+		Details: fmt.Sprintf("Writing %d bytes to `%s`", len(input.Content), input.FilePath),
+	}
+}
+
 func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.ToolResult, error) {
-	filePath := input.Path
+	filePath := input.FilePath
 	if filePath == "" {
 		return dive.NewToolResultError("Error: No file path provided. Please provide a file path either in the constructor or as an argument."), nil
 	}
@@ -137,7 +145,9 @@ func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.
 		}
 		return dive.NewToolResultError(fmt.Sprintf("Error: Failed to write to file %s. %s", filePath, err.Error())), nil
 	}
-	return dive.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", len(input.Content), filePath)), nil
+	bytesWritten := len(input.Content)
+	return dive.NewToolResultText(fmt.Sprintf("Successfully wrote %d bytes to %s", bytesWritten, filePath)).
+		WithDisplay(fmt.Sprintf("Wrote %d bytes to %s", bytesWritten, filePath)), nil
 }
 
 func (t *WriteFileTool) Annotations() *dive.ToolAnnotations {

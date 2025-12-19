@@ -9,7 +9,7 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/internal/retry"
 	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 const (
@@ -34,29 +34,26 @@ var DefaultFetchExcludeTags = []string{
 	"footer",
 }
 
-var _ dive.TypedTool[*web.FetchInput] = &FetchTool{}
+var _ dive.TypedTool[*fetch.Request] = &FetchTool{}
+var _ dive.TypedToolPreviewer[*fetch.Request] = &FetchTool{}
 
 type FetchTool struct {
-	fetcher         web.Fetcher
+	fetcher         fetch.Fetcher
 	maxSize         int
 	maxRetries      int
 	timeout         time.Duration
-	onlyMainContent *bool
-	storeInCache    *bool
-	maxAge          *int64
+	onlyMainContent bool
 }
 
 type FetchToolOptions struct {
 	MaxSize         int           `json:"max_size,omitempty"`
 	MaxRetries      int           `json:"max_retries,omitempty"`
 	Timeout         time.Duration `json:"timeout,omitempty"`
-	StoreInCache    *bool         `json:"store_in_cache,omitempty"`
-	MaxAge          *int64        `json:"max_age,omitempty"`
-	OnlyMainContent *bool         `json:"only_main_content,omitempty"`
-	Fetcher         web.Fetcher   `json:"-"`
+	OnlyMainContent bool          `json:"only_main_content,omitempty"`
+	Fetcher         fetch.Fetcher `json:"-"`
 }
 
-func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInput] {
+func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*fetch.Request] {
 	if options.MaxSize <= 0 {
 		options.MaxSize = DefaultFetchMaxSize
 	}
@@ -69,8 +66,6 @@ func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInp
 		maxRetries:      options.MaxRetries,
 		timeout:         options.Timeout,
 		onlyMainContent: options.OnlyMainContent,
-		storeInCache:    options.StoreInCache,
-		maxAge:          options.MaxAge,
 	})
 }
 
@@ -95,20 +90,20 @@ func (t *FetchTool) Schema() *schema.Schema {
 	}
 }
 
-func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.ToolResult, error) {
-	input.Formats = []web.FetchFormat{web.FetchFormatMarkdown}
+func (t *FetchTool) PreviewCall(ctx context.Context, req *fetch.Request) *dive.ToolCallPreview {
+	return &dive.ToolCallPreview{
+		Summary: fmt.Sprintf("Fetch %s", req.URL),
+	}
+}
 
-	if input.ExcludeTags == nil {
-		input.ExcludeTags = DefaultFetchExcludeTags
+func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolResult, error) {
+	req.Formats = []string{"markdown"}
+
+	if req.ExcludeTags == nil {
+		req.ExcludeTags = DefaultFetchExcludeTags
 	}
-	if t.onlyMainContent != nil {
-		input.OnlyMainContent = t.onlyMainContent
-	}
-	if t.storeInCache != nil {
-		input.StoreInCache = t.storeInCache
-	}
-	if t.maxAge != nil {
-		input.MaxAge = t.maxAge
+	if t.onlyMainContent {
+		req.OnlyMainContent = true
 	}
 
 	if t.timeout > 0 {
@@ -117,10 +112,10 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 		defer cancel()
 	}
 
-	var response *web.FetchOutput
+	var response *fetch.Response
 	err := retry.Do(ctx, func() error {
 		var err error
-		response, err = t.fetcher.Fetch(ctx, input)
+		response, err = t.fetcher.Fetch(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -140,8 +135,17 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 	}
 	sb.WriteString(response.Markdown)
 
-	result := truncateText(sb.String(), t.maxSize)
-	return NewToolResultText(result), nil
+	content := truncateText(sb.String(), t.maxSize)
+	contentLen := len([]rune(content))
+
+	// Build display summary
+	display := fmt.Sprintf("Fetched %s", req.URL)
+	if title := response.Metadata.Title; title != "" {
+		display = fmt.Sprintf("Fetched %s (%s)", req.URL, title)
+	}
+	display = fmt.Sprintf("%s - %d chars", display, contentLen)
+
+	return NewToolResultText(content).WithDisplay(display), nil
 }
 
 func (t *FetchTool) Annotations() *dive.ToolAnnotations {

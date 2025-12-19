@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 		log.Fatalf("failed to create firecrawl client: %v", err)
 	}
 
-	response, err := client.Fetch(context.Background(), &web.FetchInput{
+	response, err := client.Fetch(context.Background(), &fetch.Request{
 		URL: url,
 	})
 	if err != nil {

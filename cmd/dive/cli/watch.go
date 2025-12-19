@@ -107,8 +107,8 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		}
 	}
 
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
+	interactor := dive.NewTerminalInteractor(dive.TerminalInteractorOptions{
+		Mode: dive.InteractIfNotReadOnly,
 	})
 
 	watchAgent, err := dive.NewAgent(dive.AgentOptions{
@@ -119,7 +119,7 @@ func NewFileWatcher(options WatchOptions) (*FileWatcher, error) {
 		Tools:            tools,
 		ThreadRepository: threads.NewMemoryRepository(),
 		ModelSettings:    modelSettings,
-		Confirmer:        confirmer,
+		Interactor:       interactor,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating agent: %v", err)

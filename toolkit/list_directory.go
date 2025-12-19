@@ -14,6 +14,7 @@ import (
 )
 
 var _ dive.TypedTool[*ListDirectoryInput] = &ListDirectoryTool{}
+var _ dive.TypedToolPreviewer[*ListDirectoryInput] = &ListDirectoryTool{}
 
 const DefaultListDirectoryMaxEntries = 100
 
@@ -168,6 +169,16 @@ func (t *ListDirectoryTool) resolvePath(path string) (string, error) {
 	return resolvedPath, nil
 }
 
+func (t *ListDirectoryTool) PreviewCall(ctx context.Context, input *ListDirectoryInput) *dive.ToolCallPreview {
+	path := input.Path
+	if path == "" {
+		path = t.defaultPath
+	}
+	return &dive.ToolCallPreview{
+		Summary: fmt.Sprintf("List %s", path),
+	}
+}
+
 func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput) (*dive.ToolResult, error) {
 	dirPath := input.Path
 	if dirPath == "" {
@@ -267,5 +278,7 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 		message += fmt.Sprintf(" (limited to %d entries)", t.maxEntries)
 	}
 
-	return NewToolResultText(fmt.Sprintf("%s:\n\n%s", message, string(jsonResult))), nil
+	display := fmt.Sprintf("Listed %s (%d entries)", dirPath, len(result))
+	return NewToolResultText(fmt.Sprintf("%s:\n\n%s", message, string(jsonResult))).
+		WithDisplay(display), nil
 }

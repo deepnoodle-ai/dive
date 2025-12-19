@@ -10,6 +10,7 @@ import (
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/toolkit/google"
+	"github.com/deepnoodle-ai/wonton/fetch"
 	openaisdk "github.com/openai/openai-go"
 )
 
@@ -46,21 +47,24 @@ func initializeWebSearchTool(config map[string]interface{}) (dive.Tool, error) {
 }
 
 func initializeFetchTool(config map[string]interface{}) (dive.Tool, error) {
-	key := os.Getenv("FIRECRAWL_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("firecrawl requested but FIRECRAWL_API_KEY not set")
-	}
-	client, err := firecrawl.New(firecrawl.WithAPIKey(key))
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize firecrawl: %w", err)
-	}
 	var options toolkit.FetchToolOptions
 	if config != nil {
 		if err := convertToolConfig(config, &options); err != nil {
 			return nil, fmt.Errorf("invalid fetch tool configuration: %w", err)
 		}
 	}
-	options.Fetcher = client
+
+	// Try Firecrawl first if API key is available
+	if key := os.Getenv("FIRECRAWL_API_KEY"); key != "" {
+		client, err := firecrawl.New(firecrawl.WithAPIKey(key))
+		if err == nil {
+			options.Fetcher = client
+			return toolkit.NewFetchTool(options), nil
+		}
+	}
+
+	// Fall back to Wonton's HTTPFetcher for local fetching
+	options.Fetcher = fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{})
 	return toolkit.NewFetchTool(options), nil
 }
 
@@ -161,6 +165,44 @@ func initializeExtractTool(config map[string]interface{}) (dive.Tool, error) {
 	return toolkit.NewExtractTool(options), nil
 }
 
+func initializeGlobTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.GlobToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("invalid glob tool configuration: %w", err)
+		}
+	}
+	return toolkit.NewGlobTool(options), nil
+}
+
+func initializeGrepTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.GrepToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("invalid grep tool configuration: %w", err)
+		}
+	}
+	// Enable ripgrep by default if available
+	options.UseRipgrep = true
+	return toolkit.NewGrepTool(options), nil
+}
+
+func initializeEditTool(config map[string]interface{}) (dive.Tool, error) {
+	var options toolkit.EditToolOptions
+	if config != nil {
+		if err := convertToolConfig(config, &options); err != nil {
+			return nil, fmt.Errorf("invalid edit tool configuration: %w", err)
+		}
+	}
+	return toolkit.NewEditTool(options), nil
+}
+
+func initializeAskUserTool(config map[string]interface{}) (dive.Tool, error) {
+	// Note: ask_user requires an interactor to be injected at runtime
+	// This creates a tool with the default auto-approve interactor
+	return toolkit.NewAskUserTool(toolkit.AskUserToolOptions{}), nil
+}
+
 // ToolInitializers maps tool names to their initialization functions
 var ToolInitializers = map[string]ToolInitializer{
 	"web_search":               initializeWebSearchTool,
@@ -175,6 +217,10 @@ var ToolInitializers = map[string]ToolInitializer{
 	"anthropic_web_search":     initializeAnthropicWebSearchTool,
 	"text_editor":              initializeTextEditorTool,
 	"extract":                  initializeExtractTool,
+	"glob":                     initializeGlobTool,
+	"grep":                     initializeGrepTool,
+	"edit":                     initializeEditTool,
+	"ask_user":                 initializeAskUserTool,
 }
 
 // InitializeToolByName initializes a tool by its name with the given configuration

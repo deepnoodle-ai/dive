@@ -69,7 +69,7 @@ type AgentOptions struct {
 	ModelSettings      *ModelSettings
 	DateAwareness      *bool
 	ThreadRepository   ThreadRepository
-	Confirmer          Confirmer
+	Interactor         UserInteractor
 	SystemPrompt       string
 	NoSystemPrompt     bool
 	Context            []llm.Content
@@ -93,7 +93,7 @@ type StandardAgent struct {
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
 	threadRepository     ThreadRepository
-	confirmer            Confirmer
+	interactor           UserInteractor
 	systemPromptTemplate *template.Template
 	context              []llm.Content
 }
@@ -142,7 +142,7 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		threadRepository:     opts.ThreadRepository,
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
-		confirmer:            opts.Confirmer,
+		interactor:           opts.Interactor,
 		context:              opts.Context,
 	}
 	tools := make([]Tool, len(opts.Tools))
@@ -494,11 +494,8 @@ func (a *StandardAgent) generateStreaming(
 	return accum.Response(), nil
 }
 
-func (a *StandardAgent) getConfirmer() (Confirmer, bool) {
-	if a.confirmer != nil {
-		return a.confirmer, true
-	}
-	return nil, false
+func (a *StandardAgent) getInteractor() UserInteractor {
+	return a.interactor
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
@@ -518,6 +515,12 @@ func (a *StandardAgent) executeToolCalls(
 			"tool_name", toolCall.Name,
 			"tool_input", string(toolCall.Input))
 
+		// Generate preview if tool supports it
+		var preview *ToolCallPreview
+		if previewer, ok := tool.(ToolPreviewer); ok {
+			preview = previewer.PreviewCall(ctx, toolCall.Input)
+		}
+
 		if err := callback(ctx, &ResponseItem{
 			Type:     ResponseItemTypeToolCall,
 			ToolCall: toolCall,
@@ -526,8 +529,17 @@ func (a *StandardAgent) executeToolCalls(
 		}
 
 		isConfirmed := true
-		if confirmer, ok := a.getConfirmer(); ok {
-			confirmed, err := confirmer.Confirm(ctx, a, tool, toolCall)
+		if interactor := a.getInteractor(); interactor != nil {
+			message := ""
+			if preview != nil {
+				message = preview.Summary
+			}
+			confirmed, err := interactor.Confirm(ctx, &ConfirmRequest{
+				Tool:    tool,
+				Call:    toolCall,
+				Title:   fmt.Sprintf("Execute %s?", tool.Name()),
+				Message: message,
+			})
 			if err != nil {
 				return nil, fmt.Errorf("tool call confirmation error: %w", err)
 			}
@@ -542,17 +554,19 @@ func (a *StandardAgent) executeToolCalls(
 				return nil, fmt.Errorf("tool call error: %w", err)
 			}
 			results[i] = &ToolCallResult{
-				ID:     toolCall.ID,
-				Name:   toolCall.Name,
-				Input:  toolCall.Input,
-				Result: output,
-				Error:  err,
+				ID:      toolCall.ID,
+				Name:    toolCall.Name,
+				Input:   toolCall.Input,
+				Preview: preview,
+				Result:  output,
+				Error:   err,
 			}
 		} else {
 			results[i] = &ToolCallResult{
-				ID:    toolCall.ID,
-				Name:  toolCall.Name,
-				Input: toolCall.Input,
+				ID:      toolCall.ID,
+				Name:    toolCall.Name,
+				Input:   toolCall.Input,
+				Preview: preview,
 				Result: &ToolResult{
 					Content: []*ToolResultContent{
 						{

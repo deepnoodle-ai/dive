@@ -230,15 +230,15 @@ func discoverConfiguration(ctx context.Context, path string, noConfig bool, agen
 	}
 	threadRepo := threads.NewDiskRepository(threadsDir)
 
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
+	interactor := dive.NewTerminalInteractor(dive.TerminalInteractorOptions{
+		Mode: dive.InteractIfNotReadOnly,
 	})
 
 	env, err := config.NewEnvironment(ctx, config.EnvironmentOpts{
-		Config:    cfg,
-		Logger:    logger,
-		Confirmer: confirmer,
-		Threads:   threadRepo,
+		Config:     cfg,
+		Logger:     logger,
+		Interactor: interactor,
+		Threads:    threadRepo,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create environment: %w", err)
@@ -300,8 +300,8 @@ func createAgentFromFlags(systemPrompt, goal, instructions string, tools []dive.
 		return nil, fmt.Errorf("error getting model: %v", err)
 	}
 
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
+	interactor := dive.NewTerminalInteractor(dive.TerminalInteractorOptions{
+		Mode: dive.InteractIfNotReadOnly,
 	})
 
 	threadsDir, err := diveThreadsDirectory()
@@ -320,7 +320,7 @@ func createAgentFromFlags(systemPrompt, goal, instructions string, tools []dive.
 		Tools:            tools,
 		ThreadRepository: threadRepo,
 		ModelSettings:    &dive.ModelSettings{},
-		Confirmer:        confirmer,
+		Interactor:       interactor,
 	})
 }
 
@@ -341,8 +341,8 @@ func applyFlagOverrides(configAgent dive.Agent, systemPrompt, goal, instructions
 		return nil, fmt.Errorf("error getting model: %v", err)
 	}
 
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
+	interactor := dive.NewTerminalInteractor(dive.TerminalInteractorOptions{
+		Mode: dive.InteractIfNotReadOnly,
 	})
 
 	threadsDir, err := diveThreadsDirectory()
@@ -377,6 +377,6 @@ func applyFlagOverrides(configAgent dive.Agent, systemPrompt, goal, instructions
 		Tools:            finalTools,
 		ThreadRepository: threadRepo,
 		ModelSettings:    &dive.ModelSettings{},
-		Confirmer:        confirmer,
+		Interactor:       interactor,
 	})
 }

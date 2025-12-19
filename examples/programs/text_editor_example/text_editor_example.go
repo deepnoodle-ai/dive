@@ -28,8 +28,8 @@ func main() {
 		DenyList: []string{"rm"},
 	})
 
-	confirmer := dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{
-		Mode: dive.ConfirmIfNotReadOnly,
+	interactor := dive.NewTerminalInteractor(dive.TerminalInteractorOptions{
+		Mode: dive.InteractIfNotReadOnly,
 	})
 
 	theAgent, err := dive.NewAgent(dive.AgentOptions{
@@ -38,7 +38,7 @@ func main() {
 		Tools:        []dive.Tool{textEditor, commandTool},
 		Model:        anthropic.New(),
 		Logger:       logger,
-		Confirmer:    confirmer,
+		Interactor:   interactor,
 	})
 	if err != nil {
 		log.Fatal(err)

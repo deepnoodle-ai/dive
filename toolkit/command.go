@@ -18,6 +18,7 @@ import (
 )
 
 var _ dive.TypedTool[*CommandInput] = &CommandTool{}
+var _ dive.TypedToolPreviewer[*CommandInput] = &CommandTool{}
 
 type CommandInput struct {
 	Name             string `json:"name"`
@@ -108,6 +109,20 @@ func (c *CommandTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+func (c *CommandTool) PreviewCall(ctx context.Context, input *CommandInput) *dive.ToolCallPreview {
+	var args []string
+	for _, arg := range input.Args {
+		args = append(args, fmt.Sprintf("%v", arg))
+	}
+	cmdStr := input.Name
+	if len(args) > 0 {
+		cmdStr = fmt.Sprintf("%s %s", input.Name, strings.Join(args, " "))
+	}
+	return &dive.ToolCallPreview{
+		Summary: fmt.Sprintf("Run `%s`", cmdStr),
+	}
+}
+
 func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.ToolResult, error) {
 
 	name := input.Name
@@ -153,6 +168,9 @@ func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.Tool
 		return NewToolResultError(string(resultText)), nil
 	}
 
+	exitCode := cmd.ProcessState.ExitCode()
+	display := fmt.Sprintf("Ran `%s` (exit %d)", name, exitCode)
+
 	if input.StdoutFile != "" {
 		// create directory if it doesn't exist
 		dir := filepath.Dir(input.StdoutFile)
@@ -162,8 +180,9 @@ func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.Tool
 		if err := os.WriteFile(input.StdoutFile, []byte(output), 0644); err != nil {
 			return NewToolResultError(fmt.Sprintf("error: failed to write command output to file: %s", err.Error())), nil
 		}
-		return NewToolResultText(fmt.Sprintf("Command output written to file: %s", input.StdoutFile)), nil
+		return NewToolResultText(fmt.Sprintf("Command output written to file: %s", input.StdoutFile)).
+			WithDisplay(fmt.Sprintf("%s - output written to %s", display, input.StdoutFile)), nil
 	}
 
-	return NewToolResultText(string(resultText)), nil
+	return NewToolResultText(string(resultText)).WithDisplay(display), nil
 }

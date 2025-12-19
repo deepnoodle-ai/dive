@@ -16,7 +16,7 @@ import (
 type EnvironmentOpts struct {
 	Config     *Config
 	Logger     log.Logger
-	Confirmer  dive.Confirmer
+	Interactor dive.UserInteractor
 	Threads    dive.ThreadRepository
 	Directory  string
 	MCPManager *mcp.Manager
@@ -26,7 +26,7 @@ type Environment struct {
 	Config     *Config
 	MCPManager *mcp.Manager
 	Threads    dive.ThreadRepository
-	Confirmer  dive.Confirmer
+	Interactor dive.UserInteractor
 	Logger     log.Logger
 	Directory  string
 	Agents     []dive.Agent
@@ -42,15 +42,24 @@ func NewEnvironment(ctx context.Context, opts EnvironmentOpts) (*Environment, er
 		opts.Logger = log.New(log.GetDefaultLevel())
 	}
 
-	confirmationMode := dive.ConfirmIfNotReadOnly
+	interactionMode := dive.InteractIfNotReadOnly
 	if cfg.Config.ConfirmationMode != "" {
-		confirmationMode = dive.ConfirmationMode(cfg.Config.ConfirmationMode)
-		if !confirmationMode.IsValid() {
+		// Map old ConfirmationMode values to new InteractionMode
+		switch cfg.Config.ConfirmationMode {
+		case "always":
+			interactionMode = dive.InteractAlways
+		case "never":
+			interactionMode = dive.InteractNever
+		case "if_destructive":
+			interactionMode = dive.InteractIfDestructive
+		case "if_not_read_only":
+			interactionMode = dive.InteractIfNotReadOnly
+		default:
 			return nil, fmt.Errorf("invalid confirmation mode: %s", cfg.Config.ConfirmationMode)
 		}
 	}
-	if opts.Confirmer == nil {
-		opts.Confirmer = dive.NewTerminalConfirmer(dive.TerminalConfirmerOptions{Mode: confirmationMode})
+	if opts.Interactor == nil {
+		opts.Interactor = dive.NewTerminalInteractor(dive.TerminalInteractorOptions{Mode: interactionMode})
 	}
 
 	if opts.MCPManager == nil {
@@ -113,7 +122,7 @@ func NewEnvironment(ctx context.Context, opts EnvironmentOpts) (*Environment, er
 		Config:     cfg,
 		MCPManager: opts.MCPManager,
 		Threads:    opts.Threads,
-		Confirmer:  opts.Confirmer,
+		Interactor: opts.Interactor,
 		Logger:     opts.Logger,
 		Directory:  opts.Directory,
 		Tools:      toolsMap,
@@ -203,7 +212,7 @@ func (e *Environment) buildAgent(ctx context.Context, definition Agent) (dive.Ag
 		SystemPrompt:       definition.SystemPrompt,
 		ModelSettings:      modelSettings,
 		Logger:             e.Logger,
-		Confirmer:          e.Confirmer,
+		Interactor:         e.Interactor,
 		ThreadRepository:   e.Threads,
 		Context:            contextContent,
 	})

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/fetch"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,12 +57,12 @@ func TestClient_Fetch_V2API(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test the fetch operation
-	input := &web.FetchInput{
+	req := &fetch.Request{
 		URL:     "https://example.com",
-		Formats: []web.FetchFormat{web.FetchFormatMarkdown, web.FetchFormatHTML, web.FetchFormatSummary, web.FetchFormatLinks},
+		Formats: []string{"markdown", "html", "summary", "links"},
 	}
 
-	output, err := client.Fetch(context.Background(), input)
+	output, err := client.Fetch(context.Background(), req)
 	require.NoError(t, err)
 	require.NotNil(t, output)
 
@@ -70,12 +70,13 @@ func TestClient_Fetch_V2API(t *testing.T) {
 	require.Equal(t, "# Example\n\nThis is a test page.", output.Markdown)
 	require.Equal(t, "<h1>Example</h1><p>This is a test page.</p>", output.HTML)
 	require.Equal(t, "A test page with example content.", output.Summary)
-	require.Equal(t, []string{"https://example.com/link1", "https://example.com/link2"}, output.Links)
+	require.Len(t, output.Links, 2)
+	require.Equal(t, "https://example.com/link1", output.Links[0].URL)
+	require.Equal(t, "https://example.com/link2", output.Links[1].URL)
 	require.Equal(t, "Example Page", output.Metadata.Title)
 	require.Equal(t, "An example page for testing", output.Metadata.Description)
-	require.Equal(t, "en", output.Metadata.Language)
-	require.Equal(t, "https://example.com", output.Metadata.SourceURL)
-	require.Equal(t, 200, output.Metadata.StatusCode)
+	require.Equal(t, "https://example.com", output.Metadata.Canonical)
+	require.Equal(t, 200, output.StatusCode)
 }
 
 func TestClient_Fetch_ErrorHandling(t *testing.T) {
@@ -119,16 +120,16 @@ func TestClient_Fetch_ErrorHandling(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			input := &web.FetchInput{
+			req := &fetch.Request{
 				URL: "https://example.com",
 			}
 
-			_, err = client.Fetch(context.Background(), input)
+			_, err = client.Fetch(context.Background(), req)
 			if tt.wantErr {
 				require.Error(t, err)
-				fetchErr, ok := err.(*web.FetchError)
-				require.True(t, ok, "expected FetchError")
-				require.Equal(t, tt.errCode, fetchErr.StatusCode)
+				require.True(t, fetch.IsRequestError(err), "expected RequestError")
+				reqErr := err.(*fetch.RequestError)
+				require.Equal(t, tt.errCode, reqErr.StatusCode())
 			} else {
 				require.NoError(t, err)
 			}
@@ -170,12 +171,12 @@ func TestClient_Fetch_DefaultFormats(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	input := &web.FetchInput{
+	req := &fetch.Request{
 		URL: "https://example.com",
 		// No formats specified - should default to markdown
 	}
 
-	output, err := client.Fetch(context.Background(), input)
+	output, err := client.Fetch(context.Background(), req)
 	require.NoError(t, err)
 	require.Equal(t, "# Default Format Test", output.Markdown)
 }
