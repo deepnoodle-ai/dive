@@ -98,6 +98,14 @@ func (fs *mockFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	return nil
 }
 
+func (fs *mockFileSystem) FileSize(path string) (int64, error) {
+	content, exists := fs.files[path]
+	if !exists {
+		return 0, &mockError{"file does not exist"}
+	}
+	return int64(len(content)), nil
+}
+
 type mockError struct {
 	message string
 }

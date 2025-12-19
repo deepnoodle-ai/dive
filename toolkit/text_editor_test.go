@@ -8,13 +8,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testPathValidator creates a permissive PathValidator for unit tests
+// that allows access to any path starting with the given root (typically "/")
+func testPathValidator(root string) *PathValidator {
+	return &PathValidator{WorkspaceDir: root}
+}
+
 func TestTextEditorTool_View_File(t *testing.T) {
 	fs := newMockFileSystem()
 	fs.AddFile("/test/file.txt", "line 1\nline 2\nline 3\nline 4\nline 5")
 
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	input := &TextEditorToolInput{
@@ -41,8 +49,10 @@ func TestTextEditorTool_View_FileWithRange(t *testing.T) {
 	fs.AddFile("/test/file.txt", "line 1\nline 2\nline 3\nline 4\nline 5")
 
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	input := &TextEditorToolInput{
@@ -75,8 +85,10 @@ func TestTextEditorTool_View_Directory(t *testing.T) {
 	fs.AddFile("/test/file2.txt", "content2")
 
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	input := &TextEditorToolInput{
@@ -98,8 +110,10 @@ func TestTextEditorTool_Create(t *testing.T) {
 	fs := newMockFileSystem()
 
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	content := "Hello, World!\nThis is a test file."
@@ -131,8 +145,10 @@ func TestTextEditorTool_StrReplace(t *testing.T) {
 	fs.AddFile("/test/file.txt", originalContent)
 
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	oldStr := "This is a test."
@@ -164,8 +180,10 @@ func TestTextEditorTool_StrReplace_MultipleOccurrences(t *testing.T) {
 	fs.AddFile("/test/file.txt", "Hello, World!\nHello, World!\nGoodbye!")
 
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	oldStr := "Hello, World!"
@@ -190,8 +208,10 @@ func TestTextEditorTool_Insert(t *testing.T) {
 	fs.AddFile("/test/file.txt", originalContent)
 
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	insertLine := 2
@@ -220,8 +240,10 @@ func TestTextEditorTool_Insert(t *testing.T) {
 func TestTextEditorTool_ValidationErrors(t *testing.T) {
 	fs := newMockFileSystem()
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	tests := []struct {
@@ -339,8 +361,10 @@ func TestTextEditorTool_Integration(t *testing.T) {
 	// Test a complete workflow: create file, view it, edit it, view again
 	fs := newMockFileSystem()
 	tool := &TextEditorTool{
-		fs:          fs,
-		fileHistory: make(map[string][]string),
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
 	}
 
 	// 1. Create a file
@@ -415,4 +439,177 @@ func TestNewTextEditorTool(t *testing.T) {
 		FileSystem: mockFS,
 	})
 	require.NotNil(t, adapter2, "Expected tool adapter to be created with custom options")
+}
+
+func TestTextEditorTool_PathValidation(t *testing.T) {
+	// Create a temporary workspace directory
+	workspaceDir := t.TempDir()
+
+	// Create a path validator for the workspace
+	pathValidator, err := NewPathValidator(workspaceDir)
+	require.NoError(t, err)
+
+	fs := newMockFileSystem()
+	// Add a file inside workspace
+	fs.AddFile(workspaceDir+"/allowed.txt", "allowed content")
+	// Add a file outside workspace
+	fs.AddFile("/etc/passwd", "root:x:0:0:root:/root:/bin/bash")
+
+	tool := &TextEditorTool{
+		fs:            fs,
+		pathValidator: pathValidator,
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
+	}
+
+	tests := []struct {
+		name        string
+		input       *TextEditorToolInput
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "view file inside workspace - allowed",
+			input: &TextEditorToolInput{
+				Command: CommandView,
+				Path:    workspaceDir + "/allowed.txt",
+			},
+			expectError: false,
+		},
+		{
+			name: "view file outside workspace - denied",
+			input: &TextEditorToolInput{
+				Command: CommandView,
+				Path:    "/etc/passwd",
+			},
+			expectError: true,
+			errorMsg:    "outside workspace",
+		},
+		{
+			name: "create file outside workspace - denied",
+			input: func() *TextEditorToolInput {
+				content := "malicious content"
+				return &TextEditorToolInput{
+					Command:  CommandCreate,
+					Path:     "/tmp/evil.txt",
+					FileText: &content,
+				}
+			}(),
+			expectError: true,
+			errorMsg:    "outside workspace",
+		},
+		{
+			name: "str_replace outside workspace - denied",
+			input: func() *TextEditorToolInput {
+				oldStr := "root"
+				newStr := "hacked"
+				return &TextEditorToolInput{
+					Command: CommandStrReplace,
+					Path:    "/etc/passwd",
+					OldStr:  &oldStr,
+					NewStr:  &newStr,
+				}
+			}(),
+			expectError: true,
+			errorMsg:    "outside workspace",
+		},
+		{
+			name: "insert outside workspace - denied",
+			input: func() *TextEditorToolInput {
+				line := 0
+				newStr := "malicious line"
+				return &TextEditorToolInput{
+					Command:    CommandInsert,
+					Path:       "/etc/passwd",
+					InsertLine: &line,
+					NewStr:     &newStr,
+				}
+			}(),
+			expectError: true,
+			errorMsg:    "outside workspace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tool.Call(context.Background(), tt.input)
+			require.NoError(t, err)
+
+			if tt.expectError {
+				require.True(t, result.IsError, "Expected error for path outside workspace")
+				require.Contains(t, result.Content[0].Text, tt.errorMsg)
+			} else {
+				require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+			}
+		})
+	}
+}
+
+func TestTextEditorTool_TabPreservation(t *testing.T) {
+	// Test that tabs are NOT converted to spaces (fixes Makefile corruption)
+	fs := newMockFileSystem()
+
+	// Makefile content with tabs (required for make)
+	makefileContent := "all:\n\techo \"Building...\"\n\tgcc -o main main.c\n\nclean:\n\trm -f main"
+	fs.AddFile("/project/Makefile", makefileContent)
+
+	tool := &TextEditorTool{
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
+	}
+
+	// Test str_replace preserves tabs
+	oldStr := "echo \"Building...\""
+	newStr := "echo \"Compiling...\""
+	input := &TextEditorToolInput{
+		Command: CommandStrReplace,
+		Path:    "/project/Makefile",
+		OldStr:  &oldStr,
+		NewStr:  &newStr,
+	}
+
+	result, err := tool.Call(context.Background(), input)
+	require.NoError(t, err)
+	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+
+	// Verify tabs are preserved
+	newContent, _ := fs.ReadFile("/project/Makefile")
+	require.Contains(t, newContent, "\t", "Tabs should be preserved in Makefile")
+	require.Contains(t, newContent, "\techo \"Compiling...\"", "Tab before echo should be preserved")
+	require.Contains(t, newContent, "\tgcc", "Tab before gcc should be preserved")
+	require.Contains(t, newContent, "\trm", "Tab before rm should be preserved")
+}
+
+func TestTextEditorTool_InsertTabPreservation(t *testing.T) {
+	// Test that insert command preserves tabs
+	fs := newMockFileSystem()
+	fs.AddFile("/project/Makefile", "all:\n\techo \"hello\"")
+
+	tool := &TextEditorTool{
+		fs:            fs,
+		pathValidator: testPathValidator("/"),
+		maxFileSize:   MaxFileSize,
+		fileHistory:   make(map[string][]string),
+	}
+
+	// Insert a new line with a tab
+	insertLine := 2
+	newStr := "\techo \"world\""
+	input := &TextEditorToolInput{
+		Command:    CommandInsert,
+		Path:       "/project/Makefile",
+		InsertLine: &insertLine,
+		NewStr:     &newStr,
+	}
+
+	result, err := tool.Call(context.Background(), input)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	// Verify tabs are preserved
+	newContent, _ := fs.ReadFile("/project/Makefile")
+	require.Contains(t, newContent, "\techo \"hello\"", "Original tab should be preserved")
+	require.Contains(t, newContent, "\techo \"world\"", "Inserted tab should be preserved")
 }

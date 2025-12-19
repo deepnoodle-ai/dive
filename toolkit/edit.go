@@ -3,6 +3,7 @@ package toolkit
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,13 +154,20 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 		}
 	}
 
-	// Check file exists
-	info, err := os.Stat(input.FilePath)
+	// Open file first to avoid TOCTOU race conditions
+	file, err := os.Open(input.FilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return dive.NewToolResultError(fmt.Sprintf("File does not exist: %s", input.FilePath)), nil
 		}
 		return dive.NewToolResultError(fmt.Sprintf("Error accessing file: %v", err)), nil
+	}
+	defer file.Close()
+
+	// Stat the open file handle to avoid TOCTOU issues
+	info, err := file.Stat()
+	if err != nil {
+		return dive.NewToolResultError(fmt.Sprintf("Error getting file info: %v", err)), nil
 	}
 
 	if info.IsDir() {
@@ -170,8 +178,8 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 		return dive.NewToolResultError(fmt.Sprintf("File too large: %d bytes (max %d bytes)", info.Size(), t.maxFileSize)), nil
 	}
 
-	// Read file
-	content, err := os.ReadFile(input.FilePath)
+	// Read file from the already-open handle
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("Error reading file: %v", err)), nil
 	}

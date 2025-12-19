@@ -136,44 +136,57 @@ func runChat(ctx context.Context, systemPrompt, goal, instructions, threadID, co
 	return nil
 }
 
+func chatHandler(ctx *cli.Context) error {
+	parseGlobalFlags(ctx)
+
+	systemPrompt := ctx.String("system")
+	goal := ctx.String("goal")
+	instructions := ctx.String("instructions")
+	thread := ctx.String("thread")
+	toolsSpec := ctx.String("tools")
+	configFlag := ctx.String("config")
+	agentFlag := ctx.String("agent")
+	noConfig := ctx.Bool("no-config")
+
+	var tools []dive.Tool
+	var err error
+	if toolsSpec != "" {
+		tools, err = initializeTools(strings.Split(toolsSpec, ","))
+		if err != nil {
+			return cli.Errorf("failed to initialize tools: %s", err)
+		}
+	}
+
+	if err := runChat(ctx.Context(), systemPrompt, goal, instructions, thread, configFlag, agentFlag, noConfig, tools); err != nil {
+		return cli.Errorf("%v", err)
+	}
+	return nil
+}
+
+func chatFlags() []cli.Flag {
+	return []cli.Flag{
+		cli.String("system", "").Help("System prompt for the agent"),
+		cli.String("goal", "").Help("Goal for the agent"),
+		cli.String("instructions", "").Help("Instructions for the agent"),
+		cli.String("tools", "").Help("Comma-separated list of tools to use for the agent"),
+		cli.String("thread", "").Help("Name of the thread to use for the agent"),
+		cli.String("config", "").Help("Path to configuration file or directory"),
+		cli.String("agent", "").Help("Name of the agent to use from configuration"),
+		cli.Bool("no-config", "").Help("Disable automatic configuration loading"),
+	}
+}
+
+func registerMainCommand(app *cli.App) {
+	app.Main().
+		NoArgs().
+		Flags(chatFlags()...).
+		Run(chatHandler)
+}
+
 func registerChatCommand(app *cli.App) {
 	app.Command("chat").
 		Description("Start an interactive chat with an agent").
 		NoArgs().
-		Flags(
-			cli.String("system", "").Help("System prompt for the agent"),
-			cli.String("goal", "").Help("Goal for the agent"),
-			cli.String("instructions", "").Help("Instructions for the agent"),
-			cli.String("tools", "").Help("Comma-separated list of tools to use for the agent"),
-			cli.String("thread", "").Help("Name of the thread to use for the agent"),
-			cli.String("config", "").Help("Path to configuration file or directory"),
-			cli.String("agent", "").Help("Name of the agent to use from configuration"),
-			cli.Bool("no-config", "").Help("Disable automatic configuration loading"),
-		).
-		Run(func(ctx *cli.Context) error {
-			parseGlobalFlags(ctx)
-
-			systemPrompt := ctx.String("system")
-			goal := ctx.String("goal")
-			instructions := ctx.String("instructions")
-			thread := ctx.String("thread")
-			toolsSpec := ctx.String("tools")
-			configFlag := ctx.String("config")
-			agentFlag := ctx.String("agent")
-			noConfig := ctx.Bool("no-config")
-
-			var tools []dive.Tool
-			var err error
-			if toolsSpec != "" {
-				tools, err = initializeTools(strings.Split(toolsSpec, ","))
-				if err != nil {
-					return cli.Errorf("failed to initialize tools: %s", err)
-				}
-			}
-
-			if err := runChat(ctx.Context(), systemPrompt, goal, instructions, thread, configFlag, agentFlag, noConfig, tools); err != nil {
-				return cli.Errorf("%v", err)
-			}
-			return nil
-		})
+		Flags(chatFlags()...).
+		Run(chatHandler)
 }

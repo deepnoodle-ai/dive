@@ -354,3 +354,156 @@ func TestShellManager_FailingCommand(t *testing.T) {
 	require.NotNil(t, info.ExitCode)
 	require.NotEqual(t, 0, *info.ExitCode)
 }
+
+func TestShellManager_MaxShellLimit(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a shell manager with a small max shells limit
+	sm := NewShellManager(ShellManagerOptions{
+		MaxShells: 3,
+	})
+
+	var cmd string
+	var args []string
+	if runtime.GOOS == "windows" {
+		cmd = "cmd"
+		args = []string{"/c", "ping", "-n", "10", "127.0.0.1"}
+	} else {
+		cmd = "sleep"
+		args = []string{"10"}
+	}
+
+	// Start max shells number of long-running commands
+	var ids []string
+	for i := 0; i < 3; i++ {
+		id, err := sm.StartBackground(ctx, cmd, args, "", "")
+		require.NoError(t, err, "Should be able to start shell %d", i+1)
+		ids = append(ids, id)
+	}
+
+	// The 4th shell should fail due to max shells limit
+	_, err := sm.StartBackground(ctx, cmd, args, "", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "maximum number of background shells")
+
+	// Kill one shell
+	err = sm.Kill(ids[0])
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+
+	// Now we should be able to start another shell
+	newID, err := sm.StartBackground(ctx, cmd, args, "", "")
+	require.NoError(t, err, "Should be able to start a new shell after killing one")
+
+	// Clean up
+	for _, id := range ids[1:] {
+		sm.Kill(id)
+	}
+	sm.Kill(newID)
+}
+
+func TestShellManager_OutputSizeLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - different shell behavior")
+	}
+
+	ctx := context.Background()
+
+	// Create a shell manager with a small output limit (1KB)
+	maxSize := int64(1024)
+	sm := NewShellManager(ShellManagerOptions{
+		MaxOutputSize: maxSize,
+	})
+
+	// Generate output larger than the limit (2KB of 'x' characters)
+	// Using yes | head to generate predictable output
+	cmd := "sh"
+	args := []string{"-c", "yes x | head -c 2048"}
+
+	id, err := sm.StartBackground(ctx, cmd, args, "", "")
+	require.NoError(t, err)
+
+	// Wait for completion
+	stdout, _, _, err := sm.GetOutput(id, true, 5*time.Second)
+	require.NoError(t, err)
+
+	// Output should be truncated
+	require.LessOrEqual(t, int64(len(stdout)), maxSize+100, "Output should be approximately limited to max size")
+	require.Contains(t, stdout, "truncated", "Output should contain truncation message")
+}
+
+func TestShellManager_DefaultLimits(t *testing.T) {
+	// Test that default limits are set correctly
+	sm := NewShellManager()
+
+	require.Equal(t, int64(DefaultMaxOutputSize), sm.maxOutputSize)
+	require.Equal(t, DefaultMaxShells, sm.maxShells)
+}
+
+func TestShellManager_CustomLimits(t *testing.T) {
+	// Test that custom limits are applied
+	sm := NewShellManager(ShellManagerOptions{
+		MaxOutputSize: 5 * 1024 * 1024, // 5MB
+		MaxShells:     100,
+	})
+
+	require.Equal(t, int64(5*1024*1024), sm.maxOutputSize)
+	require.Equal(t, 100, sm.maxShells)
+}
+
+func TestLimitedWriter(t *testing.T) {
+	t.Run("WritesWithinLimit", func(t *testing.T) {
+		lw := newLimitedWriter(100)
+
+		n, err := lw.Write([]byte("Hello, World!"))
+		require.NoError(t, err)
+		require.Equal(t, 13, n)
+
+		result := lw.String()
+		require.Equal(t, "Hello, World!", result)
+		require.False(t, lw.truncated)
+	})
+
+	t.Run("TruncatesWhenExceedsLimit", func(t *testing.T) {
+		lw := newLimitedWriter(10)
+
+		// Write more than the limit
+		testData := []byte("This is a very long string that exceeds the limit")
+		n, err := lw.Write(testData)
+		require.NoError(t, err)
+		require.Equal(t, len(testData), n) // Returns full length to not break the writer
+
+		result := lw.String()
+		require.True(t, lw.truncated)
+		require.Contains(t, result, "truncated")
+		// The actual content before truncation should be limited
+		require.LessOrEqual(t, len(result), 100) // Allow some room for truncation message
+	})
+
+	t.Run("MultipleWrites", func(t *testing.T) {
+		lw := newLimitedWriter(20)
+
+		lw.Write([]byte("12345"))    // 5 bytes
+		lw.Write([]byte("67890"))    // 5 bytes = 10 total
+		lw.Write([]byte("ABCDE"))    // 5 bytes = 15 total
+		lw.Write([]byte("FGHIJ"))    // 5 bytes = 20 total
+		lw.Write([]byte("OVERFLOW")) // Should trigger truncation
+
+		result := lw.String()
+		require.True(t, lw.truncated)
+		require.Contains(t, result, "truncated")
+	})
+
+	t.Run("DiscardAfterTruncation", func(t *testing.T) {
+		lw := newLimitedWriter(5)
+
+		lw.Write([]byte("12345"))    // Fills the buffer
+		lw.Write([]byte("ABCDE"))    // Triggers truncation
+		lw.Write([]byte("OVERFLOW")) // Should be discarded silently
+
+		result := lw.String()
+		require.True(t, lw.truncated)
+		// Should not contain OVERFLOW
+		require.NotContains(t, result, "OVERFLOW")
+	})
+}

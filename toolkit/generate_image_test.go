@@ -121,3 +121,78 @@ func TestNewImageGenerationTool(t *testing.T) {
 	// Verify it implements the expected interface
 	var _ dive.Tool = adapter
 }
+
+func TestImageGenerationTool_PathValidation(t *testing.T) {
+	workspaceDir := t.TempDir()
+
+	t.Run("BlocksWritingOutsideWorkspace", func(t *testing.T) {
+		pathValidator, err := NewPathValidator(workspaceDir)
+		require.NoError(t, err)
+
+		tool := &ImageGenerationTool{
+			fs:            &RealFileSystem{},
+			pathValidator: pathValidator,
+		}
+
+		// Try to write to /tmp which is outside workspace
+		result, err := tool.Call(context.Background(), &ImageGenerationInput{
+			Prompt:     "A test image",
+			OutputPath: "/tmp/malicious.png",
+		})
+
+		require.NoError(t, err)
+		require.True(t, result.IsError, "Expected error when writing outside workspace")
+		require.Contains(t, result.Content[0].Text, "outside workspace")
+	})
+
+	t.Run("BlocksWritingToSensitivePaths", func(t *testing.T) {
+		pathValidator, err := NewPathValidator(workspaceDir)
+		require.NoError(t, err)
+
+		tool := &ImageGenerationTool{
+			fs:            &RealFileSystem{},
+			pathValidator: pathValidator,
+		}
+
+		// Try to write to system path
+		result, err := tool.Call(context.Background(), &ImageGenerationInput{
+			Prompt:     "A test image",
+			OutputPath: "/etc/image.png",
+		})
+
+		require.NoError(t, err)
+		require.True(t, result.IsError, "Expected error when writing to system path")
+		require.Contains(t, result.Content[0].Text, "outside workspace")
+	})
+
+	t.Run("AllowsWritingInsideWorkspace", func(t *testing.T) {
+		pathValidator, err := NewPathValidator(workspaceDir)
+		require.NoError(t, err)
+
+		// Note: We can only test the path validation part, not the actual image generation
+		// which requires API credentials. So we just verify the path validation passes
+		// by checking ValidateWrite directly.
+		outputPath := workspaceDir + "/output/test.png"
+		err = pathValidator.ValidateWrite(outputPath)
+		require.NoError(t, err, "Path validation should pass for files inside workspace")
+	})
+
+	t.Run("BlocksPathTraversal", func(t *testing.T) {
+		pathValidator, err := NewPathValidator(workspaceDir)
+		require.NoError(t, err)
+
+		tool := &ImageGenerationTool{
+			fs:            &RealFileSystem{},
+			pathValidator: pathValidator,
+		}
+
+		// Try path traversal
+		result, err := tool.Call(context.Background(), &ImageGenerationInput{
+			Prompt:     "A test image",
+			OutputPath: workspaceDir + "/../../etc/image.png",
+		})
+
+		require.NoError(t, err)
+		require.True(t, result.IsError, "Expected error when using path traversal")
+	})
+}

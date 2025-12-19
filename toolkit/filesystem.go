@@ -2,8 +2,8 @@ package toolkit
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // FileSystem interface for abstracting file operations (enables testing)
@@ -15,6 +15,7 @@ type FileSystem interface {
 	IsAbs(path string) bool
 	ListDir(path string) (string, error)
 	MkdirAll(path string, perm os.FileMode) error
+	FileSize(path string) (int64, error)
 }
 
 // RealFileSystem implements FileSystem using actual file operations
@@ -55,14 +56,61 @@ func (fs *RealFileSystem) IsAbs(path string) bool {
 }
 
 func (fs *RealFileSystem) ListDir(path string) (string, error) {
-	cmd := exec.Command("find", path, "-maxdepth", "2", "-not", "-path", "*/.*")
-	output, err := cmd.Output()
+	var result strings.Builder
+
+	// Walk directory up to 2 levels deep, excluding hidden files
+	err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip entries we can't access
+		}
+
+		// Get relative path for depth calculation
+		relPath, err := filepath.Rel(path, p)
+		if err != nil {
+			return nil
+		}
+
+		// Skip hidden files and directories (starting with .)
+		name := d.Name()
+		if len(name) > 0 && name[0] == '.' && relPath != "." {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Calculate depth (count path separators)
+		depth := 0
+		if relPath != "." {
+			depth = strings.Count(relPath, string(filepath.Separator)) + 1
+		}
+
+		// Skip if deeper than 2 levels
+		if depth > 2 {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		result.WriteString(p)
+		result.WriteString("\n")
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
-	return string(output), nil
+	return result.String(), nil
 }
 
 func (fs *RealFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
+}
+
+func (fs *RealFileSystem) FileSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }

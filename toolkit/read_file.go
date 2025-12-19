@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,8 +42,8 @@ func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFi
 	}
 	pathValidator, err := NewPathValidator(options.WorkspaceDir)
 	if err != nil {
-		// Fall back to no validation if we can't determine workspace
-		pathValidator = &PathValidator{}
+		// Store nil to indicate validation is unavailable - will fail closed at call time
+		pathValidator = nil
 	}
 	return dive.ToolAdapter(&ReadFileTool{
 		maxSize:       options.MaxSize,
@@ -96,11 +97,12 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 		return NewToolResultError("Error: No file path provided."), nil
 	}
 
-	// Validate path is within workspace
-	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
-		if err := t.pathValidator.ValidateRead(filePath); err != nil {
-			return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
-		}
+	// Validate path is within workspace (fail closed if validator unavailable)
+	if t.pathValidator == nil {
+		return NewToolResultError("Error: path validation unavailable - cannot safely perform file operations"), nil
+	}
+	if err := t.pathValidator.ValidateRead(filePath); err != nil {
+		return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 	}
 
 	absPath, err := filepath.Abs(filePath)
@@ -108,7 +110,8 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 		return NewToolResultError(fmt.Sprintf("failed to resolve absolute path: %s", err.Error())), nil
 	}
 
-	fileInfo, err := os.Stat(absPath)
+	// Open file first to avoid TOCTOU race conditions
+	file, err := os.Open(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return NewToolResultError(fmt.Sprintf("Error: File not found at path: %s", filePath)), nil
@@ -117,17 +120,17 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 		}
 		return NewToolResultError(fmt.Sprintf("Error: Failed to access file %s. %s", filePath, err.Error())), nil
 	}
+	defer file.Close()
+
+	// Stat the open file handle to avoid TOCTOU issues
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return NewToolResultError(fmt.Sprintf("Error: Failed to get file info for %s. %s", filePath, err.Error())), nil
+	}
 
 	if fileInfo.IsDir() {
 		return NewToolResultError(fmt.Sprintf("Error: Path is a directory, not a file: %s", filePath)), nil
 	}
-
-	// Read file content
-	file, err := os.Open(absPath)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("Error: Failed to open file %s. %s", filePath, err.Error())), nil
-	}
-	defer file.Close()
 
 	// If no offset/limit, read the whole file (with size check)
 	if input.Offset == 0 && input.Limit == 0 {
@@ -136,7 +139,7 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 				filePath, fileInfo.Size(), t.maxSize)), nil
 		}
 
-		content, err := os.ReadFile(absPath)
+		content, err := io.ReadAll(file)
 		if err != nil {
 			return NewToolResultError(fmt.Sprintf("Error: Failed to read file %s. %s", filePath, err.Error())), nil
 		}

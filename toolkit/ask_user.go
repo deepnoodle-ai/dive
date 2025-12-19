@@ -49,10 +49,8 @@ type AskUserToolOptions struct {
 }
 
 // NewAskUserTool creates a new tool for asking the user questions.
+// An explicit Interactor must be provided; without one, the tool will fail at call time.
 func NewAskUserTool(opts AskUserToolOptions) *dive.TypedToolAdapter[*AskUserInput] {
-	if opts.Interactor == nil {
-		opts.Interactor = &dive.AutoApproveInteractor{}
-	}
 	return dive.ToolAdapter(&AskUserTool{
 		interactor: opts.Interactor,
 	})
@@ -149,6 +147,11 @@ func (t *AskUserTool) PreviewCall(ctx context.Context, input *AskUserInput) *div
 }
 
 func (t *AskUserTool) Call(ctx context.Context, input *AskUserInput) (*dive.ToolResult, error) {
+	// Fail closed if no interactor configured
+	if t.interactor == nil {
+		return dive.NewToolResultError("Error: no user interactor configured - cannot ask user questions"), nil
+	}
+
 	var output AskUserOutput
 
 	switch input.Type {

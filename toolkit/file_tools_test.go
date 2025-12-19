@@ -205,6 +205,101 @@ func TestWriteFileTool(t *testing.T) {
 	})
 }
 
+func TestRealFileSystem_ListDir(t *testing.T) {
+	// Create a temporary directory structure for testing
+	tempDir, err := os.MkdirTemp("", "listdir_test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a directory structure:
+	// tempDir/
+	//   file1.txt
+	//   .hidden_file
+	//   subdir1/
+	//     file2.txt
+	//     .hidden_dir/
+	//       file3.txt
+	//   subdir2/
+	//     subsubdir/
+	//       deep_file.txt (depth 3 - should not be listed)
+
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("file1"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".hidden_file"), []byte("hidden"), 0644))
+
+	subdir1 := filepath.Join(tempDir, "subdir1")
+	require.NoError(t, os.MkdirAll(subdir1, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(subdir1, "file2.txt"), []byte("file2"), 0644))
+
+	hiddenDir := filepath.Join(subdir1, ".hidden_dir")
+	require.NoError(t, os.MkdirAll(hiddenDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(hiddenDir, "file3.txt"), []byte("file3"), 0644))
+
+	subsubdir := filepath.Join(tempDir, "subdir2", "subsubdir")
+	require.NoError(t, os.MkdirAll(subsubdir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(subsubdir, "deep_file.txt"), []byte("deep"), 0644))
+
+	fs := &RealFileSystem{}
+
+	t.Run("ListsFilesWithinDepthLimit", func(t *testing.T) {
+		output, err := fs.ListDir(tempDir)
+		require.NoError(t, err)
+
+		// Should contain the root directory
+		require.Contains(t, output, tempDir)
+
+		// Should contain files at depth 1
+		require.Contains(t, output, "file1.txt")
+
+		// Should contain directories at depth 1
+		require.Contains(t, output, "subdir1")
+		require.Contains(t, output, "subdir2")
+
+		// Should contain files at depth 2
+		require.Contains(t, output, "file2.txt")
+	})
+
+	t.Run("ExcludesHiddenFiles", func(t *testing.T) {
+		output, err := fs.ListDir(tempDir)
+		require.NoError(t, err)
+
+		// Should NOT contain hidden files
+		require.NotContains(t, output, ".hidden_file")
+
+		// Should NOT contain hidden directories or their contents
+		require.NotContains(t, output, ".hidden_dir")
+		require.NotContains(t, output, "file3.txt")
+	})
+
+	t.Run("RespectsDepthLimit", func(t *testing.T) {
+		output, err := fs.ListDir(tempDir)
+		require.NoError(t, err)
+
+		// Should NOT contain files deeper than 2 levels
+		require.NotContains(t, output, "deep_file.txt")
+	})
+
+	t.Run("HandlesNonExistentDirectory", func(t *testing.T) {
+		output, err := fs.ListDir("/nonexistent/path")
+		// Should return an error or empty output
+		if err == nil {
+			require.Empty(t, output)
+		}
+	})
+
+	t.Run("HandlesDangerousPathCharacters", func(t *testing.T) {
+		// Test that paths starting with - don't cause issues
+		// (This was the security issue with the old find-based implementation)
+		dangerousDir := filepath.Join(tempDir, "-rf")
+		require.NoError(t, os.MkdirAll(dangerousDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(dangerousDir, "test.txt"), []byte("test"), 0644))
+
+		// This should work without any shell injection issues
+		output, err := fs.ListDir(tempDir)
+		require.NoError(t, err)
+		require.Contains(t, output, "-rf")
+	})
+}
+
 func TestPathValidator(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "path_validator_test")

@@ -56,7 +56,7 @@ func (t *WebSearchTool) Schema() *schema.Schema {
 }
 
 func (t *WebSearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolResult, error) {
-	limit := 10
+	limit := input.Limit
 	if limit <= 0 {
 		limit = 10
 	}

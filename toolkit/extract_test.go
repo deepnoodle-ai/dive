@@ -299,3 +299,76 @@ func TestExtractTool_Annotations(t *testing.T) {
 	require.True(t, annotations.IdempotentHint)
 	require.False(t, annotations.OpenWorldHint)
 }
+
+func TestExtractTool_PathValidation(t *testing.T) {
+	// Create a workspace directory with a test file
+	workspaceDir := t.TempDir()
+	testFile := filepath.Join(workspaceDir, "allowed.txt")
+	err := os.WriteFile(testFile, []byte("test content"), 0644)
+	require.NoError(t, err)
+
+	// Create a file outside the workspace
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	err = os.WriteFile(outsideFile, []byte("secret data"), 0644)
+	require.NoError(t, err)
+
+	t.Run("AllowsReadingInWorkspace", func(t *testing.T) {
+		tool := NewExtractTool(ExtractToolOptions{
+			WorkspaceDir: workspaceDir,
+		})
+
+		result, err := tool.Call(context.Background(), &ExtractInput{
+			InputPath: testFile,
+			Schema:    map[string]interface{}{"type": "object"},
+		})
+
+		require.NoError(t, err)
+		require.False(t, result.IsError, "Expected success when reading file inside workspace")
+	})
+
+	t.Run("BlocksReadingOutsideWorkspace", func(t *testing.T) {
+		tool := NewExtractTool(ExtractToolOptions{
+			WorkspaceDir: workspaceDir,
+		})
+
+		result, err := tool.Call(context.Background(), &ExtractInput{
+			InputPath: outsideFile,
+			Schema:    map[string]interface{}{"type": "object"},
+		})
+
+		require.NoError(t, err)
+		require.True(t, result.IsError, "Expected error when reading file outside workspace")
+		require.Contains(t, result.Content[0].Text, "outside workspace")
+	})
+
+	t.Run("BlocksSensitiveSystemFiles", func(t *testing.T) {
+		tool := NewExtractTool(ExtractToolOptions{
+			WorkspaceDir: workspaceDir,
+		})
+
+		result, err := tool.Call(context.Background(), &ExtractInput{
+			InputPath: "/etc/passwd",
+			Schema:    map[string]interface{}{"type": "object"},
+		})
+
+		require.NoError(t, err)
+		require.True(t, result.IsError, "Expected error when reading system file")
+		require.Contains(t, result.Content[0].Text, "outside workspace")
+	})
+
+	t.Run("BlocksPathTraversal", func(t *testing.T) {
+		tool := NewExtractTool(ExtractToolOptions{
+			WorkspaceDir: workspaceDir,
+		})
+
+		// Try to traverse outside workspace using ../
+		result, err := tool.Call(context.Background(), &ExtractInput{
+			InputPath: filepath.Join(workspaceDir, "..", "etc", "passwd"),
+			Schema:    map[string]interface{}{"type": "object"},
+		})
+
+		require.NoError(t, err)
+		require.True(t, result.IsError, "Expected error when using path traversal")
+	})
+}

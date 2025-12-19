@@ -60,7 +60,8 @@ func NewCommandTool(opts ...CommandToolOptions) *dive.TypedToolAdapter[*CommandI
 	}
 	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
 	if err != nil {
-		pathValidator = &PathValidator{}
+		// Store nil to indicate validation is unavailable - will fail closed at call time
+		pathValidator = nil
 	}
 	return dive.ToolAdapter(&CommandTool{
 		pathValidator: pathValidator,
@@ -169,15 +170,20 @@ func (c *CommandTool) Call(ctx context.Context, input *CommandInput) (*dive.Tool
 		return NewToolResultError(err.Error()), nil
 	}
 
+	// Fail closed if path validator unavailable and paths need validation
+	if c.pathValidator == nil && (input.WorkingDirectory != "" || input.StdoutFile != "") {
+		return NewToolResultError("error: path validation unavailable - cannot safely perform operations with custom paths"), nil
+	}
+
 	// Validate working directory is within workspace
-	if input.WorkingDirectory != "" && c.pathValidator != nil && c.pathValidator.WorkspaceDir != "" {
+	if input.WorkingDirectory != "" && c.pathValidator != nil {
 		if err := c.pathValidator.ValidateRead(input.WorkingDirectory); err != nil {
 			return NewToolResultError(fmt.Sprintf("error: %s", err.Error())), nil
 		}
 	}
 
 	// Validate stdout file is within workspace
-	if input.StdoutFile != "" && c.pathValidator != nil && c.pathValidator.WorkspaceDir != "" {
+	if input.StdoutFile != "" && c.pathValidator != nil {
 		if err := c.pathValidator.ValidateWrite(input.StdoutFile); err != nil {
 			return NewToolResultError(fmt.Sprintf("error: %s", err.Error())), nil
 		}

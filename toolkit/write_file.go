@@ -31,7 +31,8 @@ type WriteFileTool struct {
 func NewWriteFileTool(options WriteFileToolOptions) *dive.TypedToolAdapter[*WriteFileInput] {
 	pathValidator, err := NewPathValidator(options.WorkspaceDir)
 	if err != nil {
-		pathValidator = &PathValidator{}
+		// Store nil to indicate validation is unavailable - will fail closed at call time
+		pathValidator = nil
 	}
 	return dive.ToolAdapter(&WriteFileTool{
 		pathValidator: pathValidator,
@@ -76,11 +77,12 @@ func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.
 		return dive.NewToolResultError("Error: No file path provided. Please provide a file path either in the constructor or as an argument."), nil
 	}
 
-	// Validate path is within workspace
-	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
-		if err := t.pathValidator.ValidateWrite(filePath); err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
-		}
+	// Validate path is within workspace (fail closed if validator unavailable)
+	if t.pathValidator == nil {
+		return dive.NewToolResultError("Error: path validation unavailable - cannot safely perform file operations"), nil
+	}
+	if err := t.pathValidator.ValidateWrite(filePath); err != nil {
+		return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 	}
 
 	// Convert to absolute path for file operations

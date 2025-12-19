@@ -39,22 +39,14 @@ func Execute() {
 				Help("Log level to use (none, debug, info, warn, error)"),
 		)
 
-	// Register all commands
-	registerAskCommand(app)
+	// Set up main command (runs chat when no subcommand specified)
+	registerMainCommand(app)
+
+	// Register subcommands
 	registerChatCommand(app)
-	registerClassifyCommand(app)
-	registerCompareCommand(app)
 	registerConfigCommand(app)
-	registerDiffCommand(app)
-	registerEmbedCommand(app)
-	registerExtractCommand(app)
-	registerImageCommand(app)
-	registerLLMCommand(app)
 	registerMCPCommand(app)
-	registerSummarizeCommand(app)
 	registerThreadsCommand(app)
-	registerVideoCommand(app)
-	registerWatchCommand(app)
 
 	if err := app.Execute(); err != nil {
 		if cli.IsHelpRequested(err) {

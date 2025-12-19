@@ -37,12 +37,14 @@ type ExtractInput struct {
 
 // ExtractToolOptions configures the extraction tool
 type ExtractToolOptions struct {
-	MaxFileSize int64 `json:"max_file_size,omitempty"`
+	MaxFileSize  int64  `json:"max_file_size,omitempty"`
+	WorkspaceDir string // Base directory for workspace validation (defaults to cwd)
 }
 
 // ExtractTool implements structured data extraction from various input types
 type ExtractTool struct {
-	maxFileSize int64
+	maxFileSize   int64
+	pathValidator *PathValidator
 }
 
 // NewExtractTool creates a new extraction tool
@@ -50,8 +52,13 @@ func NewExtractTool(options ExtractToolOptions) *dive.TypedToolAdapter[*ExtractI
 	if options.MaxFileSize == 0 {
 		options.MaxFileSize = 10 * 1024 * 1024 // 10MB default
 	}
+	pathValidator, err := NewPathValidator(options.WorkspaceDir)
+	if err != nil {
+		pathValidator = nil
+	}
 	return dive.ToolAdapter(&ExtractTool{
-		maxFileSize: options.MaxFileSize,
+		maxFileSize:   options.MaxFileSize,
+		pathValidator: pathValidator,
 	})
 }
 
@@ -99,6 +106,13 @@ func (t *ExtractTool) Call(ctx context.Context, input *ExtractInput) (*dive.Tool
 
 	if input.Schema == nil {
 		return NewToolResultError("Error: No schema provided"), nil
+	}
+
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateRead(input.InputPath); err != nil {
+			return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	// Resolve absolute path

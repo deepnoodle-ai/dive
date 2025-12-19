@@ -3,6 +3,8 @@ package toolkit
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -97,6 +99,11 @@ func (t *FetchTool) PreviewCall(ctx context.Context, req *fetch.Request) *dive.T
 }
 
 func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolResult, error) {
+	// Validate URL to prevent SSRF attacks
+	if err := validateFetchURL(req.URL); err != nil {
+		return NewToolResultError(fmt.Sprintf("URL validation failed: %s", err)), nil
+	}
+
 	req.Formats = []string{"markdown"}
 
 	if req.ExcludeTags == nil {
@@ -164,4 +171,83 @@ func truncateText(text string, maxSize int) string {
 		return text
 	}
 	return string(runes[:maxSize]) + "..."
+}
+
+// isPrivateIP checks if an IP address is in a private or reserved range
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+
+	// Check for loopback (127.0.0.0/8, ::1)
+	if ip.IsLoopback() {
+		return true
+	}
+
+	// Check for link-local (169.254.0.0/16, fe80::/10)
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	// Check for private ranges
+	if ip.IsPrivate() {
+		return true
+	}
+
+	// Check for unspecified (0.0.0.0, ::)
+	if ip.IsUnspecified() {
+		return true
+	}
+
+	// Additional check for IPv4-mapped IPv6 addresses
+	if ip4 := ip.To4(); ip4 != nil {
+		// Check if it starts with 0 (0.0.0.0/8)
+		if ip4[0] == 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// validateFetchURL validates a URL for safe fetching, preventing SSRF attacks
+func validateFetchURL(rawURL string) error {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Only allow http and https schemes
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("invalid URL scheme %q: only http and https are allowed", parsedURL.Scheme)
+	}
+
+	// Get the hostname
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("URL must include a hostname")
+	}
+
+	// Block localhost variations
+	lowerHost := strings.ToLower(hostname)
+	if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") {
+		return fmt.Errorf("access to localhost is not allowed")
+	}
+
+	// Resolve hostname to IP addresses
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		// Fail closed: DNS resolution failure blocks the request
+		return fmt.Errorf("DNS resolution failed for %q: %w", hostname, err)
+	}
+
+	// Check if any resolved IP is private
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("access to private/internal IP address %s is not allowed", ip.String())
+		}
+	}
+
+	return nil
 }

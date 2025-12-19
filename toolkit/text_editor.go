@@ -54,9 +54,11 @@ type TextEditorToolInput struct {
 
 // TextEditorToolOptions are the options used to configure a TextEditorTool.
 type TextEditorToolOptions struct {
-	Type       string
-	Name       string
-	FileSystem FileSystem // Optional: for testing with mock filesystem
+	Type         string
+	Name         string
+	FileSystem   FileSystem // Optional: for testing with mock filesystem
+	WorkspaceDir string     // Base directory for workspace validation (defaults to cwd)
+	MaxFileSize  int        // Maximum file size in bytes (default: 1MB)
 }
 
 // NewTextEditorTool creates a new TextEditorTool with the given options.
@@ -74,20 +76,32 @@ func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*Te
 	if resolvedOpts.FileSystem == nil {
 		resolvedOpts.FileSystem = &RealFileSystem{}
 	}
+	if resolvedOpts.MaxFileSize <= 0 {
+		resolvedOpts.MaxFileSize = MaxFileSize // Default 1MB
+	}
+	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
+	if err != nil {
+		// Store nil to indicate validation is unavailable - will fail closed at call time
+		pathValidator = nil
+	}
 	return dive.ToolAdapter(&TextEditorTool{
-		typeString:  resolvedOpts.Type,
-		name:        resolvedOpts.Name,
-		fs:          resolvedOpts.FileSystem,
-		fileHistory: make(map[string][]string),
+		typeString:    resolvedOpts.Type,
+		name:          resolvedOpts.Name,
+		fs:            resolvedOpts.FileSystem,
+		pathValidator: pathValidator,
+		fileHistory:   make(map[string][]string),
+		maxFileSize:   resolvedOpts.MaxFileSize,
 	})
 }
 
 // TextEditorTool implements Anthropic's file editor tool
 type TextEditorTool struct {
-	typeString  string
-	name        string
-	fs          FileSystem
-	fileHistory map[string][]string // Track file edit history
+	typeString    string
+	name          string
+	fs            FileSystem
+	pathValidator *PathValidator
+	fileHistory   map[string][]string // Track file edit history
+	maxFileSize   int                 // Maximum file size in bytes
 }
 
 func (t *TextEditorTool) Name() string {
@@ -206,6 +220,22 @@ func (t *TextEditorTool) validatePath(command Command, path string) error {
 		return fmt.Errorf("the path %s is not an absolute path, it should start with `/`", path)
 	}
 
+	// Fail closed if path validator unavailable
+	if t.pathValidator == nil {
+		return fmt.Errorf("path validation unavailable - cannot safely perform file operations")
+	}
+
+	// Validate path is within workspace
+	var err error
+	if command == CommandCreate || command == CommandStrReplace || command == CommandInsert {
+		err = t.pathValidator.ValidateWrite(path)
+	} else {
+		err = t.pathValidator.ValidateRead(path)
+	}
+	if err != nil {
+		return err
+	}
+
 	// Check if path exists (except for create command)
 	exists := t.fs.FileExists(path)
 	if !exists && command != CommandCreate {
@@ -236,6 +266,11 @@ func (t *TextEditorTool) handleView(path string, viewRange []int) (*dive.ToolRes
 
 		result := fmt.Sprintf("Here's the files and directories up to 2 levels deep in %s, excluding hidden items:\n%s", path, output)
 		return dive.NewToolResultText(result), nil
+	}
+
+	// Check file size before reading to prevent memory exhaustion
+	if err := t.checkFileSize(path); err != nil {
+		return dive.NewToolResultError(err.Error()), nil
 	}
 
 	// Handle file viewing
@@ -295,21 +330,23 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 		return dive.NewToolResultError("parameter `old_str` is required for command: str_replace"), nil
 	}
 
+	// Check file size before reading to prevent memory exhaustion
+	if err := t.checkFileSize(path); err != nil {
+		return dive.NewToolResultError(err.Error()), nil
+	}
+
 	content, err := t.fs.ReadFile(path)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error reading file %s: %v", path, err)), nil
 	}
 
-	// Expand tabs for consistent handling
-	content = strings.ReplaceAll(content, "\t", "    ")
-	oldStrExpanded := strings.ReplaceAll(*oldStr, "\t", "    ")
-	newStrExpanded := ""
+	newStrValue := ""
 	if newStr != nil {
-		newStrExpanded = strings.ReplaceAll(*newStr, "\t", "    ")
+		newStrValue = *newStr
 	}
 
 	// Check if old_str is unique
-	occurrences := strings.Count(content, oldStrExpanded)
+	occurrences := strings.Count(content, *oldStr)
 	if occurrences == 0 {
 		return dive.NewToolResultError(fmt.Sprintf("No replacement was performed, old_str `%s` did not appear verbatim in %s", *oldStr, path)), nil
 	}
@@ -317,7 +354,7 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 		lines := strings.Split(content, "\n")
 		lineNumbers := []int{}
 		for i, line := range lines {
-			if strings.Contains(line, oldStrExpanded) {
+			if strings.Contains(line, *oldStr) {
 				lineNumbers = append(lineNumbers, i+1)
 			}
 		}
@@ -328,14 +365,14 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 	t.fileHistory[path] = append(t.fileHistory[path], content)
 
 	// Perform replacement
-	newContent := strings.Replace(content, oldStrExpanded, newStrExpanded, 1)
+	newContent := strings.Replace(content, *oldStr, newStrValue, 1)
 
 	if err := t.fs.WriteFile(path, newContent); err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error writing file %s: %v", path, err)), nil
 	}
 
 	// Generate snippet for feedback
-	snippet := t.generateEditSnippet(content, newContent, oldStrExpanded, newStrExpanded)
+	snippet := t.generateEditSnippet(content, newContent, *oldStr, newStrValue)
 	successMsg := fmt.Sprintf("The file %s has been edited. %s\nReview the changes and make sure they are as expected. Edit the file again if necessary.", path, snippet)
 
 	return dive.NewToolResultText(successMsg), nil
@@ -349,14 +386,15 @@ func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *stri
 		return dive.NewToolResultError("parameter `new_str` is required for command: insert"), nil
 	}
 
+	// Check file size before reading to prevent memory exhaustion
+	if err := t.checkFileSize(path); err != nil {
+		return dive.NewToolResultError(err.Error()), nil
+	}
+
 	content, err := t.fs.ReadFile(path)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("error reading file %s: %v", path, err)), nil
 	}
-
-	// Expand tabs
-	content = strings.ReplaceAll(content, "\t", "    ")
-	newStrExpanded := strings.ReplaceAll(*newStr, "\t", "    ")
 
 	lines := strings.Split(content, "\n")
 	nLines := len(lines)
@@ -369,7 +407,7 @@ func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *stri
 	t.fileHistory[path] = append(t.fileHistory[path], content)
 
 	// Insert new content
-	newStrLines := strings.Split(newStrExpanded, "\n")
+	newStrLines := strings.Split(*newStr, "\n")
 	newLines := make([]string, 0, len(lines)+len(newStrLines))
 	newLines = append(newLines, lines[:*insertLine]...)
 	newLines = append(newLines, newStrLines...)
@@ -411,7 +449,6 @@ func (t *TextEditorTool) generateEditSnippet(originalContent, newContent, oldStr
 
 func (t *TextEditorTool) makeOutput(content, descriptor string, initLine int) string {
 	content = t.maybeTruncate(content)
-	content = strings.ReplaceAll(content, "\t", "    ") // Expand tabs
 
 	lines := strings.Split(content, "\n")
 	numberedLines := make([]string, len(lines))
@@ -433,6 +470,18 @@ func (t *TextEditorTool) maybeTruncate(content string) string {
 func (t *TextEditorTool) ToolConfiguration(providerName string) map[string]any {
 	if providerName == "anthropic" {
 		return map[string]any{"type": t.typeString, "name": t.name}
+	}
+	return nil
+}
+
+// checkFileSize verifies the file is within the configured size limit
+func (t *TextEditorTool) checkFileSize(path string) error {
+	size, err := t.fs.FileSize(path)
+	if err != nil {
+		return fmt.Errorf("failed to stat file %s: %v", path, err)
+	}
+	if size > int64(t.maxFileSize) {
+		return fmt.Errorf("file %s is too large (%d bytes, max %d bytes). Use view_range to read portions of the file", path, size, t.maxFileSize)
 	}
 	return nil
 }

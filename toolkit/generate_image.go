@@ -31,9 +31,10 @@ type ImageGenerationInput struct {
 
 // ImageGenerationToolOptions are the options used to configure an ImageGenerationTool.
 type ImageGenerationToolOptions struct {
-	Client     *openai.Client
-	FileSystem FileSystem
-	Registry   *providers.Registry
+	Client       *openai.Client
+	FileSystem   FileSystem
+	Registry     *providers.Registry
+	WorkspaceDir string // Base directory for workspace validation (defaults to cwd)
 }
 
 // NewImageGenerationTool creates a new ImageGenerationTool with the given options.
@@ -46,19 +47,25 @@ func NewImageGenerationTool(opts ImageGenerationToolOptions) *dive.TypedToolAdap
 		registry, _ := providers.DefaultRegistry()
 		opts.Registry = registry
 	}
+	pathValidator, err := NewPathValidator(opts.WorkspaceDir)
+	if err != nil {
+		pathValidator = nil
+	}
 	return dive.ToolAdapter(&ImageGenerationTool{
-		client:   opts.Client,
-		fs:       opts.FileSystem,
-		registry: opts.Registry,
+		client:        opts.Client,
+		fs:            opts.FileSystem,
+		registry:      opts.Registry,
+		pathValidator: pathValidator,
 	})
 }
 
 // ImageGenerationTool is a tool that allows models to generate images using various
 // providers including OpenAI DALL-E, gpt-image-1, and Google Imagen.
 type ImageGenerationTool struct {
-	client   *openai.Client
-	fs       FileSystem
-	registry *providers.Registry
+	client        *openai.Client
+	fs            FileSystem
+	registry      *providers.Registry
+	pathValidator *PathValidator
 }
 
 func (t *ImageGenerationTool) Name() string {
@@ -141,6 +148,13 @@ func (t *ImageGenerationTool) Call(ctx context.Context, input *ImageGenerationIn
 	}
 	if input.OutputPath == "" {
 		return dive.NewToolResultError("Error: output_path is required for image generation"), nil
+	}
+
+	// Validate output path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateWrite(input.OutputPath); err != nil {
+			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	// Validate and set defaults
