@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	DefaultModel     = ModelGrok40709
+	DefaultModel     = ModelGrok41FastReasoning
 	DefaultEndpoint  = "https://api.x.ai/v1/chat/completions"
 	DefaultMaxTokens = 4096
 	DefaultClient    = &http.Client{Timeout: 300 * time.Second}

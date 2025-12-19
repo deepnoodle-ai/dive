@@ -65,9 +65,6 @@ func TestMCPClient_ErrorHandling(t *testing.T) {
 	require.True(t, IsNotConnectedError(err))
 }
 
-
-
-
 func TestMCPManager_Basic(t *testing.T) {
 	manager := NewManager()
 	require.NotNil(t, manager)

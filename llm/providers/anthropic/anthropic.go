@@ -18,7 +18,7 @@ import (
 const ProviderName = "anthropic"
 
 var (
-	DefaultModel         = ModelClaudeSonnet4
+	DefaultModel         = ModelClaudeSonnet45
 	DefaultEndpoint      = "https://api.anthropic.com/v1/messages"
 	DefaultMaxTokens     = 4096
 	DefaultClient        = &http.Client{Timeout: 300 * time.Second}

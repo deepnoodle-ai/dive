@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	DefaultModel     = ModelMistralLarge2411
+	DefaultModel     = ModelMistralLarge3
 	DefaultEndpoint  = "https://api.mistral.ai/v1/chat/completions"
 	DefaultMaxTokens = 4096
 	DefaultClient    = &http.Client{Timeout: 300 * time.Second}

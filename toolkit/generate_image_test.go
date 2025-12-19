@@ -32,11 +32,11 @@ func TestImageGenerationTool_Schema(t *testing.T) {
 
 	// Verify model enum values (should include both OpenAI and Google models)
 	modelProp := schema.Properties["model"]
+	require.Contains(t, modelProp.Enum, "gpt-image-1.5")
 	require.Contains(t, modelProp.Enum, "gpt-image-1")
-	require.Contains(t, modelProp.Enum, "dall-e-2")
-	require.Contains(t, modelProp.Enum, "dall-e-3")
-	require.Contains(t, modelProp.Enum, "imagen-3.0-generate-001")
-	require.Contains(t, modelProp.Enum, "imagen-3.0-generate-002")
+	require.Contains(t, modelProp.Enum, "gpt-image-1-mini")
+	require.Contains(t, modelProp.Enum, "gemini-2.5-flash-image")
+	require.Contains(t, modelProp.Enum, "gemini-3-pro-image-preview")
 
 	// Verify quality enum values
 	qualityProp := schema.Properties["quality"]

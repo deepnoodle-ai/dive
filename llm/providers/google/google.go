@@ -17,7 +17,7 @@ import (
 const ProviderName = "google"
 
 var (
-	DefaultModel         = ModelGemini25FlashPro
+	DefaultModel         = ModelGemini25Pro
 	DefaultMaxTokens     = 4096
 	DefaultClient        *http.Client
 	DefaultMaxRetries    = 3

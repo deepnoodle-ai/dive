@@ -66,7 +66,7 @@ func (t *ImageGenerationTool) Name() string {
 }
 
 func (t *ImageGenerationTool) Description() string {
-	return "Generate images using various AI providers (OpenAI DALL-E, gpt-image-1, Google Imagen). Provide a text prompt to create an image. Saves the images to the file system at the path specified in the `output_path` parameter. Specify provider and model for best results."
+	return "Generate images using various AI providers (OpenAI gpt-image-1.5, Google Nano Banana). Provide a text prompt to create an image. Saves the images to the file system at the path specified in the `output_path` parameter. Specify provider and model for best results."
 }
 
 func (t *ImageGenerationTool) Schema() *schema.Schema {
@@ -85,22 +85,22 @@ func (t *ImageGenerationTool) Schema() *schema.Schema {
 			},
 			"model": {
 				Type:        "string",
-				Description: "The model to use for image generation. For OpenAI: gpt-image-1, dall-e-2, dall-e-3. For Google: imagen-3.0-generate-001, imagen-3.0-generate-002.",
-				Enum:        []string{"gpt-image-1", "dall-e-2", "dall-e-3", "imagen-3.0-generate-001", "imagen-3.0-generate-002"},
+				Description: "The model to use for image generation. For OpenAI: gpt-image-1.5 (recommended), gpt-image-1, gpt-image-1-mini. For Google: gemini-2.5-flash-image (Nano Banana), gemini-3-pro-image-preview (Nano Banana Pro).",
+				Enum:        []string{"gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini", "gemini-2.5-flash-image", "gemini-3-pro-image-preview"},
 			},
 			"size": {
 				Type:        "string",
-				Description: "The size of the generated images. Must be one of `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait), or `auto` (default value) for `gpt-image-1`, and one of `256x256`, `512x512`, or `1024x1024` for `dall-e-2`.",
-				Enum:        []string{"256x256", "512x512", "1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792", "auto"},
+				Description: "The size of the generated images. For OpenAI models: `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait), or `auto` (default). For Google Nano Banana Pro: supports up to 4096px.",
+				Enum:        []string{"1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792", "2048x2048", "4096x4096", "auto"},
 			},
 			"quality": {
 				Type:        "string",
-				Description: "The quality of the image that will be generated. `auto`, `high`, `medium` and `low` are only supported for `gpt-image-1`. Defaults to `auto`.",
+				Description: "The quality of the image that will be generated. `auto`, `high`, `medium` and `low` are supported for OpenAI gpt-image models. Defaults to `auto`.",
 				Enum:        []string{"high", "medium", "low", "auto"},
 			},
 			"n": {
 				Type:        "integer",
-				Description: "The number of images to generate. Must be between 1 and 10. For dall-e-3, only n=1 is supported.",
+				Description: "The number of images to generate. Must be between 1 and 10.",
 			},
 			"moderation": {
 				Type:        "string",

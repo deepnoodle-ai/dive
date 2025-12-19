@@ -37,7 +37,7 @@ func TestExtractTool_CallWithMissingInputPath(t *testing.T) {
 	input := &ExtractInput{
 		Schema: map[string]interface{}{"type": "object"},
 	}
-	
+
 	result, err := tool.Call(context.Background(), input)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
@@ -49,7 +49,7 @@ func TestExtractTool_CallWithMissingSchema(t *testing.T) {
 	input := &ExtractInput{
 		InputPath: "test.txt",
 	}
-	
+
 	result, err := tool.Call(context.Background(), input)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
@@ -62,7 +62,7 @@ func TestExtractTool_CallWithNonexistentFile(t *testing.T) {
 		InputPath: "nonexistent.txt",
 		Schema:    map[string]interface{}{"type": "object"},
 	}
-	
+
 	result, err := tool.Call(context.Background(), input)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
@@ -88,25 +88,25 @@ func TestExtractTool_CallWithTextFile(t *testing.T) {
 		},
 		"required": []string{"message"},
 	}
-	
+
 	input := &ExtractInput{
 		InputPath: textFile,
 		Schema:    schema,
 	}
-	
+
 	result, err := tool.Call(context.Background(), input)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
-	
+
 	// Parse the result
 	var analysisResult map[string]interface{}
 	err = json.Unmarshal([]byte(result.Content[0].Text), &analysisResult)
 	require.NoError(t, err)
-	
+
 	require.Equal(t, "text", analysisResult["file_type"])
 	require.Equal(t, textFile, analysisResult["file_path"])
 	require.Equal(t, testContent, analysisResult["content"])
-	
+
 	// Check schema structure instead of exact equality due to JSON unmarshaling type differences
 	extractedSchema, ok := analysisResult["schema"].(map[string]interface{})
 	require.True(t, ok)
@@ -139,22 +139,22 @@ func TestExtractTool_CallWithBiasFilter(t *testing.T) {
 			},
 		},
 	}
-	
+
 	input := &ExtractInput{
 		InputPath:  textFile,
 		Schema:     schema,
 		BiasFilter: "avoid gender-based assumptions about professions",
 	}
-	
+
 	result, err := tool.Call(context.Background(), input)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
-	
+
 	// Parse the result
 	var analysisResult map[string]interface{}
 	err = json.Unmarshal([]byte(result.Content[0].Text), &analysisResult)
 	require.NoError(t, err)
-	
+
 	require.Equal(t, "avoid gender-based assumptions about professions", analysisResult["bias_filter"])
 	require.Contains(t, analysisResult["extraction_guidelines"], "Apply bias filtering: avoid gender-based assumptions about professions")
 }
@@ -176,29 +176,29 @@ func TestExtractTool_CallWithCustomInstructions(t *testing.T) {
 			},
 		},
 	}
-	
+
 	input := &ExtractInput{
 		InputPath:    textFile,
 		Schema:       schema,
 		Instructions: "focus only on monetary values and convert to numbers",
 	}
-	
+
 	result, err := tool.Call(context.Background(), input)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
-	
+
 	// Parse the result
 	var analysisResult map[string]interface{}
 	err = json.Unmarshal([]byte(result.Content[0].Text), &analysisResult)
 	require.NoError(t, err)
-	
+
 	require.Equal(t, "focus only on monetary values and convert to numbers", analysisResult["custom_instructions"])
 	require.Contains(t, analysisResult["extraction_guidelines"], "Additional instructions: focus only on monetary values and convert to numbers")
 }
 
 func TestExtractTool_DetectFileType(t *testing.T) {
 	tool := &ExtractTool{}
-	
+
 	tests := []struct {
 		name     string
 		path     string
@@ -211,7 +211,7 @@ func TestExtractTool_DetectFileType(t *testing.T) {
 		{"Image file", "image.jpg", []byte("\xFF\xD8\xFF"), "image"},
 		{"Markdown file", "readme.md", []byte("# Title"), "text"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tool.detectFileType(tt.path, tt.content)
@@ -222,7 +222,7 @@ func TestExtractTool_DetectFileType(t *testing.T) {
 
 func TestExtractTool_GetContentPreview(t *testing.T) {
 	tool := &ExtractTool{}
-	
+
 	tests := []struct {
 		name     string
 		content  []byte
@@ -254,7 +254,7 @@ func TestExtractTool_GetContentPreview(t *testing.T) {
 			"PDF file (8 bytes)",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tool.getContentPreview(tt.content, tt.fileType)
@@ -267,7 +267,7 @@ func TestExtractTool_CallWithLargeFile(t *testing.T) {
 	// Create a temporary file that exceeds the size limit
 	tempDir := t.TempDir()
 	largeFile := filepath.Join(tempDir, "large.txt")
-	
+
 	// Create content larger than the limit
 	largeContent := make([]byte, 1024) // 1KB
 	for i := range largeContent {
@@ -278,12 +278,12 @@ func TestExtractTool_CallWithLargeFile(t *testing.T) {
 
 	tool := &ExtractTool{maxFileSize: 512} // 512 byte limit
 	schema := map[string]interface{}{"type": "object"}
-	
+
 	input := &ExtractInput{
 		InputPath: largeFile,
 		Schema:    schema,
 	}
-	
+
 	result, err := tool.Call(context.Background(), input)
 	require.NoError(t, err)
 	require.True(t, result.IsError)

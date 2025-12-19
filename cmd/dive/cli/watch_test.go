@@ -47,10 +47,10 @@ func TestWatchOptionsValidation(t *testing.T) {
 		{
 			name: "valid options",
 			options: WatchOptions{
-				Patterns:    []string{"*.go"},
-				OnChange:    "lint files",
-				AgentName:   "TestAgent",
-				Debounce:    time.Millisecond * 500,
+				Patterns:  []string{"*.go"},
+				OnChange:  "lint files",
+				AgentName: "TestAgent",
+				Debounce:  time.Millisecond * 500,
 			},
 			expectError: false,
 		},
@@ -104,7 +104,7 @@ func TestGlobPatternMatching(t *testing.T) {
 		t.Run(tc.pattern+"_"+tc.filePath, func(t *testing.T) {
 			matched, err := doublestar.PathMatch(tc.pattern, tc.filePath)
 			require.NoError(t, err)
-			require.Equal(t, tc.expected, matched, 
+			require.Equal(t, tc.expected, matched,
 				"Pattern %s should match %s: %v", tc.pattern, tc.filePath, tc.expected)
 		})
 	}
@@ -119,18 +119,18 @@ func TestDebounceLogic(t *testing.T) {
 	}
 
 	testFile := "test.go"
-	
+
 	// First event should not be debounced
 	now := time.Now()
 	fw.debouncer[testFile] = now.Add(-time.Millisecond * 200) // Old timestamp
-	
+
 	// Should not be debounced (enough time has passed)
 	shouldProcess := now.Sub(fw.debouncer[testFile]) >= fw.options.Debounce
 	require.True(t, shouldProcess, "Should process event when debounce time has passed")
 
 	// Update timestamp to now
 	fw.debouncer[testFile] = now
-	
+
 	// Should be debounced (not enough time has passed)
 	currentTime := now.Add(time.Millisecond * 50)
 	shouldProcess = currentTime.Sub(fw.debouncer[testFile]) >= fw.options.Debounce
@@ -141,7 +141,7 @@ func TestWatchCommand(t *testing.T) {
 	// Create a temporary directory for testing
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.go")
-	
+
 	// Create a test file
 	err := os.WriteFile(testFile, []byte("package main\n\nfunc main() {}\n"), 0644)
 	require.NoError(t, err)

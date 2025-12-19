@@ -39,14 +39,14 @@ type GrepInput struct {
 	Glob       string         `json:"glob,omitempty"`
 	Type       string         `json:"type,omitempty"`
 	OutputMode GrepOutputMode `json:"output_mode,omitempty"`
-	CaseInsens bool           `json:"-i,omitempty"`          // Case insensitive search
-	ShowLines  bool           `json:"-n,omitempty"`          // Show line numbers (default true)
-	Context    int            `json:"-C,omitempty"`          // Lines before and after each match
-	Before     int            `json:"-B,omitempty"`          // Lines before each match
-	After      int            `json:"-A,omitempty"`          // Lines after each match
-	Multiline  bool           `json:"multiline,omitempty"`   // Enable multiline mode
-	HeadLimit  int            `json:"head_limit,omitempty"`  // Limit output to first N entries
-	Offset     int            `json:"offset,omitempty"`      // Skip first N entries
+	CaseInsens bool           `json:"-i,omitempty"`         // Case insensitive search
+	ShowLines  bool           `json:"-n,omitempty"`         // Show line numbers (default true)
+	Context    int            `json:"-C,omitempty"`         // Lines before and after each match
+	Before     int            `json:"-B,omitempty"`         // Lines before each match
+	After      int            `json:"-A,omitempty"`         // Lines after each match
+	Multiline  bool           `json:"multiline,omitempty"`  // Enable multiline mode
+	HeadLimit  int            `json:"head_limit,omitempty"` // Limit output to first N entries
+	Offset     int            `json:"offset,omitempty"`     // Skip first N entries
 }
 
 // GrepToolOptions configures the GrepTool

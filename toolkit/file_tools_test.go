@@ -103,8 +103,8 @@ func TestWriteFileTool(t *testing.T) {
 		testContent := "This is test content for write_file tool"
 
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    testFilePath,
-			Content: testContent,
+			FilePath: testFilePath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Unexpected error")
@@ -122,8 +122,8 @@ func TestWriteFileTool(t *testing.T) {
 		testContent := "This should create the directory"
 
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    testFilePath,
-			Content: testContent,
+			FilePath: testFilePath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Unexpected error")
@@ -138,8 +138,8 @@ func TestWriteFileTool(t *testing.T) {
 	t.Run("NoPathProvided", func(t *testing.T) {
 		tool := NewWriteFileTool(WriteFileToolOptions{})
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    "",
-			Content: "Some content",
+			FilePath: "",
+			Content:  "Some content",
 		})
 
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
@@ -157,16 +157,16 @@ func TestWriteFileTool(t *testing.T) {
 
 		// Test allowed path
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    allowedPath,
-			Content: testContent,
+			FilePath: allowedPath,
+			Content:  testContent,
 		})
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
 
 		// Test denied path
 		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    deniedPath,
-			Content: testContent,
+			FilePath: deniedPath,
+			Content:  testContent,
 		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
 		require.Contains(t, result.Content[0].Text, "Error: Access denied", "Expected access denied error")
@@ -183,16 +183,16 @@ func TestWriteFileTool(t *testing.T) {
 
 		// Test allowed path
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    allowedPath,
-			Content: testContent,
+			FilePath: allowedPath,
+			Content:  testContent,
 		})
 		require.NoError(t, err, "Unexpected error")
 		require.Contains(t, result.Content[0].Text, "Successfully wrote", "Expected success message")
 
 		// Test denied path
 		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    deniedPath,
-			Content: testContent,
+			FilePath: deniedPath,
+			Content:  testContent,
 		})
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
 		require.Contains(t, result.Content[0].Text, "Error: Access denied", "Expected access denied error")
@@ -209,8 +209,8 @@ func TestWriteFileTool(t *testing.T) {
 		allowedPath := filepath.Join(allowedDir, "wildcard.txt")
 
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    allowedPath,
-			Content: testContent,
+			FilePath: allowedPath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Unexpected error")
@@ -219,8 +219,8 @@ func TestWriteFileTool(t *testing.T) {
 		// Should be denied (wrong extension)
 		deniedPath := filepath.Join(allowedDir, "wildcard.json")
 		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    deniedPath,
-			Content: testContent,
+			FilePath: deniedPath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
@@ -237,8 +237,8 @@ func TestWriteFileTool(t *testing.T) {
 		// Should be allowed (in allowed dir)
 		allowedPath := filepath.Join(allowedDir, "double_wildcard.txt")
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    allowedPath,
-			Content: testContent,
+			FilePath: allowedPath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Unexpected error")
@@ -247,8 +247,8 @@ func TestWriteFileTool(t *testing.T) {
 		// Should be allowed (in nested dir)
 		nestedPath := filepath.Join(nestedDir, "nested_wildcard.txt")
 		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    nestedPath,
-			Content: testContent,
+			FilePath: nestedPath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Unexpected error")
@@ -257,8 +257,8 @@ func TestWriteFileTool(t *testing.T) {
 		// Should be denied (outside allowed dir)
 		deniedPath := filepath.Join(deniedDir, "outside_wildcard.txt")
 		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    deniedPath,
-			Content: testContent,
+			FilePath: deniedPath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")
@@ -277,8 +277,8 @@ func TestWriteFileTool(t *testing.T) {
 		// Should be allowed (in allowed dir)
 		allowedPath := filepath.Join(allowedDir, "not_denied.txt")
 		result, err := tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    allowedPath,
-			Content: testContent,
+			FilePath: allowedPath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Unexpected error")
@@ -286,8 +286,8 @@ func TestWriteFileTool(t *testing.T) {
 
 		// Should be denied (specifically denied)
 		result, err = tool.Call(context.Background(), &WriteFileInput{
-			FilePath:    specificPath,
-			Content: testContent,
+			FilePath: specificPath,
+			Content:  testContent,
 		})
 
 		require.NoError(t, err, "Expected error to be returned in result, not as an error")

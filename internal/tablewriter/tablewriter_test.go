@@ -77,7 +77,7 @@ func TestTableWithVaryingColumnCounts(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewWriter(&buf)
 	w.Header([]string{"Col1", "Col2", "Col3", "Col4"})
-	w.Append([]string{"A", "B"}) // Only 2 columns
+	w.Append([]string{"A", "B"})                // Only 2 columns
 	w.Append([]string{"C", "D", "E", "F", "G"}) // 5 columns (extra ignored)
 	w.Render()
 
@@ -141,13 +141,13 @@ func TestTableWithANSIColors(t *testing.T) {
 
 	// Rows with ANSI color codes
 	w.Append([]string{
-		"\033[32m✓\033[0m",      // Green checkmark
+		"\033[32m✓\033[0m",         // Green checkmark
 		"\033[34mBlue Text\033[0m", // Blue text
 		"100",
 	})
 	w.Append([]string{
 		"\033[31m✗\033[0m",      // Red X
-		"\033[33mYellow\033[0m",    // Yellow text
+		"\033[33mYellow\033[0m", // Yellow text
 		"200",
 	})
 

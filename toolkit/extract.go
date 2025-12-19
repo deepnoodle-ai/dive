@@ -21,16 +21,16 @@ var _ dive.TypedTool[*ExtractInput] = &ExtractTool{}
 type ExtractInput struct {
 	// Path to the input file (text, image, PDF, etc.)
 	InputPath string `json:"input_path"`
-	
+
 	// JSON schema defining the structure to extract
 	Schema map[string]interface{} `json:"schema"`
-	
+
 	// Optional: Path to save the extracted data
 	OutputPath string `json:"output_path,omitempty"`
-	
+
 	// Optional: Bias filtering instructions
 	BiasFilter string `json:"bias_filter,omitempty"`
-	
+
 	// Optional: Additional extraction instructions
 	Instructions string `json:"instructions,omitempty"`
 }
@@ -173,7 +173,7 @@ func (t *ExtractTool) detectFileType(path string, content []byte) string {
 	// Use MIME type detection
 	mimeType := http.DetectContentType(content)
 	mediaType, _, _ := mime.ParseMediaType(mimeType)
-	
+
 	switch {
 	case strings.HasPrefix(mediaType, "image/"):
 		return "image"

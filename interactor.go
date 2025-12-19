@@ -29,11 +29,11 @@ type UserInteractor interface {
 
 // ConfirmRequest contains information for a confirmation prompt.
 type ConfirmRequest struct {
-	Tool    Tool               // The tool requesting confirmation (optional)
+	Tool    Tool                // The tool requesting confirmation (optional)
 	Call    *llm.ToolUseContent // The tool call being confirmed (optional)
-	Title   string             // Short title, e.g., "Execute command?"
-	Message string             // Longer description of what will happen
-	Default bool               // Default value if user doesn't choose
+	Title   string              // Short title, e.g., "Execute command?"
+	Message string              // Longer description of what will happen
+	Default bool                // Default value if user doesn't choose
 }
 
 // SelectOption represents a single option in a selection.
@@ -74,12 +74,12 @@ type MultiSelectResponse struct {
 
 // InputRequest contains information for a text input prompt.
 type InputRequest struct {
-	Title       string              // Prompt title
-	Message     string              // Additional context/instructions
-	Placeholder string              // Placeholder text in input field
-	Default     string              // Default value
-	Multiline   bool                // Whether to allow multiline input
-	Validate    func(string) error  // Optional validation function
+	Title       string             // Prompt title
+	Message     string             // Additional context/instructions
+	Placeholder string             // Placeholder text in input field
+	Default     string             // Default value
+	Multiline   bool               // Whether to allow multiline input
+	Validate    func(string) error // Optional validation function
 }
 
 // InputResponse contains the user's text input.

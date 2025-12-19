@@ -19,7 +19,7 @@ import (
 const ProviderName = "openai"
 
 var (
-	DefaultModel         = ModelGPT5
+	DefaultModel         = ModelGPT52
 	DefaultMaxTokens     = 4096
 	DefaultMaxRetries    = 2
 	DefaultRetryBaseWait = 1 * time.Second

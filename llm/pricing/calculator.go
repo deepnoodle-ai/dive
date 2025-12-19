@@ -6,8 +6,8 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/llm/providers/google"
-	"github.com/deepnoodle-ai/dive/llm/providers/groq"
 	"github.com/deepnoodle-ai/dive/llm/providers/grok"
+	"github.com/deepnoodle-ai/dive/llm/providers/groq"
 	"github.com/deepnoodle-ai/dive/llm/providers/mistral"
 	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
 	"github.com/deepnoodle-ai/dive/llm/providers/openai"
@@ -53,7 +53,7 @@ func NewCalculator() *Calculator {
 func (c *Calculator) CalculateTextCost(provider, model string, inputTokens, outputTokens int) (*CostBreakdown, error) {
 	// Normalize provider name
 	provider = strings.ToLower(provider)
-	
+
 	var inputPrice, outputPrice float64
 	var found bool
 	var currency = "USD"
@@ -128,8 +128,8 @@ func (c *Calculator) CalculateTextCost(provider, model string, inputTokens, outp
 	// If pricing not found, use estimated pricing
 	estimated := false
 	if !found {
-		inputPrice = 2.0   // $2 per 1M tokens (rough average)
-		outputPrice = 6.0  // $6 per 1M tokens (rough average)
+		inputPrice = 2.0  // $2 per 1M tokens (rough average)
+		outputPrice = 6.0 // $6 per 1M tokens (rough average)
 		estimated = true
 	}
 
@@ -157,7 +157,7 @@ func (c *Calculator) CalculateTextCost(provider, model string, inputTokens, outp
 // CalculateImageCost calculates the cost for image generation
 func (c *Calculator) CalculateImageCost(provider, model string, imageCount int) (*CostBreakdown, error) {
 	provider = strings.ToLower(provider)
-	
+
 	var pricePerImage float64
 	var found bool
 	var currency = "USD"
@@ -213,7 +213,7 @@ func (c *Calculator) CalculateImageCost(provider, model string, imageCount int) 
 // CalculateEmbeddingCost calculates the cost for text embeddings
 func (c *Calculator) CalculateEmbeddingCost(provider, model string, tokens int) (*CostBreakdown, error) {
 	provider = strings.ToLower(provider)
-	
+
 	var pricePerMillion float64
 	var found bool
 	var currency = "USD"
@@ -359,7 +359,7 @@ func (c *Calculator) CompareCosts(serviceType ServiceType, inputTokens, outputTo
 
 	for _, provider := range providers {
 		models := c.GetProviderModels(provider, serviceType)
-		
+
 		// Use first available model for comparison
 		if len(models) > 0 {
 			model := models[0]
