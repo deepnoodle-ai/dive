@@ -15,23 +15,22 @@ var (
 	_ dive.TypedToolPreviewer[*TodoWriteInput] = &TodoWriteTool{}
 )
 
-// TodoStatus represents the status of a todo item
-type TodoStatus string
-
-const (
-	TodoStatusPending    TodoStatus = "pending"
-	TodoStatusInProgress TodoStatus = "in_progress"
-	TodoStatusCompleted  TodoStatus = "completed"
+// Type aliases for compatibility - the canonical types are in the dive package
+type (
+	// TodoStatus is an alias for dive.TodoStatus
+	TodoStatus = dive.TodoStatus
+	// TodoItem is an alias for dive.TodoItem
+	TodoItem = dive.TodoItem
 )
 
-// TodoItem represents a single todo item
-type TodoItem struct {
-	Content    string     `json:"content"`    // Imperative form: "Run tests", "Fix bug"
-	Status     TodoStatus `json:"status"`     // pending, in_progress, completed
-	ActiveForm string     `json:"activeForm"` // Present continuous: "Running tests", "Fixing bug"
-}
+// Status constants for convenience
+const (
+	TodoStatusPending    = dive.TodoStatusPending
+	TodoStatusInProgress = dive.TodoStatusInProgress
+	TodoStatusCompleted  = dive.TodoStatusCompleted
+)
 
-// TodoWriteInput is the input for the todo_write tool
+// TodoWriteInput is the input for the TodoWrite tool
 type TodoWriteInput struct {
 	Todos []TodoItem `json:"todos"`
 }
@@ -61,7 +60,7 @@ func NewTodoWriteTool(opts ...TodoWriteToolOptions) *dive.TypedToolAdapter[*Todo
 }
 
 func (t *TodoWriteTool) Name() string {
-	return "todo_write"
+	return "TodoWrite"
 }
 
 func (t *TodoWriteTool) Description() string {

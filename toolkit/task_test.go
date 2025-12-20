@@ -86,7 +86,7 @@ func TestTaskTool(t *testing.T) {
 		registry := NewTaskRegistry()
 		tool := NewTaskTool(TaskToolOptions{
 			Registry: registry,
-			AgentFactory: func(ctx context.Context, subagentType, model string) (dive.Agent, error) {
+			AgentFactory: func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 				return &mockTaskAgent{
 					name:     "test-agent",
 					response: "Task completed successfully",
@@ -109,7 +109,7 @@ func TestTaskTool(t *testing.T) {
 		registry := NewTaskRegistry()
 		tool := NewTaskTool(TaskToolOptions{
 			Registry: registry,
-			AgentFactory: func(ctx context.Context, subagentType, model string) (dive.Agent, error) {
+			AgentFactory: func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 				return &mockTaskAgent{
 					name:     "test-agent",
 					response: "Background task done",
@@ -145,7 +145,7 @@ func TestTaskTool(t *testing.T) {
 		registry := NewTaskRegistry()
 		tool := NewTaskTool(TaskToolOptions{
 			Registry: registry,
-			AgentFactory: func(ctx context.Context, subagentType, model string) (dive.Agent, error) {
+			AgentFactory: func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 				return &mockTaskAgent{
 					name: "failing-agent",
 					err:  errors.New("agent failed"),
@@ -167,7 +167,7 @@ func TestTaskTool(t *testing.T) {
 		registry := NewTaskRegistry()
 		tool := NewTaskTool(TaskToolOptions{
 			Registry: registry,
-			AgentFactory: func(ctx context.Context, subagentType, model string) (dive.Agent, error) {
+			AgentFactory: func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 				return nil, errors.New("factory error")
 			},
 		})
@@ -186,7 +186,7 @@ func TestTaskTool(t *testing.T) {
 		registry := NewTaskRegistry()
 		tool := NewTaskTool(TaskToolOptions{
 			Registry: registry,
-			AgentFactory: func(ctx context.Context, subagentType, model string) (dive.Agent, error) {
+			AgentFactory: func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 				return &mockTaskAgent{name: "test"}, nil
 			},
 		})
@@ -223,7 +223,7 @@ func TestTaskTool(t *testing.T) {
 		registry := NewTaskRegistry()
 		tool := NewTaskTool(TaskToolOptions{
 			Registry: registry,
-			AgentFactory: func(ctx context.Context, subagentType, model string) (dive.Agent, error) {
+			AgentFactory: func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 				return &mockTaskAgent{name: "test"}, nil
 			},
 		})
@@ -378,7 +378,7 @@ func TestToolMetadata(t *testing.T) {
 	t.Run("TaskTool metadata", func(t *testing.T) {
 		tool := NewTaskTool(TaskToolOptions{
 			Registry: registry,
-			AgentFactory: func(ctx context.Context, subagentType, model string) (dive.Agent, error) {
+			AgentFactory: func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 				return nil, nil
 			},
 		})

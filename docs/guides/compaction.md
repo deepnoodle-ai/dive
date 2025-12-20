@@ -42,16 +42,17 @@ resp, _ := agent.CreateResponse(ctx,
 
 ## Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `Enabled` | `bool` | `false` | Must be `true` to activate compaction |
-| `ContextTokenThreshold` | `int` | `100000` | Token count that triggers compaction |
-| `Model` | `llm.LLM` | Agent's model | Optional model for summary generation |
-| `SummaryPrompt` | `string` | Built-in prompt | Custom prompt for summary generation |
+| Option                  | Type      | Default         | Description                           |
+| ----------------------- | --------- | --------------- | ------------------------------------- |
+| `Enabled`               | `bool`    | `false`         | Must be `true` to activate compaction |
+| `ContextTokenThreshold` | `int`     | `100000`        | Token count that triggers compaction  |
+| `Model`                 | `llm.LLM` | Agent's model   | Optional model for summary generation |
+| `SummaryPrompt`         | `string`  | Built-in prompt | Custom prompt for summary generation  |
 
 ### Token Calculation
 
 Total tokens are calculated as:
+
 ```
 InputTokens + OutputTokens + CacheCreationInputTokens + CacheReadInputTokens
 ```

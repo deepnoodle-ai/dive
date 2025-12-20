@@ -74,8 +74,9 @@ func (r *TaskRegistry) List() []string {
 	return ids
 }
 
-// AgentFactory creates agents for task execution
-type AgentFactory func(ctx context.Context, subagentType string, model string) (dive.Agent, error)
+// AgentFactory creates agents for task execution.
+// The factory receives the subagent name, definition, and parent tools to enable tool filtering.
+type AgentFactory func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error)
 
 // --- TaskTool ---
 
@@ -99,15 +100,24 @@ type TaskToolOptions struct {
 	// AgentFactory creates agents for task execution
 	AgentFactory AgentFactory
 
+	// SubagentRegistry contains available subagent definitions
+	SubagentRegistry *dive.SubagentRegistry
+
+	// ParentTools are the tools available to the parent agent,
+	// used for tool filtering when creating subagents
+	ParentTools []dive.Tool
+
 	// DefaultTimeout is the default timeout for synchronous task execution
 	DefaultTimeout time.Duration
 }
 
 // TaskTool launches specialized agents for complex, multi-step tasks
 type TaskTool struct {
-	registry       *TaskRegistry
-	agentFactory   AgentFactory
-	defaultTimeout time.Duration
+	registry         *TaskRegistry
+	agentFactory     AgentFactory
+	subagentRegistry *dive.SubagentRegistry
+	parentTools      []dive.Tool
+	defaultTimeout   time.Duration
 }
 
 // NewTaskTool creates a new TaskTool
@@ -116,9 +126,11 @@ func NewTaskTool(opts TaskToolOptions) *TaskTool {
 		opts.DefaultTimeout = 10 * time.Minute
 	}
 	return &TaskTool{
-		registry:       opts.Registry,
-		agentFactory:   opts.AgentFactory,
-		defaultTimeout: opts.DefaultTimeout,
+		registry:         opts.Registry,
+		agentFactory:     opts.AgentFactory,
+		subagentRegistry: opts.SubagentRegistry,
+		parentTools:      opts.ParentTools,
+		defaultTimeout:   opts.DefaultTimeout,
 	}
 }
 
@@ -127,7 +139,7 @@ func (t *TaskTool) Name() string {
 }
 
 func (t *TaskTool) Description() string {
-	return `Launch a specialized agent to handle complex, multi-step tasks autonomously.
+	desc := `Launch a specialized agent to handle complex, multi-step tasks autonomously.
 
 The Task tool launches agents that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
 
@@ -138,6 +150,13 @@ Usage notes:
 - You can run agents in the background using run_in_background parameter
 - Agents can be resumed using the resume parameter by passing the agent ID from a previous invocation
 - Provide clear, detailed prompts so the agent can work autonomously`
+
+	// Append available subagent types if registry is configured
+	if t.subagentRegistry != nil && t.subagentRegistry.Len() > 0 {
+		desc += "\n\n" + t.subagentRegistry.GenerateToolDescription()
+	}
+
+	return desc
 }
 
 func (t *TaskTool) Schema() *schema.Schema {
@@ -211,8 +230,32 @@ func (t *TaskTool) Call(ctx context.Context, input *TaskToolInput) (*dive.ToolRe
 		return t.executeTask(ctx, input, record.Agent, record.ID)
 	}
 
-	// Create new agent
-	agent, err := t.agentFactory(ctx, input.SubagentType, input.Model)
+	// Look up subagent definition from registry
+	var def *dive.SubagentDefinition
+	if t.subagentRegistry != nil {
+		var ok bool
+		def, ok = t.subagentRegistry.Get(input.SubagentType)
+		if !ok {
+			available := t.subagentRegistry.List()
+			return dive.NewToolResultError(fmt.Sprintf(
+				"unknown subagent type %q. Available types: %v",
+				input.SubagentType, available)), nil
+		}
+	} else {
+		// Fallback: use general-purpose if no registry configured
+		def = dive.GeneralPurposeSubagent
+	}
+
+	// Apply model override from input if specified
+	if input.Model != "" {
+		// Create a copy to avoid modifying the original
+		defCopy := *def
+		defCopy.Model = input.Model
+		def = &defCopy
+	}
+
+	// Create new agent using the factory
+	agent, err := t.agentFactory(ctx, input.SubagentType, def, t.parentTools)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("failed to create agent: %s", err.Error())), nil
 	}

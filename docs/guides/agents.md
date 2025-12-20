@@ -9,6 +9,7 @@ Agents are the core building blocks of Dive applications. They represent intelli
 - [Agent Configuration](#agent-configuration)
 - [Tool Integration](#tool-integration)
 - [Supervisor Patterns](#supervisor-patterns)
+- [Subagents](#subagents)
 - [Thread Management](#thread-management)
 - [Best Practices](#best-practices)
 
@@ -308,6 +309,182 @@ supervisor, err := agent.New(agent.Options{
     },
 })
 ```
+
+## Subagents
+
+Subagents allow an agent to spawn specialized child agents for focused subtasks. Unlike supervisor patterns where agents coordinate pre-existing subordinates, subagents are created on-demand with isolated contexts and restricted tool access.
+
+### Key Concepts
+
+- **Focused Context**: Subagents receive only the prompt provided, not the parent's full conversation history
+- **Tool Restrictions**: Subagents can be limited to specific tools
+- **No Nesting**: Subagents cannot spawn their own subagents (Task tool is never available to them)
+- **Model Override**: Subagents can use different models than their parent
+
+### Programmatic Definition
+
+Define subagents directly in `AgentOptions`:
+
+```go
+agent, err := dive.NewAgent(dive.AgentOptions{
+    Name:         "Main Agent",
+    Instructions: "You are a helpful assistant.",
+    Model:        anthropic.New(),
+    Tools:        allTools,
+    Subagents: map[string]*dive.SubagentDefinition{
+        "code-reviewer": {
+            Description: "Expert code reviewer. Use for security and quality reviews.",
+            Prompt:      "You are a code review specialist. Analyze code for bugs, security issues, and style problems.",
+            Tools:       []string{"Read", "Grep", "Glob"},
+            Model:       "sonnet",
+        },
+        "test-runner": {
+            Description: "Runs and analyzes test suites.",
+            Prompt:      "You are a test execution specialist. Run tests and analyze results.",
+            Tools:       []string{"Bash", "Read", "Grep"},
+        },
+    },
+})
+```
+
+### SubagentDefinition Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Description` | `string` | When Claude should use this subagent (shown in Task tool description) |
+| `Prompt` | `string` | System prompt for the subagent |
+| `Tools` | `[]string` | Tool names allowed (nil = inherit all except Task) |
+| `Model` | `string` | Model override: "sonnet", "opus", "haiku", or "" (inherit) |
+
+### Filesystem-Based Loading
+
+Load subagent definitions from markdown files with YAML frontmatter:
+
+```go
+agent, err := dive.NewAgent(dive.AgentOptions{
+    Name:         "Main Agent",
+    Instructions: "You are a helpful assistant.",
+    Model:        anthropic.New(),
+    Tools:        allTools,
+    SubagentLoader: &dive.FileSubagentLoader{
+        Directories:         []string{".dive/agents"},
+        IncludeClaudeAgents: true, // Also load from .claude/agents/
+    },
+})
+```
+
+Subagent files use markdown with YAML frontmatter:
+
+```markdown
+<!-- .dive/agents/code-reviewer.md -->
+---
+description: Expert code reviewer for security and quality reviews
+model: sonnet
+tools:
+  - Read
+  - Grep
+  - Glob
+---
+
+You are a code review specialist.
+
+When reviewing code:
+1. Check for security vulnerabilities
+2. Identify bugs and logic errors
+3. Suggest improvements for readability
+4. Ensure proper error handling
+```
+
+The filename (without `.md`) becomes the subagent name.
+
+### Custom Loaders
+
+Implement the `SubagentLoader` interface to load definitions from custom sources:
+
+```go
+type SubagentLoader interface {
+    Load(ctx context.Context) (map[string]*SubagentDefinition, error)
+}
+
+// Example: Load from database
+type DatabaseSubagentLoader struct {
+    DB *sql.DB
+}
+
+func (l *DatabaseSubagentLoader) Load(ctx context.Context) (map[string]*SubagentDefinition, error) {
+    rows, err := l.DB.QueryContext(ctx, "SELECT name, description, prompt, tools, model FROM subagents")
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    result := make(map[string]*dive.SubagentDefinition)
+    for rows.Next() {
+        // Parse and add to result...
+    }
+    return result, nil
+}
+```
+
+### Combining Multiple Sources
+
+Use `CompositeSubagentLoader` to combine multiple loaders:
+
+```go
+agent, err := dive.NewAgent(dive.AgentOptions{
+    Name:  "Main Agent",
+    Model: anthropic.New(),
+    SubagentLoader: &dive.CompositeSubagentLoader{
+        Loaders: []dive.SubagentLoader{
+            &dive.FileSubagentLoader{Directories: []string{".dive/agents"}},
+            &dive.MapSubagentLoader{
+                Subagents: map[string]*dive.SubagentDefinition{
+                    "custom-agent": {
+                        Description: "Custom programmatic agent",
+                        Prompt:      "You are a custom agent.",
+                    },
+                },
+            },
+        },
+    },
+})
+```
+
+Later loaders override earlier ones for definitions with the same name.
+
+### Built-in General-Purpose Subagent
+
+A `general-purpose` subagent is automatically registered unless disabled. It inherits all parent tools (except Task) and can handle any task:
+
+```go
+// Access the built-in definition
+dive.GeneralPurposeSubagent.Description
+// "General-purpose agent for complex, multi-step tasks. Use when no specialized agent matches."
+```
+
+### Tool Filtering
+
+Use `FilterTools` to apply a subagent's tool restrictions:
+
+```go
+// In your AgentFactory implementation
+func createSubagent(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
+    // Filter tools based on definition
+    filteredTools := dive.FilterTools(def, parentTools)
+
+    return dive.NewAgent(dive.AgentOptions{
+        Name:         name,
+        Instructions: def.Prompt,
+        Model:        selectModel(def.Model),
+        Tools:        filteredTools,
+    })
+}
+```
+
+Key behaviors:
+- If `def.Tools` is nil or empty, all parent tools are inherited (except Task)
+- If `def.Tools` specifies tool names, only those tools are included
+- The Task tool is **never** included, preventing nested subagent spawning
 
 ## Thread Management
 

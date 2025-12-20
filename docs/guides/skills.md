@@ -56,6 +56,7 @@ You are a code reviewer focused on identifying issues and suggesting improvement
 ## Output Format
 
 Structure your review as:
+
 - **Critical Issues**: Must be fixed
 - **Warnings**: Should be addressed
 - **Suggestions**: Nice to have improvements
@@ -63,13 +64,13 @@ Structure your review as:
 
 ### Frontmatter Fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | No* | Unique identifier for the skill (lowercase letters, numbers, hyphens) |
-| `description` | No | Brief explanation of what the skill does (shown to the LLM) |
-| `allowed-tools` | No | List of tools permitted when this skill is active |
+| Field           | Required | Description                                                           |
+| --------------- | -------- | --------------------------------------------------------------------- |
+| `name`          | No\*     | Unique identifier for the skill (lowercase letters, numbers, hyphens) |
+| `description`   | No       | Brief explanation of what the skill does (shown to the LLM)           |
+| `allowed-tools` | No       | List of tools permitted when this skill is active                     |
 
-*If `name` is not specified, it's derived from the directory or filename.
+\*If `name` is not specified, it's derived from the directory or filename.
 
 ### Name Derivation
 
@@ -175,6 +176,7 @@ but cannot modify anything.
 ## Restrictions
 
 You cannot:
+
 - Write or modify files
 - Execute commands
 - Make network requests

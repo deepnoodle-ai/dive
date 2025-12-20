@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -85,6 +86,17 @@ type AgentOptions struct {
 	// When enabled and token thresholds are exceeded, the agent automatically
 	// summarizes conversation history to fit within context limits.
 	Compaction *CompactionConfig
+
+	// Subagents defines specialized subagents this agent can spawn via the Task tool.
+	// Keys are subagent names (e.g., "code-reviewer"), values are their definitions.
+	// Claude automatically decides when to invoke subagents based on descriptions.
+	Subagents map[string]*SubagentDefinition
+
+	// SubagentLoader loads subagent definitions from external sources.
+	// Use FileSubagentLoader for filesystem-based loading, or implement
+	// the SubagentLoader interface for custom sources (database, API, etc.).
+	// Programmatically defined subagents (in Subagents map) take precedence.
+	SubagentLoader SubagentLoader
 }
 
 // StandardAgent is the standard implementation of the Agent interface.
@@ -110,6 +122,7 @@ type StandardAgent struct {
 	systemPromptTemplate *template.Template
 	context              []llm.Content
 	compaction           *CompactionConfig
+	subagentRegistry     *SubagentRegistry
 }
 
 // NewAgent returns a new StandardAgent configured with the given options.
@@ -173,6 +186,24 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 			agent.toolsByName[tool.Name()] = tool
 		}
 	}
+
+	// Initialize subagent registry
+	agent.subagentRegistry = NewSubagentRegistry(true) // Include general-purpose by default
+
+	// Load subagents from external source if configured
+	if opts.SubagentLoader != nil {
+		loaded, err := opts.SubagentLoader.Load(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("failed to load subagents: %w", err)
+		}
+		agent.subagentRegistry.RegisterAll(loaded)
+	}
+
+	// Register programmatically defined subagents (take precedence over loaded)
+	if len(opts.Subagents) > 0 {
+		agent.subagentRegistry.RegisterAll(opts.Subagents)
+	}
+
 	return agent, nil
 }
 
@@ -201,6 +232,21 @@ func (a *StandardAgent) Subordinates() []string {
 
 func (a *StandardAgent) HasTools() bool {
 	return len(a.tools) > 0
+}
+
+// Tools returns the agent's tools.
+func (a *StandardAgent) Tools() []Tool {
+	return a.tools
+}
+
+// SubagentRegistry returns the agent's subagent registry.
+func (a *StandardAgent) SubagentRegistry() *SubagentRegistry {
+	return a.subagentRegistry
+}
+
+// Model returns the agent's LLM.
+func (a *StandardAgent) Model() llm.LLM {
+	return a.model
 }
 
 func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) (*Thread, error) {
@@ -814,6 +860,21 @@ func (a *StandardAgent) executeToolCalls(
 			ToolCallResult: result,
 		}); err != nil {
 			return nil, err
+		}
+
+		// Emit TodoEvent for TodoWrite tool calls
+		if toolCall.Name == "TodoWrite" && result.Error == nil {
+			var todoInput struct {
+				Todos []TodoItem `json:"todos"`
+			}
+			if err := json.Unmarshal(toolCall.Input, &todoInput); err == nil {
+				if err := callback(ctx, &ResponseItem{
+					Type: ResponseItemTypeTodo,
+					Todo: &TodoEvent{Todos: todoInput.Todos},
+				}); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	return results, nil

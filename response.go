@@ -38,6 +38,10 @@ const (
 	// ResponseItemTypeCompaction indicates context compaction has occurred.
 	// The Compaction field contains information about the compaction.
 	ResponseItemTypeCompaction ResponseItemType = "compaction"
+
+	// ResponseItemTypeTodo indicates the todo list has been updated.
+	// The Todo field contains the current todo list state.
+	ResponseItemTypeTodo ResponseItemType = "todo"
 )
 
 // InitEvent is emitted at the start of a response and contains session information.
@@ -67,6 +71,54 @@ type InitEvent struct {
 	ThreadID string `json:"thread_id"`
 }
 
+// TodoStatus represents the status of a todo item.
+type TodoStatus string
+
+const (
+	TodoStatusPending    TodoStatus = "pending"
+	TodoStatusInProgress TodoStatus = "in_progress"
+	TodoStatusCompleted  TodoStatus = "completed"
+)
+
+// TodoItem represents a single todo item in a task list.
+type TodoItem struct {
+	// Content is the task description in imperative form (e.g., "Run tests")
+	Content string `json:"content"`
+	// Status is the task status: pending, in_progress, or completed
+	Status TodoStatus `json:"status"`
+	// ActiveForm is the task in present continuous form (e.g., "Running tests")
+	ActiveForm string `json:"activeForm"`
+}
+
+// TodoEvent is emitted when the todo list is updated.
+//
+// This event allows consumers to track task progress in real-time. The event
+// contains the complete current state of the todo list, not just the changes.
+//
+// Example usage in a callback:
+//
+//	resp, _ := agent.CreateResponse(ctx,
+//	    dive.WithInput("Build authentication system"),
+//	    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+//	        if item.Type == dive.ResponseItemTypeTodo {
+//	            for _, todo := range item.Todo.Todos {
+//	                status := "❌"
+//	                if todo.Status == dive.TodoStatusCompleted {
+//	                    status = "✅"
+//	                } else if todo.Status == dive.TodoStatusInProgress {
+//	                    status = "🔧"
+//	                }
+//	                fmt.Printf("%s %s\n", status, todo.Content)
+//	            }
+//	        }
+//	        return nil
+//	    }),
+//	)
+type TodoEvent struct {
+	// Todos is the complete current todo list
+	Todos []TodoItem `json:"todos"`
+}
+
 // ResponseItem contains either a message, tool call, tool result, or LLM event.
 // Multiple items may be generated in response to a single prompt.
 type ResponseItem struct {
@@ -90,6 +142,9 @@ type ResponseItem struct {
 
 	// Compaction is set if the response item is a compaction event
 	Compaction *CompactionEvent `json:"compaction,omitempty"`
+
+	// Todo is set if the response item is a todo list update
+	Todo *TodoEvent `json:"todo,omitempty"`
 
 	// Usage contains token usage information, if applicable
 	Usage *llm.Usage `json:"usage,omitempty"`

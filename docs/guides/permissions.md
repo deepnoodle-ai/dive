@@ -25,12 +25,12 @@ Each step can terminate the flow early by returning `allow`, `deny`, or `ask`. O
 
 Set the global permission behavior with `PermissionMode`:
 
-| Mode | Behavior |
-|------|----------|
-| `PermissionModeDefault` | Standard checks - falls through to CanUseTool or asks user |
-| `PermissionModePlan` | Read-only mode - only allows tools with `ReadOnlyHint=true` |
-| `PermissionModeAcceptEdits` | Auto-accepts file edit operations without prompting |
-| `PermissionModeBypassPermissions` | Allows ALL tools without any prompts (use with caution) |
+| Mode                              | Behavior                                                    |
+| --------------------------------- | ----------------------------------------------------------- |
+| `PermissionModeDefault`           | Standard checks - falls through to CanUseTool or asks user  |
+| `PermissionModePlan`              | Read-only mode - only allows tools with `ReadOnlyHint=true` |
+| `PermissionModeAcceptEdits`       | Auto-accepts file edit operations without prompting         |
+| `PermissionModeBypassPermissions` | Allows ALL tools without any prompts (use with caution)     |
 
 ### Basic Mode Configuration
 
@@ -71,11 +71,13 @@ Declarative rules provide static, configuration-driven access control. Rules are
 ### Pattern Matching
 
 Tool patterns use glob-style matching:
+
 - `"bash"` - matches exactly "bash"
 - `"read_*"` - matches "read_file", "read_config", etc.
 - `"*"` - matches any tool
 
 Command patterns (for bash-like tools) also support wildcards:
+
 - `"rm -rf *"` - matches any rm -rf command
 - `"git push *"` - matches any git push command
 
@@ -106,14 +108,14 @@ Permission: &dive.PermissionConfig{
 
 ### Rule Helper Functions
 
-| Function | Description |
-|----------|-------------|
-| `DenyRule(pattern, message)` | Block tools matching pattern |
-| `DenyCommandRule(tool, command, message)` | Block specific bash commands |
-| `AllowRule(pattern)` | Allow tools matching pattern |
-| `AllowCommandRule(tool, command)` | Allow specific bash commands |
-| `AskRule(pattern, message)` | Prompt for tools matching pattern |
-| `AskCommandRule(tool, command, message)` | Prompt for specific bash commands |
+| Function                                  | Description                       |
+| ----------------------------------------- | --------------------------------- |
+| `DenyRule(pattern, message)`              | Block tools matching pattern      |
+| `DenyCommandRule(tool, command, message)` | Block specific bash commands      |
+| `AllowRule(pattern)`                      | Allow tools matching pattern      |
+| `AllowCommandRule(tool, command)`         | Allow specific bash commands      |
+| `AskRule(pattern, message)`               | Prompt for tools matching pattern |
+| `AskCommandRule(tool, command, message)`  | Prompt for specific bash commands |
 
 ### Custom Input Matching
 
@@ -166,11 +168,11 @@ Permission: &dive.PermissionConfig{
 
 ### Hook Actions
 
-| Action | Effect |
-|--------|--------|
-| `ToolHookAllow` | Immediately allow execution |
-| `ToolHookDeny` | Block execution with message |
-| `ToolHookAsk` | Prompt user for confirmation |
+| Action             | Effect                       |
+| ------------------ | ---------------------------- |
+| `ToolHookAllow`    | Immediately allow execution  |
+| `ToolHookDeny`     | Block execution with message |
+| `ToolHookAsk`      | Prompt user for confirmation |
 | `ToolHookContinue` | Proceed to next step in flow |
 
 ### Helper Functions
@@ -307,12 +309,12 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 
 Tools can declare hints that affect permission evaluation:
 
-| Annotation | Description |
-|------------|-------------|
-| `ReadOnlyHint` | Tool only reads data, doesn't modify state |
-| `DestructiveHint` | Tool may cause irreversible changes |
-| `IdempotentHint` | Tool can be safely retried |
-| `EditHint` | Tool modifies files (used by AcceptEdits mode) |
+| Annotation        | Description                                    |
+| ----------------- | ---------------------------------------------- |
+| `ReadOnlyHint`    | Tool only reads data, doesn't modify state     |
+| `DestructiveHint` | Tool may cause irreversible changes            |
+| `IdempotentHint`  | Tool can be safely retried                     |
+| `EditHint`        | Tool modifies files (used by AcceptEdits mode) |
 
 When creating custom tools, set appropriate annotations:
 
@@ -328,12 +330,12 @@ func (t *MyTool) Annotations() *dive.ToolAnnotations {
 
 If you're migrating from the older `Interactor` pattern, Dive provides automatic conversion:
 
-| InteractionMode | Equivalent PermissionConfig |
-|-----------------|----------------------------|
-| `InteractNever` | `PermissionModeBypassPermissions` |
-| `InteractAlways` | Ask rule for all tools |
-| `InteractIfDestructive` | Ask if `DestructiveHint` is true |
-| `InteractIfNotReadOnly` | Ask if `ReadOnlyHint` is false |
+| InteractionMode         | Equivalent PermissionConfig       |
+| ----------------------- | --------------------------------- |
+| `InteractNever`         | `PermissionModeBypassPermissions` |
+| `InteractAlways`        | Ask rule for all tools            |
+| `InteractIfDestructive` | Ask if `DestructiveHint` is true  |
+| `InteractIfNotReadOnly` | Ask if `ReadOnlyHint` is false    |
 
 The `Interactor` field in `AgentOptions` still works but is deprecated for tool confirmations. Use `Permission` instead for new code.
 

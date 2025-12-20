@@ -12,7 +12,7 @@ import (
 
 func TestTodoWriteTool_Name(t *testing.T) {
 	tool := NewTodoWriteTool()
-	assert.Equal(t, "todo_write", tool.Name())
+	assert.Equal(t, "TodoWrite", tool.Name())
 }
 
 func TestTodoWriteTool_Description(t *testing.T) {
