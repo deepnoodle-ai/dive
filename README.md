@@ -370,11 +370,49 @@ agent, err := dive.NewAgent(dive.AgentOptions{
 
 ### Thread Management
 
-Agents support persistent conversation threads:
+Agents support persistent conversation threads with automatic ID generation,
+resumption, and forking capabilities:
 
 ```go
-response, err := agent.CreateResponse(ctx,
-    dive.WithThreadID("conversation-123"),
+// Thread IDs are auto-generated if not provided
+resp, err := agent.CreateResponse(ctx, dive.WithInput("Hello"))
+threadID := resp.ThreadID  // e.g., "thread-1234567890"
+
+// Resume a conversation using WithResume (or WithThreadID)
+resp2, err := agent.CreateResponse(ctx,
+    dive.WithResume(threadID),
     dive.WithInput("Continue our discussion"),
 )
+
+// Fork a conversation to explore alternatives
+resp3, err := agent.CreateResponse(ctx,
+    dive.WithResume(threadID),
+    dive.WithFork(true),
+    dive.WithInput("Let's try a different approach"),
+)
+// resp3.ThreadID is a new ID; original thread unchanged
+```
+
+For streaming responses, an `InitEvent` is emitted first with the thread ID:
+
+```go
+resp, err := agent.CreateResponse(ctx,
+    dive.WithInput("Hello"),
+    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+        if item.Type == dive.ResponseItemTypeInit {
+            fmt.Println("Thread ID:", item.Init.ThreadID)
+        }
+        return nil
+    }),
+)
+```
+
+Thread persistence requires a `ThreadRepository`:
+
+```go
+agent, err := dive.NewAgent(dive.AgentOptions{
+    Name:             "Assistant",
+    Model:            anthropic.New(),
+    ThreadRepository: dive.NewMemoryThreadRepository(),
+})
 ```

@@ -14,6 +14,7 @@ type ToolAnnotations struct {
 	DestructiveHint bool           `json:"destructiveHint,omitempty"`
 	IdempotentHint  bool           `json:"idempotentHint,omitempty"`
 	OpenWorldHint   bool           `json:"openWorldHint,omitempty"`
+	EditHint        bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
 	Extra           map[string]any `json:"extra,omitempty"`
 }
 
@@ -24,6 +25,7 @@ func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 		"destructiveHint": a.DestructiveHint,
 		"idempotentHint":  a.IdempotentHint,
 		"openWorldHint":   a.OpenWorldHint,
+		"editHint":        a.EditHint,
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -49,6 +51,7 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 		"destructiveHint": &a.DestructiveHint,
 		"idempotentHint":  &a.IdempotentHint,
 		"openWorldHint":   &a.OpenWorldHint,
+		"editHint":        &a.EditHint,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {
@@ -254,6 +257,15 @@ func (t *TypedToolAdapter[T]) PreviewCall(ctx context.Context, input any) *ToolC
 	return previewer.PreviewCall(ctx, typedInput)
 }
 
+// IsToolAllowed implements ToolAllowanceChecker by delegating to the underlying
+// TypedTool if it implements ToolAllowanceChecker.
+func (t *TypedToolAdapter[T]) IsToolAllowed(toolName string) bool {
+	if checker, ok := t.tool.(ToolAllowanceChecker); ok {
+		return checker.IsToolAllowed(toolName)
+	}
+	return true
+}
+
 // convertInput converts any input to the typed T, handling json.RawMessage and other types.
 func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 	var zero T
@@ -295,4 +307,12 @@ type ToolCallResult struct {
 	Preview *ToolCallPreview // Preview generated before execution (if tool implements ToolPreviewer)
 	Result  *ToolResult
 	Error   error
+}
+
+// ToolAllowanceChecker is an optional interface that tools can implement to
+// restrict which other tools can be used. This is used by skills to enforce
+// allowed-tools restrictions.
+type ToolAllowanceChecker interface {
+	// IsToolAllowed returns true if the given tool name is allowed to be executed.
+	IsToolAllowed(toolName string) bool
 }

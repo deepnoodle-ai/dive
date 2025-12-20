@@ -22,16 +22,17 @@ type Thinking struct {
 }
 
 type Request struct {
-	Model       string                `json:"model"`
-	Messages    []*llm.Message        `json:"messages"`
-	MaxTokens   *int                  `json:"max_tokens,omitempty"`
-	Temperature *float64              `json:"temperature,omitempty"`
-	System      string                `json:"system,omitempty"`
-	Stream      bool                  `json:"stream,omitempty"`
-	Tools       []map[string]any      `json:"tools,omitempty"`
-	ToolChoice  *ToolChoice           `json:"tool_choice,omitempty"`
-	Thinking    *Thinking             `json:"thinking,omitempty"`
-	MCPServers  []llm.MCPServerConfig `json:"mcp_servers,omitempty"`
+	Model             string                       `json:"model"`
+	Messages          []*llm.Message               `json:"messages"`
+	MaxTokens         *int                         `json:"max_tokens,omitempty"`
+	Temperature       *float64                     `json:"temperature,omitempty"`
+	System            string                       `json:"system,omitempty"`
+	Stream            bool                         `json:"stream,omitempty"`
+	Tools             []map[string]any             `json:"tools,omitempty"`
+	ToolChoice        *ToolChoice                  `json:"tool_choice,omitempty"`
+	Thinking          *Thinking                    `json:"thinking,omitempty"`
+	MCPServers        []llm.MCPServerConfig        `json:"mcp_servers,omitempty"`
+	ContextManagement *llm.ContextManagementConfig `json:"context_management,omitempty"`
 }
 
 type ToolChoiceType string

@@ -32,6 +32,7 @@ const (
 	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
 	ContentTypeRefusal                 ContentType = "refusal"
 	ContentTypeDynamic                 ContentType = "dynamic"
+	ContentTypeSummary                 ContentType = "summary"
 
 	// Code execution tool result types (code_execution_20250825)
 	ContentTypeBashCodeExecutionToolResult       ContentType = "bash_code_execution_tool_result"
@@ -1077,6 +1078,34 @@ func (c *TextEditorCodeExecutionToolResultContent) IsError() bool {
 	return c.Content.Type == "text_editor_code_execution_tool_result_error"
 }
 
+//// SummaryContent /////////////////////////////////////////////////////////////
+
+// SummaryContent represents a compacted conversation summary that replaces
+// the full message history during context compaction.
+type SummaryContent struct {
+	Summary      string        `json:"summary"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+func (c *SummaryContent) Type() ContentType {
+	return ContentTypeSummary
+}
+
+func (c *SummaryContent) MarshalJSON() ([]byte, error) {
+	type Alias SummaryContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeSummary,
+		Alias: (*Alias)(c),
+	})
+}
+
+func (c *SummaryContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
+}
+
 //// Unmarshalling /////////////////////////////////////////////////////////////
 
 type contentTypeIndicator struct {
@@ -1151,6 +1180,8 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &RefusalContent{}
 	case ContentTypeMCPApprovalResponse:
 		content = &MCPApprovalResponseContent{}
+	case ContentTypeSummary:
+		content = &SummaryContent{}
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
 	}

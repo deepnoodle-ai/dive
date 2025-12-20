@@ -500,3 +500,50 @@ func (a *ConfirmerAdapter) MultiSelect(ctx context.Context, req *MultiSelectRequ
 func (a *ConfirmerAdapter) Input(ctx context.Context, req *InputRequest) (*InputResponse, error) {
 	return &InputResponse{Value: req.Default}, nil
 }
+
+// PermissionConfigFromInteractionMode converts a legacy InteractionMode to a PermissionConfig.
+// This provides a migration path from the old InteractionMode-based system to the new
+// permission system that aligns with Anthropic's Claude Agent SDK.
+func PermissionConfigFromInteractionMode(mode InteractionMode) *PermissionConfig {
+	switch mode {
+	case InteractNever:
+		return &PermissionConfig{Mode: PermissionModeBypassPermissions}
+	case InteractAlways:
+		return &PermissionConfig{
+			Mode:  PermissionModeDefault,
+			Rules: PermissionRules{{Type: PermissionRuleAsk, Tool: "*"}},
+		}
+	case InteractIfDestructive:
+		return &PermissionConfig{
+			Mode: PermissionModeDefault,
+			CanUseTool: func(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
+				if tool != nil {
+					annotations := tool.Annotations()
+					if annotations != nil && annotations.DestructiveHint {
+						return AskResult(""), nil
+					}
+				}
+				return AllowResult(), nil
+			},
+		}
+	case InteractIfNotReadOnly:
+		return &PermissionConfig{
+			Mode: PermissionModeDefault,
+			CanUseTool: func(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
+				if tool != nil {
+					annotations := tool.Annotations()
+					if annotations != nil && annotations.ReadOnlyHint {
+						return AllowResult(), nil
+					}
+				}
+				return AskResult(""), nil
+			},
+		}
+	default:
+		// Default: ask for all tools
+		return &PermissionConfig{
+			Mode:  PermissionModeDefault,
+			Rules: PermissionRules{{Type: PermissionRuleAsk, Tool: "*"}},
+		}
+	}
+}

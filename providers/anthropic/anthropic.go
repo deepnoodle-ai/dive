@@ -8,11 +8,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/deepnoodle-ai/wonton/retry"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
+	"github.com/deepnoodle-ai/wonton/retry"
 )
 
 const ProviderName = "anthropic"
@@ -358,6 +359,10 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.MCPServers = config.MCPServers
 	}
 
+	if config.ContextManagement != nil {
+		req.ContextManagement = config.ContextManagement
+	}
+
 	req.Temperature = config.Temperature
 	req.System = config.SystemPrompt
 	return nil
@@ -377,30 +382,39 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 		req.Header.Set("accept", "text/event-stream")
 	}
 
+	var betaFeatures []string
 	if config.IsFeatureEnabled(FeatureExtendedCache) {
-		req.Header.Add("anthropic-beta", FeatureExtendedCache)
+		betaFeatures = append(betaFeatures, FeatureExtendedCache)
 	} else if config.IsFeatureEnabled(FeaturePromptCaching) {
-		req.Header.Add("anthropic-beta", FeaturePromptCaching)
+		betaFeatures = append(betaFeatures, FeaturePromptCaching)
 	} else if config.Caching == nil || *config.Caching {
-		req.Header.Add("anthropic-beta", FeaturePromptCaching)
+		betaFeatures = append(betaFeatures, FeaturePromptCaching)
 	}
 
 	if config.IsFeatureEnabled(FeatureOutput128k) {
-		req.Header.Add("anthropic-beta", FeatureOutput128k)
+		betaFeatures = append(betaFeatures, FeatureOutput128k)
 	}
 
 	if config.IsFeatureEnabled(FeatureMCPClient) || len(config.MCPServers) > 0 {
-		req.Header.Add("anthropic-beta", FeatureMCPClient)
+		betaFeatures = append(betaFeatures, FeatureMCPClient)
+	}
+
+	if config.IsFeatureEnabled(FeatureContextManagement) || config.ContextManagement != nil {
+		betaFeatures = append(betaFeatures, FeatureContextManagement)
 	}
 
 	if config.IsFeatureEnabled(FeatureCodeExecution) {
-		req.Header.Add("anthropic-beta", FeatureCodeExecution)
+		betaFeatures = append(betaFeatures, FeatureCodeExecution)
 	}
 
 	if config.IsFeatureEnabled(FeatureComputerUseOpus45) {
-		req.Header.Add("anthropic-beta", FeatureComputerUseOpus45)
+		betaFeatures = append(betaFeatures, FeatureComputerUseOpus45)
 	} else if config.IsFeatureEnabled(FeatureComputerUse) {
-		req.Header.Add("anthropic-beta", FeatureComputerUse)
+		betaFeatures = append(betaFeatures, FeatureComputerUse)
+	}
+
+	if len(betaFeatures) > 0 {
+		req.Header.Set("anthropic-beta", strings.Join(betaFeatures, ","))
 	}
 
 	for key, values := range config.RequestHeaders {

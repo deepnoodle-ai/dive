@@ -26,12 +26,13 @@ const (
 // Event represents a single streaming event from the LLM. A successfully
 // run stream will end with a final message containing the complete Response.
 type Event struct {
-	Type         EventType          `json:"type"`
-	Index        *int               `json:"index,omitempty"`
-	Message      *Response          `json:"message,omitempty"`
-	ContentBlock *EventContentBlock `json:"content_block,omitempty"`
-	Delta        *EventDelta        `json:"delta,omitempty"`
-	Usage        *Usage             `json:"usage,omitempty"`
+	Type              EventType                  `json:"type"`
+	Index             *int                       `json:"index,omitempty"`
+	Message           *Response                  `json:"message,omitempty"`
+	ContentBlock      *EventContentBlock         `json:"content_block,omitempty"`
+	Delta             *EventDelta                `json:"delta,omitempty"`
+	Usage             *Usage                     `json:"usage,omitempty"`
+	ContextManagement *ContextManagementResponse `json:"context_management,omitempty"`
 }
 
 // EventContentBlock carries the start of a content block in an LLM event.
@@ -187,6 +188,11 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		r.response.Usage.OutputTokens += event.Usage.OutputTokens
 		r.response.Usage.CacheReadInputTokens += event.Usage.CacheReadInputTokens
 		r.response.Usage.CacheCreationInputTokens += event.Usage.CacheCreationInputTokens
+	}
+
+	// Update context management information if provided
+	if event.ContextManagement != nil {
+		r.response.ContextManagement = event.ContextManagement
 	}
 	return nil
 }

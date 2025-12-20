@@ -193,6 +193,7 @@ func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 		DestructiveHint: true,
 		IdempotentHint:  false,
 		OpenWorldHint:   false,
+		EditHint:        true,
 	}
 }
 

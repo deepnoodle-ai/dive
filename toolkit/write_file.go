@@ -115,5 +115,6 @@ func (t *WriteFileTool) Annotations() *dive.ToolAnnotations {
 		DestructiveHint: true,
 		IdempotentHint:  true,
 		OpenWorldHint:   false,
+		EditHint:        true,
 	}
 }
