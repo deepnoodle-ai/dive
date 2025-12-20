@@ -16,12 +16,13 @@ func (a *App) View() tui.View {
 	defer a.mu.RUnlock()
 
 	return tui.Stack(
-		a.headerView(),
-		tui.Divider(),
+		tui.MaxHeight(1, a.headerView()),
+		tui.MaxHeight(1, tui.Divider()),
 		a.messagesView(),
-		tui.Divider(),
+		tui.MaxHeight(1, tui.Divider()),
 		a.inputView(),
-		a.footerView(),
+		tui.MaxHeight(1, tui.Divider()),
+		tui.MaxHeight(1, a.footerView()),
 	)
 }
 
@@ -53,7 +54,9 @@ func (a *App) headerView() tui.View {
 
 func (a *App) messagesView() tui.View {
 	if len(a.messages) == 0 {
-		return tui.WrappedText("No messages yet.").Dim().Center()
+		return tui.Stack(
+			tui.WrappedText("No messages yet.").Dim().Center(),
+		).Flex(1)
 	}
 
 	views := make([]tui.View, 0, len(a.messages))
@@ -61,11 +64,12 @@ func (a *App) messagesView() tui.View {
 		views = append(views, a.messageView(msg, i))
 	}
 
-	// Scroll view is already flexible, no need to wrap in Stack
-	return tui.Scroll(
-		tui.Stack(views...).Gap(1).Padding(1),
-		&a.scrollY,
-	)
+	return tui.Stack(
+		tui.Scroll(
+			tui.Stack(views...).Gap(1).Padding(1),
+			&a.scrollY,
+		),
+	).Flex(1)
 }
 
 func (a *App) messageView(msg Message, index int) tui.View {
@@ -88,7 +92,7 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 	case "system":
 		roleView = tui.Text("System").Bold().Fg(tui.ColorYellow)
 	default:
-		roleView = tui.Text(msg.Role).Bold()
+		roleView = tui.Text("%s", msg.Role).Bold()
 	}
 
 	content := msg.Content
@@ -132,10 +136,10 @@ func (a *App) toolCallView(msg Message) tui.View {
 		statusColor = tui.ColorYellow
 	}
 
-	statusView := tui.Text(statusText).Fg(statusColor)
+	statusView := tui.Text("%s", statusText).Fg(statusColor)
 
 	// Tool name
-	nameView := tui.Text(msg.ToolName).Bold()
+	nameView := tui.Text("%s", msg.ToolName).Bold()
 
 	// Header line
 	header := tui.Group(
@@ -172,8 +176,8 @@ func (a *App) inputView() tui.View {
 		return a.confirmView()
 	}
 
-	// Normal input mode
-	prompt := tui.Text("> ").Fg(tui.ColorCyan).Bold()
+	// Normal input mode - single line, compact
+	prompt := tui.Text(" > ").Fg(tui.ColorCyan).Bold()
 
 	inputText := a.input
 	if a.processing {
@@ -182,7 +186,7 @@ func (a *App) inputView() tui.View {
 
 	var inputContent tui.View
 	if a.processing {
-		inputContent = tui.Text(inputText).Dim()
+		inputContent = tui.Text("%s", inputText).Dim()
 	} else {
 		// Static cursor (no blinking to reduce flicker)
 		inputContent = tui.Text("%s█", inputText)
@@ -191,19 +195,17 @@ func (a *App) inputView() tui.View {
 	return tui.Group(
 		prompt,
 		inputContent,
-	).Padding(1)
+	)
 }
 
 func (a *App) confirmView() tui.View {
-	header := tui.Text(" Confirm: %s ", a.confirm.ToolName).Bold().Fg(tui.ColorYellow)
-	summary := tui.Text("  %s", a.confirm.Summary)
-	prompt := tui.Text("  Allow? [y/n] ").Bold()
-
-	return tui.Stack(
-		header,
-		summary,
-		prompt,
-	).Gap(0).Padding(1)
+	// Compact confirmation prompt
+	return tui.Group(
+		tui.Text(" Confirm: ").Fg(tui.ColorYellow),
+		tui.Text("%s", a.confirm.ToolName).Bold(),
+		tui.Text(" - %s ", a.confirm.Summary).Dim(),
+		tui.Text("[y/n] ").Bold(),
+	)
 }
 
 func (a *App) footerView() tui.View {

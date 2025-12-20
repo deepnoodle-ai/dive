@@ -59,7 +59,8 @@ type App struct {
 	streamingMessageIndex int
 
 	// Tool call tracking
-	toolCallIndex map[string]int
+	toolCallIndex        map[string]int
+	needNewTextMessage   bool // set after tool calls to create new text message
 
 	// Command history
 	history      []string
@@ -323,6 +324,7 @@ func (a *App) sendMessage() []tui.Cmd {
 	}
 	a.messages = append(a.messages, *a.currentMessage)
 	a.streamingMessageIndex = len(a.messages) - 1
+	a.needNewTextMessage = false // reset for new response
 
 	a.processing = true
 	a.thinking = true
@@ -359,7 +361,7 @@ func (a *App) handleAgentEvent(item *dive.ResponseItem) error {
 		}
 
 	case dive.ResponseItemTypeToolCall:
-		// Tool call starting
+		// Tool call starting - mark that we'll need a new text message after this
 		a.addToolCall(item.ToolCall)
 
 	case dive.ResponseItemTypeToolCallResult:
@@ -367,13 +369,8 @@ func (a *App) handleAgentEvent(item *dive.ResponseItem) error {
 		a.updateToolCallResult(item.ToolCallResult)
 
 	case dive.ResponseItemTypeMessage:
-		// Complete message (for non-streaming)
-		if item.Message != nil {
-			text := item.Message.Text()
-			if text != "" {
-				a.setStreamingMessageContent(text)
-			}
-		}
+		// Complete message - we rely on streaming deltas, so ignore this
+		// to prevent overwriting accumulated content
 	}
 	return nil
 }
@@ -382,38 +379,26 @@ func (a *App) appendToStreamingMessage(text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Check if we need to start a new streaming message
-	needNewMessage := a.currentMessage == nil ||
+	// Check if we need to start a new streaming message:
+	// - No current message (first streaming)
+	// - Index out of bounds (shouldn't happen but be defensive)
+	// - Flag set after tool calls
+	needNewMessage := a.streamingMessageIndex < 0 ||
 		a.streamingMessageIndex >= len(a.messages) ||
-		a.streamingMessageIndex != len(a.messages)-1
+		a.needNewTextMessage
 
 	if needNewMessage {
-		a.currentMessage = &Message{
+		a.messages = append(a.messages, Message{
 			Role:    "assistant",
 			Content: "",
 			Time:    time.Now(),
 			Type:    MessageTypeText,
-		}
-		a.messages = append(a.messages, *a.currentMessage)
+		})
 		a.streamingMessageIndex = len(a.messages) - 1
+		a.needNewTextMessage = false
 	}
 
 	a.messages[a.streamingMessageIndex].Content += text
-	a.thinking = false
-	a.scrollY = 999999
-}
-
-func (a *App) setStreamingMessageContent(text string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if a.streamingMessageIndex < len(a.messages) {
-		// Only set if the new text is longer (complete message might arrive
-		// after streaming deltas have accumulated the same content)
-		if len(text) > len(a.messages[a.streamingMessageIndex].Content) {
-			a.messages[a.streamingMessageIndex].Content = text
-		}
-	}
 	a.thinking = false
 	a.scrollY = 999999
 }
@@ -433,6 +418,7 @@ func (a *App) addToolCall(call *llm.ToolUseContent) {
 	}
 	a.messages = append(a.messages, msg)
 	a.toolCallIndex[call.ID] = len(a.messages) - 1
+	a.needNewTextMessage = true // next text should go to a new message
 	a.scrollY = 999999
 }
 
