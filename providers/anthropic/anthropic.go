@@ -397,6 +397,12 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 		req.Header.Add("anthropic-beta", FeatureCodeExecution)
 	}
 
+	if config.IsFeatureEnabled(FeatureComputerUseOpus45) {
+		req.Header.Add("anthropic-beta", FeatureComputerUseOpus45)
+	} else if config.IsFeatureEnabled(FeatureComputerUse) {
+		req.Header.Add("anthropic-beta", FeatureComputerUse)
+	}
+
 	for key, values := range config.RequestHeaders {
 		for _, value := range values {
 			req.Header.Add(key, value)

@@ -32,6 +32,10 @@ const (
 	ContentTypeCodeExecutionToolResult ContentType = "code_execution_tool_result"
 	ContentTypeRefusal                 ContentType = "refusal"
 	ContentTypeDynamic                 ContentType = "dynamic"
+
+	// Code execution tool result types (code_execution_20250825)
+	ContentTypeBashCodeExecutionToolResult       ContentType = "bash_code_execution_tool_result"
+	ContentTypeTextEditorCodeExecutionToolResult ContentType = "text_editor_code_execution_tool_result"
 )
 
 // ContentSourceType indicates the location of the media content.
@@ -857,6 +861,222 @@ func (c *CodeExecutionToolResultContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
+//// BashCodeExecutionToolResult ///////////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
+
+/* Examples:
+{
+  "type": "server_tool_use",
+  "id": "srvtoolu_01B3C4D5E6F7G8H9I0J1K2L3",
+  "name": "bash_code_execution",
+  "input": {
+    "command": "ls -la | head -5"
+  }
+}
+
+{
+  "type": "bash_code_execution_tool_result",
+  "tool_use_id": "srvtoolu_01B3C4D5E6F7G8H9I0J1K2L3",
+  "content": {
+    "type": "bash_code_execution_result",
+    "stdout": "total 24\ndrwxr-xr-x 2 user user 4096 ...",
+    "stderr": "",
+    "return_code": 0
+  }
+}
+
+Error response:
+{
+  "type": "bash_code_execution_tool_result",
+  "tool_use_id": "srvtoolu_01VfmxgZ46TiHbmXgy928hQR",
+  "content": {
+    "type": "bash_code_execution_tool_result_error",
+    "error_code": "unavailable"
+  }
+}
+*/
+
+// BashCodeExecutionResult contains the result of a bash command execution.
+type BashCodeExecutionResult struct {
+	Type       string `json:"type"` // "bash_code_execution_result" or "bash_code_execution_tool_result_error"
+	Stdout     string `json:"stdout,omitempty"`
+	Stderr     string `json:"stderr,omitempty"`
+	ReturnCode int    `json:"return_code,omitempty"`
+	ErrorCode  string `json:"error_code,omitempty"` // For error responses
+	// Content may contain file references when files are created
+	Content []BashCodeExecutionFile `json:"content,omitempty"`
+}
+
+// BashCodeExecutionFile represents a file created during bash execution.
+type BashCodeExecutionFile struct {
+	FileID string `json:"file_id"`
+}
+
+// BashCodeExecutionToolResultContent represents the result of a bash code execution.
+type BashCodeExecutionToolResultContent struct {
+	ToolUseID string                  `json:"tool_use_id"`
+	Content   BashCodeExecutionResult `json:"content"`
+}
+
+func (c *BashCodeExecutionToolResultContent) Type() ContentType {
+	return ContentTypeBashCodeExecutionToolResult
+}
+
+func (c *BashCodeExecutionToolResultContent) MarshalJSON() ([]byte, error) {
+	type Alias BashCodeExecutionToolResultContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeBashCodeExecutionToolResult,
+		Alias: (*Alias)(c),
+	})
+}
+
+// IsError returns true if this result represents an error.
+func (c *BashCodeExecutionToolResultContent) IsError() bool {
+	return c.Content.Type == "bash_code_execution_tool_result_error"
+}
+
+//// TextEditorCodeExecutionToolResult /////////////////////////////////////////
+
+// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
+
+/* Examples:
+View file:
+{
+  "type": "server_tool_use",
+  "id": "srvtoolu_01C4D5E6F7G8H9I0J1K2L3M4",
+  "name": "text_editor_code_execution",
+  "input": {
+    "command": "view",
+    "path": "config.json"
+  }
+}
+
+{
+  "type": "text_editor_code_execution_tool_result",
+  "tool_use_id": "srvtoolu_01C4D5E6F7G8H9I0J1K2L3M4",
+  "content": {
+    "type": "text_editor_code_execution_result",
+    "file_type": "text",
+    "content": "{\n  \"setting\": \"value\",\n  \"debug\": true\n}",
+    "numLines": 4,
+    "startLine": 1,
+    "totalLines": 4
+  }
+}
+
+Create file:
+{
+  "type": "server_tool_use",
+  "id": "srvtoolu_01D5E6F7G8H9I0J1K2L3M4N5",
+  "name": "text_editor_code_execution",
+  "input": {
+    "command": "create",
+    "path": "new_file.txt",
+    "file_text": "Hello, World!"
+  }
+}
+
+{
+  "type": "text_editor_code_execution_tool_result",
+  "tool_use_id": "srvtoolu_01D5E6F7G8H9I0J1K2L3M4N5",
+  "content": {
+    "type": "text_editor_code_execution_result",
+    "is_file_update": false
+  }
+}
+
+Edit file (str_replace):
+{
+  "type": "server_tool_use",
+  "id": "srvtoolu_01E6F7G8H9I0J1K2L3M4N5O6",
+  "name": "text_editor_code_execution",
+  "input": {
+    "command": "str_replace",
+    "path": "config.json",
+    "old_str": "\"debug\": true",
+    "new_str": "\"debug\": false"
+  }
+}
+
+{
+  "type": "text_editor_code_execution_tool_result",
+  "tool_use_id": "srvtoolu_01E6F7G8H9I0J1K2L3M4N5O6",
+  "content": {
+    "type": "text_editor_code_execution_result",
+    "oldStart": 3,
+    "oldLines": 1,
+    "newStart": 3,
+    "newLines": 1,
+    "lines": ["-  \"debug\": true", "+  \"debug\": false"]
+  }
+}
+
+Error response:
+{
+  "type": "text_editor_code_execution_tool_result",
+  "tool_use_id": "srvtoolu_...",
+  "content": {
+    "type": "text_editor_code_execution_tool_result_error",
+    "error_code": "file_not_found"
+  }
+}
+*/
+
+// TextEditorCodeExecutionResult contains the result of a text editor operation.
+type TextEditorCodeExecutionResult struct {
+	Type string `json:"type"` // "text_editor_code_execution_result" or "text_editor_code_execution_tool_result_error"
+
+	// View operation fields
+	FileType   string `json:"file_type,omitempty"`
+	Content    string `json:"content,omitempty"`
+	NumLines   int    `json:"numLines,omitempty"`
+	StartLine  int    `json:"startLine,omitempty"`
+	TotalLines int    `json:"totalLines,omitempty"`
+
+	// Create operation fields
+	IsFileUpdate *bool `json:"is_file_update,omitempty"`
+
+	// Edit (str_replace) operation fields
+	OldStart int      `json:"oldStart,omitempty"`
+	OldLines int      `json:"oldLines,omitempty"`
+	NewStart int      `json:"newStart,omitempty"`
+	NewLines int      `json:"newLines,omitempty"`
+	Lines    []string `json:"lines,omitempty"`
+
+	// Error fields
+	ErrorCode string `json:"error_code,omitempty"`
+}
+
+// TextEditorCodeExecutionToolResultContent represents the result of a text editor operation.
+type TextEditorCodeExecutionToolResultContent struct {
+	ToolUseID string                        `json:"tool_use_id"`
+	Content   TextEditorCodeExecutionResult `json:"content"`
+}
+
+func (c *TextEditorCodeExecutionToolResultContent) Type() ContentType {
+	return ContentTypeTextEditorCodeExecutionToolResult
+}
+
+func (c *TextEditorCodeExecutionToolResultContent) MarshalJSON() ([]byte, error) {
+	type Alias TextEditorCodeExecutionToolResultContent
+	return json.Marshal(struct {
+		Type ContentType `json:"type"`
+		*Alias
+	}{
+		Type:  ContentTypeTextEditorCodeExecutionToolResult,
+		Alias: (*Alias)(c),
+	})
+}
+
+// IsError returns true if this result represents an error.
+func (c *TextEditorCodeExecutionToolResultContent) IsError() bool {
+	return c.Content.Type == "text_editor_code_execution_tool_result_error"
+}
+
 //// Unmarshalling /////////////////////////////////////////////////////////////
 
 type contentTypeIndicator struct {
@@ -923,6 +1143,10 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &MCPApprovalRequestContent{}
 	case ContentTypeCodeExecutionToolResult:
 		content = &CodeExecutionToolResultContent{}
+	case ContentTypeBashCodeExecutionToolResult:
+		content = &BashCodeExecutionToolResultContent{}
+	case ContentTypeTextEditorCodeExecutionToolResult:
+		content = &TextEditorCodeExecutionToolResultContent{}
 	case ContentTypeRefusal:
 		content = &RefusalContent{}
 	case ContentTypeMCPApprovalResponse:
