@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 // boolPtr returns a pointer to the given bool value
@@ -23,7 +23,7 @@ func TestNewToolAdapter(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	mcpTool := mcp.Tool{
 		Name:        "test-tool",
@@ -40,10 +40,10 @@ func TestNewToolAdapter(t *testing.T) {
 	}
 
 	adapter := NewToolAdapter(client, mcpTool, "test-server")
-	require.NotNil(t, adapter)
-	require.Equal(t, client, adapter.mcpClient)
-	require.Equal(t, mcpTool, adapter.toolInfo)
-	require.Equal(t, "test-server", adapter.serverName)
+	assert.NotNil(t, adapter)
+	assert.Equal(t, client, adapter.mcpClient)
+	assert.Equal(t, mcpTool, adapter.toolInfo)
+	assert.Equal(t, "test-server", adapter.serverName)
 }
 
 func TestMCPToolAdapter_Name(t *testing.T) {
@@ -53,7 +53,7 @@ func TestMCPToolAdapter_Name(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	mcpTool := mcp.Tool{
 		Name:        "my-tool",
@@ -61,7 +61,7 @@ func TestMCPToolAdapter_Name(t *testing.T) {
 	}
 
 	adapter := NewToolAdapter(client, mcpTool, "test-server")
-	require.Equal(t, "my-tool", adapter.Name())
+	assert.Equal(t, "my-tool", adapter.Name())
 }
 
 func TestMCPToolAdapter_Description(t *testing.T) {
@@ -71,7 +71,7 @@ func TestMCPToolAdapter_Description(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	tests := []struct {
 		name     string
@@ -99,7 +99,7 @@ func TestMCPToolAdapter_Description(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			adapter := NewToolAdapter(client, tt.mcpTool, "test-server")
-			require.Equal(t, tt.expected, adapter.Description())
+			assert.Equal(t, tt.expected, adapter.Description())
 		})
 	}
 }
@@ -111,7 +111,7 @@ func TestMCPToolAdapter_Schema(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	tests := []struct {
 		name     string
@@ -158,7 +158,7 @@ func TestMCPToolAdapter_Schema(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			adapter := NewToolAdapter(client, tt.mcpTool, "test-server")
 			schema := adapter.Schema()
-			require.Equal(t, tt.expected, schema)
+			assert.Equal(t, tt.expected, schema)
 		})
 	}
 }
@@ -170,7 +170,7 @@ func TestMCPToolAdapter_Annotations(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	mcpTool := mcp.Tool{
 		Name:        "test-tool",
@@ -180,12 +180,12 @@ func TestMCPToolAdapter_Annotations(t *testing.T) {
 	adapter := NewToolAdapter(client, mcpTool, "test-server")
 	annotations := adapter.Annotations()
 
-	require.NotNil(t, annotations)
-	require.Equal(t, "test-tool (MCP:test-server)", annotations.Title)
-	require.False(t, annotations.ReadOnlyHint)
-	require.False(t, annotations.DestructiveHint)
-	require.False(t, annotations.IdempotentHint)
-	require.False(t, annotations.OpenWorldHint)
+	assert.NotNil(t, annotations)
+	assert.Equal(t, "test-tool (MCP:test-server)", annotations.Title)
+	assert.False(t, annotations.ReadOnlyHint)
+	assert.False(t, annotations.DestructiveHint)
+	assert.False(t, annotations.IdempotentHint)
+	assert.False(t, annotations.OpenWorldHint)
 }
 
 func TestMCPToolAdapter_Call_NotConnected(t *testing.T) {
@@ -195,7 +195,7 @@ func TestMCPToolAdapter_Call_NotConnected(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	mcpTool := mcp.Tool{
 		Name:        "test-tool",
@@ -208,12 +208,12 @@ func TestMCPToolAdapter_Call_NotConnected(t *testing.T) {
 	input := map[string]interface{}{"param": "value"}
 
 	result, err := adapter.Call(ctx, input)
-	require.NoError(t, err) // Tool adapter handles errors by returning error result
-	require.NotNil(t, result)
-	require.True(t, result.IsError)
-	require.Len(t, result.Content, 1)
-	require.Equal(t, dive.ToolResultContentTypeText, result.Content[0].Type)
-	require.Contains(t, result.Content[0].Text, "MCP tool call failed")
+	assert.NoError(t, err) // Tool adapter handles errors by returning error result
+	assert.NotNil(t, result)
+	assert.True(t, result.IsError)
+	assert.Len(t, result.Content, 1)
+	assert.Equal(t, dive.ToolResultContentTypeText, result.Content[0].Type)
+	assert.Contains(t, result.Content[0].Text, "MCP tool call failed")
 }
 
 func TestMCPToolAdapter_Call_InputFormats(t *testing.T) {
@@ -223,7 +223,7 @@ func TestMCPToolAdapter_Call_InputFormats(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	mcpTool := mcp.Tool{
 		Name:        "test-tool",
@@ -258,11 +258,11 @@ func TestMCPToolAdapter_Call_InputFormats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := adapter.Call(ctx, tt.input)
-			require.NoError(t, err)
-			require.NotNil(t, result)
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
 			// All should fail because we're not connected, but they should handle input conversion
-			require.True(t, result.IsError)
-			require.Contains(t, result.Content[0].Text, "MCP tool call failed")
+			assert.True(t, result.IsError)
+			assert.Contains(t, result.Content[0].Text, "MCP tool call failed")
 		})
 	}
 }
@@ -274,7 +274,7 @@ func TestMCPToolAdapter_Call_InvalidJSON(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	mcpTool := mcp.Tool{
 		Name:        "test-tool",
@@ -287,10 +287,10 @@ func TestMCPToolAdapter_Call_InvalidJSON(t *testing.T) {
 	// Test with invalid JSON
 	invalidJSON := json.RawMessage(`{"invalid": json}`)
 	result, err := adapter.Call(ctx, invalidJSON)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "Failed to unmarshal input")
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "Failed to unmarshal input")
 }
 
 func TestMCPToolAdapter_Call_EmptyInputs(t *testing.T) {
@@ -300,7 +300,7 @@ func TestMCPToolAdapter_Call_EmptyInputs(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	mcpTool := mcp.Tool{
 		Name:        "test-tool",
@@ -341,14 +341,14 @@ func TestMCPToolAdapter_Call_EmptyInputs(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := adapter.Call(ctx, tc.input)
-			require.NoError(t, err)
-			require.NotNil(t, result)
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
 			// Should fail because client is not connected, but the error should be
 			// about connection, not JSON unmarshaling
-			require.True(t, result.IsError)
-			require.Contains(t, result.Content[0].Text, "MCP tool call failed")
+			assert.True(t, result.IsError)
+			assert.Contains(t, result.Content[0].Text, "MCP tool call failed")
 			// Should NOT contain unmarshaling error
-			require.NotContains(t, result.Content[0].Text, "Failed to unmarshal")
+			assert.NotContains(t, result.Content[0].Text, "Failed to unmarshal")
 		})
 	}
 }
@@ -416,7 +416,7 @@ func TestConvertMCPSchemaToDiv(t *testing.T) {
 			},
 			expected: &schema.Property{
 				Type: "string",
-				Enum: []string{"option1", "option2"},
+				Enum: []any{"option1", "option2"},
 			},
 		},
 		{
@@ -435,7 +435,7 @@ func TestConvertMCPSchemaToDiv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := convertMCPSchemaToDiv(tt.mcpSchema)
-			require.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -560,11 +560,11 @@ func TestConvertMCPResultToDive(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := ConvertMCPResultToDive(tt.mcpResult)
 			if tt.expectErr {
-				require.Error(t, err)
+				assert.Error(t, err)
 				return
 			}
-			require.NoError(t, err)
-			require.Equal(t, tt.expected, result)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -676,21 +676,21 @@ func TestConvertMCPResultToDive_ContentTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := ConvertMCPResultToDive(tt.mcpResult)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			require.Len(t, result.Content, tt.expectedLength)
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.Len(t, result.Content, tt.expectedLength)
 
 			content := result.Content[0]
-			require.Equal(t, tt.expectedType, content.Type)
+			assert.Equal(t, tt.expectedType, content.Type)
 
 			if tt.expectedText != "" {
-				require.Equal(t, tt.expectedText, content.Text)
+				assert.Equal(t, tt.expectedText, content.Text)
 			}
 			if tt.expectedData != "" {
-				require.Equal(t, tt.expectedData, content.Data)
+				assert.Equal(t, tt.expectedData, content.Data)
 			}
 			if tt.expectedMime != "" {
-				require.Equal(t, tt.expectedMime, content.MimeType)
+				assert.Equal(t, tt.expectedMime, content.MimeType)
 			}
 		})
 	}
@@ -713,19 +713,19 @@ func TestConvertMCPResultToDive_Annotations(t *testing.T) {
 	}
 
 	result, err := ConvertMCPResultToDive(mcpResult)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, result.Content, 1)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Content, 1)
 
 	// content := result.Content[0]
-	// require.NotNil(t, content.Annotations)
+	// assert.NotNil(t, content.Annotations)
 
 	// // Check that MCP annotations are properly converted
-	// require.Equal(t, 0.9, content.Annotations["mcp_priority"])
+	// assert.Equal(t, 0.9, content.Annotations["mcp_priority"])
 	// audience, ok := content.Annotations["mcp_audience"].([]string)
-	// require.True(t, ok)
-	// require.Contains(t, audience, "user")
-	// require.Contains(t, audience, "assistant")
+	// assert.True(t, ok)
+	// assert.Contains(t, audience, "user")
+	// assert.Contains(t, audience, "assistant")
 }
 
 func TestConvertMCPResultToDive_ErrorResult(t *testing.T) {
@@ -740,16 +740,16 @@ func TestConvertMCPResultToDive_ErrorResult(t *testing.T) {
 	}
 
 	result, err := ConvertMCPResultToDive(mcpResult)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.True(t, result.IsError)
-	require.Equal(t, "An error occurred", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, result.IsError)
+	assert.Equal(t, "An error occurred", result.Content[0].Text)
 }
 
 func TestConvertMCPResultToDive_NilResult(t *testing.T) {
 	result, err := ConvertMCPResultToDive(nil)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.True(t, result.IsError)
-	require.Equal(t, "mcp tool returned nil result", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, result.IsError)
+	assert.Equal(t, "mcp tool returned nil result", result.Content[0].Text)
 }

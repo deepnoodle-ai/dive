@@ -7,7 +7,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 var (
@@ -152,7 +152,7 @@ func (t *TextEditorTool) Schema() *schema.Schema {
 			"command": {
 				Type:        "string",
 				Description: "The command to execute: view (read file/directory), create (create new file), str_replace (replace text), insert (insert text at line)",
-				Enum:        []string{"view", "create", "str_replace", "insert"},
+				Enum:        []any{"view", "create", "str_replace", "insert"},
 			},
 			"path": {
 				Type:        "string",

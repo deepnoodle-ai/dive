@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestContentTypeStringMethods(t *testing.T) {
@@ -28,7 +28,7 @@ func TestContentTypeStringMethods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.source.String()
-			require.Equal(t, tt.expected, got)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -37,7 +37,7 @@ func TestTextContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &TextContent{Text: "Hello, world!"}
 		got := c.Type()
-		require.Equal(t, ContentTypeText, got)
+		assert.Equal(t, ContentTypeText, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -89,8 +89,8 @@ func TestTextContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -100,7 +100,7 @@ func TestImageContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &ImageContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeImage, got)
+		assert.Equal(t, ContentTypeImage, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -146,8 +146,8 @@ func TestImageContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -157,7 +157,7 @@ func TestDocumentContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &DocumentContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeDocument, got)
+		assert.Equal(t, ContentTypeDocument, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -246,8 +246,8 @@ func TestDocumentContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -257,7 +257,7 @@ func TestToolUseContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &ToolUseContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeToolUse, got)
+		assert.Equal(t, ContentTypeToolUse, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -289,8 +289,8 @@ func TestToolUseContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -300,7 +300,7 @@ func TestToolResultContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &ToolResultContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeToolResult, got)
+		assert.Equal(t, ContentTypeToolResult, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -342,8 +342,8 @@ func TestToolResultContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -353,7 +353,7 @@ func TestServerToolUseContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &ServerToolUseContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeServerToolUse, got)
+		assert.Equal(t, ContentTypeServerToolUse, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -391,17 +391,17 @@ func TestServerToolUseContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 
 				// We need to unmarshal and compare objects since map ordering is non-deterministic
 				var gotObj, expectedObj map[string]interface{}
 				err = json.Unmarshal(got, &gotObj)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 
 				err = json.Unmarshal([]byte(tt.expected), &expectedObj)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 
-				require.Equal(t, expectedObj, gotObj)
+				assert.Equal(t, expectedObj, gotObj)
 			})
 		}
 	})
@@ -411,7 +411,7 @@ func TestWebSearchToolResultContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &WebSearchToolResultContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeWebSearchToolResult, got)
+		assert.Equal(t, ContentTypeWebSearchToolResult, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -473,8 +473,8 @@ func TestWebSearchToolResultContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -484,7 +484,7 @@ func TestThinkingContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &ThinkingContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeThinking, got)
+		assert.Equal(t, ContentTypeThinking, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -514,8 +514,8 @@ func TestThinkingContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -525,7 +525,7 @@ func TestRedactedThinkingContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &RedactedThinkingContent{}
 		got := c.Type()
-		require.Equal(t, ContentTypeRedactedThinking, got)
+		assert.Equal(t, ContentTypeRedactedThinking, got)
 	})
 
 	t.Run("MarshalJSON", func(t *testing.T) {
@@ -553,8 +553,8 @@ func TestRedactedThinkingContent(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := json.Marshal(tt.content)
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, string(got))
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, string(got))
 			})
 		}
 	})
@@ -580,7 +580,7 @@ func TestMCPContentTypes(t *testing.T) {
 		t.Run("Type", func(t *testing.T) {
 			c := &MCPListToolsContent{}
 			got := c.Type()
-			require.Equal(t, ContentTypeMCPListTools, got)
+			assert.Equal(t, ContentTypeMCPListTools, got)
 		})
 
 		t.Run("MarshalJSON", func(t *testing.T) {
@@ -644,8 +644,8 @@ func TestMCPContentTypes(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					got, err := json.Marshal(tt.content)
-					require.NoError(t, err)
-					require.Equal(t, tt.expected, string(got))
+					assert.NoError(t, err)
+					assert.Equal(t, tt.expected, string(got))
 				})
 			}
 		})
@@ -653,14 +653,14 @@ func TestMCPContentTypes(t *testing.T) {
 		t.Run("UnmarshalContent", func(t *testing.T) {
 			data := []byte(`{"type":"mcp_list_tools","server_label":"deepwiki","tools":[{"name":"ask_question","description":"Ask a question about a GitHub repository"}]}`)
 			content, err := UnmarshalContent(data)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			toolsList, ok := content.(*MCPListToolsContent)
-			require.True(t, ok)
-			require.Equal(t, "deepwiki", toolsList.ServerLabel)
-			require.Len(t, toolsList.Tools, 1)
-			require.Equal(t, "ask_question", toolsList.Tools[0].Name)
-			require.Equal(t, "Ask a question about a GitHub repository", toolsList.Tools[0].Description)
+			assert.True(t, ok)
+			assert.Equal(t, "deepwiki", toolsList.ServerLabel)
+			assert.Len(t, toolsList.Tools, 1)
+			assert.Equal(t, "ask_question", toolsList.Tools[0].Name)
+			assert.Equal(t, "Ask a question about a GitHub repository", toolsList.Tools[0].Description)
 		})
 	})
 
@@ -668,7 +668,7 @@ func TestMCPContentTypes(t *testing.T) {
 		t.Run("Type", func(t *testing.T) {
 			c := &MCPApprovalRequestContent{}
 			got := c.Type()
-			require.Equal(t, ContentTypeMCPApprovalRequest, got)
+			assert.Equal(t, ContentTypeMCPApprovalRequest, got)
 		})
 
 		t.Run("MarshalJSON", func(t *testing.T) {
@@ -692,8 +692,8 @@ func TestMCPContentTypes(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					got, err := json.Marshal(tt.content)
-					require.NoError(t, err)
-					require.Equal(t, tt.expected, string(got))
+					assert.NoError(t, err)
+					assert.Equal(t, tt.expected, string(got))
 				})
 			}
 		})
@@ -701,13 +701,13 @@ func TestMCPContentTypes(t *testing.T) {
 		t.Run("UnmarshalContent", func(t *testing.T) {
 			data := []byte(`{"type":"mcp_approval_request","name":"ask_question","server_label":"deepwiki","id":"mcpr_123456"}`)
 			content, err := UnmarshalContent(data)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			approvalRequest, ok := content.(*MCPApprovalRequestContent)
-			require.True(t, ok)
-			require.Equal(t, "ask_question", approvalRequest.Name)
-			require.Equal(t, "deepwiki", approvalRequest.ServerLabel)
-			require.Equal(t, "mcpr_123456", approvalRequest.ID)
+			assert.True(t, ok)
+			assert.Equal(t, "ask_question", approvalRequest.Name)
+			assert.Equal(t, "deepwiki", approvalRequest.ServerLabel)
+			assert.Equal(t, "mcpr_123456", approvalRequest.ID)
 		})
 	})
 
@@ -729,20 +729,20 @@ func TestMCPContentTypes(t *testing.T) {
 			}
 
 			data, err := json.Marshal(tool)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			// Unmarshal back to verify structure
 			var result map[string]interface{}
 			err = json.Unmarshal(data, &result)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
-			require.Equal(t, "test_tool", result["name"])
-			require.Equal(t, "A test tool", result["description"])
-			require.NotNil(t, result["input_schema"])
+			assert.Equal(t, "test_tool", result["name"])
+			assert.Equal(t, "A test tool", result["description"])
+			assert.NotNil(t, result["input_schema"])
 
 			schema, ok := result["input_schema"].(map[string]interface{})
-			require.True(t, ok)
-			require.Equal(t, "object", schema["type"])
+			assert.True(t, ok)
+			assert.Equal(t, "object", schema["type"])
 		})
 
 		t.Run("MCPToolsListContent with enhanced tools", func(t *testing.T) {
@@ -766,18 +766,18 @@ func TestMCPContentTypes(t *testing.T) {
 			}
 
 			data, err := json.Marshal(toolsList)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			// Verify it can be unmarshaled
 			content, err := UnmarshalContent(data)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			parsedList, ok := content.(*MCPListToolsContent)
-			require.True(t, ok)
-			require.Equal(t, "enhanced-server", parsedList.ServerLabel)
-			require.Len(t, parsedList.Tools, 1)
-			require.Equal(t, "enhanced_tool", parsedList.Tools[0].Name)
-			require.NotNil(t, parsedList.Tools[0].InputSchema)
+			assert.True(t, ok)
+			assert.Equal(t, "enhanced-server", parsedList.ServerLabel)
+			assert.Len(t, parsedList.Tools, 1)
+			assert.Equal(t, "enhanced_tool", parsedList.Tools[0].Name)
+			assert.NotNil(t, parsedList.Tools[0].InputSchema)
 		})
 	})
 }

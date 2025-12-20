@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestIsPrivateIP(t *testing.T) {
@@ -60,16 +60,16 @@ func TestIsPrivateIP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ip := net.ParseIP(tt.ip)
-			require.NotNil(t, ip, "Failed to parse IP: %s", tt.ip)
+			assert.NotNil(t, ip, "Failed to parse IP: %s", tt.ip)
 			result := isPrivateIP(ip)
-			require.Equal(t, tt.expected, result, "isPrivateIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+			assert.Equal(t, tt.expected, result, "isPrivateIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
 		})
 	}
 }
 
 func TestIsPrivateIP_NilIP(t *testing.T) {
 	result := isPrivateIP(nil)
-	require.False(t, result, "isPrivateIP(nil) should return false")
+	assert.False(t, result, "isPrivateIP(nil) should return false")
 }
 
 func TestValidateFetchURL(t *testing.T) {
@@ -111,12 +111,12 @@ func TestValidateFetchURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateFetchURL(tt.url)
 			if tt.expectError {
-				require.Error(t, err, "Expected error for URL: %s", tt.url)
+				assert.Error(t, err, "Expected error for URL: %s", tt.url)
 				if tt.errorMsg != "" {
-					require.Contains(t, err.Error(), tt.errorMsg)
+					assert.Contains(t, err.Error(), tt.errorMsg)
 				}
 			} else {
-				require.NoError(t, err, "Expected no error for URL: %s", tt.url)
+				assert.NoError(t, err, "Expected no error for URL: %s", tt.url)
 			}
 		})
 	}
@@ -153,12 +153,12 @@ func TestValidateFetchURL_PrivateIPs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateFetchURL(tt.url)
 			if tt.expectError {
-				require.Error(t, err, "Expected error for URL: %s", tt.url)
+				assert.Error(t, err, "Expected error for URL: %s", tt.url)
 				if tt.errorMsg != "" {
-					require.Contains(t, err.Error(), tt.errorMsg)
+					assert.Contains(t, err.Error(), tt.errorMsg)
 				}
 			} else {
-				require.NoError(t, err, "Expected no error for URL: %s", tt.url)
+				assert.NoError(t, err, "Expected no error for URL: %s", tt.url)
 			}
 		})
 	}
@@ -186,12 +186,12 @@ func TestValidateFetchURL_IPv6(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateFetchURL(tt.url)
 			if tt.expectError {
-				require.Error(t, err, "Expected error for URL: %s", tt.url)
+				assert.Error(t, err, "Expected error for URL: %s", tt.url)
 				if tt.errorMsg != "" {
-					require.Contains(t, err.Error(), tt.errorMsg)
+					assert.Contains(t, err.Error(), tt.errorMsg)
 				}
 			} else {
-				require.NoError(t, err, "Expected no error for URL: %s", tt.url)
+				assert.NoError(t, err, "Expected no error for URL: %s", tt.url)
 			}
 		})
 	}

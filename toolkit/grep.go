@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/gobwas/glob"
 )
 
@@ -166,7 +166,7 @@ func (t *GrepTool) Schema() *schema.Schema {
 			},
 			"output_mode": {
 				Type:        "string",
-				Enum:        []string{"content", "files_with_matches", "count"},
+				Enum:        []any{"content", "files_with_matches", "count"},
 				Description: "Output mode: \"content\" shows matching lines, \"files_with_matches\" shows file paths (default), \"count\" shows match counts",
 			},
 			"-i": {

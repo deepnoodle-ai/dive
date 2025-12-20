@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/log"
 )
 
 var (
@@ -64,7 +63,7 @@ type AgentOptions struct {
 	Tools              []Tool
 	ResponseTimeout    time.Duration
 	Hooks              llm.Hooks
-	Logger             log.Logger
+	Logger             llm.Logger
 	ToolIterationLimit int
 	ModelSettings      *ModelSettings
 	DateAwareness      *bool
@@ -88,7 +87,7 @@ type StandardAgent struct {
 	subordinates         []string
 	responseTimeout      time.Duration
 	hooks                llm.Hooks
-	logger               log.Logger
+	logger               llm.Logger
 	toolIterationLimit   int
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
@@ -110,7 +109,7 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		opts.ToolIterationLimit = defaultToolIterationLimit
 	}
 	if opts.Logger == nil {
-		opts.Logger = log.New(log.GetDefaultLevel())
+		opts.Logger = &llm.NullLogger{}
 	}
 	if opts.ID == "" {
 		opts.ID = newID()
@@ -312,7 +311,7 @@ func (a *StandardAgent) buildSystemPrompt() (string, error) {
 		prompt = strings.TrimSpace(prompt)
 	}
 	if a.dateAwareness == nil || *a.dateAwareness {
-		prompt = fmt.Sprintf("%s\n\n%s", prompt, dateString(time.Now()))
+		prompt = fmt.Sprintf("%s\n\n%s", prompt, dateTimeString(time.Now()))
 	}
 	return strings.TrimSpace(prompt), nil
 }

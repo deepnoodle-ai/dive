@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -181,13 +181,11 @@ func convertMCPSchemaToDiv(mcpSchema map[string]interface{}) *schema.Property {
 
 	// Handle enum values
 	if enum, ok := mcpSchema["enum"].([]interface{}); ok {
-		stringEnum := make([]string, len(enum))
+		anyEnum := make([]any, len(enum))
 		for i, val := range enum {
-			if str, ok := val.(string); ok {
-				stringEnum[i] = str
-			}
+			anyEnum[i] = val
 		}
-		diveSchema.Enum = stringEnum
+		diveSchema.Enum = anyEnum
 	}
 
 	// Handle additional properties

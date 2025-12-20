@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/web"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/web"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 // mockSearcher implements web.Searcher for testing
@@ -42,8 +42,8 @@ func TestWebSearchTool_LimitParameter(t *testing.T) {
 			Limit: 15,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, 15, searcher.receivedLimit, "Should use the provided limit")
+		assert.NoError(t, err)
+		assert.Equal(t, 15, searcher.receivedLimit, "Should use the provided limit")
 	})
 
 	t.Run("DefaultsToTenWhenZero", func(t *testing.T) {
@@ -55,8 +55,8 @@ func TestWebSearchTool_LimitParameter(t *testing.T) {
 			Limit: 0,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, 10, searcher.receivedLimit, "Should default to 10 when limit is 0")
+		assert.NoError(t, err)
+		assert.Equal(t, 10, searcher.receivedLimit, "Should default to 10 when limit is 0")
 	})
 
 	t.Run("DefaultsToTenWhenNegative", func(t *testing.T) {
@@ -68,8 +68,8 @@ func TestWebSearchTool_LimitParameter(t *testing.T) {
 			Limit: -5,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, 10, searcher.receivedLimit, "Should default to 10 when limit is negative")
+		assert.NoError(t, err)
+		assert.Equal(t, 10, searcher.receivedLimit, "Should default to 10 when limit is negative")
 	})
 
 	t.Run("CapsAtThirty", func(t *testing.T) {
@@ -81,8 +81,8 @@ func TestWebSearchTool_LimitParameter(t *testing.T) {
 			Limit: 100,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, 30, searcher.receivedLimit, "Should cap limit at 30")
+		assert.NoError(t, err)
+		assert.Equal(t, 30, searcher.receivedLimit, "Should cap limit at 30")
 	})
 
 	t.Run("AcceptsValidLimitInRange", func(t *testing.T) {
@@ -97,8 +97,8 @@ func TestWebSearchTool_LimitParameter(t *testing.T) {
 				Limit: limit,
 			})
 
-			require.NoError(t, err)
-			require.Equal(t, limit, searcher.receivedLimit, "Should accept limit %d", limit)
+			assert.NoError(t, err)
+			assert.Equal(t, limit, searcher.receivedLimit, "Should accept limit %d", limit)
 		}
 	})
 }
@@ -106,26 +106,26 @@ func TestWebSearchTool_LimitParameter(t *testing.T) {
 func TestWebSearchTool_Metadata(t *testing.T) {
 	tool := &WebSearchTool{}
 
-	require.Equal(t, "web_search", tool.Name())
-	require.Contains(t, tool.Description(), "Searches the web")
+	assert.Equal(t, "web_search", tool.Name())
+	assert.Contains(t, tool.Description(), "Searches the web")
 
 	annotations := tool.Annotations()
-	require.NotNil(t, annotations)
-	require.True(t, annotations.ReadOnlyHint)
-	require.False(t, annotations.DestructiveHint)
-	require.True(t, annotations.IdempotentHint)
-	require.True(t, annotations.OpenWorldHint)
+	assert.NotNil(t, annotations)
+	assert.True(t, annotations.ReadOnlyHint)
+	assert.False(t, annotations.DestructiveHint)
+	assert.True(t, annotations.IdempotentHint)
+	assert.True(t, annotations.OpenWorldHint)
 }
 
 func TestWebSearchTool_Schema(t *testing.T) {
 	tool := &WebSearchTool{}
 	schema := tool.Schema()
 
-	require.NotNil(t, schema)
-	require.Equal(t, "object", string(schema.Type))
-	require.Contains(t, schema.Required, "query")
-	require.Contains(t, schema.Properties, "query")
-	require.Contains(t, schema.Properties, "limit")
+	assert.NotNil(t, schema)
+	assert.Equal(t, "object", string(schema.Type))
+	assert.Contains(t, schema.Required, "query")
+	assert.Contains(t, schema.Properties, "query")
+	assert.Contains(t, schema.Properties, "limit")
 }
 
 func TestWebSearchTool_NoResults(t *testing.T) {
@@ -137,7 +137,7 @@ func TestWebSearchTool_NoResults(t *testing.T) {
 		Limit: 10,
 	})
 
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "No search results found")
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "No search results found")
 }

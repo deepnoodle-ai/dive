@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 var (
@@ -105,7 +105,7 @@ func (t *TodoWriteTool) Schema() *schema.Schema {
 						},
 						"status": {
 							Type:        "string",
-							Enum:        []string{"pending", "in_progress", "completed"},
+							Enum:        []any{"pending", "in_progress", "completed"},
 							Description: "The task status: pending, in_progress, or completed",
 						},
 						"activeForm": {

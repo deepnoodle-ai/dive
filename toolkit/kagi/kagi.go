@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/web"
 )
 
 var kagiBaseURL = "https://kagi.com/api/v0/search"

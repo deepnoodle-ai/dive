@@ -7,22 +7,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/schema"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestKillShellTool_Name(t *testing.T) {
 	sm := NewShellManager()
 	tool := NewKillShellTool(KillShellToolOptions{ShellManager: sm})
-	require.Equal(t, "kill_shell", tool.Name())
+	assert.Equal(t, "kill_shell", tool.Name())
 }
 
 func TestKillShellTool_Description(t *testing.T) {
 	sm := NewShellManager()
 	tool := NewKillShellTool(KillShellToolOptions{ShellManager: sm})
 	desc := tool.Description()
-	require.Contains(t, desc, "Terminate")
-	require.Contains(t, desc, "shell_id")
+	assert.Contains(t, desc, "Terminate")
+	assert.Contains(t, desc, "shell_id")
 }
 
 func TestKillShellTool_Schema(t *testing.T) {
@@ -30,9 +30,9 @@ func TestKillShellTool_Schema(t *testing.T) {
 	tool := NewKillShellTool(KillShellToolOptions{ShellManager: sm})
 	s := tool.Schema()
 
-	require.Equal(t, schema.Object, s.Type)
-	require.Contains(t, s.Required, "shell_id")
-	require.Contains(t, s.Properties, "shell_id")
+	assert.Equal(t, schema.Object, s.Type)
+	assert.Contains(t, s.Required, "shell_id")
+	assert.Contains(t, s.Properties, "shell_id")
 }
 
 func TestKillShellTool_Call(t *testing.T) {
@@ -54,26 +54,26 @@ func TestKillShellTool_Call(t *testing.T) {
 		}
 
 		id, err := sm.StartBackground(ctx, cmd, args, "long running", "")
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Verify it's running
-		require.True(t, sm.IsRunning(id))
+		assert.True(t, sm.IsRunning(id))
 
 		// Kill it
 		input := &KillShellInput{ShellID: id}
 		result, err := tool.Call(ctx, input)
-		require.NoError(t, err)
-		require.False(t, result.IsError)
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
 
 		var response map[string]interface{}
 		err = json.Unmarshal([]byte(result.Content[0].Text), &response)
-		require.NoError(t, err)
-		require.Equal(t, "killed", response["status"])
-		require.Equal(t, id, response["shell_id"])
+		assert.NoError(t, err)
+		assert.Equal(t, "killed", response["status"])
+		assert.Equal(t, id, response["shell_id"])
 
 		// Verify it's no longer running
 		time.Sleep(200 * time.Millisecond)
-		require.False(t, sm.IsRunning(id))
+		assert.False(t, sm.IsRunning(id))
 	})
 
 	t.Run("KillNotRunningShell", func(t *testing.T) {
@@ -89,7 +89,7 @@ func TestKillShellTool_Call(t *testing.T) {
 		}
 
 		id, err := sm.StartBackground(ctx, cmd, nil, "", "")
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Wait for it to complete
 		time.Sleep(100 * time.Millisecond)
@@ -97,13 +97,13 @@ func TestKillShellTool_Call(t *testing.T) {
 		// Try to kill it
 		input := &KillShellInput{ShellID: id}
 		result, err := tool.Call(ctx, input)
-		require.NoError(t, err)
-		require.False(t, result.IsError)
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
 
 		var response map[string]interface{}
 		err = json.Unmarshal([]byte(result.Content[0].Text), &response)
-		require.NoError(t, err)
-		require.Equal(t, "shell is not running", response["message"])
+		assert.NoError(t, err)
+		assert.Equal(t, "shell is not running", response["message"])
 	})
 
 	t.Run("KillNonexistentShell", func(t *testing.T) {
@@ -112,9 +112,9 @@ func TestKillShellTool_Call(t *testing.T) {
 
 		input := &KillShellInput{ShellID: "nonexistent"}
 		result, err := tool.Call(ctx, input)
-		require.NoError(t, err)
-		require.True(t, result.IsError)
-		require.Contains(t, result.Content[0].Text, "shell not found")
+		assert.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "shell not found")
 	})
 
 	t.Run("MissingShellID", func(t *testing.T) {
@@ -123,9 +123,9 @@ func TestKillShellTool_Call(t *testing.T) {
 
 		input := &KillShellInput{ShellID: ""}
 		result, err := tool.Call(ctx, input)
-		require.NoError(t, err)
-		require.True(t, result.IsError)
-		require.Contains(t, result.Content[0].Text, "shell_id is required")
+		assert.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "shell_id is required")
 	})
 
 	t.Run("NoShellManager", func(t *testing.T) {
@@ -133,9 +133,9 @@ func TestKillShellTool_Call(t *testing.T) {
 
 		input := &KillShellInput{ShellID: "test"}
 		result, err := tool.Call(ctx, input)
-		require.NoError(t, err)
-		require.True(t, result.IsError)
-		require.Contains(t, result.Content[0].Text, "shell manager not configured")
+		assert.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "shell manager not configured")
 	})
 }
 
@@ -147,8 +147,8 @@ func TestKillShellTool_PreviewCall(t *testing.T) {
 	input := &KillShellInput{ShellID: "shell-123"}
 	preview := tool.PreviewCall(ctx, input)
 
-	require.Contains(t, preview.Summary, "Kill shell")
-	require.Contains(t, preview.Summary, "shell-123")
+	assert.Contains(t, preview.Summary, "Kill shell")
+	assert.Contains(t, preview.Summary, "shell-123")
 }
 
 func TestKillShellTool_Annotations(t *testing.T) {
@@ -156,8 +156,8 @@ func TestKillShellTool_Annotations(t *testing.T) {
 	tool := NewKillShellTool(KillShellToolOptions{ShellManager: sm})
 	annotations := tool.Annotations()
 
-	require.NotNil(t, annotations)
-	require.Equal(t, "Kill Shell", annotations.Title)
-	require.False(t, annotations.ReadOnlyHint)
-	require.True(t, annotations.DestructiveHint)
+	assert.NotNil(t, annotations)
+	assert.Equal(t, "Kill Shell", annotations.Title)
+	assert.False(t, annotations.ReadOnlyHint)
+	assert.True(t, annotations.DestructiveHint)
 }

@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
-	"github.com/deepnoodle-ai/dive/llm/providers/openai"
-	openaic "github.com/deepnoodle-ai/dive/llm/providers/openaicompletions"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/openai"
+	openaic "github.com/deepnoodle-ai/dive/providers/openaicompletions"
 )
 
 func main() {

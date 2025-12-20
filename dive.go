@@ -7,13 +7,6 @@ import (
 	"math/big"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/schema"
-)
-
-// Type aliases for easy access to LLM types
-type (
-	Schema   = schema.Schema
-	Property = schema.Property
 )
 
 // Agent represents an intelligent AI entity that can autonomously use tools to

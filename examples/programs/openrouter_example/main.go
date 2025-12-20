@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/openrouter"
+	"github.com/deepnoodle-ai/dive/providers/openrouter"
 )
 
 func main() {

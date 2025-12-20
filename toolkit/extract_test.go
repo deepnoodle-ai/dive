@@ -8,28 +8,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestExtractTool_Name(t *testing.T) {
 	tool := NewExtractTool(ExtractToolOptions{})
-	require.Equal(t, "extract", tool.Name())
+	assert.Equal(t, "extract", tool.Name())
 }
 
 func TestExtractTool_Description(t *testing.T) {
 	tool := NewExtractTool(ExtractToolOptions{})
 	desc := tool.Description()
-	require.Contains(t, desc, "Extract structured data")
-	require.Contains(t, desc, "JSON schema")
+	assert.Contains(t, desc, "Extract structured data")
+	assert.Contains(t, desc, "JSON schema")
 }
 
 func TestExtractTool_Schema(t *testing.T) {
 	tool := NewExtractTool(ExtractToolOptions{})
 	schema := tool.Schema()
-	require.Equal(t, "object", string(schema.Type))
-	require.Contains(t, schema.Required, "input_path")
-	require.Contains(t, schema.Required, "schema")
-	require.NotEmpty(t, schema.Properties)
+	assert.Equal(t, "object", string(schema.Type))
+	assert.Contains(t, schema.Required, "input_path")
+	assert.Contains(t, schema.Required, "schema")
+	assert.NotEmpty(t, schema.Properties)
 }
 
 func TestExtractTool_CallWithMissingInputPath(t *testing.T) {
@@ -39,9 +39,9 @@ func TestExtractTool_CallWithMissingInputPath(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "No input path provided")
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "No input path provided")
 }
 
 func TestExtractTool_CallWithMissingSchema(t *testing.T) {
@@ -51,9 +51,9 @@ func TestExtractTool_CallWithMissingSchema(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "No schema provided")
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "No schema provided")
 }
 
 func TestExtractTool_CallWithNonexistentFile(t *testing.T) {
@@ -64,9 +64,9 @@ func TestExtractTool_CallWithNonexistentFile(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "File not found")
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "File not found")
 }
 
 func TestExtractTool_CallWithTextFile(t *testing.T) {
@@ -75,7 +75,7 @@ func TestExtractTool_CallWithTextFile(t *testing.T) {
 	textFile := filepath.Join(tempDir, "test.txt")
 	testContent := "Hello, World! This is a test document with some data."
 	err := os.WriteFile(textFile, []byte(testContent), 0644)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	tool := &ExtractTool{maxFileSize: 1024 * 1024}
 	schema := map[string]interface{}{
@@ -95,24 +95,24 @@ func TestExtractTool_CallWithTextFile(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.False(t, result.IsError)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
 
 	// Parse the result
 	var analysisResult map[string]interface{}
 	err = json.Unmarshal([]byte(result.Content[0].Text), &analysisResult)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
-	require.Equal(t, "text", analysisResult["file_type"])
-	require.Equal(t, textFile, analysisResult["file_path"])
-	require.Equal(t, testContent, analysisResult["content"])
+	assert.Equal(t, "text", analysisResult["file_type"])
+	assert.Equal(t, textFile, analysisResult["file_path"])
+	assert.Equal(t, testContent, analysisResult["content"])
 
 	// Check schema structure instead of exact equality due to JSON unmarshaling type differences
 	extractedSchema, ok := analysisResult["schema"].(map[string]interface{})
-	require.True(t, ok)
-	require.Equal(t, "object", extractedSchema["type"])
-	require.NotNil(t, extractedSchema["properties"])
-	require.NotNil(t, extractedSchema["required"])
+	assert.True(t, ok)
+	assert.Equal(t, "object", extractedSchema["type"])
+	assert.NotNil(t, extractedSchema["properties"])
+	assert.NotNil(t, extractedSchema["required"])
 }
 
 func TestExtractTool_CallWithBiasFilter(t *testing.T) {
@@ -121,7 +121,7 @@ func TestExtractTool_CallWithBiasFilter(t *testing.T) {
 	textFile := filepath.Join(tempDir, "test.txt")
 	testContent := "John is a doctor and Mary is a nurse."
 	err := os.WriteFile(textFile, []byte(testContent), 0644)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	tool := &ExtractTool{maxFileSize: 1024 * 1024}
 	schema := map[string]interface{}{
@@ -147,16 +147,16 @@ func TestExtractTool_CallWithBiasFilter(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.False(t, result.IsError)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
 
 	// Parse the result
 	var analysisResult map[string]interface{}
 	err = json.Unmarshal([]byte(result.Content[0].Text), &analysisResult)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
-	require.Equal(t, "avoid gender-based assumptions about professions", analysisResult["bias_filter"])
-	require.Contains(t, analysisResult["extraction_guidelines"], "Apply bias filtering: avoid gender-based assumptions about professions")
+	assert.Equal(t, "avoid gender-based assumptions about professions", analysisResult["bias_filter"])
+	assert.Contains(t, analysisResult["extraction_guidelines"], "Apply bias filtering: avoid gender-based assumptions about professions")
 }
 
 func TestExtractTool_CallWithCustomInstructions(t *testing.T) {
@@ -165,7 +165,7 @@ func TestExtractTool_CallWithCustomInstructions(t *testing.T) {
 	textFile := filepath.Join(tempDir, "test.txt")
 	testContent := "Revenue: $100,000\nExpenses: $75,000\nProfit: $25,000"
 	err := os.WriteFile(textFile, []byte(testContent), 0644)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	tool := &ExtractTool{maxFileSize: 1024 * 1024}
 	schema := map[string]interface{}{
@@ -184,16 +184,16 @@ func TestExtractTool_CallWithCustomInstructions(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.False(t, result.IsError)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
 
 	// Parse the result
 	var analysisResult map[string]interface{}
 	err = json.Unmarshal([]byte(result.Content[0].Text), &analysisResult)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
-	require.Equal(t, "focus only on monetary values and convert to numbers", analysisResult["custom_instructions"])
-	require.Contains(t, analysisResult["extraction_guidelines"], "Additional instructions: focus only on monetary values and convert to numbers")
+	assert.Equal(t, "focus only on monetary values and convert to numbers", analysisResult["custom_instructions"])
+	assert.Contains(t, analysisResult["extraction_guidelines"], "Additional instructions: focus only on monetary values and convert to numbers")
 }
 
 func TestExtractTool_DetectFileType(t *testing.T) {
@@ -215,7 +215,7 @@ func TestExtractTool_DetectFileType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tool.detectFileType(tt.path, tt.content)
-			require.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -258,7 +258,7 @@ func TestExtractTool_GetContentPreview(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tool.getContentPreview(tt.content, tt.fileType)
-			require.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -274,7 +274,7 @@ func TestExtractTool_CallWithLargeFile(t *testing.T) {
 		largeContent[i] = 'a'
 	}
 	err := os.WriteFile(largeFile, largeContent, 0644)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	tool := &ExtractTool{maxFileSize: 512} // 512 byte limit
 	schema := map[string]interface{}{"type": "object"}
@@ -285,19 +285,19 @@ func TestExtractTool_CallWithLargeFile(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].Text, "too large")
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "too large")
 }
 
 func TestExtractTool_Annotations(t *testing.T) {
 	tool := &ExtractTool{}
 	annotations := tool.Annotations()
-	require.Equal(t, "extract", annotations.Title)
-	require.True(t, annotations.ReadOnlyHint)
-	require.False(t, annotations.DestructiveHint)
-	require.True(t, annotations.IdempotentHint)
-	require.False(t, annotations.OpenWorldHint)
+	assert.Equal(t, "extract", annotations.Title)
+	assert.True(t, annotations.ReadOnlyHint)
+	assert.False(t, annotations.DestructiveHint)
+	assert.True(t, annotations.IdempotentHint)
+	assert.False(t, annotations.OpenWorldHint)
 }
 
 func TestExtractTool_PathValidation(t *testing.T) {
@@ -305,13 +305,13 @@ func TestExtractTool_PathValidation(t *testing.T) {
 	workspaceDir := t.TempDir()
 	testFile := filepath.Join(workspaceDir, "allowed.txt")
 	err := os.WriteFile(testFile, []byte("test content"), 0644)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Create a file outside the workspace
 	outsideDir := t.TempDir()
 	outsideFile := filepath.Join(outsideDir, "secret.txt")
 	err = os.WriteFile(outsideFile, []byte("secret data"), 0644)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	t.Run("AllowsReadingInWorkspace", func(t *testing.T) {
 		tool := NewExtractTool(ExtractToolOptions{
@@ -323,8 +323,8 @@ func TestExtractTool_PathValidation(t *testing.T) {
 			Schema:    map[string]interface{}{"type": "object"},
 		})
 
-		require.NoError(t, err)
-		require.False(t, result.IsError, "Expected success when reading file inside workspace")
+		assert.NoError(t, err)
+		assert.False(t, result.IsError, "Expected success when reading file inside workspace")
 	})
 
 	t.Run("BlocksReadingOutsideWorkspace", func(t *testing.T) {
@@ -337,9 +337,9 @@ func TestExtractTool_PathValidation(t *testing.T) {
 			Schema:    map[string]interface{}{"type": "object"},
 		})
 
-		require.NoError(t, err)
-		require.True(t, result.IsError, "Expected error when reading file outside workspace")
-		require.Contains(t, result.Content[0].Text, "outside workspace")
+		assert.NoError(t, err)
+		assert.True(t, result.IsError, "Expected error when reading file outside workspace")
+		assert.Contains(t, result.Content[0].Text, "outside workspace")
 	})
 
 	t.Run("BlocksSensitiveSystemFiles", func(t *testing.T) {
@@ -352,9 +352,9 @@ func TestExtractTool_PathValidation(t *testing.T) {
 			Schema:    map[string]interface{}{"type": "object"},
 		})
 
-		require.NoError(t, err)
-		require.True(t, result.IsError, "Expected error when reading system file")
-		require.Contains(t, result.Content[0].Text, "outside workspace")
+		assert.NoError(t, err)
+		assert.True(t, result.IsError, "Expected error when reading system file")
+		assert.Contains(t, result.Content[0].Text, "outside workspace")
 	})
 
 	t.Run("BlocksPathTraversal", func(t *testing.T) {
@@ -368,7 +368,7 @@ func TestExtractTool_PathValidation(t *testing.T) {
 			Schema:    map[string]interface{}{"type": "object"},
 		})
 
-		require.NoError(t, err)
-		require.True(t, result.IsError, "Expected error when using path traversal")
+		assert.NoError(t, err)
+		assert.True(t, result.IsError, "Expected error when using path traversal")
 	})
 }

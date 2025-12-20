@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/openai"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/dive/providers/openai"
+	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/fatih/color"
 )
 

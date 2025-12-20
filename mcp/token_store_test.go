@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestNewFileOAuthTokenStore(t *testing.T) {
@@ -15,19 +15,22 @@ func TestNewFileOAuthTokenStore(t *testing.T) {
 		filePath := filepath.Join(tempDir, "tokens", "oauth.json")
 
 		store, err := NewFileOAuthTokenStore(filePath)
-		require.NoError(t, err)
-		require.NotNil(t, store)
-		require.Equal(t, filePath, store.filePath)
+		assert.NoError(t, err)
+		assert.NotNil(t, store)
+		assert.Equal(t, filePath, store.filePath)
 
 		// Check that directory was created
-		require.DirExists(t, filepath.Dir(filePath))
+		dirPath := filepath.Dir(filePath)
+		info, err := os.Stat(dirPath)
+		assert.NoError(t, err, "directory should exist")
+		assert.True(t, info.IsDir(), "path should be a directory")
 	})
 
 	t.Run("fails with empty path", func(t *testing.T) {
 		store, err := NewFileOAuthTokenStore("")
-		require.Error(t, err)
-		require.Nil(t, store)
-		require.Contains(t, err.Error(), "file path cannot be empty")
+		assert.Error(t, err)
+		assert.Nil(t, store)
+		assert.Contains(t, err.Error(), "file path cannot be empty")
 	})
 }
 
@@ -36,7 +39,7 @@ func TestFileOAuthTokenStore_SaveAndGetToken(t *testing.T) {
 	filePath := filepath.Join(tempDir, "oauth.json")
 
 	store, err := NewFileOAuthTokenStore(filePath)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	t.Run("saves and retrieves token successfully", func(t *testing.T) {
 		expiresAt := time.Now().Add(time.Hour)
@@ -50,18 +53,22 @@ func TestFileOAuthTokenStore_SaveAndGetToken(t *testing.T) {
 
 		// Save token
 		err := store.SaveToken(token)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Retrieve token
 		retrieved, err := store.GetToken()
-		require.NoError(t, err)
-		require.NotNil(t, retrieved)
-		require.Equal(t, token.AccessToken, retrieved.AccessToken)
-		require.Equal(t, token.RefreshToken, retrieved.RefreshToken)
-		require.Equal(t, token.TokenType, retrieved.TokenType)
-		require.Equal(t, token.Scope, retrieved.Scope)
+		assert.NoError(t, err)
+		assert.NotNil(t, retrieved)
+		assert.Equal(t, token.AccessToken, retrieved.AccessToken)
+		assert.Equal(t, token.RefreshToken, retrieved.RefreshToken)
+		assert.Equal(t, token.TokenType, retrieved.TokenType)
+		assert.Equal(t, token.Scope, retrieved.Scope)
 		// Time comparison with some tolerance due to JSON marshaling precision
-		require.WithinDuration(t, token.ExpiresAt, retrieved.ExpiresAt, time.Second)
+		timeDiff := token.ExpiresAt.Sub(retrieved.ExpiresAt)
+		if timeDiff < 0 {
+			timeDiff = -timeDiff
+		}
+		assert.True(t, timeDiff <= time.Second, "ExpiresAt times should be within 1 second")
 	})
 
 	t.Run("overwrites existing token", func(t *testing.T) {
@@ -75,20 +82,20 @@ func TestFileOAuthTokenStore_SaveAndGetToken(t *testing.T) {
 
 		// Save new token (should overwrite existing)
 		err := store.SaveToken(newToken)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Retrieve token
 		retrieved, err := store.GetToken()
-		require.NoError(t, err)
-		require.Equal(t, newToken.AccessToken, retrieved.AccessToken)
-		require.Equal(t, newToken.RefreshToken, retrieved.RefreshToken)
-		require.Equal(t, newToken.Scope, retrieved.Scope)
+		assert.NoError(t, err)
+		assert.Equal(t, newToken.AccessToken, retrieved.AccessToken)
+		assert.Equal(t, newToken.RefreshToken, retrieved.RefreshToken)
+		assert.Equal(t, newToken.Scope, retrieved.Scope)
 	})
 
 	t.Run("fails to save nil token", func(t *testing.T) {
 		err := store.SaveToken(nil)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "token cannot be nil")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token cannot be nil")
 	})
 }
 
@@ -97,13 +104,13 @@ func TestFileOAuthTokenStore_GetToken_NoFile(t *testing.T) {
 	filePath := filepath.Join(tempDir, "nonexistent.json")
 
 	store, err := NewFileOAuthTokenStore(filePath)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Try to get token when file doesn't exist
 	token, err := store.GetToken()
-	require.Error(t, err)
-	require.Nil(t, token)
-	require.Contains(t, err.Error(), "no token found")
+	assert.Error(t, err)
+	assert.Nil(t, token)
+	assert.Contains(t, err.Error(), "no token found")
 }
 
 func TestFileOAuthTokenStore_GetToken_CorruptedFile(t *testing.T) {
@@ -111,17 +118,17 @@ func TestFileOAuthTokenStore_GetToken_CorruptedFile(t *testing.T) {
 	filePath := filepath.Join(tempDir, "corrupted.json")
 
 	store, err := NewFileOAuthTokenStore(filePath)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Write invalid JSON to file
 	err = os.WriteFile(filePath, []byte("invalid json content"), 0600)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Try to get token from corrupted file
 	token, err := store.GetToken()
-	require.Error(t, err)
-	require.Nil(t, token)
-	require.Contains(t, err.Error(), "failed to parse token file")
+	assert.Error(t, err)
+	assert.Nil(t, token)
+	assert.Contains(t, err.Error(), "failed to parse token file")
 }
 
 func TestFileOAuthTokenStore_HasToken(t *testing.T) {
@@ -129,11 +136,11 @@ func TestFileOAuthTokenStore_HasToken(t *testing.T) {
 	filePath := filepath.Join(tempDir, "oauth.json")
 
 	store, err := NewFileOAuthTokenStore(filePath)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	t.Run("returns false when no token exists", func(t *testing.T) {
 		has := store.HasToken()
-		require.False(t, has)
+		assert.False(t, has)
 	})
 
 	t.Run("returns true when token exists", func(t *testing.T) {
@@ -143,10 +150,10 @@ func TestFileOAuthTokenStore_HasToken(t *testing.T) {
 		}
 
 		err := store.SaveToken(token)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		has := store.HasToken()
-		require.True(t, has)
+		assert.True(t, has)
 	})
 }
 
@@ -155,7 +162,7 @@ func TestFileOAuthTokenStore_DeleteToken(t *testing.T) {
 	filePath := filepath.Join(tempDir, "oauth.json")
 
 	store, err := NewFileOAuthTokenStore(filePath)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	t.Run("deletes existing token", func(t *testing.T) {
 		// First save a token
@@ -164,23 +171,23 @@ func TestFileOAuthTokenStore_DeleteToken(t *testing.T) {
 			TokenType:   "Bearer",
 		}
 		err := store.SaveToken(token)
-		require.NoError(t, err)
-		require.True(t, store.HasToken())
+		assert.NoError(t, err)
+		assert.True(t, store.HasToken())
 
 		// Delete the token
 		err = store.DeleteToken()
-		require.NoError(t, err)
-		require.False(t, store.HasToken())
+		assert.NoError(t, err)
+		assert.False(t, store.HasToken())
 
 		// Verify we can't get the token anymore
 		_, err = store.GetToken()
-		require.Error(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("succeeds when no token exists", func(t *testing.T) {
 		// Delete non-existent token should not error
 		err := store.DeleteToken()
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	})
 }
 
@@ -190,7 +197,7 @@ func TestToken_IsExpired(t *testing.T) {
 			AccessToken: "test123",
 			// ExpiresAt is zero value
 		}
-		require.False(t, token.IsExpired())
+		assert.False(t, token.IsExpired())
 	})
 
 	t.Run("returns false for token not yet expired", func(t *testing.T) {
@@ -198,7 +205,7 @@ func TestToken_IsExpired(t *testing.T) {
 			AccessToken: "test123",
 			ExpiresAt:   time.Now().Add(time.Hour),
 		}
-		require.False(t, token.IsExpired())
+		assert.False(t, token.IsExpired())
 	})
 
 	t.Run("returns true for expired token", func(t *testing.T) {
@@ -206,7 +213,7 @@ func TestToken_IsExpired(t *testing.T) {
 			AccessToken: "test123",
 			ExpiresAt:   time.Now().Add(-time.Hour),
 		}
-		require.True(t, token.IsExpired())
+		assert.True(t, token.IsExpired())
 	})
 }
 
@@ -215,7 +222,7 @@ func TestFileOAuthTokenStore_Concurrency(t *testing.T) {
 	filePath := filepath.Join(tempDir, "concurrent.json")
 
 	store, err := NewFileOAuthTokenStore(filePath)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Test concurrent reads and writes
 	done := make(chan bool, 2)
@@ -251,11 +258,11 @@ func TestFileOAuthTokenStore_Concurrency(t *testing.T) {
 		TokenType:   "Bearer",
 	}
 	err = store.SaveToken(token)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	retrieved, err := store.GetToken()
-	require.NoError(t, err)
-	require.Equal(t, "final_token", retrieved.AccessToken)
+	assert.NoError(t, err)
+	assert.Equal(t, "final_token", retrieved.AccessToken)
 }
 
 func TestFileOAuthTokenStore_AtomicWrites(t *testing.T) {
@@ -263,7 +270,7 @@ func TestFileOAuthTokenStore_AtomicWrites(t *testing.T) {
 	filePath := filepath.Join(tempDir, "atomic.json")
 
 	store, err := NewFileOAuthTokenStore(filePath)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Save a token
 	token := &Token{
@@ -271,11 +278,11 @@ func TestFileOAuthTokenStore_AtomicWrites(t *testing.T) {
 		TokenType:   "Bearer",
 	}
 	err = store.SaveToken(token)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Verify no temporary files are left behind
 	files, err := os.ReadDir(tempDir)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	var tmpFiles []string
 	for _, file := range files {
@@ -283,5 +290,5 @@ func TestFileOAuthTokenStore_AtomicWrites(t *testing.T) {
 			tmpFiles = append(tmpFiles, file.Name())
 		}
 	}
-	require.Empty(t, tmpFiles, "Should not leave temporary files behind")
+	assert.Empty(t, tmpFiles, "Should not leave temporary files behind")
 }

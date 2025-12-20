@@ -5,18 +5,18 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestMCPErrorTypes(t *testing.T) {
 	// Test custom error types
 	err := NewMCPError("test_operation", "test_server", ErrNotConnected)
-	require.Contains(t, err.Error(), "test_operation")
-	require.Contains(t, err.Error(), "test_server")
-	require.True(t, IsNotConnectedError(err))
+	assert.Contains(t, err.Error(), "test_operation")
+	assert.Contains(t, err.Error(), "test_server")
+	assert.True(t, IsNotConnectedError(err))
 
 	// Test error unwrapping
-	require.ErrorIs(t, err, ErrNotConnected)
+	assert.ErrorIs(t, err, ErrNotConnected)
 }
 
 func TestMCPClient_NewClient(t *testing.T) {
@@ -28,10 +28,10 @@ func TestMCPClient_NewClient(t *testing.T) {
 	}
 
 	client, err := NewClient(config)
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	require.Equal(t, "test-server", client.config.Name)
-	require.False(t, client.IsConnected())
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	assert.Equal(t, "test-server", client.config.Name)
+	assert.False(t, client.IsConnected())
 }
 
 func TestMCPClient_ErrorHandling(t *testing.T) {
@@ -43,35 +43,35 @@ func TestMCPClient_ErrorHandling(t *testing.T) {
 	}
 
 	client, err := NewClient(config)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Test operations on disconnected client
 	ctx := context.Background()
 
 	_, err = client.ListTools(ctx)
-	require.Error(t, err)
-	require.True(t, IsNotConnectedError(err))
+	assert.Error(t, err)
+	assert.True(t, IsNotConnectedError(err))
 
 	_, err = client.ListResources(ctx)
-	require.Error(t, err)
-	require.True(t, IsNotConnectedError(err))
+	assert.Error(t, err)
+	assert.True(t, IsNotConnectedError(err))
 
 	_, err = client.ReadResource(ctx, "test://resource")
-	require.Error(t, err)
-	require.True(t, IsNotConnectedError(err))
+	assert.Error(t, err)
+	assert.True(t, IsNotConnectedError(err))
 
 	_, err = client.CallTool(ctx, "test", map[string]interface{}{})
-	require.Error(t, err)
-	require.True(t, IsNotConnectedError(err))
+	assert.Error(t, err)
+	assert.True(t, IsNotConnectedError(err))
 }
 
 func TestMCPManager_Basic(t *testing.T) {
 	manager := NewManager()
-	require.NotNil(t, manager)
+	assert.NotNil(t, manager)
 
 	// Test getting server names from empty manager
 	serverNames := manager.GetServerNames()
-	require.Empty(t, serverNames)
+	assert.Empty(t, serverNames)
 }
 
 func TestToolFilterConfiguration(t *testing.T) {
@@ -86,7 +86,7 @@ func TestToolFilterConfiguration(t *testing.T) {
 	}
 
 	client, err := NewClient(config)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	tools := []mcp.Tool{
 		{Name: "tool1"},
@@ -94,7 +94,7 @@ func TestToolFilterConfiguration(t *testing.T) {
 	}
 
 	filtered := client.filterTools(tools)
-	require.Empty(t, filtered)
+	assert.Empty(t, filtered)
 
 	// Test with allowed tools filter
 	config.ToolConfiguration = &ToolConfiguration{
@@ -103,13 +103,13 @@ func TestToolFilterConfiguration(t *testing.T) {
 	}
 
 	filtered = client.filterTools(tools)
-	require.Len(t, filtered, 1)
-	require.Equal(t, "tool1", filtered[0].Name)
+	assert.Len(t, filtered, 1)
+	assert.Equal(t, "tool1", filtered[0].Name)
 
 	// Test with no filter (all tools allowed)
 	config.ToolConfiguration = &ToolConfiguration{
 		Enabled: true,
 	}
 	filtered = client.filterTools(tools)
-	require.Len(t, filtered, 2)
+	assert.Len(t, filtered, 2)
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/schema"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 // testPathValidator creates a permissive PathValidator for unit tests
@@ -32,16 +32,16 @@ func TestTextEditorTool_View_File(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), input)
 
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 
 	output := result.Content[0].Text
-	require.Contains(t, output, "line 1", "Expected output to contain file content")
-	require.Contains(t, output, "line 5", "Expected output to contain file content")
+	assert.Contains(t, output, "line 1", "Expected output to contain file content")
+	assert.Contains(t, output, "line 5", "Expected output to contain file content")
 
 	// Check line numbers are present
-	require.Contains(t, output, "     1\t", "Expected output to contain line numbers")
-	require.Contains(t, output, "     5\t", "Expected output to contain line numbers")
+	assert.Contains(t, output, "     1\t", "Expected output to contain line numbers")
+	assert.Contains(t, output, "     5\t", "Expected output to contain line numbers")
 }
 
 func TestTextEditorTool_View_FileWithRange(t *testing.T) {
@@ -63,19 +63,19 @@ func TestTextEditorTool_View_FileWithRange(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), input)
 
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 
 	output := result.Content[0].Text
-	require.Contains(t, output, "line 2", "Expected output to contain lines 2-4")
-	require.Contains(t, output, "line 4", "Expected output to contain lines 2-4")
+	assert.Contains(t, output, "line 2", "Expected output to contain lines 2-4")
+	assert.Contains(t, output, "line 4", "Expected output to contain lines 2-4")
 
 	// Should not contain line 1 or 5
-	require.NotContains(t, output, "line 1", "Expected output to not contain line 1")
-	require.NotContains(t, output, "line 5", "Expected output to not contain line 5")
+	assert.NotContains(t, output, "line 1", "Expected output to not contain line 1")
+	assert.NotContains(t, output, "line 5", "Expected output to not contain line 5")
 
 	// Check line numbers start from 2
-	require.Contains(t, output, "     2\t", "Expected line numbers to start from 2")
+	assert.Contains(t, output, "     2\t", "Expected line numbers to start from 2")
 }
 
 func TestTextEditorTool_View_Directory(t *testing.T) {
@@ -98,12 +98,12 @@ func TestTextEditorTool_View_Directory(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), input)
 
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 
 	output := result.Content[0].Text
-	require.Contains(t, output, "file1.txt", "Expected directory listing to contain files")
-	require.Contains(t, output, "file2.txt", "Expected directory listing to contain files")
+	assert.Contains(t, output, "file1.txt", "Expected directory listing to contain files")
+	assert.Contains(t, output, "file2.txt", "Expected directory listing to contain files")
 }
 
 func TestTextEditorTool_Create(t *testing.T) {
@@ -125,18 +125,18 @@ func TestTextEditorTool_Create(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), input)
 
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 
 	// Verify file was created
-	require.True(t, fs.FileExists("/test/new_file.txt"), "Expected file to be created")
+	assert.True(t, fs.FileExists("/test/new_file.txt"), "Expected file to be created")
 
 	// Verify content
 	actualContent, _ := fs.ReadFile("/test/new_file.txt")
-	require.Equal(t, content, actualContent, "Expected content to match")
+	assert.Equal(t, content, actualContent, "Expected content to match")
 
 	// Verify no history for create operation
-	require.Len(t, tool.fileHistory["/test/new_file.txt"], 0, "Expected 0 history entries for create operation")
+	assert.Len(t, tool.fileHistory["/test/new_file.txt"], 0, "Expected 0 history entries for create operation")
 }
 
 func TestTextEditorTool_StrReplace(t *testing.T) {
@@ -162,17 +162,17 @@ func TestTextEditorTool_StrReplace(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), input)
 
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 
 	// Verify file was updated
 	newContent, _ := fs.ReadFile("/test/file.txt")
 	expectedContent := "Hello, World!\nThis is a successful test.\nHello, Universe!"
-	require.Equal(t, expectedContent, newContent, "Expected content to match")
+	assert.Equal(t, expectedContent, newContent, "Expected content to match")
 
 	// Verify history contains original content
-	require.Len(t, tool.fileHistory["/test/file.txt"], 1, "Expected 1 history entry")
-	require.Equal(t, originalContent, tool.fileHistory["/test/file.txt"][0], "Expected history to contain original content")
+	assert.Len(t, tool.fileHistory["/test/file.txt"], 1, "Expected 1 history entry")
+	assert.Equal(t, originalContent, tool.fileHistory["/test/file.txt"][0], "Expected history to contain original content")
 }
 
 func TestTextEditorTool_StrReplace_MultipleOccurrences(t *testing.T) {
@@ -197,9 +197,9 @@ func TestTextEditorTool_StrReplace_MultipleOccurrences(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), input)
 
-	require.NoError(t, err)
-	require.True(t, result.IsError, "Expected error for multiple occurrences")
-	require.Contains(t, result.Content[0].Text, "Multiple occurrences", "Expected error message about multiple occurrences")
+	assert.NoError(t, err)
+	assert.True(t, result.IsError, "Expected error for multiple occurrences")
+	assert.Contains(t, result.Content[0].Text, "Multiple occurrences", "Expected error message about multiple occurrences")
 }
 
 func TestTextEditorTool_Insert(t *testing.T) {
@@ -225,16 +225,16 @@ func TestTextEditorTool_Insert(t *testing.T) {
 
 	result, err := tool.Call(context.Background(), input)
 
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 
 	// Verify file was updated
 	newContent, _ := fs.ReadFile("/test/file.txt")
 	expectedContent := "line 1\nline 2\nline 3\nline 4"
-	require.Equal(t, expectedContent, newContent, "Expected content to match")
+	assert.Equal(t, expectedContent, newContent, "Expected content to match")
 
 	// Verify history
-	require.Len(t, tool.fileHistory["/test/file.txt"], 1, "Expected 1 history entry")
+	assert.Len(t, tool.fileHistory["/test/file.txt"], 1, "Expected 1 history entry")
 }
 
 func TestTextEditorTool_ValidationErrors(t *testing.T) {
@@ -322,13 +322,13 @@ func TestTextEditorTool_ValidationErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := tool.Call(context.Background(), tt.input)
 
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			if tt.expectError {
-				require.True(t, result.IsError, "Expected error, got success")
-				require.Contains(t, result.Content[0].Text, tt.errorMsg, "Expected error message to contain %q", tt.errorMsg)
+				assert.True(t, result.IsError, "Expected error, got success")
+				assert.Contains(t, result.Content[0].Text, tt.errorMsg, "Expected error message to contain %q", tt.errorMsg)
 			} else {
-				require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+				assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 			}
 		})
 	}
@@ -339,22 +339,22 @@ func TestTextEditorTool_Schema(t *testing.T) {
 	sch := tool.Schema()
 
 	// Verify schema structure
-	require.Equal(t, schema.Object, sch.Type, "Expected schema type to be 'object'")
+	assert.Equal(t, schema.Object, sch.Type, "Expected schema type to be 'object'")
 
 	// Verify required fields
 	expectedRequired := []string{"command", "path"}
-	require.Len(t, sch.Required, len(expectedRequired), "Expected %d required fields", len(expectedRequired))
+	assert.Len(t, sch.Required, len(expectedRequired), "Expected %d required fields", len(expectedRequired))
 
 	for _, field := range expectedRequired {
-		require.Contains(t, sch.Required, field, "Expected required field %s to be present", field)
+		assert.Contains(t, sch.Required, field, "Expected required field %s to be present", field)
 	}
 
 	// Verify command enum values
 	commandProp := sch.Properties["command"]
-	require.NotNil(t, commandProp, "Expected command property in schema")
+	assert.NotNil(t, commandProp, "Expected command property in schema")
 
 	expectedCommands := []string{"view", "create", "str_replace", "insert"}
-	require.Len(t, commandProp.Enum, len(expectedCommands), "Expected %d command enum values", len(expectedCommands))
+	assert.Len(t, commandProp.Enum, len(expectedCommands), "Expected %d command enum values", len(expectedCommands))
 }
 
 func TestTextEditorTool_Integration(t *testing.T) {
@@ -376,8 +376,8 @@ func TestTextEditorTool_Integration(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), createInput)
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Create operation should succeed")
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Create operation should succeed")
 
 	// 2. View the file
 	viewInput := &TextEditorToolInput{
@@ -386,8 +386,8 @@ func TestTextEditorTool_Integration(t *testing.T) {
 	}
 
 	result, err = tool.Call(context.Background(), viewInput)
-	require.NoError(t, err)
-	require.False(t, result.IsError, "View operation should succeed")
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "View operation should succeed")
 
 	// 3. Replace some content
 	oldStr := "This is a test file."
@@ -400,8 +400,8 @@ func TestTextEditorTool_Integration(t *testing.T) {
 	}
 
 	result, err = tool.Call(context.Background(), replaceInput)
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Replace operation should succeed")
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Replace operation should succeed")
 
 	// 4. Insert a new feature
 	insertLine := 6
@@ -414,23 +414,23 @@ func TestTextEditorTool_Integration(t *testing.T) {
 	}
 
 	result, err = tool.Call(context.Background(), insertInput)
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Insert operation should succeed")
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Insert operation should succeed")
 
 	// 5. Verify final content
 	finalContent, _ := fs.ReadFile("/project/README.md")
 	expectedFinal := "# README\n\nThis is a comprehensive documentation file.\n\n## Features\n- Feature 1\n- Feature 3\n- Feature 2"
 
-	require.Equal(t, expectedFinal, finalContent, "Final content should match expected content")
+	assert.Equal(t, expectedFinal, finalContent, "Final content should match expected content")
 
 	// 6. Verify history tracking
-	require.Len(t, tool.fileHistory["/project/README.md"], 2, "Expected 2 history entries")
+	assert.Len(t, tool.fileHistory["/project/README.md"], 2, "Expected 2 history entries")
 }
 
 func TestNewTextEditorTool(t *testing.T) {
 	// Test with default options
 	adapter1 := NewTextEditorTool(TextEditorToolOptions{})
-	require.NotNil(t, adapter1, "Expected tool adapter to be created")
+	assert.NotNil(t, adapter1, "Expected tool adapter to be created")
 
 	// Test with custom options
 	mockFS := newMockFileSystem()
@@ -438,7 +438,7 @@ func TestNewTextEditorTool(t *testing.T) {
 		Type:       "custom_editor",
 		FileSystem: mockFS,
 	})
-	require.NotNil(t, adapter2, "Expected tool adapter to be created with custom options")
+	assert.NotNil(t, adapter2, "Expected tool adapter to be created with custom options")
 }
 
 func TestTextEditorTool_PathValidation(t *testing.T) {
@@ -447,7 +447,7 @@ func TestTextEditorTool_PathValidation(t *testing.T) {
 
 	// Create a path validator for the workspace
 	pathValidator, err := NewPathValidator(workspaceDir)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	fs := newMockFileSystem()
 	// Add a file inside workspace
@@ -533,13 +533,13 @@ func TestTextEditorTool_PathValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := tool.Call(context.Background(), tt.input)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			if tt.expectError {
-				require.True(t, result.IsError, "Expected error for path outside workspace")
-				require.Contains(t, result.Content[0].Text, tt.errorMsg)
+				assert.True(t, result.IsError, "Expected error for path outside workspace")
+				assert.Contains(t, result.Content[0].Text, tt.errorMsg)
 			} else {
-				require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+				assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 			}
 		})
 	}
@@ -571,15 +571,15 @@ func TestTextEditorTool_TabPreservation(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError, "Expected success, got error: %s", result.Content[0].Text)
 
 	// Verify tabs are preserved
 	newContent, _ := fs.ReadFile("/project/Makefile")
-	require.Contains(t, newContent, "\t", "Tabs should be preserved in Makefile")
-	require.Contains(t, newContent, "\techo \"Compiling...\"", "Tab before echo should be preserved")
-	require.Contains(t, newContent, "\tgcc", "Tab before gcc should be preserved")
-	require.Contains(t, newContent, "\trm", "Tab before rm should be preserved")
+	assert.Contains(t, newContent, "\t", "Tabs should be preserved in Makefile")
+	assert.Contains(t, newContent, "\techo \"Compiling...\"", "Tab before echo should be preserved")
+	assert.Contains(t, newContent, "\tgcc", "Tab before gcc should be preserved")
+	assert.Contains(t, newContent, "\trm", "Tab before rm should be preserved")
 }
 
 func TestTextEditorTool_InsertTabPreservation(t *testing.T) {
@@ -605,11 +605,11 @@ func TestTextEditorTool_InsertTabPreservation(t *testing.T) {
 	}
 
 	result, err := tool.Call(context.Background(), input)
-	require.NoError(t, err)
-	require.False(t, result.IsError)
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
 
 	// Verify tabs are preserved
 	newContent, _ := fs.ReadFile("/project/Makefile")
-	require.Contains(t, newContent, "\techo \"hello\"", "Original tab should be preserved")
-	require.Contains(t, newContent, "\techo \"world\"", "Inserted tab should be preserved")
+	assert.Contains(t, newContent, "\techo \"hello\"", "Original tab should be preserved")
+	assert.Contains(t, newContent, "\techo \"world\"", "Inserted tab should be preserved")
 }

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/internal/retry"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/retry"
+	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
@@ -120,14 +120,14 @@ func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolRes
 	}
 
 	var response *fetch.Response
-	err := retry.Do(ctx, func() error {
+	err := retry.DoSimple(ctx, func() error {
 		var err error
 		response, err = t.fetcher.Fetch(ctx, req)
 		if err != nil {
 			return err
 		}
 		return nil
-	}, retry.WithMaxRetries(t.maxRetries))
+	}, retry.WithMaxAttempts(t.maxRetries+1))
 
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to fetch url after %d attempts: %s", t.maxRetries, err)), nil

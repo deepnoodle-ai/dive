@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
 func main() {

@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestShellManager_NewShellManager(t *testing.T) {
 	sm := NewShellManager()
-	require.NotNil(t, sm)
-	require.NotNil(t, sm.shells)
-	require.Empty(t, sm.shells)
+	assert.NotNil(t, sm)
+	assert.NotNil(t, sm.shells)
+	assert.Empty(t, sm.shells)
 }
 
 func TestShellManager_StartBackground(t *testing.T) {
@@ -32,18 +32,18 @@ func TestShellManager_StartBackground(t *testing.T) {
 		}
 
 		id, err := sm.StartBackground(ctx, cmd, args, "echo test", "")
-		require.NoError(t, err)
-		require.NotEmpty(t, id)
-		require.Contains(t, id, "shell-")
+		assert.NoError(t, err)
+		assert.NotEmpty(t, id)
+		assert.Contains(t, id, "shell-")
 
 		// Give it time to complete
 		time.Sleep(100 * time.Millisecond)
 
 		info, exists := sm.Get(id)
-		require.True(t, exists)
-		require.Equal(t, id, info.ID)
-		require.Equal(t, cmd, info.Command)
-		require.Equal(t, "echo test", info.Description)
+		assert.True(t, exists)
+		assert.Equal(t, id, info.ID)
+		assert.Equal(t, cmd, info.Command)
+		assert.Equal(t, "echo test", info.Description)
 	})
 
 	t.Run("IncrementingIDs", func(t *testing.T) {
@@ -55,17 +55,17 @@ func TestShellManager_StartBackground(t *testing.T) {
 		}
 
 		id1, err := sm.StartBackground(ctx, cmd, nil, "", "")
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		id2, err := sm.StartBackground(ctx, cmd, nil, "", "")
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
-		require.NotEqual(t, id1, id2)
+		assert.NotEqual(t, id1, id2)
 	})
 
 	t.Run("InvalidCommand", func(t *testing.T) {
 		_, err := sm.StartBackground(ctx, "nonexistent-command-xyz", nil, "", "")
-		require.Error(t, err)
+		assert.Error(t, err)
 	})
 }
 
@@ -85,15 +85,15 @@ func TestShellManager_GetOutput(t *testing.T) {
 		}
 
 		id, err := sm.StartBackground(ctx, cmd, args, "", "")
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		stdout, stderr, info, err := sm.GetOutput(id, true, 5*time.Second)
-		require.NoError(t, err)
-		require.Contains(t, stdout, "test output")
-		require.Empty(t, stderr)
-		require.Equal(t, ShellStatusCompleted, info.Status)
-		require.NotNil(t, info.ExitCode)
-		require.Equal(t, 0, *info.ExitCode)
+		assert.NoError(t, err)
+		assert.Contains(t, stdout, "test output")
+		assert.Empty(t, stderr)
+		assert.Equal(t, ShellStatusCompleted, info.Status)
+		assert.NotNil(t, info.ExitCode)
+		assert.Equal(t, 0, *info.ExitCode)
 	})
 
 	t.Run("GetOutputNonBlocking", func(t *testing.T) {
@@ -108,12 +108,12 @@ func TestShellManager_GetOutput(t *testing.T) {
 		}
 
 		id, err := sm.StartBackground(ctx, cmd, args, "", "")
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Non-blocking should return immediately
 		_, _, info, err := sm.GetOutput(id, false, time.Second)
-		require.NoError(t, err)
-		require.Equal(t, ShellStatusRunning, info.Status)
+		assert.NoError(t, err)
+		assert.Equal(t, ShellStatusRunning, info.Status)
 
 		// Clean up
 		sm.Kill(id)
@@ -121,8 +121,8 @@ func TestShellManager_GetOutput(t *testing.T) {
 
 	t.Run("GetOutputNotFound", func(t *testing.T) {
 		_, _, _, err := sm.GetOutput("nonexistent-shell", true, time.Second)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "shell not found")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "shell not found")
 	})
 }
 
@@ -142,30 +142,30 @@ func TestShellManager_Kill(t *testing.T) {
 		}
 
 		id, err := sm.StartBackground(ctx, cmd, args, "", "")
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Verify it's running
-		require.True(t, sm.IsRunning(id))
+		assert.True(t, sm.IsRunning(id))
 
 		// Kill it
 		err = sm.Kill(id)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Give it time to terminate
 		time.Sleep(200 * time.Millisecond)
 
 		// Verify it's no longer running
-		require.False(t, sm.IsRunning(id))
+		assert.False(t, sm.IsRunning(id))
 
 		info, exists := sm.Get(id)
-		require.True(t, exists)
-		require.Equal(t, ShellStatusKilled, info.Status)
+		assert.True(t, exists)
+		assert.Equal(t, ShellStatusKilled, info.Status)
 	})
 
 	t.Run("KillNotFound", func(t *testing.T) {
 		err := sm.Kill("nonexistent-shell")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "shell not found")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "shell not found")
 	})
 }
 
@@ -188,11 +188,11 @@ func TestShellManager_List(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	shells := sm.List()
-	require.Len(t, shells, 2)
+	assert.Len(t, shells, 2)
 
 	ids := []string{shells[0].ID, shells[1].ID}
-	require.Contains(t, ids, id1)
-	require.Contains(t, ids, id2)
+	assert.Contains(t, ids, id1)
+	assert.Contains(t, ids, id2)
 }
 
 func TestShellManager_ListRunning(t *testing.T) {
@@ -219,8 +219,8 @@ func TestShellManager_ListRunning(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	running := sm.ListRunning()
-	require.Len(t, running, 1)
-	require.Equal(t, slowID, running[0].ID)
+	assert.Len(t, running, 1)
+	assert.Equal(t, slowID, running[0].ID)
 
 	// Clean up
 	sm.Kill(slowID)
@@ -242,15 +242,15 @@ func TestShellManager_IsRunning(t *testing.T) {
 		}
 
 		id, _ := sm.StartBackground(ctx, cmd, args, "", "")
-		require.True(t, sm.IsRunning(id))
+		assert.True(t, sm.IsRunning(id))
 
 		sm.Kill(id)
 		time.Sleep(200 * time.Millisecond)
-		require.False(t, sm.IsRunning(id))
+		assert.False(t, sm.IsRunning(id))
 	})
 
 	t.Run("NotFound", func(t *testing.T) {
-		require.False(t, sm.IsRunning("nonexistent"))
+		assert.False(t, sm.IsRunning("nonexistent"))
 	})
 }
 
@@ -273,14 +273,14 @@ func TestShellManager_Cleanup(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify we have shells
-	require.Len(t, sm.List(), 2)
+	assert.Len(t, sm.List(), 2)
 
 	// Cleanup with 0 duration (remove all completed)
 	removed := sm.Cleanup(0)
-	require.Equal(t, 2, removed)
+	assert.Equal(t, 2, removed)
 
 	// Verify they're gone
-	require.Empty(t, sm.List())
+	assert.Empty(t, sm.List())
 }
 
 func TestShellManager_Concurrency(t *testing.T) {
@@ -317,12 +317,12 @@ func TestShellManager_Concurrency(t *testing.T) {
 	}
 
 	// All should have succeeded
-	require.Len(t, ids, 20)
+	assert.Len(t, ids, 20)
 
 	// All IDs should be unique
 	idSet := make(map[string]bool)
 	for _, id := range ids {
-		require.False(t, idSet[id], "duplicate ID found")
+		assert.False(t, idSet[id], "duplicate ID found")
 		idSet[id] = true
 	}
 }
@@ -342,17 +342,17 @@ func TestShellManager_FailingCommand(t *testing.T) {
 	}
 
 	id, err := sm.StartBackground(ctx, cmd, args, "", "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Wait for completion
 	stdout, stderr, info, err := sm.GetOutput(id, true, 5*time.Second)
-	require.NoError(t, err)
-	require.Empty(t, stdout)
+	assert.NoError(t, err)
+	assert.Empty(t, stdout)
 	_ = stderr // May or may not have content
 
-	require.Equal(t, ShellStatusFailed, info.Status)
-	require.NotNil(t, info.ExitCode)
-	require.NotEqual(t, 0, *info.ExitCode)
+	assert.Equal(t, ShellStatusFailed, info.Status)
+	assert.NotNil(t, info.ExitCode)
+	assert.NotEqual(t, 0, *info.ExitCode)
 }
 
 func TestShellManager_MaxShellLimit(t *testing.T) {
@@ -377,23 +377,23 @@ func TestShellManager_MaxShellLimit(t *testing.T) {
 	var ids []string
 	for i := 0; i < 3; i++ {
 		id, err := sm.StartBackground(ctx, cmd, args, "", "")
-		require.NoError(t, err, "Should be able to start shell %d", i+1)
+		assert.NoError(t, err, "Should be able to start shell %d", i+1)
 		ids = append(ids, id)
 	}
 
 	// The 4th shell should fail due to max shells limit
 	_, err := sm.StartBackground(ctx, cmd, args, "", "")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "maximum number of background shells")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "maximum number of background shells")
 
 	// Kill one shell
 	err = sm.Kill(ids[0])
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	time.Sleep(100 * time.Millisecond)
 
 	// Now we should be able to start another shell
 	newID, err := sm.StartBackground(ctx, cmd, args, "", "")
-	require.NoError(t, err, "Should be able to start a new shell after killing one")
+	assert.NoError(t, err, "Should be able to start a new shell after killing one")
 
 	// Clean up
 	for _, id := range ids[1:] {
@@ -421,23 +421,23 @@ func TestShellManager_OutputSizeLimit(t *testing.T) {
 	args := []string{"-c", "yes x | head -c 2048"}
 
 	id, err := sm.StartBackground(ctx, cmd, args, "", "")
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Wait for completion
 	stdout, _, _, err := sm.GetOutput(id, true, 5*time.Second)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Output should be truncated
-	require.LessOrEqual(t, int64(len(stdout)), maxSize+100, "Output should be approximately limited to max size")
-	require.Contains(t, stdout, "truncated", "Output should contain truncation message")
+	assert.LessOrEqual(t, int64(len(stdout)), maxSize+100, "Output should be approximately limited to max size")
+	assert.Contains(t, stdout, "truncated", "Output should contain truncation message")
 }
 
 func TestShellManager_DefaultLimits(t *testing.T) {
 	// Test that default limits are set correctly
 	sm := NewShellManager()
 
-	require.Equal(t, int64(DefaultMaxOutputSize), sm.maxOutputSize)
-	require.Equal(t, DefaultMaxShells, sm.maxShells)
+	assert.Equal(t, int64(DefaultMaxOutputSize), sm.maxOutputSize)
+	assert.Equal(t, DefaultMaxShells, sm.maxShells)
 }
 
 func TestShellManager_CustomLimits(t *testing.T) {
@@ -447,8 +447,8 @@ func TestShellManager_CustomLimits(t *testing.T) {
 		MaxShells:     100,
 	})
 
-	require.Equal(t, int64(5*1024*1024), sm.maxOutputSize)
-	require.Equal(t, 100, sm.maxShells)
+	assert.Equal(t, int64(5*1024*1024), sm.maxOutputSize)
+	assert.Equal(t, 100, sm.maxShells)
 }
 
 func TestLimitedWriter(t *testing.T) {
@@ -456,12 +456,12 @@ func TestLimitedWriter(t *testing.T) {
 		lw := newLimitedWriter(100)
 
 		n, err := lw.Write([]byte("Hello, World!"))
-		require.NoError(t, err)
-		require.Equal(t, 13, n)
+		assert.NoError(t, err)
+		assert.Equal(t, 13, n)
 
 		result := lw.String()
-		require.Equal(t, "Hello, World!", result)
-		require.False(t, lw.truncated)
+		assert.Equal(t, "Hello, World!", result)
+		assert.False(t, lw.truncated)
 	})
 
 	t.Run("TruncatesWhenExceedsLimit", func(t *testing.T) {
@@ -470,14 +470,14 @@ func TestLimitedWriter(t *testing.T) {
 		// Write more than the limit
 		testData := []byte("This is a very long string that exceeds the limit")
 		n, err := lw.Write(testData)
-		require.NoError(t, err)
-		require.Equal(t, len(testData), n) // Returns full length to not break the writer
+		assert.NoError(t, err)
+		assert.Equal(t, len(testData), n) // Returns full length to not break the writer
 
 		result := lw.String()
-		require.True(t, lw.truncated)
-		require.Contains(t, result, "truncated")
+		assert.True(t, lw.truncated)
+		assert.Contains(t, result, "truncated")
 		// The actual content before truncation should be limited
-		require.LessOrEqual(t, len(result), 100) // Allow some room for truncation message
+		assert.LessOrEqual(t, len(result), 100) // Allow some room for truncation message
 	})
 
 	t.Run("MultipleWrites", func(t *testing.T) {
@@ -490,8 +490,8 @@ func TestLimitedWriter(t *testing.T) {
 		lw.Write([]byte("OVERFLOW")) // Should trigger truncation
 
 		result := lw.String()
-		require.True(t, lw.truncated)
-		require.Contains(t, result, "truncated")
+		assert.True(t, lw.truncated)
+		assert.Contains(t, result, "truncated")
 	})
 
 	t.Run("DiscardAfterTruncation", func(t *testing.T) {
@@ -502,8 +502,8 @@ func TestLimitedWriter(t *testing.T) {
 		lw.Write([]byte("OVERFLOW")) // Should be discarded silently
 
 		result := lw.String()
-		require.True(t, lw.truncated)
+		assert.True(t, lw.truncated)
 		// Should not contain OVERFLOW
-		require.NotContains(t, result, "OVERFLOW")
+		assert.NotContains(t, result, "OVERFLOW")
 	})
 }

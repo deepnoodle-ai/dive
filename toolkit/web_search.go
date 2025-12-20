@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/schema"
+	"github.com/deepnoodle-ai/wonton/web"
 )
 
 var _ dive.TypedTool[*SearchInput] = &WebSearchTool{}

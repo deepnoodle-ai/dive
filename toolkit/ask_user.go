@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 var _ dive.TypedTool[*AskUserInput] = &AskUserTool{}
@@ -81,7 +81,7 @@ func (t *AskUserTool) Schema() *schema.Schema {
 			},
 			"type": {
 				Type:        "string",
-				Enum:        []string{"confirm", "select", "multiselect", "input"},
+				Enum:        []any{"confirm", "select", "multiselect", "input"},
 				Description: "The type of question: 'confirm' for yes/no, 'select' for single choice, 'multiselect' for multiple choices, 'input' for free-form text",
 			},
 			"options": {

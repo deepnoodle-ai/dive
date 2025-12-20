@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestNewClient(t *testing.T) {
@@ -46,12 +46,12 @@ func TestNewClient(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, err := NewClient(tt.config)
-			require.NoError(t, err)
-			require.NotNil(t, client)
-			require.Equal(t, tt.config, client.config)
-			require.False(t, client.connected)
-			require.Nil(t, client.client)
-			require.Empty(t, client.tools)
+			assert.NoError(t, err)
+			assert.NotNil(t, client)
+			assert.Equal(t, tt.config, client.config)
+			assert.False(t, client.connected)
+			assert.Nil(t, client.client)
+			assert.Empty(t, client.tools)
 		})
 	}
 }
@@ -63,18 +63,18 @@ func TestClient_IsConnected(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Initially not connected
-	require.False(t, client.IsConnected())
+	assert.False(t, client.IsConnected())
 
 	// Simulate connection
 	client.connected = true
-	require.True(t, client.IsConnected())
+	assert.True(t, client.IsConnected())
 
 	// Simulate disconnection
 	client.connected = false
-	require.False(t, client.IsConnected())
+	assert.False(t, client.IsConnected())
 }
 
 func TestClient_GetTools(t *testing.T) {
@@ -84,11 +84,11 @@ func TestClient_GetTools(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Initially no tools
 	tools := client.GetTools()
-	require.Empty(t, tools)
+	assert.Empty(t, tools)
 
 	// Add some tools
 	testTools := []mcp.Tool{
@@ -105,7 +105,7 @@ func TestClient_GetTools(t *testing.T) {
 
 	// Verify tools are returned
 	tools = client.GetTools()
-	require.Equal(t, testTools, tools)
+	assert.Equal(t, testTools, tools)
 }
 
 func TestClient_filterTools(t *testing.T) {
@@ -209,10 +209,10 @@ func TestClient_filterTools(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client, err := NewClient(tt.config)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
 			filtered := client.filterTools(tt.inputTools)
-			require.Equal(t, tt.expectedTools, filtered)
+			assert.Equal(t, tt.expectedTools, filtered)
 		})
 	}
 }
@@ -224,13 +224,13 @@ func TestClient_ListTools_NotConnected(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	ctx := context.Background()
 	tools, err := client.ListTools(ctx)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "mcp client not connected")
-	require.Nil(t, tools)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mcp client not connected")
+	assert.Nil(t, tools)
 }
 
 func TestClient_CallTool_NotConnected(t *testing.T) {
@@ -240,13 +240,13 @@ func TestClient_CallTool_NotConnected(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	ctx := context.Background()
 	result, err := client.CallTool(ctx, "test-tool", map[string]interface{}{"param": "value"})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "mcp client not connected")
-	require.Nil(t, result)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mcp client not connected")
+	assert.Nil(t, result)
 }
 
 func TestClient_Connect_UnsupportedType(t *testing.T) {
@@ -256,13 +256,13 @@ func TestClient_Connect_UnsupportedType(t *testing.T) {
 		URL:  "http://localhost:8080",
 		// ToolEnabled: true,
 	})
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	ctx := context.Background()
 	err = client.Connect(ctx)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "unsupported mcp server type: unsupported")
-	require.False(t, client.IsConnected())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported mcp server type: unsupported")
+	assert.False(t, client.IsConnected())
 }
 
 func TestClient_Connect_StdioWithEnvAndArgs(t *testing.T) {
@@ -284,22 +284,22 @@ func TestClient_Connect_StdioWithEnvAndArgs(t *testing.T) {
 	}
 
 	client, err := NewClient(config)
-	require.NoError(t, err)
-	require.NotNil(t, client)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
 
 	// Verify that the config methods return the expected values
-	require.Equal(t, "stdio", client.config.Type)
-	require.Equal(t, "python", client.config.URL)
+	assert.Equal(t, "stdio", client.config.Type)
+	assert.Equal(t, "python", client.config.URL)
 
 	expectedEnv := map[string]string{
 		"API_KEY":    "test-key",
 		"DEBUG":      "true",
 		"SERVER_URL": "http://localhost:8080",
 	}
-	require.Equal(t, expectedEnv, client.config.Env)
+	assert.Equal(t, expectedEnv, client.config.Env)
 
 	expectedArgs := []string{"server.py", "--port", "3000", "--verbose"}
-	require.Equal(t, expectedArgs, client.config.Args)
+	assert.Equal(t, expectedArgs, client.config.Args)
 
 	// Note: We don't actually call Connect() here because it would try to start
 	// a real subprocess, which would fail in the test environment.

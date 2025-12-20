@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/schema"
 )
 
 type ToolAnnotations struct {
@@ -139,7 +138,7 @@ type Tool interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() *schema.Schema
+	Schema() *Schema
 
 	// Annotations returns optional properties that describe tool behavior.
 	Annotations() *ToolAnnotations
@@ -173,7 +172,7 @@ type TypedTool[T any] interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() *schema.Schema
+	Schema() *Schema
 
 	// Annotations returns optional properties that describe tool behavior.
 	Annotations() *ToolAnnotations
@@ -209,7 +208,7 @@ func (t *TypedToolAdapter[T]) Description() string {
 	return t.tool.Description()
 }
 
-func (t *TypedToolAdapter[T]) Schema() *schema.Schema {
+func (t *TypedToolAdapter[T]) Schema() *Schema {
 	return t.tool.Schema()
 }
 
