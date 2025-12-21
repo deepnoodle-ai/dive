@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/deepnoodle-ai/dive v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.5
+	github.com/deepnoodle-ai/wonton v0.0.6
 	google.golang.org/genai v1.40.0
 )
 
@@ -35,6 +35,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251213004720-97cd9d5aeac2 // indirect
 	google.golang.org/grpc v1.77.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 replace github.com/deepnoodle-ai/dive => ../..

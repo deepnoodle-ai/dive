@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/deepnoodle-ai/dive v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.5
+	github.com/deepnoodle-ai/wonton v0.0.6
 	github.com/openai/openai-go v1.12.0
 )
 
@@ -15,6 +15,7 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	golang.org/x/sys v0.39.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 replace github.com/deepnoodle-ai/dive => ../..
