@@ -70,8 +70,7 @@ type App struct {
 	// UI state
 	termWidth  int
 	termHeight int
-	initDone   bool
-	tickCount  int
+	frame      uint64
 
 	// Processing state
 	processing bool
@@ -121,15 +120,6 @@ func (a *App) Destroy() {
 
 // HandleEvent processes TUI events
 func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
-	// Initialize tick on first event
-	a.mu.Lock()
-	if !a.initDone {
-		a.initDone = true
-		a.mu.Unlock()
-		return []tui.Cmd{tui.Tick(100 * time.Millisecond)}
-	}
-	a.mu.Unlock()
-
 	switch e := event.(type) {
 	case tui.KeyEvent:
 		return a.handleKeyEvent(e)
@@ -146,9 +136,9 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 
 	case tui.TickEvent:
 		a.mu.Lock()
-		a.tickCount++
+		a.frame = e.Frame
 		a.mu.Unlock()
-		return []tui.Cmd{tui.Tick(100 * time.Millisecond)}
+		return nil
 
 	case ResponseEvent:
 		return a.handleResponseEvent(e)

@@ -1,14 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
-// Spinner frames for loading animation
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+// spinnerSpeed controls how many frames per spinner character change (higher = slower)
+const spinnerSpeed = 12
 
 // View returns the current view tree
 func (a *App) View() tui.View {
@@ -29,18 +31,11 @@ func (a *App) View() tui.View {
 func (a *App) headerView() tui.View {
 	title := tui.Text(" Dive ").Bold().Fg(tui.ColorCyan)
 
-	statusParts := []string{}
-	if a.processing {
-		statusParts = append(statusParts, "processing")
-	}
-	if a.thinking {
-		spinner := spinnerFrames[a.tickCount%len(spinnerFrames)]
-		statusParts = append(statusParts, spinner+" thinking")
-	}
-
 	var status tui.View
-	if len(statusParts) > 0 {
-		status = tui.Text(" %s ", strings.Join(statusParts, " | ")).Dim()
+	if a.thinking {
+		status = tui.Loading(a.frame).Speed(spinnerSpeed).Label("thinking").Fg(tui.ColorCyan)
+	} else if a.processing {
+		status = tui.Text(" processing ").Dim()
 	} else {
 		status = tui.Text(" ready ").Success()
 	}
@@ -61,7 +56,9 @@ func (a *App) messagesView() tui.View {
 
 	views := make([]tui.View, 0, len(a.messages))
 	for i, msg := range a.messages {
-		views = append(views, a.messageView(msg, i))
+		if v := a.messageView(msg, i); v != nil {
+			views = append(views, v)
+		}
 	}
 
 	return tui.Stack(
@@ -82,92 +79,142 @@ func (a *App) messageView(msg Message, index int) tui.View {
 }
 
 func (a *App) textMessageView(msg Message, index int) tui.View {
-	var roleView tui.View
-
 	switch msg.Role {
 	case "user":
-		roleView = tui.Text("You").Bold().Fg(tui.ColorGreen)
+		// User messages: italic with gray background
+		return tui.WrappedText(msg.Content).
+			Style(tui.NewStyle().WithItalic().WithBackground(tui.ColorBrightBlack)).
+			FillBg()
+
 	case "assistant":
-		roleView = tui.Text("Dive").Bold().Fg(tui.ColorCyan)
+		// Assistant messages: bullet prefix, markdown content
+		content := strings.TrimRight(msg.Content, "\n")
+		if content == "" {
+			if a.thinking && index == a.streamingMessageIndex {
+				return tui.Loading(a.frame).Speed(spinnerSpeed).Label("Thinking...")
+			}
+			// Skip empty assistant messages (e.g., before tool calls)
+			return nil
+		}
+		// Prefix content with bullet point like Claude Code
+		return tui.Markdown("⏺ "+content, nil)
+
 	case "system":
-		roleView = tui.Text("System").Bold().Fg(tui.ColorYellow)
+		return tui.WrappedText(msg.Content).Fg(tui.ColorYellow)
+
 	default:
-		roleView = tui.Text("%s", msg.Role).Bold()
+		return tui.WrappedText(msg.Content)
 	}
-
-	content := msg.Content
-
-	// Show thinking indicator for empty streaming message
-	if msg.Role == "assistant" && content == "" && a.thinking && index == a.streamingMessageIndex {
-		spinner := spinnerFrames[a.tickCount%len(spinnerFrames)]
-		content = spinner + " Thinking..."
-	}
-
-	// Render content as markdown for assistant messages
-	var contentView tui.View
-	if msg.Role == "assistant" && content != "" {
-		contentView = tui.Markdown(content, nil)
-	} else if msg.Role == "system" {
-		contentView = tui.WrappedText(content).Fg(tui.ColorYellow)
-	} else {
-		contentView = tui.WrappedText(content)
-	}
-
-	return tui.Stack(
-		roleView,
-		contentView,
-	).Gap(0)
 }
 
 func (a *App) toolCallView(msg Message) tui.View {
-	// Status indicator
-	var statusText string
-	var statusColor tui.Color
+	// Status indicator: ⏺ prefix with color based on state
+	var statusView tui.View
 	if msg.ToolDone {
 		if msg.ToolError {
-			statusText = "✗"
-			statusColor = tui.ColorRed
+			statusView = tui.Text("⏺").Fg(tui.ColorRed)
 		} else {
-			statusText = "✓"
-			statusColor = tui.ColorGreen
+			statusView = tui.Text("⏺").Fg(tui.ColorGreen)
 		}
 	} else {
-		statusText = spinnerFrames[a.tickCount%len(spinnerFrames)]
-		statusColor = tui.ColorYellow
+		statusView = tui.Text("⏺").Fg(tui.ColorCyan)
 	}
 
-	statusView := tui.Text("%s", statusText).Fg(statusColor)
+	// Format tool call like: ToolName(param: value, param: value)
+	toolCall := formatToolCall(msg.ToolName, msg.ToolInput)
+	callView := tui.Text(" %s", toolCall)
 
-	// Tool name
-	nameView := tui.Text("%s", msg.ToolName).Bold()
-
-	// Header line
+	// Header line: ⏺ ToolName(params...)
 	header := tui.Group(
 		statusView,
-		tui.Text(" "),
-		nameView,
+		callView,
 	)
 
 	views := []tui.View{header}
 
-	// Input preview (truncated)
-	if msg.ToolInput != "" {
-		inputView := tui.Text("  %s", msg.ToolInput).Dim()
-		views = append(views, inputView)
-	}
-
 	// Result (if done)
 	if msg.ToolDone && msg.ToolResult != "" {
+		resultText := formatToolResult(msg.ToolResult)
 		var resultView tui.View
 		if msg.ToolError {
-			resultView = tui.Text("  %s", msg.ToolResult).Fg(tui.ColorRed)
+			resultView = tui.Text("  ⎿  %s", resultText).Fg(tui.ColorRed)
 		} else {
-			resultView = tui.Text("  %s", msg.ToolResult).Dim()
+			resultView = tui.Text("  ⎿  %s", resultText).Dim()
 		}
 		views = append(views, resultView)
 	}
 
 	return tui.Stack(views...).Gap(0)
+}
+
+// formatToolCall formats a tool call like: ToolName(param: value, param: value)
+func formatToolCall(name, inputJSON string) string {
+	if inputJSON == "" {
+		return name + "()"
+	}
+
+	var params map[string]any
+	if err := json.Unmarshal([]byte(inputJSON), &params); err != nil {
+		// If not valid JSON, just show the tool name
+		return name + "(...)"
+	}
+
+	if len(params) == 0 {
+		return name + "()"
+	}
+
+	// Sort keys for consistent ordering
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Format each parameter
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := params[k]
+		parts = append(parts, fmt.Sprintf("%s: %s", k, formatParamValue(v)))
+	}
+
+	return name + "(" + strings.Join(parts, ", ") + ")"
+}
+
+// formatParamValue formats a parameter value for display
+func formatParamValue(v any) string {
+	switch val := v.(type) {
+	case string:
+		// Truncate long strings and quote them
+		if len(val) > 40 {
+			val = val[:37] + "..."
+		}
+		return fmt.Sprintf("%q", val)
+	case bool:
+		return fmt.Sprintf("%v", val)
+	case float64:
+		// JSON numbers are float64
+		if val == float64(int(val)) {
+			return fmt.Sprintf("%d", int(val))
+		}
+		return fmt.Sprintf("%g", val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// formatToolResult formats a tool result for display
+func formatToolResult(result string) string {
+	// Count lines
+	lines := strings.Count(result, "\n") + 1
+	if lines == 1 && len(result) <= 60 {
+		return result
+	}
+
+	// Summarize multi-line or long results
+	if lines > 1 {
+		return fmt.Sprintf("(%d lines)", lines)
+	}
+	return result[:57] + "..."
 }
 
 func (a *App) inputView() tui.View {
@@ -230,73 +277,4 @@ func (a *App) footerView() tui.View {
 	parts = append(parts, tui.Text(" %s ", wsLabel).Dim())
 
 	return tui.Group(parts...)
-}
-
-// wrapText wraps text to the specified width
-func wrapText(text string, width int) []string {
-	if width <= 0 {
-		return []string{text}
-	}
-
-	var lines []string
-	for _, line := range strings.Split(text, "\n") {
-		if len(line) <= width {
-			lines = append(lines, line)
-			continue
-		}
-
-		// Wrap long lines
-		for len(line) > width {
-			// Try to break at a space
-			breakPoint := width
-			for i := width - 1; i > width/2; i-- {
-				if line[i] == ' ' {
-					breakPoint = i
-					break
-				}
-			}
-			lines = append(lines, line[:breakPoint])
-			line = strings.TrimLeft(line[breakPoint:], " ")
-		}
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-
-	return lines
-}
-
-// formatInput formats the input JSON for display
-func formatInput(input string, maxLen int) string {
-	// Remove newlines and excess whitespace
-	formatted := strings.ReplaceAll(input, "\n", " ")
-	formatted = strings.ReplaceAll(formatted, "\t", " ")
-
-	// Collapse multiple spaces
-	for strings.Contains(formatted, "  ") {
-		formatted = strings.ReplaceAll(formatted, "  ", " ")
-	}
-
-	formatted = strings.TrimSpace(formatted)
-
-	if len(formatted) > maxLen {
-		return formatted[:maxLen-3] + "..."
-	}
-	return formatted
-}
-
-// countLines counts the number of lines in text
-func countLines(text string) int {
-	if text == "" {
-		return 0
-	}
-	return strings.Count(text, "\n") + 1
-}
-
-// pluralize returns singular or plural form based on count
-func pluralize(count int, singular, plural string) string {
-	if count == 1 {
-		return fmt.Sprintf("%d %s", count, singular)
-	}
-	return fmt.Sprintf("%d %s", count, plural)
 }
