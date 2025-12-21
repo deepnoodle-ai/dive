@@ -12,17 +12,16 @@
 
 </div>
 
-Dive is an AI toolkit for Go that can be used to create specialized teams of AI
-agents and quickly integrate with the leading LLMs.
+Dive is a Go library for building AI agents and integrating with leading LLMs.
 
-- 🚀 Embed it in your Go apps
-- 🤖 Create specialized agents
-- 🛠️ Arm agents with tools
+- 🚀 Embed AI agents in your Go applications
+- 🤖 Create specialized agents with custom tools
+- 🛠️ Unified interface across LLM providers
 - ⚡ Stream responses in real-time
 
-Dive includes both a CLI and a polished set of APIs for easy integration into
-existing Go applications. It comes batteries-included, but also has the
-modularity you need for extensive customization.
+Dive is designed as a library-first toolkit, providing a clean API for building
+AI-powered applications. It comes batteries-included with sensible defaults,
+but offers the modularity you need for extensive customization.
 
 ## Project Status
 
@@ -40,54 +39,42 @@ Please leave a GitHub star if you're interested in the project!
 
 ## Features
 
-- **Agents**: Chat or assign work to specialized agents with configurable reasoning
-- **Supervisor Patterns**: Create hierarchical agent systems with work delegation
-- **Declarative Configuration**: Define agents using YAML
-- **Multiple LLMs**: Switch between Anthropic, OpenAI, Google, OpenRouter, Grok, Ollama, and others
+### Library Features
+
+- **Agents**: Create specialized agents with configurable reasoning and tools
+- **Supervisor Patterns**: Build hierarchical agent systems with work delegation
+- **Multiple LLMs**: Unified interface for Anthropic, OpenAI, Google, OpenRouter, Grok, and Ollama
 - **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
 - **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
-- **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
 - **Tools**: Give agents rich capabilities to interact with the world
 - **Tool Annotations**: Semantic hints about tool behavior (read-only, destructive, etc.)
-- **Streaming**: Stream agent events for realtime UI updates
-- **CLI**: Run agents, chat with agents, and more
+- **Streaming**: Stream agent events for real-time UI updates
 - **Thread Management**: Persistent conversation threads with memory
 - **Confirmation System**: Built-in confirmation system for destructive operations
-- **Deep Research**: Use multiple agents to perform deep research
-- **Semantic Diff**: AI-powered analysis of text differences for output drift detection
+- **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
+
+### Additional Features
+
+- **CLI**: Basic command-line interface for testing and experimentation
 
 ## Quick Start
 
-### Environment Setup
+### Installation
 
-You will need some environment variables set to use the Dive CLI, both for
-the LLM provider and for any tools that you'd like your agents to use.
-
-```bash
-# LLM Provider API Keys
-export ANTHROPIC_API_KEY="your-key-here"
-export OPENAI_API_KEY="your-key-here"
-export GEMINI_API_KEY="your-key-here"
-export GROK_API_KEY="your-key-here"
-export OPENROUTER_API_KEY="your-key-here"
-
-# Tool API Keys
-export FIRECRAWL_API_KEY="your-key-here"
-```
-
-Firecrawl is used to retrieve webpage content. Create an account with
-[Firecrawl](https://firecrawl.com) to get a free key to experiment with.
-
-Generating a Google Custom Search key is also quite easy, assuming you have a
-Google Cloud account. See the [Google Custom Search documentation](https://developers.google.com/custom-search/v1/overview).
-
-### Using the Library
-
-To get started with Dive as a library, use go get:
+Install Dive using go get:
 
 ```
 go get github.com/deepnoodle-ai/dive
 ```
+
+Set up your LLM provider API key:
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"
+# Or use other providers: OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY, OPENROUTER_API_KEY
+```
+
+### Creating an Agent
 
 Here's a quick example of creating a chat agent:
 
@@ -118,71 +105,45 @@ if err != nil {
 fmt.Println(response.Message.Text())
 ```
 
-### Dive Configurations
+## Examples
 
-Dive configurations offer a declarative approach to defining agents and MCP servers:
+The `examples/programs/` directory contains runnable examples demonstrating various features:
 
-```yaml title="config.yaml"
-Name: Research
-Description: Research a topic
+| Example                    | Description                                  |
+| -------------------------- | -------------------------------------------- |
+| `llm_example`              | Basic LLM text generation                    |
+| `google_example`           | Using Google Gemini with streaming           |
+| `ollama_example`           | Local models with Ollama, including tool use |
+| `openai_responses_example` | OpenAI Responses API                         |
+| `openrouter_example`       | Using OpenRouter for model access            |
+| `image_example`            | Image analysis with vision models            |
+| `pdf_example`              | PDF document processing                      |
+| `mcp_servers_example`      | Connecting to MCP servers                    |
+| `todo_tracking_example`    | Real-time todo list tracking with agents     |
+| `code_execution_example`   | Code execution capabilities                  |
 
-Config:
-  LogLevel: debug
-  DefaultProvider: anthropic
-  DefaultModel: claude-sonnet-4-20250514
-  ConfirmationMode: if-destructive
+Run an example with:
 
-Agents:
-  - Name: Research Assistant
-    Backstory: You are an enthusiastic and deeply curious researcher.
-    Tools:
-      - web_search
-      - fetch
+```bash
+go run ./examples/programs/llm_example
 ```
 
-### Use the Dive CLI
+## CLI
 
-For the moment, you'll need to build the CLI yourself:
+Dive includes a basic CLI for testing and experimentation. Build it with:
 
 ```bash
 git clone git@github.com:deepnoodle-ai/dive.git
-cd dive/cmd/dive
-go install .
+cd dive/cmd/dive && go install .
 ```
 
-Available CLI commands include:
-
-- `dive chat --provider anthropic --model claude-sonnet-4-20250514`: Chat with an agent
-- `dive classify --text "input text" --labels "label1,label2,label3"`: Classify text with confidence scores
-- `dive config check /path/to/config.yaml`: Validate a Dive configuration
-- `dive diff old.txt new.txt --explain-changes`: Semantic diff between texts using LLMs to explain changes
-
-### Semantic Diff
-
-The `dive diff` command provides AI-powered semantic analysis of differences between text files, which is especially useful for detecting output drift and understanding meaningful changes:
+Run the interactive assistant:
 
 ```bash
-# Basic diff - shows file size changes and suggests AI analysis
-dive diff old_output.txt new_output.txt
-
-# AI-powered semantic analysis with detailed explanations
-dive diff old_output.txt new_output.txt --explain-changes
-
-# Different output formats
-dive diff old.txt new.txt --explain-changes --format markdown
-dive diff old.txt new.txt --explain-changes --format json
-
-# Use with different LLM providers
-dive diff old.txt new.txt --explain-changes --provider openai --model gpt-4o
-dive diff old.txt new.txt --explain-changes --provider anthropic --model claude-sonnet-4-20250514
+dive                                    # Start interactive chat
+dive --model claude-sonnet-4-20250514   # Use a specific model
+dive --workspace /path/to/project       # Set workspace directory
 ```
-
-This is particularly useful for:
-
-- **Output Drift Detection**: Comparing AI-generated outputs over time
-- **Code Review**: Understanding semantic changes in generated code
-- **Content Analysis**: Analyzing changes in documentation or text content
-- **Quality Assurance**: Detecting meaningful changes in test outputs
 
 ## LLM Providers
 
@@ -233,41 +194,53 @@ MCP servers can also be configured in YAML configurations for declarative setup.
 
 ### Verified Models
 
-These are the models that have been verified to work in Dive:
+Latest models verified to work with Dive:
 
-| Provider  | Model                        | Tools Supported |
-| --------- | ---------------------------- | --------------- |
-| Anthropic | `claude-sonnet-4-20250514`   | Yes             |
-| Anthropic | `claude-opus-4-1-20250805`   | Yes             |
-| Anthropic | `claude-3-7-sonnet-20250219` | Yes             |
-| Anthropic | `claude-3-5-sonnet-20241022` | Yes             |
-| Anthropic | `claude-3-5-haiku-20241022`  | Yes             |
-| Google    | `gemini-2.5-flash`           | Yes             |
-| Google    | `gemini-2.5-flash-lite`      | Yes             |
-| Google    | `gemini-2.5-pro`             | Yes             |
-| Grok      | `grok-4-0709`                | Yes             |
-| Grok      | `grok-code-fast-1`           | Yes             |
-| OpenAI    | `gpt-5`                      | Yes             |
-| OpenAI    | `gpt-4o`                     | Yes             |
-| OpenAI    | `gpt-4.5-preview`            | Yes             |
-| OpenAI    | `o1`                         | Yes             |
-| OpenAI    | `o1-mini`                    | No              |
-| OpenAI    | `o3-mini`                    | Yes             |
-| Ollama    | `llama3.2:*`                 | Yes             |
-| Ollama    | `mistral:*`                  | No              |
+| Provider  | Model                    | Tools |
+| --------- | ------------------------ | ----- |
+| Anthropic | `claude-opus-4-5`        | Yes   |
+| Anthropic | `claude-sonnet-4-5`      | Yes   |
+| Anthropic | `claude-haiku-4-5`       | Yes   |
+| OpenAI    | `gpt-5.2`                | Yes   |
+| OpenAI    | `o3`                     | Yes   |
+| OpenAI    | `codex`                  | Yes   |
+| Google    | `gemini-3-pro-preview`   | Yes   |
+| Google    | `gemini-2.5-pro`         | Yes   |
+| Grok      | `grok-4-1-fast-reasoning`| Yes   |
+
+**Local Models via Ollama**: Dive supports local model inference through Ollama.
+Models with tool calling support (like `llama3.2`) work best for agentic tasks.
 
 ## Tool Use
 
-Tools extend agent capabilities. Dive includes these built-in tools:
+Tools extend agent capabilities. Dive intentionally aligns its tool interfaces
+and behaviors with Claude Code in many cases. This alignment leverages
+Anthropic's tuning of Claude for these specific tool patterns, making Dive
+agents highly productive out of the box.
 
-- **list_directory**: List directory contents
+Dive includes these built-in tools:
+
+**File Operations**
 - **read_file**: Read content from files
 - **write_file**: Write content to files
-- **text_editor**: Advanced file editing with view, create, replace, and insert operations
-- **web_search**: Search the web using Google Custom Search or Kagi Search
-- **fetch**: Fetch and extract content from webpages using Firecrawl
-- **command**: Execute external commands
-- **generate_image**: Generate images using OpenAI's gpt-image-1
+- **edit**: Exact string replacements in files (Claude Code aligned)
+- **glob**: Find files using glob patterns
+- **grep**: Search file contents with regex (ripgrep-style)
+- **list_directory**: List directory contents
+
+**Shell & Execution**
+- **bash**: Persistent bash sessions with state (Claude Code aligned)
+- **task**: Spawn subagents for complex subtasks
+
+**Web & Search**
+- **web_search**: Search the web using Google or Kagi
+- **fetch**: Extract content from webpages via Firecrawl
+
+**Agent Features**
+- **todo_write**: Track task progress with todo lists
+- **skill**: Activate specialized skills
+- **memory**: Persistent memory files across sessions
+- **ask_user**: Request user input or clarification
 
 ### Tool Annotations
 
@@ -304,110 +277,104 @@ tool := dive.ToolAdapter(searchTool)
 
 Go interfaces are in-place to support swapping in different tool implementations.
 
-## Contributors
+## Agent Features
 
-We're looking for contributors! Whether you're fixing bugs, adding features,
-improving documentation, or spreading the word, your help is appreciated.
+Dive provides advanced capabilities for building sophisticated AI agents.
+See the [docs/guides](./docs/guides) directory for detailed documentation.
 
-## Roadmap
+### Subagents
 
-- ✅ Ollama support
-- ✅ MCP support
-- ✅ Google Cloud Vertex AI support
-- Docs site
-- Server mode
-- Documented approach for RAG
-- AWS Bedrock support
-- Voice interactions
-- Agent memory interface
-- Integrations (Slack, Google Drive, etc.)
-- Expanded CLI
-- Hugging Face support
-
-## FAQ
-
-### Is there a hosted or managed version available?
-
-Not at this time. Dive is provided as an open-source framework that you can
-self-host and integrate into your own applications.
-
-## Advanced Agent Features
-
-### Supervisor Patterns
-
-Agents can be configured as supervisors to delegate work to other agents:
-
-```go
-supervisor, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Research Manager",
-    Instructions: "You coordinate research tasks across multiple specialists.",
-    IsSupervisor: true,
-    Subordinates: []string{"Data Analyst", "Web Researcher"},
-    Model:        anthropic.New(),
-})
-```
-
-Supervisor agents automatically get an `assign_work` tool for delegating tasks.
-
-### Model Settings
-
-Fine-tune LLM behavior with advanced model settings:
+Spawn specialized child agents for focused subtasks with isolated contexts
+and restricted tool access:
 
 ```go
 agent, err := dive.NewAgent(dive.AgentOptions{
-    Name: "Assistant",
-    ModelSettings: &dive.ModelSettings{
-        Temperature:       ptr(0.7),
-        ReasoningBudget:   ptr(50000),
-        ReasoningEffort:   "high",
-        MaxTokens:         4096,
-        ParallelToolCalls: ptr(true),
-        Caching:           ptr(true),
-    },
+    Name:  "Main Agent",
     Model: anthropic.New(),
+    Tools: allTools,
+    Subagents: map[string]*dive.SubagentDefinition{
+        "code-reviewer": {
+            Description: "Expert code reviewer for security and quality reviews.",
+            Prompt:      "You are a code review specialist.",
+            Tools:       []string{"Read", "Grep", "Glob"},
+            Model:       "haiku",
+        },
+    },
 })
+```
+
+Subagents can also be loaded from markdown files with YAML frontmatter.
+
+### Skills
+
+Modular capabilities that extend agent functionality through specialized
+instructions with optional tool restrictions:
+
+```markdown
+<!-- .dive/skills/code-reviewer.md -->
+---
+name: code-reviewer
+description: Review code for best practices and potential issues.
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+---
+
+You are a code reviewer focused on identifying issues and suggesting improvements.
+```
+
+### Permissions
+
+Fine-grained control over tool execution with declarative rules and hooks:
+
+```go
+Permission: &dive.PermissionConfig{
+    Mode: dive.PermissionModeDefault,
+    Rules: dive.PermissionRules{
+        dive.DenyCommandRule("bash", "rm -rf *", "Recursive deletion blocked"),
+        dive.AllowRule("read_*"),
+        dive.AllowRule("glob"),
+        dive.AskRule("write_*", "Confirm file write"),
+    },
+}
+```
+
+### Context Compaction
+
+Automatically manage conversation context as it grows, summarizing history
+when token usage exceeds a threshold:
+
+```go
+agent, err := dive.NewAgent(dive.AgentOptions{
+    Name:  "Assistant",
+    Model: anthropic.New(),
+    Compaction: &dive.CompactionConfig{
+        Enabled:               true,
+        ContextTokenThreshold: 100000,
+    },
+})
+```
+
+### Todo Lists
+
+Track task progress with the TodoWrite tool and TodoTracker helper:
+
+```go
+tracker := dive.NewTodoTracker()
+
+resp, err := agent.CreateResponse(ctx,
+    dive.WithInput("Set up a new Go project with testing"),
+    dive.WithEventCallback(tracker.HandleEvent),
+)
+
+completed, _, total := tracker.Progress()
+fmt.Printf("Completed %d/%d tasks\n", completed, total)
 ```
 
 ### Thread Management
 
-Agents support persistent conversation threads with automatic ID generation,
-resumption, and forking capabilities:
-
-```go
-// Thread IDs are auto-generated if not provided
-resp, err := agent.CreateResponse(ctx, dive.WithInput("Hello"))
-threadID := resp.ThreadID  // e.g., "thread-1234567890"
-
-// Resume a conversation using WithResume (or WithThreadID)
-resp2, err := agent.CreateResponse(ctx,
-    dive.WithResume(threadID),
-    dive.WithInput("Continue our discussion"),
-)
-
-// Fork a conversation to explore alternatives
-resp3, err := agent.CreateResponse(ctx,
-    dive.WithResume(threadID),
-    dive.WithFork(true),
-    dive.WithInput("Let's try a different approach"),
-)
-// resp3.ThreadID is a new ID; original thread unchanged
-```
-
-For streaming responses, an `InitEvent` is emitted first with the thread ID:
-
-```go
-resp, err := agent.CreateResponse(ctx,
-    dive.WithInput("Hello"),
-    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-        if item.Type == dive.ResponseItemTypeInit {
-            fmt.Println("Thread ID:", item.Init.ThreadID)
-        }
-        return nil
-    }),
-)
-```
-
-Thread persistence requires a `ThreadRepository`:
+Persistent conversation threads with resumption and forking:
 
 ```go
 agent, err := dive.NewAgent(dive.AgentOptions{
@@ -415,4 +382,21 @@ agent, err := dive.NewAgent(dive.AgentOptions{
     Model:            anthropic.New(),
     ThreadRepository: dive.NewMemoryThreadRepository(),
 })
+
+// First interaction
+resp, err := agent.CreateResponse(ctx,
+    dive.WithThreadID("user-123"),
+    dive.WithInput("My name is Alice"),
+)
+
+// Later - agent remembers context
+resp2, err := agent.CreateResponse(ctx,
+    dive.WithThreadID("user-123"),
+    dive.WithInput("What's my name?"),
+)
 ```
+
+## Contributors
+
+We're looking for contributors! Whether you're fixing bugs, adding features,
+improving documentation, or spreading the word, your help is appreciated.
