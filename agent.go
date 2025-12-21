@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/log"
 )
 
 var (
@@ -64,15 +64,39 @@ type AgentOptions struct {
 	Tools              []Tool
 	ResponseTimeout    time.Duration
 	Hooks              llm.Hooks
-	Logger             log.Logger
+	Logger             llm.Logger
 	ToolIterationLimit int
 	ModelSettings      *ModelSettings
 	DateAwareness      *bool
 	ThreadRepository   ThreadRepository
-	Confirmer          Confirmer
 	SystemPrompt       string
 	NoSystemPrompt     bool
 	Context            []llm.Content
+
+	// Permission configures tool permission behavior.
+	// This replaces the legacy Interactor for tool-related confirmations.
+	Permission *PermissionConfig
+
+	// Interactor handles non-tool user interactions (Select, MultiSelect, Input).
+	// For tool confirmations, use Permission instead.
+	// Deprecated: For tool confirmations, use Permission with a CanUseTool callback.
+	Interactor UserInteractor
+
+	// Compaction configures client-side context compaction.
+	// When enabled and token thresholds are exceeded, the agent automatically
+	// summarizes conversation history to fit within context limits.
+	Compaction *CompactionConfig
+
+	// Subagents defines specialized subagents this agent can spawn via the Task tool.
+	// Keys are subagent names (e.g., "code-reviewer"), values are their definitions.
+	// Claude automatically decides when to invoke subagents based on descriptions.
+	Subagents map[string]*SubagentDefinition
+
+	// SubagentLoader loads subagent definitions from external sources.
+	// Use FileSubagentLoader for filesystem-based loading, or implement
+	// the SubagentLoader interface for custom sources (database, API, etc.).
+	// Programmatically defined subagents (in Subagents map) take precedence.
+	SubagentLoader SubagentLoader
 }
 
 // StandardAgent is the standard implementation of the Agent interface.
@@ -88,14 +112,17 @@ type StandardAgent struct {
 	subordinates         []string
 	responseTimeout      time.Duration
 	hooks                llm.Hooks
-	logger               log.Logger
+	logger               llm.Logger
 	toolIterationLimit   int
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
 	threadRepository     ThreadRepository
-	confirmer            Confirmer
+	interactor           UserInteractor
+	permissionManager    *PermissionManager
 	systemPromptTemplate *template.Template
 	context              []llm.Content
+	compaction           *CompactionConfig
+	subagentRegistry     *SubagentRegistry
 }
 
 // NewAgent returns a new StandardAgent configured with the given options.
@@ -110,7 +137,7 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		opts.ToolIterationLimit = defaultToolIterationLimit
 	}
 	if opts.Logger == nil {
-		opts.Logger = log.New(log.GetDefaultLevel())
+		opts.Logger = &llm.NullLogger{}
 	}
 	if opts.ID == "" {
 		opts.ID = newID()
@@ -142,9 +169,12 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		threadRepository:     opts.ThreadRepository,
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
-		confirmer:            opts.Confirmer,
+		interactor:           opts.Interactor,
 		context:              opts.Context,
+		compaction:           opts.Compaction,
 	}
+	// Initialize permission manager with backward compatibility
+	agent.permissionManager = agent.initPermissionManager(opts.Permission, opts.Interactor)
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
 		copy(tools, opts.Tools)
@@ -156,6 +186,24 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 			agent.toolsByName[tool.Name()] = tool
 		}
 	}
+
+	// Initialize subagent registry
+	agent.subagentRegistry = NewSubagentRegistry(true) // Include general-purpose by default
+
+	// Load subagents from external source if configured
+	if opts.SubagentLoader != nil {
+		loaded, err := opts.SubagentLoader.Load(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("failed to load subagents: %w", err)
+		}
+		agent.subagentRegistry.RegisterAll(loaded)
+	}
+
+	// Register programmatically defined subagents (take precedence over loaded)
+	if len(opts.Subagents) > 0 {
+		agent.subagentRegistry.RegisterAll(opts.Subagents)
+	}
+
 	return agent, nil
 }
 
@@ -186,6 +234,21 @@ func (a *StandardAgent) HasTools() bool {
 	return len(a.tools) > 0
 }
 
+// Tools returns the agent's tools.
+func (a *StandardAgent) Tools() []Tool {
+	return a.tools
+}
+
+// SubagentRegistry returns the agent's subagent registry.
+func (a *StandardAgent) SubagentRegistry() *SubagentRegistry {
+	return a.subagentRegistry
+}
+
+// Model returns the agent's LLM.
+func (a *StandardAgent) Model() llm.LLM {
+	return a.model
+}
+
 func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) (*Thread, error) {
 	thread, err := a.getOrCreateThread(ctx, options.ThreadID, options)
 	if err != nil {
@@ -196,25 +259,51 @@ func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Messa
 }
 
 func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
-	var chatAgentOptions CreateResponseOptions
-	chatAgentOptions.Apply(opts)
+	var options CreateResponseOptions
+	options.Apply(opts)
+
+	// Auto-generate thread ID if not provided
+	if options.ThreadID == "" {
+		options.ThreadID = newThreadID()
+	}
 
 	logger := a.logger.With(
 		"agent_name", a.name,
-		"thread_id", chatAgentOptions.ThreadID,
-		"user_id", chatAgentOptions.UserID,
+		"thread_id", options.ThreadID,
+		"user_id", options.UserID,
 	)
 	logger.Info("creating response")
 
-	messages := a.prepareMessages(chatAgentOptions)
+	messages := a.prepareMessages(options)
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	thread, err := a.prepareThread(ctx, messages, chatAgentOptions)
+	// Handle forking BEFORE prepareThread to avoid modifying the original thread
+	if options.Fork && a.threadRepository != nil && options.ThreadID != "" {
+		forkedThread, err := a.threadRepository.ForkThread(ctx, options.ThreadID)
+		if err != nil && err != ErrThreadNotFound {
+			return nil, fmt.Errorf("failed to fork thread: %w", err)
+		}
+		if forkedThread != nil {
+			// Update options to use the forked thread ID
+			options.ThreadID = forkedThread.ID
+			logger = logger.With("forked_from", options.ThreadID, "forked_to", forkedThread.ID)
+			logger.Info("forked thread")
+		}
+	}
+
+	thread, err := a.prepareThread(ctx, messages, options)
 	if err != nil {
 		return nil, err
 	}
+
+	// Apply per-request compaction override
+	originalCompaction := a.compaction
+	if options.Compaction != nil {
+		a.compaction = options.Compaction
+	}
+	defer func() { a.compaction = originalCompaction }()
 
 	systemPrompt, err := a.buildSystemPrompt()
 	if err != nil {
@@ -231,13 +320,28 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 
 	response := &Response{
 		ID:        randomInt(),
+		ThreadID:  thread.ID,
 		Model:     a.model.Name(),
 		CreatedAt: time.Now(),
 	}
 
+	// Track whether we've emitted the init event
+	initEventEmitted := false
+
 	eventCallback := func(ctx context.Context, item *ResponseItem) error {
-		if chatAgentOptions.EventCallback != nil {
-			return chatAgentOptions.EventCallback(ctx, item)
+		if options.EventCallback != nil {
+			// Emit init event before the first real event
+			if !initEventEmitted {
+				initEventEmitted = true
+				initItem := &ResponseItem{
+					Type: ResponseItemTypeInit,
+					Init: &InitEvent{ThreadID: thread.ID},
+				}
+				if err := options.EventCallback(ctx, initItem); err != nil {
+					return err
+				}
+			}
+			return options.EventCallback(ctx, item)
 		}
 		return nil
 	}
@@ -248,7 +352,20 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		return nil, err
 	}
 
-	thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+	// Handle compaction: replace messages instead of appending
+	if genResult.CompactedMessages != nil {
+		thread.Messages = genResult.CompactedMessages
+		// Record compaction in history
+		thread.CompactionHistory = append(thread.CompactionHistory, CompactionRecord{
+			Timestamp:         time.Now(),
+			TokensBefore:      genResult.CompactionEvent.TokensBefore,
+			TokensAfter:       genResult.CompactionEvent.TokensAfter,
+			MessagesCompacted: genResult.CompactionEvent.MessagesCompacted,
+		})
+	} else {
+		thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+	}
+
 	if a.threadRepository != nil {
 		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
 			logger.Error("failed to save thread", "error", err)
@@ -312,7 +429,7 @@ func (a *StandardAgent) buildSystemPrompt() (string, error) {
 		prompt = strings.TrimSpace(prompt)
 	}
 	if a.dateAwareness == nil || *a.dateAwareness {
-		prompt = fmt.Sprintf("%s\n\n%s", prompt, dateString(time.Now()))
+		prompt = fmt.Sprintf("%s\n\n%s", prompt, dateTimeString(time.Now()))
 	}
 	return strings.TrimSpace(prompt), nil
 }
@@ -397,6 +514,35 @@ func (a *StandardAgent) generate(
 			return nil, err
 		}
 
+		// Check for compaction trigger
+		if a.shouldCompact(totalUsage, len(updatedMessages)) {
+			compactedMessages, compactionEvent, err := a.performCompaction(ctx, updatedMessages, systemPrompt)
+			if err != nil {
+				// Log warning but don't fail - continue with uncompacted context
+				a.logger.Warn("compaction failed", "error", err)
+			} else {
+				// Replace messages with compacted summary
+				updatedMessages = compactedMessages
+				// Clear output messages since the history is now summarized
+				outputMessages = compactedMessages
+				// Emit compaction event
+				if err := callback(ctx, &ResponseItem{
+					Type:       ResponseItemTypeCompaction,
+					Compaction: compactionEvent,
+				}); err != nil {
+					return nil, err
+				}
+				// Return with compaction info - the loop will continue
+				// from the summary on the next CreateResponse call
+				return &generateResult{
+					OutputMessages:    outputMessages,
+					Usage:             totalUsage,
+					CompactedMessages: compactedMessages,
+					CompactionEvent:   compactionEvent,
+				}, nil
+			}
+		}
+
 		// We're done if there are no tool calls
 		toolCalls := response.ToolCalls()
 		if len(toolCalls) == 0 {
@@ -461,6 +607,89 @@ func (a *StandardAgent) configureCacheControl(messages []*llm.Message) {
 	}
 }
 
+// initPermissionManager creates a permission manager with backward compatibility.
+// If Permission config is provided, it uses that. Otherwise, it converts the
+// legacy Interactor to a permission-based flow.
+func (a *StandardAgent) initPermissionManager(
+	permission *PermissionConfig,
+	interactor UserInteractor,
+) *PermissionManager {
+	// Create confirmer function from interactor or default
+	confirmer := func(ctx context.Context, tool Tool, call *llm.ToolUseContent, message string) (bool, error) {
+		if interactor == nil {
+			return true, nil // No interactor = auto-approve
+		}
+		return interactor.Confirm(ctx, &ConfirmRequest{
+			Tool:    tool,
+			Call:    call,
+			Title:   fmt.Sprintf("Execute %s?", tool.Name()),
+			Message: message,
+		})
+	}
+
+	// If permission config is provided, use it
+	if permission != nil {
+		return NewPermissionManager(permission, confirmer)
+	}
+
+	// Convert legacy interactor to permission config
+	config := a.permissionConfigFromInteractor(interactor)
+	return NewPermissionManager(config, confirmer)
+}
+
+// permissionConfigFromInteractor converts a legacy UserInteractor to PermissionConfig.
+func (a *StandardAgent) permissionConfigFromInteractor(interactor UserInteractor) *PermissionConfig {
+	if interactor == nil {
+		// No interactor = bypass permissions (auto-approve)
+		return &PermissionConfig{Mode: PermissionModeBypassPermissions}
+	}
+
+	// Check if it's a TerminalInteractor with a mode
+	if ti, ok := interactor.(*TerminalInteractor); ok {
+		switch ti.Mode {
+		case InteractNever:
+			return &PermissionConfig{Mode: PermissionModeBypassPermissions}
+		case InteractAlways:
+			return &PermissionConfig{
+				Mode:  PermissionModeDefault,
+				Rules: PermissionRules{{Type: PermissionRuleAsk, Tool: "*"}},
+			}
+		case InteractIfDestructive:
+			return &PermissionConfig{
+				Mode: PermissionModeDefault,
+				CanUseTool: func(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
+					if tool != nil {
+						annotations := tool.Annotations()
+						if annotations != nil && annotations.DestructiveHint {
+							return AskResult(""), nil
+						}
+					}
+					return AllowResult(), nil
+				},
+			}
+		case InteractIfNotReadOnly:
+			return &PermissionConfig{
+				Mode: PermissionModeDefault,
+				CanUseTool: func(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
+					if tool != nil {
+						annotations := tool.Annotations()
+						if annotations != nil && annotations.ReadOnlyHint {
+							return AllowResult(), nil
+						}
+					}
+					return AskResult(""), nil
+				},
+			}
+		}
+	}
+
+	// Default: ask for all tools
+	return &PermissionConfig{
+		Mode:  PermissionModeDefault,
+		Rules: PermissionRules{{Type: PermissionRuleAsk, Tool: "*"}},
+	}
+}
+
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
 func (a *StandardAgent) generateStreaming(
@@ -494,14 +723,13 @@ func (a *StandardAgent) generateStreaming(
 	return accum.Response(), nil
 }
 
-func (a *StandardAgent) getConfirmer() (Confirmer, bool) {
-	if a.confirmer != nil {
-		return a.confirmer, true
-	}
-	return nil, false
+func (a *StandardAgent) getInteractor() UserInteractor {
+	return a.interactor
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
+// This implements Anthropic's permission flow:
+// PreToolUse Hook → Deny Rules → Allow Rules → Ask Rules → Mode Check → CanUseTool → Execute → PostToolUse Hook
 func (a *StandardAgent) executeToolCalls(
 	ctx context.Context,
 	toolCalls []*llm.ToolUseContent,
@@ -513,42 +741,9 @@ func (a *StandardAgent) executeToolCalls(
 		if !ok {
 			return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
 		}
-		a.logger.Debug("executing tool call",
-			"tool_id", toolCall.ID,
-			"tool_name", toolCall.Name,
-			"tool_input", string(toolCall.Input))
 
-		if err := callback(ctx, &ResponseItem{
-			Type:     ResponseItemTypeToolCall,
-			ToolCall: toolCall,
-		}); err != nil {
-			return nil, err
-		}
-
-		isConfirmed := true
-		if confirmer, ok := a.getConfirmer(); ok {
-			confirmed, err := confirmer.Confirm(ctx, a, tool, toolCall)
-			if err != nil {
-				return nil, fmt.Errorf("tool call confirmation error: %w", err)
-			}
-			if !confirmed {
-				isConfirmed = false
-			}
-		}
-
-		if isConfirmed {
-			output, err := tool.Call(ctx, toolCall.Input)
-			if err != nil {
-				return nil, fmt.Errorf("tool call error: %w", err)
-			}
-			results[i] = &ToolCallResult{
-				ID:     toolCall.ID,
-				Name:   toolCall.Name,
-				Input:  toolCall.Input,
-				Result: output,
-				Error:  err,
-			}
-		} else {
+		// Check if any tool (e.g., SkillTool) restricts this tool
+		if !a.isToolAllowed(toolCall.Name) {
 			results[i] = &ToolCallResult{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
@@ -557,22 +752,191 @@ func (a *StandardAgent) executeToolCalls(
 					Content: []*ToolResultContent{
 						{
 							Type: ToolResultContentTypeText,
-							Text: "User denied tool call",
+							Text: fmt.Sprintf("Tool %q is not allowed by the active skill. Check the skill's allowed-tools list.", toolCall.Name),
 						},
 					},
 					IsError: true,
 				},
 			}
+			if err := callback(ctx, &ResponseItem{
+				Type:           ResponseItemTypeToolCallResult,
+				ToolCallResult: results[i],
+			}); err != nil {
+				return nil, err
+			}
+			continue
 		}
 
+		a.logger.Debug("executing tool call",
+			"tool_id", toolCall.ID,
+			"tool_name", toolCall.Name,
+			"tool_input", string(toolCall.Input))
+
+		// Generate preview if tool supports it
+		var preview *ToolCallPreview
+		if previewer, ok := tool.(ToolPreviewer); ok {
+			preview = previewer.PreviewCall(ctx, toolCall.Input)
+		}
+
+		// Emit tool call event
 		if err := callback(ctx, &ResponseItem{
-			Type:           ResponseItemTypeToolCallResult,
-			ToolCallResult: results[i],
+			Type:     ResponseItemTypeToolCall,
+			ToolCall: toolCall,
 		}); err != nil {
 			return nil, err
 		}
+
+		// Evaluate permissions using the permission manager
+		hookResult, err := a.permissionManager.EvaluateToolUse(ctx, tool, toolCall, a)
+		if err != nil {
+			return nil, fmt.Errorf("permission evaluation error: %w", err)
+		}
+
+		// Handle the hook result
+		var result *ToolCallResult
+		switch hookResult.Action {
+		case ToolHookAllow:
+			// Execute tool with potentially updated input
+			input := toolCall.Input
+			if hookResult.UpdatedInput != nil {
+				input = hookResult.UpdatedInput
+			}
+			result = a.executeTool(ctx, tool, toolCall, input, preview)
+
+		case ToolHookDeny:
+			// Tool execution denied
+			message := hookResult.Message
+			if message == "" {
+				message = "Tool execution denied"
+			}
+			result = a.createDeniedResult(toolCall, message, preview)
+
+		case ToolHookAsk:
+			// Prompt user for confirmation
+			message := hookResult.Message
+			if message == "" && preview != nil {
+				message = preview.Summary
+			}
+			confirmed, err := a.permissionManager.Confirm(ctx, tool, toolCall, message)
+			if err != nil {
+				return nil, fmt.Errorf("tool call confirmation error: %w", err)
+			}
+			if confirmed {
+				result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
+			} else {
+				result = a.createDeniedResult(toolCall, "User denied tool call", preview)
+			}
+
+		default:
+			// ToolHookContinue should not happen after full evaluation
+			// Treat as ask to be safe
+			confirmed, err := a.permissionManager.Confirm(ctx, tool, toolCall, "")
+			if err != nil {
+				return nil, fmt.Errorf("tool call confirmation error: %w", err)
+			}
+			if confirmed {
+				result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
+			} else {
+				result = a.createDeniedResult(toolCall, "User denied tool call", preview)
+			}
+		}
+
+		results[i] = result
+
+		// Run PostToolUse hooks
+		postCtx := &PostToolUseContext{
+			Tool:   tool,
+			Call:   toolCall,
+			Result: result,
+			Agent:  a,
+		}
+		if err := a.permissionManager.RunPostToolUseHooks(ctx, postCtx); err != nil {
+			a.logger.Debug("post-tool-use hook error", "error", err)
+		}
+
+		// Emit result event
+		if err := callback(ctx, &ResponseItem{
+			Type:           ResponseItemTypeToolCallResult,
+			ToolCallResult: result,
+		}); err != nil {
+			return nil, err
+		}
+
+		// Emit TodoEvent for TodoWrite tool calls
+		if toolCall.Name == "TodoWrite" && result.Error == nil {
+			var todoInput struct {
+				Todos []TodoItem `json:"todos"`
+			}
+			if err := json.Unmarshal(toolCall.Input, &todoInput); err == nil {
+				if err := callback(ctx, &ResponseItem{
+					Type: ResponseItemTypeTodo,
+					Todo: &TodoEvent{Todos: todoInput.Todos},
+				}); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	return results, nil
+}
+
+// executeTool runs the tool and returns the result.
+func (a *StandardAgent) executeTool(
+	ctx context.Context,
+	tool Tool,
+	call *llm.ToolUseContent,
+	input []byte,
+	preview *ToolCallPreview,
+) *ToolCallResult {
+	output, err := tool.Call(ctx, input)
+	if err != nil {
+		return &ToolCallResult{
+			ID:      call.ID,
+			Name:    call.Name,
+			Input:   call.Input,
+			Preview: preview,
+			Result: &ToolResult{
+				Content: []*ToolResultContent{
+					{
+						Type: ToolResultContentTypeText,
+						Text: fmt.Sprintf("Tool execution error: %v", err),
+					},
+				},
+				IsError: true,
+			},
+			Error: err,
+		}
+	}
+	return &ToolCallResult{
+		ID:      call.ID,
+		Name:    call.Name,
+		Input:   call.Input,
+		Preview: preview,
+		Result:  output,
+	}
+}
+
+// createDeniedResult creates a tool result for a denied tool call.
+func (a *StandardAgent) createDeniedResult(
+	call *llm.ToolUseContent,
+	message string,
+	preview *ToolCallPreview,
+) *ToolCallResult {
+	return &ToolCallResult{
+		ID:      call.ID,
+		Name:    call.Name,
+		Input:   call.Input,
+		Preview: preview,
+		Result: &ToolResult{
+			Content: []*ToolResultContent{
+				{
+					Type: ToolResultContentTypeText,
+					Text: message,
+				},
+			},
+			IsError: true,
+		},
+	}
 }
 
 func (a *StandardAgent) getToolDefinitions() []llm.Tool {
@@ -640,7 +1004,196 @@ func (a *StandardAgent) Context() []llm.Content {
 	return a.context
 }
 
+// isToolAllowed checks if a tool is allowed by any ToolAllowanceChecker in the
+// agent's tools. This is used to enforce skill-based tool restrictions.
+func (a *StandardAgent) isToolAllowed(toolName string) bool {
+	for _, tool := range a.tools {
+		if checker, ok := tool.(ToolAllowanceChecker); ok {
+			if !checker.IsToolAllowed(toolName) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 type generateResult struct {
-	OutputMessages []*llm.Message
-	Usage          *llm.Usage
+	OutputMessages    []*llm.Message
+	Usage             *llm.Usage
+	CompactedMessages []*llm.Message   // If set, Thread.Messages should be replaced with this
+	CompactionEvent   *CompactionEvent // If set, compaction occurred
+}
+
+// calculateTotalTokens returns the total token count for compaction threshold checks.
+// Per Anthropic spec: InputTokens + OutputTokens + CacheCreationInputTokens + CacheReadInputTokens.
+func (a *StandardAgent) calculateTotalTokens(usage *llm.Usage) int {
+	return usage.InputTokens + usage.OutputTokens +
+		usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+}
+
+// shouldCompact returns true if compaction should be triggered based on token usage.
+func (a *StandardAgent) shouldCompact(usage *llm.Usage, messageCount int) bool {
+	if a.compaction == nil || !a.compaction.Enabled {
+		return false
+	}
+	// Never compact if there are fewer than 2 messages
+	if messageCount < 2 {
+		return false
+	}
+	threshold := a.compaction.ContextTokenThreshold
+	if threshold <= 0 {
+		threshold = DefaultContextTokenThreshold
+	}
+	return a.calculateTotalTokens(usage) >= threshold
+}
+
+// performCompaction generates a summary of the conversation and returns compacted messages.
+func (a *StandardAgent) performCompaction(
+	ctx context.Context,
+	messages []*llm.Message,
+	systemPrompt string,
+) ([]*llm.Message, *CompactionEvent, error) {
+	// Step 1: Filter out pending tool use blocks
+	cleanedMessages := a.filterPendingToolUse(messages)
+	if len(cleanedMessages) == 0 {
+		return nil, nil, fmt.Errorf("no messages to compact after filtering")
+	}
+
+	// Step 2: Build summary request
+	summaryPrompt := a.compaction.SummaryPrompt
+	if summaryPrompt == "" {
+		summaryPrompt = DefaultCompactionSummaryPrompt
+	}
+
+	// Add summary instruction as a user message
+	summaryMessages := make([]*llm.Message, len(cleanedMessages)+1)
+	copy(summaryMessages, cleanedMessages)
+	summaryMessages[len(cleanedMessages)] = llm.NewUserTextMessage(summaryPrompt)
+
+	// Step 3: Choose model for summary
+	model := a.compaction.Model
+	if model == nil {
+		model = a.model
+	}
+
+	// Step 4: Generate summary (non-streaming for simplicity)
+	summaryOpts := []llm.Option{
+		llm.WithSystemPrompt(systemPrompt),
+		llm.WithMessages(summaryMessages...),
+	}
+
+	a.logger.Debug("performing compaction",
+		"message_count", len(cleanedMessages),
+		"model", model.Name(),
+	)
+
+	summaryResp, err := model.Generate(ctx, summaryOpts...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compaction summary generation failed: %w", err)
+	}
+
+	// Step 5: Extract summary from response
+	summaryText := a.extractSummary(summaryResp.Message().Text())
+	if summaryText == "" {
+		return nil, nil, fmt.Errorf("no summary found in compaction response (missing <summary> tags)")
+	}
+
+	// Step 6: Create new message list with just the summary as an assistant message
+	compactedMessages := []*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []llm.Content{
+				&llm.SummaryContent{Summary: summaryText},
+			},
+		},
+	}
+
+	// Step 7: Build compaction event
+	tokensBefore := a.calculateTotalTokens(&summaryResp.Usage)
+	event := &CompactionEvent{
+		TokensBefore:      tokensBefore,
+		TokensAfter:       summaryResp.Usage.OutputTokens,
+		Summary:           summaryText,
+		MessagesCompacted: len(cleanedMessages),
+	}
+
+	a.logger.Debug("compaction complete",
+		"tokens_before", event.TokensBefore,
+		"tokens_after", event.TokensAfter,
+		"messages_compacted", event.MessagesCompacted,
+	)
+
+	return compactedMessages, event, nil
+}
+
+// extractSummary extracts content from <summary></summary> tags.
+func (a *StandardAgent) extractSummary(text string) string {
+	startTag := "<summary>"
+	endTag := "</summary>"
+
+	startIdx := strings.Index(text, startTag)
+	if startIdx == -1 {
+		return ""
+	}
+	startIdx += len(startTag)
+
+	endIdx := strings.Index(text[startIdx:], endTag)
+	if endIdx == -1 {
+		return ""
+	}
+
+	return strings.TrimSpace(text[startIdx : startIdx+endIdx])
+}
+
+// filterPendingToolUse removes tool_use blocks that don't have corresponding tool_result.
+// If the last assistant message contains only tool_use blocks, remove the entire message.
+func (a *StandardAgent) filterPendingToolUse(messages []*llm.Message) []*llm.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+
+	// Check if the last message is an assistant message with tool_use
+	lastMsg := messages[len(messages)-1]
+	if lastMsg.Role != llm.Assistant {
+		return messages
+	}
+
+	// Count tool use blocks in the last message
+	toolUseCount := 0
+	nonToolUseCount := 0
+	for _, content := range lastMsg.Content {
+		if _, ok := content.(*llm.ToolUseContent); ok {
+			toolUseCount++
+		} else {
+			nonToolUseCount++
+		}
+	}
+
+	// If no tool use, return as-is
+	if toolUseCount == 0 {
+		return messages
+	}
+
+	// If all content was tool use, remove the entire message
+	if nonToolUseCount == 0 {
+		return messages[:len(messages)-1]
+	}
+
+	// Otherwise, filter out tool use blocks from the last message
+	filteredContent := make([]llm.Content, 0, nonToolUseCount)
+	for _, content := range lastMsg.Content {
+		if _, isToolUse := content.(*llm.ToolUseContent); !isToolUse {
+			filteredContent = append(filteredContent, content)
+		}
+	}
+
+	// Create a copy with filtered content
+	result := make([]*llm.Message, len(messages))
+	copy(result, messages)
+	result[len(result)-1] = &llm.Message{
+		ID:      lastMsg.ID,
+		Role:    lastMsg.Role,
+		Content: filteredContent,
+	}
+	return result
 }

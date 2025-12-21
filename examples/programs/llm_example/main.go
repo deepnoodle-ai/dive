@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/openai"
+	"github.com/deepnoodle-ai/dive/providers/openai"
 )
 
 const DefaultPrompt = "What is the scientific name of the largest animal on Earth?"

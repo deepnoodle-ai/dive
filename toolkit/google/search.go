@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/web"
 )
 
 var baseURL = "https://www.googleapis.com/customsearch/v1"

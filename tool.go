@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/schema"
 )
 
 type ToolAnnotations struct {
@@ -15,6 +14,7 @@ type ToolAnnotations struct {
 	DestructiveHint bool           `json:"destructiveHint,omitempty"`
 	IdempotentHint  bool           `json:"idempotentHint,omitempty"`
 	OpenWorldHint   bool           `json:"openWorldHint,omitempty"`
+	EditHint        bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
 	Extra           map[string]any `json:"extra,omitempty"`
 }
 
@@ -25,6 +25,7 @@ func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 		"destructiveHint": a.DestructiveHint,
 		"idempotentHint":  a.IdempotentHint,
 		"openWorldHint":   a.OpenWorldHint,
+		"editHint":        a.EditHint,
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -50,6 +51,7 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 		"destructiveHint": &a.DestructiveHint,
 		"idempotentHint":  &a.IdempotentHint,
 		"openWorldHint":   &a.OpenWorldHint,
+		"editHint":        &a.EditHint,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {
@@ -89,8 +91,19 @@ type ToolResultContent struct {
 
 // ToolResult is the output from a tool call.
 type ToolResult struct {
+	// Content is the tool output sent to the LLM.
 	Content []*ToolResultContent `json:"content"`
-	IsError bool                 `json:"isError,omitempty"`
+	// Display is an optional human-readable markdown summary of the result.
+	// If empty, consumers should fall back to Content for display.
+	Display string `json:"display,omitempty"`
+	// IsError indicates whether the tool call resulted in an error.
+	IsError bool `json:"isError,omitempty"`
+}
+
+// WithDisplay returns a copy of the ToolResult with the Display field set.
+func (r *ToolResult) WithDisplay(display string) *ToolResult {
+	r.Display = display
+	return r
 }
 
 // NewToolResultError creates a new ToolResult containing an error message.
@@ -128,13 +141,29 @@ type Tool interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() *schema.Schema
+	Schema() *Schema
 
 	// Annotations returns optional properties that describe tool behavior.
 	Annotations() *ToolAnnotations
 
 	// Call is the function that is called to use the tool.
 	Call(ctx context.Context, input any) (*ToolResult, error)
+}
+
+// ToolCallPreview contains human-readable information about a pending tool call.
+type ToolCallPreview struct {
+	// Summary is a short description of what the tool will do, e.g., "Fetch https://example.com"
+	Summary string `json:"summary"`
+	// Details is optional longer markdown with more context about the operation.
+	Details string `json:"details,omitempty"`
+}
+
+// ToolPreviewer is an optional interface that tools can implement to provide
+// human-readable previews of what they will do before execution.
+type ToolPreviewer interface {
+	// PreviewCall returns a markdown description of what the tool will do
+	// given the input. The input is the same type passed to Call().
+	PreviewCall(ctx context.Context, input any) *ToolCallPreview
 }
 
 // TypedTool is a tool that can be called with a specific type of input.
@@ -146,13 +175,20 @@ type TypedTool[T any] interface {
 	Description() string
 
 	// Schema describes the parameters used to call the tool.
-	Schema() *schema.Schema
+	Schema() *Schema
 
 	// Annotations returns optional properties that describe tool behavior.
 	Annotations() *ToolAnnotations
 
 	// Call is the function that is called to use the tool.
 	Call(ctx context.Context, input T) (*ToolResult, error)
+}
+
+// TypedToolPreviewer is an optional interface that typed tools can implement
+// to provide human-readable previews with typed input.
+type TypedToolPreviewer[T any] interface {
+	// PreviewCall returns a markdown description of what the tool will do.
+	PreviewCall(ctx context.Context, input T) *ToolCallPreview
 }
 
 // ToolAdapter creates a new TypedToolAdapter for the given tool.
@@ -175,7 +211,7 @@ func (t *TypedToolAdapter[T]) Description() string {
 	return t.tool.Description()
 }
 
-func (t *TypedToolAdapter[T]) Schema() *schema.Schema {
+func (t *TypedToolAdapter[T]) Schema() *Schema {
 	return t.tool.Schema()
 }
 
@@ -184,32 +220,9 @@ func (t *TypedToolAdapter[T]) Annotations() *ToolAnnotations {
 }
 
 func (t *TypedToolAdapter[T]) Call(ctx context.Context, input any) (*ToolResult, error) {
-	// Pass through if the input is already the correct type
-	if converted, ok := input.(T); ok {
-		return t.tool.Call(ctx, converted)
-	}
-
-	// Access the raw JSON
-	var data []byte
-	var err error
-	if raw, ok := input.(json.RawMessage); ok {
-		data = raw
-	} else if raw, ok := input.([]byte); ok {
-		data = raw
-	} else {
-		data, err = json.Marshal(input)
-		if err != nil {
-			errMessage := fmt.Sprintf("invalid json for tool %s: %v", t.Name(), err)
-			return NewToolResultError(errMessage), nil
-		}
-	}
-
-	// Unmarshal into the typed input
-	var typedInput T
-	err = json.Unmarshal(data, &typedInput)
+	typedInput, err := t.convertInput(input)
 	if err != nil {
-		errMessage := fmt.Sprintf("invalid json for tool %s: %v", t.Name(), err)
-		return NewToolResultError(errMessage), nil
+		return NewToolResultError(err.Error()), nil
 	}
 	return t.tool.Call(ctx, typedInput)
 }
@@ -226,12 +239,80 @@ func (t *TypedToolAdapter[T]) ToolConfiguration(providerName string) map[string]
 	return nil
 }
 
+// PreviewCall implements ToolPreviewer by delegating to the underlying TypedTool
+// if it implements TypedToolPreviewer[T].
+func (t *TypedToolAdapter[T]) PreviewCall(ctx context.Context, input any) *ToolCallPreview {
+	// Check if underlying tool implements TypedToolPreviewer
+	previewer, ok := t.tool.(TypedToolPreviewer[T])
+	if !ok {
+		return nil
+	}
+
+	// Convert input to typed T
+	typedInput, err := t.convertInput(input)
+	if err != nil {
+		return nil
+	}
+
+	return previewer.PreviewCall(ctx, typedInput)
+}
+
+// IsToolAllowed implements ToolAllowanceChecker by delegating to the underlying
+// TypedTool if it implements ToolAllowanceChecker.
+func (t *TypedToolAdapter[T]) IsToolAllowed(toolName string) bool {
+	if checker, ok := t.tool.(ToolAllowanceChecker); ok {
+		return checker.IsToolAllowed(toolName)
+	}
+	return true
+}
+
+// convertInput converts any input to the typed T, handling json.RawMessage and other types.
+func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
+	var zero T
+
+	// Pass through if the input is already the correct type
+	if converted, ok := input.(T); ok {
+		return converted, nil
+	}
+
+	// Access the raw JSON
+	var data []byte
+	var err error
+	if raw, ok := input.(json.RawMessage); ok {
+		data = raw
+	} else if raw, ok := input.([]byte); ok {
+		data = raw
+	} else {
+		data, err = json.Marshal(input)
+		if err != nil {
+			return zero, fmt.Errorf("invalid json for tool %s: %w", t.Name(), err)
+		}
+	}
+
+	// Unmarshal into the typed input
+	var typedInput T
+	err = json.Unmarshal(data, &typedInput)
+	if err != nil {
+		return zero, fmt.Errorf("invalid json for tool %s: %w", t.Name(), err)
+	}
+	return typedInput, nil
+}
+
 // ToolCallResult is a tool call that has been made. This is used to understand
 // what calls have happened during an LLM interaction.
 type ToolCallResult struct {
-	ID     string
-	Name   string
-	Input  any
-	Result *ToolResult
-	Error  error
+	ID      string
+	Name    string
+	Input   any
+	Preview *ToolCallPreview // Preview generated before execution (if tool implements ToolPreviewer)
+	Result  *ToolResult
+	Error   error
+}
+
+// ToolAllowanceChecker is an optional interface that tools can implement to
+// restrict which other tools can be used. This is used by skills to enforce
+// allowed-tools restrictions.
+type ToolAllowanceChecker interface {
+	// IsToolAllowed returns true if the given tool name is allowed to be executed.
+	IsToolAllowed(toolName string) bool
 }

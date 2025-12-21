@@ -8,8 +8,8 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
+	"github.com/deepnoodle-ai/wonton/web"
 )
 
 const DefaultImageURL = "https://upload.wikimedia.org/wikipedia/commons/f/f1/Kusuma_bike_large.jpg"

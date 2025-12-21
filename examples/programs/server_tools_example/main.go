@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
 const DefaultPrompt = "What is the capital of Tanzania? Respond with a name and approximate population only."

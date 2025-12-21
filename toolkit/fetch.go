@@ -3,13 +3,15 @@ package toolkit
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/internal/retry"
-	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/retry"
+	"github.com/deepnoodle-ai/wonton/schema"
+	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 const (
@@ -34,29 +36,26 @@ var DefaultFetchExcludeTags = []string{
 	"footer",
 }
 
-var _ dive.TypedTool[*web.FetchInput] = &FetchTool{}
+var _ dive.TypedTool[*fetch.Request] = &FetchTool{}
+var _ dive.TypedToolPreviewer[*fetch.Request] = &FetchTool{}
 
 type FetchTool struct {
-	fetcher         web.Fetcher
+	fetcher         fetch.Fetcher
 	maxSize         int
 	maxRetries      int
 	timeout         time.Duration
-	onlyMainContent *bool
-	storeInCache    *bool
-	maxAge          *int64
+	onlyMainContent bool
 }
 
 type FetchToolOptions struct {
 	MaxSize         int           `json:"max_size,omitempty"`
 	MaxRetries      int           `json:"max_retries,omitempty"`
 	Timeout         time.Duration `json:"timeout,omitempty"`
-	StoreInCache    *bool         `json:"store_in_cache,omitempty"`
-	MaxAge          *int64        `json:"max_age,omitempty"`
-	OnlyMainContent *bool         `json:"only_main_content,omitempty"`
-	Fetcher         web.Fetcher   `json:"-"`
+	OnlyMainContent bool          `json:"only_main_content,omitempty"`
+	Fetcher         fetch.Fetcher `json:"-"`
 }
 
-func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInput] {
+func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*fetch.Request] {
 	if options.MaxSize <= 0 {
 		options.MaxSize = DefaultFetchMaxSize
 	}
@@ -69,8 +68,6 @@ func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*web.FetchInp
 		maxRetries:      options.MaxRetries,
 		timeout:         options.Timeout,
 		onlyMainContent: options.OnlyMainContent,
-		storeInCache:    options.StoreInCache,
-		maxAge:          options.MaxAge,
 	})
 }
 
@@ -95,20 +92,25 @@ func (t *FetchTool) Schema() *schema.Schema {
 	}
 }
 
-func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.ToolResult, error) {
-	input.Formats = []web.FetchFormat{web.FetchFormatMarkdown}
+func (t *FetchTool) PreviewCall(ctx context.Context, req *fetch.Request) *dive.ToolCallPreview {
+	return &dive.ToolCallPreview{
+		Summary: fmt.Sprintf("Fetch %s", req.URL),
+	}
+}
 
-	if input.ExcludeTags == nil {
-		input.ExcludeTags = DefaultFetchExcludeTags
+func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolResult, error) {
+	// Validate URL to prevent SSRF attacks
+	if err := validateFetchURL(req.URL); err != nil {
+		return NewToolResultError(fmt.Sprintf("URL validation failed: %s", err)), nil
 	}
-	if t.onlyMainContent != nil {
-		input.OnlyMainContent = t.onlyMainContent
+
+	req.Formats = []string{"markdown"}
+
+	if req.ExcludeTags == nil {
+		req.ExcludeTags = DefaultFetchExcludeTags
 	}
-	if t.storeInCache != nil {
-		input.StoreInCache = t.storeInCache
-	}
-	if t.maxAge != nil {
-		input.MaxAge = t.maxAge
+	if t.onlyMainContent {
+		req.OnlyMainContent = true
 	}
 
 	if t.timeout > 0 {
@@ -117,15 +119,15 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 		defer cancel()
 	}
 
-	var response *web.FetchOutput
-	err := retry.Do(ctx, func() error {
+	var response *fetch.Response
+	err := retry.DoSimple(ctx, func() error {
 		var err error
-		response, err = t.fetcher.Fetch(ctx, input)
+		response, err = t.fetcher.Fetch(ctx, req)
 		if err != nil {
 			return err
 		}
 		return nil
-	}, retry.WithMaxRetries(t.maxRetries))
+	}, retry.WithMaxAttempts(t.maxRetries+1))
 
 	if err != nil {
 		return NewToolResultError(fmt.Sprintf("failed to fetch url after %d attempts: %s", t.maxRetries, err)), nil
@@ -140,8 +142,17 @@ func (t *FetchTool) Call(ctx context.Context, input *web.FetchInput) (*dive.Tool
 	}
 	sb.WriteString(response.Markdown)
 
-	result := truncateText(sb.String(), t.maxSize)
-	return NewToolResultText(result), nil
+	content := truncateText(sb.String(), t.maxSize)
+	contentLen := len([]rune(content))
+
+	// Build display summary
+	display := fmt.Sprintf("Fetched %s", req.URL)
+	if title := response.Metadata.Title; title != "" {
+		display = fmt.Sprintf("Fetched %s (%s)", req.URL, title)
+	}
+	display = fmt.Sprintf("%s - %d chars", display, contentLen)
+
+	return NewToolResultText(content).WithDisplay(display), nil
 }
 
 func (t *FetchTool) Annotations() *dive.ToolAnnotations {
@@ -160,4 +171,83 @@ func truncateText(text string, maxSize int) string {
 		return text
 	}
 	return string(runes[:maxSize]) + "..."
+}
+
+// isPrivateIP checks if an IP address is in a private or reserved range
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+
+	// Check for loopback (127.0.0.0/8, ::1)
+	if ip.IsLoopback() {
+		return true
+	}
+
+	// Check for link-local (169.254.0.0/16, fe80::/10)
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	// Check for private ranges
+	if ip.IsPrivate() {
+		return true
+	}
+
+	// Check for unspecified (0.0.0.0, ::)
+	if ip.IsUnspecified() {
+		return true
+	}
+
+	// Additional check for IPv4-mapped IPv6 addresses
+	if ip4 := ip.To4(); ip4 != nil {
+		// Check if it starts with 0 (0.0.0.0/8)
+		if ip4[0] == 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// validateFetchURL validates a URL for safe fetching, preventing SSRF attacks
+func validateFetchURL(rawURL string) error {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Only allow http and https schemes
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("invalid URL scheme %q: only http and https are allowed", parsedURL.Scheme)
+	}
+
+	// Get the hostname
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("URL must include a hostname")
+	}
+
+	// Block localhost variations
+	lowerHost := strings.ToLower(hostname)
+	if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") {
+		return fmt.Errorf("access to localhost is not allowed")
+	}
+
+	// Resolve hostname to IP addresses
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		// Fail closed: DNS resolution failure blocks the request
+		return fmt.Errorf("DNS resolution failed for %q: %w", hostname, err)
+	}
+
+	// Check if any resolved IP is private
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("access to private/internal IP address %s is not allowed", ip.String())
+		}
+	}
+
+	return nil
 }

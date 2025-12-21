@@ -105,6 +105,45 @@ func (m *Message) DecodeInto(v any) error {
 	return fmt.Errorf("no text content found")
 }
 
+// Copy creates a deep copy of the message.
+//
+// This method uses JSON marshaling/unmarshaling to create a fully independent
+// copy of the message including all content blocks. The copied message can be
+// modified without affecting the original.
+//
+// This is primarily used by ThreadRepository.ForkThread to ensure that forked
+// conversation threads have independent message histories.
+//
+// If marshaling fails (which should be rare), falls back to a shallow copy
+// of the content slice.
+func (m *Message) Copy() *Message {
+	data, err := json.Marshal(m)
+	if err != nil {
+		// Fall back to shallow copy if marshaling fails
+		contentCopy := make([]Content, len(m.Content))
+		copy(contentCopy, m.Content)
+		return &Message{
+			ID:      m.ID,
+			Role:    m.Role,
+			Content: contentCopy,
+		}
+	}
+	var messageCopy Message
+	if err := json.Unmarshal(data, &messageCopy); err != nil {
+		// Fall back to shallow copy if unmarshaling fails
+		contentCopy := make([]Content, len(m.Content))
+		for i, c := range m.Content {
+			contentCopy[i] = c
+		}
+		return &Message{
+			ID:      m.ID,
+			Role:    m.Role,
+			Content: contentCopy,
+		}
+	}
+	return &messageCopy
+}
+
 // MarshalJSON implements custom marshaling for Message to properly handle
 // the polymorphic Content field.
 func (m *Message) MarshalJSON() ([]byte, error) {

@@ -1,6 +1,6 @@
 package llm
 
-import "github.com/deepnoodle-ai/dive/schema"
+import "github.com/deepnoodle-ai/wonton/schema"
 
 type ResponseFormatType string
 

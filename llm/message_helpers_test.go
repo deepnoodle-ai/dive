@@ -3,7 +3,7 @@ package llm
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestNewUserDocumentMessage(t *testing.T) {
@@ -12,15 +12,15 @@ func TestNewUserDocumentMessage(t *testing.T) {
 
 	message := NewUserMessage(NewDocumentContent(EncodedData(mediaType, base64Data)))
 
-	require.Equal(t, User, message.Role)
-	require.Len(t, message.Content, 1)
+	assert.Equal(t, User, message.Role)
+	assert.Len(t, message.Content, 1)
 
 	docContent, ok := message.Content[0].(*DocumentContent)
-	require.True(t, ok)
-	require.NotNil(t, docContent.Source)
-	require.Equal(t, ContentSourceTypeBase64, docContent.Source.Type)
-	require.Equal(t, mediaType, docContent.Source.MediaType)
-	require.Equal(t, base64Data, docContent.Source.Data)
+	assert.True(t, ok)
+	assert.NotNil(t, docContent.Source)
+	assert.Equal(t, ContentSourceTypeBase64, docContent.Source.Type)
+	assert.Equal(t, mediaType, docContent.Source.MediaType)
+	assert.Equal(t, base64Data, docContent.Source.Data)
 }
 
 func TestNewUserDocumentURLMessage(t *testing.T) {
@@ -28,26 +28,26 @@ func TestNewUserDocumentURLMessage(t *testing.T) {
 
 	message := NewUserMessage(NewDocumentContent(ContentURL(url)))
 
-	require.Equal(t, User, message.Role)
-	require.Len(t, message.Content, 1)
+	assert.Equal(t, User, message.Role)
+	assert.Len(t, message.Content, 1)
 
 	docContent, ok := message.Content[0].(*DocumentContent)
-	require.True(t, ok)
-	require.NotNil(t, docContent.Source)
-	require.Equal(t, ContentSourceTypeURL, docContent.Source.Type)
-	require.Equal(t, url, docContent.Source.URL)
+	assert.True(t, ok)
+	assert.NotNil(t, docContent.Source)
+	assert.Equal(t, ContentSourceTypeURL, docContent.Source.Type)
+	assert.Equal(t, url, docContent.Source.URL)
 }
 
 func TestNewUserDocumentFileIDMessage(t *testing.T) {
 	fileID := "file-xyz789"
 	message := NewUserMessage(NewDocumentContent(FileID(fileID)))
 
-	require.Equal(t, User, message.Role)
-	require.Len(t, message.Content, 1)
+	assert.Equal(t, User, message.Role)
+	assert.Len(t, message.Content, 1)
 
 	docContent, ok := message.Content[0].(*DocumentContent)
-	require.True(t, ok)
-	require.NotNil(t, docContent.Source)
-	require.Equal(t, ContentSourceTypeFile, docContent.Source.Type)
-	require.Equal(t, fileID, docContent.Source.FileID)
+	assert.True(t, ok)
+	assert.NotNil(t, docContent.Source)
+	assert.Equal(t, ContentSourceTypeFile, docContent.Source.Type)
+	assert.Equal(t, fileID, docContent.Source.FileID)
 }

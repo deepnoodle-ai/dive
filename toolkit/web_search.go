@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/schema"
+	"github.com/deepnoodle-ai/wonton/web"
 )
 
 var _ dive.TypedTool[*SearchInput] = &WebSearchTool{}
@@ -56,7 +56,7 @@ func (t *WebSearchTool) Schema() *schema.Schema {
 }
 
 func (t *WebSearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolResult, error) {
-	limit := 10
+	limit := input.Limit
 	if limit <= 0 {
 		limit = 10
 	}

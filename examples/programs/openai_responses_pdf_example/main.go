@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/openai"
+	"github.com/deepnoodle-ai/dive/providers/openai"
 )
 
 func main() {

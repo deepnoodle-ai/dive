@@ -6,68 +6,68 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestNewManager(t *testing.T) {
 	manager := NewManager()
-	require.NotNil(t, manager)
-	require.NotNil(t, manager.servers)
-	require.NotNil(t, manager.tools)
-	require.Empty(t, manager.servers)
-	require.Empty(t, manager.tools)
+	assert.NotNil(t, manager)
+	assert.NotNil(t, manager.servers)
+	assert.NotNil(t, manager.tools)
+	assert.Empty(t, manager.servers)
+	assert.Empty(t, manager.tools)
 }
 
 func TestMCPManager_GetAllTools_EmptyManager(t *testing.T) {
 	manager := NewManager()
 	tools := manager.GetAllTools()
-	require.NotNil(t, tools)
-	require.Empty(t, tools)
+	assert.NotNil(t, tools)
+	assert.Empty(t, tools)
 }
 
 func TestMCPManager_GetToolsByServer_NonExistent(t *testing.T) {
 	manager := NewManager()
 	tools := manager.GetToolsByServer("nonexistent")
-	require.Nil(t, tools)
+	assert.Nil(t, tools)
 }
 
 func TestMCPManager_GetTool_NonExistent(t *testing.T) {
 	manager := NewManager()
 	tool := manager.GetTool("nonexistent.tool")
-	require.Nil(t, tool)
+	assert.Nil(t, tool)
 }
 
 func TestMCPManager_GetServerStatus_Empty(t *testing.T) {
 	manager := NewManager()
 	status := manager.GetServerStatus()
-	require.NotNil(t, status)
-	require.Empty(t, status)
+	assert.NotNil(t, status)
+	assert.Empty(t, status)
 }
 
 func TestMCPManager_IsServerConnected_NonExistent(t *testing.T) {
 	manager := NewManager()
 	connected := manager.IsServerConnected("nonexistent")
-	require.False(t, connected)
+	assert.False(t, connected)
 }
 
 func TestMCPManager_GetServerNames_Empty(t *testing.T) {
 	manager := NewManager()
 	names := manager.GetServerNames()
-	require.NotNil(t, names)
-	require.Empty(t, names)
+	assert.NotNil(t, names)
+	assert.Empty(t, names)
 }
 
 func TestMCPManager_Close_EmptyManager(t *testing.T) {
 	manager := NewManager()
 	err := manager.Close()
-	require.NoError(t, err)
+	assert.NoError(t, err)
 }
 
 func TestMCPManager_RefreshTools_EmptyManager(t *testing.T) {
 	manager := NewManager()
 	ctx := context.Background()
 	err := manager.RefreshTools(ctx)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 }
 
 func TestMCPManager_InitializeServers_UnsupportedType(t *testing.T) {
@@ -84,12 +84,12 @@ func TestMCPManager_InitializeServers_UnsupportedType(t *testing.T) {
 	}
 
 	err := manager.InitializeServers(ctx, serverConfigs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "unsupported mcp server type: unsupported")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported mcp server type: unsupported")
 
 	// Verify no servers were added
 	names := manager.GetServerNames()
-	require.Empty(t, names)
+	assert.Empty(t, names)
 }
 
 func TestMCPManager_InitializeServers_DuplicateServer(t *testing.T) {
@@ -104,7 +104,7 @@ func TestMCPManager_InitializeServers_DuplicateServer(t *testing.T) {
 	}
 
 	client, err := NewClient(testConfig)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	manager.servers["test-server"] = &MCPServerConnection{
 		Client: client,
@@ -117,7 +117,7 @@ func TestMCPManager_InitializeServers_DuplicateServer(t *testing.T) {
 	serverConfigs := []*ServerConfig{testConfig}
 
 	err = manager.InitializeServers(ctx, serverConfigs)
-	require.NoError(t, err) // Should not return error - silently skip already initialized servers
+	assert.NoError(t, err) // Should not return error - silently skip already initialized servers
 }
 
 func TestMCPManager_WithMockServer(t *testing.T) {
@@ -132,7 +132,7 @@ func TestMCPManager_WithMockServer(t *testing.T) {
 	}
 
 	client, err := NewClient(testConfig)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Mock some tools
 	mockTools := []mcp.Tool{
@@ -167,43 +167,43 @@ func TestMCPManager_WithMockServer(t *testing.T) {
 
 	// Test GetServerNames
 	names := manager.GetServerNames()
-	require.Len(t, names, 1)
-	require.Contains(t, names, "test-server")
+	assert.Len(t, names, 1)
+	assert.Contains(t, names, "test-server")
 
 	// Test GetToolsByServer
 	tools := manager.GetToolsByServer("test-server")
-	require.Len(t, tools, 2)
+	assert.Len(t, tools, 2)
 
 	// Test GetAllTools
 	allTools := manager.GetAllTools()
-	require.Len(t, allTools, 2)
-	require.Contains(t, allTools, "test-server.test-tool-1")
-	require.Contains(t, allTools, "test-server.test-tool-2")
+	assert.Len(t, allTools, 2)
+	assert.Contains(t, allTools, "test-server.test-tool-1")
+	assert.Contains(t, allTools, "test-server.test-tool-2")
 
 	// Test GetTool
 	tool1 := manager.GetTool("test-server.test-tool-1")
-	require.NotNil(t, tool1)
-	require.Equal(t, "test-tool-1", tool1.Name())
+	assert.NotNil(t, tool1)
+	assert.Equal(t, "test-tool-1", tool1.Name())
 
 	// Test GetServerStatus
 	status := manager.GetServerStatus()
-	require.Len(t, status, 1)
+	assert.Len(t, status, 1)
 	// Note: Since we didn't actually connect, this will be false
-	require.Contains(t, status, "test-server")
+	assert.Contains(t, status, "test-server")
 
 	// Test IsServerConnected
 	connected := manager.IsServerConnected("test-server")
-	require.False(t, connected) // Not actually connected
+	assert.False(t, connected) // Not actually connected
 
 	// Test Close
 	err = manager.Close()
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Verify everything is cleaned up
 	names = manager.GetServerNames()
-	require.Empty(t, names)
+	assert.Empty(t, names)
 	allTools = manager.GetAllTools()
-	require.Empty(t, allTools)
+	assert.Empty(t, allTools)
 }
 
 func TestMCPManager_RefreshTools_WithMockServer(t *testing.T) {
@@ -218,7 +218,7 @@ func TestMCPManager_RefreshTools_WithMockServer(t *testing.T) {
 	}
 
 	client, err := NewClient(testConfig)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Set up the client as connected but don't actually connect
 	client.connected = true
@@ -247,7 +247,7 @@ func TestMCPManager_RefreshTools_WithMockServer(t *testing.T) {
 	}
 
 	// Verify initial state
-	require.Len(t, manager.GetAllTools(), 1)
+	assert.Len(t, manager.GetAllTools(), 1)
 
 	// RefreshTools will fail because we can't actually list tools from a mock server
 	// but it should handle the error gracefully - we can't test this easily without
@@ -259,10 +259,10 @@ func TestMCPManager_RefreshTools_WithMockServer(t *testing.T) {
 	client.connected = false
 
 	err = manager.RefreshTools(ctx)
-	require.NoError(t, err) // Should succeed by skipping disconnected servers
+	assert.NoError(t, err) // Should succeed by skipping disconnected servers
 
 	// Verify the server connection is still there
-	require.False(t, manager.IsServerConnected("test-server")) // Now disconnected
+	assert.False(t, manager.IsServerConnected("test-server")) // Now disconnected
 }
 
 func TestMCPManager_RefreshTools_DisconnectedServer(t *testing.T) {
@@ -277,7 +277,7 @@ func TestMCPManager_RefreshTools_DisconnectedServer(t *testing.T) {
 	}
 
 	client, err := NewClient(testConfig)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	// Don't set connected = true, so it's disconnected
 
 	manager.servers[testConfig.Name] = &MCPServerConnection{
@@ -289,5 +289,5 @@ func TestMCPManager_RefreshTools_DisconnectedServer(t *testing.T) {
 	// RefreshTools should skip disconnected servers
 	ctx := context.Background()
 	err = manager.RefreshTools(ctx)
-	require.NoError(t, err) // Should succeed by skipping disconnected servers
+	assert.NoError(t, err) // Should succeed by skipping disconnected servers
 }

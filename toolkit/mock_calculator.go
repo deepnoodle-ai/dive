@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 var _ dive.TypedTool[*MockCalculatorInput] = &MockCalculatorTool{}

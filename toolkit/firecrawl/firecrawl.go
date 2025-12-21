@@ -11,10 +11,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/deepnoodle-ai/dive/web"
+	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
-var _ web.Fetcher = &Client{}
+var _ fetch.Fetcher = &Client{}
 
 // ClientOption is a function that modifies the client configuration.
 type ClientOption func(*Client)
@@ -81,19 +81,15 @@ func New(opts ...ClientOption) (*Client, error) {
 }
 
 // Fetch a web page.
-func (c *Client) Fetch(ctx context.Context, input *web.FetchInput) (*web.FetchOutput, error) {
-	// Convert web.FetchFormat to Firecrawl v2 Format objects
-	formats := make([]Format, len(input.Formats))
-	for i, format := range input.Formats {
+func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response, error) {
+	// Convert format strings to Firecrawl Format objects
+	formats := make([]Format, 0, len(req.Formats))
+	for _, format := range req.Formats {
 		switch format {
-		case web.FetchFormatMarkdown:
-			formats[i] = "markdown"
-		case web.FetchFormatHTML:
-			formats[i] = "html"
-		case web.FetchFormatSummary:
-			formats[i] = "summary"
-		case web.FetchFormatLinks:
-			formats[i] = "links"
+		case "markdown", "html", "raw_html", "links", "summary":
+			formats = append(formats, format)
+		case "images", "branding":
+			// Firecrawl doesn't support these directly, skip
 		}
 	}
 
@@ -103,57 +99,30 @@ func (c *Client) Fetch(ctx context.Context, input *web.FetchInput) (*web.FetchOu
 	}
 
 	body := scrapeRequestBody{
-		URL:         input.URL,
+		URL:         req.URL,
 		Formats:     formats,
-		Headers:     input.Headers,
-		IncludeTags: input.IncludeTags,
-		ExcludeTags: input.ExcludeTags,
+		Headers:     req.Headers,
+		IncludeTags: req.IncludeTags,
+		ExcludeTags: req.ExcludeTags,
 	}
 
-	// Set optional fields from input
-	if input.OnlyMainContent != nil {
-		body.OnlyMainContent = input.OnlyMainContent
+	// Set optional fields from request
+	if req.OnlyMainContent {
+		onlyMain := true
+		body.OnlyMainContent = &onlyMain
 	}
-	if input.MaxAge != nil {
-		body.MaxAge = input.MaxAge
+	if req.MaxAge > 0 {
+		maxAge := int64(req.MaxAge)
+		body.MaxAge = &maxAge
 	}
-	if input.StoreInCache != nil {
-		body.StoreInCache = input.StoreInCache
+	if req.WaitFor > 0 {
+		body.WaitFor = &req.WaitFor
 	}
-	if input.WaitFor != nil {
-		body.WaitFor = input.WaitFor
+	if req.Timeout > 0 {
+		body.Timeout = &req.Timeout
 	}
-	if input.Timeout > 0 {
-		timeout := input.Timeout
-		body.Timeout = &timeout
-	}
-
-	// Handle screenshot format if specified
-	if input.Screenshot != nil {
-		screenshotFormat := ScreenshotFormat{
-			Type:     "screenshot",
-			FullPage: &input.Screenshot.FullPage,
-		}
-		if input.Screenshot.Quality > 0 {
-			screenshotFormat.Quality = &input.Screenshot.Quality
-		}
-		if input.Screenshot.Viewport.Width > 0 && input.Screenshot.Viewport.Height > 0 {
-			screenshotFormat.Viewport = &Viewport{
-				Width:  input.Screenshot.Viewport.Width,
-				Height: input.Screenshot.Viewport.Height,
-			}
-		}
-		body.Formats = append(body.Formats, screenshotFormat)
-	}
-
-	// Handle JSON schema extraction if specified
-	if input.JSONSchema != nil {
-		jsonFormat := JSONFormat{
-			Type:   "json",
-			Schema: input.JSONSchema.Schema,
-			Prompt: input.JSONSchema.Prompt,
-		}
-		body.Formats = append(body.Formats, jsonFormat)
+	if req.Mobile {
+		body.Mobile = &req.Mobile
 	}
 
 	// Set v2 specific defaults
@@ -173,18 +142,12 @@ func (c *Client) Fetch(ctx context.Context, input *web.FetchInput) (*web.FetchOu
 		proxy := "auto"
 		body.Proxy = &proxy
 	}
-	if body.StoreInCache == nil {
-		storeCache := true
-		body.StoreInCache = &storeCache
-	}
+	storeCache := true
+	body.StoreInCache = &storeCache
 
 	resp, err := c.doRequest(ctx, http.MethodPost, "/scrape", &body)
 	if err != nil {
-		// Check if it's a FetchError and return it directly for proper error handling
-		if fetchErr, ok := err.(*web.FetchError); ok {
-			return nil, fetchErr
-		}
-		return nil, fmt.Errorf("scrape request failed: %w", err)
+		return nil, err
 	}
 	var scrapeResp scrapeResponse
 	if err := json.Unmarshal(resp, &scrapeResp); err != nil {
@@ -194,15 +157,17 @@ func (c *Client) Fetch(ctx context.Context, input *web.FetchInput) (*web.FetchOu
 		return nil, fmt.Errorf("scrape operation failed")
 	}
 
-	// Build the response
-	output := &web.FetchOutput{
-		Markdown: scrapeResp.Data.Markdown,
-		Metadata: web.PageMetadata{
-			SourceURL:   scrapeResp.Data.Metadata.SourceURL,
+	// Build the response using Wonton's fetch.Response
+	output := &fetch.Response{
+		URL:        req.URL,
+		StatusCode: scrapeResp.Data.Metadata.StatusCode,
+		Markdown:   scrapeResp.Data.Markdown,
+		Metadata: fetch.Metadata{
 			Title:       scrapeResp.Data.Metadata.Title,
 			Description: scrapeResp.Data.Metadata.Description,
-			StatusCode:  scrapeResp.Data.Metadata.StatusCode,
+			Canonical:   scrapeResp.Data.Metadata.SourceURL,
 		},
+		Timestamp: time.Now().UTC(),
 	}
 
 	// Set optional response fields
@@ -212,17 +177,18 @@ func (c *Client) Fetch(ctx context.Context, input *web.FetchInput) (*web.FetchOu
 	if scrapeResp.Data.HTML != nil {
 		output.HTML = *scrapeResp.Data.HTML
 	}
+	if scrapeResp.Data.RawHTML != nil {
+		output.RawHTML = *scrapeResp.Data.RawHTML
+	}
 	if scrapeResp.Data.Screenshot != nil {
 		output.Screenshot = *scrapeResp.Data.Screenshot
 	}
+	// Convert links from []string to []fetch.Link
 	if scrapeResp.Data.Links != nil {
-		output.Links = scrapeResp.Data.Links
-	}
-	if scrapeResp.Data.Warning != nil {
-		output.Warning = *scrapeResp.Data.Warning
-	}
-	if scrapeResp.Data.Metadata.Language != nil {
-		output.Metadata.Language = *scrapeResp.Data.Metadata.Language
+		output.Links = make([]fetch.Link, len(scrapeResp.Data.Links))
+		for i, link := range scrapeResp.Data.Links {
+			output.Links[i] = fetch.Link{URL: link}
+		}
 	}
 
 	return output, nil
@@ -259,13 +225,13 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		// Handle specific v2 API error responses
 		switch resp.StatusCode {
 		case 402:
-			return nil, &web.FetchError{StatusCode: 402, Err: fmt.Errorf("payment required to access this resource")}
+			return nil, fetch.NewRequestErrorf("payment required to access this resource").WithStatusCode(402)
 		case 429:
-			return nil, &web.FetchError{StatusCode: 429, Err: fmt.Errorf("request rate limit exceeded, please wait and try again later")}
+			return nil, fetch.NewRequestErrorf("request rate limit exceeded, please wait and try again later").WithStatusCode(429)
 		case 500:
-			return nil, &web.FetchError{StatusCode: 500, Err: fmt.Errorf("server error occurred")}
+			return nil, fetch.NewRequestErrorf("server error occurred").WithStatusCode(500)
 		default:
-			return nil, &web.FetchError{StatusCode: resp.StatusCode, Err: fmt.Errorf("request failed: %s", respBody)}
+			return nil, fetch.NewRequestErrorf("request failed: %s", respBody).WithStatusCode(resp.StatusCode)
 		}
 	}
 	return respBody, nil

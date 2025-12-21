@@ -3,8 +3,6 @@ package llm
 import (
 	"context"
 	"net/http"
-
-	"github.com/deepnoodle-ai/dive/log"
 )
 
 // Option is a function that is used to adjust LLM configuration.
@@ -26,6 +24,7 @@ type Config struct {
 	ReasoningBudget    *int                     `json:"reasoning_budget,omitempty"`
 	ReasoningEffort    ReasoningEffort          `json:"reasoning_effort,omitempty"`
 	ReasoningSummary   ReasoningSummary         `json:"reasoning_summary,omitempty"`
+	ContextManagement  *ContextManagementConfig `json:"context_management,omitempty"`
 	Tools              []Tool                   `json:"tools,omitempty"`
 	ToolChoice         *ToolChoice              `json:"tool_choice,omitempty"`
 	ParallelToolCalls  *bool                    `json:"parallel_tool_calls,omitempty"`
@@ -40,7 +39,7 @@ type Config struct {
 	Messages           Messages                 `json:"messages"`
 	Hooks              Hooks                    `json:"-"`
 	Client             *http.Client             `json:"-"`
-	Logger             log.Logger               `json:"-"`
+	Logger             Logger                   `json:"-"`
 	SSECallback        ServerSentEventsCallback `json:"-"`
 }
 
@@ -81,9 +80,9 @@ func WithModel(model string) Option {
 }
 
 // WithLogger sets the logger.
-func WithLogger(logger log.Logger) Option {
+func WithLogger(l Logger) Option {
 	return func(config *Config) {
-		config.Logger = logger
+		config.Logger = l
 	}
 }
 
@@ -301,5 +300,81 @@ func WithServiceTier(serviceTier string) Option {
 func WithServerSentEventsCallback(callback ServerSentEventsCallback) Option {
 	return func(config *Config) {
 		config.SSECallback = callback
+	}
+}
+
+// ContextManagementConfig configures automated context management strategies.
+// This allows the LLM provider to automatically manage conversation context,
+// such as clearing tool results or thinking blocks, to optimize context window usage.
+type ContextManagementConfig struct {
+	// Edits is a list of context editing strategies to apply.
+	// If multiple strategies are provided, they are applied in order.
+	Edits []ContextManagementEdit `json:"edits"`
+}
+
+// ContextManagementEdit defines a specific context editing strategy.
+type ContextManagementEdit struct {
+	// Type is the strategy type identifier.
+	// Supported values:
+	// - "clear_tool_uses_20250919": Clears tool results when context grows beyond a threshold.
+	//   Oldest tool results are cleared first and replaced with placeholder text.
+	// - "clear_thinking_20251015": Clears thinking blocks from previous assistant turns
+	//   when extended thinking is enabled.
+	Type string `json:"type"`
+
+	// Trigger defines when the context editing strategy activates.
+	// Once the prompt exceeds this threshold, clearing will begin.
+	// Measuring units can be "input_tokens" or "tool_uses".
+	// Only applicable for "clear_tool_uses_20250919".
+	Trigger *ContextManagementTrigger `json:"trigger,omitempty"`
+
+	// Keep defines how much content to preserve after clearing occurs.
+	// For "clear_tool_uses_20250919", this is the number of recent tool use/result pairs to keep.
+	// For "clear_thinking_20251015", this is the number of recent assistant turns with thinking blocks to preserve.
+	Keep *ContextManagementKeep `json:"keep,omitempty"`
+
+	// ClearAtLeast ensures a minimum number of tokens is cleared each time the strategy activates.
+	// If the API can't clear at least the specified amount, the strategy will not be applied.
+	// This helps determine if context clearing is worth breaking the prompt cache.
+	// Only applicable for "clear_tool_uses_20250919".
+	ClearAtLeast *ContextManagementTrigger `json:"clear_at_least,omitempty"`
+
+	// ExcludeTools is a list of tool names whose tool uses and results should never be cleared.
+	// Useful for preserving important context (e.g., "memory" or "web_search").
+	// Only applicable for "clear_tool_uses_20250919".
+	ExcludeTools []string `json:"exclude_tools,omitempty"`
+
+	// ClearToolInputs controls whether the tool call parameters are cleared along with the tool results.
+	// By default (false), only the tool results are cleared while keeping the original tool calls visible.
+	// Only applicable for "clear_tool_uses_20250919".
+	ClearToolInputs bool `json:"clear_tool_inputs,omitempty"`
+}
+
+// ContextManagementTrigger defines a threshold or amount for context editing.
+type ContextManagementTrigger struct {
+	// Type specifies the unit of measurement.
+	// Supported values: "input_tokens", "tool_uses".
+	Type string `json:"type"`
+
+	// Value is the threshold or amount.
+	Value int `json:"value"`
+}
+
+// ContextManagementKeep defines content to preserve during context editing.
+type ContextManagementKeep struct {
+	// Type specifies the unit of measurement.
+	// Supported values: "tool_uses" (for clear_tool_uses strategy) or "thinking_turns" (for clear_thinking strategy).
+	Type string `json:"type"`
+
+	// Value indicates how much to keep.
+	// For tool_uses, use an integer (N latest uses).
+	// For thinking_turns, use an integer (N latest turns) or the string "all" (to keep all thinking blocks).
+	Value any `json:"value"`
+}
+
+// WithContextManagement sets the context management configuration for the interaction.
+func WithContextManagement(config *ContextManagementConfig) Option {
+	return func(c *Config) {
+		c.ContextManagement = config
 	}
 }

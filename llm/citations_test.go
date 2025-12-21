@@ -3,8 +3,7 @@ package llm
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestUnmarshalCitation(t *testing.T) {
@@ -76,7 +75,7 @@ func TestUnmarshalCitation(t *testing.T) {
 				return
 			}
 
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 			assert.True(t, result.IsCitation())
 		})
@@ -165,7 +164,7 @@ func TestUnmarshalCitations(t *testing.T) {
 				return
 			}
 
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

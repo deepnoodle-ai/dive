@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/log"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // MCPServerConnection represents a connection to an MCP server
@@ -21,13 +21,13 @@ type MCPServerConnection struct {
 type Manager struct {
 	servers map[string]*MCPServerConnection
 	tools   map[string]dive.Tool
-	logger  log.Logger
+	logger  llm.Logger
 	mutex   sync.RWMutex
 }
 
 // ManagerOptions configures a new MCP manager
 type ManagerOptions struct {
-	Logger log.Logger
+	Logger llm.Logger
 }
 
 // NewManager creates a new MCP manager

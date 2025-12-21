@@ -7,24 +7,24 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/web"
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/fetch"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestClient_Fetch_V2API(t *testing.T) {
 	// Mock server that returns a v2 API response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "POST", r.Method)
-		require.Equal(t, "/scrape", r.URL.Path)
-		require.Equal(t, "Bearer test-api-key", r.Header.Get("Authorization"))
-		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "/scrape", r.URL.Path)
+		assert.Equal(t, "Bearer test-api-key", r.Header.Get("Authorization"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		// Parse and validate the request body
 		var reqBody scrapeRequestBody
 		err := json.NewDecoder(r.Body).Decode(&reqBody)
-		require.NoError(t, err)
-		require.Equal(t, "https://example.com", reqBody.URL)
-		require.NotEmpty(t, reqBody.Formats)
+		assert.NoError(t, err)
+		assert.Equal(t, "https://example.com", reqBody.URL)
+		assert.NotEmpty(t, reqBody.Formats)
 
 		// Return a mock v2 response
 		response := scrapeResponse{
@@ -54,28 +54,29 @@ func TestClient_Fetch_V2API(t *testing.T) {
 		WithAPIKey("test-api-key"),
 		WithBaseURL(server.URL),
 	)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	// Test the fetch operation
-	input := &web.FetchInput{
+	req := &fetch.Request{
 		URL:     "https://example.com",
-		Formats: []web.FetchFormat{web.FetchFormatMarkdown, web.FetchFormatHTML, web.FetchFormatSummary, web.FetchFormatLinks},
+		Formats: []string{"markdown", "html", "summary", "links"},
 	}
 
-	output, err := client.Fetch(context.Background(), input)
-	require.NoError(t, err)
-	require.NotNil(t, output)
+	output, err := client.Fetch(context.Background(), req)
+	assert.NoError(t, err)
+	assert.NotNil(t, output)
 
 	// Verify the response
-	require.Equal(t, "# Example\n\nThis is a test page.", output.Markdown)
-	require.Equal(t, "<h1>Example</h1><p>This is a test page.</p>", output.HTML)
-	require.Equal(t, "A test page with example content.", output.Summary)
-	require.Equal(t, []string{"https://example.com/link1", "https://example.com/link2"}, output.Links)
-	require.Equal(t, "Example Page", output.Metadata.Title)
-	require.Equal(t, "An example page for testing", output.Metadata.Description)
-	require.Equal(t, "en", output.Metadata.Language)
-	require.Equal(t, "https://example.com", output.Metadata.SourceURL)
-	require.Equal(t, 200, output.Metadata.StatusCode)
+	assert.Equal(t, "# Example\n\nThis is a test page.", output.Markdown)
+	assert.Equal(t, "<h1>Example</h1><p>This is a test page.</p>", output.HTML)
+	assert.Equal(t, "A test page with example content.", output.Summary)
+	assert.Len(t, output.Links, 2)
+	assert.Equal(t, "https://example.com/link1", output.Links[0].URL)
+	assert.Equal(t, "https://example.com/link2", output.Links[1].URL)
+	assert.Equal(t, "Example Page", output.Metadata.Title)
+	assert.Equal(t, "An example page for testing", output.Metadata.Description)
+	assert.Equal(t, "https://example.com", output.Metadata.Canonical)
+	assert.Equal(t, 200, output.StatusCode)
 }
 
 func TestClient_Fetch_ErrorHandling(t *testing.T) {
@@ -117,20 +118,20 @@ func TestClient_Fetch_ErrorHandling(t *testing.T) {
 				WithAPIKey("test-api-key"),
 				WithBaseURL(server.URL),
 			)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 
-			input := &web.FetchInput{
+			req := &fetch.Request{
 				URL: "https://example.com",
 			}
 
-			_, err = client.Fetch(context.Background(), input)
+			_, err = client.Fetch(context.Background(), req)
 			if tt.wantErr {
-				require.Error(t, err)
-				fetchErr, ok := err.(*web.FetchError)
-				require.True(t, ok, "expected FetchError")
-				require.Equal(t, tt.errCode, fetchErr.StatusCode)
+				assert.Error(t, err)
+				assert.True(t, fetch.IsRequestError(err), "expected RequestError")
+				reqErr := err.(*fetch.RequestError)
+				assert.Equal(t, tt.errCode, reqErr.StatusCode())
 			} else {
-				require.NoError(t, err)
+				assert.NoError(t, err)
 			}
 		})
 	}
@@ -140,13 +141,13 @@ func TestClient_Fetch_DefaultFormats(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody scrapeRequestBody
 		err := json.NewDecoder(r.Body).Decode(&reqBody)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 
 		// Should default to markdown format when no formats specified
-		require.Len(t, reqBody.Formats, 1)
+		assert.Len(t, reqBody.Formats, 1)
 		formatStr, ok := reqBody.Formats[0].(string)
-		require.True(t, ok)
-		require.Equal(t, "markdown", formatStr)
+		assert.True(t, ok)
+		assert.Equal(t, "markdown", formatStr)
 
 		response := scrapeResponse{
 			Success: true,
@@ -168,16 +169,16 @@ func TestClient_Fetch_DefaultFormats(t *testing.T) {
 		WithAPIKey("test-api-key"),
 		WithBaseURL(server.URL),
 	)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
-	input := &web.FetchInput{
+	req := &fetch.Request{
 		URL: "https://example.com",
 		// No formats specified - should default to markdown
 	}
 
-	output, err := client.Fetch(context.Background(), input)
-	require.NoError(t, err)
-	require.Equal(t, "# Default Format Test", output.Markdown)
+	output, err := client.Fetch(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Equal(t, "# Default Format Test", output.Markdown)
 }
 
 func TestClient_New_MissingAPIKey(t *testing.T) {
@@ -185,8 +186,8 @@ func TestClient_New_MissingAPIKey(t *testing.T) {
 	t.Setenv("FIRECRAWL_API_KEY", "")
 
 	_, err := New()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "no api key provided")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no api key provided")
 }
 
 // Helper function to create string pointers

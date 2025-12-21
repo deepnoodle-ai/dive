@@ -7,8 +7,8 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/llm/providers/ollama"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/dive/providers/ollama"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 func main() {

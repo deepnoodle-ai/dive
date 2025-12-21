@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 var _ dive.TypedTool[*ExtractInput] = &ExtractTool{}
@@ -21,28 +21,30 @@ var _ dive.TypedTool[*ExtractInput] = &ExtractTool{}
 type ExtractInput struct {
 	// Path to the input file (text, image, PDF, etc.)
 	InputPath string `json:"input_path"`
-	
+
 	// JSON schema defining the structure to extract
 	Schema map[string]interface{} `json:"schema"`
-	
+
 	// Optional: Path to save the extracted data
 	OutputPath string `json:"output_path,omitempty"`
-	
+
 	// Optional: Bias filtering instructions
 	BiasFilter string `json:"bias_filter,omitempty"`
-	
+
 	// Optional: Additional extraction instructions
 	Instructions string `json:"instructions,omitempty"`
 }
 
 // ExtractToolOptions configures the extraction tool
 type ExtractToolOptions struct {
-	MaxFileSize int64 `json:"max_file_size,omitempty"`
+	MaxFileSize  int64  `json:"max_file_size,omitempty"`
+	WorkspaceDir string // Base directory for workspace validation (defaults to cwd)
 }
 
 // ExtractTool implements structured data extraction from various input types
 type ExtractTool struct {
-	maxFileSize int64
+	maxFileSize   int64
+	pathValidator *PathValidator
 }
 
 // NewExtractTool creates a new extraction tool
@@ -50,8 +52,13 @@ func NewExtractTool(options ExtractToolOptions) *dive.TypedToolAdapter[*ExtractI
 	if options.MaxFileSize == 0 {
 		options.MaxFileSize = 10 * 1024 * 1024 // 10MB default
 	}
+	pathValidator, err := NewPathValidator(options.WorkspaceDir)
+	if err != nil {
+		pathValidator = nil
+	}
 	return dive.ToolAdapter(&ExtractTool{
-		maxFileSize: options.MaxFileSize,
+		maxFileSize:   options.MaxFileSize,
+		pathValidator: pathValidator,
 	})
 }
 
@@ -99,6 +106,13 @@ func (t *ExtractTool) Call(ctx context.Context, input *ExtractInput) (*dive.Tool
 
 	if input.Schema == nil {
 		return NewToolResultError("Error: No schema provided"), nil
+	}
+
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateRead(input.InputPath); err != nil {
+			return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	// Resolve absolute path
@@ -173,7 +187,7 @@ func (t *ExtractTool) detectFileType(path string, content []byte) string {
 	// Use MIME type detection
 	mimeType := http.DetectContentType(content)
 	mediaType, _, _ := mime.ParseMediaType(mimeType)
-	
+
 	switch {
 	case strings.HasPrefix(mediaType, "image/"):
 		return "image"

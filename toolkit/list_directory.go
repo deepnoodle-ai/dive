@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/schema"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 var _ dive.TypedTool[*ListDirectoryInput] = &ListDirectoryTool{}
+var _ dive.TypedToolPreviewer[*ListDirectoryInput] = &ListDirectoryTool{}
 
 const DefaultListDirectoryMaxEntries = 100
 
@@ -32,19 +32,15 @@ type DirectoryEntry struct {
 }
 
 type ListDirectoryToolOptions struct {
-	DefaultPath   string
-	MaxEntries    int
-	RootDirectory string   // If set, all paths will be relative to this directory
-	AllowList     []string // Patterns of allowed paths
-	DenyList      []string // Patterns of denied paths
+	DefaultPath  string
+	MaxEntries   int
+	WorkspaceDir string // Base directory for workspace validation (defaults to cwd)
 }
 
 type ListDirectoryTool struct {
 	defaultPath   string
 	maxEntries    int
-	rootDirectory string
-	allowList     []string
-	denyList      []string
+	pathValidator *PathValidator
 }
 
 // NewListDirectoryTool creates a new tool for listing directory contents
@@ -52,12 +48,14 @@ func NewListDirectoryTool(options ListDirectoryToolOptions) *dive.TypedToolAdapt
 	if options.MaxEntries == 0 {
 		options.MaxEntries = DefaultListDirectoryMaxEntries
 	}
+	pathValidator, err := NewPathValidator(options.WorkspaceDir)
+	if err != nil {
+		pathValidator = &PathValidator{}
+	}
 	return dive.ToolAdapter(&ListDirectoryTool{
 		defaultPath:   options.DefaultPath,
 		maxEntries:    options.MaxEntries,
-		rootDirectory: options.RootDirectory,
-		allowList:     options.AllowList,
-		denyList:      options.DenyList,
+		pathValidator: pathValidator,
 	})
 }
 
@@ -92,80 +90,14 @@ func (t *ListDirectoryTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
-// isPathAllowed checks if the given path is allowed based on allowList and denyList
-func (t *ListDirectoryTool) isPathAllowed(path string) (bool, string) {
-	// Convert to absolute path for consistent checking
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false, fmt.Sprintf("Error resolving absolute path: %s", err.Error())
+func (t *ListDirectoryTool) PreviewCall(ctx context.Context, input *ListDirectoryInput) *dive.ToolCallPreview {
+	path := input.Path
+	if path == "" {
+		path = t.defaultPath
 	}
-
-	// If denyList is specified, check against it first
-	if len(t.denyList) > 0 {
-		for _, pattern := range t.denyList {
-			matched, err := matchesPattern(absPath, pattern)
-			if err != nil {
-				return false, fmt.Sprintf("Error matching pattern '%s': %s", pattern, err.Error())
-			}
-			if matched {
-				return false, fmt.Sprintf("Path '%s' matches denied pattern '%s'", path, pattern)
-			}
-		}
+	return &dive.ToolCallPreview{
+		Summary: fmt.Sprintf("List %s", path),
 	}
-
-	// If allowList is specified, path must match at least one pattern
-	if len(t.allowList) > 0 {
-		allowed := false
-		for _, pattern := range t.allowList {
-			matched, err := matchesPattern(absPath, pattern)
-			if err != nil {
-				return false, fmt.Sprintf("Error matching pattern '%s': %s", pattern, err.Error())
-			}
-			if matched {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return false, fmt.Sprintf("Path '%s' does not match any allowed patterns", path)
-		}
-	}
-
-	return true, ""
-}
-
-// resolvePath resolves the provided path, applying rootDirectory if configured
-// and preventing directory traversal attacks
-func (t *ListDirectoryTool) resolvePath(path string) (string, error) {
-	if t.rootDirectory == "" {
-		// If no root directory is set, use the path as is
-		return path, nil
-	}
-
-	// Join the root directory and the provided path
-	resolvedPath := filepath.Join(t.rootDirectory, path)
-
-	// Get the absolute paths to check for directory traversal
-	absRoot, err := filepath.Abs(t.rootDirectory)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve absolute path for root directory: %w", err)
-	}
-
-	absPath, err := filepath.Abs(resolvedPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
-	}
-
-	// Check if the resolved path is within the root directory
-	cleanRoot := filepath.Clean(absRoot)
-	cleanPath := filepath.Clean(absPath)
-
-	rel, err := filepath.Rel(cleanRoot, cleanPath)
-	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return "", fmt.Errorf("path attempts to access location outside of root directory")
-	}
-
-	return resolvedPath, nil
 }
 
 func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput) (*dive.ToolResult, error) {
@@ -178,18 +110,17 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 		return NewToolResultError("Error: No directory path provided. Please provide a directory path either in the constructor or as an argument."), nil
 	}
 
-	// Resolve the path (apply rootDirectory if configured)
-	resolvedPath, err := t.resolvePath(dirPath)
-	if err != nil {
-		return NewToolResultError(fmt.Sprintf("Unable to resolve path: %s", err.Error())), nil
+	// Validate path is within workspace
+	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+		if err := t.pathValidator.ValidateRead(dirPath); err != nil {
+			return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
-	// Check if the path is allowed
-	if len(t.allowList) > 0 || len(t.denyList) > 0 {
-		allowed, reason := t.isPathAllowed(resolvedPath)
-		if !allowed {
-			return NewToolResultError(fmt.Sprintf("Access denied. %s", reason)), nil
-		}
+	// Resolve to absolute path
+	resolvedPath, err := filepath.Abs(dirPath)
+	if err != nil {
+		return NewToolResultError(fmt.Sprintf("Unable to resolve path: %s", err.Error())), nil
 	}
 
 	// Check if the directory exists
@@ -229,16 +160,6 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 
 		entryPath := filepath.Join(dirPath, entry.Name())
 
-		// For display purposes, use the path relative to rootDirectory if it was set
-		displayPath := entryPath
-		if t.rootDirectory != "" {
-			// Try to make the path relative to rootDirectory for display
-			relPath, err := filepath.Rel(t.rootDirectory, resolvedPath)
-			if err == nil {
-				displayPath = filepath.Join(relPath, entry.Name())
-			}
-		}
-
 		extension := ""
 		if !entry.IsDir() {
 			extension = filepath.Ext(entry.Name())
@@ -246,7 +167,7 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 
 		result = append(result, DirectoryEntry{
 			Name:      entry.Name(),
-			Path:      displayPath,
+			Path:      entryPath,
 			Size:      info.Size(),
 			IsDir:     entry.IsDir(),
 			Mode:      info.Mode().String(),
@@ -267,5 +188,7 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 		message += fmt.Sprintf(" (limited to %d entries)", t.maxEntries)
 	}
 
-	return NewToolResultText(fmt.Sprintf("%s:\n\n%s", message, string(jsonResult))), nil
+	display := fmt.Sprintf("Listed %s (%d entries)", dirPath, len(result))
+	return NewToolResultText(fmt.Sprintf("%s:\n\n%s", message, string(jsonResult))).
+		WithDisplay(display), nil
 }
