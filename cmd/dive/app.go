@@ -271,12 +271,12 @@ func (a *App) handleMouseEvent(e tui.MouseEvent) []tui.Cmd {
 		a.mu.Lock()
 		switch e.Button {
 		case tui.MouseButtonWheelUp:
-			a.scrollY -= 3
+			a.scrollY--
 			if a.scrollY < 0 {
 				a.scrollY = 0
 			}
 		case tui.MouseButtonWheelDown:
-			a.scrollY += 3
+			a.scrollY++
 		}
 		a.mu.Unlock()
 	}

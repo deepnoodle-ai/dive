@@ -10,7 +10,15 @@ import (
 )
 
 // spinnerSpeed controls how many frames per spinner character change (higher = slower)
-const spinnerSpeed = 12
+const spinnerSpeed = 6
+
+// diveMarkdownTheme returns a custom markdown theme matching Claude Code styling
+func diveMarkdownTheme() tui.MarkdownTheme {
+	theme := tui.DefaultMarkdownTheme()
+	// Light purple for inline code (like Claude Code)
+	theme.CodeStyle = tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})
+	return theme
+}
 
 // View returns the current view tree
 func (a *App) View() tui.View {
@@ -31,14 +39,16 @@ func (a *App) View() tui.View {
 func (a *App) headerView() tui.View {
 	title := tui.Text(" Dive ").Bold().Fg(tui.ColorCyan)
 
-	var status tui.View
-	if a.thinking {
-		status = tui.Loading(a.frame).Speed(spinnerSpeed).Label("thinking").Fg(tui.ColorCyan)
-	} else if a.processing {
-		status = tui.Text(" processing ").Dim()
-	} else {
-		status = tui.Text(" ready ").Success()
-	}
+	status := tui.IfElse(a.thinking,
+		tui.Group(
+			tui.Loading(a.frame).Speed(spinnerSpeed).Fg(tui.ColorCyan),
+			tui.Text(" thinking").Animate(tui.Pulse(tui.RGB{R: 80, G: 200, B: 220}, 8)),
+		),
+		tui.IfElse(a.processing,
+			tui.Text(" processing ").Muted(),
+			tui.Text(" ready ").Success(),
+		),
+	)
 
 	return tui.Group(
 		title,
@@ -50,22 +60,19 @@ func (a *App) headerView() tui.View {
 func (a *App) messagesView() tui.View {
 	if len(a.messages) == 0 {
 		return tui.Stack(
-			tui.WrappedText("No messages yet.").Dim().Center(),
+			tui.Text("No messages yet.").Wrap().Muted().Center(),
 		).Flex(1)
-	}
-
-	views := make([]tui.View, 0, len(a.messages))
-	for i, msg := range a.messages {
-		if v := a.messageView(msg, i); v != nil {
-			views = append(views, v)
-		}
 	}
 
 	return tui.Stack(
 		tui.Scroll(
-			tui.Stack(views...).Gap(1).Padding(1),
+			tui.Padding(1,
+				tui.ForEach(a.messages, func(msg Message, i int) tui.View {
+					return a.messageView(msg, i)
+				}).Gap(1),
+			),
 			&a.scrollY,
-		),
+		).Bottom(), // Chat-style scrolling - anchor to bottom
 	).Flex(1)
 }
 
@@ -82,7 +89,7 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 	switch msg.Role {
 	case "user":
 		// User messages: italic with gray background
-		return tui.WrappedText(msg.Content).
+		return tui.Text("%s", msg.Content).Wrap().
 			Style(tui.NewStyle().WithItalic().WithBackground(tui.ColorBrightBlack)).
 			FillBg()
 
@@ -90,35 +97,34 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 		// Assistant messages: bullet prefix, markdown content
 		content := strings.TrimRight(msg.Content, "\n")
 		if content == "" {
-			if a.thinking && index == a.streamingMessageIndex {
-				return tui.Loading(a.frame).Speed(spinnerSpeed).Label("Thinking...")
-			}
-			// Skip empty assistant messages (e.g., before tool calls)
-			return nil
+			// Show thinking spinner for current streaming message, otherwise empty
+			return tui.If(a.thinking && index == a.streamingMessageIndex,
+				tui.Group(
+					tui.Loading(a.frame).Speed(spinnerSpeed).Fg(tui.ColorCyan),
+					tui.Text(" Thinking...").Animate(tui.Pulse(tui.RGB{R: 80, G: 200, B: 220}, 8)),
+				),
+			)
 		}
 		// Prefix content with bullet point like Claude Code
-		return tui.Markdown("⏺ "+content, nil)
+		return tui.Markdown("⏺ "+content, nil).Theme(diveMarkdownTheme())
 
 	case "system":
-		return tui.WrappedText(msg.Content).Fg(tui.ColorYellow)
+		return tui.Text("%s", msg.Content).Wrap().Warning()
 
 	default:
-		return tui.WrappedText(msg.Content)
+		return tui.Text("%s", msg.Content).Wrap()
 	}
 }
 
 func (a *App) toolCallView(msg Message) tui.View {
 	// Status indicator: ⏺ prefix with color based on state
-	var statusView tui.View
-	if msg.ToolDone {
-		if msg.ToolError {
-			statusView = tui.Text("⏺").Fg(tui.ColorRed)
-		} else {
-			statusView = tui.Text("⏺").Fg(tui.ColorGreen)
-		}
-	} else {
-		statusView = tui.Text("⏺").Fg(tui.ColorCyan)
-	}
+	statusView := tui.IfElse(msg.ToolDone,
+		tui.IfElse(msg.ToolError,
+			tui.Text("⏺").Error(),
+			tui.Text("⏺").Success(),
+		),
+		tui.Text("⏺").Info(),
+	)
 
 	// Format tool call like: ToolName(param: value, param: value)
 	toolCall := formatToolCall(msg.ToolName, msg.ToolInput)
@@ -130,21 +136,16 @@ func (a *App) toolCallView(msg Message) tui.View {
 		callView,
 	)
 
-	views := []tui.View{header}
+	// Result view (only shown when done with result)
+	resultText := formatToolResult(msg.ToolResult)
+	resultView := tui.If(msg.ToolDone && msg.ToolResult != "",
+		tui.IfElse(msg.ToolError,
+			tui.Text("  ⎿  %s", resultText).Error(),
+			tui.Text("  ⎿  %s", resultText).Muted(),
+		),
+	)
 
-	// Result (if done)
-	if msg.ToolDone && msg.ToolResult != "" {
-		resultText := formatToolResult(msg.ToolResult)
-		var resultView tui.View
-		if msg.ToolError {
-			resultView = tui.Text("  ⎿  %s", resultText).Fg(tui.ColorRed)
-		} else {
-			resultView = tui.Text("  ⎿  %s", resultText).Dim()
-		}
-		views = append(views, resultView)
-	}
-
-	return tui.Stack(views...).Gap(0)
+	return tui.Stack(header, resultView).Gap(0)
 }
 
 // formatToolCall formats a tool call like: ToolName(param: value, param: value)
@@ -224,57 +225,47 @@ func (a *App) inputView() tui.View {
 	}
 
 	// Normal input mode - single line, compact
-	prompt := tui.Text(" > ").Fg(tui.ColorCyan).Bold()
+	prompt := tui.Text(" > ").Info().Bold()
 
-	inputText := a.input
-	if a.processing {
-		inputText = "(processing...)"
-	}
-
-	var inputContent tui.View
-	if a.processing {
-		inputContent = tui.Text("%s", inputText).Dim()
-	} else {
-		// Static cursor (no blinking to reduce flicker)
-		inputContent = tui.Text("%s█", inputText)
-	}
-
-	return tui.Group(
-		prompt,
-		inputContent,
+	inputContent := tui.IfElse(a.processing,
+		tui.Text("(processing...)").Muted(),
+		tui.Text("%s█", a.input), // Static cursor (no blinking to reduce flicker)
 	)
+
+	return tui.Group(prompt, inputContent)
 }
 
 func (a *App) confirmView() tui.View {
 	// Compact confirmation prompt
 	return tui.Group(
-		tui.Text(" Confirm: ").Fg(tui.ColorYellow),
+		tui.Text(" Confirm: ").Warning(),
 		tui.Text("%s", a.confirm.ToolName).Bold(),
-		tui.Text(" - %s ", a.confirm.Summary).Dim(),
+		tui.Text(" - %s ", a.confirm.Summary).Muted(),
 		tui.Text("[y/n] ").Bold(),
 	)
 }
 
 func (a *App) footerView() tui.View {
-	var parts []tui.View
+	// Help hints based on current mode
+	hints := tui.IfElse(a.confirm.Pending,
+		tui.Text(" y/n: confirm ").Hint(),
+		tui.Group(
+			tui.Text(" Enter: send ").Hint(),
+			tui.Text(" Shift+Enter: newline ").Hint(),
+			tui.Text(" PgUp/PgDn: scroll ").Hint(),
+		),
+	)
 
-	if a.confirm.Pending {
-		parts = append(parts, tui.Text(" y/n: confirm ").Dim())
-	} else {
-		parts = append(parts, tui.Text(" Enter: send ").Dim())
-		parts = append(parts, tui.Text(" Shift+Enter: newline ").Dim())
-		parts = append(parts, tui.Text(" PgUp/PgDn: scroll ").Dim())
-	}
-
-	parts = append(parts, tui.Spacer())
-	parts = append(parts, tui.Text(" Ctrl+C: exit ").Dim())
-
-	// Show workspace
+	// Truncate workspace path if too long
 	wsLabel := a.workspaceDir
 	if len(wsLabel) > 30 {
 		wsLabel = "..." + wsLabel[len(wsLabel)-27:]
 	}
-	parts = append(parts, tui.Text(" %s ", wsLabel).Dim())
 
-	return tui.Group(parts...)
+	return tui.Group(
+		hints,
+		tui.Spacer(),
+		tui.Text(" Ctrl+C: exit ").Hint(),
+		tui.Text(" %s ", wsLabel).Hint(),
+	)
 }

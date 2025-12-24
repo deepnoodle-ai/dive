@@ -2,8 +2,10 @@ module github.com/deepnoodle-ai/dive
 
 go 1.25
 
+replace github.com/deepnoodle-ai/wonton => ../wonton
+
 require (
-	github.com/deepnoodle-ai/wonton v0.0.6
+	github.com/deepnoodle-ai/wonton v0.0.9
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	gopkg.in/yaml.v3 v3.0.1

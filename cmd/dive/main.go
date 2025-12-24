@@ -5,12 +5,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/grok"
+	"github.com/deepnoodle-ai/dive/providers/groq"
+	"github.com/deepnoodle-ai/dive/providers/ollama"
+	"github.com/deepnoodle-ai/dive/providers/openrouter"
 	"github.com/deepnoodle-ai/dive/toolkit"
+	"github.com/deepnoodle-ai/dive/toolkit/kagi"
 	"github.com/deepnoodle-ai/wonton/cli"
+	"github.com/deepnoodle-ai/wonton/fetch"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -19,16 +27,29 @@ func main() {
 		Description("Interactive AI assistant for coding tasks").
 		Version("0.1.0")
 
-	app.Command("").
-		Description("Start interactive chat").
+	app.Main().
 		Flags(
 			cli.String("model", "m").
-				Default("claude-sonnet-4-20250514").
+				Default("claude-opus-4-5-20251125").
 				Env("DIVE_MODEL").
 				Help("Model to use"),
 			cli.String("workspace", "w").
 				Default("").
 				Help("Workspace directory (defaults to current directory)"),
+			cli.Float("temperature", "t").
+				Default(1.0).
+				Env("DIVE_TEMPERATURE").
+				Help("Sampling temperature (0.0-2.0)"),
+			cli.Int("max-tokens", "").
+				Default(16000).
+				Env("DIVE_MAX_TOKENS").
+				Help("Maximum tokens in response"),
+			cli.String("system-prompt", "s").
+				Default("").
+				Help("Path to custom system prompt file"),
+			cli.Bool("dangerously-skip-permissions", "").
+				Default(false).
+				Help("Skip all tool permission prompts (use with caution)"),
 		).
 		Run(runInteractive)
 
@@ -123,6 +144,10 @@ var _ dive.UserInteractor = (*TUIInteractor)(nil)
 func runInteractive(ctx *cli.Context) error {
 	modelName := ctx.String("model")
 	workspaceDir := ctx.String("workspace")
+	temperature := ctx.Float64("temperature")
+	maxTokens := ctx.Int("max-tokens")
+	systemPromptFile := ctx.String("system-prompt")
+	skipPermissions := ctx.Bool("dangerously-skip-permissions")
 
 	// Default workspace to current directory
 	if workspaceDir == "" {
@@ -139,8 +164,18 @@ func runInteractive(ctx *cli.Context) error {
 		return fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
 
-	// Create LLM provider
-	model := anthropic.New(anthropic.WithModel(modelName))
+	// Load custom system prompt if provided
+	instructions := systemInstructions(workspaceDir)
+	if systemPromptFile != "" {
+		data, err := os.ReadFile(systemPromptFile)
+		if err != nil {
+			return fmt.Errorf("failed to read system prompt file: %w", err)
+		}
+		instructions = string(data)
+	}
+
+	// Create LLM provider based on model name
+	model := createModel(modelName)
 
 	// Create standard tools with workspace validation
 	tools := createTools(workspaceDir)
@@ -148,17 +183,28 @@ func runInteractive(ctx *cli.Context) error {
 	// Create interactor that we'll wire up to the TUI later
 	interactor := NewTUIInteractor()
 
-	// Create permission config that requires approval for write operations
-	permissionConfig := createPermissionConfig()
+	// Create permission config
+	var permissionConfig *dive.PermissionConfig
+	if skipPermissions {
+		permissionConfig = &dive.PermissionConfig{
+			Mode: dive.PermissionModeBypassPermissions,
+		}
+	} else {
+		permissionConfig = createPermissionConfig()
+	}
 
 	// Create the agent
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:         "Dive",
-		Instructions: systemInstructions(workspaceDir),
+		Instructions: instructions,
 		Model:        model,
 		Tools:        tools,
 		Permission:   permissionConfig,
 		Interactor:   interactor,
+		ModelSettings: &dive.ModelSettings{
+			Temperature: &temperature,
+			MaxTokens:   &maxTokens,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
@@ -178,9 +224,37 @@ func runInteractive(ctx *cli.Context) error {
 	)
 }
 
+// createModel creates the appropriate LLM provider based on model name
+func createModel(modelName string) llm.LLM {
+	lower := strings.ToLower(modelName)
+
+	switch {
+	case strings.HasPrefix(lower, "claude-"):
+		return anthropic.New(anthropic.WithModel(modelName))
+
+	case strings.HasPrefix(lower, "grok-"):
+		return grok.New(grok.WithModel(modelName))
+
+	case strings.HasPrefix(lower, "llama") || strings.HasPrefix(lower, "mixtral") || strings.HasPrefix(lower, "gemma"):
+		// Check for Groq API key first, otherwise use Ollama
+		if os.Getenv("GROQ_API_KEY") != "" {
+			return groq.New(groq.WithModel(modelName))
+		}
+		return ollama.New(ollama.WithModel(modelName))
+
+	case strings.Contains(modelName, "/"):
+		// Models with "/" are OpenRouter format (e.g., "openai/gpt-4", "google/gemini-pro")
+		return openrouter.New(openrouter.WithModel(modelName))
+
+	default:
+		// Default to Anthropic for unknown models
+		return anthropic.New(anthropic.WithModel(modelName))
+	}
+}
+
 func createTools(workspaceDir string) []dive.Tool {
-	return []dive.Tool{
-		// Read-only tools
+	tools := []dive.Tool{
+		// Read-only file tools
 		toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{
 			WorkspaceDir: workspaceDir,
 		}),
@@ -204,7 +278,27 @@ func createTools(workspaceDir string) []dive.Tool {
 		toolkit.NewBashTool(toolkit.BashToolOptions{
 			WorkspaceDir: workspaceDir,
 		}),
+
+		// Web fetch tool (no credentials needed)
+		toolkit.NewFetchTool(toolkit.FetchToolOptions{
+			Fetcher: fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{}),
+		}),
+
+		// Todo tool for task management
+		toolkit.NewTodoWriteTool(),
+
+		// Memory tool for persistent notes
+		toolkit.NewMemoryTool(),
 	}
+
+	// Add web search if Kagi credentials are available
+	if kagiClient, err := kagi.New(); err == nil {
+		tools = append(tools, toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
+			Searcher: kagiClient,
+		}))
+	}
+
+	return tools
 }
 
 func createPermissionConfig() *dive.PermissionConfig {
@@ -216,6 +310,10 @@ func createPermissionConfig() *dive.PermissionConfig {
 			dive.AllowRule("glob"),
 			dive.AllowRule("grep"),
 			dive.AllowRule("list_directory"),
+			dive.AllowRule("fetch"),
+			dive.AllowRule("web_search"),
+			dive.AllowRule("todo_write"),
+			dive.AllowRule("memory"),
 
 			// Require approval for write operations
 			dive.AskRule("write_file", "Write file"),
@@ -233,6 +331,7 @@ You help users with software engineering tasks including:
 - Writing new code and modifying existing code
 - Debugging and fixing issues
 - Running commands and tests
+- Researching documentation and APIs
 
 ## Workspace
 
@@ -251,12 +350,23 @@ All file operations are scoped to this workspace.
 
 ## Tool Usage
 
-- Use read_file to read file contents
-- Use glob to find files by pattern
-- Use grep to search file contents
-- Use list_directory to explore directories
-- Use edit for precise text replacements
-- Use write_file to create new files
-- Use bash to run commands (build, test, git, etc.)
+File operations:
+- read_file: Read file contents
+- glob: Find files by pattern
+- grep: Search file contents
+- list_directory: Explore directories
+- edit: Make precise text replacements
+- write_file: Create new files
+
+Shell:
+- bash: Run commands (build, test, git, etc.)
+
+Web:
+- fetch: Fetch and read web page contents
+- web_search: Search the web (if available)
+
+Organization:
+- todo_write: Track tasks and progress
+- memory: Store and retrieve notes
 `, workspaceDir)
 }
