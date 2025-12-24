@@ -30,7 +30,7 @@ func main() {
 	app.Main().
 		Flags(
 			cli.String("model", "m").
-				Default("claude-opus-4-5-20251125").
+				Default("claude-opus-4-5").
 				Env("DIVE_MODEL").
 				Help("Model to use"),
 			cli.String("workspace", "w").
@@ -193,14 +193,18 @@ func runInteractive(ctx *cli.Context) error {
 		permissionConfig = createPermissionConfig()
 	}
 
+	// Create thread repository for conversation memory
+	threadRepo := dive.NewMemoryThreadRepository()
+
 	// Create the agent
 	agent, err := dive.NewAgent(dive.AgentOptions{
-		Name:         "Dive",
-		Instructions: instructions,
-		Model:        model,
-		Tools:        tools,
-		Permission:   permissionConfig,
-		Interactor:   interactor,
+		Name:             "Dive",
+		Instructions:     instructions,
+		Model:            model,
+		Tools:            tools,
+		Permission:       permissionConfig,
+		Interactor:       interactor,
+		ThreadRepository: threadRepo,
 		ModelSettings: &dive.ModelSettings{
 			Temperature: &temperature,
 			MaxTokens:   &maxTokens,
@@ -219,7 +223,7 @@ func runInteractive(ctx *cli.Context) error {
 	return tui.Run(tuiApp,
 		tui.WithAlternateScreen(true),
 		tui.WithHideCursor(true),
-		tui.WithMouseTracking(true),
+		// tui.WithMouseTracking(true),
 		tui.WithBracketedPaste(true),
 	)
 }
@@ -287,8 +291,9 @@ func createTools(workspaceDir string) []dive.Tool {
 		// Todo tool for task management
 		toolkit.NewTodoWriteTool(),
 
-		// Memory tool for persistent notes
-		toolkit.NewMemoryTool(),
+		// TODO: Re-enable once Anthropic API supports memory_* tool type
+		// // Memory tool for persistent notes
+		// toolkit.NewMemoryTool(),
 	}
 
 	// Add web search if Kagi credentials are available

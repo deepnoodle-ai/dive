@@ -64,27 +64,39 @@ func (t *TodoWriteTool) Name() string {
 }
 
 func (t *TodoWriteTool) Description() string {
-	return `Manage a structured task list for tracking progress on complex tasks.
+	return `Manage a structured task list for tracking progress. Helps organize complex tasks and gives users visibility into progress on their requests.
 
-Use this tool to:
-- Plan multi-step tasks by creating todo items
-- Track progress by updating task status
-- Give visibility into your work
+When to use (proactively):
+- Complex multi-step tasks requiring 3+ distinct steps
+- Non-trivial tasks needing careful planning
+- User explicitly requests a todo list
+- User provides multiple tasks (numbered or comma-separated)
+- After receiving new instructions: immediately capture requirements
+- When starting a task: mark in_progress BEFORE beginning work
+- After completing: mark complete and add any follow-up tasks discovered
+
+When NOT to use:
+- Single, straightforward task
+- Trivial tasks under 3 simple steps
+- Purely conversational or informational requests
 
 Task statuses:
 - pending: Task not yet started
-- in_progress: Currently working on (only ONE task should be in_progress at a time)
+- in_progress: Currently working on (only ONE at a time)
 - completed: Task finished successfully
 
 Each todo has two forms:
-- content: Imperative form describing what to do (e.g., "Run tests", "Fix the bug")
-- activeForm: Present continuous form shown during execution (e.g., "Running tests", "Fixing the bug")
+- content: Imperative form (e.g., "Run tests")
+- activeForm: Present continuous form (e.g., "Running tests")
 
-Best practices:
-- Mark tasks complete immediately after finishing
-- Only have one task in_progress at a time
-- Break complex tasks into smaller steps
-- Remove tasks that are no longer relevant`
+Management rules:
+- One in_progress at a time
+- Mark in_progress BEFORE starting work
+- Mark completed immediately after finishing (don't batch)
+- Each call replaces the entire list, so include all items
+- Only mark completed if truly finished, not if blocked
+- Add follow-up tasks discovered during implementation
+- Remove tasks no longer relevant`
 }
 
 func (t *TodoWriteTool) Schema() *schema.Schema {

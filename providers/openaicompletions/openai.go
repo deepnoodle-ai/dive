@@ -46,7 +46,7 @@ var (
 	DefaultMaxTokens          = 4096
 	DefaultSystemRole         = "developer"
 	DefaultClient             = &http.Client{Timeout: 300 * time.Second}
-	DefaultMaxRetries         = 6
+	DefaultMaxRetries         = 3
 	DefaultRetryBaseWait      = 2 * time.Second
 	ModelSystemPromptBehavior = map[string]SystemPromptBehavior{
 		"o1-mini": SystemPromptBehaviorOmit,

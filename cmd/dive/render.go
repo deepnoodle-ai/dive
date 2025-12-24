@@ -41,8 +41,8 @@ func (a *App) headerView() tui.View {
 
 	status := tui.IfElse(a.thinking,
 		tui.Group(
-			tui.Loading(a.frame).Speed(spinnerSpeed).Fg(tui.ColorCyan),
-			tui.Text(" thinking").Animate(tui.Pulse(tui.RGB{R: 80, G: 200, B: 220}, 8)),
+			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(spinnerSpeed).Fg(tui.ColorCyan),
+			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
 		),
 		tui.IfElse(a.processing,
 			tui.Text(" processing ").Muted(),
@@ -88,9 +88,9 @@ func (a *App) messageView(msg Message, index int) tui.View {
 func (a *App) textMessageView(msg Message, index int) tui.View {
 	switch msg.Role {
 	case "user":
-		// User messages: italic with gray background
+		// User messages: italic with dark gray background
 		return tui.Text("%s", msg.Content).Wrap().
-			Style(tui.NewStyle().WithItalic().WithBackground(tui.ColorBrightBlack)).
+			Style(tui.NewStyle().WithItalic().WithBgRGB(tui.RGB{R: 40, G: 40, B: 40})).
 			FillBg()
 
 	case "assistant":
@@ -100,8 +100,8 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 			// Show thinking spinner for current streaming message, otherwise empty
 			return tui.If(a.thinking && index == a.streamingMessageIndex,
 				tui.Group(
-					tui.Loading(a.frame).Speed(spinnerSpeed).Fg(tui.ColorCyan),
-					tui.Text(" Thinking...").Animate(tui.Pulse(tui.RGB{R: 80, G: 200, B: 220}, 8)),
+					tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(spinnerSpeed).Fg(tui.ColorCyan),
+					tui.Text(" Thinking...").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
 				),
 			)
 		}

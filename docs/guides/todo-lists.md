@@ -166,12 +166,23 @@ status := tracker.FormatProgress()
 
 ## When Todos Are Used
 
-The TodoWrite tool is designed for:
+The TodoWrite tool is designed for proactive use in these scenarios:
 
-- **Complex multi-step tasks** requiring 3 or more distinct actions
-- **User-provided task lists** when multiple items are mentioned
-- **Non-trivial operations** that benefit from progress tracking
-- **Long-running workflows** where visibility into progress is valuable
+1. Complex multi-step tasks requiring 3 or more distinct steps or actions
+2. Non-trivial operations that require careful planning or multiple operations
+3. User explicitly requests a todo list
+4. User-provided task lists when multiple items are mentioned (numbered or comma-separated)
+5. After receiving new instructions - immediately capture requirements as todos
+6. When starting a task - mark as `in_progress` BEFORE beginning work
+7. After completing a task - mark complete and add any follow-up tasks discovered
+
+Skip using todos when:
+
+- There is only a single, straightforward task
+- The task is trivial and completable in under 3 simple steps
+- The task is purely conversational or informational
+
+If there is only one trivial task, agents should just do it directly without the todo overhead.
 
 ### Instructing Agents to Use Todos
 
@@ -297,12 +308,22 @@ func main() {
 
 ## Best Practices
 
-1. **One in_progress at a time** - Agents should only have one task in progress
-2. **Mark complete immediately** - Don't batch completions; mark done when finished
-3. **Use both forms** - Provide both `content` and `activeForm` for better UX
-4. **Break down complex tasks** - Smaller steps provide better visibility
-5. **Remove irrelevant tasks** - Clean up todos that are no longer needed
-6. **Clear instructions** - Tell agents when and how to use the todo tool
+1. One `in_progress` at a time - Agents should only have one task in progress
+2. Mark before starting - Set a task to `in_progress` before beginning work on it
+3. Mark complete immediately - Don't batch completions; mark done when finished
+4. Use both forms - Provide both `content` and `activeForm` for better UX
+5. Break down complex tasks - Smaller steps provide better visibility
+6. Add discovered work - If follow-up tasks are discovered during implementation, add them
+7. Remove irrelevant tasks - Clean up todos that are no longer needed
+8. Clear instructions - Tell agents when and how to use the todo tool
+9. Full replacement - Each TodoWrite call replaces the entire list; include all items in every call
+10. Honest completion - Only mark tasks as `completed` when truly finished, not if blocked or partial
+
+## Limitations
+
+- No TodoRead tool - Agents track state through conversation context, not by querying the list
+- User visibility only - The list is visible to users in the UI but not programmatically queryable by agents
+- Memory-based tracking - In long conversations, agents rely on their memory of what was written
 
 ## Integration with Other Features
 

@@ -82,6 +82,7 @@ type App struct {
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+
 }
 
 // NewApp creates a new TUI application
@@ -327,15 +328,13 @@ func (a *App) sendMessage() []tui.Cmd {
 
 func (a *App) generateResponse(userInput string) tui.Cmd {
 	return func() tui.Event {
-		// Create response with event callback
 		_, err := a.agent.CreateResponse(a.ctx,
 			dive.WithInput(userInput),
+			dive.WithThreadID("main"),
 			dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
 				return a.handleAgentEvent(item)
 			}),
 		)
-
-		// Signal completion
 		return ResponseEvent{Time: time.Now(), Done: true, Error: err}
 	}
 }
