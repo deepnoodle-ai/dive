@@ -15,7 +15,10 @@ import (
 	"github.com/deepnoodle-ai/dive/providers/groq"
 	"github.com/deepnoodle-ai/dive/providers/ollama"
 	"github.com/deepnoodle-ai/dive/providers/openrouter"
+	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/toolkit"
+	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
+	"github.com/deepnoodle-ai/dive/toolkit/google"
 	"github.com/deepnoodle-ai/dive/toolkit/kagi"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
@@ -112,31 +115,56 @@ func (t *TUIInteractor) Confirm(ctx context.Context, req *dive.ConfirmRequest) (
 }
 
 func (t *TUIInteractor) Select(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
-	// For now, return default or first option
-	for _, opt := range req.Options {
-		if opt.Default {
-			return &dive.SelectResponse{Value: opt.Value}, nil
+	t.mu.RLock()
+	app := t.app
+	t.mu.RUnlock()
+
+	if app == nil {
+		// No app set, return default or first option
+		for _, opt := range req.Options {
+			if opt.Default {
+				return &dive.SelectResponse{Value: opt.Value}, nil
+			}
 		}
+		if len(req.Options) > 0 {
+			return &dive.SelectResponse{Value: req.Options[0].Value}, nil
+		}
+		return &dive.SelectResponse{Canceled: true}, nil
 	}
-	if len(req.Options) > 0 {
-		return &dive.SelectResponse{Value: req.Options[0].Value}, nil
-	}
-	return &dive.SelectResponse{Canceled: true}, nil
+
+	return app.SelectTool(ctx, req)
 }
 
 func (t *TUIInteractor) MultiSelect(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
-	// Return default options
-	var values []string
-	for _, opt := range req.Options {
-		if opt.Default {
-			values = append(values, opt.Value)
+	t.mu.RLock()
+	app := t.app
+	t.mu.RUnlock()
+
+	if app == nil {
+		// No app set, return default options
+		var values []string
+		for _, opt := range req.Options {
+			if opt.Default {
+				values = append(values, opt.Value)
+			}
 		}
+		return &dive.MultiSelectResponse{Values: values}, nil
 	}
-	return &dive.MultiSelectResponse{Values: values}, nil
+
+	return app.MultiSelectTool(ctx, req)
 }
 
 func (t *TUIInteractor) Input(ctx context.Context, req *dive.InputRequest) (*dive.InputResponse, error) {
-	return &dive.InputResponse{Value: req.Default}, nil
+	t.mu.RLock()
+	app := t.app
+	t.mu.RUnlock()
+
+	if app == nil {
+		// No app set, return default
+		return &dive.InputResponse{Value: req.Default}, nil
+	}
+
+	return app.InputTool(ctx, req)
 }
 
 var _ dive.UserInteractor = (*TUIInteractor)(nil)
@@ -183,6 +211,34 @@ func runInteractive(ctx *cli.Context) error {
 	// Create interactor that we'll wire up to the TUI later
 	interactor := NewTUIInteractor()
 
+	// Add ask_user tool with interactor
+	tools = append(tools, toolkit.NewAskUserTool(toolkit.AskUserToolOptions{
+		Interactor: interactor,
+	}))
+
+	// Create skill loader and add skill tool
+	skillLoader := skill.NewLoader(skill.LoaderOptions{
+		ProjectDir: workspaceDir,
+	})
+	_ = skillLoader.LoadSkills() // Ignore error, skills are optional
+	skillTool := toolkit.NewSkillTool(toolkit.SkillToolOptions{
+		Loader: skillLoader,
+	})
+	tools = append(tools, dive.ToolAdapter(skillTool))
+
+	// Create task registry and task tools
+	taskRegistry := toolkit.NewTaskRegistry()
+	tools = append(tools,
+		dive.ToolAdapter(toolkit.NewTaskTool(toolkit.TaskToolOptions{
+			Registry:     taskRegistry,
+			ParentTools:  tools,
+			AgentFactory: createTaskAgentFactory(model),
+		})),
+		dive.ToolAdapter(toolkit.NewTaskOutputTool(toolkit.TaskOutputToolOptions{
+			Registry: taskRegistry,
+		})),
+	)
+
 	// Create permission config
 	var permissionConfig *dive.PermissionConfig
 	if skipPermissions {
@@ -223,7 +279,7 @@ func runInteractive(ctx *cli.Context) error {
 	return tui.Run(tuiApp,
 		tui.WithAlternateScreen(true),
 		tui.WithHideCursor(true),
-		// tui.WithMouseTracking(true),
+		tui.WithMouseTracking(true),
 		tui.WithBracketedPaste(true),
 	)
 }
@@ -256,6 +312,43 @@ func createModel(modelName string) llm.LLM {
 	}
 }
 
+// createTaskAgentFactory returns an AgentFactory for creating subagents
+func createTaskAgentFactory(parentModel llm.LLM) toolkit.AgentFactory {
+	return func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
+		// Use the parent model by default, or create a new one if specified
+		model := parentModel
+		if def.Model != "" {
+			model = createModel(def.Model)
+		}
+
+		// Filter tools based on subagent definition
+		var tools []dive.Tool
+		if len(def.Tools) > 0 {
+			toolMap := make(map[string]dive.Tool)
+			for _, t := range parentTools {
+				toolMap[t.Name()] = t
+			}
+			for _, toolName := range def.Tools {
+				if t, ok := toolMap[toolName]; ok {
+					tools = append(tools, t)
+				}
+			}
+		} else {
+			tools = parentTools
+		}
+
+		return dive.NewAgent(dive.AgentOptions{
+			Name:         name,
+			Instructions: def.Prompt,
+			Model:        model,
+			Tools:        tools,
+			Permission: &dive.PermissionConfig{
+				Mode: dive.PermissionModeBypassPermissions,
+			},
+		})
+	}
+}
+
 func createTools(workspaceDir string) []dive.Tool {
 	tools := []dive.Tool{
 		// Read-only file tools
@@ -283,11 +376,6 @@ func createTools(workspaceDir string) []dive.Tool {
 			WorkspaceDir: workspaceDir,
 		}),
 
-		// Web fetch tool (no credentials needed)
-		toolkit.NewFetchTool(toolkit.FetchToolOptions{
-			Fetcher: fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{}),
-		}),
-
 		// Todo tool for task management
 		toolkit.NewTodoWriteTool(),
 
@@ -296,10 +384,26 @@ func createTools(workspaceDir string) []dive.Tool {
 		// toolkit.NewMemoryTool(),
 	}
 
-	// Add web search if Kagi credentials are available
+	// Add web fetch if Firecrawl credentials are available, otherwise use a
+	// fallback HTTP fetcher
+	if firecrawlClient, err := firecrawl.New(); err == nil {
+		tools = append(tools, toolkit.NewFetchTool(toolkit.FetchToolOptions{
+			Fetcher: firecrawlClient,
+		}))
+	} else {
+		tools = append(tools, toolkit.NewFetchTool(toolkit.FetchToolOptions{
+			Fetcher: fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{}),
+		}))
+	}
+
+	// Add web search if Kagi or Google credentials are available
 	if kagiClient, err := kagi.New(); err == nil {
 		tools = append(tools, toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
 			Searcher: kagiClient,
+		}))
+	} else if googleSearchClient, err := google.New(); err == nil {
+		tools = append(tools, toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
+			Searcher: googleSearchClient,
 		}))
 	}
 
@@ -319,6 +423,10 @@ func createPermissionConfig() *dive.PermissionConfig {
 			dive.AllowRule("web_search"),
 			dive.AllowRule("todo_write"),
 			dive.AllowRule("memory"),
+			dive.AllowRule("ask_user"),
+			dive.AllowRule("Skill"),
+			dive.AllowRule("Task"),
+			dive.AllowRule("TaskOutput"),
 
 			// Require approval for write operations
 			dive.AskRule("write_file", "Write file"),

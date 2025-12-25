@@ -25,6 +25,22 @@ func (a *App) View() tui.View {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
+	// Check if we're in any interactive prompt mode
+	hasPrompt := a.confirm.Pending || a.selectState.Pending ||
+		a.multiSelectState.Pending || a.inputState.Pending
+
+	if hasPrompt {
+		return tui.Stack(
+			tui.MaxHeight(1, a.headerView()),
+			tui.MaxHeight(1, tui.Divider()),
+			a.messagesView(),
+			tui.MaxHeight(1, tui.Divider()),
+			a.promptView(),
+			tui.MaxHeight(1, tui.Divider()),
+			tui.MaxHeight(1, a.footerView()),
+		)
+	}
+
 	return tui.Stack(
 		tui.MaxHeight(1, a.headerView()),
 		tui.MaxHeight(1, tui.Divider()),
@@ -59,21 +75,17 @@ func (a *App) headerView() tui.View {
 
 func (a *App) messagesView() tui.View {
 	if len(a.messages) == 0 {
-		return tui.Stack(
-			tui.Text("No messages yet.").Wrap().Muted().Center(),
-		).Flex(1)
+		return tui.Text("No messages yet.").Wrap().Muted().Center()
 	}
 
-	return tui.Stack(
-		tui.Scroll(
-			tui.Padding(1,
-				tui.ForEach(a.messages, func(msg Message, i int) tui.View {
-					return a.messageView(msg, i)
-				}).Gap(1),
-			),
-			&a.scrollY,
-		).Bottom(), // Chat-style scrolling - anchor to bottom
-	).Flex(1)
+	return tui.Scroll(
+		tui.Padding(1,
+			tui.ForEach(a.messages, func(msg Message, i int) tui.View {
+				return a.messageView(msg, i)
+			}).Gap(1),
+		),
+		&a.scrollY,
+	).Bottom() // Chat-style scrolling - anchor to bottom
 }
 
 func (a *App) messageView(msg Message, index int) tui.View {
@@ -243,6 +255,190 @@ func (a *App) confirmView() tui.View {
 		tui.Text(" - %s ", a.confirm.Summary).Muted(),
 		tui.Text("[y/n] ").Bold(),
 	)
+}
+
+// promptView renders the current interactive prompt with prominent styling
+func (a *App) promptView() tui.View {
+	if a.confirm.Pending {
+		return a.confirmPromptView()
+	}
+	if a.selectState.Pending {
+		return a.selectPromptView()
+	}
+	if a.multiSelectState.Pending {
+		return a.multiSelectPromptView()
+	}
+	if a.inputState.Pending {
+		return a.inputPromptView()
+	}
+	return tui.Text("")
+}
+
+// confirmPromptView renders a prominent confirmation prompt
+func (a *App) confirmPromptView() tui.View {
+	title := a.confirm.Summary
+	if title == "" {
+		title = fmt.Sprintf("Execute %s?", a.confirm.ToolName)
+	}
+
+	return tui.Padding(1,
+		tui.Stack(
+			tui.Text(" CONFIRM ").Bold().
+				Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 200, G: 150, B: 50}).WithFgRGB(tui.RGB{R: 0, G: 0, B: 0})),
+			tui.Text(""),
+			tui.Text(" %s", title).Bold(),
+			tui.Text(" Tool: %s", a.confirm.ToolName).Muted(),
+			tui.Text(""),
+			tui.Group(
+				tui.Text(" Press "),
+				tui.Text("y").Bold().Success(),
+				tui.Text(" to confirm, "),
+				tui.Text("n").Bold().Error(),
+				tui.Text(" to cancel"),
+			),
+		),
+	)
+}
+
+// selectPromptView renders a prominent single-select prompt
+func (a *App) selectPromptView() tui.View {
+	title := a.selectState.Title
+	if title == "" {
+		title = "Select an option"
+	}
+
+	views := []tui.View{
+		tui.Text(" SELECT ").Bold().
+			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 80, G: 150, B: 220}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
+		tui.Text(""),
+		tui.Text(" %s", title).Bold(),
+	}
+
+	if a.selectState.Message != "" {
+		views = append(views, tui.Text(" %s", a.selectState.Message).Muted())
+	}
+	views = append(views, tui.Text(""))
+
+	// Render options
+	for i, opt := range a.selectState.Options {
+		prefix := "  "
+		style := tui.NewStyle()
+		if i == a.selectState.SelectedIdx {
+			prefix = "> "
+			style = style.WithBold().WithFgRGB(tui.RGB{R: 80, G: 200, B: 220})
+		}
+
+		optView := tui.Text(" %s%d) %s", prefix, i+1, opt.Label).Style(style)
+		if opt.Description != "" && i == a.selectState.SelectedIdx {
+			views = append(views, tui.Group(optView, tui.Text(" - %s", opt.Description).Muted()))
+		} else {
+			views = append(views, optView)
+		}
+	}
+
+	views = append(views, tui.Text(""))
+	views = append(views, tui.Text(" ↑/↓: navigate  Enter: select  Esc: cancel").Hint())
+
+	return tui.Padding(1, tui.Stack(views...))
+}
+
+// multiSelectPromptView renders a prominent multi-select prompt
+func (a *App) multiSelectPromptView() tui.View {
+	title := a.multiSelectState.Title
+	if title == "" {
+		title = "Select options"
+	}
+
+	views := []tui.View{
+		tui.Text(" MULTI-SELECT ").Bold().
+			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 150, G: 80, B: 180}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
+		tui.Text(""),
+		tui.Text(" %s", title).Bold(),
+	}
+
+	if a.multiSelectState.Message != "" {
+		views = append(views, tui.Text(" %s", a.multiSelectState.Message).Muted())
+	}
+
+	// Show min/max constraints
+	if a.multiSelectState.MinSelect > 0 || a.multiSelectState.MaxSelect > 0 {
+		constraint := ""
+		if a.multiSelectState.MaxSelect > 0 {
+			constraint = fmt.Sprintf(" (select %d-%d)", a.multiSelectState.MinSelect, a.multiSelectState.MaxSelect)
+		} else if a.multiSelectState.MinSelect > 0 {
+			constraint = fmt.Sprintf(" (select at least %d)", a.multiSelectState.MinSelect)
+		}
+		views = append(views, tui.Text("%s", constraint).Muted())
+	}
+	views = append(views, tui.Text(""))
+
+	// Render options with checkboxes
+	for i, opt := range a.multiSelectState.Options {
+		checkbox := "[ ]"
+		if i < len(a.multiSelectState.Selected) && a.multiSelectState.Selected[i] {
+			checkbox = "[x]"
+		}
+
+		prefix := "  "
+		style := tui.NewStyle()
+		if i == a.multiSelectState.CursorIdx {
+			prefix = "> "
+			style = style.WithBold().WithFgRGB(tui.RGB{R: 180, G: 120, B: 220})
+		}
+
+		optView := tui.Text(" %s%s %d) %s", prefix, checkbox, i+1, opt.Label).Style(style)
+		if opt.Description != "" && i == a.multiSelectState.CursorIdx {
+			views = append(views, tui.Group(optView, tui.Text(" - %s", opt.Description).Muted()))
+		} else {
+			views = append(views, optView)
+		}
+	}
+
+	views = append(views, tui.Text(""))
+	views = append(views, tui.Text(" ↑/↓: navigate  Space: toggle  Enter: confirm  Esc: cancel").Hint())
+
+	return tui.Padding(1, tui.Stack(views...))
+}
+
+// inputPromptView renders a prominent text input prompt
+func (a *App) inputPromptView() tui.View {
+	title := a.inputState.Title
+	if title == "" {
+		title = "Enter input"
+	}
+
+	views := []tui.View{
+		tui.Text(" INPUT ").Bold().
+			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 80, G: 180, B: 120}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
+		tui.Text(""),
+		tui.Text(" %s", title).Bold(),
+	}
+
+	if a.inputState.Message != "" {
+		views = append(views, tui.Text(" %s", a.inputState.Message).Muted())
+	}
+	views = append(views, tui.Text(""))
+
+	// Show input field with cursor
+	inputDisplay := a.inputState.Value
+	if inputDisplay == "" && a.inputState.Placeholder != "" {
+		views = append(views, tui.Text(" > %s█", a.inputState.Placeholder).Muted())
+	} else {
+		views = append(views, tui.Text(" > %s█", inputDisplay))
+	}
+
+	if a.inputState.Default != "" && a.inputState.Value == "" {
+		views = append(views, tui.Text(" (default: %s)", a.inputState.Default).Hint())
+	}
+
+	views = append(views, tui.Text(""))
+	hint := " Enter: submit  Esc: cancel"
+	if a.inputState.Multiline {
+		hint = " Shift+Enter: newline  Enter: submit  Esc: cancel"
+	}
+	views = append(views, tui.Text("%s", hint).Hint())
+
+	return tui.Padding(1, tui.Stack(views...))
 }
 
 func (a *App) footerView() tui.View {

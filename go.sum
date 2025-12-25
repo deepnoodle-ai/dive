@@ -4,6 +4,8 @@ github.com/alecthomas/chroma/v2 v2.20.0 h1:sfIHpxPyR07/Oylvmcai3X/exDlE8+FA820NT
 github.com/alecthomas/chroma/v2 v2.20.0/go.mod h1:e7tViK0xh/Nf4BYHl00ycY6rV7b8iXBksI9E359yNmA=
 github.com/alecthomas/repr v0.5.1 h1:E3G4t2QbHTSNpPKBgMTln5KLkZHLOcU7r37J4pXBuIg=
 github.com/alecthomas/repr v0.5.1/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
+github.com/deepnoodle-ai/wonton v0.0.14 h1:m20jqozIIn1hNcgtzrgj6+I8yE4VDi4r3kUhy12J5xg=
+github.com/deepnoodle-ai/wonton v0.0.14/go.mod h1:oyogeHwAHPrVxZ7jtik55Jnj6CwC1jkF+PfHpCRlUGA=
 github.com/dlclark/regexp2 v1.11.5 h1:Q/sSnsKerHeCkc/jSTNq1oCm7KiVgUMZRDUoRu0JQZQ=
 github.com/dlclark/regexp2 v1.11.5/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/gobwas/glob v0.2.3 h1:A4xDbljILXROh+kObIiy5kIaPYD8e96x1tgBhUI5J+Y=

@@ -44,6 +44,41 @@ type ConfirmState struct {
 	ResultChan chan bool
 }
 
+// SelectState tracks pending single-selection prompt
+type SelectState struct {
+	Pending      bool
+	Title        string
+	Message      string
+	Options      []dive.SelectOption
+	SelectedIdx  int // Currently highlighted option
+	ResultChan   chan *dive.SelectResponse
+}
+
+// MultiSelectState tracks pending multi-selection prompt
+type MultiSelectState struct {
+	Pending     bool
+	Title       string
+	Message     string
+	Options     []dive.SelectOption
+	Selected    []bool // Which options are selected
+	CursorIdx   int    // Currently highlighted option
+	MinSelect   int
+	MaxSelect   int
+	ResultChan  chan *dive.MultiSelectResponse
+}
+
+// InputState tracks pending text input prompt
+type InputState struct {
+	Pending     bool
+	Title       string
+	Message     string
+	Placeholder string
+	Default     string
+	Value       string // Current input value
+	Multiline   bool
+	ResultChan  chan *dive.InputResponse
+}
+
 // App is the main TUI application
 type App struct {
 	mu sync.RWMutex
@@ -78,6 +113,11 @@ type App struct {
 
 	// Confirmation state
 	confirm ConfirmState
+
+	// User interaction states
+	selectState      SelectState
+	multiSelectState MultiSelectState
+	inputState       InputState
 
 	// Context for cancellation
 	ctx    context.Context
@@ -155,13 +195,25 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 		return []tui.Cmd{tui.Quit()}
 	}
 
-	// Handle confirmation mode
+	// Handle various interactive modes
 	a.mu.RLock()
 	inConfirm := a.confirm.Pending
+	inSelect := a.selectState.Pending
+	inMultiSelect := a.multiSelectState.Pending
+	inInput := a.inputState.Pending
 	a.mu.RUnlock()
 
 	if inConfirm {
 		return a.handleConfirmKey(e)
+	}
+	if inSelect {
+		return a.handleSelectKey(e)
+	}
+	if inMultiSelect {
+		return a.handleMultiSelectKey(e)
+	}
+	if inInput {
+		return a.handleInputPromptKey(e)
 	}
 
 	return a.handleInputKey(e)
@@ -185,6 +237,162 @@ func (a *App) handleConfirmKey(e tui.KeyEvent) []tui.Cmd {
 		}
 		a.confirm = ConfirmState{}
 		return nil
+	}
+
+	return nil
+}
+
+func (a *App) handleSelectKey(e tui.KeyEvent) []tui.Cmd {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	switch {
+	case e.Key == tui.KeyArrowUp, e.Rune == 'k':
+		if a.selectState.SelectedIdx > 0 {
+			a.selectState.SelectedIdx--
+		}
+		return nil
+
+	case e.Key == tui.KeyArrowDown, e.Rune == 'j':
+		if a.selectState.SelectedIdx < len(a.selectState.Options)-1 {
+			a.selectState.SelectedIdx++
+		}
+		return nil
+
+	case e.Key == tui.KeyEnter:
+		if a.selectState.ResultChan != nil && len(a.selectState.Options) > 0 {
+			a.selectState.ResultChan <- &dive.SelectResponse{
+				Value: a.selectState.Options[a.selectState.SelectedIdx].Value,
+			}
+		}
+		a.selectState = SelectState{}
+		return nil
+
+	case e.Key == tui.KeyEscape, e.Rune == 'q':
+		if a.selectState.ResultChan != nil {
+			a.selectState.ResultChan <- &dive.SelectResponse{Canceled: true}
+		}
+		a.selectState = SelectState{}
+		return nil
+	}
+
+	// Handle number keys for quick selection (1-9)
+	if e.Rune >= '1' && e.Rune <= '9' {
+		idx := int(e.Rune - '1')
+		if idx < len(a.selectState.Options) {
+			if a.selectState.ResultChan != nil {
+				a.selectState.ResultChan <- &dive.SelectResponse{
+					Value: a.selectState.Options[idx].Value,
+				}
+			}
+			a.selectState = SelectState{}
+		}
+	}
+
+	return nil
+}
+
+func (a *App) handleMultiSelectKey(e tui.KeyEvent) []tui.Cmd {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	switch {
+	case e.Key == tui.KeyArrowUp, e.Rune == 'k':
+		if a.multiSelectState.CursorIdx > 0 {
+			a.multiSelectState.CursorIdx--
+		}
+		return nil
+
+	case e.Key == tui.KeyArrowDown, e.Rune == 'j':
+		if a.multiSelectState.CursorIdx < len(a.multiSelectState.Options)-1 {
+			a.multiSelectState.CursorIdx++
+		}
+		return nil
+
+	case e.Rune == ' ':
+		// Toggle selection
+		idx := a.multiSelectState.CursorIdx
+		if idx < len(a.multiSelectState.Selected) {
+			a.multiSelectState.Selected[idx] = !a.multiSelectState.Selected[idx]
+		}
+		return nil
+
+	case e.Key == tui.KeyEnter:
+		// Collect selected values
+		var values []string
+		for i, opt := range a.multiSelectState.Options {
+			if i < len(a.multiSelectState.Selected) && a.multiSelectState.Selected[i] {
+				values = append(values, opt.Value)
+			}
+		}
+		// Check minimum selection
+		if len(values) < a.multiSelectState.MinSelect {
+			// Don't allow submission if minimum not met
+			return nil
+		}
+		if a.multiSelectState.ResultChan != nil {
+			a.multiSelectState.ResultChan <- &dive.MultiSelectResponse{Values: values}
+		}
+		a.multiSelectState = MultiSelectState{}
+		return nil
+
+	case e.Key == tui.KeyEscape, e.Rune == 'q':
+		if a.multiSelectState.ResultChan != nil {
+			a.multiSelectState.ResultChan <- &dive.MultiSelectResponse{Canceled: true}
+		}
+		a.multiSelectState = MultiSelectState{}
+		return nil
+	}
+
+	// Handle number keys for quick toggle (1-9)
+	if e.Rune >= '1' && e.Rune <= '9' {
+		idx := int(e.Rune - '1')
+		if idx < len(a.multiSelectState.Selected) {
+			a.multiSelectState.Selected[idx] = !a.multiSelectState.Selected[idx]
+		}
+	}
+
+	return nil
+}
+
+func (a *App) handleInputPromptKey(e tui.KeyEvent) []tui.Cmd {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	switch {
+	case e.Key == tui.KeyEnter:
+		if a.inputState.Multiline && e.Shift {
+			a.inputState.Value += "\n"
+			return nil
+		}
+		// Submit input
+		value := a.inputState.Value
+		if value == "" {
+			value = a.inputState.Default
+		}
+		if a.inputState.ResultChan != nil {
+			a.inputState.ResultChan <- &dive.InputResponse{Value: value}
+		}
+		a.inputState = InputState{}
+		return nil
+
+	case e.Key == tui.KeyEscape:
+		if a.inputState.ResultChan != nil {
+			a.inputState.ResultChan <- &dive.InputResponse{Canceled: true}
+		}
+		a.inputState = InputState{}
+		return nil
+
+	case e.Key == tui.KeyBackspace:
+		if len(a.inputState.Value) > 0 {
+			a.inputState.Value = a.inputState.Value[:len(a.inputState.Value)-1]
+		}
+		return nil
+
+	default:
+		if e.Rune != 0 {
+			a.inputState.Value += string(e.Rune)
+		}
 	}
 
 	return nil
@@ -270,14 +478,18 @@ func (a *App) handleInputKey(e tui.KeyEvent) []tui.Cmd {
 func (a *App) handleMouseEvent(e tui.MouseEvent) []tui.Cmd {
 	if e.Type == tui.MouseScroll {
 		a.mu.Lock()
-		switch e.Button {
-		case tui.MouseButtonWheelUp:
-			a.scrollY--
+		// Use DeltaY for scroll amount (negative=up, positive=down)
+		// Scroll 2 lines per wheel notch
+		scrollAmount := 2
+		if e.DeltaY < 0 {
+			// Scroll up - decrease scrollY to see earlier content
+			a.scrollY -= scrollAmount
 			if a.scrollY < 0 {
 				a.scrollY = 0
 			}
-		case tui.MouseButtonWheelDown:
-			a.scrollY++
+		} else if e.DeltaY > 0 {
+			// Scroll down - increase scrollY to see later content
+			a.scrollY += scrollAmount
 		}
 		a.mu.Unlock()
 	}
@@ -485,6 +697,104 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 		a.confirm = ConfirmState{}
 		a.mu.Unlock()
 		return false, ctx.Err()
+	}
+}
+
+// SelectTool prompts the user to select one option
+func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
+	resultChan := make(chan *dive.SelectResponse, 1)
+
+	// Find default index
+	defaultIdx := 0
+	for i, opt := range req.Options {
+		if opt.Default {
+			defaultIdx = i
+			break
+		}
+	}
+
+	a.mu.Lock()
+	a.selectState = SelectState{
+		Pending:     true,
+		Title:       req.Title,
+		Message:     req.Message,
+		Options:     req.Options,
+		SelectedIdx: defaultIdx,
+		ResultChan:  resultChan,
+	}
+	a.mu.Unlock()
+
+	select {
+	case result := <-resultChan:
+		return result, nil
+	case <-ctx.Done():
+		a.mu.Lock()
+		a.selectState = SelectState{}
+		a.mu.Unlock()
+		return &dive.SelectResponse{Canceled: true}, ctx.Err()
+	}
+}
+
+// MultiSelectTool prompts the user to select multiple options
+func (a *App) MultiSelectTool(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
+	resultChan := make(chan *dive.MultiSelectResponse, 1)
+
+	// Initialize selected state from defaults
+	selected := make([]bool, len(req.Options))
+	for i, opt := range req.Options {
+		selected[i] = opt.Default
+	}
+
+	a.mu.Lock()
+	a.multiSelectState = MultiSelectState{
+		Pending:    true,
+		Title:      req.Title,
+		Message:    req.Message,
+		Options:    req.Options,
+		Selected:   selected,
+		CursorIdx:  0,
+		MinSelect:  req.MinSelect,
+		MaxSelect:  req.MaxSelect,
+		ResultChan: resultChan,
+	}
+	a.mu.Unlock()
+
+	select {
+	case result := <-resultChan:
+		return result, nil
+	case <-ctx.Done():
+		a.mu.Lock()
+		a.multiSelectState = MultiSelectState{}
+		a.mu.Unlock()
+		return &dive.MultiSelectResponse{Canceled: true}, ctx.Err()
+	}
+}
+
+// InputTool prompts the user for text input
+func (a *App) InputTool(ctx context.Context, req *dive.InputRequest) (*dive.InputResponse, error) {
+	resultChan := make(chan *dive.InputResponse, 1)
+
+	a.mu.Lock()
+	a.inputState = InputState{
+		Pending:     true,
+		Title:       req.Title,
+		Message:     req.Message,
+		Placeholder: req.Placeholder,
+		Default:     req.Default,
+		Value:       req.Default,
+		Multiline:   req.Multiline,
+		ResultChan:  resultChan,
+	}
+	a.mu.Unlock()
+
+	select {
+	case result := <-resultChan:
+		return result, nil
+	case <-ctx.Done():
+		a.mu.Lock()
+		a.inputState = InputState{}
+		a.mu.Unlock()
+		return &dive.InputResponse{Canceled: true}, ctx.Err()
 	}
 }
 
