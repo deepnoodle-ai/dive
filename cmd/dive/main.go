@@ -271,10 +271,13 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Create the TUI app
-	tuiApp := NewApp(agent, workspaceDir)
+	tuiApp := NewApp(agent, workspaceDir, modelName)
 
 	// Wire up the interactor to the app
 	interactor.SetApp(tuiApp)
+
+	// Initialize the app (adds intro message)
+	tuiApp.Initialize()
 
 	return tui.Run(tuiApp,
 		tui.WithAlternateScreen(true),
@@ -421,7 +424,7 @@ func createPermissionConfig() *dive.PermissionConfig {
 			dive.AllowRule("list_directory"),
 			dive.AllowRule("fetch"),
 			dive.AllowRule("web_search"),
-			dive.AllowRule("todo_write"),
+			dive.AllowRule("TodoWrite"),
 			dive.AllowRule("memory"),
 			dive.AllowRule("ask_user"),
 			dive.AllowRule("Skill"),

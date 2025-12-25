@@ -209,6 +209,13 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 		)), nil
 	}
 
+	// Find line number where old_string starts (for diff context)
+	lineNum := 1
+	idx := strings.Index(contentStr, input.OldString)
+	if idx >= 0 {
+		lineNum = strings.Count(contentStr[:idx], "\n") + 1
+	}
+
 	// Perform replacement
 	var newContent string
 	if input.ReplaceAll {
@@ -222,8 +229,8 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 		return dive.NewToolResultError(fmt.Sprintf("Error writing file: %v", err)), nil
 	}
 
-	// Generate success message with snippet
-	snippet := t.generateSnippet(newContent, input.NewString)
+	// Generate diff for display
+	diff := t.generateDiff(contentStr, newContent, input.OldString, input.NewString, lineNum)
 
 	var resultMsg string
 	if input.ReplaceAll {
@@ -232,50 +239,148 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 		resultMsg = fmt.Sprintf("Replaced 1 occurrence in %s", input.FilePath)
 	}
 
-	display := resultMsg
-	if snippet != "" {
-		resultMsg += "\n\n" + snippet
-	}
+	// Result sent to LLM includes the snippet for context
+	resultMsg += "\n\n" + diff
 
-	return dive.NewToolResultText(resultMsg).WithDisplay(display), nil
+	return dive.NewToolResultText(resultMsg).WithDisplay(diff), nil
 }
 
-// generateSnippet creates a code snippet showing the edited area
-func (t *EditTool) generateSnippet(content, newString string) string {
-	lines := strings.Split(content, "\n")
+// Diff generation limits
+const (
+	maxDiffLines     = 50  // Maximum lines to show in diff output
+	maxDiffLineWidth = 200 // Maximum characters per line before truncation
+	contextBefore    = 2   // Lines of context before the change
+	contextAfter     = 2   // Lines of context after the change
+)
 
-	// Find the line(s) containing the new string
-	var matchLine int = -1
-	for i, line := range lines {
-		if strings.Contains(line, newString) || (len(newString) > 0 && strings.Contains(line, strings.Split(newString, "\n")[0])) {
-			matchLine = i
+// generateDiff creates a Claude Code-style diff showing old vs new content
+func (t *EditTool) generateDiff(oldContent, newContent, oldString, newString string, lineNum int) string {
+	oldLines := strings.Split(oldString, "\n")
+	newLines := strings.Split(newString, "\n")
+
+	// Count additions and removals
+	added := len(newLines)
+	removed := len(oldLines)
+
+	// Build summary
+	var summary string
+	if added > 0 && removed > 0 {
+		if added == 1 && removed == 1 {
+			summary = "Changed 1 line"
+		} else {
+			summary = fmt.Sprintf("Added %d line%s, removed %d line%s",
+				added, pluralize(added), removed, pluralize(removed))
+		}
+	} else if added > 0 {
+		summary = fmt.Sprintf("Added %d line%s", added, pluralize(added))
+	} else if removed > 0 {
+		summary = fmt.Sprintf("Removed %d line%s", removed, pluralize(removed))
+	}
+
+	// Check if diff would be too large - if so, return summary only
+	totalDiffLines := added + removed + contextBefore + contextAfter
+	if totalDiffLines > maxDiffLines {
+		return fmt.Sprintf("%s (diff too large to display, %d lines changed)", summary, added+removed)
+	}
+
+	// Build the diff view with context
+	contentLines := strings.Split(newContent, "\n")
+
+	// Find where the new string starts in the new content
+	newStartLine := -1
+	firstNewLine := ""
+	if len(newLines) > 0 {
+		firstNewLine = newLines[0]
+	}
+	for i, line := range contentLines {
+		if firstNewLine != "" && strings.Contains(line, firstNewLine) {
+			newStartLine = i
 			break
 		}
 	}
-
-	if matchLine == -1 {
-		return ""
+	if newStartLine == -1 {
+		newStartLine = lineNum - 1
+		if newStartLine < 0 {
+			newStartLine = 0
+		}
 	}
 
-	// Show context around the edit
-	const contextLines = 3
-	start := matchLine - contextLines
+	// Calculate context bounds
+	start := newStartLine - contextBefore
 	if start < 0 {
 		start = 0
 	}
-	end := matchLine + contextLines + 1
-	if end > len(lines) {
-		end = len(lines)
+	end := newStartLine + len(newLines) + contextAfter
+	if end > len(contentLines) {
+		end = len(contentLines)
 	}
 
-	var snippet strings.Builder
-	snippet.WriteString("```\n")
-	for i := start; i < end; i++ {
-		snippet.WriteString(fmt.Sprintf("%4d │ %s\n", i+1, lines[i]))
-	}
-	snippet.WriteString("```")
+	var diff strings.Builder
+	diff.WriteString(summary)
+	diff.WriteString("\n")
 
-	return snippet.String()
+	lineCount := 0
+
+	// Write context before
+	for i := start; i < newStartLine && lineCount < maxDiffLines; i++ {
+		diff.WriteString(fmt.Sprintf("    %4d  %s\n", i+1, truncateLine(contentLines[i])))
+		lineCount++
+	}
+
+	// Write removed lines (from old string)
+	for i, line := range oldLines {
+		if lineCount >= maxDiffLines {
+			diff.WriteString(fmt.Sprintf("    ... %d more lines omitted\n", len(oldLines)-i))
+			break
+		}
+		lineNo := newStartLine + i + 1
+		diff.WriteString(fmt.Sprintf("  - %4d  %s\n", lineNo, truncateLine(line)))
+		lineCount++
+	}
+
+	// Write added lines (from new string)
+	for i, line := range newLines {
+		if lineCount >= maxDiffLines {
+			diff.WriteString(fmt.Sprintf("    ... %d more lines omitted\n", len(newLines)-i))
+			break
+		}
+		lineNo := newStartLine + i + 1
+		diff.WriteString(fmt.Sprintf("  + %4d  %s\n", lineNo, truncateLine(line)))
+		lineCount++
+	}
+
+	// Write context after
+	for i := newStartLine + len(newLines); i < end && lineCount < maxDiffLines; i++ {
+		diff.WriteString(fmt.Sprintf("    %4d  %s\n", i+1, truncateLine(contentLines[i])))
+		lineCount++
+	}
+
+	return strings.TrimRight(diff.String(), "\n")
+}
+
+// truncateLine limits line length for display
+func truncateLine(line string) string {
+	// Replace tabs with spaces for consistent display
+	line = strings.ReplaceAll(line, "\t", "    ")
+
+	// Check for binary/non-printable content
+	for _, r := range line {
+		if r < 32 && r != '\t' && r != '\n' && r != '\r' {
+			return "[binary content]"
+		}
+	}
+
+	if len(line) > maxDiffLineWidth {
+		return line[:maxDiffLineWidth-3] + "..."
+	}
+	return line
+}
+
+func pluralize(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func truncateForError(s string, maxLen int) string {

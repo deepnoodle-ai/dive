@@ -2,6 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +25,22 @@ const (
 	MessageTypeToolCall
 )
 
+// TodoStatus represents the status of a todo item
+type TodoStatus int
+
+const (
+	TodoStatusPending TodoStatus = iota
+	TodoStatusInProgress
+	TodoStatusCompleted
+)
+
+// Todo represents a task item
+type Todo struct {
+	Content    string     // What needs to be done (imperative: "Run tests")
+	ActiveForm string     // Present continuous form (shown when active: "Running tests")
+	Status     TodoStatus // pending, in_progress, completed
+}
+
 // Message represents a chat message
 type Message struct {
 	Role    string      // "user", "assistant", or "system"
@@ -27,12 +49,13 @@ type Message struct {
 	Type    MessageType
 
 	// Tool call fields (when Type == MessageTypeToolCall)
-	ToolID     string
-	ToolName   string
-	ToolInput  string
-	ToolResult string
-	ToolError  bool
-	ToolDone   bool
+	ToolID          string
+	ToolName        string
+	ToolInput       string   // Full JSON input for display formatting
+	ToolResult      string   // Display summary (first line or truncated)
+	ToolResultLines []string // Full result lines for expansion display
+	ToolError       bool
+	ToolDone        bool
 }
 
 // ConfirmState tracks pending tool confirmation
@@ -79,12 +102,22 @@ type InputState struct {
 	ResultChan  chan *dive.InputResponse
 }
 
+// AutocompleteState tracks file path autocomplete
+type AutocompleteState struct {
+	Active   bool     // Whether autocomplete dropdown is showing
+	Prefix   string   // Text being matched (after last @)
+	StartIdx int      // Position of @ in input string (byte index)
+	Matches  []string // Matching file paths (relative to workspace)
+	Selected int      // Currently selected match index
+}
+
 // App is the main TUI application
 type App struct {
 	mu sync.RWMutex
 
 	agent        *dive.StandardAgent
 	workspaceDir string
+	modelName    string
 
 	// Chat state
 	messages              []Message
@@ -108,8 +141,13 @@ type App struct {
 	frame      uint64
 
 	// Processing state
-	processing bool
-	thinking   bool
+	processing          bool
+	thinking            bool
+	processingStartTime time.Time // When processing started, for elapsed time display
+
+	// Todo list state
+	todos       []Todo
+	showTodos   bool // Whether to show the todo list
 
 	// Confirmation state
 	confirm ConfirmState
@@ -119,6 +157,9 @@ type App struct {
 	multiSelectState MultiSelectState
 	inputState       InputState
 
+	// File autocomplete state
+	autocomplete AutocompleteState
+
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -126,11 +167,12 @@ type App struct {
 }
 
 // NewApp creates a new TUI application
-func NewApp(agent *dive.StandardAgent, workspaceDir string) *App {
+func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &App{
 		agent:         agent,
 		workspaceDir:  workspaceDir,
+		modelName:     modelName,
 		messages:      make([]Message, 0),
 		toolCallIndex: make(map[string]int),
 		history:       make([]string, 0),
@@ -146,9 +188,16 @@ func (a *App) Initialize() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// Shorten workspace path for display
+	wsDisplay := a.workspaceDir
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(wsDisplay, home) {
+		wsDisplay = "~" + wsDisplay[len(home):]
+	}
+
+	// Build intro message - rendered specially in render.go
 	a.messages = append(a.messages, Message{
-		Role:    "system",
-		Content: "Welcome to Dive! I'm your AI coding assistant.\n\nType your message and press Enter to send. Use Shift+Enter for newlines.\nPress Ctrl+C or Ctrl+D to exit.",
+		Role:    "intro",
+		Content: a.modelName + "\n" + wsDisplay,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
 	})
@@ -193,6 +242,12 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 	switch {
 	case e.Key == tui.KeyCtrlC, e.Key == tui.KeyCtrlD:
 		return []tui.Cmd{tui.Quit()}
+	case e.Key == tui.KeyCtrlT:
+		// Toggle todos visibility
+		a.mu.Lock()
+		a.showTodos = !a.showTodos
+		a.mu.Unlock()
+		return nil
 	}
 
 	// Handle various interactive modes
@@ -405,17 +460,62 @@ func (a *App) handleInputKey(e tui.KeyEvent) []tui.Cmd {
 			// Shift+Enter adds a newline
 			a.mu.Lock()
 			a.input += "\n"
+			a.autocomplete = AutocompleteState{} // Cancel autocomplete on newline
 			a.mu.Unlock()
 		} else {
+			// If autocomplete is active, Enter selects the item
+			a.mu.Lock()
+			if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
+				selected := a.autocomplete.Matches[a.autocomplete.Selected]
+				a.input = a.input[:a.autocomplete.StartIdx] + "@" + selected
+				a.autocomplete = AutocompleteState{}
+				a.mu.Unlock()
+				return nil
+			}
+			a.mu.Unlock()
 			// Plain Enter sends the message
 			return a.sendMessage()
 		}
+		return nil
+
+	case e.Key == tui.KeyTab:
+		// Tab accepts autocomplete selection
+		a.mu.Lock()
+		if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
+			selected := a.autocomplete.Matches[a.autocomplete.Selected]
+			a.input = a.input[:a.autocomplete.StartIdx] + "@" + selected
+			a.autocomplete = AutocompleteState{}
+		}
+		a.mu.Unlock()
+		return nil
+
+	case e.Key == tui.KeyEscape:
+		// Escape cancels autocomplete
+		a.mu.Lock()
+		if a.autocomplete.Active {
+			a.autocomplete = AutocompleteState{}
+			a.mu.Unlock()
+			return nil
+		}
+		a.mu.Unlock()
 		return nil
 
 	case e.Key == tui.KeyBackspace:
 		a.mu.Lock()
 		if len(a.input) > 0 {
 			a.input = a.input[:len(a.input)-1]
+
+			// Update autocomplete state
+			if a.autocomplete.Active {
+				if len(a.input) <= a.autocomplete.StartIdx {
+					// Deleted past the @, deactivate
+					a.autocomplete = AutocompleteState{}
+				} else {
+					// Update prefix
+					a.autocomplete.Prefix = a.input[a.autocomplete.StartIdx+1:]
+					a.updateAutocompleteMatches()
+				}
+			}
 		}
 		a.historyIndex = -1
 		a.mu.Unlock()
@@ -423,6 +523,15 @@ func (a *App) handleInputKey(e tui.KeyEvent) []tui.Cmd {
 
 	case e.Key == tui.KeyArrowUp:
 		a.mu.Lock()
+		// If autocomplete is active, navigate suggestions
+		if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
+			if a.autocomplete.Selected > 0 {
+				a.autocomplete.Selected--
+			}
+			a.mu.Unlock()
+			return nil
+		}
+		// Otherwise, navigate history
 		if len(a.history) > 0 {
 			if a.historyIndex == -1 {
 				a.savedInput = a.input
@@ -437,6 +546,15 @@ func (a *App) handleInputKey(e tui.KeyEvent) []tui.Cmd {
 
 	case e.Key == tui.KeyArrowDown:
 		a.mu.Lock()
+		// If autocomplete is active, navigate suggestions
+		if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
+			if a.autocomplete.Selected < len(a.autocomplete.Matches)-1 {
+				a.autocomplete.Selected++
+			}
+			a.mu.Unlock()
+			return nil
+		}
+		// Otherwise, navigate history
 		if a.historyIndex != -1 {
 			if a.historyIndex < len(a.history)-1 {
 				a.historyIndex++
@@ -468,6 +586,25 @@ func (a *App) handleInputKey(e tui.KeyEvent) []tui.Cmd {
 		a.mu.Lock()
 		a.input += string(e.Rune)
 		a.historyIndex = -1
+
+		// Handle autocomplete trigger and updates
+		if e.Rune == '@' {
+			// Start autocomplete mode
+			a.autocomplete.Active = true
+			a.autocomplete.StartIdx = len(a.input) - 1
+			a.autocomplete.Prefix = ""
+			a.autocomplete.Selected = 0
+			a.autocomplete.Matches = nil
+		} else if a.autocomplete.Active {
+			// Update prefix with text after @
+			a.autocomplete.Prefix = a.input[a.autocomplete.StartIdx+1:]
+			a.updateAutocompleteMatches()
+
+			// Deactivate on space (file path complete)
+			if e.Rune == ' ' {
+				a.autocomplete = AutocompleteState{}
+			}
+		}
 		a.mu.Unlock()
 		return nil
 	}
@@ -504,12 +641,27 @@ func (a *App) sendMessage() []tui.Cmd {
 		return nil
 	}
 
-	// Add to history
+	// Clear autocomplete state
+	a.autocomplete = AutocompleteState{}
+
+	// Expand file references
+	expanded, err := a.expandFileReferences(trimmed)
+	if err != nil {
+		// Show error to user but still allow sending
+		a.messages = append(a.messages, Message{
+			Role:    "system",
+			Content: "Warning: " + err.Error(),
+			Time:    time.Now(),
+			Type:    MessageTypeText,
+		})
+	}
+
+	// Add to history (original input, not expanded)
 	a.history = append(a.history, a.input)
 	a.historyIndex = -1
 	a.savedInput = ""
 
-	// Add user message
+	// Add user message (show original, send expanded)
 	a.messages = append(a.messages, Message{
 		Role:    "user",
 		Content: trimmed,
@@ -531,11 +683,12 @@ func (a *App) sendMessage() []tui.Cmd {
 
 	a.processing = true
 	a.thinking = true
+	a.processingStartTime = time.Now()
 	a.input = ""
 	a.mu.Unlock()
 
-	// Start async response generation
-	return []tui.Cmd{a.generateResponse(trimmed)}
+	// Start async response generation with expanded content
+	return []tui.Cmd{a.generateResponse(expanded)}
 }
 
 func (a *App) generateResponse(userInput string) tui.Cmd {
@@ -608,19 +761,60 @@ func (a *App) addToolCall(call *llm.ToolUseContent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// Check if this is a TodoWrite tool call and parse todos
+	if call.Name == "todo_write" || call.Name == "TodoWrite" {
+		a.parseTodoWriteInput(call.Input)
+	}
+
 	msg := Message{
 		Role:      "assistant",
 		Time:      time.Now(),
 		Type:      MessageTypeToolCall,
 		ToolID:    call.ID,
 		ToolName:  call.Name,
-		ToolInput: truncateString(string(call.Input), 200),
+		ToolInput: string(call.Input), // Store full input for formatting
 		ToolDone:  false,
 	}
 	a.messages = append(a.messages, msg)
 	a.toolCallIndex[call.ID] = len(a.messages) - 1
 	a.needNewTextMessage = true // next text should go to a new message
 	a.scrollY = 999999
+}
+
+// parseTodoWriteInput parses the TodoWrite tool input and updates the todos list
+func (a *App) parseTodoWriteInput(input []byte) {
+	var todoInput struct {
+		Todos []struct {
+			Content    string `json:"content"`
+			Status     string `json:"status"`
+			ActiveForm string `json:"activeForm"`
+		} `json:"todos"`
+	}
+
+	if err := json.Unmarshal(input, &todoInput); err != nil {
+		return
+	}
+
+	// Convert to our Todo type
+	a.todos = make([]Todo, 0, len(todoInput.Todos))
+	for _, t := range todoInput.Todos {
+		status := TodoStatusPending
+		switch t.Status {
+		case "in_progress":
+			status = TodoStatusInProgress
+		case "completed":
+			status = TodoStatusCompleted
+		}
+		a.todos = append(a.todos, Todo{
+			Content:    t.Content,
+			ActiveForm: t.ActiveForm,
+			Status:     status,
+		})
+	}
+	// Show todos when they're updated
+	if len(a.todos) > 0 {
+		a.showTodos = true
+	}
 }
 
 func (a *App) updateToolCallResult(result *dive.ToolCallResult) {
@@ -638,12 +832,19 @@ func (a *App) updateToolCallResult(result *dive.ToolCallResult) {
 			if display == "" && len(result.Result.Content) > 0 {
 				for _, c := range result.Result.Content {
 					if c.Type == dive.ToolResultContentTypeText {
-						display = truncateString(c.Text, 100)
+						display = c.Text
 						break
 					}
 				}
 			}
-			a.messages[idx].ToolResult = display
+			// Store full result lines for expandable display
+			if display != "" {
+				a.messages[idx].ToolResultLines = strings.Split(display, "\n")
+			}
+			// Store first line as summary
+			if len(a.messages[idx].ToolResultLines) > 0 {
+				a.messages[idx].ToolResult = a.messages[idx].ToolResultLines[0]
+			}
 		}
 	}
 	a.scrollY = 999999
@@ -815,4 +1016,194 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen-3] + "..."
 	}
 	return s
+}
+
+// fuzzyMatch returns a score for how well the pattern matches the text.
+// Higher scores are better matches. Returns -1 if no match.
+func fuzzyMatch(pattern, text string) int {
+	pattern = strings.ToLower(pattern)
+	text = strings.ToLower(text)
+
+	if len(pattern) == 0 {
+		return 0
+	}
+	if len(pattern) > len(text) {
+		return -1
+	}
+
+	// Check if pattern characters appear in order in text
+	patternIdx := 0
+	score := 0
+	lastMatchIdx := -1
+	consecutiveBonus := 0
+
+	for i := 0; i < len(text) && patternIdx < len(pattern); i++ {
+		if text[i] == pattern[patternIdx] {
+			// Base score for match
+			score += 10
+
+			// Bonus for consecutive matches
+			if lastMatchIdx == i-1 {
+				consecutiveBonus++
+				score += consecutiveBonus * 5
+			} else {
+				consecutiveBonus = 0
+			}
+
+			// Bonus for matching at start of text or after separator
+			if i == 0 || text[i-1] == '/' || text[i-1] == '_' || text[i-1] == '-' || text[i-1] == '.' {
+				score += 15
+			}
+
+			// Bonus for matching filename (after last /)
+			lastSlash := strings.LastIndex(text, "/")
+			if i > lastSlash {
+				score += 5
+			}
+
+			lastMatchIdx = i
+			patternIdx++
+		}
+	}
+
+	// All pattern characters must match
+	if patternIdx < len(pattern) {
+		return -1
+	}
+
+	// Bonus for shorter paths (prefer less nested files)
+	score -= strings.Count(text, "/") * 2
+
+	// Bonus for shorter overall length
+	score -= len(text) / 10
+
+	return score
+}
+
+// updateAutocompleteMatches finds files matching the current prefix using fuzzy search
+func (a *App) updateAutocompleteMatches() {
+	// Requires lock to already be held
+	prefix := a.autocomplete.Prefix
+	if prefix == "" {
+		a.autocomplete.Matches = nil
+		return
+	}
+
+	// Directories to exclude
+	excludeDirs := map[string]bool{
+		".git":         true,
+		"node_modules": true,
+		"vendor":       true,
+		"__pycache__":  true,
+		".venv":        true,
+		"dist":         true,
+		"build":        true,
+		".idea":        true,
+		".vscode":      true,
+	}
+
+	type scoredMatch struct {
+		path  string
+		score int
+	}
+	var matches []scoredMatch
+
+	// Walk the workspace directory
+	_ = filepath.Walk(a.workspaceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip files we can't access
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(a.workspaceDir, path)
+		if err != nil || relPath == "." {
+			return nil
+		}
+
+		// Skip excluded directories
+		if info.IsDir() {
+			if excludeDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Fuzzy match against path
+		score := fuzzyMatch(prefix, relPath)
+		if score >= 0 {
+			matches = append(matches, scoredMatch{path: relPath, score: score})
+		}
+
+		// Limit candidates collected
+		if len(matches) >= 100 {
+			return filepath.SkipAll
+		}
+
+		return nil
+	})
+
+	// Sort by score (highest first)
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		// Tie-breaker: shorter paths first
+		return len(matches[i].path) < len(matches[j].path)
+	})
+
+	// Extract paths and limit to 10
+	result := make([]string, 0, 10)
+	for i := 0; i < len(matches) && i < 10; i++ {
+		result = append(result, matches[i].path)
+	}
+
+	a.autocomplete.Matches = result
+	// Reset selection if out of bounds
+	if a.autocomplete.Selected >= len(result) {
+		a.autocomplete.Selected = 0
+	}
+}
+
+// expandFileReferences expands @filepath references in the input to file contents
+func (a *App) expandFileReferences(input string) (string, error) {
+	// Regex to find @filepath patterns (match until whitespace or end)
+	re := regexp.MustCompile(`@([^\s]+)`)
+
+	var lastErr error
+	result := re.ReplaceAllStringFunc(input, func(match string) string {
+		path := match[1:] // Remove @
+
+		// Only allow relative paths (security)
+		if filepath.IsAbs(path) {
+			lastErr = fmt.Errorf("absolute paths not allowed: %s", path)
+			return match
+		}
+
+		// Resolve path relative to workspace
+		fullPath := filepath.Join(a.workspaceDir, path)
+
+		// Verify path is within workspace (prevent directory traversal)
+		absPath, err := filepath.Abs(fullPath)
+		if err != nil {
+			lastErr = fmt.Errorf("invalid path %s: %w", path, err)
+			return match
+		}
+		absWorkspace, _ := filepath.Abs(a.workspaceDir)
+		if !strings.HasPrefix(absPath, absWorkspace) {
+			lastErr = fmt.Errorf("path outside workspace: %s", path)
+			return match
+		}
+
+		// Read file
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			lastErr = fmt.Errorf("cannot read %s: %w", path, err)
+			return match // Keep original on error
+		}
+
+		// Format as XML-style tag
+		return fmt.Sprintf("\n<file path=\"%s\">\n%s\n</file>\n", path, string(content))
+	})
+
+	return result, lastErr
 }
