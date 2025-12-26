@@ -22,7 +22,6 @@ import (
 	"github.com/deepnoodle-ai/dive/toolkit/kagi"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
-	"github.com/deepnoodle-ai/wonton/tui"
 )
 
 func main() {
@@ -65,30 +64,29 @@ func main() {
 	}
 }
 
-// TUIInteractor implements UserInteractor to work with the TUI
-type TUIInteractor struct {
+// AppInteractor implements UserInteractor to work with the App
+type AppInteractor struct {
 	mu  sync.RWMutex
 	app *App
 }
 
-func NewTUIInteractor() *TUIInteractor {
-	return &TUIInteractor{}
+func NewAppInteractor() *AppInteractor {
+	return &AppInteractor{}
 }
 
-func (t *TUIInteractor) SetApp(app *App) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.app = app
+func (i *AppInteractor) SetApp(app *App) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.app = app
 }
 
-func (t *TUIInteractor) Confirm(ctx context.Context, req *dive.ConfirmRequest) (bool, error) {
-	t.mu.RLock()
-	app := t.app
-	t.mu.RUnlock()
+func (i *AppInteractor) Confirm(ctx context.Context, req *dive.ConfirmRequest) (bool, error) {
+	i.mu.RLock()
+	app := i.app
+	i.mu.RUnlock()
 
 	if app == nil {
-		// No app set, auto-approve
-		return true, nil
+		return true, nil // Auto-approve if no app
 	}
 
 	// Get summary from the request
@@ -114,13 +112,13 @@ func (t *TUIInteractor) Confirm(ctx context.Context, req *dive.ConfirmRequest) (
 	return app.ConfirmTool(ctx, toolName, summary, input)
 }
 
-func (t *TUIInteractor) Select(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
-	t.mu.RLock()
-	app := t.app
-	t.mu.RUnlock()
+func (i *AppInteractor) Select(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
+	i.mu.RLock()
+	app := i.app
+	i.mu.RUnlock()
 
 	if app == nil {
-		// No app set, return default or first option
+		// Return default or first option
 		for _, opt := range req.Options {
 			if opt.Default {
 				return &dive.SelectResponse{Value: opt.Value}, nil
@@ -135,13 +133,12 @@ func (t *TUIInteractor) Select(ctx context.Context, req *dive.SelectRequest) (*d
 	return app.SelectTool(ctx, req)
 }
 
-func (t *TUIInteractor) MultiSelect(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
-	t.mu.RLock()
-	app := t.app
-	t.mu.RUnlock()
+func (i *AppInteractor) MultiSelect(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
+	i.mu.RLock()
+	app := i.app
+	i.mu.RUnlock()
 
 	if app == nil {
-		// No app set, return default options
 		var values []string
 		for _, opt := range req.Options {
 			if opt.Default {
@@ -154,20 +151,19 @@ func (t *TUIInteractor) MultiSelect(ctx context.Context, req *dive.MultiSelectRe
 	return app.MultiSelectTool(ctx, req)
 }
 
-func (t *TUIInteractor) Input(ctx context.Context, req *dive.InputRequest) (*dive.InputResponse, error) {
-	t.mu.RLock()
-	app := t.app
-	t.mu.RUnlock()
+func (i *AppInteractor) Input(ctx context.Context, req *dive.InputRequest) (*dive.InputResponse, error) {
+	i.mu.RLock()
+	app := i.app
+	i.mu.RUnlock()
 
 	if app == nil {
-		// No app set, return default
 		return &dive.InputResponse{Value: req.Default}, nil
 	}
 
 	return app.InputTool(ctx, req)
 }
 
-var _ dive.UserInteractor = (*TUIInteractor)(nil)
+var _ dive.UserInteractor = (*AppInteractor)(nil)
 
 func runInteractive(ctx *cli.Context) error {
 	modelName := ctx.String("model")
@@ -208,8 +204,8 @@ func runInteractive(ctx *cli.Context) error {
 	// Create standard tools with workspace validation
 	tools := createTools(workspaceDir)
 
-	// Create interactor that we'll wire up to the TUI later
-	interactor := NewTUIInteractor()
+	// Create interactor
+	interactor := NewAppInteractor()
 
 	// Add ask_user tool with interactor
 	tools = append(tools, toolkit.NewAskUserTool(toolkit.AskUserToolOptions{
@@ -270,21 +266,11 @@ func runInteractive(ctx *cli.Context) error {
 		return fmt.Errorf("failed to create agent: %w", err)
 	}
 
-	// Create the TUI app
-	tuiApp := NewApp(agent, workspaceDir, modelName)
+	// Create and run the app
+	app := NewApp(agent, workspaceDir, modelName)
+	interactor.SetApp(app)
 
-	// Wire up the interactor to the app
-	interactor.SetApp(tuiApp)
-
-	// Initialize the app (adds intro message)
-	tuiApp.Initialize()
-
-	return tui.Run(tuiApp,
-		tui.WithAlternateScreen(true),
-		tui.WithHideCursor(true),
-		tui.WithMouseTracking(true),
-		tui.WithBracketedPaste(true),
-	)
+	return app.Run()
 }
 
 // createModel creates the appropriate LLM provider based on model name

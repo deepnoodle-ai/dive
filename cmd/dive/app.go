@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/tui"
+	"golang.org/x/term"
 )
 
 // MessageType distinguishes regular messages from tool calls
@@ -43,7 +45,7 @@ type Todo struct {
 
 // Message represents a chat message
 type Message struct {
-	Role    string      // "user", "assistant", or "system"
+	Role    string      // "user", "assistant", "system", or "intro"
 	Content string      // Text content
 	Time    time.Time
 	Type    MessageType
@@ -58,60 +60,7 @@ type Message struct {
 	ToolDone        bool
 }
 
-// ConfirmState tracks pending tool confirmation
-type ConfirmState struct {
-	Pending    bool
-	ToolName   string
-	Summary    string
-	Input      []byte
-	ResultChan chan bool
-}
-
-// SelectState tracks pending single-selection prompt
-type SelectState struct {
-	Pending      bool
-	Title        string
-	Message      string
-	Options      []dive.SelectOption
-	SelectedIdx  int // Currently highlighted option
-	ResultChan   chan *dive.SelectResponse
-}
-
-// MultiSelectState tracks pending multi-selection prompt
-type MultiSelectState struct {
-	Pending     bool
-	Title       string
-	Message     string
-	Options     []dive.SelectOption
-	Selected    []bool // Which options are selected
-	CursorIdx   int    // Currently highlighted option
-	MinSelect   int
-	MaxSelect   int
-	ResultChan  chan *dive.MultiSelectResponse
-}
-
-// InputState tracks pending text input prompt
-type InputState struct {
-	Pending     bool
-	Title       string
-	Message     string
-	Placeholder string
-	Default     string
-	Value       string // Current input value
-	Multiline   bool
-	ResultChan  chan *dive.InputResponse
-}
-
-// AutocompleteState tracks file path autocomplete
-type AutocompleteState struct {
-	Active   bool     // Whether autocomplete dropdown is showing
-	Prefix   string   // Text being matched (after last @)
-	StartIdx int      // Position of @ in input string (byte index)
-	Matches  []string // Matching file paths (relative to workspace)
-	Selected int      // Currently selected match index
-}
-
-// App is the main TUI application
+// App is the main CLI application
 type App struct {
 	mu sync.RWMutex
 
@@ -121,52 +70,44 @@ type App struct {
 
 	// Chat state
 	messages              []Message
-	input                 string
-	scrollY               int
-	currentMessage        *Message
 	streamingMessageIndex int
+	currentMessage        *Message
 
 	// Tool call tracking
-	toolCallIndex        map[string]int
-	needNewTextMessage   bool // set after tool calls to create new text message
+	toolCallIndex      map[string]int
+	needNewTextMessage bool // set after tool calls to create new text message
 
 	// Command history
 	history      []string
 	historyIndex int
-	savedInput   string
 
 	// UI state
-	termWidth  int
-	termHeight int
-	frame      uint64
-
-	// Processing state
+	frame               uint64
 	processing          bool
 	thinking            bool
-	processingStartTime time.Time // When processing started, for elapsed time display
+	processingStartTime time.Time
 
 	// Todo list state
-	todos       []Todo
-	showTodos   bool // Whether to show the todo list
+	todos     []Todo
+	showTodos bool
 
-	// Confirmation state
-	confirm ConfirmState
-
-	// User interaction states
-	selectState      SelectState
-	multiSelectState MultiSelectState
-	inputState       InputState
-
-	// File autocomplete state
-	autocomplete AutocompleteState
+	// Live printer for streaming updates
+	live   *tui.LivePrinter
+	ticker *time.Ticker
+	done   chan struct{}
 
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// Terminal state for raw input
+	oldState *term.State
+
+	// Scanner for line input
+	scanner *bufio.Scanner
 }
 
-// NewApp creates a new TUI application
+// NewApp creates a new CLI application
 func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &App{
@@ -177,498 +118,283 @@ func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 		toolCallIndex: make(map[string]int),
 		history:       make([]string, 0),
 		historyIndex:  -1,
-		scrollY:       999999,
 		ctx:           ctx,
 		cancel:        cancel,
+		scanner:       bufio.NewScanner(os.Stdin),
 	}
 }
 
-// Initialize is called when the app starts
-func (a *App) Initialize() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+// Run starts the CLI application
+func (a *App) Run() error {
+	// Print header and intro once at startup
+	a.printHeader()
+	a.printIntro()
 
+	// Main input loop
+	for {
+		// Print complete input area (divider + prompt + divider + footer)
+		// Cursor is positioned after prompt for typing
+		a.printInputArea()
+
+		// Read user input
+		input, err := a.readInput()
+		if err != nil {
+			return err
+		}
+
+		// Clear entire input area
+		a.clearInputArea(input)
+
+		if input == "" {
+			continue
+		}
+
+		// Handle special commands
+		if strings.HasPrefix(input, "/") {
+			if a.handleCommand(input) {
+				continue
+			}
+		}
+
+		// Process the message
+		if err := a.processMessage(input); err != nil {
+			if err == context.Canceled {
+				fmt.Println("\n(interrupted)")
+				continue
+			}
+			return err
+		}
+	}
+}
+
+// printHeader prints the header once at startup
+func (a *App) printHeader() {
+	header := tui.Group(
+		tui.Text(" Dive ").Bold().Fg(tui.ColorCyan),
+		tui.Spacer(),
+		tui.Text(" ready ").Success(),
+	)
+	tui.Print(header)
+	tui.Print(tui.Divider())
+}
+
+// printIntro prints the intro/splash screen
+func (a *App) printIntro() {
 	// Shorten workspace path for display
 	wsDisplay := a.workspaceDir
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(wsDisplay, home) {
 		wsDisplay = "~" + wsDisplay[len(home):]
 	}
 
-	// Build intro message - rendered specially in render.go
-	a.messages = append(a.messages, Message{
+	// Build intro message - same as TUI
+	msg := Message{
 		Role:    "intro",
 		Content: a.modelName + "\n" + wsDisplay,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
-	})
+	}
+	a.messages = append(a.messages, msg)
+
+	// Print the intro view
+	view := a.introView(msg)
+	tui.Print(tui.Padding(1, view))
 }
 
-// Destroy is called when the app exits
-func (a *App) Destroy() {
-	a.cancel()
+// printInputArea prints the complete input area with cursor positioned for typing
+// Uses cursor save/restore so footer is visible while typing
+func (a *App) printInputArea() {
+	tui.Newline()                       // Blank line
+	tui.Print(tui.Divider())            // Divider above input
+	tui.Print(tui.Text(" > ").Fg(tui.ColorCyan))
+	tui.SaveCursor()                    // Save cursor position
+	tui.Newline()                       // Move to next line
+	tui.Print(tui.Divider())            // Divider below input
+	footer := tui.Group(
+		tui.Text(" Enter: send ").Hint(),
+		tui.Text(" @file: include ").Hint(),
+		tui.Text(" /help: commands ").Hint(),
+		tui.Spacer(),
+		tui.Text(" Ctrl+C: exit ").Hint(),
+	)
+	tui.Print(footer)
+	tui.RestoreCursor()                 // Restore cursor to after prompt
 }
 
-// HandleEvent processes TUI events
-func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
-	switch e := event.(type) {
-	case tui.KeyEvent:
-		return a.handleKeyEvent(e)
+// readInput reads a line of input from the user
+func (a *App) readInput() (string, error) {
+	if !a.scanner.Scan() {
+		if err := a.scanner.Err(); err != nil {
+			return "", err
+		}
+		return "", context.Canceled // EOF
+	}
+	return strings.TrimSpace(a.scanner.Text()), nil
+}
 
-	case tui.MouseEvent:
-		return a.handleMouseEvent(e)
+// clearLines clears n lines above cursor
+func (a *App) clearLines(n int) {
+	for i := 0; i < n; i++ {
+		tui.MoveCursorUp(1)
+		tui.ClearLine()
+	}
+}
 
-	case tui.ResizeEvent:
-		a.mu.Lock()
-		a.termWidth = e.Width
-		a.termHeight = e.Height
-		a.mu.Unlock()
-		return nil
+// clearInputArea clears the input area (blank + divider + input + divider + footer)
+func (a *App) clearInputArea(input string) {
+	inputLines := a.calculateInputLines(input)
+	// blank (1) + divider above (1) + input (N) + divider below (1) + footer (1) = 4 + N
+	totalLines := 4 + inputLines
+	// After Enter, cursor is on divider-below line. Move to footer line, then clear up.
+	tui.MoveCursorDown(1) // Move down 1 line to footer
+	a.clearLines(totalLines)
+}
 
-	case tui.TickEvent:
-		a.mu.Lock()
-		a.frame = e.Frame
-		a.mu.Unlock()
-		return nil
-
-	case ResponseEvent:
-		return a.handleResponseEvent(e)
+// calculateInputLines calculates how many terminal lines the input takes
+func (a *App) calculateInputLines(input string) int {
+	fd := int(os.Stdout.Fd())
+	width, _, err := term.GetSize(fd)
+	if err != nil || width <= 0 {
+		width = 80 // fallback
 	}
 
-	return nil
+	promptLen := 3 // " > "
+	totalLen := promptLen + len(input)
+	lines := (totalLen + width - 1) / width // ceiling division
+	if lines < 1 {
+		lines = 1
+	}
+	return lines
 }
 
-func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
-	// Global keybindings
-	switch {
-	case e.Key == tui.KeyCtrlC, e.Key == tui.KeyCtrlD:
-		return []tui.Cmd{tui.Quit()}
-	case e.Key == tui.KeyCtrlT:
-		// Toggle todos visibility
+// readSingleKey reads a single keypress (for y/n prompts)
+func (a *App) readSingleKey() (rune, error) {
+	// Put terminal in raw mode
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		oldState, err := term.MakeRaw(fd)
+		if err != nil {
+			// Fallback to line input
+			return a.readSingleKeyFallback()
+		}
+		defer term.Restore(fd, oldState)
+
+		// Read single byte
+		buf := make([]byte, 1)
+		_, err = os.Stdin.Read(buf)
+		if err != nil {
+			return 0, err
+		}
+		fmt.Println() // Move to next line after keypress
+		return rune(buf[0]), nil
+	}
+
+	return a.readSingleKeyFallback()
+}
+
+// readSingleKeyFallback reads input when terminal isn't available
+func (a *App) readSingleKeyFallback() (rune, error) {
+	if !a.scanner.Scan() {
+		return 0, context.Canceled
+	}
+	input := strings.TrimSpace(a.scanner.Text())
+	if len(input) > 0 {
+		return rune(input[0]), nil
+	}
+	return 0, nil
+}
+
+func (a *App) handleCommand(input string) bool {
+	switch input {
+	case "/quit", "/exit", "/q":
+		a.cancel()
+		os.Exit(0)
+		return true
+	case "/clear":
+		tui.ClearScreen()
+		a.printHeader()
+		a.printIntro()
+		return true
+	case "/todos", "/t":
 		a.mu.Lock()
 		a.showTodos = !a.showTodos
 		a.mu.Unlock()
-		return nil
+		if a.showTodos {
+			a.printTodos()
+		}
+		return true
+	case "/help", "/?":
+		a.printHelp()
+		return true
 	}
+	return false
+}
 
-	// Handle various interactive modes
+func (a *App) printHelp() {
+	help := tui.Stack(
+		tui.Text(""),
+		tui.Text("Commands:").Bold(),
+		tui.Text("  /quit, /q     Exit"),
+		tui.Text("  /clear        Clear screen"),
+		tui.Text("  /todos, /t    Toggle todo list"),
+		tui.Text("  /help, /?     Show this help"),
+		tui.Text(""),
+		tui.Text("Input:").Bold(),
+		tui.Text("  @filename     Include file contents"),
+		tui.Text("  Enter         Send message"),
+		tui.Text("  Ctrl+C        Exit"),
+		tui.Text(""),
+	)
+	tui.Print(help)
+}
+
+func (a *App) printTodos() {
 	a.mu.RLock()
-	inConfirm := a.confirm.Pending
-	inSelect := a.selectState.Pending
-	inMultiSelect := a.multiSelectState.Pending
-	inInput := a.inputState.Pending
-	a.mu.RUnlock()
+	defer a.mu.RUnlock()
 
-	if inConfirm {
-		return a.handleConfirmKey(e)
-	}
-	if inSelect {
-		return a.handleSelectKey(e)
-	}
-	if inMultiSelect {
-		return a.handleMultiSelectKey(e)
-	}
-	if inInput {
-		return a.handleInputPromptKey(e)
+	if len(a.todos) == 0 {
+		fmt.Println("No todos.")
+		return
 	}
 
-	return a.handleInputKey(e)
+	view := a.todoListView()
+	if view != nil {
+		tui.Print(view)
+	}
 }
 
-func (a *App) handleConfirmKey(e tui.KeyEvent) []tui.Cmd {
+func (a *App) processMessage(input string) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	switch {
-	case e.Rune == 'y' || e.Rune == 'Y':
-		if a.confirm.ResultChan != nil {
-			a.confirm.ResultChan <- true
-		}
-		a.confirm = ConfirmState{}
-		return nil
-
-	case e.Rune == 'n' || e.Rune == 'N' || e.Key == tui.KeyEscape:
-		if a.confirm.ResultChan != nil {
-			a.confirm.ResultChan <- false
-		}
-		a.confirm = ConfirmState{}
-		return nil
-	}
-
-	return nil
-}
-
-func (a *App) handleSelectKey(e tui.KeyEvent) []tui.Cmd {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	switch {
-	case e.Key == tui.KeyArrowUp, e.Rune == 'k':
-		if a.selectState.SelectedIdx > 0 {
-			a.selectState.SelectedIdx--
-		}
-		return nil
-
-	case e.Key == tui.KeyArrowDown, e.Rune == 'j':
-		if a.selectState.SelectedIdx < len(a.selectState.Options)-1 {
-			a.selectState.SelectedIdx++
-		}
-		return nil
-
-	case e.Key == tui.KeyEnter:
-		if a.selectState.ResultChan != nil && len(a.selectState.Options) > 0 {
-			a.selectState.ResultChan <- &dive.SelectResponse{
-				Value: a.selectState.Options[a.selectState.SelectedIdx].Value,
-			}
-		}
-		a.selectState = SelectState{}
-		return nil
-
-	case e.Key == tui.KeyEscape, e.Rune == 'q':
-		if a.selectState.ResultChan != nil {
-			a.selectState.ResultChan <- &dive.SelectResponse{Canceled: true}
-		}
-		a.selectState = SelectState{}
-		return nil
-	}
-
-	// Handle number keys for quick selection (1-9)
-	if e.Rune >= '1' && e.Rune <= '9' {
-		idx := int(e.Rune - '1')
-		if idx < len(a.selectState.Options) {
-			if a.selectState.ResultChan != nil {
-				a.selectState.ResultChan <- &dive.SelectResponse{
-					Value: a.selectState.Options[idx].Value,
-				}
-			}
-			a.selectState = SelectState{}
-		}
-	}
-
-	return nil
-}
-
-func (a *App) handleMultiSelectKey(e tui.KeyEvent) []tui.Cmd {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	switch {
-	case e.Key == tui.KeyArrowUp, e.Rune == 'k':
-		if a.multiSelectState.CursorIdx > 0 {
-			a.multiSelectState.CursorIdx--
-		}
-		return nil
-
-	case e.Key == tui.KeyArrowDown, e.Rune == 'j':
-		if a.multiSelectState.CursorIdx < len(a.multiSelectState.Options)-1 {
-			a.multiSelectState.CursorIdx++
-		}
-		return nil
-
-	case e.Rune == ' ':
-		// Toggle selection
-		idx := a.multiSelectState.CursorIdx
-		if idx < len(a.multiSelectState.Selected) {
-			a.multiSelectState.Selected[idx] = !a.multiSelectState.Selected[idx]
-		}
-		return nil
-
-	case e.Key == tui.KeyEnter:
-		// Collect selected values
-		var values []string
-		for i, opt := range a.multiSelectState.Options {
-			if i < len(a.multiSelectState.Selected) && a.multiSelectState.Selected[i] {
-				values = append(values, opt.Value)
-			}
-		}
-		// Check minimum selection
-		if len(values) < a.multiSelectState.MinSelect {
-			// Don't allow submission if minimum not met
-			return nil
-		}
-		if a.multiSelectState.ResultChan != nil {
-			a.multiSelectState.ResultChan <- &dive.MultiSelectResponse{Values: values}
-		}
-		a.multiSelectState = MultiSelectState{}
-		return nil
-
-	case e.Key == tui.KeyEscape, e.Rune == 'q':
-		if a.multiSelectState.ResultChan != nil {
-			a.multiSelectState.ResultChan <- &dive.MultiSelectResponse{Canceled: true}
-		}
-		a.multiSelectState = MultiSelectState{}
-		return nil
-	}
-
-	// Handle number keys for quick toggle (1-9)
-	if e.Rune >= '1' && e.Rune <= '9' {
-		idx := int(e.Rune - '1')
-		if idx < len(a.multiSelectState.Selected) {
-			a.multiSelectState.Selected[idx] = !a.multiSelectState.Selected[idx]
-		}
-	}
-
-	return nil
-}
-
-func (a *App) handleInputPromptKey(e tui.KeyEvent) []tui.Cmd {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	switch {
-	case e.Key == tui.KeyEnter:
-		if a.inputState.Multiline && e.Shift {
-			a.inputState.Value += "\n"
-			return nil
-		}
-		// Submit input
-		value := a.inputState.Value
-		if value == "" {
-			value = a.inputState.Default
-		}
-		if a.inputState.ResultChan != nil {
-			a.inputState.ResultChan <- &dive.InputResponse{Value: value}
-		}
-		a.inputState = InputState{}
-		return nil
-
-	case e.Key == tui.KeyEscape:
-		if a.inputState.ResultChan != nil {
-			a.inputState.ResultChan <- &dive.InputResponse{Canceled: true}
-		}
-		a.inputState = InputState{}
-		return nil
-
-	case e.Key == tui.KeyBackspace:
-		if len(a.inputState.Value) > 0 {
-			a.inputState.Value = a.inputState.Value[:len(a.inputState.Value)-1]
-		}
-		return nil
-
-	default:
-		if e.Rune != 0 {
-			a.inputState.Value += string(e.Rune)
-		}
-	}
-
-	return nil
-}
-
-func (a *App) handleInputKey(e tui.KeyEvent) []tui.Cmd {
-	switch {
-	case e.Key == tui.KeyEnter:
-		if e.Shift {
-			// Shift+Enter adds a newline
-			a.mu.Lock()
-			a.input += "\n"
-			a.autocomplete = AutocompleteState{} // Cancel autocomplete on newline
-			a.mu.Unlock()
-		} else {
-			// If autocomplete is active, Enter selects the item
-			a.mu.Lock()
-			if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-				selected := a.autocomplete.Matches[a.autocomplete.Selected]
-				a.input = a.input[:a.autocomplete.StartIdx] + "@" + selected
-				a.autocomplete = AutocompleteState{}
-				a.mu.Unlock()
-				return nil
-			}
-			a.mu.Unlock()
-			// Plain Enter sends the message
-			return a.sendMessage()
-		}
-		return nil
-
-	case e.Key == tui.KeyTab:
-		// Tab accepts autocomplete selection
-		a.mu.Lock()
-		if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-			selected := a.autocomplete.Matches[a.autocomplete.Selected]
-			a.input = a.input[:a.autocomplete.StartIdx] + "@" + selected
-			a.autocomplete = AutocompleteState{}
-		}
-		a.mu.Unlock()
-		return nil
-
-	case e.Key == tui.KeyEscape:
-		// Escape cancels autocomplete
-		a.mu.Lock()
-		if a.autocomplete.Active {
-			a.autocomplete = AutocompleteState{}
-			a.mu.Unlock()
-			return nil
-		}
-		a.mu.Unlock()
-		return nil
-
-	case e.Key == tui.KeyBackspace:
-		a.mu.Lock()
-		if len(a.input) > 0 {
-			a.input = a.input[:len(a.input)-1]
-
-			// Update autocomplete state
-			if a.autocomplete.Active {
-				if len(a.input) <= a.autocomplete.StartIdx {
-					// Deleted past the @, deactivate
-					a.autocomplete = AutocompleteState{}
-				} else {
-					// Update prefix
-					a.autocomplete.Prefix = a.input[a.autocomplete.StartIdx+1:]
-					a.updateAutocompleteMatches()
-				}
-			}
-		}
-		a.historyIndex = -1
-		a.mu.Unlock()
-		return nil
-
-	case e.Key == tui.KeyArrowUp:
-		a.mu.Lock()
-		// If autocomplete is active, navigate suggestions
-		if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-			if a.autocomplete.Selected > 0 {
-				a.autocomplete.Selected--
-			}
-			a.mu.Unlock()
-			return nil
-		}
-		// Otherwise, navigate history
-		if len(a.history) > 0 {
-			if a.historyIndex == -1 {
-				a.savedInput = a.input
-				a.historyIndex = len(a.history) - 1
-			} else if a.historyIndex > 0 {
-				a.historyIndex--
-			}
-			a.input = a.history[a.historyIndex]
-		}
-		a.mu.Unlock()
-		return nil
-
-	case e.Key == tui.KeyArrowDown:
-		a.mu.Lock()
-		// If autocomplete is active, navigate suggestions
-		if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-			if a.autocomplete.Selected < len(a.autocomplete.Matches)-1 {
-				a.autocomplete.Selected++
-			}
-			a.mu.Unlock()
-			return nil
-		}
-		// Otherwise, navigate history
-		if a.historyIndex != -1 {
-			if a.historyIndex < len(a.history)-1 {
-				a.historyIndex++
-				a.input = a.history[a.historyIndex]
-			} else {
-				a.historyIndex = -1
-				a.input = a.savedInput
-			}
-		}
-		a.mu.Unlock()
-		return nil
-
-	case e.Key == tui.KeyPageUp:
-		a.mu.Lock()
-		a.scrollY -= 10
-		if a.scrollY < 0 {
-			a.scrollY = 0
-		}
-		a.mu.Unlock()
-		return nil
-
-	case e.Key == tui.KeyPageDown:
-		a.mu.Lock()
-		a.scrollY += 10
-		a.mu.Unlock()
-		return nil
-
-	case e.Rune != 0:
-		a.mu.Lock()
-		a.input += string(e.Rune)
-		a.historyIndex = -1
-
-		// Handle autocomplete trigger and updates
-		if e.Rune == '@' {
-			// Start autocomplete mode
-			a.autocomplete.Active = true
-			a.autocomplete.StartIdx = len(a.input) - 1
-			a.autocomplete.Prefix = ""
-			a.autocomplete.Selected = 0
-			a.autocomplete.Matches = nil
-		} else if a.autocomplete.Active {
-			// Update prefix with text after @
-			a.autocomplete.Prefix = a.input[a.autocomplete.StartIdx+1:]
-			a.updateAutocompleteMatches()
-
-			// Deactivate on space (file path complete)
-			if e.Rune == ' ' {
-				a.autocomplete = AutocompleteState{}
-			}
-		}
-		a.mu.Unlock()
-		return nil
-	}
-
-	return nil
-}
-
-func (a *App) handleMouseEvent(e tui.MouseEvent) []tui.Cmd {
-	if e.Type == tui.MouseScroll {
-		a.mu.Lock()
-		// Use DeltaY for scroll amount (negative=up, positive=down)
-		// Scroll 2 lines per wheel notch
-		scrollAmount := 2
-		if e.DeltaY < 0 {
-			// Scroll up - decrease scrollY to see earlier content
-			a.scrollY -= scrollAmount
-			if a.scrollY < 0 {
-				a.scrollY = 0
-			}
-		} else if e.DeltaY > 0 {
-			// Scroll down - increase scrollY to see later content
-			a.scrollY += scrollAmount
-		}
-		a.mu.Unlock()
-	}
-	return nil
-}
-
-func (a *App) sendMessage() []tui.Cmd {
-	a.mu.Lock()
-	trimmed := strings.TrimSpace(a.input)
+	trimmed := strings.TrimSpace(input)
 	if trimmed == "" || a.processing {
 		a.mu.Unlock()
 		return nil
 	}
 
-	// Clear autocomplete state
-	a.autocomplete = AutocompleteState{}
-
 	// Expand file references
 	expanded, err := a.expandFileReferences(trimmed)
 	if err != nil {
-		// Show error to user but still allow sending
-		a.messages = append(a.messages, Message{
-			Role:    "system",
-			Content: "Warning: " + err.Error(),
-			Time:    time.Now(),
-			Type:    MessageTypeText,
-		})
+		// Show warning but continue
+		warning := tui.Text("Warning: %s", err.Error()).Warning()
+		tui.Print(tui.Padding(1, warning))
 	}
 
-	// Add to history (original input, not expanded)
-	a.history = append(a.history, a.input)
+	// Add to history
+	a.history = append(a.history, input)
 	a.historyIndex = -1
-	a.savedInput = ""
 
-	// Add user message (show original, send expanded)
-	a.messages = append(a.messages, Message{
+	// Add user message
+	userMsg := Message{
 		Role:    "user",
 		Content: trimmed,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
-	})
-	a.scrollY = 999999
+	}
+	a.messages = append(a.messages, userMsg)
+
+	// Print user message
+	a.mu.Unlock()
+	tui.Print(tui.Padding(1, a.textMessageView(userMsg, len(a.messages)-1)))
+	a.mu.Lock()
 
 	// Prepare for streaming response
 	a.currentMessage = &Message{
@@ -679,35 +405,188 @@ func (a *App) sendMessage() []tui.Cmd {
 	}
 	a.messages = append(a.messages, *a.currentMessage)
 	a.streamingMessageIndex = len(a.messages) - 1
-	a.needNewTextMessage = false // reset for new response
+	a.needNewTextMessage = false
 
 	a.processing = true
 	a.thinking = true
 	a.processingStartTime = time.Now()
-	a.input = ""
 	a.mu.Unlock()
 
-	// Start async response generation with expanded content
-	return []tui.Cmd{a.generateResponse(expanded)}
+	// Start live updates
+	a.startLiveUpdates()
+
+	// Create response with streaming
+	_, err = a.agent.CreateResponse(a.ctx,
+		dive.WithInput(expanded),
+		dive.WithThreadID("main"),
+		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			return a.handleAgentEvent(item)
+		}),
+	)
+
+	// Stop live updates
+	a.stopLiveUpdates()
+
+	// Handle completion
+	a.mu.Lock()
+	a.processing = false
+	a.thinking = false
+	a.currentMessage = nil
+	a.toolCallIndex = make(map[string]int)
+
+	if err != nil {
+		errMsg := Message{
+			Role:    "system",
+			Content: "Error: " + err.Error(),
+			Time:    time.Now(),
+			Type:    MessageTypeText,
+		}
+		a.messages = append(a.messages, errMsg)
+	}
+	a.mu.Unlock()
+
+	// Print final output to scroll history
+	a.printRecentMessages()
+
+	return nil
 }
 
-func (a *App) generateResponse(userInput string) tui.Cmd {
-	return func() tui.Event {
-		_, err := a.agent.CreateResponse(a.ctx,
-			dive.WithInput(userInput),
-			dive.WithThreadID("main"),
-			dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-				return a.handleAgentEvent(item)
-			}),
-		)
-		return ResponseEvent{Time: time.Now(), Done: true, Error: err}
+func (a *App) startLiveUpdates() {
+	a.live = tui.NewLivePrinter()
+	a.done = make(chan struct{})
+	a.ticker = time.NewTicker(time.Second / 30) // 30 FPS
+
+	// Initial render
+	a.updateLiveView()
+
+	// Start animation ticker
+	go func() {
+		for {
+			select {
+			case <-a.ticker.C:
+				a.mu.Lock()
+				a.frame++
+				a.mu.Unlock()
+				a.updateLiveView()
+			case <-a.done:
+				return
+			}
+		}
+	}()
+}
+
+func (a *App) stopLiveUpdates() {
+	if a.ticker != nil {
+		a.ticker.Stop()
+	}
+	if a.done != nil {
+		close(a.done)
+	}
+	if a.live != nil {
+		a.live.Clear()
+		a.live = nil
+	}
+}
+
+func (a *App) updateLiveView() {
+	if a.live == nil {
+		return
+	}
+
+	a.mu.RLock()
+	view := a.buildLiveView()
+	a.mu.RUnlock()
+
+	a.live.Update(view)
+}
+
+// buildLiveView creates the view for live updates during streaming
+func (a *App) buildLiveView() tui.View {
+	views := make([]tui.View, 0)
+
+	// Find start of current interaction (last user message)
+	startIdx := 0
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == "user" {
+			startIdx = i + 1 // Start after user message
+			break
+		}
+	}
+
+	// Show thinking indicator if no content yet
+	hasContent := false
+	for i := startIdx; i < len(a.messages); i++ {
+		if a.messages[i].Type == MessageTypeToolCall || a.messages[i].Content != "" {
+			hasContent = true
+			break
+		}
+	}
+
+	if a.thinking && !hasContent {
+		elapsed := time.Since(a.processingStartTime)
+		views = append(views, tui.Group(
+			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
+			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
+			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
+		))
+	}
+
+	// Render messages from current interaction
+	for i := startIdx; i < len(a.messages); i++ {
+		msg := a.messages[i]
+		view := a.messageView(msg, i)
+		if view != nil {
+			views = append(views, view)
+		}
+	}
+
+	// Show todos if active
+	if a.showTodos && len(a.todos) > 0 {
+		views = append(views, a.todoListView())
+	}
+
+	if len(views) == 0 {
+		return tui.Text("")
+	}
+
+	return tui.Padding(1, tui.Stack(views...).Gap(1))
+}
+
+// printRecentMessages prints the messages from the current interaction to scroll history
+func (a *App) printRecentMessages() {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	// Find start of current interaction
+	startIdx := 0
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == "user" {
+			startIdx = i + 1 // Start after user message (already printed)
+			break
+		}
+	}
+
+	// Print each message
+	for i := startIdx; i < len(a.messages); i++ {
+		msg := a.messages[i]
+		view := a.messageViewStatic(msg, i)
+		if view != nil {
+			tui.Print(tui.Padding(1, view))
+		}
+	}
+
+	// Print todos if visible
+	if a.showTodos && len(a.todos) > 0 {
+		view := a.todoListViewStatic()
+		if view != nil {
+			tui.Print(view)
+		}
 	}
 }
 
 func (a *App) handleAgentEvent(item *dive.ResponseItem) error {
 	switch item.Type {
 	case dive.ResponseItemTypeModelEvent:
-		// Handle streaming text
 		if item.Event != nil && item.Event.Delta != nil {
 			if text := item.Event.Delta.Text; text != "" {
 				a.appendToStreamingMessage(text)
@@ -715,16 +594,10 @@ func (a *App) handleAgentEvent(item *dive.ResponseItem) error {
 		}
 
 	case dive.ResponseItemTypeToolCall:
-		// Tool call starting - mark that we'll need a new text message after this
 		a.addToolCall(item.ToolCall)
 
 	case dive.ResponseItemTypeToolCallResult:
-		// Tool call completed
 		a.updateToolCallResult(item.ToolCallResult)
-
-	case dive.ResponseItemTypeMessage:
-		// Complete message - we rely on streaming deltas, so ignore this
-		// to prevent overwriting accumulated content
 	}
 	return nil
 }
@@ -733,10 +606,6 @@ func (a *App) appendToStreamingMessage(text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Check if we need to start a new streaming message:
-	// - No current message (first streaming)
-	// - Index out of bounds (shouldn't happen but be defensive)
-	// - Flag set after tool calls
 	needNewMessage := a.streamingMessageIndex < 0 ||
 		a.streamingMessageIndex >= len(a.messages) ||
 		a.needNewTextMessage
@@ -754,14 +623,13 @@ func (a *App) appendToStreamingMessage(text string) {
 
 	a.messages[a.streamingMessageIndex].Content += text
 	a.thinking = false
-	a.scrollY = 999999
 }
 
 func (a *App) addToolCall(call *llm.ToolUseContent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Check if this is a TodoWrite tool call and parse todos
+	// Parse TodoWrite tool calls
 	if call.Name == "todo_write" || call.Name == "TodoWrite" {
 		a.parseTodoWriteInput(call.Input)
 	}
@@ -772,16 +640,14 @@ func (a *App) addToolCall(call *llm.ToolUseContent) {
 		Type:      MessageTypeToolCall,
 		ToolID:    call.ID,
 		ToolName:  call.Name,
-		ToolInput: string(call.Input), // Store full input for formatting
+		ToolInput: string(call.Input),
 		ToolDone:  false,
 	}
 	a.messages = append(a.messages, msg)
 	a.toolCallIndex[call.ID] = len(a.messages) - 1
-	a.needNewTextMessage = true // next text should go to a new message
-	a.scrollY = 999999
+	a.needNewTextMessage = true
 }
 
-// parseTodoWriteInput parses the TodoWrite tool input and updates the todos list
 func (a *App) parseTodoWriteInput(input []byte) {
 	var todoInput struct {
 		Todos []struct {
@@ -795,7 +661,6 @@ func (a *App) parseTodoWriteInput(input []byte) {
 		return
 	}
 
-	// Convert to our Todo type
 	a.todos = make([]Todo, 0, len(todoInput.Todos))
 	for _, t := range todoInput.Todos {
 		status := TodoStatusPending
@@ -811,7 +676,6 @@ func (a *App) parseTodoWriteInput(input []byte) {
 			Status:     status,
 		})
 	}
-	// Show todos when they're updated
 	if len(a.todos) > 0 {
 		a.showTodos = true
 	}
@@ -827,7 +691,6 @@ func (a *App) updateToolCallResult(result *dive.ToolCallResult) {
 			if result.Result.IsError {
 				a.messages[idx].ToolError = true
 			}
-			// Get display text or first text content
 			display := result.Result.Display
 			if display == "" && len(result.Result.Content) > 0 {
 				for _, c := range result.Result.Content {
@@ -837,343 +700,234 @@ func (a *App) updateToolCallResult(result *dive.ToolCallResult) {
 					}
 				}
 			}
-			// Store full result lines for expandable display
 			if display != "" {
 				a.messages[idx].ToolResultLines = strings.Split(display, "\n")
 			}
-			// Store first line as summary
 			if len(a.messages[idx].ToolResultLines) > 0 {
 				a.messages[idx].ToolResult = a.messages[idx].ToolResultLines[0]
 			}
 		}
 	}
-	a.scrollY = 999999
-}
-
-func (a *App) handleResponseEvent(e ResponseEvent) []tui.Cmd {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if e.Done {
-		a.processing = false
-		a.thinking = false
-		a.currentMessage = nil
-		a.toolCallIndex = make(map[string]int)
-
-		if e.Error != nil {
-			// Add error message
-			a.messages = append(a.messages, Message{
-				Role:    "system",
-				Content: "Error: " + e.Error.Error(),
-				Time:    time.Now(),
-				Type:    MessageTypeText,
-			})
-		}
-		a.scrollY = 999999
-	}
-
-	return nil
 }
 
 // ConfirmTool prompts the user to confirm a tool execution
 func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input []byte) (bool, error) {
-	resultChan := make(chan bool, 1)
-
-	a.mu.Lock()
-	a.confirm = ConfirmState{
-		Pending:    true,
-		ToolName:   toolName,
-		Summary:    summary,
-		Input:      input,
-		ResultChan: resultChan,
+	// Pause live updates
+	if a.live != nil {
+		a.live.Clear()
 	}
-	a.mu.Unlock()
 
-	// Wait for user response or context cancellation
-	select {
-	case result := <-resultChan:
-		return result, nil
-	case <-ctx.Done():
-		a.mu.Lock()
-		a.confirm = ConfirmState{}
-		a.mu.Unlock()
-		return false, ctx.Err()
+	// Print current state
+	a.printRecentMessages()
+
+	// Print confirmation prompt
+	confirmView := tui.Padding(1,
+		tui.Stack(
+			tui.Text(" CONFIRM ").Bold().
+				Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 200, G: 150, B: 50}).WithFgRGB(tui.RGB{R: 0, G: 0, B: 0})),
+			tui.Text(""),
+			tui.Text(" %s", summary).Bold(),
+			tui.Text(" Tool: %s", toolName).Muted(),
+			tui.Text(""),
+			tui.Group(
+				tui.Text(" Press "),
+				tui.Text("y").Bold().Success(),
+				tui.Text(" to confirm, "),
+				tui.Text("n").Bold().Error(),
+				tui.Text(" to cancel "),
+			),
+		),
+	)
+	tui.Print(confirmView)
+
+	// Read single keypress
+	key, err := a.readSingleKey()
+	if err != nil {
+		return false, err
 	}
+
+	approved := key == 'y' || key == 'Y'
+
+	// Resume live updates if still processing
+	if a.processing {
+		a.live = tui.NewLivePrinter()
+		a.updateLiveView()
+	}
+
+	return approved, nil
 }
 
 // SelectTool prompts the user to select one option
 func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
-	resultChan := make(chan *dive.SelectResponse, 1)
+	// Pause live updates
+	if a.live != nil {
+		a.live.Clear()
+	}
 
-	// Find default index
+	// Build options view
+	views := []tui.View{
+		tui.Text(" SELECT ").Bold().
+			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 80, G: 150, B: 220}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
+		tui.Text(""),
+		tui.Text(" %s", req.Title).Bold(),
+	}
+
+	if req.Message != "" {
+		views = append(views, tui.Text(" %s", req.Message).Muted())
+	}
+	views = append(views, tui.Text(""))
+
 	defaultIdx := 0
 	for i, opt := range req.Options {
+		marker := "  "
 		if opt.Default {
+			marker = "* "
 			defaultIdx = i
-			break
+		}
+		optView := tui.Text(" %s%d) %s", marker, i+1, opt.Label)
+		if opt.Description != "" {
+			views = append(views, tui.Group(optView, tui.Text(" - %s", opt.Description).Muted()))
+		} else {
+			views = append(views, optView)
 		}
 	}
 
-	a.mu.Lock()
-	a.selectState = SelectState{
-		Pending:     true,
-		Title:       req.Title,
-		Message:     req.Message,
-		Options:     req.Options,
-		SelectedIdx: defaultIdx,
-		ResultChan:  resultChan,
-	}
-	a.mu.Unlock()
+	views = append(views, tui.Text(""))
+	views = append(views, tui.Text(" Enter number (or press Enter for default): ").Hint())
 
-	select {
-	case result := <-resultChan:
-		return result, nil
-	case <-ctx.Done():
-		a.mu.Lock()
-		a.selectState = SelectState{}
-		a.mu.Unlock()
-		return &dive.SelectResponse{Canceled: true}, ctx.Err()
+	tui.Print(tui.Padding(1, tui.Stack(views...)))
+
+	// Read selection
+	input, err := a.readInput()
+	if err != nil {
+		return &dive.SelectResponse{Canceled: true}, err
 	}
+
+	if input == "" {
+		// Use default
+		return &dive.SelectResponse{Value: req.Options[defaultIdx].Value}, nil
+	}
+
+	// Parse number
+	var idx int
+	if _, err := fmt.Sscanf(input, "%d", &idx); err == nil {
+		if idx >= 1 && idx <= len(req.Options) {
+			return &dive.SelectResponse{Value: req.Options[idx-1].Value}, nil
+		}
+	}
+
+	return &dive.SelectResponse{Canceled: true}, nil
 }
 
-// MultiSelectTool prompts the user to select multiple options
+// MultiSelectTool prompts for multiple selections
 func (a *App) MultiSelectTool(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
-	resultChan := make(chan *dive.MultiSelectResponse, 1)
+	// Pause live updates
+	if a.live != nil {
+		a.live.Clear()
+	}
 
-	// Initialize selected state from defaults
-	selected := make([]bool, len(req.Options))
+	// Build options view
+	views := []tui.View{
+		tui.Text(" MULTI-SELECT ").Bold().
+			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 150, G: 80, B: 180}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
+		tui.Text(""),
+		tui.Text(" %s", req.Title).Bold(),
+	}
+
+	if req.Message != "" {
+		views = append(views, tui.Text(" %s", req.Message).Muted())
+	}
+	views = append(views, tui.Text(""))
+
 	for i, opt := range req.Options {
-		selected[i] = opt.Default
+		checkbox := "[ ]"
+		if opt.Default {
+			checkbox = "[x]"
+		}
+		views = append(views, tui.Text("  %s %d) %s", checkbox, i+1, opt.Label))
 	}
 
-	a.mu.Lock()
-	a.multiSelectState = MultiSelectState{
-		Pending:    true,
-		Title:      req.Title,
-		Message:    req.Message,
-		Options:    req.Options,
-		Selected:   selected,
-		CursorIdx:  0,
-		MinSelect:  req.MinSelect,
-		MaxSelect:  req.MaxSelect,
-		ResultChan: resultChan,
-	}
-	a.mu.Unlock()
+	views = append(views, tui.Text(""))
+	views = append(views, tui.Text(" Enter numbers separated by commas (e.g., 1,3,5) or Enter for defaults: ").Hint())
 
-	select {
-	case result := <-resultChan:
-		return result, nil
-	case <-ctx.Done():
-		a.mu.Lock()
-		a.multiSelectState = MultiSelectState{}
-		a.mu.Unlock()
-		return &dive.MultiSelectResponse{Canceled: true}, ctx.Err()
+	tui.Print(tui.Padding(1, tui.Stack(views...)))
+
+	// Read selection
+	input, err := a.readInput()
+	if err != nil {
+		return &dive.MultiSelectResponse{Canceled: true}, err
 	}
+
+	if input == "" {
+		// Use defaults
+		var values []string
+		for _, opt := range req.Options {
+			if opt.Default {
+				values = append(values, opt.Value)
+			}
+		}
+		return &dive.MultiSelectResponse{Values: values}, nil
+	}
+
+	// Parse comma-separated numbers
+	var values []string
+	for _, part := range strings.Split(input, ",") {
+		var idx int
+		if _, err := fmt.Sscanf(strings.TrimSpace(part), "%d", &idx); err == nil {
+			if idx >= 1 && idx <= len(req.Options) {
+				values = append(values, req.Options[idx-1].Value)
+			}
+		}
+	}
+
+	return &dive.MultiSelectResponse{Values: values}, nil
 }
 
-// InputTool prompts the user for text input
+// InputTool prompts for text input
 func (a *App) InputTool(ctx context.Context, req *dive.InputRequest) (*dive.InputResponse, error) {
-	resultChan := make(chan *dive.InputResponse, 1)
-
-	a.mu.Lock()
-	a.inputState = InputState{
-		Pending:     true,
-		Title:       req.Title,
-		Message:     req.Message,
-		Placeholder: req.Placeholder,
-		Default:     req.Default,
-		Value:       req.Default,
-		Multiline:   req.Multiline,
-		ResultChan:  resultChan,
-	}
-	a.mu.Unlock()
-
-	select {
-	case result := <-resultChan:
-		return result, nil
-	case <-ctx.Done():
-		a.mu.Lock()
-		a.inputState = InputState{}
-		a.mu.Unlock()
-		return &dive.InputResponse{Canceled: true}, ctx.Err()
-	}
-}
-
-// ResponseEvent signals response completion
-type ResponseEvent struct {
-	Time  time.Time
-	Done  bool
-	Error error
-}
-
-// Timestamp implements the tui.Event interface
-func (e ResponseEvent) Timestamp() time.Time { return e.Time }
-
-func truncateString(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\t", " ")
-	if len(s) > maxLen {
-		return s[:maxLen-3] + "..."
-	}
-	return s
-}
-
-// fuzzyMatch returns a score for how well the pattern matches the text.
-// Higher scores are better matches. Returns -1 if no match.
-func fuzzyMatch(pattern, text string) int {
-	pattern = strings.ToLower(pattern)
-	text = strings.ToLower(text)
-
-	if len(pattern) == 0 {
-		return 0
-	}
-	if len(pattern) > len(text) {
-		return -1
+	// Pause live updates
+	if a.live != nil {
+		a.live.Clear()
 	}
 
-	// Check if pattern characters appear in order in text
-	patternIdx := 0
-	score := 0
-	lastMatchIdx := -1
-	consecutiveBonus := 0
-
-	for i := 0; i < len(text) && patternIdx < len(pattern); i++ {
-		if text[i] == pattern[patternIdx] {
-			// Base score for match
-			score += 10
-
-			// Bonus for consecutive matches
-			if lastMatchIdx == i-1 {
-				consecutiveBonus++
-				score += consecutiveBonus * 5
-			} else {
-				consecutiveBonus = 0
-			}
-
-			// Bonus for matching at start of text or after separator
-			if i == 0 || text[i-1] == '/' || text[i-1] == '_' || text[i-1] == '-' || text[i-1] == '.' {
-				score += 15
-			}
-
-			// Bonus for matching filename (after last /)
-			lastSlash := strings.LastIndex(text, "/")
-			if i > lastSlash {
-				score += 5
-			}
-
-			lastMatchIdx = i
-			patternIdx++
-		}
+	views := []tui.View{
+		tui.Text(" INPUT ").Bold().
+			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 80, G: 180, B: 120}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
+		tui.Text(""),
+		tui.Text(" %s", req.Title).Bold(),
 	}
 
-	// All pattern characters must match
-	if patternIdx < len(pattern) {
-		return -1
+	if req.Message != "" {
+		views = append(views, tui.Text(" %s", req.Message).Muted())
+	}
+	if req.Default != "" {
+		views = append(views, tui.Text(" (default: %s)", req.Default).Hint())
+	}
+	views = append(views, tui.Text(""))
+
+	tui.Print(tui.Padding(1, tui.Stack(views...)))
+	fmt.Print("  > ")
+
+	input, err := a.readInput()
+	if err != nil {
+		return &dive.InputResponse{Canceled: true}, err
 	}
 
-	// Bonus for shorter paths (prefer less nested files)
-	score -= strings.Count(text, "/") * 2
-
-	// Bonus for shorter overall length
-	score -= len(text) / 10
-
-	return score
-}
-
-// updateAutocompleteMatches finds files matching the current prefix using fuzzy search
-func (a *App) updateAutocompleteMatches() {
-	// Requires lock to already be held
-	prefix := a.autocomplete.Prefix
-	if prefix == "" {
-		a.autocomplete.Matches = nil
-		return
+	if input == "" {
+		input = req.Default
 	}
-
-	// Directories to exclude
-	excludeDirs := map[string]bool{
-		".git":         true,
-		"node_modules": true,
-		"vendor":       true,
-		"__pycache__":  true,
-		".venv":        true,
-		"dist":         true,
-		"build":        true,
-		".idea":        true,
-		".vscode":      true,
-	}
-
-	type scoredMatch struct {
-		path  string
-		score int
-	}
-	var matches []scoredMatch
-
-	// Walk the workspace directory
-	_ = filepath.Walk(a.workspaceDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip files we can't access
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(a.workspaceDir, path)
-		if err != nil || relPath == "." {
-			return nil
-		}
-
-		// Skip excluded directories
-		if info.IsDir() {
-			if excludeDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// Fuzzy match against path
-		score := fuzzyMatch(prefix, relPath)
-		if score >= 0 {
-			matches = append(matches, scoredMatch{path: relPath, score: score})
-		}
-
-		// Limit candidates collected
-		if len(matches) >= 100 {
-			return filepath.SkipAll
-		}
-
-		return nil
-	})
-
-	// Sort by score (highest first)
-	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].score != matches[j].score {
-			return matches[i].score > matches[j].score
-		}
-		// Tie-breaker: shorter paths first
-		return len(matches[i].path) < len(matches[j].path)
-	})
-
-	// Extract paths and limit to 10
-	result := make([]string, 0, 10)
-	for i := 0; i < len(matches) && i < 10; i++ {
-		result = append(result, matches[i].path)
-	}
-
-	a.autocomplete.Matches = result
-	// Reset selection if out of bounds
-	if a.autocomplete.Selected >= len(result) {
-		a.autocomplete.Selected = 0
-	}
+	return &dive.InputResponse{Value: input}, nil
 }
 
 // expandFileReferences expands @filepath references in the input to file contents
 func (a *App) expandFileReferences(input string) (string, error) {
-	// Regex to find @filepath patterns (match until whitespace or end)
 	re := regexp.MustCompile(`@([^\s]+)`)
 
 	var lastErr error
 	result := re.ReplaceAllStringFunc(input, func(match string) string {
 		path := match[1:] // Remove @
 
-		// Only allow relative paths (security)
+		// Only allow relative paths
 		if filepath.IsAbs(path) {
 			lastErr = fmt.Errorf("absolute paths not allowed: %s", path)
 			return match
@@ -1182,7 +936,7 @@ func (a *App) expandFileReferences(input string) (string, error) {
 		// Resolve path relative to workspace
 		fullPath := filepath.Join(a.workspaceDir, path)
 
-		// Verify path is within workspace (prevent directory traversal)
+		// Verify path is within workspace
 		absPath, err := filepath.Abs(fullPath)
 		if err != nil {
 			lastErr = fmt.Errorf("invalid path %s: %w", path, err)
@@ -1198,7 +952,7 @@ func (a *App) expandFileReferences(input string) (string, error) {
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
 			lastErr = fmt.Errorf("cannot read %s: %w", path, err)
-			return match // Keep original on error
+			return match
 		}
 
 		// Format as XML-style tag
@@ -1206,4 +960,114 @@ func (a *App) expandFileReferences(input string) (string, error) {
 	})
 
 	return result, lastErr
+}
+
+// fuzzyMatch returns a score for how well the pattern matches the text
+func fuzzyMatch(pattern, text string) int {
+	pattern = strings.ToLower(pattern)
+	text = strings.ToLower(text)
+
+	if len(pattern) == 0 {
+		return 0
+	}
+	if len(pattern) > len(text) {
+		return -1
+	}
+
+	patternIdx := 0
+	score := 0
+	lastMatchIdx := -1
+	consecutiveBonus := 0
+
+	for i := 0; i < len(text) && patternIdx < len(pattern); i++ {
+		if text[i] == pattern[patternIdx] {
+			score += 10
+			if lastMatchIdx == i-1 {
+				consecutiveBonus++
+				score += consecutiveBonus * 5
+			} else {
+				consecutiveBonus = 0
+			}
+			if i == 0 || text[i-1] == '/' || text[i-1] == '_' || text[i-1] == '-' || text[i-1] == '.' {
+				score += 15
+			}
+			lastSlash := strings.LastIndex(text, "/")
+			if i > lastSlash {
+				score += 5
+			}
+			lastMatchIdx = i
+			patternIdx++
+		}
+	}
+
+	if patternIdx < len(pattern) {
+		return -1
+	}
+
+	score -= strings.Count(text, "/") * 2
+	score -= len(text) / 10
+
+	return score
+}
+
+// getFileMatches returns files matching the prefix for autocomplete
+func (a *App) getFileMatches(prefix string) []string {
+	if prefix == "" {
+		return nil
+	}
+
+	excludeDirs := map[string]bool{
+		".git": true, "node_modules": true, "vendor": true,
+		"__pycache__": true, ".venv": true, "dist": true,
+		"build": true, ".idea": true, ".vscode": true,
+	}
+
+	type scoredMatch struct {
+		path  string
+		score int
+	}
+	var matches []scoredMatch
+
+	_ = filepath.Walk(a.workspaceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(a.workspaceDir, path)
+		if err != nil || relPath == "." {
+			return nil
+		}
+
+		if info.IsDir() {
+			if excludeDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		score := fuzzyMatch(prefix, relPath)
+		if score >= 0 {
+			matches = append(matches, scoredMatch{path: relPath, score: score})
+		}
+
+		if len(matches) >= 100 {
+			return filepath.SkipAll
+		}
+
+		return nil
+	})
+
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		return len(matches[i].path) < len(matches[j].path)
+	})
+
+	result := make([]string, 0, 10)
+	for i := 0; i < len(matches) && i < 10; i++ {
+		result = append(result, matches[i].path)
+	}
+
+	return result
 }
