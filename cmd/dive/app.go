@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,15 +9,60 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/wonton/terminal"
 	"github.com/deepnoodle-ai/wonton/tui"
-	"golang.org/x/term"
 )
+
+// Custom events for state changes from background goroutines.
+// These are sent via runner.SendEvent() and handled in HandleEvent(),
+// ensuring all state mutations happen in the main event loop goroutine.
+// All events implement tui.Event by embedding baseEvent.
+
+type baseEvent struct {
+	time time.Time
+}
+
+func (e baseEvent) Timestamp() time.Time { return e.time }
+
+func newBaseEvent() baseEvent { return baseEvent{time: time.Now()} }
+
+type streamTextEvent struct {
+	baseEvent
+	text string
+}
+
+type toolCallEvent struct {
+	baseEvent
+	call *llm.ToolUseContent
+}
+
+type toolResultEvent struct {
+	baseEvent
+	result *dive.ToolCallResult
+}
+
+type processingStartEvent struct {
+	baseEvent
+	userInput string
+	expanded  string
+}
+
+type processingEndEvent struct {
+	baseEvent
+	err error
+}
+
+type showDialogEvent struct {
+	baseEvent
+	dialog *DialogState
+}
+
+type hideDialogEvent struct {
+	baseEvent
+}
 
 // MessageType distinguishes regular messages from tool calls
 type MessageType int
@@ -61,23 +105,64 @@ type Message struct {
 	ToolDone        bool
 }
 
-// AutocompleteState tracks file path autocomplete
-type AutocompleteState struct {
-	Active        bool     // Whether autocomplete dropdown is showing
-	Prefix        string   // Text being matched (after last @)
-	StartIdx      int      // Position of @ in input string (byte index)
-	Matches       []string // Matching file paths (relative to workspace)
-	Selected      int      // Currently selected match index
-	PrevLineCount int      // Number of dropdown lines shown in previous render (for clearing)
+// DialogType represents the type of tool dialog
+type DialogType int
+
+const (
+	DialogTypeConfirm DialogType = iota
+	DialogTypeSelect
+	DialogTypeMultiSelect
+	DialogTypeInput
+)
+
+// DialogState holds state for all tool dialogs
+type DialogState struct {
+	Type           DialogType
+	Active         bool
+	Title          string
+	Message        string
+	ContentPreview string
+
+	// For confirm
+	ConfirmChan chan bool
+
+	// For select
+	Options      []DialogOption
+	DefaultIndex int
+	SelectChan   chan int // -1 for cancel
+
+	// For multi-select
+	MultiSelectChan chan []int // nil for cancel
+
+	// For input
+	DefaultValue string
+	InputValue   string
+	InputChan    chan string // empty for cancel
 }
 
-// App is the main CLI application
-type App struct {
-	mu sync.RWMutex
+// DialogOption represents an option in select/multi-select dialogs
+type DialogOption struct {
+	Label       string
+	Description string
+	Value       string
+	Selected    bool
+}
 
+// App is the main CLI application.
+// All state is accessed only from the main event loop goroutine (via LiveView/HandleEvent),
+// except for immutable fields (agent, workspaceDir, modelName, runner).
+// Background goroutines send events via runner.SendEvent() for state changes.
+type App struct {
 	agent        *dive.StandardAgent
 	workspaceDir string
 	modelName    string
+
+	// InlineApp runner
+	runner *tui.InlineApp
+
+	// Input state
+	inputText    string
+	historyIndex int // -1 when not navigating history
 
 	// Chat state
 	messages              []Message
@@ -89,9 +174,7 @@ type App struct {
 	needNewTextMessage bool // set after tool calls to create new text message
 
 	// Command history
-	history      []string
-	historyIndex int
-	savedInput   string // saved input when navigating history
+	history []string
 
 	// UI state
 	frame               uint64
@@ -103,20 +186,20 @@ type App struct {
 	todos     []Todo
 	showTodos bool
 
-	// Live printer for streaming updates
-	live   *tui.LivePrinter
-	ticker *time.Ticker
-	done   chan struct{}
+	// Tool dialog state (confirmations, selections, input)
+	dialogState *DialogState
+
+	// Autocomplete state
+	autocompleteMatches []string
+	autocompleteIndex   int
+	autocompletePrefix  string
+
+	// Streaming text buffer (flushed on tick for batched updates)
+	streamBuffer string
 
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	// Terminal state for raw input
-	oldState *term.State
-
-	// File autocomplete state
-	autocomplete AutocompleteState
 }
 
 // NewApp creates a new CLI application
@@ -135,51 +218,629 @@ func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 	}
 }
 
-// Run starts the CLI application
-func (a *App) Run() error {
-	// Print header and intro once at startup
-	a.printHeader()
-	a.printIntro()
+// LiveView implements tui.InlineApplication - returns the live region view.
+// Called only from the main event loop goroutine - no locking needed.
+func (a *App) LiveView() tui.View {
+	views := make([]tui.View, 0)
 
-	// Main input loop
-	for {
-		// Print complete input area (divider + prompt + divider + footer)
-		// Cursor is positioned after prompt for typing
-		a.printInputArea()
+	// Show tool dialog if active
+	if a.dialogState != nil && a.dialogState.Active {
+		views = append(views, a.dialogView())
+		return tui.Stack(views...)
+	}
 
-		// Read user input
-		input, err := a.readInput()
-		if err != nil {
-			return err
+	// Show streaming content during processing
+	if a.processing {
+		liveContent := a.buildLiveView()
+		if liveContent != nil {
+			views = append(views, liveContent)
+		}
+	}
+
+	// Show todos if visible and not processing
+	if !a.processing && a.showTodos && len(a.todos) > 0 {
+		views = append(views, a.todoListView())
+	}
+
+	// Input area
+	views = append(views, tui.Divider())
+	views = append(views,
+		tui.InputField(&a.inputText).
+			ID("main-input").
+			Prompt(" > ").
+			PromptStyle(tui.NewStyle().WithForeground(tui.ColorCyan)).
+			Placeholder("Type a message... (@filename for autocomplete)").
+			Multiline(true).
+			Width(80).
+			MaxHeight(10).
+			OnSubmit(func(value string) {
+				a.submitInput(value)
+			}),
+	)
+	views = append(views, tui.Divider())
+
+	// Show autocomplete options below the bottom divider (always reserve 8 lines)
+	if len(a.autocompleteMatches) > 0 {
+		for i := 0; i < 8; i++ {
+			if i < len(a.autocompleteMatches) {
+				match := a.autocompleteMatches[i]
+				if i == a.autocompleteIndex {
+					views = append(views, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
+				} else {
+					views = append(views, tui.Text("   @%s", match).Hint())
+				}
+			} else {
+				views = append(views, tui.Text(""))
+			}
+		}
+	}
+
+	if len(views) == 0 {
+		return tui.Text("")
+	}
+
+	return tui.Stack(views...).Gap(0)
+}
+
+// dialogView builds the view for tool dialogs
+func (a *App) dialogView() tui.View {
+	if a.dialogState == nil {
+		return nil
+	}
+
+	views := []tui.View{
+		tui.Divider(),
+		tui.Text(" %s", a.dialogState.Title).Bold(),
+	}
+
+	if a.dialogState.Message != "" {
+		views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+	}
+
+	if a.dialogState.ContentPreview != "" {
+		views = append(views, tui.Divider().Char('-'))
+		for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
+			views = append(views, tui.Text(" %s", line).Hint())
+		}
+	}
+
+	switch a.dialogState.Type {
+	case DialogTypeConfirm:
+		views = append(views,
+			tui.Divider().Char('-'),
+			tui.Group(
+				tui.Text(" ❯ ").Fg(tui.ColorCyan),
+				tui.Text("Yes").Bold(),
+				tui.Text(" (enter/y)  ").Hint(),
+				tui.Text("No").Hint(),
+				tui.Text(" (n/esc)").Hint(),
+			),
+		)
+
+	case DialogTypeSelect:
+		views = append(views, tui.Text(""))
+		for i, opt := range a.dialogState.Options {
+			marker := "  "
+			if i == a.dialogState.DefaultIndex {
+				marker = "* "
+			}
+			optView := tui.Text(" %s%d) %s", marker, i+1, opt.Label)
+			if opt.Description != "" {
+				views = append(views, tui.Group(optView, tui.Text(" - %s", opt.Description).Muted()))
+			} else {
+				views = append(views, optView)
+			}
+		}
+		views = append(views, tui.Text(""))
+		views = append(views, tui.Text(" Press 1-%d to select, Enter for default, Esc to cancel", len(a.dialogState.Options)).Hint())
+
+	case DialogTypeMultiSelect:
+		views = append(views, tui.Text(""))
+		for i, opt := range a.dialogState.Options {
+			checkbox := "[ ]"
+			if opt.Selected {
+				checkbox = "[x]"
+			}
+			views = append(views, tui.Text("  %s %d) %s", checkbox, i+1, opt.Label))
+		}
+		views = append(views, tui.Text(""))
+		views = append(views, tui.Text(" Press 1-%d to toggle, Enter to confirm, Esc to cancel", len(a.dialogState.Options)).Hint())
+
+	case DialogTypeInput:
+		views = append(views, tui.Text(""))
+		// Note: InputField handles its own Enter key via OnSubmit
+		// Escape is handled by handleDialogKey
+		inputChan := a.dialogState.InputChan
+		defaultValue := a.dialogState.DefaultValue
+		views = append(views,
+			tui.InputField(&a.dialogState.InputValue).
+				ID("dialog-input").
+				Prompt(" > ").
+				PromptStyle(tui.NewStyle().WithForeground(tui.ColorCyan)).
+				Placeholder(defaultValue).
+				Width(60).
+				OnSubmit(func(value string) {
+					if value == "" {
+						value = defaultValue
+					}
+					inputChan <- value
+				}),
+		)
+		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Hint())
+	}
+
+	return tui.Stack(views...)
+}
+
+// HandleEvent implements tui.EventHandler - handles all events.
+// Called only from the main event loop goroutine - no locking needed.
+func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
+	switch e := event.(type) {
+	case tui.KeyEvent:
+		cmds := a.handleKeyEvent(e)
+		// Update autocomplete after key events (input may have changed)
+		a.updateAutocomplete()
+		return cmds
+	case tui.TickEvent:
+		a.frame = e.Frame
+		// Flush any buffered streaming text (batches updates to 30 FPS max)
+		a.flushStreamBuffer()
+
+	// Custom events from background goroutines
+	case processingStartEvent:
+		a.handleProcessingStart(e)
+	case streamTextEvent:
+		a.handleStreamText(e.text)
+	case toolCallEvent:
+		a.handleToolCall(e.call)
+	case toolResultEvent:
+		a.handleToolResult(e.result)
+	case processingEndEvent:
+		a.handleProcessingEnd(e.err)
+	case showDialogEvent:
+		a.dialogState = e.dialog
+	case hideDialogEvent:
+		a.dialogState = nil
+	}
+	return nil
+}
+
+// handleDialogKey handles key events for dialogs
+func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
+	switch a.dialogState.Type {
+	case DialogTypeConfirm:
+		switch {
+		case e.Key == tui.KeyEnter || e.Rune == 'y' || e.Rune == 'Y':
+			a.dialogState.ConfirmChan <- true
+			a.dialogState.Active = false
+		case e.Rune == 'n' || e.Rune == 'N' || e.Key == tui.KeyEscape:
+			a.dialogState.ConfirmChan <- false
+			a.dialogState.Active = false
 		}
 
-		// Clear entire input area
-		a.clearInputArea(input)
-
-		if input == "" {
-			continue
-		}
-
-		// Handle special commands
-		if strings.HasPrefix(input, "/") {
-			if a.handleCommand(input) {
-				continue
+	case DialogTypeSelect:
+		switch {
+		case e.Key == tui.KeyEscape:
+			a.dialogState.SelectChan <- -1
+			a.dialogState.Active = false
+		case e.Key == tui.KeyEnter:
+			a.dialogState.SelectChan <- a.dialogState.DefaultIndex
+			a.dialogState.Active = false
+		case e.Rune >= '1' && e.Rune <= '9':
+			idx := int(e.Rune - '1')
+			if idx < len(a.dialogState.Options) {
+				a.dialogState.SelectChan <- idx
+				a.dialogState.Active = false
 			}
 		}
 
-		// Process the message
-		if err := a.processMessage(input); err != nil {
-			if err == context.Canceled {
-				fmt.Println("\n(interrupted)")
-				continue
+	case DialogTypeMultiSelect:
+		switch {
+		case e.Key == tui.KeyEscape:
+			a.dialogState.MultiSelectChan <- nil
+			a.dialogState.Active = false
+		case e.Key == tui.KeyEnter:
+			// Return selected indices
+			var selected []int
+			for i, opt := range a.dialogState.Options {
+				if opt.Selected {
+					selected = append(selected, i)
+				}
 			}
-			return err
+			a.dialogState.MultiSelectChan <- selected
+			a.dialogState.Active = false
+		case e.Rune >= '1' && e.Rune <= '9':
+			idx := int(e.Rune - '1')
+			if idx < len(a.dialogState.Options) {
+				a.dialogState.Options[idx].Selected = !a.dialogState.Options[idx].Selected
+			}
+		}
+
+	case DialogTypeInput:
+		// Only handle Escape - Enter is handled by InputField's OnSubmit callback
+		if e.Key == tui.KeyEscape {
+			a.dialogState.InputChan <- ""
+			a.dialogState.Active = false
+		}
+		// Other keys are handled by InputField
+	}
+
+	return nil
+}
+
+// updateAutocomplete updates autocomplete state based on current input
+func (a *App) updateAutocomplete() {
+	// Find the last @ symbol and extract the prefix after it
+	lastAt := strings.LastIndex(a.inputText, "@")
+	if lastAt < 0 {
+		a.autocompleteMatches = nil
+		a.autocompleteIndex = 0
+		a.autocompletePrefix = ""
+		return
+	}
+
+	// Extract prefix after @
+	prefix := a.inputText[lastAt+1:]
+
+	// Check if there's a space after the @ (autocomplete completed)
+	if strings.Contains(prefix, " ") || strings.Contains(prefix, "\n") {
+		a.autocompleteMatches = nil
+		a.autocompleteIndex = 0
+		a.autocompletePrefix = ""
+		return
+	}
+
+	// Only update matches if prefix changed
+	if prefix != a.autocompletePrefix {
+		a.autocompletePrefix = prefix
+		a.autocompleteMatches = a.getFileMatches(prefix)
+		if len(a.autocompleteMatches) > 8 {
+			a.autocompleteMatches = a.autocompleteMatches[:8]
+		}
+		a.autocompleteIndex = 0
+	}
+}
+
+// selectAutocomplete selects the current autocomplete option
+func (a *App) selectAutocomplete() bool {
+	if len(a.autocompleteMatches) == 0 || a.autocompleteIndex >= len(a.autocompleteMatches) {
+		return false
+	}
+
+	selected := a.autocompleteMatches[a.autocompleteIndex]
+
+	// Find the last @ and replace prefix with selected match
+	lastAt := strings.LastIndex(a.inputText, "@")
+	if lastAt >= 0 {
+		a.inputText = a.inputText[:lastAt+1] + selected + " "
+	}
+
+	// Clear autocomplete state
+	a.autocompleteMatches = nil
+	a.autocompleteIndex = 0
+	a.autocompletePrefix = ""
+
+	return true
+}
+
+// handleKeyEvent processes keyboard input
+func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
+	// Handle dialogs
+	if a.dialogState != nil && a.dialogState.Active {
+		return a.handleDialogKey(e)
+	}
+
+	// Handle autocomplete navigation
+	if len(a.autocompleteMatches) > 0 {
+		switch e.Key {
+		case tui.KeyArrowUp:
+			if a.autocompleteIndex > 0 {
+				a.autocompleteIndex--
+			}
+			return nil
+		case tui.KeyArrowDown:
+			if a.autocompleteIndex < len(a.autocompleteMatches)-1 {
+				a.autocompleteIndex++
+			}
+			return nil
+		case tui.KeyTab:
+			a.selectAutocomplete()
+			return nil
+		case tui.KeyEscape:
+			// Clear autocomplete
+			a.autocompleteMatches = nil
+			a.autocompleteIndex = 0
+			a.autocompletePrefix = ""
+			return nil
+		}
+	}
+
+	// Handle global keys
+	switch e.Key {
+	case tui.KeyCtrlC:
+		if a.processing {
+			a.cancel()
+		} else {
+			return []tui.Cmd{tui.Quit()}
+		}
+		return nil
+	case tui.KeyEscape:
+		if a.processing {
+			a.cancel()
+		}
+		return nil
+	case tui.KeyArrowUp:
+		// History navigation (only when no autocomplete and input is empty or navigating)
+		if !a.processing && len(a.history) > 0 && len(a.autocompleteMatches) == 0 {
+			if a.historyIndex < 0 {
+				a.historyIndex = len(a.history) - 1
+			} else if a.historyIndex > 0 {
+				a.historyIndex--
+			}
+			if a.historyIndex >= 0 && a.historyIndex < len(a.history) {
+				a.inputText = a.history[a.historyIndex]
+			}
+		}
+		return nil
+	case tui.KeyArrowDown:
+		// History navigation (only when no autocomplete)
+		if !a.processing && a.historyIndex >= 0 && len(a.autocompleteMatches) == 0 {
+			a.historyIndex++
+			if a.historyIndex >= len(a.history) {
+				a.historyIndex = -1
+				a.inputText = ""
+			} else {
+				a.inputText = a.history[a.historyIndex]
+			}
+		}
+		return nil
+	}
+
+	return nil
+}
+
+// submitInput handles input submission
+func (a *App) submitInput(value string) {
+	// If autocomplete is active, select instead of submitting
+	if len(a.autocompleteMatches) > 0 {
+		a.selectAutocomplete()
+		return
+	}
+
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || a.processing {
+		return
+	}
+
+	a.inputText = "" // Clear input
+	a.historyIndex = -1
+	a.history = append(a.history, trimmed)
+
+	// Handle commands
+	if strings.HasPrefix(trimmed, "/") {
+		if a.handleCommand(trimmed) {
+			return
+		}
+	}
+
+	// Process message asynchronously
+	go a.processMessageAsync(trimmed)
+}
+
+// processMessageAsync handles message processing in background.
+// Sends events to the main event loop instead of modifying state directly.
+func (a *App) processMessageAsync(input string) {
+	// Expand file references (uses only immutable workspaceDir)
+	expanded, err := a.expandFileReferences(input)
+	if err != nil {
+		a.runner.Printf("Warning: %s", err.Error())
+	}
+
+	// Send start event to set up state in the main goroutine
+	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: input, expanded: expanded})
+
+	// Create response with streaming
+	_, err = a.agent.CreateResponse(a.ctx,
+		dive.WithInput(expanded),
+		dive.WithThreadID("main"),
+		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			// Send events for each agent response item
+			switch item.Type {
+			case dive.ResponseItemTypeModelEvent:
+				if item.Event != nil && item.Event.Delta != nil {
+					if text := item.Event.Delta.Text; text != "" {
+						a.runner.SendEvent(streamTextEvent{baseEvent: newBaseEvent(), text: text})
+					}
+				}
+			case dive.ResponseItemTypeToolCall:
+				a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
+			case dive.ResponseItemTypeToolCallResult:
+				a.runner.SendEvent(toolResultEvent{baseEvent: newBaseEvent(), result: item.ToolCallResult})
+			}
+			return nil
+		}),
+	)
+
+	// Send completion event
+	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err})
+}
+
+// Event handlers for background goroutine events
+
+func (a *App) handleProcessingStart(e processingStartEvent) {
+	// Add user message
+	userMsg := Message{
+		Role:    "user",
+		Content: e.userInput,
+		Time:    time.Now(),
+		Type:    MessageTypeText,
+	}
+	a.messages = append(a.messages, userMsg)
+
+	// Print user message to scrollback (with blank lines before and after)
+	a.runner.Print(tui.Text(""))
+	a.runner.Print(tui.PaddingHV(1, 0, a.textMessageView(userMsg, len(a.messages)-1)))
+	a.runner.Print(tui.Text(""))
+
+	// Prepare for streaming response
+	a.currentMessage = &Message{
+		Role:    "assistant",
+		Content: "",
+		Time:    time.Now(),
+		Type:    MessageTypeText,
+	}
+	a.messages = append(a.messages, *a.currentMessage)
+	a.streamingMessageIndex = len(a.messages) - 1
+	a.needNewTextMessage = false
+
+	a.processing = true
+	a.thinking = true
+	a.processingStartTime = time.Now()
+}
+
+func (a *App) handleStreamText(text string) {
+	// Buffer text for batched updates (flushed on tick)
+	a.streamBuffer += text
+	a.thinking = false
+}
+
+func (a *App) flushStreamBuffer() {
+	if a.streamBuffer == "" {
+		return
+	}
+
+	needNewMessage := a.streamingMessageIndex < 0 ||
+		a.streamingMessageIndex >= len(a.messages) ||
+		a.needNewTextMessage
+
+	if needNewMessage {
+		a.messages = append(a.messages, Message{
+			Role:    "assistant",
+			Content: "",
+			Time:    time.Now(),
+			Type:    MessageTypeText,
+		})
+		a.streamingMessageIndex = len(a.messages) - 1
+		a.needNewTextMessage = false
+	}
+
+	a.messages[a.streamingMessageIndex].Content += a.streamBuffer
+	a.streamBuffer = ""
+}
+
+func (a *App) handleToolCall(call *llm.ToolUseContent) {
+	a.thinking = false
+
+	// Parse TodoWrite tool calls
+	if call.Name == "todo_write" || call.Name == "TodoWrite" {
+		a.parseTodoWriteInput(call.Input)
+	}
+
+	msg := Message{
+		Role:      "assistant",
+		Time:      time.Now(),
+		Type:      MessageTypeToolCall,
+		ToolID:    call.ID,
+		ToolName:  call.Name,
+		ToolInput: string(call.Input),
+		ToolDone:  false,
+	}
+	a.messages = append(a.messages, msg)
+	a.toolCallIndex[call.ID] = len(a.messages) - 1
+	a.needNewTextMessage = true
+}
+
+func (a *App) handleToolResult(result *dive.ToolCallResult) {
+	if idx, ok := a.toolCallIndex[result.ID]; ok && idx < len(a.messages) {
+		a.messages[idx].ToolDone = true
+		if result.Result != nil {
+			if result.Result.IsError {
+				a.messages[idx].ToolError = true
+			}
+			display := result.Result.Display
+			if display == "" && len(result.Result.Content) > 0 {
+				for _, c := range result.Result.Content {
+					if c.Type == dive.ToolResultContentTypeText {
+						display = c.Text
+						break
+					}
+				}
+			}
+			if display != "" {
+				a.messages[idx].ToolResultLines = strings.Split(display, "\n")
+			}
+			if len(a.messages[idx].ToolResultLines) > 0 {
+				a.messages[idx].ToolResult = a.messages[idx].ToolResultLines[0]
+			}
 		}
 	}
 }
 
-// printHeader prints the header once at startup
-func (a *App) printHeader() {
+func (a *App) handleProcessingEnd(err error) {
+	// Flush any remaining buffered text
+	a.flushStreamBuffer()
+
+	a.processing = false
+	a.thinking = false
+
+	if err != nil && err != context.Canceled {
+		errMsg := Message{
+			Role:    "system",
+			Content: "Error: " + err.Error(),
+			Time:    time.Now(),
+			Type:    MessageTypeText,
+		}
+		a.messages = append(a.messages, errMsg)
+	}
+
+	// Print final response to scrollback
+	a.printRecentMessagesToScrollback()
+
+	a.currentMessage = nil
+	a.toolCallIndex = make(map[string]int)
+}
+
+// printRecentMessagesToScrollback prints the messages from current interaction to scrollback
+func (a *App) printRecentMessagesToScrollback() {
+	// Find start of current interaction
+	startIdx := 0
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == "user" {
+			startIdx = i + 1 // Start after user message (already printed)
+			break
+		}
+	}
+
+	// Print each message with blank lines between them
+	for i := startIdx; i < len(a.messages); i++ {
+		msg := a.messages[i]
+		view := a.messageViewStatic(msg, i)
+		if view != nil {
+			a.runner.Print(tui.PaddingHV(1, 0, view))
+			a.runner.Print(tui.Text(""))
+		}
+	}
+}
+
+// Run starts the CLI application
+func (a *App) Run() error {
+	// Create InlineApp runner with 30 FPS for animations
+	a.runner = tui.NewInlineApp(
+		tui.WithInlineFPS(30),
+		tui.WithInlineBracketedPaste(true),
+		tui.WithInlineKittyKeyboard(true),
+	)
+
+	// Print header and intro to scrollback first
+	a.printHeaderToScrollback()
+	a.printIntroToScrollback()
+
+	// Run the inline app (blocks until quit)
+	return a.runner.Run(a)
+}
+
+// printHeaderToScrollback prints the header to scrollback
+func (a *App) printHeaderToScrollback() {
 	header := tui.Group(
 		tui.Text(" Dive ").Bold().Fg(tui.ColorCyan),
 		tui.Spacer(),
@@ -189,447 +850,43 @@ func (a *App) printHeader() {
 	tui.Print(tui.Divider())
 }
 
-// printIntro prints the intro/splash screen
-func (a *App) printIntro() {
+// printIntroToScrollback prints the intro/splash screen to scrollback
+func (a *App) printIntroToScrollback() {
 	// Shorten workspace path for display
 	wsDisplay := a.workspaceDir
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(wsDisplay, home) {
 		wsDisplay = "~" + wsDisplay[len(home):]
 	}
 
-	// Build intro message - same as TUI
+	// Build intro message
 	msg := Message{
 		Role:    "intro",
 		Content: a.modelName + "\n" + wsDisplay,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
 	}
+
 	a.messages = append(a.messages, msg)
 
 	// Print the intro view
 	view := a.introView(msg)
-	tui.Print(tui.Padding(1, view))
-}
-
-// printInputArea prints the input prompt area
-func (a *App) printInputArea() {
-	tui.Newline()
-	tui.Print(tui.Divider())
-	fmt.Print("\n") // Move to next line for input
-}
-
-// readInput reads a line of input from the user with interactive autocomplete
-func (a *App) readInput() (string, error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return a.readLineFallback()
-	}
-
-	// Put terminal in raw mode
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return a.readLineFallback()
-	}
-	defer term.Restore(fd, oldState)
-
-	// Use wonton's KeyDecoder for proper input handling
-	decoder := terminal.NewKeyDecoder(os.Stdin)
-
-	var input []byte
-	a.autocomplete = AutocompleteState{}
-	a.historyIndex = -1
-	a.savedInput = ""
-
-	for {
-		// Render current state
-		a.renderInputLine(string(input))
-
-		// Read next event
-		event, err := decoder.ReadEvent()
-		if err != nil {
-			return "", err
-		}
-
-		keyEvent, ok := event.(terminal.KeyEvent)
-		if !ok {
-			continue // Ignore mouse events for now
-		}
-
-		// Handle paste
-		if keyEvent.Paste != "" {
-			input = append(input, []byte(keyEvent.Paste)...)
-			continue
-		}
-
-		// Handle special keys
-		switch keyEvent.Key {
-		case terminal.KeyCtrlC:
-			a.clearAutocompleteDisplay()
-			return "", context.Canceled
-
-		case terminal.KeyCtrlD:
-			a.clearAutocompleteDisplay()
-			return "", context.Canceled
-
-		case terminal.KeyEnter:
-			if keyEvent.Shift {
-				// Shift+Enter: insert newline
-				input = append(input, '\n')
-				continue
-			}
-			if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-				// Accept selected autocomplete
-				selected := a.autocomplete.Matches[a.autocomplete.Selected]
-				input = append(input[:a.autocomplete.StartIdx], []byte("@"+selected)...)
-				prevLines := a.autocomplete.PrevLineCount
-				a.autocomplete = AutocompleteState{}
-				a.autocomplete.PrevLineCount = prevLines
-				continue
-			}
-			// Submit input
-			a.clearAutocompleteDisplay()
-			fmt.Print("\r\n")
-			return strings.TrimSpace(string(input)), nil
-
-		case terminal.KeyTab:
-			if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-				selected := a.autocomplete.Matches[a.autocomplete.Selected]
-				input = append(input[:a.autocomplete.StartIdx], []byte("@"+selected+" ")...)
-				prevLines := a.autocomplete.PrevLineCount
-				a.autocomplete = AutocompleteState{}
-				a.autocomplete.PrevLineCount = prevLines
-			}
-			continue
-
-		case terminal.KeyEscape:
-			if a.autocomplete.Active {
-				prevLines := a.autocomplete.PrevLineCount
-				a.autocomplete = AutocompleteState{}
-				a.autocomplete.PrevLineCount = prevLines
-			}
-			continue
-
-		case terminal.KeyBackspace:
-			if len(input) > 0 {
-				input = input[:len(input)-1]
-				a.historyIndex = -1
-				if a.autocomplete.Active {
-					if len(input) <= a.autocomplete.StartIdx {
-						prevLines := a.autocomplete.PrevLineCount
-						a.autocomplete = AutocompleteState{}
-						a.autocomplete.PrevLineCount = prevLines
-					} else {
-						a.autocomplete.Prefix = string(input[a.autocomplete.StartIdx+1:])
-						a.updateAutocompleteMatches()
-					}
-				}
-			}
-			continue
-
-		case terminal.KeyArrowUp:
-			if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-				if a.autocomplete.Selected > 0 {
-					a.autocomplete.Selected--
-				}
-			} else if len(a.history) > 0 {
-				if a.historyIndex == -1 {
-					a.savedInput = string(input)
-					a.historyIndex = len(a.history) - 1
-				} else if a.historyIndex > 0 {
-					a.historyIndex--
-				}
-				input = []byte(a.history[a.historyIndex])
-			}
-			continue
-
-		case terminal.KeyArrowDown:
-			if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-				if a.autocomplete.Selected < len(a.autocomplete.Matches)-1 {
-					a.autocomplete.Selected++
-				}
-			} else if a.historyIndex != -1 {
-				if a.historyIndex < len(a.history)-1 {
-					a.historyIndex++
-					input = []byte(a.history[a.historyIndex])
-				} else {
-					a.historyIndex = -1
-					input = []byte(a.savedInput)
-				}
-			}
-			continue
-
-		case terminal.KeyCtrlJ:
-			// Ctrl+J: insert newline (alternative to Shift+Enter)
-			input = append(input, '\n')
-			continue
-		}
-
-		// Handle regular character input
-		if keyEvent.Key == terminal.KeyUnknown && keyEvent.Rune != 0 {
-			r := keyEvent.Rune
-			input = append(input, string(r)...)
-			a.historyIndex = -1
-
-			if r == '@' {
-				// Start autocomplete
-				a.autocomplete.Active = true
-				a.autocomplete.StartIdx = len(input) - 1
-				a.autocomplete.Prefix = ""
-				a.autocomplete.Selected = 0
-				a.autocomplete.Matches = nil
-			} else if a.autocomplete.Active {
-				// Check if this character ends autocomplete
-				if r == ' ' || strings.ContainsRune("?!,.:;'\")}]>", r) {
-					prevLines := a.autocomplete.PrevLineCount
-					a.autocomplete = AutocompleteState{}
-					a.autocomplete.PrevLineCount = prevLines
-				} else {
-					a.autocomplete.Prefix = string(input[a.autocomplete.StartIdx+1:])
-					a.updateAutocompleteMatches()
-				}
-			}
-		}
-	}
-}
-
-// readLineFallback reads a line when not in a terminal
-func (a *App) readLineFallback() (string, error) {
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return "", err
-		}
-		return "", context.Canceled
-	}
-	return strings.TrimSpace(scanner.Text()), nil
-}
-
-// renderInputLine renders the input line, divider, and autocomplete dropdown
-func (a *App) renderInputLine(input string) {
-	// Get terminal width for divider
-	fd := int(os.Stdout.Fd())
-	width, _, err := term.GetSize(fd)
-	if err != nil || width <= 0 {
-		width = 80
-	}
-	divider := strings.Repeat("─", width)
-
-	// Move cursor to start of line and clear
-	fmt.Print("\r")
-	tui.ClearLine()
-
-	// Print prompt and input
-	fmt.Print(" > " + input)
-
-	// Calculate how many lines we'll show below input (divider + autocomplete)
-	currentLineCount := 1 // Always have divider
-	if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-		acLines := len(a.autocomplete.Matches)
-		if acLines > 5 {
-			acLines = 6 // 5 matches + "... +N more"
-		}
-		currentLineCount += acLines
-	}
-
-	// Clear any extra lines from previous render
-	if a.autocomplete.PrevLineCount > currentLineCount {
-		for i := 0; i < a.autocomplete.PrevLineCount; i++ {
-			fmt.Print("\n")
-			tui.ClearLine()
-		}
-		for i := 0; i < a.autocomplete.PrevLineCount; i++ {
-			fmt.Print("\033[A")
-		}
-	}
-
-	// Always print divider first (right below input)
-	fmt.Print("\n")
-	tui.ClearLine()
-	fmt.Printf("\r\033[90m%s\033[0m", divider)
-
-	// If autocomplete active, show dropdown below divider
-	if a.autocomplete.Active && len(a.autocomplete.Matches) > 0 {
-		maxShow := 5
-		if len(a.autocomplete.Matches) < maxShow {
-			maxShow = len(a.autocomplete.Matches)
-		}
-		for i := 0; i < maxShow; i++ {
-			fmt.Print("\n")
-			tui.ClearLine()
-			match := a.autocomplete.Matches[i]
-			if i == a.autocomplete.Selected {
-				fmt.Printf("\r   \033[7m %s \033[0m", match) // Inverted colors for selected
-			} else {
-				fmt.Printf("\r    %s", match)
-			}
-		}
-		if len(a.autocomplete.Matches) > maxShow {
-			fmt.Print("\n")
-			tui.ClearLine()
-			fmt.Printf("\r    ... +%d more", len(a.autocomplete.Matches)-maxShow)
-			maxShow++
-		}
-
-		// Move cursor back up to input line (over divider + autocomplete)
-		for i := 0; i < maxShow+1; i++ {
-			fmt.Print("\033[A")
-		}
-		// Position cursor at end of input
-		fmt.Printf("\r\033[%dC", 3+len(input))
-		a.autocomplete.PrevLineCount = maxShow + 1
-	} else {
-		// No autocomplete - just divider shown
-		// Clear any extra previous lines below divider
-		if a.autocomplete.PrevLineCount > 1 {
-			for i := 1; i < a.autocomplete.PrevLineCount; i++ {
-				fmt.Print("\n")
-				tui.ClearLine()
-			}
-			for i := 1; i < a.autocomplete.PrevLineCount; i++ {
-				fmt.Print("\033[A")
-			}
-		}
-
-		// Move back up to input line (over divider)
-		fmt.Print("\033[A")
-		// Position cursor at end of input
-		fmt.Printf("\r\033[%dC", 3+len(input))
-		a.autocomplete.PrevLineCount = 1
-	}
-}
-
-// clearAutocompleteDisplay clears any autocomplete dropdown lines and divider
-func (a *App) clearAutocompleteDisplay() {
-	if a.autocomplete.PrevLineCount > 0 {
-		// Move down and clear each line (autocomplete + divider)
-		for i := 0; i < a.autocomplete.PrevLineCount; i++ {
-			fmt.Print("\n")
-			tui.ClearLine()
-		}
-		// Move back up
-		for i := 0; i < a.autocomplete.PrevLineCount; i++ {
-			fmt.Print("\033[A")
-		}
-		a.autocomplete.PrevLineCount = 0
-	}
-}
-
-// updateAutocompleteMatches updates the autocomplete matches based on current prefix
-func (a *App) updateAutocompleteMatches() {
-	a.autocomplete.Matches = a.getFileMatches(a.autocomplete.Prefix)
-	if a.autocomplete.Selected >= len(a.autocomplete.Matches) {
-		a.autocomplete.Selected = 0
-	}
-}
-
-// clearLines clears n lines above cursor
-func (a *App) clearLines(n int) {
-	for i := 0; i < n; i++ {
-		tui.MoveCursorUp(1)
-		tui.ClearLine()
-	}
-}
-
-// clearInputArea clears the input area (blank + divider + input + autocomplete/divider below)
-func (a *App) clearInputArea(input string) {
-	inputLines := a.calculateInputLines(input)
-	// blank (1) + divider above (1) + input line(s) (N) + lines below (autocomplete + divider)
-	totalLines := 2 + inputLines + a.autocomplete.PrevLineCount
-	a.clearLines(totalLines)
-	a.autocomplete.PrevLineCount = 0
-}
-
-// calculateInputLines calculates how many terminal lines the input takes
-func (a *App) calculateInputLines(input string) int {
-	fd := int(os.Stdout.Fd())
-	width, _, err := term.GetSize(fd)
-	if err != nil || width <= 0 {
-		width = 80 // fallback
-	}
-
-	promptLen := 3 // " > "
-	totalLen := promptLen + len(input)
-	lines := (totalLen + width - 1) / width // ceiling division
-	if lines < 1 {
-		lines = 1
-	}
-	return lines
-}
-
-// readSingleKey reads a single keypress (for y/n prompts)
-// Returns the rune for printable keys, or special values:
-// - '\r' or '\n' for Enter
-// - 0x1b for Escape (standalone, not as part of escape sequence)
-// - 0 for special keys (arrows, function keys, etc.) that should be ignored
-func (a *App) readSingleKey() (rune, error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return a.readSingleKeyFallback()
-	}
-
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return a.readSingleKeyFallback()
-	}
-	defer term.Restore(fd, oldState)
-
-	// Use KeyDecoder to properly handle escape sequences
-	decoder := terminal.NewKeyDecoder(os.Stdin)
-	event, err := decoder.ReadEvent()
-	if err != nil {
-		return 0, err
-	}
-
-	keyEvent, ok := event.(terminal.KeyEvent)
-	if !ok {
-		return 0, nil // Mouse event, ignore
-	}
-
-	// Handle special keys
-	switch keyEvent.Key {
-	case terminal.KeyEnter:
-		return '\r', nil
-	case terminal.KeyEscape:
-		return 0x1b, nil
-	case terminal.KeyUnknown:
-		// Regular character
-		return keyEvent.Rune, nil
-	default:
-		// Arrow keys, function keys, etc. - return 0 to indicate "ignore"
-		return 0, nil
-	}
-}
-
-// readSingleKeyFallback reads input when terminal isn't available
-func (a *App) readSingleKeyFallback() (rune, error) {
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return 0, context.Canceled
-	}
-	input := strings.TrimSpace(scanner.Text())
-	if len(input) > 0 {
-		return rune(input[0]), nil
-	}
-	return 0, nil
+	tui.Print(tui.PaddingHV(1, 0, view))
 }
 
 func (a *App) handleCommand(input string) bool {
 	switch input {
 	case "/quit", "/exit", "/q":
-		a.cancel()
-		os.Exit(0)
+		a.runner.Stop()
 		return true
 	case "/clear":
-		tui.ClearScreen()
-		a.printHeader()
-		a.printIntro()
+		a.runner.ClearScrollback()
+		a.printHeaderToScrollback()
+		a.printIntroToScrollback()
 		return true
 	case "/todos", "/t":
-		a.mu.Lock()
 		a.showTodos = !a.showTodos
-		a.mu.Unlock()
 		if a.showTodos {
-			a.printTodos()
+			a.printTodosToScrollback()
 		}
 		return true
 	case "/help", "/?":
@@ -651,220 +908,71 @@ func (a *App) printHelp() {
 		tui.Text("Input:").Bold(),
 		tui.Text("  @filename     Include file contents"),
 		tui.Text("  Enter         Send message"),
+		tui.Text("  Shift+Enter   New line"),
 		tui.Text("  Ctrl+C        Exit"),
 		tui.Text(""),
 	)
-	tui.Print(help)
+	a.runner.Print(help)
 }
 
-func (a *App) printTodos() {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
+func (a *App) printTodosToScrollback() {
 	if len(a.todos) == 0 {
-		fmt.Println("No todos.")
+		a.runner.Printf("No todos.")
 		return
 	}
 
-	view := a.todoListView()
+	view := a.todoListViewStatic()
 	if view != nil {
-		tui.Print(view)
+		a.runner.Print(view)
 	}
 }
 
-func (a *App) processMessage(input string) error {
-	a.mu.Lock()
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" || a.processing {
-		a.mu.Unlock()
-		return nil
-	}
-
-	// Expand file references
-	expanded, err := a.expandFileReferences(trimmed)
-	if err != nil {
-		// Show warning but continue
-		warning := tui.Text("Warning: %s", err.Error()).Warning()
-		tui.Print(tui.Padding(1, warning))
-	}
-
-	// Add to history
-	a.history = append(a.history, input)
-	a.historyIndex = -1
-
-	// Add user message
-	userMsg := Message{
-		Role:    "user",
-		Content: trimmed,
-		Time:    time.Now(),
-		Type:    MessageTypeText,
-	}
-	a.messages = append(a.messages, userMsg)
-
-	// Print user message
-	a.mu.Unlock()
-	tui.Print(tui.Padding(1, a.textMessageView(userMsg, len(a.messages)-1)))
-	a.mu.Lock()
-
-	// Prepare for streaming response
-	a.currentMessage = &Message{
-		Role:    "assistant",
-		Content: "",
-		Time:    time.Now(),
-		Type:    MessageTypeText,
-	}
-	a.messages = append(a.messages, *a.currentMessage)
-	a.streamingMessageIndex = len(a.messages) - 1
-	a.needNewTextMessage = false
-
-	a.processing = true
-	a.thinking = true
-	a.processingStartTime = time.Now()
-	a.mu.Unlock()
-
-	// Start live updates
-	a.startLiveUpdates()
-
-	// Create response with streaming
-	_, err = a.agent.CreateResponse(a.ctx,
-		dive.WithInput(expanded),
-		dive.WithThreadID("main"),
-		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-			return a.handleAgentEvent(item)
-		}),
-	)
-
-	// Stop live updates - content remains in scroll buffer
-	a.stopLiveUpdates(false)
-
-	// Handle completion
-	a.mu.Lock()
-	a.processing = false
-	a.thinking = false
-	a.currentMessage = nil
-	a.toolCallIndex = make(map[string]int)
-
-	if err != nil {
-		errMsg := Message{
-			Role:    "system",
-			Content: "Error: " + err.Error(),
-			Time:    time.Now(),
-			Type:    MessageTypeText,
-		}
-		a.messages = append(a.messages, errMsg)
-		a.mu.Unlock()
-		// Print error to scroll history
-		tui.Print(tui.Padding(1, tui.Text(errMsg.Content).Warning()))
-	} else {
-		a.mu.Unlock()
-	}
-
-	// Note: Live view content is already in scroll buffer, no need to reprint
-
-	return nil
-}
-
-func (a *App) startLiveUpdates() {
-	a.live = tui.NewLivePrinter()
-	a.done = make(chan struct{})
-	a.ticker = time.NewTicker(time.Second / 30) // 30 FPS
-
-	// Initial render
-	a.updateLiveView()
-
-	// Start animation ticker
-	done := a.done
-	ticker := a.ticker
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				a.mu.Lock()
-				a.frame++
-				a.mu.Unlock()
-				a.updateLiveView()
-			}
-		}
-	}()
-}
-
-// stopLiveUpdates stops the live update loop.
-// If clear is true, the live region is cleared (for temporary pauses like confirmations).
-// If clear is false, the final state is rendered and left on screen (for normal completion).
-func (a *App) stopLiveUpdates(clear bool) {
-	// Signal goroutine to exit first, before touching ticker
-	if a.done != nil {
-		close(a.done)
-		a.done = nil
-	}
-	if a.ticker != nil {
-		a.ticker.Stop()
-		a.ticker = nil
-	}
-	if a.live != nil {
-		if clear {
-			a.live.Clear()
-		} else {
-			// Final render to ensure latest state is displayed (removes thinking indicator)
-			a.updateLiveView()
-			a.live.Stop()
-		}
-		a.live = nil
-	}
-}
-
-func (a *App) updateLiveView() {
-	if a.live == nil {
-		return
-	}
-
-	a.mu.RLock()
-	view := a.buildLiveView()
-	a.mu.RUnlock()
-
-	a.live.Update(view)
-}
-
-// buildLiveView creates the view for live updates during streaming
+// buildLiveView creates the view for live updates during streaming.
+// Shows a simple progress indicator to keep the live region height stable.
+// Full markdown is rendered to scrollback when the response completes.
 func (a *App) buildLiveView() tui.View {
 	views := make([]tui.View, 0)
 
-	// Find start of current interaction (last user message)
-	startIdx := 0
+	elapsed := time.Since(a.processingStartTime)
+
+	// Show recent tool calls first (last 3 max, in chronological order)
+	var toolViews []tui.View
 	for i := len(a.messages) - 1; i >= 0; i-- {
-		if a.messages[i].Role == "user" {
-			startIdx = i + 1 // Start after user message
+		msg := a.messages[i]
+		if msg.Role == "user" {
 			break
 		}
-	}
-
-	// Show thinking indicator if no content yet
-	hasContent := false
-	for i := startIdx; i < len(a.messages); i++ {
-		if a.messages[i].Type == MessageTypeToolCall || a.messages[i].Content != "" {
-			hasContent = true
-			break
+		if msg.Type == MessageTypeToolCall {
+			view := a.toolCallView(msg)
+			if view != nil {
+				toolViews = append([]tui.View{view}, toolViews...) // prepend for chronological order
+			}
+			if len(toolViews) >= 3 {
+				break
+			}
 		}
 	}
+	views = append(views, toolViews...)
 
-	if a.thinking && !hasContent {
-		elapsed := time.Since(a.processingStartTime)
+	// Show generation progress indicator (below tool calls)
+	if a.thinking {
+		// Initial thinking phase (no content yet)
 		views = append(views, tui.Group(
 			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
 			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
 			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
+			tui.Text("  ").Hint(),
+			tui.Text("esc to interrupt").Hint(),
 		))
-	}
-
-	// Render messages from current interaction
-	for i := startIdx; i < len(a.messages); i++ {
-		msg := a.messages[i]
-		view := a.messageView(msg, i)
-		if view != nil {
-			views = append(views, view)
-		}
+	} else if a.streamingMessageIndex >= 0 {
+		// Actively generating response
+		views = append(views, tui.Group(
+			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
+			tui.Text(" generating").Fg(tui.ColorCyan),
+			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
+			tui.Text("  ").Hint(),
+			tui.Text("esc to interrupt").Hint(),
+		))
 	}
 
 	// Show todos if active
@@ -876,106 +984,7 @@ func (a *App) buildLiveView() tui.View {
 		return tui.Text("")
 	}
 
-	return tui.PaddingLTRB(1, 1, 1, 0, tui.Stack(views...).Gap(1))
-}
-
-// printRecentMessages prints the messages from the current interaction to scroll history
-func (a *App) printRecentMessages() {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	// Find start of current interaction
-	startIdx := 0
-	for i := len(a.messages) - 1; i >= 0; i-- {
-		if a.messages[i].Role == "user" {
-			startIdx = i + 1 // Start after user message (already printed)
-			break
-		}
-	}
-
-	// Print each message
-	for i := startIdx; i < len(a.messages); i++ {
-		msg := a.messages[i]
-		view := a.messageViewStatic(msg, i)
-		if view != nil {
-			tui.Print(tui.Padding(1, view))
-		}
-	}
-
-	// Print todos if visible
-	if a.showTodos && len(a.todos) > 0 {
-		view := a.todoListViewStatic()
-		if view != nil {
-			tui.Print(view)
-		}
-	}
-}
-
-func (a *App) handleAgentEvent(item *dive.ResponseItem) error {
-	switch item.Type {
-	case dive.ResponseItemTypeModelEvent:
-		if item.Event != nil && item.Event.Delta != nil {
-			if text := item.Event.Delta.Text; text != "" {
-				a.appendToStreamingMessage(text)
-			}
-		}
-
-	case dive.ResponseItemTypeToolCall:
-		a.addToolCall(item.ToolCall)
-
-	case dive.ResponseItemTypeToolCallResult:
-		a.updateToolCallResult(item.ToolCallResult)
-	}
-	return nil
-}
-
-func (a *App) appendToStreamingMessage(text string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	needNewMessage := a.streamingMessageIndex < 0 ||
-		a.streamingMessageIndex >= len(a.messages) ||
-		a.needNewTextMessage
-
-	if needNewMessage {
-		a.messages = append(a.messages, Message{
-			Role:    "assistant",
-			Content: "",
-			Time:    time.Now(),
-			Type:    MessageTypeText,
-		})
-		a.streamingMessageIndex = len(a.messages) - 1
-		a.needNewTextMessage = false
-	}
-
-	a.messages[a.streamingMessageIndex].Content += text
-	a.thinking = false
-}
-
-func (a *App) addToolCall(call *llm.ToolUseContent) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Got content, no longer thinking
-	a.thinking = false
-
-	// Parse TodoWrite tool calls
-	if call.Name == "todo_write" || call.Name == "TodoWrite" {
-		a.parseTodoWriteInput(call.Input)
-	}
-
-	msg := Message{
-		Role:      "assistant",
-		Time:      time.Now(),
-		Type:      MessageTypeToolCall,
-		ToolID:    call.ID,
-		ToolName:  call.Name,
-		ToolInput: string(call.Input),
-		ToolDone:  false,
-	}
-	a.messages = append(a.messages, msg)
-	a.toolCallIndex[call.ID] = len(a.messages) - 1
-	a.needNewTextMessage = true
+	return tui.PaddingLTRB(1, 1, 1, 1, tui.Stack(views...).Gap(1))
 }
 
 func (a *App) parseTodoWriteInput(input []byte) {
@@ -1011,40 +1020,8 @@ func (a *App) parseTodoWriteInput(input []byte) {
 	}
 }
 
-func (a *App) updateToolCallResult(result *dive.ToolCallResult) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if idx, ok := a.toolCallIndex[result.ID]; ok && idx < len(a.messages) {
-		a.messages[idx].ToolDone = true
-		if result.Result != nil {
-			if result.Result.IsError {
-				a.messages[idx].ToolError = true
-			}
-			display := result.Result.Display
-			if display == "" && len(result.Result.Content) > 0 {
-				for _, c := range result.Result.Content {
-					if c.Type == dive.ToolResultContentTypeText {
-						display = c.Text
-						break
-					}
-				}
-			}
-			if display != "" {
-				a.messages[idx].ToolResultLines = strings.Split(display, "\n")
-			}
-			if len(a.messages[idx].ToolResultLines) > 0 {
-				a.messages[idx].ToolResult = a.messages[idx].ToolResultLines[0]
-			}
-		}
-	}
-}
-
 // ConfirmTool prompts the user to confirm a tool execution
 func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input []byte) (bool, error) {
-	// Clear and stop live updates (we'll restart after confirmation)
-	a.stopLiveUpdates(true)
-
 	// Parse input JSON to build better summary and preview
 	var parsed map[string]interface{}
 	var contentPreview string
@@ -1113,242 +1090,148 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 		actionSummary = fmt.Sprintf("Execute %s", toolName)
 	}
 
-	// Build confirmation view using tui Stack
-	views := []tui.View{
-		tui.Divider(),
-		tui.Text(" %s", actionSummary).Bold(),
+	// Set up dialog via event (processed in main goroutine)
+	confirmChan := make(chan bool, 1)
+	a.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:           DialogTypeConfirm,
+			Active:         true,
+			Title:          actionSummary,
+			ContentPreview: contentPreview,
+			ConfirmChan:    confirmChan,
+		},
+	})
+
+	// Wait for user response (handleDialogKey sends to channel)
+	select {
+	case approved := <-confirmChan:
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return approved, nil
+	case <-ctx.Done():
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return false, ctx.Err()
 	}
-
-	if contentPreview != "" {
-		views = append(views, tui.Divider().Char('-'))
-		for _, line := range strings.Split(contentPreview, "\n") {
-			views = append(views, tui.Text(" %s", line).Hint())
-		}
-	}
-
-	views = append(views,
-		tui.Divider().Char('-'),
-		tui.Group(
-			tui.Text(" ❯ ").Fg(tui.ColorCyan),
-			tui.Text("Yes").Bold(),
-			tui.Text(" (enter/y)  ").Hint(),
-			tui.Text("No").Hint(),
-			tui.Text(" (n/esc)").Hint(),
-		),
-	)
-
-	// Count lines for clearing later
-	lineCount := 5 // newline + divider + summary + dashed divider + options + trailing newline
-	if contentPreview != "" {
-		lineCount += 1 + len(strings.Split(contentPreview, "\n")) // dashed divider + content lines
-	}
-
-	// Print the confirmation UI as a stacked view
-	// Ensure we start on a fresh line at column 0
-	tui.Newline()
-	tui.MoveToLineStart()
-	tui.Print(tui.Stack(views...))
-	tui.Newline() // Ensure we end on a fresh line
-
-	// Hide cursor during confirmation
-	tui.HideCursor()
-	defer tui.ShowCursor()
-
-	// Read keypresses until we get a valid one
-	var approved bool
-	for {
-		key, err := a.readSingleKey()
-		if err != nil {
-			return false, err
-		}
-
-		switch key {
-		case 0:
-			continue // Ignore special keys
-		case '\r', '\n', 'y', 'Y':
-			approved = true
-		case 'n', 'N', 0x1b:
-			approved = false
-		default:
-			continue
-		}
-		break
-	}
-
-	// Clear the confirmation UI
-	for i := 0; i < lineCount; i++ {
-		tui.MoveCursorUp(1)
-		tui.ClearLine()
-	}
-
-	// Restart live updates if still processing
-	if a.processing {
-		a.startLiveUpdates()
-	}
-
-	return approved, nil
 }
 
 // SelectTool prompts the user to select one option
 func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
-	// Pause live updates
-	if a.live != nil {
-		a.live.Clear()
-	}
-
-	// Build options view
-	views := []tui.View{
-		tui.Text(" SELECT ").Bold().
-			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 80, G: 150, B: 220}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
-		tui.Text(""),
-		tui.Text(" %s", req.Title).Bold(),
-	}
-
-	if req.Message != "" {
-		views = append(views, tui.Text(" %s", req.Message).Muted())
-	}
-	views = append(views, tui.Text(""))
-
+	// Build options
+	options := make([]DialogOption, len(req.Options))
 	defaultIdx := 0
 	for i, opt := range req.Options {
-		marker := "  "
+		options[i] = DialogOption{
+			Label:       opt.Label,
+			Description: opt.Description,
+			Value:       opt.Value,
+		}
 		if opt.Default {
-			marker = "* "
 			defaultIdx = i
 		}
-		optView := tui.Text(" %s%d) %s", marker, i+1, opt.Label)
-		if opt.Description != "" {
-			views = append(views, tui.Group(optView, tui.Text(" - %s", opt.Description).Muted()))
-		} else {
-			views = append(views, optView)
+	}
+
+	// Set up dialog via event
+	selectChan := make(chan int, 1)
+	a.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:         DialogTypeSelect,
+			Active:       true,
+			Title:        req.Title,
+			Message:      req.Message,
+			Options:      options,
+			DefaultIndex: defaultIdx,
+			SelectChan:   selectChan,
+		},
+	})
+
+	// Wait for user response
+	select {
+	case idx := <-selectChan:
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		if idx < 0 {
+			return &dive.SelectResponse{Canceled: true}, nil
 		}
+		return &dive.SelectResponse{Value: req.Options[idx].Value}, nil
+	case <-ctx.Done():
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.SelectResponse{Canceled: true}, ctx.Err()
 	}
-
-	views = append(views, tui.Text(""))
-	views = append(views, tui.Text(" Enter number (or press Enter for default): ").Hint())
-
-	tui.Print(tui.Padding(1, tui.Stack(views...)))
-
-	// Read selection
-	input, err := a.readInput()
-	if err != nil {
-		return &dive.SelectResponse{Canceled: true}, err
-	}
-
-	if input == "" {
-		// Use default
-		return &dive.SelectResponse{Value: req.Options[defaultIdx].Value}, nil
-	}
-
-	// Parse number
-	var idx int
-	if _, err := fmt.Sscanf(input, "%d", &idx); err == nil {
-		if idx >= 1 && idx <= len(req.Options) {
-			return &dive.SelectResponse{Value: req.Options[idx-1].Value}, nil
-		}
-	}
-
-	return &dive.SelectResponse{Canceled: true}, nil
 }
 
 // MultiSelectTool prompts for multiple selections
 func (a *App) MultiSelectTool(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
-	// Pause live updates
-	if a.live != nil {
-		a.live.Clear()
-	}
-
-	// Build options view
-	views := []tui.View{
-		tui.Text(" MULTI-SELECT ").Bold().
-			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 150, G: 80, B: 180}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
-		tui.Text(""),
-		tui.Text(" %s", req.Title).Bold(),
-	}
-
-	if req.Message != "" {
-		views = append(views, tui.Text(" %s", req.Message).Muted())
-	}
-	views = append(views, tui.Text(""))
-
+	// Build options
+	options := make([]DialogOption, len(req.Options))
 	for i, opt := range req.Options {
-		checkbox := "[ ]"
-		if opt.Default {
-			checkbox = "[x]"
+		options[i] = DialogOption{
+			Label:    opt.Label,
+			Value:    opt.Value,
+			Selected: opt.Default,
 		}
-		views = append(views, tui.Text("  %s %d) %s", checkbox, i+1, opt.Label))
 	}
 
-	views = append(views, tui.Text(""))
-	views = append(views, tui.Text(" Enter numbers separated by commas (e.g., 1,3,5) or Enter for defaults: ").Hint())
+	// Set up dialog via event
+	multiSelectChan := make(chan []int, 1)
+	a.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:            DialogTypeMultiSelect,
+			Active:          true,
+			Title:           req.Title,
+			Message:         req.Message,
+			Options:         options,
+			MultiSelectChan: multiSelectChan,
+		},
+	})
 
-	tui.Print(tui.Padding(1, tui.Stack(views...)))
-
-	// Read selection
-	input, err := a.readInput()
-	if err != nil {
-		return &dive.MultiSelectResponse{Canceled: true}, err
-	}
-
-	if input == "" {
-		// Use defaults
+	// Wait for user response
+	select {
+	case indices := <-multiSelectChan:
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		if indices == nil {
+			return &dive.MultiSelectResponse{Canceled: true}, nil
+		}
 		var values []string
-		for _, opt := range req.Options {
-			if opt.Default {
-				values = append(values, opt.Value)
-			}
+		for _, idx := range indices {
+			values = append(values, req.Options[idx].Value)
 		}
 		return &dive.MultiSelectResponse{Values: values}, nil
+	case <-ctx.Done():
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.MultiSelectResponse{Canceled: true}, ctx.Err()
 	}
-
-	// Parse comma-separated numbers
-	var values []string
-	for _, part := range strings.Split(input, ",") {
-		var idx int
-		if _, err := fmt.Sscanf(strings.TrimSpace(part), "%d", &idx); err == nil {
-			if idx >= 1 && idx <= len(req.Options) {
-				values = append(values, req.Options[idx-1].Value)
-			}
-		}
-	}
-
-	return &dive.MultiSelectResponse{Values: values}, nil
 }
 
 // InputTool prompts for text input
 func (a *App) InputTool(ctx context.Context, req *dive.InputRequest) (*dive.InputResponse, error) {
-	// Pause live updates
-	if a.live != nil {
-		a.live.Clear()
-	}
+	// Set up dialog via event
+	inputChan := make(chan string, 1)
+	a.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:         DialogTypeInput,
+			Active:       true,
+			Title:        req.Title,
+			Message:      req.Message,
+			DefaultValue: req.Default,
+			InputValue:   "",
+			InputChan:    inputChan,
+		},
+	})
 
-	views := []tui.View{
-		tui.Text(" INPUT ").Bold().
-			Style(tui.NewStyle().WithBgRGB(tui.RGB{R: 80, G: 180, B: 120}).WithFgRGB(tui.RGB{R: 255, G: 255, B: 255})),
-		tui.Text(""),
-		tui.Text(" %s", req.Title).Bold(),
+	// Wait for user response
+	select {
+	case value := <-inputChan:
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		if value == "" && req.Default == "" {
+			return &dive.InputResponse{Canceled: true}, nil
+		}
+		return &dive.InputResponse{Value: value}, nil
+	case <-ctx.Done():
+		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.InputResponse{Canceled: true}, ctx.Err()
 	}
-
-	if req.Message != "" {
-		views = append(views, tui.Text(" %s", req.Message).Muted())
-	}
-	if req.Default != "" {
-		views = append(views, tui.Text(" (default: %s)", req.Default).Hint())
-	}
-	views = append(views, tui.Text(""))
-
-	tui.Print(tui.Padding(1, tui.Stack(views...)))
-	fmt.Print("  > ")
-
-	input, err := a.readInput()
-	if err != nil {
-		return &dive.InputResponse{Canceled: true}, err
-	}
-
-	if input == "" {
-		input = req.Default
-	}
-	return &dive.InputResponse{Value: input}, nil
 }
 
 // expandFileReferences expands @filepath references in the input to file contents

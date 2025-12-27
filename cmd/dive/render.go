@@ -28,23 +28,24 @@ func (a *App) messageView(msg Message, index int) tui.View {
 	}
 }
 
-// textMessageView renders a text message
+// textMessageView renders a text message (simplified for live updates - no markdown parsing)
 func (a *App) textMessageView(msg Message, index int) tui.View {
 	switch msg.Role {
 	case "intro":
 		return a.introView(msg)
 
 	case "user":
-		return tui.Text("> %s", msg.Content).Wrap().
-			Style(tui.NewStyle().WithItalic().WithBgRGB(tui.RGB{R: 50, G: 50, B: 50})).
-			FillBg()
+		return tui.Text("> %s", msg.Content).Wrap().Style(
+			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}).WithItalic(),
+		)
 
 	case "assistant":
 		content := strings.TrimRight(msg.Content, "\n")
 		if content == "" {
 			return nil
 		}
-		return tui.Markdown("⏺ "+content, nil).Theme(diveMarkdownTheme())
+		// Use simple text for live view (faster than markdown parsing)
+		return tui.Text("⏺ %s", content).Wrap()
 
 	case "system":
 		return tui.Text("%s", msg.Content).Wrap().Warning()
@@ -453,12 +454,12 @@ func (a *App) textMessageViewStatic(msg Message, index int) tui.View {
 		return a.introView(msg)
 
 	case "user":
-		return tui.Text("> %s", msg.Content).Wrap().
-			Style(tui.NewStyle().WithItalic().WithBgRGB(tui.RGB{R: 50, G: 50, B: 50})).
-			FillBg()
+		return tui.Text("> %s", msg.Content).Wrap().Style(
+			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}).WithItalic(),
+		)
 
 	case "assistant":
-		content := strings.TrimRight(msg.Content, "\n")
+		content := strings.TrimSpace(msg.Content)
 		if content == "" {
 			return nil
 		}
