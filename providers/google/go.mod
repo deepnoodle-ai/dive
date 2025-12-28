@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/deepnoodle-ai/dive v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.16
+	github.com/deepnoodle-ai/wonton v0.0.20
 	google.golang.org/genai v1.40.0
 )
 

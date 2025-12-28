@@ -400,13 +400,21 @@ func (c *ToolUseContent) Type() ContentType {
 }
 
 func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
-	type Alias ToolUseContent
+	// Anthropic API requires input to be a valid object, not null
+	input := c.Input
+	if len(input) == 0 {
+		input = json.RawMessage("{}")
+	}
 	return json.Marshal(struct {
-		Type ContentType `json:"type"`
-		*Alias
+		Type  ContentType     `json:"type"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	}{
 		Type:  ContentTypeToolUse,
-		Alias: (*Alias)(c),
+		ID:    c.ID,
+		Name:  c.Name,
+		Input: input,
 	})
 }
 

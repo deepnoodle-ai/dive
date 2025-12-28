@@ -284,6 +284,24 @@ func TestToolUseContent(t *testing.T) {
 				},
 				expected: `{"type":"tool_use","id":"tool_123","name":"get_weather","input":{}}`,
 			},
+			{
+				name: "nil input marshals as empty object",
+				content: &ToolUseContent{
+					ID:    "tool_456",
+					Name:  "no_params_tool",
+					Input: nil,
+				},
+				expected: `{"type":"tool_use","id":"tool_456","name":"no_params_tool","input":{}}`,
+			},
+			{
+				name: "empty byte slice input marshals as empty object",
+				content: &ToolUseContent{
+					ID:    "tool_789",
+					Name:  "another_tool",
+					Input: json.RawMessage{},
+				},
+				expected: `{"type":"tool_use","id":"tool_789","name":"another_tool","input":{}}`,
+			},
 		}
 
 		for _, tt := range tests {
