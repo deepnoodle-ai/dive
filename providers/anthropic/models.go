@@ -7,9 +7,9 @@ const (
 	ModelClaude37Sonnet20250219 = "claude-3-7-sonnet-20250219"
 
 	// Claude 4 models
-	ModelClaudeSonnet420250514  = "claude-sonnet-4-20250514"
-	ModelClaudeOpus420250514    = "claude-opus-4-20250514"
-	ModelClaudeOpus4120250805   = "claude-opus-4-1-20250805"
+	ModelClaudeSonnet420250514 = "claude-sonnet-4-20250514"
+	ModelClaudeOpus420250514   = "claude-opus-4-20250514"
+	ModelClaudeOpus4120250805  = "claude-opus-4-1-20250805"
 
 	// Claude 4.5 models (dated)
 	ModelClaudeHaiku4520251015  = "claude-haiku-4-5-20251015"

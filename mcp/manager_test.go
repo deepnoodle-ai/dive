@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestNewManager(t *testing.T) {

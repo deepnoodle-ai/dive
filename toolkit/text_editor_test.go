@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 // testPathValidator creates a permissive PathValidator for unit tests

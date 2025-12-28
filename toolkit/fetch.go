@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/wonton/fetch"
 	"github.com/deepnoodle-ai/wonton/retry"
 	"github.com/deepnoodle-ai/wonton/schema"
-	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 const (

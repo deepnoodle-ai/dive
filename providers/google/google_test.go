@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 // hasGoogleAPIKey returns true if a Google API key is available

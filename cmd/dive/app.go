@@ -90,8 +90,8 @@ type Todo struct {
 
 // Message represents a chat message
 type Message struct {
-	Role    string      // "user", "assistant", "system", or "intro"
-	Content string      // Text content
+	Role    string // "user", "assistant", "system", or "intro"
+	Content string // Text content
 	Time    time.Time
 	Type    MessageType
 

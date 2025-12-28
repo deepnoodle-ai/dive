@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestMCPErrorTypes(t *testing.T) {

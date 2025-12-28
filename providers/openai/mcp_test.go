@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/openai/openai-go"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/openai/openai-go"
 )
 
 func TestMCPContentPairing(t *testing.T) {
