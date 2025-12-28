@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 // Simple tool for testing

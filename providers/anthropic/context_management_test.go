@@ -34,7 +34,7 @@ func TestContextManagementRequest(t *testing.T) {
 		// Check headers
 		assert.Equal(t, "POST", r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-		
+
 		// Check beta header for context management
 		betaHeader := r.Header.Get("anthropic-beta")
 		assert.Contains(t, betaHeader, FeatureContextManagement, "anthropic-beta header should contain context management feature")
@@ -101,7 +101,7 @@ func TestContextManagementRequest(t *testing.T) {
 	assert.NotNil(t, resp.ContextManagement)
 	assert.Equal(t, 35000, resp.ContextManagement.OriginalInputTokens)
 	assert.Len(t, resp.ContextManagement.AppliedEdits, 1)
-	
+
 	applied := resp.ContextManagement.AppliedEdits[0]
 	assert.Equal(t, "clear_tool_uses_20250919", applied.Type)
 	assert.Equal(t, 5, applied.ClearedToolUses)

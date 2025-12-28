@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/deepnoodle-ai/wonton/fetch"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 func TestClient_Fetch_V2API(t *testing.T) {

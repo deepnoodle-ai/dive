@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 func TestTodoWriteTool_Name(t *testing.T) {

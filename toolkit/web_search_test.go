@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/deepnoodle-ai/wonton/web"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/web"
 )
 
 // mockSearcher implements web.Searcher for testing

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 func TestGetShellOutputTool_Name(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 // boolPtr returns a pointer to the given bool value

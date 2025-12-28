@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/wonton/retry"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
+	"github.com/deepnoodle-ai/wonton/retry"
 )
 
 // SystemPromptBehavior describes how the system prompt should be handled for a
