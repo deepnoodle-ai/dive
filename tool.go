@@ -282,11 +282,19 @@ func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 		data = raw
 	} else if raw, ok := input.([]byte); ok {
 		data = raw
+	} else if input == nil {
+		// Nil input is treated as empty object
+		data = []byte("{}")
 	} else {
 		data, err = json.Marshal(input)
 		if err != nil {
 			return zero, fmt.Errorf("invalid json for tool %s: %w", t.Name(), err)
 		}
+	}
+
+	// Handle empty input - treat as empty object
+	if len(data) == 0 {
+		data = []byte("{}")
 	}
 
 	// Unmarshal into the typed input
