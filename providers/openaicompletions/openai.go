@@ -308,17 +308,17 @@ func validateMessages(messages []*llm.Message) error {
 	if messageCount == 0 {
 		return fmt.Errorf("no messages provided")
 	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return fmt.Errorf("empty message detected (index %d)", i)
-		}
-	}
+	// Empty messages are silently skipped during conversion rather than erroring
 	return nil
 }
 
 func convertMessages(messages []*llm.Message) ([]Message, error) {
 	var result []Message
 	for _, msg := range messages {
+		// Skip empty messages - they can occur in edge cases during long tool-calling loops
+		if len(msg.Content) == 0 {
+			continue
+		}
 		role := strings.ToLower(string(msg.Role))
 
 		// Group all tool use content blocks into a single message

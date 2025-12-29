@@ -225,11 +225,18 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	if messageCount == 0 {
 		return nil, fmt.Errorf("no messages provided")
 	}
-	for i, message := range messages {
-		if len(message.Content) == 0 {
-			return nil, fmt.Errorf("empty message detected (index %d)", i)
+	// Filter out empty messages instead of erroring - they can occur in edge cases
+	// during long tool-calling loops and are simply ignored by the API
+	filtered := make([]*llm.Message, 0, len(messages))
+	for _, message := range messages {
+		if len(message.Content) > 0 {
+			filtered = append(filtered, message)
 		}
 	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("all messages are empty")
+	}
+	messages = filtered
 	// Workaround for Anthropic bug
 	reorderMessageContent(messages)
 	// Anthropic errors if a message ID is set, so make a copy of the messages

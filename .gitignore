@@ -34,3 +34,4 @@ tmp.json
 /openai_responses_example
 /*.png
 *.db-*
+/.vscode
