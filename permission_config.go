@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -85,7 +86,9 @@ type PermissionConfig struct {
 //
 // Thread Safety: PermissionManager is safe for concurrent use. The Mode can be
 // changed dynamically using SetMode, which affects subsequent evaluations.
+// All methods use internal synchronization to protect concurrent access.
 type PermissionManager struct {
+	mu        sync.RWMutex
 	config    *PermissionConfig
 	confirmer ConfirmToolFunc
 }
@@ -185,6 +188,8 @@ func (pm *PermissionManager) EvaluateToolUse(
 // evaluateRules checks deny, allow, and ask rules in order.
 func (pm *PermissionManager) evaluateRules(tool Tool, call *llm.ToolUseContent) *ToolHookResult {
 	// Separate rules by type and evaluate in order: deny → allow → ask
+	// Copy rules under lock to avoid race with AddRules
+	pm.mu.RLock()
 	var denyRules, allowRules, askRules PermissionRules
 	for _, rule := range pm.config.Rules {
 		switch rule.Type {
@@ -196,6 +201,7 @@ func (pm *PermissionManager) evaluateRules(tool Tool, call *llm.ToolUseContent) 
 			askRules = append(askRules, rule)
 		}
 	}
+	pm.mu.RUnlock()
 
 	// Check deny rules first
 	if result := denyRules.Evaluate(tool, call); result != nil {
@@ -217,7 +223,11 @@ func (pm *PermissionManager) evaluateRules(tool Tool, call *llm.ToolUseContent) 
 
 // evaluateMode applies permission mode logic.
 func (pm *PermissionManager) evaluateMode(tool Tool, call *llm.ToolUseContent) *ToolHookResult {
-	switch pm.config.Mode {
+	pm.mu.RLock()
+	mode := pm.config.Mode
+	pm.mu.RUnlock()
+
+	switch mode {
 	case PermissionModeBypassPermissions:
 		return AllowResult()
 
@@ -372,6 +382,8 @@ func (pm *PermissionManager) Mode() PermissionMode {
 //
 // The new mode takes effect for all subsequent EvaluateToolUse calls.
 func (pm *PermissionManager) SetMode(mode PermissionMode) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 	pm.config.Mode = mode
 }
 
@@ -389,12 +401,19 @@ func (pm *PermissionManager) SetMode(mode PermissionMode) {
 //	    dive.AllowCommandRule("bash", "go test*"),
 //	})
 func (pm *PermissionManager) AddRules(rules PermissionRules) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 	pm.config.Rules = append(pm.config.Rules, rules...)
 }
 
-// Rules returns the current permission rules.
+// Rules returns a copy of the current permission rules.
 func (pm *PermissionManager) Rules() PermissionRules {
-	return pm.config.Rules
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	// Return a copy to prevent external mutation
+	result := make(PermissionRules, len(pm.config.Rules))
+	copy(result, pm.config.Rules)
+	return result
 }
 
 // extractCommand extracts the command string from tool input.

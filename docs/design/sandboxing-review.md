@@ -10,22 +10,22 @@ The architecture is sound and aligns well with similar industry implementations,
 
 | Feature                      | Gemini CLI Implementation                                                                             | Dive Design Proposal                                                       | Recommendation                                                                                                      |
 | :--------------------------- | :---------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
-| **MacOS Profile Generation** | Static `.sb` files with `-D` param injection. Hard limit of 5 `INCLUDE_DIR`s padded with `/dev/null`. | Static `.sb` files with `-D` param injection. Same limit/padding proposed. | **Upgrade:** Use Go `text/template` for dynamic profile generation to remove arbitrary limits and clean up padding. |
-| **MacOS System Calls**       | Explicitly allows `sysctl-read` and `mach-lookup`.                                                    | Not mentioned.                                                             | **Critical:** Must add these permissions to support Go runtime and system tools like `ps`.                          |
+| **macOS Profile Generation** | Static `.sb` files with `-D` param injection. Hard limit of 5 `INCLUDE_DIR`s padded with `/dev/null`. | Static `.sb` files with `-D` param injection. Same limit/padding proposed. | **Upgrade:** Use Go `text/template` for dynamic profile generation to remove arbitrary limits and clean up padding. |
+| **macOS System Calls**       | Explicitly allows `sysctl-read` and `mach-lookup`.                                                    | Not mentioned.                                                             | **Critical:** Must add these permissions to support Go runtime and system tools like `ps`.                          |
 | **Linux User Mapping**       | Complex script injection (`groupadd`, `useradd`). Limits usage to Debian/Ubuntu via OS detection.     | Shell script injection proposed.                                           | **Refine:** The proposed script is fragile on Alpine/Distroless. Make this opt-in or robustly detect supported OSs. |
 | **Network Isolation**        | Complex "Proxy Container" approach.                                                                   | "None" or "Host" network via flag.                                         | **Keep Simple:** Dive's binary toggle is appropriate for a v1.                                                      |
 | **Read Access Model**        | Container sees only mounted paths.                                                                    | macOS Seatbelt allows `file-read*` everywhere.                             | **Clarify:** Document or configure the cross-platform read-access policy to avoid surprises.                        |
 
 ## Critical Recommendations (Must Implement)
 
-### 1. Dynamic Seatbelt Profiles (MacOS)
+### 1. Dynamic Seatbelt Profiles (macOS)
 
 The design proposes a static profile with fixed slots (`ALLOWED_DIR_0`...`ALLOWED_DIR_5`). This is brittle.
 
 - **Change:** Use Go's `text/template` engine to generate the `.sb` profile string at runtime.
 - **Benefit:** Removes the arbitrary 5-path limit and eliminates the need to pad unused slots with `/dev/null`.
 
-### 2. Missing MacOS Permissions
+### 2. Missing macOS Permissions
 
 The draft `restrictive.sb` is likely too tight for a Go-based agent or common shell tools.
 

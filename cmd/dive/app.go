@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
@@ -206,7 +207,8 @@ type App struct {
 	// Session-scoped permission allowlist: maps tool categories to allowed status.
 	// Categories include: "bash", "edit", "read", or specific tool names.
 	// When user selects "allow all X this session", the relevant category is added.
-	sessionAllowed map[string]bool
+	sessionAllowed   map[string]bool
+	sessionAllowedMu sync.RWMutex
 
 	// Autocomplete state
 	autocompleteMatches []string
@@ -1221,7 +1223,10 @@ func getToolCategory(toolName string) toolCategoryInfo {
 func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input []byte) (bool, error) {
 	// Check if this tool's category is already allowed for this session
 	toolCat := getToolCategory(toolName)
-	if a.sessionAllowed[toolCat.Category] {
+	a.sessionAllowedMu.RLock()
+	allowed := a.sessionAllowed[toolCat.Category]
+	a.sessionAllowedMu.RUnlock()
+	if allowed {
 		return true, nil
 	}
 
@@ -1246,11 +1251,35 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 			actionSummary = summary
 		}
 
-	case strings.Contains(toolName, "write") || strings.Contains(toolName, "edit"):
+	case strings.Contains(toolName, "edit"):
+		// Edit tool modifies existing files
 		if filePath, ok := parsed["file_path"].(string); ok {
-			actionSummary = fmt.Sprintf("Create file %s", filePath)
+			actionSummary = fmt.Sprintf("Edit %s", filePath)
 		} else if filePath, ok := parsed["filePath"].(string); ok {
-			actionSummary = fmt.Sprintf("Create file %s", filePath)
+			actionSummary = fmt.Sprintf("Edit %s", filePath)
+		} else {
+			actionSummary = summary
+		}
+		// Show old_string → new_string for edit operations
+		if oldStr, ok := parsed["old_string"].(string); ok {
+			if newStr, ok := parsed["new_string"].(string); ok {
+				// Truncate if too long
+				if len(oldStr) > 50 {
+					oldStr = oldStr[:47] + "..."
+				}
+				if len(newStr) > 50 {
+					newStr = newStr[:47] + "..."
+				}
+				contentPreview = fmt.Sprintf("Replace:\n  %q\nWith:\n  %q", oldStr, newStr)
+			}
+		}
+
+	case strings.Contains(toolName, "write"):
+		// Write tool creates or overwrites files
+		if filePath, ok := parsed["file_path"].(string); ok {
+			actionSummary = fmt.Sprintf("Write to %s", filePath)
+		} else if filePath, ok := parsed["filePath"].(string); ok {
+			actionSummary = fmt.Sprintf("Write to %s", filePath)
 		} else {
 			actionSummary = summary
 		}
@@ -1315,7 +1344,9 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 
 		// Handle "allow all X during this session"
 		if result.AllowSession {
+			a.sessionAllowedMu.Lock()
 			a.sessionAllowed[toolCat.Category] = true
+			a.sessionAllowedMu.Unlock()
 		}
 
 		// Handle user feedback (denied with message)
