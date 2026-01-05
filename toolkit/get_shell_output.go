@@ -85,7 +85,7 @@ func (t *GetShellOutputTool) Schema() *schema.Schema {
 
 func (t *GetShellOutputTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Get Shell Output",
+		Title:           "GetShellOutput",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,
@@ -221,7 +221,7 @@ func (t *ListShellsTool) Schema() *schema.Schema {
 
 func (t *ListShellsTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "List Shells",
+		Title:           "ListShells",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

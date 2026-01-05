@@ -125,6 +125,12 @@ type ConfirmResult struct {
 	Feedback     string // User feedback when denied (for "tell what to do differently")
 }
 
+// SelectResult represents the result of a select dialog
+type SelectResult struct {
+	Index     int    // Selected option index (-1 for cancel)
+	OtherText string // Custom text if user selected "Other"
+}
+
 // DialogState holds state for all tool dialogs
 type DialogState struct {
 	Type           DialogType
@@ -134,20 +140,23 @@ type DialogState struct {
 	ContentPreview string
 
 	// For confirm (Claude Code style)
-	ConfirmChan          chan ConfirmResult
-	ConfirmSelectedIdx   int    // Currently selected option (0=Yes, 1=Allow session, 2=Feedback)
-	ConfirmFeedbackMode  bool   // True when user is typing feedback
-	ConfirmFeedback      string
-	ConfirmToolCategory  string // Tool category for "allow all X this session" (e.g., "bash", "edit", "read")
+	ConfirmChan              chan ConfirmResult
+	ConfirmSelectedIdx       int    // Currently selected option (0=Yes, 1=Allow session, 2=Feedback)
+	ConfirmFeedback          string // User feedback text (for PromptChoice input option)
+	ConfirmToolCategory      string // Tool category for "allow all X this session" (e.g., "bash", "edit", "read")
 	ConfirmToolCategoryLabel string // Human-readable label (e.g., "bash commands", "file edits")
 
-	// For select
-	Options      []DialogOption
-	DefaultIndex int
-	SelectChan   chan int // -1 for cancel
+	// For select (uses PromptChoice with "Other" input option)
+	Options         []DialogOption
+	DefaultIndex    int
+	SelectIndex     int               // State for PromptChoice
+	SelectOtherText string            // State for PromptChoice "Other" input
+	SelectChan      chan SelectResult // Carries index and optional "Other" text
 
 	// For multi-select
-	MultiSelectChan chan []int // nil for cancel
+	MultiSelectChan    chan []int // nil for cancel
+	MultiSelectChecked []bool     // State for CheckboxList
+	MultiSelectCursor  int        // Cursor for CheckboxList
 
 	// For input
 	DefaultValue string
@@ -332,7 +341,7 @@ func (a *App) dialogView() tui.View {
 
 	switch a.dialogState.Type {
 	case DialogTypeConfirm:
-		// Claude Code style confirmation dialog
+		// Claude Code style confirmation dialog using PromptChoice
 		purpleStyle := tui.NewStyle().WithFgRGB(purpleColor)
 
 		// Upper divider (purple, dashed)
@@ -355,50 +364,40 @@ func (a *App) dialogView() tui.View {
 		// Question
 		views = append(views, tui.Text(" Do you want to proceed?").Muted())
 
-		// Options with selection marker
-		selectedIdx := a.dialogState.ConfirmSelectedIdx
-
-		// Option 1: Yes
-		if selectedIdx == 0 {
-			views = append(views, tui.Text(" ❯ 1. Yes").Style(purpleStyle.WithBold()))
-		} else {
-			views = append(views, tui.Text("   1. Yes").Muted())
-		}
-
-		// Option 2: Yes, allow all X during this session
+		// Build option labels
 		allowLabel := "file edits" // Default fallback
 		if a.dialogState.ConfirmToolCategoryLabel != "" {
 			allowLabel = a.dialogState.ConfirmToolCategoryLabel
 		}
-		if selectedIdx == 1 {
-			views = append(views, tui.Text(" ❯ 2. Yes, allow all %s during this session (shift+tab)", allowLabel).Style(purpleStyle.WithBold()))
-		} else {
-			views = append(views, tui.Text("   2. Yes, allow all %s during this session (shift+tab)", allowLabel).Muted())
-		}
 
-		// Option 3: Feedback input
-		if a.dialogState.ConfirmFeedbackMode {
-			// Show input field when in feedback mode
-			views = append(views, tui.Text(" ❯ 3. Tell Dive what to do differently:").Style(purpleStyle.WithBold()))
-			confirmChan := a.dialogState.ConfirmChan
-			views = append(views,
-				tui.InputField(&a.dialogState.ConfirmFeedback).
-					ID("confirm-feedback-input").
-					Prompt("    > ").
-					PromptStyle(tui.NewStyle().WithForeground(tui.ColorCyan)).
-					Placeholder("Type your feedback...").
-					Width(60).
-					OnSubmit(func(value string) {
-						if value != "" {
-							confirmChan <- ConfirmResult{Approved: false, Feedback: value}
+		// Use PromptChoice for the selection UI
+		confirmChan := a.dialogState.ConfirmChan
+		views = append(views,
+			tui.PromptChoice(&a.dialogState.ConfirmSelectedIdx, &a.dialogState.ConfirmFeedback).
+				ID("confirm-dialog").
+				Option("Yes").
+				Option(fmt.Sprintf("Yes, allow all %s during this session", allowLabel)).
+				InputOption("Tell Dive what to do differently...").
+				CursorStyle(purpleStyle).
+				HintText("").
+				OnSelect(func(idx int, inputText string) {
+					switch idx {
+					case 0: // Yes
+						confirmChan <- ConfirmResult{Approved: true}
+					case 1: // Yes, allow all session
+						confirmChan <- ConfirmResult{Approved: true, AllowSession: true}
+					case 2: // Feedback
+						if inputText != "" {
+							confirmChan <- ConfirmResult{Approved: false, Feedback: inputText}
 						}
-					}),
-			)
-		} else if selectedIdx == 2 {
-			views = append(views, tui.Text(" ❯ 3. Type here to tell Dive what to do differently").Style(purpleStyle.WithBold()))
-		} else {
-			views = append(views, tui.Text("   3. Type here to tell Dive what to do differently").Muted())
-		}
+					}
+					a.dialogState.Active = false
+				}).
+				OnCancel(func() {
+					confirmChan <- ConfirmResult{Approved: false}
+					a.dialogState.Active = false
+				}),
+		)
 
 		views = append(views, tui.Text(""))
 		views = append(views, tui.Text(" Esc to cancel").Hint())
@@ -421,20 +420,45 @@ func (a *App) dialogView() tui.View {
 			}
 		}
 		views = append(views, tui.Text(""))
-		for i, opt := range a.dialogState.Options {
-			marker := "  "
-			if i == a.dialogState.DefaultIndex {
-				marker = "* "
-			}
-			optView := tui.Text(" %s%d) %s", marker, i+1, opt.Label)
+
+		// Use PromptChoice with options + "Other" input option
+		selectChan := a.dialogState.SelectChan
+		numOptions := len(a.dialogState.Options)
+		promptChoice := tui.PromptChoice(&a.dialogState.SelectIndex, &a.dialogState.SelectOtherText).
+			ID("select-list")
+
+		// Add all predefined options
+		for _, opt := range a.dialogState.Options {
+			label := opt.Label
 			if opt.Description != "" {
-				views = append(views, tui.Group(optView, tui.Text(" - %s", opt.Description).Muted()))
-			} else {
-				views = append(views, optView)
+				label = fmt.Sprintf("%s - %s", opt.Label, opt.Description)
 			}
+			promptChoice = promptChoice.Option(label)
 		}
+
+		// Add "Other" input option
+		promptChoice = promptChoice.
+			InputOption("Other...").
+			OnSelect(func(idx int, inputText string) {
+				if idx == numOptions {
+					// User selected "Other" and typed custom text
+					if inputText != "" {
+						selectChan <- SelectResult{Index: -1, OtherText: inputText}
+					}
+				} else {
+					selectChan <- SelectResult{Index: idx}
+				}
+				a.dialogState.Active = false
+			}).
+			OnCancel(func() {
+				selectChan <- SelectResult{Index: -1}
+				a.dialogState.Active = false
+			})
+
+		views = append(views, promptChoice)
+
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Press 1-%d to select, Enter for default, Esc to cancel", len(a.dialogState.Options)).Hint())
+		views = append(views, tui.Text(" Use arrow keys to navigate, Enter to select, Esc to cancel").Hint())
 
 	case DialogTypeMultiSelect:
 		// Header
@@ -446,15 +470,24 @@ func (a *App) dialogView() tui.View {
 			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
 		}
 		views = append(views, tui.Text(""))
+
+		// Build list items for CheckboxList
+		items := make([]tui.ListItem, len(a.dialogState.Options))
 		for i, opt := range a.dialogState.Options {
-			checkbox := "[ ]"
-			if opt.Selected {
-				checkbox = "[x]"
+			label := opt.Label
+			if opt.Description != "" {
+				label = fmt.Sprintf("%s - %s", opt.Label, opt.Description)
 			}
-			views = append(views, tui.Text("  %s %d) %s", checkbox, i+1, opt.Label))
+			items[i] = tui.ListItem{Label: label, Value: opt.Value}
 		}
+
+		views = append(views,
+			tui.CheckboxList(items, a.dialogState.MultiSelectChecked, &a.dialogState.MultiSelectCursor).
+				ID("multiselect-list"),
+		)
+
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Press 1-%d to toggle, Enter to confirm, Esc to cancel", len(a.dialogState.Options)).Hint())
+		views = append(views, tui.Text(" Use arrow keys to navigate, Space to toggle, Enter to confirm, Esc to cancel").Hint())
 
 	case DialogTypeInput:
 		// Header
@@ -517,8 +550,19 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleProcessingEnd(e.err)
 	case showDialogEvent:
 		a.dialogState = e.dialog
+		// Focus the dialog so it receives key events
+		if e.dialog.Type == DialogTypeConfirm {
+			return []tui.Cmd{tui.Focus("confirm-dialog")}
+		} else if e.dialog.Type == DialogTypeSelect {
+			return []tui.Cmd{tui.Focus("select-list")}
+		} else if e.dialog.Type == DialogTypeMultiSelect {
+			return []tui.Cmd{tui.Focus("multiselect-list")}
+		} else if e.dialog.Type == DialogTypeInput {
+			return []tui.Cmd{tui.Focus("dialog-input")}
+		}
 	case hideDialogEvent:
 		a.dialogState = nil
+		return []tui.Cmd{tui.Focus("main-input")}
 	}
 	return nil
 }
@@ -527,97 +571,35 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 	switch a.dialogState.Type {
 	case DialogTypeConfirm:
-		// Handle feedback mode separately
-		if a.dialogState.ConfirmFeedbackMode {
-			switch {
-			case e.Key == tui.KeyEscape:
-				// Exit feedback mode back to option selection
-				a.dialogState.ConfirmFeedbackMode = false
-				a.dialogState.ConfirmFeedback = ""
-			}
-			// Let InputField handle other keys (Enter is handled by OnSubmit)
-			return nil
-		}
-
-		// Normal option selection mode
-		switch {
-		case e.Key == tui.KeyArrowUp:
-			if a.dialogState.ConfirmSelectedIdx > 0 {
-				a.dialogState.ConfirmSelectedIdx--
-			}
-		case e.Key == tui.KeyArrowDown:
-			if a.dialogState.ConfirmSelectedIdx < 2 {
-				a.dialogState.ConfirmSelectedIdx++
-			}
-		case e.Key == tui.KeyEnter:
-			switch a.dialogState.ConfirmSelectedIdx {
-			case 0: // Yes
-				a.dialogState.ConfirmChan <- ConfirmResult{Approved: true}
-				a.dialogState.Active = false
-			case 1: // Yes, allow all session
-				a.dialogState.ConfirmChan <- ConfirmResult{Approved: true, AllowSession: true}
-				a.dialogState.Active = false
-			case 2: // Enter feedback mode
-				a.dialogState.ConfirmFeedbackMode = true
-			}
-		case e.Rune == '1':
-			a.dialogState.ConfirmChan <- ConfirmResult{Approved: true}
-			a.dialogState.Active = false
-		case e.Rune == '2':
-			a.dialogState.ConfirmChan <- ConfirmResult{Approved: true, AllowSession: true}
-			a.dialogState.Active = false
-		case e.Rune == '3':
-			// Enter feedback mode
-			a.dialogState.ConfirmFeedbackMode = true
-		case e.Key == tui.KeyTab && e.Shift: // shift+tab
-			a.dialogState.ConfirmChan <- ConfirmResult{Approved: true, AllowSession: true}
-			a.dialogState.Active = false
-		case e.Key == tui.KeyEscape:
-			a.dialogState.ConfirmChan <- ConfirmResult{Approved: false}
-			a.dialogState.Active = false
-		case e.Rune == 'y' || e.Rune == 'Y':
-			a.dialogState.ConfirmChan <- ConfirmResult{Approved: true}
-			a.dialogState.Active = false
-		case e.Rune == 'n' || e.Rune == 'N':
-			a.dialogState.ConfirmChan <- ConfirmResult{Approved: false}
-			a.dialogState.Active = false
-		}
+		// PromptChoice handles most key events (arrows, numbers, Enter, Escape).
+		// We avoid global y/n shortcuts as they interfere with free-form input.
+		return nil
 
 	case DialogTypeSelect:
-		switch {
-		case e.Key == tui.KeyEscape:
-			a.dialogState.SelectChan <- -1
-			a.dialogState.Active = false
-		case e.Key == tui.KeyEnter:
-			a.dialogState.SelectChan <- a.dialogState.DefaultIndex
-			a.dialogState.Active = false
-		case e.Rune >= '1' && e.Rune <= '9':
-			idx := int(e.Rune - '1')
-			if idx < len(a.dialogState.Options) {
-				a.dialogState.SelectChan <- idx
-				a.dialogState.Active = false
-			}
-		}
+		// PromptChoice handles all key events (arrows, numbers, Enter, Escape).
+		return nil
 
 	case DialogTypeMultiSelect:
+		// CheckboxList handles arrow keys and Space
 		switch {
 		case e.Key == tui.KeyEscape:
 			a.dialogState.MultiSelectChan <- nil
 			a.dialogState.Active = false
 		case e.Key == tui.KeyEnter:
-			// Return selected indices
+			// Return selected indices based on CheckboxList state
 			var selected []int
-			for i, opt := range a.dialogState.Options {
-				if opt.Selected {
+			for i, checked := range a.dialogState.MultiSelectChecked {
+				if checked {
 					selected = append(selected, i)
 				}
 			}
 			a.dialogState.MultiSelectChan <- selected
 			a.dialogState.Active = false
 		case e.Rune >= '1' && e.Rune <= '9':
+			// Shortcut to toggle items by number
 			idx := int(e.Rune - '1')
-			if idx < len(a.dialogState.Options) {
-				a.dialogState.Options[idx].Selected = !a.dialogState.Options[idx].Selected
+			if idx < len(a.dialogState.MultiSelectChecked) {
+				a.dialogState.MultiSelectChecked[idx] = !a.dialogState.MultiSelectChecked[idx]
 			}
 		}
 
@@ -1361,7 +1343,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 	}
 }
 
-// SelectTool prompts the user to select one option
+// SelectTool prompts the user to select one option (with "Other" for custom input)
 func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
 	// Build options
 	options := make([]DialogOption, len(req.Options))
@@ -1378,7 +1360,7 @@ func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.Se
 	}
 
 	// Set up dialog via event
-	selectChan := make(chan int, 1)
+	selectChan := make(chan SelectResult, 1)
 	a.runner.SendEvent(showDialogEvent{
 		baseEvent: newBaseEvent(),
 		dialog: &DialogState{
@@ -1388,18 +1370,23 @@ func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.Se
 			Message:      req.Message,
 			Options:      options,
 			DefaultIndex: defaultIdx,
+			SelectIndex:  defaultIdx, // Initialize PromptChoice state
 			SelectChan:   selectChan,
 		},
 	})
 
 	// Wait for user response
 	select {
-	case idx := <-selectChan:
+	case result := <-selectChan:
 		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
-		if idx < 0 {
+		if result.OtherText != "" {
+			// User selected "Other" and typed custom text
+			return &dive.SelectResponse{OtherText: result.OtherText}, nil
+		}
+		if result.Index < 0 {
 			return &dive.SelectResponse{Canceled: true}, nil
 		}
-		return &dive.SelectResponse{Value: req.Options[idx].Value}, nil
+		return &dive.SelectResponse{Value: req.Options[result.Index].Value}, nil
 	case <-ctx.Done():
 		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		return &dive.SelectResponse{Canceled: true}, ctx.Err()
@@ -1410,12 +1397,14 @@ func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.Se
 func (a *App) MultiSelectTool(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
 	// Build options
 	options := make([]DialogOption, len(req.Options))
+	checked := make([]bool, len(req.Options))
 	for i, opt := range req.Options {
 		options[i] = DialogOption{
 			Label:    opt.Label,
 			Value:    opt.Value,
 			Selected: opt.Default,
 		}
+		checked[i] = opt.Default
 	}
 
 	// Set up dialog via event
@@ -1423,12 +1412,14 @@ func (a *App) MultiSelectTool(ctx context.Context, req *dive.MultiSelectRequest)
 	a.runner.SendEvent(showDialogEvent{
 		baseEvent: newBaseEvent(),
 		dialog: &DialogState{
-			Type:            DialogTypeMultiSelect,
-			Active:          true,
-			Title:           req.Title,
-			Message:         req.Message,
-			Options:         options,
-			MultiSelectChan: multiSelectChan,
+			Type:               DialogTypeMultiSelect,
+			Active:             true,
+			Title:              req.Title,
+			Message:            req.Message,
+			Options:            options,
+			MultiSelectChan:    multiSelectChan,
+			MultiSelectChecked: checked, // Initialize CheckboxList state
+			MultiSelectCursor:  0,       // Initialize cursor
 		},
 	})
 

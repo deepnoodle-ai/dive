@@ -207,7 +207,7 @@ func runInteractive(ctx *cli.Context) error {
 	// Create interactor
 	interactor := NewAppInteractor()
 
-	// Add ask_user tool with interactor
+	// Add AskUserQuestion tool with interactor
 	tools = append(tools, toolkit.NewAskUserTool(toolkit.AskUserToolOptions{
 		Interactor: interactor,
 	}))
@@ -424,7 +424,7 @@ func createPermissionConfig() *dive.PermissionConfig {
 			dive.AllowRule("WebFetch"),
 			dive.AllowRule("WebSearch"),
 			dive.AllowRule("TodoWrite"),
-			dive.AllowRule("AskUser"),
+			dive.AllowRule("AskUserQuestion"),
 			dive.AllowRule("Skill"),
 			dive.AllowRule("Task"),
 			dive.AllowRule("TaskOutput"),

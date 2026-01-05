@@ -73,8 +73,9 @@ type SelectRequest struct {
 
 // SelectResponse contains the user's selection.
 type SelectResponse struct {
-	Value    string // Selected option's Value
-	Canceled bool   // True if user canceled without selecting
+	Value     string // Selected option's Value
+	OtherText string // Custom text if user selected "Other"
+	Canceled  bool   // True if user canceled without selecting
 }
 
 // MultiSelectRequest contains information for a multi-selection prompt.

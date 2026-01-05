@@ -240,7 +240,7 @@ Dive includes these built-in tools:
 - **todo_write**: Track task progress with todo lists
 - **skill**: Activate specialized skills
 - **memory**: Persistent memory files across sessions
-- **ask_user**: Request user input or clarification
+- **ask_user_question**: Request user input or clarification
 
 ### Tool Annotations
 

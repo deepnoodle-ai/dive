@@ -64,7 +64,7 @@ func (t *KillShellTool) Schema() *schema.Schema {
 
 func (t *KillShellTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Kill Shell",
+		Title:           "KillShell",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  true,

@@ -188,7 +188,7 @@ func (t *TextEditorTool) Schema() *schema.Schema {
 
 func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Text Editor",
+		Title:           "TextEditor",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  false,

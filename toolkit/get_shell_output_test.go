@@ -243,7 +243,7 @@ func TestGetShellOutputTool_Annotations(t *testing.T) {
 	annotations := tool.Annotations()
 
 	assert.NotNil(t, annotations)
-	assert.Equal(t, "Get Shell Output", annotations.Title)
+	assert.Equal(t, "GetShellOutput", annotations.Title)
 	assert.True(t, annotations.ReadOnlyHint)
 	assert.False(t, annotations.DestructiveHint)
 }
@@ -395,7 +395,7 @@ func TestListShellsTool_Annotations(t *testing.T) {
 	annotations := tool.Annotations()
 
 	assert.NotNil(t, annotations)
-	assert.Equal(t, "List Shells", annotations.Title)
+	assert.Equal(t, "ListShells", annotations.Title)
 	assert.True(t, annotations.ReadOnlyHint)
 	assert.False(t, annotations.DestructiveHint)
 }

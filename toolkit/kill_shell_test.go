@@ -157,7 +157,7 @@ func TestKillShellTool_Annotations(t *testing.T) {
 	annotations := tool.Annotations()
 
 	assert.NotNil(t, annotations)
-	assert.Equal(t, "Kill Shell", annotations.Title)
+	assert.Equal(t, "KillShell", annotations.Title)
 	assert.False(t, annotations.ReadOnlyHint)
 	assert.True(t, annotations.DestructiveHint)
 }

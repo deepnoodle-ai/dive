@@ -109,7 +109,7 @@ func (t *EditTool) Schema() *schema.Schema {
 
 func (t *EditTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Edit File",
+		Title:           "Edit",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  true,
