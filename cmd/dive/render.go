@@ -99,10 +99,14 @@ func (a *App) introView(msg Message) tui.View {
 	}
 
 	// Style constants
-	version := tui.Text("  v0.1.0").Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 90, G: 90, B: 100}))
 	accentColor := tui.RGB{R: 80, G: 200, B: 235}
 	mutedColor := tui.RGB{R: 140, G: 140, B: 155}
 	dimColor := tui.RGB{R: 100, G: 100, B: 115}
+
+	version := tui.Group(
+		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
+		tui.Text("v0.1.0").Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 90, G: 90, B: 100})),
+	)
 
 	modelLine := tui.Group(
 		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
@@ -110,24 +114,20 @@ func (a *App) introView(msg Message) tui.View {
 	)
 
 	workspaceLine := tui.Group(
-		tui.Text("  ◇ ").Style(tui.NewStyle().WithFgRGB(dimColor)),
+		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
 		tui.Text("%s", workspace).Style(tui.NewStyle().WithFgRGB(dimColor)),
 	)
 
-	tagline := tui.Text("  Your AI coding companion").Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 130, B: 150}).WithItalic())
-
 	// Combine all views
-	views := make([]tui.View, 0, len(logoViews)+6)
+	var views []tui.View
 	views = append(views, tui.Text(""))
 	views = append(views, logoViews...)
-	views = append(views, version)
 	views = append(views, tui.Text(""))
+	views = append(views, version)
 	views = append(views, modelLine)
 	views = append(views, workspaceLine)
 	views = append(views, tui.Text(""))
-	views = append(views, tagline)
 	views = append(views, tui.Text(""))
-
 	return tui.Stack(views...).Gap(0)
 }
 
@@ -181,7 +181,7 @@ func (a *App) toolCallView(msg Message) tui.View {
 		statusView = tui.Text("⏺").Animate(tui.Pulse(tui.NewRGB(80, 160, 220), 8).Brightness(0.3, 1.0))
 	}
 
-	toolCall := formatToolCall(msg.ToolName, msg.ToolInput)
+	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
 	header := tui.Group(statusView, tui.Text(" %s", toolCall))
 
 	if msg.ToolDone && len(msg.ToolResultLines) > 0 {
@@ -194,8 +194,22 @@ func (a *App) toolCallView(msg Message) tui.View {
 	return header
 }
 
+// toolResultStyle returns the style for tool result text (brighter than muted)
+func toolResultStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(tui.RGB{R: 140, G: 140, B: 150})
+}
+
 // formatToolResultView formats tool result
 func (a *App) formatToolResultView(msg Message) tui.View {
+	// Special handling for Read tool - show line count
+	if msg.ToolName == "Read" && msg.ToolReadLines > 0 {
+		resultText := fmt.Sprintf("Read %d lines", msg.ToolReadLines)
+		if msg.ToolError {
+			return tui.Text("  ⎿  %s", resultText).Error()
+		}
+		return tui.Text("  ⎿  %s", resultText).Style(toolResultStyle())
+	}
+
 	lines := msg.ToolResultLines
 	if len(lines) == 0 {
 		return nil
@@ -215,7 +229,7 @@ func (a *App) formatToolResultView(msg Message) tui.View {
 	if msg.ToolError {
 		views = append(views, tui.Text("  ⎿  %s", firstLine).Error())
 	} else {
-		views = append(views, tui.Text("  ⎿  %s", firstLine).Muted())
+		views = append(views, tui.Text("  ⎿  %s", firstLine).Style(toolResultStyle()))
 	}
 
 	if len(lines) > 1 {
@@ -226,38 +240,55 @@ func (a *App) formatToolResultView(msg Message) tui.View {
 }
 
 // formatToolCall formats a tool call for display
-func formatToolCall(name, inputJSON string) string {
+// title is the human-readable display name, apiName is the actual tool name for special handling
+func formatToolCall(title, apiName, inputJSON string) string {
 	if inputJSON == "" {
-		return name + "()"
+		return title + "()"
 	}
 
 	var params map[string]any
 	if err := json.Unmarshal([]byte(inputJSON), &params); err != nil {
-		return name + "(...)"
+		return title + "(...)"
 	}
 
 	if len(params) == 0 {
-		return name + "()"
+		return title + "()"
 	}
 
-	// Special handling for bash tool
-	if name == "bash" || name == "Bash" {
+	// Special handling for Bash tool
+	if apiName == "Bash" {
 		if cmd, ok := params["command"].(string); ok {
 			displayCmd := cmd
 			if len(displayCmd) > 100 {
 				displayCmd = displayCmd[:97] + "..."
 			}
 			displayCmd = strings.ReplaceAll(displayCmd, "\n", " ")
-			return "Bash(" + displayCmd + ")"
+			return title + "(" + displayCmd + ")"
 		}
 	}
 
-	// Special handling for TodoWrite
-	if name == "TodoWrite" || name == "todo_write" {
-		if todos, ok := params["todos"].([]any); ok {
-			return fmt.Sprintf("TodoWrite(%d items)", len(todos))
+	// Special handling for Read tool - show as title(filepath)
+	if apiName == "Read" {
+		if filePath, ok := params["file_path"].(string); ok {
+			return fmt.Sprintf("%s(%s)", title, filePath)
 		}
-		return "TodoWrite()"
+		return title + "()"
+	}
+
+	// Special handling for ListDirectory tool - show as title(path)
+	if apiName == "ListDirectory" {
+		if path, ok := params["path"].(string); ok {
+			return fmt.Sprintf("%s(%s)", title, path)
+		}
+		return title + "()"
+	}
+
+	// Special handling for TodoWrite tool
+	if apiName == "TodoWrite" {
+		if todos, ok := params["todos"].([]any); ok {
+			return fmt.Sprintf("%s(%d items)", title, len(todos))
+		}
+		return title + "()"
 	}
 
 	// Sort keys for consistent ordering
@@ -274,7 +305,7 @@ func formatToolCall(name, inputJSON string) string {
 		parts = append(parts, fmt.Sprintf("%s: %s", k, formatParamValue(v)))
 	}
 
-	return name + "(" + strings.Join(parts, ", ") + ")"
+	return title + "(" + strings.Join(parts, ", ") + ")"
 }
 
 // formatParamValue formats a parameter value
@@ -345,7 +376,7 @@ func renderDiffResult(result string) tui.View {
 	views := make([]tui.View, 0, len(lines)+2)
 
 	if len(lines) > 0 {
-		views = append(views, tui.Text("  ⎿  %s", truncateDisplayLine(lines[0])).Muted())
+		views = append(views, tui.Text("  ⎿  %s", truncateDisplayLine(lines[0])).Style(toolResultStyle()))
 	}
 
 	for i := 1; i < len(lines); i++ {
@@ -358,7 +389,7 @@ func renderDiffResult(result string) tui.View {
 		} else if strings.HasPrefix(trimmed, "- ") {
 			lineView = tui.Text("      %s", line).Error()
 		} else {
-			lineView = tui.Text("      %s", line).Muted()
+			lineView = tui.Text("      %s", line).Style(toolResultStyle())
 		}
 		views = append(views, lineView)
 	}
@@ -439,20 +470,17 @@ func formatDuration(d time.Duration) string {
 
 // Static versions for scroll history (no animations)
 
-func (a *App) messageViewStatic(msg Message, index int) tui.View {
+func (a *App) messageViewStatic(msg Message) tui.View {
 	switch msg.Type {
 	case MessageTypeToolCall:
 		return a.toolCallViewStatic(msg)
 	default:
-		return a.textMessageViewStatic(msg, index)
+		return a.textMessageViewStatic(msg)
 	}
 }
 
-func (a *App) textMessageViewStatic(msg Message, index int) tui.View {
+func (a *App) textMessageViewStatic(msg Message) tui.View {
 	switch msg.Role {
-	case "intro":
-		return a.introView(msg)
-
 	case "user":
 		return tui.Text("> %s", msg.Content).Wrap().Style(
 			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}).WithItalic(),
@@ -485,7 +513,7 @@ func (a *App) toolCallViewStatic(msg Message) tui.View {
 		statusView = tui.Text("⏺").Fg(tui.ColorCyan)
 	}
 
-	toolCall := formatToolCall(msg.ToolName, msg.ToolInput)
+	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
 	header := tui.Group(statusView, tui.Text(" %s", toolCall))
 
 	if msg.ToolDone && len(msg.ToolResultLines) > 0 {

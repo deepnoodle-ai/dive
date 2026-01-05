@@ -296,7 +296,8 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 
 	if input.RunInBackground {
 		go executeFunc()
-		return dive.NewToolResultText(fmt.Sprintf("Task started in background. Task ID: %s\nUse TaskOutput to retrieve results.", taskID)), nil
+		return dive.NewToolResultText(fmt.Sprintf("Task started in background. Task ID: %s\nUse TaskOutput to retrieve results.", taskID)).
+			WithDisplay(fmt.Sprintf("Started background task: %s", input.Description)), nil
 	}
 
 	// Synchronous execution with timeout
@@ -312,13 +313,16 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	select {
 	case <-done:
 		if record.Status == TaskStatusFailed {
-			return dive.NewToolResultError(record.Output), nil
+			return dive.NewToolResultError(record.Output).
+				WithDisplay(fmt.Sprintf("Task failed: %s", input.Description)), nil
 		}
-		return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, record.Output)), nil
+		return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, record.Output)).
+			WithDisplay(fmt.Sprintf("Completed: %s", input.Description)), nil
 	case <-timeoutCtx.Done():
 		record.Status = TaskStatusFailed
 		record.Error = timeoutCtx.Err()
-		return dive.NewToolResultError(fmt.Sprintf("Task timed out after %s. Task ID: %s", t.defaultTimeout, taskID)), nil
+		return dive.NewToolResultError(fmt.Sprintf("Task timed out after %s. Task ID: %s", t.defaultTimeout, taskID)).
+			WithDisplay(fmt.Sprintf("Task timed out: %s", input.Description)), nil
 	}
 }
 
@@ -393,7 +397,7 @@ func (t *TaskOutputTool) Schema() *schema.Schema {
 
 func (t *TaskOutputTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Task Output",
+		Title:           "TaskOutput",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,
@@ -464,7 +468,8 @@ func (t *TaskOutputTool) formatTaskStatus(record *TaskRecord) *dive.ToolResult {
 		status += fmt.Sprintf("\nError: %s", record.Error.Error())
 	}
 
-	return dive.NewToolResultText(status)
+	display := fmt.Sprintf("Task %s: %s", record.Status, record.Description)
+	return dive.NewToolResultText(status).WithDisplay(display)
 }
 
 func (t *TaskOutputTool) ShouldReturnResult() bool {

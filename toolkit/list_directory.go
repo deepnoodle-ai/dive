@@ -60,7 +60,7 @@ func NewListDirectoryTool(options ListDirectoryToolOptions) *dive.TypedToolAdapt
 }
 
 func (t *ListDirectoryTool) Name() string {
-	return "list_directory"
+	return "ListDirectory"
 }
 
 func (t *ListDirectoryTool) Description() string {
@@ -82,7 +82,7 @@ func (t *ListDirectoryTool) Schema() *schema.Schema {
 
 func (t *ListDirectoryTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "list_directory",
+		Title:           "ListDirectory",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,
@@ -188,7 +188,7 @@ func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput)
 		message += fmt.Sprintf(" (limited to %d entries)", t.maxEntries)
 	}
 
-	display := fmt.Sprintf("Listed %s (%d entries)", dirPath, len(result))
+	display := fmt.Sprintf("Listed %d entries", len(result))
 	return NewToolResultText(fmt.Sprintf("%s:\n\n%s", message, string(jsonResult))).
 		WithDisplay(display), nil
 }

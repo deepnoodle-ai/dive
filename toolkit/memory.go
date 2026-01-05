@@ -218,7 +218,7 @@ func (t *MemoryTool) Schema() *schema.Schema {
 
 func (t *MemoryTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "memory",
+		Title:           "Memory",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  false,
@@ -304,7 +304,7 @@ func (t *MemoryTool) handleView(path string, viewRange []int) (*dive.ToolResult,
 		}
 
 		result := fmt.Sprintf("Here're the files and directories up to 2 levels deep in %s, excluding hidden items and node_modules:\n%s", path, output)
-		return dive.NewToolResultText(result), nil
+		return dive.NewToolResultText(result).WithDisplay(fmt.Sprintf("Listed %s", path)), nil
 	}
 
 	// Handle file viewing
@@ -348,7 +348,8 @@ func (t *MemoryTool) handleView(path string, viewRange []int) (*dive.ToolResult,
 	}
 
 	output := t.makeOutput(content, path, initLine)
-	return dive.NewToolResultText(output), nil
+	lineCount := strings.Count(content, "\n") + 1
+	return dive.NewToolResultText(output).WithDisplay(fmt.Sprintf("Viewed %s (%d lines)", path, lineCount)), nil
 }
 
 func (t *MemoryTool) handleCreate(path string, fileText *string) (*dive.ToolResult, error) {
@@ -368,7 +369,9 @@ func (t *MemoryTool) handleCreate(path string, fileText *string) (*dive.ToolResu
 		return dive.NewToolResultError(fmt.Sprintf("Error creating file: %v", err)), nil
 	}
 
-	return dive.NewToolResultText(fmt.Sprintf("File created successfully at: %s", path)), nil
+	lineCount := strings.Count(*fileText, "\n") + 1
+	return dive.NewToolResultText(fmt.Sprintf("File created successfully at: %s", path)).
+		WithDisplay(fmt.Sprintf("Created %s (%d lines)", path, lineCount)), nil
 }
 
 func (t *MemoryTool) handleStrReplace(path string, oldStr, newStr *string) (*dive.ToolResult, error) {
@@ -425,7 +428,7 @@ func (t *MemoryTool) handleStrReplace(path string, oldStr, newStr *string) (*div
 	snippet := t.generateEditSnippet(content, newContent, *oldStr, newStrValue)
 	successMsg := fmt.Sprintf("The memory file has been edited.%s", snippet)
 
-	return dive.NewToolResultText(successMsg), nil
+	return dive.NewToolResultText(successMsg).WithDisplay(fmt.Sprintf("Edited %s", path)), nil
 }
 
 func (t *MemoryTool) handleInsert(path string, insertLine *int, insertText *string) (*dive.ToolResult, error) {
@@ -473,7 +476,9 @@ func (t *MemoryTool) handleInsert(path string, insertLine *int, insertText *stri
 		return dive.NewToolResultError(fmt.Sprintf("Error writing file: %v", err)), nil
 	}
 
-	return dive.NewToolResultText(fmt.Sprintf("The file %s has been edited.", path)), nil
+	insertedLines := len(strings.Split(*insertText, "\n"))
+	return dive.NewToolResultText(fmt.Sprintf("The file %s has been edited.", path)).
+		WithDisplay(fmt.Sprintf("Inserted %d lines into %s", insertedLines, path)), nil
 }
 
 func (t *MemoryTool) handleDelete(path string) (*dive.ToolResult, error) {
@@ -496,7 +501,8 @@ func (t *MemoryTool) handleDelete(path string) (*dive.ToolResult, error) {
 		return dive.NewToolResultError(fmt.Sprintf("Error deleting: %v", err)), nil
 	}
 
-	return dive.NewToolResultText(fmt.Sprintf("Successfully deleted %s", path)), nil
+	return dive.NewToolResultText(fmt.Sprintf("Successfully deleted %s", path)).
+		WithDisplay(fmt.Sprintf("Deleted %s", path)), nil
 }
 
 func (t *MemoryTool) handleRename(oldPath, newPath *string) (*dive.ToolResult, error) {
@@ -526,7 +532,8 @@ func (t *MemoryTool) handleRename(oldPath, newPath *string) (*dive.ToolResult, e
 		return dive.NewToolResultError(fmt.Sprintf("Error renaming: %v", err)), nil
 	}
 
-	return dive.NewToolResultText(fmt.Sprintf("Successfully renamed %s to %s", *oldPath, *newPath)), nil
+	return dive.NewToolResultText(fmt.Sprintf("Successfully renamed %s to %s", *oldPath, *newPath)).
+		WithDisplay(fmt.Sprintf("Renamed %s → %s", *oldPath, *newPath)), nil
 }
 
 func (t *MemoryTool) generateEditSnippet(originalContent, newContent, oldStr, newStr string) string {

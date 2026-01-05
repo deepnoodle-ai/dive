@@ -114,7 +114,7 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 }
 
 func (t *GrepTool) Name() string {
-	return "grep"
+	return "Grep"
 }
 
 func (t *GrepTool) Description() string {
@@ -207,7 +207,7 @@ func (t *GrepTool) Schema() *schema.Schema {
 
 func (t *GrepTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Search Content",
+		Title:           "Grep",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

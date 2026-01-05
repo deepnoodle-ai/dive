@@ -132,7 +132,7 @@ func (t *TodoWriteTool) Schema() *schema.Schema {
 
 func (t *TodoWriteTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Todo List",
+		Title:           "TodoWrite",
 		ReadOnlyHint:    false,
 		DestructiveHint: false,
 		IdempotentHint:  true,

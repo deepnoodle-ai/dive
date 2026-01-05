@@ -23,6 +23,12 @@ Welcome to the Dive documentation! Dive is an AI toolkit for Go that enables you
 
 ### Advanced Topics
 
+- [Permissions](guides/permissions.md) - Controlling tool execution permissions
+
+### Design Documents
+
+- [Sandboxing](design/sandboxing.md) - Secure command execution isolation
+
 ### Reference
 
 - [CLI & Configuration](reference.md) - Complete CLI and configuration reference

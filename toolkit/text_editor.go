@@ -188,7 +188,7 @@ func (t *TextEditorTool) Schema() *schema.Schema {
 
 func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "text_editor",
+		Title:           "TextEditor",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  false,
@@ -266,7 +266,7 @@ func (t *TextEditorTool) handleView(path string, viewRange []int) (*dive.ToolRes
 		}
 
 		result := fmt.Sprintf("Here's the files and directories up to 2 levels deep in %s, excluding hidden items:\n%s", path, output)
-		return dive.NewToolResultText(result), nil
+		return dive.NewToolResultText(result).WithDisplay(fmt.Sprintf("Listed %s", path)), nil
 	}
 
 	// Check file size before reading to prevent memory exhaustion
@@ -309,7 +309,9 @@ func (t *TextEditorTool) handleView(path string, viewRange []int) (*dive.ToolRes
 	}
 
 	output := t.makeOutput(content, path, initLine)
-	return dive.NewToolResultText(output), nil
+	lineCount := strings.Count(content, "\n") + 1
+	display := fmt.Sprintf("Viewed %s (%d lines)", path, lineCount)
+	return dive.NewToolResultText(output).WithDisplay(display), nil
 }
 
 func (t *TextEditorTool) handleCreate(path string, fileText *string) (*dive.ToolResult, error) {
@@ -322,8 +324,9 @@ func (t *TextEditorTool) handleCreate(path string, fileText *string) (*dive.Tool
 	}
 
 	// Don't add to history for create - it's a new file, not an edit
-
-	return dive.NewToolResultText(fmt.Sprintf("File created successfully at: %s", path)), nil
+	lineCount := strings.Count(*fileText, "\n") + 1
+	display := fmt.Sprintf("Created %s (%d lines)", path, lineCount)
+	return dive.NewToolResultText(fmt.Sprintf("File created successfully at: %s", path)).WithDisplay(display), nil
 }
 
 func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (*dive.ToolResult, error) {
@@ -376,7 +379,8 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 	snippet := t.generateEditSnippet(content, newContent, *oldStr, newStrValue)
 	successMsg := fmt.Sprintf("The file %s has been edited. %s\nReview the changes and make sure they are as expected. Edit the file again if necessary.", path, snippet)
 
-	return dive.NewToolResultText(successMsg), nil
+	display := fmt.Sprintf("Edited %s", path)
+	return dive.NewToolResultText(successMsg).WithDisplay(display), nil
 }
 
 func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *string) (*dive.ToolResult, error) {
@@ -428,7 +432,8 @@ func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *stri
 
 	successMsg := fmt.Sprintf("The file %s has been edited. %s\nReview the changes and make sure they are as expected (correct indentation, no duplicate lines, etc). Edit the file again if necessary.", path, snippetOutput)
 
-	return dive.NewToolResultText(successMsg), nil
+	display := fmt.Sprintf("Inserted %d lines into %s", len(newStrLines), path)
+	return dive.NewToolResultText(successMsg).WithDisplay(display), nil
 }
 
 func (t *TextEditorTool) generateEditSnippet(originalContent, newContent, oldStr, newStr string) string {

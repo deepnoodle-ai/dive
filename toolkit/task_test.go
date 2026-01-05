@@ -410,7 +410,7 @@ func TestToolMetadata(t *testing.T) {
 		assert.Contains(t, schema.Required, "task_id")
 
 		annotations := tool.Annotations()
-		assert.Equal(t, "Task Output", annotations.Title)
+		assert.Equal(t, "TaskOutput", annotations.Title)
 		assert.True(t, annotations.ReadOnlyHint)
 		assert.True(t, annotations.IdempotentHint)
 	})

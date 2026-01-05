@@ -52,7 +52,7 @@ func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFi
 }
 
 func (t *ReadFileTool) Name() string {
-	return "read_file"
+	return "Read"
 }
 
 func (t *ReadFileTool) Description() string {
@@ -220,7 +220,7 @@ func isBinaryContent(content []byte) bool {
 
 func (t *ReadFileTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "read_file",
+		Title:           "Read",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

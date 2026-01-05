@@ -20,7 +20,7 @@ type AskUserInputOption struct {
 	Default     bool   `json:"default,omitempty"`
 }
 
-// AskUserInput is the input for the ask_user tool.
+// AskUserInput is the input for the AskUserQuestion tool.
 type AskUserInput struct {
 	Question  string               `json:"question"`
 	Type      string               `json:"type"` // "confirm", "select", "multiselect", "input"
@@ -31,7 +31,7 @@ type AskUserInput struct {
 	Multiline bool                 `json:"multiline,omitempty"`
 }
 
-// AskUserOutput is the output from the ask_user tool.
+// AskUserOutput is the output from the AskUserQuestion tool.
 type AskUserOutput struct {
 	Response string   `json:"response,omitempty"`
 	Values   []string `json:"values,omitempty"`
@@ -48,7 +48,7 @@ type AskUserToolOptions struct {
 	Interactor dive.UserInteractor
 }
 
-// NewAskUserTool creates a new tool for asking the user questions.
+// NewAskUserTool creates a new AskUserQuestion tool for asking the user questions.
 // An explicit Interactor must be provided; without one, the tool will fail at call time.
 func NewAskUserTool(opts AskUserToolOptions) *dive.TypedToolAdapter[*AskUserInput] {
 	return dive.ToolAdapter(&AskUserTool{
@@ -57,7 +57,7 @@ func NewAskUserTool(opts AskUserToolOptions) *dive.TypedToolAdapter[*AskUserInpu
 }
 
 func (t *AskUserTool) Name() string {
-	return "ask_user"
+	return "AskUserQuestion"
 }
 
 func (t *AskUserTool) Description() string {
@@ -195,6 +195,9 @@ func (t *AskUserTool) Call(ctx context.Context, input *AskUserInput) (*dive.Tool
 		}
 		if resp.Canceled {
 			output.Canceled = true
+		} else if resp.OtherText != "" {
+			// User selected "Other" and typed custom text
+			output.Response = resp.OtherText
 		} else {
 			output.Response = resp.Value
 		}
@@ -266,7 +269,7 @@ func (t *AskUserTool) Call(ctx context.Context, input *AskUserInput) (*dive.Tool
 
 func (t *AskUserTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Ask User",
+		Title:           "AskUserQuestion",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  false,

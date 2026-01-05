@@ -207,7 +207,7 @@ func runInteractive(ctx *cli.Context) error {
 	// Create interactor
 	interactor := NewAppInteractor()
 
-	// Add ask_user tool with interactor
+	// Add AskUserQuestion tool with interactor
 	tools = append(tools, toolkit.NewAskUserTool(toolkit.AskUserToolOptions{
 		Interactor: interactor,
 	}))
@@ -243,6 +243,19 @@ func runInteractive(ctx *cli.Context) error {
 		}
 	} else {
 		permissionConfig = createPermissionConfig()
+	}
+
+	// Load project settings from .dive/settings.json
+	settings, err := dive.LoadSettings(workspaceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load settings: %v\n", err)
+	} else if settings != nil {
+		// Add rules from settings file
+		settingsRules := settings.ToPermissionRules()
+		if len(settingsRules) > 0 {
+			// Prepend settings rules so they're checked first
+			permissionConfig.Rules = append(settingsRules, permissionConfig.Rules...)
+		}
 	}
 
 	// Create thread repository for conversation memory
@@ -404,23 +417,22 @@ func createPermissionConfig() *dive.PermissionConfig {
 		Mode: dive.PermissionModeDefault,
 		Rules: dive.PermissionRules{
 			// Allow read-only tools without prompting
-			dive.AllowRule("read_file"),
-			dive.AllowRule("glob"),
-			dive.AllowRule("grep"),
-			dive.AllowRule("list_directory"),
-			dive.AllowRule("fetch"),
-			dive.AllowRule("web_search"),
+			dive.AllowRule("Read"),
+			dive.AllowRule("Glob"),
+			dive.AllowRule("Grep"),
+			dive.AllowRule("ListDirectory"),
+			dive.AllowRule("WebFetch"),
+			dive.AllowRule("WebSearch"),
 			dive.AllowRule("TodoWrite"),
-			dive.AllowRule("memory"),
-			dive.AllowRule("ask_user"),
+			dive.AllowRule("AskUserQuestion"),
 			dive.AllowRule("Skill"),
 			dive.AllowRule("Task"),
 			dive.AllowRule("TaskOutput"),
 
 			// Require approval for write operations
-			dive.AskRule("write_file", "Write file"),
-			dive.AskRule("edit", "Edit file"),
-			dive.AskRule("bash", "Execute command"),
+			dive.AskRule("Write", "Write file"),
+			dive.AskRule("Edit", "Edit file"),
+			dive.AskRule("Bash", "Execute command"),
 		},
 	}
 }

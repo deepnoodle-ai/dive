@@ -13,7 +13,7 @@ import (
 
 func TestCommandTool_Name(t *testing.T) {
 	tool := NewCommandTool()
-	assert.Equal(t, "command", tool.Name())
+	assert.Equal(t, "Command", tool.Name())
 }
 
 func TestCommandTool_Description(t *testing.T) {

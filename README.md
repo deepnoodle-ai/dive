@@ -221,26 +221,26 @@ agents highly productive out of the box.
 Dive includes these built-in tools:
 
 **File Operations**
-- **read_file**: Read content from files
-- **write_file**: Write content to files
-- **edit**: Exact string replacements in files (Claude Code aligned)
-- **glob**: Find files using glob patterns
-- **grep**: Search file contents with regex (ripgrep-style)
-- **list_directory**: List directory contents
+- **Read**: Read content from files
+- **Write**: Write content to files
+- **Edit**: Exact string replacements in files (Claude Code aligned)
+- **Glob**: Find files using glob patterns
+- **Grep**: Search file contents with regex (ripgrep-style)
+- **ListDirectory**: List directory contents
 
 **Shell & Execution**
-- **bash**: Persistent bash sessions with state (Claude Code aligned)
-- **task**: Spawn subagents for complex subtasks
+- **Bash**: Persistent bash sessions with state (Claude Code aligned)
+- **Task**: Spawn subagents for complex subtasks
 
 **Web & Search**
-- **web_search**: Search the web using Google or Kagi
-- **fetch**: Extract content from webpages via Firecrawl
+- **WebSearch**: Search the web using Google or Kagi
+- **WebFetch**: Extract content from webpages via Firecrawl
 
 **Agent Features**
-- **todo_write**: Track task progress with todo lists
-- **skill**: Activate specialized skills
-- **memory**: Persistent memory files across sessions
-- **ask_user**: Request user input or clarification
+- **TodoWrite**: Track task progress with todo lists
+- **Skill**: Activate specialized skills
+- **Memory**: Persistent memory files across sessions
+- **AskUserQuestion**: Request user input or clarification
 
 ### Tool Annotations
 

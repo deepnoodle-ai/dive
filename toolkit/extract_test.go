@@ -13,7 +13,7 @@ import (
 
 func TestExtractTool_Name(t *testing.T) {
 	tool := NewExtractTool(ExtractToolOptions{})
-	assert.Equal(t, "extract", tool.Name())
+	assert.Equal(t, "Extract", tool.Name())
 }
 
 func TestExtractTool_Description(t *testing.T) {
@@ -293,7 +293,7 @@ func TestExtractTool_CallWithLargeFile(t *testing.T) {
 func TestExtractTool_Annotations(t *testing.T) {
 	tool := &ExtractTool{}
 	annotations := tool.Annotations()
-	assert.Equal(t, "extract", annotations.Title)
+	assert.Equal(t, "Extract", annotations.Title)
 	assert.True(t, annotations.ReadOnlyHint)
 	assert.False(t, annotations.DestructiveHint)
 	assert.True(t, annotations.IdempotentHint)

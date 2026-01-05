@@ -45,7 +45,7 @@ func NewGetShellOutputTool(opts GetShellOutputToolOptions) *dive.TypedToolAdapte
 }
 
 func (t *GetShellOutputTool) Name() string {
-	return "get_shell_output"
+	return "GetShellOutput"
 }
 
 func (t *GetShellOutputTool) Description() string {
@@ -85,7 +85,7 @@ func (t *GetShellOutputTool) Schema() *schema.Schema {
 
 func (t *GetShellOutputTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Get Shell Output",
+		Title:           "GetShellOutput",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,
@@ -196,7 +196,7 @@ func NewListShellsTool(opts ListShellsToolOptions) *dive.TypedToolAdapter[*ListS
 }
 
 func (t *ListShellsTool) Name() string {
-	return "list_shells"
+	return "ListShells"
 }
 
 func (t *ListShellsTool) Description() string {
@@ -221,7 +221,7 @@ func (t *ListShellsTool) Schema() *schema.Schema {
 
 func (t *ListShellsTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "List Shells",
+		Title:           "ListShells",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

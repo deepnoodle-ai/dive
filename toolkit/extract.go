@@ -63,7 +63,7 @@ func NewExtractTool(options ExtractToolOptions) *dive.TypedToolAdapter[*ExtractI
 }
 
 func (t *ExtractTool) Name() string {
-	return "extract"
+	return "Extract"
 }
 
 func (t *ExtractTool) Description() string {
@@ -276,7 +276,7 @@ func (t *ExtractTool) buildAnalysisResult(input *ExtractInput, fileType string, 
 
 func (t *ExtractTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "extract",
+		Title:           "Extract",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

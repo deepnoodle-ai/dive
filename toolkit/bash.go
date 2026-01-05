@@ -294,7 +294,7 @@ func NewBashTool(opts ...BashToolOptions) *dive.TypedToolAdapter[*BashInput] {
 }
 
 func (t *BashTool) Name() string {
-	return "bash"
+	return "Bash"
 }
 
 func (t *BashTool) Description() string {

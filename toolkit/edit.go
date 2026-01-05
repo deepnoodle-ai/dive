@@ -59,7 +59,7 @@ func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 }
 
 func (t *EditTool) Name() string {
-	return "edit"
+	return "Edit"
 }
 
 func (t *EditTool) Description() string {
@@ -109,7 +109,7 @@ func (t *EditTool) Schema() *schema.Schema {
 
 func (t *EditTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Edit File",
+		Title:           "Edit",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  true,

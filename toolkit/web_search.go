@@ -3,6 +3,7 @@ package toolkit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/schema"
@@ -31,7 +32,7 @@ func NewWebSearchTool(options WebSearchToolOptions) *dive.TypedToolAdapter[*Sear
 }
 
 func (t *WebSearchTool) Name() string {
-	return "web_search"
+	return "WebSearch"
 }
 
 func (t *WebSearchTool) Description() string {
@@ -80,12 +81,13 @@ func (t *WebSearchTool) Call(ctx context.Context, input *SearchInput) (*dive.Too
 	if err != nil {
 		return nil, err
 	}
-	return NewToolResultText(string(data)), nil
+	display := fmt.Sprintf("Found %d results for %q", len(results.Items), input.Query)
+	return NewToolResultText(string(data)).WithDisplay(display), nil
 }
 
 func (t *WebSearchTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "web_search",
+		Title:           "WebSearch",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

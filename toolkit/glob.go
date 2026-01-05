@@ -76,7 +76,7 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 }
 
 func (t *GlobTool) Name() string {
-	return "glob"
+	return "Glob"
 }
 
 func (t *GlobTool) Description() string {
@@ -117,7 +117,7 @@ func (t *GlobTool) Schema() *schema.Schema {
 
 func (t *GlobTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Find Files",
+		Title:           "Glob",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

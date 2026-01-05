@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
@@ -98,9 +99,11 @@ type Message struct {
 	// Tool call fields (when Type == MessageTypeToolCall)
 	ToolID          string
 	ToolName        string
+	ToolTitle       string   // Human-readable display name from tool annotations
 	ToolInput       string   // Full JSON input for display formatting
 	ToolResult      string   // Display summary (first line or truncated)
 	ToolResultLines []string // Full result lines for expansion display
+	ToolReadLines   int      // Line count for read_file results
 	ToolError       bool
 	ToolDone        bool
 }
@@ -115,6 +118,19 @@ const (
 	DialogTypeInput
 )
 
+// ConfirmResult represents the result of a confirmation dialog
+type ConfirmResult struct {
+	Approved     bool   // User approved the action
+	AllowSession bool   // User wants to allow all similar actions this session
+	Feedback     string // User feedback when denied (for "tell what to do differently")
+}
+
+// SelectResult represents the result of a select dialog
+type SelectResult struct {
+	Index     int    // Selected option index (-1 for cancel)
+	OtherText string // Custom text if user selected "Other"
+}
+
 // DialogState holds state for all tool dialogs
 type DialogState struct {
 	Type           DialogType
@@ -123,16 +139,24 @@ type DialogState struct {
 	Message        string
 	ContentPreview string
 
-	// For confirm
-	ConfirmChan chan bool
+	// For confirm (Claude Code style)
+	ConfirmChan              chan ConfirmResult
+	ConfirmSelectedIdx       int    // Currently selected option (0=Yes, 1=Allow session, 2=Feedback)
+	ConfirmFeedback          string // User feedback text (for PromptChoice input option)
+	ConfirmToolCategory      string // Tool category for "allow all X this session" (e.g., "bash", "edit", "read")
+	ConfirmToolCategoryLabel string // Human-readable label (e.g., "bash commands", "file edits")
 
-	// For select
-	Options      []DialogOption
-	DefaultIndex int
-	SelectChan   chan int // -1 for cancel
+	// For select (uses PromptChoice with "Other" input option)
+	Options         []DialogOption
+	DefaultIndex    int
+	SelectIndex     int               // State for PromptChoice
+	SelectOtherText string            // State for PromptChoice "Other" input
+	SelectChan      chan SelectResult // Carries index and optional "Other" text
 
 	// For multi-select
-	MultiSelectChan chan []int // nil for cancel
+	MultiSelectChan    chan []int // nil for cancel
+	MultiSelectChecked []bool     // State for CheckboxList
+	MultiSelectCursor  int        // Cursor for CheckboxList
 
 	// For input
 	DefaultValue string
@@ -171,7 +195,8 @@ type App struct {
 
 	// Tool call tracking
 	toolCallIndex      map[string]int
-	needNewTextMessage bool // set after tool calls to create new text message
+	toolTitles         map[string]string // tool name -> display title
+	needNewTextMessage bool              // set after tool calls to create new text message
 
 	// Command history
 	history []string
@@ -179,7 +204,6 @@ type App struct {
 	// UI state
 	frame               uint64
 	processing          bool
-	thinking            bool
 	processingStartTime time.Time
 
 	// Todo list state
@@ -188,6 +212,12 @@ type App struct {
 
 	// Tool dialog state (confirmations, selections, input)
 	dialogState *DialogState
+
+	// Session-scoped permission allowlist: maps tool categories to allowed status.
+	// Categories include: "bash", "edit", "read", or specific tool names.
+	// When user selects "allow all X this session", the relevant category is added.
+	sessionAllowed   map[string]bool
+	sessionAllowedMu sync.RWMutex
 
 	// Autocomplete state
 	autocompleteMatches []string
@@ -205,16 +235,29 @@ type App struct {
 // NewApp creates a new CLI application
 func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Build tool name -> title map from agent's tools
+	toolTitles := make(map[string]string)
+	for _, tool := range agent.Tools() {
+		title := tool.Name() // Default to name
+		if annotations := tool.Annotations(); annotations != nil && annotations.Title != "" {
+			title = annotations.Title
+		}
+		toolTitles[tool.Name()] = title
+	}
+
 	return &App{
-		agent:         agent,
-		workspaceDir:  workspaceDir,
-		modelName:     modelName,
-		messages:      make([]Message, 0),
-		toolCallIndex: make(map[string]int),
-		history:       make([]string, 0),
-		historyIndex:  -1,
-		ctx:           ctx,
-		cancel:        cancel,
+		agent:          agent,
+		workspaceDir:   workspaceDir,
+		modelName:      modelName,
+		messages:       make([]Message, 0),
+		toolCallIndex:  make(map[string]int),
+		toolTitles:     toolTitles,
+		history:        make([]string, 0),
+		historyIndex:   -1,
+		sessionAllowed: make(map[string]bool),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 }
 
@@ -225,12 +268,14 @@ func (a *App) LiveView() tui.View {
 
 	// Show tool dialog if active
 	if a.dialogState != nil && a.dialogState.Active {
+		views = append(views, tui.Text(""))
 		views = append(views, a.dialogView())
 		return tui.Stack(views...)
 	}
 
 	// Show streaming content during processing
 	if a.processing {
+		views = append(views, tui.Text(""))
 		liveContent := a.buildLiveView()
 		if liveContent != nil {
 			views = append(views, liveContent)
@@ -239,8 +284,12 @@ func (a *App) LiveView() tui.View {
 
 	// Show todos if visible and not processing
 	if !a.processing && a.showTodos && len(a.todos) > 0 {
+		views = append(views, tui.Text(""))
 		views = append(views, a.todoListView())
 	}
+
+	// Always add spacing before divider (separates from scrollback or live content)
+	views = append(views, tui.Text(""))
 
 	// Input area
 	views = append(views, tui.Divider())
@@ -251,7 +300,6 @@ func (a *App) LiveView() tui.View {
 			PromptStyle(tui.NewStyle().WithForeground(tui.ColorCyan)).
 			Placeholder("Type a message... (@filename for autocomplete)").
 			Multiline(true).
-			Width(80).
 			MaxHeight(10).
 			OnSubmit(func(value string) {
 				a.submitInput(value)
@@ -260,18 +308,16 @@ func (a *App) LiveView() tui.View {
 	views = append(views, tui.Divider())
 
 	// Show autocomplete options below the bottom divider (always reserve 8 lines)
-	if len(a.autocompleteMatches) > 0 {
-		for i := 0; i < 8; i++ {
-			if i < len(a.autocompleteMatches) {
-				match := a.autocompleteMatches[i]
-				if i == a.autocompleteIndex {
-					views = append(views, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
-				} else {
-					views = append(views, tui.Text("   @%s", match).Hint())
-				}
+	for i := 0; i < 8; i++ {
+		if len(a.autocompleteMatches) > 0 && i < len(a.autocompleteMatches) {
+			match := a.autocompleteMatches[i]
+			if i == a.autocompleteIndex {
+				views = append(views, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
 			} else {
-				views = append(views, tui.Text(""))
+				views = append(views, tui.Text("   @%s", match).Hint())
 			}
+		} else {
+			views = append(views, tui.Text(""))
 		}
 	}
 
@@ -282,71 +328,182 @@ func (a *App) LiveView() tui.View {
 	return tui.Stack(views...).Gap(0)
 }
 
+// Purple color for Claude Code style UI elements
+var purpleColor = tui.RGB{R: 180, G: 140, B: 220}
+
 // dialogView builds the view for tool dialogs
 func (a *App) dialogView() tui.View {
 	if a.dialogState == nil {
 		return nil
 	}
 
-	views := []tui.View{
-		tui.Divider(),
-		tui.Text(" %s", a.dialogState.Title).Bold(),
-	}
-
-	if a.dialogState.Message != "" {
-		views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
-	}
-
-	if a.dialogState.ContentPreview != "" {
-		views = append(views, tui.Divider().Char('-'))
-		for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
-			views = append(views, tui.Text(" %s", line).Hint())
-		}
-	}
+	views := []tui.View{}
 
 	switch a.dialogState.Type {
 	case DialogTypeConfirm:
+		// Claude Code style confirmation dialog using PromptChoice
+		purpleStyle := tui.NewStyle().WithFgRGB(purpleColor)
+
+		// Upper divider (purple, dashed)
+		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+
+		// Title (purple, bold)
+		views = append(views, tui.Text(" %s", a.dialogState.Title).Style(purpleStyle.WithBold()))
+
+		// Content preview with dashed dividers
+		if a.dialogState.ContentPreview != "" {
+			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
+				views = append(views, tui.Text(" %s", line).Hint())
+			}
+		}
+
+		// Lower divider (purple, dashed)
+		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+
+		// Question
+		views = append(views, tui.Text(" Do you want to proceed?").Muted())
+
+		// Build option labels
+		allowLabel := "file edits" // Default fallback
+		if a.dialogState.ConfirmToolCategoryLabel != "" {
+			allowLabel = a.dialogState.ConfirmToolCategoryLabel
+		}
+
+		// Use PromptChoice for the selection UI
+		confirmChan := a.dialogState.ConfirmChan
 		views = append(views,
-			tui.Divider().Char('-'),
-			tui.Group(
-				tui.Text(" ❯ ").Fg(tui.ColorCyan),
-				tui.Text("Yes").Bold(),
-				tui.Text(" (enter/y)  ").Hint(),
-				tui.Text("No").Hint(),
-				tui.Text(" (n/esc)").Hint(),
-			),
+			tui.PromptChoice(&a.dialogState.ConfirmSelectedIdx, &a.dialogState.ConfirmFeedback).
+				ID("confirm-dialog").
+				Option("Yes").
+				Option(fmt.Sprintf("Yes, allow all %s during this session", allowLabel)).
+				InputOption("Tell Dive what to do differently...").
+				CursorStyle(purpleStyle).
+				HintText("").
+				OnSelect(func(idx int, inputText string) {
+					switch idx {
+					case 0: // Yes
+						confirmChan <- ConfirmResult{Approved: true}
+					case 1: // Yes, allow all session
+						confirmChan <- ConfirmResult{Approved: true, AllowSession: true}
+					case 2: // Feedback
+						if inputText != "" {
+							confirmChan <- ConfirmResult{Approved: false, Feedback: inputText}
+						} else {
+							// Empty feedback treated as cancel
+							confirmChan <- ConfirmResult{Approved: false}
+						}
+					}
+					a.dialogState.Active = false
+				}).
+				OnCancel(func() {
+					confirmChan <- ConfirmResult{Approved: false}
+					a.dialogState.Active = false
+				}),
 		)
 
-	case DialogTypeSelect:
 		views = append(views, tui.Text(""))
-		for i, opt := range a.dialogState.Options {
-			marker := "  "
-			if i == a.dialogState.DefaultIndex {
-				marker = "* "
-			}
-			optView := tui.Text(" %s%d) %s", marker, i+1, opt.Label)
-			if opt.Description != "" {
-				views = append(views, tui.Group(optView, tui.Text(" - %s", opt.Description).Muted()))
-			} else {
-				views = append(views, optView)
+		views = append(views, tui.Text(" Esc to cancel").Hint())
+
+		return tui.Stack(views...)
+
+	case DialogTypeSelect:
+		// Non-confirm dialogs use original header style
+		views = append(views,
+			tui.Divider(),
+			tui.Text(" %s", a.dialogState.Title).Bold(),
+		)
+		if a.dialogState.Message != "" {
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+		}
+		if a.dialogState.ContentPreview != "" {
+			views = append(views, tui.Divider().Char('-'))
+			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
+				views = append(views, tui.Text(" %s", line).Hint())
 			}
 		}
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Press 1-%d to select, Enter for default, Esc to cancel", len(a.dialogState.Options)).Hint())
+
+		// Use PromptChoice with options + "Other" input option
+		selectChan := a.dialogState.SelectChan
+		numOptions := len(a.dialogState.Options)
+		promptChoice := tui.PromptChoice(&a.dialogState.SelectIndex, &a.dialogState.SelectOtherText).
+			ID("select-list")
+
+		// Add all predefined options
+		for _, opt := range a.dialogState.Options {
+			label := opt.Label
+			if opt.Description != "" {
+				label = fmt.Sprintf("%s - %s", opt.Label, opt.Description)
+			}
+			promptChoice = promptChoice.Option(label)
+		}
+
+		// Add "Other" input option
+		promptChoice = promptChoice.
+			InputOption("Other...").
+			OnSelect(func(idx int, inputText string) {
+				if idx == numOptions {
+					// User selected "Other" and typed custom text
+					if inputText != "" {
+						selectChan <- SelectResult{Index: -1, OtherText: inputText}
+					} else {
+						// Empty "Other" text treated as cancel
+						selectChan <- SelectResult{Index: -1}
+					}
+				} else {
+					selectChan <- SelectResult{Index: idx}
+				}
+				a.dialogState.Active = false
+			}).
+			OnCancel(func() {
+				selectChan <- SelectResult{Index: -1}
+				a.dialogState.Active = false
+			})
+
+		views = append(views, promptChoice)
+
+		views = append(views, tui.Text(""))
+		views = append(views, tui.Text(" Use arrow keys to navigate, Enter to select, Esc to cancel").Hint())
 
 	case DialogTypeMultiSelect:
-		views = append(views, tui.Text(""))
-		for i, opt := range a.dialogState.Options {
-			checkbox := "[ ]"
-			if opt.Selected {
-				checkbox = "[x]"
-			}
-			views = append(views, tui.Text("  %s %d) %s", checkbox, i+1, opt.Label))
+		// Header
+		views = append(views,
+			tui.Divider(),
+			tui.Text(" %s", a.dialogState.Title).Bold(),
+		)
+		if a.dialogState.Message != "" {
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
 		}
 		views = append(views, tui.Text(""))
-		views = append(views, tui.Text(" Press 1-%d to toggle, Enter to confirm, Esc to cancel", len(a.dialogState.Options)).Hint())
+
+		// Build list items for CheckboxList
+		items := make([]tui.ListItem, len(a.dialogState.Options))
+		for i, opt := range a.dialogState.Options {
+			label := opt.Label
+			if opt.Description != "" {
+				label = fmt.Sprintf("%s - %s", opt.Label, opt.Description)
+			}
+			items[i] = tui.ListItem{Label: label, Value: opt.Value}
+		}
+
+		views = append(views,
+			tui.CheckboxList(items, a.dialogState.MultiSelectChecked, &a.dialogState.MultiSelectCursor).
+				ID("multiselect-list"),
+		)
+
+		views = append(views, tui.Text(""))
+		views = append(views, tui.Text(" Use arrow keys to navigate, Space to toggle, Enter to confirm, Esc to cancel").Hint())
 
 	case DialogTypeInput:
+		// Header
+		views = append(views,
+			tui.Divider(),
+			tui.Text(" %s", a.dialogState.Title).Bold(),
+		)
+		if a.dialogState.Message != "" {
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Muted())
+		}
 		views = append(views, tui.Text(""))
 		// Note: InputField handles its own Enter key via OnSubmit
 		// Escape is handled by handleDialogKey
@@ -364,6 +521,7 @@ func (a *App) dialogView() tui.View {
 						value = defaultValue
 					}
 					inputChan <- value
+					a.dialogState.Active = false
 				}),
 		)
 		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Hint())
@@ -399,8 +557,19 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleProcessingEnd(e.err)
 	case showDialogEvent:
 		a.dialogState = e.dialog
+		// Focus the dialog so it receives key events
+		if e.dialog.Type == DialogTypeConfirm {
+			return []tui.Cmd{tui.Focus("confirm-dialog")}
+		} else if e.dialog.Type == DialogTypeSelect {
+			return []tui.Cmd{tui.Focus("select-list")}
+		} else if e.dialog.Type == DialogTypeMultiSelect {
+			return []tui.Cmd{tui.Focus("multiselect-list")}
+		} else if e.dialog.Type == DialogTypeInput {
+			return []tui.Cmd{tui.Focus("dialog-input")}
+		}
 	case hideDialogEvent:
 		a.dialogState = nil
+		return []tui.Cmd{tui.Focus("main-input")}
 	}
 	return nil
 }
@@ -409,50 +578,35 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 	switch a.dialogState.Type {
 	case DialogTypeConfirm:
-		switch {
-		case e.Key == tui.KeyEnter || e.Rune == 'y' || e.Rune == 'Y':
-			a.dialogState.ConfirmChan <- true
-			a.dialogState.Active = false
-		case e.Rune == 'n' || e.Rune == 'N' || e.Key == tui.KeyEscape:
-			a.dialogState.ConfirmChan <- false
-			a.dialogState.Active = false
-		}
+		// PromptChoice handles most key events (arrows, numbers, Enter, Escape).
+		// We avoid global y/n shortcuts as they interfere with free-form input.
+		return nil
 
 	case DialogTypeSelect:
-		switch {
-		case e.Key == tui.KeyEscape:
-			a.dialogState.SelectChan <- -1
-			a.dialogState.Active = false
-		case e.Key == tui.KeyEnter:
-			a.dialogState.SelectChan <- a.dialogState.DefaultIndex
-			a.dialogState.Active = false
-		case e.Rune >= '1' && e.Rune <= '9':
-			idx := int(e.Rune - '1')
-			if idx < len(a.dialogState.Options) {
-				a.dialogState.SelectChan <- idx
-				a.dialogState.Active = false
-			}
-		}
+		// PromptChoice handles all key events (arrows, numbers, Enter, Escape).
+		return nil
 
 	case DialogTypeMultiSelect:
+		// CheckboxList handles arrow keys and Space
 		switch {
 		case e.Key == tui.KeyEscape:
 			a.dialogState.MultiSelectChan <- nil
 			a.dialogState.Active = false
 		case e.Key == tui.KeyEnter:
-			// Return selected indices
+			// Return selected indices based on CheckboxList state
 			var selected []int
-			for i, opt := range a.dialogState.Options {
-				if opt.Selected {
+			for i, checked := range a.dialogState.MultiSelectChecked {
+				if checked {
 					selected = append(selected, i)
 				}
 			}
 			a.dialogState.MultiSelectChan <- selected
 			a.dialogState.Active = false
 		case e.Rune >= '1' && e.Rune <= '9':
+			// Shortcut to toggle items by number
 			idx := int(e.Rune - '1')
-			if idx < len(a.dialogState.Options) {
-				a.dialogState.Options[idx].Selected = !a.dialogState.Options[idx].Selected
+			if idx < len(a.dialogState.MultiSelectChecked) {
+				a.dialogState.MultiSelectChecked[idx] = !a.dialogState.MultiSelectChecked[idx]
 			}
 		}
 
@@ -668,19 +822,19 @@ func (a *App) processMessageAsync(input string) {
 // Event handlers for background goroutine events
 
 func (a *App) handleProcessingStart(e processingStartEvent) {
+	userInput := strings.TrimSpace(e.userInput)
+
 	// Add user message
 	userMsg := Message{
 		Role:    "user",
-		Content: e.userInput,
+		Content: userInput,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
 	}
 	a.messages = append(a.messages, userMsg)
 
-	// Print user message to scrollback (with blank lines before and after)
-	a.runner.Print(tui.Text(""))
-	a.runner.Print(tui.PaddingHV(1, 0, a.textMessageView(userMsg, len(a.messages)-1)))
-	a.runner.Print(tui.Text(""))
+	// Print user message to scrollback
+	a.runner.Print(tui.Stack(tui.Text(""), a.textMessageView(userMsg, len(a.messages)-1)))
 
 	// Prepare for streaming response
 	a.currentMessage = &Message{
@@ -694,14 +848,12 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 	a.needNewTextMessage = false
 
 	a.processing = true
-	a.thinking = true
 	a.processingStartTime = time.Now()
 }
 
 func (a *App) handleStreamText(text string) {
 	// Buffer text for batched updates (flushed on tick)
 	a.streamBuffer += text
-	a.thinking = false
 }
 
 func (a *App) flushStreamBuffer() {
@@ -729,11 +881,15 @@ func (a *App) flushStreamBuffer() {
 }
 
 func (a *App) handleToolCall(call *llm.ToolUseContent) {
-	a.thinking = false
-
 	// Parse TodoWrite tool calls
-	if call.Name == "todo_write" || call.Name == "TodoWrite" {
+	if call.Name == "TodoWrite" {
 		a.parseTodoWriteInput(call.Input)
+	}
+
+	// Look up display title, default to name if not found
+	toolTitle := call.Name
+	if title, ok := a.toolTitles[call.Name]; ok {
+		toolTitle = title
 	}
 
 	msg := Message{
@@ -742,6 +898,7 @@ func (a *App) handleToolCall(call *llm.ToolUseContent) {
 		Type:      MessageTypeToolCall,
 		ToolID:    call.ID,
 		ToolName:  call.Name,
+		ToolTitle: toolTitle,
 		ToolInput: string(call.Input),
 		ToolDone:  false,
 	}
@@ -758,19 +915,27 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 				a.messages[idx].ToolError = true
 			}
 			display := result.Result.Display
-			if display == "" && len(result.Result.Content) > 0 {
+			var textContent string
+			if len(result.Result.Content) > 0 {
 				for _, c := range result.Result.Content {
 					if c.Type == dive.ToolResultContentTypeText {
-						display = c.Text
+						textContent = c.Text
 						break
 					}
 				}
+			}
+			if display == "" {
+				display = textContent
 			}
 			if display != "" {
 				a.messages[idx].ToolResultLines = strings.Split(display, "\n")
 			}
 			if len(a.messages[idx].ToolResultLines) > 0 {
 				a.messages[idx].ToolResult = a.messages[idx].ToolResultLines[0]
+			}
+			// For Read tool, count lines in the actual content
+			if strings.ToLower(a.messages[idx].ToolName) == "read" && textContent != "" {
+				a.messages[idx].ToolReadLines = strings.Count(textContent, "\n") + 1
 			}
 		}
 	}
@@ -779,9 +944,6 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 func (a *App) handleProcessingEnd(err error) {
 	// Flush any remaining buffered text
 	a.flushStreamBuffer()
-
-	a.processing = false
-	a.thinking = false
 
 	if err != nil && err != context.Canceled {
 		errMsg := Message{
@@ -793,9 +955,11 @@ func (a *App) handleProcessingEnd(err error) {
 		a.messages = append(a.messages, errMsg)
 	}
 
-	// Print final response to scrollback
+	// Print final response to scrollback BEFORE clearing processing state
+	// This ensures content doesn't disappear from live view before appearing in scrollback
 	a.printRecentMessagesToScrollback()
 
+	a.processing = false
 	a.currentMessage = nil
 	a.toolCallIndex = make(map[string]int)
 }
@@ -811,43 +975,36 @@ func (a *App) printRecentMessagesToScrollback() {
 		}
 	}
 
-	// Print each message with blank lines between them
+	// Collect all message views (add blank line before each)
+	messageViews := []tui.View{}
 	for i := startIdx; i < len(a.messages); i++ {
 		msg := a.messages[i]
-		view := a.messageViewStatic(msg, i)
+		view := a.messageViewStatic(msg)
 		if view != nil {
-			a.runner.Print(tui.PaddingHV(1, 0, view))
-			a.runner.Print(tui.Text(""))
+			messageViews = append(messageViews, tui.Text(""), view)
 		}
+	}
+
+	// Print all messages as a single view
+	if len(messageViews) > 0 {
+		a.runner.Print(tui.Stack(messageViews...))
 	}
 }
 
 // Run starts the CLI application
 func (a *App) Run() error {
 	// Create InlineApp runner with 30 FPS for animations
-	a.runner = tui.NewInlineApp(
-		tui.WithInlineFPS(30),
-		tui.WithInlineBracketedPaste(true),
-		tui.WithInlineKittyKeyboard(true),
-	)
+	a.runner = tui.NewInlineApp(tui.InlineAppConfig{
+		FPS:            30,
+		BracketedPaste: true,
+		KittyKeyboard:  true,
+	})
 
-	// Print header and intro to scrollback first
-	a.printHeaderToScrollback()
+	// Print intro to scrollback first
 	a.printIntroToScrollback()
 
 	// Run the inline app (blocks until quit)
 	return a.runner.Run(a)
-}
-
-// printHeaderToScrollback prints the header to scrollback
-func (a *App) printHeaderToScrollback() {
-	header := tui.Group(
-		tui.Text(" Dive ").Bold().Fg(tui.ColorCyan),
-		tui.Spacer(),
-		tui.Text(" ready ").Success(),
-	)
-	tui.Print(header)
-	tui.Print(tui.Divider())
 }
 
 // printIntroToScrollback prints the intro/splash screen to scrollback
@@ -880,7 +1037,6 @@ func (a *App) handleCommand(input string) bool {
 		return true
 	case "/clear":
 		a.runner.ClearScrollback()
-		a.printHeaderToScrollback()
 		a.printIntroToScrollback()
 		return true
 	case "/todos", "/t":
@@ -935,14 +1091,14 @@ func (a *App) buildLiveView() tui.View {
 
 	elapsed := time.Since(a.processingStartTime)
 
-	// Show recent tool calls first (last 3 max, in chronological order)
+	// Show recent completed tool calls (last 3 max, in chronological order)
 	var toolViews []tui.View
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		msg := a.messages[i]
 		if msg.Role == "user" {
 			break
 		}
-		if msg.Type == MessageTypeToolCall {
+		if msg.Type == MessageTypeToolCall && msg.ToolDone {
 			view := a.toolCallView(msg)
 			if view != nil {
 				toolViews = append([]tui.View{view}, toolViews...) // prepend for chronological order
@@ -955,20 +1111,10 @@ func (a *App) buildLiveView() tui.View {
 	views = append(views, toolViews...)
 
 	// Show generation progress indicator (below tool calls)
-	if a.thinking {
-		// Initial thinking phase (no content yet)
+	if a.streamingMessageIndex >= 0 {
 		views = append(views, tui.Group(
 			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
 			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
-			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
-			tui.Text("  ").Hint(),
-			tui.Text("esc to interrupt").Hint(),
-		))
-	} else if a.streamingMessageIndex >= 0 {
-		// Actively generating response
-		views = append(views, tui.Group(
-			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
-			tui.Text(" generating").Fg(tui.ColorCyan),
 			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
 			tui.Text("  ").Hint(),
 			tui.Text("esc to interrupt").Hint(),
@@ -984,7 +1130,8 @@ func (a *App) buildLiveView() tui.View {
 		return tui.Text("")
 	}
 
-	return tui.PaddingLTRB(1, 1, 1, 1, tui.Stack(views...).Gap(1))
+	// Use only horizontal padding to avoid extra lines when live view is removed
+	return tui.PaddingLTRB(1, 0, 1, 0, tui.Stack(views...).Gap(1))
 }
 
 func (a *App) parseTodoWriteInput(input []byte) {
@@ -1020,8 +1167,58 @@ func (a *App) parseTodoWriteInput(input []byte) {
 	}
 }
 
+// toolCategoryInfo represents a tool's category for session allowlist purposes.
+type toolCategoryInfo struct {
+	Category string // Internal category key (e.g., "bash", "edit", "read")
+	Label    string // Human-readable label (e.g., "bash commands", "file edits")
+}
+
+// getToolCategory determines the category of a tool for session allowlist purposes.
+// Returns the category key and a human-readable label for the "allow all X this session" dialog.
+func getToolCategory(toolName string) toolCategoryInfo {
+	toolNameLower := strings.ToLower(toolName)
+
+	// Bash/command execution tools
+	bashPatterns := []string{"bash", "command", "shell", "exec", "run"}
+	for _, pattern := range bashPatterns {
+		if strings.Contains(toolNameLower, pattern) {
+			return toolCategoryInfo{Category: "bash", Label: "bash commands"}
+		}
+	}
+
+	// Edit/write tools
+	editPatterns := []string{"edit", "write", "create", "mkdir", "touch"}
+	for _, pattern := range editPatterns {
+		if strings.Contains(toolNameLower, pattern) {
+			return toolCategoryInfo{Category: "edit", Label: "file edits"}
+		}
+	}
+
+	// Read tools
+	if strings.Contains(toolNameLower, "read") {
+		return toolCategoryInfo{Category: "read", Label: "file reads"}
+	}
+
+	// Glob/search tools
+	if strings.Contains(toolNameLower, "glob") || strings.Contains(toolNameLower, "grep") || strings.Contains(toolNameLower, "search") {
+		return toolCategoryInfo{Category: "search", Label: "searches"}
+	}
+
+	// Default: use the tool name itself as the category
+	return toolCategoryInfo{Category: toolName, Label: toolName + " operations"}
+}
+
 // ConfirmTool prompts the user to confirm a tool execution
 func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input []byte) (bool, error) {
+	// Check if this tool's category is already allowed for this session
+	toolCat := getToolCategory(toolName)
+	a.sessionAllowedMu.RLock()
+	allowed := a.sessionAllowed[toolCat.Category]
+	a.sessionAllowedMu.RUnlock()
+	if allowed {
+		return true, nil
+	}
+
 	// Parse input JSON to build better summary and preview
 	var parsed map[string]interface{}
 	var contentPreview string
@@ -1032,8 +1229,8 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 	}
 
 	// Build tool-specific summary and preview
-	switch {
-	case strings.Contains(toolName, "bash") || strings.Contains(toolName, "command"):
+	switch toolName {
+	case "Bash":
 		if cmd, ok := parsed["command"].(string); ok {
 			if len(cmd) > 80 {
 				cmd = cmd[:77] + "..."
@@ -1043,7 +1240,31 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 			actionSummary = summary
 		}
 
-	case strings.Contains(toolName, "write") || strings.Contains(toolName, "edit"):
+	case "Edit":
+		// Edit tool modifies existing files
+		if filePath, ok := parsed["file_path"].(string); ok {
+			actionSummary = fmt.Sprintf("Edit %s", filePath)
+		} else if filePath, ok := parsed["filePath"].(string); ok {
+			actionSummary = fmt.Sprintf("Edit %s", filePath)
+		} else {
+			actionSummary = summary
+		}
+		// Show old_string → new_string for edit operations
+		if oldStr, ok := parsed["old_string"].(string); ok {
+			if newStr, ok := parsed["new_string"].(string); ok {
+				// Truncate if too long
+				if len(oldStr) > 50 {
+					oldStr = oldStr[:47] + "..."
+				}
+				if len(newStr) > 50 {
+					newStr = newStr[:47] + "..."
+				}
+				contentPreview = fmt.Sprintf("Replace:\n  %q\nWith:\n  %q", oldStr, newStr)
+			}
+		}
+
+	case "Write":
+		// Write tool creates or overwrites files
 		if filePath, ok := parsed["file_path"].(string); ok {
 			actionSummary = fmt.Sprintf("Write to %s", filePath)
 		} else if filePath, ok := parsed["filePath"].(string); ok {
@@ -1060,7 +1281,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 			}
 		}
 
-	case strings.Contains(toolName, "read"):
+	case "Read":
 		if filePath, ok := parsed["file_path"].(string); ok {
 			actionSummary = fmt.Sprintf("Read %s", filePath)
 		} else if filePath, ok := parsed["filePath"].(string); ok {
@@ -1091,30 +1312,45 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 	}
 
 	// Set up dialog via event (processed in main goroutine)
-	confirmChan := make(chan bool, 1)
+	confirmChan := make(chan ConfirmResult, 1)
 	a.runner.SendEvent(showDialogEvent{
 		baseEvent: newBaseEvent(),
 		dialog: &DialogState{
-			Type:           DialogTypeConfirm,
-			Active:         true,
-			Title:          actionSummary,
-			ContentPreview: contentPreview,
-			ConfirmChan:    confirmChan,
+			Type:                     DialogTypeConfirm,
+			Active:                   true,
+			Title:                    actionSummary,
+			ContentPreview:           contentPreview,
+			ConfirmChan:              confirmChan,
+			ConfirmToolCategory:      toolCat.Category,
+			ConfirmToolCategoryLabel: toolCat.Label,
 		},
 	})
 
 	// Wait for user response (handleDialogKey sends to channel)
 	select {
-	case approved := <-confirmChan:
+	case result := <-confirmChan:
 		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
-		return approved, nil
+
+		// Handle "allow all X during this session"
+		if result.AllowSession {
+			a.sessionAllowedMu.Lock()
+			a.sessionAllowed[toolCat.Category] = true
+			a.sessionAllowedMu.Unlock()
+		}
+
+		// Handle user feedback (denied with message)
+		if !result.Approved && result.Feedback != "" {
+			return false, &dive.UserFeedbackError{Message: result.Feedback}
+		}
+
+		return result.Approved, nil
 	case <-ctx.Done():
 		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		return false, ctx.Err()
 	}
 }
 
-// SelectTool prompts the user to select one option
+// SelectTool prompts the user to select one option (with "Other" for custom input)
 func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.SelectResponse, error) {
 	// Build options
 	options := make([]DialogOption, len(req.Options))
@@ -1131,7 +1367,7 @@ func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.Se
 	}
 
 	// Set up dialog via event
-	selectChan := make(chan int, 1)
+	selectChan := make(chan SelectResult, 1)
 	a.runner.SendEvent(showDialogEvent{
 		baseEvent: newBaseEvent(),
 		dialog: &DialogState{
@@ -1141,18 +1377,23 @@ func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.Se
 			Message:      req.Message,
 			Options:      options,
 			DefaultIndex: defaultIdx,
+			SelectIndex:  defaultIdx, // Initialize PromptChoice state
 			SelectChan:   selectChan,
 		},
 	})
 
 	// Wait for user response
 	select {
-	case idx := <-selectChan:
+	case result := <-selectChan:
 		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
-		if idx < 0 {
+		if result.OtherText != "" {
+			// User selected "Other" and typed custom text
+			return &dive.SelectResponse{OtherText: result.OtherText}, nil
+		}
+		if result.Index < 0 {
 			return &dive.SelectResponse{Canceled: true}, nil
 		}
-		return &dive.SelectResponse{Value: req.Options[idx].Value}, nil
+		return &dive.SelectResponse{Value: req.Options[result.Index].Value}, nil
 	case <-ctx.Done():
 		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		return &dive.SelectResponse{Canceled: true}, ctx.Err()
@@ -1163,12 +1404,14 @@ func (a *App) SelectTool(ctx context.Context, req *dive.SelectRequest) (*dive.Se
 func (a *App) MultiSelectTool(ctx context.Context, req *dive.MultiSelectRequest) (*dive.MultiSelectResponse, error) {
 	// Build options
 	options := make([]DialogOption, len(req.Options))
+	checked := make([]bool, len(req.Options))
 	for i, opt := range req.Options {
 		options[i] = DialogOption{
 			Label:    opt.Label,
 			Value:    opt.Value,
 			Selected: opt.Default,
 		}
+		checked[i] = opt.Default
 	}
 
 	// Set up dialog via event
@@ -1176,12 +1419,14 @@ func (a *App) MultiSelectTool(ctx context.Context, req *dive.MultiSelectRequest)
 	a.runner.SendEvent(showDialogEvent{
 		baseEvent: newBaseEvent(),
 		dialog: &DialogState{
-			Type:            DialogTypeMultiSelect,
-			Active:          true,
-			Title:           req.Title,
-			Message:         req.Message,
-			Options:         options,
-			MultiSelectChan: multiSelectChan,
+			Type:               DialogTypeMultiSelect,
+			Active:             true,
+			Title:              req.Title,
+			Message:            req.Message,
+			Options:            options,
+			MultiSelectChan:    multiSelectChan,
+			MultiSelectChecked: checked, // Initialize CheckboxList state
+			MultiSelectCursor:  0,       // Initialize cursor
 		},
 	})
 
