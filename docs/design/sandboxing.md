@@ -24,7 +24,7 @@ When AI agents execute shell commands via tools like `BashTool`, there's inheren
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                      SandboxManager                         │
 │  - Detects platform & available backends                    │
@@ -171,7 +171,7 @@ docker run --rm -i --init \
 
 #### Volume Mounting Strategy
 
-```
+```text
 Host                          Container
 ────────────────────────────────────────────
 /path/to/project      →      /path/to/project (rw)
@@ -204,7 +204,7 @@ docker run --user root ... image bash -c "
 
 Windows paths must be converted for Docker:
 
-```
+```text
 C:\Users\name\project  →  /c/Users/name/project
 ```
 
@@ -350,7 +350,7 @@ bashTool := toolkit.NewBashTool(toolkit.BashToolOptions{
 
 ### Package Structure
 
-```
+```text
 toolkit/
 ├── sandbox/
 │   ├── sandbox.go        # Manager, Backend interface, Config types

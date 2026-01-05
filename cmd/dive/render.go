@@ -201,8 +201,8 @@ func toolResultStyle() tui.Style {
 
 // formatToolResultView formats tool result
 func (a *App) formatToolResultView(msg Message) tui.View {
-	// Special handling for read_file - show line count
-	if msg.ToolName == "read_file" && msg.ToolReadLines > 0 {
+	// Special handling for Read tool - show line count
+	if msg.ToolName == "Read" && msg.ToolReadLines > 0 {
 		resultText := fmt.Sprintf("Read %d lines", msg.ToolReadLines)
 		if msg.ToolError {
 			return tui.Text("  ⎿  %s", resultText).Error()
@@ -255,8 +255,8 @@ func formatToolCall(title, apiName, inputJSON string) string {
 		return title + "()"
 	}
 
-	// Special handling for bash tool
-	if apiName == "bash" {
+	// Special handling for Bash tool
+	if apiName == "Bash" {
 		if cmd, ok := params["command"].(string); ok {
 			displayCmd := cmd
 			if len(displayCmd) > 100 {
@@ -267,24 +267,24 @@ func formatToolCall(title, apiName, inputJSON string) string {
 		}
 	}
 
-	// Special handling for read_file - show as Read(filepath)
-	if apiName == "read_file" {
+	// Special handling for Read tool - show as Read(filepath)
+	if apiName == "Read" {
 		if filePath, ok := params["file_path"].(string); ok {
 			return fmt.Sprintf("Read(%s)", filePath)
 		}
 		return "Read()"
 	}
 
-	// Special handling for list_directory - show as List Directory(path)
-	if apiName == "list_directory" {
+	// Special handling for ListDirectory tool - show as List Directory(path)
+	if apiName == "ListDirectory" {
 		if path, ok := params["path"].(string); ok {
 			return fmt.Sprintf("List Directory(%s)", path)
 		}
 		return "List Directory()"
 	}
 
-	// Special handling for todo_write
-	if apiName == "todo_write" {
+	// Special handling for TodoWrite tool
+	if apiName == "TodoWrite" {
 		if todos, ok := params["todos"].([]any); ok {
 			return fmt.Sprintf("%s(%d items)", title, len(todos))
 		}

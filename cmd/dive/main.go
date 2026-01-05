@@ -424,7 +424,6 @@ func createPermissionConfig() *dive.PermissionConfig {
 			dive.AllowRule("WebFetch"),
 			dive.AllowRule("WebSearch"),
 			dive.AllowRule("TodoWrite"),
-			dive.AllowRule("Memory"),
 			dive.AllowRule("AskUser"),
 			dive.AllowRule("Skill"),
 			dive.AllowRule("Task"),

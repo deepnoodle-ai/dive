@@ -892,8 +892,8 @@ func (a *App) flushStreamBuffer() {
 }
 
 func (a *App) handleToolCall(call *llm.ToolUseContent) {
-	// Parse todo_write tool calls
-	if call.Name == "todo_write" {
+	// Parse TodoWrite tool calls
+	if call.Name == "TodoWrite" {
 		a.parseTodoWriteInput(call.Input)
 	}
 
