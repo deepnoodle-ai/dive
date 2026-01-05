@@ -37,7 +37,7 @@ func NewKillShellTool(opts KillShellToolOptions) *dive.TypedToolAdapter[*KillShe
 }
 
 func (t *KillShellTool) Name() string {
-	return "kill_shell"
+	return "KillShell"
 }
 
 func (t *KillShellTool) Description() string {

@@ -60,7 +60,7 @@ func NewListDirectoryTool(options ListDirectoryToolOptions) *dive.TypedToolAdapt
 }
 
 func (t *ListDirectoryTool) Name() string {
-	return "list_directory"
+	return "ListDirectory"
 }
 
 func (t *ListDirectoryTool) Description() string {

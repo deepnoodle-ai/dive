@@ -12,7 +12,7 @@ import (
 
 func TestBashTool_Name(t *testing.T) {
 	tool := NewBashTool()
-	assert.Equal(t, "bash", tool.Name())
+	assert.Equal(t, "Bash", tool.Name())
 }
 
 func TestBashTool_Description(t *testing.T) {

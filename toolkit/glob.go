@@ -76,7 +76,7 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 }
 
 func (t *GlobTool) Name() string {
-	return "glob"
+	return "Glob"
 }
 
 func (t *GlobTool) Description() string {

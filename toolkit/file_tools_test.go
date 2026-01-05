@@ -110,7 +110,7 @@ func TestReadFileTool(t *testing.T) {
 
 	t.Run("ToolDefinition", func(t *testing.T) {
 		tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
-		assert.Equal(t, "read_file", tool.Name(), "Tool name mismatch")
+		assert.Equal(t, "Read", tool.Name(), "Tool name mismatch")
 	})
 }
 
@@ -201,7 +201,7 @@ func TestWriteFileTool(t *testing.T) {
 
 	t.Run("ToolDefinition", func(t *testing.T) {
 		tool := NewWriteFileTool(WriteFileToolOptions{})
-		assert.Equal(t, "write_file", tool.Name(), "Tool name mismatch")
+		assert.Equal(t, "Write", tool.Name(), "Tool name mismatch")
 	})
 }
 

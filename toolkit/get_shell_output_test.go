@@ -14,7 +14,7 @@ import (
 func TestGetShellOutputTool_Name(t *testing.T) {
 	sm := NewShellManager()
 	tool := NewGetShellOutputTool(GetShellOutputToolOptions{ShellManager: sm})
-	assert.Equal(t, "get_shell_output", tool.Name())
+	assert.Equal(t, "GetShellOutput", tool.Name())
 }
 
 func TestGetShellOutputTool_Description(t *testing.T) {
@@ -253,7 +253,7 @@ func TestGetShellOutputTool_Annotations(t *testing.T) {
 func TestListShellsTool_Name(t *testing.T) {
 	sm := NewShellManager()
 	tool := NewListShellsTool(ListShellsToolOptions{ShellManager: sm})
-	assert.Equal(t, "list_shells", tool.Name())
+	assert.Equal(t, "ListShells", tool.Name())
 }
 
 func TestListShellsTool_Description(t *testing.T) {

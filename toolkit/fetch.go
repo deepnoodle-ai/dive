@@ -72,7 +72,7 @@ func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*fetch.Reques
 }
 
 func (t *FetchTool) Name() string {
-	return "fetch"
+	return "WebFetch"
 }
 
 func (t *FetchTool) Description() string {

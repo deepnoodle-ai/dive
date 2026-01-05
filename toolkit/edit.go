@@ -59,7 +59,7 @@ func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 }
 
 func (t *EditTool) Name() string {
-	return "edit"
+	return "Edit"
 }
 
 func (t *EditTool) Description() string {

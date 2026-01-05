@@ -57,7 +57,7 @@ func NewAskUserTool(opts AskUserToolOptions) *dive.TypedToolAdapter[*AskUserInpu
 }
 
 func (t *AskUserTool) Name() string {
-	return "ask_user"
+	return "AskUser"
 }
 
 func (t *AskUserTool) Description() string {

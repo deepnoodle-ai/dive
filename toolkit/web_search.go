@@ -32,7 +32,7 @@ func NewWebSearchTool(options WebSearchToolOptions) *dive.TypedToolAdapter[*Sear
 }
 
 func (t *WebSearchTool) Name() string {
-	return "web_search"
+	return "WebSearch"
 }
 
 func (t *WebSearchTool) Description() string {

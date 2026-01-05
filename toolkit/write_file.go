@@ -40,7 +40,7 @@ func NewWriteFileTool(options WriteFileToolOptions) *dive.TypedToolAdapter[*Writ
 }
 
 func (t *WriteFileTool) Name() string {
-	return "write_file"
+	return "Write"
 }
 
 func (t *WriteFileTool) Description() string {

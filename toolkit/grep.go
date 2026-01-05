@@ -114,7 +114,7 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 }
 
 func (t *GrepTool) Name() string {
-	return "grep"
+	return "Grep"
 }
 
 func (t *GrepTool) Description() string {

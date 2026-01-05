@@ -70,7 +70,7 @@ func NewCommandTool(opts ...CommandToolOptions) *dive.TypedToolAdapter[*CommandI
 }
 
 func (c *CommandTool) Name() string {
-	return "command"
+	return "Command"
 }
 
 func (c *CommandTool) Description() string {

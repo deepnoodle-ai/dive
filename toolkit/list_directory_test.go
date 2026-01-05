@@ -124,7 +124,7 @@ func TestDirectoryListTool(t *testing.T) {
 		tool := NewListDirectoryTool(ListDirectoryToolOptions{
 			DefaultPath: "/default/path",
 		})
-		assert.Equal(t, "list_directory", tool.Name())
+		assert.Equal(t, "ListDirectory", tool.Name())
 		assert.Equal(t, "path", tool.Schema().Required[0])
 	})
 }

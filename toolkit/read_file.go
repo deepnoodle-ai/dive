@@ -52,7 +52,7 @@ func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFi
 }
 
 func (t *ReadFileTool) Name() string {
-	return "read_file"
+	return "Read"
 }
 
 func (t *ReadFileTool) Description() string {

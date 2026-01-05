@@ -14,7 +14,7 @@ import (
 func TestKillShellTool_Name(t *testing.T) {
 	sm := NewShellManager()
 	tool := NewKillShellTool(KillShellToolOptions{ShellManager: sm})
-	assert.Equal(t, "kill_shell", tool.Name())
+	assert.Equal(t, "KillShell", tool.Name())
 }
 
 func TestKillShellTool_Description(t *testing.T) {

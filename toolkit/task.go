@@ -135,7 +135,7 @@ func NewTaskTool(opts TaskToolOptions) *TaskTool {
 }
 
 func (t *TaskTool) Name() string {
-	return "task"
+	return "Task"
 }
 
 func (t *TaskTool) Description() string {
@@ -199,7 +199,7 @@ func (t *TaskTool) Schema() *schema.Schema {
 
 func (t *TaskTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Launch Agent Task",
+		Title:           "Task",
 		ReadOnlyHint:    false,
 		DestructiveHint: false,
 		IdempotentHint:  false,
@@ -360,7 +360,7 @@ func NewTaskOutputTool(opts TaskOutputToolOptions) *TaskOutputTool {
 }
 
 func (t *TaskOutputTool) Name() string {
-	return "task_output"
+	return "TaskOutput"
 }
 
 func (t *TaskOutputTool) Description() string {
@@ -397,7 +397,7 @@ func (t *TaskOutputTool) Schema() *schema.Schema {
 
 func (t *TaskOutputTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Get Task Output",
+		Title:           "Task Output",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

@@ -45,7 +45,7 @@ func NewGetShellOutputTool(opts GetShellOutputToolOptions) *dive.TypedToolAdapte
 }
 
 func (t *GetShellOutputTool) Name() string {
-	return "get_shell_output"
+	return "GetShellOutput"
 }
 
 func (t *GetShellOutputTool) Description() string {
@@ -196,7 +196,7 @@ func NewListShellsTool(opts ListShellsToolOptions) *dive.TypedToolAdapter[*ListS
 }
 
 func (t *ListShellsTool) Name() string {
-	return "list_shells"
+	return "ListShells"
 }
 
 func (t *ListShellsTool) Description() string {

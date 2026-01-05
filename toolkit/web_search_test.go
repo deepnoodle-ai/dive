@@ -106,7 +106,7 @@ func TestWebSearchTool_LimitParameter(t *testing.T) {
 func TestWebSearchTool_Metadata(t *testing.T) {
 	tool := &WebSearchTool{}
 
-	assert.Equal(t, "web_search", tool.Name())
+	assert.Equal(t, "WebSearch", tool.Name())
 	assert.Contains(t, tool.Description(), "Searches the web")
 
 	annotations := tool.Annotations()
