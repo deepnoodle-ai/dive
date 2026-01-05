@@ -99,10 +99,14 @@ func (a *App) introView(msg Message) tui.View {
 	}
 
 	// Style constants
-	version := tui.Text("  v0.1.0").Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 90, G: 90, B: 100}))
 	accentColor := tui.RGB{R: 80, G: 200, B: 235}
 	mutedColor := tui.RGB{R: 140, G: 140, B: 155}
 	dimColor := tui.RGB{R: 100, G: 100, B: 115}
+
+	version := tui.Group(
+		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
+		tui.Text("v0.1.0").Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 90, G: 90, B: 100})),
+	)
 
 	modelLine := tui.Group(
 		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
@@ -110,24 +114,20 @@ func (a *App) introView(msg Message) tui.View {
 	)
 
 	workspaceLine := tui.Group(
-		tui.Text("  ◇ ").Style(tui.NewStyle().WithFgRGB(dimColor)),
+		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
 		tui.Text("%s", workspace).Style(tui.NewStyle().WithFgRGB(dimColor)),
 	)
 
-	tagline := tui.Text("  Your AI coding companion").Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 130, B: 150}).WithItalic())
-
 	// Combine all views
-	views := make([]tui.View, 0, len(logoViews)+6)
+	var views []tui.View
 	views = append(views, tui.Text(""))
 	views = append(views, logoViews...)
-	views = append(views, version)
 	views = append(views, tui.Text(""))
+	views = append(views, version)
 	views = append(views, modelLine)
 	views = append(views, workspaceLine)
 	views = append(views, tui.Text(""))
-	views = append(views, tagline)
 	views = append(views, tui.Text(""))
-
 	return tui.Stack(views...).Gap(0)
 }
 
@@ -470,20 +470,17 @@ func formatDuration(d time.Duration) string {
 
 // Static versions for scroll history (no animations)
 
-func (a *App) messageViewStatic(msg Message, index int) tui.View {
+func (a *App) messageViewStatic(msg Message) tui.View {
 	switch msg.Type {
 	case MessageTypeToolCall:
 		return a.toolCallViewStatic(msg)
 	default:
-		return a.textMessageViewStatic(msg, index)
+		return a.textMessageViewStatic(msg)
 	}
 }
 
-func (a *App) textMessageViewStatic(msg Message, index int) tui.View {
+func (a *App) textMessageViewStatic(msg Message) tui.View {
 	switch msg.Role {
-	case "intro":
-		return a.introView(msg)
-
 	case "user":
 		return tui.Text("> %s", msg.Content).Wrap().Style(
 			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}).WithItalic(),

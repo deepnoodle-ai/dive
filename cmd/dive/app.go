@@ -192,7 +192,6 @@ type App struct {
 	// UI state
 	frame               uint64
 	processing          bool
-	thinking            bool
 	processingStartTime time.Time
 
 	// Todo list state
@@ -253,12 +252,14 @@ func (a *App) LiveView() tui.View {
 
 	// Show tool dialog if active
 	if a.dialogState != nil && a.dialogState.Active {
+		views = append(views, tui.Text(""))
 		views = append(views, a.dialogView())
 		return tui.Stack(views...)
 	}
 
 	// Show streaming content during processing
 	if a.processing {
+		views = append(views, tui.Text(""))
 		liveContent := a.buildLiveView()
 		if liveContent != nil {
 			views = append(views, liveContent)
@@ -267,8 +268,12 @@ func (a *App) LiveView() tui.View {
 
 	// Show todos if visible and not processing
 	if !a.processing && a.showTodos && len(a.todos) > 0 {
+		views = append(views, tui.Text(""))
 		views = append(views, a.todoListView())
 	}
+
+	// Always add spacing before divider (separates from scrollback or live content)
+	views = append(views, tui.Text(""))
 
 	// Input area
 	views = append(views, tui.Divider())
@@ -279,7 +284,6 @@ func (a *App) LiveView() tui.View {
 			PromptStyle(tui.NewStyle().WithForeground(tui.ColorCyan)).
 			Placeholder("Type a message... (@filename for autocomplete)").
 			Multiline(true).
-			Width(80).
 			MaxHeight(10).
 			OnSubmit(func(value string) {
 				a.submitInput(value)
@@ -288,18 +292,16 @@ func (a *App) LiveView() tui.View {
 	views = append(views, tui.Divider())
 
 	// Show autocomplete options below the bottom divider (always reserve 8 lines)
-	if len(a.autocompleteMatches) > 0 {
-		for i := 0; i < 8; i++ {
-			if i < len(a.autocompleteMatches) {
-				match := a.autocompleteMatches[i]
-				if i == a.autocompleteIndex {
-					views = append(views, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
-				} else {
-					views = append(views, tui.Text("   @%s", match).Hint())
-				}
+	for i := 0; i < 8; i++ {
+		if len(a.autocompleteMatches) > 0 && i < len(a.autocompleteMatches) {
+			match := a.autocompleteMatches[i]
+			if i == a.autocompleteIndex {
+				views = append(views, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
 			} else {
-				views = append(views, tui.Text(""))
+				views = append(views, tui.Text("   @%s", match).Hint())
 			}
+		} else {
+			views = append(views, tui.Text(""))
 		}
 	}
 
@@ -820,17 +822,19 @@ func (a *App) processMessageAsync(input string) {
 // Event handlers for background goroutine events
 
 func (a *App) handleProcessingStart(e processingStartEvent) {
+	userInput := strings.TrimSpace(e.userInput)
+
 	// Add user message
 	userMsg := Message{
 		Role:    "user",
-		Content: e.userInput,
+		Content: userInput,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
 	}
 	a.messages = append(a.messages, userMsg)
 
 	// Print user message to scrollback
-	a.runner.Print(tui.PaddingHV(1, 0, a.textMessageView(userMsg, len(a.messages)-1)))
+	a.runner.Print(tui.Stack(tui.Text(""), a.textMessageView(userMsg, len(a.messages)-1)))
 
 	// Prepare for streaming response
 	a.currentMessage = &Message{
@@ -844,14 +848,12 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 	a.needNewTextMessage = false
 
 	a.processing = true
-	a.thinking = true
 	a.processingStartTime = time.Now()
 }
 
 func (a *App) handleStreamText(text string) {
 	// Buffer text for batched updates (flushed on tick)
 	a.streamBuffer += text
-	a.thinking = false
 }
 
 func (a *App) flushStreamBuffer() {
@@ -879,8 +881,6 @@ func (a *App) flushStreamBuffer() {
 }
 
 func (a *App) handleToolCall(call *llm.ToolUseContent) {
-	a.thinking = false
-
 	// Parse todo_write tool calls
 	if call.Name == "todo_write" {
 		a.parseTodoWriteInput(call.Input)
@@ -945,9 +945,6 @@ func (a *App) handleProcessingEnd(err error) {
 	// Flush any remaining buffered text
 	a.flushStreamBuffer()
 
-	a.processing = false
-	a.thinking = false
-
 	if err != nil && err != context.Canceled {
 		errMsg := Message{
 			Role:    "system",
@@ -958,9 +955,11 @@ func (a *App) handleProcessingEnd(err error) {
 		a.messages = append(a.messages, errMsg)
 	}
 
-	// Print final response to scrollback
+	// Print final response to scrollback BEFORE clearing processing state
+	// This ensures content doesn't disappear from live view before appearing in scrollback
 	a.printRecentMessagesToScrollback()
 
+	a.processing = false
 	a.currentMessage = nil
 	a.toolCallIndex = make(map[string]int)
 }
@@ -976,13 +975,19 @@ func (a *App) printRecentMessagesToScrollback() {
 		}
 	}
 
-	// Print each message
+	// Collect all message views (add blank line before each)
+	messageViews := []tui.View{}
 	for i := startIdx; i < len(a.messages); i++ {
 		msg := a.messages[i]
-		view := a.messageViewStatic(msg, i)
+		view := a.messageViewStatic(msg)
 		if view != nil {
-			a.runner.Print(tui.PaddingHV(1, 0, view))
+			messageViews = append(messageViews, tui.Text(""), view)
 		}
+	}
+
+	// Print all messages as a single view
+	if len(messageViews) > 0 {
+		a.runner.Print(tui.Stack(messageViews...))
 	}
 }
 
@@ -995,23 +1000,11 @@ func (a *App) Run() error {
 		tui.WithInlineKittyKeyboard(true),
 	)
 
-	// Print header and intro to scrollback first
-	a.printHeaderToScrollback()
+	// Print intro to scrollback first
 	a.printIntroToScrollback()
 
 	// Run the inline app (blocks until quit)
 	return a.runner.Run(a)
-}
-
-// printHeaderToScrollback prints the header to scrollback
-func (a *App) printHeaderToScrollback() {
-	header := tui.Group(
-		tui.Text(" Dive ").Bold().Fg(tui.ColorCyan),
-		tui.Spacer(),
-		tui.Text(" ready ").Success(),
-	)
-	tui.Print(header)
-	tui.Print(tui.Divider())
 }
 
 // printIntroToScrollback prints the intro/splash screen to scrollback
@@ -1044,7 +1037,6 @@ func (a *App) handleCommand(input string) bool {
 		return true
 	case "/clear":
 		a.runner.ClearScrollback()
-		a.printHeaderToScrollback()
 		a.printIntroToScrollback()
 		return true
 	case "/todos", "/t":
@@ -1099,14 +1091,14 @@ func (a *App) buildLiveView() tui.View {
 
 	elapsed := time.Since(a.processingStartTime)
 
-	// Show recent tool calls first (last 3 max, in chronological order)
+	// Show recent completed tool calls (last 3 max, in chronological order)
 	var toolViews []tui.View
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		msg := a.messages[i]
 		if msg.Role == "user" {
 			break
 		}
-		if msg.Type == MessageTypeToolCall {
+		if msg.Type == MessageTypeToolCall && msg.ToolDone {
 			view := a.toolCallView(msg)
 			if view != nil {
 				toolViews = append([]tui.View{view}, toolViews...) // prepend for chronological order
@@ -1119,20 +1111,10 @@ func (a *App) buildLiveView() tui.View {
 	views = append(views, toolViews...)
 
 	// Show generation progress indicator (below tool calls)
-	if a.thinking {
-		// Initial thinking phase (no content yet)
+	if a.streamingMessageIndex >= 0 {
 		views = append(views, tui.Group(
 			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
 			tui.Text(" thinking").Animate(tui.Slide(3, tui.NewRGB(80, 80, 80), tui.NewRGB(80, 200, 220))),
-			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
-			tui.Text("  ").Hint(),
-			tui.Text("esc to interrupt").Hint(),
-		))
-	} else if a.streamingMessageIndex >= 0 {
-		// Actively generating response
-		views = append(views, tui.Group(
-			tui.Loading(a.frame).CharSet(tui.SpinnerBounce.Frames).Speed(6).Fg(tui.ColorCyan),
-			tui.Text(" generating").Fg(tui.ColorCyan),
 			tui.Text(" (%s)", formatDuration(elapsed)).Hint(),
 			tui.Text("  ").Hint(),
 			tui.Text("esc to interrupt").Hint(),
@@ -1148,7 +1130,8 @@ func (a *App) buildLiveView() tui.View {
 		return tui.Text("")
 	}
 
-	return tui.PaddingLTRB(1, 1, 1, 1, tui.Stack(views...).Gap(1))
+	// Use only horizontal padding to avoid extra lines when live view is removed
+	return tui.PaddingLTRB(1, 0, 1, 0, tui.Stack(views...).Gap(1))
 }
 
 func (a *App) parseTodoWriteInput(input []byte) {
