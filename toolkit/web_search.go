@@ -87,7 +87,7 @@ func (t *WebSearchTool) Call(ctx context.Context, input *SearchInput) (*dive.Too
 
 func (t *WebSearchTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Web Search",
+		Title:           "WebSearch",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

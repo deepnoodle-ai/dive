@@ -207,7 +207,7 @@ func (t *GrepTool) Schema() *schema.Schema {
 
 func (t *GrepTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Search Content",
+		Title:           "Grep",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

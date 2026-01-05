@@ -220,7 +220,7 @@ func isBinaryContent(content []byte) bool {
 
 func (t *ReadFileTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Read File",
+		Title:           "Read",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

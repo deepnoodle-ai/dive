@@ -258,7 +258,7 @@ func TestTodoWriteTool_Annotations(t *testing.T) {
 	annotations := tool.Annotations()
 
 	assert.NotNil(t, annotations)
-	assert.Equal(t, "Todo List", annotations.Title)
+	assert.Equal(t, "TodoWrite", annotations.Title)
 	assert.False(t, annotations.ReadOnlyHint)
 	assert.False(t, annotations.DestructiveHint)
 }

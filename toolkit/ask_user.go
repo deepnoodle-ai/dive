@@ -266,7 +266,7 @@ func (t *AskUserTool) Call(ctx context.Context, input *AskUserInput) (*dive.Tool
 
 func (t *AskUserTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Ask User",
+		Title:           "AskUser",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  false,

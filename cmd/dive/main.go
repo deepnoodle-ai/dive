@@ -417,23 +417,23 @@ func createPermissionConfig() *dive.PermissionConfig {
 		Mode: dive.PermissionModeDefault,
 		Rules: dive.PermissionRules{
 			// Allow read-only tools without prompting
-			dive.AllowRule("read_file"),
-			dive.AllowRule("glob"),
-			dive.AllowRule("grep"),
-			dive.AllowRule("list_directory"),
-			dive.AllowRule("fetch"),
-			dive.AllowRule("web_search"),
+			dive.AllowRule("Read"),
+			dive.AllowRule("Glob"),
+			dive.AllowRule("Grep"),
+			dive.AllowRule("ListDirectory"),
+			dive.AllowRule("WebFetch"),
+			dive.AllowRule("WebSearch"),
 			dive.AllowRule("TodoWrite"),
-			dive.AllowRule("memory"),
-			dive.AllowRule("ask_user"),
+			dive.AllowRule("Memory"),
+			dive.AllowRule("AskUser"),
 			dive.AllowRule("Skill"),
 			dive.AllowRule("Task"),
 			dive.AllowRule("TaskOutput"),
 
 			// Require approval for write operations
-			dive.AskRule("write_file", "Write file"),
-			dive.AskRule("edit", "Edit file"),
-			dive.AskRule("bash", "Execute command"),
+			dive.AskRule("Write", "Write file"),
+			dive.AskRule("Edit", "Edit file"),
+			dive.AskRule("Bash", "Execute command"),
 		},
 	}
 }

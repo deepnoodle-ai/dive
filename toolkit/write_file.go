@@ -110,7 +110,7 @@ func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.
 
 func (t *WriteFileTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Write File",
+		Title:           "Write",
 		ReadOnlyHint:    false,
 		DestructiveHint: true,
 		IdempotentHint:  true,

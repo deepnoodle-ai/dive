@@ -82,7 +82,7 @@ func (t *ListDirectoryTool) Schema() *schema.Schema {
 
 func (t *ListDirectoryTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "List Directory",
+		Title:           "ListDirectory",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

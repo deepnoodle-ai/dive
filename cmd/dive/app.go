@@ -944,8 +944,8 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			if len(a.messages[idx].ToolResultLines) > 0 {
 				a.messages[idx].ToolResult = a.messages[idx].ToolResultLines[0]
 			}
-			// For read_file, count lines in the actual content
-			if a.messages[idx].ToolName == "read_file" && textContent != "" {
+			// For Read tool, count lines in the actual content
+			if strings.ToLower(a.messages[idx].ToolName) == "read" && textContent != "" {
 				a.messages[idx].ToolReadLines = strings.Count(textContent, "\n") + 1
 			}
 		}
@@ -1240,8 +1240,8 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 	}
 
 	// Build tool-specific summary and preview
-	switch {
-	case strings.Contains(toolName, "bash") || strings.Contains(toolName, "command"):
+	switch toolName {
+	case "Bash":
 		if cmd, ok := parsed["command"].(string); ok {
 			if len(cmd) > 80 {
 				cmd = cmd[:77] + "..."
@@ -1251,7 +1251,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 			actionSummary = summary
 		}
 
-	case strings.Contains(toolName, "edit"):
+	case "Edit":
 		// Edit tool modifies existing files
 		if filePath, ok := parsed["file_path"].(string); ok {
 			actionSummary = fmt.Sprintf("Edit %s", filePath)
@@ -1274,7 +1274,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 			}
 		}
 
-	case strings.Contains(toolName, "write"):
+	case "Write":
 		// Write tool creates or overwrites files
 		if filePath, ok := parsed["file_path"].(string); ok {
 			actionSummary = fmt.Sprintf("Write to %s", filePath)
@@ -1292,7 +1292,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 			}
 		}
 
-	case strings.Contains(toolName, "read"):
+	case "Read":
 		if filePath, ok := parsed["file_path"].(string); ok {
 			actionSummary = fmt.Sprintf("Read %s", filePath)
 		} else if filePath, ok := parsed["filePath"].(string); ok {

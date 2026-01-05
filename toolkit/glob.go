@@ -117,7 +117,7 @@ func (t *GlobTool) Schema() *schema.Schema {
 
 func (t *GlobTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Find Files",
+		Title:           "Glob",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

@@ -85,14 +85,14 @@ func TestParsePermissionPattern(t *testing.T) {
 			name:     "bash command pattern",
 			pattern:  "Bash(go test:*)",
 			ruleType: PermissionRuleAllow,
-			wantTool: "bash", // Normalized to lowercase
+			wantTool: "Bash", // PascalCase tool name
 			wantCmd:  "go test*",
 		},
 		{
 			name:     "bash exact command",
 			pattern:  "Bash(ls -la)",
 			ruleType: PermissionRuleAllow,
-			wantTool: "bash", // Normalized to lowercase
+			wantTool: "Bash", // PascalCase tool name
 			wantCmd:  "ls -la",
 		},
 		{
@@ -105,13 +105,13 @@ func TestParsePermissionPattern(t *testing.T) {
 			name:     "read file pattern normalizes tool name",
 			pattern:  "Read(/path/to/file)",
 			ruleType: PermissionRuleAllow,
-			wantTool: "read_file",
+			wantTool: "Read",
 		},
 		{
 			name:     "write file pattern normalizes tool name",
 			pattern:  "Write(/path/to/file)",
 			ruleType: PermissionRuleAllow,
-			wantTool: "write_file",
+			wantTool: "Write",
 		},
 	}
 
@@ -148,7 +148,7 @@ func TestToPermissionRules(t *testing.T) {
 
 	// First rule should be deny
 	require.Equal(t, PermissionRuleDeny, rules[0].Type)
-	require.Equal(t, "bash", rules[0].Tool) // Normalized to lowercase
+	require.Equal(t, "Bash", rules[0].Tool) // PascalCase tool name
 	require.Equal(t, "rm -rf*", rules[0].Command)
 
 	// Allow rules come after
@@ -156,7 +156,7 @@ func TestToPermissionRules(t *testing.T) {
 	require.Equal(t, "WebSearch", rules[1].Tool)
 
 	require.Equal(t, PermissionRuleAllow, rules[2].Type)
-	require.Equal(t, "bash", rules[2].Tool) // Normalized to lowercase
+	require.Equal(t, "Bash", rules[2].Tool) // PascalCase tool name
 	require.Equal(t, "go build*", rules[2].Command)
 }
 

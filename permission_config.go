@@ -286,8 +286,9 @@ func (pm *PermissionManager) isEditOperation(tool Tool, call *llm.ToolUseContent
 // isBashTool checks if a tool is a bash/command execution tool.
 func (pm *PermissionManager) isBashTool(toolName string) bool {
 	bashNames := []string{"bash", "command", "shell", "exec", "run"}
+	toolNameLower := strings.ToLower(toolName)
 	for _, name := range bashNames {
-		if strings.Contains(toolName, name) {
+		if strings.Contains(toolNameLower, name) {
 			return true
 		}
 	}

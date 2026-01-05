@@ -397,7 +397,7 @@ func (t *TaskOutputTool) Schema() *schema.Schema {
 
 func (t *TaskOutputTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Task Output",
+		Title:           "TaskOutput",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

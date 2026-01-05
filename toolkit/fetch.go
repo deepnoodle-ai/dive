@@ -157,7 +157,7 @@ func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolRes
 
 func (t *FetchTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Fetch",
+		Title:           "WebFetch",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

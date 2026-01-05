@@ -120,21 +120,21 @@ func parseParameterizedPattern(toolName, args string, ruleType PermissionRuleTyp
 	case toolNameLower == "bash" || toolNameLower == "shell" || toolNameLower == "command":
 		// Bash command pattern: "go build:*" means command starts with "go build"
 		// The colon separates the prefix from a wildcard suffix
-		// Use lowercase "bash" to match actual tool name
-		return parseBashPattern("bash", args, ruleType)
+		// Use PascalCase "Bash" to match actual tool name
+		return parseBashPattern("Bash", args, ruleType)
 
 	case toolNameLower == "read" || toolNameLower == "read_file":
 		// Read file pattern: path glob
-		// Use "read_file" to match actual tool name
-		return parsePathPattern("read_file", args, ruleType)
+		// Use PascalCase "Read" to match actual tool name
+		return parsePathPattern("Read", args, ruleType)
 
 	case toolNameLower == "write" || toolNameLower == "write_file":
 		// Write file pattern: path glob
-		return parsePathPattern("write_file", args, ruleType)
+		return parsePathPattern("Write", args, ruleType)
 
 	case toolNameLower == "edit":
 		// Edit file pattern: path glob
-		return parsePathPattern("edit", args, ruleType)
+		return parsePathPattern("Edit", args, ruleType)
 
 	case toolNameLower == "webfetch" || toolNameLower == "web_fetch":
 		// WebFetch pattern: domain:example.com
@@ -219,7 +219,7 @@ func parseWebFetchPattern(args string, ruleType PermissionRuleType) *PermissionR
 		domain := strings.TrimPrefix(args, "domain:")
 		return &PermissionRule{
 			Type: ruleType,
-			Tool: "fetch", // Actual tool name is "fetch"
+			Tool: "WebFetch", // Actual tool name is "WebFetch"
 			InputMatch: func(input any) bool {
 				inputMap, ok := input.(map[string]any)
 				if !ok {
@@ -241,7 +241,7 @@ func parseWebFetchPattern(args string, ruleType PermissionRuleType) *PermissionR
 	// Generic URL pattern
 	return &PermissionRule{
 		Type: ruleType,
-		Tool: "fetch",
+		Tool: "WebFetch",
 		InputMatch: func(input any) bool {
 			inputMap, ok := input.(map[string]any)
 			if !ok {
