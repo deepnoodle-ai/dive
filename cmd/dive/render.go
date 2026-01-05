@@ -267,20 +267,20 @@ func formatToolCall(title, apiName, inputJSON string) string {
 		}
 	}
 
-	// Special handling for Read tool - show as Read(filepath)
+	// Special handling for Read tool - show as title(filepath)
 	if apiName == "Read" {
 		if filePath, ok := params["file_path"].(string); ok {
-			return fmt.Sprintf("Read(%s)", filePath)
+			return fmt.Sprintf("%s(%s)", title, filePath)
 		}
-		return "Read()"
+		return title + "()"
 	}
 
-	// Special handling for ListDirectory tool - show as List Directory(path)
+	// Special handling for ListDirectory tool - show as title(path)
 	if apiName == "ListDirectory" {
 		if path, ok := params["path"].(string); ok {
-			return fmt.Sprintf("List Directory(%s)", path)
+			return fmt.Sprintf("%s(%s)", title, path)
 		}
-		return "List Directory()"
+		return title + "()"
 	}
 
 	// Special handling for TodoWrite tool

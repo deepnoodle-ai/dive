@@ -389,6 +389,9 @@ func (a *App) dialogView() tui.View {
 					case 2: // Feedback
 						if inputText != "" {
 							confirmChan <- ConfirmResult{Approved: false, Feedback: inputText}
+						} else {
+							// Empty feedback treated as cancel
+							confirmChan <- ConfirmResult{Approved: false}
 						}
 					}
 					a.dialogState.Active = false
@@ -444,6 +447,9 @@ func (a *App) dialogView() tui.View {
 					// User selected "Other" and typed custom text
 					if inputText != "" {
 						selectChan <- SelectResult{Index: -1, OtherText: inputText}
+					} else {
+						// Empty "Other" text treated as cancel
+						selectChan <- SelectResult{Index: -1}
 					}
 				} else {
 					selectChan <- SelectResult{Index: idx}
