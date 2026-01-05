@@ -515,6 +515,7 @@ func (a *App) dialogView() tui.View {
 						value = defaultValue
 					}
 					inputChan <- value
+					a.dialogState.Active = false
 				}),
 		)
 		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Hint())
