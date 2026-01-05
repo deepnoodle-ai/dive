@@ -181,7 +181,7 @@ func (a *App) toolCallView(msg Message) tui.View {
 		statusView = tui.Text("⏺").Animate(tui.Pulse(tui.NewRGB(80, 160, 220), 8).Brightness(0.3, 1.0))
 	}
 
-	toolCall := formatToolCall(msg.ToolName, msg.ToolInput)
+	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
 	header := tui.Group(statusView, tui.Text(" %s", toolCall))
 
 	if msg.ToolDone && len(msg.ToolResultLines) > 0 {
@@ -194,8 +194,22 @@ func (a *App) toolCallView(msg Message) tui.View {
 	return header
 }
 
+// toolResultStyle returns the style for tool result text (brighter than muted)
+func toolResultStyle() tui.Style {
+	return tui.NewStyle().WithFgRGB(tui.RGB{R: 140, G: 140, B: 150})
+}
+
 // formatToolResultView formats tool result
 func (a *App) formatToolResultView(msg Message) tui.View {
+	// Special handling for read_file - show line count
+	if msg.ToolName == "read_file" && msg.ToolReadLines > 0 {
+		resultText := fmt.Sprintf("Read %d lines", msg.ToolReadLines)
+		if msg.ToolError {
+			return tui.Text("  ⎿  %s", resultText).Error()
+		}
+		return tui.Text("  ⎿  %s", resultText).Style(toolResultStyle())
+	}
+
 	lines := msg.ToolResultLines
 	if len(lines) == 0 {
 		return nil
@@ -215,7 +229,7 @@ func (a *App) formatToolResultView(msg Message) tui.View {
 	if msg.ToolError {
 		views = append(views, tui.Text("  ⎿  %s", firstLine).Error())
 	} else {
-		views = append(views, tui.Text("  ⎿  %s", firstLine).Muted())
+		views = append(views, tui.Text("  ⎿  %s", firstLine).Style(toolResultStyle()))
 	}
 
 	if len(lines) > 1 {
@@ -226,38 +240,55 @@ func (a *App) formatToolResultView(msg Message) tui.View {
 }
 
 // formatToolCall formats a tool call for display
-func formatToolCall(name, inputJSON string) string {
+// title is the human-readable display name, apiName is the actual tool name for special handling
+func formatToolCall(title, apiName, inputJSON string) string {
 	if inputJSON == "" {
-		return name + "()"
+		return title + "()"
 	}
 
 	var params map[string]any
 	if err := json.Unmarshal([]byte(inputJSON), &params); err != nil {
-		return name + "(...)"
+		return title + "(...)"
 	}
 
 	if len(params) == 0 {
-		return name + "()"
+		return title + "()"
 	}
 
 	// Special handling for bash tool
-	if name == "bash" || name == "Bash" {
+	if apiName == "bash" {
 		if cmd, ok := params["command"].(string); ok {
 			displayCmd := cmd
 			if len(displayCmd) > 100 {
 				displayCmd = displayCmd[:97] + "..."
 			}
 			displayCmd = strings.ReplaceAll(displayCmd, "\n", " ")
-			return "Bash(" + displayCmd + ")"
+			return title + "(" + displayCmd + ")"
 		}
 	}
 
-	// Special handling for TodoWrite
-	if name == "TodoWrite" || name == "todo_write" {
-		if todos, ok := params["todos"].([]any); ok {
-			return fmt.Sprintf("TodoWrite(%d items)", len(todos))
+	// Special handling for read_file - show as Read(filepath)
+	if apiName == "read_file" {
+		if filePath, ok := params["file_path"].(string); ok {
+			return fmt.Sprintf("Read(%s)", filePath)
 		}
-		return "TodoWrite()"
+		return "Read()"
+	}
+
+	// Special handling for list_directory - show as List Directory(path)
+	if apiName == "list_directory" {
+		if path, ok := params["path"].(string); ok {
+			return fmt.Sprintf("List Directory(%s)", path)
+		}
+		return "List Directory()"
+	}
+
+	// Special handling for todo_write
+	if apiName == "todo_write" {
+		if todos, ok := params["todos"].([]any); ok {
+			return fmt.Sprintf("%s(%d items)", title, len(todos))
+		}
+		return title + "()"
 	}
 
 	// Sort keys for consistent ordering
@@ -274,7 +305,7 @@ func formatToolCall(name, inputJSON string) string {
 		parts = append(parts, fmt.Sprintf("%s: %s", k, formatParamValue(v)))
 	}
 
-	return name + "(" + strings.Join(parts, ", ") + ")"
+	return title + "(" + strings.Join(parts, ", ") + ")"
 }
 
 // formatParamValue formats a parameter value
@@ -345,7 +376,7 @@ func renderDiffResult(result string) tui.View {
 	views := make([]tui.View, 0, len(lines)+2)
 
 	if len(lines) > 0 {
-		views = append(views, tui.Text("  ⎿  %s", truncateDisplayLine(lines[0])).Muted())
+		views = append(views, tui.Text("  ⎿  %s", truncateDisplayLine(lines[0])).Style(toolResultStyle()))
 	}
 
 	for i := 1; i < len(lines); i++ {
@@ -358,7 +389,7 @@ func renderDiffResult(result string) tui.View {
 		} else if strings.HasPrefix(trimmed, "- ") {
 			lineView = tui.Text("      %s", line).Error()
 		} else {
-			lineView = tui.Text("      %s", line).Muted()
+			lineView = tui.Text("      %s", line).Style(toolResultStyle())
 		}
 		views = append(views, lineView)
 	}
@@ -485,7 +516,7 @@ func (a *App) toolCallViewStatic(msg Message) tui.View {
 		statusView = tui.Text("⏺").Fg(tui.ColorCyan)
 	}
 
-	toolCall := formatToolCall(msg.ToolName, msg.ToolInput)
+	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
 	header := tui.Group(statusView, tui.Text(" %s", toolCall))
 
 	if msg.ToolDone && len(msg.ToolResultLines) > 0 {

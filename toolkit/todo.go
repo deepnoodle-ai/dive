@@ -60,7 +60,7 @@ func NewTodoWriteTool(opts ...TodoWriteToolOptions) *dive.TypedToolAdapter[*Todo
 }
 
 func (t *TodoWriteTool) Name() string {
-	return "TodoWrite"
+	return "todo_write"
 }
 
 func (t *TodoWriteTool) Description() string {

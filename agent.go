@@ -15,7 +15,7 @@ import (
 
 var (
 	defaultResponseTimeout    = time.Minute * 10
-	defaultToolIterationLimit = 16
+	defaultToolIterationLimit = 100
 	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
 	ErrNoInstructions         = errors.New("no instructions provided")
@@ -819,9 +819,13 @@ func (a *StandardAgent) executeToolCalls(
 			}
 			confirmed, err := a.permissionManager.Confirm(ctx, tool, toolCall, message)
 			if err != nil {
-				return nil, fmt.Errorf("tool call confirmation error: %w", err)
-			}
-			if confirmed {
+				// Check if this is user feedback (not a real error)
+				if feedback, ok := IsUserFeedback(err); ok {
+					result = a.createDeniedResult(toolCall, feedback, preview)
+				} else {
+					return nil, fmt.Errorf("tool call confirmation error: %w", err)
+				}
+			} else if confirmed {
 				result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
 			} else {
 				result = a.createDeniedResult(toolCall, "User denied tool call", preview)
@@ -832,9 +836,13 @@ func (a *StandardAgent) executeToolCalls(
 			// Treat as ask to be safe
 			confirmed, err := a.permissionManager.Confirm(ctx, tool, toolCall, "")
 			if err != nil {
-				return nil, fmt.Errorf("tool call confirmation error: %w", err)
-			}
-			if confirmed {
+				// Check if this is user feedback (not a real error)
+				if feedback, ok := IsUserFeedback(err); ok {
+					result = a.createDeniedResult(toolCall, feedback, preview)
+				} else {
+					return nil, fmt.Errorf("tool call confirmation error: %w", err)
+				}
+			} else if confirmed {
 				result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
 			} else {
 				result = a.createDeniedResult(toolCall, "User denied tool call", preview)

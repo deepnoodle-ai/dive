@@ -3,7 +3,7 @@ module github.com/deepnoodle-ai/dive
 go 1.25
 
 require (
-	github.com/deepnoodle-ai/wonton v0.0.20
+	github.com/deepnoodle-ai/wonton v0.0.21
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -20,3 +20,5 @@ require (
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/term v0.38.0 // indirect
 )
+
+replace github.com/deepnoodle-ai/wonton => ../wonton

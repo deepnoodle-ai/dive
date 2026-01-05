@@ -86,9 +86,9 @@ func NewSkillTool(opts SkillToolOptions) *SkillTool {
 	}
 }
 
-// Name returns "Skill", the tool's identifier.
+// Name returns "skill", the tool's identifier.
 func (t *SkillTool) Name() string {
-	return "Skill"
+	return "skill"
 }
 
 // Description returns a description of the tool including a list of available skills.
@@ -144,7 +144,7 @@ func (t *SkillTool) Schema() *schema.Schema {
 //   - OpenWorldHint: false (operates only on local skill definitions)
 func (t *SkillTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Skill",
+		Title:           "Activate Skill",
 		ReadOnlyHint:    true,
 		DestructiveHint: false,
 		IdempotentHint:  true,

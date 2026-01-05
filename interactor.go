@@ -11,6 +11,26 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
+// UserFeedbackError is returned when a user denies a confirmation but provides
+// feedback explaining what they want done differently. The agent should use
+// this feedback in the tool error result sent back to the LLM.
+type UserFeedbackError struct {
+	Message string
+}
+
+func (e *UserFeedbackError) Error() string {
+	return e.Message
+}
+
+// IsUserFeedback checks if an error is a UserFeedbackError and extracts the message.
+// Returns the feedback message and true if the error is a UserFeedbackError, or empty string and false otherwise.
+func IsUserFeedback(err error) (string, bool) {
+	if feedback, ok := err.(*UserFeedbackError); ok {
+		return feedback.Message, true
+	}
+	return "", false
+}
+
 // UserInteractor handles user interactions during agent execution.
 // Implement this interface to customize how the agent interacts with users.
 type UserInteractor interface {
