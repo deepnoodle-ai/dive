@@ -245,6 +245,19 @@ func runInteractive(ctx *cli.Context) error {
 		permissionConfig = createPermissionConfig()
 	}
 
+	// Load project settings from .dive/settings.json
+	settings, err := dive.LoadSettings(workspaceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load settings: %v\n", err)
+	} else if settings != nil {
+		// Add rules from settings file
+		settingsRules := settings.ToPermissionRules()
+		if len(settingsRules) > 0 {
+			// Prepend settings rules so they're checked first
+			permissionConfig.Rules = append(settingsRules, permissionConfig.Rules...)
+		}
+	}
+
 	// Create thread repository for conversation memory
 	threadRepo := dive.NewMemoryThreadRepository()
 

@@ -133,10 +133,12 @@ type DialogState struct {
 	ContentPreview string
 
 	// For confirm (Claude Code style)
-	ConfirmChan         chan ConfirmResult
-	ConfirmSelectedIdx  int  // Currently selected option (0=Yes, 1=Allow session, 2=Feedback)
-	ConfirmFeedbackMode bool // True when user is typing feedback
-	ConfirmFeedback     string
+	ConfirmChan          chan ConfirmResult
+	ConfirmSelectedIdx   int    // Currently selected option (0=Yes, 1=Allow session, 2=Feedback)
+	ConfirmFeedbackMode  bool   // True when user is typing feedback
+	ConfirmFeedback      string
+	ConfirmToolCategory  string // Tool category for "allow all X this session" (e.g., "bash", "edit", "read")
+	ConfirmToolCategoryLabel string // Human-readable label (e.g., "bash commands", "file edits")
 
 	// For select
 	Options      []DialogOption
@@ -201,8 +203,10 @@ type App struct {
 	// Tool dialog state (confirmations, selections, input)
 	dialogState *DialogState
 
-	// Session-level allow tracking for "allow all edits this session"
-	allowSessionEdits bool
+	// Session-scoped permission allowlist: maps tool categories to allowed status.
+	// Categories include: "bash", "edit", "read", or specific tool names.
+	// When user selects "allow all X this session", the relevant category is added.
+	sessionAllowed map[string]bool
 
 	// Autocomplete state
 	autocompleteMatches []string
@@ -232,16 +236,17 @@ func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 	}
 
 	return &App{
-		agent:         agent,
-		workspaceDir:  workspaceDir,
-		modelName:     modelName,
-		messages:      make([]Message, 0),
-		toolCallIndex: make(map[string]int),
-		toolTitles:    toolTitles,
-		history:       make([]string, 0),
-		historyIndex:  -1,
-		ctx:           ctx,
-		cancel:        cancel,
+		agent:          agent,
+		workspaceDir:   workspaceDir,
+		modelName:      modelName,
+		messages:       make([]Message, 0),
+		toolCallIndex:  make(map[string]int),
+		toolTitles:     toolTitles,
+		history:        make([]string, 0),
+		historyIndex:   -1,
+		sessionAllowed: make(map[string]bool),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 }
 
@@ -358,11 +363,15 @@ func (a *App) dialogView() tui.View {
 			views = append(views, tui.Text("   1. Yes").Muted())
 		}
 
-		// Option 2: Yes, allow all edits during this session
+		// Option 2: Yes, allow all X during this session
+		allowLabel := "file edits" // Default fallback
+		if a.dialogState.ConfirmToolCategoryLabel != "" {
+			allowLabel = a.dialogState.ConfirmToolCategoryLabel
+		}
 		if selectedIdx == 1 {
-			views = append(views, tui.Text(" ❯ 2. Yes, allow all edits during this session (shift+tab)").Style(purpleStyle.WithBold()))
+			views = append(views, tui.Text(" ❯ 2. Yes, allow all %s during this session (shift+tab)", allowLabel).Style(purpleStyle.WithBold()))
 		} else {
-			views = append(views, tui.Text("   2. Yes, allow all edits during this session (shift+tab)").Muted())
+			views = append(views, tui.Text("   2. Yes, allow all %s during this session (shift+tab)", allowLabel).Muted())
 		}
 
 		// Option 3: Feedback input
@@ -994,11 +1003,11 @@ func (a *App) printRecentMessagesToScrollback() {
 // Run starts the CLI application
 func (a *App) Run() error {
 	// Create InlineApp runner with 30 FPS for animations
-	a.runner = tui.NewInlineApp(
-		tui.WithInlineFPS(30),
-		tui.WithInlineBracketedPaste(true),
-		tui.WithInlineKittyKeyboard(true),
-	)
+	a.runner = tui.NewInlineApp(tui.InlineAppConfig{
+		FPS:            30,
+		BracketedPaste: true,
+		KittyKeyboard:  true,
+	})
 
 	// Print intro to scrollback first
 	a.printIntroToScrollback()
@@ -1167,13 +1176,53 @@ func (a *App) parseTodoWriteInput(input []byte) {
 	}
 }
 
+// toolCategoryInfo represents a tool's category for session allowlist purposes.
+type toolCategoryInfo struct {
+	Category string // Internal category key (e.g., "bash", "edit", "read")
+	Label    string // Human-readable label (e.g., "bash commands", "file edits")
+}
+
+// getToolCategory determines the category of a tool for session allowlist purposes.
+// Returns the category key and a human-readable label for the "allow all X this session" dialog.
+func getToolCategory(toolName string) toolCategoryInfo {
+	toolNameLower := strings.ToLower(toolName)
+
+	// Bash/command execution tools
+	bashPatterns := []string{"bash", "command", "shell", "exec", "run"}
+	for _, pattern := range bashPatterns {
+		if strings.Contains(toolNameLower, pattern) {
+			return toolCategoryInfo{Category: "bash", Label: "bash commands"}
+		}
+	}
+
+	// Edit/write tools
+	editPatterns := []string{"edit", "write", "create", "mkdir", "touch"}
+	for _, pattern := range editPatterns {
+		if strings.Contains(toolNameLower, pattern) {
+			return toolCategoryInfo{Category: "edit", Label: "file edits"}
+		}
+	}
+
+	// Read tools
+	if strings.Contains(toolNameLower, "read") {
+		return toolCategoryInfo{Category: "read", Label: "file reads"}
+	}
+
+	// Glob/search tools
+	if strings.Contains(toolNameLower, "glob") || strings.Contains(toolNameLower, "grep") || strings.Contains(toolNameLower, "search") {
+		return toolCategoryInfo{Category: "search", Label: "searches"}
+	}
+
+	// Default: use the tool name itself as the category
+	return toolCategoryInfo{Category: toolName, Label: toolName + " operations"}
+}
+
 // ConfirmTool prompts the user to confirm a tool execution
 func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input []byte) (bool, error) {
-	// If session-level allow is enabled for edit tools, auto-approve
-	if a.allowSessionEdits {
-		if strings.Contains(toolName, "write") || strings.Contains(toolName, "edit") {
-			return true, nil
-		}
+	// Check if this tool's category is already allowed for this session
+	toolCat := getToolCategory(toolName)
+	if a.sessionAllowed[toolCat.Category] {
+		return true, nil
 	}
 
 	// Parse input JSON to build better summary and preview
@@ -1249,11 +1298,13 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 	a.runner.SendEvent(showDialogEvent{
 		baseEvent: newBaseEvent(),
 		dialog: &DialogState{
-			Type:           DialogTypeConfirm,
-			Active:         true,
-			Title:          actionSummary,
-			ContentPreview: contentPreview,
-			ConfirmChan:    confirmChan,
+			Type:                     DialogTypeConfirm,
+			Active:                   true,
+			Title:                    actionSummary,
+			ContentPreview:           contentPreview,
+			ConfirmChan:              confirmChan,
+			ConfirmToolCategory:      toolCat.Category,
+			ConfirmToolCategoryLabel: toolCat.Label,
 		},
 	})
 
@@ -1262,9 +1313,9 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 	case result := <-confirmChan:
 		a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 
-		// Handle "allow all edits during this session"
+		// Handle "allow all X during this session"
 		if result.AllowSession {
-			a.allowSessionEdits = true
+			a.sessionAllowed[toolCat.Category] = true
 		}
 
 		// Handle user feedback (denied with message)

@@ -375,6 +375,28 @@ func (pm *PermissionManager) SetMode(mode PermissionMode) {
 	pm.config.Mode = mode
 }
 
+// AddRules appends additional permission rules to the configuration.
+// Rules are evaluated in order, with deny rules checked first across all rules,
+// then allow rules, then ask rules.
+//
+// This is useful for adding rules from a settings file or dynamically
+// during a session (e.g., when user selects "allow all X this session").
+//
+// Example:
+//
+//	pm.AddRules(dive.PermissionRules{
+//	    dive.AllowRule("read_*"),
+//	    dive.AllowCommandRule("bash", "go test*"),
+//	})
+func (pm *PermissionManager) AddRules(rules PermissionRules) {
+	pm.config.Rules = append(pm.config.Rules, rules...)
+}
+
+// Rules returns the current permission rules.
+func (pm *PermissionManager) Rules() PermissionRules {
+	return pm.config.Rules
+}
+
 // extractCommand extracts the command string from tool input.
 func extractCommand(input []byte) string {
 	var inputMap map[string]any

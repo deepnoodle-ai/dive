@@ -351,6 +351,170 @@ permissionManager.SetMode(dive.PermissionModeBypassPermissions)
 
 This is useful for workflows that start with careful review and switch to faster execution after establishing trust.
 
+## Project Settings File
+
+Dive supports project-level permission settings through a `.dive/settings.json` or `.dive/settings.local.json` file in your project directory. This allows you to configure which tools are automatically allowed or denied without modifying code.
+
+### File Location
+
+Settings are loaded from the workspace directory:
+
+```
+your-project/
+├── .dive/
+│   ├── settings.json        # Shared project settings (commit to git)
+│   └── settings.local.json  # Local overrides (add to .gitignore)
+└── src/
+    └── ...
+```
+
+If both files exist, `settings.local.json` takes precedence.
+
+### Settings Format
+
+The settings file uses JSON format compatible with Claude Code:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(ls:*)",
+      "Read(/Users/curtis/git/myproject/**)",
+      "WebFetch(domain:docs.example.com)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)"
+    ]
+  }
+}
+```
+
+### Pattern Syntax
+
+The settings file supports several pattern formats:
+
+| Pattern | Description |
+|---------|-------------|
+| `ToolName` | Simple tool name match (e.g., `WebSearch`, `glob`) |
+| `Bash(command:*)` | Bash command prefix match (e.g., `Bash(go build:*)`) |
+| `Bash(command)` | Exact bash command match |
+| `Read(/path/**)` | File read with path glob |
+| `Write(/path/**)` | File write with path glob |
+| `WebFetch(domain:example.com)` | Web fetch restricted to domain |
+| `mcp__server__tool` | MCP tool names |
+
+### Pattern Examples
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "glob",
+      "grep",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(npm run:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(ls -la)",
+      "Read(/Users/me/allowed-project/**)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:golang.org)",
+      "mcp__ide__getDiagnostics"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)",
+      "Bash(chmod 777:*)"
+    ]
+  }
+}
+```
+
+Pattern types:
+- **Simple tool names**: `WebSearch`, `glob`, `grep`
+- **Bash command prefixes**: `Bash(go build:*)` - the `:*` suffix means "starts with"
+- **Exact bash commands**: `Bash(ls -la)` - no `:*` means exact match
+- **Path-scoped file access**: `Read(/Users/me/project/**)` - uses glob patterns
+- **Domain-scoped web fetch**: `WebFetch(domain:example.com)` - matches domain and subdomains
+- **MCP tools**: `mcp__server__toolname`
+
+### Path Glob Patterns
+
+Path patterns support standard glob syntax:
+
+- `*` - Match any characters except path separators
+- `**` - Match any characters including path separators (recursive)
+- `?` - Match a single character
+
+Examples:
+- `/path/to/file` - Exact file match
+- `/path/to/*` - All files directly in `/path/to/`
+- `/path/to/**` - All files recursively under `/path/to/`
+- `/path/**/*.go` - All `.go` files under `/path/`
+
+### Recommended Setup
+
+1. Create a shared `settings.json` for team-wide rules:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(npm test:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)"
+    ]
+  }
+}
+```
+
+2. Add `settings.local.json` to `.gitignore`:
+
+```
+.dive/settings.local.json
+```
+
+3. Create personal `settings.local.json` for machine-specific rules:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Read(/Users/me/other-project/**)",
+      "WebFetch(domain:internal-docs.company.com)"
+    ]
+  }
+}
+```
+
+### How Settings Rules Are Applied
+
+Settings rules are prepended to the permission configuration, so they're evaluated first:
+
+1. Settings deny rules (from `.dive/settings.json`)
+2. Settings allow rules (from `.dive/settings.json`)
+3. Built-in deny rules
+4. Built-in allow rules
+5. Built-in ask rules
+6. Mode check
+7. CanUseTool callback
+8. Default: ask
+
+This means settings rules can override built-in behavior.
+
 ## Best Practices
 
 1. **Start restrictive** - Begin with `PermissionModeDefault` and explicit allow rules
@@ -359,3 +523,5 @@ This is useful for workflows that start with careful review and switch to faster
 4. **Set appropriate annotations** - Mark tools with ReadOnlyHint, EditHint, etc.
 5. **Test permission flows** - Verify rules work as expected before deployment
 6. **Use CanUseTool for edge cases** - Handle dynamic decisions programmatically
+7. **Use settings files for project config** - Keep permission rules in `.dive/settings.json`
+8. **Keep secrets in local settings** - Use `.dive/settings.local.json` for machine-specific rules
