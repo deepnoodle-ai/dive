@@ -163,7 +163,7 @@ func (m *Manager) SelectBackend() Backend {
 
 // Wrap wraps a command for sandboxed execution if sandboxing is enabled.
 func (m *Manager) Wrap(ctx context.Context, cmd *exec.Cmd) (*exec.Cmd, func(), error) {
-	if !m.config.Enabled {
+	if m.config == nil || !m.config.Enabled {
 		return cmd, func() {}, nil
 	}
 

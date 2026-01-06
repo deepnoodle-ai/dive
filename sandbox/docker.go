@@ -21,8 +21,10 @@ type DockerBackend struct {
 
 func NewDockerBackend() *DockerBackend {
 	// Prefer podman on Linux
-	if _, err := exec.LookPath("podman"); err == nil {
-		return &DockerBackend{command: "podman"}
+	if runtime.GOOS == "linux" {
+		if _, err := exec.LookPath("podman"); err == nil {
+			return &DockerBackend{command: "podman"}
+		}
 	}
 	return &DockerBackend{command: "docker"}
 }
@@ -117,11 +119,13 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 		}
 	}
 	for _, m := range cfg.Docker.AdditionalMounts {
+		var host, container, opts string
+		var err error
 		if runtime.GOOS == "windows" {
-			args = append(args, "--volume", m)
-			continue
+			host, container, opts, err = parseMountWindows(m)
+		} else {
+			host, container, opts, err = parseMount(m)
 		}
-		host, container, opts, err := parseMount(m)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -245,6 +249,61 @@ func parseMount(mount string) (string, string, string, error) {
 	if len(parts) == 3 {
 		opts = parts[2]
 	}
+	if host == "" || container == "" {
+		return "", "", "", fmt.Errorf("invalid mount format: %s", mount)
+	}
+	return host, container, opts, nil
+}
+
+// parseMountWindows parses a mount string on Windows where paths contain drive letters.
+// Format: C:\host\path:/container/path[:opts] or C:\host\path:D:\container\path[:opts]
+func parseMountWindows(mount string) (string, string, string, error) {
+	if mount == "" {
+		return "", "", "", fmt.Errorf("invalid mount: empty string")
+	}
+
+	// Windows paths start with drive letter (e.g., C:\)
+	// We need to find the boundary between host and container paths
+	parts := strings.Split(mount, ":")
+	if len(parts) < 2 {
+		return "", "", "", fmt.Errorf("invalid mount format: %s", mount)
+	}
+
+	var host, container, opts string
+
+	// Check if first part looks like a drive letter (single char)
+	if len(parts[0]) == 1 && len(parts) >= 2 {
+		// Host path starts with drive letter: C:\path
+		host = parts[0] + ":" + parts[1]
+		remaining := parts[2:]
+
+		if len(remaining) == 0 {
+			return "", "", "", fmt.Errorf("invalid mount format (missing container path): %s", mount)
+		}
+
+		// Check if container path also has a drive letter
+		if len(remaining) >= 2 && len(remaining[0]) == 1 {
+			// Container path has drive letter: D:\path
+			container = remaining[0] + ":" + remaining[1]
+			if len(remaining) > 2 {
+				opts = remaining[2]
+			}
+		} else {
+			// Container path is Unix-style: /path
+			container = remaining[0]
+			if len(remaining) > 1 {
+				opts = remaining[1]
+			}
+		}
+	} else {
+		// No drive letter on host, fall back to simple parsing
+		host = parts[0]
+		container = parts[1]
+		if len(parts) > 2 {
+			opts = parts[2]
+		}
+	}
+
 	if host == "" || container == "" {
 		return "", "", "", fmt.Errorf("invalid mount format: %s", mount)
 	}

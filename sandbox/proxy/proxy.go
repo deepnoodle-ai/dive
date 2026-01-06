@@ -126,22 +126,29 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		log.Printf("proxy: allowed CONNECT to %s", host)
 	}
 
-	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	// Verify hijacking is supported before dialing
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
-	clientConn, _, err := hijacker.Hijack()
+
+	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+
+	// Hijack the connection before writing the status
+	clientConn, _, err := hijacker.Hijack()
+	if err != nil {
+		destConn.Close()
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	// Send 200 OK directly on the hijacked connection
+	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
 	go transfer(destConn, clientConn)
 	go transfer(clientConn, destConn)

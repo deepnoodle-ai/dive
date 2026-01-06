@@ -710,3 +710,179 @@ func TestDockerBackend_WorkdirFromCmd(t *testing.T) {
 	assert.True(t, ok, "--workdir flag should be set")
 	assert.Equal(t, "/host/work/subdir", workdir)
 }
+
+// TestParseMount tests the Unix mount string parser
+func TestParseMount(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantHost  string
+		wantCont  string
+		wantOpts  string
+		wantError bool
+	}{
+		{
+			name:     "basic mount",
+			input:    "/host/path:/container/path",
+			wantHost: "/host/path",
+			wantCont: "/container/path",
+			wantOpts: "",
+		},
+		{
+			name:     "mount with options",
+			input:    "/host/path:/container/path:ro",
+			wantHost: "/host/path",
+			wantCont: "/container/path",
+			wantOpts: "ro",
+		},
+		{
+			name:     "mount with rw option",
+			input:    "/data:/mnt/data:rw",
+			wantHost: "/data",
+			wantCont: "/mnt/data",
+			wantOpts: "rw",
+		},
+		{
+			name:      "empty string",
+			input:     "",
+			wantError: true,
+		},
+		{
+			name:      "single path only",
+			input:     "/host/path",
+			wantError: true,
+		},
+		{
+			name:      "too many colons",
+			input:     "/host:/container:ro:extra",
+			wantError: true,
+		},
+		{
+			name:      "empty host path",
+			input:     ":/container/path",
+			wantError: true,
+		},
+		{
+			name:      "empty container path",
+			input:     "/host/path:",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host, cont, opts, err := parseMount(tt.input)
+			if tt.wantError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantHost, host)
+			assert.Equal(t, tt.wantCont, cont)
+			assert.Equal(t, tt.wantOpts, opts)
+		})
+	}
+}
+
+// TestParseMountWindows tests the Windows mount string parser
+func TestParseMountWindows(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantHost  string
+		wantCont  string
+		wantOpts  string
+		wantError bool
+	}{
+		{
+			name:     "Windows host to Unix container",
+			input:    "C:\\Users\\test:/container/path",
+			wantHost: "C:\\Users\\test",
+			wantCont: "/container/path",
+			wantOpts: "",
+		},
+		{
+			name:     "Windows host to Unix container with opts",
+			input:    "C:\\Users\\test:/container/path:ro",
+			wantHost: "C:\\Users\\test",
+			wantCont: "/container/path",
+			wantOpts: "ro",
+		},
+		{
+			name:     "Windows host with forward slashes",
+			input:    "C:/Users/test:/container/path",
+			wantHost: "C:/Users/test",
+			wantCont: "/container/path",
+			wantOpts: "",
+		},
+		{
+			name:     "Windows host to Windows container",
+			input:    "C:\\host:D:\\container",
+			wantHost: "C:\\host",
+			wantCont: "D:\\container",
+			wantOpts: "",
+		},
+		{
+			name:     "Windows host to Windows container with opts",
+			input:    "C:\\host:D:\\container:ro",
+			wantHost: "C:\\host",
+			wantCont: "D:\\container",
+			wantOpts: "ro",
+		},
+		{
+			name:     "Different drive letters",
+			input:    "E:\\data:F:\\mnt",
+			wantHost: "E:\\data",
+			wantCont: "F:\\mnt",
+			wantOpts: "",
+		},
+		{
+			name:     "Unix-style paths (fallback)",
+			input:    "/host/path:/container/path",
+			wantHost: "/host/path",
+			wantCont: "/container/path",
+			wantOpts: "",
+		},
+		{
+			name:     "Unix-style paths with opts (fallback)",
+			input:    "/host/path:/container/path:ro",
+			wantHost: "/host/path",
+			wantCont: "/container/path",
+			wantOpts: "ro",
+		},
+		{
+			name:      "empty string",
+			input:     "",
+			wantError: true,
+		},
+		{
+			name:      "single Windows path only",
+			input:     "C:\\Users\\test",
+			wantError: true,
+		},
+		{
+			name:      "Windows path missing container",
+			input:     "C:\\Users\\test:",
+			wantError: true,
+		},
+		{
+			name:      "empty host path",
+			input:     ":/container",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host, cont, opts, err := parseMountWindows(tt.input)
+			if tt.wantError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantHost, host, "host path mismatch")
+			assert.Equal(t, tt.wantCont, cont, "container path mismatch")
+			assert.Equal(t, tt.wantOpts, opts, "options mismatch")
+		})
+	}
+}

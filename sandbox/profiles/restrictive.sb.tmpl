@@ -13,7 +13,13 @@
     (subpath "/System")
     (subpath "/Library")
     (subpath "/dev")
-    (subpath "/private/var/db/timezone")
+    (subpath "/private/var/db")
+    (subpath "/private/etc")
+    (subpath "/var")
+    (subpath "/etc")
+    (subpath "/AppleInternal")
+    (literal "/")
+    (literal "/tmp")
     {{range .AllowedWritePaths}}
     (subpath {{.}})
     {{end}}
