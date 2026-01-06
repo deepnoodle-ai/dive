@@ -590,6 +590,10 @@ func (t *BashTool) runUnsandboxed(ctx context.Context, input *BashInput, timeout
 	return dive.NewToolResultText(string(resultJSON)).WithDisplay(display), nil
 }
 
+// shellCommandForHost returns the shell command and arguments for executing
+// commands on the host system (outside the sandbox).
+// On Unix-like systems, uses bash with -l (login shell) flag which sources
+// ~/.bash_profile and related files, making the environment more complete.
 func shellCommandForHost() (string, []string) {
 	if runtime.GOOS == "windows" {
 		return "cmd", []string{"/Q", "/C"}

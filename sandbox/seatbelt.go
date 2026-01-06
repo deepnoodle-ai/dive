@@ -30,13 +30,6 @@ func (s *SeatbeltBackend) Available() bool {
 	return err == nil
 }
 
-type seatbeltTemplateData struct {
-	WorkDir           string
-	TmpDir            string
-	AllowedWritePaths []string
-	AllowNetwork      bool
-}
-
 func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Config) (*exec.Cmd, func(), error) {
 	if err := validateNetworkConfig(cfg); err != nil {
 		return nil, nil, err
@@ -94,20 +87,10 @@ func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *C
 		allowedPaths = append(allowedPaths, absP)
 	}
 
-	// Escape/Quote paths for Seatbelt syntax to prevent injection.
-	// We use simple double quotes and escape existing quotes/backslashes.
+	// Quote paths for Seatbelt syntax to prevent injection
 	quotePath := func(p string) string {
 		return fmt.Sprintf("%q", p)
 	}
-
-	// Pre-quote paths in the data structure or use a func map.
-	// Since we are using struct fields, let's update the template to expects raw strings
-	// but we'll manually quote them here if we can, OR better: use the quotePath logic.
-	// Actually, Go's text/template doesn't automatically escape for Scheme.
-	// We'll update the data struct to hold Quoted paths or update the template.
-	// Updating the template is cleaner if we pass a FuncMap, but for now let's just
-	// quote them in the data struct (changing types or just storing quoted strings).
-	// Let's create a new struct for the template.
 
 	type templateData struct {
 		WorkDir           string

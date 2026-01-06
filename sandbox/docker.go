@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -203,7 +204,9 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 			cid, err := os.ReadFile(cidPath)
 			if err == nil && len(cid) > 0 {
 				// remove container
-				exec.Command(dockerCmd, "rm", "-f", strings.TrimSpace(string(cid))).Run()
+				if err := exec.Command(dockerCmd, "rm", "-f", strings.TrimSpace(string(cid))).Run(); err != nil {
+					log.Printf("sandbox: failed to remove container %s: %v", strings.TrimSpace(string(cid)), err)
+				}
 			}
 			os.Remove(cidPath)
 		}

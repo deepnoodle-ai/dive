@@ -212,16 +212,6 @@ func findFlagValue(args []string, flag string) (string, bool) {
 	return "", false
 }
 
-// hasFlag checks if a flag exists in an argument list (with or without value).
-func hasFlag(args []string, flag string) bool {
-	for _, arg := range args {
-		if arg == flag {
-			return true
-		}
-	}
-	return false
-}
-
 // findEnvValue finds the value of an environment variable in --env arguments.
 func findEnvValue(args []string, envName string) (string, bool) {
 	prefix := envName + "="

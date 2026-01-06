@@ -3,6 +3,7 @@ package sandbox
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -56,9 +57,15 @@ func mergeEnv(base []string, additions map[string]string) []string {
 	for k, v := range additions {
 		env[k] = v
 	}
+	// Sort keys for deterministic ordering
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	out := make([]string, 0, len(env))
-	for k, v := range env {
-		out = append(out, fmt.Sprintf("%s=%s", k, v))
+	for _, k := range keys {
+		out = append(out, fmt.Sprintf("%s=%s", k, env[k]))
 	}
 	return out
 }

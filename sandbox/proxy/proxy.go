@@ -172,6 +172,9 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Prepare the request to be sent to the target
 	r.RequestURI = "" // RequestURI must be empty for client requests
 
+	// Remove hop-by-hop headers before forwarding
+	removeHopByHopHeaders(r.Header)
+
 	// We need to use a new transport or the default one
 	resp, err := http.DefaultTransport.RoundTrip(r)
 	if err != nil {
@@ -180,6 +183,9 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	// Remove hop-by-hop headers from response
+	removeHopByHopHeaders(resp.Header)
+
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
@@ -187,6 +193,25 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+// removeHopByHopHeaders removes hop-by-hop headers that should not be forwarded.
+// See: https://tools.ietf.org/html/rfc2616#section-13.5.1
+func removeHopByHopHeaders(h http.Header) {
+	hopByHopHeaders := []string{
+		"Connection",
+		"Keep-Alive",
+		"Proxy-Authenticate",
+		"Proxy-Authorization",
+		"Te",
+		"Trailers",
+		"Transfer-Encoding",
+		"Upgrade",
+		"Proxy-Connection", // Non-standard but common
+	}
+	for _, header := range hopByHopHeaders {
+		h.Del(header)
+	}
 }
 
 func (s *Server) isAllowed(host string) bool {

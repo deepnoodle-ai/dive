@@ -115,5 +115,5 @@ Log events (behind `sandbox.audit_log`):
 ## Open Questions
 
 - Should we expose a fixed port or always choose an ephemeral port?
-- Should `NO_PROXY` default to localhost and 127.0.0.1?
-- Should we support wildcard syntax in `allowed_domains` from day one?
+- Would it be beneficial for `NO_PROXY` to default to localhost and 127.0.0.1?
+- Is wildcard syntax support in `allowed_domains` needed from day one?
