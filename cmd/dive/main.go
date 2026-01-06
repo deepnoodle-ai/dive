@@ -521,9 +521,14 @@ func matchesCommandPattern(pattern, command string) bool {
 	if pattern == "" {
 		return false
 	}
+	// If pattern ends with " *", treat as prefix match on command name.
+	// This handles patterns like "docker *" to match "docker run ..." etc.
+	if strings.HasSuffix(pattern, " *") {
+		prefix := strings.TrimSuffix(pattern, " *")
+		return strings.HasPrefix(command, prefix+" ") || command == prefix
+	}
 	if strings.ContainsAny(pattern, "*?[]") {
 		// For glob-like patterns, match against the first word (command name) only
-		// Extract first word of command for matching
 		cmdParts := strings.Fields(command)
 		if len(cmdParts) == 0 {
 			return false

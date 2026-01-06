@@ -346,3 +346,79 @@ func TestTruncateCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchesCommandPattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		command string
+		want    bool
+	}{
+		// Empty patterns
+		{name: "empty pattern", pattern: "", command: "docker run", want: false},
+		{name: "whitespace pattern", pattern: "   ", command: "docker run", want: false},
+
+		// Prefix matching (no wildcards)
+		{name: "exact match", pattern: "docker", command: "docker", want: true},
+		{name: "prefix match with args", pattern: "docker", command: "docker run nginx", want: true},
+		{name: "prefix no match", pattern: "docker", command: "podman run", want: false},
+		{name: "prefix partial word no match", pattern: "doc", command: "docker run", want: true}, // prefix still matches
+
+		// "command *" pattern - matches command with any arguments
+		{name: "space-star matches with args", pattern: "docker *", command: "docker run nginx", want: true},
+		{name: "space-star matches with single arg", pattern: "docker *", command: "docker ps", want: true},
+		{name: "space-star matches exact command", pattern: "docker *", command: "docker", want: true},
+		{name: "space-star no match different command", pattern: "docker *", command: "podman run", want: false},
+		{name: "space-star no match partial", pattern: "docker *", command: "dockerize something", want: false},
+		{name: "git space-star", pattern: "git *", command: "git status", want: true},
+		{name: "git space-star commit", pattern: "git *", command: "git commit -m 'test'", want: true},
+
+		// Glob patterns on command name only
+		{name: "glob star suffix", pattern: "docker*", command: "docker", want: true},
+		{name: "glob star suffix with args", pattern: "docker*", command: "docker run", want: true},
+		{name: "glob star suffix dockerize", pattern: "docker*", command: "dockerize", want: true},
+		{name: "glob star prefix", pattern: "*cker", command: "docker", want: true},
+		{name: "glob question mark", pattern: "g?t", command: "git", want: true},
+		{name: "glob question mark no match", pattern: "g?t", command: "grit", want: false},
+		{name: "glob brackets", pattern: "[dg]ocker", command: "docker", want: true},
+		{name: "glob brackets gocker", pattern: "[dg]ocker", command: "gocker", want: true},
+		{name: "glob brackets no match", pattern: "[dg]ocker", command: "locker", want: false},
+
+		// Edge cases
+		{name: "empty command", pattern: "docker", command: "", want: false},
+		{name: "glob empty command", pattern: "docker*", command: "", want: false},
+		{name: "space-star empty command", pattern: "docker *", command: "", want: false},
+		{name: "command with leading space", pattern: "docker", command: "  docker run", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesCommandPattern(tt.pattern, tt.command)
+			assert.Equal(t, tt.want, got, "pattern=%q command=%q", tt.pattern, tt.command)
+		})
+	}
+}
+
+func TestIsExcludedCommand(t *testing.T) {
+	patterns := []string{"rm *", "sudo *", "docker*"}
+
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{name: "rm with args", command: "rm -rf /", want: true},
+		{name: "sudo with args", command: "sudo apt install", want: true},
+		{name: "docker", command: "docker", want: true},
+		{name: "docker-compose", command: "docker-compose up", want: true},
+		{name: "ls allowed", command: "ls -la", want: false},
+		{name: "echo allowed", command: "echo hello", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isExcludedCommand(tt.command, patterns)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
