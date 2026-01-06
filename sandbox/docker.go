@@ -227,7 +227,9 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 		args = d.addLinuxUserMapping(args, cmd, cfg, image)
 	} else {
 		args = append(args, image)
-		args = append(args, cmd.Path)
+		// Use Args[0] (command name) instead of Path (host-resolved path)
+		// because the host path (e.g., /usr/bin/sh) may not exist in the container
+		args = append(args, cmd.Args[0])
 		args = append(args, cmd.Args[1:]...)
 	}
 
@@ -354,14 +356,17 @@ func (d *DockerBackend) addLinuxUserMapping(args []string, cmd *exec.Cmd, cfg *C
 	u, err := user.Current()
 	if err != nil {
 		args = append(args, image)
-		args = append(args, cmd.Path)
+		// Use Args[0] (command name) instead of Path (host-resolved path)
+		args = append(args, cmd.Args[0])
 		args = append(args, cmd.Args[1:]...)
 		return args
 	}
 
 	args = append(args, "--user", "root")
 
-	innerCmd := shellQuote(append([]string{cmd.Path}, cmd.Args[1:]...))
+	// Use Args[0] (command name) instead of Path (host-resolved path)
+	// because the host path (e.g., /usr/bin/sh) may not exist in the container
+	innerCmd := shellQuote(cmd.Args)
 	// Use /bin/sh for better compatibility (Alpine)
 	// Try to create user/group but ignore failures if they exist
 	shellCmd := fmt.Sprintf(
