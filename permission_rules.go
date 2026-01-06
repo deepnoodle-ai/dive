@@ -602,7 +602,11 @@ func extractPathFromInput(input any) string {
 
 // normalizePath normalizes a file path to prevent directory traversal bypasses.
 // It decodes URL-encoded paths and uses filepath.Clean to resolve . and .. sequences.
-// Returns empty string if the path cannot be safely normalized.
+//
+// Security considerations:
+//   - If URL decoding fails, the original path is used (fail closed for deny rules)
+//   - Path separators are normalized to forward slashes for cross-platform glob matching
+//   - Directory traversal sequences (.. and .) are resolved
 func normalizePath(path string) string {
 	if path == "" {
 		return ""
@@ -611,10 +615,16 @@ func normalizePath(path string) string {
 	// Decode URL-encoded paths to prevent traversal via encoded sequences like %2e%2e
 	decodedPath, err := url.PathUnescape(path)
 	if err != nil {
-		// If decoding fails, return empty to fail closed
-		return ""
+		// If decoding fails, use the original path rather than returning empty.
+		// This ensures deny rules can still match (fail closed behavior).
+		decodedPath = path
 	}
 
 	// Use filepath.Clean to normalize the path (resolves . and .. sequences)
-	return filepath.Clean(decodedPath)
+	cleaned := filepath.Clean(decodedPath)
+
+	// Normalize path separators to forward slashes for cross-platform compatibility.
+	// Glob patterns are compiled with '/' as the separator, so we must ensure
+	// paths use forward slashes regardless of OS.
+	return filepath.ToSlash(cleaned)
 }
