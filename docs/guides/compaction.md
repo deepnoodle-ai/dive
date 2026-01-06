@@ -169,24 +169,37 @@ fmt.Printf("Compaction events: %d\n", len(thread.CompactionHistory))
 
 ## Content Types
 
-### SummaryContent
+### Compacted Summary Format
 
-When compaction occurs, the summary is stored as a `SummaryContent` block:
+When compaction occurs, the summary is stored as a regular `TextContent` block in an assistant message. This ensures compatibility with all LLM providers:
 
 ```go
-// Check if a message contains a summary
-for _, content := range message.Content {
-    if summary, ok := content.(*llm.SummaryContent); ok {
-        fmt.Printf("This message is a compacted summary:\n%s\n", summary.Summary)
+// After compaction, the thread will have an assistant message with the summary
+thread, _ := repo.GetThread(ctx, threadID)
+if len(thread.Messages) > 0 && thread.Messages[0].Role == llm.Assistant {
+    // The first message after compaction contains the summary
+    for _, content := range thread.Messages[0].Content {
+        if text, ok := content.(*llm.TextContent); ok {
+            fmt.Printf("Compacted summary:\n%s\n", text.Text)
+        }
     }
 }
 ```
 
 ## Edge Cases
 
-### Pending Tool Use
+### Pending Tool Calls
 
-If compaction triggers while a tool call is pending (tool_use without tool_result), the pending tool_use blocks are removed before summarization. Claude may re-issue the tool call after resuming from the summary if still needed.
+**Compaction is automatically deferred when there are pending tool calls.** If the current response contains `tool_use` blocks that need execution, compaction will not occur until after:
+1. The tool calls are executed
+2. Tool results are added to the conversation
+3. The next LLM response is generated
+
+This ensures that `tool_use` and `tool_result` blocks remain properly paired, preventing API errors about missing tool_use references.
+
+### Partial Tool Use (Before Deferral)
+
+When compacting historical messages (before the current turn), if the message history contains unpaired `tool_use` blocks (without corresponding `tool_result`), these are automatically filtered out before summarization. This cleanup prevents malformed message sequences.
 
 ### Minimum Messages
 
@@ -273,6 +286,51 @@ func main() {
         }
     }
 }
+```
+
+## CLI Usage
+
+The Dive CLI enables compaction by default and provides flags to configure it:
+
+```bash
+# Default behavior (compaction enabled at 100k tokens)
+dive
+
+# Disable compaction
+dive --compaction=false
+
+# Adjust compaction threshold
+dive --compaction-threshold=50000  # Compact at 50k tokens
+dive --compaction-threshold=150000 # Compact at 150k tokens
+
+# Environment variables
+export DIVE_COMPACTION=true
+export DIVE_COMPACTION_THRESHOLD=75000
+dive
+```
+
+### Visual Feedback
+
+When compaction occurs in the CLI, you'll see:
+
+1. **Live notification** (3 seconds): A yellow ⚡ indicator appears in the live view with token reduction stats
+2. **Footer stats** (5 seconds): Detailed compaction statistics appear in the footer:
+   ```
+   ⚡ Context compacted: 102,450 → 1,250 tokens (47 messages summarized)
+   ```
+
+This visual feedback helps you understand when compaction is occurring and how much context is being preserved.
+
+### CLI Print Mode
+
+Print mode (non-interactive) also supports compaction:
+
+```bash
+# Enable compaction for long-running tasks
+dive --print --compaction-threshold=50000 "Process all files in the repository"
+
+# Output compaction stats in JSON format
+dive --print --output-format=json "Long task..." | jq .
 ```
 
 ## When to Use Compaction

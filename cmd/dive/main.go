@@ -68,6 +68,14 @@ func main() {
 			cli.String("skills-dir", "").
 				Default("").
 				Help("Path to a skills directory"),
+			cli.Bool("compaction", "").
+				Default(true).
+				Env("DIVE_COMPACTION").
+				Help("Enable automatic context compaction when token limits are approached"),
+			cli.Int("compaction-threshold", "").
+				Default(100000).
+				Env("DIVE_COMPACTION_THRESHOLD").
+				Help("Token count that triggers compaction (default: 100000)"),
 		).
 		Run(runMain)
 
@@ -215,20 +223,23 @@ type PrintToolCallResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// sessionConfig holds common configuration for both print and interactive modes
+// sessionConfig holds common configuration for both print and interactive modes.
+// This includes model settings, tools, and feature flags like compaction.
 type sessionConfig struct {
-	modelName     string
-	workspaceDir  string
-	temperature   float64
-	maxTokens     int
-	instructions  string
-	model         llm.LLM
-	tools         []dive.Tool
-	skillLoader   *skill.Loader
-	taskRegistry  *toolkit.TaskRegistry
-	sandboxConfig *sandbox.Config
-	settings      *dive.Settings
-	apiEndpoint   string
+	modelName            string
+	workspaceDir         string
+	temperature          float64
+	maxTokens            int
+	instructions         string
+	model                llm.LLM
+	tools                []dive.Tool
+	skillLoader          *skill.Loader
+	taskRegistry         *toolkit.TaskRegistry
+	sandboxConfig        *sandbox.Config
+	settings             *dive.Settings
+	apiEndpoint          string
+	compactionEnabled    bool // Enable automatic context compaction
+	compactionThreshold  int  // Token count that triggers compaction (default: 100000)
 }
 
 // parseSessionConfig extracts common configuration from CLI context
@@ -239,10 +250,12 @@ func parseSessionConfig(ctx *cli.Context) (*sessionConfig, error) {
 	}
 
 	cfg := &sessionConfig{
-		modelName:   modelName,
-		temperature: ctx.Float64("temperature"),
-		maxTokens:   ctx.Int("max-tokens"),
-		apiEndpoint: ctx.String("api-endpoint"),
+		modelName:           modelName,
+		temperature:         ctx.Float64("temperature"),
+		maxTokens:           ctx.Int("max-tokens"),
+		apiEndpoint:         ctx.String("api-endpoint"),
+		compactionEnabled:   ctx.Bool("compaction"),
+		compactionThreshold: ctx.Int("compaction-threshold"),
 	}
 
 	// Workspace setup
@@ -362,6 +375,15 @@ func runPrint(ctx *cli.Context) error {
 	// Add skill and task tools
 	cfg.addSkillAndTaskTools()
 
+	// Create compaction config if enabled
+	var compactionConfig *dive.CompactionConfig
+	if cfg.compactionEnabled {
+		compactionConfig = &dive.CompactionConfig{
+			Enabled:               true,
+			ContextTokenThreshold: cfg.compactionThreshold,
+		}
+	}
+
 	// Create the agent (skip all permissions in print mode)
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:         "Dive",
@@ -375,6 +397,7 @@ func runPrint(ctx *cli.Context) error {
 			Temperature: &cfg.temperature,
 			MaxTokens:   &cfg.maxTokens,
 		},
+		Compaction: compactionConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
@@ -556,6 +579,15 @@ func runInteractive(ctx *cli.Context) error {
 	// Create thread repository for conversation memory
 	threadRepo := dive.NewMemoryThreadRepository()
 
+	// Create compaction config if enabled
+	var compactionConfig *dive.CompactionConfig
+	if cfg.compactionEnabled {
+		compactionConfig = &dive.CompactionConfig{
+			Enabled:               true,
+			ContextTokenThreshold: cfg.compactionThreshold,
+		}
+	}
+
 	// Create the agent
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:             "Dive",
@@ -569,6 +601,7 @@ func runInteractive(ctx *cli.Context) error {
 			Temperature: &cfg.temperature,
 			MaxTokens:   &cfg.maxTokens,
 		},
+		Compaction: compactionConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)

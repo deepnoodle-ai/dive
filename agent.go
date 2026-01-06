@@ -460,6 +460,10 @@ func (a *StandardAgent) generate(
 	// Accumulates usage across multiple LLM calls
 	totalUsage := &llm.Usage{}
 
+	// Track if compaction occurred during this generation
+	var compactedMessages []*llm.Message
+	var compactionEvent *CompactionEvent
+
 	newMessage := func(msg *llm.Message) {
 		updatedMessages = append(updatedMessages, msg)
 		outputMessages = append(outputMessages, msg)
@@ -520,38 +524,43 @@ func (a *StandardAgent) generate(
 			return nil, err
 		}
 
-		// Check for compaction trigger
-		if a.shouldCompact(totalUsage, len(updatedMessages)) {
-			compactedMessages, compactionEvent, err := a.performCompaction(ctx, updatedMessages, systemPrompt)
+		// Check for pending tool calls BEFORE compaction
+		// If there are tool calls, we must execute them before compacting
+		toolCalls := response.ToolCalls()
+		hasPendingToolCalls := len(toolCalls) > 0
+
+		// Check for compaction trigger (but defer if we have pending tool calls)
+		if !hasPendingToolCalls && a.shouldCompact(totalUsage, len(updatedMessages)) {
+			compacted, event, err := a.performCompaction(ctx, updatedMessages, systemPrompt)
 			if err != nil {
 				// Log warning but don't fail - continue with uncompacted context
 				a.logger.Warn("compaction failed", "error", err)
 			} else {
 				// Replace messages with compacted summary
-				updatedMessages = compactedMessages
+				updatedMessages = compacted
 				// Clear output messages since the history is now summarized
-				outputMessages = compactedMessages
+				outputMessages = compacted
+				// Track compaction for final result
+				compactedMessages = compacted
+				compactionEvent = event
 				// Emit compaction event
 				if err := callback(ctx, &ResponseItem{
 					Type:       ResponseItemTypeCompaction,
-					Compaction: compactionEvent,
+					Compaction: event,
 				}); err != nil {
 					return nil, err
 				}
-				// Return with compaction info - the loop will continue
-				// from the summary on the next CreateResponse call
-				return &generateResult{
-					OutputMessages:    outputMessages,
-					Usage:             totalUsage,
-					CompactedMessages: compactedMessages,
-					CompactionEvent:   compactionEvent,
-				}, nil
+				// Continue the loop with compacted messages - don't return early
+				a.logger.Debug("compaction complete, continuing generation",
+					"tokens_before", event.TokensBefore,
+					"tokens_after", event.TokensAfter,
+					"messages_compacted", event.MessagesCompacted,
+				)
 			}
 		}
 
 		// We're done if there are no tool calls
-		toolCalls := response.ToolCalls()
-		if len(toolCalls) == 0 {
+		if !hasPendingToolCalls {
 			break
 		}
 
@@ -579,10 +588,16 @@ func (a *StandardAgent) generate(
 		}
 	}
 
-	return &generateResult{
+	// Return result with compaction info if it occurred
+	result := &generateResult{
 		OutputMessages: outputMessages,
 		Usage:          totalUsage,
-	}, nil
+	}
+	if compactedMessages != nil {
+		result.CompactedMessages = compactedMessages
+		result.CompactionEvent = compactionEvent
+	}
+	return result, nil
 }
 
 func (a *StandardAgent) isCachingEnabled() bool {
@@ -1113,11 +1128,12 @@ func (a *StandardAgent) performCompaction(
 	}
 
 	// Step 6: Create new message list with just the summary as an assistant message
+	// Use TextContent instead of SummaryContent for API compatibility
 	compactedMessages := []*llm.Message{
 		{
 			Role: llm.Assistant,
 			Content: []llm.Content{
-				&llm.SummaryContent{Summary: summaryText},
+				&llm.TextContent{Text: summaryText},
 			},
 		},
 	}
