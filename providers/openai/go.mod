@@ -4,11 +4,12 @@ go 1.25
 
 require (
 	github.com/deepnoodle-ai/dive v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.20
+	github.com/deepnoodle-ai/wonton v0.0.23
 	github.com/openai/openai-go v1.12.0
 )
 
 require (
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect

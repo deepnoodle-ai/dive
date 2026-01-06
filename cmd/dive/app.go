@@ -64,6 +64,11 @@ type hideDialogEvent struct {
 	baseEvent
 }
 
+type initialPromptEvent struct {
+	baseEvent
+	prompt string
+}
+
 // MessageType distinguishes regular messages from tool calls
 type MessageType int
 
@@ -223,10 +228,17 @@ type App struct {
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Initial prompt to submit on startup
+	initialPrompt string
+
+	// Ctrl+C exit confirmation state
+	lastCtrlC     time.Time
+	showExitHint  bool
 }
 
 // NewApp creates a new CLI application
-func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
+func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string, initialPrompt string) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Build tool name -> title map from agent's tools
@@ -250,6 +262,7 @@ func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 		historyIndex:   -1,
 		ctx:            ctx,
 		cancel:         cancel,
+		initialPrompt:  initialPrompt,
 	}
 }
 
@@ -299,7 +312,7 @@ func (a *App) LiveView() tui.View {
 	)
 	views = append(views, tui.Divider())
 
-	// Show autocomplete options below the bottom divider (always reserve 8 lines)
+	// Show autocomplete options or exit hint below the bottom divider (always reserve 8 lines)
 	for i := 0; i < 8; i++ {
 		if len(a.autocompleteMatches) > 0 && i < len(a.autocompleteMatches) {
 			match := a.autocompleteMatches[i]
@@ -308,6 +321,8 @@ func (a *App) LiveView() tui.View {
 			} else {
 				views = append(views, tui.Text("   @%s", match).Hint())
 			}
+		} else if i == 0 && a.showExitHint && len(a.autocompleteMatches) == 0 {
+			views = append(views, tui.Text(" Press Ctrl+C again to exit").Hint())
 		} else {
 			views = append(views, tui.Text(""))
 		}
@@ -535,6 +550,10 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.frame = e.Frame
 		// Flush any buffered streaming text (batches updates to 30 FPS max)
 		a.flushStreamBuffer()
+		// Clear exit hint after 2 seconds
+		if a.showExitHint && time.Since(a.lastCtrlC) >= 2*time.Second {
+			a.showExitHint = false
+		}
 
 	// Custom events from background goroutines
 	case processingStartEvent:
@@ -562,6 +581,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 	case hideDialogEvent:
 		a.dialogState = nil
 		return []tui.Cmd{tui.Focus("main-input")}
+	case initialPromptEvent:
+		a.submitInput(e.prompt)
 	}
 	return nil
 }
@@ -707,7 +728,13 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 		if a.processing {
 			a.cancel()
 		} else {
-			return []tui.Cmd{tui.Quit()}
+			// Require two Ctrl+C presses within 2 seconds to exit
+			now := time.Now()
+			if a.showExitHint && now.Sub(a.lastCtrlC) < 2*time.Second {
+				return []tui.Cmd{tui.Quit()}
+			}
+			a.lastCtrlC = now
+			a.showExitHint = true
 		}
 		return nil
 	case tui.KeyEscape:
@@ -995,6 +1022,14 @@ func (a *App) Run() error {
 	// Print intro to scrollback first
 	a.printIntroToScrollback()
 
+	// Submit initial prompt if provided (after a brief delay to let the UI initialize)
+	if a.initialPrompt != "" {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			a.runner.SendEvent(initialPromptEvent{baseEvent: newBaseEvent(), prompt: a.initialPrompt})
+		}()
+	}
+
 	// Run the inline app (blocks until quit)
 	return a.runner.Run(a)
 }
@@ -1057,7 +1092,7 @@ func (a *App) printHelp() {
 		tui.Text("  @filename     Include file contents"),
 		tui.Text("  Enter         Send message"),
 		tui.Text("  Shift+Enter   New line"),
-		tui.Text("  Ctrl+C        Exit"),
+		tui.Text("  Ctrl+C twice  Exit"),
 		tui.Text(""),
 	)
 	a.runner.Print(help)

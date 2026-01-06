@@ -1,5 +1,7 @@
-github.com/deepnoodle-ai/wonton v0.0.20 h1:e3KNQ01fHj1IACyLij8dWADzP8hKJlswKbwveZbH2TE=
-github.com/deepnoodle-ai/wonton v0.0.20/go.mod h1:oyogeHwAHPrVxZ7jtik55Jnj6CwC1jkF+PfHpCRlUGA=
+github.com/deepnoodle-ai/wonton v0.0.23 h1:mvpzs5R2S0fHFOCl7Wqdmt83Qt69dPg3/HIHHNU0Znk=
+github.com/deepnoodle-ai/wonton v0.0.23/go.mod h1:oyogeHwAHPrVxZ7jtik55Jnj6CwC1jkF+PfHpCRlUGA=
+github.com/gobwas/glob v0.2.3 h1:A4xDbljILXROh+kObIiy5kIaPYD8e96x1tgBhUI5J+Y=
+github.com/gobwas/glob v0.2.3/go.mod h1:d3Ez4x06l9bZtSvzIay5+Yzi0fmZzPgnTbPcKjJAkT8=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/openai/openai-go v1.12.0 h1:NBQCnXzqOTv5wsgNC36PrFEiskGfO5wccfCWDo9S1U0=

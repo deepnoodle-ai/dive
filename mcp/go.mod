@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/deepnoodle-ai/dive v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.16
+	github.com/deepnoodle-ai/wonton v0.0.23
 	github.com/mark3labs/mcp-go v0.43.2
 )
 
@@ -12,6 +12,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect

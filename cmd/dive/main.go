@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,11 +13,6 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/providers/anthropic"
-	"github.com/deepnoodle-ai/dive/providers/grok"
-	"github.com/deepnoodle-ai/dive/providers/groq"
-	"github.com/deepnoodle-ai/dive/providers/ollama"
-	"github.com/deepnoodle-ai/dive/providers/openrouter"
 	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/toolkit"
@@ -34,28 +31,45 @@ func main() {
 	app.Main().
 		Flags(
 			cli.String("model", "m").
-				Default("claude-opus-4-5").
 				Env("DIVE_MODEL").
-				Help("Model to use"),
+				Help("Model to use (auto-detected from available API keys if not specified)"),
 			cli.String("workspace", "w").
 				Default("").
 				Help("Workspace directory (defaults to current directory)"),
 			cli.Float("temperature", "t").
-				Default(1.0).
 				Env("DIVE_TEMPERATURE").
-				Help("Sampling temperature (0.0-2.0)"),
+				Help("Sampling temperature (0.0-1.0)"),
 			cli.Int("max-tokens", "").
 				Default(16000).
 				Env("DIVE_MAX_TOKENS").
 				Help("Maximum tokens in response"),
-			cli.String("system-prompt", "s").
+			cli.String("system-prompt", "").
 				Default("").
-				Help("Path to custom system prompt file"),
+				Help("System prompt to use for the session"),
+			cli.String("append-system-prompt", "").
+				Default("").
+				Help("Append a system prompt to the default system prompt"),
+			cli.Bool("print", "p").
+				Default(false).
+				Help("Print response and exit (useful for pipes). Note: Permission prompts are skipped."),
+			cli.String("output-format", "").
+				Default("text").
+				Help("Output format (only works with --print): \"text\" (default) or \"json\""),
+			cli.String("api-endpoint", "").
+				Default("").
+				Env("DIVE_API_ENDPOINT").
+				Help("Override the API endpoint URL for the provider"),
 			cli.Bool("dangerously-skip-permissions", "").
 				Default(false).
 				Help("Skip all tool permission prompts (use with caution)"),
+			cli.String("settings", "").
+				Default("").
+				Help("Path to a settings JSON file or a JSON string to load additional settings from"),
+			cli.String("skills-dir", "").
+				Default("").
+				Help("Path to a skills directory"),
 		).
-		Run(runInteractive)
+		Run(runMain)
 
 	if err := app.Execute(); err != nil {
 		if cli.IsHelpRequested(err) {
@@ -167,91 +181,357 @@ func (i *AppInteractor) Input(ctx context.Context, req *dive.InputRequest) (*div
 
 var _ dive.UserInteractor = (*AppInteractor)(nil)
 
-func runInteractive(ctx *cli.Context) error {
-	modelName := ctx.String("model")
-	workspaceDir := ctx.String("workspace")
-	temperature := ctx.Float64("temperature")
-	maxTokens := ctx.Int("max-tokens")
-	systemPromptFile := ctx.String("system-prompt")
-	skipPermissions := ctx.Bool("dangerously-skip-permissions")
+func runMain(ctx *cli.Context) error {
+	printMode := ctx.Bool("print")
+	if printMode {
+		return runPrint(ctx)
+	}
+	return runInteractive(ctx)
+}
 
-	// Default workspace to current directory
+// PrintOutputFormat defines the output format for print mode
+type PrintOutputFormat string
+
+const (
+	PrintOutputText PrintOutputFormat = "text"
+	PrintOutputJSON PrintOutputFormat = "json"
+)
+
+// PrintResult represents the final result for JSON output
+type PrintResult struct {
+	Output   string                `json:"output"`
+	ThreadID string                `json:"thread_id,omitempty"`
+	Usage    *llm.Usage            `json:"usage,omitempty"`
+	Todos    []dive.TodoItem       `json:"todos,omitempty"`
+	Error    string                `json:"error,omitempty"`
+	Tools    []PrintToolCallResult `json:"tools,omitempty"`
+}
+
+// PrintToolCallResult represents a tool call result for JSON output
+type PrintToolCallResult struct {
+	Name   string `json:"name"`
+	Input  any    `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// sessionConfig holds common configuration for both print and interactive modes
+type sessionConfig struct {
+	modelName     string
+	workspaceDir  string
+	temperature   float64
+	maxTokens     int
+	instructions  string
+	model         llm.LLM
+	tools         []dive.Tool
+	skillLoader   *skill.Loader
+	taskRegistry  *toolkit.TaskRegistry
+	sandboxConfig *sandbox.Config
+	settings      *dive.Settings
+	apiEndpoint   string
+}
+
+// parseSessionConfig extracts common configuration from CLI context
+func parseSessionConfig(ctx *cli.Context) (*sessionConfig, error) {
+	modelName := ctx.String("model")
+	if modelName == "" {
+		modelName = getDefaultModel()
+	}
+
+	cfg := &sessionConfig{
+		modelName:   modelName,
+		temperature: ctx.Float64("temperature"),
+		maxTokens:   ctx.Int("max-tokens"),
+		apiEndpoint: ctx.String("api-endpoint"),
+	}
+
+	// Workspace setup
+	workspaceDir := ctx.String("workspace")
 	if workspaceDir == "" {
 		var err error
 		workspaceDir, err = os.Getwd()
 		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
+			return nil, fmt.Errorf("failed to get current directory: %w", err)
 		}
 	}
-
-	// Resolve to absolute path
 	workspaceDir, err := filepath.Abs(workspaceDir)
 	if err != nil {
-		return fmt.Errorf("failed to resolve workspace path: %w", err)
+		return nil, fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
+	cfg.workspaceDir = workspaceDir
 
-	// Load project settings from .dive/settings.json
-	settings, err := dive.LoadSettings(workspaceDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load settings: %v\n", err)
-	}
+	// Load settings (errors handled differently per mode, so just attempt load)
+	cfg.settings, _ = dive.LoadSettings(workspaceDir)
 
-	// Prepare sandbox config
-	var sandboxConfig *sandbox.Config
-	if settings != nil && settings.Sandbox != nil {
-		sandboxConfig = settings.Sandbox
-		// Default WorkDir to workspace if not set
-		if sandboxConfig.WorkDir == "" {
-			sandboxConfig.WorkDir = workspaceDir
-		}
-	}
-
-	// Load custom system prompt if provided
-	instructions := systemInstructions(workspaceDir)
-	if systemPromptFile != "" {
-		data, err := os.ReadFile(systemPromptFile)
+	// Load additional settings from --settings flag if provided
+	if settingsArg := ctx.String("settings"); settingsArg != "" {
+		additionalSettings, err := loadSettingsFromArg(settingsArg)
 		if err != nil {
-			return fmt.Errorf("failed to read system prompt file: %w", err)
+			return nil, fmt.Errorf("failed to load settings from --settings: %w", err)
 		}
-		instructions = string(data)
+		cfg.settings = mergeSettings(cfg.settings, additionalSettings)
 	}
 
-	// Create LLM provider based on model name
-	model := createModel(modelName)
+	// Sandbox config
+	if cfg.settings != nil && cfg.settings.Sandbox != nil {
+		cfg.sandboxConfig = cfg.settings.Sandbox
+		if cfg.sandboxConfig.WorkDir == "" {
+			cfg.sandboxConfig.WorkDir = workspaceDir
+		}
+	}
 
-	// Create standard tools with workspace validation
-	tools := createTools(workspaceDir, sandboxConfig)
+	// Build instructions
+	systemPrompt := ctx.String("system-prompt")
+	appendSystemPrompt := ctx.String("append-system-prompt")
+	if systemPrompt != "" {
+		cfg.instructions = systemPrompt
+	} else {
+		cfg.instructions = systemInstructions(workspaceDir)
+	}
+	if appendSystemPrompt != "" {
+		cfg.instructions += "\n\n" + appendSystemPrompt
+	}
 
-	// Create interactor
+	// Create model and tools
+	cfg.model = createModel(cfg.modelName, cfg.apiEndpoint)
+	cfg.tools = createTools(workspaceDir, cfg.sandboxConfig)
+
+	// Skill loader
+	loaderOpts := skill.LoaderOptions{
+		ProjectDir: workspaceDir,
+	}
+	if skillsDir := ctx.String("skills-dir"); skillsDir != "" {
+		loaderOpts.AdditionalPaths = []string{skillsDir}
+	}
+	cfg.skillLoader = skill.NewLoader(loaderOpts)
+	_ = cfg.skillLoader.LoadSkills()
+
+	// Task registry
+	cfg.taskRegistry = toolkit.NewTaskRegistry()
+
+	return cfg, nil
+}
+
+// addSkillAndTaskTools adds skill and task tools to the session config
+func (cfg *sessionConfig) addSkillAndTaskTools() {
+	// Add skill tool
+	skillTool := toolkit.NewSkillTool(toolkit.SkillToolOptions{
+		Loader: cfg.skillLoader,
+	})
+	cfg.tools = append(cfg.tools, dive.ToolAdapter(skillTool))
+
+	// Add task tools
+	cfg.tools = append(cfg.tools,
+		dive.ToolAdapter(toolkit.NewTaskTool(toolkit.TaskToolOptions{
+			Registry:     cfg.taskRegistry,
+			ParentTools:  cfg.tools,
+			AgentFactory: createTaskAgentFactory(cfg.model, cfg.apiEndpoint),
+		})),
+		dive.ToolAdapter(toolkit.NewTaskOutputTool(toolkit.TaskOutputToolOptions{
+			Registry: cfg.taskRegistry,
+		})),
+	)
+}
+
+func runPrint(ctx *cli.Context) error {
+	outputFormat := PrintOutputFormat(ctx.String("output-format"))
+
+	// Validate output format
+	switch outputFormat {
+	case PrintOutputText, PrintOutputJSON:
+		// Valid
+	default:
+		return fmt.Errorf("invalid output format: %s (must be text or json)", outputFormat)
+	}
+
+	// Get input from args or stdin
+	input, err := getInput(ctx.Args())
+	if err != nil {
+		return fmt.Errorf("failed to get input: %w", err)
+	}
+	if input == "" {
+		return fmt.Errorf("no input provided; provide a prompt as an argument or pipe content to stdin")
+	}
+
+	// Parse common session configuration
+	cfg, err := parseSessionConfig(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Add skill and task tools
+	cfg.addSkillAndTaskTools()
+
+	// Create the agent (skip all permissions in print mode)
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		Name:         "Dive",
+		Instructions: cfg.instructions,
+		Model:        cfg.model,
+		Tools:        cfg.tools,
+		Permission: &dive.PermissionConfig{
+			Mode: dive.PermissionModeBypassPermissions,
+		},
+		ModelSettings: &dive.ModelSettings{
+			Temperature: &cfg.temperature,
+			MaxTokens:   &cfg.maxTokens,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	// Run the agent
+	bgCtx := context.Background()
+
+	switch outputFormat {
+	case PrintOutputJSON:
+		return runPrintJSON(bgCtx, agent, input)
+	default:
+		return runPrintText(bgCtx, agent, input)
+	}
+}
+
+func readStdinInput() (string, error) {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return "", err
+	}
+
+	// Check if stdin has data (piped input)
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		reader := bufio.NewReader(os.Stdin)
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+
+	return "", nil
+}
+
+// getInput returns input from command-line args or stdin.
+// If args are provided, exactly one arg is expected.
+// If no args, stdin is read for piped input.
+func getInput(args []string) (string, error) {
+	if len(args) > 1 {
+		return "", fmt.Errorf("expected at most 1 argument, got %d", len(args))
+	}
+	if len(args) == 1 {
+		return strings.TrimSpace(args[0]), nil
+	}
+	// No args provided, try stdin
+	return readStdinInput()
+}
+
+func runPrintText(ctx context.Context, agent dive.Agent, input string) error {
+	var outputText strings.Builder
+
+	resp, err := agent.CreateResponse(ctx,
+		dive.WithInput(input),
+		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			if item.Type == dive.ResponseItemTypeModelEvent && item.Event != nil {
+				if item.Event.Delta != nil && item.Event.Delta.Text != "" {
+					fmt.Print(item.Event.Delta.Text)
+					outputText.WriteString(item.Event.Delta.Text)
+				}
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("agent error: %w", err)
+	}
+
+	// Ensure newline at end
+	if outputText.Len() > 0 && !strings.HasSuffix(outputText.String(), "\n") {
+		fmt.Println()
+	} else if outputText.Len() == 0 {
+		// If no streaming output was captured, print the final output
+		fmt.Println(resp.OutputText())
+	}
+
+	return nil
+}
+
+func runPrintJSON(ctx context.Context, agent dive.Agent, input string) error {
+	result := PrintResult{}
+	var toolResults []PrintToolCallResult
+
+	resp, err := agent.CreateResponse(ctx,
+		dive.WithInput(input),
+		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			switch item.Type {
+			case dive.ResponseItemTypeInit:
+				if item.Init != nil {
+					result.ThreadID = item.Init.ThreadID
+				}
+			case dive.ResponseItemTypeTodo:
+				if item.Todo != nil {
+					result.Todos = item.Todo.Todos
+				}
+			case dive.ResponseItemTypeToolCallResult:
+				if item.ToolCallResult != nil {
+					tr := PrintToolCallResult{
+						Name: item.ToolCallResult.Name,
+					}
+					if item.ToolCallResult.Result != nil {
+						tr.Output = item.ToolCallResult.Result.Display
+					}
+					if item.ToolCallResult.Error != nil {
+						tr.Error = item.ToolCallResult.Error.Error()
+					}
+					toolResults = append(toolResults, tr)
+				}
+			}
+			if item.Usage != nil {
+				result.Usage = item.Usage
+			}
+			return nil
+		}),
+	)
+	if err != nil {
+		result.Error = err.Error()
+	} else {
+		result.Output = resp.OutputText()
+		if resp.Usage != nil {
+			result.Usage = resp.Usage
+		}
+	}
+	result.Tools = toolResults
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
+func runInteractive(ctx *cli.Context) error {
+	skipPermissions := ctx.Bool("dangerously-skip-permissions")
+
+	// Get initial prompt from args (at most 1 arg allowed)
+	args := ctx.Args()
+	if len(args) > 1 {
+		return fmt.Errorf("expected at most 1 argument, got %d", len(args))
+	}
+	var initialPrompt string
+	if len(args) == 1 {
+		initialPrompt = strings.TrimSpace(args[0])
+	}
+
+	// Parse common session configuration
+	cfg, err := parseSessionConfig(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Create interactor and add AskUserQuestion tool
 	interactor := NewAppInteractor()
-
-	// Add AskUserQuestion tool with interactor
-	tools = append(tools, toolkit.NewAskUserTool(toolkit.AskUserToolOptions{
+	cfg.tools = append(cfg.tools, toolkit.NewAskUserTool(toolkit.AskUserToolOptions{
 		Interactor: interactor,
 	}))
 
-	// Create skill loader and add skill tool
-	skillLoader := skill.NewLoader(skill.LoaderOptions{
-		ProjectDir: workspaceDir,
-	})
-	_ = skillLoader.LoadSkills() // Ignore error, skills are optional
-	skillTool := toolkit.NewSkillTool(toolkit.SkillToolOptions{
-		Loader: skillLoader,
-	})
-	tools = append(tools, dive.ToolAdapter(skillTool))
-
-	// Create task registry and task tools
-	taskRegistry := toolkit.NewTaskRegistry()
-	tools = append(tools,
-		dive.ToolAdapter(toolkit.NewTaskTool(toolkit.TaskToolOptions{
-			Registry:     taskRegistry,
-			ParentTools:  tools,
-			AgentFactory: createTaskAgentFactory(model),
-		})),
-		dive.ToolAdapter(toolkit.NewTaskOutputTool(toolkit.TaskOutputToolOptions{
-			Registry: taskRegistry,
-		})),
-	)
+	// Add skill and task tools
+	cfg.addSkillAndTaskTools()
 
 	// Create permission config
 	var permissionConfig *dive.PermissionConfig
@@ -263,15 +543,15 @@ func runInteractive(ctx *cli.Context) error {
 		permissionConfig = createPermissionConfig()
 	}
 
-	if settings != nil {
+	if cfg.settings != nil {
 		// Add rules from settings file
-		settingsRules := settings.ToPermissionRules()
+		settingsRules := cfg.settings.ToPermissionRules()
 		if len(settingsRules) > 0 {
 			// Prepend settings rules so they're checked first
 			permissionConfig.Rules = append(settingsRules, permissionConfig.Rules...)
 		}
 	}
-	applySandboxPermissionMode(permissionConfig, sandboxConfig)
+	applySandboxPermissionMode(permissionConfig, cfg.sandboxConfig)
 
 	// Create thread repository for conversation memory
 	threadRepo := dive.NewMemoryThreadRepository()
@@ -279,15 +559,15 @@ func runInteractive(ctx *cli.Context) error {
 	// Create the agent
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:             "Dive",
-		Instructions:     instructions,
-		Model:            model,
-		Tools:            tools,
+		Instructions:     cfg.instructions,
+		Model:            cfg.model,
+		Tools:            cfg.tools,
 		Permission:       permissionConfig,
 		Interactor:       interactor,
 		ThreadRepository: threadRepo,
 		ModelSettings: &dive.ModelSettings{
-			Temperature: &temperature,
-			MaxTokens:   &maxTokens,
+			Temperature: &cfg.temperature,
+			MaxTokens:   &cfg.maxTokens,
 		},
 	})
 	if err != nil {
@@ -295,47 +575,19 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Create and run the app
-	app := NewApp(agent, workspaceDir, modelName)
+	app := NewApp(agent, cfg.workspaceDir, cfg.modelName, initialPrompt)
 	interactor.SetApp(app)
 
 	return app.Run()
 }
 
-// createModel creates the appropriate LLM provider based on model name
-func createModel(modelName string) llm.LLM {
-	lower := strings.ToLower(modelName)
-
-	switch {
-	case strings.HasPrefix(lower, "claude-"):
-		return anthropic.New(anthropic.WithModel(modelName))
-
-	case strings.HasPrefix(lower, "grok-"):
-		return grok.New(grok.WithModel(modelName))
-
-	case strings.HasPrefix(lower, "llama") || strings.HasPrefix(lower, "mixtral") || strings.HasPrefix(lower, "gemma"):
-		// Check for Groq API key first, otherwise use Ollama
-		if os.Getenv("GROQ_API_KEY") != "" {
-			return groq.New(groq.WithModel(modelName))
-		}
-		return ollama.New(ollama.WithModel(modelName))
-
-	case strings.Contains(modelName, "/"):
-		// Models with "/" are OpenRouter format (e.g., "openai/gpt-4", "google/gemini-pro")
-		return openrouter.New(openrouter.WithModel(modelName))
-
-	default:
-		// Default to Anthropic for unknown models
-		return anthropic.New(anthropic.WithModel(modelName))
-	}
-}
-
 // createTaskAgentFactory returns an AgentFactory for creating subagents
-func createTaskAgentFactory(parentModel llm.LLM) toolkit.AgentFactory {
+func createTaskAgentFactory(parentModel llm.LLM, apiEndpoint string) toolkit.AgentFactory {
 	return func(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
 		// Use the parent model by default, or create a new one if specified
 		model := parentModel
 		if def.Model != "" {
-			model = createModel(def.Model)
+			model = createModel(def.Model, apiEndpoint)
 		}
 
 		// Filter tools based on subagent definition
@@ -561,4 +813,88 @@ Organization:
 - todo_write: Track tasks and progress
 - memory: Store and retrieve notes
 `, workspaceDir)
+}
+
+// loadSettingsFromArg loads settings from either a file path or a JSON string.
+// If the argument starts with '{', it's treated as inline JSON.
+// Otherwise, it's treated as a file path.
+func loadSettingsFromArg(arg string) (*dive.Settings, error) {
+	arg = strings.TrimSpace(arg)
+
+	// Check if it looks like JSON (starts with '{')
+	if strings.HasPrefix(arg, "{") {
+		var settings dive.Settings
+		if err := json.Unmarshal([]byte(arg), &settings); err != nil {
+			return nil, fmt.Errorf("parsing JSON string: %w", err)
+		}
+		return &settings, nil
+	}
+
+	// Treat as file path
+	data, err := os.ReadFile(arg)
+	if err != nil {
+		return nil, fmt.Errorf("reading settings file: %w", err)
+	}
+
+	var settings dive.Settings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("parsing settings file: %w", err)
+	}
+
+	return &settings, nil
+}
+
+// mergeSettings merges two Settings objects, with the second taking precedence.
+// If base is nil, returns override. If override is nil, returns base.
+func mergeSettings(base, override *dive.Settings) *dive.Settings {
+	if override == nil {
+		return base
+	}
+	if base == nil {
+		return override
+	}
+
+	// Create a new merged settings object
+	merged := &dive.Settings{}
+
+	// Merge permissions - concatenate allow and deny lists
+	merged.Permissions.Allow = append([]string{}, base.Permissions.Allow...)
+	merged.Permissions.Allow = append(merged.Permissions.Allow, override.Permissions.Allow...)
+
+	merged.Permissions.Deny = append([]string{}, base.Permissions.Deny...)
+	merged.Permissions.Deny = append(merged.Permissions.Deny, override.Permissions.Deny...)
+
+	// Sandbox config - override takes precedence
+	if override.Sandbox != nil {
+		merged.Sandbox = override.Sandbox
+	} else {
+		merged.Sandbox = base.Sandbox
+	}
+
+	return merged
+}
+
+// getDefaultModel returns the default model based on available API keys.
+// Priority order: anthropic, google, openai, grok, mistral.
+// Falls back to anthropic if no API keys are found.
+func getDefaultModel() string {
+	// Check for API keys in priority order
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		return "claude-haiku-4-5"
+	}
+	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
+		return "gemini-3-flash-preview"
+	}
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		return "gpt-5.2"
+	}
+	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
+		return "grok-code-fast-1"
+	}
+	if os.Getenv("MISTRAL_API_KEY") != "" {
+		return "mistral-small-latest"
+	}
+
+	// Default fallback to anthropic (will prompt for API key)
+	return "claude-haiku-4-5"
 }

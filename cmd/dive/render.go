@@ -101,11 +101,10 @@ func (a *App) introView(msg Message) tui.View {
 	// Style constants
 	accentColor := tui.RGB{R: 80, G: 200, B: 235}
 	mutedColor := tui.RGB{R: 140, G: 140, B: 155}
-	dimColor := tui.RGB{R: 100, G: 100, B: 115}
 
 	version := tui.Group(
 		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
-		tui.Text("v0.1.0").Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 90, G: 90, B: 100})),
+		tui.Text("v0.1.0").Style(tui.NewStyle().WithFgRGB(mutedColor)),
 	)
 
 	modelLine := tui.Group(
@@ -115,7 +114,7 @@ func (a *App) introView(msg Message) tui.View {
 
 	workspaceLine := tui.Group(
 		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
-		tui.Text("%s", workspace).Style(tui.NewStyle().WithFgRGB(dimColor)),
+		tui.Text("%s", workspace).Style(tui.NewStyle().WithFgRGB(mutedColor)),
 	)
 
 	// Combine all views
