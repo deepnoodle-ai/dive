@@ -1,0 +1,58 @@
+(version 1)
+
+;; Default deny - explicit allowlist approach
+(deny default)
+
+;; Allow reading files only from project directory and essential system paths
+(allow file-read*
+    (subpath {{.WorkDir}})
+    (subpath {{.TmpDir}})
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/System")
+    (subpath "/Library")
+    (subpath "/dev")
+    (subpath "/private/var/db")
+    (subpath "/private/etc")
+    (subpath "/var")
+    (subpath "/etc")
+    (subpath "/AppleInternal")
+    (literal "/")
+    (literal "/tmp")
+    {{range .AllowedWritePaths}}
+    (subpath {{.}})
+    {{end}}
+)
+
+;; Allow process execution (children inherit policy)
+(allow process-exec)
+(allow process-fork)
+
+;; Allow signals to self
+(allow signal (target self))
+
+;; Allow writes only to specific paths
+(allow file-write*
+    (subpath {{.WorkDir}})
+    (subpath {{.TmpDir}})
+    (literal "/dev/stdout")
+    (literal "/dev/stderr")
+    (literal "/dev/null")
+    {{range .AllowedWritePaths}}
+    (subpath {{.}})
+    {{end}}
+)
+
+;; Terminal/PTY access for interactive commands
+(allow file-ioctl (regex #"^/dev/tty.*"))
+
+;; Essential for Go runtime initialization (hardware capabilities)
+(allow sysctl-read)
+
+;; Network access
+{{if .AllowNetwork}}
+(allow network-outbound)
+{{else}}
+;; Network disabled
+{{end}}

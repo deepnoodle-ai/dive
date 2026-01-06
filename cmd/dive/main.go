@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/deepnoodle-ai/dive/providers/groq"
 	"github.com/deepnoodle-ai/dive/providers/ollama"
 	"github.com/deepnoodle-ai/dive/providers/openrouter"
+	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
@@ -188,6 +190,22 @@ func runInteractive(ctx *cli.Context) error {
 		return fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
 
+	// Load project settings from .dive/settings.json
+	settings, err := dive.LoadSettings(workspaceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load settings: %v\n", err)
+	}
+
+	// Prepare sandbox config
+	var sandboxConfig *sandbox.Config
+	if settings != nil && settings.Sandbox != nil {
+		sandboxConfig = settings.Sandbox
+		// Default WorkDir to workspace if not set
+		if sandboxConfig.WorkDir == "" {
+			sandboxConfig.WorkDir = workspaceDir
+		}
+	}
+
 	// Load custom system prompt if provided
 	instructions := systemInstructions(workspaceDir)
 	if systemPromptFile != "" {
@@ -202,7 +220,7 @@ func runInteractive(ctx *cli.Context) error {
 	model := createModel(modelName)
 
 	// Create standard tools with workspace validation
-	tools := createTools(workspaceDir)
+	tools := createTools(workspaceDir, sandboxConfig)
 
 	// Create interactor
 	interactor := NewAppInteractor()
@@ -245,11 +263,7 @@ func runInteractive(ctx *cli.Context) error {
 		permissionConfig = createPermissionConfig()
 	}
 
-	// Load project settings from .dive/settings.json
-	settings, err := dive.LoadSettings(workspaceDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load settings: %v\n", err)
-	} else if settings != nil {
+	if settings != nil {
 		// Add rules from settings file
 		settingsRules := settings.ToPermissionRules()
 		if len(settingsRules) > 0 {
@@ -257,6 +271,7 @@ func runInteractive(ctx *cli.Context) error {
 			permissionConfig.Rules = append(settingsRules, permissionConfig.Rules...)
 		}
 	}
+	applySandboxPermissionMode(permissionConfig, sandboxConfig)
 
 	// Create thread repository for conversation memory
 	threadRepo := dive.NewMemoryThreadRepository()
@@ -351,7 +366,7 @@ func createTaskAgentFactory(parentModel llm.LLM) toolkit.AgentFactory {
 	}
 }
 
-func createTools(workspaceDir string) []dive.Tool {
+func createTools(workspaceDir string, sandboxConfig *sandbox.Config) []dive.Tool {
 	tools := []dive.Tool{
 		// Read-only file tools
 		toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{
@@ -375,7 +390,8 @@ func createTools(workspaceDir string) []dive.Tool {
 			WorkspaceDir: workspaceDir,
 		}),
 		toolkit.NewBashTool(toolkit.BashToolOptions{
-			WorkspaceDir: workspaceDir,
+			WorkspaceDir:  workspaceDir,
+			SandboxConfig: sandboxConfig,
 		}),
 
 		// Todo tool for task management
@@ -435,6 +451,68 @@ func createPermissionConfig() *dive.PermissionConfig {
 			dive.AskRule("Bash", "Execute command"),
 		},
 	}
+}
+
+func applySandboxPermissionMode(permissionConfig *dive.PermissionConfig, sandboxConfig *sandbox.Config) {
+	if permissionConfig == nil || sandboxConfig == nil || !sandboxConfig.Enabled {
+		return
+	}
+	if sandboxConfig.Mode != sandbox.SandboxModeAutoAllow {
+		return
+	}
+
+	// Drop the default Bash ask rule so sandboxed commands can auto-allow.
+	filtered := make(dive.PermissionRules, 0, len(permissionConfig.Rules))
+	for _, rule := range permissionConfig.Rules {
+		if rule.Type == dive.PermissionRuleAsk && rule.Tool == "Bash" && rule.Command == "" && rule.Message == "Execute command" {
+			continue
+		}
+		filtered = append(filtered, rule)
+	}
+	permissionConfig.Rules = filtered
+
+	prevCanUse := permissionConfig.CanUseTool
+	permissionConfig.CanUseTool = func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent) (*dive.ToolHookResult, error) {
+		if tool != nil && strings.EqualFold(tool.Name(), "Bash") {
+			command := extractCommand(call)
+			if matchesAnyCommand(command, sandboxConfig.ExcludedCommands) {
+				if sandboxConfig.AllowUnsandboxedCommands {
+					return dive.AskResult("Command is excluded from sandbox; run unsandboxed?"), nil
+				}
+				return dive.DenyResult("Command is excluded from sandbox and unsandboxed commands are disabled"), nil
+			}
+			return dive.AllowResult(), nil
+		}
+		if prevCanUse != nil {
+			return prevCanUse(ctx, tool, call)
+		}
+		return dive.ContinueResult(), nil
+	}
+}
+
+func extractCommand(call *llm.ToolUseContent) string {
+	if call == nil || call.Input == nil {
+		return ""
+	}
+	var inputMap map[string]any
+	if err := json.Unmarshal(call.Input, &inputMap); err != nil {
+		return ""
+	}
+	for _, field := range []string{"command", "cmd", "script", "code"} {
+		if value, ok := inputMap[field].(string); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func matchesAnyCommand(command string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if sandbox.MatchesCommandPattern(pattern, command) {
+			return true
+		}
+	}
+	return false
 }
 
 func systemInstructions(workspaceDir string) string {

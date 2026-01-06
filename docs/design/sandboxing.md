@@ -327,7 +327,7 @@ sandbox:
 ### Programmatic Configuration
 
 ```go
-import "github.com/deepnoodle-ai/dive/toolkit/sandbox"
+import "github.com/deepnoodle-ai/dive/sandbox"
 
 cfg := &sandbox.Config{
     Enabled:      true,
