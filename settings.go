@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/deepnoodle-ai/dive/sandbox"
 )
 
 // Settings represents the Dive project settings loaded from .dive/settings.json.
@@ -13,6 +15,8 @@ import (
 type Settings struct {
 	// Permissions contains allow and deny lists for tool operations.
 	Permissions SettingsPermissions `json:"permissions"`
+	// Sandbox contains sandboxing configuration.
+	Sandbox *sandbox.Config `json:"sandbox,omitempty"`
 }
 
 // SettingsPermissions contains permission rules in Claude Code format.

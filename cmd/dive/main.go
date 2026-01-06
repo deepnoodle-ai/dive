@@ -20,6 +20,7 @@ import (
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/toolkit/google"
 	"github.com/deepnoodle-ai/dive/toolkit/kagi"
+	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
 )
@@ -188,6 +189,22 @@ func runInteractive(ctx *cli.Context) error {
 		return fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
 
+	// Load project settings from .dive/settings.json
+	settings, err := dive.LoadSettings(workspaceDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load settings: %v\n", err)
+	}
+
+	// Prepare sandbox config
+	var sandboxConfig *sandbox.Config
+	if settings != nil && settings.Sandbox != nil {
+		sandboxConfig = settings.Sandbox
+		// Default WorkDir to workspace if not set
+		if sandboxConfig.WorkDir == "" {
+			sandboxConfig.WorkDir = workspaceDir
+		}
+	}
+
 	// Load custom system prompt if provided
 	instructions := systemInstructions(workspaceDir)
 	if systemPromptFile != "" {
@@ -202,7 +219,7 @@ func runInteractive(ctx *cli.Context) error {
 	model := createModel(modelName)
 
 	// Create standard tools with workspace validation
-	tools := createTools(workspaceDir)
+	tools := createTools(workspaceDir, sandboxConfig)
 
 	// Create interactor
 	interactor := NewAppInteractor()
@@ -245,11 +262,7 @@ func runInteractive(ctx *cli.Context) error {
 		permissionConfig = createPermissionConfig()
 	}
 
-	// Load project settings from .dive/settings.json
-	settings, err := dive.LoadSettings(workspaceDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load settings: %v\n", err)
-	} else if settings != nil {
+	if settings != nil {
 		// Add rules from settings file
 		settingsRules := settings.ToPermissionRules()
 		if len(settingsRules) > 0 {
@@ -351,7 +364,7 @@ func createTaskAgentFactory(parentModel llm.LLM) toolkit.AgentFactory {
 	}
 }
 
-func createTools(workspaceDir string) []dive.Tool {
+func createTools(workspaceDir string, sandboxConfig *sandbox.Config) []dive.Tool {
 	tools := []dive.Tool{
 		// Read-only file tools
 		toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{
@@ -375,7 +388,8 @@ func createTools(workspaceDir string) []dive.Tool {
 			WorkspaceDir: workspaceDir,
 		}),
 		toolkit.NewBashTool(toolkit.BashToolOptions{
-			WorkspaceDir: workspaceDir,
+			WorkspaceDir:  workspaceDir,
+			SandboxConfig: sandboxConfig,
 		}),
 
 		// Todo tool for task management

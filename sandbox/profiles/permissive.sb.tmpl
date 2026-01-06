@@ -1,0 +1,24 @@
+(version 1)
+
+;; Default allow
+(allow default)
+
+;; Deny writing to root by default (to be overridden by allow rules below)
+(deny file-write* (subpath "/"))
+
+;; Re-allow writing to specific paths
+(allow file-write*
+    (subpath "{{.WorkDir}}")
+    (subpath "{{.TmpDir}}")
+    (literal "/dev/stdout")
+    (literal "/dev/stderr")
+    (literal "/dev/null")
+    {{range .AllowedWritePaths}}
+    (subpath "{{.}}")
+    {{end}}
+)
+
+;; Network access
+{{if not .AllowNetwork}}
+(deny network-outbound)
+{{end}}

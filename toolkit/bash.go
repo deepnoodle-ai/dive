@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
@@ -56,14 +57,16 @@ type BashInput struct {
 
 // BashSession manages a persistent bash process.
 type BashSession struct {
-	mu            sync.Mutex
-	cmd           *exec.Cmd
-	stdin         io.WriteCloser
-	stdout        io.ReadCloser
-	stderr        io.ReadCloser
-	workingDir    string
-	maxOutputLen  int
-	pathValidator *PathValidator
+	mu             sync.Mutex
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	stdout         io.ReadCloser
+	stderr         io.ReadCloser
+	workingDir     string
+	maxOutputLen   int
+	pathValidator  *PathValidator
+	sandboxManager *sandbox.Manager
+	cleanup        func()
 }
 
 // BashSessionOptions configures a BashSession
@@ -74,6 +77,8 @@ type BashSessionOptions struct {
 	MaxOutputLength int
 	// PathValidator for workspace validation (optional)
 	PathValidator *PathValidator
+	// SandboxManager for sandboxed execution (optional)
+	SandboxManager *sandbox.Manager
 }
 
 // NewBashSession creates a new persistent bash session.
@@ -87,9 +92,10 @@ func NewBashSession(opts ...BashSessionOptions) (*BashSession, error) {
 	}
 
 	session := &BashSession{
-		workingDir:    resolvedOpts.WorkingDirectory,
-		maxOutputLen:  resolvedOpts.MaxOutputLength,
-		pathValidator: resolvedOpts.PathValidator,
+		workingDir:     resolvedOpts.WorkingDirectory,
+		maxOutputLen:   resolvedOpts.MaxOutputLength,
+		pathValidator:  resolvedOpts.PathValidator,
+		sandboxManager: resolvedOpts.SandboxManager,
 	}
 
 	if err := session.start(); err != nil {
@@ -114,6 +120,16 @@ func (s *BashSession) start() error {
 	s.cmd = exec.Command(shell, shellArgs...)
 	if s.workingDir != "" {
 		s.cmd.Dir = s.workingDir
+	}
+
+	// Apply sandboxing if configured
+	if s.sandboxManager != nil {
+		wrapped, cleanup, err := s.sandboxManager.Wrap(context.Background(), s.cmd)
+		if err != nil {
+			return fmt.Errorf("sandbox wrap failed: %w", err)
+		}
+		s.cmd = wrapped
+		s.cleanup = cleanup
 	}
 
 	var err error
@@ -143,6 +159,10 @@ func (s *BashSession) start() error {
 func (s *BashSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.cleanup != nil {
+		defer s.cleanup()
+	}
 
 	if s.stdin != nil {
 		s.stdin.Close()
@@ -264,15 +284,18 @@ type BashToolOptions struct {
 	WorkspaceDir string
 	// MaxOutputLength limits the output size (default: 30000 characters)
 	MaxOutputLength int
+	// SandboxConfig configures sandboxing (optional)
+	SandboxConfig *sandbox.Config
 }
 
 // BashTool implements a persistent bash session tool that aligns with
 // Anthropic's bash_20250124 tool specification.
 type BashTool struct {
-	mu            sync.Mutex
-	session       *BashSession
-	pathValidator *PathValidator
-	maxOutputLen  int
+	mu             sync.Mutex
+	session        *BashSession
+	pathValidator  *PathValidator
+	maxOutputLen   int
+	sandboxManager *sandbox.Manager
 }
 
 // NewBashTool creates a new bash tool.
@@ -287,9 +310,15 @@ func NewBashTool(opts ...BashToolOptions) *dive.TypedToolAdapter[*BashInput] {
 
 	pathValidator, _ := NewPathValidator(resolvedOpts.WorkspaceDir)
 
+	var sandboxManager *sandbox.Manager
+	if resolvedOpts.SandboxConfig != nil {
+		sandboxManager = sandbox.NewManager(resolvedOpts.SandboxConfig)
+	}
+
 	return dive.ToolAdapter(&BashTool{
-		pathValidator: pathValidator,
-		maxOutputLen:  resolvedOpts.MaxOutputLength,
+		pathValidator:  pathValidator,
+		maxOutputLen:   resolvedOpts.MaxOutputLength,
+		sandboxManager: sandboxManager,
 	})
 }
 
@@ -413,6 +442,7 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 			WorkingDirectory: input.WorkingDirectory,
 			MaxOutputLength:  t.maxOutputLen,
 			PathValidator:    t.pathValidator,
+			SandboxManager:   t.sandboxManager,
 		})
 		if err != nil {
 			return dive.NewToolResultError(fmt.Sprintf("error starting bash session: %s", err.Error())), nil

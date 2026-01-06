@@ -17,8 +17,7 @@ experimentation, but the library is the primary interface.
 
 ### Testing Guidelines
 
-- Use `github.com/stretchr/testify/require` for all tests
-- Prefer `require` functions over `assert` functions
+- Use `github.com/deepnoodle-ai/wonton/assert` for all tests
 
 ## Architecture
 
@@ -30,9 +29,8 @@ experimentation, but the library is the primary interface.
 ### Key Components
 
 - **Agent** (`agent.go`): StandardAgent implementation
-- **LLM Providers** (`llm/providers/`): Anthropic, OpenAI, Google, Grok, Ollama integrations
+- **LLM Providers** (`providers/`): Anthropic, OpenAI, Google, Grok, Ollama integrations
 - **Tools** (`toolkit/`): Built-in tool implementations
-- **Configuration** (`config/`): YAML configuration of agents, tools, and MCP servers
 - **CLI** (`cmd/dive/`): Basic command-line interface (secondary to library)
 
 ### Design Philosophy
@@ -43,7 +41,15 @@ tool use highly productive.
 
 ### Provider Support
 
-Anthropic, Google, Grok, Groq, Ollama, OpenAI (Responses API), OpenAI (Completions API), OpenRouter.
+- Anthropic
+- Google
+- Grok
+- Groq
+- Mistral
+- Ollama
+- OpenAI (Responses API)
+- OpenAI (Completions API)
+- OpenRouter
 
 ## Example
 
