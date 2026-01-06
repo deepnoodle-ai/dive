@@ -31,6 +31,8 @@ Dive dynamically generates Seatbelt profiles at runtime, ensuring that:
 - Common system tools (`ps`, `top`, `pgrep`) continue to work via specialized permissions.
 - Network access is toggled based on your configuration.
 
+**Permissive profile note:** The `permissive` profile still blocks writes outside your workspace, but it is intentionally broader. Use it only when the restrictive profile blocks legitimate workflows and you understand the tradeoffs.
+
 ### Linux & Windows (Docker/Podman)
 
 On Linux and Windows, Dive uses containerization. It prefers **Podman** on Linux (for rootless execution) but falls back to **Docker** if Podman is not found.
@@ -66,12 +68,27 @@ You can customize the sandbox behavior for more complex workflows:
 {
   "sandbox": {
     "enabled": true,
+    "mode": "regular",
     "allow_network": false,
+    "network": {
+      "allowed_domains": ["github.com", "proxy.golang.org"],
+      "http_proxy": "http://127.0.0.1:8080",
+      "https_proxy": "http://127.0.0.1:8080",
+      "no_proxy": ["localhost", "127.0.0.1"]
+    },
+    "excluded_commands": ["docker *", "podman *"],
+    "allow_unsandboxed_commands": true,
+    "max_command_duration_ms": 120000,
+    "audit_log": false,
     "mount_cloud_credentials": true,
     "allowed_write_paths": ["/Users/me/.cache/go-build", "/Users/me/.npm"],
+    "allowed_unix_sockets": ["/var/run/docker.sock"],
     "docker": {
       "image": "golang:1.23-alpine",
-      "enable_user_mapping": true
+      "enable_user_mapping": true,
+      "memory": "1g",
+      "cpus": "2",
+      "pids_limit": 256
     },
     "seatbelt": {
       "profile": "restrictive"
@@ -82,16 +99,34 @@ You can customize the sandbox behavior for more complex workflows:
 
 ### Configuration Options
 
-| Option                       | Type       | Description                                                                            |
-| :--------------------------- | :--------- | :------------------------------------------------------------------------------------- |
-| `enabled`                    | `bool`     | Enables or disables sandboxing.                                                        |
-| `allow_network`              | `bool`     | Permits outbound network access. Default: `false`.                                     |
-| `work_dir`                   | `string`   | The directory where the agent can write. Defaults to current workspace.                |
-| `allowed_write_paths`        | `[]string` | Additional host paths the agent is allowed to write to.                                |
-| `mount_cloud_credentials`    | `bool`     | Mounts `~/.aws`, `~/.config/gcloud`, and `GOOGLE_APPLICATION_CREDENTIALS` (read-only). |
-| `docker.image`               | `string`   | The container image to use. Default: `ubuntu:22.04`.                                   |
-| `docker.enable_user_mapping` | `bool`     | (Linux) Maps host UID/GID to container user.                                           |
-| `seatbelt.profile`           | `string`   | `restrictive` or `permissive`. Default: `restrictive`.                                 |
+| Option                             | Type       | Description                                                                            |
+| :--------------------------------- | :--------- | :------------------------------------------------------------------------------------- |
+| `enabled`                          | `bool`     | Enables or disables sandboxing.                                                        |
+| `mode`                             | `string`   | `regular` (prompt for Bash) or `auto` (auto-allow sandboxed Bash). Default: `regular`. |
+| `allow_network`                    | `bool`     | Permits outbound network access. Default: `false`.                                     |
+| `network.allowed_domains`          | `[]string` | Domains allowed by your proxy (proxy must enforce).                                    |
+| `network.http_proxy`               | `string`   | HTTP proxy URL for sandboxed commands.                                                 |
+| `network.https_proxy`              | `string`   | HTTPS proxy URL for sandboxed commands.                                                |
+| `network.no_proxy`                 | `[]string` | Hosts that bypass the proxy.                                                           |
+| `work_dir`                         | `string`   | The directory where the agent can write. Defaults to current workspace.                |
+| `allowed_write_paths`              | `[]string` | Additional host paths the agent is allowed to write to.                                |
+| `allowed_unix_sockets`             | `[]string` | Unix socket paths allowed for mounting (Docker only).                                  |
+| `excluded_commands`                | `[]string` | Command patterns that should run outside the sandbox.                                  |
+| `allow_unsandboxed_commands`       | `bool`     | Allows running `excluded_commands` outside the sandbox. Default: `false`.              |
+| `max_command_duration_ms`          | `int`      | Caps command execution time in milliseconds.                                           |
+| `audit_log`                        | `bool`     | Enables audit logging for sandbox usage.                                               |
+| `mount_cloud_credentials`          | `bool`     | Mounts `~/.aws`, `~/.config/gcloud`, and `GOOGLE_APPLICATION_CREDENTIALS` (read-only). |
+| `docker.image`                     | `string`   | The container image to use. Default: `ubuntu:22.04`.                                   |
+| `docker.enable_user_mapping`       | `bool`     | (Linux) Maps host UID/GID to container user.                                           |
+| `docker.memory`                    | `string`   | Docker memory limit (e.g. `512m`).                                                     |
+| `docker.cpus`                      | `string`   | Docker CPU limit (e.g. `1.5`).                                                         |
+| `docker.pids_limit`                | `int`      | Docker process limit.                                                                  |
+| `seatbelt.profile`                 | `string`   | `restrictive` or `permissive`. Default: `restrictive`.                                 |
+| `seatbelt.custom_profile_path`     | `string`   | Path to a custom Seatbelt profile template (overrides built-in profiles).              |
+
+Notes:
+- `excluded_commands` run outside the sandbox in a one-off shell and do not share the persistent Bash session state.
+- If `allowed_domains` is set, Dive automatically starts a built-in proxy to enforce the allowlist. You do not need to configure `http_proxy`/`https_proxy` manually.
 
 ## Programmatic Usage
 
@@ -119,9 +154,11 @@ bashTool := toolkit.NewBashTool(toolkit.BashToolOptions{
 ## Best Practices
 
 1. **Use Restrictive by Default**: Keep `allow_network: false` unless the agent specifically needs to download dependencies or call external APIs.
-2. **Mount Credentials Sparingly**: Only set `mount_cloud_credentials: true` if the agent needs to run `aws` or `gcloud` commands. These are mounted as **Read-Only** for safety.
-3. **Specify Tool-Specific Images**: If your project is in Go, Node, or Python, use a Docker image that already contains the necessary compilers (`golang:1.23`, `node:20`, etc.) to avoid the agent trying to install tools at runtime.
-4. **Use `.dive/settings.local.json`**: For machine-specific paths (like your home directory's cache), use `settings.local.json` so these paths don't get committed to the project's repository.
+2. **Use Domain Allowlists**: When network access is needed, prefer `network.allowed_domains` over unrestricted `allow_network: true`. Dive's built-in proxy enforces the allowlist automatically.
+3. **Mount Credentials Sparingly**: Only set `mount_cloud_credentials: true` if the agent needs to run `aws` or `gcloud` commands. These are mounted as **Read-Only** for safety.
+4. **Specify Tool-Specific Images**: If your project is in Go, Node, or Python, use a Docker image that already contains the necessary compilers (`golang:1.23`, `node:20`, etc.) to avoid the agent trying to install tools at runtime.
+5. **Use `.dive/settings.local.json`**: For machine-specific paths (like your home directory's cache), use `settings.local.json` so these paths don't get committed to the project's repository.
+6. **Understand Network Behavior**: `allow_network: true` opens outbound access for sandboxed commands. If `allowed_domains` is also set, only those domains will be accessible via the built-in proxy.
 
 ## Troubleshooting
 
@@ -133,6 +170,57 @@ This usually means the agent tried to write to a path outside the `WorkDir` or `
 
 Ensure the Docker or Podman daemon is installed and running. If using Docker on Linux, ensure your user is in the `docker` group or that rootless Docker is configured.
 
+### Missing shell or common tools in container
+
+If you see errors like `sh: not found` or missing compilers, switch to an image that includes the tools you need (for example `golang:1.23`, `node:20`, or `python:3.12`) or build a custom image.
+
 ### Permissions issues on Linux
 
 If files created by the agent are owned by `root`, try enabling `enable_user_mapping: true` in the `docker` configuration. Note that the image must have `shadow-utils` (`useradd`/`groupadd`) installed for this to work.
+
+### Permissions issues with mounted volumes
+
+If the container can read but not write to mounted folders, check the host permissions and ensure the path is included in `allowed_write_paths`.
+
+## Differences vs Claude Code and Gemini
+
+- Dive includes a built-in proxy that enforces `network.allowed_domains`. When domains are specified, Dive automatically starts a local proxy and configures sandboxed commands to use it.
+- Auto-allow mode is supported via `sandbox.mode: "auto"` for Bash tool calls, but there is no global auto-allow for other tools.
+- `excluded_commands` can run outside the sandbox when `allow_unsandboxed_commands` is true. These run in a one-off shell and do not reuse the Bash session state.
+
+## Custom Seatbelt Profiles
+
+For advanced macOS users, you can provide a custom Seatbelt profile template. The template uses Go's `text/template` syntax with these variables:
+
+| Variable            | Description                                      |
+| :------------------ | :----------------------------------------------- |
+| `{{.WorkDir}}`      | The quoted project directory path                |
+| `{{.TmpDir}}`       | The quoted temp directory path                   |
+| `{{.AllowedWritePaths}}` | List of quoted additional writable paths    |
+| `{{.AllowNetwork}}` | Boolean indicating if network access is allowed  |
+
+Example custom profile:
+
+```scheme
+(version 1)
+(allow default)
+(deny file-write* (subpath "/"))
+(allow file-write* (subpath {{.WorkDir}}))
+(allow file-write* (subpath {{.TmpDir}}))
+{{range .AllowedWritePaths}}
+(allow file-write* (subpath {{.}}))
+{{end}}
+```
+
+Configure it in settings:
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "seatbelt": {
+      "custom_profile_path": "/path/to/my-profile.sb"
+    }
+  }
+}
+```

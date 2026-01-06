@@ -56,6 +56,7 @@ Please leave a GitHub star if you're interested in the project!
 ### Additional Features
 
 - **CLI**: Basic command-line interface for testing and experimentation
+- **Sandboxing** *(Draft)*: Secure isolation for tool execution using Seatbelt (macOS) or Docker/Podman (Linux/Windows). Includes filesystem restrictions, network isolation with domain allowlists, and a built-in proxy. See [docs/guides/sandboxing.md](./docs/guides/sandboxing.md).
 
 ## Quick Start
 

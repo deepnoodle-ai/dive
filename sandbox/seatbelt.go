@@ -38,6 +38,10 @@ type seatbeltTemplateData struct {
 }
 
 func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Config) (*exec.Cmd, func(), error) {
+	if err := validateNetworkConfig(cfg); err != nil {
+		return nil, nil, err
+	}
+
 	// Select template
 	tmplStr := restrictiveProfileTmpl
 	if cfg.Seatbelt.Profile == "permissive" {
@@ -58,13 +62,13 @@ func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *C
 
 	// Prepare data
 	workDir, err := filepath.Abs(cfg.WorkDir)
-	if err == nil {
-		if resolved, err := filepath.EvalSymlinks(workDir); err == nil {
-			workDir = resolved
-		}
-	} else {
-		workDir = cfg.WorkDir // Fallback
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to resolve workDir %q: %w", cfg.WorkDir, err)
 	}
+	if resolved, err := filepath.EvalSymlinks(workDir); err == nil {
+		workDir = resolved
+	}
+
 	tmpDir := os.TempDir()
 	if resolved, err := filepath.EvalSymlinks(tmpDir); err == nil {
 		tmpDir = resolved
@@ -73,21 +77,44 @@ func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *C
 	var allowedPaths []string
 	for _, p := range cfg.AllowedWritePaths {
 		absP, err := filepath.Abs(p)
-		if err == nil {
-			if resolved, err := filepath.EvalSymlinks(absP); err == nil {
-				absP = resolved
-			}
-			allowedPaths = append(allowedPaths, absP)
-		} else {
-			allowedPaths = append(allowedPaths, p)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to resolve allowed path %q: %w", p, err)
 		}
+		if resolved, err := filepath.EvalSymlinks(absP); err == nil {
+			absP = resolved
+		}
+		allowedPaths = append(allowedPaths, absP)
 	}
 
-	data := seatbeltTemplateData{
-		WorkDir:           workDir,
-		TmpDir:            tmpDir,
-		AllowedWritePaths: allowedPaths,
-		AllowNetwork:      cfg.AllowNetwork,
+	// Escape/Quote paths for Seatbelt syntax to prevent injection.
+	// We use simple double quotes and escape existing quotes/backslashes.
+	quotePath := func(p string) string {
+		return fmt.Sprintf("%q", p)
+	}
+
+	// Pre-quote paths in the data structure or use a func map.
+	// Since we are using struct fields, let's update the template to expects raw strings
+	// but we'll manually quote them here if we can, OR better: use the quotePath logic.
+	// Actually, Go's text/template doesn't automatically escape for Scheme.
+	// We'll update the data struct to hold Quoted paths or update the template.
+	// Updating the template is cleaner if we pass a FuncMap, but for now let's just
+	// quote them in the data struct (changing types or just storing quoted strings).
+	// Let's create a new struct for the template.
+
+	type templateData struct {
+		WorkDir           string
+		TmpDir            string
+		AllowedWritePaths []string
+		AllowNetwork      bool
+	}
+
+	data := templateData{
+		WorkDir:      quotePath(workDir),
+		TmpDir:       quotePath(tmpDir),
+		AllowNetwork: cfg.AllowNetwork,
+	}
+	for _, p := range allowedPaths {
+		data.AllowedWritePaths = append(data.AllowedWritePaths, quotePath(p))
 	}
 
 	var buf bytes.Buffer
@@ -120,7 +147,7 @@ func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *C
 
 	wrapped := exec.CommandContext(ctx, "sandbox-exec", args...)
 	wrapped.Dir = cmd.Dir
-	wrapped.Env = cmd.Env
+	wrapped.Env = BuildCommandEnv(cmd.Env, cfg)
 	wrapped.Stdin = cmd.Stdin
 	wrapped.Stdout = cmd.Stdout
 	wrapped.Stderr = cmd.Stderr

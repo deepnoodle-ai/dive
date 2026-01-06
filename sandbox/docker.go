@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -38,32 +40,93 @@ func (d *DockerBackend) Available() bool {
 }
 
 func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Config) (*exec.Cmd, func(), error) {
+	if err := validateNetworkConfig(cfg); err != nil {
+		return nil, nil, err
+	}
+
+	// Respect configured command if set
+	dockerCmd := d.command
+	if cfg.Docker.Command != "" {
+		dockerCmd = cfg.Docker.Command
+	}
+
 	image := cfg.Docker.Image
 	if image == "" {
 		image = "ubuntu:22.04"
 	}
 
+	// Determine container workdir
+	// If cmd.Dir is set, use it (relative to host WorkDir -> container path)
+	// Otherwise default to project root
+	containerWorkDir := getContainerPath(cfg.WorkDir)
+	if cmd.Dir != "" {
+		// Just map the requested dir directly to container path
+		// (assuming it's within the mounted volumes)
+		containerWorkDir = getContainerPath(cmd.Dir)
+	}
+
 	args := []string{
 		"run", "--rm", "-i", "--init",
 		"--read-only", // Security: Read-Only Root Filesystem
-		"--workdir", getContainerPath(cfg.WorkDir),
+		"--workdir", containerWorkDir,
+	}
+
+	// Resource limits
+	if cfg.Docker.Memory != "" {
+		args = append(args, "--memory", cfg.Docker.Memory)
+	}
+	if cfg.Docker.CPUs != "" {
+		args = append(args, "--cpus", cfg.Docker.CPUs)
+	}
+	if cfg.Docker.PidsLimit > 0 {
+		args = append(args, "--pids-limit", strconv.Itoa(cfg.Docker.PidsLimit))
+	}
+
+	// Helper to safely append mounts
+	addMount := func(hostPath, containerPath, opts string) error {
+		// Validate host path (simple check to prevent injection via colon)
+		if strings.Contains(hostPath, ":") && runtime.GOOS != "windows" { // Windows has C:\
+			return fmt.Errorf("invalid host path (contains colon): %s", hostPath)
+		}
+		if err := validateUnixSocket(hostPath, cfg); err != nil {
+			return err
+		}
+		mount := fmt.Sprintf("%s:%s", hostPath, containerPath)
+		if opts != "" {
+			mount += ":" + opts
+		}
+		args = append(args, "--volume", mount)
+		return nil
 	}
 
 	// Mount project directory
-	args = append(args, "--volume",
-		fmt.Sprintf("%s:%s", cfg.WorkDir, getContainerPath(cfg.WorkDir)))
+	if err := addMount(cfg.WorkDir, getContainerPath(cfg.WorkDir), ""); err != nil {
+		return nil, nil, err
+	}
 
 	// Mount temp directory
-	args = append(args, "--volume",
-		fmt.Sprintf("%s:%s", os.TempDir(), getContainerPath(os.TempDir())))
+	if err := addMount(os.TempDir(), getContainerPath(os.TempDir()), ""); err != nil {
+		return nil, nil, err
+	}
 
 	// Mount additional paths
 	for _, p := range cfg.AllowedWritePaths {
-		args = append(args, "--volume",
-			fmt.Sprintf("%s:%s", p, getContainerPath(p)))
+		if err := addMount(p, getContainerPath(p), ""); err != nil {
+			return nil, nil, err
+		}
 	}
 	for _, m := range cfg.Docker.AdditionalMounts {
-		args = append(args, "--volume", m)
+		if runtime.GOOS == "windows" {
+			args = append(args, "--volume", m)
+			continue
+		}
+		host, container, opts, err := parseMount(m)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := addMount(host, container, opts); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Mount Cloud Credentials
@@ -73,18 +136,23 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 			// gcloud
 			gcloudPath := filepath.Join(home, ".config", "gcloud")
 			if _, err := os.Stat(gcloudPath); err == nil {
-				args = append(args, "--volume", fmt.Sprintf("%s:%s:ro", gcloudPath, getContainerPath(gcloudPath)))
+				if err := addMount(gcloudPath, getContainerPath(gcloudPath), "ro"); err != nil {
+					return nil, nil, err
+				}
 			}
 			// aws
 			awsDir := filepath.Join(home, ".aws")
 			if _, err := os.Stat(awsDir); err == nil {
-				args = append(args, "--volume", fmt.Sprintf("%s:%s:ro", awsDir, getContainerPath(awsDir)))
+				if err := addMount(awsDir, getContainerPath(awsDir), "ro"); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 		// GOOGLE_APPLICATION_CREDENTIALS
 		if gac := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); gac != "" {
-			// Ensure we mount the file, even if it's outside standard paths
-			args = append(args, "--volume", fmt.Sprintf("%s:%s:ro", gac, getContainerPath(gac)))
+			if err := addMount(gac, getContainerPath(gac), "ro"); err != nil {
+				return nil, nil, err
+			}
 			args = append(args, "--env", fmt.Sprintf("GOOGLE_APPLICATION_CREDENTIALS=%s", getContainerPath(gac)))
 		}
 	}
@@ -100,7 +168,11 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 	}
 
 	// Environment variables
+	envs := buildProxyEnv(cfg)
 	for k, v := range cfg.Environment {
+		envs[k] = v
+	}
+	for k, v := range envs {
 		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
 	}
 
@@ -114,7 +186,7 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 	// Setup CID file for cleanup
 	cidFile, err := os.CreateTemp("", "dive-docker-cid-")
 	var cleanup func() = func() {}
-	
+
 	if err == nil {
 		cidPath := cidFile.Name()
 		cidFile.Close()
@@ -131,7 +203,7 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 			cid, err := os.ReadFile(cidPath)
 			if err == nil && len(cid) > 0 {
 				// remove container
-				exec.Command(d.command, "rm", "-f", strings.TrimSpace(string(cid))).Run()
+				exec.Command(dockerCmd, "rm", "-f", strings.TrimSpace(string(cid))).Run()
 			}
 			os.Remove(cidPath)
 		}
@@ -146,7 +218,7 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 		args = append(args, cmd.Args[1:]...)
 	}
 
-	wrapped := exec.CommandContext(ctx, d.command, args...)
+	wrapped := exec.CommandContext(ctx, dockerCmd, args...)
 	wrapped.Dir = cmd.Dir
 	wrapped.Env = cmd.Env
 	wrapped.Stdin = cmd.Stdin
@@ -154,6 +226,60 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 	wrapped.Stderr = cmd.Stderr
 
 	return wrapped, cleanup, nil
+}
+
+func parseMount(mount string) (string, string, string, error) {
+	if mount == "" {
+		return "", "", "", fmt.Errorf("invalid mount: empty string")
+	}
+	parts := strings.Split(mount, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return "", "", "", fmt.Errorf("invalid mount format: %s", mount)
+	}
+	host := parts[0]
+	container := parts[1]
+	opts := ""
+	if len(parts) == 3 {
+		opts = parts[2]
+	}
+	if host == "" || container == "" {
+		return "", "", "", fmt.Errorf("invalid mount format: %s", mount)
+	}
+	return host, container, opts, nil
+}
+
+func validateUnixSocket(hostPath string, cfg *Config) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	info, err := os.Stat(hostPath)
+	if err != nil {
+		return nil
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return nil
+	}
+	if len(cfg.AllowedUnixSockets) == 0 {
+		return fmt.Errorf("unix socket mount not allowed: %s", hostPath)
+	}
+	for _, pattern := range cfg.AllowedUnixSockets {
+		if matchPattern(pattern, hostPath) {
+			return nil
+		}
+	}
+	return fmt.Errorf("unix socket mount not allowed: %s", hostPath)
+}
+
+func matchPattern(pattern, value string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	if strings.ContainsAny(pattern, "*?[]") {
+		ok, err := path.Match(pattern, value)
+		return err == nil && ok
+	}
+	return strings.HasPrefix(value, pattern)
 }
 
 func (d *DockerBackend) addLinuxUserMapping(args []string, cmd *exec.Cmd, cfg *Config, image string) []string {
@@ -168,19 +294,29 @@ func (d *DockerBackend) addLinuxUserMapping(args []string, cmd *exec.Cmd, cfg *C
 	args = append(args, "--user", "root")
 
 	innerCmd := shellQuote(append([]string{cmd.Path}, cmd.Args[1:]...))
+	// Use /bin/sh for better compatibility (Alpine)
+	// Try to create user/group but ignore failures if they exist
 	shellCmd := fmt.Sprintf(
 		"groupadd -f -g %s dive 2>/dev/null; "+
-			"useradd -o -u %s -g %s -d /home/dive -s /bin/bash dive 2>/dev/null || true; "+
+			"useradd -o -u %s -g %s -d /home/dive -s /bin/sh dive 2>/dev/null || true; "+
 			"su -p dive -c %s",
 		u.Gid, u.Uid, u.Gid, innerCmd,
 	)
 
-	args = append(args, image, "bash", "-c", shellCmd)
+	// Wrap in sh
+	args = append(args, image, "/bin/sh", "-c", shellCmd)
 	return args
 }
 
 func getContainerPath(hostPath string) string {
-	if runtime.GOOS != "windows" {
+	return convertPathForContainer(hostPath, runtime.GOOS)
+}
+
+// convertPathForContainer converts a host path to a container-compatible path.
+// On Windows, converts paths like C:\foo\bar to /c/foo/bar for Docker/Podman.
+// On other platforms, returns the path unchanged.
+func convertPathForContainer(hostPath, goos string) string {
+	if goos != "windows" {
 		return hostPath
 	}
 	// Convert C:\foo\bar to /c/foo/bar

@@ -14,7 +14,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"os/exec"
+	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -110,9 +113,12 @@ func (s *BashSession) start() error {
 	defer s.mu.Unlock()
 
 	// Determine shell based on OS
+	// If sandboxing is enabled, we assume a Linux-like environment (container or macOS)
+	// regardless of the host OS.
 	shell := "/bin/bash"
 	var shellArgs []string
-	if runtime.GOOS == "windows" {
+	
+	if s.sandboxManager == nil && runtime.GOOS == "windows" {
 		shell = "cmd"
 		shellArgs = []string{"/Q"} // Quiet mode
 	}
@@ -436,6 +442,34 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 		}
 	}
 
+	// Calculate timeout
+	timeout := DefaultBashTimeout
+	if input.Timeout > 0 {
+		timeout = time.Duration(input.Timeout) * time.Millisecond
+		if timeout > MaxBashTimeout {
+			timeout = MaxBashTimeout
+		}
+	}
+	if t.sandboxManager != nil {
+		if cfg := t.sandboxManager.Config(); cfg != nil && cfg.MaxCommandDurationMs > 0 {
+			maxTimeout := time.Duration(cfg.MaxCommandDurationMs) * time.Millisecond
+			if timeout > maxTimeout {
+				timeout = maxTimeout
+			}
+		}
+	}
+
+	// Run excluded commands outside the sandbox when allowed
+	if t.sandboxManager != nil {
+		cfg := t.sandboxManager.Config()
+		if cfg != nil && isExcludedCommand(input.Command, cfg.ExcludedCommands) {
+			if !cfg.AllowUnsandboxedCommands {
+				return dive.NewToolResultError("error: command is excluded from sandbox and unsandboxed commands are disabled"), nil
+			}
+			return t.runUnsandboxed(ctx, input, timeout, cfg)
+		}
+	}
+
 	// Start session if not already running
 	if t.session == nil {
 		session, err := NewBashSession(BashSessionOptions{
@@ -450,20 +484,13 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 		t.session = session
 	}
 
-	// Calculate timeout
-	timeout := DefaultBashTimeout
-	if input.Timeout > 0 {
-		timeout = time.Duration(input.Timeout) * time.Millisecond
-		if timeout > MaxBashTimeout {
-			timeout = MaxBashTimeout
-		}
-	}
-
 	// Execute command
 	stdout, stderr, exitCode, err := t.session.Execute(ctx, input.Command, timeout)
 	if err != nil {
 		// On error, check if it's a timeout
 		if strings.Contains(err.Error(), "timed out") {
+			t.session.Close()
+			t.session = nil
 			return dive.NewToolResultError(err.Error()), nil
 		}
 		// For other errors, restart the session and return error
@@ -497,6 +524,105 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 	}
 
 	return dive.NewToolResultText(string(resultJSON)).WithDisplay(display), nil
+}
+
+func (t *BashTool) runUnsandboxed(ctx context.Context, input *BashInput, timeout time.Duration, cfg *sandbox.Config) (*dive.ToolResult, error) {
+	workingDir := input.WorkingDirectory
+	if workingDir == "" && t.session != nil {
+		workingDir = t.session.workingDir
+	}
+
+	if cfg != nil && cfg.AuditLog {
+		log.Printf("sandbox: running excluded command unsandboxed: %s", input.Command)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	shell, shellArgs := shellCommandForHost()
+	shellArgs = append(shellArgs, input.Command)
+	cmd := exec.CommandContext(ctx, shell, shellArgs...)
+	if workingDir != "" {
+		cmd.Dir = workingDir
+	}
+	cmd.Env = sandbox.BuildCommandEnv(os.Environ(), cfg)
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else if ctx.Err() == context.DeadlineExceeded {
+			return dive.NewToolResultError(fmt.Sprintf("command timed out after %s", timeout)), nil
+		} else {
+			return dive.NewToolResultError(fmt.Sprintf("error: %s", err.Error())), nil
+		}
+	}
+
+	stdout := truncateOutput(stdoutBuf.String(), t.maxOutputLen)
+	stderr := truncateOutput(stderrBuf.String(), t.maxOutputLen)
+
+	result := map[string]interface{}{
+		"stdout":      stdout,
+		"stderr":      stderr,
+		"return_code": exitCode,
+	}
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error marshaling result: %s", err.Error())), nil
+	}
+
+	display := input.Description
+	if display == "" {
+		display = fmt.Sprintf("Ran `%s`", truncateCommand(input.Command, 40))
+	}
+	display = fmt.Sprintf("%s (exit %d)", display, exitCode)
+
+	if exitCode != 0 {
+		return dive.NewToolResultError(string(resultJSON)).WithDisplay(display), nil
+	}
+
+	return dive.NewToolResultText(string(resultJSON)).WithDisplay(display), nil
+}
+
+func shellCommandForHost() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", []string{"/Q", "/C"}
+	}
+	return "/bin/bash", []string{"-lc"}
+}
+
+func isExcludedCommand(command string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if matchesCommandPattern(pattern, command) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesCommandPattern(pattern, command string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	if strings.ContainsAny(pattern, "*?[]") {
+		ok, err := path.Match(pattern, command)
+		return err == nil && ok
+	}
+	return strings.HasPrefix(command, pattern)
+}
+
+func truncateOutput(output string, maxLen int) string {
+	if maxLen <= 0 || len(output) <= maxLen {
+		return output
+	}
+	return output[:maxLen] + "\n... (output truncated)"
 }
 
 // Close closes the bash session if one is active

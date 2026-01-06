@@ -15,13 +15,13 @@
 
 ;; Allow writes only to specific paths
 (allow file-write*
-    (subpath "{{.WorkDir}}")
-    (subpath "{{.TmpDir}}")
+    (subpath {{.WorkDir}})
+    (subpath {{.TmpDir}})
     (literal "/dev/stdout")
     (literal "/dev/stderr")
     (literal "/dev/null")
     {{range .AllowedWritePaths}}
-    (subpath "{{.}}")
+    (subpath {{.}})
     {{end}}
 )
 

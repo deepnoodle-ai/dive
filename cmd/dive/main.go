@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -270,6 +272,7 @@ func runInteractive(ctx *cli.Context) error {
 			permissionConfig.Rules = append(settingsRules, permissionConfig.Rules...)
 		}
 	}
+	applySandboxPermissionMode(permissionConfig, sandboxConfig)
 
 	// Create thread repository for conversation memory
 	threadRepo := dive.NewMemoryThreadRepository()
@@ -449,6 +452,80 @@ func createPermissionConfig() *dive.PermissionConfig {
 			dive.AskRule("Bash", "Execute command"),
 		},
 	}
+}
+
+func applySandboxPermissionMode(permissionConfig *dive.PermissionConfig, sandboxConfig *sandbox.Config) {
+	if permissionConfig == nil || sandboxConfig == nil || !sandboxConfig.Enabled {
+		return
+	}
+	if sandboxConfig.Mode != sandbox.SandboxModeAutoAllow {
+		return
+	}
+
+	// Drop the default Bash ask rule so sandboxed commands can auto-allow.
+	filtered := make(dive.PermissionRules, 0, len(permissionConfig.Rules))
+	for _, rule := range permissionConfig.Rules {
+		if rule.Type == dive.PermissionRuleAsk && rule.Tool == "Bash" && rule.Command == "" && rule.Message == "Execute command" {
+			continue
+		}
+		filtered = append(filtered, rule)
+	}
+	permissionConfig.Rules = filtered
+
+	prevCanUse := permissionConfig.CanUseTool
+	permissionConfig.CanUseTool = func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent) (*dive.ToolHookResult, error) {
+		if tool != nil && strings.EqualFold(tool.Name(), "Bash") {
+			command := extractCommand(call)
+			if matchesAnyCommand(command, sandboxConfig.ExcludedCommands) {
+				if sandboxConfig.AllowUnsandboxedCommands {
+					return dive.AskResult("Command is excluded from sandbox; run unsandboxed?"), nil
+				}
+				return dive.DenyResult("Command is excluded from sandbox and unsandboxed commands are disabled"), nil
+			}
+			return dive.AllowResult(), nil
+		}
+		if prevCanUse != nil {
+			return prevCanUse(ctx, tool, call)
+		}
+		return dive.ContinueResult(), nil
+	}
+}
+
+func extractCommand(call *llm.ToolUseContent) string {
+	if call == nil || call.Input == nil {
+		return ""
+	}
+	var inputMap map[string]any
+	if err := json.Unmarshal(call.Input, &inputMap); err != nil {
+		return ""
+	}
+	for _, field := range []string{"command", "cmd", "script", "code"} {
+		if value, ok := inputMap[field].(string); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func matchesAnyCommand(command string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if matchesCommandPattern(pattern, command) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesCommandPattern(pattern, command string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	if strings.ContainsAny(pattern, "*?[]") {
+		ok, err := path.Match(pattern, command)
+		return err == nil && ok
+	}
+	return strings.HasPrefix(command, pattern)
 }
 
 func systemInstructions(workspaceDir string) string {
