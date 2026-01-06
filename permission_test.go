@@ -1312,6 +1312,101 @@ func TestPathRuleEdgeCases(t *testing.T) {
 	})
 }
 
+func TestPathRuleDirectoryTraversal(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("DenyPathRule blocks directory traversal attempts", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyPathRule("*", "/etc/**", "Cannot access system files"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Direct path should be blocked
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/etc/passwd"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action)
+
+		// Path traversal via .. should also be blocked (vulnerability fix)
+		call = newMockToolCall("read_file", map[string]any{"file_path": "/var/../etc/passwd"})
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action, "Path traversal via .. should be blocked")
+
+		// Multiple traversals should be blocked
+		call = newMockToolCall("read_file", map[string]any{"file_path": "/home/user/../../etc/passwd"})
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action, "Multiple path traversals should be blocked")
+	})
+
+	t.Run("AllowPathRule normalizes paths before matching", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/home/user/project/**"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Normalized path within allowed directory should match
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/home/user/project/./src/../main.go"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+
+		// Path with traversal out of allowed directory should not match allow rule
+		call = newMockToolCall("read_file", map[string]any{"file_path": "/home/user/project/../../etc/passwd"})
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action, "Traversal out of allowed directory should fall through")
+	})
+
+	t.Run("URL-encoded path traversal is blocked", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyPathRule("*", "/etc/**", "Cannot access system files"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// URL-encoded traversal: %2e%2e = ..
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/var/%2e%2e/etc/passwd"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action, "URL-encoded path traversal should be blocked")
+	})
+
+	t.Run("AskPathRule normalizes paths", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AskPathRule("*", "/important/**", "Confirm access to important"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("write_file", nil)
+
+		// Traversal that resolves to /important should match
+		call := newMockToolCall("write_file", map[string]any{"file_path": "/var/../important/data.json"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+		assert.Equal(t, "Confirm access to important", result.Message)
+	})
+}
+
 func TestCommandPrefixRuleEdgeCases(t *testing.T) {
 	ctx := context.Background()
 

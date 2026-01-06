@@ -2,6 +2,7 @@ package dive
 
 import (
 	"encoding/json"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -578,6 +579,11 @@ func extractCommandFromInput(input any) string {
 // The function checks these fields in order: "path", "file_path", "filePath",
 // "filename", "file". Returns empty string if input is not a map or no path
 // field is found.
+//
+// Security: The returned path is normalized using [filepath.Clean] to prevent
+// directory traversal bypasses. For example, "/var/../etc/passwd" is normalized
+// to "/etc/passwd" so that deny rules for "/etc/**" will correctly match.
+// URL-encoded paths are also decoded to prevent bypasses via %2e%2e sequences.
 func extractPathFromInput(input any) string {
 	m, ok := input.(map[string]any)
 	if !ok {
@@ -588,8 +594,27 @@ func extractPathFromInput(input any) string {
 	pathFields := []string{"path", "file_path", "filePath", "filename", "file"}
 	for _, field := range pathFields {
 		if path, ok := m[field].(string); ok {
-			return path
+			return normalizePath(path)
 		}
 	}
 	return ""
+}
+
+// normalizePath normalizes a file path to prevent directory traversal bypasses.
+// It decodes URL-encoded paths and uses filepath.Clean to resolve . and .. sequences.
+// Returns empty string if the path cannot be safely normalized.
+func normalizePath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	// Decode URL-encoded paths to prevent traversal via encoded sequences like %2e%2e
+	decodedPath, err := url.PathUnescape(path)
+	if err != nil {
+		// If decoding fails, return empty to fail closed
+		return ""
+	}
+
+	// Use filepath.Clean to normalize the path (resolves . and .. sequences)
+	return filepath.Clean(decodedPath)
 }
