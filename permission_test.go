@@ -980,3 +980,565 @@ func TestAcceptEditsModeEdgeCases(t *testing.T) {
 		assert.Equal(t, ToolHookAsk, result.Action) // Falls through to ask
 	})
 }
+
+func TestSessionAllowlist(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("AllowForSession allows tools of that category", func(t *testing.T) {
+		config := &PermissionConfig{Mode: PermissionModeDefault}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", nil)
+
+		// Before allowing, should ask
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+
+		// Allow bash for session
+		pm.AllowForSession("bash")
+
+		// After allowing, should be allowed
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+		assert.NotNil(t, result.Category)
+		assert.Equal(t, "bash", result.Category.Key)
+	})
+
+	t.Run("AllowCategoryForSession allows with ToolCategory", func(t *testing.T) {
+		config := &PermissionConfig{Mode: PermissionModeDefault}
+		pm := NewPermissionManager(config, nil)
+
+		pm.AllowCategoryForSession(ToolCategoryEdit)
+
+		tool := newMockTool("edit_file", nil)
+		call := newMockToolCall("edit_file", nil)
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+	})
+
+	t.Run("IsSessionAllowed checks correctly", func(t *testing.T) {
+		pm := NewPermissionManager(nil, nil)
+
+		assert.False(t, pm.IsSessionAllowed("bash"))
+		pm.AllowForSession("bash")
+		assert.True(t, pm.IsSessionAllowed("bash"))
+	})
+
+	t.Run("SessionAllowedCategories returns all allowed", func(t *testing.T) {
+		pm := NewPermissionManager(nil, nil)
+
+		pm.AllowForSession("bash")
+		pm.AllowForSession("edit")
+
+		categories := pm.SessionAllowedCategories()
+		assert.Len(t, categories, 2)
+		assert.Contains(t, categories, "bash")
+		assert.Contains(t, categories, "edit")
+	})
+
+	t.Run("ClearSessionAllowlist removes all", func(t *testing.T) {
+		pm := NewPermissionManager(nil, nil)
+
+		pm.AllowForSession("bash")
+		pm.AllowForSession("edit")
+		pm.ClearSessionAllowlist()
+
+		assert.False(t, pm.IsSessionAllowed("bash"))
+		assert.False(t, pm.IsSessionAllowed("edit"))
+		assert.Len(t, pm.SessionAllowedCategories(), 0)
+	})
+}
+
+func TestGetToolCategory(t *testing.T) {
+	t.Run("Bash tools", func(t *testing.T) {
+		bashTools := []string{"bash", "Bash", "command", "shell_exec", "run_command"}
+		for _, name := range bashTools {
+			cat := GetToolCategory(name)
+			assert.Equal(t, "bash", cat.Key, "Tool %s should be bash category", name)
+			assert.Equal(t, "bash commands", cat.Label)
+		}
+	})
+
+	t.Run("Edit tools", func(t *testing.T) {
+		editTools := []string{"edit", "Edit", "write_file", "create_file", "mkdir"}
+		for _, name := range editTools {
+			cat := GetToolCategory(name)
+			assert.Equal(t, "edit", cat.Key, "Tool %s should be edit category", name)
+			assert.Equal(t, "file edits", cat.Label)
+		}
+	})
+
+	t.Run("Read tools", func(t *testing.T) {
+		cat := GetToolCategory("read_file")
+		assert.Equal(t, "read", cat.Key)
+		assert.Equal(t, "file reads", cat.Label)
+	})
+
+	t.Run("Search tools", func(t *testing.T) {
+		searchTools := []string{"glob", "grep", "search_files"}
+		for _, name := range searchTools {
+			cat := GetToolCategory(name)
+			assert.Equal(t, "search", cat.Key, "Tool %s should be search category", name)
+		}
+	})
+
+	t.Run("Unknown tools use name as category", func(t *testing.T) {
+		cat := GetToolCategory("custom_tool")
+		assert.Equal(t, "custom_tool", cat.Key)
+		assert.Equal(t, "custom_tool operations", cat.Label)
+	})
+}
+
+func TestCommandPrefixRule(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("AllowCommandPrefixRule matches prefix", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowCommandPrefixRule("bash", "go test"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+
+		// Should match
+		call := newMockToolCall("bash", map[string]any{"command": "go test ./..."})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+
+		// Should match
+		call = newMockToolCall("bash", map[string]any{"command": "go test -v"})
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+
+		// Should not match
+		call = newMockToolCall("bash", map[string]any{"command": "go build"})
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+	})
+
+	t.Run("DenyCommandPrefixRule blocks prefix", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyCommandPrefixRule("bash", "sudo", "sudo not allowed"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", map[string]any{"command": "sudo rm -rf /"})
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action)
+		assert.Equal(t, "sudo not allowed", result.Message)
+	})
+}
+
+func TestPathRule(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("AllowPathRule allows matching paths", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("read_file", "/home/user/project/**"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Should match
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/home/user/project/src/main.go"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+
+		// Should not match
+		call = newMockToolCall("read_file", map[string]any{"file_path": "/etc/passwd"})
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+	})
+
+	t.Run("DenyPathRule blocks matching paths", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyPathRule("*", "/etc/**", "Cannot access system files"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/etc/passwd"})
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action)
+		assert.Equal(t, "Cannot access system files", result.Message)
+	})
+
+	t.Run("AskPathRule prompts for matching paths", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AskPathRule("write_file", "/important/**", "Confirm write to important dir"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("write_file", nil)
+		call := newMockToolCall("write_file", map[string]any{"file_path": "/important/data.json"})
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+		assert.Equal(t, "Confirm write to important dir", result.Message)
+	})
+
+	t.Run("Path rules check different field names", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/tmp/**"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("custom_tool", nil)
+
+		// Check path field
+		call := newMockToolCall("custom_tool", map[string]any{"path": "/tmp/file.txt"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+
+		// Check filePath field
+		call = newMockToolCall("custom_tool", map[string]any{"filePath": "/tmp/file.txt"})
+		result, err = pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+	})
+}
+
+func TestCategoryInResult(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Ask result includes category", func(t *testing.T) {
+		config := &PermissionConfig{Mode: PermissionModeDefault}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", nil)
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+		assert.NotNil(t, result.Category)
+		assert.Equal(t, "bash", result.Category.Key)
+		assert.Equal(t, "bash commands", result.Category.Label)
+	})
+}
+
+func TestPathRuleEdgeCases(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Invalid glob pattern fails closed (never matches)", func(t *testing.T) {
+		// Invalid pattern with unmatched bracket
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/path/[invalid"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/path/[invalid/test.txt"})
+
+		// Should fall through to ask since invalid pattern never matches
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+	})
+
+	t.Run("Empty path in input doesn't match", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/tmp/**"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+		call := newMockToolCall("read_file", map[string]any{"other_field": "/tmp/file.txt"})
+
+		// Should fall through to ask since path field not found
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+	})
+
+	t.Run("Path rule with non-map input doesn't match", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/tmp/**"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+		// Manually create a call with nil input (simulates non-JSON input)
+		call := &llm.ToolUseContent{ID: "test", Name: "read_file", Input: nil}
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+	})
+}
+
+func TestCommandPrefixRuleEdgeCases(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Empty command doesn't match prefix rule", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowCommandPrefixRule("bash", "go test"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", map[string]any{"other_field": "go test"})
+
+		// Should fall through to ask since command field not found
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action)
+	})
+
+	t.Run("Partial prefix doesn't match", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowCommandPrefixRule("bash", "go test"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+		// "go testing" starts with "go test" - should match
+		call := newMockToolCall("bash", map[string]any{"command": "go testing"})
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+	})
+
+	t.Run("Exact match works", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowCommandPrefixRule("bash", "go test"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", map[string]any{"command": "go test"})
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+	})
+
+	t.Run("Command in script field works", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowCommandPrefixRule("bash", "go test"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", map[string]any{"script": "go test ./..."})
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAllow, result.Action)
+	})
+}
+
+func TestSessionAllowlistConcurrency(t *testing.T) {
+	pm := NewPermissionManager(nil, nil)
+
+	// Run concurrent operations
+	done := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go func(i int) {
+			category := "cat" + string(rune('a'+i%5))
+			pm.AllowForSession(category)
+			pm.IsSessionAllowed(category)
+			pm.SessionAllowedCategories()
+			done <- true
+		}(i)
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	// Should have some categories allowed
+	categories := pm.SessionAllowedCategories()
+	assert.True(t, len(categories) > 0)
+}
+
+func TestSessionAllowlistPrecedence(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Session allowlist takes precedence after hooks", func(t *testing.T) {
+		hookCalled := false
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			PreToolUse: []PreToolUseHook{
+				func(ctx context.Context, hookCtx *PreToolUseContext) (*ToolHookResult, error) {
+					hookCalled = true
+					return ContinueResult(), nil // Continue to next check
+				},
+			},
+			Rules: PermissionRules{
+				// This deny rule would normally block
+				DenyRule("bash", "bash blocked"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		// Allow bash for session BEFORE checking rules
+		pm.AllowForSession("bash")
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", nil)
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.True(t, hookCalled, "Hook should still be called")
+		// Session allowlist is checked AFTER hooks, BEFORE rules
+		// So session allowlist should take precedence over deny rule
+		assert.Equal(t, ToolHookAllow, result.Action)
+	})
+
+	t.Run("PreToolUse hook can still deny even with session allowlist", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			PreToolUse: []PreToolUseHook{
+				func(ctx context.Context, hookCtx *PreToolUseContext) (*ToolHookResult, error) {
+					return DenyResult("Hook denied"), nil
+				},
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		// Allow bash for session
+		pm.AllowForSession("bash")
+
+		tool := newMockTool("bash", nil)
+		call := newMockToolCall("bash", nil)
+
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		// Hook should take precedence since it runs before session allowlist check
+		assert.Equal(t, ToolHookDeny, result.Action)
+	})
+}
+
+func TestGetToolCategoryEdgeCases(t *testing.T) {
+	t.Run("Empty string returns empty category", func(t *testing.T) {
+		cat := GetToolCategory("")
+		assert.Equal(t, "", cat.Key)
+		assert.Equal(t, " operations", cat.Label)
+	})
+
+	t.Run("Case insensitive matching", func(t *testing.T) {
+		cases := []struct {
+			input    string
+			expected string
+		}{
+			{"BASH", "bash"},
+			{"Bash", "bash"},
+			{"bash", "bash"},
+			{"EDIT", "edit"},
+			{"Edit", "edit"},
+			{"READ", "read"},
+			{"Read", "read"},
+			{"GREP", "search"},
+			{"Grep", "search"},
+		}
+
+		for _, tc := range cases {
+			cat := GetToolCategory(tc.input)
+			assert.Equal(t, tc.expected, cat.Key, "Input: %s", tc.input)
+		}
+	})
+
+	t.Run("Multiple patterns match first", func(t *testing.T) {
+		// "bash_read" contains both "bash" and "read"
+		// Should match bash since it's checked first
+		cat := GetToolCategory("bash_read")
+		assert.Equal(t, "bash", cat.Key)
+	})
+
+	t.Run("Substring matching", func(t *testing.T) {
+		cases := []struct {
+			input    string
+			expected string
+		}{
+			{"my_bash_tool", "bash"},
+			{"shell_executor", "bash"},
+			{"command_runner", "bash"},
+			{"file_editor", "edit"},
+			{"write_helper", "edit"},
+			{"file_reader", "read"},
+			{"search_files", "search"},
+		}
+
+		for _, tc := range cases {
+			cat := GetToolCategory(tc.input)
+			assert.Equal(t, tc.expected, cat.Key, "Input: %s", tc.input)
+		}
+	})
+}
+
+func TestNilToolInEvaluate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Nil tool skips session allowlist check", func(t *testing.T) {
+		config := &PermissionConfig{Mode: PermissionModeDefault}
+		pm := NewPermissionManager(config, nil)
+		pm.AllowForSession("bash")
+
+		// Nil tool should still work, just skips category checks
+		result, err := pm.EvaluateToolUse(ctx, nil, nil, nil)
+		assert.NoError(t, err)
+		// Should fall through to ask with no category
+		assert.Equal(t, ToolHookAsk, result.Action)
+		assert.Nil(t, result.Category)
+	})
+}

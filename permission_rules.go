@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/gobwas/glob"
 )
 
 // Permission Rules
@@ -349,4 +350,246 @@ func AskCommandRule(toolPattern, commandPattern, message string) PermissionRule 
 		Command: commandPattern,
 		Message: message,
 	}
+}
+
+// AllowCommandPrefixRule creates an allow rule for bash commands starting with a prefix.
+// This is useful for allowing command families like "go test", "npm run", etc.
+//
+// Unlike [AllowCommandRule] which uses glob matching, this specifically checks if the
+// command starts with the given prefix using [strings.HasPrefix]. This makes it easier
+// to use for common patterns where you want to allow a command and all its variations.
+//
+// The command is extracted from the tool input by checking these fields (in order):
+// "command", "cmd", "script", "code".
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "bash", "*")
+//   - commandPrefix: The exact prefix that commands must start with
+//
+// Example:
+//
+//	AllowCommandPrefixRule("bash", "go test")    // Matches "go test ./...", "go test -v", etc.
+//	AllowCommandPrefixRule("bash", "git status") // Matches "git status", "git status -s", etc.
+//	AllowCommandPrefixRule("*", "npm run")       // Any tool, commands starting with "npm run"
+//	AllowCommandPrefixRule("bash", "gofmt")      // Matches "gofmt -w .", "gofmt file.go", etc.
+func AllowCommandPrefixRule(toolPattern, commandPrefix string) PermissionRule {
+	return PermissionRule{
+		Type: PermissionRuleAllow,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			cmd := extractCommandFromInput(input)
+			return strings.HasPrefix(cmd, commandPrefix)
+		},
+	}
+}
+
+// DenyCommandPrefixRule creates a deny rule for bash commands starting with a prefix.
+// Use this to block dangerous command patterns regardless of their arguments.
+//
+// The command is extracted from the tool input by checking these fields (in order):
+// "command", "cmd", "script", "code".
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "bash", "*")
+//   - commandPrefix: The exact prefix that triggers the denial
+//   - message: Error message returned when the rule matches
+//
+// Example:
+//
+//	DenyCommandPrefixRule("bash", "rm -rf", "Recursive forced deletion is blocked")
+//	DenyCommandPrefixRule("bash", "sudo", "Sudo commands are not allowed")
+//	DenyCommandPrefixRule("*", "curl | bash", "Piped execution is dangerous")
+func DenyCommandPrefixRule(toolPattern, commandPrefix, message string) PermissionRule {
+	return PermissionRule{
+		Type: PermissionRuleDeny,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			cmd := extractCommandFromInput(input)
+			return strings.HasPrefix(cmd, commandPrefix)
+		},
+		Message: message,
+	}
+}
+
+// AllowPathRule creates an allow rule for file operations within a path pattern.
+// This is useful for allowing reads/writes within a workspace while blocking
+// operations outside of it.
+//
+// The pathPattern supports glob syntax with the following patterns:
+//   - "*" matches any characters except path separators (/)
+//   - "**" matches any characters including path separators (recursive)
+//   - "?" matches exactly one character
+//
+// The path is extracted from the tool input by checking these fields (in order):
+// "path", "file_path", "filePath", "filename", "file".
+//
+// If the pathPattern is invalid, the rule will never match (fails closed).
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "read", "Read", "*")
+//   - pathPattern: Glob pattern for matching file paths
+//
+// Example:
+//
+//	AllowPathRule("read", "/home/user/project/**")  // Allow reading any file in project
+//	AllowPathRule("write", "/tmp/**")               // Allow writing to /tmp
+//	AllowPathRule("*", "/safe/path/**")             // Allow any tool for paths under /safe/path
+//	AllowPathRule("Read", "/workspace/**/*.go")     // Allow reading Go files in workspace
+func AllowPathRule(toolPattern, pathPattern string) PermissionRule {
+	g, err := glob.Compile(pathPattern, '/')
+	if err != nil {
+		// Invalid pattern - return a rule that never matches
+		return PermissionRule{
+			Type:       PermissionRuleAllow,
+			Tool:       toolPattern,
+			InputMatch: func(input any) bool { return false },
+		}
+	}
+
+	return PermissionRule{
+		Type: PermissionRuleAllow,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			path := extractPathFromInput(input)
+			return path != "" && g.Match(path)
+		},
+	}
+}
+
+// DenyPathRule creates a deny rule for file operations matching a path pattern.
+// Use this to block access to sensitive directories or files.
+//
+// The pathPattern supports glob syntax with the following patterns:
+//   - "*" matches any characters except path separators (/)
+//   - "**" matches any characters including path separators (recursive)
+//   - "?" matches exactly one character
+//
+// The path is extracted from the tool input by checking these fields (in order):
+// "path", "file_path", "filePath", "filename", "file".
+//
+// If the pathPattern is invalid, the rule will never match (fails open for deny rules,
+// but this is generally not a security concern since other rules may still block).
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "write", "*")
+//   - pathPattern: Glob pattern for matching file paths to block
+//   - message: Error message returned when the rule matches
+//
+// Example:
+//
+//	DenyPathRule("*", "/etc/**", "Cannot access system files")
+//	DenyPathRule("write", "**/.git/**", "Cannot modify git internals")
+//	DenyPathRule("*", "**/.env", "Cannot access environment files")
+//	DenyPathRule("*", "**/credentials*", "Cannot access credential files")
+func DenyPathRule(toolPattern, pathPattern, message string) PermissionRule {
+	g, err := glob.Compile(pathPattern, '/')
+	if err != nil {
+		// Invalid pattern - return a rule that never matches
+		return PermissionRule{
+			Type:       PermissionRuleDeny,
+			Tool:       toolPattern,
+			InputMatch: func(input any) bool { return false },
+			Message:    message,
+		}
+	}
+
+	return PermissionRule{
+		Type: PermissionRuleDeny,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			path := extractPathFromInput(input)
+			return path != "" && g.Match(path)
+		},
+		Message: message,
+	}
+}
+
+// AskPathRule creates an ask rule for file operations matching a path pattern.
+// Use this to require user confirmation for operations in sensitive directories.
+//
+// The pathPattern supports glob syntax with the following patterns:
+//   - "*" matches any characters except path separators (/)
+//   - "**" matches any characters including path separators (recursive)
+//   - "?" matches exactly one character
+//
+// The path is extracted from the tool input by checking these fields (in order):
+// "path", "file_path", "filePath", "filename", "file".
+//
+// If the pathPattern is invalid, the rule will never match.
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "write", "*")
+//   - pathPattern: Glob pattern for matching file paths to prompt for
+//   - message: Prompt message displayed to the user
+//
+// Example:
+//
+//	AskPathRule("write", "/important/**", "Confirm write to important directory")
+//	AskPathRule("*", "/production/**", "Confirm production file access")
+func AskPathRule(toolPattern, pathPattern, message string) PermissionRule {
+	g, err := glob.Compile(pathPattern, '/')
+	if err != nil {
+		// Invalid pattern - return a rule that never matches
+		return PermissionRule{
+			Type:       PermissionRuleAsk,
+			Tool:       toolPattern,
+			InputMatch: func(input any) bool { return false },
+			Message:    message,
+		}
+	}
+
+	return PermissionRule{
+		Type: PermissionRuleAsk,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			path := extractPathFromInput(input)
+			return path != "" && g.Match(path)
+		},
+		Message: message,
+	}
+}
+
+// extractCommandFromInput extracts a command string from unmarshaled tool input.
+// This is used by [AllowCommandPrefixRule] and [DenyCommandPrefixRule] to match
+// commands in bash-like tools.
+//
+// The function checks these fields in order: "command", "cmd", "script", "code".
+// Returns empty string if input is not a map or no command field is found.
+func extractCommandFromInput(input any) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	// Look for command in common field names
+	commandFields := []string{"command", "cmd", "script", "code"}
+	for _, field := range commandFields {
+		if cmd, ok := m[field].(string); ok {
+			return cmd
+		}
+	}
+	return ""
+}
+
+// extractPathFromInput extracts a file path from unmarshaled tool input.
+// This is used by [AllowPathRule], [DenyPathRule], and [AskPathRule] to match
+// file paths in file operation tools.
+//
+// The function checks these fields in order: "path", "file_path", "filePath",
+// "filename", "file". Returns empty string if input is not a map or no path
+// field is found.
+func extractPathFromInput(input any) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	// Look for path in common field names
+	pathFields := []string{"path", "file_path", "filePath", "filename", "file"}
+	for _, field := range pathFields {
+		if path, ok := m[field].(string); ok {
+			return path
+		}
+	}
+	return ""
 }

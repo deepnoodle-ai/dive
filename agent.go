@@ -244,6 +244,12 @@ func (a *StandardAgent) SubagentRegistry() *SubagentRegistry {
 	return a.subagentRegistry
 }
 
+// PermissionManager returns the agent's permission manager.
+// This allows access to permission state, such as session allowlists.
+func (a *StandardAgent) PermissionManager() *PermissionManager {
+	return a.permissionManager
+}
+
 // Model returns the agent's LLM.
 func (a *StandardAgent) Model() llm.LLM {
 	return a.model
