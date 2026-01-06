@@ -69,9 +69,15 @@ func (d *DockerBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *Con
 	}
 
 	args := []string{
-		"run", "--rm", "-i", "--init",
+		"run", "--rm", "-i",
 		"--read-only", // Security: Read-Only Root Filesystem
 		"--workdir", containerWorkDir,
+	}
+
+	// Use --init for proper signal handling and zombie reaping, but only with docker.
+	// Podman has better defaults and catatonit may not be available in all environments.
+	if dockerCmd == "docker" {
+		args = append(args, "--init")
 	}
 
 	// Resource limits
