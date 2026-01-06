@@ -17,7 +17,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -603,34 +602,11 @@ func shellCommandForHost() (string, []string) {
 
 func isExcludedCommand(command string, patterns []string) bool {
 	for _, pattern := range patterns {
-		if matchesCommandPattern(pattern, command) {
+		if sandbox.MatchesCommandPattern(pattern, command) {
 			return true
 		}
 	}
 	return false
-}
-
-func matchesCommandPattern(pattern, command string) bool {
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return false
-	}
-	// If pattern ends with " *", treat as prefix match on command name.
-	// This handles patterns like "docker *" to match "docker run ..." etc.
-	if strings.HasSuffix(pattern, " *") {
-		prefix := strings.TrimSuffix(pattern, " *")
-		return strings.HasPrefix(command, prefix+" ") || command == prefix
-	}
-	if strings.ContainsAny(pattern, "*?[]") {
-		// For glob-like patterns, match against the first word (command name) only
-		cmdParts := strings.Fields(command)
-		if len(cmdParts) == 0 {
-			return false
-		}
-		ok, err := path.Match(pattern, cmdParts[0])
-		return err == nil && ok
-	}
-	return strings.HasPrefix(command, pattern)
 }
 
 func truncateOutput(output string, maxLen int) string {

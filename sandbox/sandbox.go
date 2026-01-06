@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"path"
+	"strings"
 
 	"github.com/deepnoodle-ai/dive/sandbox/proxy"
 )
@@ -222,4 +224,33 @@ func (m *Manager) Wrap(ctx context.Context, cmd *exec.Cmd) (*exec.Cmd, func(), e
 	}
 
 	return wrappedCmd, finalCleanup, nil
+}
+
+// MatchesCommandPattern checks if a command matches a pattern.
+// Pattern matching rules:
+//   - If pattern ends with " *", treat as prefix match on command name.
+//     e.g., "docker *" matches "docker run ..." and "docker" alone.
+//   - If pattern contains glob chars (*?[]), match against the first word only.
+//   - Otherwise, check if command starts with pattern.
+func MatchesCommandPattern(pattern, command string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	// If pattern ends with " *", treat as prefix match on command name.
+	// This handles patterns like "docker *" to match "docker run ..." etc.
+	if strings.HasSuffix(pattern, " *") {
+		prefix := strings.TrimSuffix(pattern, " *")
+		return strings.HasPrefix(command, prefix+" ") || command == prefix
+	}
+	if strings.ContainsAny(pattern, "*?[]") {
+		// For glob-like patterns, match against the first word (command name) only
+		cmdParts := strings.Fields(command)
+		if len(cmdParts) == 0 {
+			return false
+		}
+		ok, err := path.Match(pattern, cmdParts[0])
+		return err == nil && ok
+	}
+	return strings.HasPrefix(command, pattern)
 }

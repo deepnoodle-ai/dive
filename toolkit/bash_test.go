@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -393,7 +394,7 @@ func TestMatchesCommandPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := matchesCommandPattern(tt.pattern, tt.command)
+			got := sandbox.MatchesCommandPattern(tt.pattern, tt.command)
 			assert.Equal(t, tt.want, got, "pattern=%q command=%q", tt.pattern, tt.command)
 		})
 	}
