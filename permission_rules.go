@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -437,7 +438,13 @@ func DenyCommandPrefixRule(toolPattern, commandPrefix, message string) Permissio
 //	AllowPathRule("*", "/safe/path/**")             // Allow any tool for paths under /safe/path
 //	AllowPathRule("Read", "/workspace/**/*.go")     // Allow reading Go files in workspace
 func AllowPathRule(toolPattern, pathPattern string) PermissionRule {
-	g, err := glob.Compile(pathPattern, '/')
+	// Normalize pattern case on case-insensitive platforms
+	normalizedPattern := pathPattern
+	if isCaseInsensitiveFS() {
+		normalizedPattern = strings.ToLower(pathPattern)
+	}
+
+	g, err := glob.Compile(normalizedPattern, '/')
 	if err != nil {
 		// Invalid pattern - return a rule that never matches
 		return PermissionRule{
@@ -468,8 +475,8 @@ func AllowPathRule(toolPattern, pathPattern string) PermissionRule {
 // The path is extracted from the tool input by checking these fields (in order):
 // "path", "file_path", "filePath", "filename", "file".
 //
-// If the pathPattern is invalid, the rule will never match (fails open for deny rules,
-// but this is generally not a security concern since other rules may still block).
+// Security: If the pathPattern is invalid, the rule fails closed by always matching.
+// This ensures that typos in deny patterns don't silently disable security rules.
 //
 // Parameters:
 //   - toolPattern: Glob pattern for matching tool names (e.g., "write", "*")
@@ -483,14 +490,21 @@ func AllowPathRule(toolPattern, pathPattern string) PermissionRule {
 //	DenyPathRule("*", "**/.env", "Cannot access environment files")
 //	DenyPathRule("*", "**/credentials*", "Cannot access credential files")
 func DenyPathRule(toolPattern, pathPattern, message string) PermissionRule {
-	g, err := glob.Compile(pathPattern, '/')
+	// Normalize pattern case on case-insensitive platforms
+	normalizedPattern := pathPattern
+	if isCaseInsensitiveFS() {
+		normalizedPattern = strings.ToLower(pathPattern)
+	}
+
+	g, err := glob.Compile(normalizedPattern, '/')
 	if err != nil {
-		// Invalid pattern - return a rule that never matches
+		// Invalid pattern - fail closed by always matching.
+		// This ensures typos in deny patterns don't silently disable security rules.
 		return PermissionRule{
 			Type:       PermissionRuleDeny,
 			Tool:       toolPattern,
-			InputMatch: func(input any) bool { return false },
-			Message:    message,
+			InputMatch: func(input any) bool { return true },
+			Message:    "invalid path pattern: " + message,
 		}
 	}
 
@@ -528,9 +542,16 @@ func DenyPathRule(toolPattern, pathPattern, message string) PermissionRule {
 //	AskPathRule("write", "/important/**", "Confirm write to important directory")
 //	AskPathRule("*", "/production/**", "Confirm production file access")
 func AskPathRule(toolPattern, pathPattern, message string) PermissionRule {
-	g, err := glob.Compile(pathPattern, '/')
+	// Normalize pattern case on case-insensitive platforms
+	normalizedPattern := pathPattern
+	if isCaseInsensitiveFS() {
+		normalizedPattern = strings.ToLower(pathPattern)
+	}
+
+	g, err := glob.Compile(normalizedPattern, '/')
 	if err != nil {
-		// Invalid pattern - return a rule that never matches
+		// Invalid pattern - return a rule that never matches.
+		// For ask rules, this is acceptable as it falls through to other rules.
 		return PermissionRule{
 			Type:       PermissionRuleAsk,
 			Tool:       toolPattern,
@@ -601,12 +622,15 @@ func extractPathFromInput(input any) string {
 }
 
 // normalizePath normalizes a file path to prevent directory traversal bypasses.
-// It decodes URL-encoded paths and uses filepath.Clean to resolve . and .. sequences.
+// It decodes URL-encoded paths, converts to absolute paths, and uses filepath.Clean
+// to resolve . and .. sequences.
 //
 // Security considerations:
 //   - If URL decoding fails, the original path is used (fail closed for deny rules)
+//   - Relative paths are converted to absolute paths to prevent bypass attacks
 //   - Path separators are normalized to forward slashes for cross-platform glob matching
 //   - Directory traversal sequences (.. and .) are resolved
+//   - On case-insensitive platforms (Windows, macOS), paths are lowercased for matching
 func normalizePath(path string) string {
 	if path == "" {
 		return ""
@@ -620,11 +644,30 @@ func normalizePath(path string) string {
 		decodedPath = path
 	}
 
-	// Use filepath.Clean to normalize the path (resolves . and .. sequences)
-	cleaned := filepath.Clean(decodedPath)
+	// Convert to absolute path to prevent relative path bypasses.
+	// For example, "../../etc/passwd" becomes "/etc/passwd" (after resolving from cwd).
+	absPath, err := filepath.Abs(decodedPath)
+	if err != nil {
+		// If Abs fails, use the cleaned decoded path as fallback.
+		absPath = filepath.Clean(decodedPath)
+	}
 
 	// Normalize path separators to forward slashes for cross-platform compatibility.
 	// Glob patterns are compiled with '/' as the separator, so we must ensure
 	// paths use forward slashes regardless of OS.
-	return filepath.ToSlash(cleaned)
+	normalized := filepath.ToSlash(absPath)
+
+	// On case-insensitive filesystems (Windows, macOS), normalize case to prevent
+	// bypasses via mixed-case paths (e.g., "/ETC/passwd" bypassing "/etc/**").
+	if isCaseInsensitiveFS() {
+		normalized = strings.ToLower(normalized)
+	}
+
+	return normalized
+}
+
+// isCaseInsensitiveFS returns true if the current platform uses a case-insensitive
+// filesystem by default. This is used to normalize paths for glob matching.
+func isCaseInsensitiveFS() bool {
+	return runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 }

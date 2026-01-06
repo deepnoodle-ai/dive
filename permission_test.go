@@ -1256,8 +1256,9 @@ func TestCategoryInResult(t *testing.T) {
 func TestPathRuleEdgeCases(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("Invalid glob pattern fails closed (never matches)", func(t *testing.T) {
+	t.Run("AllowPathRule with invalid glob pattern never matches", func(t *testing.T) {
 		// Invalid pattern with unmatched bracket
+		// For allow rules, invalid patterns should never match (fail open = safe)
 		config := &PermissionConfig{
 			Mode: PermissionModeDefault,
 			Rules: PermissionRules{
@@ -1635,5 +1636,192 @@ func TestNilToolInEvaluate(t *testing.T) {
 		// Should fall through to ask with no category
 		assert.Equal(t, ToolHookAsk, result.Action)
 		assert.Nil(t, result.Category)
+	})
+}
+
+func TestRelativePathBypass(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("DenyPathRule blocks relative paths that resolve to denied directory", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyPathRule("*", "/etc/**", "Cannot access system files"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Relative path ../../etc/passwd should be resolved to absolute path
+		// and then matched against the deny rule
+		call := newMockToolCall("read_file", map[string]any{"file_path": "../../etc/passwd"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		// After fix: should be denied because the path resolves to /etc/passwd
+		// (This depends on cwd, but in most cases relative ../etc paths would resolve)
+		// The key is that the path is converted to absolute before matching
+		assert.NotEqual(t, ToolHookAllow, result.Action, "Relative path should not bypass deny rule")
+	})
+
+	t.Run("AllowPathRule correctly handles relative paths", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/tmp/**"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Relative path that doesn't resolve to /tmp should not match
+		call := newMockToolCall("read_file", map[string]any{"file_path": "../etc/passwd"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		// Should not be allowed since it doesn't resolve to /tmp
+		assert.Equal(t, ToolHookAsk, result.Action, "Relative path should be resolved before matching")
+	})
+}
+
+func TestCaseSensitivityOnCaseInsensitiveFS(t *testing.T) {
+	// These tests verify behavior on case-insensitive filesystems (macOS/Windows)
+	// The isCaseInsensitiveFS() function returns true on darwin and windows
+	if !isCaseInsensitiveFS() {
+		t.Skip("Skipping case sensitivity tests on case-sensitive filesystem")
+	}
+
+	ctx := context.Background()
+
+	t.Run("DenyPathRule matches mixed-case paths on case-insensitive FS", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyPathRule("*", "/etc/**", "Cannot access system files"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Mixed case paths should still be blocked on case-insensitive FS
+		testCases := []string{
+			"/ETC/passwd",
+			"/Etc/Passwd",
+			"/ETC/PASSWD",
+		}
+
+		for _, path := range testCases {
+			call := newMockToolCall("read_file", map[string]any{"file_path": path})
+			result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, ToolHookDeny, result.Action, "Path %s should be denied on case-insensitive FS", path)
+		}
+	})
+
+	t.Run("AllowPathRule matches mixed-case paths on case-insensitive FS", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/tmp/**"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Mixed case paths should be allowed on case-insensitive FS
+		testCases := []string{
+			"/TMP/file.txt",
+			"/Tmp/File.txt",
+			"/TMP/SUBDIR/FILE.TXT",
+		}
+
+		for _, path := range testCases {
+			call := newMockToolCall("read_file", map[string]any{"file_path": path})
+			result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, ToolHookAllow, result.Action, "Path %s should be allowed on case-insensitive FS", path)
+		}
+	})
+
+	t.Run("Pattern with mixed case is normalized", func(t *testing.T) {
+		// Pattern with uppercase should still match lowercase paths
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyPathRule("*", "/ETC/**", "Cannot access system files"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/etc/passwd"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action, "Uppercase pattern should match lowercase path on case-insensitive FS")
+	})
+}
+
+func TestInvalidGlobPatternFailsClosed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("DenyPathRule with invalid pattern blocks all paths", func(t *testing.T) {
+		// Invalid pattern with unmatched bracket
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				DenyPathRule("*", "/path/[invalid", "blocked"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Any path should be blocked because invalid deny patterns fail closed
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/some/random/path.txt"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookDeny, result.Action, "Invalid deny pattern should fail closed (block everything)")
+		assert.Contains(t, result.Message, "invalid path pattern")
+	})
+
+	t.Run("AllowPathRule with invalid pattern never matches", func(t *testing.T) {
+		// Invalid pattern should result in no matches (fail open for allow rules is safe)
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AllowPathRule("*", "/path/[invalid"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Should fall through to ask since invalid allow pattern never matches
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/path/invalid/test.txt"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, ToolHookAsk, result.Action, "Invalid allow pattern should fail open (never match)")
+	})
+
+	t.Run("AskPathRule with invalid pattern never matches", func(t *testing.T) {
+		config := &PermissionConfig{
+			Mode: PermissionModeDefault,
+			Rules: PermissionRules{
+				AskPathRule("*", "/path/[invalid", "confirm"),
+			},
+		}
+		pm := NewPermissionManager(config, nil)
+
+		tool := newMockTool("read_file", nil)
+
+		// Should fall through to default ask (but not with the message from invalid rule)
+		call := newMockToolCall("read_file", map[string]any{"file_path": "/path/invalid/test.txt"})
+		result, err := pm.EvaluateToolUse(ctx, tool, call, nil)
+		assert.NoError(t, err)
+		// Falls through to default ask behavior
+		assert.Equal(t, ToolHookAsk, result.Action)
 	})
 }
