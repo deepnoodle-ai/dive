@@ -35,3 +35,6 @@ tmp.json
 /*.png
 *.db-*
 /.vscode
+
+# Local settings (machine-specific)
+.dive/settings.local.json
