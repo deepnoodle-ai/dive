@@ -604,6 +604,38 @@ func TestSeatbeltBackend_PermissiveProfile(t *testing.T) {
 	assert.Equal(t, "sandbox-exec", filepath.Base(wrapped.Path))
 }
 
+// TestSeatbeltBackend_TmpAccess verifies /tmp is writable in the sandbox
+func TestSeatbeltBackend_TmpAccess(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Seatbelt is macOS only")
+	}
+
+	backend := &SeatbeltBackend{}
+	if !backend.Available() {
+		t.Skip("sandbox-exec not available")
+	}
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join("/tmp", fmt.Sprintf("dive-seatbelt-test-%d.txt", os.Getpid()))
+
+	cfg := &Config{
+		Enabled: true,
+		WorkDir: tempDir,
+	}
+
+	// Try to write to /tmp
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("echo test > %s && cat %s", testFile, testFile))
+	cmd.Dir = tempDir
+	wrapped, cleanup, err := backend.WrapCommand(context.Background(), cmd, cfg)
+	assert.NoError(t, err)
+	defer cleanup()
+	defer os.Remove(testFile)
+
+	output, err := wrapped.CombinedOutput()
+	assert.NoError(t, err, "sandbox should allow /tmp writes: %s", string(output))
+	assert.Equal(t, "test\n", string(output))
+}
+
 // TestDockerBackend_ResourceLimits tests resource limit arguments
 func TestDockerBackend_ResourceLimits(t *testing.T) {
 	backend := NewDockerBackend()

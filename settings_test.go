@@ -5,23 +5,23 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 func TestLoadSettings(t *testing.T) {
 	t.Run("returns empty settings when file doesn't exist", func(t *testing.T) {
 		settings, err := LoadSettings("/nonexistent/path")
-		require.NoError(t, err)
-		require.NotNil(t, settings)
-		require.Empty(t, settings.Permissions.Allow)
-		require.Empty(t, settings.Permissions.Deny)
+		assert.NoError(t, err)
+		assert.NotNil(t, settings)
+		assert.Empty(t, settings.Permissions.Allow)
+		assert.Empty(t, settings.Permissions.Deny)
 	})
 
 	t.Run("loads settings from .dive/settings.json", func(t *testing.T) {
 		// Create temp directory
 		tmpDir := t.TempDir()
 		diveDir := filepath.Join(tmpDir, ".dive")
-		require.NoError(t, os.Mkdir(diveDir, 0755))
+		assert.NoError(t, os.Mkdir(diveDir, 0755))
 
 		// Write settings file
 		settingsJSON := `{
@@ -36,34 +36,34 @@ func TestLoadSettings(t *testing.T) {
     ]
   }
 }`
-		require.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.json"), []byte(settingsJSON), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.json"), []byte(settingsJSON), 0644))
 
 		// Load settings
 		settings, err := LoadSettings(tmpDir)
-		require.NoError(t, err)
-		require.NotNil(t, settings)
-		require.Len(t, settings.Permissions.Allow, 3)
-		require.Len(t, settings.Permissions.Deny, 1)
+		assert.NoError(t, err)
+		assert.NotNil(t, settings)
+		assert.Len(t, settings.Permissions.Allow, 3)
+		assert.Len(t, settings.Permissions.Deny, 1)
 	})
 
 	t.Run("settings.local.json takes precedence over settings.json", func(t *testing.T) {
 		// Create temp directory
 		tmpDir := t.TempDir()
 		diveDir := filepath.Join(tmpDir, ".dive")
-		require.NoError(t, os.Mkdir(diveDir, 0755))
+		assert.NoError(t, os.Mkdir(diveDir, 0755))
 
 		// Write both settings files
 		settingsJSON := `{"permissions": {"allow": ["WebSearch"]}}`
 		localSettingsJSON := `{"permissions": {"allow": ["WebSearch", "Bash(go test:*)"]}}`
 
-		require.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.json"), []byte(settingsJSON), 0644))
-		require.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.local.json"), []byte(localSettingsJSON), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.json"), []byte(settingsJSON), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.local.json"), []byte(localSettingsJSON), 0644))
 
 		// Load settings - should get local version
 		settings, err := LoadSettings(tmpDir)
-		require.NoError(t, err)
-		require.NotNil(t, settings)
-		require.Len(t, settings.Permissions.Allow, 2) // local has 2, regular has 1
+		assert.NoError(t, err)
+		assert.NotNil(t, settings)
+		assert.Len(t, settings.Permissions.Allow, 2) // local has 2, regular has 1
 	})
 }
 
@@ -118,11 +118,11 @@ func TestParsePermissionPattern(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rule := parsePermissionPattern(tt.pattern, tt.ruleType)
-			require.NotNil(t, rule)
-			require.Equal(t, tt.ruleType, rule.Type)
-			require.Equal(t, tt.wantTool, rule.Tool)
+			assert.NotNil(t, rule)
+			assert.Equal(t, rule.Type, tt.ruleType)
+			assert.Equal(t, rule.Tool, tt.wantTool)
 			if tt.wantCmd != "" {
-				require.Equal(t, tt.wantCmd, rule.Command)
+				assert.Equal(t, rule.Command, tt.wantCmd)
 			}
 		})
 	}
@@ -144,20 +144,20 @@ func TestToPermissionRules(t *testing.T) {
 	rules := settings.ToPermissionRules()
 
 	// Deny rules come first
-	require.Len(t, rules, 3)
+	assert.Len(t, rules, 3)
 
 	// First rule should be deny
-	require.Equal(t, PermissionRuleDeny, rules[0].Type)
-	require.Equal(t, "Bash", rules[0].Tool) // PascalCase tool name
-	require.Equal(t, "rm -rf*", rules[0].Command)
+	assert.Equal(t, rules[0].Type, PermissionRuleDeny)
+	assert.Equal(t, rules[0].Tool, "Bash") // PascalCase tool name
+	assert.Equal(t, rules[0].Command, "rm -rf*")
 
 	// Allow rules come after
-	require.Equal(t, PermissionRuleAllow, rules[1].Type)
-	require.Equal(t, "WebSearch", rules[1].Tool)
+	assert.Equal(t, rules[1].Type, PermissionRuleAllow)
+	assert.Equal(t, rules[1].Tool, "WebSearch")
 
-	require.Equal(t, PermissionRuleAllow, rules[2].Type)
-	require.Equal(t, "Bash", rules[2].Tool) // PascalCase tool name
-	require.Equal(t, "go build*", rules[2].Command)
+	assert.Equal(t, rules[2].Type, PermissionRuleAllow)
+	assert.Equal(t, rules[2].Tool, "Bash") // PascalCase tool name
+	assert.Equal(t, rules[2].Command, "go build*")
 }
 
 func TestMatchDomain(t *testing.T) {
@@ -189,7 +189,7 @@ func TestMatchDomain(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.url+"_"+tt.domain, func(t *testing.T) {
 			got := matchDomain(tt.url, tt.domain)
-			require.Equal(t, tt.want, got)
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
@@ -213,7 +213,7 @@ func TestMatchPathGlob(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.pattern+"_"+tt.path, func(t *testing.T) {
 			got := matchPathGlob(tt.pattern, tt.path)
-			require.Equal(t, tt.want, got)
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }

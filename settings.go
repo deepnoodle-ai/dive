@@ -271,9 +271,8 @@ func matchDomain(urlStr, domain string) bool {
 	// Remove protocol
 	if idx := strings.Index(host, "://"); idx != -1 {
 		host = host[idx+3:]
-	} else if strings.HasPrefix(host, "//") {
-		host = host[2:]
 	}
+	host = strings.TrimPrefix(host, "//")
 
 	// Remove path
 	if idx := strings.Index(host, "/"); idx != -1 {

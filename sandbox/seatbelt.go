@@ -74,6 +74,14 @@ func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *C
 		tmpDir = resolved
 	}
 
+	// Also allow /tmp which is separate from os.TempDir() on macOS.
+	// On macOS, /tmp is a symlink to /private/tmp, while os.TempDir()
+	// returns a per-user directory like /var/folders/.../T/.
+	slashTmp := "/tmp"
+	if resolved, err := filepath.EvalSymlinks(slashTmp); err == nil {
+		slashTmp = resolved
+	}
+
 	var allowedPaths []string
 	for _, p := range cfg.AllowedWritePaths {
 		absP, err := filepath.Abs(p)
@@ -112,6 +120,10 @@ func (s *SeatbeltBackend) WrapCommand(ctx context.Context, cmd *exec.Cmd, cfg *C
 		WorkDir:      quotePath(workDir),
 		TmpDir:       quotePath(tmpDir),
 		AllowNetwork: cfg.AllowNetwork,
+	}
+	// Add /tmp if it's different from os.TempDir() (common on macOS)
+	if slashTmp != tmpDir {
+		data.AllowedWritePaths = append(data.AllowedWritePaths, quotePath(slashTmp))
 	}
 	for _, p := range allowedPaths {
 		data.AllowedWritePaths = append(data.AllowedWritePaths, quotePath(p))

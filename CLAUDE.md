@@ -62,7 +62,7 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
 func main() {

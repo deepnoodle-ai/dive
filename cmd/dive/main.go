@@ -522,7 +522,13 @@ func matchesCommandPattern(pattern, command string) bool {
 		return false
 	}
 	if strings.ContainsAny(pattern, "*?[]") {
-		ok, err := path.Match(pattern, command)
+		// For glob-like patterns, match against the first word (command name) only
+		// Extract first word of command for matching
+		cmdParts := strings.Fields(command)
+		if len(cmdParts) == 0 {
+			return false
+		}
+		ok, err := path.Match(pattern, cmdParts[0])
 		return err == nil && ok
 	}
 	return strings.HasPrefix(command, pattern)
