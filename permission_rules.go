@@ -2,10 +2,13 @@ package dive
 
 import (
 	"encoding/json"
+	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/gobwas/glob"
 )
 
 // Permission Rules
@@ -349,4 +352,322 @@ func AskCommandRule(toolPattern, commandPattern, message string) PermissionRule 
 		Command: commandPattern,
 		Message: message,
 	}
+}
+
+// AllowCommandPrefixRule creates an allow rule for bash commands starting with a prefix.
+// This is useful for allowing command families like "go test", "npm run", etc.
+//
+// Unlike [AllowCommandRule] which uses glob matching, this specifically checks if the
+// command starts with the given prefix using [strings.HasPrefix]. This makes it easier
+// to use for common patterns where you want to allow a command and all its variations.
+//
+// The command is extracted from the tool input by checking these fields (in order):
+// "command", "cmd", "script", "code".
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "bash", "*")
+//   - commandPrefix: The exact prefix that commands must start with
+//
+// Example:
+//
+//	AllowCommandPrefixRule("bash", "go test")    // Matches "go test ./...", "go test -v", etc.
+//	AllowCommandPrefixRule("bash", "git status") // Matches "git status", "git status -s", etc.
+//	AllowCommandPrefixRule("*", "npm run")       // Any tool, commands starting with "npm run"
+//	AllowCommandPrefixRule("bash", "gofmt")      // Matches "gofmt -w .", "gofmt file.go", etc.
+func AllowCommandPrefixRule(toolPattern, commandPrefix string) PermissionRule {
+	return PermissionRule{
+		Type: PermissionRuleAllow,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			cmd := extractCommandFromInput(input)
+			return strings.HasPrefix(cmd, commandPrefix)
+		},
+	}
+}
+
+// DenyCommandPrefixRule creates a deny rule for bash commands starting with a prefix.
+// Use this to block dangerous command patterns regardless of their arguments.
+//
+// The command is extracted from the tool input by checking these fields (in order):
+// "command", "cmd", "script", "code".
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "bash", "*")
+//   - commandPrefix: The exact prefix that triggers the denial
+//   - message: Error message returned when the rule matches
+//
+// Example:
+//
+//	DenyCommandPrefixRule("bash", "rm -rf", "Recursive forced deletion is blocked")
+//	DenyCommandPrefixRule("bash", "sudo", "Sudo commands are not allowed")
+//	DenyCommandPrefixRule("*", "curl | bash", "Piped execution is dangerous")
+func DenyCommandPrefixRule(toolPattern, commandPrefix, message string) PermissionRule {
+	return PermissionRule{
+		Type: PermissionRuleDeny,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			cmd := extractCommandFromInput(input)
+			return strings.HasPrefix(cmd, commandPrefix)
+		},
+		Message: message,
+	}
+}
+
+// AllowPathRule creates an allow rule for file operations within a path pattern.
+// This is useful for allowing reads/writes within a workspace while blocking
+// operations outside of it.
+//
+// The pathPattern supports glob syntax with the following patterns:
+//   - "*" matches any characters except path separators (/)
+//   - "**" matches any characters including path separators (recursive)
+//   - "?" matches exactly one character
+//
+// The path is extracted from the tool input by checking these fields (in order):
+// "path", "file_path", "filePath", "filename", "file".
+//
+// If the pathPattern is invalid, the rule will never match (fails closed).
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "read", "Read", "*")
+//   - pathPattern: Glob pattern for matching file paths
+//
+// Example:
+//
+//	AllowPathRule("read", "/home/user/project/**")  // Allow reading any file in project
+//	AllowPathRule("write", "/tmp/**")               // Allow writing to /tmp
+//	AllowPathRule("*", "/safe/path/**")             // Allow any tool for paths under /safe/path
+//	AllowPathRule("Read", "/workspace/**/*.go")     // Allow reading Go files in workspace
+func AllowPathRule(toolPattern, pathPattern string) PermissionRule {
+	// Normalize pattern case on case-insensitive platforms
+	normalizedPattern := pathPattern
+	if isCaseInsensitiveFS() {
+		normalizedPattern = strings.ToLower(pathPattern)
+	}
+
+	g, err := glob.Compile(normalizedPattern, '/')
+	if err != nil {
+		// Invalid pattern - return a rule that never matches
+		return PermissionRule{
+			Type:       PermissionRuleAllow,
+			Tool:       toolPattern,
+			InputMatch: func(input any) bool { return false },
+		}
+	}
+
+	return PermissionRule{
+		Type: PermissionRuleAllow,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			path := extractPathFromInput(input)
+			return path != "" && g.Match(path)
+		},
+	}
+}
+
+// DenyPathRule creates a deny rule for file operations matching a path pattern.
+// Use this to block access to sensitive directories or files.
+//
+// The pathPattern supports glob syntax with the following patterns:
+//   - "*" matches any characters except path separators (/)
+//   - "**" matches any characters including path separators (recursive)
+//   - "?" matches exactly one character
+//
+// The path is extracted from the tool input by checking these fields (in order):
+// "path", "file_path", "filePath", "filename", "file".
+//
+// Security: If the pathPattern is invalid, the rule fails closed by always matching.
+// This ensures that typos in deny patterns don't silently disable security rules.
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "write", "*")
+//   - pathPattern: Glob pattern for matching file paths to block
+//   - message: Error message returned when the rule matches
+//
+// Example:
+//
+//	DenyPathRule("*", "/etc/**", "Cannot access system files")
+//	DenyPathRule("write", "**/.git/**", "Cannot modify git internals")
+//	DenyPathRule("*", "**/.env", "Cannot access environment files")
+//	DenyPathRule("*", "**/credentials*", "Cannot access credential files")
+func DenyPathRule(toolPattern, pathPattern, message string) PermissionRule {
+	// Normalize pattern case on case-insensitive platforms
+	normalizedPattern := pathPattern
+	if isCaseInsensitiveFS() {
+		normalizedPattern = strings.ToLower(pathPattern)
+	}
+
+	g, err := glob.Compile(normalizedPattern, '/')
+	if err != nil {
+		// Invalid pattern - fail closed by always matching.
+		// This ensures typos in deny patterns don't silently disable security rules.
+		return PermissionRule{
+			Type:       PermissionRuleDeny,
+			Tool:       toolPattern,
+			InputMatch: func(input any) bool { return true },
+			Message:    "invalid path pattern: " + message,
+		}
+	}
+
+	return PermissionRule{
+		Type: PermissionRuleDeny,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			path := extractPathFromInput(input)
+			return path != "" && g.Match(path)
+		},
+		Message: message,
+	}
+}
+
+// AskPathRule creates an ask rule for file operations matching a path pattern.
+// Use this to require user confirmation for operations in sensitive directories.
+//
+// The pathPattern supports glob syntax with the following patterns:
+//   - "*" matches any characters except path separators (/)
+//   - "**" matches any characters including path separators (recursive)
+//   - "?" matches exactly one character
+//
+// The path is extracted from the tool input by checking these fields (in order):
+// "path", "file_path", "filePath", "filename", "file".
+//
+// If the pathPattern is invalid, the rule will never match.
+//
+// Parameters:
+//   - toolPattern: Glob pattern for matching tool names (e.g., "write", "*")
+//   - pathPattern: Glob pattern for matching file paths to prompt for
+//   - message: Prompt message displayed to the user
+//
+// Example:
+//
+//	AskPathRule("write", "/important/**", "Confirm write to important directory")
+//	AskPathRule("*", "/production/**", "Confirm production file access")
+func AskPathRule(toolPattern, pathPattern, message string) PermissionRule {
+	// Normalize pattern case on case-insensitive platforms
+	normalizedPattern := pathPattern
+	if isCaseInsensitiveFS() {
+		normalizedPattern = strings.ToLower(pathPattern)
+	}
+
+	g, err := glob.Compile(normalizedPattern, '/')
+	if err != nil {
+		// Invalid pattern - return a rule that never matches.
+		// For ask rules, this is acceptable as it falls through to other rules.
+		return PermissionRule{
+			Type:       PermissionRuleAsk,
+			Tool:       toolPattern,
+			InputMatch: func(input any) bool { return false },
+			Message:    message,
+		}
+	}
+
+	return PermissionRule{
+		Type: PermissionRuleAsk,
+		Tool: toolPattern,
+		InputMatch: func(input any) bool {
+			path := extractPathFromInput(input)
+			return path != "" && g.Match(path)
+		},
+		Message: message,
+	}
+}
+
+// extractCommandFromInput extracts a command string from unmarshaled tool input.
+// This is used by [AllowCommandPrefixRule] and [DenyCommandPrefixRule] to match
+// commands in bash-like tools.
+//
+// The function checks these fields in order: "command", "cmd", "script", "code".
+// Returns empty string if input is not a map or no command field is found.
+func extractCommandFromInput(input any) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	// Look for command in common field names
+	commandFields := []string{"command", "cmd", "script", "code"}
+	for _, field := range commandFields {
+		if cmd, ok := m[field].(string); ok {
+			return cmd
+		}
+	}
+	return ""
+}
+
+// extractPathFromInput extracts a file path from unmarshaled tool input.
+// This is used by [AllowPathRule], [DenyPathRule], and [AskPathRule] to match
+// file paths in file operation tools.
+//
+// The function checks these fields in order: "path", "file_path", "filePath",
+// "filename", "file". Returns empty string if input is not a map or no path
+// field is found.
+//
+// Security: The returned path is normalized using [filepath.Clean] to prevent
+// directory traversal bypasses. For example, "/var/../etc/passwd" is normalized
+// to "/etc/passwd" so that deny rules for "/etc/**" will correctly match.
+// URL-encoded paths are also decoded to prevent bypasses via %2e%2e sequences.
+func extractPathFromInput(input any) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	// Look for path in common field names
+	pathFields := []string{"path", "file_path", "filePath", "filename", "file"}
+	for _, field := range pathFields {
+		if path, ok := m[field].(string); ok {
+			return normalizePath(path)
+		}
+	}
+	return ""
+}
+
+// normalizePath normalizes a file path to prevent directory traversal bypasses.
+// It decodes URL-encoded paths, converts to absolute paths, and uses filepath.Clean
+// to resolve . and .. sequences.
+//
+// Security considerations:
+//   - If URL decoding fails, the original path is used (fail closed for deny rules)
+//   - Relative paths are converted to absolute paths to prevent bypass attacks
+//   - Path separators are normalized to forward slashes for cross-platform glob matching
+//   - Directory traversal sequences (.. and .) are resolved
+//   - On case-insensitive platforms (Windows, macOS), paths are lowercased for matching
+func normalizePath(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	// Decode URL-encoded paths to prevent traversal via encoded sequences like %2e%2e
+	decodedPath, err := url.PathUnescape(path)
+	if err != nil {
+		// If decoding fails, use the original path rather than returning empty.
+		// This ensures deny rules can still match (fail closed behavior).
+		decodedPath = path
+	}
+
+	// Convert to absolute path to prevent relative path bypasses.
+	// For example, "../../etc/passwd" becomes "/etc/passwd" (after resolving from cwd).
+	absPath, err := filepath.Abs(decodedPath)
+	if err != nil {
+		// If Abs fails, use the cleaned decoded path as fallback.
+		absPath = filepath.Clean(decodedPath)
+	}
+
+	// Normalize path separators to forward slashes for cross-platform compatibility.
+	// Glob patterns are compiled with '/' as the separator, so we must ensure
+	// paths use forward slashes regardless of OS.
+	normalized := filepath.ToSlash(absPath)
+
+	// On case-insensitive filesystems (Windows, macOS), normalize case to prevent
+	// bypasses via mixed-case paths (e.g., "/ETC/passwd" bypassing "/etc/**").
+	if isCaseInsensitiveFS() {
+		normalized = strings.ToLower(normalized)
+	}
+
+	return normalized
+}
+
+// isCaseInsensitiveFS returns true if the current platform uses a case-insensitive
+// filesystem by default. This is used to normalize paths for glob matching.
+func isCaseInsensitiveFS() bool {
+	return runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 }

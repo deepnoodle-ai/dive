@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
@@ -213,12 +212,6 @@ type App struct {
 	// Tool dialog state (confirmations, selections, input)
 	dialogState *DialogState
 
-	// Session-scoped permission allowlist: maps tool categories to allowed status.
-	// Categories include: "bash", "edit", "read", or specific tool names.
-	// When user selects "allow all X this session", the relevant category is added.
-	sessionAllowed   map[string]bool
-	sessionAllowedMu sync.RWMutex
-
 	// Autocomplete state
 	autocompleteMatches []string
 	autocompleteIndex   int
@@ -255,7 +248,6 @@ func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string) *App {
 		toolTitles:     toolTitles,
 		history:        make([]string, 0),
 		historyIndex:   -1,
-		sessionAllowed: make(map[string]bool),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -1167,55 +1159,12 @@ func (a *App) parseTodoWriteInput(input []byte) {
 	}
 }
 
-// toolCategoryInfo represents a tool's category for session allowlist purposes.
-type toolCategoryInfo struct {
-	Category string // Internal category key (e.g., "bash", "edit", "read")
-	Label    string // Human-readable label (e.g., "bash commands", "file edits")
-}
-
-// getToolCategory determines the category of a tool for session allowlist purposes.
-// Returns the category key and a human-readable label for the "allow all X this session" dialog.
-func getToolCategory(toolName string) toolCategoryInfo {
-	toolNameLower := strings.ToLower(toolName)
-
-	// Bash/command execution tools
-	bashPatterns := []string{"bash", "command", "shell", "exec", "run"}
-	for _, pattern := range bashPatterns {
-		if strings.Contains(toolNameLower, pattern) {
-			return toolCategoryInfo{Category: "bash", Label: "bash commands"}
-		}
-	}
-
-	// Edit/write tools
-	editPatterns := []string{"edit", "write", "create", "mkdir", "touch"}
-	for _, pattern := range editPatterns {
-		if strings.Contains(toolNameLower, pattern) {
-			return toolCategoryInfo{Category: "edit", Label: "file edits"}
-		}
-	}
-
-	// Read tools
-	if strings.Contains(toolNameLower, "read") {
-		return toolCategoryInfo{Category: "read", Label: "file reads"}
-	}
-
-	// Glob/search tools
-	if strings.Contains(toolNameLower, "glob") || strings.Contains(toolNameLower, "grep") || strings.Contains(toolNameLower, "search") {
-		return toolCategoryInfo{Category: "search", Label: "searches"}
-	}
-
-	// Default: use the tool name itself as the category
-	return toolCategoryInfo{Category: toolName, Label: toolName + " operations"}
-}
-
 // ConfirmTool prompts the user to confirm a tool execution
 func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input []byte) (bool, error) {
 	// Check if this tool's category is already allowed for this session
-	toolCat := getToolCategory(toolName)
-	a.sessionAllowedMu.RLock()
-	allowed := a.sessionAllowed[toolCat.Category]
-	a.sessionAllowedMu.RUnlock()
-	if allowed {
+	// Use the library's GetToolCategory for consistent categorization
+	toolCat := dive.GetToolCategory(toolName)
+	if a.agent.PermissionManager().IsSessionAllowed(toolCat.Key) {
 		return true, nil
 	}
 
@@ -1321,7 +1270,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 			Title:                    actionSummary,
 			ContentPreview:           contentPreview,
 			ConfirmChan:              confirmChan,
-			ConfirmToolCategory:      toolCat.Category,
+			ConfirmToolCategory:      toolCat.Key,
 			ConfirmToolCategoryLabel: toolCat.Label,
 		},
 	})
@@ -1333,9 +1282,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 
 		// Handle "allow all X during this session"
 		if result.AllowSession {
-			a.sessionAllowedMu.Lock()
-			a.sessionAllowed[toolCat.Category] = true
-			a.sessionAllowedMu.Unlock()
+			a.agent.PermissionManager().AllowForSession(toolCat.Key)
 		}
 
 		// Handle user feedback (denied with message)

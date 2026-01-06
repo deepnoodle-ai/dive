@@ -100,18 +100,43 @@ const (
 )
 
 // ToolHookResult is returned by tool hooks to control execution flow.
+// It contains the action to take (allow, deny, ask, continue), an optional
+// message, and metadata about the decision.
 type ToolHookResult struct {
 	// Action determines what happens next in the permission flow.
+	// See [ToolHookAllow], [ToolHookDeny], [ToolHookAsk], [ToolHookContinue].
 	Action ToolHookAction `json:"action"`
 
 	// Message provides context for deny/ask actions.
-	// For deny: explains why the tool was blocked.
+	// For deny: explains why the tool was blocked (returned to the LLM).
 	// For ask: displayed to the user when prompting for confirmation.
 	Message string `json:"message,omitempty"`
 
 	// UpdatedInput optionally provides modified input for allow actions.
 	// If set, the tool will be called with this input instead of the original.
+	// Use [AllowResultWithInput] to create a result with modified input.
 	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
+
+	// Category contains the tool category that triggered this result.
+	// This is populated in two cases:
+	//   1. When the result comes from a session allowlist check (the category
+	//      that was previously allowed via [PermissionManager.AllowForSession])
+	//   2. When the result is a default "ask" action, providing the category
+	//      so UIs can offer "allow all [category] this session" options
+	//
+	// The category enables "allow all X this session" functionality in UIs.
+	// When a user approves a tool call, the UI can use Category.Key to call
+	// [PermissionManager.AllowForSession] for future auto-approval.
+	//
+	// Example usage in a confirmation dialog:
+	//
+	//	if result.Action == ToolHookAsk && result.Category != nil {
+	//	    // Show "Allow all [category.Label] this session" checkbox
+	//	    if userSelectedAllowAll {
+	//	        pm.AllowForSession(result.Category.Key)
+	//	    }
+	//	}
+	Category *ToolCategory `json:"category,omitempty"`
 }
 
 // PreToolUseContext contains information passed to PreToolUse hooks.

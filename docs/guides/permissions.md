@@ -16,10 +16,15 @@ The permission system provides four complementary ways to control tool usage:
 When a tool is called, Dive evaluates permissions in this order:
 
 ```
-PreToolUse Hooks → Deny Rules → Allow Rules → Ask Rules → Mode Check → CanUseTool → Execute → PostToolUse Hooks
+PreToolUse Hooks → Session Allowlist → Deny Rules → Allow Rules → Ask Rules → Mode Check → CanUseTool → Execute → PostToolUse Hooks
 ```
 
 Each step can terminate the flow early by returning `allow`, `deny`, or `ask`. Only `continue` passes control to the next step.
+
+Key features:
+- **Session Allowlists**: Users can approve "allow all X this session" to skip future confirmations for a tool category
+- **Tool Categories**: Tools are automatically categorized (bash, edit, read, search) for consistent grouping
+- **Category Tracking**: The `Category` field in results enables UIs to offer "allow all" options
 
 ## Permission Modes
 
@@ -108,14 +113,19 @@ Permission: &dive.PermissionConfig{
 
 ### Rule Helper Functions
 
-| Function                                  | Description                       |
-| ----------------------------------------- | --------------------------------- |
-| `DenyRule(pattern, message)`              | Block tools matching pattern      |
-| `DenyCommandRule(tool, command, message)` | Block specific bash commands      |
-| `AllowRule(pattern)`                      | Allow tools matching pattern      |
-| `AllowCommandRule(tool, command)`         | Allow specific bash commands      |
-| `AskRule(pattern, message)`               | Prompt for tools matching pattern |
-| `AskCommandRule(tool, command, message)`  | Prompt for specific bash commands |
+| Function                                       | Description                              |
+| ---------------------------------------------- | ---------------------------------------- |
+| `DenyRule(pattern, message)`                   | Block tools matching pattern             |
+| `DenyCommandRule(tool, command, message)`      | Block specific bash commands (glob)      |
+| `DenyCommandPrefixRule(tool, prefix, message)` | Block commands starting with prefix      |
+| `DenyPathRule(tool, path, message)`            | Block file operations matching path glob |
+| `AllowRule(pattern)`                           | Allow tools matching pattern             |
+| `AllowCommandRule(tool, command)`              | Allow specific bash commands (glob)      |
+| `AllowCommandPrefixRule(tool, prefix)`         | Allow commands starting with prefix      |
+| `AllowPathRule(tool, path)`                    | Allow file operations matching path glob |
+| `AskRule(pattern, message)`                    | Prompt for tools matching pattern        |
+| `AskCommandRule(tool, command, message)`       | Prompt for specific bash commands        |
+| `AskPathRule(tool, path, message)`             | Prompt for file operations matching path |
 
 ### Custom Input Matching
 
@@ -134,6 +144,119 @@ rule := dive.PermissionRule{
         return strings.HasPrefix(path, "/etc/")  // Block writes to /etc/
     },
     Message: "Cannot write to system directories",
+}
+```
+
+### Command Prefix Rules
+
+Command prefix rules use `strings.HasPrefix` matching, making them ideal for allowing or blocking command families:
+
+```go
+Rules: dive.PermissionRules{
+    // Allow common development commands
+    dive.AllowCommandPrefixRule("bash", "go test"),   // Matches "go test ./...", "go test -v", etc.
+    dive.AllowCommandPrefixRule("bash", "go build"),  // Matches "go build ./cmd/...", etc.
+    dive.AllowCommandPrefixRule("bash", "npm run"),   // Matches "npm run test", "npm run build", etc.
+    dive.AllowCommandPrefixRule("bash", "git status"),
+    dive.AllowCommandPrefixRule("bash", "git diff"),
+    dive.AllowCommandPrefixRule("bash", "gofmt"),
+
+    // Block dangerous command prefixes
+    dive.DenyCommandPrefixRule("bash", "sudo", "Sudo commands are not allowed"),
+    dive.DenyCommandPrefixRule("bash", "rm -rf", "Recursive forced deletion is blocked"),
+    dive.DenyCommandPrefixRule("*", "curl | bash", "Piped execution is dangerous"),
+}
+```
+
+The command is extracted from the tool input by checking these fields in order: `command`, `cmd`, `script`, `code`.
+
+### Path-Based Rules
+
+Path rules use glob patterns to match file paths, with support for recursive matching:
+
+```go
+Rules: dive.PermissionRules{
+    // Allow operations within the project
+    dive.AllowPathRule("Read", "/home/user/project/**"),
+    dive.AllowPathRule("Write", "/home/user/project/**"),
+
+    // Block sensitive paths
+    dive.DenyPathRule("*", "/etc/**", "Cannot access system files"),
+    dive.DenyPathRule("*", "**/.git/**", "Cannot modify git internals"),
+    dive.DenyPathRule("*", "**/.env", "Cannot access environment files"),
+    dive.DenyPathRule("*", "**/credentials*", "Cannot access credential files"),
+
+    // Require confirmation for important directories
+    dive.AskPathRule("Write", "/production/**", "Confirm production file write"),
+}
+```
+
+Path glob patterns:
+- `*` matches any characters except path separators (`/`)
+- `**` matches any characters including path separators (recursive)
+- `?` matches exactly one character
+
+The path is extracted from the tool input by checking these fields in order: `path`, `file_path`, `filePath`, `filename`, `file`.
+
+## Session Allowlists
+
+Session allowlists let users approve "allow all X this session" to skip future confirmations for a tool category. This improves the workflow for users who have established trust.
+
+### Tool Categories
+
+Tools are automatically categorized based on their names:
+
+| Category | Key      | Matches                                        |
+| -------- | -------- | ---------------------------------------------- |
+| Bash     | `bash`   | Tools containing: bash, command, shell, exec, run |
+| Edit     | `edit`   | Tools containing: edit, write, create, mkdir, touch |
+| Read     | `read`   | Tools containing: read                         |
+| Search   | `search` | Tools containing: glob, grep, search           |
+
+You can also use predefined category constants:
+
+```go
+dive.ToolCategoryBash   // {Key: "bash", Label: "bash commands"}
+dive.ToolCategoryEdit   // {Key: "edit", Label: "file edits"}
+dive.ToolCategoryRead   // {Key: "read", Label: "file reads"}
+dive.ToolCategorySearch // {Key: "search", Label: "searches"}
+```
+
+### Managing Session Allowlists
+
+```go
+pm := dive.NewPermissionManager(config, confirmer)
+
+// Allow a category for the session
+pm.AllowForSession("bash")                    // By key
+pm.AllowCategoryForSession(dive.ToolCategoryEdit) // By category constant
+
+// Check if a category is allowed
+if pm.IsSessionAllowed("bash") {
+    // bash commands will be auto-approved
+}
+
+// Get all allowed categories
+allowed := pm.SessionAllowedCategories() // []string{"bash", "edit"}
+
+// Clear all session allowances
+pm.ClearSessionAllowlist()
+```
+
+### Using Category in UI
+
+The `Category` field in `ToolHookResult` enables "allow all" UI options:
+
+```go
+result, _ := pm.EvaluateToolUse(ctx, tool, call, agent)
+
+if result.Action == dive.ToolHookAsk && result.Category != nil {
+    // Show confirmation dialog with "Allow all [Label] this session" checkbox
+    fmt.Printf("Allow all %s this session?\n", result.Category.Label)
+
+    if userSelectedAllowAll {
+        pm.AllowForSession(result.Category.Key)
+    }
 }
 ```
 

@@ -14,12 +14,20 @@ import (
 // This file implements the PermissionConfig and PermissionManager types that
 // orchestrate the permission evaluation flow for tool calls.
 //
-// The PermissionManager implements Anthropic's permission flow:
+// The PermissionManager implements the following permission flow:
 //
-//	PreToolUse Hook → Deny Rules → Allow Rules → Ask Rules → Mode Check → CanUseTool → Confirm
+//	PreToolUse Hooks → Session Allowlist → Deny Rules → Allow Rules → Ask Rules → Mode Check → CanUseTool → Confirm
 //
 // Each step can terminate the flow early by returning allow, deny, or ask.
 // Only ToolHookContinue passes control to the next step.
+//
+// Key features:
+//   - Session Allowlists: Users can approve "allow all X this session" to skip
+//     future confirmations for a tool category (bash, edit, read, search, etc.)
+//   - Tool Categories: Tools are automatically categorized based on their names,
+//     enabling consistent grouping for session allowlists
+//   - Category Tracking: The Category field in ToolHookResult indicates which
+//     category matched, allowing UIs to offer "allow all" options
 
 // PermissionConfig contains all permission-related configuration for an agent.
 // It combines the permission mode, declarative rules, and programmatic callbacks
@@ -77,6 +85,100 @@ type PermissionConfig struct {
 	PostToolUse []PostToolUseHook `json:"-" yaml:"-"`
 }
 
+// ToolCategory represents a tool's category for session allowlist purposes.
+// Categories group similar tools together (e.g., all bash-like tools, all file editors),
+// enabling "allow all X this session" functionality in UIs.
+//
+// When a user approves a tool and selects "allow all [category] this session",
+// the category Key is stored in the session allowlist. Subsequent tool calls
+// with the same category are auto-approved.
+//
+// The Category field in [ToolHookResult] indicates which category matched,
+// allowing UIs to display appropriate "allow all" options.
+type ToolCategory struct {
+	// Key is the internal category identifier used for matching.
+	// Standard keys include: "bash", "edit", "read", "search".
+	// For unrecognized tools, the tool name itself becomes the key.
+	Key string
+
+	// Label is the human-readable description displayed in UIs.
+	// For example: "bash commands", "file edits", "file reads".
+	Label string
+}
+
+// Common tool categories used by the permission system.
+// These predefined categories cover the most common tool types.
+// Use these when calling [PermissionManager.AllowCategoryForSession].
+//
+// Example:
+//
+//	pm.AllowCategoryForSession(dive.ToolCategoryBash)
+//	pm.AllowCategoryForSession(dive.ToolCategoryEdit)
+var (
+	// ToolCategoryBash matches command execution tools (bash, shell, exec, run, command).
+	ToolCategoryBash = ToolCategory{Key: "bash", Label: "bash commands"}
+
+	// ToolCategoryEdit matches file modification tools (edit, write, create, mkdir, touch).
+	ToolCategoryEdit = ToolCategory{Key: "edit", Label: "file edits"}
+
+	// ToolCategoryRead matches file reading tools (read).
+	ToolCategoryRead = ToolCategory{Key: "read", Label: "file reads"}
+
+	// ToolCategorySearch matches search and discovery tools (glob, grep, search).
+	ToolCategorySearch = ToolCategory{Key: "search", Label: "searches"}
+)
+
+// GetToolCategory determines the category of a tool based on its name.
+// This centralizes tool categorization logic for consistent behavior across the library
+// and CLI implementations.
+//
+// Categorization rules (checked in order):
+//  1. Bash tools: name contains "bash", "command", "shell", "exec", or "run"
+//  2. Edit tools: name contains "edit", "write", "create", "mkdir", or "touch"
+//  3. Read tools: name contains "read"
+//  4. Search tools: name contains "glob", "grep", or "search"
+//  5. Default: tool name becomes its own category
+//
+// The matching is case-insensitive.
+//
+// Example:
+//
+//	cat := dive.GetToolCategory("Bash")     // Returns ToolCategoryBash
+//	cat := dive.GetToolCategory("read_file") // Returns ToolCategoryRead
+//	cat := dive.GetToolCategory("custom")    // Returns {Key: "custom", Label: "custom operations"}
+func GetToolCategory(toolName string) ToolCategory {
+	toolNameLower := strings.ToLower(toolName)
+
+	// Bash/command execution tools
+	bashPatterns := []string{"bash", "command", "shell", "exec", "run"}
+	for _, pattern := range bashPatterns {
+		if strings.Contains(toolNameLower, pattern) {
+			return ToolCategoryBash
+		}
+	}
+
+	// Edit/write tools
+	editPatterns := []string{"edit", "write", "create", "mkdir", "touch"}
+	for _, pattern := range editPatterns {
+		if strings.Contains(toolNameLower, pattern) {
+			return ToolCategoryEdit
+		}
+	}
+
+	// Read tools
+	if strings.Contains(toolNameLower, "read") {
+		return ToolCategoryRead
+	}
+
+	// Glob/search tools
+	if strings.Contains(toolNameLower, "glob") || strings.Contains(toolNameLower, "grep") || strings.Contains(toolNameLower, "search") {
+		return ToolCategorySearch
+	}
+
+	// Default: use the tool name itself as the category
+	return ToolCategory{Key: toolName, Label: toolName + " operations"}
+}
+
 // PermissionManager orchestrates the permission evaluation flow for tool calls.
 // It evaluates PreToolUse hooks, permission rules, mode checks, and the CanUseTool
 // callback in order, returning the first definitive action (allow, deny, or ask).
@@ -87,10 +189,15 @@ type PermissionConfig struct {
 // Thread Safety: PermissionManager is safe for concurrent use. The Mode can be
 // changed dynamically using SetMode, which affects subsequent evaluations.
 // All methods use internal synchronization to protect concurrent access.
+//
+// Session Allowlists: The manager maintains session-scoped allowlists that persist
+// for the lifetime of the manager. When a user approves "allow all X this session",
+// subsequent calls for that category are automatically allowed.
 type PermissionManager struct {
-	mu        sync.RWMutex
-	config    *PermissionConfig
-	confirmer ConfirmToolFunc
+	mu             sync.RWMutex
+	config         *PermissionConfig
+	confirmer      ConfirmToolFunc
+	sessionAllowed map[string]bool // Maps category keys to allowed status
 }
 
 // NewPermissionManager creates a new permission manager with the given configuration.
@@ -113,8 +220,9 @@ func NewPermissionManager(config *PermissionConfig, confirmer ConfirmToolFunc) *
 		config = &PermissionConfig{Mode: PermissionModeDefault}
 	}
 	return &PermissionManager{
-		config:    config,
-		confirmer: confirmer,
+		config:         config,
+		confirmer:      confirmer,
+		sessionAllowed: make(map[string]bool),
 	}
 }
 
@@ -123,18 +231,21 @@ func NewPermissionManager(config *PermissionConfig, confirmer ConfirmToolFunc) *
 // The evaluation proceeds through these steps in order:
 //
 //  1. PreToolUse Hooks - Each hook can return allow/deny/ask to short-circuit
-//  2. Deny Rules - First matching deny rule blocks the tool
-//  3. Allow Rules - First matching allow rule permits the tool
-//  4. Ask Rules - First matching ask rule prompts the user
-//  5. Permission Mode Check - Mode-specific logic (bypass, plan, acceptEdits)
-//  6. CanUseTool Callback - Final programmatic decision point
-//  7. Default to Ask - If nothing else decided, prompt the user
+//  2. Session Allowlist - Check if category is allowed for this session
+//  3. Deny Rules - First matching deny rule blocks the tool
+//  4. Allow Rules - First matching allow rule permits the tool
+//  5. Ask Rules - First matching ask rule prompts the user
+//  6. Permission Mode Check - Mode-specific logic (bypass, plan, acceptEdits)
+//  7. CanUseTool Callback - Final programmatic decision point
+//  8. Default to Ask - If nothing else decided, prompt the user
 //
 // At each step, returning ToolHookAllow, ToolHookDeny, or ToolHookAsk terminates
 // the flow. Only ToolHookContinue (or nil) passes control to the next step.
 //
 // Returns:
-//   - *ToolHookResult: The permission decision (allow, deny, or ask)
+//   - *ToolHookResult: The permission decision (allow, deny, or ask).
+//     The Category field is populated when the decision was based on
+//     session allowlists or category-based rules.
 //   - error: Any error from hooks or callbacks (terminates evaluation)
 func (pm *PermissionManager) EvaluateToolUse(
 	ctx context.Context,
@@ -158,19 +269,32 @@ func (pm *PermissionManager) EvaluateToolUse(
 		}
 	}
 
-	// Step 2-4: Evaluate rules (deny → allow → ask)
+	// Step 2: Check session allowlist
+	if tool != nil {
+		category := GetToolCategory(tool.Name())
+		pm.mu.RLock()
+		allowed := pm.sessionAllowed[category.Key]
+		pm.mu.RUnlock()
+		if allowed {
+			result := AllowResult()
+			result.Category = &category
+			return result, nil
+		}
+	}
+
+	// Step 3-5: Evaluate rules (deny → allow → ask)
 	result := pm.evaluateRules(tool, call)
 	if result != nil {
 		return result, nil
 	}
 
-	// Step 5: Check permission mode
+	// Step 6: Check permission mode
 	result = pm.evaluateMode(tool, call)
 	if result != nil && result.Action != ToolHookContinue {
 		return result, nil
 	}
 
-	// Step 6: Call CanUseTool callback
+	// Step 7: Call CanUseTool callback
 	if pm.config.CanUseTool != nil {
 		result, err := pm.config.CanUseTool(ctx, tool, call)
 		if err != nil {
@@ -181,8 +305,13 @@ func (pm *PermissionManager) EvaluateToolUse(
 		}
 	}
 
-	// Step 7: Default to ask
-	return AskResult(""), nil
+	// Step 8: Default to ask with category info
+	askResult := AskResult("")
+	if tool != nil {
+		category := GetToolCategory(tool.Name())
+		askResult.Category = &category
+	}
+	return askResult, nil
 }
 
 // evaluateRules checks deny, allow, and ask rules in order.
@@ -415,6 +544,104 @@ func (pm *PermissionManager) Rules() PermissionRules {
 	result := make(PermissionRules, len(pm.config.Rules))
 	copy(result, pm.config.Rules)
 	return result
+}
+
+// AllowForSession marks a tool category as allowed for the remainder of this session.
+// When a category is allowed, all tools in that category will be auto-approved
+// by [PermissionManager.EvaluateToolUse] without prompting the user.
+//
+// This is typically called when a user selects "allow all X this session" in a
+// confirmation dialog. The category key should match the Key field from [ToolCategory].
+//
+// Session allowlists are checked early in the permission flow (step 2), after
+// PreToolUse hooks but before rules. This means session allowlists can override
+// deny rules that would otherwise block a tool.
+//
+// Thread-safe: can be called concurrently with [EvaluateToolUse].
+//
+// Example:
+//
+//	// Using category keys directly
+//	pm.AllowForSession("bash")  // Allow all bash commands this session
+//	pm.AllowForSession("edit")  // Allow all file edits this session
+//
+//	// From a tool call result
+//	result, _ := pm.EvaluateToolUse(ctx, tool, call, agent)
+//	if result.Action == dive.ToolHookAsk && userApprovedAll {
+//	    pm.AllowForSession(result.Category.Key)
+//	}
+func (pm *PermissionManager) AllowForSession(categoryKey string) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.sessionAllowed[categoryKey] = true
+}
+
+// AllowCategoryForSession is a convenience method that takes a [ToolCategory]
+// and allows it for the session. This is equivalent to calling
+// [PermissionManager.AllowForSession] with category.Key.
+//
+// Use this when you have a ToolCategory struct (e.g., from [GetToolCategory]
+// or one of the predefined categories like [ToolCategoryBash]).
+//
+// Example:
+//
+//	pm.AllowCategoryForSession(dive.ToolCategoryBash)
+//	pm.AllowCategoryForSession(dive.GetToolCategory(tool.Name()))
+func (pm *PermissionManager) AllowCategoryForSession(category ToolCategory) {
+	pm.AllowForSession(category.Key)
+}
+
+// IsSessionAllowed checks if a tool category is allowed for this session.
+// Returns true if [AllowForSession] was previously called with this category key.
+//
+// Thread-safe: can be called concurrently with other methods.
+//
+// Example:
+//
+//	if pm.IsSessionAllowed("bash") {
+//	    // Skip confirmation dialog
+//	}
+func (pm *PermissionManager) IsSessionAllowed(categoryKey string) bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.sessionAllowed[categoryKey]
+}
+
+// SessionAllowedCategories returns a list of all category keys currently allowed
+// for this session. The returned slice is a copy and can be safely modified.
+//
+// This is useful for displaying which categories have been allowed in a UI,
+// or for persisting session state.
+//
+// Example:
+//
+//	allowed := pm.SessionAllowedCategories()
+//	for _, key := range allowed {
+//	    fmt.Printf("Allowed: %s\n", key)
+//	}
+func (pm *PermissionManager) SessionAllowedCategories() []string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	result := make([]string, 0, len(pm.sessionAllowed))
+	for key, allowed := range pm.sessionAllowed {
+		if allowed {
+			result = append(result, key)
+		}
+	}
+	return result
+}
+
+// ClearSessionAllowlist removes all session-scoped allowlist entries.
+// After calling this, all tools will require their normal permission checks again.
+//
+// This is useful for resetting permissions at the start of a new task or when
+// the user wants to re-enable confirmations for previously allowed categories.
+//
+// Thread-safe: can be called concurrently with other methods.
+func (pm *PermissionManager) ClearSessionAllowlist() {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.sessionAllowed = make(map[string]bool)
 }
 
 // extractCommand extracts the command string from tool input.
