@@ -1254,8 +1254,13 @@ func (a *App) Run() error {
 		KittyKeyboard:  true,
 	})
 
-	// Print intro to scrollback first
-	a.printIntroToScrollback()
+	// If resuming a session, print the conversation history instead of the intro
+	if a.resumeSessionID != "" {
+		a.printSessionHistoryToScrollback()
+	} else {
+		// Print intro to scrollback for new sessions
+		a.printIntroToScrollback()
+	}
 
 	// Submit initial prompt if provided (after a brief delay to let the UI initialize)
 	if a.initialPrompt != "" {
@@ -1302,6 +1307,157 @@ func (a *App) printIntroToScrollback() {
 	// Print the intro view
 	view := a.introView(msg)
 	tui.Print(tui.PaddingHV(1, 0, view))
+}
+
+// printSessionHistoryToScrollback prints the conversation history from a resumed session
+// to the scrollback buffer, so it appears as if continuing from where we left off.
+func (a *App) printSessionHistoryToScrollback() {
+	if a.resumeSessionID == "" {
+		return
+	}
+	if a.sessionRepo == nil {
+		return
+	}
+
+	// Load the session from the repository
+	session, err := a.sessionRepo.GetSession(a.ctx, a.resumeSessionID)
+	if err != nil {
+		return
+	}
+
+	// Build a map of tool use ID -> tool result for matching
+	toolResults := make(map[string]*llm.ToolResultContent)
+	for _, msg := range session.Messages {
+		for _, content := range msg.Content {
+			if result, ok := content.(*llm.ToolResultContent); ok {
+				toolResults[result.ToolUseID] = result
+			}
+		}
+	}
+
+	// Convert and print each message
+	messageViews := []tui.View{}
+	for _, msg := range session.Messages {
+		views := a.convertLLMMessageToViews(msg, toolResults)
+		messageViews = append(messageViews, views...)
+	}
+
+	// Print all messages as a single view
+	if len(messageViews) > 0 {
+		tui.Print(tui.Stack(messageViews...))
+	}
+}
+
+// convertLLMMessageToViews converts an llm.Message to app Message views for display.
+func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]*llm.ToolResultContent) []tui.View {
+	var views []tui.View
+
+	for _, content := range msg.Content {
+		switch c := content.(type) {
+		case *llm.TextContent:
+			if c.Text == "" {
+				continue
+			}
+			appMsg := Message{
+				Role:    string(msg.Role),
+				Content: c.Text,
+				Time:    time.Now(),
+				Type:    MessageTypeText,
+			}
+			view := a.textMessageViewStatic(appMsg)
+			if view != nil {
+				views = append(views, tui.Text(""), view)
+			}
+
+		case *llm.ToolUseContent:
+			// Find the corresponding result if available
+			result := toolResults[c.ID]
+
+			toolTitle := a.toolTitles[c.Name]
+			if toolTitle == "" {
+				toolTitle = c.Name
+			}
+
+			appMsg := Message{
+				Role:      "assistant",
+				Time:      time.Now(),
+				Type:      MessageTypeToolCall,
+				ToolID:    c.ID,
+				ToolName:  c.Name,
+				ToolTitle: toolTitle,
+				ToolInput: string(c.Input),
+				ToolDone:  result != nil,
+			}
+
+			// If we have a result, extract its content
+			if result != nil {
+				appMsg.ToolError = result.IsError
+				resultText := extractToolResultText(result)
+				if resultText != "" {
+					appMsg.ToolResultLines = strings.Split(resultText, "\n")
+					if len(appMsg.ToolResultLines) > 0 {
+						appMsg.ToolResult = appMsg.ToolResultLines[0]
+					}
+				}
+			}
+
+			view := a.toolCallViewStatic(appMsg)
+			if view != nil {
+				views = append(views, tui.Text(""), view)
+			}
+
+		case *llm.SummaryContent:
+			// Show compaction summaries as system messages
+			if c.Summary != "" {
+				appMsg := Message{
+					Role:    "system",
+					Content: "[Context compacted]",
+					Time:    time.Now(),
+					Type:    MessageTypeText,
+				}
+				view := a.textMessageViewStatic(appMsg)
+				if view != nil {
+					views = append(views, tui.Text(""), view)
+				}
+			}
+		}
+	}
+
+	return views
+}
+
+// extractToolResultText extracts text content from a tool result.
+func extractToolResultText(result *llm.ToolResultContent) string {
+	if result.Content == nil {
+		return ""
+	}
+
+	switch content := result.Content.(type) {
+	case string:
+		return content
+	case []byte:
+		return string(content)
+	case []interface{}:
+		// Array of content objects
+		var texts []string
+		for _, item := range content {
+			if m, ok := item.(map[string]interface{}); ok {
+				if t, ok := m["type"].(string); ok && t == "text" {
+					if text, ok := m["text"].(string); ok {
+						texts = append(texts, text)
+					}
+				}
+			}
+		}
+		return strings.Join(texts, "\n")
+	default:
+		// Try JSON marshaling as fallback
+		data, err := json.Marshal(content)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
 }
 
 func (a *App) handleCommand(input string) bool {
