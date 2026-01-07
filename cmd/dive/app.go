@@ -189,9 +189,14 @@ type DialogOption struct {
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
 	agent        *dive.StandardAgent
-	threadRepo   dive.ThreadRepository
+	sessionRepo  dive.SessionRepository
 	workspaceDir string
 	modelName    string
+
+	// Session management
+	resumeSessionID  string // Session ID to resume (from --resume flag)
+	forkSession      bool   // Create new session when resuming (from --fork-session flag)
+	currentSessionID string // Current active session ID
 
 	// InlineApp runner
 	runner *tui.InlineApp
@@ -255,10 +260,12 @@ type App struct {
 // NewApp creates a new CLI application
 func NewApp(
 	agent *dive.StandardAgent,
-	threadRepo dive.ThreadRepository,
+	sessionRepo dive.SessionRepository,
 	workspaceDir, modelName string,
 	initialPrompt string,
 	compactionConfig *dive.CompactionConfig,
+	resumeSessionID string,
+	forkSession bool,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -274,9 +281,11 @@ func NewApp(
 
 	return &App{
 		agent:            agent,
-		threadRepo:       threadRepo,
+		sessionRepo:      sessionRepo,
 		workspaceDir:     workspaceDir,
 		modelName:        modelName,
+		resumeSessionID:  resumeSessionID,
+		forkSession:      forkSession,
 		messages:         make([]Message, 0),
 		toolCallIndex:    make(map[string]int),
 		toolTitles:       toolTitles,
@@ -863,11 +872,20 @@ func (a *App) processMessageAsync(input string) {
 	// resp.Usage is accumulated across tool iterations which inflates context size
 	var lastUsage *llm.Usage
 
-	// Create response with streaming
-	resp, err := a.agent.CreateResponse(a.ctx,
+	// Determine session ID to use
+	sessionID := a.currentSessionID
+	if sessionID == "" && a.resumeSessionID != "" {
+		sessionID = a.resumeSessionID
+	}
+
+	// Build options for CreateResponse
+	opts := []dive.CreateResponseOption{
 		dive.WithInput(expanded),
-		dive.WithThreadID("main"),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+			// Capture session ID from init event
+			if item.Type == dive.ResponseItemTypeInit && item.Init != nil {
+				a.currentSessionID = item.Init.SessionID
+			}
 			// Send events for each agent response item
 			switch item.Type {
 			case dive.ResponseItemTypeModelEvent:
@@ -888,10 +906,31 @@ func (a *App) processMessageAsync(input string) {
 			}
 			return nil
 		}),
-	)
+	}
+
+	// Add session ID if we have one
+	if sessionID != "" {
+		opts = append(opts, dive.WithSessionID(sessionID))
+	}
+
+	// Add fork option if this is the first message and fork is requested
+	if a.currentSessionID == "" && a.forkSession && a.resumeSessionID != "" {
+		opts = append(opts, dive.WithFork(true))
+	}
+
+	// Track if this is a new session (for metadata update)
+	isNewSession := sessionID == ""
+
+	// Create response with streaming
+	resp, err := a.agent.CreateResponse(a.ctx, opts...)
+
+	// Update session metadata for new sessions
+	if err == nil && resp != nil && a.sessionRepo != nil && isNewSession && a.currentSessionID != "" {
+		a.updateSessionMetadata(input)
+	}
 
 	// Check for compaction after successful response
-	if err == nil && resp != nil && a.compactionConfig != nil && a.threadRepo != nil {
+	if err == nil && resp != nil && a.compactionConfig != nil && a.sessionRepo != nil {
 		a.checkAndPerformCompaction(lastUsage)
 	}
 
@@ -899,10 +938,71 @@ func (a *App) processMessageAsync(input string) {
 	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err})
 }
 
+// updateSessionMetadata updates a session with workspace and title information
+func (a *App) updateSessionMetadata(firstMessage string) {
+	session, err := a.sessionRepo.GetSession(a.ctx, a.currentSessionID)
+	if err != nil || session == nil {
+		return
+	}
+
+	// Only update if metadata is not already set
+	needsUpdate := false
+
+	// Set workspace if not already set
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	if _, hasWorkspace := session.Metadata["workspace"]; !hasWorkspace {
+		session.Metadata["workspace"] = a.workspaceDir
+		needsUpdate = true
+	}
+
+	// Generate title from first message if not already set
+	if session.Title == "" {
+		session.Title = generateSessionTitle(firstMessage)
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		_ = a.sessionRepo.PutSession(a.ctx, session)
+	}
+}
+
+// generateSessionTitle creates a short title from the first user message
+func generateSessionTitle(message string) string {
+	// Clean up the message
+	title := strings.TrimSpace(message)
+
+	// Remove file references
+	title = strings.ReplaceAll(title, "<file path=", "")
+
+	// Take first line only
+	if idx := strings.Index(title, "\n"); idx > 0 {
+		title = title[:idx]
+	}
+
+	// Truncate to reasonable length
+	if len(title) > 60 {
+		// Try to truncate at word boundary
+		truncated := title[:60]
+		if lastSpace := strings.LastIndex(truncated, " "); lastSpace > 40 {
+			title = truncated[:lastSpace] + "..."
+		} else {
+			title = truncated + "..."
+		}
+	}
+
+	if title == "" {
+		title = "Untitled session"
+	}
+
+	return title
+}
+
 // checkAndPerformCompaction checks if compaction is needed and performs it.
 // Uses lastUsage (from final LLM call) for accurate context size measurement.
 func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
-	if lastUsage == nil {
+	if lastUsage == nil || a.currentSessionID == "" {
 		return
 	}
 
@@ -912,14 +1012,14 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 		threshold = dive.DefaultContextTokenThreshold
 	}
 
-	// Get the thread to check message count
-	thread, err := a.threadRepo.GetThread(a.ctx, "main")
-	if err != nil || thread == nil {
+	// Get the session to check message count
+	session, err := a.sessionRepo.GetSession(a.ctx, a.currentSessionID)
+	if err != nil || session == nil {
 		return
 	}
 
 	// Check if compaction should trigger
-	if !dive.ShouldCompact(lastUsage, len(thread.Messages), threshold) {
+	if !dive.ShouldCompact(lastUsage, len(session.Messages), threshold) {
 		return
 	}
 
@@ -936,7 +1036,7 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 	compactedMsgs, event, err := dive.CompactMessages(
 		a.ctx,
 		model,
-		thread.Messages,
+		session.Messages,
 		"", // System prompt - can be empty for summary generation
 		a.compactionConfig.SummaryPrompt,
 		tokensBefore,
@@ -946,16 +1046,16 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 		return
 	}
 
-	// Update thread with compacted messages
-	thread.Messages = compactedMsgs
-	thread.CompactionHistory = append(thread.CompactionHistory, dive.CompactionRecord{
+	// Update session with compacted messages
+	session.Messages = compactedMsgs
+	session.CompactionHistory = append(session.CompactionHistory, dive.CompactionRecord{
 		Timestamp:         time.Now(),
 		TokensBefore:      event.TokensBefore,
 		TokensAfter:       event.TokensAfter,
 		MessagesCompacted: event.MessagesCompacted,
 	})
 
-	if err := a.threadRepo.PutThread(a.ctx, thread); err != nil {
+	if err := a.sessionRepo.PutSession(a.ctx, session); err != nil {
 		return
 	}
 
@@ -1177,10 +1277,22 @@ func (a *App) printIntroToScrollback() {
 		wsDisplay = "~" + wsDisplay[len(home):]
 	}
 
+	// Build intro content
+	content := a.modelName + "\n" + wsDisplay
+
+	// Add session info if resuming
+	if a.resumeSessionID != "" {
+		sessionInfo := "Resuming session: " + a.resumeSessionID
+		if a.forkSession {
+			sessionInfo = "Forking session: " + a.resumeSessionID
+		}
+		content += "\n" + sessionInfo
+	}
+
 	// Build intro message
 	msg := Message{
 		Role:    "intro",
-		Content: a.modelName + "\n" + wsDisplay,
+		Content: content,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
 	}

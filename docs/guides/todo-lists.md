@@ -9,7 +9,7 @@ Dive's todo system provides:
 1. A `TodoWrite` tool for agents to create and update task lists
 2. Real-time `TodoEvent` emissions through the event callback system
 3. A `TodoTracker` helper for consuming and displaying progress
-4. Thread-safe state management for concurrent access
+4. Concurrent-safe state management for parallel access
 
 ## Basic Usage
 
@@ -331,9 +331,9 @@ func main() {
 
 Todo state persists across compaction. The summary will include task progress, and agents can continue from where they left off.
 
-### With Thread Persistence
+### With Session Persistence
 
-Todo updates are tracked in the event stream. While the tool state itself isn't persisted, the agent's todo usage is recorded in thread messages.
+Todo updates are tracked in the event stream. While the tool state itself isn't persisted, the agent's todo usage is recorded in session messages.
 
 ### With Skills
 

@@ -10,7 +10,7 @@ Complete API reference for Dive agent types (now in the main dive package), cove
 - [Model Settings](#model-settings)
 - [Response Handling](#response-handling)
 - [Tool Integration](#tool-integration)
-- [Thread Management](#thread-management)
+- [Session Management](#session-management)
 - [Error Handling](#error-handling)
 - [Examples](#examples)
 
@@ -41,8 +41,8 @@ type Agent interface {
 Options that can be passed to `CreateResponse` and `StreamResponse`:
 
 ```go
-// WithThreadID associates a conversation thread ID with generation
-func WithThreadID(threadID string) Option
+// WithSessionID associates a conversation session ID with generation
+func WithSessionID(sessionID string) Option
 
 // WithUserID associates a user ID with generation
 func WithUserID(userID string) Option
@@ -82,7 +82,7 @@ type StandardAgent struct {
     toolIterationLimit   int
     modelSettings        *ModelSettings
     dateAwareness        *bool
-    threadRepository     dive.ThreadRepository
+    sessionRepository    dive.SessionRepository
     confirmer            dive.Confirmer
     systemPromptTemplate *template.Template
     context              []llm.Content
@@ -159,7 +159,7 @@ type Options struct {
     SystemPromptTemplate string                    // Custom system prompt template
 
     // Integration
-    ThreadRepository     dive.ThreadRepository     // Conversation storage
+    SessionRepository    dive.SessionRepository    // Conversation storage
     Confirmer            dive.Confirmer            // User confirmation handler
 
     // Advanced
@@ -259,7 +259,7 @@ type Response interface {
 
     // Metadata
     ID() string                     // Unique response identifier
-    ThreadID() string               // Associated thread identifier
+    SessionID() string              // Associated session identifier
     Usage() *TokenUsage             // Token usage statistics
 
     // Event access
@@ -355,32 +355,32 @@ const (
 )
 ```
 
-## Thread Management
+## Session Management
 
-### Thread Repository
+### Session Repository
 
 ```go
-type ThreadRepository interface {
-    // Thread lifecycle
-    CreateThread(ctx context.Context, thread *Thread) error
-    GetThread(ctx context.Context, threadID string) (*Thread, error)
-    UpdateThread(ctx context.Context, thread *Thread) error
-    DeleteThread(ctx context.Context, threadID string) error
+type SessionRepository interface {
+    // Session lifecycle
+    CreateSession(ctx context.Context, session *Session) error
+    GetSession(ctx context.Context, sessionID string) (*Session, error)
+    UpdateSession(ctx context.Context, session *Session) error
+    DeleteSession(ctx context.Context, sessionID string) error
 
     // Message management
-    AddMessage(ctx context.Context, threadID string, message *Message) error
-    GetMessages(ctx context.Context, threadID string, limit int, offset int) ([]*Message, error)
+    AddMessage(ctx context.Context, sessionID string, message *Message) error
+    GetMessages(ctx context.Context, sessionID string, limit int, offset int) ([]*Message, error)
 
     // Search and filtering
-    ListThreads(ctx context.Context, userID string, limit int, offset int) ([]*Thread, error)
-    SearchThreads(ctx context.Context, query string, userID string) ([]*Thread, error)
+    ListSessions(ctx context.Context, userID string, limit int, offset int) ([]*Session, error)
+    SearchSessions(ctx context.Context, query string, userID string) ([]*Session, error)
 }
 ```
 
-### Thread Structure
+### Session Structure
 
 ```go
-type Thread struct {
+type Session struct {
     ID        string                 `json:"id"`
     UserID    string                 `json:"user_id,omitempty"`
     CreatedAt time.Time              `json:"created_at"`
@@ -391,7 +391,7 @@ type Thread struct {
 
 type Message struct {
     ID        string                 `json:"id"`
-    ThreadID  string                 `json:"thread_id"`
+    SessionID string                 `json:"session_id"`
     Role      string                 `json:"role"`      // "user", "assistant", "system"
     Content   string                 `json:"content"`
     ToolCalls []*ToolCall            `json:"tool_calls,omitempty"`
@@ -404,13 +404,10 @@ type Message struct {
 
 ```go
 // In-memory repository (not persistent)
-func NewInMemoryThreadRepository() ThreadRepository
+func NewMemorySessionRepository() SessionRepository
 
 // File-based repository
-func NewFileThreadRepository(basePath string) ThreadRepository
-
-// PostgreSQL repository
-func NewPostgresThreadRepository(connectionString string) (ThreadRepository, error)
+func NewFileSessionRepository(basePath string) (SessionRepository, error)
 ```
 
 ## Error Handling
@@ -419,10 +416,10 @@ func NewPostgresThreadRepository(connectionString string) (ThreadRepository, err
 
 ```go
 var (
-    ErrThreadsAreNotEnabled = errors.New("threads are not enabled")
-    ErrLLMNoResponse       = errors.New("llm did not return a response")
-    ErrNoInstructions      = errors.New("no instructions provided")
-    ErrNoLLM               = errors.New("no llm provided")
+    ErrSessionsNotEnabled = errors.New("sessions are not enabled")
+    ErrLLMNoResponse      = errors.New("llm did not return a response")
+    ErrNoInstructions     = errors.New("no instructions provided")
+    ErrNoLLM              = errors.New("no llm provided")
 )
 ```
 
@@ -438,7 +435,7 @@ type ConfigurationError struct {
 // Runtime errors
 type ResponseError struct {
     AgentName string
-    ThreadID  string
+    SessionID string
     Cause     error
 }
 
@@ -516,13 +513,12 @@ func main() {
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/threads"
     "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 func createAdvancedAgent() (dive.Agent, error) {
-    // Create thread repository for memory
-    threadRepo := threads.NewMemoryRepository()
+    // Create session repository for memory
+    sessionRepo := dive.NewMemorySessionRepository()
 
     // Create agent with tools and memory
     return dive.NewAgent(dive.AgentOptions{
@@ -537,7 +533,7 @@ func createAdvancedAgent() (dive.Agent, error) {
             dive.ToolAdapter(toolkit.NewReadFileTool()),
             dive.ToolAdapter(toolkit.NewWriteFileTool()),
         },
-        ThreadRepository: threadRepo,
+        SessionRepository: sessionRepo,
         ModelSettings: &dive.ModelSettings{
             Temperature:       &[]float64{0.7}[0],
             MaxTokens:         &[]int{4000}[0],

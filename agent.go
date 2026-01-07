@@ -16,7 +16,7 @@ import (
 var (
 	defaultResponseTimeout    = time.Minute * 10
 	defaultToolIterationLimit = 100
-	ErrThreadsAreNotEnabled   = errors.New("threads are not enabled")
+	ErrSessionsAreNotEnabled  = errors.New("sessions are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
 	ErrNoInstructions         = errors.New("no instructions provided")
 	ErrNoLLM                  = errors.New("no llm provided")
@@ -68,8 +68,13 @@ type AgentOptions struct {
 	ToolIterationLimit int
 	ModelSettings      *ModelSettings
 	DateAwareness      *bool
-	ThreadRepository   ThreadRepository
-	SystemPrompt       string
+
+	// SessionRepository enables persistent multi-turn conversations.
+	// When set, the agent loads and saves session history automatically.
+	// Use with WithSessionID or WithResume to continue conversations.
+	SessionRepository SessionRepository
+
+	SystemPrompt string
 	NoSystemPrompt     bool
 	Context            []llm.Content
 
@@ -111,7 +116,7 @@ type StandardAgent struct {
 	toolIterationLimit   int
 	modelSettings        *ModelSettings
 	dateAwareness        *bool
-	threadRepository     ThreadRepository
+	sessionRepository    SessionRepository
 	interactor           UserInteractor
 	permissionManager    *PermissionManager
 	systemPromptTemplate *template.Template
@@ -160,7 +165,7 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		hooks:                opts.Hooks,
 		logger:               opts.Logger,
 		dateAwareness:        opts.DateAwareness,
-		threadRepository:     opts.ThreadRepository,
+		sessionRepository:    opts.SessionRepository,
 		systemPromptTemplate: systemPromptTemplate,
 		modelSettings:        opts.ModelSettings,
 		interactor:           opts.Interactor,
@@ -248,27 +253,27 @@ func (a *StandardAgent) Model() llm.LLM {
 	return a.model
 }
 
-func (a *StandardAgent) prepareThread(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) (*Thread, error) {
-	thread, err := a.getOrCreateThread(ctx, options.ThreadID, options)
+func (a *StandardAgent) prepareSession(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) (*Session, error) {
+	session, err := a.getOrCreateSession(ctx, options.SessionID, options)
 	if err != nil {
 		return nil, err
 	}
-	thread.Messages = append(thread.Messages, messages...)
-	return thread, nil
+	session.Messages = append(session.Messages, messages...)
+	return session, nil
 }
 
 func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
 	var options CreateResponseOptions
 	options.Apply(opts)
 
-	// Auto-generate thread ID if not provided
-	if options.ThreadID == "" {
-		options.ThreadID = newThreadID()
+	// Auto-generate session ID if not provided
+	if options.SessionID == "" {
+		options.SessionID = newSessionID()
 	}
 
 	logger := a.logger.With(
 		"agent_name", a.name,
-		"thread_id", options.ThreadID,
+		"session_id", options.SessionID,
 		"user_id", options.UserID,
 	)
 	logger.Info("creating response")
@@ -278,21 +283,21 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	// Handle forking BEFORE prepareThread to avoid modifying the original thread
-	if options.Fork && a.threadRepository != nil && options.ThreadID != "" {
-		forkedThread, err := a.threadRepository.ForkThread(ctx, options.ThreadID)
-		if err != nil && err != ErrThreadNotFound {
-			return nil, fmt.Errorf("failed to fork thread: %w", err)
+	// Handle forking BEFORE prepareSession to avoid modifying the original session
+	if options.Fork && a.sessionRepository != nil && options.SessionID != "" {
+		forkedSession, err := a.sessionRepository.ForkSession(ctx, options.SessionID)
+		if err != nil && err != ErrSessionNotFound {
+			return nil, fmt.Errorf("failed to fork session: %w", err)
 		}
-		if forkedThread != nil {
-			// Update options to use the forked thread ID
-			options.ThreadID = forkedThread.ID
-			logger = logger.With("forked_from", options.ThreadID, "forked_to", forkedThread.ID)
-			logger.Info("forked thread")
+		if forkedSession != nil {
+			// Update options to use the forked session ID
+			options.SessionID = forkedSession.ID
+			logger = logger.With("forked_from", options.SessionID, "forked_to", forkedSession.ID)
+			logger.Info("forked session")
 		}
 	}
 
-	thread, err := a.prepareThread(ctx, messages, options)
+	session, err := a.prepareSession(ctx, messages, options)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +317,7 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 
 	response := &Response{
 		ID:        randomInt(),
-		ThreadID:  thread.ID,
+		SessionID: session.ID,
 		Model:     a.model.Name(),
 		CreatedAt: time.Now(),
 	}
@@ -327,7 +332,7 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 				initEventEmitted = true
 				initItem := &ResponseItem{
 					Type: ResponseItemTypeInit,
-					Init: &InitEvent{ThreadID: thread.ID},
+					Init: &InitEvent{SessionID: session.ID},
 				}
 				if err := options.EventCallback(ctx, initItem); err != nil {
 					return err
@@ -338,17 +343,17 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		return nil
 	}
 
-	genResult, err := a.generate(ctx, thread.Messages, systemPrompt, eventCallback)
+	genResult, err := a.generate(ctx, session.Messages, systemPrompt, eventCallback)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
 		return nil, err
 	}
 
-	thread.Messages = append(thread.Messages, genResult.OutputMessages...)
+	session.Messages = append(session.Messages, genResult.OutputMessages...)
 
-	if a.threadRepository != nil {
-		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
-			logger.Error("failed to save thread", "error", err)
+	if a.sessionRepository != nil {
+		if err := a.sessionRepository.PutSession(ctx, session); err != nil {
+			logger.Error("failed to save session", "error", err)
 			return nil, err
 		}
 	}
@@ -378,19 +383,19 @@ func (a *StandardAgent) prepareMessages(options CreateResponseOptions) []*llm.Me
 	return messages
 }
 
-func (a *StandardAgent) getOrCreateThread(ctx context.Context, threadID string, options CreateResponseOptions) (*Thread, error) {
-	if a.threadRepository != nil {
-		thread, err := a.threadRepository.GetThread(ctx, threadID)
+func (a *StandardAgent) getOrCreateSession(ctx context.Context, sessionID string, options CreateResponseOptions) (*Session, error) {
+	if a.sessionRepository != nil {
+		session, err := a.sessionRepository.GetSession(ctx, sessionID)
 		if err != nil {
-			if err != ErrThreadNotFound {
+			if err != ErrSessionNotFound {
 				return nil, err
 			}
 		} else {
-			return thread, nil
+			return session, nil
 		}
 	}
-	return &Thread{
-		ID:        threadID,
+	return &Session{
+		ID:        sessionID,
 		UserID:    options.UserID,
 		AgentID:   a.id,
 		AgentName: a.name,

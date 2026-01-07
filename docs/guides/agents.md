@@ -10,7 +10,7 @@ Agents are the core building blocks of Dive applications. They represent intelli
 - [Tool Integration](#tool-integration)
 - [Supervisor Patterns](#supervisor-patterns)
 - [Subagents](#subagents)
-- [Thread Management](#thread-management)
+- [Session Management](#session-management)
 - [Best Practices](#best-practices)
 
 ## What is an Agent?
@@ -486,47 +486,95 @@ Key behaviors:
 - If `def.Tools` specifies tool names, only those tools are included
 - The Task tool is **never** included, preventing nested subagent spawning
 
-## Thread Management
+## Session Management
+
+Sessions enable persistent multi-turn conversations across multiple `CreateResponse` calls. Each session maintains a complete message history, allowing agents to remember context from previous interactions.
 
 ### Persistent Conversations
 
 ```go
-
-// Set up thread repository
-threadRepo := threads.NewMemoryRepository()
+// Set up session repository for file-based persistence
+sessionRepo, err := dive.NewFileSessionRepository("~/.myapp/sessions")
+if err != nil {
+    panic(err)
+}
 
 agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:             "Assistant",
-    ThreadRepository: threadRepo,
+    Name:              "Assistant",
+    Model:             anthropic.New(),
+    SessionRepository: sessionRepo,
 })
 
-// First interaction
+// First interaction - auto-generates session ID
 response1, err := agent.CreateResponse(
     context.Background(),
-    dive.WithThreadID("user-123"),
     dive.WithInput("My name is Alice"),
 )
+sessionID := response1.SessionID // Save this to resume later
 
 // Later interaction - agent remembers previous context
 response2, err := agent.CreateResponse(
     context.Background(),
-    dive.WithThreadID("user-123"),
+    dive.WithResume(sessionID),
     dive.WithInput("What's my name?"),
 )
 // Agent will respond with "Alice"
 ```
 
-### Thread Storage Options
+### Session Storage Options
 
 ```go
 // In-memory (development/testing)
-threadRepo := threads.NewMemoryRepository()
+sessionRepo := dive.NewMemorySessionRepository()
 
-// File-based (simple persistence)
-threadRepo := threads.NewDiskRepository("./threads")
+// File-based (CLI applications, single-user deployments)
+// Stores sessions as JSON files in ~/.myapp/sessions/{session_id}.json
+sessionRepo, err := dive.NewFileSessionRepository("~/.myapp/sessions")
 
-// Database-based (production)
-// Implement dive.ThreadRepository interface
+// Database-based (production, multi-user)
+// Implement the dive.SessionRepository interface
+```
+
+### Forking Sessions
+
+Create conversation branches to explore alternative paths while preserving the original:
+
+```go
+// Fork from an existing session
+response, err := agent.CreateResponse(
+    context.Background(),
+    dive.WithResume("original-session-id"),
+    dive.WithFork(true),
+    dive.WithInput("Let's try a different approach"),
+)
+// response.SessionID is a new ID; original session is unchanged
+```
+
+### Session Metadata
+
+Sessions automatically store:
+- **ID**: Unique identifier (auto-generated or user-provided)
+- **Messages**: Complete conversation history
+- **Timestamps**: CreatedAt and UpdatedAt
+- **Metadata**: Custom key-value pairs (e.g., workspace directory)
+- **Title**: Human-readable description (can be auto-generated)
+
+### Capturing Session IDs
+
+Use the `InitEvent` callback to capture session IDs early in the response:
+
+```go
+var sessionID string
+response, err := agent.CreateResponse(ctx,
+    dive.WithInput("Hello"),
+    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+        if item.Type == dive.ResponseItemTypeInit && item.Init != nil {
+            sessionID = item.Init.SessionID
+            // Save sessionID for later resumption
+        }
+        return nil
+    }),
+)
 ```
 
 ## Best Practices
@@ -579,8 +627,8 @@ if err != nil {
 response, err := agent.CreateResponse(ctx, dive.WithInput(userInput))
 if err != nil {
     // Handle specific error types
-    if errors.Is(err, agent.ErrThreadsAreNotEnabled) {
-        // Handle thread configuration issue
+    if errors.Is(err, dive.ErrSessionsNotEnabled) {
+        // Handle session configuration issue
     }
     return fmt.Errorf("agent response failed: %w", err)
 }

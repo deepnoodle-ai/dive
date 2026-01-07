@@ -28,7 +28,7 @@ Options:
   --config          Configuration file path
   --agent           Agent name from config
   --system-prompt   System prompt override
-  --thread-id       Thread ID for conversation continuity
+  --session-id      Session ID for conversation continuity
 ```
 
 #### chat
@@ -43,7 +43,7 @@ Options:
   --model       Model name
   --config      Configuration file path
   --agent       Agent name from config
-  --thread-id   Thread ID for conversation continuity
+  --session-id  Session ID for conversation continuity
 ```
 
 #### classify
@@ -140,14 +140,14 @@ Options:
   --provider    Image provider
 ```
 
-#### threads
+#### sessions
 
-Manage conversation threads.
+Manage conversation sessions.
 
 ```bash
-dive threads list
-dive threads show <thread-id>
-dive threads delete <thread-id>
+dive sessions list
+dive sessions show <session-id>
+dive sessions delete <session-id>
 ```
 
 #### mcp

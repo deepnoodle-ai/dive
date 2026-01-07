@@ -16,7 +16,7 @@ type ResponseItemType string
 const (
 	// ResponseItemTypeInit indicates the start of a response with session information.
 	// This is always emitted as the first event when an EventCallback is provided.
-	// The Init field contains the ThreadID for session resumption.
+	// The Init field contains the SessionID for session resumption.
 	ResponseItemTypeInit ResponseItemType = "init"
 
 	// ResponseItemTypeMessage indicates a complete message is available from the agent.
@@ -43,28 +43,28 @@ const (
 // InitEvent is emitted at the start of a response and contains session information.
 //
 // This event is always the first item delivered to an EventCallback, allowing callers
-// to immediately capture the thread ID for session management. This is particularly
-// useful when thread IDs are auto-generated, as it provides the ID before the
+// to immediately capture the session ID for session management. This is particularly
+// useful when session IDs are auto-generated, as it provides the ID before the
 // response completes.
 //
 // Example usage in a callback:
 //
-//	var threadID string
+//	var sessionID string
 //	resp, _ := agent.CreateResponse(ctx,
 //	    dive.WithInput("Hello"),
 //	    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
 //	        if item.Type == dive.ResponseItemTypeInit {
-//	            threadID = item.Init.ThreadID
-//	            // Save threadID for later session resumption
+//	            sessionID = item.Init.SessionID
+//	            // Save sessionID for later session resumption
 //	        }
 //	        return nil
 //	    }),
 //	)
 type InitEvent struct {
-	// ThreadID is the conversation thread ID for this response.
+	// SessionID is the conversation session ID for this response.
 	// This may be a user-provided ID or an auto-generated one.
 	// Use this value with WithResume to continue the conversation later.
-	ThreadID string `json:"thread_id"`
+	SessionID string `json:"session_id"`
 }
 
 // TodoStatus represents the status of a todo item.
@@ -148,10 +148,10 @@ type Response struct {
 	// ID is a unique identifier for this response
 	ID string `json:"id,omitempty"`
 
-	// ThreadID is the conversation thread ID associated with this response.
-	// If no thread ID was provided in the request, one is auto-generated.
+	// SessionID is the conversation session ID associated with this response.
+	// If no session ID was provided in the request, one is auto-generated.
 	// Use this value to resume the conversation in subsequent requests.
-	ThreadID string `json:"thread_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 
 	// Model represents the model that generated the response
 	Model string `json:"model,omitempty"`

@@ -11,8 +11,8 @@ The compaction flow:
 1. After each agent response, check token usage from the last LLM call
 2. If context tokens exceed the threshold, trigger compaction
 3. Generate a structured summary of the conversation
-4. Replace the thread's message history with the summary
-5. Persist the compacted state to the thread repository
+4. Replace the session's message history with the summary
+5. Persist the compacted state to the session repository
 
 This enables long-running agent sessions that would otherwise exceed context limits.
 
@@ -35,21 +35,21 @@ import (
 func main() {
     ctx := context.Background()
     model := anthropic.New()
-    repo := dive.NewMemoryThreadRepository()
-    threadID := "my-thread"
+    repo := dive.NewMemorySessionRepository()
+    sessionID := "my-session"
     threshold := 100000 // Compact at 100k context tokens
 
     agent, _ := dive.NewAgent(dive.AgentOptions{
         Name:             "Assistant",
         Model:            model,
-        ThreadRepository: repo,
+        SessionRepository: repo,
     })
 
     // Track the last usage from the callback (for accurate context size)
     var lastUsage *llm.Usage
 
     resp, _ := agent.CreateResponse(ctx,
-        dive.WithThreadID(threadID),
+        dive.WithSessionID(sessionID),
         dive.WithInput("Process all files"),
         dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
             if item.Type == dive.ResponseItemTypeMessage && item.Usage != nil {
@@ -61,25 +61,25 @@ func main() {
 
     // Check if compaction is needed after the response
     if lastUsage != nil {
-        thread, _ := repo.GetThread(ctx, threadID)
-        if dive.ShouldCompact(lastUsage, len(thread.Messages), threshold) {
+        session, _ := repo.GetSession(ctx, sessionID)
+        if dive.ShouldCompact(lastUsage, len(session.Messages), threshold) {
             compactedMsgs, event, err := dive.CompactMessages(
                 ctx,
                 model,
-                thread.Messages,
+                session.Messages,
                 "",  // system prompt (optional)
                 "",  // use default summary prompt
                 dive.CalculateContextTokens(lastUsage),
             )
             if err == nil {
-                thread.Messages = compactedMsgs
-                thread.CompactionHistory = append(thread.CompactionHistory, dive.CompactionRecord{
+                session.Messages = compactedMsgs
+                session.CompactionHistory = append(session.CompactionHistory, dive.CompactionRecord{
                     Timestamp:         time.Now(),
                     TokensBefore:      event.TokensBefore,
                     TokensAfter:       event.TokensAfter,
                     MessagesCompacted: event.MessagesCompacted,
                 })
-                repo.PutThread(ctx, thread)
+                repo.PutSession(ctx, session)
                 fmt.Printf("Compacted: %d -> %d tokens\n", event.TokensBefore, event.TokensAfter)
             }
         }
@@ -98,7 +98,7 @@ func ShouldCompact(usage *llm.Usage, messageCount int, threshold int) bool
 ```
 
 - `usage`: Token usage from the last LLM call
-- `messageCount`: Number of messages in the thread
+- `messageCount`: Number of messages in the session
 - `threshold`: Token threshold (0 uses default of 100,000)
 
 Returns `true` if context tokens >= threshold and messageCount >= 2.
@@ -180,7 +180,7 @@ haiku := anthropic.New(anthropic.WithModel(anthropic.Claude35Haiku))
 compactedMsgs, event, err := dive.CompactMessages(
     ctx,
     haiku,  // Faster model for summaries
-    thread.Messages,
+    session.Messages,
     "",
     "",
     tokensBefore,
@@ -202,7 +202,7 @@ Wrap your summary in <summary></summary> tags.`
 compactedMsgs, event, err := dive.CompactMessages(
     ctx,
     model,
-    thread.Messages,
+    session.Messages,
     "",
     customPrompt,
     tokensBefore,
@@ -221,18 +221,18 @@ The built-in prompt instructs the model to create a structured continuation summ
 4. **Next Steps**: Specific actions needed, blockers, and priority order
 5. **Context to Preserve**: User preferences, domain-specific details, and commitments
 
-## Thread Persistence
+## Session Persistence
 
-When using a `ThreadRepository`, compaction affects the thread:
+When using a `SessionRepository`, compaction affects the session:
 
-1. `Thread.Messages` is replaced with the compacted summary (a single user message)
-2. `Thread.CompactionHistory` records when compaction occurred
+1. `Session.Messages` is replaced with the compacted summary (a single user message)
+2. `Session.CompactionHistory` records when compaction occurred
 
 ```go
-// After compaction, retrieve the thread
-thread, _ := repo.GetThread(ctx, threadID)
-fmt.Printf("Messages: %d\n", len(thread.Messages))  // Will be 1 (the summary)
-fmt.Printf("Compaction events: %d\n", len(thread.CompactionHistory))
+// After compaction, retrieve the session
+session, _ := repo.GetSession(ctx, sessionID)
+fmt.Printf("Messages: %d\n", len(session.Messages))  // Will be 1 (the summary)
+fmt.Printf("Compaction events: %d\n", len(session.CompactionHistory))
 ```
 
 ### Compacted Summary Format
@@ -240,9 +240,9 @@ fmt.Printf("Compaction events: %d\n", len(thread.CompactionHistory))
 The summary is stored as a user message to ensure compatibility with all LLM providers (which typically require the first message to be from the user role):
 
 ```go
-thread, _ := repo.GetThread(ctx, threadID)
-if len(thread.Messages) > 0 && thread.Messages[0].Role == llm.User {
-    for _, content := range thread.Messages[0].Content {
+session, _ := repo.GetSession(ctx, sessionID)
+if len(session.Messages) > 0 && session.Messages[0].Role == llm.User {
+    for _, content := range session.Messages[0].Content {
         if text, ok := content.(*llm.TextContent); ok {
             fmt.Printf("Compacted summary:\n%s\n", text.Text)
         }
@@ -316,5 +316,5 @@ When compaction occurs in the CLI, you'll see:
 2. **Track last usage** - Use the callback to track usage from `ResponseItemTypeMessage` events for accurate context measurement
 3. **Use faster models for summaries** - Haiku can generate quality summaries quickly
 4. **Test your workflows** - Verify important context survives compaction
-5. **Combine with thread persistence** - Use ThreadRepository to maintain compaction history
+5. **Combine with session persistence** - Use SessionRepository to maintain compaction history
 6. **Handle errors gracefully** - Compaction failures shouldn't crash your application
