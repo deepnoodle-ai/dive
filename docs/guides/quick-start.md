@@ -208,21 +208,20 @@ import (
     "strings"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
-    "github.com/deepnoodle-ai/dive/threads"
+    "github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
 func main() {
-    // Create thread repository for conversation memory
-    threadRepo := threads.NewMemoryRepository()
+    // Create session repository for conversation memory
+    sessionRepo := dive.NewMemorySessionRepository()
 
     // Create agent with memory
     assistant, err := dive.NewAgent(dive.AgentOptions{
         Name: "Chat Assistant",
         Instructions: `You are a helpful AI assistant. Remember our conversation
                       and provide helpful, contextual responses.`,
-        Model:            anthropic.New(),
-        ThreadRepository: threadRepo,
+        Model:             anthropic.New(),
+        SessionRepository: sessionRepo,
     })
     if err != nil {
         panic(err)
@@ -233,7 +232,7 @@ func main() {
     fmt.Println(strings.Repeat("=", 50))
 
     scanner := bufio.NewScanner(os.Stdin)
-    threadID := "chat-session-1"
+    sessionID := "chat-session-1"
 
     for {
         fmt.Print("\nYou: ")
@@ -251,7 +250,7 @@ func main() {
             fmt.Println("👋 Goodbye!")
             return
         case "clear":
-            threadID = dive.NewID()
+            sessionID = "" // Empty triggers auto-generation of new ID
             fmt.Println("🔄 Started new conversation")
             continue
         }
@@ -261,7 +260,7 @@ func main() {
         // Stream the response for real-time output
         stream, err := assistant.StreamResponse(
             context.Background(),
-            dive.WithThreadID(threadID),
+            dive.WithSessionID(sessionID),
             dive.WithInput(input),
         )
         if err != nil {

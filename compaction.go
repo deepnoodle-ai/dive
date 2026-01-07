@@ -9,11 +9,11 @@ package dive
 // Basic usage:
 //
 //	// After each CreateResponse call, check if compaction is needed
-//	if dive.ShouldCompact(lastUsage, len(thread.Messages), threshold) {
-//	    compactedMsgs, event, err := dive.CompactMessages(ctx, model, thread.Messages, "", "", tokensBefore)
+//	if dive.ShouldCompact(lastUsage, len(session.Messages), threshold) {
+//	    compactedMsgs, event, err := dive.CompactMessages(ctx, model, session.Messages, "", "", tokensBefore)
 //	    if err == nil {
-//	        thread.Messages = compactedMsgs
-//	        threadRepo.PutThread(ctx, thread)
+//	        session.Messages = compactedMsgs
+//	        sessionRepo.PutSession(ctx, session)
 //	    }
 //	}
 //

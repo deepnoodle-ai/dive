@@ -26,7 +26,7 @@ experimentation, but the library is the primary interface.
 - **Agent** (`dive.go:14-21`): Main abstraction for AI entities that can execute tasks and respond to chat
 - **LLM Interface** (`llm/llm.go:7-13`): Unified abstraction over different LLM providers
 - **Tool Interface** (`llm/tool.go:48-57`): Tools with schema, annotations, and permissions
-- **Thread Repository** (`thread.go:85-102`): Persistent conversation storage
+- **Session Repository** (`session.go`): Persistent conversation storage with file and memory backends
 
 ### Key Components
 

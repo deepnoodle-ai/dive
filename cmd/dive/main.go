@@ -76,6 +76,12 @@ func main() {
 				Default(100000).
 				Env("DIVE_COMPACTION_THRESHOLD").
 				Help("Token count that triggers compaction (default: 100000)"),
+			cli.Bool("resume", "r").
+				Default(false).
+				Help("Resume session (use with session ID arg, or show picker if none)"),
+			cli.Bool("fork-session", "").
+				Default(false).
+				Help("Create new session when resuming (branch conversation)"),
 		).
 		Run(runMain)
 
@@ -207,12 +213,12 @@ const (
 
 // PrintResult represents the final result for JSON output
 type PrintResult struct {
-	Output   string                `json:"output"`
-	ThreadID string                `json:"thread_id,omitempty"`
-	Usage    *llm.Usage            `json:"usage,omitempty"`
-	Todos    []dive.TodoItem       `json:"todos,omitempty"`
-	Error    string                `json:"error,omitempty"`
-	Tools    []PrintToolCallResult `json:"tools,omitempty"`
+	Output    string                `json:"output"`
+	SessionID string                `json:"session_id,omitempty"`
+	Usage     *llm.Usage            `json:"usage,omitempty"`
+	Todos     []dive.TodoItem       `json:"todos,omitempty"`
+	Error     string                `json:"error,omitempty"`
+	Tools     []PrintToolCallResult `json:"tools,omitempty"`
 }
 
 // PrintToolCallResult represents a tool call result for JSON output
@@ -478,7 +484,7 @@ func runPrintJSON(ctx context.Context, agent dive.Agent, input string) error {
 			switch item.Type {
 			case dive.ResponseItemTypeInit:
 				if item.Init != nil {
-					result.ThreadID = item.Init.ThreadID
+					result.SessionID = item.Init.SessionID
 				}
 			case dive.ResponseItemTypeTodo:
 				if item.Todo != nil {
@@ -521,14 +527,22 @@ func runPrintJSON(ctx context.Context, agent dive.Agent, input string) error {
 
 func runInteractive(ctx *cli.Context) error {
 	skipPermissions := ctx.Bool("dangerously-skip-permissions")
+	resumeMode := ctx.Bool("resume")
+	forkSession := ctx.Bool("fork-session")
 
-	// Get initial prompt from args (at most 1 arg allowed)
+	// Get args - interpretation depends on whether we're in resume mode
 	args := ctx.Args()
 	if len(args) > 1 {
 		return fmt.Errorf("expected at most 1 argument, got %d", len(args))
 	}
+
 	var initialPrompt string
-	if len(args) == 1 {
+	var resumeArg string
+	if resumeMode && len(args) == 1 {
+		// In resume mode, the arg is a session ID or filter
+		resumeArg = strings.TrimSpace(args[0])
+	} else if len(args) == 1 {
+		// Normal mode, the arg is the initial prompt
 		initialPrompt = strings.TrimSpace(args[0])
 	}
 
@@ -567,18 +581,62 @@ func runInteractive(ctx *cli.Context) error {
 	}
 	applySandboxPermissionMode(permissionConfig, cfg.sandboxConfig)
 
-	// Create thread repository for conversation memory
-	threadRepo := dive.NewMemoryThreadRepository()
+	// Create session repository for conversation memory
+	// Use FileSessionRepository for persistent sessions in ~/.dive/sessions
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	sessionsDir := filepath.Join(homeDir, ".dive", "sessions")
+	sessionRepo, err := dive.NewFileSessionRepository(sessionsDir)
+	if err != nil {
+		return fmt.Errorf("failed to create session repository: %w", err)
+	}
+
+	// Handle --resume flag
+	var resumeID string
+	if resumeMode {
+		if resumeArg == "" {
+			// No ID provided, show session picker
+			result, err := RunSessionPicker(sessionRepo, "", cfg.workspaceDir)
+			if err != nil {
+				return fmt.Errorf("session picker error: %w", err)
+			}
+			if result.Canceled {
+				return nil // User canceled, exit gracefully
+			}
+			resumeID = result.SessionID
+		} else {
+			// Check if resumeArg is a valid session ID
+			_, err := sessionRepo.GetSession(context.Background(), resumeArg)
+			if err == dive.ErrSessionNotFound {
+				// Not a valid ID, treat as search filter and show picker
+				result, err := RunSessionPicker(sessionRepo, resumeArg, cfg.workspaceDir)
+				if err != nil {
+					return fmt.Errorf("session picker error: %w", err)
+				}
+				if result.Canceled {
+					return nil // User canceled, exit gracefully
+				}
+				resumeID = result.SessionID
+			} else if err != nil {
+				return fmt.Errorf("failed to check session: %w", err)
+			} else {
+				// Valid session ID
+				resumeID = resumeArg
+			}
+		}
+	}
 
 	// Create the agent
 	agent, err := dive.NewAgent(dive.AgentOptions{
-		Name:             "Dive",
-		Instructions:     cfg.instructions,
-		Model:            cfg.model,
-		Tools:            cfg.tools,
-		Permission:       permissionConfig,
-		Interactor:       interactor,
-		ThreadRepository: threadRepo,
+		Name:              "Dive",
+		Instructions:      cfg.instructions,
+		Model:             cfg.model,
+		Tools:             cfg.tools,
+		Permission:        permissionConfig,
+		Interactor:        interactor,
+		SessionRepository: sessionRepo,
 		ModelSettings: &dive.ModelSettings{
 			Temperature: &cfg.temperature,
 			MaxTokens:   &cfg.maxTokens,
@@ -598,7 +656,7 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Create and run the app
-	app := NewApp(agent, threadRepo, cfg.workspaceDir, cfg.modelName, initialPrompt, compactionConfig)
+	app := NewApp(agent, sessionRepo, cfg.workspaceDir, cfg.modelName, initialPrompt, compactionConfig, resumeID, forkSession)
 	interactor.SetApp(app)
 
 	return app.Run()

@@ -390,7 +390,7 @@ type BuildOptions struct {
 
     // Custom repositories
     DocumentRepository dive.DocumentRepository
-    ThreadRepository   dive.ThreadRepository
+    SessionRepository  dive.SessionRepository
 
     // Custom confirmer
     Confirmer dive.Confirmer
@@ -704,7 +704,7 @@ func main() {
     // Build environment with custom options
     env, err := config.BuildEnvironmentWithOptions(cfg, config.BuildOptions{
         DocumentRepository: objects.NewFileDocumentRepository("./data"),
-        ThreadRepository:   objects.NewFileThreadRepository("./threads"),
+        SessionRepository:  dive.NewFileSessionRepository("./sessions"),
         AutoStart:          true,
     })
     if err != nil {

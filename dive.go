@@ -26,28 +26,28 @@ type Agent interface {
 // Options are typically set using the With* functions rather than directly
 // modifying this struct.
 type CreateResponseOptions struct {
-	// ThreadID is the conversation thread identifier. If empty, a new thread ID
-	// will be auto-generated with the format "thread-<random>". Use the same
-	// ThreadID across multiple calls to maintain conversation context.
-	ThreadID string
+	// SessionID is the conversation session identifier. If empty, a new session ID
+	// will be auto-generated with the format "session-<random>". Use the same
+	// SessionID across multiple calls to maintain conversation context.
+	SessionID string
 
 	// UserID identifies the user in the conversation. This is stored with the
-	// thread and can be used for multi-user scenarios.
+	// session and can be used for multi-user scenarios.
 	UserID string
 
 	// Messages contains the input messages for this generation. These are
-	// appended to any existing thread messages before sending to the LLM.
+	// appended to any existing session messages before sending to the LLM.
 	Messages []*llm.Message
 
 	// EventCallback is invoked for each response item during generation.
-	// The first callback will always be an InitEvent containing the ThreadID.
+	// The first callback will always be an InitEvent containing the SessionID.
 	// Subsequent callbacks include messages, tool calls, and tool results.
 	EventCallback EventCallback
 
-	// Fork indicates whether to create a new thread branching from an existing
-	// thread's history. When true and ThreadID references an existing thread,
-	// a new thread is created with a copy of the original's messages.
-	// The original thread remains unchanged.
+	// Fork indicates whether to create a new session branching from an existing
+	// session's history. When true and SessionID references an existing session,
+	// a new session is created with a copy of the original's messages.
+	// The original session remains unchanged.
 	Fork bool
 }
 
@@ -65,58 +65,58 @@ func (o *CreateResponseOptions) Apply(opts []CreateResponseOption) {
 	}
 }
 
-// WithThreadID associates the given conversation thread ID with a generation.
+// WithSessionID associates the given conversation session ID with a generation.
 //
-// When a ThreadRepository is configured on the agent, this enables multi-turn
-// conversations by persisting and loading message history. If the thread exists,
-// previous messages are loaded; if not, a new thread is created.
+// When a SessionRepository is configured on the agent, this enables multi-turn
+// conversations by persisting and loading message history. If the session exists,
+// previous messages are loaded; if not, a new session is created.
 //
-// If threadID is empty, a new thread ID will be auto-generated.
+// If sessionID is empty, a new session ID will be auto-generated.
 //
 // Example:
 //
-//	// First message creates a new thread
+//	// First message creates a new session
 //	resp1, _ := agent.CreateResponse(ctx,
-//	    dive.WithThreadID("conversation-123"),
+//	    dive.WithSessionID("conversation-123"),
 //	    dive.WithInput("Hello"),
 //	)
 //
 //	// Second message continues the conversation
 //	resp2, _ := agent.CreateResponse(ctx,
-//	    dive.WithThreadID("conversation-123"),
+//	    dive.WithSessionID("conversation-123"),
 //	    dive.WithInput("Tell me more"),
 //	)
-func WithThreadID(threadID string) CreateResponseOption {
+func WithSessionID(sessionID string) CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
-		opts.ThreadID = threadID
+		opts.SessionID = sessionID
 	}
 }
 
-// WithResume resumes an existing conversation thread by ID.
+// WithResume resumes an existing conversation session by ID.
 //
-// This is functionally identical to WithThreadID but expresses clearer intent
+// This is functionally identical to WithSessionID but expresses clearer intent
 // when the caller knows they are resuming an existing conversation rather than
 // potentially creating a new one.
 //
-// The thread's complete message history will be loaded from the ThreadRepository
+// The session's complete message history will be loaded from the SessionRepository
 // and new messages will be appended to continue the conversation.
 //
 // Example:
 //
 //	// Resume a previously saved conversation
 //	resp, _ := agent.CreateResponse(ctx,
-//	    dive.WithResume(savedThreadID),
+//	    dive.WithResume(savedSessionID),
 //	    dive.WithInput("Continue where we left off"),
 //	)
-func WithResume(threadID string) CreateResponseOption {
-	return WithThreadID(threadID)
+func WithResume(sessionID string) CreateResponseOption {
+	return WithSessionID(sessionID)
 }
 
-// WithFork creates a new thread that branches from the resumed thread's history.
+// WithFork creates a new session that branches from the resumed session's history.
 //
-// When fork is true and used with WithThreadID or WithResume, a new thread is
-// created containing a deep copy of all messages from the original thread.
-// The original thread remains completely unchanged, allowing you to explore
+// When fork is true and used with WithSessionID or WithResume, a new session is
+// created containing a deep copy of all messages from the original session.
+// The original session remains completely unchanged, allowing you to explore
 // alternative conversation paths.
 //
 // This is useful for:
@@ -124,18 +124,18 @@ func WithResume(threadID string) CreateResponseOption {
 //   - Creating conversation branches for A/B testing
 //   - Preserving a checkpoint while experimenting
 //
-// The forked thread receives a new auto-generated ID, which is returned in
-// Response.ThreadID and emitted in the InitEvent callback.
+// The forked session receives a new auto-generated ID, which is returned in
+// Response.SessionID and emitted in the InitEvent callback.
 //
 // Example:
 //
 //	// Fork to try a different approach
 //	resp, _ := agent.CreateResponse(ctx,
-//	    dive.WithResume("original-thread"),
+//	    dive.WithResume("original-session"),
 //	    dive.WithFork(true),
 //	    dive.WithInput("Let's try a completely different approach"),
 //	)
-//	// resp.ThreadID is a new ID; "original-thread" is unchanged
+//	// resp.SessionID is a new ID; "original-session" is unchanged
 func WithFork(fork bool) CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
 		opts.Fork = fork
@@ -185,9 +185,9 @@ func newID() string {
 	return fmt.Sprintf("agent-%s", randomInt())
 }
 
-// newThreadID returns a new unique thread identifier with format "thread-<randomnum>"
-func newThreadID() string {
-	return fmt.Sprintf("thread-%s", randomInt())
+// newSessionID returns a new unique session identifier with format "session-<randomnum>"
+func newSessionID() string {
+	return fmt.Sprintf("session-%s", randomInt())
 }
 
 // randomInt returns a random integer as a string

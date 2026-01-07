@@ -135,8 +135,8 @@ func TestAgentCreateResponse(t *testing.T) {
 			}
 			if initItem.Init == nil {
 				t.Errorf("Expected init item to have Init field")
-			} else if initItem.Init.ThreadID == "" {
-				t.Errorf("Expected init event to have a thread ID")
+			} else if initItem.Init.SessionID == "" {
+				t.Errorf("Expected init event to have a session ID")
 			}
 
 			// Second item should be the message
@@ -188,7 +188,7 @@ func TestSessionManagement(t *testing.T) {
 		},
 	}
 
-	t.Run("auto-generate ThreadID when not provided", func(t *testing.T) {
+	t.Run("auto-generate SessionID when not provided", func(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
@@ -202,18 +202,18 @@ func TestSessionManagement(t *testing.T) {
 			t.Fatalf("CreateResponse failed: %v", err)
 		}
 
-		if resp.ThreadID == "" {
-			t.Error("Expected ThreadID to be auto-generated")
+		if resp.SessionID == "" {
+			t.Error("Expected SessionID to be auto-generated")
 		}
-		if len(resp.ThreadID) < 10 {
-			t.Errorf("Expected ThreadID to have reasonable length, got %q", resp.ThreadID)
+		if len(resp.SessionID) < 10 {
+			t.Errorf("Expected SessionID to have reasonable length, got %q", resp.SessionID)
 		}
-		if resp.ThreadID[:7] != "thread-" {
-			t.Errorf("Expected ThreadID to start with 'thread-', got %q", resp.ThreadID)
+		if resp.SessionID[:8] != "session-" {
+			t.Errorf("Expected SessionID to start with 'session-', got %q", resp.SessionID)
 		}
 	})
 
-	t.Run("use provided ThreadID", func(t *testing.T) {
+	t.Run("use provided SessionID", func(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
@@ -222,62 +222,62 @@ func TestSessionManagement(t *testing.T) {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		customThreadID := "my-custom-thread-123"
+		customSessionID := "my-custom-session-123"
 		resp, err := agent.CreateResponse(context.Background(),
-			WithThreadID(customThreadID),
+			WithSessionID(customSessionID),
 			WithInput("Hello"),
 		)
 		if err != nil {
 			t.Fatalf("CreateResponse failed: %v", err)
 		}
 
-		if resp.ThreadID != customThreadID {
-			t.Errorf("Expected ThreadID %q, got %q", customThreadID, resp.ThreadID)
+		if resp.SessionID != customSessionID {
+			t.Errorf("Expected SessionID %q, got %q", customSessionID, resp.SessionID)
 		}
 	})
 
-	t.Run("WithResume is alias for WithThreadID", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+	t.Run("WithResume is alias for WithSessionID", func(t *testing.T) {
+		sessionRepo := NewMemorySessionRepository()
 		agent, err := NewAgent(AgentOptions{
-			Name:             "TestAgent",
-			Model:            mockLLM,
-			ThreadRepository: threadRepo,
+			Name:              "TestAgent",
+			Model:             mockLLM,
+			SessionRepository: sessionRepo,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		// First call creates a thread
+		// First call creates a session
 		resp1, err := agent.CreateResponse(context.Background(),
-			WithThreadID("resume-test-thread"),
+			WithSessionID("resume-test-session"),
 			WithInput("First message"),
 		)
 		if err != nil {
 			t.Fatalf("First CreateResponse failed: %v", err)
 		}
 
-		// Resume the thread using WithResume
+		// Resume the session using WithResume
 		resp2, err := agent.CreateResponse(context.Background(),
-			WithResume("resume-test-thread"),
+			WithResume("resume-test-session"),
 			WithInput("Second message"),
 		)
 		if err != nil {
 			t.Fatalf("Resume CreateResponse failed: %v", err)
 		}
 
-		if resp1.ThreadID != resp2.ThreadID {
-			t.Errorf("Expected same ThreadID for resumed thread, got %q vs %q", resp1.ThreadID, resp2.ThreadID)
+		if resp1.SessionID != resp2.SessionID {
+			t.Errorf("Expected same SessionID for resumed session, got %q vs %q", resp1.SessionID, resp2.SessionID)
 		}
 
-		// Verify thread has accumulated messages
-		thread, err := threadRepo.GetThread(context.Background(), "resume-test-thread")
+		// Verify session has accumulated messages
+		session, err := sessionRepo.GetSession(context.Background(), "resume-test-session")
 		if err != nil {
-			t.Fatalf("Failed to get thread: %v", err)
+			t.Fatalf("Failed to get session: %v", err)
 		}
 
 		// Should have: first input + first response + second input + second response = 4 messages
-		if len(thread.Messages) != 4 {
-			t.Errorf("Expected 4 messages in thread, got %d", len(thread.Messages))
+		if len(session.Messages) != 4 {
+			t.Errorf("Expected 4 messages in session, got %d", len(session.Messages))
 		}
 	})
 
@@ -291,14 +291,14 @@ func TestSessionManagement(t *testing.T) {
 		}
 
 		var initEvent *InitEvent
-		var callbackThreadID string
+		var callbackSessionID string
 
 		resp, err := agent.CreateResponse(context.Background(),
 			WithInput("Hello"),
 			WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
 				if item.Type == ResponseItemTypeInit && item.Init != nil {
 					initEvent = item.Init
-					callbackThreadID = item.Init.ThreadID
+					callbackSessionID = item.Init.SessionID
 				}
 				return nil
 			}),
@@ -309,15 +309,15 @@ func TestSessionManagement(t *testing.T) {
 
 		if initEvent == nil {
 			t.Error("Expected InitEvent to be emitted")
-		} else if callbackThreadID != resp.ThreadID {
-			t.Errorf("InitEvent ThreadID %q doesn't match response ThreadID %q",
-				callbackThreadID, resp.ThreadID)
+		} else if callbackSessionID != resp.SessionID {
+			t.Errorf("InitEvent SessionID %q doesn't match response SessionID %q",
+				callbackSessionID, resp.SessionID)
 		}
 	})
 }
 
-// TestThreadForking tests the thread forking functionality
-func TestThreadForking(t *testing.T) {
+// TestSessionForking tests the session forking functionality
+func TestSessionForking(t *testing.T) {
 	mockLLM := &mockLLM{
 		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 			return &llm.Response{
@@ -333,12 +333,12 @@ func TestThreadForking(t *testing.T) {
 		nameFunc: func() string { return "test-model" },
 	}
 
-	t.Run("fork creates new thread with copied messages", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+	t.Run("fork creates new session with copied messages", func(t *testing.T) {
+		sessionRepo := NewMemorySessionRepository()
 		agent, err := NewAgent(AgentOptions{
-			Name:             "TestAgent",
-			Model:            mockLLM,
-			ThreadRepository: threadRepo,
+			Name:              "TestAgent",
+			Model:             mockLLM,
+			SessionRepository: sessionRepo,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
@@ -346,16 +346,16 @@ func TestThreadForking(t *testing.T) {
 
 		// Create initial conversation
 		resp1, err := agent.CreateResponse(context.Background(),
-			WithThreadID("original-thread"),
+			WithSessionID("original-session"),
 			WithInput("Hello"),
 		)
 		if err != nil {
 			t.Fatalf("First CreateResponse failed: %v", err)
 		}
 
-		// Fork the thread
+		// Fork the session
 		resp2, err := agent.CreateResponse(context.Background(),
-			WithResume("original-thread"),
+			WithResume("original-session"),
 			WithFork(true),
 			WithInput("Let's try something different"),
 		)
@@ -363,83 +363,83 @@ func TestThreadForking(t *testing.T) {
 			t.Fatalf("Fork CreateResponse failed: %v", err)
 		}
 
-		// Forked thread should have different ID
-		if resp2.ThreadID == resp1.ThreadID {
-			t.Error("Expected forked thread to have different ID")
+		// Forked session should have different ID
+		if resp2.SessionID == resp1.SessionID {
+			t.Error("Expected forked session to have different ID")
 		}
 
-		// Original thread should be unchanged
-		originalThread, err := threadRepo.GetThread(context.Background(), "original-thread")
+		// Original session should be unchanged
+		originalSession, err := sessionRepo.GetSession(context.Background(), "original-session")
 		if err != nil {
-			t.Fatalf("Failed to get original thread: %v", err)
+			t.Fatalf("Failed to get original session: %v", err)
 		}
 		// Original should have: input + response = 2 messages
-		if len(originalThread.Messages) != 2 {
-			t.Errorf("Expected original thread to have 2 messages, got %d", len(originalThread.Messages))
+		if len(originalSession.Messages) != 2 {
+			t.Errorf("Expected original session to have 2 messages, got %d", len(originalSession.Messages))
 		}
 
-		// Forked thread should have original messages plus new ones
-		forkedThread, err := threadRepo.GetThread(context.Background(), resp2.ThreadID)
+		// Forked session should have original messages plus new ones
+		forkedSession, err := sessionRepo.GetSession(context.Background(), resp2.SessionID)
 		if err != nil {
-			t.Fatalf("Failed to get forked thread: %v", err)
+			t.Fatalf("Failed to get forked session: %v", err)
 		}
 		// Forked should have: copied messages (2) + new input + new response = 4 messages
-		if len(forkedThread.Messages) != 4 {
-			t.Errorf("Expected forked thread to have 4 messages, got %d", len(forkedThread.Messages))
+		if len(forkedSession.Messages) != 4 {
+			t.Errorf("Expected forked session to have 4 messages, got %d", len(forkedSession.Messages))
 		}
 	})
 
-	t.Run("ForkThread repository method", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+	t.Run("ForkSession repository method", func(t *testing.T) {
+		sessionRepo := NewMemorySessionRepository()
 
-		// Create a thread with messages
-		originalThread := &Thread{
+		// Create a session with messages
+		originalSession := &Session{
 			ID:        "original",
 			UserID:    "user-1",
 			AgentID:   "agent-1",
 			AgentName: "Test Agent",
-			Title:     "Test Thread",
+			Title:     "Test Session",
 			Messages: []*llm.Message{
 				llm.NewUserTextMessage("Hello"),
 				llm.NewAssistantTextMessage("Hi there!"),
 			},
 			Metadata: map[string]interface{}{"key": "value"},
 		}
-		if err := threadRepo.PutThread(context.Background(), originalThread); err != nil {
-			t.Fatalf("Failed to put original thread: %v", err)
+		if err := sessionRepo.PutSession(context.Background(), originalSession); err != nil {
+			t.Fatalf("Failed to put original session: %v", err)
 		}
 
-		// Fork the thread
-		forked, err := threadRepo.ForkThread(context.Background(), "original")
+		// Fork the session
+		forked, err := sessionRepo.ForkSession(context.Background(), "original")
 		if err != nil {
-			t.Fatalf("ForkThread failed: %v", err)
+			t.Fatalf("ForkSession failed: %v", err)
 		}
 
-		// Verify forked thread
-		if forked.ID == originalThread.ID {
-			t.Error("Forked thread should have different ID")
+		// Verify forked session
+		if forked.ID == originalSession.ID {
+			t.Error("Forked session should have different ID")
 		}
-		if forked.ID[:7] != "thread-" {
-			t.Errorf("Forked thread ID should start with 'thread-', got %q", forked.ID)
+		if forked.ID[:8] != "session-" {
+			t.Errorf("Forked session ID should start with 'session-', got %q", forked.ID)
 		}
-		if forked.UserID != originalThread.UserID {
-			t.Errorf("UserID mismatch: expected %q, got %q", originalThread.UserID, forked.UserID)
+		if forked.UserID != originalSession.UserID {
+			t.Errorf("UserID mismatch: expected %q, got %q", originalSession.UserID, forked.UserID)
 		}
-		if forked.AgentID != originalThread.AgentID {
-			t.Errorf("AgentID mismatch: expected %q, got %q", originalThread.AgentID, forked.AgentID)
+		if forked.AgentID != originalSession.AgentID {
+			t.Errorf("AgentID mismatch: expected %q, got %q", originalSession.AgentID, forked.AgentID)
 		}
-		if forked.Title != originalThread.Title {
-			t.Errorf("Title mismatch: expected %q, got %q", originalThread.Title, forked.Title)
+		if forked.Title != originalSession.Title {
+			t.Errorf("Title mismatch: expected %q, got %q", originalSession.Title, forked.Title)
 		}
-		if len(forked.Messages) != len(originalThread.Messages) {
-			t.Errorf("Expected %d messages, got %d", len(originalThread.Messages), len(forked.Messages))
+		if len(forked.Messages) != len(originalSession.Messages) {
+			t.Errorf("Expected %d messages, got %d", len(originalSession.Messages), len(forked.Messages))
 		}
 		if forked.Metadata["key"] != "value" {
 			t.Error("Metadata not copied correctly")
 		}
 
 		// Verify original is unchanged
-		original, err := threadRepo.GetThread(context.Background(), "original")
+		original, err := sessionRepo.GetSession(context.Background(), "original")
 		if err != nil {
 			t.Fatalf("Failed to get original: %v", err)
 		}
@@ -448,21 +448,21 @@ func TestThreadForking(t *testing.T) {
 		}
 
 		// Verify forked is stored
-		storedForked, err := threadRepo.GetThread(context.Background(), forked.ID)
+		storedForked, err := sessionRepo.GetSession(context.Background(), forked.ID)
 		if err != nil {
-			t.Fatalf("Forked thread not stored: %v", err)
+			t.Fatalf("Forked session not stored: %v", err)
 		}
 		if storedForked.ID != forked.ID {
-			t.Error("Stored forked thread ID mismatch")
+			t.Error("Stored forked session ID mismatch")
 		}
 	})
 
-	t.Run("ForkThread returns error for non-existent thread", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+	t.Run("ForkSession returns error for non-existent session", func(t *testing.T) {
+		sessionRepo := NewMemorySessionRepository()
 
-		_, err := threadRepo.ForkThread(context.Background(), "non-existent")
-		if err != ErrThreadNotFound {
-			t.Errorf("Expected ErrThreadNotFound, got %v", err)
+		_, err := sessionRepo.ForkSession(context.Background(), "non-existent")
+		if err != ErrSessionNotFound {
+			t.Errorf("Expected ErrSessionNotFound, got %v", err)
 		}
 	})
 }
@@ -501,7 +501,7 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 		nameFunc: func() string { return "test-model" },
 	}
 
-	t.Run("unique ThreadIDs generated each time", func(t *testing.T) {
+	t.Run("unique SessionIDs generated each time", func(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
@@ -520,12 +520,12 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 			t.Fatalf("Second CreateResponse failed: %v", err)
 		}
 
-		if resp1.ThreadID == resp2.ThreadID {
-			t.Error("Expected unique ThreadIDs for different conversations")
+		if resp1.SessionID == resp2.SessionID {
+			t.Error("Expected unique SessionIDs for different conversations")
 		}
 	})
 
-	t.Run("empty ThreadID triggers auto-generation", func(t *testing.T) {
+	t.Run("empty SessionID triggers auto-generation", func(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
@@ -535,44 +535,44 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 		}
 
 		resp, err := agent.CreateResponse(context.Background(),
-			WithThreadID(""),
+			WithSessionID(""),
 			WithInput("Hello"),
 		)
 		if err != nil {
 			t.Fatalf("CreateResponse failed: %v", err)
 		}
 
-		if resp.ThreadID == "" {
-			t.Error("Expected ThreadID to be auto-generated when empty string provided")
+		if resp.SessionID == "" {
+			t.Error("Expected SessionID to be auto-generated when empty string provided")
 		}
-		if len(resp.ThreadID) < 7 || resp.ThreadID[:7] != "thread-" {
-			t.Errorf("Expected auto-generated ThreadID format, got %q", resp.ThreadID)
+		if len(resp.SessionID) < 8 || resp.SessionID[:8] != "session-" {
+			t.Errorf("Expected auto-generated SessionID format, got %q", resp.SessionID)
 		}
 	})
 
 	t.Run("WithFork false does not fork", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+		sessionRepo := NewMemorySessionRepository()
 		agent, err := NewAgent(AgentOptions{
-			Name:             "TestAgent",
-			Model:            mockLLM,
-			ThreadRepository: threadRepo,
+			Name:              "TestAgent",
+			Model:             mockLLM,
+			SessionRepository: sessionRepo,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		// Create initial thread
+		// Create initial session
 		resp1, err := agent.CreateResponse(context.Background(),
-			WithThreadID("no-fork-thread"),
+			WithSessionID("no-fork-session"),
 			WithInput("Hello"),
 		)
 		if err != nil {
 			t.Fatalf("First CreateResponse failed: %v", err)
 		}
 
-		// WithFork(false) should continue same thread
+		// WithFork(false) should continue same session
 		resp2, err := agent.CreateResponse(context.Background(),
-			WithResume("no-fork-thread"),
+			WithResume("no-fork-session"),
 			WithFork(false),
 			WithInput("Continue"),
 		)
@@ -580,26 +580,26 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 			t.Fatalf("Second CreateResponse failed: %v", err)
 		}
 
-		if resp1.ThreadID != resp2.ThreadID {
-			t.Errorf("Expected same ThreadID with WithFork(false), got %q vs %q",
-				resp1.ThreadID, resp2.ThreadID)
+		if resp1.SessionID != resp2.SessionID {
+			t.Errorf("Expected same SessionID with WithFork(false), got %q vs %q",
+				resp1.SessionID, resp2.SessionID)
 		}
 
-		// Should only have one thread
-		threads, err := threadRepo.ListThreads(context.Background(), nil)
+		// Should only have one session
+		sessions, err := sessionRepo.ListSessions(context.Background(), nil)
 		if err != nil {
-			t.Fatalf("ListThreads failed: %v", err)
+			t.Fatalf("ListSessions failed: %v", err)
 		}
-		if len(threads.Items) != 1 {
-			t.Errorf("Expected 1 thread, got %d", len(threads.Items))
+		if len(sessions.Items) != 1 {
+			t.Errorf("Expected 1 session, got %d", len(sessions.Items))
 		}
 	})
 
-	t.Run("fork without ThreadRepository works without error", func(t *testing.T) {
+	t.Run("fork without SessionRepository works without error", func(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			// No ThreadRepository
+			// No SessionRepository
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
@@ -607,7 +607,7 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 
 		// WithFork should not cause an error even without repository
 		resp, err := agent.CreateResponse(context.Background(),
-			WithThreadID("some-thread"),
+			WithSessionID("some-session"),
 			WithFork(true),
 			WithInput("Hello"),
 		)
@@ -615,26 +615,26 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 			t.Fatalf("CreateResponse with fork but no repository failed: %v", err)
 		}
 
-		// Should still have a thread ID
-		if resp.ThreadID == "" {
-			t.Error("Expected ThreadID even without repository")
+		// Should still have a session ID
+		if resp.SessionID == "" {
+			t.Error("Expected SessionID even without repository")
 		}
 	})
 
-	t.Run("multiple forks from same thread", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+	t.Run("multiple forks from same session", func(t *testing.T) {
+		sessionRepo := NewMemorySessionRepository()
 		agent, err := NewAgent(AgentOptions{
-			Name:             "TestAgent",
-			Model:            mockLLM,
-			ThreadRepository: threadRepo,
+			Name:              "TestAgent",
+			Model:             mockLLM,
+			SessionRepository: sessionRepo,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		// Create initial thread
+		// Create initial session
 		resp1, err := agent.CreateResponse(context.Background(),
-			WithThreadID("multi-fork-original"),
+			WithSessionID("multi-fork-original"),
 			WithInput("Hello"),
 		)
 		if err != nil {
@@ -661,18 +661,18 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 		}
 
 		// All three should have different IDs
-		if resp1.ThreadID == resp2.ThreadID {
+		if resp1.SessionID == resp2.SessionID {
 			t.Error("Fork 1 should have different ID from original")
 		}
-		if resp1.ThreadID == resp3.ThreadID {
+		if resp1.SessionID == resp3.SessionID {
 			t.Error("Fork 2 should have different ID from original")
 		}
-		if resp2.ThreadID == resp3.ThreadID {
+		if resp2.SessionID == resp3.SessionID {
 			t.Error("Fork 1 and Fork 2 should have different IDs")
 		}
 
 		// Original should still have 2 messages
-		original, err := threadRepo.GetThread(context.Background(), "multi-fork-original")
+		original, err := sessionRepo.GetSession(context.Background(), "multi-fork-original")
 		if err != nil {
 			t.Fatalf("Failed to get original: %v", err)
 		}
@@ -681,7 +681,7 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 		}
 
 		// Both forks should have 4 messages each
-		fork1, err := threadRepo.GetThread(context.Background(), resp2.ThreadID)
+		fork1, err := sessionRepo.GetSession(context.Background(), resp2.SessionID)
 		if err != nil {
 			t.Fatalf("Failed to get fork 1: %v", err)
 		}
@@ -689,7 +689,7 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 			t.Errorf("Fork 1 should have 4 messages, got %d", len(fork1.Messages))
 		}
 
-		fork2, err := threadRepo.GetThread(context.Background(), resp3.ThreadID)
+		fork2, err := sessionRepo.GetSession(context.Background(), resp3.SessionID)
 		if err != nil {
 			t.Fatalf("Failed to get fork 2: %v", err)
 		}
@@ -698,20 +698,20 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("InitEvent has correct ThreadID after fork", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+	t.Run("InitEvent has correct SessionID after fork", func(t *testing.T) {
+		sessionRepo := NewMemorySessionRepository()
 		agent, err := NewAgent(AgentOptions{
-			Name:             "TestAgent",
-			Model:            mockLLM,
-			ThreadRepository: threadRepo,
+			Name:              "TestAgent",
+			Model:             mockLLM,
+			SessionRepository: sessionRepo,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		// Create initial thread
+		// Create initial session
 		_, err = agent.CreateResponse(context.Background(),
-			WithThreadID("init-event-fork-test"),
+			WithSessionID("init-event-fork-test"),
 			WithInput("Hello"),
 		)
 		if err != nil {
@@ -719,14 +719,14 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 		}
 
 		// Fork and capture InitEvent
-		var initThreadID string
+		var initSessionID string
 		resp, err := agent.CreateResponse(context.Background(),
 			WithResume("init-event-fork-test"),
 			WithFork(true),
 			WithInput("Forking"),
 			WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
 				if item.Type == ResponseItemTypeInit && item.Init != nil {
-					initThreadID = item.Init.ThreadID
+					initSessionID = item.Init.SessionID
 				}
 				return nil
 			}),
@@ -735,30 +735,30 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 			t.Fatalf("Fork CreateResponse failed: %v", err)
 		}
 
-		// InitEvent should have the FORKED thread ID, not the original
-		if initThreadID == "init-event-fork-test" {
-			t.Error("InitEvent should have forked ThreadID, not original")
+		// InitEvent should have the FORKED session ID, not the original
+		if initSessionID == "init-event-fork-test" {
+			t.Error("InitEvent should have forked SessionID, not original")
 		}
-		if initThreadID != resp.ThreadID {
-			t.Errorf("InitEvent ThreadID %q doesn't match response ThreadID %q",
-				initThreadID, resp.ThreadID)
+		if initSessionID != resp.SessionID {
+			t.Errorf("InitEvent SessionID %q doesn't match response SessionID %q",
+				initSessionID, resp.SessionID)
 		}
 	})
 
-	t.Run("forking non-existent thread creates new thread", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+	t.Run("forking non-existent session creates new session", func(t *testing.T) {
+		sessionRepo := NewMemorySessionRepository()
 		agent, err := NewAgent(AgentOptions{
-			Name:             "TestAgent",
-			Model:            mockLLM,
-			ThreadRepository: threadRepo,
+			Name:              "TestAgent",
+			Model:             mockLLM,
+			SessionRepository: sessionRepo,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		// Try to fork a non-existent thread
+		// Try to fork a non-existent session
 		resp, err := agent.CreateResponse(context.Background(),
-			WithResume("non-existent-thread"),
+			WithResume("non-existent-session"),
 			WithFork(true),
 			WithInput("Hello"),
 		)
@@ -766,29 +766,29 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 			t.Fatalf("CreateResponse failed: %v", err)
 		}
 
-		// Should still work and create a thread
-		if resp.ThreadID == "" {
-			t.Error("Expected ThreadID to be set")
+		// Should still work and create a session
+		if resp.SessionID == "" {
+			t.Error("Expected SessionID to be set")
 		}
 	})
 
 	t.Run("message accumulation across multiple calls", func(t *testing.T) {
-		threadRepo := NewMemoryThreadRepository()
+		sessionRepo := NewMemorySessionRepository()
 		agent, err := NewAgent(AgentOptions{
-			Name:             "TestAgent",
-			Model:            mockLLM,
-			ThreadRepository: threadRepo,
+			Name:              "TestAgent",
+			Model:             mockLLM,
+			SessionRepository: sessionRepo,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
-		threadID := "accumulation-test"
+		sessionID := "accumulation-test"
 
-		// Make 5 calls to the same thread
+		// Make 5 calls to the same session
 		for i := 1; i <= 5; i++ {
 			_, err := agent.CreateResponse(context.Background(),
-				WithThreadID(threadID),
+				WithSessionID(sessionID),
 				WithInput("Message"),
 			)
 			if err != nil {
@@ -796,17 +796,17 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 			}
 		}
 
-		// Thread should have 10 messages (5 inputs + 5 responses)
-		thread, err := threadRepo.GetThread(context.Background(), threadID)
+		// Session should have 10 messages (5 inputs + 5 responses)
+		session, err := sessionRepo.GetSession(context.Background(), sessionID)
 		if err != nil {
-			t.Fatalf("Failed to get thread: %v", err)
+			t.Fatalf("Failed to get session: %v", err)
 		}
-		if len(thread.Messages) != 10 {
-			t.Errorf("Expected 10 messages after 5 calls, got %d", len(thread.Messages))
+		if len(session.Messages) != 10 {
+			t.Errorf("Expected 10 messages after 5 calls, got %d", len(session.Messages))
 		}
 
 		// Verify alternating roles
-		for i, msg := range thread.Messages {
+		for i, msg := range session.Messages {
 			expectedRole := llm.User
 			if i%2 == 1 {
 				expectedRole = llm.Assistant
@@ -818,25 +818,25 @@ func TestSessionManagementEdgeCases(t *testing.T) {
 	})
 }
 
-// TestThreadForkingDeepCopy tests that forked messages are truly independent
-func TestThreadForkingDeepCopy(t *testing.T) {
-	threadRepo := NewMemoryThreadRepository()
+// TestSessionForkingDeepCopy tests that forked messages are truly independent
+func TestSessionForkingDeepCopy(t *testing.T) {
+	sessionRepo := NewMemorySessionRepository()
 
-	// Create original thread with a message
-	original := &Thread{
+	// Create original session with a message
+	original := &Session{
 		ID: "deep-copy-test",
 		Messages: []*llm.Message{
 			llm.NewUserTextMessage("Original message"),
 		},
 	}
-	if err := threadRepo.PutThread(context.Background(), original); err != nil {
+	if err := sessionRepo.PutSession(context.Background(), original); err != nil {
 		t.Fatalf("Failed to put original: %v", err)
 	}
 
-	// Fork the thread
-	forked, err := threadRepo.ForkThread(context.Background(), "deep-copy-test")
+	// Fork the session
+	forked, err := sessionRepo.ForkSession(context.Background(), "deep-copy-test")
 	if err != nil {
-		t.Fatalf("ForkThread failed: %v", err)
+		t.Fatalf("ForkSession failed: %v", err)
 	}
 
 	// Modify the forked message
@@ -845,12 +845,12 @@ func TestThreadForkingDeepCopy(t *testing.T) {
 	}
 
 	// Save the modified fork
-	if err := threadRepo.PutThread(context.Background(), forked); err != nil {
+	if err := sessionRepo.PutSession(context.Background(), forked); err != nil {
 		t.Fatalf("Failed to save modified fork: %v", err)
 	}
 
 	// Original should be unchanged
-	originalReloaded, err := threadRepo.GetThread(context.Background(), "deep-copy-test")
+	originalReloaded, err := sessionRepo.GetSession(context.Background(), "deep-copy-test")
 	if err != nil {
 		t.Fatalf("Failed to reload original: %v", err)
 	}
@@ -866,7 +866,7 @@ func TestThreadForkingDeepCopy(t *testing.T) {
 	}
 
 	// Forked should have the new message
-	forkedReloaded, err := threadRepo.GetThread(context.Background(), forked.ID)
+	forkedReloaded, err := sessionRepo.GetSession(context.Background(), forked.ID)
 	if err != nil {
 		t.Fatalf("Failed to reload fork: %v", err)
 	}
@@ -878,13 +878,13 @@ func TestThreadForkingDeepCopy(t *testing.T) {
 	}
 }
 
-// TestThreadRepositoryOperations tests all ThreadRepository interface methods
-func TestThreadRepositoryOperations(t *testing.T) {
-	t.Run("PutThread and GetThread", func(t *testing.T) {
-		repo := NewMemoryThreadRepository()
+// TestSessionRepositoryOperations tests all SessionRepository interface methods
+func TestSessionRepositoryOperations(t *testing.T) {
+	t.Run("PutSession and GetSession", func(t *testing.T) {
+		repo := NewMemorySessionRepository()
 
-		thread := &Thread{
-			ID:        "test-thread",
+		session := &Session{
+			ID:        "test-session",
 			UserID:    "user-1",
 			AgentID:   "agent-1",
 			AgentName: "Test Agent",
@@ -898,30 +898,30 @@ func TestThreadRepositoryOperations(t *testing.T) {
 			},
 		}
 
-		err := repo.PutThread(context.Background(), thread)
+		err := repo.PutSession(context.Background(), session)
 		if err != nil {
-			t.Fatalf("PutThread failed: %v", err)
+			t.Fatalf("PutSession failed: %v", err)
 		}
 
-		retrieved, err := repo.GetThread(context.Background(), "test-thread")
+		retrieved, err := repo.GetSession(context.Background(), "test-session")
 		if err != nil {
-			t.Fatalf("GetThread failed: %v", err)
+			t.Fatalf("GetSession failed: %v", err)
 		}
 
-		if retrieved.ID != thread.ID {
-			t.Errorf("ID mismatch: expected %q, got %q", thread.ID, retrieved.ID)
+		if retrieved.ID != session.ID {
+			t.Errorf("ID mismatch: expected %q, got %q", session.ID, retrieved.ID)
 		}
-		if retrieved.UserID != thread.UserID {
-			t.Errorf("UserID mismatch: expected %q, got %q", thread.UserID, retrieved.UserID)
+		if retrieved.UserID != session.UserID {
+			t.Errorf("UserID mismatch: expected %q, got %q", session.UserID, retrieved.UserID)
 		}
-		if retrieved.AgentID != thread.AgentID {
-			t.Errorf("AgentID mismatch: expected %q, got %q", thread.AgentID, retrieved.AgentID)
+		if retrieved.AgentID != session.AgentID {
+			t.Errorf("AgentID mismatch: expected %q, got %q", session.AgentID, retrieved.AgentID)
 		}
-		if retrieved.AgentName != thread.AgentName {
-			t.Errorf("AgentName mismatch: expected %q, got %q", thread.AgentName, retrieved.AgentName)
+		if retrieved.AgentName != session.AgentName {
+			t.Errorf("AgentName mismatch: expected %q, got %q", session.AgentName, retrieved.AgentName)
 		}
-		if retrieved.Title != thread.Title {
-			t.Errorf("Title mismatch: expected %q, got %q", thread.Title, retrieved.Title)
+		if retrieved.Title != session.Title {
+			t.Errorf("Title mismatch: expected %q, got %q", session.Title, retrieved.Title)
 		}
 		if len(retrieved.Messages) != 1 {
 			t.Errorf("Expected 1 message, got %d", len(retrieved.Messages))
@@ -931,120 +931,120 @@ func TestThreadRepositoryOperations(t *testing.T) {
 		}
 	})
 
-	t.Run("GetThread returns error for non-existent", func(t *testing.T) {
-		repo := NewMemoryThreadRepository()
+	t.Run("GetSession returns error for non-existent", func(t *testing.T) {
+		repo := NewMemorySessionRepository()
 
-		_, err := repo.GetThread(context.Background(), "non-existent")
-		if err != ErrThreadNotFound {
-			t.Errorf("Expected ErrThreadNotFound, got %v", err)
+		_, err := repo.GetSession(context.Background(), "non-existent")
+		if err != ErrSessionNotFound {
+			t.Errorf("Expected ErrSessionNotFound, got %v", err)
 		}
 	})
 
-	t.Run("DeleteThread", func(t *testing.T) {
-		repo := NewMemoryThreadRepository()
+	t.Run("DeleteSession", func(t *testing.T) {
+		repo := NewMemorySessionRepository()
 
-		thread := &Thread{ID: "delete-test"}
-		_ = repo.PutThread(context.Background(), thread)
+		session := &Session{ID: "delete-test"}
+		_ = repo.PutSession(context.Background(), session)
 
-		err := repo.DeleteThread(context.Background(), "delete-test")
+		err := repo.DeleteSession(context.Background(), "delete-test")
 		if err != nil {
-			t.Fatalf("DeleteThread failed: %v", err)
+			t.Fatalf("DeleteSession failed: %v", err)
 		}
 
-		_, err = repo.GetThread(context.Background(), "delete-test")
-		if err != ErrThreadNotFound {
-			t.Errorf("Thread should be deleted, got err: %v", err)
+		_, err = repo.GetSession(context.Background(), "delete-test")
+		if err != ErrSessionNotFound {
+			t.Errorf("Session should be deleted, got err: %v", err)
 		}
 	})
 
-	t.Run("DeleteThread non-existent is not an error", func(t *testing.T) {
-		repo := NewMemoryThreadRepository()
+	t.Run("DeleteSession non-existent is not an error", func(t *testing.T) {
+		repo := NewMemorySessionRepository()
 
-		err := repo.DeleteThread(context.Background(), "non-existent")
+		err := repo.DeleteSession(context.Background(), "non-existent")
 		if err != nil {
-			t.Errorf("DeleteThread should not error for non-existent: %v", err)
+			t.Errorf("DeleteSession should not error for non-existent: %v", err)
 		}
 	})
 
-	t.Run("ListThreads with pagination", func(t *testing.T) {
-		repo := NewMemoryThreadRepository()
+	t.Run("ListSessions with pagination", func(t *testing.T) {
+		repo := NewMemorySessionRepository()
 
-		// Create 5 threads
+		// Create 5 sessions
 		for i := 0; i < 5; i++ {
-			thread := &Thread{ID: string(rune('a' + i))}
-			_ = repo.PutThread(context.Background(), thread)
+			session := &Session{ID: string(rune('a' + i))}
+			_ = repo.PutSession(context.Background(), session)
 		}
 
 		// List all
-		all, err := repo.ListThreads(context.Background(), nil)
+		all, err := repo.ListSessions(context.Background(), nil)
 		if err != nil {
-			t.Fatalf("ListThreads failed: %v", err)
+			t.Fatalf("ListSessions failed: %v", err)
 		}
 		if len(all.Items) != 5 {
-			t.Errorf("Expected 5 threads, got %d", len(all.Items))
+			t.Errorf("Expected 5 sessions, got %d", len(all.Items))
 		}
 
 		// List with limit
-		limited, err := repo.ListThreads(context.Background(), &ListThreadsInput{Limit: 2})
+		limited, err := repo.ListSessions(context.Background(), &ListSessionsInput{Limit: 2})
 		if err != nil {
-			t.Fatalf("ListThreads with limit failed: %v", err)
+			t.Fatalf("ListSessions with limit failed: %v", err)
 		}
 		if len(limited.Items) != 2 {
-			t.Errorf("Expected 2 threads with limit, got %d", len(limited.Items))
+			t.Errorf("Expected 2 sessions with limit, got %d", len(limited.Items))
 		}
 
 		// List with offset
-		offset, err := repo.ListThreads(context.Background(), &ListThreadsInput{Offset: 3})
+		offset, err := repo.ListSessions(context.Background(), &ListSessionsInput{Offset: 3})
 		if err != nil {
-			t.Fatalf("ListThreads with offset failed: %v", err)
+			t.Fatalf("ListSessions with offset failed: %v", err)
 		}
 		if len(offset.Items) != 2 {
-			t.Errorf("Expected 2 threads with offset 3, got %d", len(offset.Items))
+			t.Errorf("Expected 2 sessions with offset 3, got %d", len(offset.Items))
 		}
 
 		// Offset beyond range
-		empty, err := repo.ListThreads(context.Background(), &ListThreadsInput{Offset: 10})
+		empty, err := repo.ListSessions(context.Background(), &ListSessionsInput{Offset: 10})
 		if err != nil {
-			t.Fatalf("ListThreads with large offset failed: %v", err)
+			t.Fatalf("ListSessions with large offset failed: %v", err)
 		}
 		if len(empty.Items) != 0 {
-			t.Errorf("Expected 0 threads with offset 10, got %d", len(empty.Items))
+			t.Errorf("Expected 0 sessions with offset 10, got %d", len(empty.Items))
 		}
 	})
 
-	t.Run("WithThreads initializer", func(t *testing.T) {
-		threads := []*Thread{
+	t.Run("WithSessions initializer", func(t *testing.T) {
+		sessions := []*Session{
 			{ID: "init-1"},
 			{ID: "init-2"},
 			{ID: "init-3"},
 		}
 
-		repo := NewMemoryThreadRepository().WithThreads(threads)
+		repo := NewMemorySessionRepository().WithSessions(sessions)
 
-		all, err := repo.ListThreads(context.Background(), nil)
+		all, err := repo.ListSessions(context.Background(), nil)
 		if err != nil {
-			t.Fatalf("ListThreads failed: %v", err)
+			t.Fatalf("ListSessions failed: %v", err)
 		}
 		if len(all.Items) != 3 {
-			t.Errorf("Expected 3 threads, got %d", len(all.Items))
+			t.Errorf("Expected 3 sessions, got %d", len(all.Items))
 		}
 
 		// Verify we can get each one
-		for _, thread := range threads {
-			retrieved, err := repo.GetThread(context.Background(), thread.ID)
+		for _, session := range sessions {
+			retrieved, err := repo.GetSession(context.Background(), session.ID)
 			if err != nil {
-				t.Errorf("Failed to get thread %s: %v", thread.ID, err)
+				t.Errorf("Failed to get session %s: %v", session.ID, err)
 			}
-			if retrieved.ID != thread.ID {
-				t.Errorf("ID mismatch for %s", thread.ID)
+			if retrieved.ID != session.ID {
+				t.Errorf("ID mismatch for %s", session.ID)
 			}
 		}
 	})
 
-	t.Run("ForkThread copies all fields", func(t *testing.T) {
-		repo := NewMemoryThreadRepository()
+	t.Run("ForkSession copies all fields", func(t *testing.T) {
+		repo := NewMemorySessionRepository()
 
-		original := &Thread{
+		original := &Session{
 			ID:        "fork-all-fields",
 			UserID:    "user-123",
 			AgentID:   "agent-456",
@@ -1060,11 +1060,11 @@ func TestThreadRepositoryOperations(t *testing.T) {
 				"tags":     []string{"test", "fork"},
 			},
 		}
-		_ = repo.PutThread(context.Background(), original)
+		_ = repo.PutSession(context.Background(), original)
 
-		forked, err := repo.ForkThread(context.Background(), "fork-all-fields")
+		forked, err := repo.ForkSession(context.Background(), "fork-all-fields")
 		if err != nil {
-			t.Fatalf("ForkThread failed: %v", err)
+			t.Fatalf("ForkSession failed: %v", err)
 		}
 
 		// Verify all fields are copied correctly

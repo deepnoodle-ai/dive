@@ -74,7 +74,7 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 
 - **Tool Calling** - Agents can interact with external systems
 - **Streaming Responses** - Real-time output for better UX
-- **Thread Persistence** - Conversations that span multiple interactions
+- **Session Persistence** - Conversations that span multiple interactions
 - **Supervisor Patterns** - Hierarchical agent systems
 - **MCP Integration** - Connect to external tool ecosystems
 
@@ -94,7 +94,7 @@ Agents emit detailed events that can be streamed to UIs, monitoring systems, or 
 └─────────────┘    └─────────────┘    └─────────────┘
                            │                    │
                    ┌───────────────┐    ┌─────────────┐
-                   │    Tools      │    │   Threads   │
+                   │    Tools      │    │  Sessions   │
                    └───────────────┘    └─────────────┘
                            │                    │
                    ┌───────────────┐    ┌─────────────┐

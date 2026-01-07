@@ -295,7 +295,7 @@ Dive uses the functional options pattern for flexible configuration:
 type Option func(*Options)
 
 type Options struct {
-    ThreadID      string
+    SessionID     string
     UserID        string
     Messages      []*llm.Message
     EventCallback EventCallback
@@ -305,8 +305,8 @@ type Options struct {
 ### Available Options
 
 ```go
-// WithThreadID associates a conversation thread
-func WithThreadID(threadID string) Option
+// WithSessionID associates a conversation session
+func WithSessionID(sessionID string) Option
 
 // WithUserID identifies the user making the request
 func WithUserID(userID string) Option
@@ -333,10 +333,10 @@ response, err := agent.CreateResponse(
     dive.WithInput("Hello!"),
 )
 
-// Thread-based conversation
+// Session-based conversation
 response, err := agent.CreateResponse(
     ctx,
-    dive.WithThreadID("user-123"),
+    dive.WithSessionID("user-123"),
     dive.WithUserID("alice"),
     dive.WithInput("Continue our discussion"),
 )
@@ -382,23 +382,23 @@ type Document struct {
 }
 ```
 
-### ThreadRepository
+### SessionRepository
 
-For managing conversation threads:
+For managing conversation sessions:
 
 ```go
-type ThreadRepository interface {
-    GetThread(ctx context.Context, id string) (*Thread, error)
-    PutThread(ctx context.Context, thread *Thread) error
-    DeleteThread(ctx context.Context, id string) error
+type SessionRepository interface {
+    GetSession(ctx context.Context, id string) (*Session, error)
+    PutSession(ctx context.Context, session *Session) error
+    DeleteSession(ctx context.Context, id string) error
 }
 
-type Thread struct {
+type Session struct {
     ID       string         `json:"id"`
     Messages []*llm.Message `json:"messages"`
 }
 
-var ErrThreadNotFound = errors.New("thread not found")
+var ErrSessionNotFound = errors.New("session not found")
 ```
 
 ## Utility Functions
@@ -453,8 +453,8 @@ func (a *MyAgent) Name() string { return "MyAgent" }
 response, err := agent.CreateResponse(ctx, dive.WithInput(input))
 if err != nil {
     // Check for specific error types
-    if errors.Is(err, dive.ErrThreadNotFound) {
-        // Handle thread not found
+    if errors.Is(err, dive.ErrSessionNotFound) {
+        // Handle session not found
     }
     return fmt.Errorf("agent response failed: %w", err)
 }
