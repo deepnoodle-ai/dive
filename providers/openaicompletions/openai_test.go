@@ -69,12 +69,11 @@ func TestToolUse(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	assert.Equal(t, 1, len(response.Message().Content))
-	content := response.Message().Content[0]
-	assert.Equal(t, llm.ContentTypeToolUse, content.Type())
+	// Use ToolCalls() which filters for tool_use content (model may also return text)
+	toolCalls := response.ToolCalls()
+	assert.Equal(t, 1, len(toolCalls))
 
-	toolUse, ok := content.(*llm.ToolUseContent)
-	assert.True(t, ok)
+	toolUse := toolCalls[0]
 	assert.Equal(t, "add", toolUse.Name)
 
 	// The exact format of the arguments may vary, so we just check that it contains the numbers
