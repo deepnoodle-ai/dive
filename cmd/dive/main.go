@@ -76,9 +76,9 @@ func main() {
 				Default(100000).
 				Env("DIVE_COMPACTION_THRESHOLD").
 				Help("Token count that triggers compaction (default: 100000)"),
-			cli.String("resume", "r").
-				Default("").
-				Help("Resume session by ID, or show picker if no ID provided"),
+			cli.Bool("resume", "r").
+				Default(false).
+				Help("Resume session (use with session ID arg, or show picker if none)"),
 			cli.Bool("fork-session", "").
 				Default(false).
 				Help("Create new session when resuming (branch conversation)"),
@@ -527,16 +527,22 @@ func runPrintJSON(ctx context.Context, agent dive.Agent, input string) error {
 
 func runInteractive(ctx *cli.Context) error {
 	skipPermissions := ctx.Bool("dangerously-skip-permissions")
-	resumeArg := ctx.String("resume")
+	resumeMode := ctx.Bool("resume")
 	forkSession := ctx.Bool("fork-session")
 
-	// Get initial prompt from args (at most 1 arg allowed)
+	// Get args - interpretation depends on whether we're in resume mode
 	args := ctx.Args()
 	if len(args) > 1 {
 		return fmt.Errorf("expected at most 1 argument, got %d", len(args))
 	}
+
 	var initialPrompt string
-	if len(args) == 1 {
+	var resumeArg string
+	if resumeMode && len(args) == 1 {
+		// In resume mode, the arg is a session ID or filter
+		resumeArg = strings.TrimSpace(args[0])
+	} else if len(args) == 1 {
+		// Normal mode, the arg is the initial prompt
 		initialPrompt = strings.TrimSpace(args[0])
 	}
 
@@ -589,7 +595,7 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Handle --resume flag
 	var resumeID string
-	if ctx.IsSet("resume") {
+	if resumeMode {
 		if resumeArg == "" {
 			// No ID provided, show session picker
 			result, err := RunSessionPicker(sessionRepo, "", cfg.workspaceDir)
