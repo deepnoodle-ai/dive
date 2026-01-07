@@ -69,6 +69,13 @@ type initialPromptEvent struct {
 	prompt string
 }
 
+// compactionEvent is sent when context compaction occurs.
+// This allows the UI to display compaction status and statistics.
+type compactionEvent struct {
+	baseEvent
+	event *dive.CompactionEvent
+}
+
 // MessageType distinguishes regular messages from tool calls
 type MessageType int
 
@@ -182,6 +189,7 @@ type DialogOption struct {
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
 	agent        *dive.StandardAgent
+	threadRepo   dive.ThreadRepository
 	workspaceDir string
 	modelName    string
 
@@ -233,12 +241,25 @@ type App struct {
 	initialPrompt string
 
 	// Ctrl+C exit confirmation state
-	lastCtrlC     time.Time
-	showExitHint  bool
+	lastCtrlC    time.Time
+	showExitHint bool
+
+	// Compaction configuration and state
+	compactionConfig         *dive.CompactionConfig
+	lastCompactionEvent      *dive.CompactionEvent
+	compactionEventTime      time.Time
+	showCompactionStats      bool
+	compactionStatsStartTime time.Time
 }
 
 // NewApp creates a new CLI application
-func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string, initialPrompt string) *App {
+func NewApp(
+	agent *dive.StandardAgent,
+	threadRepo dive.ThreadRepository,
+	workspaceDir, modelName string,
+	initialPrompt string,
+	compactionConfig *dive.CompactionConfig,
+) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Build tool name -> title map from agent's tools
@@ -252,17 +273,19 @@ func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string, initialPr
 	}
 
 	return &App{
-		agent:          agent,
-		workspaceDir:   workspaceDir,
-		modelName:      modelName,
-		messages:       make([]Message, 0),
-		toolCallIndex:  make(map[string]int),
-		toolTitles:     toolTitles,
-		history:        make([]string, 0),
-		historyIndex:   -1,
-		ctx:            ctx,
-		cancel:         cancel,
-		initialPrompt:  initialPrompt,
+		agent:            agent,
+		threadRepo:       threadRepo,
+		workspaceDir:     workspaceDir,
+		modelName:        modelName,
+		messages:         make([]Message, 0),
+		toolCallIndex:    make(map[string]int),
+		toolTitles:       toolTitles,
+		history:          make([]string, 0),
+		historyIndex:     -1,
+		ctx:              ctx,
+		cancel:           cancel,
+		initialPrompt:    initialPrompt,
+		compactionConfig: compactionConfig,
 	}
 }
 
@@ -312,21 +335,39 @@ func (a *App) LiveView() tui.View {
 	)
 	views = append(views, tui.Divider())
 
-	// Show autocomplete options or exit hint below the bottom divider (always reserve 8 lines)
-	for i := 0; i < 8; i++ {
-		if len(a.autocompleteMatches) > 0 && i < len(a.autocompleteMatches) {
+	// Show autocomplete options, compaction stats, or exit hint below the bottom divider (always reserve 8 lines)
+	footerViews := make([]tui.View, 0, 8)
+
+	if len(a.autocompleteMatches) > 0 {
+		count := len(a.autocompleteMatches)
+		if count > 8 {
+			count = 8
+		}
+		for i := 0; i < count; i++ {
 			match := a.autocompleteMatches[i]
 			if i == a.autocompleteIndex {
-				views = append(views, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
+				footerViews = append(footerViews, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
 			} else {
-				views = append(views, tui.Text("   @%s", match).Hint())
+				footerViews = append(footerViews, tui.Text("   @%s", match).Hint())
 			}
-		} else if i == 0 && a.showExitHint && len(a.autocompleteMatches) == 0 {
-			views = append(views, tui.Text(" Press Ctrl+C again to exit").Hint())
-		} else {
-			views = append(views, tui.Text(""))
 		}
+	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
+		footerViews = append(footerViews,
+			tui.Text(" ⚡").Fg(tui.ColorYellow),
+			tui.Text(" Context compacted:").Hint(),
+			tui.Text(" %d → %d tokens", a.lastCompactionEvent.TokensBefore, a.lastCompactionEvent.TokensAfter),
+			tui.Text(" (%d messages summarized)", a.lastCompactionEvent.MessagesCompacted).Hint(),
+		)
+	} else if a.showExitHint {
+		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Hint())
 	}
+
+	// Pad with empty lines to ensure stable height
+	for len(footerViews) < 8 {
+		footerViews = append(footerViews, tui.Text(""))
+	}
+
+	views = append(views, footerViews...)
 
 	if len(views) == 0 {
 		return tui.Text("")
@@ -554,6 +595,10 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		if a.showExitHint && time.Since(a.lastCtrlC) >= 2*time.Second {
 			a.showExitHint = false
 		}
+		// Clear compaction stats after 5 seconds
+		if a.showCompactionStats && time.Since(a.compactionStatsStartTime) >= 5*time.Second {
+			a.showCompactionStats = false
+		}
 
 	// Custom events from background goroutines
 	case processingStartEvent:
@@ -566,6 +611,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleToolResult(e.result)
 	case processingEndEvent:
 		a.handleProcessingEnd(e.err)
+	case compactionEvent:
+		a.handleCompaction(e.event)
 	case showDialogEvent:
 		a.dialogState = e.dialog
 		// Focus the dialog so it receives key events
@@ -812,8 +859,12 @@ func (a *App) processMessageAsync(input string) {
 	// Send start event to set up state in the main goroutine
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: input, expanded: expanded})
 
+	// Track the last usage from the final LLM call (for accurate context size)
+	// resp.Usage is accumulated across tool iterations which inflates context size
+	var lastUsage *llm.Usage
+
 	// Create response with streaming
-	_, err = a.agent.CreateResponse(a.ctx,
+	resp, err := a.agent.CreateResponse(a.ctx,
 		dive.WithInput(expanded),
 		dive.WithThreadID("main"),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
@@ -825,6 +876,11 @@ func (a *App) processMessageAsync(input string) {
 						a.runner.SendEvent(streamTextEvent{baseEvent: newBaseEvent(), text: text})
 					}
 				}
+			case dive.ResponseItemTypeMessage:
+				// Track usage from each LLM response (last one = actual context size)
+				if item.Usage != nil {
+					lastUsage = item.Usage
+				}
 			case dive.ResponseItemTypeToolCall:
 				a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
 			case dive.ResponseItemTypeToolCallResult:
@@ -834,8 +890,77 @@ func (a *App) processMessageAsync(input string) {
 		}),
 	)
 
+	// Check for compaction after successful response
+	if err == nil && resp != nil && a.compactionConfig != nil && a.threadRepo != nil {
+		a.checkAndPerformCompaction(lastUsage)
+	}
+
 	// Send completion event
 	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err})
+}
+
+// checkAndPerformCompaction checks if compaction is needed and performs it.
+// Uses lastUsage (from final LLM call) for accurate context size measurement.
+func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
+	if lastUsage == nil {
+		return
+	}
+
+	// Get threshold
+	threshold := a.compactionConfig.ContextTokenThreshold
+	if threshold <= 0 {
+		threshold = dive.DefaultContextTokenThreshold
+	}
+
+	// Get the thread to check message count
+	thread, err := a.threadRepo.GetThread(a.ctx, "main")
+	if err != nil || thread == nil {
+		return
+	}
+
+	// Check if compaction should trigger
+	if !dive.ShouldCompact(lastUsage, len(thread.Messages), threshold) {
+		return
+	}
+
+	// Get the model for compaction
+	model := a.compactionConfig.Model
+	if model == nil {
+		model = a.agent.Model()
+	}
+
+	// Calculate tokens before (from last LLM call = actual context size)
+	tokensBefore := dive.CalculateContextTokens(lastUsage)
+
+	// Perform compaction
+	compactedMsgs, event, err := dive.CompactMessages(
+		a.ctx,
+		model,
+		thread.Messages,
+		"", // System prompt - can be empty for summary generation
+		a.compactionConfig.SummaryPrompt,
+		tokensBefore,
+	)
+	if err != nil {
+		// Log warning but don't fail
+		return
+	}
+
+	// Update thread with compacted messages
+	thread.Messages = compactedMsgs
+	thread.CompactionHistory = append(thread.CompactionHistory, dive.CompactionRecord{
+		Timestamp:         time.Now(),
+		TokensBefore:      event.TokensBefore,
+		TokensAfter:       event.TokensAfter,
+		MessagesCompacted: event.MessagesCompacted,
+	})
+
+	if err := a.threadRepo.PutThread(a.ctx, thread); err != nil {
+		return
+	}
+
+	// Send compaction event to UI
+	a.runner.SendEvent(compactionEvent{baseEvent: newBaseEvent(), event: event})
 }
 
 // Event handlers for background goroutine events
@@ -958,6 +1083,16 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			}
 		}
 	}
+}
+
+// handleCompaction processes a compaction event and updates UI state.
+// The compaction notification is shown in the live view for 3 seconds,
+// and detailed stats are displayed in the footer for 5 seconds.
+func (a *App) handleCompaction(event *dive.CompactionEvent) {
+	a.lastCompactionEvent = event
+	a.compactionEventTime = time.Now()
+	a.showCompactionStats = true
+	a.compactionStatsStartTime = time.Now()
 }
 
 func (a *App) handleProcessingEnd(err error) {
@@ -1136,6 +1271,18 @@ func (a *App) buildLiveView() tui.View {
 		}
 	}
 	views = append(views, toolViews...)
+
+	// Show compaction notification (if recent)
+	if a.lastCompactionEvent != nil && time.Since(a.compactionEventTime) < 3*time.Second {
+		views = append(views, tui.Group(
+			tui.Text("⚡").Fg(tui.ColorYellow),
+			tui.Text(" Context compacted").Fg(tui.ColorYellow),
+			tui.Text(" %d → %d tokens, %d messages summarized",
+				a.lastCompactionEvent.TokensBefore,
+				a.lastCompactionEvent.TokensAfter,
+				a.lastCompactionEvent.MessagesCompacted).Hint(),
+		))
+	}
 
 	// Show generation progress indicator (below tool calls)
 	if a.streamingMessageIndex >= 0 {

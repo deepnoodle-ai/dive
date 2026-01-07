@@ -144,7 +144,11 @@ Run the interactive assistant:
 dive                                    # Start interactive chat
 dive --model claude-sonnet-4-20250514   # Use a specific model
 dive --workspace /path/to/project       # Set workspace directory
+dive --compaction=false                 # Disable automatic context compaction
+dive --compaction-threshold=50000       # Trigger compaction at 50k tokens
 ```
+
+The CLI enables automatic context compaction by default (at 100k tokens), which summarizes conversation history when token limits are approached. This allows for long-running sessions without hitting context limits.
 
 ## LLM Providers
 

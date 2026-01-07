@@ -7,14 +7,17 @@ import (
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
-func TestCalculateTotalTokens(t *testing.T) {
-	agent := &StandardAgent{}
-
+func TestCalculateContextTokens(t *testing.T) {
 	tests := []struct {
 		name     string
 		usage    *llm.Usage
 		expected int
 	}{
+		{
+			name:     "nil usage",
+			usage:    nil,
+			expected: 0,
+		},
 		{
 			name: "all zeros",
 			usage: &llm.Usage{
@@ -26,28 +29,28 @@ func TestCalculateTotalTokens(t *testing.T) {
 			expected: 0,
 		},
 		{
-			name: "input and output only",
+			name: "input only",
 			usage: &llm.Usage{
 				InputTokens:  1000,
-				OutputTokens: 500,
+				OutputTokens: 500, // Not included in context
 			},
-			expected: 1500,
+			expected: 1000, // Only input tokens
 		},
 		{
-			name: "with cache tokens",
+			name: "with cache read tokens",
 			usage: &llm.Usage{
 				InputTokens:              1000,
-				OutputTokens:             500,
-				CacheCreationInputTokens: 200,
+				OutputTokens:             500,  // Not included
+				CacheCreationInputTokens: 200,  // Not included (subset of input)
 				CacheReadInputTokens:     300,
 			},
-			expected: 2000,
+			expected: 1300, // InputTokens + CacheReadInputTokens
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := agent.calculateTotalTokens(tt.usage)
+			result := CalculateContextTokens(tt.usage)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -56,111 +59,72 @@ func TestCalculateTotalTokens(t *testing.T) {
 func TestShouldCompact(t *testing.T) {
 	tests := []struct {
 		name         string
-		compaction   *CompactionConfig
 		usage        *llm.Usage
 		messageCount int
+		threshold    int
 		expected     bool
 	}{
 		{
-			name:       "nil compaction config",
-			compaction: nil,
-			usage: &llm.Usage{
-				InputTokens:  150000,
-				OutputTokens: 1000,
-			},
-			messageCount: 10,
-			expected:     false,
-		},
-		{
-			name: "compaction disabled",
-			compaction: &CompactionConfig{
-				Enabled: false,
-			},
-			usage: &llm.Usage{
-				InputTokens:  150000,
-				OutputTokens: 1000,
-			},
-			messageCount: 10,
-			expected:     false,
-		},
-		{
 			name: "below default threshold",
-			compaction: &CompactionConfig{
-				Enabled: true,
-			},
 			usage: &llm.Usage{
 				InputTokens:  50000,
 				OutputTokens: 1000,
 			},
 			messageCount: 10,
+			threshold:    0, // Use default
 			expected:     false,
 		},
 		{
 			name: "above default threshold",
-			compaction: &CompactionConfig{
-				Enabled: true,
-			},
 			usage: &llm.Usage{
-				InputTokens:  99000,
-				OutputTokens: 2000,
+				InputTokens:  100001, // Context tokens exceed threshold
+				OutputTokens: 2000,   // Output tokens not counted for threshold
 			},
 			messageCount: 10,
+			threshold:    0, // Use default
 			expected:     true,
 		},
 		{
 			name: "above custom threshold",
-			compaction: &CompactionConfig{
-				Enabled:               true,
-				ContextTokenThreshold: 50000,
-			},
 			usage: &llm.Usage{
 				InputTokens:  50000,
 				OutputTokens: 1000,
 			},
 			messageCount: 10,
+			threshold:    50000,
 			expected:     true,
 		},
 		{
 			name: "below custom threshold",
-			compaction: &CompactionConfig{
-				Enabled:               true,
-				ContextTokenThreshold: 50000,
-			},
 			usage: &llm.Usage{
 				InputTokens:  40000,
 				OutputTokens: 1000,
 			},
 			messageCount: 10,
+			threshold:    50000,
 			expected:     false,
 		},
 		{
 			name: "too few messages",
-			compaction: &CompactionConfig{
-				Enabled: true,
-			},
 			usage: &llm.Usage{
 				InputTokens:  150000,
 				OutputTokens: 1000,
 			},
 			messageCount: 1,
+			threshold:    0,
 			expected:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agent := &StandardAgent{
-				compaction: tt.compaction,
-			}
-			result := agent.shouldCompact(tt.usage, tt.messageCount)
+			result := ShouldCompact(tt.usage, tt.messageCount, tt.threshold)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestExtractSummary(t *testing.T) {
-	agent := &StandardAgent{}
-
 	tests := []struct {
 		name     string
 		text     string
@@ -201,19 +165,32 @@ func TestExtractSummary(t *testing.T) {
 			text:     "<summary>\n# Task Overview\nDoing something\n\n# Next Steps\n1. Step one\n</summary>",
 			expected: "# Task Overview\nDoing something\n\n# Next Steps\n1. Step one",
 		},
+		{
+			name:     "uppercase tags",
+			text:     "<SUMMARY>Uppercase content</SUMMARY>",
+			expected: "Uppercase content",
+		},
+		{
+			name:     "mixed case tags",
+			text:     "<Summary>Mixed Case</Summary>",
+			expected: "Mixed Case",
+		},
+		{
+			name:     "preserves content case",
+			text:     "<SUMMARY>Content With MIXED Case</SUMMARY>",
+			expected: "Content With MIXED Case",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := agent.extractSummary(tt.text)
+			result := extractSummary(tt.text)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
 func TestFilterPendingToolUse(t *testing.T) {
-	agent := &StandardAgent{}
-
 	tests := []struct {
 		name     string
 		messages []*llm.Message
@@ -271,7 +248,7 @@ func TestFilterPendingToolUse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := agent.filterPendingToolUse(tt.messages)
+			result := filterPendingToolUse(tt.messages)
 			assert.Len(t, result, tt.expected)
 
 			// Verify that the last message (if exists) has no tool use
@@ -293,4 +270,19 @@ func TestCompactionConfigDefaults(t *testing.T) {
 	assert.NotEmpty(t, DefaultCompactionSummaryPrompt)
 	assert.Contains(t, DefaultCompactionSummaryPrompt, "<summary>")
 	assert.Contains(t, DefaultCompactionSummaryPrompt, "</summary>")
+}
+
+func TestCompactionEventStructure(t *testing.T) {
+	// Test that CompactionEvent can be properly constructed
+	event := &CompactionEvent{
+		TokensBefore:      150000,
+		TokensAfter:       5000,
+		Summary:           "Test summary",
+		MessagesCompacted: 50,
+	}
+
+	assert.Equal(t, 150000, event.TokensBefore)
+	assert.Equal(t, 5000, event.TokensAfter)
+	assert.Equal(t, "Test summary", event.Summary)
+	assert.Equal(t, 50, event.MessagesCompacted)
 }
