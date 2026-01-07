@@ -43,11 +43,12 @@ func TestFileSessionRepository_NewFileSessionRepository(t *testing.T) {
 			t.Skip("Cannot determine home directory")
 		}
 
-		// Use a unique temp directory under home
-		uniqueDir := filepath.Join(home, ".dive-test-"+time.Now().Format("20060102150405"))
+		// Use a unique temp directory under home with consistent timestamp
+		timestamp := time.Now().Format("20060102150405")
+		uniqueDir := filepath.Join(home, ".dive-test-"+timestamp)
 		defer os.RemoveAll(uniqueDir)
 
-		repo, err := NewFileSessionRepository("~/.dive-test-" + time.Now().Format("20060102150405"))
+		repo, err := NewFileSessionRepository("~/.dive-test-" + timestamp)
 		assert.NoError(t, err)
 		assert.NotNil(t, repo)
 	})

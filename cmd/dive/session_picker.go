@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -128,7 +129,7 @@ func (p *SessionPickerApp) sessionItemView(session *dive.Session, selected bool)
 	if title == "" && len(session.Messages) > 0 {
 		// Use first user message as title
 		for _, msg := range session.Messages {
-			if msg.Role == "user" {
+			if msg.Role == llm.User {
 				title = msg.Text()
 				break
 			}

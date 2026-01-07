@@ -285,6 +285,7 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 
 	// Handle forking BEFORE prepareSession to avoid modifying the original session
 	if options.Fork && a.sessionRepository != nil && options.SessionID != "" {
+		originalSessionID := options.SessionID
 		forkedSession, err := a.sessionRepository.ForkSession(ctx, options.SessionID)
 		if err != nil && err != ErrSessionNotFound {
 			return nil, fmt.Errorf("failed to fork session: %w", err)
@@ -292,7 +293,7 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		if forkedSession != nil {
 			// Update options to use the forked session ID
 			options.SessionID = forkedSession.ID
-			logger = logger.With("forked_from", options.SessionID, "forked_to", forkedSession.ID)
+			logger = logger.With("forked_from", originalSessionID, "forked_to", forkedSession.ID)
 			logger.Info("forked session")
 		}
 	}

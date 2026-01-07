@@ -9,7 +9,7 @@ Dive's todo system provides:
 1. A `TodoWrite` tool for agents to create and update task lists
 2. Real-time `TodoEvent` emissions through the event callback system
 3. A `TodoTracker` helper for consuming and displaying progress
-4. Concurrent-safe state management for parallel access
+4. Thread-safe state management for parallel access
 
 ## Basic Usage
 
