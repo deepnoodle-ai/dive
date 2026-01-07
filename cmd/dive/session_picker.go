@@ -58,8 +58,7 @@ func RunSessionPicker(repo dive.SessionRepository, filter string, workspaceDir s
 	}
 
 	if len(sessions) == 0 {
-		fmt.Printf("No sessions found matching %q\n", filter)
-		return &SessionPickerResult{Canceled: true}, nil
+		return nil, fmt.Errorf("no sessions found matching %q", filter)
 	}
 
 	// Create picker app
@@ -207,11 +206,22 @@ func (p *SessionPickerApp) HandleEvent(event tui.Event) []tui.Cmd {
 			return []tui.Cmd{tui.Quit()}
 		}
 
-		// Handle number keys 1-9 for quick selection
+		// Handle number keys 1-9 for quick selection within visible viewport
 		if e.Rune >= '1' && e.Rune <= '9' {
+			// Calculate visible viewport (same logic as LiveView)
+			startIdx := 0
+			if p.selectedIdx >= 10 {
+				startIdx = p.selectedIdx - 9
+			}
+			endIdx := startIdx + 10
+			if endIdx > len(p.sessions) {
+				endIdx = len(p.sessions)
+			}
+			visibleCount := endIdx - startIdx
+
 			idx := int(e.Rune - '1')
-			if idx < len(p.sessions) {
-				p.result.SessionID = p.sessions[idx].ID
+			if idx < visibleCount {
+				p.result.SessionID = p.sessions[startIdx+idx].ID
 				return []tui.Cmd{tui.Quit()}
 			}
 		}
