@@ -189,6 +189,7 @@ type DialogOption struct {
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
 	agent        *dive.StandardAgent
+	threadRepo   dive.ThreadRepository
 	workspaceDir string
 	modelName    string
 
@@ -240,10 +241,11 @@ type App struct {
 	initialPrompt string
 
 	// Ctrl+C exit confirmation state
-	lastCtrlC     time.Time
-	showExitHint  bool
+	lastCtrlC    time.Time
+	showExitHint bool
 
-	// Compaction state
+	// Compaction configuration and state
+	compactionConfig         *dive.CompactionConfig
 	lastCompactionEvent      *dive.CompactionEvent
 	compactionEventTime      time.Time
 	showCompactionStats      bool
@@ -251,7 +253,13 @@ type App struct {
 }
 
 // NewApp creates a new CLI application
-func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string, initialPrompt string) *App {
+func NewApp(
+	agent *dive.StandardAgent,
+	threadRepo dive.ThreadRepository,
+	workspaceDir, modelName string,
+	initialPrompt string,
+	compactionConfig *dive.CompactionConfig,
+) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Build tool name -> title map from agent's tools
@@ -265,17 +273,19 @@ func NewApp(agent *dive.StandardAgent, workspaceDir, modelName string, initialPr
 	}
 
 	return &App{
-		agent:          agent,
-		workspaceDir:   workspaceDir,
-		modelName:      modelName,
-		messages:       make([]Message, 0),
-		toolCallIndex:  make(map[string]int),
-		toolTitles:     toolTitles,
-		history:        make([]string, 0),
-		historyIndex:   -1,
-		ctx:            ctx,
-		cancel:         cancel,
-		initialPrompt:  initialPrompt,
+		agent:            agent,
+		threadRepo:       threadRepo,
+		workspaceDir:     workspaceDir,
+		modelName:        modelName,
+		messages:         make([]Message, 0),
+		toolCallIndex:    make(map[string]int),
+		toolTitles:       toolTitles,
+		history:          make([]string, 0),
+		historyIndex:     -1,
+		ctx:              ctx,
+		cancel:           cancel,
+		initialPrompt:    initialPrompt,
+		compactionConfig: compactionConfig,
 	}
 }
 
@@ -849,8 +859,12 @@ func (a *App) processMessageAsync(input string) {
 	// Send start event to set up state in the main goroutine
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: input, expanded: expanded})
 
+	// Track the last usage from the final LLM call (for accurate context size)
+	// resp.Usage is accumulated across tool iterations which inflates context size
+	var lastUsage *llm.Usage
+
 	// Create response with streaming
-	_, err = a.agent.CreateResponse(a.ctx,
+	resp, err := a.agent.CreateResponse(a.ctx,
 		dive.WithInput(expanded),
 		dive.WithThreadID("main"),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
@@ -862,21 +876,91 @@ func (a *App) processMessageAsync(input string) {
 						a.runner.SendEvent(streamTextEvent{baseEvent: newBaseEvent(), text: text})
 					}
 				}
+			case dive.ResponseItemTypeMessage:
+				// Track usage from each LLM response (last one = actual context size)
+				if item.Usage != nil {
+					lastUsage = item.Usage
+				}
 			case dive.ResponseItemTypeToolCall:
 				a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
 			case dive.ResponseItemTypeToolCallResult:
 				a.runner.SendEvent(toolResultEvent{baseEvent: newBaseEvent(), result: item.ToolCallResult})
-			case dive.ResponseItemTypeCompaction:
-				if item.Compaction != nil {
-					a.runner.SendEvent(compactionEvent{baseEvent: newBaseEvent(), event: item.Compaction})
-				}
 			}
 			return nil
 		}),
 	)
 
+	// Check for compaction after successful response
+	if err == nil && resp != nil && a.compactionConfig != nil && a.threadRepo != nil {
+		a.checkAndPerformCompaction(lastUsage)
+	}
+
 	// Send completion event
 	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err})
+}
+
+// checkAndPerformCompaction checks if compaction is needed and performs it.
+// Uses lastUsage (from final LLM call) for accurate context size measurement.
+func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
+	if lastUsage == nil {
+		return
+	}
+
+	// Get threshold
+	threshold := a.compactionConfig.ContextTokenThreshold
+	if threshold <= 0 {
+		threshold = dive.DefaultContextTokenThreshold
+	}
+
+	// Get the thread to check message count
+	thread, err := a.threadRepo.GetThread(a.ctx, "main")
+	if err != nil || thread == nil {
+		return
+	}
+
+	// Check if compaction should trigger
+	if !dive.ShouldCompact(lastUsage, len(thread.Messages), threshold) {
+		return
+	}
+
+	// Get the model for compaction
+	model := a.compactionConfig.Model
+	if model == nil {
+		model = a.agent.Model()
+	}
+
+	// Calculate tokens before (from last LLM call = actual context size)
+	tokensBefore := dive.CalculateContextTokens(lastUsage)
+
+	// Perform compaction
+	compactedMsgs, event, err := dive.CompactMessages(
+		a.ctx,
+		model,
+		thread.Messages,
+		"", // System prompt - can be empty for summary generation
+		a.compactionConfig.SummaryPrompt,
+		tokensBefore,
+	)
+	if err != nil {
+		// Log warning but don't fail
+		return
+	}
+
+	// Update thread with compacted messages
+	thread.Messages = compactedMsgs
+	thread.CompactionHistory = append(thread.CompactionHistory, dive.CompactionRecord{
+		Timestamp:         time.Now(),
+		TokensBefore:      event.TokensBefore,
+		TokensAfter:       event.TokensAfter,
+		MessagesCompacted: event.MessagesCompacted,
+	})
+
+	if err := a.threadRepo.PutThread(a.ctx, thread); err != nil {
+		return
+	}
+
+	// Send compaction event to UI
+	a.runner.SendEvent(compactionEvent{baseEvent: newBaseEvent(), event: event})
 }
 
 // Event handlers for background goroutine events

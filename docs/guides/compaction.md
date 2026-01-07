@@ -4,80 +4,168 @@ Dive's compaction feature automatically manages conversation context as it grows
 
 ## Overview
 
-Compaction is a client-side feature that:
+Compaction is managed externally to the agent (typically by the CLI or your application code). This design keeps the agent simple and gives you full control over when and how compaction occurs.
 
-1. Monitors token usage after each LLM response
-2. Triggers when total tokens exceed a threshold
-3. Generates a structured summary of the conversation
-4. Replaces the message history with the summary
-5. Persists the compacted state to the thread repository
+The compaction flow:
+
+1. After each agent response, check token usage from the last LLM call
+2. If context tokens exceed the threshold, trigger compaction
+3. Generate a structured summary of the conversation
+4. Replace the thread's message history with the summary
+5. Persist the compacted state to the thread repository
 
 This enables long-running agent sessions that would otherwise exceed context limits.
 
-## Basic Usage
+## Library Usage
 
-Enable compaction at the agent level:
-
-```go
-agent, _ := dive.NewAgent(dive.AgentOptions{
-    Name:  "Assistant",
-    Model: anthropic.New(),
-    Compaction: &dive.CompactionConfig{
-        Enabled: true,
-    },
-})
-```
-
-Or enable per-request:
+For library users, compaction is performed externally after each `CreateResponse` call. Dive provides utility functions to make this straightforward:
 
 ```go
-resp, _ := agent.CreateResponse(ctx,
-    dive.WithInput("Process all files in the directory"),
-    dive.WithCompaction(&dive.CompactionConfig{
-        Enabled:               true,
-        ContextTokenThreshold: 50000,
-    }),
+package main
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/llm"
+    "github.com/deepnoodle-ai/dive/providers/anthropic"
 )
+
+func main() {
+    ctx := context.Background()
+    model := anthropic.New()
+    repo := dive.NewMemoryThreadRepository()
+    threadID := "my-thread"
+    threshold := 100000 // Compact at 100k context tokens
+
+    agent, _ := dive.NewAgent(dive.AgentOptions{
+        Name:             "Assistant",
+        Model:            model,
+        ThreadRepository: repo,
+    })
+
+    // Track the last usage from the callback (for accurate context size)
+    var lastUsage *llm.Usage
+
+    resp, _ := agent.CreateResponse(ctx,
+        dive.WithThreadID(threadID),
+        dive.WithInput("Process all files"),
+        dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+            if item.Type == dive.ResponseItemTypeMessage && item.Usage != nil {
+                lastUsage = item.Usage
+            }
+            return nil
+        }),
+    )
+
+    // Check if compaction is needed after the response
+    if lastUsage != nil {
+        thread, _ := repo.GetThread(ctx, threadID)
+        if dive.ShouldCompact(lastUsage, len(thread.Messages), threshold) {
+            compactedMsgs, event, err := dive.CompactMessages(
+                ctx,
+                model,
+                thread.Messages,
+                "",  // system prompt (optional)
+                "",  // use default summary prompt
+                dive.CalculateContextTokens(lastUsage),
+            )
+            if err == nil {
+                thread.Messages = compactedMsgs
+                thread.CompactionHistory = append(thread.CompactionHistory, dive.CompactionRecord{
+                    Timestamp:         time.Now(),
+                    TokensBefore:      event.TokensBefore,
+                    TokensAfter:       event.TokensAfter,
+                    MessagesCompacted: event.MessagesCompacted,
+                })
+                repo.PutThread(ctx, thread)
+                fmt.Printf("Compacted: %d -> %d tokens\n", event.TokensBefore, event.TokensAfter)
+            }
+        }
+    }
+}
 ```
 
-## Configuration Options
+## Compaction Functions
 
-| Option                  | Type      | Default         | Description                           |
+### ShouldCompact
+
+Check if compaction should be triggered:
+
+```go
+func ShouldCompact(usage *llm.Usage, messageCount int, threshold int) bool
+```
+
+- `usage`: Token usage from the last LLM call
+- `messageCount`: Number of messages in the thread
+- `threshold`: Token threshold (0 uses default of 100,000)
+
+Returns `true` if context tokens >= threshold and messageCount >= 2.
+
+### CalculateContextTokens
+
+Calculate the context window size from usage:
+
+```go
+func CalculateContextTokens(usage *llm.Usage) int
+```
+
+Returns `InputTokens + CacheReadInputTokens`. This represents the actual context size sent to the LLM.
+
+Note: `CacheCreationInputTokens` is a subset of `InputTokens` (not additive), and `OutputTokens` are not part of the input context.
+
+### CompactMessages
+
+Generate a summary and return compacted messages:
+
+```go
+func CompactMessages(
+    ctx context.Context,
+    model llm.LLM,
+    messages []*llm.Message,
+    systemPrompt string,
+    summaryPrompt string,
+    tokensBefore int,
+) ([]*llm.Message, *CompactionEvent, error)
+```
+
+- `model`: LLM to use for generating the summary
+- `messages`: The conversation messages to compact
+- `systemPrompt`: System prompt to include (can be empty)
+- `summaryPrompt`: Custom prompt for summary generation (empty uses default)
+- `tokensBefore`: Pre-compaction token count for accurate event reporting
+
+Returns the compacted messages (a single user message containing the summary), a `CompactionEvent` with stats, and any error.
+
+## Configuration
+
+### CompactionConfig
+
+The `CompactionConfig` struct configures compaction behavior:
+
+```go
+type CompactionConfig struct {
+    ContextTokenThreshold int     // Token count that triggers compaction (default: 100000)
+    Model                 llm.LLM // Optional model for summary generation
+    SummaryPrompt         string  // Custom prompt for summary generation
+}
+```
+
+| Field                   | Type      | Default         | Description                           |
 | ----------------------- | --------- | --------------- | ------------------------------------- |
-| `Enabled`               | `bool`    | `false`         | Must be `true` to activate compaction |
-| `ContextTokenThreshold` | `int`     | `100000`        | Token count that triggers compaction  |
-| `Model`                 | `llm.LLM` | Agent's model   | Optional model for summary generation |
+| `ContextTokenThreshold` | `int`     | `100000`        | Context token count that triggers compaction |
+| `Model`                 | `llm.LLM` | (required)      | Model for summary generation          |
 | `SummaryPrompt`         | `string`  | Built-in prompt | Custom prompt for summary generation  |
-
-### Token Calculation
-
-Total tokens are calculated as:
-
-```
-InputTokens + OutputTokens + CacheCreationInputTokens + CacheReadInputTokens
-```
-
-This matches Anthropic's SDK calculation for consistency.
 
 ## Choosing a Threshold
 
-The threshold determines when compaction occurs:
+The threshold determines when compaction occurs based on context tokens (InputTokens + CacheReadInputTokens):
 
-```go
-// More frequent compaction for memory-constrained scenarios
-Compaction: &dive.CompactionConfig{
-    Enabled:               true,
-    ContextTokenThreshold: 50000,
-}
+- **Lower thresholds** (e.g., 50,000): More frequent compaction, smaller context windows
+- **Higher thresholds** (e.g., 150,000): Less frequent compaction, preserves more context
 
-// Less frequent compaction when you need more context
-Compaction: &dive.CompactionConfig{
-    Enabled:               true,
-    ContextTokenThreshold: 150000,
-}
-```
-
-Lower thresholds mean more frequent compactions with smaller context windows. Higher thresholds preserve more context but risk hitting limits.
+The default of 100,000 works well for most use cases with Claude models.
 
 ## Using a Different Model for Summaries
 
@@ -88,11 +176,15 @@ import "github.com/deepnoodle-ai/dive/providers/anthropic"
 
 haiku := anthropic.New(anthropic.WithModel(anthropic.Claude35Haiku))
 
-Compaction: &dive.CompactionConfig{
-    Enabled:               true,
-    ContextTokenThreshold: 100000,
-    Model:                 haiku,
-}
+// Use haiku for summary generation
+compactedMsgs, event, err := dive.CompactMessages(
+    ctx,
+    haiku,  // Faster model for summaries
+    thread.Messages,
+    "",
+    "",
+    tokensBefore,
+)
 ```
 
 ## Custom Summary Prompts
@@ -100,15 +192,21 @@ Compaction: &dive.CompactionConfig{
 Provide a custom prompt for domain-specific needs:
 
 ```go
-Compaction: &dive.CompactionConfig{
-    Enabled: true,
-    SummaryPrompt: `Summarize the research conducted so far, including:
+customPrompt := `Summarize the research conducted so far, including:
 - Sources consulted and key findings
 - Questions answered and remaining unknowns
 - Recommended next steps
 
-Wrap your summary in <summary></summary> tags.`,
-}
+Wrap your summary in <summary></summary> tags.`
+
+compactedMsgs, event, err := dive.CompactMessages(
+    ctx,
+    model,
+    thread.Messages,
+    "",
+    customPrompt,
+    tokensBefore,
+)
 ```
 
 Your prompt must instruct the model to wrap the summary in `<summary></summary>` tags.
@@ -123,61 +221,27 @@ The built-in prompt instructs the model to create a structured continuation summ
 4. **Next Steps**: Specific actions needed, blockers, and priority order
 5. **Context to Preserve**: User preferences, domain-specific details, and commitments
 
-## Monitoring Compaction Events
-
-Use an event callback to monitor when compaction occurs:
-
-```go
-resp, _ := agent.CreateResponse(ctx,
-    dive.WithInput("..."),
-    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-        if item.Type == dive.ResponseItemTypeCompaction {
-            event := item.Compaction
-            fmt.Printf("Compaction occurred:\n")
-            fmt.Printf("  Tokens before: %d\n", event.TokensBefore)
-            fmt.Printf("  Tokens after: %d\n", event.TokensAfter)
-            fmt.Printf("  Messages compacted: %d\n", event.MessagesCompacted)
-        }
-        return nil
-    }),
-)
-```
-
 ## Thread Persistence
 
 When using a `ThreadRepository`, compaction affects the thread:
 
-1. `Thread.Messages` is replaced with the summary (not appended)
+1. `Thread.Messages` is replaced with the compacted summary (a single user message)
 2. `Thread.CompactionHistory` records when compaction occurred
 
 ```go
-repo := dive.NewMemoryThreadRepository()
-agent, _ := dive.NewAgent(dive.AgentOptions{
-    Name:             "Assistant",
-    Model:            anthropic.New(),
-    ThreadRepository: repo,
-    Compaction: &dive.CompactionConfig{
-        Enabled: true,
-    },
-})
-
 // After compaction, retrieve the thread
 thread, _ := repo.GetThread(ctx, threadID)
 fmt.Printf("Messages: %d\n", len(thread.Messages))  // Will be 1 (the summary)
 fmt.Printf("Compaction events: %d\n", len(thread.CompactionHistory))
 ```
 
-## Content Types
-
 ### Compacted Summary Format
 
-When compaction occurs, the summary is stored as a regular `TextContent` block in an assistant message. This ensures compatibility with all LLM providers:
+The summary is stored as a user message to ensure compatibility with all LLM providers (which typically require the first message to be from the user role):
 
 ```go
-// After compaction, the thread will have an assistant message with the summary
 thread, _ := repo.GetThread(ctx, threadID)
-if len(thread.Messages) > 0 && thread.Messages[0].Role == llm.Assistant {
-    // The first message after compaction contains the summary
+if len(thread.Messages) > 0 && thread.Messages[0].Role == llm.User {
     for _, content := range thread.Messages[0].Content {
         if text, ok := content.(*llm.TextContent); ok {
             fmt.Printf("Compacted summary:\n%s\n", text.Text)
@@ -190,16 +254,7 @@ if len(thread.Messages) > 0 && thread.Messages[0].Role == llm.Assistant {
 
 ### Pending Tool Calls
 
-**Compaction is automatically deferred when there are pending tool calls.** If the current response contains `tool_use` blocks that need execution, compaction will not occur until after:
-1. The tool calls are executed
-2. Tool results are added to the conversation
-3. The next LLM response is generated
-
-This ensures that `tool_use` and `tool_result` blocks remain properly paired, preventing API errors about missing tool_use references.
-
-### Partial Tool Use (Before Deferral)
-
-When compacting historical messages (before the current turn), if the message history contains unpaired `tool_use` blocks (without corresponding `tool_result`), these are automatically filtered out before summarization. This cleanup prevents malformed message sequences.
+When compacting, any pending `tool_use` blocks in the last assistant message (without corresponding `tool_result`) are automatically filtered out. This prevents malformed message sequences.
 
 ### Minimum Messages
 
@@ -207,90 +262,11 @@ Compaction is skipped if there are fewer than 2 messages in the conversation.
 
 ### Compaction Failure
 
-If summary generation fails (e.g., model error, missing `<summary>` tags), compaction is skipped with a warning logged. The conversation continues with uncompacted context.
-
-## Complete Example
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "log"
-
-    "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/providers/anthropic"
-)
-
-func main() {
-    // Create a repository for thread persistence
-    repo := dive.NewMemoryThreadRepository()
-
-    // Create agent with compaction enabled
-    agent, err := dive.NewAgent(dive.AgentOptions{
-        Name:         "Research Assistant",
-        Instructions: "You are a thorough researcher.",
-        Model:        anthropic.New(),
-        ThreadRepository: repo,
-        Compaction: &dive.CompactionConfig{
-            Enabled:               true,
-            ContextTokenThreshold: 50000,  // Compact at 50k tokens
-        },
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Track compaction events
-    callback := func(ctx context.Context, item *dive.ResponseItem) error {
-        switch item.Type {
-        case dive.ResponseItemTypeCompaction:
-            fmt.Printf("Context compacted: %d -> %d tokens\n",
-                item.Compaction.TokensBefore,
-                item.Compaction.TokensAfter)
-        case dive.ResponseItemTypeMessage:
-            fmt.Printf("Assistant: %s\n", item.Message.Text())
-        }
-        return nil
-    }
-
-    // Long conversation that may trigger compaction
-    threadID := "research-session"
-    queries := []string{
-        "Research the history of programming languages",
-        "Tell me about functional programming paradigms",
-        "Compare Go and Rust for systems programming",
-        // ... more queries that build up context
-    }
-
-    for _, query := range queries {
-        _, err := agent.CreateResponse(context.Background(),
-            dive.WithThreadID(threadID),
-            dive.WithInput(query),
-            dive.WithEventCallback(callback),
-        )
-        if err != nil {
-            log.Printf("Error: %v", err)
-            continue
-        }
-    }
-
-    // Check compaction history
-    thread, _ := repo.GetThread(context.Background(), threadID)
-    if len(thread.CompactionHistory) > 0 {
-        fmt.Printf("\nCompaction occurred %d time(s)\n", len(thread.CompactionHistory))
-        for i, record := range thread.CompactionHistory {
-            fmt.Printf("  %d: %d messages compacted at %s\n",
-                i+1, record.MessagesCompacted, record.Timestamp)
-        }
-    }
-}
-```
+If summary generation fails (e.g., model error, missing `<summary>` tags), `CompactMessages` returns an error. Your application can decide how to handle this (skip compaction, retry, etc.).
 
 ## CLI Usage
 
-The Dive CLI enables compaction by default and provides flags to configure it:
+The Dive CLI manages compaction automatically and provides flags to configure it:
 
 ```bash
 # Default behavior (compaction enabled at 100k tokens)
@@ -313,25 +289,11 @@ dive
 
 When compaction occurs in the CLI, you'll see:
 
-1. **Live notification** (3 seconds): A yellow ⚡ indicator appears in the live view with token reduction stats
+1. **Live notification** (3 seconds): A yellow indicator appears in the live view with token reduction stats
 2. **Footer stats** (5 seconds): Detailed compaction statistics appear in the footer:
    ```
-   ⚡ Context compacted: 102,450 → 1,250 tokens (47 messages summarized)
+   Context compacted: 102,450 -> 1,250 tokens (47 messages summarized)
    ```
-
-This visual feedback helps you understand when compaction is occurring and how much context is being preserved.
-
-### CLI Print Mode
-
-Print mode (non-interactive) also supports compaction:
-
-```bash
-# Enable compaction for long-running tasks
-dive --print --compaction-threshold=50000 "Process all files in the repository"
-
-# Output compaction stats in JSON format
-dive --print --output-format=json "Long task..." | jq .
-```
 
 ## When to Use Compaction
 
@@ -351,8 +313,8 @@ dive --print --output-format=json "Long task..." | jq .
 ## Best Practices
 
 1. **Start with defaults** - The default 100k threshold works well for most use cases
-2. **Monitor compaction events** - Use callbacks to track when compaction occurs
+2. **Track last usage** - Use the callback to track usage from `ResponseItemTypeMessage` events for accurate context measurement
 3. **Use faster models for summaries** - Haiku can generate quality summaries quickly
 4. **Test your workflows** - Verify important context survives compaction
 5. **Combine with thread persistence** - Use ThreadRepository to maintain compaction history
-6. **Set appropriate thresholds** - Lower for memory-constrained scenarios, higher when you need more context
+6. **Handle errors gracefully** - Compaction failures shouldn't crash your application

@@ -49,10 +49,6 @@ type CreateResponseOptions struct {
 	// a new thread is created with a copy of the original's messages.
 	// The original thread remains unchanged.
 	Fork bool
-
-	// Compaction overrides the agent's compaction configuration for this request.
-	// If nil, the agent's compaction configuration (if any) is used.
-	Compaction *CompactionConfig
 }
 
 // EventCallback is a function called with each item produced while an agent
@@ -181,27 +177,6 @@ func WithInput(input string) CreateResponseOption {
 func WithEventCallback(callback EventCallback) CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
 		opts.EventCallback = callback
-	}
-}
-
-// WithCompaction overrides the agent's compaction configuration for this request.
-//
-// Compaction automatically summarizes conversation history when token thresholds
-// are exceeded, replacing the full message history with a concise summary.
-// This helps manage context window limits for long-running conversations.
-//
-// Example:
-//
-//	resp, _ := agent.CreateResponse(ctx,
-//	    dive.WithInput("Process all the files"),
-//	    dive.WithCompaction(&dive.CompactionConfig{
-//	        Enabled:               true,
-//	        ContextTokenThreshold: 50000,
-//	    }),
-//	)
-func WithCompaction(config *CompactionConfig) CreateResponseOption {
-	return func(opts *CreateResponseOptions) {
-		opts.Compaction = config
 	}
 }
 

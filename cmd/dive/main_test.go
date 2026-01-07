@@ -60,7 +60,6 @@ func TestCompactionConfigCreation(t *testing.T) {
 		enabled           bool
 		threshold         int
 		expectNil         bool
-		expectedEnabled   bool
 		expectedThreshold int
 	}{
 		{
@@ -68,7 +67,6 @@ func TestCompactionConfigCreation(t *testing.T) {
 			enabled:           true,
 			threshold:         100000,
 			expectNil:         false,
-			expectedEnabled:   true,
 			expectedThreshold: 100000,
 		},
 		{
@@ -76,7 +74,6 @@ func TestCompactionConfigCreation(t *testing.T) {
 			enabled:           true,
 			threshold:         50000,
 			expectNil:         false,
-			expectedEnabled:   true,
 			expectedThreshold: 50000,
 		},
 		{
@@ -90,10 +87,10 @@ func TestCompactionConfigCreation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Simulate the logic from runInteractive/runPrint
+			// When enabled, config is non-nil; when disabled, config is nil
 			var compactionConfig *dive.CompactionConfig
 			if tt.enabled {
 				compactionConfig = &dive.CompactionConfig{
-					Enabled:               true,
 					ContextTokenThreshold: tt.threshold,
 				}
 			}
@@ -102,8 +99,6 @@ func TestCompactionConfigCreation(t *testing.T) {
 				assert.Nil(t, compactionConfig, "compactionConfig should be nil when disabled")
 			} else {
 				assert.NotNil(t, compactionConfig, "compactionConfig should not be nil when enabled")
-				assert.Equal(t, tt.expectedEnabled, compactionConfig.Enabled,
-					"Enabled should match expected")
 				assert.Equal(t, tt.expectedThreshold, compactionConfig.ContextTokenThreshold,
 					"ContextTokenThreshold should match expected")
 			}

@@ -35,10 +35,6 @@ const (
 	// The Event field contains the raw LLM event for real-time UI updates.
 	ResponseItemTypeModelEvent ResponseItemType = "model_event"
 
-	// ResponseItemTypeCompaction indicates context compaction has occurred.
-	// The Compaction field contains information about the compaction.
-	ResponseItemTypeCompaction ResponseItemType = "compaction"
-
 	// ResponseItemTypeTodo indicates the todo list has been updated.
 	// The Todo field contains the current todo list state.
 	ResponseItemTypeTodo ResponseItemType = "todo"
@@ -140,9 +136,6 @@ type ResponseItem struct {
 	// ToolCallResult is set if the response item is a tool call result
 	ToolCallResult *ToolCallResult `json:"tool_call_result,omitempty"`
 
-	// Compaction is set if the response item is a compaction event
-	Compaction *CompactionEvent `json:"compaction,omitempty"`
-
 	// Todo is set if the response item is a todo list update
 	Todo *TodoEvent `json:"todo,omitempty"`
 
@@ -166,10 +159,6 @@ type Response struct {
 	// Items contains the individual response items including
 	// messages, tool calls, and tool results.
 	Items []*ResponseItem `json:"items,omitempty"`
-
-	// Compaction is set if context compaction occurred during this response.
-	// This allows non-callback clients to detect when compaction happened.
-	Compaction *CompactionEvent `json:"compaction,omitempty"`
 
 	// Usage contains token usage information
 	Usage *llm.Usage `json:"usage,omitempty"`

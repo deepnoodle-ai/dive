@@ -82,11 +82,6 @@ type AgentOptions struct {
 	// Deprecated: For tool confirmations, use Permission with a CanUseTool callback.
 	Interactor UserInteractor
 
-	// Compaction configures client-side context compaction.
-	// When enabled and token thresholds are exceeded, the agent automatically
-	// summarizes conversation history to fit within context limits.
-	Compaction *CompactionConfig
-
 	// Subagents defines specialized subagents this agent can spawn via the Task tool.
 	// Keys are subagent names (e.g., "code-reviewer"), values are their definitions.
 	// Claude automatically decides when to invoke subagents based on descriptions.
@@ -121,7 +116,6 @@ type StandardAgent struct {
 	permissionManager    *PermissionManager
 	systemPromptTemplate *template.Template
 	context              []llm.Content
-	compaction           *CompactionConfig
 	subagentRegistry     *SubagentRegistry
 }
 
@@ -171,7 +165,6 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 		modelSettings:        opts.ModelSettings,
 		interactor:           opts.Interactor,
 		context:              opts.Context,
-		compaction:           opts.Compaction,
 	}
 	// Initialize permission manager with backward compatibility
 	agent.permissionManager = agent.initPermissionManager(opts.Permission, opts.Interactor)
@@ -304,13 +297,6 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		return nil, err
 	}
 
-	// Apply per-request compaction override
-	originalCompaction := a.compaction
-	if options.Compaction != nil {
-		a.compaction = options.Compaction
-	}
-	defer func() { a.compaction = originalCompaction }()
-
 	systemPrompt, err := a.buildSystemPrompt()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build system prompt: %w", err)
@@ -358,22 +344,7 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		return nil, err
 	}
 
-	// Handle compaction: replace old messages with summary + new output
-	if genResult.CompactedMessages != nil {
-		// Thread gets: compacted summary + post-compaction assistant response
-		thread.Messages = append(genResult.CompactedMessages, genResult.OutputMessages...)
-		// Record compaction in history
-		thread.CompactionHistory = append(thread.CompactionHistory, CompactionRecord{
-			Timestamp:         time.Now(),
-			TokensBefore:      genResult.CompactionEvent.TokensBefore,
-			TokensAfter:       genResult.CompactionEvent.TokensAfter,
-			MessagesCompacted: genResult.CompactionEvent.MessagesCompacted,
-		})
-		// Set compaction on response for non-callback clients
-		response.Compaction = genResult.CompactionEvent
-	} else {
-		thread.Messages = append(thread.Messages, genResult.OutputMessages...)
-	}
+	thread.Messages = append(thread.Messages, genResult.OutputMessages...)
 
 	if a.threadRepository != nil {
 		if err := a.threadRepository.PutThread(ctx, thread); err != nil {
@@ -463,11 +434,6 @@ func (a *StandardAgent) generate(
 	// Accumulates usage across multiple LLM calls
 	totalUsage := &llm.Usage{}
 
-	// Track if compaction occurred during this generation
-	var compactedMessages []*llm.Message
-	var compactionEvent *CompactionEvent
-	var compactionOccurred bool // Forces one more generation after compaction
-
 	newMessage := func(msg *llm.Message) {
 		updatedMessages = append(updatedMessages, msg)
 		outputMessages = append(outputMessages, msg)
@@ -528,60 +494,9 @@ func (a *StandardAgent) generate(
 			return nil, err
 		}
 
-		// Check for pending tool calls BEFORE compaction
-		// If there are tool calls, we must execute them before compacting
+		// Check for tool calls
 		toolCalls := response.ToolCalls()
-		hasPendingToolCalls := len(toolCalls) > 0
-
-		// If we just generated a post-compaction response, we're done
-		// (check this before compaction trigger to handle the follow-up generation)
-		if compactionOccurred {
-			compactionOccurred = false
-			if !hasPendingToolCalls {
-				break
-			}
-			// If there are tool calls after compaction, continue processing them
-		}
-
-		// Check for compaction trigger (but defer if we have pending tool calls)
-		// Use per-call usage, not cumulative, since each call includes the full context
-		if !hasPendingToolCalls && a.shouldCompact(&response.Usage, len(updatedMessages)) {
-			// Calculate pre-compaction token count for accurate event reporting
-			tokensBefore := a.calculateContextTokens(&response.Usage)
-			compacted, event, err := a.performCompaction(ctx, updatedMessages, systemPrompt, tokensBefore)
-			if err != nil {
-				// Log warning but don't fail - continue with uncompacted context
-				a.logger.Warn("compaction failed", "error", err)
-			} else {
-				// Replace context with compacted summary for next generation
-				updatedMessages = compacted
-				// Clear output messages - we only want post-compaction responses
-				// The summary is a User message and shouldn't be in output items
-				outputMessages = nil
-				// Track compaction for final result
-				compactedMessages = compacted
-				compactionEvent = event
-				// Emit compaction event
-				if err := callback(ctx, &ResponseItem{
-					Type:       ResponseItemTypeCompaction,
-					Compaction: event,
-				}); err != nil {
-					return nil, err
-				}
-				// Set flag to generate exactly one more response with compacted context
-				compactionOccurred = true
-				a.logger.Debug("compaction complete, will generate response with compacted context",
-					"tokens_before", event.TokensBefore,
-					"tokens_after", event.TokensAfter,
-					"messages_compacted", event.MessagesCompacted,
-				)
-				// Continue to next iteration to generate a response
-				continue
-			}
-		}
-
-		// We're done if there are no tool calls
-		if !hasPendingToolCalls {
+		if len(toolCalls) == 0 {
 			break
 		}
 
@@ -609,16 +524,10 @@ func (a *StandardAgent) generate(
 		}
 	}
 
-	// Return result with compaction info if it occurred
-	result := &generateResult{
+	return &generateResult{
 		OutputMessages: outputMessages,
 		Usage:          totalUsage,
-	}
-	if compactedMessages != nil {
-		result.CompactedMessages = compactedMessages
-		result.CompactionEvent = compactionEvent
-	}
-	return result, nil
+	}, nil
 }
 
 func (a *StandardAgent) isCachingEnabled() bool {
@@ -1068,211 +977,6 @@ func (a *StandardAgent) isToolAllowed(toolName string) bool {
 }
 
 type generateResult struct {
-	OutputMessages    []*llm.Message
-	Usage             *llm.Usage
-	CompactedMessages []*llm.Message   // If set, Thread.Messages should be replaced with this
-	CompactionEvent   *CompactionEvent // If set, compaction occurred
-}
-
-// calculateTotalTokens returns the total token count for billing/stats purposes.
-// Includes all token types: input, output, and cache tokens.
-func (a *StandardAgent) calculateTotalTokens(usage *llm.Usage) int {
-	return usage.InputTokens + usage.OutputTokens +
-		usage.CacheCreationInputTokens + usage.CacheReadInputTokens
-}
-
-// calculateContextTokens returns the context window token count for threshold checks.
-// Per Anthropic API: input_tokens are non-cached tokens, cache_read_input_tokens are
-// tokens read from cache. Together they represent the actual context size.
-// Note: cache_creation_input_tokens is a subset of input_tokens, not additive.
-func (a *StandardAgent) calculateContextTokens(usage *llm.Usage) int {
-	return usage.InputTokens + usage.CacheReadInputTokens
-}
-
-// shouldCompact returns true if compaction should be triggered based on token usage.
-func (a *StandardAgent) shouldCompact(usage *llm.Usage, messageCount int) bool {
-	if a.compaction == nil || !a.compaction.Enabled {
-		return false
-	}
-	// Never compact if there are fewer than 2 messages
-	if messageCount < 2 {
-		return false
-	}
-	threshold := a.compaction.ContextTokenThreshold
-	if threshold <= 0 {
-		threshold = DefaultContextTokenThreshold
-	}
-	return a.calculateContextTokens(usage) >= threshold
-}
-
-// performCompaction generates a summary of the conversation and returns compacted messages.
-// tokensBefore is the pre-compaction context token count for accurate event reporting.
-func (a *StandardAgent) performCompaction(
-	ctx context.Context,
-	messages []*llm.Message,
-	systemPrompt string,
-	tokensBefore int,
-) ([]*llm.Message, *CompactionEvent, error) {
-	// Step 1: Filter out pending tool use blocks
-	cleanedMessages := a.filterPendingToolUse(messages)
-	if len(cleanedMessages) == 0 {
-		return nil, nil, fmt.Errorf("no messages to compact after filtering")
-	}
-
-	// Track original message count before any trimming for accurate reporting
-	originalMessageCount := len(cleanedMessages)
-
-	// Step 1.5: Trim messages if too many to avoid exceeding context during summarization
-	// Keep first message (often contains important context) + recent messages
-	const maxMessagesForSummary = 50
-	if len(cleanedMessages) > maxMessagesForSummary {
-		cleanedMessages = append(
-			cleanedMessages[:1], // Keep first message
-			cleanedMessages[len(cleanedMessages)-maxMessagesForSummary+1:]..., // Keep recent messages
-		)
-	}
-
-	// Step 2: Build summary request
-	summaryPrompt := a.compaction.SummaryPrompt
-	if summaryPrompt == "" {
-		summaryPrompt = DefaultCompactionSummaryPrompt
-	}
-
-	// Add summary instruction as a user message
-	summaryMessages := make([]*llm.Message, len(cleanedMessages)+1)
-	copy(summaryMessages, cleanedMessages)
-	summaryMessages[len(cleanedMessages)] = llm.NewUserTextMessage(summaryPrompt)
-
-	// Step 3: Choose model for summary
-	model := a.compaction.Model
-	if model == nil {
-		model = a.model
-	}
-
-	// Step 4: Generate summary (non-streaming for simplicity)
-	summaryOpts := []llm.Option{
-		llm.WithSystemPrompt(systemPrompt),
-		llm.WithMessages(summaryMessages...),
-	}
-
-	a.logger.Debug("performing compaction",
-		"message_count", len(cleanedMessages),
-		"model", model.Name(),
-	)
-
-	summaryResp, err := model.Generate(ctx, summaryOpts...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("compaction summary generation failed: %w", err)
-	}
-
-	// Step 5: Extract summary from response
-	summaryText := a.extractSummary(summaryResp.Message().Text())
-	if summaryText == "" {
-		return nil, nil, fmt.Errorf("no summary found in compaction response (missing <summary> tags)")
-	}
-
-	// Step 6: Create new message list with the summary as a user message
-	// This ensures the first message is from the User role, which is required by most LLM APIs
-	summaryPrefix := "Here is a summary of our conversation so far:\n\n"
-	compactedMessages := []*llm.Message{
-		llm.NewUserTextMessage(summaryPrefix + summaryText),
-	}
-
-	// Step 7: Build compaction event
-	// TokensAfter is estimated from full summary message length (rough heuristic: ~4 chars per token)
-	// This is an approximation since actual tokenization varies by model
-	fullSummaryLen := len(summaryPrefix) + len(summaryText)
-	tokensAfter := fullSummaryLen / 4
-	if tokensAfter < 100 {
-		tokensAfter = 100 // Minimum reasonable estimate
-	}
-	event := &CompactionEvent{
-		TokensBefore:      tokensBefore,
-		TokensAfter:       tokensAfter,
-		Summary:           summaryText,
-		MessagesCompacted: originalMessageCount, // Use pre-trim count
-	}
-
-	a.logger.Debug("compaction complete",
-		"tokens_before", event.TokensBefore,
-		"tokens_after", event.TokensAfter,
-		"messages_compacted", event.MessagesCompacted,
-	)
-
-	return compactedMessages, event, nil
-}
-
-// extractSummary extracts content from <summary></summary> tags.
-// Matching is case-insensitive to handle variations like <Summary> or <SUMMARY>.
-func (a *StandardAgent) extractSummary(text string) string {
-	lower := strings.ToLower(text)
-	startTag := "<summary>"
-	endTag := "</summary>"
-
-	startIdx := strings.Index(lower, startTag)
-	if startIdx == -1 {
-		return ""
-	}
-	startIdx += len(startTag)
-
-	endIdx := strings.Index(lower[startIdx:], endTag)
-	if endIdx == -1 {
-		return ""
-	}
-
-	// Extract from original text (not lowercase) to preserve case of summary content
-	return strings.TrimSpace(text[startIdx : startIdx+endIdx])
-}
-
-// filterPendingToolUse removes tool_use blocks that don't have corresponding tool_result.
-// If the last assistant message contains only tool_use blocks, remove the entire message.
-func (a *StandardAgent) filterPendingToolUse(messages []*llm.Message) []*llm.Message {
-	if len(messages) == 0 {
-		return messages
-	}
-
-	// Check if the last message is an assistant message with tool_use
-	lastMsg := messages[len(messages)-1]
-	if lastMsg.Role != llm.Assistant {
-		return messages
-	}
-
-	// Count tool use blocks in the last message
-	toolUseCount := 0
-	nonToolUseCount := 0
-	for _, content := range lastMsg.Content {
-		if _, ok := content.(*llm.ToolUseContent); ok {
-			toolUseCount++
-		} else {
-			nonToolUseCount++
-		}
-	}
-
-	// If no tool use, return as-is
-	if toolUseCount == 0 {
-		return messages
-	}
-
-	// If all content was tool use, remove the entire message
-	if nonToolUseCount == 0 {
-		return messages[:len(messages)-1]
-	}
-
-	// Otherwise, filter out tool use blocks from the last message
-	filteredContent := make([]llm.Content, 0, nonToolUseCount)
-	for _, content := range lastMsg.Content {
-		if _, isToolUse := content.(*llm.ToolUseContent); !isToolUse {
-			filteredContent = append(filteredContent, content)
-		}
-	}
-
-	// Create a copy with filtered content
-	result := make([]*llm.Message, len(messages))
-	copy(result, messages)
-	result[len(result)-1] = &llm.Message{
-		ID:      lastMsg.ID,
-		Role:    lastMsg.Role,
-		Content: filteredContent,
-	}
-	return result
+	OutputMessages []*llm.Message
+	Usage          *llm.Usage
 }

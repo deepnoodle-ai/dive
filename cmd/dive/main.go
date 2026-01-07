@@ -375,16 +375,8 @@ func runPrint(ctx *cli.Context) error {
 	// Add skill and task tools
 	cfg.addSkillAndTaskTools()
 
-	// Create compaction config if enabled
-	var compactionConfig *dive.CompactionConfig
-	if cfg.compactionEnabled {
-		compactionConfig = &dive.CompactionConfig{
-			Enabled:               true,
-			ContextTokenThreshold: cfg.compactionThreshold,
-		}
-	}
-
 	// Create the agent (skip all permissions in print mode)
+	// Note: Compaction is not used in print mode (single request)
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:         "Dive",
 		Instructions: cfg.instructions,
@@ -397,7 +389,6 @@ func runPrint(ctx *cli.Context) error {
 			Temperature: &cfg.temperature,
 			MaxTokens:   &cfg.maxTokens,
 		},
-		Compaction: compactionConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
@@ -579,15 +570,6 @@ func runInteractive(ctx *cli.Context) error {
 	// Create thread repository for conversation memory
 	threadRepo := dive.NewMemoryThreadRepository()
 
-	// Create compaction config if enabled
-	var compactionConfig *dive.CompactionConfig
-	if cfg.compactionEnabled {
-		compactionConfig = &dive.CompactionConfig{
-			Enabled:               true,
-			ContextTokenThreshold: cfg.compactionThreshold,
-		}
-	}
-
 	// Create the agent
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:             "Dive",
@@ -601,14 +583,22 @@ func runInteractive(ctx *cli.Context) error {
 			Temperature: &cfg.temperature,
 			MaxTokens:   &cfg.maxTokens,
 		},
-		Compaction: compactionConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
 	}
 
+	// Create compaction config for external management
+	var compactionConfig *dive.CompactionConfig
+	if cfg.compactionEnabled {
+		compactionConfig = &dive.CompactionConfig{
+			ContextTokenThreshold: cfg.compactionThreshold,
+			Model:                 cfg.model,
+		}
+	}
+
 	// Create and run the app
-	app := NewApp(agent, cfg.workspaceDir, cfg.modelName, initialPrompt)
+	app := NewApp(agent, threadRepo, cfg.workspaceDir, cfg.modelName, initialPrompt, compactionConfig)
 	interactor.SetApp(app)
 
 	return app.Run()
