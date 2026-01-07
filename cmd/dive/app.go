@@ -244,7 +244,6 @@ type App struct {
 	showExitHint  bool
 
 	// Compaction state
-	compacting               bool
 	lastCompactionEvent      *dive.CompactionEvent
 	compactionEventTime      time.Time
 	showCompactionStats      bool
@@ -342,7 +341,7 @@ func (a *App) LiveView() tui.View {
 				footerViews = append(footerViews, tui.Text("   @%s", match).Hint())
 			}
 		}
-	} else if a.showCompactionStats {
+	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
 		footerViews = append(footerViews,
 			tui.Text(" ⚡").Fg(tui.ColorYellow),
 			tui.Text(" Context compacted:").Hint(),
@@ -1006,7 +1005,6 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 // The compaction notification is shown in the live view for 3 seconds,
 // and detailed stats are displayed in the footer for 5 seconds.
 func (a *App) handleCompaction(event *dive.CompactionEvent) {
-	a.compacting = false
 	a.lastCompactionEvent = event
 	a.compactionEventTime = time.Now()
 	a.showCompactionStats = true

@@ -46,7 +46,7 @@ func TestSessionConfigCompaction(t *testing.T) {
 			}
 
 			// Verify config values
-			assert.Equal(t, tt.wantConfig, cfg.compactionEnabled,
+			assert.Equal(t, tt.compactionEnabled, cfg.compactionEnabled,
 				"compactionEnabled should match expected")
 			assert.Equal(t, tt.wantThreshold, cfg.compactionThreshold,
 				"compactionThreshold should match expected")
@@ -112,13 +112,7 @@ func TestCompactionConfigCreation(t *testing.T) {
 }
 
 func TestDefaultCompactionValues(t *testing.T) {
-	// Verify default values match what's in the CLI flags
-	const expectedDefaultThreshold = 100000
-	const expectedDefaultEnabled = true
-
-	// These constants should match the defaults in the CLI flag definitions
-	assert.Equal(t, 100000, expectedDefaultThreshold,
+	// Verify the dive package default matches expected CLI behavior
+	assert.Equal(t, 100000, dive.DefaultContextTokenThreshold,
 		"default threshold should be 100000 tokens")
-	assert.True(t, expectedDefaultEnabled,
-		"compaction should be enabled by default")
 }

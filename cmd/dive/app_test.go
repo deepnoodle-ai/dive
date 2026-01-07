@@ -26,7 +26,6 @@ func TestHandleCompaction(t *testing.T) {
 	app.handleCompaction(event)
 
 	// Verify state was updated correctly
-	assert.False(t, app.compacting, "compacting should be false after handling")
 	assert.NotNil(t, app.lastCompactionEvent, "lastCompactionEvent should be set")
 	assert.Equal(t, event, app.lastCompactionEvent, "lastCompactionEvent should match the event")
 	assert.True(t, app.showCompactionStats, "showCompactionStats should be true")
