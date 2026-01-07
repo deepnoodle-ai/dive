@@ -39,6 +39,7 @@ experimentation, but the library is the primary interface.
 - **Sandbox** (`sandbox/`): Docker/Seatbelt sandboxing with network isolation
 - **MCP** (`mcp/`): Model Context Protocol client for external tools and resources
 - **Skills** (`skill/`): Modular agent capabilities loaded from markdown files
+- **Slash Commands** (`slashcmd/`): User-invocable CLI commands from markdown files
 - **Subagents** (`subagent.go`, `subagent_loader.go`): Specialized child agents for focused tasks
 - **Compaction** (`compaction.go`): Automatic context summarization for long conversations
 - **Todo Tracking** (`todo_tracker.go`): Progress tracking for multi-step tasks
@@ -146,13 +147,15 @@ See `docs/sandboxing.md` for configuration details.
 
 **Skills**: Load modular capabilities from `.dive/skills/*.md` with YAML frontmatter metadata
 
+**Slash Commands**: User-invocable CLI commands from `.dive/commands/*.md` with argument placeholders ($1, $2, $ARGUMENTS)
+
 **Todo Tracking**: Track multi-step task progress with TodoWrite tool and TodoTracker helper
 
 **Enhanced LLM Features**: Citations, prompt caching, structured output, token pricing, usage tracking, server-sent events, hooks
 
 ## Documentation
 
-Comprehensive guides are available in `docs/`:
+Comprehensive guides are available in `docs/guides/`:
 - `agents.md` - Agent creation and configuration
 - `compaction.md` - Context compaction guide
 - `custom-tools.md` - Creating custom tools
@@ -161,6 +164,7 @@ Comprehensive guides are available in `docs/`:
 - `permissions.md` - Permission system guide
 - `sandboxing.md` - Sandboxing setup
 - `skills.md` - Skill system guide
+- `slash-commands.md` - Slash commands guide
 - `todo-lists.md` - Todo tracking guide
 - `tools.md` - Tool system overview
 

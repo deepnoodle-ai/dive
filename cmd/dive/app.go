@@ -13,6 +13,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/slashcmd"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -188,10 +189,11 @@ type DialogOption struct {
 // except for immutable fields (agent, workspaceDir, modelName, runner).
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
-	agent        *dive.StandardAgent
-	sessionRepo  dive.SessionRepository
-	workspaceDir string
-	modelName    string
+	agent         *dive.StandardAgent
+	sessionRepo   dive.SessionRepository
+	workspaceDir  string
+	modelName     string
+	commandLoader *slashcmd.Loader
 
 	// Session management
 	resumeSessionID  string // Session ID to resume (from --resume flag)
@@ -234,6 +236,7 @@ type App struct {
 	autocompleteMatches []string
 	autocompleteIndex   int
 	autocompletePrefix  string
+	autocompleteType    string // "file" or "command"
 
 	// Streaming text buffer (flushed on tick for batched updates)
 	streamBuffer string
@@ -266,6 +269,7 @@ func NewApp(
 	compactionConfig *dive.CompactionConfig,
 	resumeSessionID string,
 	forkSession bool,
+	commandLoader *slashcmd.Loader,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -286,6 +290,7 @@ func NewApp(
 		modelName:        modelName,
 		resumeSessionID:  resumeSessionID,
 		forkSession:      forkSession,
+		commandLoader:    commandLoader,
 		messages:         make([]Message, 0),
 		toolCallIndex:    make(map[string]int),
 		toolTitles:       toolTitles,
@@ -352,12 +357,16 @@ func (a *App) LiveView() tui.View {
 		if count > 8 {
 			count = 8
 		}
+		prefix := "@"
+		if a.autocompleteType == "command" {
+			prefix = "/"
+		}
 		for i := 0; i < count; i++ {
 			match := a.autocompleteMatches[i]
 			if i == a.autocompleteIndex {
-				footerViews = append(footerViews, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
+				footerViews = append(footerViews, tui.Text(" ❯ %s%s", prefix, match).Fg(tui.ColorCyan))
 			} else {
-				footerViews = append(footerViews, tui.Text("   @%s", match).Hint())
+				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Hint())
 			}
 		}
 	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
@@ -693,12 +702,33 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 
 // updateAutocomplete updates autocomplete state based on current input
 func (a *App) updateAutocomplete() {
-	// Find the last @ symbol and extract the prefix after it
+	// Check for command autocomplete (/ at start of input)
+	if strings.HasPrefix(a.inputText, "/") {
+		prefix := a.inputText[1:]
+
+		// Check if there's a space (command completed)
+		if strings.Contains(prefix, " ") || strings.Contains(prefix, "\n") {
+			a.clearAutocomplete()
+			return
+		}
+
+		// Only update matches if prefix changed or type changed
+		if prefix != a.autocompletePrefix || a.autocompleteType != "command" {
+			a.autocompletePrefix = prefix
+			a.autocompleteType = "command"
+			a.autocompleteMatches = a.getCommandMatches(prefix)
+			if len(a.autocompleteMatches) > 8 {
+				a.autocompleteMatches = a.autocompleteMatches[:8]
+			}
+			a.autocompleteIndex = 0
+		}
+		return
+	}
+
+	// Check for file autocomplete (@ anywhere in input)
 	lastAt := strings.LastIndex(a.inputText, "@")
 	if lastAt < 0 {
-		a.autocompleteMatches = nil
-		a.autocompleteIndex = 0
-		a.autocompletePrefix = ""
+		a.clearAutocomplete()
 		return
 	}
 
@@ -707,21 +737,28 @@ func (a *App) updateAutocomplete() {
 
 	// Check if there's a space after the @ (autocomplete completed)
 	if strings.Contains(prefix, " ") || strings.Contains(prefix, "\n") {
-		a.autocompleteMatches = nil
-		a.autocompleteIndex = 0
-		a.autocompletePrefix = ""
+		a.clearAutocomplete()
 		return
 	}
 
-	// Only update matches if prefix changed
-	if prefix != a.autocompletePrefix {
+	// Only update matches if prefix changed or type changed
+	if prefix != a.autocompletePrefix || a.autocompleteType != "file" {
 		a.autocompletePrefix = prefix
+		a.autocompleteType = "file"
 		a.autocompleteMatches = a.getFileMatches(prefix)
 		if len(a.autocompleteMatches) > 8 {
 			a.autocompleteMatches = a.autocompleteMatches[:8]
 		}
 		a.autocompleteIndex = 0
 	}
+}
+
+// clearAutocomplete resets autocomplete state
+func (a *App) clearAutocomplete() {
+	a.autocompleteMatches = nil
+	a.autocompleteIndex = 0
+	a.autocompletePrefix = ""
+	a.autocompleteType = ""
 }
 
 // selectAutocomplete selects the current autocomplete option
@@ -732,17 +769,18 @@ func (a *App) selectAutocomplete() bool {
 
 	selected := a.autocompleteMatches[a.autocompleteIndex]
 
-	// Find the last @ and replace prefix with selected match
-	lastAt := strings.LastIndex(a.inputText, "@")
-	if lastAt >= 0 {
-		a.inputText = a.inputText[:lastAt+1] + selected + " "
+	if a.autocompleteType == "command" {
+		// Replace entire input with selected command (add space for args)
+		a.inputText = "/" + selected + " "
+	} else {
+		// Find the last @ and replace prefix with selected match
+		lastAt := strings.LastIndex(a.inputText, "@")
+		if lastAt >= 0 {
+			a.inputText = a.inputText[:lastAt+1] + selected + " "
+		}
 	}
 
-	// Clear autocomplete state
-	a.autocompleteMatches = nil
-	a.autocompleteIndex = 0
-	a.autocompletePrefix = ""
-
+	a.clearAutocomplete()
 	return true
 }
 
@@ -770,10 +808,7 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 			a.selectAutocomplete()
 			return nil
 		case tui.KeyEscape:
-			// Clear autocomplete
-			a.autocompleteMatches = nil
-			a.autocompleteIndex = 0
-			a.autocompletePrefix = ""
+			a.clearAutocomplete()
 			return nil
 		}
 	}
@@ -867,6 +902,26 @@ func (a *App) processMessageAsync(input string) {
 
 	// Send start event to set up state in the main goroutine
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: input, expanded: expanded})
+	a.runAgent(expanded)
+}
+
+// processCommandAsync handles slash command processing in background.
+// displayText is what the user typed (e.g., "/explain go.mod")
+// expanded is the full prompt to send to the agent
+func (a *App) processCommandAsync(displayText, expanded string) {
+	// Expand file references in the expanded text
+	expandedWithFiles, err := a.expandFileReferences(expanded)
+	if err != nil {
+		a.runner.Printf("Warning: %s", err.Error())
+	}
+
+	// Send start event with display text, but send expanded text to agent
+	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: displayText, expanded: expandedWithFiles})
+	a.runAgent(expandedWithFiles)
+}
+
+// runAgent runs the agent with the given input
+func (a *App) runAgent(expanded string) {
 
 	// Track the last usage from the final LLM call (for accurate context size)
 	// resp.Usage is accumulated across tool iterations which inflates context size
@@ -926,7 +981,7 @@ func (a *App) processMessageAsync(input string) {
 
 	// Update session metadata for new sessions
 	if err == nil && resp != nil && a.sessionRepo != nil && isNewSession && a.currentSessionID != "" {
-		a.updateSessionMetadata(input)
+		a.updateSessionMetadata(expanded)
 	}
 
 	// Check for compaction after successful response
@@ -1461,44 +1516,196 @@ func extractToolResultText(result *llm.ToolResultContent) string {
 }
 
 func (a *App) handleCommand(input string) bool {
-	switch input {
-	case "/quit", "/exit", "/q":
+	// Parse command name and arguments
+	parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)
+	cmdName := parts[0]
+	var cmdArgs string
+	if len(parts) > 1 {
+		cmdArgs = parts[1]
+	}
+
+	// Handle built-in commands first
+	switch cmdName {
+	case "quit", "exit", "q":
 		a.runner.Stop()
 		return true
-	case "/clear":
+
+	case "clear":
+		// Clear scrollback
 		a.runner.ClearScrollback()
+
+		// Reset conversation state by deleting the current session
+		if a.currentSessionID != "" && a.sessionRepo != nil {
+			if err := a.sessionRepo.DeleteSession(a.ctx, a.currentSessionID); err != nil {
+				// Log error but continue
+				a.runner.Printf("Warning: failed to clear conversation: %v", err)
+			}
+		}
+
+		// Clear local message state and reset session
+		a.messages = make([]Message, 0)
+		a.todos = nil
+		a.toolCallIndex = make(map[string]int)
+		a.needNewTextMessage = false
+		a.currentMessage = nil
+		a.streamingMessageIndex = 0
+		a.currentSessionID = ""
+
+		// Show fresh intro
 		a.printIntroToScrollback()
 		return true
-	case "/todos", "/t":
+
+	case "compact":
+		a.handleCompactCommand()
+		return true
+
+	case "todos", "t":
 		a.showTodos = !a.showTodos
 		if a.showTodos {
 			a.printTodosToScrollback()
 		}
 		return true
-	case "/help", "/?":
+
+	case "help", "?":
 		a.printHelp()
 		return true
 	}
-	return false
+
+	// Check for custom slash commands
+	if a.commandLoader != nil {
+		if cmd, ok := a.commandLoader.GetCommand(cmdName); ok {
+			// Expand argument placeholders
+			expanded := cmd.ExpandArguments(cmdArgs)
+
+			// Warn about unsupported model override (agent doesn't support per-request model changes)
+			if cmd.Model != "" {
+				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Model)
+			}
+
+			// Append tool restrictions to instructions (like skills do)
+			if len(cmd.AllowedTools) > 0 {
+				expanded = expanded + fmt.Sprintf("\n\n---\n**Tool Restrictions:** While executing this command, you may only use these tools: %s\n",
+					strings.Join(cmd.AllowedTools, ", "))
+			}
+
+			// Build display text with command name and args
+			displayCmd := "/" + cmdName
+			if cmdArgs != "" {
+				displayCmd = "/" + cmdName + " " + cmdArgs
+			}
+
+			// Send the expanded instructions to the agent (async like regular messages)
+			go a.processCommandAsync(displayCmd, expanded)
+			return true
+		}
+	}
+
+	// Unknown command - show error
+	a.runner.Printf("Unknown command: /%s (try /help)", cmdName)
+	return true
+}
+
+// handleCompactCommand performs manual compaction of the conversation
+func (a *App) handleCompactCommand() {
+	if a.compactionConfig == nil {
+		a.runner.Printf("Compaction is disabled.")
+		return
+	}
+
+	if a.currentSessionID == "" || a.sessionRepo == nil {
+		a.runner.Printf("No conversation to compact.")
+		return
+	}
+
+	// Get current session
+	session, err := a.sessionRepo.GetSession(a.ctx, a.currentSessionID)
+	if err != nil {
+		a.runner.Printf("No conversation to compact.")
+		return
+	}
+
+	if len(session.Messages) < 2 {
+		a.runner.Printf("Not enough messages to compact (need at least 2).")
+		return
+	}
+
+	a.runner.Printf("Compacting conversation...")
+
+	// Calculate tokens before compaction (estimate)
+	tokensBefore := 0
+	for _, msg := range session.Messages {
+		for _, c := range msg.Content {
+			if tc, ok := c.(*llm.TextContent); ok && tc.Text != "" {
+				tokensBefore += len(tc.Text) / 4 // rough estimate
+			}
+		}
+	}
+
+	// Perform compaction
+	compactedMsgs, event, err := dive.CompactMessages(
+		a.ctx,
+		a.compactionConfig.Model,
+		session.Messages,
+		a.agent.Instructions(),
+		dive.DefaultCompactionSummaryPrompt,
+		tokensBefore,
+	)
+	if err != nil {
+		a.runner.Printf("Compaction failed: %v", err)
+		return
+	}
+
+	// Update session with compacted messages
+	session.Messages = compactedMsgs
+	if err := a.sessionRepo.PutSession(a.ctx, session); err != nil {
+		a.runner.Printf("Failed to save compacted session: %v", err)
+		return
+	}
+
+	// Show stats
+	a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
 }
 
 func (a *App) printHelp() {
-	help := tui.Stack(
+	views := []tui.View{
 		tui.Text(""),
-		tui.Text("Commands:").Bold(),
-		tui.Text("  /quit, /q     Exit"),
-		tui.Text("  /clear        Clear screen"),
-		tui.Text("  /todos, /t    Toggle todo list"),
-		tui.Text("  /help, /?     Show this help"),
+		tui.Text("Built-in Commands:").Bold(),
+		tui.Text("  /quit, /q      Exit"),
+		tui.Text("  /clear         Clear conversation and screen"),
+		tui.Text("  /compact       Compact conversation to save context"),
+		tui.Text("  /todos, /t     Toggle todo list"),
+		tui.Text("  /help, /?      Show this help"),
+	}
+
+	// List custom commands if any
+	if a.commandLoader != nil && a.commandLoader.CommandCount() > 0 {
+		views = append(views,
+			tui.Text(""),
+			tui.Text("Custom Commands:").Bold(),
+		)
+		for _, cmd := range a.commandLoader.ListCommands() {
+			line := fmt.Sprintf("  /%s", cmd.Name)
+			if cmd.ArgumentHint != "" {
+				line += " " + cmd.ArgumentHint
+			}
+			views = append(views, tui.Text(line))
+			if cmd.Description != "" {
+				views = append(views, tui.Text("      %s", cmd.Description).Hint())
+			}
+		}
+	}
+
+	views = append(views,
 		tui.Text(""),
 		tui.Text("Input:").Bold(),
-		tui.Text("  @filename     Include file contents"),
-		tui.Text("  Enter         Send message"),
-		tui.Text("  Shift+Enter   New line"),
-		tui.Text("  Ctrl+C twice  Exit"),
+		tui.Text("  @filename      Include file contents"),
+		tui.Text("  Enter          Send message"),
+		tui.Text("  Shift+Enter    New line"),
+		tui.Text("  Ctrl+C twice   Exit"),
 		tui.Text(""),
 	)
-	a.runner.Print(help)
+
+	a.runner.Print(tui.Stack(views...))
 }
 
 func (a *App) printTodosToScrollback() {
@@ -1981,6 +2188,35 @@ func fuzzyMatch(pattern, text string) int {
 	score -= len(text) / 10
 
 	return score
+}
+
+// getCommandMatches returns slash commands matching the prefix for autocomplete
+func (a *App) getCommandMatches(prefix string) []string {
+	// Built-in commands
+	builtins := []string{"clear", "compact", "help", "quit", "todos"}
+
+	var matches []string
+
+	// Add matching built-in commands
+	for _, cmd := range builtins {
+		if strings.HasPrefix(cmd, prefix) {
+			matches = append(matches, cmd)
+		}
+	}
+
+	// Add matching custom commands from loader
+	if a.commandLoader != nil {
+		for _, cmd := range a.commandLoader.ListCommands() {
+			if strings.HasPrefix(cmd.Name, prefix) {
+				matches = append(matches, cmd.Name)
+			}
+		}
+	}
+
+	// Sort alphabetically
+	sort.Strings(matches)
+
+	return matches
 }
 
 // getFileMatches returns files matching the prefix for autocomplete
