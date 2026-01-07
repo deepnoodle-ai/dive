@@ -13,6 +13,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/slashcmd"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -188,10 +189,11 @@ type DialogOption struct {
 // except for immutable fields (agent, workspaceDir, modelName, runner).
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
-	agent        *dive.StandardAgent
-	sessionRepo  dive.SessionRepository
-	workspaceDir string
-	modelName    string
+	agent         *dive.StandardAgent
+	sessionRepo   dive.SessionRepository
+	workspaceDir  string
+	modelName     string
+	commandLoader *slashcmd.Loader
 
 	// Session management
 	resumeSessionID  string // Session ID to resume (from --resume flag)
@@ -266,6 +268,7 @@ func NewApp(
 	compactionConfig *dive.CompactionConfig,
 	resumeSessionID string,
 	forkSession bool,
+	commandLoader *slashcmd.Loader,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -286,6 +289,7 @@ func NewApp(
 		modelName:        modelName,
 		resumeSessionID:  resumeSessionID,
 		forkSession:      forkSession,
+		commandLoader:    commandLoader,
 		messages:         make([]Message, 0),
 		toolCallIndex:    make(map[string]int),
 		toolTitles:       toolTitles,
@@ -1461,44 +1465,179 @@ func extractToolResultText(result *llm.ToolResultContent) string {
 }
 
 func (a *App) handleCommand(input string) bool {
-	switch input {
-	case "/quit", "/exit", "/q":
+	// Parse command name and arguments
+	parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)
+	cmdName := parts[0]
+	var cmdArgs string
+	if len(parts) > 1 {
+		cmdArgs = parts[1]
+	}
+
+	// Handle built-in commands first
+	switch cmdName {
+	case "quit", "exit", "q":
 		a.runner.Stop()
 		return true
-	case "/clear":
+
+	case "clear":
+		// Clear scrollback
 		a.runner.ClearScrollback()
+
+		// Reset conversation state by deleting the current session
+		if a.currentSessionID != "" && a.sessionRepo != nil {
+			if err := a.sessionRepo.DeleteSession(a.ctx, a.currentSessionID); err != nil {
+				// Log error but continue
+				a.runner.Printf("Warning: failed to clear conversation: %v", err)
+			}
+		}
+
+		// Clear local message state and reset session
+		a.messages = make([]Message, 0)
+		a.todos = nil
+		a.toolCallIndex = make(map[string]int)
+		a.needNewTextMessage = false
+		a.currentMessage = nil
+		a.streamingMessageIndex = 0
+		a.currentSessionID = ""
+
+		// Show fresh intro
 		a.printIntroToScrollback()
 		return true
-	case "/todos", "/t":
+
+	case "compact":
+		a.handleCompactCommand()
+		return true
+
+	case "todos", "t":
 		a.showTodos = !a.showTodos
 		if a.showTodos {
 			a.printTodosToScrollback()
 		}
 		return true
-	case "/help", "/?":
+
+	case "help", "?":
 		a.printHelp()
 		return true
 	}
-	return false
+
+	// Check for custom slash commands
+	if a.commandLoader != nil {
+		if cmd, ok := a.commandLoader.GetCommand(cmdName); ok {
+			// Expand argument placeholders
+			expanded := cmd.ExpandArguments(cmdArgs)
+
+			// Send the expanded instructions to the agent
+			a.processMessageAsync(expanded)
+			return true
+		}
+	}
+
+	// Unknown command - show error
+	a.runner.Printf("Unknown command: /%s (try /help)", cmdName)
+	return true
+}
+
+// handleCompactCommand performs manual compaction of the conversation
+func (a *App) handleCompactCommand() {
+	if a.compactionConfig == nil {
+		a.runner.Printf("Compaction is disabled.")
+		return
+	}
+
+	if a.currentSessionID == "" || a.sessionRepo == nil {
+		a.runner.Printf("No conversation to compact.")
+		return
+	}
+
+	// Get current session
+	session, err := a.sessionRepo.GetSession(a.ctx, a.currentSessionID)
+	if err != nil {
+		a.runner.Printf("No conversation to compact.")
+		return
+	}
+
+	if len(session.Messages) < 2 {
+		a.runner.Printf("Not enough messages to compact (need at least 2).")
+		return
+	}
+
+	a.runner.Printf("Compacting conversation...")
+
+	// Calculate tokens before compaction (estimate)
+	tokensBefore := 0
+	for _, msg := range session.Messages {
+		for _, c := range msg.Content {
+			if tc, ok := c.(*llm.TextContent); ok && tc.Text != "" {
+				tokensBefore += len(tc.Text) / 4 // rough estimate
+			}
+		}
+	}
+
+	// Perform compaction
+	compactedMsgs, event, err := dive.CompactMessages(
+		a.ctx,
+		a.compactionConfig.Model,
+		session.Messages,
+		a.agent.Instructions(),
+		dive.DefaultCompactionSummaryPrompt,
+		tokensBefore,
+	)
+	if err != nil {
+		a.runner.Printf("Compaction failed: %v", err)
+		return
+	}
+
+	// Update session with compacted messages
+	session.Messages = compactedMsgs
+	if err := a.sessionRepo.PutSession(a.ctx, session); err != nil {
+		a.runner.Printf("Failed to save compacted session: %v", err)
+		return
+	}
+
+	// Show stats
+	a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
 }
 
 func (a *App) printHelp() {
-	help := tui.Stack(
+	views := []tui.View{
 		tui.Text(""),
-		tui.Text("Commands:").Bold(),
-		tui.Text("  /quit, /q     Exit"),
-		tui.Text("  /clear        Clear screen"),
-		tui.Text("  /todos, /t    Toggle todo list"),
-		tui.Text("  /help, /?     Show this help"),
+		tui.Text("Built-in Commands:").Bold(),
+		tui.Text("  /quit, /q      Exit"),
+		tui.Text("  /clear         Clear conversation and screen"),
+		tui.Text("  /compact       Compact conversation to save context"),
+		tui.Text("  /todos, /t     Toggle todo list"),
+		tui.Text("  /help, /?      Show this help"),
+	}
+
+	// List custom commands if any
+	if a.commandLoader != nil && a.commandLoader.CommandCount() > 0 {
+		views = append(views,
+			tui.Text(""),
+			tui.Text("Custom Commands:").Bold(),
+		)
+		for _, cmd := range a.commandLoader.ListCommands() {
+			line := fmt.Sprintf("  /%s", cmd.Name)
+			if cmd.ArgumentHint != "" {
+				line += " " + cmd.ArgumentHint
+			}
+			views = append(views, tui.Text(line))
+			if cmd.Description != "" {
+				views = append(views, tui.Text("      %s", cmd.Description).Hint())
+			}
+		}
+	}
+
+	views = append(views,
 		tui.Text(""),
 		tui.Text("Input:").Bold(),
-		tui.Text("  @filename     Include file contents"),
-		tui.Text("  Enter         Send message"),
-		tui.Text("  Shift+Enter   New line"),
-		tui.Text("  Ctrl+C twice  Exit"),
+		tui.Text("  @filename      Include file contents"),
+		tui.Text("  Enter          Send message"),
+		tui.Text("  Shift+Enter    New line"),
+		tui.Text("  Ctrl+C twice   Exit"),
 		tui.Text(""),
 	)
-	a.runner.Print(help)
+
+	a.runner.Print(tui.Stack(views...))
 }
 
 func (a *App) printTodosToScrollback() {

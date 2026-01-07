@@ -15,6 +15,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/dive/skill"
+	"github.com/deepnoodle-ai/dive/slashcmd"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/toolkit/google"
@@ -240,6 +241,7 @@ type sessionConfig struct {
 	model                llm.LLM
 	tools                []dive.Tool
 	skillLoader          *skill.Loader
+	commandLoader        *slashcmd.Loader
 	taskRegistry         *toolkit.TaskRegistry
 	sandboxConfig        *sandbox.Config
 	settings             *dive.Settings
@@ -324,6 +326,12 @@ func parseSessionConfig(ctx *cli.Context) (*sessionConfig, error) {
 	}
 	cfg.skillLoader = skill.NewLoader(loaderOpts)
 	_ = cfg.skillLoader.LoadSkills()
+
+	// Command loader for slash commands
+	cfg.commandLoader = slashcmd.NewLoader(slashcmd.LoaderOptions{
+		ProjectDir: workspaceDir,
+	})
+	_ = cfg.commandLoader.LoadCommands()
 
 	// Task registry
 	cfg.taskRegistry = toolkit.NewTaskRegistry()
@@ -656,7 +664,7 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Create and run the app
-	app := NewApp(agent, sessionRepo, cfg.workspaceDir, cfg.modelName, initialPrompt, compactionConfig, resumeID, forkSession)
+	app := NewApp(agent, sessionRepo, cfg.workspaceDir, cfg.modelName, initialPrompt, compactionConfig, resumeID, forkSession, cfg.commandLoader)
 	interactor.SetApp(app)
 
 	return app.Run()
