@@ -331,7 +331,9 @@ func parseSessionConfig(ctx *cli.Context) (*sessionConfig, error) {
 	cfg.commandLoader = slashcmd.NewLoader(slashcmd.LoaderOptions{
 		ProjectDir: workspaceDir,
 	})
-	_ = cfg.commandLoader.LoadCommands()
+	if err := cfg.commandLoader.LoadCommands(); err != nil {
+		return nil, fmt.Errorf("failed to load slash commands: %w", err)
+	}
 
 	// Task registry
 	cfg.taskRegistry = toolkit.NewTaskRegistry()

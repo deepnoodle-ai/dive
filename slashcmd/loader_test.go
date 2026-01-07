@@ -496,6 +496,52 @@ Just do the thing. No frontmatter needed.`), 0644))
 	assert.Contains(t, cmd.Instructions, "Just do the thing")
 }
 
+func TestLoader_InvalidCommandFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	commandsDir := filepath.Join(tmpDir, ".dive", "commands")
+	assert.NoError(t, os.MkdirAll(commandsDir, 0755))
+
+	// Create a valid command
+	assert.NoError(t, os.WriteFile(filepath.Join(commandsDir, "valid.md"), []byte(`---
+description: Valid command.
+---
+Instructions.`), 0644))
+
+	// Create an invalid command (unquoted YAML sequence in string field)
+	assert.NoError(t, os.WriteFile(filepath.Join(commandsDir, "invalid.md"), []byte(`---
+description: Invalid command.
+argument-hint: [unquoted-brackets]
+---
+Instructions.`), 0644))
+
+	// Create another invalid command (missing closing frontmatter)
+	assert.NoError(t, os.WriteFile(filepath.Join(commandsDir, "broken.md"), []byte(`---
+description: Broken command.
+No closing delimiter here.`), 0644))
+
+	loader := NewLoader(LoaderOptions{
+		ProjectDir: tmpDir,
+		HomeDir:    "/nonexistent",
+	})
+
+	err := loader.LoadCommands()
+
+	// Should return an error for the invalid files
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid.md")
+	assert.Contains(t, err.Error(), "broken.md")
+
+	// Valid commands should still be loaded
+	_, ok := loader.GetCommand("valid")
+	assert.True(t, ok)
+
+	// Invalid commands should not be loaded
+	_, ok = loader.GetCommand("invalid")
+	assert.False(t, ok)
+	_, ok = loader.GetCommand("broken")
+	assert.False(t, ok)
+}
+
 func TestDeriveCommandName(t *testing.T) {
 	tests := []struct {
 		filePath string

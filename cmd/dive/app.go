@@ -236,6 +236,7 @@ type App struct {
 	autocompleteMatches []string
 	autocompleteIndex   int
 	autocompletePrefix  string
+	autocompleteType    string // "file" or "command"
 
 	// Streaming text buffer (flushed on tick for batched updates)
 	streamBuffer string
@@ -356,12 +357,16 @@ func (a *App) LiveView() tui.View {
 		if count > 8 {
 			count = 8
 		}
+		prefix := "@"
+		if a.autocompleteType == "command" {
+			prefix = "/"
+		}
 		for i := 0; i < count; i++ {
 			match := a.autocompleteMatches[i]
 			if i == a.autocompleteIndex {
-				footerViews = append(footerViews, tui.Text(" ❯ @%s", match).Fg(tui.ColorCyan))
+				footerViews = append(footerViews, tui.Text(" ❯ %s%s", prefix, match).Fg(tui.ColorCyan))
 			} else {
-				footerViews = append(footerViews, tui.Text("   @%s", match).Hint())
+				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Hint())
 			}
 		}
 	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
@@ -697,12 +702,33 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 
 // updateAutocomplete updates autocomplete state based on current input
 func (a *App) updateAutocomplete() {
-	// Find the last @ symbol and extract the prefix after it
+	// Check for command autocomplete (/ at start of input)
+	if strings.HasPrefix(a.inputText, "/") {
+		prefix := a.inputText[1:]
+
+		// Check if there's a space (command completed)
+		if strings.Contains(prefix, " ") || strings.Contains(prefix, "\n") {
+			a.clearAutocomplete()
+			return
+		}
+
+		// Only update matches if prefix changed or type changed
+		if prefix != a.autocompletePrefix || a.autocompleteType != "command" {
+			a.autocompletePrefix = prefix
+			a.autocompleteType = "command"
+			a.autocompleteMatches = a.getCommandMatches(prefix)
+			if len(a.autocompleteMatches) > 8 {
+				a.autocompleteMatches = a.autocompleteMatches[:8]
+			}
+			a.autocompleteIndex = 0
+		}
+		return
+	}
+
+	// Check for file autocomplete (@ anywhere in input)
 	lastAt := strings.LastIndex(a.inputText, "@")
 	if lastAt < 0 {
-		a.autocompleteMatches = nil
-		a.autocompleteIndex = 0
-		a.autocompletePrefix = ""
+		a.clearAutocomplete()
 		return
 	}
 
@@ -711,21 +737,28 @@ func (a *App) updateAutocomplete() {
 
 	// Check if there's a space after the @ (autocomplete completed)
 	if strings.Contains(prefix, " ") || strings.Contains(prefix, "\n") {
-		a.autocompleteMatches = nil
-		a.autocompleteIndex = 0
-		a.autocompletePrefix = ""
+		a.clearAutocomplete()
 		return
 	}
 
-	// Only update matches if prefix changed
-	if prefix != a.autocompletePrefix {
+	// Only update matches if prefix changed or type changed
+	if prefix != a.autocompletePrefix || a.autocompleteType != "file" {
 		a.autocompletePrefix = prefix
+		a.autocompleteType = "file"
 		a.autocompleteMatches = a.getFileMatches(prefix)
 		if len(a.autocompleteMatches) > 8 {
 			a.autocompleteMatches = a.autocompleteMatches[:8]
 		}
 		a.autocompleteIndex = 0
 	}
+}
+
+// clearAutocomplete resets autocomplete state
+func (a *App) clearAutocomplete() {
+	a.autocompleteMatches = nil
+	a.autocompleteIndex = 0
+	a.autocompletePrefix = ""
+	a.autocompleteType = ""
 }
 
 // selectAutocomplete selects the current autocomplete option
@@ -736,17 +769,18 @@ func (a *App) selectAutocomplete() bool {
 
 	selected := a.autocompleteMatches[a.autocompleteIndex]
 
-	// Find the last @ and replace prefix with selected match
-	lastAt := strings.LastIndex(a.inputText, "@")
-	if lastAt >= 0 {
-		a.inputText = a.inputText[:lastAt+1] + selected + " "
+	if a.autocompleteType == "command" {
+		// Replace entire input with selected command (add space for args)
+		a.inputText = "/" + selected + " "
+	} else {
+		// Find the last @ and replace prefix with selected match
+		lastAt := strings.LastIndex(a.inputText, "@")
+		if lastAt >= 0 {
+			a.inputText = a.inputText[:lastAt+1] + selected + " "
+		}
 	}
 
-	// Clear autocomplete state
-	a.autocompleteMatches = nil
-	a.autocompleteIndex = 0
-	a.autocompletePrefix = ""
-
+	a.clearAutocomplete()
 	return true
 }
 
@@ -774,10 +808,7 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 			a.selectAutocomplete()
 			return nil
 		case tui.KeyEscape:
-			// Clear autocomplete
-			a.autocompleteMatches = nil
-			a.autocompleteIndex = 0
-			a.autocompletePrefix = ""
+			a.clearAutocomplete()
 			return nil
 		}
 	}
@@ -871,6 +902,26 @@ func (a *App) processMessageAsync(input string) {
 
 	// Send start event to set up state in the main goroutine
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: input, expanded: expanded})
+	a.runAgent(expanded)
+}
+
+// processCommandAsync handles slash command processing in background.
+// displayText is what the user typed (e.g., "/explain go.mod")
+// expanded is the full prompt to send to the agent
+func (a *App) processCommandAsync(displayText, expanded string) {
+	// Expand file references in the expanded text
+	expandedWithFiles, err := a.expandFileReferences(expanded)
+	if err != nil {
+		a.runner.Printf("Warning: %s", err.Error())
+	}
+
+	// Send start event with display text, but send expanded text to agent
+	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: displayText, expanded: expandedWithFiles})
+	a.runAgent(expandedWithFiles)
+}
+
+// runAgent runs the agent with the given input
+func (a *App) runAgent(expanded string) {
 
 	// Track the last usage from the final LLM call (for accurate context size)
 	// resp.Usage is accumulated across tool iterations which inflates context size
@@ -930,7 +981,7 @@ func (a *App) processMessageAsync(input string) {
 
 	// Update session metadata for new sessions
 	if err == nil && resp != nil && a.sessionRepo != nil && isNewSession && a.currentSessionID != "" {
-		a.updateSessionMetadata(input)
+		a.updateSessionMetadata(expanded)
 	}
 
 	// Check for compaction after successful response
@@ -1526,8 +1577,25 @@ func (a *App) handleCommand(input string) bool {
 			// Expand argument placeholders
 			expanded := cmd.ExpandArguments(cmdArgs)
 
-			// Send the expanded instructions to the agent
-			a.processMessageAsync(expanded)
+			// Warn about unsupported model override (agent doesn't support per-request model changes)
+			if cmd.Model != "" {
+				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Model)
+			}
+
+			// Append tool restrictions to instructions (like skills do)
+			if len(cmd.AllowedTools) > 0 {
+				expanded = expanded + fmt.Sprintf("\n\n---\n**Tool Restrictions:** While executing this command, you may only use these tools: %s\n",
+					strings.Join(cmd.AllowedTools, ", "))
+			}
+
+			// Build display text with command name and args
+			displayCmd := "/" + cmdName
+			if cmdArgs != "" {
+				displayCmd = "/" + cmdName + " " + cmdArgs
+			}
+
+			// Send the expanded instructions to the agent (async like regular messages)
+			go a.processCommandAsync(displayCmd, expanded)
 			return true
 		}
 	}
@@ -2120,6 +2188,35 @@ func fuzzyMatch(pattern, text string) int {
 	score -= len(text) / 10
 
 	return score
+}
+
+// getCommandMatches returns slash commands matching the prefix for autocomplete
+func (a *App) getCommandMatches(prefix string) []string {
+	// Built-in commands
+	builtins := []string{"clear", "compact", "help", "quit", "todos"}
+
+	var matches []string
+
+	// Add matching built-in commands
+	for _, cmd := range builtins {
+		if strings.HasPrefix(cmd, prefix) {
+			matches = append(matches, cmd)
+		}
+	}
+
+	// Add matching custom commands from loader
+	if a.commandLoader != nil {
+		for _, cmd := range a.commandLoader.ListCommands() {
+			if strings.HasPrefix(cmd.Name, prefix) {
+				matches = append(matches, cmd.Name)
+			}
+		}
+	}
+
+	// Sort alphabetically
+	sort.Strings(matches)
+
+	return matches
 }
 
 // getFileMatches returns files matching the prefix for autocomplete

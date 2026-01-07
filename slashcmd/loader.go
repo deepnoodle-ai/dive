@@ -1,6 +1,7 @@
 package slashcmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -91,6 +92,7 @@ func NewLoader(opts LoaderOptions) *Loader {
 //  5. AdditionalPaths (in order specified)
 //
 // This method clears any previously loaded commands before scanning.
+// Returns an error if any command files fail to parse.
 func (l *Loader) LoadCommands() error {
 	l.commands = make(map[string]*Command)
 
@@ -99,13 +101,17 @@ func (l *Loader) LoadCommands() error {
 		return fmt.Errorf("getting search paths: %w", err)
 	}
 
+	var parseErrors []error
 	for _, searchPath := range paths {
 		source := l.determineSource(searchPath)
-		if err := l.loadCommandsFromPath(searchPath, source); err != nil {
-			l.logWarn("failed to load commands from %s: %v", searchPath, err)
+		if errs := l.loadCommandsFromPath(searchPath, source); len(errs) > 0 {
+			parseErrors = append(parseErrors, errs...)
 		}
 	}
 
+	if len(parseErrors) > 0 {
+		return errors.Join(parseErrors...)
+	}
 	return nil
 }
 
@@ -216,42 +222,50 @@ func (l *Loader) determineSource(searchPath string) string {
 }
 
 // loadCommandsFromPath loads commands from a single directory path.
-func (l *Loader) loadCommandsFromPath(searchPath, source string) error {
+// Returns a slice of parse errors encountered (does not include missing directories).
+func (l *Loader) loadCommandsFromPath(searchPath, source string) []error {
 	entries, err := os.ReadDir(searchPath)
 	if os.IsNotExist(err) {
 		l.logDebug("command path does not exist: %s", searchPath)
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("reading directory: %w", err)
+		l.logWarn("failed to read directory %s: %v", searchPath, err)
+		return nil
 	}
 
+	var errs []error
 	for _, entry := range entries {
 		if entry.IsDir() {
 			// Look for COMMAND.md in subdirectory
 			cmdPath := filepath.Join(searchPath, entry.Name(), "COMMAND.md")
-			l.loadCommandFile(cmdPath, source)
+			if err := l.loadCommandFile(cmdPath, source); err != nil {
+				errs = append(errs, err)
+			}
 		} else if strings.HasSuffix(strings.ToLower(entry.Name()), ".md") {
 			// Load standalone command file
 			cmdPath := filepath.Join(searchPath, entry.Name())
-			l.loadCommandFile(cmdPath, source)
+			if err := l.loadCommandFile(cmdPath, source); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 
-	return nil
+	return errs
 }
 
 // loadCommandFile attempts to load a single command file.
-func (l *Loader) loadCommandFile(filePath, source string) {
+// Returns nil if the file doesn't exist or was loaded successfully.
+// Returns an error if the file exists but failed to parse.
+func (l *Loader) loadCommandFile(filePath, source string) error {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return
+		return nil
 	}
 
 	cmd, err := ParseCommandFile(filePath)
 	if err != nil {
-		l.logWarn("failed to parse command file %s: %v", filePath, err)
-		return
+		return fmt.Errorf("%s: %w", filePath, err)
 	}
 
 	// Set the source
@@ -260,11 +274,12 @@ func (l *Loader) loadCommandFile(filePath, source string) {
 	// First command with a given name wins
 	if _, exists := l.commands[cmd.Name]; exists {
 		l.logDebug("command %s already loaded, ignoring %s", cmd.Name, filePath)
-		return
+		return nil
 	}
 
 	l.commands[cmd.Name] = cmd
 	l.logDebug("loaded command %s from %s", cmd.Name, filePath)
+	return nil
 }
 
 func (l *Loader) logDebug(format string, args ...any) {
