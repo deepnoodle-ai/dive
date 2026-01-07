@@ -167,6 +167,10 @@ type Response struct {
 	// messages, tool calls, and tool results.
 	Items []*ResponseItem `json:"items,omitempty"`
 
+	// Compaction is set if context compaction occurred during this response.
+	// This allows non-callback clients to detect when compaction happened.
+	Compaction *CompactionEvent `json:"compaction,omitempty"`
+
 	// Usage contains token usage information
 	Usage *llm.Usage `json:"usage,omitempty"`
 

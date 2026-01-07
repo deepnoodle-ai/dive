@@ -49,10 +49,10 @@ type CompactionConfig struct {
 	// Enabled must be true to activate compaction.
 	Enabled bool `json:"enabled"`
 
-	// ContextTokenThreshold is the token count that triggers compaction.
+	// ContextTokenThreshold is the context window token count that triggers compaction.
 	// Default: 100000 (100k tokens).
-	// Total tokens are calculated as: InputTokens + OutputTokens +
-	// CacheCreationInputTokens + CacheReadInputTokens.
+	// Context tokens are calculated as: InputTokens + CacheReadInputTokens.
+	// This represents the actual context size (excluding output and cache creation).
 	ContextTokenThreshold int `json:"context_token_threshold,omitempty"`
 
 	// Model is an optional LLM to use for summary generation.

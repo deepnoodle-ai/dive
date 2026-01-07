@@ -53,6 +53,52 @@ func TestCalculateTotalTokens(t *testing.T) {
 	}
 }
 
+func TestCalculateContextTokens(t *testing.T) {
+	agent := &StandardAgent{}
+
+	tests := []struct {
+		name     string
+		usage    *llm.Usage
+		expected int
+	}{
+		{
+			name: "all zeros",
+			usage: &llm.Usage{
+				InputTokens:              0,
+				OutputTokens:             0,
+				CacheCreationInputTokens: 0,
+				CacheReadInputTokens:     0,
+			},
+			expected: 0,
+		},
+		{
+			name: "input only",
+			usage: &llm.Usage{
+				InputTokens:  1000,
+				OutputTokens: 500, // Not included in context
+			},
+			expected: 1000, // Only input tokens
+		},
+		{
+			name: "with cache read tokens",
+			usage: &llm.Usage{
+				InputTokens:              1000,
+				OutputTokens:             500,  // Not included
+				CacheCreationInputTokens: 200,  // Not included (subset of input)
+				CacheReadInputTokens:     300,
+			},
+			expected: 1300, // InputTokens + CacheReadInputTokens
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := agent.calculateContextTokens(tt.usage)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestShouldCompact(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -101,8 +147,8 @@ func TestShouldCompact(t *testing.T) {
 				Enabled: true,
 			},
 			usage: &llm.Usage{
-				InputTokens:  99000,
-				OutputTokens: 2000,
+				InputTokens:  100001, // Context tokens exceed threshold
+				OutputTokens: 2000,   // Output tokens not counted for threshold
 			},
 			messageCount: 10,
 			expected:     true,
@@ -200,6 +246,21 @@ func TestExtractSummary(t *testing.T) {
 			name:     "multiline summary",
 			text:     "<summary>\n# Task Overview\nDoing something\n\n# Next Steps\n1. Step one\n</summary>",
 			expected: "# Task Overview\nDoing something\n\n# Next Steps\n1. Step one",
+		},
+		{
+			name:     "uppercase tags",
+			text:     "<SUMMARY>Uppercase content</SUMMARY>",
+			expected: "Uppercase content",
+		},
+		{
+			name:     "mixed case tags",
+			text:     "<Summary>Mixed Case</Summary>",
+			expected: "Mixed Case",
+		},
+		{
+			name:     "preserves content case",
+			text:     "<SUMMARY>Content With MIXED Case</SUMMARY>",
+			expected: "Content With MIXED Case",
 		},
 	}
 

@@ -358,9 +358,10 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		return nil, err
 	}
 
-	// Handle compaction: replace messages instead of appending
+	// Handle compaction: replace old messages with summary + new output
 	if genResult.CompactedMessages != nil {
-		thread.Messages = genResult.CompactedMessages
+		// Thread gets: compacted summary + post-compaction assistant response
+		thread.Messages = append(genResult.CompactedMessages, genResult.OutputMessages...)
 		// Record compaction in history
 		thread.CompactionHistory = append(thread.CompactionHistory, CompactionRecord{
 			Timestamp:         time.Now(),
@@ -368,6 +369,8 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 			TokensAfter:       genResult.CompactionEvent.TokensAfter,
 			MessagesCompacted: genResult.CompactionEvent.MessagesCompacted,
 		})
+		// Set compaction on response for non-callback clients
+		response.Compaction = genResult.CompactionEvent
 	} else {
 		thread.Messages = append(thread.Messages, genResult.OutputMessages...)
 	}
@@ -463,6 +466,7 @@ func (a *StandardAgent) generate(
 	// Track if compaction occurred during this generation
 	var compactedMessages []*llm.Message
 	var compactionEvent *CompactionEvent
+	var compactionOccurred bool // Forces one more generation after compaction
 
 	newMessage := func(msg *llm.Message) {
 		updatedMessages = append(updatedMessages, msg)
@@ -529,17 +533,31 @@ func (a *StandardAgent) generate(
 		toolCalls := response.ToolCalls()
 		hasPendingToolCalls := len(toolCalls) > 0
 
+		// If we just generated a post-compaction response, we're done
+		// (check this before compaction trigger to handle the follow-up generation)
+		if compactionOccurred {
+			compactionOccurred = false
+			if !hasPendingToolCalls {
+				break
+			}
+			// If there are tool calls after compaction, continue processing them
+		}
+
 		// Check for compaction trigger (but defer if we have pending tool calls)
-		if !hasPendingToolCalls && a.shouldCompact(totalUsage, len(updatedMessages)) {
-			compacted, event, err := a.performCompaction(ctx, updatedMessages, systemPrompt)
+		// Use per-call usage, not cumulative, since each call includes the full context
+		if !hasPendingToolCalls && a.shouldCompact(&response.Usage, len(updatedMessages)) {
+			// Calculate pre-compaction token count for accurate event reporting
+			tokensBefore := a.calculateContextTokens(&response.Usage)
+			compacted, event, err := a.performCompaction(ctx, updatedMessages, systemPrompt, tokensBefore)
 			if err != nil {
 				// Log warning but don't fail - continue with uncompacted context
 				a.logger.Warn("compaction failed", "error", err)
 			} else {
-				// Replace messages with compacted summary
+				// Replace context with compacted summary for next generation
 				updatedMessages = compacted
-				// Clear output messages since the history is now summarized
-				outputMessages = compacted
+				// Clear output messages - we only want post-compaction responses
+				// The summary is a User message and shouldn't be in output items
+				outputMessages = nil
 				// Track compaction for final result
 				compactedMessages = compacted
 				compactionEvent = event
@@ -550,12 +568,15 @@ func (a *StandardAgent) generate(
 				}); err != nil {
 					return nil, err
 				}
-				// Continue the loop with compacted messages - don't return early
-				a.logger.Debug("compaction complete, continuing generation",
+				// Set flag to generate exactly one more response with compacted context
+				compactionOccurred = true
+				a.logger.Debug("compaction complete, will generate response with compacted context",
 					"tokens_before", event.TokensBefore,
 					"tokens_after", event.TokensAfter,
 					"messages_compacted", event.MessagesCompacted,
 				)
+				// Continue to next iteration to generate a response
+				continue
 			}
 		}
 
@@ -1053,11 +1074,19 @@ type generateResult struct {
 	CompactionEvent   *CompactionEvent // If set, compaction occurred
 }
 
-// calculateTotalTokens returns the total token count for compaction threshold checks.
-// Per Anthropic spec: InputTokens + OutputTokens + CacheCreationInputTokens + CacheReadInputTokens.
+// calculateTotalTokens returns the total token count for billing/stats purposes.
+// Includes all token types: input, output, and cache tokens.
 func (a *StandardAgent) calculateTotalTokens(usage *llm.Usage) int {
 	return usage.InputTokens + usage.OutputTokens +
 		usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+}
+
+// calculateContextTokens returns the context window token count for threshold checks.
+// Per Anthropic API: input_tokens are non-cached tokens, cache_read_input_tokens are
+// tokens read from cache. Together they represent the actual context size.
+// Note: cache_creation_input_tokens is a subset of input_tokens, not additive.
+func (a *StandardAgent) calculateContextTokens(usage *llm.Usage) int {
+	return usage.InputTokens + usage.CacheReadInputTokens
 }
 
 // shouldCompact returns true if compaction should be triggered based on token usage.
@@ -1073,19 +1102,34 @@ func (a *StandardAgent) shouldCompact(usage *llm.Usage, messageCount int) bool {
 	if threshold <= 0 {
 		threshold = DefaultContextTokenThreshold
 	}
-	return a.calculateTotalTokens(usage) >= threshold
+	return a.calculateContextTokens(usage) >= threshold
 }
 
 // performCompaction generates a summary of the conversation and returns compacted messages.
+// tokensBefore is the pre-compaction context token count for accurate event reporting.
 func (a *StandardAgent) performCompaction(
 	ctx context.Context,
 	messages []*llm.Message,
 	systemPrompt string,
+	tokensBefore int,
 ) ([]*llm.Message, *CompactionEvent, error) {
 	// Step 1: Filter out pending tool use blocks
 	cleanedMessages := a.filterPendingToolUse(messages)
 	if len(cleanedMessages) == 0 {
 		return nil, nil, fmt.Errorf("no messages to compact after filtering")
+	}
+
+	// Track original message count before any trimming for accurate reporting
+	originalMessageCount := len(cleanedMessages)
+
+	// Step 1.5: Trim messages if too many to avoid exceeding context during summarization
+	// Keep first message (often contains important context) + recent messages
+	const maxMessagesForSummary = 50
+	if len(cleanedMessages) > maxMessagesForSummary {
+		cleanedMessages = append(
+			cleanedMessages[:1], // Keep first message
+			cleanedMessages[len(cleanedMessages)-maxMessagesForSummary+1:]..., // Keep recent messages
+		)
 	}
 
 	// Step 2: Build summary request
@@ -1127,24 +1171,26 @@ func (a *StandardAgent) performCompaction(
 		return nil, nil, fmt.Errorf("no summary found in compaction response (missing <summary> tags)")
 	}
 
-	// Step 6: Create new message list with just the summary as an assistant message
-	// Use TextContent instead of SummaryContent for API compatibility
+	// Step 6: Create new message list with the summary as a user message
+	// This ensures the first message is from the User role, which is required by most LLM APIs
+	summaryPrefix := "Here is a summary of our conversation so far:\n\n"
 	compactedMessages := []*llm.Message{
-		{
-			Role: llm.Assistant,
-			Content: []llm.Content{
-				&llm.TextContent{Text: summaryText},
-			},
-		},
+		llm.NewUserTextMessage(summaryPrefix + summaryText),
 	}
 
 	// Step 7: Build compaction event
-	tokensBefore := a.calculateTotalTokens(&summaryResp.Usage)
+	// TokensAfter is estimated from full summary message length (rough heuristic: ~4 chars per token)
+	// This is an approximation since actual tokenization varies by model
+	fullSummaryLen := len(summaryPrefix) + len(summaryText)
+	tokensAfter := fullSummaryLen / 4
+	if tokensAfter < 100 {
+		tokensAfter = 100 // Minimum reasonable estimate
+	}
 	event := &CompactionEvent{
 		TokensBefore:      tokensBefore,
-		TokensAfter:       summaryResp.Usage.OutputTokens,
+		TokensAfter:       tokensAfter,
 		Summary:           summaryText,
-		MessagesCompacted: len(cleanedMessages),
+		MessagesCompacted: originalMessageCount, // Use pre-trim count
 	}
 
 	a.logger.Debug("compaction complete",
@@ -1157,21 +1203,24 @@ func (a *StandardAgent) performCompaction(
 }
 
 // extractSummary extracts content from <summary></summary> tags.
+// Matching is case-insensitive to handle variations like <Summary> or <SUMMARY>.
 func (a *StandardAgent) extractSummary(text string) string {
+	lower := strings.ToLower(text)
 	startTag := "<summary>"
 	endTag := "</summary>"
 
-	startIdx := strings.Index(text, startTag)
+	startIdx := strings.Index(lower, startTag)
 	if startIdx == -1 {
 		return ""
 	}
 	startIdx += len(startTag)
 
-	endIdx := strings.Index(text[startIdx:], endTag)
+	endIdx := strings.Index(lower[startIdx:], endTag)
 	if endIdx == -1 {
 		return ""
 	}
 
+	// Extract from original text (not lowercase) to preserve case of summary content
 	return strings.TrimSpace(text[startIdx : startIdx+endIdx])
 }
 
