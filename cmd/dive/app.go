@@ -349,7 +349,8 @@ func (a *App) LiveView() tui.View {
 	)
 	views = append(views, tui.Divider())
 
-	// Show autocomplete options, compaction stats, or exit hint below the bottom divider (always reserve 8 lines)
+	// Show autocomplete options, compaction stats, or exit hint below the bottom divider
+	// Only reserve space when autocomplete is active (collapses otherwise)
 	footerViews := make([]tui.View, 0, 8)
 
 	if len(a.autocompleteMatches) > 0 {
@@ -369,19 +370,23 @@ func (a *App) LiveView() tui.View {
 				footerViews = append(footerViews, tui.Text("   %s%s", prefix, match).Hint())
 			}
 		}
+		// Pad to 8 lines only when autocomplete is active (stable height during selection)
+		for len(footerViews) < 8 {
+			footerViews = append(footerViews, tui.Text(""))
+		}
 	} else if a.showCompactionStats && a.lastCompactionEvent != nil {
-		footerViews = append(footerViews,
+		footerViews = append(footerViews, tui.Group(
 			tui.Text(" ⚡").Fg(tui.ColorYellow),
 			tui.Text(" Context compacted:").Hint(),
 			tui.Text(" %d → %d tokens", a.lastCompactionEvent.TokensBefore, a.lastCompactionEvent.TokensAfter),
 			tui.Text(" (%d messages summarized)", a.lastCompactionEvent.MessagesCompacted).Hint(),
-		)
+		))
 	} else if a.showExitHint {
 		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Hint())
 	}
 
-	// Pad with empty lines to ensure stable height
-	for len(footerViews) < 8 {
+	// Minimum padding at bottom for visual breathing room
+	for len(footerViews) < 2 {
 		footerViews = append(footerViews, tui.Text(""))
 	}
 
@@ -1264,13 +1269,15 @@ func (a *App) handleProcessingEnd(err error) {
 		a.messages = append(a.messages, errMsg)
 	}
 
-	// Print final response to scrollback BEFORE clearing processing state
-	// This ensures content doesn't disappear from live view before appearing in scrollback
-	a.printRecentMessagesToScrollback()
-
+	// Clear processing state BEFORE printing to scrollback.
+	// This ensures the live view rendered inside Print() matches the final state
+	// (without thinking animation), preventing orphaned blank lines.
 	a.processing = false
 	a.currentMessage = nil
 	a.toolCallIndex = make(map[string]int)
+
+	// Now print to scrollback - the live view will be re-rendered with correct height
+	a.printRecentMessagesToScrollback()
 }
 
 // printRecentMessagesToScrollback prints the messages from current interaction to scrollback
@@ -1329,8 +1336,22 @@ func (a *App) Run() error {
 	return a.runner.Run(a)
 }
 
-// printIntroToScrollback prints the intro/splash screen to scrollback
+// printIntroToScrollback prints the intro/splash screen to scrollback.
+// Uses tui.Print directly - suitable for startup before the runner event loop starts.
 func (a *App) printIntroToScrollback() {
+	view := a.buildIntroView()
+	tui.Print(tui.PaddingHV(1, 0, view))
+}
+
+// printIntroViaRunner prints the intro/splash screen using the runner's Print method.
+// Uses a.runner.Print - required when the runner event loop is active (e.g., after /clear).
+func (a *App) printIntroViaRunner() {
+	view := a.buildIntroView()
+	a.runner.Print(tui.PaddingHV(1, 0, view))
+}
+
+// buildIntroView creates the intro view and adds it to messages.
+func (a *App) buildIntroView() tui.View {
 	// Shorten workspace path for display
 	wsDisplay := a.workspaceDir
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(wsDisplay, home) {
@@ -1359,9 +1380,7 @@ func (a *App) printIntroToScrollback() {
 
 	a.messages = append(a.messages, msg)
 
-	// Print the intro view
-	view := a.introView(msg)
-	tui.Print(tui.PaddingHV(1, 0, view))
+	return a.introView(msg)
 }
 
 // printSessionHistoryToScrollback prints the conversation history from a resumed session
@@ -1551,8 +1570,9 @@ func (a *App) handleCommand(input string) bool {
 		a.streamingMessageIndex = 0
 		a.currentSessionID = ""
 
-		// Show fresh intro
-		a.printIntroToScrollback()
+		// Show fresh intro using runner.Print (not tui.Print) since we're
+		// in the middle of the running InlineApp event loop
+		a.printIntroViaRunner()
 		return true
 
 	case "compact":
@@ -1688,7 +1708,7 @@ func (a *App) printHelp() {
 			if cmd.ArgumentHint != "" {
 				line += " " + cmd.ArgumentHint
 			}
-			views = append(views, tui.Text(line))
+			views = append(views, tui.Text("%s", line))
 			if cmd.Description != "" {
 				views = append(views, tui.Text("      %s", cmd.Description).Hint())
 			}

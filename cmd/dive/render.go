@@ -10,11 +10,19 @@ import (
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
-// diveMarkdownTheme returns a custom markdown theme matching Claude Code styling
+// diveMarkdownTheme returns a custom markdown theme with complementary colors
 func diveMarkdownTheme() tui.MarkdownTheme {
 	theme := tui.DefaultMarkdownTheme()
+
+	// Cyan-blue headers with decreasing brightness for hierarchy
+	theme.H1Style = tui.NewStyle().WithBold().WithUnderline().WithFgRGB(tui.RGB{R: 90, G: 185, B: 225})
+	theme.H2Style = tui.NewStyle().WithBold().WithFgRGB(tui.RGB{R: 80, G: 165, B: 200})
+	theme.H3Style = tui.NewStyle().WithBold().WithFgRGB(tui.RGB{R: 70, G: 150, B: 180})
+	theme.H4Style = tui.NewStyle().WithBold().WithFgRGB(tui.RGB{R: 65, G: 135, B: 165})
+
 	// Light purple for inline code (like Claude Code)
 	theme.CodeStyle = tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})
+
 	return theme
 }
 
