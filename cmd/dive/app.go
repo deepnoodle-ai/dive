@@ -1748,14 +1748,16 @@ func (a *App) buildLiveView() tui.View {
 
 	elapsed := time.Since(a.processingStartTime)
 
-	// Show recent completed tool calls (last 3 max, in chronological order)
+	// Show recent tool calls (last 3 max, in chronological order)
+	// Includes both completed and in-progress tool calls so users can see
+	// long-running operations like subagent tasks while they're working
 	var toolViews []tui.View
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		msg := a.messages[i]
 		if msg.Role == "user" {
 			break
 		}
-		if msg.Type == MessageTypeToolCall && msg.ToolDone {
+		if msg.Type == MessageTypeToolCall {
 			view := a.toolCallView(msg)
 			if view != nil {
 				toolViews = append([]tui.View{view}, toolViews...) // prepend for chronological order
