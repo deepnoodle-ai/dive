@@ -12,7 +12,7 @@ func TestHandleCompaction(t *testing.T) {
 	// Create a mock agent (we won't use it for this test)
 	agent := &dive.StandardAgent{}
 
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil)
+	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", false, nil)
 
 	// Create a compaction event
 	event := &dive.CompactionEvent{
