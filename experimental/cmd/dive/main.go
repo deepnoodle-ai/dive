@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,9 +12,13 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/experimental/session"
+	"github.com/deepnoodle-ai/dive/experimental/slashcmd"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
@@ -51,6 +57,17 @@ func main() {
 				Default("").
 				Env("DIVE_API_ENDPOINT").
 				Help("Override the API endpoint URL for the provider"),
+			cli.Bool("resume", "r").
+				Default(false).
+				Help("Resume a previous session"),
+			cli.Bool("compaction", "").
+				Default(true).
+				Env("DIVE_COMPACTION").
+				Help("Enable automatic context compaction"),
+			cli.Int("compaction-threshold", "").
+				Default(100000).
+				Env("DIVE_COMPACTION_THRESHOLD").
+				Help("Token threshold for automatic context compaction"),
 		).
 		Run(runMain)
 
@@ -68,7 +85,197 @@ func runMain(ctx *cli.Context) error {
 	if printMode {
 		return runPrint(ctx)
 	}
-	return fmt.Errorf("interactive mode not implemented yet")
+	return runInteractive(ctx)
+}
+
+func runInteractive(ctx *cli.Context) error {
+	// Parse workspace
+	workspaceDir := ctx.String("workspace")
+	if workspaceDir == "" {
+		var err error
+		workspaceDir, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get working directory: %w", err)
+		}
+	}
+
+	// Parse model
+	modelName := ctx.String("model")
+	if modelName == "" {
+		modelName = getDefaultModel()
+	}
+
+	// Build system prompt
+	systemPrompt := ctx.String("system-prompt")
+	if systemPrompt == "" {
+		systemPrompt = defaultSystemPrompt(workspaceDir)
+	}
+
+	// Create model
+	model := createModel(modelName, ctx.String("api-endpoint"))
+
+	// Create TUI dialog for interactive user prompts (AskUserQuestion tool)
+	tuiDialog := &tuiDialog{}
+
+	// Create tools
+	tools := createTools(workspaceDir, tuiDialog)
+
+	// Create session repository
+	sessionRepo, err := session.NewFileRepository("~/.dive/sessions")
+	if err != nil {
+		return fmt.Errorf("failed to create session repository: %w", err)
+	}
+
+	// Handle --resume flag
+	var resumeSessionID string
+	if ctx.Bool("resume") {
+		// If an argument was provided, use it as a session ID or filter
+		args := ctx.Args()
+		var filter string
+		if len(args) > 0 {
+			filter = args[0]
+		}
+		result, err := RunSessionPicker(sessionRepo, filter, workspaceDir)
+		if err != nil {
+			return fmt.Errorf("session picker failed: %w", err)
+		}
+		if result.Canceled {
+			return nil // User canceled, exit gracefully
+		}
+		resumeSessionID = result.SessionID
+	}
+
+	// Generate session ID
+	sessionID := resumeSessionID
+	if sessionID == "" {
+		sessionID = newSessionID()
+	}
+
+	// Get initial prompt from args (if not resuming)
+	var initialPrompt string
+	if !ctx.Bool("resume") {
+		args := ctx.Args()
+		if len(args) > 0 {
+			initialPrompt = strings.Join(args, " ")
+		}
+	}
+
+	// appPtr is set after App creation; closures below capture it by pointer.
+	var appPtr *App
+
+	// Set up session ID hook (injects session_id into generation state).
+	// Reads from app.currentSessionID dynamically so /clear can reset it.
+	// If currentSessionID is empty, generates a new one (fresh conversation).
+	sessionIDHook := func(_ context.Context, state *dive.GenerationState) error {
+		if state.Values == nil {
+			state.Values = map[string]any{}
+		}
+		if appPtr != nil && appPtr.currentSessionID == "" {
+			// Generate a new session ID after /clear
+			appPtr.currentSessionID = newSessionID()
+		}
+		if appPtr != nil {
+			state.Values["session_id"] = appPtr.currentSessionID
+		} else {
+			state.Values["session_id"] = sessionID
+		}
+		return nil
+	}
+
+	// Set up session hooks for multi-turn conversation
+	sessionLoader := session.Loader(sessionRepo)
+	sessionSaver := session.Saver(sessionRepo)
+
+	// Set up tool permission hook
+	permissionHook := func(_ context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
+		// Auto-allow read-only tools
+		if annotations := hookCtx.Tool.Annotations(); annotations != nil && annotations.ReadOnlyHint {
+			return dive.AllowResult(), nil
+		}
+		// Ask for confirmation on write tools
+		return dive.AskResult(fmt.Sprintf("Execute %s?", hookCtx.Tool.Name())), nil
+	}
+
+	// Set up confirmer (captures app pointer, set after App creation)
+	confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, message string) (bool, error) {
+		if appPtr == nil {
+			return true, nil // Shouldn't happen, but allow if app not set
+		}
+		return appPtr.ConfirmTool(ctx, tool.Name(), message, call.Input)
+	}
+
+	// Set up compaction config
+	var compactionConfig *compaction.CompactionConfig
+	if ctx.Bool("compaction") {
+		compactionConfig = &compaction.CompactionConfig{
+			ContextTokenThreshold: ctx.Int("compaction-threshold"),
+			Model:                 model,
+		}
+	}
+
+	// Load slash commands
+	commandLoader := slashcmd.NewLoader(slashcmd.LoaderOptions{
+		ProjectDir: workspaceDir,
+	})
+	_ = commandLoader.LoadCommands() // Ignore errors, commands are optional
+
+	// Create model settings
+	temperature := ctx.Float64("temperature")
+	maxTokens := ctx.Int("max-tokens")
+
+	// Create agent with hooks
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		SystemPrompt: systemPrompt,
+		Model:        model,
+		Tools:        tools,
+		ModelSettings: &dive.ModelSettings{
+			Temperature: &temperature,
+			MaxTokens:   &maxTokens,
+		},
+		PreGeneration:  []dive.PreGenerationHook{sessionIDHook, sessionLoader},
+		PostGeneration: []dive.PostGenerationHook{sessionSaver},
+		PreToolUse:     []dive.PreToolUseHook{permissionHook},
+		Confirmer:      confirmer,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	// Create App
+	app := NewApp(
+		agent,
+		sessionRepo,
+		workspaceDir,
+		modelName,
+		initialPrompt,
+		compactionConfig,
+		resumeSessionID,
+		commandLoader,
+	)
+
+	// Set the session ID on the app and wire up closures
+	app.currentSessionID = sessionID
+	appPtr = app
+	tuiDialog.app = app
+
+	return app.Run()
+}
+
+func defaultSystemPrompt(workspaceDir string) string {
+	return fmt.Sprintf(`You are Dive, an AI coding assistant. You help users with software engineering tasks including writing code, debugging, explaining code, and more.
+
+You are working in: %s
+
+Be concise and helpful. When modifying code, explain what you're changing and why. Use the available tools to read, write, and search files as needed.`, workspaceDir)
+}
+
+func newSessionID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to a simple timestamp-based ID
+		return fmt.Sprintf("session-%d", os.Getpid())
+	}
+	return hex.EncodeToString(b)
 }
 
 func runPrint(ctx *cli.Context) error {
@@ -108,8 +315,8 @@ func runPrint(ctx *cli.Context) error {
 	// Create model
 	model := createModel(modelName, ctx.String("api-endpoint"))
 
-	// Create tools
-	tools := createTools(workspaceDir)
+	// Create tools (auto-approve dialog for non-interactive print mode)
+	tools := createTools(workspaceDir, nil)
 
 	// Create agent
 	temperature := ctx.Float64("temperature")
@@ -208,7 +415,173 @@ func runPrintJSON(ctx context.Context, agent *dive.Agent, input string) error {
 	return encoder.Encode(result)
 }
 
-func createTools(workspaceDir string) []dive.Tool {
+// tuiDialog implements dive.Dialog by routing to the App's TUI dialog system.
+// The app field is set after App creation (same pattern as the confirmer closure).
+type tuiDialog struct {
+	app *App
+}
+
+func (d *tuiDialog) Show(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+	if d.app == nil || d.app.runner == nil {
+		// Fallback before app is initialized
+		return (&dive.AutoApproveDialog{}).Show(ctx, in)
+	}
+
+	if in.Confirm {
+		return d.showConfirm(ctx, in)
+	}
+	if len(in.Options) > 0 && in.MultiSelect {
+		return d.showMultiSelect(ctx, in)
+	}
+	if len(in.Options) > 0 {
+		return d.showSelect(ctx, in)
+	}
+	return d.showInput(ctx, in)
+}
+
+func (d *tuiDialog) showConfirm(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+	confirmChan := make(chan ConfirmResult, 1)
+	d.app.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:                     DialogTypeConfirm,
+			Active:                   true,
+			Title:                    in.Title,
+			ContentPreview:           in.Message,
+			ConfirmChan:              confirmChan,
+			ConfirmToolCategoryLabel: "this action",
+		},
+	})
+	select {
+	case result := <-confirmChan:
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.DialogOutput{Confirmed: result.Approved}, nil
+	case <-ctx.Done():
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.DialogOutput{Canceled: true}, ctx.Err()
+	}
+}
+
+func (d *tuiDialog) showSelect(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+	options := make([]DialogOption, len(in.Options))
+	defaultIdx := 0
+	for i, opt := range in.Options {
+		options[i] = DialogOption{
+			Label:       opt.Label,
+			Description: opt.Description,
+			Value:       opt.Value,
+		}
+		if opt.Value == in.Default {
+			defaultIdx = i
+		}
+	}
+
+	selectChan := make(chan SelectResult, 1)
+	d.app.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:         DialogTypeSelect,
+			Active:       true,
+			Title:        in.Title,
+			Message:      in.Message,
+			Options:      options,
+			DefaultIndex: defaultIdx,
+			SelectIndex:  defaultIdx,
+			SelectChan:   selectChan,
+		},
+	})
+	select {
+	case result := <-selectChan:
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		if result.OtherText != "" {
+			return &dive.DialogOutput{Text: result.OtherText}, nil
+		}
+		if result.Index < 0 {
+			return &dive.DialogOutput{Canceled: true}, nil
+		}
+		return &dive.DialogOutput{Values: []string{in.Options[result.Index].Value}}, nil
+	case <-ctx.Done():
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.DialogOutput{Canceled: true}, ctx.Err()
+	}
+}
+
+func (d *tuiDialog) showMultiSelect(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+	options := make([]DialogOption, len(in.Options))
+	checked := make([]bool, len(in.Options))
+	for i, opt := range in.Options {
+		options[i] = DialogOption{
+			Label:       opt.Label,
+			Description: opt.Description,
+			Value:       opt.Value,
+		}
+		if opt.Value == in.Default {
+			checked[i] = true
+		}
+	}
+
+	multiSelectChan := make(chan []int, 1)
+	d.app.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:               DialogTypeMultiSelect,
+			Active:             true,
+			Title:              in.Title,
+			Message:            in.Message,
+			Options:            options,
+			MultiSelectChan:    multiSelectChan,
+			MultiSelectChecked: checked,
+			MultiSelectCursor:  0,
+		},
+	})
+	select {
+	case indices := <-multiSelectChan:
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		if indices == nil {
+			return &dive.DialogOutput{Canceled: true}, nil
+		}
+		var values []string
+		for _, idx := range indices {
+			values = append(values, in.Options[idx].Value)
+		}
+		return &dive.DialogOutput{Values: values}, nil
+	case <-ctx.Done():
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.DialogOutput{Canceled: true}, ctx.Err()
+	}
+}
+
+func (d *tuiDialog) showInput(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+	inputChan := make(chan string, 1)
+	d.app.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog: &DialogState{
+			Type:         DialogTypeInput,
+			Active:       true,
+			Title:        in.Title,
+			Message:      in.Message,
+			DefaultValue: in.Default,
+			InputValue:   "",
+			InputChan:    inputChan,
+		},
+	})
+	select {
+	case value := <-inputChan:
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		if value == "" && in.Default == "" {
+			return &dive.DialogOutput{Canceled: true}, nil
+		}
+		return &dive.DialogOutput{Text: value}, nil
+	case <-ctx.Done():
+		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
+		return &dive.DialogOutput{Canceled: true}, ctx.Err()
+	}
+}
+
+func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
+	if dialog == nil {
+		dialog = &dive.AutoApproveDialog{}
+	}
 	tools := []dive.Tool{
 		// Read-only file tools
 		toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{
@@ -237,7 +610,7 @@ func createTools(workspaceDir string) []dive.Tool {
 
 		// User interaction
 		toolkit.NewAskUserTool(toolkit.AskUserToolOptions{
-			Dialog: &dive.AutoApproveDialog{}, // Auto-approve for now
+			Dialog: dialog,
 		}),
 	}
 

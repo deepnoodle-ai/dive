@@ -52,7 +52,7 @@ func TestGetDefaultModel(t *testing.T) {
 
 func TestCreateTools(t *testing.T) {
 	workspaceDir := "/tmp/test"
-	tools := createTools(workspaceDir)
+	tools := createTools(workspaceDir, nil)
 
 	// Verify we have some basic tools
 	assert.True(t, len(tools) > 0, "should create at least some tools")

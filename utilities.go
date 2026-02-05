@@ -6,7 +6,9 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
-func dateTimeString(t time.Time) string {
+// DateTimeString returns a human-readable string describing the given time,
+// including the date, time of day, and day of the week.
+func DateTimeString(t time.Time) string {
 	prompt := "The current date is " + t.Format("January 2, 2006") + "."
 	prompt += " The current time is " + t.Format("3:04 PM") + "."
 	prompt += " It is a " + t.Format("Monday") + "."
