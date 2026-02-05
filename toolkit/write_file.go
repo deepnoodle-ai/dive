@@ -46,7 +46,11 @@ type WriteFileTool struct {
 }
 
 // NewWriteFileTool creates a new WriteFileTool with the given options.
-func NewWriteFileTool(options WriteFileToolOptions) *dive.TypedToolAdapter[*WriteFileInput] {
+func NewWriteFileTool(opts ...WriteFileToolOptions) *dive.TypedToolAdapter[*WriteFileInput] {
+	var options WriteFileToolOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	var pathValidator *PathValidator
 	if options.WorkspaceDir != "" {
 		pathValidator, _ = NewPathValidator(options.WorkspaceDir)

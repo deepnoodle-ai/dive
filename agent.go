@@ -274,7 +274,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	session.Messages = append(session.Messages, genResult.OutputMessages...)
 
-	response.FinishedAt = ptr(time.Now())
+	response.FinishedAt = Ptr(time.Now())
 	response.Usage = genResult.Usage
 
 	for _, msg := range genResult.OutputMessages {

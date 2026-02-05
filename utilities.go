@@ -25,6 +25,8 @@ func getToolResultContent(callResults []*ToolCallResult) []*llm.ToolResultConten
 	return results
 }
 
-func ptr[T any](t T) *T {
+// Ptr returns a pointer to the given value. This is useful for setting
+// optional pointer fields in structs like ModelSettings.
+func Ptr[T any](t T) *T {
 	return &t
 }

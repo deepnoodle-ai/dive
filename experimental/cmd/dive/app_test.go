@@ -11,7 +11,7 @@ import (
 
 func TestHandleCompaction(t *testing.T) {
 	// Create a mock agent (we won't use it for this test)
-	agent := &dive.StandardAgent{}
+	agent := &dive.Agent{}
 
 	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", false, nil)
 

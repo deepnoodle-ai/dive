@@ -12,7 +12,7 @@ import (
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 	openaic "github.com/deepnoodle-ai/dive/providers/openaicompletions"
 	"github.com/deepnoodle-ai/dive/toolkit"
-	"github.com/deepnoodle-ai/dive/toolkit/google"
+	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/fatih/color"
 )
 

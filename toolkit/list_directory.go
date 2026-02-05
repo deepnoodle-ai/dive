@@ -81,7 +81,11 @@ type ListDirectoryTool struct {
 }
 
 // NewListDirectoryTool creates a new ListDirectoryTool with the given options.
-func NewListDirectoryTool(options ListDirectoryToolOptions) *dive.TypedToolAdapter[*ListDirectoryInput] {
+func NewListDirectoryTool(opts ...ListDirectoryToolOptions) *dive.TypedToolAdapter[*ListDirectoryInput] {
+	var options ListDirectoryToolOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	if options.MaxEntries == 0 {
 		options.MaxEntries = DefaultListDirectoryMaxEntries
 	}

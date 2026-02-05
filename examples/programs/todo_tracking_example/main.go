@@ -10,20 +10,21 @@ import (
 	"os"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/experimental/todo"
+	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/providers/openai"
-	"github.com/deepnoodle-ai/dive/toolkit"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// Create a TodoTracker to monitor progress
-	tracker := dive.NewTodoTracker()
+	tracker := todo.NewTodoTracker()
 
 	// Create an agent with the TodoWrite tool
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name: "Task Manager",
-		Instructions: `You are a task management assistant. When given a complex task:
+		SystemPrompt: `You are a task management assistant. When given a complex task:
 1. Break it down into smaller steps using the TodoWrite tool
 2. Update the status of each step as you work on it
 3. Mark each step complete when done
@@ -31,7 +32,7 @@ func main() {
 Always use the TodoWrite tool to track your progress on multi-step tasks.`,
 		Model: openai.New(),
 		Tools: []dive.Tool{
-			toolkit.NewTodoWriteTool(),
+			extended.NewTodoWriteTool(),
 		},
 	})
 	if err != nil {

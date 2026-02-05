@@ -88,7 +88,11 @@ type FetchToolOptions struct {
 }
 
 // NewFetchTool creates a new FetchTool with the given options.
-func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*fetch.Request] {
+func NewFetchTool(opts ...FetchToolOptions) *dive.TypedToolAdapter[*fetch.Request] {
+	var options FetchToolOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	if options.MaxSize <= 0 {
 		options.MaxSize = DefaultFetchMaxSize
 	}

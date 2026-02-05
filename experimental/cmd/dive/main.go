@@ -156,7 +156,7 @@ func getInput(args []string) (string, error) {
 	return "", nil
 }
 
-func runPrintText(ctx context.Context, agent dive.Agent, input string) error {
+func runPrintText(ctx context.Context, agent *dive.Agent, input string) error {
 	var outputText strings.Builder
 
 	resp, err := agent.CreateResponse(ctx,
@@ -184,7 +184,7 @@ func runPrintText(ctx context.Context, agent dive.Agent, input string) error {
 	return nil
 }
 
-func runPrintJSON(ctx context.Context, agent dive.Agent, input string) error {
+func runPrintJSON(ctx context.Context, agent *dive.Agent, input string) error {
 	result := map[string]interface{}{}
 
 	resp, err := agent.CreateResponse(ctx,

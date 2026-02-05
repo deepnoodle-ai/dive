@@ -101,9 +101,13 @@ type AskUserToolOptions struct {
 // NewAskUserTool creates a new AskUserTool with the given options.
 // A [dive.Dialog] must be provided via options; without one, the tool
 // will return an error when called.
-func NewAskUserTool(opts AskUserToolOptions) *dive.TypedToolAdapter[*AskUserInput] {
+func NewAskUserTool(opts ...AskUserToolOptions) *dive.TypedToolAdapter[*AskUserInput] {
+	var options AskUserToolOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	return dive.ToolAdapter(&AskUserTool{
-		dialog: opts.Dialog,
+		dialog: options.Dialog,
 	})
 }
 

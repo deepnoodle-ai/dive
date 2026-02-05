@@ -64,7 +64,11 @@ type ReadFileTool struct {
 }
 
 // NewReadFileTool creates a new ReadFileTool with the given options.
-func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFileInput] {
+func NewReadFileTool(opts ...ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFileInput] {
+	var options ReadFileToolOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	if options.MaxSize == 0 {
 		options.MaxSize = DefaultReadFileMaxSize
 	}

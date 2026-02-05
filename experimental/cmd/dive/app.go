@@ -192,7 +192,7 @@ type DialogOption struct {
 // except for immutable fields (agent, workspaceDir, modelName, runner).
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
-	agent         *dive.StandardAgent
+	agent         *dive.Agent
 	sessionRepo   session.Repository
 	workspaceDir  string
 	modelName     string
@@ -265,7 +265,7 @@ type App struct {
 
 // NewApp creates a new CLI application
 func NewApp(
-	agent *dive.StandardAgent,
+	agent *dive.Agent,
 	sessionRepo session.Repository,
 	workspaceDir, modelName string,
 	initialPrompt string,
