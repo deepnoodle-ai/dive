@@ -225,6 +225,14 @@ go run ./programs/openai_responses_example
 - [LLM Guide](./docs/guides/llm-guide.md)
 - [Tools Overview](./docs/guides/tools.md)
 
+## See Also
+
+[Wonton](https://github.com/deepnoodle-ai/wonton) is a companion Go library
+for building CLI applications. It provides a TUI framework, HTML-to-Markdown
+conversion, HTTP utilities, and other common building blocks. Dive's
+experimental CLI is built with Wonton, and the two libraries pair well for
+building agent-powered command-line tools.
+
 ## Contributing
 
 - Questions and ideas: [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions)
