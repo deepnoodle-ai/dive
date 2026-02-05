@@ -101,7 +101,7 @@ model := openrouter.New()
 All providers accept variadic options. For example, to specify a model:
 
 ```go
-model := anthropic.New(anthropic.WithModel("claude-sonnet-4-5"))
+provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-5"))
 ```
 
 ## Model Settings

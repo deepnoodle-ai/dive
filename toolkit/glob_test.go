@@ -2,6 +2,7 @@ package toolkit
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -317,4 +318,48 @@ func TestGlobTool_CustomExcludes(t *testing.T) {
 	output := result.Content[0].Text
 	assert.Contains(t, output, "main.go")
 	assert.NotContains(t, output, "main_test.go")
+}
+
+func TestGlobTool_EmptyDefaultExcludesDisablesBuiltInExcludes(t *testing.T) {
+	tempDir := t.TempDir()
+	nodeModules := filepath.Join(tempDir, "node_modules")
+	assert.NoError(t, os.MkdirAll(nodeModules, 0755))
+
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "main.js"), []byte("code"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(nodeModules, "dep.js"), []byte("dep"), 0644))
+
+	tool := NewGlobTool(GlobToolOptions{
+		WorkspaceDir:    tempDir,
+		DefaultExcludes: []string{},
+	})
+
+	result, err := tool.Call(context.Background(), &GlobInput{
+		Pattern: "**/*.js",
+		Path:    tempDir,
+	})
+
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "node_modules/dep.js")
+}
+
+func TestGlobTool_Call_ReturnsConfigError(t *testing.T) {
+	tool := &GlobTool{
+		configErr: errors.New("validator init failed"),
+	}
+
+	result, err := tool.Call(context.Background(), &GlobInput{Pattern: "*.go"})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "validator init failed")
+}
+
+func TestGlobTool_Call_ReturnsWorkspaceConfigErrorWhenValidatorMissing(t *testing.T) {
+	tool := &GlobTool{workspaceDir: "/bad/workspace"}
+
+	result, err := tool.Call(context.Background(), &GlobInput{Pattern: "*.go"})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "WorkspaceDir \"/bad/workspace\"")
+	assert.Contains(t, result.Content[0].Text, "path validator is not initialized")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -83,11 +84,31 @@ type FetchToolOptions struct {
 	OnlyMainContent bool `json:"only_main_content,omitempty"`
 
 	// Fetcher is the underlying HTTP fetcher implementation.
-	// Required - the tool will fail at call time if not provided.
+	// If not provided, a default HTTPFetcher with SSRF-safe redirect
+	// validation is used.
 	Fetcher fetch.Fetcher `json:"-"`
 }
 
+// SafeHTTPClient returns an *http.Client that validates redirect targets
+// against SSRF rules. Each redirect URL is checked for blocked schemes,
+// localhost, and private IP addresses using the same rules as the initial
+// URL validation.
+func SafeHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return validateFetchURL(req.URL.String())
+		},
+	}
+}
+
 // NewFetchTool creates a new FetchTool with the given options.
+//
+// If no Fetcher is provided, a default HTTPFetcher with SSRF-safe redirect
+// validation is used.
 func NewFetchTool(opts ...FetchToolOptions) *dive.TypedToolAdapter[*fetch.Request] {
 	var options FetchToolOptions
 	if len(opts) > 0 {
@@ -98,6 +119,12 @@ func NewFetchTool(opts ...FetchToolOptions) *dive.TypedToolAdapter[*fetch.Reques
 	}
 	if options.Timeout <= 0 {
 		options.Timeout = DefaultFetchTimeout
+	}
+	if options.Fetcher == nil {
+		options.Fetcher = fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{
+			Client:  SafeHTTPClient(options.Timeout),
+			Timeout: options.Timeout,
+		})
 	}
 	return dive.ToolAdapter(&FetchTool{
 		fetcher:         options.Fetcher,

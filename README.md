@@ -192,6 +192,9 @@ any time.
 - **Skills** — Markdown-based skill loading system
 - **Slash Commands** — User-defined CLI commands
 - **Settings** — Load configuration from `.dive/settings.json`
+- **Interactor** — User interaction interfaces for confirmations, selections, and input
+- **Todo** — Real-time todo list tracking during agent execution
+- **Toolkit** — Additional tool packages (extended, firecrawl, google, kagi)
 - **CLI** — Interactive command-line interface (`experimental/cmd/dive`)
 
 ## Examples

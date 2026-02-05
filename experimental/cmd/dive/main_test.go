@@ -7,6 +7,17 @@ import (
 )
 
 func TestGetDefaultModel(t *testing.T) {
+	// All provider env vars that getDefaultModel checks.
+	allKeys := []string{
+		"ANTHROPIC_API_KEY",
+		"GOOGLE_API_KEY",
+		"GEMINI_API_KEY",
+		"OPENAI_API_KEY",
+		"XAI_API_KEY",
+		"GROK_API_KEY",
+		"MISTRAL_API_KEY",
+	}
+
 	tests := []struct {
 		name     string
 		envVars  map[string]string
@@ -42,16 +53,21 @@ func TestGetDefaultModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Note: This test doesn't actually set env vars, just verifies the logic exists
-			// A real test would need to set/unset environment variables
+			// Clear all provider env vars so only the test's vars are set.
+			for _, key := range allKeys {
+				t.Setenv(key, "")
+			}
+			for key, value := range tt.envVars {
+				t.Setenv(key, value)
+			}
 			model := getDefaultModel()
-			assert.NotEmpty(t, model, "getDefaultModel should return a non-empty model name")
+			assert.Equal(t, tt.expected, model)
 		})
 	}
 }
 
 func TestCreateTools(t *testing.T) {
-	workspaceDir := "/tmp/test"
+	workspaceDir := t.TempDir()
 	tools := createTools(workspaceDir, nil)
 
 	// Verify we have some basic tools

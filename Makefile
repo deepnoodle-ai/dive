@@ -55,6 +55,6 @@ tidy:
 	go mod tidy
 
 build:
-	go build ./cmd/dive
+	cd experimental/cmd/dive && go build .
 
 check: fmt-check vet test

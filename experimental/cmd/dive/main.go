@@ -339,10 +339,14 @@ func runPrint(ctx *cli.Context) error {
 	// Run agent
 	bgCtx := context.Background()
 
-	if outputFormat == "json" {
+	switch outputFormat {
+	case "json":
 		return runPrintJSON(bgCtx, agent, input)
+	case "text":
+		return runPrintText(bgCtx, agent, input)
+	default:
+		return fmt.Errorf("unsupported --output-format %q; valid values are: json, text", outputFormat)
 	}
-	return runPrintText(bgCtx, agent, input)
 }
 
 func getInput(args []string) (string, error) {

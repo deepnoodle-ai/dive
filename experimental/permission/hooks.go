@@ -50,40 +50,6 @@ func HookFromManager(manager *Manager) dive.PreToolUseHook {
 	}
 }
 
-// HookWithOptions provides additional configuration for the permission hook.
-type HookWithOptions struct {
-	// Config is the permission configuration.
-	Config *Config
-
-	// Confirmer is called when user confirmation is needed.
-	Confirmer ConfirmFunc
-
-	// OnAllow is called when a tool is allowed.
-	OnAllow func(ctx context.Context, tool dive.Tool)
-
-	// OnDeny is called when a tool is denied.
-	OnDeny func(ctx context.Context, tool dive.Tool, reason string)
-}
-
-// Build returns a PreToolUseHook with the configured options.
-func (o HookWithOptions) Build() dive.PreToolUseHook {
-	manager := NewManager(o.Config, o.Confirmer)
-
-	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
-		err := manager.EvaluateToolUse(ctx, hookCtx.Tool, hookCtx.Call)
-		if err == nil {
-			if o.OnAllow != nil {
-				o.OnAllow(ctx, hookCtx.Tool)
-			}
-		} else {
-			if o.OnDeny != nil {
-				o.OnDeny(ctx, hookCtx.Tool, err.Error())
-			}
-		}
-		return err
-	}
-}
-
 // AuditHook returns a PreToolUseHook that logs all tool calls without making
 // permission decisions.
 //

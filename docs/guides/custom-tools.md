@@ -7,12 +7,13 @@ Create custom tools to extend your agent's capabilities.
 Custom tools implement the `TypedTool[T]` generic interface:
 
 ```go
+// In package dive:
 type TypedTool[T any] interface {
     Name() string
     Description() string
-    Schema() *Schema
-    Annotations() *ToolAnnotations
-    Call(ctx context.Context, input T) (*ToolResult, error)
+    Schema() *dive.Schema
+    Annotations() *dive.ToolAnnotations
+    Call(ctx context.Context, input T) (*dive.ToolResult, error)
 }
 ```
 

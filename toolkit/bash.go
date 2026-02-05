@@ -77,6 +77,8 @@ type BashToolOptions struct {
 type BashTool struct {
 	pathValidator *PathValidator
 	maxOutputLen  int
+	workspaceDir  string
+	configErr     error
 }
 
 // NewBashTool creates a new BashTool with the given options.
@@ -90,11 +92,16 @@ func NewBashTool(opts ...BashToolOptions) *dive.TypedToolAdapter[*BashInput] {
 		resolvedOpts.MaxOutputLength = DefaultMaxOutputLength
 	}
 
-	pathValidator, _ := NewPathValidator(resolvedOpts.WorkspaceDir)
+	pathValidator, configErr := NewPathValidator(resolvedOpts.WorkspaceDir)
+	if configErr != nil {
+		configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+	}
 
 	return dive.ToolAdapter(&BashTool{
 		pathValidator: pathValidator,
 		maxOutputLen:  resolvedOpts.MaxOutputLength,
+		workspaceDir:  resolvedOpts.WorkspaceDir,
+		configErr:     configErr,
 	})
 }
 
@@ -183,6 +190,13 @@ func (t *BashTool) PreviewCall(ctx context.Context, input *BashInput) *dive.Tool
 //
 // The context can be used to cancel long-running commands.
 func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	// Validate command is provided
 	if input.Command == "" {
 		return dive.NewToolResultError("error: 'command' is required"), nil

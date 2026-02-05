@@ -2,6 +2,7 @@ package toolkit
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -237,4 +238,25 @@ func TestTruncateOutput(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestBashTool_Call_ReturnsConfigError(t *testing.T) {
+	tool := &BashTool{
+		configErr: errors.New("validator init failed"),
+	}
+
+	result, err := tool.Call(context.Background(), &BashInput{Command: "echo hello"})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "validator init failed")
+}
+
+func TestBashTool_Call_ReturnsWorkspaceConfigErrorWhenValidatorMissing(t *testing.T) {
+	tool := &BashTool{workspaceDir: "/bad/workspace"}
+
+	result, err := tool.Call(context.Background(), &BashInput{Command: "echo hello"})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "WorkspaceDir \"/bad/workspace\"")
+	assert.Contains(t, result.Content[0].Text, "path validator is not initialized")
 }

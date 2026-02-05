@@ -144,17 +144,27 @@ func (a *AutoApprove) MultiSelect(ctx context.Context, req *MultiSelectRequest) 
 	var values []string
 	for _, opt := range req.Options {
 		if opt.Default {
+			if req.MaxSelect > 0 && len(values) >= req.MaxSelect {
+				break
+			}
 			values = append(values, opt.Value)
 		}
 	}
 	if len(values) == 0 && req.MinSelect == 0 {
 		return &MultiSelectResponse{Values: []string{}}, nil
 	}
-	if len(values) < req.MinSelect {
+	targetMin := req.MinSelect
+	if req.MaxSelect > 0 && targetMin > req.MaxSelect {
+		targetMin = req.MaxSelect
+	}
+	if len(values) < targetMin {
 		for _, opt := range req.Options {
 			if !opt.Default {
+				if req.MaxSelect > 0 && len(values) >= req.MaxSelect {
+					break
+				}
 				values = append(values, opt.Value)
-				if len(values) >= req.MinSelect {
+				if len(values) >= targetMin {
 					break
 				}
 			}

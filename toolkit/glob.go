@@ -63,6 +63,8 @@ type GlobTool struct {
 	defaultExcludes []string
 	maxResults      int
 	pathValidator   *PathValidator
+	workspaceDir    string
+	configErr       error
 }
 
 // NewGlobTool creates a new GlobTool with the given options.
@@ -75,7 +77,7 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 	if resolvedOpts.MaxResults == 0 {
 		resolvedOpts.MaxResults = 500
 	}
-	if len(resolvedOpts.DefaultExcludes) == 0 {
+	if resolvedOpts.DefaultExcludes == nil {
 		resolvedOpts.DefaultExcludes = []string{
 			"**/node_modules/**",
 			"**/.git/**",
@@ -89,13 +91,19 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 		}
 	}
 	var pathValidator *PathValidator
+	var configErr error
 	if resolvedOpts.WorkspaceDir != "" {
-		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
+		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		}
 	}
 	return dive.ToolAdapter(&GlobTool{
 		defaultExcludes: resolvedOpts.DefaultExcludes,
 		maxResults:      resolvedOpts.MaxResults,
 		pathValidator:   pathValidator,
+		workspaceDir:    resolvedOpts.WorkspaceDir,
+		configErr:       configErr,
 	})
 }
 
@@ -171,6 +179,13 @@ func (t *GlobTool) PreviewCall(ctx context.Context, input *GlobInput) *dive.Tool
 // modification time (most recent first). If no files match, returns
 // a message indicating no matches were found.
 func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	searchPath := input.Path
 	if searchPath == "" {
 		var err error

@@ -181,6 +181,7 @@ func loadFile(path string) (*Definition, error) {
 }
 
 func parseFrontmatter(content string) (fm, body string, err error) {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.TrimSpace(content)
 
 	if !strings.HasPrefix(content, "---") {

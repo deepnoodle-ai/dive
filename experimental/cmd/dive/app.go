@@ -1632,12 +1632,16 @@ func (a *App) handleCompactCommand() {
 	}
 
 	// Perform compaction
+	summaryPrompt := a.compactionConfig.SummaryPrompt
+	if summaryPrompt == "" {
+		summaryPrompt = compaction.DefaultCompactionSummaryPrompt
+	}
 	compactedMsgs, event, err := compaction.CompactMessages(
 		a.ctx,
 		a.compactionConfig.Model,
 		session.Messages,
 		"", // System prompt not needed for compaction
-		compaction.DefaultCompactionSummaryPrompt,
+		summaryPrompt,
 		tokensBefore,
 	)
 	if err != nil {

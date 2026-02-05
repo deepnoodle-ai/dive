@@ -98,7 +98,7 @@ PostGeneration: []dive.PostGenerationHook{
 },
 ```
 
-PostGeneration errors are logged but don't affect the returned `Response`.
+PostGeneration errors are logged but don't affect the returned `Response`, unless the hook returns a `*HookAbortError` (via `AbortGeneration()`), which aborts generation and returns an error.
 
 ### Built-in Hook Helpers
 
