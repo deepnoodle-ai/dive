@@ -58,6 +58,9 @@ var (
 
 var _ llm.StreamingLLM = &Provider{}
 
+// Provider implements an LLM provider using the OpenAI Chat Completions API.
+// This is used as the base for several providers including Grok, Groq, Mistral,
+// Ollama, and OpenRouter.
 type Provider struct {
 	client        *http.Client
 	apiKey        string
@@ -69,6 +72,7 @@ type Provider struct {
 	systemRole    string
 }
 
+// New creates a new OpenAI Completions provider with the given options.
 func New(opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:        os.Getenv("OPENAI_API_KEY"),

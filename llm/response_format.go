@@ -2,6 +2,7 @@ package llm
 
 import "github.com/deepnoodle-ai/wonton/schema"
 
+// ResponseFormatType specifies the expected format of the LLM's response.
 type ResponseFormatType string
 
 const (

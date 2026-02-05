@@ -4,6 +4,7 @@ import (
 	"context"
 )
 
+// LLM is the core interface for interacting with a language model provider.
 type LLM interface {
 	// Name of the LLM provider
 	Name() string
@@ -12,6 +13,7 @@ type LLM interface {
 	Generate(ctx context.Context, opts ...Option) (*Response, error)
 }
 
+// StreamingLLM extends LLM with support for streaming responses.
 type StreamingLLM interface {
 	LLM
 
@@ -20,6 +22,7 @@ type StreamingLLM interface {
 	Stream(ctx context.Context, opts ...Option) (StreamIterator, error)
 }
 
+// StreamIterator provides an iterator-style interface for reading streaming LLM responses.
 type StreamIterator interface {
 	// Next advances the stream to the next event. It returns false when the stream
 	// is complete or if an error occurs. The caller should check Err() after Next

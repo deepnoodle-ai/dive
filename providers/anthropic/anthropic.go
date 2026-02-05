@@ -30,6 +30,7 @@ var (
 
 var _ llm.StreamingLLM = &Provider{}
 
+// Provider implements the Anthropic LLM provider for Claude models.
 type Provider struct {
 	client        *http.Client
 	apiKey        string
@@ -41,6 +42,7 @@ type Provider struct {
 	version       string
 }
 
+// New creates a new Anthropic provider with the given options.
 func New(opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:        os.Getenv("ANTHROPIC_API_KEY"),

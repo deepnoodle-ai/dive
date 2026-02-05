@@ -27,6 +27,7 @@ var (
 
 var _ llm.StreamingLLM = &Provider{}
 
+// Provider implements the Google Gemini LLM provider.
 type Provider struct {
 	client        *genai.Client
 	projectID     string
@@ -40,6 +41,7 @@ type Provider struct {
 	mutex         sync.Mutex
 }
 
+// New creates a new Google Gemini provider with the given options.
 func New(opts ...Option) *Provider {
 	var apiKey string
 	if value := os.Getenv("GEMINI_API_KEY"); value != "" {

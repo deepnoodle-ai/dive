@@ -116,7 +116,7 @@ type CacheControlSetter interface {
 	SetCacheControl(cacheControl *CacheControl)
 }
 
-//// TextContent ///////////////////////////////////////////////////////////////
+// TextContent is a text content block, optionally with citations.
 
 /* Examples:
 {
@@ -199,8 +199,9 @@ func (c *TextContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
-//// RefusalContent ////////////////////////////////////////////////////////////
+// RefusalContent represents the model refusing to fulfill a request.
 
+// RefusalContent represents a refusal response from the model.
 type RefusalContent struct {
 	Text         string        `json:"text"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
@@ -225,9 +226,7 @@ func (c *RefusalContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
-//// ImageContent //////////////////////////////////////////////////////////////
-
-// https://docs.anthropic.com/en/docs/build-with-claude/vision
+// ImageContent carries an image in a message, either base64-encoded, via URL, or file ID.
 
 /* Examples:
 {
@@ -296,7 +295,7 @@ func (c *ImageContent) Image() (image.Image, error) {
 	return img, nil
 }
 
-//// DocumentContent ///////////////////////////////////////////////////////////
+// DocumentContent carries a document (PDF, text, etc.) in a message.
 
 /* Examples:
 {
@@ -378,7 +377,7 @@ func (c *DocumentContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
-//// ToolUseContent ////////////////////////////////////////////////////////////
+// ToolUseContent represents an LLM requesting a tool call.
 
 /* Examples:
 {
@@ -418,7 +417,7 @@ func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// ToolResultContent /////////////////////////////////////////////////////////
+// ToolResultContent carries the result of a tool call back to the LLM.
 
 /* Examples:
 {
@@ -470,9 +469,7 @@ func (c *ToolResultContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
-//// ServerToolUseContent //////////////////////////////////////////////////////
-
-// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool#response
+// ServerToolUseContent represents a server-side tool call made by the LLM provider.
 
 /* Examples:
 {
@@ -506,9 +503,7 @@ func (c *ServerToolUseContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// WebSearchToolResultContent ////////////////////////////////////////////////
-
-// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool#response
+// WebSearchToolResultContent carries results from a server-side web search.
 
 /* Examples:
 {
@@ -535,6 +530,7 @@ func (c *ServerToolUseContent) MarshalJSON() ([]byte, error) {
 }
 */
 
+// WebSearchResult is a single web search result within a WebSearchToolResultContent.
 type WebSearchResult struct {
 	Type             string `json:"type"`
 	URL              string `json:"url"`
@@ -543,6 +539,7 @@ type WebSearchResult struct {
 	PageAge          string `json:"page_age"`
 }
 
+// WebSearchToolResultContent contains the results of a server-side web search tool call.
 type WebSearchToolResultContent struct {
 	ToolUseID string             `json:"tool_use_id"`
 	Content   []*WebSearchResult `json:"content"`
@@ -636,9 +633,7 @@ func (c *RedactedThinkingContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// MCPToolUse ////////////////////////////////////////////////////////////////
-
-// https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector#mcp-tool-use-block
+// MCPToolUseContent represents a tool call routed through an MCP server.
 
 /* Examples:
 {
@@ -672,9 +667,7 @@ func (c *MCPToolUseContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// MCPToolResult //////////////////////////////////////////////////////////////
-
-// https://docs.anthropic.com/en/docs/agents-and-tools/mcp-connector#mcp-tool-result-block
+// MCPToolResultContent carries the result of an MCP tool call.
 
 /* Examples:
 {
@@ -711,9 +704,7 @@ func (c *MCPToolResultContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// MCPListToolsContent ///////////////////////////////////////////////////////
-
-// https://platform.openai.com/docs/guides/tools-remote-mcp
+// MCPListToolsContent lists the tools available from an MCP server (OpenAI).
 
 /* Examples:
 {
@@ -732,12 +723,14 @@ func (c *MCPToolResultContent) MarshalJSON() ([]byte, error) {
 }
 */
 
+// MCPToolDefinition describes a tool provided by an MCP server.
 type MCPToolDefinition struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	InputSchema map[string]interface{} `json:"input_schema,omitempty"`
 }
 
+// MCPListToolsContent lists the tools available on an MCP server.
 type MCPListToolsContent struct {
 	ServerLabel string               `json:"server_label"`
 	Tools       []*MCPToolDefinition `json:"tools"`
@@ -758,9 +751,7 @@ func (c *MCPListToolsContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// MCPApprovalRequestContent /////////////////////////////////////////////////
-
-// https://platform.openai.com/docs/guides/tools-remote-mcp#approvals
+// MCPApprovalRequestContent is a request from the LLM for user approval of an MCP tool call (OpenAI).
 
 /* Examples:
 {
@@ -794,7 +785,7 @@ func (c *MCPApprovalRequestContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// MCPApprovalResponseContent /////////////////////////////////////////////////
+// MCPApprovalResponseContent carries the user's approval or denial of an MCP tool call.
 
 /* Examples:
 {
@@ -826,9 +817,7 @@ func (c *MCPApprovalResponseContent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-//// CodeExecutionToolResult ///////////////////////////////////////////////////
-
-// https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/code-execution-tool
+// CodeExecutionToolResultContent carries the result of a server-side code execution.
 
 /* Examples:
    {
@@ -843,6 +832,7 @@ func (c *MCPApprovalResponseContent) MarshalJSON() ([]byte, error) {
    }
 */
 
+// CodeExecutionResult contains stdout, stderr, and return code from code execution.
 type CodeExecutionResult struct {
 	Type       string `json:"type"`
 	Stdout     string `json:"stdout"`
@@ -850,6 +840,7 @@ type CodeExecutionResult struct {
 	ReturnCode int    `json:"return_code"`
 }
 
+// CodeExecutionToolResultContent carries the result of a server-side code execution tool call.
 type CodeExecutionToolResultContent struct {
 	ToolUseID string              `json:"tool_use_id"`
 	Content   CodeExecutionResult `json:"content"`

@@ -8,6 +8,8 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
+// ToolAnnotations contains optional metadata hints that describe a tool's behavior.
+// These hints help agents and permission systems make decisions about tool usage.
 type ToolAnnotations struct {
 	Title           string         `json:"title,omitempty"`
 	ReadOnlyHint    bool           `json:"readOnlyHint,omitempty"`
@@ -69,6 +71,7 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ToolResultContentType indicates the media type of a tool result content block.
 type ToolResultContentType string
 
 const (
@@ -81,6 +84,8 @@ func (t ToolResultContentType) String() string {
 	return string(t)
 }
 
+// ToolResultContent is a single content block within a tool result, such as
+// text output, an image, or audio data.
 type ToolResultContent struct {
 	Type        ToolResultContentType `json:"type"`
 	Text        string                `json:"text,omitempty"`
@@ -232,6 +237,8 @@ func (t *TypedToolAdapter[T]) Unwrap() TypedTool[T] {
 	return t.tool
 }
 
+// ToolConfiguration delegates to the underlying tool's ToolConfiguration method
+// if it implements the llm.ToolConfiguration interface.
 func (t *TypedToolAdapter[T]) ToolConfiguration(providerName string) map[string]any {
 	if toolWithConfig, ok := t.tool.(llm.ToolConfiguration); ok {
 		return toolWithConfig.ToolConfiguration(providerName)

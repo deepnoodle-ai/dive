@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// CitationType identifies the kind of citation attached to a text content block.
 type CitationType string
 
 const (
@@ -18,6 +19,7 @@ type CitationSettings struct {
 	Enabled bool `json:"enabled"`
 }
 
+// Citation is a reference to source material attached to generated text.
 type Citation interface {
 	IsCitation() bool
 }
