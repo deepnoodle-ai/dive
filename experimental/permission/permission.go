@@ -1,24 +1,9 @@
 // Package permission provides tool permission management for Dive agents.
 //
-// This package contains types and utilities for controlling tool usage permissions,
-// including rule-based evaluation, session allowlists, and user confirmation flows.
+// This package implements permission checking as a PreToolUse hook,
+// including rule-based evaluation, session allowlists, and user confirmation.
 //
-// # Migration from AgentOptions.Permission
-//
-// Previously, permissions were configured via AgentOptions.Permission:
-//
-//	agent, _ := dive.NewAgent(dive.AgentOptions{
-//	    Model: model,
-//	    Permission: &dive.PermissionConfig{
-//	        Mode: dive.PermissionModeDefault,
-//	        Rules: dive.PermissionRules{
-//	            dive.AllowRule("Read"),
-//	            dive.AskRule("Bash", "Execute command?"),
-//	        },
-//	    },
-//	})
-//
-// With the new hook-based approach, use the Hook helper function:
+// Example:
 //
 //	config := &permission.Config{
 //	    Mode: permission.ModeDefault,
@@ -27,26 +12,31 @@
 //	        permission.AskRule("Bash", "Execute command?"),
 //	    },
 //	}
+//	confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
+//	    return promptUser(msg), nil
+//	}
 //	preToolHook := permission.Hook(config, confirmer)
 //
-//	// Add to permission config
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
-//	    Model: model,
-//	    Permission: &dive.PermissionConfig{
-//	        PreToolUse: []dive.PreToolUseHook{preToolHook},
-//	    },
+//	    Model:      model,
+//	    PreToolUse: []dive.PreToolUseHook{preToolHook},
 //	})
 package permission
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 )
+
+// ConfirmFunc is called when user confirmation is needed for a tool call.
+// Returns true if the user approved, false if denied.
+type ConfirmFunc func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, message string) (bool, error)
 
 // Mode determines the global permission behavior.
 type Mode string
@@ -88,21 +78,20 @@ type Rules []Rule
 
 // Config contains all permission-related configuration.
 type Config struct {
-	Mode       Mode
-	Rules      Rules
-	CanUseTool dive.CanUseToolFunc
+	Mode  Mode
+	Rules Rules
 }
 
 // Manager orchestrates the permission evaluation flow.
 type Manager struct {
 	mu             sync.RWMutex
 	config         *Config
-	confirmer      dive.ConfirmToolFunc
+	confirmer      ConfirmFunc
 	sessionAllowed map[string]bool
 }
 
 // NewManager creates a new permission manager.
-func NewManager(config *Config, confirmer dive.ConfirmToolFunc) *Manager {
+func NewManager(config *Config, confirmer ConfirmFunc) *Manager {
 	if config == nil {
 		config = &Config{Mode: ModeDefault}
 	}
@@ -113,12 +102,23 @@ func NewManager(config *Config, confirmer dive.ConfirmToolFunc) *Manager {
 	}
 }
 
+// Internal decision type used between evaluateRules/evaluateMode and EvaluateToolUse.
+type decision int
+
+const (
+	noDecision decision = iota
+	allow
+	deny
+	askUser
+)
+
 // EvaluateToolUse runs the full permission evaluation flow.
+// Returns nil if the tool is allowed, or an error if denied.
 func (pm *Manager) EvaluateToolUse(
 	ctx context.Context,
 	tool dive.Tool,
 	call *llm.ToolUseContent,
-) (*dive.ToolHookResult, error) {
+) error {
 	// Check session allowlist
 	if tool != nil {
 		category := GetToolCategory(tool.Name())
@@ -126,47 +126,37 @@ func (pm *Manager) EvaluateToolUse(
 		allowed := pm.sessionAllowed[category.Key]
 		pm.mu.RUnlock()
 		if allowed {
-			result := dive.AllowResult()
-			result.Category = &dive.ToolCategory{Key: category.Key, Label: category.Label}
-			return result, nil
+			return nil
 		}
 	}
 
 	// Evaluate rules
-	result := pm.evaluateRules(tool, call)
-	if result != nil {
-		return result, nil
+	d, msg := pm.evaluateRules(tool, call)
+	switch d {
+	case deny:
+		return fmt.Errorf("%s", msg)
+	case allow:
+		return nil
+	case askUser:
+		return pm.confirm(ctx, tool, call, msg)
 	}
 
 	// Check permission mode
-	result = pm.evaluateMode(tool, call)
-	if result != nil && result.Action != dive.ToolHookContinue {
-		return result, nil
+	d, msg = pm.evaluateMode(tool, call)
+	switch d {
+	case deny:
+		return fmt.Errorf("%s", msg)
+	case allow:
+		return nil
 	}
 
-	// Call CanUseTool callback
-	if pm.config.CanUseTool != nil {
-		result, err := pm.config.CanUseTool(ctx, tool, call)
-		if err != nil {
-			return nil, err
-		}
-		if result != nil && result.Action != dive.ToolHookContinue {
-			return result, nil
-		}
-	}
-
-	// Default to ask with category info
-	askResult := dive.AskResult("")
-	if tool != nil {
-		category := GetToolCategory(tool.Name())
-		askResult.Category = &dive.ToolCategory{Key: category.Key, Label: category.Label}
-	}
-	return askResult, nil
+	// Default: ask for confirmation
+	return pm.confirm(ctx, tool, call, "")
 }
 
-func (pm *Manager) evaluateRules(tool dive.Tool, call *llm.ToolUseContent) *dive.ToolHookResult {
+func (pm *Manager) evaluateRules(tool dive.Tool, call *llm.ToolUseContent) (decision, string) {
 	if tool == nil || call == nil {
-		return nil
+		return noDecision, ""
 	}
 
 	pm.mu.RLock()
@@ -188,25 +178,25 @@ func (pm *Manager) evaluateRules(tool dive.Tool, call *llm.ToolUseContent) *dive
 	// Check deny rules first
 	for _, rule := range denyRules {
 		if pm.matchRule(rule, toolName, call) {
-			return dive.DenyResult(rule.Message)
+			return deny, rule.Message
 		}
 	}
 
 	// Check allow rules
 	for _, rule := range allowRules {
 		if pm.matchRule(rule, toolName, call) {
-			return dive.AllowResult()
+			return allow, ""
 		}
 	}
 
 	// Check ask rules
 	for _, rule := range askRules {
 		if pm.matchRule(rule, toolName, call) {
-			return dive.AskResult(rule.Message)
+			return askUser, rule.Message
 		}
 	}
 
-	return nil
+	return noDecision, ""
 }
 
 func (pm *Manager) matchRule(rule Rule, toolName string, call *llm.ToolUseContent) bool {
@@ -262,32 +252,32 @@ func matchCommandPattern(pattern string, input json.RawMessage) bool {
 	return strings.Contains(command, strings.ReplaceAll(pattern, "*", ""))
 }
 
-func (pm *Manager) evaluateMode(tool dive.Tool, call *llm.ToolUseContent) *dive.ToolHookResult {
+func (pm *Manager) evaluateMode(tool dive.Tool, call *llm.ToolUseContent) (decision, string) {
 	pm.mu.RLock()
 	mode := pm.config.Mode
 	pm.mu.RUnlock()
 
 	switch mode {
 	case ModeBypassPermissions:
-		return dive.AllowResult()
+		return allow, ""
 
 	case ModePlan:
 		if tool != nil {
 			annotations := tool.Annotations()
 			if annotations != nil && annotations.ReadOnlyHint {
-				return dive.AllowResult()
+				return allow, ""
 			}
 		}
-		return dive.DenyResult("Only read-only tools are allowed in plan mode")
+		return deny, "only read-only tools are allowed in plan mode"
 
 	case ModeAcceptEdits:
 		if pm.isEditOperation(tool, call) {
-			return dive.AllowResult()
+			return allow, ""
 		}
-		return dive.ContinueResult()
+		return noDecision, ""
 
 	default:
-		return dive.ContinueResult()
+		return noDecision, ""
 	}
 }
 
@@ -312,17 +302,25 @@ func (pm *Manager) isEditOperation(tool dive.Tool, call *llm.ToolUseContent) boo
 	return false
 }
 
-// Confirm prompts the user for tool confirmation.
-func (pm *Manager) Confirm(
+// confirm prompts the user for tool confirmation.
+// Returns nil if approved, error if denied.
+func (pm *Manager) confirm(
 	ctx context.Context,
 	tool dive.Tool,
 	call *llm.ToolUseContent,
 	message string,
-) (bool, error) {
+) error {
 	if pm.confirmer == nil {
-		return true, nil
+		return nil // no confirmer = auto-allow
 	}
-	return pm.confirmer(ctx, tool, call, message)
+	approved, err := pm.confirmer(ctx, tool, call, message)
+	if err != nil {
+		return err
+	}
+	if !approved {
+		return fmt.Errorf("user denied tool call")
+	}
+	return nil
 }
 
 // Mode returns the current permission mode.

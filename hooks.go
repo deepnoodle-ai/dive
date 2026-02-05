@@ -275,10 +275,8 @@ func UsageLoggerWithSlog(logger llm.Logger) PostGenerationHook {
 // They allow inspection and control of tool calls without modifying the agent.
 //
 // PreToolUse hooks can:
-//   - Allow tool execution unconditionally
-//   - Deny tool execution with a message
-//   - Request user confirmation before execution
-//   - Modify the tool input before execution
+//   - Deny tool execution by returning an error
+//   - Implement permission checks or user confirmation
 //   - Audit or log tool calls
 //
 // PostToolUse hooks can:
@@ -294,58 +292,16 @@ func UsageLoggerWithSlog(logger llm.Logger) PostGenerationHook {
 //	    Model:        model,
 //	    Tools:        tools,
 //	    PreToolUse: []dive.PreToolUseHook{
-//	        func(ctx context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
-//	            // Allow read-only tools automatically
+//	        func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+//	            // Allow read-only tools
 //	            if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
-//	                return dive.AllowResult(), nil
+//	                return nil
 //	            }
-//	            // Ask for confirmation on other tools
-//	            return dive.AskResult("Execute this tool?"), nil
+//	            // Deny everything else
+//	            return fmt.Errorf("tool %s requires approval", hookCtx.Tool.Name())
 //	        },
 //	    },
 //	})
-
-// ToolHookAction represents the action a PreToolUse hook wants to take.
-type ToolHookAction string
-
-const (
-	// ToolHookAllow allows the tool execution to proceed.
-	ToolHookAllow ToolHookAction = "allow"
-
-	// ToolHookDeny prevents the tool execution.
-	ToolHookDeny ToolHookAction = "deny"
-
-	// ToolHookAsk requests user confirmation before proceeding.
-	ToolHookAsk ToolHookAction = "ask"
-
-	// ToolHookContinue defers to the next hook in the chain.
-	ToolHookContinue ToolHookAction = "continue"
-)
-
-// ToolCategory represents a category of tools for permission grouping.
-type ToolCategory struct {
-	// Key is the machine-readable identifier (e.g., "bash", "edit", "read").
-	Key string
-
-	// Label is the human-readable description (e.g., "bash commands", "file edits").
-	Label string
-}
-
-// ToolHookResult is returned by PreToolUse hooks to indicate the desired action.
-type ToolHookResult struct {
-	// Action indicates what should happen (allow, deny, ask, continue).
-	Action ToolHookAction
-
-	// Message provides context for deny/ask actions.
-	Message string
-
-	// UpdatedInput optionally provides modified input for the tool call.
-	// Only used when Action is ToolHookAllow.
-	UpdatedInput []byte
-
-	// Category optionally identifies the tool category for session allowlists.
-	Category *ToolCategory
-}
 
 // PreToolUseContext provides context about a pending tool execution.
 type PreToolUseContext struct {
@@ -377,26 +333,26 @@ type PostToolUseContext struct {
 
 // PreToolUseHook is called before a tool is executed.
 //
-// The hook receives context about the pending tool call and returns a result
-// indicating the desired action:
-//   - AllowResult(): Execute the tool
-//   - DenyResult(msg): Reject the tool call with a message
-//   - AskResult(msg): Request user confirmation
-//   - ContinueResult(): Defer to the next hook
+// All hooks run in order. If any hook returns an error, the tool is denied
+// and the error message is sent to the LLM. If all hooks return nil, the
+// tool is executed.
 //
-// If all hooks return ContinueResult, the default behavior is to ask for confirmation.
+// Error handling:
+//   - nil: no objection (tool runs if all hooks return nil)
+//   - error: deny the tool (error message sent to LLM)
+//   - *HookAbortError: abort generation entirely
 //
 // Example:
 //
-//	func readOnlyAllower() PreToolUseHook {
-//	    return func(ctx context.Context, hookCtx *PreToolUseContext) (*ToolHookResult, error) {
+//	func readOnlyChecker() dive.PreToolUseHook {
+//	    return func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
 //	        if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
-//	            return AllowResult(), nil
+//	            return nil // allow read-only tools
 //	        }
-//	        return ContinueResult(), nil
+//	        return fmt.Errorf("only read-only tools are allowed")
 //	    }
 //	}
-type PreToolUseHook func(ctx context.Context, hookCtx *PreToolUseContext) (*ToolHookResult, error)
+type PreToolUseHook func(ctx context.Context, hookCtx *PreToolUseContext) error
 
 // PostToolUseHook is called after a tool has been executed.
 //
@@ -434,34 +390,6 @@ type PreToolUseHook func(ctx context.Context, hookCtx *PreToolUseContext) (*Tool
 //	    }
 //	}
 type PostToolUseHook func(ctx context.Context, hookCtx *PostToolUseContext) error
-
-// ConfirmToolFunc is called when user confirmation is needed for a tool call.
-// Returns true if the user approved, false if denied.
-type ConfirmToolFunc func(ctx context.Context, tool Tool, call *llm.ToolUseContent, message string) (bool, error)
-
-// CanUseToolFunc is a callback for custom permission logic.
-// Return nil to defer to other hooks, or a ToolHookResult to make a decision.
-type CanUseToolFunc func(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error)
-
-// AllowResult creates a ToolHookResult that allows tool execution.
-func AllowResult() *ToolHookResult {
-	return &ToolHookResult{Action: ToolHookAllow}
-}
-
-// DenyResult creates a ToolHookResult that denies tool execution.
-func DenyResult(message string) *ToolHookResult {
-	return &ToolHookResult{Action: ToolHookDeny, Message: message}
-}
-
-// AskResult creates a ToolHookResult that requests user confirmation.
-func AskResult(message string) *ToolHookResult {
-	return &ToolHookResult{Action: ToolHookAsk, Message: message}
-}
-
-// ContinueResult creates a ToolHookResult that defers to the next hook.
-func ContinueResult() *ToolHookResult {
-	return &ToolHookResult{Action: ToolHookContinue}
-}
 
 // HookAbortError signals that a hook wants to abort generation entirely.
 // When returned from any hook, CreateResponse will abort and return this error.

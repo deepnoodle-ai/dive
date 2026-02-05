@@ -31,9 +31,8 @@ func TestManager(t *testing.T) {
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), tool, call)
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 	})
 
 	t.Run("plan mode allows read-only tools", func(t *testing.T) {
@@ -46,9 +45,8 @@ func TestManager(t *testing.T) {
 		}
 		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{"file": "test.txt"}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), readTool, call)
+		err := manager.EvaluateToolUse(context.Background(), readTool, call)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 	})
 
 	t.Run("plan mode denies non-read-only tools", func(t *testing.T) {
@@ -61,10 +59,9 @@ func TestManager(t *testing.T) {
 		}
 		call := &llm.ToolUseContent{Name: "Write", Input: []byte(`{}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), writeTool, call)
-		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookDeny, result.Action)
-		assert.Contains(t, result.Message, "plan mode")
+		err := manager.EvaluateToolUse(context.Background(), writeTool, call)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "plan mode")
 	})
 
 	t.Run("accept edits mode allows edit operations", func(t *testing.T) {
@@ -77,9 +74,8 @@ func TestManager(t *testing.T) {
 		}
 		call := &llm.ToolUseContent{Name: "Edit", Input: []byte(`{}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), editTool, call)
+		err := manager.EvaluateToolUse(context.Background(), editTool, call)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 	})
 
 	t.Run("deny rules take precedence", func(t *testing.T) {
@@ -95,10 +91,9 @@ func TestManager(t *testing.T) {
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), tool, call)
-		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookDeny, result.Action)
-		assert.Equal(t, "Bash is not allowed", result.Message)
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Equal(t, "Bash is not allowed", err.Error())
 	})
 
 	t.Run("allow rules match tool name", func(t *testing.T) {
@@ -113,27 +108,54 @@ func TestManager(t *testing.T) {
 		tool := &mockTool{name: "Read"}
 		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), tool, call)
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 	})
 
-	t.Run("ask rules match tool name", func(t *testing.T) {
+	t.Run("ask rules call confirmer", func(t *testing.T) {
 		config := &Config{
 			Mode: ModeDefault,
 			Rules: Rules{
 				AskRule("Bash", "Execute this command?"),
 			},
 		}
-		manager := NewManager(config, nil)
+
+		var confirmedMsg string
+		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
+			confirmedMsg = msg
+			return true, nil
+		}
+
+		manager := NewManager(config, confirmer)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), tool, call)
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAsk, result.Action)
-		assert.Equal(t, "Execute this command?", result.Message)
+		assert.Equal(t, "Execute this command?", confirmedMsg)
+	})
+
+	t.Run("ask rules deny when confirmer denies", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AskRule("Bash", "Execute?"),
+			},
+		}
+
+		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
+			return false, nil
+		}
+
+		manager := NewManager(config, confirmer)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "denied")
 	})
 
 	t.Run("command pattern matching", func(t *testing.T) {
@@ -149,14 +171,12 @@ func TestManager(t *testing.T) {
 		matchCall := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "go build ./..."}`)}
 		noMatchCall := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf"}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), tool, matchCall)
+		err := manager.EvaluateToolUse(context.Background(), tool, matchCall)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 
-		result, err = manager.EvaluateToolUse(context.Background(), tool, noMatchCall)
+		// Should fall through to default (confirm). No confirmer = auto-allow.
+		err = manager.EvaluateToolUse(context.Background(), tool, noMatchCall)
 		assert.NoError(t, err)
-		// Should fall through to default (ask)
-		assert.Equal(t, dive.ToolHookAsk, result.Action)
 	})
 
 	t.Run("wildcard tool pattern", func(t *testing.T) {
@@ -171,30 +191,30 @@ func TestManager(t *testing.T) {
 		tool := &mockTool{name: "AnyTool"}
 		call := &llm.ToolUseContent{Name: "AnyTool", Input: []byte(`{}`)}
 
-		result, err := manager.EvaluateToolUse(context.Background(), tool, call)
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 	})
 
 	t.Run("session allowlist", func(t *testing.T) {
 		config := &Config{Mode: ModeDefault}
-		manager := NewManager(config, nil)
+		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
+			return false, nil // deny by default
+		}
+		manager := NewManager(config, confirmer)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 
-		// Before adding to allowlist - should ask
-		result, err := manager.EvaluateToolUse(context.Background(), tool, call)
-		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAsk, result.Action)
+		// Before adding to allowlist - should deny (confirmer says no)
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
 
 		// Add bash category to session allowlist
 		manager.AllowForSession("bash")
 
 		// After adding to allowlist - should allow
-		result, err = manager.EvaluateToolUse(context.Background(), tool, call)
+		err = manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 
 		// Check IsSessionAllowed
 		assert.True(t, manager.IsSessionAllowed("bash"))
@@ -215,27 +235,15 @@ func TestManager(t *testing.T) {
 		assert.Equal(t, ModeBypassPermissions, manager.Mode())
 	})
 
-	t.Run("confirm with nil confirmer returns true", func(t *testing.T) {
+	t.Run("nil confirmer auto-allows", func(t *testing.T) {
 		manager := NewManager(nil, nil)
 
-		result, err := manager.Confirm(context.Background(), nil, nil, "message")
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		// Default with nil confirmer should auto-allow
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
-		assert.True(t, result)
-	})
-
-	t.Run("confirm calls confirmer", func(t *testing.T) {
-		var calledWith string
-		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-			calledWith = msg
-			return true, nil
-		}
-
-		manager := NewManager(nil, confirmer)
-
-		result, err := manager.Confirm(context.Background(), nil, nil, "test message")
-		assert.NoError(t, err)
-		assert.True(t, result)
-		assert.Equal(t, "test message", calledWith)
 	})
 
 	t.Run("nil config defaults to ModeDefault", func(t *testing.T) {
@@ -339,12 +347,11 @@ func TestHook(t *testing.T) {
 		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)}
 		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
 
-		result, err := hook(context.Background(), hookCtx)
+		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 	})
 
-	t.Run("ask result triggers confirmation", func(t *testing.T) {
+	t.Run("ask rule triggers confirmation", func(t *testing.T) {
 		config := &Config{
 			Mode: ModeDefault,
 			Rules: Rules{
@@ -364,13 +371,12 @@ func TestHook(t *testing.T) {
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
 
-		result, err := hook(context.Background(), hookCtx)
+		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
 		assert.True(t, confirmed)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 	})
 
-	t.Run("denied confirmation returns deny", func(t *testing.T) {
+	t.Run("denied confirmation returns error", func(t *testing.T) {
 		config := &Config{
 			Mode: ModeDefault,
 			Rules: Rules{
@@ -388,9 +394,9 @@ func TestHook(t *testing.T) {
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
 
-		result, err := hook(context.Background(), hookCtx)
-		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookDeny, result.Action)
+		err := hook(context.Background(), hookCtx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "denied")
 	})
 }
 
@@ -408,9 +414,8 @@ func TestAuditHook(t *testing.T) {
 		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{"file": "test.txt"}`)}
 		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
 
-		result, err := hook(context.Background(), hookCtx)
+		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookContinue, result.Action)
 		assert.Equal(t, "Read", loggedName)
 		assert.Equal(t, `{"file": "test.txt"}`, string(loggedInput))
 	})
@@ -424,9 +429,8 @@ func TestAuditHook(t *testing.T) {
 
 		hookCtx := &dive.PreToolUseContext{Tool: nil, Call: nil}
 
-		result, err := hook(context.Background(), hookCtx)
+		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookContinue, result.Action)
 		assert.Equal(t, "unknown", loggedName)
 	})
 }
@@ -440,7 +444,7 @@ func TestHookWithOptions(t *testing.T) {
 				Mode:  ModeDefault,
 				Rules: Rules{AllowRule("Read")},
 			},
-			OnAllow: func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent) {
+			OnAllow: func(ctx context.Context, tool dive.Tool) {
 				calledTool = tool
 			},
 		}.Build()
@@ -449,9 +453,8 @@ func TestHookWithOptions(t *testing.T) {
 		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)}
 		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
 
-		result, err := hook(context.Background(), hookCtx)
+		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookAllow, result.Action)
 		assert.Equal(t, tool, calledTool)
 	})
 
@@ -463,7 +466,7 @@ func TestHookWithOptions(t *testing.T) {
 				Mode:  ModeDefault,
 				Rules: Rules{DenyRule("Bash", "Not allowed")},
 			},
-			OnDeny: func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, reason string) {
+			OnDeny: func(ctx context.Context, tool dive.Tool, reason string) {
 				calledReason = reason
 			},
 		}.Build()
@@ -472,34 +475,8 @@ func TestHookWithOptions(t *testing.T) {
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
 
-		result, err := hook(context.Background(), hookCtx)
-		assert.NoError(t, err)
-		assert.Equal(t, dive.ToolHookDeny, result.Action)
+		err := hook(context.Background(), hookCtx)
+		assert.Error(t, err)
 		assert.Equal(t, "Not allowed", calledReason)
-	})
-
-	t.Run("calls OnAsk callback", func(t *testing.T) {
-		var calledMessage string
-
-		hook := HookWithOptions{
-			Config: &Config{
-				Mode:  ModeDefault,
-				Rules: Rules{AskRule("Bash", "Execute?")},
-			},
-			Confirmer: func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-				return true, nil
-			},
-			OnAsk: func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, message string) {
-				calledMessage = message
-			},
-		}.Build()
-
-		tool := &mockTool{name: "Bash"}
-		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
-		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
-
-		_, err := hook(context.Background(), hookCtx)
-		assert.NoError(t, err)
-		assert.Equal(t, "Execute?", calledMessage)
 	})
 }

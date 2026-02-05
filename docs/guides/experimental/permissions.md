@@ -2,11 +2,11 @@
 
 > **Experimental**: This package is in `experimental/permission/`. The API may change.
 
-Dive's core permission system is built on **hooks** defined in the main `dive` package. The `experimental/permission` package provides a higher-level `PermissionManager` with modes, rules, and session allowlists.
+Dive's permission system is built on **PreToolUse hooks**. The `experimental/permission` package provides a higher-level permission manager with modes, rules, and session allowlists.
 
 ## Core: Using PreToolUse Hooks
 
-The simplest way to control tool execution is with `PreToolUseHook` on `AgentOptions`:
+The simplest way to control tool execution is with `PreToolUseHook` on `AgentOptions`. Hooks return `nil` to allow or `error` to deny:
 
 ```go
 agent, _ := dive.NewAgent(dive.AgentOptions{
@@ -14,41 +14,27 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     Model:        model,
     Tools:        tools,
     PreToolUse: []dive.PreToolUseHook{
-        func(ctx context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
+        func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
             // Allow read-only tools automatically
             if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
-                return dive.AllowResult(), nil
+                return nil
             }
-            // Block dangerous operations
+            // Block destructive operations
             if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().DestructiveHint {
-                return dive.DenyResult("Destructive operations not allowed"), nil
+                return fmt.Errorf("destructive operations not allowed")
             }
-            // Ask for confirmation on everything else
-            return dive.AskResult("Execute this tool?"), nil
+            // Allow everything else
+            return nil
         },
-    },
-    Confirmer: func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, message string) (bool, error) {
-        // Implement your confirmation UI here
-        fmt.Printf("Allow %s? (y/n): ", tool.Name())
-        var answer string
-        fmt.Scanln(&answer)
-        return answer == "y", nil
     },
 })
 ```
 
-### Hook Actions
-
-| Action             | Effect                              |
-| ------------------ | ----------------------------------- |
-| `AllowResult()`    | Execute the tool immediately        |
-| `DenyResult(msg)`  | Block execution with a message      |
-| `AskResult(msg)`   | Prompt user for confirmation        |
-| `ContinueResult()` | Defer to the next hook in the chain |
+All hooks run in order. If any hook returns an error, the tool is denied and the error message is sent to the LLM. A `*dive.HookAbortError` aborts generation entirely.
 
 ## Experimental: PermissionManager
 
-The `experimental/permission` package provides a `PermissionManager` with declarative rules and modes:
+The `experimental/permission` package provides a `Manager` with declarative rules and modes:
 
 ```go
 import "github.com/deepnoodle-ai/dive/experimental/permission"
@@ -77,30 +63,35 @@ rules := permission.Rules{
 }
 ```
 
-### Settings File
+Ask rules call the `ConfirmFunc` to prompt the user. If no confirmer is set, ask rules auto-allow.
 
-Permission rules can be loaded from `.dive/settings.json`:
+### Using as a Hook
 
-```json
-{
-  "permissions": {
-    "allow": [
-      "WebSearch",
-      "Bash(go build:*)",
-      "Bash(go test:*)",
-      "Read(/path/to/project/**)"
-    ],
-    "deny": ["Bash(rm -rf:*)", "Bash(sudo:*)"]
-  }
+```go
+config := &permission.Config{
+    Mode: permission.ModeDefault,
+    Rules: rules,
 }
+confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
+    fmt.Printf("Allow %s? (y/n): ", tool.Name())
+    var answer string
+    fmt.Scanln(&answer)
+    return answer == "y", nil
+}
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:      model,
+    Tools:      tools,
+    PreToolUse: []dive.PreToolUseHook{permission.Hook(config, confirmer)},
+})
 ```
 
 ### Permission Flow
 
-When using the full `PermissionManager`:
+When using the full `Manager`:
 
 ```text
-PreToolUse Hooks -> Session Allowlist -> Deny Rules -> Allow Rules -> Ask Rules -> Mode Check -> Execute
+Session Allowlist -> Deny Rules -> Allow Rules -> Ask Rules -> Mode Check -> Default (confirm)
 ```
 
 ### Session Allowlists
@@ -108,8 +99,12 @@ PreToolUse Hooks -> Session Allowlist -> Deny Rules -> Allow Rules -> Ask Rules 
 Users can approve "allow all X this session" for a tool category:
 
 ```go
-pm.AllowForSession("bash")
-pm.AllowForSession(permission.CategoryEdit.Key)
+manager := permission.NewManager(config, confirmer)
+hook := permission.HookFromManager(manager)
+
+// Later, allow a category for the session
+manager.AllowForSession("bash")
+manager.AllowForSession(permission.CategoryEdit.Key)
 ```
 
 ## Tool Annotations

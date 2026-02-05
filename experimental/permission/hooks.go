@@ -4,13 +4,12 @@ import (
 	"context"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // Hook returns a PreToolUseHook that implements permission checking.
 //
-// The hook evaluates the permission config and returns allow/deny/ask results.
-// When the result is "ask", the confirmer function is called to get user approval.
+// The hook evaluates the permission config and resolves confirmations internally.
+// Returns nil (allow) or error (deny).
 //
 // Example:
 //
@@ -28,7 +27,7 @@ import (
 //	}
 //
 //	preToolHook := permission.Hook(config, confirmer)
-func Hook(config *Config, confirmer dive.ConfirmToolFunc) dive.PreToolUseHook {
+func Hook(config *Config, confirmer ConfirmFunc) dive.PreToolUseHook {
 	manager := NewManager(config, confirmer)
 	return HookFromManager(manager)
 }
@@ -46,29 +45,8 @@ func Hook(config *Config, confirmer dive.ConfirmToolFunc) dive.PreToolUseHook {
 //	// Later, allow a category for the session
 //	manager.AllowForSession("bash")
 func HookFromManager(manager *Manager) dive.PreToolUseHook {
-	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
-		result, err := manager.EvaluateToolUse(ctx, hookCtx.Tool, hookCtx.Call)
-		if err != nil {
-			return nil, err
-		}
-
-		// If the result is "ask", invoke the confirmer
-		if result.Action == dive.ToolHookAsk {
-			confirmed, err := manager.Confirm(ctx, hookCtx.Tool, hookCtx.Call, result.Message)
-			if err != nil {
-				// Check if this is user feedback
-				if feedback, ok := dive.IsUserFeedback(err); ok {
-					return dive.DenyResult(feedback), nil
-				}
-				return nil, err
-			}
-			if confirmed {
-				return dive.AllowResult(), nil
-			}
-			return dive.DenyResult("User denied tool call"), nil
-		}
-
-		return result, nil
+	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+		return manager.EvaluateToolUse(ctx, hookCtx.Tool, hookCtx.Call)
 	}
 }
 
@@ -78,78 +56,41 @@ type HookWithOptions struct {
 	Config *Config
 
 	// Confirmer is called when user confirmation is needed.
-	Confirmer dive.ConfirmToolFunc
+	Confirmer ConfirmFunc
 
 	// OnAllow is called when a tool is allowed.
-	OnAllow func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent)
+	OnAllow func(ctx context.Context, tool dive.Tool)
 
 	// OnDeny is called when a tool is denied.
-	OnDeny func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, reason string)
-
-	// OnAsk is called when user confirmation is requested.
-	OnAsk func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, message string)
+	OnDeny func(ctx context.Context, tool dive.Tool, reason string)
 }
 
 // Build returns a PreToolUseHook with the configured options.
 func (o HookWithOptions) Build() dive.PreToolUseHook {
 	manager := NewManager(o.Config, o.Confirmer)
 
-	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
-		result, err := manager.EvaluateToolUse(ctx, hookCtx.Tool, hookCtx.Call)
-		if err != nil {
-			return nil, err
-		}
-
-		switch result.Action {
-		case dive.ToolHookAllow:
+	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+		err := manager.EvaluateToolUse(ctx, hookCtx.Tool, hookCtx.Call)
+		if err == nil {
 			if o.OnAllow != nil {
-				o.OnAllow(ctx, hookCtx.Tool, hookCtx.Call)
+				o.OnAllow(ctx, hookCtx.Tool)
 			}
-			return result, nil
-
-		case dive.ToolHookDeny:
+		} else {
 			if o.OnDeny != nil {
-				o.OnDeny(ctx, hookCtx.Tool, hookCtx.Call, result.Message)
+				o.OnDeny(ctx, hookCtx.Tool, err.Error())
 			}
-			return result, nil
-
-		case dive.ToolHookAsk:
-			if o.OnAsk != nil {
-				o.OnAsk(ctx, hookCtx.Tool, hookCtx.Call, result.Message)
-			}
-			confirmed, err := manager.Confirm(ctx, hookCtx.Tool, hookCtx.Call, result.Message)
-			if err != nil {
-				if feedback, ok := dive.IsUserFeedback(err); ok {
-					if o.OnDeny != nil {
-						o.OnDeny(ctx, hookCtx.Tool, hookCtx.Call, feedback)
-					}
-					return dive.DenyResult(feedback), nil
-				}
-				return nil, err
-			}
-			if confirmed {
-				if o.OnAllow != nil {
-					o.OnAllow(ctx, hookCtx.Tool, hookCtx.Call)
-				}
-				return dive.AllowResult(), nil
-			}
-			if o.OnDeny != nil {
-				o.OnDeny(ctx, hookCtx.Tool, hookCtx.Call, "User denied tool call")
-			}
-			return dive.DenyResult("User denied tool call"), nil
 		}
-
-		return result, nil
+		return err
 	}
 }
 
 // AuditHook returns a PreToolUseHook that logs all tool calls without making
 // permission decisions.
 //
-// This is useful for monitoring and debugging. It always returns ContinueResult()
+// This is useful for monitoring and debugging. It always returns nil
 // to let other hooks make the actual permission decision.
 func AuditHook(logger func(toolName string, input []byte)) dive.PreToolUseHook {
-	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
+	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
 		toolName := "unknown"
 		if hookCtx.Tool != nil {
 			toolName = hookCtx.Tool.Name()
@@ -161,6 +102,6 @@ func AuditHook(logger func(toolName string, input []byte)) dive.PreToolUseHook {
 		if logger != nil {
 			logger(toolName, input)
 		}
-		return dive.ContinueResult(), nil
+		return nil
 	}
 }

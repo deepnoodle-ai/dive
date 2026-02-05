@@ -35,7 +35,7 @@ Anthropic's tuning of Claude for these tool patterns.
 
 PreGeneration → [LLM → PreToolUse → Execute → PostToolUse]* → PostGeneration
 
-PreToolUse returns `AllowResult()`, `DenyResult(msg)`, `AskResult(msg)`, or `ContinueResult()`.
+PreToolUse hooks return `nil` (allow) or `error` (deny). All hooks run; any error denies the tool.
 
 ## Documentation
 

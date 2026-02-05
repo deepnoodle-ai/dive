@@ -68,8 +68,8 @@ type AgentOptions struct {
 	PostGeneration []PostGenerationHook
 
 	// PreToolUse hooks are called before each tool execution.
-	// Use these to implement permission checks, logging, or input modification.
-	// Hooks run in order until one returns a non-Continue result.
+	// All hooks run in order. If any returns an error, the tool is denied.
+	// If all return nil, the tool is executed.
 	PreToolUse []PreToolUseHook
 
 	// PostToolUse hooks are called after each tool execution.
@@ -77,10 +77,6 @@ type AgentOptions struct {
 	// Hooks can modify the result before it's sent to the LLM.
 	// Hook errors are logged but don't affect the tool result.
 	PostToolUse []PostToolUseHook
-
-	// Confirmer is called when a PreToolUse hook returns AskResult.
-	// If nil, AskResult is treated as AllowResult.
-	Confirmer ConfirmToolFunc
 
 	// Infrastructure
 	Logger        llm.Logger
@@ -116,7 +112,6 @@ type Agent struct {
 	// Tool hooks
 	preToolUse  []PreToolUseHook
 	postToolUse []PostToolUseHook
-	confirmer   ConfirmToolFunc
 }
 
 // NewAgent returns a new Agent configured with the given options.
@@ -146,7 +141,6 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		postGeneration:     opts.PostGeneration,
 		preToolUse:         opts.PreToolUse,
 		postToolUse:        opts.PostToolUse,
-		confirmer:          opts.Confirmer,
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -456,8 +450,8 @@ func (a *Agent) generateStreaming(
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
-// Hooks are evaluated in order: PreToolUse hooks determine whether to allow/deny/ask.
-// If a hook returns AskResult and a confirmer is set, confirmation is requested.
+// PreToolUse hooks run in order for each call. If any hook returns an error,
+// the tool is denied. If all hooks return nil, the tool is executed.
 func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	toolCalls []*llm.ToolUseContent,
@@ -489,43 +483,30 @@ func (a *Agent) executeToolCalls(
 			return nil, err
 		}
 
-		// Evaluate PreToolUse hooks
-		hookResult, err := a.evaluatePreToolUseHooks(ctx, tool, toolCall)
-		if err != nil {
-			// Fatal error - abort generation
-			return nil, err
-		}
-
-		// Handle the hook result
+		// Run PreToolUse hooks — any error denies the tool
 		var result *ToolCallResult
-		switch hookResult.Action {
-		case ToolHookAllow:
-			// Execute tool with potentially updated input
-			input := toolCall.Input
-			if hookResult.UpdatedInput != nil {
-				input = hookResult.UpdatedInput
+		hookCtx := &PreToolUseContext{
+			Tool:  tool,
+			Call:  toolCall,
+			Agent: a,
+		}
+		denied := false
+		for _, hook := range a.preToolUse {
+			if err := hook(ctx, hookCtx); err != nil {
+				var abortErr *HookAbortError
+				if errors.As(err, &abortErr) {
+					abortErr.HookType = "PreToolUse"
+					a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
+					return nil, abortErr
+				}
+				a.logger.Debug("pre-tool-use hook denied tool", "error", err)
+				result = a.createDeniedResult(toolCall, err.Error(), preview)
+				denied = true
+				break
 			}
-			result = a.executeTool(ctx, tool, toolCall, input, preview)
-
-		case ToolHookDeny:
-			// Tool execution denied
-			message := hookResult.Message
-			if message == "" {
-				message = "Tool execution denied"
-			}
-			result = a.createDeniedResult(toolCall, message, preview)
-
-		case ToolHookAsk:
-			// Prompt user for confirmation if confirmer is set
-			result = a.handleToolConfirmation(ctx, tool, toolCall, hookResult.Message, preview)
-
-		default:
-			// ToolHookContinue - default to allow if no confirmer, ask otherwise
-			if a.confirmer == nil {
-				result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
-			} else {
-				result = a.handleToolConfirmation(ctx, tool, toolCall, "", preview)
-			}
+		}
+		if !denied {
+			result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
 		}
 
 		// Run PostToolUse hooks (before storing result)
@@ -563,69 +544,6 @@ func (a *Agent) executeToolCalls(
 		}
 	}
 	return results, nil
-}
-
-// evaluatePreToolUseHooks runs all PreToolUse hooks and returns the result.
-// Hooks are evaluated in order until one returns a non-Continue result.
-// Returns a ToolHookResult, or nil with error if generation should abort.
-func (a *Agent) evaluatePreToolUseHooks(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
-	hookCtx := &PreToolUseContext{
-		Tool:  tool,
-		Call:  call,
-		Agent: a,
-	}
-	for _, hook := range a.preToolUse {
-		result, err := hook(ctx, hookCtx)
-		if err != nil {
-			// Check if this is a fatal abort error
-			var abortErr *HookAbortError
-			if errors.As(err, &abortErr) {
-				abortErr.HookType = "PreToolUse"
-				a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
-				return nil, abortErr
-			}
-			// Regular errors are converted to Deny
-			a.logger.Debug("pre-tool-use hook error", "error", err)
-			return DenyResult(err.Error()), nil
-		}
-		if result != nil && result.Action != ToolHookContinue {
-			return result, nil
-		}
-	}
-	// All hooks returned Continue - default behavior
-	return ContinueResult(), nil
-}
-
-// handleToolConfirmation prompts for user confirmation if a confirmer is set.
-func (a *Agent) handleToolConfirmation(
-	ctx context.Context,
-	tool Tool,
-	call *llm.ToolUseContent,
-	message string,
-	preview *ToolCallPreview,
-) *ToolCallResult {
-	// If no confirmer, auto-allow
-	if a.confirmer == nil {
-		return a.executeTool(ctx, tool, call, call.Input, preview)
-	}
-
-	// Use preview summary if no message provided
-	if message == "" && preview != nil {
-		message = preview.Summary
-	}
-
-	confirmed, err := a.confirmer(ctx, tool, call, message)
-	if err != nil {
-		// Check if this is user feedback (not a real error)
-		if feedback, ok := IsUserFeedback(err); ok {
-			return a.createDeniedResult(call, feedback, preview)
-		}
-		return a.createDeniedResult(call, fmt.Sprintf("Confirmation error: %v", err), preview)
-	}
-	if confirmed {
-		return a.executeTool(ctx, tool, call, call.Input, preview)
-	}
-	return a.createDeniedResult(call, "User denied tool call", preview)
 }
 
 // executeTool runs the tool and returns the result.

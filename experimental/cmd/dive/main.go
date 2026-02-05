@@ -18,7 +18,6 @@ import (
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
-	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
@@ -187,21 +186,24 @@ func runInteractive(ctx *cli.Context) error {
 	sessionSaver := session.Saver(sessionRepo)
 
 	// Set up tool permission hook
-	permissionHook := func(_ context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
+	permissionHook := func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
 		// Auto-allow read-only tools
 		if annotations := hookCtx.Tool.Annotations(); annotations != nil && annotations.ReadOnlyHint {
-			return dive.AllowResult(), nil
+			return nil
 		}
 		// Ask for confirmation on write tools
-		return dive.AskResult(fmt.Sprintf("Execute %s?", hookCtx.Tool.Name())), nil
-	}
-
-	// Set up confirmer (captures app pointer, set after App creation)
-	confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, message string) (bool, error) {
 		if appPtr == nil {
-			return true, nil // Shouldn't happen, but allow if app not set
+			return nil // Allow if app not set yet
 		}
-		return appPtr.ConfirmTool(ctx, tool.Name(), message, call.Input)
+		message := fmt.Sprintf("Execute %s?", hookCtx.Tool.Name())
+		approved, err := appPtr.ConfirmTool(ctx, hookCtx.Tool.Name(), message, hookCtx.Call.Input)
+		if err != nil {
+			return err
+		}
+		if !approved {
+			return fmt.Errorf("user denied tool call")
+		}
+		return nil
 	}
 
 	// Set up compaction config
@@ -235,7 +237,6 @@ func runInteractive(ctx *cli.Context) error {
 		PreGeneration:  []dive.PreGenerationHook{sessionIDHook, sessionLoader},
 		PostGeneration: []dive.PostGenerationHook{sessionSaver},
 		PreToolUse:     []dive.PreToolUseHook{permissionHook},
-		Confirmer:      confirmer,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)

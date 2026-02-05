@@ -52,7 +52,6 @@ func main() {
 | `PostGeneration`     | `[]PostGenerationHook` | Hooks called after LLM generation                 |
 | `PreToolUse`         | `[]PreToolUseHook`     | Hooks called before each tool execution           |
 | `PostToolUse`        | `[]PostToolUseHook`    | Hooks called after each tool execution            |
-| `Confirmer`          | `ConfirmToolFunc`      | Called when a PreToolUse hook returns `AskResult` |
 | `ModelSettings`      | `*ModelSettings`       | Temperature, max tokens, reasoning, caching       |
 | `ResponseTimeout`    | `time.Duration`        | Max time for a response (default: 30 min)         |
 | `ToolIterationLimit` | `int`                  | Max tool call iterations (default: 100)           |
@@ -112,22 +111,17 @@ PostGeneration errors are logged but don't affect the returned `Response`.
 
 ### PreToolUse
 
-Runs before each tool execution. Returns one of:
-
-- `AllowResult()` - execute the tool
-- `DenyResult(msg)` - reject with a message
-- `AskResult(msg)` - prompt the user for confirmation
-- `ContinueResult()` - defer to the next hook
+Runs before each tool execution. All hooks run in order. If any returns an error, the tool is denied. If all return nil, the tool is executed.
 
 ```go
 PreToolUse: []dive.PreToolUseHook{
-    func(ctx context.Context, hookCtx *dive.PreToolUseContext) (*dive.ToolHookResult, error) {
-        // Allow read-only tools automatically
+    func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+        // Allow read-only tools
         if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
-            return dive.AllowResult(), nil
+            return nil
         }
-        // Ask for confirmation on other tools
-        return dive.AskResult("Execute this tool?"), nil
+        // Deny everything else
+        return fmt.Errorf("tool %s requires approval", hookCtx.Tool.Name())
     },
 },
 ```
