@@ -9,17 +9,6 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
-// Agent represents an intelligent AI entity that can autonomously use tools to
-// process information while responding to chat messages.
-type Agent interface {
-
-	// Name of the Agent
-	Name() string
-
-	// CreateResponse creates a new Response from the Agent
-	CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error)
-}
-
 // CreateResponseOptions contains configuration for LLM generations.
 //
 // This struct holds all the options that can be passed to Agent.CreateResponse.
@@ -197,4 +186,15 @@ func randomInt() string {
 		panic(err)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// Session holds conversation state during generation.
+// This is a minimal internal type. For persistent session storage,
+// use PreGeneration/PostGeneration hooks with experimental/session.
+type Session struct {
+	// ID is the session identifier.
+	ID string
+
+	// Messages contains the conversation history.
+	Messages []*llm.Message
 }

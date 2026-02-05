@@ -1,30 +1,16 @@
-// Package toolkit provides tools for AI agents.
-//
-// The BashTool in this file implements a bash tool that aligns with Anthropic's
-// bash_20250124 tool specification. It provides a persistent bash session that
-// maintains state (environment variables, working directory) between commands.
-//
-// Reference: https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/bash-tool
 package toolkit
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
@@ -42,268 +28,59 @@ const (
 	DefaultMaxOutputLength = 30000
 )
 
-// BashInput represents the input for the bash tool.
-// This aligns with Anthropic's bash_20250124 tool specification.
+// BashInput represents the input parameters for the Bash tool.
 type BashInput struct {
-	// Command is the bash command to execute. Required unless Restart is true.
-	Command string `json:"command,omitempty"`
-	// Restart set to true will restart the bash session, clearing all state.
-	Restart bool `json:"restart,omitempty"`
-	// Timeout in milliseconds (max 600000ms / 10 minutes, default 120000ms / 2 minutes)
+	// Command is the shell command to execute. Required.
+	Command string `json:"command"`
+
+	// Timeout specifies the maximum execution time in milliseconds.
+	// Valid range: 1-600000 (10 minutes). Defaults to 120000 (2 minutes).
 	Timeout int `json:"timeout,omitempty"`
-	// Description is a brief description of what the command does (5-10 words)
+
+	// Description provides a brief human-readable summary of what the command does.
+	// When provided, this is displayed instead of the raw command (5-10 words recommended).
 	Description string `json:"description,omitempty"`
-	// WorkingDirectory sets the initial working directory for the session
+
+	// WorkingDirectory sets the working directory for command execution.
+	// If empty, the command runs in the current working directory.
+	// Must be within the workspace if path validation is enabled.
 	WorkingDirectory string `json:"working_directory,omitempty"`
 }
 
-// BashSession manages a persistent bash process.
-type BashSession struct {
-	mu             sync.Mutex
-	cmd            *exec.Cmd
-	stdin          io.WriteCloser
-	stdout         io.ReadCloser
-	stderr         io.ReadCloser
-	workingDir     string
-	maxOutputLen   int
-	pathValidator  *PathValidator
-	sandboxManager *sandbox.Manager
-	cleanup        func()
-}
-
-// BashSessionOptions configures a BashSession
-type BashSessionOptions struct {
-	// WorkingDirectory sets the initial working directory
-	WorkingDirectory string
-	// MaxOutputLength limits the output size (default: 30000 characters)
-	MaxOutputLength int
-	// PathValidator for workspace validation (optional)
-	PathValidator *PathValidator
-	// SandboxManager for sandboxed execution (optional)
-	SandboxManager *sandbox.Manager
-}
-
-// NewBashSession creates a new persistent bash session.
-func NewBashSession(opts ...BashSessionOptions) (*BashSession, error) {
-	var resolvedOpts BashSessionOptions
-	if len(opts) > 0 {
-		resolvedOpts = opts[0]
-	}
-	if resolvedOpts.MaxOutputLength <= 0 {
-		resolvedOpts.MaxOutputLength = DefaultMaxOutputLength
-	}
-
-	session := &BashSession{
-		workingDir:     resolvedOpts.WorkingDirectory,
-		maxOutputLen:   resolvedOpts.MaxOutputLength,
-		pathValidator:  resolvedOpts.PathValidator,
-		sandboxManager: resolvedOpts.SandboxManager,
-	}
-
-	if err := session.start(); err != nil {
-		return nil, err
-	}
-	return session, nil
-}
-
-// start initializes the bash process
-func (s *BashSession) start() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Determine shell based on OS
-	// If sandboxing is enabled, we assume a Linux-like environment (container or macOS)
-	// regardless of the host OS.
-	shell := "/bin/bash"
-	var shellArgs []string
-	
-	if s.sandboxManager == nil && runtime.GOOS == "windows" {
-		shell = "cmd"
-		shellArgs = []string{"/Q"} // Quiet mode
-	}
-
-	s.cmd = exec.Command(shell, shellArgs...)
-	if s.workingDir != "" {
-		s.cmd.Dir = s.workingDir
-	}
-
-	// Apply sandboxing if configured
-	if s.sandboxManager != nil {
-		wrapped, cleanup, err := s.sandboxManager.Wrap(context.Background(), s.cmd)
-		if err != nil {
-			return fmt.Errorf("sandbox wrap failed: %w", err)
-		}
-		s.cmd = wrapped
-		s.cleanup = cleanup
-	}
-
-	var err error
-	s.stdin, err = s.cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
-	s.stdout, err = s.cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	s.stderr, err = s.cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	if err := s.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start bash session: %w", err)
-	}
-
-	return nil
-}
-
-// Close terminates the bash session
-func (s *BashSession) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.cleanup != nil {
-		defer s.cleanup()
-	}
-
-	if s.stdin != nil {
-		s.stdin.Close()
-	}
-	if s.cmd != nil && s.cmd.Process != nil {
-		s.cmd.Process.Kill()
-		s.cmd.Wait()
-	}
-	return nil
-}
-
-// Restart terminates and restarts the bash session
-func (s *BashSession) Restart() error {
-	s.Close()
-	return s.start()
-}
-
-// Execute runs a command in the persistent bash session
-func (s *BashSession) Execute(ctx context.Context, command string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.cmd == nil || s.cmd.Process == nil {
-		return "", "", -1, fmt.Errorf("bash session not started")
-	}
-
-	// Generate unique markers for output boundaries
-	marker := fmt.Sprintf("__DIVE_CMD_END_%d__", time.Now().UnixNano())
-	exitCodeMarker := fmt.Sprintf("__DIVE_EXIT_%d__", time.Now().UnixNano())
-
-	// Construct command with markers
-	// We echo markers to both stdout and stderr to capture both streams
-	fullCmd := fmt.Sprintf("%s; echo \"%s$?\"; echo \"%s\" >&2\n", command, exitCodeMarker, marker)
-
-	// Write command to stdin
-	if _, err := s.stdin.Write([]byte(fullCmd)); err != nil {
-		return "", "", -1, fmt.Errorf("failed to write command: %w", err)
-	}
-
-	// Read output with timeout
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	exitCode = 0
-
-	// Read stdout in goroutine
-	stdoutDone := make(chan error, 1)
-	go func() {
-		scanner := bufio.NewScanner(s.stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, exitCodeMarker) {
-				codeStr := strings.TrimPrefix(line, exitCodeMarker)
-				if code, err := strconv.Atoi(codeStr); err == nil {
-					exitCode = code
-				}
-				stdoutDone <- nil
-				return
-			}
-			if stdoutBuf.Len() < s.maxOutputLen {
-				stdoutBuf.WriteString(line)
-				stdoutBuf.WriteString("\n")
-			}
-		}
-		stdoutDone <- scanner.Err()
-	}()
-
-	// Read stderr in goroutine
-	stderrDone := make(chan error, 1)
-	go func() {
-		scanner := bufio.NewScanner(s.stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == marker {
-				stderrDone <- nil
-				return
-			}
-			if stderrBuf.Len() < s.maxOutputLen {
-				stderrBuf.WriteString(line)
-				stderrBuf.WriteString("\n")
-			}
-		}
-		stderrDone <- scanner.Err()
-	}()
-
-	// Wait for completion or timeout
-	select {
-	case <-ctx.Done():
-		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("command timed out after %s", timeout)
-	case err := <-stdoutDone:
-		if err != nil {
-			return stdoutBuf.String(), stderrBuf.String(), -1, err
-		}
-		// Wait for stderr to finish too (with a short timeout)
-		select {
-		case <-stderrDone:
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-
-	stdout = strings.TrimSuffix(stdoutBuf.String(), "\n")
-	stderr = strings.TrimSuffix(stderrBuf.String(), "\n")
-
-	// Truncate if needed
-	if len(stdout) > s.maxOutputLen {
-		stdout = stdout[:s.maxOutputLen] + "\n... (output truncated)"
-	}
-	if len(stderr) > s.maxOutputLen {
-		stderr = stderr[:s.maxOutputLen] + "\n... (output truncated)"
-	}
-
-	return stdout, stderr, exitCode, nil
-}
-
-// BashToolOptions configures the BashTool
+// BashToolOptions configures the behavior of [BashTool].
 type BashToolOptions struct {
-	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+	// WorkspaceDir restricts command execution to paths within this directory.
+	// When set, the working directory must be within this path.
+	// Defaults to the current working directory if empty.
 	WorkspaceDir string
-	// MaxOutputLength limits the output size (default: 30000 characters)
+
+	// MaxOutputLength limits the combined stdout/stderr output size in characters.
+	// Output exceeding this limit is truncated with a warning.
+	// Defaults to [DefaultMaxOutputLength] (30000 characters).
 	MaxOutputLength int
-	// SandboxConfig configures sandboxing (optional)
-	SandboxConfig *sandbox.Config
 }
 
-// BashTool implements a persistent bash session tool that aligns with
-// Anthropic's bash_20250124 tool specification.
+// BashTool executes shell commands and captures their output.
+//
+// On Unix systems, commands are executed via /bin/bash -c. On Windows, commands
+// are executed via cmd /C. The tool captures stdout, stderr, and the exit code.
+//
+// Features:
+//   - Configurable timeout (default 2 minutes, max 10 minutes)
+//   - Output truncation to prevent overwhelming the LLM
+//   - Working directory validation when workspace restrictions are enabled
+//   - Non-interactive only (no stdin support)
+//
+// Security: This tool can execute arbitrary shell commands. Use workspace
+// restrictions and the agent permission system to control what commands
+// are allowed.
 type BashTool struct {
-	mu             sync.Mutex
-	session        *BashSession
-	pathValidator  *PathValidator
-	maxOutputLen   int
-	sandboxManager *sandbox.Manager
+	pathValidator *PathValidator
+	maxOutputLen  int
 }
 
-// NewBashTool creates a new bash tool.
+// NewBashTool creates a new BashTool with the given options.
+// If no options are provided, defaults are used.
 func NewBashTool(opts ...BashToolOptions) *dive.TypedToolAdapter[*BashInput] {
 	var resolvedOpts BashToolOptions
 	if len(opts) > 0 {
@@ -315,40 +92,26 @@ func NewBashTool(opts ...BashToolOptions) *dive.TypedToolAdapter[*BashInput] {
 
 	pathValidator, _ := NewPathValidator(resolvedOpts.WorkspaceDir)
 
-	var sandboxManager *sandbox.Manager
-	if resolvedOpts.SandboxConfig != nil {
-		sandboxManager = sandbox.NewManager(resolvedOpts.SandboxConfig)
-	}
-
 	return dive.ToolAdapter(&BashTool{
-		pathValidator:  pathValidator,
-		maxOutputLen:   resolvedOpts.MaxOutputLength,
-		sandboxManager: sandboxManager,
+		pathValidator: pathValidator,
+		maxOutputLen:  resolvedOpts.MaxOutputLength,
 	})
 }
 
+// Name returns "Bash" as the tool identifier.
 func (t *BashTool) Name() string {
 	return "Bash"
 }
 
+// Description returns detailed usage instructions for the LLM.
 func (t *BashTool) Description() string {
-	desc := `Execute shell commands in a persistent bash session.
-
-This tool aligns with Anthropic's bash_20250124 tool specification, providing
-a persistent bash session that maintains state (environment variables, working
-directory, etc.) between commands.
+	desc := `Execute shell commands.
 
 Parameters:
-- command: The bash command to run (required unless restart is true)
-- restart: Set to true to restart the bash session, clearing all state
+- command: The bash command to run (required)
 - timeout: Timeout in milliseconds (max 600000ms / 10 minutes, default 120000ms / 2 minutes)
 - description: Brief description of what the command does (5-10 words)
-- working_directory: Initial working directory for the session
-
-Key features:
-- Persistent session: Environment variables and working directory persist between calls
-- State management: Use 'restart' to clear session state when needed
-- Timeout handling: Commands that exceed the timeout will be terminated
+- working_directory: Directory to run the command in
 
 Limitations:
 - No interactive commands (vim, less, password prompts)
@@ -360,17 +123,15 @@ Limitations:
 	return desc
 }
 
+// Schema returns the JSON schema describing the tool's input parameters.
 func (t *BashTool) Schema() *schema.Schema {
 	return &schema.Schema{
-		Type: "object",
+		Type:     "object",
+		Required: []string{"command"},
 		Properties: map[string]*schema.Property{
 			"command": {
 				Type:        "string",
-				Description: "The bash command to run. Required unless 'restart' is true.",
-			},
-			"restart": {
-				Type:        "boolean",
-				Description: "Set to true to restart the bash session, clearing all state (environment variables, working directory, etc.).",
+				Description: "The bash command to run.",
 			},
 			"timeout": {
 				Type:        "integer",
@@ -382,12 +143,15 @@ func (t *BashTool) Schema() *schema.Schema {
 			},
 			"working_directory": {
 				Type:        "string",
-				Description: "The initial working directory for the session. Only used when starting a new session.",
+				Description: "The working directory for command execution.",
 			},
 		},
 	}
 }
 
+// Annotations returns metadata hints about the tool's behavior.
+// Bash is marked as destructive (can modify system state) and open-world
+// (interacts with external systems).
 func (t *BashTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:           "Bash",
@@ -398,13 +162,9 @@ func (t *BashTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+// PreviewCall returns a summary of what the command will do, used for
+// permission prompts and logging.
 func (t *BashTool) PreviewCall(ctx context.Context, input *BashInput) *dive.ToolCallPreview {
-	if input.Restart {
-		return &dive.ToolCallPreview{
-			Summary: "Restart bash session",
-		}
-	}
-
 	summary := fmt.Sprintf("Run `%s`", truncateCommand(input.Command, 50))
 	if input.Description != "" {
 		summary = input.Description
@@ -415,23 +175,17 @@ func (t *BashTool) PreviewCall(ctx context.Context, input *BashInput) *dive.Tool
 	}
 }
 
+// Call executes the shell command and returns its output.
+//
+// The result includes stdout, stderr, and the exit code as a JSON object.
+// If the command fails (non-zero exit code), an error result is returned
+// but no Go error is returned - the LLM receives the failure information.
+//
+// The context can be used to cancel long-running commands.
 func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Handle restart
-	if input.Restart {
-		if t.session != nil {
-			t.session.Close()
-			t.session = nil
-		}
-		return dive.NewToolResultText("Bash session restarted").
-			WithDisplay("Bash session restarted"), nil
-	}
-
 	// Validate command is provided
 	if input.Command == "" {
-		return dive.NewToolResultError("error: 'command' is required unless 'restart' is true"), nil
+		return dive.NewToolResultError("error: 'command' is required"), nil
 	}
 
 	// Validate working directory if provided
@@ -449,53 +203,11 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 			timeout = MaxBashTimeout
 		}
 	}
-	if t.sandboxManager != nil {
-		if cfg := t.sandboxManager.Config(); cfg != nil && cfg.MaxCommandDurationMs > 0 {
-			maxTimeout := time.Duration(cfg.MaxCommandDurationMs) * time.Millisecond
-			if timeout > maxTimeout {
-				timeout = maxTimeout
-			}
-		}
-	}
-
-	// Run excluded commands outside the sandbox when allowed
-	if t.sandboxManager != nil {
-		cfg := t.sandboxManager.Config()
-		if cfg != nil && isExcludedCommand(input.Command, cfg.ExcludedCommands) {
-			if !cfg.AllowUnsandboxedCommands {
-				return dive.NewToolResultError("error: command is excluded from sandbox and unsandboxed commands are disabled"), nil
-			}
-			return t.runUnsandboxed(ctx, input, timeout, cfg)
-		}
-	}
-
-	// Start session if not already running
-	if t.session == nil {
-		session, err := NewBashSession(BashSessionOptions{
-			WorkingDirectory: input.WorkingDirectory,
-			MaxOutputLength:  t.maxOutputLen,
-			PathValidator:    t.pathValidator,
-			SandboxManager:   t.sandboxManager,
-		})
-		if err != nil {
-			return dive.NewToolResultError(fmt.Sprintf("error starting bash session: %s", err.Error())), nil
-		}
-		t.session = session
-	}
 
 	// Execute command
-	stdout, stderr, exitCode, err := t.session.Execute(ctx, input.Command, timeout)
+	stdout, stderr, exitCode, err := t.execute(ctx, input.Command, input.WorkingDirectory, timeout)
 	if err != nil {
-		// On error, check if it's a timeout
-		if strings.Contains(err.Error(), "timed out") {
-			t.session.Close()
-			t.session = nil
-			return dive.NewToolResultError(err.Error()), nil
-		}
-		// For other errors, restart the session and return error
-		t.session.Close()
-		t.session = nil
-		return dive.NewToolResultError(fmt.Sprintf("error: %s", err.Error())), nil
+		return dive.NewToolResultError(err.Error()), nil
 	}
 
 	// Build result
@@ -525,90 +237,53 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 	return dive.NewToolResultText(string(resultJSON)).WithDisplay(display), nil
 }
 
-func (t *BashTool) runUnsandboxed(ctx context.Context, input *BashInput, timeout time.Duration, cfg *sandbox.Config) (*dive.ToolResult, error) {
-	workingDir := input.WorkingDirectory
-	if workingDir == "" && t.session != nil {
-		workingDir = t.session.workingDir
-	}
-
-	if cfg != nil && cfg.AuditLog {
-		log.Printf("sandbox: running excluded command unsandboxed: %s", input.Command)
-	}
-
+// execute runs a command with the given timeout and returns its output.
+// It handles context cancellation, timeout enforcement, and output truncation.
+func (t *BashTool) execute(ctx context.Context, command, workingDir string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	shell, shellArgs := shellCommandForHost()
-	shellArgs = append(shellArgs, input.Command)
+	// Determine shell based on OS
+	shell, shellArgs := shellCommand()
+	shellArgs = append(shellArgs, command)
+
 	cmd := exec.CommandContext(ctx, shell, shellArgs...)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
-	cmd.Env = sandbox.BuildCommandEnv(os.Environ(), cfg)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
 
-	err := cmd.Run()
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	runErr := cmd.Run()
+	exitCode = 0
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else if ctx.Err() == context.DeadlineExceeded {
-			return dive.NewToolResultError(fmt.Sprintf("command timed out after %s", timeout)), nil
+			return "", "", -1, fmt.Errorf("command timed out after %s", timeout)
 		} else {
-			return dive.NewToolResultError(fmt.Sprintf("error: %s", err.Error())), nil
+			return "", "", -1, fmt.Errorf("error: %s", runErr.Error())
 		}
 	}
 
-	stdout := truncateOutput(stdoutBuf.String(), t.maxOutputLen)
-	stderr := truncateOutput(stderrBuf.String(), t.maxOutputLen)
+	stdout = truncateOutput(stdoutBuf.String(), t.maxOutputLen)
+	stderr = truncateOutput(stderrBuf.String(), t.maxOutputLen)
 
-	result := map[string]interface{}{
-		"stdout":      stdout,
-		"stderr":      stderr,
-		"return_code": exitCode,
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return dive.NewToolResultError(fmt.Sprintf("error marshaling result: %s", err.Error())), nil
-	}
-
-	display := input.Description
-	if display == "" {
-		display = fmt.Sprintf("Ran `%s`", truncateCommand(input.Command, 40))
-	}
-	display = fmt.Sprintf("%s (exit %d)", display, exitCode)
-
-	if exitCode != 0 {
-		return dive.NewToolResultError(string(resultJSON)).WithDisplay(display), nil
-	}
-
-	return dive.NewToolResultText(string(resultJSON)).WithDisplay(display), nil
+	return stdout, stderr, exitCode, nil
 }
 
-// shellCommandForHost returns the shell command and arguments for executing
-// commands on the host system (outside the sandbox).
-// On Unix-like systems, uses bash with -l (login shell) flag which sources
-// ~/.bash_profile and related files, making the environment more complete.
-func shellCommandForHost() (string, []string) {
+// shellCommand returns the shell and arguments for command execution.
+func shellCommand() (string, []string) {
 	if runtime.GOOS == "windows" {
-		return "cmd", []string{"/Q", "/C"}
+		return "cmd", []string{"/C"}
 	}
-	return "/bin/bash", []string{"-lc"}
+	return "/bin/bash", []string{"-c"}
 }
 
-func isExcludedCommand(command string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if sandbox.MatchesCommandPattern(pattern, command) {
-			return true
-		}
-	}
-	return false
-}
-
+// truncateOutput limits output length to prevent overwhelming the LLM.
+// If truncated, a notice is appended to indicate data was cut off.
 func truncateOutput(output string, maxLen int) string {
 	if maxLen <= 0 || len(output) <= maxLen {
 		return output
@@ -616,20 +291,8 @@ func truncateOutput(output string, maxLen int) string {
 	return output[:maxLen] + "\n... (output truncated)"
 }
 
-// Close closes the bash session if one is active
-func (t *BashTool) Close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.session != nil {
-		return t.session.Close()
-	}
-	return nil
-}
-
 // truncateCommand truncates a command string for display, replacing newlines with spaces
 func truncateCommand(s string, maxLen int) string {
-	// Remove newlines for display
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) <= maxLen {
 		return s

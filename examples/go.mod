@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/deepnoodle-ai/dive v0.0.0
-	github.com/deepnoodle-ai/dive/mcp v0.0.0-00010101000000-000000000000
+	github.com/deepnoodle-ai/dive/experimental/mcp v0.0.0-00010101000000-000000000000
 	github.com/deepnoodle-ai/dive/providers/google v0.0.0
 	github.com/deepnoodle-ai/dive/providers/openai v0.0.0
 	github.com/deepnoodle-ai/wonton v0.0.23
@@ -59,7 +59,7 @@ require (
 
 replace (
 	github.com/deepnoodle-ai/dive => ..
-	github.com/deepnoodle-ai/dive/mcp => ../mcp
+	github.com/deepnoodle-ai/dive/experimental/mcp => ../experimental/mcp
 	github.com/deepnoodle-ai/dive/providers/google => ../providers/google
 	github.com/deepnoodle-ai/dive/providers/openai => ../providers/openai
 )

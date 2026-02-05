@@ -2,25 +2,22 @@ package dive
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
 var (
-	defaultResponseTimeout    = time.Minute * 10
+	defaultResponseTimeout    = time.Minute * 30
 	defaultToolIterationLimit = 100
 	ErrSessionsAreNotEnabled  = errors.New("sessions are not enabled")
 	ErrLLMNoResponse          = errors.New("llm did not return a response")
 	ErrNoInstructions         = errors.New("no instructions provided")
 	ErrNoLLM                  = errors.New("no llm provided")
-	FinishNow                 = "Do not use any more tools. You must respond with your final answer now."
 )
 
 // SetDefaultResponseTimeout sets the default response timeout for agents.
@@ -33,10 +30,7 @@ func SetDefaultToolIterationLimit(limit int) {
 	defaultToolIterationLimit = limit
 }
 
-// Confirm our standard implementation satisfies the StandardAgent interface.
-var _ Agent = &StandardAgent{}
-
-// ModelSettings are used to configure details of the LLM for an StandardAgent.
+// ModelSettings are used to configure details of the LLM for an Agent.
 type ModelSettings struct {
 	Temperature       *float64
 	PresencePenalty   *float64
@@ -52,80 +46,81 @@ type ModelSettings struct {
 	MCPServers        []llm.MCPServerConfig
 }
 
-// AgentOptions are used to configure an StandardAgent.
-type AgentOptions struct {
-	ID                 string
-	Name               string
-	Goal               string
-	Instructions       string
-	IsSupervisor       bool
-	Subordinates       []string
-	Model              llm.LLM
-	Tools              []Tool
-	ResponseTimeout    time.Duration
-	Hooks              llm.Hooks
-	Logger             llm.Logger
-	ToolIterationLimit int
-	ModelSettings      *ModelSettings
-	DateAwareness      *bool
-
-	// SessionRepository enables persistent multi-turn conversations.
-	// When set, the agent loads and saves session history automatically.
-	// Use with WithSessionID or WithResume to continue conversations.
-	SessionRepository SessionRepository
-
+// AgentOptions are used to configure an Agent.
+type AgentOptions struct{
+	// SystemPrompt is the system prompt sent to the LLM.
 	SystemPrompt string
-	NoSystemPrompt     bool
-	Context            []llm.Content
 
-	// Permission configures tool permission behavior.
-	// This replaces the legacy Interactor for tool-related confirmations.
-	Permission *PermissionConfig
+	// Model is the LLM to use for generation.
+	Model llm.LLM
 
-	// Interactor handles non-tool user interactions (Select, MultiSelect, Input).
-	// For tool confirmations, use Permission instead.
-	// Deprecated: For tool confirmations, use Permission with a CanUseTool callback.
-	Interactor UserInteractor
+	// Tools available to the agent.
+	Tools []Tool
 
-	// Subagents defines specialized subagents this agent can spawn via the Task tool.
-	// Keys are subagent names (e.g., "code-reviewer"), values are their definitions.
-	// Claude automatically decides when to invoke subagents based on descriptions.
-	Subagents map[string]*SubagentDefinition
+	// PreGeneration hooks are called before the LLM generation loop.
+	// Use these to load session history, inject context, or modify the system prompt.
+	// If any hook returns an error, generation is aborted.
+	PreGeneration []PreGenerationHook
 
-	// SubagentLoader loads subagent definitions from external sources.
-	// Use FileSubagentLoader for filesystem-based loading, or implement
-	// the SubagentLoader interface for custom sources (database, API, etc.).
-	// Programmatically defined subagents (in Subagents map) take precedence.
-	SubagentLoader SubagentLoader
+	// PostGeneration hooks are called after the LLM generation loop completes.
+	// Use these to save session history, log results, or trigger side effects.
+	// Hook errors are logged but don't affect the returned Response.
+	PostGeneration []PostGenerationHook
+
+	// PreToolUse hooks are called before each tool execution.
+	// Use these to implement permission checks, logging, or input modification.
+	// Hooks run in order until one returns a non-Continue result.
+	PreToolUse []PreToolUseHook
+
+	// PostToolUse hooks are called after each tool execution.
+	// Use these to modify tool results, log results, update metrics, or trigger side effects.
+	// Hooks can modify the result before it's sent to the LLM.
+	// Hook errors are logged but don't affect the tool result.
+	PostToolUse []PostToolUseHook
+
+	// Confirmer is called when a PreToolUse hook returns AskResult.
+	// If nil, AskResult is treated as AllowResult.
+	Confirmer ConfirmToolFunc
+
+	// Infrastructure
+	Logger        llm.Logger
+	ModelSettings *ModelSettings
+	Hooks         llm.Hooks // LLM-level hooks
+
+	// Optional name for logging
+	Name string
+
+	// Timeouts and limits
+	ResponseTimeout    time.Duration
+	ToolIterationLimit int
 }
 
-// StandardAgent is the standard implementation of the Agent interface.
-type StandardAgent struct {
-	id                   string
-	name                 string
-	goal                 string
-	instructions         string
-	model                llm.LLM
-	tools                []Tool
-	toolsByName          map[string]Tool
-	isSupervisor         bool
-	subordinates         []string
-	responseTimeout      time.Duration
-	hooks                llm.Hooks
-	logger               llm.Logger
-	toolIterationLimit   int
-	modelSettings        *ModelSettings
-	dateAwareness        *bool
-	sessionRepository    SessionRepository
-	interactor           UserInteractor
-	permissionManager    *PermissionManager
-	systemPromptTemplate *template.Template
-	context              []llm.Content
-	subagentRegistry     *SubagentRegistry
+// Agent represents an intelligent AI entity that can autonomously use tools to
+// process information while responding to chat messages.
+type Agent struct {
+	name               string
+	model              llm.LLM
+	tools              []Tool
+	toolsByName        map[string]Tool
+	responseTimeout    time.Duration
+	hooks              llm.Hooks
+	logger             llm.Logger
+	toolIterationLimit int
+	modelSettings      *ModelSettings
+	systemPrompt       string
+
+	// Generation hooks
+	preGeneration  []PreGenerationHook
+	postGeneration []PostGenerationHook
+
+	// Tool hooks
+	preToolUse  []PreToolUseHook
+	postToolUse []PostToolUseHook
+	confirmer   ConfirmToolFunc
 }
 
-// NewAgent returns a new StandardAgent configured with the given options.
-func NewAgent(opts AgentOptions) (*StandardAgent, error) {
+// NewAgent returns a new Agent configured with the given options.
+func NewAgent(opts AgentOptions) (*Agent, error) {
 	if opts.Model == nil {
 		return nil, ErrNoLLM
 	}
@@ -138,41 +133,21 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 	if opts.Logger == nil {
 		opts.Logger = &llm.NullLogger{}
 	}
-	if opts.ID == "" {
-		opts.ID = newID()
+	agent := &Agent{
+		name:               opts.Name,
+		model:              opts.Model,
+		responseTimeout:    opts.ResponseTimeout,
+		toolIterationLimit: opts.ToolIterationLimit,
+		hooks:              opts.Hooks,
+		logger:             opts.Logger,
+		systemPrompt:       opts.SystemPrompt,
+		modelSettings:      opts.ModelSettings,
+		preGeneration:      opts.PreGeneration,
+		postGeneration:     opts.PostGeneration,
+		preToolUse:         opts.PreToolUse,
+		postToolUse:        opts.PostToolUse,
+		confirmer:          opts.Confirmer,
 	}
-	var systemPromptTemplate *template.Template
-	if !opts.NoSystemPrompt {
-		if opts.SystemPrompt == "" {
-			opts.SystemPrompt = defaultSystemPrompt
-		}
-		var err error
-		systemPromptTemplate, err = parseTemplate("agent", opts.SystemPrompt)
-		if err != nil {
-			return nil, fmt.Errorf("invalid system prompt template: %w", err)
-		}
-	}
-	agent := &StandardAgent{
-		id:                   opts.ID,
-		name:                 opts.Name,
-		goal:                 opts.Goal,
-		instructions:         opts.Instructions,
-		model:                opts.Model,
-		isSupervisor:         opts.IsSupervisor,
-		subordinates:         opts.Subordinates,
-		responseTimeout:      opts.ResponseTimeout,
-		toolIterationLimit:   opts.ToolIterationLimit,
-		hooks:                opts.Hooks,
-		logger:               opts.Logger,
-		dateAwareness:        opts.DateAwareness,
-		sessionRepository:    opts.SessionRepository,
-		systemPromptTemplate: systemPromptTemplate,
-		modelSettings:        opts.ModelSettings,
-		interactor:           opts.Interactor,
-		context:              opts.Context,
-	}
-	// Initialize permission manager with backward compatibility
-	agent.permissionManager = agent.initPermissionManager(opts.Permission, opts.Interactor)
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
 		copy(tools, opts.Tools)
@@ -184,85 +159,35 @@ func NewAgent(opts AgentOptions) (*StandardAgent, error) {
 			agent.toolsByName[tool.Name()] = tool
 		}
 	}
-
-	// Initialize subagent registry
-	agent.subagentRegistry = NewSubagentRegistry(true) // Include general-purpose by default
-
-	// Load subagents from external source if configured
-	if opts.SubagentLoader != nil {
-		loaded, err := opts.SubagentLoader.Load(context.Background())
-		if err != nil {
-			return nil, fmt.Errorf("failed to load subagents: %w", err)
-		}
-		agent.subagentRegistry.RegisterAll(loaded)
-	}
-
-	// Register programmatically defined subagents (take precedence over loaded)
-	if len(opts.Subagents) > 0 {
-		agent.subagentRegistry.RegisterAll(opts.Subagents)
-	}
-
 	return agent, nil
 }
 
-func (a *StandardAgent) Name() string {
+func (a *Agent) Name() string {
 	return a.name
 }
 
-func (a *StandardAgent) Goal() string {
-	return a.goal
-}
-
-func (a *StandardAgent) Instructions() string {
-	return a.instructions
-}
-
-func (a *StandardAgent) IsSupervisor() bool {
-	return a.isSupervisor
-}
-
-func (a *StandardAgent) Subordinates() []string {
-	if !a.isSupervisor {
-		return nil
-	}
-	return a.subordinates
-}
-
-func (a *StandardAgent) HasTools() bool {
+func (a *Agent) HasTools() bool {
 	return len(a.tools) > 0
 }
 
 // Tools returns the agent's tools.
-func (a *StandardAgent) Tools() []Tool {
+func (a *Agent) Tools() []Tool {
 	return a.tools
 }
 
-// SubagentRegistry returns the agent's subagent registry.
-func (a *StandardAgent) SubagentRegistry() *SubagentRegistry {
-	return a.subagentRegistry
-}
-
-// PermissionManager returns the agent's permission manager.
-// This allows access to permission state, such as session allowlists.
-func (a *StandardAgent) PermissionManager() *PermissionManager {
-	return a.permissionManager
-}
-
 // Model returns the agent's LLM.
-func (a *StandardAgent) Model() llm.LLM {
+func (a *Agent) Model() llm.LLM {
 	return a.model
 }
 
-func (a *StandardAgent) prepareSession(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) (*Session, error) {
-	session, err := a.getOrCreateSession(ctx, options.SessionID, options)
-	if err != nil {
-		return nil, err
+func (a *Agent) prepareSession(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) *Session {
+	return &Session{
+		ID:       options.SessionID,
+		Messages: messages,
 	}
-	session.Messages = append(session.Messages, messages...)
-	return session, nil
 }
 
-func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
+func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
 	var options CreateResponseOptions
 	options.Apply(opts)
 
@@ -283,30 +208,28 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	// Handle forking BEFORE prepareSession to avoid modifying the original session
-	if options.Fork && a.sessionRepository != nil && options.SessionID != "" {
-		originalSessionID := options.SessionID
-		forkedSession, err := a.sessionRepository.ForkSession(ctx, options.SessionID)
-		if err != nil && err != ErrSessionNotFound {
-			return nil, fmt.Errorf("failed to fork session: %w", err)
-		}
-		if forkedSession != nil {
-			// Update options to use the forked session ID
-			options.SessionID = forkedSession.ID
-			logger = logger.With("forked_from", originalSessionID, "forked_to", forkedSession.ID)
-			logger.Info("forked session")
+	session := a.prepareSession(ctx, messages, options)
+
+	systemPrompt := a.buildSystemPrompt()
+
+	// Initialize generation state for hooks
+	genState := NewGenerationState()
+	genState.SessionID = session.ID
+	genState.UserID = options.UserID
+	genState.SystemPrompt = systemPrompt
+	genState.Messages = session.Messages
+
+	// Run PreGeneration hooks
+	for _, hook := range a.preGeneration {
+		if err := hook(ctx, genState); err != nil {
+			logger.Error("pre-generation hook error", "error", err)
+			return nil, fmt.Errorf("pre-generation hook error: %w", err)
 		}
 	}
 
-	session, err := a.prepareSession(ctx, messages, options)
-	if err != nil {
-		return nil, err
-	}
-
-	systemPrompt, err := a.buildSystemPrompt()
-	if err != nil {
-		return nil, fmt.Errorf("failed to build system prompt: %w", err)
-	}
+	// Use potentially modified values from hooks
+	systemPrompt = genState.SystemPrompt
+	session.Messages = genState.Messages
 
 	logger.Debug("system prompt", "system_prompt", systemPrompt)
 
@@ -318,7 +241,6 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 
 	response := &Response{
 		ID:        randomInt(),
-		SessionID: session.ID,
 		Model:     a.model.Name(),
 		CreatedAt: time.Now(),
 	}
@@ -352,13 +274,6 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 
 	session.Messages = append(session.Messages, genResult.OutputMessages...)
 
-	if a.sessionRepository != nil {
-		if err := a.sessionRepository.PutSession(ctx, session); err != nil {
-			logger.Error("failed to save session", "error", err)
-			return nil, err
-		}
-	}
-
 	response.FinishedAt = ptr(time.Now())
 	response.Usage = genResult.Usage
 
@@ -368,62 +283,42 @@ func (a *StandardAgent) CreateResponse(ctx context.Context, opts ...CreateRespon
 			Message: msg,
 		})
 	}
+
+	// Run PostGeneration hooks
+	genState.Response = response
+	genState.OutputMessages = genResult.OutputMessages
+	genState.Usage = genResult.Usage
+	for _, hook := range a.postGeneration {
+		if err := hook(ctx, genState); err != nil {
+			// Check if this is a fatal abort error
+			var abortErr *HookAbortError
+			if errors.As(err, &abortErr) {
+				abortErr.HookType = "PostGeneration"
+				logger.Error("post-generation hook aborted", "error", abortErr)
+				return nil, abortErr
+			}
+			// Regular errors are logged but don't affect the response
+			logger.Error("post-generation hook error", "error", err)
+		}
+	}
+
 	return response, nil
 }
 
 // prepareMessages processes the ChatAgentOptions to create messages for the LLM.
 // It handles both WithMessages and WithInput options.
-func (a *StandardAgent) prepareMessages(options CreateResponseOptions) []*llm.Message {
-	var messages []*llm.Message
-	if len(a.context) > 0 {
-		messages = append(messages, llm.NewUserMessage(a.context...))
-	}
-	if len(options.Messages) > 0 {
-		messages = append(messages, options.Messages...)
-	}
-	return messages
+func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
+	return options.Messages
 }
 
-func (a *StandardAgent) getOrCreateSession(ctx context.Context, sessionID string, options CreateResponseOptions) (*Session, error) {
-	if a.sessionRepository != nil {
-		session, err := a.sessionRepository.GetSession(ctx, sessionID)
-		if err != nil {
-			if err != ErrSessionNotFound {
-				return nil, err
-			}
-		} else {
-			return session, nil
-		}
-	}
-	return &Session{
-		ID:        sessionID,
-		UserID:    options.UserID,
-		AgentID:   a.id,
-		AgentName: a.name,
-		Messages:  []*llm.Message{},
-	}, nil
-}
-
-func (a *StandardAgent) buildSystemPrompt() (string, error) {
-	var prompt string
-	if a.systemPromptTemplate != nil {
-		var err error
-		prompt, err = executeTemplate(a.systemPromptTemplate, a)
-		if err != nil {
-			return "", err
-		}
-		prompt = strings.TrimSpace(prompt)
-	}
-	if a.dateAwareness == nil || *a.dateAwareness {
-		prompt = fmt.Sprintf("%s\n\n%s", prompt, dateTimeString(time.Now()))
-	}
-	return strings.TrimSpace(prompt), nil
+func (a *Agent) buildSystemPrompt() string {
+	return strings.TrimSpace(a.systemPrompt)
 }
 
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *StandardAgent) generate(
+func (a *Agent) generate(
 	ctx context.Context,
 	messages []*llm.Message,
 	systemPrompt string,
@@ -536,14 +431,14 @@ func (a *StandardAgent) generate(
 	}, nil
 }
 
-func (a *StandardAgent) isCachingEnabled() bool {
+func (a *Agent) isCachingEnabled() bool {
 	if a.modelSettings == nil || a.modelSettings.Caching == nil {
 		return true // default to caching enabled
 	}
 	return *a.modelSettings.Caching
 }
 
-func (a *StandardAgent) configureCacheControl(messages []*llm.Message) {
+func (a *Agent) configureCacheControl(messages []*llm.Message) {
 	if !a.isCachingEnabled() || len(messages) == 0 {
 		return
 	}
@@ -564,92 +459,9 @@ func (a *StandardAgent) configureCacheControl(messages []*llm.Message) {
 	}
 }
 
-// initPermissionManager creates a permission manager with backward compatibility.
-// If Permission config is provided, it uses that. Otherwise, it converts the
-// legacy Interactor to a permission-based flow.
-func (a *StandardAgent) initPermissionManager(
-	permission *PermissionConfig,
-	interactor UserInteractor,
-) *PermissionManager {
-	// Create confirmer function from interactor or default
-	confirmer := func(ctx context.Context, tool Tool, call *llm.ToolUseContent, message string) (bool, error) {
-		if interactor == nil {
-			return true, nil // No interactor = auto-approve
-		}
-		return interactor.Confirm(ctx, &ConfirmRequest{
-			Tool:    tool,
-			Call:    call,
-			Title:   fmt.Sprintf("Execute %s?", tool.Name()),
-			Message: message,
-		})
-	}
-
-	// If permission config is provided, use it
-	if permission != nil {
-		return NewPermissionManager(permission, confirmer)
-	}
-
-	// Convert legacy interactor to permission config
-	config := a.permissionConfigFromInteractor(interactor)
-	return NewPermissionManager(config, confirmer)
-}
-
-// permissionConfigFromInteractor converts a legacy UserInteractor to PermissionConfig.
-func (a *StandardAgent) permissionConfigFromInteractor(interactor UserInteractor) *PermissionConfig {
-	if interactor == nil {
-		// No interactor = bypass permissions (auto-approve)
-		return &PermissionConfig{Mode: PermissionModeBypassPermissions}
-	}
-
-	// Check if it's a TerminalInteractor with a mode
-	if ti, ok := interactor.(*TerminalInteractor); ok {
-		switch ti.Mode {
-		case InteractNever:
-			return &PermissionConfig{Mode: PermissionModeBypassPermissions}
-		case InteractAlways:
-			return &PermissionConfig{
-				Mode:  PermissionModeDefault,
-				Rules: PermissionRules{{Type: PermissionRuleAsk, Tool: "*"}},
-			}
-		case InteractIfDestructive:
-			return &PermissionConfig{
-				Mode: PermissionModeDefault,
-				CanUseTool: func(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
-					if tool != nil {
-						annotations := tool.Annotations()
-						if annotations != nil && annotations.DestructiveHint {
-							return AskResult(""), nil
-						}
-					}
-					return AllowResult(), nil
-				},
-			}
-		case InteractIfNotReadOnly:
-			return &PermissionConfig{
-				Mode: PermissionModeDefault,
-				CanUseTool: func(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
-					if tool != nil {
-						annotations := tool.Annotations()
-						if annotations != nil && annotations.ReadOnlyHint {
-							return AllowResult(), nil
-						}
-					}
-					return AskResult(""), nil
-				},
-			}
-		}
-	}
-
-	// Default: ask for all tools
-	return &PermissionConfig{
-		Mode:  PermissionModeDefault,
-		Rules: PermissionRules{{Type: PermissionRuleAsk, Tool: "*"}},
-	}
-}
-
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
-func (a *StandardAgent) generateStreaming(
+func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
 	generateOpts []llm.Option,
@@ -680,14 +492,10 @@ func (a *StandardAgent) generateStreaming(
 	return accum.Response(), nil
 }
 
-func (a *StandardAgent) getInteractor() UserInteractor {
-	return a.interactor
-}
-
 // executeToolCalls executes all tool calls and returns the tool call results.
-// This implements Anthropic's permission flow:
-// PreToolUse Hook → Deny Rules → Allow Rules → Ask Rules → Mode Check → CanUseTool → Execute → PostToolUse Hook
-func (a *StandardAgent) executeToolCalls(
+// Hooks are evaluated in order: PreToolUse hooks determine whether to allow/deny/ask.
+// If a hook returns AskResult and a confirmer is set, confirmation is requested.
+func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	toolCalls []*llm.ToolUseContent,
 	callback EventCallback,
@@ -743,10 +551,11 @@ func (a *StandardAgent) executeToolCalls(
 			return nil, err
 		}
 
-		// Evaluate permissions using the permission manager
-		hookResult, err := a.permissionManager.EvaluateToolUse(ctx, tool, toolCall, a)
+		// Evaluate PreToolUse hooks
+		hookResult, err := a.evaluatePreToolUseHooks(ctx, tool, toolCall)
 		if err != nil {
-			return nil, fmt.Errorf("permission evaluation error: %w", err)
+			// Fatal error - abort generation
+			return nil, err
 		}
 
 		// Handle the hook result
@@ -769,55 +578,43 @@ func (a *StandardAgent) executeToolCalls(
 			result = a.createDeniedResult(toolCall, message, preview)
 
 		case ToolHookAsk:
-			// Prompt user for confirmation
-			message := hookResult.Message
-			if message == "" && preview != nil {
-				message = preview.Summary
-			}
-			confirmed, err := a.permissionManager.Confirm(ctx, tool, toolCall, message)
-			if err != nil {
-				// Check if this is user feedback (not a real error)
-				if feedback, ok := IsUserFeedback(err); ok {
-					result = a.createDeniedResult(toolCall, feedback, preview)
-				} else {
-					return nil, fmt.Errorf("tool call confirmation error: %w", err)
-				}
-			} else if confirmed {
-				result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
-			} else {
-				result = a.createDeniedResult(toolCall, "User denied tool call", preview)
-			}
+			// Prompt user for confirmation if confirmer is set
+			result = a.handleToolConfirmation(ctx, tool, toolCall, hookResult.Message, preview)
 
 		default:
-			// ToolHookContinue should not happen after full evaluation
-			// Treat as ask to be safe
-			confirmed, err := a.permissionManager.Confirm(ctx, tool, toolCall, "")
-			if err != nil {
-				// Check if this is user feedback (not a real error)
-				if feedback, ok := IsUserFeedback(err); ok {
-					result = a.createDeniedResult(toolCall, feedback, preview)
-				} else {
-					return nil, fmt.Errorf("tool call confirmation error: %w", err)
-				}
-			} else if confirmed {
+			// ToolHookContinue - default to allow if no confirmer, ask otherwise
+			if a.confirmer == nil {
 				result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
 			} else {
-				result = a.createDeniedResult(toolCall, "User denied tool call", preview)
+				result = a.handleToolConfirmation(ctx, tool, toolCall, "", preview)
 			}
 		}
 
-		results[i] = result
-
-		// Run PostToolUse hooks
+		// Run PostToolUse hooks (before storing result)
+		// Hooks can modify result before it's sent to the LLM
 		postCtx := &PostToolUseContext{
 			Tool:   tool,
 			Call:   toolCall,
 			Result: result,
 			Agent:  a,
 		}
-		if err := a.permissionManager.RunPostToolUseHooks(ctx, postCtx); err != nil {
-			a.logger.Debug("post-tool-use hook error", "error", err)
+		for _, hook := range a.postToolUse {
+			if err := hook(ctx, postCtx); err != nil {
+				// Check if this is a fatal abort error
+				var abortErr *HookAbortError
+				if errors.As(err, &abortErr) {
+					abortErr.HookType = "PostToolUse"
+					a.logger.Error("post-tool-use hook aborted", "error", abortErr)
+					return nil, abortErr
+				}
+				// Regular errors are logged but don't affect the result
+				a.logger.Debug("post-tool-use hook error", "error", err)
+			}
 		}
+
+		// Use potentially modified result from hooks
+		result = postCtx.Result
+		results[i] = result
 
 		// Emit result event
 		if err := callback(ctx, &ResponseItem{
@@ -826,27 +623,75 @@ func (a *StandardAgent) executeToolCalls(
 		}); err != nil {
 			return nil, err
 		}
-
-		// Emit TodoEvent for TodoWrite tool calls
-		if toolCall.Name == "TodoWrite" && result.Error == nil {
-			var todoInput struct {
-				Todos []TodoItem `json:"todos"`
-			}
-			if err := json.Unmarshal(toolCall.Input, &todoInput); err == nil {
-				if err := callback(ctx, &ResponseItem{
-					Type: ResponseItemTypeTodo,
-					Todo: &TodoEvent{Todos: todoInput.Todos},
-				}); err != nil {
-					return nil, err
-				}
-			}
-		}
 	}
 	return results, nil
 }
 
+// evaluatePreToolUseHooks runs all PreToolUse hooks and returns the result.
+// Hooks are evaluated in order until one returns a non-Continue result.
+// Returns a ToolHookResult, or nil with error if generation should abort.
+func (a *Agent) evaluatePreToolUseHooks(ctx context.Context, tool Tool, call *llm.ToolUseContent) (*ToolHookResult, error) {
+	hookCtx := &PreToolUseContext{
+		Tool:  tool,
+		Call:  call,
+		Agent: a,
+	}
+	for _, hook := range a.preToolUse {
+		result, err := hook(ctx, hookCtx)
+		if err != nil {
+			// Check if this is a fatal abort error
+			var abortErr *HookAbortError
+			if errors.As(err, &abortErr) {
+				abortErr.HookType = "PreToolUse"
+				a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
+				return nil, abortErr
+			}
+			// Regular errors are converted to Deny
+			a.logger.Debug("pre-tool-use hook error", "error", err)
+			return DenyResult(err.Error()), nil
+		}
+		if result != nil && result.Action != ToolHookContinue {
+			return result, nil
+		}
+	}
+	// All hooks returned Continue - default behavior
+	return ContinueResult(), nil
+}
+
+// handleToolConfirmation prompts for user confirmation if a confirmer is set.
+func (a *Agent) handleToolConfirmation(
+	ctx context.Context,
+	tool Tool,
+	call *llm.ToolUseContent,
+	message string,
+	preview *ToolCallPreview,
+) *ToolCallResult {
+	// If no confirmer, auto-allow
+	if a.confirmer == nil {
+		return a.executeTool(ctx, tool, call, call.Input, preview)
+	}
+
+	// Use preview summary if no message provided
+	if message == "" && preview != nil {
+		message = preview.Summary
+	}
+
+	confirmed, err := a.confirmer(ctx, tool, call, message)
+	if err != nil {
+		// Check if this is user feedback (not a real error)
+		if feedback, ok := IsUserFeedback(err); ok {
+			return a.createDeniedResult(call, feedback, preview)
+		}
+		return a.createDeniedResult(call, fmt.Sprintf("Confirmation error: %v", err), preview)
+	}
+	if confirmed {
+		return a.executeTool(ctx, tool, call, call.Input, preview)
+	}
+	return a.createDeniedResult(call, "User denied tool call", preview)
+}
+
 // executeTool runs the tool and returns the result.
-func (a *StandardAgent) executeTool(
+func (a *Agent) executeTool(
 	ctx context.Context,
 	tool Tool,
 	call *llm.ToolUseContent,
@@ -882,7 +727,7 @@ func (a *StandardAgent) executeTool(
 }
 
 // createDeniedResult creates a tool result for a denied tool call.
-func (a *StandardAgent) createDeniedResult(
+func (a *Agent) createDeniedResult(
 	call *llm.ToolUseContent,
 	message string,
 	preview *ToolCallPreview,
@@ -904,7 +749,7 @@ func (a *StandardAgent) createDeniedResult(
 	}
 }
 
-func (a *StandardAgent) getToolDefinitions() []llm.Tool {
+func (a *Agent) getToolDefinitions() []llm.Tool {
 	definitions := make([]llm.Tool, len(a.tools))
 	for i, tool := range a.tools {
 		definitions[i] = tool
@@ -912,7 +757,7 @@ func (a *StandardAgent) getToolDefinitions() []llm.Tool {
 	return definitions
 }
 
-func (a *StandardAgent) getGenerationAgentOptions(systemPrompt string) []llm.Option {
+func (a *Agent) getGenerationAgentOptions(systemPrompt string) []llm.Option {
 	var generateOpts []llm.Option
 	if systemPrompt != "" {
 		generateOpts = append(generateOpts, llm.WithSystemPrompt(systemPrompt))
@@ -965,13 +810,9 @@ func (a *StandardAgent) getGenerationAgentOptions(systemPrompt string) []llm.Opt
 	return generateOpts
 }
 
-func (a *StandardAgent) Context() []llm.Content {
-	return a.context
-}
-
 // isToolAllowed checks if a tool is allowed by any ToolAllowanceChecker in the
 // agent's tools. This is used to enforce skill-based tool restrictions.
-func (a *StandardAgent) isToolAllowed(toolName string) bool {
+func (a *Agent) isToolAllowed(toolName string) bool {
 	for _, tool := range a.tools {
 		if checker, ok := tool.(ToolAllowanceChecker); ok {
 			if !checker.IsToolAllowed(toolName) {

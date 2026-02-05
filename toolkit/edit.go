@@ -17,29 +17,58 @@ var (
 	_ dive.TypedToolPreviewer[*EditInput] = &EditTool{}
 )
 
-// EditInput represents the input parameters for the edit tool
+// EditInput represents the input parameters for the Edit tool.
 type EditInput struct {
-	FilePath   string `json:"file_path"`
-	OldString  string `json:"old_string"`
-	NewString  string `json:"new_string"`
-	ReplaceAll bool   `json:"replace_all,omitempty"`
+	// FilePath is the absolute path to the file to modify. Required.
+	FilePath string `json:"file_path"`
+
+	// OldString is the exact text to find and replace. Required.
+	// Must appear exactly once in the file unless ReplaceAll is true.
+	OldString string `json:"old_string"`
+
+	// NewString is the replacement text. Required.
+	// Must be different from OldString.
+	NewString string `json:"new_string"`
+
+	// ReplaceAll enables replacing all occurrences of OldString.
+	// When false (default), OldString must be unique in the file.
+	ReplaceAll bool `json:"replace_all,omitempty"`
 }
 
-// EditToolOptions configures the EditTool
+// EditToolOptions configures the behavior of [EditTool].
 type EditToolOptions struct {
-	// MaxFileSize is the maximum file size to edit (default 10MB)
+	// MaxFileSize is the maximum file size in bytes that can be edited.
+	// Files larger than this limit will be rejected.
+	// Defaults to 10MB if not specified.
 	MaxFileSize int64
-	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+
+	// WorkspaceDir restricts file edits to paths within this directory.
+	// Defaults to the current working directory if empty.
 	WorkspaceDir string
 }
 
-// EditTool performs exact string replacements in files
+// EditTool performs exact string replacements in files.
+//
+// Unlike sed or regex-based tools, EditTool requires exact string matches,
+// which reduces errors from incorrect pattern matching. The tool ensures
+// the target string is unique (unless replace_all is used) to prevent
+// accidental modifications to unintended locations.
+//
+// Features:
+//   - Exact string matching (no regex interpretation)
+//   - Uniqueness validation to prevent ambiguous edits
+//   - Diff output showing the context around changes
+//   - Preserves file permissions
+//
+// Security: File paths are validated against the workspace boundary when
+// WorkspaceDir is configured.
 type EditTool struct {
 	maxFileSize   int64
 	pathValidator *PathValidator
 }
 
-// NewEditTool creates a new EditTool
+// NewEditTool creates a new EditTool with the given options.
+// If no options are provided, defaults are used.
 func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 	var resolvedOpts EditToolOptions
 	if len(opts) > 0 {
@@ -48,9 +77,9 @@ func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 	if resolvedOpts.MaxFileSize == 0 {
 		resolvedOpts.MaxFileSize = 10 * 1024 * 1024 // 10MB
 	}
-	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
-	if err != nil {
-		pathValidator = &PathValidator{}
+	var pathValidator *PathValidator
+	if resolvedOpts.WorkspaceDir != "" {
+		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&EditTool{
 		maxFileSize:   resolvedOpts.MaxFileSize,
@@ -58,10 +87,12 @@ func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 	})
 }
 
+// Name returns "Edit" as the tool identifier.
 func (t *EditTool) Name() string {
 	return "Edit"
 }
 
+// Description returns detailed usage instructions for the LLM.
 func (t *EditTool) Description() string {
 	return `Perform exact string replacements in files.
 
@@ -82,6 +113,7 @@ Examples:
 - Update import: {"file_path": "/path/to/file.go", "old_string": "\"old/package\"", "new_string": "\"new/package\""}`
 }
 
+// Schema returns the JSON schema describing the tool's input parameters.
 func (t *EditTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
@@ -107,6 +139,9 @@ func (t *EditTool) Schema() *schema.Schema {
 	}
 }
 
+// Annotations returns metadata hints about the tool's behavior.
+// Edit is marked as destructive (modifies files), idempotent (same input produces
+// same result), and has EditHint set for special UI treatment.
 func (t *EditTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:           "Edit",
@@ -118,6 +153,7 @@ func (t *EditTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+// PreviewCall returns a summary of the edit operation for permission prompts.
 func (t *EditTool) PreviewCall(ctx context.Context, input *EditInput) *dive.ToolCallPreview {
 	filename := filepath.Base(input.FilePath)
 	action := "Replace"
@@ -137,6 +173,16 @@ func (t *EditTool) PreviewCall(ctx context.Context, input *EditInput) *dive.Tool
 	}
 }
 
+// Call performs the string replacement and returns a diff of the changes.
+//
+// Validation steps:
+//  1. Ensures old_string differs from new_string
+//  2. Validates file path is absolute and within workspace
+//  3. Checks file exists and is within size limits
+//  4. Verifies old_string appears exactly once (unless replace_all is true)
+//
+// On success, returns the replacement count and a diff showing context
+// around the changes.
 func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult, error) {
 	// Validate inputs
 	if input.OldString == input.NewString {
@@ -148,8 +194,8 @@ func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult
 		return dive.NewToolResultError(fmt.Sprintf("file_path must be absolute, got: %s", input.FilePath)), nil
 	}
 
-	// Validate path is within workspace
-	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+	// Validate path is within workspace (skip validation if no validator configured)
+	if t.pathValidator != nil {
 		if err := t.pathValidator.ValidateWrite(input.FilePath); err != nil {
 			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 		}

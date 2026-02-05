@@ -12,396 +12,520 @@
 
 </div>
 
-Dive is a Go library for building AI agents and integrating with leading LLMs.
+Dive is a Go library for building AI agents with a stable, extensible core API.
 
 - 🚀 Embed AI agents in your Go applications
-- 🤖 Create specialized agents with custom tools
-- 🛠️ Unified interface across LLM providers
+- 🛠️ Unified interface across 8+ LLM providers
+- 🔌 Extensible via hooks - no core modifications needed
 - ⚡ Stream responses in real-time
-
-Dive is designed as a library-first toolkit, providing a clean API for building
-AI-powered applications. It comes batteries-included with sensible defaults,
-but offers the modularity you need for extensive customization.
 
 ## Project Status
 
-Dive is shaping up nicely, but is still a young project.
+Dive has a clear separation between **stable core** and **experimental** features:
 
-- **Feedback is highly valued** on concepts, APIs, and usability
-- **Some breaking changes will happen** as the API matures
-- **Not yet recommended for production use**
+### 🟢 Core (Stable, Production-Ready)
 
-You can also use [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions) for questions, suggestions, or feedback.
+- Agent interface and StandardAgent implementation
+- Tool system with core file/shell operations
+- LLM interface with 8+ provider integrations (Anthropic, OpenAI, Google, Grok, Groq, Mistral, Ollama, OpenRouter)
+- Hook system for extensibility (PreGeneration, PostGeneration, PreToolUse, PostToolUse)
+- Response streaming and events
+- **Follows Go standard versioning** - Breaking changes require major version bump
 
-We welcome your input! 🙌
+### 🟡 Experimental (Active Development)
 
-Please leave a GitHub star if you're interested in the project!
+- Session persistence, permissions, context compaction
+- Subagents, skills, sandbox isolation
+- Model Context Protocol (MCP)
+- CLI application
+- **May change at any time** - Import from `experimental/*` path
 
-## Features
-
-### Library Features
-
-- **Agents**: Create specialized agents with configurable reasoning and tools
-- **Supervisor Patterns**: Build hierarchical agent systems with work delegation
-- **Multiple LLMs**: Unified interface for Anthropic, OpenAI, Google, OpenRouter, Grok, and Ollama
-- **Extended Reasoning**: Configure reasoning effort and budget for deep thinking
-- **Model Context Protocol (MCP)**: Connect to MCP servers for external tool access
-- **Tools**: Give agents rich capabilities to interact with the world
-- **Tool Annotations**: Semantic hints about tool behavior (read-only, destructive, etc.)
-- **Streaming**: Stream agent events for real-time UI updates
-- **Thread Management**: Persistent conversation threads with memory
-- **Confirmation System**: Built-in confirmation system for destructive operations
-- **Advanced Model Settings**: Fine-tune temperature, penalties, caching, and tool behavior
-
-### Additional Features
-
-- **CLI**: Basic command-line interface for testing and experimentation
-- **Sandboxing** *(Draft)*: Secure isolation for tool execution using Seatbelt (macOS) or Docker/Podman (Linux/Windows). Includes filesystem restrictions, network isolation with domain allowlists, and a built-in proxy. See [docs/guides/sandboxing.md](./docs/guides/sandboxing.md).
+---
 
 ## Quick Start
 
 ### Installation
 
-Install Dive using go get:
-
-```
+```bash
 go get github.com/deepnoodle-ai/dive
 ```
 
-Set up your LLM provider API key:
+Set up your LLM API key:
 
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
-# Or use other providers: OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY, OPENROUTER_API_KEY
+# Or: OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY, etc.
 ```
 
-### Creating an Agent
-
-Here's a quick example of creating a chat agent:
+### Your First Agent
 
 ```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Research Assistant",
-    Instructions: "You are an enthusiastic and deeply curious researcher.",
-    Model:        anthropic.New(),
-})
+package main
 
-// Start chatting with the agent
-response, err := agent.CreateResponse(ctx, dive.WithInput("Hello there!"))
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
+)
+
+func main() {
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		SystemPrompt: "You are a helpful research assistant.",
+		Model:        anthropic.New(),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	response, err := agent.CreateResponse(
+		context.Background(),
+		dive.WithInput("What is the capital of France?"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(response.OutputText())
+}
 ```
 
-Or use the Dive LLM interface directly:
+### Direct LLM Usage
 
 ```go
+import (
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
+)
+
 model := anthropic.New()
 response, err := model.Generate(
-  context.Background(),
-  llm.WithMessages(llm.NewUserTextMessage("Hello there!")),
-  llm.WithMaxTokens(2048),
-  llm.WithTemperature(0.7),
+	context.Background(),
+	llm.WithMessages(llm.NewUserTextMessage("Hello!")),
+	llm.WithMaxTokens(1024),
 )
-if err != nil {
-  log.Fatal(err)
-}
 fmt.Println(response.Message.Text())
 ```
 
+---
+
+## Core Features
+
+### Agent System
+
+The `Agent` interface (`dive.go:14-21`) provides autonomous tool-using AI entities:
+
+```go
+type Agent interface {
+	Name() string
+	CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error)
+}
+```
+
+Create agents with `NewAgent` (`agent.go:133-179`):
+
+```go
+agent, err := dive.NewAgent(dive.AgentOptions{
+	SystemPrompt: "Your instructions here",
+	Model:        anthropic.New(),
+	Tools:        []dive.Tool{/* tools */},
+
+	// Optional: Hooks for extensibility
+	PreGeneration:  []dive.PreGenerationHook{/* hooks */},
+	PostGeneration: []dive.PostGenerationHook{/* hooks */},
+	PreToolUse:     []dive.PreToolUseHook{/* hooks */},
+	PostToolUse:    []dive.PostToolUseHook{/* hooks */},
+})
+```
+
+**Options:**
+
+```go
+type AgentOptions struct {
+	SystemPrompt string
+	Model        llm.LLM
+	Tools        []Tool
+
+	PreGeneration  []PreGenerationHook
+	PostGeneration []PostGenerationHook
+	PreToolUse     []PreToolUseHook
+	PostToolUse    []PostToolUseHook
+
+	Confirmer          ConfirmToolFunc
+	Logger             llm.Logger
+	ModelSettings      *ModelSettings
+	Hooks              llm.Hooks
+	DateAwareness      *bool
+	NoSystemPrompt     bool
+	Context            []llm.Content
+	ID                 string
+	Name               string
+	ResponseTimeout    time.Duration
+	ToolIterationLimit int
+}
+```
+
+### Tool System
+
+Tools extend agent capabilities. Core tools (`toolkit/`):
+
+**File Operations:**
+
+- `Read` - Read file contents
+- `Write` - Write files
+- `Edit` - Exact string replacements (Claude Code aligned)
+- `Glob` - Pattern-based file finding
+- `Grep` - Regex content search (ripgrep-style)
+- `ListDirectory` - Directory listings
+- `TextEditor` - Multi-line editing
+
+**Shell & Execution:**
+
+- `Bash` - Persistent shell sessions (Claude Code aligned)
+
+**Agent Features:**
+
+- `AskUserQuestion` - Request user input
+
+**Create custom tools:**
+
+```go
+type MyTool struct{}
+
+func (t *MyTool) Name() string { return "my_tool" }
+func (t *MyTool) Description() string { return "Does something useful" }
+func (t *MyTool) Schema() schema.Schema { /* parameters */ }
+func (t *MyTool) Annotations() dive.ToolAnnotations {
+	return dive.ToolAnnotations{
+		ReadOnlyHint:    true,
+		DestructiveHint: false,
+		OpenWorldHint:   false,
+	}
+}
+func (t *MyTool) Call(ctx context.Context, input []byte) (*dive.ToolResult, error) {
+	// Implementation
+	return &dive.ToolResult{
+		Content: []*dive.ToolResultContent{{
+			Type: dive.ToolResultContentTypeText,
+			Text: "Result",
+		}},
+	}, nil
+}
+```
+
+See `tool.go:48-57` for the Tool interface. Use `ToolAdapter` for type-safe tools.
+
+### Hook System
+
+Hooks enable extending agent behavior without modifying core code:
+
+**Generation Hooks (`hooks.go`):**
+
+- `PreGenerationHook` - Runs before LLM generation (load session, inject context, modify system prompt)
+- `PostGenerationHook` - Runs after generation (save session, log results, trigger side effects)
+
+**Tool Hooks:**
+
+- `PreToolUseHook` - Runs before tool execution (permissions, validation, input modification)
+- `PostToolUseHook` - Runs after tool execution (logging, metrics, result processing)
+
+```go
+func myPreGenHook(ctx context.Context, state *dive.GenerationState) error {
+	// Modify state.SystemPrompt, state.Messages, etc.
+	state.SystemPrompt += "\n\nAdditional context: ..."
+	return nil
+}
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+	PreGeneration: []dive.PreGenerationHook{myPreGenHook},
+})
+```
+
+**All experimental features are implemented as hooks.** This allows you to compose functionality without core dependencies.
+
+### LLM Interface
+
+Unified interface (`llm/llm.go:7-13`) across multiple providers:
+
+**Supported Providers:**
+
+| Provider      | Models                                     | Tools | Features                  |
+| ------------- | ------------------------------------------ | ----- | ------------------------- |
+| **Anthropic** | Claude Sonnet, Opus, Haiku                 | Yes   | Computer Use, Web Search  |
+| **OpenAI**    | GPT-5, GPT-4, o1, o3, Codex                | Yes   | Vision, structured output |
+| **Google**    | Gemini 2.5, Gemini 3 Preview               | Yes   | Vision, tool calling      |
+| **Grok**      | Grok 4, Grok Code Fast                     | Yes   | Reasoning                 |
+| **OpenRouter**| 200+ models from multiple providers        | Yes   | Unified API               |
+| **Groq**      | Fast inference                             | Yes   | Low latency               |
+| **Mistral**   | Mistral models                             | Yes   | European hosting          |
+| **Ollama**    | Local models (llama3.2, deepseek-r1, etc.) | Yes   | Privacy, no API key       |
+
+```go
+// Each provider implements llm.LLM interface
+provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-5"))
+provider := openai.New(openai.WithModel("gpt-5"))
+provider := google.New(google.WithModel("gemini-2.5-pro"))
+provider := ollama.New(ollama.WithModel("llama3.2:3b"))
+```
+
+**LLM Interface:**
+
+```go
+type LLM interface {
+	Name() string
+	Generate(ctx context.Context, opts ...Option) (*Response, error)
+}
+
+type StreamingLLM interface {
+	LLM
+	Stream(ctx context.Context, opts ...Option) (ResponseIterator, error)
+}
+```
+
+**Features:**
+
+- Streaming via `llm.StreamingLLM`
+- Tool calling with JSON schema
+- Vision support (images, PDFs)
+- Prompt caching
+- Token counting & pricing
+- Structured output
+- Citations
+
+### Streaming & Events
+
+Real-time streaming with event callbacks:
+
+```go
+agent.CreateResponse(ctx,
+	dive.WithInput("Generate a report"),
+	dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+		switch item.Type {
+		case dive.ResponseItemTypeInit:
+			fmt.Printf("Session: %s\n", item.Init.SessionID)
+		case dive.ResponseItemTypeMessage:
+			fmt.Printf("Message: %s\n", item.Message.Text())
+		case dive.ResponseItemTypeModelEvent:
+			// Streaming text deltas
+			fmt.Print(item.Event.Delta.Text)
+		case dive.ResponseItemTypeToolCall:
+			fmt.Printf("Tool: %s\n", item.ToolCall.Name)
+		case dive.ResponseItemTypeToolCallResult:
+			fmt.Printf("Result: %v\n", item.ToolCallResult.Result)
+		}
+		return nil
+	}),
+)
+```
+
+**Event Types (`response.go`):**
+
+- `Init` - Session initialization with SessionID
+- `Message` - Complete LLM messages
+- `ModelEvent` - Streaming text deltas, reasoning tokens, citations
+- `ToolCall` - Tool invocation with input
+- `ToolCallResult` - Tool execution result
+- `Todo` - Task progress updates (when using TodoWrite tool)
+
+---
+
+## Experimental Features
+
+> ⚠️ **Warning:** Experimental features may change or be removed without notice.
+> Import from `github.com/deepnoodle-ai/dive/experimental/*`
+
+### Session Management
+
+Persistent conversation storage via hooks.
+
+```go
+import "github.com/deepnoodle-ai/dive/experimental/session"
+
+repo := session.NewFileRepository(".dive/sessions")
+hook := session.NewSessionHook(repo)
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+	PreGeneration:  []dive.PreGenerationHook{hook.PreGeneration},
+	PostGeneration: []dive.PostGenerationHook{hook.PostGeneration},
+})
+
+response, _ := agent.CreateResponse(ctx,
+	dive.WithSessionID("conversation-123"),
+	dive.WithInput("Continue where we left off"),
+)
+```
+
+### Permission System
+
+Rule-based tool execution control.
+
+```go
+import "github.com/deepnoodle-ai/dive/experimental/permission"
+
+perm := permission.New(permission.Config{
+	Mode: permission.ModeDefault,
+	Rules: []permission.Rule{
+		permission.DenyCommandRule("bash", "rm -rf *", "Blocked"),
+		permission.AllowRule("read_*"),
+	},
+})
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+	PreToolUse: []dive.PreToolUseHook{perm.PreToolUse},
+})
+```
+
+### Context Compaction
+
+Auto-summarize long conversations when approaching token limits.
+
+```go
+import "github.com/deepnoodle-ai/dive/experimental/compaction"
+
+hook := compaction.NewHook(compaction.Config{
+	Enabled:   true,
+	Threshold: 100000,
+	Model:     anthropic.New(),
+})
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+	PostGeneration: []dive.PostGenerationHook{hook.PostGeneration},
+})
+```
+
+### Subagents
+
+Spawn specialized child agents for focused subtasks.
+
+```go
+import "github.com/deepnoodle-ai/dive/experimental/subagent"
+
+taskTool := subagent.NewTaskTool(map[string]*subagent.Definition{
+	"code-reviewer": {
+		Description: "Expert code reviewer",
+		Prompt:      "You review code for security and quality.",
+		Tools:       []string{"Read", "Grep"},
+	},
+})
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+	Tools: []dive.Tool{taskTool},
+})
+```
+
+### CLI Application
+
+Interactive command-line interface.
+
+```bash
+cd experimental/cmd/dive && go install .
+dive chat                                  # Interactive mode
+dive --model claude-sonnet-4-5             # Specify model
+dive --workspace /path/to/project          # Set workspace
+```
+
+### Other Experimental Features
+
+- **Settings** (`experimental/settings`) - Load configuration from `.dive/settings.json`
+- **Todo Tracking** (`experimental/todo`) - TodoTracker helper for task progress
+- **Sandbox** (`experimental/sandbox`) - Docker/Seatbelt isolation for tool execution
+- **MCP** (`experimental/mcp`) - Model Context Protocol client for external tools
+- **Skills** (`experimental/skill`) - Markdown-based skill loading system
+- **Slash Commands** (`experimental/slashcmd`) - User-defined CLI commands
+- **External Tools** (`experimental/toolkit/*`) - Google Search, Kagi Search, Firecrawl web scraping
+
+---
+
 ## Examples
 
-The `examples/programs/` directory contains runnable examples demonstrating various features:
+Core examples in `examples/programs/`:
 
-| Example                    | Description                                  |
-| -------------------------- | -------------------------------------------- |
-| `llm_example`              | Basic LLM text generation                    |
-| `google_example`           | Using Google Gemini with streaming           |
-| `ollama_example`           | Local models with Ollama, including tool use |
-| `openai_responses_example` | OpenAI Responses API                         |
-| `openrouter_example`       | Using OpenRouter for model access            |
-| `image_example`            | Image analysis with vision models            |
-| `pdf_example`              | PDF document processing                      |
-| `mcp_servers_example`      | Connecting to MCP servers                    |
-| `todo_tracking_example`    | Real-time todo list tracking with agents     |
-| `code_execution_example`   | Code execution capabilities                  |
+**Core API:**
 
-Run an example with:
+- `llm_example` - Basic LLM text generation
+- `google_example` - Google Gemini with streaming
+- `ollama_example` - Local models with tool calling
+- `openai_responses_example` - OpenAI Responses API
+- `openrouter_example` - OpenRouter multi-provider access
+- `image_example` - Vision capabilities with images
+- `pdf_example` - PDF document processing
+
+**Experimental:**
+
+- `mcp_servers_example` - MCP server integration
+- `todo_tracking_example` - Real-time todo list tracking
+- `code_execution_example` - Code execution capabilities
+
+Run with:
 
 ```bash
 go run ./examples/programs/llm_example
 ```
 
-## CLI
-
-Dive includes a basic CLI for testing and experimentation. Build it with:
-
-```bash
-git clone git@github.com:deepnoodle-ai/dive.git
-cd dive/cmd/dive && go install .
-```
-
-Run the interactive assistant:
-
-```bash
-dive                                    # Start interactive chat
-dive --model claude-sonnet-4-20250514   # Use a specific model
-dive --workspace /path/to/project       # Set workspace directory
-dive --compaction=false                 # Disable automatic context compaction
-dive --compaction-threshold=50000       # Trigger compaction at 50k tokens
-```
-
-The CLI enables automatic context compaction by default (at 100k tokens), which summarizes conversation history when token limits are approached. This allows for long-running sessions without hitting context limits.
-
-## LLM Providers
-
-Dive provides a unified interface for working with different LLM providers:
-
-- **Anthropic** (Claude Sonnet, Haiku, Opus)
-- **OpenAI** (GPT-5, GPT-4, o1, o3)
-- **OpenRouter** (Access to 200+ models from multiple providers with unified API)
-- **Google** (Gemini models)
-- **Grok** (Grok 4, Grok Code Fast)
-- **Ollama** (Local model serving)
-
-Each provider implementation handles API communication, token counting,
-tool calling, and other details.
-
-```go
-provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-20250514"))
-
-provider := openai.New(openai.WithModel("gpt-5"))
-
-provider := openrouter.New(openrouter.WithModel("openai/gpt-4o"))
-
-provider := google.New(google.WithModel("gemini-2.5-flash"))
-
-provider := ollama.New(ollama.WithModel("llama3.2:3b"))
-```
-
-## Model Context Protocol (MCP)
-
-Dive supports the Model Context Protocol (MCP) for connecting to external tools and services:
-
-```go
-response, err := anthropic.New().Generate(
-    context.Background(),
-    llm.WithMessages(llm.NewUserTextMessage("What are the open tickets?")),
-    llm.WithMCPServers(
-        llm.MCPServerConfig{
-            Type:               "url",
-            Name:               "linear",
-            URL:                "https://mcp.linear.app/sse",
-            AuthorizationToken: "your-token-here",
-        },
-    ),
-)
-```
-
-MCP servers can also be configured in YAML configurations for declarative setup.
-
-### Verified Models
-
-Latest models verified to work with Dive:
-
-| Provider  | Model                    | Tools |
-| --------- | ------------------------ | ----- |
-| Anthropic | `claude-opus-4-5`        | Yes   |
-| Anthropic | `claude-sonnet-4-5`      | Yes   |
-| Anthropic | `claude-haiku-4-5`       | Yes   |
-| OpenAI    | `gpt-5.2`                | Yes   |
-| OpenAI    | `o3`                     | Yes   |
-| OpenAI    | `codex`                  | Yes   |
-| Google    | `gemini-3-pro-preview`   | Yes   |
-| Google    | `gemini-2.5-pro`         | Yes   |
-| Grok      | `grok-4-1-fast-reasoning`| Yes   |
-
-**Local Models via Ollama**: Dive supports local model inference through Ollama.
-Models with tool calling support (like `llama3.2`) work best for agentic tasks.
-
-## Tool Use
-
-Tools extend agent capabilities. Dive intentionally aligns its tool interfaces
-and behaviors with Claude Code in many cases. This alignment leverages
-Anthropic's tuning of Claude for these specific tool patterns, making Dive
-agents highly productive out of the box.
-
-Dive includes these built-in tools:
-
-**File Operations**
-- **Read**: Read content from files
-- **Write**: Write content to files
-- **Edit**: Exact string replacements in files (Claude Code aligned)
-- **Glob**: Find files using glob patterns
-- **Grep**: Search file contents with regex (ripgrep-style)
-- **ListDirectory**: List directory contents
-
-**Shell & Execution**
-- **Bash**: Persistent bash sessions with state (Claude Code aligned)
-- **Task**: Spawn subagents for complex subtasks
-
-**Web & Search**
-- **WebSearch**: Search the web using Google or Kagi
-- **WebFetch**: Extract content from webpages via Firecrawl
-
-**Agent Features**
-- **TodoWrite**: Track task progress with todo lists
-- **Skill**: Activate specialized skills
-- **Memory**: Persistent memory files across sessions
-- **AskUserQuestion**: Request user input or clarification
-
-### Tool Annotations
-
-Dive's tool system includes rich annotations that provide hints about tool behavior:
-
-```go
-type ToolAnnotations struct {
-    Title           string      // Human-readable title
-    ReadOnlyHint    bool        // Tool only reads, doesn't modify
-    DestructiveHint bool        // Tool may make destructive changes
-    IdempotentHint  bool        // Tool is safe to call multiple times
-    OpenWorldHint   bool        // Tool accesses external resources
-}
-```
-
-### Custom Tools
-
-Creating custom tools is straightforward using the `TypedTool` interface:
-
-```go
-type SearchTool struct{}
-
-func (t *SearchTool) Name() string { return "search" }
-func (t *SearchTool) Description() string { return "Search for information" }
-func (t *SearchTool) Schema() schema.Schema { /* define parameters */ }
-func (t *SearchTool) Annotations() dive.ToolAnnotations { /* tool hints */ }
-func (t *SearchTool) Call(ctx context.Context, input *SearchInput) (*dive.ToolResult, error) {
-    // Tool implementation
-}
-
-// Use with ToolAdapter for type safety
-tool := dive.ToolAdapter(searchTool)
-```
-
-Go interfaces are in-place to support swapping in different tool implementations.
-
-## Agent Features
-
-Dive provides advanced capabilities for building sophisticated AI agents.
-See the [docs/guides](./docs/guides) directory for detailed documentation.
-
-### Subagents
-
-Spawn specialized child agents for focused subtasks with isolated contexts
-and restricted tool access:
-
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:  "Main Agent",
-    Model: anthropic.New(),
-    Tools: allTools,
-    Subagents: map[string]*dive.SubagentDefinition{
-        "code-reviewer": {
-            Description: "Expert code reviewer for security and quality reviews.",
-            Prompt:      "You are a code review specialist.",
-            Tools:       []string{"Read", "Grep", "Glob"},
-            Model:       "haiku",
-        },
-    },
-})
-```
-
-Subagents can also be loaded from markdown files with YAML frontmatter.
-
-### Skills
-
-Modular capabilities that extend agent functionality through specialized
-instructions with optional tool restrictions:
-
-```markdown
-<!-- .dive/skills/code-reviewer.md -->
----
-name: code-reviewer
-description: Review code for best practices and potential issues.
-allowed-tools:
-  - Read
-  - Grep
-  - Glob
 ---
 
-You are a code reviewer focused on identifying issues and suggesting improvements.
-```
+## Documentation
 
-### Permissions
+### Core Guides
 
-Fine-grained control over tool execution with declarative rules and hooks:
+- [Quick Start](./docs/guides/quick-start.md)
+- [Agents Guide](./docs/guides/agents.md)
+- [Custom Tools](./docs/guides/custom-tools.md)
+- [LLM Guide](./docs/guides/llm-guide.md)
+- [Tools Overview](./docs/guides/tools.md)
 
-```go
-Permission: &dive.PermissionConfig{
-    Mode: dive.PermissionModeDefault,
-    Rules: dive.PermissionRules{
-        dive.DenyCommandRule("bash", "rm -rf *", "Recursive deletion blocked"),
-        dive.AllowRule("read_*"),
-        dive.AllowRule("glob"),
-        dive.AskRule("write_*", "Confirm file write"),
-    },
-}
-```
+### API Reference
 
-### Context Compaction
+- [Agent API](./docs/api/agent.md)
+- [LLM API](./docs/api/llm.md)
+- [Core Types](./docs/api/core.md)
 
-Automatically manage conversation context as it grows, summarizing history
-when token usage exceeds a threshold:
+### Experimental Guides
 
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:  "Assistant",
-    Model: anthropic.New(),
-    Compaction: &dive.CompactionConfig{
-        Enabled:               true,
-        ContextTokenThreshold: 100000,
-    },
-})
-```
+- [MCP Integration](./docs/guides/mcp-integration.md)
+- [Permissions](./docs/guides/permissions.md)
+- [Sandboxing](./docs/guides/sandboxing.md)
+- [Skills](./docs/guides/skills.md)
+- [Slash Commands](./docs/guides/slash-commands.md)
+- [Compaction](./docs/guides/compaction.md)
+- [Todo Lists](./docs/guides/todo-lists.md)
 
-### Todo Lists
+---
 
-Track task progress with the TodoWrite tool and TodoTracker helper:
+## Stability Policy
 
-```go
-tracker := dive.NewTodoTracker()
+### Core Package
 
-resp, err := agent.CreateResponse(ctx,
-    dive.WithInput("Set up a new Go project with testing"),
-    dive.WithEventCallback(tracker.HandleEvent),
-)
+Core packages (`dive`, `llm`, `providers`, `toolkit`) follow **Go standard versioning practices**.
 
-completed, _, total := tracker.Progress()
-fmt.Printf("Completed %d/%d tasks\n", completed, total)
-```
+Breaking changes require a major version increment.
 
-### Thread Management
+### Experimental Packages
 
-Persistent conversation threads with resumption and forking:
+All packages under `experimental/*` have **no stability guarantees**.
 
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:             "Assistant",
-    Model:            anthropic.New(),
-    ThreadRepository: dive.NewMemoryThreadRepository(),
-})
+APIs may change or be removed at any time. Use experimental features when you want cutting-edge functionality and can tolerate API changes.
 
-// First interaction
-resp, err := agent.CreateResponse(ctx,
-    dive.WithThreadID("user-123"),
-    dive.WithInput("My name is Alice"),
-)
+---
 
-// Later - agent remembers context
-resp2, err := agent.CreateResponse(ctx,
-    dive.WithThreadID("user-123"),
-    dive.WithInput("What's my name?"),
-)
-```
+## Contributing
 
-## Contributors
+We welcome contributions!
 
-We're looking for contributors! Whether you're fixing bugs, adding features,
-improving documentation, or spreading the word, your help is appreciated.
+**Core contributions require:**
+
+- Comprehensive tests
+- Documentation for all public APIs
+- Backward compatibility (or discussion for major version changes)
+
+**Experimental contributions:**
+
+- Tests encouraged
+- Documentation encouraged
+- Breaking changes acceptable
+
+See [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions) for questions and feedback.
+
+Please leave a GitHub star if you're interested in the project!

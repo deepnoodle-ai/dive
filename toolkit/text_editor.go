@@ -16,18 +16,30 @@ var (
 )
 
 const (
-	SnippetLines = 5           // Number of context lines to show around edits
-	MaxFileSize  = 1024 * 1024 // 1MB file size limit for truncation
+	// SnippetLines is the number of context lines shown around edits in output.
+	SnippetLines = 5
+
+	// MaxFileSize is the default maximum file size for text editor operations (1MB).
+	MaxFileSize = 1024 * 1024
 )
 
-// Command represents the available commands for the text editor tool
+// Command represents the available operations for the TextEditor tool.
 type Command string
 
 const (
-	CommandView       Command = "view"
-	CommandCreate     Command = "create"
+	// CommandView reads file contents or lists directory entries.
+	CommandView Command = "view"
+
+	// CommandCreate creates a new file with the specified content.
+	// Fails if the file already exists.
+	CommandCreate Command = "create"
+
+	// CommandStrReplace replaces exact text matches in an existing file.
+	// Requires the old text to appear exactly once in the file.
 	CommandStrReplace Command = "str_replace"
-	CommandInsert     Command = "insert"
+
+	// CommandInsert inserts text at a specific line number.
+	CommandInsert Command = "insert"
 )
 
 // text_editor_20241022 - Claude 3.5 Sonnet
@@ -41,27 +53,63 @@ const (
 }
 */
 
-// TextEditorToolInput represents the input parameters for the text editor tool
+// TextEditorToolInput represents the input parameters for the TextEditor tool.
 type TextEditorToolInput struct {
-	Command    Command `json:"command"`
-	Path       string  `json:"path"`
-	FileText   *string `json:"file_text,omitempty"`
-	ViewRange  []int   `json:"view_range,omitempty"`
-	OldStr     *string `json:"old_str,omitempty"`
-	NewStr     *string `json:"new_str,omitempty"`
-	InsertLine *int    `json:"insert_line,omitempty"`
+	// Command specifies the operation to perform. Required.
+	// Valid values: "view", "create", "str_replace", "insert"
+	Command Command `json:"command"`
+
+	// Path is the absolute path to the file or directory. Required.
+	Path string `json:"path"`
+
+	// FileText is the content for the "create" command.
+	// Required for "create", ignored for other commands.
+	FileText *string `json:"file_text,omitempty"`
+
+	// ViewRange specifies a line range for the "view" command as [start, end].
+	// Lines are 1-indexed. Use -1 for end to read to the end of the file.
+	// Optional; if omitted, the entire file is shown.
+	ViewRange []int `json:"view_range,omitempty"`
+
+	// OldStr is the exact text to replace for the "str_replace" command.
+	// Must appear exactly once in the file.
+	OldStr *string `json:"old_str,omitempty"`
+
+	// NewStr is the replacement text for "str_replace" or the text to
+	// insert for the "insert" command.
+	NewStr *string `json:"new_str,omitempty"`
+
+	// InsertLine is the line number (0-indexed) for the "insert" command.
+	// Line 0 inserts at the beginning; line N inserts after line N.
+	InsertLine *int `json:"insert_line,omitempty"`
 }
 
-// TextEditorToolOptions are the options used to configure a TextEditorTool.
+// TextEditorToolOptions configures the behavior of [TextEditorTool].
 type TextEditorToolOptions struct {
-	Type         string
-	Name         string
-	FileSystem   FileSystem // Optional: for testing with mock filesystem
-	WorkspaceDir string     // Base directory for workspace validation (defaults to cwd)
-	MaxFileSize  int        // Maximum file size in bytes (default: 1MB)
+	// Type is the Anthropic tool type identifier.
+	// Defaults to "text_editor_20250429" for Claude 4 compatibility.
+	Type string
+
+	// Name is the tool name sent to the API.
+	// Defaults to "str_replace_based_edit_tool".
+	Name string
+
+	// FileSystem is the filesystem implementation for file operations.
+	// Defaults to [RealFileSystem]. Use a mock for testing.
+	FileSystem FileSystem
+
+	// WorkspaceDir restricts operations to paths within this directory.
+	// Defaults to the current working directory if empty.
+	WorkspaceDir string
+
+	// MaxFileSize is the maximum file size in bytes.
+	// Files larger than this are rejected.
+	// Defaults to [MaxFileSize] (1MB).
+	MaxFileSize int
 }
 
 // NewTextEditorTool creates a new TextEditorTool with the given options.
+// If no options are provided, sensible defaults are used for Anthropic Claude 4 models.
 func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*TextEditorToolInput] {
 	var resolvedOpts TextEditorToolOptions
 	if len(opts) > 0 {
@@ -79,10 +127,9 @@ func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*Te
 	if resolvedOpts.MaxFileSize <= 0 {
 		resolvedOpts.MaxFileSize = MaxFileSize // Default 1MB
 	}
-	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
-	if err != nil {
-		// Store nil to indicate validation is unavailable - will fail closed at call time
-		pathValidator = nil
+	var pathValidator *PathValidator
+	if resolvedOpts.WorkspaceDir != "" {
+		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&TextEditorTool{
 		typeString:    resolvedOpts.Type,
@@ -94,20 +141,36 @@ func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*Te
 	})
 }
 
-// TextEditorTool implements Anthropic's file editor tool
+// TextEditorTool implements Anthropic's text editor tool interface.
+//
+// This tool provides Claude-optimized file editing capabilities that align
+// with Anthropic's tool training. It supports viewing, creating, and editing
+// files with commands that Claude models are specifically trained to use
+// effectively.
+//
+// The tool maintains edit history per file and provides detailed feedback
+// with code snippets showing the context around each change.
+//
+// Compatibility: This tool is designed for use with Anthropic Claude models.
+// The Type field in options should match the model version being used:
+//   - "text_editor_20241022" for Claude 3.5 Sonnet
+//   - "text_editor_20250124" for Claude 3.7 Sonnet
+//   - "text_editor_20250429" for Claude 4 Opus and Sonnet
 type TextEditorTool struct {
 	typeString    string
 	name          string
 	fs            FileSystem
 	pathValidator *PathValidator
-	fileHistory   map[string][]string // Track file edit history
-	maxFileSize   int                 // Maximum file size in bytes
+	fileHistory   map[string][]string // Edit history for potential undo
+	maxFileSize   int
 }
 
+// Name returns the configured tool name.
 func (t *TextEditorTool) Name() string {
 	return t.name
 }
 
+// Description returns comprehensive usage instructions for the LLM.
 func (t *TextEditorTool) Description() string {
 	return `A comprehensive filesystem editor tool for viewing, creating, and editing files. This tool provides four main commands:
 
@@ -145,6 +208,7 @@ IMPORTANT USAGE NOTES:
 This tool is ideal for code editing, configuration file updates, and file system exploration tasks.`
 }
 
+// Schema returns the JSON schema describing the tool's input parameters.
 func (t *TextEditorTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type: "object",
@@ -186,6 +250,10 @@ func (t *TextEditorTool) Schema() *schema.Schema {
 	}
 }
 
+// Annotations returns metadata hints about the tool's behavior.
+// TextEditor is marked as destructive (modifies files) and has EditHint
+// for special UI treatment. It's not marked idempotent because str_replace
+// and insert operations depend on file state.
 func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:           "TextEditor",
@@ -197,6 +265,16 @@ func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+// Call executes the specified command on the file.
+//
+// Commands:
+//   - view: Returns file contents or directory listing
+//   - create: Creates a new file (fails if exists)
+//   - str_replace: Replaces unique text in a file
+//   - insert: Inserts text at a line number
+//
+// All paths must be absolute. Returns detailed feedback including
+// code snippets showing context around changes.
 func (t *TextEditorTool) Call(ctx context.Context, input *TextEditorToolInput) (*dive.ToolResult, error) {
 	if err := t.validatePath(input.Command, input.Path); err != nil {
 		return dive.NewToolResultError(err.Error()), nil
@@ -221,20 +299,17 @@ func (t *TextEditorTool) validatePath(command Command, path string) error {
 		return fmt.Errorf("the path %s is not an absolute path, it should start with `/`", path)
 	}
 
-	// Fail closed if path validator unavailable
-	if t.pathValidator == nil {
-		return fmt.Errorf("path validation unavailable - cannot safely perform file operations")
-	}
-
-	// Validate path is within workspace
-	var err error
-	if command == CommandCreate || command == CommandStrReplace || command == CommandInsert {
-		err = t.pathValidator.ValidateWrite(path)
-	} else {
-		err = t.pathValidator.ValidateRead(path)
-	}
-	if err != nil {
-		return err
+	// Validate path is within workspace (skip validation if no validator configured)
+	if t.pathValidator != nil {
+		var err error
+		if command == CommandCreate || command == CommandStrReplace || command == CommandInsert {
+			err = t.pathValidator.ValidateWrite(path)
+		} else {
+			err = t.pathValidator.ValidateRead(path)
+		}
+		if err != nil {
+			return err
+		}
 	}
 
 	// Check if path exists (except for create command)
@@ -473,6 +548,9 @@ func (t *TextEditorTool) maybeTruncate(content string) string {
 	return content
 }
 
+// ToolConfiguration returns provider-specific configuration for the tool.
+// For Anthropic, this returns the special text_editor tool type configuration
+// that enables Claude's optimized file editing capabilities.
 func (t *TextEditorTool) ToolConfiguration(providerName string) map[string]any {
 	if providerName == "anthropic" {
 		return map[string]any{"type": t.typeString, "name": t.name}

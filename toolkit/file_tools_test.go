@@ -378,3 +378,226 @@ func TestPathValidator(t *testing.T) {
 		assert.True(t, IsPathAccessError(err))
 	})
 }
+
+func TestReadFileTool_WithOffsetAndLimit(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "read_offset_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a file with multiple lines
+	content := "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10"
+	testFile := filepath.Join(tempDir, "multiline.txt")
+	err = os.WriteFile(testFile, []byte(content), 0644)
+	assert.NoError(t, err)
+
+	tool := NewReadFileTool(ReadFileToolOptions{
+		MaxSize:      10000,
+		WorkspaceDir: tempDir,
+	})
+
+	t.Run("ReadWithOffset", func(t *testing.T) {
+		result, err := tool.Call(context.Background(), &ReadFileInput{
+			FilePath: testFile,
+			Offset:   3,
+			Limit:    3,
+		})
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
+
+		output := result.Content[0].Text
+		assert.Contains(t, output, "line 3")
+		assert.Contains(t, output, "line 4")
+		assert.Contains(t, output, "line 5")
+		assert.NotContains(t, output, "line 1")
+		assert.NotContains(t, output, "line 6")
+	})
+
+	t.Run("ReadFromBeginningWithLimit", func(t *testing.T) {
+		result, err := tool.Call(context.Background(), &ReadFileInput{
+			FilePath: testFile,
+			Limit:    2,
+		})
+		assert.NoError(t, err)
+		assert.False(t, result.IsError)
+
+		output := result.Content[0].Text
+		assert.Contains(t, output, "line 1")
+		assert.Contains(t, output, "line 2")
+		assert.NotContains(t, output, "line 3")
+	})
+}
+
+func TestReadFileTool_BinaryFile(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "read_binary_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a binary file with null bytes
+	binaryContent := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE}
+	binaryFile := filepath.Join(tempDir, "binary.bin")
+	err = os.WriteFile(binaryFile, binaryContent, 0644)
+	assert.NoError(t, err)
+
+	tool := NewReadFileTool(ReadFileToolOptions{
+		MaxSize:      10000,
+		WorkspaceDir: tempDir,
+	})
+
+	result, err := tool.Call(context.Background(), &ReadFileInput{
+		FilePath: binaryFile,
+	})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "binary file")
+}
+
+func TestReadFileTool_Directory(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "read_dir_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	tool := NewReadFileTool(ReadFileToolOptions{
+		MaxSize:      10000,
+		WorkspaceDir: tempDir,
+	})
+
+	result, err := tool.Call(context.Background(), &ReadFileInput{
+		FilePath: tempDir,
+	})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "directory")
+}
+
+func TestReadFileTool_NoValidator(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "read_novalidator_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.txt")
+	err = os.WriteFile(testFile, []byte("content"), 0644)
+	assert.NoError(t, err)
+
+	// Create tool without workspace dir
+	tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+
+	result, err := tool.Call(context.Background(), &ReadFileInput{
+		FilePath: testFile,
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Equal(t, "content", result.Content[0].Text)
+}
+
+func TestReadFileTool_PreviewCall(t *testing.T) {
+	tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+	ctx := context.Background()
+
+	input := &ReadFileInput{
+		FilePath: "/path/to/file.txt",
+	}
+
+	preview := tool.PreviewCall(ctx, input)
+	assert.Contains(t, preview.Summary, "/path/to/file.txt")
+}
+
+func TestReadFileTool_Annotations(t *testing.T) {
+	tool := NewReadFileTool(ReadFileToolOptions{MaxSize: 10000})
+	annotations := tool.Annotations()
+
+	assert.Equal(t, "Read", annotations.Title)
+	assert.True(t, annotations.ReadOnlyHint)
+	assert.False(t, annotations.DestructiveHint)
+	assert.True(t, annotations.IdempotentHint)
+}
+
+func TestWriteFileTool_OverwriteExisting(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "write_overwrite_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "existing.txt")
+	err = os.WriteFile(testFile, []byte("original content"), 0644)
+	assert.NoError(t, err)
+
+	tool := NewWriteFileTool(WriteFileToolOptions{WorkspaceDir: tempDir})
+
+	result, err := tool.Call(context.Background(), &WriteFileInput{
+		FilePath: testFile,
+		Content:  "new content",
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	content, err := os.ReadFile(testFile)
+	assert.NoError(t, err)
+	assert.Equal(t, "new content", string(content))
+}
+
+func TestWriteFileTool_NoValidator(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "write_novalidator_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "test.txt")
+
+	// Create tool without workspace dir
+	tool := NewWriteFileTool(WriteFileToolOptions{})
+
+	result, err := tool.Call(context.Background(), &WriteFileInput{
+		FilePath: testFile,
+		Content:  "content",
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	content, err := os.ReadFile(testFile)
+	assert.NoError(t, err)
+	assert.Equal(t, "content", string(content))
+}
+
+func TestWriteFileTool_PreviewCall(t *testing.T) {
+	tool := NewWriteFileTool(WriteFileToolOptions{})
+	ctx := context.Background()
+
+	input := &WriteFileInput{
+		FilePath: "/path/to/file.txt",
+		Content:  "some content here",
+	}
+
+	preview := tool.PreviewCall(ctx, input)
+	assert.Contains(t, preview.Summary, "/path/to/file.txt")
+	assert.Contains(t, preview.Details, "17 bytes")
+}
+
+func TestWriteFileTool_Annotations(t *testing.T) {
+	tool := NewWriteFileTool(WriteFileToolOptions{})
+	annotations := tool.Annotations()
+
+	assert.Equal(t, "Write", annotations.Title)
+	assert.False(t, annotations.ReadOnlyHint)
+	assert.True(t, annotations.DestructiveHint)
+	assert.True(t, annotations.IdempotentHint)
+	assert.True(t, annotations.EditHint)
+}
+
+func TestWriteFileTool_EmptyContent(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "write_empty_test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	testFile := filepath.Join(tempDir, "empty.txt")
+
+	tool := NewWriteFileTool(WriteFileToolOptions{WorkspaceDir: tempDir})
+
+	result, err := tool.Call(context.Background(), &WriteFileInput{
+		FilePath: testFile,
+		Content:  "",
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	content, err := os.ReadFile(testFile)
+	assert.NoError(t, err)
+	assert.Equal(t, "", string(content))
+}

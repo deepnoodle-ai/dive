@@ -148,11 +148,6 @@ type Response struct {
 	// ID is a unique identifier for this response
 	ID string `json:"id,omitempty"`
 
-	// SessionID is the conversation session ID associated with this response.
-	// If no session ID was provided in the request, one is auto-generated.
-	// Use this value to resume the conversation in subsequent requests.
-	SessionID string `json:"session_id,omitempty"`
-
 	// Model represents the model that generated the response
 	Model string `json:"model,omitempty"`
 

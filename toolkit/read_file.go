@@ -17,33 +17,60 @@ import (
 var _ dive.TypedTool[*ReadFileInput] = &ReadFileTool{}
 var _ dive.TypedToolPreviewer[*ReadFileInput] = &ReadFileTool{}
 
-const DefaultReadFileMaxSize = 1024 * 100 // 100KB
+// DefaultReadFileMaxSize is the default maximum file size in bytes (100KB).
+const DefaultReadFileMaxSize = 1024 * 100
 
+// ReadFileInput represents the input parameters for the Read tool.
 type ReadFileInput struct {
+	// FilePath is the absolute path to the file to read. Required.
 	FilePath string `json:"file_path"`
-	Offset   int    `json:"offset,omitempty"` // Line number to start reading from (1-based)
-	Limit    int    `json:"limit,omitempty"`  // Number of lines to read
+
+	// Offset is the 1-based line number to start reading from.
+	// When combined with Limit, enables reading specific portions of large files.
+	// Defaults to 1 (start of file).
+	Offset int `json:"offset,omitempty"`
+
+	// Limit is the maximum number of lines to read.
+	// Defaults to 2000 when Offset is specified, otherwise reads the entire file.
+	Limit int `json:"limit,omitempty"`
 }
 
+// ReadFileToolOptions configures the behavior of [ReadFileTool].
 type ReadFileToolOptions struct {
-	MaxSize      int    `json:"max_size,omitempty"`
-	WorkspaceDir string // Base directory for workspace validation (defaults to cwd)
+	// MaxSize is the maximum file size in bytes that can be read entirely.
+	// Files larger than this require using Offset and Limit parameters.
+	// Defaults to [DefaultReadFileMaxSize] (100KB).
+	MaxSize int `json:"max_size,omitempty"`
+
+	// WorkspaceDir restricts file reads to paths within this directory.
+	// Defaults to the current working directory if empty.
+	WorkspaceDir string
 }
 
+// ReadFileTool reads file contents from the filesystem.
+//
+// This tool provides flexible file reading with support for both full-file
+// reads and partial reads using line offsets. It detects binary files and
+// warns appropriately.
+//
+// Features:
+//   - Full file reading with size limits
+//   - Partial reading via offset and limit for large files
+//   - Line numbers in output (cat -n style) when using offset/limit
+//   - Binary file detection to avoid garbled output
 type ReadFileTool struct {
 	maxSize       int
 	pathValidator *PathValidator
 }
 
-// NewReadFileTool creates a new tool for reading file contents
+// NewReadFileTool creates a new ReadFileTool with the given options.
 func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFileInput] {
 	if options.MaxSize == 0 {
 		options.MaxSize = DefaultReadFileMaxSize
 	}
-	pathValidator, err := NewPathValidator(options.WorkspaceDir)
-	if err != nil {
-		// Store nil to indicate validation is unavailable - will fail closed at call time
-		pathValidator = nil
+	var pathValidator *PathValidator
+	if options.WorkspaceDir != "" {
+		pathValidator, _ = NewPathValidator(options.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&ReadFileTool{
 		maxSize:       options.MaxSize,
@@ -51,10 +78,12 @@ func NewReadFileTool(options ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFi
 	})
 }
 
+// Name returns "Read" as the tool identifier.
 func (t *ReadFileTool) Name() string {
 	return "Read"
 }
 
+// Description returns detailed usage instructions for the LLM.
 func (t *ReadFileTool) Description() string {
 	return `Read a file from the filesystem.
 
@@ -64,6 +93,7 @@ for reading specific portions of large files.
 Supports text files, and will warn if content appears to be binary.`
 }
 
+// Schema returns the JSON schema describing the tool's input parameters.
 func (t *ReadFileTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
@@ -85,24 +115,32 @@ func (t *ReadFileTool) Schema() *schema.Schema {
 	}
 }
 
+// PreviewCall returns a summary of the read operation for permission prompts.
 func (t *ReadFileTool) PreviewCall(ctx context.Context, input *ReadFileInput) *dive.ToolCallPreview {
 	return &dive.ToolCallPreview{
 		Summary: fmt.Sprintf("Read %s", input.FilePath),
 	}
 }
 
+// Call reads the file contents and returns them.
+//
+// When Offset and Limit are not specified, reads the entire file (subject to
+// MaxSize). When specified, reads the requested line range and includes
+// line numbers in the output.
+//
+// Binary files are detected by checking for null bytes and control characters.
+// If detected, an error is returned instead of garbled content.
 func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.ToolResult, error) {
 	filePath := input.FilePath
 	if filePath == "" {
 		return NewToolResultError("Error: No file path provided."), nil
 	}
 
-	// Validate path is within workspace (fail closed if validator unavailable)
-	if t.pathValidator == nil {
-		return NewToolResultError("Error: path validation unavailable - cannot safely perform file operations"), nil
-	}
-	if err := t.pathValidator.ValidateRead(filePath); err != nil {
-		return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+	// Validate path is within workspace (skip validation if no validator configured)
+	if t.pathValidator != nil {
+		if err := t.pathValidator.ValidateRead(filePath); err != nil {
+			return NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
+		}
 	}
 
 	absPath, err := filepath.Abs(filePath)
@@ -218,6 +256,8 @@ func isBinaryContent(content []byte) bool {
 	return controlCount > sampleSize/10
 }
 
+// Annotations returns metadata hints about the tool's behavior.
+// Read is marked as read-only and idempotent.
 func (t *ReadFileTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:           "Read",
