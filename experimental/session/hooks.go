@@ -72,6 +72,9 @@ func Loader(repo Repository) dive.PreGenerationHook {
 		}
 
 		// Store session for the Saver hook
+		if state.Values == nil {
+			state.Values = map[string]any{}
+		}
 		state.Values["session"] = session
 
 		// Prepend existing messages to the new messages
@@ -142,6 +145,9 @@ func (o LoaderWithOptions) Build() dive.PreGenerationHook {
 			return err
 		}
 
+		if state.Values == nil {
+			state.Values = map[string]any{}
+		}
 		state.Values["session"] = session
 
 		if len(session.Messages) > 0 {

@@ -99,7 +99,7 @@ Permission rules can be loaded from `.dive/settings.json`:
 
 When using the full `PermissionManager`:
 
-```
+```text
 PreToolUse Hooks -> Session Allowlist -> Deny Rules -> Allow Rules -> Ask Rules -> Mode Check -> Execute
 ```
 

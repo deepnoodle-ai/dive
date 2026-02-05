@@ -1,4 +1,4 @@
-// Package toolkit provides tools for AI agents.
+// Package extended provides extended tools for AI agents.
 package extended
 
 import (

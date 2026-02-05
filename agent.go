@@ -269,8 +269,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	return response, nil
 }
 
-// prepareMessages processes the ChatAgentOptions to create messages for the LLM.
-// It handles both WithMessages and WithInput options.
+// prepareMessages returns the messages from the provided options.
 func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 	return options.Messages
 }

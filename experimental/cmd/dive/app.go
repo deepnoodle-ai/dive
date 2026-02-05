@@ -1931,7 +1931,7 @@ func (a *App) ConfirmTool(ctx context.Context, toolName, summary string, input [
 
 		// Handle user feedback (denied with message)
 		if !result.Approved && result.Feedback != "" {
-			return false, fmt.Errorf("user feedback: %s", result.Feedback)
+			return false, dive.NewUserFeedback(result.Feedback)
 		}
 
 		return result.Approved, nil

@@ -150,6 +150,10 @@ func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolRes
 		return NewToolResultError(fmt.Sprintf("URL validation failed: %s", err)), nil
 	}
 
+	if t.fetcher == nil {
+		return NewToolResultError("fetch tool has no fetcher configured"), nil
+	}
+
 	req.Formats = []string{"markdown"}
 
 	if req.ExcludeTags == nil {

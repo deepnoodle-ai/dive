@@ -86,7 +86,11 @@ func runPrint(ctx *cli.Context) error {
 	// Get workspace
 	workspaceDir := ctx.String("workspace")
 	if workspaceDir == "" {
-		workspaceDir, _ = os.Getwd()
+		var err error
+		workspaceDir, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get working directory: %w", err)
+		}
 	}
 
 	// Get model

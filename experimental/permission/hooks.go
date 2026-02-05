@@ -158,7 +158,9 @@ func AuditHook(logger func(toolName string, input []byte)) dive.PreToolUseHook {
 		if hookCtx.Call != nil {
 			input = hookCtx.Call.Input
 		}
-		logger(toolName, input)
+		if logger != nil {
+			logger(toolName, input)
+		}
 		return dive.ContinueResult(), nil
 	}
 }

@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -529,7 +530,8 @@ func NewUserFeedback(feedback string) error {
 // IsUserFeedback checks if an error is user feedback and returns the feedback text.
 // Returns the feedback string and true if it's user feedback, empty string and false otherwise.
 func IsUserFeedback(err error) (string, bool) {
-	if uf, ok := err.(*UserFeedbackError); ok {
+	var uf *UserFeedbackError
+	if errors.As(err, &uf) {
 		return uf.Feedback, true
 	}
 	return "", false
