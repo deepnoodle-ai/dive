@@ -68,10 +68,8 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     Model:        model,
     PreGeneration: []dive.PreGenerationHook{
         func(ctx context.Context, state *dive.GenerationState) error {
-            // Load session history
-            if history, ok := loadHistory(state.SessionID); ok {
-                state.Messages = append(history, state.Messages...)
-            }
+            // Inject additional context before generation
+            state.SystemPrompt += "\nToday is Wednesday."
             return nil
         },
     },
@@ -80,7 +78,6 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 
 The `GenerationState` provides mutable access to:
 
-- `SessionID`, `UserID` - identifiers
 - `SystemPrompt` - modifiable system prompt
 - `Messages` - modifiable message list
 - `Values` - arbitrary data shared between hooks
@@ -92,8 +89,11 @@ Runs after generation completes. Use it to save sessions, log results, or trigge
 ```go
 PostGeneration: []dive.PostGenerationHook{
     func(ctx context.Context, state *dive.GenerationState) error {
-        // Save session
-        return saveHistory(state.SessionID, state.Messages, state.OutputMessages)
+        // Log token usage after generation
+        if state.Usage != nil {
+            log.Printf("Tokens used: %d input, %d output", state.Usage.InputTokens, state.Usage.OutputTokens)
+        }
+        return nil
     },
 },
 ```
@@ -148,8 +148,6 @@ response, err := agent.CreateResponse(ctx,
     dive.WithInput("Analyze this codebase"),
     dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
         switch item.Type {
-        case dive.ResponseItemTypeInit:
-            fmt.Printf("Session: %s\n", item.Init.SessionID)
         case dive.ResponseItemTypeMessage:
             // Complete assistant message
         case dive.ResponseItemTypeToolCall:

@@ -28,8 +28,3 @@ These cover packages in `experimental/` with unstable APIs:
 - [Sandboxing](design/sandboxing.md) - Sandboxing design
 - [Sandboxing Review](design/sandboxing-review.md) - Sandboxing design review
 - [Sandboxing Network Proxy](design/sandboxing-network-proxy.md) - Network proxy design
-
-## Links
-
-- [GitHub Repository](https://github.com/deepnoodle-ai/dive)
-- [Discord Community](https://discord.gg/yrcuURWk)

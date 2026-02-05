@@ -117,8 +117,6 @@ response, err := agent.CreateResponse(ctx,
     dive.WithInput("Analyze the project structure"),
     dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
         switch item.Type {
-        case dive.ResponseItemTypeInit:
-            fmt.Printf("Session: %s\n", item.Init.SessionID)
         case dive.ResponseItemTypeToolCall:
             fmt.Printf("Calling tool: %s\n", item.ToolCall.Name)
         case dive.ResponseItemTypeModelEvent:
