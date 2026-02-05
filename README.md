@@ -196,12 +196,25 @@ any time.
 
 ## Examples
 
-Examples in `examples/programs/`:
+Run examples from the `examples/` directory:
 
 ```bash
-go run ./examples/programs/llm_example
-go run ./examples/programs/google_example
-go run ./examples/programs/ollama_example
+cd examples
+
+# Claude runs Python to compute 53^4 (Anthropic)
+go run ./programs/code_execution_example
+
+# Agent with web search (Anthropic)
+go run ./programs/server_tools_example
+
+# Vision: describe an image from a URL (Anthropic)
+go run ./programs/image_example
+
+# Document analysis with source citations (Anthropic)
+go run ./programs/citations_example
+
+# Web search, reasoning, structured output, and MCP (OpenAI)
+go run ./programs/openai_responses_example
 ```
 
 ## Documentation
