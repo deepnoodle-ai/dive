@@ -218,6 +218,7 @@ func WithReasoningEffort(reasoningEffort ReasoningEffort) Option {
 	}
 }
 
+// ReasoningSummary controls whether and how reasoning content is summarized.
 type ReasoningSummary string
 
 const (

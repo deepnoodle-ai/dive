@@ -12,7 +12,7 @@ import (
 	"github.com/deepnoodle-ai/wonton/web"
 )
 
-const DefaultImageURL = "https://upload.wikimedia.org/wikipedia/commons/f/f1/Kusuma_bike_large.jpg"
+const DefaultImageURL = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400"
 
 func main() {
 	var prompt, url string

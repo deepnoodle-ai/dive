@@ -23,45 +23,105 @@ var (
 	_ dive.TypedToolPreviewer[*GrepInput] = &GrepTool{}
 )
 
-// GrepOutputMode specifies what type of output to produce
+// GrepOutputMode specifies what type of output to produce from a grep search.
 type GrepOutputMode string
 
 const (
-	GrepOutputContent          GrepOutputMode = "content"
+	// GrepOutputContent returns matching lines with file paths and line numbers.
+	GrepOutputContent GrepOutputMode = "content"
+
+	// GrepOutputFilesWithMatches returns only the paths of files containing matches.
+	// This is the default mode.
 	GrepOutputFilesWithMatches GrepOutputMode = "files_with_matches"
-	GrepOutputCount            GrepOutputMode = "count"
+
+	// GrepOutputCount returns the count of matches per file.
+	GrepOutputCount GrepOutputMode = "count"
 )
 
-// GrepInput represents the input parameters for the grep tool
+// GrepInput represents the input parameters for the Grep tool.
 type GrepInput struct {
-	Pattern    string         `json:"pattern"`
-	Path       string         `json:"path,omitempty"`
-	Glob       string         `json:"glob,omitempty"`
-	Type       string         `json:"type,omitempty"`
+	// Pattern is the regular expression to search for. Required.
+	Pattern string `json:"pattern"`
+
+	// Path is the file or directory to search in.
+	// Defaults to the current working directory if empty.
+	Path string `json:"path,omitempty"`
+
+	// Glob filters files by pattern (e.g., "*.go", "*.{ts,tsx}").
+	Glob string `json:"glob,omitempty"`
+
+	// Type filters files by type (e.g., "go", "ts", "py", "js", "rust").
+	// More efficient than Glob for common file types.
+	Type string `json:"type,omitempty"`
+
+	// OutputMode controls the format of results.
+	// Defaults to GrepOutputFilesWithMatches.
 	OutputMode GrepOutputMode `json:"output_mode,omitempty"`
-	CaseInsens bool           `json:"-i,omitempty"`         // Case insensitive search
-	ShowLines  bool           `json:"-n,omitempty"`         // Show line numbers (default true)
-	Context    int            `json:"-C,omitempty"`         // Lines before and after each match
-	Before     int            `json:"-B,omitempty"`         // Lines before each match
-	After      int            `json:"-A,omitempty"`         // Lines after each match
-	Multiline  bool           `json:"multiline,omitempty"`  // Enable multiline mode
-	HeadLimit  int            `json:"head_limit,omitempty"` // Limit output to first N entries
-	Offset     int            `json:"offset,omitempty"`     // Skip first N entries
+
+	// CaseInsens enables case-insensitive matching.
+	CaseInsens bool `json:"-i,omitempty"`
+
+	// ShowLines includes line numbers in output (default true).
+	// Only applies when OutputMode is GrepOutputContent.
+	ShowLines bool `json:"-n,omitempty"`
+
+	// Context shows N lines before and after each match.
+	// Only applies when OutputMode is GrepOutputContent.
+	Context int `json:"-C,omitempty"`
+
+	// Before shows N lines before each match.
+	Before int `json:"-B,omitempty"`
+
+	// After shows N lines after each match.
+	After int `json:"-A,omitempty"`
+
+	// Multiline enables patterns to match across line boundaries.
+	// In this mode, . matches newlines and patterns can span multiple lines.
+	Multiline bool `json:"multiline,omitempty"`
+
+	// HeadLimit restricts output to the first N entries.
+	// Defaults to 0 (unlimited, up to MaxResults).
+	HeadLimit int `json:"head_limit,omitempty"`
+
+	// Offset skips the first N entries before applying HeadLimit.
+	Offset int `json:"offset,omitempty"`
 }
 
-// GrepToolOptions configures the GrepTool
+// GrepToolOptions configures the behavior of [GrepTool].
 type GrepToolOptions struct {
-	// DefaultExcludes are glob patterns to exclude by default
+	// DefaultExcludes are glob patterns to exclude from searches.
+	// Common defaults include node_modules, .git, vendor, etc.
 	DefaultExcludes []string
-	// MaxResults limits the number of results
+
+	// MaxResults limits the total number of matches returned.
+	// Defaults to 1000 if not specified.
 	MaxResults int
-	// UseRipgrep attempts to use ripgrep if available
+
+	// UseRipgrep enables using ripgrep (rg) when available.
+	// Ripgrep is significantly faster for large codebases.
+	// Falls back to Go regexp if ripgrep is not installed.
 	UseRipgrep bool
-	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+
+	// WorkspaceDir restricts searches to paths within this directory.
+	// Defaults to the current working directory if empty.
 	WorkspaceDir string
 }
 
-// GrepTool is a tool for searching file contents using regex patterns
+// GrepTool searches file contents using regular expressions.
+//
+// This tool is essential for finding code patterns, function definitions,
+// usages, and other text within a codebase. It supports both ripgrep
+// (when available) and a pure Go fallback implementation.
+//
+// Features:
+//   - Full regex syntax with optional case-insensitive and multiline modes
+//   - File type and glob pattern filtering
+//   - Multiple output modes: content, file list, or counts
+//   - Context lines around matches
+//   - Automatic exclusion of non-source directories
+//
+// Performance: When ripgrep is available and UseRipgrep is true, searches
+// are significantly faster, especially in large codebases.
 type GrepTool struct {
 	defaultExcludes []string
 	maxResults      int
@@ -70,7 +130,8 @@ type GrepTool struct {
 	pathValidator   *PathValidator
 }
 
-// NewGrepTool creates a new GrepTool
+// NewGrepTool creates a new GrepTool with the given options.
+// If no options are provided, sensible defaults are used.
 func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 	var resolvedOpts GrepToolOptions
 	if len(opts) > 0 {
@@ -99,9 +160,9 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 		}
 	}
 
-	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
-	if err != nil {
-		pathValidator = &PathValidator{}
+	var pathValidator *PathValidator
+	if resolvedOpts.WorkspaceDir != "" {
+		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
 	}
 
 	return dive.ToolAdapter(&GrepTool{
@@ -113,10 +174,12 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 	})
 }
 
+// Name returns "Grep" as the tool identifier.
 func (t *GrepTool) Name() string {
 	return "Grep"
 }
 
+// Description returns detailed usage instructions for the LLM.
 func (t *GrepTool) Description() string {
 	return `Search file contents using regular expressions.
 
@@ -143,6 +206,7 @@ Examples:
 - Show context around matches: {"pattern": "error", "-C": 3, "output_mode": "content"}`
 }
 
+// Schema returns the JSON schema describing the tool's input parameters.
 func (t *GrepTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
@@ -205,6 +269,8 @@ func (t *GrepTool) Schema() *schema.Schema {
 	}
 }
 
+// Annotations returns metadata hints about the tool's behavior.
+// Grep is marked as read-only and idempotent.
 func (t *GrepTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:           "Grep",
@@ -215,6 +281,7 @@ func (t *GrepTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+// PreviewCall returns a summary of the search operation for permission prompts.
 func (t *GrepTool) PreviewCall(ctx context.Context, input *GrepInput) *dive.ToolCallPreview {
 	searchPath := input.Path
 	if searchPath == "" {
@@ -231,6 +298,11 @@ func (t *GrepTool) PreviewCall(ctx context.Context, input *GrepInput) *dive.Tool
 	}
 }
 
+// Call searches for the pattern and returns matches in the requested format.
+//
+// The search is performed using ripgrep if available and enabled, otherwise
+// using Go's built-in regexp package. Results are formatted according to
+// the OutputMode setting.
 func (t *GrepTool) Call(ctx context.Context, input *GrepInput) (*dive.ToolResult, error) {
 	// Use ripgrep if available
 	if t.ripgrepPath != "" {
@@ -250,8 +322,8 @@ func (t *GrepTool) callRipgrep(ctx context.Context, input *GrepInput) (*dive.Too
 		}
 	}
 
-	// Validate path is within workspace
-	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+	// Validate path is within workspace (skip validation if no validator configured)
+	if t.pathValidator != nil {
 		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
 			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 		}
@@ -316,7 +388,8 @@ func (t *GrepTool) callRipgrep(ctx context.Context, input *GrepInput) (*dive.Too
 	return t.parseRipgrepOutput(stdout.String(), searchPath, input)
 }
 
-// ripgrepMatch represents a match from ripgrep's JSON output
+// ripgrepMatch represents a single match from ripgrep's JSON output format.
+// This struct maps to ripgrep's --json output for parsing results.
 type ripgrepMatch struct {
 	Type string `json:"type"`
 	Data struct {
@@ -383,8 +456,8 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 		searchPath = filepath.Join(cwd, searchPath)
 	}
 
-	// Validate path is within workspace
-	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+	// Validate path is within workspace (skip validation if no validator configured)
+	if t.pathValidator != nil {
 		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
 			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 		}
@@ -535,12 +608,14 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 	return t.formatResults(matches, input)
 }
 
+// grepMatch represents a single match found during a search.
 type grepMatch struct {
-	file       string
-	lineNumber int
-	line       string
+	file       string // Relative path to the file containing the match
+	lineNumber int    // 1-based line number of the match
+	line       string // Content of the matching line
 }
 
+// formatResults converts matches into the output format specified by OutputMode.
 func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.ToolResult, error) {
 	if len(matches) == 0 {
 		return t.formatNoMatches(input), nil
@@ -618,6 +693,7 @@ func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.T
 	return dive.NewToolResultText(strings.TrimSpace(result.String())).WithDisplay(display), nil
 }
 
+// formatNoMatches returns a result indicating no matches were found.
 func (t *GrepTool) formatNoMatches(input *GrepInput) *dive.ToolResult {
 	display := fmt.Sprintf("No matches found for %q", input.Pattern)
 	return dive.NewToolResultText("No matches found").WithDisplay(display)

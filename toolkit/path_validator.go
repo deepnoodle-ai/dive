@@ -7,13 +7,24 @@ import (
 	"strings"
 )
 
-// PathValidator provides workspace-based path validation for tools.
-// By default, read operations are allowed within the workspace directory.
-// Write operations and access outside the workspace require explicit approval
-// at the agent level.
+// PathValidator enforces workspace boundaries for file operations.
+//
+// This is a security component that prevents tools from accessing files
+// outside a designated workspace directory. It resolves symlinks to prevent
+// symlink-based path traversal attacks.
+//
+// Usage:
+//
+//	validator, err := NewPathValidator("/workspace")
+//	if err := validator.ValidateRead("/workspace/file.txt"); err != nil {
+//	    // Access denied
+//	}
+//
+// The validator is used internally by tools like [ReadFileTool], [WriteFileTool],
+// [EditTool], and others when a WorkspaceDir is configured.
 type PathValidator struct {
-	// WorkspaceDir is the base directory for workspace operations.
-	// Defaults to current working directory if empty.
+	// WorkspaceDir is the resolved absolute path to the workspace root.
+	// All validated paths must be within this directory tree.
 	WorkspaceDir string
 }
 
@@ -171,14 +182,23 @@ func (v *PathValidator) ValidateWrite(path string) error {
 	return nil
 }
 
-// PathAccessError is returned when a path access is denied.
+// PathAccessError is returned when a path access is denied by [PathValidator].
+// It includes context about why the access was denied.
 type PathAccessError struct {
-	Path      string
+	// Path is the path that was denied access.
+	Path string
+
+	// Operation is "read" or "write" indicating the attempted operation.
 	Operation string
-	Reason    string
+
+	// Reason explains why access was denied (e.g., "path is outside workspace").
+	Reason string
+
+	// Workspace is the configured workspace directory for context.
 	Workspace string
 }
 
+// Error returns a human-readable error message.
 func (e *PathAccessError) Error() string {
 	return fmt.Sprintf("access denied: cannot %s %q - %s (workspace: %s)",
 		e.Operation, e.Path, e.Reason, e.Workspace)

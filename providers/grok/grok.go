@@ -18,6 +18,7 @@ var (
 
 var _ llm.StreamingLLM = &Provider{}
 
+// Provider implements the X.AI Grok LLM provider.
 type Provider struct {
 	apiKey    string
 	endpoint  string
@@ -29,6 +30,7 @@ type Provider struct {
 	*openaic.Provider
 }
 
+// New creates a new Grok provider with the given options.
 func New(opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:    getAPIKey(),

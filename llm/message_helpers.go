@@ -82,6 +82,11 @@ func NewToolResultMessage(outputs ...*ToolResultContent) *Message {
 	return &Message{Role: User, Content: content}
 }
 
+// NewImageContent creates an image content block with the given content source.
+func NewImageContent(source *ContentSource) *ImageContent {
+	return &ImageContent{Source: source}
+}
+
 // NewDocumentContent creates a document content block with the given
 // content source.
 func NewDocumentContent(source *ContentSource) *DocumentContent {

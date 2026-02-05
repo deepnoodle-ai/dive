@@ -2,12 +2,11 @@ package toolkit
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/deepnoodle-ai/dive/sandbox"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -19,8 +18,7 @@ func TestBashTool_Name(t *testing.T) {
 func TestBashTool_Description(t *testing.T) {
 	tool := NewBashTool()
 	desc := tool.Description()
-	assert.Contains(t, desc, "persistent bash session")
-	assert.Contains(t, desc, "bash_20250124")
+	assert.Contains(t, desc, "Execute shell commands")
 	assert.Contains(t, desc, runtime.GOOS)
 }
 
@@ -33,10 +31,12 @@ func TestBashTool_Schema(t *testing.T) {
 
 	// Check properties exist
 	assert.Contains(t, schema.Properties, "command")
-	assert.Contains(t, schema.Properties, "restart")
 	assert.Contains(t, schema.Properties, "timeout")
 	assert.Contains(t, schema.Properties, "description")
 	assert.Contains(t, schema.Properties, "working_directory")
+
+	// Command is required
+	assert.Contains(t, schema.Required, "command")
 }
 
 func TestBashTool_Annotations(t *testing.T) {
@@ -53,12 +53,6 @@ func TestBashTool_Annotations(t *testing.T) {
 func TestBashTool_PreviewCall(t *testing.T) {
 	tool := NewBashTool()
 	ctx := context.Background()
-
-	// Test restart preview
-	t.Run("restart", func(t *testing.T) {
-		preview := tool.Unwrap().(*BashTool).PreviewCall(ctx, &BashInput{Restart: true})
-		assert.Equal(t, "Restart bash session", preview.Summary)
-	})
 
 	// Test command preview
 	t.Run("command", func(t *testing.T) {
@@ -94,17 +88,6 @@ func TestBashTool_Call_EmptyCommand(t *testing.T) {
 	assert.Contains(t, result.Content[0].Text, "'command' is required")
 }
 
-func TestBashTool_Call_Restart(t *testing.T) {
-	tool := NewBashTool()
-	ctx := context.Background()
-
-	result, err := tool.Call(ctx, &BashInput{Restart: true})
-	assert.NoError(t, err)
-	assert.False(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, "restarted")
-	assert.Equal(t, "Bash session restarted", result.Display)
-}
-
 func TestBashTool_Call_SimpleCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping on Windows - bash not available")
@@ -118,9 +101,6 @@ func TestBashTool_Call_SimpleCommand(t *testing.T) {
 	assert.False(t, result.IsError)
 	assert.Contains(t, result.Content[0].Text, "hello")
 	assert.Contains(t, result.Content[0].Text, "return_code")
-
-	// Cleanup
-	tool.Unwrap().(*BashTool).Close()
 }
 
 func TestBashTool_Call_CommandWithExitCode(t *testing.T) {
@@ -142,32 +122,6 @@ func TestBashTool_Call_CommandWithExitCode(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, result.IsError) // Non-zero exit code is an error
 	assert.Contains(t, result.Content[0].Text, `"return_code":1`)
-
-	// Cleanup
-	tool.Unwrap().(*BashTool).Close()
-}
-
-func TestBashTool_Call_PersistentSession(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping on Windows - bash not available")
-	}
-
-	tool := NewBashTool()
-	ctx := context.Background()
-
-	// Set environment variable
-	result, err := tool.Call(ctx, &BashInput{Command: "export MY_VAR=test123"})
-	assert.NoError(t, err)
-	assert.False(t, result.IsError)
-
-	// Verify it persists
-	result, err = tool.Call(ctx, &BashInput{Command: "echo $MY_VAR"})
-	assert.NoError(t, err)
-	assert.False(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, "test123")
-
-	// Cleanup
-	tool.Unwrap().(*BashTool).Close()
 }
 
 func TestBashTool_Call_WorkingDirectory(t *testing.T) {
@@ -175,22 +129,20 @@ func TestBashTool_Call_WorkingDirectory(t *testing.T) {
 		t.Skip("Skipping on Windows - bash not available")
 	}
 
-	tool := NewBashTool()
+	// Create a temp dir within the workspace
+	tempDir := t.TempDir()
+	tool := NewBashTool(BashToolOptions{
+		WorkspaceDir: tempDir,
+	})
 	ctx := context.Background()
 
-	// Change directory
-	result, err := tool.Call(ctx, &BashInput{Command: "cd /tmp && pwd"})
+	result, err := tool.Call(ctx, &BashInput{
+		Command:          "pwd",
+		WorkingDirectory: tempDir,
+	})
 	assert.NoError(t, err)
 	assert.False(t, result.IsError)
-
-	// Verify working directory persists
-	result, err = tool.Call(ctx, &BashInput{Command: "pwd"})
-	assert.NoError(t, err)
-	assert.False(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, "/tmp")
-
-	// Cleanup
-	tool.Unwrap().(*BashTool).Close()
+	assert.Contains(t, result.Content[0].Text, tempDir)
 }
 
 func TestBashTool_Call_Stderr(t *testing.T) {
@@ -207,35 +159,6 @@ func TestBashTool_Call_Stderr(t *testing.T) {
 	assert.False(t, result.IsError)
 	assert.Contains(t, result.Content[0].Text, "stderr")
 	assert.Contains(t, result.Content[0].Text, "error")
-
-	// Cleanup
-	tool.Unwrap().(*BashTool).Close()
-}
-
-func TestBashTool_Call_RestartClearsState(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping on Windows - bash not available")
-	}
-
-	tool := NewBashTool()
-	ctx := context.Background()
-
-	// Set variable
-	_, err := tool.Call(ctx, &BashInput{Command: "export MY_VAR=before"})
-	assert.NoError(t, err)
-
-	// Restart session
-	result, err := tool.Call(ctx, &BashInput{Restart: true})
-	assert.NoError(t, err)
-	assert.False(t, result.IsError)
-
-	// Verify variable is gone (after restart, need new command to start session)
-	result, err = tool.Call(ctx, &BashInput{Command: "echo ${MY_VAR:-unset}"})
-	assert.NoError(t, err)
-	assert.Contains(t, result.Content[0].Text, "unset")
-
-	// Cleanup
-	tool.Unwrap().(*BashTool).Close()
 }
 
 func TestBashTool_Call_WithDescription(t *testing.T) {
@@ -254,9 +177,6 @@ func TestBashTool_Call_WithDescription(t *testing.T) {
 	assert.False(t, result.IsError)
 	assert.Contains(t, result.Display, "Print greeting")
 	assert.Contains(t, result.Display, "exit 0")
-
-	// Cleanup
-	tool.Unwrap().(*BashTool).Close()
 }
 
 func TestBashTool_Call_Timeout(t *testing.T) {
@@ -274,56 +194,8 @@ func TestBashTool_Call_Timeout(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.True(t, result.IsError)
-	assert.Contains(t, result.Content[0].Text, "timed out")
-
-	// Allow time for cleanup
-	time.Sleep(200 * time.Millisecond)
-
-	// Cleanup (create new tool since session may be in bad state)
-}
-
-func TestBashSession_Execute(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping on Windows - bash not available")
-	}
-
-	session, err := NewBashSession()
-	assert.NoError(t, err)
-	defer session.Close()
-
-	ctx := context.Background()
-
-	// Test simple command
-	stdout, stderr, exitCode, err := session.Execute(ctx, "echo hello", 5*time.Second)
-	assert.NoError(t, err)
-	assert.Contains(t, stdout, "hello")
-	assert.Empty(t, stderr)
-	assert.Equal(t, 0, exitCode)
-}
-
-func TestBashSession_Restart(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping on Windows - bash not available")
-	}
-
-	session, err := NewBashSession()
-	assert.NoError(t, err)
-	defer session.Close()
-
-	ctx := context.Background()
-
-	// Set variable
-	_, _, _, err = session.Execute(ctx, "export TEST_VAR=hello", 5*time.Second)
-	assert.NoError(t, err)
-
-	// Restart
-	err = session.Restart()
-	assert.NoError(t, err)
-
-	// Check variable is gone
-	stdout, _, _, err := session.Execute(ctx, "echo ${TEST_VAR:-unset}", 5*time.Second)
-	assert.NoError(t, err)
-	assert.Contains(t, stdout, "unset")
+	// Timeout results in exit code -1 due to signal
+	assert.Contains(t, result.Content[0].Text, `"return_code":-1`)
 }
 
 func TestTruncateCommand(t *testing.T) {
@@ -348,78 +220,43 @@ func TestTruncateCommand(t *testing.T) {
 	}
 }
 
-func TestMatchesCommandPattern(t *testing.T) {
+func TestTruncateOutput(t *testing.T) {
 	tests := []struct {
-		name    string
-		pattern string
-		command string
-		want    bool
+		input    string
+		maxLen   int
+		expected string
 	}{
-		// Empty patterns
-		{name: "empty pattern", pattern: "", command: "docker run", want: false},
-		{name: "whitespace pattern", pattern: "   ", command: "docker run", want: false},
-
-		// Prefix matching (no wildcards)
-		{name: "exact match", pattern: "docker", command: "docker", want: true},
-		{name: "prefix match with args", pattern: "docker", command: "docker run nginx", want: true},
-		{name: "prefix no match", pattern: "docker", command: "podman run", want: false},
-		{name: "prefix partial word no match", pattern: "doc", command: "docker run", want: true}, // prefix still matches
-
-		// "command *" pattern - matches command with any arguments
-		{name: "space-star matches with args", pattern: "docker *", command: "docker run nginx", want: true},
-		{name: "space-star matches with single arg", pattern: "docker *", command: "docker ps", want: true},
-		{name: "space-star matches exact command", pattern: "docker *", command: "docker", want: true},
-		{name: "space-star no match different command", pattern: "docker *", command: "podman run", want: false},
-		{name: "space-star no match partial", pattern: "docker *", command: "dockerize something", want: false},
-		{name: "git space-star", pattern: "git *", command: "git status", want: true},
-		{name: "git space-star commit", pattern: "git *", command: "git commit -m 'test'", want: true},
-
-		// Glob patterns on command name only
-		{name: "glob star suffix", pattern: "docker*", command: "docker", want: true},
-		{name: "glob star suffix with args", pattern: "docker*", command: "docker run", want: true},
-		{name: "glob star suffix dockerize", pattern: "docker*", command: "dockerize", want: true},
-		{name: "glob star prefix", pattern: "*cker", command: "docker", want: true},
-		{name: "glob question mark", pattern: "g?t", command: "git", want: true},
-		{name: "glob question mark no match", pattern: "g?t", command: "grit", want: false},
-		{name: "glob brackets", pattern: "[dg]ocker", command: "docker", want: true},
-		{name: "glob brackets gocker", pattern: "[dg]ocker", command: "gocker", want: true},
-		{name: "glob brackets no match", pattern: "[dg]ocker", command: "locker", want: false},
-
-		// Edge cases
-		{name: "empty command", pattern: "docker", command: "", want: false},
-		{name: "glob empty command", pattern: "docker*", command: "", want: false},
-		{name: "space-star empty command", pattern: "docker *", command: "", want: false},
-		{name: "command with leading space", pattern: "docker", command: "  docker run", want: false},
+		{"hello", 10, "hello"},
+		{"hello world", 5, "hello\n... (output truncated)"},
+		{"", 10, ""},
+		{"abc", 0, "abc"}, // 0 means no limit
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := sandbox.MatchesCommandPattern(tt.pattern, tt.command)
-			assert.Equal(t, tt.want, got, "pattern=%q command=%q", tt.pattern, tt.command)
+		t.Run(tt.input, func(t *testing.T) {
+			result := truncateOutput(tt.input, tt.maxLen)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestIsExcludedCommand(t *testing.T) {
-	patterns := []string{"rm *", "sudo *", "docker*"}
-
-	tests := []struct {
-		name    string
-		command string
-		want    bool
-	}{
-		{name: "rm with args", command: "rm -rf /", want: true},
-		{name: "sudo with args", command: "sudo apt install", want: true},
-		{name: "docker", command: "docker", want: true},
-		{name: "docker-compose", command: "docker-compose up", want: true},
-		{name: "ls allowed", command: "ls -la", want: false},
-		{name: "echo allowed", command: "echo hello", want: false},
+func TestBashTool_Call_ReturnsConfigError(t *testing.T) {
+	tool := &BashTool{
+		configErr: errors.New("validator init failed"),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isExcludedCommand(tt.command, patterns)
-			assert.Equal(t, tt.want, got)
-		})
-	}
+	result, err := tool.Call(context.Background(), &BashInput{Command: "echo hello"})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "validator init failed")
+}
+
+func TestBashTool_Call_ReturnsWorkspaceConfigErrorWhenValidatorMissing(t *testing.T) {
+	tool := &BashTool{workspaceDir: "/bad/workspace"}
+
+	result, err := tool.Call(context.Background(), &BashInput{Command: "echo hello"})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "WorkspaceDir \"/bad/workspace\"")
+	assert.Contains(t, result.Content[0].Text, "path validator is not initialized")
 }

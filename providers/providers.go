@@ -7,6 +7,7 @@ import (
 	"github.com/deepnoodle-ai/wonton/retry"
 )
 
+// ProviderError represents an error returned by an LLM provider API.
 type ProviderError struct {
 	statusCode int
 	body       string
@@ -20,6 +21,8 @@ func (e *ProviderError) StatusCode() int {
 	return e.statusCode
 }
 
+// NewError creates a new ProviderError. Non-retryable status codes are wrapped
+// with retry.MarkPermanent.
 func NewError(statusCode int, body string) error {
 	err := &ProviderError{statusCode: statusCode, body: body}
 	if !shouldRetry(statusCode) {

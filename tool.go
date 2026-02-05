@@ -8,6 +8,8 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
+// ToolAnnotations contains optional metadata hints that describe a tool's behavior.
+// These hints help agents and permission systems make decisions about tool usage.
 type ToolAnnotations struct {
 	Title           string         `json:"title,omitempty"`
 	ReadOnlyHint    bool           `json:"readOnlyHint,omitempty"`
@@ -69,6 +71,7 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ToolResultContentType indicates the media type of a tool result content block.
 type ToolResultContentType string
 
 const (
@@ -81,6 +84,8 @@ func (t ToolResultContentType) String() string {
 	return string(t)
 }
 
+// ToolResultContent is a single content block within a tool result, such as
+// text output, an image, or audio data.
 type ToolResultContent struct {
 	Type        ToolResultContentType `json:"type"`
 	Text        string                `json:"text,omitempty"`
@@ -232,6 +237,8 @@ func (t *TypedToolAdapter[T]) Unwrap() TypedTool[T] {
 	return t.tool
 }
 
+// ToolConfiguration delegates to the underlying tool's ToolConfiguration method
+// if it implements the llm.ToolConfiguration interface.
 func (t *TypedToolAdapter[T]) ToolConfiguration(providerName string) map[string]any {
 	if toolWithConfig, ok := t.tool.(llm.ToolConfiguration); ok {
 		return toolWithConfig.ToolConfiguration(providerName)
@@ -255,15 +262,6 @@ func (t *TypedToolAdapter[T]) PreviewCall(ctx context.Context, input any) *ToolC
 	}
 
 	return previewer.PreviewCall(ctx, typedInput)
-}
-
-// IsToolAllowed implements ToolAllowanceChecker by delegating to the underlying
-// TypedTool if it implements ToolAllowanceChecker.
-func (t *TypedToolAdapter[T]) IsToolAllowed(toolName string) bool {
-	if checker, ok := t.tool.(ToolAllowanceChecker); ok {
-		return checker.IsToolAllowed(toolName)
-	}
-	return true
 }
 
 // convertInput converts any input to the typed T, handling json.RawMessage and other types.
@@ -315,12 +313,4 @@ type ToolCallResult struct {
 	Preview *ToolCallPreview // Preview generated before execution (if tool implements ToolPreviewer)
 	Result  *ToolResult
 	Error   error
-}
-
-// ToolAllowanceChecker is an optional interface that tools can implement to
-// restrict which other tools can be used. This is used by skills to enforce
-// allowed-tools restrictions.
-type ToolAllowanceChecker interface {
-	// IsToolAllowed returns true if the given tool name is allowed to be executed.
-	IsToolAllowed(toolName string) bool
 }

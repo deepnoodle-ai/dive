@@ -1,4 +1,3 @@
-
 ## Tool Use Deltas
 
 ```json

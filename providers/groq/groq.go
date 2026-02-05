@@ -19,6 +19,7 @@ var (
 
 var _ llm.StreamingLLM = &Provider{}
 
+// Provider implements the Groq inference engine LLM provider.
 type Provider struct {
 	apiKey    string
 	endpoint  string
@@ -30,6 +31,7 @@ type Provider struct {
 	*openaic.Provider
 }
 
+// New creates a new Groq provider with the given options.
 func New(opts ...Option) *Provider {
 	p := &Provider{
 		apiKey:    os.Getenv("GROQ_API_KEY"),

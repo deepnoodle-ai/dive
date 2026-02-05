@@ -1,274 +1,157 @@
 # LLM Guide
 
-Complete guide to using Large Language Models with Dive.
+Dive supports multiple LLM providers through a unified interface. Each provider is in `providers/<name>` and auto-registers via `init()`.
 
 ## Supported Providers
 
 ### Anthropic (Claude)
 
 ```go
-import "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+import "github.com/deepnoodle-ai/dive/providers/anthropic"
 
-model := anthropic.New()
+model := anthropic.New() // defaults to claude-opus-4-5
 ```
 
-**Models:** claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022, claude-3-7-sonnet-20250219
-**Features:** Tool calling, streaming, prompt caching, reasoning control
+**Env:** `ANTHROPIC_API_KEY`
+**Models:** See `providers/anthropic/models.go` for available models.
+**Features:** Streaming, tool calling, prompt caching, reasoning control
 
 ### OpenAI
 
 ```go
-import "github.com/deepnoodle-ai/dive/llm/providers/openai"
+import "github.com/deepnoodle-ai/dive/providers/openai"
 
-model := openai.New()
+model := openai.New() // defaults to gpt-5.2
 ```
 
-**Models:** gpt-5 (default), gpt-4o, gpt-4o-mini, o1, o3-mini, o3
-**Features:** Tool calling, streaming, reasoning budget (o1/o3)
+**Env:** `OPENAI_API_KEY`
+**Models:** See `providers/openai/models.go` for available models.
+**Features:** Streaming, tool calling, reasoning budget (o-series)
+
+### Google (Gemini)
+
+```go
+import "github.com/deepnoodle-ai/dive/providers/google"
+
+model := google.New() // defaults to gemini-2.5-pro
+```
+
+**Env:** `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+**Models:** See `providers/google/models.go` for available models.
+**Features:** Streaming, tool calling, multimodal
 
 ### Groq
 
 ```go
-import "github.com/deepnoodle-ai/dive/llm/providers/groq"
+import "github.com/deepnoodle-ai/dive/providers/groq"
 
 model := groq.New()
 ```
 
-**Models:** llama-3.3-70b-versatile, deepseek-r1-distill-llama-70b
+**Env:** `GROQ_API_KEY`
+**Models:** See `providers/groq/models.go` for available models.
 **Features:** High-speed inference, streaming
 
 ### Grok (X.AI)
 
 ```go
-import "github.com/deepnoodle-ai/dive/llm/providers/grok"
+import "github.com/deepnoodle-ai/dive/providers/grok"
 
 model := grok.New()
 ```
 
-**Models:** grok-2, grok-2-mini, grok-3
-**Features:** Real-time X (Twitter) integration, reasoning
+**Env:** `GROK_API_KEY`
+**Models:** See `providers/grok/models.go` for available models.
 
-### OpenRouter
-
-```go
-import "github.com/deepnoodle-ai/dive/llm/providers/openrouter"
-
-model := openrouter.New()
-```
-
-**Models:** Access to 200+ models from multiple providers
-**Features:** Unified access to diverse models, cost optimization
-
-### Google (Gemini)
+### Mistral
 
 ```go
-import "github.com/deepnoodle-ai/dive/llm/providers/google"
+import "github.com/deepnoodle-ai/dive/providers/mistral"
 
-model := google.New()
+model := mistral.New()
 ```
 
-**Models:** gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash
-**Features:** Multimodal capabilities, large context windows
+**Env:** `MISTRAL_API_KEY`
+**Models:** See `providers/mistral/models.go` for available models.
 
 ### Ollama (Local)
 
 ```go
-import "github.com/deepnoodle-ai/dive/llm/providers/ollama"
+import "github.com/deepnoodle-ai/dive/providers/ollama"
 
 model := ollama.New()
 ```
 
-**Models:** Any locally installed model
-**Features:** Local inference, privacy, custom models
+No API key needed. Requires Ollama running locally.
+Use any model available in your local Ollama installation.
 
-## Quick Setup
-
-### Environment Variables
-
-```bash
-export ANTHROPIC_API_KEY="your-key"
-export OPENAI_API_KEY="your-key"
-export GROQ_API_KEY="your-key"
-export GROK_API_KEY="your-key"
-export OPENROUTER_API_KEY="your-key"
-export GEMINI_API_KEY="your-key"  # For Google
-# Ollama runs locally - no key needed
-```
-
-### Basic Usage
+### OpenRouter
 
 ```go
-import (
-    "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
-)
+import "github.com/deepnoodle-ai/dive/providers/openrouter"
 
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Assistant",
-    Instructions: "You are a helpful assistant.",
+model := openrouter.New()
+```
+
+**Env:** `OPENROUTER_API_KEY`
+**Features:** Access to 200+ models from multiple providers
+
+## Provider Options
+
+All providers accept variadic options. For example, to specify a model:
+
+```go
+provider := anthropic.New(anthropic.WithModel("claude-sonnet-4-5"))
+```
+
+## Model Settings
+
+Configure LLM behavior per agent via `ModelSettings`:
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a creative writer.",
     Model:        anthropic.New(),
-})
-```
-
-## Model Configuration
-
-### Agent-Level Settings
-
-```go
-import (
-    "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
-)
-
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:  "Assistant",
-    Model: anthropic.New(),
     ModelSettings: &dive.ModelSettings{
-        Temperature:     &[]float64{0.7}[0],
-        MaxTokens:      &[]int{2000}[0],
-        ReasoningBudget: &[]int{5000}[0],  // For o1 models
-        Caching:        &[]bool{true}[0],   // For Claude
+        Temperature:       dive.Ptr(0.7),
+        MaxTokens:         dive.Ptr(2000),
+        ReasoningBudget:   dive.Ptr(5000),
+        ReasoningEffort:   "high",
+        Caching:           dive.Ptr(true),
+        ParallelToolCalls: dive.Ptr(true),
     },
 })
 ```
 
-### YAML Configuration
+### Settings Reference
 
-```yaml
-Agents:
-  - Name: Creative Writer
-    Provider: anthropic
-    Model: claude-sonnet-4-20250514
-    ModelSettings:
-      Temperature: 0.9
-      MaxTokens: 4000
-      Caching: true
+| Setting             | Type              | Description                             |
+| ------------------- | ----------------- | --------------------------------------- |
+| `Temperature`       | `*float64`        | Creativity vs consistency (0.0-1.0)     |
+| `MaxTokens`         | `*int`            | Maximum response length                 |
+| `PresencePenalty`   | `*float64`        | Reduce repetition                       |
+| `FrequencyPenalty`  | `*float64`        | Encourage topic variety                 |
+| `ReasoningBudget`   | `*int`            | Tokens for reasoning (o-series, Claude) |
+| `ReasoningEffort`   | `string`          | low, medium, high                       |
+| `Caching`           | `*bool`           | Enable prompt caching (Claude)          |
+| `ParallelToolCalls` | `*bool`           | Allow simultaneous tool calls           |
+| `ToolChoice`        | `*llm.ToolChoice` | auto, any, none, or specific tool       |
 
-  - Name: Reasoner
-    Provider: openai
-    Model: o1
-    ModelSettings:
-      ReasoningBudget: 10000
-      ReasoningEffort: high
-```
+## Provider Registry
 
-## Model Settings Reference
-
-### Core Settings
-
-- **Temperature** (0.0-1.0): Creativity vs consistency
-- **MaxTokens**: Maximum response length
-- **PresencePenalty**: Reduce repetition
-- **FrequencyPenalty**: Encourage topic variety
-
-### Provider-Specific
-
-- **ReasoningBudget** (OpenAI o1/o3): Tokens for reasoning
-- **ReasoningEffort** (OpenAI o1/o3): low, medium, high
-- **Caching** (Anthropic): Cache prompts for speed
-
-### Tool Settings
-
-- **ParallelToolCalls**: Allow simultaneous tool use
-- **ToolChoice**: auto, required, none, or specific tool
-
-## Model Selection Tips
-
-### Choose by Use Case
-
-**Creative Tasks:**
-
-- Claude Sonnet (high creativity)
-- Temperature: 0.7-0.9
-
-**Factual/Analysis:**
-
-- GPT-4o (reliability)
-- Temperature: 0.1-0.3
-
-**Complex Reasoning:**
-
-- OpenAI o1/o3 (reasoning)
-- High reasoning budget
-
-**Fast Response:**
-
-- Claude Haiku (speed)
-- Groq models (fastest)
-
-**Local/Private:**
-
-- Ollama (privacy)
-- Any local model
-
-### Configuration Examples
-
-**Creative Writer:**
-
-```yaml
-ModelSettings:
-  Temperature: 0.9
-  MaxTokens: 4000
-  PresencePenalty: 0.1
-```
-
-**Code Analyst:**
-
-```yaml
-ModelSettings:
-  Temperature: 0.2
-  MaxTokens: 2000
-  ReasoningBudget: 8000 # If using o1
-```
-
-**Fast Chat:**
-
-```yaml
-Provider: groq
-Model: llama-3.3-70b
-ModelSettings:
-  Temperature: 0.5
-  MaxTokens: 1000
-```
-
-## Performance Tips
-
-1. **Use caching** (Claude) for repeated prompts
-2. **Set reasonable token limits** to control costs
-3. **Choose appropriate models** for your use case
-4. **Monitor usage** with built-in token tracking
-5. **Use local models** (Ollama) for development
-
-## Error Handling
-
-All providers have automatic retry logic and consistent error handling:
+The `providers` package provides a registry for creating models by name:
 
 ```go
-import (
-    "context"
-    "log"
+import "github.com/deepnoodle-ai/dive/providers"
 
-    "github.com/deepnoodle-ai/dive"
-)
-
-response, err := agent.CreateResponse(ctx, dive.WithInput("Hello"))
-if err != nil {
-    // Handle rate limits, API errors, etc.
-    log.Printf("Error: %v", err)
-}
+model := providers.CreateModel("claude-sonnet-4-5", "")
 ```
 
-Common errors are handled automatically:
-
-- Rate limits (automatic retry with backoff)
-- Network timeouts (configurable retry)
-- API errors (clear error messages)
+This is useful for CLI tools or configuration-driven model selection.
 
 ## Best Practices
 
-1. **Test with multiple providers** - Each has strengths
-2. **Use appropriate temperatures** - Low for facts, high for creativity
-3. **Set reasonable token limits** - Balance quality and cost
-4. **Enable caching** when using repeated prompts
-5. **Monitor costs** - Track token usage across providers
-6. **Use local models** for development and privacy-sensitive tasks
+1. **Use local models for development** - Ollama avoids API costs during dev
+2. **Enable caching** with Claude for repeated prompts
+3. **Set reasonable token limits** to control costs
+4. **Choose the right model** for your use case: fast (Haiku, Flash) vs capable (Opus, GPT-5)

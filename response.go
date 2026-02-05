@@ -14,11 +14,6 @@ import (
 type ResponseItemType string
 
 const (
-	// ResponseItemTypeInit indicates the start of a response with session information.
-	// This is always emitted as the first event when an EventCallback is provided.
-	// The Init field contains the SessionID for session resumption.
-	ResponseItemTypeInit ResponseItemType = "init"
-
 	// ResponseItemTypeMessage indicates a complete message is available from the agent.
 	// The Message field contains the full assistant message including any tool calls.
 	ResponseItemTypeMessage ResponseItemType = "message"
@@ -39,33 +34,6 @@ const (
 	// The Todo field contains the current todo list state.
 	ResponseItemTypeTodo ResponseItemType = "todo"
 )
-
-// InitEvent is emitted at the start of a response and contains session information.
-//
-// This event is always the first item delivered to an EventCallback, allowing callers
-// to immediately capture the session ID for session management. This is particularly
-// useful when session IDs are auto-generated, as it provides the ID before the
-// response completes.
-//
-// Example usage in a callback:
-//
-//	var sessionID string
-//	resp, _ := agent.CreateResponse(ctx,
-//	    dive.WithInput("Hello"),
-//	    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-//	        if item.Type == dive.ResponseItemTypeInit {
-//	            sessionID = item.Init.SessionID
-//	            // Save sessionID for later session resumption
-//	        }
-//	        return nil
-//	    }),
-//	)
-type InitEvent struct {
-	// SessionID is the conversation session ID for this response.
-	// This may be a user-provided ID or an auto-generated one.
-	// Use this value with WithResume to continue the conversation later.
-	SessionID string `json:"session_id"`
-}
 
 // TodoStatus represents the status of a todo item.
 type TodoStatus string
@@ -121,9 +89,6 @@ type ResponseItem struct {
 	// Type of the response item
 	Type ResponseItemType `json:"type,omitempty"`
 
-	// Init is set if the response item is an init event (first event in stream)
-	Init *InitEvent `json:"init,omitempty"`
-
 	// Event is set if the response item is an event
 	Event *llm.Event `json:"event,omitempty"`
 
@@ -147,11 +112,6 @@ type ResponseItem struct {
 type Response struct {
 	// ID is a unique identifier for this response
 	ID string `json:"id,omitempty"`
-
-	// SessionID is the conversation session ID associated with this response.
-	// If no session ID was provided in the request, one is auto-generated.
-	// Use this value to resume the conversation in subsequent requests.
-	SessionID string `json:"session_id,omitempty"`
 
 	// Model represents the model that generated the response
 	Model string `json:"model,omitempty"`

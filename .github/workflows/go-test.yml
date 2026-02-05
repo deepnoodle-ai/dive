@@ -38,6 +38,6 @@ jobs:
 
       - name: Run CLI tests
         run: |
-          cd cmd/dive
+          cd experimental/cmd/dive
           go mod download
           go test -v ./...

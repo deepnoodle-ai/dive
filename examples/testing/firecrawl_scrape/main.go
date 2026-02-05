@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
+	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/wonton/fetch"
 )
 

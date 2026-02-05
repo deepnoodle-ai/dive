@@ -27,6 +27,7 @@ The provider works by configuring the OpenAI client with Ollama's local endpoint
 1. **Install Ollama**: Follow the [official installation guide](https://ollama.ai/)
 
 2. **Pull a Model**: Download a model to use locally
+
    ```bash
    ollama pull llama3.2
    ```
@@ -131,16 +132,19 @@ This approach provides several key benefits:
 ## Troubleshooting
 
 ### Connection Issues
+
 - Ensure Ollama is running: `ollama serve`
 - Check the endpoint URL (default: `http://localhost:11434/v1/chat/completions`)
 - Verify Ollama is listening on the expected port: `curl http://localhost:11434/api/version`
 
 ### Model Not Found
+
 - Pull the model: `ollama pull <model-name>`
 - List available models: `ollama list`
 - Use exact model names including size variants (e.g., `llama3.2:3b` not `llama3.2`)
 
 ### Performance Optimization
+
 - Choose appropriate model sizes for your hardware (smaller models = faster responses)
 - Adjust `max_tokens` based on response length needs
 - Use streaming for long responses to improve perceived performance

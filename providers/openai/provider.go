@@ -29,6 +29,7 @@ var (
 var _ llm.LLM = &Provider{}
 var _ llm.StreamingLLM = &Provider{}
 
+// Provider implements the OpenAI LLM provider using the Responses API.
 type Provider struct {
 	client        openai.Client
 	model         openai.ChatModel
@@ -39,6 +40,7 @@ type Provider struct {
 	options       []option.RequestOption
 }
 
+// New creates a new OpenAI provider with the given options.
 func New(opts ...Option) *Provider {
 	p := &Provider{
 		model:         DefaultModel,

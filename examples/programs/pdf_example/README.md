@@ -93,6 +93,7 @@ llm.NewUserFileIDMessage("file-abc123")
 ## Supported Formats
 
 Both providers support:
+
 - **PDF files** (primary focus)
 - **Base64 encoded data**
 - **URL references** to publicly accessible documents
@@ -108,6 +109,7 @@ Both providers support:
 ### Supported Models
 
 #### Anthropic
+
 - Claude Opus 4 (`claude-opus-4-20250514`)
 - Claude Sonnet 4 (`claude-sonnet-4-20250514`)
 - Claude Sonnet 3.7 (`claude-3-7-sonnet-20250219`)
@@ -115,6 +117,7 @@ Both providers support:
 - Claude Haiku 3.5 (`claude-3-5-haiku-20241022`)
 
 #### OpenAI Responses API
+
 - GPT-4o and GPT-4o-mini models with PDF support
 
 ## Limitations
@@ -142,4 +145,4 @@ go run main.go -pdf "./financial-report.pdf" -prompt "Extract the quarterly reve
 
 ```bash
 go run main.go -pdf "./document.pdf" -log debug -prompt "Analyze this document"
-``` 
+```

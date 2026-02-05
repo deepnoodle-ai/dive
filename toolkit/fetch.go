@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -15,11 +16,18 @@ import (
 )
 
 const (
-	DefaultFetchMaxSize    = 1024 * 500 // 500k runes
+	// DefaultFetchMaxSize is the default maximum content size in runes (500k).
+	DefaultFetchMaxSize = 1024 * 500
+
+	// DefaultFetchMaxRetries is the default number of retry attempts on failure.
 	DefaultFetchMaxRetries = 1
-	DefaultFetchTimeout    = 15 * time.Second
+
+	// DefaultFetchTimeout is the default request timeout duration.
+	DefaultFetchTimeout = 15 * time.Second
 )
 
+// DefaultFetchExcludeTags lists HTML tags that are stripped from fetched content
+// by default. These are typically non-content elements that add noise.
 var DefaultFetchExcludeTags = []string{
 	"script",
 	"style",
@@ -39,6 +47,16 @@ var DefaultFetchExcludeTags = []string{
 var _ dive.TypedTool[*fetch.Request] = &FetchTool{}
 var _ dive.TypedToolPreviewer[*fetch.Request] = &FetchTool{}
 
+// FetchTool fetches web pages and extracts their content as markdown.
+//
+// This tool is useful for giving LLMs access to web content. It converts
+// HTML to clean markdown, strips non-content elements (scripts, styles,
+// navigation), and optionally extracts only the main content area.
+//
+// Security: The tool validates URLs to prevent SSRF attacks. It blocks:
+//   - Non-HTTP(S) schemes (file://, javascript://, etc.)
+//   - Localhost and private IP addresses
+//   - URLs that resolve to internal networks
 type FetchTool struct {
 	fetcher         fetch.Fetcher
 	maxSize         int
@@ -47,20 +65,66 @@ type FetchTool struct {
 	onlyMainContent bool
 }
 
+// FetchToolOptions configures the behavior of [FetchTool].
 type FetchToolOptions struct {
-	MaxSize         int           `json:"max_size,omitempty"`
-	MaxRetries      int           `json:"max_retries,omitempty"`
-	Timeout         time.Duration `json:"timeout,omitempty"`
-	OnlyMainContent bool          `json:"only_main_content,omitempty"`
-	Fetcher         fetch.Fetcher `json:"-"`
+	// MaxSize limits the extracted content size in runes.
+	// Defaults to [DefaultFetchMaxSize] (500k runes).
+	MaxSize int `json:"max_size,omitempty"`
+
+	// MaxRetries is the number of retry attempts on transient failures.
+	// Defaults to [DefaultFetchMaxRetries] (1 retry).
+	MaxRetries int `json:"max_retries,omitempty"`
+
+	// Timeout is the maximum duration for the HTTP request.
+	// Defaults to [DefaultFetchTimeout] (15 seconds).
+	Timeout time.Duration `json:"timeout,omitempty"`
+
+	// OnlyMainContent extracts only the main content area when true,
+	// ignoring sidebars, headers, and footers.
+	OnlyMainContent bool `json:"only_main_content,omitempty"`
+
+	// Fetcher is the underlying HTTP fetcher implementation.
+	// If not provided, a default HTTPFetcher with SSRF-safe redirect
+	// validation is used.
+	Fetcher fetch.Fetcher `json:"-"`
 }
 
-func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*fetch.Request] {
+// SafeHTTPClient returns an *http.Client that validates redirect targets
+// against SSRF rules. Each redirect URL is checked for blocked schemes,
+// localhost, and private IP addresses using the same rules as the initial
+// URL validation.
+func SafeHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after 10 redirects")
+			}
+			return validateFetchURL(req.URL.String())
+		},
+	}
+}
+
+// NewFetchTool creates a new FetchTool with the given options.
+//
+// If no Fetcher is provided, a default HTTPFetcher with SSRF-safe redirect
+// validation is used.
+func NewFetchTool(opts ...FetchToolOptions) *dive.TypedToolAdapter[*fetch.Request] {
+	var options FetchToolOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	if options.MaxSize <= 0 {
 		options.MaxSize = DefaultFetchMaxSize
 	}
 	if options.Timeout <= 0 {
 		options.Timeout = DefaultFetchTimeout
+	}
+	if options.Fetcher == nil {
+		options.Fetcher = fetch.NewHTTPFetcher(fetch.HTTPFetcherOptions{
+			Client:  SafeHTTPClient(options.Timeout),
+			Timeout: options.Timeout,
+		})
 	}
 	return dive.ToolAdapter(&FetchTool{
 		fetcher:         options.Fetcher,
@@ -71,14 +135,17 @@ func NewFetchTool(options FetchToolOptions) *dive.TypedToolAdapter[*fetch.Reques
 	})
 }
 
+// Name returns "WebFetch" as the tool identifier.
 func (t *FetchTool) Name() string {
 	return "WebFetch"
 }
 
+// Description returns usage instructions for the LLM.
 func (t *FetchTool) Description() string {
 	return "Fetches the contents of the webpage at the given URL."
 }
 
+// Schema returns the JSON schema describing the tool's input parameters.
 func (t *FetchTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
@@ -92,16 +159,26 @@ func (t *FetchTool) Schema() *schema.Schema {
 	}
 }
 
+// PreviewCall returns a summary of the fetch operation for permission prompts.
 func (t *FetchTool) PreviewCall(ctx context.Context, req *fetch.Request) *dive.ToolCallPreview {
 	return &dive.ToolCallPreview{
 		Summary: fmt.Sprintf("Fetch %s", req.URL),
 	}
 }
 
+// Call fetches the URL and returns its content as markdown.
+//
+// The response includes the page title and description (if available)
+// followed by the converted markdown content. Content is truncated
+// if it exceeds the configured MaxSize.
 func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolResult, error) {
 	// Validate URL to prevent SSRF attacks
 	if err := validateFetchURL(req.URL); err != nil {
 		return NewToolResultError(fmt.Sprintf("URL validation failed: %s", err)), nil
+	}
+
+	if t.fetcher == nil {
+		return NewToolResultError("fetch tool has no fetcher configured"), nil
 	}
 
 	req.Formats = []string{"markdown"}
@@ -155,6 +232,8 @@ func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolRes
 	return NewToolResultText(content).WithDisplay(display), nil
 }
 
+// Annotations returns metadata hints about the tool's behavior.
+// WebFetch is marked as read-only, idempotent, and open-world (accesses external systems).
 func (t *FetchTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:           "WebFetch",
@@ -165,6 +244,7 @@ func (t *FetchTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+// truncateText limits text to maxSize runes, appending "..." if truncated.
 func truncateText(text string, maxSize int) string {
 	runes := []rune(text)
 	if len(runes) <= maxSize {

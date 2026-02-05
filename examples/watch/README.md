@@ -10,6 +10,7 @@ The `dive watch` command monitors files and directories for changes and triggers
 ## Basic Usage
 
 ### Simple File Watching
+
 ```bash
 # Watch Go files and lint them
 dive watch src/*.go --on-change "Lint and suggest fixes"
@@ -19,6 +20,7 @@ dive watch "**/*.py" --on-change "Check for PEP8 compliance and suggest improvem
 ```
 
 ### Directory Watching
+
 ```bash
 # Watch entire directory recursively
 dive watch . --recursive --on-change "Review changes for security vulnerabilities"
@@ -30,18 +32,21 @@ dive watch src/ --recursive --only-extensions "go,js,ts" --on-change "Code revie
 ## Advanced Features
 
 ### Extension Filtering
+
 ```bash
 # Only watch specific file types
 dive watch . --recursive --only-extensions "go,py,js" --on-change "Code review"
 ```
 
 ### Ignore Patterns
+
 ```bash
 # Ignore test files and dependencies
 dive watch . --recursive --ignore "*.test.go,node_modules/**,vendor/**" --on-change "Review production code"
 ```
 
 ### Tool Integration
+
 ```bash
 # Use web search for enhanced reviews
 dive watch src/ --recursive --on-change "Review code and search for best practices" --tools "Web.Search"
@@ -53,6 +58,7 @@ dive watch docs/ --on-change "Update documentation based on changes" --tools "Do
 ## CI/CD Integration
 
 ### Exit on Error
+
 For CI/CD pipelines, use `--exit-on-error` to make the process fail if the LLM detects issues:
 
 ```bash
@@ -61,6 +67,7 @@ dive watch src/ --recursive --on-change "Perform security audit and fail on crit
 ```
 
 ### Logging
+
 Use `--log-file` to capture all watch events and responses for CI/CD reporting:
 
 ```bash
@@ -97,11 +104,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
-      
+          go-version: "1.21"
+
       - name: Install Dive
         run: go install github.com/deepnoodle-ai/dive/cmd/dive@latest
-      
+
       - name: Run AI Code Review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -110,7 +117,7 @@ jobs:
             --ignore "*.test.go,node_modules/**,vendor/**" \
             --on-change "Review changes for security, performance, and best practices" \
             --exit-on-error --log-file ai-review.log
-      
+
       - name: Upload Review Results
         uses: actions/upload-artifact@v3
         if: always()
@@ -122,6 +129,7 @@ jobs:
 ## Configuration Examples
 
 ### Custom System Prompts
+
 ```bash
 # Custom system prompt for specific review focus
 dive watch src/ --recursive \
@@ -130,12 +138,14 @@ dive watch src/ --recursive \
 ```
 
 ### Debouncing
+
 ```bash
 # Adjust debounce time for rapid file changes
 dive watch . --recursive --debounce 1000 --on-change "Review changes"
 ```
 
 ### Multiple Tools
+
 ```bash
 # Use multiple tools for comprehensive review
 dive watch src/ --recursive \
@@ -155,16 +165,19 @@ dive watch src/ --recursive \
 ## Troubleshooting
 
 ### High CPU Usage
+
 - Use more specific patterns instead of watching entire directories
 - Increase debounce time with `--debounce`
 - Use `--only-extensions` to filter file types
 
 ### Too Many Triggers
+
 - Add ignore patterns for build artifacts and temporary files
 - Use `--debounce` to reduce rapid fire events
 - Be more specific with watch patterns
 
 ### LLM Errors
+
 - Check API keys and rate limits
 - Use `--log-file` to capture detailed error information
 - Consider using `--reasoning-budget` for complex tasks

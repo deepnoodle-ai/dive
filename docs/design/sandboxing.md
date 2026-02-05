@@ -1,5 +1,7 @@
 # Sandboxing Design Document
 
+> **Note**: This is a design document. The implementation lives in `experimental/sandbox/` and may differ from some details described here. See the [sandboxing guide](../guides/experimental/sandboxing.md) for current usage.
+
 This document describes the design for sandboxed command execution in Dive, providing secure isolation for AI agent tool execution across different platforms.
 
 ## Overview
@@ -20,7 +22,7 @@ When AI agents execute shell commands via tools like `BashTool`, there's inheren
 1. Perfect security against determined attackers (defense-in-depth, not absolute security)
 2. GUI application support
 3. Real-time filesystem monitoring/IDS capabilities
-4. Fine-grained network filtering (allow specific domains)
+4. ~~Fine-grained network filtering~~ (now implemented via built-in proxy; see [sandboxing-network-proxy.md](sandboxing-network-proxy.md))
 
 ## Architecture
 
@@ -327,7 +329,7 @@ sandbox:
 ### Programmatic Configuration
 
 ```go
-import "github.com/deepnoodle-ai/dive/sandbox"
+import "github.com/deepnoodle-ai/dive/experimental/sandbox"
 
 cfg := &sandbox.Config{
     Enabled:      true,
@@ -351,17 +353,15 @@ bashTool := toolkit.NewBashTool(toolkit.BashToolOptions{
 ### Package Structure
 
 ```text
-toolkit/
-├── sandbox/
-│   ├── sandbox.go        # Manager, Backend interface, Config types
-│   ├── seatbelt.go       # macOS Seatbelt backend
-│   ├── docker.go         # Docker/Podman backend
-│   ├── profiles/
-│   │   ├── restrictive.sb
-│   │   └── permissive.sb
-│   └── sandbox_test.go
-├── bash.go               # Modified to use sandbox
-└── ...
+experimental/sandbox/
+├── sandbox.go        # Manager, Backend interface, Config types
+├── seatbelt.go       # macOS Seatbelt backend
+├── docker.go         # Docker/Podman backend
+├── proxy/            # Network proxy for domain filtering
+├── profiles/
+│   ├── restrictive.sb
+│   └── permissive.sb
+└── sandbox_test.go
 ```
 
 ### Backend Interface
@@ -798,7 +798,6 @@ func TestSandbox_FilesystemIsolation(t *testing.T) {
 ### External Projects
 
 - **gemini-cli** (Google) - Reference implementation for Seatbelt and Docker sandboxing
-
   - Source: `packages/cli/src/utils/sandbox.ts`
   - Seatbelt profiles: `packages/cli/src/utils/sandbox-macos-*.sb`
 

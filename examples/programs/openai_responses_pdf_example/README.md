@@ -34,4 +34,4 @@ go run main.go -file-id file-abc123 -prompt "Summarize the key points in this do
 - "What is this document about? Provide a brief summary."
 - "Extract the key findings from this research paper."
 - "List the main sections and their topics."
-- "What are the conclusions or recommendations?" 
+- "What are the conclusions or recommendations?"

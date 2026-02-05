@@ -6,6 +6,7 @@ import (
 	"net/http"
 )
 
+// ImageType represents a supported image MIME type.
 type ImageType string
 
 const (

@@ -1,34 +1,10 @@
 # Agent Guide
 
-Agents are the core building blocks of Dive applications. They represent intelligent AI entities that can understand natural language, use tools to interact with the world, and work together to accomplish complex tasks.
+The `Agent` struct is the core building block of Dive applications. It manages LLM interactions, tool execution, and conversation flow.
 
-## 📋 Table of Contents
+## Creating an Agent
 
-- [What is an Agent?](#what-is-an-agent)
-- [Creating Agents](#creating-agents)
-- [Agent Configuration](#agent-configuration)
-- [Tool Integration](#tool-integration)
-- [Supervisor Patterns](#supervisor-patterns)
-- [Subagents](#subagents)
-- [Session Management](#session-management)
-- [Best Practices](#best-practices)
-
-## What is an Agent?
-
-An agent in Dive is an autonomous AI entity that can:
-
-- **Understand** natural language input and context
-- **Reason** about problems and make decisions
-- **Act** using tools to interact with external systems
-- **Communicate** in natural language responses
-- **Collaborate** with other agents through work delegation
-- **Remember** conversation history across interactions
-
-Think of agents as AI assistants with specific expertise and capabilities, similar to having specialized team members who can work independently or together.
-
-## Creating Agents
-
-### Basic Agent
+`NewAgent` returns an `*Agent` configured with the given options:
 
 ```go
 package main
@@ -36,635 +12,191 @@ package main
 import (
     "context"
     "fmt"
+    "log"
+
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
 func main() {
-    // Create a basic agent
-    assistant, err := dive.NewAgent(dive.AgentOptions{
+    agent, err := dive.NewAgent(dive.AgentOptions{
         Name:         "Assistant",
-        Instructions: "You are a helpful AI assistant.",
+        SystemPrompt: "You are a helpful AI assistant.",
         Model:        anthropic.New(),
     })
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
 
-    // Chat with the agent
-    response, err := assistant.CreateResponse(
+    response, err := agent.CreateResponse(
         context.Background(),
-        dive.WithInput("Hello! Can you help me with some questions?"),
+        dive.WithInput("Hello!"),
     )
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
 
-    fmt.Println(response.Text())
+    fmt.Println(response.OutputText())
 }
 ```
 
-### Agent with Tools
+## AgentOptions
+
+| Field                | Type                   | Description                                       |
+| -------------------- | ---------------------- | ------------------------------------------------- |
+| `Name`               | `string`               | Agent identifier (for logging)                    |
+| `SystemPrompt`       | `string`               | System prompt sent to the LLM                     |
+| `Model`              | `llm.LLM`              | LLM provider (required)                           |
+| `Tools`              | `[]Tool`               | Tools available to the agent                      |
+| `PreGeneration`      | `[]PreGenerationHook`  | Hooks called before LLM generation                |
+| `PostGeneration`     | `[]PostGenerationHook` | Hooks called after LLM generation                 |
+| `PreToolUse`         | `[]PreToolUseHook`     | Hooks called before each tool execution           |
+| `PostToolUse`        | `[]PostToolUseHook`    | Hooks called after each tool execution            |
+| `ModelSettings`      | `*ModelSettings`       | Temperature, max tokens, reasoning, caching       |
+| `ResponseTimeout`    | `time.Duration`        | Max time for a response (default: 30 min)         |
+| `ToolIterationLimit` | `int`                  | Max tool call iterations (default: 100)           |
+
+## Generation Hooks
+
+### PreGeneration
+
+Runs before the LLM is called. Use it to load session history, inject context, or modify the system prompt:
 
 ```go
-import (
-    "github.com/deepnoodle-ai/dive/toolkit"
-)
-
-// Create an agent with file system access
-researcher, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Research Assistant",
-    Instructions: "You help research topics and save findings to files.",
-    Model:        anthropic.New(),
-    Tools: []dive.Tool{
-        dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
-        dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
-        dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
-            Provider: "google", // or "kagi"
-        })),
-    },
-})
-```
-
-### Streaming Responses
-
-```go
-// Stream responses for real-time UI updates
-stream, err := assistant.StreamResponse(
-    context.Background(),
-    dive.WithInput("Write a short story about AI"),
-)
-if err != nil {
-    panic(err)
-}
-
-for event := range stream.Events() {
-    switch event.Type {
-    case dive.EventTypeResponseInProgress:
-        if event.Item.Message != nil {
-            fmt.Print(event.Item.Message.Text())
-        }
-    case dive.EventTypeResponseCompleted:
-        fmt.Println("\n--- Complete ---")
-    }
-}
-```
-
-## Agent Configuration
-
-### Basic Options
-
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Data Analyst",        // Agent identifier
-    Goal:         "Analyze data sets",   // High-level purpose
-    Instructions: "You are an expert...", // Detailed behavior instructions
-    Model:        anthropic.New(),       // LLM provider
-})
-```
-
-### Advanced Configuration
-
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Advanced Assistant",
-    Instructions: "You are a specialized assistant...",
-    Model:        anthropic.New(),
-
-    // Tool configuration
-    Tools: []dive.Tool{
-        webSearchTool,
-        calculatorTool,
-        fileSystemTool,
-    },
-
-    // Behavior settings
-    ResponseTimeout:      time.Minute * 5,
-    ToolIterationLimit:   10,
-    DateAwareness:        &[]bool{true}[0],
-
-    // Model fine-tuning
-    ModelSettings: &agent.ModelSettings{
-        Temperature:       &[]float64{0.7}[0],
-        MaxTokens:         &[]int{2048}[0],
-        ReasoningBudget:   &[]int{50000}[0],
-        ReasoningEffort:   "high",
-        ParallelToolCalls: &[]bool{true}[0],
-        Caching:           &[]bool{true}[0],
-    },
-
-    // Custom system prompt
-    SystemPromptTemplate: "You are {{.Name}}. {{.Instructions}}",
-
-    // Additional context
-    Context: []llm.Content{
-        &llm.TextContent{Text: "Today's priority is data analysis."},
-    },
-})
-```
-
-## Tool Integration
-
-### Built-in Tools
-
-Dive includes several built-in tools:
-
-```go
-import "github.com/deepnoodle-ai/dive/toolkit"
-
-tools := []dive.Tool{
-    // File operations
-    dive.ToolAdapter(toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{})),
-    dive.ToolAdapter(toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{})),
-    dive.ToolAdapter(toolkit.NewListDirectoryTool(toolkit.ListDirectoryToolOptions{})),
-
-    // Web operations
-    dive.ToolAdapter(toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
-        Provider: "google",
-    })),
-    dive.ToolAdapter(toolkit.NewFetchTool(toolkit.FetchToolOptions{})),
-
-    // System operations
-    dive.ToolAdapter(toolkit.NewCommandTool(toolkit.CommandToolOptions{})),
-
-    // Text editing
-    dive.ToolAdapter(toolkit.NewTextEditorTool(toolkit.TextEditorToolOptions{})),
-
-    // Image generation
-    dive.ToolAdapter(toolkit.NewImageGenerationTool(toolkit.ImageGenerationToolOptions{})),
-}
-```
-
-### Custom Tools
-
-Create custom tools by implementing the `TypedTool` interface:
-
-```go
-type WeatherTool struct {
-    APIKey string
-}
-
-type WeatherInput struct {
-    Location string `json:"location"`
-}
-
-func (t *WeatherTool) Name() string {
-    return "get_weather"
-}
-
-func (t *WeatherTool) Description() string {
-    return "Get current weather information for a location"
-}
-
-func (t *WeatherTool) Schema() schema.Schema {
-    return schema.Schema{
-        Type: "object",
-        Properties: map[string]schema.Property{
-            "location": {
-                Type:        "string",
-                Description: "City name or coordinates",
-            },
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a helpful assistant.",
+    Model:        model,
+    PreGeneration: []dive.PreGenerationHook{
+        func(ctx context.Context, state *dive.GenerationState) error {
+            // Load session history
+            if history, ok := loadHistory(state.SessionID); ok {
+                state.Messages = append(history, state.Messages...)
+            }
+            return nil
         },
-        Required: []string{"location"},
-    }
-}
-
-func (t *WeatherTool) Annotations() dive.ToolAnnotations {
-    return dive.ToolAnnotations{
-        Title:         "Weather Information",
-        ReadOnlyHint:  true,
-        OpenWorldHint: true,
-    }
-}
-
-func (t *WeatherTool) Call(ctx context.Context, input *WeatherInput) (*dive.ToolResult, error) {
-    // Implementation details...
-    return &dive.ToolResult{
-        Content: []*dive.ToolResultContent{{
-            Type: dive.ToolResultContentTypeText,
-            Text: fmt.Sprintf("Weather in %s: %s", input.Location, weatherData),
-        }},
-    }, nil
-}
-
-// Use the tool
-weatherTool := dive.ToolAdapter(&WeatherTool{APIKey: "your-key"})
-```
-
-### Tool Annotations
-
-Tools can include annotations to help agents understand their behavior:
-
-```go
-annotations := dive.ToolAnnotations{
-    Title:           "File Writer",        // Human-readable name
-    ReadOnlyHint:    false,               // Tool modifies data
-    DestructiveHint: true,                // Tool may delete/overwrite
-    IdempotentHint:  false,               // Results may vary on repeat
-    OpenWorldHint:   false,               // No external network access
-}
-```
-
-## Supervisor Patterns
-
-Agents can be configured as supervisors to delegate work to other agents:
-
-### Creating a Supervisor
-
-```go
-supervisor, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Project Manager",
-    Instructions: "You coordinate work between team members.",
-    IsSupervisor: true,
-    Subordinates: []string{"Researcher", "Writer", "Reviewer"},
-    Model:        anthropic.New(),
+    },
 })
 ```
 
-### Automatic Work Assignment
+The `GenerationState` provides mutable access to:
 
-Supervisors automatically get an `assign_work` tool:
+- `SessionID`, `UserID` - identifiers
+- `SystemPrompt` - modifiable system prompt
+- `Messages` - modifiable message list
+- `Values` - arbitrary data shared between hooks
+
+### PostGeneration
+
+Runs after generation completes. Use it to save sessions, log results, or trigger side effects:
 
 ```go
-// The supervisor can now delegate tasks
-response, err := supervisor.CreateResponse(
-    context.Background(),
-    dive.WithInput("Research renewable energy and write a summary report"),
+PostGeneration: []dive.PostGenerationHook{
+    func(ctx context.Context, state *dive.GenerationState) error {
+        // Save session
+        return saveHistory(state.SessionID, state.Messages, state.OutputMessages)
+    },
+},
+```
+
+PostGeneration errors are logged but don't affect the returned `Response`, unless the hook returns a `*HookAbortError` (via `AbortGeneration()`), which aborts generation and returns an error.
+
+### Built-in Hook Helpers
+
+- `dive.InjectContext(content...)` - Prepends content as a user message
+- `dive.CompactionHook(threshold, summarizer)` - Triggers context compaction
+- `dive.UsageLogger(logFunc)` - Logs token usage after generation
+- `dive.UsageLoggerWithSlog(logger)` - Logs usage via slog
+
+## Tool Hooks
+
+### PreToolUse
+
+Runs before each tool execution. All hooks run in order. If any returns an error, the tool is denied. If all return nil, the tool is executed.
+
+```go
+PreToolUse: []dive.PreToolUseHook{
+    func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+        // Allow read-only tools
+        if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
+            return nil
+        }
+        // Deny everything else
+        return fmt.Errorf("tool %s requires approval", hookCtx.Tool.Name())
+    },
+},
+```
+
+### PostToolUse
+
+Runs after tool execution. Can modify the result before it's sent to the LLM:
+
+```go
+PostToolUse: []dive.PostToolUseHook{
+    func(ctx context.Context, hookCtx *dive.PostToolUseContext) error {
+        log.Printf("Tool %s completed", hookCtx.Tool.Name())
+        return nil
+    },
+},
+```
+
+## Event Callbacks
+
+Use `WithEventCallback` to observe agent activity in real-time:
+
+```go
+response, err := agent.CreateResponse(ctx,
+    dive.WithInput("Analyze this codebase"),
+    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+        switch item.Type {
+        case dive.ResponseItemTypeInit:
+            fmt.Printf("Session: %s\n", item.Init.SessionID)
+        case dive.ResponseItemTypeMessage:
+            // Complete assistant message
+        case dive.ResponseItemTypeToolCall:
+            fmt.Printf("Calling: %s\n", item.ToolCall.Name)
+        case dive.ResponseItemTypeToolCallResult:
+            // Tool result available
+        case dive.ResponseItemTypeModelEvent:
+            // Streaming event from LLM (for real-time UI)
+        case dive.ResponseItemTypeTodo:
+            // Todo list updated
+        }
+        return nil
+    }),
 )
 ```
 
-### Custom Assignment Logic
+## CreateResponse Options
+
+| Option                  | Description                                |
+| ----------------------- | ------------------------------------------ |
+| `WithInput(text)`       | Simple text input (creates a user message) |
+| `WithMessages(msgs...)` | Multiple messages                          |
+| `WithEventCallback(fn)` | Receive events during generation           |
+
+## Model Settings
+
+Fine-tune LLM behavior per agent:
 
 ```go
-// Override the default assign_work tool
-customAssignTool := &CustomAssignWorkTool{
-    // Your custom delegation logic
-}
-
-supervisor, err := agent.New(agent.Options{
-    Name:         "Smart Manager",
-    IsSupervisor: true,
-    Tools: []dive.Tool{
-        dive.ToolAdapter(customAssignTool), // Custom tool will be used
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a creative writer.",
+    Model:        anthropic.New(),
+    ModelSettings: &dive.ModelSettings{
+        Temperature:     dive.Ptr(0.9),
+        MaxTokens:       dive.Ptr(4000),
+        ReasoningBudget: dive.Ptr(50000),
+        Caching:         dive.Ptr(true),
     },
 })
 ```
 
 ## Subagents
 
-Subagents allow an agent to spawn specialized child agents for focused subtasks. Unlike supervisor patterns where agents coordinate pre-existing subordinates, subagents are created on-demand with isolated contexts and restricted tool access.
-
-### Key Concepts
-
-- **Focused Context**: Subagents receive only the prompt provided, not the parent's full conversation history
-- **Tool Restrictions**: Subagents can be limited to specific tools
-- **No Nesting**: Subagents cannot spawn their own subagents (Task tool is never available to them)
-- **Model Override**: Subagents can use different models than their parent
-
-### Programmatic Definition
-
-Define subagents directly in `AgentOptions`:
-
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Main Agent",
-    Instructions: "You are a helpful assistant.",
-    Model:        anthropic.New(),
-    Tools:        allTools,
-    Subagents: map[string]*dive.SubagentDefinition{
-        "code-reviewer": {
-            Description: "Expert code reviewer. Use for security and quality reviews.",
-            Prompt:      "You are a code review specialist. Analyze code for bugs, security issues, and style problems.",
-            Tools:       []string{"Read", "Grep", "Glob"},
-            Model:       "sonnet",
-        },
-        "test-runner": {
-            Description: "Runs and analyzes test suites.",
-            Prompt:      "You are a test execution specialist. Run tests and analyze results.",
-            Tools:       []string{"Bash", "Read", "Grep"},
-        },
-    },
-})
-```
-
-### SubagentDefinition Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `Description` | `string` | When Claude should use this subagent (shown in Task tool description) |
-| `Prompt` | `string` | System prompt for the subagent |
-| `Tools` | `[]string` | Tool names allowed (nil = inherit all except Task) |
-| `Model` | `string` | Model override: "sonnet", "opus", "haiku", or "" (inherit) |
-
-### Filesystem-Based Loading
-
-Load subagent definitions from markdown files with YAML frontmatter:
-
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Main Agent",
-    Instructions: "You are a helpful assistant.",
-    Model:        anthropic.New(),
-    Tools:        allTools,
-    SubagentLoader: &dive.FileSubagentLoader{
-        Directories:         []string{".dive/agents"},
-        IncludeClaudeAgents: true, // Also load from .claude/agents/
-    },
-})
-```
-
-Subagent files use markdown with YAML frontmatter:
-
-```markdown
-<!-- .dive/agents/code-reviewer.md -->
----
-description: Expert code reviewer for security and quality reviews
-model: sonnet
-tools:
-  - Read
-  - Grep
-  - Glob
----
-
-You are a code review specialist.
-
-When reviewing code:
-1. Check for security vulnerabilities
-2. Identify bugs and logic errors
-3. Suggest improvements for readability
-4. Ensure proper error handling
-```
-
-The filename (without `.md`) becomes the subagent name.
-
-### Custom Loaders
-
-Implement the `SubagentLoader` interface to load definitions from custom sources:
-
-```go
-type SubagentLoader interface {
-    Load(ctx context.Context) (map[string]*SubagentDefinition, error)
-}
-
-// Example: Load from database
-type DatabaseSubagentLoader struct {
-    DB *sql.DB
-}
-
-func (l *DatabaseSubagentLoader) Load(ctx context.Context) (map[string]*SubagentDefinition, error) {
-    rows, err := l.DB.QueryContext(ctx, "SELECT name, description, prompt, tools, model FROM subagents")
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
-
-    result := make(map[string]*dive.SubagentDefinition)
-    for rows.Next() {
-        // Parse and add to result...
-    }
-    return result, nil
-}
-```
-
-### Combining Multiple Sources
-
-Use `CompositeSubagentLoader` to combine multiple loaders:
-
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:  "Main Agent",
-    Model: anthropic.New(),
-    SubagentLoader: &dive.CompositeSubagentLoader{
-        Loaders: []dive.SubagentLoader{
-            &dive.FileSubagentLoader{Directories: []string{".dive/agents"}},
-            &dive.MapSubagentLoader{
-                Subagents: map[string]*dive.SubagentDefinition{
-                    "custom-agent": {
-                        Description: "Custom programmatic agent",
-                        Prompt:      "You are a custom agent.",
-                    },
-                },
-            },
-        },
-    },
-})
-```
-
-Later loaders override earlier ones for definitions with the same name.
-
-### Built-in General-Purpose Subagent
-
-A `general-purpose` subagent is automatically registered unless disabled. It inherits all parent tools (except Task) and can handle any task:
-
-```go
-// Access the built-in definition
-dive.GeneralPurposeSubagent.Description
-// "General-purpose agent for complex, multi-step tasks. Use when no specialized agent matches."
-```
-
-### Tool Filtering
-
-Use `FilterTools` to apply a subagent's tool restrictions:
-
-```go
-// In your AgentFactory implementation
-func createSubagent(ctx context.Context, name string, def *dive.SubagentDefinition, parentTools []dive.Tool) (dive.Agent, error) {
-    // Filter tools based on definition
-    filteredTools := dive.FilterTools(def, parentTools)
-
-    return dive.NewAgent(dive.AgentOptions{
-        Name:         name,
-        Instructions: def.Prompt,
-        Model:        selectModel(def.Model),
-        Tools:        filteredTools,
-    })
-}
-```
-
-Key behaviors:
-- If `def.Tools` is nil or empty, all parent tools are inherited (except Task)
-- If `def.Tools` specifies tool names, only those tools are included
-- The Task tool is **never** included, preventing nested subagent spawning
-
-## Session Management
-
-Sessions enable persistent multi-turn conversations across multiple `CreateResponse` calls. Each session maintains a complete message history, allowing agents to remember context from previous interactions.
-
-### Persistent Conversations
-
-```go
-// Set up session repository for file-based persistence
-sessionRepo, err := dive.NewFileSessionRepository("~/.myapp/sessions")
-if err != nil {
-    panic(err)
-}
-
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:              "Assistant",
-    Model:             anthropic.New(),
-    SessionRepository: sessionRepo,
-})
-
-// First interaction - auto-generates session ID
-response1, err := agent.CreateResponse(
-    context.Background(),
-    dive.WithInput("My name is Alice"),
-)
-sessionID := response1.SessionID // Save this to resume later
-
-// Later interaction - agent remembers previous context
-response2, err := agent.CreateResponse(
-    context.Background(),
-    dive.WithResume(sessionID),
-    dive.WithInput("What's my name?"),
-)
-// Agent will respond with "Alice"
-```
-
-### Session Storage Options
-
-```go
-// In-memory (development/testing)
-sessionRepo := dive.NewMemorySessionRepository()
-
-// File-based (CLI applications, single-user deployments)
-// Stores sessions as JSON files in ~/.myapp/sessions/{session_id}.json
-sessionRepo, err := dive.NewFileSessionRepository("~/.myapp/sessions")
-
-// Database-based (production, multi-user)
-// Implement the dive.SessionRepository interface
-```
-
-### Forking Sessions
-
-Create conversation branches to explore alternative paths while preserving the original:
-
-```go
-// Fork from an existing session
-response, err := agent.CreateResponse(
-    context.Background(),
-    dive.WithResume("original-session-id"),
-    dive.WithFork(true),
-    dive.WithInput("Let's try a different approach"),
-)
-// response.SessionID is a new ID; original session is unchanged
-```
-
-### Session Metadata
-
-Sessions automatically store:
-- **ID**: Unique identifier (auto-generated or user-provided)
-- **Messages**: Complete conversation history
-- **Timestamps**: CreatedAt and UpdatedAt
-- **Metadata**: Custom key-value pairs (e.g., workspace directory)
-- **Title**: Human-readable description (can be auto-generated)
-
-### Capturing Session IDs
-
-Use the `InitEvent` callback to capture session IDs early in the response:
-
-```go
-var sessionID string
-response, err := agent.CreateResponse(ctx,
-    dive.WithInput("Hello"),
-    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-        if item.Type == dive.ResponseItemTypeInit && item.Init != nil {
-            sessionID = item.Init.SessionID
-            // Save sessionID for later resumption
-        }
-        return nil
-    }),
-)
-```
-
-## Best Practices
-
-### 1. Clear Instructions
-
-```go
-// Good: Specific, actionable instructions
-Instructions: `You are a code review assistant. When reviewing code:
-1. Check for security vulnerabilities
-2. Suggest performance improvements
-3. Ensure proper error handling
-4. Verify documentation completeness
-Always explain your reasoning.`
-
-// Avoid: Vague or conflicting instructions
-Instructions: "You're helpful and do everything well."
-```
-
-### 2. Appropriate Tool Selection
-
-```go
-// Good: Include only relevant tools
-Tools: []dive.Tool{
-    codeAnalysisTool,
-    documentationTool,
-    securityScanTool,
-}
-
-// Avoid: Including too many unrelated tools
-Tools: []dive.Tool{
-    codeAnalysisTool,
-    weatherTool,      // Unrelated
-    gamePlayerTool,   // Unrelated
-    fileSystemTool,   // Maybe needed?
-}
-```
-
-### 3. Error Handling
-
-```go
-agent, err := dive.NewAgent(dive.AgentOptions{
-    Name: "Assistant",
-    ResponseTimeout: time.Minute * 2, // Reasonable timeout
-})
-if err != nil {
-    return fmt.Errorf("failed to create agent: %w", err)
-}
-
-response, err := agent.CreateResponse(ctx, dive.WithInput(userInput))
-if err != nil {
-    // Handle specific error types
-    if errors.Is(err, dive.ErrSessionsNotEnabled) {
-        // Handle session configuration issue
-    }
-    return fmt.Errorf("agent response failed: %w", err)
-}
-```
-
-### 4. Resource Management
-
-```go
-// Use contexts for cancellation
-ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
-defer cancel()
-
-response, err := agent.CreateResponse(ctx, dive.WithInput(input))
-```
-
-### 5. Event Handling
-
-```go
-response, err := agent.CreateResponse(
-    context.Background(),
-    dive.WithInput("Analyze this data"),
-    dive.WithEventCallback(func(ctx context.Context, event *dive.ResponseEvent) error {
-        switch event.Type {
-        case dive.EventTypeResponseToolCall:
-            log.Printf("Tool called: %s", event.Item.ToolCall.Name)
-        case dive.EventTypeResponseToolResult:
-            log.Printf("Tool result: %s", event.Item.ToolCallResult.Result)
-        }
-        return nil
-    }),
-)
-```
+Subagent support is available in `experimental/subagent/`. See the experimental packages for details.
 
 ## Next Steps
 
-- [Custom Tools](custom-tools.md) - Build domain-specific agent capabilities
-- [Tools Guide](tools.md) - Learn about built-in tools and capabilities
-- [LLM Guide](llm-guide.md) - Work with different AI models and providers
-- [API Reference](../api/agent.md) - Detailed API documentation
+- [Tools Guide](tools.md) - Built-in tools
+- [Custom Tools](custom-tools.md) - Create your own tools
+- [LLM Guide](llm-guide.md) - Provider configuration

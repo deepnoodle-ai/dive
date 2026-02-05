@@ -1,5 +1,7 @@
 # Sandboxing Design Review
 
+> **Historical**: This review was written prior to implementation. Some recommendations have since been implemented (e.g. `MountCloudCredentials`, network proxy filtering). See `experimental/sandbox/` for current state.
+
 ## Executive Summary
 
 The proposed sandboxing design for Dive (`docs/design/sandboxing.md`) presents a pragmatic, defense-in-depth approach leveraging native OS capabilities: **Seatbelt (sandbox-exec)** for macOS and **Docker/Podman** for Linux/Windows.

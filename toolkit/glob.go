@@ -19,30 +19,56 @@ var (
 	_ dive.TypedToolPreviewer[*GlobInput] = &GlobTool{}
 )
 
-// GlobInput represents the input parameters for the glob tool
+// GlobInput represents the input parameters for the Glob tool.
 type GlobInput struct {
+	// Pattern is the glob pattern to match files against. Required.
+	// Supports *, **, ?, [abc], and {a,b,c} syntax.
 	Pattern string `json:"pattern"`
-	Path    string `json:"path,omitempty"`
+
+	// Path is the directory to search in.
+	// Defaults to the current working directory if empty.
+	Path string `json:"path,omitempty"`
 }
 
-// GlobToolOptions configures the GlobTool
+// GlobToolOptions configures the behavior of [GlobTool].
 type GlobToolOptions struct {
-	// DefaultExcludes are glob patterns to exclude by default (e.g., node_modules)
+	// DefaultExcludes are glob patterns to exclude from results.
+	// Common defaults include node_modules, .git, vendor, etc.
+	// Set to an empty slice to disable default exclusions.
 	DefaultExcludes []string
-	// MaxResults limits the number of files returned
+
+	// MaxResults limits the number of files returned.
+	// Defaults to 500 if not specified.
 	MaxResults int
-	// WorkspaceDir is the base directory for workspace validation (defaults to cwd)
+
+	// WorkspaceDir restricts searches to paths within this directory.
+	// Defaults to the current working directory if empty.
 	WorkspaceDir string
 }
 
-// GlobTool is a tool for finding files using glob patterns
+// GlobTool finds files matching glob patterns.
+//
+// This tool is useful for discovering files in a codebase by pattern.
+// Results are sorted by modification time (most recent first) to help
+// identify recently changed files.
+//
+// Features:
+//   - Full glob syntax: *, **, ?, [abc], {a,b,c}
+//   - Automatic exclusion of common non-source directories
+//   - Results sorted by modification time
+//   - Configurable result limit
+//
+// The tool only matches files, not directories.
 type GlobTool struct {
 	defaultExcludes []string
 	maxResults      int
 	pathValidator   *PathValidator
+	workspaceDir    string
+	configErr       error
 }
 
-// NewGlobTool creates a new GlobTool
+// NewGlobTool creates a new GlobTool with the given options.
+// If no options are provided, sensible defaults are used.
 func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 	var resolvedOpts GlobToolOptions
 	if len(opts) > 0 {
@@ -51,7 +77,7 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 	if resolvedOpts.MaxResults == 0 {
 		resolvedOpts.MaxResults = 500
 	}
-	if len(resolvedOpts.DefaultExcludes) == 0 {
+	if resolvedOpts.DefaultExcludes == nil {
 		resolvedOpts.DefaultExcludes = []string{
 			"**/node_modules/**",
 			"**/.git/**",
@@ -64,21 +90,29 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 			"**/*.min.css",
 		}
 	}
-	pathValidator, err := NewPathValidator(resolvedOpts.WorkspaceDir)
-	if err != nil {
-		pathValidator = &PathValidator{}
+	var pathValidator *PathValidator
+	var configErr error
+	if resolvedOpts.WorkspaceDir != "" {
+		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		}
 	}
 	return dive.ToolAdapter(&GlobTool{
 		defaultExcludes: resolvedOpts.DefaultExcludes,
 		maxResults:      resolvedOpts.MaxResults,
 		pathValidator:   pathValidator,
+		workspaceDir:    resolvedOpts.WorkspaceDir,
+		configErr:       configErr,
 	})
 }
 
+// Name returns "Glob" as the tool identifier.
 func (t *GlobTool) Name() string {
 	return "Glob"
 }
 
+// Description returns detailed usage instructions for the LLM.
 func (t *GlobTool) Description() string {
 	return `Find files matching a glob pattern.
 
@@ -98,6 +132,7 @@ Examples:
 Returns file paths sorted by modification time (most recent first).`
 }
 
+// Schema returns the JSON schema describing the tool's input parameters.
 func (t *GlobTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
@@ -115,6 +150,8 @@ func (t *GlobTool) Schema() *schema.Schema {
 	}
 }
 
+// Annotations returns metadata hints about the tool's behavior.
+// Glob is marked as read-only and idempotent.
 func (t *GlobTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:           "Glob",
@@ -125,6 +162,7 @@ func (t *GlobTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+// PreviewCall returns a summary of the search operation for permission prompts.
 func (t *GlobTool) PreviewCall(ctx context.Context, input *GlobInput) *dive.ToolCallPreview {
 	searchPath := input.Path
 	if searchPath == "" {
@@ -135,7 +173,19 @@ func (t *GlobTool) PreviewCall(ctx context.Context, input *GlobInput) *dive.Tool
 	}
 }
 
+// Call searches for files matching the glob pattern.
+//
+// Returns matching file paths as newline-separated text, sorted by
+// modification time (most recent first). If no files match, returns
+// a message indicating no matches were found.
 func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	searchPath := input.Path
 	if searchPath == "" {
 		var err error
@@ -154,8 +204,8 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 		searchPath = filepath.Join(cwd, searchPath)
 	}
 
-	// Validate path is within workspace
-	if t.pathValidator != nil && t.pathValidator.WorkspaceDir != "" {
+	// Validate path is within workspace (skip validation if no validator configured)
+	if t.pathValidator != nil {
 		if err := t.pathValidator.ValidateRead(searchPath); err != nil {
 			return dive.NewToolResultError(fmt.Sprintf("Error: %s", err.Error())), nil
 		}

@@ -1,13 +1,12 @@
-Code Interpreter
-================
+# Code Interpreter
 
 Allow models to write and run Python to solve problems.
 
 The Code Interpreter tool allows models to write and run Python code in a sandboxed environment to solve complex problems in domains like data analysis, coding, and math. Use it for:
 
-*   Processing files with diverse data and formatting
-*   Generating files with data and images of graphs
-*   Writing and running code iteratively to solve problems—for example, a model that writes code that fails to run can keep rewriting and running that code until it succeeds
+- Processing files with diverse data and formatting
+- Generating files with data and images of graphs
+- Writing and running code iteratively to solve problems—for example, a model that writes code that fails to run can keep rewriting and running that code until it succeeds
 
 Code Interpreter is available in the [Responses API](/docs/api-reference/responses) across all models.
 
@@ -45,10 +44,11 @@ const resp = await client.responses.create({
   tools: [
     {
       type: "code_interpreter",
-      container: { type: "auto" }
-    }
+      container: { type: "auto" },
+    },
   ],
-  instructions: "You are a personal math tutor. When asked a math question, write and run code to answer the question.",
+  instructions:
+    "You are a personal math tutor. When asked a math question, write and run code to answer the question.",
   input: "I need to solve the equation 3x + 11 = 14. Can you help me?",
 });
 
@@ -74,8 +74,7 @@ resp = client.responses.create(
 print(resp.output_text)
 ```
 
-Containers
-----------
+## Containers
 
 The Code Interpreter tool requires a [container object](/docs/api-reference/containers/object). A container is a fully sandboxed virtual machine that the model can run Python code in. This container can contain files that you upload, or that it generates.
 
@@ -135,15 +134,16 @@ const client = new OpenAI();
 const container = await client.containers.create({ name: "test-container" });
 
 const resp = await client.responses.create({
-    model: "gpt-4.1",
-    tools: [
-      {
-        type: "code_interpreter",
-        container: container.id
-      }
-    ],
-    tool_choice: "required",
-    input: "use the python tool to calculate what is 4 * 3.82. and then find its square root and then find the square root of that result"
+  model: "gpt-4.1",
+  tools: [
+    {
+      type: "code_interpreter",
+      container: container.id,
+    },
+  ],
+  tool_choice: "required",
+  input:
+    "use the python tool to calculate what is 4 * 3.82. and then find its square root and then find the square root of that result",
 });
 
 console.log(resp.output_text);
@@ -155,12 +155,11 @@ Note that containers created with the auto mode are also accessible using the `v
 
 We highly recommend you treat containers as ephemeral and store all data related to the use of this tool on your own systems. Expiration details:
 
-*   A container expires if it is not used for 20 minutes. When this happens, using the container in `v1/responses` will fail. You'll still be able to see a snapshot of the container's metadata at its expiry, but all data associated with the container will be discarded from our systems and not recoverable. You should download any files you may need from the container while it is active.
-*   You can't move a container from an expired state to an active one. Instead, create a new container and upload files again. Note that any state in the old container's memory (like python objects) will be lost.
-*   Any container operation, like retrieving the container, or adding or deleting files from the container, will automatically refresh the container's `last_active_at` time.
+- A container expires if it is not used for 20 minutes. When this happens, using the container in `v1/responses` will fail. You'll still be able to see a snapshot of the container's metadata at its expiry, but all data associated with the container will be discarded from our systems and not recoverable. You should download any files you may need from the container while it is active.
+- You can't move a container from an expired state to an active one. Instead, create a new container and upload files again. Note that any state in the old container's memory (like python objects) will be lost.
+- Any container operation, like retrieving the container, or adding or deleting files from the container, will automatically refresh the container's `last_active_at` time.
 
-Work with files
----------------
+## Work with files
 
 When running Code Interpreter, the model can create its own files. For example, if you ask it to construct a plot, or create a CSV, it creates these images directly on your container. When it does so, it cites these files in the `annotations` of its next message. Here's an example:
 
@@ -232,8 +231,7 @@ Any [files in the model input](/docs/guides/pdf-files) get automatically uploade
 | .xml        | application/xml or "text/xml"                                             |
 | .zip        | application/zip                                                           |
 
-Usage notes
------------
+## Usage notes
 
 ||
 |ResponsesChat CompletionsAssistants|100 RPM per org|PricingZDR and data residency|
