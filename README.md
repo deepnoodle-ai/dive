@@ -40,7 +40,7 @@ agent, err := dive.NewAgent(dive.AgentOptions{
     Tools: []dive.Tool{
         toolkit.NewReadFileTool(),
         toolkit.NewTextEditorTool(),
-        toolkit.NewListDirectoryTool(),        
+        toolkit.NewListDirectoryTool(),
     },
 })
 

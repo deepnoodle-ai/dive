@@ -40,8 +40,8 @@ func TestCalculateContextTokens(t *testing.T) {
 			name: "with cache read tokens",
 			usage: &llm.Usage{
 				InputTokens:              1000,
-				OutputTokens:             500,  // Not included
-				CacheCreationInputTokens: 200,  // Not included (subset of input)
+				OutputTokens:             500, // Not included
+				CacheCreationInputTokens: 200, // Not included (subset of input)
 				CacheReadInputTokens:     300,
 			},
 			expected: 1300, // InputTokens + CacheReadInputTokens

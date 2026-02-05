@@ -497,10 +497,10 @@ func TestUsageLoggerWithSlog(t *testing.T) {
 
 		state := NewGenerationState()
 		state.Usage = &llm.Usage{
-			InputTokens:             100,
-			OutputTokens:            50,
+			InputTokens:              100,
+			OutputTokens:             50,
 			CacheCreationInputTokens: 10,
-			CacheReadInputTokens:    20,
+			CacheReadInputTokens:     20,
 		}
 
 		err := hook(context.Background(), state)

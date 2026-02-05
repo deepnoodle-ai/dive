@@ -1,6 +1,6 @@
 # Todo Lists
 
-> **Experimental**: The TodoWrite tool is in `experimental/toolkit/`. The API may change.
+> **Experimental**: The TodoWrite tool is in `experimental/toolkit/extended/`. The API may change.
 
 Track task progress using Dive's todo functionality. The TodoWrite tool lets agents create and update task lists, with real-time `TodoEvent` emissions through the event callback system.
 
@@ -9,7 +9,7 @@ Track task progress using Dive's todo functionality. The TodoWrite tool lets age
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/experimental/toolkit"
+    "github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
     "github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
@@ -18,7 +18,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "Break complex tasks into steps and track progress with the TodoWrite tool.",
     Model:        anthropic.New(),
     Tools: []dive.Tool{
-        toolkit.NewTodoWriteTool(),
+        extended.NewTodoWriteTool(),
     },
 })
 ```
@@ -69,10 +69,10 @@ type TodoItem struct {
 
 ## TodoTracker Helper
 
-The `TodoTracker` helper (in the core `dive` package) consumes todo events and provides progress tracking:
+The `TodoTracker` helper (in `experimental/todo`) consumes todo events and provides progress tracking:
 
 ```go
-tracker := dive.NewTodoTracker()
+tracker := todo.NewTodoTracker()
 
 resp, _ := agent.CreateResponse(ctx,
     dive.WithInput("Build a REST API"),

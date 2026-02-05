@@ -192,4 +192,3 @@ func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 	}
 	return result
 }
-

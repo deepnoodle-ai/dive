@@ -130,16 +130,15 @@ func TestTaskTool(t *testing.T) {
 		assert.Contains(t, result.Content[0].Text, "Task started in background")
 		assert.Contains(t, result.Content[0].Text, "task_")
 
-		// Wait for background task to complete
-		time.Sleep(200 * time.Millisecond)
-
 		// Verify task completed
 		tasks := registry.List()
 		assert.Equal(t, 1, len(tasks))
 		record, ok := registry.Get(tasks[0])
 		assert.True(t, ok)
-		assert.Equal(t, TaskStatusCompleted, record.Status)
-		assert.Equal(t, "Background task done", record.Output)
+		<-record.done
+		snapshot := record.snapshot()
+		assert.Equal(t, TaskStatusCompleted, snapshot.Status)
+		assert.Equal(t, "Background task done", snapshot.Output)
 	})
 
 	t.Run("task with agent error", func(t *testing.T) {

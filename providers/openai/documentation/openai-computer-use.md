@@ -1,5 +1,4 @@
-Computer use
-============
+# Computer use
 
 Build a computer-using agent that can perform tasks on your behalf.
 
@@ -9,8 +8,7 @@ Computer use is available through the [Responses API](/docs/guides/responses-vs-
 
 Computer use is in beta. Because the model is still in preview and may be susceptible to exploits and inadvertent mistakes, we discourage trusting it in fully authenticated environments or for high-stakes tasks. See [limitations](#limitations) and [risk and safety best practices](#risks-and-safety) below. You must use the Computer Use tool in line with OpenAI's [Usage Policy](https://openai.com/policies/usage-policies/) and [Business Terms](https://openai.com/policies/business-terms/).
 
-How it works
-------------
+## How it works
 
 The computer use tool operates in a continuous loop. It sends computer actions, like `click(x,y)` or `type(text)`, which your code executes on a computer or browser environment and then returns screenshots of the outcomes back to the model.
 
@@ -28,8 +26,7 @@ Examples of how to integrate the computer use tool in different environments
 
 ](https://github.com/openai/openai-cua-sample-app)
 
-Setting up your environment
----------------------------
+## Setting up your environment
 
 Before integrating the tool, prepare an environment that can capture screenshots and execute the recommended actions. We recommend using a sandboxed environment for safety reasons.
 
@@ -41,9 +38,9 @@ If you want to try out the computer use tool with minimal setup, you can use a b
 
 Running a browser automation framework locally can pose security risks. We recommend the following setup to mitigate them:
 
-*   Use a sandboxed environment
-*   Set `env` to an empty object to avoid exposing host environment variables to the browser
-*   Set flags to disable extensions and the file system
+- Use a sandboxed environment
+- Set `env` to an empty object to avoid exposing host environment variables to the browser
+- Set flags to disable extensions and the file system
 
 #### Start a browser instance
 
@@ -51,8 +48,8 @@ You can start browser instances using your preferred language by installing the 
 
 For example, to start a Playwright browser instance, install the Playwright SDK:
 
-*   Python: `pip install playwright`
-*   JavaScript: `npm i playwright` then `npx playwright install`
+- Python: `pip install playwright`
+- JavaScript: `npm i playwright` then `npx playwright install`
 
 Then run the following code:
 
@@ -189,26 +186,20 @@ async function dockerExec(cmd, containerName, decode = true) {
 }
 
 const vm = {
-    display: ":99",
-    containerName: "cua-image",
+  display: ":99",
+  containerName: "cua-image",
 };
 ```
 
-Integrating the CUA loop
-------------------------
+## Integrating the CUA loop
 
 These are the high-level steps you need to follow to integrate the computer use tool in your application:
 
 1.  **Send a request to the model**: Include the `computer` tool as part of the available tools, specifying the display size and environment. You can also include in the first request a screenshot of the initial state of the environment.
-    
 2.  **Receive a response from the model**: Check if the response has any `computer_call` items. This tool call contains a suggested action to take to progress towards the specified goal. These actions could be clicking at a given position, typing in text, scrolling, or even waiting.
-    
 3.  **Execute the requested action**: Execute through code the corresponding action on your computer or browser environment.
-    
 4.  **Capture the updated state**: After executing the action, capture the updated state of the environment as a screenshot.
-    
 5.  **Repeat**: Send a new request with the updated state as a `computer_call_output`, and repeat this loop until the model stops requesting actions or you decide to stop.
-    
 
 ![Computer use diagram](https://cdn.openai.com/API/docs/images/cua_diagram.png)
 
@@ -274,7 +265,7 @@ response = client.responses.create(
         "display_width": 1024,
         "display_height": 768,
         "environment": "browser" # other possible values: "mac", "windows", "ubuntu"
-    }],    
+    }],
     input=[
         {
           "role": "user",
@@ -373,7 +364,7 @@ async function handleModelAction(page, action) {
       case "scroll": {
         const { x, y, scrollX, scrollY } = action;
         console.log(
-          `Action: scroll at (${x}, ${y}) with offsets (scrollX=${scrollX}, scrollY=${scrollY})`
+          `Action: scroll at (${x}, ${y}) with offsets (scrollX=${scrollX}, scrollY=${scrollY})`,
         );
         await page.mouse.move(x, y);
         await page.evaluate(`window.scrollBy(${scrollX}, ${scrollY})`);
@@ -433,7 +424,7 @@ def handle_model_action(page, action):
     execute the corresponding operation on the Playwright page.
     """
     action_type = action.type
-    
+
     try:
         match action_type:
 
@@ -464,12 +455,12 @@ def handle_model_action(page, action):
                         page.keyboard.press(" ")
                     else:
                         page.keyboard.press(k)
-            
+
             case "type":
                 text = action.text
                 print(f"Action: type text: {text}")
                 page.keyboard.type(text)
-            
+
             case "wait":
                 print(f"Action: wait")
                 time.sleep(2)
@@ -493,104 +484,104 @@ Execute the action
 
 ```javascript
 async function handleModelAction(vm, action) {
-    // Given a computer action (e.g., click, double_click, scroll, etc.),
-    // execute the corresponding operation on the Docker environment.
-  
-    const actionType = action.type;
-  
-    try {
-      switch (actionType) {
-        case "click": {
-          const { x, y, button = "left" } = action;
-          const buttonMap = { left: 1, middle: 2, right: 3 };
-          const b = buttonMap[button] || 1;
-          console.log(`Action: click at (${x}, ${y}) with button '${button}'`);
-          await dockerExec(
-            `DISPLAY=${vm.display} xdotool mousemove ${x} ${y} click ${b}`,
-            vm.containerName
-          );
-          break;
-        }
-  
-        case "scroll": {
-          const { x, y, scrollX, scrollY } = action;
-          console.log(
-            `Action: scroll at (${x}, ${y}) with offsets (scrollX=${scrollX}, scrollY=${scrollY})`
-          );
-          await dockerExec(
-            `DISPLAY=${vm.display} xdotool mousemove ${x} ${y}`,
-            vm.containerName
-          );
-          // For vertical scrolling, use button 4 for scroll up and button 5 for scroll down.
-          if (scrollY !== 0) {
-            const button = scrollY < 0 ? 4 : 5;
-            const clicks = Math.abs(scrollY);
-            for (let i = 0; i < clicks; i++) {
-              await dockerExec(
-                `DISPLAY=${vm.display} xdotool click ${button}`,
-                vm.containerName
-              );
-            }
-          }
-          break;
-        }
-  
-        case "keypress": {
-          const { keys } = action;
-          for (const k of keys) {
-            console.log(`Action: keypress '${k}'`);
-            // A simple mapping for common keys; expand as needed.
-            if (k.includes("ENTER")) {
-              await dockerExec(
-                `DISPLAY=${vm.display} xdotool key 'Return'`,
-                vm.containerName
-              );
-            } else if (k.includes("SPACE")) {
-              await dockerExec(
-                `DISPLAY=${vm.display} xdotool key 'space'`,
-                vm.containerName
-              );
-            } else {
-              await dockerExec(
-                `DISPLAY=${vm.display} xdotool key '${k}'`,
-                vm.containerName
-              );
-            }
-          }
-          break;
-        }
-  
-        case "type": {
-          const { text } = action;
-          console.log(`Action: type text '${text}'`);
-          await dockerExec(
-            `DISPLAY=${vm.display} xdotool type '${text}'`,
-            vm.containerName
-          );
-          break;
-        }
-  
-        case "wait": {
-          console.log(`Action: wait`);
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          break;
-        }
-  
-        case "screenshot": {
-          // Nothing to do as screenshot is taken at each turn
-          console.log(`Action: screenshot`);
-          break;
-        }
-  
-        // Handle other actions here
-  
-        default:
-          console.log("Unrecognized action:", action);
+  // Given a computer action (e.g., click, double_click, scroll, etc.),
+  // execute the corresponding operation on the Docker environment.
+
+  const actionType = action.type;
+
+  try {
+    switch (actionType) {
+      case "click": {
+        const { x, y, button = "left" } = action;
+        const buttonMap = { left: 1, middle: 2, right: 3 };
+        const b = buttonMap[button] || 1;
+        console.log(`Action: click at (${x}, ${y}) with button '${button}'`);
+        await dockerExec(
+          `DISPLAY=${vm.display} xdotool mousemove ${x} ${y} click ${b}`,
+          vm.containerName,
+        );
+        break;
       }
-    } catch (e) {
-      console.error("Error handling action", action, ":", e);
+
+      case "scroll": {
+        const { x, y, scrollX, scrollY } = action;
+        console.log(
+          `Action: scroll at (${x}, ${y}) with offsets (scrollX=${scrollX}, scrollY=${scrollY})`,
+        );
+        await dockerExec(
+          `DISPLAY=${vm.display} xdotool mousemove ${x} ${y}`,
+          vm.containerName,
+        );
+        // For vertical scrolling, use button 4 for scroll up and button 5 for scroll down.
+        if (scrollY !== 0) {
+          const button = scrollY < 0 ? 4 : 5;
+          const clicks = Math.abs(scrollY);
+          for (let i = 0; i < clicks; i++) {
+            await dockerExec(
+              `DISPLAY=${vm.display} xdotool click ${button}`,
+              vm.containerName,
+            );
+          }
+        }
+        break;
+      }
+
+      case "keypress": {
+        const { keys } = action;
+        for (const k of keys) {
+          console.log(`Action: keypress '${k}'`);
+          // A simple mapping for common keys; expand as needed.
+          if (k.includes("ENTER")) {
+            await dockerExec(
+              `DISPLAY=${vm.display} xdotool key 'Return'`,
+              vm.containerName,
+            );
+          } else if (k.includes("SPACE")) {
+            await dockerExec(
+              `DISPLAY=${vm.display} xdotool key 'space'`,
+              vm.containerName,
+            );
+          } else {
+            await dockerExec(
+              `DISPLAY=${vm.display} xdotool key '${k}'`,
+              vm.containerName,
+            );
+          }
+        }
+        break;
+      }
+
+      case "type": {
+        const { text } = action;
+        console.log(`Action: type text '${text}'`);
+        await dockerExec(
+          `DISPLAY=${vm.display} xdotool type '${text}'`,
+          vm.containerName,
+        );
+        break;
+      }
+
+      case "wait": {
+        console.log(`Action: wait`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        break;
+      }
+
+      case "screenshot": {
+        // Nothing to do as screenshot is taken at each turn
+        console.log(`Action: screenshot`);
+        break;
+      }
+
+      // Handle other actions here
+
+      default:
+        console.log("Unrecognized action:", action);
     }
+  } catch (e) {
+    console.error("Error handling action", action, ":", e);
   }
+}
 ```
 
 ```python
@@ -603,7 +594,7 @@ def handle_model_action(vm, action):
 
     try:
         match action_type:
-            
+
             case "click":
                 x, y = int(action.x), int(action.y)
                 button_map = {"left": 1, "middle": 2, "right": 3}
@@ -616,14 +607,14 @@ def handle_model_action(vm, action):
                 scroll_x, scroll_y = int(action.scroll_x), int(action.scroll_y)
                 print(f"Action: scroll at ({x}, {y}) with offsets (scroll_x={scroll_x}, scroll_y={scroll_y})")
                 docker_exec(f"DISPLAY={vm.display} xdotool mousemove {x} {y}", vm.container_name)
-                
+
                 # For vertical scrolling, use button 4 (scroll up) or button 5 (scroll down)
                 if scroll_y != 0:
                     button = 4 if scroll_y < 0 else 5
                     clicks = abs(scroll_y)
                     for _ in range(clicks):
                         docker_exec(f"DISPLAY={vm.display} xdotool click {button}", vm.container_name)
-            
+
             case "keypress":
                 keys = action.keys
                 for k in keys:
@@ -635,12 +626,12 @@ def handle_model_action(vm, action):
                         docker_exec(f"DISPLAY={vm.display} xdotool key 'space'", vm.container_name)
                     else:
                         docker_exec(f"DISPLAY={vm.display} xdotool key '{k}'", vm.container_name)
-            
+
             case "type":
                 text = action.text
                 print(f"Action: type text: {text}")
                 docker_exec(f"DISPLAY={vm.display} xdotool type '{text}'", vm.container_name)
-            
+
             case "wait":
                 print(f"Action: wait")
                 time.sleep(2)
@@ -648,7 +639,7 @@ def handle_model_action(vm, action):
             case "screenshot":
                 # Nothing to do as screenshot is taken at each turn
                 print(f"Action: screenshot")
-            
+
             # Handle other actions here
 
             case _:
@@ -668,8 +659,8 @@ Capture and send the updated screenshot
 
 ```javascript
 async function getScreenshot(page) {
-    // Take a full-page screenshot using Playwright and return the image bytes.
-    return await page.screenshot();
+  // Take a full-page screenshot using Playwright and return the image bytes.
+  return await page.screenshot();
 }
 ```
 
@@ -723,7 +714,7 @@ async function computerUseLoop(instance, response) {
    */
   while (true) {
     const computerCalls = response.output.filter(
-      (item) => item.type === "computer_call"
+      (item) => item.type === "computer_call",
     );
     if (computerCalls.length === 0) {
       console.log("No computer call found. Output from model:");
@@ -845,9 +836,9 @@ If you do not want to use this parameter, you should make sure to include in you
 
 We have implemented safety checks in the API to help protect against prompt injection and model mistakes. These checks include:
 
-*   Malicious instruction detection: we evaluate the screenshot image and check if it contains adversarial content that may change the model's behavior.
-*   Irrelevant domain detection: we evaluate the `current_url` (if provided) and check if the current domain is considered relevant given the conversation history.
-*   Sensitive domain detection: we check the `current_url` (if provided) and raise a warning when we detect the user is on a sensitive domain.
+- Malicious instruction detection: we evaluate the screenshot image and check if it contains adversarial content that may change the model's behavior.
+- Irrelevant domain detection: we evaluate the `current_url` (if provided) and check if the current domain is considered relevant given the conversation history.
+- Sensitive domain detection: we check the `current_url` (if provided) and raise a warning when we detect the user is on a sensitive domain.
 
 If one or multiple of the above checks is triggered, a safety check is raised when the model returns the next `computer_call`, with the `pending_safety_checks` parameter.
 
@@ -889,8 +880,8 @@ Pending safety checks
 
 You need to pass the safety checks back as `acknowledged_safety_checks` in the next request in order to proceed. In all cases where `pending_safety_checks` are returned, actions should be handed over to the end user to confirm model behavior and accuracy.
 
-*   `malicious_instructions` and `irrelevant_domain`: end users should review model actions and confirm that the model is behaving as intended.
-*   `sensitive_domain`: ensure an end user is actively monitoring the model actions on these sites. Exact implementation of this "watch mode" may vary by application, but a potential example could be collecting user impression data on the site to make sure there is active end user engagement with the application.
+- `malicious_instructions` and `irrelevant_domain`: end users should review model actions and confirm that the model is behaving as intended.
+- `sensitive_domain`: ensure an end user is actively monitoring the model actions on these sites. Exact implementation of this "watch mode" may vary by application, but a potential example could be collecting user impression data on the site to make sure there is active end user engagement with the application.
 
 Acknowledge safety checks
 
@@ -933,32 +924,35 @@ import OpenAI from "openai";
 const openai = new OpenAI();
 
 const response = await openai.responses.create({
-    model: "computer-use-preview",
-    previous_response_id: "<previous_response_id>",
-    tools: [{
-        type: "computer_use_preview",
-        display_width: 1024,
-        display_height: 768,
-        environment: "browser"
-    }],
-    input: [
+  model: "computer-use-preview",
+  previous_response_id: "<previous_response_id>",
+  tools: [
+    {
+      type: "computer_use_preview",
+      display_width: 1024,
+      display_height: 768,
+      environment: "browser",
+    },
+  ],
+  input: [
+    {
+      type: "computer_call_output",
+      call_id: "<call_id>",
+      acknowledged_safety_checks: [
         {
-            "type": "computer_call_output",
-            "call_id": "<call_id>",
-            "acknowledged_safety_checks": [
-                {
-                    "id": "<safety_check_id>",
-                    "code": "malicious_instructions",
-                    "message": "We've detected instructions that may cause your application to perform malicious or unauthorized actions. Please acknowledge this warning if you'd like to proceed."
-                }
-            ],
-            "output": {
-                "type": "computer_screenshot",
-                "image_url": "<image_url>"
-            }
-        }
-    ],
-    truncation: "auto",
+          id: "<safety_check_id>",
+          code: "malicious_instructions",
+          message:
+            "We've detected instructions that may cause your application to perform malicious or unauthorized actions. Please acknowledge this warning if you'd like to proceed.",
+        },
+      ],
+      output: {
+        type: "computer_screenshot",
+        image_url: "<image_url>",
+      },
+    },
+  ],
+  truncation: "auto",
 });
 ```
 
@@ -981,8 +975,7 @@ Examples of how to integrate the computer use tool in different environments
 
 ](https://github.com/openai/openai-cua-sample-app)
 
-Limitations
------------
+## Limitations
 
 We recommend using the `computer-use-preview` model for browser-based tasks. The model may be susceptible to inadvertent model mistakes, especially in non-browser environments that it is less used to.
 
@@ -990,11 +983,10 @@ For example, `computer-use-preview`'s performance on OSWorld is currently 38.1%,
 
 Some other behavior limitations to be aware of:
 
-*   The [`computer-use-preview` model](/docs/models/computer-use-preview) has constrained rate limits and feature support, described on its model detail page.
-*   [Refer to this guide](/docs/guides/your-data) for data retention, residency, and handling policies.
+- The [`computer-use-preview` model](/docs/models/computer-use-preview) has constrained rate limits and feature support, described on its model detail page.
+- [Refer to this guide](/docs/guides/your-data) for data retention, residency, and handling policies.
 
-Risks and safety
-----------------
+## Risks and safety
 
 Computer use presents unique risks that differ from those in standard API features or chat interfaces, especially when interacting with the internet.
 
@@ -1020,9 +1012,9 @@ Send end-user IDs (optional param) to help OpenAI monitor and detect abuse.
 
 The following safety checks are available to protect against prompt injection and model mistakes:
 
-*   Malicious instruction detection
-*   Irrelevant domain detection
-*   Sensitive domain detection
+- Malicious instruction detection
+- Irrelevant domain detection
+- Sensitive domain detection
 
 When you receive a `pending_safety_check`, you should increase oversight into model actions, for example by handing over to an end user to explicitly acknowledge the desire to proceed with the task and ensure that the user is actively monitoring the agent's actions (e.g., by implementing something like a watch mode similar to [Operator](https://operator.chatgpt.com/)). Essentially, when safety checks fire, a human should come into the loop.
 
@@ -1034,14 +1026,14 @@ Using current URL
 
 ```json
 {
-    "type": "computer_call_output",
-    "call_id": "call_7OU...",
-    "acknowledged_safety_checks": [],
-    "output": {
-        "type": "computer_screenshot",
-        "image_url": "..."
-    },
-    "current_url": "https://openai.com"
+  "type": "computer_call_output",
+  "call_id": "call_7OU...",
+  "acknowledged_safety_checks": [],
+  "output": {
+    "type": "computer_screenshot",
+    "image_url": "..."
+  },
+  "current_url": "https://openai.com"
 }
 ```
 

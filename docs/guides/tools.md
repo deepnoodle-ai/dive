@@ -66,7 +66,7 @@ toolkit.NewTextEditorTool()
 
 ### Bash
 
-Execute shell commands with persistent sessions, timeout, and output capture:
+Execute shell commands with timeout and output capture:
 
 ```go
 toolkit.NewBashTool(toolkit.BashToolOptions{
@@ -79,22 +79,22 @@ toolkit.NewBashTool(toolkit.BashToolOptions{
 
 ### WebSearch
 
-Search the web using Google or Kagi:
+Search the web. Requires a `web.Searcher` implementation (e.g. from `wonton/web`):
 
 ```go
 toolkit.NewWebSearchTool(toolkit.WebSearchToolOptions{
-    Provider: "google",
+    Searcher: searcher, // e.g. google.NewSearcher() or kagi.NewSearcher()
 })
 ```
 
-Requires `GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_CX`, or `KAGI_API_KEY`.
-
 ### Fetch
 
-Fetch and extract content from web pages:
+Fetch and extract content from web pages. Requires a `fetch.Fetcher` implementation:
 
 ```go
-toolkit.NewFetchTool()
+toolkit.NewFetchTool(toolkit.FetchToolOptions{
+    Fetcher: fetcher, // e.g. fetch.NewHTTPFetcher()
+})
 ```
 
 ## User Interaction

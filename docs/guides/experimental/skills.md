@@ -2,7 +2,7 @@
 
 > **Experimental**: This package is in `experimental/skill/`. The API may change.
 
-Skills are modular capabilities that extend agent functionality through specialized instructions. When activated, a skill provides focused instructions and can restrict which tools the agent may use.
+Skills are modular capabilities that extend agent functionality through specialized instructions. When activated, a skill provides focused instructions to the agent.
 
 ## Skill File Format
 
@@ -12,10 +12,6 @@ Skills are defined in Markdown files with YAML frontmatter:
 ---
 name: code-reviewer
 description: Review code for best practices and potential issues.
-allowed-tools:
-  - Read
-  - Grep
-  - Glob
 ---
 
 # Code Reviewer
@@ -31,11 +27,10 @@ You are a code reviewer focused on identifying issues and suggesting improvement
 
 ### Frontmatter Fields
 
-| Field           | Required | Description                               |
-| --------------- | -------- | ----------------------------------------- |
-| `name`          | No       | Unique identifier (defaults to filename)  |
-| `description`   | No       | Brief explanation shown to the LLM        |
-| `allowed-tools` | No       | Tools permitted when this skill is active |
+| Field         | Required | Description                              |
+| ------------- | -------- | ---------------------------------------- |
+| `name`        | No       | Unique identifier (defaults to filename) |
+| `description` | No       | Brief explanation shown to the LLM       |
 
 ## Skill Discovery
 
@@ -48,21 +43,15 @@ Skills are discovered from multiple locations in priority order:
 
 The first skill found with a given name takes precedence.
 
-## Tool Restrictions
-
-When a skill with `allowed-tools` is active:
-
-- Only listed tools are permitted
-- The `Skill` tool itself is always allowed
-- If `allowed-tools` is empty or omitted, all tools are allowed
-
 ## Using Skills with Agents
 
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
     "github.com/deepnoodle-ai/dive/experimental/skill"
+    "github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
     "github.com/deepnoodle-ai/dive/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/toolkit"
 )
 
 // Create a skill loader
@@ -73,8 +62,8 @@ if err := loader.LoadSkills(); err != nil {
     log.Fatal(err)
 }
 
-// Create the skill tool (from experimental/toolkit)
-skillTool := toolkit.NewSkillTool(toolkit.SkillToolOptions{
+// Create the skill tool (from experimental/toolkit/extended)
+skillTool := extended.NewSkillTool(extended.SkillToolOptions{
     Loader: loader,
 })
 
@@ -84,7 +73,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "You are a helpful assistant with access to specialized skills.",
     Model:        anthropic.New(),
     Tools: []dive.Tool{
-        skillTool,
+        dive.ToolAdapter(skillTool),
         toolkit.NewReadFileTool(),
         toolkit.NewGrepTool(),
         toolkit.NewGlobTool(),
@@ -101,5 +90,4 @@ fmt.Println(response.OutputText())
 
 1. Write descriptions that help the LLM understand when to use the skill
 2. Keep skills focused on a single domain or task type
-3. Only restrict tools when necessary for security or focus
-4. Put project-specific skills in `.dive/skills/`, personal skills in `~/.dive/skills/`
+3. Put project-specific skills in `.dive/skills/`, personal skills in `~/.dive/skills/`

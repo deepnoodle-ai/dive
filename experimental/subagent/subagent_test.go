@@ -90,10 +90,10 @@ type mockTool struct {
 	name string
 }
 
-func (m *mockTool) Name() string                                   { return m.name }
-func (m *mockTool) Description() string                            { return "Mock tool" }
-func (m *mockTool) Schema() *dive.Schema                           { return nil }
-func (m *mockTool) Annotations() *dive.ToolAnnotations             { return nil }
+func (m *mockTool) Name() string                       { return m.name }
+func (m *mockTool) Description() string                { return "Mock tool" }
+func (m *mockTool) Schema() *dive.Schema               { return nil }
+func (m *mockTool) Annotations() *dive.ToolAnnotations { return nil }
 func (m *mockTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
 	return nil, nil
 }
@@ -144,7 +144,6 @@ func TestFilterTools(t *testing.T) {
 		assert.Equal(t, "Read", filtered[0].Name())
 	})
 }
-
 
 func TestMapLoader(t *testing.T) {
 	t.Run("Load returns definitions", func(t *testing.T) {

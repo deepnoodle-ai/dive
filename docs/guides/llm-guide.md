@@ -13,7 +13,7 @@ model := anthropic.New() // defaults to claude-opus-4-5
 ```
 
 **Env:** `ANTHROPIC_API_KEY`
-**Models:** claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5, claude-opus-4-1-20250805, claude-sonnet-4-20250514, claude-opus-4-20250514, claude-3-7-sonnet-20250219, claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
+**Models:** See `providers/anthropic/models.go` for available models.
 **Features:** Streaming, tool calling, prompt caching, reasoning control
 
 ### OpenAI
@@ -25,7 +25,7 @@ model := openai.New() // defaults to gpt-5.2
 ```
 
 **Env:** `OPENAI_API_KEY`
-**Models:** gpt-5.2, gpt-5.1, gpt-5, gpt-5-mini, gpt-5-nano, gpt-4.1, gpt-4o, o3, o3-pro, o4-mini
+**Models:** See `providers/openai/models.go` for available models.
 **Features:** Streaming, tool calling, reasoning budget (o-series)
 
 ### Google (Gemini)
@@ -37,7 +37,7 @@ model := google.New() // defaults to gemini-2.5-pro
 ```
 
 **Env:** `GEMINI_API_KEY` or `GOOGLE_API_KEY`
-**Models:** gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-3-pro-preview, gemini-3-flash-preview
+**Models:** See `providers/google/models.go` for available models.
 **Features:** Streaming, tool calling, multimodal
 
 ### Groq
@@ -49,6 +49,7 @@ model := groq.New()
 ```
 
 **Env:** `GROQ_API_KEY`
+**Models:** See `providers/groq/models.go` for available models.
 **Features:** High-speed inference, streaming
 
 ### Grok (X.AI)
@@ -60,6 +61,7 @@ model := grok.New()
 ```
 
 **Env:** `GROK_API_KEY`
+**Models:** See `providers/grok/models.go` for available models.
 
 ### Mistral
 
@@ -70,6 +72,7 @@ model := mistral.New()
 ```
 
 **Env:** `MISTRAL_API_KEY`
+**Models:** See `providers/mistral/models.go` for available models.
 
 ### Ollama (Local)
 
@@ -80,6 +83,7 @@ model := ollama.New()
 ```
 
 No API key needed. Requires Ollama running locally.
+Use any model available in your local Ollama installation.
 
 ### OpenRouter
 

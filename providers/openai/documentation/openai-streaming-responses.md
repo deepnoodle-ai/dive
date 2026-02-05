@@ -1,12 +1,10 @@
-Streaming API responses
-=======================
+# Streaming API responses
 
 Learn how to stream model responses from the OpenAI API using server-sent events.
 
 By default, when you make a request to the OpenAI API, we generate the model's entire output before sending it back in a single HTTP response. When generating long outputs, waiting for a response can take time. Streaming responses lets you start printing or processing the beginning of the model's output while it continues generating the full response.
 
-Enable streaming
-----------------
+## Enable streaming
 
 To start streaming responses, set `stream=True` in your request to the Responses endpoint:
 
@@ -15,18 +13,18 @@ import { OpenAI } from "openai";
 const client = new OpenAI();
 
 const stream = await client.responses.create({
-    model: "gpt-4.1",
-    input: [
-        {
-            role: "user",
-            content: "Say 'double bubble bath' ten times fast.",
-        },
-    ],
-    stream: true,
+  model: "gpt-4.1",
+  input: [
+    {
+      role: "user",
+      content: "Say 'double bubble bath' ten times fast.",
+    },
+  ],
+  stream: true,
 });
 
 for await (const event of stream) {
-    console.log(event);
+  console.log(event);
 }
 ```
 
@@ -54,7 +52,7 @@ The Responses API uses semantic events for streaming. Each event is typed with a
 For a full list of event types, see the [API reference for streaming](/docs/api-reference/responses-streaming). Here are a few examples:
 
 ```python
-type StreamingEvent = 
+type StreamingEvent =
 	| ResponseCreatedEvent
 	| ResponseInProgressEvent
 	| ResponseFailedEvent
@@ -81,8 +79,7 @@ type StreamingEvent =
 	| Error
 ```
 
-Read the responses
-------------------
+## Read the responses
 
 If you're using our SDK, every event is a typed instance. You can also identity individual events using the `type` property of the event.
 
@@ -97,16 +94,14 @@ Some key lifecycle events are emitted only once, while others are emitted multip
 
 For a full list of events you can listen for, see the [API reference for streaming](/docs/api-reference/responses-streaming).
 
-Advanced use cases
-------------------
+## Advanced use cases
 
 For more advanced use cases, like streaming tool calls, check out the following dedicated guides:
 
-*   [Streaming function calls](/docs/guides/function-calling#streaming)
-*   [Streaming structured output](/docs/guides/structured-outputs#streaming)
+- [Streaming function calls](/docs/guides/function-calling#streaming)
+- [Streaming structured output](/docs/guides/structured-outputs#streaming)
 
-Moderation risk
----------------
+## Moderation risk
 
 Note that streaming the model's output in a production application makes it more difficult to moderate the content of the completions, as partial completions may be more difficult to evaluate. This may have implications for approved usage.
 

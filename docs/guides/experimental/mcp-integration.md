@@ -12,28 +12,6 @@ MCP provides a standardized interface for accessing external tools and data with
 - Consistent tool interface across services
 - Built-in security and authentication
 
-## Configuration
-
-Configure MCP servers in `.dive/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"]
-    },
-    "github": {
-      "type": "url",
-      "url": "https://mcp.github.com/sse",
-      "headers": {
-        "Authorization": "Bearer ${GITHUB_TOKEN}"
-      }
-    }
-  }
-}
-```
-
 ## Server Types
 
 **Stdio Servers** (local processes):
@@ -42,6 +20,7 @@ Configure MCP servers in `.dive/settings.json`:
 {
   "mcpServers": {
     "filesystem": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
     }
@@ -49,13 +28,13 @@ Configure MCP servers in `.dive/settings.json`:
 }
 ```
 
-**URL Servers** (HTTP/SSE):
+**HTTP Servers** (HTTP/SSE):
 
 ```json
 {
   "mcpServers": {
     "github": {
-      "type": "url",
+      "type": "http",
       "url": "https://mcp.github.com/sse",
       "headers": {
         "Authorization": "Bearer ${GITHUB_TOKEN}"
@@ -70,17 +49,45 @@ Configure MCP servers in `.dive/settings.json`:
 ```go
 import "github.com/deepnoodle-ai/dive/experimental/mcp"
 
-client, err := mcp.NewStdioClient(mcp.StdioClientOptions{
+// Stdio server
+client, err := mcp.NewClient(&mcp.ServerConfig{
+    Type:    "stdio",
     Command: "npx",
     Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/path"},
 })
 if err != nil {
     log.Fatal(err)
 }
+if err := client.Connect(ctx); err != nil {
+    log.Fatal(err)
+}
 defer client.Close()
 
 // Discover available tools
 tools, err := client.ListTools(ctx)
+```
+
+```go
+// HTTP server
+client, err := mcp.NewClient(&mcp.ServerConfig{
+    Type: "http",
+    URL:  "https://mcp.github.com/sse",
+})
+```
+
+## Manager
+
+The `Manager` initializes multiple MCP servers from a configuration map:
+
+```go
+manager := mcp.NewManager()
+err := manager.InitializeServers(ctx, map[string]*mcp.ServerConfig{
+    "filesystem": {
+        Type:    "stdio",
+        Command: "npx",
+        Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/path"},
+    },
+})
 ```
 
 ## Authentication
@@ -93,7 +100,7 @@ export GITHUB_TOKEN="your-token"
 
 ### OAuth 2.0
 
-The MCP client supports OAuth 2.0 with PKCE for servers that require it.
+The MCP client supports OAuth 2.0 with PKCE for servers that require it. Configure via the `OAuth` field on `ServerConfig`.
 
 ## Best Practices
 

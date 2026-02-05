@@ -65,15 +65,15 @@ import "github.com/deepnoodle-ai/dive/experimental/permission"
 
 ### Permission Rules
 
-Declarative allow/deny/ask rules with pattern matching:
+Declarative allow/deny/ask rules with exact tool name matching (or `"*"` for all tools):
 
 ```go
 rules := permission.Rules{
-    permission.DenyCommandRule("bash", "rm -rf *", "Recursive deletion blocked"),
-    permission.AllowRule("read_*"),
-    permission.AllowRule("glob"),
-    permission.AllowCommandPrefixRule("bash", "go test"),
-    permission.AskRule("write_*", "Confirm file write"),
+    permission.DenyCommandRule("Bash", "rm -rf", "Recursive deletion blocked"),
+    permission.AllowRule("Read"),
+    permission.AllowRule("Glob"),
+    permission.AllowCommandRule("Bash", "go test"),
+    permission.AskRule("Write", "Confirm file write"),
 }
 ```
 
@@ -109,7 +109,7 @@ Users can approve "allow all X this session" for a tool category:
 
 ```go
 pm.AllowForSession("bash")
-pm.AllowCategoryForSession(permission.ToolCategoryEdit)
+pm.AllowForSession(permission.CategoryEdit.Key)
 ```
 
 ## Tool Annotations

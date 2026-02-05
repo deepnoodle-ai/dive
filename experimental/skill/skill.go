@@ -78,6 +78,4 @@ type SkillConfig struct {
 
 	// Description explains what the skill does and when to use it.
 	Description string `yaml:"description"`
-
 }
-

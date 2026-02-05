@@ -307,4 +307,3 @@ type ToolCallResult struct {
 	Result  *ToolResult
 	Error   error
 }
-

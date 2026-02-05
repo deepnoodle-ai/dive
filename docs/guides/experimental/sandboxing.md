@@ -56,11 +56,10 @@ Configure in `.dive/settings.json`:
 
 ## Programmatic Usage
 
+The sandbox package provides a `Manager` that wraps `exec.Cmd` with platform-appropriate isolation:
+
 ```go
-import (
-    "github.com/deepnoodle-ai/dive/experimental/sandbox"
-    "github.com/deepnoodle-ai/dive/toolkit"
-)
+import "github.com/deepnoodle-ai/dive/experimental/sandbox"
 
 sandboxCfg := &sandbox.Config{
     Enabled:      true,
@@ -68,11 +67,22 @@ sandboxCfg := &sandbox.Config{
     AllowNetwork: false,
 }
 
-bashTool := toolkit.NewBashTool(toolkit.BashToolOptions{
-    WorkspaceDir:  "/path/to/project",
-    SandboxConfig: sandboxCfg,
-})
+manager, err := sandbox.NewManager(sandboxCfg)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Wrap a command with sandbox isolation
+cmd := exec.Command("bash", "-c", "ls -la")
+wrappedCmd, cleanup, err := manager.Wrap(ctx, cmd)
+if err != nil {
+    log.Fatal(err)
+}
+defer cleanup()
+output, err := wrappedCmd.CombinedOutput()
 ```
+
+> **Note:** The sandbox is not yet integrated directly into the core `BashTool`. Integration requires using the `Manager.Wrap` API around command execution.
 
 ## Network Filtering
 

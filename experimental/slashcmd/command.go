@@ -134,4 +134,3 @@ func (c *Command) ExpandArguments(argsString string) string {
 
 	return result
 }
-

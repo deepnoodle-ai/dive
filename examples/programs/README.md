@@ -7,6 +7,7 @@ This directory contains standalone example programs that demonstrate various AI 
 ### Core LLM Interaction
 
 - **ask_cli** - Ask an agent a single question
+
   ```bash
   go run ./examples/programs/ask_cli "What is the capital of France?"
   ```
@@ -19,11 +20,13 @@ This directory contains standalone example programs that demonstrate various AI 
 ### Text Processing
 
 - **summarize_cli** - Summarize text from stdin
+
   ```bash
   cat document.txt | go run ./examples/programs/summarize_cli --length short
   ```
 
 - **classify_cli** - Classify text into categories
+
   ```bash
   go run ./examples/programs/classify_cli --text "This is great!" --labels "positive,negative,neutral"
   ```
@@ -43,11 +46,13 @@ This directory contains standalone example programs that demonstrate various AI 
 ### Utilities
 
 - **diff_cli** - AI-powered semantic diff between files
+
   ```bash
   go run ./examples/programs/diff_cli file1.txt file2.txt
   ```
 
 - **compare_cli** - Compare responses from multiple LLM providers
+
   ```bash
   go run ./examples/programs/compare_cli --prompt "Hello" --providers "anthropic,openai"
   ```
@@ -60,6 +65,7 @@ This directory contains standalone example programs that demonstrate various AI 
 ### Generation
 
 - **image_cli** - Generate images using DALL-E
+
   ```bash
   go run ./examples/programs/image_cli --prompt "A sunset over mountains" --output image.png
   ```

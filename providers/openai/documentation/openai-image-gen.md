@@ -1,5 +1,4 @@
-Image generation
-================
+# Image generation
 
 Allow models to generate or edit images.
 
@@ -7,8 +6,7 @@ The image generation tool allows you to generate images using a text prompt, and
 
 To learn more about image generation, refer to our dedicated [image generation guide](/docs/guides/image-generation?image-generation-model=gpt-image-1&api=responses).
 
-Usage
------
+## Usage
 
 When you include the `image_generation` tool in your request, the model can decide when and how to generate images as part of the conversation, using your prompt and any provided image inputs.
 
@@ -21,9 +19,10 @@ import OpenAI from "openai";
 const openai = new OpenAI();
 
 const response = await openai.responses.create({
-    model: "gpt-4.1-mini",
-    input: "Generate an image of gray tabby cat hugging an otter with an orange scarf",
-    tools: [{type: "image_generation"}],
+  model: "gpt-4.1-mini",
+  input:
+    "Generate an image of gray tabby cat hugging an otter with an orange scarf",
+  tools: [{ type: "image_generation" }],
 });
 
 // Save the image to a file
@@ -42,7 +41,7 @@ if (imageData.length > 0) {
 from openai import OpenAI
 import base64
 
-client = OpenAI() 
+client = OpenAI()
 
 response = client.responses.create(
     model="gpt-4.1-mini",
@@ -56,7 +55,7 @@ image_data = [
     for output in response.output
     if output.type == "image_generation_call"
 ]
-    
+
 if image_data:
     image_base64 = image_data[0]
     with open("otter.png", "wb") as f:
@@ -71,11 +70,11 @@ To force the image generation tool call, you can set the parameter `tool_choice`
 
 You can configure the following output options as parameters for the [image generation tool](/docs/api-reference/responses/create#responses-create-tools):
 
-*   Size: Image dimensions (e.g., 1024x1024, 1024x1536)
-*   Quality: Rendering quality (e.g. low, medium, high)
-*   Format: File output format
-*   Compression: Compression level (0-100%) for JPEG and WebP formats
-*   Background: Transparent or opaque
+- Size: Image dimensions (e.g., 1024x1024, 1024x1536)
+- Quality: Rendering quality (e.g. low, medium, high)
+- Format: File output format
+- Compression: Compression level (0-100%) for JPEG and WebP formats
+- Background: Transparent or opaque
 
 `size`, `quality`, and `background` support the `auto` option, where the model will automatically select the best option based on the prompt.
 
@@ -103,8 +102,7 @@ Image generation works best when you use terms like "draw" or "edit" in your pro
 
 For example, if you want to combine images, instead of saying "combine" or "merge", you can say something like "edit the first image by adding this element from the second image".
 
-Multi-turn editing
-------------------
+## Multi-turn editing
 
 You can iteratively edit images by referencing previous response or image IDs. This allows you to refine images across multiple turns in a conversation.
 
@@ -151,7 +149,7 @@ if (imageData_fwup.length > 0) {
   const fs = await import("fs");
   fs.writeFileSync(
     "cat_and_otter_realistic.png",
-    Buffer.from(imageBase64, "base64")
+    Buffer.from(imageBase64, "base64"),
   );
 }
 ```
@@ -217,7 +215,7 @@ const response = await openai.responses.create({
 });
 
 const imageGenerationCalls = response.output.filter(
-  (output) => output.type === "image_generation_call"
+  (output) => output.type === "image_generation_call",
 );
 
 const imageData = imageGenerationCalls.map((output) => output.result);
@@ -254,7 +252,7 @@ if (imageData_fwup.length > 0) {
   const fs = await import("fs");
   fs.writeFileSync(
     "cat_and_otter_realistic.png",
-    Buffer.from(imageBase64, "base64")
+    Buffer.from(imageBase64, "base64"),
   );
 }
 ```
@@ -312,8 +310,7 @@ if image_data_fwup:
         f.write(base64.b64decode(image_base64))
 ```
 
-Streaming
----------
+## Streaming
 
 The image generation tool supports streaming partial images as the final result is being generated. This provides faster visual feedback for users and improves perceived latency.
 
@@ -366,17 +363,16 @@ for event in stream:
             f.write(image_bytes)
 ```
 
-Supported models
-----------------
+## Supported models
 
 The image generation tool is supported for the following models:
 
-*   `gpt-4o`
-*   `gpt-4o-mini`
-*   `gpt-4.1`
-*   `gpt-4.1-mini`
-*   `gpt-4.1-nano`
-*   `o3`
+- `gpt-4o`
+- `gpt-4o-mini`
+- `gpt-4.1`
+- `gpt-4.1-mini`
+- `gpt-4.1-nano`
+- `o3`
 
 The model used for the image generation process is always `gpt-image-1`, but these models can be used as the mainline model in the Responses API as they can reliably call the image generation tool when needed.g
 

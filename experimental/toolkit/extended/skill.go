@@ -227,4 +227,3 @@ func (t *SkillTool) ClearActiveSkill() {
 	defer t.mu.Unlock()
 	t.activeSkill = nil
 }
-

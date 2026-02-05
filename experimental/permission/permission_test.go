@@ -15,10 +15,10 @@ type mockTool struct {
 	annotations *dive.ToolAnnotations
 }
 
-func (m *mockTool) Name() string                                   { return m.name }
-func (m *mockTool) Description() string                            { return "Test tool" }
-func (m *mockTool) Schema() *dive.Schema                           { return nil }
-func (m *mockTool) Annotations() *dive.ToolAnnotations             { return m.annotations }
+func (m *mockTool) Name() string                       { return m.name }
+func (m *mockTool) Description() string                { return "Test tool" }
+func (m *mockTool) Schema() *dive.Schema               { return nil }
+func (m *mockTool) Annotations() *dive.ToolAnnotations { return m.annotations }
 func (m *mockTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
 	return nil, nil
 }

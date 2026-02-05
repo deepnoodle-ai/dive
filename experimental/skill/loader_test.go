@@ -35,9 +35,9 @@ allowed-tools:
 ## Instructions
 1. Read the files
 2. Check for issues`,
-			filePath: "/path/to/skill/SKILL.md",
-			wantName: "code-reviewer",
-			wantDesc: "Review code for best practices.",
+			filePath:  "/path/to/skill/SKILL.md",
+			wantName:  "code-reviewer",
+			wantDesc:  "Review code for best practices.",
 			wantInstr: "# Code Reviewer\n\n## Instructions\n1. Read the files\n2. Check for issues",
 		},
 		{
@@ -48,9 +48,9 @@ description: A helpful skill.
 ---
 
 Some instructions here.`,
-			filePath: "/path/to/helper.md",
-			wantName: "helper",
-			wantDesc: "A helpful skill.",
+			filePath:  "/path/to/helper.md",
+			wantName:  "helper",
+			wantDesc:  "A helpful skill.",
 			wantInstr: "Some instructions here.",
 		},
 		{
@@ -969,4 +969,3 @@ func TestLoader_ListSkillsEmpty(t *testing.T) {
 	assert.NotNil(t, names)
 	assert.Equal(t, 0, len(names))
 }
-

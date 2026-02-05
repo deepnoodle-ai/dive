@@ -1578,7 +1578,7 @@ func (a *App) handleCommand(input string) bool {
 				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Model)
 			}
 
-				// Build display text with command name and args
+			// Build display text with command name and args
 			displayCmd := "/" + cmdName
 			if cmdArgs != "" {
 				displayCmd = "/" + cmdName + " " + cmdArgs

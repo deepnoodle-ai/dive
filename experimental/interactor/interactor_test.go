@@ -208,16 +208,15 @@ func TestTerminal(t *testing.T) {
 	})
 }
 
-
 // mockTool implements dive.Tool for testing Terminal.ShouldInteract
 type mockTool struct {
 	annotations *dive.ToolAnnotations
 }
 
-func (m *mockTool) Name() string                                   { return "mock" }
-func (m *mockTool) Description() string                            { return "Mock tool" }
-func (m *mockTool) Schema() *dive.Schema                           { return nil }
-func (m *mockTool) Annotations() *dive.ToolAnnotations             { return m.annotations }
+func (m *mockTool) Name() string                       { return "mock" }
+func (m *mockTool) Description() string                { return "Mock tool" }
+func (m *mockTool) Schema() *dive.Schema               { return nil }
+func (m *mockTool) Annotations() *dive.ToolAnnotations { return m.annotations }
 func (m *mockTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
 	return nil, nil
 }

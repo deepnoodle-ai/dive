@@ -11,11 +11,6 @@ Commands are defined in markdown files with optional YAML frontmatter:
 ```markdown
 ---
 description: Review code for best practices
-allowed-tools:
-  - Read
-  - Grep
-  - Glob
-  - Bash
 argument-hint: [file-pattern]
 ---
 
@@ -31,7 +26,6 @@ Review the current codebase for:
 | Field           | Required | Description                         |
 | --------------- | -------- | ----------------------------------- |
 | `description`   | No       | Shown in `/help` output             |
-| `allowed-tools` | No       | Tools permitted when command runs   |
 | `model`         | No       | Model override for this command     |
 | `argument-hint` | No       | Shows expected arguments in `/help` |
 
@@ -92,5 +86,4 @@ if ok {
 
 1. Write clear descriptions for `/help` output
 2. Use `argument-hint` to show expected arguments
-3. Restrict tools when commands don't need full access
-4. Put project commands in `.dive/commands/`, personal in `~/.dive/commands/`
+3. Put project commands in `.dive/commands/`, personal in `~/.dive/commands/`

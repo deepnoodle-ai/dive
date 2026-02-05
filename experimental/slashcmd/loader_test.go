@@ -10,20 +10,20 @@ import (
 
 func TestParseCommandContent(t *testing.T) {
 	tests := []struct {
-		name         string
-		content      string
-		filePath     string
-		wantName     string
-		wantDesc     string
-		wantModel    string
-		wantArgHint  string
-		wantInstr    string
-		wantErr      bool
-		errContains  string
+		name        string
+		content     string
+		filePath    string
+		wantName    string
+		wantDesc    string
+		wantModel   string
+		wantArgHint string
+		wantInstr   string
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name: "valid command with all fields",
-			content: "---\ndescription: Review code for best practices.\nallowed-tools:\n  - Read\n  - Grep\n  - Glob\nmodel: claude-sonnet-4-5-20250929\nargument-hint: \"[file-pattern]\"\n---\n\n# Code Review\n\nReview files matching: $ARGUMENTS",
+			name:        "valid command with all fields",
+			content:     "---\ndescription: Review code for best practices.\nallowed-tools:\n  - Read\n  - Grep\n  - Glob\nmodel: claude-sonnet-4-5-20250929\nargument-hint: \"[file-pattern]\"\n---\n\n# Code Review\n\nReview files matching: $ARGUMENTS",
 			filePath:    "/path/to/review.md",
 			wantName:    "review",
 			wantDesc:    "Review code for best practices.",

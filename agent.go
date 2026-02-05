@@ -47,7 +47,7 @@ type ModelSettings struct {
 }
 
 // AgentOptions are used to configure an Agent.
-type AgentOptions struct{
+type AgentOptions struct {
 	// SystemPrompt is the system prompt sent to the LLM.
 	SystemPrompt string
 

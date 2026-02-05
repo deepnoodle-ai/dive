@@ -486,4 +486,3 @@ func (t *Terminal) Input(ctx context.Context, req *InputRequest) (*InputResponse
 
 	return &InputResponse{Value: input}, nil
 }
-

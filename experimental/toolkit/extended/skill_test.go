@@ -199,4 +199,3 @@ func TestSkillTool_EmptyLoader(t *testing.T) {
 	assert.True(t, result.IsError)
 	assert.Contains(t, result.Content[0].Text, "No skills are currently available")
 }
-

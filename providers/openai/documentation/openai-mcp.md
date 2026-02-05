@@ -1,5 +1,4 @@
-Remote MCP
-==========
+# Remote MCP
 
 Allow models to use remote MCP servers to perform tasks.
 
@@ -32,16 +31,17 @@ import OpenAI from "openai";
 const client = new OpenAI();
 
 const resp = await client.responses.create({
-    model: "gpt-4.1",
-    tools: [
-        {
-            type: "mcp",
-            server_label: "deepwiki",
-            server_url: "https://mcp.deepwiki.com/mcp",
-            require_approval: "never",
-        },
-    ],
-    input: "What transport protocols are supported in the 2025-03-26 version of the MCP spec?",
+  model: "gpt-4.1",
+  tools: [
+    {
+      type: "mcp",
+      server_label: "deepwiki",
+      server_url: "https://mcp.deepwiki.com/mcp",
+      require_approval: "never",
+    },
+  ],
+  input:
+    "What transport protocols are supported in the 2025-03-26 version of the MCP spec?",
 });
 
 console.log(resp.output_text);
@@ -70,13 +70,11 @@ print(resp.output_text)
 
 It is very important that developers trust any remote MCP server they use with the Responses API. A malicious server can exfiltrate sensitive data from anything that enters the model's context. Carefully review the [Risks and Safety](#risks-and-safety) section below before using this tool.
 
-The MCP ecosystem
------------------
+## The MCP ecosystem
 
 We are still in the early days of the MCP ecosystem. Some popular remote MCP servers today include [Cloudflare](https://developers.cloudflare.com/agents/guides/remote-mcp-server/), [Hubspot](https://developers.hubspot.com/mcp), [Intercom](https://developers.intercom.com/docs/guides/mcp), [Paypal](https://developer.paypal.com/tools/mcp-server/), [Pipedream](https://pipedream.com/docs/connect/mcp/openai/), [Plaid](https://plaid.com/docs/mcp/), [Shopify](https://shopify.dev/docs/apps/build/storefront-mcp), [Stripe](https://docs.stripe.com/mcp), [Square](https://developer.squareup.com/docs/mcp), [Twilio](https://github.com/twilio-labs/function-templates/tree/main/mcp-server) and [Zapier](https://zapier.com/mcp). We expect many more servers—and registries making it easy to discover these servers—to launch in the coming months. The MCP protocol itself is also early, and we expect to add many more updates to our MCP tool as the protocol evolves.
 
-How it works
-------------
+## How it works
 
 The MCP tool works only in the [Responses API](/docs/api-reference/responses/create), and is available across all our new models (gpt-4o, gpt-4.1, and our reasoning models). When you're using the MCP tool, you only pay for [tokens](/docs/pricing) used when importing tool definitions or making tool calls—there are no additional fees involved.
 
@@ -102,15 +100,13 @@ If successful in retrieving the list of tools, a new `mcp_list_tools` output ite
             "description": "GitHub repository: owner/repo (e.g. \"facebook/react\")"
           }
         },
-        "required": [
-          "repoName"
-        ],
+        "required": ["repoName"],
         "additionalProperties": false,
         "annotations": null,
         "description": "",
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
-    },
+    }
     // ... other tools
   ]
 }
@@ -148,15 +144,18 @@ import OpenAI from "openai";
 const client = new OpenAI();
 
 const resp = await client.responses.create({
-    model: "gpt-4.1",
-    tools: [{
-        type: "mcp",
-        server_label: "deepwiki",
-        server_url: "https://mcp.deepwiki.com/mcp",
-        require_approval: "never",
-        allowed_tools: ["ask_question"],
-    }],
-    input: "What transport protocols does the 2025-03-26 version of the MCP spec (modelcontextprotocol/modelcontextprotocol) support?",
+  model: "gpt-4.1",
+  tools: [
+    {
+      type: "mcp",
+      server_label: "deepwiki",
+      server_url: "https://mcp.deepwiki.com/mcp",
+      require_approval: "never",
+      allowed_tools: ["ask_question"],
+    },
+  ],
+  input:
+    "What transport protocols does the 2025-03-26 version of the MCP spec (modelcontextprotocol/modelcontextprotocol) support?",
 });
 
 console.log(resp.output_text);
@@ -248,18 +247,23 @@ import OpenAI from "openai";
 const client = new OpenAI();
 
 const resp = await client.responses.create({
-    model: "gpt-4.1",
-    tools: [{
-        type: "mcp",
-        server_label: "deepwiki",
-        server_url: "https://mcp.deepwiki.com/mcp",
-    }],
-    previous_response_id: "resp_682d498bdefc81918b4a6aa477bfafd904ad1e533afccbfa",
-    input: [{
-        type: "mcp_approval_response",
-        approve: true,
-        approval_request_id: "mcpr_682d498e3bd4819196a0ce1664f8e77b04ad1e533afccbfa"
-    }],
+  model: "gpt-4.1",
+  tools: [
+    {
+      type: "mcp",
+      server_label: "deepwiki",
+      server_url: "https://mcp.deepwiki.com/mcp",
+    },
+  ],
+  previous_response_id: "resp_682d498bdefc81918b4a6aa477bfafd904ad1e533afccbfa",
+  input: [
+    {
+      type: "mcp_approval_response",
+      approve: true,
+      approval_request_id:
+        "mcpr_682d498e3bd4819196a0ce1664f8e77b04ad1e533afccbfa",
+    },
+  ],
 });
 
 console.log(resp.output_text);
@@ -321,20 +325,21 @@ import OpenAI from "openai";
 const client = new OpenAI();
 
 const resp = await client.responses.create({
-    model: "gpt-4.1",
-    tools: [
-        {
-            type: "mcp",
-            server_label: "deepwiki",
-            server_url: "https://mcp.deepwiki.com/mcp",
-            require_approval: {
-                never: {
-                    tool_names: ["ask_question", "read_wiki_structure"]
-                }
-            }
+  model: "gpt-4.1",
+  tools: [
+    {
+      type: "mcp",
+      server_label: "deepwiki",
+      server_url: "https://mcp.deepwiki.com/mcp",
+      require_approval: {
+        never: {
+          tool_names: ["ask_question", "read_wiki_structure"],
         },
-    ],
-    input: "What transport protocols does the 2025-03-26 version of the MCP spec (modelcontextprotocol/modelcontextprotocol) support?",
+      },
+    },
+  ],
+  input:
+    "What transport protocols does the 2025-03-26 version of the MCP spec (modelcontextprotocol/modelcontextprotocol) support?",
 });
 
 console.log(resp.output_text);
@@ -365,8 +370,7 @@ resp = client.responses.create(
 print(resp.output_text)
 ```
 
-Authentication
---------------
+## Authentication
 
 Unlike the DeepWiki MCP server, most other MCP servers require authentication. The MCP tool in the Responses API gives you the ability to flexibly specify headers that should be included in any request made to a remote MCP server. These headers can be used to share API keys, oAuth access tokens, or any other authentication scheme the remote MCP server implements.
 
@@ -399,18 +403,18 @@ import OpenAI from "openai";
 const client = new OpenAI();
 
 const resp = await client.responses.create({
-    model: "gpt-4.1",
-    input: "Create a payment link for $20",
-    tools: [
-        {
-            type: "mcp",
-            server_label: "stripe",
-            server_url: "https://mcp.stripe.com",
-            headers: {
-                Authorization: "Bearer $STRIPE_API_KEY"
-            }
-        }
-    ]
+  model: "gpt-4.1",
+  input: "Create a payment link for $20",
+  tools: [
+    {
+      type: "mcp",
+      server_label: "stripe",
+      server_url: "https://mcp.stripe.com",
+      headers: {
+        Authorization: "Bearer $STRIPE_API_KEY",
+      },
+    },
+  ],
 });
 
 console.log(resp.output_text);
@@ -441,8 +445,7 @@ print(resp.output_text)
 
 To prevent the leakage of sensitive keys, the Responses API does not store the values of **any** string you provide in the `headers` object. These values will also not be visible in the Response object created. Additionally, because some remote MCP servers generate authenticated URLs, we also discard the _path_ portion of the `server_url` in our responses (i.e. `example.com/mcp` becomes `example.com`). Because of this, you must send the full path of the MCP `server_url` and any relevant `headers` in every Responses API creation request you make.
 
-Risks and safety
-----------------
+## Risks and safety
 
 The MCP tool permits you to connect OpenAI to services that have not been verified by OpenAI and allows OpenAI to access, send and receive data, and take action in these services. All MCP servers are third-party services that are subject to their own terms and conditions.
 
@@ -468,8 +471,7 @@ The MCP tool is compatible with Zero Data Retention and Data Residency, but it's
 
 In other words, if you're an organization with Data Residency in Europe, OpenAI will limit inference and storage of Customer Content to take place in Europe up until the point communication or data is sent to the MCP server. It is your responsibility to ensure that the MCP server also adheres to any Zero Data Retention or Data Residency requirements you may have. Learn more about Zero Data Retention and Data Residency [here](/docs/guides/your-data).
 
-Usage notes
------------
+## Usage notes
 
 ||
 |ResponsesChat CompletionsAssistants|Tier 1200 RPMTier 2 and 31000 RPMTier 4 and 52000 RPM|PricingZDR and data residency|

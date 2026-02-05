@@ -26,7 +26,7 @@ go get github.com/deepnoodle-ai/dive
 ```bash
 # Install from source
 git clone https://github.com/deepnoodle-ai/dive.git
-cd dive/cmd/dive
+cd dive/experimental/cmd/dive
 go install .
 ```
 

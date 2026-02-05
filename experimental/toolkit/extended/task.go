@@ -25,6 +25,7 @@ const (
 
 // TaskRecord stores information about a running or completed task
 type TaskRecord struct {
+	mu          sync.RWMutex
 	ID          string
 	Description string
 	Status      TaskStatus
@@ -34,6 +35,39 @@ type TaskRecord struct {
 	EndTime     time.Time
 	Agent       *dive.Agent
 	done        chan struct{}
+}
+
+type taskRecordSnapshot struct {
+	ID          string
+	Description string
+	Status      TaskStatus
+	Output      string
+	Error       error
+	StartTime   time.Time
+	EndTime     time.Time
+}
+
+func (r *TaskRecord) snapshot() taskRecordSnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return taskRecordSnapshot{
+		ID:          r.ID,
+		Description: r.Description,
+		Status:      r.Status,
+		Output:      r.Output,
+		Error:       r.Error,
+		StartTime:   r.StartTime,
+		EndTime:     r.EndTime,
+	}
+}
+
+func (r *TaskRecord) setResult(status TaskStatus, output string, err error, endTime time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Status = status
+	r.Output = output
+	r.Error = err
+	r.EndTime = endTime
 }
 
 // TaskRegistry manages running and completed tasks
@@ -283,15 +317,12 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 		message.Content = append(message.Content, &llm.TextContent{Text: input.Prompt})
 
 		response, err := agent.CreateResponse(ctx, dive.WithMessages(message))
-		record.EndTime = time.Now()
+		endTime := time.Now()
 
 		if err != nil {
-			record.Status = TaskStatusFailed
-			record.Error = err
-			record.Output = fmt.Sprintf("Task failed: %s", err.Error())
+			record.setResult(TaskStatusFailed, fmt.Sprintf("Task failed: %s", err.Error()), err, endTime)
 		} else {
-			record.Status = TaskStatusCompleted
-			record.Output = response.OutputText()
+			record.setResult(TaskStatusCompleted, response.OutputText(), nil, endTime)
 		}
 	}
 
@@ -313,15 +344,15 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 
 	select {
 	case <-done:
-		if record.Status == TaskStatusFailed {
-			return dive.NewToolResultError(record.Output).
+		snapshot := record.snapshot()
+		if snapshot.Status == TaskStatusFailed {
+			return dive.NewToolResultError(snapshot.Output).
 				WithDisplay(fmt.Sprintf("Task failed: %s", input.Description)), nil
 		}
-		return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, record.Output)).
+		return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, snapshot.Output)).
 			WithDisplay(fmt.Sprintf("Completed: %s", input.Description)), nil
 	case <-timeoutCtx.Done():
-		record.Status = TaskStatusFailed
-		record.Error = timeoutCtx.Err()
+		record.setResult(TaskStatusFailed, "", timeoutCtx.Err(), time.Now())
 		return dive.NewToolResultError(fmt.Sprintf("Task timed out after %s. Task ID: %s", t.defaultTimeout, taskID)).
 			WithDisplay(fmt.Sprintf("Task timed out: %s", input.Description)), nil
 	}
@@ -447,29 +478,30 @@ func (t *TaskOutputTool) Call(ctx context.Context, input *TaskOutputToolInput) (
 }
 
 func (t *TaskOutputTool) formatTaskStatus(record *TaskRecord) *dive.ToolResult {
+	snapshot := record.snapshot()
 	status := fmt.Sprintf("Task ID: %s\nDescription: %s\nStatus: %s\nStarted: %s\n",
-		record.ID,
-		record.Description,
-		record.Status,
-		record.StartTime.Format(time.RFC3339),
+		snapshot.ID,
+		snapshot.Description,
+		snapshot.Status,
+		snapshot.StartTime.Format(time.RFC3339),
 	)
 
-	if record.Status == TaskStatusCompleted || record.Status == TaskStatusFailed {
+	if snapshot.Status == TaskStatusCompleted || snapshot.Status == TaskStatusFailed {
 		status += fmt.Sprintf("Ended: %s\nDuration: %s\n",
-			record.EndTime.Format(time.RFC3339),
-			record.EndTime.Sub(record.StartTime).Round(time.Millisecond),
+			snapshot.EndTime.Format(time.RFC3339),
+			snapshot.EndTime.Sub(snapshot.StartTime).Round(time.Millisecond),
 		)
 	}
 
-	if record.Output != "" {
-		status += fmt.Sprintf("\nOutput:\n%s", record.Output)
+	if snapshot.Output != "" {
+		status += fmt.Sprintf("\nOutput:\n%s", snapshot.Output)
 	}
 
-	if record.Error != nil {
-		status += fmt.Sprintf("\nError: %s", record.Error.Error())
+	if snapshot.Error != nil {
+		status += fmt.Sprintf("\nError: %s", snapshot.Error.Error())
 	}
 
-	display := fmt.Sprintf("Task %s: %s", record.Status, record.Description)
+	display := fmt.Sprintf("Task %s: %s", snapshot.Status, snapshot.Description)
 	return dive.NewToolResultText(status).WithDisplay(display)
 }
 
