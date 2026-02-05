@@ -14,24 +14,26 @@ with hooks to intercept before and after each step. Tools and hooks are the
 primary extension points.
 
 The built-in toolkit includes Read, Write, Edit, Glob, Grep, Bash, and more.
-Use all of them, some of them, or none. Bring your own tools instead. The
-built-in tools align with Claude Code's patterns, so you benefit from any model
-tuning that Anthropic has done for these tool shapes.
+Use all of them, some of them, or bring your own. The built-in tools align with
+Claude Code's patterns, so you benefit from any model tuning that Anthropic has
+done for these tool shapes.
 
-Dive is unopinionated. You provide the system prompt. You decide which tools and
+Dive is unopinionated. You provide the system prompt and decide which tools and
 hooks to install. Your agents do what you tell them. There are no hidden prompts
-or library-imposed behaviors to work around.
+or library-imposed behaviors.
 
 Use the LLM layer when you want direct access to model capabilities. Use the
-agent layer when you want the tool-calling loop handled for you. Both work. Use
-Dive to build CLIs, power SaaS backends, or run within a workflow orchestrator.
+agent layer when you want the tool-calling loop handled for you. Use Dive to
+build CLIs, add AI to back-end SaaS services, or run agents within a workflow
+orchestrator.
 
-Everything outside the `experimental/` directory is stable. Everything inside
-`experimental/` may change. The experimental packages add more tools,
+Everything _outside_ the `experimental/` directory is stable, while everything
+_inside_ `experimental/` may change. The experimental packages add more tools,
 permissions, sessions, and a CLI similar to Claude Code. Use experimental code
 as inspiration, copy and modify it, or use it directly.
 
-Developed by [Deep Noodle](https://deepnoodle.ai). Used in production systems.
+Dive is developed by [Deep Noodle](https://deepnoodle.ai) and is used in
+multiple production AI deployments.
 
 ```go
 agent, err := dive.NewAgent(dive.AgentOptions{
@@ -44,7 +46,7 @@ agent, err := dive.NewAgent(dive.AgentOptions{
     },
 })
 
-response, err := agent.CreateResponse(ctx, dive.WithInput("Fix the failing test in auth_test.go"))
+response, err := agent.CreateResponse(ctx, dive.WithInput("Please fix the failing test"))
 fmt.Println(response.OutputText())
 ```
 
