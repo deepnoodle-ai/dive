@@ -27,23 +27,23 @@ This document proposes a built-in network proxy that enforces domain allowlists 
 
 ### Components
 
-1) **Proxy Server** (new package: `sandbox/proxy`)
+1. **Proxy Server** (new package: `sandbox/proxy`)
    - Runs in-process with a short-lived listener bound to `127.0.0.1`.
    - Accepts HTTP proxy requests and CONNECT tunnels.
    - Enforces domain allowlist.
 
-2) **Sandbox Manager Integration**
+2. **Sandbox Manager Integration**
    - When `sandbox.network.allowed_domains` is configured, start proxy automatically.
    - Inject `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` into sandboxed processes.
    - `allow_network` must be `true` or the sandbox rejects startup.
 
 ### Data Flow
 
-1) User enables sandbox and sets `network.allowed_domains`.
-2) Manager starts proxy and obtains a local port.
-3) Manager sets proxy env vars for sandboxed commands.
-4) Sandbox backend runs the command.
-5) Proxy allows or blocks outbound requests based on domain allowlist.
+1. User enables sandbox and sets `network.allowed_domains`.
+2. Manager starts proxy and obtains a local port.
+3. Manager sets proxy env vars for sandboxed commands.
+4. Sandbox backend runs the command.
+5. Proxy allows or blocks outbound requests based on domain allowlist.
 
 ## Domain Matching
 
@@ -107,10 +107,10 @@ Log events (behind `sandbox.audit_log`):
 
 ## Rollout Plan
 
-1) Implement proxy package and integrate with `sandbox.Manager`.
-2) Update docs to describe built-in proxy and its limitations.
-3) Add tests and basic metrics/logging.
-4) Release behind configuration (`network.allowed_domains`) only.
+1. Implement proxy package and integrate with `sandbox.Manager`.
+2. Update docs to describe built-in proxy and its limitations.
+3. Add tests and basic metrics/logging.
+4. Release behind configuration (`network.allowed_domains`) only.
 
 ## Open Questions
 

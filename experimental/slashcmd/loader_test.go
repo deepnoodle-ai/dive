@@ -15,7 +15,6 @@ func TestParseCommandContent(t *testing.T) {
 		filePath     string
 		wantName     string
 		wantDesc     string
-		wantTools    []string
 		wantModel    string
 		wantArgHint  string
 		wantInstr    string
@@ -28,7 +27,6 @@ func TestParseCommandContent(t *testing.T) {
 			filePath:    "/path/to/review.md",
 			wantName:    "review",
 			wantDesc:    "Review code for best practices.",
-			wantTools:   []string{"Read", "Grep", "Glob"},
 			wantModel:   "claude-sonnet-4-5-20250929",
 			wantArgHint: "[file-pattern]",
 			wantInstr:   "# Code Review\n\nReview files matching: $ARGUMENTS",
@@ -140,14 +138,6 @@ Instructions`,
 			assert.Equal(t, tt.wantDesc, cmd.Description)
 			assert.Equal(t, tt.wantModel, cmd.Model)
 			assert.Equal(t, tt.wantArgHint, cmd.ArgumentHint)
-			if tt.wantTools == nil {
-				assert.Nil(t, cmd.AllowedTools)
-			} else {
-				assert.Equal(t, len(tt.wantTools), len(cmd.AllowedTools))
-				for i, tool := range tt.wantTools {
-					assert.Equal(t, tool, cmd.AllowedTools[i])
-				}
-			}
 			assert.Equal(t, tt.wantInstr, cmd.Instructions)
 			assert.Equal(t, tt.filePath, cmd.FilePath)
 		})
@@ -220,53 +210,6 @@ func TestCommand_ExpandArguments(t *testing.T) {
 	}
 }
 
-func TestCommand_IsToolAllowed(t *testing.T) {
-	tests := []struct {
-		name         string
-		allowedTools []string
-		toolName     string
-		want         bool
-	}{
-		{
-			name:         "no restrictions - all allowed",
-			allowedTools: nil,
-			toolName:     "AnyTool",
-			want:         true,
-		},
-		{
-			name:         "empty restrictions - all allowed",
-			allowedTools: []string{},
-			toolName:     "AnyTool",
-			want:         true,
-		},
-		{
-			name:         "tool in allowed list",
-			allowedTools: []string{"Read", "Grep", "Glob"},
-			toolName:     "Read",
-			want:         true,
-		},
-		{
-			name:         "tool not in allowed list",
-			allowedTools: []string{"Read", "Grep", "Glob"},
-			toolName:     "Write",
-			want:         false,
-		},
-		{
-			name:         "case insensitive match",
-			allowedTools: []string{"Read", "Grep"},
-			toolName:     "read",
-			want:         true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd := &Command{AllowedTools: tt.allowedTools}
-			assert.Equal(t, tt.want, cmd.IsToolAllowed(tt.toolName))
-		})
-	}
-}
-
 func TestLoader_LoadCommands(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -331,7 +274,6 @@ Personal instructions.`), 0644))
 	assert.True(t, ok)
 	assert.Equal(t, "code-review", cmd.Name)
 	assert.Equal(t, "Review code.", cmd.Description)
-	assert.Equal(t, 2, len(cmd.AllowedTools))
 	assert.Equal(t, "project", cmd.Source)
 
 	// Check helper command (project one should win)

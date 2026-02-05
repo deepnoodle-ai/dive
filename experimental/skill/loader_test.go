@@ -15,7 +15,6 @@ func TestParseSkillContent(t *testing.T) {
 		filePath    string
 		wantName    string
 		wantDesc    string
-		wantTools   []string
 		wantInstr   string
 		wantErr     bool
 		errContains string
@@ -36,10 +35,9 @@ allowed-tools:
 ## Instructions
 1. Read the files
 2. Check for issues`,
-			filePath:  "/path/to/skill/SKILL.md",
-			wantName:  "code-reviewer",
-			wantDesc:  "Review code for best practices.",
-			wantTools: []string{"Read", "Grep", "Glob"},
+			filePath: "/path/to/skill/SKILL.md",
+			wantName: "code-reviewer",
+			wantDesc: "Review code for best practices.",
 			wantInstr: "# Code Reviewer\n\n## Instructions\n1. Read the files\n2. Check for issues",
 		},
 		{
@@ -50,10 +48,9 @@ description: A helpful skill.
 ---
 
 Some instructions here.`,
-			filePath:  "/path/to/helper.md",
-			wantName:  "helper",
-			wantDesc:  "A helpful skill.",
-			wantTools: nil,
+			filePath: "/path/to/helper.md",
+			wantName: "helper",
+			wantDesc: "A helpful skill.",
 			wantInstr: "Some instructions here.",
 		},
 		{
@@ -140,69 +137,8 @@ Instructions`,
 			assert.NotNil(t, skill)
 			assert.Equal(t, tt.wantName, skill.Name)
 			assert.Equal(t, tt.wantDesc, skill.Description)
-			if tt.wantTools == nil {
-				assert.Nil(t, skill.AllowedTools)
-			} else {
-				assert.Equal(t, len(tt.wantTools), len(skill.AllowedTools))
-				for i, tool := range tt.wantTools {
-					assert.Equal(t, tool, skill.AllowedTools[i])
-				}
-			}
 			assert.Equal(t, tt.wantInstr, skill.Instructions)
 			assert.Equal(t, tt.filePath, skill.FilePath)
-		})
-	}
-}
-
-func TestSkill_IsToolAllowed(t *testing.T) {
-	tests := []struct {
-		name         string
-		allowedTools []string
-		toolName     string
-		want         bool
-	}{
-		{
-			name:         "no restrictions - all allowed",
-			allowedTools: nil,
-			toolName:     "AnyTool",
-			want:         true,
-		},
-		{
-			name:         "empty restrictions - all allowed",
-			allowedTools: []string{},
-			toolName:     "AnyTool",
-			want:         true,
-		},
-		{
-			name:         "tool in allowed list",
-			allowedTools: []string{"Read", "Grep", "Glob"},
-			toolName:     "Read",
-			want:         true,
-		},
-		{
-			name:         "tool not in allowed list",
-			allowedTools: []string{"Read", "Grep", "Glob"},
-			toolName:     "Write",
-			want:         false,
-		},
-		{
-			name:         "case insensitive match",
-			allowedTools: []string{"Read", "Grep"},
-			toolName:     "read",
-			want:         true,
-		},
-		{
-			name:         "case insensitive match - uppercase",
-			allowedTools: []string{"read", "grep"},
-			toolName:     "READ",
-			want:         true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			skill := &Skill{AllowedTools: tt.allowedTools}
-			assert.Equal(t, tt.want, skill.IsToolAllowed(tt.toolName))
 		})
 	}
 }
@@ -276,9 +212,6 @@ Personal instructions.`), 0644))
 	assert.True(t, ok)
 	assert.Equal(t, "code-reviewer", skill.Name)
 	assert.Equal(t, "Review code.", skill.Description)
-	assert.Equal(t, 2, len(skill.AllowedTools))
-	assert.Equal(t, "Read", skill.AllowedTools[0])
-	assert.Equal(t, "Grep", skill.AllowedTools[1])
 
 	// Check helper skill (project one should win)
 	skill, ok = loader.GetSkill("helper")
@@ -412,7 +345,6 @@ func TestParseSkillContent_EdgeCases(t *testing.T) {
 		filePath    string
 		wantName    string
 		wantDesc    string
-		wantTools   []string
 		wantInstr   string
 		wantErr     bool
 		errContains string
@@ -511,7 +443,6 @@ Instructions.`,
 			filePath:  "/path/to/inline.md",
 			wantName:  "inline-tools",
 			wantDesc:  "Uses inline array.",
-			wantTools: []string{"Read", "Write", "Grep"},
 			wantInstr: "Instructions.",
 		},
 		{
@@ -526,7 +457,6 @@ Instructions.`,
 			filePath:  "/path/to/no-tools.md",
 			wantName:  "no-tools",
 			wantDesc:  "Empty tools list.",
-			wantTools: []string{},
 			wantInstr: "Instructions.",
 		},
 		{
@@ -542,7 +472,6 @@ Instructions.`,
 			filePath:  "/path/to/single.md",
 			wantName:  "single-tool",
 			wantDesc:  "Single tool.",
-			wantTools: []string{"Read"},
 			wantInstr: "Instructions.",
 		},
 		{
@@ -641,7 +570,6 @@ Instructions.`,
 			filePath:  "/path/to/commented.md",
 			wantName:  "commented",
 			wantDesc:  "Has YAML comments.",
-			wantTools: []string{"Read", "Write"},
 			wantInstr: "Instructions.",
 		},
 		{
@@ -696,14 +624,6 @@ More text.`,
 			assert.NotNil(t, skill)
 			assert.Equal(t, tt.wantName, skill.Name)
 			assert.Equal(t, tt.wantDesc, skill.Description)
-			if tt.wantTools == nil {
-				assert.Nil(t, skill.AllowedTools)
-			} else {
-				assert.Equal(t, len(tt.wantTools), len(skill.AllowedTools))
-				for i, tool := range tt.wantTools {
-					assert.Equal(t, tool, skill.AllowedTools[i])
-				}
-			}
 			assert.Equal(t, tt.wantInstr, skill.Instructions)
 			assert.Equal(t, tt.filePath, skill.FilePath)
 		})
@@ -734,7 +654,6 @@ These are the instructions.`
 	assert.NotNil(t, skill)
 	assert.Equal(t, "file-test", skill.Name)
 	assert.Equal(t, "Testing file parsing.", skill.Description)
-	assert.Equal(t, 2, len(skill.AllowedTools))
 	assert.Equal(t, skillPath, skill.FilePath)
 }
 
@@ -1051,61 +970,3 @@ func TestLoader_ListSkillsEmpty(t *testing.T) {
 	assert.Equal(t, 0, len(names))
 }
 
-func TestSkill_IsToolAllowed_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name         string
-		allowedTools []string
-		toolName     string
-		want         bool
-	}{
-		{
-			name:         "empty tool name",
-			allowedTools: []string{"Read", "Write"},
-			toolName:     "",
-			want:         false,
-		},
-		{
-			name:         "tool name with spaces not matching",
-			allowedTools: []string{"Read", "Write"},
-			toolName:     "Read ",
-			want:         false,
-		},
-		{
-			name:         "mixed case in allowed list",
-			allowedTools: []string{"ReAd", "WrItE"},
-			toolName:     "read",
-			want:         true,
-		},
-		{
-			name:         "unicode tool name",
-			allowedTools: []string{"読む", "書く"},
-			toolName:     "読む",
-			want:         true,
-		},
-		{
-			name:         "tool with numbers",
-			allowedTools: []string{"Tool1", "Tool2"},
-			toolName:     "tool1",
-			want:         true,
-		},
-		{
-			name:         "tool with underscores",
-			allowedTools: []string{"my_tool", "other_tool"},
-			toolName:     "MY_TOOL",
-			want:         true,
-		},
-		{
-			name:         "tool with hyphens",
-			allowedTools: []string{"my-tool", "other-tool"},
-			toolName:     "MY-TOOL",
-			want:         true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			skill := &Skill{AllowedTools: tt.allowedTools}
-			assert.Equal(t, tt.want, skill.IsToolAllowed(tt.toolName))
-		})
-	}
-}

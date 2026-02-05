@@ -798,7 +798,6 @@ func TestSandbox_FilesystemIsolation(t *testing.T) {
 ### External Projects
 
 - **gemini-cli** (Google) - Reference implementation for Seatbelt and Docker sandboxing
-
   - Source: `packages/cli/src/utils/sandbox.ts`
   - Seatbelt profiles: `packages/cli/src/utils/sandbox-macos-*.sb`
 

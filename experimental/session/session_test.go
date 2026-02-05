@@ -281,7 +281,7 @@ func TestSessionHooks(t *testing.T) {
 		loader := Loader(repo)
 
 		state := dive.NewGenerationState()
-		state.SessionID = "test-session"
+		state.Values["session_id"] = "test-session"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("New message")}
 
 		err := loader(ctx, state)
@@ -305,7 +305,7 @@ func TestSessionHooks(t *testing.T) {
 		loader := Loader(repo)
 
 		state := dive.NewGenerationState()
-		state.SessionID = "non-existent"
+		state.Values["session_id"] = "non-existent"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("New message")}
 
 		err := loader(ctx, state)
@@ -322,7 +322,7 @@ func TestSessionHooks(t *testing.T) {
 		loader := Loader(repo)
 
 		state := dive.NewGenerationState()
-		state.SessionID = ""
+		state.Values["session_id"] = ""
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("New message")}
 
 		err := loader(ctx, state)
@@ -338,8 +338,8 @@ func TestSessionHooks(t *testing.T) {
 		saver := Saver(repo)
 
 		state := dive.NewGenerationState()
-		state.SessionID = "new-session"
-		state.UserID = "user-123"
+		state.Values["session_id"] = "new-session"
+		state.Values["user_id"] = "user-123"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
 		state.OutputMessages = []*llm.Message{llm.NewAssistantTextMessage("Hi there")}
 
@@ -368,7 +368,7 @@ func TestSessionHooks(t *testing.T) {
 
 		// Simulate loader storing session
 		state := dive.NewGenerationState()
-		state.SessionID = "existing-session"
+		state.Values["session_id"] = "existing-session"
 		state.Values["session"] = existing
 		state.Messages = existing.Messages
 		state.OutputMessages = []*llm.Message{llm.NewAssistantTextMessage("New response")}
@@ -391,7 +391,7 @@ func TestSessionHooks(t *testing.T) {
 		saver := Saver(repo)
 
 		state := dive.NewGenerationState()
-		state.SessionID = ""
+		state.Values["session_id"] = ""
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
 
 		err := saver(ctx, state)
@@ -431,7 +431,7 @@ func TestLoaderWithOptions(t *testing.T) {
 		}.Build()
 
 		state := dive.NewGenerationState()
-		state.SessionID = "test-session"
+		state.Values["session_id"] = "test-session"
 		state.Messages = []*llm.Message{}
 
 		err := loader(ctx, state)
@@ -453,7 +453,7 @@ func TestSaverWithOptions(t *testing.T) {
 		}.Build()
 
 		state := dive.NewGenerationState()
-		state.SessionID = "new-session"
+		state.Values["session_id"] = "new-session"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
 		state.OutputMessages = []*llm.Message{}
 
@@ -478,7 +478,7 @@ func TestSaverWithOptions(t *testing.T) {
 		}.Build()
 
 		state := dive.NewGenerationState()
-		state.SessionID = "test-session"
+		state.Values["session_id"] = "test-session"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
 		state.OutputMessages = []*llm.Message{}
 

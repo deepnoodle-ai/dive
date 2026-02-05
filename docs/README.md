@@ -1,56 +1,35 @@
 # Dive Documentation
 
-Welcome to the Dive documentation! Dive is an AI toolkit for Go that enables you to create specialized AI agents and integrate with leading LLMs.
+Dive is a Go library for building AI agents and integrating with leading LLMs.
 
-## 📚 Documentation Structure
+## Core Guides
 
-### Getting Started
-
-- [Overview](overview.md) - Introduction to Dive concepts and architecture
-- [Installation](guides/installation.md) - Setting up Dive in your environment
+- [Installation](guides/installation.md) - Setting up Dive
 - [Quick Start](guides/quick-start.md) - Build your first agent
+- [Agents](guides/agents.md) - Agent creation, hooks, and event handling
+- [Tools](guides/tools.md) - Built-in tools
+- [Custom Tools](guides/custom-tools.md) - Creating your own tools
+- [LLM Guide](guides/llm-guide.md) - Working with different LLM providers
 
-### Core Concepts
+## Experimental Guides
 
-- [Agents](guides/agents.md) - Understanding AI agents and their capabilities
-- [Tools](guides/tools.md) - Extending agent capabilities
-- [Custom Tools](guides/custom-tools.md) - Creating your own agent tools
+These cover packages in `experimental/` with unstable APIs:
 
-### LLM Integration
+- [Permissions](guides/experimental/permissions.md) - Tool execution permissions
+- [Compaction](guides/experimental/compaction.md) - Context compaction for long conversations
+- [MCP Integration](guides/experimental/mcp-integration.md) - Model Context Protocol support
+- [Sandboxing](guides/experimental/sandboxing.md) - Secure command execution isolation
+- [Skills](guides/experimental/skills.md) - Modular agent capabilities
+- [Slash Commands](guides/experimental/slash-commands.md) - User-invocable CLI commands
+- [Todo Lists](guides/experimental/todo-lists.md) - Task progress tracking
 
-- [LLM Guide](guides/llm-guide.md) - Working with different AI models and configuration
-- [MCP Integration](guides/mcp-integration.md) - Model Context Protocol support
+## Design Documents
 
-### Advanced Topics
+- [Sandboxing](design/sandboxing.md) - Sandboxing design
+- [Sandboxing Review](design/sandboxing-review.md) - Sandboxing design review
+- [Sandboxing Network Proxy](design/sandboxing-network-proxy.md) - Network proxy design
 
-- [Permissions](guides/permissions.md) - Controlling tool execution permissions
-
-### Design Documents
-
-- [Sandboxing](design/sandboxing.md) - Secure command execution isolation
-
-### Reference
-
-- [CLI & Configuration](reference.md) - Complete CLI and configuration reference
-
-### API Reference
-
-- [Core Interfaces](api/core.md) - Core Dive interfaces including Agent types
-- [Config Package](api/config.md) - Configuration system APIs
-- [LLM Package](api/llm.md) - LLM abstraction layer
-
-## 🚀 Quick Links
-
-- **New to Dive?** Start with the [Overview](overview.md) and [Quick Start Guide](guides/quick-start.md)
-- **Building Agents?** See [Agent Guide](guides/agents.md) and [Core API](api/core.md)
-- **Need Help?** Join our [Discord community](https://discord.gg/yrcuURWk)
-
-## 🔧 Development
-
-- [Contributing Guidelines](../README.md#contributors) - How to contribute to Dive
-
-## 📖 External Resources
+## Links
 
 - [GitHub Repository](https://github.com/deepnoodle-ai/dive)
 - [Discord Community](https://discord.gg/yrcuURWk)
-- [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions)

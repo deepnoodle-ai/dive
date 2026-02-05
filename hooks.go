@@ -32,17 +32,15 @@ import (
 //	    Model:        model,
 //	    PreGeneration: []dive.PreGenerationHook{
 //	        func(ctx context.Context, state *dive.GenerationState) error {
-//	            // Load session history
-//	            if history, ok := loadHistory(state.SessionID); ok {
-//	                state.Messages = append(history, state.Messages...)
-//	            }
+//	            // Inject additional context before generation
+//	            state.SystemPrompt += "\nToday is Monday."
 //	            return nil
 //	        },
 //	    },
 //	    PostGeneration: []dive.PostGenerationHook{
 //	        func(ctx context.Context, state *dive.GenerationState) error {
-//	            // Save session after generation
-//	            saveHistory(state.SessionID, state.Messages)
+//	            // Log token usage after generation
+//	            fmt.Printf("Tokens used: %d\n", state.Usage.InputTokens+state.Usage.OutputTokens)
 //	            return nil
 //	        },
 //	    },
@@ -55,16 +53,6 @@ import (
 // The Values map allows hooks to communicate with each other by storing
 // arbitrary data that persists across the hook chain.
 type GenerationState struct {
-	// Identifiers
-
-	// SessionID is the conversation session identifier.
-	// Auto-generated if not provided via WithSessionID.
-	SessionID string
-
-	// UserID identifies the user in the conversation.
-	// Set via WithUserID option.
-	UserID string
-
 	// Input (mutable in PreGeneration)
 
 	// SystemPrompt is the system prompt that will be sent to the LLM.
@@ -117,20 +105,9 @@ type GenerationState struct {
 //
 // Example:
 //
-//	func sessionLoader(repo SessionRepository) PreGenerationHook {
+//	func contextInjector(info string) PreGenerationHook {
 //	    return func(ctx context.Context, state *GenerationState) error {
-//	        if state.SessionID == "" {
-//	            return nil
-//	        }
-//	        session, err := repo.GetSession(ctx, state.SessionID)
-//	        if err == ErrSessionNotFound {
-//	            return nil // New session
-//	        }
-//	        if err != nil {
-//	            return err
-//	        }
-//	        // Prepend existing messages
-//	        state.Messages = append(session.Messages, state.Messages...)
+//	        state.SystemPrompt += "\n" + info
 //	        return nil
 //	    }
 //	}
@@ -151,14 +128,13 @@ type PreGenerationHook func(ctx context.Context, state *GenerationState) error
 //
 // Example:
 //
-//	func sessionSaver(repo SessionRepository) PostGenerationHook {
+//	func usageTracker(totals *UsageTotals) PostGenerationHook {
 //	    return func(ctx context.Context, state *GenerationState) error {
-//	        session := &Session{
-//	            ID:       state.SessionID,
-//	            UserID:   state.UserID,
-//	            Messages: append(state.Messages, state.OutputMessages...),
+//	        if state.Usage != nil {
+//	            totals.InputTokens += state.Usage.InputTokens
+//	            totals.OutputTokens += state.Usage.OutputTokens
 //	        }
-//	        return repo.PutSession(ctx, session)
+//	        return nil
 //	    }
 //	}
 type PostGenerationHook func(ctx context.Context, state *GenerationState) error
@@ -240,31 +216,26 @@ func CompactionHook(messageThreshold int, summarizer func(context.Context, []*ll
 }
 
 // UsageLogger returns a PostGenerationHook that logs token usage after each
-// generation.
-//
-// The hook logs session ID, input tokens, output tokens, and cache statistics
-// using the provided logger function.
+// generation using the provided callback function.
 //
 // Example with slog:
 //
-//	logger := slog.Default()
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
 //	    SystemPrompt: "You are a helpful assistant.",
 //	    Model:        model,
 //	    PostGeneration: []dive.PostGenerationHook{
-//	        dive.UsageLogger(func(sessionID string, usage *llm.Usage) {
-//	            logger.Info("generation complete",
-//	                "session_id", sessionID,
+//	        dive.UsageLogger(func(usage *llm.Usage) {
+//	            slog.Info("generation complete",
 //	                "input_tokens", usage.InputTokens,
 //	                "output_tokens", usage.OutputTokens,
 //	            )
 //	        }),
 //	    },
 //	})
-func UsageLogger(logFunc func(sessionID string, usage *llm.Usage)) PostGenerationHook {
+func UsageLogger(logFunc func(usage *llm.Usage)) PostGenerationHook {
 	return func(ctx context.Context, state *GenerationState) error {
 		if state.Usage != nil && logFunc != nil {
-			logFunc(state.SessionID, state.Usage)
+			logFunc(state.Usage)
 		}
 		return nil
 	}
@@ -272,8 +243,6 @@ func UsageLogger(logFunc func(sessionID string, usage *llm.Usage)) PostGeneratio
 
 // UsageLoggerWithSlog returns a PostGenerationHook that logs token usage
 // using an slog.Logger.
-//
-// This is a convenience wrapper around UsageLogger for slog users.
 //
 // Example:
 //
@@ -290,7 +259,6 @@ func UsageLoggerWithSlog(logger llm.Logger) PostGenerationHook {
 			return nil
 		}
 		logger.Info("generation complete",
-			"session_id", state.SessionID,
 			"input_tokens", state.Usage.InputTokens,
 			"output_tokens", state.Usage.OutputTokens,
 			"cache_creation_input_tokens", state.Usage.CacheCreationInputTokens,

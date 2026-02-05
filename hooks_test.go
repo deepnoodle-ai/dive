@@ -197,14 +197,10 @@ func TestPostGenerationHooks(t *testing.T) {
 		assert.NoError(t, err)
 
 		resp, err := agent.CreateResponse(context.Background(),
-			WithSessionID("test-session"),
-			WithUserID("test-user"),
 			WithInput("Hello"),
 		)
 		assert.NoError(t, err)
 
-		assert.Equal(t, "test-session", capturedState.SessionID)
-		assert.Equal(t, "test-user", capturedState.UserID)
 		assert.NotNil(t, capturedState.Response)
 		assert.NotNil(t, resp)
 		assert.NotNil(t, capturedState.Usage)
@@ -451,16 +447,13 @@ func TestCompactionHook(t *testing.T) {
 
 func TestUsageLogger(t *testing.T) {
 	t.Run("logs usage data", func(t *testing.T) {
-		var loggedSessionID string
 		var loggedUsage *llm.Usage
 
-		hook := UsageLogger(func(sessionID string, usage *llm.Usage) {
-			loggedSessionID = sessionID
+		hook := UsageLogger(func(usage *llm.Usage) {
 			loggedUsage = usage
 		})
 
 		state := NewGenerationState()
-		state.SessionID = "test-session-123"
 		state.Usage = &llm.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
@@ -468,14 +461,13 @@ func TestUsageLogger(t *testing.T) {
 
 		err := hook(context.Background(), state)
 		assert.NoError(t, err)
-		assert.Equal(t, "test-session-123", loggedSessionID)
 		assert.Equal(t, 100, loggedUsage.InputTokens)
 		assert.Equal(t, 50, loggedUsage.OutputTokens)
 	})
 
 	t.Run("handles nil usage gracefully", func(t *testing.T) {
 		called := false
-		hook := UsageLogger(func(sessionID string, usage *llm.Usage) {
+		hook := UsageLogger(func(usage *llm.Usage) {
 			called = true
 		})
 
@@ -504,7 +496,6 @@ func TestUsageLoggerWithSlog(t *testing.T) {
 		hook := UsageLoggerWithSlog(&llm.NullLogger{})
 
 		state := NewGenerationState()
-		state.SessionID = "test-session"
 		state.Usage = &llm.Usage{
 			InputTokens:             100,
 			OutputTokens:            50,

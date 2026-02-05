@@ -21,28 +21,34 @@ experimentation, but the library is the primary interface.
 
 ## Architecture
 
-### Core Interfaces
+### Core Types
 
-- **Agent** (`dive.go:14-21`): Main abstraction for AI entities that can execute tasks and respond to chat
-- **LLM Interface** (`llm/llm.go:7-13`): Unified abstraction over different LLM providers
-- **Tool Interface** (`llm/tool.go:48-57`): Tools with schema, annotations, and permissions
-- **Session Repository** (`session.go`): Persistent conversation storage with file and memory backends
+- **Agent** (`agent.go`): Concrete struct for AI entities with tool execution and conversation management. Created via `NewAgent(AgentOptions)`, returns `*Agent`.
+- **LLM Interface** (`llm/llm.go`): Unified abstraction over different LLM providers (`LLM` and `StreamingLLM` interfaces).
+- **Tool Interface** (`tool.go`): `Tool` and `TypedTool[T]` interfaces with schema, annotations, and `ToolAdapter` for type conversion.
+- **Hooks** (`hooks.go`): `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook` for customizing agent behavior.
 
-### Key Components
+### Key Packages
 
-- **Agent** (`agent.go`): StandardAgent implementation with tool execution and conversation management
 - **LLM Providers** (`providers/`): See Provider Support section below
 - **Tools** (`toolkit/`): Built-in tool implementations (see Tools section)
 - **CLI** (`cmd/dive/`): Basic command-line interface (secondary to library)
-- **Permissions** (`permission.go`, `permission_rules.go`, `permission_config.go`): Comprehensive permission system with hooks and modes
-- **Settings** (`settings.go`): Load settings from `.dive/settings.json` (Claude Code compatible)
-- **Sandbox** (`sandbox/`): Docker/Seatbelt sandboxing with network isolation
-- **MCP** (`mcp/`): Model Context Protocol client for external tools and resources
-- **Skills** (`skill/`): Modular agent capabilities loaded from markdown files
-- **Slash Commands** (`slashcmd/`): User-invocable CLI commands from markdown files
-- **Subagents** (`subagent.go`, `subagent_loader.go`): Specialized child agents for focused tasks
-- **Compaction** (`compaction.go`): Automatic context summarization for long conversations
-- **Todo Tracking** (`todo_tracker.go`): Progress tracking for multi-step tasks
+
+### Experimental Packages (`experimental/`)
+
+These packages are functional but have unstable APIs:
+
+- **Permission** (`experimental/permission/`): Permission system with modes, rules, and hooks
+- **Settings** (`experimental/settings/`): Load settings from `.dive/settings.json`
+- **Session** (`experimental/session/`): Persistent conversation storage (file and memory backends)
+- **Sandbox** (`experimental/sandbox/`): Docker/Seatbelt sandboxing with network isolation
+- **MCP** (`experimental/mcp/`): Model Context Protocol client for external tools
+- **Skills** (`experimental/skill/`): Modular agent capabilities from markdown files
+- **Slash Commands** (`experimental/slashcmd/`): User-invocable CLI commands from markdown files
+- **Subagents** (`experimental/subagent/`): Specialized child agents for focused tasks
+- **Compaction** (`experimental/compaction/`): Context summarization for long conversations
+- **Todo** (`experimental/todo/`): Progress tracking for multi-step tasks
+- **Experimental Toolkit** (`experimental/toolkit/`): Additional tools beyond core toolkit
 
 ### Design Philosophy
 
@@ -56,7 +62,6 @@ Providers use a registry-based architecture (`providers/registry.go`) where each
 provider self-registers via `init()` functions with pattern matching:
 
 - **Anthropic** - Claude models (prefix: "claude-", also fallback)
-  - Includes special tools: Computer Use, Code Execution, Web Search
 - **Google** - Gemini models
 - **Grok** - X.AI's Grok models
 - **Groq** - Groq inference engine
@@ -68,105 +73,48 @@ provider self-registers via `init()` functions with pattern matching:
 
 ### Tools
 
-Built-in tools in `toolkit/` are organized by category:
+Built-in tools in `toolkit/` (core):
 
-**File Operations**: Read, Write, Edit (exact string replacement), Glob (pattern matching),
-Grep (ripgrep-style search), ListDirectory, TextEditor
+**File Operations**: ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor
 
-**Shell & Execution**: Bash (persistent sessions), ShellManager, KillShell, GetShellOutput,
-CodeExecution, Command, Task (spawn subagents)
+**Shell**: Bash
 
-**Web & Search**: WebSearch (Google/Kagi), Fetch (webpage extraction), Google Search,
-Kagi Search, Firecrawl (web scraping)
+**Web**: WebSearch, Fetch
 
-**Agent Features**: TodoWrite (task tracking), Skill (activate skills), Memory (persistent files),
-AskUserQuestion (user input), Extract (structured data)
+**User Interaction**: AskUser
 
-Tools support rich annotations (`tool.go:11-19`) including hints for read-only, destructive,
-idempotent, open-world, and edit operations.
+All tool constructors return `*dive.TypedToolAdapter[T]` which satisfies `dive.Tool`.
+Example: `toolkit.NewBashTool(toolkit.BashToolOptions{...})`.
 
-### Permission System
+### Hook System
 
-The permission system (`permission.go`) provides fine-grained control:
+The hook system (`hooks.go`) provides customization points:
 
-**Permission Modes**:
-- `Default` - Standard rule-based checks
-- `Plan` - Read-only operations only
-- `AcceptEdits` - Auto-accept edit operations
-- `BypassPermissions` - Allow all (dangerous)
+**Generation Hooks**: `PreGenerationHook` and `PostGenerationHook` run before/after the LLM generation loop. Access `GenerationState` to modify system prompt, messages, or read results.
 
-**Permission Flow**: PreToolUse Hook → Deny Rules → Allow Rules → Ask Rules → Mode Check → Execute → PostToolUse Hook
+**Tool Hooks**: `PreToolUseHook` and `PostToolUseHook` run around individual tool executions. PreToolUse returns `AllowResult()`, `DenyResult(msg)`, `AskResult(msg)`, or `ContinueResult()`.
 
-Settings can be loaded from `.dive/settings.json` with allow/deny patterns:
-```json
-{
-  "permissions": {
-    "allow": ["WebSearch", "Bash(go build:*)", "Read(/path/**)"],
-    "deny": ["Bash(rm -rf *:*)"]
-  }
-}
-```
-
-### MCP (Model Context Protocol)
-
-Full MCP support (`mcp/`) enables integration with external tools and resources:
-- HTTP (SSE) and stdio server support
-- OAuth 2.0 with PKCE for authentication
-- Dynamic tool and resource discovery
-- Multi-server management
-
-Configure MCP servers in `.dive/settings.json`:
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-    }
-  }
-}
-```
-
-### Sandboxing
-
-Production-ready sandboxing (`sandbox/`) provides isolation:
-- Docker/Podman support (Linux/Windows)
-- macOS Seatbelt support
-- Filesystem restrictions with path allowlists
-- Network isolation with domain allowlists
-- Built-in HTTP proxy for filtered web access
-- Environment variable and credential pass-through
-
-See `docs/sandboxing.md` for configuration details.
-
-### Advanced Features
-
-**Context Compaction**: Automatically summarize conversations when approaching token limits (default: 100k tokens)
-
-**Subagents**: Spawn specialized child agents with isolated contexts and tool access via the Task tool
-
-**Skills**: Load modular capabilities from `.dive/skills/*.md` with YAML frontmatter metadata
-
-**Slash Commands**: User-invocable CLI commands from `.dive/commands/*.md` with argument placeholders ($1, $2, $ARGUMENTS)
-
-**Todo Tracking**: Track multi-step task progress with TodoWrite tool and TodoTracker helper
-
-**Enhanced LLM Features**: Citations, prompt caching, structured output, token pricing, usage tracking, server-sent events, hooks
+**Hook Flow**: PreGeneration → [LLM → PreToolUse → Execute → PostToolUse]\* → PostGeneration
 
 ## Documentation
 
-Comprehensive guides are available in `docs/guides/`:
+Core guides are in `docs/guides/`:
+
+- `quick-start.md` - Build your first agent
 - `agents.md` - Agent creation and configuration
-- `compaction.md` - Context compaction guide
+- `tools.md` - Built-in tools overview
 - `custom-tools.md` - Creating custom tools
-- `llm-guide.md` - LLM usage guide
+- `llm-guide.md` - LLM providers and configuration
+
+Experimental guides are in `docs/guides/experimental/`:
+
+- `permissions.md` - Permission system
+- `compaction.md` - Context compaction
 - `mcp-integration.md` - MCP setup and usage
-- `permissions.md` - Permission system guide
 - `sandboxing.md` - Sandboxing setup
-- `skills.md` - Skill system guide
-- `slash-commands.md` - Slash commands guide
-- `todo-lists.md` - Todo tracking guide
-- `tools.md` - Tool system overview
+- `skills.md` - Skill system
+- `slash-commands.md` - Slash commands
+- `todo-lists.md` - Todo tracking
 
 ## Example
 
@@ -185,7 +133,7 @@ import (
 func main() {
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:         "Research Assistant",
-		Instructions: "You are an enthusiastic and deeply curious researcher.",
+		SystemPrompt: "You are an enthusiastic and deeply curious researcher.",
 		Model:        anthropic.New(),
 	})
 	if err != nil {

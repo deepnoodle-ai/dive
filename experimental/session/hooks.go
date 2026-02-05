@@ -7,6 +7,20 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
+func getSessionID(state *dive.GenerationState) string {
+	if v, ok := state.Values["session_id"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func getUserID(state *dive.GenerationState) string {
+	if v, ok := state.Values["user_id"].(string); ok {
+		return v
+	}
+	return ""
+}
+
 // Hooks returns PreGeneration and PostGeneration hooks that implement
 // session loading and saving using the provided Repository.
 //
@@ -25,27 +39,30 @@ import (
 //	    PostGeneration: []dive.PostGenerationHook{postHook},
 //	})
 //
-//	// Use same SessionID to continue conversation
-//	resp1, _ := agent.CreateResponse(ctx, dive.WithSessionID("my-session"), dive.WithInput("Hello"))
-//	resp2, _ := agent.CreateResponse(ctx, dive.WithSessionID("my-session"), dive.WithInput("Tell me more"))
+//	// Conversations are tracked by session ID set in Values
+//	//	state.Values["session_id"] = "my-session"
+//	resp1, _ := agent.CreateResponse(ctx, dive.WithInput("Hello"))
+//	resp2, _ := agent.CreateResponse(ctx, dive.WithInput("Tell me more"))
 func Hooks(repo Repository) (dive.PreGenerationHook, dive.PostGenerationHook) {
 	return Loader(repo), Saver(repo)
 }
 
 // Loader returns a PreGenerationHook that loads session history from the repository.
 //
-// If a session exists with the given SessionID, its messages are prepended
-// to state.Messages. If the session doesn't exist, the hook does nothing.
+// If a session exists with the given session ID (from state.Values["session_id"]),
+// its messages are prepended to state.Messages. If the session doesn't exist,
+// the hook does nothing.
 //
 // This hook stores the loaded session in state.Values["session"] for use
 // by the Saver hook.
 func Loader(repo Repository) dive.PreGenerationHook {
 	return func(ctx context.Context, state *dive.GenerationState) error {
-		if state.SessionID == "" {
+		sessionID := getSessionID(state)
+		if sessionID == "" {
 			return nil
 		}
 
-		session, err := repo.GetSession(ctx, state.SessionID)
+		session, err := repo.GetSession(ctx, sessionID)
 		if err == ErrSessionNotFound {
 			// New session, nothing to load
 			return nil
@@ -74,7 +91,8 @@ func Loader(repo Repository) dive.PreGenerationHook {
 // The session includes all messages (history + new input + output messages).
 func Saver(repo Repository) dive.PostGenerationHook {
 	return func(ctx context.Context, state *dive.GenerationState) error {
-		if state.SessionID == "" {
+		sessionID := getSessionID(state)
+		if sessionID == "" {
 			return nil
 		}
 
@@ -84,8 +102,8 @@ func Saver(repo Repository) dive.PostGenerationHook {
 			session = existing
 		} else {
 			session = &Session{
-				ID:        state.SessionID,
-				UserID:    state.UserID,
+				ID:        sessionID,
+				UserID:    getUserID(state),
 				CreatedAt: time.Now(),
 			}
 		}
@@ -111,11 +129,12 @@ type LoaderWithOptions struct {
 // Build returns a PreGenerationHook with the configured options.
 func (o LoaderWithOptions) Build() dive.PreGenerationHook {
 	return func(ctx context.Context, state *dive.GenerationState) error {
-		if state.SessionID == "" {
+		sessionID := getSessionID(state)
+		if sessionID == "" {
 			return nil
 		}
 
-		session, err := o.Repository.GetSession(ctx, state.SessionID)
+		session, err := o.Repository.GetSession(ctx, sessionID)
 		if err == ErrSessionNotFound {
 			return nil
 		}
@@ -156,7 +175,8 @@ type SaverWithOptions struct {
 // Build returns a PostGenerationHook with the configured options.
 func (o SaverWithOptions) Build() dive.PostGenerationHook {
 	return func(ctx context.Context, state *dive.GenerationState) error {
-		if state.SessionID == "" {
+		sessionID := getSessionID(state)
+		if sessionID == "" {
 			return nil
 		}
 
@@ -165,8 +185,8 @@ func (o SaverWithOptions) Build() dive.PostGenerationHook {
 			session = existing
 		} else {
 			session = &Session{
-				ID:        state.SessionID,
-				UserID:    state.UserID,
+				ID:        sessionID,
+				UserID:    getUserID(state),
 				AgentID:   o.AgentID,
 				AgentName: o.AgentName,
 				CreatedAt: time.Now(),

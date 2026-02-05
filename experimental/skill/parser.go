@@ -22,7 +22,6 @@ const frontmatterDelimiter = "---"
 //	---
 //	name: code-reviewer
 //	description: Review code for best practices.
-//	allowed-tools: Read, Grep, Glob
 //	---
 //
 //	# Code Reviewer
@@ -108,7 +107,6 @@ func ParseSkillContent(content []byte, filePath string) (*Skill, error) {
 		Name:         config.Name,
 		Description:  config.Description,
 		Instructions: strings.TrimSpace(string(body)),
-		AllowedTools: config.AllowedTools,
 		FilePath:     filePath,
 	}, nil
 }

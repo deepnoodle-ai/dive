@@ -2,6 +2,7 @@ package openaicompletions
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,7 +11,15 @@ import (
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
+func skipIfNoAPIKey(t *testing.T) {
+	t.Helper()
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+}
+
 func TestHelloWorld(t *testing.T) {
+	skipIfNoAPIKey(t)
 	ctx := context.Background()
 	provider := New()
 	response, err := provider.Generate(ctx, llm.WithMessages(
@@ -22,6 +31,7 @@ func TestHelloWorld(t *testing.T) {
 }
 
 func TestHelloWorldStream(t *testing.T) {
+	skipIfNoAPIKey(t)
 	ctx := context.Background()
 	provider := New()
 	iterator, err := provider.Stream(ctx, llm.WithMessages(
@@ -46,6 +56,7 @@ func TestHelloWorldStream(t *testing.T) {
 }
 
 func TestToolUse(t *testing.T) {
+	skipIfNoAPIKey(t)
 	ctx := context.Background()
 	provider := New()
 
@@ -82,6 +93,7 @@ func TestToolUse(t *testing.T) {
 }
 
 func TestMultipleToolUse(t *testing.T) {
+	skipIfNoAPIKey(t)
 	ctx := context.Background()
 	provider := New()
 
@@ -125,6 +137,7 @@ func TestMultipleToolUse(t *testing.T) {
 }
 
 func TestMultipleToolUseStreaming(t *testing.T) {
+	skipIfNoAPIKey(t)
 	ctx := context.Background()
 	provider := New()
 
@@ -186,6 +199,7 @@ func TestMultipleToolUseStreaming(t *testing.T) {
 }
 
 func TestToolUseStream(t *testing.T) {
+	skipIfNoAPIKey(t)
 	ctx := context.Background()
 	provider := New()
 

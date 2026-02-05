@@ -10,10 +10,6 @@
 //
 //	---
 //	description: Review code for best practices
-//	allowed-tools:
-//	  - Read
-//	  - Grep
-//	  - Glob
 //	argument-hint: [file-pattern]
 //	---
 //
@@ -36,11 +32,6 @@
 // Commands support argument placeholders:
 //   - $1, $2, etc. for positional arguments
 //   - $ARGUMENTS for the full argument string
-//
-// # Tool Restrictions
-//
-// Commands can optionally specify an allowed-tools list to restrict which
-// tools the agent may use while executing the command.
 //
 // # Usage Example
 //
@@ -81,10 +72,6 @@ type Command struct {
 	// containing the prompt/instructions for the command.
 	Instructions string
 
-	// AllowedTools is an optional list of tool names that are permitted
-	// when this command executes. If empty, all tools are allowed.
-	AllowedTools []string
-
 	// Model is an optional model override for this command.
 	Model string
 
@@ -106,9 +93,6 @@ type CommandConfig struct {
 
 	// Description explains what the command does.
 	Description string `yaml:"description,omitempty"`
-
-	// AllowedTools restricts which tools can be used when the command executes.
-	AllowedTools []string `yaml:"allowed-tools,omitempty"`
 
 	// Model is an optional model override (e.g., "claude-sonnet-4-5-20250929").
 	Model string `yaml:"model,omitempty"`
@@ -151,39 +135,3 @@ func (c *Command) ExpandArguments(argsString string) string {
 	return result
 }
 
-// IsToolAllowed checks if a tool is permitted by this command's allowed-tools list.
-//
-// Returns true if:
-//   - AllowedTools is nil or empty (no restrictions)
-//   - The tool name matches an entry in AllowedTools (case-insensitive)
-func (c *Command) IsToolAllowed(toolName string) bool {
-	if len(c.AllowedTools) == 0 {
-		return true
-	}
-	for _, allowed := range c.AllowedTools {
-		if equalsIgnoreCase(allowed, toolName) {
-			return true
-		}
-	}
-	return false
-}
-
-// equalsIgnoreCase performs a case-insensitive string comparison.
-func equalsIgnoreCase(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a); i++ {
-		ca, cb := a[i], b[i]
-		if ca >= 'A' && ca <= 'Z' {
-			ca += 'a' - 'A'
-		}
-		if cb >= 'A' && cb <= 'Z' {
-			cb += 'a' - 'A'
-		}
-		if ca != cb {
-			return false
-		}
-	}
-	return true
-}

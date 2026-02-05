@@ -180,27 +180,11 @@ func (a *Agent) Model() llm.LLM {
 	return a.model
 }
 
-func (a *Agent) prepareSession(ctx context.Context, messages []*llm.Message, options CreateResponseOptions) *Session {
-	return &Session{
-		ID:       options.SessionID,
-		Messages: messages,
-	}
-}
-
 func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
 	var options CreateResponseOptions
 	options.Apply(opts)
 
-	// Auto-generate session ID if not provided
-	if options.SessionID == "" {
-		options.SessionID = newSessionID()
-	}
-
-	logger := a.logger.With(
-		"agent_name", a.name,
-		"session_id", options.SessionID,
-		"user_id", options.UserID,
-	)
+	logger := a.logger.With("agent_name", a.name)
 	logger.Info("creating response")
 
 	messages := a.prepareMessages(options)
@@ -208,16 +192,12 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	session := a.prepareSession(ctx, messages, options)
-
 	systemPrompt := a.buildSystemPrompt()
 
 	// Initialize generation state for hooks
 	genState := NewGenerationState()
-	genState.SessionID = session.ID
-	genState.UserID = options.UserID
 	genState.SystemPrompt = systemPrompt
-	genState.Messages = session.Messages
+	genState.Messages = messages
 
 	// Run PreGeneration hooks
 	for _, hook := range a.preGeneration {
@@ -229,7 +209,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	// Use potentially modified values from hooks
 	systemPrompt = genState.SystemPrompt
-	session.Messages = genState.Messages
+	messages = genState.Messages
 
 	logger.Debug("system prompt", "system_prompt", systemPrompt)
 
@@ -245,34 +225,18 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		CreatedAt: time.Now(),
 	}
 
-	// Track whether we've emitted the init event
-	initEventEmitted := false
-
 	eventCallback := func(ctx context.Context, item *ResponseItem) error {
 		if options.EventCallback != nil {
-			// Emit init event before the first real event
-			if !initEventEmitted {
-				initEventEmitted = true
-				initItem := &ResponseItem{
-					Type: ResponseItemTypeInit,
-					Init: &InitEvent{SessionID: session.ID},
-				}
-				if err := options.EventCallback(ctx, initItem); err != nil {
-					return err
-				}
-			}
 			return options.EventCallback(ctx, item)
 		}
 		return nil
 	}
 
-	genResult, err := a.generate(ctx, session.Messages, systemPrompt, eventCallback)
+	genResult, err := a.generate(ctx, messages, systemPrompt, eventCallback)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
 		return nil, err
 	}
-
-	session.Messages = append(session.Messages, genResult.OutputMessages...)
 
 	response.FinishedAt = Ptr(time.Now())
 	response.Usage = genResult.Usage
@@ -505,31 +469,6 @@ func (a *Agent) executeToolCalls(
 		tool, ok := a.toolsByName[toolCall.Name]
 		if !ok {
 			return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
-		}
-
-		// Check if any tool (e.g., SkillTool) restricts this tool
-		if !a.isToolAllowed(toolCall.Name) {
-			results[i] = &ToolCallResult{
-				ID:    toolCall.ID,
-				Name:  toolCall.Name,
-				Input: toolCall.Input,
-				Result: &ToolResult{
-					Content: []*ToolResultContent{
-						{
-							Type: ToolResultContentTypeText,
-							Text: fmt.Sprintf("Tool %q is not allowed by the active skill. Check the skill's allowed-tools list.", toolCall.Name),
-						},
-					},
-					IsError: true,
-				},
-			}
-			if err := callback(ctx, &ResponseItem{
-				Type:           ResponseItemTypeToolCallResult,
-				ToolCallResult: results[i],
-			}); err != nil {
-				return nil, err
-			}
-			continue
 		}
 
 		a.logger.Debug("executing tool call",
@@ -808,19 +747,6 @@ func (a *Agent) getGenerationAgentOptions(systemPrompt string) []llm.Option {
 		}
 	}
 	return generateOpts
-}
-
-// isToolAllowed checks if a tool is allowed by any ToolAllowanceChecker in the
-// agent's tools. This is used to enforce skill-based tool restrictions.
-func (a *Agent) isToolAllowed(toolName string) bool {
-	for _, tool := range a.tools {
-		if checker, ok := tool.(ToolAllowanceChecker); ok {
-			if !checker.IsToolAllowed(toolName) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 type generateResult struct {

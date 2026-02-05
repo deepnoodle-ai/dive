@@ -200,7 +200,6 @@ type App struct {
 
 	// Session management
 	resumeSessionID  string // Session ID to resume (from --resume flag)
-	forkSession      bool   // Create new session when resuming (from --fork-session flag)
 	currentSessionID string // Current active session ID
 
 	// InlineApp runner
@@ -271,7 +270,6 @@ func NewApp(
 	initialPrompt string,
 	compactionConfig *compaction.CompactionConfig,
 	resumeSessionID string,
-	forkSession bool,
 	commandLoader *slashcmd.Loader,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -292,7 +290,6 @@ func NewApp(
 		workspaceDir:     workspaceDir,
 		modelName:        modelName,
 		resumeSessionID:  resumeSessionID,
-		forkSession:      forkSession,
 		commandLoader:    commandLoader,
 		messages:         make([]Message, 0),
 		toolCallIndex:    make(map[string]int),
@@ -945,10 +942,6 @@ func (a *App) runAgent(expanded string) {
 	opts := []dive.CreateResponseOption{
 		dive.WithInput(expanded),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-			// Capture session ID from init event
-			if item.Type == dive.ResponseItemTypeInit && item.Init != nil {
-				a.currentSessionID = item.Init.SessionID
-			}
 			// Send events for each agent response item
 			switch item.Type {
 			case dive.ResponseItemTypeModelEvent:
@@ -969,16 +962,6 @@ func (a *App) runAgent(expanded string) {
 			}
 			return nil
 		}),
-	}
-
-	// Add session ID if we have one
-	if sessionID != "" {
-		opts = append(opts, dive.WithSessionID(sessionID))
-	}
-
-	// Add fork option if this is the first message and fork is requested
-	if a.currentSessionID == "" && a.forkSession && a.resumeSessionID != "" {
-		opts = append(opts, dive.WithFork(true))
 	}
 
 	// Track if this is a new session (for metadata update)
@@ -1360,11 +1343,7 @@ func (a *App) buildIntroView() tui.View {
 
 	// Add session info if resuming
 	if a.resumeSessionID != "" {
-		sessionInfo := "Resuming session: " + a.resumeSessionID
-		if a.forkSession {
-			sessionInfo = "Forking session: " + a.resumeSessionID
-		}
-		content += "\n" + sessionInfo
+		content += "\nResuming session: " + a.resumeSessionID
 	}
 
 	// Build intro message
@@ -1599,13 +1578,7 @@ func (a *App) handleCommand(input string) bool {
 				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Model)
 			}
 
-			// Append tool restrictions to instructions (like skills do)
-			if len(cmd.AllowedTools) > 0 {
-				expanded = expanded + fmt.Sprintf("\n\n---\n**Tool Restrictions:** While executing this command, you may only use these tools: %s\n",
-					strings.Join(cmd.AllowedTools, ", "))
-			}
-
-			// Build display text with command name and args
+				// Build display text with command name and args
 			displayCmd := "/" + cmdName
 			if cmdArgs != "" {
 				displayCmd = "/" + cmdName + " " + cmdArgs

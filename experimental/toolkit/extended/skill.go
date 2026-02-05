@@ -43,14 +43,7 @@ type SkillToolOptions struct {
 //
 // When invoked, the tool returns the skill's instructions as markdown text,
 // which the agent uses to guide its subsequent actions. The tool also tracks
-// the currently active skill for tool restriction enforcement.
-//
-// # Tool Restrictions
-//
-// Skills can optionally define an allowed-tools list. When such a skill is
-// active, the SkillTool's IsToolAllowed method can be used to check whether
-// a given tool is permitted. The Skill tool itself is always allowed, enabling
-// agents to switch skills even when restrictions are in place.
+// the currently active skill.
 //
 // # Thread Safety
 //
@@ -157,12 +150,11 @@ func (t *SkillTool) Annotations() *dive.ToolAnnotations {
 // The method performs the following:
 //  1. Validates that a skill name was provided
 //  2. Looks up the skill in the loader
-//  3. Sets the skill as the active skill (for tool restriction checks)
+//  3. Sets the skill as the active skill
 //  4. Returns a formatted markdown response containing:
 //     - The skill name and description
 //     - Any arguments provided
 //     - The skill's instructions
-//     - Tool restrictions (if the skill has allowed-tools defined)
 //
 // If the skill is not found, an error result is returned listing available skills.
 //
@@ -208,11 +200,6 @@ func (t *SkillTool) Call(ctx context.Context, input *SkillToolInput) (*dive.Tool
 	result.WriteString("## Instructions\n\n")
 	result.WriteString(s.Instructions)
 
-	if len(s.AllowedTools) > 0 {
-		result.WriteString(fmt.Sprintf("\n\n---\n**Tool Restrictions:** While this skill is active, you may only use these tools: %s\n",
-			strings.Join(s.AllowedTools, ", ")))
-	}
-
 	return dive.NewToolResultText(result.String()).
 		WithDisplay(fmt.Sprintf("Activated skill: %s", s.Name)), nil
 }
@@ -231,9 +218,8 @@ func (t *SkillTool) GetActiveSkill() *skill.Skill {
 
 // ClearActiveSkill deactivates the currently active skill.
 //
-// After calling this method, GetActiveSkill returns nil and IsToolAllowed
-// returns true for all tools. This is useful when a task is complete and
-// tool restrictions should be lifted.
+// After calling this method, GetActiveSkill returns nil. This is useful
+// when a task is complete and the skill should be deactivated.
 //
 // This method is thread-safe.
 func (t *SkillTool) ClearActiveSkill() {
@@ -242,29 +228,3 @@ func (t *SkillTool) ClearActiveSkill() {
 	t.activeSkill = nil
 }
 
-// IsToolAllowed checks if a tool is permitted by the currently active skill.
-//
-// This method implements the dive.ToolAllowanceChecker interface, enabling
-// integration with agents that enforce tool restrictions.
-//
-// Returns true in the following cases:
-//   - No skill is currently active
-//   - The active skill has no allowed-tools restrictions
-//   - The tool name matches an allowed tool (case-insensitive)
-//   - The tool name is "Skill" (always allowed to enable skill switching)
-//
-// This method is thread-safe.
-func (t *SkillTool) IsToolAllowed(toolName string) bool {
-	// Always allow the Skill tool itself so agents can switch skills
-	if toolName == t.Name() {
-		return true
-	}
-
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	if t.activeSkill == nil {
-		return true
-	}
-	return t.activeSkill.IsToolAllowed(toolName)
-}

@@ -257,15 +257,6 @@ func (t *TypedToolAdapter[T]) PreviewCall(ctx context.Context, input any) *ToolC
 	return previewer.PreviewCall(ctx, typedInput)
 }
 
-// IsToolAllowed implements ToolAllowanceChecker by delegating to the underlying
-// TypedTool if it implements ToolAllowanceChecker.
-func (t *TypedToolAdapter[T]) IsToolAllowed(toolName string) bool {
-	if checker, ok := t.tool.(ToolAllowanceChecker); ok {
-		return checker.IsToolAllowed(toolName)
-	}
-	return true
-}
-
 // convertInput converts any input to the typed T, handling json.RawMessage and other types.
 func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 	var zero T
@@ -317,10 +308,3 @@ type ToolCallResult struct {
 	Error   error
 }
 
-// ToolAllowanceChecker is an optional interface that tools can implement to
-// restrict which other tools can be used. This is used by skills to enforce
-// allowed-tools restrictions.
-type ToolAllowanceChecker interface {
-	// IsToolAllowed returns true if the given tool name is allowed to be executed.
-	IsToolAllowed(toolName string) bool
-}

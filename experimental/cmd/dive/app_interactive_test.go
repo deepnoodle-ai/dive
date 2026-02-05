@@ -21,7 +21,7 @@ import (
 func TestAppLiveView(t *testing.T) {
 	// Create a minimal app with mock agent
 	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", false, nil)
+	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil)
 
 	t.Run("initial view shows input prompt", func(t *testing.T) {
 		// Render the live view to a termtest screen
@@ -77,7 +77,7 @@ func TestAppLiveView(t *testing.T) {
 // to verify the full rendering pipeline including ANSI sequences.
 func TestAppWithInlineRunner(t *testing.T) {
 	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", false, nil)
+	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil)
 
 	var buf bytes.Buffer
 	runner := tui.NewInlineApp(tui.InlineAppConfig{
@@ -113,7 +113,7 @@ func TestAppWithInlineRunner(t *testing.T) {
 // TestAppFooterCollapse tests that footer padding collapses when autocomplete is inactive
 func TestAppFooterCollapse(t *testing.T) {
 	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", false, nil)
+	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil)
 
 	t.Run("footer minimal without autocomplete", func(t *testing.T) {
 		// No autocomplete matches
@@ -160,7 +160,7 @@ func TestAppFooterCollapse(t *testing.T) {
 // TestAppCompactionStats tests the compaction stats display
 func TestAppCompactionStats(t *testing.T) {
 	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", false, nil)
+	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil)
 
 	t.Run("shows compaction stats when enabled", func(t *testing.T) {
 		app.showCompactionStats = true
@@ -202,7 +202,7 @@ func renderLiveView(t *testing.T, app *App, width, height int) *termtest.Screen 
 // This demonstrates how to simulate user interactions and verify the resulting view.
 func TestAppEventHandling(t *testing.T) {
 	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", false, nil)
+	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil)
 
 	// Create a runner with captured output
 	var buf bytes.Buffer
@@ -289,7 +289,7 @@ func TestAppEventHandling(t *testing.T) {
 // This is useful for catching unintended changes to the UI layout.
 func TestAppSnapshotView(t *testing.T) {
 	agent := &dive.Agent{}
-	app := NewApp(agent, nil, "/workspace", anthropic.ModelClaudeSonnet45, "", nil, "", false, nil)
+	app := NewApp(agent, nil, "/workspace", anthropic.ModelClaudeSonnet45, "", nil, "", nil)
 
 	t.Run("idle state view structure", func(t *testing.T) {
 		// Ensure clean state

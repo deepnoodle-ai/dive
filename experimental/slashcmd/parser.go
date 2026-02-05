@@ -22,9 +22,6 @@ const frontmatterDelimiter = "---"
 //
 //	---
 //	description: Review code changes
-//	allowed-tools:
-//	  - Read
-//	  - Grep
 //	argument-hint: [file-pattern]
 //	---
 //
@@ -94,7 +91,6 @@ func ParseCommandContent(content []byte, filePath string) (*Command, error) {
 		Name:         name,
 		Description:  config.Description,
 		Instructions: strings.TrimSpace(string(body)),
-		AllowedTools: config.AllowedTools,
 		Model:        config.Model,
 		ArgumentHint: config.ArgumentHint,
 		FilePath:     filePath,

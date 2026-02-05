@@ -125,172 +125,40 @@ func TestAgentCreateResponse(t *testing.T) {
 			t.Fatalf("CreateResponse with callback failed: %v", err)
 		}
 
-		// Verify that the callback was called for init event + final message
-		if len(callbackItems) != 2 {
-			t.Errorf("Expected callback to be called twice (init + message), got %d calls", len(callbackItems))
-		} else {
-			// First item should be init event
-			initItem := callbackItems[0]
-			if initItem.Type != ResponseItemTypeInit {
-				t.Errorf("Expected first callback item type to be %s, got %s", ResponseItemTypeInit, initItem.Type)
-			}
-			if initItem.Init == nil {
-				t.Errorf("Expected init item to have Init field")
-			} else if initItem.Init.SessionID == "" {
-				t.Errorf("Expected init event to have a session ID")
-			}
+		// Verify that the callback was called with the message
+		if len(callbackItems) == 0 {
+			t.Errorf("Expected callback to be called at least once, got 0 calls")
+		}
 
-			// Second item should be the message
-			msgItem := callbackItems[1]
-			if msgItem.Type != ResponseItemTypeMessage {
-				t.Errorf("Expected second callback item type to be %s, got %s", ResponseItemTypeMessage, msgItem.Type)
-			}
-			if msgItem.Message == nil {
-				t.Errorf("Expected callback item to have a message")
-			} else if msgItem.Message.Text() != "This is a test response" {
-				t.Errorf("Expected callback message text to be 'This is a test response', got '%s'", msgItem.Message.Text())
-			}
-			if msgItem.Usage == nil {
-				t.Errorf("Expected callback item to have usage information")
-			} else {
-				if msgItem.Usage.InputTokens != 10 {
-					t.Errorf("Expected callback usage InputTokens=10, got %d", msgItem.Usage.InputTokens)
+		// Find the message item in callback items
+		foundMessage := false
+		for _, item := range callbackItems {
+			if item.Type == ResponseItemTypeMessage {
+				foundMessage = true
+				if item.Message == nil {
+					t.Errorf("Expected callback item to have a message")
+				} else if item.Message.Text() != "This is a test response" {
+					t.Errorf("Expected callback message text to be 'This is a test response', got '%s'", item.Message.Text())
 				}
-				if msgItem.Usage.OutputTokens != 5 {
-					t.Errorf("Expected callback usage OutputTokens=5, got %d", msgItem.Usage.OutputTokens)
+				if item.Usage == nil {
+					t.Errorf("Expected callback item to have usage information")
+				} else {
+					if item.Usage.InputTokens != 10 {
+						t.Errorf("Expected callback usage InputTokens=10, got %d", item.Usage.InputTokens)
+					}
+					if item.Usage.OutputTokens != 5 {
+						t.Errorf("Expected callback usage OutputTokens=5, got %d", item.Usage.OutputTokens)
+					}
 				}
 			}
+		}
+		if !foundMessage {
+			t.Errorf("Expected to find a message callback item")
 		}
 
 		// Also verify the response itself is correct
 		if len(resp.Items) == 0 {
 			t.Errorf("Expected response to have items, got none")
-		}
-	})
-}
-
-// TestSessionIDGeneration tests that session IDs are generated correctly
-func TestSessionIDGeneration(t *testing.T) {
-	mockLLM := &mockLLM{
-		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
-			return &llm.Response{
-				ID:         "resp_123",
-				Model:      "test-model",
-				Role:       llm.Assistant,
-				Content:    []llm.Content{&llm.TextContent{Text: "Test response"}},
-				Type:       "message",
-				StopReason: "stop",
-				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
-			}, nil
-		},
-		nameFunc: func() string {
-			return "test-model"
-		},
-	}
-
-	t.Run("auto-generate SessionID when not provided", func(t *testing.T) {
-		agent, err := NewAgent(AgentOptions{
-			Name:  "TestAgent",
-			Model: mockLLM,
-		})
-		if err != nil {
-			t.Fatalf("Failed to create agent: %v", err)
-		}
-
-		var capturedSessionID string
-		_, err = agent.CreateResponse(context.Background(),
-			WithInput("Hello"),
-			WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
-				if item.Type == ResponseItemTypeInit && item.Init != nil {
-					capturedSessionID = item.Init.SessionID
-				}
-				return nil
-			}),
-		)
-		if err != nil {
-			t.Fatalf("CreateResponse failed: %v", err)
-		}
-
-		if capturedSessionID == "" {
-			t.Error("Expected SessionID to be auto-generated")
-		}
-		if len(capturedSessionID) < 10 {
-			t.Errorf("Expected SessionID to have reasonable length, got %q", capturedSessionID)
-		}
-		if capturedSessionID[:8] != "session-" {
-			t.Errorf("Expected SessionID to start with 'session-', got %q", capturedSessionID)
-		}
-	})
-
-	t.Run("use provided SessionID", func(t *testing.T) {
-		agent, err := NewAgent(AgentOptions{
-			Name:  "TestAgent",
-			Model: mockLLM,
-		})
-		if err != nil {
-			t.Fatalf("Failed to create agent: %v", err)
-		}
-
-		customSessionID := "my-custom-session-123"
-		var capturedSessionID string
-		_, err = agent.CreateResponse(context.Background(),
-			WithSessionID(customSessionID),
-			WithInput("Hello"),
-			WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
-				if item.Type == ResponseItemTypeInit && item.Init != nil {
-					capturedSessionID = item.Init.SessionID
-				}
-				return nil
-			}),
-		)
-		if err != nil {
-			t.Fatalf("CreateResponse failed: %v", err)
-		}
-
-		if capturedSessionID != customSessionID {
-			t.Errorf("Expected SessionID %q, got %q", customSessionID, capturedSessionID)
-		}
-	})
-
-	t.Run("unique SessionIDs generated each time", func(t *testing.T) {
-		agent, err := NewAgent(AgentOptions{
-			Name:  "TestAgent",
-			Model: mockLLM,
-		})
-		if err != nil {
-			t.Fatalf("Failed to create agent: %v", err)
-		}
-
-		var sessionID1 string
-		_, err = agent.CreateResponse(context.Background(),
-			WithInput("Hello"),
-			WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
-				if item.Type == ResponseItemTypeInit && item.Init != nil {
-					sessionID1 = item.Init.SessionID
-				}
-				return nil
-			}),
-		)
-		if err != nil {
-			t.Fatalf("First CreateResponse failed: %v", err)
-		}
-
-		var sessionID2 string
-		_, err = agent.CreateResponse(context.Background(),
-			WithInput("Hello again"),
-			WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
-				if item.Type == ResponseItemTypeInit && item.Init != nil {
-					sessionID2 = item.Init.SessionID
-				}
-				return nil
-			}),
-		)
-		if err != nil {
-			t.Fatalf("Second CreateResponse failed: %v", err)
-		}
-
-		if sessionID1 == sessionID2 {
-			t.Error("Expected unique SessionIDs for different conversations")
 		}
 	})
 }

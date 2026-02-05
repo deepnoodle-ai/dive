@@ -282,7 +282,7 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 		message := &llm.Message{Role: llm.User}
 		message.Content = append(message.Content, &llm.TextContent{Text: input.Prompt})
 
-		response, err := agent.CreateResponse(ctx, dive.WithMessage(message))
+		response, err := agent.CreateResponse(ctx, dive.WithMessages(message))
 		record.EndTime = time.Now()
 
 		if err != nil {

@@ -4,7 +4,7 @@ Quick setup guide for Dive.
 
 ## Prerequisites
 
-- **Go** 1.23.2 or later
+- **Go** 1.25 or later
 - **API keys** for LLM providers (optional):
   - [Anthropic](https://console.anthropic.com/)
   - [OpenAI](https://platform.openai.com/api-keys)
@@ -37,9 +37,6 @@ Set your API keys:
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
-
-# For tools (optional)
-export FIRECRAWL_API_KEY="your-key"
 ```
 
 ## Verification
@@ -52,18 +49,20 @@ package main
 import (
     "context"
     "fmt"
+    "log"
+
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/llm/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/providers/anthropic"
 )
 
 func main() {
     agent, err := dive.NewAgent(dive.AgentOptions{
         Name:         "Test Agent",
-        Instructions: "You are a helpful assistant.",
+        SystemPrompt: "You are a helpful assistant.",
         Model:        anthropic.New(),
     })
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
 
     response, err := agent.CreateResponse(
@@ -71,10 +70,10 @@ func main() {
         dive.WithInput("Hello!"),
     )
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
 
-    fmt.Println(response.Text())
+    fmt.Println(response.OutputText())
 }
 ```
 
@@ -83,17 +82,12 @@ func main() {
 **Import errors:**
 
 - Run `go mod tidy`
-- Ensure Go version 1.23.2+
+- Ensure Go version 1.25+
 
 **API key issues:**
 
 - Verify key format and permissions
 - Check environment variable names
-
-**Network issues:**
-
-- Configure proxy if needed
-- Check firewall settings
 
 ## Next Steps
 
