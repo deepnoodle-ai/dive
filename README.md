@@ -233,10 +233,15 @@ conversion, HTTP utilities, and other common building blocks. Dive's
 experimental CLI is built with Wonton, and the two libraries pair well for
 building agent-powered command-line tools.
 
+[Workflow](https://github.com/deepnoodle-ai/workflow) is a lightweight Go
+library for composing multi-step workflows. Use it to orchestrate Dive agents
+into pipelines, fan-out/fan-in patterns, and other structured execution flows.
+
 ## Contributing
 
-- Questions and ideas: [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions)
-- Bugs and PRs: [GitHub Issues](https://github.com/deepnoodle-ai/dive/issues)
+Questions and ideas: [GitHub Discussions](https://github.com/deepnoodle-ai/dive/discussions)
+
+Bugs and PRs: [GitHub Issues](https://github.com/deepnoodle-ai/dive/issues)
 
 ## License
 
