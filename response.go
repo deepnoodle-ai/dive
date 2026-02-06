@@ -59,9 +59,6 @@ type ResponseItem struct {
 
 // Response represents the output from an Agent's response generation.
 type Response struct {
-	// ID is a unique identifier for this response
-	ID string `json:"id,omitempty"`
-
 	// Model represents the model that generated the response
 	Model string `json:"model,omitempty"`
 

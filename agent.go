@@ -197,7 +197,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 
 	response := &Response{
-		ID:        randomInt(),
 		Model:     a.model.Name(),
 		CreatedAt: time.Now(),
 	}

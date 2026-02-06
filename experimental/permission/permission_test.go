@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
@@ -21,6 +22,15 @@ func (m *mockTool) Schema() *dive.Schema               { return nil }
 func (m *mockTool) Annotations() *dive.ToolAnnotations { return m.annotations }
 func (m *mockTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
 	return nil, nil
+}
+
+// testDialog implements dive.Dialog for testing
+type testDialog struct {
+	showFunc func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error)
+}
+
+func (d *testDialog) Show(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+	return d.showFunc(ctx, in)
 }
 
 func TestManager(t *testing.T) {
@@ -112,7 +122,7 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("ask rules call confirmer", func(t *testing.T) {
+	t.Run("ask rules call dialog", func(t *testing.T) {
 		config := &Config{
 			Mode: ModeDefault,
 			Rules: Rules{
@@ -121,12 +131,12 @@ func TestManager(t *testing.T) {
 		}
 
 		var confirmedMsg string
-		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-			confirmedMsg = msg
-			return true, nil
-		}
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			confirmedMsg = in.Message
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}}
 
-		manager := NewManager(config, confirmer)
+		manager := NewManager(config, dialog)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
@@ -136,7 +146,7 @@ func TestManager(t *testing.T) {
 		assert.Equal(t, "Execute this command?", confirmedMsg)
 	})
 
-	t.Run("ask rules deny when confirmer denies", func(t *testing.T) {
+	t.Run("ask rules deny when dialog denies", func(t *testing.T) {
 		config := &Config{
 			Mode: ModeDefault,
 			Rules: Rules{
@@ -144,11 +154,11 @@ func TestManager(t *testing.T) {
 			},
 		}
 
-		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-			return false, nil
-		}
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Confirmed: false}, nil
+		}}
 
-		manager := NewManager(config, confirmer)
+		manager := NewManager(config, dialog)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
@@ -174,7 +184,7 @@ func TestManager(t *testing.T) {
 		err := manager.EvaluateToolUse(context.Background(), tool, matchCall)
 		assert.NoError(t, err)
 
-		// Should fall through to default (confirm). No confirmer = auto-allow.
+		// Should fall through to default (confirm). No dialog = auto-allow.
 		err = manager.EvaluateToolUse(context.Background(), tool, noMatchCall)
 		assert.NoError(t, err)
 	})
@@ -197,15 +207,13 @@ func TestManager(t *testing.T) {
 
 	t.Run("session allowlist", func(t *testing.T) {
 		config := &Config{Mode: ModeDefault}
-		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-			return false, nil // deny by default
-		}
-		manager := NewManager(config, confirmer)
+		dialog := &dive.DenyAllDialog{}
+		manager := NewManager(config, dialog)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 
-		// Before adding to allowlist - should deny (confirmer says no)
+		// Before adding to allowlist - should deny (dialog says no)
 		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.Error(t, err)
 
@@ -235,13 +243,13 @@ func TestManager(t *testing.T) {
 		assert.Equal(t, ModeBypassPermissions, manager.Mode())
 	})
 
-	t.Run("nil confirmer auto-allows", func(t *testing.T) {
+	t.Run("nil dialog auto-allows", func(t *testing.T) {
 		manager := NewManager(nil, nil)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
 
-		// Default with nil confirmer should auto-allow
+		// Default with nil dialog should auto-allow
 		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
 	})
@@ -360,12 +368,12 @@ func TestHook(t *testing.T) {
 		}
 
 		confirmed := false
-		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
 			confirmed = true
-			return true, nil
-		}
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}}
 
-		hook := Hook(config, confirmer)
+		hook := Hook(config, dialog)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
@@ -384,11 +392,11 @@ func TestHook(t *testing.T) {
 			},
 		}
 
-		confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-			return false, nil
-		}
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Confirmed: false}, nil
+		}}
 
-		hook := Hook(config, confirmer)
+		hook := Hook(config, dialog)
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
@@ -397,6 +405,133 @@ func TestHook(t *testing.T) {
 		err := hook(context.Background(), hookCtx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "denied")
+	})
+}
+
+func TestConfirmDialogInput(t *testing.T) {
+	t.Run("dialog receives correct fields", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		var received *dive.DialogInput
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			received = in
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "ls"}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+		assert.NotNil(t, received)
+		assert.True(t, received.Confirm)
+		assert.Equal(t, "Bash", received.Title)
+		assert.Equal(t, tool, received.Tool)
+		assert.Equal(t, call, received.Call)
+	})
+
+	t.Run("dialog error propagates", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return nil, fmt.Errorf("dialog failed")
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "dialog failed")
+	})
+
+	t.Run("dialog canceled treated as denial", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Canceled: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "denied")
+	})
+
+	t.Run("ask rule message forwarded to dialog", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AskRule("Bash", "Are you sure about this?"),
+			},
+		}
+
+		var received *dive.DialogInput
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			received = in
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+		assert.True(t, received.Confirm)
+		assert.Equal(t, "Are you sure about this?", received.Message)
+		assert.Equal(t, "Bash", received.Title)
+	})
+
+	t.Run("default fallthrough confirms via dialog", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		called := false
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			called = true
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("default fallthrough denied via dialog", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+		manager := NewManager(config, &dive.DenyAllDialog{})
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "denied")
+	})
+
+	t.Run("AutoApproveDialog allows via manager", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+		manager := NewManager(config, &dive.AutoApproveDialog{})
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
 	})
 }
 
