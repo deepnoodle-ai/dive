@@ -159,6 +159,35 @@ Extend agent behavior without modifying core code:
 - `PreToolUseHook` — Permissions, validation, input modification
 - `PostToolUseHook` — Logging, metrics, result processing
 
+### Dialog
+
+The `Dialog` interface handles user-facing prompts during agent execution.
+It's used by the permission system to confirm tool calls, and by the
+`AskUser` tool to collect input from the user. A single `Show` method covers
+confirmations, single/multi-select, and free-form text input — the mode is
+determined by which fields are set on `DialogInput`.
+
+Dive ships two built-in implementations: `AutoApproveDialog` (says yes to
+everything) and `DenyAllDialog` (denies/cancels everything). Provide your
+own `Dialog` to wire prompts into a TUI, web UI, or Slack bot.
+
+### Content Types
+
+Messages sent to and received from LLMs contain typed content blocks
+(`llm.Content`). The main types are:
+
+| Type | Description |
+| --- | --- |
+| `TextContent` | Plain text — the most common content type |
+| `ImageContent` | An image, either inline bytes or a URL |
+| `DocumentContent` | A document (e.g. PDF), inline bytes or URL |
+| `ToolUseContent` | A tool call requested by the model |
+| `ToolResultContent` | The result returned to the model after a tool call |
+| `ThinkingContent` | Extended thinking / chain-of-thought from the model |
+| `RefusalContent` | The model declined to respond |
+
+All content types implement `llm.Content` and are used in `llm.Message.Content`.
+
 ### Streaming
 
 Real-time streaming with event callbacks:
@@ -194,7 +223,6 @@ any time.
 - **Skills** — Markdown-based skill loading system
 - **Slash Commands** — User-defined CLI commands
 - **Settings** — Load configuration from `.dive/settings.json`
-- **Interactor** — User interaction interfaces for confirmations, selections, and input
 - **Todo** — Real-time todo list tracking during agent execution
 - **Toolkit** — Additional tool packages (extended, firecrawl, google, kagi)
 - **CLI** — Interactive command-line interface (`experimental/cmd/dive`)
