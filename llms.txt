@@ -1,0 +1,260 @@
+# Dive
+
+Dive is a Go library for building AI agents and LLM-powered applications. Use it
+to build CLIs, add AI to back-end services, or run agents within workflow
+orchestrators. Apache 2.0, Go 1.25+.
+
+Dive gives you consistent access to 8+ LLM providers, a tool-calling system
+aligned with Claude Code patterns, and an agent loop with hooks. Images,
+documents, and structured output work across all providers. The library is
+unopinionated. It has no hidden prompts or library-imposed behaviors. You
+provide the system prompt and decide which tools and hooks to install.
+
+A single `CreateResponse` call runs the full agent loop. It generates, calls
+tools, feeds results back to the LLM, and repeats until the model produces a
+final response or hits the iteration limit. Agents are stateless. Each call
+takes messages in and returns a response. To maintain a conversation across
+calls, pass the previous messages plus new ones on each call. Alternatively,
+use PreGeneration/PostGeneration hooks to load and save session history. The
+experimental `session` package provides a ready-made hook-based implementation.
+
+Module: `github.com/deepnoodle-ai/dive`
+
+Install: `go get github.com/deepnoodle-ai/dive`
+
+Everything outside `experimental/` is stable. Everything inside may change.
+
+## Credentials
+
+Each provider reads its API key from an environment variable:
+
+- `ANTHROPIC_API_KEY` - Anthropic
+- `OPENAI_API_KEY` - OpenAI, OpenAI Completions
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY` - Google
+- `XAI_API_KEY` or `GROK_API_KEY` - Grok
+- `GROQ_API_KEY` - Groq
+- `MISTRAL_API_KEY` - Mistral
+- `OLLAMA_API_KEY` - Ollama (optional; defaults to "ollama")
+- `OPENROUTER_API_KEY` - OpenRouter
+
+## Agent with tools
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a senior software engineer.",
+    Model:        anthropic.New(),
+    Tools: []dive.Tool{
+        toolkit.NewReadFileTool(),
+        toolkit.NewTextEditorTool(),
+        toolkit.NewBashTool(),
+    },
+})
+response, _ := agent.CreateResponse(ctx, dive.WithInput("Fix the failing test"))
+fmt.Println(response.OutputText())
+```
+
+## Streaming events
+
+```go
+agent.CreateResponse(ctx,
+    dive.WithInput("Generate a report"),
+    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+        switch item.Type {
+        case dive.ResponseItemTypeModelEvent:
+            fmt.Print(item.Event.Delta.Text)
+        case dive.ResponseItemTypeToolCall:
+            fmt.Printf("Tool: %s\n", item.ToolCall.Name)
+        }
+        return nil
+    }),
+)
+```
+
+## Direct LLM usage (no agent loop)
+
+```go
+model := google.New(google.WithModel("gemini-3-flash-preview"))
+response, _ := model.Generate(ctx,
+    llm.WithMessages(llm.NewUserMessage(
+        llm.NewTextContent("What is in this image?"),
+        llm.NewImageContent(llm.ContentURL("https://example.com/photo.jpg")),
+    )),
+    llm.WithMaxTokens(1024),
+)
+fmt.Println(response.Message().Text())
+```
+
+## Custom tool
+
+```go
+type WeatherTool struct{}
+type WeatherInput struct {
+    City string `json:"city"`
+}
+
+func (t *WeatherTool) Name() string        { return "get_weather" }
+func (t *WeatherTool) Description() string { return "Get current weather for a city" }
+func (t *WeatherTool) Annotations() *dive.ToolAnnotations {
+    return &dive.ToolAnnotations{ReadOnlyHint: true}
+}
+func (t *WeatherTool) Schema() *dive.Schema {
+    return &dive.Schema{
+        Type: "object", Required: []string{"city"},
+        Properties: map[string]*dive.SchemaProperty{
+            "city": {Type: "string", Description: "City name"},
+        },
+    }
+}
+func (t *WeatherTool) Call(ctx context.Context, input WeatherInput) (*dive.ToolResult, error) {
+    return dive.NewToolResultText(fmt.Sprintf("72°F in %s", input.City)), nil
+}
+
+// Register: dive.ToolAdapter(&WeatherTool{})
+```
+
+## Hooks
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model: anthropic.New(),
+    PreGeneration: []dive.PreGenerationHook{
+        func(ctx context.Context, state *dive.GenerationState) error {
+            state.SystemPrompt += "\nToday is Monday."
+            return nil
+        },
+    },
+    PreToolUse: []dive.PreToolUseHook{
+        func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+            if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
+                return nil // allow read-only tools
+            }
+            return fmt.Errorf("tool %s requires approval", hookCtx.Tool.Name())
+        },
+    },
+    PostGeneration: []dive.PostGenerationHook{
+        dive.UsageLogger(func(usage *llm.Usage) {
+            slog.Info("done", "in", usage.InputTokens, "out", usage.OutputTokens)
+        }),
+    },
+})
+```
+
+Hook flow: PreGeneration -> [LLM -> PreToolUse -> Execute -> PostToolUse]* -> PostGeneration
+
+## Key types
+
+- `dive.Agent` - created via `dive.NewAgent(AgentOptions)`, runs the generate-call-repeat loop
+- `dive.Tool` - interface: Name, Description, Schema, Annotations, Call
+- `dive.TypedTool[T]` - generic tool with typed input; wrap with `dive.ToolAdapter()`
+- `dive.Response` - returned by CreateResponse; use OutputText() or Items
+- `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
+- `dive.ToolResult` - tool output; create with NewToolResultText() or NewToolResultError()
+- `llm.LLM` - interface: Name, Generate
+- `llm.StreamingLLM` - extends LLM with Stream()
+- `llm.Message` - create with NewUserTextMessage(), NewUserMessage(), NewAssistantMessage()
+- `llm.Content` - interface; primary types listed below
+- `dive.Dialog` - interface for user prompts; built-ins: AutoApproveDialog, DenyAllDialog
+
+## ModelSettings
+
+Set via `AgentOptions.ModelSettings`. All fields are optional (pointer types).
+
+```go
+dive.ModelSettings{
+    MaxTokens:         dive.Ptr(16000),
+    Temperature:       dive.Ptr(0.7),
+    ReasoningBudget:   dive.Ptr(4000),        // token budget for extended thinking
+    ReasoningEffort:   llm.ReasoningEffortHigh, // or Medium, Low
+    Caching:           dive.Ptr(true),         // enable prompt caching
+    ParallelToolCalls: dive.Ptr(true),
+    PresencePenalty:   dive.Ptr(0.1),
+    FrequencyPenalty:  dive.Ptr(0.1),
+}
+```
+
+## Response
+
+`dive.Response` is returned by `agent.CreateResponse()`.
+
+```go
+response.OutputText()       // text from the last assistant message
+response.ToolCallResults()  // all tool call results
+response.Items              // []*ResponseItem in chronological order
+response.Usage              // *llm.Usage (InputTokens, OutputTokens, CacheCreationInputTokens, CacheReadInputTokens)
+response.Model              // model name string
+response.CreatedAt          // time.Time
+response.FinishedAt         // *time.Time
+```
+
+Each `ResponseItem` has a `Type` and one populated field:
+
+- `ResponseItemTypeMessage` - `item.Message` (*llm.Message)
+- `ResponseItemTypeToolCall` - `item.ToolCall` (*llm.ToolUseContent)
+- `ResponseItemTypeToolCallResult` - `item.ToolCallResult` (*dive.ToolCallResult)
+- `ResponseItemTypeModelEvent` - `item.Event` (*llm.Event, for streaming deltas)
+
+## Content types (llm/)
+
+All implement `llm.Content` and are used in `llm.Message.Content`.
+
+- `TextContent` - Plain text (most common)
+- `ImageContent` - Image from URL or inline bytes
+- `DocumentContent` - Document (PDF, etc.) from URL or inline bytes, with optional citations
+- `ToolUseContent` - Tool call requested by the model (ID, Name, Input)
+- `ToolResultContent` - Result returned to the model after a tool call
+- `ThinkingContent` - Extended thinking / chain-of-thought from the model
+- `RedactedThinkingContent` - Encrypted thinking flagged by safety systems
+- `RefusalContent` - Model declined to respond
+- `SummaryContent` - Compacted conversation summary replacing full history
+
+## Providers
+
+All support tool calling. Each self-registers via init(). Providers with their own go.mod require a separate `go get`.
+
+- `providers/anthropic` - Claude models (own go.mod)
+- `providers/openai` - OpenAI Responses API (own go.mod)
+- `providers/google` - Gemini models (own go.mod)
+- `providers/openaicompletions` - OpenAI Chat Completions API
+- `providers/grok` - X.AI Grok models
+- `providers/groq` - Groq inference
+- `providers/mistral` - Mistral models
+- `providers/ollama` - Local models via Ollama
+- `providers/openrouter` - Multi-provider proxy
+
+## Built-in tools (toolkit/)
+
+All constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
+
+- `NewReadFileTool` - Read file contents with optional offset/limit for large files
+- `NewWriteFileTool` - Create or overwrite a file
+- `NewEditTool` - Exact string replacement in files (unique match or replace_all)
+- `NewGlobTool` - Find files matching glob patterns (**, *, ?, {a,b})
+- `NewGrepTool` - Search file contents with regex, glob filters, and context lines
+- `NewListDirectoryTool` - List directory contents
+- `NewBashTool` - Execute shell commands with optional timeout
+- `NewTextEditorTool` - Multi-command editor: view, create, str_replace, insert
+- `NewWebFetchTool` - Fetch webpage contents as markdown
+- `NewWebSearchTool` - Web search returning URLs, titles, and descriptions
+- `NewAskUserTool` - Collect user input: confirm, select, multiselect, or free-form text
+
+## Docs and examples
+
+- [README](README.md)
+- [Quick Start](docs/guides/quick-start.md)
+- [Agents](docs/guides/agents.md)
+- [Tools](docs/guides/tools.md)
+- [Custom Tools](docs/guides/custom-tools.md)
+- [LLM Providers](docs/guides/llm-guide.md)
+- [GoDoc](https://pkg.go.dev/github.com/deepnoodle-ai/dive)
+- [examples/](examples/) - runnable examples for each provider and feature
+
+## Experimental (experimental/)
+
+Session, Permission, Compaction, Subagent, Sandbox, MCP, Skills, Slash Commands, Settings, Todo, extended Toolkit, CLI.
+
+Guides: docs/guides/experimental/
+
+## Related projects
+
+- [Wonton](https://github.com/deepnoodle-ai/wonton) - companion Go library for CLIs: TUI framework, HTML-to-Markdown, HTTP utilities
+- [Workflow](https://github.com/deepnoodle-ai/workflow) - lightweight Go library for composing multi-step agent workflows
