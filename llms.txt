@@ -66,6 +66,12 @@ agent.CreateResponse(ctx,
             }
         case dive.ResponseItemTypeToolCall:
             fmt.Printf("Tool: %s\n", item.ToolCall.Name)
+        case dive.ResponseItemTypeToolCallResult:
+            if item.ToolCallResult.Result != nil {
+                for _, c := range item.ToolCallResult.Result.Content {
+                    fmt.Printf("Result: %s\n", c.Text)
+                }
+            }
         }
         return nil
     }),
@@ -150,6 +156,7 @@ Hook flow: PreGeneration -> [LLM -> PreToolUse -> Execute -> PostToolUse]* -> Po
 - `dive.TypedTool[T]` - generic tool with typed input; wrap with `dive.ToolAdapter()`
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
 - `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
+- `dive.ToolCallResult` - completed tool call; fields: ID (string), Name (string), Input (any), Result (*ToolResult), Error (error)
 - `dive.ToolResult` - tool output; create with NewToolResultText() or NewToolResultError()
 - `llm.LLM` - interface: Name, Generate
 - `llm.StreamingLLM` - extends LLM with Stream()
