@@ -156,6 +156,10 @@ response, err := agent.CreateResponse(ctx,
             // Tool result available
         case dive.ResponseItemTypeModelEvent:
             // Streaming event from LLM (for real-time UI)
+            // Note: Event and Delta can be nil for non-delta events (e.g. ping, message_start)
+            if item.Event != nil && item.Event.Delta != nil {
+                fmt.Print(item.Event.Delta.Text)
+            }
         }
         return nil
     }),
@@ -186,6 +190,36 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     },
 })
 ```
+
+## Multi-Turn Conversations
+
+Agents are stateless. To maintain a conversation across calls, accumulate messages using `response.OutputMessages`:
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a helpful assistant.",
+    Model:        anthropic.New(),
+})
+
+var messages []*llm.Message
+
+// First turn
+resp, _ := agent.CreateResponse(ctx, dive.WithInput("Hi, my name is Alice."))
+fmt.Println(resp.OutputText())
+
+// Build history: input + output
+messages = append(messages, llm.NewUserTextMessage("Hi, my name is Alice."))
+messages = append(messages, resp.OutputMessages...)
+
+// Second turn
+messages = append(messages, llm.NewUserTextMessage("What's my name?"))
+resp, _ = agent.CreateResponse(ctx, dive.WithMessages(messages...))
+fmt.Println(resp.OutputText())
+```
+
+`OutputMessages` includes both assistant messages and tool result messages in the correct order. This is important when the agent uses tools — using `response.Items` alone will miss the tool result messages that the LLM needs to see.
+
+For persistent sessions across process restarts, see the experimental `session` package which provides hook-based session save/load.
 
 ## Subagents
 

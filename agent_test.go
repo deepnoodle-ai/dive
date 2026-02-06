@@ -226,6 +226,65 @@ func TestResponseItemsContainToolCalls(t *testing.T) {
 	assert.Equal(t, resp.OutputText(), "Done")
 }
 
+func TestResponseOutputMessages(t *testing.T) {
+	callCount := 0
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			callCount++
+			if callCount == 1 {
+				return &llm.Response{
+					ID:    "resp_1",
+					Model: "test-model",
+					Role:  llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{
+							ID:    "tool_1",
+							Name:  "test_tool",
+							Input: []byte(`{}`),
+						},
+					},
+					Type:       "message",
+					StopReason: "tool_use",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			}
+			return &llm.Response{
+				ID:         "resp_2",
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+				Type:       "message",
+				StopReason: "stop",
+				Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+
+	tool := &mockTool{
+		name: "test_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewToolResultText("tool output"), nil
+		},
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Tools: []Tool{tool},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("Use the tool"))
+	assert.NoError(t, err)
+
+	// OutputMessages should contain: assistant msg, tool result msg, final assistant msg
+	assert.Len(t, resp.OutputMessages, 3)
+	assert.Equal(t, resp.OutputMessages[0].Role, llm.Assistant)
+	assert.Equal(t, resp.OutputMessages[1].Role, llm.User) // tool results are user messages
+	assert.Equal(t, resp.OutputMessages[2].Role, llm.Assistant)
+	assert.Equal(t, resp.OutputMessages[2].Text(), "Done")
+}
+
 func TestNilToolOutput(t *testing.T) {
 	callCount := 0
 	mock := &mockLLM{

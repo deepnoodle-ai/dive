@@ -61,7 +61,9 @@ agent.CreateResponse(ctx,
     dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
         switch item.Type {
         case dive.ResponseItemTypeModelEvent:
-            fmt.Print(item.Event.Delta.Text)
+            if item.Event != nil && item.Event.Delta != nil {
+                fmt.Print(item.Event.Delta.Text)
+            }
         case dive.ResponseItemTypeToolCall:
             fmt.Printf("Tool: %s\n", item.ToolCall.Name)
         }
@@ -160,7 +162,7 @@ Hook flow: PreGeneration -> [LLM -> PreToolUse -> Execute -> PostToolUse]* -> Po
 Set via `AgentOptions.ModelSettings`. All fields are optional (pointer types).
 
 ```go
-dive.ModelSettings{
+&dive.ModelSettings{
     MaxTokens:         dive.Ptr(16000),
     Temperature:       dive.Ptr(0.7),
     ReasoningBudget:   dive.Ptr(4000),        // token budget for extended thinking
@@ -180,6 +182,7 @@ dive.ModelSettings{
 response.OutputText()       // text from the last assistant message
 response.ToolCallResults()  // all tool call results
 response.Items              // []*ResponseItem in chronological order
+response.OutputMessages     // []*llm.Message — assistant + tool result messages for conversation continuation
 response.Usage              // *llm.Usage (InputTokens, OutputTokens, CacheCreationInputTokens, CacheReadInputTokens)
 response.Model              // model name string
 response.CreatedAt          // time.Time
@@ -192,6 +195,37 @@ Each `ResponseItem` has a `Type` and one populated field:
 - `ResponseItemTypeToolCall` - `item.ToolCall` (*llm.ToolUseContent)
 - `ResponseItemTypeToolCallResult` - `item.ToolCallResult` (*dive.ToolCallResult)
 - `ResponseItemTypeModelEvent` - `item.Event` (*llm.Event, for streaming deltas)
+
+## Multi-turn conversation
+
+Agents are stateless. To maintain a conversation, accumulate messages across
+calls using `response.OutputMessages`:
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a helpful assistant.",
+    Model:        anthropic.New(),
+})
+
+// First turn
+var messages []*llm.Message
+resp, _ := agent.CreateResponse(ctx, dive.WithInput("Hi, my name is Alice."))
+fmt.Println(resp.OutputText())
+
+// Accumulate: input messages + output messages
+messages = append(messages, llm.NewUserTextMessage("Hi, my name is Alice."))
+messages = append(messages, resp.OutputMessages...)
+
+// Second turn: add new user message and pass full history
+messages = append(messages, llm.NewUserTextMessage("What's my name?"))
+resp, _ = agent.CreateResponse(ctx, dive.WithMessages(messages...))
+fmt.Println(resp.OutputText()) // "Your name is Alice."
+```
+
+`OutputMessages` includes both assistant messages and tool result messages
+in the correct order for the LLM. This is important when the agent uses
+tools — `response.Items` shows what happened but `OutputMessages` provides
+the complete message sequence needed to continue the conversation.
 
 ## Content types (llm/)
 
@@ -211,7 +245,7 @@ All implement `llm.Content` and are used in `llm.Message.Content`.
 
 All support tool calling. Each self-registers via init(). Providers with their own go.mod require a separate `go get`.
 
-- `providers/anthropic` - Claude models (own go.mod)
+- `providers/anthropic` - Claude models
 - `providers/openai` - OpenAI Responses API (own go.mod)
 - `providers/google` - Gemini models (own go.mod)
 - `providers/openaicompletions` - OpenAI Chat Completions API
