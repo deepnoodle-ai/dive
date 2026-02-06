@@ -26,5 +26,3 @@ These cover packages in `experimental/` with unstable APIs:
 ## Design Documents
 
 - [Sandboxing](design/sandboxing.md) - Sandboxing design
-- [Sandboxing Review](design/sandboxing-review.md) - Sandboxing design review
-- [Sandboxing Network Proxy](design/sandboxing-network-proxy.md) - Network proxy design
