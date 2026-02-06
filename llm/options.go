@@ -279,6 +279,15 @@ func WithResponseFormat(responseFormat *ResponseFormat) Option {
 	}
 }
 
+// WithCaching controls provider-level caching. When true (default), providers
+// that support caching will automatically apply cache control to messages.
+// Set to false to disable automatic caching.
+func WithCaching(enabled bool) Option {
+	return func(config *Config) {
+		config.Caching = &enabled
+	}
+}
+
 // WithPreviousResponseID sets the previous response ID for the interaction.
 // OpenAI only.
 // https://platform.openai.com/docs/guides/conversation-state?api-mode=responses#openai-apis-for-conversation-state

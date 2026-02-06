@@ -50,7 +50,7 @@ Always use the TodoWrite tool to track your progress on multi-step tasks.`,
 			}
 
 			// Display progress when todos are updated
-			if item.Type == dive.ResponseItemTypeTodo {
+			if item.Type == todo.ItemType {
 				fmt.Println("\n--- Todo List Updated ---")
 				tracker.DisplayProgress(os.Stdout)
 				fmt.Println()

@@ -2,11 +2,11 @@ package dive
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/wonton/assert"
 )
 
 // TestAgentCreateResponse demonstrates using the CreateResponse API
@@ -34,150 +34,90 @@ func TestAgentCreateResponse(t *testing.T) {
 		Name:  "TestAgent",
 		Model: mockLLM,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create agent: %v", err)
-	}
+	assert.NoError(t, err)
 
 	t.Run("CreateResponse with input string", func(t *testing.T) {
-		// Test with a simple string input
 		resp, err := agent.CreateResponse(context.Background(), WithInput("Hello, agent!"))
-		if err != nil {
-			t.Fatalf("CreateResponse failed: %v", err)
-		}
+		assert.NoError(t, err)
 
-		// Check if items exist and the message has the expected text
-		if len(resp.Items) == 0 {
-			t.Errorf("Expected response to have items, got none")
-		} else {
-			found := false
-			for _, item := range resp.Items {
-				if item.Type == ResponseItemTypeMessage && item.Message != nil {
-					text := item.Message.Text()
-					if text == "This is a test response" {
-						found = true
-						break
-					}
+		// Check that items exist and contain the expected message
+		assert.True(t, len(resp.Items) > 0, "expected response to have items")
+		found := false
+		for _, item := range resp.Items {
+			if item.Type == ResponseItemTypeMessage && item.Message != nil {
+				if item.Message.Text() == "This is a test response" {
+					found = true
+					break
 				}
 			}
-			if !found {
-				t.Errorf("Expected to find 'This is a test response' in response items")
-			}
 		}
+		assert.True(t, found, "expected to find 'This is a test response' in items")
 
-		if resp.Usage == nil {
-			t.Errorf("Expected non-nil Usage")
-		} else {
-			if resp.Usage.InputTokens != 10 {
-				t.Errorf("Expected InputTokens=10, got %d", resp.Usage.InputTokens)
-			}
-			if resp.Usage.OutputTokens != 5 {
-				t.Errorf("Expected OutputTokens=5, got %d", resp.Usage.OutputTokens)
-			}
-		}
+		assert.NotNil(t, resp.Usage)
+		assert.Equal(t, resp.Usage.InputTokens, 10)
+		assert.Equal(t, resp.Usage.OutputTokens, 5)
 	})
 
 	t.Run("CreateResponse with messages", func(t *testing.T) {
-		// Test with explicit messages
 		messages := []*llm.Message{
 			llm.NewUserTextMessage("Here's a more complex message"),
 		}
-
 		resp, err := agent.CreateResponse(context.Background(), WithMessages(messages...))
-		if err != nil {
-			t.Fatalf("CreateResponse with messages failed: %v", err)
-		}
+		assert.NoError(t, err)
 
-		// Check if items exist and the message has the expected text
-		if len(resp.Items) == 0 {
-			t.Errorf("Expected response to have items, got none")
-		} else {
-			found := false
-			for _, item := range resp.Items {
-				if item.Type == ResponseItemTypeMessage && item.Message != nil {
-					text := item.Message.Text()
-					if text == "This is a test response" {
-						found = true
-						break
-					}
+		assert.True(t, len(resp.Items) > 0, "expected response to have items")
+		found := false
+		for _, item := range resp.Items {
+			if item.Type == ResponseItemTypeMessage && item.Message != nil {
+				if item.Message.Text() == "This is a test response" {
+					found = true
+					break
 				}
 			}
-			if !found {
-				t.Errorf("Expected to find 'This is a test response' in response items")
-			}
 		}
+		assert.True(t, found, "expected to find 'This is a test response' in items")
 	})
 
 	t.Run("CreateResponse with callback for final message", func(t *testing.T) {
-		// Track callback invocations
 		var callbackItems []*ResponseItem
 		eventCallback := func(ctx context.Context, item *ResponseItem) error {
 			callbackItems = append(callbackItems, item)
 			return nil
 		}
 
-		// Create a response with callback
 		resp, err := agent.CreateResponse(
 			context.Background(),
 			WithInput("Hello, agent!"),
 			WithEventCallback(eventCallback),
 		)
-		if err != nil {
-			t.Fatalf("CreateResponse with callback failed: %v", err)
-		}
-
-		// Verify that the callback was called with the message
-		if len(callbackItems) == 0 {
-			t.Errorf("Expected callback to be called at least once, got 0 calls")
-		}
+		assert.NoError(t, err)
+		assert.True(t, len(callbackItems) > 0, "expected callback to be called")
 
 		// Find the message item in callback items
 		foundMessage := false
 		for _, item := range callbackItems {
 			if item.Type == ResponseItemTypeMessage {
 				foundMessage = true
-				if item.Message == nil {
-					t.Errorf("Expected callback item to have a message")
-				} else if item.Message.Text() != "This is a test response" {
-					t.Errorf("Expected callback message text to be 'This is a test response', got '%s'", item.Message.Text())
-				}
-				if item.Usage == nil {
-					t.Errorf("Expected callback item to have usage information")
-				} else {
-					if item.Usage.InputTokens != 10 {
-						t.Errorf("Expected callback usage InputTokens=10, got %d", item.Usage.InputTokens)
-					}
-					if item.Usage.OutputTokens != 5 {
-						t.Errorf("Expected callback usage OutputTokens=5, got %d", item.Usage.OutputTokens)
-					}
-				}
+				assert.NotNil(t, item.Message)
+				assert.Equal(t, item.Message.Text(), "This is a test response")
+				assert.NotNil(t, item.Usage)
+				assert.Equal(t, item.Usage.InputTokens, 10)
+				assert.Equal(t, item.Usage.OutputTokens, 5)
 			}
 		}
-		if !foundMessage {
-			t.Errorf("Expected to find a message callback item")
-		}
-
-		// Also verify the response itself is correct
-		if len(resp.Items) == 0 {
-			t.Errorf("Expected response to have items, got none")
-		}
+		assert.True(t, foundMessage, "expected to find a message callback item")
+		assert.True(t, len(resp.Items) > 0, "expected response to have items")
 	})
 }
 
 // TestMessageCopy tests the Message.Copy method
 func TestMessageCopy(t *testing.T) {
 	original := llm.NewUserTextMessage("Hello, world!")
-
 	copied := original.Copy()
 
-	if copied == original {
-		t.Error("Copy should return a new pointer")
-	}
-	if copied.Role != original.Role {
-		t.Errorf("Role mismatch: expected %v, got %v", original.Role, copied.Role)
-	}
-	if copied.Text() != original.Text() {
-		t.Errorf("Text mismatch: expected %q, got %q", original.Text(), copied.Text())
-	}
+	assert.NotEqual(t, fmt.Sprintf("%p", copied), fmt.Sprintf("%p", original), "Copy should return a new pointer")
+	assert.Equal(t, copied.Role, original.Role)
+	assert.Equal(t, copied.Text(), original.Text())
 }
 
 // Mock types for testing
@@ -196,6 +136,190 @@ func (m *mockLLM) Name() string {
 
 func (m *mockLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	return m.generateFunc(ctx, opts...)
+}
+
+// mockTool is a simple tool for testing tool call flows.
+type mockTool struct {
+	name     string
+	callFunc func(ctx context.Context, input any) (*ToolResult, error)
+}
+
+func (t *mockTool) Name() string                                          { return t.name }
+func (t *mockTool) Description() string                                   { return "mock tool" }
+func (t *mockTool) Schema() *Schema                                       { return nil }
+func (t *mockTool) Annotations() *ToolAnnotations                         { return nil }
+func (t *mockTool) Call(ctx context.Context, input any) (*ToolResult, error) {
+	return t.callFunc(ctx, input)
+}
+
+func TestResponseItemsContainToolCalls(t *testing.T) {
+	callCount := 0
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			callCount++
+			if callCount == 1 {
+				return &llm.Response{
+					ID:    "resp_1",
+					Model: "test-model",
+					Role:  llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{
+							ID:    "tool_1",
+							Name:  "test_tool",
+							Input: []byte(`{}`),
+						},
+					},
+					Type:       "message",
+					StopReason: "tool_use",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			}
+			return &llm.Response{
+				ID:         "resp_2",
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+				Type:       "message",
+				StopReason: "stop",
+				Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+
+	tool := &mockTool{
+		name: "test_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewToolResultText("tool output"), nil
+		},
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Tools: []Tool{tool},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("Use the tool"))
+	assert.NoError(t, err)
+
+	// Verify Response.Items contains all item types in order
+	var types []ResponseItemType
+	for _, item := range resp.Items {
+		types = append(types, item.Type)
+	}
+
+	expected := []ResponseItemType{
+		ResponseItemTypeMessage,
+		ResponseItemTypeToolCall,
+		ResponseItemTypeToolCallResult,
+		ResponseItemTypeMessage,
+	}
+	assert.Equal(t, types, expected)
+
+	// Verify ToolCallResults() returns the tool result
+	results := resp.ToolCallResults()
+	assert.Len(t, results, 1)
+	assert.Equal(t, results[0].Name, "test_tool")
+
+	// Verify OutputText() returns the final message text
+	assert.Equal(t, resp.OutputText(), "Done")
+}
+
+func TestNilToolOutput(t *testing.T) {
+	callCount := 0
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			callCount++
+			if callCount == 1 {
+				return &llm.Response{
+					ID:    "resp_1",
+					Model: "test-model",
+					Role:  llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{
+							ID:    "tool_1",
+							Name:  "nil_tool",
+							Input: []byte(`{}`),
+						},
+					},
+					Type:       "message",
+					StopReason: "tool_use",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			}
+			return &llm.Response{
+				ID:         "resp_2",
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+				Type:       "message",
+				StopReason: "stop",
+				Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+
+	tool := &mockTool{
+		name: "nil_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return nil, nil
+		},
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Tools: []Tool{tool},
+	})
+	assert.NoError(t, err)
+
+	// This should not panic
+	resp, err := agent.CreateResponse(context.Background(), WithInput("Use the tool"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.OutputText(), "Done")
+}
+
+func TestDuplicateToolNames(t *testing.T) {
+	mock := &mockLLM{nameFunc: func() string { return "test-model" }}
+
+	tool1 := &mockTool{
+		name:     "same_name",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+	}
+	tool2 := &mockTool{
+		name:     "same_name",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+	}
+
+	_, err := NewAgent(AgentOptions{
+		Model: mock,
+		Tools: []Tool{tool1, tool2},
+	})
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, `duplicate tool name: "same_name"`)
+}
+
+func TestToolsReturnsCopy(t *testing.T) {
+	mock := &mockLLM{nameFunc: func() string { return "test-model" }}
+	tool := &mockTool{
+		name:     "test_tool",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Tools: []Tool{tool},
+	})
+	assert.NoError(t, err)
+
+	tools := agent.Tools()
+	assert.Len(t, tools, 1)
+
+	// Modifying returned slice should not affect agent's tools
+	tools[0] = nil
+	agentTools := agent.Tools()
+	assert.NotNil(t, agentTools[0], "modifying Tools() return value should not affect agent's internal tools")
 }
 
 // TestHookAbortError tests the HookAbortError functionality across all hook types
@@ -225,12 +349,8 @@ func TestHookAbortError(t *testing.T) {
 		})
 
 		resp, err := agent.CreateResponse(context.Background(), WithInput("test"))
-		if err != nil {
-			t.Errorf("Expected success despite regular error, got: %v", err)
-		}
-		if resp == nil {
-			t.Error("Expected non-nil response")
-		}
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
 	})
 
 	t.Run("PostGeneration with HookAbortError aborts", func(t *testing.T) {
@@ -244,24 +364,13 @@ func TestHookAbortError(t *testing.T) {
 		})
 
 		resp, err := agent.CreateResponse(context.Background(), WithInput("test"))
-		if err == nil {
-			t.Error("Expected error from HookAbortError")
-		}
-		if resp != nil {
-			t.Error("Expected nil response when aborted")
-		}
+		assert.Error(t, err)
+		assert.Nil(t, resp)
 
 		var abortErr *HookAbortError
-		if !errors.As(err, &abortErr) {
-			t.Errorf("Expected HookAbortError, got: %T", err)
-		} else {
-			if abortErr.Reason != "safety violation detected" {
-				t.Errorf("Expected reason 'safety violation detected', got: %s", abortErr.Reason)
-			}
-			if abortErr.HookType != "PostGeneration" {
-				t.Errorf("Expected HookType 'PostGeneration', got: %s", abortErr.HookType)
-			}
-		}
+		assert.ErrorAs(t, err, &abortErr)
+		assert.Equal(t, abortErr.Reason, "safety violation detected")
+		assert.Equal(t, abortErr.HookType, "PostGeneration")
 	})
 
 	t.Run("PreGeneration with any error aborts", func(t *testing.T) {
@@ -275,17 +384,9 @@ func TestHookAbortError(t *testing.T) {
 		})
 
 		resp, err := agent.CreateResponse(context.Background(), WithInput("test"))
-		if err == nil {
-			t.Error("Expected error from PreGeneration hook")
-		}
-		if resp != nil {
-			t.Error("Expected nil response when PreGeneration fails")
-		}
-		// PreGeneration wraps errors with "pre-generation hook error: "
-		expectedMsg := "pre-generation hook error: setup failed"
-		if err.Error() != expectedMsg {
-			t.Errorf("Expected error %q, got: %v", expectedMsg, err)
-		}
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+		assert.ErrorContains(t, err, "pre-generation hook error: setup failed")
 	})
 
 	t.Run("HookAbortError with cause", func(t *testing.T) {
@@ -300,21 +401,11 @@ func TestHookAbortError(t *testing.T) {
 		})
 
 		_, err := agent.CreateResponse(context.Background(), WithInput("test"))
-		if err == nil {
-			t.Fatal("Expected error")
-		}
+		assert.Error(t, err)
 
 		var abortErr *HookAbortError
-		if !errors.As(err, &abortErr) {
-			t.Fatalf("Expected HookAbortError, got: %T", err)
-		}
-
-		if abortErr.Cause != causeErr {
-			t.Errorf("Expected cause to be preserved, got: %v", abortErr.Cause)
-		}
-
-		if !errors.Is(err, causeErr) {
-			t.Error("Expected errors.Is to work with wrapped cause")
-		}
+		assert.ErrorAs(t, err, &abortErr)
+		assert.Equal(t, abortErr.Cause, causeErr)
+		assert.ErrorIs(t, err, causeErr)
 	})
 }

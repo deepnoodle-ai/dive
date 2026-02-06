@@ -18,10 +18,16 @@ func DateTimeString(t time.Time) string {
 func getToolResultContent(callResults []*ToolCallResult) []*llm.ToolResultContent {
 	results := make([]*llm.ToolResultContent, len(callResults))
 	for i, callResult := range callResults {
+		var content any
+		var isError bool
+		if callResult.Result != nil {
+			content = callResult.Result.Content
+			isError = callResult.Result.IsError
+		}
 		results[i] = &llm.ToolResultContent{
 			ToolUseID: callResult.ID,
-			Content:   callResult.Result.Content,
-			IsError:   callResult.Error != nil || callResult.Result.IsError,
+			Content:   content,
+			IsError:   callResult.Error != nil || isError,
 		}
 	}
 	return results

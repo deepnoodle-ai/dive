@@ -2,13 +2,14 @@
 
 > **Experimental**: The TodoWrite tool is in `experimental/toolkit/extended/`. The API may change.
 
-Track task progress using Dive's todo functionality. The TodoWrite tool lets agents create and update task lists, with real-time `TodoEvent` emissions through the event callback system.
+Track task progress using Dive's todo functionality. The TodoWrite tool lets agents create and update task lists, with real-time event emissions through the event callback system.
 
 ## Basic Usage
 
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
+    "github.com/deepnoodle-ai/dive/experimental/todo"
     "github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
     "github.com/deepnoodle-ai/dive/providers/anthropic"
 )
@@ -31,15 +32,17 @@ Monitor todo updates via event callbacks:
 response, _ := agent.CreateResponse(ctx,
     dive.WithInput("Set up a new Go project with testing"),
     dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-        if item.Type == dive.ResponseItemTypeTodo {
-            for _, todo := range item.Todo.Todos {
-                status := "pending"
-                if todo.Status == dive.TodoStatusCompleted {
-                    status = "done"
-                } else if todo.Status == dive.TodoStatusInProgress {
-                    status = "working"
+        if item.Type == todo.ItemType {
+            if evt, ok := item.Extension.(*todo.TodoEvent); ok {
+                for _, t := range evt.Todos {
+                    status := "pending"
+                    if t.Status == todo.TodoStatusCompleted {
+                        status = "done"
+                    } else if t.Status == todo.TodoStatusInProgress {
+                        status = "working"
+                    }
+                    fmt.Printf("[%s] %s\n", status, t.Content)
                 }
-                fmt.Printf("[%s] %s\n", status, todo.Content)
             }
         }
         return nil

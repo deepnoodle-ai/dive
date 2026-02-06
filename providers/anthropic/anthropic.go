@@ -76,6 +76,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
+	applyCacheControl(msgs, config)
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
@@ -163,6 +164,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
+	applyCacheControl(msgs, config)
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
@@ -285,6 +287,34 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 		}
 	}
 	return copied, nil
+}
+
+// applyCacheControl sets ephemeral cache control on the last content block of
+// the last message. This is applied automatically unless the user explicitly
+// opts out by setting Caching to false. The messages slice should already be a
+// copy (from convertMessages) so mutation is safe.
+func applyCacheControl(messages []*llm.Message, config *llm.Config) {
+	if config.Caching != nil && !*config.Caching {
+		return
+	}
+	if len(messages) == 0 {
+		return
+	}
+	// Clear any existing cache control
+	for _, message := range messages {
+		for _, content := range message.Content {
+			if setter, ok := content.(llm.CacheControlSetter); ok {
+				setter.SetCacheControl(nil)
+			}
+		}
+	}
+	// Set cache control on the last content block of the last message
+	lastMessage := messages[len(messages)-1]
+	if contents := lastMessage.Content; len(contents) > 0 {
+		if setter, ok := contents[len(contents)-1].(llm.CacheControlSetter); ok {
+			setter.SetCacheControl(&llm.CacheControl{Type: llm.CacheControlTypeEphemeral})
+		}
+	}
 }
 
 func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {

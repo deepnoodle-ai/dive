@@ -105,7 +105,7 @@ type ToolResult struct {
 	IsError bool `json:"isError,omitempty"`
 }
 
-// WithDisplay returns a copy of the ToolResult with the Display field set.
+// WithDisplay sets the Display field and returns the receiver for chaining.
 func (r *ToolResult) WithDisplay(display string) *ToolResult {
 	r.Display = display
 	return r

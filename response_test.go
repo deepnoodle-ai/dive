@@ -111,16 +111,9 @@ func TestResponse_ToolCallResults(t *testing.T) {
 	})
 }
 
-func TestTodoStatus(t *testing.T) {
-	assert.Equal(t, TodoStatus("pending"), TodoStatusPending)
-	assert.Equal(t, TodoStatus("in_progress"), TodoStatusInProgress)
-	assert.Equal(t, TodoStatus("completed"), TodoStatusCompleted)
-}
-
 func TestResponseItemType(t *testing.T) {
 	assert.Equal(t, ResponseItemType("message"), ResponseItemTypeMessage)
 	assert.Equal(t, ResponseItemType("tool_call"), ResponseItemTypeToolCall)
 	assert.Equal(t, ResponseItemType("tool_call_result"), ResponseItemTypeToolCallResult)
 	assert.Equal(t, ResponseItemType("model_event"), ResponseItemTypeModelEvent)
-	assert.Equal(t, ResponseItemType("todo"), ResponseItemTypeTodo)
 }

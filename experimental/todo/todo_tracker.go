@@ -14,18 +14,9 @@ import (
 // TodoTracker can be used as an event callback to monitor todo updates during
 // agent execution. It maintains the current state of the todo list and provides
 // methods for displaying progress.
-//
-// Example usage:
-//
-//	tracker := dive.NewTodoTracker()
-//	resp, _ := agent.CreateResponse(ctx,
-//	    dive.WithInput("Build authentication system"),
-//	    dive.Withdive.EventCallback(tracker.HandleEvent),
-//	)
-//	tracker.DisplayProgress(os.Stdout)
 type TodoTracker struct {
 	mu    sync.RWMutex
-	todos []dive.TodoItem
+	todos []TodoItem
 }
 
 // NewTodoTracker creates a new TodoTracker.
@@ -33,33 +24,35 @@ func NewTodoTracker() *TodoTracker {
 	return &TodoTracker{}
 }
 
-// HandleEvent is an dive.EventCallback that tracks todo updates.
-// Use this as the callback passed to Withdive.EventCallback.
+// HandleEvent is a dive.EventCallback that tracks todo updates.
+// Use this as the callback passed to dive.WithEventCallback.
 func (t *TodoTracker) HandleEvent(ctx context.Context, item *dive.ResponseItem) error {
-	if item.Type == dive.ResponseItemTypeTodo && item.Todo != nil {
-		t.mu.Lock()
-		t.todos = make([]dive.TodoItem, len(item.Todo.Todos))
-		copy(t.todos, item.Todo.Todos)
-		t.mu.Unlock()
+	if item.Type == ItemType {
+		if evt, ok := item.Extension.(*TodoEvent); ok && evt != nil {
+			t.mu.Lock()
+			t.todos = make([]TodoItem, len(evt.Todos))
+			copy(t.todos, evt.Todos)
+			t.mu.Unlock()
+		}
 	}
 	return nil
 }
 
 // Todos returns a copy of the current todo list.
-func (t *TodoTracker) Todos() []dive.TodoItem {
+func (t *TodoTracker) Todos() []TodoItem {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	result := make([]dive.TodoItem, len(t.todos))
+	result := make([]TodoItem, len(t.todos))
 	copy(result, t.todos)
 	return result
 }
 
 // CurrentTask returns the currently in-progress task, if any.
-func (t *TodoTracker) CurrentTask() *dive.TodoItem {
+func (t *TodoTracker) CurrentTask() *TodoItem {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	for _, todo := range t.todos {
-		if todo.Status == dive.TodoStatusInProgress {
+		if todo.Status == TodoStatusInProgress {
 			todoCopy := todo
 			return &todoCopy
 		}
@@ -74,9 +67,9 @@ func (t *TodoTracker) Progress() (completed, inProgress, total int) {
 	total = len(t.todos)
 	for _, todo := range t.todos {
 		switch todo.Status {
-		case dive.TodoStatusCompleted:
+		case TodoStatusCompleted:
 			completed++
-		case dive.TodoStatusInProgress:
+		case TodoStatusInProgress:
 			inProgress++
 		}
 	}
@@ -95,9 +88,9 @@ func (t *TodoTracker) DisplayProgress(w io.Writer) {
 	completed, inProgress, total := 0, 0, len(t.todos)
 	for _, todo := range t.todos {
 		switch todo.Status {
-		case dive.TodoStatusCompleted:
+		case TodoStatusCompleted:
 			completed++
-		case dive.TodoStatusInProgress:
+		case TodoStatusInProgress:
 			inProgress++
 		}
 	}
@@ -108,9 +101,9 @@ func (t *TodoTracker) DisplayProgress(w io.Writer) {
 	for i, todo := range t.todos {
 		icon := "❌"
 		text := todo.Content
-		if todo.Status == dive.TodoStatusCompleted {
+		if todo.Status == TodoStatusCompleted {
 			icon = "✅"
-		} else if todo.Status == dive.TodoStatusInProgress {
+		} else if todo.Status == TodoStatusInProgress {
 			icon = "🔧"
 			text = todo.ActiveForm
 		}
@@ -131,9 +124,9 @@ func (t *TodoTracker) FormatProgress() string {
 	var currentTask string
 	for _, todo := range t.todos {
 		switch todo.Status {
-		case dive.TodoStatusCompleted:
+		case TodoStatusCompleted:
 			completed++
-		case dive.TodoStatusInProgress:
+		case TodoStatusInProgress:
 			inProgress++
 			if currentTask == "" {
 				currentTask = todo.ActiveForm
@@ -148,7 +141,7 @@ func (t *TodoTracker) FormatProgress() string {
 	return progress
 }
 
-// ChainCallback returns an dive.EventCallback that calls the tracker's HandleEvent
+// ChainCallback returns a dive.EventCallback that calls the tracker's HandleEvent
 // and then calls the provided callback. This allows chaining multiple handlers.
 func (t *TodoTracker) ChainCallback(next dive.EventCallback) dive.EventCallback {
 	return func(ctx context.Context, item *dive.ResponseItem) error {

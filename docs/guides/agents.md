@@ -156,8 +156,6 @@ response, err := agent.CreateResponse(ctx,
             // Tool result available
         case dive.ResponseItemTypeModelEvent:
             // Streaming event from LLM (for real-time UI)
-        case dive.ResponseItemTypeTodo:
-            // Todo list updated
         }
         return nil
     }),
