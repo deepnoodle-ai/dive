@@ -66,6 +66,13 @@ type Response struct {
 	// messages, tool calls, and tool results.
 	Items []*ResponseItem `json:"items,omitempty"`
 
+	// OutputMessages contains the messages generated during this response.
+	// This includes assistant messages and tool result messages in the order
+	// they were produced. Use these messages to continue a multi-turn
+	// conversation: pass the original input messages plus OutputMessages
+	// plus a new user message on the next call.
+	OutputMessages []*llm.Message `json:"output_messages,omitempty"`
+
 	// Usage contains token usage information
 	Usage *llm.Usage `json:"usage,omitempty"`
 

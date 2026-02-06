@@ -217,6 +217,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	response.FinishedAt = Ptr(time.Now())
 	response.Usage = genResult.Usage
 	response.Items = genResult.Items
+	response.OutputMessages = genResult.OutputMessages
 
 	// Run PostGeneration hooks
 	genState.Response = response
