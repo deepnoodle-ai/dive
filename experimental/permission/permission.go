@@ -12,10 +12,7 @@
 //	        permission.AskRule("Bash", "Execute command?"),
 //	    },
 //	}
-//	confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-//	    return promptUser(msg), nil
-//	}
-//	preToolHook := permission.Hook(config, confirmer)
+//	preToolHook := permission.Hook(config, &dive.AutoApproveDialog{})
 //
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
 //	    Model:      model,
@@ -33,10 +30,6 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 )
-
-// ConfirmFunc is called when user confirmation is needed for a tool call.
-// Returns true if the user approved, false if denied.
-type ConfirmFunc func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, message string) (bool, error)
 
 // Mode determines the global permission behavior.
 type Mode string
@@ -86,18 +79,18 @@ type Config struct {
 type Manager struct {
 	mu             sync.RWMutex
 	config         *Config
-	confirmer      ConfirmFunc
+	dialog         dive.Dialog
 	sessionAllowed map[string]bool
 }
 
 // NewManager creates a new permission manager.
-func NewManager(config *Config, confirmer ConfirmFunc) *Manager {
+func NewManager(config *Config, dialog dive.Dialog) *Manager {
 	if config == nil {
 		config = &Config{Mode: ModeDefault}
 	}
 	return &Manager{
 		config:         config,
-		confirmer:      confirmer,
+		dialog:         dialog,
 		sessionAllowed: make(map[string]bool),
 	}
 }
@@ -310,14 +303,20 @@ func (pm *Manager) confirm(
 	call *llm.ToolUseContent,
 	message string,
 ) error {
-	if pm.confirmer == nil {
-		return nil // no confirmer = auto-allow
+	if pm.dialog == nil {
+		return nil // no dialog = auto-allow
 	}
-	approved, err := pm.confirmer(ctx, tool, call, message)
+	output, err := pm.dialog.Show(ctx, &dive.DialogInput{
+		Confirm: true,
+		Title:   tool.Name(),
+		Message: message,
+		Tool:    tool,
+		Call:    call,
+	})
 	if err != nil {
 		return err
 	}
-	if !approved {
+	if output.Canceled || !output.Confirmed {
 		return fmt.Errorf("user denied tool call")
 	}
 	return nil

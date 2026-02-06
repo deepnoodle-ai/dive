@@ -105,7 +105,7 @@ type ToolResult struct {
 	IsError bool `json:"isError,omitempty"`
 }
 
-// WithDisplay returns a copy of the ToolResult with the Display field set.
+// WithDisplay sets the Display field and returns the receiver for chaining.
 func (r *ToolResult) WithDisplay(display string) *ToolResult {
 	r.Display = display
 	return r
@@ -306,11 +306,16 @@ func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 
 // ToolCallResult is a tool call that has been made. This is used to understand
 // what calls have happened during an LLM interaction.
+//
+// Error and Result.IsError track different failure modes:
+//   - Error is a Go error from tool.Call() — the tool itself crashed or failed unexpectedly.
+//   - Result.IsError is a protocol-level flag — the tool ran but reported a failure to the LLM
+//     (e.g. via NewToolResultError). Both are surfaced to the LLM as an error result.
 type ToolCallResult struct {
 	ID      string
 	Name    string
 	Input   any
 	Preview *ToolCallPreview // Preview generated before execution (if tool implements ToolPreviewer)
-	Result  *ToolResult
-	Error   error
+	Result  *ToolResult      // Protocol-level result sent to the LLM
+	Error   error            // Go error if tool.Call() itself failed
 }

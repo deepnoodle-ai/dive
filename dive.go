@@ -2,9 +2,6 @@ package dive
 
 import (
 	"context"
-	"crypto/rand"
-	"fmt"
-	"math/big"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -61,11 +58,3 @@ func WithEventCallback(callback EventCallback) CreateResponseOption {
 	}
 }
 
-// randomInt returns a random integer as a string
-func randomInt() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1<<62))
-	if err != nil {
-		panic(err)
-	}
-	return fmt.Sprintf("%d", n)
-}

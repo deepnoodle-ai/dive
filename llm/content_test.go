@@ -578,6 +578,70 @@ func TestRedactedThinkingContent(t *testing.T) {
 	})
 }
 
+func TestCloneContent(t *testing.T) {
+	cc := &CacheControl{Type: CacheControlTypeEphemeral}
+
+	t.Run("TextContent", func(t *testing.T) {
+		orig := &TextContent{Text: "hello", CacheControl: cc, Citations: []Citation{&MockCitation{Text: "cite"}}}
+		clone := orig.CloneContent()
+		cloned := clone.(*TextContent)
+		assert.True(t, orig != cloned)
+		assert.Equal(t, "hello", cloned.Text)
+		assert.Nil(t, cloned.CacheControl)
+		assert.Len(t, cloned.Citations, 1)
+	})
+
+	t.Run("RefusalContent", func(t *testing.T) {
+		orig := &RefusalContent{Text: "refused", CacheControl: cc}
+		clone := orig.CloneContent()
+		cloned := clone.(*RefusalContent)
+		assert.True(t, orig != cloned)
+		assert.Equal(t, "refused", cloned.Text)
+		assert.Nil(t, cloned.CacheControl)
+	})
+
+	t.Run("ImageContent", func(t *testing.T) {
+		src := &ContentSource{Type: ContentSourceTypeURL, URL: "https://example.com/img.jpg"}
+		orig := &ImageContent{Source: src, CacheControl: cc}
+		clone := orig.CloneContent()
+		cloned := clone.(*ImageContent)
+		assert.True(t, orig != cloned)
+		assert.Equal(t, src, cloned.Source)
+		assert.Nil(t, cloned.CacheControl)
+	})
+
+	t.Run("DocumentContent", func(t *testing.T) {
+		src := &ContentSource{Type: ContentSourceTypeBase64, Data: "abc"}
+		orig := &DocumentContent{Source: src, Title: "doc", CacheControl: cc}
+		clone := orig.CloneContent()
+		cloned := clone.(*DocumentContent)
+		assert.True(t, orig != cloned)
+		assert.Equal(t, "doc", cloned.Title)
+		assert.Equal(t, src, cloned.Source)
+		assert.Nil(t, cloned.CacheControl)
+	})
+
+	t.Run("ToolResultContent", func(t *testing.T) {
+		orig := &ToolResultContent{ToolUseID: "id1", Content: "result", IsError: true, CacheControl: cc}
+		clone := orig.CloneContent()
+		cloned := clone.(*ToolResultContent)
+		assert.True(t, orig != cloned)
+		assert.Equal(t, "id1", cloned.ToolUseID)
+		assert.Equal(t, "result", cloned.Content)
+		assert.True(t, cloned.IsError)
+		assert.Nil(t, cloned.CacheControl)
+	})
+
+	t.Run("SummaryContent", func(t *testing.T) {
+		orig := &SummaryContent{Summary: "summary text", CacheControl: cc}
+		clone := orig.CloneContent()
+		cloned := clone.(*SummaryContent)
+		assert.True(t, orig != cloned)
+		assert.Equal(t, "summary text", cloned.Summary)
+		assert.Nil(t, cloned.CacheControl)
+	})
+}
+
 // MockCitation implements the Citation interface for testing
 type MockCitation struct {
 	Text string `json:"cited_text"`

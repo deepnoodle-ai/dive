@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/experimental/todo"
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
@@ -15,19 +16,17 @@ var (
 	_ dive.TypedToolPreviewer[*TodoWriteInput] = &TodoWriteTool{}
 )
 
-// Type aliases for compatibility - the canonical types are in the dive package
+// Type aliases — canonical types are in experimental/todo
 type (
-	// TodoStatus is an alias for dive.TodoStatus
-	TodoStatus = dive.TodoStatus
-	// TodoItem is an alias for dive.TodoItem
-	TodoItem = dive.TodoItem
+	TodoStatus = todo.TodoStatus
+	TodoItem   = todo.TodoItem
 )
 
 // Status constants for convenience
 const (
-	TodoStatusPending    = dive.TodoStatusPending
-	TodoStatusInProgress = dive.TodoStatusInProgress
-	TodoStatusCompleted  = dive.TodoStatusCompleted
+	TodoStatusPending    = todo.TodoStatusPending
+	TodoStatusInProgress = todo.TodoStatusInProgress
+	TodoStatusCompleted  = todo.TodoStatusCompleted
 )
 
 // TodoWriteInput is the input for the TodoWrite tool

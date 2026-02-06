@@ -63,7 +63,7 @@ rules := permission.Rules{
 }
 ```
 
-Ask rules call the `ConfirmFunc` to prompt the user. If no confirmer is set, ask rules auto-allow.
+Ask rules call the `dive.Dialog` to prompt the user. If no dialog is set, ask rules auto-allow.
 
 ### Using as a Hook
 
@@ -72,17 +72,11 @@ config := &permission.Config{
     Mode: permission.ModeDefault,
     Rules: rules,
 }
-confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-    fmt.Printf("Allow %s? (y/n): ", tool.Name())
-    var answer string
-    fmt.Scanln(&answer)
-    return answer == "y", nil
-}
 
 agent, _ := dive.NewAgent(dive.AgentOptions{
     Model:      model,
     Tools:      tools,
-    PreToolUse: []dive.PreToolUseHook{permission.Hook(config, confirmer)},
+    PreToolUse: []dive.PreToolUseHook{permission.Hook(config, &dive.AutoApproveDialog{})},
 })
 ```
 
@@ -99,7 +93,7 @@ Session Allowlist -> Deny Rules -> Allow Rules -> Ask Rules -> Mode Check -> Def
 Users can approve "allow all X this session" for a tool category:
 
 ```go
-manager := permission.NewManager(config, confirmer)
+manager := permission.NewManager(config, dialog)
 hook := permission.HookFromManager(manager)
 
 // Later, allow a category for the session

@@ -132,9 +132,7 @@ func (m *Message) Copy() *Message {
 	if err := json.Unmarshal(data, &messageCopy); err != nil {
 		// Fall back to shallow copy if unmarshaling fails
 		contentCopy := make([]Content, len(m.Content))
-		for i, c := range m.Content {
-			contentCopy[i] = c
-		}
+		copy(contentCopy, m.Content)
 		return &Message{
 			ID:      m.ID,
 			Role:    m.Role,

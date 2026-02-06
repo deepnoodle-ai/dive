@@ -22,13 +22,9 @@ import (
 //	    },
 //	}
 //
-//	confirmer := func(ctx context.Context, tool dive.Tool, call *llm.ToolUseContent, msg string) (bool, error) {
-//	    return promptUser(msg), nil
-//	}
-//
-//	preToolHook := permission.Hook(config, confirmer)
-func Hook(config *Config, confirmer ConfirmFunc) dive.PreToolUseHook {
-	manager := NewManager(config, confirmer)
+//	preToolHook := permission.Hook(config, &dive.AutoApproveDialog{})
+func Hook(config *Config, dialog dive.Dialog) dive.PreToolUseHook {
+	manager := NewManager(config, dialog)
 	return HookFromManager(manager)
 }
 
@@ -39,7 +35,7 @@ func Hook(config *Config, confirmer ConfirmFunc) dive.PreToolUseHook {
 //
 // Example:
 //
-//	manager := permission.NewManager(config, confirmer)
+//	manager := permission.NewManager(config, dialog)
 //	preToolHook := permission.HookFromManager(manager)
 //
 //	// Later, allow a category for the session

@@ -8,14 +8,14 @@ import (
 )
 
 func getSessionID(state *dive.GenerationState) string {
-	if v, ok := state.Values["session_id"].(string); ok {
+	if v, ok := state.Values[dive.StateKeySessionID].(string); ok {
 		return v
 	}
 	return ""
 }
 
 func getUserID(state *dive.GenerationState) string {
-	if v, ok := state.Values["user_id"].(string); ok {
+	if v, ok := state.Values[dive.StateKeyUserID].(string); ok {
 		return v
 	}
 	return ""
@@ -40,7 +40,7 @@ func getUserID(state *dive.GenerationState) string {
 //	})
 //
 //	// Conversations are tracked by session ID set in Values
-//	//	state.Values["session_id"] = "my-session"
+//	//	state.Values[dive.StateKeySessionID] = "my-session"
 //	resp1, _ := agent.CreateResponse(ctx, dive.WithInput("Hello"))
 //	resp2, _ := agent.CreateResponse(ctx, dive.WithInput("Tell me more"))
 func Hooks(repo Repository) (dive.PreGenerationHook, dive.PostGenerationHook) {
@@ -49,11 +49,11 @@ func Hooks(repo Repository) (dive.PreGenerationHook, dive.PostGenerationHook) {
 
 // Loader returns a PreGenerationHook that loads session history from the repository.
 //
-// If a session exists with the given session ID (from state.Values["session_id"]),
+// If a session exists with the given session ID (from state.Values[dive.StateKeySessionID]),
 // its messages are prepended to state.Messages. If the session doesn't exist,
 // the hook does nothing.
 //
-// This hook stores the loaded session in state.Values["session"] for use
+// This hook stores the loaded session in state.Values[dive.StateKeySession] for use
 // by the Saver hook.
 func Loader(repo Repository) dive.PreGenerationHook {
 	return func(ctx context.Context, state *dive.GenerationState) error {
@@ -75,7 +75,7 @@ func Loader(repo Repository) dive.PreGenerationHook {
 		if state.Values == nil {
 			state.Values = map[string]any{}
 		}
-		state.Values["session"] = session
+		state.Values[dive.StateKeySession] = session
 
 		// Prepend existing messages to the new messages
 		if len(session.Messages) > 0 {
@@ -88,7 +88,7 @@ func Loader(repo Repository) dive.PreGenerationHook {
 
 // Saver returns a PostGenerationHook that saves the session to the repository.
 //
-// If a session was loaded by the Loader hook (stored in state.Values["session"]),
+// If a session was loaded by the Loader hook (stored in state.Values[dive.StateKeySession]),
 // it updates that session. Otherwise, it creates a new session.
 //
 // The session includes all messages (history + new input + output messages).
@@ -101,7 +101,7 @@ func Saver(repo Repository) dive.PostGenerationHook {
 
 		// Get or create session
 		var session *Session
-		if existing, ok := state.Values["session"].(*Session); ok {
+		if existing, ok := state.Values[dive.StateKeySession].(*Session); ok {
 			session = existing
 		} else {
 			session = &Session{
@@ -148,7 +148,7 @@ func (o LoaderWithOptions) Build() dive.PreGenerationHook {
 		if state.Values == nil {
 			state.Values = map[string]any{}
 		}
-		state.Values["session"] = session
+		state.Values[dive.StateKeySession] = session
 
 		if len(session.Messages) > 0 {
 			state.Messages = append(session.Messages, state.Messages...)
@@ -187,7 +187,7 @@ func (o SaverWithOptions) Build() dive.PostGenerationHook {
 		}
 
 		var session *Session
-		if existing, ok := state.Values["session"].(*Session); ok {
+		if existing, ok := state.Values[dive.StateKeySession].(*Session); ok {
 			session = existing
 		} else {
 			session = &Session{

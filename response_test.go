@@ -1,6 +1,7 @@
 package dive
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -111,10 +112,20 @@ func TestResponse_ToolCallResults(t *testing.T) {
 	})
 }
 
-func TestTodoStatus(t *testing.T) {
-	assert.Equal(t, TodoStatus("pending"), TodoStatusPending)
-	assert.Equal(t, TodoStatus("in_progress"), TodoStatusInProgress)
-	assert.Equal(t, TodoStatus("completed"), TodoStatusCompleted)
+func TestResponse_NoIDField(t *testing.T) {
+	resp := &Response{
+		Model: "test-model",
+	}
+	data, err := json.Marshal(resp)
+	assert.NoError(t, err)
+
+	var m map[string]any
+	err = json.Unmarshal(data, &m)
+	assert.NoError(t, err)
+
+	_, hasID := m["id"]
+	assert.False(t, hasID, "Response JSON should not contain an 'id' field")
+	assert.Equal(t, "test-model", m["model"])
 }
 
 func TestResponseItemType(t *testing.T) {
@@ -122,5 +133,4 @@ func TestResponseItemType(t *testing.T) {
 	assert.Equal(t, ResponseItemType("tool_call"), ResponseItemTypeToolCall)
 	assert.Equal(t, ResponseItemType("tool_call_result"), ResponseItemTypeToolCallResult)
 	assert.Equal(t, ResponseItemType("model_event"), ResponseItemTypeModelEvent)
-	assert.Equal(t, ResponseItemType("todo"), ResponseItemTypeTodo)
 }

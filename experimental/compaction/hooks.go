@@ -12,7 +12,7 @@ import (
 // exceeds the given threshold.
 //
 // This hook uses the CompactMessages function to generate summaries. The
-// compaction event is stored in state.Values["compaction_event"] for access
+// compaction event is stored in state.Values[dive.StateKeyCompactionEvent] for access
 // by PostGeneration hooks.
 //
 // Parameters:
@@ -50,7 +50,7 @@ func HookWithModel(model llm.LLM, tokenThreshold int, systemPrompt string) dive.
 		}
 
 		state.Messages = compacted
-		state.Values["compaction_event"] = event
+		state.Values[dive.StateKeyCompactionEvent] = event
 		return nil
 	}
 }

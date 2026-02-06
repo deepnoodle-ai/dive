@@ -4,47 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
-var (
-	defaultResponseTimeout    = time.Minute * 30
+const (
+	defaultResponseTimeout    = 30 * time.Minute
 	defaultToolIterationLimit = 100
-	ErrSessionsAreNotEnabled  = errors.New("sessions are not enabled")
-	ErrLLMNoResponse          = errors.New("llm did not return a response")
-	ErrNoInstructions         = errors.New("no instructions provided")
-	ErrNoLLM                  = errors.New("no llm provided")
 )
 
-// SetDefaultResponseTimeout sets the default response timeout for agents.
-func SetDefaultResponseTimeout(timeout time.Duration) {
-	defaultResponseTimeout = timeout
-}
-
-// SetDefaultToolIterationLimit sets the default tool iteration limit for agents.
-func SetDefaultToolIterationLimit(limit int) {
-	defaultToolIterationLimit = limit
-}
-
-// ModelSettings are used to configure details of the LLM for an Agent.
-type ModelSettings struct {
-	Temperature       *float64
-	PresencePenalty   *float64
-	FrequencyPenalty  *float64
-	ParallelToolCalls *bool
-	Caching           *bool
-	MaxTokens         *int
-	ReasoningBudget   *int
-	ReasoningEffort   llm.ReasoningEffort
-	ToolChoice        *llm.ToolChoice
-	Features          []string
-	RequestHeaders    http.Header
-	MCPServers        []llm.MCPServerConfig
-}
+var (
+	ErrLLMNoResponse = errors.New("llm did not return a response")
+	ErrNoLLM         = errors.New("no llm provided")
+)
 
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
@@ -81,7 +56,11 @@ type AgentOptions struct {
 	// Infrastructure
 	Logger        llm.Logger
 	ModelSettings *ModelSettings
-	Hooks         llm.Hooks // LLM-level hooks
+
+	// LLMHooks are provider-level hooks passed to the LLM on each generation.
+	// These are distinct from agent-level hooks (PreGeneration, PostGeneration,
+	// PreToolUse, PostToolUse) which control the agent's generation loop.
+	LLMHooks llm.Hooks
 
 	// Optional name for logging
 	Name string
@@ -99,7 +78,7 @@ type Agent struct {
 	tools              []Tool
 	toolsByName        map[string]Tool
 	responseTimeout    time.Duration
-	hooks              llm.Hooks
+	llmHooks           llm.Hooks
 	logger             llm.Logger
 	toolIterationLimit int
 	modelSettings      *ModelSettings
@@ -133,7 +112,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		model:              opts.Model,
 		responseTimeout:    opts.ResponseTimeout,
 		toolIterationLimit: opts.ToolIterationLimit,
-		hooks:              opts.Hooks,
+		llmHooks:           opts.LLMHooks,
 		logger:             opts.Logger,
 		systemPrompt:       opts.SystemPrompt,
 		modelSettings:      opts.ModelSettings,
@@ -150,7 +129,11 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	if len(tools) > 0 {
 		agent.toolsByName = make(map[string]Tool, len(tools))
 		for _, tool := range tools {
-			agent.toolsByName[tool.Name()] = tool
+			name := tool.Name()
+			if _, exists := agent.toolsByName[name]; exists {
+				return nil, fmt.Errorf("duplicate tool name: %q", name)
+			}
+			agent.toolsByName[name] = tool
 		}
 	}
 	return agent, nil
@@ -164,9 +147,9 @@ func (a *Agent) HasTools() bool {
 	return len(a.tools) > 0
 }
 
-// Tools returns the agent's tools.
+// Tools returns a copy of the agent's tools.
 func (a *Agent) Tools() []Tool {
-	return a.tools
+	return slices.Clone(a.tools)
 }
 
 // Model returns the agent's LLM.
@@ -186,7 +169,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	systemPrompt := a.buildSystemPrompt()
+	systemPrompt := strings.TrimSpace(a.systemPrompt)
 
 	// Initialize generation state for hooks
 	genState := NewGenerationState()
@@ -214,7 +197,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 
 	response := &Response{
-		ID:        randomInt(),
 		Model:     a.model.Name(),
 		CreatedAt: time.Now(),
 	}
@@ -234,13 +216,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	response.FinishedAt = Ptr(time.Now())
 	response.Usage = genResult.Usage
-
-	for _, msg := range genResult.OutputMessages {
-		response.Items = append(response.Items, &ResponseItem{
-			Type:    ResponseItemTypeMessage,
-			Message: msg,
-		})
-	}
+	response.Items = genResult.Items
 
 	// Run PostGeneration hooks
 	genState.Response = response
@@ -268,19 +244,10 @@ func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 	return options.Messages
 }
 
-func (a *Agent) buildSystemPrompt() string {
-	return strings.TrimSpace(a.systemPrompt)
-}
-
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(
-	ctx context.Context,
-	messages []*llm.Message,
-	systemPrompt string,
-	callback EventCallback,
-) (*generateResult, error) {
+func (a *Agent) generate(ctx context.Context, messages []*llm.Message, systemPrompt string, callback EventCallback) (*generateResult, error) {
 
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
@@ -288,6 +255,15 @@ func (a *Agent) generate(
 
 	// New messages that are the output
 	var outputMessages []*llm.Message
+
+	// All response items in chronological order
+	var items []*ResponseItem
+
+	// Wrap callback to collect all items
+	collectingCallback := func(ctx context.Context, item *ResponseItem) error {
+		items = append(items, item)
+		return callback(ctx, item)
+	}
 
 	// Accumulates usage across multiple LLM calls
 	totalUsage := &llm.Usage{}
@@ -297,26 +273,27 @@ func (a *Agent) generate(
 		outputMessages = append(outputMessages, msg)
 	}
 
-	// AgentOptions passed to the LLM
-	generateOpts := a.getGenerationAgentOptions(systemPrompt)
+	// Base options passed to the LLM (built once, never mutated)
+	baseOpts := a.getGenerationAgentOptions(systemPrompt)
 
 	// The loop is used to run and respond to the primary generation request
 	// and then automatically run any tool-use invocations. The first time
 	// through, we submit the primary generation. On subsequent loops, we are
 	// running tool-uses and responding with the results.
 	generationLimit := a.toolIterationLimit + 1
+	lastIteration := false
 	for i := range generationLimit {
-		// Add cache control flag to messages if appropriate
-		a.configureCacheControl(updatedMessages)
-
-		// Generate a response in either streaming or non-streaming mode
-		generateOpts = append(generateOpts, llm.WithMessages(updatedMessages...))
+		// Build per-iteration options from base options + current messages
+		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
+		if lastIteration {
+			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
+		}
 		var err error
 		var response *llm.Response
 		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
-			response, err = a.generateStreaming(ctx, streamingLLM, generateOpts, callback)
+			response, err = a.generateStreaming(ctx, streamingLLM, iterOpts, collectingCallback)
 		} else {
-			response, err = a.model.Generate(ctx, generateOpts...)
+			response, err = a.model.Generate(ctx, iterOpts...)
 		}
 		if err == nil && response == nil {
 			// This indicates a bug in the LLM provider implementation
@@ -344,7 +321,7 @@ func (a *Agent) generate(
 		totalUsage.Add(&response.Usage)
 
 		// Always call callback for every LLM-generated message
-		if err := callback(ctx, &ResponseItem{
+		if err := collectingCallback(ctx, &ResponseItem{
 			Type:    ResponseItemTypeMessage,
 			Message: assistantMsg,
 			Usage:   response.Usage.Copy(),
@@ -359,7 +336,7 @@ func (a *Agent) generate(
 		}
 
 		// Execute all requested tool calls
-		toolResults, err := a.executeToolCalls(ctx, toolCalls, callback)
+		toolResults, err := a.executeToolCalls(ctx, toolCalls, collectingCallback)
 		if err != nil {
 			return nil, err
 		}
@@ -371,49 +348,19 @@ func (a *Agent) generate(
 		// Add instructions to the message to not use any more tools if we have
 		// only one generation left
 		if i == generationLimit-2 {
-			generateOpts = append(generateOpts, llm.WithToolChoice(llm.ToolChoiceNone))
+			lastIteration = true
 			toolResultMessage.Content = append(toolResultMessage.Content, &llm.TextContent{
 				Text: "Your tool calls are complete. You must respond with a final answer now.",
 			})
-			a.logger.Debug("set tool choice to none",
-				"agent", a.name,
-				"generation_number", i+1,
-			)
+			a.logger.Debug("set tool choice to none", "agent", a.name, "generation_number", i+1)
 		}
 	}
 
 	return &generateResult{
 		OutputMessages: outputMessages,
+		Items:          items,
 		Usage:          totalUsage,
 	}, nil
-}
-
-func (a *Agent) isCachingEnabled() bool {
-	if a.modelSettings == nil || a.modelSettings.Caching == nil {
-		return true // default to caching enabled
-	}
-	return *a.modelSettings.Caching
-}
-
-func (a *Agent) configureCacheControl(messages []*llm.Message) {
-	if !a.isCachingEnabled() || len(messages) == 0 {
-		return
-	}
-	// Clear cache control from all messages
-	for _, message := range messages {
-		for _, content := range message.Content {
-			if setter, ok := content.(llm.CacheControlSetter); ok {
-				setter.SetCacheControl(nil)
-			}
-		}
-	}
-	// Add cache control to the last message
-	lastMessage := messages[len(messages)-1]
-	if contents := lastMessage.Content; len(contents) > 0 {
-		if setter, ok := contents[len(contents)-1].(llm.CacheControlSetter); ok {
-			setter.SetCacheControl(&llm.CacheControl{Type: llm.CacheControlTypeEphemeral})
-		}
-	}
 }
 
 // generateStreaming handles streaming generation with an LLM, including
@@ -573,6 +520,9 @@ func (a *Agent) executeTool(
 			Error: err,
 		}
 	}
+	if output == nil {
+		output = &ToolResult{Content: []*ToolResultContent{}}
+	}
 	return &ToolCallResult{
 		ID:      call.ID,
 		Name:    call.Name,
@@ -583,11 +533,7 @@ func (a *Agent) executeTool(
 }
 
 // createDeniedResult creates a tool result for a denied tool call.
-func (a *Agent) createDeniedResult(
-	call *llm.ToolUseContent,
-	message string,
-	preview *ToolCallPreview,
-) *ToolCallResult {
+func (a *Agent) createDeniedResult(call *llm.ToolUseContent, message string, preview *ToolCallPreview) *ToolCallResult {
 	return &ToolCallResult{
 		ID:      call.ID,
 		Name:    call.Name,
@@ -621,52 +567,18 @@ func (a *Agent) getGenerationAgentOptions(systemPrompt string) []llm.Option {
 	if len(a.tools) > 0 {
 		generateOpts = append(generateOpts, llm.WithTools(a.getToolDefinitions()...))
 	}
-	if a.hooks != nil {
-		generateOpts = append(generateOpts, llm.WithHooks(a.hooks))
+	if a.llmHooks != nil {
+		generateOpts = append(generateOpts, llm.WithHooks(a.llmHooks))
 	}
 	if a.logger != nil {
 		generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 	}
-	if a.modelSettings != nil {
-		settings := a.modelSettings
-		if settings.Temperature != nil {
-			generateOpts = append(generateOpts, llm.WithTemperature(*settings.Temperature))
-		}
-		if settings.PresencePenalty != nil {
-			generateOpts = append(generateOpts, llm.WithPresencePenalty(*settings.PresencePenalty))
-		}
-		if settings.FrequencyPenalty != nil {
-			generateOpts = append(generateOpts, llm.WithFrequencyPenalty(*settings.FrequencyPenalty))
-		}
-		if settings.ReasoningBudget != nil {
-			generateOpts = append(generateOpts, llm.WithReasoningBudget(*settings.ReasoningBudget))
-		}
-		if settings.ReasoningEffort != "" {
-			generateOpts = append(generateOpts, llm.WithReasoningEffort(settings.ReasoningEffort))
-		}
-		if settings.MaxTokens != nil {
-			generateOpts = append(generateOpts, llm.WithMaxTokens(*settings.MaxTokens))
-		}
-		if settings.ToolChoice != nil {
-			generateOpts = append(generateOpts, llm.WithToolChoice(settings.ToolChoice))
-		}
-		if settings.ParallelToolCalls != nil {
-			generateOpts = append(generateOpts, llm.WithParallelToolCalls(*settings.ParallelToolCalls))
-		}
-		if len(settings.Features) > 0 {
-			generateOpts = append(generateOpts, llm.WithFeatures(settings.Features...))
-		}
-		if len(settings.RequestHeaders) > 0 {
-			generateOpts = append(generateOpts, llm.WithRequestHeaders(settings.RequestHeaders))
-		}
-		if len(settings.MCPServers) > 0 {
-			generateOpts = append(generateOpts, llm.WithMCPServers(settings.MCPServers...))
-		}
-	}
+	generateOpts = append(generateOpts, a.modelSettings.Options()...)
 	return generateOpts
 }
 
 type generateResult struct {
 	OutputMessages []*llm.Message
+	Items          []*ResponseItem
 	Usage          *llm.Usage
 }

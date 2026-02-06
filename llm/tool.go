@@ -4,13 +4,6 @@ import (
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
-// ToolResult contains the result of a tool call
-type ToolResult struct {
-	ToolUseID string `json:"tool_use_id"`
-	Output    string `json:"output,omitempty"`
-	Error     error  `json:"error,omitempty"`
-}
-
 // ToolChoiceType is used to guide the LLM's choice of which tool to use.
 type ToolChoiceType string
 
