@@ -116,6 +116,13 @@ type CacheControlSetter interface {
 	SetCacheControl(cacheControl *CacheControl)
 }
 
+// ContentCloner is an interface for content blocks that can produce a shallow
+// copy with CacheControl cleared. This is used by provider convertMessages
+// functions to avoid mutating the caller's content when applying cache control.
+type ContentCloner interface {
+	CloneContent() Content
+}
+
 // TextContent is a text content block, optionally with citations.
 
 /* Examples:
@@ -199,6 +206,12 @@ func (c *TextContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
+func (c *TextContent) CloneContent() Content {
+	cp := *c
+	cp.CacheControl = nil
+	return &cp
+}
+
 // RefusalContent represents the model refusing to fulfill a request.
 
 // RefusalContent represents a refusal response from the model.
@@ -224,6 +237,12 @@ func (c *RefusalContent) MarshalJSON() ([]byte, error) {
 
 func (c *RefusalContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
+}
+
+func (c *RefusalContent) CloneContent() Content {
+	cp := *c
+	cp.CacheControl = nil
+	return &cp
 }
 
 // ImageContent carries an image in a message, either base64-encoded, via URL, or file ID.
@@ -277,6 +296,12 @@ func (c *ImageContent) MarshalJSON() ([]byte, error) {
 
 func (c *ImageContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
+}
+
+func (c *ImageContent) CloneContent() Content {
+	cp := *c
+	cp.CacheControl = nil
+	return &cp
 }
 
 // Image returns the image content as an image.Image.
@@ -377,6 +402,12 @@ func (c *DocumentContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
 }
 
+func (c *DocumentContent) CloneContent() Content {
+	cp := *c
+	cp.CacheControl = nil
+	return &cp
+}
+
 // ToolUseContent represents an LLM requesting a tool call.
 
 /* Examples:
@@ -467,6 +498,12 @@ func (c *ToolResultContent) MarshalJSON() ([]byte, error) {
 
 func (c *ToolResultContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
+}
+
+func (c *ToolResultContent) CloneContent() Content {
+	cp := *c
+	cp.CacheControl = nil
+	return &cp
 }
 
 // ServerToolUseContent represents a server-side tool call made by the LLM provider.
@@ -1103,6 +1140,12 @@ func (c *SummaryContent) MarshalJSON() ([]byte, error) {
 
 func (c *SummaryContent) SetCacheControl(cacheControl *CacheControl) {
 	c.CacheControl = cacheControl
+}
+
+func (c *SummaryContent) CloneContent() Content {
+	cp := *c
+	cp.CacheControl = nil
+	return &cp
 }
 
 //// Unmarshalling /////////////////////////////////////////////////////////////

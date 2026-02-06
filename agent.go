@@ -521,7 +521,7 @@ func (a *Agent) executeTool(
 		}
 	}
 	if output == nil {
-		output = &ToolResult{}
+		output = &ToolResult{Content: []*ToolResultContent{}}
 	}
 	return &ToolCallResult{
 		ID:      call.ID,

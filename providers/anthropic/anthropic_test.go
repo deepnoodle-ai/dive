@@ -280,3 +280,26 @@ func TestDocumentContentHandling(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyCacheControlDoesNotMutateOriginal(t *testing.T) {
+	// Build an original message with TextContent that has no CacheControl
+	original := &llm.TextContent{Text: "hello"}
+	messages := []*llm.Message{
+		{Role: llm.User, Content: []llm.Content{original}},
+	}
+
+	// convertMessages should clone content, so applyCacheControl won't touch the original
+	converted, err := convertMessages(messages)
+	assert.NoError(t, err)
+
+	config := &llm.Config{}
+	applyCacheControl(converted, config)
+
+	// The converted message's content should have cache control set
+	setter, ok := converted[0].Content[0].(llm.CacheControlSetter)
+	assert.True(t, ok)
+	_ = setter // applyCacheControl sets it on the last content of the last message
+
+	// The original content must NOT have been mutated
+	assert.Nil(t, original.CacheControl)
+}

@@ -274,11 +274,15 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 					}
 					copiedContent = append(copiedContent, docContent)
 				} else {
-					// Pass through other DocumentContent as-is
-					copiedContent = append(copiedContent, content)
+					// Clone to avoid mutating caller's content during applyCacheControl
+					copiedContent = append(copiedContent, c.CloneContent())
 				}
 			default:
-				copiedContent = append(copiedContent, content)
+				if cloner, ok := content.(llm.ContentCloner); ok {
+					copiedContent = append(copiedContent, cloner.CloneContent())
+				} else {
+					copiedContent = append(copiedContent, content)
+				}
 			}
 		}
 		copied[i] = &llm.Message{
