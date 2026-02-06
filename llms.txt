@@ -66,6 +66,12 @@ agent.CreateResponse(ctx,
             }
         case dive.ResponseItemTypeToolCall:
             fmt.Printf("Tool: %s\n", item.ToolCall.Name)
+        case dive.ResponseItemTypeToolCallResult:
+            if item.ToolCallResult.Result != nil {
+                for _, c := range item.ToolCallResult.Result.Content {
+                    fmt.Printf("Result: %s\n", c.Text)
+                }
+            }
         }
         return nil
     }),
@@ -88,8 +94,13 @@ fmt.Println(response.Message().Text())
 
 ## Custom tool
 
+Tool structs can hold dependencies — DB clients, API clients, config — and
+use them in Call. This is how you integrate tools with external systems.
+
 ```go
-type WeatherTool struct{}
+type WeatherTool struct{
+    DB *sql.DB // any dependency: DB handle, API client, config, etc.
+}
 type WeatherInput struct {
     City string `json:"city"`
 }
@@ -108,10 +119,15 @@ func (t *WeatherTool) Schema() *dive.Schema {
     }
 }
 func (t *WeatherTool) Call(ctx context.Context, input WeatherInput) (*dive.ToolResult, error) {
-    return dive.NewToolResultText(fmt.Sprintf("72°F in %s", input.City)), nil
+    var temp float64
+    err := t.DB.QueryRowContext(ctx, "SELECT temp FROM weather WHERE city = ?", input.City).Scan(&temp)
+    if err != nil {
+        return dive.NewToolResultError(fmt.Sprintf("city not found: %s", input.City)), nil
+    }
+    return dive.NewToolResultText(fmt.Sprintf("%.1f°F in %s", temp, input.City)), nil
 }
 
-// Register: dive.ToolAdapter(&WeatherTool{})
+// Register: dive.ToolAdapter(&WeatherTool{DB: db})
 ```
 
 ## Hooks
@@ -150,6 +166,7 @@ Hook flow: PreGeneration -> [LLM -> PreToolUse -> Execute -> PostToolUse]* -> Po
 - `dive.TypedTool[T]` - generic tool with typed input; wrap with `dive.ToolAdapter()`
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
 - `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
+- `dive.ToolCallResult` - completed tool call; fields: ID (string), Name (string), Input (any), Result (*ToolResult), Error (error)
 - `dive.ToolResult` - tool output; create with NewToolResultText() or NewToolResultError()
 - `llm.LLM` - interface: Name, Generate
 - `llm.StreamingLLM` - extends LLM with Stream()
