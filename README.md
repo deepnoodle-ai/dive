@@ -136,19 +136,36 @@ go get github.com/deepnoodle-ai/dive/providers/google
 Core tools in `toolkit/`: Read, Write, Edit, Glob, Grep, ListDirectory,
 TextEditor, Bash, WebFetch, WebSearch, AskUserQuestion.
 
-Create custom tools by implementing `Tool`:
+Create custom tools by implementing `TypedTool[T]`. Tool structs can hold
+dependencies — DB clients, API clients, config — and use them in `Call`.
+This is how you integrate tools with external systems:
 
 ```go
-type Tool interface {
-    Name() string
-    Description() string
-    Schema() *dive.Schema
-    Annotations() *dive.ToolAnnotations
-    Call(ctx context.Context, input any) (*dive.ToolResult, error)
+type OrderTool struct {
+    DB *sql.DB
 }
+
+type OrderInput struct {
+    OrderID string `json:"order_id"`
+}
+
+func (t *OrderTool) Name() string                         { return "get_order" }
+func (t *OrderTool) Description() string                  { return "Look up an order by ID" }
+func (t *OrderTool) Schema() *dive.Schema                 { /* ... */ }
+func (t *OrderTool) Annotations() *dive.ToolAnnotations   { return nil }
+func (t *OrderTool) Call(ctx context.Context, input OrderInput) (*dive.ToolResult, error) {
+    var status string
+    err := t.DB.QueryRowContext(ctx, "SELECT status FROM orders WHERE id = ?", input.OrderID).Scan(&status)
+    if err != nil {
+        return dive.NewToolResultError("order not found"), nil
+    }
+    return dive.NewToolResultText(status), nil
+}
+
+// Register: dive.ToolAdapter(&OrderTool{DB: db})
 ```
 
-Use `TypedToolAdapter` for automatic JSON unmarshaling of input to your struct.
+See the [Custom Tools Guide](./docs/guides/custom-tools.md) for the full interface and more examples.
 
 ### Hooks
 

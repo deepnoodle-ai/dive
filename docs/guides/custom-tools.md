@@ -19,73 +19,82 @@ type TypedTool[T any] interface {
 
 The type parameter `T` is the tool's input type. Dive automatically deserializes JSON from the LLM into `T`.
 
-## Example: Calculator Tool
+## Example: Lookup Tool
+
+Tool structs can hold fields — DB clients, API clients, config — and use them in `Call`. This is the primary way to integrate tools with external systems.
 
 ```go
 package main
 
 import (
     "context"
+    "database/sql"
     "fmt"
 
     "github.com/deepnoodle-ai/dive"
 )
 
-type CalculatorTool struct{}
-
-type CalculatorInput struct {
-    Expression string `json:"expression" description:"Mathematical expression to evaluate"`
+type LookupTool struct {
+    DB *sql.DB
 }
 
-func (t *CalculatorTool) Name() string        { return "calculator" }
-func (t *CalculatorTool) Description() string { return "Evaluate mathematical expressions" }
+type LookupInput struct {
+    Name string `json:"name"`
+}
 
-func (t *CalculatorTool) Schema() *dive.Schema {
+func (t *LookupTool) Name() string        { return "lookup_employee" }
+func (t *LookupTool) Description() string { return "Look up an employee by name" }
+
+func (t *LookupTool) Schema() *dive.Schema {
     return &dive.Schema{
         Type:     "object",
-        Required: []string{"expression"},
+        Required: []string{"name"},
         Properties: map[string]*dive.SchemaProperty{
-            "expression": {
+            "name": {
                 Type:        "string",
-                Description: "Mathematical expression to evaluate",
+                Description: "Employee name to look up",
             },
         },
     }
 }
 
-func (t *CalculatorTool) Annotations() *dive.ToolAnnotations {
+func (t *LookupTool) Annotations() *dive.ToolAnnotations {
     return &dive.ToolAnnotations{
-        Title:          "Calculator",
-        ReadOnlyHint:   true,
-        IdempotentHint: true,
+        Title:        "Employee Lookup",
+        ReadOnlyHint: true,
     }
 }
 
-func (t *CalculatorTool) Call(ctx context.Context, input CalculatorInput) (*dive.ToolResult, error) {
-    result, err := evaluateExpression(input.Expression)
+func (t *LookupTool) Call(ctx context.Context, input LookupInput) (*dive.ToolResult, error) {
+    var role string
+    err := t.DB.QueryRowContext(ctx,
+        "SELECT role FROM employees WHERE name = ?", input.Name,
+    ).Scan(&role)
     if err != nil {
-        return nil, fmt.Errorf("calculation failed: %w", err)
+        return dive.NewToolResultError(fmt.Sprintf("employee not found: %s", input.Name)), nil
     }
-    return dive.NewToolResultText(fmt.Sprintf("Result: %f", result)), nil
+    return dive.NewToolResultText(fmt.Sprintf("%s is a %s", input.Name, role)), nil
 }
 ```
 
 ## Registering with an Agent
 
-Wrap with `dive.ToolAdapter` and pass to `AgentOptions.Tools`:
+Wrap with `dive.ToolAdapter` and pass to `AgentOptions.Tools`. Inject dependencies when constructing the tool:
 
 ```go
 agent, err := dive.NewAgent(dive.AgentOptions{
-    Name:         "Math Assistant",
-    SystemPrompt: "You are a math assistant.",
+    Name:         "HR Assistant",
+    SystemPrompt: "You help answer questions about employees.",
     Model:        anthropic.New(),
     Tools: []dive.Tool{
-        dive.ToolAdapter(&CalculatorTool{}),
+        dive.ToolAdapter(&LookupTool{DB: db}),
     },
 })
 ```
 
 Note: Built-in tools in `toolkit/` already call `ToolAdapter` internally, so their constructors return a `dive.Tool` directly. You only need `ToolAdapter` for your own `TypedTool` implementations.
+
+This pattern works the same way for any dependency: HTTP clients, gRPC connections, caches, third-party SDKs, or configuration values. Store it as a field on the tool struct and use it in `Call`.
 
 ## Tool Annotations
 
