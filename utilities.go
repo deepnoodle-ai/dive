@@ -24,6 +24,8 @@ func getToolResultContent(callResults []*ToolCallResult) []*llm.ToolResultConten
 			content = callResult.Result.Content
 			isError = callResult.Result.IsError
 		}
+		// IsError is true if either the tool crashed (Error) or the tool
+		// reported a protocol-level error (Result.IsError).
 		results[i] = &llm.ToolResultContent{
 			ToolUseID: callResult.ID,
 			Content:   content,
