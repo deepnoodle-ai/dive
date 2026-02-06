@@ -269,11 +269,12 @@ go run ./openai_responses_example
 
 ## Documentation
 
-- [Quick Start](./docs/guides/quick-start.md)
-- [Agents Guide](./docs/guides/agents.md)
-- [Custom Tools](./docs/guides/custom-tools.md)
-- [LLM Guide](./docs/guides/llm-guide.md)
-- [Tools Overview](./docs/guides/tools.md)
+- [Quick Start](./docs/guides/quick-start.md) — Get up and running in minutes
+- [Agents Guide](./docs/guides/agents.md) — Agent loop, hooks, and configuration
+- [Custom Tools](./docs/guides/custom-tools.md) — Build and register your own tools
+- [LLM Guide](./docs/guides/llm-guide.md) — Direct model access without the agent loop
+- [Tools Overview](./docs/guides/tools.md) — Built-in toolkit reference
+- [llms.txt](./llms.txt) — AI-optimized reference for agents developing with Dive
 
 ## See Also
 
