@@ -49,6 +49,7 @@ func main() {
 | `Model`              | `llm.LLM`              | LLM provider (required)                           |
 | `Tools`              | `[]Tool`               | Tools available to the agent                      |
 | `Hooks`              | `Hooks`                | Hook functions grouped in a struct (see below)    |
+| `Session`            | `Session`              | Persistent conversation state (see below)         |
 | `ModelSettings`      | `*ModelSettings`       | Temperature, max tokens, reasoning, caching       |
 | `ResponseTimeout`    | `time.Duration`        | Max time for a response (default: 30 min)         |
 | `ToolIterationLimit` | `int`                  | Max tool call iterations (default: 100)           |
@@ -268,6 +269,8 @@ response, err := agent.CreateResponse(ctx,
 | `WithInput(text)`       | Simple text input (creates a user message) |
 | `WithMessages(msgs...)` | Multiple messages                          |
 | `WithEventCallback(fn)` | Receive events during generation           |
+| `WithSession(sess)`     | Per-call session override                  |
+| `WithValue(key, val)`   | Pass data to hooks via HookContext.Values  |
 
 ## Model Settings
 
@@ -286,9 +289,69 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 })
 ```
 
-## Multi-Turn Conversations
+## Sessions
 
-Agents are stateless. To maintain a conversation across calls, accumulate messages using `response.OutputMessages`:
+Sessions provide persistent conversation state across multiple `CreateResponse` calls. The agent automatically loads history before generation and saves new messages after.
+
+### In-memory session
+
+```go
+sess := session.New("my-session")
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a helpful assistant.",
+    Model:        anthropic.New(),
+    Session:      sess,
+})
+
+// Turn 1 — history is empty
+resp, _ := agent.CreateResponse(ctx, dive.WithInput("Hi, my name is Alice."))
+fmt.Println(resp.OutputText())
+
+// Turn 2 — history loaded automatically
+resp, _ = agent.CreateResponse(ctx, dive.WithInput("What's my name?"))
+fmt.Println(resp.OutputText()) // "Your name is Alice."
+```
+
+### Persistent session with a store
+
+```go
+store, _ := session.NewFileStore("~/.myapp/sessions")
+sess, _ := store.Open(ctx, "my-session")
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:   anthropic.New(),
+    Session: sess,
+})
+```
+
+### Per-call session override
+
+In server scenarios where one agent serves many users, override the session per call:
+
+```go
+resp, _ := agent.CreateResponse(ctx,
+    dive.WithInput("Hello"),
+    dive.WithSession(userSession),
+)
+```
+
+### Fork and compact
+
+```go
+// Fork a conversation
+forked := sess.Fork("new-branch")
+store.Put(ctx, forked)
+
+// Compact history with a summarizer
+sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+    // Use an LLM to summarize, or implement custom logic
+    return summarize(ctx, msgs)
+})
+```
+
+## Multi-Turn Without Sessions
+
+If you prefer manual message management, agents are stateless by default. Accumulate messages using `response.OutputMessages`:
 
 ```go
 agent, _ := dive.NewAgent(dive.AgentOptions{
@@ -300,21 +363,15 @@ var messages []*llm.Message
 
 // First turn
 resp, _ := agent.CreateResponse(ctx, dive.WithInput("Hi, my name is Alice."))
-fmt.Println(resp.OutputText())
-
-// Build history: input + output
 messages = append(messages, llm.NewUserTextMessage("Hi, my name is Alice."))
 messages = append(messages, resp.OutputMessages...)
 
 // Second turn
 messages = append(messages, llm.NewUserTextMessage("What's my name?"))
 resp, _ = agent.CreateResponse(ctx, dive.WithMessages(messages...))
-fmt.Println(resp.OutputText())
 ```
 
-`OutputMessages` includes both assistant messages and tool result messages in the correct order. This is important when the agent uses tools — using `response.Items` alone will miss the tool result messages that the LLM needs to see.
-
-For persistent sessions across process restarts, see the experimental `session` package which provides hook-based session save/load.
+`OutputMessages` includes both assistant messages and tool result messages in the correct order.
 
 ## Subagents
 

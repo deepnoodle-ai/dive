@@ -70,16 +70,18 @@ hooks can pass data to each other.
 
 ### PreGeneration
 
-Runs once before the generation loop. Use it to load session history, inject
-context, or modify the system prompt. Errors abort generation.
+Runs once before the generation loop. Use it to inject context or modify the
+system prompt. Errors abort generation.
+
+Note: Session history is loaded automatically before PreGeneration hooks run
+(when `AgentOptions.Session` or `WithSession` is set). You don't need hooks
+for basic session management.
 
 ```go
 Hooks: dive.Hooks{
     PreGeneration: []dive.PreGenerationHook{
         func(ctx context.Context, hctx *dive.HookContext) error {
-            // Load session from database
-            messages, _ := loadSession(ctx, sessionID)
-            hctx.Messages = append(messages, hctx.Messages...)
+            hctx.SystemPrompt += "\nToday is " + time.Now().Format("Monday")
             return nil
         },
     },
@@ -89,14 +91,17 @@ Hooks: dive.Hooks{
 ### PostGeneration
 
 Runs after the generation loop completes (and after Stop hooks). Use it to
-save sessions, log results, or trigger side effects. Errors are logged but
-don't affect the returned `Response`.
+log results or trigger side effects. Errors are logged but don't affect the
+returned `Response`.
+
+Note: Session saving happens automatically after PostGeneration hooks run.
 
 ```go
 Hooks: dive.Hooks{
     PostGeneration: []dive.PostGenerationHook{
         func(ctx context.Context, hctx *dive.HookContext) error {
-            return saveSession(ctx, sessionID, hctx.OutputMessages)
+            log.Printf("Generation complete: %d output messages", len(hctx.OutputMessages))
+            return nil
         },
     },
 },

@@ -6,6 +6,23 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
+// Session provides persistent conversation state across multiple turns.
+// The agent calls Messages before generation to load history, and SaveTurn
+// after generation to persist new messages.
+//
+// Agents are stateless by default. Setting Session on AgentOptions or passing
+// WithSession per-call enables automatic history loading and saving.
+type Session interface {
+	// ID returns a unique identifier for this session.
+	ID() string
+
+	// Messages returns the conversation history.
+	Messages(ctx context.Context) ([]*llm.Message, error)
+
+	// SaveTurn persists messages from a single turn.
+	SaveTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error
+}
+
 // CreateResponseOptions contains configuration for LLM generations.
 //
 // This struct holds all the options that can be passed to Agent.CreateResponse.
@@ -19,6 +36,15 @@ type CreateResponseOptions struct {
 	// EventCallback is invoked for each response item during generation.
 	// Callbacks include messages, tool calls, and tool results.
 	EventCallback EventCallback
+
+	// Values contains arbitrary key-value pairs that are copied into
+	// HookContext.Values before hooks run. This allows callers to pass
+	// data to hooks (e.g. session IDs) through CreateResponse options.
+	Values map[string]any
+
+	// Session overrides AgentOptions.Session for this call.
+	// Useful in server scenarios where one agent serves multiple sessions.
+	Session Session
 }
 
 // EventCallback is a function called with each item produced while an agent
@@ -55,6 +81,25 @@ func WithInput(input string) CreateResponseOption {
 func WithEventCallback(callback EventCallback) CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
 		opts.EventCallback = callback
+	}
+}
+
+// WithValue sets a single key-value pair that will be available in
+// HookContext.Values during generation. Multiple WithValue calls accumulate.
+func WithValue(key string, value any) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
+		if opts.Values == nil {
+			opts.Values = make(map[string]any)
+		}
+		opts.Values[key] = value
+	}
+}
+
+// WithSession overrides the agent's default session for a single call.
+// This is useful in server scenarios where one agent handles multiple sessions.
+func WithSession(s Session) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
+		opts.Session = s
 	}
 }
 

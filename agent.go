@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -72,6 +73,11 @@ type AgentOptions struct {
 	// Optional name for logging
 	Name string
 
+	// Session enables persistent conversation state. When set, the agent
+	// automatically loads history before generation and saves new messages
+	// after generation. Can be overridden per-call with WithSession.
+	Session Session
+
 	// Timeouts and limits
 	ResponseTimeout    time.Duration
 	ToolIterationLimit int
@@ -90,6 +96,7 @@ type Agent struct {
 	toolIterationLimit int
 	modelSettings      *ModelSettings
 	systemPrompt       string
+	session            Session
 
 	// Agent hooks
 	hooks Hooks
@@ -119,6 +126,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		systemPrompt:       opts.SystemPrompt,
 		modelSettings:      opts.ModelSettings,
 		hooks:              opts.Hooks,
+		session:            opts.Session,
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -163,9 +171,30 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	logger := a.logger.With("agent_name", a.name)
 	logger.Info("creating response")
 
+	// Save the caller's input messages before session history is prepended.
+	// These are used later to compute the turn delta for session saving.
+	inputMessages := options.Messages
+
 	messages := a.prepareMessages(options)
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("no messages provided")
+	}
+
+	// Determine active session (per-call override takes priority)
+	sess := options.Session
+	if sess == nil {
+		sess = a.session
+	}
+
+	// Load session history and prepend to messages
+	if sess != nil {
+		sessionMsgs, err := sess.Messages(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("session load error: %w", err)
+		}
+		if len(sessionMsgs) > 0 {
+			messages = append(sessionMsgs, messages...)
+		}
 	}
 
 	systemPrompt := strings.TrimSpace(a.systemPrompt)
@@ -175,6 +204,9 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	hctx.Agent = a
 	hctx.SystemPrompt = systemPrompt
 	hctx.Messages = messages
+
+	// Copy caller-provided values into hook context
+	maps.Copy(hctx.Values, options.Values)
 
 	// Run PreGeneration hooks
 	for _, hook := range a.hooks.PreGeneration {
@@ -268,6 +300,16 @@ generateLoop:
 			}
 			// Regular errors are logged but don't affect the response
 			logger.Error("post-generation hook error", "error", err)
+		}
+	}
+
+	// Save session turn (input + output messages)
+	if sess != nil {
+		turnMessages := make([]*llm.Message, 0, len(inputMessages)+len(response.OutputMessages))
+		turnMessages = append(turnMessages, inputMessages...)
+		turnMessages = append(turnMessages, response.OutputMessages...)
+		if err := sess.SaveTurn(ctx, turnMessages, response.Usage); err != nil {
+			logger.Error("session save error", "error", err)
 		}
 	}
 
