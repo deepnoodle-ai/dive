@@ -21,6 +21,31 @@ var (
 	ErrNoLLM         = errors.New("no llm provided")
 )
 
+// Hooks groups all agent hook slices.
+type Hooks struct {
+	// PreGeneration hooks are called before the LLM generation loop.
+	PreGeneration []PreGenerationHook
+
+	// PostGeneration hooks are called after the LLM generation loop completes.
+	PostGeneration []PostGenerationHook
+
+	// PreToolUse hooks are called before each tool execution.
+	PreToolUse []PreToolUseHook
+
+	// PostToolUse hooks are called after each successful tool execution.
+	PostToolUse []PostToolUseHook
+
+	// PostToolUseFailure hooks are called after each failed tool execution.
+	PostToolUseFailure []PostToolUseFailureHook
+
+	// Stop hooks run when the agent is about to finish responding.
+	// A hook can prevent stopping by returning a StopDecision with Continue: true.
+	Stop []StopHook
+
+	// PreIteration hooks run before each LLM call within the generation loop.
+	PreIteration []PreIterationHook
+}
+
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
 	// SystemPrompt is the system prompt sent to the LLM.
@@ -32,34 +57,16 @@ type AgentOptions struct {
 	// Tools available to the agent.
 	Tools []Tool
 
-	// PreGeneration hooks are called before the LLM generation loop.
-	// Use these to load session history, inject context, or modify the system prompt.
-	// If any hook returns an error, generation is aborted.
-	PreGeneration []PreGenerationHook
-
-	// PostGeneration hooks are called after the LLM generation loop completes.
-	// Use these to save session history, log results, or trigger side effects.
-	// Hook errors are logged but don't affect the returned Response.
-	PostGeneration []PostGenerationHook
-
-	// PreToolUse hooks are called before each tool execution.
-	// All hooks run in order. If any returns an error, the tool is denied.
-	// If all return nil, the tool is executed.
-	PreToolUse []PreToolUseHook
-
-	// PostToolUse hooks are called after each tool execution.
-	// Use these to modify tool results, log results, update metrics, or trigger side effects.
-	// Hooks can modify the result before it's sent to the LLM.
-	// Hook errors are logged but don't affect the tool result.
-	PostToolUse []PostToolUseHook
+	// Hooks groups all agent-level hooks.
+	Hooks Hooks
 
 	// Infrastructure
 	Logger        llm.Logger
 	ModelSettings *ModelSettings
 
 	// LLMHooks are provider-level hooks passed to the LLM on each generation.
-	// These are distinct from agent-level hooks (PreGeneration, PostGeneration,
-	// PreToolUse, PostToolUse) which control the agent's generation loop.
+	// These are distinct from agent-level hooks which control the agent's
+	// generation loop.
 	LLMHooks llm.Hooks
 
 	// Optional name for logging
@@ -84,13 +91,8 @@ type Agent struct {
 	modelSettings      *ModelSettings
 	systemPrompt       string
 
-	// Generation hooks
-	preGeneration  []PreGenerationHook
-	postGeneration []PostGenerationHook
-
-	// Tool hooks
-	preToolUse  []PreToolUseHook
-	postToolUse []PostToolUseHook
+	// Agent hooks
+	hooks Hooks
 }
 
 // NewAgent returns a new Agent configured with the given options.
@@ -116,10 +118,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		logger:             opts.Logger,
 		systemPrompt:       opts.SystemPrompt,
 		modelSettings:      opts.ModelSettings,
-		preGeneration:      opts.PreGeneration,
-		postGeneration:     opts.PostGeneration,
-		preToolUse:         opts.PreToolUse,
-		postToolUse:        opts.PostToolUse,
+		hooks:              opts.Hooks,
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -171,22 +170,23 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	systemPrompt := strings.TrimSpace(a.systemPrompt)
 
-	// Initialize generation state for hooks
-	genState := NewGenerationState()
-	genState.SystemPrompt = systemPrompt
-	genState.Messages = messages
+	// Initialize hook context shared across all phases
+	hctx := NewHookContext()
+	hctx.Agent = a
+	hctx.SystemPrompt = systemPrompt
+	hctx.Messages = messages
 
 	// Run PreGeneration hooks
-	for _, hook := range a.preGeneration {
-		if err := hook(ctx, genState); err != nil {
+	for _, hook := range a.hooks.PreGeneration {
+		if err := hook(ctx, hctx); err != nil {
 			logger.Error("pre-generation hook error", "error", err)
 			return nil, fmt.Errorf("pre-generation hook error: %w", err)
 		}
 	}
 
 	// Use potentially modified values from hooks
-	systemPrompt = genState.SystemPrompt
-	messages = genState.Messages
+	systemPrompt = hctx.SystemPrompt
+	messages = hctx.Messages
 
 	logger.Debug("system prompt", "system_prompt", systemPrompt)
 
@@ -208,7 +208,10 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil
 	}
 
-	genResult, err := a.generate(ctx, messages, systemPrompt, eventCallback)
+	stopHookActive := false
+
+generateLoop:
+	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
 		return nil, err
@@ -219,12 +222,43 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	response.Items = genResult.Items
 	response.OutputMessages = genResult.OutputMessages
 
+	// Run Stop hooks before PostGeneration
+	if len(a.hooks.Stop) > 0 {
+		hctx.Response = response
+		hctx.OutputMessages = genResult.OutputMessages
+		hctx.Usage = genResult.Usage
+		hctx.StopHookActive = stopHookActive
+
+		for _, hook := range a.hooks.Stop {
+			decision, err := hook(ctx, hctx)
+			if err != nil {
+				var abortErr *HookAbortError
+				if errors.As(err, &abortErr) {
+					abortErr.HookType = "Stop"
+					logger.Error("stop hook aborted", "error", abortErr)
+					return nil, abortErr
+				}
+				logger.Error("stop hook error", "error", err)
+				continue
+			}
+			if decision != nil && decision.Continue {
+				// Inject reason as user message and re-enter generate loop
+				reasonMsg := llm.NewUserTextMessage(decision.Reason)
+				messages = append(messages, genResult.OutputMessages...)
+				messages = append(messages, reasonMsg)
+				hctx.Messages = messages
+				stopHookActive = true
+				goto generateLoop
+			}
+		}
+	}
+
 	// Run PostGeneration hooks
-	genState.Response = response
-	genState.OutputMessages = genResult.OutputMessages
-	genState.Usage = genResult.Usage
-	for _, hook := range a.postGeneration {
-		if err := hook(ctx, genState); err != nil {
+	hctx.Response = response
+	hctx.OutputMessages = genResult.OutputMessages
+	hctx.Usage = genResult.Usage
+	for _, hook := range a.hooks.PostGeneration {
+		if err := hook(ctx, hctx); err != nil {
 			// Check if this is a fatal abort error
 			var abortErr *HookAbortError
 			if errors.As(err, &abortErr) {
@@ -248,7 +282,7 @@ func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(ctx context.Context, messages []*llm.Message, systemPrompt string, callback EventCallback) (*generateResult, error) {
+func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback) (*generateResult, error) {
 
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
@@ -284,6 +318,23 @@ func (a *Agent) generate(ctx context.Context, messages []*llm.Message, systemPro
 	generationLimit := a.toolIterationLimit + 1
 	lastIteration := false
 	for i := range generationLimit {
+		// Run PreIteration hooks
+		if len(a.hooks.PreIteration) > 0 {
+			hctx.Iteration = i
+			hctx.SystemPrompt = systemPrompt
+			hctx.Messages = updatedMessages
+			for _, hook := range a.hooks.PreIteration {
+				if err := hook(ctx, hctx); err != nil {
+					return nil, fmt.Errorf("pre-iteration hook error: %w", err)
+				}
+			}
+			// Apply any modifications from hooks
+			if hctx.SystemPrompt != systemPrompt {
+				systemPrompt = hctx.SystemPrompt
+				baseOpts = a.getGenerationAgentOptions(systemPrompt)
+			}
+		}
+
 		// Build per-iteration options from base options + current messages
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
@@ -337,13 +388,19 @@ func (a *Agent) generate(ctx context.Context, messages []*llm.Message, systemPro
 		}
 
 		// Execute all requested tool calls
-		toolResults, err := a.executeToolCalls(ctx, toolCalls, collectingCallback)
+		toolResults, err := a.executeToolCalls(ctx, hctx, toolCalls, collectingCallback)
 		if err != nil {
 			return nil, err
 		}
 
 		// Capture results in a new message to send to LLM on the next iteration
 		toolResultMessage := llm.NewToolResultMessage(getToolResultContent(toolResults)...)
+
+		// Append any additional context injected by hooks
+		for _, tc := range getAdditionalContextContent(toolResults) {
+			toolResultMessage.Content = append(toolResultMessage.Content, tc)
+		}
+
 		newMessage(toolResultMessage)
 
 		// Add instructions to the message to not use any more tools if we have
@@ -402,6 +459,7 @@ func (a *Agent) generateStreaming(
 // the tool is denied. If all hooks return nil, the tool is executed.
 func (a *Agent) executeToolCalls(
 	ctx context.Context,
+	hctx *HookContext,
 	toolCalls []*llm.ToolUseContent,
 	callback EventCallback,
 ) ([]*ToolCallResult, error) {
@@ -433,14 +491,15 @@ func (a *Agent) executeToolCalls(
 
 		// Run PreToolUse hooks — any error denies the tool
 		var result *ToolCallResult
-		hookCtx := &PreToolUseContext{
-			Tool:  tool,
-			Call:  toolCall,
-			Agent: a,
+		preHctx := &HookContext{
+			Agent:  a,
+			Values: hctx.Values,
+			Tool:   tool,
+			Call:   toolCall,
 		}
 		denied := false
-		for _, hook := range a.preToolUse {
-			if err := hook(ctx, hookCtx); err != nil {
+		for _, hook := range a.hooks.PreToolUse {
+			if err := hook(ctx, preHctx); err != nil {
 				var abortErr *HookAbortError
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PreToolUse"
@@ -454,34 +513,65 @@ func (a *Agent) executeToolCalls(
 			}
 		}
 		if !denied {
-			result = a.executeTool(ctx, tool, toolCall, toolCall.Input, preview)
+			input := toolCall.Input
+			if preHctx.UpdatedInput != nil {
+				input = preHctx.UpdatedInput
+			}
+			result = a.executeTool(ctx, tool, toolCall, input, preview)
 		}
 
-		// Run PostToolUse hooks (before storing result)
-		// Hooks can modify result before it's sent to the LLM
-		postCtx := &PostToolUseContext{
+		// Determine if the tool call failed
+		failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
+
+		// Run PostToolUse or PostToolUseFailure hooks based on outcome
+		postHctx := &HookContext{
+			Agent:  a,
+			Values: hctx.Values,
 			Tool:   tool,
 			Call:   toolCall,
 			Result: result,
-			Agent:  a,
 		}
-		for _, hook := range a.postToolUse {
-			if err := hook(ctx, postCtx); err != nil {
-				// Check if this is a fatal abort error
-				var abortErr *HookAbortError
-				if errors.As(err, &abortErr) {
-					abortErr.HookType = "PostToolUse"
-					a.logger.Error("post-tool-use hook aborted", "error", abortErr)
-					return nil, abortErr
+		if failed {
+			for _, hook := range a.hooks.PostToolUseFailure {
+				if err := hook(ctx, postHctx); err != nil {
+					var abortErr *HookAbortError
+					if errors.As(err, &abortErr) {
+						abortErr.HookType = "PostToolUseFailure"
+						a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
+						return nil, abortErr
+					}
+					a.logger.Debug("post-tool-use-failure hook error", "error", err)
 				}
-				// Regular errors are logged but don't affect the result
-				a.logger.Debug("post-tool-use hook error", "error", err)
+			}
+		} else {
+			for _, hook := range a.hooks.PostToolUse {
+				if err := hook(ctx, postHctx); err != nil {
+					var abortErr *HookAbortError
+					if errors.As(err, &abortErr) {
+						abortErr.HookType = "PostToolUse"
+						a.logger.Error("post-tool-use hook aborted", "error", abortErr)
+						return nil, abortErr
+					}
+					a.logger.Debug("post-tool-use hook error", "error", err)
+				}
 			}
 		}
 
 		// Use potentially modified result from hooks
-		result = postCtx.Result
+		result = postHctx.Result
 		results[i] = result
+
+		// Apply AdditionalContext from pre or post hooks
+		additionalContext := preHctx.AdditionalContext
+		if postHctx.AdditionalContext != "" {
+			if additionalContext != "" {
+				additionalContext += "\n"
+			}
+			additionalContext += postHctx.AdditionalContext
+		}
+		if additionalContext != "" {
+			result.AdditionalContext = additionalContext
+		}
 
 		// Emit result event
 		if err := callback(ctx, &ResponseItem{

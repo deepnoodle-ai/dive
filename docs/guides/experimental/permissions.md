@@ -13,18 +13,20 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "You are a helpful assistant.",
     Model:        model,
     Tools:        tools,
-    PreToolUse: []dive.PreToolUseHook{
-        func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
-            // Allow read-only tools automatically
-            if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
+    Hooks: dive.Hooks{
+        PreToolUse: []dive.PreToolUseHook{
+            func(ctx context.Context, hctx *dive.HookContext) error {
+                // Allow read-only tools automatically
+                if hctx.Tool.Annotations() != nil && hctx.Tool.Annotations().ReadOnlyHint {
+                    return nil
+                }
+                // Block destructive operations
+                if hctx.Tool.Annotations() != nil && hctx.Tool.Annotations().DestructiveHint {
+                    return fmt.Errorf("destructive operations not allowed")
+                }
+                // Allow everything else
                 return nil
-            }
-            // Block destructive operations
-            if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().DestructiveHint {
-                return fmt.Errorf("destructive operations not allowed")
-            }
-            // Allow everything else
-            return nil
+            },
         },
     },
 })
@@ -74,9 +76,11 @@ config := &permission.Config{
 }
 
 agent, _ := dive.NewAgent(dive.AgentOptions{
-    Model:      model,
-    Tools:      tools,
-    PreToolUse: []dive.PreToolUseHook{permission.Hook(config, &dive.AutoApproveDialog{})},
+    Model: model,
+    Tools: tools,
+    Hooks: dive.Hooks{
+        PreToolUse: []dive.PreToolUseHook{permission.Hook(config, &dive.AutoApproveDialog{})},
+    },
 })
 ```
 

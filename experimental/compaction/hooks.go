@@ -25,15 +25,17 @@ import (
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
 //	    SystemPrompt: "You are a helpful assistant.",
 //	    Model:        mainModel,
-//	    PreGeneration: []dive.PreGenerationHook{
-//	        compaction.HookWithModel(summaryModel, 80000, ""),
+//	    Hooks: dive.Hooks{
+//	        PreGeneration: []dive.PreGenerationHook{
+//	            compaction.HookWithModel(summaryModel, 80000, ""),
+//	        },
 //	    },
 //	})
 func HookWithModel(model llm.LLM, tokenThreshold int, systemPrompt string) dive.PreGenerationHook {
 	if tokenThreshold <= 0 {
 		tokenThreshold = DefaultContextTokenThreshold
 	}
-	return func(ctx context.Context, state *dive.GenerationState) error {
+	return func(ctx context.Context, state *dive.HookContext) error {
 		// Rough token estimation: ~4 chars per token
 		estimatedTokens := 0
 		for _, msg := range state.Messages {

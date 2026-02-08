@@ -400,9 +400,11 @@ func TestHookAbortError(t *testing.T) {
 	t.Run("PostGeneration with regular error logs and continues", func(t *testing.T) {
 		agent, _ := NewAgent(AgentOptions{
 			Model: mockLLM,
-			PostGeneration: []PostGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					return fmt.Errorf("regular error")
+			Hooks: Hooks{
+				PostGeneration: []PostGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						return fmt.Errorf("regular error")
+					},
 				},
 			},
 		})
@@ -415,9 +417,11 @@ func TestHookAbortError(t *testing.T) {
 	t.Run("PostGeneration with HookAbortError aborts", func(t *testing.T) {
 		agent, _ := NewAgent(AgentOptions{
 			Model: mockLLM,
-			PostGeneration: []PostGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					return AbortGeneration("safety violation detected")
+			Hooks: Hooks{
+				PostGeneration: []PostGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						return AbortGeneration("safety violation detected")
+					},
 				},
 			},
 		})
@@ -435,9 +439,11 @@ func TestHookAbortError(t *testing.T) {
 	t.Run("PreGeneration with any error aborts", func(t *testing.T) {
 		agent, _ := NewAgent(AgentOptions{
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					return fmt.Errorf("setup failed")
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						return fmt.Errorf("setup failed")
+					},
 				},
 			},
 		})
@@ -452,9 +458,11 @@ func TestHookAbortError(t *testing.T) {
 		causeErr := fmt.Errorf("underlying cause")
 		agent, _ := NewAgent(AgentOptions{
 			Model: mockLLM,
-			PostGeneration: []PostGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					return AbortGenerationWithCause("wrapped error", causeErr)
+			Hooks: Hooks{
+				PostGeneration: []PostGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						return AbortGenerationWithCause("wrapped error", causeErr)
+					},
 				},
 			},
 		})

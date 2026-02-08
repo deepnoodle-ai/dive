@@ -312,10 +312,11 @@ func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 //   - Result.IsError is a protocol-level flag — the tool ran but reported a failure to the LLM
 //     (e.g. via NewToolResultError). Both are surfaced to the LLM as an error result.
 type ToolCallResult struct {
-	ID      string
-	Name    string
-	Input   any
-	Preview *ToolCallPreview // Preview generated before execution (if tool implements ToolPreviewer)
-	Result  *ToolResult      // Protocol-level result sent to the LLM
-	Error   error            // Go error if tool.Call() itself failed
+	ID                string
+	Name              string
+	Input             any
+	Preview           *ToolCallPreview // Preview generated before execution (if tool implements ToolPreviewer)
+	Result            *ToolResult      // Protocol-level result sent to the LLM
+	Error             error            // Go error if tool.Call() itself failed
+	AdditionalContext string           // Context injected by hooks, appended to the tool result message
 }

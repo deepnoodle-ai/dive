@@ -165,18 +165,18 @@ func runInteractive(ctx *cli.Context) error {
 	// Set up session ID hook (injects session_id into generation state).
 	// Reads from app.currentSessionID dynamically so /clear can reset it.
 	// If currentSessionID is empty, generates a new one (fresh conversation).
-	sessionIDHook := func(_ context.Context, state *dive.GenerationState) error {
-		if state.Values == nil {
-			state.Values = map[string]any{}
+	sessionIDHook := func(_ context.Context, hctx *dive.HookContext) error {
+		if hctx.Values == nil {
+			hctx.Values = map[string]any{}
 		}
 		if appPtr != nil && appPtr.currentSessionID == "" {
 			// Generate a new session ID after /clear
 			appPtr.currentSessionID = newSessionID()
 		}
 		if appPtr != nil {
-			state.Values["session_id"] = appPtr.currentSessionID
+			hctx.Values["session_id"] = appPtr.currentSessionID
 		} else {
-			state.Values["session_id"] = sessionID
+			hctx.Values["session_id"] = sessionID
 		}
 		return nil
 	}
@@ -186,17 +186,17 @@ func runInteractive(ctx *cli.Context) error {
 	sessionSaver := session.Saver(sessionRepo)
 
 	// Set up tool permission hook
-	permissionHook := func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+	permissionHook := func(ctx context.Context, hctx *dive.HookContext) error {
 		// Auto-allow read-only tools
-		if annotations := hookCtx.Tool.Annotations(); annotations != nil && annotations.ReadOnlyHint {
+		if annotations := hctx.Tool.Annotations(); annotations != nil && annotations.ReadOnlyHint {
 			return nil
 		}
 		// Ask for confirmation on write tools
 		if appPtr == nil {
 			return nil // Allow if app not set yet
 		}
-		message := fmt.Sprintf("Execute %s?", hookCtx.Tool.Name())
-		approved, err := appPtr.ConfirmTool(ctx, hookCtx.Tool.Name(), message, hookCtx.Call.Input)
+		message := fmt.Sprintf("Execute %s?", hctx.Tool.Name())
+		approved, err := appPtr.ConfirmTool(ctx, hctx.Tool.Name(), message, hctx.Call.Input)
 		if err != nil {
 			return err
 		}
@@ -234,9 +234,11 @@ func runInteractive(ctx *cli.Context) error {
 			Temperature: &temperature,
 			MaxTokens:   &maxTokens,
 		},
-		PreGeneration:  []dive.PreGenerationHook{sessionIDHook, sessionLoader},
-		PostGeneration: []dive.PostGenerationHook{sessionSaver},
-		PreToolUse:     []dive.PreToolUseHook{permissionHook},
+		Hooks: dive.Hooks{
+			PreGeneration:  []dive.PreGenerationHook{sessionIDHook, sessionLoader},
+			PostGeneration: []dive.PostGenerationHook{sessionSaver},
+			PreToolUse:     []dive.PreToolUseHook{permissionHook},
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)

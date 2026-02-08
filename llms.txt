@@ -132,32 +132,47 @@ func (t *WeatherTool) Call(ctx context.Context, input WeatherInput) (*dive.ToolR
 
 ## Hooks
 
+All hooks receive `*dive.HookContext`. Hooks are grouped in the `dive.Hooks` struct on `AgentOptions`.
+
 ```go
 agent, _ := dive.NewAgent(dive.AgentOptions{
     Model: anthropic.New(),
-    PreGeneration: []dive.PreGenerationHook{
-        func(ctx context.Context, state *dive.GenerationState) error {
-            state.SystemPrompt += "\nToday is Monday."
-            return nil
+    Hooks: dive.Hooks{
+        PreGeneration: []dive.PreGenerationHook{
+            func(ctx context.Context, hctx *dive.HookContext) error {
+                hctx.SystemPrompt += "\nToday is Monday."
+                return nil
+            },
         },
-    },
-    PreToolUse: []dive.PreToolUseHook{
-        func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
-            if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
-                return nil // allow read-only tools
-            }
-            return fmt.Errorf("tool %s requires approval", hookCtx.Tool.Name())
+        PreToolUse: []dive.PreToolUseHook{
+            func(ctx context.Context, hctx *dive.HookContext) error {
+                if hctx.Tool.Annotations() != nil && hctx.Tool.Annotations().ReadOnlyHint {
+                    return nil // allow read-only tools
+                }
+                return fmt.Errorf("tool %s requires approval", hctx.Tool.Name())
+            },
         },
-    },
-    PostGeneration: []dive.PostGenerationHook{
-        dive.UsageLogger(func(usage *llm.Usage) {
-            slog.Info("done", "in", usage.InputTokens, "out", usage.OutputTokens)
-        }),
+        PostGeneration: []dive.PostGenerationHook{
+            dive.UsageLogger(func(usage *llm.Usage) {
+                slog.Info("done", "in", usage.InputTokens, "out", usage.OutputTokens)
+            }),
+        },
     },
 })
 ```
 
-Hook flow: PreGeneration -> [LLM -> PreToolUse -> Execute -> PostToolUse]* -> PostGeneration
+Hook types:
+- `PreGenerationHook` — runs before the LLM generation loop
+- `PostGenerationHook` — runs after the generation loop completes
+- `PreToolUseHook` — runs before each tool execution (can modify input via `hctx.UpdatedInput`)
+- `PostToolUseHook` — runs after a tool call succeeds
+- `PostToolUseFailureHook` — runs after a tool call fails
+- `StopHook` — runs when the agent is about to stop; can return `Continue: true` to re-enter the loop
+- `PreIterationHook` — runs before each LLM call within the loop
+
+Hook flow: PreGeneration -> [PreIteration -> LLM -> PreToolUse -> Execute -> PostToolUse]* -> Stop -> PostGeneration
+
+Hook helpers: `InjectContext`, `CompactionHook`, `UsageLogger`, `UsageLoggerWithSlog`, `MatchTool`, `MatchToolPost`, `MatchToolPostFailure`
 
 ## Key types
 

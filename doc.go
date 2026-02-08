@@ -7,8 +7,9 @@
 //   - [Agent] orchestrates LLM interactions with tool execution and conversation management.
 //   - [Tool] and [TypedTool] define callable tools that an LLM can invoke.
 //   - [Response] captures the output from an agent's response generation.
-//   - Hook types ([PreGenerationHook], [PostGenerationHook], [PreToolUseHook],
-//     [PostToolUseHook]) customize agent behavior at key points.
+//   - [Hooks] groups hook slices for customizing agent behavior at key points.
+//     Hook types: [PreGenerationHook], [PostGenerationHook], [PreToolUseHook],
+//     [PostToolUseHook], [PostToolUseFailureHook], [StopHook], [PreIterationHook].
 //
 // # Quick Start
 //

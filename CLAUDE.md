@@ -18,7 +18,7 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - **Agent** (`agent.go`): Created via `NewAgent(AgentOptions)`, returns `*Agent`. Manages tool execution and conversation.
 - **LLM** (`llm/llm.go`): `LLM` and `StreamingLLM` interfaces abstract over providers.
 - **Tool** (`tool.go`): `Tool` and `TypedTool[T]` interfaces. All toolkit constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
-- **Hooks** (`hooks.go`): `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook`.
+- **Hooks** (`hooks.go`): `Hooks` struct groups hook slices on `AgentOptions`. Hook types: `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook`, `PostToolUseFailureHook`, `StopHook`, `PreIterationHook`. All hooks receive `*HookContext`.
 
 ### Packages
 
@@ -33,9 +33,9 @@ Anthropic's tuning of Claude for these tool patterns.
 
 ### Hook Flow
 
-PreGeneration → [LLM → PreToolUse → Execute → PostToolUse]* → PostGeneration
+PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration
 
-PreToolUse hooks return `nil` (allow) or `error` (deny). All hooks run; any error denies the tool.
+PreToolUse hooks return `nil` (allow) or `error` (deny). All hooks run; any error denies the tool. Stop hooks can return `Continue: true` to re-enter the loop.
 
 ## Documentation
 

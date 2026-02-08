@@ -36,10 +36,12 @@ func TestPreGenerationHooks(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					state.SystemPrompt = "Modified system prompt"
-					return nil
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						hctx.SystemPrompt = "Modified system prompt"
+						return nil
+					},
 				},
 			},
 		})
@@ -76,12 +78,14 @@ func TestPreGenerationHooks(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					// Prepend a context message
-					contextMsg := llm.NewUserTextMessage("Context: This is important info")
-					state.Messages = append([]*llm.Message{contextMsg}, state.Messages...)
-					return nil
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						// Prepend a context message
+						contextMsg := llm.NewUserTextMessage("Context: This is important info")
+						hctx.Messages = append([]*llm.Message{contextMsg}, hctx.Messages...)
+						return nil
+					},
 				},
 			},
 		})
@@ -107,9 +111,11 @@ func TestPreGenerationHooks(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					return errors.New("hook error")
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						return errors.New("hook error")
+					},
 				},
 			},
 		})
@@ -141,18 +147,20 @@ func TestPreGenerationHooks(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					order = append(order, "first")
-					return nil
-				},
-				func(ctx context.Context, state *GenerationState) error {
-					order = append(order, "second")
-					return nil
-				},
-				func(ctx context.Context, state *GenerationState) error {
-					order = append(order, "third")
-					return nil
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						order = append(order, "first")
+						return nil
+					},
+					func(ctx context.Context, hctx *HookContext) error {
+						order = append(order, "second")
+						return nil
+					},
+					func(ctx context.Context, hctx *HookContext) error {
+						order = append(order, "third")
+						return nil
+					},
 				},
 			},
 		})
@@ -167,7 +175,7 @@ func TestPreGenerationHooks(t *testing.T) {
 
 func TestPostGenerationHooks(t *testing.T) {
 	t.Run("hooks receive response data", func(t *testing.T) {
-		var capturedState *GenerationState
+		var capturedHctx *HookContext
 
 		mockLLM := &mockLLM{
 			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
@@ -187,10 +195,12 @@ func TestPostGenerationHooks(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PostGeneration: []PostGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					capturedState = state
-					return nil
+			Hooks: Hooks{
+				PostGeneration: []PostGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						capturedHctx = hctx
+						return nil
+					},
 				},
 			},
 		})
@@ -201,12 +211,12 @@ func TestPostGenerationHooks(t *testing.T) {
 		)
 		assert.NoError(t, err)
 
-		assert.NotNil(t, capturedState.Response)
+		assert.NotNil(t, capturedHctx.Response)
 		assert.NotNil(t, resp)
-		assert.NotNil(t, capturedState.Usage)
-		assert.Equal(t, 10, capturedState.Usage.InputTokens)
-		assert.Equal(t, 5, capturedState.Usage.OutputTokens)
-		assert.Equal(t, 1, len(capturedState.OutputMessages))
+		assert.NotNil(t, capturedHctx.Usage)
+		assert.Equal(t, 10, capturedHctx.Usage.InputTokens)
+		assert.Equal(t, 5, capturedHctx.Usage.OutputTokens)
+		assert.Equal(t, 1, len(capturedHctx.OutputMessages))
 	})
 
 	t.Run("hook errors are logged but don't affect response", func(t *testing.T) {
@@ -228,9 +238,11 @@ func TestPostGenerationHooks(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PostGeneration: []PostGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					return errors.New("post-hook error")
+			Hooks: Hooks{
+				PostGeneration: []PostGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						return errors.New("post-hook error")
+					},
 				},
 			},
 		})
@@ -263,18 +275,20 @@ func TestPostGenerationHooks(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					state.Values["shared_key"] = "shared_value"
-					return nil
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						hctx.Values["shared_key"] = "shared_value"
+						return nil
+					},
 				},
-			},
-			PostGeneration: []PostGenerationHook{
-				func(ctx context.Context, state *GenerationState) error {
-					if v, ok := state.Values["shared_key"].(string); ok {
-						receivedValue = v
-					}
-					return nil
+				PostGeneration: []PostGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						if v, ok := hctx.Values["shared_key"].(string); ok {
+							receivedValue = v
+						}
+						return nil
+					},
 				},
 			},
 		})
@@ -313,11 +327,13 @@ func TestInjectContext(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				InjectContext(
-					&llm.TextContent{Text: "Context item 1"},
-					&llm.TextContent{Text: "Context item 2"},
-				),
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					InjectContext(
+						&llm.TextContent{Text: "Context item 1"},
+						&llm.TextContent{Text: "Context item 2"},
+					),
+				},
 			},
 		})
 		assert.NoError(t, err)
@@ -358,8 +374,10 @@ func TestInjectContext(t *testing.T) {
 		agent, err := NewAgent(AgentOptions{
 			Name:  "TestAgent",
 			Model: mockLLM,
-			PreGeneration: []PreGenerationHook{
-				InjectContext(), // No content
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					InjectContext(), // No content
+				},
 			},
 		})
 		assert.NoError(t, err)
@@ -372,8 +390,13 @@ func TestInjectContext(t *testing.T) {
 	})
 }
 
-func TestGenerationState(t *testing.T) {
-	t.Run("NewGenerationState initializes Values map", func(t *testing.T) {
+func TestHookContext(t *testing.T) {
+	t.Run("NewHookContext initializes Values map", func(t *testing.T) {
+		hctx := NewHookContext()
+		assert.NotNil(t, hctx.Values)
+	})
+
+	t.Run("NewGenerationState returns HookContext for compat", func(t *testing.T) {
 		state := NewGenerationState()
 		assert.NotNil(t, state.Values)
 	})
@@ -390,19 +413,19 @@ func TestCompactionHook(t *testing.T) {
 		hook := CompactionHook(3, summarizer)
 
 		// Create state with messages above threshold
-		state := NewGenerationState()
-		state.Messages = []*llm.Message{
+		hctx := NewHookContext()
+		hctx.Messages = []*llm.Message{
 			llm.NewUserTextMessage("Message 1"),
 			llm.NewAssistantTextMessage("Response 1"),
 			llm.NewUserTextMessage("Message 2"),
 			llm.NewAssistantTextMessage("Response 2"),
 		}
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
 		assert.True(t, summarized)
-		assert.Equal(t, 1, len(state.Messages))
-		assert.Contains(t, state.Messages[0].Text(), "Summary of Message 1")
+		assert.Equal(t, 1, len(hctx.Messages))
+		assert.Contains(t, hctx.Messages[0].Text(), "Summary of Message 1")
 	})
 
 	t.Run("does not compact when message count below threshold", func(t *testing.T) {
@@ -414,16 +437,16 @@ func TestCompactionHook(t *testing.T) {
 
 		hook := CompactionHook(10, summarizer)
 
-		state := NewGenerationState()
-		state.Messages = []*llm.Message{
+		hctx := NewHookContext()
+		hctx.Messages = []*llm.Message{
 			llm.NewUserTextMessage("Message 1"),
 			llm.NewAssistantTextMessage("Response 1"),
 		}
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
 		assert.False(t, summarized)
-		assert.Equal(t, 2, len(state.Messages))
+		assert.Equal(t, 2, len(hctx.Messages))
 	})
 
 	t.Run("propagates summarizer errors", func(t *testing.T) {
@@ -433,13 +456,13 @@ func TestCompactionHook(t *testing.T) {
 
 		hook := CompactionHook(1, summarizer)
 
-		state := NewGenerationState()
-		state.Messages = []*llm.Message{
+		hctx := NewHookContext()
+		hctx.Messages = []*llm.Message{
 			llm.NewUserTextMessage("Message 1"),
 			llm.NewAssistantTextMessage("Response 1"),
 		}
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "summarization failed")
 	})
@@ -453,13 +476,13 @@ func TestUsageLogger(t *testing.T) {
 			loggedUsage = usage
 		})
 
-		state := NewGenerationState()
-		state.Usage = &llm.Usage{
+		hctx := NewHookContext()
+		hctx.Usage = &llm.Usage{
 			InputTokens:  100,
 			OutputTokens: 50,
 		}
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
 		assert.Equal(t, 100, loggedUsage.InputTokens)
 		assert.Equal(t, 50, loggedUsage.OutputTokens)
@@ -471,10 +494,10 @@ func TestUsageLogger(t *testing.T) {
 			called = true
 		})
 
-		state := NewGenerationState()
-		state.Usage = nil
+		hctx := NewHookContext()
+		hctx.Usage = nil
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
 		assert.False(t, called)
 	})
@@ -482,10 +505,10 @@ func TestUsageLogger(t *testing.T) {
 	t.Run("handles nil log func gracefully", func(t *testing.T) {
 		hook := UsageLogger(nil)
 
-		state := NewGenerationState()
-		state.Usage = &llm.Usage{InputTokens: 100}
+		hctx := NewHookContext()
+		hctx.Usage = &llm.Usage{InputTokens: 100}
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
 	})
 }
@@ -495,35 +518,363 @@ func TestUsageLoggerWithSlog(t *testing.T) {
 		// Use NullLogger to verify it doesn't panic
 		hook := UsageLoggerWithSlog(&llm.NullLogger{})
 
-		state := NewGenerationState()
-		state.Usage = &llm.Usage{
+		hctx := NewHookContext()
+		hctx.Usage = &llm.Usage{
 			InputTokens:              100,
 			OutputTokens:             50,
 			CacheCreationInputTokens: 10,
 			CacheReadInputTokens:     20,
 		}
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
 	})
 
 	t.Run("handles nil usage gracefully", func(t *testing.T) {
 		hook := UsageLoggerWithSlog(&llm.NullLogger{})
 
-		state := NewGenerationState()
-		state.Usage = nil
+		hctx := NewHookContext()
+		hctx.Usage = nil
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
 	})
 
 	t.Run("handles nil logger gracefully", func(t *testing.T) {
 		hook := UsageLoggerWithSlog(nil)
 
-		state := NewGenerationState()
-		state.Usage = &llm.Usage{InputTokens: 100}
+		hctx := NewHookContext()
+		hctx.Usage = &llm.Usage{InputTokens: 100}
 
-		err := hook(context.Background(), state)
+		err := hook(context.Background(), hctx)
 		assert.NoError(t, err)
+	})
+}
+
+func TestMatchTool(t *testing.T) {
+	t.Run("runs hook when tool name matches", func(t *testing.T) {
+		called := false
+		hook := MatchTool("Bash", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{
+			Tool: &mockTool{name: "Bash"},
+		}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("skips hook when tool name does not match", func(t *testing.T) {
+		called := false
+		hook := MatchTool("Bash", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{
+			Tool: &mockTool{name: "Read"},
+		}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.False(t, called)
+	})
+
+	t.Run("supports regex patterns", func(t *testing.T) {
+		called := false
+		hook := MatchTool("Bash|Edit|Write", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{
+			Tool: &mockTool{name: "Edit"},
+		}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("handles nil tool", func(t *testing.T) {
+		called := false
+		hook := MatchTool("Bash", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.False(t, called)
+	})
+}
+
+func TestMatchToolPost(t *testing.T) {
+	t.Run("runs hook when tool name matches", func(t *testing.T) {
+		called := false
+		hook := MatchToolPost("Bash", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{
+			Tool: &mockTool{name: "Bash"},
+		}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("skips hook when tool name does not match", func(t *testing.T) {
+		called := false
+		hook := MatchToolPost("Bash", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{
+			Tool: &mockTool{name: "Read"},
+		}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.False(t, called)
+	})
+}
+
+func TestMatchToolPostFailure(t *testing.T) {
+	t.Run("runs hook when tool name matches", func(t *testing.T) {
+		called := false
+		hook := MatchToolPostFailure("Bash", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{
+			Tool: &mockTool{name: "Bash"},
+		}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("skips hook when tool name does not match", func(t *testing.T) {
+		called := false
+		hook := MatchToolPostFailure("Bash", func(ctx context.Context, hctx *HookContext) error {
+			called = true
+			return nil
+		})
+
+		hctx := &HookContext{
+			Tool: &mockTool{name: "Read"},
+		}
+
+		err := hook(context.Background(), hctx)
+		assert.NoError(t, err)
+		assert.False(t, called)
+	})
+}
+
+func TestStopDecision(t *testing.T) {
+	t.Run("stop hook can continue generation", func(t *testing.T) {
+		callCount := 0
+		mockLLM := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				return &llm.Response{
+					ID:         "resp_" + string(rune('0'+callCount)),
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Response " + string(rune('0'+callCount))}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		stopCalls := 0
+		agent, err := NewAgent(AgentOptions{
+			Model: mockLLM,
+			Hooks: Hooks{
+				Stop: []StopHook{
+					func(ctx context.Context, hctx *HookContext) (*StopDecision, error) {
+						stopCalls++
+						if stopCalls == 1 {
+							return &StopDecision{
+								Continue: true,
+								Reason:   "Keep working",
+							}, nil
+						}
+						return &StopDecision{Continue: false}, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("Hello"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, 2, callCount) // LLM called twice (initial + continuation)
+		assert.Equal(t, 2, stopCalls)
+	})
+
+	t.Run("stop hook receives StopHookActive on continuation", func(t *testing.T) {
+		callCount := 0
+		mockLLM := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				return &llm.Response{
+					ID:         "resp_1",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Response"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		var receivedActive []bool
+		agent, err := NewAgent(AgentOptions{
+			Model: mockLLM,
+			Hooks: Hooks{
+				Stop: []StopHook{
+					func(ctx context.Context, hctx *HookContext) (*StopDecision, error) {
+						receivedActive = append(receivedActive, hctx.StopHookActive)
+						if !hctx.StopHookActive {
+							return &StopDecision{Continue: true, Reason: "continue"}, nil
+						}
+						return &StopDecision{Continue: false}, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("Hello"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, []bool{false, true}, receivedActive)
+	})
+}
+
+func TestPreIterationHook(t *testing.T) {
+	t.Run("runs before each LLM call with iteration count", func(t *testing.T) {
+		callCount := 0
+		mockLLM := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{
+								ID:    "tool_1",
+								Name:  "test_tool",
+								Input: []byte(`{}`),
+							},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		tool := &mockTool{
+			name: "test_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				return NewToolResultText("tool output"), nil
+			},
+		}
+
+		var iterations []int
+		agent, err := NewAgent(AgentOptions{
+			Model: mockLLM,
+			Tools: []Tool{tool},
+			Hooks: Hooks{
+				PreIteration: []PreIterationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						iterations = append(iterations, hctx.Iteration)
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("Use the tool"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, []int{0, 1}, iterations)
+	})
+
+	t.Run("can modify system prompt per iteration", func(t *testing.T) {
+		var capturedPrompts []string
+
+		mockLLM := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				var config llm.Config
+				config.Apply(opts...)
+				capturedPrompts = append(capturedPrompts, config.SystemPrompt)
+
+				return &llm.Response{
+					ID:         "resp_1",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			SystemPrompt: "Original prompt",
+			Model:        mockLLM,
+			Hooks: Hooks{
+				PreIteration: []PreIterationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						hctx.SystemPrompt = "Modified prompt"
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("Hello"))
+		assert.NoError(t, err)
+
+		assert.Equal(t, 1, len(capturedPrompts))
+		assert.Equal(t, "Modified prompt", capturedPrompts[0])
 	})
 }

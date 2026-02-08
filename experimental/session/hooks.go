@@ -7,14 +7,14 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
-func getSessionID(state *dive.GenerationState) string {
+func getSessionID(state *dive.HookContext) string {
 	if v, ok := state.Values[dive.StateKeySessionID].(string); ok {
 		return v
 	}
 	return ""
 }
 
-func getUserID(state *dive.GenerationState) string {
+func getUserID(state *dive.HookContext) string {
 	if v, ok := state.Values[dive.StateKeyUserID].(string); ok {
 		return v
 	}
@@ -33,10 +33,12 @@ func getUserID(state *dive.GenerationState) string {
 //	preHook, postHook := session.Hooks(repo)
 //
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
-//	    SystemPrompt:   "You are a helpful assistant.",
-//	    Model:          model,
-//	    PreGeneration:  []dive.PreGenerationHook{preHook},
-//	    PostGeneration: []dive.PostGenerationHook{postHook},
+//	    SystemPrompt: "You are a helpful assistant.",
+//	    Model:        model,
+//	    Hooks: dive.Hooks{
+//	        PreGeneration:  []dive.PreGenerationHook{preHook},
+//	        PostGeneration: []dive.PostGenerationHook{postHook},
+//	    },
 //	})
 //
 //	// Conversations are tracked by session ID set in Values
@@ -56,7 +58,7 @@ func Hooks(repo Repository) (dive.PreGenerationHook, dive.PostGenerationHook) {
 // This hook stores the loaded session in state.Values[dive.StateKeySession] for use
 // by the Saver hook.
 func Loader(repo Repository) dive.PreGenerationHook {
-	return func(ctx context.Context, state *dive.GenerationState) error {
+	return func(ctx context.Context, state *dive.HookContext) error {
 		sessionID := getSessionID(state)
 		if sessionID == "" {
 			return nil
@@ -93,7 +95,7 @@ func Loader(repo Repository) dive.PreGenerationHook {
 //
 // The session includes all messages (history + new input + output messages).
 func Saver(repo Repository) dive.PostGenerationHook {
-	return func(ctx context.Context, state *dive.GenerationState) error {
+	return func(ctx context.Context, state *dive.HookContext) error {
 		sessionID := getSessionID(state)
 		if sessionID == "" {
 			return nil
@@ -131,7 +133,7 @@ type LoaderWithOptions struct {
 
 // Build returns a PreGenerationHook with the configured options.
 func (o LoaderWithOptions) Build() dive.PreGenerationHook {
-	return func(ctx context.Context, state *dive.GenerationState) error {
+	return func(ctx context.Context, state *dive.HookContext) error {
 		sessionID := getSessionID(state)
 		if sessionID == "" {
 			return nil
@@ -180,7 +182,7 @@ type SaverWithOptions struct {
 
 // Build returns a PostGenerationHook with the configured options.
 func (o SaverWithOptions) Build() dive.PostGenerationHook {
-	return func(ctx context.Context, state *dive.GenerationState) error {
+	return func(ctx context.Context, state *dive.HookContext) error {
 		sessionID := getSessionID(state)
 		if sessionID == "" {
 			return nil
