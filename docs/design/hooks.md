@@ -44,7 +44,7 @@ All hook types are `func(ctx context.Context, hctx *HookContext) error` except
 
 ## Hook Flow
 
-```
+```text
 CreateResponse
 │
 ├─ PreGeneration hooks

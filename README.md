@@ -183,7 +183,7 @@ Extend agent behavior without modifying core code. All hooks receive `*HookConte
 
 Hooks are grouped in a `Hooks` struct on `AgentOptions`. Hook flow:
 
-```
+```text
 PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration
 ```
 

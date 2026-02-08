@@ -162,7 +162,7 @@ AdditionalContext string
 ```
 
 **Integration:** After executing the tool (or after deny), if
-`AdditionalContext` is non-empty on either the pre or post context, append
+`AdditionalContext` is non-empty on either the pre‑ or post‑context, append
 it as a `TextContent` block to the tool result message. This rides the
 existing message flow without creating new messages.
 

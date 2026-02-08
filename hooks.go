@@ -305,9 +305,16 @@ func UsageLoggerWithSlog(logger llm.Logger) PostGenerationHook {
 }
 
 // MatchTool returns a PreToolUseHook that only runs when the tool name
-// matches the given pattern. The pattern is a Go regexp.
+// matches the given pattern. The pattern is a Go regexp. If the pattern
+// fails to compile, the returned hook always denies tool execution with
+// the compilation error.
 func MatchTool(pattern string, hook PreToolUseHook) PreToolUseHook {
-	re := regexp.MustCompile(pattern)
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return func(ctx context.Context, hctx *HookContext) error {
+			return err
+		}
+	}
 	return func(ctx context.Context, hctx *HookContext) error {
 		if hctx.Tool == nil || !re.MatchString(hctx.Tool.Name()) {
 			return nil
@@ -317,9 +324,15 @@ func MatchTool(pattern string, hook PreToolUseHook) PreToolUseHook {
 }
 
 // MatchToolPost returns a PostToolUseHook that only runs when the tool name
-// matches the given pattern. The pattern is a Go regexp.
+// matches the given pattern. The pattern is a Go regexp. If the pattern
+// fails to compile, the returned hook always returns the compilation error.
 func MatchToolPost(pattern string, hook PostToolUseHook) PostToolUseHook {
-	re := regexp.MustCompile(pattern)
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return func(ctx context.Context, hctx *HookContext) error {
+			return err
+		}
+	}
 	return func(ctx context.Context, hctx *HookContext) error {
 		if hctx.Tool == nil || !re.MatchString(hctx.Tool.Name()) {
 			return nil
@@ -329,9 +342,16 @@ func MatchToolPost(pattern string, hook PostToolUseHook) PostToolUseHook {
 }
 
 // MatchToolPostFailure returns a PostToolUseFailureHook that only runs when
-// the tool name matches the given pattern. The pattern is a Go regexp.
+// the tool name matches the given pattern. The pattern is a Go regexp. If
+// the pattern fails to compile, the returned hook always returns the
+// compilation error.
 func MatchToolPostFailure(pattern string, hook PostToolUseFailureHook) PostToolUseFailureHook {
-	re := regexp.MustCompile(pattern)
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return func(ctx context.Context, hctx *HookContext) error {
+			return err
+		}
+	}
 	return func(ctx context.Context, hctx *HookContext) error {
 		if hctx.Tool == nil || !re.MatchString(hctx.Tool.Name()) {
 			return nil

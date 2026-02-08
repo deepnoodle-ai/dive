@@ -31,7 +31,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 
 ## Hook Flow
 
-```
+```text
 PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse / PostToolUseFailure]* → Stop → PostGeneration
 ```
 
