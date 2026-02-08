@@ -12,11 +12,13 @@ The simplest approach uses `dive.CompactionHook` as a `PreGenerationHook`:
 agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "You are a helpful assistant.",
     Model:        model,
-    PreGeneration: []dive.PreGenerationHook{
-        dive.CompactionHook(50, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
-            // Custom summarization logic
-            return summarize(ctx, msgs)
-        }),
+    Hooks: dive.Hooks{
+        PreGeneration: []dive.PreGenerationHook{
+            dive.CompactionHook(50, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+                // Custom summarization logic
+                return summarize(ctx, msgs)
+            }),
+        },
     },
 })
 ```

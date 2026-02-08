@@ -48,57 +48,117 @@ func main() {
 | `SystemPrompt`       | `string`               | System prompt sent to the LLM                     |
 | `Model`              | `llm.LLM`              | LLM provider (required)                           |
 | `Tools`              | `[]Tool`               | Tools available to the agent                      |
-| `PreGeneration`      | `[]PreGenerationHook`  | Hooks called before LLM generation                |
-| `PostGeneration`     | `[]PostGenerationHook` | Hooks called after LLM generation                 |
-| `PreToolUse`         | `[]PreToolUseHook`     | Hooks called before each tool execution           |
-| `PostToolUse`        | `[]PostToolUseHook`    | Hooks called after each tool execution            |
+| `Hooks`              | `Hooks`                | Hook functions grouped in a struct (see below)    |
 | `ModelSettings`      | `*ModelSettings`       | Temperature, max tokens, reasoning, caching       |
 | `ResponseTimeout`    | `time.Duration`        | Max time for a response (default: 30 min)         |
 | `ToolIterationLimit` | `int`                  | Max tool call iterations (default: 100)           |
 
+### Hooks Struct
+
+The `Hooks` struct groups all hook slices:
+
+| Field            | Type                   | Description                                       |
+| ---------------- | ---------------------- | ------------------------------------------------- |
+| `PreGeneration`  | `[]PreGenerationHook`  | Hooks called before LLM generation                |
+| `PostGeneration` | `[]PostGenerationHook` | Hooks called after LLM generation                 |
+| `PreToolUse`     | `[]PreToolUseHook`     | Hooks called before each tool execution           |
+| `PostToolUse`        | `[]PostToolUseHook`        | Hooks called after each successful tool execution |
+| `PostToolUseFailure` | `[]PostToolUseFailureHook` | Hooks called after each failed tool execution     |
+| `Stop`               | `[]StopHook`               | Hooks called when agent is about to stop          |
+| `PreIteration`   | `[]PreIterationHook`   | Hooks called before each LLM call in the loop     |
+
 ## Generation Hooks
+
+All hooks receive `*dive.HookContext`, which provides mutable access to:
+
+- `Agent` - the agent running generation
+- `Values` - arbitrary data shared between hooks (persists across all phases)
+- `SystemPrompt` - modifiable system prompt (PreGeneration, PreIteration)
+- `Messages` - modifiable message list (PreGeneration, PreIteration)
+- `Response`, `OutputMessages`, `Usage` - generation results (PostGeneration, Stop)
+- `Tool`, `Call` - tool details (PreToolUse, PostToolUse)
+- `Result` - tool result (PostToolUse, PostToolUseFailure)
 
 ### PreGeneration
 
-Runs before the LLM is called. Use it to load session history, inject context, or modify the system prompt:
+Runs before the LLM generation loop begins. Use it to load session history, inject context, or modify the system prompt:
 
 ```go
 agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "You are a helpful assistant.",
     Model:        model,
-    PreGeneration: []dive.PreGenerationHook{
-        func(ctx context.Context, state *dive.GenerationState) error {
-            // Inject additional context before generation
-            state.SystemPrompt += "\nToday is Wednesday."
-            return nil
+    Hooks: dive.Hooks{
+        PreGeneration: []dive.PreGenerationHook{
+            func(ctx context.Context, hctx *dive.HookContext) error {
+                hctx.SystemPrompt += "\nToday is Wednesday."
+                return nil
+            },
         },
     },
 })
 ```
-
-The `GenerationState` provides mutable access to:
-
-- `SystemPrompt` - modifiable system prompt
-- `Messages` - modifiable message list
-- `Values` - arbitrary data shared between hooks
 
 ### PostGeneration
 
 Runs after generation completes. Use it to save sessions, log results, or trigger side effects:
 
 ```go
-PostGeneration: []dive.PostGenerationHook{
-    func(ctx context.Context, state *dive.GenerationState) error {
-        // Log token usage after generation
-        if state.Usage != nil {
-            log.Printf("Tokens used: %d input, %d output", state.Usage.InputTokens, state.Usage.OutputTokens)
-        }
-        return nil
+Hooks: dive.Hooks{
+    PostGeneration: []dive.PostGenerationHook{
+        func(ctx context.Context, hctx *dive.HookContext) error {
+            if hctx.Usage != nil {
+                log.Printf("Tokens used: %d input, %d output", hctx.Usage.InputTokens, hctx.Usage.OutputTokens)
+            }
+            return nil
+        },
     },
 },
 ```
 
 PostGeneration errors are logged but don't affect the returned `Response`, unless the hook returns a `*HookAbortError` (via `AbortGeneration()`), which aborts generation and returns an error.
+
+### Stop Hook
+
+Runs when the agent is about to stop responding. Can prevent stopping and continue generation:
+
+```go
+Hooks: dive.Hooks{
+    Stop: []dive.StopHook{
+        func(ctx context.Context, hctx *dive.HookContext) (*dive.StopDecision, error) {
+            if hctx.StopHookActive {
+                return nil, nil // prevent infinite loops
+            }
+            if !allTestsPassing() {
+                return &dive.StopDecision{
+                    Continue: true,
+                    Reason:   "Tests are still failing. Please fix them.",
+                }, nil
+            }
+            return nil, nil
+        },
+    },
+},
+```
+
+When a Stop hook returns `Continue: true`, the `Reason` is injected as a user message and the generation loop re-enters. `hctx.StopHookActive` is true on subsequent stop checks.
+
+### PreIteration Hook
+
+Runs before each LLM call within the generation loop. Use it to modify the system prompt or messages between iterations:
+
+```go
+Hooks: dive.Hooks{
+    PreIteration: []dive.PreIterationHook{
+        func(ctx context.Context, hctx *dive.HookContext) error {
+            // hctx.Iteration is the zero-based iteration number
+            if hctx.Iteration > 5 {
+                hctx.SystemPrompt += "\nPlease wrap up soon."
+            }
+            return nil
+        },
+    },
+},
+```
 
 ### Built-in Hook Helpers
 
@@ -106,6 +166,9 @@ PostGeneration errors are logged but don't affect the returned `Response`, unles
 - `dive.CompactionHook(threshold, summarizer)` - Triggers context compaction
 - `dive.UsageLogger(logFunc)` - Logs token usage after generation
 - `dive.UsageLoggerWithSlog(logger)` - Logs usage via slog
+- `dive.MatchTool(pattern, hook)` - PreToolUse hook that only runs for matching tool names (regex)
+- `dive.MatchToolPost(pattern, hook)` - PostToolUse hook that only runs for matching tool names (regex)
+- `dive.MatchToolPostFailure(pattern, hook)` - PostToolUseFailure hook that only runs for matching tool names (regex)
 
 ## Tool Hooks
 
@@ -114,27 +177,59 @@ PostGeneration errors are logged but don't affect the returned `Response`, unles
 Runs before each tool execution. All hooks run in order. If any returns an error, the tool is denied. If all return nil, the tool is executed.
 
 ```go
-PreToolUse: []dive.PreToolUseHook{
-    func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
-        // Allow read-only tools
-        if hookCtx.Tool.Annotations() != nil && hookCtx.Tool.Annotations().ReadOnlyHint {
-            return nil
-        }
-        // Deny everything else
-        return fmt.Errorf("tool %s requires approval", hookCtx.Tool.Name())
+Hooks: dive.Hooks{
+    PreToolUse: []dive.PreToolUseHook{
+        func(ctx context.Context, hctx *dive.HookContext) error {
+            // Allow read-only tools
+            if hctx.Tool.Annotations() != nil && hctx.Tool.Annotations().ReadOnlyHint {
+                return nil
+            }
+            // Deny everything else
+            return fmt.Errorf("tool %s requires approval", hctx.Tool.Name())
+        },
     },
 },
 ```
 
-### PostToolUse
+PreToolUse hooks can also:
+- Set `hctx.UpdatedInput` to rewrite tool arguments before execution
+- Set `hctx.AdditionalContext` to inject context into the tool result message
 
-Runs after tool execution. Can modify the result before it's sent to the LLM:
+Use `dive.MatchTool(pattern, hook)` to run a hook only for specific tools:
 
 ```go
-PostToolUse: []dive.PostToolUseHook{
-    func(ctx context.Context, hookCtx *dive.PostToolUseContext) error {
-        log.Printf("Tool %s completed", hookCtx.Tool.Name())
-        return nil
+dive.MatchTool("Bash|Edit", func(ctx context.Context, hctx *dive.HookContext) error {
+    // Only runs for Bash and Edit tools
+    return nil
+})
+```
+
+### PostToolUse
+
+Runs after a tool call succeeds:
+
+```go
+Hooks: dive.Hooks{
+    PostToolUse: []dive.PostToolUseHook{
+        func(ctx context.Context, hctx *dive.HookContext) error {
+            log.Printf("Tool %s succeeded", hctx.Tool.Name())
+            return nil
+        },
+    },
+},
+```
+
+### PostToolUseFailure
+
+Runs after a tool call fails. This mirrors Claude Code's separate `PostToolUseFailure` event:
+
+```go
+Hooks: dive.Hooks{
+    PostToolUseFailure: []dive.PostToolUseFailureHook{
+        func(ctx context.Context, hctx *dive.HookContext) error {
+            log.Printf("Tool %s failed: %v", hctx.Tool.Name(), hctx.Result.Error)
+            return nil
+        },
     },
 },
 ```

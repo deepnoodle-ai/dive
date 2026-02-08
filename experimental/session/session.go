@@ -19,9 +19,11 @@
 //	preHook, postHook := session.Hooks(repo)
 //
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
-//	    Model:          model,
-//	    PreGeneration:  []dive.PreGenerationHook{preHook},
-//	    PostGeneration: []dive.PostGenerationHook{postHook},
+//	    Model: model,
+//	    Hooks: dive.Hooks{
+//	        PreGeneration:  []dive.PreGenerationHook{preHook},
+//	        PostGeneration: []dive.PostGenerationHook{postHook},
+//	    },
 //	})
 //
 // This approach gives you more control over when and how sessions are loaded

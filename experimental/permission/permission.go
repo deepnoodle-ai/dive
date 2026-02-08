@@ -15,8 +15,10 @@
 //	preToolHook := permission.Hook(config, &dive.AutoApproveDialog{})
 //
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
-//	    Model:      model,
-//	    PreToolUse: []dive.PreToolUseHook{preToolHook},
+//	    Model: model,
+//	    Hooks: dive.Hooks{
+//	        PreToolUse: []dive.PreToolUseHook{preToolHook},
+//	    },
 //	})
 package permission
 

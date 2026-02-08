@@ -280,7 +280,7 @@ func TestSessionHooks(t *testing.T) {
 
 		loader := Loader(repo)
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = "test-session"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("New message")}
 
@@ -304,7 +304,7 @@ func TestSessionHooks(t *testing.T) {
 
 		loader := Loader(repo)
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = "non-existent"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("New message")}
 
@@ -321,7 +321,7 @@ func TestSessionHooks(t *testing.T) {
 
 		loader := Loader(repo)
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = ""
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("New message")}
 
@@ -337,7 +337,7 @@ func TestSessionHooks(t *testing.T) {
 
 		saver := Saver(repo)
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = "new-session"
 		state.Values["user_id"] = "user-123"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
@@ -367,7 +367,7 @@ func TestSessionHooks(t *testing.T) {
 		repo.PutSession(ctx, existing)
 
 		// Simulate loader storing session
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = "existing-session"
 		state.Values["session"] = existing
 		state.Messages = existing.Messages
@@ -390,7 +390,7 @@ func TestSessionHooks(t *testing.T) {
 
 		saver := Saver(repo)
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = ""
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
 
@@ -430,7 +430,7 @@ func TestLoaderWithOptions(t *testing.T) {
 			},
 		}.Build()
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = "test-session"
 		state.Messages = []*llm.Message{}
 
@@ -452,7 +452,7 @@ func TestSaverWithOptions(t *testing.T) {
 			AgentName:  "TestAgent",
 		}.Build()
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = "new-session"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
 		state.OutputMessages = []*llm.Message{}
@@ -477,7 +477,7 @@ func TestSaverWithOptions(t *testing.T) {
 			},
 		}.Build()
 
-		state := dive.NewGenerationState()
+		state := dive.NewHookContext()
 		state.Values["session_id"] = "test-session"
 		state.Messages = []*llm.Message{llm.NewUserTextMessage("Hello")}
 		state.OutputMessages = []*llm.Message{}

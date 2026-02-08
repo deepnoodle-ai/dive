@@ -41,7 +41,7 @@ func Hook(config *Config, dialog dive.Dialog) dive.PreToolUseHook {
 //	// Later, allow a category for the session
 //	manager.AllowForSession("bash")
 func HookFromManager(manager *Manager) dive.PreToolUseHook {
-	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+	return func(ctx context.Context, hookCtx *dive.HookContext) error {
 		return manager.EvaluateToolUse(ctx, hookCtx.Tool, hookCtx.Call)
 	}
 }
@@ -52,7 +52,7 @@ func HookFromManager(manager *Manager) dive.PreToolUseHook {
 // This is useful for monitoring and debugging. It always returns nil
 // to let other hooks make the actual permission decision.
 func AuditHook(logger func(toolName string, input []byte)) dive.PreToolUseHook {
-	return func(ctx context.Context, hookCtx *dive.PreToolUseContext) error {
+	return func(ctx context.Context, hookCtx *dive.HookContext) error {
 		toolName := "unknown"
 		if hookCtx.Tool != nil {
 			toolName = hookCtx.Tool.Name()

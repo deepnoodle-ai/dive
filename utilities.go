@@ -26,13 +26,26 @@ func getToolResultContent(callResults []*ToolCallResult) []*llm.ToolResultConten
 		}
 		// IsError is true if either the tool crashed (Error) or the tool
 		// reported a protocol-level error (Result.IsError).
-		results[i] = &llm.ToolResultContent{
+		resultContent := &llm.ToolResultContent{
 			ToolUseID: callResult.ID,
 			Content:   content,
 			IsError:   callResult.Error != nil || isError,
 		}
+		results[i] = resultContent
 	}
 	return results
+}
+
+func getAdditionalContextContent(callResults []*ToolCallResult) []*llm.TextContent {
+	var contexts []*llm.TextContent
+	for _, callResult := range callResults {
+		if callResult.AdditionalContext != "" {
+			contexts = append(contexts, &llm.TextContent{
+				Text: callResult.AdditionalContext,
+			})
+		}
+	}
+	return contexts
 }
 
 // Ptr returns a pointer to the given value. This is useful for setting

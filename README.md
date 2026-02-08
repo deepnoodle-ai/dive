@@ -77,10 +77,12 @@ agent, err := dive.NewAgent(dive.AgentOptions{
         toolkit.NewListDirectoryTool(),
     },
     // Hooks for extensibility
-    PreGeneration:  []dive.PreGenerationHook{loadSession},
-    PostGeneration: []dive.PostGenerationHook{saveSession},
-    PreToolUse:     []dive.PreToolUseHook{checkPermissions},
-    PostToolUse:    []dive.PostToolUseHook{logToolCall},
+    Hooks: dive.Hooks{
+        PreGeneration:  []dive.PreGenerationHook{loadSession},
+        PostGeneration: []dive.PostGenerationHook{saveSession},
+        PreToolUse:     []dive.PreToolUseHook{checkPermissions},
+        PostToolUse:    []dive.PostToolUseHook{logToolCall},
+    },
     // Model settings
     ModelSettings: &dive.ModelSettings{
         MaxTokens:   dive.Ptr(16000),
@@ -169,12 +171,21 @@ See the [Custom Tools Guide](./docs/guides/custom-tools.md) for the full interfa
 
 ### Hooks
 
-Extend agent behavior without modifying core code:
+Extend agent behavior without modifying core code. All hooks receive `*HookContext`:
 
 - `PreGenerationHook` — Load session, inject context, modify system prompt
 - `PostGenerationHook` — Save session, log results, trigger side effects
 - `PreToolUseHook` — Permissions, validation, input modification
-- `PostToolUseHook` — Logging, metrics, result processing
+- `PostToolUseHook` — Logging, metrics, result processing (success)
+- `PostToolUseFailureHook` — Error handling, retry logic, failure logging
+- `StopHook` — Prevent the agent from stopping and continue generation
+- `PreIterationHook` — Modify system prompt or messages between loop iterations
+
+Hooks are grouped in a `Hooks` struct on `AgentOptions`. Hook flow:
+
+```text
+PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration
+```
 
 ### Dialog
 
