@@ -396,10 +396,6 @@ func TestHookContext(t *testing.T) {
 		assert.NotNil(t, hctx.Values)
 	})
 
-	t.Run("NewGenerationState returns HookContext for compat", func(t *testing.T) {
-		state := NewGenerationState()
-		assert.NotNil(t, state.Values)
-	})
 }
 
 func TestCompactionHook(t *testing.T) {

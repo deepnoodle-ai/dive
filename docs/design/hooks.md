@@ -29,15 +29,15 @@ lifecycle is CLI-centric while Dive's is API-centric.
 
 ## Hook Types
 
-| Hook Type              | When it fires                        | Claude Code equivalent |
-| :--------------------- | :----------------------------------- | :--------------------- |
-| `PreGenerationHook`    | Before the LLM generation loop       | `SessionStart` (loosely) |
-| `PostGenerationHook`   | After the generation loop completes  | —                      |
-| `PreToolUseHook`       | Before a tool call executes          | `PreToolUse`           |
-| `PostToolUseHook`      | After a tool call succeeds           | `PostToolUse`          |
-| `PostToolUseFailureHook` | After a tool call fails            | `PostToolUseFailure`   |
-| `StopHook`             | When the agent is about to stop      | `Stop`                 |
-| `PreIterationHook`     | Before each LLM call in the loop     | —                      |
+| Hook Type                | When it fires                       | Claude Code equivalent   |
+| :----------------------- | :---------------------------------- | :----------------------- |
+| `PreGenerationHook`      | Before the LLM generation loop      | `SessionStart` (loosely) |
+| `PostGenerationHook`     | After the generation loop completes | —                        |
+| `PreToolUseHook`         | Before a tool call executes         | `PreToolUse`             |
+| `PostToolUseHook`        | After a tool call succeeds          | `PostToolUse`            |
+| `PostToolUseFailureHook` | After a tool call fails             | `PostToolUseFailure`     |
+| `StopHook`               | When the agent is about to stop     | `Stop`                   |
+| `PreIterationHook`       | Before each LLM call in the loop    | —                        |
 
 All hook types are `func(ctx context.Context, hctx *HookContext) error` except
 `StopHook` which returns `(*StopDecision, error)`.
@@ -128,27 +128,27 @@ PreToolUse hooks can do more than allow/deny:
 
 ## Error Handling
 
-| Hook type            | Regular error              | `*HookAbortError`       |
-| :------------------- | :------------------------- | :---------------------- |
-| PreGeneration        | Aborts generation          | Aborts generation       |
-| PostGeneration       | Logged, response preserved | Aborts, returns error   |
-| PreToolUse           | Denies tool call           | Aborts generation       |
-| PostToolUse          | Logged, result preserved   | Aborts generation       |
-| PostToolUseFailure   | Logged, result preserved   | Aborts generation       |
-| Stop                 | Logged, continues          | Aborts generation       |
-| PreIteration         | Aborts generation          | Aborts generation       |
+| Hook type          | Regular error              | `*HookAbortError`     |
+| :----------------- | :------------------------- | :-------------------- |
+| PreGeneration      | Aborts generation          | Aborts generation     |
+| PostGeneration     | Logged, response preserved | Aborts, returns error |
+| PreToolUse         | Denies tool call           | Aborts generation     |
+| PostToolUse        | Logged, result preserved   | Aborts generation     |
+| PostToolUseFailure | Logged, result preserved   | Aborts generation     |
+| Stop               | Logged, continues          | Aborts generation     |
+| PreIteration       | Aborts generation          | Aborts generation     |
 
 ## Hook Helpers
 
-| Helper                  | Type                     | Description                           |
-| :---------------------- | :----------------------- | :------------------------------------ |
-| `InjectContext`         | `PreGenerationHook`      | Prepends content as a user message    |
-| `CompactionHook`        | `PreGenerationHook`      | Triggers compaction above a threshold |
-| `UsageLogger`           | `PostGenerationHook`     | Logs token usage via callback         |
-| `UsageLoggerWithSlog`   | `PostGenerationHook`     | Logs token usage via slog             |
-| `MatchTool`             | `PreToolUseHook`         | Runs only for matching tool names     |
-| `MatchToolPost`         | `PostToolUseHook`        | Runs only for matching tool names     |
-| `MatchToolPostFailure`  | `PostToolUseFailureHook` | Runs only for matching tool names     |
+| Helper                 | Type                     | Description                           |
+| :--------------------- | :----------------------- | :------------------------------------ |
+| `InjectContext`        | `PreGenerationHook`      | Prepends content as a user message    |
+| `CompactionHook`       | `PreGenerationHook`      | Triggers compaction above a threshold |
+| `UsageLogger`          | `PostGenerationHook`     | Logs token usage via callback         |
+| `UsageLoggerWithSlog`  | `PostGenerationHook`     | Logs token usage via slog             |
+| `MatchTool`            | `PreToolUseHook`         | Runs only for matching tool names     |
+| `MatchToolPost`        | `PostToolUseHook`        | Runs only for matching tool names     |
+| `MatchToolPostFailure` | `PostToolUseFailureHook` | Runs only for matching tool names     |
 
 All `Match*` helpers accept a Go regexp pattern compiled once at construction.
 
@@ -168,16 +168,10 @@ type Hooks struct {
 }
 ```
 
-## Backwards Compatibility
-
-- Type aliases (`GenerationState = HookContext`, `PreToolUseContext = HookContext`,
-  `PostToolUseContext = HookContext`) preserve code referencing old type names.
-- `NewGenerationState()` is preserved as a deprecated wrapper for `NewHookContext()`.
-
 ## Files
 
-| File       | Contents                                                |
-| :--------- | :------------------------------------------------------ |
-| `hooks.go` | `HookContext`, all hook types, helpers, error types      |
+| File       | Contents                                                                                       |
+| :--------- | :--------------------------------------------------------------------------------------------- |
+| `hooks.go` | `HookContext`, all hook types, helpers, error types                                            |
 | `agent.go` | `Hooks` struct, `AgentOptions`, dispatch in `CreateResponse` / `generate` / `executeToolCalls` |
-| `state.go` | `StateKey*` constants for the `Values` map              |
+| `state.go` | `StateKey*` constants for the `Values` map                                                     |

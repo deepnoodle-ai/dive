@@ -397,8 +397,8 @@ Phase 3 (do later — nice to have):
 
 | File | Changes |
 |:--|:--|
-| `hooks.go` | Unified `HookContext` replacing `GenerationState`, `PreToolUseContext`, `PostToolUseContext`. New types: `StopHook`, `StopDecision`, `PreIterationHook`, `PostToolUseFailureHook`. New fields: `UpdatedInput`, `AdditionalContext`, `StopHookActive`, `Iteration`. New helpers: `MatchTool`, `MatchToolPost`, `MatchToolPostFailure`. Type aliases for backwards compat. |
-| `agent.go` | `Hooks` struct on `AgentOptions` replacing 4 separate hook fields. Agent stores `hooks Hooks`. `CreateResponse` implements stop hook loop. `generate` runs PreIteration hooks. `executeToolCalls` handles UpdatedInput, Failed, AdditionalContext. |
+| `hooks.go` | Unified `HookContext` replacing `GenerationState`, `PreToolUseContext`, `PostToolUseContext`. New types: `StopHook`, `StopDecision`, `PreIterationHook`, `PostToolUseFailureHook`. New fields: `UpdatedInput`, `AdditionalContext`, `StopHookActive`, `Iteration`. New helpers: `MatchTool`, `MatchToolPost`, `MatchToolPostFailure`. |
+| `agent.go` | `Hooks` struct on `AgentOptions` replacing 4 separate hook fields. Agent stores `hooks Hooks`. `CreateResponse` implements stop hook loop. `generate` runs PreIteration hooks. `executeToolCalls` handles UpdatedInput, AdditionalContext, PostToolUse/PostToolUseFailure dispatch. |
 | `tool.go` | `AdditionalContext` field on `ToolCallResult`. |
 | `hooks_test.go` | Tests for all new hook types and helpers. |
 | `agent_test.go` | Updated to use `Hooks` struct. |
@@ -407,28 +407,13 @@ Phase 3 (do later — nice to have):
 | `experimental/permission/hooks.go` | Updated to use `*dive.HookContext`. |
 | `experimental/cmd/dive/main.go` | Updated to use `Hooks` struct. |
 
-## Backwards Compatibility
-
-All changes are additive:
-
-- Type aliases (`GenerationState = HookContext`, `PreToolUseContext = HookContext`,
-  `PostToolUseContext = HookContext`) preserve compatibility for code referencing old types.
-- `NewGenerationState()` is preserved as a deprecated wrapper around `NewHookContext()`.
-- New fields on `HookContext` have zero values that preserve current behavior
-  (`UpdatedInput nil` = no modification, `AdditionalContext ""` = no injection,
-  `Failed false` = existing behavior for hooks that don't check it).
-- New hook slices on `Hooks` struct default to nil (no hooks).
-- New helper functions (`MatchTool`, `OnToolFailure`, etc.) are optional
-  wrappers — they don't change hook type signatures.
-
 ## Design Decisions
 
 **Why a unified `HookContext` instead of separate context types?**
 The original design had separate `GenerationState`, `PreToolUseContext`, and
 `PostToolUseContext` types. The unified `HookContext` shares a single `Values`
 map across all phases, allows hooks to access any field they need, and
-simplifies the API. Type aliases (`GenerationState = HookContext`, etc.)
-maintain backwards compatibility.
+simplifies the API.
 
 **Why a `Hooks` struct instead of individual fields on `AgentOptions`?**
 Grouping all hook slices into a single `Hooks` struct keeps `AgentOptions`

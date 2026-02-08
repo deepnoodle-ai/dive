@@ -353,7 +353,7 @@ func TestHook(t *testing.T) {
 
 		tool := &mockTool{name: "Read"}
 		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)}
-		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
+		hookCtx := &dive.HookContext{Tool: tool, Call: call}
 
 		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
@@ -377,7 +377,7 @@ func TestHook(t *testing.T) {
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
-		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
+		hookCtx := &dive.HookContext{Tool: tool, Call: call}
 
 		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
@@ -400,7 +400,7 @@ func TestHook(t *testing.T) {
 
 		tool := &mockTool{name: "Bash"}
 		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
-		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
+		hookCtx := &dive.HookContext{Tool: tool, Call: call}
 
 		err := hook(context.Background(), hookCtx)
 		assert.Error(t, err)
@@ -547,7 +547,7 @@ func TestAuditHook(t *testing.T) {
 
 		tool := &mockTool{name: "Read"}
 		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{"file": "test.txt"}`)}
-		hookCtx := &dive.PreToolUseContext{Tool: tool, Call: call}
+		hookCtx := &dive.HookContext{Tool: tool, Call: call}
 
 		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)
@@ -562,7 +562,7 @@ func TestAuditHook(t *testing.T) {
 			loggedName = name
 		})
 
-		hookCtx := &dive.PreToolUseContext{Tool: nil, Call: nil}
+		hookCtx := &dive.HookContext{Tool: nil, Call: nil}
 
 		err := hook(context.Background(), hookCtx)
 		assert.NoError(t, err)

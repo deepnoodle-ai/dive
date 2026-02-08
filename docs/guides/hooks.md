@@ -46,22 +46,22 @@ PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolU
 
 All hooks receive `*HookContext`. Which fields are populated depends on the phase:
 
-| Field            | PreGen | PostGen | PreToolUse | PostToolUse | PostToolUseFailure | Stop | PreIter |
-| :--------------- | :----: | :-----: | :--------: | :---------: | :----------------: | :--: | :-----: |
-| Agent            |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |  ✓   |    ✓    |
-| Values           |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |  ✓   |    ✓    |
-| SystemPrompt     |   ✓    |    ✓    |            |             |                    |      |    ✓    |
-| Messages         |   ✓    |    ✓    |            |             |                    |      |    ✓    |
-| Response         |        |    ✓    |            |             |                    |  ✓   |         |
-| OutputMessages   |        |    ✓    |            |             |                    |  ✓   |         |
-| Usage            |        |    ✓    |            |             |                    |  ✓   |         |
-| Tool             |        |         |     ✓      |      ✓      |         ✓          |      |         |
-| Call             |        |         |     ✓      |      ✓      |         ✓          |      |         |
-| Result           |        |         |            |      ✓      |         ✓          |      |         |
-| UpdatedInput     |        |         |     ✓      |             |                    |      |         |
-| AdditionalContext|        |         |     ✓      |      ✓      |         ✓          |      |         |
-| StopHookActive   |        |         |            |             |                    |  ✓   |         |
-| Iteration        |        |         |            |             |                    |      |    ✓    |
+| Field             | PreGen | PostGen | PreToolUse | PostToolUse | PostToolUseFailure | Stop  | PreIter |
+| :---------------- | :----: | :-----: | :--------: | :---------: | :----------------: | :---: | :-----: |
+| Agent             |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |   ✓   |    ✓    |
+| Values            |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |   ✓   |    ✓    |
+| SystemPrompt      |   ✓    |    ✓    |            |             |                    |       |    ✓    |
+| Messages          |   ✓    |    ✓    |            |             |                    |       |    ✓    |
+| Response          |        |    ✓    |            |             |                    |   ✓   |         |
+| OutputMessages    |        |    ✓    |            |             |                    |   ✓   |         |
+| Usage             |        |    ✓    |            |             |                    |   ✓   |         |
+| Tool              |        |         |     ✓      |      ✓      |         ✓          |       |         |
+| Call              |        |         |     ✓      |      ✓      |         ✓          |       |         |
+| Result            |        |         |            |      ✓      |         ✓          |       |         |
+| UpdatedInput      |        |         |     ✓      |             |                    |       |         |
+| AdditionalContext |        |         |     ✓      |      ✓      |         ✓          |       |         |
+| StopHookActive    |        |         |            |             |                    |   ✓   |         |
+| Iteration         |        |         |            |             |                    |       |    ✓    |
 
 The `Values` map persists across all phases within one `CreateResponse` call, so
 hooks can pass data to each other.
@@ -254,15 +254,15 @@ invocation.
 
 How errors are handled depends on the hook type:
 
-| Hook type            | Regular error              | `*HookAbortError`       |
-| :------------------- | :------------------------- | :---------------------- |
-| PreGeneration        | Aborts generation          | Aborts generation       |
-| PostGeneration       | Logged, response preserved | Aborts, returns error   |
-| PreToolUse           | Denies tool call           | Aborts generation       |
-| PostToolUse          | Logged, result preserved   | Aborts generation       |
-| PostToolUseFailure   | Logged, result preserved   | Aborts generation       |
-| Stop                 | Logged, continues          | Aborts generation       |
-| PreIteration         | Aborts generation          | Aborts generation       |
+| Hook type          | Regular error              | `*HookAbortError`     |
+| :----------------- | :------------------------- | :-------------------- |
+| PreGeneration      | Aborts generation          | Aborts generation     |
+| PostGeneration     | Logged, response preserved | Aborts, returns error |
+| PreToolUse         | Denies tool call           | Aborts generation     |
+| PostToolUse        | Logged, result preserved   | Aborts generation     |
+| PostToolUseFailure | Logged, result preserved   | Aborts generation     |
+| Stop               | Logged, continues          | Aborts generation     |
+| PreIteration       | Aborts generation          | Aborts generation     |
 
 Use `dive.AbortGeneration("reason")` to create a `*HookAbortError` when a
 critical failure should stop generation entirely:

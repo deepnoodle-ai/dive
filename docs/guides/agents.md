@@ -77,7 +77,7 @@ All hooks receive `*dive.HookContext`, which provides mutable access to:
 - `Messages` - modifiable message list (PreGeneration, PreIteration)
 - `Response`, `OutputMessages`, `Usage` - generation results (PostGeneration, Stop)
 - `Tool`, `Call` - tool details (PreToolUse, PostToolUse)
-- `Result`, `Failed` - tool results (PostToolUse)
+- `Result` - tool result (PostToolUse, PostToolUseFailure)
 
 ### PreGeneration
 

@@ -222,11 +222,6 @@ func NewHookContext() *HookContext {
 	}
 }
 
-// Deprecated: NewGenerationState creates a new HookContext. Use NewHookContext instead.
-func NewGenerationState() *HookContext {
-	return NewHookContext()
-}
-
 // InjectContext returns a PreGenerationHook that prepends the given content
 // to the conversation as a user message.
 //
@@ -409,7 +404,3 @@ func IsUserFeedback(err error) (string, bool) {
 	return "", false
 }
 
-// Type aliases for backwards compatibility.
-type GenerationState = HookContext
-type PreToolUseContext = HookContext
-type PostToolUseContext = HookContext
