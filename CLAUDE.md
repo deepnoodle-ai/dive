@@ -26,7 +26,8 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - `session/` — Persistent conversation state: `Session` struct (implements `dive.Session`), `Store` interface, `MemoryStore`, `FileStore`, Fork, Compact.
 - `providers/` — LLM providers (Anthropic, OpenAI, Google, Grok, Groq, Mistral, Ollama, OpenRouter). Registry-based (`providers/registry.go`), self-registering via `init()`.
 - `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser).
-- `experimental/` — Functional but unstable APIs: permission, settings, sandbox, mcp, skill, slashcmd, subagent, compaction, todo, toolkit.
+- `permission/` — Rule-based tool permission management with modes, specifier patterns, and session allowlists.
+- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, skill, slashcmd, subagent, compaction, todo, toolkit.
 
 ### Design Philosophy
 

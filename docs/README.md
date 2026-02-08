@@ -10,12 +10,11 @@ Dive is a Go library for building AI agents and integrating with leading LLMs.
 - [Tools](guides/tools.md) - Built-in tools
 - [Custom Tools](guides/custom-tools.md) - Creating your own tools
 - [LLM Guide](guides/llm-guide.md) - Working with different LLM providers
+- [Permissions](guides/permissions.md) - Tool execution permissions
 
 ## Experimental Guides
 
 These cover packages in `experimental/` with unstable APIs:
-
-- [Permissions](guides/experimental/permissions.md) - Tool execution permissions
 - [Compaction](guides/experimental/compaction.md) - Context compaction for long conversations
 - [MCP Integration](guides/experimental/mcp-integration.md) - Model Context Protocol support
 - [Sandboxing](guides/experimental/sandboxing.md) - Secure command execution isolation

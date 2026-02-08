@@ -379,12 +379,13 @@ All constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 - [Tools](docs/guides/tools.md)
 - [Custom Tools](docs/guides/custom-tools.md)
 - [LLM Providers](docs/guides/llm-guide.md)
+- [Permissions](docs/guides/permissions.md)
 - [GoDoc](https://pkg.go.dev/github.com/deepnoodle-ai/dive)
 - [examples/](examples/) - runnable examples for each provider and feature
 
 ## Experimental (experimental/)
 
-Permission, Compaction, Subagent, Sandbox, MCP, Skills, Slash Commands, Settings, Todo, extended Toolkit, CLI.
+Compaction, Subagent, Sandbox, MCP, Skills, Slash Commands, Settings, Todo, extended Toolkit, CLI.
 
 Guides: docs/guides/experimental/
 

@@ -10,7 +10,7 @@ import (
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
-// mockTool implements dive.Tool for testing
+// mockTool implements dive.Tool for testing.
 type mockTool struct {
 	name        string
 	annotations *dive.ToolAnnotations
@@ -24,7 +24,7 @@ func (m *mockTool) Call(ctx context.Context, input any) (*dive.ToolResult, error
 	return nil, nil
 }
 
-// testDialog implements dive.Dialog for testing
+// testDialog implements dive.Dialog for testing.
 type testDialog struct {
 	showFunc func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error)
 }
@@ -85,6 +85,34 @@ func TestManager(t *testing.T) {
 		call := &llm.ToolUseContent{Name: "Edit", Input: []byte(`{}`)}
 
 		err := manager.EvaluateToolUse(context.Background(), editTool, call)
+		assert.NoError(t, err)
+	})
+
+	t.Run("dontAsk mode denies non-allowed tools", func(t *testing.T) {
+		config := &Config{Mode: ModeDontAsk}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "dontAsk")
+	})
+
+	t.Run("dontAsk mode allows explicitly allowed tools", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDontAsk,
+			Rules: Rules{
+				AllowRule("Read"),
+			},
+		}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "Read"}
+		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
 	})
 
@@ -168,11 +196,11 @@ func TestManager(t *testing.T) {
 		assert.Contains(t, err.Error(), "denied")
 	})
 
-	t.Run("command pattern matching", func(t *testing.T) {
+	t.Run("specifier pattern matching", func(t *testing.T) {
 		config := &Config{
 			Mode: ModeDefault,
 			Rules: Rules{
-				AllowCommandRule("Bash", "go build"),
+				AllowSpecifierRule("Bash", "go build*"),
 			},
 		}
 		manager := NewManager(config, nil)
@@ -186,6 +214,39 @@ func TestManager(t *testing.T) {
 
 		// Should fall through to default (confirm). No dialog = auto-allow.
 		err = manager.EvaluateToolUse(context.Background(), tool, noMatchCall)
+		assert.NoError(t, err)
+	})
+
+	t.Run("specifier deny rule blocks matching commands", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				DenySpecifierRule("Bash", "rm -rf*", "Dangerous command"),
+			},
+		}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Equal(t, "Dangerous command", err.Error())
+	})
+
+	t.Run("glob tool pattern matching", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AllowRule("mcp__*"),
+			},
+		}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "mcp__ide__getDiagnostics"}
+		call := &llm.ToolUseContent{Name: "mcp__ide__getDiagnostics", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
 	})
 
@@ -281,27 +342,33 @@ func TestRuleHelpers(t *testing.T) {
 		assert.Equal(t, "Execute?", rule.Message)
 	})
 
-	t.Run("DenyCommandRule", func(t *testing.T) {
-		rule := DenyCommandRule("Bash", "rm -rf", "Dangerous command")
+	t.Run("DenySpecifierRule", func(t *testing.T) {
+		rule := DenySpecifierRule("Bash", "rm -rf*", "Dangerous command")
 		assert.Equal(t, RuleDeny, rule.Type)
 		assert.Equal(t, "Bash", rule.Tool)
-		assert.Equal(t, "rm -rf", rule.Command)
+		assert.Equal(t, "rm -rf*", rule.Specifier)
 		assert.Equal(t, "Dangerous command", rule.Message)
 	})
 
-	t.Run("AllowCommandRule", func(t *testing.T) {
-		rule := AllowCommandRule("Bash", "go build")
+	t.Run("AllowSpecifierRule", func(t *testing.T) {
+		rule := AllowSpecifierRule("Bash", "go build*")
 		assert.Equal(t, RuleAllow, rule.Type)
 		assert.Equal(t, "Bash", rule.Tool)
-		assert.Equal(t, "go build", rule.Command)
+		assert.Equal(t, "go build*", rule.Specifier)
 	})
 
-	t.Run("AskCommandRule", func(t *testing.T) {
-		rule := AskCommandRule("Bash", "git push", "Push changes?")
+	t.Run("AskSpecifierRule", func(t *testing.T) {
+		rule := AskSpecifierRule("Bash", "git push*", "Push changes?")
 		assert.Equal(t, RuleAsk, rule.Type)
 		assert.Equal(t, "Bash", rule.Tool)
-		assert.Equal(t, "git push", rule.Command)
+		assert.Equal(t, "git push*", rule.Specifier)
 		assert.Equal(t, "Push changes?", rule.Message)
+	})
+
+	t.Run("Rule.String", func(t *testing.T) {
+		assert.Equal(t, "allow:Read", AllowRule("Read").String())
+		assert.Equal(t, "deny:Bash(rm -rf*)", DenySpecifierRule("Bash", "rm -rf*", "").String())
+		assert.Equal(t, "ask:Bash", AskRule("Bash", "").String())
 	})
 }
 
@@ -336,6 +403,146 @@ func TestGetToolCategory(t *testing.T) {
 		cat := GetToolCategory("CustomTool")
 		assert.Equal(t, "CustomTool", cat.Key)
 		assert.Contains(t, cat.Label, "CustomTool")
+	})
+}
+
+func TestMatchGlob(t *testing.T) {
+	tests := []struct {
+		pattern string
+		value   string
+		want    bool
+	}{
+		// Exact match
+		{"Bash", "Bash", true},
+		{"Bash", "Read", false},
+
+		// Wildcard
+		{"*", "anything", true},
+		{"mcp__*", "mcp__ide__getDiagnostics", true},
+		{"mcp__*", "Read", false},
+
+		// Double star
+		{"**", "a/b/c", true},
+
+		// Alternatives
+		{"{Bash,Read}", "Bash", true},
+		{"{Bash,Read}", "Read", true},
+		{"{Bash,Read}", "Write", false},
+
+		// Specifier patterns
+		{"go test*", "go test ./...", true},
+		{"go test*", "go build", false},
+		{"rm -rf*", "rm -rf /", true},
+		{"rm -rf*", "rm foo", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pattern+"_"+tt.value, func(t *testing.T) {
+			got := MatchGlob(tt.pattern, tt.value)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMatchDomain(t *testing.T) {
+	tests := []struct {
+		url    string
+		domain string
+		want   bool
+	}{
+		// Exact matches
+		{"https://example.com/path", "example.com", true},
+		{"http://example.com", "example.com", true},
+
+		// Subdomain matches
+		{"https://sub.example.com/path", "example.com", true},
+		{"https://deep.sub.example.com", "example.com", true},
+
+		// Non-matches
+		{"https://notexample.com", "example.com", false},
+		{"https://example.com.evil.com", "example.com", false},
+
+		// Different domains
+		{"https://other.com", "example.com", false},
+
+		// With ports
+		{"https://example.com:8080/path", "example.com", true},
+		{"https://sub.example.com:443", "example.com", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url+"_"+tt.domain, func(t *testing.T) {
+			got := MatchDomain(tt.url, tt.domain)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMatchPath(t *testing.T) {
+	tests := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		{"/path/to/file", "/path/to/file", true},
+		{"/path/to/*", "/path/to/file", true},
+		{"/path/to/*", "/path/to/file.go", true},
+		{"/path/**", "/path/to/file", true},
+		{"/path/**", "/path/to/deep/nested/file", true},
+		{"/path/to/*", "/other/path", false},
+		{"*.go", "file.go", true},
+		{"*.go", "file.txt", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pattern+"_"+tt.path, func(t *testing.T) {
+			got := MatchPath(tt.pattern, tt.path)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestParseRule(t *testing.T) {
+	t.Run("simple tool pattern", func(t *testing.T) {
+		rule, err := ParseRule(RuleAllow, "Read")
+		assert.NoError(t, err)
+		assert.Equal(t, RuleAllow, rule.Type)
+		assert.Equal(t, "Read", rule.Tool)
+		assert.Equal(t, "", rule.Specifier)
+	})
+
+	t.Run("tool with specifier", func(t *testing.T) {
+		rule, err := ParseRule(RuleAllow, "Bash(go test *)")
+		assert.NoError(t, err)
+		assert.Equal(t, RuleAllow, rule.Type)
+		assert.Equal(t, "Bash", rule.Tool)
+		assert.Equal(t, "go test *", rule.Specifier)
+	})
+
+	t.Run("deny with specifier", func(t *testing.T) {
+		rule, err := ParseRule(RuleDeny, "Bash(rm -rf*)")
+		assert.NoError(t, err)
+		assert.Equal(t, RuleDeny, rule.Type)
+		assert.Equal(t, "Bash", rule.Tool)
+		assert.Equal(t, "rm -rf*", rule.Specifier)
+	})
+
+	t.Run("glob tool pattern", func(t *testing.T) {
+		rule, err := ParseRule(RuleAllow, "mcp__*")
+		assert.NoError(t, err)
+		assert.Equal(t, "mcp__*", rule.Tool)
+		assert.Equal(t, "", rule.Specifier)
+	})
+
+	t.Run("empty spec returns error", func(t *testing.T) {
+		_, err := ParseRule(RuleAllow, "")
+		assert.Error(t, err)
+	})
+
+	t.Run("roundtrip with String", func(t *testing.T) {
+		rule, err := ParseRule(RuleAllow, "Bash(go test *)")
+		assert.NoError(t, err)
+		assert.Equal(t, "allow:Bash(go test *)", rule.String())
 	})
 }
 
@@ -570,3 +777,29 @@ func TestAuditHook(t *testing.T) {
 	})
 }
 
+func TestDefaultSpecifierFields(t *testing.T) {
+	t.Run("Bash command field", func(t *testing.T) {
+		fn := DefaultSpecifierFields["Bash"]
+		assert.Equal(t, "go test ./...", fn([]byte(`{"command": "go test ./..."}`)))
+	})
+
+	t.Run("Bash cmd field", func(t *testing.T) {
+		fn := DefaultSpecifierFields["Bash"]
+		assert.Equal(t, "ls -la", fn([]byte(`{"cmd": "ls -la"}`)))
+	})
+
+	t.Run("Read file_path field", func(t *testing.T) {
+		fn := DefaultSpecifierFields["Read"]
+		assert.Equal(t, "/path/to/file", fn([]byte(`{"file_path": "/path/to/file"}`)))
+	})
+
+	t.Run("WebFetch url field", func(t *testing.T) {
+		fn := DefaultSpecifierFields["WebFetch"]
+		assert.Equal(t, "https://example.com", fn([]byte(`{"url": "https://example.com"}`)))
+	})
+
+	t.Run("empty input returns empty", func(t *testing.T) {
+		fn := DefaultSpecifierFields["Bash"]
+		assert.Equal(t, "", fn([]byte(`{}`)))
+	})
+}

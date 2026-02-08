@@ -4,11 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
-	"github.com/deepnoodle-ai/dive/experimental/permission"
 	"github.com/deepnoodle-ai/dive/experimental/sandbox"
+	"github.com/deepnoodle-ai/dive/permission"
 )
 
 // Settings represents the Dive project settings loaded from .dive/settings.json.
@@ -90,7 +89,7 @@ func (s *Settings) ToPermissionRules() permission.Rules {
 	return rules
 }
 
-// parsePermissionPattern parses a Claude Code-style permission pattern into a PermissionRule.
+// parsePermissionPattern parses a Claude Code-style permission pattern into a Rule.
 // Supports patterns like:
 //   - "WebSearch" - simple tool name match
 //   - "Bash(go build:*)" - bash with command pattern
@@ -110,11 +109,12 @@ func parsePermissionPattern(pattern string, ruleType permission.RuleType) *permi
 		return parseParameterizedPattern(toolName, args, ruleType)
 	}
 
-	// Simple tool name pattern
-	return &permission.Rule{
-		Type: ruleType,
-		Tool: pattern,
+	// Simple tool name pattern — delegate to permission.ParseRule
+	rule, err := permission.ParseRule(ruleType, pattern)
+	if err != nil {
+		return nil
 	}
+	return &rule
 }
 
 // parseParameterizedPattern handles patterns like Bash(go build:*) or Read(/path/**)
@@ -123,74 +123,57 @@ func parseParameterizedPattern(toolName, args string, ruleType permission.RuleTy
 
 	switch {
 	case toolNameLower == "bash" || toolNameLower == "shell" || toolNameLower == "command":
-		// Bash command pattern: "go build:*" means command starts with "go build"
-		// The colon separates the prefix from a wildcard suffix
-		// Use PascalCase "Bash" to match actual tool name
 		return parseBashPattern("Bash", args, ruleType)
 
 	case toolNameLower == "read" || toolNameLower == "read_file":
-		// Read file pattern: path glob
-		// Use PascalCase "Read" to match actual tool name
 		return parsePathPattern("Read", args, ruleType)
 
 	case toolNameLower == "write" || toolNameLower == "write_file":
-		// Write file pattern: path glob
 		return parsePathPattern("Write", args, ruleType)
 
 	case toolNameLower == "edit":
-		// Edit file pattern: path glob
 		return parsePathPattern("Edit", args, ruleType)
 
 	case toolNameLower == "webfetch" || toolNameLower == "web_fetch":
-		// WebFetch pattern: domain:example.com
 		return parseWebFetchPattern(args, ruleType)
 
 	default:
 		// Generic tool with arguments - treat args as input pattern
-		return &permission.Rule{
+		rule := permission.Rule{
 			Type: ruleType,
 			Tool: toolName,
 			InputMatch: func(input any) bool {
-				// Simple substring match on serialized input
 				inputBytes, _ := json.Marshal(input)
 				return strings.Contains(string(inputBytes), args)
 			},
 		}
+		return &rule
 	}
 }
 
 // parseBashPattern parses bash command patterns like "go build:*"
 func parseBashPattern(toolName, args string, ruleType permission.RuleType) *permission.Rule {
-	// Handle patterns like "go build:*" or "ls -la /path:*"
-	// The :* suffix indicates a prefix match
-
-	// Convert pattern to command glob
+	// Convert Claude Code pattern to specifier glob
 	// "go build:*" -> "go build*"
 	// "ls" -> "ls" (exact match)
-	commandPattern := args
-	if strings.HasSuffix(commandPattern, ":*") {
-		commandPattern = strings.TrimSuffix(commandPattern, ":*") + "*"
+	specifier := args
+	if strings.HasSuffix(specifier, ":*") {
+		specifier = strings.TrimSuffix(specifier, ":*") + "*"
 	}
 
-	return &permission.Rule{
-		Type:    ruleType,
-		Tool:    toolName,
-		Command: commandPattern,
-	}
+	rule := permission.ParseRuleWithSpecifier(ruleType, toolName, specifier)
+	return &rule
 }
 
 // parsePathPattern parses file path patterns for read/write tools
 func parsePathPattern(toolName, pathPattern string, ruleType permission.RuleType) *permission.Rule {
 	// Convert Claude Code path patterns to our format
 	// "//Users/path/**" -> "/Users/path/**" (remove leading double slash)
-	// "/path/to/file" -> exact match
-	// "/path/**" -> glob match
-
 	if strings.HasPrefix(pathPattern, "//") {
-		pathPattern = pathPattern[1:] // Remove one leading slash
+		pathPattern = pathPattern[1:]
 	}
 
-	return &permission.Rule{
+	rule := permission.Rule{
 		Type: ruleType,
 		Tool: toolName,
 		InputMatch: func(input any) bool {
@@ -199,7 +182,6 @@ func parsePathPattern(toolName, pathPattern string, ruleType permission.RuleType
 				return false
 			}
 
-			// Look for path in common field names
 			var filePath string
 			for _, field := range []string{"file_path", "filePath", "path"} {
 				if p, ok := inputMap[field].(string); ok {
@@ -212,19 +194,19 @@ func parsePathPattern(toolName, pathPattern string, ruleType permission.RuleType
 				return false
 			}
 
-			return matchPathGlob(pathPattern, filePath)
+			return permission.MatchPath(pathPattern, filePath)
 		},
 	}
+	return &rule
 }
 
 // parseWebFetchPattern parses WebFetch patterns like "domain:example.com"
 func parseWebFetchPattern(args string, ruleType permission.RuleType) *permission.Rule {
-	// Handle "domain:example.com" format
 	if strings.HasPrefix(args, "domain:") {
 		domain := strings.TrimPrefix(args, "domain:")
-		return &permission.Rule{
+		rule := permission.Rule{
 			Type: ruleType,
-			Tool: "WebFetch", // Actual tool name is "WebFetch"
+			Tool: "WebFetch",
 			InputMatch: func(input any) bool {
 				inputMap, ok := input.(map[string]any)
 				if !ok {
@@ -236,15 +218,14 @@ func parseWebFetchPattern(args string, ruleType permission.RuleType) *permission
 					return false
 				}
 
-				// Match domain properly: check for domain at host position
-				// This handles http://example.com, https://sub.example.com, etc.
-				return matchDomain(url, domain)
+				return permission.MatchDomain(url, domain)
 			},
 		}
+		return &rule
 	}
 
 	// Generic URL pattern
-	return &permission.Rule{
+	rule := permission.Rule{
 		Type: ruleType,
 		Tool: "WebFetch",
 		InputMatch: func(input any) bool {
@@ -258,90 +239,8 @@ func parseWebFetchPattern(args string, ruleType permission.RuleType) *permission
 				return false
 			}
 
-			return matchPathGlob(args, url)
+			return permission.MatchPath(args, url)
 		},
 	}
-}
-
-// matchDomain checks if a URL's host matches or is a subdomain of the given domain.
-func matchDomain(urlStr, domain string) bool {
-	// Extract host from URL
-	// Handle both http://example.com and //example.com formats
-	host := urlStr
-
-	// Remove protocol
-	if idx := strings.Index(host, "://"); idx != -1 {
-		host = host[idx+3:]
-	}
-	host = strings.TrimPrefix(host, "//")
-
-	// Remove path
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
-
-	// Remove port
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
-
-	// Check exact match or subdomain match
-	// example.com matches example.com
-	// sub.example.com matches example.com
-	// notexample.com does NOT match example.com
-	if host == domain {
-		return true
-	}
-	return strings.HasSuffix(host, "."+domain)
-}
-
-// matchPathGlob performs glob-style matching on file paths.
-// Supports * (single segment) and ** (multiple segments).
-func matchPathGlob(pattern, path string) bool {
-	// Handle exact match
-	if pattern == path {
-		return true
-	}
-
-	// Convert glob pattern to regex
-	regexPattern := globToRegex(pattern)
-	matched, err := regexp.MatchString(regexPattern, path)
-	if err != nil {
-		return false
-	}
-	return matched
-}
-
-// globToRegex converts a glob pattern to a regex pattern.
-func globToRegex(glob string) string {
-	// Escape special regex characters except * and ?
-	var result strings.Builder
-	result.WriteString("^")
-
-	i := 0
-	for i < len(glob) {
-		c := glob[i]
-		switch c {
-		case '*':
-			if i+1 < len(glob) && glob[i+1] == '*' {
-				// ** matches any path including separators
-				result.WriteString(".*")
-				i++ // Skip the second *
-			} else {
-				// * matches anything except path separators
-				result.WriteString("[^/]*")
-			}
-		case '?':
-			result.WriteString("[^/]")
-		case '.', '+', '^', '$', '|', '(', ')', '[', ']', '{', '}', '\\':
-			result.WriteByte('\\')
-			result.WriteByte(c)
-		default:
-			result.WriteByte(c)
-		}
-		i++
-	}
-
-	result.WriteString("$")
-	return result.String()
+	return &rule
 }

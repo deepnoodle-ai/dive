@@ -404,7 +404,7 @@ Phase 3 (do later — nice to have):
 | `agent_test.go` | Updated to use `Hooks` struct. |
 | `experimental/session/hooks.go` | Updated to use `*dive.HookContext`. |
 | `experimental/compaction/hooks.go` | Updated to use `*dive.HookContext`. |
-| `experimental/permission/hooks.go` | Updated to use `*dive.HookContext`. |
+| `permission/hooks.go` | Updated to use `*dive.HookContext`. |
 | `experimental/cmd/dive/main.go` | Updated to use `Hooks` struct. |
 
 ## Design Decisions

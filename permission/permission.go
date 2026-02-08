@@ -26,7 +26,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
@@ -48,6 +47,10 @@ const (
 
 	// ModeBypassPermissions allows ALL tools without prompts.
 	ModeBypassPermissions Mode = "bypassPermissions"
+
+	// ModeDontAsk auto-denies any tool call that is not explicitly allowed
+	// by a rule. This is useful for headless/automation use cases.
+	ModeDontAsk Mode = "dontAsk"
 )
 
 // RuleType indicates what action a rule takes when it matches.
@@ -61,20 +64,39 @@ const (
 
 // Rule defines a declarative permission rule.
 type Rule struct {
-	Type       RuleType
-	Tool       string
-	Command    string
-	Message    string
+	Type      RuleType
+	Tool      string
+	Specifier string
+	Message   string
+
+	// InputMatch is an optional custom matcher for tool input.
 	InputMatch func(input any) bool
+}
+
+// String returns a human-readable representation like "allow:Bash(go test *)".
+func (r Rule) String() string {
+	s := string(r.Type) + ":" + r.Tool
+	if r.Specifier != "" {
+		s += "(" + r.Specifier + ")"
+	}
+	return s
 }
 
 // Rules is an ordered list of permission rules.
 type Rules []Rule
 
+// SpecifierFieldFunc extracts the specifier value from a tool call's input.
+// The input is the raw JSON input from the tool call.
+type SpecifierFieldFunc func(input json.RawMessage) string
+
 // Config contains all permission-related configuration.
 type Config struct {
 	Mode  Mode
 	Rules Rules
+
+	// SpecifierFields maps tool names to functions that extract the specifier
+	// value from tool call input. If not set, DefaultSpecifierFields is used.
+	SpecifierFields map[string]SpecifierFieldFunc
 }
 
 // Manager orchestrates the permission evaluation flow.
@@ -195,14 +217,15 @@ func (pm *Manager) evaluateRules(tool dive.Tool, call *llm.ToolUseContent) (deci
 }
 
 func (pm *Manager) matchRule(rule Rule, toolName string, call *llm.ToolUseContent) bool {
-	// Match tool pattern
-	if rule.Tool != "*" && rule.Tool != toolName {
+	// Match tool pattern using glob
+	if !MatchGlob(rule.Tool, toolName) {
 		return false
 	}
 
-	// Match command pattern if specified
-	if rule.Command != "" {
-		if !matchCommandPattern(rule.Command, call.Input) {
+	// Match specifier pattern if specified
+	if rule.Specifier != "" {
+		specifier := pm.extractSpecifier(toolName, call.Input)
+		if specifier == "" || !MatchGlob(rule.Specifier, specifier) {
 			return false
 		}
 	}
@@ -221,30 +244,23 @@ func (pm *Manager) matchRule(rule Rule, toolName string, call *llm.ToolUseConten
 	return true
 }
 
-func matchCommandPattern(pattern string, input json.RawMessage) bool {
-	var inputMap map[string]any
-	if err := json.Unmarshal(input, &inputMap); err != nil {
-		return false
-	}
+func (pm *Manager) extractSpecifier(toolName string, input json.RawMessage) string {
+	pm.mu.RLock()
+	specFields := pm.config.SpecifierFields
+	pm.mu.RUnlock()
 
-	commandFields := []string{"command", "cmd", "script", "code"}
-	var command string
-	for _, field := range commandFields {
-		if cmd, ok := inputMap[field].(string); ok {
-			command = cmd
-			break
+	// Check user-configured specifier fields first
+	if specFields != nil {
+		if fn, ok := specFields[toolName]; ok {
+			return fn(input)
 		}
 	}
 
-	if command == "" {
-		return false
+	// Fall back to defaults
+	if fn, ok := DefaultSpecifierFields[toolName]; ok {
+		return fn(input)
 	}
-
-	if pattern == "*" {
-		return true
-	}
-
-	return strings.Contains(command, strings.ReplaceAll(pattern, "*", ""))
+	return ""
 }
 
 func (pm *Manager) evaluateMode(tool dive.Tool, call *llm.ToolUseContent) (decision, string) {
@@ -271,12 +287,15 @@ func (pm *Manager) evaluateMode(tool dive.Tool, call *llm.ToolUseContent) (decis
 		}
 		return noDecision, ""
 
+	case ModeDontAsk:
+		return deny, "tool not explicitly allowed (dontAsk mode)"
+
 	default:
 		return noDecision, ""
 	}
 }
 
-func (pm *Manager) isEditOperation(tool dive.Tool, call *llm.ToolUseContent) bool {
+func (pm *Manager) isEditOperation(tool dive.Tool, _ *llm.ToolUseContent) bool {
 	if tool == nil {
 		return false
 	}
@@ -286,14 +305,13 @@ func (pm *Manager) isEditOperation(tool dive.Tool, call *llm.ToolUseContent) boo
 		return true
 	}
 
-	toolName := strings.ToLower(tool.Name())
-	editPatterns := []string{"edit", "write", "create", "mkdir", "touch", "mv", "cp", "rm"}
-	for _, pattern := range editPatterns {
-		if strings.Contains(toolName, pattern) {
+	toolName := tool.Name()
+	editNames := []string{"Edit", "Write", "Create", "Mkdir", "Touch"}
+	for _, name := range editNames {
+		if MatchGlob(name, toolName) || MatchGlob("*"+name+"*", toolName) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -365,7 +383,7 @@ type Category struct {
 	Label string
 }
 
-// Common tool categories
+// Common tool categories.
 var (
 	CategoryBash   = Category{Key: "bash", Label: "bash commands"}
 	CategoryEdit   = Category{Key: "edit", Label: "file edits"}
@@ -375,34 +393,58 @@ var (
 
 // GetToolCategory determines the category of a tool based on its name.
 func GetToolCategory(toolName string) Category {
-	toolNameLower := strings.ToLower(toolName)
-
-	bashPatterns := []string{"bash", "command", "shell", "exec", "run"}
-	for _, pattern := range bashPatterns {
-		if strings.Contains(toolNameLower, pattern) {
-			return CategoryBash
-		}
+	if MatchGlob("*{Bash,Command,Shell,Exec,Run}*", toolName) {
+		return CategoryBash
 	}
-
-	editPatterns := []string{"edit", "write", "create", "mkdir", "touch"}
-	for _, pattern := range editPatterns {
-		if strings.Contains(toolNameLower, pattern) {
-			return CategoryEdit
-		}
+	if MatchGlob("*{Edit,Write,Create,Mkdir,Touch}*", toolName) {
+		return CategoryEdit
 	}
-
-	if strings.Contains(toolNameLower, "read") {
+	if MatchGlob("*Read*", toolName) {
 		return CategoryRead
 	}
-
-	if strings.Contains(toolNameLower, "glob") || strings.Contains(toolNameLower, "grep") || strings.Contains(toolNameLower, "search") {
+	if MatchGlob("*{Glob,Grep,Search}*", toolName) {
 		return CategorySearch
 	}
-
 	return Category{Key: toolName, Label: toolName + " operations"}
 }
 
-// Helper functions to create rules
+// DefaultSpecifierFields maps tool names to functions that extract the
+// specifier value from the tool call input. These are used when
+// Config.SpecifierFields does not have an entry for the tool.
+var DefaultSpecifierFields = map[string]SpecifierFieldFunc{
+	"Bash": func(input json.RawMessage) string {
+		return jsonStringField(input, "command", "cmd", "script", "code")
+	},
+	"Read": func(input json.RawMessage) string {
+		return jsonStringField(input, "file_path", "filePath", "path")
+	},
+	"Write": func(input json.RawMessage) string {
+		return jsonStringField(input, "file_path", "filePath", "path")
+	},
+	"Edit": func(input json.RawMessage) string {
+		return jsonStringField(input, "file_path", "filePath", "path")
+	},
+	"WebFetch": func(input json.RawMessage) string {
+		return jsonStringField(input, "url")
+	},
+}
+
+// jsonStringField extracts the first non-empty string value from the given
+// JSON object for the specified field names.
+func jsonStringField(input json.RawMessage, fields ...string) string {
+	var m map[string]any
+	if err := json.Unmarshal(input, &m); err != nil {
+		return ""
+	}
+	for _, field := range fields {
+		if v, ok := m[field].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// Helper functions to create rules.
 
 // DenyRule creates a deny rule for a tool pattern.
 func DenyRule(toolPattern string, message string) Rule {
@@ -419,17 +461,17 @@ func AskRule(toolPattern string, message string) Rule {
 	return Rule{Type: RuleAsk, Tool: toolPattern, Message: message}
 }
 
-// DenyCommandRule creates a deny rule for specific commands.
-func DenyCommandRule(toolPattern, commandPattern, message string) Rule {
-	return Rule{Type: RuleDeny, Tool: toolPattern, Command: commandPattern, Message: message}
+// DenySpecifierRule creates a deny rule for a tool with a specifier pattern.
+func DenySpecifierRule(toolPattern, specifierPattern, message string) Rule {
+	return Rule{Type: RuleDeny, Tool: toolPattern, Specifier: specifierPattern, Message: message}
 }
 
-// AllowCommandRule creates an allow rule for specific commands.
-func AllowCommandRule(toolPattern, commandPattern string) Rule {
-	return Rule{Type: RuleAllow, Tool: toolPattern, Command: commandPattern}
+// AllowSpecifierRule creates an allow rule for a tool with a specifier pattern.
+func AllowSpecifierRule(toolPattern, specifierPattern string) Rule {
+	return Rule{Type: RuleAllow, Tool: toolPattern, Specifier: specifierPattern}
 }
 
-// AskCommandRule creates an ask rule for specific commands.
-func AskCommandRule(toolPattern, commandPattern, message string) Rule {
-	return Rule{Type: RuleAsk, Tool: toolPattern, Command: commandPattern, Message: message}
+// AskSpecifierRule creates an ask rule for a tool with a specifier pattern.
+func AskSpecifierRule(toolPattern, specifierPattern, message string) Rule {
+	return Rule{Type: RuleAsk, Tool: toolPattern, Specifier: specifierPattern, Message: message}
 }

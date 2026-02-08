@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/experimental/permission"
+	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -70,11 +70,11 @@ func TestLoadSettings(t *testing.T) {
 
 func TestParsePermissionPattern(t *testing.T) {
 	tests := []struct {
-		name     string
-		pattern  string
-		ruleType permission.RuleType
-		wantTool string
-		wantCmd  string
+		name          string
+		pattern       string
+		ruleType      permission.RuleType
+		wantTool      string
+		wantSpecifier string
 	}{
 		{
 			name:     "simple tool name",
@@ -83,18 +83,18 @@ func TestParsePermissionPattern(t *testing.T) {
 			wantTool: "WebSearch",
 		},
 		{
-			name:     "bash command pattern",
-			pattern:  "Bash(go test:*)",
-			ruleType: permission.RuleAllow,
-			wantTool: "Bash", // PascalCase tool name
-			wantCmd:  "go test*",
+			name:          "bash command pattern",
+			pattern:       "Bash(go test:*)",
+			ruleType:      permission.RuleAllow,
+			wantTool:      "Bash",
+			wantSpecifier: "go test*",
 		},
 		{
-			name:     "bash exact command",
-			pattern:  "Bash(ls -la)",
-			ruleType: permission.RuleAllow,
-			wantTool: "Bash", // PascalCase tool name
-			wantCmd:  "ls -la",
+			name:          "bash exact command",
+			pattern:       "Bash(ls -la)",
+			ruleType:      permission.RuleAllow,
+			wantTool:      "Bash",
+			wantSpecifier: "ls -la",
 		},
 		{
 			name:     "MCP tool pattern",
@@ -122,8 +122,8 @@ func TestParsePermissionPattern(t *testing.T) {
 			assert.NotNil(t, rule)
 			assert.Equal(t, rule.Type, tt.ruleType)
 			assert.Equal(t, rule.Tool, tt.wantTool)
-			if tt.wantCmd != "" {
-				assert.Equal(t, rule.Command, tt.wantCmd)
+			if tt.wantSpecifier != "" {
+				assert.Equal(t, rule.Specifier, tt.wantSpecifier)
 			}
 		})
 	}
@@ -149,16 +149,16 @@ func TestToPermissionRules(t *testing.T) {
 
 	// First rule should be deny
 	assert.Equal(t, rules[0].Type, permission.RuleDeny)
-	assert.Equal(t, rules[0].Tool, "Bash") // PascalCase tool name
-	assert.Equal(t, rules[0].Command, "rm -rf*")
+	assert.Equal(t, rules[0].Tool, "Bash")
+	assert.Equal(t, rules[0].Specifier, "rm -rf*")
 
 	// Allow rules come after
 	assert.Equal(t, rules[1].Type, permission.RuleAllow)
 	assert.Equal(t, rules[1].Tool, "WebSearch")
 
 	assert.Equal(t, rules[2].Type, permission.RuleAllow)
-	assert.Equal(t, rules[2].Tool, "Bash") // PascalCase tool name
-	assert.Equal(t, rules[2].Command, "go build*")
+	assert.Equal(t, rules[2].Tool, "Bash")
+	assert.Equal(t, rules[2].Specifier, "go build*")
 }
 
 func TestMatchDomain(t *testing.T) {
@@ -189,13 +189,13 @@ func TestMatchDomain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.url+"_"+tt.domain, func(t *testing.T) {
-			got := matchDomain(tt.url, tt.domain)
+			got := permission.MatchDomain(tt.url, tt.domain)
 			assert.Equal(t, got, tt.want)
 		})
 	}
 }
 
-func TestMatchPathGlob(t *testing.T) {
+func TestMatchPath(t *testing.T) {
 	tests := []struct {
 		pattern string
 		path    string
@@ -213,7 +213,7 @@ func TestMatchPathGlob(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern+"_"+tt.path, func(t *testing.T) {
-			got := matchPathGlob(tt.pattern, tt.path)
+			got := permission.MatchPath(tt.pattern, tt.path)
 			assert.Equal(t, got, tt.want)
 		})
 	}
