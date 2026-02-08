@@ -90,14 +90,31 @@ response, _ := model.Generate(ctx,
 fmt.Println(response.Message().Text())
 ```
 
-## Custom tool
+## Custom tool (FuncTool — recommended for simple tools)
 
-Tool structs can hold dependencies — DB clients, API clients, config — and
-use them in Call. This is how you integrate tools with external systems.
+Use `FuncTool` for tools without struct state. Schema is auto-generated from struct tags:
+
+```go
+type WeatherInput struct {
+    City  string `json:"city" description:"City name"`
+    Units string `json:"units,omitempty" description:"Temperature units" enum:"celsius,fahrenheit"`
+}
+
+weatherTool := dive.FuncTool("get_weather", "Get current weather for a city",
+    func(ctx context.Context, input *WeatherInput) (*dive.ToolResult, error) {
+        return dive.NewToolResultText(fmt.Sprintf("72°F in %s", input.City)), nil
+    },
+    dive.WithFuncToolAnnotations(&dive.ToolAnnotations{ReadOnlyHint: true}),
+)
+```
+
+## Custom tool (TypedTool — for tools with struct state)
+
+Use `TypedTool[T]` when the tool needs dependencies (DB clients, API clients, config):
 
 ```go
 type WeatherTool struct{
-    DB *sql.DB // any dependency: DB handle, API client, config, etc.
+    DB *sql.DB
 }
 type WeatherInput struct {
     City string `json:"city"`
@@ -126,6 +143,24 @@ func (t *WeatherTool) Call(ctx context.Context, input WeatherInput) (*dive.ToolR
 }
 
 // Register: dive.ToolAdapter(&WeatherTool{DB: db})
+```
+
+## Dynamic tools (Toolset)
+
+Use `Toolset` for tools resolved at runtime (MCP servers, permission-filtered, etc.):
+
+```go
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model: anthropic.New(),
+    Toolsets: []dive.Toolset{
+        &dive.ToolsetFunc{
+            ToolsetName: "mcp-tools",
+            Resolve: func(ctx context.Context) ([]dive.Tool, error) {
+                return discoverMCPTools(ctx)
+            },
+        },
+    },
+})
 ```
 
 ## Hooks
@@ -178,6 +213,10 @@ Hook helpers: `InjectContext`, `CompactionHook`, `UsageLogger`, `UsageLoggerWith
 - `dive.Session` - interface: ID, Messages, SaveTurn; set on AgentOptions or pass via WithSession
 - `dive.Tool` - interface: Name, Description, Schema, Annotations, Call
 - `dive.TypedTool[T]` - generic tool with typed input; wrap with `dive.ToolAdapter()`
+- `dive.FuncTool[T]` - create a Tool from a function with auto-generated schema from T's struct tags
+- `dive.Toolset` - interface: Name, Tools(ctx) — dynamic tool resolution per LLM request
+- `dive.ToolsetFunc` - adapts a function into a Toolset
+- `dive.SystemInstructor` - optional interface for tools to inject system prompt instructions
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
 - `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
 - `dive.ToolCallResult` - completed tool call; fields: ID (string), Name (string), Input (any), Result (*ToolResult), Error (error)
