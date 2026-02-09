@@ -158,22 +158,9 @@ func (t *MyTool) Annotations() *dive.ToolAnnotations {
         DestructiveHint:    true,  // May overwrite/delete
         IdempotentHint:     false, // Results may vary
         OpenWorldHint:      true,  // Accesses external resources
-        DisableParallelUse: true,  // Must not run in parallel with other tools
     }
 }
 ```
-
-## System Instructions
-
-Tools can inject instructions into the system prompt by implementing `SystemInstructor`:
-
-```go
-func (t *MemoryTool) SystemInstructions() string {
-    return "You have access to memory. Use the memory tool to search past conversations."
-}
-```
-
-Instructions from all tools (including those from toolsets) are appended to the system prompt before each LLM request.
 
 ## Error Handling
 

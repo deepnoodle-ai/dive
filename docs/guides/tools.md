@@ -136,7 +136,6 @@ type ToolAnnotations struct {
     IdempotentHint     bool   // Safe to call multiple times
     OpenWorldHint      bool   // Accesses external resources
     EditHint           bool   // File edit operation
-    DisableParallelUse bool   // Tool should not be invoked in parallel
 }
 ```
 

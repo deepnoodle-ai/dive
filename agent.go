@@ -168,37 +168,29 @@ func (a *Agent) Tools() []Tool {
 }
 
 // resolveTools returns all tools for the current request, including static tools
-// and dynamically resolved tools from toolsets. It also returns any system
-// instructions collected from tools implementing SystemInstructor.
-func (a *Agent) resolveTools(ctx context.Context) (tools []Tool, toolsByName map[string]Tool, systemInstructions []string, err error) {
+// and dynamically resolved tools from toolsets.
+func (a *Agent) resolveTools(ctx context.Context) (tools []Tool, toolsByName map[string]Tool, err error) {
 	tools = slices.Clone(a.tools)
 
 	// Resolve dynamic tools from toolsets
 	for _, ts := range a.toolsets {
 		dynamic, tsErr := ts.Tools(ctx)
 		if tsErr != nil {
-			return nil, nil, nil, fmt.Errorf("toolset %s: %w", ts.Name(), tsErr)
+			return nil, nil, fmt.Errorf("toolset %s: %w", ts.Name(), tsErr)
 		}
 		tools = append(tools, dynamic...)
 	}
 
-	// Build name index and collect system instructions
+	// Build name index
 	toolsByName = make(map[string]Tool, len(tools))
 	for _, tool := range tools {
 		name := tool.Name()
 		if _, exists := toolsByName[name]; exists {
-			return nil, nil, nil, fmt.Errorf("duplicate tool name: %q", name)
+			return nil, nil, fmt.Errorf("duplicate tool name: %q", name)
 		}
 		toolsByName[name] = tool
-
-		// Collect system instructions from tools
-		if si, ok := tool.(SystemInstructor); ok {
-			if instr := si.SystemInstructions(); instr != "" {
-				systemInstructions = append(systemInstructions, instr)
-			}
-		}
 	}
-	return tools, toolsByName, systemInstructions, nil
+	return tools, toolsByName, nil
 }
 
 // Model returns the agent's LLM.
@@ -415,20 +407,14 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			}
 		}
 
-		// Resolve tools (static + dynamic toolsets) and collect system instructions
-		resolvedTools, toolsByName, toolSystemInstructions, resolveErr := a.resolveTools(ctx)
+		// Resolve tools (static + dynamic toolsets)
+		resolvedTools, toolsByName, resolveErr := a.resolveTools(ctx)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("tool resolution error: %w", resolveErr)
 		}
 
-		// Build effective system prompt (base + tool system instructions)
-		effectiveSystemPrompt := systemPrompt
-		if len(toolSystemInstructions) > 0 {
-			effectiveSystemPrompt = systemPrompt + "\n\n" + strings.Join(toolSystemInstructions, "\n\n")
-		}
-
 		// Build per-iteration LLM options
-		baseOpts := a.getGenerationOptions(effectiveSystemPrompt, resolvedTools)
+		baseOpts := a.getGenerationOptions(systemPrompt, resolvedTools)
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))

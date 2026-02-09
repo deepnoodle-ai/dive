@@ -18,7 +18,7 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - **Agent** (`agent.go`): Created via `NewAgent(AgentOptions)`, returns `*Agent`. Manages tool execution and conversation.
 - **Session** (`dive.go`): `Session` interface (`ID`, `Messages`, `SaveTurn`). Set on `AgentOptions.Session` or per-call via `WithSession`. The `session` package provides `New()` (in-memory) and store-backed implementations.
 - **LLM** (`llm/llm.go`): `LLM` and `StreamingLLM` interfaces abstract over providers.
-- **Tool** (`tool.go`): `Tool` and `TypedTool[T]` interfaces. `FuncTool[T]()` creates tools from functions with auto-generated schemas. `Toolset` interface provides dynamic tool resolution per LLM request. `SystemInstructor` interface lets tools inject system prompt instructions. `ToolAnnotations` includes `DisableParallelUse` hint. Tool panics are auto-recovered. All toolkit constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
+- **Tool** (`tool.go`): `Tool` and `TypedTool[T]` interfaces. `FuncTool[T]()` creates tools from functions with auto-generated schemas. `Toolset` interface provides dynamic tool resolution per LLM request. Tool panics are auto-recovered. All toolkit constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 - **Hooks** (`hooks.go`): `Hooks` struct groups hook slices on `AgentOptions`. Hook types: `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook`, `PostToolUseFailureHook`, `StopHook`, `PreIterationHook`. All hooks receive `*HookContext`.
 
 ### Packages

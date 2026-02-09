@@ -60,15 +60,6 @@ each LLM request, enabling context-dependent tool availability. Codex has
 errors with full stack traces. Codex is Rust (no panics). Dive does nothing — a
 panicking tool crashes the process.
 
-**5. No tool-level request processing.** ADK's `RequestProcessor` lets tools
-modify the LLM request before it's sent — injecting system instructions, adding
-native tool configs, etc. Dive's `PreIterationHook` is the closest equivalent but
-it's not tool-scoped.
-
-**6. No parallel execution signal.** Codex's `ConfiguredToolSpec` has
-`supports_parallel_tool_calls`. Providers that support parallel tool calls need to
-know which tools are safe to run concurrently.
-
 ## Proposals
 
 ### 1. Auto-derive Schema for TypedTool (breaking)
@@ -409,63 +400,6 @@ func (a *Agent) callTool(ctx *ToolContext, tool Tool, input any) (result *ToolRe
 Panics become tool errors that the LLM can see and respond to, rather than
 process-terminating crashes. The stack trace is logged but not sent to the LLM.
 
-### 6. Add Parallel Execution Hint
-
-**Problem:** Some tools are safe to run concurrently (read-only queries), others
-aren't (file writes that could conflict). Providers that support parallel tool
-calls need this signal.
-
-**Change:** Add to `ToolAnnotations`:
-
-```go
-type ToolAnnotations struct {
-    // ...existing fields...
-
-    // DisableParallelUse, when true, signals that this tool should not be
-    // invoked in parallel with other tool calls. Use for tools that have
-    // ordering dependencies or mutate shared state.
-    DisableParallelUse bool `json:"disableParallelUse,omitempty"`
-}
-```
-
-Default is false (parallel OK), which is the common case. Only tools with
-ordering dependencies or shared mutable state need to opt out.
-
-### 7. Support Tool-Scoped System Instructions
-
-**Problem:** Some tools need to inject instructions into the system prompt. ADK's
-`ProcessRequest` lets tools do this. Dive's current approach requires a separate
-`PreIterationHook`, which is disconnected from the tool.
-
-**Change:** Add an optional interface that tools can implement:
-
-```go
-// SystemInstructor is an optional interface for tools that need to inject
-// additional instructions into the system prompt. Called once per LLM request
-// during tool resolution.
-type SystemInstructor interface {
-    SystemInstructions() string
-}
-```
-
-When the agent resolves tools, it collects instructions:
-
-```go
-var extraInstructions []string
-for _, tool := range tools {
-    if si, ok := tool.(SystemInstructor); ok {
-        if instr := si.SystemInstructions(); instr != "" {
-            extraInstructions = append(extraInstructions, instr)
-        }
-    }
-}
-// Append to system prompt
-```
-
-This is lighter than ADK's `ProcessRequest` (which gives tools full request
-mutation power) but covers the primary use case: tools that need the LLM to know
-about their existence and usage patterns beyond what the description provides.
-
 ## What We Deliberately Skip
 
 **Uniform result type (ADK: `map[string]any`).** Dive's `ToolResult` with typed
@@ -493,8 +427,6 @@ validation, and tool output varies too much to schema-ify usefully.
 - Add `Toolset` interface and `AgentOptions.Toolsets`
 - Add `FuncTool` builder
 - Add panic recovery in the agent loop
-- Add `DisableParallelUse` to `ToolAnnotations`
-- Add `SystemInstructor` interface
 - Add `SchemaProvider` optional interface
 
 **Phase 2 — Breaking changes (major version):**
@@ -506,9 +438,6 @@ validation, and tool output varies too much to schema-ify usefully.
 
 **Phase 3 — Toolkit migration:**
 - Convert all 11 toolkit tools to use struct tags instead of manual schemas
-- Add `SystemInstructor` to tools that benefit (e.g., Edit tool with usage
-  instructions)
-- Add `DisableParallelUse` to mutating tools (Bash, Write, Edit)
 
 ## Summary
 
@@ -519,8 +448,6 @@ validation, and tool output varies too much to schema-ify usefully.
 | Toolset | No | High — enables dynamic tool resolution | Low |
 | FuncTool builder | No | High — dramatically simplifies tool creation | Low |
 | Panic recovery | No | Medium — production safety | Trivial |
-| Parallel execution hint | No | Low — niche optimization signal | Trivial |
-| SystemInstructor | No | Medium — enables tool-scoped instructions | Low |
 
 The two breaking changes (auto-derive schema, ToolContext) are the most impactful
 and should ship together in a major version bump. The mechanical migration is

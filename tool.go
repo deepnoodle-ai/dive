@@ -18,8 +18,7 @@ type ToolAnnotations struct {
 	IdempotentHint     bool           `json:"idempotentHint,omitempty"`
 	OpenWorldHint      bool           `json:"openWorldHint,omitempty"`
 	EditHint           bool           `json:"editHint,omitempty"`           // Indicates file edit operations for acceptEdits mode
-	DisableParallelUse bool           `json:"disableParallelUse,omitempty"` // Tool should not be invoked in parallel with other tool calls
-	Extra              map[string]any `json:"extra,omitempty"`
+	Extra map[string]any `json:"extra,omitempty"`
 }
 
 func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
@@ -29,8 +28,7 @@ func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 		"destructiveHint":    a.DestructiveHint,
 		"idempotentHint":     a.IdempotentHint,
 		"openWorldHint":      a.OpenWorldHint,
-		"editHint":           a.EditHint,
-		"disableParallelUse": a.DisableParallelUse,
+		"editHint": a.EditHint,
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -55,9 +53,8 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 		"readOnlyHint":       &a.ReadOnlyHint,
 		"destructiveHint":    &a.DestructiveHint,
 		"idempotentHint":     &a.IdempotentHint,
-		"openWorldHint":      &a.OpenWorldHint,
-		"editHint":           &a.EditHint,
-		"disableParallelUse": &a.DisableParallelUse,
+		"openWorldHint": &a.OpenWorldHint,
+		"editHint":      &a.EditHint,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {
@@ -336,14 +333,6 @@ func (f *ToolsetFunc) Name() string { return f.ToolsetName }
 // Tools calls the resolve function.
 func (f *ToolsetFunc) Tools(ctx context.Context) ([]Tool, error) {
 	return f.Resolve(ctx)
-}
-
-// SystemInstructor is an optional interface for tools that need to inject
-// additional instructions into the system prompt. When a tool implements
-// this interface, its instructions are appended to the system prompt before
-// each LLM request during tool resolution.
-type SystemInstructor interface {
-	SystemInstructions() string
 }
 
 // FuncTool creates a Tool from a function with an auto-generated schema.

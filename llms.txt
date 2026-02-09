@@ -216,7 +216,6 @@ Hook helpers: `InjectContext`, `CompactionHook`, `UsageLogger`, `UsageLoggerWith
 - `dive.FuncTool[T]` - create a Tool from a function with auto-generated schema from T's struct tags
 - `dive.Toolset` - interface: Name, Tools(ctx) — dynamic tool resolution per LLM request
 - `dive.ToolsetFunc` - adapts a function into a Toolset
-- `dive.SystemInstructor` - optional interface for tools to inject system prompt instructions
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
 - `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
 - `dive.ToolCallResult` - completed tool call; fields: ID (string), Name (string), Input (any), Result (*ToolResult), Error (error)
