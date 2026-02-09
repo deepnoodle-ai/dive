@@ -315,7 +315,8 @@ fmt.Println(resp.OutputText()) // "Your name is Alice."
 ### Persistent session with a store
 
 ```go
-store, _ := session.NewFileStore("~/.myapp/sessions")
+home, _ := os.UserHomeDir()
+store, _ := session.NewFileStore(filepath.Join(home, ".myapp", "sessions"))
 sess, _ := store.Open(ctx, "my-session")
 
 agent, _ := dive.NewAgent(dive.AgentOptions{

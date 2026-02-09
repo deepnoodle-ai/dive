@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,6 +14,10 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrInvalidSessionID is returned when a session ID contains path separators,
+// relative path components, or other characters that could cause path traversal.
+var ErrInvalidSessionID = errors.New("invalid session ID")
 
 // FileStore persists sessions as JSONL files on disk.
 //
@@ -40,8 +46,29 @@ func NewFileStore(dir string) (*FileStore, error) {
 	return &FileStore{dir: dir}, nil
 }
 
-func (s *FileStore) path(id string) string {
-	return filepath.Join(s.dir, id+".jsonl")
+// validateID rejects session IDs that could escape the store directory.
+func validateID(id string) error {
+	if id == "" || id == "." || id == ".." ||
+		strings.ContainsAny(id, "/\\") ||
+		strings.Contains(id, "..") {
+		return fmt.Errorf("%w: %q", ErrInvalidSessionID, id)
+	}
+	return nil
+}
+
+// path returns the file path for the given session ID after validating that
+// the result is confined to the store directory.
+func (s *FileStore) path(id string) (string, error) {
+	if err := validateID(id); err != nil {
+		return "", err
+	}
+	p := filepath.Join(s.dir, id+".jsonl")
+	p = filepath.Clean(p)
+	// Verify the cleaned path is still within the store directory.
+	if !strings.HasPrefix(p, s.dir+string(filepath.Separator)) && p != s.dir {
+		return "", fmt.Errorf("%w: %q resolves outside store directory", ErrInvalidSessionID, id)
+	}
+	return p, nil
 }
 
 // jsonlLine is the on-disk format for each line in a session JSONL file.
@@ -61,6 +88,9 @@ type sessionHeader struct {
 }
 
 func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -87,6 +117,9 @@ func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
 }
 
 func (s *FileStore) Put(ctx context.Context, sess *Session) error {
+	if err := validateID(sess.data.ID); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.writeSession(sess.data); err != nil {
@@ -148,9 +181,16 @@ func (s *FileStore) List(ctx context.Context, opts *ListOptions) (*ListResult, e
 }
 
 func (s *FileStore) Delete(ctx context.Context, id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := os.Remove(s.path(id))
+	p, err := s.path(id)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(p)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -162,7 +202,10 @@ func (s *FileStore) appendEvent(ctx context.Context, sessionID string, evt *even
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	p := s.path(sessionID)
+	p, err := s.path(sessionID)
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -193,7 +236,11 @@ func (s *FileStore) putSession(ctx context.Context, data *sessionData) error {
 // readSession parses a JSONL file into sessionData. Must be called with at
 // least a read lock held.
 func (s *FileStore) readSession(id string) (*sessionData, error) {
-	f, err := os.Open(s.path(id))
+	p, err := s.path(id)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(p)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrNotFound
@@ -263,7 +310,11 @@ func (s *FileStore) readSession(id string) (*sessionData, error) {
 // writeSession writes a complete session as a JSONL file (header + events).
 // Must be called with the write lock held.
 func (s *FileStore) writeSession(data *sessionData) error {
-	f, err := os.Create(s.path(data.ID))
+	p, err := s.path(data.ID)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(p)
 	if err != nil {
 		return err
 	}

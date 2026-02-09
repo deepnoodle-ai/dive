@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -14,42 +13,44 @@ import (
 // Data is lost when the process exits.
 type MemoryStore struct {
 	mu       sync.RWMutex
-	sessions map[string]*sessionData
+	sessions map[string]*Session
 }
 
 // NewMemoryStore creates an empty in-memory store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		sessions: make(map[string]*sessionData),
+		sessions: make(map[string]*Session),
 	}
 }
 
 func (s *MemoryStore) Open(ctx context.Context, id string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, ok := s.sessions[id]
+	sess, ok := s.sessions[id]
 	if !ok {
 		now := time.Now()
-		data = &sessionData{
-			ID:        id,
-			CreatedAt: now,
-			UpdatedAt: now,
+		sess = &Session{
+			data: &sessionData{
+				ID:        id,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			appender: s,
 		}
-		s.sessions[id] = data
+		s.sessions[id] = sess
 	}
-	return &Session{
-		data:     data,
-		appender: s,
-	}, nil
+	return sess, nil
 }
 
 func (s *MemoryStore) Put(ctx context.Context, sess *Session) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := cloneSessionData(sess.data)
-	s.sessions[cp.ID] = cp
-	sess.data = cp
+	sess.mu.Lock()
 	sess.appender = s
+	id := sess.data.ID
+	sess.mu.Unlock()
+
+	s.mu.Lock()
+	s.sessions[id] = sess
+	s.mu.Unlock()
 	return nil
 }
 
@@ -58,14 +59,17 @@ func (s *MemoryStore) List(ctx context.Context, opts *ListOptions) (*ListResult,
 	defer s.mu.RUnlock()
 
 	infos := make([]*SessionInfo, 0, len(s.sessions))
-	for _, data := range s.sessions {
-		infos = append(infos, &SessionInfo{
-			ID:         data.ID,
-			Title:      data.Title,
-			CreatedAt:  data.CreatedAt,
-			UpdatedAt:  data.UpdatedAt,
-			EventCount: len(data.Events),
-		})
+	for _, sess := range s.sessions {
+		sess.mu.RLock()
+		info := &SessionInfo{
+			ID:         sess.data.ID,
+			Title:      sess.data.Title,
+			CreatedAt:  sess.data.CreatedAt,
+			UpdatedAt:  sess.data.UpdatedAt,
+			EventCount: len(sess.data.Events),
+		}
+		sess.mu.RUnlock()
+		infos = append(infos, info)
 	}
 
 	sort.Slice(infos, func(i, j int) bool {
@@ -109,23 +113,4 @@ func (s *MemoryStore) putSession(ctx context.Context, data *sessionData) error {
 	return nil
 }
 
-func cloneSessionData(data *sessionData) *sessionData {
-	cp := &sessionData{
-		ID:         data.ID,
-		Title:      data.Title,
-		CreatedAt:  data.CreatedAt,
-		UpdatedAt:  data.UpdatedAt,
-		ForkedFrom: data.ForkedFrom,
-	}
-	if len(data.Events) > 0 {
-		cp.Events = make([]*event, len(data.Events))
-		for i, e := range data.Events {
-			cp.Events[i] = e.copy()
-		}
-	}
-	if data.Metadata != nil {
-		cp.Metadata = make(map[string]any, len(data.Metadata))
-		maps.Copy(cp.Metadata, data.Metadata)
-	}
-	return cp
-}
+

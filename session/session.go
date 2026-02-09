@@ -37,10 +37,14 @@ import (
 	"fmt"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
+
+// eventCounter ensures unique event IDs under concurrent generation.
+var eventCounter uint64
 
 // ErrNotFound is returned when a session does not exist.
 var ErrNotFound = errors.New("session not found")
@@ -313,5 +317,6 @@ func ForkSession(ctx context.Context, store Store, fromID, newID string) (*Sessi
 
 // newEventID generates a unique event identifier.
 func newEventID() string {
-	return fmt.Sprintf("evt-%d", time.Now().UnixNano())
+	n := atomic.AddUint64(&eventCounter, 1)
+	return fmt.Sprintf("evt-%d-%d", time.Now().UnixNano(), n)
 }
