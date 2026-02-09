@@ -295,8 +295,11 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			reader:            bufio.NewReader(resp.Body),
 			contentBlocks:     map[int]*ContentBlockAccumulator{},
 			toolCalls:         map[int]*ToolCallAccumulator{},
+			toolCallIndices:   map[int]int{},
 			prefill:           config.Prefill,
 			prefillClosingTag: config.PrefillClosingTag,
+			thinkingIndex:     -1,
+			textIndex:         -1,
 		}
 		return nil
 	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute))

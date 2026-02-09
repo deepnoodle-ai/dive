@@ -116,7 +116,7 @@ response, err := model.Generate(ctx,
     )),
     llm.WithMaxTokens(1024),
 )
-fmt.Println(response.Message.Text())
+fmt.Println(response.Message().Text())
 ```
 
 ### Providers

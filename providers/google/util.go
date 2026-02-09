@@ -174,8 +174,21 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 			case *llm.TextContent:
 				content.Parts = append(content.Parts, genai.NewPartFromText(ct.Text))
 			case *llm.ImageContent:
-				// TODO: Properly handle image content when image support is added
-				content.Parts = append(content.Parts, genai.NewPartFromText("[Image content]"))
+				if ct.Source == nil {
+					return nil, fmt.Errorf("image content has nil source")
+				}
+				switch ct.Source.Type {
+				case llm.ContentSourceTypeURL:
+					content.Parts = append(content.Parts, genai.NewPartFromURI(ct.Source.URL, ct.Source.MediaType))
+				case llm.ContentSourceTypeBase64:
+					data, err := ct.Source.DecodedData()
+					if err != nil {
+						return nil, fmt.Errorf("failed to decode image data: %w", err)
+					}
+					content.Parts = append(content.Parts, genai.NewPartFromBytes(data, ct.Source.MediaType))
+				default:
+					return nil, fmt.Errorf("unsupported image source type: %s", ct.Source.Type)
+				}
 			case *llm.ToolUseContent:
 				// Track tool use for later matching
 				toolUses[ct.ID] = ct
