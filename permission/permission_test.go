@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -801,5 +802,532 @@ func TestDefaultSpecifierFields(t *testing.T) {
 	t.Run("empty input returns empty", func(t *testing.T) {
 		fn := DefaultSpecifierFields["Bash"]
 		assert.Equal(t, "", fn([]byte(`{}`)))
+	})
+
+	t.Run("Write file_path field", func(t *testing.T) {
+		fn := DefaultSpecifierFields["Write"]
+		assert.Equal(t, "/tmp/out.txt", fn([]byte(`{"file_path": "/tmp/out.txt"}`)))
+	})
+
+	t.Run("Edit filePath field", func(t *testing.T) {
+		fn := DefaultSpecifierFields["Edit"]
+		assert.Equal(t, "main.go", fn([]byte(`{"filePath": "main.go"}`)))
+	})
+
+	t.Run("invalid JSON returns empty", func(t *testing.T) {
+		fn := DefaultSpecifierFields["Bash"]
+		assert.Equal(t, "", fn([]byte(`not json`)))
+	})
+}
+
+func TestParseRuleWithSpecifier(t *testing.T) {
+	rule := ParseRuleWithSpecifier(RuleAllow, "Bash", "go test*")
+	assert.Equal(t, RuleAllow, rule.Type)
+	assert.Equal(t, "Bash", rule.Tool)
+	assert.Equal(t, "go test*", rule.Specifier)
+
+	rule = ParseRuleWithSpecifier(RuleDeny, "Read", "/etc/**")
+	assert.Equal(t, RuleDeny, rule.Type)
+	assert.Equal(t, "Read", rule.Tool)
+	assert.Equal(t, "/etc/**", rule.Specifier)
+}
+
+func TestInputMatchRule(t *testing.T) {
+	t.Run("InputMatch allows when matcher returns true", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				{
+					Type: RuleAllow,
+					Tool: "Bash",
+					InputMatch: func(input any) bool {
+						m, ok := input.(map[string]any)
+						if !ok {
+							return false
+						}
+						cmd, _ := m["command"].(string)
+						return cmd == "ls"
+					},
+				},
+			},
+		}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "ls"}`)}
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+	})
+
+	t.Run("InputMatch denies when matcher returns false", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				{
+					Type: RuleDeny,
+					Tool: "Bash",
+					InputMatch: func(input any) bool {
+						m, ok := input.(map[string]any)
+						if !ok {
+							return false
+						}
+						cmd, _ := m["command"].(string)
+						return cmd == "rm -rf /"
+					},
+					Message: "dangerous",
+				},
+			},
+		}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "Bash"}
+
+		// Matching input - should deny
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)}
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Equal(t, "dangerous", err.Error())
+
+		// Non-matching input - should fall through to default (nil dialog = auto-allow)
+		call = &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "ls"}`)}
+		err = manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+	})
+
+	t.Run("InputMatch with invalid JSON does not match", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				{
+					Type: RuleAllow,
+					Tool: "Bash",
+					InputMatch: func(input any) bool {
+						return true // would match if JSON parses
+					},
+				},
+			},
+		}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`not json`)}
+		// InputMatch path fails to unmarshal, so rule does not match.
+		// Falls through to default (nil dialog = auto-allow).
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+	})
+}
+
+func TestIsEditOperation(t *testing.T) {
+	t.Run("acceptEdits allows tools with EditHint annotation", func(t *testing.T) {
+		config := &Config{Mode: ModeAcceptEdits}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "CustomEditor", annotations: &dive.ToolAnnotations{EditHint: true}}
+		call := &llm.ToolUseContent{Name: "CustomEditor", Input: []byte(`{}`)}
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+	})
+
+	t.Run("acceptEdits allows tools with edit names", func(t *testing.T) {
+		config := &Config{Mode: ModeAcceptEdits}
+		manager := NewManager(config, nil)
+
+		for _, name := range []string{"Edit", "Write", "Create", "Mkdir", "Touch", "FileWrite", "CreateFile"} {
+			tool := &mockTool{name: name}
+			call := &llm.ToolUseContent{Name: name, Input: []byte(`{}`)}
+			err := manager.EvaluateToolUse(context.Background(), tool, call)
+			assert.NoError(t, err, "expected %s to be allowed in acceptEdits mode", name)
+		}
+	})
+
+	t.Run("acceptEdits falls through for non-edit tools", func(t *testing.T) {
+		config := &Config{Mode: ModeAcceptEdits}
+		manager := NewManager(config, nil)
+
+		// Non-edit tool with no dialog = auto-allow via confirm
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err) // nil dialog = auto-allow
+	})
+
+	t.Run("acceptEdits with nil tool", func(t *testing.T) {
+		config := &Config{Mode: ModeAcceptEdits}
+		manager := NewManager(config, nil)
+
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+		// nil tool: isEditOperation returns false, falls through to confirm (nil dialog = auto-allow)
+		err := manager.EvaluateToolUse(context.Background(), nil, call)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCustomSpecifierFields(t *testing.T) {
+	t.Run("custom specifier field takes precedence", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AllowSpecifierRule("Bash", "safe*"),
+			},
+			SpecifierFields: map[string]SpecifierFieldFunc{
+				"Bash": func(input json.RawMessage) string {
+					return jsonStringField(input, "script")
+				},
+			},
+		}
+		manager := NewManager(config, nil)
+
+		tool := &mockTool{name: "Bash"}
+
+		// Uses custom "script" field, not default "command"
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"script": "safe-run", "command": "dangerous"}`)}
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+
+		// Custom field doesn't match, falls through
+		call = &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"script": "danger", "command": "safe-run"}`)}
+		err = manager.EvaluateToolUse(context.Background(), tool, call)
+		// Falls through to default (nil dialog = auto-allow)
+		assert.NoError(t, err)
+	})
+}
+
+func TestMatchGlobExtended(t *testing.T) {
+	t.Run("question mark wildcard", func(t *testing.T) {
+		assert.True(t, MatchGlob("Bas?", "Bash"))
+		assert.True(t, MatchGlob("Bas?", "Bass"))
+		assert.False(t, MatchGlob("Bas?", "Ba"))
+		assert.False(t, MatchGlob("Bas?", "Basher"))
+	})
+
+	t.Run("unclosed brace treated as literal", func(t *testing.T) {
+		assert.True(t, MatchGlob("{unclosed", "{unclosed"))
+		assert.False(t, MatchGlob("{unclosed", "unclosed"))
+	})
+
+	t.Run("special regex chars are escaped", func(t *testing.T) {
+		assert.True(t, MatchGlob("file.go", "file.go"))
+		assert.False(t, MatchGlob("file.go", "filexgo"))
+	})
+}
+
+func TestMatchPathExtended(t *testing.T) {
+	t.Run("question mark in path mode", func(t *testing.T) {
+		assert.True(t, MatchPath("/path/to/fil?", "/path/to/file"))
+		assert.False(t, MatchPath("/path/to/fil?", "/path/to/fi"))
+		// ? should not cross directory boundary in path mode
+		assert.False(t, MatchPath("/path/to?file", "/path/to/file"))
+	})
+
+	t.Run("star does not cross directories in path mode", func(t *testing.T) {
+		assert.True(t, MatchPath("/path/*/file", "/path/to/file"))
+		assert.False(t, MatchPath("/path/*/file", "/path/to/sub/file"))
+	})
+}
+
+func TestEvaluateNilInputs(t *testing.T) {
+	t.Run("nil tool and nil call", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+		manager := NewManager(config, nil)
+		// nil tool/call: rules return noDecision, evaluateMode uses default,
+		// nil dialog = auto-allow
+		err := manager.EvaluateToolUse(context.Background(), nil, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("nil tool with bypass mode", func(t *testing.T) {
+		config := &Config{Mode: ModeBypassPermissions}
+		manager := NewManager(config, nil)
+		err := manager.EvaluateToolUse(context.Background(), nil, nil)
+		assert.NoError(t, err)
+	})
+}
+
+func TestPlanModeWithNilAnnotations(t *testing.T) {
+	config := &Config{Mode: ModePlan}
+	manager := NewManager(config, nil)
+
+	// Tool with nil annotations should be denied
+	tool := &mockTool{name: "CustomTool", annotations: nil}
+	call := &llm.ToolUseContent{Name: "CustomTool", Input: []byte(`{}`)}
+	err := manager.EvaluateToolUse(context.Background(), tool, call)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "plan mode")
+}
+
+// Integration-style tests that exercise the full permission flow.
+func TestIntegrationFlow(t *testing.T) {
+	t.Run("realistic agent config: allow reads, ask bash, deny rm", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AllowRule("Read"),
+				AllowRule("Glob"),
+				AllowRule("Grep"),
+				DenySpecifierRule("Bash", "rm *", "rm commands are not allowed"),
+				AskRule("Bash", "Execute shell command?"),
+				AllowRule("Edit"),
+			},
+		}
+
+		var dialogCalls int
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			dialogCalls++
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+		ctx := context.Background()
+
+		// Read should be allowed without dialog
+		err := manager.EvaluateToolUse(ctx,
+			&mockTool{name: "Read", annotations: &dive.ToolAnnotations{ReadOnlyHint: true}},
+			&llm.ToolUseContent{Name: "Read", Input: []byte(`{"file_path": "main.go"}`)})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, dialogCalls)
+
+		// Glob should be allowed without dialog
+		err = manager.EvaluateToolUse(ctx,
+			&mockTool{name: "Glob", annotations: &dive.ToolAnnotations{ReadOnlyHint: true}},
+			&llm.ToolUseContent{Name: "Glob", Input: []byte(`{"pattern": "*.go"}`)})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, dialogCalls)
+
+		// rm command should be denied by specifier rule
+		err = manager.EvaluateToolUse(ctx,
+			&mockTool{name: "Bash"},
+			&llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "rm commands are not allowed")
+		assert.Equal(t, 0, dialogCalls) // deny rules don't trigger dialog
+
+		// Safe bash should trigger ask dialog
+		err = manager.EvaluateToolUse(ctx,
+			&mockTool{name: "Bash"},
+			&llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "go test ./..."}`)})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, dialogCalls)
+
+		// Edit should be allowed without dialog
+		err = manager.EvaluateToolUse(ctx,
+			&mockTool{name: "Edit"},
+			&llm.ToolUseContent{Name: "Edit", Input: []byte(`{"file_path": "main.go"}`)})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, dialogCalls)
+	})
+
+	t.Run("mode transition: default -> plan -> bypass -> dontAsk", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		bashTool := &mockTool{name: "Bash"}
+		readTool := &mockTool{name: "Read", annotations: &dive.ToolAnnotations{ReadOnlyHint: true}}
+		bashCall := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+		readCall := &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)}
+
+		// Default mode: both allowed (nil dialog = auto-allow)
+		assert.NoError(t, manager.EvaluateToolUse(ctx, bashTool, bashCall))
+		assert.NoError(t, manager.EvaluateToolUse(ctx, readTool, readCall))
+
+		// Plan mode: only read-only allowed
+		manager.SetMode(ModePlan)
+		assert.Error(t, manager.EvaluateToolUse(ctx, bashTool, bashCall))
+		assert.NoError(t, manager.EvaluateToolUse(ctx, readTool, readCall))
+
+		// Bypass mode: everything allowed
+		manager.SetMode(ModeBypassPermissions)
+		assert.NoError(t, manager.EvaluateToolUse(ctx, bashTool, bashCall))
+		assert.NoError(t, manager.EvaluateToolUse(ctx, readTool, readCall))
+
+		// DontAsk mode: everything denied without explicit rules
+		manager.SetMode(ModeDontAsk)
+		assert.Error(t, manager.EvaluateToolUse(ctx, bashTool, bashCall))
+		assert.Error(t, manager.EvaluateToolUse(ctx, readTool, readCall))
+	})
+
+	t.Run("session allowlist overrides mode", func(t *testing.T) {
+		config := &Config{Mode: ModeDontAsk}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		bashTool := &mockTool{name: "Bash"}
+		bashCall := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		// DontAsk denies everything
+		assert.Error(t, manager.EvaluateToolUse(ctx, bashTool, bashCall))
+
+		// Session allowlist overrides
+		manager.AllowForSession("bash")
+		assert.NoError(t, manager.EvaluateToolUse(ctx, bashTool, bashCall))
+
+		// Clear and verify it's denied again
+		manager.ClearSessionAllowlist()
+		assert.Error(t, manager.EvaluateToolUse(ctx, bashTool, bashCall))
+	})
+
+	t.Run("rules override mode", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeBypassPermissions,
+			Rules: Rules{
+				DenyRule("Bash", "bash is forbidden"),
+			},
+		}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		bashTool := &mockTool{name: "Bash"}
+		bashCall := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		// Deny rule takes precedence even in bypass mode
+		err := manager.EvaluateToolUse(ctx, bashTool, bashCall)
+		assert.Error(t, err)
+		assert.Equal(t, "bash is forbidden", err.Error())
+	})
+
+	t.Run("MCP tool glob patterns with specifiers", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AllowRule("mcp__*"),
+				DenySpecifierRule("Bash", "curl *evil*", "blocked URL"),
+			},
+		}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		// MCP tools should all be allowed
+		for _, name := range []string{"mcp__ide__getDiagnostics", "mcp__git__status", "mcp__custom__tool"} {
+			tool := &mockTool{name: name}
+			call := &llm.ToolUseContent{Name: name, Input: []byte(`{}`)}
+			assert.NoError(t, manager.EvaluateToolUse(ctx, tool, call))
+		}
+
+		// Non-MCP tool should not match MCP rule
+		tool := &mockTool{name: "Read"}
+		call := &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)}
+		// Falls through to default (nil dialog = auto-allow)
+		assert.NoError(t, manager.EvaluateToolUse(ctx, tool, call))
+	})
+
+	t.Run("brace alternatives in tool patterns", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AllowRule("{Read,Glob,Grep}"),
+			},
+		}
+		manager := NewManager(config, &dive.DenyAllDialog{})
+		ctx := context.Background()
+
+		// Matching tools should be allowed
+		for _, name := range []string{"Read", "Glob", "Grep"} {
+			tool := &mockTool{name: name}
+			call := &llm.ToolUseContent{Name: name, Input: []byte(`{}`)}
+			assert.NoError(t, manager.EvaluateToolUse(ctx, tool, call))
+		}
+
+		// Non-matching tool should be denied (DenyAllDialog)
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+		assert.Error(t, manager.EvaluateToolUse(ctx, tool, call))
+	})
+
+	t.Run("hook integration with agent HookContext", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AllowRule("Read"),
+				DenyRule("Bash", "not allowed"),
+			},
+		}
+		hook := Hook(config, nil)
+
+		// Simulate agent calling PreToolUse hook
+		readCtx := &dive.HookContext{
+			Tool: &mockTool{name: "Read"},
+			Call: &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)},
+		}
+		assert.NoError(t, hook(context.Background(), readCtx))
+
+		bashCtx := &dive.HookContext{
+			Tool: &mockTool{name: "Bash"},
+			Call: &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)},
+		}
+		err := hook(context.Background(), bashCtx)
+		assert.Error(t, err)
+		assert.Equal(t, "not allowed", err.Error())
+	})
+
+	t.Run("audit hook captures all tool calls", func(t *testing.T) {
+		var calls []string
+		auditHook := AuditHook(func(name string, input []byte) {
+			calls = append(calls, name)
+		})
+
+		// Simulate a sequence of tool calls
+		tools := []string{"Read", "Bash", "Edit", "Glob"}
+		for _, name := range tools {
+			hookCtx := &dive.HookContext{
+				Tool: &mockTool{name: name},
+				Call: &llm.ToolUseContent{Name: name, Input: []byte(`{}`)},
+			}
+			err := auditHook(context.Background(), hookCtx)
+			assert.NoError(t, err) // audit hook never blocks
+		}
+		assert.Equal(t, tools, calls)
+	})
+
+	t.Run("HookFromManager preserves manager state", func(t *testing.T) {
+		config := &Config{Mode: ModeDontAsk}
+		manager := NewManager(config, nil)
+		hook := HookFromManager(manager)
+		ctx := context.Background()
+
+		bashCtx := &dive.HookContext{
+			Tool: &mockTool{name: "Bash"},
+			Call: &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)},
+		}
+
+		// Initially denied
+		assert.Error(t, hook(ctx, bashCtx))
+
+		// Allow via session allowlist on the same manager
+		manager.AllowForSession("bash")
+		assert.NoError(t, hook(ctx, bashCtx))
+
+		// Change mode on the same manager
+		manager.SetMode(ModeBypassPermissions)
+		manager.ClearSessionAllowlist()
+		assert.NoError(t, hook(ctx, bashCtx))
+	})
+
+	t.Run("specifier with no matching default field", func(t *testing.T) {
+		config := &Config{
+			Mode: ModeDefault,
+			Rules: Rules{
+				AllowSpecifierRule("CustomTool", "safe*"),
+			},
+		}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		tool := &mockTool{name: "CustomTool"}
+		// CustomTool has no default specifier field, so specifier is "",
+		// and the specifier rule doesn't match. Falls through to default.
+		call := &llm.ToolUseContent{Name: "CustomTool", Input: []byte(`{"value": "safe-thing"}`)}
+		err := manager.EvaluateToolUse(ctx, tool, call)
+		assert.NoError(t, err) // nil dialog = auto-allow
+	})
+
+	t.Run("audit hook with nil logger is safe", func(t *testing.T) {
+		hook := AuditHook(nil)
+		hookCtx := &dive.HookContext{
+			Tool: &mockTool{name: "Read"},
+			Call: &llm.ToolUseContent{Name: "Read", Input: []byte(`{}`)},
+		}
+		err := hook(context.Background(), hookCtx)
+		assert.NoError(t, err)
 	})
 }
