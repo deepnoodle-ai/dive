@@ -1,6 +1,8 @@
 package permission
 
 import (
+	"net"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -32,22 +34,20 @@ func MatchGlob(pattern, value string) bool {
 
 // MatchDomain checks if a URL's host matches or is a subdomain of the given domain.
 func MatchDomain(urlStr, domain string) bool {
-	host := urlStr
-
-	// Remove protocol
-	if idx := strings.Index(host, "://"); idx != -1 {
-		host = host[idx+3:]
+	// Ensure the string has a scheme so url.Parse treats it as absolute.
+	if !strings.Contains(urlStr, "://") {
+		urlStr = "https://" + urlStr
 	}
-	host = strings.TrimPrefix(host, "//")
-
-	// Remove path
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return false
 	}
+	host := u.Hostname() // strips port and brackets for IPv6
+	// For bracketed IPv6 that Hostname might not fully strip:
+	host = strings.Trim(host, "[]")
 
-	// Remove port
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
+	if h, _, err := net.SplitHostPort(u.Host); err == nil {
+		host = strings.Trim(h, "[]")
 	}
 
 	if host == domain {

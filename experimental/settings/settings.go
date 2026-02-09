@@ -138,13 +138,13 @@ func parseParameterizedPattern(toolName, args string, ruleType permission.RuleTy
 		return parseWebFetchPattern(args, ruleType)
 
 	default:
-		// Generic tool with arguments - treat args as input pattern
+		// Generic tool with arguments - treat args as glob pattern against input
 		rule := permission.Rule{
 			Type: ruleType,
 			Tool: toolName,
 			InputMatch: func(input any) bool {
 				inputBytes, _ := json.Marshal(input)
-				return strings.Contains(string(inputBytes), args)
+				return permission.MatchGlob(args, string(inputBytes))
 			},
 		}
 		return &rule

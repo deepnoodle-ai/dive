@@ -469,6 +469,15 @@ func TestMatchDomain(t *testing.T) {
 		// With ports
 		{"https://example.com:8080/path", "example.com", true},
 		{"https://sub.example.com:443", "example.com", true},
+
+		// IPv6 addresses
+		{"https://[::1]:8080/path", "::1", true},
+		{"https://[::1]/path", "::1", true},
+		{"https://[::1]:8080/path", "example.com", false},
+
+		// Bare host (no scheme)
+		{"example.com/path", "example.com", true},
+		{"sub.example.com", "example.com", true},
 	}
 
 	for _, tt := range tests {
@@ -538,6 +547,27 @@ func TestParseRule(t *testing.T) {
 	t.Run("empty spec returns error", func(t *testing.T) {
 		_, err := ParseRule(RuleAllow, "")
 		assert.Error(t, err)
+	})
+
+	t.Run("empty specifier returns error", func(t *testing.T) {
+		_, err := ParseRule(RuleAllow, "Bash()")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty specifier")
+	})
+
+	t.Run("whitespace-only tool pattern treated as simple pattern", func(t *testing.T) {
+		// "  (x)" after trim is "(x)" — idx==0 so not parameterized
+		rule, err := ParseRule(RuleAllow, "  (x)")
+		assert.NoError(t, err)
+		assert.Equal(t, "(x)", rule.Tool)
+		assert.Equal(t, "", rule.Specifier)
+	})
+
+	t.Run("whitespace in tool and specifier is trimmed", func(t *testing.T) {
+		rule, err := ParseRule(RuleAllow, " Bash ( go test * ) ")
+		assert.NoError(t, err)
+		assert.Equal(t, "Bash", rule.Tool)
+		assert.Equal(t, "go test *", rule.Specifier)
 	})
 
 	t.Run("roundtrip with String", func(t *testing.T) {

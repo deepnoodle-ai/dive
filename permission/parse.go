@@ -15,8 +15,14 @@ func ParseRule(ruleType RuleType, spec string) (Rule, error) {
 
 	// Check for parameterized pattern: ToolName(specifier)
 	if idx := strings.Index(spec, "("); idx > 0 && strings.HasSuffix(spec, ")") {
-		toolPattern := spec[:idx]
-		specifier := spec[idx+1 : len(spec)-1]
+		toolPattern := strings.TrimSpace(spec[:idx])
+		specifier := strings.TrimSpace(spec[idx+1 : len(spec)-1])
+		if toolPattern == "" {
+			return Rule{}, fmt.Errorf("empty tool pattern in rule spec: %s", spec)
+		}
+		if specifier == "" {
+			return Rule{}, fmt.Errorf("empty specifier in rule spec: %s", spec)
+		}
 		return Rule{
 			Type:      ruleType,
 			Tool:      toolPattern,
