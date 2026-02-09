@@ -1,5 +1,5 @@
 
-.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy check
+.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy tidy-all check
 
 COVER_PROFILE := cover.out
 
@@ -14,7 +14,8 @@ help:
 	@echo "  make fmt-check   - Fail if Go or Markdown files need formatting"
 	@echo "  make fmt-md-check - Fail if Markdown files need formatting"
 	@echo "  make vet         - Run go vet on all packages"
-	@echo "  make tidy        - Tidy module dependencies"
+	@echo "  make tidy        - Tidy root module dependencies"
+	@echo "  make tidy-all    - Tidy and format all modules"
 	@echo "  make build       - Build the dive CLI"
 	@echo "  make check       - Run fmt-check, vet, and test"
 
@@ -51,8 +52,16 @@ fmt-md-check:
 vet:
 	go vet ./...
 
+GO_MODULES := . providers/google providers/openai experimental/mcp experimental/cmd/dive
+
 tidy:
 	go mod tidy
+
+tidy-all:
+	@for dir in $(GO_MODULES); do \
+		echo "==> $$dir"; \
+		(cd $$dir && go mod tidy && gofmt -w $$(find . -name '*.go' -not -path './.git/*')); \
+	done
 
 build:
 	cd experimental/cmd/dive && go build .

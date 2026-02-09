@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	// Register for llama/mixtral/gemma models (fallback when Groq not available)
+	// Register for llama/mixtral/gemma models
 	providers.Register(providers.ProviderEntry{
 		Name:    "ollama",
 		Match:   providers.PrefixesMatcher("llama", "mixtral", "gemma"),

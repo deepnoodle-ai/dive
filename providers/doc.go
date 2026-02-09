@@ -11,7 +11,6 @@
 //   - [github.com/deepnoodle-ai/dive/providers/openai] - OpenAI Responses API
 //   - [github.com/deepnoodle-ai/dive/providers/openaicompletions] - OpenAI Chat Completions API
 //   - [github.com/deepnoodle-ai/dive/providers/grok] - X.AI Grok models
-//   - [github.com/deepnoodle-ai/dive/providers/groq] - Groq inference engine
 //   - [github.com/deepnoodle-ai/dive/providers/mistral] - Mistral models
 //   - [github.com/deepnoodle-ai/dive/providers/ollama] - Local model serving
 //   - [github.com/deepnoodle-ai/dive/providers/openrouter] - Multi-provider proxy

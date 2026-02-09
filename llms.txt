@@ -30,7 +30,6 @@ Each provider reads its API key from an environment variable:
 - `OPENAI_API_KEY` - OpenAI, OpenAI Completions
 - `GEMINI_API_KEY` or `GOOGLE_API_KEY` - Google
 - `XAI_API_KEY` or `GROK_API_KEY` - Grok
-- `GROQ_API_KEY` - Groq
 - `MISTRAL_API_KEY` - Mistral
 - `OLLAMA_API_KEY` - Ollama (optional; defaults to "ollama")
 - `OPENROUTER_API_KEY` - OpenRouter
@@ -350,7 +349,6 @@ All support tool calling. Each self-registers via init(). Providers with their o
 - `providers/google` - Gemini models (own go.mod)
 - `providers/openaicompletions` - OpenAI Chat Completions API
 - `providers/grok` - X.AI Grok models
-- `providers/groq` - Groq inference
 - `providers/mistral` - Mistral models
 - `providers/ollama` - Local models via Ollama
 - `providers/openrouter` - Multi-provider proxy

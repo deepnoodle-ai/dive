@@ -2,6 +2,7 @@ package openrouter
 
 const (
 	// Anthropic models
+	ModelClaudeOpus46   = "anthropic/claude-opus-4-6"
 	ModelClaudeOpus45   = "anthropic/claude-opus-4-5"
 	ModelClaudeSonnet45 = "anthropic/claude-sonnet-4-5"
 	ModelClaudeHaiku45  = "anthropic/claude-haiku-4-5"

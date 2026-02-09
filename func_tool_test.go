@@ -55,9 +55,9 @@ func TestFuncTool(t *testing.T) {
 				return NewToolResultText("ok"), nil
 			},
 			WithFuncToolAnnotations(&ToolAnnotations{
-				ReadOnlyHint:   true,
-				OpenWorldHint:  true,
-				Title:          "Weather",
+				ReadOnlyHint:  true,
+				OpenWorldHint: true,
+				Title:         "Weather",
 			}),
 		)
 

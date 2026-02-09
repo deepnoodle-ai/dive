@@ -40,18 +40,6 @@ model := google.New() // defaults to gemini-2.5-pro
 **Models:** See `providers/google/models.go` for available models.
 **Features:** Streaming, tool calling, multimodal
 
-### Groq
-
-```go
-import "github.com/deepnoodle-ai/dive/providers/groq"
-
-model := groq.New()
-```
-
-**Env:** `GROQ_API_KEY`
-**Models:** See `providers/groq/models.go` for available models.
-**Features:** High-speed inference, streaming
-
 ### Grok (X.AI)
 
 ```go
