@@ -2,6 +2,7 @@ package openrouter
 
 const (
 	// Anthropic models
+	ModelClaudeOpus46   = "anthropic/claude-opus-4-6"
 	ModelClaudeOpus45   = "anthropic/claude-opus-4-5"
 	ModelClaudeSonnet45 = "anthropic/claude-sonnet-4-5"
 	ModelClaudeHaiku45  = "anthropic/claude-haiku-4-5"
@@ -28,7 +29,7 @@ const (
 	// xAI models
 	ModelGrok41FastReasoning = "x-ai/grok-4-1-fast-reasoning"
 	ModelGrok4FastReasoning  = "x-ai/grok-4-fast-reasoning"
-	ModelGrok3               = "x-ai/grok-3"
+	ModelGrok3              = "x-ai/grok-3"
 
 	// Mistral models
 	ModelMistralLarge3 = "mistral/mistral-large-3"

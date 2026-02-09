@@ -12,12 +12,15 @@ const (
 	ModelClaudeOpus4120250805  = "claude-opus-4-1-20250805"
 
 	// Claude 4.5 models (dated)
-	ModelClaudeHaiku4520251015  = "claude-haiku-4-5-20251015"
+	ModelClaudeHaiku4520251001  = "claude-haiku-4-5-20251001"
 	ModelClaudeSonnet4520250929 = "claude-sonnet-4-5-20250929"
-	ModelClaudeOpus4520251125   = "claude-opus-4-5-20251125"
+	ModelClaudeOpus4520251101   = "claude-opus-4-5-20251101"
 
 	// Claude 4.5 models (latest, without date suffix)
 	ModelClaudeHaiku45  = "claude-haiku-4-5"
 	ModelClaudeSonnet45 = "claude-sonnet-4-5"
 	ModelClaudeOpus45   = "claude-opus-4-5"
+
+	// Claude 4.6 models
+	ModelClaudeOpus46 = "claude-opus-4-6"
 )
