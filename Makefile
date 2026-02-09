@@ -1,5 +1,5 @@
 
-.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy tidy-all check
+.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy tidy-all tag-modules check
 
 COVER_PROFILE := cover.out
 
@@ -17,6 +17,7 @@ help:
 	@echo "  make tidy        - Tidy root module dependencies"
 	@echo "  make tidy-all    - Tidy and format all modules"
 	@echo "  make build       - Build the dive CLI"
+	@echo "  make tag-modules VERSION=v1.0.0 - Tag all sub-modules"
 	@echo "  make check       - Run fmt-check, vet, and test"
 
 test:
@@ -52,7 +53,7 @@ fmt-md-check:
 vet:
 	go vet ./...
 
-GO_MODULES := . providers/google providers/openai experimental/mcp experimental/cmd/dive
+GO_MODULES := . providers/google providers/openai experimental/mcp experimental/cmd/dive examples
 
 tidy:
 	go mod tidy
@@ -65,5 +66,18 @@ tidy-all:
 
 build:
 	cd experimental/cmd/dive && go build .
+
+SUB_MODULES := providers/google providers/openai experimental/mcp experimental/cmd/dive examples
+
+tag-modules:
+ifndef VERSION
+	$(error VERSION is required. Usage: make tag-modules VERSION=v1.0.0)
+endif
+	@for mod in $(SUB_MODULES); do \
+		echo "Tagging $$mod/$(VERSION)"; \
+		git tag "$$mod/$(VERSION)"; \
+	done
+	@echo ""
+	@echo "Tags created. Push with: git push origin --tags"
 
 check: fmt-check vet test
