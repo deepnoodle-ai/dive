@@ -12,11 +12,9 @@ provide the system prompt and decide which tools and hooks to install.
 
 A single `CreateResponse` call runs the full agent loop. It generates, calls
 tools, feeds results back to the LLM, and repeats until the model produces a
-final response or hits the iteration limit. Agents are stateless. Each call
-takes messages in and returns a response. To maintain a conversation across
-calls, pass the previous messages plus new ones on each call. Alternatively,
-use PreGeneration/PostGeneration hooks to load and save session history. The
-experimental `session` package provides a ready-made hook-based implementation.
+final response or hits the iteration limit. Agents are stateless by default.
+Set `AgentOptions.Session` to enable automatic history loading and saving, or
+accumulate messages manually across calls.
 
 Module: `github.com/deepnoodle-ai/dive`
 
@@ -177,6 +175,7 @@ Hook helpers: `InjectContext`, `CompactionHook`, `UsageLogger`, `UsageLoggerWith
 ## Key types
 
 - `dive.Agent` - created via `dive.NewAgent(AgentOptions)`, runs the generate-call-repeat loop
+- `dive.Session` - interface: ID, Messages, SaveTurn; set on AgentOptions or pass via WithSession
 - `dive.Tool` - interface: Name, Description, Schema, Annotations, Call
 - `dive.TypedTool[T]` - generic tool with typed input; wrap with `dive.ToolAdapter()`
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
@@ -228,36 +227,67 @@ Each `ResponseItem` has a `Type` and one populated field:
 - `ResponseItemTypeToolCallResult` - `item.ToolCallResult` (*dive.ToolCallResult)
 - `ResponseItemTypeModelEvent` - `item.Event` (*llm.Event, for streaming deltas)
 
-## Multi-turn conversation
+## Sessions
 
-Agents are stateless. To maintain a conversation, accumulate messages across
-calls using `response.OutputMessages`:
+Sessions provide persistent conversation state. The agent automatically loads
+history before generation and saves new messages after.
 
 ```go
+// In-memory session
+sess := session.New("my-session")
 agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "You are a helpful assistant.",
     Model:        anthropic.New(),
+    Session:      sess,
 })
 
-// First turn
+resp, _ := agent.CreateResponse(ctx, dive.WithInput("Hi, my name is Alice."))
+resp, _ = agent.CreateResponse(ctx, dive.WithInput("What's my name?"))
+// "Your name is Alice."
+
+// Persistent session (JSONL files)
+store, _ := session.NewFileStore("~/.myapp/sessions")
+sess, _ := store.Open(ctx, "my-session")
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:   anthropic.New(),
+    Session: sess,
+})
+
+// Per-call override (one agent, many sessions)
+resp, _ := agent.CreateResponse(ctx,
+    dive.WithInput("Hello"),
+    dive.WithSession(userSession),
+)
+```
+
+Session types (`session` package):
+- `session.New(id)` - in-memory session
+- `session.NewMemoryStore()` - in-memory store
+- `session.NewFileStore(dir)` - JSONL file store
+- `store.Open(ctx, id)` - open/create session connected to store
+- `store.Put(ctx, sess)` - save session (e.g. after Fork)
+- `store.List(ctx, opts)` - list session summaries
+- `store.Delete(ctx, id)` - delete session
+- `sess.Fork(newID)` - deep-copy into new session
+- `sess.Compact(ctx, summarizer)` - replace events with summary
+- `sess.TotalUsage()` - sum token usage
+- `session.ForkSession(ctx, store, fromID, newID)` - fork + persist
+
+## Multi-turn without sessions
+
+Accumulate messages manually using `response.OutputMessages`:
+
+```go
 var messages []*llm.Message
 resp, _ := agent.CreateResponse(ctx, dive.WithInput("Hi, my name is Alice."))
-fmt.Println(resp.OutputText())
-
-// Accumulate: input messages + output messages
 messages = append(messages, llm.NewUserTextMessage("Hi, my name is Alice."))
 messages = append(messages, resp.OutputMessages...)
-
-// Second turn: add new user message and pass full history
 messages = append(messages, llm.NewUserTextMessage("What's my name?"))
 resp, _ = agent.CreateResponse(ctx, dive.WithMessages(messages...))
-fmt.Println(resp.OutputText()) // "Your name is Alice."
 ```
 
 `OutputMessages` includes both assistant messages and tool result messages
-in the correct order for the LLM. This is important when the agent uses
-tools — `response.Items` shows what happened but `OutputMessages` provides
-the complete message sequence needed to continue the conversation.
+in the correct order for the LLM.
 
 ## Content types (llm/)
 
@@ -316,7 +346,7 @@ All constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 
 ## Experimental (experimental/)
 
-Session, Permission, Compaction, Subagent, Sandbox, MCP, Skills, Slash Commands, Settings, Todo, extended Toolkit, CLI.
+Permission, Compaction, Subagent, Sandbox, MCP, Skills, Slash Commands, Settings, Todo, extended Toolkit, CLI.
 
 Guides: docs/guides/experimental/
 

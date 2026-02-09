@@ -16,15 +16,17 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 ### Core Types
 
 - **Agent** (`agent.go`): Created via `NewAgent(AgentOptions)`, returns `*Agent`. Manages tool execution and conversation.
+- **Session** (`dive.go`): `Session` interface (`ID`, `Messages`, `SaveTurn`). Set on `AgentOptions.Session` or per-call via `WithSession`. The `session` package provides `New()` (in-memory) and store-backed implementations.
 - **LLM** (`llm/llm.go`): `LLM` and `StreamingLLM` interfaces abstract over providers.
 - **Tool** (`tool.go`): `Tool` and `TypedTool[T]` interfaces. All toolkit constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 - **Hooks** (`hooks.go`): `Hooks` struct groups hook slices on `AgentOptions`. Hook types: `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook`, `PostToolUseFailureHook`, `StopHook`, `PreIterationHook`. All hooks receive `*HookContext`.
 
 ### Packages
 
+- `session/` — Persistent conversation state: `Session` struct (implements `dive.Session`), `Store` interface, `MemoryStore`, `FileStore`, Fork, Compact.
 - `providers/` — LLM providers (Anthropic, OpenAI, Google, Grok, Groq, Mistral, Ollama, OpenRouter). Registry-based (`providers/registry.go`), self-registering via `init()`.
 - `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser).
-- `experimental/` — Functional but unstable APIs: permission, session, settings, sandbox, mcp, skill, slashcmd, subagent, compaction, todo, toolkit.
+- `experimental/` — Functional but unstable APIs: permission, settings, sandbox, mcp, skill, slashcmd, subagent, compaction, todo, toolkit.
 
 ### Design Philosophy
 
@@ -33,9 +35,9 @@ Anthropic's tuning of Claude for these tool patterns.
 
 ### Hook Flow
 
-PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration
+SessionLoad → PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration → SessionSave
 
-PreToolUse hooks return `nil` (allow) or `error` (deny). All hooks run; any error denies the tool. Stop hooks can return `Continue: true` to re-enter the loop.
+Session load/save is automatic when `AgentOptions.Session` or `WithSession` is set. PreToolUse hooks return `nil` (allow) or `error` (deny). All hooks run; any error denies the tool. Stop hooks can return `Continue: true` to re-enter the loop.
 
 ## Documentation
 
