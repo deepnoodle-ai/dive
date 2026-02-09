@@ -157,6 +157,7 @@ func (s *FileStore) List(ctx context.Context, opts *ListOptions) (*ListResult, e
 			CreatedAt:  data.CreatedAt,
 			UpdatedAt:  data.UpdatedAt,
 			EventCount: len(data.Events),
+			Metadata:   data.Metadata,
 		})
 	}
 

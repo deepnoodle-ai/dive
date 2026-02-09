@@ -15,12 +15,12 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/experimental/session"
 	"github.com/deepnoodle-ai/dive/experimental/slashcmd"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
 	"github.com/deepnoodle-ai/dive/permission"
+	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
@@ -123,10 +123,10 @@ func runInteractive(ctx *cli.Context) error {
 	// Create tools
 	tools := createTools(workspaceDir, tuiDialog)
 
-	// Create session repository
-	sessionRepo, err := session.NewFileRepository("~/.dive/sessions")
+	// Create session store
+	sessionStore, err := session.NewFileStore("~/.dive/sessions")
 	if err != nil {
-		return fmt.Errorf("failed to create session repository: %w", err)
+		return fmt.Errorf("failed to create session store: %w", err)
 	}
 
 	// Handle --resume flag
@@ -138,7 +138,7 @@ func runInteractive(ctx *cli.Context) error {
 		if len(args) > 0 {
 			filter = args[0]
 		}
-		result, err := RunSessionPicker(sessionRepo, filter, workspaceDir)
+		result, err := RunSessionPicker(sessionStore, filter, workspaceDir)
 		if err != nil {
 			return fmt.Errorf("session picker failed: %w", err)
 		}
@@ -154,6 +154,13 @@ func runInteractive(ctx *cli.Context) error {
 		sessionID = newSessionID()
 	}
 
+	// Open the session
+	bgCtx := context.Background()
+	currentSession, err := sessionStore.Open(bgCtx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to open session: %w", err)
+	}
+
 	// Get initial prompt from args (if not resuming)
 	var initialPrompt string
 	if !ctx.Bool("resume") {
@@ -162,32 +169,6 @@ func runInteractive(ctx *cli.Context) error {
 			initialPrompt = strings.Join(args, " ")
 		}
 	}
-
-	// appPtr is set after App creation; closures below capture it by pointer.
-	var appPtr *App
-
-	// Set up session ID hook (injects session_id into generation state).
-	// Reads from app.currentSessionID dynamically so /clear can reset it.
-	// If currentSessionID is empty, generates a new one (fresh conversation).
-	sessionIDHook := func(_ context.Context, hctx *dive.HookContext) error {
-		if hctx.Values == nil {
-			hctx.Values = map[string]any{}
-		}
-		if appPtr != nil && appPtr.currentSessionID == "" {
-			// Generate a new session ID after /clear
-			appPtr.currentSessionID = newSessionID()
-		}
-		if appPtr != nil {
-			hctx.Values["session_id"] = appPtr.currentSessionID
-		} else {
-			hctx.Values["session_id"] = sessionID
-		}
-		return nil
-	}
-
-	// Set up session hooks for multi-turn conversation
-	sessionLoader := session.Loader(sessionRepo)
-	sessionSaver := session.Saver(sessionRepo)
 
 	// Set up tool permission hook using the permission package
 	permConfig := &permission.Config{
@@ -226,9 +207,7 @@ func runInteractive(ctx *cli.Context) error {
 			MaxTokens:   &maxTokens,
 		},
 		Hooks: dive.Hooks{
-			PreGeneration:  []dive.PreGenerationHook{sessionIDHook, sessionLoader},
-			PostGeneration: []dive.PostGenerationHook{sessionSaver},
-			PreToolUse:     []dive.PreToolUseHook{permissionHook},
+			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
 	})
 	if err != nil {
@@ -238,7 +217,7 @@ func runInteractive(ctx *cli.Context) error {
 	// Create App
 	app := NewApp(
 		agent,
-		sessionRepo,
+		sessionStore,
 		workspaceDir,
 		modelName,
 		initialPrompt,
@@ -246,6 +225,7 @@ func runInteractive(ctx *cli.Context) error {
 		resumeSessionID,
 		commandLoader,
 	)
+	app.currentSession = currentSession
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {
@@ -253,9 +233,7 @@ func runInteractive(ctx *cli.Context) error {
 	}
 	app.startupAttachment = attachment
 
-	// Set the session ID on the app and wire up closures
-	app.currentSessionID = sessionID
-	appPtr = app
+	// Wire up dialog
 	tuiDialog.app = app
 
 	return app.Run()
