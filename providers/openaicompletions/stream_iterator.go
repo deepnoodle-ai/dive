@@ -24,8 +24,15 @@ type StreamIterator struct {
 	prefill           string
 	prefillClosingTag string
 	eventCount        int
+	nextBlockIndex    int
 	closeOnce         sync.Once
 	eventQueue        []*llm.Event
+	// thinkingIndex and textIndex track the sequential content block index
+	// assigned to each block type, or -1 if not yet started.
+	thinkingIndex int
+	textIndex     int
+	// toolCallIndices maps OpenAI tool call indices to sequential block indices.
+	toolCallIndices map[int]int
 }
 
 type ToolCallAccumulator struct {
@@ -140,19 +147,19 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 
 	if choice.Delta.Reasoning != "" {
-		// Use a fixed index offset to avoid collisions with text content blocks
-		index := 1000 + choice.Index
-		if _, exists := s.contentBlocks[index]; !exists {
-			s.contentBlocks[index] = &ContentBlockAccumulator{Type: "thinking"}
+		if s.thinkingIndex < 0 {
+			s.thinkingIndex = s.nextBlockIndex
+			s.nextBlockIndex++
+			s.contentBlocks[s.thinkingIndex] = &ContentBlockAccumulator{Type: "thinking"}
 			events = append(events, &llm.Event{
 				Type:         llm.EventTypeContentBlockStart,
-				Index:        &index,
+				Index:        &s.thinkingIndex,
 				ContentBlock: &llm.EventContentBlock{Type: "thinking"},
 			})
 		}
 		events = append(events, &llm.Event{
 			Type:  llm.EventTypeContentBlockDelta,
-			Index: &index,
+			Index: &s.thinkingIndex,
 			Delta: &llm.EventDelta{
 				Type:     llm.EventDeltaTypeThinking,
 				Thinking: choice.Delta.Reasoning,
@@ -170,10 +177,8 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 			}
 			s.prefill = ""
 		}
-		// If this is a new content block, stop any open content blocks and
-		// generate a content_block_start event
-		index := choice.Index
-		if _, exists := s.contentBlocks[index]; !exists {
+		// If this is a new text block, stop any open blocks and start it
+		if s.textIndex < 0 {
 			// Stop any previous content blocks that are still open
 			for prevIndex, prev := range s.contentBlocks {
 				if !prev.IsComplete {
@@ -196,17 +201,19 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 					prev.IsComplete = true
 				}
 			}
-			s.contentBlocks[index] = &ContentBlockAccumulator{Type: "text"}
+			s.textIndex = s.nextBlockIndex
+			s.nextBlockIndex++
+			s.contentBlocks[s.textIndex] = &ContentBlockAccumulator{Type: "text"}
 			events = append(events, &llm.Event{
 				Type:         llm.EventTypeContentBlockStart,
-				Index:        &index,
+				Index:        &s.textIndex,
 				ContentBlock: &llm.EventContentBlock{Type: "text"},
 			})
 		}
 		// Generate a content_block_delta event
 		events = append(events, &llm.Event{
 			Type:  llm.EventTypeContentBlockDelta,
-			Index: &index,
+			Index: &s.textIndex,
 			Delta: &llm.EventDelta{
 				Type: llm.EventDeltaTypeText,
 				Text: choice.Delta.Content,
@@ -216,9 +223,9 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 
 	if len(choice.Delta.ToolCalls) > 0 {
 		for _, toolCallDelta := range choice.Delta.ToolCalls {
-			index := toolCallDelta.Index
-			// If this is a new tool call, generate a content_block_start event
-			if _, exists := s.toolCalls[index]; !exists {
+			// Map OpenAI tool call index to a sequential display index
+			index, known := s.toolCallIndices[toolCallDelta.Index]
+			if !known {
 				// Stop any previous content blocks that are still open
 				for prevIndex, prev := range s.contentBlocks {
 					if !prev.IsComplete {
@@ -241,6 +248,9 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 						prev.IsComplete = true
 					}
 				}
+				index = s.nextBlockIndex
+				s.nextBlockIndex++
+				s.toolCallIndices[toolCallDelta.Index] = index
 				s.toolCalls[index] = &ToolCallAccumulator{Type: "function"}
 				events = append(events, &llm.Event{
 					Type:  llm.EventTypeContentBlockStart,
