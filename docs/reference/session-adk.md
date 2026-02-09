@@ -267,7 +267,7 @@ Partial events (streaming tokens) are silently dropped by `AppendEvent`. This ke
 
 ## Package Structure
 
-```
+```text
 session/
     session.go              # Core interfaces: Session, State, Events, Event
     service.go              # Service interface and request/response types

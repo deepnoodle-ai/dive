@@ -144,7 +144,7 @@ agent, err := dive.NewAgent(dive.AgentOptions{
 })
 ```
 
-`Toolset.Tools()` is called before each LLM request, so the tool set can change between iterations. Tools from toolsets are merged with static `Tools`.
+`Toolset.Tools(ctx context.Context)` is called before each LLM request, returning `([]Tool, error)`, so the tool set can change between iterations. Tools from toolsets are merged with static `Tools`.
 
 ## Tool Annotations
 

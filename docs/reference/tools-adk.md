@@ -195,7 +195,7 @@ if t.OutputSchema != nil {
 
 The LLM returns function call arguments as `map[string]any` (parsed from JSON). The marshaling path in `functiontool.Run()`:
 
-```
+```text
 LLM FunctionCall.Args (map[string]any)
     ↓ typeutil.ConvertToWithJSONSchema[map[string]any, TArgs](args, inputSchema)
         ↓ json.Marshal(args)        →  []byte
@@ -226,7 +226,7 @@ This is a JSON round-trip conversion with optional schema validation in between.
 
 The return path in `functiontool.Run()`:
 
-```
+```text
 handler returns TResults
     ↓ typeutil.ConvertToWithJSONSchema[TResults, map[string]any](output, outputSchema)
     ↓ if conversion fails and output validates against schema:
@@ -238,7 +238,7 @@ The fallback wrapping (`{"result": output}`) handles cases where the output is a
 
 ### Other tools
 
-Non-functiontool implementations handle marshaling manually:
+Non-functiontool implementations handle marshaling manuallylly:
 - **agenttool**: Extracts text from sub-agent's last event, returns `{"result": text}`
 - **mcptool**: Extracts text from MCP `TextContent`, returns `{"output": text}` or `{"output": structuredContent}`
 - **loadmemorytool**: Manually pulls `"query"` from `args.(map[string]any)`, returns `{"memories": entries}`
@@ -287,7 +287,7 @@ Multiple function tools share a single `genai.Tool.FunctionDeclarations` slice. 
 
 When the LLM returns `FunctionCall` parts in its response:
 
-```
+```text
 LLM response contains FunctionCall{ID, Name, Args}
     ↓
 Look up tool by Name in req.Tools map
@@ -566,7 +566,7 @@ Before/After/OnError callbacks for both model and tool calls follow a consistent
 
 ## Package Structure
 
-```
+```text
 tool/
     tool.go                    # Tool, Context, Toolset, Predicate interfaces
     functiontool/
