@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.1] - 2025-02-09
+
+### Changed
+
+- **Decoupled root module** from provider and experimental sub-modules. The root
+  `go.mod` no longer depends on `providers/google`, `providers/openai`, or
+  `experimental/mcp`, significantly reducing transitive dependencies for consumers
+  who only need the core library.
+- **Added `examples/` module** with its own `go.mod` to hold example code separately
+  from the core module.
+- **Added `tag-modules` Makefile target** for tagging all sub-modules in one step
+  (`make tag-modules VERSION=v1.0.0`).
+- **Added `examples` to `tidy-all`** module list in Makefile.
+
 ## [1.0.0] - 2025-02-09
 
 First official stable release. Major architectural overhaul from v0.0.x with a simpler
