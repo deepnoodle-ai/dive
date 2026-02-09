@@ -4,33 +4,47 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing contains pricing for all text generation models
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelGemini3ProPreview: {
+		Model:       ModelGemini3ProPreview,
+		InputPrice:  2.00, // Up to 200K tokens
+		OutputPrice: 12.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-02-09",
+	},
+	ModelGemini3FlashPreview: {
+		Model:       ModelGemini3FlashPreview,
+		InputPrice:  0.50,
+		OutputPrice: 3.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-02-09",
+	},
 	ModelGemini25Flash: {
 		Model:       ModelGemini25Flash,
-		InputPrice:  0.15,
-		OutputPrice: 0.60,
+		InputPrice:  0.30,
+		OutputPrice: 2.50,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-02-09",
 	},
 	ModelGemini25FlashLite: {
 		Model:       ModelGemini25FlashLite,
-		InputPrice:  0.075, // Estimated as typically half of Flash
-		OutputPrice: 0.30,
+		InputPrice:  0.10,
+		OutputPrice: 0.40,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-02-09",
 	},
 	ModelGemini25Pro: {
 		Model:       ModelGemini25Pro,
-		InputPrice:  1.25,
-		OutputPrice: 10.00, // Up to 200K tokens
+		InputPrice:  1.25, // Up to 200K tokens
+		OutputPrice: 10.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-02-09",
 	},
 	ModelGemini25ProLong: {
 		Model:       ModelGemini25ProLong,
 		InputPrice:  2.50, // Over 200K tokens
 		OutputPrice: 15.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-02-09",
 	},
 	ModelGemini20Flash: {
 		Model:       ModelGemini20Flash,
@@ -57,8 +71,8 @@ var TextModelPricing = map[string]llm.PricingInfo{
 
 // ImageModelPricing contains pricing for image generation models
 var ImageModelPricing = map[string]llm.ImagePricingInfo{
-	"gemini-2.5-flash-image": {
-		Model:     "gemini-2.5-flash-image",
+	ModelGemini25FlashImage: {
+		Model:     ModelGemini25FlashImage,
 		Price:     0.039, // $30 per 1M tokens, 1290 tokens per 1024x1024 image
 		MaxSize:   "1024x1024",
 		Currency:  "USD",
