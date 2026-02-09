@@ -247,6 +247,9 @@ type App struct {
 
 	// Initial prompt to submit on startup
 	initialPrompt string
+	// Content attached to the first outbound user message only.
+	startupAttachment string
+	firstUserSent     bool
 
 	// Ctrl+C exit confirmation state
 	lastCtrlC    time.Time
@@ -412,18 +415,21 @@ func (a *App) dialogView() tui.View {
 	case DialogTypeConfirm:
 		// Claude Code style confirmation dialog using PromptChoice
 		purpleStyle := tui.NewStyle().WithFgRGB(purpleColor)
+		confirmTextStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210})
+		confirmInfoStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210}).WithItalic()
 
 		// Upper divider (purple, dashed)
 		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
 
-		// Title (purple, bold)
-		views = append(views, tui.Text(" %s", a.dialogState.Title).Style(purpleStyle.WithBold()))
+		// Title (purple, bold) with explicit permission context
+		views = append(views, tui.Text(" Permission Check: %s", a.dialogState.Title).Style(purpleStyle.WithBold()))
+		views = append(views, tui.Text(" This is a permission prompt. The tool has not run yet.").Style(confirmInfoStyle))
 
 		// Content preview with dashed dividers
 		if a.dialogState.ContentPreview != "" {
-			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+			views = append(views, tui.Text(" Tool Input").Style(confirmTextStyle.WithBold()))
 			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
-				views = append(views, tui.Text(" %s", line).Hint())
+				views = append(views, tui.Text(" %s", line).Style(confirmTextStyle))
 			}
 		}
 
@@ -431,7 +437,7 @@ func (a *App) dialogView() tui.View {
 		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
 
 		// Question
-		views = append(views, tui.Text(" Do you want to proceed?").Muted())
+		views = append(views, tui.Text(" Do you want to proceed with this tool request?").Style(confirmTextStyle.WithBold()))
 
 		// Build option labels
 		allowLabel := "file edits" // Default fallback
@@ -463,11 +469,11 @@ func (a *App) dialogView() tui.View {
 							confirmChan <- ConfirmResult{Approved: false}
 						}
 					}
-					a.dialogState.Active = false
+					a.hideActiveDialog()
 				}).
 				OnCancel(func() {
 					confirmChan <- ConfirmResult{Approved: false}
-					a.dialogState.Active = false
+					a.hideActiveDialog()
 				}),
 		)
 
@@ -523,11 +529,11 @@ func (a *App) dialogView() tui.View {
 				} else {
 					selectChan <- SelectResult{Index: idx}
 				}
-				a.dialogState.Active = false
+				a.hideActiveDialog()
 			}).
 			OnCancel(func() {
 				selectChan <- SelectResult{Index: -1}
-				a.dialogState.Active = false
+				a.hideActiveDialog()
 			})
 
 		views = append(views, promptChoice)
@@ -590,13 +596,26 @@ func (a *App) dialogView() tui.View {
 						value = defaultValue
 					}
 					inputChan <- value
-					a.dialogState.Active = false
+					a.hideActiveDialog()
 				}),
 		)
 		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Hint())
 	}
 
 	return tui.Stack(views...)
+}
+
+// hideActiveDialog closes the current dialog via the event loop and restores
+// focus to the main input.
+func (a *App) hideActiveDialog() {
+	if a.runner == nil {
+		if a.dialogState != nil {
+			a.dialogState.Active = false
+			a.dialogState = nil
+		}
+		return
+	}
+	a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 }
 
 // HandleEvent implements tui.EventHandler - handles all events.
@@ -647,6 +666,9 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 			return []tui.Cmd{tui.Focus("dialog-input")}
 		}
 	case hideDialogEvent:
+		if a.dialogState != nil {
+			a.dialogState.Active = false
+		}
 		a.dialogState = nil
 		return []tui.Cmd{tui.Focus("main-input")}
 	case initialPromptEvent:
@@ -672,7 +694,7 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 		switch {
 		case e.Key == tui.KeyEscape:
 			a.dialogState.MultiSelectChan <- nil
-			a.dialogState.Active = false
+			a.hideActiveDialog()
 		case e.Key == tui.KeyEnter:
 			// Return selected indices based on CheckboxList state
 			var selected []int
@@ -682,7 +704,7 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 				}
 			}
 			a.dialogState.MultiSelectChan <- selected
-			a.dialogState.Active = false
+			a.hideActiveDialog()
 		case e.Rune >= '1' && e.Rune <= '9':
 			// Shortcut to toggle items by number
 			idx := int(e.Rune - '1')
@@ -695,7 +717,7 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 		// Only handle Escape - Enter is handled by InputField's OnSubmit callback
 		if e.Key == tui.KeyEscape {
 			a.dialogState.InputChan <- ""
-			a.dialogState.Active = false
+			a.hideActiveDialog()
 		}
 		// Other keys are handled by InputField
 	}
@@ -891,16 +913,21 @@ func (a *App) submitInput(value string) {
 	}
 
 	// Process message asynchronously
-	go a.processMessageAsync(trimmed)
+	includeStartupAttachment := !a.firstUserSent
+	a.firstUserSent = true
+	go a.processMessageAsync(trimmed, includeStartupAttachment)
 }
 
 // processMessageAsync handles message processing in background.
 // Sends events to the main event loop instead of modifying state directly.
-func (a *App) processMessageAsync(input string) {
+func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 	// Expand file references (uses only immutable workspaceDir)
 	expanded, err := a.expandFileReferences(input)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
+	}
+	if includeStartupAttachment {
+		expanded = appendAttachedContent(expanded, a.startupAttachment)
 	}
 
 	// Send start event to set up state in the main goroutine
@@ -911,11 +938,14 @@ func (a *App) processMessageAsync(input string) {
 // processCommandAsync handles slash command processing in background.
 // displayText is what the user typed (e.g., "/explain go.mod")
 // expanded is the full prompt to send to the agent
-func (a *App) processCommandAsync(displayText, expanded string) {
+func (a *App) processCommandAsync(displayText, expanded string, includeStartupAttachment bool) {
 	// Expand file references in the expanded text
 	expandedWithFiles, err := a.expandFileReferences(expanded)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
+	}
+	if includeStartupAttachment {
+		expandedWithFiles = appendAttachedContent(expandedWithFiles, a.startupAttachment)
 	}
 
 	// Send start event with display text, but send expanded text to agent
@@ -1193,9 +1223,6 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 	if idx, ok := a.toolCallIndex[result.ID]; ok && idx < len(a.messages) {
 		a.messages[idx].ToolDone = true
 		if result.Result != nil {
-			if result.Result.IsError {
-				a.messages[idx].ToolError = true
-			}
 			display := result.Result.Display
 			var textContent string
 			if len(result.Result.Content) > 0 {
@@ -1209,6 +1236,15 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			if display == "" {
 				display = textContent
 			}
+			statusText := textContent
+			if statusText == "" {
+				statusText = display
+			}
+			a.messages[idx].ToolError = shouldDisplayToolError(
+				a.messages[idx].ToolName,
+				result.Result.IsError,
+				statusText,
+			)
 			if display != "" {
 				a.messages[idx].ToolResultLines = strings.Split(display, "\n")
 			}
@@ -1221,6 +1257,13 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			}
 		}
 	}
+}
+
+// shouldDisplayToolError determines whether a tool result should render as an error.
+// AskUserQuestion can return valid custom responses that may be flagged as protocol
+// errors upstream, so we treat valid AskUser JSON output as non-error for UI status.
+func shouldDisplayToolError(_ string, isError bool, _ string) bool {
+	return isError
 }
 
 // handleCompaction processes a compaction event and updates UI state.
@@ -1439,8 +1482,8 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 
 			// If we have a result, extract its content
 			if result != nil {
-				appMsg.ToolError = result.IsError
 				resultText := extractToolResultText(result)
+				appMsg.ToolError = shouldDisplayToolError(c.Name, result.IsError, resultText)
 				if resultText != "" {
 					appMsg.ToolResultLines = strings.Split(resultText, "\n")
 					if len(appMsg.ToolResultLines) > 0 {
@@ -1543,6 +1586,7 @@ func (a *App) handleCommand(input string) bool {
 		a.currentMessage = nil
 		a.streamingMessageIndex = 0
 		a.currentSessionID = ""
+		a.firstUserSent = false
 
 		// Show fresh intro using runner.Print (not tui.Print) since we're
 		// in the middle of the running InlineApp event loop
@@ -1583,7 +1627,9 @@ func (a *App) handleCommand(input string) bool {
 			}
 
 			// Send the expanded instructions to the agent (async like regular messages)
-			go a.processCommandAsync(displayCmd, expanded)
+			includeStartupAttachment := !a.firstUserSent
+			a.firstUserSent = true
+			go a.processCommandAsync(displayCmd, expanded, includeStartupAttachment)
 			return true
 		}
 	}

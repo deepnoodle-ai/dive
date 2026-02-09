@@ -6,7 +6,7 @@ require (
 	github.com/deepnoodle-ai/dive/experimental/mcp v0.0.0
 	github.com/deepnoodle-ai/dive/providers/google v0.0.0
 	github.com/deepnoodle-ai/dive/providers/openai v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.24
+	github.com/deepnoodle-ai/wonton v0.0.26
 	github.com/fatih/color v1.18.0
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0

@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
@@ -89,14 +91,15 @@ func runMain(ctx *cli.Context) error {
 }
 
 func runInteractive(ctx *cli.Context) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
 	// Parse workspace
 	workspaceDir := ctx.String("workspace")
 	if workspaceDir == "" {
-		var err error
-		workspaceDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get working directory: %w", err)
-		}
+		workspaceDir = cwd
 	}
 
 	// Parse model
@@ -187,7 +190,10 @@ func runInteractive(ctx *cli.Context) error {
 	sessionSaver := session.Saver(sessionRepo)
 
 	// Set up tool permission hook using the permission package
-	permConfig := &permission.Config{Mode: permission.ModeDefault}
+	permConfig := &permission.Config{
+		Mode:  permission.ModeDefault,
+		Rules: defaultPermissionRules(tools),
+	}
 	permManager := permission.NewManager(permConfig, tuiDialog)
 	permissionHook := permission.HookFromManager(permManager)
 
@@ -240,6 +246,12 @@ func runInteractive(ctx *cli.Context) error {
 		resumeSessionID,
 		commandLoader,
 	)
+
+	attachment, err := loadStartupInstructionAttachment(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to read startup instructions: %v\n", err)
+	}
+	app.startupAttachment = attachment
 
 	// Set the session ID on the app and wire up closures
 	app.currentSessionID = sessionID
@@ -325,6 +337,13 @@ func runPrint(ctx *cli.Context) error {
 
 	// Run agent
 	bgCtx := context.Background()
+	if cwd, err := os.Getwd(); err == nil {
+		if attachment, readErr := loadStartupInstructionAttachment(cwd); readErr == nil {
+			input = appendAttachedContent(input, attachment)
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read startup instructions: %v\n", readErr)
+		}
+	}
 
 	switch outputFormat {
 	case "json":
@@ -334,6 +353,29 @@ func runPrint(ctx *cli.Context) error {
 	default:
 		return fmt.Errorf("unsupported --output-format %q; valid values are: json, text", outputFormat)
 	}
+}
+
+func loadStartupInstructionAttachment(cwd string) (string, error) {
+	candidates := []string{"AGENTS.md", "CLAUDE.md"}
+	for _, name := range candidates {
+		path := filepath.Join(cwd, name)
+		content, err := os.ReadFile(path)
+		if err == nil {
+			return fmt.Sprintf("\n<file path=\"%s\">\n%s\n</file>\n", name, string(content)), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+func appendAttachedContent(input, attachment string) string {
+	if attachment == "" {
+		return input
+	}
+	trimmed := strings.TrimRight(input, "\n")
+	return trimmed + attachment
 }
 
 func getInput(args []string) (string, error) {
@@ -466,7 +508,6 @@ func (d *tuiDialog) showConfirm(ctx context.Context, in *dive.DialogInput) (*div
 	})
 	select {
 	case result := <-confirmChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		return &dive.DialogOutput{
 			Confirmed:    result.Approved,
 			AllowSession: result.AllowSession,
@@ -508,7 +549,6 @@ func (d *tuiDialog) showSelect(ctx context.Context, in *dive.DialogInput) (*dive
 	})
 	select {
 	case result := <-selectChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		if result.OtherText != "" {
 			return &dive.DialogOutput{Text: result.OtherText}, nil
 		}
@@ -552,7 +592,6 @@ func (d *tuiDialog) showMultiSelect(ctx context.Context, in *dive.DialogInput) (
 	})
 	select {
 	case indices := <-multiSelectChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		if indices == nil {
 			return &dive.DialogOutput{Canceled: true}, nil
 		}
@@ -583,7 +622,6 @@ func (d *tuiDialog) showInput(ctx context.Context, in *dive.DialogInput) (*dive.
 	})
 	select {
 	case value := <-inputChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		if value == "" && in.Default == "" {
 			return &dive.DialogOutput{Canceled: true}, nil
 		}
@@ -729,6 +767,32 @@ func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
 	}
 
 	return tools
+}
+
+// defaultPermissionRules builds the CLI's default permission rules.
+// Read-only tools are auto-allowed; other tools continue through normal
+// permission flow (prompted unless explicitly allowed/denied elsewhere).
+func defaultPermissionRules(tools []dive.Tool) permission.Rules {
+	rules := make(permission.Rules, 0, len(tools))
+	seen := make(map[string]bool, len(tools))
+
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		annotations := tool.Annotations()
+		if annotations == nil || !annotations.ReadOnlyHint {
+			continue
+		}
+		name := tool.Name()
+		if name == "" || seen[name] {
+			continue
+		}
+		rules = append(rules, permission.AllowRule(name))
+		seen[name] = true
+	}
+
+	return rules
 }
 
 func getDefaultModel() string {
