@@ -42,3 +42,19 @@ func TestHandleCompaction(t *testing.T) {
 	assert.True(t, time.Since(app.compactionStatsStartTime) < time.Second,
 		"compactionStatsStartTime should be recent")
 }
+
+func TestShouldDisplayToolError(t *testing.T) {
+	t.Run("non-error remains non-error", func(t *testing.T) {
+		assert.False(t, shouldDisplayToolError("AskUserQuestion", false, ""))
+	})
+
+	t.Run("non-askuser error remains error", func(t *testing.T) {
+		assert.True(t, shouldDisplayToolError("Read", true, `{"ok":true}`))
+	})
+
+	t.Run("askuser error stays red (including custom deny feedback)", func(t *testing.T) {
+		assert.True(t, shouldDisplayToolError("AskUserQuestion", true, "Ask me another question please."))
+		assert.True(t, shouldDisplayToolError("request_user_input", true, "Ask me another question please."))
+		assert.True(t, shouldDisplayToolError("AskUserQuestion", true, "No options provided for selection"))
+	})
+}

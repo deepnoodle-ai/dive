@@ -13,9 +13,9 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/experimental/session"
 	"github.com/deepnoodle-ai/dive/experimental/slashcmd"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -191,14 +191,14 @@ type DialogOption struct {
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
 	agent         *dive.Agent
-	sessionRepo   session.Repository
+	sessionStore  session.Store
 	workspaceDir  string
 	modelName     string
 	commandLoader *slashcmd.Loader
 
 	// Session management
-	resumeSessionID  string // Session ID to resume (from --resume flag)
-	currentSessionID string // Current active session ID
+	resumeSessionID string           // Session ID to resume (from --resume flag)
+	currentSession  *session.Session // Current active session
 
 	// InlineApp runner
 	runner *tui.InlineApp
@@ -247,6 +247,9 @@ type App struct {
 
 	// Initial prompt to submit on startup
 	initialPrompt string
+	// Content attached to the first outbound user message only.
+	startupAttachment string
+	firstUserSent     bool
 
 	// Ctrl+C exit confirmation state
 	lastCtrlC    time.Time
@@ -263,7 +266,7 @@ type App struct {
 // NewApp creates a new CLI application
 func NewApp(
 	agent *dive.Agent,
-	sessionRepo session.Repository,
+	sessionStore session.Store,
 	workspaceDir, modelName string,
 	initialPrompt string,
 	compactionConfig *compaction.CompactionConfig,
@@ -284,7 +287,7 @@ func NewApp(
 
 	return &App{
 		agent:            agent,
-		sessionRepo:      sessionRepo,
+		sessionStore:     sessionStore,
 		workspaceDir:     workspaceDir,
 		modelName:        modelName,
 		resumeSessionID:  resumeSessionID,
@@ -412,18 +415,21 @@ func (a *App) dialogView() tui.View {
 	case DialogTypeConfirm:
 		// Claude Code style confirmation dialog using PromptChoice
 		purpleStyle := tui.NewStyle().WithFgRGB(purpleColor)
+		confirmTextStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210})
+		confirmInfoStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210}).WithItalic()
 
 		// Upper divider (purple, dashed)
 		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
 
-		// Title (purple, bold)
-		views = append(views, tui.Text(" %s", a.dialogState.Title).Style(purpleStyle.WithBold()))
+		// Title (purple, bold) with explicit permission context
+		views = append(views, tui.Text(" Permission Check: %s", a.dialogState.Title).Style(purpleStyle.WithBold()))
+		views = append(views, tui.Text(" This is a permission prompt. The tool has not run yet.").Style(confirmInfoStyle))
 
 		// Content preview with dashed dividers
 		if a.dialogState.ContentPreview != "" {
-			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+			views = append(views, tui.Text(" Tool Input").Style(confirmTextStyle.WithBold()))
 			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
-				views = append(views, tui.Text(" %s", line).Hint())
+				views = append(views, tui.Text(" %s", line).Style(confirmTextStyle))
 			}
 		}
 
@@ -431,7 +437,7 @@ func (a *App) dialogView() tui.View {
 		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
 
 		// Question
-		views = append(views, tui.Text(" Do you want to proceed?").Muted())
+		views = append(views, tui.Text(" Do you want to proceed with this tool request?").Style(confirmTextStyle.WithBold()))
 
 		// Build option labels
 		allowLabel := "file edits" // Default fallback
@@ -463,11 +469,11 @@ func (a *App) dialogView() tui.View {
 							confirmChan <- ConfirmResult{Approved: false}
 						}
 					}
-					a.dialogState.Active = false
+					a.hideActiveDialog()
 				}).
 				OnCancel(func() {
 					confirmChan <- ConfirmResult{Approved: false}
-					a.dialogState.Active = false
+					a.hideActiveDialog()
 				}),
 		)
 
@@ -523,11 +529,11 @@ func (a *App) dialogView() tui.View {
 				} else {
 					selectChan <- SelectResult{Index: idx}
 				}
-				a.dialogState.Active = false
+				a.hideActiveDialog()
 			}).
 			OnCancel(func() {
 				selectChan <- SelectResult{Index: -1}
-				a.dialogState.Active = false
+				a.hideActiveDialog()
 			})
 
 		views = append(views, promptChoice)
@@ -590,13 +596,26 @@ func (a *App) dialogView() tui.View {
 						value = defaultValue
 					}
 					inputChan <- value
-					a.dialogState.Active = false
+					a.hideActiveDialog()
 				}),
 		)
 		views = append(views, tui.Text(" Press Enter to confirm, Esc to cancel").Hint())
 	}
 
 	return tui.Stack(views...)
+}
+
+// hideActiveDialog closes the current dialog via the event loop and restores
+// focus to the main input.
+func (a *App) hideActiveDialog() {
+	if a.runner == nil {
+		if a.dialogState != nil {
+			a.dialogState.Active = false
+			a.dialogState = nil
+		}
+		return
+	}
+	a.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 }
 
 // HandleEvent implements tui.EventHandler - handles all events.
@@ -647,6 +666,9 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 			return []tui.Cmd{tui.Focus("dialog-input")}
 		}
 	case hideDialogEvent:
+		if a.dialogState != nil {
+			a.dialogState.Active = false
+		}
 		a.dialogState = nil
 		return []tui.Cmd{tui.Focus("main-input")}
 	case initialPromptEvent:
@@ -672,7 +694,7 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 		switch {
 		case e.Key == tui.KeyEscape:
 			a.dialogState.MultiSelectChan <- nil
-			a.dialogState.Active = false
+			a.hideActiveDialog()
 		case e.Key == tui.KeyEnter:
 			// Return selected indices based on CheckboxList state
 			var selected []int
@@ -682,7 +704,7 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 				}
 			}
 			a.dialogState.MultiSelectChan <- selected
-			a.dialogState.Active = false
+			a.hideActiveDialog()
 		case e.Rune >= '1' && e.Rune <= '9':
 			// Shortcut to toggle items by number
 			idx := int(e.Rune - '1')
@@ -695,7 +717,7 @@ func (a *App) handleDialogKey(e tui.KeyEvent) []tui.Cmd {
 		// Only handle Escape - Enter is handled by InputField's OnSubmit callback
 		if e.Key == tui.KeyEscape {
 			a.dialogState.InputChan <- ""
-			a.dialogState.Active = false
+			a.hideActiveDialog()
 		}
 		// Other keys are handled by InputField
 	}
@@ -891,16 +913,21 @@ func (a *App) submitInput(value string) {
 	}
 
 	// Process message asynchronously
-	go a.processMessageAsync(trimmed)
+	includeStartupAttachment := !a.firstUserSent
+	a.firstUserSent = true
+	go a.processMessageAsync(trimmed, includeStartupAttachment)
 }
 
 // processMessageAsync handles message processing in background.
 // Sends events to the main event loop instead of modifying state directly.
-func (a *App) processMessageAsync(input string) {
+func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 	// Expand file references (uses only immutable workspaceDir)
 	expanded, err := a.expandFileReferences(input)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
+	}
+	if includeStartupAttachment {
+		expanded = appendAttachedContent(expanded, a.startupAttachment)
 	}
 
 	// Send start event to set up state in the main goroutine
@@ -911,11 +938,14 @@ func (a *App) processMessageAsync(input string) {
 // processCommandAsync handles slash command processing in background.
 // displayText is what the user typed (e.g., "/explain go.mod")
 // expanded is the full prompt to send to the agent
-func (a *App) processCommandAsync(displayText, expanded string) {
+func (a *App) processCommandAsync(displayText, expanded string, includeStartupAttachment bool) {
 	// Expand file references in the expanded text
 	expandedWithFiles, err := a.expandFileReferences(expanded)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
+	}
+	if includeStartupAttachment {
+		expandedWithFiles = appendAttachedContent(expandedWithFiles, a.startupAttachment)
 	}
 
 	// Send start event with display text, but send expanded text to agent
@@ -930,15 +960,10 @@ func (a *App) runAgent(expanded string) {
 	// resp.Usage is accumulated across tool iterations which inflates context size
 	var lastUsage *llm.Usage
 
-	// Determine session ID to use
-	sessionID := a.currentSessionID
-	if sessionID == "" && a.resumeSessionID != "" {
-		sessionID = a.resumeSessionID
-	}
-
 	// Build options for CreateResponse
 	opts := []dive.CreateResponseOption{
 		dive.WithInput(expanded),
+		dive.WithSession(a.currentSession),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
 			// Send events for each agent response item
 			switch item.Type {
@@ -963,18 +988,18 @@ func (a *App) runAgent(expanded string) {
 	}
 
 	// Track if this is a new session (for metadata update)
-	isNewSession := sessionID == ""
+	isNewSession := a.currentSession.EventCount() <= 1
 
 	// Create response with streaming
 	resp, err := a.agent.CreateResponse(a.ctx, opts...)
 
 	// Update session metadata for new sessions
-	if err == nil && resp != nil && a.sessionRepo != nil && isNewSession && a.currentSessionID != "" {
+	if err == nil && resp != nil && a.sessionStore != nil && isNewSession {
 		a.updateSessionMetadata(expanded)
 	}
 
 	// Check for compaction after successful response
-	if err == nil && resp != nil && a.compactionConfig != nil && a.sessionRepo != nil {
+	if err == nil && resp != nil && a.compactionConfig != nil && a.sessionStore != nil {
 		a.checkAndPerformCompaction(lastUsage)
 	}
 
@@ -984,31 +1009,28 @@ func (a *App) runAgent(expanded string) {
 
 // updateSessionMetadata updates a session with workspace and title information
 func (a *App) updateSessionMetadata(firstMessage string) {
-	session, err := a.sessionRepo.GetSession(a.ctx, a.currentSessionID)
-	if err != nil || session == nil {
+	sess := a.currentSession
+	if sess == nil {
 		return
 	}
 
-	// Only update if metadata is not already set
 	needsUpdate := false
 
 	// Set workspace if not already set
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
-	}
-	if _, hasWorkspace := session.Metadata["workspace"]; !hasWorkspace {
-		session.Metadata["workspace"] = a.workspaceDir
+	meta := sess.Metadata()
+	if meta == nil || meta["workspace"] == nil {
+		sess.SetMetadata("workspace", a.workspaceDir)
 		needsUpdate = true
 	}
 
 	// Generate title from first message if not already set
-	if session.Title == "" {
-		session.Title = generateSessionTitle(firstMessage)
+	if sess.Title() == "" {
+		sess.SetTitle(generateSessionTitle(firstMessage))
 		needsUpdate = true
 	}
 
-	if needsUpdate {
-		_ = a.sessionRepo.PutSession(a.ctx, session)
+	if needsUpdate && a.sessionStore != nil {
+		_ = a.sessionStore.Put(a.ctx, sess)
 	}
 }
 
@@ -1046,7 +1068,7 @@ func generateSessionTitle(message string) string {
 // checkAndPerformCompaction checks if compaction is needed and performs it.
 // Uses lastUsage (from final LLM call) for accurate context size measurement.
 func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
-	if lastUsage == nil || a.currentSessionID == "" {
+	if lastUsage == nil || a.currentSession == nil {
 		return
 	}
 
@@ -1056,14 +1078,14 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 		threshold = compaction.DefaultContextTokenThreshold
 	}
 
-	// Get the session to check message count
-	session, err := a.sessionRepo.GetSession(a.ctx, a.currentSessionID)
-	if err != nil || session == nil {
+	// Get message count from session
+	msgs, err := a.currentSession.Messages(a.ctx)
+	if err != nil {
 		return
 	}
 
 	// Check if compaction should trigger
-	if !compaction.ShouldCompact(lastUsage, len(session.Messages), threshold) {
+	if !compaction.ShouldCompact(lastUsage, len(msgs), threshold) {
 		return
 	}
 
@@ -1076,29 +1098,39 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 	// Calculate tokens before (from last LLM call = actual context size)
 	tokensBefore := compaction.CalculateContextTokens(lastUsage)
 
-	// Perform compaction
-	compactedMsgs, event, err := compaction.CompactMessages(
-		a.ctx,
-		model,
-		session.Messages,
-		"", // System prompt - can be empty for summary generation
-		a.compactionConfig.SummaryPrompt,
-		tokensBefore,
-	)
+	// Perform compaction using the session's Compact method
+	err = a.currentSession.Compact(a.ctx, func(ctx context.Context, messages []*llm.Message) ([]*llm.Message, error) {
+		compactedMsgs, _, err := compaction.CompactMessages(
+			ctx,
+			model,
+			messages,
+			"",
+			a.compactionConfig.SummaryPrompt,
+			tokensBefore,
+		)
+		return compactedMsgs, err
+	})
 	if err != nil {
-		// Log warning but don't fail
 		return
 	}
 
-	// Update session with compacted messages
-	session.Messages = compactedMsgs
-
-	if err := a.sessionRepo.PutSession(a.ctx, session); err != nil {
-		return
+	// Calculate rough tokens after for the event
+	compactedMsgs, _ := a.currentSession.Messages(a.ctx)
+	tokensAfter := 0
+	for _, msg := range compactedMsgs {
+		for _, c := range msg.Content {
+			if tc, ok := c.(*llm.TextContent); ok && tc.Text != "" {
+				tokensAfter += len(tc.Text) / 4
+			}
+		}
 	}
 
 	// Send compaction event to UI
-	a.runner.SendEvent(compactionEvent{baseEvent: newBaseEvent(), event: event})
+	a.runner.SendEvent(compactionEvent{baseEvent: newBaseEvent(), event: &compaction.CompactionEvent{
+		TokensBefore:      tokensBefore,
+		TokensAfter:       tokensAfter,
+		MessagesCompacted: len(msgs) - len(compactedMsgs),
+	}})
 }
 
 // Event handlers for background goroutine events
@@ -1193,9 +1225,6 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 	if idx, ok := a.toolCallIndex[result.ID]; ok && idx < len(a.messages) {
 		a.messages[idx].ToolDone = true
 		if result.Result != nil {
-			if result.Result.IsError {
-				a.messages[idx].ToolError = true
-			}
 			display := result.Result.Display
 			var textContent string
 			if len(result.Result.Content) > 0 {
@@ -1209,6 +1238,15 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			if display == "" {
 				display = textContent
 			}
+			statusText := textContent
+			if statusText == "" {
+				statusText = display
+			}
+			a.messages[idx].ToolError = shouldDisplayToolError(
+				a.messages[idx].ToolName,
+				result.Result.IsError,
+				statusText,
+			)
 			if display != "" {
 				a.messages[idx].ToolResultLines = strings.Split(display, "\n")
 			}
@@ -1221,6 +1259,13 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			}
 		}
 	}
+}
+
+// shouldDisplayToolError determines whether a tool result should render as an error.
+// AskUserQuestion can return valid custom responses that may be flagged as protocol
+// errors upstream, so we treat valid AskUser JSON output as non-error for UI status.
+func shouldDisplayToolError(_ string, isError bool, _ string) bool {
+	return isError
 }
 
 // handleCompaction processes a compaction event and updates UI state.
@@ -1360,22 +1405,19 @@ func (a *App) buildIntroView() tui.View {
 // printSessionHistoryToScrollback prints the conversation history from a resumed session
 // to the scrollback buffer, so it appears as if continuing from where we left off.
 func (a *App) printSessionHistoryToScrollback() {
-	if a.resumeSessionID == "" {
-		return
-	}
-	if a.sessionRepo == nil {
+	if a.resumeSessionID == "" || a.currentSession == nil {
 		return
 	}
 
-	// Load the session from the repository
-	session, err := a.sessionRepo.GetSession(a.ctx, a.resumeSessionID)
+	// Load messages from the session
+	sessionMsgs, err := a.currentSession.Messages(a.ctx)
 	if err != nil {
 		return
 	}
 
 	// Build a map of tool use ID -> tool result for matching
 	toolResults := make(map[string]*llm.ToolResultContent)
-	for _, msg := range session.Messages {
+	for _, msg := range sessionMsgs {
 		for _, content := range msg.Content {
 			if result, ok := content.(*llm.ToolResultContent); ok {
 				toolResults[result.ToolUseID] = result
@@ -1385,7 +1427,7 @@ func (a *App) printSessionHistoryToScrollback() {
 
 	// Convert and print each message
 	messageViews := []tui.View{}
-	for _, msg := range session.Messages {
+	for _, msg := range sessionMsgs {
 		views := a.convertLLMMessageToViews(msg, toolResults)
 		messageViews = append(messageViews, views...)
 	}
@@ -1439,8 +1481,8 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 
 			// If we have a result, extract its content
 			if result != nil {
-				appMsg.ToolError = result.IsError
 				resultText := extractToolResultText(result)
+				appMsg.ToolError = shouldDisplayToolError(c.Name, result.IsError, resultText)
 				if resultText != "" {
 					appMsg.ToolResultLines = strings.Split(resultText, "\n")
 					if len(appMsg.ToolResultLines) > 0 {
@@ -1528,21 +1570,30 @@ func (a *App) handleCommand(input string) bool {
 		a.runner.ClearScrollback()
 
 		// Reset conversation state by deleting the current session
-		if a.currentSessionID != "" && a.sessionRepo != nil {
-			if err := a.sessionRepo.DeleteSession(a.ctx, a.currentSessionID); err != nil {
+		if a.currentSession != nil && a.sessionStore != nil {
+			if err := a.sessionStore.Delete(a.ctx, a.currentSession.ID()); err != nil {
 				// Log error but continue
 				a.runner.Printf("Warning: failed to clear conversation: %v", err)
 			}
 		}
 
-		// Clear local message state and reset session
+		// Create a new session
+		newID := newSessionID()
+		newSess, err := a.sessionStore.Open(a.ctx, newID)
+		if err != nil {
+			a.runner.Printf("Warning: failed to create new session: %v", err)
+		} else {
+			a.currentSession = newSess
+		}
+
+		// Clear local message state
 		a.messages = make([]Message, 0)
 		a.todos = nil
 		a.toolCallIndex = make(map[string]int)
 		a.needNewTextMessage = false
 		a.currentMessage = nil
 		a.streamingMessageIndex = 0
-		a.currentSessionID = ""
+		a.firstUserSent = false
 
 		// Show fresh intro using runner.Print (not tui.Print) since we're
 		// in the middle of the running InlineApp event loop
@@ -1583,7 +1634,9 @@ func (a *App) handleCommand(input string) bool {
 			}
 
 			// Send the expanded instructions to the agent (async like regular messages)
-			go a.processCommandAsync(displayCmd, expanded)
+			includeStartupAttachment := !a.firstUserSent
+			a.firstUserSent = true
+			go a.processCommandAsync(displayCmd, expanded, includeStartupAttachment)
 			return true
 		}
 	}
@@ -1600,19 +1653,19 @@ func (a *App) handleCompactCommand() {
 		return
 	}
 
-	if a.currentSessionID == "" || a.sessionRepo == nil {
+	if a.currentSession == nil || a.sessionStore == nil {
 		a.runner.Printf("No conversation to compact.")
 		return
 	}
 
-	// Get current session
-	session, err := a.sessionRepo.GetSession(a.ctx, a.currentSessionID)
+	// Get current messages
+	msgs, err := a.currentSession.Messages(a.ctx)
 	if err != nil {
 		a.runner.Printf("No conversation to compact.")
 		return
 	}
 
-	if len(session.Messages) < 2 {
+	if len(msgs) < 2 {
 		a.runner.Printf("Not enough messages to compact (need at least 2).")
 		return
 	}
@@ -1621,7 +1674,7 @@ func (a *App) handleCompactCommand() {
 
 	// Calculate tokens before compaction (estimate)
 	tokensBefore := 0
-	for _, msg := range session.Messages {
+	for _, msg := range msgs {
 		for _, c := range msg.Content {
 			if tc, ok := c.(*llm.TextContent); ok && tc.Text != "" {
 				tokensBefore += len(tc.Text) / 4 // rough estimate
@@ -1629,33 +1682,34 @@ func (a *App) handleCompactCommand() {
 		}
 	}
 
-	// Perform compaction
+	// Perform compaction using session's Compact method
 	summaryPrompt := a.compactionConfig.SummaryPrompt
 	if summaryPrompt == "" {
 		summaryPrompt = compaction.DefaultCompactionSummaryPrompt
 	}
-	compactedMsgs, event, err := compaction.CompactMessages(
-		a.ctx,
-		a.compactionConfig.Model,
-		session.Messages,
-		"", // System prompt not needed for compaction
-		summaryPrompt,
-		tokensBefore,
-	)
+
+	var event *compaction.CompactionEvent
+	err = a.currentSession.Compact(a.ctx, func(ctx context.Context, messages []*llm.Message) ([]*llm.Message, error) {
+		compactedMsgs, evt, err := compaction.CompactMessages(
+			ctx,
+			a.compactionConfig.Model,
+			messages,
+			"",
+			summaryPrompt,
+			tokensBefore,
+		)
+		event = evt
+		return compactedMsgs, err
+	})
 	if err != nil {
 		a.runner.Printf("Compaction failed: %v", err)
 		return
 	}
 
-	// Update session with compacted messages
-	session.Messages = compactedMsgs
-	if err := a.sessionRepo.PutSession(a.ctx, session); err != nil {
-		a.runner.Printf("Failed to save compacted session: %v", err)
-		return
-	}
-
 	// Show stats
-	a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
+	if event != nil {
+		a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
+	}
 }
 
 func (a *App) printHelp() {

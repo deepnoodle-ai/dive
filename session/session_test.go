@@ -86,6 +86,28 @@ func TestSessionTitle(t *testing.T) {
 	assert.Equal(t, "My Chat", sess.Title())
 }
 
+func TestSessionMetadata(t *testing.T) {
+	sess := New("s1")
+
+	// Initially nil
+	assert.Nil(t, sess.Metadata())
+
+	// Set a value
+	sess.SetMetadata("workspace", "/tmp/test")
+	meta := sess.Metadata()
+	assert.Equal(t, "/tmp/test", meta["workspace"])
+
+	// Set another value
+	sess.SetMetadata("user", "alice")
+	meta = sess.Metadata()
+	assert.Equal(t, "/tmp/test", meta["workspace"])
+	assert.Equal(t, "alice", meta["user"])
+
+	// Returns a copy (mutations don't affect session)
+	meta["workspace"] = "mutated"
+	assert.Equal(t, "/tmp/test", sess.Metadata()["workspace"])
+}
+
 func TestSessionFork(t *testing.T) {
 	ctx := context.Background()
 	sess := New("original")

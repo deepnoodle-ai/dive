@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -67,7 +68,7 @@ func TestPanicRecovery(t *testing.T) {
 		assert.Contains(t, results[0].Result.Content[0].Text, "something went terribly wrong")
 	})
 
-	t.Run("nil panic is recovered", func(t *testing.T) {
+	t.Run("error panic is recovered", func(t *testing.T) {
 		callCount := 0
 		mock := &mockLLM{
 			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
@@ -78,7 +79,7 @@ func TestPanicRecovery(t *testing.T) {
 						Model: "test-model",
 						Role:  llm.Assistant,
 						Content: []llm.Content{
-							&llm.ToolUseContent{ID: "t1", Name: "nil_panicker", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "t1", Name: "error_panicker", Input: []byte(`{}`)},
 						},
 						Type:       "message",
 						StopReason: "tool_use",
@@ -99,9 +100,9 @@ func TestPanicRecovery(t *testing.T) {
 		}
 
 		tool := &mockTool{
-			name: "nil_panicker",
+			name: "error_panicker",
 			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
-				panic(nil)
+				panic(fmt.Errorf("unexpected error"))
 			},
 		}
 

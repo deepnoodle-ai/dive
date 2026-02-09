@@ -6,19 +6,21 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/experimental/session"
 	"github.com/deepnoodle-ai/dive/experimental/slashcmd"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
 	"github.com/deepnoodle-ai/dive/permission"
+	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
@@ -89,14 +91,15 @@ func runMain(ctx *cli.Context) error {
 }
 
 func runInteractive(ctx *cli.Context) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
 	// Parse workspace
 	workspaceDir := ctx.String("workspace")
 	if workspaceDir == "" {
-		var err error
-		workspaceDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get working directory: %w", err)
-		}
+		workspaceDir = cwd
 	}
 
 	// Parse model
@@ -120,10 +123,10 @@ func runInteractive(ctx *cli.Context) error {
 	// Create tools
 	tools := createTools(workspaceDir, tuiDialog)
 
-	// Create session repository
-	sessionRepo, err := session.NewFileRepository("~/.dive/sessions")
+	// Create session store
+	sessionStore, err := session.NewFileStore("~/.dive/sessions")
 	if err != nil {
-		return fmt.Errorf("failed to create session repository: %w", err)
+		return fmt.Errorf("failed to create session store: %w", err)
 	}
 
 	// Handle --resume flag
@@ -135,7 +138,7 @@ func runInteractive(ctx *cli.Context) error {
 		if len(args) > 0 {
 			filter = args[0]
 		}
-		result, err := RunSessionPicker(sessionRepo, filter, workspaceDir)
+		result, err := RunSessionPicker(sessionStore, filter, workspaceDir)
 		if err != nil {
 			return fmt.Errorf("session picker failed: %w", err)
 		}
@@ -151,6 +154,13 @@ func runInteractive(ctx *cli.Context) error {
 		sessionID = newSessionID()
 	}
 
+	// Open the session
+	bgCtx := context.Background()
+	currentSession, err := sessionStore.Open(bgCtx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to open session: %w", err)
+	}
+
 	// Get initial prompt from args (if not resuming)
 	var initialPrompt string
 	if !ctx.Bool("resume") {
@@ -160,34 +170,11 @@ func runInteractive(ctx *cli.Context) error {
 		}
 	}
 
-	// appPtr is set after App creation; closures below capture it by pointer.
-	var appPtr *App
-
-	// Set up session ID hook (injects session_id into generation state).
-	// Reads from app.currentSessionID dynamically so /clear can reset it.
-	// If currentSessionID is empty, generates a new one (fresh conversation).
-	sessionIDHook := func(_ context.Context, hctx *dive.HookContext) error {
-		if hctx.Values == nil {
-			hctx.Values = map[string]any{}
-		}
-		if appPtr != nil && appPtr.currentSessionID == "" {
-			// Generate a new session ID after /clear
-			appPtr.currentSessionID = newSessionID()
-		}
-		if appPtr != nil {
-			hctx.Values["session_id"] = appPtr.currentSessionID
-		} else {
-			hctx.Values["session_id"] = sessionID
-		}
-		return nil
-	}
-
-	// Set up session hooks for multi-turn conversation
-	sessionLoader := session.Loader(sessionRepo)
-	sessionSaver := session.Saver(sessionRepo)
-
 	// Set up tool permission hook using the permission package
-	permConfig := &permission.Config{Mode: permission.ModeDefault}
+	permConfig := &permission.Config{
+		Mode:  permission.ModeDefault,
+		Rules: defaultPermissionRules(tools),
+	}
 	permManager := permission.NewManager(permConfig, tuiDialog)
 	permissionHook := permission.HookFromManager(permManager)
 
@@ -220,9 +207,7 @@ func runInteractive(ctx *cli.Context) error {
 			MaxTokens:   &maxTokens,
 		},
 		Hooks: dive.Hooks{
-			PreGeneration:  []dive.PreGenerationHook{sessionIDHook, sessionLoader},
-			PostGeneration: []dive.PostGenerationHook{sessionSaver},
-			PreToolUse:     []dive.PreToolUseHook{permissionHook},
+			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
 	})
 	if err != nil {
@@ -232,7 +217,7 @@ func runInteractive(ctx *cli.Context) error {
 	// Create App
 	app := NewApp(
 		agent,
-		sessionRepo,
+		sessionStore,
 		workspaceDir,
 		modelName,
 		initialPrompt,
@@ -240,10 +225,15 @@ func runInteractive(ctx *cli.Context) error {
 		resumeSessionID,
 		commandLoader,
 	)
+	app.currentSession = currentSession
 
-	// Set the session ID on the app and wire up closures
-	app.currentSessionID = sessionID
-	appPtr = app
+	attachment, err := loadStartupInstructionAttachment(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to read startup instructions: %v\n", err)
+	}
+	app.startupAttachment = attachment
+
+	// Wire up dialog
 	tuiDialog.app = app
 
 	return app.Run()
@@ -325,6 +315,13 @@ func runPrint(ctx *cli.Context) error {
 
 	// Run agent
 	bgCtx := context.Background()
+	if cwd, err := os.Getwd(); err == nil {
+		if attachment, readErr := loadStartupInstructionAttachment(cwd); readErr == nil {
+			input = appendAttachedContent(input, attachment)
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read startup instructions: %v\n", readErr)
+		}
+	}
 
 	switch outputFormat {
 	case "json":
@@ -334,6 +331,29 @@ func runPrint(ctx *cli.Context) error {
 	default:
 		return fmt.Errorf("unsupported --output-format %q; valid values are: json, text", outputFormat)
 	}
+}
+
+func loadStartupInstructionAttachment(cwd string) (string, error) {
+	candidates := []string{"AGENTS.md", "CLAUDE.md"}
+	for _, name := range candidates {
+		path := filepath.Join(cwd, name)
+		content, err := os.ReadFile(path)
+		if err == nil {
+			return fmt.Sprintf("\n<file path=\"%s\">\n%s\n</file>\n", name, string(content)), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+func appendAttachedContent(input, attachment string) string {
+	if attachment == "" {
+		return input
+	}
+	trimmed := strings.TrimRight(input, "\n")
+	return trimmed + attachment
 }
 
 func getInput(args []string) (string, error) {
@@ -466,7 +486,6 @@ func (d *tuiDialog) showConfirm(ctx context.Context, in *dive.DialogInput) (*div
 	})
 	select {
 	case result := <-confirmChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		return &dive.DialogOutput{
 			Confirmed:    result.Approved,
 			AllowSession: result.AllowSession,
@@ -508,7 +527,6 @@ func (d *tuiDialog) showSelect(ctx context.Context, in *dive.DialogInput) (*dive
 	})
 	select {
 	case result := <-selectChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		if result.OtherText != "" {
 			return &dive.DialogOutput{Text: result.OtherText}, nil
 		}
@@ -552,7 +570,6 @@ func (d *tuiDialog) showMultiSelect(ctx context.Context, in *dive.DialogInput) (
 	})
 	select {
 	case indices := <-multiSelectChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		if indices == nil {
 			return &dive.DialogOutput{Canceled: true}, nil
 		}
@@ -583,7 +600,6 @@ func (d *tuiDialog) showInput(ctx context.Context, in *dive.DialogInput) (*dive.
 	})
 	select {
 	case value := <-inputChan:
-		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		if value == "" && in.Default == "" {
 			return &dive.DialogOutput{Canceled: true}, nil
 		}
@@ -729,6 +745,32 @@ func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
 	}
 
 	return tools
+}
+
+// defaultPermissionRules builds the CLI's default permission rules.
+// Read-only tools are auto-allowed; other tools continue through normal
+// permission flow (prompted unless explicitly allowed/denied elsewhere).
+func defaultPermissionRules(tools []dive.Tool) permission.Rules {
+	rules := make(permission.Rules, 0, len(tools))
+	seen := make(map[string]bool, len(tools))
+
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		annotations := tool.Annotations()
+		if annotations == nil || !annotations.ReadOnlyHint {
+			continue
+		}
+		name := tool.Name()
+		if name == "" || seen[name] {
+			continue
+		}
+		rules = append(rules, permission.AllowRule(name))
+		seen[name] = true
+	}
+
+	return rules
 }
 
 func getDefaultModel() string {

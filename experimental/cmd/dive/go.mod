@@ -6,7 +6,7 @@ require (
 	github.com/deepnoodle-ai/dive v0.0.0
 	github.com/deepnoodle-ai/dive/providers/google v0.0.0
 	github.com/deepnoodle-ai/dive/providers/openai v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.24
+	github.com/deepnoodle-ai/wonton v0.0.26
 )
 
 require (

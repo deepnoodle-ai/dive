@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/deepnoodle-ai/dive/experimental/session"
-	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -20,7 +19,7 @@ type SessionPickerResult struct {
 
 // SessionPickerApp implements the session picker TUI
 type SessionPickerApp struct {
-	sessions     []*session.Session
+	sessions     []*session.SessionInfo
 	selectedIdx  int
 	filter       string
 	result       *SessionPickerResult
@@ -28,33 +27,39 @@ type SessionPickerApp struct {
 }
 
 // RunSessionPicker displays an interactive session picker and returns the selected session ID
-func RunSessionPicker(repo session.Repository, filter string, workspaceDir string) (*SessionPickerResult, error) {
+func RunSessionPicker(store session.Store, filter string, workspaceDir string) (*SessionPickerResult, error) {
 	ctx := context.Background()
 
-	// List sessions from repository
-	listResult, err := repo.ListSessions(ctx, &session.ListSessionsInput{Limit: 50})
+	// List sessions from store
+	listResult, err := store.List(ctx, &session.ListOptions{Limit: 50})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
 
-	if len(listResult.Items) == 0 {
+	if len(listResult.Sessions) == 0 {
 		return &SessionPickerResult{Canceled: true}, nil
 	}
 
 	// Filter sessions if a filter is provided
-	var sessions []*session.Session
+	var sessions []*session.SessionInfo
 	if filter != "" {
 		filterLower := strings.ToLower(filter)
-		for _, s := range listResult.Items {
+		for _, s := range listResult.Sessions {
 			// Match against title, ID, or workspace
+			workspace := ""
+			if s.Metadata != nil {
+				if ws, ok := s.Metadata["workspace"].(string); ok {
+					workspace = ws
+				}
+			}
 			if strings.Contains(strings.ToLower(s.Title), filterLower) ||
 				strings.Contains(strings.ToLower(s.ID), filterLower) ||
-				(s.Metadata != nil && strings.Contains(strings.ToLower(fmt.Sprintf("%v", s.Metadata["workspace"])), filterLower)) {
+				strings.Contains(strings.ToLower(workspace), filterLower) {
 				sessions = append(sessions, s)
 			}
 		}
 	} else {
-		sessions = listResult.Items
+		sessions = listResult.Sessions
 	}
 
 	if len(sessions) == 0 {
@@ -119,21 +124,12 @@ func (p *SessionPickerApp) LiveView() tui.View {
 }
 
 // sessionItemView creates the view for a single session item
-func (p *SessionPickerApp) sessionItemView(session *session.Session, selected bool) tui.View {
+func (p *SessionPickerApp) sessionItemView(info *session.SessionInfo, selected bool) tui.View {
 	// Build the session display
-	timeAgo := formatTimeAgo(session.UpdatedAt)
+	timeAgo := formatTimeAgo(info.UpdatedAt)
 
-	// Get title or generate from first message
-	title := session.Title
-	if title == "" && len(session.Messages) > 0 {
-		// Use first user message as title
-		for _, msg := range session.Messages {
-			if msg.Role == llm.User {
-				title = msg.Text()
-				break
-			}
-		}
-	}
+	// Get title
+	title := info.Title
 	if title == "" {
 		title = "Untitled session"
 	}
@@ -145,8 +141,8 @@ func (p *SessionPickerApp) sessionItemView(session *session.Session, selected bo
 
 	// Get workspace if available
 	var workspace string
-	if session.Metadata != nil {
-		if ws, ok := session.Metadata["workspace"].(string); ok {
+	if info.Metadata != nil {
+		if ws, ok := info.Metadata["workspace"].(string); ok {
 			workspace = shortenPath(ws)
 		}
 	}
@@ -161,9 +157,9 @@ func (p *SessionPickerApp) sessionItemView(session *session.Session, selected bo
 
 		var line2 tui.View
 		if workspace != "" {
-			line2 = tui.Text("     %s (%d messages)", workspace, len(session.Messages)).Hint()
+			line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Hint()
 		} else {
-			line2 = tui.Text("     %d messages", len(session.Messages)).Hint()
+			line2 = tui.Text("     %d turns", info.EventCount).Hint()
 		}
 
 		return tui.Stack(line1, line2)
@@ -177,9 +173,9 @@ func (p *SessionPickerApp) sessionItemView(session *session.Session, selected bo
 
 	var line2 tui.View
 	if workspace != "" {
-		line2 = tui.Text("     %s (%d messages)", workspace, len(session.Messages)).Hint()
+		line2 = tui.Text("     %s (%d turns)", workspace, info.EventCount).Hint()
 	} else {
-		line2 = tui.Text("     %d messages", len(session.Messages)).Hint()
+		line2 = tui.Text("     %d turns", info.EventCount).Hint()
 	}
 
 	return tui.Stack(line1, line2)

@@ -182,6 +182,28 @@ func (s *Session) SetTitle(title string) {
 	s.data.Title = title
 }
 
+// Metadata returns a copy of the session's metadata.
+func (s *Session) Metadata() map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.data.Metadata == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(s.data.Metadata))
+	maps.Copy(cp, s.data.Metadata)
+	return cp
+}
+
+// SetMetadata sets a key-value pair in the session's metadata.
+func (s *Session) SetMetadata(key string, value any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.Metadata == nil {
+		s.data.Metadata = make(map[string]any)
+	}
+	s.data.Metadata[key] = value
+}
+
 // EventCount returns the number of events in the session.
 func (s *Session) EventCount() int {
 	s.mu.RLock()
@@ -295,11 +317,12 @@ type ListResult struct {
 
 // SessionInfo is a lightweight session summary returned by List.
 type SessionInfo struct {
-	ID         string    `json:"id"`
-	Title      string    `json:"title,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	EventCount int       `json:"event_count"`
+	ID         string         `json:"id"`
+	Title      string         `json:"title,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	EventCount int            `json:"event_count"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // ForkSession loads a session, forks it, and saves the fork to the store.
