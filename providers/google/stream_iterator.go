@@ -50,23 +50,6 @@ func NewStreamIteratorFromSeq(ctx context.Context, streamSeq iter.Seq2[*genai.Ge
 	}
 }
 
-// NewStreamIterator creates a new StreamIterator (deprecated, use NewStreamIteratorFromSeq)
-func NewStreamIterator(ctx context.Context, chat *genai.Chat, parts []genai.Part, model string) *StreamIterator {
-	// Legacy constructor for backward compatibility
-	// Start the stream using the chat API
-	var streamSeq iter.Seq2[*genai.GenerateContentResponse, error]
-	if chat != nil && len(parts) > 0 {
-		streamSeq = chat.SendMessageStream(ctx, parts...)
-	}
-	return &StreamIterator{
-		ctx:          ctx,
-		streamSeq:    streamSeq,
-		model:        model,
-		responseID:   fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano()),
-		contentIndex: 0,
-	}
-}
-
 func (s *StreamIterator) Next() bool {
 	s.mu.Lock()
 

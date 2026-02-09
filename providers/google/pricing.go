@@ -18,8 +18,8 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2025-01-15",
 	},
-	ModelGemini25FlashPro: {
-		Model:       ModelGemini25FlashPro,
+	ModelGemini25Pro: {
+		Model:       ModelGemini25Pro,
 		InputPrice:  1.25,
 		OutputPrice: 10.00, // Up to 200K tokens
 		Currency:    "USD",

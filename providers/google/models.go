@@ -10,7 +10,4 @@ const (
 	ModelGemini25Pro       = "gemini-2.5-pro"
 	ModelGemini25Flash     = "gemini-2.5-flash"
 	ModelGemini25FlashLite = "gemini-2.5-flash-lite"
-
-	// Deprecated: use ModelGemini25Pro instead
-	ModelGemini25FlashPro = ModelGemini25Pro
 )

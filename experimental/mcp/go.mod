@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/deepnoodle-ai/dive v0.0.0
-	github.com/deepnoodle-ai/wonton v0.0.24
+	github.com/deepnoodle-ai/wonton v0.0.26
 	github.com/mark3labs/mcp-go v0.43.2
 )
 

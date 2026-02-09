@@ -22,7 +22,7 @@ When AI agents execute shell commands via tools like `BashTool`, there's inheren
 1. Perfect security against determined attackers (defense-in-depth, not absolute security)
 2. GUI application support
 3. Real-time filesystem monitoring/IDS capabilities
-4. ~~Fine-grained network filtering~~ (now implemented via built-in proxy; see [sandboxing-network-proxy.md](sandboxing-network-proxy.md))
+4. ~~Fine-grained network filtering~~ (now implemented via built-in proxy)
 
 ## Architecture
 

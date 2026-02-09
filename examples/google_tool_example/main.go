@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	provider := google.New(google.WithModel(google.ModelGemini25FlashPro))
+	provider := google.New(google.WithModel(google.ModelGemini25Pro))
 
 	ctx := context.Background()
 

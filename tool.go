@@ -382,17 +382,6 @@ type FuncToolOption interface {
 	applyFuncTool(ft any)
 }
 
-type funcToolAnnotations struct {
-	annotations *ToolAnnotations
-}
-
-func (o funcToolAnnotations) applyFuncTool(ft any) {
-	switch t := ft.(type) {
-	default:
-		_ = t
-	}
-}
-
 // WithFuncToolAnnotations sets annotations on a FuncTool.
 func WithFuncToolAnnotations(a *ToolAnnotations) FuncToolOption {
 	return &withAnnotationsOption{annotations: a}
