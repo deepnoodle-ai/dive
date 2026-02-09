@@ -32,10 +32,12 @@ The `experimental/compaction` package provides `CompactMessages` for full compac
 ```go
 import "github.com/deepnoodle-ai/dive/experimental/compaction"
 
+messages, _ := sess.Messages(ctx)
+
 compactedMsgs, event, err := compaction.CompactMessages(
     ctx,
     model,
-    session.Messages,
+    messages,
     "",  // system prompt (optional)
     "",  // summary prompt (empty = default)
     compaction.CalculateContextTokens(lastUsage),
@@ -47,7 +49,7 @@ compactedMsgs, event, err := compaction.CompactMessages(
 Check if compaction should be triggered:
 
 ```go
-if compaction.ShouldCompact(lastUsage, len(session.Messages), 100000) {
+if compaction.ShouldCompact(lastUsage, len(messages), 100000) {
     // Trigger compaction
 }
 ```
@@ -64,7 +66,7 @@ haiku := anthropic.New(anthropic.WithModel("claude-haiku-4-5"))
 compactedMsgs, event, err := compaction.CompactMessages(
     ctx,
     haiku,
-    session.Messages,
+    messages,
     "", "", tokensBefore,
 )
 ```
