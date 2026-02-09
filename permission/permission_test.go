@@ -743,6 +743,103 @@ func TestConfirmDialogInput(t *testing.T) {
 	})
 }
 
+func TestConfirmAllowSession(t *testing.T) {
+	t.Run("AllowSession adds category to session allowlist", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Confirmed: true, AllowSession: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "ls"}`)}
+
+		// First call triggers dialog, which returns AllowSession
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+
+		// Category should now be in session allowlist
+		assert.True(t, manager.IsSessionAllowed("bash"))
+
+		// Second call should skip dialog entirely (session allowed)
+		dialogCalled := false
+		dialog.showFunc = func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			dialogCalled = true
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}
+
+		err = manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+		assert.False(t, dialogCalled)
+	})
+
+	t.Run("AllowSession uses correct category for edit tools", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Confirmed: true, AllowSession: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Write"}
+		call := &llm.ToolUseContent{Name: "Write", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+
+		// Write is in the "edit" category
+		assert.True(t, manager.IsSessionAllowed("edit"))
+		assert.False(t, manager.IsSessionAllowed("bash"))
+	})
+}
+
+func TestConfirmFeedback(t *testing.T) {
+	t.Run("Feedback returns UserFeedback error", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Feedback: "try using cat instead"}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+
+		// Should be a UserFeedback error
+		feedback, ok := dive.IsUserFeedback(err)
+		assert.True(t, ok)
+		assert.Equal(t, "try using cat instead", feedback)
+	})
+
+	t.Run("empty Feedback and not confirmed is regular denial", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Confirmed: false}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{}`)}
+
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "denied")
+
+		// Should NOT be a UserFeedback error
+		_, ok := dive.IsUserFeedback(err)
+		assert.False(t, ok)
+	})
+}
+
 func TestAuditHook(t *testing.T) {
 	t.Run("logs tool calls", func(t *testing.T) {
 		var loggedName string

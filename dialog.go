@@ -97,6 +97,12 @@ type DialogOutput struct {
 
 	// Canceled indicates the user dismissed the dialog without responding.
 	Canceled bool
+
+	// AllowSession indicates the user wants to allow all similar actions this session.
+	AllowSession bool
+
+	// Feedback contains user-provided text when denying (e.g., "try a different approach").
+	Feedback string
 }
 
 // AutoApproveDialog automatically approves confirmations and selects first/default options.

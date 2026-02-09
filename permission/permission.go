@@ -336,6 +336,14 @@ func (pm *Manager) confirm(
 	if err != nil {
 		return err
 	}
+	if output.AllowSession {
+		category := GetToolCategory(tool.Name())
+		pm.AllowForSession(category.Key)
+		return nil
+	}
+	if output.Feedback != "" {
+		return dive.NewUserFeedback(output.Feedback)
+	}
 	if output.Canceled || !output.Confirmed {
 		return fmt.Errorf("user denied tool call")
 	}
