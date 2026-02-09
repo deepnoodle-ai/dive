@@ -29,7 +29,7 @@ const (
 	// xAI models
 	ModelGrok41FastReasoning = "x-ai/grok-4-1-fast-reasoning"
 	ModelGrok4FastReasoning  = "x-ai/grok-4-fast-reasoning"
-	ModelGrok3              = "x-ai/grok-3"
+	ModelGrok3               = "x-ai/grok-3"
 
 	// Mistral models
 	ModelMistralLarge3 = "mistral/mistral-large-3"

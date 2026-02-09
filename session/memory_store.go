@@ -113,5 +113,3 @@ func (s *MemoryStore) putSession(ctx context.Context, data *sessionData) error {
 	// No-op: MemoryStore shares data directly with Session.
 	return nil
 }
-
-

@@ -144,10 +144,10 @@ type mockTool struct {
 	callFunc func(ctx context.Context, input any) (*ToolResult, error)
 }
 
-func (t *mockTool) Name() string                                          { return t.name }
-func (t *mockTool) Description() string                                   { return "mock tool" }
-func (t *mockTool) Schema() *Schema                                       { return nil }
-func (t *mockTool) Annotations() *ToolAnnotations                         { return nil }
+func (t *mockTool) Name() string                  { return t.name }
+func (t *mockTool) Description() string           { return "mock tool" }
+func (t *mockTool) Schema() *Schema               { return nil }
+func (t *mockTool) Annotations() *ToolAnnotations { return nil }
 func (t *mockTool) Call(ctx context.Context, input any) (*ToolResult, error) {
 	return t.callFunc(ctx, input)
 }

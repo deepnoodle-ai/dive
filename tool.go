@@ -12,23 +12,23 @@ import (
 // ToolAnnotations contains optional metadata hints that describe a tool's behavior.
 // These hints help agents and permission systems make decisions about tool usage.
 type ToolAnnotations struct {
-	Title              string         `json:"title,omitempty"`
-	ReadOnlyHint       bool           `json:"readOnlyHint,omitempty"`
-	DestructiveHint    bool           `json:"destructiveHint,omitempty"`
-	IdempotentHint     bool           `json:"idempotentHint,omitempty"`
-	OpenWorldHint      bool           `json:"openWorldHint,omitempty"`
-	EditHint           bool           `json:"editHint,omitempty"`           // Indicates file edit operations for acceptEdits mode
-	Extra map[string]any `json:"extra,omitempty"`
+	Title           string         `json:"title,omitempty"`
+	ReadOnlyHint    bool           `json:"readOnlyHint,omitempty"`
+	DestructiveHint bool           `json:"destructiveHint,omitempty"`
+	IdempotentHint  bool           `json:"idempotentHint,omitempty"`
+	OpenWorldHint   bool           `json:"openWorldHint,omitempty"`
+	EditHint        bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
+	Extra           map[string]any `json:"extra,omitempty"`
 }
 
 func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 	data := map[string]any{
-		"title":              a.Title,
-		"readOnlyHint":       a.ReadOnlyHint,
-		"destructiveHint":    a.DestructiveHint,
-		"idempotentHint":     a.IdempotentHint,
-		"openWorldHint":      a.OpenWorldHint,
-		"editHint": a.EditHint,
+		"title":           a.Title,
+		"readOnlyHint":    a.ReadOnlyHint,
+		"destructiveHint": a.DestructiveHint,
+		"idempotentHint":  a.IdempotentHint,
+		"openWorldHint":   a.OpenWorldHint,
+		"editHint":        a.EditHint,
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -50,11 +50,11 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 	}
 	// Handle boolean hints
 	boolFields := map[string]*bool{
-		"readOnlyHint":       &a.ReadOnlyHint,
-		"destructiveHint":    &a.DestructiveHint,
-		"idempotentHint":     &a.IdempotentHint,
-		"openWorldHint": &a.OpenWorldHint,
-		"editHint":      &a.EditHint,
+		"readOnlyHint":    &a.ReadOnlyHint,
+		"destructiveHint": &a.DestructiveHint,
+		"idempotentHint":  &a.IdempotentHint,
+		"openWorldHint":   &a.OpenWorldHint,
+		"editHint":        &a.EditHint,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {
