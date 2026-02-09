@@ -140,7 +140,24 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 
 	if choice.Delta.Reasoning != "" {
-		// TODO: handle accumulated reasoning
+		// Use a fixed index offset to avoid collisions with text content blocks
+		index := 1000 + choice.Index
+		if _, exists := s.contentBlocks[index]; !exists {
+			s.contentBlocks[index] = &ContentBlockAccumulator{Type: "thinking"}
+			events = append(events, &llm.Event{
+				Type:         llm.EventTypeContentBlockStart,
+				Index:        &index,
+				ContentBlock: &llm.EventContentBlock{Type: "thinking"},
+			})
+		}
+		events = append(events, &llm.Event{
+			Type:  llm.EventTypeContentBlockDelta,
+			Index: &index,
+			Delta: &llm.EventDelta{
+				Type:     llm.EventDeltaTypeThinking,
+				Thinking: choice.Delta.Reasoning,
+			},
+		})
 	}
 
 	// Handle text content
