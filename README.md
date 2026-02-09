@@ -121,7 +121,7 @@ fmt.Println(response.Message().Text())
 
 ### Providers
 
-Anthropic, OpenAI, Google, Grok, OpenRouter, Groq, Mistral, Ollama. All support
+Anthropic, OpenAI, Google, Grok, OpenRouter, Mistral, Ollama. All support
 tool calling.
 
 Some providers are separate Go modules to isolate dependencies. For example, to

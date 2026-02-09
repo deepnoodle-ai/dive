@@ -28,13 +28,12 @@ LLM-powered applications.
 
 ### Providers
 
-Eight LLM providers with self-registering init():
+Seven LLM providers with self-registering init():
 
-- Anthropic (default: claude-opus-4-5)
+- Anthropic (default: claude-opus-4-6)
 - OpenAI (default: gpt-5.2)
 - Google (default: gemini-2.5-pro)
 - Grok
-- Groq
 - Mistral
 - Ollama
 - OpenRouter

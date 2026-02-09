@@ -25,29 +25,29 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2025-01-15",
 	},
-	"gemini-2.5-pro-long": {
-		Model:       "gemini-2.5-pro-long",
+	ModelGemini25ProLong: {
+		Model:       ModelGemini25ProLong,
 		InputPrice:  2.50, // Over 200K tokens
 		OutputPrice: 15.00,
 		Currency:    "USD",
 		UpdatedAt:   "2025-01-15",
 	},
-	"gemini-2.0-flash": {
-		Model:       "gemini-2.0-flash",
+	ModelGemini20Flash: {
+		Model:       ModelGemini20Flash,
 		InputPrice:  0.10,
 		OutputPrice: 0.40,
 		Currency:    "USD",
 		UpdatedAt:   "2025-01-15",
 	},
-	"gemini-1.5-pro": {
-		Model:       "gemini-1.5-pro",
+	ModelGemini15Pro: {
+		Model:       ModelGemini15Pro,
 		InputPrice:  1.25,
 		OutputPrice: 5.00,
 		Currency:    "USD",
 		UpdatedAt:   "2025-01-15",
 	},
-	"gemini-1.5-flash": {
-		Model:       "gemini-1.5-flash",
+	ModelGemini15Flash: {
+		Model:       ModelGemini15Flash,
 		InputPrice:  0.15,
 		OutputPrice: 0.60,
 		Currency:    "USD",
