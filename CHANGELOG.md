@@ -1,70 +1,44 @@
 # Changelog
 
-## v1.0.0
+All notable changes to this project will be documented in this file.
 
-Initial stable release of Dive, a Go library for building AI agents and
-LLM-powered applications.
+The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-### Core
+## [1.0.0] - 2025-02-09
 
-- **Agent** - Tool-calling agent loop with `NewAgent` and `CreateResponse`.
-  Manages the generate-call-repeat cycle with configurable hooks at each stage.
-- **LLM abstraction** - Unified `LLM` and `StreamingLLM` interfaces across all
-  providers. Supports text, images, documents, tool calls, thinking/reasoning,
-  and structured output.
-- **Tool system** - `Tool` and `TypedTool[T]` interfaces with auto-generated
-  JSON schemas via struct tags. `FuncTool` creates tools from plain functions.
-  `Toolset` enables dynamic tool resolution per request. Panics in tools are
-  automatically recovered.
-- **Hook system** - `PreGeneration`, `PostGeneration`, `PreToolUse`,
-  `PostToolUse`, `PostToolUseFailure`, `PreIteration`, and `Stop` hooks.
-  All hooks receive `*HookContext` for state sharing.
-- **Session management** - `Session` interface for persistent conversation
-  state. In-memory and file-backed stores. Fork and compact operations.
-- **Permission system** - Rule-based tool permission management with modes
-  (`Default`, `Plan`, `AcceptEdits`, `BypassPermissions`, `DontAsk`),
-  specifier patterns (`MatchGlob`, `MatchPath`, `MatchDomain`), and
-  session allowlists.
+First official stable release. Major architectural overhaul from v0.0.x with a simpler
+agent API, a new hook system, and clearly separated core vs experimental packages.
 
-### Providers
+### Added
 
-Seven LLM providers with self-registering init():
+- **Hook system** with 7 hook types (`PreGeneration`, `PostGeneration`,
+  `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PreIteration`, `Stop`)
+  and shared `*HookContext`. Built-in hooks for context injection, compaction,
+  and usage logging.
+- **Session package** (`session/`) with `FileStore` and `MemoryStore` backends,
+  plus fork and compact operations.
+- **Permission package** (`permission/`) promoted to core. Rule-based tool
+  permissions with modes, specifier patterns, and session allowlists.
+- **`FuncTool[T]`** for creating tools from functions with auto-generated schemas.
+- **`Toolset` interface** for dynamic per-request tool resolution.
+- **Provider registry** with self-registering providers via `init()`.
+- **Gemini 3 models** (`gemini-3-pro-preview`, `gemini-3-flash-preview`).
+- **Tool panic recovery**, `OutputMessages` on Response, `llms.txt`.
 
-- Anthropic (default: claude-opus-4-6)
-- OpenAI (default: gpt-5.2)
-- Google (default: gemini-2.5-pro)
-- Grok
-- Mistral
-- Ollama
-- OpenRouter
+### Changed
 
-### Built-in Toolkit
+- **Agent is a concrete struct**, not an interface. `SystemPrompt` replaces
+  `Instructions`. `AgentOptions` streamlined with `Hooks`, `Toolsets`, `Session`.
+- **Toolkit constructors** return `*dive.TypedToolAdapter[T]` with variadic options.
+- **CLI moved** to `experimental/cmd/dive/`.
+- **Provider defaults updated**: Anthropic `claude-opus-4-6`, OpenAI `gpt-5.2`,
+  Google `gemini-2.5-pro`. Pricing updated across all providers.
+- **Experimental boundary**: MCP, sandbox, skills, slash commands, subagents,
+  compaction, todo, settings, and extended toolkit moved under `experimental/`.
 
-Tools that align with Claude Code's patterns:
+### Removed
 
-- `BashTool` - Shell command execution
-- `ReadFileTool` - File reading with line range support
-- `WriteFileTool` - File creation
-- `EditTool` - Exact string replacement editing
-- `TextEditorTool` - Combined view/create/edit operations
-- `GlobTool` - File pattern matching
-- `GrepTool` - Content search with regex support
-- `ListDirectoryTool` - Directory listing
-- `FetchTool` - HTTP fetching
-- `WebSearchTool` - Web search via Brave API
-- `AskUserTool` - Interactive user input
-
-### Experimental
-
-Functional but unstable APIs in `experimental/`:
-
-- MCP client integration
-- Sandboxing (macOS Seatbelt, Docker/Podman)
-- Settings management
-- Skill system
-- Slash commands
-- Subagent orchestration
-- Context compaction
-- Todo tracking
-- Additional toolkit extensions
-- CLI (`experimental/cmd/dive/`)
+- **Groq provider**.
+- **Thread system** replaced by `dive.Session` interface.
+- **Interactor and Confirmer** replaced by hooks and the permission package.
+- **Subagent loader and compaction** from core (available in `experimental/`).
