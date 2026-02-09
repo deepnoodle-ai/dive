@@ -306,5 +306,5 @@ Hooks: dive.Hooks{
 
 - [Agents Guide](agents.md) — Full agent configuration reference
 - [Custom Tools](custom-tools.md) — Build tools that hooks can intercept
-- [Permissions Guide](experimental/permissions.md) — Hook-based permission system
+- [Permissions Guide](permissions.md) — Hook-based permission system
 - [Compaction Guide](experimental/compaction.md) — Hook-based context compaction

@@ -18,6 +18,7 @@ import (
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
+	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
@@ -185,26 +186,10 @@ func runInteractive(ctx *cli.Context) error {
 	sessionLoader := session.Loader(sessionRepo)
 	sessionSaver := session.Saver(sessionRepo)
 
-	// Set up tool permission hook
-	permissionHook := func(ctx context.Context, hctx *dive.HookContext) error {
-		// Auto-allow read-only tools
-		if annotations := hctx.Tool.Annotations(); annotations != nil && annotations.ReadOnlyHint {
-			return nil
-		}
-		// Ask for confirmation on write tools
-		if appPtr == nil {
-			return nil // Allow if app not set yet
-		}
-		message := fmt.Sprintf("Execute %s?", hctx.Tool.Name())
-		approved, err := appPtr.ConfirmTool(ctx, hctx.Tool.Name(), message, hctx.Call.Input)
-		if err != nil {
-			return err
-		}
-		if !approved {
-			return fmt.Errorf("user denied tool call")
-		}
-		return nil
-	}
+	// Set up tool permission hook using the permission package
+	permConfig := &permission.Config{Mode: permission.ModeDefault}
+	permManager := permission.NewManager(permConfig, tuiDialog)
+	permissionHook := permission.HookFromManager(permManager)
 
 	// Set up compaction config
 	var compactionConfig *compaction.CompactionConfig
@@ -447,22 +432,46 @@ func (d *tuiDialog) Show(ctx context.Context, in *dive.DialogInput) (*dive.Dialo
 }
 
 func (d *tuiDialog) showConfirm(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+	// Build tool-specific title and preview
+	title := in.Title
+	preview := in.Message
+	if in.Call != nil {
+		t, p := buildToolPreview(in.Call.Name, in.Call.Input)
+		if t != "" {
+			title = t
+		}
+		if p != "" {
+			preview = p
+		}
+	}
+
+	// Get tool category for "allow all X this session" option
+	categoryLabel := "this action"
+	if in.Tool != nil {
+		category := permission.GetToolCategory(in.Tool.Name())
+		categoryLabel = category.Label
+	}
+
 	confirmChan := make(chan ConfirmResult, 1)
 	d.app.runner.SendEvent(showDialogEvent{
 		baseEvent: newBaseEvent(),
 		dialog: &DialogState{
 			Type:                     DialogTypeConfirm,
 			Active:                   true,
-			Title:                    in.Title,
-			ContentPreview:           in.Message,
+			Title:                    title,
+			ContentPreview:           preview,
 			ConfirmChan:              confirmChan,
-			ConfirmToolCategoryLabel: "this action",
+			ConfirmToolCategoryLabel: categoryLabel,
 		},
 	})
 	select {
 	case result := <-confirmChan:
 		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
-		return &dive.DialogOutput{Confirmed: result.Approved}, nil
+		return &dive.DialogOutput{
+			Confirmed:    result.Approved,
+			AllowSession: result.AllowSession,
+			Feedback:     result.Feedback,
+		}, nil
 	case <-ctx.Done():
 		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		return &dive.DialogOutput{Canceled: true}, ctx.Err()
@@ -583,6 +592,82 @@ func (d *tuiDialog) showInput(ctx context.Context, in *dive.DialogInput) (*dive.
 		d.app.runner.SendEvent(hideDialogEvent{baseEvent: newBaseEvent()})
 		return &dive.DialogOutput{Canceled: true}, ctx.Err()
 	}
+}
+
+// buildToolPreview generates a human-readable title and content preview
+// for a tool confirmation dialog based on the tool name and its JSON input.
+func buildToolPreview(toolName string, input json.RawMessage) (title, preview string) {
+	var parsed map[string]interface{}
+	if len(input) > 0 {
+		json.Unmarshal(input, &parsed)
+	}
+
+	switch toolName {
+	case "Bash":
+		if cmd, ok := parsed["command"].(string); ok {
+			if len(cmd) > 80 {
+				cmd = cmd[:77] + "..."
+			}
+			title = fmt.Sprintf("Run: %s", cmd)
+		}
+
+	case "Edit":
+		if filePath, ok := parsed["file_path"].(string); ok {
+			title = fmt.Sprintf("Edit %s", filePath)
+		} else if filePath, ok := parsed["filePath"].(string); ok {
+			title = fmt.Sprintf("Edit %s", filePath)
+		}
+		if oldStr, ok := parsed["old_string"].(string); ok {
+			if newStr, ok := parsed["new_string"].(string); ok {
+				if len(oldStr) > 50 {
+					oldStr = oldStr[:47] + "..."
+				}
+				if len(newStr) > 50 {
+					newStr = newStr[:47] + "..."
+				}
+				preview = fmt.Sprintf("Replace:\n  %q\nWith:\n  %q", oldStr, newStr)
+			}
+		}
+
+	case "Write":
+		if filePath, ok := parsed["file_path"].(string); ok {
+			title = fmt.Sprintf("Write to %s", filePath)
+		} else if filePath, ok := parsed["filePath"].(string); ok {
+			title = fmt.Sprintf("Write to %s", filePath)
+		}
+		if content, ok := parsed["content"].(string); ok {
+			lines := strings.Split(content, "\n")
+			if len(lines) > 10 {
+				preview = strings.Join(lines[:10], "\n") + "\n..."
+			} else {
+				preview = content
+			}
+		}
+
+	case "Read":
+		if filePath, ok := parsed["file_path"].(string); ok {
+			title = fmt.Sprintf("Read %s", filePath)
+		} else if filePath, ok := parsed["filePath"].(string); ok {
+			title = fmt.Sprintf("Read %s", filePath)
+		}
+
+	default:
+		if len(parsed) > 0 {
+			var params []string
+			for k, v := range parsed {
+				valStr := fmt.Sprintf("%v", v)
+				if len(valStr) > 50 {
+					valStr = valStr[:47] + "..."
+				}
+				params = append(params, fmt.Sprintf("%s: %s", k, valStr))
+			}
+			if len(params) > 0 {
+				preview = strings.Join(params, "\n")
+			}
+		}
+	}
+
+	return title, preview
 }
 
 func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {

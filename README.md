@@ -241,7 +241,6 @@ Packages under `experimental/*` have no stability guarantees. APIs may change at
 any time.
 
 - **Session** — Persistent conversation storage via hooks
-- **Permission** — Rule-based tool execution control
 - **Compaction** — Auto-summarize conversations approaching token limits
 - **Subagent** — Spawn specialized child agents for subtasks
 - **Sandbox** — Docker/Seatbelt isolation for tool execution
@@ -283,6 +282,7 @@ go run ./openai_responses_example
 - [Custom Tools](./docs/guides/custom-tools.md) — Build and register your own tools
 - [LLM Guide](./docs/guides/llm-guide.md) — Direct model access without the agent loop
 - [Tools Overview](./docs/guides/tools.md) — Built-in toolkit reference
+- [Permissions](./docs/guides/permissions.md) — Rule-based tool permission management
 - [llms.txt](./llms.txt) — AI-optimized reference for agents developing with Dive
 
 ## See Also

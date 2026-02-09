@@ -1,8 +1,6 @@
 # Permission System Guide
 
-> **Experimental**: This package is in `experimental/permission/`. The API may change.
-
-Dive's permission system is built on **PreToolUse hooks**. The `experimental/permission` package provides a higher-level permission manager with modes, rules, and session allowlists.
+Dive's permission system is built on **PreToolUse hooks**. The `permission` package provides a higher-level permission manager with modes, rules, and session allowlists.
 
 ## Core: Using PreToolUse Hooks
 
@@ -34,38 +32,66 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 
 All hooks run in order. If any hook returns an error, the tool is denied and the error message is sent to the LLM. A `*dive.HookAbortError` aborts generation entirely.
 
-## Experimental: PermissionManager
+## Permission Manager
 
-The `experimental/permission` package provides a `Manager` with declarative rules and modes:
+The `permission` package provides a `Manager` with declarative rules and modes:
 
 ```go
-import "github.com/deepnoodle-ai/dive/experimental/permission"
+import "github.com/deepnoodle-ai/dive/permission"
 ```
 
 ### Permission Modes
 
-| Mode                | Behavior                                        |
-| ------------------- | ----------------------------------------------- |
-| `Default`           | Standard rule-based checks                      |
-| `Plan`              | Read-only mode (only `ReadOnlyHint=true` tools) |
-| `AcceptEdits`       | Auto-accept file edit operations                |
-| `BypassPermissions` | Allow all tools (use with caution)              |
+| Mode                | Behavior                                               |
+| ------------------- | ------------------------------------------------------ |
+| `Default`           | Standard rule-based checks                             |
+| `Plan`              | Read-only mode (only `ReadOnlyHint=true` tools)        |
+| `AcceptEdits`       | Auto-accept file edit operations                       |
+| `BypassPermissions` | Allow all tools (use with caution)                     |
+| `DontAsk`           | Auto-deny unless explicitly allowed (headless/CI mode) |
 
 ### Permission Rules
 
-Declarative allow/deny/ask rules with exact tool name matching (or `"*"` for all tools):
+Declarative allow/deny/ask rules with glob tool name matching and specifier patterns:
 
 ```go
 rules := permission.Rules{
-    permission.DenyCommandRule("Bash", "rm -rf", "Recursive deletion blocked"),
+    permission.DenySpecifierRule("Bash", "rm -rf*", "Recursive deletion blocked"),
     permission.AllowRule("Read"),
     permission.AllowRule("Glob"),
-    permission.AllowCommandRule("Bash", "go test"),
+    permission.AllowSpecifierRule("Bash", "go test*"),
+    permission.AllowRule("mcp__*"),  // glob pattern matches all MCP tools
     permission.AskRule("Write", "Confirm file write"),
 }
 ```
 
 Ask rules call the `dive.Dialog` to prompt the user. If no dialog is set, ask rules auto-allow.
+
+### Specifier Patterns
+
+The `Specifier` field on a rule matches against tool-specific values extracted from the tool call input. For example, Bash rules match against the command, Read/Write/Edit rules match against the file path, and WebFetch rules match against the URL.
+
+Default specifier fields:
+
+| Tool     | Input fields checked                         |
+| -------- | --------------------------------------------- |
+| Bash     | `command`, `cmd`, `script`, `code`            |
+| Read     | `file_path`, `filePath`, `path`               |
+| Write    | `file_path`, `filePath`, `path`               |
+| Edit     | `file_path`, `filePath`, `path`               |
+| WebFetch | `url`                                         |
+
+Override with `Config.SpecifierFields` for custom tools.
+
+### Parsing Rules from Strings
+
+```go
+rule, err := permission.ParseRule(permission.RuleAllow, "Bash(go test *)")
+// rule.Tool = "Bash", rule.Specifier = "go test *"
+
+rule, err = permission.ParseRule(permission.RuleDeny, "mcp__*")
+// rule.Tool = "mcp__*", rule.Specifier = ""
+```
 
 ### Using as a Hook
 
@@ -105,6 +131,21 @@ manager.AllowForSession("bash")
 manager.AllowForSession(permission.CategoryEdit.Key)
 ```
 
+### DontAsk Mode
+
+For headless or automation use cases, `ModeDontAsk` auto-denies any tool that is not explicitly allowed by a rule:
+
+```go
+config := &permission.Config{
+    Mode: permission.ModeDontAsk,
+    Rules: permission.Rules{
+        permission.AllowRule("Read"),
+        permission.AllowRule("Glob"),
+        permission.AllowSpecifierRule("Bash", "go test*"),
+    },
+}
+```
+
 ## Tool Annotations
 
 Annotations on tools influence permission decisions:
@@ -120,5 +161,6 @@ Annotations on tools influence permission decisions:
 
 1. Start restrictive and add explicit allow rules
 2. Use deny rules for dangerous operations
-3. Use PreToolUse hooks for audit logging
-4. Set appropriate annotations on custom tools
+3. Use `ModeDontAsk` for headless/CI pipelines
+4. Use PreToolUse hooks for audit logging
+5. Set appropriate annotations on custom tools
