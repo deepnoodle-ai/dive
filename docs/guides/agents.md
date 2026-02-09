@@ -47,7 +47,8 @@ func main() {
 | `Name`               | `string`               | Agent identifier (for logging)                    |
 | `SystemPrompt`       | `string`               | System prompt sent to the LLM                     |
 | `Model`              | `llm.LLM`              | LLM provider (required)                           |
-| `Tools`              | `[]Tool`               | Tools available to the agent                      |
+| `Tools`              | `[]Tool`               | Static tools available to the agent               |
+| `Toolsets`           | `[]Toolset`            | Dynamic tool providers resolved per LLM request   |
 | `Hooks`              | `Hooks`                | Hook functions grouped in a struct (see below)    |
 | `Session`            | `Session`              | Persistent conversation state (see below)         |
 | `ModelSettings`      | `*ModelSettings`       | Temperature, max tokens, reasoning, caching       |

@@ -130,12 +130,12 @@ Tools include annotations that describe their behavior:
 
 ```go
 type ToolAnnotations struct {
-    Title           string
-    ReadOnlyHint    bool   // Tool only reads data
-    DestructiveHint bool   // Tool may delete/overwrite data
-    IdempotentHint  bool   // Safe to call multiple times
-    OpenWorldHint   bool   // Accesses external resources
-    EditHint        bool   // File edit operation
+    Title              string
+    ReadOnlyHint       bool   // Tool only reads data
+    DestructiveHint    bool   // Tool may delete/overwrite data
+    IdempotentHint     bool   // Safe to call multiple times
+    OpenWorldHint      bool   // Accesses external resources
+    EditHint           bool   // File edit operation
 }
 ```
 

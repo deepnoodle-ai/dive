@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -55,8 +56,13 @@ type AgentOptions struct {
 	// Model is the LLM to use for generation.
 	Model llm.LLM
 
-	// Tools available to the agent.
+	// Tools available to the agent (static).
 	Tools []Tool
+
+	// Toolsets provide dynamic tool resolution. Each toolset's Tools() method
+	// is called before each LLM request, enabling context-dependent tool
+	// availability. Tools from toolsets are merged with static Tools.
+	Toolsets []Toolset
 
 	// Hooks groups all agent-level hooks.
 	Hooks Hooks
@@ -89,6 +95,7 @@ type Agent struct {
 	name               string
 	model              llm.LLM
 	tools              []Tool
+	toolsets           []Toolset
 	toolsByName        map[string]Tool
 	responseTimeout    time.Duration
 	llmHooks           llm.Hooks
@@ -127,6 +134,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		modelSettings:      opts.ModelSettings,
 		hooks:              opts.Hooks,
 		session:            opts.Session,
+		toolsets:           opts.Toolsets,
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -151,12 +159,38 @@ func (a *Agent) Name() string {
 }
 
 func (a *Agent) HasTools() bool {
-	return len(a.tools) > 0
+	return len(a.tools) > 0 || len(a.toolsets) > 0
 }
 
-// Tools returns a copy of the agent's tools.
+// Tools returns a copy of the agent's static tools.
 func (a *Agent) Tools() []Tool {
 	return slices.Clone(a.tools)
+}
+
+// resolveTools returns all tools for the current request, including static tools
+// and dynamically resolved tools from toolsets.
+func (a *Agent) resolveTools(ctx context.Context) (tools []Tool, toolsByName map[string]Tool, err error) {
+	tools = slices.Clone(a.tools)
+
+	// Resolve dynamic tools from toolsets
+	for _, ts := range a.toolsets {
+		dynamic, tsErr := ts.Tools(ctx)
+		if tsErr != nil {
+			return nil, nil, fmt.Errorf("toolset %s: %w", ts.Name(), tsErr)
+		}
+		tools = append(tools, dynamic...)
+	}
+
+	// Build name index
+	toolsByName = make(map[string]Tool, len(tools))
+	for _, tool := range tools {
+		name := tool.Name()
+		if _, exists := toolsByName[name]; exists {
+			return nil, nil, fmt.Errorf("duplicate tool name: %q", name)
+		}
+		toolsByName[name] = tool
+	}
+	return tools, toolsByName, nil
 }
 
 // Model returns the agent's LLM.
@@ -350,9 +384,6 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		outputMessages = append(outputMessages, msg)
 	}
 
-	// Base options passed to the LLM (built once, never mutated)
-	baseOpts := a.getGenerationAgentOptions(systemPrompt)
-
 	// The loop is used to run and respond to the primary generation request
 	// and then automatically run any tool-use invocations. The first time
 	// through, we submit the primary generation. On subsequent loops, we are
@@ -373,11 +404,17 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			// Apply any modifications from hooks
 			if hctx.SystemPrompt != systemPrompt {
 				systemPrompt = hctx.SystemPrompt
-				baseOpts = a.getGenerationAgentOptions(systemPrompt)
 			}
 		}
 
-		// Build per-iteration options from base options + current messages
+		// Resolve tools (static + dynamic toolsets)
+		resolvedTools, toolsByName, resolveErr := a.resolveTools(ctx)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("tool resolution error: %w", resolveErr)
+		}
+
+		// Build per-iteration LLM options
+		baseOpts := a.getGenerationOptions(systemPrompt, resolvedTools)
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
@@ -430,7 +467,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		}
 
 		// Execute all requested tool calls
-		toolResults, err := a.executeToolCalls(ctx, hctx, toolCalls, collectingCallback)
+		toolResults, err := a.executeToolCalls(ctx, hctx, toolCalls, toolsByName, collectingCallback)
 		if err != nil {
 			return nil, err
 		}
@@ -503,11 +540,12 @@ func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	hctx *HookContext,
 	toolCalls []*llm.ToolUseContent,
+	toolsByName map[string]Tool,
 	callback EventCallback,
 ) ([]*ToolCallResult, error) {
 	results := make([]*ToolCallResult, len(toolCalls))
 	for i, toolCall := range toolCalls {
-		tool, ok := a.toolsByName[toolCall.Name]
+		tool, ok := toolsByName[toolCall.Name]
 		if !ok {
 			return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
 		}
@@ -626,14 +664,42 @@ func (a *Agent) executeToolCalls(
 	return results, nil
 }
 
-// executeTool runs the tool and returns the result.
+// executeTool runs the tool and returns the result. Panics in tool.Call are
+// recovered and converted to error results so the LLM can see the failure
+// and adapt, rather than crashing the process.
 func (a *Agent) executeTool(
 	ctx context.Context,
 	tool Tool,
 	call *llm.ToolUseContent,
 	input []byte,
 	preview *ToolCallPreview,
-) *ToolCallResult {
+) (result *ToolCallResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.logger.Error("tool panic recovered",
+				"tool", tool.Name(),
+				"panic", fmt.Sprint(r),
+				"stack", string(debug.Stack()),
+			)
+			result = &ToolCallResult{
+				ID:      call.ID,
+				Name:    call.Name,
+				Input:   call.Input,
+				Preview: preview,
+				Result: &ToolResult{
+					Content: []*ToolResultContent{
+						{
+							Type: ToolResultContentTypeText,
+							Text: fmt.Sprintf("Tool %s panicked: %v", tool.Name(), r),
+						},
+					},
+					IsError: true,
+				},
+				Error: fmt.Errorf("tool %s panicked: %v", tool.Name(), r),
+			}
+		}
+	}()
+
 	output, err := tool.Call(ctx, input)
 	if err != nil {
 		return &ToolCallResult{
@@ -684,21 +750,19 @@ func (a *Agent) createDeniedResult(call *llm.ToolUseContent, message string, pre
 	}
 }
 
-func (a *Agent) getToolDefinitions() []llm.Tool {
-	definitions := make([]llm.Tool, len(a.tools))
-	for i, tool := range a.tools {
-		definitions[i] = tool
-	}
-	return definitions
-}
-
-func (a *Agent) getGenerationAgentOptions(systemPrompt string) []llm.Option {
+// getGenerationOptions builds LLM options for a generation iteration using
+// the resolved tool set and effective system prompt.
+func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool) []llm.Option {
 	var generateOpts []llm.Option
 	if systemPrompt != "" {
 		generateOpts = append(generateOpts, llm.WithSystemPrompt(systemPrompt))
 	}
-	if len(a.tools) > 0 {
-		generateOpts = append(generateOpts, llm.WithTools(a.getToolDefinitions()...))
+	if len(tools) > 0 {
+		defs := make([]llm.Tool, len(tools))
+		for i, tool := range tools {
+			defs[i] = tool
+		}
+		generateOpts = append(generateOpts, llm.WithTools(defs...))
 	}
 	if a.llmHooks != nil {
 		generateOpts = append(generateOpts, llm.WithHooks(a.llmHooks))

@@ -1,13 +1,55 @@
 # Custom Tools Guide
 
-Create custom tools to extend your agent's capabilities.
+Create custom tools to extend your agent's capabilities. Dive offers two approaches: `FuncTool` for quick tool creation from a function, and `TypedTool[T]` for tools that need struct-based state.
+
+## FuncTool (Recommended for Simple Tools)
+
+`FuncTool` creates a tool from a function. The schema is auto-generated from the input type's struct tags — no manual `Schema()` method needed:
+
+```go
+type WeatherInput struct {
+    City  string `json:"city" description:"City name"`
+    Units string `json:"units,omitempty" description:"Temperature units" enum:"celsius,fahrenheit"`
+}
+
+weatherTool := dive.FuncTool("get_weather", "Get current weather for a city",
+    func(ctx context.Context, input *WeatherInput) (*dive.ToolResult, error) {
+        temp := fetchWeather(input.City, input.Units)
+        return dive.NewToolResultText(fmt.Sprintf("%.1f°%s in %s", temp, input.Units, input.City)), nil
+    },
+)
+```
+
+The schema is derived from `WeatherInput` struct tags:
+- `json:"city"` — required field (no `omitempty`)
+- `json:"units,omitempty"` — optional field
+- `description:"..."` — field description for the LLM
+- `enum:"celsius,fahrenheit"` — constrained values
+
+Other supported tags: `default`, `example`, `minimum`, `maximum`, `minLength`, `maxLength`, `pattern`, `format`, `nullable`, `required`.
+
+### FuncTool Options
+
+```go
+// Set annotations
+dive.FuncTool("tool", "desc", fn,
+    dive.WithFuncToolAnnotations(&dive.ToolAnnotations{
+        ReadOnlyHint:  true,
+        OpenWorldHint: true,
+    }),
+)
+
+// Override the auto-generated schema
+dive.FuncTool("tool", "desc", fn,
+    dive.WithFuncToolSchema(customSchema),
+)
+```
 
 ## TypedTool Interface
 
-Custom tools implement the `TypedTool[T]` generic interface:
+For tools that need struct-based state (DB connections, API clients, config), implement `TypedTool[T]`:
 
 ```go
-// In package dive:
 type TypedTool[T any] interface {
     Name() string
     Description() string
@@ -19,21 +61,11 @@ type TypedTool[T any] interface {
 
 The type parameter `T` is the tool's input type. Dive automatically deserializes JSON from the LLM into `T`.
 
-## Example: Lookup Tool
+### Example: Lookup Tool
 
-Tool structs can hold fields — DB clients, API clients, config — and use them in `Call`. This is the primary way to integrate tools with external systems.
+Tool structs can hold fields — DB clients, API clients, config — and use them in `Call`:
 
 ```go
-package main
-
-import (
-    "context"
-    "database/sql"
-    "fmt"
-
-    "github.com/deepnoodle-ai/dive"
-)
-
 type LookupTool struct {
     DB *sql.DB
 }
@@ -77,9 +109,9 @@ func (t *LookupTool) Call(ctx context.Context, input LookupInput) (*dive.ToolRes
 }
 ```
 
-## Registering with an Agent
+### Registering with an Agent
 
-Wrap with `dive.ToolAdapter` and pass to `AgentOptions.Tools`. Inject dependencies when constructing the tool:
+Wrap with `dive.ToolAdapter` and pass to `AgentOptions.Tools`:
 
 ```go
 agent, err := dive.NewAgent(dive.AgentOptions{
@@ -92,9 +124,27 @@ agent, err := dive.NewAgent(dive.AgentOptions{
 })
 ```
 
-Note: Built-in tools in `toolkit/` already call `ToolAdapter` internally, so their constructors return a `dive.Tool` directly. You only need `ToolAdapter` for your own `TypedTool` implementations.
+Note: Built-in tools in `toolkit/` already call `ToolAdapter` internally. `FuncTool` also wraps internally. You only need `ToolAdapter` for your own `TypedTool` implementations.
 
-This pattern works the same way for any dependency: HTTP clients, gRPC connections, caches, third-party SDKs, or configuration values. Store it as a field on the tool struct and use it in `Call`.
+## Dynamic Tools with Toolsets
+
+Use `Toolset` to provide tools that vary at runtime — MCP servers, permission-filtered tools, or context-dependent availability:
+
+```go
+agent, err := dive.NewAgent(dive.AgentOptions{
+    Model: anthropic.New(),
+    Toolsets: []dive.Toolset{
+        &dive.ToolsetFunc{
+            ToolsetName: "mcp-tools",
+            Resolve: func(ctx context.Context) ([]dive.Tool, error) {
+                return discoverMCPTools(ctx)
+            },
+        },
+    },
+})
+```
+
+`Toolset.Tools(ctx context.Context)` is called before each LLM request, returning `([]Tool, error)`, so the tool set can change between iterations. Tools from toolsets are merged with static `Tools`.
 
 ## Tool Annotations
 
@@ -103,11 +153,11 @@ Annotations help agents and permission systems understand tool behavior:
 ```go
 func (t *MyTool) Annotations() *dive.ToolAnnotations {
     return &dive.ToolAnnotations{
-        Title:           "My Tool",
-        ReadOnlyHint:    false,          // Modifies data
-        DestructiveHint: true,           // May overwrite/delete
-        IdempotentHint:  false,          // Results may vary
-        OpenWorldHint:   true,           // Accesses external resources
+        Title:              "My Tool",
+        ReadOnlyHint:       false, // Modifies data
+        DestructiveHint:    true,  // May overwrite/delete
+        IdempotentHint:     false, // Results may vary
+        OpenWorldHint:      true,  // Accesses external resources
     }
 }
 ```
@@ -121,10 +171,11 @@ func (t *MyTool) Call(ctx context.Context, input MyInput) (*dive.ToolResult, err
     if input.Value == "" {
         return dive.NewToolResultError("value is required"), nil
     }
-    // ...
     return dive.NewToolResultText("Success"), nil
 }
 ```
+
+Tool panics are automatically recovered and converted to error results — the LLM sees the error and can adapt. The stack trace is logged but not sent to the model.
 
 ## Tool Previews
 
@@ -140,10 +191,11 @@ func (t *MyTool) PreviewCall(ctx context.Context, input MyInput) *dive.ToolCallP
 
 ## Best Practices
 
-1. **Keep tools focused** - One tool, one purpose
-2. **Validate input** - Check parameters before processing
-3. **Write clear descriptions** - The LLM uses these to decide when to call your tool
-4. **Set appropriate annotations** - Helps permission systems and agent reasoning
-5. **Use `NewToolResultError`** for expected errors, `error` return for unexpected failures
+1. **Use `FuncTool` for simple tools** — Less boilerplate, auto-generated schema
+2. **Use `TypedTool[T]` when you need state** — DB connections, API clients, config
+3. **Keep tools focused** — One tool, one purpose
+4. **Write clear descriptions** — The LLM uses these to decide when to call your tool
+5. **Set appropriate annotations** — Helps permission systems and agent reasoning
+6. **Use `NewToolResultError`** for expected errors, `error` return for unexpected failures
 
 For built-in tools, see the [Tools Guide](tools.md).

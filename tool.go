@@ -6,28 +6,29 @@ import (
 	"fmt"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 // ToolAnnotations contains optional metadata hints that describe a tool's behavior.
 // These hints help agents and permission systems make decisions about tool usage.
 type ToolAnnotations struct {
-	Title           string         `json:"title,omitempty"`
-	ReadOnlyHint    bool           `json:"readOnlyHint,omitempty"`
-	DestructiveHint bool           `json:"destructiveHint,omitempty"`
-	IdempotentHint  bool           `json:"idempotentHint,omitempty"`
-	OpenWorldHint   bool           `json:"openWorldHint,omitempty"`
-	EditHint        bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
-	Extra           map[string]any `json:"extra,omitempty"`
+	Title              string         `json:"title,omitempty"`
+	ReadOnlyHint       bool           `json:"readOnlyHint,omitempty"`
+	DestructiveHint    bool           `json:"destructiveHint,omitempty"`
+	IdempotentHint     bool           `json:"idempotentHint,omitempty"`
+	OpenWorldHint      bool           `json:"openWorldHint,omitempty"`
+	EditHint           bool           `json:"editHint,omitempty"`           // Indicates file edit operations for acceptEdits mode
+	Extra map[string]any `json:"extra,omitempty"`
 }
 
 func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 	data := map[string]any{
-		"title":           a.Title,
-		"readOnlyHint":    a.ReadOnlyHint,
-		"destructiveHint": a.DestructiveHint,
-		"idempotentHint":  a.IdempotentHint,
-		"openWorldHint":   a.OpenWorldHint,
-		"editHint":        a.EditHint,
+		"title":              a.Title,
+		"readOnlyHint":       a.ReadOnlyHint,
+		"destructiveHint":    a.DestructiveHint,
+		"idempotentHint":     a.IdempotentHint,
+		"openWorldHint":      a.OpenWorldHint,
+		"editHint": a.EditHint,
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -49,11 +50,11 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 	}
 	// Handle boolean hints
 	boolFields := map[string]*bool{
-		"readOnlyHint":    &a.ReadOnlyHint,
-		"destructiveHint": &a.DestructiveHint,
-		"idempotentHint":  &a.IdempotentHint,
-		"openWorldHint":   &a.OpenWorldHint,
-		"editHint":        &a.EditHint,
+		"readOnlyHint":       &a.ReadOnlyHint,
+		"destructiveHint":    &a.DestructiveHint,
+		"idempotentHint":     &a.IdempotentHint,
+		"openWorldHint": &a.OpenWorldHint,
+		"editHint":      &a.EditHint,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {
@@ -302,6 +303,153 @@ func (t *TypedToolAdapter[T]) convertInput(input any) (T, error) {
 		return zero, fmt.Errorf("invalid json for tool %s: %w", t.Name(), err)
 	}
 	return typedInput, nil
+}
+
+// Toolset provides dynamic tool resolution. Tools() is called before each
+// LLM request, allowing the available tools to vary based on runtime context.
+// Use toolsets for MCP servers, permission-filtered tools, or context-dependent
+// tool availability.
+type Toolset interface {
+	// Name identifies this toolset for logging and debugging.
+	Name() string
+
+	// Tools returns the tools available in the current context.
+	// Called before each LLM request. Implementations should cache tool
+	// instances and avoid re-creating them on every call.
+	Tools(ctx context.Context) ([]Tool, error)
+}
+
+// ToolsetFunc adapts a function into a Toolset.
+type ToolsetFunc struct {
+	// ToolsetName identifies this toolset.
+	ToolsetName string
+	// Resolve returns the tools for the current context.
+	Resolve func(ctx context.Context) ([]Tool, error)
+}
+
+// Name returns the toolset name.
+func (f *ToolsetFunc) Name() string { return f.ToolsetName }
+
+// Tools calls the resolve function.
+func (f *ToolsetFunc) Tools(ctx context.Context) ([]Tool, error) {
+	return f.Resolve(ctx)
+}
+
+// FuncTool creates a Tool from a function with an auto-generated schema.
+//
+// The schema is generated from the input type T using struct tags. Use json
+// tags for field names, description tags for parameter descriptions, and
+// omitempty to mark optional fields. See [schema.Generate] for all supported tags.
+//
+// Example:
+//
+//	type WeatherInput struct {
+//	    City  string `json:"city" description:"City name"`
+//	    Units string `json:"units,omitempty" description:"Temperature units" enum:"celsius,fahrenheit"`
+//	}
+//
+//	weatherTool := dive.FuncTool("get_weather", "Get current weather",
+//	    func(ctx context.Context, input *WeatherInput) (*dive.ToolResult, error) {
+//	        return dive.NewToolResultText("72°F"), nil
+//	    },
+//	)
+func FuncTool[T any](name, description string, fn func(ctx context.Context, input T) (*ToolResult, error), opts ...FuncToolOption) Tool {
+	ft := &funcTool[T]{
+		name:        name,
+		description: description,
+		fn:          fn,
+	}
+	for _, opt := range opts {
+		opt.applyFuncTool(ft)
+	}
+	// Auto-generate schema from T if not overridden
+	if ft.schema == nil {
+		var zero T
+		s, err := schema.Generate(zero)
+		if err != nil {
+			// If schema generation fails, store the error and report at call time
+			ft.schemaErr = fmt.Errorf("FuncTool %q: cannot generate schema from %T: %w", name, zero, err)
+			ft.schema = &Schema{Type: Object}
+		} else {
+			ft.schema = s
+		}
+	}
+	return ToolAdapter(ft)
+}
+
+// FuncToolOption configures a FuncTool.
+type FuncToolOption interface {
+	applyFuncTool(ft any)
+}
+
+type funcToolAnnotations struct {
+	annotations *ToolAnnotations
+}
+
+func (o funcToolAnnotations) applyFuncTool(ft any) {
+	switch t := ft.(type) {
+	default:
+		_ = t
+	}
+}
+
+// WithFuncToolAnnotations sets annotations on a FuncTool.
+func WithFuncToolAnnotations(a *ToolAnnotations) FuncToolOption {
+	return &withAnnotationsOption{annotations: a}
+}
+
+type withAnnotationsOption struct {
+	annotations *ToolAnnotations
+}
+
+func (o *withAnnotationsOption) applyFuncTool(ft any) {
+	// Use reflection-free approach via the interface
+	if s, ok := ft.(interface{ setAnnotations(*ToolAnnotations) }); ok {
+		s.setAnnotations(o.annotations)
+	}
+}
+
+// WithFuncToolSchema overrides the auto-generated schema.
+func WithFuncToolSchema(s *Schema) FuncToolOption {
+	return &withSchemaOption{schema: s}
+}
+
+type withSchemaOption struct {
+	schema *Schema
+}
+
+func (o *withSchemaOption) applyFuncTool(ft any) {
+	if s, ok := ft.(interface{ setSchema(*Schema) }); ok {
+		s.setSchema(o.schema)
+	}
+}
+
+// funcTool is the internal implementation backing FuncTool.
+type funcTool[T any] struct {
+	name        string
+	description string
+	fn          func(ctx context.Context, input T) (*ToolResult, error)
+	annotations *ToolAnnotations
+	schema      *Schema
+	schemaErr   error
+}
+
+func (f *funcTool[T]) setAnnotations(a *ToolAnnotations) { f.annotations = a }
+func (f *funcTool[T]) setSchema(s *Schema)               { f.schema = s }
+
+func (f *funcTool[T]) Name() string        { return f.name }
+func (f *funcTool[T]) Description() string { return f.description }
+func (f *funcTool[T]) Schema() *Schema     { return f.schema }
+
+func (f *funcTool[T]) Annotations() *ToolAnnotations {
+	return f.annotations
+}
+
+func (f *funcTool[T]) Call(ctx context.Context, input T) (*ToolResult, error) {
+	if f.schemaErr != nil {
+		return NewToolResultError(f.schemaErr.Error()), nil
+	}
+	return f.fn(ctx, input)
 }
 
 // ToolCallResult is a tool call that has been made. This is used to understand
