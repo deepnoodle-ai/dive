@@ -29,8 +29,8 @@ orchestrator.
 
 Everything _outside_ the `experimental/` directory is stable, while everything
 _inside_ `experimental/` may change. The experimental packages add more tools,
-permissions, sessions, and a CLI similar to Claude Code. Use experimental code
-as inspiration, copy and modify it, or use it directly.
+permissions, and a CLI similar to Claude Code. Use experimental code as
+inspiration, copy and modify it, or use it directly.
 
 Dive is developed by [Deep Noodle](https://deepnoodle.ai) and is used in
 multiple production AI deployments.
@@ -78,10 +78,8 @@ agent, err := dive.NewAgent(dive.AgentOptions{
     },
     // Hooks for extensibility
     Hooks: dive.Hooks{
-        PreGeneration:  []dive.PreGenerationHook{loadSession},
-        PostGeneration: []dive.PostGenerationHook{saveSession},
-        PreToolUse:     []dive.PreToolUseHook{checkPermissions},
-        PostToolUse:    []dive.PostToolUseHook{logToolCall},
+        PreToolUse:  []dive.PreToolUseHook{checkPermissions},
+        PostToolUse: []dive.PostToolUseHook{logToolCall},
     },
     // Model settings
     ModelSettings: &dive.ModelSettings{
@@ -185,6 +183,32 @@ Hooks are grouped in a `Hooks` struct on `AgentOptions`. Hook flow:
 PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration
 ```
 
+### Sessions
+
+Sessions provide persistent conversation state. The agent automatically loads
+history before generation and saves new messages after. No hooks needed.
+
+```go
+// In-memory session
+sess := session.New("my-session")
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:   anthropic.New(),
+    Session: sess,
+})
+
+// Persistent session (JSONL files)
+store, _ := session.NewFileStore("~/.myapp/sessions")
+sess, _ := store.Open(ctx, "my-session")
+
+// Per-call session override (one agent, many sessions)
+resp, _ := agent.CreateResponse(ctx,
+    dive.WithInput("Hello"),
+    dive.WithSession(userSession),
+)
+```
+
+See the [Agents Guide](./docs/guides/agents.md#sessions) for fork, compact, and multi-turn patterns.
+
 ### Dialog
 
 The `Dialog` interface handles user-facing prompts during agent execution.
@@ -240,7 +264,6 @@ agent.CreateResponse(ctx,
 Packages under `experimental/*` have no stability guarantees. APIs may change at
 any time.
 
-- **Session** — Persistent conversation storage via hooks
 - **Compaction** — Auto-summarize conversations approaching token limits
 - **Subagent** — Spawn specialized child agents for subtasks
 - **Sandbox** — Docker/Seatbelt isolation for tool execution
