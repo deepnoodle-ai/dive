@@ -8,9 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **Upgrade OpenAI Go SDK from v1 to v3** (`openai-go` v1.12.0 → v3.26.0). Breaking
-  changes in import paths and API types; streaming reasoning deduplicated and
-  per-summary-part tracking added.
+- **Upgrade OpenAI Go SDK from v1 to v3** (`openai-go` v1.12.0 → v3.26.0). All SDK
+  migration handled internally in `providers/openai`; Dive's public API is unchanged.
+  Streaming reasoning deduplicated and per-summary-part tracking added.
 - **Update provider models and features for March 2026.** Anthropic: claude-sonnet-4-6,
   new beta features. OpenAI: gpt-5.4 (new default), gpt-5.3, gpt-5.1-mini, o3-mini.
   Google: gemini-3.1-pro/flash variants. Grok: removed deprecated grok-2 models.
