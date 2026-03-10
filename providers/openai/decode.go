@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/openai/openai-go/responses"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 func decodeAssistantResponse(response *responses.Response) (*llm.Response, error) {

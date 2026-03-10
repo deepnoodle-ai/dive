@@ -7,8 +7,8 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/schema"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/responses"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 var (
@@ -63,31 +63,30 @@ func (t *WebSearchPreviewTool) Schema() *schema.Schema {
 	return nil // Empty for server-side tools
 }
 
-func (t *WebSearchPreviewTool) Param() *responses.WebSearchToolParam {
-	param := &responses.WebSearchToolParam{
+func (t *WebSearchPreviewTool) Param() *responses.WebSearchPreviewToolParam {
+	param := &responses.WebSearchPreviewToolParam{
 		Type: "web_search_preview",
 	}
 	switch t.searchContextSize {
 	case "low":
-		param.SearchContextSize = responses.WebSearchToolSearchContextSizeLow
+		param.SearchContextSize = responses.WebSearchPreviewToolSearchContextSizeLow
 	case "medium":
-		param.SearchContextSize = responses.WebSearchToolSearchContextSizeMedium
+		param.SearchContextSize = responses.WebSearchPreviewToolSearchContextSizeMedium
 	case "high":
-		param.SearchContextSize = responses.WebSearchToolSearchContextSizeHigh
+		param.SearchContextSize = responses.WebSearchPreviewToolSearchContextSizeHigh
 	}
 	if t.userLocation != nil {
-		param.UserLocation.Type = "approximate"
 		if t.userLocation.City != "" {
-			param.UserLocation.City = openai.String(t.userLocation.City)
+			param.UserLocation.City = openai.Opt(t.userLocation.City)
 		}
 		if t.userLocation.Country != "" {
-			param.UserLocation.Country = openai.String(t.userLocation.Country)
+			param.UserLocation.Country = openai.Opt(t.userLocation.Country)
 		}
 		if t.userLocation.Region != "" {
-			param.UserLocation.Region = openai.String(t.userLocation.Region)
+			param.UserLocation.Region = openai.Opt(t.userLocation.Region)
 		}
 		if t.userLocation.Timezone != "" {
-			param.UserLocation.Timezone = openai.String(t.userLocation.Timezone)
+			param.UserLocation.Timezone = openai.Opt(t.userLocation.Timezone)
 		}
 	}
 	return param

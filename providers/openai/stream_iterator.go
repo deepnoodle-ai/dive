@@ -1,13 +1,12 @@
 package openai
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/openai/openai-go/responses"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 // StreamSource is an interface that both the real OpenAI stream and mocks can implement
@@ -347,62 +346,6 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 				partState.Text = data.Part.Text // Set final text
 			}
 		}
-
-	case responses.ResponseReasoningSummaryDoneEvent:
-		// Handle completion of entire reasoning summary
-		summaryIndex := -1
-		if itemState, exists := s.outputItemsState[summaryIndex]; exists {
-			itemState.IsComplete = true
-			diveEvents = append(diveEvents, &llm.Event{
-				Type:  llm.EventTypeContentBlockStop,
-				Index: &summaryIndex,
-			})
-		}
-
-	case responses.ResponseReasoningSummaryDeltaEvent:
-		outputIdx := int(data.OutputIndex)
-		contentIdx := int(data.SummaryIndex)
-
-		itemState, itemOk := s.outputItemsState[outputIdx]
-		if !itemOk {
-			return nil, fmt.Errorf("reasoning delta for unknown output index %d", outputIdx)
-		}
-
-		partState, partOk := itemState.ContentParts[contentIdx]
-		if !partOk {
-			partState = &contentPartState{
-				ContentIndex: contentIdx,
-				PartType:     "thinking",
-			}
-			itemState.ContentParts[contentIdx] = partState
-
-			diveEvents = append(diveEvents, &llm.Event{
-				Type:  llm.EventTypeContentBlockStart,
-				Index: &outputIdx,
-				ContentBlock: &llm.EventContentBlock{
-					Type: llm.ContentTypeThinking,
-				},
-			})
-		}
-
-		// Handle delta that might be string or other type
-		var reasoningTextChunk string
-		if textChunk, ok := data.Delta.(string); ok {
-			reasoningTextChunk = textChunk
-		} else {
-			jsonBytes, _ := json.Marshal(data.Delta)
-			reasoningTextChunk = string(jsonBytes)
-		}
-		partState.Text += reasoningTextChunk
-
-		diveEvents = append(diveEvents, &llm.Event{
-			Type:  llm.EventTypeContentBlockDelta,
-			Index: &outputIdx,
-			Delta: &llm.EventDelta{
-				Type:     llm.EventDeltaTypeThinking,
-				Thinking: reasoningTextChunk,
-			},
-		})
 
 	case responses.ResponseTextDoneEvent:
 		outputIdx := int(data.OutputIndex)
