@@ -2,17 +2,17 @@ package openai
 
 const (
 	// GPT-5 models (latest)
-	ModelGPT54          = "gpt-5.4"
+	ModelGPT54           = "gpt-5.4"
 	ModelGPT53ChatLatest = "gpt-5.3-chat-latest"
 	ModelGPT53ChatLast   = ModelGPT53ChatLatest // Deprecated: Use ModelGPT53ChatLatest.
-	ModelGPT52          = "gpt-5.2"
-	ModelGPT52Pro       = "gpt-5.2-pro"
-	ModelGPT51          = "gpt-5.1"
-	ModelGPT51Mini      = "gpt-5.1-mini"
-	ModelGPT5           = "gpt-5"
-	ModelGPT5Pro        = "gpt-5-pro"
-	ModelGPT5Mini       = "gpt-5-mini"
-	ModelGPT5Nano       = "gpt-5-nano"
+	ModelGPT52           = "gpt-5.2"
+	ModelGPT52Pro        = "gpt-5.2-pro"
+	ModelGPT51           = "gpt-5.1"
+	ModelGPT51Mini       = "gpt-5.1-mini"
+	ModelGPT5            = "gpt-5"
+	ModelGPT5Pro         = "gpt-5-pro"
+	ModelGPT5Mini        = "gpt-5-mini"
+	ModelGPT5Nano        = "gpt-5-nano"
 
 	// GPT-4 models
 	ModelGPT41 = "gpt-4.1"
