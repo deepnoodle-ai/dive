@@ -17,10 +17,6 @@ const (
 	ModelGrok3Latest = "grok-3-latest"
 	ModelGrok3Mini   = "grok-3-mini"
 
-	// Grok 2 models
-	ModelGrok2Vision1212 = "grok-2-vision-1212"
-	ModelGrok2Image1212  = "grok-2-image-1212"
-
 	// Specialized models (256K context)
 	ModelGrokCodeFast1 = "grok-code-fast-1"
 )

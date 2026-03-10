@@ -1,8 +1,12 @@
 package google
 
 const (
+	// Gemini 3.1 models (preview)
+	ModelGemini31ProPreview       = "gemini-3.1-pro-preview"
+	ModelGemini31FlashLitePreview = "gemini-3.1-flash-lite-preview"
+	ModelGemini31FlashImagePrev   = "gemini-3.1-flash-image-preview"
+
 	// Gemini 3 models (preview)
-	ModelGemini3ProPreview      = "gemini-3-pro-preview"
 	ModelGemini3ProImagePreview = "gemini-3-pro-image-preview"
 	ModelGemini3FlashPreview    = "gemini-3-flash-preview"
 

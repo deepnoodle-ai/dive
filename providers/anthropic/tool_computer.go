@@ -17,11 +17,11 @@ var (
 // Tool versions:
 //   - computer_20241022 - Claude 3.5 Sonnet (legacy)
 //   - computer_20250124 - Claude Sonnet 4, Sonnet 4.5, Haiku 4.5, Opus 4, Opus 4.1, Sonnet 3.7
-//   - computer_20251124 - Claude Opus 4.5 (adds zoom action)
+//   - computer_20251124 - Claude Opus 4.5, Sonnet 4.6, Opus 4.6 (adds zoom action)
 //
 // Beta headers required (use llm.WithFeatures):
 //   - FeatureComputerUse ("computer-use-2025-01-24") for computer_20250124
-//   - FeatureComputerUseOpus45 ("computer-use-2025-11-24") for computer_20251124
+//   - FeatureComputerUse45_46 ("computer-use-2025-11-24") for computer_20251124
 //
 // Example tool definition:
 //
@@ -40,7 +40,7 @@ type ComputerToolOptions struct {
 	DisplayWidthPx  int
 	DisplayHeightPx int
 	DisplayNumber   int
-	EnableZoom      bool // Only for computer_20251124 (Opus 4.5)
+	EnableZoom      bool // Only for computer_20251124 (Opus 4.5, Sonnet 4.6, Opus 4.6)
 }
 
 // NewComputerTool creates a new ComputerTool with the given options.

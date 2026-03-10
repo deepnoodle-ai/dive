@@ -22,5 +22,6 @@ const (
 	ModelClaudeOpus45   = "claude-opus-4-5"
 
 	// Claude 4.6 models
-	ModelClaudeOpus46 = "claude-opus-4-6"
+	ModelClaudeSonnet46 = "claude-sonnet-4-6"
+	ModelClaudeOpus46   = "claude-opus-4-6"
 )

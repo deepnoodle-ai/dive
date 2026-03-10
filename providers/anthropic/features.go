@@ -15,6 +15,21 @@ const (
 
 	// Computer use tool beta headers
 	// https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
-	FeatureComputerUse       = "computer-use-2025-01-24" // Sonnet 4, Sonnet 4.5, Haiku 4.5, Opus 4, Opus 4.1, Sonnet 3.7
-	FeatureComputerUseOpus45 = "computer-use-2025-11-24" // Opus 4.5 (adds zoom action)
+	FeatureComputerUse      = "computer-use-2025-01-24" // Sonnet 4, Sonnet 4.5, Haiku 4.5, Opus 4, Opus 4.1, Sonnet 3.7
+	FeatureComputerUse45_46 = "computer-use-2025-11-24" // Opus 4.5, Sonnet 4.6, Opus 4.6 (adds zoom action)
+
+	// 1M context window beta (Opus 4.6, Sonnet 4.6, Sonnet 4.5, Sonnet 4)
+	FeatureContext1M = "context-1m-2025-08-07"
+
+	// Server-side compaction (Opus 4.6, Sonnet 4.6)
+	FeatureCompact = "compact-2026-01-12"
+
+	// MCP client connector (updated from mcp-client-2025-04-04)
+	FeatureMCPClientV2 = "mcp-client-2025-11-20"
+
+	// Files API for upload/download/reuse
+	FeatureFilesAPI = "files-api-2025-04-14"
+
+	// Interleaved thinking (manual mode, Sonnet 4.6)
+	FeatureInterleavedThinking = "interleaved-thinking-2025-05-14"
 )

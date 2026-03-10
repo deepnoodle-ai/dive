@@ -4,12 +4,12 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing contains pricing for all text generation models
 var TextModelPricing = map[string]llm.PricingInfo{
-	ModelGemini3ProPreview: {
-		Model:       ModelGemini3ProPreview,
+	ModelGemini31ProPreview: {
+		Model:       ModelGemini31ProPreview,
 		InputPrice:  2.00, // Up to 200K tokens
 		OutputPrice: 12.00,
 		Currency:    "USD",
-		UpdatedAt:   "2026-02-09",
+		UpdatedAt:   "2026-03-10",
 	},
 	ModelGemini3FlashPreview: {
 		Model:       ModelGemini3FlashPreview,
