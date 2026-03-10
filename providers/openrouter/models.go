@@ -3,6 +3,7 @@ package openrouter
 const (
 	// Anthropic models
 	ModelClaudeOpus46   = "anthropic/claude-opus-4-6"
+	ModelClaudeSonnet46 = "anthropic/claude-sonnet-4-6"
 	ModelClaudeOpus45   = "anthropic/claude-opus-4-5"
 	ModelClaudeSonnet45 = "anthropic/claude-sonnet-4-5"
 	ModelClaudeHaiku45  = "anthropic/claude-haiku-4-5"
@@ -10,6 +11,7 @@ const (
 	ModelClaudeSonnet4  = "anthropic/claude-sonnet-4"
 
 	// OpenAI models
+	ModelGPT54    = "openai/gpt-5.4"
 	ModelGPT52    = "openai/gpt-5.2"
 	ModelGPT51    = "openai/gpt-5.1"
 	ModelGPT5     = "openai/gpt-5"
@@ -21,7 +23,8 @@ const (
 	ModelO4Mini   = "openai/o4-mini"
 
 	// Google models
-	ModelGemini3ProPreview   = "google/gemini-3-pro-preview"
+	ModelGemini31ProPreview  = "google/gemini-3.1-pro-preview"
+	ModelGemini3ProPreview   = "google/gemini-3-pro-preview" // Deprecated: shut down March 9, 2026
 	ModelGemini3FlashPreview = "google/gemini-3-flash-preview"
 	ModelGemini25Pro         = "google/gemini-2.5-pro"
 	ModelGemini25Flash       = "google/gemini-2.5-flash"

@@ -67,6 +67,13 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-02-09",
 	},
+	ModelClaudeSonnet46: {
+		Model:       ModelClaudeSonnet46,
+		InputPrice:  3.00,
+		OutputPrice: 15.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-03-10",
+	},
 	ModelClaudeOpus46: {
 		Model:       ModelClaudeOpus46,
 		InputPrice:  5.00,

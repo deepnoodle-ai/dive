@@ -438,7 +438,9 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 		betaFeatures = append(betaFeatures, FeatureOutput128k)
 	}
 
-	if config.IsFeatureEnabled(FeatureMCPClient) || len(config.MCPServers) > 0 {
+	if config.IsFeatureEnabled(FeatureMCPClientV2) || len(config.MCPServers) > 0 {
+		betaFeatures = append(betaFeatures, FeatureMCPClientV2)
+	} else if config.IsFeatureEnabled(FeatureMCPClient) {
 		betaFeatures = append(betaFeatures, FeatureMCPClient)
 	}
 
@@ -450,8 +452,24 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 		betaFeatures = append(betaFeatures, FeatureCodeExecution)
 	}
 
-	if config.IsFeatureEnabled(FeatureComputerUseOpus45) {
-		betaFeatures = append(betaFeatures, FeatureComputerUseOpus45)
+	if config.IsFeatureEnabled(FeatureContext1M) {
+		betaFeatures = append(betaFeatures, FeatureContext1M)
+	}
+
+	if config.IsFeatureEnabled(FeatureCompact) {
+		betaFeatures = append(betaFeatures, FeatureCompact)
+	}
+
+	if config.IsFeatureEnabled(FeatureFilesAPI) {
+		betaFeatures = append(betaFeatures, FeatureFilesAPI)
+	}
+
+	if config.IsFeatureEnabled(FeatureInterleavedThinking) {
+		betaFeatures = append(betaFeatures, FeatureInterleavedThinking)
+	}
+
+	if config.IsFeatureEnabled(FeatureComputerUse45_46) {
+		betaFeatures = append(betaFeatures, FeatureComputerUse45_46)
 	} else if config.IsFeatureEnabled(FeatureComputerUse) {
 		betaFeatures = append(betaFeatures, FeatureComputerUse)
 	}

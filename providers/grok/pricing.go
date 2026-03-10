@@ -60,11 +60,4 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-02-09",
 	},
-	ModelGrok2Vision1212: {
-		Model:       ModelGrok2Vision1212,
-		InputPrice:  2.00,
-		OutputPrice: 10.00,
-		Currency:    "USD",
-		UpdatedAt:   "2026-02-09",
-	},
 }

@@ -1,10 +1,17 @@
 package google
 
 const (
+	// Gemini 3.1 models (preview)
+	ModelGemini31ProPreview       = "gemini-3.1-pro-preview"
+	ModelGemini31FlashLitePreview = "gemini-3.1-flash-lite-preview"
+	ModelGemini31FlashImagePrev   = "gemini-3.1-flash-image-preview"
+
 	// Gemini 3 models (preview)
-	ModelGemini3ProPreview      = "gemini-3-pro-preview"
 	ModelGemini3ProImagePreview = "gemini-3-pro-image-preview"
 	ModelGemini3FlashPreview    = "gemini-3-flash-preview"
+
+	// Deprecated: Model was shut down March 9, 2026. Use ModelGemini31ProPreview instead.
+	ModelGemini3ProPreview = "gemini-3-pro-preview"
 
 	// Gemini 2.5 models
 	ModelGemini25Pro        = "gemini-2.5-pro"
