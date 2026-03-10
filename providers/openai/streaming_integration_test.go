@@ -225,4 +225,3 @@ func TestStreamingWithToolCall(t *testing.T) {
 	assert.Equal(t, "calculator", toolName)
 	assert.Equal(t, `{"a":15,"b":27,"operation":"add"}`, toolInput)
 }
-
