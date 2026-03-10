@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] - 2026-03-10
+
+### Changed
+
+- **Upgrade OpenAI Go SDK from v1 to v3** (`openai-go` v1.12.0 → v3.26.0). All SDK
+  migration handled internally in `providers/openai`; Dive's public API is unchanged.
+  Streaming reasoning deduplicated and per-summary-part tracking added.
+- **Update provider models and features for March 2026.** Anthropic: claude-sonnet-4-6,
+  new beta features. OpenAI: gpt-5.4 (new default), gpt-5.3, gpt-5.1-mini, o3-mini.
+  Google: gemini-3.1-pro/flash variants. Grok: removed deprecated grok-2 models.
+- **Upgrade all dependencies to latest versions.** Key bumps: mcp-go v0.43→v0.45,
+  golang.org/x/net v0.50→v0.51, googleapis/gax-go v2.17→v2.18, opentelemetry
+  v1.40→v1.42, grpc v1.78→v1.79, genai SDK v1.46→v1.49.
+
 ## [1.0.1] - 2025-02-09
 
 ### Changed
