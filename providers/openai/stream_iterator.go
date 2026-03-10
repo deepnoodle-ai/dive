@@ -48,6 +48,10 @@ type outputItemState struct {
 	ToolCallID        string // The 'call_id' (e.g. call_xxxx)
 	ToolArgumentsJson string
 
+	// SummaryStreamed indicates that reasoning summary was streamed incrementally
+	// for this item, so the OutputItemDone handler should not duplicate it.
+	SummaryStreamed bool
+
 	// For message with text/reasoning content parts
 	// Keyed by ContentIndex
 	ContentParts map[int]*contentPartState
@@ -261,30 +265,34 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		})
 
 	case responses.ResponseReasoningSummaryPartAddedEvent:
-		// This indicates the start of reasoning summary content
+		// This indicates the start of reasoning summary content.
 		if data.Part.Type == "summary_text" {
-			// We need to track this as a thinking content block
-			// Use a special index for reasoning summary (e.g., -1 to distinguish from regular output items)
-			summaryIndex := -1
+			outputIdx := int(data.OutputIndex)
 
-			// Create state for the summary content
-			s.outputItemsState[summaryIndex] = &outputItemState{
-				OutputIndex:  summaryIndex,
-				ItemID:       fmt.Sprintf("reasoning_summary_%d", s.eventCount),
-				ItemType:     "reasoning_summary",
-				ContentParts: make(map[int]*contentPartState),
-			}
-
-			// Add the content part state
-			s.outputItemsState[summaryIndex].ContentParts[0] = &contentPartState{
-				ContentIndex: 0,
-				PartType:     "thinking",
-				Text:         data.Part.Text,
+			// Mark the existing reasoning item state so OutputItemDone skips duplicate emission.
+			if itemState, ok := s.outputItemsState[outputIdx]; ok {
+				itemState.SummaryStreamed = true
+				itemState.ContentParts[0] = &contentPartState{
+					ContentIndex: 0,
+					PartType:     "thinking",
+					Text:         data.Part.Text,
+				}
+			} else {
+				// Create state if it doesn't exist yet.
+				s.outputItemsState[outputIdx] = &outputItemState{
+					OutputIndex:     outputIdx,
+					ItemID:          data.ItemID,
+					ItemType:        "reasoning",
+					SummaryStreamed: true,
+					ContentParts: map[int]*contentPartState{
+						0: {ContentIndex: 0, PartType: "thinking", Text: data.Part.Text},
+					},
+				}
 			}
 
 			diveEvents = append(diveEvents, &llm.Event{
 				Type:  llm.EventTypeContentBlockStart,
-				Index: &summaryIndex,
+				Index: &outputIdx,
 				ContentBlock: &llm.EventContentBlock{
 					Type:     llm.ContentTypeThinking,
 					Thinking: data.Part.Text,
@@ -293,44 +301,39 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		}
 
 	case responses.ResponseReasoningSummaryTextDeltaEvent:
-		// Handle incremental text for reasoning summary
-		summaryIndex := -1
+		outputIdx := int(data.OutputIndex)
 
-		// Get or create the state for reasoning summary
-		itemState, exists := s.outputItemsState[summaryIndex]
+		// Get or create the state for reasoning summary.
+		itemState, exists := s.outputItemsState[outputIdx]
 		if !exists {
-			// Create state if it doesn't exist (shouldn't happen normally)
-			s.outputItemsState[summaryIndex] = &outputItemState{
-				OutputIndex:  summaryIndex,
-				ItemID:       fmt.Sprintf("reasoning_summary_%d", s.eventCount),
-				ItemType:     "reasoning_summary",
-				ContentParts: make(map[int]*contentPartState),
+			s.outputItemsState[outputIdx] = &outputItemState{
+				OutputIndex:     outputIdx,
+				ItemID:          data.ItemID,
+				ItemType:        "reasoning",
+				SummaryStreamed: true,
+				ContentParts: map[int]*contentPartState{
+					0: {ContentIndex: 0, PartType: "thinking"},
+				},
 			}
-			s.outputItemsState[summaryIndex].ContentParts[0] = &contentPartState{
-				ContentIndex: 0,
-				PartType:     "thinking",
-			}
-			itemState = s.outputItemsState[summaryIndex]
+			itemState = s.outputItemsState[outputIdx]
 
-			// Emit a start event if we haven't already
 			diveEvents = append(diveEvents, &llm.Event{
 				Type:  llm.EventTypeContentBlockStart,
-				Index: &summaryIndex,
+				Index: &outputIdx,
 				ContentBlock: &llm.EventContentBlock{
 					Type: llm.ContentTypeThinking,
 				},
 			})
 		}
 
-		// Accumulate the text
+		// Accumulate the text.
 		if partState, ok := itemState.ContentParts[0]; ok {
 			partState.Text += data.Delta
 		}
 
-		// Emit the delta event
 		diveEvents = append(diveEvents, &llm.Event{
 			Type:  llm.EventTypeContentBlockDelta,
-			Index: &summaryIndex,
+			Index: &outputIdx,
 			Delta: &llm.EventDelta{
 				Type:     llm.EventDeltaTypeThinking,
 				Thinking: data.Delta,
@@ -338,17 +341,15 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		})
 
 	case responses.ResponseReasoningSummaryPartDoneEvent:
-		// Handle completion of reasoning summary part
-		summaryIndex := -1
-		if itemState, exists := s.outputItemsState[summaryIndex]; exists {
+		outputIdx := int(data.OutputIndex)
+		if itemState, exists := s.outputItemsState[outputIdx]; exists {
 			if partState, ok := itemState.ContentParts[0]; ok {
 				partState.IsComplete = true
-				partState.Text = data.Part.Text // Set final text
+				partState.Text = data.Part.Text
 			}
-			itemState.IsComplete = true
 			diveEvents = append(diveEvents, &llm.Event{
 				Type:  llm.EventTypeContentBlockStop,
-				Index: &summaryIndex,
+				Index: &outputIdx,
 			})
 		}
 
@@ -376,10 +377,12 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		outputIdx := int(data.OutputIndex)
 
 		// Handle reasoning items that arrive complete (without incremental summary events).
-		// The summaryIndex (-1) state is set by ReasoningSummaryPartAddedEvent; if it
-		// exists, the summary was already streamed incrementally and we skip duplicating it.
+		// If the summary was already streamed incrementally, skip duplicating it.
 		if data.Item.Type == "reasoning" {
-			_, alreadyStreamed := s.outputItemsState[-1]
+			alreadyStreamed := false
+			if itemState, ok := s.outputItemsState[outputIdx]; ok {
+				alreadyStreamed = itemState.SummaryStreamed
+			}
 			reasoning := data.Item.AsReasoning()
 			if !alreadyStreamed && len(reasoning.Summary) > 0 {
 				var summaryText string

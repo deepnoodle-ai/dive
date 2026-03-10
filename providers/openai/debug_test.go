@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -32,8 +34,6 @@ func TestDebugRawStreamEvents(t *testing.T) {
 
 	model := envOr("DEBUG_MODEL", "o3")
 	prompt := envOr("DEBUG_PROMPT", "What is the derivative of x^3 + 2x^2 - 5x + 1?")
-	effort := envOr("DEBUG_EFFORT", "high")
-	summary := envOr("DEBUG_SUMMARY", "detailed")
 
 	provider.model = model
 
@@ -42,24 +42,30 @@ func TestDebugRawStreamEvents(t *testing.T) {
 		llm.WithMessages(llm.NewUserTextMessage(prompt)),
 		llm.WithMaxTokens(16000),
 	}
-	if effort != "" {
-		opts = append(opts, llm.WithReasoningEffort(llm.ReasoningEffort(effort)))
+	if effort, ok := os.LookupEnv("DEBUG_EFFORT"); ok {
+		if effort != "" {
+			opts = append(opts, llm.WithReasoningEffort(llm.ReasoningEffort(effort)))
+		}
+	} else {
+		opts = append(opts, llm.WithReasoningEffort(llm.ReasoningEffort("high")))
 	}
-	if summary != "" {
-		opts = append(opts, llm.WithReasoningSummary(llm.ReasoningSummary(summary)))
+	if summary, ok := os.LookupEnv("DEBUG_SUMMARY"); ok {
+		if summary != "" {
+			opts = append(opts, llm.WithReasoningSummary(llm.ReasoningSummary(summary)))
+		}
+	} else {
+		opts = append(opts, llm.WithReasoningSummary(llm.ReasoningSummary("detailed")))
 	}
 	config.Apply(opts...)
 
 	params, err := provider.buildRequestParams(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
 
 	t.Logf("Model: %s", model)
-	t.Logf("Reasoning: effort=%s summary=%s", effort, summary)
 	t.Logf("Include: %v", params.Include)
 
-	sdkStream := provider.client.Responses.NewStreaming(context.Background(), params)
+	ctx := testContext(t)
+	sdkStream := provider.client.Responses.NewStreaming(ctx, params)
 	iter := newOpenAIStreamIterator(sdkStream, config)
 	defer iter.Close()
 
@@ -113,9 +119,7 @@ func TestDebugRawStreamEvents(t *testing.T) {
 
 		// Process through Dive's event handler
 		events, err := iter.processOpenAIEvent(rawEvent)
-		if err != nil {
-			t.Fatalf("processOpenAIEvent error: %v", err)
-		}
+		assert.NoError(t, err, "processOpenAIEvent error")
 		for _, ev := range events {
 			fmt.Printf("    -> DIVE %-25s", ev.Type)
 			if ev.ContentBlock != nil {
@@ -127,9 +131,7 @@ func TestDebugRawStreamEvents(t *testing.T) {
 			fmt.Println()
 		}
 	}
-	if err := sdkStream.Err(); err != nil {
-		t.Fatalf("Stream error: %v", err)
-	}
+	assert.NoError(t, sdkStream.Err(), "stream error")
 }
 
 // TestDebugNonStreamingResponse dumps the non-streaming response for comparison.
@@ -138,8 +140,6 @@ func TestDebugNonStreamingResponse(t *testing.T) {
 
 	model := envOr("DEBUG_MODEL", "o3")
 	prompt := envOr("DEBUG_PROMPT", "What is the derivative of x^3 + 2x^2 - 5x + 1?")
-	effort := envOr("DEBUG_EFFORT", "high")
-	summary := envOr("DEBUG_SUMMARY", "detailed")
 
 	provider.model = model
 
@@ -148,23 +148,28 @@ func TestDebugNonStreamingResponse(t *testing.T) {
 		llm.WithMessages(llm.NewUserTextMessage(prompt)),
 		llm.WithMaxTokens(16000),
 	}
-	if effort != "" {
-		opts = append(opts, llm.WithReasoningEffort(llm.ReasoningEffort(effort)))
+	if effort, ok := os.LookupEnv("DEBUG_EFFORT"); ok {
+		if effort != "" {
+			opts = append(opts, llm.WithReasoningEffort(llm.ReasoningEffort(effort)))
+		}
+	} else {
+		opts = append(opts, llm.WithReasoningEffort(llm.ReasoningEffort("high")))
 	}
-	if summary != "" {
-		opts = append(opts, llm.WithReasoningSummary(llm.ReasoningSummary(summary)))
+	if summary, ok := os.LookupEnv("DEBUG_SUMMARY"); ok {
+		if summary != "" {
+			opts = append(opts, llm.WithReasoningSummary(llm.ReasoningSummary(summary)))
+		}
+	} else {
+		opts = append(opts, llm.WithReasoningSummary(llm.ReasoningSummary("detailed")))
 	}
 	config.Apply(opts...)
 
 	params, err := provider.buildRequestParams(config)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
 
-	resp, err := provider.client.Responses.New(context.Background(), params)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	ctx := testContext(t)
+	resp, err := provider.client.Responses.New(ctx, params)
+	assert.NoError(t, err)
 
 	t.Logf("Response ID: %s", resp.ID)
 	t.Logf("Model: %s", resp.Model)
@@ -197,6 +202,17 @@ func TestDebugNonStreamingResponse(t *testing.T) {
 			}
 		}
 	}
+}
+
+func testContext(t *testing.T) context.Context {
+	t.Helper()
+	timeout := 30 * time.Second
+	if deadline, ok := t.Deadline(); ok {
+		timeout = time.Until(deadline)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	t.Cleanup(cancel)
+	return ctx
 }
 
 func envOr(key, fallback string) string {
