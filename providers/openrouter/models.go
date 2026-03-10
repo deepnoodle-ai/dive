@@ -24,6 +24,7 @@ const (
 
 	// Google models
 	ModelGemini31ProPreview  = "google/gemini-3.1-pro-preview"
+	ModelGemini3ProPreview   = "google/gemini-3-pro-preview" // Deprecated: shut down March 9, 2026
 	ModelGemini3FlashPreview = "google/gemini-3-flash-preview"
 	ModelGemini25Pro         = "google/gemini-2.5-pro"
 	ModelGemini25Flash       = "google/gemini-2.5-flash"
