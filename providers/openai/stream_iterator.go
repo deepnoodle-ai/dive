@@ -345,6 +345,11 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 				partState.IsComplete = true
 				partState.Text = data.Part.Text // Set final text
 			}
+			itemState.IsComplete = true
+			diveEvents = append(diveEvents, &llm.Event{
+				Type:  llm.EventTypeContentBlockStop,
+				Index: &summaryIndex,
+			})
 		}
 
 	case responses.ResponseTextDoneEvent:
@@ -369,6 +374,44 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 
 	case responses.ResponseOutputItemDoneEvent:
 		outputIdx := int(data.OutputIndex)
+
+		// Handle reasoning items that arrive complete (without incremental summary events).
+		// The summaryIndex (-1) state is set by ReasoningSummaryPartAddedEvent; if it
+		// exists, the summary was already streamed incrementally and we skip duplicating it.
+		if data.Item.Type == "reasoning" {
+			_, alreadyStreamed := s.outputItemsState[-1]
+			reasoning := data.Item.AsReasoning()
+			if !alreadyStreamed && len(reasoning.Summary) > 0 {
+				var summaryText string
+				for i, s := range reasoning.Summary {
+					if i > 0 {
+						summaryText += "\n\n"
+					}
+					summaryText += s.Text
+				}
+				diveEvents = append(diveEvents, &llm.Event{
+					Type:  llm.EventTypeContentBlockStart,
+					Index: &outputIdx,
+					ContentBlock: &llm.EventContentBlock{
+						Type:     llm.ContentTypeThinking,
+						Thinking: summaryText,
+					},
+				})
+				diveEvents = append(diveEvents, &llm.Event{
+					Type:  llm.EventTypeContentBlockDelta,
+					Index: &outputIdx,
+					Delta: &llm.EventDelta{
+						Type:     llm.EventDeltaTypeThinking,
+						Thinking: summaryText,
+					},
+				})
+				diveEvents = append(diveEvents, &llm.Event{
+					Type:  llm.EventTypeContentBlockStop,
+					Index: &outputIdx,
+				})
+			}
+		}
+
 		if item, ok := s.outputItemsState[outputIdx]; ok && !item.IsComplete {
 			item.IsComplete = true
 			if item.ItemType == "function_call" {
