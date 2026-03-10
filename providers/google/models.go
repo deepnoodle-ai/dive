@@ -10,6 +10,9 @@ const (
 	ModelGemini3ProImagePreview = "gemini-3-pro-image-preview"
 	ModelGemini3FlashPreview    = "gemini-3-flash-preview"
 
+	// Deprecated: Model was shut down March 9, 2026. Use ModelGemini31ProPreview instead.
+	ModelGemini3ProPreview = "gemini-3-pro-preview"
+
 	// Gemini 2.5 models
 	ModelGemini25Pro        = "gemini-2.5-pro"
 	ModelGemini25ProLong    = "gemini-2.5-pro-long"

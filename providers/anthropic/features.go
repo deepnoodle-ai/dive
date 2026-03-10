@@ -18,6 +18,9 @@ const (
 	FeatureComputerUse      = "computer-use-2025-01-24" // Sonnet 4, Sonnet 4.5, Haiku 4.5, Opus 4, Opus 4.1, Sonnet 3.7
 	FeatureComputerUse45_46 = "computer-use-2025-11-24" // Opus 4.5, Sonnet 4.6, Opus 4.6 (adds zoom action)
 
+	// Deprecated: Use FeatureComputerUse45_46 instead.
+	FeatureComputerUseOpus45 = FeatureComputerUse45_46
+
 	// 1M context window beta (Opus 4.6, Sonnet 4.6, Sonnet 4.5, Sonnet 4)
 	FeatureContext1M = "context-1m-2025-08-07"
 

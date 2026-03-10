@@ -28,4 +28,9 @@ const (
 	// Codex models (coding-optimized)
 	ModelCodexMiniLatest = "codex-mini-latest"
 	ModelGPT51Codex      = "gpt-5.1-codex"
+
+	// Deprecated: Use ModelCodexMiniLatest instead.
+	ModelCodex = ModelCodexMiniLatest
+	// Deprecated: Use ModelCodexMiniLatest instead.
+	ModelCodexAsk = "codex-ask"
 )
