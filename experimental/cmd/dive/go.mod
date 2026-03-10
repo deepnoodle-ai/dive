@@ -28,7 +28,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
-	github.com/openai/openai-go v1.12.0 // indirect
+	github.com/openai/openai-go/v3 v3.26.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect

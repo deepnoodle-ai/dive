@@ -6,8 +6,8 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/responses"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 func newInputMessage(role string, content string) responses.ResponseInputItemUnionParam {

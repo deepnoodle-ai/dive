@@ -11,9 +11,9 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/wonton/retry"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/responses"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 const ProviderName = "openai"
@@ -307,7 +307,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	for _, mcpServer := range config.MCPServers {
 		mcpParam := &responses.ToolMcpParam{
 			ServerLabel: mcpServer.Name,
-			ServerURL:   mcpServer.URL,
+			ServerURL:   openai.Opt(mcpServer.URL),
 		}
 		tool := responses.ToolUnionParam{OfMcp: mcpParam}
 

@@ -3,7 +3,7 @@ package openai
 import (
 	"net/http"
 
-	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/v3/option"
 )
 
 // Option is a function that configures the Provider
