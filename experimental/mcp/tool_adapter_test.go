@@ -11,6 +11,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+func ptr[T any](v T) *T { return &v }
+
 // boolPtr returns a pointer to the given bool value
 func boolPtr(b bool) *bool {
 	return &b
@@ -589,7 +591,7 @@ func TestConvertMCPResultToDive_ContentTypes(t *testing.T) {
 						Text: "Hello world",
 						Annotated: mcp.Annotated{
 							Annotations: &mcp.Annotations{
-								Priority: 0.8,
+								Priority: ptr(0.8),
 								Audience: []mcp.Role{mcp.RoleUser},
 							},
 						},

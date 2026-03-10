@@ -1,6 +1,6 @@
 module github.com/deepnoodle-ai/dive/providers/google
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/deepnoodle-ai/dive v1.0.0
@@ -29,7 +29,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.40.0 // indirect
 	go.opentelemetry.io/otel/trace v1.40.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209193700-7e5cd0f99864 // indirect

@@ -1,6 +1,6 @@
 module github.com/deepnoodle-ai/dive/providers/openai
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/deepnoodle-ai/dive v1.0.0
