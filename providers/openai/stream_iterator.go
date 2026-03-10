@@ -48,9 +48,10 @@ type outputItemState struct {
 	ToolCallID        string // The 'call_id' (e.g. call_xxxx)
 	ToolArgumentsJson string
 
-	// SummaryStreamed indicates that reasoning summary was streamed incrementally
-	// for this item, so the OutputItemDone handler should not duplicate it.
-	SummaryStreamed bool
+	// SummaryStreamedByIndex tracks which reasoning summary parts were streamed
+	// incrementally (keyed by SummaryIndex), so the OutputItemDone handler
+	// only emits fallback events for summary parts that were not already streamed.
+	SummaryStreamedByIndex map[int]bool
 
 	// For message with text/reasoning content parts
 	// Keyed by ContentIndex
@@ -268,24 +269,30 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		// This indicates the start of reasoning summary content.
 		if data.Part.Type == "summary_text" {
 			outputIdx := int(data.OutputIndex)
+			summaryIdx := int(data.SummaryIndex)
 
 			// Mark the existing reasoning item state so OutputItemDone skips duplicate emission.
 			if itemState, ok := s.outputItemsState[outputIdx]; ok {
-				itemState.SummaryStreamed = true
-				itemState.ContentParts[0] = &contentPartState{
-					ContentIndex: 0,
+				if itemState.SummaryStreamedByIndex == nil {
+					itemState.SummaryStreamedByIndex = make(map[int]bool)
+				}
+				itemState.SummaryStreamedByIndex[summaryIdx] = true
+				itemState.ContentParts[summaryIdx] = &contentPartState{
+					ContentIndex: summaryIdx,
 					PartType:     "thinking",
 					Text:         data.Part.Text,
 				}
 			} else {
 				// Create state if it doesn't exist yet.
 				s.outputItemsState[outputIdx] = &outputItemState{
-					OutputIndex:     outputIdx,
-					ItemID:          data.ItemID,
-					ItemType:        "reasoning",
-					SummaryStreamed: true,
+					OutputIndex: outputIdx,
+					ItemID:      data.ItemID,
+					ItemType:    "reasoning",
+					SummaryStreamedByIndex: map[int]bool{
+						summaryIdx: true,
+					},
 					ContentParts: map[int]*contentPartState{
-						0: {ContentIndex: 0, PartType: "thinking", Text: data.Part.Text},
+						summaryIdx: {ContentIndex: summaryIdx, PartType: "thinking", Text: data.Part.Text},
 					},
 				}
 			}
@@ -302,38 +309,48 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 
 	case responses.ResponseReasoningSummaryTextDeltaEvent:
 		outputIdx := int(data.OutputIndex)
+		summaryIdx := int(data.SummaryIndex)
 
 		// Get or create the state for reasoning summary.
 		itemState, exists := s.outputItemsState[outputIdx]
 		if !exists {
 			s.outputItemsState[outputIdx] = &outputItemState{
-				OutputIndex:     outputIdx,
-				ItemID:          data.ItemID,
-				ItemType:        "reasoning",
-				SummaryStreamed: true,
+				OutputIndex: outputIdx,
+				ItemID:      data.ItemID,
+				ItemType:    "reasoning",
+				SummaryStreamedByIndex: map[int]bool{
+					summaryIdx: true,
+				},
 				ContentParts: map[int]*contentPartState{
-					0: {ContentIndex: 0, PartType: "thinking"},
+					summaryIdx: {ContentIndex: summaryIdx, PartType: "thinking"},
 				},
 			}
 			itemState = s.outputItemsState[outputIdx]
 
+			idxStart := outputIdx
 			diveEvents = append(diveEvents, &llm.Event{
 				Type:  llm.EventTypeContentBlockStart,
-				Index: &outputIdx,
+				Index: &idxStart,
 				ContentBlock: &llm.EventContentBlock{
 					Type: llm.ContentTypeThinking,
 				},
 			})
+		} else {
+			if itemState.SummaryStreamedByIndex == nil {
+				itemState.SummaryStreamedByIndex = make(map[int]bool)
+			}
+			itemState.SummaryStreamedByIndex[summaryIdx] = true
 		}
 
 		// Accumulate the text.
-		if partState, ok := itemState.ContentParts[0]; ok {
+		if partState, ok := itemState.ContentParts[summaryIdx]; ok {
 			partState.Text += data.Delta
 		}
 
+		idxDelta := outputIdx
 		diveEvents = append(diveEvents, &llm.Event{
 			Type:  llm.EventTypeContentBlockDelta,
-			Index: &outputIdx,
+			Index: &idxDelta,
 			Delta: &llm.EventDelta{
 				Type:     llm.EventDeltaTypeThinking,
 				Thinking: data.Delta,
@@ -342,15 +359,20 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 
 	case responses.ResponseReasoningSummaryPartDoneEvent:
 		outputIdx := int(data.OutputIndex)
+		summaryIdx := int(data.SummaryIndex)
 		if itemState, exists := s.outputItemsState[outputIdx]; exists {
-			itemState.SummaryStreamed = true
-			if partState, ok := itemState.ContentParts[0]; ok {
+			if itemState.SummaryStreamedByIndex == nil {
+				itemState.SummaryStreamedByIndex = make(map[int]bool)
+			}
+			itemState.SummaryStreamedByIndex[summaryIdx] = true
+			if partState, ok := itemState.ContentParts[summaryIdx]; ok {
 				partState.IsComplete = true
 				partState.Text = data.Part.Text
 			}
+			idxStop := outputIdx
 			diveEvents = append(diveEvents, &llm.Event{
 				Type:  llm.EventTypeContentBlockStop,
-				Index: &outputIdx,
+				Index: &idxStop,
 			})
 		}
 
@@ -378,40 +400,36 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		outputIdx := int(data.OutputIndex)
 
 		// Handle reasoning items that arrive complete (without incremental summary events).
-		// If the summary was already streamed incrementally, skip duplicating it.
+		// Only emit fallback events for summary parts that were NOT already streamed.
 		if data.Item.Type == "reasoning" {
-			alreadyStreamed := false
-			if itemState, ok := s.outputItemsState[outputIdx]; ok {
-				alreadyStreamed = itemState.SummaryStreamed
-			}
+			itemState := s.outputItemsState[outputIdx]
 			reasoning := data.Item.AsReasoning()
-			if !alreadyStreamed && len(reasoning.Summary) > 0 {
-				var summaryText string
-				for i, s := range reasoning.Summary {
-					if i > 0 {
-						summaryText += "\n\n"
-					}
-					summaryText += s.Text
+			for i, part := range reasoning.Summary {
+				if itemState != nil && itemState.SummaryStreamedByIndex[i] {
+					continue // already streamed incrementally
 				}
+				idxStart := outputIdx
 				diveEvents = append(diveEvents, &llm.Event{
 					Type:  llm.EventTypeContentBlockStart,
-					Index: &outputIdx,
+					Index: &idxStart,
 					ContentBlock: &llm.EventContentBlock{
 						Type:     llm.ContentTypeThinking,
-						Thinking: summaryText,
+						Thinking: part.Text,
 					},
 				})
+				idxDelta := outputIdx
 				diveEvents = append(diveEvents, &llm.Event{
 					Type:  llm.EventTypeContentBlockDelta,
-					Index: &outputIdx,
+					Index: &idxDelta,
 					Delta: &llm.EventDelta{
 						Type:     llm.EventDeltaTypeThinking,
-						Thinking: summaryText,
+						Thinking: part.Text,
 					},
 				})
+				idxStop := outputIdx
 				diveEvents = append(diveEvents, &llm.Event{
 					Type:  llm.EventTypeContentBlockStop,
-					Index: &outputIdx,
+					Index: &idxStop,
 				})
 			}
 		}
@@ -419,9 +437,10 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		if item, ok := s.outputItemsState[outputIdx]; ok && !item.IsComplete {
 			item.IsComplete = true
 			if item.ItemType == "function_call" {
+				idxFnStop := outputIdx
 				diveEvents = append(diveEvents, &llm.Event{
 					Type:  llm.EventTypeContentBlockStop,
-					Index: &outputIdx,
+					Index: &idxFnStop,
 				})
 			}
 		}
