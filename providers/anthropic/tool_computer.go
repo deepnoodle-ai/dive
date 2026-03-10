@@ -89,7 +89,7 @@ func (t *ComputerTool) ToolConfiguration(providerName string) map[string]any {
 		"display_height_px": t.displayHeightPx,
 		"display_number":    t.displayNumber,
 	}
-	// enable_zoom is only valid for computer_20251124 (Opus 4.5)
+	// enable_zoom is only valid for computer_20251124 (Opus 4.5, Sonnet 4.6, Opus 4.6)
 	if t.enableZoom {
 		config["enable_zoom"] = true
 	}

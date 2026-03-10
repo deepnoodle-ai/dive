@@ -11,6 +11,20 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-03-10",
 	},
+	ModelGemini31FlashLitePreview: {
+		Model:       ModelGemini31FlashLitePreview,
+		InputPrice:  0.10,
+		OutputPrice: 0.40,
+		Currency:    "USD",
+		UpdatedAt:   "2026-03-10",
+	},
+	ModelGemini31FlashImagePrev: {
+		Model:       ModelGemini31FlashImagePrev,
+		InputPrice:  0.50,
+		OutputPrice: 3.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-03-10",
+	},
 	ModelGemini3FlashPreview: {
 		Model:       ModelGemini3FlashPreview,
 		InputPrice:  0.50,
