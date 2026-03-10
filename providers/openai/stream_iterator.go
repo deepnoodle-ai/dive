@@ -343,6 +343,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 	case responses.ResponseReasoningSummaryPartDoneEvent:
 		outputIdx := int(data.OutputIndex)
 		if itemState, exists := s.outputItemsState[outputIdx]; exists {
+			itemState.SummaryStreamed = true
 			if partState, ok := itemState.ContentParts[0]; ok {
 				partState.IsComplete = true
 				partState.Text = data.Part.Text
