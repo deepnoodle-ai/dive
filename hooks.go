@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
-	"sync"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -225,8 +224,8 @@ func NewHookContext() *HookContext {
 }
 
 // clone returns a shallow copy of the HookContext with a fresh copy of the
-// Values map. When mu is non-nil the source Values are read under the lock.
-func (h *HookContext) clone(mu *sync.Mutex) *HookContext {
+// Values map. All other fields are copied by value or reference.
+func (h *HookContext) clone() *HookContext {
 	cp := &HookContext{
 		Agent:          h.Agent,
 		SystemPrompt:   h.SystemPrompt,
@@ -237,15 +236,9 @@ func (h *HookContext) clone(mu *sync.Mutex) *HookContext {
 		StopHookActive: h.StopHookActive,
 		Iteration:      h.Iteration,
 	}
-	if mu != nil {
-		mu.Lock()
-	}
 	if h.Values != nil {
 		cp.Values = make(map[string]any, len(h.Values))
 		maps.Copy(cp.Values, h.Values)
-	}
-	if mu != nil {
-		mu.Unlock()
 	}
 	return cp
 }
