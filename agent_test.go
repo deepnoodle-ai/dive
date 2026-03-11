@@ -3,6 +3,7 @@ package dive
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -516,19 +517,21 @@ func TestParallelToolExecution(t *testing.T) {
 		}
 
 		var maxConcurrent atomic.Int32
+		var startTimes sync.Map // tool index -> time.Time
+		toolDuration := 50 * time.Millisecond
 		tool := &mockTool{
 			name: "slow_tool",
 			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
 				cur := concurrent.Add(1)
 				defer concurrent.Add(-1)
-				// Track the max concurrency seen
+				startTimes.Store(cur, time.Now())
 				for {
 					old := maxConcurrent.Load()
 					if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
 						break
 					}
 				}
-				time.Sleep(50 * time.Millisecond)
+				time.Sleep(toolDuration)
 				return NewToolResultText("done"), nil
 			},
 		}
@@ -540,9 +543,7 @@ func TestParallelToolExecution(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		start := time.Now()
 		resp, err := agent.CreateResponse(context.Background(), WithInput("Use tools"))
-		elapsed := time.Since(start)
 		assert.NoError(t, err)
 		assert.Equal(t, resp.OutputText(), "Done")
 
@@ -554,9 +555,25 @@ func TestParallelToolExecution(t *testing.T) {
 		assert.True(t, maxConcurrent.Load() > 1,
 			"expected concurrent execution, max concurrent was %d", maxConcurrent.Load())
 
-		// Should complete in roughly 1 tool duration, not 3x
-		assert.True(t, elapsed < 120*time.Millisecond,
-			"expected parallel execution to be faster than sequential, took %s", elapsed)
+		// Verify overlap deterministically: collect start timestamps and
+		// assert that at least two tools started within one tool duration.
+		var starts []time.Time
+		startTimes.Range(func(_, v any) bool {
+			starts = append(starts, v.(time.Time))
+			return true
+		})
+		assert.True(t, len(starts) >= 2, "expected at least 2 recorded start times")
+		earliest, latest := starts[0], starts[0]
+		for _, ts := range starts[1:] {
+			if ts.Before(earliest) {
+				earliest = ts
+			}
+			if ts.After(latest) {
+				latest = ts
+			}
+		}
+		assert.True(t, latest.Sub(earliest) < toolDuration,
+			"expected overlapping starts, spread was %s (tool duration %s)", latest.Sub(earliest), toolDuration)
 	})
 
 	t.Run("sequential when parallel disabled", func(t *testing.T) {

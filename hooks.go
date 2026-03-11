@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"sync"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -220,6 +222,32 @@ func NewHookContext() *HookContext {
 	return &HookContext{
 		Values: make(map[string]any),
 	}
+}
+
+// clone returns a shallow copy of the HookContext with a fresh copy of the
+// Values map. When mu is non-nil the source Values are read under the lock.
+func (h *HookContext) clone(mu *sync.Mutex) *HookContext {
+	cp := &HookContext{
+		Agent:          h.Agent,
+		SystemPrompt:   h.SystemPrompt,
+		Messages:       h.Messages,
+		Response:       h.Response,
+		OutputMessages: h.OutputMessages,
+		Usage:          h.Usage,
+		StopHookActive: h.StopHookActive,
+		Iteration:      h.Iteration,
+	}
+	if mu != nil {
+		mu.Lock()
+	}
+	if h.Values != nil {
+		cp.Values = make(map[string]any, len(h.Values))
+		maps.Copy(cp.Values, h.Values)
+	}
+	if mu != nil {
+		mu.Unlock()
+	}
+	return cp
 }
 
 // InjectContext returns a PreGenerationHook that prepends the given content

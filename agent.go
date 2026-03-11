@@ -573,7 +573,7 @@ func (a *Agent) executeToolCallsSequential(
 	results []*ToolCallResult,
 ) ([]*ToolCallResult, error) {
 	for i, toolCall := range toolCalls {
-		result, err := a.executeOneToolCall(ctx, hctx, toolCall, toolsByName, callback)
+		result, err := a.executeOneToolCall(ctx, hctx, toolCall, toolsByName, callback, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -583,7 +583,9 @@ func (a *Agent) executeToolCallsSequential(
 }
 
 // executeToolCallsParallel executes tool calls concurrently using goroutines.
-// Hooks and event callbacks are serialized with a mutex for safety.
+// Hooks and event callbacks are serialized with a mutex for safety. A
+// cancelable child context ensures sibling goroutines bail out early when
+// any goroutine encounters a fatal error.
 func (a *Agent) executeToolCallsParallel(
 	ctx context.Context,
 	hctx *HookContext,
@@ -595,22 +597,25 @@ func (a *Agent) executeToolCallsParallel(
 	var mu sync.Mutex
 	errs := make([]error, len(toolCalls))
 
-	// Wrap callback and hook context access with a mutex
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Wrap callback with a mutex for concurrent safety.
 	syncCallback := func(ctx context.Context, item *ResponseItem) error {
 		mu.Lock()
 		defer mu.Unlock()
 		return callback(ctx, item)
 	}
-	syncHctx := &syncHookContext{mu: &mu, hctx: hctx}
 
 	var wg sync.WaitGroup
 	for i, toolCall := range toolCalls {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			result, err := a.executeOneToolCall(ctx, syncHctx, toolCall, toolsByName, syncCallback)
+			result, err := a.executeOneToolCall(childCtx, hctx, toolCall, toolsByName, syncCallback, &mu)
 			if err != nil {
 				errs[i] = err
+				cancel()
 				return
 			}
 			results[i] = result
@@ -627,43 +632,25 @@ func (a *Agent) executeToolCallsParallel(
 	return results, nil
 }
 
-// syncHookContext wraps a HookContext with a mutex so that shared Values
-// can be safely accessed from concurrent goroutines. It implements the
-// hookContextAccessor interface used by executeOneToolCall.
-type syncHookContext struct {
-	mu   *sync.Mutex
-	hctx *HookContext
-}
-
-// hookContextAccessor abstracts access to hook context values so that
-// executeOneToolCall can work with both plain and mutex-protected contexts.
-type hookContextAccessor interface {
-	copyValues() map[string]any
-}
-
-func (h *HookContext) copyValues() map[string]any {
-	cp := make(map[string]any, len(h.Values))
-	maps.Copy(cp, h.Values)
-	return cp
-}
-
-func (s *syncHookContext) copyValues() map[string]any {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.hctx.copyValues()
-}
-
 // executeOneToolCall executes a single tool call including hooks and callbacks.
+// When hookMu is non-nil (parallel mode), it is held around hook invocations
+// to serialize them. Tool execution itself runs without the lock.
 func (a *Agent) executeOneToolCall(
 	ctx context.Context,
-	hctx hookContextAccessor,
+	hctx *HookContext,
 	toolCall *llm.ToolUseContent,
 	toolsByName map[string]Tool,
 	callback EventCallback,
+	hookMu *sync.Mutex,
 ) (*ToolCallResult, error) {
 	tool, ok := toolsByName[toolCall.Name]
 	if !ok {
 		return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
+	}
+
+	// Check for cancellation before starting work.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	a.logger.Debug("executing tool call",
@@ -685,30 +672,38 @@ func (a *Agent) executeOneToolCall(
 		return nil, err
 	}
 
-	// Run PreToolUse hooks — any error denies the tool
+	// Clone the parent hook context for this tool call so that each tool
+	// call gets an isolated copy of Values while preserving Agent,
+	// SystemPrompt, Messages, and other generation-level fields.
+	preHctx := hctx.clone(hookMu)
+	preHctx.Tool = tool
+	preHctx.Call = toolCall
+
+	// Run PreToolUse hooks — any error denies the tool. All hooks run even
+	// if an earlier one denies; only HookAbortError short-circuits.
 	var result *ToolCallResult
-	preHctx := &HookContext{
-		Agent:  a,
-		Values: hctx.copyValues(),
-		Tool:   tool,
-		Call:   toolCall,
-	}
-	denied := false
+	var denialErr error
+	lockIfNonNil(hookMu)
 	for _, hook := range a.hooks.PreToolUse {
 		if err := hook(ctx, preHctx); err != nil {
 			var abortErr *HookAbortError
 			if errors.As(err, &abortErr) {
 				abortErr.HookType = "PreToolUse"
 				a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
+				unlockIfNonNil(hookMu)
 				return nil, abortErr
 			}
+			if denialErr == nil {
+				denialErr = err
+			}
 			a.logger.Debug("pre-tool-use hook denied tool", "error", err)
-			result = a.createDeniedResult(toolCall, err.Error(), preview)
-			denied = true
-			break
 		}
 	}
-	if !denied {
+	unlockIfNonNil(hookMu)
+
+	if denialErr != nil {
+		result = a.createDeniedResult(toolCall, denialErr.Error(), preview)
+	} else {
 		input := toolCall.Input
 		if preHctx.UpdatedInput != nil {
 			input = preHctx.UpdatedInput
@@ -719,14 +714,20 @@ func (a *Agent) executeOneToolCall(
 	// Determine if the tool call failed
 	failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
 
-	// Run PostToolUse or PostToolUseFailure hooks based on outcome
+	// Build postHctx sharing Values with preHctx so that mutations from
+	// PreToolUse hooks are visible in PostToolUse hooks.
 	postHctx := &HookContext{
-		Agent:  a,
-		Values: hctx.copyValues(),
-		Tool:   tool,
-		Call:   toolCall,
-		Result: result,
+		Agent:        preHctx.Agent,
+		Values:       preHctx.Values,
+		SystemPrompt: preHctx.SystemPrompt,
+		Messages:     preHctx.Messages,
+		Tool:         tool,
+		Call:         toolCall,
+		Result:       result,
 	}
+
+	// Run PostToolUse or PostToolUseFailure hooks based on outcome
+	lockIfNonNil(hookMu)
 	if failed {
 		for _, hook := range a.hooks.PostToolUseFailure {
 			if err := hook(ctx, postHctx); err != nil {
@@ -734,6 +735,7 @@ func (a *Agent) executeOneToolCall(
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PostToolUseFailure"
 					a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
+					unlockIfNonNil(hookMu)
 					return nil, abortErr
 				}
 				a.logger.Debug("post-tool-use-failure hook error", "error", err)
@@ -746,12 +748,14 @@ func (a *Agent) executeOneToolCall(
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PostToolUse"
 					a.logger.Error("post-tool-use hook aborted", "error", abortErr)
+					unlockIfNonNil(hookMu)
 					return nil, abortErr
 				}
 				a.logger.Debug("post-tool-use hook error", "error", err)
 			}
 		}
 	}
+	unlockIfNonNil(hookMu)
 
 	// Use potentially modified result from hooks
 	result = postHctx.Result
@@ -776,6 +780,20 @@ func (a *Agent) executeOneToolCall(
 		return nil, err
 	}
 	return result, nil
+}
+
+// lockIfNonNil acquires the mutex if it is non-nil.
+func lockIfNonNil(mu *sync.Mutex) {
+	if mu != nil {
+		mu.Lock()
+	}
+}
+
+// unlockIfNonNil releases the mutex if it is non-nil.
+func unlockIfNonNil(mu *sync.Mutex) {
+	if mu != nil {
+		mu.Unlock()
+	}
 }
 
 // executeTool runs the tool and returns the result. Panics in tool.Call are
