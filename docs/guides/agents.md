@@ -52,8 +52,9 @@ func main() {
 | `Hooks`              | `Hooks`                | Hook functions grouped in a struct (see below)    |
 | `Session`            | `Session`              | Persistent conversation state (see below)         |
 | `ModelSettings`      | `*ModelSettings`       | Temperature, max tokens, reasoning, caching       |
-| `ResponseTimeout`    | `time.Duration`        | Max time for a response (default: 30 min)         |
-| `ToolIterationLimit` | `int`                  | Max tool call iterations (default: 100)           |
+| `ResponseTimeout`      | `time.Duration`        | Max time for a response (default: 30 min)         |
+| `ToolIterationLimit`   | `int`                  | Max tool call iterations (default: 100)           |
+| `ParallelToolExecution`| `bool`                 | Execute tool calls concurrently (default: false)  |
 
 ### Hooks Struct
 
