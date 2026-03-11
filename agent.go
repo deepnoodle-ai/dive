@@ -98,19 +98,19 @@ type AgentOptions struct {
 // Agent represents an intelligent AI entity that can autonomously use tools to
 // process information while responding to chat messages.
 type Agent struct {
-	name               string
-	model              llm.LLM
-	tools              []Tool
-	toolsets           []Toolset
-	toolsByName        map[string]Tool
-	responseTimeout    time.Duration
-	llmHooks           llm.Hooks
-	logger             llm.Logger
-	toolIterationLimit     int
-	parallelToolExecution  bool
-	modelSettings          *ModelSettings
-	systemPrompt           string
-	session                Session
+	name                  string
+	model                 llm.LLM
+	tools                 []Tool
+	toolsets              []Toolset
+	toolsByName           map[string]Tool
+	responseTimeout       time.Duration
+	llmHooks              llm.Hooks
+	logger                llm.Logger
+	toolIterationLimit    int
+	parallelToolExecution bool
+	modelSettings         *ModelSettings
+	systemPrompt          string
+	session               Session
 
 	// Agent hooks
 	hooks Hooks

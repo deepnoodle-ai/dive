@@ -3,7 +3,7 @@ module github.com/deepnoodle-ai/dive/providers/google
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.1.0
+	github.com/deepnoodle-ai/dive v1.2.0
 	github.com/deepnoodle-ai/wonton v0.0.26
 	google.golang.org/genai v1.49.0
 )

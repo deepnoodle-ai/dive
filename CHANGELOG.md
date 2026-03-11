@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] - 2026-03-11
+
+### Added
+
+- **Parallel tool execution** via `AgentOptions.ParallelToolExecution` (defaults to `false`).
+  When enabled and the LLM returns multiple tool calls in one message, they execute
+  concurrently via goroutines. Hooks and event callbacks remain serialized for safety.
+  Three-phase design: pre-hooks run sequentially, tools execute in parallel, post-hooks
+  run sequentially.
+
 ## [1.1.0] - 2026-03-10
 
 ### Changed
