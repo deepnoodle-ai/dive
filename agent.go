@@ -636,9 +636,14 @@ func (a *Agent) executeToolCallsParallel(
 			return nil, err
 		}
 
-		preHctx := hctx.clone()
-		preHctx.Tool = tool
-		preHctx.Call = toolCall
+		preHctx := &HookContext{
+			Agent:        a,
+			Values:       hctx.Values,
+			SystemPrompt: hctx.SystemPrompt,
+			Messages:     hctx.Messages,
+			Tool:         tool,
+			Call:         toolCall,
+		}
 
 		var denialErr error
 		for _, hook := range a.hooks.PreToolUse {
@@ -810,12 +815,14 @@ func (a *Agent) executeOneToolCall(
 		return nil, err
 	}
 
-	// Clone the parent hook context for this tool call so that each tool
-	// call gets an isolated copy of Values while preserving Agent,
-	// SystemPrompt, Messages, and other generation-level fields.
-	preHctx := hctx.clone()
-	preHctx.Tool = tool
-	preHctx.Call = toolCall
+	preHctx := &HookContext{
+		Agent:        a,
+		Values:       hctx.Values,
+		SystemPrompt: hctx.SystemPrompt,
+		Messages:     hctx.Messages,
+		Tool:         tool,
+		Call:         toolCall,
+	}
 
 	// Run PreToolUse hooks — any error denies the tool. All hooks run even
 	// if an earlier one denies; only HookAbortError short-circuits.
