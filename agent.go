@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -87,6 +88,11 @@ type AgentOptions struct {
 	// Timeouts and limits
 	ResponseTimeout    time.Duration
 	ToolIterationLimit int
+
+	// ParallelToolExecution enables concurrent execution of tool calls when
+	// the LLM returns multiple tool calls in a single message. When false
+	// (the default), tool calls are executed sequentially in order.
+	ParallelToolExecution bool
 }
 
 // Agent represents an intelligent AI entity that can autonomously use tools to
@@ -100,10 +106,11 @@ type Agent struct {
 	responseTimeout    time.Duration
 	llmHooks           llm.Hooks
 	logger             llm.Logger
-	toolIterationLimit int
-	modelSettings      *ModelSettings
-	systemPrompt       string
-	session            Session
+	toolIterationLimit     int
+	parallelToolExecution  bool
+	modelSettings          *ModelSettings
+	systemPrompt           string
+	session                Session
 
 	// Agent hooks
 	hooks Hooks
@@ -124,17 +131,18 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		opts.Logger = &llm.NullLogger{}
 	}
 	agent := &Agent{
-		name:               opts.Name,
-		model:              opts.Model,
-		responseTimeout:    opts.ResponseTimeout,
-		toolIterationLimit: opts.ToolIterationLimit,
-		llmHooks:           opts.LLMHooks,
-		logger:             opts.Logger,
-		systemPrompt:       opts.SystemPrompt,
-		modelSettings:      opts.ModelSettings,
-		hooks:              opts.Hooks,
-		session:            opts.Session,
-		toolsets:           opts.Toolsets,
+		name:                  opts.Name,
+		model:                 opts.Model,
+		responseTimeout:       opts.ResponseTimeout,
+		toolIterationLimit:    opts.ToolIterationLimit,
+		parallelToolExecution: opts.ParallelToolExecution,
+		llmHooks:              opts.LLMHooks,
+		logger:                opts.Logger,
+		systemPrompt:          opts.SystemPrompt,
+		modelSettings:         opts.ModelSettings,
+		hooks:                 opts.Hooks,
+		session:               opts.Session,
+		toolsets:              opts.Toolsets,
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -536,6 +544,10 @@ func (a *Agent) generateStreaming(
 // executeToolCalls executes all tool calls and returns the tool call results.
 // PreToolUse hooks run in order for each call. If any hook returns an error,
 // the tool is denied. If all hooks return nil, the tool is executed.
+//
+// When parallelToolExecution is enabled on the agent, tool calls are executed
+// concurrently. Hooks and callbacks are serialized with a mutex to preserve
+// safety. When disabled (the default), tool calls execute sequentially.
 func (a *Agent) executeToolCalls(
 	ctx context.Context,
 	hctx *HookContext,
@@ -544,124 +556,226 @@ func (a *Agent) executeToolCalls(
 	callback EventCallback,
 ) ([]*ToolCallResult, error) {
 	results := make([]*ToolCallResult, len(toolCalls))
+
+	if a.parallelToolExecution && len(toolCalls) > 1 {
+		return a.executeToolCallsParallel(ctx, hctx, toolCalls, toolsByName, callback, results)
+	}
+	return a.executeToolCallsSequential(ctx, hctx, toolCalls, toolsByName, callback, results)
+}
+
+// executeToolCallsSequential executes tool calls one at a time in order.
+func (a *Agent) executeToolCallsSequential(
+	ctx context.Context,
+	hctx *HookContext,
+	toolCalls []*llm.ToolUseContent,
+	toolsByName map[string]Tool,
+	callback EventCallback,
+	results []*ToolCallResult,
+) ([]*ToolCallResult, error) {
 	for i, toolCall := range toolCalls {
-		tool, ok := toolsByName[toolCall.Name]
-		if !ok {
-			return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
-		}
-
-		a.logger.Debug("executing tool call",
-			"tool_id", toolCall.ID,
-			"tool_name", toolCall.Name,
-			"tool_input", string(toolCall.Input))
-
-		// Generate preview if tool supports it
-		var preview *ToolCallPreview
-		if previewer, ok := tool.(ToolPreviewer); ok {
-			preview = previewer.PreviewCall(ctx, toolCall.Input)
-		}
-
-		// Emit tool call event
-		if err := callback(ctx, &ResponseItem{
-			Type:     ResponseItemTypeToolCall,
-			ToolCall: toolCall,
-		}); err != nil {
+		result, err := a.executeOneToolCall(ctx, hctx, toolCall, toolsByName, callback)
+		if err != nil {
 			return nil, err
 		}
-
-		// Run PreToolUse hooks — any error denies the tool
-		var result *ToolCallResult
-		preHctx := &HookContext{
-			Agent:  a,
-			Values: hctx.Values,
-			Tool:   tool,
-			Call:   toolCall,
-		}
-		denied := false
-		for _, hook := range a.hooks.PreToolUse {
-			if err := hook(ctx, preHctx); err != nil {
-				var abortErr *HookAbortError
-				if errors.As(err, &abortErr) {
-					abortErr.HookType = "PreToolUse"
-					a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
-					return nil, abortErr
-				}
-				a.logger.Debug("pre-tool-use hook denied tool", "error", err)
-				result = a.createDeniedResult(toolCall, err.Error(), preview)
-				denied = true
-				break
-			}
-		}
-		if !denied {
-			input := toolCall.Input
-			if preHctx.UpdatedInput != nil {
-				input = preHctx.UpdatedInput
-			}
-			result = a.executeTool(ctx, tool, toolCall, input, preview)
-		}
-
-		// Determine if the tool call failed
-		failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
-
-		// Run PostToolUse or PostToolUseFailure hooks based on outcome
-		postHctx := &HookContext{
-			Agent:  a,
-			Values: hctx.Values,
-			Tool:   tool,
-			Call:   toolCall,
-			Result: result,
-		}
-		if failed {
-			for _, hook := range a.hooks.PostToolUseFailure {
-				if err := hook(ctx, postHctx); err != nil {
-					var abortErr *HookAbortError
-					if errors.As(err, &abortErr) {
-						abortErr.HookType = "PostToolUseFailure"
-						a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
-						return nil, abortErr
-					}
-					a.logger.Debug("post-tool-use-failure hook error", "error", err)
-				}
-			}
-		} else {
-			for _, hook := range a.hooks.PostToolUse {
-				if err := hook(ctx, postHctx); err != nil {
-					var abortErr *HookAbortError
-					if errors.As(err, &abortErr) {
-						abortErr.HookType = "PostToolUse"
-						a.logger.Error("post-tool-use hook aborted", "error", abortErr)
-						return nil, abortErr
-					}
-					a.logger.Debug("post-tool-use hook error", "error", err)
-				}
-			}
-		}
-
-		// Use potentially modified result from hooks
-		result = postHctx.Result
 		results[i] = result
+	}
+	return results, nil
+}
 
-		// Apply AdditionalContext from pre or post hooks
-		additionalContext := preHctx.AdditionalContext
-		if postHctx.AdditionalContext != "" {
-			if additionalContext != "" {
-				additionalContext += "\n"
+// executeToolCallsParallel executes tool calls concurrently using goroutines.
+// Hooks and event callbacks are serialized with a mutex for safety.
+func (a *Agent) executeToolCallsParallel(
+	ctx context.Context,
+	hctx *HookContext,
+	toolCalls []*llm.ToolUseContent,
+	toolsByName map[string]Tool,
+	callback EventCallback,
+	results []*ToolCallResult,
+) ([]*ToolCallResult, error) {
+	var mu sync.Mutex
+	errs := make([]error, len(toolCalls))
+
+	// Wrap callback and hook context access with a mutex
+	syncCallback := func(ctx context.Context, item *ResponseItem) error {
+		mu.Lock()
+		defer mu.Unlock()
+		return callback(ctx, item)
+	}
+	syncHctx := &syncHookContext{mu: &mu, hctx: hctx}
+
+	var wg sync.WaitGroup
+	for i, toolCall := range toolCalls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := a.executeOneToolCall(ctx, syncHctx, toolCall, toolsByName, syncCallback)
+			if err != nil {
+				errs[i] = err
+				return
 			}
-			additionalContext += postHctx.AdditionalContext
-		}
-		if additionalContext != "" {
-			result.AdditionalContext = additionalContext
-		}
+			results[i] = result
+		}()
+	}
+	wg.Wait()
 
-		// Emit result event
-		if err := callback(ctx, &ResponseItem{
-			Type:           ResponseItemTypeToolCallResult,
-			ToolCallResult: result,
-		}); err != nil {
+	// Return the first error encountered
+	for _, err := range errs {
+		if err != nil {
 			return nil, err
 		}
 	}
 	return results, nil
+}
+
+// syncHookContext wraps a HookContext with a mutex so that shared Values
+// can be safely accessed from concurrent goroutines. It implements the
+// hookContextAccessor interface used by executeOneToolCall.
+type syncHookContext struct {
+	mu   *sync.Mutex
+	hctx *HookContext
+}
+
+// hookContextAccessor abstracts access to hook context values so that
+// executeOneToolCall can work with both plain and mutex-protected contexts.
+type hookContextAccessor interface {
+	copyValues() map[string]any
+}
+
+func (h *HookContext) copyValues() map[string]any {
+	cp := make(map[string]any, len(h.Values))
+	maps.Copy(cp, h.Values)
+	return cp
+}
+
+func (s *syncHookContext) copyValues() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hctx.copyValues()
+}
+
+// executeOneToolCall executes a single tool call including hooks and callbacks.
+func (a *Agent) executeOneToolCall(
+	ctx context.Context,
+	hctx hookContextAccessor,
+	toolCall *llm.ToolUseContent,
+	toolsByName map[string]Tool,
+	callback EventCallback,
+) (*ToolCallResult, error) {
+	tool, ok := toolsByName[toolCall.Name]
+	if !ok {
+		return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
+	}
+
+	a.logger.Debug("executing tool call",
+		"tool_id", toolCall.ID,
+		"tool_name", toolCall.Name,
+		"tool_input", string(toolCall.Input))
+
+	// Generate preview if tool supports it
+	var preview *ToolCallPreview
+	if previewer, ok := tool.(ToolPreviewer); ok {
+		preview = previewer.PreviewCall(ctx, toolCall.Input)
+	}
+
+	// Emit tool call event
+	if err := callback(ctx, &ResponseItem{
+		Type:     ResponseItemTypeToolCall,
+		ToolCall: toolCall,
+	}); err != nil {
+		return nil, err
+	}
+
+	// Run PreToolUse hooks — any error denies the tool
+	var result *ToolCallResult
+	preHctx := &HookContext{
+		Agent:  a,
+		Values: hctx.copyValues(),
+		Tool:   tool,
+		Call:   toolCall,
+	}
+	denied := false
+	for _, hook := range a.hooks.PreToolUse {
+		if err := hook(ctx, preHctx); err != nil {
+			var abortErr *HookAbortError
+			if errors.As(err, &abortErr) {
+				abortErr.HookType = "PreToolUse"
+				a.logger.Error("pre-tool-use hook aborted", "error", abortErr)
+				return nil, abortErr
+			}
+			a.logger.Debug("pre-tool-use hook denied tool", "error", err)
+			result = a.createDeniedResult(toolCall, err.Error(), preview)
+			denied = true
+			break
+		}
+	}
+	if !denied {
+		input := toolCall.Input
+		if preHctx.UpdatedInput != nil {
+			input = preHctx.UpdatedInput
+		}
+		result = a.executeTool(ctx, tool, toolCall, input, preview)
+	}
+
+	// Determine if the tool call failed
+	failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
+
+	// Run PostToolUse or PostToolUseFailure hooks based on outcome
+	postHctx := &HookContext{
+		Agent:  a,
+		Values: hctx.copyValues(),
+		Tool:   tool,
+		Call:   toolCall,
+		Result: result,
+	}
+	if failed {
+		for _, hook := range a.hooks.PostToolUseFailure {
+			if err := hook(ctx, postHctx); err != nil {
+				var abortErr *HookAbortError
+				if errors.As(err, &abortErr) {
+					abortErr.HookType = "PostToolUseFailure"
+					a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
+					return nil, abortErr
+				}
+				a.logger.Debug("post-tool-use-failure hook error", "error", err)
+			}
+		}
+	} else {
+		for _, hook := range a.hooks.PostToolUse {
+			if err := hook(ctx, postHctx); err != nil {
+				var abortErr *HookAbortError
+				if errors.As(err, &abortErr) {
+					abortErr.HookType = "PostToolUse"
+					a.logger.Error("post-tool-use hook aborted", "error", abortErr)
+					return nil, abortErr
+				}
+				a.logger.Debug("post-tool-use hook error", "error", err)
+			}
+		}
+	}
+
+	// Use potentially modified result from hooks
+	result = postHctx.Result
+
+	// Apply AdditionalContext from pre or post hooks
+	additionalContext := preHctx.AdditionalContext
+	if postHctx.AdditionalContext != "" {
+		if additionalContext != "" {
+			additionalContext += "\n"
+		}
+		additionalContext += postHctx.AdditionalContext
+	}
+	if additionalContext != "" {
+		result.AdditionalContext = additionalContext
+	}
+
+	// Emit result event
+	if err := callback(ctx, &ResponseItem{
+		Type:           ResponseItemTypeToolCallResult,
+		ToolCallResult: result,
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // executeTool runs the tool and returns the result. Panics in tool.Call are

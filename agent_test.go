@@ -3,7 +3,9 @@ package dive
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -474,5 +476,222 @@ func TestHookAbortError(t *testing.T) {
 		assert.ErrorAs(t, err, &abortErr)
 		assert.Equal(t, abortErr.Cause, causeErr)
 		assert.ErrorIs(t, err, causeErr)
+	})
+}
+
+func TestParallelToolExecution(t *testing.T) {
+	t.Run("tools execute concurrently", func(t *testing.T) {
+		callCount := 0
+		var concurrent atomic.Int32
+
+		mock := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{ID: "t1", Name: "slow_tool", Input: []byte(`{"id":"1"}`)},
+							&llm.ToolUseContent{ID: "t2", Name: "slow_tool", Input: []byte(`{"id":"2"}`)},
+							&llm.ToolUseContent{ID: "t3", Name: "slow_tool", Input: []byte(`{"id":"3"}`)},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		var maxConcurrent atomic.Int32
+		tool := &mockTool{
+			name: "slow_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				cur := concurrent.Add(1)
+				defer concurrent.Add(-1)
+				// Track the max concurrency seen
+				for {
+					old := maxConcurrent.Load()
+					if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
+						break
+					}
+				}
+				time.Sleep(50 * time.Millisecond)
+				return NewToolResultText("done"), nil
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:                 mock,
+			Tools:                 []Tool{tool},
+			ParallelToolExecution: true,
+		})
+		assert.NoError(t, err)
+
+		start := time.Now()
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use tools"))
+		elapsed := time.Since(start)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+
+		// All 3 tool results should be present
+		results := resp.ToolCallResults()
+		assert.Len(t, results, 3)
+
+		// Verify actual concurrency: max concurrent should be > 1
+		assert.True(t, maxConcurrent.Load() > 1,
+			"expected concurrent execution, max concurrent was %d", maxConcurrent.Load())
+
+		// Should complete in roughly 1 tool duration, not 3x
+		assert.True(t, elapsed < 120*time.Millisecond,
+			"expected parallel execution to be faster than sequential, took %s", elapsed)
+	})
+
+	t.Run("sequential when parallel disabled", func(t *testing.T) {
+		callCount := 0
+		var concurrent atomic.Int32
+
+		mock := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{ID: "t1", Name: "slow_tool", Input: []byte(`{"id":"1"}`)},
+							&llm.ToolUseContent{ID: "t2", Name: "slow_tool", Input: []byte(`{"id":"2"}`)},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		var maxConcurrent atomic.Int32
+		tool := &mockTool{
+			name: "slow_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				cur := concurrent.Add(1)
+				defer concurrent.Add(-1)
+				for {
+					old := maxConcurrent.Load()
+					if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
+						break
+					}
+				}
+				time.Sleep(50 * time.Millisecond)
+				return NewToolResultText("done"), nil
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:                 mock,
+			Tools:                 []Tool{tool},
+			ParallelToolExecution: false, // default
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use tools"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+
+		// Max concurrent should be exactly 1 (sequential)
+		assert.Equal(t, maxConcurrent.Load(), int32(1))
+	})
+
+	t.Run("hooks work with parallel execution", func(t *testing.T) {
+		callCount := 0
+		var hookCalls atomic.Int32
+
+		mock := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{ID: "t1", Name: "tool_a", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "t2", Name: "tool_b", Input: []byte(`{}`)},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		toolA := &mockTool{
+			name: "tool_a",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				return NewToolResultText("a"), nil
+			},
+		}
+		toolB := &mockTool{
+			name: "tool_b",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				return NewToolResultText("b"), nil
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:                 mock,
+			Tools:                 []Tool{toolA, toolB},
+			ParallelToolExecution: true,
+			Hooks: Hooks{
+				PostToolUse: []PostToolUseHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						hookCalls.Add(1)
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use tools"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+
+		// Both tools should have triggered the PostToolUse hook
+		assert.Equal(t, hookCalls.Load(), int32(2))
 	})
 }
