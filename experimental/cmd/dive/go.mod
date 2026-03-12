@@ -3,9 +3,9 @@ module github.com/deepnoodle-ai/dive/experimental/cmd/dive
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.2.0
-	github.com/deepnoodle-ai/dive/providers/google v1.2.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.2.0
+	github.com/deepnoodle-ai/dive v1.3.0
+	github.com/deepnoodle-ai/dive/providers/google v1.3.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.3.0
 	github.com/deepnoodle-ai/wonton v0.0.26
 )
 
