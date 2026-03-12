@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] - 2026-03-12
+
+### Changed
+
+- **Stream parallel tool results as they complete.** `ToolCallResult` events and
+  `PostToolUse` hooks now fire as soon as each tool finishes, rather than waiting
+  for all parallel tools to complete. Callbacks remain single-threaded via a channel
+  consumer. Result events now arrive in completion order, not declaration order.
+
 ## [1.2.0] - 2026-03-11
 
 ### Added
