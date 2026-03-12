@@ -576,6 +576,111 @@ func TestParallelToolExecution(t *testing.T) {
 			"expected overlapping starts, spread was %s (tool duration %s)", latest.Sub(earliest), toolDuration)
 	})
 
+	t.Run("callbacks fire as each tool completes", func(t *testing.T) {
+		// Verify that ToolCallResult events are emitted as soon as each tool
+		// finishes, rather than waiting for all tools to complete. The fast
+		// tool's result callback should fire while the slow tool is still running.
+		callCount := 0
+
+		mock := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{ID: "t1", Name: "fast_tool", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "t2", Name: "slow_tool", Input: []byte(`{}`)},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		slowDuration := 200 * time.Millisecond
+		var slowRunning atomic.Bool
+		slowStarted := make(chan struct{})
+
+		fastTool := &mockTool{
+			name: "fast_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				// Wait until the slow tool has entered its body before returning,
+				// so we know slowRunning is true when the fast callback fires.
+				<-slowStarted
+				return NewToolResultText("fast"), nil
+			},
+		}
+		slowTool := &mockTool{
+			name: "slow_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				slowRunning.Store(true)
+				close(slowStarted)
+				defer slowRunning.Store(false)
+				time.Sleep(slowDuration)
+				return NewToolResultText("slow"), nil
+			},
+		}
+
+		// Track when each ToolCallResult callback fires and whether the
+		// slow tool is still running at that moment.
+		type callbackRecord struct {
+			toolName         string
+			slowStillRunning bool
+		}
+		var records []callbackRecord
+
+		agent, err := NewAgent(AgentOptions{
+			Model:                 mock,
+			Tools:                 []Tool{fastTool, slowTool},
+			ParallelToolExecution: true,
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(),
+			WithInput("Use tools"),
+			WithEventCallback(func(ctx context.Context, item *ResponseItem) error {
+				if item.Type == ResponseItemTypeToolCallResult {
+					records = append(records, callbackRecord{
+						toolName:         item.ToolCallResult.Name,
+						slowStillRunning: slowRunning.Load(),
+					})
+				}
+				return nil
+			}),
+		)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+		assert.Len(t, records, 2)
+
+		// The fast tool's callback should have fired while the slow tool
+		// was still running. Find the fast tool's record and verify.
+		var fastRecord *callbackRecord
+		for i := range records {
+			if records[i].toolName == "fast_tool" {
+				fastRecord = &records[i]
+				break
+			}
+		}
+		assert.NotNil(t, fastRecord, "expected fast_tool callback record")
+		assert.True(t, fastRecord.slowStillRunning,
+			"fast_tool callback should fire while slow_tool is still running")
+	})
+
 	t.Run("sequential when parallel disabled", func(t *testing.T) {
 		callCount := 0
 		var concurrent atomic.Int32

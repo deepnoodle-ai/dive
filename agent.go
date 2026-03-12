@@ -8,7 +8,6 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -92,6 +91,10 @@ type AgentOptions struct {
 	// ParallelToolExecution enables concurrent execution of tool calls when
 	// the LLM returns multiple tool calls in a single message. When false
 	// (the default), tool calls are executed sequentially in order.
+	//
+	// When enabled, ToolCallResult events and PostToolUse hooks fire in
+	// completion order (fastest tool first), not in the order the LLM
+	// declared the tool calls.
 	ParallelToolExecution bool
 }
 
@@ -593,15 +596,19 @@ type toolCallPrep struct {
 	input   []byte
 }
 
-// executeToolCallsParallel uses a three-phase approach:
+// executeToolCallsParallel uses a two-phase approach:
 //
 //	Phase 1 (sequential): PreToolUse hooks, previews, and tool_call events
-//	Phase 2 (parallel):   Tool execution for all non-denied tools
-//	Phase 3 (sequential): PostToolUse hooks and tool_call_result events
+//	Phase 2 (parallel):   Tool execution with streamed results
 //
-// Hooks and callbacks are always single-threaded. Only tool execution is
-// parallelized. This eliminates the need for mutexes around hooks and makes
-// hook behavior identical to sequential mode.
+// Tools execute concurrently but results are processed as they arrive via a
+// channel. PostToolUse hooks and callbacks fire as soon as each tool completes,
+// rather than waiting for all tools to finish. Hooks and callbacks remain
+// single-threaded since a single goroutine drains the channel.
+//
+// Note: ToolCallResult events and PostToolUse hooks fire in completion order,
+// not tool-call declaration order. The results slice is indexed correctly
+// regardless of completion order.
 func (a *Agent) executeToolCallsParallel(
 	ctx context.Context,
 	hctx *HookContext,
@@ -676,46 +683,57 @@ func (a *Agent) executeToolCallsParallel(
 		preps[i] = prep
 	}
 
-	// Phase 2: Tool execution (parallel)
+	// Phase 2: Tool execution (parallel) with streamed results
+	type completedTool struct {
+		index  int
+		result *ToolCallResult
+		err    error // fatal error (e.g. context cancellation)
+	}
+
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	errs := make([]error, len(toolCalls))
-	var wg sync.WaitGroup
+	ch := make(chan completedTool, len(toolCalls))
+
+	// Send denied results immediately — no goroutine needed.
+	for i, prep := range preps {
+		if prep.denied {
+			ch <- completedTool{index: i, result: results[i]}
+		}
+	}
+
+	// Launch tool executions.
 	for i, prep := range preps {
 		if prep.denied {
 			continue
 		}
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			if err := childCtx.Err(); err != nil {
-				errs[i] = err
+				ch <- completedTool{index: i, err: err}
 				return
 			}
 			result := a.executeTool(childCtx, prep.tool, toolCalls[i], prep.input, prep.preview)
-			if result.Error != nil {
-				// Non-fatal: tool errors are reported to the LLM, not propagated.
-				// But if the context was cancelled, treat it as fatal.
-				if childCtx.Err() != nil {
-					errs[i] = childCtx.Err()
-					return
-				}
+			if result.Error != nil && childCtx.Err() != nil {
+				ch <- completedTool{index: i, err: childCtx.Err()}
+				return
 			}
-			results[i] = result
+			ch <- completedTool{index: i, result: result}
 		}()
 	}
-	wg.Wait()
 
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
+	// Drain results as they arrive (single-threaded: hooks + callbacks are safe).
+	remaining := len(toolCalls)
+	for remaining > 0 {
+		ct := <-ch
+		remaining--
+
+		if ct.err != nil {
+			cancel() // cancel remaining tools
+			return nil, ct.err
 		}
-	}
 
-	// Phase 3: PostToolUse hooks and result events (sequential)
-	for i, toolCall := range toolCalls {
-		result := results[i]
+		i := ct.index
+		result := ct.result
 		prep := preps[i]
 
 		failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
@@ -726,7 +744,7 @@ func (a *Agent) executeToolCallsParallel(
 			SystemPrompt: prep.preHctx.SystemPrompt,
 			Messages:     prep.preHctx.Messages,
 			Tool:         prep.tool,
-			Call:         toolCall,
+			Call:         toolCalls[i],
 			Result:       result,
 		}
 
