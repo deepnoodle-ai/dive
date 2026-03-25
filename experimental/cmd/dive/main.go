@@ -122,6 +122,7 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Create tools
 	tools := createTools(workspaceDir, tuiDialog)
+	tools = append(tools, grokServerSideTools(modelName)...)
 
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")
@@ -295,6 +296,7 @@ func runPrint(ctx *cli.Context) error {
 
 	// Create tools (auto-approve dialog for non-interactive print mode)
 	tools := createTools(workspaceDir, nil)
+	tools = append(tools, grokServerSideTools(modelName)...)
 
 	// Create agent
 	temperature := ctx.Float64("temperature")
@@ -784,7 +786,7 @@ func getDefaultModel() string {
 		return "gpt-5.2"
 	}
 	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
-		return "grok-code-fast-1"
+		return defaultGrokModel
 	}
 	if os.Getenv("MISTRAL_API_KEY") != "" {
 		return "mistral-small-latest"

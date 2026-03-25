@@ -1,8 +1,12 @@
 package main
 
 import (
+	"strings"
+
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
+	"github.com/deepnoodle-ai/dive/providers/grok"
 
 	// Import providers to trigger their init() registration
 	_ "github.com/deepnoodle-ai/dive/providers/anthropic"
@@ -15,8 +19,23 @@ import (
 	_ "github.com/deepnoodle-ai/dive/providers/openrouter"
 )
 
+// defaultGrokModel is the default model used when a Grok API key is detected.
+var defaultGrokModel = grok.ModelGrok420Reasoning
+
 // createModel creates an LLM provider using the global registry.
 // Providers are registered via init() when imported above.
 func createModel(modelName, apiEndpoint string) llm.LLM {
 	return providers.CreateModel(modelName, apiEndpoint)
+}
+
+// grokServerSideTools returns the Grok server-side tools (web search, X search)
+// if the model is a Grok model, or nil otherwise.
+func grokServerSideTools(modelName string) []dive.Tool {
+	if !strings.HasPrefix(modelName, "grok-") {
+		return nil
+	}
+	return []dive.Tool{
+		grok.NewWebSearchTool(grok.WebSearchToolOptions{}),
+		grok.NewXSearchTool(grok.XSearchToolOptions{}),
+	}
 }
