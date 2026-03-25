@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] - 2026-03-25
+
+### Added
+
+- **Grok provider** as a standalone Go submodule (`providers/grok/`). Built on the
+  OpenAI Responses API with support for Grok 4.20 models (reasoning, non-reasoning,
+  multi-agent).
+- **Server-side tools for Grok**: `WebSearchTool` (web search with domain filters and
+  image understanding) and `XSearchTool` (X/Twitter search with handle filters, date
+  ranges, and media understanding).
+- **Prompt caching for Grok** via `WithPromptCacheKey(key)` option for cache reuse
+  across requests.
+- **OpenAI provider extensions**: `ResponsesToolProvider` interface for custom tool
+  types and `WithExtraRequestOptions` for per-request SDK options.
+
+### Changed
+
+- **Upgraded dependencies**: grpc v1.79.3, jsonparser v1.1.2 (DoS fix),
+  openai-go v3.29.0, genai v1.51.0.
+
 ## [1.3.0] - 2026-03-12
 
 ### Changed
