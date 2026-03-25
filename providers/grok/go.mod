@@ -3,8 +3,8 @@ module github.com/deepnoodle-ai/dive/providers/grok
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.3.0
-	github.com/deepnoodle-ai/dive/providers/openai v0.0.0
+	github.com/deepnoodle-ai/dive v1.4.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.4.0
 	github.com/deepnoodle-ai/wonton v0.0.29
 	github.com/openai/openai-go/v3 v3.29.0
 )
