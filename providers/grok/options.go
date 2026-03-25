@@ -1,41 +1,54 @@
 package grok
 
-import "net/http"
+import "github.com/openai/openai-go/v3/option"
 
-// Option is a function that configures the Provider
-type Option func(*Provider)
+// config holds the Grok provider configuration before passing to the
+// embedded OpenAI Responses API provider.
+type config struct {
+	apiKey              string
+	endpoint            string
+	model               string
+	maxTokens           int
+	extraRequestOptions []option.RequestOption
+}
 
-// WithAPIKey sets the API key for the provider
+// Option is a function that configures the Grok Provider.
+type Option func(*config)
+
+// WithAPIKey sets the API key for the provider.
 func WithAPIKey(apiKey string) Option {
-	return func(p *Provider) {
-		p.apiKey = apiKey
+	return func(c *config) {
+		c.apiKey = apiKey
 	}
 }
 
-// WithEndpoint sets the API endpoint URL for the provider
+// WithEndpoint sets the API base URL for the provider.
 func WithEndpoint(endpoint string) Option {
-	return func(p *Provider) {
-		p.endpoint = endpoint
+	return func(c *config) {
+		c.endpoint = endpoint
 	}
 }
 
-// WithClient sets the HTTP client used for all API requests
-func WithClient(client *http.Client) Option {
-	return func(p *Provider) {
-		p.client = client
-	}
-}
-
-// WithMaxTokens sets the maximum number of tokens to generate
+// WithMaxTokens sets the maximum number of tokens to generate.
 func WithMaxTokens(maxTokens int) Option {
-	return func(p *Provider) {
-		p.maxTokens = maxTokens
+	return func(c *config) {
+		c.maxTokens = maxTokens
 	}
 }
 
-// WithModel sets the LLM model name to use for the provider
+// WithModel sets the LLM model name to use for the provider.
 func WithModel(model string) Option {
-	return func(p *Provider) {
-		p.model = model
+	return func(c *config) {
+		c.model = model
+	}
+}
+
+// WithPromptCacheKey sets a cache key that routes requests to the same server
+// for prompt cache reuse. Use the same key across requests in a conversation
+// to maximize cache hits. The key can be any string (e.g., a UUID).
+func WithPromptCacheKey(key string) Option {
+	return func(c *config) {
+		c.extraRequestOptions = append(c.extraRequestOptions,
+			option.WithJSONSet("prompt_cache_key", key))
 	}
 }

@@ -4,6 +4,27 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing contains pricing for all text generation models
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelGrok420Reasoning: {
+		Model:       ModelGrok420Reasoning,
+		InputPrice:  2.00,
+		OutputPrice: 6.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-03-25",
+	},
+	ModelGrok420NonReasoning: {
+		Model:       ModelGrok420NonReasoning,
+		InputPrice:  2.00,
+		OutputPrice: 6.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-03-25",
+	},
+	ModelGrok420MultiAgent: {
+		Model:       ModelGrok420MultiAgent,
+		InputPrice:  2.00,
+		OutputPrice: 6.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-03-25",
+	},
 	ModelGrok41FastReasoning: {
 		Model:       ModelGrok41FastReasoning,
 		InputPrice:  0.20,

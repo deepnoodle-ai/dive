@@ -7,7 +7,7 @@ require (
 	github.com/deepnoodle-ai/dive/experimental/mcp v1.3.0
 	github.com/deepnoodle-ai/dive/providers/google v1.3.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.3.0
-	github.com/deepnoodle-ai/wonton v0.0.26
+	github.com/deepnoodle-ai/wonton v0.0.29
 	github.com/fatih/color v1.18.0
 	github.com/mark3labs/mcp-go v0.45.0
 )
