@@ -339,8 +339,8 @@ func (a *App) LiveView() tui.View {
 	views = append(views,
 		tui.InputField(&a.inputText).
 			ID("main-input").
-			Prompt(" > ").
-			PromptStyle(tui.NewStyle().WithForeground(tui.ColorCyan)).
+			Prompt(" ❯ ").
+			PromptStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})).
 			Placeholder("Type a message... (@filename for autocomplete)").
 			Multiline(true).
 			MaxHeight(10).

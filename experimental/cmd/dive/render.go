@@ -43,9 +43,13 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 		return a.introView(msg)
 
 	case "user":
-		return tui.Text("> %s", msg.Content).Wrap().Style(
-			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}).WithItalic(),
+		caret := tui.Text("❯ ").Style(
+			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
 		)
+		text := tui.Text("%s", msg.Content).Wrap().Style(
+			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
+		)
+		return tui.Group(caret, text)
 
 	case "assistant":
 		content := strings.TrimRight(msg.Content, "\n")
@@ -489,9 +493,13 @@ func (a *App) messageViewStatic(msg Message) tui.View {
 func (a *App) textMessageViewStatic(msg Message) tui.View {
 	switch msg.Role {
 	case "user":
-		return tui.Text("> %s", msg.Content).Wrap().Style(
-			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}).WithItalic(),
+		caret := tui.Text("❯ ").Style(
+			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
 		)
+		text := tui.Text("%s", msg.Content).Wrap().Style(
+			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
+		)
+		return tui.Group(caret, text)
 
 	case "assistant":
 		content := strings.TrimSpace(msg.Content)
