@@ -1,7 +1,12 @@
 package grok
 
 const (
-	// Grok 4.1 models (latest, 2M context)
+	// Grok 4.20 models (latest, 2M context)
+	ModelGrok420Reasoning      = "grok-4.20-0309-reasoning"
+	ModelGrok420NonReasoning   = "grok-4.20-0309-non-reasoning"
+	ModelGrok420MultiAgent     = "grok-4.20-multi-agent-0309"
+
+	// Grok 4.1 models (2M context)
 	ModelGrok41FastReasoning    = "grok-4-1-fast-reasoning"
 	ModelGrok41FastNonReasoning = "grok-4-1-fast-non-reasoning"
 

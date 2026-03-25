@@ -24,18 +24,8 @@ func TestProvider_Name(t *testing.T) {
 	assert.Equal(t, expected, name)
 }
 
-func TestProvider_WithOptions(t *testing.T) {
-	provider := New(
-		WithModel("grok-3"),
-		WithEndpoint("https://custom.x.ai/v1/chat/completions"),
-		WithAPIKey("custom-key"),
-		WithMaxTokens(8192),
-	)
-
-	assert.Equal(t, "grok-3", provider.model)
-	assert.Equal(t, "https://custom.x.ai/v1/chat/completions", provider.endpoint)
-	assert.Equal(t, "custom-key", provider.apiKey)
-	assert.Equal(t, 8192, provider.maxTokens)
+func TestProvider_DefaultModel(t *testing.T) {
+	assert.Equal(t, ModelGrok420Reasoning, DefaultModel)
 }
 
 func TestProvider_GetAPIKey(t *testing.T) {

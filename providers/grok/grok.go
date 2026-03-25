@@ -1,56 +1,50 @@
 package grok
 
 import (
-	"net/http"
 	"os"
-	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	openaic "github.com/deepnoodle-ai/dive/providers/openaicompletions"
+	openaiProvider "github.com/deepnoodle-ai/dive/providers/openai"
 )
 
 var (
-	DefaultModel     = ModelGrok41FastReasoning
-	DefaultEndpoint  = "https://api.x.ai/v1/chat/completions"
+	DefaultModel     = ModelGrok420Reasoning
+	DefaultEndpoint  = "https://api.x.ai/v1"
 	DefaultMaxTokens = 4096
-	DefaultClient    = &http.Client{Timeout: 300 * time.Second}
 )
 
 var _ llm.StreamingLLM = &Provider{}
 
-// Provider implements the X.AI Grok LLM provider.
+// Provider implements the X.AI Grok LLM provider using the Responses API.
 type Provider struct {
-	apiKey    string
-	endpoint  string
-	model     string
-	maxTokens int
-	client    *http.Client
-
-	// Embedded OpenAI completions provider
-	*openaic.Provider
+	// Embedded OpenAI Responses API provider
+	*openaiProvider.Provider
 }
 
 // New creates a new Grok provider with the given options.
 func New(opts ...Option) *Provider {
-	p := &Provider{
+	cfg := &config{
 		apiKey:    getAPIKey(),
 		endpoint:  DefaultEndpoint,
-		client:    DefaultClient,
 		model:     DefaultModel,
 		maxTokens: DefaultMaxTokens,
 	}
 	for _, opt := range opts {
-		opt(p)
+		opt(cfg)
 	}
-	// Pass the options through to the wrapped OpenAI provider
-	p.Provider = openaic.New(
-		openaic.WithAPIKey(p.apiKey),
-		openaic.WithClient(p.client),
-		openaic.WithEndpoint(p.endpoint),
-		openaic.WithMaxTokens(p.maxTokens),
-		openaic.WithModel(p.model),
-		openaic.WithSystemRole("system"),
-	)
+	openaiOpts := []openaiProvider.Option{
+		openaiProvider.WithAPIKey(cfg.apiKey),
+		openaiProvider.WithEndpoint(cfg.endpoint),
+		openaiProvider.WithModel(cfg.model),
+		openaiProvider.WithMaxTokens(cfg.maxTokens),
+	}
+	if len(cfg.extraRequestOptions) > 0 {
+		openaiOpts = append(openaiOpts,
+			openaiProvider.WithExtraRequestOptions(cfg.extraRequestOptions...))
+	}
+	p := &Provider{
+		Provider: openaiProvider.New(openaiOpts...),
+	}
 	return p
 }
 
@@ -58,7 +52,6 @@ func getAPIKey() string {
 	if key := os.Getenv("XAI_API_KEY"); key != "" {
 		return key
 	}
-	// Also check for GROK_API_KEY as an alternative
 	if key := os.Getenv("GROK_API_KEY"); key != "" {
 		return key
 	}

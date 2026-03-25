@@ -50,3 +50,12 @@ func WithMaxRetries(maxRetries int) Option {
 		p.options = append(p.options, option.WithMaxRetries(maxRetries))
 	}
 }
+
+// WithExtraRequestOptions adds additional SDK request options that are applied
+// to every API call. This can be used to inject extra body fields (e.g., via
+// option.WithJSONSet) or custom headers for provider-specific features.
+func WithExtraRequestOptions(opts ...option.RequestOption) Option {
+	return func(p *Provider) {
+		p.extraRequestOptions = append(p.extraRequestOptions, opts...)
+	}
+}

@@ -31,13 +31,14 @@ var _ llm.StreamingLLM = &Provider{}
 
 // Provider implements the OpenAI LLM provider using the Responses API.
 type Provider struct {
-	client        openai.Client
-	model         openai.ChatModel
-	maxTokens     int
-	maxRetries    int
-	retryBaseWait time.Duration
-	httpClient    *http.Client
-	options       []option.RequestOption
+	client              openai.Client
+	model               openai.ChatModel
+	maxTokens           int
+	maxRetries          int
+	retryBaseWait       time.Duration
+	httpClient          *http.Client
+	options             []option.RequestOption
+	extraRequestOptions []option.RequestOption
 }
 
 // New creates a new OpenAI provider with the given options.
@@ -86,11 +87,14 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 
 	var resp *responses.Response
 	err = retry.DoSimple(ctx, func() error {
+		reqOpts := append([]option.RequestOption{
+			option.WithRequestTimeout(5 * time.Minute),
+			option.WithHTTPClient(p.httpClient),
+		}, p.extraRequestOptions...)
 		resp, err = p.client.Responses.New(
 			ctx,
 			params,
-			option.WithRequestTimeout(5*time.Minute),
-			option.WithHTTPClient(p.httpClient),
+			reqOpts...,
 		)
 		if err != nil {
 			var apierr *openai.Error
@@ -127,11 +131,14 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
+	streamOpts := append([]option.RequestOption{
+		option.WithRequestTimeout(5 * time.Minute),
+		option.WithHTTPClient(p.httpClient),
+	}, p.extraRequestOptions...)
 	streamSDK := p.client.Responses.NewStreaming(
 		ctx,
 		params,
-		option.WithRequestTimeout(5*time.Minute),
-		option.WithHTTPClient(p.httpClient),
+		streamOpts...,
 	)
 
 	return newOpenAIStreamIterator(streamSDK, config), nil
@@ -269,6 +276,11 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	if len(config.Tools) > 0 {
 		var tools []responses.ToolUnionParam
 		for _, tool := range config.Tools {
+			// Check for tools that provide native Responses API params
+			if responsesTool, ok := tool.(ResponsesToolProvider); ok {
+				tools = append(tools, responsesTool.ResponsesToolParam())
+				continue
+			}
 			if toolWebSearch, ok := tool.(*WebSearchPreviewTool); ok {
 				tools = append(tools, responses.ToolUnionParam{
 					OfWebSearchPreview: toolWebSearch.Param(),
