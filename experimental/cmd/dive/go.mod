@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/deepnoodle-ai/dive v1.3.0
 	github.com/deepnoodle-ai/dive/providers/google v1.3.0
+	github.com/deepnoodle-ai/dive/providers/grok v0.0.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.3.0
 	github.com/deepnoodle-ai/wonton v0.0.26
 )
@@ -53,5 +54,6 @@ require (
 replace (
 	github.com/deepnoodle-ai/dive => ../../..
 	github.com/deepnoodle-ai/dive/providers/google => ../../../providers/google
+	github.com/deepnoodle-ai/dive/providers/grok => ../../../providers/grok
 	github.com/deepnoodle-ai/dive/providers/openai => ../../../providers/openai
 )
