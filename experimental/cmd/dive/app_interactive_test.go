@@ -28,7 +28,7 @@ func TestAppLiveView(t *testing.T) {
 		screen := renderLiveView(t, app, 80, 24)
 
 		// The live view should show the input prompt
-		termtest.AssertContains(t, screen, ">")
+		termtest.AssertContains(t, screen, "❯")
 		termtest.AssertContains(t, screen, "Type a message")
 	})
 
@@ -106,7 +106,7 @@ func TestAppWithInlineRunner(t *testing.T) {
 		screen.WriteString(output)
 
 		// Should contain the prompt
-		termtest.AssertContains(t, screen, ">")
+		termtest.AssertContains(t, screen, "❯")
 	})
 }
 

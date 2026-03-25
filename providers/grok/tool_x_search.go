@@ -3,6 +3,8 @@ package grok
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -40,8 +42,42 @@ type XSearchToolOptions struct {
 	EnableVideoUnderstanding bool
 }
 
+func (o XSearchToolOptions) validate() error {
+	if len(o.AllowedXHandles) > 0 && len(o.ExcludedXHandles) > 0 {
+		return fmt.Errorf("AllowedXHandles and ExcludedXHandles cannot both be set")
+	}
+	if len(o.AllowedXHandles) > 10 {
+		return fmt.Errorf("AllowedXHandles exceeds maximum of 10 (got %d)", len(o.AllowedXHandles))
+	}
+	if len(o.ExcludedXHandles) > 10 {
+		return fmt.Errorf("ExcludedXHandles exceeds maximum of 10 (got %d)", len(o.ExcludedXHandles))
+	}
+	if o.FromDate != "" {
+		if _, err := time.Parse("2006-01-02", o.FromDate); err != nil {
+			return fmt.Errorf("FromDate must be YYYY-MM-DD format: %w", err)
+		}
+	}
+	if o.ToDate != "" {
+		if _, err := time.Parse("2006-01-02", o.ToDate); err != nil {
+			return fmt.Errorf("ToDate must be YYYY-MM-DD format: %w", err)
+		}
+	}
+	if o.FromDate != "" && o.ToDate != "" {
+		from, _ := time.Parse("2006-01-02", o.FromDate)
+		to, _ := time.Parse("2006-01-02", o.ToDate)
+		if from.After(to) {
+			return fmt.Errorf("FromDate (%s) must not be after ToDate (%s)", o.FromDate, o.ToDate)
+		}
+	}
+	return nil
+}
+
 // NewXSearchTool creates a new Grok XSearchTool with the given options.
-func NewXSearchTool(opts XSearchToolOptions) *XSearchTool {
+// Returns an error if the options are invalid.
+func NewXSearchTool(opts XSearchToolOptions) (*XSearchTool, error) {
+	if err := opts.validate(); err != nil {
+		return nil, fmt.Errorf("invalid XSearchToolOptions: %w", err)
+	}
 	return &XSearchTool{
 		allowedXHandles:          opts.AllowedXHandles,
 		excludedXHandles:         opts.ExcludedXHandles,
@@ -49,7 +85,7 @@ func NewXSearchTool(opts XSearchToolOptions) *XSearchTool {
 		toDate:                   opts.ToDate,
 		enableImageUnderstanding: opts.EnableImageUnderstanding,
 		enableVideoUnderstanding: opts.EnableVideoUnderstanding,
-	}
+	}, nil
 }
 
 // XSearchTool is a server-side tool that enables Grok to search X (Twitter).

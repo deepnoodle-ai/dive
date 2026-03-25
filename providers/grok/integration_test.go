@@ -2,8 +2,10 @@ package grok
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -16,11 +18,18 @@ func skipIfNoAPIKey(t *testing.T) {
 	}
 }
 
+func testContext(t *testing.T, timeout time.Duration) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func TestIntegration_Generate(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New()
-	ctx := context.Background()
+	ctx := testContext(t, 30*time.Second)
 
 	response, err := provider.Generate(ctx, llm.WithMessages(
 		llm.NewUserTextMessage("Say 'hello' and nothing else."),
@@ -37,7 +46,7 @@ func TestIntegration_Stream(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New()
-	ctx := context.Background()
+	ctx := testContext(t, 30*time.Second)
 
 	iterator, err := provider.Stream(ctx, llm.WithMessages(
 		llm.NewUserTextMessage("Say 'hello' and nothing else."),
@@ -63,9 +72,10 @@ func TestIntegration_WebSearch(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New()
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
-	webSearch := NewWebSearchTool(WebSearchToolOptions{})
+	webSearch, err := NewWebSearchTool(WebSearchToolOptions{})
+	assert.NoError(t, err)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -86,11 +96,12 @@ func TestIntegration_WebSearchWithDomains(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New()
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
-	webSearch := NewWebSearchTool(WebSearchToolOptions{
+	webSearch, err := NewWebSearchTool(WebSearchToolOptions{
 		AllowedDomains: []string{"wikipedia.org"},
 	})
+	assert.NoError(t, err)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -110,9 +121,10 @@ func TestIntegration_XSearch(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New()
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
-	xSearch := NewXSearchTool(XSearchToolOptions{})
+	xSearch, err := NewXSearchTool(XSearchToolOptions{})
+	assert.NoError(t, err)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -133,10 +145,12 @@ func TestIntegration_WebSearchAndXSearch(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New()
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
-	webSearch := NewWebSearchTool(WebSearchToolOptions{})
-	xSearch := NewXSearchTool(XSearchToolOptions{})
+	webSearch, err := NewWebSearchTool(WebSearchToolOptions{})
+	assert.NoError(t, err)
+	xSearch, err := NewXSearchTool(XSearchToolOptions{})
+	assert.NoError(t, err)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -156,9 +170,10 @@ func TestIntegration_WebSearchStream(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New()
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
-	webSearch := NewWebSearchTool(WebSearchToolOptions{})
+	webSearch, err := NewWebSearchTool(WebSearchToolOptions{})
+	assert.NoError(t, err)
 
 	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(
@@ -187,9 +202,9 @@ func TestIntegration_WebSearchStream(t *testing.T) {
 func TestIntegration_PromptCaching(t *testing.T) {
 	skipIfNoAPIKey(t)
 
-	cacheKey := "dive-test-cache-key-abc123"
+	cacheKey := fmt.Sprintf("dive-test-%s-%d", t.Name(), time.Now().UnixNano())
 	provider := New(WithPromptCacheKey(cacheKey))
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
 	systemPrompt := "You are a helpful assistant that answers questions concisely. " +
 		"Always respond in exactly one sentence."
@@ -222,44 +237,70 @@ func TestIntegration_PromptCaching(t *testing.T) {
 		response2.Usage.InputTokens, response2.Usage.OutputTokens,
 		response2.Usage.CacheReadInputTokens)
 
-	// Verify we got a response (cache hits are best-effort, so we don't
-	// assert on CacheReadInputTokens > 0)
-	assert.True(t, len(response2.Message().Text()) > 0)
+	// Second request should have cache hits from the shared prefix
+	assert.True(t, response2.Usage.CacheReadInputTokens > 0)
 }
 
 func TestIntegration_PromptCachingStream(t *testing.T) {
 	skipIfNoAPIKey(t)
 
-	cacheKey := "dive-test-stream-cache-key-xyz789"
+	cacheKey := fmt.Sprintf("dive-test-%s-%d", t.Name(), time.Now().UnixNano())
 	provider := New(WithPromptCacheKey(cacheKey))
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
-	iterator, err := provider.Stream(ctx,
+	systemPrompt := "You are a helpful assistant. Always respond concisely in one sentence."
+
+	// First request populates the cache
+	iter1, err := provider.Stream(ctx,
+		llm.WithSystemPrompt(systemPrompt),
 		llm.WithMessages(
-			llm.NewUserTextMessage("Say 'cached' and nothing else."),
+			llm.NewUserTextMessage("What is 2+2?"),
 		),
 	)
 	assert.NoError(t, err)
 
-	accumulator := llm.NewResponseAccumulator()
-	for iterator.Next() {
-		err := accumulator.AddEvent(iterator.Event())
+	acc1 := llm.NewResponseAccumulator()
+	for iter1.Next() {
+		err := acc1.AddEvent(iter1.Event())
 		assert.NoError(t, err)
 	}
-	assert.NoError(t, iterator.Err())
-	assert.True(t, accumulator.IsComplete())
+	assert.NoError(t, iter1.Err())
+	assert.True(t, acc1.IsComplete())
+	resp1 := acc1.Response()
+	t.Logf("Stream turn 1 - cached: %d", resp1.Usage.CacheReadInputTokens)
 
-	response := accumulator.Response()
-	assert.NotNil(t, response)
-	ok := strings.Contains(strings.ToLower(response.Message().Text()), "cached")
-	assert.True(t, ok)
+	// Second request should hit the cache
+	iter2, err := provider.Stream(ctx,
+		llm.WithSystemPrompt(systemPrompt),
+		llm.WithMessages(
+			llm.NewUserTextMessage("What is 2+2?"),
+			llm.NewAssistantTextMessage(resp1.Message().Text()),
+			llm.NewUserTextMessage("What is 3+3?"),
+		),
+	)
+	assert.NoError(t, err)
+
+	acc2 := llm.NewResponseAccumulator()
+	for iter2.Next() {
+		err := acc2.AddEvent(iter2.Event())
+		assert.NoError(t, err)
+	}
+	assert.NoError(t, iter2.Err())
+	assert.True(t, acc2.IsComplete())
+	resp2 := acc2.Response()
+	t.Logf("Stream turn 2 - cached: %d", resp2.Usage.CacheReadInputTokens)
+	// Note: the streaming accumulator does not currently extract
+	// CacheReadInputTokens from the response.completed event, so we only
+	// verify the response was successful. The non-streaming test above
+	// validates cache hits.
+	assert.True(t, len(resp2.Message().Text()) > 0)
 }
 
 func TestIntegration_MultiAgent(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New(WithModel(ModelGrok420MultiAgent))
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -279,10 +320,12 @@ func TestIntegration_MultiAgentWithTools(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New(WithModel(ModelGrok420MultiAgent))
-	ctx := context.Background()
+	ctx := testContext(t, 120*time.Second)
 
-	webSearch := NewWebSearchTool(WebSearchToolOptions{})
-	xSearch := NewXSearchTool(XSearchToolOptions{})
+	webSearch, err := NewWebSearchTool(WebSearchToolOptions{})
+	assert.NoError(t, err)
+	xSearch, err := NewXSearchTool(XSearchToolOptions{})
+	assert.NoError(t, err)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -303,7 +346,7 @@ func TestIntegration_MultiAgent4Agents(t *testing.T) {
 
 	// 4 agents = reasoning effort "low" or "medium"
 	provider := New(WithModel(ModelGrok420MultiAgent))
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -324,7 +367,7 @@ func TestIntegration_MultiAgent16Agents(t *testing.T) {
 
 	// 16 agents = reasoning effort "high"
 	provider := New(WithModel(ModelGrok420MultiAgent))
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
 	response, err := provider.Generate(ctx,
 		llm.WithMessages(
@@ -344,7 +387,7 @@ func TestIntegration_MultiAgentStream(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	provider := New(WithModel(ModelGrok420MultiAgent))
-	ctx := context.Background()
+	ctx := testContext(t, 60*time.Second)
 
 	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(
@@ -382,7 +425,7 @@ func TestIntegration_Grok420Models(t *testing.T) {
 	for _, m := range models {
 		t.Run(m.name, func(t *testing.T) {
 			provider := New(WithModel(m.model))
-			ctx := context.Background()
+			ctx := testContext(t, 30*time.Second)
 
 			response, err := provider.Generate(ctx, llm.WithMessages(
 				llm.NewUserTextMessage("Say 'hello' and nothing else."),

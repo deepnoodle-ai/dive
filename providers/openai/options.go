@@ -51,6 +51,15 @@ func WithMaxRetries(maxRetries int) Option {
 	}
 }
 
+// WithName overrides the provider name returned by Name(). This is used by
+// providers that embed the OpenAI provider (e.g., Grok) to ensure the correct
+// name is reported in contexts like ToolConfiguration.
+func WithName(name string) Option {
+	return func(p *Provider) {
+		p.name = name
+	}
+}
+
 // WithExtraRequestOptions adds additional SDK request options that are applied
 // to every API call. This can be used to inject extra body fields (e.g., via
 // option.WithJSONSet) or custom headers for provider-specific features.

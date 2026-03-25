@@ -31,6 +31,7 @@ var _ llm.StreamingLLM = &Provider{}
 
 // Provider implements the OpenAI LLM provider using the Responses API.
 type Provider struct {
+	name                string
 	client              openai.Client
 	model               openai.ChatModel
 	maxTokens           int
@@ -58,6 +59,9 @@ func New(opts ...Option) *Provider {
 }
 
 func (p *Provider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
 	return ProviderName
 }
 

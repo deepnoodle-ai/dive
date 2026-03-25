@@ -33,6 +33,7 @@ func New(opts ...Option) *Provider {
 		opt(cfg)
 	}
 	openaiOpts := []openaiProvider.Option{
+		openaiProvider.WithName("grok"),
 		openaiProvider.WithAPIKey(cfg.apiKey),
 		openaiProvider.WithEndpoint(cfg.endpoint),
 		openaiProvider.WithModel(cfg.model),

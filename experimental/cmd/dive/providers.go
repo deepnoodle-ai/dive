@@ -34,8 +34,12 @@ func grokServerSideTools(modelName string) []dive.Tool {
 	if !strings.HasPrefix(modelName, "grok-") {
 		return nil
 	}
-	return []dive.Tool{
-		grok.NewWebSearchTool(grok.WebSearchToolOptions{}),
-		grok.NewXSearchTool(grok.XSearchToolOptions{}),
+	var tools []dive.Tool
+	if ws, err := grok.NewWebSearchTool(grok.WebSearchToolOptions{}); err == nil {
+		tools = append(tools, ws)
 	}
+	if xs, err := grok.NewXSearchTool(grok.XSearchToolOptions{}); err == nil {
+		tools = append(tools, xs)
+	}
+	return tools
 }

@@ -3,6 +3,7 @@ package grok
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -12,7 +13,7 @@ import (
 )
 
 var (
-	_ llm.Tool                          = &WebSearchTool{}
+	_ llm.Tool                             = &WebSearchTool{}
 	_ openaiProvider.ResponsesToolProvider = &WebSearchTool{}
 )
 
@@ -30,13 +31,30 @@ type WebSearchToolOptions struct {
 	EnableImageUnderstanding bool
 }
 
+func (o WebSearchToolOptions) validate() error {
+	if len(o.AllowedDomains) > 0 && len(o.ExcludedDomains) > 0 {
+		return fmt.Errorf("AllowedDomains and ExcludedDomains cannot both be set")
+	}
+	if len(o.AllowedDomains) > 5 {
+		return fmt.Errorf("AllowedDomains exceeds maximum of 5 (got %d)", len(o.AllowedDomains))
+	}
+	if len(o.ExcludedDomains) > 5 {
+		return fmt.Errorf("ExcludedDomains exceeds maximum of 5 (got %d)", len(o.ExcludedDomains))
+	}
+	return nil
+}
+
 // NewWebSearchTool creates a new Grok WebSearchTool with the given options.
-func NewWebSearchTool(opts WebSearchToolOptions) *WebSearchTool {
+// Returns an error if the options are invalid.
+func NewWebSearchTool(opts WebSearchToolOptions) (*WebSearchTool, error) {
+	if err := opts.validate(); err != nil {
+		return nil, fmt.Errorf("invalid WebSearchToolOptions: %w", err)
+	}
 	return &WebSearchTool{
 		allowedDomains:           opts.AllowedDomains,
 		excludedDomains:          opts.ExcludedDomains,
 		enableImageUnderstanding: opts.EnableImageUnderstanding,
-	}
+	}, nil
 }
 
 // WebSearchTool is a server-side tool that enables Grok to search the web.
