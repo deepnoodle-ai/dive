@@ -1,4 +1,7 @@
-# Skills Guide
+# Skills Guide (Deprecated)
+
+> **Deprecated**: This experimental package has been promoted to `skill/`.
+> See the [production Skills Guide](../skills.md) instead.
 
 > **Experimental**: This package is in `experimental/skill/`. The API may change.
 

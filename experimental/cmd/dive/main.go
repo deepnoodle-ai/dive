@@ -15,7 +15,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/experimental/slashcmd"
+	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
@@ -237,18 +237,18 @@ func runInteractive(ctx *cli.Context) error {
 		}
 	}
 
-	// Load slash commands
-	commandLoader := slashcmd.NewLoader(slashcmd.LoaderOptions{
+	// Load skills and slash commands
+	skillLoader := skill.NewLoader(skill.LoaderOptions{
 		ProjectDir: workspaceDir,
 	})
-	_ = commandLoader.LoadCommands() // Ignore errors, commands are optional
+	_ = skillLoader.Load(bgCtx) // Ignore errors, skills are optional
 
 	// Create model settings
 	temperature := ctx.Float64("temperature")
 	maxTokens := ctx.Int("max-tokens")
 
-	// Create agent with hooks
-	agent, err := dive.NewAgent(dive.AgentOptions{
+	// Create agent options with hooks
+	agentOpts := dive.AgentOptions{
 		SystemPrompt: systemPrompt,
 		Model:        model,
 		Tools:        tools,
@@ -259,7 +259,12 @@ func runInteractive(ctx *cli.Context) error {
 		Hooks: dive.Hooks{
 			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
-	})
+	}
+
+	// Configure skills (adds tool, toolset, catalog hook, rules)
+	skill.ConfigureAgent(&agentOpts, skillLoader, skill.WithConfigShellExpansion(true))
+
+	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
 	}
@@ -273,7 +278,7 @@ func runInteractive(ctx *cli.Context) error {
 		initialPrompt,
 		compactionConfig,
 		resumeSessionID,
-		commandLoader,
+		skillLoader,
 	)
 	app.currentSession = currentSession
 

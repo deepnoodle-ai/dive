@@ -1,3 +1,6 @@
+// Deprecated: Use github.com/deepnoodle-ai/dive/skill instead.
+// Skills and slash commands are now unified in the skill package.
+//
 // Package slashcmd provides support for Claude-compatible slash commands.
 //
 // Slash commands are user-invocable actions defined in markdown files with

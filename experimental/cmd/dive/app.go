@@ -14,7 +14,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/experimental/slashcmd"
+	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/wonton/tui"
@@ -195,7 +195,7 @@ type App struct {
 	sessionStore  session.Store
 	workspaceDir  string
 	modelName     string
-	commandLoader *slashcmd.Loader
+	skillLoader *skill.Loader
 
 	// Session management
 	resumeSessionID string           // Session ID to resume (from --resume flag)
@@ -272,7 +272,7 @@ func NewApp(
 	initialPrompt string,
 	compactionConfig *compaction.CompactionConfig,
 	resumeSessionID string,
-	commandLoader *slashcmd.Loader,
+	skillLoader *skill.Loader,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -292,7 +292,7 @@ func NewApp(
 		workspaceDir:     workspaceDir,
 		modelName:        modelName,
 		resumeSessionID:  resumeSessionID,
-		commandLoader:    commandLoader,
+		skillLoader:      skillLoader,
 		messages:         make([]Message, 0),
 		toolCallIndex:    make(map[string]int),
 		toolTitles:       toolTitles,
@@ -1630,15 +1630,18 @@ func (a *App) handleCommand(input string) bool {
 		return true
 	}
 
-	// Check for custom slash commands
-	if a.commandLoader != nil {
-		if cmd, ok := a.commandLoader.GetCommand(cmdName); ok {
-			// Expand argument placeholders
-			expanded := cmd.ExpandArguments(cmdArgs)
+	// Check for custom slash commands and skills
+	if a.skillLoader != nil {
+		if cmd, ok := a.skillLoader.Get(cmdName); ok {
+			// Expand argument placeholders (with shell expansion for local skills)
+			expanded, expandErr := cmd.Expand(context.Background(), cmdArgs, skill.WithShellExpansion(true))
+			if expandErr != nil {
+				a.runner.Printf("Warning: expansion error: %v", expandErr)
+			}
 
 			// Warn about unsupported model override (agent doesn't support per-request model changes)
-			if cmd.Model != "" {
-				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Model)
+			if cmd.Config.Model != "" {
+				a.runner.Printf("Note: Model override '%s' specified but not yet supported in CLI", cmd.Config.Model)
 			}
 
 			// Build display text with command name and args
@@ -1738,15 +1741,15 @@ func (a *App) printHelp() {
 	}
 
 	// List custom commands if any
-	if a.commandLoader != nil && a.commandLoader.CommandCount() > 0 {
+	if a.skillLoader != nil && a.skillLoader.Count() > 0 {
 		views = append(views,
 			tui.Text(""),
-			tui.Text("Custom Commands:").Bold(),
+			tui.Text("Custom Commands & Skills:").Bold(),
 		)
-		for _, cmd := range a.commandLoader.ListCommands() {
+		for _, cmd := range a.skillLoader.List() {
 			line := fmt.Sprintf("  /%s", cmd.Name)
-			if cmd.ArgumentHint != "" {
-				line += " " + cmd.ArgumentHint
+			if cmd.Config.ArgumentHint != "" {
+				line += " " + cmd.Config.ArgumentHint
 			}
 			views = append(views, tui.Text("%s", line))
 			if cmd.Description != "" {
@@ -2083,8 +2086,8 @@ func (a *App) getCommandMatches(prefix string) []string {
 	}
 
 	// Add matching custom commands from loader
-	if a.commandLoader != nil {
-		for _, cmd := range a.commandLoader.ListCommands() {
+	if a.skillLoader != nil {
+		for _, cmd := range a.skillLoader.List() {
 			if strings.HasPrefix(cmd.Name, prefix) {
 				matches = append(matches, cmd.Name)
 			}

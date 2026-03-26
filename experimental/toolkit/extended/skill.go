@@ -39,6 +39,8 @@ type SkillToolOptions struct {
 	Loader *skill.Loader
 }
 
+// Deprecated: Use github.com/deepnoodle-ai/dive/skill.NewTool instead.
+//
 // SkillTool is an agent tool that activates skills on demand.
 //
 // When invoked, the tool returns the skill's instructions as markdown text,
