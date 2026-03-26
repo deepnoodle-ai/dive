@@ -64,7 +64,7 @@ func (p *MediaProvider) GenerateImage(ctx context.Context, prompt string, config
 		return nil, fmt.Errorf("no images in response")
 	}
 
-	return decodeGrokImageResults(resp.Data, model)
+	return decodeGrokImageResults(ctx, resp.Data, model)
 }
 
 // GenerateVideo implements media.VideoProvider.
@@ -133,7 +133,7 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 
 // decodeGrokImageResults extracts image data from xAI response items.
 // Handles both base64 and URL response formats.
-func decodeGrokImageResults(data []openai.Image, model string) ([]*media.ImageResult, error) {
+func decodeGrokImageResults(ctx context.Context, data []openai.Image, model string) ([]*media.ImageResult, error) {
 	var results []*media.ImageResult
 	for _, item := range data {
 		var imageData []byte
@@ -146,7 +146,7 @@ func decodeGrokImageResults(data []openai.Image, model string) ([]*media.ImageRe
 				return nil, fmt.Errorf("decoding image data: %w", err)
 			}
 		case item.URL != "":
-			imageData, err = downloadURL(item.URL)
+			imageData, err = downloadURL(ctx, item.URL)
 			if err != nil {
 				return nil, fmt.Errorf("downloading image from URL: %w", err)
 			}
@@ -176,9 +176,16 @@ func decodeGrokImageResults(data []openai.Image, model string) ([]*media.ImageRe
 	return results, nil
 }
 
-// downloadURL fetches image data from a URL.
-func downloadURL(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+// downloadURL fetches image data from a URL with context and size limits.
+func downloadURL(ctx context.Context, url string) ([]byte, error) {
+	const maxImageSize = 50 * 1024 * 1024 // 50 MB
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +193,7 @@ func downloadURL(url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d fetching image", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, maxImageSize))
 }
 
 // grokDurationToSeconds converts a time.Duration to a seconds string for the
