@@ -31,9 +31,9 @@ func diveMarkdownTheme() tui.MarkdownTheme {
 // statusLineView renders the status line above the input area.
 // Shows: model name, directory, git branch, context %, elapsed time.
 func (a *App) statusLineView() tui.View {
-	accentColor := tui.RGB{R: 80, G: 200, B: 235}
+	accentColor := tui.RGB{R: 100, G: 160, B: 180}
 	mutedColor := tui.RGB{R: 100, G: 100, B: 110}
-	accentStyle := tui.NewStyle().WithFgRGB(accentColor).WithBold()
+	accentStyle := tui.NewStyle().WithFgRGB(accentColor)
 	mutedStyle := tui.NewStyle().WithFgRGB(mutedColor)
 
 	// Line 1: model in directory on branch
@@ -62,17 +62,18 @@ func (a *App) statusLineView() tui.View {
 		contextPct := a.contextPercent()
 		barColor := accentColor
 		if contextPct > 75 {
-			barColor = tui.RGB{R: 255, G: 180, B: 60}
+			barColor = tui.RGB{R: 200, G: 150, B: 60}
 		}
 		if contextPct > 90 {
-			barColor = tui.RGB{R: 255, G: 80, B: 80}
+			barColor = tui.RGB{R: 200, G: 70, B: 70}
 		}
 		bar := tui.Progress(contextPct, 100).
 			Width(20).
+			HidePercent().
 			Style(tui.NewStyle().WithFgRGB(barColor)).
-			EmptyStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 60, G: 60, B: 65})).
-			PercentStyle(tui.NewStyle().WithFgRGB(barColor))
+			EmptyStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 80, G: 80, B: 90}))
 		line2Parts = append(line2Parts, bar)
+		line2Parts = append(line2Parts, tui.Text(" %d%%", contextPct).Style(mutedStyle))
 	}
 
 	// Only show line 2 if there's content beyond the leading space
@@ -106,15 +107,6 @@ func (a *App) modelDisplayName() string {
 		name = "Haiku 3.5"
 	}
 
-	// Add context window size
-	if a.contextWindowMax > 0 {
-		switch {
-		case a.contextWindowMax >= 1_000_000:
-			name += fmt.Sprintf(" (%dM context)", a.contextWindowMax/1_000_000)
-		case a.contextWindowMax >= 1_000:
-			name += fmt.Sprintf(" (%dk context)", a.contextWindowMax/1_000)
-		}
-	}
 	return name
 }
 
