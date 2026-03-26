@@ -1,4 +1,7 @@
-# Slash Commands Guide
+# Slash Commands Guide (Deprecated)
+
+> **Deprecated**: This experimental package has been superseded by `skill/`.
+> Skills and slash commands are now unified. See the [production Skills Guide](../skills.md) instead.
 
 > **Experimental**: This package is in `experimental/slashcmd/`. The API may change.
 

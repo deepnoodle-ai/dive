@@ -27,7 +27,8 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - `providers/` — LLM providers (Anthropic, OpenAI, Google, Grok, Mistral, Ollama, OpenRouter). Registry-based (`providers/registry.go`), self-registering via `init()`.
 - `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser).
 - `permission/` — Rule-based tool permission management with modes, specifier patterns, and session allowlists.
-- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, skill, slashcmd, subagent, compaction, todo, toolkit.
+- `skill/` — Unified skills and slash commands. `skill.ConfigureAgent(&opts, loader)` wires up the Skill tool, catalog hook, and content hook. Three-layer architecture: rules in system prompt, catalog as `<system-reminder name="skills">` in first user message, tool as trigger with content via PostToolUseHook. Provider-based loading (filesystem, `.agents/skills/`), variable expansion, trigger matching. `dive.SetSystemReminder` manages named blocks in conversation context.
+- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, subagent, compaction, todo, toolkit. Note: `experimental/skill/` and `experimental/slashcmd/` are deprecated in favor of `skill/`.
 
 ### Design Philosophy
 

@@ -26,6 +26,11 @@ type PathValidator struct {
 	// WorkspaceDir is the resolved absolute path to the workspace root.
 	// All validated paths must be within this directory tree.
 	WorkspaceDir string
+
+	// ReadAllowedPaths contains additional resolved absolute paths
+	// where read access is permitted. Used to allow reading skill
+	// reference files outside the workspace.
+	ReadAllowedPaths []string
 }
 
 // NewPathValidator creates a PathValidator with the given workspace directory.
@@ -140,8 +145,27 @@ func (v *PathValidator) IsInWorkspace(path string) (bool, error) {
 	return true, nil
 }
 
+// AllowReadPath adds a directory path where read access is permitted.
+// The path is resolved to an absolute, symlink-free form. This is used
+// to allow reading skill reference files that live outside the workspace.
+func (v *PathValidator) AllowReadPath(dir string) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+	realDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to resolve symlinks: %w", err)
+		}
+		realDir = absDir
+	}
+	v.ReadAllowedPaths = append(v.ReadAllowedPaths, realDir)
+	return nil
+}
+
 // ValidateRead checks if reading from the given path is allowed.
-// By default, reads within the workspace are allowed.
+// Reads within the workspace or any ReadAllowedPaths are permitted.
 // Returns nil if allowed, or an error describing why access is denied.
 func (v *PathValidator) ValidateRead(path string) error {
 	inWorkspace, err := v.IsInWorkspace(path)
@@ -149,16 +173,39 @@ func (v *PathValidator) ValidateRead(path string) error {
 		return fmt.Errorf("failed to validate path: %w", err)
 	}
 
-	if !inWorkspace {
-		return &PathAccessError{
-			Path:      path,
-			Operation: "read",
-			Reason:    "path is outside workspace",
-			Workspace: v.WorkspaceDir,
-		}
+	if inWorkspace {
+		return nil
 	}
 
-	return nil
+	// Check additional read-allowed paths
+	if v.isInReadAllowedPath(path) {
+		return nil
+	}
+
+	return &PathAccessError{
+		Path:      path,
+		Operation: "read",
+		Reason:    "path is outside workspace",
+		Workspace: v.WorkspaceDir,
+	}
+}
+
+// isInReadAllowedPath checks if a path is under any of the read-allowed directories.
+func (v *PathValidator) isInReadAllowedPath(path string) bool {
+	realPath, err := v.ResolvePath(path)
+	if err != nil {
+		return false
+	}
+	for _, allowed := range v.ReadAllowedPaths {
+		rel, err := filepath.Rel(allowed, realPath)
+		if err != nil {
+			continue
+		}
+		if !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." && !filepath.IsAbs(rel) {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateWrite checks if writing to the given path is allowed.

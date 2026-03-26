@@ -44,7 +44,13 @@ type ReadFileToolOptions struct {
 
 	// WorkspaceDir restricts file reads to paths within this directory.
 	// Defaults to the current working directory if empty.
+	// Ignored when Validator is set.
 	WorkspaceDir string
+
+	// Validator is an optional shared PathValidator. When set, it is used
+	// instead of creating one from WorkspaceDir. This allows a single
+	// validator (with additional read-allowed paths) to be shared across tools.
+	Validator *PathValidator
 }
 
 // ReadFileTool reads file contents from the filesystem.
@@ -73,7 +79,9 @@ func NewReadFileTool(opts ...ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFi
 		options.MaxSize = DefaultReadFileMaxSize
 	}
 	var pathValidator *PathValidator
-	if options.WorkspaceDir != "" {
+	if options.Validator != nil {
+		pathValidator = options.Validator
+	} else if options.WorkspaceDir != "" {
 		pathValidator, _ = NewPathValidator(options.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&ReadFileTool{

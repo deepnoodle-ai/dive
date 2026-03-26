@@ -973,7 +973,7 @@ func (a *Agent) executeTool(
 		}
 	}()
 
-	output, err := tool.Call(ctx, input)
+	output, err := tool.Call(WithToolCallID(ctx, call.ID), input)
 	if err != nil {
 		return &ToolCallResult{
 			ID:      call.ID,

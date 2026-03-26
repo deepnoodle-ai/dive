@@ -52,7 +52,12 @@ type BashToolOptions struct {
 	// WorkspaceDir restricts command execution to paths within this directory.
 	// When set, the working directory must be within this path.
 	// Defaults to the current working directory if empty.
+	// Ignored when Validator is set.
 	WorkspaceDir string
+
+	// Validator is an optional shared PathValidator. When set, it is used
+	// instead of creating one from WorkspaceDir.
+	Validator *PathValidator
 
 	// MaxOutputLength limits the combined stdout/stderr output size in characters.
 	// Output exceeding this limit is truncated with a warning.
@@ -92,9 +97,15 @@ func NewBashTool(opts ...BashToolOptions) *dive.TypedToolAdapter[*BashInput] {
 		resolvedOpts.MaxOutputLength = DefaultMaxOutputLength
 	}
 
-	pathValidator, configErr := NewPathValidator(resolvedOpts.WorkspaceDir)
-	if configErr != nil {
-		configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+	var pathValidator *PathValidator
+	var configErr error
+	if resolvedOpts.Validator != nil {
+		pathValidator = resolvedOpts.Validator
+	} else {
+		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		}
 	}
 
 	return dive.ToolAdapter(&BashTool{

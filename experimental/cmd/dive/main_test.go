@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -70,7 +71,9 @@ func TestGetDefaultModel(t *testing.T) {
 
 func TestCreateTools(t *testing.T) {
 	workspaceDir := t.TempDir()
-	tools := createTools(workspaceDir, nil)
+	v, err := toolkit.NewPathValidator(workspaceDir)
+	assert.NoError(t, err)
+	tools := createTools(v, nil)
 
 	// Verify we have some basic tools
 	assert.True(t, len(tools) > 0, "should create at least some tools")
@@ -91,7 +94,9 @@ func TestCreateTools(t *testing.T) {
 
 func TestDefaultPermissionRules_AllowsReadOnlyToolsByDefault(t *testing.T) {
 	workspaceDir := t.TempDir()
-	tools := createTools(workspaceDir, nil)
+	v, err := toolkit.NewPathValidator(workspaceDir)
+	assert.NoError(t, err)
+	tools := createTools(v, nil)
 	rules := defaultPermissionRules(tools)
 
 	allowed := map[string]bool{}

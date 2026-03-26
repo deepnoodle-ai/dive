@@ -44,7 +44,12 @@ type EditToolOptions struct {
 
 	// WorkspaceDir restricts file edits to paths within this directory.
 	// Defaults to the current working directory if empty.
+	// Ignored when Validator is set.
 	WorkspaceDir string
+
+	// Validator is an optional shared PathValidator. When set, it is used
+	// instead of creating one from WorkspaceDir.
+	Validator *PathValidator
 }
 
 // EditTool performs exact string replacements in files.
@@ -78,7 +83,9 @@ func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 		resolvedOpts.MaxFileSize = 10 * 1024 * 1024 // 10MB
 	}
 	var pathValidator *PathValidator
-	if resolvedOpts.WorkspaceDir != "" {
+	if resolvedOpts.Validator != nil {
+		pathValidator = resolvedOpts.Validator
+	} else if resolvedOpts.WorkspaceDir != "" {
 		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&EditTool{

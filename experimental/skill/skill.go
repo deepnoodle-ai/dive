@@ -1,3 +1,5 @@
+// Deprecated: Use github.com/deepnoodle-ai/dive/skill instead.
+//
 // Package skill provides support for Claude-compatible Agent Skills.
 //
 // Skills are modular capabilities that extend agent functionality through

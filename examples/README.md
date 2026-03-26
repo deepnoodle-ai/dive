@@ -24,6 +24,7 @@ cd examples
 | `google_tool_example` | Google | Gemini with tool calling |
 | `ollama_example` | Ollama | Local model usage |
 | `openrouter_example` | OpenRouter | Multi-provider routing |
+| `skills_example` | Anthropic | Agent with skill loading and auto-invocation |
 | `oauth_client` | — | OAuth client credential flow |
 
 Run any example with `go run`:

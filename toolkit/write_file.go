@@ -26,7 +26,12 @@ type WriteFileInput struct {
 type WriteFileToolOptions struct {
 	// WorkspaceDir restricts file writes to paths within this directory.
 	// Defaults to the current working directory if empty.
+	// Ignored when Validator is set.
 	WorkspaceDir string
+
+	// Validator is an optional shared PathValidator. When set, it is used
+	// instead of creating one from WorkspaceDir.
+	Validator *PathValidator
 }
 
 // WriteFileTool writes content to files on the filesystem.
@@ -52,7 +57,9 @@ func NewWriteFileTool(opts ...WriteFileToolOptions) *dive.TypedToolAdapter[*Writ
 		options = opts[0]
 	}
 	var pathValidator *PathValidator
-	if options.WorkspaceDir != "" {
+	if options.Validator != nil {
+		pathValidator = options.Validator
+	} else if options.WorkspaceDir != "" {
 		pathValidator, _ = NewPathValidator(options.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&WriteFileTool{
