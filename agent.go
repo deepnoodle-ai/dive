@@ -209,6 +209,21 @@ func (a *Agent) Model() llm.LLM {
 	return a.model
 }
 
+// SetModel replaces the agent's LLM. This allows switching models mid-session.
+func (a *Agent) SetModel(model llm.LLM) {
+	a.model = model
+}
+
+// SystemPrompt returns the agent's current system prompt.
+func (a *Agent) SystemPrompt() string {
+	return a.systemPrompt
+}
+
+// SetSystemPrompt replaces the agent's system prompt.
+func (a *Agent) SetSystemPrompt(prompt string) {
+	a.systemPrompt = prompt
+}
+
 func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
 	var options CreateResponseOptions
 	options.Apply(opts)

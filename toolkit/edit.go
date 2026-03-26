@@ -376,35 +376,35 @@ func (t *EditTool) generateDiff(oldContent, newContent, oldString, newString str
 
 	// Write context before
 	for i := start; i < newStartLine && lineCount < maxDiffLines; i++ {
-		diff.WriteString(fmt.Sprintf("    %4d  %s\n", i+1, truncateLine(contentLines[i])))
+		diff.WriteString(fmt.Sprintf("%5d   %s\n", i+1, truncateLine(contentLines[i])))
 		lineCount++
 	}
 
 	// Write removed lines (from old string)
 	for i, line := range oldLines {
 		if lineCount >= maxDiffLines {
-			diff.WriteString(fmt.Sprintf("    ... %d more lines omitted\n", len(oldLines)-i))
+			diff.WriteString(fmt.Sprintf("        ... %d more lines omitted\n", len(oldLines)-i))
 			break
 		}
 		lineNo := newStartLine + i + 1
-		diff.WriteString(fmt.Sprintf("  - %4d  %s\n", lineNo, truncateLine(line)))
+		diff.WriteString(fmt.Sprintf("%5d - %s\n", lineNo, truncateLine(line)))
 		lineCount++
 	}
 
 	// Write added lines (from new string)
 	for i, line := range newLines {
 		if lineCount >= maxDiffLines {
-			diff.WriteString(fmt.Sprintf("    ... %d more lines omitted\n", len(newLines)-i))
+			diff.WriteString(fmt.Sprintf("        ... %d more lines omitted\n", len(newLines)-i))
 			break
 		}
 		lineNo := newStartLine + i + 1
-		diff.WriteString(fmt.Sprintf("  + %4d  %s\n", lineNo, truncateLine(line)))
+		diff.WriteString(fmt.Sprintf("%5d + %s\n", lineNo, truncateLine(line)))
 		lineCount++
 	}
 
 	// Write context after
 	for i := newStartLine + len(newLines); i < end && lineCount < maxDiffLines; i++ {
-		diff.WriteString(fmt.Sprintf("    %4d  %s\n", i+1, truncateLine(contentLines[i])))
+		diff.WriteString(fmt.Sprintf("%5d   %s\n", i+1, truncateLine(contentLines[i])))
 		lineCount++
 	}
 
