@@ -259,6 +259,30 @@ agent.CreateResponse(ctx,
 )
 ```
 
+### Skills
+
+Skills are modular, markdown-based capabilities that extend agent behavior.
+Place skill files in `.dive/skills/`, `.claude/skills/`, or `~/.dive/skills/`
+and they're discovered automatically. Skills can be invoked by the agent
+(auto-triggered) or by users via `/name` syntax.
+
+```go
+loader := skill.NewLoader(skill.LoaderOptions{ProjectDir: "."})
+loader.Load(ctx)
+
+opts := dive.AgentOptions{
+    Model: anthropic.New(),
+    Tools: tools,
+}
+skill.ConfigureAgent(&opts, loader)
+
+agent, _ := dive.NewAgent(opts)
+```
+
+`ConfigureAgent` wires up the Skill tool, catalog injection, and system prompt
+rules. See the [Skills Guide](./docs/guides/skills.md) for file format, variable
+expansion, trigger matching, and provider extensibility.
+
 ## Experimental Features
 
 Packages under `experimental/*` have no stability guarantees. APIs may change at
@@ -268,8 +292,6 @@ any time.
 - **Subagent** — Spawn specialized child agents for subtasks
 - **Sandbox** — Docker/Seatbelt isolation for tool execution
 - **MCP** — Model Context Protocol client for external tools
-- **Skills** — Markdown-based skill loading system
-- **Slash Commands** — User-defined CLI commands
 - **Settings** — Load configuration from `.dive/settings.json`
 - **Todo** — Real-time todo list tracking during agent execution
 - **Toolkit** — Additional tool packages (extended, firecrawl, google, kagi)
@@ -306,6 +328,7 @@ go run ./openai_responses_example
 - [LLM Guide](./docs/guides/llm-guide.md) — Direct model access without the agent loop
 - [Tools Overview](./docs/guides/tools.md) — Built-in toolkit reference
 - [Permissions](./docs/guides/permissions.md) — Rule-based tool permission management
+- [Skills](./docs/guides/skills.md) — Modular agent capabilities and slash commands
 - [llms.txt](./llms.txt) — AI-optimized reference for agents developing with Dive
 
 ## See Also
