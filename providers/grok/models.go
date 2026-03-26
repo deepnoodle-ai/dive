@@ -2,9 +2,9 @@ package grok
 
 const (
 	// Grok 4.20 models (latest, 2M context)
-	ModelGrok420Reasoning      = "grok-4.20-0309-reasoning"
-	ModelGrok420NonReasoning   = "grok-4.20-0309-non-reasoning"
-	ModelGrok420MultiAgent     = "grok-4.20-multi-agent-0309"
+	ModelGrok420Reasoning    = "grok-4.20-0309-reasoning"
+	ModelGrok420NonReasoning = "grok-4.20-0309-non-reasoning"
+	ModelGrok420MultiAgent   = "grok-4.20-multi-agent-0309"
 
 	// Grok 4.1 models (2M context)
 	ModelGrok41FastReasoning    = "grok-4-1-fast-reasoning"
@@ -24,6 +24,13 @@ const (
 
 	// Specialized models (256K context)
 	ModelGrokCodeFast1 = "grok-code-fast-1"
+
+	// Image generation models
+	ModelImagineImagePro = "grok-imagine-image-pro"
+	ModelImagineImage    = "grok-imagine-image"
+
+	// Video generation model
+	ModelImagineVideo = "grok-imagine-video"
 
 	// Deprecated: No longer listed in xAI docs.
 	ModelGrok2Vision1212 = "grok-2-vision-1212"

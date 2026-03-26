@@ -31,6 +31,55 @@ func main() {
 		Description("Interactive AI assistant for coding tasks").
 		Version("0.1.0")
 
+	// Image generation subcommand
+	app.Command("image").
+		Description("Generate an image from a text prompt").
+		Args("prompt").
+		Flags(
+			cli.String("model", "m").
+				Default("").
+				Help("Model to use (default: gpt-image-1)"),
+			cli.String("aspect", "").
+				Default("").
+				Help("Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4"),
+			cli.String("format", "").
+				Default("").
+				Help("Output format: png, jpeg, webp"),
+			cli.String("out", "o").
+				Default("").
+				Help("Output file path (auto-generated from prompt if omitted)"),
+			cli.Int("count", "n").
+				Default(1).
+				Help("Number of images to generate"),
+			cli.Bool("open", "").
+				Default(false).
+				Help("Open result in default viewer"),
+		).
+		Run(runImage)
+
+	// Video generation subcommand
+	app.Command("video").
+		Description("Generate a video from a text prompt").
+		Args("prompt").
+		Flags(
+			cli.String("model", "m").
+				Default("").
+				Help("Model to use (default: veo-3.1-generate-preview)"),
+			cli.String("aspect", "").
+				Default("").
+				Help("Aspect ratio: 16:9, 9:16, 1:1"),
+			cli.String("duration", "d").
+				Default("8s").
+				Help("Video duration: 4s, 8s, 12s"),
+			cli.String("out", "o").
+				Default("").
+				Help("Output file path"),
+			cli.Bool("open", "").
+				Default(false).
+				Help("Open result in default viewer"),
+		).
+		Run(runVideo)
+
 	app.Main().
 		Flags(
 			cli.String("model", "m").
@@ -746,6 +795,20 @@ func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
 		}))
 	}
 
+	// Add image generation tool using the best available provider
+	if imageModel := getDefaultImageModel(); imageModel != "" {
+		tools = append(tools, toolkit.NewImageGenerationTool(imageModel,
+			toolkit.WithImageToolWorkDir(workspaceDir),
+		))
+	}
+
+	// Add video generation tool using the best available provider
+	if videoModel := getDefaultVideoModel(); videoModel != "" {
+		tools = append(tools, toolkit.NewVideoGenerationTool(videoModel,
+			toolkit.WithVideoToolWorkDir(workspaceDir),
+		))
+	}
+
 	return tools
 }
 
@@ -773,6 +836,32 @@ func defaultPermissionRules(tools []dive.Tool) permission.Rules {
 	}
 
 	return rules
+}
+
+func getDefaultImageModel() string {
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		return "gpt-image-1"
+	}
+	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
+		return "imagen-4.0-generate-001"
+	}
+	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
+		return "grok-imagine-image"
+	}
+	return ""
+}
+
+func getDefaultVideoModel() string {
+	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
+		return "veo-3.1-generate-preview"
+	}
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		return "sora-2"
+	}
+	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
+		return "grok-imagine-video"
+	}
+	return ""
 }
 
 func getDefaultModel() string {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -922,7 +923,7 @@ func (a *App) submitInput(value string) {
 // Sends events to the main event loop instead of modifying state directly.
 func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 	// Expand file references (uses only immutable workspaceDir)
-	expanded, err := a.expandFileReferences(input)
+	expanded, extraContent, err := a.expandFileReferences(input)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
 	}
@@ -932,7 +933,7 @@ func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 
 	// Send start event to set up state in the main goroutine
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: input, expanded: expanded})
-	a.runAgent(expanded)
+	a.runAgent(expanded, extraContent)
 }
 
 // processCommandAsync handles slash command processing in background.
@@ -940,7 +941,7 @@ func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 // expanded is the full prompt to send to the agent
 func (a *App) processCommandAsync(displayText, expanded string, includeStartupAttachment bool) {
 	// Expand file references in the expanded text
-	expandedWithFiles, err := a.expandFileReferences(expanded)
+	expandedWithFiles, extraContent, err := a.expandFileReferences(expanded)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
 	}
@@ -950,19 +951,32 @@ func (a *App) processCommandAsync(displayText, expanded string, includeStartupAt
 
 	// Send start event with display text, but send expanded text to agent
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: displayText, expanded: expandedWithFiles})
-	a.runAgent(expandedWithFiles)
+	a.runAgent(expandedWithFiles, extraContent)
 }
 
-// runAgent runs the agent with the given input
-func (a *App) runAgent(expanded string) {
+// runAgent runs the agent with the given input. If extra content blocks are
+// provided (images, documents, etc.), they are sent as native content blocks
+// alongside the text in a single user message.
+func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 
 	// Track the last usage from the final LLM call (for accurate context size)
 	// resp.Usage is accumulated across tool iterations which inflates context size
 	var lastUsage *llm.Usage
 
+	// Build the input option: use WithMessages when extra content blocks are
+	// present so they are sent as native content blocks rather than text.
+	var inputOpt dive.CreateResponseOption
+	if len(extraContent) > 0 {
+		content := []llm.Content{&llm.TextContent{Text: expanded}}
+		content = append(content, extraContent...)
+		inputOpt = dive.WithMessages(llm.NewUserMessage(content...))
+	} else {
+		inputOpt = dive.WithInput(expanded)
+	}
+
 	// Build options for CreateResponse
 	opts := []dive.CreateResponseOption{
-		dive.WithInput(expanded),
+		inputOpt,
 		dive.WithSession(a.currentSession),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
 			// Send events for each agent response item
@@ -1864,12 +1878,43 @@ func (a *App) parseTodoWriteInput(input []byte) {
 	}
 }
 
-// expandFileReferences expands @filepath references in the input to file contents
-func (a *App) expandFileReferences(input string) (string, error) {
+// fileMediaTypes maps file extensions to MIME types for files that should be
+// sent as native content blocks rather than inlined as text.
+var fileMediaTypes = map[string]string{
+	// Images → ImageContent
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	// Documents → DocumentContent (base64)
+	".pdf": "application/pdf",
+	// Videos (base64 — provider support varies)
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	".mov":  "video/quicktime",
+}
+
+// textDocExtensions lists extensions that should be sent as DocumentContent
+// with a text source rather than inlined in the prompt as XML.
+var textDocExtensions = map[string]bool{
+	".csv":  true,
+	".tsv":  true,
+	".xml":  true,
+	".html": true,
+	".htm":  true,
+}
+
+// expandFileReferences expands @filepath references in the input.
+// Text files are inlined as XML tags in the returned string. Images, PDFs,
+// videos, and structured text files are returned as separate content blocks
+// for native API support.
+func (a *App) expandFileReferences(input string) (string, []llm.Content, error) {
 	// Match @ followed by path characters (exclude common punctuation that might follow)
 	re := regexp.MustCompile(`@([^\s@]+)`)
 
 	var lastErr error
+	var contentBlocks []llm.Content
 	result := re.ReplaceAllStringFunc(input, func(match string) string {
 		path := match[1:] // Remove @
 
@@ -1897,18 +1942,70 @@ func (a *App) expandFileReferences(input string) (string, error) {
 			return match
 		}
 
-		// Read file
-		content, err := os.ReadFile(fullPath)
+		// Guard against reading excessively large files into memory.
+		const maxFileSize = 100 * 1024 * 1024 // 100 MB
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			lastErr = fmt.Errorf("cannot stat %s: %w", path, err)
+			return match
+		}
+		if info.Size() > maxFileSize {
+			lastErr = fmt.Errorf("file too large to attach: %s (%s)", path, formatBytes(int(info.Size())))
+			return match
+		}
+
+		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			lastErr = fmt.Errorf("cannot read %s: %w", path, err)
 			return match
 		}
 
-		// Format as XML-style tag, preserving trailing punctuation
-		return fmt.Sprintf("\n<file path=\"%s\">\n%s\n</file>%s\n", path, string(content), trailing)
+		ext := strings.ToLower(filepath.Ext(path))
+		filename := filepath.Base(path)
+
+		// Images → ImageContent
+		if mediaType, ok := fileMediaTypes[ext]; ok && strings.HasPrefix(mediaType, "image/") {
+			contentBlocks = append(contentBlocks, &llm.ImageContent{
+				Source: &llm.ContentSource{
+					Type:      llm.ContentSourceTypeBase64,
+					MediaType: mediaType,
+					Data:      base64.StdEncoding.EncodeToString(data),
+				},
+			})
+			return fmt.Sprintf("[image: %s]%s", path, trailing)
+		}
+
+		// PDFs and videos → DocumentContent (base64)
+		if mediaType, ok := fileMediaTypes[ext]; ok {
+			contentBlocks = append(contentBlocks, &llm.DocumentContent{
+				Source: &llm.ContentSource{
+					Type:      llm.ContentSourceTypeBase64,
+					MediaType: mediaType,
+					Data:      base64.StdEncoding.EncodeToString(data),
+				},
+				Title: filename,
+			})
+			return fmt.Sprintf("[document: %s]%s", path, trailing)
+		}
+
+		// Structured text files → DocumentContent (text source)
+		if textDocExtensions[ext] {
+			contentBlocks = append(contentBlocks, &llm.DocumentContent{
+				Source: &llm.ContentSource{
+					Type:      llm.ContentSourceTypeText,
+					MediaType: "text/plain",
+					Data:      string(data),
+				},
+				Title: filename,
+			})
+			return fmt.Sprintf("[document: %s]%s", path, trailing)
+		}
+
+		// Default: inline as XML-style tag
+		return fmt.Sprintf("\n<file path=\"%s\">\n%s\n</file>%s\n", path, string(data), trailing)
 	})
 
-	return result, lastErr
+	return result, contentBlocks, lastErr
 }
 
 // stripTrailingPunctuation removes trailing punctuation from a path and returns both parts

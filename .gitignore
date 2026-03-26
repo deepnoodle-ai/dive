@@ -33,9 +33,12 @@ tmp.json
 /examples/openai_responses_example/openai_responses_example
 /openai_responses_example
 /*.png
+/*.jpg
 *.db-*
 /.vscode
 
 # Local settings (machine-specific)
 .dive/settings.local.json
 /experimental/cmd/dive/dive
+
+/docs/research
