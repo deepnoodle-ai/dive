@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/schema"
 )
@@ -115,7 +116,9 @@ func TestTool_Call(t *testing.T) {
 		loader := setupTestLoader(t)
 		tool := NewTool(loader)
 
-		result, err := tool.Call(ctx, &ToolInput{Skill: "code-reviewer"})
+		// Provide a call ID via context (as the agent would)
+		callCtx := dive.WithToolCallID(ctx, "call-1")
+		result, err := tool.Call(callCtx, &ToolInput{Skill: "code-reviewer"})
 		assert.NoError(t, err)
 		assert.False(t, result.IsError)
 
@@ -123,11 +126,11 @@ func TestTool_Call(t *testing.T) {
 		text := result.Content[0].Text
 		assert.Contains(t, text, "Launching skill: code-reviewer")
 
-		// Full instructions stored as pending for PostToolUse hook
+		// Full instructions stored as pending keyed by call ID
 		loader.mu.RLock()
-		assert.Equal(t, 1, len(loader.pendingInstructions))
-		pending := loader.pendingInstructions[0]
+		pending, ok := loader.pendingInstructions["call-1"]
 		loader.mu.RUnlock()
+		assert.True(t, ok)
 		assert.Contains(t, pending, "Read the target files")
 		assert.Contains(t, pending, "Base directory for this skill:")
 	})
@@ -136,7 +139,8 @@ func TestTool_Call(t *testing.T) {
 		loader := setupTestLoader(t)
 		tool := NewTool(loader)
 
-		result, err := tool.Call(ctx, &ToolInput{
+		callCtx := dive.WithToolCallID(ctx, "call-2")
+		result, err := tool.Call(callCtx, &ToolInput{
 			Skill: "deploy",
 			Args:  "staging",
 		})
@@ -146,9 +150,9 @@ func TestTool_Call(t *testing.T) {
 
 		// Check expanded instructions in pending
 		loader.mu.RLock()
-		assert.Equal(t, 1, len(loader.pendingInstructions))
-		pending := loader.pendingInstructions[0]
+		pending, ok := loader.pendingInstructions["call-2"]
 		loader.mu.RUnlock()
+		assert.True(t, ok)
 		assert.Contains(t, pending, "Deploy to staging environment")
 		assert.Contains(t, pending, "Full args: staging")
 		assert.Contains(t, pending, "**Arguments:** staging")
@@ -216,36 +220,30 @@ func TestTool_ShellExpansionBlockedForHTTPSkills(t *testing.T) {
 				Config:       SkillConfig{Description: "A local skill."},
 			},
 		},
+		pendingInstructions: make(map[string]string),
 	}
 
 	// Shell expansion enabled globally
 	tool := NewTool(loader, WithToolShellExpansion(true))
 
 	// Remote skill: shell expansion should NOT run
-	_, err := tool.Call(context.Background(), &ToolInput{Skill: "remote"})
+	remoteCtx := dive.WithToolCallID(context.Background(), "call-remote")
+	_, err := tool.Call(remoteCtx, &ToolInput{Skill: "remote"})
 	assert.NoError(t, err)
 
 	loader.mu.RLock()
-	assert.Equal(t, 1, len(loader.pendingInstructions))
-	remotePending := loader.pendingInstructions[0]
+	remotePending := loader.pendingInstructions["call-remote"]
 	loader.mu.RUnlock()
-	// The !{...} placeholder should be left unexpanded
 	assert.Contains(t, remotePending, "!{echo SHOULD_NOT_EXECUTE}")
 
-	// Drain the queue
-	loader.mu.Lock()
-	loader.pendingInstructions = nil
-	loader.mu.Unlock()
-
 	// Local skill: shell expansion should run
-	_, err = tool.Call(context.Background(), &ToolInput{Skill: "local"})
+	localCtx := dive.WithToolCallID(context.Background(), "call-local")
+	_, err = tool.Call(localCtx, &ToolInput{Skill: "local"})
 	assert.NoError(t, err)
 
 	loader.mu.RLock()
-	assert.Equal(t, 1, len(loader.pendingInstructions))
-	localPending := loader.pendingInstructions[0]
+	localPending := loader.pendingInstructions["call-local"]
 	loader.mu.RUnlock()
-	// The !{...} placeholder should have been expanded
 	assert.NotContains(t, localPending, "!{echo hello}")
 	assert.Contains(t, localPending, "hello")
 }
@@ -268,34 +266,44 @@ func TestTool_ParallelSkillCalls(t *testing.T) {
 				Config:       SkillConfig{Description: "Skill B."},
 			},
 		},
+		pendingInstructions: make(map[string]string),
 	}
 
 	tool := NewTool(loader)
-	ctx := context.Background()
 
-	// Simulate two parallel Skill tool calls (both push before either hook pops)
-	_, err := tool.Call(ctx, &ToolInput{Skill: "skill-a"})
+	// Simulate two parallel Skill tool calls with different call IDs
+	ctxA := dive.WithToolCallID(context.Background(), "call-a")
+	ctxB := dive.WithToolCallID(context.Background(), "call-b")
+	_, err := tool.Call(ctxA, &ToolInput{Skill: "skill-a"})
 	assert.NoError(t, err)
-	_, err = tool.Call(ctx, &ToolInput{Skill: "skill-b"})
+	_, err = tool.Call(ctxB, &ToolInput{Skill: "skill-b"})
 	assert.NoError(t, err)
 
-	// Both should be queued
+	// Both should be stored keyed by call ID
 	loader.mu.RLock()
 	assert.Equal(t, 2, len(loader.pendingInstructions))
 	loader.mu.RUnlock()
 
-	// First hook pop gets skill-a
+	// Hook pops by call ID — even if B completes first, it gets B's content
 	hook := skillContentHook(loader)
-	hctx1 := &dive.HookContext{Tool: &mockTool{name: "Skill"}}
-	assert.NoError(t, hook(ctx, hctx1))
-	assert.Contains(t, hctx1.AdditionalContext, "Instructions for A.")
 
-	// Second hook pop gets skill-b
-	hctx2 := &dive.HookContext{Tool: &mockTool{name: "Skill"}}
-	assert.NoError(t, hook(ctx, hctx2))
-	assert.Contains(t, hctx2.AdditionalContext, "Instructions for B.")
+	// Pop B first (out of order)
+	hctxB := &dive.HookContext{
+		Tool: &mockTool{name: "Skill"},
+		Call: &llm.ToolUseContent{ID: "call-b"},
+	}
+	assert.NoError(t, hook(context.Background(), hctxB))
+	assert.Contains(t, hctxB.AdditionalContext, "Instructions for B.")
 
-	// Queue is now empty
+	// Pop A second
+	hctxA := &dive.HookContext{
+		Tool: &mockTool{name: "Skill"},
+		Call: &llm.ToolUseContent{ID: "call-a"},
+	}
+	assert.NoError(t, hook(context.Background(), hctxA))
+	assert.Contains(t, hctxA.AdditionalContext, "Instructions for A.")
+
+	// Map is now empty
 	loader.mu.RLock()
 	assert.Equal(t, 0, len(loader.pendingInstructions))
 	loader.mu.RUnlock()

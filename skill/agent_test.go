@@ -22,13 +22,16 @@ func TestSkillContentHook(t *testing.T) {
 
 	hook := skillContentHook(loader)
 
-	t.Run("injects pending instructions", func(t *testing.T) {
+	t.Run("injects pending instructions by call ID", func(t *testing.T) {
 		loader.mu.Lock()
-		loader.pendingInstructions = []string{"# Skill content here"}
+		loader.pendingInstructions = map[string]string{
+			"call-123": "# Skill content here",
+		}
 		loader.mu.Unlock()
 
 		hctx := &dive.HookContext{
 			Tool: &mockTool{name: "Skill"},
+			Call: &llm.ToolUseContent{ID: "call-123"},
 		}
 		assert.NoError(t, hook(context.Background(), hctx))
 		assert.Contains(t, hctx.AdditionalContext, "# Skill content here")
@@ -41,7 +44,9 @@ func TestSkillContentHook(t *testing.T) {
 
 	t.Run("no-op for non-Skill tools", func(t *testing.T) {
 		loader.mu.Lock()
-		loader.pendingInstructions = []string{"should not be consumed"}
+		loader.pendingInstructions = map[string]string{
+			"call-456": "should not be consumed",
+		}
 		loader.mu.Unlock()
 
 		hctx := &dive.HookContext{
@@ -53,8 +58,23 @@ func TestSkillContentHook(t *testing.T) {
 		// Pending should still be there
 		loader.mu.RLock()
 		assert.Equal(t, 1, len(loader.pendingInstructions))
-		assert.Equal(t, "should not be consumed", loader.pendingInstructions[0])
+		assert.Equal(t, "should not be consumed", loader.pendingInstructions["call-456"])
 		loader.mu.RUnlock()
+	})
+
+	t.Run("no-op when Call is nil", func(t *testing.T) {
+		loader.mu.Lock()
+		loader.pendingInstructions = map[string]string{
+			"call-789": "content",
+		}
+		loader.mu.Unlock()
+
+		hctx := &dive.HookContext{
+			Tool: &mockTool{name: "Skill"},
+			Call: nil,
+		}
+		assert.NoError(t, hook(context.Background(), hctx))
+		assert.Equal(t, "", hctx.AdditionalContext)
 	})
 }
 
@@ -106,10 +126,13 @@ func TestConfigureAgent_EmptyLoader(t *testing.T) {
 
 	ConfigureAgent(&opts, loader)
 
-	// Should be a no-op
+	// No Skill tool or system prompt changes when no skills loaded
 	assert.Equal(t, 1, len(opts.Tools)) // Only original tool
 	assert.Equal(t, "Original prompt.", opts.SystemPrompt)
-	assert.Equal(t, 0, len(opts.Hooks.PreGeneration))
+
+	// Hooks are still registered for stale catalog cleanup on session resume
+	assert.Equal(t, 1, len(opts.Hooks.PreGeneration))
+	assert.Equal(t, 1, len(opts.Hooks.PostToolUse))
 }
 
 func TestConfigureAgent_NilLoader(t *testing.T) {
@@ -330,6 +353,25 @@ func TestCatalogHook_EmptySkills(t *testing.T) {
 	}
 	assert.NoError(t, hook(context.Background(), hctx))
 	assert.Equal(t, "Hello", hctx.Messages[0].Content[0].(*llm.TextContent).Text)
+}
+
+func TestCatalogHook_RemovesStaleCatalogOnFreshResume(t *testing.T) {
+	// Simulate: skills were available in a previous process, which wrote
+	// a catalog block. Now skills are gone and a fresh process resumes
+	// the session. lastHash starts empty, but the block is in messages.
+	loader := &Loader{skills: map[string]*Skill{}} // no skills
+
+	// Messages from a previous session with a catalog block
+	existingMsg := llm.NewUserTextMessage("Hello")
+	dive.SetSystemReminder([]*llm.Message{existingMsg}, "skills", "<skills>\n- old-skill: Gone now.\n</skills>")
+	assert.True(t, dive.HasSystemReminder([]*llm.Message{existingMsg}, "skills"))
+
+	hook := catalogHook(loader)
+	hctx := &dive.HookContext{Messages: []*llm.Message{existingMsg}}
+
+	// Hook should remove the stale block even though lastHash is ""
+	assert.NoError(t, hook(context.Background(), hctx))
+	assert.False(t, dive.HasSystemReminder(hctx.Messages, "skills"))
 }
 
 func TestCatalogHook_RemovesOnReloadToEmpty(t *testing.T) {

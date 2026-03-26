@@ -1,7 +1,7 @@
 # Implementation Plan: Production Skills System
 
 **PRD:** [prd-02-skills.md](../prds/prd-02-skills.md)
-**Last Updated:** 2026-03-27
+**Last Updated:** 2026-03-26
 
 ## Overview
 
@@ -17,10 +17,10 @@ Promoted `experimental/skill/` to `skill/` with:
 - Enhanced `Skill` and `SkillConfig` types (all frontmatter fields)
 - Variable expansion (`$ARGUMENTS`, `$1`-`$9`, `!{command}`)
 - Thread-safe Loader with Provider support
-- Provider interface + FilesystemProvider + HTTPProvider
+- Provider interface + FilesystemProvider
 - `.agents/skills/` generic path support (Codex/agentskills.io standard)
 - Merge `experimental/slashcmd/` into unified loading
-- Skill Tool and Toolset
+- Skill Tool
 - Deprecation markers on experimental packages
 - CLI updated to use new package
 
@@ -32,7 +32,7 @@ Aligned with Claude Code's architecture based on direct investigation:
 
 1. **Rules** — skill usage instructions appended to system prompt by `ConfigureAgent`
 2. **Catalog** — skill names/descriptions/triggers injected as `<system-reminder name="skills">` in the **first user message** via `dive.SetSystemReminder`. Stable position for prompt caching.
-3. **Tool** — trigger mechanism. Returns `"Launching skill: X"`. Full content delivered via PostToolUseHook as `AdditionalContext` on the tool result message.
+3. **Tool** — trigger mechanism. Returns `"Launching skill: X"`. Full content delivered via PostToolUseHook as `AdditionalContext` on the tool result message, keyed by tool call ID for parallel safety.
 
 ### What Was Built
 
@@ -40,20 +40,22 @@ Aligned with Claude Code's architecture based on direct investigation:
 |------|------|
 | `skill/catalog.go` | `BuildCatalog`, `CatalogHash`, `SkillRules` |
 | `skill/agent.go` | `ConfigureAgent`, `catalogHook` (PreGeneration), `skillContentHook` (PostToolUse) |
+| `skill/skill.go` | `Skill`, `SkillConfig`, `IsLocal()`, `IsCommand()` |
 | `system_reminder.go` | `dive.SetSystemReminder`, `RemoveSystemReminder`, `HasSystemReminder` — general-purpose named block management in first user message |
-| `system_reminder_test.go` | 12 tests for system-reminder CRUD |
-| `skill/catalog_test.go` | 5 tests for catalog building and hashing |
-| `skill/agent_test.go` | 10 tests for ConfigureAgent and both hooks |
+| `context.go` | `dive.WithToolCallID`, `dive.ToolCallID` — context key for tool call ID propagation |
 
 ### Key Design Decisions
 
 - **`skill.ConfigureAgent(&opts, loader)`** avoids circular import (skill→dive, not dive→skill). Follows the same one-call pattern as `AgentOptions.Session`.
+- **Hooks always installed** — even with zero skills, hooks are registered so that stale catalog blocks from a previous session can be cleaned up on resume.
 - **First user message** for catalog (not last) — stable position for prompt caching, doesn't move as conversation grows.
 - **`dive.SetSystemReminder`** is a general-purpose API — any system can manage named blocks, not just skills. Idempotent: insert or replace by name.
-- **Tool as trigger** — matches Claude Code where the tool returns a brief acknowledgment and the content appears separately. Uses `pendingInstructions` on the Loader for tool→hook communication.
+- **Per-call-ID content association** — `tool.Call()` reads `dive.ToolCallID(ctx)` to key pending instructions; the PostToolUse hook reads `hctx.Call.ID` to retrieve the correct content. This is safe under parallel tool execution where results arrive out of order.
+- **No tool restrictions** — `allowed-tools` is parsed as metadata but not enforced at runtime. Simplifies the implementation and avoids the complexity of skill activation/deactivation lifecycle.
+- **No HTTP provider** — removed due to security implications (remote code could exploit shell expansion). The `Provider` interface remains extensible for custom backends.
+- **Shell expansion gated by `IsLocal()`** — only skills with `file://` or empty `SourceURI` can have `!{command}` expanded, regardless of global config.
+- **Session resume** — catalog hook detects existing `<system-reminder name="skills">` blocks in messages directly (not just via in-memory hash state), handles fresh-process resume correctly.
 - **Base directory** included in skill content so the agent can resolve relative paths to reference files within the skill directory.
-- **Re-invocation guard** — returns "already active" if the agent tries to invoke the same skill twice.
-- **Session resume** — hook detects existing `<system-reminder name="skills">` block and skips re-injection.
 
 ## Phase 3: Documentation (DONE)
 

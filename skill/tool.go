@@ -121,13 +121,12 @@ func (t *toolImpl) Call(ctx context.Context, input *ToolInput) (*dive.ToolResult
 	allowShell := t.config.shellExpansion && s.IsLocal()
 	instructions, _ := s.Expand(ctx, input.Args, WithShellExpansion(allowShell))
 
-	// Queue expanded instructions for the PostToolUse hook to inject
-	// as AdditionalContext (matching Claude Code's pattern where the tool
-	// returns a brief acknowledgment and the content appears separately).
-	// Uses a queue to support parallel Skill tool calls in one response.
+	// Store expanded instructions keyed by tool call ID for the PostToolUse
+	// hook to inject as AdditionalContext. Keyed by call ID so parallel
+	// Skill tool calls that complete out of order get the right content.
+	callID := dive.ToolCallID(ctx)
 	t.loader.mu.Lock()
-	t.loader.pendingInstructions = append(t.loader.pendingInstructions,
-		formatSkillContent(s, input.Args, instructions))
+	t.loader.pendingInstructions[callID] = formatSkillContent(s, input.Args, instructions)
 	t.loader.mu.Unlock()
 
 	// Tool result is brief — the actual instructions are injected by the

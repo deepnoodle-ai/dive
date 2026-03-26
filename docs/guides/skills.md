@@ -20,7 +20,7 @@ skill.ConfigureAgent(&opts, loader)
 agent, _ := dive.NewAgent(opts)
 ```
 
-`ConfigureAgent` wires up everything — the Skill tool, allowed-tools filtering, catalog injection into conversation context, and usage rules in the system prompt. See [Agent Integration](#agent-integration) for details.
+`ConfigureAgent` wires up everything — the Skill tool, catalog injection into conversation context, and usage rules in the system prompt. See [Agent Integration](#agent-integration) for details.
 
 ## Skill File Format
 
@@ -52,7 +52,7 @@ Target: $ARGUMENTS
 | --------------- | -------- | ---------------------------------------------------- |
 | `name`          | No       | Unique identifier (defaults to filename/directory)   |
 | `description`   | No       | Brief explanation for the LLM; presence makes it agent-invocable |
-| `allowed-tools` | No       | Restricts which tools are available while this skill is active |
+| `allowed-tools` | No       | Metadata only — parsed but not enforced at runtime   |
 | `model`         | No       | Model override for this skill (reserved for future use) |
 | `argument-hint` | No       | Describes expected arguments (shown in CLI help) |
 | `triggers`      | No       | Keyword/regex patterns for automatic skill suggestion |
@@ -81,7 +81,9 @@ Skills support three kinds of variable substitution in their instructions:
 | `$1`, `$2`, ..., `$9` | Positional arguments | `/deploy staging` → `$1` = `"staging"` |
 | `!{command}` | Shell command output | `!{git branch --show-current}` → `"main"` |
 
-Shell expansion (`!{...}`) is **disabled by default** for security. Enable it with `skill.WithConfigShellExpansion(true)` in `ConfigureAgent`, or `skill.WithShellExpansion(true)` when calling `Expand()` directly. Shell expansion is always disabled for skills loaded via HTTP.
+Shell expansion (`!{...}`) is **disabled by default** for security. Enable it with `skill.WithConfigShellExpansion(true)` in `ConfigureAgent`, or `skill.WithShellExpansion(true)` when calling `Expand()` directly.
+
+**Security:** Shell expansion is only allowed for local skills (`file://` or empty SourceURI). Skills loaded from remote providers (e.g., custom HTTP providers) never get shell expansion regardless of configuration. This is enforced by `Skill.IsLocal()`.
 
 ## Skill Discovery
 
@@ -163,7 +165,7 @@ opts := dive.AgentOptions{
     },
 }
 
-// Adds: Skill tool, allowed-tools Toolset, catalog hook, system prompt rules
+// Adds: Skill tool, catalog hook, content hook, system prompt rules
 skill.ConfigureAgent(&opts, loader)
 
 // Enable shell expansion for local skills:
@@ -173,29 +175,11 @@ agent, _ := dive.NewAgent(opts)
 ```
 
 What `ConfigureAgent` does internally:
-1. Appends the Skill tool to `opts.Tools` (trigger: returns "Launching skill: X")
-2. Wraps all tools with a Toolset that enforces `allowed-tools`
-3. Appends skill usage rules to `opts.SystemPrompt`
-4. Registers a `PreGenerationHook` that injects the skill catalog as a `<system-reminder name="skills">` block into the **first user message** (replaced in place if the catalog changes after a `loader.Load()`)
-5. Registers a `PostToolUseHook` that injects expanded skill instructions (with base directory for relative path resolution) as `AdditionalContext` on the tool result message
-
-### Manual Wiring (Advanced)
-
-For full control over how skills integrate with the agent:
-
-```go
-skillTool := skill.NewTool(loader)
-toolset := skill.NewToolset(loader, tools)
-
-agent, _ := dive.NewAgent(dive.AgentOptions{
-    Tools:    append(tools, skillTool),
-    Toolsets: []dive.Toolset{toolset},
-})
-```
-
-With manual wiring, you're responsible for:
-- Injecting the skill catalog into conversation context (use `skill.BuildCatalog(loader)`)
-- Adding skill usage rules to the system prompt (use `skill.SkillRules()`)
+1. **Always registers hooks** — even with zero skills, hooks are installed so that stale catalog blocks from a previous session can be cleaned up on resume.
+2. **Appends the Skill tool** to `opts.Tools` (only when skills are loaded)
+3. **Appends skill usage rules** to `opts.SystemPrompt` (only when skills are loaded)
+4. Registers a **PreGenerationHook** that injects the skill catalog as a `<system-reminder name="skills">` block into the first user message (replaced in place if the catalog changes; removed if skills become empty)
+5. Registers a **PostToolUseHook** that injects expanded skill instructions as `AdditionalContext` on the tool result message, keyed by tool call ID for correct association under parallel execution
 
 ### Catalog Injection
 
@@ -226,9 +210,13 @@ The injected content includes:
 - **Base directory** — the skill's file path parent, so the agent can resolve relative paths to reference files (e.g., `references/05-prd.md`)
 - **Expanded instructions** — with `$ARGUMENTS`, `$1`-`$9`, and `!{command}` substituted
 
-### Re-Invocation Guard
+Content is keyed by tool call ID internally, so parallel Skill tool calls in a single response each get their correct instructions regardless of completion order.
 
-If the agent tries to invoke the same skill twice, the tool returns `"Skill X is already active."` instead of re-loading. This prevents unnecessary context duplication.
+### Session Resume
+
+The catalog hook handles session resume correctly:
+- On a fresh process resuming a session, stale catalog blocks from a previous run are detected and updated (or removed if skills are no longer available)
+- Hooks are always installed by `ConfigureAgent` (even with zero skills) specifically to handle this cleanup
 
 ## Provider System
 
@@ -238,32 +226,9 @@ The loader supports pluggable providers for loading skills from different source
 
 When no providers are specified, the loader uses a filesystem provider that scans the standard directories listed above.
 
-### HTTP Provider
-
-Fetch skills from a remote endpoint:
-
-```go
-loader := skill.NewLoader(skill.LoaderOptions{
-    Providers: []skill.Provider{
-        skill.NewDefaultFilesystemProvider(skill.DefaultFSOptions{
-            ProjectDir: ".",
-        }),
-        skill.NewHTTPProvider("https://skills.example.com/api",
-            skill.WithHTTPTimeout(10 * time.Second),
-        ),
-    },
-})
-```
-
-The HTTP provider supports two modes:
-- **Manifest mode:** endpoint returns JSON `{"skills": [{"name": "x", "url": "..."}, ...]}`
-- **Direct mode:** endpoint serves a single SKILL.md file
-
-ETag-based caching prevents re-downloading unchanged skills. Shell expansion is always disabled for HTTP-sourced skills.
-
 ### Custom Providers
 
-Implement the `Provider` interface:
+Implement the `Provider` interface to load skills from any source:
 
 ```go
 type Provider interface {
@@ -271,6 +236,8 @@ type Provider interface {
     Load(ctx context.Context) ([]*Skill, error)
 }
 ```
+
+Example: a database-backed provider, a Git provider, or an API-backed provider. Skills loaded from non-local providers have `SourceURI` set to a non-`file://` URI, which prevents shell expansion for security.
 
 ## Trigger Matching
 

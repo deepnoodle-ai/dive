@@ -55,11 +55,11 @@ type Loader struct {
 	skills   map[string]*Skill
 	triggers map[string]*regexp.Regexp // compiled trigger patterns
 
-	// pendingInstructions is a queue of expanded skill content from Skill
-	// tool calls, for the PostToolUse hook to inject as AdditionalContext.
-	// A queue (not a single string) supports parallel Skill tool calls
-	// in a single response — each Call() pushes, each hook invocation pops.
-	pendingInstructions []string
+	// pendingInstructions maps tool call IDs to expanded skill content,
+	// for the PostToolUse hook to inject as AdditionalContext. Keyed by
+	// call ID to correctly associate content with the right tool result
+	// when parallel Skill tool calls complete out of order.
+	pendingInstructions map[string]string
 }
 
 // NewLoader creates a new skill loader with the given options.
@@ -88,7 +88,7 @@ func NewLoader(opts LoaderOptions) *Loader {
 		logger:              opts.Logger,
 		skills:              make(map[string]*Skill),
 		triggers:            make(map[string]*regexp.Regexp),
-		pendingInstructions: nil,
+		pendingInstructions: make(map[string]string),
 	}
 }
 
@@ -139,7 +139,7 @@ func (l *Loader) Load(ctx context.Context) error {
 	l.mu.Lock()
 	l.skills = allSkills
 	l.triggers = triggers
-	l.pendingInstructions = nil
+	l.pendingInstructions = make(map[string]string)
 	l.mu.Unlock()
 
 	return nil

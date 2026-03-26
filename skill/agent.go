@@ -29,7 +29,7 @@ import (
 //	skill.ConfigureAgent(&opts, loader)
 //	agent, _ := dive.NewAgent(opts)
 func ConfigureAgent(opts *dive.AgentOptions, loader *Loader, cfgOpts ...ConfigOption) {
-	if loader == nil || loader.Count() == 0 {
+	if loader == nil {
 		return
 	}
 
@@ -38,7 +38,16 @@ func ConfigureAgent(opts *dive.AgentOptions, loader *Loader, cfgOpts ...ConfigOp
 		opt(cfg)
 	}
 
-	// Add the Skill tool
+	// Always register hooks — even with zero skills, a resumed session
+	// may contain a stale catalog block that needs cleanup.
+	opts.Hooks.PreGeneration = append(opts.Hooks.PreGeneration, catalogHook(loader))
+	opts.Hooks.PostToolUse = append(opts.Hooks.PostToolUse, skillContentHook(loader))
+
+	// Only add the Skill tool and system prompt rules when skills exist.
+	if loader.Count() == 0 {
+		return
+	}
+
 	var toolOpts []ToolOption
 	if cfg.shellExpansion {
 		toolOpts = append(toolOpts, WithToolShellExpansion(true))
@@ -46,21 +55,11 @@ func ConfigureAgent(opts *dive.AgentOptions, loader *Loader, cfgOpts ...ConfigOp
 	skillTool := NewTool(loader, toolOpts...)
 	opts.Tools = append(opts.Tools, skillTool)
 
-	// Append skill usage rules to system prompt
 	if opts.SystemPrompt != "" {
 		opts.SystemPrompt = strings.TrimRight(opts.SystemPrompt, "\n") + "\n\n" + SkillRules()
 	} else {
 		opts.SystemPrompt = SkillRules()
 	}
-
-	// Register catalog injection hook
-	opts.Hooks.PreGeneration = append(opts.Hooks.PreGeneration, catalogHook(loader))
-
-	// Register PostToolUse hook that injects skill content as AdditionalContext
-	// when the Skill tool fires. This matches Claude Code's pattern where the
-	// tool returns a brief acknowledgment and the content appears as a separate
-	// text block on the tool result message.
-	opts.Hooks.PostToolUse = append(opts.Hooks.PostToolUse, skillContentHook(loader))
 }
 
 // ConfigOption configures skill agent integration.
@@ -83,15 +82,13 @@ func WithConfigShellExpansion(allow bool) ConfigOption {
 // matching Claude Code's pattern.
 func skillContentHook(loader *Loader) dive.PostToolUseHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
-		if hctx.Tool == nil || hctx.Tool.Name() != "Skill" {
+		if hctx.Tool == nil || hctx.Tool.Name() != "Skill" || hctx.Call == nil {
 			return nil
 		}
+		callID := hctx.Call.ID
 		loader.mu.Lock()
-		var content string
-		if len(loader.pendingInstructions) > 0 {
-			content = loader.pendingInstructions[0]
-			loader.pendingInstructions = loader.pendingInstructions[1:]
-		}
+		content := loader.pendingInstructions[callID]
+		delete(loader.pendingInstructions, callID)
 		loader.mu.Unlock()
 
 		if content != "" {
@@ -119,11 +116,13 @@ func catalogHook(loader *Loader) dive.PreGenerationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		hash := CatalogHash(loader)
 		if hash == "" {
-			// No skills — remove stale catalog block if present
-			if lastHash != "" {
+			// No skills — remove stale catalog block if present.
+			// Check messages directly (not just lastHash) to handle
+			// session resume where a previous process left a block.
+			if dive.HasSystemReminder(hctx.Messages, skillReminderName) {
 				hctx.Messages = dive.RemoveSystemReminder(hctx.Messages, skillReminderName)
-				lastHash = ""
 			}
+			lastHash = ""
 			return nil
 		}
 		if hash == lastHash {
