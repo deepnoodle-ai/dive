@@ -53,43 +53,34 @@ func (a *App) statusLineView() tui.View {
 	}
 	line1 := tui.Group(parts...)
 
-	// Line 2: context %, elapsed time, git stats
-	var stats []tui.View
+	// Line 2: progress bar with context %, elapsed time
+	var line2Parts []tui.View
+	line2Parts = append(line2Parts, tui.Text(" ").Style(mutedStyle))
 
-	// Context usage percentage (show after first LLM response)
+	// Context usage progress bar (show after first LLM response)
 	if a.lastUsage != nil {
 		contextPct := a.contextPercent()
-		pctColor := accentColor
+		barColor := accentColor
 		if contextPct > 75 {
-			pctColor = tui.RGB{R: 255, G: 180, B: 60} // orange warning
+			barColor = tui.RGB{R: 255, G: 180, B: 60}
 		}
 		if contextPct > 90 {
-			pctColor = tui.RGB{R: 255, G: 80, B: 80} // red critical
+			barColor = tui.RGB{R: 255, G: 80, B: 80}
 		}
-		stats = append(stats, tui.Text("%d%%", contextPct).Style(tui.NewStyle().WithFgRGB(pctColor)))
+		bar := tui.Progress(contextPct, 100).
+			Width(20).
+			Style(tui.NewStyle().WithFgRGB(barColor)).
+			EmptyStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 60, G: 60, B: 65})).
+			PercentStyle(tui.NewStyle().WithFgRGB(barColor))
+		line2Parts = append(line2Parts, bar)
 	}
 
-	// Elapsed time (when processing)
-	if a.processing {
-		elapsed := time.Since(a.processingStartTime)
-		stats = append(stats, tui.Text("%s", formatDuration(elapsed)).Style(mutedStyle))
-	}
-
-	if len(stats) == 0 {
+	// Only show line 2 if there's content beyond the leading space
+	if len(line2Parts) <= 1 {
 		return line1
 	}
 
-	// Join stats with " | " separator
-	var statsViews []tui.View
-	statsViews = append(statsViews, tui.Text(" ").Style(mutedStyle))
-	for i, s := range stats {
-		if i > 0 {
-			statsViews = append(statsViews, tui.Text(" | ").Style(mutedStyle))
-		}
-		statsViews = append(statsViews, s)
-	}
-	line2 := tui.Group(statsViews...)
-
+	line2 := tui.Group(line2Parts...)
 	return tui.Stack(line1, line2).Gap(0)
 }
 
