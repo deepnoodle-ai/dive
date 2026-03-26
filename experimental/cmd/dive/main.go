@@ -33,7 +33,7 @@ func main() {
 
 	// Image generation subcommand
 	app.Command("image").
-		Description("Generate an image from a text prompt").
+		Description("Generate or edit an image from a text prompt").
 		Args("prompt").
 		Flags(
 			cli.String("model", "m").
@@ -51,6 +51,11 @@ func main() {
 			cli.Int("count", "n").
 				Default(1).
 				Help("Number of images to generate"),
+			cli.Strings("ref", "r").
+				Help("Reference image file path (can be specified multiple times)"),
+			cli.Bool("edit", "e").
+				Default(false).
+				Help("Edit reference images instead of generating new ones"),
 			cli.Bool("open", "").
 				Default(false).
 				Help("Open result in default viewer"),

@@ -86,7 +86,7 @@ failing the entire call.
 
 ### Image Editing
 
-Providers that support editing (OpenAI) can modify existing images:
+Providers that support editing (OpenAI, Google Gemini) can modify existing images:
 
 ```go
 refImage, _ := os.ReadFile("photo.png")
@@ -205,6 +205,8 @@ Flags:
       --aspect   Aspect ratio: 1:1, 16:9, 9:16
       --format   Output format: png, jpeg, webp
   -n, --count    Number of images (default: 1)
+  -r, --ref      Reference image file path (repeatable)
+  -e, --edit     Edit reference images instead of generating
   -o, --out      Output file path (default: auto from prompt)
       --open     Open result in default viewer
 ```
@@ -223,6 +225,12 @@ dive image "abstract art" -n 4
 
 # Specify output path
 dive image "logo design" -o logo.png
+
+# Edit an existing image
+dive image "make the sky purple" --edit --ref photo.png
+
+# Generate with reference images (style/composition guidance)
+dive image "a painting in this style" --ref reference.jpg
 ```
 
 ### Video Generation
