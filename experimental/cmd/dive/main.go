@@ -196,22 +196,6 @@ func runInteractive(ctx *cli.Context) error {
 	appBridge := &appBridgeType{}
 
 	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
-		// Filter tools if the subagent definition specifies a subset
-		var filteredTools []dive.Tool
-		if len(def.Tools) > 0 {
-			allowed := make(map[string]bool)
-			for _, t := range def.Tools {
-				allowed[t] = true
-			}
-			for _, t := range parentTools {
-				if allowed[t.Name()] {
-					filteredTools = append(filteredTools, t)
-				}
-			}
-		} else {
-			filteredTools = parentTools
-		}
-
 		// Create sub-model (use parent model by default)
 		subModel := model
 		if def.Model != "" {
@@ -222,7 +206,7 @@ func runInteractive(ctx *cli.Context) error {
 			Name:         name,
 			SystemPrompt: def.Prompt,
 			Model:        subModel,
-			Tools:        filteredTools,
+			Tools:        subagent.FilterTools(def, parentTools),
 		})
 	}
 

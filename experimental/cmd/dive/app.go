@@ -297,13 +297,13 @@ type App struct {
 	contextWindowMax int        // Max context window tokens for the model
 
 	// Sub-agent panel state
-	subagentPanels        map[string]*SubAgentPanel // taskID -> panel
-	subagentOrder         []string                  // taskIDs in creation order
-	taskIDToMsgIndex      map[string]int            // task ID -> original Task message index
-	taskOutputRedirect    map[string]int            // TaskOutput tool call ID -> Task message index to update
-	pendingBackgroundTasks   map[string]string          // taskID -> description, for tasks still running after main turn ends
-	completedBackgroundTasks []backgroundTaskDoneEvent  // queued completions waiting to be retrieved
-	backgroundFlushTimer     *time.Timer                // debounce timer for batching completions
+	subagentPanels           map[string]*SubAgentPanel // taskID -> panel
+	subagentOrder            []string                  // taskIDs in creation order
+	taskIDToMsgIndex         map[string]int            // task ID -> original Task message index
+	taskOutputRedirect       map[string]int            // TaskOutput tool call ID -> Task message index to update
+	pendingBackgroundTasks   map[string]string         // taskID -> description, for tasks still running after main turn ends
+	completedBackgroundTasks []backgroundTaskDoneEvent // queued completions waiting to be retrieved
+	backgroundFlushTimer     *time.Timer               // debounce timer for batching completions
 }
 
 // NewApp creates a new CLI application
@@ -329,27 +329,35 @@ func NewApp(
 	}
 
 	return &App{
-		agent:            agent,
-		sessionStore:     sessionStore,
-		workspaceDir:     workspaceDir,
-		modelName:        modelName,
-		resumeSessionID:  resumeSessionID,
-		skillLoader:      skillLoader,
-		messages:         make([]Message, 0),
-		toolCallIndex:    make(map[string]int),
-		toolTitles:       toolTitles,
-		history:          make([]string, 0),
-		historyIndex:     -1,
-		ctx:              ctx,
-		cancel:           cancel,
-		initialPrompt:    initialPrompt,
-		compactionConfig: compactionConfig,
+		agent:                  agent,
+		sessionStore:           sessionStore,
+		workspaceDir:           workspaceDir,
+		modelName:              modelName,
+		resumeSessionID:        resumeSessionID,
+		skillLoader:            skillLoader,
+		messages:               make([]Message, 0),
+		toolCallIndex:          make(map[string]int),
+		toolTitles:             toolTitles,
+		history:                make([]string, 0),
+		historyIndex:           -1,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		initialPrompt:          initialPrompt,
+		compactionConfig:       compactionConfig,
 		contextWindowMax:       contextWindowForModel(modelName),
 		subagentPanels:         make(map[string]*SubAgentPanel),
 		subagentOrder:          make([]string, 0),
 		taskIDToMsgIndex:       make(map[string]int),
 		taskOutputRedirect:     make(map[string]int),
 		pendingBackgroundTasks: make(map[string]string),
+	}
+}
+
+// shutdown cleans up resources before exit.
+func (a *App) shutdown() {
+	if a.backgroundFlushTimer != nil {
+		a.backgroundFlushTimer.Stop()
+		a.backgroundFlushTimer = nil
 	}
 }
 
@@ -908,6 +916,7 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 			// Require two Ctrl+C presses within 2 seconds to exit
 			now := time.Now()
 			if a.showExitHint && now.Sub(a.lastCtrlC) < 2*time.Second {
+				a.shutdown()
 				return []tui.Cmd{tui.Quit()}
 			}
 			a.lastCtrlC = now
