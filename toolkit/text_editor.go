@@ -100,7 +100,12 @@ type TextEditorToolOptions struct {
 
 	// WorkspaceDir restricts operations to paths within this directory.
 	// Defaults to the current working directory if empty.
+	// Ignored when Validator is set.
 	WorkspaceDir string
+
+	// Validator is an optional shared PathValidator. When set, it is used
+	// instead of creating one from WorkspaceDir.
+	Validator *PathValidator
 
 	// MaxFileSize is the maximum file size in bytes.
 	// Files larger than this are rejected.
@@ -128,7 +133,9 @@ func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*Te
 		resolvedOpts.MaxFileSize = MaxFileSize // Default 1MB
 	}
 	var pathValidator *PathValidator
-	if resolvedOpts.WorkspaceDir != "" {
+	if resolvedOpts.Validator != nil {
+		pathValidator = resolvedOpts.Validator
+	} else if resolvedOpts.WorkspaceDir != "" {
 		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&TextEditorTool{

@@ -169,8 +169,14 @@ func runInteractive(ctx *cli.Context) error {
 	// Create TUI dialog for interactive user prompts (AskUserQuestion tool)
 	tuiDialog := &tuiDialog{}
 
+	// Create path validator for workspace enforcement
+	pathValidator, err := toolkit.NewPathValidator(workspaceDir)
+	if err != nil {
+		return fmt.Errorf("failed to create path validator: %w", err)
+	}
+
 	// Create tools
-	tools := createTools(workspaceDir, tuiDialog)
+	tools := createTools(pathValidator, tuiDialog)
 	tools = append(tools, grokServerSideTools(modelName)...)
 
 	// Create session store
@@ -242,6 +248,12 @@ func runInteractive(ctx *cli.Context) error {
 		ProjectDir: workspaceDir,
 	})
 	_ = skillLoader.Load(bgCtx) // Ignore errors, skills are optional
+
+	// Allow read access to skill directories so the agent can read
+	// reference files that live alongside skills (e.g., ~/.claude/skills/taste/reference/)
+	for _, dir := range skillLoader.BaseDirs() {
+		_ = pathValidator.AllowReadPath(dir)
+	}
 
 	// Create model settings
 	temperature := ctx.Float64("temperature")
@@ -349,7 +361,11 @@ func runPrint(ctx *cli.Context) error {
 	model := createModel(modelName, ctx.String("api-endpoint"))
 
 	// Create tools (auto-approve dialog for non-interactive print mode)
-	tools := createTools(workspaceDir, nil)
+	printValidator, err := toolkit.NewPathValidator(workspaceDir)
+	if err != nil {
+		return fmt.Errorf("failed to create path validator: %w", err)
+	}
+	tools := createTools(printValidator, nil)
 	tools = append(tools, grokServerSideTools(modelName)...)
 
 	// Create agent
@@ -742,34 +758,34 @@ func buildToolPreview(toolName string, input json.RawMessage) (title, preview st
 	return title, preview
 }
 
-func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
+func createTools(validator *toolkit.PathValidator, dialog dive.Dialog) []dive.Tool {
 	if dialog == nil {
 		dialog = &dive.AutoApproveDialog{}
 	}
 	tools := []dive.Tool{
 		// Read-only file tools
 		toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{
-			WorkspaceDir: workspaceDir,
+			Validator: validator,
 		}),
 		toolkit.NewGlobTool(toolkit.GlobToolOptions{
-			WorkspaceDir: workspaceDir,
+			Validator: validator,
 		}),
 		toolkit.NewGrepTool(toolkit.GrepToolOptions{
-			WorkspaceDir: workspaceDir,
+			Validator: validator,
 		}),
 		toolkit.NewListDirectoryTool(toolkit.ListDirectoryToolOptions{
-			WorkspaceDir: workspaceDir,
+			Validator: validator,
 		}),
 
 		// Write tools
 		toolkit.NewWriteFileTool(toolkit.WriteFileToolOptions{
-			WorkspaceDir: workspaceDir,
+			Validator: validator,
 		}),
 		toolkit.NewEditTool(toolkit.EditToolOptions{
-			WorkspaceDir: workspaceDir,
+			Validator: validator,
 		}),
 		toolkit.NewBashTool(toolkit.BashToolOptions{
-			WorkspaceDir: workspaceDir,
+			Validator: validator,
 		}),
 
 		// User interaction
@@ -803,14 +819,14 @@ func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
 	// Add image generation tool using the best available provider
 	if imageModel := getDefaultImageModel(); imageModel != "" {
 		tools = append(tools, toolkit.NewImageGenerationTool(imageModel,
-			toolkit.WithImageToolWorkDir(workspaceDir),
+			toolkit.WithImageToolWorkDir(validator.WorkspaceDir),
 		))
 	}
 
 	// Add video generation tool using the best available provider
 	if videoModel := getDefaultVideoModel(); videoModel != "" {
 		tools = append(tools, toolkit.NewVideoGenerationTool(videoModel,
-			toolkit.WithVideoToolWorkDir(workspaceDir),
+			toolkit.WithVideoToolWorkDir(validator.WorkspaceDir),
 		))
 	}
 

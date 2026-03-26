@@ -143,7 +143,7 @@ func formatSkillContent(s *Skill, args, instructions string) string {
 	// Include base directory so the agent can resolve relative paths
 	// to reference files within the skill directory
 	if s.FilePath != "" {
-		fmt.Fprintf(&sb, "Base directory for this skill: %s\n\n", skillBaseDir(s))
+		fmt.Fprintf(&sb, "Base directory for this skill: %s\n\n", SkillBaseDir(s))
 	}
 	fmt.Fprintf(&sb, "# %s\n\n", s.Name)
 	if s.Description != "" {
@@ -156,8 +156,8 @@ func formatSkillContent(s *Skill, args, instructions string) string {
 	return sb.String()
 }
 
-// skillBaseDir returns the base directory for a skill's supporting files.
-func skillBaseDir(s *Skill) string {
+// SkillBaseDir returns the base directory for a skill's supporting files.
+func SkillBaseDir(s *Skill) string {
 	if s.FilePath == "" {
 		return ""
 	}

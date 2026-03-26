@@ -193,6 +193,24 @@ func (l *Loader) Commands() []*Skill {
 	return l.sortedSkills(func(s *Skill) bool { return s.IsCommand() })
 }
 
+// BaseDirs returns the unique base directories of all loaded skills that
+// have file paths. This is useful for allowing read access to skill
+// reference files that live outside the workspace.
+func (l *Loader) BaseDirs() []string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	seen := make(map[string]bool)
+	var dirs []string
+	for _, s := range l.skills {
+		dir := SkillBaseDir(s)
+		if dir != "" && !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
+
 // Match returns skills whose triggers match the given input text.
 func (l *Loader) Match(input string) []*Skill {
 	l.mu.RLock()

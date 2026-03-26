@@ -60,7 +60,12 @@ type ListDirectoryToolOptions struct {
 
 	// WorkspaceDir restricts listings to paths within this directory.
 	// Defaults to the current working directory if empty.
+	// Ignored when Validator is set.
 	WorkspaceDir string
+
+	// Validator is an optional shared PathValidator. When set, it is used
+	// instead of creating one from WorkspaceDir.
+	Validator *PathValidator
 }
 
 // ListDirectoryTool lists the contents of a directory with metadata.
@@ -90,7 +95,9 @@ func NewListDirectoryTool(opts ...ListDirectoryToolOptions) *dive.TypedToolAdapt
 		options.MaxEntries = DefaultListDirectoryMaxEntries
 	}
 	var pathValidator *PathValidator
-	if options.WorkspaceDir != "" {
+	if options.Validator != nil {
+		pathValidator = options.Validator
+	} else if options.WorkspaceDir != "" {
 		pathValidator, _ = NewPathValidator(options.WorkspaceDir)
 	}
 	return dive.ToolAdapter(&ListDirectoryTool{

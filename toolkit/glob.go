@@ -43,7 +43,12 @@ type GlobToolOptions struct {
 
 	// WorkspaceDir restricts searches to paths within this directory.
 	// Defaults to the current working directory if empty.
+	// Ignored when Validator is set.
 	WorkspaceDir string
+
+	// Validator is an optional shared PathValidator. When set, it is used
+	// instead of creating one from WorkspaceDir.
+	Validator *PathValidator
 }
 
 // GlobTool finds files matching glob patterns.
@@ -92,7 +97,9 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 	}
 	var pathValidator *PathValidator
 	var configErr error
-	if resolvedOpts.WorkspaceDir != "" {
+	if resolvedOpts.Validator != nil {
+		pathValidator = resolvedOpts.Validator
+	} else if resolvedOpts.WorkspaceDir != "" {
 		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
 		if configErr != nil {
 			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
