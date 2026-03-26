@@ -13,7 +13,7 @@ import (
 var (
 	DefaultModel     = "llama3.2:3b"
 	DefaultEndpoint  = "http://localhost:11434/v1/chat/completions"
-	DefaultMaxTokens = 4096
+	DefaultMaxTokens = 32768
 	DefaultClient    = &http.Client{Timeout: 300 * time.Second}
 )
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
@@ -80,6 +81,32 @@ type initialPromptEvent struct {
 type compactionEvent struct {
 	baseEvent
 	event *compaction.CompactionEvent
+}
+
+// subagentEvent carries streaming data from a sub-agent task.
+type subagentEvent struct {
+	baseEvent
+	taskID string
+	item   *dive.ResponseItem
+}
+
+// backgroundTaskDoneEvent is sent when a background task completes while
+// the main agent is idle, triggering an automatic retrieval turn.
+type backgroundTaskDoneEvent struct {
+	baseEvent
+	taskID      string
+	description string
+}
+
+// SubAgentPanel tracks the UI state for a running or completed sub-agent.
+type SubAgentPanel struct {
+	TaskID      string
+	Description string
+	Status      extended.TaskStatus
+	StreamText  string // rolling buffer for live display
+	StartTime   time.Time
+	EndTime     time.Time
+	Output      string // final output for completed panels
 }
 
 // MessageType distinguishes regular messages from tool calls
@@ -268,6 +295,15 @@ type App struct {
 	// Status line state
 	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
 	contextWindowMax int        // Max context window tokens for the model
+
+	// Sub-agent panel state
+	subagentPanels        map[string]*SubAgentPanel // taskID -> panel
+	subagentOrder         []string                  // taskIDs in creation order
+	taskIDToMsgIndex      map[string]int            // task ID -> original Task message index
+	taskOutputRedirect    map[string]int            // TaskOutput tool call ID -> Task message index to update
+	pendingBackgroundTasks   map[string]string          // taskID -> description, for tasks still running after main turn ends
+	completedBackgroundTasks []backgroundTaskDoneEvent  // queued completions waiting to be retrieved
+	backgroundFlushTimer     *time.Timer                // debounce timer for batching completions
 }
 
 // NewApp creates a new CLI application
@@ -308,7 +344,12 @@ func NewApp(
 		cancel:           cancel,
 		initialPrompt:    initialPrompt,
 		compactionConfig: compactionConfig,
-		contextWindowMax: contextWindowForModel(modelName),
+		contextWindowMax:       contextWindowForModel(modelName),
+		subagentPanels:         make(map[string]*SubAgentPanel),
+		subagentOrder:          make([]string, 0),
+		taskIDToMsgIndex:       make(map[string]int),
+		taskOutputRedirect:     make(map[string]int),
+		pendingBackgroundTasks: make(map[string]string),
 	}
 }
 
@@ -669,6 +710,10 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
 		a.handleCompaction(e.event)
+	case subagentEvent:
+		a.handleSubagentEvent(e)
+	case backgroundTaskDoneEvent:
+		a.handleBackgroundTaskDone(e)
 	case showDialogEvent:
 		a.dialogState = e.dialog
 		// Focus the dialog so it receives key events
@@ -1286,6 +1331,16 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			if strings.ToLower(a.messages[idx].ToolName) == "read" && textContent != "" {
 				a.messages[idx].ToolReadLines = strings.Count(textContent, "\n") + 1
 			}
+
+			// For Task tool with background tasks, extract task ID for redirect tracking
+			if a.messages[idx].ToolName == "Task" && textContent != "" {
+				if taskID := parseTaskID(textContent); taskID != "" {
+					a.taskIDToMsgIndex[taskID] = idx
+					// Replace the "Started background task" display with just the description
+					a.messages[idx].ToolResultLines = nil
+					a.messages[idx].ToolResult = ""
+				}
+			}
 		}
 	}
 }
@@ -1330,9 +1385,141 @@ func (a *App) handleProcessingEnd(err error) {
 	a.processing = false
 	a.currentMessage = nil
 	a.toolCallIndex = make(map[string]int)
+	a.subagentPanels = make(map[string]*SubAgentPanel)
+	a.subagentOrder = make([]string, 0)
+	a.taskIDToMsgIndex = make(map[string]int)
+	a.taskOutputRedirect = make(map[string]int)
 
 	// Now print to scrollback - the live view will be re-rendered with correct height
 	a.printRecentMessagesToScrollback()
+
+	// Check if any background tasks completed while we were processing
+	if len(a.completedBackgroundTasks) > 0 {
+		a.scheduleBackgroundFlush()
+	}
+}
+
+// handleSubagentEvent routes streaming events from sub-agents to their
+// corresponding Task tool call message, updating the result line in-place.
+func (a *App) handleSubagentEvent(e subagentEvent) {
+	item := e.item
+
+	// Check for background task completion/failure status events
+	if item.Type == "subagent_status" {
+		if status, ok := item.Extension.(*extended.SubagentStatusEvent); ok {
+			if status.Status == extended.TaskStatusCompleted || status.Status == extended.TaskStatusFailed {
+				delete(a.pendingBackgroundTasks, e.taskID)
+				// Queue the completion
+				a.completedBackgroundTasks = append(a.completedBackgroundTasks, backgroundTaskDoneEvent{
+					baseEvent:   newBaseEvent(),
+					taskID:      status.TaskID,
+					description: status.Description,
+				})
+				// If idle, schedule a debounced flush
+				if !a.processing {
+					a.scheduleBackgroundFlush()
+				}
+				return
+			}
+			// Track running background tasks by description
+			if status.Status == extended.TaskStatusRunning {
+				a.pendingBackgroundTasks[status.TaskID] = status.Description
+			}
+		}
+	}
+
+	msgIdx, ok := a.taskIDToMsgIndex[e.taskID]
+	if !ok {
+		return
+	}
+
+	// Handle streaming text — update the tool call's result line
+	if item.Type == dive.ResponseItemTypeModelEvent {
+		if item.Event != nil && item.Event.Delta != nil && item.Event.Delta.Text != "" {
+			panel := a.getOrCreatePanel(e.taskID)
+			panel.StreamText += item.Event.Delta.Text
+			if len(panel.StreamText) > 500 {
+				panel.StreamText = panel.StreamText[len(panel.StreamText)-500:]
+			}
+			if last := lastNonEmptyLine(panel.StreamText); last != "" {
+				if len(last) > 80 {
+					last = last[:77] + "..."
+				}
+				a.messages[msgIdx].ToolResultLines = []string{last}
+			}
+		}
+	}
+
+	// Handle tool calls — show tool name in the result line
+	if item.Type == dive.ResponseItemTypeToolCall && item.ToolCall != nil {
+		panel := a.getOrCreatePanel(e.taskID)
+		panel.StreamText += fmt.Sprintf("\n[%s] ", item.ToolCall.Name)
+		a.messages[msgIdx].ToolResultLines = []string{fmt.Sprintf("[%s]", item.ToolCall.Name)}
+	}
+}
+
+// handleBackgroundTaskDone is fired by the debounce timer via SendEvent.
+func (a *App) handleBackgroundTaskDone(_ backgroundTaskDoneEvent) {
+	if a.processing || len(a.completedBackgroundTasks) == 0 {
+		return
+	}
+	// Drain the queue
+	tasks := a.completedBackgroundTasks
+	a.completedBackgroundTasks = nil
+	a.backgroundFlushTimer = nil
+
+	var lines []string
+	for _, t := range tasks {
+		lines = append(lines, fmt.Sprintf("- %s (task_id: %s)", t.description, t.taskID))
+	}
+	prompt := fmt.Sprintf("Background tasks completed:\n%s", strings.Join(lines, "\n"))
+	go a.processMessageAsync(prompt, false)
+}
+
+// scheduleBackgroundFlush starts or resets a 500ms debounce timer. When it
+// fires, it sends a backgroundTaskDoneEvent to flush all queued completions.
+func (a *App) scheduleBackgroundFlush() {
+	if a.backgroundFlushTimer != nil {
+		a.backgroundFlushTimer.Stop()
+	}
+	a.backgroundFlushTimer = time.AfterFunc(500*time.Millisecond, func() {
+		a.runner.SendEvent(backgroundTaskDoneEvent{baseEvent: newBaseEvent()})
+	})
+}
+
+// getOrCreatePanel returns the streaming buffer for a task, creating one if needed.
+func (a *App) getOrCreatePanel(taskID string) *SubAgentPanel {
+	panel, ok := a.subagentPanels[taskID]
+	if !ok {
+		panel = &SubAgentPanel{TaskID: taskID}
+		a.subagentPanels[taskID] = panel
+	}
+	return panel
+}
+
+// parseTaskID extracts a task ID from text like "Task started in background. Task ID: task_abc12345\n..."
+func parseTaskID(text string) string {
+	prefix := "Task started in background. Task ID: "
+	idx := strings.Index(text, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := text[idx+len(prefix):]
+	if newline := strings.IndexByte(rest, '\n'); newline >= 0 {
+		rest = rest[:newline]
+	}
+	return strings.TrimSpace(rest)
+}
+
+// lastNonEmptyLine returns the last non-empty line from text.
+func lastNonEmptyLine(text string) string {
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // printRecentMessagesToScrollback prints the messages from current interaction to scrollback

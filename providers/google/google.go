@@ -18,7 +18,7 @@ const ProviderName = "google"
 
 var (
 	DefaultModel         = ModelGemini25Pro
-	DefaultMaxTokens     = 4096
+	DefaultMaxTokens     = 32768
 	DefaultClient        *http.Client
 	DefaultMaxRetries    = 3
 	DefaultRetryBaseWait = 1 * time.Second

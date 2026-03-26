@@ -430,9 +430,9 @@ func (c *ToolUseContent) Type() ContentType {
 }
 
 func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
-	// Anthropic API requires input to be a valid object, not null
+	// Anthropic API requires input to be a valid JSON object, not null or truncated
 	input := c.Input
-	if len(input) == 0 {
+	if len(input) == 0 || !json.Valid(input) {
 		input = json.RawMessage("{}")
 	}
 	return json.Marshal(struct {

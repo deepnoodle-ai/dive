@@ -15,6 +15,8 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/experimental/subagent"
+	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
@@ -184,6 +186,66 @@ func runInteractive(ctx *cli.Context) error {
 	tools := createTools(pathValidator, tuiDialog)
 	tools = append(tools, grokServerSideTools(modelName)...)
 
+	// Set up subagent registry and task tools
+	subagentRegistry := subagent.NewRegistry(true)
+	taskRegistry := extended.NewTaskRegistry()
+
+	// appBridge allows the task tool's OnEvent callback to reach the App,
+	// which isn't created yet at this point.
+	type appBridgeType struct{ app *App }
+	appBridge := &appBridgeType{}
+
+	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
+		// Filter tools if the subagent definition specifies a subset
+		var filteredTools []dive.Tool
+		if len(def.Tools) > 0 {
+			allowed := make(map[string]bool)
+			for _, t := range def.Tools {
+				allowed[t] = true
+			}
+			for _, t := range parentTools {
+				if allowed[t.Name()] {
+					filteredTools = append(filteredTools, t)
+				}
+			}
+		} else {
+			filteredTools = parentTools
+		}
+
+		// Create sub-model (use parent model by default)
+		subModel := model
+		if def.Model != "" {
+			subModel = createModel(def.Model, "")
+		}
+
+		return dive.NewAgent(dive.AgentOptions{
+			Name:         name,
+			SystemPrompt: def.Prompt,
+			Model:        subModel,
+			Tools:        filteredTools,
+		})
+	}
+
+	taskTool := extended.NewTaskTool(extended.TaskToolOptions{
+		Registry:         taskRegistry,
+		AgentFactory:     agentFactory,
+		SubagentRegistry: subagentRegistry,
+		ParentTools:      tools,
+		OnEvent: func(taskID string, item *dive.ResponseItem) {
+			if appBridge.app != nil && appBridge.app.runner != nil {
+				appBridge.app.runner.SendEvent(subagentEvent{
+					baseEvent: newBaseEvent(),
+					taskID:    taskID,
+					item:      item,
+				})
+			}
+		},
+	})
+	taskOutputTool := extended.NewTaskOutputTool(extended.TaskOutputToolOptions{
+		Registry: taskRegistry,
+	})
+	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool))
+
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")
 	if err != nil {
@@ -298,6 +360,7 @@ func runInteractive(ctx *cli.Context) error {
 		skillLoader,
 	)
 	app.currentSession = currentSession
+	appBridge.app = app
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {
