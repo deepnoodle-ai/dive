@@ -344,8 +344,8 @@ func (a *App) LiveView() tui.View {
 	// Always add spacing before divider (separates from scrollback or live content)
 	views = append(views, tui.Text(""))
 
-	// Input area with status line
-	views = append(views, a.statusLineView())
+	// Input area
+	views = append(views, tui.Divider())
 	views = append(views,
 		tui.InputField(&a.inputText).
 			ID("main-input").
@@ -359,6 +359,7 @@ func (a *App) LiveView() tui.View {
 			}),
 	)
 	views = append(views, tui.Divider())
+	views = append(views, a.statusLineView())
 
 	// Show autocomplete options, compaction stats, or exit hint below the bottom divider
 	// Only reserve space when autocomplete is active (collapses otherwise)
