@@ -359,7 +359,6 @@ func (a *App) LiveView() tui.View {
 			}),
 	)
 	views = append(views, tui.Divider())
-	views = append(views, a.statusLineView())
 
 	// Show autocomplete options, compaction stats, or exit hint below the bottom divider
 	// Only reserve space when autocomplete is active (collapses otherwise)
@@ -395,6 +394,11 @@ func (a *App) LiveView() tui.View {
 		))
 	} else if a.showExitHint {
 		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Hint())
+	}
+
+	// Show status line when autocomplete is not active
+	if len(a.autocompleteMatches) == 0 {
+		views = append(views, a.statusLineView())
 	}
 
 	// Minimum padding at bottom for visual breathing room
