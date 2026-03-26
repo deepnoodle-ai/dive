@@ -128,20 +128,21 @@ Built by `skill.BuildCatalog(loader)` and injected into the first user message v
 
 ```xml
 <system-reminder name="skills">
-<skills>
 The following skills are available for use with the Skill tool:
 
 - code-reviewer: Review code for best practices and potential issues.
+  Location: /home/user/.dive/skills/code-reviewer/SKILL.md
   TRIGGER when: user mentions "review"
 - deploy: Deploy the current project to an environment.
+  Location: /home/user/project/.claude/skills/deploy.md
 
 When a task matches a skill's description or trigger, invoke the Skill
-tool with the skill name before proceeding.
-</skills>
+tool with the skill name before proceeding. Do not guess skill names —
+only use skills listed above.
 </system-reminder>
 ```
 
-Injected into the first user message for prompt caching stability. `dive.SetSystemReminder` is a general-purpose core API for managing named blocks — any system can use it, not just skills.
+Each catalog entry includes its file path (`Location:`) so the agent can tell the user where skills live on disk. Injected into the first user message for prompt caching stability. `dive.SetSystemReminder` is a general-purpose core API for managing named blocks — any system can use it, not just skills.
 
 ## Unification: Skills and Slash Commands
 

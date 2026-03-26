@@ -104,6 +104,8 @@ Skills are discovered from multiple locations in priority order:
 
 The first skill found with a given name takes precedence. The `.agents/skills/` path follows the generic standard used by Codex CLI, enabling cross-tool skill sharing.
 
+Symlinked skill directories are supported — the filesystem provider resolves symlinks when scanning, so you can symlink skill directories from other locations into your skills path.
+
 ### Organization Patterns
 
 **Directory-based** (for skills with supporting files):
@@ -187,20 +189,21 @@ The catalog is injected into the first user message as a named `<system-reminder
 
 ```xml
 <system-reminder name="skills">
-<skills>
 The following skills are available for use with the Skill tool:
 
 - code-reviewer: Review code for best practices and potential issues.
+  Location: /home/user/.dive/skills/code-reviewer/SKILL.md
   TRIGGER when: user mentions "review"
 - deploy: Deploy the current project to an environment.
+  Location: /home/user/project/.claude/skills/deploy.md
 
 When a task matches a skill's description or trigger, invoke the Skill
-tool with the skill name before proceeding.
-</skills>
+tool with the skill name before proceeding. Do not guess skill names —
+only use skills listed above.
 </system-reminder>
 ```
 
-Only agent-invocable skills appear in the catalog. Commands are excluded. The block is managed by `dive.SetSystemReminder` — a general-purpose API for named blocks that any system can use.
+Only agent-invocable skills appear in the catalog. Commands are excluded. Each entry includes its `Location:` on disk so the agent can tell the user where a skill lives. The block is managed by `dive.SetSystemReminder` — a general-purpose API for named blocks that any system can use.
 
 ### Skill Content Injection
 
@@ -211,6 +214,30 @@ The injected content includes:
 - **Expanded instructions** — with `$ARGUMENTS`, `$1`-`$9`, and `!{command}` substituted
 
 Content is keyed by tool call ID internally, so parallel Skill tool calls in a single response each get their correct instructions regardless of completion order.
+
+### Skill Reference File Access
+
+Skills often include reference files alongside the SKILL.md (e.g., `references/`, `examples/`). By default, the workspace `PathValidator` restricts reads to the project directory, which blocks access to user-level skill references in `~/.claude/skills/`.
+
+To allow the agent to read skill reference files, use a shared `PathValidator` and add skill base directories:
+
+```go
+validator, _ := toolkit.NewPathValidator(workspaceDir)
+
+// After loading skills, allow read access to their directories
+for _, dir := range skillLoader.BaseDirs() {
+    _ = validator.AllowReadPath(dir)
+}
+
+// Pass the shared validator to tools
+tools := []dive.Tool{
+    toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{Validator: validator}),
+    toolkit.NewGlobTool(toolkit.GlobToolOptions{Validator: validator}),
+    // ...
+}
+```
+
+All toolkit tools accept a `Validator` field that takes precedence over `WorkspaceDir`. Existing code using `WorkspaceDir` is unaffected.
 
 ### Session Resume
 

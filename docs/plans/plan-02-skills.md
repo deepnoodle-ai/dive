@@ -56,6 +56,9 @@ Aligned with Claude Code's architecture based on direct investigation:
 - **Shell expansion gated by `IsLocal()`** — only skills with `file://` or empty `SourceURI` can have `!{command}` expanded, regardless of global config.
 - **Session resume** — catalog hook detects existing `<system-reminder name="skills">` blocks in messages directly (not just via in-memory hash state), handles fresh-process resume correctly.
 - **Base directory** included in skill content so the agent can resolve relative paths to reference files within the skill directory.
+- **File path in catalog** — each catalog entry includes `Location:` so the agent can answer "where is this skill?" without guessing.
+- **Symlink resolution** — filesystem provider resolves symlinked skill directories, so `~/.claude/skills/` entries that are symlinks are discovered correctly.
+- **Shared `PathValidator`** — toolkit tools accept an optional `Validator` field (takes precedence over `WorkspaceDir`). `PathValidator.AllowReadPath(dir)` grants read access to skill reference directories outside the workspace. `Loader.BaseDirs()` returns unique skill base directories for this purpose.
 
 ## Phase 3: Documentation (DONE)
 
