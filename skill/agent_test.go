@@ -24,7 +24,7 @@ func TestSkillContentHook(t *testing.T) {
 
 	t.Run("injects pending instructions", func(t *testing.T) {
 		loader.mu.Lock()
-		loader.pendingInstructions = "# Skill content here"
+		loader.pendingInstructions = []string{"# Skill content here"}
 		loader.mu.Unlock()
 
 		hctx := &dive.HookContext{
@@ -35,13 +35,13 @@ func TestSkillContentHook(t *testing.T) {
 
 		// Should be cleared after use
 		loader.mu.RLock()
-		assert.Equal(t, "", loader.pendingInstructions)
+		assert.Equal(t, 0, len(loader.pendingInstructions))
 		loader.mu.RUnlock()
 	})
 
 	t.Run("no-op for non-Skill tools", func(t *testing.T) {
 		loader.mu.Lock()
-		loader.pendingInstructions = "should not be consumed"
+		loader.pendingInstructions = []string{"should not be consumed"}
 		loader.mu.Unlock()
 
 		hctx := &dive.HookContext{
@@ -52,7 +52,8 @@ func TestSkillContentHook(t *testing.T) {
 
 		// Pending should still be there
 		loader.mu.RLock()
-		assert.Equal(t, "should not be consumed", loader.pendingInstructions)
+		assert.Equal(t, 1, len(loader.pendingInstructions))
+		assert.Equal(t, "should not be consumed", loader.pendingInstructions[0])
 		loader.mu.RUnlock()
 	})
 }
@@ -84,10 +85,6 @@ func TestConfigureAgent(t *testing.T) {
 	}
 	assert.True(t, hasSkillTool)
 
-	// Toolset should be added
-	assert.Equal(t, 1, len(opts.Toolsets))
-	assert.Equal(t, "skill-filter", opts.Toolsets[0].Name())
-
 	// System prompt should include rules
 	assert.Contains(t, opts.SystemPrompt, "Skill tool")
 	assert.Contains(t, opts.SystemPrompt, "You are a helpful assistant.")
@@ -111,7 +108,6 @@ func TestConfigureAgent_EmptyLoader(t *testing.T) {
 
 	// Should be a no-op
 	assert.Equal(t, 1, len(opts.Tools)) // Only original tool
-	assert.Equal(t, 0, len(opts.Toolsets))
 	assert.Equal(t, "Original prompt.", opts.SystemPrompt)
 	assert.Equal(t, 0, len(opts.Hooks.PreGeneration))
 }
@@ -334,4 +330,34 @@ func TestCatalogHook_EmptySkills(t *testing.T) {
 	}
 	assert.NoError(t, hook(context.Background(), hctx))
 	assert.Equal(t, "Hello", hctx.Messages[0].Content[0].(*llm.TextContent).Text)
+}
+
+func TestCatalogHook_RemovesOnReloadToEmpty(t *testing.T) {
+	loader := &Loader{
+		skills: map[string]*Skill{
+			"reviewer": {
+				Name:        "reviewer",
+				Description: "Review code.",
+				Config:      SkillConfig{Description: "Review code."},
+			},
+		},
+	}
+
+	hook := catalogHook(loader)
+	firstMsg := llm.NewUserTextMessage("Hello")
+	hctx := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
+
+	// First call — injects catalog
+	assert.NoError(t, hook(context.Background(), hctx))
+	assert.True(t, dive.HasSystemReminder(hctx.Messages, "skills"))
+
+	// Simulate reload that clears all skills
+	loader.mu.Lock()
+	loader.skills = map[string]*Skill{}
+	loader.mu.Unlock()
+
+	// Next generation — should remove the stale catalog
+	hctx2 := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
+	assert.NoError(t, hook(context.Background(), hctx2))
+	assert.False(t, dive.HasSystemReminder(hctx2.Messages, "skills"))
 }

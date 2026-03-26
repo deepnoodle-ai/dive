@@ -123,14 +123,10 @@ func TestTool_Call(t *testing.T) {
 		text := result.Content[0].Text
 		assert.Contains(t, text, "Launching skill: code-reviewer")
 
-		// Active skill should be set on loader
-		active := loader.ActiveSkill()
-		assert.NotNil(t, active)
-		assert.Equal(t, "code-reviewer", active.Name)
-
 		// Full instructions stored as pending for PostToolUse hook
 		loader.mu.RLock()
-		pending := loader.pendingInstructions
+		assert.Equal(t, 1, len(loader.pendingInstructions))
+		pending := loader.pendingInstructions[0]
 		loader.mu.RUnlock()
 		assert.Contains(t, pending, "Read the target files")
 		assert.Contains(t, pending, "Base directory for this skill:")
@@ -150,26 +146,12 @@ func TestTool_Call(t *testing.T) {
 
 		// Check expanded instructions in pending
 		loader.mu.RLock()
-		pending := loader.pendingInstructions
+		assert.Equal(t, 1, len(loader.pendingInstructions))
+		pending := loader.pendingInstructions[0]
 		loader.mu.RUnlock()
 		assert.Contains(t, pending, "Deploy to staging environment")
 		assert.Contains(t, pending, "Full args: staging")
 		assert.Contains(t, pending, "**Arguments:** staging")
-	})
-
-	t.Run("re-invocation guard", func(t *testing.T) {
-		loader := setupTestLoader(t)
-		tool := NewTool(loader)
-
-		// First call
-		_, err := tool.Call(ctx, &ToolInput{Skill: "code-reviewer"})
-		assert.NoError(t, err)
-
-		// Second call with same skill — should get guard message
-		result, err := tool.Call(ctx, &ToolInput{Skill: "code-reviewer"})
-		assert.NoError(t, err)
-		assert.False(t, result.IsError)
-		assert.Contains(t, result.Content[0].Text, "already active")
 	})
 
 	t.Run("skill not found", func(t *testing.T) {
@@ -216,75 +198,126 @@ func TestTool_EmptyLoader(t *testing.T) {
 	assert.Contains(t, result.Content[0].Text, "No skills are currently available")
 }
 
-// TestToolset tests
-
-func TestToolset_NoActiveSkill(t *testing.T) {
-	loader := setupTestLoader(t)
-	mockTools := []dive.Tool{
-		&mockTool{name: "Read"},
-		&mockTool{name: "Write"},
-		&mockTool{name: "Bash"},
-	}
-	ts := NewToolset(loader, mockTools)
-
-	tools, err := ts.Tools(context.Background())
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(tools))
-}
-
-func TestToolset_ActiveSkillNoAllowedTools(t *testing.T) {
-	loader := setupTestLoader(t)
-	loader.SetActiveSkill(&Skill{Name: "test", Config: SkillConfig{}})
-
-	mockTools := []dive.Tool{
-		&mockTool{name: "Read"},
-		&mockTool{name: "Write"},
-	}
-	ts := NewToolset(loader, mockTools)
-
-	tools, err := ts.Tools(context.Background())
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(tools))
-}
-
-func TestToolset_ActiveSkillWithAllowedTools(t *testing.T) {
-	loader := setupTestLoader(t)
-	loader.SetActiveSkill(&Skill{
-		Name: "reviewer",
-		Config: SkillConfig{
-			AllowedTools: []string{"Read", "Grep"},
+func TestTool_ShellExpansionBlockedForHTTPSkills(t *testing.T) {
+	loader := &Loader{
+		skills: map[string]*Skill{
+			"remote": {
+				Name:         "remote",
+				Description:  "A remote skill.",
+				Instructions: "Result: !{echo SHOULD_NOT_EXECUTE}",
+				SourceURI:    "https://example.com/skills/remote/SKILL.md",
+				Config:       SkillConfig{Description: "A remote skill."},
+			},
+			"local": {
+				Name:         "local",
+				Description:  "A local skill.",
+				Instructions: "Result: !{echo hello}",
+				SourceURI:    "file:///path/to/skill.md",
+				Config:       SkillConfig{Description: "A local skill."},
+			},
 		},
-	})
-
-	mockTools := []dive.Tool{
-		&mockTool{name: "Read"},
-		&mockTool{name: "Write"},
-		&mockTool{name: "Grep"},
-		&mockTool{name: "Bash"},
-		&mockTool{name: "Skill"},
 	}
-	ts := NewToolset(loader, mockTools)
 
-	tools, err := ts.Tools(context.Background())
+	// Shell expansion enabled globally
+	tool := NewTool(loader, WithToolShellExpansion(true))
+
+	// Remote skill: shell expansion should NOT run
+	_, err := tool.Call(context.Background(), &ToolInput{Skill: "remote"})
 	assert.NoError(t, err)
 
-	// Should get Read, Grep, and Skill (always included)
-	assert.Equal(t, 3, len(tools))
-	names := make(map[string]bool)
-	for _, tool := range tools {
-		names[tool.Name()] = true
-	}
-	assert.True(t, names["Read"])
-	assert.True(t, names["Grep"])
-	assert.True(t, names["Skill"])
-	assert.False(t, names["Write"])
-	assert.False(t, names["Bash"])
+	loader.mu.RLock()
+	assert.Equal(t, 1, len(loader.pendingInstructions))
+	remotePending := loader.pendingInstructions[0]
+	loader.mu.RUnlock()
+	// The !{...} placeholder should be left unexpanded
+	assert.Contains(t, remotePending, "!{echo SHOULD_NOT_EXECUTE}")
+
+	// Drain the queue
+	loader.mu.Lock()
+	loader.pendingInstructions = nil
+	loader.mu.Unlock()
+
+	// Local skill: shell expansion should run
+	_, err = tool.Call(context.Background(), &ToolInput{Skill: "local"})
+	assert.NoError(t, err)
+
+	loader.mu.RLock()
+	assert.Equal(t, 1, len(loader.pendingInstructions))
+	localPending := loader.pendingInstructions[0]
+	loader.mu.RUnlock()
+	// The !{...} placeholder should have been expanded
+	assert.NotContains(t, localPending, "!{echo hello}")
+	assert.Contains(t, localPending, "hello")
 }
 
-func TestToolset_Name(t *testing.T) {
-	loader := setupTestLoader(t)
-	ts := NewToolset(loader, nil)
-	assert.Equal(t, "skill-filter", ts.Name())
+func TestTool_ParallelSkillCalls(t *testing.T) {
+	loader := &Loader{
+		skills: map[string]*Skill{
+			"skill-a": {
+				Name:         "skill-a",
+				Description:  "Skill A.",
+				Instructions: "Instructions for A.",
+				SourceURI:    "file:///a.md",
+				Config:       SkillConfig{Description: "Skill A."},
+			},
+			"skill-b": {
+				Name:         "skill-b",
+				Description:  "Skill B.",
+				Instructions: "Instructions for B.",
+				SourceURI:    "file:///b.md",
+				Config:       SkillConfig{Description: "Skill B."},
+			},
+		},
+	}
+
+	tool := NewTool(loader)
+	ctx := context.Background()
+
+	// Simulate two parallel Skill tool calls (both push before either hook pops)
+	_, err := tool.Call(ctx, &ToolInput{Skill: "skill-a"})
+	assert.NoError(t, err)
+	_, err = tool.Call(ctx, &ToolInput{Skill: "skill-b"})
+	assert.NoError(t, err)
+
+	// Both should be queued
+	loader.mu.RLock()
+	assert.Equal(t, 2, len(loader.pendingInstructions))
+	loader.mu.RUnlock()
+
+	// First hook pop gets skill-a
+	hook := skillContentHook(loader)
+	hctx1 := &dive.HookContext{Tool: &mockTool{name: "Skill"}}
+	assert.NoError(t, hook(ctx, hctx1))
+	assert.Contains(t, hctx1.AdditionalContext, "Instructions for A.")
+
+	// Second hook pop gets skill-b
+	hctx2 := &dive.HookContext{Tool: &mockTool{name: "Skill"}}
+	assert.NoError(t, hook(ctx, hctx2))
+	assert.Contains(t, hctx2.AdditionalContext, "Instructions for B.")
+
+	// Queue is now empty
+	loader.mu.RLock()
+	assert.Equal(t, 0, len(loader.pendingInstructions))
+	loader.mu.RUnlock()
+}
+
+func TestIsLocal(t *testing.T) {
+	tests := []struct {
+		name      string
+		sourceURI string
+		want      bool
+	}{
+		{"empty URI is local", "", true},
+		{"file URI is local", "file:///path/to/skill.md", true},
+		{"http URI is not local", "http://example.com/skill.md", false},
+		{"https URI is not local", "https://example.com/skill.md", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Skill{SourceURI: tt.sourceURI}
+			assert.Equal(t, tt.want, s.IsLocal())
+		})
+	}
 }
 
 // mockTool implements dive.Tool for testing

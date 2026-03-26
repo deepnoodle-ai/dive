@@ -369,48 +369,6 @@ Instructions.`), 0644))
 	})
 }
 
-func TestLoader_ActiveSkill(t *testing.T) {
-	loader := NewLoader(LoaderOptions{
-		ProjectDir: "/nonexistent",
-		HomeDir:    "/nonexistent",
-	})
-
-	assert.Nil(t, loader.ActiveSkill())
-
-	s := &Skill{Name: "test"}
-	loader.SetActiveSkill(s)
-	assert.Equal(t, "test", loader.ActiveSkill().Name)
-
-	loader.SetActiveSkill(nil)
-	assert.Nil(t, loader.ActiveSkill())
-}
-
-func TestLoader_ActiveSkillClearedOnReload(t *testing.T) {
-	tmpDir := t.TempDir()
-	skillsDir := filepath.Join(tmpDir, ".dive", "skills")
-	assert.NoError(t, os.MkdirAll(skillsDir, 0755))
-
-	assert.NoError(t, os.WriteFile(filepath.Join(skillsDir, "test.md"), []byte(`---
-name: test
-description: Test skill.
----
-Instructions.`), 0644))
-
-	loader := NewLoader(LoaderOptions{
-		ProjectDir: tmpDir,
-		HomeDir:    "/nonexistent",
-	})
-	assert.NoError(t, loader.Load(context.Background()))
-
-	s, _ := loader.Get("test")
-	loader.SetActiveSkill(s)
-	assert.NotNil(t, loader.ActiveSkill())
-
-	// Reload should clear active skill
-	assert.NoError(t, loader.Load(context.Background()))
-	assert.Nil(t, loader.ActiveSkill())
-}
-
 func TestLoader_ThreadSafety(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillsDir := filepath.Join(tmpDir, ".dive", "skills")
@@ -440,7 +398,6 @@ Instructions.`), 0644))
 			loader.Skills()
 			loader.Commands()
 			loader.Match("test")
-			loader.ActiveSkill()
 		}()
 	}
 	wg.Wait()

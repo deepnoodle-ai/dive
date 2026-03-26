@@ -51,14 +51,15 @@ type Loader struct {
 	providers []Provider
 	logger    Logger
 
-	mu          sync.RWMutex
-	skills      map[string]*Skill
-	triggers    map[string]*regexp.Regexp // compiled trigger patterns
-	activeSkill *Skill
+	mu       sync.RWMutex
+	skills   map[string]*Skill
+	triggers map[string]*regexp.Regexp // compiled trigger patterns
 
-	// pendingInstructions holds the expanded skill content from the last
-	// Skill tool call, for the PostToolUse hook to inject as AdditionalContext.
-	pendingInstructions string
+	// pendingInstructions is a queue of expanded skill content from Skill
+	// tool calls, for the PostToolUse hook to inject as AdditionalContext.
+	// A queue (not a single string) supports parallel Skill tool calls
+	// in a single response — each Call() pushes, each hook invocation pops.
+	pendingInstructions []string
 }
 
 // NewLoader creates a new skill loader with the given options.
@@ -83,10 +84,11 @@ func NewLoader(opts LoaderOptions) *Loader {
 	}
 
 	return &Loader{
-		providers: providers,
-		logger:    opts.Logger,
-		skills:    make(map[string]*Skill),
-		triggers:  make(map[string]*regexp.Regexp),
+		providers:           providers,
+		logger:              opts.Logger,
+		skills:              make(map[string]*Skill),
+		triggers:            make(map[string]*regexp.Regexp),
+		pendingInstructions: nil,
 	}
 }
 
@@ -137,9 +139,7 @@ func (l *Loader) Load(ctx context.Context) error {
 	l.mu.Lock()
 	l.skills = allSkills
 	l.triggers = triggers
-	// Clear active skill and pending state — they may be stale
-	l.activeSkill = nil
-	l.pendingInstructions = ""
+	l.pendingInstructions = nil
 	l.mu.Unlock()
 
 	return nil
@@ -230,20 +230,6 @@ func (l *Loader) Match(input string) []*Skill {
 		return matched[i].Name < matched[j].Name
 	})
 	return matched
-}
-
-// ActiveSkill returns the currently active skill, or nil.
-func (l *Loader) ActiveSkill() *Skill {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.activeSkill
-}
-
-// SetActiveSkill sets the active skill. Pass nil to clear.
-func (l *Loader) SetActiveSkill(s *Skill) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.activeSkill = s
 }
 
 // sortedSkills returns skills matching the predicate, sorted by name.

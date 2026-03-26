@@ -115,25 +115,19 @@ func (t *toolImpl) Call(ctx context.Context, input *ToolInput) (*dive.ToolResult
 		)), nil
 	}
 
-	// Guard against re-invoking an already active skill
-	if active := t.loader.ActiveSkill(); active != nil && active.Name == s.Name {
-		return dive.NewToolResultText(
-			fmt.Sprintf("Skill %q is already active.", s.Name),
-		).WithDisplay(fmt.Sprintf("Skill already active: %s", s.Name)), nil
-	}
-
-	// Set as active skill
-	t.loader.SetActiveSkill(s)
-
 	// Always expand variables (handles !{command} even with empty args).
-	// On shell expansion error, the partially expanded result is still usable.
-	instructions, _ := s.Expand(ctx, input.Args, WithShellExpansion(t.config.shellExpansion))
+	// Shell expansion is only allowed for local skills — remote skills
+	// (HTTP-loaded) never get !{command} substitution regardless of config.
+	allowShell := t.config.shellExpansion && s.IsLocal()
+	instructions, _ := s.Expand(ctx, input.Args, WithShellExpansion(allowShell))
 
-	// Store expanded instructions for the PostToolUse hook to inject
+	// Queue expanded instructions for the PostToolUse hook to inject
 	// as AdditionalContext (matching Claude Code's pattern where the tool
-	// returns a brief acknowledgment and the content appears separately)
+	// returns a brief acknowledgment and the content appears separately).
+	// Uses a queue to support parallel Skill tool calls in one response.
 	t.loader.mu.Lock()
-	t.loader.pendingInstructions = formatSkillContent(s, input.Args, instructions)
+	t.loader.pendingInstructions = append(t.loader.pendingInstructions,
+		formatSkillContent(s, input.Args, instructions))
 	t.loader.mu.Unlock()
 
 	// Tool result is brief — the actual instructions are injected by the

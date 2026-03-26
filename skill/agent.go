@@ -10,9 +10,9 @@ import (
 // ConfigureAgent sets up skill support on the given AgentOptions.
 // Call this before dive.NewAgent(). It:
 //   - Adds the Skill tool to opts.Tools
-//   - Wraps opts.Tools with a skill Toolset in opts.Toolsets
 //   - Appends skill usage rules to opts.SystemPrompt
 //   - Adds a PreGenerationHook for catalog injection into conversation context
+//   - Adds a PostToolUseHook for skill content injection
 //
 // This follows the same pattern as setting AgentOptions.Session — one call
 // wires up all the internal machinery.
@@ -45,9 +45,6 @@ func ConfigureAgent(opts *dive.AgentOptions, loader *Loader, cfgOpts ...ConfigOp
 	}
 	skillTool := NewTool(loader, toolOpts...)
 	opts.Tools = append(opts.Tools, skillTool)
-
-	// Wrap all tools with the skill Toolset for allowed-tools filtering
-	opts.Toolsets = append(opts.Toolsets, NewToolset(loader, opts.Tools))
 
 	// Append skill usage rules to system prompt
 	if opts.SystemPrompt != "" {
@@ -90,8 +87,11 @@ func skillContentHook(loader *Loader) dive.PostToolUseHook {
 			return nil
 		}
 		loader.mu.Lock()
-		content := loader.pendingInstructions
-		loader.pendingInstructions = ""
+		var content string
+		if len(loader.pendingInstructions) > 0 {
+			content = loader.pendingInstructions[0]
+			loader.pendingInstructions = loader.pendingInstructions[1:]
+		}
 		loader.mu.Unlock()
 
 		if content != "" {
@@ -119,6 +119,11 @@ func catalogHook(loader *Loader) dive.PreGenerationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		hash := CatalogHash(loader)
 		if hash == "" {
+			// No skills — remove stale catalog block if present
+			if lastHash != "" {
+				hctx.Messages = dive.RemoveSystemReminder(hctx.Messages, skillReminderName)
+				lastHash = ""
+			}
 			return nil
 		}
 		if hash == lastHash {

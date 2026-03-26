@@ -36,6 +36,8 @@
 //	skillTool := skill.NewTool(loader)
 package skill
 
+import "strings"
+
 // Skill represents a loaded skill or slash command with metadata and instructions.
 type Skill struct {
 	// Name is the unique identifier for the skill, derived from YAML
@@ -63,6 +65,12 @@ type Skill struct {
 
 	// Config holds the full parsed frontmatter.
 	Config SkillConfig
+}
+
+// IsLocal returns true if the skill was loaded from the local filesystem.
+// Only local skills are eligible for !{command} shell expansion.
+func (s *Skill) IsLocal() bool {
+	return s.SourceURI == "" || strings.HasPrefix(s.SourceURI, "file://")
 }
 
 // IsCommand returns true if this skill is a slash command (user-invocable only).
