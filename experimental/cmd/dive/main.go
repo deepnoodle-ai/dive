@@ -15,12 +15,12 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
 	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/dive/session"
+	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"

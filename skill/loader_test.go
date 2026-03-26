@@ -501,7 +501,7 @@ type mockProvider struct {
 	skills []*Skill
 }
 
-func (p *mockProvider) Name() string                              { return "mock" }
+func (p *mockProvider) Name() string                             { return "mock" }
 func (p *mockProvider) Load(_ context.Context) ([]*Skill, error) { return p.skills, nil }
 
 func TestLoader_SourceField(t *testing.T) {

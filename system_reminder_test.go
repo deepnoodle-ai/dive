@@ -150,4 +150,3 @@ func TestHasSystemReminder(t *testing.T) {
 func TestHasSystemReminder_NoMessages(t *testing.T) {
 	assert.False(t, HasSystemReminder(nil, "skills"))
 }
-

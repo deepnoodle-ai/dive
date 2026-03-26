@@ -154,7 +154,6 @@ type DefaultFSOptions struct {
 //  9. homeDir/.claude/skills/
 //  10. homeDir/.claude/commands/
 //  11. additionalPaths...
-//
 func NewDefaultFilesystemProvider(opts DefaultFSOptions) Provider {
 	projectDir := opts.ProjectDir
 	if projectDir == "" {

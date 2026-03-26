@@ -14,9 +14,9 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"
+	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -191,11 +191,11 @@ type DialogOption struct {
 // except for immutable fields (agent, workspaceDir, modelName, runner).
 // Background goroutines send events via runner.SendEvent() for state changes.
 type App struct {
-	agent         *dive.Agent
-	sessionStore  session.Store
-	workspaceDir  string
-	modelName     string
-	skillLoader *skill.Loader
+	agent        *dive.Agent
+	sessionStore session.Store
+	workspaceDir string
+	modelName    string
+	skillLoader  *skill.Loader
 
 	// Session management
 	resumeSessionID string           // Session ID to resume (from --resume flag)

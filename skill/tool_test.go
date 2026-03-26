@@ -292,8 +292,8 @@ type mockTool struct {
 	name string
 }
 
-func (m *mockTool) Name() string                                                      { return m.name }
-func (m *mockTool) Description() string                                               { return "" }
-func (m *mockTool) Schema() *schema.Schema                                            { return nil }
-func (m *mockTool) Annotations() *dive.ToolAnnotations                                { return nil }
+func (m *mockTool) Name() string                                            { return m.name }
+func (m *mockTool) Description() string                                     { return "" }
+func (m *mockTool) Schema() *schema.Schema                                  { return nil }
+func (m *mockTool) Annotations() *dive.ToolAnnotations                      { return nil }
 func (m *mockTool) Call(_ context.Context, _ any) (*dive.ToolResult, error) { return nil, nil }
