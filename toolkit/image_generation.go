@@ -76,8 +76,8 @@ func (t *imageGenerationTool) Schema() *schema.Schema {
 			},
 			"aspect_ratio": {
 				Type:        "string",
-				Description: "Aspect ratio: 1:1 (square), 16:9 (landscape), 9:16 (portrait), 4:3, 3:4",
-				Enum:        []any{"1:1", "16:9", "9:16", "4:3", "3:4"},
+				Description: "Aspect ratio: 1:1 (square), 16:9 (landscape), 9:16 (portrait)",
+				Enum:        []any{"1:1", "16:9", "9:16"},
 			},
 			"output_path": {
 				Type:        "string",
@@ -127,14 +127,17 @@ func (t *imageGenerationTool) Call(ctx context.Context, input *ImageGenerationIn
 		return NewToolResultError(fmt.Sprintf("image generation failed: %v", err)), nil
 	}
 
-	// Determine output path
+	// Determine output path, constrained to workDir
 	outPath := input.OutputPath
 	if outPath == "" {
 		slug := media.SlugifyPrompt(input.Prompt, 40)
 		outPath = filepath.Join(t.workDir, slug+result.Format.FileExtension())
-	}
-	if !filepath.IsAbs(outPath) {
-		outPath = filepath.Join(t.workDir, outPath)
+	} else {
+		resolved, err := validateOutputPath(input.OutputPath, t.workDir)
+		if err != nil {
+			return NewToolResultError(err.Error()), nil
+		}
+		outPath = resolved
 	}
 
 	outPath, err = result.WriteTo(outPath)
@@ -145,4 +148,26 @@ func (t *imageGenerationTool) Call(ctx context.Context, input *ImageGenerationIn
 	absPath, _ := filepath.Abs(outPath)
 	display := fmt.Sprintf("Generated image: %s (%dx%d %s)", absPath, result.Width, result.Height, result.Format)
 	return dive.NewToolResultText(absPath).WithDisplay(display), nil
+}
+
+// validateOutputPath validates and resolves a user-provided output path,
+// ensuring it is relative and contained within workDir. Uses PathValidator to
+// resolve symlinks, preventing both path traversal and symlink-based attacks.
+func validateOutputPath(outputPath, workDir string) (string, error) {
+	if filepath.IsAbs(outputPath) {
+		return "", fmt.Errorf("output_path must be a relative path")
+	}
+	validator, err := NewPathValidator(workDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid working directory: %w", err)
+	}
+	resolved := filepath.Join(workDir, outputPath)
+	if err := validator.ValidateWrite(resolved); err != nil {
+		return "", fmt.Errorf("output_path must be within the working directory")
+	}
+	realPath, err := validator.ResolvePath(resolved)
+	if err != nil {
+		return "", fmt.Errorf("invalid output path: %w", err)
+	}
+	return realPath, nil
 }

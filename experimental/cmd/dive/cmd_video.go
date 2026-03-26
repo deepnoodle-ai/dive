@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -65,7 +64,7 @@ func runVideo(ctx *cli.Context) error {
 		}
 	}()
 
-	result, err := media.GenerateVideo(context.Background(), prompt, opts...)
+	result, err := media.GenerateVideo(ctx.Context(), prompt, opts...)
 	close(done)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)

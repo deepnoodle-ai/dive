@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -45,21 +45,48 @@ func runImage(ctx *cli.Context) error {
 		}
 		opts = append(opts, media.WithOutputFormat(format))
 	}
+	// Load reference images
+	refPaths := ctx.Strings("ref")
+	for _, refPath := range refPaths {
+		data, err := os.ReadFile(refPath)
+		if err != nil {
+			return fmt.Errorf("reading reference image %q: %w", refPath, err)
+		}
+		opts = append(opts, media.WithReferenceImage(data))
+	}
+
+	editing := ctx.Bool("edit")
+	if editing && len(refPaths) == 0 {
+		return fmt.Errorf("--edit requires at least one --ref image")
+	}
+
 	count := ctx.Int("count")
 	if count < 1 {
 		count = 1
 	}
 	opts = append(opts, media.WithCount(count))
+	opts = append(opts, media.WithTimeout(5*time.Minute))
 
-	timeout := 5 * time.Minute
-	opts = append(opts, media.WithTimeout(timeout))
-
-	fmt.Printf("Generating image with %s...\n", model)
+	var results []*media.ImageResult
+	if editing {
+		fmt.Printf("Editing image with %s...\n", model)
+	} else {
+		fmt.Printf("Generating image with %s...\n", model)
+	}
 	start := time.Now()
 
-	results, err := media.GenerateImageBatch(context.Background(), prompt, opts...)
-	if err != nil {
-		return fmt.Errorf("generation failed: %w", err)
+	if editing {
+		result, err := media.EditImage(ctx.Context(), prompt, opts...)
+		if err != nil {
+			return fmt.Errorf("editing failed: %w", err)
+		}
+		results = []*media.ImageResult{result}
+	} else {
+		var err error
+		results, err = media.GenerateImageBatch(ctx.Context(), prompt, opts...)
+		if err != nil {
+			return fmt.Errorf("generation failed: %w", err)
+		}
 	}
 
 	elapsed := time.Since(start)
@@ -80,10 +107,11 @@ func runImage(ctx *cli.Context) error {
 			outPath = fmt.Sprintf("%s-%d%s", base, i+1, ext)
 		}
 
-		outPath, err = result.WriteTo(outPath)
-		if err != nil {
-			return fmt.Errorf("writing image: %w", err)
+		written, writeErr := result.WriteTo(outPath)
+		if writeErr != nil {
+			return fmt.Errorf("writing image: %w", writeErr)
 		}
+		outPath = written
 
 		absPath, err := filepath.Abs(outPath)
 		if err != nil {

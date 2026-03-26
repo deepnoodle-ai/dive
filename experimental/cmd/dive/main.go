@@ -33,7 +33,7 @@ func main() {
 
 	// Image generation subcommand
 	app.Command("image").
-		Description("Generate an image from a text prompt").
+		Description("Generate or edit an image from a text prompt").
 		Args("prompt").
 		Flags(
 			cli.String("model", "m").
@@ -41,7 +41,7 @@ func main() {
 				Help("Model to use (default: gpt-image-1)"),
 			cli.String("aspect", "").
 				Default("").
-				Help("Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4"),
+				Help("Aspect ratio: 1:1, 16:9, 9:16"),
 			cli.String("format", "").
 				Default("").
 				Help("Output format: png, jpeg, webp"),
@@ -51,6 +51,11 @@ func main() {
 			cli.Int("count", "n").
 				Default(1).
 				Help("Number of images to generate"),
+			cli.Strings("ref", "r").
+				Help("Reference image file path (can be specified multiple times)"),
+			cli.Bool("edit", "e").
+				Default(false).
+				Help("Edit reference images instead of generating new ones"),
 			cli.Bool("open", "").
 				Default(false).
 				Help("Open result in default viewer"),
@@ -70,7 +75,7 @@ func main() {
 				Help("Aspect ratio: 16:9, 9:16, 1:1"),
 			cli.String("duration", "d").
 				Default("8s").
-				Help("Video duration: 4s, 8s, 12s"),
+				Help("Video duration (e.g. 8s, 16s, 20s). Exact duration depends on provider."),
 			cli.String("out", "o").
 				Default("").
 				Help("Output file path"),

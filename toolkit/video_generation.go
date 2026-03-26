@@ -78,8 +78,7 @@ func (t *videoGenerationTool) Schema() *schema.Schema {
 			},
 			"duration": {
 				Type:        "string",
-				Description: "Video duration: 4s, 8s, or 12s",
-				Enum:        []any{"4s", "8s", "12s"},
+				Description: "Video duration as a Go duration string (e.g. 8s, 16s, 20s). Exact duration depends on the provider.",
 			},
 			"aspect_ratio": {
 				Type:        "string",
@@ -132,7 +131,7 @@ func (t *videoGenerationTool) Call(ctx context.Context, input *VideoGenerationIn
 		return NewToolResultError(fmt.Sprintf("video generation failed: %v", err)), nil
 	}
 
-	// Determine output path
+	// Determine output path, constrained to workDir
 	outPath := input.OutputPath
 	if outPath == "" {
 		slug := media.SlugifyPrompt(input.Prompt, 40)
@@ -141,9 +140,12 @@ func (t *videoGenerationTool) Call(ctx context.Context, input *VideoGenerationIn
 			ext = ".webm"
 		}
 		outPath = filepath.Join(t.workDir, slug+ext)
-	}
-	if !filepath.IsAbs(outPath) {
-		outPath = filepath.Join(t.workDir, outPath)
+	} else {
+		resolved, err := validateOutputPath(input.OutputPath, t.workDir)
+		if err != nil {
+			return NewToolResultError(err.Error()), nil
+		}
+		outPath = resolved
 	}
 
 	outPath, err = result.WriteTo(outPath)

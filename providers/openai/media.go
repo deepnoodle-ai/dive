@@ -267,7 +267,9 @@ func videoSizeToAspectRatio(size string) media.AspectRatio {
 }
 
 // durationToSeconds maps a time.Duration to an OpenAI Sora-compatible seconds string.
-// Sora supports discrete values: "8", "16", "20".
+// Sora only supports discrete values: 8, 16, and 20 seconds.
+// Durations are bucketed/clamped to the nearest supported value:
+// <16s → "8", 16–19s → "16", ≥20s → "20".
 func durationToSeconds(d time.Duration) string {
 	sec := int(d.Seconds())
 	if sec >= 20 {
