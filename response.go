@@ -29,6 +29,10 @@ const (
 	// ResponseItemTypeModelEvent indicates a streaming event from the LLM.
 	// The Event field contains the raw LLM event for real-time UI updates.
 	ResponseItemTypeModelEvent ResponseItemType = "model_event"
+
+	// ResponseItemTypeToolStream indicates streaming output from a tool during execution.
+	// The ToolStream field contains the tool call ID and a chunk of text.
+	ResponseItemTypeToolStream ResponseItemType = "tool_stream"
 )
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.
@@ -49,12 +53,21 @@ type ResponseItem struct {
 	// ToolCallResult is set if the response item is a tool call result
 	ToolCallResult *ToolCallResult `json:"tool_call_result,omitempty"`
 
+	// ToolStream is set if the response item is streaming tool output
+	ToolStream *ToolStreamEvent `json:"tool_stream,omitempty"`
+
 	// Extension holds optional data from experimental packages.
 	// The concrete type depends on the ResponseItemType.
 	Extension any `json:"extension,omitempty"`
 
 	// Usage contains token usage information, if applicable
 	Usage *llm.Usage `json:"usage,omitempty"`
+}
+
+// ToolStreamEvent contains a chunk of streaming output from a tool.
+type ToolStreamEvent struct {
+	ToolCallID string `json:"tool_call_id"`
+	Text       string `json:"text"`
 }
 
 // Response represents the output from an Agent's response generation.

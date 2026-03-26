@@ -90,23 +90,20 @@ type subagentEvent struct {
 	item   *dive.ResponseItem
 }
 
+// toolStreamEvent carries a chunk of streaming output for a tool call.
+// Used by any tool that produces incremental output (Bash stdout, sub-agents).
+type toolStreamEvent struct {
+	baseEvent
+	toolCallID string
+	text       string
+}
+
 // backgroundTaskDoneEvent is sent when a background task completes while
 // the main agent is idle, triggering an automatic retrieval turn.
 type backgroundTaskDoneEvent struct {
 	baseEvent
 	taskID      string
 	description string
-}
-
-// SubAgentPanel tracks the UI state for a running or completed sub-agent.
-type SubAgentPanel struct {
-	TaskID      string
-	Description string
-	Status      extended.TaskStatus
-	StreamText  string // rolling buffer for live display
-	StartTime   time.Time
-	EndTime     time.Time
-	Output      string // final output for completed panels
 }
 
 // MessageType distinguishes regular messages from tool calls
@@ -296,12 +293,12 @@ type App struct {
 	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
 	contextWindowMax int        // Max context window tokens for the model
 
-	// Sub-agent panel state
-	subagentPanels           map[string]*SubAgentPanel // taskID -> panel
-	subagentOrder            []string                  // taskIDs in creation order
-	taskIDToMsgIndex         map[string]int            // task ID -> original Task message index
-	taskOutputRedirect       map[string]int            // TaskOutput tool call ID -> Task message index to update
-	pendingBackgroundTasks   map[string]string         // taskID -> description, for tasks still running after main turn ends
+	// Streaming tool output state
+	toolStreamBuffers map[string]string // tool call ID -> accumulated streaming text
+	taskIDToMsgIndex  map[string]int    // sub-agent task ID -> original Task message index
+
+	// Background task auto-retrieval state
+	pendingBackgroundTasks   map[string]string         // taskID -> description
 	completedBackgroundTasks []backgroundTaskDoneEvent // queued completions waiting to be retrieved
 	backgroundFlushTimer     *time.Timer               // debounce timer for batching completions
 }
@@ -345,10 +342,8 @@ func NewApp(
 		initialPrompt:          initialPrompt,
 		compactionConfig:       compactionConfig,
 		contextWindowMax:       contextWindowForModel(modelName),
-		subagentPanels:         make(map[string]*SubAgentPanel),
-		subagentOrder:          make([]string, 0),
+		toolStreamBuffers:      make(map[string]string),
 		taskIDToMsgIndex:       make(map[string]int),
-		taskOutputRedirect:     make(map[string]int),
 		pendingBackgroundTasks: make(map[string]string),
 	}
 }
@@ -718,6 +713,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
 		a.handleCompaction(e.event)
+	case toolStreamEvent:
+		a.handleToolStream(e)
 	case subagentEvent:
 		a.handleSubagentEvent(e)
 	case backgroundTaskDoneEvent:
@@ -1065,6 +1062,14 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 				a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
 			case dive.ResponseItemTypeToolCallResult:
 				a.runner.SendEvent(toolResultEvent{baseEvent: newBaseEvent(), result: item.ToolCallResult})
+			case dive.ResponseItemTypeToolStream:
+				if item.ToolStream != nil {
+					a.runner.SendEvent(toolStreamEvent{
+						baseEvent:  newBaseEvent(),
+						toolCallID: item.ToolStream.ToolCallID,
+						text:       item.ToolStream.Text,
+					})
+				}
 			}
 			return nil
 		}),
@@ -1394,10 +1399,8 @@ func (a *App) handleProcessingEnd(err error) {
 	a.processing = false
 	a.currentMessage = nil
 	a.toolCallIndex = make(map[string]int)
-	a.subagentPanels = make(map[string]*SubAgentPanel)
-	a.subagentOrder = make([]string, 0)
+	a.toolStreamBuffers = make(map[string]string)
 	a.taskIDToMsgIndex = make(map[string]int)
-	a.taskOutputRedirect = make(map[string]int)
 
 	// Now print to scrollback - the live view will be re-rendered with correct height
 	a.printRecentMessagesToScrollback()
@@ -1408,8 +1411,28 @@ func (a *App) handleProcessingEnd(err error) {
 	}
 }
 
-// handleSubagentEvent routes streaming events from sub-agents to their
-// corresponding Task tool call message, updating the result line in-place.
+// handleToolStream updates a tool call's result line with streaming output.
+// Used by any tool that produces incremental output (Bash stdout, sub-agents).
+func (a *App) handleToolStream(e toolStreamEvent) {
+	idx, ok := a.toolCallIndex[e.toolCallID]
+	if !ok {
+		return
+	}
+	buf := a.toolStreamBuffers[e.toolCallID] + e.text
+	if len(buf) > 500 {
+		buf = buf[len(buf)-500:]
+	}
+	a.toolStreamBuffers[e.toolCallID] = buf
+	if last := lastNonEmptyLine(buf); last != "" {
+		if len(last) > 80 {
+			last = last[:77] + "..."
+		}
+		a.messages[idx].ToolResultLines = []string{last}
+	}
+}
+
+// handleSubagentEvent routes streaming events from sub-agents, converting
+// them into generic toolStreamEvents for display.
 func (a *App) handleSubagentEvent(e subagentEvent) {
 	item := e.item
 
@@ -1418,52 +1441,45 @@ func (a *App) handleSubagentEvent(e subagentEvent) {
 		if status, ok := item.Extension.(*extended.SubagentStatusEvent); ok {
 			if status.Status == extended.TaskStatusCompleted || status.Status == extended.TaskStatusFailed {
 				delete(a.pendingBackgroundTasks, e.taskID)
-				// Queue the completion
 				a.completedBackgroundTasks = append(a.completedBackgroundTasks, backgroundTaskDoneEvent{
 					baseEvent:   newBaseEvent(),
 					taskID:      status.TaskID,
 					description: status.Description,
 				})
-				// If idle, schedule a debounced flush
 				if !a.processing {
 					a.scheduleBackgroundFlush()
 				}
 				return
 			}
-			// Track running background tasks by description
 			if status.Status == extended.TaskStatusRunning {
 				a.pendingBackgroundTasks[status.TaskID] = status.Description
 			}
 		}
 	}
 
+	// Route sub-agent streaming to the Task tool call's message
 	msgIdx, ok := a.taskIDToMsgIndex[e.taskID]
 	if !ok {
 		return
 	}
+	// Find the tool call ID for this message so we can use the generic stream buffer
+	callID := a.messages[msgIdx].ToolID
 
-	// Handle streaming text — update the tool call's result line
 	if item.Type == dive.ResponseItemTypeModelEvent {
 		if item.Event != nil && item.Event.Delta != nil && item.Event.Delta.Text != "" {
-			panel := a.getOrCreatePanel(e.taskID)
-			panel.StreamText += item.Event.Delta.Text
-			if len(panel.StreamText) > 500 {
-				panel.StreamText = panel.StreamText[len(panel.StreamText)-500:]
-			}
-			if last := lastNonEmptyLine(panel.StreamText); last != "" {
-				if len(last) > 80 {
-					last = last[:77] + "..."
-				}
-				a.messages[msgIdx].ToolResultLines = []string{last}
-			}
+			a.handleToolStream(toolStreamEvent{
+				baseEvent:  newBaseEvent(),
+				toolCallID: callID,
+				text:       item.Event.Delta.Text,
+			})
 		}
 	}
-
-	// Handle tool calls — show tool name in the result line
 	if item.Type == dive.ResponseItemTypeToolCall && item.ToolCall != nil {
-		panel := a.getOrCreatePanel(e.taskID)
-		panel.StreamText += fmt.Sprintf("\n[%s] ", item.ToolCall.Name)
-		a.messages[msgIdx].ToolResultLines = []string{fmt.Sprintf("[%s]", item.ToolCall.Name)}
+		a.handleToolStream(toolStreamEvent{
+			baseEvent:  newBaseEvent(),
+			toolCallID: callID,
+			text:       fmt.Sprintf("\n[%s] ", item.ToolCall.Name),
+		})
 	}
 }
 
@@ -1494,16 +1510,6 @@ func (a *App) scheduleBackgroundFlush() {
 	a.backgroundFlushTimer = time.AfterFunc(500*time.Millisecond, func() {
 		a.runner.SendEvent(backgroundTaskDoneEvent{baseEvent: newBaseEvent()})
 	})
-}
-
-// getOrCreatePanel returns the streaming buffer for a task, creating one if needed.
-func (a *App) getOrCreatePanel(taskID string) *SubAgentPanel {
-	panel, ok := a.subagentPanels[taskID]
-	if !ok {
-		panel = &SubAgentPanel{TaskID: taskID}
-		a.subagentPanels[taskID] = panel
-	}
-	return panel
 }
 
 // parseTaskID extracts a task ID from text like "Task started in background. Task ID: task_abc12345\n..."

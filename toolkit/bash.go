@@ -1,10 +1,12 @@
 package toolkit
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -264,6 +266,7 @@ func (t *BashTool) Call(ctx context.Context, input *BashInput) (*dive.ToolResult
 
 // execute runs a command with the given timeout and returns its output.
 // It handles context cancellation, timeout enforcement, and output truncation.
+// If dive.StreamOutput is available in the context, stdout is streamed line by line.
 func (t *BashTool) execute(ctx context.Context, command, workingDir string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -277,11 +280,43 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 		cmd.Dir = workingDir
 	}
 
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
+	// Set up stdout streaming via pipe if streaming is available
+	var stdoutBuf bytes.Buffer
+	stdoutPipe, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		// Fall back to buffer if pipe fails
+		cmd.Stdout = &stdoutBuf
+		stdoutPipe = nil
+	}
+
+	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
-	runErr := cmd.Run()
+	runErr := cmd.Start()
+	if runErr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", "", -1, fmt.Errorf("command timed out after %s", timeout)
+		}
+		return "", "", -1, fmt.Errorf("error: %s", runErr.Error())
+	}
+
+	// Read stdout, streaming lines as they arrive
+	if stdoutPipe != nil {
+		scanner := bufio.NewScanner(stdoutPipe)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text() + "\n"
+			stdoutBuf.WriteString(line)
+			dive.StreamOutput(ctx, line)
+		}
+		// Drain any remaining data that didn't end with newline
+		if remaining, readErr := io.ReadAll(stdoutPipe); readErr == nil && len(remaining) > 0 {
+			stdoutBuf.Write(remaining)
+			dive.StreamOutput(ctx, string(remaining))
+		}
+	}
+
+	runErr = cmd.Wait()
 	exitCode = 0
 	if runErr != nil {
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
