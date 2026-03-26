@@ -2,19 +2,14 @@ package dive
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
-// patternCache memoizes compiled regexps for named system-reminder blocks.
-var patternCache sync.Map // string -> *regexp.Regexp
-
-// SetSystemReminder inserts or replaces a named <system-reminder> block in
-// the first user message's text content. If the block already exists (matched
-// by name), it is replaced in place. Otherwise it is appended.
+// SetSystemReminder inserts or replaces a named <system-reminder> block as a
+// separate text content block in the first user message. Each reminder gets
+// its own content block, keeping user text pristine.
 //
 // This provides a stable, cache-friendly location for injecting context that
 // persists across generations. Placing reminders in the first user message
@@ -36,28 +31,26 @@ func SetSystemReminder(messages []*llm.Message, name, content string) []*llm.Mes
 		if msg.Role != llm.User {
 			continue
 		}
-		// Find the first text content block
-		for _, c := range msg.Content {
+		// Look for an existing block with the same name
+		for i, c := range msg.Content {
 			tc, ok := c.(*llm.TextContent)
 			if !ok {
 				continue
 			}
-			// Try to replace existing block with same name
-			if replaced := replaceBlock(tc, name, block); replaced {
+			if isReminderBlock(tc.Text, name) {
+				// Replace in place
+				msg.Content[i] = &llm.TextContent{Text: block}
 				return messages
 			}
-			// Append new block
-			tc.Text = strings.TrimRight(tc.Text, "\n") + "\n" + block
-			return messages
 		}
-		// No text content — add one
+		// No existing block — append a new content block
 		msg.Content = append(msg.Content, &llm.TextContent{Text: block})
 		return messages
 	}
 
-	// No user message — create one
+	// No user message — create one with the reminder as the sole content block
 	return append([]*llm.Message{
-		llm.NewUserTextMessage(block),
+		{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: block}}},
 	}, messages...)
 }
 
@@ -68,14 +61,17 @@ func RemoveSystemReminder(messages []*llm.Message, name string) []*llm.Message {
 		if msg.Role != llm.User {
 			continue
 		}
-		for _, c := range msg.Content {
+		for i, c := range msg.Content {
 			tc, ok := c.(*llm.TextContent)
 			if !ok {
 				continue
 			}
-			tc.Text = removeBlock(tc.Text, name)
-			return messages
+			if isReminderBlock(tc.Text, name) {
+				msg.Content = append(msg.Content[:i], msg.Content[i+1:]...)
+				return messages
+			}
 		}
+		return messages
 	}
 	return messages
 }
@@ -92,8 +88,11 @@ func HasSystemReminder(messages []*llm.Message, name string) bool {
 			if !ok {
 				continue
 			}
-			return blockPattern(name).MatchString(tc.Text)
+			if isReminderBlock(tc.Text, name) {
+				return true
+			}
 		}
+		return false
 	}
 	return false
 }
@@ -102,30 +101,9 @@ func formatBlock(name, content string) string {
 	return fmt.Sprintf("<system-reminder name=%q>\n%s\n</system-reminder>", name, content)
 }
 
-func blockPattern(name string) *regexp.Regexp {
-	if cached, ok := patternCache.Load(name); ok {
-		return cached.(*regexp.Regexp)
-	}
-	escaped := regexp.QuoteMeta(name)
-	re := regexp.MustCompile(
-		`(?s)\n?<system-reminder name="` + escaped + `">\n.*?\n</system-reminder>\n?`,
-	)
-	patternCache.Store(name, re)
-	return re
-}
-
-func replaceBlock(tc *llm.TextContent, name, newBlock string) bool {
-	pat := blockPattern(name)
-	if !pat.MatchString(tc.Text) {
-		return false
-	}
-	tc.Text = pat.ReplaceAllString(tc.Text, "\n"+newBlock+"\n")
-	tc.Text = strings.TrimLeft(tc.Text, "\n")
-	return true
-}
-
-func removeBlock(text, name string) string {
-	pat := blockPattern(name)
-	result := pat.ReplaceAllString(text, "")
-	return strings.TrimRight(result, "\n")
+// isReminderBlock returns true if the text is a system-reminder block with
+// the given name. It checks for the opening tag at the start of the text.
+func isReminderBlock(text, name string) bool {
+	prefix := fmt.Sprintf("<system-reminder name=%q>", name)
+	return strings.HasPrefix(text, prefix)
 }

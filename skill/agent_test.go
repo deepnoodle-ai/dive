@@ -189,11 +189,15 @@ func TestCatalogHook_InjectsIntoFirstUserMessage(t *testing.T) {
 	err := hook(context.Background(), hctx)
 	assert.NoError(t, err)
 
-	text := hctx.Messages[0].Content[0].(*llm.TextContent).Text
-	assert.Contains(t, text, `<system-reminder name="skills">`)
-	assert.Contains(t, text, "The following skills are available")
-	assert.Contains(t, text, "reviewer: Review code.")
-	assert.Contains(t, text, "</system-reminder>")
+	// User text should be unchanged
+	assert.Equal(t, "Review my code", hctx.Messages[0].Content[0].(*llm.TextContent).Text)
+	// Catalog should be a separate content block
+	assert.Equal(t, 2, len(hctx.Messages[0].Content))
+	reminderText := hctx.Messages[0].Content[1].(*llm.TextContent).Text
+	assert.Contains(t, reminderText, `<system-reminder name="skills">`)
+	assert.Contains(t, reminderText, "The following skills are available")
+	assert.Contains(t, reminderText, "reviewer: Review code.")
+	assert.Contains(t, reminderText, "</system-reminder>")
 }
 
 func TestCatalogHook_StableAcrossGenerations(t *testing.T) {
@@ -209,39 +213,32 @@ func TestCatalogHook_StableAcrossGenerations(t *testing.T) {
 
 	hook := catalogHook(loader)
 
-	// First generation — injects into first user message
+	// First generation — injects catalog as separate content block
 	firstMsg := llm.NewUserTextMessage("First")
 	hctx := &dive.HookContext{
 		Messages: []*llm.Message{firstMsg},
 	}
 	assert.NoError(t, hook(context.Background(), hctx))
-	assert.Contains(t, firstMsg.Content[0].(*llm.TextContent).Text, "The following skills are available")
+	assert.Equal(t, 2, len(firstMsg.Content))
+	assert.Equal(t, "First", firstMsg.Content[0].(*llm.TextContent).Text)
 
 	// Second generation — same messages plus a new turn
 	// The catalog should already be in firstMsg, hook should be a no-op
 	hctx2 := &dive.HookContext{
 		Messages: []*llm.Message{
-			firstMsg, // already has catalog baked in
+			firstMsg, // already has catalog content block
 			{Role: llm.Assistant, Content: []llm.Content{&llm.TextContent{Text: "Done"}}},
 			llm.NewUserTextMessage("Second turn"),
 		},
 	}
 	assert.NoError(t, hook(context.Background(), hctx2))
 
-	// First message should still have exactly one catalog block
-	text := firstMsg.Content[0].(*llm.TextContent).Text
-	count := 0
-	for i := 0; i < len(text); i++ {
-		if i+len(`<system-reminder name="skills">`) <= len(text) &&
-			text[i:i+len(`<system-reminder name="skills">`)] == `<system-reminder name="skills">` {
-			count++
-		}
-	}
-	assert.Equal(t, 1, count)
+	// First message should still have exactly two content blocks
+	assert.Equal(t, 2, len(firstMsg.Content))
 
 	// Second user message should NOT have a catalog
-	secondText := hctx2.Messages[2].Content[0].(*llm.TextContent).Text
-	assert.Equal(t, "Second turn", secondText)
+	assert.Equal(t, 1, len(hctx2.Messages[2].Content))
+	assert.Equal(t, "Second turn", hctx2.Messages[2].Content[0].(*llm.TextContent).Text)
 }
 
 func TestCatalogHook_ReinjectsOnChange(t *testing.T) {
@@ -260,7 +257,7 @@ func TestCatalogHook_ReinjectsOnChange(t *testing.T) {
 	firstMsg := llm.NewUserTextMessage("Hello")
 	hctx := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
 	assert.NoError(t, hook(context.Background(), hctx))
-	assert.Contains(t, firstMsg.Content[0].(*llm.TextContent).Text, "reviewer")
+	assert.Equal(t, 2, len(firstMsg.Content))
 
 	// Add a skill — catalog changes
 	loader.mu.Lock()
@@ -271,13 +268,16 @@ func TestCatalogHook_ReinjectsOnChange(t *testing.T) {
 	}
 	loader.mu.Unlock()
 
-	// Next generation — should replace the block in first message
+	// Next generation — should replace the catalog content block
 	hctx2 := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
 	assert.NoError(t, hook(context.Background(), hctx2))
 
-	text := firstMsg.Content[0].(*llm.TextContent).Text
-	assert.Contains(t, text, "deploy: Deploy.")
-	assert.Contains(t, text, "reviewer: Review code.")
+	// Still two content blocks (user text + catalog), not three
+	assert.Equal(t, 2, len(firstMsg.Content))
+	assert.Equal(t, "Hello", firstMsg.Content[0].(*llm.TextContent).Text)
+	reminderText := firstMsg.Content[1].(*llm.TextContent).Text
+	assert.Contains(t, reminderText, "deploy: Deploy.")
+	assert.Contains(t, reminderText, "reviewer: Review code.")
 }
 
 func TestCatalogHook_SessionResume(t *testing.T) {
@@ -307,16 +307,9 @@ func TestCatalogHook_SessionResume(t *testing.T) {
 
 	assert.NoError(t, hook(context.Background(), hctx))
 
-	// Should detect existing block and not duplicate
-	text := existingMsg.Content[0].(*llm.TextContent).Text
-	count := 0
-	needle := `<system-reminder name="skills">`
-	for i := 0; i <= len(text)-len(needle); i++ {
-		if text[i:i+len(needle)] == needle {
-			count++
-		}
-	}
-	assert.Equal(t, 1, count)
+	// Should detect existing block and not duplicate — still two content blocks
+	assert.Equal(t, 2, len(existingMsg.Content))
+	assert.Equal(t, "Hello", existingMsg.Content[0].(*llm.TextContent).Text)
 }
 
 func TestCatalogHook_NoUserMessage(t *testing.T) {
