@@ -12,9 +12,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
@@ -80,6 +82,29 @@ type initialPromptEvent struct {
 type compactionEvent struct {
 	baseEvent
 	event *compaction.CompactionEvent
+}
+
+// subagentEvent carries streaming data from a sub-agent task.
+type subagentEvent struct {
+	baseEvent
+	taskID string
+	item   *dive.ResponseItem
+}
+
+// toolStreamEvent carries a chunk of streaming output for a tool call.
+// Used by any tool that produces incremental output (Bash stdout, sub-agents).
+type toolStreamEvent struct {
+	baseEvent
+	toolCallID string
+	text       string
+}
+
+// backgroundTaskDoneEvent is sent when a background task completes while
+// the main agent is idle, triggering an automatic retrieval turn.
+type backgroundTaskDoneEvent struct {
+	baseEvent
+	taskID      string
+	description string
 }
 
 // MessageType distinguishes regular messages from tool calls
@@ -268,6 +293,15 @@ type App struct {
 	// Status line state
 	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
 	contextWindowMax int        // Max context window tokens for the model
+
+	// Streaming tool output state
+	toolStreamBuffers map[string]string // tool call ID -> accumulated streaming text
+	taskIDToMsgIndex  map[string]int    // sub-agent task ID -> original Task message index
+
+	// Background task auto-retrieval state
+	pendingBackgroundTasks   map[string]string         // taskID -> description
+	completedBackgroundTasks []backgroundTaskDoneEvent // queued completions waiting to be retrieved
+	backgroundFlushTimer     *time.Timer               // debounce timer for batching completions
 }
 
 // NewApp creates a new CLI application
@@ -293,22 +327,33 @@ func NewApp(
 	}
 
 	return &App{
-		agent:            agent,
-		sessionStore:     sessionStore,
-		workspaceDir:     workspaceDir,
-		modelName:        modelName,
-		resumeSessionID:  resumeSessionID,
-		skillLoader:      skillLoader,
-		messages:         make([]Message, 0),
-		toolCallIndex:    make(map[string]int),
-		toolTitles:       toolTitles,
-		history:          make([]string, 0),
-		historyIndex:     -1,
-		ctx:              ctx,
-		cancel:           cancel,
-		initialPrompt:    initialPrompt,
-		compactionConfig: compactionConfig,
-		contextWindowMax: contextWindowForModel(modelName),
+		agent:                  agent,
+		sessionStore:           sessionStore,
+		workspaceDir:           workspaceDir,
+		modelName:              modelName,
+		resumeSessionID:        resumeSessionID,
+		skillLoader:            skillLoader,
+		messages:               make([]Message, 0),
+		toolCallIndex:          make(map[string]int),
+		toolTitles:             toolTitles,
+		history:                make([]string, 0),
+		historyIndex:           -1,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		initialPrompt:          initialPrompt,
+		compactionConfig:       compactionConfig,
+		contextWindowMax:       contextWindowForModel(modelName),
+		toolStreamBuffers:      make(map[string]string),
+		taskIDToMsgIndex:       make(map[string]int),
+		pendingBackgroundTasks: make(map[string]string),
+	}
+}
+
+// shutdown cleans up resources before exit.
+func (a *App) shutdown() {
+	if a.backgroundFlushTimer != nil {
+		a.backgroundFlushTimer.Stop()
+		a.backgroundFlushTimer = nil
 	}
 }
 
@@ -669,6 +714,12 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
 		a.handleCompaction(e.event)
+	case toolStreamEvent:
+		a.handleToolStream(e)
+	case subagentEvent:
+		a.handleSubagentEvent(e)
+	case backgroundTaskDoneEvent:
+		a.handleBackgroundTaskDone(e)
 	case showDialogEvent:
 		a.dialogState = e.dialog
 		// Focus the dialog so it receives key events
@@ -863,6 +914,7 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 			// Require two Ctrl+C presses within 2 seconds to exit
 			now := time.Now()
 			if a.showExitHint && now.Sub(a.lastCtrlC) < 2*time.Second {
+				a.shutdown()
 				return []tui.Cmd{tui.Quit()}
 			}
 			a.lastCtrlC = now
@@ -1011,6 +1063,14 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 				a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
 			case dive.ResponseItemTypeToolCallResult:
 				a.runner.SendEvent(toolResultEvent{baseEvent: newBaseEvent(), result: item.ToolCallResult})
+			case dive.ResponseItemTypeToolStream:
+				if item.ToolStream != nil {
+					a.runner.SendEvent(toolStreamEvent{
+						baseEvent:  newBaseEvent(),
+						toolCallID: item.ToolStream.ToolCallID,
+						text:       item.ToolStream.Text,
+					})
+				}
 			}
 			return nil
 		}),
@@ -1286,6 +1346,16 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 			if strings.ToLower(a.messages[idx].ToolName) == "read" && textContent != "" {
 				a.messages[idx].ToolReadLines = strings.Count(textContent, "\n") + 1
 			}
+
+			// For Task tool with background tasks, extract task ID for redirect tracking
+			if a.messages[idx].ToolName == "Task" && textContent != "" {
+				if taskID := parseTaskID(textContent); taskID != "" {
+					a.taskIDToMsgIndex[taskID] = idx
+					// Replace the "Started background task" display with just the description
+					a.messages[idx].ToolResultLines = nil
+					a.messages[idx].ToolResult = ""
+				}
+			}
 		}
 	}
 }
@@ -1330,9 +1400,146 @@ func (a *App) handleProcessingEnd(err error) {
 	a.processing = false
 	a.currentMessage = nil
 	a.toolCallIndex = make(map[string]int)
+	a.toolStreamBuffers = make(map[string]string)
+	a.taskIDToMsgIndex = make(map[string]int)
 
 	// Now print to scrollback - the live view will be re-rendered with correct height
 	a.printRecentMessagesToScrollback()
+
+	// Check if any background tasks completed while we were processing
+	if len(a.completedBackgroundTasks) > 0 {
+		a.scheduleBackgroundFlush()
+	}
+}
+
+// handleToolStream updates a tool call's result line with streaming output.
+// Used by any tool that produces incremental output (Bash stdout, sub-agents).
+func (a *App) handleToolStream(e toolStreamEvent) {
+	idx, ok := a.toolCallIndex[e.toolCallID]
+	if !ok {
+		return
+	}
+	buf := a.toolStreamBuffers[e.toolCallID] + e.text
+	if len(buf) > 500 {
+		buf = buf[len(buf)-500:]
+		// Skip to the next valid UTF-8 boundary to avoid garbled display
+		for len(buf) > 0 && !utf8.RuneStart(buf[0]) {
+			buf = buf[1:]
+		}
+	}
+	a.toolStreamBuffers[e.toolCallID] = buf
+	if last := lastNonEmptyLine(buf); last != "" {
+		if len(last) > 80 {
+			last = last[:77] + "..."
+		}
+		a.messages[idx].ToolResultLines = []string{last}
+	}
+}
+
+// handleSubagentEvent routes streaming events from sub-agents, converting
+// them into generic toolStreamEvents for display.
+func (a *App) handleSubagentEvent(e subagentEvent) {
+	item := e.item
+
+	// Check for background task completion/failure status events
+	if item.Type == "subagent_status" {
+		if status, ok := item.Extension.(*extended.SubagentStatusEvent); ok {
+			if status.Status == extended.TaskStatusCompleted || status.Status == extended.TaskStatusFailed {
+				delete(a.pendingBackgroundTasks, e.taskID)
+				a.completedBackgroundTasks = append(a.completedBackgroundTasks, backgroundTaskDoneEvent{
+					baseEvent:   newBaseEvent(),
+					taskID:      status.TaskID,
+					description: status.Description,
+				})
+				if !a.processing {
+					a.scheduleBackgroundFlush()
+				}
+				return
+			}
+			if status.Status == extended.TaskStatusRunning {
+				a.pendingBackgroundTasks[status.TaskID] = status.Description
+			}
+		}
+	}
+
+	// Route sub-agent streaming to the Task tool call's message
+	msgIdx, ok := a.taskIDToMsgIndex[e.taskID]
+	if !ok {
+		return
+	}
+	// Find the tool call ID for this message so we can use the generic stream buffer
+	callID := a.messages[msgIdx].ToolID
+
+	if item.Type == dive.ResponseItemTypeModelEvent {
+		if item.Event != nil && item.Event.Delta != nil && item.Event.Delta.Text != "" {
+			a.handleToolStream(toolStreamEvent{
+				baseEvent:  newBaseEvent(),
+				toolCallID: callID,
+				text:       item.Event.Delta.Text,
+			})
+		}
+	}
+	if item.Type == dive.ResponseItemTypeToolCall && item.ToolCall != nil {
+		a.handleToolStream(toolStreamEvent{
+			baseEvent:  newBaseEvent(),
+			toolCallID: callID,
+			text:       fmt.Sprintf("\n[%s] ", item.ToolCall.Name),
+		})
+	}
+}
+
+// handleBackgroundTaskDone is fired by the debounce timer via SendEvent.
+func (a *App) handleBackgroundTaskDone(_ backgroundTaskDoneEvent) {
+	if a.processing || len(a.completedBackgroundTasks) == 0 {
+		return
+	}
+	// Drain the queue
+	tasks := a.completedBackgroundTasks
+	a.completedBackgroundTasks = nil
+	a.backgroundFlushTimer = nil
+
+	var lines []string
+	for _, t := range tasks {
+		lines = append(lines, fmt.Sprintf("- %s (task_id: %s)", t.description, t.taskID))
+	}
+	prompt := fmt.Sprintf("Background tasks completed:\n%s", strings.Join(lines, "\n"))
+	go a.processMessageAsync(prompt, false)
+}
+
+// scheduleBackgroundFlush starts or resets a 500ms debounce timer. When it
+// fires, it sends a backgroundTaskDoneEvent to flush all queued completions.
+func (a *App) scheduleBackgroundFlush() {
+	if a.backgroundFlushTimer != nil {
+		a.backgroundFlushTimer.Stop()
+	}
+	a.backgroundFlushTimer = time.AfterFunc(500*time.Millisecond, func() {
+		a.runner.SendEvent(backgroundTaskDoneEvent{baseEvent: newBaseEvent()})
+	})
+}
+
+// parseTaskID extracts a task ID from text like "Task started in background. Task ID: task_abc12345\n..."
+func parseTaskID(text string) string {
+	prefix := "Task started in background. Task ID: "
+	idx := strings.Index(text, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := text[idx+len(prefix):]
+	if newline := strings.IndexByte(rest, '\n'); newline >= 0 {
+		rest = rest[:newline]
+	}
+	return strings.TrimSpace(rest)
+}
+
+// lastNonEmptyLine returns the last non-empty line from text.
+func lastNonEmptyLine(text string) string {
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // printRecentMessagesToScrollback prints the messages from current interaction to scrollback

@@ -43,7 +43,7 @@ const (
 var (
 	DefaultModel              = ModelGPT5
 	DefaultEndpoint           = "https://api.openai.com/v1/chat/completions"
-	DefaultMaxTokens          = 4096
+	DefaultMaxTokens          = 16384
 	DefaultSystemRole         = "developer"
 	DefaultClient             = &http.Client{Timeout: 300 * time.Second}
 	DefaultMaxRetries         = 3

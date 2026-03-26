@@ -12,9 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/experimental/subagent"
+	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
@@ -184,6 +187,50 @@ func runInteractive(ctx *cli.Context) error {
 	tools := createTools(pathValidator, tuiDialog)
 	tools = append(tools, grokServerSideTools(modelName)...)
 
+	// Set up subagent registry and task tools
+	subagentRegistry := subagent.NewRegistry(true)
+	taskRegistry := extended.NewTaskRegistry()
+
+	// appRef allows the task tool's OnEvent callback to reach the App,
+	// which isn't created yet at this point. Uses atomic for safe
+	// concurrent access from background task goroutines.
+	var appRef atomic.Pointer[App]
+
+	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
+		// Create sub-model (use parent model by default)
+		subModel := model
+		if def.Model != "" {
+			subModel = createModel(def.Model, "")
+		}
+
+		return dive.NewAgent(dive.AgentOptions{
+			Name:         name,
+			SystemPrompt: def.Prompt,
+			Model:        subModel,
+			Tools:        subagent.FilterTools(def, parentTools),
+		})
+	}
+
+	taskTool := extended.NewTaskTool(extended.TaskToolOptions{
+		Registry:         taskRegistry,
+		AgentFactory:     agentFactory,
+		SubagentRegistry: subagentRegistry,
+		ParentTools:      tools,
+		OnEvent: func(taskID string, item *dive.ResponseItem) {
+			if app := appRef.Load(); app != nil && app.runner != nil {
+				app.runner.SendEvent(subagentEvent{
+					baseEvent: newBaseEvent(),
+					taskID:    taskID,
+					item:      item,
+				})
+			}
+		},
+	})
+	taskOutputTool := extended.NewTaskOutputTool(extended.TaskOutputToolOptions{
+		Registry: taskRegistry,
+	})
+	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool))
+
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")
 	if err != nil {
@@ -298,6 +345,7 @@ func runInteractive(ctx *cli.Context) error {
 		skillLoader,
 	)
 	app.currentSession = currentSession
+	appRef.Store(app)
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {

@@ -64,6 +64,10 @@ func (r *TaskRecord) snapshot() taskRecordSnapshot {
 func (r *TaskRecord) setResult(status TaskStatus, output string, err error, endTime time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Don't overwrite a terminal status (e.g. timeout already set to failed)
+	if r.Status == TaskStatusCompleted || r.Status == TaskStatusFailed {
+		return
+	}
 	r.Status = status
 	r.Output = output
 	r.Error = err
@@ -127,6 +131,14 @@ type TaskToolInput struct {
 	Resume          string `json:"resume,omitempty"`
 }
 
+// SubagentStatusEvent is sent via OnEvent for sub-agent lifecycle changes.
+type SubagentStatusEvent struct {
+	TaskID      string
+	Description string
+	Status      TaskStatus
+	Output      string // set on completion/failure
+}
+
 // TaskToolOptions configures a new TaskTool
 type TaskToolOptions struct {
 	// Registry is the shared task registry
@@ -144,6 +156,12 @@ type TaskToolOptions struct {
 
 	// DefaultTimeout is the default timeout for synchronous task execution
 	DefaultTimeout time.Duration
+
+	// OnEvent is called with streaming events from sub-agents.
+	// The taskID identifies which sub-agent produced the event.
+	// Called from background goroutines — must be safe for concurrent use.
+	// If nil, no events are emitted.
+	OnEvent func(taskID string, item *dive.ResponseItem)
 }
 
 // TaskTool launches specialized agents for complex, multi-step tasks
@@ -153,6 +171,7 @@ type TaskTool struct {
 	subagentRegistry *subagent.Registry
 	parentTools      []dive.Tool
 	defaultTimeout   time.Duration
+	onEvent          func(taskID string, item *dive.ResponseItem)
 }
 
 // NewTaskTool creates a new TaskTool
@@ -166,6 +185,7 @@ func NewTaskTool(opts TaskToolOptions) *TaskTool {
 		subagentRegistry: opts.SubagentRegistry,
 		parentTools:      opts.ParentTools,
 		defaultTimeout:   opts.DefaultTimeout,
+		onEvent:          opts.OnEvent,
 	}
 }
 
@@ -310,19 +330,60 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	}
 	t.registry.Register(record)
 
+	// Background tasks use an independent context so they survive parent cancellation.
+	// Synchronous tasks get a cancellable context so timeouts stop the sub-agent.
+	taskCtx := ctx
+	var taskCancel context.CancelFunc
+	if input.RunInBackground {
+		taskCtx = context.Background()
+	} else {
+		taskCtx, taskCancel = context.WithCancel(ctx)
+		defer taskCancel()
+	}
+
 	executeFunc := func() {
 		defer close(record.done)
+
+		// Notify start
+		if t.onEvent != nil {
+			t.onEvent(record.ID, &dive.ResponseItem{
+				Type:      "subagent_status",
+				Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusRunning},
+			})
+		}
 
 		message := &llm.Message{Role: llm.User}
 		message.Content = append(message.Content, &llm.TextContent{Text: input.Prompt})
 
-		response, err := agent.CreateResponse(ctx, dive.WithMessages(message))
+		opts := []dive.CreateResponseOption{dive.WithMessages(message)}
+		if t.onEvent != nil {
+			taskID := record.ID
+			opts = append(opts, dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+				t.onEvent(taskID, item)
+				return nil
+			}))
+		}
+
+		response, err := agent.CreateResponse(taskCtx, opts...)
 		endTime := time.Now()
 
 		if err != nil {
 			record.setResult(TaskStatusFailed, fmt.Sprintf("Task failed: %s", err.Error()), err, endTime)
+			if t.onEvent != nil {
+				t.onEvent(record.ID, &dive.ResponseItem{
+					Type:      "subagent_status",
+					Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusFailed},
+				})
+			}
 		} else {
-			record.setResult(TaskStatusCompleted, response.OutputText(), nil, endTime)
+			output := response.OutputText()
+			record.setResult(TaskStatusCompleted, output, nil, endTime)
+			if t.onEvent != nil {
+				t.onEvent(record.ID, &dive.ResponseItem{
+					Type:      "subagent_status",
+					Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusCompleted, Output: output},
+				})
+			}
 		}
 	}
 
@@ -333,8 +394,8 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	}
 
 	// Synchronous execution with timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, t.defaultTimeout)
-	defer cancel()
+	timeoutTimer := time.NewTimer(t.defaultTimeout)
+	defer timeoutTimer.Stop()
 
 	done := make(chan struct{})
 	go func() {
@@ -351,8 +412,10 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 		}
 		return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, snapshot.Output)).
 			WithDisplay(fmt.Sprintf("Completed: %s", input.Description)), nil
-	case <-timeoutCtx.Done():
-		record.setResult(TaskStatusFailed, "", timeoutCtx.Err(), time.Now())
+	case <-timeoutTimer.C:
+		// Cancel the sub-agent's context so it stops working
+		taskCancel()
+		record.setResult(TaskStatusFailed, "", context.DeadlineExceeded, time.Now())
 		return dive.NewToolResultError(fmt.Sprintf("Task timed out after %s. Task ID: %s", t.defaultTimeout, taskID)).
 			WithDisplay(fmt.Sprintf("Task timed out: %s", input.Description)), nil
 	}

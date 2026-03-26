@@ -712,7 +712,7 @@ func (a *Agent) executeToolCallsParallel(
 				ch <- completedTool{index: i, err: err}
 				return
 			}
-			result := a.executeTool(childCtx, prep.tool, toolCalls[i], prep.input, prep.preview)
+			result := a.executeTool(childCtx, prep.tool, toolCalls[i], prep.input, prep.preview, callback)
 			if result.Error != nil && childCtx.Err() != nil {
 				ch <- completedTool{index: i, err: childCtx.Err()}
 				return
@@ -868,7 +868,7 @@ func (a *Agent) executeOneToolCall(
 		if preHctx.UpdatedInput != nil {
 			input = preHctx.UpdatedInput
 		}
-		result = a.executeTool(ctx, tool, toolCall, input, preview)
+		result = a.executeTool(ctx, tool, toolCall, input, preview, callback)
 	}
 
 	// Determine if the tool call failed
@@ -946,6 +946,7 @@ func (a *Agent) executeTool(
 	call *llm.ToolUseContent,
 	input []byte,
 	preview *ToolCallPreview,
+	callback EventCallback,
 ) (result *ToolCallResult) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -973,7 +974,21 @@ func (a *Agent) executeTool(
 		}
 	}()
 
-	output, err := tool.Call(WithToolCallID(ctx, call.ID), input)
+	// Inject tool call ID and streaming function into context
+	toolCtx := WithToolCallID(ctx, call.ID)
+	if callback != nil {
+		toolCtx = WithToolStreamFunc(toolCtx, func(toolCallID, text string) {
+			_ = callback(ctx, &ResponseItem{
+				Type: ResponseItemTypeToolStream,
+				ToolStream: &ToolStreamEvent{
+					ToolCallID: toolCallID,
+					Text:       text,
+				},
+			})
+		})
+	}
+
+	output, err := tool.Call(toolCtx, input)
 	if err != nil {
 		return &ToolCallResult{
 			ID:      call.ID,

@@ -20,7 +20,7 @@ const ProviderName = "openai"
 
 var (
 	DefaultModel         = ModelGPT54
-	DefaultMaxTokens     = 4096
+	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = 2
 	DefaultRetryBaseWait = 1 * time.Second
 	DefaultClient        = &http.Client{Timeout: 300 * time.Second}

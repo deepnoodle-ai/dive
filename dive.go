@@ -48,7 +48,9 @@ type CreateResponseOptions struct {
 }
 
 // EventCallback is a function called with each item produced while an agent
-// is using tools or generating a response.
+// is using tools or generating a response. Callbacks may be invoked
+// concurrently from multiple goroutines (e.g. parallel tool calls, tool
+// streaming) — implementations must be safe for concurrent use.
 type EventCallback func(ctx context.Context, item *ResponseItem) error
 
 // CreateResponseOption is a type signature for defining new LLM generation options.

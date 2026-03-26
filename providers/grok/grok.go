@@ -10,7 +10,7 @@ import (
 var (
 	DefaultModel     = ModelGrok420Reasoning
 	DefaultEndpoint  = "https://api.x.ai/v1"
-	DefaultMaxTokens = 4096
+	DefaultMaxTokens = 32768
 )
 
 var _ llm.StreamingLLM = &Provider{}
