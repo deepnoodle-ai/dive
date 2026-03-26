@@ -1,6 +1,9 @@
 package toolkit
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -53,36 +56,66 @@ func TestImageGenerationTool_Schema_NoDurationEnum(t *testing.T) {
 }
 
 func TestImageGenerationTool_WorkDir(t *testing.T) {
-	tool := NewImageGenerationTool("test-model", WithImageToolWorkDir("/tmp/images"))
+	dir := t.TempDir()
+	tool := NewImageGenerationTool("test-model", WithImageToolWorkDir(dir))
 	inner := tool.Unwrap().(*imageGenerationTool)
-	assert.Equal(t, "/tmp/images", inner.workDir)
+	assert.Equal(t, dir, inner.workDir)
 }
 
-func TestResolveOutputPath(t *testing.T) {
-	workDir := "/tmp/workdir"
+func TestValidateOutputPath(t *testing.T) {
+	workDir := t.TempDir()
+	// Resolve symlinks in workDir itself (e.g. /var -> /private/var on macOS)
+	realWorkDir, err := filepath.EvalSymlinks(workDir)
+	assert.Nil(t, err)
 
 	// Valid relative path
-	path, err := resolveOutputPath("output.png", workDir)
+	path, err := validateOutputPath("output.png", workDir)
 	assert.Nil(t, err)
-	assert.Equal(t, "/tmp/workdir/output.png", path)
+	assert.True(t, filepath.IsAbs(path))
+	assert.Equal(t, filepath.Join(realWorkDir, "output.png"), path)
 
 	// Valid nested relative path
-	path, err = resolveOutputPath("subdir/output.png", workDir)
+	path, err = validateOutputPath(filepath.FromSlash("subdir/output.png"), workDir)
 	assert.Nil(t, err)
-	assert.Equal(t, "/tmp/workdir/subdir/output.png", path)
+	assert.True(t, filepath.IsAbs(path))
+	assert.Equal(t, filepath.Join(realWorkDir, "subdir", "output.png"), path)
 
 	// Absolute path rejected
-	_, err = resolveOutputPath("/etc/passwd", workDir)
+	absPath := filepath.Join(workDir, "other", "file.png")
+	_, err = validateOutputPath(absPath, workDir)
 	assert.NotNil(t, err)
 	assert.Contains(t, err.Error(), "relative path")
 
 	// Traversal attack rejected
-	_, err = resolveOutputPath("../../etc/passwd", workDir)
+	_, err = validateOutputPath(filepath.FromSlash("../../etc/passwd"), workDir)
 	assert.NotNil(t, err)
 	assert.Contains(t, err.Error(), "within the working directory")
 
 	// Traversal with nested path rejected
-	_, err = resolveOutputPath("subdir/../../etc/passwd", workDir)
+	_, err = validateOutputPath(filepath.FromSlash("subdir/../../etc/passwd"), workDir)
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "within the working directory")
+}
+
+func TestValidateOutputPath_SymlinkTraversal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require elevated privileges on Windows")
+	}
+
+	workDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// Create a file outside the workDir
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	os.WriteFile(outsideFile, []byte("secret"), 0o644)
+
+	// Create a symlink inside workDir pointing outside
+	linkPath := filepath.Join(workDir, "escape")
+	err := os.Symlink(outsideDir, linkPath)
+	assert.Nil(t, err)
+
+	// Attempting to write through the symlink should be rejected
+	_, err = validateOutputPath(filepath.FromSlash("escape/secret.txt"), workDir)
 	assert.NotNil(t, err)
 	assert.Contains(t, err.Error(), "within the working directory")
 }

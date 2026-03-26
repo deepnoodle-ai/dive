@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
@@ -134,7 +133,7 @@ func (t *imageGenerationTool) Call(ctx context.Context, input *ImageGenerationIn
 		slug := media.SlugifyPrompt(input.Prompt, 40)
 		outPath = filepath.Join(t.workDir, slug+result.Format.FileExtension())
 	} else {
-		resolved, err := resolveOutputPath(input.OutputPath, t.workDir)
+		resolved, err := validateOutputPath(input.OutputPath, t.workDir)
 		if err != nil {
 			return NewToolResultError(err.Error()), nil
 		}
@@ -151,21 +150,24 @@ func (t *imageGenerationTool) Call(ctx context.Context, input *ImageGenerationIn
 	return dive.NewToolResultText(absPath).WithDisplay(display), nil
 }
 
-// resolveOutputPath validates and resolves a user-provided output path,
-// ensuring it is relative and contained within workDir. This prevents
-// path traversal attacks (e.g. "../../../etc/passwd") and absolute path writes.
-func resolveOutputPath(outputPath, workDir string) (string, error) {
+// validateOutputPath validates and resolves a user-provided output path,
+// ensuring it is relative and contained within workDir. Uses PathValidator to
+// resolve symlinks, preventing both path traversal and symlink-based attacks.
+func validateOutputPath(outputPath, workDir string) (string, error) {
 	if filepath.IsAbs(outputPath) {
 		return "", fmt.Errorf("output_path must be a relative path")
 	}
-	resolved := filepath.Join(workDir, outputPath)
-	absOut, err := filepath.Abs(resolved)
+	validator, err := NewPathValidator(workDir)
 	if err != nil {
-		return "", fmt.Errorf("invalid output path: %v", err)
+		return "", fmt.Errorf("invalid working directory: %w", err)
 	}
-	absWork, _ := filepath.Abs(workDir)
-	if !strings.HasPrefix(absOut, absWork+string(filepath.Separator)) && absOut != absWork {
+	resolved := filepath.Join(workDir, outputPath)
+	if err := validator.ValidateWrite(resolved); err != nil {
 		return "", fmt.Errorf("output_path must be within the working directory")
 	}
-	return absOut, nil
+	realPath, err := validator.ResolvePath(resolved)
+	if err != nil {
+		return "", fmt.Errorf("invalid output path: %w", err)
+	}
+	return realPath, nil
 }

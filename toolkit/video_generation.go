@@ -141,7 +141,7 @@ func (t *videoGenerationTool) Call(ctx context.Context, input *VideoGenerationIn
 		}
 		outPath = filepath.Join(t.workDir, slug+ext)
 	} else {
-		resolved, err := resolveOutputPath(input.OutputPath, t.workDir)
+		resolved, err := validateOutputPath(input.OutputPath, t.workDir)
 		if err != nil {
 			return NewToolResultError(err.Error()), nil
 		}

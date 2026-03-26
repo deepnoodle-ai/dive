@@ -268,6 +268,24 @@ func (p *MediaProvider) generateImageWithImagen(ctx context.Context, prompt, mod
 	return results, nil
 }
 
+// EditImage implements media.ImageEditor for Gemini models.
+// Gemini's multimodal GenerateContent endpoint supports image editing by
+// passing reference images alongside the text prompt.
+func (p *MediaProvider) EditImage(ctx context.Context, prompt string, config *media.Config) ([]*media.ImageResult, error) {
+	if _, err := p.ensureClient(ctx); err != nil {
+		return nil, err
+	}
+	model := config.Model
+	if !strings.HasPrefix(model, "gemini-") {
+		return nil, fmt.Errorf("image editing is only supported with Gemini models, got %q", model)
+	}
+	aspectRatio := config.AspectRatio
+	if aspectRatio == media.AspectAuto {
+		aspectRatio = media.Aspect1x1
+	}
+	return p.generateImageWithGemini(ctx, prompt, model, aspectRatio, config)
+}
+
 // GenerateVideo implements media.VideoProvider.
 func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config *media.Config) (*media.VideoResult, error) {
 	if _, err := p.ensureClient(ctx); err != nil {
@@ -342,5 +360,6 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 // Compile-time interface checks.
 var (
 	_ media.ImageProvider = (*MediaProvider)(nil)
+	_ media.ImageEditor   = (*MediaProvider)(nil)
 	_ media.VideoProvider = (*MediaProvider)(nil)
 )
