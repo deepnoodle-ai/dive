@@ -56,8 +56,12 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 		if content == "" {
 			return nil
 		}
-		// Use simple text for live view (faster than markdown parsing)
-		return tui.Text("⏺ %s", content).Wrap()
+		// Hanging indent: ⏺ prefix is fixed, text fills remaining width
+		// so wrapped lines align to column 2 (like Claude Code)
+		return tui.Group(
+			tui.Text("⏺ "),
+			tui.Text("%s", content).Wrap().Flex(1),
+		)
 
 	case "system":
 		return tui.Text("%s", msg.Content).Wrap().Warning()
@@ -506,7 +510,12 @@ func (a *App) textMessageViewStatic(msg Message) tui.View {
 		if content == "" {
 			return nil
 		}
-		return tui.Markdown("⏺ "+content, nil).Theme(diveMarkdownTheme())
+		// Hanging indent: ⏺ overlaid at (0,0), markdown indented 2 spaces
+		// so all lines (including wrapped) align to column 2 (like Claude Code)
+		return tui.ZStack(
+			tui.PaddingLTRB(2, 0, 0, 0, tui.Markdown(content, nil).Theme(diveMarkdownTheme())),
+			tui.Text("⏺"),
+		).Align(tui.AlignLeft)
 
 	case "system":
 		return tui.Text("%s", msg.Content).Wrap().Warning()
