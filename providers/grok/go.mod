@@ -7,6 +7,7 @@ require (
 	github.com/deepnoodle-ai/dive/providers/openai v1.4.0
 	github.com/deepnoodle-ai/wonton v0.0.29
 	github.com/openai/openai-go/v3 v3.29.0
+	golang.org/x/image v0.38.0
 )
 
 require (
@@ -15,7 +16,6 @@ require (
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
-	golang.org/x/image v0.38.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 )
 

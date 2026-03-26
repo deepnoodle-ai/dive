@@ -25,6 +25,13 @@ const (
 	// Specialized models (256K context)
 	ModelGrokCodeFast1 = "grok-code-fast-1"
 
+	// Image generation models
+	ModelImagineImagePro = "grok-imagine-image-pro"
+	ModelImagineImage    = "grok-imagine-image"
+
+	// Video generation model
+	ModelImagineVideo = "grok-imagine-video"
+
 	// Deprecated: No longer listed in xAI docs.
 	ModelGrok2Vision1212 = "grok-2-vision-1212"
 	// Deprecated: No longer listed in xAI docs.

@@ -23,7 +23,10 @@ func runVideo(ctx *cli.Context) error {
 
 	model := ctx.String("model")
 	if model == "" {
-		model = "veo-3.1-generate-preview"
+		model = getDefaultVideoModel()
+		if model == "" {
+			return fmt.Errorf("no video generation API key found (set GOOGLE_API_KEY, OPENAI_API_KEY, or XAI_API_KEY)")
+		}
 	}
 
 	var opts []media.Option

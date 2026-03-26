@@ -795,6 +795,13 @@ func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
 		}))
 	}
 
+	// Add image generation tool using the best available provider
+	if imageModel := getDefaultImageModel(); imageModel != "" {
+		tools = append(tools, toolkit.NewImageGenerationTool(imageModel,
+			toolkit.WithImageToolWorkDir(workspaceDir),
+		))
+	}
+
 	return tools
 }
 
@@ -822,6 +829,32 @@ func defaultPermissionRules(tools []dive.Tool) permission.Rules {
 	}
 
 	return rules
+}
+
+func getDefaultImageModel() string {
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		return "gpt-image-1"
+	}
+	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
+		return "imagen-4.0-generate-001"
+	}
+	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
+		return "grok-imagine-image"
+	}
+	return ""
+}
+
+func getDefaultVideoModel() string {
+	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
+		return "veo-3.1-generate-preview"
+	}
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		return "sora-2"
+	}
+	if os.Getenv("XAI_API_KEY") != "" || os.Getenv("GROK_API_KEY") != "" {
+		return "grok-imagine-video"
+	}
+	return ""
 }
 
 func getDefaultModel() string {

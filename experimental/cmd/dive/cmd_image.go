@@ -25,7 +25,10 @@ func runImage(ctx *cli.Context) error {
 
 	model := ctx.String("model")
 	if model == "" {
-		model = "gpt-image-1"
+		model = getDefaultImageModel()
+		if model == "" {
+			return fmt.Errorf("no image generation API key found (set OPENAI_API_KEY, GOOGLE_API_KEY, or XAI_API_KEY)")
+		}
 	}
 
 	var opts []media.Option
