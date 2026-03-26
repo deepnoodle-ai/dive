@@ -33,6 +33,7 @@ tmp.json
 /examples/openai_responses_example/openai_responses_example
 /openai_responses_example
 /*.png
+/*.jpg
 *.db-*
 /.vscode
 

@@ -15,7 +15,7 @@ func TestGrokDurationToSeconds(t *testing.T) {
 		d    time.Duration
 		want string
 	}{
-		{0, "5"},            // below minimum → default
+		{0, "5"}, // below minimum → default
 		{4 * time.Second, "4"},
 		{5 * time.Second, "5"},
 		{8 * time.Second, "8"},

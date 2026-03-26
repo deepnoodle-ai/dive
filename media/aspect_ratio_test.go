@@ -19,7 +19,7 @@ func TestStandardImageDimensions(t *testing.T) {
 		{Aspect3x4, 768, 1024},
 		{Aspect4x1, 2048, 512},
 		{Aspect1x4, 512, 2048},
-		{AspectAuto, 1024, 1024},     // default
+		{AspectAuto, 1024, 1024},         // default
 		{AspectRatio("7:3"), 1024, 1024}, // unknown
 	}
 	for _, tt := range tests {

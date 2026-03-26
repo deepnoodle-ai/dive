@@ -1,10 +1,10 @@
 package media
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"image/png"
-	"bytes"
 	"testing"
 
 	"github.com/deepnoodle-ai/wonton/assert"
