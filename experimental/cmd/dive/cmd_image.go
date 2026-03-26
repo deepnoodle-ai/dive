@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -57,7 +56,7 @@ func runImage(ctx *cli.Context) error {
 	fmt.Printf("Generating image with %s...\n", model)
 	start := time.Now()
 
-	results, err := media.GenerateImageBatch(context.Background(), prompt, opts...)
+	results, err := media.GenerateImageBatch(ctx.Context(), prompt, opts...)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
 	}

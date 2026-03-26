@@ -86,8 +86,7 @@ failing the entire call.
 
 ### Image Editing
 
-Providers that support editing (OpenAI, Google Gemini) can modify existing
-images:
+Providers that support editing (OpenAI) can modify existing images:
 
 ```go
 refImage, _ := os.ReadFile("photo.png")
@@ -145,7 +144,7 @@ until the provider completes or the context is cancelled.
 |--------|-------------|---------|
 | `WithModel(m)` | Model name for generation | (required) |
 | `WithModels(m...)` | Multiple models for fan-out | — |
-| `WithAspectRatio(ar)` | `1:1`, `16:9`, `9:16`, `4:3`, `3:4` | `1:1` (image), `16:9` (video) |
+| `WithAspectRatio(ar)` | `1:1`, `16:9`, `9:16` | `1:1` (image), `16:9` (video) |
 | `WithOutputFormat(f)` | `FormatPNG`, `FormatJPEG`, `FormatWebP` | Provider default |
 | `WithCount(n)` | Number of images to generate | 1 |
 | `WithReferenceImage(data)` | Reference image bytes for editing | — |
@@ -203,7 +202,7 @@ dive image "prompt" [flags]
 
 Flags:
   -m, --model    Model name (default: auto-detect)
-      --aspect   Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4
+      --aspect   Aspect ratio: 1:1, 16:9, 9:16
       --format   Output format: png, jpeg, webp
   -n, --count    Number of images (default: 1)
   -o, --out      Output file path (default: auto from prompt)
@@ -234,7 +233,7 @@ dive video "prompt" [flags]
 Flags:
   -m, --model      Model name (default: auto-detect)
       --aspect     Aspect ratio: 16:9, 9:16, 1:1
-  -d, --duration   Video duration: 4s, 8s, 12s (default: 8s)
+  -d, --duration   Video duration, e.g. 8s, 16s, 20s (default: 8s)
   -o, --out        Output file path (default: auto from prompt)
       --open       Open result in default viewer
 ```
@@ -246,7 +245,7 @@ Examples:
 dive video "ocean waves at sunset"
 
 # Specific model and duration
-dive video "timelapse of clouds" -m sora-2 -d 16s
+dive video "timelapse of clouds" -m sora-2 -d 20s
 
 # Portrait video
 dive video "person walking" --aspect 9:16

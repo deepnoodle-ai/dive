@@ -41,7 +41,7 @@ func main() {
 				Help("Model to use (default: gpt-image-1)"),
 			cli.String("aspect", "").
 				Default("").
-				Help("Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4"),
+				Help("Aspect ratio: 1:1, 16:9, 9:16"),
 			cli.String("format", "").
 				Default("").
 				Help("Output format: png, jpeg, webp"),
@@ -70,7 +70,7 @@ func main() {
 				Help("Aspect ratio: 16:9, 9:16, 1:1"),
 			cli.String("duration", "d").
 				Default("8s").
-				Help("Video duration: 4s, 8s, 12s"),
+				Help("Video duration (e.g. 8s, 16s, 20s). Exact duration depends on provider."),
 			cli.String("out", "o").
 				Default("").
 				Help("Output file path"),
