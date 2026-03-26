@@ -31,6 +31,55 @@ func main() {
 		Description("Interactive AI assistant for coding tasks").
 		Version("0.1.0")
 
+	// Image generation subcommand
+	app.Command("image").
+		Description("Generate an image from a text prompt").
+		Args("prompt").
+		Flags(
+			cli.String("model", "m").
+				Default("").
+				Help("Model to use (default: gpt-image-1)"),
+			cli.String("aspect", "").
+				Default("").
+				Help("Aspect ratio: 1:1, 16:9, 9:16, 4:3, 3:4"),
+			cli.String("format", "").
+				Default("").
+				Help("Output format: png, jpeg, webp"),
+			cli.String("out", "o").
+				Default("").
+				Help("Output file path (auto-generated from prompt if omitted)"),
+			cli.Int("count", "n").
+				Default(1).
+				Help("Number of images to generate"),
+			cli.Bool("open", "").
+				Default(false).
+				Help("Open result in default viewer"),
+		).
+		Run(runImage)
+
+	// Video generation subcommand
+	app.Command("video").
+		Description("Generate a video from a text prompt").
+		Args("prompt").
+		Flags(
+			cli.String("model", "m").
+				Default("").
+				Help("Model to use (default: veo-3.1-generate-preview)"),
+			cli.String("aspect", "").
+				Default("").
+				Help("Aspect ratio: 16:9, 9:16, 1:1"),
+			cli.String("duration", "d").
+				Default("8s").
+				Help("Video duration: 4s, 8s, 12s"),
+			cli.String("out", "o").
+				Default("").
+				Help("Output file path"),
+			cli.Bool("open", "").
+				Default(false).
+				Help("Open result in default viewer"),
+		).
+		Run(runVideo)
+
 	app.Main().
 		Flags(
 			cli.String("model", "m").

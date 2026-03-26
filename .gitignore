@@ -39,3 +39,5 @@ tmp.json
 # Local settings (machine-specific)
 .dive/settings.local.json
 /experimental/cmd/dive/dive
+
+/docs/research
