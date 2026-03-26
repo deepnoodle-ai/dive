@@ -191,7 +191,7 @@ func TestCatalogHook_InjectsIntoFirstUserMessage(t *testing.T) {
 
 	text := hctx.Messages[0].Content[0].(*llm.TextContent).Text
 	assert.Contains(t, text, `<system-reminder name="skills">`)
-	assert.Contains(t, text, "<skills>")
+	assert.Contains(t, text, "The following skills are available")
 	assert.Contains(t, text, "reviewer: Review code.")
 	assert.Contains(t, text, "</system-reminder>")
 }
@@ -215,7 +215,7 @@ func TestCatalogHook_StableAcrossGenerations(t *testing.T) {
 		Messages: []*llm.Message{firstMsg},
 	}
 	assert.NoError(t, hook(context.Background(), hctx))
-	assert.Contains(t, firstMsg.Content[0].(*llm.TextContent).Text, "<skills>")
+	assert.Contains(t, firstMsg.Content[0].(*llm.TextContent).Text, "The following skills are available")
 
 	// Second generation — same messages plus a new turn
 	// The catalog should already be in firstMsg, hook should be a no-op

@@ -12,6 +12,7 @@ func TestBuildCatalog(t *testing.T) {
 			"reviewer": {
 				Name:        "reviewer",
 				Description: "Review code for issues.",
+				FilePath:    "/home/user/.dive/skills/reviewer/SKILL.md",
 				Config: SkillConfig{
 					Description: "Review code for issues.",
 					Triggers: []Trigger{
@@ -34,12 +35,14 @@ func TestBuildCatalog(t *testing.T) {
 
 	catalog := BuildCatalog(loader)
 
-	assert.Contains(t, catalog, "<skills>")
-	assert.Contains(t, catalog, "</skills>")
+	assert.Contains(t, catalog, "The following skills are available")
 	assert.Contains(t, catalog, "reviewer: Review code for issues.")
 	assert.Contains(t, catalog, "deploy: Deploy to an environment.")
+	assert.Contains(t, catalog, "Location: /home/user/.dive/skills/reviewer/SKILL.md")
 	assert.Contains(t, catalog, `TRIGGER when: user mentions "review"`)
 	assert.Contains(t, catalog, `TRIGGER when: input matches pattern "review .+"`)
+	// Skill without FilePath should not have Location line
+	assert.NotContains(t, catalog, "Location: \n")
 	// Command should be excluded
 	assert.NotContains(t, catalog, "commit")
 }
@@ -94,7 +97,7 @@ func TestCatalogHash_Empty(t *testing.T) {
 func TestSkillRules(t *testing.T) {
 	rules := SkillRules()
 	assert.Contains(t, rules, "Skill tool")
-	assert.Contains(t, rules, "<skills>")
+	assert.Contains(t, rules, "system-reminder")
 	// Should be reasonably concise
 	assert.True(t, len(rules) < 500)
 }

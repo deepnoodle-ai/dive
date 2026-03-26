@@ -82,7 +82,17 @@ func (p *filesystemProvider) loadFromPath(searchPath string) ([]*Skill, error) {
 
 	var skills []*Skill
 	for _, entry := range entries {
-		if entry.IsDir() {
+		// Resolve symlinks: entry.IsDir() returns false for symlinks
+		// to directories, so we stat the full path to check the target.
+		isDir := entry.IsDir()
+		if entry.Type()&os.ModeSymlink != 0 {
+			info, err := os.Stat(filepath.Join(searchPath, entry.Name()))
+			if err == nil {
+				isDir = info.IsDir()
+			}
+		}
+
+		if isDir {
 			// Look for SKILL.md or COMMAND.md in subdirectory
 			for _, marker := range []string{"SKILL.md", "COMMAND.md"} {
 				markerPath := filepath.Join(searchPath, entry.Name(), marker)

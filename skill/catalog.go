@@ -21,11 +21,14 @@ func BuildCatalog(loader *Loader) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("<skills>\n")
 	sb.WriteString("The following skills are available for use with the Skill tool:\n\n")
 
 	for _, s := range skills {
 		fmt.Fprintf(&sb, "- %s: %s\n", s.Name, s.Description)
+		// Include file location so the agent knows where the skill lives on disk
+		if s.FilePath != "" {
+			fmt.Fprintf(&sb, "  Location: %s\n", s.FilePath)
+		}
 		// Add trigger hints if present
 		for _, t := range s.Config.Triggers {
 			if t.Keyword != "" {
@@ -36,8 +39,7 @@ func BuildCatalog(loader *Loader) string {
 		}
 	}
 
-	sb.WriteString("\nWhen a task matches a skill's description or trigger, invoke the Skill tool with the skill name before proceeding. Do not guess skill names — only use skills listed above.\n")
-	sb.WriteString("</skills>")
+	sb.WriteString("\nWhen a task matches a skill's description or trigger, invoke the Skill tool with the skill name before proceeding. Do not guess skill names — only use skills listed above.")
 
 	return sb.String()
 }
@@ -57,8 +59,8 @@ func CatalogHash(loader *Loader) string {
 // This is appended to the agent's system prompt when skills are configured.
 func SkillRules() string {
 	return "You have access to specialized skills via the Skill tool. " +
-		"Available skills are listed in <skills> blocks in the conversation. " +
+		"Available skills are listed in <system-reminder name=\"skills\"> blocks in the conversation. " +
 		"When a task matches a skill's description or trigger condition, " +
 		"invoke the Skill tool with the skill name before proceeding. " +
-		"Do not guess skill names — only use skills listed in <skills> blocks."
+		"Do not guess skill names — only use skills listed in system-reminder blocks."
 }
