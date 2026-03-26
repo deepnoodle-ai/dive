@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -24,6 +26,84 @@ func diveMarkdownTheme() tui.MarkdownTheme {
 	theme.CodeStyle = tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})
 
 	return theme
+}
+
+// statusLineView renders the status line above the input area.
+// Shows: model name, directory, git branch, context %, elapsed time.
+func (a *App) statusLineView() tui.View {
+	accentColor := tui.RGB{R: 100, G: 160, B: 180}
+	mutedColor := tui.RGB{R: 100, G: 100, B: 110}
+	accentStyle := tui.NewStyle().WithFgRGB(accentColor)
+	mutedStyle := tui.NewStyle().WithFgRGB(mutedColor)
+
+	// Line 1: model in directory on branch
+	parts := []tui.View{
+		tui.Text(" %s", a.modelDisplayName()).Style(accentStyle),
+	}
+	dirName := filepath.Base(a.workspaceDir)
+	parts = append(parts,
+		tui.Text(" in ").Style(mutedStyle),
+		tui.Text("%s", dirName).Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 200, G: 200, B: 210}).WithBold()),
+	)
+	if branch := detectGitBranch(a.workspaceDir); branch != "" {
+		parts = append(parts,
+			tui.Text(" on ").Style(mutedStyle),
+			tui.Text("%s", branch).Style(accentStyle),
+		)
+	}
+	line1 := tui.Group(parts...)
+
+	// Line 2: progress bar with context %, elapsed time
+	var line2Parts []tui.View
+	line2Parts = append(line2Parts, tui.Text(" ").Style(mutedStyle))
+
+	// Context usage progress bar (show after first LLM response)
+	if a.lastUsage != nil {
+		contextPct := a.contextPercent()
+		barColor := accentColor
+		if contextPct > 75 {
+			barColor = tui.RGB{R: 200, G: 150, B: 60}
+		}
+		if contextPct > 90 {
+			barColor = tui.RGB{R: 200, G: 70, B: 70}
+		}
+		bar := tui.Progress(contextPct, 100).
+			Width(20).
+			HidePercent().
+			Style(tui.NewStyle().WithFgRGB(barColor)).
+			EmptyStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 80, G: 80, B: 90}))
+		line2Parts = append(line2Parts, bar)
+		line2Parts = append(line2Parts, tui.Text(" %d%%", contextPct).Style(mutedStyle))
+	}
+
+	// Only show line 2 if there's content beyond the leading space
+	if len(line2Parts) <= 1 {
+		return line1
+	}
+
+	line2 := tui.Group(line2Parts...)
+	return tui.Stack(line1, line2).Gap(0)
+}
+
+// modelDisplayName returns a human-friendly model name.
+func (a *App) modelDisplayName() string {
+	if info := lookupModel(a.modelName); info != nil && info.Label != "" {
+		return info.Label
+	}
+	return a.modelName
+}
+
+// contextPercent returns the context usage as a percentage (0-100), or 0 if unknown.
+func (a *App) contextPercent() int {
+	if a.lastUsage == nil || a.contextWindowMax <= 0 {
+		return 0
+	}
+	tokens := compaction.CalculateContextTokens(a.lastUsage)
+	pct := (tokens * 100) / a.contextWindowMax
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
 }
 
 // messageView returns the view for a message (with animations for live updates)

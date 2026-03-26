@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -56,7 +57,8 @@ type processingStartEvent struct {
 
 type processingEndEvent struct {
 	baseEvent
-	err error
+	err       error
+	lastUsage *llm.Usage // Final LLM usage for context tracking
 }
 
 type showDialogEvent struct {
@@ -262,6 +264,10 @@ type App struct {
 	compactionEventTime      time.Time
 	showCompactionStats      bool
 	compactionStatsStartTime time.Time
+
+	// Status line state
+	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
+	contextWindowMax int        // Max context window tokens for the model
 }
 
 // NewApp creates a new CLI application
@@ -302,6 +308,7 @@ func NewApp(
 		cancel:           cancel,
 		initialPrompt:    initialPrompt,
 		compactionConfig: compactionConfig,
+		contextWindowMax: contextWindowForModel(modelName),
 	}
 }
 
@@ -385,6 +392,11 @@ func (a *App) LiveView() tui.View {
 		))
 	} else if a.showExitHint {
 		footerViews = append(footerViews, tui.Text(" Press Ctrl+C again to exit").Hint())
+	}
+
+	// Show status line when autocomplete is not active
+	if len(a.autocompleteMatches) == 0 {
+		views = append(views, a.statusLineView())
 	}
 
 	// Minimum padding at bottom for visual breathing room
@@ -651,6 +663,9 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 	case toolResultEvent:
 		a.handleToolResult(e.result)
 	case processingEndEvent:
+		if e.lastUsage != nil {
+			a.lastUsage = e.lastUsage
+		}
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
 		a.handleCompaction(e.event)
@@ -1017,8 +1032,8 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 		a.checkAndPerformCompaction(lastUsage)
 	}
 
-	// Send completion event
-	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err})
+	// Send completion event with usage info
+	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err, lastUsage: lastUsage})
 }
 
 // updateSessionMetadata updates a session with workspace and title information
@@ -1290,6 +1305,9 @@ func (a *App) handleCompaction(event *compaction.CompactionEvent) {
 	a.compactionEventTime = time.Now()
 	a.showCompactionStats = true
 	a.compactionStatsStartTime = time.Now()
+	// Reset usage so the context bar reflects post-compaction state.
+	// It will be repopulated on the next LLM response.
+	a.lastUsage = nil
 }
 
 func (a *App) handleProcessingEnd(err error) {
@@ -1608,6 +1626,7 @@ func (a *App) handleCommand(input string) bool {
 		a.currentMessage = nil
 		a.streamingMessageIndex = 0
 		a.firstUserSent = false
+		a.lastUsage = nil
 
 		// Show fresh intro using runner.Print (not tui.Print) since we're
 		// in the middle of the running InlineApp event loop
@@ -2160,4 +2179,76 @@ func (a *App) getFileMatches(prefix string) []string {
 	}
 
 	return result
+}
+
+// detectGitBranch returns the current git branch name, or empty string if not in a repo.
+func detectGitBranch(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// modelInfo describes a known model's display name and context window size.
+type modelInfo struct {
+	Pattern       string // substring to match against model ID
+	Label         string // human-friendly display name (empty = use raw model ID)
+	ContextWindow int    // max context window in tokens
+}
+
+// modelCatalog is the shared catalog of known models, checked in order.
+// More specific patterns must appear before broader ones.
+var modelCatalog = []modelInfo{
+	// Anthropic models
+	{"claude-opus-4-6", "Opus 4.6", 1_000_000},
+	{"claude-opus-4-5", "Opus 4.5", 1_000_000},
+	{"claude-opus-4", "", 1_000_000},
+	{"claude-sonnet-4-6", "Sonnet 4.6", 1_000_000},
+	{"claude-sonnet-4-5", "Sonnet 4.5", 1_000_000},
+	{"claude-sonnet-4", "", 1_000_000},
+	{"claude-haiku-4-5", "Haiku 4.5", 200_000},
+	{"claude-haiku-4", "", 200_000},
+	{"claude-3-5-sonnet", "Sonnet 3.5", 200_000},
+	{"claude-3-5-haiku", "Haiku 3.5", 200_000},
+	{"claude", "", 200_000},
+
+	// Google models
+	{"gemini-2.5", "", 1_000_000},
+	{"gemini-3", "", 1_000_000},
+	{"gemini", "", 1_000_000},
+
+	// OpenAI models
+	{"gpt-5", "", 1_000_000},
+	{"gpt-4o", "", 128_000},
+	{"gpt-4", "", 128_000},
+	{"o3", "", 200_000},
+	{"o4", "", 200_000},
+
+	// Grok models
+	{"grok", "", 131_072},
+
+	// Mistral models
+	{"mistral", "", 128_000},
+}
+
+// lookupModel finds the first matching catalog entry for a model ID.
+func lookupModel(model string) *modelInfo {
+	for i := range modelCatalog {
+		if strings.Contains(model, modelCatalog[i].Pattern) {
+			return &modelCatalog[i]
+		}
+	}
+	return nil
+}
+
+// contextWindowForModel returns the max context window size (in tokens) for known models.
+// Returns 0 for unknown models; the UI hides the context bar when 0.
+func contextWindowForModel(model string) int {
+	if info := lookupModel(model); info != nil {
+		return info.ContextWindow
+	}
+	return 0
 }
