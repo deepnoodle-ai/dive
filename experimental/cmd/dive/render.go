@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/wonton/tui"
 )
 
@@ -24,6 +26,118 @@ func diveMarkdownTheme() tui.MarkdownTheme {
 	theme.CodeStyle = tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})
 
 	return theme
+}
+
+// statusLineView renders the status line above the input area.
+// Shows: model name, directory, git branch, context %, elapsed time.
+func (a *App) statusLineView() tui.View {
+	accentColor := tui.RGB{R: 80, G: 200, B: 235}
+	mutedColor := tui.RGB{R: 100, G: 100, B: 110}
+	accentStyle := tui.NewStyle().WithFgRGB(accentColor).WithBold()
+	mutedStyle := tui.NewStyle().WithFgRGB(mutedColor)
+
+	// Line 1: model in directory on branch
+	parts := []tui.View{
+		tui.Text(" %s", a.modelDisplayName()).Style(accentStyle),
+	}
+	dirName := filepath.Base(a.workspaceDir)
+	parts = append(parts,
+		tui.Text(" in ").Style(mutedStyle),
+		tui.Text("%s", dirName).Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 200, G: 200, B: 210}).WithBold()),
+	)
+	if a.gitBranch != "" {
+		parts = append(parts,
+			tui.Text(" on ").Style(mutedStyle),
+			tui.Text("%s", a.gitBranch).Style(accentStyle),
+		)
+	}
+	line1 := tui.Group(parts...)
+
+	// Line 2: context %, elapsed time, git stats
+	var stats []tui.View
+
+	// Context usage percentage
+	contextPct := a.contextPercent()
+	if contextPct > 0 {
+		pctColor := accentColor
+		if contextPct > 75 {
+			pctColor = tui.RGB{R: 255, G: 180, B: 60} // orange warning
+		}
+		if contextPct > 90 {
+			pctColor = tui.RGB{R: 255, G: 80, B: 80} // red critical
+		}
+		stats = append(stats, tui.Text("%d%%", contextPct).Style(tui.NewStyle().WithFgRGB(pctColor)))
+	}
+
+	// Elapsed time (when processing)
+	if a.processing {
+		elapsed := time.Since(a.processingStartTime)
+		stats = append(stats, tui.Text("%s", formatDuration(elapsed)).Style(mutedStyle))
+	}
+
+	if len(stats) == 0 {
+		return line1
+	}
+
+	// Join stats with " | " separator
+	var statsViews []tui.View
+	statsViews = append(statsViews, tui.Text(" ").Style(mutedStyle))
+	for i, s := range stats {
+		if i > 0 {
+			statsViews = append(statsViews, tui.Text(" | ").Style(mutedStyle))
+		}
+		statsViews = append(statsViews, s)
+	}
+	line2 := tui.Group(statsViews...)
+
+	return tui.Stack(line1, line2).Gap(0)
+}
+
+// modelDisplayName returns a human-friendly model name with context size.
+func (a *App) modelDisplayName() string {
+	name := a.modelName
+
+	// Friendly names for known models
+	switch {
+	case strings.Contains(name, "claude-opus-4-6"):
+		name = "Opus 4.6"
+	case strings.Contains(name, "claude-opus-4-5"):
+		name = "Opus 4.5"
+	case strings.Contains(name, "claude-sonnet-4-6"):
+		name = "Sonnet 4.6"
+	case strings.Contains(name, "claude-sonnet-4-5"):
+		name = "Sonnet 4.5"
+	case strings.Contains(name, "claude-haiku-4-5"):
+		name = "Haiku 4.5"
+	case strings.Contains(name, "claude-3-5-sonnet"):
+		name = "Sonnet 3.5"
+	case strings.Contains(name, "claude-3-5-haiku"):
+		name = "Haiku 3.5"
+	}
+
+	// Add context window size
+	if a.contextWindowMax > 0 {
+		switch {
+		case a.contextWindowMax >= 1_000_000:
+			name += fmt.Sprintf(" (%dM context)", a.contextWindowMax/1_000_000)
+		case a.contextWindowMax >= 1_000:
+			name += fmt.Sprintf(" (%dk context)", a.contextWindowMax/1_000)
+		}
+	}
+	return name
+}
+
+// contextPercent returns the context usage as a percentage (0-100), or 0 if unknown.
+func (a *App) contextPercent() int {
+	if a.lastUsage == nil || a.contextWindowMax <= 0 {
+		return 0
+	}
+	tokens := compaction.CalculateContextTokens(a.lastUsage)
+	pct := (tokens * 100) / a.contextWindowMax
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
 }
 
 // messageView returns the view for a message (with animations for live updates)

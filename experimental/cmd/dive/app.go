@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -56,7 +57,8 @@ type processingStartEvent struct {
 
 type processingEndEvent struct {
 	baseEvent
-	err error
+	err       error
+	lastUsage *llm.Usage // Final LLM usage for context tracking
 }
 
 type showDialogEvent struct {
@@ -262,6 +264,11 @@ type App struct {
 	compactionEventTime      time.Time
 	showCompactionStats      bool
 	compactionStatsStartTime time.Time
+
+	// Status line state
+	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
+	contextWindowMax int        // Max context window tokens for the model
+	gitBranch        string     // Current git branch (empty if not in a repo)
 }
 
 // NewApp creates a new CLI application
@@ -302,6 +309,8 @@ func NewApp(
 		cancel:           cancel,
 		initialPrompt:    initialPrompt,
 		compactionConfig: compactionConfig,
+		contextWindowMax: contextWindowForModel(modelName),
+		gitBranch:        detectGitBranch(workspaceDir),
 	}
 }
 
@@ -335,8 +344,8 @@ func (a *App) LiveView() tui.View {
 	// Always add spacing before divider (separates from scrollback or live content)
 	views = append(views, tui.Text(""))
 
-	// Input area
-	views = append(views, tui.Divider())
+	// Input area with status line
+	views = append(views, a.statusLineView())
 	views = append(views,
 		tui.InputField(&a.inputText).
 			ID("main-input").
@@ -651,6 +660,9 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 	case toolResultEvent:
 		a.handleToolResult(e.result)
 	case processingEndEvent:
+		if e.lastUsage != nil {
+			a.lastUsage = e.lastUsage
+		}
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
 		a.handleCompaction(e.event)
@@ -1017,8 +1029,8 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 		a.checkAndPerformCompaction(lastUsage)
 	}
 
-	// Send completion event
-	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err})
+	// Send completion event with usage info
+	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err, lastUsage: lastUsage})
 }
 
 // updateSessionMetadata updates a session with workspace and title information
@@ -2160,4 +2172,59 @@ func (a *App) getFileMatches(prefix string) []string {
 	}
 
 	return result
+}
+
+// detectGitBranch returns the current git branch name, or empty string if not in a repo.
+func detectGitBranch(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// contextWindowForModel returns the max context window size (in tokens) for known models.
+func contextWindowForModel(model string) int {
+	switch {
+	// Anthropic models
+	case strings.Contains(model, "claude-opus-4"), strings.Contains(model, "claude-sonnet-4"):
+		return 1_000_000
+	case strings.Contains(model, "claude-haiku-4"):
+		return 200_000
+	case strings.Contains(model, "claude-3-5"):
+		return 200_000
+	case strings.Contains(model, "claude"):
+		return 200_000
+
+	// Google models
+	case strings.Contains(model, "gemini-2.5"):
+		return 1_000_000
+	case strings.Contains(model, "gemini-3"):
+		return 1_000_000
+	case strings.Contains(model, "gemini"):
+		return 1_000_000
+
+	// OpenAI models
+	case strings.Contains(model, "gpt-5"):
+		return 1_000_000
+	case strings.Contains(model, "gpt-4o"):
+		return 128_000
+	case strings.Contains(model, "gpt-4"):
+		return 128_000
+	case strings.Contains(model, "o3"), strings.Contains(model, "o4"):
+		return 200_000
+
+	// Grok models
+	case strings.Contains(model, "grok"):
+		return 131_072
+
+	// Mistral models
+	case strings.Contains(model, "mistral"):
+		return 128_000
+
+	default:
+		return 200_000
+	}
 }
