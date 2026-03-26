@@ -64,6 +64,10 @@ func (r *TaskRecord) snapshot() taskRecordSnapshot {
 func (r *TaskRecord) setResult(status TaskStatus, output string, err error, endTime time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Don't overwrite a terminal status (e.g. timeout already set to failed)
+	if r.Status == TaskStatusCompleted || r.Status == TaskStatusFailed {
+		return
+	}
 	r.Status = status
 	r.Output = output
 	r.Error = err
@@ -326,10 +330,15 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	}
 	t.registry.Register(record)
 
-	// Background tasks use an independent context so they survive parent cancellation
+	// Background tasks use an independent context so they survive parent cancellation.
+	// Synchronous tasks get a cancellable context so timeouts stop the sub-agent.
 	taskCtx := ctx
+	var taskCancel context.CancelFunc
 	if input.RunInBackground {
 		taskCtx = context.Background()
+	} else {
+		taskCtx, taskCancel = context.WithCancel(ctx)
+		defer taskCancel()
 	}
 
 	executeFunc := func() {
@@ -385,8 +394,8 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	}
 
 	// Synchronous execution with timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, t.defaultTimeout)
-	defer cancel()
+	timeoutTimer := time.NewTimer(t.defaultTimeout)
+	defer timeoutTimer.Stop()
 
 	done := make(chan struct{})
 	go func() {
@@ -403,8 +412,10 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 		}
 		return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, snapshot.Output)).
 			WithDisplay(fmt.Sprintf("Completed: %s", input.Description)), nil
-	case <-timeoutCtx.Done():
-		record.setResult(TaskStatusFailed, "", timeoutCtx.Err(), time.Now())
+	case <-timeoutTimer.C:
+		// Cancel the sub-agent's context so it stops working
+		taskCancel()
+		record.setResult(TaskStatusFailed, "", context.DeadlineExceeded, time.Now())
 		return dive.NewToolResultError(fmt.Sprintf("Task timed out after %s. Task ID: %s", t.defaultTimeout, taskID)).
 			WithDisplay(fmt.Sprintf("Task timed out: %s", input.Description)), nil
 	}

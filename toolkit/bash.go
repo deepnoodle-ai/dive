@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -300,7 +299,8 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 		return "", "", -1, fmt.Errorf("error: %s", runErr.Error())
 	}
 
-	// Read stdout, streaming lines as they arrive
+	// Read stdout, streaming lines as they arrive.
+	// bufio.Scanner with ScanLines handles the final non-newline-terminated line.
 	if stdoutPipe != nil {
 		scanner := bufio.NewScanner(stdoutPipe)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -308,11 +308,6 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 			line := scanner.Text() + "\n"
 			stdoutBuf.WriteString(line)
 			dive.StreamOutput(ctx, line)
-		}
-		// Drain any remaining data that didn't end with newline
-		if remaining, readErr := io.ReadAll(stdoutPipe); readErr == nil && len(remaining) > 0 {
-			stdoutBuf.Write(remaining)
-			dive.StreamOutput(ctx, string(remaining))
 		}
 	}
 

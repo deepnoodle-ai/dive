@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
@@ -1421,6 +1422,10 @@ func (a *App) handleToolStream(e toolStreamEvent) {
 	buf := a.toolStreamBuffers[e.toolCallID] + e.text
 	if len(buf) > 500 {
 		buf = buf[len(buf)-500:]
+		// Skip to the next valid UTF-8 boundary to avoid garbled display
+		for len(buf) > 0 && !utf8.RuneStart(buf[0]) {
+			buf = buf[1:]
+		}
 	}
 	a.toolStreamBuffers[e.toolCallID] = buf
 	if last := lastNonEmptyLine(buf); last != "" {

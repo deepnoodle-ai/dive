@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
@@ -190,10 +191,10 @@ func runInteractive(ctx *cli.Context) error {
 	subagentRegistry := subagent.NewRegistry(true)
 	taskRegistry := extended.NewTaskRegistry()
 
-	// appBridge allows the task tool's OnEvent callback to reach the App,
-	// which isn't created yet at this point.
-	type appBridgeType struct{ app *App }
-	appBridge := &appBridgeType{}
+	// appRef allows the task tool's OnEvent callback to reach the App,
+	// which isn't created yet at this point. Uses atomic for safe
+	// concurrent access from background task goroutines.
+	var appRef atomic.Pointer[App]
 
 	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 		// Create sub-model (use parent model by default)
@@ -216,8 +217,8 @@ func runInteractive(ctx *cli.Context) error {
 		SubagentRegistry: subagentRegistry,
 		ParentTools:      tools,
 		OnEvent: func(taskID string, item *dive.ResponseItem) {
-			if appBridge.app != nil && appBridge.app.runner != nil {
-				appBridge.app.runner.SendEvent(subagentEvent{
+			if app := appRef.Load(); app != nil && app.runner != nil {
+				app.runner.SendEvent(subagentEvent{
 					baseEvent: newBaseEvent(),
 					taskID:    taskID,
 					item:      item,
@@ -344,7 +345,7 @@ func runInteractive(ctx *cli.Context) error {
 		skillLoader,
 	)
 	app.currentSession = currentSession
-	appBridge.app = app
+	appRef.Store(app)
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {

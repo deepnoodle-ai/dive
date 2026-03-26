@@ -179,6 +179,46 @@ func TestTaskTool(t *testing.T) {
 		assert.Contains(t, result.Content[0].Text, "failed to create agent")
 	})
 
+	t.Run("synchronous task timeout cancels sub-agent", func(t *testing.T) {
+		registry := NewTaskRegistry()
+		tool := NewTaskTool(TaskToolOptions{
+			Registry: registry,
+			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
+				// Agent that takes 5 seconds — well beyond the timeout
+				return createMockAgent("slow-agent", "should not appear", nil, 5*time.Second)
+			},
+			DefaultTimeout: 200 * time.Millisecond,
+		})
+
+		start := time.Now()
+		result, err := tool.Call(ctx, &TaskToolInput{
+			Prompt:       "Do something slow",
+			Description:  "Timeout test",
+			SubagentType: "general-purpose",
+		})
+		elapsed := time.Since(start)
+
+		assert.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "timed out")
+
+		// Should have returned quickly (near the timeout), not waited 5s
+		assert.True(t, elapsed < 2*time.Second)
+
+		// Verify the record stays in failed state and isn't overwritten
+		tasks := registry.List()
+		assert.Equal(t, 1, len(tasks))
+		record, ok := registry.Get(tasks[0])
+		assert.True(t, ok)
+		snapshot := record.snapshot()
+		assert.Equal(t, TaskStatusFailed, snapshot.Status)
+
+		// Wait a bit to confirm the goroutine doesn't overwrite the status
+		time.Sleep(300 * time.Millisecond)
+		snapshot = record.snapshot()
+		assert.Equal(t, TaskStatusFailed, snapshot.Status)
+	})
+
 	t.Run("missing required fields", func(t *testing.T) {
 		registry := NewTaskRegistry()
 		tool := NewTaskTool(TaskToolOptions{
