@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/media"
@@ -44,9 +45,11 @@ func runImage(ctx *cli.Context) error {
 		}
 		opts = append(opts, media.WithOutputFormat(format))
 	}
-	if n := ctx.Int("count"); n > 1 {
-		opts = append(opts, media.WithCount(n))
+	count := ctx.Int("count")
+	if count < 1 {
+		count = 1
 	}
+	opts = append(opts, media.WithCount(count))
 
 	timeout := 5 * time.Minute
 	opts = append(opts, media.WithTimeout(timeout))
@@ -54,36 +57,46 @@ func runImage(ctx *cli.Context) error {
 	fmt.Printf("Generating image with %s...\n", model)
 	start := time.Now()
 
-	result, err := media.GenerateImage(context.Background(), prompt, opts...)
+	results, err := media.GenerateImageBatch(context.Background(), prompt, opts...)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
 	}
 
 	elapsed := time.Since(start)
+	outBase := ctx.String("out")
 
-	// Determine output path
-	outPath := ctx.String("out")
-	if outPath == "" {
-		slug := media.SlugifyPrompt(prompt, 40)
-		outPath = slug + result.Format.FileExtension()
-	}
+	for i, result := range results {
+		outPath := outBase
+		if outPath == "" {
+			slug := media.SlugifyPrompt(prompt, 40)
+			if count > 1 {
+				outPath = fmt.Sprintf("%s-%d%s", slug, i+1, result.Format.FileExtension())
+			} else {
+				outPath = slug + result.Format.FileExtension()
+			}
+		} else if count > 1 {
+			ext := filepath.Ext(outPath)
+			base := strings.TrimSuffix(outPath, ext)
+			outPath = fmt.Sprintf("%s-%d%s", base, i+1, ext)
+		}
 
-	outPath, err = result.WriteTo(outPath)
-	if err != nil {
-		return fmt.Errorf("writing image: %w", err)
-	}
+		outPath, err = result.WriteTo(outPath)
+		if err != nil {
+			return fmt.Errorf("writing image: %w", err)
+		}
 
-	absPath, err := filepath.Abs(outPath)
-	if err != nil {
-		absPath = outPath
-	}
+		absPath, err := filepath.Abs(outPath)
+		if err != nil {
+			absPath = outPath
+		}
 
-	fmt.Printf("Saved: %s (%dx%d %s, %s, %.1fs)\n",
-		absPath, result.Width, result.Height,
-		result.Format, formatBytes(len(result.Data)), elapsed.Seconds())
+		fmt.Printf("Saved: %s (%dx%d %s, %s, %.1fs)\n",
+			absPath, result.Width, result.Height,
+			result.Format, formatBytes(len(result.Data)), elapsed.Seconds())
 
-	if ctx.Bool("open") {
-		openFile(absPath)
+		if ctx.Bool("open") {
+			openFile(absPath)
+		}
 	}
 	return nil
 }
@@ -96,7 +109,7 @@ func openFile(path string) {
 	case "linux":
 		cmd = exec.Command("xdg-open", path)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", path)
+		cmd = exec.Command("cmd", "/c", "start", "", path)
 	default:
 		return
 	}

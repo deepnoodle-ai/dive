@@ -45,15 +45,18 @@ func TestMediaProviderOptions(t *testing.T) {
 	assert.Equal(t, "us-east1", p.imagenLocation)
 }
 
-func requireGoogleMediaAPIKey(t *testing.T) {
+func requireGoogleMediaIntegration(t *testing.T) {
 	t.Helper()
+	if os.Getenv("RUN_INTEGRATION_TESTS") == "" {
+		t.Skip("RUN_INTEGRATION_TESTS not set")
+	}
 	if os.Getenv("GOOGLE_API_KEY") == "" && os.Getenv("GEMINI_API_KEY") == "" {
 		t.Skip("GOOGLE_API_KEY or GEMINI_API_KEY not set")
 	}
 }
 
 func TestGoogleGenerateImage_Gemini_Integration(t *testing.T) {
-	requireGoogleMediaAPIKey(t)
+	requireGoogleMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{
@@ -71,7 +74,7 @@ func TestGoogleGenerateImage_Gemini_Integration(t *testing.T) {
 }
 
 func TestGoogleGenerateImage_Imagen4_Integration(t *testing.T) {
-	requireGoogleMediaAPIKey(t)
+	requireGoogleMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{
@@ -87,7 +90,7 @@ func TestGoogleGenerateImage_Imagen4_Integration(t *testing.T) {
 }
 
 func TestGoogleGenerateImage_FormatConversion_Integration(t *testing.T) {
-	requireGoogleMediaAPIKey(t)
+	requireGoogleMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{
@@ -106,7 +109,7 @@ func TestGoogleGenerateVideo_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping video generation test in short mode")
 	}
-	requireGoogleMediaAPIKey(t)
+	requireGoogleMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{

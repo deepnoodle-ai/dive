@@ -84,15 +84,18 @@ func TestOpenAIVideoMatcher(t *testing.T) {
 	assert.True(t, !matcher("veo-3"))
 }
 
-func requireOpenAIAPIKey(t *testing.T) {
+func requireOpenAIMediaIntegration(t *testing.T) {
 	t.Helper()
+	if os.Getenv("RUN_INTEGRATION_TESTS") == "" {
+		t.Skip("RUN_INTEGRATION_TESTS not set")
+	}
 	if os.Getenv("OPENAI_API_KEY") == "" {
 		t.Skip("OPENAI_API_KEY not set")
 	}
 }
 
 func TestOpenAIGenerateImage_Integration(t *testing.T) {
-	requireOpenAIAPIKey(t)
+	requireOpenAIMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{
@@ -111,7 +114,7 @@ func TestOpenAIGenerateVideo_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping video generation test in short mode")
 	}
-	requireOpenAIAPIKey(t)
+	requireOpenAIMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{

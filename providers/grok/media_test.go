@@ -44,15 +44,18 @@ func TestGrokVideoMatcher(t *testing.T) {
 	assert.True(t, !matcher("sora-2"))
 }
 
-func requireGrokAPIKey(t *testing.T) {
+func requireGrokMediaIntegration(t *testing.T) {
 	t.Helper()
+	if os.Getenv("RUN_INTEGRATION_TESTS") == "" {
+		t.Skip("RUN_INTEGRATION_TESTS not set")
+	}
 	if os.Getenv("XAI_API_KEY") == "" && os.Getenv("GROK_API_KEY") == "" {
 		t.Skip("XAI_API_KEY or GROK_API_KEY not set")
 	}
 }
 
 func TestGrokGenerateImage_Integration(t *testing.T) {
-	requireGrokAPIKey(t)
+	requireGrokMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{
@@ -70,7 +73,7 @@ func TestGrokGenerateVideo_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping video generation test in short mode")
 	}
-	requireGrokAPIKey(t)
+	requireGrokMediaIntegration(t)
 
 	p := NewMediaProvider()
 	config := &media.Config{

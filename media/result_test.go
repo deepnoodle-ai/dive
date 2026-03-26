@@ -72,8 +72,9 @@ func TestVideoResult_WriteTo_AutoExtension(t *testing.T) {
 
 	expected := filepath.Join(dir, "test.webm")
 	assert.Equal(t, expected, actual)
-	_, err = os.Stat(expected)
+	data, err := os.ReadFile(expected)
 	assert.NoError(t, err)
+	assert.Equal(t, []byte("fake-webm-data"), data)
 }
 
 func TestUniquePath(t *testing.T) {
@@ -84,11 +85,13 @@ func TestUniquePath(t *testing.T) {
 	assert.Equal(t, path, UniquePath(path))
 
 	// Create the file, then UniquePath should return path with suffix 1.
-	os.WriteFile(path, []byte("x"), 0644)
+	err := os.WriteFile(path, []byte("x"), 0644)
+	assert.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "new1.png"), UniquePath(path))
 
 	// Create that too, should get suffix 2.
-	os.WriteFile(filepath.Join(dir, "new1.png"), []byte("x"), 0644)
+	err = os.WriteFile(filepath.Join(dir, "new1.png"), []byte("x"), 0644)
+	assert.NoError(t, err)
 	assert.Equal(t, filepath.Join(dir, "new2.png"), UniquePath(path))
 }
 

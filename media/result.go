@@ -122,17 +122,20 @@ func (r *VideoResult) SetVideoFormat(mimeType string) {
 // a numeric suffix is inserted before the extension (e.g., "photo1.png",
 // "photo2.png") until an available name is found.
 func UniquePath(path string) string {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return path
+	if _, err := os.Stat(path); err != nil {
+		return path // doesn't exist or can't stat — use as-is
 	}
 	ext := filepath.Ext(path)
 	base := strings.TrimSuffix(path, ext)
-	for i := 1; ; i++ {
+	const maxAttempts = 10000
+	for i := 1; i <= maxAttempts; i++ {
 		candidate := fmt.Sprintf("%s%d%s", base, i, ext)
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		if _, err := os.Stat(candidate); err != nil {
 			return candidate
 		}
 	}
+	// Fallback: use timestamp suffix
+	return fmt.Sprintf("%s-%d%s", base, time.Now().UnixNano(), ext)
 }
 
 // SlugifyPrompt generates a short filename-safe slug from a prompt string.

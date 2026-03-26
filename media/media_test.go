@@ -3,18 +3,26 @@ package media
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
+var registryMu sync.Mutex
+
 // testRegistry replaces the default registry for the duration of a test.
+// Not safe with t.Parallel() — tests using this must run sequentially.
 func testRegistry(t *testing.T) *Registry {
 	t.Helper()
+	registryMu.Lock()
 	old := defaultRegistry
 	defaultRegistry = &Registry{}
-	t.Cleanup(func() { defaultRegistry = old })
+	t.Cleanup(func() {
+		defaultRegistry = old
+		registryMu.Unlock()
+	})
 	return defaultRegistry
 }
 

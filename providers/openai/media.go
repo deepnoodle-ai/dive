@@ -86,21 +86,27 @@ func (p *MediaProvider) EditImage(ctx context.Context, prompt string, config *me
 		count = 1
 	}
 
-	// Use Images.Generate with the reference image included as input.
-	// The gpt-image models support editing through the generate endpoint
-	// when provided with image inputs.
-	params := openai.ImageGenerateParams{
-		Prompt:  prompt,
-		Model:   openai.ImageModel(model),
-		Size:    openai.ImageGenerateParamsSize(size),
-		Quality: openai.ImageGenerateParamsQualityHigh,
-		N:       openai.Opt[int64](int64(count)),
+	// Build image input from reference images.
+	readers := make([]io.Reader, len(config.ReferenceImages))
+	for i, imgData := range config.ReferenceImages {
+		readers[i] = bytes.NewReader(imgData)
 	}
-	if config.OutputFormat != "" {
-		params.OutputFormat = openai.ImageGenerateParamsOutputFormat(string(config.OutputFormat))
+	var imageInput openai.ImageEditParamsImageUnion
+	if len(readers) == 1 {
+		imageInput.OfFile = readers[0]
+	} else {
+		imageInput.OfFileArray = readers
 	}
 
-	resp, err := p.client.Images.Generate(ctx, params)
+	params := openai.ImageEditParams{
+		Image:  imageInput,
+		Prompt: prompt,
+		Model:  openai.ImageModel(model),
+		Size:   openai.ImageEditParamsSize(size),
+		N:      openai.Opt[int64](int64(count)),
+	}
+
+	resp, err := p.client.Images.Edit(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("openai image edit: %w", err)
 	}
@@ -162,12 +168,18 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 
 	ar := videoSizeToAspectRatio(size)
 	width, height := media.StandardVideoDimensions(ar)
+	duration := config.Duration
+	if duration == 0 {
+		if parsed, err := time.ParseDuration(seconds + "s"); err == nil {
+			duration = parsed
+		}
+	}
 	result := &media.VideoResult{
 		Data:        videoData,
 		Model:       string(video.Model),
 		Width:       width,
 		Height:      height,
-		Duration:    config.Duration,
+		Duration:    duration,
 		AspectRatio: ar,
 		Metadata: map[string]any{
 			"provider": "openai",

@@ -313,11 +313,10 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		return nil, fmt.Errorf("no video data in response")
 	}
 
-	_, err = p.client.Files.Download(ctx, genai.NewDownloadURIFromGeneratedVideo(firstVideo), nil)
+	videoData, err := p.client.Files.Download(ctx, genai.NewDownloadURIFromGeneratedVideo(firstVideo), nil)
 	if err != nil {
 		return nil, fmt.Errorf("downloading video: %w", err)
 	}
-	videoData := firstVideo.Video.VideoBytes
 	if len(videoData) == 0 {
 		return nil, fmt.Errorf("empty video data after download")
 	}
