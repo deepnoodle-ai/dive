@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"net/http"
 	"time"
 
 	// Register image decoders for DecodeConfig.
@@ -49,9 +50,10 @@ func (p *MediaProvider) GenerateImage(ctx context.Context, prompt string, config
 	}
 
 	params := openai.ImageGenerateParams{
-		Prompt: prompt,
-		Model:  openai.ImageModel(model),
-		N:      openai.Opt[int64](int64(count)),
+		Prompt:         prompt,
+		Model:          openai.ImageModel(model),
+		N:              openai.Opt[int64](int64(count)),
+		ResponseFormat: openai.ImageGenerateParamsResponseFormatB64JSON,
 	}
 
 	resp, err := p.client.Images.Generate(ctx, params)
@@ -124,15 +126,26 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 }
 
 // decodeGrokImageResults extracts image data from xAI response items.
+// Handles both base64 and URL response formats.
 func decodeGrokImageResults(data []openai.Image, model string) ([]*media.ImageResult, error) {
 	var results []*media.ImageResult
 	for _, item := range data {
-		if item.B64JSON == "" {
+		var imageData []byte
+		var err error
+
+		switch {
+		case item.B64JSON != "":
+			imageData, err = base64.StdEncoding.DecodeString(item.B64JSON)
+			if err != nil {
+				return nil, fmt.Errorf("decoding image data: %w", err)
+			}
+		case item.URL != "":
+			imageData, err = downloadURL(item.URL)
+			if err != nil {
+				return nil, fmt.Errorf("downloading image from URL: %w", err)
+			}
+		default:
 			continue
-		}
-		imageData, err := base64.StdEncoding.DecodeString(item.B64JSON)
-		if err != nil {
-			return nil, fmt.Errorf("decoding image data: %w", err)
 		}
 		format := media.DetectFormat(imageData)
 		var width, height int
@@ -155,6 +168,19 @@ func decodeGrokImageResults(data []openai.Image, model string) ([]*media.ImageRe
 		return nil, fmt.Errorf("no images in response")
 	}
 	return results, nil
+}
+
+// downloadURL fetches image data from a URL.
+func downloadURL(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d fetching image", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // grokDurationToSeconds maps a time.Duration to a Grok-compatible seconds string.
