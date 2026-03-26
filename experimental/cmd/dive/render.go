@@ -45,10 +45,10 @@ func (a *App) statusLineView() tui.View {
 		tui.Text(" in ").Style(mutedStyle),
 		tui.Text("%s", dirName).Style(tui.NewStyle().WithFgRGB(tui.RGB{R: 200, G: 200, B: 210}).WithBold()),
 	)
-	if a.gitBranch != "" {
+	if branch := detectGitBranch(a.workspaceDir); branch != "" {
 		parts = append(parts,
 			tui.Text(" on ").Style(mutedStyle),
-			tui.Text("%s", a.gitBranch).Style(accentStyle),
+			tui.Text("%s", branch).Style(accentStyle),
 		)
 	}
 	line1 := tui.Group(parts...)
@@ -85,29 +85,12 @@ func (a *App) statusLineView() tui.View {
 	return tui.Stack(line1, line2).Gap(0)
 }
 
-// modelDisplayName returns a human-friendly model name with context size.
+// modelDisplayName returns a human-friendly model name.
 func (a *App) modelDisplayName() string {
-	name := a.modelName
-
-	// Friendly names for known models
-	switch {
-	case strings.Contains(name, "claude-opus-4-6"):
-		name = "Opus 4.6"
-	case strings.Contains(name, "claude-opus-4-5"):
-		name = "Opus 4.5"
-	case strings.Contains(name, "claude-sonnet-4-6"):
-		name = "Sonnet 4.6"
-	case strings.Contains(name, "claude-sonnet-4-5"):
-		name = "Sonnet 4.5"
-	case strings.Contains(name, "claude-haiku-4-5"):
-		name = "Haiku 4.5"
-	case strings.Contains(name, "claude-3-5-sonnet"):
-		name = "Sonnet 3.5"
-	case strings.Contains(name, "claude-3-5-haiku"):
-		name = "Haiku 3.5"
+	if info := lookupModel(a.modelName); info != nil && info.Label != "" {
+		return info.Label
 	}
-
-	return name
+	return a.modelName
 }
 
 // contextPercent returns the context usage as a percentage (0-100), or 0 if unknown.

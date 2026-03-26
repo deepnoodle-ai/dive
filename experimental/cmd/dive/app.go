@@ -268,7 +268,6 @@ type App struct {
 	// Status line state
 	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
 	contextWindowMax int        // Max context window tokens for the model
-	gitBranch        string     // Current git branch (empty if not in a repo)
 }
 
 // NewApp creates a new CLI application
@@ -310,7 +309,6 @@ func NewApp(
 		initialPrompt:    initialPrompt,
 		compactionConfig: compactionConfig,
 		contextWindowMax: contextWindowForModel(modelName),
-		gitBranch:        detectGitBranch(workspaceDir),
 	}
 }
 
@@ -1307,6 +1305,9 @@ func (a *App) handleCompaction(event *compaction.CompactionEvent) {
 	a.compactionEventTime = time.Now()
 	a.showCompactionStats = true
 	a.compactionStatsStartTime = time.Now()
+	// Reset usage so the context bar reflects post-compaction state.
+	// It will be repopulated on the next LLM response.
+	a.lastUsage = nil
 }
 
 func (a *App) handleProcessingEnd(err error) {
@@ -1625,6 +1626,7 @@ func (a *App) handleCommand(input string) bool {
 		a.currentMessage = nil
 		a.streamingMessageIndex = 0
 		a.firstUserSent = false
+		a.lastUsage = nil
 
 		// Show fresh intro using runner.Print (not tui.Print) since we're
 		// in the middle of the running InlineApp event loop
@@ -2190,46 +2192,63 @@ func detectGitBranch(dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// contextWindowForModel returns the max context window size (in tokens) for known models.
-func contextWindowForModel(model string) int {
-	switch {
+// modelInfo describes a known model's display name and context window size.
+type modelInfo struct {
+	Pattern       string // substring to match against model ID
+	Label         string // human-friendly display name (empty = use raw model ID)
+	ContextWindow int    // max context window in tokens
+}
+
+// modelCatalog is the shared catalog of known models, checked in order.
+// More specific patterns must appear before broader ones.
+var modelCatalog = []modelInfo{
 	// Anthropic models
-	case strings.Contains(model, "claude-opus-4"), strings.Contains(model, "claude-sonnet-4"):
-		return 1_000_000
-	case strings.Contains(model, "claude-haiku-4"):
-		return 200_000
-	case strings.Contains(model, "claude-3-5"):
-		return 200_000
-	case strings.Contains(model, "claude"):
-		return 200_000
+	{"claude-opus-4-6", "Opus 4.6", 1_000_000},
+	{"claude-opus-4-5", "Opus 4.5", 1_000_000},
+	{"claude-opus-4", "", 1_000_000},
+	{"claude-sonnet-4-6", "Sonnet 4.6", 1_000_000},
+	{"claude-sonnet-4-5", "Sonnet 4.5", 1_000_000},
+	{"claude-sonnet-4", "", 1_000_000},
+	{"claude-haiku-4-5", "Haiku 4.5", 200_000},
+	{"claude-haiku-4", "", 200_000},
+	{"claude-3-5-sonnet", "Sonnet 3.5", 200_000},
+	{"claude-3-5-haiku", "Haiku 3.5", 200_000},
+	{"claude", "", 200_000},
 
 	// Google models
-	case strings.Contains(model, "gemini-2.5"):
-		return 1_000_000
-	case strings.Contains(model, "gemini-3"):
-		return 1_000_000
-	case strings.Contains(model, "gemini"):
-		return 1_000_000
+	{"gemini-2.5", "", 1_000_000},
+	{"gemini-3", "", 1_000_000},
+	{"gemini", "", 1_000_000},
 
 	// OpenAI models
-	case strings.Contains(model, "gpt-5"):
-		return 1_000_000
-	case strings.Contains(model, "gpt-4o"):
-		return 128_000
-	case strings.Contains(model, "gpt-4"):
-		return 128_000
-	case strings.Contains(model, "o3"), strings.Contains(model, "o4"):
-		return 200_000
+	{"gpt-5", "", 1_000_000},
+	{"gpt-4o", "", 128_000},
+	{"gpt-4", "", 128_000},
+	{"o3", "", 200_000},
+	{"o4", "", 200_000},
 
 	// Grok models
-	case strings.Contains(model, "grok"):
-		return 131_072
+	{"grok", "", 131_072},
 
 	// Mistral models
-	case strings.Contains(model, "mistral"):
-		return 128_000
+	{"mistral", "", 128_000},
+}
 
-	default:
-		return 200_000
+// lookupModel finds the first matching catalog entry for a model ID.
+func lookupModel(model string) *modelInfo {
+	for i := range modelCatalog {
+		if strings.Contains(model, modelCatalog[i].Pattern) {
+			return &modelCatalog[i]
+		}
 	}
+	return nil
+}
+
+// contextWindowForModel returns the max context window size (in tokens) for known models.
+// Returns 0 for unknown models; the UI hides the context bar when 0.
+func contextWindowForModel(model string) int {
+	if info := lookupModel(model); info != nil {
+		return info.ContextWindow
+	}
+	return 0
 }
