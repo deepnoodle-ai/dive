@@ -56,9 +56,9 @@ func (a *App) statusLineView() tui.View {
 	// Line 2: context %, elapsed time, git stats
 	var stats []tui.View
 
-	// Context usage percentage
-	contextPct := a.contextPercent()
-	if contextPct > 0 {
+	// Context usage percentage (show after first LLM response)
+	if a.lastUsage != nil {
+		contextPct := a.contextPercent()
 		pctColor := accentColor
 		if contextPct > 75 {
 			pctColor = tui.RGB{R: 255, G: 180, B: 60} // orange warning
