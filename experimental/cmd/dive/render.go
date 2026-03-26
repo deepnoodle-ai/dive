@@ -279,7 +279,7 @@ func (a *App) toolCallView(msg Message) tui.View {
 	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
 	header := tui.Group(statusView, tui.Text(" %s", toolCall))
 
-	if msg.ToolDone && len(msg.ToolResultLines) > 0 {
+	if len(msg.ToolResultLines) > 0 {
 		resultView := a.formatToolResultView(msg)
 		if resultView != nil {
 			return tui.Stack(header, resultView).Gap(0)
@@ -620,7 +620,7 @@ func (a *App) toolCallViewStatic(msg Message) tui.View {
 	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
 	header := tui.Group(statusView, tui.Text(" %s", toolCall))
 
-	if msg.ToolDone && len(msg.ToolResultLines) > 0 {
+	if len(msg.ToolResultLines) > 0 {
 		resultView := a.formatToolResultView(msg)
 		if resultView != nil {
 			return tui.Stack(header, resultView).Gap(0)
