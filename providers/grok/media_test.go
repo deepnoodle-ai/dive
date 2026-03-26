@@ -15,12 +15,14 @@ func TestGrokDurationToSeconds(t *testing.T) {
 		d    time.Duration
 		want string
 	}{
-		{0, "5"},
-		{4 * time.Second, "5"},
+		{0, "5"},            // below minimum → default
+		{4 * time.Second, "4"},
 		{5 * time.Second, "5"},
-		{8 * time.Second, "5"},
+		{8 * time.Second, "8"},
 		{10 * time.Second, "10"},
-		{15 * time.Second, "10"},
+		{12 * time.Second, "12"},
+		{15 * time.Second, "15"},
+		{20 * time.Second, "15"}, // clamped to max
 	}
 	for _, tt := range tests {
 		t.Run(tt.d.String(), func(t *testing.T) {

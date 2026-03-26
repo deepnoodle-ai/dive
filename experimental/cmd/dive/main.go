@@ -802,6 +802,13 @@ func createTools(workspaceDir string, dialog dive.Dialog) []dive.Tool {
 		))
 	}
 
+	// Add video generation tool using the best available provider
+	if videoModel := getDefaultVideoModel(); videoModel != "" {
+		tools = append(tools, toolkit.NewVideoGenerationTool(videoModel,
+			toolkit.WithVideoToolWorkDir(workspaceDir),
+		))
+	}
+
 	return tools
 }
 

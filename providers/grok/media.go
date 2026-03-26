@@ -109,12 +109,18 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 		ar = media.Aspect16x9
 	}
 	width, height := media.StandardVideoDimensions(ar)
+	duration := config.Duration
+	if duration == 0 {
+		if parsed, err := time.ParseDuration(seconds + "s"); err == nil {
+			duration = parsed
+		}
+	}
 	result := &media.VideoResult{
 		Data:        videoData,
 		Model:       model,
 		Width:       width,
 		Height:      height,
-		Duration:    config.Duration,
+		Duration:    duration,
 		AspectRatio: ar,
 		Metadata: map[string]any{
 			"provider": "grok",
@@ -183,13 +189,17 @@ func downloadURL(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// grokDurationToSeconds maps a time.Duration to a Grok-compatible seconds string.
+// grokDurationToSeconds converts a time.Duration to a seconds string for the
+// Grok video API. Clamps to the 1–15 second range, defaulting to 5.
 func grokDurationToSeconds(d time.Duration) string {
 	sec := int(d.Seconds())
-	if sec >= 10 {
-		return "10"
+	if sec < 1 {
+		return "5"
 	}
-	return "5"
+	if sec > 15 {
+		sec = 15
+	}
+	return fmt.Sprintf("%d", sec)
 }
 
 // Compile-time interface checks.

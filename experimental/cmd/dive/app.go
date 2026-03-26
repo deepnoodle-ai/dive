@@ -923,7 +923,7 @@ func (a *App) submitInput(value string) {
 // Sends events to the main event loop instead of modifying state directly.
 func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 	// Expand file references (uses only immutable workspaceDir)
-	expanded, images, err := a.expandFileReferences(input)
+	expanded, extraContent, err := a.expandFileReferences(input)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
 	}
@@ -933,7 +933,7 @@ func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 
 	// Send start event to set up state in the main goroutine
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: input, expanded: expanded})
-	a.runAgent(expanded, images)
+	a.runAgent(expanded, extraContent)
 }
 
 // processCommandAsync handles slash command processing in background.
@@ -941,7 +941,7 @@ func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 // expanded is the full prompt to send to the agent
 func (a *App) processCommandAsync(displayText, expanded string, includeStartupAttachment bool) {
 	// Expand file references in the expanded text
-	expandedWithFiles, images, err := a.expandFileReferences(expanded)
+	expandedWithFiles, extraContent, err := a.expandFileReferences(expanded)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
 	}
@@ -951,7 +951,7 @@ func (a *App) processCommandAsync(displayText, expanded string, includeStartupAt
 
 	// Send start event with display text, but send expanded text to agent
 	a.runner.SendEvent(processingStartEvent{baseEvent: newBaseEvent(), userInput: displayText, expanded: expandedWithFiles})
-	a.runAgent(expandedWithFiles, images)
+	a.runAgent(expandedWithFiles, extraContent)
 }
 
 // runAgent runs the agent with the given input. If extra content blocks are
@@ -1942,7 +1942,18 @@ func (a *App) expandFileReferences(input string) (string, []llm.Content, error) 
 			return match
 		}
 
-		// Read file
+		// Guard against reading excessively large files into memory.
+		const maxFileSize = 100 * 1024 * 1024 // 100 MB
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			lastErr = fmt.Errorf("cannot stat %s: %w", path, err)
+			return match
+		}
+		if info.Size() > maxFileSize {
+			lastErr = fmt.Errorf("file too large to attach: %s (%s)", path, formatBytes(int(info.Size())))
+			return match
+		}
+
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			lastErr = fmt.Errorf("cannot read %s: %w", path, err)
