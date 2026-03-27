@@ -189,7 +189,7 @@ The `skill.Loader` gains three methods to satisfy `dive.Extension`:
 |------|----------|
 | Nil extension in the slice | Skip silently |
 | Extension returns nil from Tools() or empty Hooks() | Safe — append of nil slice is a no-op |
-| Multiple extensions add same-named tool | Last one wins (same as adding duplicate tools directly) |
+| Multiple extensions add same-named tool | `NewAgent` returns an error (`duplicate tool name: "X"`) |
 | Extension Rules() with leading/trailing whitespace | Trimmed during merge |
 | Zero extensions | No-op, identical to current behavior |
 | skill.Loader with no skills loaded | Tools() returns empty, Rules() returns empty, hooks still returned (for session resume catalog cleanup) |
