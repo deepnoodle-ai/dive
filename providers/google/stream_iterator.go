@@ -130,7 +130,7 @@ func (s *StreamIterator) Next() bool {
 	if s.streamNext != nil {
 		response, err, hasMore := s.streamNext()
 		if err != nil {
-			s.err = err
+			s.err = wrapGoogleError(err)
 			s.done = true
 			s.mu.Unlock()
 			return false

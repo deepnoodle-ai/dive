@@ -3,6 +3,7 @@ package google
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/wonton/retry"
 	"google.golang.org/genai"
 )
@@ -132,7 +134,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		// Use Models.GenerateContent directly
 		resp, err := p.client.Models.GenerateContent(ctx, request.Model, contents, genConfig)
 		if err != nil {
-			return fmt.Errorf("error generating content: %w", err)
+			return wrapGoogleError(err)
 		}
 
 		var convErr error
@@ -141,7 +143,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return fmt.Errorf("error converting response: %w", convErr)
 		}
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute))
+	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
 
 	if err != nil {
 		return nil, err
@@ -189,19 +191,23 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
-	var stream *StreamIterator
-	err = retry.DoSimple(ctx, func() error {
-		// Use Models.GenerateContentStream directly
-		streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
-		stream = NewStreamIteratorFromSeq(ctx, streamSeq, request.Model)
-		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute))
-
-	if err != nil {
-		return nil, err
-	}
+	// Note: GenerateContentStream returns an iterator; errors surface during
+	// iteration, not at creation time, so retry.DoSimple cannot help here.
+	streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
+	stream := NewStreamIteratorFromSeq(ctx, streamSeq, request.Model)
 
 	return stream, nil
+}
+
+// wrapGoogleError converts a Google API error to a providers.NewError so that
+// retry.SkipPermanent can detect non-retryable status codes. Falls back to the
+// original error if it's not a genai.APIError.
+func wrapGoogleError(err error) error {
+	var apiErr *genai.APIError
+	if errors.As(err, &apiErr) {
+		return providers.NewError(apiErr.Code, apiErr.Message)
+	}
+	return err
 }
 
 func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
