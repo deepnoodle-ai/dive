@@ -4,17 +4,21 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/experimental/subagent"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
@@ -87,6 +91,16 @@ func main() {
 				Help("Open result in default viewer"),
 		).
 		Run(runVideo)
+
+	// Models subcommand
+	app.Command("models").
+		Description("List available models and providers").
+		Flags(
+			cli.Bool("available", "a").
+				Default(false).
+				Help("Only show providers with API keys configured"),
+		).
+		Run(runModels)
 
 	app.Main().
 		Flags(
@@ -165,14 +179,14 @@ func runInteractive(ctx *cli.Context) error {
 		modelName = getDefaultModel()
 	}
 
+	// Create model
+	model := createModel(modelName, ctx.String("api-endpoint"))
+
 	// Build system prompt
 	systemPrompt := ctx.String("system-prompt")
 	if systemPrompt == "" {
-		systemPrompt = defaultSystemPrompt(workspaceDir)
+		systemPrompt = defaultSystemPrompt(workspaceDir, modelName)
 	}
-
-	// Create model
-	model := createModel(modelName, ctx.String("api-endpoint"))
 
 	// Create TUI dialog for interactive user prompts (AskUserQuestion tool)
 	tuiDialog := &tuiDialog{}
@@ -343,6 +357,7 @@ func runInteractive(ctx *cli.Context) error {
 		compactionConfig,
 		resumeSessionID,
 		skillLoader,
+		ctx.String("api-endpoint"),
 	)
 	app.currentSession = currentSession
 	appRef.Store(app)
@@ -359,12 +374,41 @@ func runInteractive(ctx *cli.Context) error {
 	return app.Run()
 }
 
-func defaultSystemPrompt(workspaceDir string) string {
-	return fmt.Sprintf(`You are Dive, an AI coding assistant. You help users with software engineering tasks including writing code, debugging, explaining code, and more.
+//go:embed system_prompt.txt
+var defaultSystemPromptTemplate string
 
-You are working in: %s
+func defaultSystemPrompt(workspaceDir, modelName string) string {
+	var b strings.Builder
+	b.WriteString(defaultSystemPromptTemplate)
+	b.WriteString("\n\n# Environment\nYou have been invoked in the following environment:\n")
 
-Be concise and helpful. When modifying code, explain what you're changing and why. Use the available tools to read, write, and search files as needed.`, workspaceDir)
+	// Working directory and git status
+	b.WriteString(fmt.Sprintf("- Working directory: %s\n", workspaceDir))
+	if isGitRepo(workspaceDir) {
+		b.WriteString("  - Is a git repository: true\n")
+	}
+
+	// Platform and OS
+	b.WriteString(fmt.Sprintf("- Platform: %s\n", runtime.GOOS))
+	if shell := os.Getenv("SHELL"); shell != "" {
+		b.WriteString(fmt.Sprintf("- Shell: %s\n", filepath.Base(shell)))
+	}
+	if out, err := exec.Command("uname", "-r").Output(); err == nil {
+		b.WriteString(fmt.Sprintf("- OS version: %s %s\n", runtime.GOOS, strings.TrimSpace(string(out))))
+	}
+
+	// Model
+	if modelName != "" {
+		b.WriteString(fmt.Sprintf("- Model: %s\n", modelName))
+	}
+
+	return b.String()
+}
+
+func isGitRepo(dir string) bool {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree")
+	out, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
 func newSessionID() string {
@@ -407,7 +451,7 @@ func runPrint(ctx *cli.Context) error {
 	// Build system prompt
 	systemPrompt := ctx.String("system-prompt")
 	if systemPrompt == "" {
-		systemPrompt = fmt.Sprintf("You are Dive, an AI coding assistant working in: %s", workspaceDir)
+		systemPrompt = defaultSystemPrompt(workspaceDir, modelName)
 	}
 
 	// Create model
@@ -577,18 +621,18 @@ func (d *tuiDialog) Show(ctx context.Context, in *dive.DialogInput) (*dive.Dialo
 }
 
 func (d *tuiDialog) showConfirm(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
-	// Build tool-specific title and preview
-	title := in.Title
-	preview := in.Message
-	if in.Call != nil {
-		t, p := buildToolPreview(in.Call.Name, in.Call.Input)
-		if t != "" {
-			title = t
-		}
-		if p != "" {
-			preview = p
-		}
+	// Build tool-specific title, subtitle, preview, and question
+	tp := buildToolPreview(in.Call)
+	title := tp.title
+	if title == "" {
+		title = in.Title
 	}
+	subtitle := tp.subtitle
+	preview := tp.preview
+	if preview == "" {
+		preview = in.Message
+	}
+	question := tp.question
 
 	// Get tool category for "allow all X this session" option
 	categoryLabel := "this action"
@@ -604,9 +648,11 @@ func (d *tuiDialog) showConfirm(ctx context.Context, in *dive.DialogInput) (*div
 			Type:                     DialogTypeConfirm,
 			Active:                   true,
 			Title:                    title,
+			Message:                  subtitle,
 			ContentPreview:           preview,
 			ConfirmChan:              confirmChan,
 			ConfirmToolCategoryLabel: categoryLabel,
+			ConfirmQuestion:          question,
 		},
 	})
 	select {
@@ -737,59 +783,75 @@ func (d *tuiDialog) showInput(ctx context.Context, in *dive.DialogInput) (*dive.
 
 // buildToolPreview generates a human-readable title and content preview
 // for a tool confirmation dialog based on the tool name and its JSON input.
-func buildToolPreview(toolName string, input json.RawMessage) (title, preview string) {
+type toolPreview struct {
+	title    string
+	subtitle string
+	preview  string
+	question string
+}
+
+func buildToolPreview(call *llm.ToolUseContent) toolPreview {
+	if call == nil {
+		return toolPreview{}
+	}
 	var parsed map[string]interface{}
-	if len(input) > 0 {
-		json.Unmarshal(input, &parsed)
+	if len(call.Input) > 0 {
+		json.Unmarshal(call.Input, &parsed)
 	}
 
-	switch toolName {
+	filePath, _ := parsed["file_path"].(string)
+	if filePath == "" {
+		filePath, _ = parsed["filePath"].(string)
+	}
+	fileName := filepath.Base(filePath)
+
+	switch call.Name {
 	case "Bash":
-		if cmd, ok := parsed["command"].(string); ok {
-			if len(cmd) > 80 {
-				cmd = cmd[:77] + "..."
-			}
-			title = fmt.Sprintf("Run: %s", cmd)
+		cmd, _ := parsed["command"].(string)
+		if len(cmd) > 80 {
+			cmd = cmd[:77] + "..."
+		}
+		return toolPreview{
+			title:    "Run command",
+			preview:  cmd,
+			question: "Do you want to run this command?",
 		}
 
 	case "Edit":
-		if filePath, ok := parsed["file_path"].(string); ok {
-			title = fmt.Sprintf("Edit %s", filePath)
-		} else if filePath, ok := parsed["filePath"].(string); ok {
-			title = fmt.Sprintf("Edit %s", filePath)
+		tp := toolPreview{
+			title:    "Edit file",
+			subtitle: filePath,
+			question: fmt.Sprintf("Do you want to make this edit to %s?", fileName),
 		}
-		if oldStr, ok := parsed["old_string"].(string); ok {
-			if newStr, ok := parsed["new_string"].(string); ok {
-				if len(oldStr) > 50 {
-					oldStr = oldStr[:47] + "..."
-				}
-				if len(newStr) > 50 {
-					newStr = newStr[:47] + "..."
-				}
-				preview = fmt.Sprintf("Replace:\n  %q\nWith:\n  %q", oldStr, newStr)
-			}
+		oldStr, _ := parsed["old_string"].(string)
+		newStr, _ := parsed["new_string"].(string)
+		replaceAll, _ := parsed["replace_all"].(bool)
+		if oldStr != "" || newStr != "" {
+			tp.preview = buildEditDiffPreview(filePath, oldStr, newStr, replaceAll)
 		}
+		return tp
 
 	case "Write":
-		if filePath, ok := parsed["file_path"].(string); ok {
-			title = fmt.Sprintf("Write to %s", filePath)
-		} else if filePath, ok := parsed["filePath"].(string); ok {
-			title = fmt.Sprintf("Write to %s", filePath)
+		tp := toolPreview{
+			title:    "Write file",
+			subtitle: filePath,
+			question: fmt.Sprintf("Do you want to write to %s?", fileName),
 		}
 		if content, ok := parsed["content"].(string); ok {
 			lines := strings.Split(content, "\n")
 			if len(lines) > 10 {
-				preview = strings.Join(lines[:10], "\n") + "\n..."
+				tp.preview = strings.Join(lines[:10], "\n") + "\n..."
 			} else {
-				preview = content
+				tp.preview = content
 			}
 		}
+		return tp
 
 	case "Read":
-		if filePath, ok := parsed["file_path"].(string); ok {
-			title = fmt.Sprintf("Read %s", filePath)
-		} else if filePath, ok := parsed["filePath"].(string); ok {
-			title = fmt.Sprintf("Read %s", filePath)
+		return toolPreview{
+			title:    "Read file",
+			subtitle: filePath,
+			question: fmt.Sprintf("Do you want to read %s?", fileName),
 		}
 
 	default:
@@ -802,13 +864,46 @@ func buildToolPreview(toolName string, input json.RawMessage) (title, preview st
 				}
 				params = append(params, fmt.Sprintf("%s: %s", k, valStr))
 			}
-			if len(params) > 0 {
-				preview = strings.Join(params, "\n")
-			}
+			return toolPreview{preview: strings.Join(params, "\n")}
+		}
+		return toolPreview{}
+	}
+}
+
+// buildEditDiffPreview generates a diff preview for the permission dialog
+// using only the old/new strings from the tool payload (no file I/O).
+// When replaceAll is true, it shows a summary indicating all matches will be replaced.
+func buildEditDiffPreview(filePath, oldStr, newStr string, replaceAll bool) string {
+	var b strings.Builder
+
+	// Removed lines (skip when empty to avoid stray "  - " line)
+	if oldStr != "" {
+		for _, line := range strings.Split(oldStr, "\n") {
+			b.WriteString(fmt.Sprintf("  - %s\n", line))
+		}
+	}
+	// Added lines (skip when empty to avoid stray "  + " line)
+	if newStr != "" {
+		for _, line := range strings.Split(newStr, "\n") {
+			b.WriteString(fmt.Sprintf("  + %s\n", line))
 		}
 	}
 
-	return title, preview
+	if replaceAll {
+		b.WriteString("\n  (replace all occurrences)")
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func formatSimpleEditPreview(oldStr, newStr string) string {
+	if len(oldStr) > 50 {
+		oldStr = oldStr[:47] + "..."
+	}
+	if len(newStr) > 50 {
+		newStr = newStr[:47] + "..."
+	}
+	return fmt.Sprintf("Replace:\n  %q\nWith:\n  %q", oldStr, newStr)
 }
 
 func createTools(validator *toolkit.PathValidator, dialog dive.Dialog) []dive.Tool {

@@ -8,8 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-runewidth"
+
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/tui"
+)
+
+// Shared accent color palette (teal family, anchored to the splash diamond color)
+var (
+	accentBright = tui.RGB{R: 80, G: 200, B: 235}
+	accentMid    = tui.RGB{R: 70, G: 175, B: 210}
+	accentDim    = tui.RGB{R: 60, G: 155, B: 185}
+	accentMuted  = tui.RGB{R: 55, G: 135, B: 165}
 )
 
 // diveMarkdownTheme returns a custom markdown theme with complementary colors
@@ -17,10 +28,10 @@ func diveMarkdownTheme() tui.MarkdownTheme {
 	theme := tui.DefaultMarkdownTheme()
 
 	// Cyan-blue headers with decreasing brightness for hierarchy
-	theme.H1Style = tui.NewStyle().WithBold().WithUnderline().WithFgRGB(tui.RGB{R: 90, G: 185, B: 225})
-	theme.H2Style = tui.NewStyle().WithBold().WithFgRGB(tui.RGB{R: 80, G: 165, B: 200})
-	theme.H3Style = tui.NewStyle().WithBold().WithFgRGB(tui.RGB{R: 70, G: 150, B: 180})
-	theme.H4Style = tui.NewStyle().WithBold().WithFgRGB(tui.RGB{R: 65, G: 135, B: 165})
+	theme.H1Style = tui.NewStyle().WithBold().WithUnderline().WithFgRGB(accentBright)
+	theme.H2Style = tui.NewStyle().WithBold().WithFgRGB(accentMid)
+	theme.H3Style = tui.NewStyle().WithBold().WithFgRGB(accentDim)
+	theme.H4Style = tui.NewStyle().WithBold().WithFgRGB(accentMuted)
 
 	// Light purple for inline code (like Claude Code)
 	theme.CodeStyle = tui.NewStyle().WithFgRGB(tui.RGB{R: 180, G: 140, B: 220})
@@ -31,9 +42,8 @@ func diveMarkdownTheme() tui.MarkdownTheme {
 // statusLineView renders the status line above the input area.
 // Shows: model name, directory, git branch, context %, elapsed time.
 func (a *App) statusLineView() tui.View {
-	accentColor := tui.RGB{R: 100, G: 160, B: 180}
 	mutedColor := tui.RGB{R: 100, G: 100, B: 110}
-	accentStyle := tui.NewStyle().WithFgRGB(accentColor)
+	accentStyle := tui.NewStyle().WithFgRGB(accentDim)
 	mutedStyle := tui.NewStyle().WithFgRGB(mutedColor)
 
 	// Line 1: model in directory on branch
@@ -51,16 +61,32 @@ func (a *App) statusLineView() tui.View {
 			tui.Text("%s", branch).Style(accentStyle),
 		)
 	}
-	line1 := tui.Group(parts...)
+	// Right-aligned token usage lines (turn above session)
+	sectionStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170}).WithBold()
+	var usageLines []tui.View
+	if u := a.interactionUsage; u != nil && hasUsage(u) {
+		usageLines = append(usageLines, tui.Group(
+			tui.Width(9, tui.Stack(tui.Text("turn").Style(sectionStyle)).Align(tui.AlignRight)),
+			tui.Text("  "),
+			usageView(u),
+		))
+	}
+	if u := a.sessionUsage; u != nil && hasUsage(u) && a.sessionUsageDiffers() {
+		usageLines = append(usageLines, tui.Group(
+			tui.Width(9, tui.Stack(tui.Text("session").Style(sectionStyle)).Align(tui.AlignRight)),
+			tui.Text("  "),
+			usageView(u),
+		))
+	}
 
-	// Line 2: progress bar with context %, elapsed time
-	var line2Parts []tui.View
-	line2Parts = append(line2Parts, tui.Text(" ").Style(mutedStyle))
+	// Line 2: progress bar with context %
+	var line2LeftParts []tui.View
+	line2LeftParts = append(line2LeftParts, tui.Text(" ").Style(mutedStyle))
 
 	// Context usage progress bar (show after first LLM response)
 	if a.lastUsage != nil {
 		contextPct := a.contextPercent()
-		barColor := accentColor
+		barColor := accentDim
 		if contextPct > 75 {
 			barColor = tui.RGB{R: 200, G: 150, B: 60}
 		}
@@ -72,17 +98,86 @@ func (a *App) statusLineView() tui.View {
 			HidePercent().
 			Style(tui.NewStyle().WithFgRGB(barColor)).
 			EmptyStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 80, G: 80, B: 90}))
-		line2Parts = append(line2Parts, bar)
-		line2Parts = append(line2Parts, tui.Text(" %d%%", contextPct).Style(mutedStyle))
+		line2LeftParts = append(line2LeftParts, bar)
+		line2LeftParts = append(line2LeftParts, tui.Text(" %d%%", contextPct).Style(mutedStyle))
 	}
 
-	// Only show line 2 if there's content beyond the leading space
-	if len(line2Parts) <= 1 {
-		return line1
+	hasLine2Left := len(line2LeftParts) > 1
+	hasUsageLines := len(usageLines) > 0
+
+	if !hasLine2Left && !hasUsageLines {
+		return tui.Group(parts...)
 	}
 
-	line2 := tui.Group(line2Parts...)
-	return tui.Stack(line1, line2).Gap(0)
+	// Build the line 1 row: model info on left, turn usage on right
+	line1Row := tui.Group(parts...)
+	if len(usageLines) > 0 {
+		line1Row = tui.Group(tui.Group(parts...), tui.Spacer(), usageLines[0], tui.Text(" "))
+	}
+
+	// Build the line 2 row: context bar on left, session usage on right
+	if hasLine2Left || len(usageLines) > 1 {
+		var line2Left tui.View
+		if hasLine2Left {
+			line2Left = tui.Group(line2LeftParts...)
+		} else {
+			line2Left = tui.Text("")
+		}
+		var line2Row tui.View
+		if len(usageLines) > 1 {
+			line2Row = tui.Group(line2Left, tui.Spacer(), usageLines[1], tui.Text(" "))
+		} else {
+			line2Row = line2Left
+		}
+		return tui.Stack(line1Row, line2Row).Gap(0)
+	}
+
+	return line1Row
+}
+
+// formatTokenCount formats a token count for display (e.g. 1234 -> "1.2k", 56 -> "56").
+func formatTokenCount(n int) string {
+	if n >= 1000000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// hasUsage returns true if the usage has any non-zero token counts.
+func hasUsage(u *llm.Usage) bool {
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0
+}
+
+// usageView renders a compact token usage display with right-aligned number columns:
+//   "in:  13.7k  cache:  13.5k  out:    53"
+func usageView(u *llm.Usage) tui.View {
+	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+	valueStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
+	totalIn := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	col := func(val string) tui.View {
+		return tui.Width(6, tui.Stack(tui.Text("%s", val).Style(valueStyle)).Align(tui.AlignRight))
+	}
+	return tui.Group(
+		tui.Text("in: ").Style(labelStyle), col(formatTokenCount(totalIn)),
+		tui.Text("  cache: ").Style(labelStyle), col(formatTokenCount(u.CacheReadInputTokens)),
+		tui.Text("  out: ").Style(labelStyle), col(formatTokenCount(u.OutputTokens)),
+	)
+}
+
+// sessionUsageDiffers returns true if session usage differs from interaction usage
+// (i.e. there have been multiple interactions). No point showing both if they're identical.
+func (a *App) sessionUsageDiffers() bool {
+	s, i := a.sessionUsage, a.interactionUsage
+	if s == nil || i == nil {
+		return false
+	}
+	return s.InputTokens != i.InputTokens ||
+		s.OutputTokens != i.OutputTokens ||
+		s.CacheReadInputTokens != i.CacheReadInputTokens ||
+		s.CacheCreationInputTokens != i.CacheCreationInputTokens
 }
 
 // modelDisplayName returns a human-friendly model name.
@@ -123,13 +218,14 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 		return a.introView(msg)
 
 	case "user":
+		bg := tui.RGB{R: 48, G: 48, B: 54}
 		caret := tui.Text("❯ ").Style(
-			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
+			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(bg),
 		)
 		text := tui.Text("%s", msg.Content).Wrap().Style(
-			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
+			tui.NewStyle().WithBgRGB(bg),
 		)
-		return tui.Group(caret, text)
+		return tui.Group(caret, text, tui.Fill(' ').BgRGB(bg.R, bg.G, bg.B))
 
 	case "assistant":
 		content := strings.TrimRight(msg.Content, "\n")
@@ -151,116 +247,70 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 	}
 }
 
-// introView renders the splash screen with dive branding
+// introView renders a bordered splash header (Codex-style)
 func (a *App) introView(msg Message) tui.View {
-	// Parse model and workspace from content
-	parts := strings.SplitN(msg.Content, "\n", 2)
-	model := parts[0]
+	// Parse lines from content: model, workspace, optional session info
+	lines := strings.Split(msg.Content, "\n")
+	model := ""
 	workspace := ""
-	if len(parts) > 1 {
-		workspace = parts[1]
+	var extras []string
+	if len(lines) > 0 {
+		model = lines[0]
+	}
+	if len(lines) > 1 {
+		workspace = lines[1]
+	}
+	if len(lines) > 2 {
+		extras = lines[2:]
 	}
 
-	// ASCII art logo
-	artLines := []string{
-		"  ██████╗ ██╗██╗   ██╗███████╗",
-		"  ██╔══██╗██║██║   ██║██╔════╝",
-		"  ██║  ██║██║██║   ██║█████╗  ",
-		"  ██║  ██║██║╚██╗ ██╔╝██╔══╝  ",
-		"  ██████╔╝██║ ╚████╔╝ ███████╗",
-		"  ╚═════╝ ╚═╝  ╚═══╝  ╚══════╝",
+	titleStyle := tui.NewStyle().WithFgRGB(accentBright).WithBold()
+	mutedStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 140, G: 140, B: 155})
+	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+
+	// Box content
+	content := []tui.View{
+		tui.Group(
+			tui.Text("Dive").Style(titleStyle),
+			tui.Text(" (v0.1.0)").Style(mutedStyle),
+		),
+		tui.Text(""),
+		tui.Group(
+			tui.Text("model:     ").Style(labelStyle),
+			tui.Text("%s", model).Style(mutedStyle),
+		),
+		tui.Group(
+			tui.Text("directory: ").Style(labelStyle),
+			tui.Text("%s", workspace).Style(mutedStyle),
+		),
 	}
 
-	// Find max width for consistent gradient
-	maxWidth := 0
-	for _, line := range artLines {
-		if w := len([]rune(line)); w > maxWidth {
-			maxWidth = w
+	for _, extra := range extras {
+		if extra != "" {
+			content = append(content, tui.Text("%s", extra).Style(mutedStyle))
 		}
 	}
 
-	// Build logo with gradient
-	logoViews := make([]tui.View, len(artLines))
-	for row, line := range artLines {
-		runes := []rune(line)
-		charViews := make([]tui.View, len(runes))
-
-		for col, r := range runes {
-			t := float64(col) / float64(maxWidth-1)
-			color := interpolateGradient(t)
-			charViews[col] = tui.Text("%c", r).Style(tui.NewStyle().WithFgRGB(color))
-		}
-
-		logoViews[row] = tui.Group(charViews...)
+	// Compute box width from longest visible line (using display width for Unicode)
+	textWidths := []int{
+		runewidth.StringWidth("Dive (v0.1.0)"),
+		runewidth.StringWidth("model:     ") + runewidth.StringWidth(model),
+		runewidth.StringWidth("directory: ") + runewidth.StringWidth(workspace),
 	}
-
-	// Style constants
-	accentColor := tui.RGB{R: 80, G: 200, B: 235}
-	mutedColor := tui.RGB{R: 140, G: 140, B: 155}
-
-	version := tui.Group(
-		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
-		tui.Text("v0.1.0").Style(tui.NewStyle().WithFgRGB(mutedColor)),
-	)
-
-	modelLine := tui.Group(
-		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
-		tui.Text("%s", model).Style(tui.NewStyle().WithFgRGB(mutedColor)),
-	)
-
-	workspaceLine := tui.Group(
-		tui.Text("  ◆ ").Style(tui.NewStyle().WithFgRGB(accentColor)),
-		tui.Text("%s", workspace).Style(tui.NewStyle().WithFgRGB(mutedColor)),
-	)
-
-	// Combine all views
-	var views []tui.View
-	views = append(views, tui.Text(""))
-	views = append(views, logoViews...)
-	views = append(views, tui.Text(""))
-	views = append(views, version)
-	views = append(views, modelLine)
-	views = append(views, workspaceLine)
-	views = append(views, tui.Text(""))
-	views = append(views, tui.Text(""))
-	return tui.Stack(views...).Gap(0)
-}
-
-// interpolateGradient returns a color along the dive gradient
-func interpolateGradient(t float64) tui.RGB {
-	type colorStop struct {
-		pos   float64
-		color tui.RGB
+	for _, extra := range extras {
+		textWidths = append(textWidths, runewidth.StringWidth(extra))
 	}
-	stops := []colorStop{
-		{0.0, tui.RGB{R: 80, G: 220, B: 240}},
-		{0.35, tui.RGB{R: 70, G: 150, B: 230}},
-		{0.65, tui.RGB{R: 100, G: 120, B: 210}},
-		{1.0, tui.RGB{R: 140, G: 100, B: 200}},
-	}
-
-	var lower, upper colorStop
-	for i := 0; i < len(stops)-1; i++ {
-		if t >= stops[i].pos && t <= stops[i+1].pos {
-			lower = stops[i]
-			upper = stops[i+1]
-			break
+	maxLen := 0
+	for _, w := range textWidths {
+		if w > maxLen {
+			maxLen = w
 		}
 	}
+	boxWidth := maxLen + 2 + 2 // 2 for border chars + 2 for inner spacing
 
-	if t <= 0 {
-		return stops[0].color
-	}
-	if t >= 1 {
-		return stops[len(stops)-1].color
-	}
-
-	localT := (t - lower.pos) / (upper.pos - lower.pos)
-	return tui.RGB{
-		R: uint8(float64(lower.color.R) + localT*(float64(upper.color.R)-float64(lower.color.R))),
-		G: uint8(float64(lower.color.G) + localT*(float64(upper.color.G)-float64(lower.color.G))),
-		B: uint8(float64(lower.color.B) + localT*(float64(upper.color.B)-float64(lower.color.B))),
-	}
+	return tui.Width(boxWidth, tui.Bordered(tui.Stack(content...)).
+		Border(&tui.RoundedBorder).
+		BorderFg(tui.ColorBrightBlack))
 }
 
 // toolCallView renders a tool call message (with animation)
@@ -362,16 +412,14 @@ func formatToolCall(title, apiName, inputJSON string) string {
 		}
 	}
 
-	// Special handling for Read tool - show as title(filepath)
-	if apiName == "Read" {
+	// Special handling for file tools - show as title(filepath)
+	switch apiName {
+	case "Read", "Write", "Edit":
 		if filePath, ok := params["file_path"].(string); ok {
 			return fmt.Sprintf("%s(%s)", title, filePath)
 		}
 		return title + "()"
-	}
-
-	// Special handling for ListDirectory tool - show as title(path)
-	if apiName == "ListDirectory" {
+	case "ListDirectory":
 		if path, ok := params["path"].(string); ok {
 			return fmt.Sprintf("%s(%s)", title, path)
 		}
@@ -423,6 +471,39 @@ func formatParamValue(v any) string {
 	}
 }
 
+// isDiffLine checks if a line is a diff addition or removal.
+// Recognizes numbered format ("  42 + code" / "  42 - code") and plain
+// preview format ("  + code" / "  - code"). Returns "+", "-", or "".
+func isDiffLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+
+	// Plain preview format from buildEditDiffPreview: "  + code" / "  - code"
+	if strings.HasPrefix(trimmed, "+ ") || trimmed == "+" {
+		return "+"
+	}
+	if strings.HasPrefix(trimmed, "- ") || trimmed == "-" {
+		return "-"
+	}
+
+	// Numbered format: "  42 + code" / "  42 - code"
+	for i, ch := range trimmed {
+		if ch >= '0' && ch <= '9' {
+			continue
+		}
+		if ch == ' ' && i > 0 {
+			rest := trimmed[i:]
+			if strings.HasPrefix(rest, " + ") {
+				return "+"
+			}
+			if strings.HasPrefix(rest, " - ") {
+				return "-"
+			}
+		}
+		break
+	}
+	return ""
+}
+
 // isDiffResult checks if the result looks like a diff output
 func isDiffResult(result string) bool {
 	lines := strings.Split(result, "\n")
@@ -430,8 +511,7 @@ func isDiffResult(result string) bool {
 		return false
 	}
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "+ ") || strings.HasPrefix(trimmed, "- ") {
+		if isDiffLine(line) != "" {
 			return true
 		}
 	}
@@ -476,14 +556,14 @@ func renderDiffResult(result string) tui.View {
 
 	for i := 1; i < len(lines); i++ {
 		line := truncateDisplayLine(lines[i])
-		trimmed := strings.TrimSpace(lines[i])
 
 		var lineView tui.View
-		if strings.HasPrefix(trimmed, "+ ") {
+		switch isDiffLine(lines[i]) {
+		case "+":
 			lineView = tui.Text("      %s", line).Success()
-		} else if strings.HasPrefix(trimmed, "- ") {
+		case "-":
 			lineView = tui.Text("      %s", line).Error()
-		} else {
+		default:
 			lineView = tui.Text("      %s", line).Style(toolResultStyle())
 		}
 		views = append(views, lineView)
@@ -577,13 +657,14 @@ func (a *App) messageViewStatic(msg Message) tui.View {
 func (a *App) textMessageViewStatic(msg Message) tui.View {
 	switch msg.Role {
 	case "user":
+		bg := tui.RGB{R: 70, G: 70, B: 78}
 		caret := tui.Text("❯ ").Style(
-			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
+			tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110}).WithBgRGB(bg),
 		)
 		text := tui.Text("%s", msg.Content).Wrap().Style(
-			tui.NewStyle().WithBgRGB(tui.RGB{R: 40, G: 40, B: 45}),
+			tui.NewStyle().WithBgRGB(bg),
 		)
-		return tui.Group(caret, text)
+		return tui.Group(caret, text, tui.Fill(' ').BgRGB(bg.R, bg.G, bg.B))
 
 	case "assistant":
 		content := strings.TrimSpace(msg.Content)

@@ -63,6 +63,13 @@ type processingEndEvent struct {
 	lastUsage *llm.Usage // Final LLM usage for context tracking
 }
 
+// usageUpdateEvent is sent each time the LLM returns usage data,
+// allowing the status line to show live token counts during an interaction.
+type usageUpdateEvent struct {
+	baseEvent
+	usage *llm.Usage
+}
+
 type showDialogEvent struct {
 	baseEvent
 	dialog *DialogState
@@ -186,6 +193,7 @@ type DialogState struct {
 	ConfirmSelectedIdx       int    // Currently selected option (0=Yes, 1=Allow session, 2=Feedback)
 	ConfirmFeedback          string // User feedback text (for PromptChoice input option)
 	ConfirmToolCategoryLabel string // Human-readable label (e.g., "bash commands", "file edits")
+	ConfirmQuestion          string // Custom question text (e.g., "Do you want to make this edit to tmp.txt?")
 
 	// For select (uses PromptChoice with "Other" input option)
 	Options         []DialogOption
@@ -283,6 +291,9 @@ type App struct {
 	lastCtrlC    time.Time
 	showExitHint bool
 
+	// API endpoint for model creation (preserved for model switching)
+	apiEndpoint string
+
 	// Compaction configuration and state
 	compactionConfig         *compaction.CompactionConfig
 	lastCompactionEvent      *compaction.CompactionEvent
@@ -292,6 +303,8 @@ type App struct {
 
 	// Status line state
 	lastUsage        *llm.Usage // Most recent LLM usage (for context %)
+	interactionUsage *llm.Usage // Usage for the current interaction (reset per turn)
+	sessionUsage     *llm.Usage // Cumulative usage across all interactions
 	contextWindowMax int        // Max context window tokens for the model
 
 	// Streaming tool output state
@@ -313,6 +326,7 @@ func NewApp(
 	compactionConfig *compaction.CompactionConfig,
 	resumeSessionID string,
 	skillLoader *skill.Loader,
+	apiEndpoint string,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -333,6 +347,7 @@ func NewApp(
 		modelName:              modelName,
 		resumeSessionID:        resumeSessionID,
 		skillLoader:            skillLoader,
+		apiEndpoint:            apiEndpoint,
 		messages:               make([]Message, 0),
 		toolCallIndex:          make(map[string]int),
 		toolTitles:             toolTitles,
@@ -476,26 +491,39 @@ func (a *App) dialogView() tui.View {
 		confirmTextStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210})
 		confirmInfoStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 198, G: 198, B: 210}).WithItalic()
 
-		// Upper divider (purple, dashed)
-		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+		// Upper divider (solid line)
+		views = append(views, tui.Divider().Char('─').Style(purpleStyle))
 
-		// Title (purple, bold) with explicit permission context
-		views = append(views, tui.Text(" Permission Check: %s", a.dialogState.Title).Style(purpleStyle.WithBold()))
-		views = append(views, tui.Text(" This is a permission prompt. The tool has not run yet.").Style(confirmInfoStyle))
+		// Title and subtitle
+		views = append(views, tui.Text(" %s", a.dialogState.Title).Style(confirmTextStyle.WithBold()))
+		if a.dialogState.Message != "" {
+			views = append(views, tui.Text(" %s", a.dialogState.Message).Style(confirmInfoStyle))
+		}
 
 		// Content preview with dashed dividers
 		if a.dialogState.ContentPreview != "" {
-			views = append(views, tui.Text(" Tool Input").Style(confirmTextStyle.WithBold()))
+			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
 			for _, line := range strings.Split(a.dialogState.ContentPreview, "\n") {
-				views = append(views, tui.Text(" %s", line).Style(confirmTextStyle))
+				switch isDiffLine(line) {
+				case "+":
+					views = append(views, tui.Text(" %s", line).Success())
+				case "-":
+					views = append(views, tui.Text(" %s", line).Error())
+				default:
+					views = append(views, tui.Text(" %s", line).Style(confirmTextStyle))
+				}
 			}
+			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
+		} else {
+			views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
 		}
 
-		// Lower divider (purple, dashed)
-		views = append(views, tui.Divider().Char('╌').Style(purpleStyle))
-
 		// Question
-		views = append(views, tui.Text(" Do you want to proceed with this tool request?").Style(confirmTextStyle.WithBold()))
+		question := "Do you want to proceed?"
+		if a.dialogState.ConfirmQuestion != "" {
+			question = a.dialogState.ConfirmQuestion
+		}
+		views = append(views, tui.Text(" %s", question).Style(confirmTextStyle.WithBold()))
 
 		// Build option labels
 		allowLabel := "file edits" // Default fallback
@@ -509,8 +537,8 @@ func (a *App) dialogView() tui.View {
 			tui.PromptChoice(&a.dialogState.ConfirmSelectedIdx, &a.dialogState.ConfirmFeedback).
 				ID("confirm-dialog").
 				Option("Yes").
-				Option(fmt.Sprintf("Yes, allow all %s during this session", allowLabel)).
-				InputOption("Tell Dive what to do differently...").
+				Option(fmt.Sprintf("Yes, allow all %s during this session (shift+tab)", allowLabel)).
+				Option("No").
 				CursorStyle(purpleStyle).
 				HintText("").
 				OnSelect(func(idx int, inputText string) {
@@ -519,13 +547,8 @@ func (a *App) dialogView() tui.View {
 						confirmChan <- ConfirmResult{Approved: true}
 					case 1: // Yes, allow all session
 						confirmChan <- ConfirmResult{Approved: true, AllowSession: true}
-					case 2: // Feedback
-						if inputText != "" {
-							confirmChan <- ConfirmResult{Approved: false, Feedback: inputText}
-						} else {
-							// Empty feedback treated as cancel
-							confirmChan <- ConfirmResult{Approved: false}
-						}
+					case 2: // No
+						confirmChan <- ConfirmResult{Approved: false}
 					}
 					a.hideActiveDialog()
 				}).
@@ -707,6 +730,13 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleToolCall(e.call)
 	case toolResultEvent:
 		a.handleToolResult(e.result)
+	case usageUpdateEvent:
+		if a.interactionUsage != nil {
+			a.interactionUsage.Add(e.usage)
+		}
+		if a.sessionUsage != nil {
+			a.sessionUsage.Add(e.usage)
+		}
 	case processingEndEvent:
 		if e.lastUsage != nil {
 			a.lastUsage = e.lastUsage
@@ -738,6 +768,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		}
 		a.dialogState = nil
 		return []tui.Cmd{tui.Focus("main-input")}
+	case modelSwitchEvent:
+		a.switchModel(e.modelID)
 	case initialPromptEvent:
 		a.submitInput(e.prompt)
 	}
@@ -1058,6 +1090,7 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 				// Track usage from each LLM response (last one = actual context size)
 				if item.Usage != nil {
 					lastUsage = item.Usage
+					a.runner.SendEvent(usageUpdateEvent{baseEvent: newBaseEvent(), usage: item.Usage.Copy()})
 				}
 			case dive.ResponseItemTypeToolCall:
 				a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
@@ -1252,6 +1285,10 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 
 	a.processing = true
 	a.processingStartTime = time.Now()
+	a.interactionUsage = &llm.Usage{}
+	if a.sessionUsage == nil {
+		a.sessionUsage = &llm.Usage{}
+	}
 }
 
 func (a *App) handleStreamText(text string) {
@@ -1599,46 +1636,38 @@ func (a *App) Run() error {
 }
 
 // printIntroToScrollback prints the intro/splash screen to scrollback.
-// Uses tui.Print directly - suitable for startup before the runner event loop starts.
 func (a *App) printIntroToScrollback() {
 	view := a.buildIntroView()
-	tui.Print(tui.PaddingHV(1, 0, view))
+	tui.Print(view)
+	fmt.Println() // Newline so the live region doesn't overwrite the last line
 }
 
 // printIntroViaRunner prints the intro/splash screen using the runner's Print method.
-// Uses a.runner.Print - required when the runner event loop is active (e.g., after /clear).
 func (a *App) printIntroViaRunner() {
 	view := a.buildIntroView()
-	a.runner.Print(tui.PaddingHV(1, 0, view))
+	a.runner.Print(view)
 }
 
 // buildIntroView creates the intro view and adds it to messages.
 func (a *App) buildIntroView() tui.View {
-	// Shorten workspace path for display
 	wsDisplay := a.workspaceDir
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(wsDisplay, home) {
 		wsDisplay = "~" + wsDisplay[len(home):]
 	}
 
-	// Build intro content
-	content := a.modelName + "\n" + wsDisplay
-
-	// Add session info if resuming
+	content := a.modelDisplayName() + "\n" + wsDisplay
 	if a.resumeSessionID != "" {
 		content += "\nResuming session: " + a.resumeSessionID
 	}
 
-	// Build intro message
-	msg := Message{
+	a.messages = append(a.messages, Message{
 		Role:    "intro",
 		Content: content,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
-	}
+	})
 
-	a.messages = append(a.messages, msg)
-
-	return a.introView(msg)
+	return a.introView(a.messages[len(a.messages)-1])
 }
 
 // printSessionHistoryToScrollback prints the conversation history from a resumed session
@@ -1834,6 +1863,8 @@ func (a *App) handleCommand(input string) bool {
 		a.streamingMessageIndex = 0
 		a.firstUserSent = false
 		a.lastUsage = nil
+		a.sessionUsage = nil
+		a.interactionUsage = nil
 
 		// Show fresh intro using runner.Print (not tui.Print) since we're
 		// in the middle of the running InlineApp event loop
@@ -1853,6 +1884,10 @@ func (a *App) handleCommand(input string) bool {
 
 	case "help", "?":
 		a.printHelp()
+		return true
+
+	case "model":
+		a.handleModelCommand(cmdArgs)
 		return true
 	}
 
@@ -1962,6 +1997,7 @@ func (a *App) printHelp() {
 		tui.Text("  /quit, /q      Exit"),
 		tui.Text("  /clear         Clear conversation and screen"),
 		tui.Text("  /compact       Compact conversation to save context"),
+		tui.Text("  /model         Switch model"),
 		tui.Text("  /todos, /t     Toggle todo list"),
 		tui.Text("  /help, /?      Show this help"),
 	}
@@ -2300,7 +2336,7 @@ func fuzzyMatch(pattern, text string) int {
 // getCommandMatches returns slash commands matching the prefix for autocomplete
 func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
-	builtins := []string{"clear", "compact", "help", "quit", "todos"}
+	builtins := []string{"clear", "compact", "help", "model", "quit", "todos"}
 
 	var matches []string
 
@@ -2399,63 +2435,124 @@ func detectGitBranch(dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// modelInfo describes a known model's display name and context window size.
-type modelInfo struct {
-	Pattern       string // substring to match against model ID
-	Label         string // human-friendly display name (empty = use raw model ID)
-	ContextWindow int    // max context window in tokens
-}
+// Model types, catalog, and selection logic are in models.go.
 
-// modelCatalog is the shared catalog of known models, checked in order.
-// More specific patterns must appear before broader ones.
-var modelCatalog = []modelInfo{
-	// Anthropic models
-	{"claude-opus-4-6", "Opus 4.6", 1_000_000},
-	{"claude-opus-4-5", "Opus 4.5", 1_000_000},
-	{"claude-opus-4", "", 1_000_000},
-	{"claude-sonnet-4-6", "Sonnet 4.6", 1_000_000},
-	{"claude-sonnet-4-5", "Sonnet 4.5", 1_000_000},
-	{"claude-sonnet-4", "", 1_000_000},
-	{"claude-haiku-4-5", "Haiku 4.5", 200_000},
-	{"claude-haiku-4", "", 200_000},
-	{"claude-3-5-sonnet", "Sonnet 3.5", 200_000},
-	{"claude-3-5-haiku", "Haiku 3.5", 200_000},
-	{"claude", "", 200_000},
+// handleModelCommand shows the model selection dialog or switches directly if
+// a model name is provided as an argument.
+func (a *App) handleModelCommand(args string) {
+	args = strings.TrimSpace(args)
 
-	// Google models
-	{"gemini-2.5", "", 1_000_000},
-	{"gemini-3", "", 1_000_000},
-	{"gemini", "", 1_000_000},
+	// Direct model switch if argument provided
+	if args != "" {
+		a.switchModel(args)
+		return
+	}
 
-	// OpenAI models
-	{"gpt-5", "", 1_000_000},
-	{"gpt-4o", "", 128_000},
-	{"gpt-4", "", 128_000},
-	{"o3", "", 200_000},
-	{"o4", "", 200_000},
+	// Build choices
+	choices := availableModelChoices()
+	if len(choices) == 0 {
+		a.runner.Printf("No models available. Set an API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)")
+		return
+	}
 
-	// Grok models
-	{"grok", "", 131_072},
+	// Show dialog via event so focus gets set properly
+	selectChan := make(chan SelectResult, 1)
 
-	// Mistral models
-	{"mistral", "", 128_000},
-}
-
-// lookupModel finds the first matching catalog entry for a model ID.
-func lookupModel(model string) *modelInfo {
-	for i := range modelCatalog {
-		if strings.Contains(model, modelCatalog[i].Pattern) {
-			return &modelCatalog[i]
+	// Find current model index
+	currentIdx := -1
+	options := make([]DialogOption, len(choices))
+	for i, c := range choices {
+		label := c.Label
+		if c.ModelID == a.modelName {
+			label += " ✓"
+			currentIdx = i
+		}
+		options[i] = DialogOption{
+			Label:       label,
+			Description: c.Description,
+			Value:       c.ModelID,
 		}
 	}
-	return nil
+
+	defaultIdx := 0
+	if currentIdx >= 0 {
+		defaultIdx = currentIdx
+	}
+
+	dialog := &DialogState{
+		Type:         DialogTypeSelect,
+		Active:       true,
+		Title:        "Select model",
+		Message:      "Switch between models. Applies to this session.",
+		Options:      options,
+		DefaultIndex: defaultIdx,
+		SelectIndex:  defaultIdx,
+		SelectChan:   selectChan,
+	}
+
+	a.runner.SendEvent(showDialogEvent{
+		baseEvent: newBaseEvent(),
+		dialog:    dialog,
+	})
+
+	// Wait for selection in background
+	go func() {
+		result := <-selectChan
+		if result.Index >= 0 && result.Index < len(choices) {
+			modelID := choices[result.Index].ModelID
+			a.runner.SendEvent(modelSwitchEvent{
+				baseEvent: newBaseEvent(),
+				modelID:   modelID,
+			})
+		} else if result.OtherText != "" {
+			a.runner.SendEvent(modelSwitchEvent{
+				baseEvent: newBaseEvent(),
+				modelID:   result.OtherText,
+			})
+		}
+	}()
 }
 
-// contextWindowForModel returns the max context window size (in tokens) for known models.
-// Returns 0 for unknown models; the UI hides the context bar when 0.
-func contextWindowForModel(model string) int {
-	if info := lookupModel(model); info != nil {
-		return info.ContextWindow
+// modelSwitchEvent is sent when the user selects a model from the /model dialog.
+type modelSwitchEvent struct {
+	baseEvent
+	modelID string
+}
+
+// switchModel changes the agent's model to the given model ID.
+func (a *App) switchModel(modelID string) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return
 	}
-	return 0
+	if modelID == a.modelName {
+		a.runner.Printf("Already using %s", a.modelDisplayName())
+		return
+	}
+
+	oldName := a.modelName
+	newModel := createModel(modelID, a.apiEndpoint)
+	if newModel == nil {
+		a.runner.Printf("Unknown model: %s", modelID)
+		return
+	}
+	a.agent.SetModel(newModel)
+	a.modelName = modelID
+	a.contextWindowMax = contextWindowForModel(modelID)
+
+	// Update compaction model so compaction uses the new model
+	if a.compactionConfig != nil {
+		a.compactionConfig.Model = newModel
+	}
+
+	// Update the model line in the system prompt so the agent knows its identity
+	if sp := a.agent.SystemPrompt(); sp != "" {
+		oldLine := fmt.Sprintf("- Model: %s", oldName)
+		newLine := fmt.Sprintf("- Model: %s", modelID)
+		if strings.Contains(sp, oldLine) {
+			a.agent.SetSystemPrompt(strings.Replace(sp, oldLine, newLine, 1))
+		}
+	}
+
+	a.runner.Printf("Switched to %s", a.modelDisplayName())
 }
