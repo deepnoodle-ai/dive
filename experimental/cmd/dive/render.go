@@ -471,11 +471,21 @@ func formatParamValue(v any) string {
 	}
 }
 
-// isDiffLine checks if a line is a diff addition or removal in "NNN + " or "NNN - " format.
-// Returns "+", "-", or "" for context lines.
+// isDiffLine checks if a line is a diff addition or removal.
+// Recognizes numbered format ("  42 + code" / "  42 - code") and plain
+// preview format ("  + code" / "  - code"). Returns "+", "-", or "".
 func isDiffLine(line string) string {
 	trimmed := strings.TrimSpace(line)
-	// Match patterns like "  42 + code" or "  42 - code"
+
+	// Plain preview format from buildEditDiffPreview: "  + code" / "  - code"
+	if strings.HasPrefix(trimmed, "+ ") || trimmed == "+" {
+		return "+"
+	}
+	if strings.HasPrefix(trimmed, "- ") || trimmed == "-" {
+		return "-"
+	}
+
+	// Numbered format: "  42 + code" / "  42 - code"
 	for i, ch := range trimmed {
 		if ch >= '0' && ch <= '9' {
 			continue

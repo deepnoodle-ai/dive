@@ -451,7 +451,7 @@ func runPrint(ctx *cli.Context) error {
 	// Build system prompt
 	systemPrompt := ctx.String("system-prompt")
 	if systemPrompt == "" {
-		systemPrompt = fmt.Sprintf("You are Dive, an AI coding assistant working in: %s", workspaceDir)
+		systemPrompt = defaultSystemPrompt(workspaceDir, modelName)
 	}
 
 	// Create model
@@ -874,18 +874,19 @@ func buildToolPreview(call *llm.ToolUseContent) toolPreview {
 // using only the old/new strings from the tool payload (no file I/O).
 // When replaceAll is true, it shows a summary indicating all matches will be replaced.
 func buildEditDiffPreview(filePath, oldStr, newStr string, replaceAll bool) string {
-	oldLines := strings.Split(oldStr, "\n")
-	newLines := strings.Split(newStr, "\n")
-
 	var b strings.Builder
 
-	// Removed lines
-	for _, line := range oldLines {
-		b.WriteString(fmt.Sprintf("  - %s\n", line))
+	// Removed lines (skip when empty to avoid stray "  - " line)
+	if oldStr != "" {
+		for _, line := range strings.Split(oldStr, "\n") {
+			b.WriteString(fmt.Sprintf("  - %s\n", line))
+		}
 	}
-	// Added lines
-	for _, line := range newLines {
-		b.WriteString(fmt.Sprintf("  + %s\n", line))
+	// Added lines (skip when empty to avoid stray "  + " line)
+	if newStr != "" {
+		for _, line := range strings.Split(newStr, "\n") {
+			b.WriteString(fmt.Sprintf("  + %s\n", line))
+		}
 	}
 
 	if replaceAll {

@@ -2532,6 +2532,10 @@ func (a *App) switchModel(modelID string) {
 
 	oldName := a.modelName
 	newModel := createModel(modelID, a.apiEndpoint)
+	if newModel == nil {
+		a.runner.Printf("Unknown model: %s", modelID)
+		return
+	}
 	a.agent.SetModel(newModel)
 	a.modelName = modelID
 	a.contextWindowMax = contextWindowForModel(modelID)
