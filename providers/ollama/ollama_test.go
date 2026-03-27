@@ -27,13 +27,13 @@ func TestProvider_Name(t *testing.T) {
 func TestProvider_WithOptions(t *testing.T) {
 	provider := New(
 		WithModel("llama3.1"),
-		WithEndpoint("http://custom:11434/v1/chat/completions"),
+		WithEndpoint("http://custom:11434/v1/messages"),
 		WithAPIKey("custom-key"),
 		WithMaxTokens(8192),
 	)
 
 	assert.Equal(t, "llama3.1", provider.model)
-	assert.Equal(t, "http://custom:11434/v1/chat/completions", provider.endpoint)
+	assert.Equal(t, "http://custom:11434/v1/messages", provider.endpoint)
 	assert.Equal(t, "custom-key", provider.apiKey)
 	assert.Equal(t, 8192, provider.maxTokens)
 }
