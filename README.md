@@ -267,21 +267,19 @@ and they're discovered automatically. Skills can be invoked by the agent
 (auto-triggered) or by users via `/name` syntax.
 
 ```go
-loader := skill.NewLoader(skill.LoaderOptions{ProjectDir: "."})
-loader.Load(ctx)
+skills, _ := skill.Load(ctx, skill.LoaderOptions{ProjectDir: "."})
 
-opts := dive.AgentOptions{
-    Model: anthropic.New(),
-    Tools: tools,
-}
-skill.ConfigureAgent(&opts, loader)
-
-agent, _ := dive.NewAgent(opts)
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:      anthropic.New(),
+    Tools:      tools,
+    Extensions: []dive.Extension{skills},
+})
 ```
 
-`ConfigureAgent` wires up the Skill tool, catalog injection, and system prompt
-rules. See the [Skills Guide](./docs/guides/skills.md) for file format, variable
-expansion, trigger matching, and provider extensibility.
+`skill.Load` discovers skills and returns a `*Loader` that implements
+`dive.Extension`, wiring up the Skill tool, catalog injection, and system prompt
+rules. See the [Skills Guide](./docs/guides/skills.md)
+for file format, variable expansion, trigger matching, and provider extensibility.
 
 ## Experimental Features
 

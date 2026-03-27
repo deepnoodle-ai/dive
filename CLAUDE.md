@@ -16,6 +16,7 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 ### Core Types
 
 - **Agent** (`agent.go`): Created via `NewAgent(AgentOptions)`, returns `*Agent`. Manages tool execution and conversation.
+- **Extension** (`agent.go`): `Extension` interface (`Tools`, `Hooks`, `Rules`) for composable agent capabilities. Set on `AgentOptions.Extensions`. Extensions provide tools, hooks, and system prompt rules that are merged during `NewAgent`.
 - **Session** (`dive.go`): `Session` interface (`ID`, `Messages`, `SaveTurn`). Set on `AgentOptions.Session` or per-call via `WithSession`. The `session` package provides `New()` (in-memory) and store-backed implementations.
 - **LLM** (`llm/llm.go`): `LLM` and `StreamingLLM` interfaces abstract over providers.
 - **Tool** (`tool.go`): `Tool` and `TypedTool[T]` interfaces. `FuncTool[T]()` creates tools from functions with auto-generated schemas. `Toolset` interface provides dynamic tool resolution per LLM request. Tool panics are auto-recovered. All toolkit constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
@@ -27,8 +28,8 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - `providers/` — LLM providers (Anthropic, OpenAI, Google, Grok, Mistral, Ollama, OpenRouter). Registry-based (`providers/registry.go`), self-registering via `init()`.
 - `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser).
 - `permission/` — Rule-based tool permission management with modes, specifier patterns, and session allowlists.
-- `skill/` — Unified skills and slash commands. `skill.ConfigureAgent(&opts, loader)` wires up the Skill tool, catalog hook, and content hook. Three-layer architecture: rules in system prompt, catalog as `<system-reminder name="skills">` in first user message, tool as trigger with content via PostToolUseHook. Provider-based loading (filesystem, `.agents/skills/`), variable expansion, trigger matching. `dive.SetSystemReminder` manages named blocks in conversation context.
-- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, subagent, compaction, todo, toolkit. Note: `experimental/skill/` and `experimental/slashcmd/` are deprecated in favor of `skill/`.
+- `skill/` — Unified skills and slash commands. `skill.Loader` implements `dive.Extension` — pass it to `AgentOptions.Extensions` to wire up the Skill tool, catalog hook, and content hook. Three-layer architecture: rules in system prompt, catalog as `<system-reminder name="skills">` in first user message, tool as trigger with content via PostToolUseHook. Provider-based loading (filesystem, `.agents/skills/`), variable expansion, trigger matching. `dive.SetSystemReminder` manages named blocks in conversation context.
+- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, subagent, compaction, todo, toolkit.
 
 ### Design Philosophy
 

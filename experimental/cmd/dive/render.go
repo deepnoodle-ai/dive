@@ -152,7 +152,8 @@ func hasUsage(u *llm.Usage) bool {
 }
 
 // usageView renders a compact token usage display with right-aligned number columns:
-//   "in:  13.7k  cache:  13.5k  out:    53"
+//
+//	"in:  13.7k  cache:  13.5k  out:    53"
 func usageView(u *llm.Usage) tui.View {
 	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
 	valueStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()

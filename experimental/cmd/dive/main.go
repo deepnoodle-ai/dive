@@ -18,13 +18,13 @@ import (
 	"sync/atomic"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/experimental/subagent"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
@@ -310,14 +310,17 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Load skills and slash commands
-	skillLoader := skill.NewLoader(skill.LoaderOptions{
-		ProjectDir: workspaceDir,
+	skills, err := skill.Load(bgCtx, skill.LoaderOptions{
+		ProjectDir:     workspaceDir,
+		ShellExpansion: true,
 	})
-	_ = skillLoader.Load(bgCtx) // Ignore errors, skills are optional
+	if err != nil {
+		return fmt.Errorf("failed to load skills: %w", err)
+	}
 
 	// Allow read access to skill directories so the agent can read
 	// reference files that live alongside skills (e.g., ~/.claude/skills/taste/reference/)
-	for _, dir := range skillLoader.BaseDirs() {
+	for _, dir := range skills.BaseDirs() {
 		_ = pathValidator.AllowReadPath(dir)
 	}
 
@@ -325,11 +328,12 @@ func runInteractive(ctx *cli.Context) error {
 	temperature := ctx.Float64("temperature")
 	maxTokens := ctx.Int("max-tokens")
 
-	// Create agent options with hooks
+	// Create agent options with hooks and extensions
 	agentOpts := dive.AgentOptions{
 		SystemPrompt: systemPrompt,
 		Model:        model,
 		Tools:        tools,
+		Extensions:   []dive.Extension{skills},
 		ModelSettings: &dive.ModelSettings{
 			Temperature: &temperature,
 			MaxTokens:   &maxTokens,
@@ -338,9 +342,6 @@ func runInteractive(ctx *cli.Context) error {
 			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
 	}
-
-	// Configure skills (adds tool, toolset, catalog hook, rules)
-	skill.ConfigureAgent(&agentOpts, skillLoader, skill.WithConfigShellExpansion(true))
 
 	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
@@ -356,7 +357,7 @@ func runInteractive(ctx *cli.Context) error {
 		initialPrompt,
 		compactionConfig,
 		resumeSessionID,
-		skillLoader,
+		skills,
 		ctx.String("api-endpoint"),
 	)
 	app.currentSession = currentSession

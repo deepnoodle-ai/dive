@@ -43,13 +43,20 @@ type LoaderOptions struct {
 
 	// DisableAgentsPaths prevents searching .agents/ directories.
 	DisableAgentsPaths bool
+
+	// ShellExpansion enables !{command} substitution when skills are invoked.
+	ShellExpansion bool
 }
 
 // Loader discovers and loads skills from configured providers.
 // Thread-safe: Load() takes a write lock; all read methods take read locks.
+//
+// Loader implements dive.Extension, providing tools, hooks, and system prompt
+// rules that can be passed directly to AgentOptions.Extensions.
 type Loader struct {
-	providers []Provider
-	logger    Logger
+	providers      []Provider
+	logger         Logger
+	shellExpansion bool
 
 	mu       sync.RWMutex
 	skills   map[string]*Skill
@@ -60,6 +67,25 @@ type Loader struct {
 	// call ID to correctly associate content with the right tool result
 	// when parallel Skill tool calls complete out of order.
 	pendingInstructions map[string]string
+}
+
+// Load creates a Loader, discovers skills, and returns the ready-to-use
+// result. This is the recommended way to set up skills:
+//
+//	skills, err := skill.Load(ctx, skill.LoaderOptions{ProjectDir: "."})
+//
+//	agent, _ := dive.NewAgent(dive.AgentOptions{
+//	    Extensions: []dive.Extension{skills},
+//	})
+//
+// For advanced use cases (custom providers, reloading, inspecting before
+// loading), use NewLoader and call Load separately.
+func Load(ctx context.Context, opts LoaderOptions) (*Loader, error) {
+	l := NewLoader(opts)
+	if err := l.Load(ctx); err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
 // NewLoader creates a new skill loader with the given options.
@@ -86,6 +112,7 @@ func NewLoader(opts LoaderOptions) *Loader {
 	return &Loader{
 		providers:           providers,
 		logger:              opts.Logger,
+		shellExpansion:      opts.ShellExpansion,
 		skills:              make(map[string]*Skill),
 		triggers:            make(map[string]*regexp.Regexp),
 		pendingInstructions: make(map[string]string),
@@ -263,77 +290,6 @@ func (l *Loader) sortedSkills(pred func(*Skill) bool) []*Skill {
 		return result[i].Name < result[j].Name
 	})
 	return result
-}
-
-// --- Backward-compatible methods ---
-
-// LoadSkills is a backward-compatible alias for Load(context.Background()).
-//
-// Deprecated: Use Load instead.
-func (l *Loader) LoadSkills() error {
-	return l.Load(context.Background())
-}
-
-// GetSkill is a backward-compatible alias for Get.
-//
-// Deprecated: Use Get instead.
-func (l *Loader) GetSkill(name string) (*Skill, bool) {
-	return l.Get(name)
-}
-
-// ListSkills is a backward-compatible alias for List.
-//
-// Deprecated: Use List instead.
-func (l *Loader) ListSkills() []*Skill {
-	return l.List()
-}
-
-// ListSkillNames is a backward-compatible alias for Names.
-//
-// Deprecated: Use Names instead.
-func (l *Loader) ListSkillNames() []string {
-	return l.Names()
-}
-
-// SkillCount is a backward-compatible alias for Count.
-//
-// Deprecated: Use Count instead.
-func (l *Loader) SkillCount() int {
-	return l.Count()
-}
-
-// GetCommand retrieves a command by exact name.
-//
-// Deprecated: Use Get instead. Commands and skills are unified.
-func (l *Loader) GetCommand(name string) (*Skill, bool) {
-	return l.Get(name)
-}
-
-// ListCommands is a backward-compatible alias for Commands.
-func (l *Loader) ListCommands() []*Skill {
-	return l.Commands()
-}
-
-// ListCommandNames returns names of commands only.
-func (l *Loader) ListCommandNames() []string {
-	cmds := l.Commands()
-	names := make([]string, len(cmds))
-	for i, c := range cmds {
-		names[i] = c.Name
-	}
-	return names
-}
-
-// CommandCount returns the number of commands.
-func (l *Loader) CommandCount() int {
-	return len(l.Commands())
-}
-
-// LoadCommands is a backward-compatible alias for Load.
-//
-// Deprecated: Use Load instead.
-func (l *Loader) LoadCommands() error {
-	return l.Load(context.Background())
 }
 
 func (l *Loader) logDebug(format string, args ...any) {
