@@ -19,8 +19,6 @@ These cover packages in `experimental/` with unstable APIs:
 - [Compaction](guides/experimental/compaction.md) - Context compaction for long conversations
 - [MCP Integration](guides/experimental/mcp-integration.md) - Model Context Protocol support
 - [Sandboxing](guides/experimental/sandboxing.md) - Secure command execution isolation
-- [Skills (deprecated)](guides/experimental/skills.md) - Superseded by `skill/` package
-- [Slash Commands (deprecated)](guides/experimental/slash-commands.md) - Superseded by `skill/` package
 - [Todo Lists](guides/experimental/todo-lists.md) - Task progress tracking
 
 ## Design Documents

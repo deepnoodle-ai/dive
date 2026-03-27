@@ -269,21 +269,3 @@ triggers:
 ```
 
 Use `loader.Match(input)` to find skills whose triggers match user input. This enables CLI-level skill suggestions before the LLM sees the input.
-
-## Migration from Experimental
-
-The `experimental/skill/` and `experimental/slashcmd/` packages are deprecated. The new `skill/` package is a drop-in replacement:
-
-| Experimental | Production |
-|---|---|
-| `experimental/skill.NewLoader` | `skill.NewLoader` |
-| `loader.LoadSkills()` | `loader.Load(ctx)` |
-| `loader.GetSkill(name)` | `loader.Get(name)` |
-| `loader.ListSkills()` | `loader.List()` |
-| `experimental/slashcmd.NewLoader` | `skill.NewLoader` (unified) |
-| `loader.LoadCommands()` | `loader.Load(ctx)` |
-| `loader.GetCommand(name)` | `loader.Get(name)` |
-| Manual tool + toolset wiring | `Extensions: []dive.Extension{loader}` |
-| `skill.ConfigureAgent(&opts, loader)` | `Extensions: []dive.Extension{loader}` |
-
-Backward-compatible aliases (`LoadSkills`, `GetSkill`, `GetCommand`, etc.) are provided on the new Loader. `skill.ConfigureAgent` is deprecated but still works.

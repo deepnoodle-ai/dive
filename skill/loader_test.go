@@ -403,38 +403,6 @@ Instructions.`), 0644))
 	wg.Wait()
 }
 
-func TestLoader_BackwardCompat(t *testing.T) {
-	tmpDir := t.TempDir()
-	skillsDir := filepath.Join(tmpDir, ".dive", "skills")
-	assert.NoError(t, os.MkdirAll(skillsDir, 0755))
-
-	assert.NoError(t, os.WriteFile(filepath.Join(skillsDir, "skill.md"), []byte(`---
-name: test
-description: A skill.
----
-Instructions.`), 0644))
-
-	loader := NewLoader(LoaderOptions{
-		ProjectDir: tmpDir,
-		HomeDir:    "/nonexistent",
-	})
-
-	// Use deprecated methods
-	assert.NoError(t, loader.LoadSkills())
-	assert.Equal(t, 1, loader.SkillCount())
-
-	s, ok := loader.GetSkill("test")
-	assert.True(t, ok)
-	assert.Equal(t, "test", s.Name)
-
-	skills := loader.ListSkills()
-	assert.Equal(t, 1, len(skills))
-
-	names := loader.ListSkillNames()
-	assert.Equal(t, 1, len(names))
-	assert.Equal(t, "test", names[0])
-}
-
 func TestLoader_CustomProvider(t *testing.T) {
 	loader := NewLoader(LoaderOptions{
 		Providers: []Provider{
