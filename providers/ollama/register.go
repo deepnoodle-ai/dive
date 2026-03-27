@@ -11,7 +11,7 @@ func init() {
 		Name: "ollama",
 		Match: providers.PrefixesMatcher(
 			"llama", "codellama",
-			"mixtral", "mistral",
+			"mixtral",
 			"gemma",
 			"gpt-oss",
 			"qwen",
