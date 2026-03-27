@@ -47,12 +47,26 @@ func (r *Registry) SetFallback(factory ProviderFactory) {
 }
 
 // CreateModel returns an LLM provider for the given model name and endpoint.
-// It iterates through registered entries in order and returns the first match.
+// The model string supports an optional "provider/model" syntax to explicitly
+// select a provider (e.g. "ollama/mistral:7b"). Without a provider prefix, it
+// iterates through registered entries in order and returns the first match.
 // If no entry matches and a fallback is set, the fallback is used.
 // Returns nil if no match and no fallback.
 func (r *Registry) CreateModel(model, endpoint string) llm.LLM {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// Check for explicit "provider/model" syntax
+	if idx := strings.IndexByte(model, '/'); idx > 0 {
+		providerName := strings.ToLower(model[:idx])
+		modelName := model[idx+1:]
+		for _, entry := range r.entries {
+			if strings.ToLower(entry.Name) == providerName {
+				return entry.Factory(modelName, endpoint)
+			}
+		}
+		return nil
+	}
 
 	for _, entry := range r.entries {
 		if entry.Match(model) {
