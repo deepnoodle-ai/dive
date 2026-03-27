@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -115,6 +116,10 @@ type Agent struct {
 	systemPrompt          string
 	session               Session
 
+	// mu protects model and systemPrompt for concurrent access via
+	// SetModel/SetSystemPrompt while CreateResponse is running.
+	mu sync.Mutex
+
 	// Agent hooks
 	hooks Hooks
 }
@@ -206,27 +211,46 @@ func (a *Agent) resolveTools(ctx context.Context) (tools []Tool, toolsByName map
 
 // Model returns the agent's LLM.
 func (a *Agent) Model() llm.LLM {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return a.model
 }
 
 // SetModel replaces the agent's LLM. This allows switching models mid-session.
+// It panics if model is nil; use NewAgent to validate the initial model.
 func (a *Agent) SetModel(model llm.LLM) {
+	if model == nil {
+		panic("dive: SetModel called with nil model")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.model = model
 }
 
 // SystemPrompt returns the agent's current system prompt.
 func (a *Agent) SystemPrompt() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return a.systemPrompt
 }
 
 // SetSystemPrompt replaces the agent's system prompt.
 func (a *Agent) SetSystemPrompt(prompt string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.systemPrompt = prompt
 }
 
 func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
 	var options CreateResponseOptions
 	options.Apply(opts)
+
+	// Snapshot mutable fields under the mutex so concurrent SetModel/SetSystemPrompt
+	// calls don't race with the generation loop.
+	a.mu.Lock()
+	model := a.model
+	systemPrompt := strings.TrimSpace(a.systemPrompt)
+	a.mu.Unlock()
 
 	logger := a.logger.With("agent_name", a.name)
 	logger.Info("creating response")
@@ -256,8 +280,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			messages = append(sessionMsgs, messages...)
 		}
 	}
-
-	systemPrompt := strings.TrimSpace(a.systemPrompt)
 
 	// Initialize hook context shared across all phases
 	hctx := NewHookContext()
@@ -289,7 +311,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 
 	response := &Response{
-		Model:     a.model.Name(),
+		Model:     model.Name(),
 		CreatedAt: time.Now(),
 	}
 
@@ -303,7 +325,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	stopHookActive := false
 
 generateLoop:
-	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback)
+	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback, model)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
 		return nil, err
@@ -384,7 +406,7 @@ func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback) (*generateResult, error) {
+func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback, model llm.LLM) (*generateResult, error) {
 
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
@@ -447,10 +469,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		}
 		var err error
 		var response *llm.Response
-		if streamingLLM, ok := a.model.(llm.StreamingLLM); ok {
+		if streamingLLM, ok := model.(llm.StreamingLLM); ok {
 			response, err = a.generateStreaming(ctx, streamingLLM, iterOpts, collectingCallback)
 		} else {
-			response, err = a.model.Generate(ctx, iterOpts...)
+			response, err = model.Generate(ctx, iterOpts...)
 		}
 		if err == nil && response == nil {
 			// This indicates a bug in the LLM provider implementation

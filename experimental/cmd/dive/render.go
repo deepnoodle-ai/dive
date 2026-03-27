@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-runewidth"
+
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/tui"
@@ -146,7 +148,7 @@ func formatTokenCount(n int) string {
 
 // hasUsage returns true if the usage has any non-zero token counts.
 func hasUsage(u *llm.Usage) bool {
-	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0
 }
 
 // usageView renders a compact token usage display with right-aligned number columns:
@@ -289,14 +291,14 @@ func (a *App) introView(msg Message) tui.View {
 		}
 	}
 
-	// Compute box width from longest visible line
+	// Compute box width from longest visible line (using display width for Unicode)
 	textWidths := []int{
-		len("Dive (v0.1.0)"),
-		len("model:     ") + len(model),
-		len("directory: ") + len(workspace),
+		runewidth.StringWidth("Dive (v0.1.0)"),
+		runewidth.StringWidth("model:     ") + runewidth.StringWidth(model),
+		runewidth.StringWidth("directory: ") + runewidth.StringWidth(workspace),
 	}
 	for _, extra := range extras {
-		textWidths = append(textWidths, len(extra))
+		textWidths = append(textWidths, runewidth.StringWidth(extra))
 	}
 	maxLen := 0
 	for _, w := range textWidths {

@@ -291,6 +291,9 @@ type App struct {
 	lastCtrlC    time.Time
 	showExitHint bool
 
+	// API endpoint for model creation (preserved for model switching)
+	apiEndpoint string
+
 	// Compaction configuration and state
 	compactionConfig         *compaction.CompactionConfig
 	lastCompactionEvent      *compaction.CompactionEvent
@@ -323,6 +326,7 @@ func NewApp(
 	compactionConfig *compaction.CompactionConfig,
 	resumeSessionID string,
 	skillLoader *skill.Loader,
+	apiEndpoint string,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -343,6 +347,7 @@ func NewApp(
 		modelName:              modelName,
 		resumeSessionID:        resumeSessionID,
 		skillLoader:            skillLoader,
+		apiEndpoint:            apiEndpoint,
 		messages:               make([]Message, 0),
 		toolCallIndex:          make(map[string]int),
 		toolTitles:             toolTitles,
@@ -2526,10 +2531,15 @@ func (a *App) switchModel(modelID string) {
 	}
 
 	oldName := a.modelName
-	newModel := createModel(modelID, "")
+	newModel := createModel(modelID, a.apiEndpoint)
 	a.agent.SetModel(newModel)
 	a.modelName = modelID
 	a.contextWindowMax = contextWindowForModel(modelID)
+
+	// Update compaction model so compaction uses the new model
+	if a.compactionConfig != nil {
+		a.compactionConfig.Model = newModel
+	}
 
 	// Update the model line in the system prompt so the agent knows its identity
 	if sp := a.agent.SystemPrompt(); sp != "" {

@@ -357,6 +357,7 @@ func runInteractive(ctx *cli.Context) error {
 		compactionConfig,
 		resumeSessionID,
 		skillLoader,
+		ctx.String("api-endpoint"),
 	)
 	app.currentSession = currentSession
 	appRef.Store(app)
@@ -824,8 +825,9 @@ func buildToolPreview(call *llm.ToolUseContent) toolPreview {
 		}
 		oldStr, _ := parsed["old_string"].(string)
 		newStr, _ := parsed["new_string"].(string)
+		replaceAll, _ := parsed["replace_all"].(bool)
 		if oldStr != "" || newStr != "" {
-			tp.preview = buildEditDiffPreview(filePath, oldStr, newStr)
+			tp.preview = buildEditDiffPreview(filePath, oldStr, newStr, replaceAll)
 		}
 		return tp
 
@@ -868,58 +870,28 @@ func buildToolPreview(call *llm.ToolUseContent) toolPreview {
 	}
 }
 
-// buildEditDiffPreview reads the target file and generates a diff preview
-// for the permission dialog. Falls back to a simple old/new display.
-func buildEditDiffPreview(filePath, oldStr, newStr string) string {
-	if filePath == "" {
-		return formatSimpleEditPreview(oldStr, newStr)
-	}
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return formatSimpleEditPreview(oldStr, newStr)
-	}
-	contentStr := string(content)
-	idx := strings.Index(contentStr, oldStr)
-	if idx < 0 {
-		return formatSimpleEditPreview(oldStr, newStr)
-	}
-
-	// Find line number where old_string starts
-	lineNum := strings.Count(contentStr[:idx], "\n")
-
-	// Build new content for context
-	newContent := contentStr[:idx] + newStr + contentStr[idx+len(oldStr):]
-	contentLines := strings.Split(newContent, "\n")
+// buildEditDiffPreview generates a diff preview for the permission dialog
+// using only the old/new strings from the tool payload (no file I/O).
+// When replaceAll is true, it shows a summary indicating all matches will be replaced.
+func buildEditDiffPreview(filePath, oldStr, newStr string, replaceAll bool) string {
 	oldLines := strings.Split(oldStr, "\n")
 	newLines := strings.Split(newStr, "\n")
 
-	// Context bounds
-	start := lineNum - 2
-	if start < 0 {
-		start = 0
-	}
-	end := lineNum + len(newLines) + 2
-	if end > len(contentLines) {
-		end = len(contentLines)
-	}
-
 	var b strings.Builder
-	// Context before
-	for i := start; i < lineNum; i++ {
-		b.WriteString(fmt.Sprintf("%5d   %s\n", i+1, contentLines[i]))
-	}
+
 	// Removed lines
-	for i, line := range oldLines {
-		b.WriteString(fmt.Sprintf("%5d - %s\n", lineNum+i+1, line))
+	for _, line := range oldLines {
+		b.WriteString(fmt.Sprintf("  - %s\n", line))
 	}
 	// Added lines
-	for i, line := range newLines {
-		b.WriteString(fmt.Sprintf("%5d + %s\n", lineNum+i+1, line))
+	for _, line := range newLines {
+		b.WriteString(fmt.Sprintf("  + %s\n", line))
 	}
-	// Context after
-	for i := lineNum + len(newLines); i < end; i++ {
-		b.WriteString(fmt.Sprintf("%5d   %s\n", i+1, contentLines[i]))
+
+	if replaceAll {
+		b.WriteString("\n  (replace all occurrences)")
 	}
+
 	return strings.TrimRight(b.String(), "\n")
 }
 

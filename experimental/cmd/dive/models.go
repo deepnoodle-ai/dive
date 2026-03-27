@@ -29,8 +29,10 @@ var modelCatalog = []modelInfo{
 	{"claude", "", 200_000},
 
 	// Google models
+	{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", 1_000_000},
 	{"gemini-3.1-pro", "Gemini 3.1 Pro", 1_000_000},
 	{"gemini-3.1-flash", "Gemini 3.1 Flash", 1_000_000},
+	{"gemini-3-flash-preview", "Gemini 3 Flash", 1_000_000},
 	{"gemini-3-flash", "Gemini 3 Flash", 1_000_000},
 	{"gemini-3", "", 1_000_000},
 	{"gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000},
@@ -58,6 +60,7 @@ var modelCatalog = []modelInfo{
 	{"o3", "o3", 200_000},
 
 	// Grok models
+	{"grok-4.20-0309-reasoning", "Grok 4.20", 131_072},
 	{"grok-4.20", "Grok 4.20", 131_072},
 	{"grok-4-1-fast", "Grok 4.1 Fast", 131_072},
 	{"grok-4", "Grok 4", 131_072},
@@ -67,7 +70,10 @@ var modelCatalog = []modelInfo{
 	{"grok", "", 131_072},
 
 	// Mistral models
+	{"devstral-small-latest", "Devstral Small", 128_000},
 	{"devstral", "", 128_000},
+	{"mistral-large-latest", "Mistral Large", 128_000},
+	{"mistral-small-latest", "Mistral Small", 128_000},
 	{"mistral", "", 128_000},
 }
 
