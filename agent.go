@@ -49,6 +49,21 @@ type Hooks struct {
 	PreIteration []PreIterationHook
 }
 
+// Extension bundles tools, hooks, and system prompt rules that extend an
+// agent's capabilities. Implementations provide any combination of these,
+// returning nil/empty for aspects they don't use.
+type Extension interface {
+	// Tools returns additional tools to make available to the agent.
+	Tools() []Tool
+
+	// Hooks returns hooks to register on the agent.
+	Hooks() Hooks
+
+	// Rules returns text to append to the agent's system prompt.
+	// Returns empty string if no rules are needed.
+	Rules() string
+}
+
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
 	// SystemPrompt is the system prompt sent to the LLM.
@@ -64,6 +79,12 @@ type AgentOptions struct {
 	// is called before each LLM request, enabling context-dependent tool
 	// availability. Tools from toolsets are merged with static Tools.
 	Toolsets []Toolset
+
+	// Extensions provide additional tools, hooks, and system prompt rules.
+	// Extensions are merged in order: tools are appended, hooks are appended
+	// to their respective slices, and rules are appended to the system prompt.
+	// Extension tools and hooks come after those set directly on AgentOptions.
+	Extensions []Extension
 
 	// Hooks groups all agent-level hooks.
 	Hooks Hooks
@@ -138,6 +159,25 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	if opts.Logger == nil {
 		opts.Logger = &llm.NullLogger{}
 	}
+	// Merge extensions into opts before building the agent.
+	for _, ext := range opts.Extensions {
+		if ext == nil {
+			continue
+		}
+		opts.Tools = append(opts.Tools, ext.Tools()...)
+		extHooks := ext.Hooks()
+		opts.Hooks.PreGeneration = append(opts.Hooks.PreGeneration, extHooks.PreGeneration...)
+		opts.Hooks.PostGeneration = append(opts.Hooks.PostGeneration, extHooks.PostGeneration...)
+		opts.Hooks.PreToolUse = append(opts.Hooks.PreToolUse, extHooks.PreToolUse...)
+		opts.Hooks.PostToolUse = append(opts.Hooks.PostToolUse, extHooks.PostToolUse...)
+		opts.Hooks.PostToolUseFailure = append(opts.Hooks.PostToolUseFailure, extHooks.PostToolUseFailure...)
+		opts.Hooks.Stop = append(opts.Hooks.Stop, extHooks.Stop...)
+		opts.Hooks.PreIteration = append(opts.Hooks.PreIteration, extHooks.PreIteration...)
+		if rules := ext.Rules(); rules != "" {
+			opts.SystemPrompt = strings.TrimRight(opts.SystemPrompt, "\n") + "\n\n" + rules
+		}
+	}
+
 	agent := &Agent{
 		name:                  opts.Name,
 		model:                 opts.Model,

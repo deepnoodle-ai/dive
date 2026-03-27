@@ -45,14 +45,14 @@ func main() {
 	}
 
 	// Load skills from the example's .dive/skills/ directory
-	loader := skill.NewLoader(skill.LoaderOptions{
+	skills, err := skill.Load(ctx, skill.LoaderOptions{
 		ProjectDir: exampleDir,
 	})
-	if err := loader.Load(ctx); err != nil {
+	if err != nil {
 		log.Fatalf("Failed to load skills: %v", err)
 	}
-	fmt.Printf("Loaded %d skill(s)\n", loader.Count())
-	for _, s := range loader.List() {
+	fmt.Printf("Loaded %d skill(s)\n", skills.Count())
+	for _, s := range skills.List() {
 		fmt.Printf("  - %s: %s\n", s.Name, s.Description)
 	}
 
@@ -64,14 +64,12 @@ func main() {
 	}
 
 	// Configure agent with skill support
-	opts := dive.AgentOptions{
+	agent, err := dive.NewAgent(dive.AgentOptions{
 		SystemPrompt: "You are a helpful software engineering assistant.",
 		Model:        anthropic.New(),
 		Tools:        tools,
-	}
-	skill.ConfigureAgent(&opts, loader)
-
-	agent, err := dive.NewAgent(opts)
+		Extensions:   []dive.Extension{skills},
+	})
 	if err != nil {
 		log.Fatalf("Failed to create agent: %v", err)
 	}

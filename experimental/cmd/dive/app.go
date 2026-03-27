@@ -230,7 +230,7 @@ type App struct {
 	sessionStore session.Store
 	workspaceDir string
 	modelName    string
-	skillLoader  *skill.Loader
+	skills       *skill.Loader
 
 	// Session management
 	resumeSessionID string           // Session ID to resume (from --resume flag)
@@ -325,7 +325,7 @@ func NewApp(
 	initialPrompt string,
 	compactionConfig *compaction.CompactionConfig,
 	resumeSessionID string,
-	skillLoader *skill.Loader,
+	skills *skill.Loader,
 	apiEndpoint string,
 ) *App {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -346,7 +346,7 @@ func NewApp(
 		workspaceDir:           workspaceDir,
 		modelName:              modelName,
 		resumeSessionID:        resumeSessionID,
-		skillLoader:            skillLoader,
+		skills:                 skills,
 		apiEndpoint:            apiEndpoint,
 		messages:               make([]Message, 0),
 		toolCallIndex:          make(map[string]int),
@@ -1892,8 +1892,8 @@ func (a *App) handleCommand(input string) bool {
 	}
 
 	// Check for custom slash commands and skills
-	if a.skillLoader != nil {
-		if cmd, ok := a.skillLoader.Get(cmdName); ok {
+	if a.skills != nil {
+		if cmd, ok := a.skills.Get(cmdName); ok {
 			// Expand argument placeholders (with shell expansion for local skills)
 			expanded, expandErr := cmd.Expand(context.Background(), cmdArgs, skill.WithShellExpansion(true))
 			if expandErr != nil {
@@ -2003,12 +2003,12 @@ func (a *App) printHelp() {
 	}
 
 	// List custom commands if any
-	if a.skillLoader != nil && a.skillLoader.Count() > 0 {
+	if a.skills != nil && a.skills.Count() > 0 {
 		views = append(views,
 			tui.Text(""),
 			tui.Text("Custom Commands & Skills:").Bold(),
 		)
-		for _, cmd := range a.skillLoader.List() {
+		for _, cmd := range a.skills.List() {
 			line := fmt.Sprintf("  /%s", cmd.Name)
 			if cmd.Config.ArgumentHint != "" {
 				line += " " + cmd.Config.ArgumentHint
@@ -2348,8 +2348,8 @@ func (a *App) getCommandMatches(prefix string) []string {
 	}
 
 	// Add matching custom commands from loader
-	if a.skillLoader != nil {
-		for _, cmd := range a.skillLoader.List() {
+	if a.skills != nil {
+		for _, cmd := range a.skills.List() {
 			if strings.HasPrefix(cmd.Name, prefix) {
 				matches = append(matches, cmd.Name)
 			}

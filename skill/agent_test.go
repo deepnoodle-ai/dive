@@ -168,6 +168,71 @@ func TestConfigureAgent_ShellExpansion(t *testing.T) {
 	assert.True(t, hasSkillTool)
 }
 
+func TestLoaderExtension(t *testing.T) {
+	t.Run("with skills", func(t *testing.T) {
+		loader := &Loader{
+			skills: map[string]*Skill{
+				"reviewer": {
+					Name:        "reviewer",
+					Description: "Review code.",
+					Config:      SkillConfig{Description: "Review code."},
+				},
+			},
+			pendingInstructions: make(map[string]string),
+		}
+
+		// Tools() returns the Skill tool
+		tools := loader.Tools()
+		assert.Equal(t, 1, len(tools))
+		assert.Equal(t, "Skill", tools[0].Name())
+
+		// Hooks() returns catalog and content hooks
+		hooks := loader.Hooks()
+		assert.Equal(t, 1, len(hooks.PreGeneration))
+		assert.Equal(t, 1, len(hooks.PostToolUse))
+
+		// Rules() returns skill rules
+		rules := loader.Rules()
+		assert.Contains(t, rules, "Skill tool")
+	})
+
+	t.Run("with no skills", func(t *testing.T) {
+		loader := &Loader{
+			skills:              map[string]*Skill{},
+			pendingInstructions: make(map[string]string),
+		}
+
+		// Tools() returns nil
+		assert.Nil(t, loader.Tools())
+
+		// Hooks() still returns hooks (for stale catalog cleanup)
+		hooks := loader.Hooks()
+		assert.Equal(t, 1, len(hooks.PreGeneration))
+		assert.Equal(t, 1, len(hooks.PostToolUse))
+
+		// Rules() returns empty
+		assert.Equal(t, "", loader.Rules())
+	})
+
+	t.Run("shell expansion via LoaderOptions", func(t *testing.T) {
+		loader := &Loader{
+			shellExpansion: true,
+			skills: map[string]*Skill{
+				"test": {
+					Name:        "test",
+					Description: "Test.",
+					Config:      SkillConfig{Description: "Test."},
+				},
+			},
+			pendingInstructions: make(map[string]string),
+		}
+
+		tools := loader.Tools()
+		assert.Equal(t, 1, len(tools))
+		assert.Equal(t, "Skill", tools[0].Name())
+	})
+}
+
 func TestCatalogHook_InjectsIntoFirstUserMessage(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{

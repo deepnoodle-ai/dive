@@ -7,20 +7,17 @@ Skills and slash commands are unified: a slash command is simply a skill without
 ## Quick Start
 
 ```go
-loader := skill.NewLoader(skill.LoaderOptions{ProjectDir: "."})
-loader.Load(ctx)
+skills, _ := skill.Load(ctx, skill.LoaderOptions{ProjectDir: "."})
 
-opts := dive.AgentOptions{
+agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "You are a helpful assistant.",
     Model:        anthropic.New(),
     Tools:        tools,
-}
-skill.ConfigureAgent(&opts, loader)
-
-agent, _ := dive.NewAgent(opts)
+    Extensions:   []dive.Extension{skills},
+})
 ```
 
-`ConfigureAgent` wires up everything — the Skill tool, catalog injection into conversation context, and usage rules in the system prompt. See [Agent Integration](#agent-integration) for details.
+`skill.Load` discovers skills and returns a `*Loader` that implements `dive.Extension`. Passing it to `Extensions` wires up everything — the Skill tool, catalog injection into conversation context, and usage rules in the system prompt. See [Agent Integration](#agent-integration) for details.
 
 ## Skill File Format
 
@@ -81,7 +78,7 @@ Skills support three kinds of variable substitution in their instructions:
 | `$1`, `$2`, ..., `$9` | Positional arguments | `/deploy staging` → `$1` = `"staging"` |
 | `!{command}` | Shell command output | `!{git branch --show-current}` → `"main"` |
 
-Shell expansion (`!{...}`) is **disabled by default** for security. Enable it with `skill.WithConfigShellExpansion(true)` in `ConfigureAgent`, or `skill.WithShellExpansion(true)` when calling `Expand()` directly.
+Shell expansion (`!{...}`) is **disabled by default** for security. Enable it with `skill.LoaderOptions{ShellExpansion: true}`, or `skill.WithShellExpansion(true)` when calling `Expand()` directly.
 
 **Security:** Shell expansion is only allowed for local skills (`file://` or empty SourceURI). Skills loaded from remote providers (e.g., custom HTTP providers) never get shell expansion regardless of configuration. This is enforced by `Skill.IsLocal()`.
 
@@ -127,6 +124,35 @@ Commands use `COMMAND.md` as the directory marker instead of `SKILL.md`.
 
 ## Agent Integration
 
+### Extension Interface
+
+The skill `Loader` implements `dive.Extension`, which provides tools, hooks, and system prompt rules to the agent:
+
+```go
+skills, _ := skill.Load(ctx, skill.LoaderOptions{
+    ProjectDir:     ".",
+    ShellExpansion: true, // enable !{command} substitution
+})
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    SystemPrompt: "You are a helpful assistant.",
+    Model:        anthropic.New(),
+    Tools: []dive.Tool{
+        toolkit.NewReadFileTool(),
+        toolkit.NewGrepTool(),
+        toolkit.NewGlobTool(),
+    },
+    Extensions: []dive.Extension{skills},
+})
+```
+
+What the extension provides:
+1. **Tools** — the Skill tool (only when skills are loaded)
+2. **Rules** — skill usage instructions appended to the system prompt (only when skills are loaded)
+3. **Hooks** — always provided, even with zero skills:
+   - A **PreGenerationHook** that injects the skill catalog as a `<system-reminder name="skills">` block into the first user message (replaced in place if the catalog changes; removed if skills become empty)
+   - A **PostToolUseHook** that injects expanded skill instructions as `AdditionalContext` on the tool result message, keyed by tool call ID for correct association under parallel execution
+
 ### Three-Layer Architecture
 
 Dive's skill integration follows Claude Code's three-layer architecture:
@@ -148,40 +174,6 @@ Dive's skill integration follows Claude Code's three-layer architecture:
 ```
 
 The key insight: the skill catalog is injected into the **first user message** via `dive.SetSystemReminder`, not repeated in the tool description on every LLM request. This is stable for prompt caching — it sits right after the system prompt and doesn't move as the conversation grows.
-
-### ConfigureAgent (Recommended)
-
-`skill.ConfigureAgent` sets up all three layers in one call:
-
-```go
-loader := skill.NewLoader(skill.LoaderOptions{ProjectDir: "."})
-loader.Load(ctx)
-
-opts := dive.AgentOptions{
-    SystemPrompt: "You are a helpful assistant.",
-    Model:        anthropic.New(),
-    Tools: []dive.Tool{
-        toolkit.NewReadFileTool(),
-        toolkit.NewGrepTool(),
-        toolkit.NewGlobTool(),
-    },
-}
-
-// Adds: Skill tool, catalog hook, content hook, system prompt rules
-skill.ConfigureAgent(&opts, loader)
-
-// Enable shell expansion for local skills:
-// skill.ConfigureAgent(&opts, loader, skill.WithConfigShellExpansion(true))
-
-agent, _ := dive.NewAgent(opts)
-```
-
-What `ConfigureAgent` does internally:
-1. **Always registers hooks** — even with zero skills, hooks are installed so that stale catalog blocks from a previous session can be cleaned up on resume.
-2. **Appends the Skill tool** to `opts.Tools` (only when skills are loaded)
-3. **Appends skill usage rules** to `opts.SystemPrompt` (only when skills are loaded)
-4. Registers a **PreGenerationHook** that injects the skill catalog as a `<system-reminder name="skills">` block into the first user message (replaced in place if the catalog changes; removed if skills become empty)
-5. Registers a **PostToolUseHook** that injects expanded skill instructions as `AdditionalContext` on the tool result message, keyed by tool call ID for correct association under parallel execution
 
 ### Catalog Injection
 
@@ -243,7 +235,7 @@ All toolkit tools accept a `Validator` field that takes precedence over `Workspa
 
 The catalog hook handles session resume correctly:
 - On a fresh process resuming a session, stale catalog blocks from a previous run are detected and updated (or removed if skills are no longer available)
-- Hooks are always installed by `ConfigureAgent` (even with zero skills) specifically to handle this cleanup
+- Hooks are always returned by the extension (even with zero skills) specifically to handle this cleanup
 
 ## Provider System
 
@@ -291,6 +283,7 @@ The `experimental/skill/` and `experimental/slashcmd/` packages are deprecated. 
 | `experimental/slashcmd.NewLoader` | `skill.NewLoader` (unified) |
 | `loader.LoadCommands()` | `loader.Load(ctx)` |
 | `loader.GetCommand(name)` | `loader.Get(name)` |
-| Manual tool + toolset wiring | `skill.ConfigureAgent(&opts, loader)` |
+| Manual tool + toolset wiring | `Extensions: []dive.Extension{loader}` |
+| `skill.ConfigureAgent(&opts, loader)` | `Extensions: []dive.Extension{loader}` |
 
-Backward-compatible aliases (`LoadSkills`, `GetSkill`, `GetCommand`, etc.) are provided on the new Loader.
+Backward-compatible aliases (`LoadSkills`, `GetSkill`, `GetCommand`, etc.) are provided on the new Loader. `skill.ConfigureAgent` is deprecated but still works.

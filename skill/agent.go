@@ -7,27 +7,51 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
+// Compile-time check that Loader implements dive.Extension.
+var _ dive.Extension = (*Loader)(nil)
+
+// Tools returns the Skill tool if skills are loaded, or nil otherwise.
+// Implements dive.Extension.
+func (l *Loader) Tools() []dive.Tool {
+	if l.Count() == 0 {
+		return nil
+	}
+	var toolOpts []ToolOption
+	if l.shellExpansion {
+		toolOpts = append(toolOpts, WithToolShellExpansion(true))
+	}
+	return []dive.Tool{NewTool(l, toolOpts...)}
+}
+
+// Hooks returns the catalog injection and skill content hooks.
+// Hooks are always returned even when no skills are loaded, because a
+// resumed session may contain a stale catalog block that needs cleanup.
+// Implements dive.Extension.
+func (l *Loader) Hooks() dive.Hooks {
+	return dive.Hooks{
+		PreGeneration: []dive.PreGenerationHook{catalogHook(l)},
+		PostToolUse:   []dive.PostToolUseHook{skillContentHook(l)},
+	}
+}
+
+// Rules returns the skill usage rules for the system prompt, or empty
+// string if no skills are loaded.
+// Implements dive.Extension.
+func (l *Loader) Rules() string {
+	if l.Count() == 0 {
+		return ""
+	}
+	return SkillRules()
+}
+
 // ConfigureAgent sets up skill support on the given AgentOptions.
-// Call this before dive.NewAgent(). It:
-//   - Adds the Skill tool to opts.Tools
-//   - Appends skill usage rules to opts.SystemPrompt
-//   - Adds a PreGenerationHook for catalog injection into conversation context
-//   - Adds a PostToolUseHook for skill content injection
 //
-// This follows the same pattern as setting AgentOptions.Session — one call
-// wires up all the internal machinery.
+// Deprecated: Use AgentOptions.Extensions instead:
 //
-// Example:
-//
-//	loader := skill.NewLoader(skill.LoaderOptions{ProjectDir: "."})
-//	loader.Load(ctx)
-//
-//	opts := dive.AgentOptions{
-//	    Model: anthropic.New(),
-//	    Tools: tools,
-//	}
-//	skill.ConfigureAgent(&opts, loader)
-//	agent, _ := dive.NewAgent(opts)
+//	agent, _ := dive.NewAgent(dive.AgentOptions{
+//	    Model:      anthropic.New(),
+//	    Extensions: []dive.Extension{loader},
+//	})
 func ConfigureAgent(opts *dive.AgentOptions, loader *Loader, cfgOpts ...ConfigOption) {
 	if loader == nil {
 		return

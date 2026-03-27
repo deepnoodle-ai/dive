@@ -206,9 +206,50 @@ Hook flow: PreGeneration -> [PreIteration -> LLM -> PreToolUse -> Execute -> Pos
 
 Hook helpers: `InjectContext`, `CompactionHook`, `UsageLogger`, `UsageLoggerWithSlog`, `MatchTool`, `MatchToolPost`, `MatchToolPostFailure`
 
+## Extensions
+
+Extensions bundle tools, hooks, and system prompt rules into a composable unit.
+Any type implementing `dive.Extension` can be passed to `AgentOptions.Extensions`.
+`NewAgent` merges all extensions in order after direct fields.
+
+```go
+type Extension interface {
+    Tools() []Tool
+    Hooks() Hooks
+    Rules() string
+}
+```
+
+## Skills
+
+Skills are markdown-based instruction sets that extend agent behavior. They can
+be auto-invoked by the agent based on triggers/descriptions or manually triggered
+by users via `/name` syntax. Place skill files in `.dive/skills/`, `.claude/skills/`,
+or `.agents/skills/`.
+
+The skill `Loader` implements `dive.Extension`:
+
+```go
+skills, _ := skill.Load(ctx, skill.LoaderOptions{
+    ProjectDir:     ".",
+    ShellExpansion: true, // enable !{command} substitution
+})
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:      anthropic.New(),
+    Tools:      tools,
+    Extensions: []dive.Extension{skills},
+})
+```
+
+Skills support variable expansion (`$ARGUMENTS`, `$1`-`$9`, `!{command}`),
+trigger matching (keyword and regex), and pluggable providers for loading
+from custom sources. See [Skills Guide](docs/guides/skills.md).
+
 ## Key types
 
 - `dive.Agent` - created via `dive.NewAgent(AgentOptions)`, runs the generate-call-repeat loop
+- `dive.Extension` - interface: Tools, Hooks, Rules; composable agent capability bundle; set on AgentOptions.Extensions
 - `dive.Session` - interface: ID, Messages, SaveTurn; set on AgentOptions or pass via WithSession
 - `dive.Tool` - interface: Name, Description, Schema, Annotations, Call
 - `dive.TypedTool[T]` - generic tool with typed input; wrap with `dive.ToolAdapter()`
@@ -378,12 +419,13 @@ All constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 - [Custom Tools](docs/guides/custom-tools.md)
 - [LLM Providers](docs/guides/llm-guide.md)
 - [Permissions](docs/guides/permissions.md)
+- [Skills](docs/guides/skills.md)
 - [GoDoc](https://pkg.go.dev/github.com/deepnoodle-ai/dive)
 - [examples/](examples/) - runnable examples for each provider and feature
 
 ## Experimental (experimental/)
 
-Compaction, Subagent, Sandbox, MCP, Skills, Slash Commands, Settings, Todo, extended Toolkit, CLI.
+Compaction, Subagent, Sandbox, MCP, Settings, Todo, extended Toolkit, CLI.
 
 Guides: docs/guides/experimental/
 

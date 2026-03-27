@@ -817,3 +817,147 @@ func TestParallelToolExecution(t *testing.T) {
 		assert.Equal(t, hookCalls.Load(), int32(2))
 	})
 }
+
+// mockExtension implements Extension for testing.
+type mockExtension struct {
+	tools []Tool
+	hooks Hooks
+	rules string
+}
+
+func (e *mockExtension) Tools() []Tool { return e.tools }
+func (e *mockExtension) Hooks() Hooks  { return e.hooks }
+func (e *mockExtension) Rules() string { return e.rules }
+
+func TestExtensionMerge(t *testing.T) {
+	mock := &mockLLM{nameFunc: func() string { return "test-model" }}
+
+	t.Run("merges tools from extensions", func(t *testing.T) {
+		directTool := &mockTool{
+			name:     "direct_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+		}
+		extTool := &mockTool{
+			name:     "ext_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model: mock,
+			Tools: []Tool{directTool},
+			Extensions: []Extension{
+				&mockExtension{tools: []Tool{extTool}},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Len(t, agent.Tools(), 2)
+		assert.Equal(t, "direct_tool", agent.Tools()[0].Name())
+		assert.Equal(t, "ext_tool", agent.Tools()[1].Name())
+	})
+
+	t.Run("merges hooks from extensions", func(t *testing.T) {
+		var order []string
+		agent, err := NewAgent(AgentOptions{
+			Model: mock,
+			Hooks: Hooks{
+				PreGeneration: []PreGenerationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						order = append(order, "direct")
+						return nil
+					},
+				},
+			},
+			Extensions: []Extension{
+				&mockExtension{hooks: Hooks{
+					PreGeneration: []PreGenerationHook{
+						func(ctx context.Context, hctx *HookContext) error {
+							order = append(order, "ext")
+							return nil
+						},
+					},
+				}},
+			},
+		})
+		assert.NoError(t, err)
+
+		// Run PreGeneration hooks to verify merge order
+		for _, hook := range agent.hooks.PreGeneration {
+			hook(context.Background(), &HookContext{})
+		}
+		assert.Equal(t, []string{"direct", "ext"}, order)
+	})
+
+	t.Run("merges rules into system prompt", func(t *testing.T) {
+		agent, err := NewAgent(AgentOptions{
+			Model:        mock,
+			SystemPrompt: "Base prompt.",
+			Extensions: []Extension{
+				&mockExtension{rules: "Extension rules."},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "Base prompt.\n\nExtension rules.", agent.SystemPrompt())
+	})
+
+	t.Run("empty rules not appended", func(t *testing.T) {
+		agent, err := NewAgent(AgentOptions{
+			Model:        mock,
+			SystemPrompt: "Base prompt.",
+			Extensions: []Extension{
+				&mockExtension{rules: ""},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "Base prompt.", agent.SystemPrompt())
+	})
+
+	t.Run("nil extensions skipped", func(t *testing.T) {
+		agent, err := NewAgent(AgentOptions{
+			Model:      mock,
+			Extensions: []Extension{nil},
+		})
+		assert.NoError(t, err)
+		assert.Len(t, agent.Tools(), 0)
+	})
+
+	t.Run("multiple extensions merged in order", func(t *testing.T) {
+		ext1Tool := &mockTool{
+			name:     "tool_1",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+		}
+		ext2Tool := &mockTool{
+			name:     "tool_2",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model: mock,
+			Extensions: []Extension{
+				&mockExtension{tools: []Tool{ext1Tool}, rules: "Rules 1."},
+				&mockExtension{tools: []Tool{ext2Tool}, rules: "Rules 2."},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Len(t, agent.Tools(), 2)
+		assert.Equal(t, "tool_1", agent.Tools()[0].Name())
+		assert.Equal(t, "tool_2", agent.Tools()[1].Name())
+		assert.Contains(t, agent.SystemPrompt(), "Rules 1.\n\nRules 2.")
+	})
+
+	t.Run("duplicate tool from extension rejected", func(t *testing.T) {
+		tool := &mockTool{
+			name:     "same_name",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return nil, nil },
+		}
+
+		_, err := NewAgent(AgentOptions{
+			Model: mock,
+			Tools: []Tool{tool},
+			Extensions: []Extension{
+				&mockExtension{tools: []Tool{tool}},
+			},
+		})
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, `duplicate tool name: "same_name"`)
+	})
+}
