@@ -159,7 +159,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return fmt.Errorf("error decoding response: %w", err)
 		}
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
+	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute))
 
 	if err != nil {
 		return nil, err
@@ -302,7 +302,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			textIndex:         -1,
 		}
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
+	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute))
 
 	if err != nil {
 		return nil, err
@@ -395,8 +395,6 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 					})
 				case *llm.ToolUseContent:
 					// Already handled above
-				case *llm.ThinkingContent, *llm.SummaryContent, *llm.MCPApprovalRequestContent, *llm.MCPApprovalResponseContent:
-					// Skip content types not relevant to the chat completions API
 				default:
 					return nil, fmt.Errorf("unsupported content type: %s", c.Type())
 				}
