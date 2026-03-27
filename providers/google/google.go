@@ -141,7 +141,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			return fmt.Errorf("error converting response: %w", convErr)
 		}
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute))
+	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
 
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
 		stream = NewStreamIteratorFromSeq(ctx, streamSeq, request.Model)
 		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute))
+	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
 
 	if err != nil {
 		return nil, err
