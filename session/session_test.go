@@ -1,4 +1,4 @@
-package session
+package session_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -16,14 +17,14 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestNew(t *testing.T) {
-	sess := New("s1")
+	sess := session.New("s1")
 	assert.Equal(t, "s1", sess.ID())
 	assert.Equal(t, 0, sess.EventCount())
 }
 
 func TestSessionMessages(t *testing.T) {
 	ctx := context.Background()
-	sess := New("s1")
+	sess := session.New("s1")
 
 	err := sess.SaveTurn(ctx, []*llm.Message{
 		llm.NewUserTextMessage("Hello"),
@@ -46,7 +47,7 @@ func TestSessionMessages(t *testing.T) {
 }
 
 func TestSessionMessagesEmpty(t *testing.T) {
-	sess := New("s1")
+	sess := session.New("s1")
 	msgs, err := sess.Messages(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(msgs))
@@ -54,7 +55,7 @@ func TestSessionMessagesEmpty(t *testing.T) {
 
 func TestSessionMessagesReturnsCopy(t *testing.T) {
 	ctx := context.Background()
-	sess := New("s1")
+	sess := session.New("s1")
 
 	sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("Hello")}, nil)
 
@@ -68,7 +69,7 @@ func TestSessionMessagesReturnsCopy(t *testing.T) {
 
 func TestSessionTotalUsage(t *testing.T) {
 	ctx := context.Background()
-	sess := New("s1")
+	sess := session.New("s1")
 
 	sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("a")}, &llm.Usage{InputTokens: 10, OutputTokens: 5})
 	sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("b")}, &llm.Usage{InputTokens: 20, OutputTokens: 15})
@@ -80,14 +81,14 @@ func TestSessionTotalUsage(t *testing.T) {
 }
 
 func TestSessionTitle(t *testing.T) {
-	sess := New("s1")
+	sess := session.New("s1")
 	assert.Equal(t, "", sess.Title())
 	sess.SetTitle("My Chat")
 	assert.Equal(t, "My Chat", sess.Title())
 }
 
 func TestSessionMetadata(t *testing.T) {
-	sess := New("s1")
+	sess := session.New("s1")
 
 	// Initially nil
 	assert.Nil(t, sess.Metadata())
@@ -110,7 +111,7 @@ func TestSessionMetadata(t *testing.T) {
 
 func TestSessionFork(t *testing.T) {
 	ctx := context.Background()
-	sess := New("original")
+	sess := session.New("original")
 	sess.SetTitle("Test Session")
 
 	sess.SaveTurn(ctx, []*llm.Message{
@@ -136,7 +137,7 @@ func TestSessionFork(t *testing.T) {
 
 func TestSessionCompact(t *testing.T) {
 	ctx := context.Background()
-	sess := New("s1")
+	sess := session.New("s1")
 
 	sess.SaveTurn(ctx, []*llm.Message{
 		llm.NewUserTextMessage("msg1"),
@@ -164,7 +165,7 @@ func TestSessionCompact(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionImplementsDiveSession(t *testing.T) {
-	var _ dive.Session = New("test")
+	var _ dive.Session = session.New("test")
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +174,7 @@ func TestSessionImplementsDiveSession(t *testing.T) {
 
 func TestMemoryStore(t *testing.T) {
 	t.Run("open creates new session", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		ctx := context.Background()
 
 		sess, err := store.Open(ctx, "s1")
@@ -183,7 +184,7 @@ func TestMemoryStore(t *testing.T) {
 	})
 
 	t.Run("open returns existing session", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		ctx := context.Background()
 
 		sess1, _ := store.Open(ctx, "s1")
@@ -196,7 +197,7 @@ func TestMemoryStore(t *testing.T) {
 	})
 
 	t.Run("put saves forked session", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		ctx := context.Background()
 
 		sess, _ := store.Open(ctx, "s1")
@@ -212,7 +213,7 @@ func TestMemoryStore(t *testing.T) {
 	})
 
 	t.Run("save turn persists automatically", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		ctx := context.Background()
 
 		sess, _ := store.Open(ctx, "s1")
@@ -226,7 +227,7 @@ func TestMemoryStore(t *testing.T) {
 	})
 
 	t.Run("delete", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		ctx := context.Background()
 		store.Open(ctx, "s1")
 
@@ -239,13 +240,13 @@ func TestMemoryStore(t *testing.T) {
 	})
 
 	t.Run("delete idempotent", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		err := store.Delete(context.Background(), "nope")
 		assert.NoError(t, err)
 	})
 
 	t.Run("list sessions", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		ctx := context.Background()
 
 		for _, id := range []string{"sA", "sB", "sC"} {
@@ -259,17 +260,17 @@ func TestMemoryStore(t *testing.T) {
 	})
 
 	t.Run("list sessions pagination", func(t *testing.T) {
-		store := NewMemoryStore()
+		store := session.NewMemoryStore()
 		ctx := context.Background()
 
 		for _, id := range []string{"sA", "sB", "sC", "sD", "sE"} {
 			store.Open(ctx, id)
 		}
 
-		result, _ := store.List(ctx, &ListOptions{Limit: 2})
+		result, _ := store.List(ctx, &session.ListOptions{Limit: 2})
 		assert.Equal(t, 2, len(result.Sessions))
 
-		result, _ = store.List(ctx, &ListOptions{Offset: 10})
+		result, _ = store.List(ctx, &session.ListOptions{Offset: 10})
 		assert.Equal(t, 0, len(result.Sessions))
 	})
 }
@@ -281,7 +282,7 @@ func TestMemoryStore(t *testing.T) {
 func TestFileStore(t *testing.T) {
 	t.Run("open creates new session", func(t *testing.T) {
 		dir := t.TempDir()
-		store, err := NewFileStore(dir)
+		store, err := session.NewFileStore(dir)
 		assert.NoError(t, err)
 
 		sess, err := store.Open(context.Background(), "s1")
@@ -295,7 +296,7 @@ func TestFileStore(t *testing.T) {
 
 	t.Run("open returns existing session", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		sess, _ := store.Open(ctx, "s1")
@@ -313,7 +314,7 @@ func TestFileStore(t *testing.T) {
 
 	t.Run("multiple save turns", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		sess, _ := store.Open(ctx, "s1")
@@ -333,7 +334,7 @@ func TestFileStore(t *testing.T) {
 
 	t.Run("put saves forked session", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		sess, _ := store.Open(ctx, "s1")
@@ -353,7 +354,7 @@ func TestFileStore(t *testing.T) {
 
 	t.Run("delete", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		store.Open(ctx, "s1")
@@ -366,14 +367,14 @@ func TestFileStore(t *testing.T) {
 
 	t.Run("delete idempotent", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		err := store.Delete(context.Background(), "nope")
 		assert.NoError(t, err)
 	})
 
 	t.Run("list sessions", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		for _, id := range []string{"sA", "sB", "sC"} {
@@ -387,23 +388,23 @@ func TestFileStore(t *testing.T) {
 
 	t.Run("list sessions pagination", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		for _, id := range []string{"sA", "sB", "sC", "sD", "sE"} {
 			store.Open(ctx, id)
 		}
 
-		result, _ := store.List(ctx, &ListOptions{Limit: 2})
+		result, _ := store.List(ctx, &session.ListOptions{Limit: 2})
 		assert.Equal(t, 2, len(result.Sessions))
 
-		result, _ = store.List(ctx, &ListOptions{Offset: 10})
+		result, _ = store.List(ctx, &session.ListOptions{Offset: 10})
 		assert.Equal(t, 0, len(result.Sessions))
 	})
 
 	t.Run("updated at derived from last event", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		sess, _ := store.Open(ctx, "s1")
@@ -417,7 +418,7 @@ func TestFileStore(t *testing.T) {
 
 	t.Run("compact persists to file", func(t *testing.T) {
 		dir := t.TempDir()
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		ctx := context.Background()
 
 		sess, _ := store.Open(ctx, "s1")
@@ -448,13 +449,13 @@ func TestFileStore(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestForkSession(t *testing.T) {
-	store := NewMemoryStore()
+	store := session.NewMemoryStore()
 	ctx := context.Background()
 
 	sess, _ := store.Open(ctx, "original")
 	sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("Hello")}, nil)
 
-	forked, err := ForkSession(ctx, store, "original", "forked")
+	forked, err := session.ForkSession(ctx, store, "original", "forked")
 	assert.NoError(t, err)
 	assert.Equal(t, "forked", forked.ID())
 
@@ -473,7 +474,7 @@ func TestForkSession(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWithSession(t *testing.T) {
-	sess := New("my-session")
+	sess := session.New("my-session")
 	var opts dive.CreateResponseOptions
 	dive.WithSession(sess)(&opts)
 	assert.Equal(t, sess, opts.Session)
@@ -506,19 +507,25 @@ func suspendedTurnMessages() []*llm.Message {
 	return []*llm.Message{llm.NewUserTextMessage("start"), assistant, toolResult}
 }
 
+func singlePendingCall() []session.PendingCall {
+	return []session.PendingCall{{ID: "toolu_a", Name: "approve", Input: []byte(`{}`)}}
+}
+
 func TestMemoryStoreSuspendRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	store := NewMemoryStore()
+	store := session.NewMemoryStore()
 
 	sess, err := store.Open(ctx, "s1")
 	assert.NoError(t, err)
 
 	msgs := suspendedTurnMessages()
-	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5}, []string{"toolu_a"})
+	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5}, singlePendingCall())
 	assert.NoError(t, err)
 
 	assert.True(t, sess.Suspended())
-	assert.Equal(t, sess.PendingToolCallIDs(), []string{"toolu_a"})
+	pending := sess.PendingCalls()
+	assert.Equal(t, len(pending), 1)
+	assert.Equal(t, pending[0].ID, "toolu_a")
 
 	got, _ := sess.Messages(ctx)
 	assert.Equal(t, len(got), len(msgs))
@@ -527,24 +534,26 @@ func TestMemoryStoreSuspendRoundTrip(t *testing.T) {
 func TestFileStoreSuspendRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	store, err := NewFileStore(dir)
+	store, err := session.NewFileStore(dir)
 	assert.NoError(t, err)
 
 	sess, err := store.Open(ctx, "s1")
 	assert.NoError(t, err)
 
 	msgs := suspendedTurnMessages()
-	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5, OutputTokens: 2}, []string{"toolu_a"})
+	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5, OutputTokens: 2}, singlePendingCall())
 	assert.NoError(t, err)
 
 	// Re-open from disk and verify.
-	store2, err := NewFileStore(dir)
+	store2, err := session.NewFileStore(dir)
 	assert.NoError(t, err)
 	sess2, err := store2.Open(ctx, "s1")
 	assert.NoError(t, err)
 
 	assert.True(t, sess2.Suspended())
-	assert.Equal(t, sess2.PendingToolCallIDs(), []string{"toolu_a"})
+	pending := sess2.PendingCalls()
+	assert.Equal(t, len(pending), 1)
+	assert.Equal(t, pending[0].ID, "toolu_a")
 	got, _ := sess2.Messages(ctx)
 	assert.Equal(t, len(got), len(msgs))
 }
@@ -552,7 +561,7 @@ func TestFileStoreSuspendRoundTrip(t *testing.T) {
 func TestFileStoreListReportsSuspended(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	store, _ := NewFileStore(dir)
+	store, _ := session.NewFileStore(dir)
 
 	// Normal session
 	s1, _ := store.Open(ctx, "normal")
@@ -560,7 +569,7 @@ func TestFileStoreListReportsSuspended(t *testing.T) {
 
 	// Suspended session
 	s2, _ := store.Open(ctx, "suspended")
-	_ = s2.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, []string{"toolu_a"})
+	_ = s2.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singlePendingCall())
 
 	res, err := store.List(ctx, nil)
 	assert.NoError(t, err)
@@ -577,15 +586,15 @@ func TestFileStoreListReportsSuspended(t *testing.T) {
 
 func TestSaveTurnClearsSuspension(t *testing.T) {
 	ctx := context.Background()
-	sess := New("s1")
-	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, []string{"toolu_a"})
+	sess := session.New("s1")
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singlePendingCall())
 	assert.NoError(t, err)
 	assert.True(t, sess.Suspended())
 
 	err = sess.SaveResumedTurn(ctx, append(suspendedTurnMessages(), llm.NewAssistantTextMessage("done")), nil)
 	assert.NoError(t, err)
 	assert.False(t, sess.Suspended())
-	assert.Equal(t, len(sess.PendingToolCallIDs()), 0)
+	assert.Equal(t, len(sess.PendingCalls()), 0)
 }
 
 func TestCrossProcessResume(t *testing.T) {
@@ -594,18 +603,20 @@ func TestCrossProcessResume(t *testing.T) {
 
 	// "Process A": create session, suspend.
 	{
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		sess, _ := store.Open(ctx, "cross")
-		err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, []string{"toolu_a"})
+		err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singlePendingCall())
 		assert.NoError(t, err)
 	}
 
 	// "Process B": fresh store and session, resume the suspended turn.
 	{
-		store, _ := NewFileStore(dir)
+		store, _ := session.NewFileStore(dir)
 		sess, _ := store.Open(ctx, "cross")
 		assert.True(t, sess.Suspended())
-		assert.Equal(t, sess.PendingToolCallIDs(), []string{"toolu_a"})
+		pending := sess.PendingCalls()
+		assert.Equal(t, len(pending), 1)
+		assert.Equal(t, pending[0].ID, "toolu_a")
 
 		// Simulate completion.
 		complete := suspendedTurnMessages()
@@ -616,7 +627,7 @@ func TestCrossProcessResume(t *testing.T) {
 	}
 
 	// Re-open once more and verify the final state.
-	store, _ := NewFileStore(dir)
+	store, _ := session.NewFileStore(dir)
 	sess, _ := store.Open(ctx, "cross")
 	assert.False(t, sess.Suspended())
 	msgs, _ := sess.Messages(ctx)

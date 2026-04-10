@@ -33,10 +33,10 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +49,54 @@ var eventCounter uint64
 
 // ErrNotFound is returned when a session does not exist.
 var ErrNotFound = errors.New("session not found")
+
+// ErrSuspendedSession is returned when an operation is not permitted on a
+// session that is currently suspended. For example, Compact refuses to run
+// on a suspended session because compaction would destroy the in-progress
+// tool_use/tool_result messages the resume path depends on.
+var ErrSuspendedSession = errors.New("session is suspended")
+
+// ErrNotSuspended is returned from SaveResumedTurn when the session is not
+// actually in a suspended state. Protects against accidental overwrites of
+// the last event.
+var ErrNotSuspended = errors.New("session is not suspended")
+
+// PendingCall is the internal, serializable shape of a suspended tool call.
+// Kept in the session package so sessionData/sessionHeader stay self-contained
+// (session does not import dive). Callers in the dive package convert to and
+// from the public dive.PendingToolCall type at the boundary.
+type PendingCall struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input,omitempty"`
+	Prompt   string          `json:"prompt,omitempty"`
+	Metadata map[string]any  `json:"metadata,omitempty"`
+}
+
+// clonePendingCalls returns a deep copy of pending calls so callers cannot
+// mutate the session's internal state through the returned slice.
+func clonePendingCalls(src []PendingCall) []PendingCall {
+	if src == nil {
+		return nil
+	}
+	out := make([]PendingCall, len(src))
+	for i, p := range src {
+		cp := PendingCall{
+			ID:     p.ID,
+			Name:   p.Name,
+			Prompt: p.Prompt,
+		}
+		if p.Input != nil {
+			cp.Input = append(json.RawMessage(nil), p.Input...)
+		}
+		if p.Metadata != nil {
+			cp.Metadata = make(map[string]any, len(p.Metadata))
+			maps.Copy(cp.Metadata, p.Metadata)
+		}
+		out[i] = cp
+	}
+	return out
+}
 
 // eventType identifies the kind of session event.
 type eventType string
@@ -108,12 +156,16 @@ type sessionData struct {
 	ForkedFrom string         `json:"forked_from,omitempty"`
 
 	// Suspended tracks the authoritative suspend flag. Cleared on a normal
-	// SaveTurn or on ClearSuspension.
+	// SaveTurn or on AbandonSuspension.
 	Suspended bool `json:"suspended,omitempty"`
 
-	// PendingToolCallIDs is the set of tool_call IDs awaiting external
-	// results. Valid only when Suspended is true.
-	PendingToolCallIDs []string `json:"pending_tool_call_ids,omitempty"`
+	// PendingCalls is the set of tool_call IDs awaiting external results,
+	// along with the prompt and metadata the tool attached to its
+	// SuspendResult. Valid only when Suspended is true. Persisting the full
+	// payload lets cross-process resume and partial-resume-again flows
+	// surface the original Prompt/Metadata to callers without having to
+	// reconstruct it from the assistant tool_use message.
+	PendingCalls []PendingCall `json:"pending_calls,omitempty"`
 }
 
 // Session implements dive.Session with event-based persistence.
@@ -174,7 +226,7 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 	// session in an inconsistent state).
 	wasSuspended := s.data.Suspended
 	s.data.Suspended = false
-	s.data.PendingToolCallIDs = nil
+	s.data.PendingCalls = nil
 	s.data.Events = append(s.data.Events, evt)
 	s.data.UpdatedAt = evt.Timestamp
 	if s.appender != nil {
@@ -208,22 +260,22 @@ func (s *Session) Suspended() bool {
 	return s.data.Suspended
 }
 
-// PendingToolCallIDs returns a copy of the tool_call IDs awaiting external
+// PendingCalls returns a deep copy of the tool calls awaiting external
 // results. Valid only when Suspended() is true.
-func (s *Session) PendingToolCallIDs() []string {
+func (s *Session) PendingCalls() []PendingCall {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return slices.Clone(s.data.PendingToolCallIDs)
+	return clonePendingCalls(s.data.PendingCalls)
 }
 
 // SaveSuspendedTurn persists a partial turn: messages ending in an assistant
 // tool_use message and an (optionally partial) tool_result message. Sets the
-// session's Suspended flag and records pendingIDs.
+// session's Suspended flag and records pending call info.
 //
 // If the session is already suspended and the last event is the corresponding
 // turn, this replaces it rather than appending, so repeated partial resumes
 // do not grow the event log without bound.
-func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, pendingIDs []string) error {
+func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, pending []PendingCall) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -251,7 +303,7 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 		s.data.Events = append(s.data.Events, evt)
 	}
 	s.data.Suspended = true
-	s.data.PendingToolCallIDs = slices.Clone(pendingIDs)
+	s.data.PendingCalls = clonePendingCalls(pending)
 	s.data.UpdatedAt = now
 
 	if s.appender != nil {
@@ -266,9 +318,16 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 // SaveResumedTurn replaces the last (suspended) event with a completed turn
 // and clears the suspended flag. Called by the agent when a resumed generate
 // run completes normally.
+//
+// Returns ErrNotSuspended if the session is not currently suspended. This
+// prevents accidental overwrite of the last event when a custom Session
+// implementation or caller plumbing routes a normal turn into this method.
 func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.data.Suspended {
+		return ErrNotSuspended
+	}
 
 	now := time.Now()
 	var evtID string
@@ -290,7 +349,7 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 		s.data.Events = append(s.data.Events, evt)
 	}
 	s.data.Suspended = false
-	s.data.PendingToolCallIDs = nil
+	s.data.PendingCalls = nil
 	s.data.UpdatedAt = now
 
 	if s.appender != nil {
@@ -299,17 +358,22 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 	return nil
 }
 
-// ClearSuspension marks the session as no longer suspended without writing
-// new messages. Used when a resume completes without calling generate (e.g.
-// partial resume that stays suspended, or a cancel-by-error flow).
-func (s *Session) ClearSuspension(ctx context.Context) error {
+// AbandonSuspension marks the session as no longer suspended without writing
+// new messages. Used when a caller gives up on a suspended turn without
+// supplying results, or as a rollback path when post-suspend hooks abort.
+//
+// Note: the session's last event still contains an unanswered tool_use, so
+// calling CreateResponse on an abandoned session will typically fail at the
+// LLM layer. Callers who want to recover should Compact or roll back the
+// last event first.
+func (s *Session) AbandonSuspension(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.data.Suspended {
 		return nil
 	}
 	s.data.Suspended = false
-	s.data.PendingToolCallIDs = nil
+	s.data.PendingCalls = nil
 	s.data.UpdatedAt = time.Now()
 	if s.appender != nil {
 		return s.appender.putSession(ctx, s.data)
@@ -376,6 +440,13 @@ func (s *Session) TotalUsage() *llm.Usage {
 // Fork creates a new in-memory session with a deep copy of all events.
 // The forked session records the original as its parent.
 // To persist the fork, save it to a store with store.Put.
+//
+// A forked session is never suspended, even if the original was: pending
+// out-of-band tool calls are owned by whoever launched the original suspend
+// and cannot be resumed against a divergent branch. The fork's last event
+// still carries any unanswered assistant tool_use blocks, so callers of a
+// forked-from-suspended session should Compact or roll back the last event
+// before attempting a new turn.
 func (s *Session) Fork(newID string) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -392,6 +463,7 @@ func (s *Session) Fork(newID string) *Session {
 			UpdatedAt:  now,
 			Events:     events,
 			ForkedFrom: s.data.ID,
+			// Suspended and PendingCalls intentionally not copied.
 		},
 	}
 	if s.data.Metadata != nil {
@@ -407,9 +479,17 @@ type CompactFunc func(ctx context.Context, messages []*llm.Message) ([]*llm.Mess
 // Compact replaces all events with a single compaction event containing
 // the summarized messages. If the session is backed by a store, the
 // compacted session is persisted.
+//
+// Returns ErrSuspendedSession if the session is currently suspended.
+// Compaction destroys the in-progress tool_use/tool_result messages that
+// the resume path depends on, so the caller must first resume to completion
+// or call AbandonSuspension.
 func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.data.Suspended {
+		return ErrSuspendedSession
+	}
 	var msgs []*llm.Message
 	for _, e := range s.data.Events {
 		msgs = append(msgs, e.Messages...)

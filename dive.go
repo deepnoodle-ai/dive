@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/session"
 )
 
 // Session provides persistent conversation state across multiple turns.
@@ -35,9 +36,10 @@ type SuspendableSession interface {
 	// tool results.
 	Suspended() bool
 
-	// PendingToolCallIDs returns the tool_call IDs awaiting external results.
-	// Only meaningful when Suspended() is true.
-	PendingToolCallIDs() []string
+	// PendingCalls returns the tool calls awaiting external results,
+	// including the Prompt and Metadata the tool attached to its
+	// SuspendResult. Only meaningful when Suspended() is true.
+	PendingCalls() []session.PendingCall
 
 	// LastEventMessageCount returns the number of messages in the most
 	// recent event, or 0 if the session has no events. The agent uses this
@@ -47,15 +49,19 @@ type SuspendableSession interface {
 
 	// SaveSuspendedTurn persists a partial turn whose final tool_result message
 	// is missing one or more tool_result blocks. Sets Suspended=true.
-	SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, pendingIDs []string) error
+	SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, pending []session.PendingCall) error
 
 	// SaveResumedTurn replaces the last (suspended) event with a complete turn
-	// and clears the suspended flag.
+	// and clears the suspended flag. Implementations must return an error
+	// (typically session.ErrNotSuspended) if the session is not currently
+	// suspended.
 	SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error
 
-	// ClearSuspension marks the session as no longer suspended and clears the
-	// pending set. Used when resume completes without running generate.
-	ClearSuspension(ctx context.Context) error
+	// AbandonSuspension marks the session as no longer suspended and clears
+	// the pending set. Used when resume completes without running generate,
+	// or as a rollback path when OnSuspend hooks abort after the suspend was
+	// already persisted.
+	AbandonSuspension(ctx context.Context) error
 }
 
 // ErrNoSuspendedState is returned from CreateResponse when WithToolResults is

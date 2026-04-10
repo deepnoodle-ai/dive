@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/session"
 )
 
 const (
@@ -416,7 +417,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			snap := &suspendedSnapshot{
 				PendingToolCalls:   rs.RemainingPendingCalls,
 				CompletedToolCalls: rs.CompletedToolCalls(),
-				PendingToolCallIDs: rs.RemainingPending,
 			}
 			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, nil, eventCallback, sess, rs)
 		}
@@ -431,7 +431,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				resumeItems = append(resumeItems, item)
 				return eventCallback(ctx, item)
 			}
-			batch, err := a.executeToolCallsSequential(ctx, hctx, rs.NotStartedToolCalls, toolsByName, resumeCallback)
+			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, toolsByName, resumeCallback)
 			if err != nil {
 				return nil, err
 			}
@@ -586,26 +586,37 @@ func (a *Agent) finishSuspended(
 		})
 	}
 
-	// Persist the suspended turn to the session.
-	if sess != nil {
-		suspendable, ok := sess.(SuspendableSession)
-		if !ok {
-			return nil, ErrSessionNotSuspendable
-		}
-		var turnMsgs []*llm.Message
-		if rs != nil {
-			turnMsgs = append(turnMsgs, rs.TurnMessages...)
-			turnMsgs = append(turnMsgs, response.OutputMessages...)
-		} else {
-			turnMsgs = append(turnMsgs, inputMessages...)
-			turnMsgs = append(turnMsgs, response.OutputMessages...)
-		}
-		if err := suspendable.SaveSuspendedTurn(ctx, turnMsgs, response.Usage, snap.PendingToolCallIDs); err != nil {
-			logger.Error("session save error", "error", err)
-		}
+	// Persist the suspended turn to the session. Suspension is only
+	// supported with a SuspendableSession — without one there is no way for
+	// the caller to resume.
+	if sess == nil {
+		return nil, ErrSessionNotSuspendable
+	}
+	suspendable, ok := sess.(SuspendableSession)
+	if !ok {
+		return nil, ErrSessionNotSuspendable
+	}
+	var turnMsgs []*llm.Message
+	if rs != nil {
+		turnMsgs = append(turnMsgs, rs.TurnMessages...)
+		turnMsgs = append(turnMsgs, response.OutputMessages...)
+	} else {
+		turnMsgs = append(turnMsgs, inputMessages...)
+		turnMsgs = append(turnMsgs, response.OutputMessages...)
+	}
+	pendingForSession := toSessionPendingCalls(snap.PendingToolCalls)
+	if err := suspendable.SaveSuspendedTurn(ctx, turnMsgs, response.Usage, pendingForSession); err != nil {
+		// If we can't persist the suspend, we must not return a suspended
+		// Response with pending IDs that don't exist in the session. Fail
+		// the call loudly.
+		logger.Error("session save error", "error", err)
+		return nil, fmt.Errorf("save suspended turn: %w", err)
 	}
 
-	// Run OnSuspend hooks before PostGeneration.
+	// Run OnSuspend hooks before PostGeneration. On a HookAbortError we
+	// compensate by clearing the just-persisted suspend state — the caller
+	// gets an error instead of a response, so leaving the session in the
+	// suspended state would strand it.
 	hctx.Response = response
 	hctx.OutputMessages = response.OutputMessages
 	hctx.Usage = response.Usage
@@ -615,6 +626,9 @@ func (a *Agent) finishSuspended(
 			if errors.As(err, &abortErr) {
 				abortErr.HookType = "OnSuspend"
 				logger.Error("on-suspend hook aborted", "error", abortErr)
+				if abandonErr := suspendable.AbandonSuspension(ctx); abandonErr != nil {
+					logger.Error("abandon suspension on hook abort failed", "error", abandonErr)
+				}
 				return nil, abortErr
 			}
 			logger.Error("on-suspend hook error", "error", err)
@@ -719,16 +733,25 @@ func (rs *resumeState) AppendToolResultTextContent(tc *llm.TextContent) {
 // to build a resumeState. It validates invariants per FR-19 and returns
 // descriptive errors.
 func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSession, toolResults map[string]*ToolResult) (*resumeState, error) {
-	pendingIDs := sess.PendingToolCallIDs()
+	pendingCalls := sess.PendingCalls()
+	pendingByID := make(map[string]session.PendingCall, len(pendingCalls))
+	pendingIDs := make([]string, len(pendingCalls))
+	for i, pc := range pendingCalls {
+		pendingByID[pc.ID] = pc
+		pendingIDs[i] = pc.ID
+	}
+	// Validate caller-supplied IDs. Any ID not in the pending set — including
+	// IDs that already have a completed tool_result in the persisted turn —
+	// is rejected. The caller must reconcile their view of outstanding work
+	// against the session's truth.
+	for id := range toolResults {
+		if _, ok := pendingByID[id]; !ok {
+			return nil, fmt.Errorf("%w: %s", ErrUnknownPendingToolCall, id)
+		}
+	}
 	pendingSet := make(map[string]bool, len(pendingIDs))
 	for _, id := range pendingIDs {
 		pendingSet[id] = true
-	}
-	// Validate caller-supplied IDs.
-	for id := range toolResults {
-		if !pendingSet[id] {
-			return nil, fmt.Errorf("%w: %s", ErrUnknownPendingToolCall, id)
-		}
 	}
 
 	turnLen := sess.LastEventMessageCount()
@@ -827,10 +850,15 @@ func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSessio
 		})
 	}
 
-	// Build the merged tool_result message (or keep the slot empty if no content).
+	// Build the merged tool_result message. When there are not-started tool
+	// calls we will append their results during resume via AppendToolResults;
+	// to keep the `messages` slice passed to generate in sync with those
+	// mutations (which must mutate an existing shared pointer rather than
+	// append a new one), ensure a tool_result message exists up front.
 	var mergedMessage *llm.Message
 	newToolResultIdx := toolResultIdx
-	if len(mergedContent) > 0 {
+	needPlaceholder := toolResultIdx < 0 && len(notStarted) > 0
+	if len(mergedContent) > 0 || needPlaceholder {
 		mergedMessage = llm.NewToolResultMessage(mergedContent...)
 		for _, aux := range mergedAux {
 			mergedMessage.Content = append(mergedMessage.Content, aux)
@@ -865,7 +893,9 @@ func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSessio
 		})
 	}
 
-	// Compute remaining pending (pending minus caller-supplied).
+	// Compute remaining pending (pending minus caller-supplied). Pull
+	// Prompt/Metadata from the persisted PendingCall so partial-resume-again
+	// and cross-process flows preserve the original SuspendResult payload.
 	var remaining []string
 	var remainingCalls []*PendingToolCall
 	for _, id := range pendingIDs {
@@ -873,14 +903,26 @@ func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSessio
 			continue
 		}
 		remaining = append(remaining, id)
-		toolUse := findToolUseByID(assistant, id)
-		if toolUse != nil {
-			remainingCalls = append(remainingCalls, &PendingToolCall{
-				ID:    id,
-				Name:  toolUse.Name,
-				Input: toolUse.Input,
-			})
+		pc := pendingByID[id]
+		input := pc.Input
+		name := pc.Name
+		if toolUse := findToolUseByID(assistant, id); toolUse != nil {
+			// Prefer the live tool_use input if it's present — it is
+			// authoritative for the call shape; Name should match either way.
+			if len(toolUse.Input) > 0 {
+				input = toolUse.Input
+			}
+			if name == "" {
+				name = toolUse.Name
+			}
 		}
+		remainingCalls = append(remainingCalls, &PendingToolCall{
+			ID:       id,
+			Name:     name,
+			Input:    input,
+			Prompt:   pc.Prompt,
+			Metadata: pc.Metadata,
+		})
 	}
 
 	return &resumeState{
@@ -898,12 +940,19 @@ func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSessio
 
 // fireResumePostHooks fires PostToolUse or PostToolUseFailure for each
 // caller-supplied result on resume, mirroring the contract used for tools
-// that run in-process.
+// that run in-process. Hooks fire in the order the tool_use blocks appeared
+// in the suspended assistant message so ordering is deterministic.
 func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *resumeState) error {
 	if len(rs.CallerSupplied) == 0 {
 		return nil
 	}
-	for _, result := range rs.CallerSupplied {
+	// Walk assistant tool_use blocks in original order so PostToolUse hooks
+	// fire deterministically instead of in random map-iteration order.
+	for _, toolUseID := range collectToolUseIDs(rs.AssistantToolUse) {
+		result, ok := rs.CallerSupplied[toolUseID]
+		if !ok {
+			continue
+		}
 		failed := result.Result != nil && result.Result.IsError
 		postHctx := &HookContext{
 			Agent:        a,
@@ -1793,7 +1842,6 @@ type generateResult struct {
 type suspendedSnapshot struct {
 	PendingToolCalls   []*PendingToolCall
 	CompletedToolCalls []*CompletedToolCall
-	PendingToolCallIDs []string
 }
 
 // toolCallOutcome is the per-tool-call result of an executeToolCalls batch.
@@ -1834,7 +1882,6 @@ func buildSuspendedSnapshot(toolCalls []*llm.ToolUseContent, batch *toolBatchRes
 		switch {
 		case o.Pending != nil:
 			snap.PendingToolCalls = append(snap.PendingToolCalls, o.Pending)
-			snap.PendingToolCallIDs = append(snap.PendingToolCallIDs, o.Pending.ID)
 		case o.Result != nil:
 			completed := &CompletedToolCall{
 				ID:     o.Result.ID,
@@ -1849,6 +1896,26 @@ func buildSuspendedSnapshot(toolCalls []*llm.ToolUseContent, batch *toolBatchRes
 		}
 	}
 	return snap
+}
+
+// toSessionPendingCalls converts the agent's PendingToolCall values into
+// the serializable session.PendingCall form, preserving Prompt and Metadata
+// so they survive cross-process and partial-resume-again flows.
+func toSessionPendingCalls(calls []*PendingToolCall) []session.PendingCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]session.PendingCall, len(calls))
+	for i, c := range calls {
+		out[i] = session.PendingCall{
+			ID:       c.ID,
+			Name:     c.Name,
+			Input:    c.Input,
+			Prompt:   c.Prompt,
+			Metadata: c.Metadata,
+		}
+	}
+	return out
 }
 
 // toPendingToolCall builds a PendingToolCall from a tool_use block and a

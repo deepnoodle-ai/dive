@@ -79,14 +79,14 @@ type jsonlLine struct {
 
 // sessionHeader is the first line of a session JSONL file.
 type sessionHeader struct {
-	ID                 string         `json:"id"`
-	Title              string         `json:"title,omitempty"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          time.Time      `json:"updated_at"`
-	Metadata           map[string]any `json:"metadata,omitempty"`
-	ForkedFrom         string         `json:"forked_from,omitempty"`
-	Suspended          bool           `json:"suspended,omitempty"`
-	PendingToolCallIDs []string       `json:"pending_tool_call_ids,omitempty"`
+	ID           string         `json:"id"`
+	Title        string         `json:"title,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	ForkedFrom   string         `json:"forked_from,omitempty"`
+	Suspended    bool           `json:"suspended,omitempty"`
+	PendingCalls []PendingCall  `json:"pending_calls,omitempty"`
 }
 
 func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
@@ -288,14 +288,14 @@ func (s *FileStore) readSession(id string) (*sessionData, error) {
 	}
 
 	data := &sessionData{
-		ID:                 header.ID,
-		Title:              header.Title,
-		CreatedAt:          header.CreatedAt,
-		UpdatedAt:          header.UpdatedAt,
-		Events:             events,
-		ForkedFrom:         header.ForkedFrom,
-		Suspended:          header.Suspended,
-		PendingToolCallIDs: header.PendingToolCallIDs,
+		ID:           header.ID,
+		Title:        header.Title,
+		CreatedAt:    header.CreatedAt,
+		UpdatedAt:    header.UpdatedAt,
+		Events:       events,
+		ForkedFrom:   header.ForkedFrom,
+		Suspended:    header.Suspended,
+		PendingCalls: header.PendingCalls,
 	}
 	if header.Metadata != nil {
 		data.Metadata = make(map[string]any, len(header.Metadata))
@@ -329,14 +329,14 @@ func (s *FileStore) writeSession(data *sessionData) error {
 	w := bufio.NewWriter(f)
 
 	hdr := sessionHeader{
-		ID:                 data.ID,
-		Title:              data.Title,
-		CreatedAt:          data.CreatedAt,
-		UpdatedAt:          data.UpdatedAt,
-		Metadata:           data.Metadata,
-		ForkedFrom:         data.ForkedFrom,
-		Suspended:          data.Suspended,
-		PendingToolCallIDs: data.PendingToolCallIDs,
+		ID:           data.ID,
+		Title:        data.Title,
+		CreatedAt:    data.CreatedAt,
+		UpdatedAt:    data.UpdatedAt,
+		Metadata:     data.Metadata,
+		ForkedFrom:   data.ForkedFrom,
+		Suspended:    data.Suspended,
+		PendingCalls: data.PendingCalls,
 	}
 	hdrData, err := json.Marshal(hdr)
 	if err != nil {
