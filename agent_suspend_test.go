@@ -1752,7 +1752,8 @@ func TestSaveSuspendedTurnErrorPropagates(t *testing.T) {
 }
 
 // Invariant 12: an OnSuspend hook that aborts with HookAbortError leaves the
-// session not suspended — the agent compensates by calling AbandonSuspension.
+// session not suspended — OnSuspend runs before SaveSuspendedTurn, so an
+// abort returns before any suspend state is persisted.
 func TestOnSuspendAbortRollsBack(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{

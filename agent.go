@@ -331,7 +331,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	if hasToolResults && !sessSuspended {
 		return nil, ErrNoSuspendedState
 	}
-	if sessSuspended && !hasToolResults && len(inputMessages) > 0 {
+	if sessSuspended && len(inputMessages) > 0 {
 		return nil, ErrSuspendedSessionInput
 	}
 
@@ -414,11 +414,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		}
 		if len(rs.RemainingPending) > 0 {
 			// Partial resume: update session and return a new suspended response.
+			// This is not a fresh transition — the session was already suspended —
+			// so we skip OnSuspend notifications and the terminal stream item.
 			snap := &suspendedSnapshot{
 				PendingToolCalls:   rs.RemainingPendingCalls,
 				CompletedToolCalls: rs.CompletedToolCalls(),
 			}
-			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, nil, eventCallback, sess, rs)
+			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, nil, eventCallback, sess, rs, true)
 		}
 		// Execute not-started tool calls, if any.
 		if len(rs.NotStartedToolCalls) > 0 {
@@ -448,7 +450,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				snap := buildSuspendedSnapshot(rs.NotStartedToolCalls, batch)
 				// Prepend previously-completed calls from the original suspend.
 				snap.CompletedToolCalls = append(rs.CompletedToolCalls(), snap.CompletedToolCalls...)
-				return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs)
+				return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs, false)
 			}
 		}
 	}
@@ -474,7 +476,7 @@ generateLoop:
 
 	// Handle suspension from generate.
 	if genResult.Suspended != nil {
-		return a.finishSuspended(ctx, logger, hctx, response, inputMessages, genResult.Suspended, nil, eventCallback, sess, rs)
+		return a.finishSuspended(ctx, logger, hctx, response, inputMessages, genResult.Suspended, nil, eventCallback, sess, rs, false)
 	}
 
 	// Run Stop hooks before PostGeneration
@@ -551,8 +553,14 @@ generateLoop:
 	return response, nil
 }
 
-// finishSuspended populates the suspended response, saves the session, runs
-// OnSuspend and PostGeneration hooks, and emits the suspended stream item.
+// finishSuspended populates the suspended response, runs OnSuspend and
+// PostGeneration hooks, persists the suspended turn, and emits the terminal
+// suspended stream item. Hooks run before persistence so a hook abort leaves
+// the session untouched — no compensation needed.
+//
+// If skipSuspendNotifications is true, OnSuspend hooks and the terminal
+// stream item are skipped. This is used for pure partial resumes, which
+// continue an existing suspension rather than announcing a new one.
 func (a *Agent) finishSuspended(
 	ctx context.Context,
 	logger llm.Logger,
@@ -564,6 +572,7 @@ func (a *Agent) finishSuspended(
 	callback EventCallback,
 	sess Session,
 	rs *resumeState,
+	skipSuspendNotifications bool,
 ) (*Response, error) {
 	if response.FinishedAt == nil {
 		response.FinishedAt = Ptr(time.Now())
@@ -575,20 +584,8 @@ func (a *Agent) finishSuspended(
 		response.Items = append(extraItems, response.Items...)
 	}
 
-	// Emit a terminal suspended stream item.
-	if callback != nil {
-		_ = callback(ctx, &ResponseItem{
-			Type: ResponseItemTypeSuspended,
-			Suspended: &SuspendedItem{
-				PendingToolCalls:   snap.PendingToolCalls,
-				CompletedToolCalls: snap.CompletedToolCalls,
-			},
-		})
-	}
-
-	// Persist the suspended turn to the session. Suspension is only
-	// supported with a SuspendableSession — without one there is no way for
-	// the caller to resume.
+	// Suspension is only supported with a SuspendableSession — without one
+	// there is no way for the caller to resume.
 	if sess == nil {
 		return nil, ErrSessionNotSuspendable
 	}
@@ -596,6 +593,42 @@ func (a *Agent) finishSuspended(
 	if !ok {
 		return nil, ErrSessionNotSuspendable
 	}
+
+	hctx.Response = response
+	hctx.OutputMessages = response.OutputMessages
+	hctx.Usage = response.Usage
+
+	// Run OnSuspend hooks before PostGeneration and before persistence.
+	// Aborting here leaves the session in its previous state.
+	if !skipSuspendNotifications {
+		for _, hook := range a.hooks.OnSuspend {
+			if err := hook(ctx, hctx); err != nil {
+				var abortErr *HookAbortError
+				if errors.As(err, &abortErr) {
+					abortErr.HookType = "OnSuspend"
+					logger.Error("on-suspend hook aborted", "error", abortErr)
+					return nil, abortErr
+				}
+				logger.Error("on-suspend hook error", "error", err)
+			}
+		}
+	}
+
+	// Run PostGeneration hooks (they see Status=Suspended). Still before
+	// persistence so an abort cannot strand a saved suspended turn.
+	for _, hook := range a.hooks.PostGeneration {
+		if err := hook(ctx, hctx); err != nil {
+			var abortErr *HookAbortError
+			if errors.As(err, &abortErr) {
+				abortErr.HookType = "PostGeneration"
+				logger.Error("post-generation hook aborted", "error", abortErr)
+				return nil, abortErr
+			}
+			logger.Error("post-generation hook error", "error", err)
+		}
+	}
+
+	// Persist the suspended turn only after hooks succeed.
 	var turnMsgs []*llm.Message
 	if rs != nil {
 		turnMsgs = append(turnMsgs, rs.TurnMessages...)
@@ -613,38 +646,18 @@ func (a *Agent) finishSuspended(
 		return nil, fmt.Errorf("save suspended turn: %w", err)
 	}
 
-	// Run OnSuspend hooks before PostGeneration. On a HookAbortError we
-	// compensate by clearing the just-persisted suspend state — the caller
-	// gets an error instead of a response, so leaving the session in the
-	// suspended state would strand it.
-	hctx.Response = response
-	hctx.OutputMessages = response.OutputMessages
-	hctx.Usage = response.Usage
-	for _, hook := range a.hooks.OnSuspend {
-		if err := hook(ctx, hctx); err != nil {
-			var abortErr *HookAbortError
-			if errors.As(err, &abortErr) {
-				abortErr.HookType = "OnSuspend"
-				logger.Error("on-suspend hook aborted", "error", abortErr)
-				if abandonErr := suspendable.AbandonSuspension(ctx); abandonErr != nil {
-					logger.Error("abandon suspension on hook abort failed", "error", abandonErr)
-				}
-				return nil, abortErr
-			}
-			logger.Error("on-suspend hook error", "error", err)
-		}
-	}
-
-	// Run PostGeneration hooks (they see Status=Suspended).
-	for _, hook := range a.hooks.PostGeneration {
-		if err := hook(ctx, hctx); err != nil {
-			var abortErr *HookAbortError
-			if errors.As(err, &abortErr) {
-				abortErr.HookType = "PostGeneration"
-				logger.Error("post-generation hook aborted", "error", abortErr)
-				return nil, abortErr
-			}
-			logger.Error("post-generation hook error", "error", err)
+	// Emit the terminal suspended stream item only after the session is
+	// persisted and hooks have succeeded, so a stream consumer never sees a
+	// suspended terminal for a call that ultimately returned an error.
+	if !skipSuspendNotifications && callback != nil {
+		if err := callback(ctx, &ResponseItem{
+			Type: ResponseItemTypeSuspended,
+			Suspended: &SuspendedItem{
+				PendingToolCalls:   snap.PendingToolCalls,
+				CompletedToolCalls: snap.CompletedToolCalls,
+			},
+		}); err != nil {
+			return nil, err
 		}
 	}
 
