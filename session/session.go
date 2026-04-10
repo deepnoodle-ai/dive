@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -105,6 +106,14 @@ type sessionData struct {
 	Events     []*event       `json:"events"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 	ForkedFrom string         `json:"forked_from,omitempty"`
+
+	// Suspended tracks the authoritative suspend flag. Cleared on a normal
+	// SaveTurn or on ClearSuspension.
+	Suspended bool `json:"suspended,omitempty"`
+
+	// PendingToolCallIDs is the set of tool_call IDs awaiting external
+	// results. Valid only when Suspended is true.
+	PendingToolCallIDs []string `json:"pending_tool_call_ids,omitempty"`
 }
 
 // Session implements dive.Session with event-based persistence.
@@ -160,10 +169,150 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Clear any stale suspend flag (defensive — callers should route resume
+	// completions through SaveResumedTurn, but SaveTurn must never leave the
+	// session in an inconsistent state).
+	wasSuspended := s.data.Suspended
+	s.data.Suspended = false
+	s.data.PendingToolCallIDs = nil
 	s.data.Events = append(s.data.Events, evt)
 	s.data.UpdatedAt = evt.Timestamp
 	if s.appender != nil {
+		if wasSuspended {
+			// When transitioning out of suspend via a raw SaveTurn, rewrite
+			// the whole session so the header's suspend flag clears.
+			return s.appender.putSession(ctx, s.data)
+		}
 		return s.appender.appendEvent(ctx, s.data.ID, evt)
+	}
+	return nil
+}
+
+// LastEventMessageCount returns the number of messages in the most recent
+// event, or 0 if the session has no events. The agent uses this during
+// resume to compute the boundary between the suspended turn and the rest
+// of the conversation history.
+func (s *Session) LastEventMessageCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.data.Events) == 0 {
+		return 0
+	}
+	return len(s.data.Events[len(s.data.Events)-1].Messages)
+}
+
+// Suspended reports whether the session is awaiting external tool results.
+func (s *Session) Suspended() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.data.Suspended
+}
+
+// PendingToolCallIDs returns a copy of the tool_call IDs awaiting external
+// results. Valid only when Suspended() is true.
+func (s *Session) PendingToolCallIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.Clone(s.data.PendingToolCallIDs)
+}
+
+// SaveSuspendedTurn persists a partial turn: messages ending in an assistant
+// tool_use message and an (optionally partial) tool_result message. Sets the
+// session's Suspended flag and records pendingIDs.
+//
+// If the session is already suspended and the last event is the corresponding
+// turn, this replaces it rather than appending, so repeated partial resumes
+// do not grow the event log without bound.
+func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, pendingIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	var evtID string
+	replaceLast := s.data.Suspended && len(s.data.Events) > 0 && s.data.Events[len(s.data.Events)-1].Type == eventTypeTurn
+	if replaceLast {
+		evtID = s.data.Events[len(s.data.Events)-1].ID
+	} else {
+		evtID = newEventID()
+	}
+	evt := &event{
+		ID:        evtID,
+		Type:      eventTypeTurn,
+		Timestamp: now,
+		Messages:  messages,
+		Usage:     usage,
+		Metadata: map[string]any{
+			"suspended": true,
+		},
+	}
+	if replaceLast {
+		s.data.Events[len(s.data.Events)-1] = evt
+	} else {
+		s.data.Events = append(s.data.Events, evt)
+	}
+	s.data.Suspended = true
+	s.data.PendingToolCallIDs = slices.Clone(pendingIDs)
+	s.data.UpdatedAt = now
+
+	if s.appender != nil {
+		// Suspend transitions always take the full-rewrite path to keep the
+		// header's suspend flag in sync and to support the replace-last
+		// optimization.
+		return s.appender.putSession(ctx, s.data)
+	}
+	return nil
+}
+
+// SaveResumedTurn replaces the last (suspended) event with a completed turn
+// and clears the suspended flag. Called by the agent when a resumed generate
+// run completes normally.
+func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	var evtID string
+	if len(s.data.Events) > 0 {
+		evtID = s.data.Events[len(s.data.Events)-1].ID
+	} else {
+		evtID = newEventID()
+	}
+	evt := &event{
+		ID:        evtID,
+		Type:      eventTypeTurn,
+		Timestamp: now,
+		Messages:  messages,
+		Usage:     usage,
+	}
+	if len(s.data.Events) > 0 {
+		s.data.Events[len(s.data.Events)-1] = evt
+	} else {
+		s.data.Events = append(s.data.Events, evt)
+	}
+	s.data.Suspended = false
+	s.data.PendingToolCallIDs = nil
+	s.data.UpdatedAt = now
+
+	if s.appender != nil {
+		return s.appender.putSession(ctx, s.data)
+	}
+	return nil
+}
+
+// ClearSuspension marks the session as no longer suspended without writing
+// new messages. Used when a resume completes without calling generate (e.g.
+// partial resume that stays suspended, or a cancel-by-error flow).
+func (s *Session) ClearSuspension(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.data.Suspended {
+		return nil
+	}
+	s.data.Suspended = false
+	s.data.PendingToolCallIDs = nil
+	s.data.UpdatedAt = time.Now()
+	if s.appender != nil {
+		return s.appender.putSession(ctx, s.data)
 	}
 	return nil
 }
@@ -323,6 +472,9 @@ type SessionInfo struct {
 	UpdatedAt  time.Time      `json:"updated_at"`
 	EventCount int            `json:"event_count"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
+
+	// Suspended indicates the session is awaiting external tool results.
+	Suspended bool `json:"suspended,omitempty"`
 }
 
 // ForkSession loads a session, forks it, and saves the fork to the store.

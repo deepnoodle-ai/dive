@@ -104,6 +104,39 @@ type ToolResult struct {
 	Display string `json:"display,omitempty"`
 	// IsError indicates whether the tool call resulted in an error.
 	IsError bool `json:"isError,omitempty"`
+	// Suspend, when non-nil, tells the agent to suspend its turn rather than
+	// send this tool result to the LLM. Content, Display, and IsError are
+	// ignored when Suspend is set. Use NewSuspendResult to construct.
+	Suspend *SuspendResult `json:"suspend,omitempty"`
+}
+
+// SuspendResult is the signal a tool returns to pause the agent mid-turn and
+// hand control back to the caller. It is NOT an error — it is a first-class
+// result type. The agent observes it, persists the partial turn, and returns
+// a suspended Response. On resume, the caller supplies a real ToolResult for
+// the suspended call via WithToolResults.
+type SuspendResult struct {
+	// Prompt is optional human-readable text describing what the agent is
+	// waiting for. Surfaced to the caller via PendingToolCall.Prompt.
+	Prompt string `json:"prompt,omitempty"`
+
+	// Metadata is optional structured data the tool wants to attach. It is
+	// opaque to Dive and round-trips through the session unchanged.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// NewSuspendResult returns a *ToolResult whose Suspend field is set. Use it
+// from a tool's Call method:
+//
+//	return dive.NewSuspendResult("Waiting for approval from @alice"), nil
+func NewSuspendResult(prompt string) *ToolResult {
+	return &ToolResult{Suspend: &SuspendResult{Prompt: prompt}}
+}
+
+// NewSuspendResultWithMetadata returns a *ToolResult whose Suspend field is
+// set with both a prompt and structured metadata.
+func NewSuspendResultWithMetadata(prompt string, metadata map[string]any) *ToolResult {
+	return &ToolResult{Suspend: &SuspendResult{Prompt: prompt, Metadata: metadata}}
 }
 
 // WithDisplay sets the Display field and returns the receiver for chaining.

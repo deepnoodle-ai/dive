@@ -1,6 +1,7 @@
 package dive
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -33,7 +34,54 @@ const (
 	// ResponseItemTypeToolStream indicates streaming output from a tool during execution.
 	// The ToolStream field contains the tool call ID and a chunk of text.
 	ResponseItemTypeToolStream ResponseItemType = "tool_stream"
+
+	// ResponseItemTypeSuspended is a terminal item emitted when the agent
+	// transitions into a suspended state. The Suspended field carries the
+	// same pending/completed lists as Response. Stream consumers should
+	// treat this as end-of-stream and then observe Response.Status.
+	ResponseItemTypeSuspended ResponseItemType = "suspended"
 )
+
+// ResponseStatus indicates the terminal state of a CreateResponse call.
+type ResponseStatus string
+
+const (
+	// ResponseStatusCompleted is the default: the agent finished normally.
+	// An empty Status is treated as Completed for backward compatibility.
+	ResponseStatusCompleted ResponseStatus = "completed"
+
+	// ResponseStatusSuspended means one or more tool calls in the final
+	// iteration returned SuspendResult. The agent has persisted the partial
+	// turn to its session and expects a future CreateResponse call with
+	// WithToolResults to supply the missing tool outputs.
+	ResponseStatusSuspended ResponseStatus = "suspended"
+)
+
+// PendingToolCall describes a tool call awaiting an external result.
+type PendingToolCall struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
+	Prompt   string          `json:"prompt,omitempty"`
+	Metadata map[string]any  `json:"metadata,omitempty"`
+}
+
+// CompletedToolCall describes a tool call that ran to completion in the same
+// iteration where a sibling suspended. Informational — the result is already
+// persisted in the session.
+type CompletedToolCall struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Input  json.RawMessage `json:"input"`
+	Result *ToolResult     `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+// SuspendedItem is the payload of a ResponseItemTypeSuspended stream event.
+type SuspendedItem struct {
+	PendingToolCalls   []*PendingToolCall   `json:"pending_tool_calls,omitempty"`
+	CompletedToolCalls []*CompletedToolCall `json:"completed_tool_calls,omitempty"`
+}
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.
 // Multiple items may be generated in response to a single prompt.
@@ -55,6 +103,9 @@ type ResponseItem struct {
 
 	// ToolStream is set if the response item is streaming tool output
 	ToolStream *ToolStreamEvent `json:"tool_stream,omitempty"`
+
+	// Suspended is set on a ResponseItemTypeSuspended item.
+	Suspended *SuspendedItem `json:"suspended,omitempty"`
 
 	// Extension holds optional data from experimental packages.
 	// The concrete type depends on the ResponseItemType.
@@ -94,6 +145,21 @@ type Response struct {
 
 	// FinishedAt is the timestamp when this response was completed
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+
+	// Status is ResponseStatusCompleted for normal returns, or
+	// ResponseStatusSuspended when at least one tool returned SuspendResult.
+	// An empty Status means Completed (back-compat).
+	Status ResponseStatus `json:"status,omitempty"`
+
+	// PendingToolCalls is populated when Status == ResponseStatusSuspended.
+	// Each entry is a tool call awaiting an external result, which the caller
+	// must supply on a subsequent CreateResponse via WithToolResults.
+	PendingToolCalls []*PendingToolCall `json:"pending_tool_calls,omitempty"`
+
+	// CompletedToolCalls lists tool calls that ran alongside the suspending
+	// sibling(s) in the suspended iteration. Only populated when
+	// Status == ResponseStatusSuspended. For the terminal iteration only.
+	CompletedToolCalls []*CompletedToolCall `json:"completed_tool_calls,omitempty"`
 }
 
 // OutputText returns the text content from the last message in the response.

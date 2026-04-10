@@ -68,6 +68,7 @@ func (s *MemoryStore) List(ctx context.Context, opts *ListOptions) (*ListResult,
 			UpdatedAt:  sess.data.UpdatedAt,
 			EventCount: len(sess.data.Events),
 			Metadata:   sess.data.Metadata,
+			Suspended:  sess.data.Suspended,
 		}
 		sess.mu.RUnlock()
 		infos = append(infos, info)

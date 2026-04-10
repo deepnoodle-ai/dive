@@ -490,3 +490,135 @@ func TestWithValue(t *testing.T) {
 	assert.Equal(t, "val1", opts.Values["key1"])
 	assert.Equal(t, "val2", opts.Values["key2"])
 }
+
+// ---------------------------------------------------------------------------
+// Suspend / Resume persistence
+// ---------------------------------------------------------------------------
+
+func suspendedTurnMessages() []*llm.Message {
+	assistant := &llm.Message{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.ToolUseContent{ID: "toolu_a", Name: "approve", Input: []byte(`{}`)},
+		},
+	}
+	toolResult := llm.NewToolResultMessage()
+	return []*llm.Message{llm.NewUserTextMessage("start"), assistant, toolResult}
+}
+
+func TestMemoryStoreSuspendRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+
+	sess, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+
+	msgs := suspendedTurnMessages()
+	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5}, []string{"toolu_a"})
+	assert.NoError(t, err)
+
+	assert.True(t, sess.Suspended())
+	assert.Equal(t, sess.PendingToolCallIDs(), []string{"toolu_a"})
+
+	got, _ := sess.Messages(ctx)
+	assert.Equal(t, len(got), len(msgs))
+}
+
+func TestFileStoreSuspendRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := NewFileStore(dir)
+	assert.NoError(t, err)
+
+	sess, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+
+	msgs := suspendedTurnMessages()
+	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5, OutputTokens: 2}, []string{"toolu_a"})
+	assert.NoError(t, err)
+
+	// Re-open from disk and verify.
+	store2, err := NewFileStore(dir)
+	assert.NoError(t, err)
+	sess2, err := store2.Open(ctx, "s1")
+	assert.NoError(t, err)
+
+	assert.True(t, sess2.Suspended())
+	assert.Equal(t, sess2.PendingToolCallIDs(), []string{"toolu_a"})
+	got, _ := sess2.Messages(ctx)
+	assert.Equal(t, len(got), len(msgs))
+}
+
+func TestFileStoreListReportsSuspended(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, _ := NewFileStore(dir)
+
+	// Normal session
+	s1, _ := store.Open(ctx, "normal")
+	_ = s1.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("hi")}, nil)
+
+	// Suspended session
+	s2, _ := store.Open(ctx, "suspended")
+	_ = s2.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, []string{"toolu_a"})
+
+	res, err := store.List(ctx, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, len(res.Sessions), 2)
+	for _, info := range res.Sessions {
+		if info.ID == "suspended" {
+			assert.True(t, info.Suspended)
+		}
+		if info.ID == "normal" {
+			assert.False(t, info.Suspended)
+		}
+	}
+}
+
+func TestSaveTurnClearsSuspension(t *testing.T) {
+	ctx := context.Background()
+	sess := New("s1")
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, []string{"toolu_a"})
+	assert.NoError(t, err)
+	assert.True(t, sess.Suspended())
+
+	err = sess.SaveResumedTurn(ctx, append(suspendedTurnMessages(), llm.NewAssistantTextMessage("done")), nil)
+	assert.NoError(t, err)
+	assert.False(t, sess.Suspended())
+	assert.Equal(t, len(sess.PendingToolCallIDs()), 0)
+}
+
+func TestCrossProcessResume(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	// "Process A": create session, suspend.
+	{
+		store, _ := NewFileStore(dir)
+		sess, _ := store.Open(ctx, "cross")
+		err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, []string{"toolu_a"})
+		assert.NoError(t, err)
+	}
+
+	// "Process B": fresh store and session, resume the suspended turn.
+	{
+		store, _ := NewFileStore(dir)
+		sess, _ := store.Open(ctx, "cross")
+		assert.True(t, sess.Suspended())
+		assert.Equal(t, sess.PendingToolCallIDs(), []string{"toolu_a"})
+
+		// Simulate completion.
+		complete := suspendedTurnMessages()
+		// Add a final assistant text message to simulate what generate would append.
+		complete = append(complete, llm.NewAssistantTextMessage("done"))
+		err := sess.SaveResumedTurn(ctx, complete, nil)
+		assert.NoError(t, err)
+	}
+
+	// Re-open once more and verify the final state.
+	store, _ := NewFileStore(dir)
+	sess, _ := store.Open(ctx, "cross")
+	assert.False(t, sess.Suspended())
+	msgs, _ := sess.Messages(ctx)
+	assert.Equal(t, msgs[len(msgs)-1].Text(), "done")
+}
