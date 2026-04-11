@@ -419,3 +419,218 @@ func TestServerInvalidMethod(t *testing.T) {
 	assert.NotNil(t, env.Error)
 	assert.Equal(t, env.Error.Code, a2a.ErrorCodeMethodNotFound)
 }
+
+// ---------------------------------------------------------------------------
+// Server: known-but-unimplemented methods report UnsupportedOperation
+// ---------------------------------------------------------------------------
+
+func TestServerUnsupportedMethodsReportCorrectCode(t *testing.T) {
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		return textResponse("ok"), nil
+	}}
+	agent := buildAgent(t, model)
+	server, err := a2a.NewServer(a2a.ServerOptions{Agent: agent})
+	assert.NoError(t, err)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	methods := []string{
+		a2a.MethodTasksResubscribe,
+		a2a.MethodTasksPushNotifConfigSet,
+		a2a.MethodTasksPushNotifConfigGet,
+		a2a.MethodTasksPushNotifConfigList,
+		a2a.MethodTasksPushNotifConfigDelete,
+		a2a.MethodAgentExtendedCard,
+	}
+	for _, method := range methods {
+		body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{}}`
+		resp, err := http.Post(ts.URL+"/", "application/json", strings.NewReader(body))
+		assert.NoError(t, err)
+		var env struct {
+			Error *a2a.RPCError `json:"error"`
+		}
+		assert.NoError(t, json.NewDecoder(resp.Body).Decode(&env))
+		resp.Body.Close()
+		assert.NotNil(t, env.Error)
+		assert.Equal(t, env.Error.Code, a2a.ErrorCodeUnsupportedOperation)
+		assert.True(t, strings.Contains(env.Error.Message, method))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Server: DataPart and FilePart input flatten into the agent's prompt
+// ---------------------------------------------------------------------------
+
+func TestServerNonTextPartsFlattenToPrompt(t *testing.T) {
+	var captured string
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		cfg := &llm.Config{}
+		cfg.Apply(opts...)
+		for _, msg := range cfg.Messages {
+			if msg.Role != llm.User {
+				continue
+			}
+			for _, c := range msg.Content {
+				if tc, ok := c.(*llm.TextContent); ok {
+					captured += tc.Text
+				}
+			}
+		}
+		return textResponse("got it"), nil
+	}}
+	agent := buildAgent(t, model)
+	server, err := a2a.NewServer(a2a.ServerOptions{Agent: agent})
+	assert.NoError(t, err)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client, err := a2a.NewClient(a2a.ClientOptions{Endpoint: ts.URL + "/"})
+	assert.NoError(t, err)
+
+	task, err := client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m1",
+		Role:      a2a.RoleUser,
+		Parts: []a2a.Part{
+			a2a.NewTextPart("Summarize the attached order."),
+			a2a.NewDataPart(map[string]any{"orderId": "ABC-123", "total": 4299}),
+			{Kind: a2a.PartKindFile, File: &a2a.FileContent{
+				Name:     "invoice.pdf",
+				MimeType: "application/pdf",
+				URI:      "https://example.com/invoice.pdf",
+			}},
+		},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, task.Status.State, a2a.TaskStateCompleted)
+	assert.True(t, strings.Contains(captured, "Summarize the attached order."))
+	assert.True(t, strings.Contains(captured, `"orderId":"ABC-123"`))
+	assert.True(t, strings.Contains(captured, `"total":4299`))
+	assert.True(t, strings.Contains(captured, "name=invoice.pdf"))
+	assert.True(t, strings.Contains(captured, "uri=https://example.com/invoice.pdf"))
+}
+
+// Messages that hold parts but carry no renderable content are rejected
+// with InvalidParams, not InternalError.
+func TestServerEmptyPartsRejectedAsInvalidParams(t *testing.T) {
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		return textResponse("ok"), nil
+	}}
+	agent := buildAgent(t, model)
+	server, err := a2a.NewServer(a2a.ServerOptions{Agent: agent})
+	assert.NoError(t, err)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client, err := a2a.NewClient(a2a.ClientOptions{Endpoint: ts.URL + "/"})
+	assert.NoError(t, err)
+
+	_, err = client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m1",
+		Role:      a2a.RoleUser,
+		// A data part with an empty map is effectively empty.
+		Parts: []a2a.Part{a2a.NewDataPart(nil)},
+	}, nil)
+	assert.Error(t, err)
+	rpcErr, ok := err.(*a2a.RPCError)
+	assert.True(t, ok)
+	assert.Equal(t, rpcErr.Code, a2a.ErrorCodeInvalidParams)
+}
+
+// ---------------------------------------------------------------------------
+// Server: resume does not duplicate the incoming user message in history
+// ---------------------------------------------------------------------------
+
+func TestServerResumeDoesNotDuplicateUserMessage(t *testing.T) {
+	var callNum atomic.Int32
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		n := callNum.Add(1)
+		if n == 1 {
+			return toolCallResponse("ask", "call_1"), nil
+		}
+		return textResponse("all set"), nil
+	}}
+	agent := buildAgent(t, model, &suspendingTool{})
+	server, err := a2a.NewServer(a2a.ServerOptions{Agent: agent})
+	assert.NoError(t, err)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client, err := a2a.NewClient(a2a.ClientOptions{Endpoint: ts.URL + "/"})
+	assert.NoError(t, err)
+
+	task, err := client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m1",
+		Role:      a2a.RoleUser,
+		Parts:     []a2a.Part{a2a.NewTextPart("kick off")},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, task.Status.State, a2a.TaskStateInputRequired)
+
+	resumed, err := client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m2",
+		Role:      a2a.RoleUser,
+		Parts:     []a2a.Part{a2a.NewTextPart("approved")},
+		TaskID:    task.ID,
+		ContextID: task.ContextID,
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, resumed.Status.State, a2a.TaskStateCompleted)
+
+	seen := 0
+	for _, h := range resumed.History {
+		if h.MessageID == "m2" {
+			seen++
+		}
+	}
+	assert.Equal(t, seen, 1)
+}
+
+// ---------------------------------------------------------------------------
+// Client: bare Message result on message/send is wrapped into a Task
+// ---------------------------------------------------------------------------
+
+func TestClientSendMessageHandlesBareMessageResult(t *testing.T) {
+	// Stand up a minimal hand-rolled JSON-RPC server that returns a
+	// Message result rather than a Task. This is the spec-allowed shape
+	// our own server does not emit, so we verify the client-side
+	// adapter explicitly.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		assert.Equal(t, req.Method, a2a.MethodMessageSend)
+		result := a2a.Message{
+			MessageID: "srv-1",
+			Role:      a2a.RoleAgent,
+			ContextID: "ctx-xyz",
+			Parts:     []a2a.Part{a2a.NewTextPart("direct reply")},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
+		})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	client, err := a2a.NewClient(a2a.ClientOptions{Endpoint: ts.URL + "/"})
+	assert.NoError(t, err)
+
+	task, err := client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m1",
+		Role:      a2a.RoleUser,
+		Parts:     []a2a.Part{a2a.NewTextPart("hi")},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, task.Status.State, a2a.TaskStateCompleted)
+	assert.Equal(t, task.ContextID, "ctx-xyz")
+	assert.Equal(t, a2a.ResponseText(task), "direct reply")
+	if synthetic, _ := task.Metadata["a2a.syntheticFromMessage"].(bool); !synthetic {
+		t.Fatalf("expected a2a.syntheticFromMessage=true, got metadata=%v", task.Metadata)
+	}
+}

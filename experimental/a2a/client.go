@@ -135,6 +135,13 @@ func (c *Client) fetchCardAt(ctx context.Context, url string) (*AgentCard, int, 
 }
 
 // SendMessage invokes message/send and returns the resulting Task.
+//
+// The A2A spec lets a server return either a Task or a bare Message on
+// message/send. When a server replies with a Message, SendMessage
+// synthesizes a minimal completed Task wrapping it so callers always
+// receive a *Task. Inspect task.History and task.Artifacts to read the
+// reply; task.Metadata["a2a.syntheticFromMessage"] is set to true so
+// callers that care can tell the difference.
 func (c *Client) SendMessage(ctx context.Context, msg *Message, cfg *MessageConfiguration) (*Task, error) {
 	if msg == nil {
 		return nil, fmt.Errorf("a2a: SendMessage: nil message")
@@ -143,11 +150,71 @@ func (c *Client) SendMessage(ctx context.Context, msg *Message, cfg *MessageConf
 		msg.MessageID = uuid.NewString()
 	}
 	params := SendMessageParams{Message: msg, Configuration: cfg}
-	var task Task
-	if err := c.call(ctx, MethodMessageSend, params, &task); err != nil {
+	var raw json.RawMessage
+	if err := c.call(ctx, MethodMessageSend, params, &raw); err != nil {
 		return nil, err
 	}
+	return decodeSendMessageResult(raw)
+}
+
+// decodeSendMessageResult probes the result envelope for the "kind"
+// discriminator. A "task" result decodes directly; a "message" result is
+// wrapped into a synthesized completed Task so callers only ever need to
+// handle *Task. Any other shape is decoded as Task for backwards
+// compatibility.
+func decodeSendMessageResult(raw json.RawMessage) (*Task, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("a2a: message/send returned empty result")
+	}
+	var probe struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, fmt.Errorf("a2a: probe message/send result: %w", err)
+	}
+	if probe.Kind == "message" {
+		var msg Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return nil, fmt.Errorf("a2a: decode message/send message result: %w", err)
+		}
+		return syntheticTaskFromMessage(&msg), nil
+	}
+	var task Task
+	if err := json.Unmarshal(raw, &task); err != nil {
+		return nil, fmt.Errorf("a2a: decode message/send task result: %w", err)
+	}
 	return &task, nil
+}
+
+// syntheticTaskFromMessage wraps a bare Message reply as a completed
+// Task. The message becomes the first history entry and, when it carries
+// text, is also exposed as the task's single "response" artifact so
+// ResponseText(task) works unchanged.
+func syntheticTaskFromMessage(msg *Message) *Task {
+	task := &Task{
+		ID:        msg.TaskID,
+		ContextID: msg.ContextID,
+		Kind:      "task",
+		Status: TaskStatus{
+			State: TaskStateCompleted,
+		},
+		History: []*Message{msg},
+		Metadata: map[string]any{
+			"a2a.syntheticFromMessage": true,
+		},
+	}
+	if task.ID == "" {
+		task.ID = msg.MessageID
+	}
+	if text := msg.TextContent(); text != "" {
+		task.Artifacts = []*Artifact{{
+			ArtifactID: msg.MessageID,
+			Name:       "response",
+			Parts:      []Part{NewTextPart(text)},
+			LastChunk:  true,
+		}}
+	}
+	return task
 }
 
 // GetTask invokes tasks/get.

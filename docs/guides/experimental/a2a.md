@@ -88,6 +88,12 @@ The returned `http.Handler` serves these paths:
 | `tasks/get` | Retrieve a task by ID |
 | `tasks/cancel` | Mark an in-flight task as canceled |
 
+The dispatcher also recognizes `tasks/resubscribe`,
+`tasks/pushNotificationConfig/{set,get,list,delete}`, and
+`agent/getAuthenticatedExtendedCard` — but they are not implemented and
+return `-32004 UnsupportedOperation`. Any other method returns
+`-32601 MethodNotFound`.
+
 ### Sessions
 
 `SessionProvider` is optional. When nil, the server runs the agent with no
@@ -179,17 +185,26 @@ agent continues exactly where it paused.
 - Task cancellation only marks the stored record as canceled; it does not
   interrupt a Dive turn that is already executing. Cancel before sending
   new input on an `input-required` task for guaranteed cleanup.
-- The server only emits text content. `FilePart` and `DataPart` round-trip
-  through the wire types but the server-side adapter ignores them when
-  building task history and artifacts from a Dive `Response`.
-- The client returns `*Task` from `SendMessage`. The A2A spec also allows
-  the server to return a bare `Message` for direct replies; today we
-  decode that as a `Task` with empty fields (status checks will fail).
-  Talk to peers that always wrap replies in a Task — every server we have
-  tested (a2a-python, our own) does so by default.
-- Task cancellation is the only place we use the
-  `tasks/pushNotificationConfig/*` and `tasks/resubscribe` method strings
-  reserved by the spec; those endpoints are not implemented.
+- Non-text input parts (`DataPart`, `FilePart`) are flattened into the
+  agent prompt: data is rendered as a JSON code block, file parts as a
+  short `[file name=… mime=… uri=…]` reference. Inline base64 file bytes
+  are summarized rather than inlined. The agent sees the flattened text,
+  not a structured content vector.
+- The server still only *emits* text content on the response side.
+  Artifacts and task history are built from the assistant's text output;
+  tool-result structured content does not round-trip into `FilePart` or
+  `DataPart` in the task record.
+- `Client.SendMessage` always returns `*Task`. When a peer returns a
+  bare `Message` (spec-allowed for direct replies), the client wraps it
+  in a synthesized completed task whose single `"response"` artifact
+  carries the message's text and whose metadata has
+  `a2a.syntheticFromMessage: true`. Callers who need to tell a real
+  task from a wrapped message can check that flag.
+- `tasks/resubscribe`, the `tasks/pushNotificationConfig/*` family, and
+  `agent/getAuthenticatedExtendedCard` are recognized by the dispatcher
+  but not implemented: probing them returns
+  `-32004 UnsupportedOperation` (not `-32601 MethodNotFound`) so peers
+  get a meaningful signal.
 - Phase 1 was validated against `a2a-sdk` (Python, current main as of
   April 2026) in both directions. Our server passes the Python client's
   agent-card validation, single-shot send, streaming, `tasks/get`, and

@@ -4,12 +4,21 @@ import (
 	"encoding/json"
 )
 
-// Well-known JSON-RPC method names supported by the server adapter.
+// Well-known JSON-RPC method names defined by the A2A spec. The first four
+// are fully handled by the server adapter; the rest are recognized so the
+// dispatcher can return UnsupportedOperation instead of MethodNotFound to
+// peers that probe for them.
 const (
-	MethodMessageSend   = "message/send"
-	MethodMessageStream = "message/stream"
-	MethodTasksGet      = "tasks/get"
-	MethodTasksCancel   = "tasks/cancel"
+	MethodMessageSend                = "message/send"
+	MethodMessageStream              = "message/stream"
+	MethodTasksGet                   = "tasks/get"
+	MethodTasksCancel                = "tasks/cancel"
+	MethodTasksResubscribe           = "tasks/resubscribe"
+	MethodTasksPushNotifConfigSet    = "tasks/pushNotificationConfig/set"
+	MethodTasksPushNotifConfigGet    = "tasks/pushNotificationConfig/get"
+	MethodTasksPushNotifConfigList   = "tasks/pushNotificationConfig/list"
+	MethodTasksPushNotifConfigDelete = "tasks/pushNotificationConfig/delete"
+	MethodAgentExtendedCard          = "agent/getAuthenticatedExtendedCard"
 )
 
 // DefaultAgentCardPath is the canonical well-known URL path at which an

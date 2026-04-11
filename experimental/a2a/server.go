@@ -216,6 +216,14 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		s.handleTasksGet(w, r, &req)
 	case MethodTasksCancel:
 		s.handleTasksCancel(w, r, &req)
+	case MethodTasksResubscribe,
+		MethodTasksPushNotifConfigSet,
+		MethodTasksPushNotifConfigGet,
+		MethodTasksPushNotifConfigList,
+		MethodTasksPushNotifConfigDelete,
+		MethodAgentExtendedCard:
+		writeRPCError(w, req.ID, newRPCError(ErrorCodeUnsupportedOperation,
+			"a2a server does not implement "+req.Method, nil))
 	default:
 		writeRPCError(w, req.ID, newRPCError(ErrorCodeMethodNotFound, "method not found: "+req.Method, nil))
 	}
@@ -446,9 +454,9 @@ func (s *Server) runTurn(ctx context.Context, params *SendMessageParams, cb dive
 		return nil, newRPCError(ErrorCodeInternalError, "session: "+err.Error(), nil)
 	}
 
-	inputText := params.Message.TextContent()
-	if inputText == "" {
-		return nil, newRPCError(ErrorCodeInvalidParams, "message has no text content", nil)
+	inputText, err := inputPromptFromMessage(params.Message)
+	if err != nil {
+		return nil, newRPCError(ErrorCodeInvalidParams, err.Error(), nil)
 	}
 
 	opts := []dive.CreateResponseOption{dive.WithInput(inputText)}
@@ -493,9 +501,9 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 			"task is already in terminal state: "+string(rec.Task.Status.State), nil)
 	}
 
-	inputText := params.Message.TextContent()
-	if inputText == "" {
-		return nil, newRPCError(ErrorCodeInvalidParams, "message has no text content", nil)
+	inputText, err := inputPromptFromMessage(params.Message)
+	if err != nil {
+		return nil, newRPCError(ErrorCodeInvalidParams, err.Error(), nil)
 	}
 
 	sess, err := s.resolveSession(ctx, rec.SessionID)
@@ -503,9 +511,11 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 		return nil, newRPCError(ErrorCodeInternalError, "session: "+err.Error(), nil)
 	}
 
-	// Append the new user message to task history for the client's
-	// benefit, regardless of whether we're resuming or not.
-	rec.Task.History = append(rec.Task.History, params.Message)
+	// Snapshot the existing task history so we can prepend it to the
+	// freshly built turn below. The new user message is *not* appended
+	// here — buildTaskFromResponse seeds its own history with userMsg,
+	// and double-appending it here would duplicate the entry.
+	priorHistory := append([]*Message(nil), rec.Task.History...)
 
 	opts := []dive.CreateResponseOption{}
 	if sess != nil {
@@ -535,7 +545,7 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 
 	// Merge the fresh response into the existing task record.
 	updated := buildTaskFromResponse(rec.Task.ID, rec.Task.ContextID, params.Message, resp)
-	updated.History = append(rec.Task.History, updated.History...)
+	updated.History = append(priorHistory, updated.History...)
 	rec.Task = updated
 	rec.Suspension = resp.Suspension
 	if err := s.store.Put(ctx, rec); err != nil {
@@ -678,6 +688,75 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 		}
 	}
 	return task
+}
+
+// inputPromptFromMessage flattens an A2A Message into a single prompt
+// string suitable for dive.WithInput. Text parts pass through verbatim.
+// DataParts are rendered as a JSON code block (labeled with the part's
+// "kind" when present in metadata) so the agent can reason over
+// structured inputs. FileParts are rendered as a short reference line
+// carrying name/MIME/URI when provided; inline base64 file bytes are
+// intentionally summarized rather than inlined to keep prompt budgets
+// predictable. The function returns an error only if the message is
+// empty or contains no renderable content.
+func inputPromptFromMessage(msg *Message) (string, error) {
+	if msg == nil || len(msg.Parts) == 0 {
+		return "", fmt.Errorf("a2a: message has no parts")
+	}
+	var b strings.Builder
+	appendSeparator := func() {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+	}
+	for _, p := range msg.Parts {
+		switch p.Kind {
+		case PartKindText:
+			if p.Text == "" {
+				continue
+			}
+			appendSeparator()
+			b.WriteString(p.Text)
+		case PartKindData:
+			if len(p.Data) == 0 {
+				continue
+			}
+			encoded, err := json.Marshal(p.Data)
+			if err != nil {
+				return "", fmt.Errorf("a2a: marshal data part: %w", err)
+			}
+			appendSeparator()
+			b.WriteString("```json\n")
+			b.Write(encoded)
+			b.WriteString("\n```")
+		case PartKindFile:
+			if p.File == nil {
+				continue
+			}
+			appendSeparator()
+			b.WriteString("[file")
+			if p.File.Name != "" {
+				b.WriteString(" name=")
+				b.WriteString(p.File.Name)
+			}
+			if p.File.MimeType != "" {
+				b.WriteString(" mime=")
+				b.WriteString(p.File.MimeType)
+			}
+			switch {
+			case p.File.URI != "":
+				b.WriteString(" uri=")
+				b.WriteString(p.File.URI)
+			case p.File.Bytes != "":
+				fmt.Fprintf(&b, " bytes=%d (base64)", len(p.File.Bytes))
+			}
+			b.WriteString("]")
+		}
+	}
+	if b.Len() == 0 {
+		return "", fmt.Errorf("a2a: message has no renderable content")
+	}
+	return b.String(), nil
 }
 
 func mergeMetadata(dst, src map[string]any) map[string]any {

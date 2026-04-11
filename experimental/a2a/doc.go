@@ -13,11 +13,20 @@
 //
 // The first shipping phase of A2A support is deliberately small:
 //
-//   - agent card discovery via /.well-known/agent.json
+//   - agent card discovery via /.well-known/agent-card.json (canonical)
+//     and /.well-known/agent.json (legacy alias)
 //   - message/send and tasks/get JSON-RPC methods
 //   - tasks/cancel for in-flight task cancellation
 //   - message/stream for Server-Sent Events streaming of task progress
 //   - mapping Dive's ResponseStatusSuspended to A2A input-required state
+//   - flattening non-text input parts (DataPart, FilePart) into the
+//     agent prompt so structured A2A messages round-trip usefully
+//
+// tasks/resubscribe, the tasks/pushNotificationConfig/* family, and
+// agent/getAuthenticatedExtendedCard are recognized by the dispatcher
+// but respond with -32004 UnsupportedOperation (rather than -32601
+// MethodNotFound) so peers get a meaningful signal when probing for
+// them.
 //
 // See docs/prds/prd-05-a2a-support.md for the full motivation, goals, and
 // out-of-scope items. See docs/guides/experimental/a2a.md for usage.
