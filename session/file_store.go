@@ -25,6 +25,26 @@ var ErrInvalidSessionID = errors.New("invalid session ID")
 // session metadata header; subsequent lines are events. AppendEvent opens
 // the file in append mode and writes a single line, making it the efficient
 // hot-path write.
+//
+// # Concurrency model
+//
+// FileStore assumes single-writer-per-session semantics: at any given
+// moment, only one process should hold a *Session for a given session ID.
+// Sequential handoff between processes — suspend in process A, exit, then
+// resume in process B — is fully supported and crash-consistent (writes
+// use tmp file + rename + parent directory fsync, so a reader always sees
+// either the previous or the new complete file).
+//
+// Concurrent access from multiple processes to the same session is NOT
+// supported and may cause silent state loss: two processes can both read,
+// both rewrite the JSONL, and the later rename wins. There is no OS-level
+// file lock. For multi-instance deployments where the same session might
+// be touched concurrently, implement a database-backed Session backend
+// instead of using FileStore.
+//
+// Within a single process, a FileStore is safe for concurrent use across
+// distinct sessions and serializes writes to the same session via an
+// internal mutex.
 type FileStore struct {
 	mu  sync.RWMutex
 	dir string
