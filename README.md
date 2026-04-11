@@ -323,6 +323,8 @@ go run ./openai_responses_example
 - [Quick Start](./docs/guides/quick-start.md) — Get up and running in minutes
 - [Agents Guide](./docs/guides/agents.md) — Agent loop, hooks, and configuration
 - [Custom Tools](./docs/guides/custom-tools.md) — Build and register your own tools
+- [Hooks](./docs/guides/hooks.md) — Lifecycle hooks for tools and generation
+- [Suspend & Resume](./docs/guides/suspend-resume.md) — Pause mid-turn for human input or async callbacks
 - [LLM Guide](./docs/guides/llm-guide.md) — Direct model access without the agent loop
 - [Tools Overview](./docs/guides/tools.md) — Built-in toolkit reference
 - [Permissions](./docs/guides/permissions.md) — Rule-based tool permission management

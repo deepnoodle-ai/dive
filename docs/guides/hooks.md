@@ -33,6 +33,10 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 
 ```text
 PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse / PostToolUseFailure]* → Stop → PostGeneration
+                                                                              ↓
+                                                                   (tool returned SuspendResult)
+                                                                              ↓
+                                                                   OnSuspend → PostGeneration
 ```
 
 1. **PreGeneration** runs once before the loop starts.
@@ -41,6 +45,8 @@ PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolU
    **PostToolUse** (success) or **PostToolUseFailure** (failure) runs after.
 4. When the loop exits, **Stop** hooks can force re-entry.
 5. **PostGeneration** runs last.
+6. On suspend, **OnSuspend** fires before `PostGeneration` and before the session is persisted.
+   See [Suspend & Resume](suspend-resume.md).
 
 ## HookContext
 
@@ -215,6 +221,45 @@ Hooks: dive.Hooks{
 Check `hctx.StopHookActive` to prevent infinite loops — it's true when the
 current stop check was triggered by a previous continuation.
 
+## OnSuspend Hook
+
+Runs when a tool returns `SuspendResult` and the agent is about to pause
+mid-turn. Fires **before** `PostGeneration` and **before** the suspended
+turn is persisted to the session, so it is the right place to dispatch
+webhooks, send notification emails, or create review tasks.
+
+```go
+Hooks: dive.Hooks{
+    OnSuspend: []dive.OnSuspendHook{
+        func(ctx context.Context, hctx *dive.HookContext) error {
+            for _, p := range hctx.Response.Suspension.PendingToolCalls {
+                if err := postWebhook(ctx, p); err != nil {
+                    return err // aborts persistence; caller sees the error
+                }
+            }
+            return nil
+        },
+    },
+},
+```
+
+Returning an error (or `dive.AbortGeneration`) aborts the transition:
+the caller sees the error and the session stays in its previous state.
+Because the hook runs before persistence, aborting requires no
+compensating rollback.
+
+`PostGeneration` still runs on suspended responses with
+`Response.Status == ResponseStatusSuspended`, so existing hook authors
+(metrics, logging) get a single consistent end-of-turn signal regardless
+of status. `Stop` hooks do **not** fire on suspend — a suspended
+response is not final.
+
+Partial resumes (a suspended session that is continued with only some of
+the awaited results) do **not** re-fire `OnSuspend` — it announces new
+suspensions, not continuations.
+
+See the [Suspend & Resume Guide](suspend-resume.md) for the full flow.
+
 ## Hook Helpers
 
 Built-in helpers reduce boilerplate:
@@ -268,6 +313,7 @@ How errors are handled depends on the hook type:
 | PostToolUseFailure | Logged, result preserved   | Aborts generation     |
 | Stop               | Logged, continues          | Aborts generation     |
 | PreIteration       | Aborts generation          | Aborts generation     |
+| OnSuspend          | Aborts suspend persistence | Aborts suspend persistence |
 
 Use `dive.AbortGeneration("reason")` to create a `*HookAbortError` when a
 critical failure should stop generation entirely:
@@ -306,5 +352,6 @@ Hooks: dive.Hooks{
 
 - [Agents Guide](agents.md) — Full agent configuration reference
 - [Custom Tools](custom-tools.md) — Build tools that hooks can intercept
+- [Suspend & Resume](suspend-resume.md) — OnSuspend hook and pause-mid-turn flow
 - [Permissions Guide](permissions.md) — Hook-based permission system
 - [Compaction Guide](experimental/compaction.md) — Hook-based context compaction

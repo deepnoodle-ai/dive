@@ -177,6 +177,29 @@ func (t *MyTool) Call(ctx context.Context, input MyInput) (*dive.ToolResult, err
 
 Tool panics are automatically recovered and converted to error results — the LLM sees the error and can adapt. The stack trace is logged but not sent to the model.
 
+## Suspending Mid-Call
+
+A tool can pause the agent by returning `NewSuspendResult` instead of a
+normal result. The agent persists the partial turn, returns a suspended
+`Response` to the caller, and resumes later when `CreateResponse` is
+invoked with `WithToolResults` (or `WithResume` for stateless callers).
+
+```go
+func (t *DeployTool) Call(ctx context.Context, input DeployInput) (*dive.ToolResult, error) {
+    return dive.NewSuspendResult(
+        fmt.Sprintf("Approve deploy of %s to %s?", input.Version, input.Environment),
+        map[string]any{"request_id": newRequestID()},
+    ), nil
+}
+```
+
+`ToolResult` is a tagged union: set **either** `Content` / `Display` /
+`IsError` **or** `Suspend`, never both. Mixed results are surfaced as an
+error through `PostToolUseFailure`. Use `NewSuspendResult` to stay on
+the safe side of the union.
+
+See the [Suspend & Resume Guide](suspend-resume.md) for the full flow.
+
 ## Tool Previews
 
 Implement `TypedToolPreviewer[T]` to provide human-readable previews before execution:
@@ -198,4 +221,5 @@ func (t *MyTool) PreviewCall(ctx context.Context, input MyInput) *dive.ToolCallP
 5. **Set appropriate annotations** — Helps permission systems and agent reasoning
 6. **Use `NewToolResultError`** for expected errors, `error` return for unexpected failures
 
-For built-in tools, see the [Tools Guide](tools.md).
+For built-in tools, see the [Tools Guide](tools.md). For the full
+suspend/resume workflow, see the [Suspend & Resume Guide](suspend-resume.md).

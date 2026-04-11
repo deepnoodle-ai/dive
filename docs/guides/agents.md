@@ -68,7 +68,8 @@ The `Hooks` struct groups all hook slices:
 | `PostToolUse`        | `[]PostToolUseHook`        | Hooks called after each successful tool execution |
 | `PostToolUseFailure` | `[]PostToolUseFailureHook` | Hooks called after each failed tool execution     |
 | `Stop`               | `[]StopHook`               | Hooks called when agent is about to stop          |
-| `PreIteration`   | `[]PreIterationHook`   | Hooks called before each LLM call in the loop     |
+| `PreIteration`       | `[]PreIterationHook`       | Hooks called before each LLM call in the loop     |
+| `OnSuspend`          | `[]OnSuspendHook`          | Hooks called when a tool returns `SuspendResult`  |
 
 ## Generation Hooks
 
@@ -266,13 +267,15 @@ response, err := agent.CreateResponse(ctx,
 
 ## CreateResponse Options
 
-| Option                  | Description                                |
-| ----------------------- | ------------------------------------------ |
-| `WithInput(text)`       | Simple text input (creates a user message) |
-| `WithMessages(msgs...)` | Multiple messages                          |
-| `WithEventCallback(fn)` | Receive events during generation           |
-| `WithSession(sess)`     | Per-call session override                  |
-| `WithValue(key, val)`   | Pass data to hooks via HookContext.Values  |
+| Option                     | Description                                                 |
+| -------------------------- | ----------------------------------------------------------- |
+| `WithInput(text)`          | Simple text input (creates a user message)                  |
+| `WithMessages(msgs...)`    | Multiple messages                                           |
+| `WithEventCallback(fn)`    | Receive events during generation                            |
+| `WithSession(sess)`        | Per-call session override                                   |
+| `WithValue(key, val)`      | Pass data to hooks via HookContext.Values                   |
+| `WithToolResults(results)` | Resume a session-backed suspended turn (see suspend-resume) |
+| `WithResume(state, results)` | Resume statelessly with an explicit `SuspensionState`     |
 
 ## Model Settings
 
@@ -376,6 +379,34 @@ resp, _ = agent.CreateResponse(ctx, dive.WithMessages(messages...))
 
 `OutputMessages` includes both assistant messages and tool result messages in the correct order.
 
+## Suspend and Resume
+
+Agents can pause mid-turn while a tool waits on an external input —
+human approval, webhook callback, form submission — and resume cleanly
+later, including across process restarts. A tool signals suspension by
+returning `dive.NewSuspendResult`, and the caller reads
+`resp.Status == dive.ResponseStatusSuspended` plus `resp.Suspension` to
+learn what's pending:
+
+```go
+resp, _ := agent.CreateResponse(ctx, dive.WithInput("Please deploy v1.4.2"))
+if resp.Status == dive.ResponseStatusSuspended {
+    for _, p := range resp.Suspension.PendingToolCalls {
+        // route p.ID + p.Input + p.Prompt to a review queue and return
+    }
+    return
+}
+
+// Later, possibly in another process:
+final, _ := agent.CreateResponse(ctx, dive.WithToolResults(map[string]*dive.ToolResult{
+    pendingID: dive.NewToolResultText("approved"),
+}))
+```
+
+See the [Suspend & Resume Guide](suspend-resume.md) for the full flow,
+including `OnSuspend` hooks, stateless resume with `WithResume`, partial
+resumes, and the streaming `ResponseItemTypeSuspended` terminator.
+
 ## Subagents
 
 Subagent support is available in `experimental/subagent/`. See the experimental packages for details.
@@ -384,4 +415,5 @@ Subagent support is available in `experimental/subagent/`. See the experimental 
 
 - [Tools Guide](tools.md) - Built-in tools
 - [Custom Tools](custom-tools.md) - Create your own tools
+- [Suspend & Resume](suspend-resume.md) - Pause mid-turn for human input or async callbacks
 - [LLM Guide](llm-guide.md) - Provider configuration
