@@ -481,6 +481,13 @@ type ToolResultContent struct {
 	Content      any           `json:"content"`
 	IsError      bool          `json:"is_error,omitempty"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+
+	// rawContent holds the original JSON bytes of the `content` field when
+	// this struct was populated via json.Unmarshal. DecodeContent uses it to
+	// decode the original payload into a typed destination without the lossy
+	// `any` → map[string]any coercion that reading Content directly would
+	// give after a round-trip (e.g. via Message.Copy or session replay).
+	rawContent json.RawMessage
 }
 
 func (c *ToolResultContent) Type() ContentType {
@@ -496,6 +503,73 @@ func (c *ToolResultContent) MarshalJSON() ([]byte, error) {
 		Type:  ContentTypeToolResult,
 		Alias: (*Alias)(c),
 	})
+}
+
+func (c *ToolResultContent) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		ToolUseID    string          `json:"tool_use_id"`
+		Content      json.RawMessage `json:"content"`
+		IsError      bool            `json:"is_error,omitempty"`
+		CacheControl *CacheControl   `json:"cache_control,omitempty"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	c.ToolUseID = aux.ToolUseID
+	c.IsError = aux.IsError
+	c.CacheControl = aux.CacheControl
+	c.rawContent = nil
+	c.Content = nil
+	if len(aux.Content) > 0 {
+		c.rawContent = append(json.RawMessage(nil), aux.Content...)
+		var generic any
+		if err := json.Unmarshal(aux.Content, &generic); err != nil {
+			return err
+		}
+		c.Content = generic
+	}
+	return nil
+}
+
+// DecodeContent decodes the tool result's content into dst without the
+// type loss that reading Content directly incurs after a JSON round-trip.
+//
+// When ToolResultContent was populated via json.Unmarshal — which happens
+// transparently during Message.Copy, session persistence, and cross-process
+// suspend/resume — reading the Content field gives the generic decoded
+// shape (map[string]any, []any, float64). DecodeContent instead replays
+// the original JSON bytes into dst, so integers stay integers, typed
+// structs decode into themselves, and slices keep their element types.
+//
+// When the struct was constructed in memory and never round-tripped,
+// DecodeContent falls back to marshaling Content and decoding into dst,
+// so call sites work the same in both cases.
+//
+// Returns nil without touching dst when the content is empty.
+func (c *ToolResultContent) DecodeContent(dst any) error {
+	if c == nil {
+		return nil
+	}
+	if len(c.rawContent) > 0 {
+		return json.Unmarshal(c.rawContent, dst)
+	}
+	if c.Content == nil {
+		return nil
+	}
+	data, err := json.Marshal(c.Content)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, dst)
+}
+
+// DecodeToolResultContent decodes a ToolResultContent into a value of type
+// T. Generic wrapper around (*ToolResultContent).DecodeContent for call
+// sites that prefer a return value over an out-parameter.
+func DecodeToolResultContent[T any](c *ToolResultContent) (T, error) {
+	var out T
+	err := c.DecodeContent(&out)
+	return out, err
 }
 
 func (c *ToolResultContent) SetCacheControl(cacheControl *CacheControl) {

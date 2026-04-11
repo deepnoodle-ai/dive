@@ -367,6 +367,189 @@ func TestToolResultContent(t *testing.T) {
 	})
 }
 
+// TestToolResultContent_DecodeContent pins the typed-decode helper that
+// callers use to recover the original shape of a tool result after it has
+// been round-tripped through JSON — which happens transparently during
+// Message.Copy, session persistence, and cross-process suspend/resume.
+//
+// The underlying problem: ToolResultContent.Content is `any`, so once the
+// struct is unmarshaled from JSON, reading Content directly yields the
+// generic decoded shape (map[string]any / []any / float64), discarding the
+// caller's original Go types. DecodeContent replays the preserved raw JSON
+// bytes into a typed destination instead.
+func TestToolResultContent_DecodeContent(t *testing.T) {
+	type nestedItem struct {
+		Type  string `json:"type"`
+		Text  string `json:"text"`
+		Count int    `json:"count"`
+	}
+
+	t.Run("typed decode after json round trip", func(t *testing.T) {
+		// Round-trip through JSON the way Message.Copy does.
+		orig := &ToolResultContent{
+			ToolUseID: "tool_123",
+			Content: []*nestedItem{
+				{Type: "text", Text: "hello", Count: 7},
+				{Type: "text", Text: "world", Count: 42},
+			},
+		}
+		data, err := json.Marshal(orig)
+		assert.NoError(t, err)
+
+		var decoded ToolResultContent
+		assert.NoError(t, json.Unmarshal(data, &decoded))
+
+		// Reading Content directly still gives the generic shape — this is
+		// the backwards-compatible behavior that existing callers depend on.
+		generic, ok := decoded.Content.([]any)
+		assert.True(t, ok, "Content should decode as []any for backwards compat")
+		assert.Equal(t, len(generic), 2)
+
+		// DecodeContent replays the raw bytes into the original typed shape.
+		var items []*nestedItem
+		assert.NoError(t, decoded.DecodeContent(&items))
+		assert.Equal(t, len(items), 2)
+		assert.Equal(t, items[0].Type, "text")
+		assert.Equal(t, items[0].Text, "hello")
+		assert.Equal(t, items[0].Count, 7)
+		assert.Equal(t, items[1].Count, 42)
+	})
+
+	t.Run("integers stay integers after round trip", func(t *testing.T) {
+		// The classic JSON round-trip pitfall: numbers come back as
+		// float64. DecodeContent avoids it by unmarshaling into a typed
+		// destination rather than a map[string]any.
+		raw := `{"tool_use_id":"t","content":{"count":7,"ratio":1.5}}`
+		var c ToolResultContent
+		assert.NoError(t, json.Unmarshal([]byte(raw), &c))
+
+		// Reading through the generic map: int becomes float64.
+		m, ok := c.Content.(map[string]any)
+		assert.True(t, ok)
+		_, isFloat := m["count"].(float64)
+		assert.True(t, isFloat, "Content map coerces ints to float64")
+
+		// DecodeContent into a typed struct: int stays int.
+		type counts struct {
+			Count int     `json:"count"`
+			Ratio float64 `json:"ratio"`
+		}
+		var out counts
+		assert.NoError(t, c.DecodeContent(&out))
+		assert.Equal(t, out.Count, 7)
+		assert.Equal(t, out.Ratio, 1.5)
+	})
+
+	t.Run("works on in-memory struct without round trip", func(t *testing.T) {
+		// No json.Unmarshal ever happened, so rawContent is empty. The
+		// fallback path marshals Content then decodes into dst.
+		c := &ToolResultContent{
+			ToolUseID: "t",
+			Content: []*nestedItem{
+				{Type: "text", Text: "fresh", Count: 3},
+			},
+		}
+		var items []*nestedItem
+		assert.NoError(t, c.DecodeContent(&items))
+		assert.Equal(t, len(items), 1)
+		assert.Equal(t, items[0].Text, "fresh")
+		assert.Equal(t, items[0].Count, 3)
+	})
+
+	t.Run("string content", func(t *testing.T) {
+		raw := `{"tool_use_id":"t","content":"15 degrees"}`
+		var c ToolResultContent
+		assert.NoError(t, json.Unmarshal([]byte(raw), &c))
+
+		var s string
+		assert.NoError(t, c.DecodeContent(&s))
+		assert.Equal(t, s, "15 degrees")
+	})
+
+	t.Run("empty content is a no-op", func(t *testing.T) {
+		c := &ToolResultContent{ToolUseID: "t"}
+		var out []any
+		assert.NoError(t, c.DecodeContent(&out))
+		assert.Equal(t, len(out), 0)
+	})
+
+	t.Run("nil receiver returns nil", func(t *testing.T) {
+		var c *ToolResultContent
+		var out []any
+		assert.NoError(t, c.DecodeContent(&out))
+	})
+
+	t.Run("generic helper", func(t *testing.T) {
+		orig := &ToolResultContent{
+			ToolUseID: "t",
+			Content: []*nestedItem{
+				{Type: "text", Text: "g", Count: 9},
+			},
+		}
+		data, err := json.Marshal(orig)
+		assert.NoError(t, err)
+		var decoded ToolResultContent
+		assert.NoError(t, json.Unmarshal(data, &decoded))
+
+		items, err := DecodeToolResultContent[[]*nestedItem](&decoded)
+		assert.NoError(t, err)
+		assert.Equal(t, len(items), 1)
+		assert.Equal(t, items[0].Count, 9)
+	})
+
+	t.Run("survives Message.Copy", func(t *testing.T) {
+		// Message.Copy is the concrete real-world path that triggers this:
+		// it marshals and unmarshals the whole message to produce an
+		// independent deep copy. Any typed Content a caller stashed in a
+		// ToolResultContent must still be recoverable via DecodeContent.
+		msg := &Message{
+			Role: User,
+			Content: []Content{
+				&ToolResultContent{
+					ToolUseID: "tool_123",
+					Content: []*nestedItem{
+						{Type: "text", Text: "a", Count: 1},
+						{Type: "text", Text: "b", Count: 2},
+					},
+				},
+			},
+		}
+		cp := msg.Copy()
+		trc, ok := cp.Content[0].(*ToolResultContent)
+		assert.True(t, ok)
+
+		var items []*nestedItem
+		assert.NoError(t, trc.DecodeContent(&items))
+		assert.Equal(t, len(items), 2)
+		assert.Equal(t, items[0].Text, "a")
+		assert.Equal(t, items[1].Count, 2)
+	})
+
+	t.Run("round trip marshal re-emits content", func(t *testing.T) {
+		// Make sure that after our custom UnmarshalJSON populates both
+		// rawContent and Content, a subsequent Marshal still emits the
+		// content field (from the generic Content value, not the raw
+		// bytes — simple and correct).
+		orig := `{"tool_use_id":"t","content":{"a":1},"is_error":true}`
+		var c ToolResultContent
+		assert.NoError(t, json.Unmarshal([]byte(orig), &c))
+
+		out, err := json.Marshal(&c)
+		assert.NoError(t, err)
+
+		// Re-decoding proves round-trip parity for the exported fields.
+		var again ToolResultContent
+		assert.NoError(t, json.Unmarshal(out, &again))
+		assert.Equal(t, again.ToolUseID, "t")
+		assert.Equal(t, again.IsError, true)
+		var body struct {
+			A int `json:"a"`
+		}
+		assert.NoError(t, again.DecodeContent(&body))
+		assert.Equal(t, body.A, 1)
+	})
+}
+
 func TestServerToolUseContent(t *testing.T) {
 	t.Run("Type", func(t *testing.T) {
 		c := &ServerToolUseContent{}

@@ -3084,9 +3084,10 @@ func TestAskUserToolAsyncEndToEnd(t *testing.T) {
 	// must contain the integrator's supplied answer JSON — proving the
 	// async-mode signal flows end-to-end.
 	//
-	// llm.Message.Copy round-trips through JSON, so llm.ToolResultContent.Content
-	// (an `any` field that originally held []*dive.ToolResultContent) decodes
-	// back to []any of map[string]any. Walk that shape directly.
+	// llm.Message.Copy round-trips through JSON, so reading
+	// ToolResultContent.Content directly would give the generic
+	// []any / map[string]any shape. DecodeContent replays the raw JSON
+	// bytes into the original typed shape.
 	lastCall := mock.received[1]
 	lastMsg := lastCall[len(lastCall)-1]
 	assert.Equal(t, lastMsg.Role, llm.User)
@@ -3096,16 +3097,10 @@ func TestAskUserToolAsyncEndToEnd(t *testing.T) {
 		if !ok || trc.ToolUseID != "toolu_ask" {
 			continue
 		}
-		items, ok := trc.Content.([]any)
-		if !ok {
-			continue
-		}
+		items, err := llm.DecodeToolResultContent[[]*ToolResultContent](trc)
+		assert.NoError(t, err)
 		for _, item := range items {
-			m, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if text, _ := m["text"].(string); text == string(answerJSON) {
+			if item.Text == string(answerJSON) {
 				foundAnswer = true
 			}
 		}
