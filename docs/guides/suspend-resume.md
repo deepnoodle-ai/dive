@@ -338,7 +338,7 @@ concrete use case lands.
 
 ## Worked examples
 
-All three patterns are in `examples/suspend/`:
+Runnable examples live in `examples/suspend/`:
 
 - `human_approval/` — synchronous human approval dialog, single session.
 - `async_webhook/` — cross-process suspend/resume using `FileStore` and
@@ -347,6 +347,10 @@ All three patterns are in `examples/suspend/`:
   calls resumed one at a time.
 - `stateless/` — suspend/resume with no session at all; history is
   stored on the caller's side and handed back via `WithResume`.
+
+The `dialogspec/` directory next to them is a shared helper package the
+examples use to serialize a "what the caller should ask the human"
+payload through `SuspendResult.Metadata`.
 
 ## Next steps
 

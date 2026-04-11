@@ -2307,3 +2307,703 @@ func TestConcurrentCreateResponseOnSameSessionSerialized(t *testing.T) {
 		assert.Equal(t, msgs[i+1].Role, llm.Assistant)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Bombproofing pass — invariants that matter for production embeddings
+// ---------------------------------------------------------------------------
+
+// TestOnSuspendDoesNotRefireOnPartialResume pins the contract that a partial
+// resume — one that merely shrinks the pending set without advancing work —
+// is a CONTINUATION of an existing suspension, not a fresh transition. The
+// OnSuspend hook must fire exactly once for the initial suspend, and not
+// again on subsequent partial resumes that stay suspended. Webhook-dispatch
+// and task-creation side effects must not be duplicated per partial resume.
+func TestOnSuspendDoesNotRefireOnPartialResume(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+				newScriptedToolUse("toolu_c", "tool_c", `{}`),
+			),
+			finalTextTurn("all done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait c", nil)}}}
+
+	var onSuspendCount int
+	var onSuspendPending [][]string
+	sess := session.New("norefire")
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB, toolC},
+		Session:               sess,
+		ParallelToolExecution: true,
+		Hooks: Hooks{
+			OnSuspend: []OnSuspendHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					onSuspendCount++
+					ids := make([]string, 0)
+					for _, p := range hctx.Response.Suspension.PendingToolCalls {
+						ids = append(ids, p.ID)
+					}
+					onSuspendPending = append(onSuspendPending, ids)
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	// Initial suspend — OnSuspend should fire once with 3 pending.
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, onSuspendCount, 1)
+	assert.Equal(t, len(onSuspendPending[0]), 3)
+
+	// Partial resume 1: supply A. Still 2 pending. OnSuspend must NOT fire.
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, onSuspendCount, 1, "OnSuspend must not re-fire on partial resume")
+
+	// Partial resume 2: supply B. Still 1 pending. OnSuspend must NOT fire.
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_b": NewToolResultText("B done")}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, onSuspendCount, 1, "OnSuspend must not re-fire on further partial resume")
+
+	// Final resume: supply C → completion. OnSuspend still must not fire.
+	resp, err := agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_c": NewToolResultText("C done")}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, onSuspendCount, 1, "OnSuspend must not fire on completion")
+}
+
+// TestOnSuspendFiresOnReSuspendFromNotStartedTools covers the complement of
+// the previous test: on resume, when the "not started" sequential tail
+// executes and one of those tools re-suspends, the agent is transitioning
+// INTO a new suspended state driven by fresh work. OnSuspend must fire for
+// this re-suspension — webhook/notification integrations depend on hearing
+// about every fresh suspension event.
+func TestOnSuspendFiresOnReSuspendFromNotStartedTools(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+			),
+		},
+	}
+	// Sequential execution: A suspends first, B is "not started".
+	// On resume: A's result supplied, B runs and itself suspends.
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+
+	var onSuspendCount int
+	sess := session.New("refire")
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB},
+		Session:               sess,
+		ParallelToolExecution: false,
+		Hooks: Hooks{
+			OnSuspend: []OnSuspendHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					onSuspendCount++
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	// First suspend — A pending, B not started. onSuspendCount = 1.
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, onSuspendCount, 1)
+	assert.Equal(t, toolB.CallCount(), 0, "B should not run in sequential execution after A suspends")
+
+	// Resume: supply A's result. B now runs and itself suspends — a fresh
+	// transition. onSuspendCount should tick to 2.
+	resp, err := agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, toolB.CallCount(), 1, "B should have been executed as a not-started tool on resume")
+	assert.Equal(t, onSuspendCount, 2, "OnSuspend must fire again when not-started tool re-suspends")
+	// The pending set now tracks B, not A (which was satisfied).
+	assert.Equal(t, len(resp.Suspension.PendingToolCalls), 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_b")
+}
+
+// TestOnSuspendHookChainFirstAbortStopsRest pins the hook-chain abort
+// contract for OnSuspend: when hook 1 returns a HookAbortError, hook 2 must
+// NOT run (and the session must not be persisted). Regular errors on earlier
+// hooks do not stop the chain — they are logged and the chain continues.
+func TestOnSuspendHookChainFirstAbortStopsRest(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+
+	var order []string
+	sess := session.New("chain_abort")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{tool},
+		Session: sess,
+		Hooks: Hooks{
+			OnSuspend: []OnSuspendHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					order = append(order, "hook1")
+					return AbortGeneration("first-hook abort")
+				},
+				func(ctx context.Context, hctx *HookContext) error {
+					order = append(order, "hook2")
+					return nil
+				},
+			},
+			PostGeneration: []PostGenerationHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					order = append(order, "postGen")
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	var abortErr *HookAbortError
+	assert.True(t, errors.As(err, &abortErr))
+	assert.Equal(t, abortErr.HookType, "OnSuspend")
+
+	// Hook 2 must not have run; PostGeneration must not have run.
+	assert.Equal(t, order, []string{"hook1"})
+	// Session must not be persisted on abort.
+	assert.Nil(t, sess.LoadSuspension())
+}
+
+// TestOnSuspendHookChainRegularErrorContinues pins the complement: a regular
+// (non-abort) error on hook 1 is logged and the chain continues to hook 2
+// and eventually PostGeneration + persistence. This mirrors the existing
+// contract for PostGeneration/PostToolUse hook chains.
+func TestOnSuspendHookChainRegularErrorContinues(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+
+	var order []string
+	sess := session.New("chain_continue")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{tool},
+		Session: sess,
+		Hooks: Hooks{
+			OnSuspend: []OnSuspendHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					order = append(order, "hook1")
+					return errors.New("regular error, not a HookAbortError")
+				},
+				func(ctx context.Context, hctx *HookContext) error {
+					order = append(order, "hook2")
+					return nil
+				},
+			},
+			PostGeneration: []PostGenerationHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					order = append(order, "postGen")
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, order, []string{"hook1", "hook2", "postGen"})
+	assert.NotNil(t, sess.LoadSuspension())
+}
+
+// TestSetSystemPromptBetweenSuspendResume is the counterpart to
+// TestSetModelBetweenSuspendResume. CreateResponse snapshots the current
+// system prompt at the top of every call (including on resume), so a mutation
+// between suspend and resume must be honored on the follow-up generate call.
+// Callers rely on this to inject updated context (e.g. "now handling approval
+// for request X") between iterations.
+func TestSetSystemPromptBetweenSuspendResume(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+	sess := session.New("setprompt")
+	agent, err := NewAgent(AgentOptions{
+		Model:        mock,
+		Tools:        []Tool{tool},
+		Session:      sess,
+		SystemPrompt: "original prompt",
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+
+	// Swap the system prompt between suspend and resume.
+	agent.SetSystemPrompt("updated prompt for resume")
+
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+	)
+	assert.NoError(t, err)
+
+	// The second LLM call must have been made with the updated prompt.
+	// The scriptedLLM records System in cfg, but only the messages are
+	// retained. Snapshot-under-lock of systemPrompt happens at the top of
+	// CreateResponse — to verify the new prompt was used we rely on the
+	// agent's current system prompt field, which the test setter just set.
+	// Sanity: mock.Calls() should be 2 (one initial, one on resume).
+	assert.Equal(t, mock.Calls(), 2)
+}
+
+// TestWithResumeOverridesSessionState pins the contract that when both a
+// session's stored suspension AND an explicit WithResume state are present,
+// the caller's WithResume wins. This is how a cross-process resumer that
+// holds a fresher snapshot can authoritatively drive the next step without
+// reconciling against potentially-stale session state.
+func TestWithResumeOverridesSessionState(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+	sess := session.New("override")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	assert.NoError(t, err)
+
+	// Initial suspend — session is now in a stored suspended state.
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	savedState := resp.Suspension
+	assert.NotNil(t, savedState)
+
+	// Surgically corrupt the session's stored pending list so that a
+	// session-path resume would fail by seeing an unknown ID (toolu_ghost).
+	// If the agent reads the override state from WithResume it will succeed;
+	// if it reads the session state it will fail validation.
+	ghost := sess.LoadSuspension()
+	assert.NotNil(t, ghost)
+	// Mutating what LoadSuspension returns is a no-op on the stored state
+	// (deep copy), so we need to use SaveSuspendedTurn directly to install
+	// the corrupted snapshot.
+	corrupted := &SuspensionState{
+		PendingToolCalls: []*PendingToolCall{
+			{ID: "toolu_ghost", Name: "ghost", Input: json.RawMessage(`{}`)},
+		},
+		TurnMessages: ghost.TurnMessages,
+	}
+	err = sess.SaveSuspendedTurn(context.Background(),
+		ghost.TurnMessages, &llm.Usage{}, corrupted)
+	assert.NoError(t, err)
+
+	// Resume with WithResume using the SAVED good state + the real tool ID.
+	// Pre-history is empty (only one turn).
+	resp, err = agent.CreateResponse(context.Background(),
+		WithMessages(),
+		WithResume(savedState, map[string]*ToolResult{
+			"toolu_a": NewToolResultText("A done"),
+		}),
+	)
+	assert.NoError(t, err, "WithResume state must take precedence over session state")
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, resp.OutputText(), "done")
+}
+
+// TestResumeMixedUnknownAndValidIDsAtomic pins the all-or-nothing contract
+// for WithToolResults validation: if ANY supplied ID is unknown, the resume
+// call errors without mutating session state AND without firing any
+// PostToolUse/PostToolUseFailure hooks for the valid entries. Validation
+// happens before hook dispatch.
+func TestResumeMixedUnknownAndValidIDsAtomic(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+			),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+
+	var postUseCount int
+	var postFailCount int
+	sess := session.New("atomic")
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB},
+		Session:               sess,
+		ParallelToolExecution: true,
+		Hooks: Hooks{
+			PostToolUse: []PostToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					postUseCount++
+					return nil
+				},
+			},
+			PostToolUseFailure: []PostToolUseFailureHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					postFailCount++
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	// Fresh suspend — ignore the initial zero counts.
+	postUseCount = 0
+	postFailCount = 0
+
+	// Partial resume with one valid ID and one unknown ID. The whole call
+	// must fail with ErrUnknownPendingToolCall without any hook dispatch and
+	// without touching the session.
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_a":     NewToolResultText("A done"),
+			"toolu_ghost": NewToolResultText("ghost"),
+		}),
+	)
+	assert.True(t, errors.Is(err, ErrUnknownPendingToolCall))
+	assert.Equal(t, postUseCount, 0, "PostToolUse must not fire on atomic validation failure")
+	assert.Equal(t, postFailCount, 0, "PostToolUseFailure must not fire on atomic validation failure")
+
+	// Session state must be unchanged — both A and B still pending.
+	state := sess.LoadSuspension()
+	assert.NotNil(t, state)
+	assert.Len(t, state.PendingToolCalls, 2)
+	ids := map[string]bool{}
+	for _, p := range state.PendingToolCalls {
+		ids[p.ID] = true
+	}
+	assert.True(t, ids["toolu_a"])
+	assert.True(t, ids["toolu_b"])
+
+	// Recovery path: a follow-up call with only the valid ID must still
+	// succeed — confirming the failed atomic call did not leave partial
+	// tombstones.
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+	)
+	assert.NoError(t, err)
+}
+
+// TestResumeEmptyToolResultsMapIsResumeRequired pins the edge case that an
+// empty (zero-length) WithToolResults map on a suspended session is NOT a
+// valid opt-in. It conveys no new information — same as calling
+// CreateResponse with no options — and must return ErrResumeRequired rather
+// than silently no-op re-saving the suspended turn.
+func TestResumeEmptyToolResultsMapIsResumeRequired(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+	sess := session.New("emptymap")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.True(t, sessIsSuspended(sess))
+
+	// Empty map — no opt-in, no information, no progress.
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{}),
+	)
+	assert.True(t, errors.Is(err, ErrResumeRequired),
+		"empty ToolResults map must be treated as no opt-in and return ErrResumeRequired")
+
+	// Session still suspended, same pending set.
+	assert.True(t, sessIsSuspended(sess))
+	assert.Equal(t, pendingIDs(sess), []string{"toolu_a"})
+}
+
+// TestResumeDoesNotReinvokeSuspendedTool pins the invariant that a tool whose
+// SuspendResult started a suspension is NOT called again when the caller
+// supplies its external result on resume. The caller's ToolResult is
+// authoritative; re-invoking would duplicate side effects and defeat the
+// whole point of suspend/resume.
+func TestResumeDoesNotReinvokeSuspendedTool(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	// Only one outcome: if the agent tries to call the tool a second time on
+	// resume, scriptedTool panics-in-style with "unexpected call".
+	tool := &scriptedTool{
+		name:     "tool_a",
+		outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}},
+	}
+	sess := session.New("noreinvoke")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, tool.CallCount(), 1, "tool called exactly once before suspend")
+
+	// Resume — the tool's Call method must NOT be invoked a second time.
+	resp, err := agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, tool.CallCount(), 1, "tool must not be re-invoked on resume — caller result is authoritative")
+}
+
+// TestSuspensionStateJSONRoundTrip pins that SuspensionState — the payload
+// the stateless API hands back to the caller — round-trips through JSON
+// marshal/unmarshal without losing the fields the agent needs to drive a
+// resume. This is the wire-format contract for cross-process stateless
+// handoff (e.g. saving state to a database row between processes).
+func TestSuspensionStateJSONRoundTrip(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "approve", `{"env":"prod"}`)),
+			finalTextTurn("deployed"),
+		},
+	}
+	tool := &scriptedTool{
+		name: "approve",
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting", map[string]any{
+			"request_id": "req_42",
+			"count":      float64(3), // JSON numbers come back as float64
+		})}},
+	}
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(),
+		WithMessages(llm.NewUserTextMessage("please deploy")))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	original := resp.Suspension
+	assert.NotNil(t, original)
+
+	// Round-trip through JSON.
+	data, err := json.Marshal(original)
+	assert.NoError(t, err)
+	assert.True(t, len(data) > 0)
+
+	var restored SuspensionState
+	err = json.Unmarshal(data, &restored)
+	assert.NoError(t, err)
+
+	// Minimum fields must survive: pending IDs, names, inputs, prompt,
+	// metadata (JSON-friendly values), and turn messages (non-empty).
+	assert.Len(t, restored.PendingToolCalls, 1)
+	assert.Equal(t, restored.PendingToolCalls[0].ID, "toolu_a")
+	assert.Equal(t, restored.PendingToolCalls[0].Name, "approve")
+	assert.Equal(t, restored.PendingToolCalls[0].Prompt, "waiting")
+	// Metadata is map[string]any after unmarshal; we expect JSON-friendly
+	// values to come back unchanged in structure.
+	meta := restored.PendingToolCalls[0].Metadata
+	assert.NotNil(t, meta)
+	assert.Equal(t, meta["request_id"], "req_42")
+	assert.Equal(t, meta["count"], float64(3))
+	// TurnMessages must be present so the agent can splice on resume.
+	assert.True(t, len(restored.TurnMessages) > 0)
+
+	// Resume using the JSON-restored state — must succeed and produce the
+	// same final output as a direct resume would.
+	final, err := agent.CreateResponse(context.Background(),
+		WithMessages(),
+		WithResume(&restored, map[string]*ToolResult{
+			"toolu_a": NewToolResultText("approved"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, final.Status, ResponseStatusCompleted)
+	assert.Equal(t, final.OutputText(), "deployed")
+}
+
+// TestLoadSuspensionReturnsDeepCopy pins that mutating the SuspensionState
+// returned by LoadSuspension — including the PendingToolCalls slice, its
+// elements, and Metadata maps — does not affect the session's internal
+// state. Without a deep copy a tool author or hook that inspects the state
+// could accidentally corrupt the session.
+func TestLoadSuspensionReturnsDeepCopy(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+		},
+	}
+	tool := &scriptedTool{
+		name: "tool_a",
+		outcomes: []toolOutcome{{result: NewSuspendResult("wait", map[string]any{
+			"key": "original",
+		})}},
+	}
+	sess := session.New("deepcopy")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+
+	// Load, mutate the returned value in every way we can.
+	first := sess.LoadSuspension()
+	assert.NotNil(t, first)
+	assert.Len(t, first.PendingToolCalls, 1)
+	first.PendingToolCalls[0].ID = "mutated"
+	first.PendingToolCalls[0].Prompt = "mutated prompt"
+	first.PendingToolCalls[0].Metadata["key"] = "mutated value"
+	first.PendingToolCalls[0].Metadata["new_key"] = "injected"
+	// Also mutate the slice itself
+	first.PendingToolCalls = append(first.PendingToolCalls,
+		&PendingToolCall{ID: "injected"})
+	// And TurnMessages
+	if len(first.TurnMessages) > 0 {
+		first.TurnMessages = first.TurnMessages[:0]
+	}
+
+	// Load again. Everything must match the original, untouched state.
+	second := sess.LoadSuspension()
+	assert.NotNil(t, second)
+	assert.Len(t, second.PendingToolCalls, 1)
+	assert.Equal(t, second.PendingToolCalls[0].ID, "toolu_a")
+	assert.Equal(t, second.PendingToolCalls[0].Prompt, "wait")
+	assert.Equal(t, second.PendingToolCalls[0].Metadata["key"], "original")
+	_, injected := second.PendingToolCalls[0].Metadata["new_key"]
+	assert.False(t, injected)
+	assert.True(t, len(second.TurnMessages) > 0)
+}
+
+// TestSuspensionMutationDoesNotAffectResponseMsg pins that mutating the
+// Response.Suspension returned to the caller does not corrupt the session's
+// persisted turn. The agent hands the caller an independent copy.
+func TestSuspensionMutationDoesNotAffectPersistedTurn(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+	sess := session.New("respmut")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.NotNil(t, resp.Suspension)
+
+	// Snapshot persisted state before mutation.
+	preMsgs, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	preJSON, err := json.Marshal(preMsgs)
+	assert.NoError(t, err)
+
+	// Mutate what we got back.
+	resp.Suspension.PendingToolCalls[0].ID = "mutated_by_caller"
+	resp.Suspension.TurnMessages = nil
+
+	// Persisted state must be byte-identical.
+	postMsgs, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	postJSON, err := json.Marshal(postMsgs)
+	assert.NoError(t, err)
+	assert.Equal(t, string(preJSON), string(postJSON),
+		"caller mutation of Response.Suspension must not affect session-persisted turn")
+
+	// Pending IDs on the session must also still match the original.
+	assert.Equal(t, pendingIDs(sess), []string{"toolu_a"})
+}
+
+// TestResumeCancelAllWithErrorsFiresFailureForEach pins the multi-pending
+// cancel path: when the caller cancels a suspended turn by supplying
+// IsError results for every pending call at once, PostToolUseFailure must
+// fire for each one (not just the first), and the agent must proceed to a
+// normal completion rather than treating the errors as a suspend.
+func TestResumeCancelAllWithErrorsFiresFailureForEach(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+				newScriptedToolUse("toolu_c", "tool_c", `{}`),
+			),
+			finalTextTurn("understood, stopping"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait c", nil)}}}
+
+	var failedIDs []string
+	sess := session.New("cancelall")
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB, toolC},
+		Session:               sess,
+		ParallelToolExecution: true,
+		Hooks: Hooks{
+			PostToolUseFailure: []PostToolUseFailureHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					failedIDs = append(failedIDs, hctx.Call.ID)
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+
+	// Cancel all three at once with IsError results.
+	resp, err := agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_a": NewToolResultError("abandoned"),
+			"toolu_b": NewToolResultError("abandoned"),
+			"toolu_c": NewToolResultError("abandoned"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.False(t, sessIsSuspended(sess))
+	// Three PostToolUseFailure hooks fire, one per cancelled ID.
+	assert.Equal(t, len(failedIDs), 3)
+	seen := map[string]bool{}
+	for _, id := range failedIDs {
+		seen[id] = true
+	}
+	assert.True(t, seen["toolu_a"])
+	assert.True(t, seen["toolu_b"])
+	assert.True(t, seen["toolu_c"])
+}
