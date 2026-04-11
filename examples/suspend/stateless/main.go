@@ -1,10 +1,21 @@
 // stateless shows suspend/resume with no Session at all.
 //
-// The caller manages the message history and the SuspensionState
+// The caller manages the pre-turn message history and the SuspensionState
 // themselves, serializing both to disk between runs. This mirrors the
-// async_webhook example structurally, but replaces FileStore with a
-// plain JSON file holding the history and state, proving that Dive's
-// suspend/resume works without buying into the Session abstraction.
+// async_webhook example structurally, but replaces FileStore with a plain
+// JSON file, proving that Dive's suspend/resume works without buying into
+// the Session abstraction.
+//
+// The pattern:
+//
+//   - preHistory holds every message from completed turns.
+//   - Response.Suspension carries the in-progress turn (TurnMessages) plus
+//     the pending tool calls.
+//   - On resume the caller passes WithMessages(preHistory...) and
+//     WithResume(saved, results). The agent splices state.TurnMessages
+//     onto preHistory to reconstruct the full conversation.
+//   - On completion the agent populates Response.Suspension with the final
+//     merged turn so the caller can flush it into preHistory in one append.
 //
 // Run twice against the same state file:
 //
@@ -46,12 +57,16 @@ func sendEmailTool() dive.Tool {
 		})
 }
 
-// savedState is everything the stateless caller tracks between calls.
-// It's the exact data a session would store on the caller's behalf —
-// persisted here as plain JSON to make it concrete.
+// savedState is everything the stateless caller tracks between calls. It's
+// exactly the data a session would store on the caller's behalf — persisted
+// here as plain JSON to make it concrete.
+//
+//   - PreHistory holds every message from completed turns.
+//   - Suspension holds the SuspensionState (pending calls plus the
+//     in-progress TurnMessages) from the most recent suspended Response.
 type savedState struct {
-	Messages   []*llm.Message         `json:"messages"`
-	Suspension *dive.SuspensionState  `json:"suspension,omitempty"`
+	PreHistory []*llm.Message        `json:"pre_history"`
+	Suspension *dive.SuspensionState `json:"suspension,omitempty"`
 }
 
 func loadState(path string) (*savedState, error) {
@@ -101,10 +116,12 @@ func main() {
 			log.Fatalf("state file %q already exists — run with -mode=resume or delete it", statePath)
 		}
 
-		history := []*llm.Message{
-			llm.NewUserTextMessage("Email alice@example.com subject 'Nightly report' body 'All jobs green.'"),
-		}
-		resp, err := agent.CreateResponse(ctx, dive.WithMessages(history...))
+		// Fresh turn. PreHistory is empty for this example; we pass the
+		// kickoff user message directly via WithMessages.
+		kickoff := llm.NewUserTextMessage(
+			"Email alice@example.com subject 'Nightly report' body 'All jobs green.'",
+		)
+		resp, err := agent.CreateResponse(ctx, dive.WithMessages(kickoff))
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -113,9 +130,12 @@ func main() {
 			return
 		}
 
-		// Save (history ++ OutputMessages) and the suspension state.
-		history = append(history, resp.OutputMessages...)
-		s := &savedState{Messages: history, Suspension: resp.Suspension}
+		// The kickoff + agent output live inside resp.Suspension.TurnMessages.
+		// PreHistory is whatever came before (empty on a first turn).
+		s := &savedState{
+			PreHistory: nil,
+			Suspension: resp.Suspension,
+		}
 		if err := writeState(statePath, s); err != nil {
 			log.Fatal(err)
 		}
@@ -138,18 +158,35 @@ func main() {
 			results[p.ID] = dive.NewToolResultText("Email delivered successfully (message-id: msg_" + p.ID + ")")
 		}
 
+		// One bundled option carries the saved state and the tool results.
+		// The caller still passes their pre-turn history via WithMessages;
+		// the agent internally splices state.TurnMessages onto it.
 		resp, err := agent.CreateResponse(ctx,
-			dive.WithMessages(s.Messages...),
-			dive.WithSuspension(s.Suspension),
-			dive.WithToolResults(results),
+			dive.WithMessages(s.PreHistory...),
+			dive.WithResume(s.Suspension, results),
 		)
 		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println("\nAgent:", resp.OutputText())
 
-		// Clean up the state file on success.
-		_ = os.Remove(statePath)
+		// On completion the agent populates resp.Suspension with the final
+		// merged turn. Flush it into PreHistory in one append, clear the
+		// suspension, and persist — in a real system the updated state file
+		// is what the next turn would pick up.
+		if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) == 0 {
+			s.PreHistory = append(s.PreHistory, resp.Suspension.TurnMessages...)
+			s.Suspension = nil
+			_ = writeState(statePath, s)
+		}
+
+		// Still-suspended partial resume would set s.Suspension = resp.Suspension
+		// and re-save. Not exercised in this single-pending example.
+
+		// Clean up the state file on full completion.
+		if s.Suspension == nil {
+			_ = os.Remove(statePath)
+		}
 
 	default:
 		log.Fatalf("unknown mode %q", mode)

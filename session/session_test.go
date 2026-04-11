@@ -512,7 +512,9 @@ func singleSuspensionState() *dive.SuspensionState {
 		PendingToolCalls: []*dive.PendingToolCall{
 			{ID: "toolu_a", Name: "approve", Input: []byte(`{}`)},
 		},
-		TurnMessageCount: 3,
+		// TurnMessages is populated by the session from the last event
+		// on LoadSuspension — we don't need to seed it here because the
+		// round-trip tests read the state through that path.
 	}
 }
 
@@ -531,6 +533,9 @@ func TestMemoryStoreSuspendRoundTrip(t *testing.T) {
 	assert.NotNil(t, state)
 	assert.Equal(t, len(state.PendingToolCalls), 1)
 	assert.Equal(t, state.PendingToolCalls[0].ID, "toolu_a")
+	// LoadSuspension populates TurnMessages from the last event so stateless
+	// and session-backed callers see the same shape.
+	assert.Equal(t, len(state.TurnMessages), len(msgs))
 
 	got, _ := sess.Messages(ctx)
 	assert.Equal(t, len(got), len(msgs))
@@ -559,8 +564,63 @@ func TestFileStoreSuspendRoundTrip(t *testing.T) {
 	assert.NotNil(t, state)
 	assert.Equal(t, len(state.PendingToolCalls), 1)
 	assert.Equal(t, state.PendingToolCalls[0].ID, "toolu_a")
+	assert.Equal(t, len(state.TurnMessages), len(msgs),
+		"LoadSuspension must carry the in-progress turn across process restarts")
 	got, _ := sess2.Messages(ctx)
 	assert.Equal(t, len(got), len(msgs))
+}
+
+func TestListFilterSuspended(t *testing.T) {
+	ctx := context.Background()
+
+	stores := []struct {
+		name string
+		open func(t *testing.T) session.Store
+	}{
+		{
+			name: "memory",
+			open: func(t *testing.T) session.Store { return session.NewMemoryStore() },
+		},
+		{
+			name: "file",
+			open: func(t *testing.T) session.Store {
+				s, err := session.NewFileStore(t.TempDir())
+				assert.NoError(t, err)
+				return s
+			},
+		},
+	}
+
+	for _, tc := range stores {
+		t.Run(tc.name, func(t *testing.T) {
+			store := tc.open(t)
+
+			normal, _ := store.Open(ctx, "normal")
+			_ = normal.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("hi")}, nil)
+
+			suspended, _ := store.Open(ctx, "suspended")
+			_ = suspended.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState())
+
+			trueVal, falseVal := true, false
+
+			// Suspended-only
+			res, err := store.List(ctx, &session.ListOptions{Suspended: &trueVal})
+			assert.NoError(t, err)
+			assert.Equal(t, len(res.Sessions), 1)
+			assert.Equal(t, res.Sessions[0].ID, "suspended")
+
+			// Non-suspended only
+			res, err = store.List(ctx, &session.ListOptions{Suspended: &falseVal})
+			assert.NoError(t, err)
+			assert.Equal(t, len(res.Sessions), 1)
+			assert.Equal(t, res.Sessions[0].ID, "normal")
+
+			// No filter returns both
+			res, err = store.List(ctx, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, len(res.Sessions), 2)
+		})
+	}
 }
 
 func TestFileStoreListReportsSuspended(t *testing.T) {

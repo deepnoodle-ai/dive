@@ -50,7 +50,7 @@ func NewSuspend(s Spec) *dive.ToolResult {
 	if prompt == "" {
 		prompt = s.Title
 	}
-	return dive.NewSuspendResultWithMetadata(prompt, map[string]any{metaKey: s.toMap()})
+	return dive.NewSuspendResult(prompt, map[string]any{metaKey: s.toMap()})
 }
 
 // FromPending extracts a Spec from a PendingToolCall. Returns nil if the

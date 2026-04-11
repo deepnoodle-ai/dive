@@ -170,7 +170,7 @@ func TestSuspendSimple(t *testing.T) {
 	tool := &scriptedTool{
 		name: "approve",
 		outcomes: []toolOutcome{
-			{result: NewSuspendResult("waiting on alice")},
+			{result: NewSuspendResult("waiting on alice", nil)},
 		},
 	}
 	sess := session.New("s1")
@@ -202,7 +202,7 @@ func TestResumeSimple(t *testing.T) {
 	tool := &scriptedTool{
 		name: "approve",
 		outcomes: []toolOutcome{
-			{result: NewSuspendResult("waiting")},
+			{result: NewSuspendResult("waiting", nil)},
 		},
 	}
 	sess := session.New("s1")
@@ -249,11 +249,11 @@ func TestSuspendResumeSuspendAgain(t *testing.T) {
 	}
 	toolA := &scriptedTool{
 		name:     "tool_a",
-		outcomes: []toolOutcome{{result: NewSuspendResult("wait A")}},
+		outcomes: []toolOutcome{{result: NewSuspendResult("wait A", nil)}},
 	}
 	toolB := &scriptedTool{
 		name:     "tool_b",
-		outcomes: []toolOutcome{{result: NewSuspendResult("wait B")}},
+		outcomes: []toolOutcome{{result: NewSuspendResult("wait B", nil)}},
 	}
 	sess := session.New("multi")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{toolA, toolB}, Session: sess})
@@ -302,7 +302,7 @@ func TestParallelOneSuspends(t *testing.T) {
 	}
 	toolB := &scriptedTool{
 		name:     "tool_b",
-		outcomes: []toolOutcome{{result: NewSuspendResult("wait B")}},
+		outcomes: []toolOutcome{{result: NewSuspendResult("wait B", nil)}},
 	}
 	sess := session.New("par1")
 	agent, err := NewAgent(AgentOptions{
@@ -344,8 +344,8 @@ func TestParallelMultipleSuspend(t *testing.T) {
 		},
 	}
 	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewToolResultText("A")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait B")}}}
-	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait C")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait B", nil)}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait C", nil)}}}
 	sess := session.New("parmulti")
 	agent, err := NewAgent(AgentOptions{
 		Model:                 mock,
@@ -397,7 +397,7 @@ func TestSequentialSuspendSkipsTail(t *testing.T) {
 		},
 	}
 	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewToolResultText("A")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait B")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait B", nil)}}}
 	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewToolResultText("C")}}}
 	sess := session.New("seqsus")
 	agent, err := NewAgent(AgentOptions{
@@ -435,7 +435,7 @@ func TestResumeUnknownID(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("unknown")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -465,7 +465,7 @@ func TestResumeNoSuspendedState(t *testing.T) {
 	_, err = agent.CreateResponse(context.Background(),
 		WithToolResults(map[string]*ToolResult{"toolu_x": NewToolResultText("x")}),
 	)
-	assert.True(t, errors.Is(err, ErrNoSuspendedState))
+	assert.True(t, errors.Is(err, ErrNoSuspendedTurn))
 }
 
 func TestResumeErrorResultCancelsTurn(t *testing.T) {
@@ -478,7 +478,7 @@ func TestResumeErrorResultCancelsTurn(t *testing.T) {
 	tool := &scriptedTool{
 		name: "approve",
 		outcomes: []toolOutcome{
-			{result: NewSuspendResult("wait")},
+			{result: NewSuspendResult("wait", nil)},
 		},
 	}
 
@@ -516,7 +516,7 @@ func TestOnSuspendHookOrder(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 
 	var order []string
 	sess := session.New("hook_order")
@@ -554,7 +554,7 @@ func TestOnSuspendHookSeesPending(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait on alice")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait on alice", nil)}}}
 
 	var hookResponse *Response
 	sess := session.New("hook_sees")
@@ -587,7 +587,7 @@ func TestStreamingSuspendedItem(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("stream")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -642,9 +642,9 @@ func TestResumePostHooksFireInToolUseOrder(t *testing.T) {
 			finalTextTurn("done"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
-	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait c")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait c", nil)}}}
 
 	// Assert that we get the same ordering on repeated runs across different
 	// map seeds. We do this by running the resume many times and verifying
@@ -704,7 +704,7 @@ func TestResumeNotStartedRunsInParallel(t *testing.T) {
 			finalTextTurn("done"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewToolResultText("B done")}}}
 	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewToolResultText("C done")}}}
 
@@ -755,8 +755,8 @@ func TestResumeNotStartedReSuspends(t *testing.T) {
 			finalTextTurn("done"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
 	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewToolResultText("C done")}}}
 
 	sess := session.New("notstart_resus")
@@ -796,7 +796,7 @@ func TestSuspendedSessionInputReturnsError(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("inp")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -806,7 +806,7 @@ func TestSuspendedSessionInputReturnsError(t *testing.T) {
 
 	// Supplying new input on a suspended session must fail.
 	_, err = agent.CreateResponse(context.Background(), WithInput("more"))
-	assert.True(t, errors.Is(err, ErrSuspendedSessionInput))
+	assert.True(t, errors.Is(err, ErrInputOnSuspendedSession))
 	assert.True(t, sessIsSuspended(sess))
 }
 
@@ -840,7 +840,7 @@ func TestSuspendOnPlainSessionReturnsSuspendedResponse(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := &plainSession{id: "plain"}
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -863,7 +863,7 @@ func TestSuspendWithoutSessionReturnsSuspendedResponse(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}})
 	assert.NoError(t, err)
 
@@ -872,7 +872,7 @@ func TestSuspendWithoutSessionReturnsSuspendedResponse(t *testing.T) {
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
 	assert.NotNil(t, resp.Suspension)
 	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
-	assert.True(t, resp.Suspension.TurnMessageCount > 0)
+	assert.True(t, len(resp.Suspension.TurnMessages) > 0)
 }
 
 func TestPartialResumeTwice(t *testing.T) {
@@ -886,9 +886,9 @@ func TestPartialResumeTwice(t *testing.T) {
 			finalTextTurn("done"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
-	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait c")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait c", nil)}}}
 	sess := session.New("partial2")
 	agent, err := NewAgent(AgentOptions{
 		Model:                 mock,
@@ -948,7 +948,7 @@ func TestResumePostHookAbortPropagates(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("abort")
 	agent, err := NewAgent(AgentOptions{
 		Model:   mock,
@@ -988,7 +988,7 @@ func TestSuspendAccumulatesUsageAcrossResume(t *testing.T) {
 			},
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("usage")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -1013,7 +1013,7 @@ func TestSuspendedResponseMessagesIncludeAssistant(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("outmsgs")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -1048,7 +1048,7 @@ func TestSuspendedResponseItemsOrderParallel(t *testing.T) {
 		},
 	}
 	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewToolResultText("A")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
 	sess := session.New("items")
 	agent, err := NewAgent(AgentOptions{
 		Model:                 mock,
@@ -1085,7 +1085,7 @@ func TestResumeWithFileStoreCrossProcess(t *testing.T) {
 			finalTextTurn("done"),
 		},
 	}
-	suspendTool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	suspendTool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 
 	// Process A
 	{
@@ -1126,7 +1126,7 @@ func TestSuspendMetadataPreserved(t *testing.T) {
 	tool := &scriptedTool{
 		name: "tool_a",
 		outcomes: []toolOutcome{
-			{result: NewSuspendResultWithMetadata("wait", map[string]any{"owner": "alice", "urgency": "high"})},
+			{result: NewSuspendResult("wait", map[string]any{"owner": "alice", "urgency": "high"})},
 		},
 	}
 	mock := &scriptedLLM{
@@ -1159,7 +1159,7 @@ func TestResumeRestoresSessionHistoryForSecondCall(t *testing.T) {
 			finalTextTurn("second done"),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("history")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -1202,7 +1202,7 @@ func TestSetModelBetweenSuspendResume(t *testing.T) {
 			finalTextTurn("via B"),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("setmodel")
 	agent, err := NewAgent(AgentOptions{Model: modelA, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -1237,7 +1237,7 @@ func TestPartialResumeEventCountStable(t *testing.T) {
 		uses = append(uses, newScriptedToolUse(id, name, `{}`))
 		tools = append(tools, &scriptedTool{
 			name:     name,
-			outcomes: []toolOutcome{{result: NewSuspendResult("wait " + id)}},
+			outcomes: []toolOutcome{{result: NewSuspendResult("wait "+id, nil)}},
 		})
 	}
 	mock := &scriptedLLM{
@@ -1280,13 +1280,13 @@ func TestCrossProcessSuspendMetadata(t *testing.T) {
 	toolA := &scriptedTool{
 		name: "tool_a",
 		outcomes: []toolOutcome{{
-			result: NewSuspendResultWithMetadata("wait on alice", map[string]any{"owner": "alice", "severity": "high"}),
+			result: NewSuspendResult("wait on alice", map[string]any{"owner": "alice", "severity": "high"}),
 		}},
 	}
 	toolB := &scriptedTool{
 		name: "tool_b",
 		outcomes: []toolOutcome{{
-			result: NewSuspendResultWithMetadata("wait on bob", map[string]any{"owner": "bob", "severity": "low"}),
+			result: NewSuspendResult("wait on bob", map[string]any{"owner": "bob", "severity": "low"}),
 		}},
 	}
 	mock := &scriptedLLM{
@@ -1382,7 +1382,7 @@ func TestMixSequentialParallelAgentsOnSameSession(t *testing.T) {
 			finalTextTurn("done"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
 	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewToolResultText("B ok")}}}
 
 	sess := session.New("mixed")
@@ -1443,7 +1443,7 @@ func TestResumeNotStartedToolPanic(t *testing.T) {
 			finalTextTurn("recovered"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
 	toolB := &panickyTool{name: "tool_b"}
 
 	sess := session.New("panic_resume")
@@ -1486,7 +1486,7 @@ func TestSuspendOnLastIterationBoundary(t *testing.T) {
 		},
 	}
 	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewToolResultText("A")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait at boundary")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait at boundary", nil)}}}
 
 	sess := session.New("boundary")
 	agent, err := NewAgent(AgentOptions{
@@ -1547,7 +1547,7 @@ func TestResumeContextCancelMidExecution(t *testing.T) {
 			),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
 	toolB := &blockingTool{name: "tool_b", started: make(chan struct{})}
 	toolC := &blockingTool{name: "tool_c", started: make(chan struct{})}
 
@@ -1617,7 +1617,7 @@ func TestResumeCompletedIDReturnsError(t *testing.T) {
 		},
 	}
 	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewToolResultText("A done")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
 	sess := session.New("completed_id")
 	agent, err := NewAgent(AgentOptions{
 		Model:                 mock,
@@ -1657,7 +1657,7 @@ func TestForkSuspendedSessionClearsSuspension(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("fork_src")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -1678,7 +1678,7 @@ func TestCompactSuspendedSessionRefuses(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("cmp")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -1754,7 +1754,7 @@ func TestSaveSuspendedTurnErrorPropagates(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	failing := &failingSuspendableSession{
 		inner:   session.New("prop"),
 		saveErr: errors.New("disk full"),
@@ -1779,7 +1779,7 @@ func TestOnSuspendAbortRollsBack(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("rollback")
 	agent, err := NewAgent(AgentOptions{
 		Model:   mock,
@@ -1818,7 +1818,7 @@ func TestResumeTurnMessagesNoAliasing(t *testing.T) {
 			finalTextTurn("done"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
 	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewToolResultText("B")}}}
 	sess := session.New("nonalias")
 	agent, err := NewAgent(AgentOptions{
@@ -1863,7 +1863,7 @@ func TestSuspendedOutputMessagesInvariant(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("outmsgs_a")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -1881,8 +1881,8 @@ func TestSuspendedOutputMessagesInvariant(t *testing.T) {
 			),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
 	sess2 := session.New("outmsgs_b")
 	agent2, err := NewAgent(AgentOptions{
 		Model:                 mock2,
@@ -1920,34 +1920,40 @@ func TestStatelessSuspendAndResume(t *testing.T) {
 	}
 	tool := &scriptedTool{
 		name:     "approve",
-		outcomes: []toolOutcome{{result: NewSuspendResult("waiting for alice")}},
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting for alice", nil)}},
 	}
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}})
 	assert.NoError(t, err)
 
 	ctx := context.Background()
 
-	// Initial call — stateless; caller passes history via WithMessages.
-	history := []*llm.Message{llm.NewUserTextMessage("please deploy")}
-	resp, err := agent.CreateResponse(ctx, WithMessages(history...))
+	// Initial call — stateless; caller passes the kickoff via WithMessages.
+	// preHistory is empty for this test (first turn in the conversation).
+	var preHistory []*llm.Message
+	kickoff := llm.NewUserTextMessage("please deploy")
+	resp, err := agent.CreateResponse(ctx, WithMessages(kickoff))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
 	assert.NotNil(t, resp.Suspension)
 	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
 	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_a")
 	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Prompt, "waiting for alice")
-	assert.True(t, resp.Suspension.TurnMessageCount > 0)
+	assert.True(t, len(resp.Suspension.TurnMessages) > 0)
+	// The SuspensionState's TurnMessages holds the whole in-progress turn:
+	// kickoff + assistant tool_use + partial tool_result.
+	assert.True(t, len(resp.Suspension.TurnMessages) >= 2,
+		"TurnMessages should include at least the kickoff and assistant turn")
 
-	// Caller stores (history ++ resp.OutputMessages) and resp.Suspension.
-	resumedHistory := append([]*llm.Message{}, history...)
-	resumedHistory = append(resumedHistory, resp.OutputMessages...)
+	// Caller holds onto the state until resume. preHistory stays unchanged.
 	savedState := resp.Suspension
 
-	// Resume — still no session. Pass history + state + results.
+	// Resume — still no session. One bundled option (WithResume) carries
+	// both the state and the tool results; the caller passes their
+	// pre-turn history via WithMessages. The agent splices
+	// state.TurnMessages onto preHistory internally.
 	resp, err = agent.CreateResponse(ctx,
-		WithMessages(resumedHistory...),
-		WithSuspension(savedState),
-		WithToolResults(map[string]*ToolResult{
+		WithMessages(preHistory...),
+		WithResume(savedState, map[string]*ToolResult{
 			"toolu_a": NewToolResultText("approved"),
 		}),
 	)
@@ -1955,6 +1961,16 @@ func TestStatelessSuspendAndResume(t *testing.T) {
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, resp.OutputText(), "deployed")
 	assert.Equal(t, mock.Calls(), 2)
+
+	// On resume completion the agent populates resp.Suspension with the
+	// final merged turn so stateless callers can flush in one append.
+	assert.NotNil(t, resp.Suspension,
+		"resume completion must set Suspension with the merged turn")
+	assert.Nil(t, resp.Suspension.PendingToolCalls,
+		"completed resume has no pending")
+	assert.True(t, len(resp.Suspension.TurnMessages) > len(savedState.TurnMessages),
+		"merged turn must include the final assistant message")
+	_ = append(preHistory, resp.Suspension.TurnMessages...)
 }
 
 // Stateless multi-pending resume: two parallel suspends, both resolved in
@@ -1973,8 +1989,8 @@ func TestStatelessMultiPendingResume(t *testing.T) {
 			finalTextTurn("all done"),
 		},
 	}
-	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
-	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
 	agent, err := NewAgent(AgentOptions{
 		Model:                 mock,
 		Tools:                 []Tool{toolA, toolB},
@@ -1983,21 +1999,17 @@ func TestStatelessMultiPendingResume(t *testing.T) {
 	assert.NoError(t, err)
 
 	ctx := context.Background()
-	history := []*llm.Message{llm.NewUserTextMessage("go")}
+	var preHistory []*llm.Message
 
-	resp, err := agent.CreateResponse(ctx, WithMessages(history...))
+	resp, err := agent.CreateResponse(ctx, WithMessages(llm.NewUserTextMessage("go")))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
 	assert.Len(t, resp.Suspension.PendingToolCalls, 2)
 
-	savedHistory := append([]*llm.Message{}, history...)
-	savedHistory = append(savedHistory, resp.OutputMessages...)
-
 	// Full resume: supply both A and B at once → completion.
 	resp, err = agent.CreateResponse(ctx,
-		WithMessages(savedHistory...),
-		WithSuspension(resp.Suspension),
-		WithToolResults(map[string]*ToolResult{
+		WithMessages(preHistory...),
+		WithResume(resp.Suspension, map[string]*ToolResult{
 			"toolu_a": NewToolResultText("A done"),
 			"toolu_b": NewToolResultText("B done"),
 		}),
@@ -2015,7 +2027,7 @@ func TestSuspendedSessionNoOptInErrors(t *testing.T) {
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
-	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
 	sess := session.New("noopt")
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
@@ -2027,7 +2039,7 @@ func TestSuspendedSessionNoOptInErrors(t *testing.T) {
 	// No input, no tool results, no suspension: must error rather than
 	// silently no-op-rewrite the suspended turn.
 	_, err = agent.CreateResponse(context.Background())
-	assert.True(t, errors.Is(err, ErrSuspendedSessionNoOptIn))
+	assert.True(t, errors.Is(err, ErrResumeRequired))
 	assert.True(t, sessIsSuspended(sess))
 }
 
@@ -2132,7 +2144,7 @@ func TestStopHookContinueThenSuspend(t *testing.T) {
 	}
 	tool := &scriptedTool{
 		name:     "approve",
-		outcomes: []toolOutcome{{result: NewSuspendResult("waiting on alice")}},
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting on alice", nil)}},
 	}
 
 	stopCalls := 0
@@ -2188,9 +2200,9 @@ func TestStopHookContinueThenSuspend(t *testing.T) {
 	}
 	assert.True(t, foundToolUse, "iteration 2 assistant message should contain the tool_use block")
 
-	// TurnMessageCount should cover the original user input plus all three
-	// accumulated output messages.
-	assert.Equal(t, resp.Suspension.TurnMessageCount, 4)
+	// Suspension.TurnMessages should cover the original user input plus all
+	// three accumulated output messages.
+	assert.Equal(t, len(resp.Suspension.TurnMessages), 4)
 
 	// The second LLM call must have seen all three prior messages, not
 	// just the original input — otherwise the LLM wouldn't know why it

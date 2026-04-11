@@ -416,18 +416,115 @@ v1 surface):**
    `TestConcurrentCreateResponseOnSameSessionSerialized` (runs under
    `-race`). `dive.go` `WithToolResults` godoc and the `Session`
    interface godoc updated to describe the new guarantee.
-7. (L2) Document JSON metadata type-fidelity caveat in
-   `SuspendResult.Metadata` godoc.
+7. ✅ **(L2) Metadata type-fidelity caveat documented.**
+   `SuspendResult.Metadata` and `PendingToolCall.Metadata` godoc both
+   call out that values are round-tripped through JSON (so numeric
+   values come back as `float64` and custom struct types become
+   `map[string]any`).
 8. ✅ **(L4) `OnSuspend` hook contract doc aligned.** `hooks.go`
    `OnSuspendHook` godoc now refers to the current
    `Response.Suspension *SuspensionState` shape and explicitly notes
    that aborting in `OnSuspend` requires no compensating rollback
    because the hook runs before persistence. Sweep for any residual
    "abort then compensate" language came back clean.
-9. Cleanups: `withRollback` helper extraction in `session/session.go`,
-   lock-order comment in `memory_store.go`, example warning in
-   `async_webhook/main.go`.
+9. ✅ **Cleanups.** `withRollback` helper extraction in
+   `session/session.go` (both `SaveSuspendedTurn` and `SaveResumedTurn`
+   now route through it), lock-order comment in `memory_store.go`
+   (store → session, documented in `List`), and warning already in
+   `async_webhook/main.go` about `FileStore` single-writer-per-session.
 
 (H1 was descoped — single-writer-per-session is now the documented
 contract. Optional flock guardrail can be added later if useful.)
 (L3 and L5 are subsumed by item 1.)
+
+---
+
+## Final API polish pass (shipped in this PR)
+
+A second review pass focused on the *shape* of the public API. The
+priorities were (a) closing the stateless resume ergonomics gap,
+(b) eliminating the "three options to remember" pattern, and
+(c) killing confusing symbol names. Concretely:
+
+### `SuspensionState.TurnMessages` replaces `TurnMessageCount`
+
+Callers no longer reason in terms of trailing-message indices. The
+state now carries an actual `[]*llm.Message` slice of the in-progress
+turn (including the user input that kicked it off). The agent reads
+`len(state.TurnMessages)` internally to locate the turn boundary;
+stateless callers can pass the state back unchanged without any
+indexing math.
+
+### `WithResume(state, results)` bundles stateless resume
+
+`WithSuspension` is gone. Stateless callers use one option:
+
+```go
+resp, _ := agent.CreateResponse(ctx,
+    dive.WithMessages(preHistory...),
+    dive.WithResume(saved, results),
+)
+```
+
+`WithToolResults` stays for session-backed callers who want the
+session to provide the state automatically.
+
+### `Response.Suspension` on resume completion
+
+To close the last rough edge in the stateless flow, the agent now
+populates `Response.Suspension` on a *resume-completed* response as
+well as on a suspended one. The completed case has
+`PendingToolCalls == nil` but `TurnMessages` holds the final merged
+view (including the tool_result that got filled in during this
+resume call). Stateless callers flush the completed turn with a
+single append:
+
+```go
+if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) == 0 {
+    preHistory = append(preHistory, resp.Suspension.TurnMessages...)
+    saved = nil
+}
+```
+
+No reconciliation of a stale partial tool_result from the caller's
+saved state.
+
+### `NewSuspendResult` consolidated
+
+`NewSuspendResultWithMetadata` deleted. The single constructor now
+takes `(prompt string, metadata map[string]any)`; pass `nil` when no
+metadata is needed. Fewer symbols for the same capability.
+
+### Error renames
+
+Two public errors were renamed for clarity and to retire the
+dangling reference to a non-existent `AbandonSuspension` API:
+
+- `ErrSuspendedSessionNoOptIn` → `ErrResumeRequired`
+- `ErrSuspendedSessionInput` → `ErrInputOnSuspendedSession`
+- `ErrNoSuspendedState` → `ErrNoSuspendedTurn`
+
+Error messages were rewritten to reference the current options
+(`WithResume` / `WithToolResults`) instead of ghosts.
+
+### `ListOptions.Suspended` filter
+
+`session.ListOptions` gained a `Suspended *bool` field honored by
+both `MemoryStore.List` and `FileStore.List`. Use `&true` to find
+stale suspended sessions that may need to be reaped (answer each
+pending call with an `IsError` result and resume to drain it).
+`TestListFilterSuspended` pins the behavior across both stores.
+
+### Pinned by tests
+
+- `TestStatelessSuspendAndResume` and `TestStatelessMultiPendingResume`
+  rewritten to use the `preHistory + WithResume` pattern and to
+  assert that `resp.Suspension` on the completion carries the merged
+  `TurnMessages`.
+- `TestListFilterSuspended` is parametrized across `MemoryStore` and
+  `FileStore`.
+- `TestMemoryStoreSuspendRoundTrip` / `TestFileStoreSuspendRoundTrip`
+  now assert that `LoadSuspension()` surfaces `TurnMessages` to match
+  the stateless and session-backed paths.
+
+Full suite under `go test -race -count=1 ./...` is green.
