@@ -1,8 +1,8 @@
 ---
 Title: Agent Suspend/Resume for Long-Running Tool Calls
 Author: Curtis Myzie
-Status: Draft
-Last Updated: 2026-04-10
+Status: Implemented
+Last Updated: 2026-04-11
 Stakeholders: Dive maintainers
 ---
 
@@ -49,59 +49,60 @@ Without a first-class mechanism, every SaaS embedding of Dive has to reinvent th
 **Description:** As a tool author, I want to return a typed `SuspendResult` from my tool's `Call` method so that the agent suspends its turn and the caller can fulfill the tool result later.
 
 **Acceptance Criteria:**
-- [ ] A tool can return a typed `dive.SuspendResult` (or equivalent) from `Call` to signal suspension. Optional fields on the result allow the tool to attach a human-readable prompt or other metadata for the integrator.
-- [ ] When the agent observes this, the current `CreateResponse` unwinds without an error and without calling the LLM again.
-- [ ] The tool's `ToolUse` block is preserved in the conversation, but no `ToolResult` for it is written.
-- [ ] Documentation and at least one built-in toolkit tool (e.g. an `AskUser`-style tool) demonstrate the pattern.
+- [x] A tool can return a typed `dive.SuspendResult` (or equivalent) from `Call` to signal suspension. Optional fields on the result allow the tool to attach a human-readable prompt or other metadata for the integrator.
+- [x] When the agent observes this, the current `CreateResponse` unwinds without an error and without calling the LLM again.
+- [x] The tool's `ToolUse` block is preserved in the conversation, but no `ToolResult` for it is written.
+- [x] Documentation and runnable examples demonstrate the pattern (`docs/guides/suspend-resume.md` plus five examples under `examples/suspend/`: `human_approval`, `partial_resume`, `async_webhook`, `stateless`, and the shared `dialogspec`).
+- [ ] At least one built-in toolkit tool demonstrates suspend (e.g. an async-mode `AskUser`). **Not done** — `toolkit/ask_user.go` uses a synchronous in-process `Dialog` by design. Adding a suspend-mode option is a separate enhancement; the pattern is demonstrated in `examples/suspend/` for now.
 
 ### US-002: Caller observes a suspended response
 **Description:** As a SaaS integrator, I want `CreateResponse` to return a `Response` with a status field that clearly indicates the agent is suspended and which tool calls are awaiting external fulfillment.
 
 **Acceptance Criteria:**
-- [ ] `Response.Status` distinguishes `ResponseStatusCompleted` from `ResponseStatusSuspended`. Suspended responses are returned as normal `(*Response, nil)`, NOT as errors.
-- [ ] A suspended `Response` exposes `PendingToolCalls` — a list of pending tool call IDs, their tool names, their input payloads, and any metadata supplied by the tool's `SuspendResult`.
-- [ ] The caller can persist the response's session and return from their handler without holding any goroutines.
+- [x] `Response.Status` distinguishes `ResponseStatusCompleted` from `ResponseStatusSuspended`. Suspended responses are returned as normal `(*Response, nil)`, NOT as errors.
+- [x] A suspended `Response` exposes `PendingToolCalls` — a list of pending tool call IDs, their tool names, their input payloads, and any metadata supplied by the tool's `SuspendResult`. (Now nested under `Response.Suspension *SuspensionState`; `PendingToolCalls` is a field on the suspension.)
+- [x] The caller can persist the response's session and return from their handler without holding any goroutines.
 
 ### US-003: Caller resumes a suspended agent with a tool result
 **Description:** As a SaaS integrator, I want to resume a suspended agent by providing results for the pending tool calls so that the agent continues its turn as if the tool had returned normally.
 
 **Acceptance Criteria:**
-- [ ] A resume API accepts a map of `tool_call_id → ToolResult` and a session (or session ID).
-- [ ] On resume, the agent injects the provided results as a `ToolResult` message, skips the LLM generation for that step (the assistant message already exists), and re-enters the normal generation loop.
-- [ ] Resume works whether the same process or a different process (given a persistent `session.Store`) is driving it.
-- [ ] If the caller provides results for only some pending tool calls, resume errors clearly (see US-005 for the "all suspended" case).
+- [x] A resume API accepts a map of `tool_call_id → ToolResult` and a session (or session ID). Two entry points: `WithToolResults(map)` for session-backed callers, and `WithResume(state, map)` for stateless callers who manage history themselves.
+- [x] On resume, the agent injects the provided results as a `ToolResult` message, skips the LLM generation for that step (the assistant message already exists), and re-enters the normal generation loop.
+- [x] Resume works whether the same process or a different process (given a persistent `session.Store`) is driving it. Pinned by `TestResumeWithFileStoreCrossProcess`.
+- [x] If the caller provides results for tool call IDs that are not in the pending set, resume errors clearly (`ErrUnknownPendingToolCall`) without mutating session state. Partial coverage of pending calls (where some pending IDs are satisfied and some are not) keeps the agent suspended — see US-005.
 
 ### US-004: Parallel tool calls where one suspends (Option A)
 **Description:** As a tool author, I want non-suspending sibling tool calls to complete normally while a suspending sibling suspends the agent, so that work isn't wasted and the agent has partial results ready on resume.
 
 **Acceptance Criteria:**
-- [ ] When parallel tool execution includes at least one suspending tool, the non-suspending siblings run to completion.
-- [ ] Their results are persisted with the session as part of the suspended turn.
-- [ ] On resume, the caller only needs to supply results for the tool calls that actually suspended — the completed siblings are already in place.
-- [ ] Hooks (`PostToolUse`, `PostToolUseFailure`) fire normally for the completed siblings; suspending tools do NOT fire `PostToolUse` (since there is no result yet).
+- [x] When parallel tool execution includes at least one suspending tool, the non-suspending siblings run to completion.
+- [x] Their results are persisted with the session as part of the suspended turn.
+- [x] On resume, the caller only needs to supply results for the tool calls that actually suspended — the completed siblings are already in place.
+- [x] Hooks (`PostToolUse`, `PostToolUseFailure`) fire normally for the completed siblings; suspending tools do NOT fire `PostToolUse` (since there is no result yet).
 
 ### US-005: Multiple simultaneous suspensions
 **Description:** As a tool author, I want two or more tool calls in the same iteration to be able to suspend concurrently, so that a single turn can wait on multiple external inputs at once.
 
 **Acceptance Criteria:**
-- [ ] If multiple parallel tool calls return the suspend signal, the `Response.PendingToolCalls` includes all of them.
-- [ ] Resume accepts results for all pending calls at once, or for a subset — if a subset is supplied, the remaining ones stay pending and the agent stays suspended.
-- [ ] Resuming with all pending results satisfied transitions the agent back to the generation loop in a single call.
+- [x] If multiple parallel tool calls return the suspend signal, the `Response.PendingToolCalls` includes all of them.
+- [x] Resume accepts results for all pending calls at once, or for a subset — if a subset is supplied, the remaining ones stay pending and the agent stays suspended. Pinned by `TestPartialResumeTwice`.
+- [x] Resuming with all pending results satisfied transitions the agent back to the generation loop in a single call.
 
 ### US-006: Suspend state survives process restart
 **Description:** As a SaaS integrator using a persistent `session.Store`, I want to restart my process and still be able to resume a suspended agent so that long waits (hours, days) are not bounded by process lifetime.
 
 **Acceptance Criteria:**
-- [ ] The suspended turn — assistant message with tool_use blocks, any completed sibling tool results — is persisted via the session before `CreateResponse` returns.
-- [ ] After a process restart, opening the same session shows the agent in a suspended state with the same pending tool calls.
-- [ ] Resume from the new process produces the same final output as resume from the original process would have.
+- [x] The suspended turn — assistant message with tool_use blocks, any completed sibling tool results — is persisted via the session before `CreateResponse` returns.
+- [x] After a process restart, opening the same session shows the agent in a suspended state with the same pending tool calls.
+- [x] Resume from the new process produces the same final output as resume from the original process would have. Pinned by `TestResumeWithFileStoreCrossProcess` and `TestCrossProcessSuspendMetadata`.
 
 ### US-007: Cancel a suspended agent
 **Description:** As a SaaS integrator, I want to cancel a suspended agent (e.g. the user abandoned the workflow) and clean up without corrupting the session so that the conversation can be discarded or continued as a fresh turn.
 
 **Acceptance Criteria:**
-- [ ] There is a documented way to finalize a suspended session — either by supplying an error result for each pending tool call, or by a `CancelTurn` API that rolls back the partial turn.
-- [ ] After cancellation, starting a new `CreateResponse` on the session does not leave dangling tool_use blocks without matching tool_results.
+- [x] There is a documented way to finalize a suspended session — supplying an `IsError: true` `ToolResult` for each pending tool call. The error results flow through the normal `PostToolUseFailure` path; a dedicated `CancelTurn` API was deferred to v2 (see §6 Non-Goals). Pinned by `TestResumeErrorResultCancelsTurn`.
+- [x] After cancellation, starting a new `CreateResponse` on the session does not leave dangling tool_use blocks without matching tool_results.
 
 ## 5. Functional Requirements
 
