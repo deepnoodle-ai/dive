@@ -30,8 +30,20 @@
 //
 // # Wire format
 //
-// The prototype targets A2A wire format v0.2 (JSON-RPC method names like
-// "message/send", hyphenated task state strings like "input-required", and
-// the "kind" part discriminator). This is the form most deployed clients
-// speak today. Later revisions of this package may add v1.0 aliases.
+// The package targets the current A2A JSON-RPC binding: method names like
+// "message/send"/"message/stream"/"tasks/get"/"tasks/cancel", hyphenated
+// lowercase task state strings ("input-required", "completed"), and "kind"
+// discriminators on Part, Message, Task, TaskStatusUpdateEvent, and
+// TaskArtifactUpdateEvent. Custom MarshalJSON implementations on the
+// types fill in safe defaults so manually constructed values still
+// validate against strict A2A clients.
+//
+// The agent card is served at the canonical
+// /.well-known/agent-card.json path; the legacy /.well-known/agent.json
+// path is also served for older clients. The client fetches the
+// canonical path and falls back to the legacy path on 404.
+//
+// Phase 1 has been cross-validated against the official a2a-python SDK in
+// both directions; see experimental/a2a/interop_test.go (build tag
+// "interop") and docs/guides/experimental/a2a.md for details.
 package a2a

@@ -12,9 +12,14 @@ const (
 	MethodTasksCancel   = "tasks/cancel"
 )
 
-// DefaultAgentCardPath is the well-known URL path at which an A2A agent
-// card is served.
-const DefaultAgentCardPath = "/.well-known/agent.json"
+// DefaultAgentCardPath is the canonical well-known URL path at which an
+// A2A agent card is served, per the current A2A spec.
+const DefaultAgentCardPath = "/.well-known/agent-card.json"
+
+// LegacyAgentCardPath is the previous A2A well-known URL path. The server
+// adapter serves the same card body at this path so older clients keep
+// working; new clients should use DefaultAgentCardPath.
+const LegacyAgentCardPath = "/.well-known/agent.json"
 
 // JSON-RPC error codes reserved by the A2A spec. Values in the
 // -32000..-32099 range are server-defined in JSON-RPC 2.0; A2A carves out

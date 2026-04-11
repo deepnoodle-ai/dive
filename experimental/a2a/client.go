@@ -15,17 +15,20 @@ import (
 )
 
 // Client is a low-level client for an A2A agent. It speaks JSON-RPC 2.0
-// over HTTP and knows how to fetch an agent card from
-// /.well-known/agent.json.
+// over HTTP and knows how to fetch an agent card from the well-known
+// path (/.well-known/agent-card.json, falling back to the legacy
+// /.well-known/agent.json for older servers).
 //
 // The Client wraps an *http.Client and a base endpoint URL. All public
 // methods are safe for concurrent use.
 type Client struct {
-	endpoint string
-	cardURL  string
-	http     *http.Client
-	headers  http.Header
-	reqID    atomic.Int64
+	endpoint       string
+	cardURL        string
+	legacyCardURL  string
+	cardURLOverride bool
+	http           *http.Client
+	headers        http.Header
+	reqID          atomic.Int64
 }
 
 // ClientOptions configures a Client.
@@ -56,57 +59,79 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	override := opts.CardURL != ""
 	cardURL := opts.CardURL
 	if cardURL == "" {
-		cardURL = deriveCardURL(opts.Endpoint)
+		cardURL = deriveCardURL(opts.Endpoint, DefaultAgentCardPath)
 	}
 	return &Client{
-		endpoint: opts.Endpoint,
-		cardURL:  cardURL,
-		http:     httpClient,
-		headers:  opts.Headers,
+		endpoint:        opts.Endpoint,
+		cardURL:         cardURL,
+		legacyCardURL:   deriveCardURL(opts.Endpoint, LegacyAgentCardPath),
+		cardURLOverride: override,
+		http:            httpClient,
+		headers:         opts.Headers,
 	}, nil
 }
 
 // deriveCardURL returns the well-known agent card URL for a given
-// endpoint, preserving scheme and authority.
-func deriveCardURL(endpoint string) string {
-	// Take the part before any path beyond scheme://host.
-	// We do this with a simple scan rather than importing net/url to
-	// keep the helper obvious.
+// endpoint at the supplied well-known path, preserving scheme and
+// authority.
+func deriveCardURL(endpoint, path string) string {
+	// Take the part before any path beyond scheme://host. A simple scan
+	// keeps the helper obvious without pulling in net/url.
 	schemeIdx := strings.Index(endpoint, "://")
 	if schemeIdx < 0 {
-		return strings.TrimRight(endpoint, "/") + DefaultAgentCardPath
+		return strings.TrimRight(endpoint, "/") + path
 	}
 	hostStart := schemeIdx + 3
 	pathIdx := strings.Index(endpoint[hostStart:], "/")
 	if pathIdx < 0 {
-		return endpoint + DefaultAgentCardPath
+		return endpoint + path
 	}
-	return endpoint[:hostStart+pathIdx] + DefaultAgentCardPath
+	return endpoint[:hostStart+pathIdx] + path
 }
 
 // FetchCard retrieves the remote agent's card from the well-known URL.
+// It tries the canonical /.well-known/agent-card.json path first; if that
+// returns 404 (and the caller did not explicitly override CardURL) it
+// falls back to the legacy /.well-known/agent.json path so older servers
+// that have not migrated still work.
 func (c *Client) FetchCard(ctx context.Context) (*AgentCard, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cardURL, nil)
+	card, status, err := c.fetchCardAt(ctx, c.cardURL)
+	if err == nil {
+		return card, nil
+	}
+	if status == http.StatusNotFound && !c.cardURLOverride && c.legacyCardURL != c.cardURL {
+		card, _, legacyErr := c.fetchCardAt(ctx, c.legacyCardURL)
+		if legacyErr == nil {
+			return card, nil
+		}
+	}
+	return nil, err
+}
+
+func (c *Client) fetchCardAt(ctx context.Context, url string) (*AgentCard, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	c.applyHeaders(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("a2a: fetch card: %w", err)
+		return nil, 0, fmt.Errorf("a2a: fetch card: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("a2a: fetch card: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return nil, resp.StatusCode, fmt.Errorf("a2a: fetch card: %s: %s",
+			resp.Status, strings.TrimSpace(string(body)))
 	}
 	var card AgentCard
 	if err := json.NewDecoder(resp.Body).Decode(&card); err != nil {
-		return nil, fmt.Errorf("a2a: decode card: %w", err)
+		return nil, resp.StatusCode, fmt.Errorf("a2a: decode card: %w", err)
 	}
-	return &card, nil
+	return &card, resp.StatusCode, nil
 }
 
 // SendMessage invokes message/send and returns the resulting Task.

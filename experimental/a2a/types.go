@@ -86,6 +86,7 @@ type Message struct {
 	MessageID string         `json:"messageId"`
 	Role      Role           `json:"role"`
 	Parts     []Part         `json:"parts"`
+	Kind      string         `json:"kind"`
 	TaskID    string         `json:"taskId,omitempty"`
 	ContextID string         `json:"contextId,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
@@ -130,55 +131,69 @@ type Artifact struct {
 }
 
 // Task is the top-level A2A task object returned by message/send and
-// tasks/get.
+// tasks/get. The wire schema requires Kind to be the literal string
+// "task"; the marshaler fills it in if it is empty.
 type Task struct {
 	ID        string         `json:"id"`
 	ContextID string         `json:"contextId"`
+	Kind      string         `json:"kind"`
 	Status    TaskStatus     `json:"status"`
 	History   []*Message     `json:"history,omitempty"`
 	Artifacts []*Artifact    `json:"artifacts,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
-	Kind      string         `json:"kind,omitempty"`
 }
 
 // TaskStatusUpdateEvent is a streaming update announcing a new TaskStatus.
+// The wire schema marks Kind, TaskID, ContextID, Status, and Final as
+// required fields, so they are always emitted (with zero defaults filled
+// in by the marshaler).
 type TaskStatusUpdateEvent struct {
 	TaskID    string         `json:"taskId"`
 	ContextID string         `json:"contextId"`
+	Kind      string         `json:"kind"`
 	Status    TaskStatus     `json:"status"`
-	Final     bool           `json:"final,omitempty"`
+	Final     bool           `json:"final"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
-	Kind      string         `json:"kind,omitempty"`
 }
 
 // TaskArtifactUpdateEvent is a streaming update announcing a new or updated
-// artifact.
+// artifact. The wire schema marks Kind, TaskID, ContextID, and Artifact as
+// required fields, so they are always emitted.
 type TaskArtifactUpdateEvent struct {
 	TaskID    string         `json:"taskId"`
 	ContextID string         `json:"contextId"`
+	Kind      string         `json:"kind"`
 	Artifact  *Artifact      `json:"artifact"`
 	Append    bool           `json:"append,omitempty"`
 	LastChunk bool           `json:"lastChunk,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
-	Kind      string         `json:"kind,omitempty"`
 }
 
 // ---- Agent Card ----
 
 // AgentCard describes an A2A agent: identity, endpoint, supported skills,
-// and capability flags. It is served at /.well-known/agent.json.
+// and capability flags. It is served at /.well-known/agent-card.json (and,
+// for backwards compatibility, /.well-known/agent.json).
+//
+// The A2A schema marks Name, Description, URL, Version, Capabilities,
+// DefaultInputModes, DefaultOutputModes, and Skills as required. The
+// custom MarshalJSON below fills in safe defaults when those fields are
+// empty so that a partially configured card still validates against
+// strict A2A clients.
 type AgentCard struct {
-	Name               string               `json:"name"`
-	Description        string               `json:"description,omitempty"`
-	URL                string               `json:"url"`
-	Version            string               `json:"version"`
-	DocumentationURL   string               `json:"documentationUrl,omitempty"`
-	Provider           *AgentProvider       `json:"provider,omitempty"`
-	Capabilities       AgentCapabilities    `json:"capabilities"`
-	DefaultInputModes  []string             `json:"defaultInputModes,omitempty"`
-	DefaultOutputModes []string             `json:"defaultOutputModes,omitempty"`
-	Skills             []AgentSkill         `json:"skills,omitempty"`
-	SecuritySchemes    map[string]any       `json:"securitySchemes,omitempty"`
+	Name               string                `json:"name"`
+	Description        string                `json:"description"`
+	URL                string                `json:"url"`
+	Version            string                `json:"version"`
+	ProtocolVersion    string                `json:"protocolVersion,omitempty"`
+	PreferredTransport string                `json:"preferredTransport,omitempty"`
+	DocumentationURL   string                `json:"documentationUrl,omitempty"`
+	Provider           *AgentProvider        `json:"provider,omitempty"`
+	Capabilities       AgentCapabilities     `json:"capabilities"`
+	DefaultInputModes  []string              `json:"defaultInputModes"`
+	DefaultOutputModes []string              `json:"defaultOutputModes"`
+	Skills             []AgentSkill          `json:"skills"`
+	SecuritySchemes    map[string]any        `json:"securitySchemes,omitempty"`
 	Security           []map[string][]string `json:"security,omitempty"`
 }
 
@@ -197,12 +212,13 @@ type AgentCapabilities struct {
 
 // AgentSkill is one coarse capability the agent advertises. A Dive agent
 // that exposes a single conversational surface typically publishes one
-// skill matching its name.
+// skill matching its name. The A2A schema marks ID, Name, Description, and
+// Tags as required; Tags is always emitted (as an empty array if unset).
 type AgentSkill struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
 	Examples    []string `json:"examples,omitempty"`
 	InputModes  []string `json:"inputModes,omitempty"`
 	OutputModes []string `json:"outputModes,omitempty"`
@@ -250,13 +266,79 @@ func (p *SendMessageParams) Validate() error {
 	return nil
 }
 
-// Ensure Message marshals to empty parts array rather than null for
-// compatibility with strict parsers.
+// MarshalJSON ensures Parts serializes to "[]" rather than null and that
+// Kind defaults to "message" so the wire payload satisfies strict A2A
+// validators.
 func (m Message) MarshalJSON() ([]byte, error) {
 	type alias Message
 	clone := alias(m)
 	if clone.Parts == nil {
 		clone.Parts = []Part{}
+	}
+	if clone.Kind == "" {
+		clone.Kind = "message"
+	}
+	return json.Marshal(clone)
+}
+
+// MarshalJSON defaults Kind to "task" so Task always carries the
+// discriminator the A2A schema requires.
+func (t Task) MarshalJSON() ([]byte, error) {
+	type alias Task
+	clone := alias(t)
+	if clone.Kind == "" {
+		clone.Kind = "task"
+	}
+	return json.Marshal(clone)
+}
+
+// MarshalJSON defaults Kind to "status-update" and ensures the
+// discriminator is always present on streamed status events.
+func (e TaskStatusUpdateEvent) MarshalJSON() ([]byte, error) {
+	type alias TaskStatusUpdateEvent
+	clone := alias(e)
+	if clone.Kind == "" {
+		clone.Kind = "status-update"
+	}
+	return json.Marshal(clone)
+}
+
+// MarshalJSON defaults Kind to "artifact-update" and ensures the
+// discriminator is always present on streamed artifact events.
+func (e TaskArtifactUpdateEvent) MarshalJSON() ([]byte, error) {
+	type alias TaskArtifactUpdateEvent
+	clone := alias(e)
+	if clone.Kind == "" {
+		clone.Kind = "artifact-update"
+	}
+	return json.Marshal(clone)
+}
+
+// MarshalJSON ensures the slice fields the A2A schema marks as required
+// (DefaultInputModes, DefaultOutputModes, Skills) serialize to empty
+// arrays rather than null when the caller has not set them.
+func (c AgentCard) MarshalJSON() ([]byte, error) {
+	type alias AgentCard
+	clone := alias(c)
+	if clone.DefaultInputModes == nil {
+		clone.DefaultInputModes = []string{}
+	}
+	if clone.DefaultOutputModes == nil {
+		clone.DefaultOutputModes = []string{}
+	}
+	if clone.Skills == nil {
+		clone.Skills = []AgentSkill{}
+	}
+	return json.Marshal(clone)
+}
+
+// MarshalJSON ensures Tags serializes to "[]" instead of null so the
+// resulting skill validates against strict A2A clients.
+func (s AgentSkill) MarshalJSON() ([]byte, error) {
+	type alias AgentSkill
+	clone := alias(s)
+	if clone.Tags == nil {
+		clone.Tags = []string{}
 	}
 	return json.Marshal(clone)
 }

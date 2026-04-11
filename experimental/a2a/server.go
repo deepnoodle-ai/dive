@@ -98,8 +98,30 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if card.Version == "" {
 		card.Version = "0.1.0"
 	}
+	if card.Description == "" {
+		card.Description = card.Name + " (Dive A2A agent)"
+	}
 	if card.URL == "" && opts.BaseURL != "" {
 		card.URL = strings.TrimRight(opts.BaseURL, "/") + opts.Path
+	}
+	if len(card.DefaultInputModes) == 0 {
+		card.DefaultInputModes = []string{"text/plain"}
+	}
+	if len(card.DefaultOutputModes) == 0 {
+		card.DefaultOutputModes = []string{"text/plain"}
+	}
+	if len(card.Skills) == 0 {
+		// Publish one default skill so the card validates against strict
+		// A2A clients without forcing every caller to enumerate skills.
+		card.Skills = []AgentSkill{{
+			ID:          "chat",
+			Name:        "chat",
+			Description: "General purpose conversational interface.",
+			Tags:        []string{"chat"},
+		}}
+	}
+	if card.PreferredTransport == "" {
+		card.PreferredTransport = "JSONRPC"
 	}
 	// Dive agents support streaming by default because CreateResponse
 	// exposes an event callback. Expose that in the card unless the
@@ -138,10 +160,16 @@ func (s *Server) Card() AgentCard {
 
 // Handler returns an http.Handler that serves the well-known agent card
 // and the JSON-RPC endpoint. Mount it at the root of your public origin
-// (the server picks out the two specific paths it handles internally).
+// (the server picks out the specific paths it handles internally). The
+// card is served at both the canonical /.well-known/agent-card.json path
+// and the legacy /.well-known/agent.json path so older clients keep
+// working.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(DefaultAgentCardPath, s.handleCard)
+	if LegacyAgentCardPath != DefaultAgentCardPath {
+		mux.HandleFunc(LegacyAgentCardPath, s.handleCard)
+	}
 	mux.HandleFunc(s.path, s.handleRPC)
 	return mux
 }

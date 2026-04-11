@@ -73,9 +73,10 @@ func main() {
 }
 ```
 
-The returned `http.Handler` serves two paths:
+The returned `http.Handler` serves these paths:
 
-- `GET /.well-known/agent.json` — the A2A agent card
+- `GET /.well-known/agent-card.json` — the canonical A2A agent card path
+- `GET /.well-known/agent.json` — the legacy path, kept for older clients
 - `POST /` (configurable via `ServerOptions.Path`) — the JSON-RPC endpoint
 
 ### Supported JSON-RPC methods
@@ -178,6 +179,25 @@ agent continues exactly where it paused.
 - Task cancellation only marks the stored record as canceled; it does not
   interrupt a Dive turn that is already executing. Cancel before sending
   new input on an `input-required` task for guaranteed cleanup.
+- The server only emits text content. `FilePart` and `DataPart` round-trip
+  through the wire types but the server-side adapter ignores them when
+  building task history and artifacts from a Dive `Response`.
+- The client returns `*Task` from `SendMessage`. The A2A spec also allows
+  the server to return a bare `Message` for direct replies; today we
+  decode that as a `Task` with empty fields (status checks will fail).
+  Talk to peers that always wrap replies in a Task — every server we have
+  tested (a2a-python, our own) does so by default.
+- Task cancellation is the only place we use the
+  `tasks/pushNotificationConfig/*` and `tasks/resubscribe` method strings
+  reserved by the spec; those endpoints are not implemented.
+- Phase 1 was validated against `a2a-sdk` (Python, current main as of
+  April 2026) in both directions. Our server passes the Python client's
+  agent-card validation, single-shot send, streaming, `tasks/get`, and
+  `tasks/cancel` checks. Our client successfully fetches the card,
+  sends/receives messages, and parses streamed events from a stock
+  Python `A2AStarletteApplication`. See `interop_test.go` for the
+  automated cross-validation (build-tag gated: `go test -tags interop
+  ./experimental/a2a/...`).
 
 ## Task storage
 
@@ -201,11 +221,23 @@ long as the store is shared.
 
 ## Wire format
 
-The prototype targets A2A v0.2 — hyphenated task state strings
-(`input-required`, `completed`), the `kind` discriminator on `Part`, and
-the `/.well-known/agent.json` path. A future revision may add v1.0
-aliases (`TASK_STATE_INPUT_REQUIRED`, `/.well-known/agent-card.json`) so
-that callers on either vintage of the spec interoperate.
+The package targets the current A2A JSON-RPC protocol binding:
+
+- Hyphenated lowercase task state strings (`input-required`, `completed`,
+  …) on the wire.
+- `kind` discriminators on `Part` (`text`/`file`/`data`), `Message`
+  (`message`), `Task` (`task`), `TaskStatusUpdateEvent` (`status-update`),
+  and `TaskArtifactUpdateEvent` (`artifact-update`). The Go marshalers
+  fill these in automatically when the field is unset.
+- JSON-RPC method names: `message/send`, `message/stream`, `tasks/get`,
+  `tasks/cancel`.
+- Agent card served at `/.well-known/agent-card.json` (canonical) **and**
+  `/.well-known/agent.json` (legacy alias for older clients). The client
+  fetches the canonical path and falls back to the legacy path on 404
+  unless `ClientOptions.CardURL` is set explicitly.
+
+Phase 1 has been validated against the official `a2a-sdk` (Python) in
+both directions; see the Phase 1 limits section for caveats.
 
 ## Boundaries
 
