@@ -315,18 +315,33 @@ func (s *FileStore) readSession(id string) (*sessionData, error) {
 
 // writeSession writes a complete session as a JSONL file (header + events).
 // Must be called with the write lock held.
+//
+// Writes go to a temp file in the same directory and are promoted via
+// os.Rename so a crash mid-write cannot truncate the live JSONL and lose
+// pending-call state — readers always see either the previous or the new
+// complete file.
 func (s *FileStore) writeSession(data *sessionData) error {
 	p, err := s.path(data.ID)
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(p)
+
+	dir := filepath.Dir(p)
+	base := filepath.Base(p)
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
+	// Ensure we clean up the temp file on any error path.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
-	w := bufio.NewWriter(f)
+	w := bufio.NewWriter(tmp)
 
 	hdr := sessionHeader{
 		ID:           data.ID,
@@ -340,31 +355,52 @@ func (s *FileStore) writeSession(data *sessionData) error {
 	}
 	hdrData, err := json.Marshal(hdr)
 	if err != nil {
+		tmp.Close()
 		return err
 	}
 	line := jsonlLine{LineType: "header", Data: hdrData}
 	encoded, err := json.Marshal(line)
 	if err != nil {
+		tmp.Close()
 		return err
 	}
 	if _, err := w.Write(append(encoded, '\n')); err != nil {
+		tmp.Close()
 		return err
 	}
 
 	for _, evt := range data.Events {
 		eventData, err := json.Marshal(evt)
 		if err != nil {
+			tmp.Close()
 			return err
 		}
 		line := jsonlLine{LineType: "event", Data: eventData}
 		encoded, err := json.Marshal(line)
 		if err != nil {
+			tmp.Close()
 			return err
 		}
 		if _, err := w.Write(append(encoded, '\n')); err != nil {
+			tmp.Close()
 			return err
 		}
 	}
 
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, p); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

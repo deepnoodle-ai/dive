@@ -91,11 +91,51 @@ func clonePendingCalls(src []PendingCall) []PendingCall {
 		}
 		if p.Metadata != nil {
 			cp.Metadata = make(map[string]any, len(p.Metadata))
-			maps.Copy(cp.Metadata, p.Metadata)
+			for k, v := range p.Metadata {
+				cp.Metadata[k] = deepCopyJSONValue(v)
+			}
 		}
 		out[i] = cp
 	}
 	return out
+}
+
+// deepCopyJSONValue returns a deep copy of a JSON-like value so callers
+// cannot mutate nested maps or slices held inside session internals.
+// Scalars (string, bool, numbers, nil) are returned as-is; maps and slices
+// are recursively copied. Unknown types fall back to a json round-trip so
+// we stay correct even when tools attach exotic payloads.
+func deepCopyJSONValue(v any) any {
+	switch val := v.(type) {
+	case nil, bool, string, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, float32, float64,
+		json.Number:
+		return val
+	case map[string]any:
+		cp := make(map[string]any, len(val))
+		for k, item := range val {
+			cp[k] = deepCopyJSONValue(item)
+		}
+		return cp
+	case []any:
+		cp := make([]any, len(val))
+		for i, item := range val {
+			cp[i] = deepCopyJSONValue(item)
+		}
+		return cp
+	case json.RawMessage:
+		return append(json.RawMessage(nil), val...)
+	default:
+		data, err := json.Marshal(val)
+		if err != nil {
+			return val
+		}
+		var out any
+		if err := json.Unmarshal(data, &out); err != nil {
+			return val
+		}
+		return out
+	}
 }
 
 // eventType identifies the kind of session event.
@@ -211,7 +251,18 @@ func (s *Session) Messages(ctx context.Context) ([]*llm.Message, error) {
 
 // SaveTurn persists messages from a single conversation turn.
 // The messages should include both the user input and the assistant response.
+//
+// Returns ErrSuspendedSession if the session is currently suspended: resume
+// completions must go through SaveResumedTurn, which is the only path that
+// clears the suspend flag and rewrites the store header. Allowing SaveTurn
+// to silently clear suspension would drop the partial tool_use/tool_result
+// messages the resume path depends on.
 func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.Suspended {
+		return ErrSuspendedSession
+	}
 	evt := &event{
 		ID:        newEventID(),
 		Type:      eventTypeTurn,
@@ -219,22 +270,9 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 		Messages:  messages,
 		Usage:     usage,
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Clear any stale suspend flag (defensive — callers should route resume
-	// completions through SaveResumedTurn, but SaveTurn must never leave the
-	// session in an inconsistent state).
-	wasSuspended := s.data.Suspended
-	s.data.Suspended = false
-	s.data.PendingCalls = nil
 	s.data.Events = append(s.data.Events, evt)
 	s.data.UpdatedAt = evt.Timestamp
 	if s.appender != nil {
-		if wasSuspended {
-			// When transitioning out of suspend via a raw SaveTurn, rewrite
-			// the whole session so the header's suspend flag clears.
-			return s.appender.putSession(ctx, s.data)
-		}
 		return s.appender.appendEvent(ctx, s.data.ID, evt)
 	}
 	return nil
