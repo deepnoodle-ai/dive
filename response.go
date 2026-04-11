@@ -58,6 +58,15 @@ const (
 )
 
 // PendingToolCall describes a tool call awaiting an external result.
+//
+// # Metadata type fidelity
+//
+// Metadata values are round-tripped through JSON whenever a SuspensionState
+// is deep-copied (during LoadSuspension, partial resume, etc.) or persisted
+// to disk. After a round trip, numeric values come back as float64 and custom
+// struct types become generic map[string]any. Tool authors attaching
+// structured metadata should expect this loss of type fidelity and stick to
+// JSON-friendly values.
 type PendingToolCall struct {
 	ID       string          `json:"id"`
 	Name     string          `json:"name"`
@@ -87,7 +96,18 @@ func DecodePendingInput[T any](p *PendingToolCall) (T, error) {
 
 // CompletedToolCall describes a tool call that ran to completion in the same
 // iteration where a sibling suspended. Informational — the result is already
-// persisted in the session (or in the messages the caller is tracking).
+// present in the turn's message history (and in the session, when one is
+// used). Exposed on SuspensionState so a SaaS UI can render "here's what we
+// finished before pausing for your input" without reconstructing from the
+// raw messages.
+//
+// Result and Error describe the same completion in two distinct ways:
+//
+//   - Result is the ToolResult the tool returned; it may have IsError set
+//     if the tool reported a normal error outcome.
+//   - Error is a Go-level error string, set only when the tool's Call method
+//     itself returned a non-nil error (tool panic, transport failure, etc).
+//     Empty whenever Result is non-nil.
 type CompletedToolCall struct {
 	ID     string          `json:"id"`
 	Name   string          `json:"name"`
@@ -96,30 +116,71 @@ type CompletedToolCall struct {
 	Error  string          `json:"error,omitempty"`
 }
 
-// SuspensionState is the symmetric in/out payload describing a suspended
-// turn. It is returned on Response.Suspension whenever Status is
-// ResponseStatusSuspended, and passed back via WithSuspension on resume.
+// SuspensionState is the payload describing a suspended turn. It is
+// populated on Response.Suspension whenever a CreateResponse call
+// interacted with suspend/resume logic and is handed back to the agent via
+// WithResume on the next call.
 //
-// The same value flows in both directions: callers store it alongside their
-// message history and hand it back unchanged on the resume call. Sessions
-// that implement SuspendableSession persist this state on the caller's
-// behalf so that a session-backed resume only needs to supply WithToolResults.
+// # When Response.Suspension is populated
+//
+// SuspensionState is set on the Response in two situations:
+//
+//  1. Status == ResponseStatusSuspended. The agent has paused mid-turn and
+//     at least one entry is in PendingToolCalls. TurnMessages carries the
+//     in-progress turn snapshot.
+//  2. Status == ResponseStatusCompleted on a call that resumed a previously
+//     suspended turn. PendingToolCalls is nil (all pending work was
+//     resolved). TurnMessages carries the final merged turn so stateless
+//     callers can flush it into their local history in one step without
+//     having to reconcile a stale partial tool_result from their saved
+//     state.
+//
+// It is NOT populated on a plain completion that never involved suspend or
+// resume.
+//
+// # Stateless caller pattern
+//
+// A caller managing history themselves holds two values: their pre-turn
+// history and the most recent Response.Suspension (or nil). The pattern:
+//
+//	resp, _ := agent.CreateResponse(ctx,
+//	    dive.WithMessages(history...),
+//	    dive.WithResume(saved, toolResults), // omit if no active turn
+//	)
+//	if resp.Suspension != nil {
+//	    if len(resp.Suspension.PendingToolCalls) > 0 {
+//	        saved = resp.Suspension                 // still suspended
+//	    } else {
+//	        history = append(history, resp.Suspension.TurnMessages...)
+//	        saved = nil                              // turn committed
+//	    }
+//	}
+//
+// SuspendableSession implementations persist this state on the caller's
+// behalf so session-backed callers only need to pass WithToolResults.
 type SuspensionState struct {
 	// PendingToolCalls are the tool calls awaiting external results. On
-	// resume the caller must supply a ToolResult for each via WithToolResults
-	// (partial resumes are allowed: remaining entries stay pending).
+	// resume the caller must supply a ToolResult for each via
+	// WithResume/WithToolResults; partial resumes are allowed and remaining
+	// entries stay pending. Nil on a resume-completed SuspensionState.
 	PendingToolCalls []*PendingToolCall `json:"pending_tool_calls,omitempty"`
 
-	// CompletedToolCalls are sibling tool calls that ran to completion in
-	// the same iteration where one or more tools suspended. Informational:
-	// the results are already present in the message history.
+	// CompletedToolCalls are tool calls that ran to completion in the same
+	// iteration as a suspending sibling (or have since been supplied via a
+	// resume call). Informational: their results are already in TurnMessages.
 	CompletedToolCalls []*CompletedToolCall `json:"completed_tool_calls,omitempty"`
 
-	// TurnMessageCount is the number of trailing messages in the full
-	// conversation history that belong to the suspended turn. The agent
-	// uses this on resume to locate the turn boundary — it is the only
-	// field needed to route resume logic without a session.
-	TurnMessageCount int `json:"turn_message_count,omitempty"`
+	// TurnMessages is the complete set of messages that belong to the
+	// in-progress (or just-completed) turn, in order, including the user
+	// input that kicked it off and every assistant/tool_result message
+	// produced across all iterations of this turn. The agent rebuilds the
+	// full conversation on resume as preHistory + TurnMessages.
+	//
+	// On a resume-completed SuspensionState, TurnMessages reflects the
+	// final merged view (including the last merged tool_result and the
+	// final assistant message), so stateless callers can append it to
+	// their pre-turn history in one operation.
+	TurnMessages []*llm.Message `json:"turn_messages,omitempty"`
 }
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.
@@ -191,12 +252,19 @@ type Response struct {
 	// An empty Status means Completed (back-compat).
 	Status ResponseStatus `json:"status,omitempty"`
 
-	// Suspension is populated when Status == ResponseStatusSuspended. It
-	// carries everything the caller needs to resume: the pending and
-	// completed tool calls and the turn boundary. Callers store this
-	// alongside their message history and hand it back via
-	// WithSuspension on the resume call (or rely on auto-persistence via a
-	// SuspendableSession).
+	// Suspension carries the suspend/resume turn snapshot. It is populated:
+	//
+	//   - When Status == ResponseStatusSuspended (the agent is paused
+	//     mid-turn): Pending and Completed tool calls plus the in-progress
+	//     turn messages.
+	//   - When Status == ResponseStatusCompleted on a call that resumed a
+	//     previously suspended turn: PendingToolCalls is nil, TurnMessages
+	//     holds the final merged turn. Stateless callers flush by
+	//     appending TurnMessages to their pre-turn history.
+	//
+	// It is nil on plain completions that did not involve suspend or
+	// resume. See the SuspensionState docs for the canonical stateless
+	// usage pattern.
 	Suspension *SuspensionState `json:"suspension,omitempty"`
 }
 

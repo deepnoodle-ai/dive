@@ -207,6 +207,9 @@ func (s *FileStore) List(ctx context.Context, opts *ListOptions) (*ListResult, e
 		if err != nil {
 			continue
 		}
+		if opts != nil && opts.Suspended != nil && *opts.Suspended != data.Suspended {
+			continue
+		}
 		infos = append(infos, &SessionInfo{
 			ID:         data.ID,
 			Title:      data.Title,

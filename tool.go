@@ -123,28 +123,34 @@ type ToolResult struct {
 // hand control back to the caller. It is NOT an error — it is a first-class
 // result type. The agent observes it, persists the partial turn, and returns
 // a suspended Response. On resume, the caller supplies a real ToolResult for
-// the suspended call via WithToolResults.
+// the suspended call via WithResume or WithToolResults.
 type SuspendResult struct {
 	// Prompt is optional human-readable text describing what the agent is
 	// waiting for. Surfaced to the caller via PendingToolCall.Prompt.
 	Prompt string `json:"prompt,omitempty"`
 
-	// Metadata is optional structured data the tool wants to attach. It is
-	// opaque to Dive and round-trips through the session unchanged.
+	// Metadata is optional structured data the tool wants to attach to the
+	// suspension so the caller can render a richer UI (request IDs, form
+	// URLs, expiration hints, etc.). It is surfaced via
+	// PendingToolCall.Metadata.
+	//
+	// Metadata values are round-tripped through JSON during deep-copy and
+	// persistence: numeric types come back as float64 and custom struct
+	// types become generic map[string]any. Stick to JSON-friendly values
+	// and expect that loss of type fidelity.
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // NewSuspendResult returns a *ToolResult whose Suspend field is set. Use it
-// from a tool's Call method:
+// from a tool's Call method; pass nil for metadata if none is needed:
 //
-//	return dive.NewSuspendResult("Waiting for approval from @alice"), nil
-func NewSuspendResult(prompt string) *ToolResult {
-	return &ToolResult{Suspend: &SuspendResult{Prompt: prompt}}
-}
-
-// NewSuspendResultWithMetadata returns a *ToolResult whose Suspend field is
-// set with both a prompt and structured metadata.
-func NewSuspendResultWithMetadata(prompt string, metadata map[string]any) *ToolResult {
+//	return dive.NewSuspendResult("Waiting for approval from @alice", nil), nil
+//
+//	return dive.NewSuspendResult("Waiting for approval", map[string]any{
+//	    "request_id": requestID,
+//	    "form_url":   url,
+//	}), nil
+func NewSuspendResult(prompt string, metadata map[string]any) *ToolResult {
 	return &ToolResult{Suspend: &SuspendResult{Prompt: prompt, Metadata: metadata}}
 }
 

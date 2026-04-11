@@ -211,7 +211,7 @@ type PreIterationHook func(ctx context.Context, hctx *HookContext) error
 // hctx.Response is populated with the suspended Response. Status is
 // ResponseStatusSuspended and Response.Suspension is a non-nil
 // *SuspensionState carrying PendingToolCalls, CompletedToolCalls, and
-// TurnMessageCount. Regular errors are logged; returning a HookAbortError
+// TurnMessages. Regular errors are logged; returning a HookAbortError
 // aborts the call before the session is marked suspended, so the caller
 // sees an error and the session stays in its previous state. Because the
 // hook runs BEFORE persistence, aborting does not require any

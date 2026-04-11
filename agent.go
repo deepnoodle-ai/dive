@@ -353,9 +353,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		}
 	}
 
-	// Determine authoritative suspension state: options override session.
-	// This lets cross-process resumers override a stale session snapshot and
-	// lets stateless users drive the feature without any session at all.
+	// Determine the authoritative suspension state.
+	//
+	// Options supplied via WithResume always win — this lets stateless
+	// users drive the feature without a session at all, and lets a
+	// cross-process resumer override a stale session snapshot with a
+	// fresher one. When the option is absent and the session is
+	// suspendable, the session's stored state is used.
 	suspendable, _ := sess.(SuspendableSession)
 	suspState := options.Suspension
 	if suspState == nil && suspendable != nil {
@@ -367,31 +371,40 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	hasResumeIntent := hasToolResults || hasExplicitSuspension
 
 	if hasResumeIntent && suspState == nil {
-		return nil, ErrNoSuspendedState
+		return nil, ErrNoSuspendedTurn
 	}
-	// For session-backed resume, inputMessages carry new user input on top
-	// of the session's suspended turn — not allowed. For stateless resume
-	// (no session / empty session), inputMessages ARE the saved history and
-	// must be accepted. The difference is whether sessionMsgs is non-empty.
-	if suspState != nil && len(sessionMsgs) > 0 && len(inputMessages) > 0 {
-		return nil, ErrSuspendedSessionInput
+	// A session-backed resume cannot accept new user input — the new
+	// input belongs in a fresh turn after the suspended one resolves.
+	// Stateless resumes (WithResume supplied) are the opposite:
+	// options.Messages IS the pre-turn history, so non-empty input is
+	// expected there. Checked before ErrResumeRequired so a clearer error
+	// surfaces when the caller's intent is "start a new turn" on a
+	// suspended session.
+	if suspState != nil && !hasExplicitSuspension && len(inputMessages) > 0 {
+		return nil, ErrInputOnSuspendedSession
 	}
-	// H3: if the session reports itself as suspended but the caller did not
-	// explicitly opt in to resuming, error out instead of silently no-op
-	// re-saving the suspended turn.
+	// Resume is explicit: a suspended session without any opt-in errors
+	// out rather than silently no-op re-saving the suspended turn.
 	if suspState != nil && !hasResumeIntent {
-		return nil, ErrSuspendedSessionNoOptIn
+		return nil, ErrResumeRequired
 	}
 
 	// Build the full history the agent will operate on.
+	//
+	//  - Stateless / cross-process resume (options.Suspension supplied):
+	//    inputMessages is the pre-turn history, suspState.TurnMessages is
+	//    the turn itself. Splice them.
+	//  - Session-backed resume (no options.Suspension): session.Messages()
+	//    already has the suspended turn at its tail — use it directly.
+	//  - Normal (non-resume): session history followed by new input.
 	var fullHistory []*llm.Message
-	if suspState != nil {
-		// On resume the user must not pass new input messages; sessionMsgs
-		// (for session-backed flows) or options.Messages (for stateless
-		// flows) carries the saved history including the suspended turn.
-		fullHistory = append(fullHistory, sessionMsgs...)
+	switch {
+	case suspState != nil && hasExplicitSuspension:
 		fullHistory = append(fullHistory, inputMessages...)
-	} else {
+		fullHistory = append(fullHistory, suspState.TurnMessages...)
+	case suspState != nil:
+		fullHistory = append(fullHistory, sessionMsgs...)
+	default:
 		fullHistory = append(fullHistory, sessionMsgs...)
 		fullHistory = append(fullHistory, inputMessages...)
 	}
@@ -609,23 +622,42 @@ generateLoop:
 	// append a new turn with input + output. Persistence failures are fatal:
 	// returning a successful Response while the session is out of sync would
 	// strand the caller with state that doesn't match disk.
-	if sess != nil {
-		if rs != nil {
-			turnMsgs := make([]*llm.Message, 0, len(rs.TurnMessages)+len(response.OutputMessages))
-			turnMsgs = append(turnMsgs, rs.TurnMessages...)
-			turnMsgs = append(turnMsgs, response.OutputMessages...)
+	//
+	// On a resume completion we also populate Response.Suspension with the
+	// final merged turn snapshot (PendingToolCalls = nil) so stateless
+	// callers can flush the turn into their local history in one append
+	// without reconciling a stale partial tool_result from their saved
+	// state.
+	if rs != nil {
+		turnMsgs := make([]*llm.Message, 0, len(rs.TurnMessages)+len(response.OutputMessages))
+		turnMsgs = append(turnMsgs, rs.TurnMessages...)
+		turnMsgs = append(turnMsgs, response.OutputMessages...)
+		switch {
+		case suspendable != nil:
 			if err := suspendable.SaveResumedTurn(ctx, turnMsgs, response.Usage); err != nil {
 				logger.Error("session save error", "error", err)
 				return nil, fmt.Errorf("save resumed turn: %w", err)
 			}
-		} else {
-			turnMessages := make([]*llm.Message, 0, len(inputMessages)+len(response.OutputMessages))
-			turnMessages = append(turnMessages, inputMessages...)
-			turnMessages = append(turnMessages, response.OutputMessages...)
-			if err := sess.SaveTurn(ctx, turnMessages, response.Usage); err != nil {
+		case sess != nil:
+			// Plain session: the suspend never hit SaveTurn (only
+			// SuspendableSessions auto-persist suspended turns), so this
+			// resume completion is the first write for this turn. Append.
+			if err := sess.SaveTurn(ctx, turnMsgs, response.Usage); err != nil {
 				logger.Error("session save error", "error", err)
 				return nil, fmt.Errorf("save turn: %w", err)
 			}
+		}
+		response.Suspension = &SuspensionState{
+			CompletedToolCalls: rs.CompletedToolCalls(),
+			TurnMessages:       turnMsgs,
+		}
+	} else if sess != nil {
+		turnMessages := make([]*llm.Message, 0, len(inputMessages)+len(response.OutputMessages))
+		turnMessages = append(turnMessages, inputMessages...)
+		turnMessages = append(turnMessages, response.OutputMessages...)
+		if err := sess.SaveTurn(ctx, turnMessages, response.Usage); err != nil {
+			logger.Error("session save error", "error", err)
+			return nil, fmt.Errorf("save turn: %w", err)
 		}
 	}
 
@@ -681,7 +713,7 @@ func (a *Agent) finishSuspended(
 	response.Suspension = &SuspensionState{
 		PendingToolCalls:   snap.PendingToolCalls,
 		CompletedToolCalls: snap.CompletedToolCalls,
-		TurnMessageCount:   len(turnMsgs),
+		TurnMessages:       turnMsgs,
 	}
 	if len(extraItems) > 0 {
 		response.Items = append(extraItems, response.Items...)
@@ -855,7 +887,7 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		pendingSet[id] = true
 	}
 
-	turnLen := state.TurnMessageCount
+	turnLen := len(state.TurnMessages)
 	if turnLen <= 0 || turnLen > len(fullHistory) {
 		return nil, fmt.Errorf("dive: suspended state has invalid turn message count (%d)", turnLen)
 	}

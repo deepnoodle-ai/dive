@@ -64,11 +64,13 @@ var ErrNotSuspended = errors.New("session is not suspended")
 
 // cloneSuspensionState returns a deep copy of a SuspensionState so callers
 // cannot mutate the session's internal state through the returned pointer.
+// The TurnMessages slice is copied shallowly by pointer — individual messages
+// are treated as immutable once produced.
 func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 	if src == nil {
 		return nil
 	}
-	out := &dive.SuspensionState{TurnMessageCount: src.TurnMessageCount}
+	out := &dive.SuspensionState{}
 	if src.PendingToolCalls != nil {
 		out.PendingToolCalls = make([]*dive.PendingToolCall, len(src.PendingToolCalls))
 		for i, p := range src.PendingToolCalls {
@@ -80,6 +82,10 @@ func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 		for i, c := range src.CompletedToolCalls {
 			out.CompletedToolCalls[i] = cloneCompletedToolCall(c)
 		}
+	}
+	if src.TurnMessages != nil {
+		out.TurnMessages = make([]*llm.Message, len(src.TurnMessages))
+		copy(out.TurnMessages, src.TurnMessages)
 	}
 	return out
 }
@@ -324,10 +330,70 @@ func (s *Session) LoadSuspension() *dive.SuspensionState {
 		PendingToolCalls:   s.data.PendingToolCalls,
 		CompletedToolCalls: s.data.CompletedToolCalls,
 	}
+	// TurnMessages carries the last event's messages (the in-progress
+	// suspended turn). The agent uses len(TurnMessages) to locate the turn
+	// boundary on resume and stateless callers — or anyone rendering the
+	// in-progress turn to a UI — read this field directly.
 	if len(s.data.Events) > 0 {
-		state.TurnMessageCount = len(s.data.Events[len(s.data.Events)-1].Messages)
+		state.TurnMessages = s.data.Events[len(s.data.Events)-1].Messages
 	}
 	return cloneSuspensionState(state)
+}
+
+// sessionSnapshot captures the fields of sessionData we mutate during
+// suspend/resume writes so the in-memory state can be rolled back if the
+// store write fails. Without rollback the Session would diverge from its
+// backing file/DB.
+type sessionSnapshot struct {
+	events    []*event // full events slice (pointer-level copy)
+	suspended bool
+	pending   []*dive.PendingToolCall
+	completed []*dive.CompletedToolCall
+	updatedAt time.Time
+}
+
+// snapshotMutated returns a shallow snapshot of the fields that
+// withRollback restores on store-write failure. The events slice is
+// duplicated so an in-place replacement of the last event can be undone
+// cleanly.
+func (s *Session) snapshotMutated() sessionSnapshot {
+	eventsCopy := make([]*event, len(s.data.Events))
+	copy(eventsCopy, s.data.Events)
+	return sessionSnapshot{
+		events:    eventsCopy,
+		suspended: s.data.Suspended,
+		pending:   s.data.PendingToolCalls,
+		completed: s.data.CompletedToolCalls,
+		updatedAt: s.data.UpdatedAt,
+	}
+}
+
+// restoreSnapshot reverts mutations after a failed store write.
+func (s *Session) restoreSnapshot(snap sessionSnapshot) {
+	s.data.Events = snap.events
+	s.data.Suspended = snap.suspended
+	s.data.PendingToolCalls = snap.pending
+	s.data.CompletedToolCalls = snap.completed
+	s.data.UpdatedAt = snap.updatedAt
+}
+
+// withRollback runs mutate to apply state changes, then asks the store to
+// persist them. On store failure the pre-mutation state is restored so the
+// in-memory session stays consistent with what is actually durable.
+//
+// When the session has no appender (in-memory mode), mutate still runs but
+// no rollback is performed — there is nothing to recover from.
+func (s *Session) withRollback(ctx context.Context, mutate func()) error {
+	snap := s.snapshotMutated()
+	mutate()
+	if s.appender == nil {
+		return nil
+	}
+	if err := s.appender.putSession(ctx, s.data); err != nil {
+		s.restoreSnapshot(snap)
+		return err
+	}
+	return nil
 }
 
 // SaveSuspendedTurn persists a partial turn: messages ending in an assistant
@@ -341,72 +407,44 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now()
-	replaceLast := s.data.Suspended && len(s.data.Events) > 0 && s.data.Events[len(s.data.Events)-1].Type == eventTypeTurn
+	return s.withRollback(ctx, func() {
+		now := time.Now()
+		replaceLast := s.data.Suspended &&
+			len(s.data.Events) > 0 &&
+			s.data.Events[len(s.data.Events)-1].Type == eventTypeTurn
 
-	// Snapshot fields we are about to mutate so we can roll back if the
-	// store write fails. Otherwise the in-memory Session would diverge from
-	// what's on disk.
-	prevSuspended := s.data.Suspended
-	prevPending := s.data.PendingToolCalls
-	prevCompleted := s.data.CompletedToolCalls
-	prevUpdatedAt := s.data.UpdatedAt
-	var prevLastEvent *event
-	prevEventsLen := len(s.data.Events)
-	if replaceLast {
-		prevLastEvent = s.data.Events[len(s.data.Events)-1]
-	}
-
-	var evtID string
-	if replaceLast {
-		evtID = s.data.Events[len(s.data.Events)-1].ID
-	} else {
-		evtID = newEventID()
-	}
-	evt := &event{
-		ID:        evtID,
-		Type:      eventTypeTurn,
-		Timestamp: now,
-		Messages:  messages,
-		Usage:     usage,
-		Metadata: map[string]any{
-			"suspended": true,
-		},
-	}
-	if replaceLast {
-		s.data.Events[len(s.data.Events)-1] = evt
-	} else {
-		s.data.Events = append(s.data.Events, evt)
-	}
-	cloned := cloneSuspensionState(state)
-	s.data.Suspended = true
-	if cloned != nil {
-		s.data.PendingToolCalls = cloned.PendingToolCalls
-		s.data.CompletedToolCalls = cloned.CompletedToolCalls
-	} else {
-		s.data.PendingToolCalls = nil
-		s.data.CompletedToolCalls = nil
-	}
-	s.data.UpdatedAt = now
-
-	if s.appender != nil {
-		// Suspend transitions always take the full-rewrite path to keep the
-		// header's suspend flag in sync and to support the replace-last
-		// optimization.
-		if err := s.appender.putSession(ctx, s.data); err != nil {
-			if replaceLast {
-				s.data.Events[len(s.data.Events)-1] = prevLastEvent
-			} else {
-				s.data.Events = s.data.Events[:prevEventsLen]
-			}
-			s.data.Suspended = prevSuspended
-			s.data.PendingToolCalls = prevPending
-			s.data.CompletedToolCalls = prevCompleted
-			s.data.UpdatedAt = prevUpdatedAt
-			return err
+		var evtID string
+		if replaceLast {
+			evtID = s.data.Events[len(s.data.Events)-1].ID
+		} else {
+			evtID = newEventID()
 		}
-	}
-	return nil
+		evt := &event{
+			ID:        evtID,
+			Type:      eventTypeTurn,
+			Timestamp: now,
+			Messages:  messages,
+			Usage:     usage,
+			Metadata: map[string]any{
+				"suspended": true,
+			},
+		}
+		if replaceLast {
+			s.data.Events[len(s.data.Events)-1] = evt
+		} else {
+			s.data.Events = append(s.data.Events, evt)
+		}
+		cloned := cloneSuspensionState(state)
+		s.data.Suspended = true
+		if cloned != nil {
+			s.data.PendingToolCalls = cloned.PendingToolCalls
+			s.data.CompletedToolCalls = cloned.CompletedToolCalls
+		} else {
+			s.data.PendingToolCalls = nil
+			s.data.CompletedToolCalls = nil
+		}
+		s.data.UpdatedAt = now
+	})
 }
 
 // SaveResumedTurn replaces the last (suspended) event with a completed turn
@@ -423,58 +461,33 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 		return ErrNotSuspended
 	}
 
-	now := time.Now()
+	return s.withRollback(ctx, func() {
+		now := time.Now()
+		hasLastEvent := len(s.data.Events) > 0
 
-	// Snapshot mutated fields for rollback on store failure.
-	prevSuspended := s.data.Suspended
-	prevPending := s.data.PendingToolCalls
-	prevCompleted := s.data.CompletedToolCalls
-	prevUpdatedAt := s.data.UpdatedAt
-	hasLastEvent := len(s.data.Events) > 0
-	var prevLastEvent *event
-	prevEventsLen := len(s.data.Events)
-	if hasLastEvent {
-		prevLastEvent = s.data.Events[len(s.data.Events)-1]
-	}
-
-	var evtID string
-	if hasLastEvent {
-		evtID = s.data.Events[len(s.data.Events)-1].ID
-	} else {
-		evtID = newEventID()
-	}
-	evt := &event{
-		ID:        evtID,
-		Type:      eventTypeTurn,
-		Timestamp: now,
-		Messages:  messages,
-		Usage:     usage,
-	}
-	if hasLastEvent {
-		s.data.Events[len(s.data.Events)-1] = evt
-	} else {
-		s.data.Events = append(s.data.Events, evt)
-	}
-	s.data.Suspended = false
-	s.data.PendingToolCalls = nil
-	s.data.CompletedToolCalls = nil
-	s.data.UpdatedAt = now
-
-	if s.appender != nil {
-		if err := s.appender.putSession(ctx, s.data); err != nil {
-			if hasLastEvent {
-				s.data.Events[len(s.data.Events)-1] = prevLastEvent
-			} else {
-				s.data.Events = s.data.Events[:prevEventsLen]
-			}
-			s.data.Suspended = prevSuspended
-			s.data.PendingToolCalls = prevPending
-			s.data.CompletedToolCalls = prevCompleted
-			s.data.UpdatedAt = prevUpdatedAt
-			return err
+		var evtID string
+		if hasLastEvent {
+			evtID = s.data.Events[len(s.data.Events)-1].ID
+		} else {
+			evtID = newEventID()
 		}
-	}
-	return nil
+		evt := &event{
+			ID:        evtID,
+			Type:      eventTypeTurn,
+			Timestamp: now,
+			Messages:  messages,
+			Usage:     usage,
+		}
+		if hasLastEvent {
+			s.data.Events[len(s.data.Events)-1] = evt
+		} else {
+			s.data.Events = append(s.data.Events, evt)
+		}
+		s.data.Suspended = false
+		s.data.PendingToolCalls = nil
+		s.data.CompletedToolCalls = nil
+		s.data.UpdatedAt = now
+	})
 }
 
 // IsSuspended reports whether the session is awaiting external tool
@@ -590,8 +603,8 @@ type CompactFunc func(ctx context.Context, messages []*llm.Message) ([]*llm.Mess
 //
 // Returns ErrSuspendedSession if the session is currently suspended.
 // Compaction destroys the in-progress tool_use/tool_result messages that
-// the resume path depends on, so the caller must first resume to completion
-// or call AbandonSuspension.
+// the resume path depends on, so the caller must first resume the turn to
+// completion (via WithResume/WithToolResults) before compacting.
 func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -641,10 +654,23 @@ type Store interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// ListOptions specifies pagination for List.
+// ListOptions specifies pagination and filters for List.
 type ListOptions struct {
-	Limit  int
+	// Limit caps the number of results returned (0 = no limit).
+	Limit int
+	// Offset skips this many leading results (0 = start from the top).
 	Offset int
+
+	// Suspended filters by the session's suspended state when non-nil:
+	//   Suspended = &true  → only sessions awaiting external tool results
+	//   Suspended = &false → only sessions in a normal (non-suspended) state
+	//
+	// This is the canonical way to find stale suspended sessions that a
+	// caller may want to abandon or reap. Typical pattern: periodically
+	// list Suspended=&true sessions and, for those older than some SLA,
+	// cancel the workflow by constructing error ToolResults for each
+	// pending call and resuming to drain them.
+	Suspended *bool
 }
 
 // ListResult contains the result of a List call.
