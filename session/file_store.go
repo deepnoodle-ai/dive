@@ -401,6 +401,20 @@ func (s *FileStore) writeSession(data *sessionData) error {
 	if err := os.Rename(tmpPath, p); err != nil {
 		return err
 	}
+	// Sync the parent directory so the rename itself is durable. Without
+	// this, a crash after rename can lose the rename on power loss even
+	// though the file contents are on disk.
+	dirf, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open parent dir for sync: %w", err)
+	}
+	if err := dirf.Sync(); err != nil {
+		dirf.Close()
+		return fmt.Errorf("sync parent dir: %w", err)
+	}
+	if err := dirf.Close(); err != nil {
+		return fmt.Errorf("close parent dir: %w", err)
+	}
 	committed = true
 	return nil
 }

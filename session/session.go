@@ -318,8 +318,21 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	var evtID string
 	replaceLast := s.data.Suspended && len(s.data.Events) > 0 && s.data.Events[len(s.data.Events)-1].Type == eventTypeTurn
+
+	// Snapshot fields we are about to mutate so we can roll back if the
+	// store write fails. Otherwise the in-memory Session would diverge from
+	// what's on disk.
+	prevSuspended := s.data.Suspended
+	prevPending := clonePendingCalls(s.data.PendingCalls)
+	prevUpdatedAt := s.data.UpdatedAt
+	var prevLastEvent *event
+	prevEventsLen := len(s.data.Events)
+	if replaceLast {
+		prevLastEvent = s.data.Events[len(s.data.Events)-1]
+	}
+
+	var evtID string
 	if replaceLast {
 		evtID = s.data.Events[len(s.data.Events)-1].ID
 	} else {
@@ -348,7 +361,17 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 		// Suspend transitions always take the full-rewrite path to keep the
 		// header's suspend flag in sync and to support the replace-last
 		// optimization.
-		return s.appender.putSession(ctx, s.data)
+		if err := s.appender.putSession(ctx, s.data); err != nil {
+			if replaceLast {
+				s.data.Events[len(s.data.Events)-1] = prevLastEvent
+			} else {
+				s.data.Events = s.data.Events[:prevEventsLen]
+			}
+			s.data.Suspended = prevSuspended
+			s.data.PendingCalls = prevPending
+			s.data.UpdatedAt = prevUpdatedAt
+			return err
+		}
 	}
 	return nil
 }
@@ -368,8 +391,20 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 	}
 
 	now := time.Now()
+
+	// Snapshot mutated fields for rollback on store failure.
+	prevSuspended := s.data.Suspended
+	prevPending := clonePendingCalls(s.data.PendingCalls)
+	prevUpdatedAt := s.data.UpdatedAt
+	hasLastEvent := len(s.data.Events) > 0
+	var prevLastEvent *event
+	prevEventsLen := len(s.data.Events)
+	if hasLastEvent {
+		prevLastEvent = s.data.Events[len(s.data.Events)-1]
+	}
+
 	var evtID string
-	if len(s.data.Events) > 0 {
+	if hasLastEvent {
 		evtID = s.data.Events[len(s.data.Events)-1].ID
 	} else {
 		evtID = newEventID()
@@ -381,7 +416,7 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 		Messages:  messages,
 		Usage:     usage,
 	}
-	if len(s.data.Events) > 0 {
+	if hasLastEvent {
 		s.data.Events[len(s.data.Events)-1] = evt
 	} else {
 		s.data.Events = append(s.data.Events, evt)
@@ -391,7 +426,17 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 	s.data.UpdatedAt = now
 
 	if s.appender != nil {
-		return s.appender.putSession(ctx, s.data)
+		if err := s.appender.putSession(ctx, s.data); err != nil {
+			if hasLastEvent {
+				s.data.Events[len(s.data.Events)-1] = prevLastEvent
+			} else {
+				s.data.Events = s.data.Events[:prevEventsLen]
+			}
+			s.data.Suspended = prevSuspended
+			s.data.PendingCalls = prevPending
+			s.data.UpdatedAt = prevUpdatedAt
+			return err
+		}
 	}
 	return nil
 }
@@ -410,11 +455,18 @@ func (s *Session) AbandonSuspension(ctx context.Context) error {
 	if !s.data.Suspended {
 		return nil
 	}
+	prevPending := clonePendingCalls(s.data.PendingCalls)
+	prevUpdatedAt := s.data.UpdatedAt
 	s.data.Suspended = false
 	s.data.PendingCalls = nil
 	s.data.UpdatedAt = time.Now()
 	if s.appender != nil {
-		return s.appender.putSession(ctx, s.data)
+		if err := s.appender.putSession(ctx, s.data); err != nil {
+			s.data.Suspended = true
+			s.data.PendingCalls = prevPending
+			s.data.UpdatedAt = prevUpdatedAt
+			return err
+		}
 	}
 	return nil
 }

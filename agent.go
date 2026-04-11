@@ -530,7 +530,9 @@ generateLoop:
 
 	// Save session turn. On resume, replace the suspended event with the
 	// combined turn (pre-suspend turn messages plus new output). Otherwise
-	// append a new turn with input + output.
+	// append a new turn with input + output. Persistence failures are fatal:
+	// returning a successful Response while the session is out of sync would
+	// strand the caller with state that doesn't match disk.
 	if sess != nil {
 		if rs != nil {
 			turnMsgs := make([]*llm.Message, 0, len(rs.TurnMessages)+len(response.OutputMessages))
@@ -538,6 +540,7 @@ generateLoop:
 			turnMsgs = append(turnMsgs, response.OutputMessages...)
 			if err := suspendable.SaveResumedTurn(ctx, turnMsgs, response.Usage); err != nil {
 				logger.Error("session save error", "error", err)
+				return nil, fmt.Errorf("save resumed turn: %w", err)
 			}
 		} else {
 			turnMessages := make([]*llm.Message, 0, len(inputMessages)+len(response.OutputMessages))
@@ -545,6 +548,7 @@ generateLoop:
 			turnMessages = append(turnMessages, response.OutputMessages...)
 			if err := sess.SaveTurn(ctx, turnMessages, response.Usage); err != nil {
 				logger.Error("session save error", "error", err)
+				return nil, fmt.Errorf("save turn: %w", err)
 			}
 		}
 	}
