@@ -72,6 +72,44 @@ Contract:
   `PostToolUseFailure` do **not** fire — suspend is neither success nor
   failure.
 
+### Built-in: `toolkit.AskUserTool` in async mode
+
+For the most common case — asking a human a question and waiting for the
+answer — `toolkit.AskUserTool` ships with an async mode that suspends
+instead of blocking on a `Dialog`:
+
+```go
+askTool := toolkit.NewAskUserTool(toolkit.AskUserToolOptions{Async: true})
+
+agent, _ := dive.NewAgent(dive.AgentOptions{
+    Model:   anthropic.New(),
+    Tools:   []dive.Tool{askTool},
+    Session: sess,
+})
+```
+
+When the LLM invokes `AskUserQuestion`, the tool returns
+`NewSuspendResult(question, {"type": <confirm|select|multiselect|input>})`
+and the agent suspends. The integrator surfaces the question to the human
+out-of-band (form, email, Slack, ticket), then resumes the agent with a
+tool result whose text content is JSON-marshaled `toolkit.AskUserOutput`:
+
+```go
+answer := toolkit.AskUserOutput{Response: "yes"}
+b, _ := json.Marshal(answer)
+
+resp, _ := agent.CreateResponse(ctx, dive.WithToolResults(
+    map[string]*dive.ToolResult{
+        pending.ID: dive.NewToolResultText(string(b)),
+    },
+))
+```
+
+In async mode the `Dialog` field is ignored and may be left nil. Use
+synchronous mode (default, with a non-nil `Dialog`) when the agent runs
+inside the same process as the UI; use async mode when the wait may take
+minutes, hours, or days, or when the agent must survive process restarts.
+
 ## Observing a suspended response
 
 The caller checks `Response.Status` and reads `Response.Suspension`:

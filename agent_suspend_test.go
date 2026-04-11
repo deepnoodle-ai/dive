@@ -12,6 +12,7 @@ import (
 	. "github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"
+	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -3006,4 +3007,108 @@ func TestResumeCancelAllWithErrorsFiresFailureForEach(t *testing.T) {
 	assert.True(t, seen["toolu_a"])
 	assert.True(t, seen["toolu_b"])
 	assert.True(t, seen["toolu_c"])
+}
+
+// TestAskUserToolAsyncEndToEnd is the toolkit-tool counterpart to
+// TestSuspendSimple/TestResumeSimple: it pins that the real
+// toolkit.AskUserTool in async mode drives the suspend/resume path through
+// agent.CreateResponse end-to-end. This is what closes the last PRD US-001
+// acceptance criterion ("at least one built-in toolkit tool demonstrates
+// the pattern").
+func TestAskUserToolAsyncEndToEnd(t *testing.T) {
+	askInput := `{"question":"Approve deploy to prod?","type":"confirm"}`
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_ask", "AskUserQuestion", askInput)),
+			finalTextTurn("deploy approved"),
+		},
+	}
+
+	// Async mode: no Dialog needed. The tool returns SuspendResult instead
+	// of blocking on a UI.
+	askTool := toolkit.NewAskUserTool(toolkit.AskUserToolOptions{Async: true})
+
+	sess := session.New("ask-async")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{askTool},
+		Session: sess,
+	})
+	assert.NoError(t, err)
+
+	// First call: agent suspends inside the toolkit AskUser tool.
+	resp, err := agent.CreateResponse(context.Background(), WithInput("ship it"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+
+	pending := resp.Suspension.PendingToolCalls[0]
+	assert.Equal(t, pending.ID, "toolu_ask")
+	assert.Equal(t, pending.Name, "AskUserQuestion")
+	assert.Equal(t, pending.Prompt, "Approve deploy to prod?")
+
+	// Metadata round-trips through JSON deep-copy, so values come back as
+	// the JSON-native type. "type" is a string in the original, so it stays
+	// a string after the round-trip.
+	assert.Equal(t, pending.Metadata["type"], "confirm")
+
+	// The integrator can recover the full original AskUserInput from the
+	// pending call's Input via the documented helper.
+	decoded, err := DecodePendingInput[*toolkit.AskUserInput](pending)
+	assert.NoError(t, err)
+	assert.Equal(t, decoded.Question, "Approve deploy to prod?")
+	assert.Equal(t, decoded.Type, "confirm")
+
+	// LLM was only called once before suspend.
+	assert.Equal(t, mock.Calls(), 1)
+	assert.True(t, sessIsSuspended(sess))
+
+	// Second call: integrator supplies a fulfilled AskUserOutput as the
+	// resumed tool result, exactly as the AskUserTool godoc describes.
+	answer := toolkit.AskUserOutput{Response: "yes"}
+	answerJSON, err := json.Marshal(answer)
+	assert.NoError(t, err)
+
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_ask": NewToolResultText(string(answerJSON)),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, resp.OutputText(), "deploy approved")
+	assert.False(t, sessIsSuspended(sess))
+	assert.Equal(t, mock.Calls(), 2)
+
+	// On the resumed LLM call, the user-message tool_result for toolu_ask
+	// must contain the integrator's supplied answer JSON — proving the
+	// async-mode signal flows end-to-end.
+	//
+	// llm.Message.Copy round-trips through JSON, so llm.ToolResultContent.Content
+	// (an `any` field that originally held []*dive.ToolResultContent) decodes
+	// back to []any of map[string]any. Walk that shape directly.
+	lastCall := mock.received[1]
+	lastMsg := lastCall[len(lastCall)-1]
+	assert.Equal(t, lastMsg.Role, llm.User)
+	foundAnswer := false
+	for _, c := range lastMsg.Content {
+		trc, ok := c.(*llm.ToolResultContent)
+		if !ok || trc.ToolUseID != "toolu_ask" {
+			continue
+		}
+		items, ok := trc.Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range items {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, _ := m["text"].(string); text == string(answerJSON) {
+				foundAnswer = true
+			}
+		}
+	}
+	assert.True(t, foundAnswer, "resumed tool_result should carry the integrator's AskUserOutput JSON")
 }

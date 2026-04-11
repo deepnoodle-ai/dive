@@ -53,7 +53,7 @@ Without a first-class mechanism, every SaaS embedding of Dive has to reinvent th
 - [x] When the agent observes this, the current `CreateResponse` unwinds without an error and without calling the LLM again.
 - [x] The tool's `ToolUse` block is preserved in the conversation, but no `ToolResult` for it is written.
 - [x] Documentation and runnable examples demonstrate the pattern (`docs/guides/suspend-resume.md` plus five examples under `examples/suspend/`: `human_approval`, `partial_resume`, `async_webhook`, `stateless`, and the shared `dialogspec`).
-- [ ] At least one built-in toolkit tool demonstrates suspend (e.g. an async-mode `AskUser`). **Not done** — `toolkit/ask_user.go` uses a synchronous in-process `Dialog` by design. Adding a suspend-mode option is a separate enhancement; the pattern is demonstrated in `examples/suspend/` for now.
+- [x] At least one built-in toolkit tool demonstrates suspend. `toolkit.AskUserTool` now supports an async mode (`AskUserToolOptions{Async: true}`) that returns `dive.NewSuspendResult` instead of blocking on a `Dialog`. The integrator resumes the agent later with a tool result whose text content is JSON-marshaled `AskUserOutput`. End-to-end behavior pinned by `TestAskUserToolAsyncEndToEnd`; tool-level coverage in `toolkit/ask_user_test.go`.
 
 ### US-002: Caller observes a suspended response
 **Description:** As a SaaS integrator, I want `CreateResponse` to return a `Response` with a status field that clearly indicates the agent is suspended and which tool calls are awaiting external fulfillment.

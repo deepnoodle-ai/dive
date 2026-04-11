@@ -85,22 +85,48 @@ type AskUserOutput struct {
 //   - "multiselect": Multiple choices from options, returns all selected values
 //   - "input": Free-form text entry, returns the entered text
 //
-// The tool requires a [dive.Dialog] implementation to display prompts and
-// collect responses. Without a dialog, the tool will return an error.
+// The tool runs in one of two modes, set on [AskUserToolOptions]:
+//
+// Synchronous (default): the tool calls into a [dive.Dialog] implementation
+// and blocks until the user responds. Use this when the agent runs inside
+// the same process as the UI (CLI, desktop app, dev loop). A non-nil Dialog
+// is required; without one, the tool returns an IsError result.
+//
+// Asynchronous (Async=true): the tool returns a [dive.SuspendResult],
+// pausing the agent mid-turn. The integrator surfaces the question to a
+// human out-of-band (form, email, Slack, ticket) and resumes the agent
+// later via [dive.WithResume] or [dive.WithToolResults] by supplying a
+// tool result whose text content is the JSON-marshaled [AskUserOutput].
+// In Async mode the Dialog field is ignored. Use this when the wait may
+// take minutes, hours, or days, or when the agent must survive process
+// restarts. See `examples/suspend/human_approval` for a worked example.
 type AskUserTool struct {
 	dialog dive.Dialog
+	async  bool
 }
 
 // AskUserToolOptions configures the behavior of [AskUserTool].
 type AskUserToolOptions struct {
-	// Dialog is the implementation used to display prompts and collect responses.
-	// Required - the tool will fail at call time if not provided.
+	// Dialog is the implementation used to display prompts and collect
+	// responses in synchronous mode. Required when Async is false; ignored
+	// when Async is true.
 	Dialog dive.Dialog
+
+	// Async, when true, makes the tool return a [dive.SuspendResult] from
+	// Call instead of blocking on Dialog.Show. The agent suspends mid-turn
+	// and the integrator fulfills the call later via [dive.WithResume] or
+	// [dive.WithToolResults], supplying a tool result whose text content is
+	// the JSON-marshaled [AskUserOutput] the LLM should observe.
+	//
+	// In Async mode, Dialog is not consulted at all and may be left nil.
+	Async bool
 }
 
 // NewAskUserTool creates a new AskUserTool with the given options.
-// A [dive.Dialog] must be provided via options; without one, the tool
-// will return an error when called.
+//
+// In synchronous mode (the default), a [dive.Dialog] must be provided via
+// options; without one, the tool will return an IsError result when called.
+// In asynchronous mode (Async=true), no Dialog is required.
 func NewAskUserTool(opts ...AskUserToolOptions) *dive.TypedToolAdapter[*AskUserInput] {
 	var options AskUserToolOptions
 	if len(opts) > 0 {
@@ -108,6 +134,7 @@ func NewAskUserTool(opts ...AskUserToolOptions) *dive.TypedToolAdapter[*AskUserI
 	}
 	return dive.ToolAdapter(&AskUserTool{
 		dialog: options.Dialog,
+		async:  options.Async,
 	})
 }
 
@@ -207,15 +234,31 @@ func (t *AskUserTool) PreviewCall(ctx context.Context, input *AskUserInput) *div
 
 // Call displays the question to the user and returns their response.
 //
-// The response is returned as JSON containing either:
+// In synchronous mode, the response is returned as JSON containing either:
 //   - Response: for confirm, select, and input types
 //   - Values: for multiselect type
 //   - Canceled: true if the user dismissed without answering
 //
 // Validation is performed on multiselect responses if MinSelect or
 // MaxSelect constraints are specified.
+//
+// In asynchronous mode (Async=true on [AskUserToolOptions]), Call does not
+// invoke any Dialog. It returns a [dive.SuspendResult] whose Prompt is the
+// question text and whose Metadata carries `{"type": <input.Type>}` so the
+// integrator can route on question type without unmarshaling
+// PendingToolCall.Input. The integrator must later resume the agent with a
+// tool result whose text content is the JSON-marshaled [AskUserOutput] the
+// LLM should observe.
 func (t *AskUserTool) Call(ctx context.Context, input *AskUserInput) (*dive.ToolResult, error) {
-	// Fail closed if no dialog configured
+	// Async mode: package the question as a suspend signal and let the
+	// integrator handle the human round-trip out-of-band.
+	if t.async {
+		return dive.NewSuspendResult(input.Question, map[string]any{
+			"type": input.Type,
+		}), nil
+	}
+
+	// Synchronous mode: fail closed if no dialog configured.
 	if t.dialog == nil {
 		return dive.NewToolResultError("Error: no dialog configured - cannot ask user questions"), nil
 	}
