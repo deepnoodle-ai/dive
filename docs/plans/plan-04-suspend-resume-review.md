@@ -365,38 +365,65 @@ should mention an "abandon stale suspended sessions" pattern.
 **Must-do before merge (or before any user starts depending on the
 v1 surface):**
 
-1. **(H2 + H3 + M4) The combined "sessions are optional" redesign.**
-   This is the single largest item and shapes everything else:
-   - Add `WithPendingToolCalls` (or `WithSuspendedState`) option.
-   - Make agent read pending state from options first, session
-     second.
-   - Drop the hard `SuspendableSession` requirement.
-   - Move `PendingToolCall` to root `dive` package.
-   - Shrink `SuspendableSession` to the minimum needed for
-     auto-persistence.
-   - Collapse `Response`'s suspension fields into one
-     `Response.Suspension *SuspensionState`.
-   - Make resume opt-in via the presence of suspension options.
-2. **(M5) Add input-decoding helpers** —
+1. ✅ **(H2 + H3 + M4) The combined "sessions are optional" redesign.**
+   *Shipped in the same PR as this review.* Concretely:
+   - New `WithSuspension(*SuspensionState)` option; resume path reads
+     authoritative state from options first and falls back to the
+     session only when the option is absent.
+   - `SuspendableSession` is now a 3-method interface (`LoadSuspension`,
+     `SaveSuspendedTurn`, `SaveResumedTurn`). Plain `Session`
+     implementations — and no session at all — now participate in
+     suspend/resume without any hard requirement check.
+   - `session.PendingCall` deleted; the session package imports `dive`
+     and works directly with `*dive.PendingToolCall` /
+     `*dive.SuspensionState`.
+   - `Response.PendingToolCalls` / `Response.CompletedToolCalls`
+     collapsed into `Response.Suspension *SuspensionState`, with
+     `TurnMessageCount` on the state so stateless callers can locate
+     the turn boundary without session plumbing.
+   - Resume is opt-in: a suspended session that is called with neither
+     `WithToolResults` nor `WithSuspension` nor new input now returns
+     `ErrSuspendedSessionNoOptIn`, killing the silent-no-op path.
+   - `ErrSessionNotSuspendable` and `AbandonSuspension` removed.
+2. ✅ **(M5) Input-decoding helpers shipped.**
    `(*PendingToolCall).UnmarshalInput(into any) error` and a generic
-   `DecodePendingInput[T]`. Stateless callers do more marshalling, so
-   this matters more without sessions.
-3. **(M3) Validate `ToolResult.Suspend` mutual-exclusion** at
-   construction. Cheap, prevents surprising silent-ignore behavior.
+   `DecodePendingInput[T any]` for stateless callers.
+3. ✅ **(M3) `ToolResult.Suspend` mutual-exclusion validated at the
+   agent boundary.** A tool returning both `Suspend` and regular
+   result fields is surfaced as an `IsError` result that flows
+   through `PostToolUseFailure`, and the `ToolResult` godoc spells
+   out the tagged-union contract.
 
 **Follow-up PRs (no API rewrite needed):**
 
-4. (M1) Add an `Sync` knob to `FileStore` for the hot-path durability
-   trade-off.
-5. (L1) Fix the pre-existing Stop hook + suspend message loss in
-   `agent.go:501-509`.
-6. (M2) Per-session locking or a documented coordination recipe for
-   concurrent `CreateResponse` on the same session.
+4. ✅ **(M1) `FileStore` hot-path durability knob shipped.**
+   `NewFileStoreWithSync(dir, sync)` opts into `f.Sync()` on every
+   `appendEvent`; the default remains pagecache durability. The
+   trade-off is documented in the `FileStore` godoc.
+5. ✅ **(L1) Stop hook + suspend message loss fixed in `agent.go`.**
+   `CreateResponse` now accumulates `OutputMessages`, `Items`, and
+   `Usage` across Stop-hook continuations; the synthetic user reason
+   message is appended to the accumulator so a suspend on the
+   re-entered generate captures both iterations plus the Stop reason
+   in the persisted turn and on `Response.Suspension.TurnMessageCount`.
+   Pinned by `TestStopHookContinueThenSuspend`.
+6. ✅ **(M2) Per-session lock at the library level.**
+   Package-level `sessionLocks sync.Map` keyed on `Session.ID()` is
+   acquired at the top of `CreateResponse` whenever a session is
+   present (respecting per-call `WithSession`), so two goroutines — or
+   two agents — calling `CreateResponse` on the same session serialize
+   automatically. Stateless callers skip the lock. Pinned by
+   `TestConcurrentCreateResponseOnSameSessionSerialized` (runs under
+   `-race`). `dive.go` `WithToolResults` godoc and the `Session`
+   interface godoc updated to describe the new guarantee.
 7. (L2) Document JSON metadata type-fidelity caveat in
    `SuspendResult.Metadata` godoc.
-8. (L4) Reconcile hook contract docs with current `OnSuspend`
-   ordering (runs before persistence; abort path triggers
-   compensation).
+8. ✅ **(L4) `OnSuspend` hook contract doc aligned.** `hooks.go`
+   `OnSuspendHook` godoc now refers to the current
+   `Response.Suspension *SuspensionState` shape and explicitly notes
+   that aborting in `OnSuspend` requires no compensating rollback
+   because the hook runs before persistence. Sweep for any residual
+   "abort then compensate" language came back clean.
 9. Cleanups: `withRollback` helper extraction in `session/session.go`,
    lock-order comment in `memory_store.go`, example warning in
    `async_webhook/main.go`.

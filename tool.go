@@ -96,6 +96,14 @@ type ToolResultContent struct {
 }
 
 // ToolResult is the output from a tool call.
+//
+// ToolResult is a tagged union between a normal result (Content / Display /
+// IsError) and a suspend result (Suspend). A single ToolResult must set
+// exactly one of the two — either the regular fields OR Suspend, never
+// both. The agent validates this at the boundary and a malformed result is
+// surfaced as an IsError result routed through the PostToolUseFailure
+// hook chain. Use NewToolResult*/NewSuspendResult* constructors rather
+// than filling the fields directly to stay on the safe side of the union.
 type ToolResult struct {
 	// Content is the tool output sent to the LLM.
 	Content []*ToolResultContent `json:"content"`
@@ -105,8 +113,9 @@ type ToolResult struct {
 	// IsError indicates whether the tool call resulted in an error.
 	IsError bool `json:"isError,omitempty"`
 	// Suspend, when non-nil, tells the agent to suspend its turn rather than
-	// send this tool result to the LLM. Content, Display, and IsError are
-	// ignored when Suspend is set. Use NewSuspendResult to construct.
+	// send this tool result to the LLM. Must be the only field set on the
+	// ToolResult (no Content, no Display, no IsError). Use NewSuspendResult
+	// to construct.
 	Suspend *SuspendResult `json:"suspend,omitempty"`
 }
 

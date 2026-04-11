@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/deepnoodle-ai/dive"
 )
 
 // ErrInvalidSessionID is returned when a session ID contains path separators,
@@ -45,14 +47,45 @@ var ErrInvalidSessionID = errors.New("invalid session ID")
 // Within a single process, a FileStore is safe for concurrent use across
 // distinct sessions and serializes writes to the same session via an
 // internal mutex.
+//
+// # Durability
+//
+// Full session writes (initial Open, Put, Compact) go through a
+// tmp-file + fsync + rename + parent-directory fsync sequence and are
+// crash-consistent under power loss. The hot-path event append
+// (SaveTurn → appendEvent) does not fsync by default: a successful Write
+// only guarantees the bytes have reached the OS pagecache, so a power
+// loss between commit and the kernel flush can lose the most recent
+// completed turn. For most workloads this trade-off is correct — fsync
+// on every append costs a disk round-trip per message.
+//
+// Callers who need power-loss durability for every turn can opt in by
+// constructing the store with NewFileStoreWithSync(dir, true). When
+// enabled, appendEvent calls f.Sync() before closing the file. This
+// still does not fsync the parent directory on every append; we rely on
+// the up-front existence of the file (established by Open) staying
+// stable.
 type FileStore struct {
-	mu  sync.RWMutex
-	dir string
+	mu   sync.RWMutex
+	dir  string
+	sync bool
 }
 
 // NewFileStore creates a FileStore rooted at dir. The directory is created
-// if it does not exist.
+// if it does not exist. The returned store uses pagecache durability for
+// the hot-path event append — see FileStore's documentation for the
+// trade-off and NewFileStoreWithSync for power-loss durability.
 func NewFileStore(dir string) (*FileStore, error) {
+	return NewFileStoreWithSync(dir, false)
+}
+
+// NewFileStoreWithSync creates a FileStore rooted at dir with explicit
+// control over hot-path durability. When sync is true, appendEvent
+// fsyncs the JSONL file before closing it, guaranteeing that a
+// successfully returned SaveTurn call survives an immediate power loss
+// at the cost of a disk round-trip per append. When sync is false the
+// store behaves like NewFileStore.
+func NewFileStoreWithSync(dir string, sync bool) (*FileStore, error) {
 	if strings.HasPrefix(dir, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -63,7 +96,7 @@ func NewFileStore(dir string) (*FileStore, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-	return &FileStore{dir: dir}, nil
+	return &FileStore{dir: dir, sync: sync}, nil
 }
 
 // validateID rejects session IDs that could escape the store directory.
@@ -99,14 +132,15 @@ type jsonlLine struct {
 
 // sessionHeader is the first line of a session JSONL file.
 type sessionHeader struct {
-	ID           string         `json:"id"`
-	Title        string         `json:"title,omitempty"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
-	ForkedFrom   string         `json:"forked_from,omitempty"`
-	Suspended    bool           `json:"suspended,omitempty"`
-	PendingCalls []PendingCall  `json:"pending_calls,omitempty"`
+	ID                 string                    `json:"id"`
+	Title              string                    `json:"title,omitempty"`
+	CreatedAt          time.Time                 `json:"created_at"`
+	UpdatedAt          time.Time                 `json:"updated_at"`
+	Metadata           map[string]any            `json:"metadata,omitempty"`
+	ForkedFrom         string                    `json:"forked_from,omitempty"`
+	Suspended          bool                      `json:"suspended,omitempty"`
+	PendingToolCalls   []*dive.PendingToolCall   `json:"pending_tool_calls,omitempty"`
+	CompletedToolCalls []*dive.CompletedToolCall `json:"completed_tool_calls,omitempty"`
 }
 
 func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
@@ -246,8 +280,15 @@ func (s *FileStore) appendEvent(ctx context.Context, sessionID string, evt *even
 		return err
 	}
 	encoded = append(encoded, '\n')
-	_, err = f.Write(encoded)
-	return err
+	if _, err := f.Write(encoded); err != nil {
+		return err
+	}
+	if s.sync {
+		if err := f.Sync(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // putSession implements eventAppender for FileStore. Used by Compact.
@@ -308,14 +349,15 @@ func (s *FileStore) readSession(id string) (*sessionData, error) {
 	}
 
 	data := &sessionData{
-		ID:           header.ID,
-		Title:        header.Title,
-		CreatedAt:    header.CreatedAt,
-		UpdatedAt:    header.UpdatedAt,
-		Events:       events,
-		ForkedFrom:   header.ForkedFrom,
-		Suspended:    header.Suspended,
-		PendingCalls: header.PendingCalls,
+		ID:                 header.ID,
+		Title:              header.Title,
+		CreatedAt:          header.CreatedAt,
+		UpdatedAt:          header.UpdatedAt,
+		Events:             events,
+		ForkedFrom:         header.ForkedFrom,
+		Suspended:          header.Suspended,
+		PendingToolCalls:   header.PendingToolCalls,
+		CompletedToolCalls: header.CompletedToolCalls,
 	}
 	if header.Metadata != nil {
 		data.Metadata = make(map[string]any, len(header.Metadata))
@@ -364,14 +406,15 @@ func (s *FileStore) writeSession(data *sessionData) error {
 	w := bufio.NewWriter(tmp)
 
 	hdr := sessionHeader{
-		ID:           data.ID,
-		Title:        data.Title,
-		CreatedAt:    data.CreatedAt,
-		UpdatedAt:    data.UpdatedAt,
-		Metadata:     data.Metadata,
-		ForkedFrom:   data.ForkedFrom,
-		Suspended:    data.Suspended,
-		PendingCalls: data.PendingCalls,
+		ID:                 data.ID,
+		Title:              data.Title,
+		CreatedAt:          data.CreatedAt,
+		UpdatedAt:          data.UpdatedAt,
+		Metadata:           data.Metadata,
+		ForkedFrom:         data.ForkedFrom,
+		Suspended:          data.Suspended,
+		PendingToolCalls:   data.PendingToolCalls,
+		CompletedToolCalls: data.CompletedToolCalls,
 	}
 	hdrData, err := json.Marshal(hdr)
 	if err != nil {

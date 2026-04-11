@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/session"
 )
 
 const (
@@ -25,6 +24,27 @@ var (
 	ErrLLMNoResponse = errors.New("llm did not return a response")
 	ErrNoLLM         = errors.New("no llm provided")
 )
+
+// sessionLocks serializes CreateResponse calls that share a session ID.
+// Concurrent calls on the same session would otherwise interleave their
+// Messages() reads and SaveTurn writes, producing tangled event state and
+// — on suspended sessions — mixed pending-call sets. The lock is keyed by
+// Session.ID() so it also covers cross-agent usage of a single session.
+//
+// Entries accumulate in the map for the lifetime of the process; if you
+// create unbounded fresh session IDs, the memory cost is a small *sync.Mutex
+// per distinct ID. For typical workloads this is negligible.
+var sessionLocks sync.Map
+
+// acquireSessionLock blocks until the caller holds the exclusive lock for
+// the given session ID. The returned function releases the lock and must
+// be deferred by the caller.
+func acquireSessionLock(id string) func() {
+	v, _ := sessionLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // Hooks groups all agent hook slices.
 type Hooks struct {
@@ -313,6 +333,16 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		sess = a.session
 	}
 
+	// Serialize concurrent CreateResponse calls that share a session ID.
+	// Without this, two callers racing on the same session would interleave
+	// Messages() reads and SaveTurn writes and corrupt the event stream.
+	// Stateless callers (sess == nil) have no shared state to protect and
+	// skip the lock entirely.
+	if sess != nil {
+		release := acquireSessionLock(sess.ID())
+		defer release()
+	}
+
 	// Load session history
 	var sessionMsgs []*llm.Message
 	if sess != nil {
@@ -323,38 +353,63 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		}
 	}
 
-	// Detect resume mode and prepare resume state
+	// Determine authoritative suspension state: options override session.
+	// This lets cross-process resumers override a stale session snapshot and
+	// lets stateless users drive the feature without any session at all.
 	suspendable, _ := sess.(SuspendableSession)
-	sessSuspended := suspendable != nil && suspendable.Suspended()
-	hasToolResults := len(options.ToolResults) > 0
+	suspState := options.Suspension
+	if suspState == nil && suspendable != nil {
+		suspState = suspendable.LoadSuspension()
+	}
 
-	if hasToolResults && !sessSuspended {
+	hasToolResults := len(options.ToolResults) > 0
+	hasExplicitSuspension := options.Suspension != nil
+	hasResumeIntent := hasToolResults || hasExplicitSuspension
+
+	if hasResumeIntent && suspState == nil {
 		return nil, ErrNoSuspendedState
 	}
-	if sessSuspended && len(inputMessages) > 0 {
+	// For session-backed resume, inputMessages carry new user input on top
+	// of the session's suspended turn — not allowed. For stateless resume
+	// (no session / empty session), inputMessages ARE the saved history and
+	// must be accepted. The difference is whether sessionMsgs is non-empty.
+	if suspState != nil && len(sessionMsgs) > 0 && len(inputMessages) > 0 {
 		return nil, ErrSuspendedSessionInput
+	}
+	// H3: if the session reports itself as suspended but the caller did not
+	// explicitly opt in to resuming, error out instead of silently no-op
+	// re-saving the suspended turn.
+	if suspState != nil && !hasResumeIntent {
+		return nil, ErrSuspendedSessionNoOptIn
+	}
+
+	// Build the full history the agent will operate on.
+	var fullHistory []*llm.Message
+	if suspState != nil {
+		// On resume the user must not pass new input messages; sessionMsgs
+		// (for session-backed flows) or options.Messages (for stateless
+		// flows) carries the saved history including the suspended turn.
+		fullHistory = append(fullHistory, sessionMsgs...)
+		fullHistory = append(fullHistory, inputMessages...)
+	} else {
+		fullHistory = append(fullHistory, sessionMsgs...)
+		fullHistory = append(fullHistory, inputMessages...)
 	}
 
 	var rs *resumeState
-	if sessSuspended {
+	if suspState != nil {
 		var err error
-		rs, err = a.prepareResume(sessionMsgs, suspendable, options.ToolResults)
+		rs, err = a.prepareResume(fullHistory, suspState, options.ToolResults)
 		if err != nil {
 			return nil, err
 		}
-		// Replace the loaded session messages' tool_result message with the
-		// merged version (or append one if there was no prior tool_result).
-		sessionMsgs = rs.SessionMessagesWithMerged
+		// Replace the loaded history's tool_result message with the merged
+		// version (or append one if there was no prior tool_result).
+		fullHistory = rs.SessionMessagesWithMerged
 	}
 
 	// Build the message list for generation
-	var messages []*llm.Message
-	if rs != nil {
-		messages = sessionMsgs
-	} else {
-		messages = append(messages, sessionMsgs...)
-		messages = append(messages, inputMessages...)
-	}
+	messages := fullHistory
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("no messages provided")
 	}
@@ -457,6 +512,16 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	stopHookActive := false
 
+	// Accumulators persist across Stop-hook continuations so every
+	// iteration's output (plus any synthetic user reason injected by a Stop
+	// hook) is preserved on the Response and in the saved session turn.
+	// generate() builds a fresh outputMessages slice on each call, so
+	// without this accumulation a Stop-hook continuation that later
+	// suspends would drop the first iteration's assistant turn.
+	var accumulatedOutput []*llm.Message
+	var accumulatedItems []*ResponseItem
+	accumulatedUsage := &llm.Usage{}
+
 generateLoop:
 	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback, model)
 	if err != nil {
@@ -464,10 +529,16 @@ generateLoop:
 		return nil, err
 	}
 
+	accumulatedOutput = append(accumulatedOutput, genResult.OutputMessages...)
+	accumulatedItems = append(accumulatedItems, genResult.Items...)
+	if genResult.Usage != nil {
+		accumulatedUsage.Add(genResult.Usage)
+	}
+
 	response.FinishedAt = Ptr(time.Now())
-	response.Usage = genResult.Usage
-	response.Items = genResult.Items
-	response.OutputMessages = genResult.OutputMessages
+	response.Usage = accumulatedUsage
+	response.Items = accumulatedItems
+	response.OutputMessages = accumulatedOutput
 
 	// Merge any resume-phase items into the response, keeping chronological order.
 	if len(resumeExtraItems) > 0 {
@@ -482,8 +553,8 @@ generateLoop:
 	// Run Stop hooks before PostGeneration
 	if len(a.hooks.Stop) > 0 {
 		hctx.Response = response
-		hctx.OutputMessages = genResult.OutputMessages
-		hctx.Usage = genResult.Usage
+		hctx.OutputMessages = accumulatedOutput
+		hctx.Usage = accumulatedUsage
 		hctx.StopHookActive = stopHookActive
 
 		for _, hook := range a.hooks.Stop {
@@ -499,10 +570,15 @@ generateLoop:
 				continue
 			}
 			if decision != nil && decision.Continue {
-				// Inject reason as user message and re-enter generate loop
+				// Inject reason as user message and re-enter generate loop.
+				// The reason message becomes part of the conversation the LLM
+				// sees, so it must also be accumulated onto the response /
+				// saved turn so a subsequent suspend doesn't drop it.
 				reasonMsg := llm.NewUserTextMessage(decision.Reason)
 				messages = append(messages, genResult.OutputMessages...)
 				messages = append(messages, reasonMsg)
+				accumulatedOutput = append(accumulatedOutput, reasonMsg)
+				response.OutputMessages = accumulatedOutput
 				hctx.Messages = messages
 				stopHookActive = true
 				goto generateLoop
@@ -512,8 +588,8 @@ generateLoop:
 
 	// Run PostGeneration hooks
 	hctx.Response = response
-	hctx.OutputMessages = genResult.OutputMessages
-	hctx.Usage = genResult.Usage
+	hctx.OutputMessages = accumulatedOutput
+	hctx.Usage = accumulatedUsage
 	for _, hook := range a.hooks.PostGeneration {
 		if err := hook(ctx, hctx); err != nil {
 			// Check if this is a fatal abort error
@@ -558,9 +634,15 @@ generateLoop:
 }
 
 // finishSuspended populates the suspended response, runs OnSuspend and
-// PostGeneration hooks, persists the suspended turn, and emits the terminal
-// suspended stream item. Hooks run before persistence so a hook abort leaves
-// the session untouched — no compensation needed.
+// PostGeneration hooks, persists the suspended turn (if a
+// SuspendableSession is present), and emits the terminal suspended stream
+// item. Hooks run before persistence so a hook abort leaves the session
+// untouched — no compensation needed.
+//
+// Suspension works without a session: when sess is nil or does not
+// implement SuspendableSession, the Response.Suspension payload is still
+// populated and returned to the caller, who is responsible for persisting
+// history and state themselves.
 //
 // If skipSuspendNotifications is true, OnSuspend hooks and the terminal
 // stream item are skipped. This is used for pure partial resumes, which
@@ -581,22 +663,31 @@ func (a *Agent) finishSuspended(
 	if response.FinishedAt == nil {
 		response.FinishedAt = Ptr(time.Now())
 	}
+
+	// Build the turn the caller will need on resume. For a generate-driven
+	// suspend this is inputMessages + the assistant tool_use and any partial
+	// tool_result. For a partial resume it is the existing turn plus any
+	// tool_result updates captured in rs.
+	var turnMsgs []*llm.Message
+	if rs != nil {
+		turnMsgs = append(turnMsgs, rs.TurnMessages...)
+		turnMsgs = append(turnMsgs, response.OutputMessages...)
+	} else {
+		turnMsgs = append(turnMsgs, inputMessages...)
+		turnMsgs = append(turnMsgs, response.OutputMessages...)
+	}
+
 	response.Status = ResponseStatusSuspended
-	response.PendingToolCalls = snap.PendingToolCalls
-	response.CompletedToolCalls = snap.CompletedToolCalls
+	response.Suspension = &SuspensionState{
+		PendingToolCalls:   snap.PendingToolCalls,
+		CompletedToolCalls: snap.CompletedToolCalls,
+		TurnMessageCount:   len(turnMsgs),
+	}
 	if len(extraItems) > 0 {
 		response.Items = append(extraItems, response.Items...)
 	}
 
-	// Suspension is only supported with a SuspendableSession — without one
-	// there is no way for the caller to resume.
-	if sess == nil {
-		return nil, ErrSessionNotSuspendable
-	}
-	suspendable, ok := sess.(SuspendableSession)
-	if !ok {
-		return nil, ErrSessionNotSuspendable
-	}
+	suspendable, _ := sess.(SuspendableSession)
 
 	hctx.Response = response
 	hctx.OutputMessages = response.OutputMessages
@@ -632,34 +723,27 @@ func (a *Agent) finishSuspended(
 		}
 	}
 
-	// Persist the suspended turn only after hooks succeed.
-	var turnMsgs []*llm.Message
-	if rs != nil {
-		turnMsgs = append(turnMsgs, rs.TurnMessages...)
-		turnMsgs = append(turnMsgs, response.OutputMessages...)
-	} else {
-		turnMsgs = append(turnMsgs, inputMessages...)
-		turnMsgs = append(turnMsgs, response.OutputMessages...)
-	}
-	pendingForSession := toSessionPendingCalls(snap.PendingToolCalls)
-	if err := suspendable.SaveSuspendedTurn(ctx, turnMsgs, response.Usage, pendingForSession); err != nil {
-		// If we can't persist the suspend, we must not return a suspended
-		// Response with pending IDs that don't exist in the session. Fail
-		// the call loudly.
-		logger.Error("session save error", "error", err)
-		return nil, fmt.Errorf("save suspended turn: %w", err)
+	// Persist the suspended turn only after hooks succeed, and only if the
+	// caller opted into auto-persistence via a SuspendableSession. Plain
+	// sessions and session-less callers rely on the Response.Suspension
+	// payload to drive their own persistence.
+	if suspendable != nil {
+		if err := suspendable.SaveSuspendedTurn(ctx, turnMsgs, response.Usage, response.Suspension); err != nil {
+			// If we can't persist the suspend, we must not return a
+			// suspended Response with pending IDs that don't exist in the
+			// session. Fail the call loudly.
+			logger.Error("session save error", "error", err)
+			return nil, fmt.Errorf("save suspended turn: %w", err)
+		}
 	}
 
-	// Emit the terminal suspended stream item only after the session is
-	// persisted and hooks have succeeded, so a stream consumer never sees a
+	// Emit the terminal suspended stream item only after any persistence
+	// succeeds and hooks have succeeded, so a stream consumer never sees a
 	// suspended terminal for a call that ultimately returned an error.
 	if !skipSuspendNotifications && callback != nil {
 		if err := callback(ctx, &ResponseItem{
-			Type: ResponseItemTypeSuspended,
-			Suspended: &SuspendedItem{
-				PendingToolCalls:   snap.PendingToolCalls,
-				CompletedToolCalls: snap.CompletedToolCalls,
-			},
+			Type:       ResponseItemTypeSuspended,
+			Suspension: response.Suspension,
 		}); err != nil {
 			return nil, err
 		}
@@ -746,12 +830,12 @@ func (rs *resumeState) AppendToolResultTextContent(tc *llm.TextContent) {
 	msg.Content = append(msg.Content, tc)
 }
 
-// prepareResume inspects a suspended session and caller-supplied tool results
+// prepareResume inspects the full history and caller-supplied tool results
 // to build a resumeState. It validates invariants per FR-19 and returns
 // descriptive errors.
-func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSession, toolResults map[string]*ToolResult) (*resumeState, error) {
-	pendingCalls := sess.PendingCalls()
-	pendingByID := make(map[string]session.PendingCall, len(pendingCalls))
+func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState, toolResults map[string]*ToolResult) (*resumeState, error) {
+	pendingCalls := state.PendingToolCalls
+	pendingByID := make(map[string]*PendingToolCall, len(pendingCalls))
 	pendingIDs := make([]string, len(pendingCalls))
 	for i, pc := range pendingCalls {
 		pendingByID[pc.ID] = pc
@@ -760,7 +844,7 @@ func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSessio
 	// Validate caller-supplied IDs. Any ID not in the pending set — including
 	// IDs that already have a completed tool_result in the persisted turn —
 	// is rejected. The caller must reconcile their view of outstanding work
-	// against the session's truth.
+	// against the authoritative pending set.
 	for id := range toolResults {
 		if _, ok := pendingByID[id]; !ok {
 			return nil, fmt.Errorf("%w: %s", ErrUnknownPendingToolCall, id)
@@ -771,14 +855,14 @@ func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSessio
 		pendingSet[id] = true
 	}
 
-	turnLen := sess.LastEventMessageCount()
-	if turnLen <= 0 || turnLen > len(sessionMsgs) {
-		return nil, fmt.Errorf("dive: suspended session has invalid last-event message count (%d)", turnLen)
+	turnLen := state.TurnMessageCount
+	if turnLen <= 0 || turnLen > len(fullHistory) {
+		return nil, fmt.Errorf("dive: suspended state has invalid turn message count (%d)", turnLen)
 	}
-	turnStart := len(sessionMsgs) - turnLen
-	// Copy turn messages so mutations don't leak into the session's snapshot.
+	turnStart := len(fullHistory) - turnLen
+	// Copy turn messages so mutations don't leak into the caller's snapshot.
 	turnMessages := make([]*llm.Message, turnLen)
-	for i, msg := range sessionMsgs[turnStart:] {
+	for i, msg := range fullHistory[turnStart:] {
 		turnMessages[i] = msg
 	}
 
@@ -888,9 +972,9 @@ func (a *Agent) prepareResume(sessionMsgs []*llm.Message, sess SuspendableSessio
 		}
 	}
 
-	// Build the full session messages list with the merged turn.
+	// Build the full history list with the merged turn.
 	sessionWithMerged := make([]*llm.Message, 0, turnStart+len(turnMessages))
-	sessionWithMerged = append(sessionWithMerged, sessionMsgs[:turnStart]...)
+	sessionWithMerged = append(sessionWithMerged, fullHistory[:turnStart]...)
 	sessionWithMerged = append(sessionWithMerged, turnMessages...)
 
 	// Previously-completed calls from existing results (pre-resume).
@@ -1791,6 +1875,36 @@ func (a *Agent) executeTool(
 	if output == nil {
 		output = &ToolResult{Content: []*ToolResultContent{}}
 	}
+	// Validate ToolResult.Suspend mutual exclusion (M3). Suspend and the
+	// regular result fields are a tagged union; setting both is a bug on
+	// the tool author's side. Surface it as a normal IsError result so the
+	// agent converges instead of panicking, and so PostToolUseFailure hooks
+	// fire just like any other tool error.
+	if output.Suspend != nil && (len(output.Content) > 0 || output.Display != "" || output.IsError) {
+		msg := fmt.Sprintf(
+			"Tool %s returned a SuspendResult together with Content/Display/IsError; these fields are mutually exclusive.",
+			tool.Name(),
+		)
+		a.logger.Error("tool returned malformed suspend result",
+			"tool", tool.Name(),
+			"has_content", len(output.Content) > 0,
+			"has_display", output.Display != "",
+			"is_error", output.IsError,
+		)
+		return &ToolCallResult{
+			ID:      call.ID,
+			Name:    call.Name,
+			Input:   call.Input,
+			Preview: preview,
+			Result: &ToolResult{
+				Content: []*ToolResultContent{
+					{Type: ToolResultContentTypeText, Text: msg},
+				},
+				IsError: true,
+			},
+			Error: errors.New(msg),
+		}
+	}
 	return &ToolCallResult{
 		ID:      call.ID,
 		Name:    call.Name,
@@ -1913,26 +2027,6 @@ func buildSuspendedSnapshot(toolCalls []*llm.ToolUseContent, batch *toolBatchRes
 		}
 	}
 	return snap
-}
-
-// toSessionPendingCalls converts the agent's PendingToolCall values into
-// the serializable session.PendingCall form, preserving Prompt and Metadata
-// so they survive cross-process and partial-resume-again flows.
-func toSessionPendingCalls(calls []*PendingToolCall) []session.PendingCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	out := make([]session.PendingCall, len(calls))
-	for i, c := range calls {
-		out[i] = session.PendingCall{
-			ID:       c.ID,
-			Name:     c.Name,
-			Input:    c.Input,
-			Prompt:   c.Prompt,
-			Metadata: c.Metadata,
-		}
-	}
-	return out
 }
 
 // toPendingToolCall builds a PendingToolCall from a tool_use block and a

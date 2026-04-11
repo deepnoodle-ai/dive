@@ -11,7 +11,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 
@@ -63,9 +62,9 @@ func main() {
 	}
 
 	results := map[string]*dive.ToolResult{}
-	for _, pending := range resp.PendingToolCalls {
+	for _, pending := range resp.Suspension.PendingToolCalls {
 		var args DeployInput
-		_ = json.Unmarshal(pending.Input, &args)
+		_ = pending.UnmarshalInput(&args)
 
 		spec := dialogspec.FromPending(pending)
 		out, err := dialog.Show(ctx, spec.ToDialogInput())

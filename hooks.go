@@ -208,11 +208,14 @@ type PreIterationHook func(ctx context.Context, hctx *HookContext) error
 // the session. Use this to notify an external system that human input is
 // needed (email, Slack, task creation, webhook dispatch).
 //
-// hctx.Response is populated with the suspended Response (Status =
-// ResponseStatusSuspended, PendingToolCalls, CompletedToolCalls). Regular
-// errors are logged; returning a HookAbortError aborts the call before the
-// session is marked suspended, so the caller sees an error and the session
-// stays in its previous state.
+// hctx.Response is populated with the suspended Response. Status is
+// ResponseStatusSuspended and Response.Suspension is a non-nil
+// *SuspensionState carrying PendingToolCalls, CompletedToolCalls, and
+// TurnMessageCount. Regular errors are logged; returning a HookAbortError
+// aborts the call before the session is marked suspended, so the caller
+// sees an error and the session stays in its previous state. Because the
+// hook runs BEFORE persistence, aborting does not require any
+// compensating rollback — there is simply nothing on disk to roll back.
 //
 // Partial resumes (a suspended session resumed with only some of the
 // awaited results) do NOT re-fire OnSuspend, since they continue an existing

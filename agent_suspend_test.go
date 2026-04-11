@@ -1,4 +1,4 @@
-package dive
+package dive_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	. "github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -143,12 +144,20 @@ func newScriptedToolUse(id, name, input string) *llm.ToolUseContent {
 // pendingIDs extracts the ID field from a session's pending calls for easy
 // equality assertions.
 func pendingIDs(sess *session.Session) []string {
-	calls := sess.PendingCalls()
-	out := make([]string, len(calls))
-	for i, c := range calls {
+	state := sess.LoadSuspension()
+	if state == nil {
+		return nil
+	}
+	out := make([]string, len(state.PendingToolCalls))
+	for i, c := range state.PendingToolCalls {
 		out[i] = c.ID
 	}
 	return out
+}
+
+// sessIsSuspended reports whether the session is suspended.
+func sessIsSuspended(sess *session.Session) bool {
+	return sess.LoadSuspension() != nil
 }
 
 func TestSuspendSimple(t *testing.T) {
@@ -175,11 +184,11 @@ func TestSuspendSimple(t *testing.T) {
 	resp, err := agent.CreateResponse(context.Background(), WithInput("hi"))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 1)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_a")
-	assert.Equal(t, resp.PendingToolCalls[0].Prompt, "waiting on alice")
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_a")
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Prompt, "waiting on alice")
 	assert.Equal(t, mock.Calls(), 1, "LLM should only be called once before suspend")
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, pendingIDs(sess), []string{"toolu_a"})
 }
 
@@ -202,7 +211,7 @@ func TestResumeSimple(t *testing.T) {
 
 	_, err = agent.CreateResponse(context.Background(), WithInput("hi"))
 	assert.NoError(t, err)
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 
 	// Resume with a real result for toolu_a
 	resp, err := agent.CreateResponse(context.Background(),
@@ -213,7 +222,7 @@ func TestResumeSimple(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, resp.OutputText(), "done")
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 	assert.Equal(t, mock.Calls(), 2)
 	// The second LLM call should see a complete tool_result message.
 	lastCallMsgs := mock.received[1]
@@ -254,7 +263,7 @@ func TestSuspendResumeSuspendAgain(t *testing.T) {
 	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_a")
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_a")
 
 	// Call 2: resume with A's result; LLM emits tool B, which suspends
 	resp, err = agent.CreateResponse(context.Background(),
@@ -262,8 +271,8 @@ func TestSuspendResumeSuspendAgain(t *testing.T) {
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_b")
-	assert.True(t, sess.Suspended())
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_b")
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, pendingIDs(sess), []string{"toolu_b"})
 
 	// Call 3: resume with B's result → final completion
@@ -274,7 +283,7 @@ func TestSuspendResumeSuspendAgain(t *testing.T) {
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, resp.OutputText(), "all done")
 	assert.Equal(t, mock.Calls(), 3)
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 }
 
 func TestParallelOneSuspends(t *testing.T) {
@@ -307,10 +316,10 @@ func TestParallelOneSuspends(t *testing.T) {
 	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 1)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_b")
-	assert.Len(t, resp.CompletedToolCalls, 1)
-	assert.Equal(t, resp.CompletedToolCalls[0].ID, "toolu_a")
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_b")
+	assert.Len(t, resp.Suspension.CompletedToolCalls, 1)
+	assert.Equal(t, resp.Suspension.CompletedToolCalls[0].ID, "toolu_a")
 	assert.Equal(t, toolA.CallCount(), 1)
 	assert.Equal(t, toolB.CallCount(), 1)
 
@@ -349,11 +358,11 @@ func TestParallelMultipleSuspend(t *testing.T) {
 	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 2)
-	assert.Len(t, resp.CompletedToolCalls, 1)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 2)
+	assert.Len(t, resp.Suspension.CompletedToolCalls, 1)
 	// Should have both B and C pending
 	pendingIDs := map[string]bool{}
-	for _, p := range resp.PendingToolCalls {
+	for _, p := range resp.Suspension.PendingToolCalls {
 		pendingIDs[p.ID] = true
 	}
 	assert.True(t, pendingIDs["toolu_b"])
@@ -365,8 +374,8 @@ func TestParallelMultipleSuspend(t *testing.T) {
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 1)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_c")
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_c")
 
 	// Final resume: C
 	resp, err = agent.CreateResponse(context.Background(),
@@ -406,10 +415,10 @@ func TestSequentialSuspendSkipsTail(t *testing.T) {
 	assert.Equal(t, toolB.CallCount(), 1, "B should have run (and suspended)")
 	assert.Equal(t, toolC.CallCount(), 0, "C should NOT have run (skipped)")
 	// Snapshot shows 1 pending and 1 completed (not including not-started C)
-	assert.Len(t, resp.PendingToolCalls, 1)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_b")
-	assert.Len(t, resp.CompletedToolCalls, 1)
-	assert.Equal(t, resp.CompletedToolCalls[0].ID, "toolu_a")
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_b")
+	assert.Len(t, resp.Suspension.CompletedToolCalls, 1)
+	assert.Equal(t, resp.Suspension.CompletedToolCalls[0].ID, "toolu_a")
 
 	// Resume with B's result → C should now run
 	resp, err = agent.CreateResponse(context.Background(),
@@ -439,7 +448,7 @@ func TestResumeUnknownID(t *testing.T) {
 	)
 	assert.True(t, errors.Is(err, ErrUnknownPendingToolCall))
 	// Session unchanged
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, pendingIDs(sess), []string{"toolu_a"})
 }
 
@@ -567,9 +576,9 @@ func TestOnSuspendHookSeesPending(t *testing.T) {
 	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 	assert.NotNil(t, hookResponse)
-	assert.Len(t, hookResponse.PendingToolCalls, 1)
-	assert.Equal(t, hookResponse.PendingToolCalls[0].ID, "toolu_a")
-	assert.Equal(t, hookResponse.PendingToolCalls[0].Prompt, "wait on alice")
+	assert.Len(t, hookResponse.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, hookResponse.Suspension.PendingToolCalls[0].ID, "toolu_a")
+	assert.Equal(t, hookResponse.Suspension.PendingToolCalls[0].Prompt, "wait on alice")
 }
 
 func TestStreamingSuspendedItem(t *testing.T) {
@@ -596,8 +605,8 @@ func TestStreamingSuspendedItem(t *testing.T) {
 	assert.True(t, len(items) > 0)
 	last := items[len(items)-1]
 	assert.Equal(t, last.Type, ResponseItemTypeSuspended)
-	assert.NotNil(t, last.Suspended)
-	assert.Len(t, last.Suspended.PendingToolCalls, 1)
+	assert.NotNil(t, last.Suspension)
+	assert.Len(t, last.Suspension.PendingToolCalls, 1)
 }
 
 func TestSuspendNoRegressionForNonSuspendingTools(t *testing.T) {
@@ -616,7 +625,7 @@ func TestSuspendNoRegressionForNonSuspendingTools(t *testing.T) {
 	// Status is empty (treated as Completed) or explicitly set to Completed
 	assert.True(t, resp.Status == "" || resp.Status == ResponseStatusCompleted)
 	assert.Equal(t, resp.OutputText(), "done")
-	assert.Nil(t, resp.PendingToolCalls)
+	assert.Nil(t, resp.Suspension)
 }
 
 func TestResumePostHooksFireInToolUseOrder(t *testing.T) {
@@ -778,7 +787,7 @@ func TestResumeNotStartedReSuspends(t *testing.T) {
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, toolC.CallCount(), 1)
 	assert.Equal(t, resp.OutputText(), "done")
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 }
 
 func TestSuspendedSessionInputReturnsError(t *testing.T) {
@@ -798,45 +807,57 @@ func TestSuspendedSessionInputReturnsError(t *testing.T) {
 	// Supplying new input on a suspended session must fail.
 	_, err = agent.CreateResponse(context.Background(), WithInput("more"))
 	assert.True(t, errors.Is(err, ErrSuspendedSessionInput))
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 }
 
-// nonSuspendableSession is a minimal Session that doesn't implement
-// SuspendableSession, used to verify ErrSessionNotSuspendable.
-type nonSuspendableSession struct {
+// plainSession is a minimal Session that does not implement
+// SuspendableSession. Used to verify that suspend/resume still works when
+// the caller wants to manage suspension state themselves.
+type plainSession struct {
 	id   string
 	msgs []*llm.Message
 }
 
-func (s *nonSuspendableSession) ID() string { return s.id }
-func (s *nonSuspendableSession) Messages(ctx context.Context) ([]*llm.Message, error) {
+func (s *plainSession) ID() string { return s.id }
+func (s *plainSession) Messages(ctx context.Context) ([]*llm.Message, error) {
 	out := make([]*llm.Message, len(s.msgs))
 	for i, m := range s.msgs {
 		out[i] = m.Copy()
 	}
 	return out, nil
 }
-func (s *nonSuspendableSession) SaveTurn(ctx context.Context, msgs []*llm.Message, _ *llm.Usage) error {
+func (s *plainSession) SaveTurn(ctx context.Context, msgs []*llm.Message, _ *llm.Usage) error {
 	s.msgs = append(s.msgs, msgs...)
 	return nil
 }
 
-func TestSuspendOnNonSuspendableSessionReturnsError(t *testing.T) {
+// A plain (non-suspendable) session can still drive a suspend: the caller
+// gets back Response.Suspension and is responsible for passing it (plus the
+// history via WithMessages) on the resume call.
+func TestSuspendOnPlainSessionReturnsSuspendedResponse(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
 		},
 	}
 	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
-	sess := &nonSuspendableSession{id: "nonsus"}
+	sess := &plainSession{id: "plain"}
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
 	assert.NoError(t, err)
 
-	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
-	assert.True(t, errors.Is(err, ErrSessionNotSuspendable))
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.NotNil(t, resp.Suspension)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_a")
+	// Plain session was not auto-updated with the partial turn.
+	assert.Equal(t, len(sess.msgs), 0)
 }
 
-func TestSuspendWithoutSessionReturnsError(t *testing.T) {
+// Without any session at all, suspend/resume still returns a usable
+// Response.Suspension — the "stateless" flow that used to be locked out.
+func TestSuspendWithoutSessionReturnsSuspendedResponse(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
 			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
@@ -846,9 +867,12 @@ func TestSuspendWithoutSessionReturnsError(t *testing.T) {
 	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}})
 	assert.NoError(t, err)
 
-	// No session at all — suspension should fail with ErrSessionNotSuspendable.
-	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
-	assert.True(t, errors.Is(err, ErrSessionNotSuspendable))
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.NotNil(t, resp.Suspension)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.True(t, resp.Suspension.TurnMessageCount > 0)
 }
 
 func TestPartialResumeTwice(t *testing.T) {
@@ -878,7 +902,7 @@ func TestPartialResumeTwice(t *testing.T) {
 	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 3)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 3)
 
 	// Partial resume: supply only A.
 	resp, err = agent.CreateResponse(context.Background(),
@@ -886,10 +910,10 @@ func TestPartialResumeTwice(t *testing.T) {
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 2)
-	assert.True(t, sess.Suspended())
+	assert.Len(t, resp.Suspension.PendingToolCalls, 2)
+	assert.True(t, sessIsSuspended(sess))
 	remaining := map[string]bool{}
-	for _, p := range resp.PendingToolCalls {
+	for _, p := range resp.Suspension.PendingToolCalls {
 		remaining[p.ID] = true
 	}
 	assert.True(t, remaining["toolu_b"])
@@ -901,8 +925,8 @@ func TestPartialResumeTwice(t *testing.T) {
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 1)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_c")
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_c")
 
 	// Final resume: supply C → completion.
 	resp, err = agent.CreateResponse(context.Background(),
@@ -911,7 +935,7 @@ func TestPartialResumeTwice(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, mock.Calls(), 2, "second LLM call runs after full resume")
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 
 	// Session should have exactly one turn after resolution (replace-last
 	// behavior means repeated suspended saves do not grow the event log).
@@ -1082,7 +1106,7 @@ func TestResumeWithFileStoreCrossProcess(t *testing.T) {
 		assert.NoError(t, err)
 		sess, err := store.Open(context.Background(), "xproc")
 		assert.NoError(t, err)
-		assert.True(t, sess.Suspended())
+		assert.True(t, sessIsSuspended(sess))
 		assert.Equal(t, pendingIDs(sess), []string{"toolu_a"})
 
 		// No tool needs to run on resume (A was suspended); supply its result.
@@ -1094,7 +1118,7 @@ func TestResumeWithFileStoreCrossProcess(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, resp.Status, ResponseStatusCompleted)
 		assert.Equal(t, resp.OutputText(), "done")
-		assert.False(t, sess.Suspended())
+		assert.False(t, sessIsSuspended(sess))
 	}
 }
 
@@ -1117,11 +1141,11 @@ func TestSuspendMetadataPreserved(t *testing.T) {
 	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 1)
-	assert.Equal(t, resp.PendingToolCalls[0].Prompt, "wait")
-	assert.NotNil(t, resp.PendingToolCalls[0].Metadata)
-	assert.Equal(t, resp.PendingToolCalls[0].Metadata["owner"], "alice")
-	assert.Equal(t, resp.PendingToolCalls[0].Metadata["urgency"], "high")
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Prompt, "wait")
+	assert.NotNil(t, resp.Suspension.PendingToolCalls[0].Metadata)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Metadata["owner"], "alice")
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Metadata["urgency"], "high")
 }
 
 func TestResumeRestoresSessionHistoryForSecondCall(t *testing.T) {
@@ -1245,7 +1269,7 @@ func TestPartialResumeEventCountStable(t *testing.T) {
 		assert.Equal(t, sess.EventCount(), 1,
 			fmt.Sprintf("round %d: event count must remain 1 across partial resumes", i))
 	}
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 }
 
 // Invariant 2: cross-process — suspended Prompt + Metadata survive a
@@ -1291,7 +1315,7 @@ func TestCrossProcessSuspendMetadata(t *testing.T) {
 		resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
 		assert.NoError(t, err)
 		assert.Equal(t, resp.Status, ResponseStatusSuspended)
-		assert.Len(t, resp.PendingToolCalls, 2)
+		assert.Len(t, resp.Suspension.PendingToolCalls, 2)
 	}
 
 	// Process B: fresh store → fresh session. Metadata must be readable.
@@ -1303,12 +1327,13 @@ func TestCrossProcessSuspendMetadata(t *testing.T) {
 		sess, err := store.Open(context.Background(), "meta")
 		assert.NoError(t, err)
 		freshSess = sess
-		assert.True(t, sess.Suspended())
+		assert.True(t, sessIsSuspended(sess))
 
-		pending := sess.PendingCalls()
-		assert.Equal(t, len(pending), 2)
-		byID := map[string]session.PendingCall{}
-		for _, p := range pending {
+		state := sess.LoadSuspension()
+		assert.NotNil(t, state)
+		assert.Equal(t, len(state.PendingToolCalls), 2)
+		byID := map[string]*PendingToolCall{}
+		for _, p := range state.PendingToolCalls {
 			byID[p.ID] = p
 		}
 		assert.Equal(t, byID["toolu_a"].Prompt, "wait on alice")
@@ -1336,13 +1361,13 @@ func TestCrossProcessSuspendMetadata(t *testing.T) {
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.Len(t, resp.PendingToolCalls, 1)
-	assert.Equal(t, resp.PendingToolCalls[0].ID, "toolu_b")
-	assert.Equal(t, resp.PendingToolCalls[0].Prompt, "wait on bob")
-	assert.NotNil(t, resp.PendingToolCalls[0].Metadata)
-	assert.Equal(t, resp.PendingToolCalls[0].Metadata["owner"], "bob")
-	assert.Equal(t, resp.PendingToolCalls[0].Metadata["severity"], "low")
-	assert.True(t, freshSess.Suspended())
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_b")
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Prompt, "wait on bob")
+	assert.NotNil(t, resp.Suspension.PendingToolCalls[0].Metadata)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Metadata["owner"], "bob")
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Metadata["severity"], "low")
+	assert.True(t, sessIsSuspended(freshSess))
 }
 
 // Invariant 3: sequential ↔ parallel agents can be mixed on the same session
@@ -1384,7 +1409,7 @@ func TestMixSequentialParallelAgentsOnSameSession(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, toolB.CallCount(), 1)
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 }
 
 // panickyTool panics on its first call. Used to verify the resume not-started
@@ -1432,7 +1457,7 @@ func TestResumeNotStartedToolPanic(t *testing.T) {
 	// First turn: A suspends; sequential skips B.
 	_, err = agent.CreateResponse(context.Background(), WithInput("go"))
 	assert.NoError(t, err)
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 
 	// Resume: supplies A; B is not-started and panics when executed. The
 	// panic must be recovered into an error result, and generation must
@@ -1443,7 +1468,7 @@ func TestResumeNotStartedToolPanic(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, resp.OutputText(), "recovered")
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 }
 
 // Invariant 5: suspend during the last tool-producing iteration is persisted
@@ -1475,7 +1500,7 @@ func TestSuspendOnLastIterationBoundary(t *testing.T) {
 	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, sess.EventCount(), 1)
 
 	// Resume: the final LLM call has tool_choice=none (lastIteration path).
@@ -1485,7 +1510,7 @@ func TestSuspendOnLastIterationBoundary(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 	assert.Equal(t, resp.OutputText(), "finished")
-	assert.False(t, sess.Suspended())
+	assert.False(t, sessIsSuspended(sess))
 }
 
 // blockingTool blocks until ctx is cancelled, then returns a ctx error. Used
@@ -1537,7 +1562,7 @@ func TestResumeContextCancelMidExecution(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = seqAgent.CreateResponse(context.Background(), WithInput("go"))
 	assert.NoError(t, err)
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 
 	// Snapshot pre-resume state.
 	preMsgs, _ := sess.Messages(context.Background())
@@ -1575,7 +1600,7 @@ func TestResumeContextCancelMidExecution(t *testing.T) {
 	postMsgs, _ := sess.Messages(context.Background())
 	postJSON, _ := json.Marshal(postMsgs)
 	assert.Equal(t, string(preJSON), string(postJSON))
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, pendingIDs(sess), prePending)
 }
 
@@ -1604,7 +1629,7 @@ func TestResumeCompletedIDReturnsError(t *testing.T) {
 
 	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, pendingIDs(sess), []string{"toolu_b"})
 
 	preMsgs, _ := sess.Messages(context.Background())
@@ -1621,7 +1646,7 @@ func TestResumeCompletedIDReturnsError(t *testing.T) {
 	postMsgs, _ := sess.Messages(context.Background())
 	postJSON, _ := json.Marshal(postMsgs)
 	assert.Equal(t, string(preJSON), string(postJSON))
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, pendingIDs(sess), []string{"toolu_b"})
 }
 
@@ -1638,13 +1663,12 @@ func TestForkSuspendedSessionClearsSuspension(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 
 	forked := sess.Fork("fork_dst")
-	assert.False(t, forked.Suspended(), "forked session must not be suspended")
-	assert.Equal(t, len(forked.PendingCalls()), 0)
+	assert.Nil(t, forked.LoadSuspension(), "forked session must not be suspended")
 	// Original unchanged.
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 }
 
 // Invariant 9: Compact refuses to run on a suspended session.
@@ -1660,7 +1684,7 @@ func TestCompactSuspendedSessionRefuses(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 
 	err = sess.Compact(context.Background(), func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
 		return []*llm.Message{llm.NewAssistantTextMessage("summary")}, nil
@@ -1668,7 +1692,7 @@ func TestCompactSuspendedSessionRefuses(t *testing.T) {
 	assert.True(t, errors.Is(err, session.ErrSuspendedSession))
 
 	// Session still suspended, unchanged event count.
-	assert.True(t, sess.Suspended())
+	assert.True(t, sessIsSuspended(sess))
 	assert.Equal(t, sess.EventCount(), 1)
 }
 
@@ -1711,19 +1735,14 @@ func (f *failingSuspendableSession) Messages(ctx context.Context) ([]*llm.Messag
 func (f *failingSuspendableSession) SaveTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error {
 	return f.inner.SaveTurn(ctx, messages, usage)
 }
-func (f *failingSuspendableSession) Suspended() bool                 { return f.inner.Suspended() }
-func (f *failingSuspendableSession) PendingCalls() []session.PendingCall {
-	return f.inner.PendingCalls()
+func (f *failingSuspendableSession) LoadSuspension() *SuspensionState {
+	return f.inner.LoadSuspension()
 }
-func (f *failingSuspendableSession) LastEventMessageCount() int { return f.inner.LastEventMessageCount() }
-func (f *failingSuspendableSession) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, pending []session.PendingCall) error {
+func (f *failingSuspendableSession) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, state *SuspensionState) error {
 	return f.saveErr
 }
 func (f *failingSuspendableSession) SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error {
 	return f.inner.SaveResumedTurn(ctx, messages, usage)
-}
-func (f *failingSuspendableSession) AbandonSuspension(ctx context.Context) error {
-	return f.inner.AbandonSuspension(ctx)
 }
 
 // Invariant 11: SaveSuspendedTurn failure is propagated from CreateResponse,
@@ -1748,7 +1767,7 @@ func TestSaveSuspendedTurnErrorPropagates(t *testing.T) {
 	assert.True(t, errors.Is(err, failing.saveErr))
 	// Inner session never transitioned to suspended (the save was a no-op
 	// that failed before any state change).
-	assert.False(t, failing.inner.Suspended())
+	assert.False(t, sessIsSuspended(failing.inner))
 }
 
 // Invariant 12: an OnSuspend hook that aborts with HookAbortError leaves the
@@ -1782,8 +1801,7 @@ func TestOnSuspendAbortRollsBack(t *testing.T) {
 	assert.Equal(t, abortErr.HookType, "OnSuspend")
 
 	// Rollback: session must no longer report suspended.
-	assert.False(t, sess.Suspended())
-	assert.Equal(t, len(sess.PendingCalls()), 0)
+	assert.Nil(t, sess.LoadSuspension())
 }
 
 // Invariant 13: turn messages from a session snapshot are not mutated by
@@ -1885,4 +1903,395 @@ func TestSuspendedOutputMessagesInvariant(t *testing.T) {
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
 	assert.Equal(t, len(resp.OutputMessages), 0,
 		"partial-resume-only suspend must not carry OutputMessages (caller should read from session)")
+}
+
+// ---------------------------------------------------------------------------
+// Stateless suspend/resume (no session at all)
+// ---------------------------------------------------------------------------
+
+// End-to-end: suspend and resume without any session. The caller manages
+// the message history and the SuspensionState themselves.
+func TestStatelessSuspendAndResume(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "approve", `{"env":"prod"}`)),
+			finalTextTurn("deployed"),
+		},
+	}
+	tool := &scriptedTool{
+		name:     "approve",
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting for alice")}},
+	}
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}})
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Initial call — stateless; caller passes history via WithMessages.
+	history := []*llm.Message{llm.NewUserTextMessage("please deploy")}
+	resp, err := agent.CreateResponse(ctx, WithMessages(history...))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.NotNil(t, resp.Suspension)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_a")
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].Prompt, "waiting for alice")
+	assert.True(t, resp.Suspension.TurnMessageCount > 0)
+
+	// Caller stores (history ++ resp.OutputMessages) and resp.Suspension.
+	resumedHistory := append([]*llm.Message{}, history...)
+	resumedHistory = append(resumedHistory, resp.OutputMessages...)
+	savedState := resp.Suspension
+
+	// Resume — still no session. Pass history + state + results.
+	resp, err = agent.CreateResponse(ctx,
+		WithMessages(resumedHistory...),
+		WithSuspension(savedState),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_a": NewToolResultText("approved"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, resp.OutputText(), "deployed")
+	assert.Equal(t, mock.Calls(), 2)
+}
+
+// Stateless multi-pending resume: two parallel suspends, both resolved in
+// a single resume call without a session. (True multi-round stateless
+// partial resume — updating history between rounds — requires the caller
+// to track the agent's internal tool_result merging; the session-backed
+// flow handles that transparently. For the single-shot flow shown here,
+// the stateless API is fully sufficient.)
+func TestStatelessMultiPendingResume(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+			),
+			finalTextTurn("all done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b")}}}
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB},
+		ParallelToolExecution: true,
+	})
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	history := []*llm.Message{llm.NewUserTextMessage("go")}
+
+	resp, err := agent.CreateResponse(ctx, WithMessages(history...))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 2)
+
+	savedHistory := append([]*llm.Message{}, history...)
+	savedHistory = append(savedHistory, resp.OutputMessages...)
+
+	// Full resume: supply both A and B at once → completion.
+	resp, err = agent.CreateResponse(ctx,
+		WithMessages(savedHistory...),
+		WithSuspension(resp.Suspension),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_a": NewToolResultText("A done"),
+			"toolu_b": NewToolResultText("B done"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, resp.OutputText(), "all done")
+}
+
+// Resume is opt-in: calling CreateResponse on a suspended session with no
+// tool results, no suspension option, and no new input returns an error.
+func TestSuspendedSessionNoOptInErrors(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait")}}}
+	sess := session.New("noopt")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.True(t, sessIsSuspended(sess))
+
+	// No input, no tool results, no suspension: must error rather than
+	// silently no-op-rewrite the suspended turn.
+	_, err = agent.CreateResponse(context.Background())
+	assert.True(t, errors.Is(err, ErrSuspendedSessionNoOptIn))
+	assert.True(t, sessIsSuspended(sess))
+}
+
+// M5: PendingToolCall.UnmarshalInput and DecodePendingInput[T] decode the
+// pending call's raw Input JSON into a typed destination.
+func TestDecodePendingInputHelpers(t *testing.T) {
+	p := &PendingToolCall{
+		ID:    "toolu_a",
+		Name:  "deploy",
+		Input: json.RawMessage(`{"env":"prod","version":"v1.4.2"}`),
+	}
+
+	type DeployInput struct {
+		Env     string `json:"env"`
+		Version string `json:"version"`
+	}
+
+	var via1 DeployInput
+	err := p.UnmarshalInput(&via1)
+	assert.NoError(t, err)
+	assert.Equal(t, via1.Env, "prod")
+	assert.Equal(t, via1.Version, "v1.4.2")
+
+	via2, err := DecodePendingInput[DeployInput](p)
+	assert.NoError(t, err)
+	assert.Equal(t, via2.Env, "prod")
+	assert.Equal(t, via2.Version, "v1.4.2")
+
+	// Nil pointer is safe — returns nil.
+	var nilp *PendingToolCall
+	assert.NoError(t, nilp.UnmarshalInput(&via1))
+}
+
+// malformedSuspendTool returns a ToolResult with both Suspend and Content
+// populated — the agent must reject it as IsError rather than panic or
+// silently ignore the conflict.
+type malformedSuspendTool struct{}
+
+func (malformedSuspendTool) Name() string                  { return "malformed" }
+func (malformedSuspendTool) Description() string           { return "tool that returns a malformed suspend" }
+func (malformedSuspendTool) Schema() *Schema               { return &Schema{Type: Object} }
+func (malformedSuspendTool) Annotations() *ToolAnnotations { return nil }
+func (malformedSuspendTool) Call(ctx context.Context, input any) (*ToolResult, error) {
+	return &ToolResult{
+		Content: []*ToolResultContent{{Type: ToolResultContentTypeText, Text: "body"}},
+		Suspend: &SuspendResult{Prompt: "bad"},
+	}, nil
+}
+
+// M3: a tool returning both Suspend and regular result fields is surfaced
+// as an IsError result that flows through PostToolUseFailure.
+func TestMalformedSuspendResultBecomesError(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "malformed", `{}`)),
+			finalTextTurn("ok"),
+		},
+	}
+	var failures int
+	sess := session.New("malformed")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{malformedSuspendTool{}},
+		Session: sess,
+		Hooks: Hooks{
+			PostToolUseFailure: []PostToolUseFailureHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					failures++
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("go"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, failures, 1, "malformed suspend result must fire PostToolUseFailure")
+	assert.Nil(t, resp.Suspension)
+	assert.False(t, sessIsSuspended(sess))
+}
+
+// TestStopHookContinueThenSuspend covers the interaction between a Stop
+// hook that returns Continue:true and a suspend on the re-entered
+// generate. Before the accumulation fix in agent.go, the second
+// generate() call produced a fresh outputMessages slice that overwrote
+// the first iteration's output on the Response, so the suspended turn
+// persisted to the session lost both the first iteration's assistant
+// message and the synthetic user reason message injected by the Stop
+// hook. This test pins the corrected behavior: the suspended turn
+// carries every iteration's output plus the Stop reason.
+func TestStopHookContinueThenSuspend(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			// Iteration 1: plain text, no tool calls — lets the Stop hook fire.
+			finalTextTurn("first round"),
+			// Iteration 2 (after Stop hook continuation): emit a tool_use
+			// whose tool will suspend.
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "approve", `{}`)),
+		},
+	}
+	tool := &scriptedTool{
+		name:     "approve",
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting on alice")}},
+	}
+
+	stopCalls := 0
+	sess := session.New("stop-continue-suspend")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{tool},
+		Session: sess,
+		Hooks: Hooks{
+			Stop: []StopHook{
+				func(ctx context.Context, hctx *HookContext) (*StopDecision, error) {
+					stopCalls++
+					if stopCalls == 1 {
+						return &StopDecision{
+							Continue: true,
+							Reason:   "please call the approval tool",
+						}, nil
+					}
+					return &StopDecision{Continue: false}, nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, mock.Calls(), 2, "LLM should be called twice: initial + stop-hook continuation")
+	assert.Equal(t, stopCalls, 1, "stop hook should only fire once; suspend bypasses Stop on the continuation")
+	assert.Equal(t, tool.CallCount(), 1)
+	assert.NotNil(t, resp.Suspension)
+	assert.Len(t, resp.Suspension.PendingToolCalls, 1)
+	assert.Equal(t, resp.Suspension.PendingToolCalls[0].ID, "toolu_a")
+
+	// Response.OutputMessages should carry every iteration's contribution:
+	//   1) assistant "first round" from iteration 1
+	//   2) synthetic user reason from the Stop hook
+	//   3) assistant tool_use from iteration 2
+	// (No tool_result is present because the only tool suspended before
+	// producing a completed result.)
+	assert.Equal(t, len(resp.OutputMessages), 3, "accumulated output must span both iterations plus the stop reason")
+	assert.Equal(t, resp.OutputMessages[0].Role, llm.Assistant)
+	assert.Equal(t, resp.OutputMessages[0].Text(), "first round")
+	assert.Equal(t, resp.OutputMessages[1].Role, llm.User)
+	assert.Equal(t, resp.OutputMessages[1].Text(), "please call the approval tool")
+	assert.Equal(t, resp.OutputMessages[2].Role, llm.Assistant)
+	foundToolUse := false
+	for _, c := range resp.OutputMessages[2].Content {
+		if tu, ok := c.(*llm.ToolUseContent); ok && tu.ID == "toolu_a" {
+			foundToolUse = true
+		}
+	}
+	assert.True(t, foundToolUse, "iteration 2 assistant message should contain the tool_use block")
+
+	// TurnMessageCount should cover the original user input plus all three
+	// accumulated output messages.
+	assert.Equal(t, resp.Suspension.TurnMessageCount, 4)
+
+	// The second LLM call must have seen all three prior messages, not
+	// just the original input — otherwise the LLM wouldn't know why it
+	// was being asked to continue.
+	assert.True(t, len(mock.received) >= 2)
+	secondCall := mock.received[1]
+	assert.Equal(t, len(secondCall), 3, "second LLM call should see user input + assistant + stop-reason user msg")
+	assert.Equal(t, secondCall[0].Role, llm.User)
+	assert.Equal(t, secondCall[0].Text(), "start")
+	assert.Equal(t, secondCall[1].Role, llm.Assistant)
+	assert.Equal(t, secondCall[1].Text(), "first round")
+	assert.Equal(t, secondCall[2].Role, llm.User)
+	assert.Equal(t, secondCall[2].Text(), "please call the approval tool")
+
+	// The persisted session turn must match what's on the Response: user
+	// input plus every accumulated output message. Before the fix the
+	// persisted turn dropped the first iteration's assistant message and
+	// the stop-reason user message.
+	assert.True(t, sessIsSuspended(sess))
+	savedMsgs, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, len(savedMsgs), 4, "persisted turn must carry all accumulated messages")
+	assert.Equal(t, savedMsgs[0].Role, llm.User)
+	assert.Equal(t, savedMsgs[0].Text(), "start")
+	assert.Equal(t, savedMsgs[1].Role, llm.Assistant)
+	assert.Equal(t, savedMsgs[1].Text(), "first round")
+	assert.Equal(t, savedMsgs[2].Role, llm.User)
+	assert.Equal(t, savedMsgs[2].Text(), "please call the approval tool")
+	assert.Equal(t, savedMsgs[3].Role, llm.Assistant)
+	foundSavedToolUse := false
+	for _, c := range savedMsgs[3].Content {
+		if tu, ok := c.(*llm.ToolUseContent); ok && tu.ID == "toolu_a" {
+			foundSavedToolUse = true
+		}
+	}
+	assert.True(t, foundSavedToolUse, "persisted assistant turn should contain the tool_use block")
+
+	// Usage should accumulate across both iterations.
+	assert.NotNil(t, resp.Usage)
+	assert.Equal(t, resp.Usage.InputTokens, 2)
+	assert.Equal(t, resp.Usage.OutputTokens, 2)
+}
+
+// TestConcurrentCreateResponseOnSameSessionSerialized pins the M2 per-
+// session locking contract: two goroutines calling CreateResponse on the
+// same session run one after the other, so their SaveTurn writes land as
+// two distinct, well-ordered turns rather than interleaving and
+// corrupting the event stream. Runs under -race to catch any lost
+// synchronization.
+func TestConcurrentCreateResponseOnSameSessionSerialized(t *testing.T) {
+	// Two consecutive simple turns; each CreateResponse will consume one
+	// finalTextTurn. We need one scriptedLLM per agent to avoid the mock's
+	// internal mutex masking the race the per-session lock guards against.
+	mock1 := &scriptedLLM{script: []scriptedTurn{finalTextTurn("first")}}
+	mock2 := &scriptedLLM{script: []scriptedTurn{finalTextTurn("second")}}
+
+	sess := session.New("concurrent")
+
+	agent1, err := NewAgent(AgentOptions{Model: mock1, Session: sess})
+	assert.NoError(t, err)
+	agent2, err := NewAgent(AgentOptions{Model: mock2, Session: sess})
+	assert.NoError(t, err)
+
+	// Fire both calls concurrently. The per-session lock should serialize
+	// them; if it didn't, `go test -race` would flag the concurrent writes
+	// to the session's event list, and the final Messages() assertion
+	// would be flaky.
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make(chan error, 2)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := agent1.CreateResponse(context.Background(), WithInput("a"))
+		errs <- err
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_, err := agent2.CreateResponse(context.Background(), WithInput("b"))
+		errs <- err
+	}()
+	close(start)
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		assert.NoError(t, e)
+	}
+
+	// Both turns should be persisted. The ordering between the two turns
+	// isn't guaranteed (whichever goroutine acquires the lock first wins),
+	// but each turn is atomic: user input immediately followed by the
+	// assistant response. That means we should see exactly 4 messages and
+	// each assistant message should directly follow its matching user
+	// input.
+	msgs, err := sess.Messages(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, len(msgs), 4)
+	for i := 0; i < 4; i += 2 {
+		assert.Equal(t, msgs[i].Role, llm.User)
+		assert.Equal(t, msgs[i+1].Role, llm.Assistant)
+	}
 }

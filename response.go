@@ -36,8 +36,8 @@ const (
 	ResponseItemTypeToolStream ResponseItemType = "tool_stream"
 
 	// ResponseItemTypeSuspended is a terminal item emitted when the agent
-	// transitions into a suspended state. The Suspended field carries the
-	// same pending/completed lists as Response. Stream consumers should
+	// transitions into a suspended state. The Suspension field carries the
+	// same SuspensionState as Response.Suspension. Stream consumers should
 	// treat this as end-of-stream and then observe Response.Status.
 	ResponseItemTypeSuspended ResponseItemType = "suspended"
 )
@@ -66,9 +66,28 @@ type PendingToolCall struct {
 	Metadata map[string]any  `json:"metadata,omitempty"`
 }
 
+// UnmarshalInput decodes the pending call's Input JSON into the given
+// destination. Convenience for the common pattern of reading the original
+// tool arguments when handling a suspend out-of-band.
+func (p *PendingToolCall) UnmarshalInput(into any) error {
+	if p == nil || len(p.Input) == 0 {
+		return nil
+	}
+	return json.Unmarshal(p.Input, into)
+}
+
+// DecodePendingInput decodes the pending call's Input JSON into a value of
+// type T. Generic wrapper around PendingToolCall.UnmarshalInput for call
+// sites that prefer a return value over an out-parameter.
+func DecodePendingInput[T any](p *PendingToolCall) (T, error) {
+	var out T
+	err := p.UnmarshalInput(&out)
+	return out, err
+}
+
 // CompletedToolCall describes a tool call that ran to completion in the same
 // iteration where a sibling suspended. Informational — the result is already
-// persisted in the session.
+// persisted in the session (or in the messages the caller is tracking).
 type CompletedToolCall struct {
 	ID     string          `json:"id"`
 	Name   string          `json:"name"`
@@ -77,10 +96,30 @@ type CompletedToolCall struct {
 	Error  string          `json:"error,omitempty"`
 }
 
-// SuspendedItem is the payload of a ResponseItemTypeSuspended stream event.
-type SuspendedItem struct {
-	PendingToolCalls   []*PendingToolCall   `json:"pending_tool_calls,omitempty"`
+// SuspensionState is the symmetric in/out payload describing a suspended
+// turn. It is returned on Response.Suspension whenever Status is
+// ResponseStatusSuspended, and passed back via WithSuspension on resume.
+//
+// The same value flows in both directions: callers store it alongside their
+// message history and hand it back unchanged on the resume call. Sessions
+// that implement SuspendableSession persist this state on the caller's
+// behalf so that a session-backed resume only needs to supply WithToolResults.
+type SuspensionState struct {
+	// PendingToolCalls are the tool calls awaiting external results. On
+	// resume the caller must supply a ToolResult for each via WithToolResults
+	// (partial resumes are allowed: remaining entries stay pending).
+	PendingToolCalls []*PendingToolCall `json:"pending_tool_calls,omitempty"`
+
+	// CompletedToolCalls are sibling tool calls that ran to completion in
+	// the same iteration where one or more tools suspended. Informational:
+	// the results are already present in the message history.
 	CompletedToolCalls []*CompletedToolCall `json:"completed_tool_calls,omitempty"`
+
+	// TurnMessageCount is the number of trailing messages in the full
+	// conversation history that belong to the suspended turn. The agent
+	// uses this on resume to locate the turn boundary — it is the only
+	// field needed to route resume logic without a session.
+	TurnMessageCount int `json:"turn_message_count,omitempty"`
 }
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.
@@ -104,8 +143,9 @@ type ResponseItem struct {
 	// ToolStream is set if the response item is streaming tool output
 	ToolStream *ToolStreamEvent `json:"tool_stream,omitempty"`
 
-	// Suspended is set on a ResponseItemTypeSuspended item.
-	Suspended *SuspendedItem `json:"suspended,omitempty"`
+	// Suspension is set on a ResponseItemTypeSuspended item. It mirrors
+	// Response.Suspension.
+	Suspension *SuspensionState `json:"suspension,omitempty"`
 
 	// Extension holds optional data from experimental packages.
 	// The concrete type depends on the ResponseItemType.
@@ -151,15 +191,13 @@ type Response struct {
 	// An empty Status means Completed (back-compat).
 	Status ResponseStatus `json:"status,omitempty"`
 
-	// PendingToolCalls is populated when Status == ResponseStatusSuspended.
-	// Each entry is a tool call awaiting an external result, which the caller
-	// must supply on a subsequent CreateResponse via WithToolResults.
-	PendingToolCalls []*PendingToolCall `json:"pending_tool_calls,omitempty"`
-
-	// CompletedToolCalls lists tool calls that ran alongside the suspending
-	// sibling(s) in the suspended iteration. Only populated when
-	// Status == ResponseStatusSuspended. For the terminal iteration only.
-	CompletedToolCalls []*CompletedToolCall `json:"completed_tool_calls,omitempty"`
+	// Suspension is populated when Status == ResponseStatusSuspended. It
+	// carries everything the caller needs to resume: the pending and
+	// completed tool calls and the turn boundary. Callers store this
+	// alongside their message history and hand it back via
+	// WithSuspension on the resume call (or rely on auto-persistence via a
+	// SuspendableSession).
+	Suspension *SuspensionState `json:"suspension,omitempty"`
 }
 
 // OutputText returns the text content from the last message in the response.

@@ -507,8 +507,13 @@ func suspendedTurnMessages() []*llm.Message {
 	return []*llm.Message{llm.NewUserTextMessage("start"), assistant, toolResult}
 }
 
-func singlePendingCall() []session.PendingCall {
-	return []session.PendingCall{{ID: "toolu_a", Name: "approve", Input: []byte(`{}`)}}
+func singleSuspensionState() *dive.SuspensionState {
+	return &dive.SuspensionState{
+		PendingToolCalls: []*dive.PendingToolCall{
+			{ID: "toolu_a", Name: "approve", Input: []byte(`{}`)},
+		},
+		TurnMessageCount: 3,
+	}
 }
 
 func TestMemoryStoreSuspendRoundTrip(t *testing.T) {
@@ -519,13 +524,13 @@ func TestMemoryStoreSuspendRoundTrip(t *testing.T) {
 	assert.NoError(t, err)
 
 	msgs := suspendedTurnMessages()
-	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5}, singlePendingCall())
+	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5}, singleSuspensionState())
 	assert.NoError(t, err)
 
-	assert.True(t, sess.Suspended())
-	pending := sess.PendingCalls()
-	assert.Equal(t, len(pending), 1)
-	assert.Equal(t, pending[0].ID, "toolu_a")
+	state := sess.LoadSuspension()
+	assert.NotNil(t, state)
+	assert.Equal(t, len(state.PendingToolCalls), 1)
+	assert.Equal(t, state.PendingToolCalls[0].ID, "toolu_a")
 
 	got, _ := sess.Messages(ctx)
 	assert.Equal(t, len(got), len(msgs))
@@ -541,7 +546,7 @@ func TestFileStoreSuspendRoundTrip(t *testing.T) {
 	assert.NoError(t, err)
 
 	msgs := suspendedTurnMessages()
-	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5, OutputTokens: 2}, singlePendingCall())
+	err = sess.SaveSuspendedTurn(ctx, msgs, &llm.Usage{InputTokens: 5, OutputTokens: 2}, singleSuspensionState())
 	assert.NoError(t, err)
 
 	// Re-open from disk and verify.
@@ -550,10 +555,10 @@ func TestFileStoreSuspendRoundTrip(t *testing.T) {
 	sess2, err := store2.Open(ctx, "s1")
 	assert.NoError(t, err)
 
-	assert.True(t, sess2.Suspended())
-	pending := sess2.PendingCalls()
-	assert.Equal(t, len(pending), 1)
-	assert.Equal(t, pending[0].ID, "toolu_a")
+	state := sess2.LoadSuspension()
+	assert.NotNil(t, state)
+	assert.Equal(t, len(state.PendingToolCalls), 1)
+	assert.Equal(t, state.PendingToolCalls[0].ID, "toolu_a")
 	got, _ := sess2.Messages(ctx)
 	assert.Equal(t, len(got), len(msgs))
 }
@@ -569,7 +574,7 @@ func TestFileStoreListReportsSuspended(t *testing.T) {
 
 	// Suspended session
 	s2, _ := store.Open(ctx, "suspended")
-	_ = s2.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singlePendingCall())
+	_ = s2.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState())
 
 	res, err := store.List(ctx, nil)
 	assert.NoError(t, err)
@@ -587,14 +592,13 @@ func TestFileStoreListReportsSuspended(t *testing.T) {
 func TestSaveTurnClearsSuspension(t *testing.T) {
 	ctx := context.Background()
 	sess := session.New("s1")
-	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singlePendingCall())
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState())
 	assert.NoError(t, err)
-	assert.True(t, sess.Suspended())
+	assert.NotNil(t, sess.LoadSuspension())
 
 	err = sess.SaveResumedTurn(ctx, append(suspendedTurnMessages(), llm.NewAssistantTextMessage("done")), nil)
 	assert.NoError(t, err)
-	assert.False(t, sess.Suspended())
-	assert.Equal(t, len(sess.PendingCalls()), 0)
+	assert.Nil(t, sess.LoadSuspension())
 }
 
 func TestCrossProcessResume(t *testing.T) {
@@ -605,7 +609,7 @@ func TestCrossProcessResume(t *testing.T) {
 	{
 		store, _ := session.NewFileStore(dir)
 		sess, _ := store.Open(ctx, "cross")
-		err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singlePendingCall())
+		err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState())
 		assert.NoError(t, err)
 	}
 
@@ -613,10 +617,10 @@ func TestCrossProcessResume(t *testing.T) {
 	{
 		store, _ := session.NewFileStore(dir)
 		sess, _ := store.Open(ctx, "cross")
-		assert.True(t, sess.Suspended())
-		pending := sess.PendingCalls()
-		assert.Equal(t, len(pending), 1)
-		assert.Equal(t, pending[0].ID, "toolu_a")
+		state := sess.LoadSuspension()
+		assert.NotNil(t, state)
+		assert.Equal(t, len(state.PendingToolCalls), 1)
+		assert.Equal(t, state.PendingToolCalls[0].ID, "toolu_a")
 
 		// Simulate completion.
 		complete := suspendedTurnMessages()
@@ -629,7 +633,7 @@ func TestCrossProcessResume(t *testing.T) {
 	// Re-open once more and verify the final state.
 	store, _ := session.NewFileStore(dir)
 	sess, _ := store.Open(ctx, "cross")
-	assert.False(t, sess.Suspended())
+	assert.Nil(t, sess.LoadSuspension())
 	msgs, _ := sess.Messages(ctx)
 	assert.Equal(t, msgs[len(msgs)-1].Text(), "done")
 }

@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 
@@ -51,7 +50,7 @@ func notifyTool() dive.Tool {
 
 func teamFor(p *dive.PendingToolCall) string {
 	var in NotifyInput
-	_ = json.Unmarshal(p.Input, &in)
+	_ = p.UnmarshalInput(&in)
 	return in.Team
 }
 
@@ -82,15 +81,15 @@ func main() {
 		fmt.Println("Agent completed without suspending:", resp.OutputText())
 		return
 	}
-	fmt.Printf("Initial suspend: %d pending tool call(s)\n", len(resp.PendingToolCalls))
+	fmt.Printf("Initial suspend: %d pending tool call(s)\n", len(resp.Suspension.PendingToolCalls))
 
 	// Resume one at a time. After each call the agent stays suspended
-	// (Status=Suspended, PendingToolCalls shrinks by one) until the last
-	// result lands and the turn completes.
-	for resp.Status == dive.ResponseStatusSuspended && len(resp.PendingToolCalls) > 0 {
-		next := resp.PendingToolCalls[0]
+	// (Status=Suspended, Suspension.PendingToolCalls shrinks by one) until
+	// the last result lands and the turn completes.
+	for resp.Status == dive.ResponseStatusSuspended && len(resp.Suspension.PendingToolCalls) > 0 {
+		next := resp.Suspension.PendingToolCalls[0]
 		team := teamFor(next)
-		fmt.Printf("\nResuming %s (team=%s) — %d remaining before\n", next.ID, team, len(resp.PendingToolCalls))
+		fmt.Printf("\nResuming %s (team=%s) — %d remaining before\n", next.ID, team, len(resp.Suspension.PendingToolCalls))
 
 		out, err := dialog.Show(ctx, dialogspec.FromPending(next).ToDialogInput())
 		if err != nil {
@@ -106,7 +105,11 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("  -> status=%s remaining=%d\n", resp.Status, len(resp.PendingToolCalls))
+		remaining := 0
+		if resp.Suspension != nil {
+			remaining = len(resp.Suspension.PendingToolCalls)
+		}
+		fmt.Printf("  -> status=%s remaining=%d\n", resp.Status, remaining)
 	}
 
 	fmt.Println("\nAgent:", resp.OutputText())

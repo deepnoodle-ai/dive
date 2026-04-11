@@ -41,6 +41,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
@@ -61,43 +62,65 @@ var ErrSuspendedSession = errors.New("session is suspended")
 // the last event.
 var ErrNotSuspended = errors.New("session is not suspended")
 
-// PendingCall is the internal, serializable shape of a suspended tool call.
-// Kept in the session package so sessionData/sessionHeader stay self-contained
-// (session does not import dive). Callers in the dive package convert to and
-// from the public dive.PendingToolCall type at the boundary.
-type PendingCall struct {
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Input    json.RawMessage `json:"input,omitempty"`
-	Prompt   string          `json:"prompt,omitempty"`
-	Metadata map[string]any  `json:"metadata,omitempty"`
-}
-
-// clonePendingCalls returns a deep copy of pending calls so callers cannot
-// mutate the session's internal state through the returned slice.
-func clonePendingCalls(src []PendingCall) []PendingCall {
+// cloneSuspensionState returns a deep copy of a SuspensionState so callers
+// cannot mutate the session's internal state through the returned pointer.
+func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 	if src == nil {
 		return nil
 	}
-	out := make([]PendingCall, len(src))
-	for i, p := range src {
-		cp := PendingCall{
-			ID:     p.ID,
-			Name:   p.Name,
-			Prompt: p.Prompt,
+	out := &dive.SuspensionState{TurnMessageCount: src.TurnMessageCount}
+	if src.PendingToolCalls != nil {
+		out.PendingToolCalls = make([]*dive.PendingToolCall, len(src.PendingToolCalls))
+		for i, p := range src.PendingToolCalls {
+			out.PendingToolCalls[i] = clonePendingToolCall(p)
 		}
-		if p.Input != nil {
-			cp.Input = append(json.RawMessage(nil), p.Input...)
+	}
+	if src.CompletedToolCalls != nil {
+		out.CompletedToolCalls = make([]*dive.CompletedToolCall, len(src.CompletedToolCalls))
+		for i, c := range src.CompletedToolCalls {
+			out.CompletedToolCalls[i] = cloneCompletedToolCall(c)
 		}
-		if p.Metadata != nil {
-			cp.Metadata = make(map[string]any, len(p.Metadata))
-			for k, v := range p.Metadata {
-				cp.Metadata[k] = deepCopyJSONValue(v)
-			}
-		}
-		out[i] = cp
 	}
 	return out
+}
+
+func clonePendingToolCall(p *dive.PendingToolCall) *dive.PendingToolCall {
+	if p == nil {
+		return nil
+	}
+	cp := &dive.PendingToolCall{
+		ID:     p.ID,
+		Name:   p.Name,
+		Prompt: p.Prompt,
+	}
+	if p.Input != nil {
+		cp.Input = append(json.RawMessage(nil), p.Input...)
+	}
+	if p.Metadata != nil {
+		cp.Metadata = make(map[string]any, len(p.Metadata))
+		for k, v := range p.Metadata {
+			cp.Metadata[k] = deepCopyJSONValue(v)
+		}
+	}
+	return cp
+}
+
+func cloneCompletedToolCall(c *dive.CompletedToolCall) *dive.CompletedToolCall {
+	if c == nil {
+		return nil
+	}
+	cp := &dive.CompletedToolCall{
+		ID:    c.ID,
+		Name:  c.Name,
+		Error: c.Error,
+	}
+	if c.Input != nil {
+		cp.Input = append(json.RawMessage(nil), c.Input...)
+	}
+	// Result is not deep-cloned; tool results are treated as immutable
+	// once produced.
+	cp.Result = c.Result
+	return cp
 }
 
 // deepCopyJSONValue returns a deep copy of a JSON-like value so callers
@@ -105,6 +128,11 @@ func clonePendingCalls(src []PendingCall) []PendingCall {
 // Scalars (string, bool, numbers, nil) are returned as-is; maps and slices
 // are recursively copied. Unknown types fall back to a json round-trip so
 // we stay correct even when tools attach exotic payloads.
+//
+// Values must be JSON-friendly. After a round trip through this helper or
+// through the on-disk store, numeric values come back as float64 and custom
+// struct types become generic map[string]any — tool authors attaching
+// structured metadata should expect that loss of type fidelity.
 func deepCopyJSONValue(v any) any {
 	switch val := v.(type) {
 	case nil, bool, string, int, int8, int16, int32, int64,
@@ -196,16 +224,21 @@ type sessionData struct {
 	ForkedFrom string         `json:"forked_from,omitempty"`
 
 	// Suspended tracks the authoritative suspend flag. Cleared on a normal
-	// SaveTurn or on AbandonSuspension.
+	// SaveTurn or SaveResumedTurn.
 	Suspended bool `json:"suspended,omitempty"`
 
-	// PendingCalls is the set of tool_call IDs awaiting external results,
-	// along with the prompt and metadata the tool attached to its
+	// PendingToolCalls is the set of tool calls awaiting external results,
+	// along with the Prompt and Metadata the tool attached to its
 	// SuspendResult. Valid only when Suspended is true. Persisting the full
 	// payload lets cross-process resume and partial-resume-again flows
 	// surface the original Prompt/Metadata to callers without having to
 	// reconstruct it from the assistant tool_use message.
-	PendingCalls []PendingCall `json:"pending_calls,omitempty"`
+	PendingToolCalls []*dive.PendingToolCall `json:"pending_tool_calls,omitempty"`
+
+	// CompletedToolCalls are sibling tool calls that ran alongside the
+	// suspending tools in the same iteration. Informational — the results
+	// are also present in the tool_result message on the last event.
+	CompletedToolCalls []*dive.CompletedToolCall `json:"completed_tool_calls,omitempty"`
 }
 
 // Session implements dive.Session with event-based persistence.
@@ -278,42 +311,33 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 	return nil
 }
 
-// LastEventMessageCount returns the number of messages in the most recent
-// event, or 0 if the session has no events. The agent uses this during
-// resume to compute the boundary between the suspended turn and the rest
-// of the conversation history.
-func (s *Session) LastEventMessageCount() int {
+// LoadSuspension returns a deep copy of the stored suspension state, or
+// nil if the session is not currently suspended. Satisfies the
+// dive.SuspendableSession interface.
+func (s *Session) LoadSuspension() *dive.SuspensionState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if len(s.data.Events) == 0 {
-		return 0
+	if !s.data.Suspended {
+		return nil
 	}
-	return len(s.data.Events[len(s.data.Events)-1].Messages)
-}
-
-// Suspended reports whether the session is awaiting external tool results.
-func (s *Session) Suspended() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.data.Suspended
-}
-
-// PendingCalls returns a deep copy of the tool calls awaiting external
-// results. Valid only when Suspended() is true.
-func (s *Session) PendingCalls() []PendingCall {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return clonePendingCalls(s.data.PendingCalls)
+	state := &dive.SuspensionState{
+		PendingToolCalls:   s.data.PendingToolCalls,
+		CompletedToolCalls: s.data.CompletedToolCalls,
+	}
+	if len(s.data.Events) > 0 {
+		state.TurnMessageCount = len(s.data.Events[len(s.data.Events)-1].Messages)
+	}
+	return cloneSuspensionState(state)
 }
 
 // SaveSuspendedTurn persists a partial turn: messages ending in an assistant
 // tool_use message and an (optionally partial) tool_result message. Sets the
-// session's Suspended flag and records pending call info.
+// session's Suspended flag and records the supplied SuspensionState.
 //
 // If the session is already suspended and the last event is the corresponding
 // turn, this replaces it rather than appending, so repeated partial resumes
 // do not grow the event log without bound.
-func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, pending []PendingCall) error {
+func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, state *dive.SuspensionState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -324,7 +348,8 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 	// store write fails. Otherwise the in-memory Session would diverge from
 	// what's on disk.
 	prevSuspended := s.data.Suspended
-	prevPending := clonePendingCalls(s.data.PendingCalls)
+	prevPending := s.data.PendingToolCalls
+	prevCompleted := s.data.CompletedToolCalls
 	prevUpdatedAt := s.data.UpdatedAt
 	var prevLastEvent *event
 	prevEventsLen := len(s.data.Events)
@@ -353,8 +378,15 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 	} else {
 		s.data.Events = append(s.data.Events, evt)
 	}
+	cloned := cloneSuspensionState(state)
 	s.data.Suspended = true
-	s.data.PendingCalls = clonePendingCalls(pending)
+	if cloned != nil {
+		s.data.PendingToolCalls = cloned.PendingToolCalls
+		s.data.CompletedToolCalls = cloned.CompletedToolCalls
+	} else {
+		s.data.PendingToolCalls = nil
+		s.data.CompletedToolCalls = nil
+	}
 	s.data.UpdatedAt = now
 
 	if s.appender != nil {
@@ -368,7 +400,8 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 				s.data.Events = s.data.Events[:prevEventsLen]
 			}
 			s.data.Suspended = prevSuspended
-			s.data.PendingCalls = prevPending
+			s.data.PendingToolCalls = prevPending
+			s.data.CompletedToolCalls = prevCompleted
 			s.data.UpdatedAt = prevUpdatedAt
 			return err
 		}
@@ -377,8 +410,8 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 }
 
 // SaveResumedTurn replaces the last (suspended) event with a completed turn
-// and clears the suspended flag. Called by the agent when a resumed generate
-// run completes normally.
+// and clears the suspension state. Called by the agent when a resumed
+// generate run completes normally.
 //
 // Returns ErrNotSuspended if the session is not currently suspended. This
 // prevents accidental overwrite of the last event when a custom Session
@@ -394,7 +427,8 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 
 	// Snapshot mutated fields for rollback on store failure.
 	prevSuspended := s.data.Suspended
-	prevPending := clonePendingCalls(s.data.PendingCalls)
+	prevPending := s.data.PendingToolCalls
+	prevCompleted := s.data.CompletedToolCalls
 	prevUpdatedAt := s.data.UpdatedAt
 	hasLastEvent := len(s.data.Events) > 0
 	var prevLastEvent *event
@@ -422,7 +456,8 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 		s.data.Events = append(s.data.Events, evt)
 	}
 	s.data.Suspended = false
-	s.data.PendingCalls = nil
+	s.data.PendingToolCalls = nil
+	s.data.CompletedToolCalls = nil
 	s.data.UpdatedAt = now
 
 	if s.appender != nil {
@@ -433,7 +468,8 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 				s.data.Events = s.data.Events[:prevEventsLen]
 			}
 			s.data.Suspended = prevSuspended
-			s.data.PendingCalls = prevPending
+			s.data.PendingToolCalls = prevPending
+			s.data.CompletedToolCalls = prevCompleted
 			s.data.UpdatedAt = prevUpdatedAt
 			return err
 		}
@@ -441,34 +477,13 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 	return nil
 }
 
-// AbandonSuspension marks the session as no longer suspended without writing
-// new messages. Used when a caller gives up on a suspended turn without
-// supplying results, or as a rollback path when post-suspend hooks abort.
-//
-// Note: the session's last event still contains an unanswered tool_use, so
-// calling CreateResponse on an abandoned session will typically fail at the
-// LLM layer. Callers who want to recover should Compact or roll back the
-// last event first.
-func (s *Session) AbandonSuspension(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.data.Suspended {
-		return nil
-	}
-	prevPending := clonePendingCalls(s.data.PendingCalls)
-	prevUpdatedAt := s.data.UpdatedAt
-	s.data.Suspended = false
-	s.data.PendingCalls = nil
-	s.data.UpdatedAt = time.Now()
-	if s.appender != nil {
-		if err := s.appender.putSession(ctx, s.data); err != nil {
-			s.data.Suspended = true
-			s.data.PendingCalls = prevPending
-			s.data.UpdatedAt = prevUpdatedAt
-			return err
-		}
-	}
-	return nil
+// IsSuspended reports whether the session is awaiting external tool
+// results. Thin helper around LoadSuspension() != nil, retained for stores
+// and UI code that need a boolean without the full state.
+func (s *Session) IsSuspended() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.data.Suspended
 }
 
 // Title returns the session title.
@@ -553,7 +568,10 @@ func (s *Session) Fork(newID string) *Session {
 			UpdatedAt:  now,
 			Events:     events,
 			ForkedFrom: s.data.ID,
-			// Suspended and PendingCalls intentionally not copied.
+			// Suspended / PendingToolCalls / CompletedToolCalls intentionally
+			// not copied: pending out-of-band tool calls are owned by whoever
+			// launched the original suspend and cannot be resumed against a
+			// divergent branch.
 		},
 	}
 	if s.data.Metadata != nil {

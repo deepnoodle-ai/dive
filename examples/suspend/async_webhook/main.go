@@ -12,6 +12,13 @@
 // is persisted to ./async_webhook_sessions/. "resume" reopens the same
 // session from disk and supplies the tool result — simulating a webhook
 // callback arriving minutes or days later.
+//
+// Production note: FileStore is single-writer-per-session. It is fine for
+// sequential cross-process handoff as demonstrated here, but does NOT take
+// an OS-level file lock, so two processes writing the same session
+// concurrently may race. For multi-instance deployments where the same
+// session ID can be touched concurrently, use a database-backed Session
+// implementation instead.
 package main
 
 import (
@@ -46,7 +53,10 @@ func sendEmailTool() dive.Tool {
 }
 
 func webhookNotifier(ctx context.Context, hctx *dive.HookContext) error {
-	for _, p := range hctx.Response.PendingToolCalls {
+	if hctx.Response == nil || hctx.Response.Suspension == nil {
+		return nil
+	}
+	for _, p := range hctx.Response.Suspension.PendingToolCalls {
 		payload, _ := json.MarshalIndent(map[string]any{
 			"webhook_url": "https://example.com/webhooks/tool-result",
 			"tool_call":   p,
@@ -85,7 +95,7 @@ func main() {
 
 	switch *mode {
 	case "suspend":
-		if sess.Suspended() {
+		if sess.LoadSuspension() != nil {
 			log.Fatalf("session %q is already suspended — run with -mode=resume", *sessionID)
 		}
 		resp, err := agent.CreateResponse(ctx,
@@ -93,13 +103,18 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("status=%s pending=%d (re-run with -mode=resume)\n", resp.Status, len(resp.PendingToolCalls))
+		pending := 0
+		if resp.Suspension != nil {
+			pending = len(resp.Suspension.PendingToolCalls)
+		}
+		fmt.Printf("status=%s pending=%d (re-run with -mode=resume)\n", resp.Status, pending)
 	case "resume":
-		if !sess.Suspended() {
+		state := sess.LoadSuspension()
+		if state == nil {
 			log.Fatalf("session %q is not suspended — run with -mode=suspend first", *sessionID)
 		}
 		results := map[string]*dive.ToolResult{}
-		for _, p := range sess.PendingCalls() {
+		for _, p := range state.PendingToolCalls {
 			fmt.Printf("[webhook callback] delivering result for %s (%s)\n", p.ID, p.Prompt)
 			results[p.ID] = dive.NewToolResultText("Email delivered successfully (message-id: msg_" + p.ID + ")")
 		}
