@@ -1,54 +1,72 @@
 # Todo Lists
 
-> The TodoWrite tool is in `experimental/toolkit/extended/`. The todo types
-> are in the stable `todo/` package.
-
-Track task progress using Dive's todo functionality. The TodoWrite tool lets agents create and update task lists, with real-time event emissions through the event callback system.
+Track task progress using Dive's `todo` package. The TodoWrite tool lets agents create and update task lists; the package's `Extension` also installs a stale-list reminder hook so the model is gently reminded to update its list when many turns have passed without one.
 
 ## Basic Usage
+
+Wire the extension into your agent — it provides the tool, the reminder hook, and (optionally) an `OnUpdate` observer:
 
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/todo"
-    "github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
     "github.com/deepnoodle-ai/dive/providers/anthropic"
+    "github.com/deepnoodle-ai/dive/todo"
 )
 
 agent, _ := dive.NewAgent(dive.AgentOptions{
     Name:         "Task Manager",
     SystemPrompt: "Break complex tasks into steps and track progress with the TodoWrite tool.",
     Model:        anthropic.New(),
-    Tools: []dive.Tool{
-        extended.NewTodoWriteTool(),
-    },
+    Extensions:   []dive.Extension{todo.New()},
 })
+```
+
+If you only want the tool with no reminder hook, register it directly:
+
+```go
+Tools: []dive.Tool{todo.NewTool()},
+```
+
+## Stale-List Reminder
+
+`todo.Extension` installs a `PreGenerationHook` that walks the message history before each generation. If the model has not used `TodoWrite` in the last N assistant turns (default 10) and a list exists, the hook injects a `<system-reminder name="todos">` block into the first user message containing the latest list. When the model uses `TodoWrite` again, the next iteration removes the block automatically.
+
+The hook is fully stateless — message history is the source of truth — so a single `Extension` instance is safe to share across agents, sessions, and subagents.
+
+Tune the threshold (set to 0 to disable):
+
+```go
+todo.New(todo.WithReminderTurns(6))
+todo.New(todo.WithReminderTurns(0)) // tool only, no reminder
 ```
 
 ## Tracking Progress
 
-Monitor todo updates via event callbacks:
+Two ways to observe updates externally.
+
+### `TodoTracker` event handler (recommended for per-call observation)
 
 ```go
-response, _ := agent.CreateResponse(ctx,
-    dive.WithInput("Set up a new Go project with testing"),
-    dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-        if item.Type == todo.ItemType {
-            if evt, ok := item.Extension.(*todo.TodoEvent); ok {
-                for _, t := range evt.Todos {
-                    status := "pending"
-                    if t.Status == todo.TodoStatusCompleted {
-                        status = "done"
-                    } else if t.Status == todo.TodoStatusInProgress {
-                        status = "working"
-                    }
-                    fmt.Printf("[%s] %s\n", status, t.Content)
-                }
-            }
-        }
-        return nil
-    }),
+tracker := todo.NewTodoTracker()
+
+resp, _ := agent.CreateResponse(ctx,
+    dive.WithInput("Build a REST API"),
+    dive.WithEventCallback(tracker.HandleEvent),
 )
+
+tracker.DisplayProgress(os.Stdout)
+completed, inProgress, total := tracker.Progress()
+status := tracker.FormatProgress() // "Running tests - 2/5"
+```
+
+### `OnUpdate` callback (push notification on every write)
+
+```go
+ext := todo.New(todo.WithExtensionOnUpdate(func(items []todo.TodoItem) {
+    for _, t := range items {
+        fmt.Printf("[%s] %s\n", t.Status, t.Content)
+    }
+}))
 ```
 
 ## Todo States
@@ -71,33 +89,11 @@ type TodoItem struct {
 }
 ```
 
-## TodoTracker Helper
-
-The `TodoTracker` helper (in `todo/`) consumes todo events and provides progress tracking:
-
-```go
-tracker := todo.NewTodoTracker()
-
-resp, _ := agent.CreateResponse(ctx,
-    dive.WithInput("Build a REST API"),
-    dive.WithEventCallback(tracker.HandleEvent),
-)
-
-// Display progress
-tracker.DisplayProgress(os.Stdout)
-
-// Get counts
-completed, inProgress, total := tracker.Progress()
-
-// Get status line
-status := tracker.FormatProgress() // "Running tests - 2/5"
-```
-
 ## Best Practices
 
 1. One `in_progress` task at a time
 2. Mark a task as `in_progress` before starting work
 3. Mark tasks `completed` immediately when done
 4. Provide both `Content` and `ActiveForm` for better UX
-5. Each TodoWrite call replaces the entire list (include all items)
+5. Each `TodoWrite` call replaces the entire list (include all items)
 6. Only mark tasks `completed` when truly finished
