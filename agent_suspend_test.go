@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -3106,4 +3107,208 @@ func TestAskUserToolAsyncEndToEnd(t *testing.T) {
 		}
 	}
 	assert.True(t, foundAnswer, "resumed tool_result should carry the integrator's AskUserOutput JSON")
+}
+
+func TestResumePostHookSeesToolField(t *testing.T) {
+	// Verify that PostToolUse hooks fired during resume have HookContext.Tool
+	// populated, matching the contract from the normal execution path.
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+			),
+			finalTextTurn("done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+
+	var hookTools []string
+	sess := session.New("tool-field")
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB},
+		Session:               sess,
+		ParallelToolExecution: true,
+		Hooks: Hooks{
+			PostToolUse: []PostToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					if hctx.Tool != nil {
+						hookTools = append(hookTools, hctx.Tool.Name())
+					} else {
+						hookTools = append(hookTools, "<nil>")
+					}
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_a": NewToolResultText("A"),
+			"toolu_b": NewToolResultText("B"),
+		}),
+	)
+	assert.NoError(t, err)
+	// Hooks fire in tool_use order (a, b); each should see its Tool populated.
+	assert.Equal(t, hookTools, []string{"tool_a", "tool_b"})
+}
+
+func TestResumePostHookMutationsPropagate(t *testing.T) {
+	// Verify that PostToolUse hook mutations to Result and AdditionalContext
+	// are propagated into the merged tool_result message sent to the LLM,
+	// matching the normal execution path contract.
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+
+	sess := session.New("mutations")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{tool},
+		Session: sess,
+		Hooks: Hooks{
+			PostToolUse: []PostToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					// Rewrite the result content (e.g. redaction).
+					hctx.Result = &ToolCallResult{
+						ID:   hctx.Result.ID,
+						Name: hctx.Result.Name,
+						Result: &ToolResult{
+							Content: []*ToolResultContent{{
+								Type: ToolResultContentTypeText,
+								Text: "REDACTED",
+							}},
+						},
+					}
+					// Inject additional context.
+					hctx.AdditionalContext = "hook-injected context"
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_a": NewToolResultText("original content"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+
+	// The LLM should have seen the hook-modified result, not the original.
+	// Check the second LLM call's messages for the tool_result content.
+	assert.True(t, len(mock.received) >= 2, "expected at least 2 LLM calls")
+	resumeCall := mock.received[1]
+	// Find the tool_result message.
+	var foundRedacted bool
+	var foundContext bool
+	for _, msg := range resumeCall {
+		if msg.Role != llm.User {
+			continue
+		}
+		for _, c := range msg.Content {
+			if trc, ok := c.(*llm.ToolResultContent); ok && trc.ToolUseID == "toolu_a" {
+				// The content should reflect the hook's rewritten result.
+				// After Copy() in scriptedLLM the concrete type may be
+				// []interface{}/map[string]any, so marshal to JSON and
+				// check for the rewritten text.
+				raw, _ := json.Marshal(trc.Content)
+				contentStr := string(raw)
+				if strings.Contains(contentStr, "REDACTED") {
+					foundRedacted = true
+				}
+			}
+			if tc, ok := c.(*llm.TextContent); ok && tc.Text == "hook-injected context" {
+				foundContext = true
+			}
+		}
+	}
+	assert.True(t, foundRedacted, "hook-rewritten result should appear in the tool_result sent to the LLM")
+	assert.True(t, foundContext, "hook-injected AdditionalContext should appear in the tool_result sent to the LLM")
+}
+
+func TestCompletedToolCallsPreservedAcrossPartialResume(t *testing.T) {
+	// Verify that CompletedToolCall.Result and .Error survive across
+	// partial resumes — i.e. the second suspended response carries the
+	// full payloads from the first suspension's CompletedToolCalls.
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_fast", "fast_tool", `{}`),
+				newScriptedToolUse("toolu_slow", "slow_tool", `{}`),
+				newScriptedToolUse("toolu_extra", "extra_tool", `{}`),
+			),
+		},
+	}
+	fastTool := &scriptedTool{name: "fast_tool", outcomes: []toolOutcome{
+		{result: NewToolResultText("fast-result")},
+	}}
+	slowTool := &scriptedTool{name: "slow_tool", outcomes: []toolOutcome{
+		{result: NewSuspendResult("waiting on slow", nil)},
+	}}
+	extraTool := &scriptedTool{name: "extra_tool", outcomes: []toolOutcome{
+		{result: NewSuspendResult("waiting on extra", nil)},
+	}}
+
+	sess := session.New("completed-preserve")
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{fastTool, slowTool, extraTool},
+		Session:               sess,
+		ParallelToolExecution: true,
+	})
+	assert.NoError(t, err)
+
+	// First call: fast_tool completes, slow_tool and extra_tool suspend.
+	resp1, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp1.Status, ResponseStatusSuspended)
+	assert.Equal(t, len(resp1.Suspension.PendingToolCalls), 2)
+	assert.Equal(t, len(resp1.Suspension.CompletedToolCalls), 1)
+
+	// Verify initial completed call has Result populated.
+	cc0 := resp1.Suspension.CompletedToolCalls[0]
+	assert.Equal(t, cc0.ID, "toolu_fast")
+	assert.NotNil(t, cc0.Result)
+
+	// Partial resume: supply only slow_tool, leaving extra_tool pending.
+	resp2, err := agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_slow": NewToolResultText("slow-result"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp2.Status, ResponseStatusSuspended)
+	assert.Equal(t, len(resp2.Suspension.PendingToolCalls), 1)
+	assert.Equal(t, resp2.Suspension.PendingToolCalls[0].ID, "toolu_extra")
+
+	// The completed set should now include fast_tool with its original
+	// Result preserved — not a lossy reconstruction.
+	assert.True(t, len(resp2.Suspension.CompletedToolCalls) >= 1,
+		"expected at least 1 completed tool call")
+	var foundFast bool
+	for _, cc := range resp2.Suspension.CompletedToolCalls {
+		if cc.ID == "toolu_fast" {
+			foundFast = true
+			assert.NotNil(t, cc.Result, "CompletedToolCall.Result should survive partial resume")
+			break
+		}
+	}
+	assert.True(t, foundFast, "fast_tool should appear in CompletedToolCalls after partial resume")
 }

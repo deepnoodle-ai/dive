@@ -476,8 +476,16 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	//     capture and unwind.
 	var resumeExtraItems []*ResponseItem
 	if rs != nil {
+		// Resolve tools once for the entire resume phase: used both to
+		// populate HookContext.Tool on post hooks and to execute any
+		// not-started tool calls.
+		_, resumeToolsByName, err := a.resolveTools(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("tool resolution error: %w", err)
+		}
+
 		// Fire post hooks for caller-supplied results.
-		if err := a.fireResumePostHooks(ctx, hctx, rs); err != nil {
+		if err := a.fireResumePostHooks(ctx, hctx, rs, resumeToolsByName); err != nil {
 			return nil, err
 		}
 		if len(rs.RemainingPending) > 0 {
@@ -492,16 +500,12 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		}
 		// Execute not-started tool calls, if any.
 		if len(rs.NotStartedToolCalls) > 0 {
-			_, toolsByName, err := a.resolveTools(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("tool resolution error: %w", err)
-			}
 			var resumeItems []*ResponseItem
 			resumeCallback := func(ctx context.Context, item *ResponseItem) error {
 				resumeItems = append(resumeItems, item)
 				return eventCallback(ctx, item)
 			}
-			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, toolsByName, resumeCallback)
+			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback)
 			if err != nil {
 				return nil, err
 			}
@@ -862,6 +866,46 @@ func (rs *resumeState) AppendToolResultTextContent(tc *llm.TextContent) {
 	msg.Content = append(msg.Content, tc)
 }
 
+// UpdateToolResultContent updates the tool_result content block for the given
+// tool_use ID with the (possibly hook-modified) ToolCallResult. This brings
+// the merged message in sync with any mutations made by PostToolUse or
+// PostToolUseFailure hooks during resume, and appends AdditionalContext as a
+// trailing text block — the same contract executeOneToolCall honors.
+func (rs *resumeState) UpdateToolResultContent(toolUseID string, result *ToolCallResult) {
+	if rs.ToolResultMessageIdx < 0 || result == nil {
+		return
+	}
+	msg := rs.TurnMessages[rs.ToolResultMessageIdx]
+
+	// Find and replace the tool_result content block for this ID.
+	var content any
+	var isError bool
+	if result.Result != nil {
+		content = result.Result.Content
+		isError = result.Result.IsError
+	}
+	isError = result.Error != nil || isError
+
+	for i, c := range msg.Content {
+		if trc, ok := c.(*llm.ToolResultContent); ok && trc.ToolUseID == toolUseID {
+			msg.Content[i] = &llm.ToolResultContent{
+				ToolUseID: toolUseID,
+				Content:   content,
+				IsError:   isError,
+			}
+			break
+		}
+	}
+
+	// Append AdditionalContext as a trailing text block, matching the
+	// normal path in executeOneToolCall / getAdditionalContextContent.
+	if result.AdditionalContext != "" {
+		msg.Content = append(msg.Content, &llm.TextContent{
+			Text: result.AdditionalContext,
+		})
+	}
+}
+
 // prepareResume inspects the full history and caller-supplied tool results
 // to build a resumeState. It validates invariants per FR-19 and returns
 // descriptive errors.
@@ -1009,12 +1053,28 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 	sessionWithMerged = append(sessionWithMerged, fullHistory[:turnStart]...)
 	sessionWithMerged = append(sessionWithMerged, turnMessages...)
 
-	// Previously-completed calls from existing results (pre-resume).
+	// Previously-completed calls from the incoming SuspensionState.
+	// Prefer the rich CompletedToolCall entries (which carry Result and
+	// Error) over reconstructing lossy versions from message content
+	// blocks. Fall back to message-based reconstruction only for IDs not
+	// found in the state — shouldn't happen in practice, but keeps the
+	// code robust against incomplete snapshots.
+	priorCompletedByID := make(map[string]*CompletedToolCall, len(state.CompletedToolCalls))
+	for _, cc := range state.CompletedToolCalls {
+		priorCompletedByID[cc.ID] = cc
+	}
 	var previouslyCompleted []*CompletedToolCall
 	for _, id := range toolUseIDs {
 		if _, ok := existingResults[id]; !ok {
 			continue
 		}
+		if cc, found := priorCompletedByID[id]; found {
+			previouslyCompleted = append(previouslyCompleted, cc)
+			continue
+		}
+		// Fallback: reconstruct from the assistant message (lossy — no
+		// Result/Error). This path is only hit if the SuspensionState's
+		// CompletedToolCalls is incomplete.
 		toolUse := findToolUseByID(assistant, id)
 		if toolUse == nil {
 			continue
@@ -1075,7 +1135,16 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 // caller-supplied result on resume, mirroring the contract used for tools
 // that run in-process. Hooks fire in the order the tool_use blocks appeared
 // in the suspended assistant message so ordering is deterministic.
-func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *resumeState) error {
+//
+// toolsByName is used to populate HookContext.Tool, matching the normal
+// execution path contract. In cross-process scenarios the tool may not exist
+// in the current agent's registry; Tool is nil in that case (best-effort).
+//
+// After hooks fire, any mutations to postHctx.Result and
+// postHctx.AdditionalContext are propagated back into the merged tool_result
+// message on rs, keeping resume behaviorally equivalent to the normal tool
+// execution path.
+func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *resumeState, toolsByName map[string]Tool) error {
 	if len(rs.CallerSupplied) == 0 {
 		return nil
 	}
@@ -1092,6 +1161,7 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 			Values:       hctx.Values,
 			SystemPrompt: hctx.SystemPrompt,
 			Messages:     hctx.Messages,
+			Tool:         toolsByName[result.Name], // nil if tool not in registry (cross-process)
 			Call: &llm.ToolUseContent{
 				ID:    result.ID,
 				Name:  result.Name,
@@ -1124,6 +1194,21 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 				}
 			}
 		}
+
+		// Propagate hook mutations back into the caller-supplied result and
+		// the merged tool_result message, mirroring the normal execution path
+		// in executeOneToolCall which reads postHctx.Result and
+		// postHctx.AdditionalContext after hooks fire.
+		result = postHctx.Result
+		rs.CallerSupplied[toolUseID] = result
+
+		if postHctx.AdditionalContext != "" {
+			result.AdditionalContext = postHctx.AdditionalContext
+		}
+
+		// Update the corresponding tool_result content block in the merged
+		// message so the LLM sees the hook-modified result.
+		rs.UpdateToolResultContent(toolUseID, result)
 	}
 	return nil
 }
