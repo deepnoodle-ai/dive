@@ -93,6 +93,7 @@ func NewFileStoreWithSync(dir string, sync bool) (*FileStore, error) {
 		}
 		dir = filepath.Join(home, dir[2:])
 	}
+	dir = filepath.Clean(dir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}

@@ -52,6 +52,12 @@ func sendEmailTool() dive.Tool {
 		})
 }
 
+// webhookNotifier is an OnSuspend hook that logs what a webhook dispatch
+// would look like. WARNING: OnSuspend fires BEFORE SaveSuspendedTurn
+// durably commits the suspended turn. If SaveSuspendedTurn fails after this
+// hook runs, the webhook will have been dispatched for a turn that was never
+// persisted. In production, use an outbox or durable queue: enqueue the
+// webhook payload here, and deliver it only after SaveSuspendedTurn succeeds.
 func webhookNotifier(ctx context.Context, hctx *dive.HookContext) error {
 	if hctx.Response == nil || hctx.Response.Suspension == nil {
 		return nil

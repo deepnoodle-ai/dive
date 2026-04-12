@@ -3,7 +3,7 @@ Title: Agent Suspend/Resume — Technical Design
 Author: Curtis Myzie
 Status: Draft
 Last Updated: 2026-04-10
-PRD: tasks/prd-agent-suspend-resume.md
+PRD: docs/prds/prd-04-suspend-resume.md
 ---
 
 # Agent Suspend/Resume — Technical Design
@@ -11,7 +11,7 @@ PRD: tasks/prd-agent-suspend-resume.md
 ## 1. Overview
 
 This document describes the concrete implementation of the suspend/resume
-primitive specified in `tasks/prd-agent-suspend-resume.md`. The design is
+primitive specified in `docs/prds/prd-04-suspend-resume.md`. The design is
 scoped to three surfaces:
 
 1. **Tool author surface.** A tool's `Call` can signal suspension by returning
@@ -27,9 +27,16 @@ scoped to three surfaces:
    transitions into a suspended state. A new `ResponseItemTypeSuspended` is
    emitted to streaming callbacks.
 
-The design is **additive** — nothing existing is renamed, removed, or changes
-shape. Tools that never suspend pay zero cost: the new `Suspend` field is a
-nil pointer check.
+The design is **mostly additive** — tools that never suspend pay zero cost (the
+new `Suspend` field is a nil pointer check) — but introduces breaking changes
+to the session contract: `SuspendableSession` is a new 3-method interface
+(`LoadSuspension`, `SaveSuspendedTurn`, `SaveResumedTurn`) rather than the
+original 4-method shape; the on-disk `pending_tool_call_ids []string` field
+became `pending_tool_calls []*PendingToolCall` (carrying full Prompt/Metadata);
+and `ClearSuspension` was removed in favor of `SaveResumedTurn`, which replaces
+the last event atomically. Callers migrating from earlier drafts must update
+their `SuspendableSession` implementations and any stored session files that
+contain the old `pending_tool_call_ids` field.
 
 ## 2. Design Summary
 
@@ -713,36 +720,30 @@ to `dive.Session` would technically break third-party implementations. The
 design adds an *optional* interface in `dive.go`:
 
 ```go
-// SuspendableSession is an optional extension of Session. Sessions that
-// implement it participate in suspend/resume; the agent prefers the flag
-// they expose over the structural invariant. Sessions that do not implement
-// it cannot be resumed — any tool returning SuspendResult against such a
-// session causes CreateResponse to return an error.
+// SuspendableSession is an optional extension of Session for callers who
+// want suspend/resume state to be auto-persisted alongside the conversation
+// history. A plain Session — or no session at all — also supports
+// suspend/resume; in that case the caller manages the SuspensionState
+// themselves via Response.Suspension and WithResume.
 type SuspendableSession interface {
     Session
 
-    // Suspended reports whether the session is currently in a suspended
-    // state awaiting external tool results.
-    Suspended() bool
+    // LoadSuspension returns the stored suspension state for this session,
+    // or nil if the session is not currently suspended. The returned value
+    // is a deep copy — mutations do not affect session internals.
+    LoadSuspension() *SuspensionState
 
-    // PendingToolCallIDs returns the tool_call IDs currently awaiting
-    // external results. Valid only when Suspended() is true.
-    PendingToolCallIDs() []string
+    // SaveSuspendedTurn persists a partial turn whose final tool_result
+    // message is missing one or more tool_result blocks, together with the
+    // SuspensionState that describes the pending work. Implementations
+    // should store the state so a subsequent LoadSuspension returns an
+    // equivalent value.
+    SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, state *SuspensionState) error
 
-    // SaveSuspendedTurn persists a partial turn: messages ending in an
-    // assistant tool_use message and an (optionally partial) tool_result
-    // message. It must set Suspended=true and record pendingIDs.
-    SaveSuspendedTurn(
-        ctx context.Context,
-        messages []*llm.Message,
-        usage *llm.Usage,
-        pendingIDs []string,
-    ) error
-
-    // ClearSuspension marks the session as no longer suspended and clears
-    // the pending set. Called after a successful non-suspended return from
-    // CreateResponse that transitioned out of resume mode.
-    ClearSuspension(ctx context.Context) error
+    // SaveResumedTurn replaces the last (suspended) event with a completed
+    // turn and clears the stored suspension state. Implementations should
+    // return an error if the session is not currently suspended.
+    SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error
 }
 ```
 
@@ -752,113 +753,44 @@ Extend `sessionData` in `session/session.go`:
 
 ```go
 type sessionData struct {
-    ID                 string         `json:"id"`
-    Title              string         `json:"title,omitempty"`
-    CreatedAt          time.Time      `json:"created_at"`
-    UpdatedAt          time.Time      `json:"updated_at"`
-    Events             []*event       `json:"events"`
-    Metadata           map[string]any `json:"metadata,omitempty"`
-    ForkedFrom         string         `json:"forked_from,omitempty"`
+    ID                 string                    `json:"id"`
+    Title              string                    `json:"title,omitempty"`
+    CreatedAt          time.Time                 `json:"created_at"`
+    UpdatedAt          time.Time                 `json:"updated_at"`
+    Events             []*event                  `json:"events"`
+    Metadata           map[string]any            `json:"metadata,omitempty"`
+    ForkedFrom         string                    `json:"forked_from,omitempty"`
 
-    // Suspended tracks the authoritative suspend flag. Cleared on a normal
-    // SaveTurn or on ClearSuspension.
-    Suspended          bool     `json:"suspended,omitempty"`
-    PendingToolCallIDs []string `json:"pending_tool_call_ids,omitempty"`
+    // Suspended tracks the authoritative suspend flag. Cleared on
+    // SaveResumedTurn.
+    Suspended          bool                      `json:"suspended,omitempty"`
+    PendingToolCalls   []*dive.PendingToolCall   `json:"pending_tool_calls,omitempty"`
+    CompletedToolCalls []*dive.CompletedToolCall  `json:"completed_tool_calls,omitempty"`
 }
 ```
 
-New `Session` methods:
+New `Session` methods (see `session/session.go` for the full implementation
+with `withRollback` for crash-safe store writes):
 
 ```go
-func (s *Session) Suspended() bool {
-    s.mu.RLock()
-    defer s.mu.RUnlock()
-    return s.data.Suspended
-}
-
-func (s *Session) PendingToolCallIDs() []string {
-    s.mu.RLock()
-    defer s.mu.RUnlock()
-    return slices.Clone(s.data.PendingToolCallIDs)
-}
-
-func (s *Session) SaveSuspendedTurn(
-    ctx context.Context,
-    messages []*llm.Message,
-    usage *llm.Usage,
-    pendingIDs []string,
-) error {
-    evt := &event{
-        ID:        newEventID(),
-        Type:      eventTypeTurn,
-        Timestamp: time.Now(),
-        Messages:  messages,
-        Usage:     usage,
-        Metadata: map[string]any{
-            "suspended":      true,
-            "pending_ids":    pendingIDs,
-        },
-    }
-    s.mu.Lock()
-    defer s.mu.Unlock()
-
-    // Replace the last event if it was also a suspended turn for this same
-    // assistant message — otherwise append. This keeps resume idempotent
-    // and avoids unbounded event growth across many partial resumes.
-    if n := len(s.data.Events); n > 0 {
-        last := s.data.Events[n-1]
-        if last.Type == eventTypeTurn && s.data.Suspended {
-            s.data.Events[n-1] = evt
-        } else {
-            s.data.Events = append(s.data.Events, evt)
-        }
-    } else {
-        s.data.Events = append(s.data.Events, evt)
-    }
-
-    s.data.Suspended = true
-    s.data.PendingToolCallIDs = slices.Clone(pendingIDs)
-    s.data.UpdatedAt = evt.Timestamp
-
-    if s.appender != nil {
-        // For append-only stores, we rewrite the whole session when
-        // transitioning suspend state because we may have replaced the
-        // last event. putSession is the right primitive.
-        return s.appender.putSession(ctx, s.data)
-    }
-    return nil
-}
-
-func (s *Session) ClearSuspension(ctx context.Context) error {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    if !s.data.Suspended {
-        return nil
-    }
-    s.data.Suspended = false
-    s.data.PendingToolCallIDs = nil
-    s.data.UpdatedAt = time.Now()
-    if s.appender != nil {
-        return s.appender.putSession(ctx, s.data)
-    }
-    return nil
-}
+func (s *Session) LoadSuspension() *dive.SuspensionState { ... }
+func (s *Session) IsSuspended() bool { ... }
+func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage, state *dive.SuspensionState) error { ... }
+func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error { ... }
 ```
 
-Also: `SaveTurn` (the existing method) clears `Suspended` before appending.
-Once the agent successfully completes a resumed turn via `generate`, it
-calls `SaveTurn` to write the full, completed turn — which implicitly
-ends the suspended state.
+`SaveResumedTurn` replaces the last (suspended) event with a completed
+turn and clears `Suspended`, `PendingToolCalls`, and `CompletedToolCalls`.
+Returns `ErrNotSuspended` if the session is not actually suspended.
 
-Actually no — on a successful resume we want to *replace* the last
-suspended event rather than append a new one (the suspended event's
-assistant msg is still part of the turn). So the resume-completion path
-should:
+On a successful resume we *replace* the last suspended event rather than
+append a new one (the suspended event's assistant msg is still part of the
+turn). So the resume-completion path:
 
-1. Replace the last (suspended) event with a new event whose Messages
+1. Replaces the last (suspended) event with a new event whose Messages
    contain the complete turn (assistant + full tool_result + any follow-up
    iterations).
-2. Clear `Suspended` and `PendingToolCallIDs`.
+2. Clears `Suspended`, `PendingToolCalls`, and `CompletedToolCalls`.
 
 We add a helper `Session.ReplaceLastEventWithCompleted(ctx, messages, usage)`
 for this, or we reuse `putSession` through a new `SaveResumedTurn` method.
@@ -955,7 +887,7 @@ is not supported")`. This is a change in `experimental/subagent` only.
 
 Given a session in the following state:
 
-```
+```text
 messages:
   user: "Please approve the purchase order and then send the summary"
   assistant: [tool_use approve_po, tool_use fetch_summary]
@@ -1008,7 +940,7 @@ set) and return a new suspended Response.
 
 ### 7.1 Hook ordering on suspend
 
-```
+```text
 CreateResponse
   PreGeneration
   generate

@@ -309,10 +309,16 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 		Messages:  messages,
 		Usage:     usage,
 	}
+	prevLen := len(s.data.Events)
+	prevUpdatedAt := s.data.UpdatedAt
 	s.data.Events = append(s.data.Events, evt)
 	s.data.UpdatedAt = evt.Timestamp
 	if s.appender != nil {
-		return s.appender.appendEvent(ctx, s.data.ID, evt)
+		if err := s.appender.appendEvent(ctx, s.data.ID, evt); err != nil {
+			s.data.Events = s.data.Events[:prevLen]
+			s.data.UpdatedAt = prevUpdatedAt
+			return err
+		}
 	}
 	return nil
 }
@@ -460,17 +466,13 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 	if !s.data.Suspended {
 		return ErrNotSuspended
 	}
+	if len(s.data.Events) == 0 {
+		return ErrNotSuspended
+	}
 
 	return s.withRollback(ctx, func() {
 		now := time.Now()
-		hasLastEvent := len(s.data.Events) > 0
-
-		var evtID string
-		if hasLastEvent {
-			evtID = s.data.Events[len(s.data.Events)-1].ID
-		} else {
-			evtID = newEventID()
-		}
+		evtID := s.data.Events[len(s.data.Events)-1].ID
 		evt := &event{
 			ID:        evtID,
 			Type:      eventTypeTurn,
@@ -478,11 +480,7 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 			Messages:  messages,
 			Usage:     usage,
 		}
-		if hasLastEvent {
-			s.data.Events[len(s.data.Events)-1] = evt
-		} else {
-			s.data.Events = append(s.data.Events, evt)
-		}
+		s.data.Events[len(s.data.Events)-1] = evt
 		s.data.Suspended = false
 		s.data.PendingToolCalls = nil
 		s.data.CompletedToolCalls = nil
