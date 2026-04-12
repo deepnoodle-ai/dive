@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/todo"
 )
 
 // DefaultContextTokenThreshold is the default token count that triggers compaction.
@@ -208,9 +209,13 @@ func CompactMessages(
 	// Step 6: Create new message list with the summary as a user message
 	// This ensures the first message is from the User role, which is required by most LLM APIs
 	summaryPrefix := "Here is a summary of our conversation so far:\n\n"
-	compactedMessages := []*llm.Message{
-		llm.NewUserTextMessage(summaryPrefix + summaryText),
+	summaryMsg := llm.NewUserTextMessage(summaryPrefix + summaryText)
+	if latestTodos, turnsSinceWrite, found := todo.LatestState(messages); found {
+		if block := todo.StateBlock(latestTodos, turnsSinceWrite); block != "" {
+			summaryMsg.Content = append(summaryMsg.Content, &llm.TextContent{Text: block})
+		}
 	}
+	compactedMessages := []*llm.Message{summaryMsg}
 
 	// Step 7: Build compaction event
 	// TokensAfter is estimated from full summary message length (rough heuristic: ~4 chars per token)

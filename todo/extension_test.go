@@ -30,21 +30,9 @@ func TestExtension_RulesEmpty(t *testing.T) {
 func TestExtension_HooksDisabledWhenThresholdZero(t *testing.T) {
 	ext := New(WithReminderTurns(0))
 	hooks := ext.Hooks()
-	assert.Len(t, hooks.PreGeneration, 0)
-}
-
-// helper: build an assistant message with a TodoWrite tool_use containing
-// the given list (encoded as JSON).
-func todoWriteCall(t *testing.T, items []TodoItem) *llm.Message {
-	t.Helper()
-	input, err := json.Marshal(WriteInput{Todos: items})
-	assert.NoError(t, err)
-	return &llm.Message{
-		Role: llm.Assistant,
-		Content: []llm.Content{
-			&llm.ToolUseContent{ID: "tu-1", Name: ToolName, Input: input},
-		},
-	}
+	assert.Len(t, hooks.PreGeneration, 1)
+	assert.Len(t, hooks.PreIteration, 1)
+	assert.Len(t, hooks.PostToolUse, 1)
 }
 
 func plainAssistant(text string) *llm.Message {
@@ -61,10 +49,34 @@ func plainUser(text string) *llm.Message {
 	}
 }
 
-func runHook(t *testing.T, ext *Extension, messages []*llm.Message) []*llm.Message {
+func persistedStateMessage(t *testing.T, items []TodoItem, turnsSinceWrite int) *llm.Message {
+	t.Helper()
+	block := formatStateBlock(items, turnsSinceWrite)
+	assert.NotEqual(t, "", block)
+	return &llm.Message{
+		Role:    llm.User,
+		Content: []llm.Content{&llm.TextContent{Text: block}},
+	}
+}
+
+func todoWriteCall(t *testing.T, items []TodoItem) *llm.ToolUseContent {
+	t.Helper()
+	input, err := json.Marshal(WriteInput{Todos: items})
+	assert.NoError(t, err)
+	return &llm.ToolUseContent{ID: "tu-1", Name: ToolName, Input: input}
+}
+
+func runPreGenerationHook(t *testing.T, hook dive.PreGenerationHook, messages []*llm.Message) []*llm.Message {
 	t.Helper()
 	hctx := &dive.HookContext{Messages: messages}
-	hook := ext.Hooks().PreGeneration[0]
+	err := hook(context.Background(), hctx)
+	assert.NoError(t, err)
+	return hctx.Messages
+}
+
+func runPreIterationHook(t *testing.T, hook dive.PreIterationHook, messages []*llm.Message) []*llm.Message {
+	t.Helper()
+	hctx := &dive.HookContext{Messages: messages}
 	err := hook(context.Background(), hctx)
 	assert.NoError(t, err)
 	return hctx.Messages
@@ -78,26 +90,26 @@ func TestReminderHook_NoTodoWriteEverInjectsNothing(t *testing.T) {
 		plainUser("how are you"),
 		plainAssistant("fine"),
 	}
-	out := runHook(t, ext, messages)
+	out := runPreGenerationHook(t, ext.Hooks().PreGeneration[0], messages)
 	assert.False(t, dive.HasSystemReminder(out, reminderName))
 }
 
-func TestReminderHook_RecentWriteInjectsNothing(t *testing.T) {
+func TestReminderHook_RecentStateInjectsNothing(t *testing.T) {
 	ext := New(WithReminderTurns(3))
 	items := []TodoItem{
 		{Content: "Task A", Status: TodoStatusInProgress, ActiveForm: "Doing A"},
 	}
 	messages := []*llm.Message{
 		plainUser("start"),
-		todoWriteCall(t, items),
+		persistedStateMessage(t, items, 0),
 		plainAssistant("first turn after"),
 		plainAssistant("second turn after"),
 	}
-	out := runHook(t, ext, messages)
+	out := runPreGenerationHook(t, ext.Hooks().PreGeneration[0], messages)
 	assert.False(t, dive.HasSystemReminder(out, reminderName))
 }
 
-func TestReminderHook_StaleWriteInjectsBlockWithCurrentList(t *testing.T) {
+func TestReminderHook_StaleStateInjectsBlockWithCurrentList(t *testing.T) {
 	ext := New(WithReminderTurns(3))
 	items := []TodoItem{
 		{Content: "Write tests", Status: TodoStatusInProgress, ActiveForm: "Writing tests"},
@@ -105,13 +117,13 @@ func TestReminderHook_StaleWriteInjectsBlockWithCurrentList(t *testing.T) {
 	}
 	messages := []*llm.Message{
 		plainUser("start"),
-		todoWriteCall(t, items),
+		persistedStateMessage(t, items, 0),
 		plainAssistant("turn 1"),
 		plainAssistant("turn 2"),
 		plainAssistant("turn 3"),
 		plainAssistant("turn 4"),
 	}
-	out := runHook(t, ext, messages)
+	out := runPreGenerationHook(t, ext.Hooks().PreGeneration[0], messages)
 	assert.True(t, dive.HasSystemReminder(out, reminderName))
 
 	// The block contains both the canonical nudge and the current list.
@@ -137,13 +149,13 @@ func TestReminderHook_RemovesStaleBlockWhenWriteIsRecentAgain(t *testing.T) {
 	// Pre-seed the first user message with an existing reminder block.
 	messages := []*llm.Message{
 		plainUser("start"),
-		todoWriteCall(t, items),
+		persistedStateMessage(t, items, 0),
 		plainAssistant("just used it"),
 	}
 	messages = dive.SetSystemReminder(messages, reminderName, "old reminder body")
 	assert.True(t, dive.HasSystemReminder(messages, reminderName))
 
-	out := runHook(t, ext, messages)
+	out := runPreIterationHook(t, ext.Hooks().PreIteration[0], messages)
 	assert.False(t, dive.HasSystemReminder(out, reminderName))
 }
 
@@ -155,40 +167,89 @@ func TestReminderHook_RemovesLeftoverBlockWhenNoWriteEver(t *testing.T) {
 	messages = dive.SetSystemReminder(messages, reminderName, "stale leftover")
 	assert.True(t, dive.HasSystemReminder(messages, reminderName))
 
-	out := runHook(t, ext, messages)
+	out := runPreGenerationHook(t, ext.Hooks().PreGeneration[0], messages)
 	assert.False(t, dive.HasSystemReminder(out, reminderName))
 }
 
-func TestFindLatestTodos_PrefersMostRecentCall(t *testing.T) {
+func TestReminderHook_EmptyListDoesNotInject(t *testing.T) {
+	ext := New(WithReminderTurns(3))
+	messages := []*llm.Message{
+		plainUser("start"),
+		persistedStateMessage(t, []TodoItem{}, 6),
+		plainAssistant("turn"),
+	}
+	out := runPreGenerationHook(t, ext.Hooks().PreGeneration[0], messages)
+	assert.False(t, dive.HasSystemReminder(out, reminderName))
+}
+
+func TestFindLatestState_PrefersMostRecentBlock(t *testing.T) {
 	older := []TodoItem{{Content: "old", Status: TodoStatusPending, ActiveForm: "olding"}}
 	newer := []TodoItem{{Content: "new", Status: TodoStatusInProgress, ActiveForm: "newing"}}
 	messages := []*llm.Message{
 		plainUser("start"),
-		todoWriteCall(t, older),
+		persistedStateMessage(t, older, 0),
 		plainAssistant("turn"),
-		todoWriteCall(t, newer),
+		persistedStateMessage(t, newer, 0),
 		plainAssistant("turn after newer"),
 	}
-	got, turnsSince, found := findLatestTodos(messages)
+	got, turnsSince, found := findLatestState(messages)
 	assert.True(t, found)
 	assert.Equal(t, 1, turnsSince)
 	assert.Len(t, got, 1)
 	assert.Equal(t, "new", got[0].Content)
 }
 
-func TestFindLatestTodos_TurnCountSkipsUserMessages(t *testing.T) {
+func TestFindLatestState_TurnCountSkipsUserMessages(t *testing.T) {
 	items := []TodoItem{{Content: "x", Status: TodoStatusPending, ActiveForm: "xing"}}
 	messages := []*llm.Message{
 		plainUser("u1"),
-		todoWriteCall(t, items),
+		persistedStateMessage(t, items, 0),
 		plainAssistant("a1"),
 		plainUser("u2"),
 		plainAssistant("a2"),
 		plainUser("u3"),
 	}
-	_, turnsSince, found := findLatestTodos(messages)
+	_, turnsSince, found := findLatestState(messages)
 	assert.True(t, found)
-	// Two assistant messages after the TodoWrite call. User messages and
-	// the call message itself do not count.
 	assert.Equal(t, 2, turnsSince)
+}
+
+func TestFindLatestState_PreservesBaseTurnsFromCompactionSnapshot(t *testing.T) {
+	items := []TodoItem{{Content: "x", Status: TodoStatusPending, ActiveForm: "xing"}}
+	messages := []*llm.Message{
+		plainUser("summary"),
+		persistedStateMessage(t, items, 4),
+		plainAssistant("a1"),
+		plainAssistant("a2"),
+	}
+	_, turnsSince, found := findLatestState(messages)
+	assert.True(t, found)
+	assert.Equal(t, 6, turnsSince)
+}
+
+func TestStateCaptureHook_AppendsHiddenStateBlock(t *testing.T) {
+	ext := New()
+	hctx := &dive.HookContext{
+		Tool: NewTool(),
+		Call: todoWriteCall(t, []TodoItem{
+			{Content: "Task", Status: TodoStatusInProgress, ActiveForm: "Doing task"},
+		}),
+		Result: &dive.ToolCallResult{
+			ID:     "tu-1",
+			Result: dive.NewToolResultText("ok"),
+		},
+	}
+	err := ext.Hooks().PostToolUse[0](context.Background(), hctx)
+	assert.NoError(t, err)
+	assert.Contains(t, hctx.AdditionalContext, stateBlockStart)
+
+	messages := []*llm.Message{
+		plainUser("start"),
+		{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: hctx.AdditionalContext}}},
+	}
+	got, turnsSince, found := findLatestState(messages)
+	assert.True(t, found)
+	assert.Equal(t, 0, turnsSince)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "Task", got[0].Content)
 }

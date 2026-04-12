@@ -1,9 +1,11 @@
 package compaction
 
 import (
+	"context"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/todo"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -285,4 +287,51 @@ func TestCompactionEventStructure(t *testing.T) {
 	assert.Equal(t, 5000, event.TokensAfter)
 	assert.Equal(t, "Test summary", event.Summary)
 	assert.Equal(t, 50, event.MessagesCompacted)
+}
+
+func TestCompactMessages_PreservesLatestTodoState(t *testing.T) {
+	model := &stubLLM{
+		response: &llm.Response{
+			Role:    llm.Assistant,
+			Content: []llm.Content{&llm.TextContent{Text: "<summary>Compacted summary</summary>"}},
+		},
+	}
+	items := []todo.TodoItem{
+		{Content: "Write tests", Status: todo.TodoStatusInProgress, ActiveForm: "Writing tests"},
+	}
+	messages := []*llm.Message{
+		llm.NewUserTextMessage("start"),
+		{
+			Role: llm.User,
+			Content: []llm.Content{
+				&llm.TextContent{Text: todo.StateBlock(items, 0)},
+			},
+		},
+		llm.NewAssistantTextMessage("turn one"),
+		llm.NewAssistantTextMessage("turn two"),
+	}
+
+	compacted, _, err := CompactMessages(context.Background(), model, messages, "", "", 5000)
+	assert.NoError(t, err)
+	assert.Len(t, compacted, 1)
+	assert.Equal(t, llm.User, compacted[0].Role)
+	assert.Contains(t, compacted[0].Text(), "Compacted summary")
+
+	got, turnsSinceWrite, found := todo.LatestState(compacted)
+	assert.True(t, found)
+	assert.Equal(t, 2, turnsSinceWrite)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "Write tests", got[0].Content)
+}
+
+type stubLLM struct {
+	response *llm.Response
+}
+
+func (s *stubLLM) Name() string {
+	return "stub"
+}
+
+func (s *stubLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+	return s.response, nil
 }

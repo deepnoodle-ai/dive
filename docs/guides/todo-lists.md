@@ -29,9 +29,9 @@ Tools: []dive.Tool{todo.NewTool()},
 
 ## Stale-List Reminder
 
-`todo.Extension` installs a `PreGenerationHook` that walks the message history before each generation. If the model has not used `TodoWrite` in the last N assistant turns (default 10) and a list exists, the hook injects a `<system-reminder name="todos">` block into the first user message containing the latest list. When the model uses `TodoWrite` again, the next iteration removes the block automatically.
+`todo.Extension` installs hooks that persist the latest successful `TodoWrite` state in message history and walk that history before each generation. If the model has not used `TodoWrite` in the last N assistant turns (default 10) and a non-empty list exists, the hook injects a `<system-reminder name="todos">` block into the first user message containing the latest list. When the model uses `TodoWrite` again, the next iteration removes the block automatically.
 
-The hook is fully stateless — message history is the source of truth — so a single `Extension` instance is safe to share across agents, sessions, and subagents.
+The hook is fully stateless — successful `TodoWrite` results in conversation history are the source of truth — so a single `Extension` instance is safe to share across agents, sessions, and subagents. Compaction preserves the latest successful list so todo state survives context rewriting.
 
 Tune the threshold (set to 0 to disable):
 

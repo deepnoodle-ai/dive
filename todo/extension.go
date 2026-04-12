@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // reminderName is the system-reminder block name used to inject the
@@ -81,14 +80,14 @@ func (e *Extension) Tools() []dive.Tool {
 	return []dive.Tool{NewTool(opts...)}
 }
 
-// Hooks returns the stale-list reminder PreGenerationHook.
+// Hooks returns the stale-list reminder hooks and the state-capture hook.
 // Implements [dive.Extension].
 func (e *Extension) Hooks() dive.Hooks {
-	if e.turnsSinceWrite <= 0 {
-		return dive.Hooks{}
-	}
+	stateHook := e.reminderHook()
 	return dive.Hooks{
-		PreGeneration: []dive.PreGenerationHook{e.reminderHook()},
+		PreGeneration: []dive.PreGenerationHook{stateHook},
+		PreIteration:  []dive.PreIterationHook{stateHook},
+		PostToolUse:   []dive.PostToolUseHook{e.stateCaptureHook()},
 	}
 }
 
@@ -98,24 +97,21 @@ func (e *Extension) Rules() string {
 	return ""
 }
 
-// reminderHook returns a PreGenerationHook that walks the message history
-// looking for the most recent TodoWrite tool call. If the model has not
-// touched the tool in turnsSinceWrite assistant turns and a list exists,
-// it (re)injects a <system-reminder name="todos"> block into the first
-// user message containing the latest list. Otherwise it removes any stale
-// block.
-func (e *Extension) reminderHook() dive.PreGenerationHook {
+// reminderHook returns a hook that walks the message history looking for the
+// most recent successful TodoWrite state block. If the model has not touched
+// the tool in turnsSinceWrite assistant turns and a non-empty list exists, it
+// injects a <system-reminder name="todos"> block into the first user message.
+// Otherwise it removes any stale block.
+func (e *Extension) reminderHook() func(context.Context, *dive.HookContext) error {
 	return func(_ context.Context, hctx *dive.HookContext) error {
-		latest, turnsSince, found := findLatestTodos(hctx.Messages)
-		if !found {
-			// Model has never used TodoWrite in this conversation. Don't
-			// nag — and clean up any leftover block from a prior session.
+		latest, turnsSince, found := findLatestState(hctx.Messages)
+		if !found || len(latest) == 0 {
 			if dive.HasSystemReminder(hctx.Messages, reminderName) {
 				hctx.Messages = dive.RemoveSystemReminder(hctx.Messages, reminderName)
 			}
 			return nil
 		}
-		if turnsSince < e.turnsSinceWrite {
+		if e.turnsSinceWrite <= 0 || turnsSince < e.turnsSinceWrite {
 			// Recent enough — the tool result is still in fresh context.
 			if dive.HasSystemReminder(hctx.Messages, reminderName) {
 				hctx.Messages = dive.RemoveSystemReminder(hctx.Messages, reminderName)
@@ -127,40 +123,34 @@ func (e *Extension) reminderHook() dive.PreGenerationHook {
 	}
 }
 
-// findLatestTodos walks messages from newest to oldest looking for the most
-// recent assistant message containing a TodoWrite tool_use. Returns the
-// parsed todo list, the count of assistant messages between that call and
-// the end of history (i.e., turns since the last TodoWrite), and whether a
-// call was found at all.
-func findLatestTodos(messages []*llm.Message) (todos []TodoItem, turnsSince int, found bool) {
-	turnsSince = 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != llm.Assistant {
-			continue
+func (e *Extension) stateCaptureHook() dive.PostToolUseHook {
+	return func(_ context.Context, hctx *dive.HookContext) error {
+		if hctx.Tool == nil || hctx.Tool.Name() != ToolName || hctx.Result == nil || hctx.Result.Result == nil || hctx.Call == nil {
+			return nil
 		}
-		for _, c := range msg.Content {
-			tu, ok := c.(*llm.ToolUseContent)
-			if !ok || tu.Name != ToolName {
-				continue
-			}
-			parsed, err := parseTodoInput(tu.Input)
-			if err != nil {
-				continue
-			}
-			return parsed, turnsSince, true
+		// Defensive: the agent dispatches failed tool results to
+		// PostToolUseFailure hooks rather than PostToolUse, so in practice
+		// this branch will not fire. Guard anyway so the state block is
+		// never persisted for an invocation the LLM sees as an error —
+		// otherwise a bad write (e.g. validation failure) would silently
+		// overwrite the last good state.
+		if hctx.Result.Error != nil || hctx.Result.Result.IsError {
+			return nil
 		}
-		turnsSince++
+		var input WriteInput
+		if err := json.Unmarshal(hctx.Call.Input, &input); err != nil {
+			return nil
+		}
+		block := formatStateBlock(input.Todos, 0)
+		if block == "" {
+			return nil
+		}
+		if hctx.AdditionalContext != "" {
+			hctx.AdditionalContext += "\n"
+		}
+		hctx.AdditionalContext += block
+		return nil
 	}
-	return nil, 0, false
-}
-
-func parseTodoInput(raw json.RawMessage) ([]TodoItem, error) {
-	var input WriteInput
-	if err := json.Unmarshal(raw, &input); err != nil {
-		return nil, err
-	}
-	return input.Todos, nil
 }
 
 // formatReminder builds the body of the <system-reminder name="todos"> block.
