@@ -22,13 +22,13 @@ import (
 // The Client wraps an *http.Client and a base endpoint URL. All public
 // methods are safe for concurrent use.
 type Client struct {
-	endpoint       string
-	cardURL        string
-	legacyCardURL  string
+	endpoint        string
+	cardURL         string
+	legacyCardURL   string
 	cardURLOverride bool
-	http           *http.Client
-	headers        http.Header
-	reqID          atomic.Int64
+	http            *http.Client
+	headers         http.Header
+	reqID           atomic.Int64
 }
 
 // ClientOptions configures a Client.
@@ -78,8 +78,6 @@ func NewClient(opts ClientOptions) (*Client, error) {
 // endpoint at the supplied well-known path, preserving scheme and
 // authority.
 func deriveCardURL(endpoint, path string) string {
-	// Take the part before any path beyond scheme://host. A simple scan
-	// keeps the helper obvious without pulling in net/url.
 	schemeIdx := strings.Index(endpoint, "://")
 	if schemeIdx < 0 {
 		return strings.TrimRight(endpoint, "/") + path
@@ -157,22 +155,25 @@ func (c *Client) SendMessage(ctx context.Context, msg *Message, cfg *MessageConf
 	return decodeSendMessageResult(raw)
 }
 
-// decodeSendMessageResult probes the result envelope for the "kind"
-// discriminator. A "task" result decodes directly; a "message" result is
-// wrapped into a synthesized completed Task so callers only ever need to
-// handle *Task. Any other shape is decoded as Task for backwards
-// compatibility.
+// decodeSendMessageResult distinguishes a Task from a bare Message result.
 func decodeSendMessageResult(raw json.RawMessage) (*Task, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("a2a: message/send returned empty result")
 	}
+	// Probe for task-specific fields. A Task has "id" and "status";
+	// a Message has "messageId" and "role".
 	var probe struct {
-		Kind string `json:"kind"`
+		ID        string `json:"id"`
+		MessageID string `json:"messageId"`
+		Status    *struct {
+			State string `json:"state"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil, fmt.Errorf("a2a: probe message/send result: %w", err)
 	}
-	if probe.Kind == "message" {
+	if probe.MessageID != "" && probe.Status == nil {
+		// Bare Message result.
 		var msg Message
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			return nil, fmt.Errorf("a2a: decode message/send message result: %w", err)
@@ -186,15 +187,11 @@ func decodeSendMessageResult(raw json.RawMessage) (*Task, error) {
 	return &task, nil
 }
 
-// syntheticTaskFromMessage wraps a bare Message reply as a completed
-// Task. The message becomes the first history entry and, when it carries
-// text, is also exposed as the task's single "response" artifact so
-// ResponseText(task) works unchanged.
+// syntheticTaskFromMessage wraps a bare Message reply as a completed Task.
 func syntheticTaskFromMessage(msg *Message) *Task {
 	task := &Task{
 		ID:        msg.TaskID,
 		ContextID: msg.ContextID,
-		Kind:      "task",
 		Status: TaskStatus{
 			State: TaskStateCompleted,
 		},
@@ -211,7 +208,6 @@ func syntheticTaskFromMessage(msg *Message) *Task {
 			ArtifactID: msg.MessageID,
 			Name:       "response",
 			Parts:      []Part{NewTextPart(text)},
-			LastChunk:  true,
 		}}
 	}
 	return task
@@ -342,9 +338,7 @@ func (c *Client) nextID() json.RawMessage {
 }
 
 // parseSSEStream consumes a server-sent events stream and invokes the
-// callback for every decoded A2A stream event. It returns when the stream
-// completes, a decode error occurs, or the callback returns a non-nil
-// error.
+// callback for every decoded A2A stream event.
 func parseSSEStream(r io.Reader, onEvent func(*StreamEvent) error) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -382,42 +376,27 @@ func parseSSEStream(r io.Reader, onEvent func(*StreamEvent) error) error {
 	return scanner.Err()
 }
 
-// decodeStreamResult distinguishes the four possible shapes of the
-// `result` field on a streamed JSON-RPC envelope: Task,
-// TaskStatusUpdateEvent, TaskArtifactUpdateEvent, or an unknown value.
+// decodeStreamResult parses a StreamResponse envelope from the result
+// field of a streamed JSON-RPC response. The A2A v1.0 format uses
+// field-name discriminators: statusUpdate, artifactUpdate, task, message.
 func decodeStreamResult(raw json.RawMessage) (*StreamEvent, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	var probe struct {
-		Kind     string          `json:"kind"`
-		ID       string          `json:"id"`
-		TaskID   string          `json:"taskId"`
-		Artifact json.RawMessage `json:"artifact"`
-		Status   json.RawMessage `json:"status"`
-	}
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return nil, fmt.Errorf("a2a: probe stream result: %w", err)
+	var sr StreamResponse
+	if err := json.Unmarshal(raw, &sr); err != nil {
+		return nil, fmt.Errorf("a2a: decode stream result: %w", err)
 	}
 	switch {
-	case probe.Kind == "status-update" || (probe.TaskID != "" && len(probe.Status) > 0 && probe.ID == ""):
-		var ev TaskStatusUpdateEvent
-		if err := json.Unmarshal(raw, &ev); err != nil {
-			return nil, fmt.Errorf("a2a: decode status update: %w", err)
-		}
-		return &StreamEvent{StatusUpdate: &ev}, nil
-	case probe.Kind == "artifact-update" || (probe.TaskID != "" && len(probe.Artifact) > 0):
-		var ev TaskArtifactUpdateEvent
-		if err := json.Unmarshal(raw, &ev); err != nil {
-			return nil, fmt.Errorf("a2a: decode artifact update: %w", err)
-		}
-		return &StreamEvent{ArtifactUpdate: &ev}, nil
-	case probe.ID != "":
-		var task Task
-		if err := json.Unmarshal(raw, &task); err != nil {
-			return nil, fmt.Errorf("a2a: decode task: %w", err)
-		}
-		return &StreamEvent{Task: &task}, nil
+	case sr.StatusUpdate != nil:
+		return &StreamEvent{StatusUpdate: sr.StatusUpdate}, nil
+	case sr.ArtifactUpdate != nil:
+		return &StreamEvent{ArtifactUpdate: sr.ArtifactUpdate}, nil
+	case sr.Task != nil:
+		return &StreamEvent{Task: sr.Task}, nil
+	case sr.Message != nil:
+		// Wrap bare message as a synthetic task.
+		return &StreamEvent{Task: syntheticTaskFromMessage(sr.Message)}, nil
 	}
 	return nil, nil
 }

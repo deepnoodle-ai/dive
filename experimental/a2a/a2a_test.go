@@ -244,7 +244,8 @@ func TestServerAgentCard(t *testing.T) {
 	assert.NoError(t, json.NewDecoder(resp.Body).Decode(&card))
 	assert.Equal(t, card.Name, "Research Assistant")
 	assert.True(t, card.Capabilities.Streaming)
-	assert.True(t, strings.HasPrefix(card.URL, "https://agent.example.com"))
+	assert.True(t, len(card.SupportedInterfaces) > 0)
+	assert.True(t, strings.HasPrefix(card.SupportedInterfaces[0].URL, "https://agent.example.com"))
 }
 
 // ---------------------------------------------------------------------------
@@ -439,7 +440,6 @@ func TestServerMessageStream(t *testing.T) {
 	assert.True(t, len(statusEvents) > 0)
 	final := statusEvents[len(statusEvents)-1]
 	assert.Equal(t, final.Status.State, a2a.TaskStateCompleted)
-	assert.True(t, final.Final)
 	assert.Len(t, artifactEvents, 1)
 	assert.Equal(t, artifactEvents[0].Artifact.Parts[0].Text, "streamed hello")
 }
@@ -581,11 +581,7 @@ func TestServerMixedPartsProjectToTypedContent(t *testing.T) {
 		Parts: []a2a.Part{
 			a2a.NewTextPart("Summarize the attached order."),
 			a2a.NewDataPart(map[string]any{"orderId": "ABC-123", "total": 4299}),
-			{Kind: a2a.PartKindFile, File: &a2a.FileContent{
-				Name:     "invoice.pdf",
-				MimeType: "application/pdf",
-				URI:      "https://example.com/invoice.pdf",
-			}},
+			{URL: "https://example.com/invoice.pdf", MediaType: "application/pdf", Filename: "invoice.pdf"},
 		},
 	}, nil)
 	assert.NoError(t, err)
@@ -892,11 +888,11 @@ func TestServerNonTextContentInArtifacts(t *testing.T) {
 
 	art := task.Artifacts[0]
 	assert.Len(t, art.Parts, 2)
-	assert.Equal(t, art.Parts[0].Kind, a2a.PartKindText)
+	assert.True(t, art.Parts[0].IsText())
 	assert.Equal(t, art.Parts[0].Text, "Here is the chart")
-	assert.Equal(t, art.Parts[1].Kind, a2a.PartKindFile)
-	assert.Equal(t, art.Parts[1].File.MimeType, "image/png")
-	assert.Equal(t, art.Parts[1].File.URI, "https://example.com/chart.png")
+	assert.True(t, art.Parts[1].IsURL())
+	assert.Equal(t, art.Parts[1].MediaType, "image/png")
+	assert.Equal(t, art.Parts[1].URL, "https://example.com/chart.png")
 
 	// History should also carry the full content.
 	var agentMsgs []*a2a.Message
@@ -947,13 +943,12 @@ func TestServerStreamEmitsAllArtifacts(t *testing.T) {
 	assert.True(t, len(artifactEvents) > 0)
 	art := artifactEvents[0]
 	assert.Len(t, art.Artifact.Parts, 2)
-	assert.Equal(t, art.Artifact.Parts[0].Kind, a2a.PartKindText)
-	assert.Equal(t, art.Artifact.Parts[1].Kind, a2a.PartKindFile)
+	assert.True(t, art.Artifact.Parts[0].IsText())
+	assert.True(t, art.Artifact.Parts[1].IsURL())
 
 	// Final status should be completed.
 	final := statusEvents[len(statusEvents)-1]
 	assert.Equal(t, final.Status.State, a2a.TaskStateCompleted)
-	assert.True(t, final.Final)
 }
 
 // ---------------------------------------------------------------------------
@@ -1239,11 +1234,7 @@ func TestServerImagePartProjectsToImageContent(t *testing.T) {
 		Role:      a2a.RoleUser,
 		Parts: []a2a.Part{
 			a2a.NewTextPart("What's in this image?"),
-			{Kind: a2a.PartKindFile, File: &a2a.FileContent{
-				Name:     "photo.png",
-				MimeType: "image/png",
-				URI:      "https://example.com/photo.png",
-			}},
+			{URL: "https://example.com/photo.png", MediaType: "image/png", Filename: "photo.png"},
 		},
 	}, nil)
 	assert.NoError(t, err)

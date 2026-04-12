@@ -34,12 +34,12 @@ type ServerOptions struct {
 	Agent *dive.Agent
 
 	// Card is the static portion of the agent card served at
-	// /.well-known/agent.json. The server fills in the URL from
-	// ServerOptions.BaseURL if BaseURL is set and Card.URL is empty.
+	// /.well-known/agent-card.json. The server fills in defaults for
+	// any missing required fields.
 	Card AgentCard
 
 	// BaseURL is the public URL that clients should use to reach this
-	// server. Optional — used to fill AgentCard.URL and nothing else.
+	// server. Optional — used to fill AgentCard.SupportedInterfaces.
 	BaseURL string
 
 	// Path is the mount path of the JSON-RPC endpoint. Defaults to "/".
@@ -106,9 +106,6 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if card.Description == "" {
 		card.Description = card.Name + " (Dive A2A agent)"
 	}
-	if card.URL == "" && opts.BaseURL != "" {
-		card.URL = strings.TrimRight(opts.BaseURL, "/") + opts.Path
-	}
 	if len(card.DefaultInputModes) == 0 {
 		card.DefaultInputModes = []string{"text/plain"}
 	}
@@ -116,8 +113,6 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		card.DefaultOutputModes = []string{"text/plain"}
 	}
 	if len(card.Skills) == 0 {
-		// Publish one default skill so the card validates against strict
-		// A2A clients without forcing every caller to enumerate skills.
 		card.Skills = []AgentSkill{{
 			ID:          "chat",
 			Name:        "chat",
@@ -125,12 +120,16 @@ func NewServer(opts ServerOptions) (*Server, error) {
 			Tags:        []string{"chat"},
 		}}
 	}
-	if card.PreferredTransport == "" {
-		card.PreferredTransport = "JSONRPC"
+	if len(card.SupportedInterfaces) == 0 && opts.BaseURL != "" {
+		url := strings.TrimRight(opts.BaseURL, "/") + opts.Path
+		card.SupportedInterfaces = []AgentInterface{{
+			URL:             url,
+			ProtocolBinding: "JSONRPC",
+			ProtocolVersion: "1.0",
+		}}
 	}
 	// Dive agents support streaming by default because CreateResponse
-	// exposes an event callback. Expose that in the card unless the
-	// caller explicitly opted out.
+	// exposes an event callback.
 	card.Capabilities.Streaming = true
 
 	s := &Server{
@@ -287,10 +286,10 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request, req
 	// Streaming callback: emit a status update for every Dive response
 	// item that translates to a user-visible progress signal.
 	var streamMu sync.Mutex
-	emit := func(event any) {
+	emit := func(sr StreamResponse) {
 		streamMu.Lock()
 		defer streamMu.Unlock()
-		writeSSEEvent(w, flusher, req.ID, event)
+		writeSSEEvent(w, flusher, req.ID, sr)
 	}
 
 	cb := func(ctx context.Context, item *dive.ResponseItem) error {
@@ -299,8 +298,7 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request, req
 			if item.ToolCall == nil {
 				return nil
 			}
-			emit(TaskStatusUpdateEvent{
-				Kind: "status-update",
+			emit(StreamResponse{StatusUpdate: &TaskStatusUpdateEvent{
 				Status: TaskStatus{
 					State: TaskStateWorking,
 					Message: &Message{
@@ -309,9 +307,8 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request, req
 						Parts: []Part{NewTextPart(fmt.Sprintf(
 							"Calling tool: %s", item.ToolCall.Name))},
 					},
-					Timestamp: time.Now().UTC(),
 				},
-			})
+			}})
 		case dive.ResponseItemTypeMessage:
 			if item.Message == nil || item.Message.Role != llm.Assistant {
 				return nil
@@ -320,8 +317,7 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request, req
 			if text == "" {
 				return nil
 			}
-			emit(TaskStatusUpdateEvent{
-				Kind: "status-update",
+			emit(StreamResponse{StatusUpdate: &TaskStatusUpdateEvent{
 				Status: TaskStatus{
 					State: TaskStateWorking,
 					Message: &Message{
@@ -329,9 +325,8 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request, req
 						Role:      RoleAgent,
 						Parts:     []Part{NewTextPart(text)},
 					},
-					Timestamp: time.Now().UTC(),
 				},
-			})
+			}})
 		}
 		return nil
 	}
@@ -347,21 +342,22 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request, req
 	// Emit all artifacts, then the final status event so the client
 	// can correlate everything with the task.
 	streamMu.Lock()
-	for i, art := range task.Artifacts {
-		writeSSEEvent(w, flusher, req.ID, TaskArtifactUpdateEvent{
-			Kind:      "artifact-update",
-			TaskID:    task.ID,
-			ContextID: task.ContextID,
-			Artifact:  art,
-			LastChunk: i == len(task.Artifacts)-1,
+	for _, art := range task.Artifacts {
+		writeSSEEvent(w, flusher, req.ID, StreamResponse{
+			ArtifactUpdate: &TaskArtifactUpdateEvent{
+				TaskID:    task.ID,
+				ContextID: task.ContextID,
+				Artifact:  art,
+				LastChunk: true,
+			},
 		})
 	}
-	writeSSEEvent(w, flusher, req.ID, TaskStatusUpdateEvent{
-		Kind:      "status-update",
-		TaskID:    task.ID,
-		ContextID: task.ContextID,
-		Status:    task.Status,
-		Final:     true,
+	writeSSEEvent(w, flusher, req.ID, StreamResponse{
+		StatusUpdate: &TaskStatusUpdateEvent{
+			TaskID:    task.ID,
+			ContextID: task.ContextID,
+			Status:    task.Status,
+		},
 	})
 	streamMu.Unlock()
 }
@@ -421,9 +417,10 @@ func (s *Server) handleTasksCancel(w http.ResponseWriter, r *http.Request, req *
 		return
 	}
 	s.cancelInflight(params.ID)
+	now := time.Now().UTC()
 	rec.Task.Status = TaskStatus{
 		State:     TaskStateCanceled,
-		Timestamp: time.Now().UTC(),
+		Timestamp: &now,
 	}
 	rec.Suspension = nil
 
@@ -580,16 +577,6 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 
 // resumeToolResults translates an inbound user message into ToolResults
 // for the pending tool calls on a suspended Dive turn.
-//
-// For a single pending call, the message text is used as the result.
-//
-// For multiple pending calls, the function checks for a DataPart with a
-// "toolResults" key mapping call IDs to result strings:
-//
-//	{ "kind": "data", "data": { "toolResults": { "call_1": "yes", "call_2": "no" } } }
-//
-// If no structured mapping is found and there are multiple pending calls,
-// the message text is broadcast as the result for every pending call.
 func resumeToolResults(state *dive.SuspensionState, msg *Message) (map[string]*dive.ToolResult, *RPCError) {
 	if len(state.PendingToolCalls) == 0 {
 		return nil, nil
@@ -625,7 +612,7 @@ func extractToolResultsMap(msg *Message) map[string]string {
 		return nil
 	}
 	for _, p := range msg.Parts {
-		if p.Kind != PartKindData || p.Data == nil {
+		if !p.IsData() {
 			continue
 		}
 		raw, ok := p.Data["toolResults"]
@@ -681,8 +668,7 @@ func (s *Server) resolveSession(ctx context.Context, contextID string) (dive.Ses
 }
 
 // rpcErrorFromTurn converts an error returned from Dive's CreateResponse
-// into an RPC error. Known sentinel errors get specific codes; anything
-// else becomes InternalError.
+// into an RPC error.
 func rpcErrorFromTurn(err error) *RPCError {
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -702,7 +688,7 @@ func rpcErrorFromTurn(err error) *RPCError {
 // Response → Task mapping
 // ---------------------------------------------------------------------------
 
-// contentToParts maps Dive LLM content to A2A parts. Internal content
+// contentToParts maps Dive LLM content to A2A v1.0 parts. Internal content
 // types (tool use, tool result, thinking) are skipped — only user-visible
 // content is projected.
 func contentToParts(content []llm.Content) []Part {
@@ -715,26 +701,17 @@ func contentToParts(content []llm.Content) []Part {
 			}
 		case *llm.ImageContent:
 			if v.Source != nil {
-				parts = append(parts, Part{
-					Kind: PartKindFile,
-					File: &FileContent{
-						MimeType: v.Source.MediaType,
-						Bytes:    v.Source.Data,
-						URI:      v.Source.URL,
-					},
-				})
+				p := partFromSource(v.Source, "")
+				if p != nil {
+					parts = append(parts, *p)
+				}
 			}
 		case *llm.DocumentContent:
 			if v.Source != nil {
-				parts = append(parts, Part{
-					Kind: PartKindFile,
-					File: &FileContent{
-						Name:     v.Title,
-						MimeType: v.Source.MediaType,
-						Bytes:    v.Source.Data,
-						URI:      v.Source.URL,
-					},
-				})
+				p := partFromSource(v.Source, v.Title)
+				if p != nil {
+					parts = append(parts, *p)
+				}
 			}
 		case *llm.RefusalContent:
 			if v.Text != "" {
@@ -745,15 +722,30 @@ func contentToParts(content []llm.Content) []Part {
 	return parts
 }
 
+func partFromSource(src *llm.ContentSource, title string) *Part {
+	if src == nil {
+		return nil
+	}
+	switch src.Type {
+	case llm.ContentSourceTypeBase64:
+		p := NewRawPart(src.Data, src.MediaType)
+		p.Filename = title
+		return &p
+	case llm.ContentSourceTypeURL:
+		p := NewURLPart(src.URL, src.MediaType)
+		p.Filename = title
+		return &p
+	}
+	return nil
+}
+
 // buildTaskFromResponse projects a completed (or suspended) Dive Response
-// onto the A2A Task shape. It is the core of the server's translation
-// layer.
+// onto the A2A Task shape.
 func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *dive.Response) *Task {
 	now := time.Now().UTC()
 	task := &Task{
 		ID:        taskID,
 		ContextID: contextID,
-		Kind:      "task",
 	}
 	if userMsg != nil {
 		task.History = append(task.History, userMsg)
@@ -787,7 +779,7 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 		}
 		task.Status = TaskStatus{
 			State:     state,
-			Timestamp: now,
+			Timestamp: &now,
 		}
 		if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) > 0 {
 			prompt := resp.Suspension.PendingToolCalls[0].Prompt
@@ -810,13 +802,13 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 	case "", dive.ResponseStatusCompleted:
 		task.Status = TaskStatus{
 			State:     TaskStateCompleted,
-			Timestamp: now,
+			Timestamp: &now,
 		}
 		task.Artifacts = artifactsFromResponse(resp)
 	default:
 		task.Status = TaskStatus{
 			State:     TaskStateFailed,
-			Timestamp: now,
+			Timestamp: &now,
 			Message: &Message{
 				MessageID: uuid.NewString(),
 				Role:      RoleAgent,
@@ -827,12 +819,10 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 	return task
 }
 
-// artifactsFromResponse builds A2A artifacts from the assistant messages
-// in a Dive response. Each assistant message with renderable content
-// becomes one artifact, preserving all content types.
+// artifactsFromResponse builds A2A artifacts from the assistant messages.
 func artifactsFromResponse(resp *dive.Response) []*Artifact {
 	var artifacts []*Artifact
-	for i, out := range resp.OutputMessages {
+	for _, out := range resp.OutputMessages {
 		if out.Role != llm.Assistant {
 			continue
 		}
@@ -844,34 +834,25 @@ func artifactsFromResponse(resp *dive.Response) []*Artifact {
 			ArtifactID: uuid.NewString(),
 			Name:       "response",
 			Parts:      parts,
-			Index:      i,
-			LastChunk:  true,
 		})
 	}
 	return artifacts
 }
 
 // inputMessageFromParts converts A2A message parts into an *llm.Message
-// with properly typed content. Text parts become TextContent, file parts
-// become ImageContent or DocumentContent based on MIME type, and data
-// parts are rendered as a JSON code block in TextContent (since LLMs
-// don't have a native structured-data content type).
+// with properly typed content. Text parts become TextContent, raw/url
+// parts become ImageContent or DocumentContent based on MIME type, and
+// data parts are rendered as a JSON code block in TextContent.
 func inputMessageFromParts(msg *Message) (*llm.Message, error) {
 	if msg == nil || len(msg.Parts) == 0 {
 		return nil, fmt.Errorf("a2a: message has no parts")
 	}
 	out := &llm.Message{Role: llm.User}
 	for _, p := range msg.Parts {
-		switch p.Kind {
-		case PartKindText:
-			if p.Text == "" {
-				continue
-			}
+		switch {
+		case p.IsText():
 			out.Content = append(out.Content, &llm.TextContent{Text: p.Text})
-		case PartKindData:
-			if len(p.Data) == 0 {
-				continue
-			}
+		case p.IsData():
 			encoded, err := json.Marshal(p.Data)
 			if err != nil {
 				return nil, fmt.Errorf("a2a: marshal data part: %w", err)
@@ -879,32 +860,42 @@ func inputMessageFromParts(msg *Message) (*llm.Message, error) {
 			out.Content = append(out.Content, &llm.TextContent{
 				Text: "```json\n" + string(encoded) + "\n```",
 			})
-		case PartKindFile:
-			if p.File == nil {
-				continue
-			}
-			if isImageMIME(p.File.MimeType) {
-				source := &llm.ContentSource{MediaType: p.File.MimeType}
-				if p.File.Bytes != "" {
-					source.Type = llm.ContentSourceTypeBase64
-					source.Data = p.File.Bytes
-				} else if p.File.URI != "" {
-					source.Type = llm.ContentSourceTypeURL
-					source.URL = p.File.URI
-				}
-				out.Content = append(out.Content, &llm.ImageContent{Source: source})
+		case p.IsRaw():
+			if isImageMIME(p.MediaType) {
+				out.Content = append(out.Content, &llm.ImageContent{
+					Source: &llm.ContentSource{
+						Type:      llm.ContentSourceTypeBase64,
+						MediaType: p.MediaType,
+						Data:      p.Raw,
+					},
+				})
 			} else {
-				source := &llm.ContentSource{MediaType: p.File.MimeType}
-				if p.File.Bytes != "" {
-					source.Type = llm.ContentSourceTypeBase64
-					source.Data = p.File.Bytes
-				} else if p.File.URI != "" {
-					source.Type = llm.ContentSourceTypeURL
-					source.URL = p.File.URI
-				}
 				out.Content = append(out.Content, &llm.DocumentContent{
-					Source: source,
-					Title:  p.File.Name,
+					Source: &llm.ContentSource{
+						Type:      llm.ContentSourceTypeBase64,
+						MediaType: p.MediaType,
+						Data:      p.Raw,
+					},
+					Title: p.Filename,
+				})
+			}
+		case p.IsURL():
+			if isImageMIME(p.MediaType) {
+				out.Content = append(out.Content, &llm.ImageContent{
+					Source: &llm.ContentSource{
+						Type:      llm.ContentSourceTypeURL,
+						MediaType: p.MediaType,
+						URL:       p.URL,
+					},
+				})
+			} else {
+				out.Content = append(out.Content, &llm.DocumentContent{
+					Source: &llm.ContentSource{
+						Type:      llm.ContentSourceTypeURL,
+						MediaType: p.MediaType,
+						URL:       p.URL,
+					},
+					Title: p.Filename,
 				})
 			}
 		}
@@ -946,7 +937,7 @@ func writeRPCError(w http.ResponseWriter, id json.RawMessage, rpcErr *RPCError) 
 	_ = json.NewEncoder(w).Encode(RPCResponse{JSONRPC: "2.0", ID: id, Error: rpcErr})
 }
 
-func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, id json.RawMessage, result any) {
+func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, id json.RawMessage, result StreamResponse) {
 	payload := RPCResponse{JSONRPC: "2.0", ID: id, Result: result}
 	var buf bytes.Buffer
 	buf.WriteString("data: ")
