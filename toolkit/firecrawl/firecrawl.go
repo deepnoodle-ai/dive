@@ -82,18 +82,16 @@ func New(opts ...ClientOption) (*Client, error) {
 
 // Fetch a web page.
 func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response, error) {
-	// Convert format strings to Firecrawl Format objects
+	// Convert wonton format strings to the names Firecrawl v2 expects.
 	formats := make([]Format, 0, len(req.Formats))
 	for _, format := range req.Formats {
 		switch format {
-		case "markdown", "html", "raw_html", "links", "summary":
+		case "markdown", "html", "links", "summary":
 			formats = append(formats, format)
-		case "images", "branding":
-			// Firecrawl doesn't support these directly, skip
+		case "raw_html", "rawHtml":
+			formats = append(formats, "rawHtml")
 		}
 	}
-
-	// Default to markdown if no formats specified
 	if len(formats) == 0 {
 		formats = []Format{"markdown"}
 	}
@@ -105,8 +103,9 @@ func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response
 		IncludeTags: req.IncludeTags,
 		ExcludeTags: req.ExcludeTags,
 	}
-
-	// Set optional fields from request
+	// fetch.Request.OnlyMainContent is a bool, so we can only forward "true";
+	// when false (the zero value) we omit the field and let Firecrawl apply
+	// its own default (also true as of v2).
 	if req.OnlyMainContent {
 		onlyMain := true
 		body.OnlyMainContent = &onlyMain
@@ -125,26 +124,6 @@ func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response
 		body.Mobile = &req.Mobile
 	}
 
-	// Set v2 specific defaults
-	if body.OnlyMainContent == nil {
-		onlyMain := true
-		body.OnlyMainContent = &onlyMain
-	}
-	if body.RemoveBase64Images == nil {
-		removeImages := true
-		body.RemoveBase64Images = &removeImages
-	}
-	if body.BlockAds == nil {
-		blockAds := true
-		body.BlockAds = &blockAds
-	}
-	if body.Proxy == nil {
-		proxy := "auto"
-		body.Proxy = &proxy
-	}
-	storeCache := true
-	body.StoreInCache = &storeCache
-
 	resp, err := c.doRequest(ctx, http.MethodPost, "/scrape", &body)
 	if err != nil {
 		return nil, err
@@ -153,21 +132,23 @@ func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response
 	if err := json.Unmarshal(resp, &scrapeResp); err != nil {
 		return nil, fmt.Errorf("failed to parse scrape response: %w", err)
 	}
-	if !scrapeResp.Success {
+	if !scrapeResp.Success || scrapeResp.Data == nil {
 		return nil, fmt.Errorf("scrape operation failed")
 	}
 
-	// Build the response using Wonton's fetch.Response
 	output := &fetch.Response{
-		URL:        req.URL,
-		StatusCode: scrapeResp.Data.Metadata.StatusCode,
-		Markdown:   scrapeResp.Data.Markdown,
-		Metadata: fetch.Metadata{
-			Title:       scrapeResp.Data.Metadata.Title,
-			Description: scrapeResp.Data.Metadata.Description,
-			Canonical:   scrapeResp.Data.Metadata.SourceURL,
-		},
+		URL:       req.URL,
+		Markdown:  scrapeResp.Data.Markdown,
 		Timestamp: time.Now().UTC(),
+	}
+	if md := scrapeResp.Data.Metadata; md != nil {
+		output.StatusCode = md.StatusCode
+		output.Metadata = fetch.Metadata{
+			Title:       md.Title,
+			Description: md.Description,
+			Keywords:    []string(md.Keywords),
+			Canonical:   md.SourceURL,
+		}
 	}
 
 	// Set optional response fields
@@ -222,14 +203,19 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		// Handle specific v2 API error responses
 		switch resp.StatusCode {
+		case 400:
+			return nil, fetch.NewRequestErrorf("bad request: %s", respBody).WithStatusCode(400)
+		case 401:
+			return nil, fetch.NewRequestErrorf("unauthorized: invalid or missing API key").WithStatusCode(401)
 		case 402:
 			return nil, fetch.NewRequestErrorf("payment required to access this resource").WithStatusCode(402)
+		case 404:
+			return nil, fetch.NewRequestErrorf("resource not found").WithStatusCode(404)
 		case 429:
 			return nil, fetch.NewRequestErrorf("request rate limit exceeded, please wait and try again later").WithStatusCode(429)
-		case 500:
-			return nil, fetch.NewRequestErrorf("server error occurred").WithStatusCode(500)
+		case 500, 502, 503, 504:
+			return nil, fetch.NewRequestErrorf("server error occurred").WithStatusCode(resp.StatusCode)
 		default:
 			return nil, fetch.NewRequestErrorf("request failed: %s", respBody).WithStatusCode(resp.StatusCode)
 		}

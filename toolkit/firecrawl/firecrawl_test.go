@@ -181,6 +181,106 @@ func TestClient_Fetch_DefaultFormats(t *testing.T) {
 	assert.Equal(t, "# Default Format Test", output.Markdown)
 }
 
+func TestClient_Fetch_RawHTMLFormatRenamed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody scrapeRequestBody
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
+		assert.NoError(t, err)
+
+		// wonton's "raw_html" must be translated to Firecrawl's "rawHtml".
+		assert.Len(t, reqBody.Formats, 1)
+		formatStr, ok := reqBody.Formats[0].(string)
+		assert.True(t, ok)
+		assert.Equal(t, "rawHtml", formatStr)
+
+		response := scrapeResponse{
+			Success: true,
+			Data: &document{
+				RawHTML:  stringPtr("<html><body>raw</body></html>"),
+				Metadata: &documentMetadata{SourceURL: "https://example.com"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := New(WithAPIKey("test"), WithBaseURL(server.URL))
+	assert.NoError(t, err)
+
+	output, err := client.Fetch(context.Background(), &fetch.Request{
+		URL:     "https://example.com",
+		Formats: []string{"raw_html"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "<html><body>raw</body></html>", output.RawHTML)
+}
+
+func TestKeywordsField_Unmarshal(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want []string
+	}{
+		{"array", `["go","testing"]`, []string{"go", "testing"}},
+		{"comma string", `"go, testing,  ai "`, []string{"go", "testing", "ai"}},
+		{"empty string", `""`, []string{}},
+		{"null", `null`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var k keywordsField
+			err := k.UnmarshalJSON([]byte(tt.json))
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, []string(k))
+		})
+	}
+}
+
+func TestClient_Fetch_KeywordsMappedToMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return a metadata blob with keywords as a comma-separated string,
+		// which is the most common shape from <meta name="keywords">.
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"success": true,
+			"data": {
+				"markdown": "# Hi",
+				"metadata": {
+					"title": "Hi",
+					"keywords": "go, testing, ai",
+					"sourceURL": "https://example.com",
+					"statusCode": 200
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(WithAPIKey("test"), WithBaseURL(server.URL))
+	assert.NoError(t, err)
+
+	output, err := client.Fetch(context.Background(), &fetch.Request{URL: "https://example.com"})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"go", "testing", "ai"}, output.Metadata.Keywords)
+}
+
+func TestClient_Fetch_UnauthorizedError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		w.Write([]byte(`{"error":"invalid api key"}`))
+	}))
+	defer server.Close()
+
+	client, err := New(WithAPIKey("test"), WithBaseURL(server.URL))
+	assert.NoError(t, err)
+
+	_, err = client.Fetch(context.Background(), &fetch.Request{URL: "https://example.com"})
+	assert.Error(t, err)
+	assert.True(t, fetch.IsRequestError(err))
+	assert.Equal(t, 401, err.(*fetch.RequestError).StatusCode())
+}
+
 func TestClient_New_MissingAPIKey(t *testing.T) {
 	// Temporarily unset the environment variable
 	t.Setenv("FIRECRAWL_API_KEY", "")

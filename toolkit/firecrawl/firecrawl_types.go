@@ -1,5 +1,42 @@
 package firecrawl
 
+import (
+	"encoding/json"
+	"strings"
+)
+
+// keywordsField accepts either a JSON string ("foo, bar") or an array
+// (["foo", "bar"]), since Firecrawl has been observed returning both shapes
+// depending on the source page's <meta name="keywords"> tag.
+type keywordsField []string
+
+func (k *keywordsField) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	if data[0] == '[' {
+		var arr []string
+		if err := json.Unmarshal(data, &arr); err != nil {
+			return err
+		}
+		*k = arr
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	*k = out
+	return nil
+}
+
 // Format represents the different output formats available in Firecrawl v2
 // We use interface{} here because the v2 API accepts both strings and objects
 type Format interface{}
@@ -185,6 +222,7 @@ type documentMetadata struct {
 	Title       string                 `json:"title,omitempty"`
 	Description string                 `json:"description,omitempty"`
 	Language    *string                `json:"language,omitempty"`
+	Keywords    keywordsField          `json:"keywords,omitempty"`
 	SourceURL   string                 `json:"sourceURL,omitempty"`
 	StatusCode  int                    `json:"statusCode,omitempty"`
 	Error       *string                `json:"error,omitempty"`
