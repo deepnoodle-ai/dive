@@ -55,12 +55,22 @@ func (s *MemoryStore) Put(ctx context.Context, sess *Session) error {
 }
 
 func (s *MemoryStore) List(ctx context.Context, opts *ListOptions) (*ListResult, error) {
+	// Lock order: store first, session second. This mirrors how the rest
+	// of the package takes locks (e.g., Open releases the store lock
+	// before the caller touches session.mu) and keeps us free of
+	// deadlocks with any goroutine that holds a session lock and then
+	// reaches back into the store. Do NOT invert.
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	infos := make([]*SessionInfo, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		sess.mu.RLock()
+		suspended := sess.data.Suspended
+		if opts != nil && opts.Suspended != nil && *opts.Suspended != suspended {
+			sess.mu.RUnlock()
+			continue
+		}
 		info := &SessionInfo{
 			ID:         sess.data.ID,
 			Title:      sess.data.Title,
@@ -68,6 +78,7 @@ func (s *MemoryStore) List(ctx context.Context, opts *ListOptions) (*ListResult,
 			UpdatedAt:  sess.data.UpdatedAt,
 			EventCount: len(sess.data.Events),
 			Metadata:   sess.data.Metadata,
+			Suspended:  suspended,
 		}
 		sess.mu.RUnlock()
 		infos = append(infos, info)

@@ -96,6 +96,14 @@ type ToolResultContent struct {
 }
 
 // ToolResult is the output from a tool call.
+//
+// ToolResult is a tagged union between a normal result (Content / Display /
+// IsError) and a suspend result (Suspend). A single ToolResult must set
+// exactly one of the two — either the regular fields OR Suspend, never
+// both. The agent validates this at the boundary and a malformed result is
+// surfaced as an IsError result routed through the PostToolUseFailure
+// hook chain. Use NewToolResult*/NewSuspendResult* constructors rather
+// than filling the fields directly to stay on the safe side of the union.
 type ToolResult struct {
 	// Content is the tool output sent to the LLM.
 	Content []*ToolResultContent `json:"content"`
@@ -104,6 +112,46 @@ type ToolResult struct {
 	Display string `json:"display,omitempty"`
 	// IsError indicates whether the tool call resulted in an error.
 	IsError bool `json:"isError,omitempty"`
+	// Suspend, when non-nil, tells the agent to suspend its turn rather than
+	// send this tool result to the LLM. Must be the only field set on the
+	// ToolResult (no Content, no Display, no IsError). Use NewSuspendResult
+	// to construct.
+	Suspend *SuspendResult `json:"suspend,omitempty"`
+}
+
+// SuspendResult is the signal a tool returns to pause the agent mid-turn and
+// hand control back to the caller. It is NOT an error — it is a first-class
+// result type. The agent observes it, persists the partial turn, and returns
+// a suspended Response. On resume, the caller supplies a real ToolResult for
+// the suspended call via WithResume or WithToolResults.
+type SuspendResult struct {
+	// Prompt is optional human-readable text describing what the agent is
+	// waiting for. Surfaced to the caller via PendingToolCall.Prompt.
+	Prompt string `json:"prompt,omitempty"`
+
+	// Metadata is optional structured data the tool wants to attach to the
+	// suspension so the caller can render a richer UI (request IDs, form
+	// URLs, expiration hints, etc.). It is surfaced via
+	// PendingToolCall.Metadata.
+	//
+	// Metadata values are round-tripped through JSON during deep-copy and
+	// persistence: numeric types come back as float64 and custom struct
+	// types become generic map[string]any. Stick to JSON-friendly values
+	// and expect that loss of type fidelity.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// NewSuspendResult returns a *ToolResult whose Suspend field is set. Use it
+// from a tool's Call method; pass nil for metadata if none is needed:
+//
+//	return dive.NewSuspendResult("Waiting for approval from @alice", nil), nil
+//
+//	return dive.NewSuspendResult("Waiting for approval", map[string]any{
+//	    "request_id": requestID,
+//	    "form_url":   url,
+//	}), nil
+func NewSuspendResult(prompt string, metadata map[string]any) *ToolResult {
+	return &ToolResult{Suspend: &SuspendResult{Prompt: prompt, Metadata: metadata}}
 }
 
 // WithDisplay sets the Display field and returns the receiver for chaining.

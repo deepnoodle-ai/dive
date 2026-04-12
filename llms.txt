@@ -201,8 +201,10 @@ Hook types:
 - `PostToolUseFailureHook` — runs after a tool call fails
 - `StopHook` — runs when the agent is about to stop; can return `Continue: true` to re-enter the loop
 - `PreIterationHook` — runs before each LLM call within the loop
+- `OnSuspendHook` — runs when a tool returns `SuspendResult`, before `PostGeneration` and before the suspended turn is persisted
 
 Hook flow: PreGeneration -> [PreIteration -> LLM -> PreToolUse -> Execute -> PostToolUse]* -> Stop -> PostGeneration
+On suspend: OnSuspend -> PostGeneration -> persist -> return
 
 Hook helpers: `InjectContext`, `CompactionHook`, `UsageLogger`, `UsageLoggerWithSlog`, `MatchTool`, `MatchToolPost`, `MatchToolPostFailure`
 
@@ -259,7 +261,10 @@ from custom sources. See [Skills Guide](docs/guides/skills.md).
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
 - `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
 - `dive.ToolCallResult` - completed tool call; fields: ID (string), Name (string), Input (any), Result (*ToolResult), Error (error)
-- `dive.ToolResult` - tool output; create with NewToolResultText() or NewToolResultError()
+- `dive.ToolResult` - tool output; tagged union (regular fields XOR `Suspend`); create with NewToolResultText(), NewToolResultError(), or NewSuspendResult()
+- `dive.SuspensionState` - payload describing a suspended turn; carried on `Response.Suspension`
+- `dive.PendingToolCall` - tool call awaiting external result; fields: ID, Name, Input, Prompt, Metadata
+- `dive.SuspendableSession` - optional `Session` extension: LoadSuspension, SaveSuspendedTurn, SaveResumedTurn
 - `llm.LLM` - interface: Name, Generate
 - `llm.StreamingLLM` - extends LLM with Stream()
 - `llm.Message` - create with NewUserTextMessage(), NewUserMessage(), NewAssistantMessage()
@@ -351,6 +356,58 @@ Session types (`session` package):
 - `sess.TotalUsage()` - sum token usage
 - `session.ForkSession(ctx, store, fromID, newID)` - fork + persist
 
+## Suspend and resume
+
+A tool can pause the agent mid-turn by returning `dive.NewSuspendResult(prompt, metadata)`.
+`CreateResponse` returns `(*Response, nil)` with `Status == ResponseStatusSuspended` and
+`Suspension *SuspensionState` describing the pending tool calls, completed siblings, and
+the in-progress turn messages. The caller resumes later — possibly in a different process —
+by invoking `CreateResponse` again with `WithToolResults` (session-backed) or
+`WithResume(state, results)` (stateless). Partial resumes are allowed: supply a subset of
+pending results and the agent re-suspends with a shrunk pending list.
+
+```go
+// Tool signals suspension
+func (t *DeployTool) Call(ctx context.Context, in DeployInput) (*dive.ToolResult, error) {
+    return dive.NewSuspendResult("Approve deploy?", map[string]any{"req": in.ID}), nil
+}
+
+// Observe a suspended response
+resp, _ := agent.CreateResponse(ctx, dive.WithInput("Please deploy v1.4.2"))
+if resp.Status == dive.ResponseStatusSuspended {
+    for _, p := range resp.Suspension.PendingToolCalls {
+        // route p.ID + p.Input + p.Prompt to a review queue and return
+    }
+    return
+}
+
+// Resume later (session-backed)
+final, _ := agent.CreateResponse(ctx, dive.WithToolResults(map[string]*dive.ToolResult{
+    pendingID: dive.NewToolResultText("approved"),
+}))
+
+// Resume later (stateless — no Session)
+final, _ := agent.CreateResponse(ctx,
+    dive.WithMessages(preHistory...),
+    dive.WithResume(savedSuspensionState, results),
+)
+```
+
+Key types and helpers:
+- `dive.SuspendResult{Prompt, Metadata}` — signal returned from a tool; construct with `NewSuspendResult`
+- `dive.ToolResult.Suspend` — tagged union; never set alongside `Content`/`Display`/`IsError`
+- `dive.Response.Status` — `ResponseStatusCompleted` or `ResponseStatusSuspended`
+- `dive.Response.Suspension *SuspensionState` — `PendingToolCalls`, `CompletedToolCalls`, `TurnMessages`
+- `dive.PendingToolCall.UnmarshalInput(&v)` / `dive.DecodePendingInput[T](p)` — decode original tool input
+- `dive.WithResume(state, results)` / `dive.WithToolResults(results)` — resume options
+- `dive.OnSuspendHook` — fires before persistence; abort to prevent the transition
+- `dive.SuspendableSession` — optional `Session` extension for auto-persistence
+- `session.ListOptions{Suspended: dive.Ptr(true)}` — sweep for stale suspended sessions
+- Errors: `ErrResumeRequired`, `ErrInputOnSuspendedSession`, `ErrNoSuspendedTurn`, `ErrUnknownPendingToolCall`
+- Streaming: a terminal `ResponseItemTypeSuspended` item is emitted carrying the same pending/completed lists
+
+See [Suspend & Resume Guide](docs/guides/suspend-resume.md) and the `examples/suspend/` directory.
+
 ## Multi-turn without sessions
 
 Accumulate messages manually using `response.OutputMessages`:
@@ -417,6 +474,8 @@ All constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 - [Agents](docs/guides/agents.md)
 - [Tools](docs/guides/tools.md)
 - [Custom Tools](docs/guides/custom-tools.md)
+- [Hooks](docs/guides/hooks.md)
+- [Suspend & Resume](docs/guides/suspend-resume.md)
 - [LLM Providers](docs/guides/llm-guide.md)
 - [Permissions](docs/guides/permissions.md)
 - [Skills](docs/guides/skills.md)

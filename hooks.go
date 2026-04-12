@@ -203,6 +203,25 @@ type StopHook func(ctx context.Context, hctx *HookContext) (*StopDecision, error
 // Errors abort generation (same as PreGeneration).
 type PreIterationHook func(ctx context.Context, hctx *HookContext) error
 
+// OnSuspendHook fires when the agent transitions into a suspended state,
+// BEFORE PostGeneration runs and BEFORE the suspended turn is persisted to
+// the session. Use this to notify an external system that human input is
+// needed (email, Slack, task creation, webhook dispatch).
+//
+// hctx.Response is populated with the suspended Response. Status is
+// ResponseStatusSuspended and Response.Suspension is a non-nil
+// *SuspensionState carrying PendingToolCalls, CompletedToolCalls, and
+// TurnMessages. Regular errors are logged; returning a HookAbortError
+// aborts the call before the session is marked suspended, so the caller
+// sees an error and the session stays in its previous state. Because the
+// hook runs BEFORE persistence, aborting does not require any
+// compensating rollback — there is simply nothing on disk to roll back.
+//
+// Partial resumes (a suspended session resumed with only some of the
+// awaited results) do NOT re-fire OnSuspend, since they continue an existing
+// suspension rather than announcing a new one.
+type OnSuspendHook func(ctx context.Context, hctx *HookContext) error
+
 // StopDecision tells the agent what to do after a stop hook runs.
 type StopDecision struct {
 	// Continue, when true, prevents the agent from stopping.

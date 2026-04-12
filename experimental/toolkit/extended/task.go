@@ -367,6 +367,13 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 		response, err := agent.CreateResponse(taskCtx, opts...)
 		endTime := time.Now()
 
+		// Subagents do not support suspend/resume in v1. If the subagent
+		// returns a suspended response, surface it as a failure so the parent
+		// agent sees a clear error and can adapt.
+		if err == nil && response != nil && response.Status == dive.ResponseStatusSuspended {
+			err = fmt.Errorf("subagent suspension is not supported")
+		}
+
 		if err != nil {
 			record.setResult(TaskStatusFailed, fmt.Sprintf("Task failed: %s", err.Error()), err, endTime)
 			if t.onEvent != nil {
