@@ -51,8 +51,9 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		opts.Transport = "jsonrpc"
 	}
 
-	// Build the agent card with defaults.
-	card := opts.Card
+	// Deep-copy the card so we don't share mutable state (slices, maps,
+	// pointers) with the caller.
+	card := deepCopyCard(&opts.Card)
 	if card.Name == "" {
 		card.Name = opts.Agent.Name()
 		if card.Name == "" {
@@ -126,7 +127,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	return &Server{
 		handler:     handler,
 		httpHandler: transportHandler,
-		card:        &card,
+		card:        card,
 	}, nil
 }
 
@@ -151,6 +152,25 @@ func (s *Server) Card() *a2a.AgentCard {
 	var cp a2a.AgentCard
 	if err := json.Unmarshal(b, &cp); err != nil {
 		cp2 := *s.card
+		return &cp2
+	}
+	return &cp
+}
+
+// deepCopyCard returns a deep copy of an AgentCard via JSON round-trip.
+// Falls back to a shallow copy if marshaling fails.
+func deepCopyCard(src *a2a.AgentCard) *a2a.AgentCard {
+	if src == nil {
+		return &a2a.AgentCard{}
+	}
+	b, err := json.Marshal(src)
+	if err != nil {
+		cp := *src
+		return &cp
+	}
+	var cp a2a.AgentCard
+	if err := json.Unmarshal(b, &cp); err != nil {
+		cp2 := *src
 		return &cp2
 	}
 	return &cp

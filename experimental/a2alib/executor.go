@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"sync"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
@@ -24,6 +25,11 @@ type SessionProvider func(ctx context.Context, contextID string) (dive.Session, 
 type Executor struct {
 	agent    *dive.Agent
 	sessions SessionProvider
+
+	// inflight tracks cancel functions for in-progress Execute runs
+	// so Cancel can abort a running CreateResponse.
+	inflightMu sync.Mutex
+	inflight   map[a2a.TaskID]context.CancelFunc
 }
 
 // ExecutorOption configures an Executor.
@@ -36,7 +42,10 @@ func WithSessionProvider(sp SessionProvider) ExecutorOption {
 
 // NewExecutor creates an Executor that bridges a Dive agent to a2a-go.
 func NewExecutor(agent *dive.Agent, opts ...ExecutorOption) *Executor {
-	e := &Executor{agent: agent}
+	e := &Executor{
+		agent:    agent,
+		inflight: make(map[a2a.TaskID]context.CancelFunc),
+	}
 	for _, o := range opts {
 		o(e)
 	}
@@ -111,9 +120,14 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		// Set up streaming: run CreateResponse with an event callback that
 		// yields intermediate a2a status updates for tool calls and text.
 		// Use a derived context so the goroutine is cancelled if yield
-		// returns false (consumer disconnected).
+		// returns false (consumer disconnected) or Cancel is called.
 		execCtx2, cancelExec := context.WithCancel(ctx)
 		defer cancelExec()
+
+		// Register so Cancel can abort this run.
+		taskID := execCtx.TaskID
+		e.trackInflight(taskID, cancelExec)
+		defer e.untrackInflight(taskID)
 
 		events := make(chan a2a.Event, 64)
 		var resp *dive.Response
@@ -159,6 +173,9 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 // Cancel implements a2asrv.AgentExecutor.
 func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
 	return func(yield func(a2a.Event, error) bool) {
+		// Abort any in-flight Execute for this task.
+		e.cancelInflight(execCtx.TaskID)
+
 		// If the session supports cancellation, clean up suspension state.
 		if e.sessions != nil && execCtx.ContextID != "" {
 			if sess, err := e.sessions(ctx, execCtx.ContextID); err == nil && sess != nil {
@@ -168,6 +185,27 @@ func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 			}
 		}
 		yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCanceled, nil), nil)
+	}
+}
+
+func (e *Executor) trackInflight(id a2a.TaskID, cancel context.CancelFunc) {
+	e.inflightMu.Lock()
+	e.inflight[id] = cancel
+	e.inflightMu.Unlock()
+}
+
+func (e *Executor) untrackInflight(id a2a.TaskID) {
+	e.inflightMu.Lock()
+	delete(e.inflight, id)
+	e.inflightMu.Unlock()
+}
+
+func (e *Executor) cancelInflight(id a2a.TaskID) {
+	e.inflightMu.Lock()
+	cancel, ok := e.inflight[id]
+	e.inflightMu.Unlock()
+	if ok {
+		cancel()
 	}
 }
 
@@ -461,7 +499,11 @@ func resumeToolResults(state *dive.SuspensionState, msg *a2a.Message) (map[strin
 	}
 
 	// Check for a structured toolResults DataPart.
-	if mapped := extractToolResultsMap(msg); mapped != nil {
+	mapped, found, err := extractToolResultsMap(msg)
+	if err != nil {
+		return nil, err
+	}
+	if found {
 		results := make(map[string]*dive.ToolResult, len(state.PendingToolCalls))
 		for _, call := range state.PendingToolCalls {
 			text, ok := mapped[call.ID]
@@ -485,9 +527,13 @@ func resumeToolResults(state *dive.SuspensionState, msg *a2a.Message) (map[strin
 	return results, nil
 }
 
-func extractToolResultsMap(msg *a2a.Message) map[string]string {
+// extractToolResultsMap looks for a DataPart with a "toolResults" key.
+// Returns (map, true, nil) on success, (nil, false, nil) when no DataPart
+// has a toolResults key, and (nil, true, err) when a toolResults key is
+// present but malformed (not a map of strings).
+func extractToolResultsMap(msg *a2a.Message) (map[string]string, bool, error) {
 	if msg == nil {
-		return nil
+		return nil, false, nil
 	}
 	for _, p := range msg.Parts {
 		data := p.Data()
@@ -502,21 +548,22 @@ func extractToolResultsMap(msg *a2a.Message) map[string]string {
 		if !ok {
 			continue
 		}
+		// toolResults key is present — must be a valid map[string]string.
 		tm, ok := raw.(map[string]any)
 		if !ok {
-			continue
+			return nil, true, fmt.Errorf("a2alib: toolResults must be an object, got %T", raw)
 		}
 		out := make(map[string]string, len(tm))
 		for k, v := range tm {
 			s, ok := v.(string)
 			if !ok {
-				return nil
+				return nil, true, fmt.Errorf("a2alib: toolResults value for %q must be a string, got %T", k, v)
 			}
 			out[k] = s
 		}
-		return out
+		return out, true, nil
 	}
-	return nil
+	return nil, false, nil
 }
 
 func textFromMessage(msg *a2a.Message) string {
