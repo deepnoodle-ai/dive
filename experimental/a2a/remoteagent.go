@@ -128,7 +128,7 @@ func ResponseText(task *Task) string {
 	}
 	for _, art := range task.Artifacts {
 		for _, p := range art.Parts {
-			if p.Kind == PartKindText && p.Text != "" {
+			if p.IsText() {
 				return p.Text
 			}
 		}

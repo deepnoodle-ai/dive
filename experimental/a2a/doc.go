@@ -51,13 +51,14 @@
 //
 // # Wire format
 //
-// The package targets the current A2A JSON-RPC binding: method names like
-// "message/send"/"message/stream"/"tasks/get"/"tasks/cancel", hyphenated
-// lowercase task state strings ("input-required", "completed"), and "kind"
-// discriminators on Part, Message, Task, TaskStatusUpdateEvent, and
-// TaskArtifactUpdateEvent. Custom MarshalJSON implementations on the
-// types fill in safe defaults so manually constructed values still
-// validate against strict A2A clients.
+// The package targets the A2A v1.0 JSON-RPC binding: method names like
+// "message/send"/"message/stream"/"tasks/get"/"tasks/cancel",
+// SCREAMING_SNAKE_CASE task state strings ("TASK_STATE_INPUT_REQUIRED",
+// "TASK_STATE_COMPLETED"), content-based Part discrimination (text, raw,
+// data, url), and StreamResponse field-name discrimination for streaming
+// events. Custom MarshalJSON implementations on the types fill in safe
+// defaults so manually constructed values still validate against strict
+// A2A clients.
 //
 // The agent card is served at the canonical
 // /.well-known/agent-card.json path; the legacy /.well-known/agent.json
