@@ -21,7 +21,7 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - **LLM** (`llm/llm.go`): `LLM` and `StreamingLLM` interfaces abstract over providers.
 - **Tool** (`tool.go`): `Tool` and `TypedTool[T]` interfaces. `FuncTool[T]()` creates tools from functions with auto-generated schemas. `Toolset` interface provides dynamic tool resolution per LLM request. Tool panics are auto-recovered. All toolkit constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 - **Hooks** (`hooks.go`): `Hooks` struct groups hook slices on `AgentOptions`. Hook types: `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook`, `PostToolUseFailureHook`, `StopHook`, `PreIterationHook`, `OnSuspendHook`. All hooks receive `*HookContext`.
-- **Suspend/Resume** (`tool.go`, `response.go`, `dive.go`): A tool can pause the agent mid-turn by returning `NewSuspendResult(prompt, metadata)` (sets `ToolResult.Suspend`). `CreateResponse` returns `(*Response, nil)` with `Status == ResponseStatusSuspended` and `Response.Suspension *SuspensionState`. Resume via `WithToolResults` (session-backed) or `WithResume(state, results)` (stateless). `SuspendableSession` is an optional `Session` extension for auto-persistence. `OnSuspend` hooks fire before persistence. See `docs/guides/suspend-resume.md`.
+- **Suspend/Resume** (`tool.go`, `response.go`, `dive.go`): A tool can pause the agent mid-turn by returning `NewSuspendResult(prompt, metadata)` or `NewSuspendResultWithReason(prompt, reason, metadata)` (sets `ToolResult.Suspend`). `SuspendReason` classifies why: `SuspendReasonInput` (default) or `SuspendReasonAuth`. `CreateResponse` returns `(*Response, nil)` with `Status == ResponseStatusSuspended` and `Response.Suspension *SuspensionState`. Resume via `WithToolResults` (session-backed) or `WithResume(state, results)` (stateless). `SuspendableSession` is an optional `Session` extension for auto-persistence with `CancelSuspension(ctx)` to abandon a suspended turn. `OnSuspend` hooks fire before persistence. See `docs/guides/suspend-resume.md`.
 
 ### Packages
 
@@ -30,7 +30,7 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser).
 - `permission/` — Rule-based tool permission management with modes, specifier patterns, and session allowlists.
 - `skill/` — Unified skills and slash commands. `skill.Loader` implements `dive.Extension` — pass it to `AgentOptions.Extensions` to wire up the Skill tool, catalog hook, and content hook. Three-layer architecture: rules in system prompt, catalog as `<system-reminder name="skills">` in first user message, tool as trigger with content via PostToolUseHook. Provider-based loading (filesystem, `.agents/skills/`), variable expansion, trigger matching. `dive.SetSystemReminder` manages named blocks in conversation context.
-- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, subagent, compaction, todo, toolkit.
+- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, subagent, compaction, todo, toolkit, a2a.
 
 ### Design Philosophy
 

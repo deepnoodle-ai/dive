@@ -60,6 +60,13 @@ type SuspendableSession interface {
 	// turn and clears the stored suspension state. Implementations should
 	// return an error if the session is not currently suspended.
 	SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error
+
+	// CancelSuspension abandons a suspended turn, clearing the suspension
+	// state and removing the partial turn from the session history.
+	// Returns ErrNotSuspended if the session is not currently suspended.
+	// After cancellation, the session is ready for a fresh turn as if the
+	// suspended turn never happened.
+	CancelSuspension(ctx context.Context) error
 }
 
 // ErrNoSuspendedTurn is returned from CreateResponse when WithResume or

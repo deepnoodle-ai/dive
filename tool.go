@@ -119,6 +119,21 @@ type ToolResult struct {
 	Suspend *SuspendResult `json:"suspend,omitempty"`
 }
 
+// SuspendReason classifies why a tool suspended so that adapters (A2A,
+// custom UIs) can project the correct external state without guessing.
+// When empty, callers should treat the reason as SuspendReasonInput.
+type SuspendReason string
+
+const (
+	// SuspendReasonInput means the agent needs information from the user
+	// before it can continue. This is the default.
+	SuspendReasonInput SuspendReason = "input_required"
+
+	// SuspendReasonAuth means the agent is blocked on an authentication or
+	// authorization step (OAuth flow, approval gate, etc.).
+	SuspendReasonAuth SuspendReason = "auth_required"
+)
+
 // SuspendResult is the signal a tool returns to pause the agent mid-turn and
 // hand control back to the caller. It is NOT an error — it is a first-class
 // result type. The agent observes it, persists the partial turn, and returns
@@ -128,6 +143,10 @@ type SuspendResult struct {
 	// Prompt is optional human-readable text describing what the agent is
 	// waiting for. Surfaced to the caller via PendingToolCall.Prompt.
 	Prompt string `json:"prompt,omitempty"`
+
+	// Reason classifies the suspension. Surfaced to the caller via
+	// PendingToolCall.Reason. When empty, treated as SuspendReasonInput.
+	Reason SuspendReason `json:"reason,omitempty"`
 
 	// Metadata is optional structured data the tool wants to attach to the
 	// suspension so the caller can render a richer UI (request IDs, form
@@ -152,6 +171,15 @@ type SuspendResult struct {
 //	}), nil
 func NewSuspendResult(prompt string, metadata map[string]any) *ToolResult {
 	return &ToolResult{Suspend: &SuspendResult{Prompt: prompt, Metadata: metadata}}
+}
+
+// NewSuspendResultWithReason is like NewSuspendResult but sets a reason
+// classifying why the tool suspended:
+//
+//	return dive.NewSuspendResultWithReason("Sign in to continue",
+//	    dive.SuspendReasonAuth, map[string]any{"auth_url": url}), nil
+func NewSuspendResultWithReason(prompt string, reason SuspendReason, metadata map[string]any) *ToolResult {
+	return &ToolResult{Suspend: &SuspendResult{Prompt: prompt, Reason: reason, Metadata: metadata}}
 }
 
 // WithDisplay sets the Display field and returns the receiver for chaining.

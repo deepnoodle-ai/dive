@@ -98,6 +98,7 @@ func clonePendingToolCall(p *dive.PendingToolCall) *dive.PendingToolCall {
 		ID:     p.ID,
 		Name:   p.Name,
 		Prompt: p.Prompt,
+		Reason: p.Reason,
 	}
 	if p.Input != nil {
 		cp.Input = append(json.RawMessage(nil), p.Input...)
@@ -485,6 +486,28 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 		s.data.PendingToolCalls = nil
 		s.data.CompletedToolCalls = nil
 		s.data.UpdatedAt = now
+	})
+}
+
+// CancelSuspension abandons a suspended turn, clearing the suspension
+// state and removing the partial turn's event from the session history.
+// After cancellation the session is ready for a fresh turn as if the
+// suspended turn never happened. Returns ErrNotSuspended if the session
+// is not currently suspended.
+func (s *Session) CancelSuspension(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.data.Suspended {
+		return ErrNotSuspended
+	}
+	return s.withRollback(ctx, func() {
+		if len(s.data.Events) > 0 {
+			s.data.Events = s.data.Events[:len(s.data.Events)-1]
+		}
+		s.data.Suspended = false
+		s.data.PendingToolCalls = nil
+		s.data.CompletedToolCalls = nil
+		s.data.UpdatedAt = time.Now()
 	})
 }
 

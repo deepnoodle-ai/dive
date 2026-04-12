@@ -56,10 +56,31 @@ func deployTool() dive.Tool {
 }
 ```
 
-Contract:
+### Suspend reason
+
+Tools can classify why they're suspending using `NewSuspendResultWithReason`.
+The reason is surfaced on `PendingToolCall.Reason` and consumed by adapters
+(e.g. the A2A adapter maps `SuspendReasonAuth` to the `auth-required` task
+state):
+
+```go
+return dive.NewSuspendResultWithReason("Sign in to continue",
+    dive.SuspendReasonAuth, map[string]any{"auth_url": url}), nil
+```
+
+| Reason | Meaning |
+|---|---|
+| `""` or `SuspendReasonInput` | Waiting for user input (default) |
+| `SuspendReasonAuth` | Blocked on authentication or authorization |
+
+When empty, callers should treat the reason as `SuspendReasonInput`.
+
+### Contract
 
 - `SuspendResult.Prompt` is optional human-readable context, surfaced on
   `PendingToolCall.Prompt`.
+- `SuspendResult.Reason` classifies the suspension, surfaced on
+  `PendingToolCall.Reason`. When empty, treated as `SuspendReasonInput`.
 - `SuspendResult.Metadata` is opaque to Dive and round-trips through the
   session. Values are JSON-marshalled; numbers come back as `float64`
   and custom structs become `map[string]any`, so stick to JSON-friendly
@@ -307,8 +328,19 @@ for _, info := range infos {
 }
 ```
 
-To cancel a stale suspension, open the session, load its state, and
-resume with `IsError` results for every pending call.
+To cancel a stale suspension cleanly, use `CancelSuspension`:
+
+```go
+sess, _ := store.Open(ctx, info.ID)
+err := sess.CancelSuspension(ctx)
+```
+
+This removes the partial turn from the session history and clears the
+suspension state. After cancellation, the session is ready for a fresh
+turn as if the suspended turn never happened.
+
+Alternatively, you can resume with `IsError` results for every pending
+call if you want the agent to acknowledge the cancellation.
 
 ## Streaming
 
@@ -369,10 +401,11 @@ prompt at the top of every call, including on resume.
 
 ## Subagents
 
-In the current version, tools running inside `experimental/subagent`
-cannot suspend — a subagent call that tries to return `SuspendResult`
-surfaces as an error. Cross-boundary nested suspend is deferred until a
-concrete use case lands.
+The `TaskTool` in `experimental/toolkit/extended` now supports suspended
+subagents. When a subagent suspends, the task enters `TaskStatusSuspended`
+instead of being treated as a failure. The parent agent sees "task is
+waiting for input" and can resume the task by passing the task ID via
+the `resume` parameter.
 
 ## Worked examples
 

@@ -72,6 +72,7 @@ type PendingToolCall struct {
 	Name     string          `json:"name"`
 	Input    json.RawMessage `json:"input"`
 	Prompt   string          `json:"prompt,omitempty"`
+	Reason   SuspendReason   `json:"reason,omitempty"`
 	Metadata map[string]any  `json:"metadata,omitempty"`
 }
 
