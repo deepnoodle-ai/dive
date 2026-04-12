@@ -21,6 +21,7 @@ const (
 	TaskStatusRunning   TaskStatus = "running"
 	TaskStatusCompleted TaskStatus = "completed"
 	TaskStatusFailed    TaskStatus = "failed"
+	TaskStatusSuspended TaskStatus = "suspended"
 )
 
 // TaskRecord stores information about a running or completed task
@@ -34,6 +35,7 @@ type TaskRecord struct {
 	StartTime   time.Time
 	EndTime     time.Time
 	Agent       *dive.Agent
+	Suspension  *dive.SuspensionState
 	done        chan struct{}
 }
 
@@ -45,6 +47,7 @@ type taskRecordSnapshot struct {
 	Error       error
 	StartTime   time.Time
 	EndTime     time.Time
+	Suspended   bool
 }
 
 func (r *TaskRecord) snapshot() taskRecordSnapshot {
@@ -58,6 +61,7 @@ func (r *TaskRecord) snapshot() taskRecordSnapshot {
 		Error:       r.Error,
 		StartTime:   r.StartTime,
 		EndTime:     r.EndTime,
+		Suspended:   r.Suspension != nil,
 	}
 }
 
@@ -72,6 +76,9 @@ func (r *TaskRecord) setResult(status TaskStatus, output string, err error, endT
 	r.Output = output
 	r.Error = err
 	r.EndTime = endTime
+	if status != TaskStatusSuspended {
+		r.Suspension = nil
+	}
 }
 
 // TaskRegistry manages running and completed tasks
@@ -367,19 +374,29 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 		response, err := agent.CreateResponse(taskCtx, opts...)
 		endTime := time.Now()
 
-		// Subagents do not support suspend/resume in v1. If the subagent
-		// returns a suspended response, surface it as a failure so the parent
-		// agent sees a clear error and can adapt.
-		if err == nil && response != nil && response.Status == dive.ResponseStatusSuspended {
-			err = fmt.Errorf("subagent suspension is not supported")
-		}
-
 		if err != nil {
 			record.setResult(TaskStatusFailed, fmt.Sprintf("Task failed: %s", err.Error()), err, endTime)
 			if t.onEvent != nil {
 				t.onEvent(record.ID, &dive.ResponseItem{
 					Type:      "subagent_status",
 					Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusFailed},
+				})
+			}
+		} else if response != nil && response.Status == dive.ResponseStatusSuspended {
+			prompt := "Agent is waiting for input."
+			if response.Suspension != nil && len(response.Suspension.PendingToolCalls) > 0 {
+				if p := response.Suspension.PendingToolCalls[0].Prompt; p != "" {
+					prompt = p
+				}
+			}
+			record.mu.Lock()
+			record.Suspension = response.Suspension
+			record.mu.Unlock()
+			record.setResult(TaskStatusSuspended, prompt, nil, endTime)
+			if t.onEvent != nil {
+				t.onEvent(record.ID, &dive.ResponseItem{
+					Type:      "subagent_status",
+					Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusSuspended, Output: prompt},
 				})
 			}
 		} else {
@@ -413,12 +430,17 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	select {
 	case <-done:
 		snapshot := record.snapshot()
-		if snapshot.Status == TaskStatusFailed {
+		switch snapshot.Status {
+		case TaskStatusFailed:
 			return dive.NewToolResultError(snapshot.Output).
 				WithDisplay(fmt.Sprintf("Task failed: %s", input.Description)), nil
+		case TaskStatusSuspended:
+			return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\nStatus: suspended\n\n%s", taskID, snapshot.Output)).
+				WithDisplay(fmt.Sprintf("Suspended: %s", input.Description)), nil
+		default:
+			return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, snapshot.Output)).
+				WithDisplay(fmt.Sprintf("Completed: %s", input.Description)), nil
 		}
-		return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, snapshot.Output)).
-			WithDisplay(fmt.Sprintf("Completed: %s", input.Description)), nil
 	case <-timeoutTimer.C:
 		// Cancel the sub-agent's context so it stops working
 		taskCancel()
@@ -556,11 +578,15 @@ func (t *TaskOutputTool) formatTaskStatus(record *TaskRecord) *dive.ToolResult {
 		snapshot.StartTime.Format(time.RFC3339),
 	)
 
-	if snapshot.Status == TaskStatusCompleted || snapshot.Status == TaskStatusFailed {
+	if snapshot.Status == TaskStatusCompleted || snapshot.Status == TaskStatusFailed || snapshot.Status == TaskStatusSuspended {
 		status += fmt.Sprintf("Ended: %s\nDuration: %s\n",
 			snapshot.EndTime.Format(time.RFC3339),
 			snapshot.EndTime.Sub(snapshot.StartTime).Round(time.Millisecond),
 		)
+	}
+
+	if snapshot.Suspended {
+		status += "Awaiting input: use the resume parameter to continue this task.\n"
 	}
 
 	if snapshot.Output != "" {

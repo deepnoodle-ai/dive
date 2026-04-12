@@ -697,3 +697,94 @@ func TestCrossProcessResume(t *testing.T) {
 	msgs, _ := sess.Messages(ctx)
 	assert.Equal(t, msgs[len(msgs)-1].Text(), "done")
 }
+
+func TestCancelSuspension(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("cancel-test")
+
+	// Suspend the session.
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState())
+	assert.NoError(t, err)
+	assert.True(t, sess.IsSuspended())
+	assert.Equal(t, sess.EventCount(), 1)
+
+	// Cancel the suspension.
+	err = sess.CancelSuspension(ctx)
+	assert.NoError(t, err)
+	assert.False(t, sess.IsSuspended())
+	assert.Nil(t, sess.LoadSuspension())
+	assert.Equal(t, sess.EventCount(), 0)
+
+	// Session is now ready for a fresh turn.
+	err = sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("fresh start")}, nil)
+	assert.NoError(t, err)
+	msgs, _ := sess.Messages(ctx)
+	assert.Equal(t, len(msgs), 1)
+	assert.Equal(t, msgs[0].Text(), "fresh start")
+}
+
+func TestCancelSuspensionNotSuspended(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("not-suspended")
+	err := sess.CancelSuspension(ctx)
+	assert.Error(t, err)
+	assert.Equal(t, err, session.ErrNotSuspended)
+}
+
+func TestCancelSuspensionWithFileStore(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+
+	sess, err := store.Open(ctx, "cancel-file")
+	assert.NoError(t, err)
+
+	// Add a normal turn first, then suspend.
+	err = sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("turn one")}, nil)
+	assert.NoError(t, err)
+	err = sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, singleSuspensionState())
+	assert.NoError(t, err)
+	assert.True(t, sess.IsSuspended())
+	assert.Equal(t, sess.EventCount(), 2)
+
+	err = sess.CancelSuspension(ctx)
+	assert.NoError(t, err)
+
+	// Re-open from disk and verify.
+	store2, _ := session.NewFileStore(dir)
+	sess2, _ := store2.Open(ctx, "cancel-file")
+	assert.False(t, sess2.IsSuspended())
+	assert.Equal(t, sess2.EventCount(), 1)
+	msgs, _ := sess2.Messages(ctx)
+	assert.Equal(t, len(msgs), 1)
+	assert.Equal(t, msgs[0].Text(), "turn one")
+}
+
+func TestSuspendReasonRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, _ := session.NewFileStore(dir)
+	sess, _ := store.Open(ctx, "reason")
+
+	state := &dive.SuspensionState{
+		PendingToolCalls: []*dive.PendingToolCall{
+			{
+				ID:     "toolu_a",
+				Name:   "auth_gate",
+				Input:  []byte(`{}`),
+				Reason: dive.SuspendReasonAuth,
+				Prompt: "Sign in to continue",
+			},
+		},
+	}
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, state)
+	assert.NoError(t, err)
+
+	// Re-open and verify reason survives persistence.
+	store2, _ := session.NewFileStore(dir)
+	sess2, _ := store2.Open(ctx, "reason")
+	loaded := sess2.LoadSuspension()
+	assert.NotNil(t, loaded)
+	assert.Equal(t, loaded.PendingToolCalls[0].Reason, dive.SuspendReasonAuth)
+}

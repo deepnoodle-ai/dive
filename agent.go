@@ -1114,6 +1114,7 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 			Name:     name,
 			Input:    input,
 			Prompt:   pc.Prompt,
+			Reason:   pc.Reason,
 			Metadata: pc.Metadata,
 		})
 	}
@@ -2156,6 +2157,7 @@ func toPendingToolCall(toolCall *llm.ToolUseContent, sr *SuspendResult) *Pending
 	}
 	if sr != nil {
 		p.Prompt = sr.Prompt
+		p.Reason = sr.Reason
 		p.Metadata = sr.Metadata
 	}
 	return p

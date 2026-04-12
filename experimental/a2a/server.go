@@ -426,6 +426,17 @@ func (s *Server) handleTasksCancel(w http.ResponseWriter, r *http.Request, req *
 		Timestamp: time.Now().UTC(),
 	}
 	rec.Suspension = nil
+
+	// If the session supports cancellation, clear its suspension state
+	// so the underlying session doesn't retain stale pending tool calls.
+	if rec.SessionID != "" && s.provider != nil {
+		if sess, sessErr := s.provider(r.Context(), rec.SessionID); sessErr == nil && sess != nil {
+			if suspendable, ok := sess.(dive.SuspendableSession); ok {
+				_ = suspendable.CancelSuspension(r.Context())
+			}
+		}
+	}
+
 	_ = s.store.Put(r.Context(), rec)
 	writeRPCResult(w, req.ID, rec.Task)
 }
@@ -458,12 +469,12 @@ func (s *Server) runTurn(ctx context.Context, params *SendMessageParams, cb dive
 		return nil, newRPCError(ErrorCodeInternalError, "session: "+err.Error(), nil)
 	}
 
-	inputText, err := inputPromptFromMessage(params.Message)
+	inputMsg, err := inputMessageFromParts(params.Message)
 	if err != nil {
 		return nil, newRPCError(ErrorCodeInvalidParams, err.Error(), nil)
 	}
 
-	opts := []dive.CreateResponseOption{dive.WithInput(inputText)}
+	opts := []dive.CreateResponseOption{dive.WithMessages(inputMsg)}
 	if sess != nil {
 		opts = append(opts, dive.WithSession(sess))
 	}
@@ -510,11 +521,6 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 			"task is already in terminal state: "+string(rec.Task.Status.State), nil)
 	}
 
-	inputText, err := inputPromptFromMessage(params.Message)
-	if err != nil {
-		return nil, newRPCError(ErrorCodeInvalidParams, err.Error(), nil)
-	}
-
 	sess, err := s.resolveSession(ctx, rec.SessionID)
 	if err != nil {
 		return nil, newRPCError(ErrorCodeInternalError, "session: "+err.Error(), nil)
@@ -544,7 +550,11 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 	} else {
 		// No suspension — treat the inbound message as a new turn on
 		// the same session.
-		opts = append(opts, dive.WithInput(inputText))
+		inputMsg, msgErr := inputMessageFromParts(params.Message)
+		if msgErr != nil {
+			return nil, newRPCError(ErrorCodeInvalidParams, msgErr.Error(), nil)
+		}
+		opts = append(opts, dive.WithMessages(inputMsg))
 	}
 
 	turnCtx, turnCancel := context.WithCancel(ctx)
@@ -769,8 +779,14 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 	// Status mapping.
 	switch resp.Status {
 	case dive.ResponseStatusSuspended:
+		state := TaskStateInputRequired
+		if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) > 0 {
+			if resp.Suspension.PendingToolCalls[0].Reason == dive.SuspendReasonAuth {
+				state = TaskStateAuthRequired
+			}
+		}
 		task.Status = TaskStatus{
-			State:     TaskStateInputRequired,
+			State:     state,
 			Timestamp: now,
 		}
 		if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) > 0 {
@@ -835,73 +851,72 @@ func artifactsFromResponse(resp *dive.Response) []*Artifact {
 	return artifacts
 }
 
-// inputPromptFromMessage flattens an A2A Message into a single prompt
-// string suitable for dive.WithInput. Text parts pass through verbatim.
-// DataParts are rendered as a JSON code block (labeled with the part's
-// "kind" when present in metadata) so the agent can reason over
-// structured inputs. FileParts are rendered as a short reference line
-// carrying name/MIME/URI when provided; inline base64 file bytes are
-// intentionally summarized rather than inlined to keep prompt budgets
-// predictable. The function returns an error only if the message is
-// empty or contains no renderable content.
-func inputPromptFromMessage(msg *Message) (string, error) {
+// inputMessageFromParts converts A2A message parts into an *llm.Message
+// with properly typed content. Text parts become TextContent, file parts
+// become ImageContent or DocumentContent based on MIME type, and data
+// parts are rendered as a JSON code block in TextContent (since LLMs
+// don't have a native structured-data content type).
+func inputMessageFromParts(msg *Message) (*llm.Message, error) {
 	if msg == nil || len(msg.Parts) == 0 {
-		return "", fmt.Errorf("a2a: message has no parts")
+		return nil, fmt.Errorf("a2a: message has no parts")
 	}
-	var b strings.Builder
-	appendSeparator := func() {
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-	}
+	out := &llm.Message{Role: llm.User}
 	for _, p := range msg.Parts {
 		switch p.Kind {
 		case PartKindText:
 			if p.Text == "" {
 				continue
 			}
-			appendSeparator()
-			b.WriteString(p.Text)
+			out.Content = append(out.Content, &llm.TextContent{Text: p.Text})
 		case PartKindData:
 			if len(p.Data) == 0 {
 				continue
 			}
 			encoded, err := json.Marshal(p.Data)
 			if err != nil {
-				return "", fmt.Errorf("a2a: marshal data part: %w", err)
+				return nil, fmt.Errorf("a2a: marshal data part: %w", err)
 			}
-			appendSeparator()
-			b.WriteString("```json\n")
-			b.Write(encoded)
-			b.WriteString("\n```")
+			out.Content = append(out.Content, &llm.TextContent{
+				Text: "```json\n" + string(encoded) + "\n```",
+			})
 		case PartKindFile:
 			if p.File == nil {
 				continue
 			}
-			appendSeparator()
-			b.WriteString("[file")
-			if p.File.Name != "" {
-				b.WriteString(" name=")
-				b.WriteString(p.File.Name)
+			if isImageMIME(p.File.MimeType) {
+				source := &llm.ContentSource{MediaType: p.File.MimeType}
+				if p.File.Bytes != "" {
+					source.Type = llm.ContentSourceTypeBase64
+					source.Data = p.File.Bytes
+				} else if p.File.URI != "" {
+					source.Type = llm.ContentSourceTypeURL
+					source.URL = p.File.URI
+				}
+				out.Content = append(out.Content, &llm.ImageContent{Source: source})
+			} else {
+				source := &llm.ContentSource{MediaType: p.File.MimeType}
+				if p.File.Bytes != "" {
+					source.Type = llm.ContentSourceTypeBase64
+					source.Data = p.File.Bytes
+				} else if p.File.URI != "" {
+					source.Type = llm.ContentSourceTypeURL
+					source.URL = p.File.URI
+				}
+				out.Content = append(out.Content, &llm.DocumentContent{
+					Source: source,
+					Title:  p.File.Name,
+				})
 			}
-			if p.File.MimeType != "" {
-				b.WriteString(" mime=")
-				b.WriteString(p.File.MimeType)
-			}
-			switch {
-			case p.File.URI != "":
-				b.WriteString(" uri=")
-				b.WriteString(p.File.URI)
-			case p.File.Bytes != "":
-				fmt.Fprintf(&b, " bytes=%d (base64)", len(p.File.Bytes))
-			}
-			b.WriteString("]")
 		}
 	}
-	if b.Len() == 0 {
-		return "", fmt.Errorf("a2a: message has no renderable content")
+	if len(out.Content) == 0 {
+		return nil, fmt.Errorf("a2a: message has no renderable content")
 	}
-	return b.String(), nil
+	return out, nil
+}
+
+func isImageMIME(mime string) bool {
+	return strings.HasPrefix(mime, "image/")
 }
 
 func mergeMetadata(dst, src map[string]any) map[string]any {

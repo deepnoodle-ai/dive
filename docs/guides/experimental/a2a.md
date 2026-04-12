@@ -135,9 +135,10 @@ Low-level callers who need full control can bypass `RemoteAgent` and use
 `Client.SendMessage`, `Client.GetTask`, `Client.CancelTask`, and
 `Client.StreamMessage` directly.
 
-## Suspend → input-required mapping
+## Suspend → input-required / auth-required mapping
 
-A Dive tool can pause the agent mid-turn with `dive.NewSuspendResult`:
+A Dive tool can pause the agent mid-turn with `dive.NewSuspendResult` or
+`dive.NewSuspendResultWithReason`:
 
 ```go
 func approveTool() dive.Tool {
@@ -146,10 +147,24 @@ func approveTool() dive.Tool {
             return dive.NewSuspendResult("Approve the deployment?", nil), nil
         })
 }
+
+func authGateTool() dive.Tool {
+    return dive.FuncTool("auth_gate", "Require authentication.",
+        func(ctx context.Context, _ *struct{}) (*dive.ToolResult, error) {
+            return dive.NewSuspendResultWithReason("Sign in to continue",
+                dive.SuspendReasonAuth, map[string]any{"auth_url": url}), nil
+        })
+}
 ```
 
-The A2A adapter projects that onto a task in `input-required` state. The
-suspended tool's `Prompt` becomes `task.Status.Message`, and its
+The A2A adapter maps the suspend reason to the correct A2A task state:
+
+| `SuspendReason` | A2A state |
+|---|---|
+| `""` or `SuspendReasonInput` | `input-required` |
+| `SuspendReasonAuth` | `auth-required` |
+
+The suspended tool's `Prompt` becomes `task.Status.Message`, and its
 `Metadata` appears under `task.metadata.suspend`:
 
 ```json
@@ -207,17 +222,24 @@ single message. Two conventions are available:
 a plain text message and it will be used as the result for every pending
 call.
 
+### Cancellation and session cleanup
+
+`tasks/cancel` now also clears the underlying Dive session's suspension
+state when a `SessionProvider` is configured and the session implements
+`SuspendableSession`. This means a canceled A2A task won't leave stale
+pending tool calls in the session.
+
+For direct session-level cleanup (outside of A2A), use
+`session.CancelSuspension(ctx)` to abandon a suspended turn and return
+the session to a clean state.
+
 ### Current limits
 
-- All suspends become `input-required`. A future revision will add an
-  optional category so Dive tools can choose between `input-required` and
-  `auth-required`. This will land alongside the optional suspend
-  reason/category discussed in FR-19 of the PRD.
-- Non-text input parts (`DataPart`, `FilePart`) are flattened into the
-  agent prompt: data is rendered as a JSON code block, file parts as a
-  short `[file name=… mime=… uri=…]` reference. Inline base64 file bytes
-  are summarized rather than inlined. The agent sees the flattened text,
-  not a structured content vector.
+- Non-text input parts (`DataPart`) are rendered as JSON code blocks in
+  the agent's prompt. `FilePart` is projected to the appropriate typed
+  content: image MIME types become `ImageContent`, everything else becomes
+  `DocumentContent`. The agent sees typed multi-modal content, not
+  flattened text references.
 - `Client.SendMessage` always returns `*Task`. When a peer returns a
   bare `Message` (spec-allowed for direct replies), the client wraps it
   in a synthesized completed task whose single `"response"` artifact
@@ -293,8 +315,7 @@ both directions; see the Phase 1 limits section for caveats.
 
 ## Content projection
 
-The server faithfully projects all user-visible content types from Dive
-responses into A2A artifacts and history:
+### Outbound (Dive response → A2A artifacts)
 
 | Dive content type | A2A part |
 |---|---|
@@ -307,6 +328,19 @@ responses into A2A artifacts and history:
 Each assistant message with renderable content becomes its own artifact.
 Streaming emits all artifacts as `artifact-update` events before the
 final status event.
+
+### Inbound (A2A message → Dive user message)
+
+| A2A part | Dive content type |
+|---|---|
+| `text` part | `TextContent` |
+| `file` part (image/* MIME) | `ImageContent` |
+| `file` part (other MIME) | `DocumentContent` |
+| `data` part | `TextContent` (JSON code block) |
+
+Inbound parts are projected as typed `llm.Content` on the user message,
+preserving multi-modal fidelity for images and documents. Data parts are
+rendered as JSON since LLMs don't have a native structured-data input.
 
 ## Library philosophy
 

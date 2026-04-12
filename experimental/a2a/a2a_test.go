@@ -538,11 +538,13 @@ func TestServerUnsupportedMethodsReportCorrectCode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Server: DataPart and FilePart input flatten into the agent's prompt
+// Server: mixed content parts project into typed LLM content
 // ---------------------------------------------------------------------------
 
-func TestServerNonTextPartsFlattenToPrompt(t *testing.T) {
-	var captured string
+func TestServerMixedPartsProjectToTypedContent(t *testing.T) {
+	var textContent string
+	var hasDocument bool
+	var docURI string
 	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 		cfg := &llm.Config{}
 		cfg.Apply(opts...)
@@ -551,8 +553,14 @@ func TestServerNonTextPartsFlattenToPrompt(t *testing.T) {
 				continue
 			}
 			for _, c := range msg.Content {
-				if tc, ok := c.(*llm.TextContent); ok {
-					captured += tc.Text
+				switch v := c.(type) {
+				case *llm.TextContent:
+					textContent += v.Text
+				case *llm.DocumentContent:
+					hasDocument = true
+					if v.Source != nil {
+						docURI = v.Source.URL
+					}
 				}
 			}
 		}
@@ -582,11 +590,11 @@ func TestServerNonTextPartsFlattenToPrompt(t *testing.T) {
 	}, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, task.Status.State, a2a.TaskStateCompleted)
-	assert.True(t, strings.Contains(captured, "Summarize the attached order."))
-	assert.True(t, strings.Contains(captured, `"orderId":"ABC-123"`))
-	assert.True(t, strings.Contains(captured, `"total":4299`))
-	assert.True(t, strings.Contains(captured, "name=invoice.pdf"))
-	assert.True(t, strings.Contains(captured, "uri=https://example.com/invoice.pdf"))
+	assert.True(t, strings.Contains(textContent, "Summarize the attached order."))
+	assert.True(t, strings.Contains(textContent, `"orderId":"ABC-123"`))
+	assert.True(t, strings.Contains(textContent, `"total":4299`))
+	assert.True(t, hasDocument)
+	assert.Equal(t, docURI, "https://example.com/invoice.pdf")
 }
 
 // Messages that hold parts but carry no renderable content are rejected
@@ -1137,4 +1145,109 @@ func TestServerConcurrentSendAndGet(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// ---------------------------------------------------------------------------
+// SuspendReason: auth_required maps to A2A auth-required state
+// ---------------------------------------------------------------------------
+
+type authSuspendTool struct{}
+
+func (t *authSuspendTool) Name() string                        { return "auth_gate" }
+func (t *authSuspendTool) Description() string                 { return "Require auth" }
+func (t *authSuspendTool) Schema() *dive.Schema                { return nil }
+func (t *authSuspendTool) Annotations() *dive.ToolAnnotations  { return &dive.ToolAnnotations{Title: "AuthGate"} }
+func (t *authSuspendTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return dive.NewSuspendResultWithReason("Sign in to continue",
+		dive.SuspendReasonAuth, map[string]any{"auth_url": "https://example.com/oauth"}), nil
+}
+
+func TestServerAuthRequiredSuspendMapsToAuthState(t *testing.T) {
+	var callNum atomic.Int32
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		n := callNum.Add(1)
+		if n == 1 {
+			return toolCallResponse("auth_gate", "call_auth"), nil
+		}
+		return textResponse("authenticated"), nil
+	}}
+	agent := buildAgent(t, model, &authSuspendTool{})
+	server, err := a2a.NewServer(a2a.ServerOptions{Agent: agent})
+	assert.NoError(t, err)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client, err := a2a.NewClient(a2a.ClientOptions{Endpoint: ts.URL + "/"})
+	assert.NoError(t, err)
+
+	task, err := client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m1",
+		Role:      a2a.RoleUser,
+		Parts:     []a2a.Part{a2a.NewTextPart("access the resource")},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, task.Status.State, a2a.TaskStateAuthRequired)
+	assert.True(t, strings.Contains(task.Status.Message.TextContent(), "Sign in"))
+
+	// Resume with auth result.
+	resumed, err := client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m2",
+		Role:      a2a.RoleUser,
+		TaskID:    task.ID,
+		Parts:     []a2a.Part{a2a.NewTextPart("token_abc")},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, resumed.Status.State, a2a.TaskStateCompleted)
+}
+
+// ---------------------------------------------------------------------------
+// Image file parts project to ImageContent, not DocumentContent
+// ---------------------------------------------------------------------------
+
+func TestServerImagePartProjectsToImageContent(t *testing.T) {
+	var hasImage bool
+	var imageURI string
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		cfg := &llm.Config{}
+		cfg.Apply(opts...)
+		for _, msg := range cfg.Messages {
+			if msg.Role != llm.User {
+				continue
+			}
+			for _, c := range msg.Content {
+				if img, ok := c.(*llm.ImageContent); ok {
+					hasImage = true
+					if img.Source != nil {
+						imageURI = img.Source.URL
+					}
+				}
+			}
+		}
+		return textResponse("nice picture"), nil
+	}}
+	agent := buildAgent(t, model)
+	server, err := a2a.NewServer(a2a.ServerOptions{Agent: agent})
+	assert.NoError(t, err)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	client, err := a2a.NewClient(a2a.ClientOptions{Endpoint: ts.URL + "/"})
+	assert.NoError(t, err)
+
+	task, err := client.SendMessage(context.Background(), &a2a.Message{
+		MessageID: "m1",
+		Role:      a2a.RoleUser,
+		Parts: []a2a.Part{
+			a2a.NewTextPart("What's in this image?"),
+			{Kind: a2a.PartKindFile, File: &a2a.FileContent{
+				Name:     "photo.png",
+				MimeType: "image/png",
+				URI:      "https://example.com/photo.png",
+			}},
+		},
+	}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, task.Status.State, a2a.TaskStateCompleted)
+	assert.True(t, hasImage)
+	assert.Equal(t, imageURI, "https://example.com/photo.png")
 }

@@ -1746,6 +1746,9 @@ func (f *failingSuspendableSession) SaveSuspendedTurn(ctx context.Context, messa
 func (f *failingSuspendableSession) SaveResumedTurn(ctx context.Context, messages []*llm.Message, usage *llm.Usage) error {
 	return f.inner.SaveResumedTurn(ctx, messages, usage)
 }
+func (f *failingSuspendableSession) CancelSuspension(ctx context.Context) error {
+	return f.inner.CancelSuspension(ctx)
+}
 
 // Invariant 11: SaveSuspendedTurn failure is propagated from CreateResponse,
 // not swallowed. The caller must see the failure instead of a stale pending
