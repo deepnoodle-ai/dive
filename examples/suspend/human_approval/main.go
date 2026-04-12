@@ -1,10 +1,6 @@
-// human_approval shows the agent suspending mid-turn so a human can approve
-// a tool call from the terminal, then resuming with the user's answer.
-//
-// The deploy tool packs a dialogspec.Spec (kind=confirm, title, message)
-// into the SuspendResult's metadata. The caller rebuilds a dive.DialogInput
-// from it, prompts via dive.NewTerminalDialog(), and resumes the agent with
-// WithToolResults.
+// human_approval shows the simplest suspend/resume pattern: a tool suspends
+// mid-turn so a human can approve the action from the terminal, then the
+// agent resumes with the user's answer.
 //
 // Run: cd examples && go run ./suspend/human_approval
 package main
@@ -15,7 +11,6 @@ import (
 	"log"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/examples/suspend/dialogspec"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/session"
 )
@@ -25,58 +20,51 @@ type DeployInput struct {
 	Version     string `json:"version" description:"Version tag to deploy"`
 }
 
-func deployTool() dive.Tool {
-	return dive.FuncTool("deploy",
-		"Deploys the application to the given environment. Requires human approval.",
-		func(ctx context.Context, in *DeployInput) (*dive.ToolResult, error) {
-			return dialogspec.NewSuspend(dialogspec.Spec{
-				Kind:    dialogspec.KindConfirm,
-				Title:   "Deployment approval",
-				Message: fmt.Sprintf("About to deploy version %q to %q. Proceed?", in.Version, in.Environment),
-			}), nil
-		})
-}
-
 func main() {
 	ctx := context.Background()
-	dialog := dive.NewTerminalDialog()
+
+	deployTool := dive.FuncTool("deploy",
+		"Deploys the application to the given environment. Requires human approval.",
+		func(ctx context.Context, in *DeployInput) (*dive.ToolResult, error) {
+			prompt := fmt.Sprintf("Deploy %s to %s?", in.Version, in.Environment)
+			return dive.NewSuspendResult(prompt, nil), nil
+		})
 
 	agent, err := dive.NewAgent(dive.AgentOptions{
-		SystemPrompt: "You are a release manager. When asked to deploy, call the deploy tool exactly once.",
+		SystemPrompt: "You are a release manager. When asked to deploy, use the deploy tool.",
 		Model:        anthropic.New(),
-		Tools:        []dive.Tool{deployTool()},
+		Tools:        []dive.Tool{deployTool},
 		Session:      session.New("human-approval-demo"),
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	resp, err := agent.CreateResponse(ctx, dive.WithInput("Please deploy version v1.4.2 to production."))
+	resp, err := agent.CreateResponse(ctx, dive.WithInput("Deploy v1.4.2 to production."))
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	if resp.Status != dive.ResponseStatusSuspended {
 		fmt.Println("Agent finished without suspending:", resp.OutputText())
 		return
 	}
 
+	// Show each pending tool call's prompt and ask for confirmation.
+	dialog := dive.NewTerminalDialog()
 	results := map[string]*dive.ToolResult{}
 	for _, pending := range resp.Suspension.PendingToolCalls {
-		var args DeployInput
-		_ = pending.UnmarshalInput(&args)
-
-		spec := dialogspec.FromPending(pending)
-		out, err := dialog.Show(ctx, spec.ToDialogInput())
+		out, err := dialog.Show(ctx, &dive.DialogInput{
+			Title:   "Deployment approval",
+			Message: pending.Prompt,
+			Confirm: true,
+		})
 		if err != nil {
-			log.Fatalf("dialog error: %v", err)
+			log.Fatal(err)
 		}
 		if out.Confirmed {
-			results[pending.ID] = dive.NewToolResultText(
-				fmt.Sprintf("Deploy of %s to %s approved and completed.", args.Version, args.Environment))
+			results[pending.ID] = dive.NewToolResultText("Approved and deployed.")
 		} else {
-			results[pending.ID] = dive.NewToolResultError(
-				fmt.Sprintf("Deploy of %s to %s denied by operator.", args.Version, args.Environment))
+			results[pending.ID] = dive.NewToolResultError("Denied by operator.")
 		}
 	}
 
