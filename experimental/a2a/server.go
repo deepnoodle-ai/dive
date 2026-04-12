@@ -71,6 +71,11 @@ type Server struct {
 	// cardBytes is the pre-marshaled agent card response.
 	cardBytes []byte
 	cardMu    sync.RWMutex
+
+	// inflight tracks cancel functions for in-progress turns so that
+	// tasks/cancel can interrupt a running CreateResponse.
+	inflight   map[string]context.CancelFunc
+	inflightMu sync.Mutex
 }
 
 // NewServer constructs a Server from the given options. It returns an
@@ -135,6 +140,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		store:    opts.TaskStore,
 		provider: opts.SessionProvider,
 		logger:   opts.Logger,
+		inflight: make(map[string]context.CancelFunc),
 	}
 	if err := s.refreshCardBytes(); err != nil {
 		return nil, err
@@ -338,28 +344,25 @@ func (s *Server) handleMessageStream(w http.ResponseWriter, r *http.Request, req
 		return
 	}
 
-	// Patch contextID/taskID on the final status event so the client
-	// can correlate it with the task that was just created.
-	finalEvent := TaskStatusUpdateEvent{
+	// Emit all artifacts, then the final status event so the client
+	// can correlate everything with the task.
+	streamMu.Lock()
+	for i, art := range task.Artifacts {
+		writeSSEEvent(w, flusher, req.ID, TaskArtifactUpdateEvent{
+			Kind:      "artifact-update",
+			TaskID:    task.ID,
+			ContextID: task.ContextID,
+			Artifact:  art,
+			LastChunk: i == len(task.Artifacts)-1,
+		})
+	}
+	writeSSEEvent(w, flusher, req.ID, TaskStatusUpdateEvent{
 		Kind:      "status-update",
 		TaskID:    task.ID,
 		ContextID: task.ContextID,
 		Status:    task.Status,
 		Final:     true,
-	}
-	if len(task.Artifacts) > 0 {
-		streamMu.Lock()
-		writeSSEEvent(w, flusher, req.ID, TaskArtifactUpdateEvent{
-			Kind:      "artifact-update",
-			TaskID:    task.ID,
-			ContextID: task.ContextID,
-			Artifact:  task.Artifacts[0],
-			LastChunk: true,
-		})
-		streamMu.Unlock()
-	}
-	streamMu.Lock()
-	writeSSEEvent(w, flusher, req.ID, finalEvent)
+	})
 	streamMu.Unlock()
 }
 
@@ -417,6 +420,7 @@ func (s *Server) handleTasksCancel(w http.ResponseWriter, r *http.Request, req *
 			"task is already in terminal state: "+string(rec.Task.Status.State), nil))
 		return
 	}
+	s.cancelInflight(params.ID)
 	rec.Task.Status = TaskStatus{
 		State:     TaskStateCanceled,
 		Timestamp: time.Now().UTC(),
@@ -467,7 +471,12 @@ func (s *Server) runTurn(ctx context.Context, params *SendMessageParams, cb dive
 		opts = append(opts, dive.WithEventCallback(cb))
 	}
 
-	resp, runErr := s.agent.CreateResponse(ctx, opts...)
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	defer turnCancel()
+	s.trackInflight(newTaskID, turnCancel)
+	defer s.untrackInflight(newTaskID)
+
+	resp, runErr := s.agent.CreateResponse(turnCtx, opts...)
 	if runErr != nil {
 		return nil, rpcErrorFromTurn(runErr)
 	}
@@ -527,7 +536,7 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 
 	if rec.Suspension != nil && len(rec.Suspension.PendingToolCalls) > 0 {
 		// Resume path. Map the inbound message to tool results.
-		results, rpcErr := resumeToolResults(rec.Suspension, inputText)
+		results, rpcErr := resumeToolResults(rec.Suspension, params.Message)
 		if rpcErr != nil {
 			return nil, rpcErr
 		}
@@ -538,7 +547,12 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 		opts = append(opts, dive.WithInput(inputText))
 	}
 
-	resp, runErr := s.agent.CreateResponse(ctx, opts...)
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	defer turnCancel()
+	s.trackInflight(taskID, turnCancel)
+	defer s.untrackInflight(taskID)
+
+	resp, runErr := s.agent.CreateResponse(turnCtx, opts...)
 	if runErr != nil {
 		return nil, rpcErrorFromTurn(runErr)
 	}
@@ -555,23 +569,96 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 }
 
 // resumeToolResults translates an inbound user message into ToolResults
-// for the pending tool calls on a suspended Dive turn. The prototype
-// supports the common case of a single pending call: the full message
-// text becomes that call's text result. Multi-pending is rejected with
-// a clear error; a future revision can accept a structured payload.
-func resumeToolResults(state *dive.SuspensionState, inputText string) (map[string]*dive.ToolResult, *RPCError) {
+// for the pending tool calls on a suspended Dive turn.
+//
+// For a single pending call, the message text is used as the result.
+//
+// For multiple pending calls, the function checks for a DataPart with a
+// "toolResults" key mapping call IDs to result strings:
+//
+//	{ "kind": "data", "data": { "toolResults": { "call_1": "yes", "call_2": "no" } } }
+//
+// If no structured mapping is found and there are multiple pending calls,
+// the message text is broadcast as the result for every pending call.
+func resumeToolResults(state *dive.SuspensionState, msg *Message) (map[string]*dive.ToolResult, *RPCError) {
 	if len(state.PendingToolCalls) == 0 {
 		return nil, nil
 	}
-	if len(state.PendingToolCalls) > 1 {
-		return nil, newRPCError(ErrorCodeInvalidRequest,
-			"a2a adapter cannot resume a turn with multiple pending tool calls yet", nil)
+
+	// Check for a structured toolResults DataPart.
+	if mapped := extractToolResultsMap(msg); mapped != nil {
+		results := make(map[string]*dive.ToolResult, len(state.PendingToolCalls))
+		for _, call := range state.PendingToolCalls {
+			text, ok := mapped[call.ID]
+			if !ok {
+				return nil, newRPCError(ErrorCodeInvalidParams,
+					fmt.Sprintf("toolResults map missing pending call ID %q", call.ID), nil)
+			}
+			results[call.ID] = dive.NewToolResultText(text)
+		}
+		return results, nil
 	}
-	call := state.PendingToolCalls[0]
-	results := map[string]*dive.ToolResult{
-		call.ID: dive.NewToolResultText(inputText),
+
+	// Fall back to text: use for single call, broadcast for multiple.
+	text := msg.TextContent()
+	results := make(map[string]*dive.ToolResult, len(state.PendingToolCalls))
+	for _, call := range state.PendingToolCalls {
+		results[call.ID] = dive.NewToolResultText(text)
 	}
 	return results, nil
+}
+
+// extractToolResultsMap looks for a DataPart with a "toolResults" key
+// whose value is a map[string]string. Returns nil if not found.
+func extractToolResultsMap(msg *Message) map[string]string {
+	if msg == nil {
+		return nil
+	}
+	for _, p := range msg.Parts {
+		if p.Kind != PartKindData || p.Data == nil {
+			continue
+		}
+		raw, ok := p.Data["toolResults"]
+		if !ok {
+			continue
+		}
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		out := make(map[string]string, len(m))
+		for k, v := range m {
+			s, ok := v.(string)
+			if !ok {
+				return nil
+			}
+			out[k] = s
+		}
+		return out
+	}
+	return nil
+}
+
+func (s *Server) trackInflight(taskID string, cancel context.CancelFunc) {
+	s.inflightMu.Lock()
+	s.inflight[taskID] = cancel
+	s.inflightMu.Unlock()
+}
+
+func (s *Server) untrackInflight(taskID string) {
+	s.inflightMu.Lock()
+	delete(s.inflight, taskID)
+	s.inflightMu.Unlock()
+}
+
+func (s *Server) cancelInflight(taskID string) bool {
+	s.inflightMu.Lock()
+	cancel, ok := s.inflight[taskID]
+	s.inflightMu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
 }
 
 // resolveSession calls the configured SessionProvider, falling back to
@@ -588,6 +675,8 @@ func (s *Server) resolveSession(ctx context.Context, contextID string) (dive.Ses
 // else becomes InternalError.
 func rpcErrorFromTurn(err error) *RPCError {
 	switch {
+	case errors.Is(err, context.Canceled):
+		return newRPCError(ErrorCodeTaskNotCancelable, "task was canceled", nil)
 	case errors.Is(err, dive.ErrNoSuspendedTurn):
 		return newRPCError(ErrorCodeInvalidRequest, "no suspended turn to resume", nil)
 	case errors.Is(err, dive.ErrUnknownPendingToolCall):
@@ -603,6 +692,49 @@ func rpcErrorFromTurn(err error) *RPCError {
 // Response → Task mapping
 // ---------------------------------------------------------------------------
 
+// contentToParts maps Dive LLM content to A2A parts. Internal content
+// types (tool use, tool result, thinking) are skipped — only user-visible
+// content is projected.
+func contentToParts(content []llm.Content) []Part {
+	var parts []Part
+	for _, c := range content {
+		switch v := c.(type) {
+		case *llm.TextContent:
+			if v.Text != "" {
+				parts = append(parts, NewTextPart(v.Text))
+			}
+		case *llm.ImageContent:
+			if v.Source != nil {
+				parts = append(parts, Part{
+					Kind: PartKindFile,
+					File: &FileContent{
+						MimeType: v.Source.MediaType,
+						Bytes:    v.Source.Data,
+						URI:      v.Source.URL,
+					},
+				})
+			}
+		case *llm.DocumentContent:
+			if v.Source != nil {
+				parts = append(parts, Part{
+					Kind: PartKindFile,
+					File: &FileContent{
+						Name:     v.Title,
+						MimeType: v.Source.MediaType,
+						Bytes:    v.Source.Data,
+						URI:      v.Source.URL,
+					},
+				})
+			}
+		case *llm.RefusalContent:
+			if v.Text != "" {
+				parts = append(parts, NewTextPart(v.Text))
+			}
+		}
+	}
+	return parts
+}
+
 // buildTaskFromResponse projects a completed (or suspended) Dive Response
 // onto the A2A Task shape. It is the core of the server's translation
 // layer.
@@ -617,15 +749,12 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 		task.History = append(task.History, userMsg)
 	}
 
-	// Append each assistant message (text content only for the
-	// prototype) to task history so the remote caller can render the
-	// conversation if they care.
 	for _, out := range resp.OutputMessages {
 		if out.Role != llm.Assistant {
 			continue
 		}
-		text := out.LastText()
-		if text == "" {
+		parts := contentToParts(out.Content)
+		if len(parts) == 0 {
 			continue
 		}
 		task.History = append(task.History, &Message{
@@ -633,7 +762,7 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 			Role:      RoleAgent,
 			TaskID:    taskID,
 			ContextID: contextID,
-			Parts:     []Part{NewTextPart(text)},
+			Parts:     parts,
 		})
 	}
 
@@ -667,15 +796,7 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 			State:     TaskStateCompleted,
 			Timestamp: now,
 		}
-		finalText := resp.OutputText()
-		if finalText != "" {
-			task.Artifacts = []*Artifact{{
-				ArtifactID: uuid.NewString(),
-				Name:       "response",
-				Parts:      []Part{NewTextPart(finalText)},
-				LastChunk:  true,
-			}}
-		}
+		task.Artifacts = artifactsFromResponse(resp)
 	default:
 		task.Status = TaskStatus{
 			State:     TaskStateFailed,
@@ -688,6 +809,30 @@ func buildTaskFromResponse(taskID, contextID string, userMsg *Message, resp *div
 		}
 	}
 	return task
+}
+
+// artifactsFromResponse builds A2A artifacts from the assistant messages
+// in a Dive response. Each assistant message with renderable content
+// becomes one artifact, preserving all content types.
+func artifactsFromResponse(resp *dive.Response) []*Artifact {
+	var artifacts []*Artifact
+	for i, out := range resp.OutputMessages {
+		if out.Role != llm.Assistant {
+			continue
+		}
+		parts := contentToParts(out.Content)
+		if len(parts) == 0 {
+			continue
+		}
+		artifacts = append(artifacts, &Artifact{
+			ArtifactID: uuid.NewString(),
+			Name:       "response",
+			Parts:      parts,
+			Index:      i,
+			LastChunk:  true,
+		})
+	}
+	return artifacts
 }
 
 // inputPromptFromMessage flattens an A2A Message into a single prompt

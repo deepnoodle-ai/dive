@@ -25,6 +25,10 @@ type TaskStore interface {
 
 	// Delete removes a task record.
 	Delete(ctx context.Context, id string) error
+
+	// List returns all stored task records. Callers can filter by state,
+	// timestamp, or any other criteria to implement expiration policies.
+	List(ctx context.Context) ([]*TaskRecord, error)
 }
 
 // TaskRecord is everything the adapter tracks about one A2A task. The
@@ -74,4 +78,15 @@ func (s *MemoryTaskStore) Delete(ctx context.Context, id string) error {
 	defer s.mu.Unlock()
 	delete(s.records, id)
 	return nil
+}
+
+// List implements TaskStore.
+func (s *MemoryTaskStore) List(ctx context.Context) ([]*TaskRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recs := make([]*TaskRecord, 0, len(s.records))
+	for _, rec := range s.records {
+		recs = append(recs, rec)
+	}
+	return recs, nil
 }

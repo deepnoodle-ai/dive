@@ -11,22 +11,34 @@
 //
 // # Scope
 //
-// The first shipping phase of A2A support is deliberately small:
-//
 //   - agent card discovery via /.well-known/agent-card.json (canonical)
 //     and /.well-known/agent.json (legacy alias)
 //   - message/send and tasks/get JSON-RPC methods
-//   - tasks/cancel for in-flight task cancellation
+//   - tasks/cancel with cancellation propagation to in-flight LLM calls
 //   - message/stream for Server-Sent Events streaming of task progress
 //   - mapping Dive's ResponseStatusSuspended to A2A input-required state
+//   - multi-pending-tool-call resume via structured DataPart or text broadcast
+//   - faithful content projection: text, image, document, and refusal
+//     content types are mapped to A2A parts in artifacts and history
 //   - flattening non-text input parts (DataPart, FilePart) into the
 //     agent prompt so structured A2A messages round-trip usefully
+//   - TaskStore.List for user-implemented expiration and cleanup
 //
 // tasks/resubscribe, the tasks/pushNotificationConfig/* family, and
 // agent/getAuthenticatedExtendedCard are recognized by the dispatcher
 // but respond with -32004 UnsupportedOperation (rather than -32601
 // MethodNotFound) so peers get a meaningful signal when probing for
 // them.
+//
+// # Library philosophy
+//
+// This package handles protocol fidelity and Dive runtime integration.
+// Deployment concerns — authentication, rate limiting, timeouts, graceful
+// shutdown, durable storage, and observability — belong in your HTTP server
+// and middleware. The package provides the right seams: Server.Handler
+// returns an http.Handler you can wrap, TaskStore and SessionProvider are
+// pluggable interfaces, and in-flight turn contexts propagate cancellation
+// from your server's shutdown path.
 //
 // See docs/prds/prd-05-a2a-support.md for the full motivation, goals, and
 // out-of-scope items. See docs/guides/experimental/a2a.md for usage.

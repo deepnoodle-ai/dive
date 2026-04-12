@@ -173,27 +173,51 @@ same `taskId`. The next message text is plumbed through Dive's
 `WithResume`/`WithToolResults` API as the suspended tool's result, so the
 agent continues exactly where it paused.
 
-### Phase 1 limits
+### Cancellation
 
-- The mapping supports exactly one pending tool call per suspended turn.
-  If your tool design suspends multiple calls simultaneously the adapter
-  will reject the resume until we add a structured-input convention.
+`tasks/cancel` does two things: marks the stored task record as canceled
+**and** cancels the Go context for any in-flight `CreateResponse` on that
+task. This means a cancel request will interrupt a running LLM call,
+stopping token generation and freeing resources. If no turn is in
+flight (e.g. the task is already in `input-required`), only the store
+record is updated.
+
+### Multi-pending-tool-call resume
+
+When a Dive agent uses parallel tool execution and multiple tools
+suspend simultaneously, the adapter supports resuming all of them in a
+single message. Two conventions are available:
+
+**Structured DataPart** (preferred for distinct per-call answers):
+
+```json
+{
+  "parts": [
+    { "kind": "data", "data": {
+        "toolResults": {
+          "call_1": "approved",
+          "call_2": "denied"
+        }
+    }}
+  ]
+}
+```
+
+**Text broadcast** (when one answer applies to all pending calls): send
+a plain text message and it will be used as the result for every pending
+call.
+
+### Current limits
+
 - All suspends become `input-required`. A future revision will add an
   optional category so Dive tools can choose between `input-required` and
   `auth-required`. This will land alongside the optional suspend
   reason/category discussed in FR-19 of the PRD.
-- Task cancellation only marks the stored record as canceled; it does not
-  interrupt a Dive turn that is already executing. Cancel before sending
-  new input on an `input-required` task for guaranteed cleanup.
 - Non-text input parts (`DataPart`, `FilePart`) are flattened into the
   agent prompt: data is rendered as a JSON code block, file parts as a
   short `[file name=… mime=… uri=…]` reference. Inline base64 file bytes
   are summarized rather than inlined. The agent sees the flattened text,
   not a structured content vector.
-- The server still only *emits* text content on the response side.
-  Artifacts and task history are built from the assistant's text output;
-  tool-result structured content does not round-trip into `FilePart` or
-  `DataPart` in the task record.
 - `Client.SendMessage` always returns `*Task`. When a peer returns a
   bare `Message` (spec-allowed for direct replies), the client wraps it
   in a synthesized completed task whose single `"response"` artifact
@@ -226,6 +250,7 @@ type TaskStore interface {
     Put(ctx context.Context, rec *TaskRecord) error
     Get(ctx context.Context, id string) (*TaskRecord, bool, error)
     Delete(ctx context.Context, id string) error
+    List(ctx context.Context) ([]*TaskRecord, error)
 }
 ```
 
@@ -233,6 +258,18 @@ A `TaskRecord` carries both the A2A `Task` (wire state) and the Dive
 `*SuspensionState` needed to resume. Keeping them together means a resume
 can happen on a different process from the original `message/send` as
 long as the store is shared.
+
+`List` exists so callers can implement expiration and cleanup policies.
+For example, a periodic goroutine that deletes tasks older than 24 hours:
+
+```go
+recs, _ := store.List(ctx)
+for _, rec := range recs {
+    if time.Since(rec.Task.Status.Timestamp) > 24*time.Hour {
+        store.Delete(ctx, rec.Task.ID)
+    }
+}
+```
 
 ## Wire format
 
@@ -253,6 +290,63 @@ The package targets the current A2A JSON-RPC protocol binding:
 
 Phase 1 has been validated against the official `a2a-sdk` (Python) in
 both directions; see the Phase 1 limits section for caveats.
+
+## Content projection
+
+The server faithfully projects all user-visible content types from Dive
+responses into A2A artifacts and history:
+
+| Dive content type | A2A part |
+|---|---|
+| `TextContent` | `text` part |
+| `ImageContent` | `file` part (with URI or base64, MIME type) |
+| `DocumentContent` | `file` part (with title as name, MIME type) |
+| `RefusalContent` | `text` part |
+| Tool-internal types (ToolUse, ToolResult, Thinking) | skipped |
+
+Each assistant message with renderable content becomes its own artifact.
+Streaming emits all artifacts as `artifact-update` events before the
+final status event.
+
+## Library philosophy
+
+This package provides the hard parts of A2A that are tightly coupled to
+the protocol and to Dive's runtime — and stays out of concerns that
+belong in your HTTP infrastructure.
+
+**The library provides:**
+
+- Protocol-correct JSON-RPC dispatch and SSE streaming
+- Faithful projection of Dive responses onto A2A task state
+- Suspend/resume mapping including multi-pending-tool-call resume
+- Cancellation propagation to in-flight LLM calls
+- `TaskStore` and `SessionProvider` interfaces for pluggable persistence
+- `TaskStore.List` so you can implement your own expiration
+- Agent card generation and well-known path serving
+- Client with card fetching, fallback, and stream parsing
+
+**Your code provides:**
+
+- **Authentication and authorization**: wrap `server.Handler()` in your
+  auth middleware, or use a reverse proxy. The client's
+  `ClientOptions.Headers` carries bearer tokens. The library does not
+  interpret `AgentCard.SecuritySchemes`.
+- **Rate limiting and request size limits**: configure on your
+  `http.Server` or middleware layer.
+- **Timeouts**: set `ReadTimeout`/`WriteTimeout` on your `http.Server`.
+  The agent's own `ResponseTimeout` caps turn duration.
+- **Graceful shutdown**: call your `http.Server.Shutdown(ctx)` — the
+  in-flight turn contexts will be canceled via the standard Go mechanism.
+- **Durable TaskStore**: implement the four-method interface backed by
+  your database. `MemoryTaskStore` is for prototyping.
+- **Task expiration**: use `TaskStore.List` to find and delete stale
+  records on your own schedule.
+- **Observability**: instrument your middleware with metrics and tracing.
+  The library accepts an `llm.Logger` for structured debug logging.
+
+The goal is that `experimental/a2a` handles protocol fidelity and runtime
+integration so you can focus on deployment concerns specific to your
+environment.
 
 ## Boundaries
 
