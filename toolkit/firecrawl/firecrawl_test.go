@@ -87,10 +87,28 @@ func TestClient_Fetch_ErrorHandling(t *testing.T) {
 		errCode    int
 	}{
 		{
+			name:       "bad request",
+			statusCode: 400,
+			wantErr:    true,
+			errCode:    400,
+		},
+		{
+			name:       "unauthorized",
+			statusCode: 401,
+			wantErr:    true,
+			errCode:    401,
+		},
+		{
 			name:       "payment required",
 			statusCode: 402,
 			wantErr:    true,
 			errCode:    402,
+		},
+		{
+			name:       "not found",
+			statusCode: 404,
+			wantErr:    true,
+			errCode:    404,
 		},
 		{
 			name:       "rate limit exceeded",
@@ -103,6 +121,12 @@ func TestClient_Fetch_ErrorHandling(t *testing.T) {
 			statusCode: 500,
 			wantErr:    true,
 			errCode:    500,
+		},
+		{
+			name:       "gateway unavailable",
+			statusCode: 503,
+			wantErr:    true,
+			errCode:    503,
 		},
 	}
 
@@ -179,6 +203,64 @@ func TestClient_Fetch_DefaultFormats(t *testing.T) {
 	output, err := client.Fetch(context.Background(), req)
 	assert.NoError(t, err)
 	assert.Equal(t, "# Default Format Test", output.Markdown)
+}
+
+func TestClient_Fetch_V2DefaultsAreNotForced(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody scrapeRequestBody
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
+		assert.NoError(t, err)
+
+		assert.Nil(t, reqBody.OnlyMainContent)
+		assert.Nil(t, reqBody.RemoveBase64Images)
+		assert.Nil(t, reqBody.BlockAds)
+		assert.Nil(t, reqBody.Proxy)
+		assert.Nil(t, reqBody.StoreInCache)
+
+		response := scrapeResponse{
+			Success: true,
+			Data: &document{
+				Markdown: "# Defaults",
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := New(WithAPIKey("test"), WithBaseURL(server.URL))
+	assert.NoError(t, err)
+
+	_, err = client.Fetch(context.Background(), &fetch.Request{URL: "https://example.com"})
+	assert.NoError(t, err)
+}
+
+func TestClient_Fetch_OnlyMainContentFalseIsOmitted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody scrapeRequestBody
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
+		assert.NoError(t, err)
+		assert.Nil(t, reqBody.OnlyMainContent)
+
+		response := scrapeResponse{
+			Success: true,
+			Data: &document{
+				Markdown: "# Main content",
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client, err := New(WithAPIKey("test"), WithBaseURL(server.URL))
+	assert.NoError(t, err)
+
+	_, err = client.Fetch(context.Background(), &fetch.Request{
+		URL:             "https://example.com",
+		OnlyMainContent: false,
+	})
+	assert.NoError(t, err)
 }
 
 func TestClient_Fetch_RawHTMLFormatRenamed(t *testing.T) {
