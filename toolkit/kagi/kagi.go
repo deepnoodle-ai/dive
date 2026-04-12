@@ -13,40 +13,44 @@ import (
 	"github.com/deepnoodle-ai/wonton/web"
 )
 
-var kagiBaseURL = "https://kagi.com/api/v0/search"
+const defaultBaseURL = "https://kagi.com/api/v0/search"
 
-func SetKagiBaseURL(url string) {
-	kagiBaseURL = url
-}
+// ClientOption is a function that modifies the client configuration.
+type ClientOption func(*Client)
 
-type KagiClientOption func(*KagiClient)
-
-func WithKagiAPIKey(apiKey string) KagiClientOption {
-	return func(c *KagiClient) {
+// WithAPIKey sets the API key for the client.
+func WithAPIKey(apiKey string) ClientOption {
+	return func(c *Client) {
 		c.apiKey = apiKey
 	}
 }
 
-func WithKagiBaseURL(url string) KagiClientOption {
-	return func(c *KagiClient) {
-		kagiBaseURL = url
+// WithBaseURL sets the base URL for the client.
+func WithBaseURL(url string) ClientOption {
+	return func(c *Client) {
+		c.baseURL = url
 	}
 }
 
-func WithKagiHTTPClient(httpClient *http.Client) KagiClientOption {
-	return func(c *KagiClient) {
+// WithHTTPClient sets the HTTP client for the client.
+func WithHTTPClient(httpClient *http.Client) ClientOption {
+	return func(c *Client) {
 		c.httpClient = httpClient
 	}
 }
 
-type KagiClient struct {
+// Client is a Kagi search API client.
+type Client struct {
 	apiKey     string
+	baseURL    string
 	httpClient *http.Client
 }
 
-func New(opts ...KagiClientOption) (*KagiClient, error) {
-	c := &KagiClient{
-		apiKey: os.Getenv("KAGI_API_KEY"),
+// New creates a new Kagi search client.
+func New(opts ...ClientOption) (*Client, error) {
+	c := &Client{
+		apiKey:  os.Getenv("KAGI_API_KEY"),
+		baseURL: defaultBaseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -60,7 +64,7 @@ func New(opts ...KagiClientOption) (*KagiClient, error) {
 	return c, nil
 }
 
-func (s *KagiClient) Search(ctx context.Context, q *web.SearchInput) (*web.SearchOutput, error) {
+func (s *Client) Search(ctx context.Context, q *web.SearchInput) (*web.SearchOutput, error) {
 	if q.Limit < 0 {
 		return nil, fmt.Errorf("invalid limit: %d", q.Limit)
 	}
@@ -71,7 +75,7 @@ func (s *KagiClient) Search(ctx context.Context, q *web.SearchInput) (*web.Searc
 		params.Set("limit", fmt.Sprintf("%d", q.Limit))
 	}
 
-	rawURL := kagiBaseURL + "?" + params.Encode()
+	rawURL := s.baseURL + "?" + params.Encode()
 	results, err := s.fetchResultsWithRetries(ctx, rawURL, 3)
 	if err != nil {
 		return nil, err
@@ -94,27 +98,31 @@ func (s *KagiClient) Search(ctx context.Context, q *web.SearchInput) (*web.Searc
 	return &web.SearchOutput{Items: items}, nil
 }
 
-func (s *KagiClient) getThumbnailURL(item *kagiSearchResultItem) string {
+func (s *Client) getThumbnailURL(item *searchResultItem) string {
 	if item.Thumbnail != nil && item.Thumbnail.URL != "" {
 		return item.Thumbnail.URL
 	}
 	return ""
 }
 
-func (s *KagiClient) fetchResultsWithRetries(ctx context.Context, url string, retries int) (*kagiResults, error) {
+func (s *Client) fetchResultsWithRetries(ctx context.Context, url string, retries int) (*searchResults, error) {
 	var err error
 	for range retries {
-		var results *kagiResults
+		var results *searchResults
 		results, err = s.fetchResults(ctx, url)
 		if err == nil {
 			return results, nil
 		}
-		time.Sleep(time.Second * 2)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second * 2):
+		}
 	}
 	return nil, fmt.Errorf("failed to fetch %q after %d retries: %w", url, retries, err)
 }
 
-func (s *KagiClient) fetchResults(ctx context.Context, url string) (*kagiResults, error) {
+func (s *Client) fetchResults(ctx context.Context, url string) (*searchResults, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -137,7 +145,7 @@ func (s *KagiClient) fetchResults(ctx context.Context, url string) (*kagiResults
 		return nil, err
 	}
 
-	var result kagiResults
+	var result searchResults
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		return nil, err
@@ -150,14 +158,14 @@ func (s *KagiClient) fetchResults(ctx context.Context, url string) (*kagiResults
 	return &result, nil
 }
 
-type kagiResults struct {
+type searchResults struct {
 	Meta struct {
 		ID         string  `json:"id"`
 		Node       string  `json:"node"`
 		MS         int     `json:"ms"`
 		APIBalance float64 `json:"api_balance"`
 	} `json:"meta"`
-	Data  []*kagiSearchResultItem `json:"data"`
+	Data  []*searchResultItem `json:"data"`
 	Error []struct {
 		Code    int    `json:"code"`
 		Message string `json:"msg"`
@@ -165,7 +173,7 @@ type kagiResults struct {
 	} `json:"error"`
 }
 
-type kagiSearchResultItem struct {
+type searchResultItem struct {
 	Type      int    `json:"t"`
 	URL       string `json:"url"`
 	Title     string `json:"title"`

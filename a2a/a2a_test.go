@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/experimental/a2a"
+	"github.com/deepnoodle-ai/dive/a2a"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )

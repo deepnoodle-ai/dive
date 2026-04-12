@@ -72,6 +72,9 @@ type Server struct {
 	cardBytes []byte
 	cardMu    sync.RWMutex
 
+	// handler is the cached http.Handler returned by Handler().
+	handler http.Handler
+
 	// inflight tracks cancel functions for in-progress turns so that
 	// tasks/cancel can interrupt a running CreateResponse.
 	inflight   map[string]context.CancelFunc
@@ -144,6 +147,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if err := s.refreshCardBytes(); err != nil {
 		return nil, err
 	}
+	s.handler = s.buildHandler()
 	return s, nil
 }
 
@@ -168,8 +172,12 @@ func (s *Server) Card() AgentCard {
 // (the server picks out the specific paths it handles internally). The
 // card is served at both the canonical /.well-known/agent-card.json path
 // and the legacy /.well-known/agent.json path so older clients keep
-// working.
+// working. The handler is built once during NewServer and cached.
 func (s *Server) Handler() http.Handler {
+	return s.handler
+}
+
+func (s *Server) buildHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(DefaultAgentCardPath, s.handleCard)
 	if LegacyAgentCardPath != DefaultAgentCardPath {
@@ -179,9 +187,9 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// ServeHTTP implements http.Handler by delegating to Handler().
+// ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.Handler().ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *Server) handleCard(w http.ResponseWriter, r *http.Request) {

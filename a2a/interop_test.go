@@ -7,7 +7,7 @@
 //
 // Run with:
 //
-//	go test -tags interop ./experimental/a2a/...
+//	go test -tags interop ./a2a/...
 //
 // Environment:
 //
@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deepnoodle-ai/dive/experimental/a2a"
+	"github.com/deepnoodle-ai/dive/a2a"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )

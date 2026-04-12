@@ -1,12 +1,11 @@
 # A2A (Agent-to-Agent) Support
 
-> **Experimental**: This package is in `experimental/a2a/`. The API will
-> change. See [PRD-05](../../prds/prd-05-a2a-support.md) for the motivation
+> See [PRD-05](../../prds/prd-05-a2a-support.md) for the motivation
 > and roadmap.
 
 The A2A protocol is a standards-based way for agents to discover each
 other, exchange messages, and drive long-running tasks across process and
-network boundaries. Dive's `experimental/a2a` package lets a Dive agent
+network boundaries. Dive's `a2a` package lets a Dive agent
 play either end of that protocol:
 
 - **Server**: wrap a `*dive.Agent` so it is reachable as a remote A2A agent.
@@ -19,7 +18,7 @@ maps to A2A's `input-required` state, and calls out the phase-1 limits.
 ## Package layout
 
 ```
-experimental/a2a/
+a2a/
   doc.go              — package overview
   types.go            — wire types (AgentCard, Task, Message, Part, …)
   rpc.go              — JSON-RPC envelope + error codes + method names
@@ -41,7 +40,7 @@ import (
     "net/http"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/experimental/a2a"
+    "github.com/deepnoodle-ai/dive/a2a"
     "github.com/deepnoodle-ai/dive/providers/anthropic"
     "github.com/deepnoodle-ai/dive/session"
 )
@@ -258,7 +257,7 @@ the session to a clean state.
   sends/receives messages, and parses streamed events from a stock
   Python `A2AStarletteApplication`. See `interop_test.go` for the
   automated cross-validation (build-tag gated: `go test -tags interop
-  ./experimental/a2a/...`).
+  ./a2a/...`).
 
 ## Task storage
 
@@ -378,13 +377,13 @@ belong in your HTTP infrastructure.
 - **Observability**: instrument your middleware with metrics and tracing.
   The library accepts an `llm.Logger` for structured debug logging.
 
-The goal is that `experimental/a2a` handles protocol fidelity and runtime
+The goal is that `a2a` handles protocol fidelity and runtime
 integration so you can focus on deployment concerns specific to your
 environment.
 
 ## Boundaries
 
-`experimental/a2a` does not leak A2A types into the stable `dive`
+`a2a` does not leak A2A types into the stable `dive`
 package. `*dive.Agent`, `*dive.Response`, and `dive.Session` are unchanged.
 If you move away from A2A later, removing this package does not force a
 core-API migration.

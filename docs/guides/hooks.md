@@ -354,4 +354,4 @@ Hooks: dive.Hooks{
 - [Custom Tools](custom-tools.md) — Build tools that hooks can intercept
 - [Suspend & Resume](suspend-resume.md) — OnSuspend hook and pause-mid-turn flow
 - [Permissions Guide](permissions.md) — Hook-based permission system
-- [Compaction Guide](experimental/compaction.md) — Hook-based context compaction
+- [Compaction Guide](compaction.md) — Hook-based context compaction

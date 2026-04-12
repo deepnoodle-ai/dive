@@ -1,6 +1,7 @@
 # Sub-Agents
 
-> **Experimental**: Sub-agent orchestration is in `experimental/toolkit/extended/` and `experimental/subagent/`. The API may change.
+> Sub-agent orchestration uses the `subagent/` package for definitions and
+> `experimental/toolkit/extended/` for the Task tool.
 
 Sub-agents let a Dive agent spawn specialized agents to handle parts of a complex task. Each sub-agent runs in its own context with its own tools and returns its result to the parent agent.
 
@@ -117,7 +118,7 @@ import (
     "context"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/experimental/subagent"
+    "github.com/deepnoodle-ai/dive/subagent"
     "github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 )
 

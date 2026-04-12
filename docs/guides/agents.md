@@ -409,7 +409,7 @@ resumes, and the streaming `ResponseItemTypeSuspended` terminator.
 
 ## Subagents
 
-Subagent support is available in `experimental/subagent/`. See the experimental packages for details.
+Subagent support is available in `subagent/`. See the [Sub-Agents guide](subagents.md) for details.
 
 ## Next Steps
 

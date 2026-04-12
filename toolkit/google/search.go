@@ -14,11 +14,7 @@ import (
 	"github.com/deepnoodle-ai/wonton/web"
 )
 
-var baseURL = "https://www.googleapis.com/customsearch/v1"
-
-func SetBaseURL(url string) {
-	baseURL = url
-}
+const defaultBaseURL = "https://www.googleapis.com/customsearch/v1"
 
 // ClientOption is a function that modifies the client configuration.
 type ClientOption func(*Client)
@@ -34,7 +30,7 @@ func WithCredentials(cx, apiKey string) ClientOption {
 // WithBaseURL sets the base URL for the client.
 func WithBaseURL(url string) ClientOption {
 	return func(c *Client) {
-		baseURL = url
+		c.baseURL = url
 	}
 }
 
@@ -48,13 +44,15 @@ func WithHTTPClient(httpClient *http.Client) ClientOption {
 type Client struct {
 	cx         string
 	key        string
+	baseURL    string
 	httpClient *http.Client
 }
 
 func New(opts ...ClientOption) (*Client, error) {
 	c := &Client{
-		cx:  os.Getenv("GOOGLE_SEARCH_CX"),
-		key: os.Getenv("GOOGLE_SEARCH_API_KEY"),
+		cx:      os.Getenv("GOOGLE_SEARCH_CX"),
+		key:     os.Getenv("GOOGLE_SEARCH_API_KEY"),
+		baseURL: defaultBaseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -72,13 +70,14 @@ func New(opts ...ClientOption) (*Client, error) {
 }
 
 func (s *Client) Search(ctx context.Context, q *web.SearchInput) (*web.SearchOutput, error) {
-	if q.Limit < 0 || q.Limit > 100 {
-		return nil, fmt.Errorf("invalid limit: %d", q.Limit)
+	limit := q.Limit
+	if limit < 0 || limit > 100 {
+		return nil, fmt.Errorf("invalid limit: %d", limit)
 	}
-	if q.Limit == 0 {
-		q.Limit = 10
+	if limit == 0 {
+		limit = 10
 	}
-	pageCount := (q.Limit + 9) / 10 // Google always returns 10 results per page
+	pageCount := (limit + 9) / 10 // Google always returns 10 results per page
 	var items []*web.SearchItem
 	var curPage int
 	for curPage < pageCount {
@@ -87,7 +86,7 @@ func (s *Client) Search(ctx context.Context, q *web.SearchInput) (*web.SearchOut
 		params.Set("cx", s.cx)
 		params.Set("q", q.Query)
 		params.Set("start", fmt.Sprintf("%d", curPage*10+1))
-		rawURL := baseURL + "?" + params.Encode()
+		rawURL := s.baseURL + "?" + params.Encode()
 		crs, err := s.fetchResultsWithRetries(ctx, rawURL, 3)
 		if err != nil {
 			return nil, err
@@ -115,7 +114,11 @@ func (s *Client) fetchResultsWithRetries(ctx context.Context, url string, retrie
 			return results, nil
 		}
 		if strings.Contains(err.Error(), "429") {
-			time.Sleep(time.Second * 5)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Second * 5):
+			}
 			continue
 		}
 	}
@@ -146,32 +149,3 @@ func (s *Client) fetchResults(ctx context.Context, url string) (*results, error)
 	}
 	return &result, nil
 }
-
-// udm=14 indicates "web" search (no AI results)
-// udm=18 indicates "forums" search
-// tbm=nws indicates "news" search
-// udm=2 indicates "images" search
-// tbm=vid indicates "videos" search
-// tbm=bks indicates "books" search
-// tbs=qdr:w indicates "past week" search
-// tbs=qdr:m indicates "past month" search
-// tbs=qdr:y indicates "past year" search
-
-// type TimeRange string
-
-// const (
-// 	PastWeek  TimeRange = "tbs=qdr:w"
-// 	PastMonth TimeRange = "tbs=qdr:m"
-// 	PastYear  TimeRange = "tbs=qdr:y"
-// )
-
-// type Category string
-
-// const (
-// 	Web    Category = "udm=14"
-// 	Forums Category = "udm=18"
-// 	News   Category = "tbm=nws"
-// 	Images Category = "udm=2"
-// 	Videos Category = "tbm=vid"
-// 	Books  Category = "tbm=bks"
-// )

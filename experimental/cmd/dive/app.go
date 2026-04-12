@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/compaction"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"

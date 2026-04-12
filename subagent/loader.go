@@ -38,20 +38,19 @@ func (l *FileLoader) Load(ctx context.Context) (map[string]*Definition, error) {
 	result := make(map[string]*Definition)
 
 	dirs := l.Directories
-	if len(dirs) == 0 {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get working directory: %w", err)
-		}
-		dirs = []string{filepath.Join(cwd, ".dive", "agents")}
-	}
 
-	if l.IncludeClaudeAgents {
+	// Resolve the working directory once if we need default paths.
+	if len(dirs) == 0 || l.IncludeClaudeAgents {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get working directory: %w", err)
 		}
-		dirs = append(dirs, filepath.Join(cwd, ".claude", "agents"))
+		if len(dirs) == 0 {
+			dirs = []string{filepath.Join(cwd, ".dive", "agents")}
+		}
+		if l.IncludeClaudeAgents {
+			dirs = append(dirs, filepath.Join(cwd, ".claude", "agents"))
+		}
 	}
 
 	for _, dir := range dirs {
@@ -99,9 +98,13 @@ type MapLoader struct {
 
 var _ Loader = (*MapLoader)(nil)
 
-// Load implements Loader by returning the wrapped map.
+// Load implements Loader by returning a copy of the wrapped map.
 func (m *MapLoader) Load(ctx context.Context) (map[string]*Definition, error) {
-	return m.Definitions, nil
+	result := make(map[string]*Definition, len(m.Definitions))
+	for k, v := range m.Definitions {
+		result[k] = v
+	}
+	return result, nil
 }
 
 // frontmatter represents the YAML frontmatter in a subagent markdown file.

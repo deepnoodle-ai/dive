@@ -27,10 +27,14 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 
 - `session/` — Persistent conversation state: `Session` struct (implements `dive.Session`), `Store` interface, `MemoryStore`, `FileStore`, Fork, Compact.
 - `providers/` — LLM providers (Anthropic, OpenAI, Google, Grok, Mistral, Ollama, OpenRouter). Registry-based (`providers/registry.go`), self-registering via `init()`.
-- `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser).
+- `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser). Search provider integrations in `toolkit/firecrawl/`, `toolkit/google/`, `toolkit/kagi/`.
 - `permission/` — Rule-based tool permission management with modes, specifier patterns, and session allowlists.
 - `skill/` — Unified skills and slash commands. `skill.Loader` implements `dive.Extension` — pass it to `AgentOptions.Extensions` to wire up the Skill tool, catalog hook, and content hook. Three-layer architecture: rules in system prompt, catalog as `<system-reminder name="skills">` in first user message, tool as trigger with content via PostToolUseHook. Provider-based loading (filesystem, `.agents/skills/`), variable expansion, trigger matching. `dive.SetSystemReminder` manages named blocks in conversation context.
-- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, subagent, compaction, todo, toolkit, a2a.
+- `subagent/` — Subagent definitions (`Definition`, `Registry`, `Loader` interface) for specialized agents spawned by the Task tool.
+- `compaction/` — Context compaction: `CompactMessages` summarizes older messages, `ShouldCompact` checks thresholds, `HookWithModel` provides a `PreGenerationHook`.
+- `todo/` — Todo status types (`TodoStatus`, `TodoItem`) and `TodoTracker` for task progress tracking.
+- `a2a/` — A2A (Agent-to-Agent) protocol: `Server` wraps `*dive.Agent` as HTTP endpoint, `Client`/`RemoteAgent` for calling remote A2A agents, suspend/resume maps to A2A `input-required`/`auth-required`.
+- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, toolkit/extended.
 
 ### Design Philosophy
 
@@ -47,7 +51,7 @@ Session load/save is automatic when `AgentOptions.Session` or `WithSession` is s
 
 ## Documentation
 
-Guides in `docs/guides/` (core) and `docs/guides/experimental/`.
+Guides in `docs/guides/` (core and promoted) and `docs/guides/experimental/` (unstable).
 
 ## Example
 

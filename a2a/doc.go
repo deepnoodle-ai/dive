@@ -1,13 +1,6 @@
-// Package a2a provides experimental support for the A2A (Agent-to-Agent)
-// protocol so that Dive agents can be exposed as remote A2A agents and can
-// call remote A2A agents from Go code.
-//
-// # Status
-//
-// This package is experimental. Its API may change without notice. It lives
-// under experimental/ because the A2A protocol, its Go SDK story, and the
-// mapping between Dive's local runtime and A2A task semantics are all still
-// evolving.
+// Package a2a provides support for the A2A (Agent-to-Agent) protocol so that
+// Dive agents can be exposed as remote A2A agents and can call remote A2A
+// agents from Go code.
 //
 // # Scope
 //
@@ -41,7 +34,7 @@
 // from your server's shutdown path.
 //
 // See docs/prds/prd-05-a2a-support.md for the full motivation, goals, and
-// out-of-scope items. See docs/guides/experimental/a2a.md for usage.
+// out-of-scope items. See docs/guides/a2a.md for usage.
 //
 // # Architectural boundaries
 //
@@ -66,6 +59,6 @@
 // canonical path and falls back to the legacy path on 404.
 //
 // Phase 1 has been cross-validated against the official a2a-python SDK in
-// both directions; see experimental/a2a/interop_test.go (build tag
-// "interop") and docs/guides/experimental/a2a.md for details.
+// both directions; see a2a/interop_test.go (build tag "interop") and
+// docs/guides/a2a.md for details.
 package a2a

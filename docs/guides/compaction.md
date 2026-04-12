@@ -1,6 +1,5 @@
 # Context Compaction Guide
 
-> **Experimental**: This package is in `experimental/compaction/`. The API may change.
 
 Compaction manages conversation context as it grows, summarizing older messages to stay within context window limits.
 
@@ -27,10 +26,10 @@ This triggers compaction when the message count exceeds the threshold.
 
 ## Experimental: CompactMessages
 
-The `experimental/compaction` package provides `CompactMessages` for full compaction with token estimation:
+The `compaction` package provides `CompactMessages` for full compaction with token estimation:
 
 ```go
-import "github.com/deepnoodle-ai/dive/experimental/compaction"
+import "github.com/deepnoodle-ai/dive/compaction"
 
 messages, _ := sess.Messages(ctx)
 

@@ -20,7 +20,7 @@ import (
 	"net/http/httptest"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/experimental/a2a"
+	"github.com/deepnoodle-ai/dive/a2a"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/session"
 )
