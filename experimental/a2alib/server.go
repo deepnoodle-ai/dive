@@ -1,6 +1,7 @@
 package a2alib
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -138,7 +139,19 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// Card returns a copy of the server's agent card.
+// Card returns a deep copy of the server's agent card. Callers may
+// mutate the returned value without affecting server state.
 func (s *Server) Card() *a2a.AgentCard {
-	return s.card
+	b, err := json.Marshal(s.card)
+	if err != nil {
+		// Should never happen — we marshaled successfully in NewServer.
+		cp := *s.card
+		return &cp
+	}
+	var cp a2a.AgentCard
+	if err := json.Unmarshal(b, &cp); err != nil {
+		cp2 := *s.card
+		return &cp2
+	}
+	return &cp
 }

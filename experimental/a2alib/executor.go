@@ -110,6 +110,11 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 
 		// Set up streaming: run CreateResponse with an event callback that
 		// yields intermediate a2a status updates for tool calls and text.
+		// Use a derived context so the goroutine is cancelled if yield
+		// returns false (consumer disconnected).
+		execCtx2, cancelExec := context.WithCancel(ctx)
+		defer cancelExec()
+
 		events := make(chan a2a.Event, 64)
 		var resp *dive.Response
 		var respErr error
@@ -121,19 +126,20 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 				if event != nil {
 					select {
 					case events <- event:
-					case <-ctx.Done():
-						return ctx.Err()
+					case <-execCtx2.Done():
+						return execCtx2.Err()
 					}
 				}
 				return nil
 			}
 			opts = append(opts, dive.WithEventCallback(cb))
-			resp, respErr = e.agent.CreateResponse(ctx, opts...)
+			resp, respErr = e.agent.CreateResponse(execCtx2, opts...)
 		}()
 
 		// Yield intermediate streaming events.
 		for event := range events {
 			if !yield(event, nil) {
+				cancelExec()
 				return
 			}
 		}
@@ -468,7 +474,10 @@ func resumeToolResults(state *dive.SuspensionState, msg *a2a.Message) (map[strin
 	}
 
 	// Fall back to text: broadcast for all pending calls.
-	text := textFromMessage(msg)
+	text := strings.TrimSpace(textFromMessage(msg))
+	if text == "" {
+		return nil, fmt.Errorf("a2alib: resume message has no text and no structured toolResults")
+	}
 	results := make(map[string]*dive.ToolResult, len(state.PendingToolCalls))
 	for _, call := range state.PendingToolCalls {
 		results[call.ID] = dive.NewToolResultText(text)

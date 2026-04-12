@@ -254,7 +254,7 @@ func TestStreamMessage(t *testing.T) {
 	case *a2a.Task:
 		assert.Equal(t, a2a.TaskStateCompleted, v.Status.State)
 	default:
-		t.Fatalf("unexpected last event type: %T", last)
+		assert.True(t, false, "unexpected last event type: %T", last)
 	}
 }
 

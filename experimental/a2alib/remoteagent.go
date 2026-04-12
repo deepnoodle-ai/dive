@@ -89,11 +89,25 @@ func (r *RemoteAgent) SendTextOnTask(ctx context.Context, taskID a2a.TaskID, pro
 }
 
 // StreamText sends a text prompt via streaming and delivers events to the
-// caller as an iterator. Returns when the stream ends.
+// caller as an iterator. It captures the context ID from the first event
+// that carries one so ContextID() stays current. Returns when the stream
+// ends.
 func (r *RemoteAgent) StreamText(ctx context.Context, prompt string) iter.Seq2[a2a.Event, error] {
 	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(prompt))
 	msg.ContextID = r.contextID
-	return r.client.SendStreamingMessage(ctx, &a2a.SendMessageRequest{Message: msg})
+	inner := r.client.SendStreamingMessage(ctx, &a2a.SendMessageRequest{Message: msg})
+	return func(yield func(a2a.Event, error) bool) {
+		for event, err := range inner {
+			if err == nil && event != nil {
+				if cid := event.TaskInfo().ContextID; cid != "" {
+					r.contextID = cid
+				}
+			}
+			if !yield(event, err) {
+				return
+			}
+		}
+	}
 }
 
 // extractTask converts a SendMessageResult to a *Task and updates the
