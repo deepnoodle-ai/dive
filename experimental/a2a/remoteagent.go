@@ -3,6 +3,7 @@ package a2a
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 // RemoteAgent is a higher-level wrapper around Client that lets Dive code
@@ -12,7 +13,9 @@ import (
 // persistent contextId so follow-up calls on the same conversation go
 // through as multi-turn interactions rather than fresh tasks.
 type RemoteAgent struct {
-	client    *Client
+	client *Client
+
+	mu        sync.RWMutex
 	card      *AgentCard
 	contextID string
 }
@@ -23,22 +26,38 @@ func NewRemoteAgent(client *Client) *RemoteAgent {
 }
 
 // Card returns the cached remote agent card, fetching it if it has not
-// been loaded yet.
+// been loaded yet. The card is cached for the lifetime of the
+// RemoteAgent; call RefreshCard to pick up changes from a long-lived
+// remote.
 func (r *RemoteAgent) Card(ctx context.Context) (*AgentCard, error) {
-	if r.card != nil {
-		return r.card, nil
+	r.mu.RLock()
+	cached := r.card
+	r.mu.RUnlock()
+	if cached != nil {
+		return cached, nil
 	}
+	return r.RefreshCard(ctx)
+}
+
+// RefreshCard re-fetches the remote agent card and updates the cache.
+// Use this when the remote agent's capabilities may have changed since
+// the card was first loaded.
+func (r *RemoteAgent) RefreshCard(ctx context.Context) (*AgentCard, error) {
 	card, err := r.client.FetchCard(ctx)
 	if err != nil {
 		return nil, err
 	}
+	r.mu.Lock()
 	r.card = card
+	r.mu.Unlock()
 	return card, nil
 }
 
 // ContextID returns the persistent A2A context ID this agent is using,
 // if any.
 func (r *RemoteAgent) ContextID() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.contextID
 }
 
@@ -46,7 +65,9 @@ func (r *RemoteAgent) ContextID() string {
 // Useful when the caller wants to resume a prior A2A context by ID
 // instead of the one the server assigned on the first message.
 func (r *RemoteAgent) SetContextID(id string) {
+	r.mu.Lock()
 	r.contextID = id
+	r.mu.Unlock()
 }
 
 // SendText is the most common entry point: send a plain text prompt to
@@ -62,14 +83,14 @@ func (r *RemoteAgent) SendText(ctx context.Context, prompt string) (*Task, error
 	msg := &Message{
 		Role:      RoleUser,
 		Parts:     []Part{NewTextPart(prompt)},
-		ContextID: r.contextID,
+		ContextID: r.ContextID(),
 	}
 	task, err := r.client.SendMessage(ctx, msg, nil)
 	if err != nil {
 		return nil, err
 	}
 	if task != nil && task.ContextID != "" {
-		r.contextID = task.ContextID
+		r.SetContextID(task.ContextID)
 	}
 	return task, nil
 }
@@ -89,14 +110,14 @@ func (r *RemoteAgent) SendTextOnTask(ctx context.Context, taskID, prompt string)
 		Role:      RoleUser,
 		Parts:     []Part{NewTextPart(prompt)},
 		TaskID:    taskID,
-		ContextID: r.contextID,
+		ContextID: r.ContextID(),
 	}
 	task, err := r.client.SendMessage(ctx, msg, nil)
 	if err != nil {
 		return nil, err
 	}
 	if task != nil && task.ContextID != "" {
-		r.contextID = task.ContextID
+		r.SetContextID(task.ContextID)
 	}
 	return task, nil
 }
@@ -107,13 +128,13 @@ func (r *RemoteAgent) StreamText(ctx context.Context, prompt string, onEvent fun
 	msg := &Message{
 		Role:      RoleUser,
 		Parts:     []Part{NewTextPart(prompt)},
-		ContextID: r.contextID,
+		ContextID: r.ContextID(),
 	}
 	return r.client.StreamMessage(ctx, msg, nil, func(ev *StreamEvent) error {
 		if ev.Task != nil && ev.Task.ContextID != "" {
-			r.contextID = ev.Task.ContextID
+			r.SetContextID(ev.Task.ContextID)
 		} else if ev.StatusUpdate != nil && ev.StatusUpdate.ContextID != "" {
-			r.contextID = ev.StatusUpdate.ContextID
+			r.SetContextID(ev.StatusUpdate.ContextID)
 		}
 		return onEvent(ev)
 	})

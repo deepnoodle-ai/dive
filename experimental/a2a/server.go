@@ -53,9 +53,19 @@ type ServerOptions struct {
 	// in-memory store. Prototype callers can leave this nil.
 	TaskStore TaskStore
 
+	// MaxRequestBytes caps the size of an inbound JSON-RPC request body.
+	// A value <= 0 selects DefaultMaxRequestBytes. Set explicitly to a
+	// large value if you intentionally accept multi-megabyte payloads,
+	// or wrap the handler with your own size-limiting middleware.
+	MaxRequestBytes int64
+
 	// Logger is an optional logger. Defaults to llm.NullLogger.
 	Logger llm.Logger
 }
+
+// DefaultMaxRequestBytes is the default cap on inbound JSON-RPC request
+// body size when ServerOptions.MaxRequestBytes is unset.
+const DefaultMaxRequestBytes = 10 * 1024 * 1024
 
 // Server exposes a Dive agent as an A2A endpoint. Wire it into an HTTP
 // mux via Handler; the returned handler serves both the well-known agent
@@ -72,10 +82,18 @@ type Server struct {
 	cardBytes []byte
 	cardMu    sync.RWMutex
 
+	// maxRequestBytes caps inbound JSON-RPC request body size.
+	maxRequestBytes int64
+
 	// inflight tracks cancel functions for in-progress turns so that
 	// tasks/cancel can interrupt a running CreateResponse.
 	inflight   map[string]context.CancelFunc
 	inflightMu sync.Mutex
+
+	// writeMu serializes terminal-state writes to the task store so a
+	// runTurn that completes just after tasks/cancel arrives cannot
+	// clobber the CANCELED record (and vice versa).
+	writeMu sync.Mutex
 }
 
 // NewServer constructs a Server from the given options. It returns an
@@ -132,14 +150,20 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	// exposes an event callback.
 	card.Capabilities.Streaming = true
 
+	maxBytes := opts.MaxRequestBytes
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxRequestBytes
+	}
+
 	s := &Server{
-		agent:    opts.Agent,
-		card:     card,
-		path:     opts.Path,
-		store:    opts.TaskStore,
-		provider: opts.SessionProvider,
-		logger:   opts.Logger,
-		inflight: make(map[string]context.CancelFunc),
+		agent:           opts.Agent,
+		card:            card,
+		path:            opts.Path,
+		store:           opts.TaskStore,
+		provider:        opts.SessionProvider,
+		logger:          opts.Logger,
+		maxRequestBytes: maxBytes,
+		inflight:        make(map[string]context.CancelFunc),
 	}
 	if err := s.refreshCardBytes(); err != nil {
 		return nil, err
@@ -158,9 +182,71 @@ func (s *Server) refreshCardBytes() error {
 	return nil
 }
 
-// Card returns a copy of the server's agent card.
+// Card returns a deep copy of the server's agent card. Mutating the
+// returned value will not affect what the server serves.
 func (s *Server) Card() AgentCard {
-	return s.card
+	return cloneAgentCard(s.card)
+}
+
+// cloneAgentCard returns a deep copy of an AgentCard. Slices and maps
+// are copied so callers cannot mutate the server's authoritative card.
+func cloneAgentCard(c AgentCard) AgentCard {
+	out := c
+	if c.SupportedInterfaces != nil {
+		out.SupportedInterfaces = append([]AgentInterface(nil), c.SupportedInterfaces...)
+	}
+	if c.DefaultInputModes != nil {
+		out.DefaultInputModes = append([]string(nil), c.DefaultInputModes...)
+	}
+	if c.DefaultOutputModes != nil {
+		out.DefaultOutputModes = append([]string(nil), c.DefaultOutputModes...)
+	}
+	if c.Skills != nil {
+		out.Skills = make([]AgentSkill, len(c.Skills))
+		for i, sk := range c.Skills {
+			out.Skills[i] = cloneAgentSkill(sk)
+		}
+	}
+	if c.Provider != nil {
+		p := *c.Provider
+		out.Provider = &p
+	}
+	if c.SecuritySchemes != nil {
+		ss := make(map[string]any, len(c.SecuritySchemes))
+		for k, v := range c.SecuritySchemes {
+			ss[k] = v
+		}
+		out.SecuritySchemes = ss
+	}
+	if c.Security != nil {
+		sec := make([]map[string][]string, len(c.Security))
+		for i, m := range c.Security {
+			cm := make(map[string][]string, len(m))
+			for k, v := range m {
+				cm[k] = append([]string(nil), v...)
+			}
+			sec[i] = cm
+		}
+		out.Security = sec
+	}
+	return out
+}
+
+func cloneAgentSkill(s AgentSkill) AgentSkill {
+	out := s
+	if s.Tags != nil {
+		out.Tags = append([]string(nil), s.Tags...)
+	}
+	if s.Examples != nil {
+		out.Examples = append([]string(nil), s.Examples...)
+	}
+	if s.InputModes != nil {
+		out.InputModes = append([]string(nil), s.InputModes...)
+	}
+	if s.OutputModes != nil {
+		out.OutputModes = append([]string(nil), s.OutputModes...)
+	}
+	return out
 }
 
 // Handler returns an http.Handler that serves the well-known agent card
@@ -202,6 +288,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxRequestBytes)
 	var req RPCRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeRPCError(w, nil, newRPCError(ErrorCodeParseError, "parse error: "+err.Error(), nil))
@@ -402,6 +489,9 @@ func (s *Server) handleTasksCancel(w http.ResponseWriter, r *http.Request, req *
 		writeRPCError(w, req.ID, newRPCError(ErrorCodeInvalidParams, "missing task id", nil))
 		return
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	rec, ok, err := s.store.Get(r.Context(), params.ID)
 	if err != nil {
 		writeRPCError(w, req.ID, newRPCError(ErrorCodeInternalError, err.Error(), nil))
@@ -434,7 +524,10 @@ func (s *Server) handleTasksCancel(w http.ResponseWriter, r *http.Request, req *
 		}
 	}
 
-	_ = s.store.Put(r.Context(), rec)
+	if err := s.store.Put(r.Context(), rec); err != nil {
+		writeRPCError(w, req.ID, newRPCError(ErrorCodeInternalError, "task store: "+err.Error(), nil))
+		return
+	}
 	writeRPCResult(w, req.ID, rec.Task)
 }
 
@@ -486,6 +579,11 @@ func (s *Server) runTurn(ctx context.Context, params *SendMessageParams, cb dive
 
 	resp, runErr := s.agent.CreateResponse(turnCtx, opts...)
 	if runErr != nil {
+		if errors.Is(runErr, context.Canceled) {
+			if t := s.canceledTaskFromStore(ctx, newTaskID); t != nil {
+				return t, nil
+			}
+		}
 		return nil, rpcErrorFromTurn(runErr)
 	}
 
@@ -496,10 +594,11 @@ func (s *Server) runTurn(ctx context.Context, params *SendMessageParams, cb dive
 		Suspension: resp.Suspension,
 		SessionID:  contextID,
 	}
-	if err := s.store.Put(ctx, rec); err != nil {
+	committed, err := s.commitFinalTask(ctx, rec)
+	if err != nil {
 		return nil, newRPCError(ErrorCodeInternalError, "task store: "+err.Error(), nil)
 	}
-	return task, nil
+	return committed.Task, nil
 }
 
 // resumeTurn handles a message/send or message/stream that targets an
@@ -561,6 +660,11 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 
 	resp, runErr := s.agent.CreateResponse(turnCtx, opts...)
 	if runErr != nil {
+		if errors.Is(runErr, context.Canceled) {
+			if t := s.canceledTaskFromStore(ctx, taskID); t != nil {
+				return t, nil
+			}
+		}
 		return nil, rpcErrorFromTurn(runErr)
 	}
 
@@ -569,10 +673,11 @@ func (s *Server) resumeTurn(ctx context.Context, params *SendMessageParams, cb d
 	updated.History = append(priorHistory, updated.History...)
 	rec.Task = updated
 	rec.Suspension = resp.Suspension
-	if err := s.store.Put(ctx, rec); err != nil {
+	committed, err := s.commitFinalTask(ctx, rec)
+	if err != nil {
 		return nil, newRPCError(ErrorCodeInternalError, "task store: "+err.Error(), nil)
 	}
-	return updated, nil
+	return committed.Task, nil
 }
 
 // resumeToolResults translates an inbound user message into ToolResults
@@ -658,6 +763,24 @@ func (s *Server) cancelInflight(taskID string) bool {
 	return ok
 }
 
+// commitFinalTask writes a non-suspended terminal TaskRecord, refusing
+// to overwrite a record that a concurrent tasks/cancel has already
+// transitioned into a terminal state. Returns the canonical record
+// (either the one passed in, or the canceled record stored in the
+// meantime).
+func (s *Server) commitFinalTask(ctx context.Context, rec *TaskRecord) (*TaskRecord, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if existing, ok, err := s.store.Get(ctx, rec.Task.ID); err == nil && ok &&
+		existing.Task.Status.State.IsTerminal() {
+		return existing, nil
+	}
+	if err := s.store.Put(ctx, rec); err != nil {
+		return nil, err
+	}
+	return rec, nil
+}
+
 // resolveSession calls the configured SessionProvider, falling back to
 // nil when no provider is set.
 func (s *Server) resolveSession(ctx context.Context, contextID string) (dive.Session, error) {
@@ -668,11 +791,11 @@ func (s *Server) resolveSession(ctx context.Context, contextID string) (dive.Ses
 }
 
 // rpcErrorFromTurn converts an error returned from Dive's CreateResponse
-// into an RPC error.
+// into an RPC error. context.Canceled is treated as an internal error;
+// callers that want to expose a CANCELED task to the original sender
+// should consult the store first (see runTurn/resumeTurn).
 func rpcErrorFromTurn(err error) *RPCError {
 	switch {
-	case errors.Is(err, context.Canceled):
-		return newRPCError(ErrorCodeTaskNotCancelable, "task was canceled", nil)
 	case errors.Is(err, dive.ErrNoSuspendedTurn):
 		return newRPCError(ErrorCodeInvalidRequest, "no suspended turn to resume", nil)
 	case errors.Is(err, dive.ErrUnknownPendingToolCall):
@@ -682,6 +805,24 @@ func rpcErrorFromTurn(err error) *RPCError {
 	default:
 		return newRPCError(ErrorCodeInternalError, err.Error(), nil)
 	}
+}
+
+// canceledTaskFromStore returns the CANCELED TaskRecord for the given ID
+// if a concurrent tasks/cancel transitioned the task to CANCELED while
+// the turn was running. Returns nil if no canceled record is present.
+// The store read is taken under writeMu so it observes any cancel write
+// the cancel handler completed before releasing the lock.
+func (s *Server) canceledTaskFromStore(ctx context.Context, taskID string) *Task {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rec, ok, err := s.store.Get(ctx, taskID)
+	if err != nil || !ok || rec.Task == nil {
+		return nil
+	}
+	if rec.Task.Status.State == TaskStateCanceled {
+		return rec.Task
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

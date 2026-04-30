@@ -2,10 +2,15 @@ package a2a
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
 )
+
+// ErrInvalidTaskRecord is returned by TaskStore.Put when the supplied
+// record is missing required fields.
+var ErrInvalidTaskRecord = errors.New("a2a: invalid task record")
 
 // TaskStore persists A2A task state and the optional Dive SuspensionState
 // that accompanies a suspended task. The server adapter reads and writes
@@ -53,10 +58,12 @@ func NewMemoryTaskStore() *MemoryTaskStore {
 	return &MemoryTaskStore{records: make(map[string]*TaskRecord)}
 }
 
-// Put implements TaskStore.
+// Put implements TaskStore. Returns ErrInvalidTaskRecord if rec, rec.Task,
+// or rec.Task.ID is missing — silently dropping such records would mask
+// caller bugs and leave clients waiting on tasks that were never stored.
 func (s *MemoryTaskStore) Put(ctx context.Context, rec *TaskRecord) error {
 	if rec == nil || rec.Task == nil || rec.Task.ID == "" {
-		return nil
+		return ErrInvalidTaskRecord
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

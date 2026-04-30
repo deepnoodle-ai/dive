@@ -251,11 +251,15 @@ func (c *Client) StreamMessage(ctx context.Context, msg *Message, cfg *MessageCo
 		msg.MessageID = uuid.NewString()
 	}
 	params := SendMessageParams{Message: msg, Configuration: cfg}
+	rawParams, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("a2a: marshal stream params: %w", err)
+	}
 	body, err := json.Marshal(RPCRequest{
 		JSONRPC: "2.0",
 		ID:      c.nextID(),
 		Method:  MethodMessageStream,
-		Params:  mustMarshal(params),
+		Params:  rawParams,
 	})
 	if err != nil {
 		return err
@@ -281,11 +285,15 @@ func (c *Client) StreamMessage(ctx context.Context, msg *Message, cfg *MessageCo
 
 // call is the shared JSON-RPC round-trip helper.
 func (c *Client) call(ctx context.Context, method string, params any, out any) error {
+	rawParams, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("a2a: marshal %s params: %w", method, err)
+	}
 	body, err := json.Marshal(RPCRequest{
 		JSONRPC: "2.0",
 		ID:      c.nextID(),
 		Method:  method,
-		Params:  mustMarshal(params),
+		Params:  rawParams,
 	})
 	if err != nil {
 		return err
@@ -401,10 +409,3 @@ func decodeStreamResult(raw json.RawMessage) (*StreamEvent, error) {
 	return nil, nil
 }
 
-func mustMarshal(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage("null")
-	}
-	return b
-}
