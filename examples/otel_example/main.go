@@ -25,12 +25,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/deepnoodle-ai/dive"
 	otelext "github.com/deepnoodle-ai/dive/experimental/otel"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -75,10 +78,19 @@ func main() {
 		),
 	)
 
+	// Wire otelhttp on the provider's HTTP client. Because Dive's
+	// BeforeGenerate hook publishes the chat-span ctx via
+	// HookContext.UpdatedCtx, the provider uses that ctx for the request,
+	// and otelhttp's HTTP CLIENT span will nest under the chat span.
+	httpClient := &http.Client{
+		Timeout:   300 * time.Second,
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
+
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:         "Weather Agent",
 		SystemPrompt: "You are a meteorologist. When asked about weather, use the get_weather tool.",
-		Model:        anthropic.New(),
+		Model:        anthropic.New(anthropic.WithClient(httpClient)),
 		Tools:        []dive.Tool{weather},
 		Extensions:   []dive.Extension{ext},
 		LLMHooks:     ext.LLMHooks(),
