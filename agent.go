@@ -1456,6 +1456,13 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
+//
+// Streaming providers fire BeforeGenerate from Stream() but cannot fire
+// AfterGenerate themselves — the iterator is consumed by the caller, so the
+// final accumulated response only exists here. This method fires
+// AfterGenerate explicitly so observability hooks (e.g. the experimental
+// otel package) see a balanced Before/After pair regardless of whether the
+// provider streams or not.
 func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
@@ -1465,6 +1472,7 @@ func (a *Agent) generateStreaming(
 	accum := llm.NewResponseAccumulator()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
 	if err != nil {
+		a.fireLLMAfterGenerate(ctx, nil, err)
 		return nil, err
 	}
 	defer iter.Close()
@@ -1472,19 +1480,53 @@ func (a *Agent) generateStreaming(
 	for iter.Next() {
 		event := iter.Event()
 		if err := accum.AddEvent(event); err != nil {
+			a.fireLLMAfterGenerate(ctx, nil, err)
 			return nil, err
 		}
 		if err := callback(ctx, &ResponseItem{
 			Type:  ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
+			a.fireLLMAfterGenerate(ctx, nil, err)
 			return nil, err
 		}
 	}
 	if err := iter.Err(); err != nil {
+		a.fireLLMAfterGenerate(ctx, nil, err)
 		return nil, err
 	}
-	return accum.Response(), nil
+	resp := accum.Response()
+	a.fireLLMAfterGenerate(ctx, resp, nil)
+	return resp, nil
+}
+
+// fireLLMAfterGenerate fires the agent's LLM AfterGenerate (or OnError) hooks
+// against a synthetic Config that carries the accumulated response. Used to
+// close the streaming hook contract — providers can't fire AfterGenerate
+// themselves because they hand the iterator off to the caller.
+func (a *Agent) fireLLMAfterGenerate(ctx context.Context, resp *llm.Response, hookErr error) {
+	if a.llmHooks == nil {
+		return
+	}
+	cfg := &llm.Config{Hooks: a.llmHooks}
+	if resp != nil {
+		cfg.Model = resp.Model
+	}
+	hookType := llm.AfterGenerate
+	if hookErr != nil {
+		hookType = llm.OnError
+	}
+	hctx := &llm.HookContext{
+		Type:    hookType,
+		Request: &llm.HookRequestContext{Config: cfg},
+		Response: &llm.HookResponseContext{
+			Response: resp,
+			Error:    hookErr,
+		},
+	}
+	if err := cfg.FireHooks(ctx, hctx); err != nil {
+		a.logger.Debug("after-generate hook error", "error", err)
+	}
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
