@@ -1587,6 +1587,10 @@ type toolCallPrep struct {
 	preHctx *HookContext
 	denied  bool
 	input   []byte
+	// toolCtx is the context Tool.Call will receive. It defaults to
+	// childCtx (so the agent's cancel chain still applies) and is
+	// replaced by HookContext.UpdatedCtx if a PreToolUse hook returns one.
+	toolCtx context.Context
 }
 
 // executeToolCallsParallel uses a two-phase approach:
@@ -1613,6 +1617,14 @@ func (a *Agent) executeToolCallsParallel(
 	batch := &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))}
 	deniedResults := make([]*ToolCallResult, len(toolCalls))
 
+	// childCtx exists outside phase 1 so PreToolUse hooks see a context that
+	// already carries the agent's cancel chain. A hook can derive
+	// HookContext.UpdatedCtx from this ctx (e.g. trace.ContextWithSpan) and
+	// the goroutine will use the derived ctx — preserving both span
+	// propagation and cancellation.
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Phase 1: PreToolUse hooks (sequential)
 	preps := make([]toolCallPrep, len(toolCalls))
 	for i, toolCall := range toolCalls {
@@ -1628,10 +1640,10 @@ func (a *Agent) executeToolCallsParallel(
 
 		var preview *ToolCallPreview
 		if previewer, ok := tool.(ToolPreviewer); ok {
-			preview = previewer.PreviewCall(ctx, toolCall.Input)
+			preview = previewer.PreviewCall(childCtx, toolCall.Input)
 		}
 
-		if err := callback(ctx, &ResponseItem{
+		if err := callback(childCtx, &ResponseItem{
 			Type:     ResponseItemTypeToolCall,
 			ToolCall: toolCall,
 		}); err != nil {
@@ -1649,7 +1661,7 @@ func (a *Agent) executeToolCallsParallel(
 
 		var denialErr error
 		for _, hook := range a.hooks.PreToolUse {
-			if err := hook(ctx, preHctx); err != nil {
+			if err := hook(childCtx, preHctx); err != nil {
 				var abortErr *HookAbortError
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PreToolUse"
@@ -1668,12 +1680,18 @@ func (a *Agent) executeToolCallsParallel(
 			preview: preview,
 			preHctx: preHctx,
 			input:   toolCall.Input,
+			toolCtx: childCtx,
 		}
 		if denialErr != nil {
 			prep.denied = true
 			deniedResults[i] = a.createDeniedResult(toolCall, denialErr.Error(), preview)
-		} else if preHctx.UpdatedInput != nil {
-			prep.input = preHctx.UpdatedInput
+		} else {
+			if preHctx.UpdatedInput != nil {
+				prep.input = preHctx.UpdatedInput
+			}
+			if preHctx.UpdatedCtx != nil {
+				prep.toolCtx = preHctx.UpdatedCtx
+			}
 		}
 		preps[i] = prep
 	}
@@ -1684,9 +1702,6 @@ func (a *Agent) executeToolCallsParallel(
 		result *ToolCallResult
 		err    error // fatal error (e.g. context cancellation)
 	}
-
-	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	ch := make(chan completedTool, len(toolCalls))
 
@@ -1707,7 +1722,10 @@ func (a *Agent) executeToolCallsParallel(
 				ch <- completedTool{index: i, err: err}
 				return
 			}
-			result := a.executeTool(childCtx, prep.tool, toolCalls[i], prep.input, prep.preview, callback)
+			// prep.toolCtx is childCtx, or a hook-derived child of it.
+			// Either way it carries the agent's cancel chain, so a
+			// downstream cancel still aborts the tool.
+			result := a.executeTool(prep.toolCtx, prep.tool, toolCalls[i], prep.input, prep.preview, callback)
 			if result.Error != nil && childCtx.Err() != nil {
 				ch <- completedTool{index: i, err: childCtx.Err()}
 				return
@@ -1881,7 +1899,11 @@ func (a *Agent) executeOneToolCall(
 		if preHctx.UpdatedInput != nil {
 			input = preHctx.UpdatedInput
 		}
-		result = a.executeTool(ctx, tool, toolCall, input, preview, callback)
+		toolCtx := ctx
+		if preHctx.UpdatedCtx != nil {
+			toolCtx = preHctx.UpdatedCtx
+		}
+		result = a.executeTool(toolCtx, tool, toolCall, input, preview, callback)
 	}
 
 	// Suspend path: emit the tool_call_result event but skip PostToolUse

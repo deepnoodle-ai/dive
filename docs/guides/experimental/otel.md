@@ -98,11 +98,15 @@ when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Useful local backends:
 
 ## Limitations
 
-- **Context propagation:** Dive hooks cannot mutate the `context.Context`
-  the agent uses downstream. As a result, spans created inside a tool's
-  `Call` method (e.g. an HTTP client emitting its own OTel spans) appear as
-  children of the **agent** span, not of the `execute_tool` span. Fixing
-  this would require teaching Dive to thread an updated ctx through hooks.
 - **Provider coverage:** `chat` spans are wired through `llm.Hooks`. All
-  current Dive providers fire `BeforeGenerate` / `AfterGenerate`; if a
-  future provider doesn't, its calls will silently produce no chat spans.
+  current Dive providers fire `BeforeGenerate` from both `Generate` and
+  `Stream`; the agent itself fires `AfterGenerate` after streaming
+  accumulation, so the contract is symmetric for both code paths. If a
+  future provider doesn't fire `BeforeGenerate`, its calls will silently
+  produce no chat spans.
+- **Chat-span ctx propagation:** Spans created inside an LLM provider's
+  HTTP client (e.g. via `otelhttp` middleware) currently parent under the
+  agent span, not the `chat` span. Tool-internal spans nest correctly
+  (the `execute_tool` ctx is plumbed through `HookContext.UpdatedCtx`);
+  doing the equivalent for chat spans would require each provider to use
+  the hook-derived ctx for its HTTP request.

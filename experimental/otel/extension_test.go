@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // fakeLLM is a minimal llm.LLM that returns scripted responses and (when so
@@ -102,8 +103,14 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 	type echoIn struct {
 		Text string `json:"text"`
 	}
+	// The tool opens its own child span on the ctx it receives. Whether
+	// that span ends up under execute_tool depends on whether the agent
+	// passes the per-tool ctx in (HookContext.UpdatedCtx wiring).
+	tracer := tp.Tracer("test")
 	echoTool := dive.FuncTool("echo", "echoes input",
 		func(ctx context.Context, in *echoIn) (*dive.ToolResult, error) {
+			_, span := tracer.Start(ctx, "tool.work")
+			span.End()
 			return dive.NewToolResultText(in.Text), nil
 		},
 	)
@@ -159,6 +166,27 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 	}
 	if byOp["execute_tool"] != 1 {
 		t.Errorf("expected 1 execute_tool span, got %d (byOp=%v)", byOp["execute_tool"], byOp)
+	}
+
+	// Verify the tool's own child span (tool.work) nests under the
+	// execute_tool span. This is the ctx-propagation guarantee — without
+	// HookContext.UpdatedCtx wiring, tool.work would be a sibling of
+	// execute_tool instead of a child.
+	var executeToolSpanID, toolWorkParentID oteltrace.SpanID
+	for _, s := range spans {
+		switch s.Name() {
+		case "execute_tool echo":
+			executeToolSpanID = s.SpanContext().SpanID()
+		case "tool.work":
+			toolWorkParentID = s.Parent().SpanID()
+		}
+	}
+	if !executeToolSpanID.IsValid() {
+		t.Fatalf("did not find execute_tool span")
+	}
+	if toolWorkParentID != executeToolSpanID {
+		t.Errorf("tool.work span parent = %s, want execute_tool span %s — ctx propagation through PreToolUse is broken",
+			toolWorkParentID, executeToolSpanID)
 	}
 
 	// Verify hierarchy: chat / execute_tool spans should have invoke_agent
@@ -252,4 +280,116 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 			t.Errorf("execute_tool span missing gen_ai.tool.call.arguments (CaptureToolIO=true)")
 		}
 	}
+}
+
+// TestExtension_CtxPropagation_ParallelTools verifies that the parallel-tool
+// execution path also wires HookContext.UpdatedCtx through to Tool.Call so
+// each tool's internal spans nest under its own execute_tool span.
+func TestExtension_CtxPropagation_ParallelTools(t *testing.T) {
+	tp, rec := newRecordingProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(otel.GetTracerProvider())
+
+	// Iter 1: assistant requests two tool calls in one message.
+	// Iter 2: final text response.
+	llmResponses := []*llm.Response{
+		{
+			ID:    "msg_1",
+			Model: "fake-model-2",
+			Role:  llm.Assistant,
+			Content: []llm.Content{
+				&llm.ToolUseContent{ID: "call_a", Name: "echo", Input: json.RawMessage(`{"text":"a"}`)},
+				&llm.ToolUseContent{ID: "call_b", Name: "echo", Input: json.RawMessage(`{"text":"b"}`)},
+			},
+			Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+			StopReason: "tool_use",
+		},
+		{
+			ID:    "msg_2",
+			Model: "fake-model-2",
+			Role:  llm.Assistant,
+			Content: []llm.Content{
+				&llm.TextContent{Text: "done"},
+			},
+			Usage:      llm.Usage{InputTokens: 12, OutputTokens: 4},
+			StopReason: "end_turn",
+		},
+	}
+	model := &fakeLLM{name: "fake-model-2", responses: llmResponses}
+
+	type echoIn struct {
+		Text string `json:"text"`
+	}
+	tracer := tp.Tracer("test")
+	echoTool := dive.FuncTool("echo", "echoes input",
+		func(ctx context.Context, in *echoIn) (*dive.ToolResult, error) {
+			// Open a child span tagged with the input text so we can
+			// verify each parallel call's ctx independently.
+			_, span := tracer.Start(ctx, "tool.work."+in.Text)
+			span.End()
+			return dive.NewToolResultText(in.Text), nil
+		},
+	)
+
+	ext := otelext.New(otelext.WithSystem("fake"))
+
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		Name:                  "ParallelTester",
+		Model:                 model,
+		Tools:                 []dive.Tool{echoTool},
+		Extensions:            []dive.Extension{ext},
+		LLMHooks:              ext.LLMHooks(),
+		ParallelToolExecution: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := otelext.Run(context.Background(), agent, dive.WithInput("go")); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if err := tp.ForceFlush(context.Background()); err != nil {
+		t.Fatalf("ForceFlush: %v", err)
+	}
+
+	// Build a name → SpanID and SpanID → ParentID lookup. For execute_tool
+	// spans, also remember which tool_call_id they cover.
+	executeToolByCallID := map[string]oteltrace.SpanID{} // call_id → execute_tool span id
+	parents := map[oteltrace.SpanID]oteltrace.SpanID{}   // span id → parent id
+	for _, s := range rec.Ended() {
+		parents[s.SpanContext().SpanID()] = s.Parent().SpanID()
+		if s.Name() == "execute_tool echo" {
+			for _, kv := range s.Attributes() {
+				if string(kv.Key) == otelext.AttrGenAIToolCallID {
+					executeToolByCallID[kv.Value.AsString()] = s.SpanContext().SpanID()
+				}
+			}
+		}
+	}
+
+	if len(executeToolByCallID) != 2 {
+		t.Fatalf("expected 2 execute_tool spans (one per parallel call), got %d", len(executeToolByCallID))
+	}
+
+	// Each tool.work.X span should be a child of the execute_tool span for
+	// its corresponding call ID. With UpdatedCtx wired correctly, each
+	// goroutine sees its OWN tool ctx — not childCtx, and not a sibling's.
+	for _, s := range rec.Ended() {
+		switch s.Name() {
+		case "tool.work.a":
+			if got := s.Parent().SpanID(); got != executeToolByCallID["call_a"] {
+				t.Errorf("tool.work.a parent = %s, want execute_tool[call_a] = %s",
+					got, executeToolByCallID["call_a"])
+			}
+		case "tool.work.b":
+			if got := s.Parent().SpanID(); got != executeToolByCallID["call_b"] {
+				t.Errorf("tool.work.b parent = %s, want execute_tool[call_b] = %s",
+					got, executeToolByCallID["call_b"])
+			}
+		}
+	}
+
+	// Reference parents to silence unused-variable on the lookup we built
+	// for debug ergonomics — keeping it around makes future asserts easy.
+	_ = parents
 }

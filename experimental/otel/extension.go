@@ -233,7 +233,10 @@ func (e *Extension) onSuspend(ctx context.Context, hctx *dive.HookContext) error
 }
 
 // preToolUse starts the execute_tool span and stashes it under a per-call
-// key on hctx.Values.
+// key on hctx.Values. It also publishes the new ctx (which carries the
+// span) via hctx.UpdatedCtx so the agent passes it into Tool.Call. Any
+// spans the tool emits internally (HTTP, DB, retrieval, …) then nest under
+// this execute_tool span.
 func (e *Extension) preToolUse(ctx context.Context, hctx *dive.HookContext) error {
 	if hctx.Call == nil {
 		return nil
@@ -247,11 +250,12 @@ func (e *Extension) preToolUse(ctx context.Context, hctx *dive.HookContext) erro
 	if e.opts.CaptureToolIO && len(hctx.Call.Input) > 0 {
 		attrs = append(attrs, attribute.String(AttrGenAIToolCallArgs, string(hctx.Call.Input)))
 	}
-	_, span := e.opts.Tracer.Start(ctx, OperationExecuteTool+" "+toolName,
+	toolCtx, span := e.opts.Tracer.Start(ctx, OperationExecuteTool+" "+toolName,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
 	hctx.Values[keyToolSpanPrefix+hctx.Call.ID] = span
+	hctx.UpdatedCtx = toolCtx
 	return nil
 }
 
