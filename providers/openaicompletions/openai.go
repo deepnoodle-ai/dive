@@ -122,20 +122,25 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	if err := config.FireHooks(ctx, &llm.HookContext{
+	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
-	}); err != nil {
+	}
+	if err := config.FireHooks(ctx, beforeHook); err != nil {
 		return nil, err
+	}
+	reqCtx := ctx
+	if beforeHook.UpdatedCtx != nil {
+		reqCtx = beforeHook.UpdatedCtx
 	}
 
 	var result Response
-	err = retry.DoSimple(ctx, func() error {
-		req, err := p.createRequest(ctx, body, config, false)
+	err = retry.DoSimple(reqCtx, func() error {
+		req, err := p.createRequest(reqCtx, body, config, false)
 		if err != nil {
 			return err
 		}
@@ -257,20 +262,25 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	if err := config.FireHooks(ctx, &llm.HookContext{
+	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
-	}); err != nil {
+	}
+	if err := config.FireHooks(ctx, beforeHook); err != nil {
 		return nil, err
+	}
+	reqCtx := ctx
+	if beforeHook.UpdatedCtx != nil {
+		reqCtx = beforeHook.UpdatedCtx
 	}
 
 	var stream *StreamIterator
-	err = retry.DoSimple(ctx, func() error {
-		req, err := p.createRequest(ctx, body, config, true)
+	err = retry.DoSimple(reqCtx, func() error {
+		req, err := p.createRequest(reqCtx, body, config, true)
 		if err != nil {
 			return err
 		}

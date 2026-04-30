@@ -96,6 +96,29 @@ when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Useful local backends:
 - **Jaeger**: `docker run -p 4318:4318 -p 16686:16686 -e COLLECTOR_OTLP_ENABLED=true jaegertracing/all-in-one:latest` → http://localhost:16686
 - **Phoenix** (best UI for agent traces): `docker run -p 6006:6006 -p 4318:4318 arizephoenix/phoenix:latest` → http://localhost:6006
 
+## Nesting under the chat span
+
+Spans your provider's HTTP client emits (e.g. `otelhttp` middleware on
+`http.Client.Transport`) parent under the `chat` span, not the agent span.
+This works because `BeforeGenerate` publishes the chat-span ctx via
+`llm.HookContext.UpdatedCtx`, and each Dive provider picks it up for the
+underlying HTTP/SDK request. Tool-internal spans nest under their
+`execute_tool` span via the same mechanism on the agent-level
+`HookContext.UpdatedCtx`. Custom providers wishing to support this should
+honor `UpdatedCtx` after firing `BeforeGenerate`:
+
+```go
+beforeHook := &llm.HookContext{Type: llm.BeforeGenerate, ...}
+if err := config.FireHooks(ctx, beforeHook); err != nil {
+    return nil, err
+}
+reqCtx := ctx
+if beforeHook.UpdatedCtx != nil {
+    reqCtx = beforeHook.UpdatedCtx
+}
+// use reqCtx for the HTTP/SDK call; keep using `ctx` for AfterGenerate.
+```
+
 ## Limitations
 
 - **Provider coverage:** `chat` spans are wired through `llm.Hooks`. All
@@ -104,9 +127,3 @@ when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Useful local backends:
   accumulation, so the contract is symmetric for both code paths. If a
   future provider doesn't fire `BeforeGenerate`, its calls will silently
   produce no chat spans.
-- **Chat-span ctx propagation:** Spans created inside an LLM provider's
-  HTTP client (e.g. via `otelhttp` middleware) currently parent under the
-  agent span, not the `chat` span. Tool-internal spans nest correctly
-  (the `execute_tool` ctx is plumbed through `HookContext.UpdatedCtx`);
-  doing the equivalent for chat spans would require each provider to use
-  the hook-derived ctx for its HTTP request.

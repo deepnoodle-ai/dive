@@ -79,24 +79,29 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, err
 	}
 
-	if err := config.FireHooks(ctx, &llm.HookContext{
+	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: config.Messages,
 			Config:   config,
 		},
-	}); err != nil {
+	}
+	if err := config.FireHooks(ctx, beforeHook); err != nil {
 		return nil, err
+	}
+	reqCtx := ctx
+	if beforeHook.UpdatedCtx != nil {
+		reqCtx = beforeHook.UpdatedCtx
 	}
 
 	var resp *responses.Response
-	err = retry.DoSimple(ctx, func() error {
+	err = retry.DoSimple(reqCtx, func() error {
 		reqOpts := append([]option.RequestOption{
 			option.WithRequestTimeout(5 * time.Minute),
 			option.WithHTTPClient(p.httpClient),
 		}, p.extraRequestOptions...)
 		resp, err = p.client.Responses.New(
-			ctx,
+			reqCtx,
 			params,
 			reqOpts...,
 		)
@@ -125,14 +130,19 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
-	if err := config.FireHooks(ctx, &llm.HookContext{
+	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: config.Messages,
 			Config:   config,
 		},
-	}); err != nil {
+	}
+	if err := config.FireHooks(ctx, beforeHook); err != nil {
 		return nil, err
+	}
+	reqCtx := ctx
+	if beforeHook.UpdatedCtx != nil {
+		reqCtx = beforeHook.UpdatedCtx
 	}
 
 	streamOpts := append([]option.RequestOption{
@@ -140,7 +150,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		option.WithHTTPClient(p.httpClient),
 	}, p.extraRequestOptions...)
 	streamSDK := p.client.Responses.NewStreaming(
-		ctx,
+		reqCtx,
 		params,
 		streamOpts...,
 	)

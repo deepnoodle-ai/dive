@@ -329,11 +329,17 @@ func (e *Extension) beforeGenerate(ctx context.Context, hctx *llm.HookContext) e
 	if cfg.Model != "" {
 		spanName = OperationChat + " " + cfg.Model
 	}
-	_, span := e.opts.Tracer.Start(ctx, spanName,
+	chatCtx, span := e.opts.Tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
 	e.enqueueChatSpan(ctx, span)
+	// Publish the chat-span ctx so the provider uses it for the underlying
+	// HTTP/SDK request. HTTP-client middleware (e.g. otelhttp) will then
+	// nest its spans under this chat span. The provider continues to use
+	// the original ctx for AfterGenerate, so our queue lookup still
+	// matches.
+	hctx.UpdatedCtx = chatCtx
 	return nil
 }
 

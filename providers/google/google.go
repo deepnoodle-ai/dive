@@ -118,21 +118,26 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	if err := config.FireHooks(ctx, &llm.HookContext{
+	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
 		},
-	}); err != nil {
+	}
+	if err := config.FireHooks(ctx, beforeHook); err != nil {
 		return nil, err
+	}
+	reqCtx := ctx
+	if beforeHook.UpdatedCtx != nil {
+		reqCtx = beforeHook.UpdatedCtx
 	}
 
 	var result *llm.Response
-	err = retry.DoSimple(ctx, func() error {
+	err = retry.DoSimple(reqCtx, func() error {
 		// Use Models.GenerateContent directly
-		resp, err := p.client.Models.GenerateContent(ctx, request.Model, contents, genConfig)
+		resp, err := p.client.Models.GenerateContent(reqCtx, request.Model, contents, genConfig)
 		if err != nil {
 			return wrapGoogleError(err)
 		}

@@ -19,11 +19,21 @@ import (
 )
 
 // fakeLLM is a minimal llm.LLM that returns scripted responses and (when so
-// scripted) issues a tool call before producing a final assistant text.
+// scripted) issues a tool call before producing a final assistant text. It
+// mirrors real-provider semantics for HookContext.UpdatedCtx: if a
+// BeforeGenerate hook publishes an updated ctx, the optional onRequest
+// callback is invoked with that ctx (acting as the synthetic HTTP boundary),
+// while AfterGenerate is fired on the original ctx.
 type fakeLLM struct {
 	name      string
 	responses []*llm.Response
 	idx       int
+
+	// onRequest, if set, is called with the ctx the provider would use for
+	// the underlying HTTP/SDK request (post-UpdatedCtx pickup). Tests use
+	// this to open a synthetic HTTP span and verify it nests under the
+	// chat span.
+	onRequest func(ctx context.Context)
 }
 
 func (f *fakeLLM) Name() string { return f.name }
@@ -33,7 +43,7 @@ func (f *fakeLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respon
 	cfg.Apply(opts...)
 
 	body := []byte("{}")
-	hctx := &llm.HookContext{
+	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: cfg.Messages,
@@ -41,8 +51,15 @@ func (f *fakeLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respon
 			Body:     body,
 		},
 	}
-	if err := cfg.FireHooks(ctx, hctx); err != nil {
+	if err := cfg.FireHooks(ctx, beforeHook); err != nil {
 		return nil, err
+	}
+	reqCtx := ctx
+	if beforeHook.UpdatedCtx != nil {
+		reqCtx = beforeHook.UpdatedCtx
+	}
+	if f.onRequest != nil {
+		f.onRequest(reqCtx)
 	}
 
 	if f.idx >= len(f.responses) {
@@ -51,7 +68,7 @@ func (f *fakeLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respon
 	resp := f.responses[f.idx]
 	f.idx++
 
-	hctx = &llm.HookContext{
+	hctx := &llm.HookContext{
 		Type: llm.AfterGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: cfg.Messages,
@@ -392,4 +409,85 @@ func TestExtension_CtxPropagation_ParallelTools(t *testing.T) {
 	// Reference parents to silence unused-variable on the lookup we built
 	// for debug ergonomics — keeping it around makes future asserts easy.
 	_ = parents
+}
+
+// TestExtension_ChatSpanCtxPropagation verifies that a span opened from the
+// ctx the provider receives after BeforeGenerate (i.e. HookContext.UpdatedCtx
+// pickup) parents under the chat span. This is the contract that lets
+// otelhttp middleware on the provider's HTTP client nest under chat.
+func TestExtension_ChatSpanCtxPropagation(t *testing.T) {
+	tp, rec := newRecordingProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(otel.GetTracerProvider())
+
+	tracer := tp.Tracer("test")
+
+	// fakeLLM opens a "fake.http" span on the ctx it would use for the
+	// underlying HTTP call — i.e. the post-UpdatedCtx ctx from the
+	// BeforeGenerate hook.
+	var httpSpanIDs []oteltrace.SpanID
+	model := &fakeLLM{
+		name: "fake-model-ctx",
+		responses: []*llm.Response{
+			{
+				ID:    "msg_1",
+				Model: "fake-model-ctx",
+				Role:  llm.Assistant,
+				Content: []llm.Content{
+					&llm.TextContent{Text: "hello"},
+				},
+				Usage:      llm.Usage{InputTokens: 1, OutputTokens: 1},
+				StopReason: "end_turn",
+			},
+		},
+		onRequest: func(ctx context.Context) {
+			_, span := tracer.Start(ctx, "fake.http")
+			httpSpanIDs = append(httpSpanIDs, span.SpanContext().SpanID())
+			span.End()
+		},
+	}
+
+	ext := otelext.New(otelext.WithSystem("fake"))
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		Name:       "CtxTester",
+		Model:      model,
+		Extensions: []dive.Extension{ext},
+		LLMHooks:   ext.LLMHooks(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := otelext.Run(context.Background(), agent, dive.WithInput("hi")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := tp.ForceFlush(context.Background()); err != nil {
+		t.Fatalf("ForceFlush: %v", err)
+	}
+
+	if len(httpSpanIDs) != 1 {
+		t.Fatalf("expected 1 fake.http span, got %d", len(httpSpanIDs))
+	}
+
+	// Find the chat span ID and verify fake.http parents under it.
+	var chatSpanID oteltrace.SpanID
+	for _, s := range rec.Ended() {
+		for _, kv := range s.Attributes() {
+			if string(kv.Key) == otelext.AttrGenAIOperationName && kv.Value.AsString() == "chat" {
+				chatSpanID = s.SpanContext().SpanID()
+			}
+		}
+	}
+	if !chatSpanID.IsValid() {
+		t.Fatalf("did not find chat span")
+	}
+	for _, s := range rec.Ended() {
+		if s.Name() != "fake.http" {
+			continue
+		}
+		if got := s.Parent().SpanID(); got != chatSpanID {
+			t.Errorf("fake.http parent = %s, want chat span %s — chat-ctx propagation through BeforeGenerate is broken",
+				got, chatSpanID)
+		}
+	}
 }

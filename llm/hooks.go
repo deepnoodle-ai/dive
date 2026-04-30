@@ -29,6 +29,17 @@ type HookContext struct {
 	Type     HookType             `json:"type"`
 	Request  *HookRequestContext  `json:"request,omitempty"`
 	Response *HookResponseContext `json:"response,omitempty"`
+
+	// UpdatedCtx, if set by a BeforeGenerate hook, replaces the context the
+	// provider uses for the underlying HTTP/SDK request. Mirrors
+	// dive.HookContext.UpdatedCtx. Useful for OTel: the otel extension sets
+	// this to the chat-span ctx so HTTP-client middleware (e.g. otelhttp)
+	// nests provider HTTP spans under the chat span.
+	//
+	// Providers MUST honor this for the request that follows BeforeGenerate
+	// but MUST keep using the original ctx for AfterGenerate so observers
+	// that pair Before/After by ctx identity continue to work.
+	UpdatedCtx context.Context `json:"-"`
 }
 
 // Hook is a function that gets called during LLM operations
