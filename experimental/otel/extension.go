@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
@@ -373,6 +374,11 @@ func (e *Extension) dequeueChatSpan(ctx context.Context) trace.Span {
 func (e *Extension) afterGenerate(ctx context.Context, hctx *llm.HookContext) error {
 	span := e.dequeueChatSpan(ctx)
 	if span == nil {
+		// AfterGenerate fired without a matching BeforeGenerate ctx in the
+		// queue. The most likely cause is a provider that uses the
+		// post-UpdatedCtx ctx for AfterGenerate instead of the original.
+		// See HookContext.UpdatedCtx contract in llm/hooks.go.
+		slog.Default().DebugContext(ctx, "otel: chat span queue miss on AfterGenerate — provider may be violating HookContext.UpdatedCtx contract")
 		return nil
 	}
 	defer span.End()
@@ -419,6 +425,9 @@ func (e *Extension) afterGenerate(ctx context.Context, hctx *llm.HookContext) er
 func (e *Extension) onError(ctx context.Context, hctx *llm.HookContext) error {
 	span := e.dequeueChatSpan(ctx)
 	if span == nil {
+		// Either the chat span was already ended by AfterGenerate, or the
+		// provider used the post-UpdatedCtx ctx (contract violation).
+		slog.Default().DebugContext(ctx, "otel: chat span queue miss on OnError")
 		return nil
 	}
 	defer span.End()

@@ -81,6 +81,87 @@ func (f *fakeLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respon
 	return resp, nil
 }
 
+// streamingFakeLLM is the streaming counterpart of fakeLLM. It implements
+// llm.StreamingLLM so the agent dispatches through generateStreaming, which
+// is the path that exercises AfterGenerate firing from the agent (not from
+// the provider). Same UpdatedCtx semantics as fakeLLM: BeforeGenerate fires
+// inside Stream(); the post-UpdatedCtx ctx is handed to onRequest.
+type streamingFakeLLM struct {
+	name      string
+	responses []*llm.Response
+	idx       int
+	onRequest func(ctx context.Context)
+}
+
+func (f *streamingFakeLLM) Name() string { return f.name }
+
+func (f *streamingFakeLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+	return nil, errors.New("streamingFakeLLM: Generate not supported in this test")
+}
+
+func (f *streamingFakeLLM) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
+	cfg := &llm.Config{}
+	cfg.Apply(opts...)
+
+	beforeHook := &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.HookRequestContext{
+			Messages: cfg.Messages,
+			Config:   cfg,
+			Body:     []byte("{}"),
+		},
+	}
+	if err := cfg.FireHooks(ctx, beforeHook); err != nil {
+		return nil, err
+	}
+	reqCtx := ctx
+	if beforeHook.UpdatedCtx != nil {
+		reqCtx = beforeHook.UpdatedCtx
+	}
+	if f.onRequest != nil {
+		f.onRequest(reqCtx)
+	}
+
+	if f.idx >= len(f.responses) {
+		return nil, errors.New("streamingFakeLLM: no more scripted responses")
+	}
+	resp := f.responses[f.idx]
+	f.idx++
+
+	// Synthesize the minimum event sequence that ResponseAccumulator
+	// accepts: a MessageStart that carries the full response (content
+	// already populated), then a MessageStop. finalizeContent skips
+	// rebuilding content when the contentBlocks map is empty, so the
+	// response we set on MessageStart survives intact.
+	events := []*llm.Event{
+		{Type: llm.EventTypeMessageStart, Message: resp},
+		{Type: llm.EventTypeMessageStop},
+	}
+	return &sliceStreamIterator{events: events}, nil
+}
+
+// sliceStreamIterator emits a fixed slice of events. Sufficient for tests
+// that don't care about delta semantics — only about the BeforeGenerate /
+// AfterGenerate ctx contract.
+type sliceStreamIterator struct {
+	events []*llm.Event
+	i      int
+	cur    *llm.Event
+}
+
+func (s *sliceStreamIterator) Next() bool {
+	if s.i >= len(s.events) {
+		return false
+	}
+	s.cur = s.events[s.i]
+	s.i++
+	return true
+}
+
+func (s *sliceStreamIterator) Event() *llm.Event { return s.cur }
+func (s *sliceStreamIterator) Err() error        { return nil }
+func (s *sliceStreamIterator) Close() error      { return nil }
+
 func newRecordingProvider() (*trace.TracerProvider, *tracetest.SpanRecorder) {
 	rec := tracetest.NewSpanRecorder()
 	tp := trace.NewTracerProvider(trace.WithSpanProcessor(rec))
@@ -487,6 +568,94 @@ func TestExtension_ChatSpanCtxPropagation(t *testing.T) {
 		}
 		if got := s.Parent().SpanID(); got != chatSpanID {
 			t.Errorf("fake.http parent = %s, want chat span %s — chat-ctx propagation through BeforeGenerate is broken",
+				got, chatSpanID)
+		}
+	}
+}
+
+// TestExtension_ChatSpanCtxPropagation_Streaming is the streaming-path twin
+// of TestExtension_ChatSpanCtxPropagation. The streaming path is structurally
+// different: providers fire BeforeGenerate from Stream() but the agent (not
+// the provider) fires AfterGenerate after iterator accumulation. This test
+// locks in the contract that both paths produce identically-parented
+// fake.http spans.
+func TestExtension_ChatSpanCtxPropagation_Streaming(t *testing.T) {
+	tp, rec := newRecordingProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(otel.GetTracerProvider())
+
+	tracer := tp.Tracer("test")
+
+	var httpSpanIDs []oteltrace.SpanID
+	model := &streamingFakeLLM{
+		name: "fake-streaming-ctx",
+		responses: []*llm.Response{
+			{
+				ID:    "msg_1",
+				Model: "fake-streaming-ctx",
+				Role:  llm.Assistant,
+				Content: []llm.Content{
+					&llm.TextContent{Text: "hello"},
+				},
+				Usage:      llm.Usage{InputTokens: 1, OutputTokens: 1},
+				StopReason: "end_turn",
+			},
+		},
+		onRequest: func(ctx context.Context) {
+			_, span := tracer.Start(ctx, "fake.http")
+			httpSpanIDs = append(httpSpanIDs, span.SpanContext().SpanID())
+			span.End()
+		},
+	}
+
+	ext := otelext.New(otelext.WithSystem("fake"))
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		Name:       "CtxTesterStreaming",
+		Model:      model,
+		Extensions: []dive.Extension{ext},
+		LLMHooks:   ext.LLMHooks(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := otelext.Run(context.Background(), agent, dive.WithInput("hi")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := tp.ForceFlush(context.Background()); err != nil {
+		t.Fatalf("ForceFlush: %v", err)
+	}
+
+	if len(httpSpanIDs) != 1 {
+		t.Fatalf("expected 1 fake.http span, got %d", len(httpSpanIDs))
+	}
+
+	var chatSpanID oteltrace.SpanID
+	chatSpansEnded := 0
+	for _, s := range rec.Ended() {
+		for _, kv := range s.Attributes() {
+			if string(kv.Key) == otelext.AttrGenAIOperationName && kv.Value.AsString() == "chat" {
+				chatSpanID = s.SpanContext().SpanID()
+				chatSpansEnded++
+			}
+		}
+	}
+	if !chatSpanID.IsValid() {
+		t.Fatalf("did not find chat span")
+	}
+	// The agent's fireLLMAfterGenerate must end the chat span — if streaming
+	// providers stopped firing AfterGenerate themselves and the agent's
+	// closing call regressed, the chat span would never end and wouldn't
+	// appear in rec.Ended(). Asserting >=1 catches that regression.
+	if chatSpansEnded < 1 {
+		t.Fatalf("expected the streaming chat span to be ended (via agent.fireLLMAfterGenerate), saw %d ended chat spans", chatSpansEnded)
+	}
+	for _, s := range rec.Ended() {
+		if s.Name() != "fake.http" {
+			continue
+		}
+		if got := s.Parent().SpanID(); got != chatSpanID {
+			t.Errorf("fake.http parent = %s, want chat span %s — chat-ctx propagation in the streaming path is broken",
 				got, chatSpanID)
 		}
 	}

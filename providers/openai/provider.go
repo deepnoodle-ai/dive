@@ -54,6 +54,10 @@ func New(opts ...Option) *Provider {
 	for _, opt := range opts {
 		opt(p)
 	}
+	// Bake the HTTP client into the SDK client at construction time so
+	// per-request options don't have to re-specify it. WithClient only
+	// updates p.httpClient; the actual plumbing happens here.
+	p.options = append(p.options, option.WithHTTPClient(p.httpClient))
 	p.client = openai.NewClient(p.options...)
 	return p
 }
@@ -98,7 +102,6 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	err = retry.DoSimple(reqCtx, func() error {
 		reqOpts := append([]option.RequestOption{
 			option.WithRequestTimeout(5 * time.Minute),
-			option.WithHTTPClient(p.httpClient),
 		}, p.extraRequestOptions...)
 		resp, err = p.client.Responses.New(
 			reqCtx,
@@ -147,7 +150,6 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 
 	streamOpts := append([]option.RequestOption{
 		option.WithRequestTimeout(5 * time.Minute),
-		option.WithHTTPClient(p.httpClient),
 	}, p.extraRequestOptions...)
 	streamSDK := p.client.Responses.NewStreaming(
 		reqCtx,

@@ -108,7 +108,14 @@ underlying HTTP/SDK request. Tool-internal spans nest under their
 honor `UpdatedCtx` after firing `BeforeGenerate`:
 
 ```go
-beforeHook := &llm.HookContext{Type: llm.BeforeGenerate, ...}
+beforeHook := &llm.HookContext{
+    Type: llm.BeforeGenerate,
+    Request: &llm.HookRequestContext{
+        Messages: config.Messages,
+        Config:   config,
+        Body:     body,
+    },
+}
 if err := config.FireHooks(ctx, beforeHook); err != nil {
     return nil, err
 }
@@ -116,7 +123,8 @@ reqCtx := ctx
 if beforeHook.UpdatedCtx != nil {
     reqCtx = beforeHook.UpdatedCtx
 }
-// use reqCtx for the HTTP/SDK call; keep using `ctx` for AfterGenerate.
+// use reqCtx for the HTTP/SDK call; keep using `ctx` for AfterGenerate
+// so observers that pair Before/After by ctx identity still match.
 ```
 
 ## Limitations

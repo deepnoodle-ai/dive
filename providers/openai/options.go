@@ -23,11 +23,12 @@ func WithEndpoint(endpoint string) Option {
 	}
 }
 
-// WithClient sets the HTTP client.
+// WithClient sets the HTTP client used for every request to the OpenAI API.
+// The constructor flows p.httpClient into the SDK client via
+// option.WithHTTPClient — see New.
 func WithClient(client *http.Client) Option {
 	return func(p *Provider) {
 		p.httpClient = client
-		p.options = append(p.options, option.WithHTTPClient(client))
 	}
 }
 
