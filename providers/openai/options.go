@@ -26,6 +26,7 @@ func WithEndpoint(endpoint string) Option {
 // WithClient sets the HTTP client.
 func WithClient(client *http.Client) Option {
 	return func(p *Provider) {
+		p.httpClient = client
 		p.options = append(p.options, option.WithHTTPClient(client))
 	}
 }
