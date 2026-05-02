@@ -6,6 +6,13 @@ package otel
 // flagged "experimental" in OTel; we mirror them verbatim so destinations
 // (Datadog, Honeycomb, Phoenix, Langfuse, Mobius) decode out of the box.
 const (
+	AttrMobiusRunID   = "mobius.run.id"
+	AttrMobiusStepID  = "mobius.step.id"
+	AttrMobiusJobID   = "mobius.job.id"
+	AttrMobiusAgentID = "mobius.agent.id"
+)
+
+const (
 	AttrGenAISystem        = "gen_ai.system"
 	AttrGenAIOperationName = "gen_ai.operation.name"
 
@@ -21,15 +28,15 @@ const (
 	AttrGenAIUsageOutputTokens = "gen_ai.usage.output_tokens"
 
 	// gen_ai.input.messages and gen_ai.output.messages are opt-in (privacy).
-	AttrGenAIInputMessages       = "gen_ai.input.messages"
-	AttrGenAIOutputMessages      = "gen_ai.output.messages"
-	AttrGenAISystemInstructions  = "gen_ai.system_instructions"
+	AttrGenAIInputMessages      = "gen_ai.input.messages"
+	AttrGenAIOutputMessages     = "gen_ai.output.messages"
+	AttrGenAISystemInstructions = "gen_ai.system_instructions"
 
-	AttrGenAIToolName        = "gen_ai.tool.name"
-	AttrGenAIToolType        = "gen_ai.tool.type"
-	AttrGenAIToolCallID      = "gen_ai.tool.call.id"
-	AttrGenAIToolCallArgs    = "gen_ai.tool.call.arguments"
-	AttrGenAIToolCallResult  = "gen_ai.tool.call.result"
+	AttrGenAIToolName       = "gen_ai.tool.name"
+	AttrGenAIToolType       = "gen_ai.tool.type"
+	AttrGenAIToolCallID     = "gen_ai.tool.call.id"
+	AttrGenAIToolCallArgs   = "gen_ai.tool.call.arguments"
+	AttrGenAIToolCallResult = "gen_ai.tool.call.result"
 
 	AttrGenAIAgentName        = "gen_ai.agent.name"
 	AttrGenAIAgentDescription = "gen_ai.agent.description"

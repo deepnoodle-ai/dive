@@ -25,7 +25,6 @@
 //	    Model:        anthropic.New(),
 //	    SystemPrompt: "You are an enthusiastic researcher.",
 //	    Extensions:   []dive.Extension{ext},
-//	    LLMHooks:     ext.LLMHooks(),
 //	})
 //
 //	// Use Run to open the invoke_agent span so chat/tool spans nest under it.

@@ -42,8 +42,8 @@ type Options struct {
 	CaptureToolIO bool
 
 	// Attributes are added to every span this Extension produces. Useful for
-	// resource-style identifiers (mobius.run.id, mobius.step.id, …) that the
-	// destination uses for correlation.
+	// resource-style identifiers (for example AttrMobiusRunID and
+	// AttrMobiusStepID) that the destination uses for correlation.
 	Attributes []attribute.KeyValue
 }
 
@@ -69,7 +69,7 @@ func WithCaptureToolIO(b bool) Option {
 }
 
 // WithAttributes adds attributes to every emitted span. Useful for
-// correlation keys like mobius.run.id / mobius.step.id.
+// correlation keys like AttrMobiusRunID / AttrMobiusStepID.
 func WithAttributes(a ...attribute.KeyValue) Option {
 	return func(o *Options) { o.Attributes = append(o.Attributes, a...) }
 }
@@ -149,8 +149,8 @@ func (e *Extension) Hooks() dive.Hooks {
 	}
 }
 
-// LLMHooks returns the provider-level hooks that emit chat spans. Wire these
-// on AgentOptions.LLMHooks alongside the Extension on AgentOptions.Extensions.
+// LLMHooks returns the provider-level hooks that emit chat spans. NewAgent
+// wires these automatically when the extension is passed via AgentOptions.Extensions.
 func (e *Extension) LLMHooks() llm.Hooks {
 	return llm.Hooks{
 		{Type: llm.BeforeGenerate, Func: e.beforeGenerate},

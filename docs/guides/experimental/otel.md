@@ -43,18 +43,17 @@ otel.SetTracerProvider(tp)
 ext := otelext.New(
     otelext.WithSystem("anthropic"),
     otelext.WithAttributes(
-        attribute.String("mobius.run.id", runID),
-        attribute.String("mobius.step.id", stepID),
+        attribute.String(otelext.AttrMobiusRunID, runID),
+        attribute.String(otelext.AttrMobiusStepID, stepID),
     ),
 )
 
-// 3. Wire BOTH the Extension (agent + tool spans) and ext.LLMHooks() (chat
-//    spans, fired at the provider layer).
+// 3. Add the Extension. It contributes both agent-level hooks (agent + tool
+//    spans) and provider-level LLM hooks (chat spans).
 agent, _ := dive.NewAgent(dive.AgentOptions{
     Name:         "Research Assistant",
     Model:        anthropic.New(),
     Extensions:   []dive.Extension{ext},
-    LLMHooks:     ext.LLMHooks(),
 })
 
 // 4. Use otelext.Run instead of agent.CreateResponse so chat / tool spans
@@ -85,8 +84,8 @@ status — just not the raw text.
 | `chat` | `gen_ai.system`, `gen_ai.operation.name=chat`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.*`, optional `gen_ai.input.messages` / `gen_ai.output.messages` |
 | `execute_tool` | `gen_ai.system`, `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, optional `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result` |
 
-Resource-style identifiers passed via `WithAttributes` (e.g. `mobius.run.id`)
-are added to every span.
+Resource-style identifiers passed via `WithAttributes` (e.g.
+`otelext.AttrMobiusRunID`) are added to every span.
 
 ## Local development
 

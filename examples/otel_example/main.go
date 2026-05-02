@@ -73,8 +73,8 @@ func main() {
 		// Resource-style identifiers any backend can correlate on. Mobius
 		// uses these to attach spans to the right run/step.
 		otelext.WithAttributes(
-			attribute.String("mobius.run.id", "demo_run_1"),
-			attribute.String("mobius.step.id", "demo_step_1"),
+			attribute.String(otelext.AttrMobiusRunID, "demo_run_1"),
+			attribute.String(otelext.AttrMobiusStepID, "demo_step_1"),
 		),
 	)
 
@@ -93,7 +93,6 @@ func main() {
 		Model:        anthropic.New(anthropic.WithClient(httpClient)),
 		Tools:        []dive.Tool{weather},
 		Extensions:   []dive.Extension{ext},
-		LLMHooks:     ext.LLMHooks(),
 	})
 	if err != nil {
 		log.Fatal(err)

@@ -91,6 +91,13 @@ type Extension interface {
 	Rules() string
 }
 
+// LLMHookExtension is implemented by extensions that also need provider-level
+// LLM hooks. NewAgent merges these hooks alongside the agent-level hooks from
+// Extension.Hooks.
+type LLMHookExtension interface {
+	LLMHooks() llm.Hooks
+}
+
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
 	// SystemPrompt is the system prompt sent to the LLM.
@@ -201,6 +208,9 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		opts.Hooks.Stop = append(opts.Hooks.Stop, extHooks.Stop...)
 		opts.Hooks.PreIteration = append(opts.Hooks.PreIteration, extHooks.PreIteration...)
 		opts.Hooks.OnSuspend = append(opts.Hooks.OnSuspend, extHooks.OnSuspend...)
+		if llmExt, ok := ext.(LLMHookExtension); ok {
+			opts.LLMHooks = append(opts.LLMHooks, llmExt.LLMHooks()...)
+		}
 		if rules := ext.Rules(); rules != "" {
 			opts.SystemPrompt = strings.TrimRight(opts.SystemPrompt, "\n") + "\n\n" + rules
 		}

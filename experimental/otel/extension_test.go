@@ -217,7 +217,7 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 		otelext.WithSystem("fake"),
 		otelext.WithCaptureToolIO(true),
 		otelext.WithCaptureMessages(true),
-		otelext.WithAttributes(attribute.String("mobius.run.id", "run_test")),
+		otelext.WithAttributes(attribute.String(otelext.AttrMobiusRunID, "run_test")),
 	)
 
 	agent, err := dive.NewAgent(dive.AgentOptions{
@@ -226,7 +226,6 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 		SystemPrompt: "you are a test agent",
 		Tools:        []dive.Tool{echoTool},
 		Extensions:   []dive.Extension{ext},
-		LLMHooks:     ext.LLMHooks(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -371,8 +370,8 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 		if got[otelext.AttrGenAIToolCallID] != "call_1" {
 			t.Errorf("execute_tool span call id: %v", got[otelext.AttrGenAIToolCallID])
 		}
-		if got["mobius.run.id"] != "run_test" {
-			t.Errorf("execute_tool span missing mobius.run.id attribute")
+		if got[otelext.AttrMobiusRunID] != "run_test" {
+			t.Errorf("execute_tool span missing %s attribute", otelext.AttrMobiusRunID)
 		}
 		if _, ok := got[otelext.AttrGenAIToolCallArgs]; !ok {
 			t.Errorf("execute_tool span missing gen_ai.tool.call.arguments (CaptureToolIO=true)")
@@ -436,7 +435,6 @@ func TestExtension_CtxPropagation_ParallelTools(t *testing.T) {
 		Model:                 model,
 		Tools:                 []dive.Tool{echoTool},
 		Extensions:            []dive.Extension{ext},
-		LLMHooks:              ext.LLMHooks(),
 		ParallelToolExecution: true,
 	})
 	if err != nil {
@@ -533,7 +531,6 @@ func TestExtension_ChatSpanCtxPropagation(t *testing.T) {
 		Name:       "CtxTester",
 		Model:      model,
 		Extensions: []dive.Extension{ext},
-		LLMHooks:   ext.LLMHooks(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -613,7 +610,6 @@ func TestExtension_ChatSpanCtxPropagation_Streaming(t *testing.T) {
 		Name:       "CtxTesterStreaming",
 		Model:      model,
 		Extensions: []dive.Extension{ext},
-		LLMHooks:   ext.LLMHooks(),
 	})
 	if err != nil {
 		t.Fatal(err)
