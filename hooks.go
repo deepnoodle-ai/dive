@@ -49,13 +49,13 @@ import (
 // All hook types receive a *HookContext. Fields are populated based on
 // the hook phase:
 //
-//   - PreGeneration: Agent, Values, SystemPrompt, Messages
-//   - PostGeneration: Agent, Values, SystemPrompt, Messages, Response, OutputMessages, Usage
-//   - PreToolUse: Agent, Values, Tool, Call
-//   - PostToolUse: Agent, Values, Tool, Call, Result
-//   - PostToolUseFailure: Agent, Values, Tool, Call, Result
-//   - Stop: Agent, Values, Response, OutputMessages, Usage, StopHookActive
-//   - PreIteration: Agent, Values, SystemPrompt, Messages, Iteration
+//   - PreGeneration: Agent, Session, Values, SystemPrompt, Messages
+//   - PostGeneration: Agent, Session, Values, SystemPrompt, Messages, Response, OutputMessages, Usage
+//   - PreToolUse: Agent, Session, Values, Tool, Call
+//   - PostToolUse: Agent, Session, Values, Tool, Call, Result
+//   - PostToolUseFailure: Agent, Session, Values, Tool, Call, Result
+//   - Stop: Agent, Session, Values, Response, OutputMessages, Usage, StopHookActive
+//   - PreIteration: Agent, Session, Values, SystemPrompt, Messages, Iteration
 //
 // The Values map allows hooks to communicate with each other by storing
 // arbitrary data that persists across the hook chain within a single
@@ -65,6 +65,12 @@ type HookContext struct {
 
 	// Agent is the agent running the generation.
 	Agent *Agent
+
+	// Session is the active session for this CreateResponse call (per-call
+	// override via WithSession takes priority over AgentOptions.Session).
+	// Nil for stateless calls. Hooks can read Session.ID() to attach
+	// gen_ai.conversation.id or correlate work across turns.
+	Session Session
 
 	// Values provides arbitrary storage for hooks to communicate.
 	// Persists across all phases within one CreateResponse call.

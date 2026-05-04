@@ -128,6 +128,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
+			Endpoint: p.endpoint,
 		},
 	}
 	if err := config.FireHooks(ctx, beforeHook); err != nil {
@@ -219,6 +220,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
+			Endpoint: p.endpoint,
 		},
 		Response: &llm.HookResponseContext{
 			Response: response,
@@ -265,9 +267,11 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: config.Messages,
-			Config:   config,
-			Body:     body,
+			Messages:  config.Messages,
+			Config:    config,
+			Body:      body,
+			Endpoint:  p.endpoint,
+			Streaming: true,
 		},
 	}
 	if err := config.FireHooks(ctx, beforeHook); err != nil {

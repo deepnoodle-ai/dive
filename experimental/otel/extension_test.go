@@ -249,7 +249,7 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 	for _, s := range spans {
 		op := ""
 		for _, kv := range s.Attributes() {
-			if string(kv.Key) == otelext.AttrGenAIOperationName {
+			if string(kv.Key) == "gen_ai.operation.name" {
 				op = kv.Value.AsString()
 			}
 		}
@@ -291,7 +291,7 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 	var agentSpanID string
 	for _, s := range spans {
 		for _, kv := range s.Attributes() {
-			if string(kv.Key) == otelext.AttrGenAIOperationName && kv.Value.AsString() == "invoke_agent" {
+			if string(kv.Key) == "gen_ai.operation.name" && kv.Value.AsString() == "invoke_agent" {
 				agentSpanID = s.SpanContext().SpanID().String()
 			}
 		}
@@ -302,7 +302,7 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 	for _, s := range spans {
 		op := ""
 		for _, kv := range s.Attributes() {
-			if string(kv.Key) == otelext.AttrGenAIOperationName {
+			if string(kv.Key) == "gen_ai.operation.name" {
 				op = kv.Value.AsString()
 			}
 		}
@@ -319,7 +319,7 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 	for _, s := range spans {
 		op := ""
 		for _, kv := range s.Attributes() {
-			if string(kv.Key) == otelext.AttrGenAIOperationName {
+			if string(kv.Key) == "gen_ai.operation.name" {
 				op = kv.Value.AsString()
 			}
 		}
@@ -333,13 +333,13 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 		// Either gen_ai.request.model or gen_ai.response.model should be set
 		// to the model name. Providers that don't echo cfg.Model leave the
 		// request attr falling back to resp.Model.
-		if got[otelext.AttrGenAIResponseModel] != "fake-model-1" {
-			t.Errorf("chat span missing/wrong gen_ai.response.model: %v", got[otelext.AttrGenAIResponseModel])
+		if got["gen_ai.response.model"] != "fake-model-1" {
+			t.Errorf("chat span missing/wrong gen_ai.response.model: %v", got["gen_ai.response.model"])
 		}
-		if got[otelext.AttrGenAISystem] != "fake" {
-			t.Errorf("chat span missing gen_ai.system: %v", got[otelext.AttrGenAISystem])
+		if got["gen_ai.system"] != "fake" {
+			t.Errorf("chat span missing gen_ai.system: %v", got["gen_ai.system"])
 		}
-		if _, ok := got[otelext.AttrGenAIInputMessages]; !ok {
+		if _, ok := got["gen_ai.input.messages"]; !ok {
 			t.Errorf("chat span missing gen_ai.input.messages (CaptureMessages=true)")
 		}
 		sawChatAttrs = true
@@ -353,7 +353,7 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 	for _, s := range spans {
 		op := ""
 		for _, kv := range s.Attributes() {
-			if string(kv.Key) == otelext.AttrGenAIOperationName {
+			if string(kv.Key) == "gen_ai.operation.name" {
 				op = kv.Value.AsString()
 			}
 		}
@@ -364,16 +364,16 @@ func TestExtension_EmitsAgentChatToolSpans(t *testing.T) {
 		for _, kv := range s.Attributes() {
 			got[string(kv.Key)] = kv.Value.AsInterface()
 		}
-		if got[otelext.AttrGenAIToolName] != "echo" {
-			t.Errorf("execute_tool span tool name: %v", got[otelext.AttrGenAIToolName])
+		if got["gen_ai.tool.name"] != "echo" {
+			t.Errorf("execute_tool span tool name: %v", got["gen_ai.tool.name"])
 		}
-		if got[otelext.AttrGenAIToolCallID] != "call_1" {
-			t.Errorf("execute_tool span call id: %v", got[otelext.AttrGenAIToolCallID])
+		if got["gen_ai.tool.call.id"] != "call_1" {
+			t.Errorf("execute_tool span call id: %v", got["gen_ai.tool.call.id"])
 		}
 		if got[otelext.AttrMobiusRunID] != "run_test" {
 			t.Errorf("execute_tool span missing %s attribute", otelext.AttrMobiusRunID)
 		}
-		if _, ok := got[otelext.AttrGenAIToolCallArgs]; !ok {
+		if _, ok := got["gen_ai.tool.call.arguments"]; !ok {
 			t.Errorf("execute_tool span missing gen_ai.tool.call.arguments (CaptureToolIO=true)")
 		}
 	}
@@ -456,7 +456,7 @@ func TestExtension_CtxPropagation_ParallelTools(t *testing.T) {
 		parents[s.SpanContext().SpanID()] = s.Parent().SpanID()
 		if s.Name() == "execute_tool echo" {
 			for _, kv := range s.Attributes() {
-				if string(kv.Key) == otelext.AttrGenAIToolCallID {
+				if string(kv.Key) == "gen_ai.tool.call.id" {
 					executeToolByCallID[kv.Value.AsString()] = s.SpanContext().SpanID()
 				}
 			}
@@ -551,7 +551,7 @@ func TestExtension_ChatSpanCtxPropagation(t *testing.T) {
 	var chatSpanID oteltrace.SpanID
 	for _, s := range rec.Ended() {
 		for _, kv := range s.Attributes() {
-			if string(kv.Key) == otelext.AttrGenAIOperationName && kv.Value.AsString() == "chat" {
+			if string(kv.Key) == "gen_ai.operation.name" && kv.Value.AsString() == "chat" {
 				chatSpanID = s.SpanContext().SpanID()
 			}
 		}
@@ -630,7 +630,7 @@ func TestExtension_ChatSpanCtxPropagation_Streaming(t *testing.T) {
 	chatSpansEnded := 0
 	for _, s := range rec.Ended() {
 		for _, kv := range s.Attributes() {
-			if string(kv.Key) == otelext.AttrGenAIOperationName && kv.Value.AsString() == "chat" {
+			if string(kv.Key) == "gen_ai.operation.name" && kv.Value.AsString() == "chat" {
 				chatSpanID = s.SpanContext().SpanID()
 				chatSpansEnded++
 			}

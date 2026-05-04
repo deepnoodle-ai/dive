@@ -5,7 +5,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 
-	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -18,29 +18,40 @@ func contextHasAgentSpan(ctx context.Context) bool {
 	return ctx.Value(runMarkerKey{}) != nil
 }
 
-// Run wraps agent.CreateResponse, opening an invoke_agent span on the caller's
-// context BEFORE the agent runs so chat and execute_tool spans nest correctly.
-//
-// Without this wrapper, the Extension's PreGeneration hook still emits an
-// invoke_agent span — but Dive does not allow hooks to mutate the context
-// downstream operations see, so chat / execute_tool spans wouldn't be
-// children of that span. Use Run to get the full hierarchy.
-//
-// If you need finer control (custom span name, attributes, links, baggage),
-// open the span yourself with WithSpan instead.
+// Run wraps agent.CreateResponse, opening an invoke_agent span on the
+// caller's context BEFORE the agent runs so chat and execute_tool spans
+// nest correctly. This package-level helper uses the global tracer
+// provider; see Extension.Run for the variant that honors WithTracer /
+// WithMeter on a configured Extension.
 func Run(ctx context.Context, agent *dive.Agent, opts ...dive.CreateResponseOption) (*dive.Response, error) {
-	tr := tracerOf(agent)
+	return runWithTracer(ctx, defaultTracer(), agent, opts...)
+}
+
+// Run wraps agent.CreateResponse using this Extension's tracer/meter.
+// Prefer Extension.Run over the package-level Run when you've configured
+// WithTracer or WithMeter — those options would otherwise be ignored by
+// the global helper.
+func (e *Extension) Run(ctx context.Context, agent *dive.Agent, opts ...dive.CreateResponseOption) (*dive.Response, error) {
+	return runWithTracer(ctx, e.opts.Tracer, agent, opts...)
+}
+
+// runWithTracer is the shared implementation for the package-level Run
+// and Extension.Run. The tracer comes from the caller — callers without
+// an Extension instance use the global provider; callers with one use
+// e.opts.Tracer.
+func runWithTracer(ctx context.Context, tr trace.Tracer, agent *dive.Agent, opts ...dive.CreateResponseOption) (*dive.Response, error) {
 	name := agent.Name()
 	if name == "" {
 		name = "agent"
 	}
-	ctx, span := tr.Start(ctx, OperationInvokeAgent+" "+name,
+	attrs := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(
-			attribute.String(AttrGenAIOperationName, OperationInvokeAgent),
-			attribute.String(AttrGenAIAgentName, name),
+			semconv.GenAIOperationNameInvokeAgent,
+			semconv.GenAIAgentName(name),
 		),
-	)
+	}
+	ctx, span := tr.Start(ctx, OperationInvokeAgent+" "+name, attrs...)
 	defer span.End()
 	ctx = context.WithValue(ctx, runMarkerKey{}, span)
 
@@ -50,17 +61,7 @@ func Run(ctx context.Context, agent *dive.Agent, opts ...dive.CreateResponseOpti
 		return resp, err
 	}
 	if resp != nil && resp.Usage != nil {
-		span.SetAttributes(
-			attribute.Int(AttrGenAIUsageInputTokens, int(resp.Usage.InputTokens)),
-			attribute.Int(AttrGenAIUsageOutputTokens, int(resp.Usage.OutputTokens)),
-		)
+		span.SetAttributes(usageAttrs(resp.Usage)...)
 	}
 	return resp, nil
-}
-
-// tracerOf returns the package-default tracer. The agent argument is reserved
-// for a future enhancement (per-agent tracer override via an option) but is
-// unused for now.
-func tracerOf(_ *dive.Agent) trace.Tracer {
-	return defaultTracer()
 }

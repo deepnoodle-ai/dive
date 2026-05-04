@@ -136,8 +136,9 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	beforeHook := &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages: config.Messages,
-			Config:   config,
+			Messages:  config.Messages,
+			Config:    config,
+			Streaming: true,
 		},
 	}
 	if err := config.FireHooks(ctx, beforeHook); err != nil {

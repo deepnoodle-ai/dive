@@ -132,8 +132,21 @@ type AgentOptions struct {
 	// generation loop.
 	LLMHooks llm.Hooks
 
-	// Optional name for logging
+	// Optional name for logging.
 	Name string
+
+	// Description is a free-form purpose/role description. Surfaced as
+	// gen_ai.agent.description for telemetry.
+	Description string
+
+	// Version identifies a revision of the agent's prompt/tooling/config
+	// (e.g. "1.0.0", "2025-05-01"). Surfaced as gen_ai.agent.version.
+	Version string
+
+	// ID is a stable identifier for the agent, useful in multi-tenant
+	// systems for correlating runs to a specific agent record. Surfaced
+	// as gen_ai.agent.id. Empty values are not auto-generated.
+	ID string
 
 	// Session enables persistent conversation state. When set, the agent
 	// automatically loads history before generation and saves new messages
@@ -158,6 +171,9 @@ type AgentOptions struct {
 // process information while responding to chat messages.
 type Agent struct {
 	name                  string
+	id                    string
+	description           string
+	version               string
 	model                 llm.LLM
 	tools                 []Tool
 	toolsets              []Toolset
@@ -218,6 +234,9 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 
 	agent := &Agent{
 		name:                  opts.Name,
+		id:                    opts.ID,
+		description:           opts.Description,
+		version:               opts.Version,
 		model:                 opts.Model,
 		responseTimeout:       opts.ResponseTimeout,
 		toolIterationLimit:    opts.ToolIterationLimit,
@@ -250,6 +269,24 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 
 func (a *Agent) Name() string {
 	return a.name
+}
+
+// ID returns the agent's stable identifier set via AgentOptions.ID, or "" if
+// none was provided.
+func (a *Agent) ID() string {
+	return a.id
+}
+
+// Description returns the free-form purpose/role description set via
+// AgentOptions.Description, or "" if none was provided.
+func (a *Agent) Description() string {
+	return a.description
+}
+
+// Version returns the agent's version string set via AgentOptions.Version,
+// or "" if none was provided.
+func (a *Agent) Version() string {
+	return a.version
 }
 
 func (a *Agent) HasTools() bool {
@@ -437,9 +474,15 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil, fmt.Errorf("no messages provided")
 	}
 
+	// Publish the active session on ctx so provider-level LLM hooks (which
+	// only see llm.HookContext) can read it via SessionFromContext —
+	// e.g. to attach gen_ai.conversation.id on chat spans.
+	ctx = withSessionContext(ctx, sess)
+
 	// Initialize hook context shared across all phases
 	hctx := NewHookContext()
 	hctx.Agent = a
+	hctx.Session = sess
 	hctx.SystemPrompt = systemPrompt
 	hctx.Messages = messages
 
@@ -1480,41 +1523,74 @@ func (a *Agent) generateStreaming(
 	callback EventCallback,
 ) (*llm.Response, error) {
 	accum := llm.NewResponseAccumulator()
+	streamStart := time.Now()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
 	if err != nil {
-		a.fireLLMAfterGenerate(ctx, nil, err)
+		a.fireLLMAfterGenerate(ctx, nil, err, 0)
 		return nil, err
 	}
 	defer iter.Close()
 
+	var ttfc float64
 	for iter.Next() {
 		event := iter.Event()
+		// Capture time-to-first-chunk on the first content-bearing event
+		// (delta with text or content_block_start carrying populated content).
+		// This becomes gen_ai.response.time_to_first_chunk.
+		if ttfc == 0 && eventHasContent(event) {
+			ttfc = time.Since(streamStart).Seconds()
+		}
 		if err := accum.AddEvent(event); err != nil {
-			a.fireLLMAfterGenerate(ctx, nil, err)
+			a.fireLLMAfterGenerate(ctx, nil, err, ttfc)
 			return nil, err
 		}
 		if err := callback(ctx, &ResponseItem{
 			Type:  ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
-			a.fireLLMAfterGenerate(ctx, nil, err)
+			a.fireLLMAfterGenerate(ctx, nil, err, ttfc)
 			return nil, err
 		}
 	}
 	if err := iter.Err(); err != nil {
-		a.fireLLMAfterGenerate(ctx, nil, err)
+		a.fireLLMAfterGenerate(ctx, nil, err, ttfc)
 		return nil, err
 	}
 	resp := accum.Response()
-	a.fireLLMAfterGenerate(ctx, resp, nil)
+	a.fireLLMAfterGenerate(ctx, resp, nil, ttfc)
 	return resp, nil
+}
+
+// eventHasContent reports whether the event carries assistant content
+// (text delta, populated content block, or input_json delta) — used to
+// detect the first chunk for time-to-first-chunk telemetry. Lifecycle
+// events without payload (message_start, ping) don't count.
+func eventHasContent(event *llm.Event) bool {
+	if event == nil {
+		return false
+	}
+	switch event.Type {
+	case llm.EventTypeContentBlockDelta:
+		if event.Delta == nil {
+			return false
+		}
+		return event.Delta.Text != "" || event.Delta.PartialJSON != "" || event.Delta.Thinking != ""
+	case llm.EventTypeContentBlockStart:
+		if event.ContentBlock == nil {
+			return false
+		}
+		return event.ContentBlock.Text != "" || event.ContentBlock.Name != "" || event.ContentBlock.Input != nil
+	}
+	return false
 }
 
 // fireLLMAfterGenerate fires the agent's LLM AfterGenerate (or OnError) hooks
 // against a synthetic Config that carries the accumulated response. Used to
 // close the streaming hook contract — providers can't fire AfterGenerate
-// themselves because they hand the iterator off to the caller.
-func (a *Agent) fireLLMAfterGenerate(ctx context.Context, resp *llm.Response, hookErr error) {
+// themselves because they hand the iterator off to the caller. The
+// timeToFirstChunk argument carries the streaming TTFT measurement (zero
+// for non-streaming or pre-first-chunk failures).
+func (a *Agent) fireLLMAfterGenerate(ctx context.Context, resp *llm.Response, hookErr error, timeToFirstChunk float64) {
 	if a.llmHooks == nil {
 		return
 	}
@@ -1528,10 +1604,11 @@ func (a *Agent) fireLLMAfterGenerate(ctx context.Context, resp *llm.Response, ho
 	}
 	hctx := &llm.HookContext{
 		Type:    hookType,
-		Request: &llm.HookRequestContext{Config: cfg},
+		Request: &llm.HookRequestContext{Config: cfg, Streaming: true},
 		Response: &llm.HookResponseContext{
-			Response: resp,
-			Error:    hookErr,
+			Response:         resp,
+			Error:            hookErr,
+			TimeToFirstChunk: timeToFirstChunk,
 		},
 	}
 	if err := cfg.FireHooks(ctx, hctx); err != nil {
