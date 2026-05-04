@@ -86,6 +86,32 @@ func (p Part) IsData() bool { return len(p.Data) > 0 }
 // IsURL returns true if this is a URL part.
 func (p Part) IsURL() bool { return p.URL != "" }
 
+// Validate enforces the A2A v1.0 invariant that exactly one of Text,
+// Raw, Data, or URL is populated on a Part.
+func (p Part) Validate() error {
+	count := 0
+	if p.IsText() {
+		count++
+	}
+	if p.IsRaw() {
+		count++
+	}
+	if p.IsData() {
+		count++
+	}
+	if p.IsURL() {
+		count++
+	}
+	switch count {
+	case 0:
+		return fmt.Errorf("a2a: part has no content (one of text, raw, data, url required)")
+	case 1:
+		return nil
+	default:
+		return fmt.Errorf("a2a: part must populate exactly one of text, raw, data, url")
+	}
+}
+
 // Message is a unit of conversation exchanged between an A2A client and
 // agent. It matches the A2A v1.0 Message shape.
 type Message struct {
@@ -260,6 +286,11 @@ func (p *SendMessageParams) Validate() error {
 	}
 	if len(p.Message.Parts) == 0 {
 		return fmt.Errorf("a2a: message has no parts")
+	}
+	for i, part := range p.Message.Parts {
+		if err := part.Validate(); err != nil {
+			return fmt.Errorf("a2a: parts[%d]: %w", i, err)
+		}
 	}
 	return nil
 }

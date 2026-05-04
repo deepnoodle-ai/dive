@@ -129,9 +129,12 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		e.trackInflight(taskID, cancelExec)
 		defer e.untrackInflight(taskID)
 
+		type runResult struct {
+			resp *dive.Response
+			err  error
+		}
 		events := make(chan a2a.Event, 64)
-		var resp *dive.Response
-		var respErr error
+		results := make(chan runResult, 1)
 
 		go func() {
 			defer close(events)
@@ -147,26 +150,31 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 				return nil
 			}
 			opts = append(opts, dive.WithEventCallback(cb))
-			resp, respErr = e.agent.CreateResponse(execCtx2, opts...)
+			resp, err := e.agent.CreateResponse(execCtx2, opts...)
+			results <- runResult{resp: resp, err: err}
 		}()
 
 		// Yield intermediate streaming events.
 		for event := range events {
 			if !yield(event, nil) {
 				cancelExec()
+				// Wait for the goroutine to finish so its write to
+				// the result channel happens-before we return.
+				<-results
 				return
 			}
 		}
 
 		// CreateResponse finished. Yield final result.
-		if respErr != nil {
+		result := <-results
+		if result.err != nil {
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed,
-				a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(respErr.Error()))), nil)
+				a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(result.err.Error()))), nil)
 			return
 		}
 
 		// Map response to final events.
-		e.yieldResponseEvents(execCtx, resp, yield)
+		e.yieldResponseEvents(execCtx, result.resp, yield)
 	}
 }
 
