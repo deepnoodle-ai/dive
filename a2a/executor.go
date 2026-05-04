@@ -250,13 +250,20 @@ func (e *Executor) yieldResponseEvents(
 		// Stash the suspension state in task metadata so we can resume later.
 		// We marshal to JSON then unmarshal to map[string]any because
 		// a2a-go's task store only permits basic metadata types.
+		// On any marshal/unmarshal failure fall back to a minimal map that
+		// still carries the reason so clients can distinguish auth-required
+		// from input-required.
 		if resp.Suspension != nil {
 			suspBytes, err := json.Marshal(resp.Suspension)
 			if err == nil {
 				var suspMap map[string]any
 				if json.Unmarshal(suspBytes, &suspMap) == nil {
 					event.SetMeta("dive.suspension", suspMap)
+				} else {
+					event.SetMeta("dive.suspension", suspensionFallbackMeta(resp.Suspension))
 				}
+			} else {
+				event.SetMeta("dive.suspension", suspensionFallbackMeta(resp.Suspension))
 			}
 		}
 
@@ -593,4 +600,15 @@ func textFromMessage(msg *a2asdk.Message) string {
 
 func isImageMIME(mime string) bool {
 	return strings.HasPrefix(mime, "image/")
+}
+
+// suspensionFallbackMeta returns a minimal metadata map when full JSON
+// marshaling of a SuspensionState fails. It preserves the suspend reason so
+// clients can still distinguish SuspendReasonAuth from SuspendReasonInput.
+func suspensionFallbackMeta(s *dive.SuspensionState) map[string]any {
+	reason := dive.SuspendReasonInput
+	if len(s.PendingToolCalls) > 0 && s.PendingToolCalls[0].Reason != "" {
+		reason = s.PendingToolCalls[0].Reason
+	}
+	return map[string]any{"reason": string(reason)}
 }

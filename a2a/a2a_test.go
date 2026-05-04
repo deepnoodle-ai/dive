@@ -832,6 +832,8 @@ func TestStreamingEmitsArtifacts(t *testing.T) {
 		assert.Equal(t, a2asdk.TaskStateCompleted, v.Status.State)
 	case *a2asdk.Task:
 		assert.Equal(t, a2asdk.TaskStateCompleted, v.Status.State)
+	default:
+		assert.True(t, false, "unexpected final streaming event type: %T", last)
 	}
 
 	// The artifact should include both text and image parts.
