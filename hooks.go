@@ -209,6 +209,18 @@ type StopHook func(ctx context.Context, hctx *HookContext) (*StopDecision, error
 // Errors abort generation (same as PreGeneration).
 type PreIterationHook func(ctx context.Context, hctx *HookContext) error
 
+// PostBackgroundToolUseHook fires when a background task's result is delivered
+// to the agent — specifically when WithBackgroundResults is used on the next
+// CreateResponse call. The hook receives a HookContext with the final
+// *ToolResult and the original tool/call metadata.
+//
+// This hook always runs in the main agent goroutine (never from the background
+// goroutine). It is the correct place to close OTel spans that were opened at
+// the original tool call time.
+//
+// Errors are logged but do not affect the response.
+type PostBackgroundToolUseHook func(ctx context.Context, hctx *HookContext) error
+
 // OnSuspendHook fires when the agent transitions into a suspended state,
 // BEFORE PostGeneration runs and BEFORE the suspended turn is persisted to
 // the session. Use this to notify an external system that human input is

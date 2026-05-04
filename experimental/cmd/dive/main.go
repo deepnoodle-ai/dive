@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
@@ -190,6 +189,8 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Create TUI dialog for interactive user prompts (AskUserQuestion tool)
 	tuiDialog := &tuiDialog{}
+	// monitorNotifier forwards monitor line batches to the app event loop
+	monNotifier := &monitorNotifier{}
 
 	// Create path validator for workspace enforcement
 	pathValidator, err := toolkit.NewPathValidator(workspaceDir)
@@ -204,11 +205,6 @@ func runInteractive(ctx *cli.Context) error {
 	// Set up subagent registry and task tools
 	subagentRegistry := subagent.NewRegistry(true)
 	taskRegistry := extended.NewTaskRegistry()
-
-	// appRef allows the task tool's OnEvent callback to reach the App,
-	// which isn't created yet at this point. Uses atomic for safe
-	// concurrent access from background task goroutines.
-	var appRef atomic.Pointer[App]
 
 	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 		// Create sub-model (use parent model by default)
@@ -230,20 +226,18 @@ func runInteractive(ctx *cli.Context) error {
 		AgentFactory:     agentFactory,
 		SubagentRegistry: subagentRegistry,
 		ParentTools:      tools,
-		OnEvent: func(taskID string, item *dive.ResponseItem) {
-			if app := appRef.Load(); app != nil && app.runner != nil {
-				app.runner.SendEvent(subagentEvent{
-					baseEvent: newBaseEvent(),
-					taskID:    taskID,
-					item:      item,
-				})
-			}
-		},
 	})
 	taskOutputTool := extended.NewTaskOutputTool(extended.TaskOutputToolOptions{
 		Registry: taskRegistry,
 	})
-	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool))
+	monitorTool := extended.NewMonitorTool(extended.MonitorToolOptions{
+		Registry:       taskRegistry,
+		NotifyCallback: monNotifier.notify,
+	})
+	taskStopTool := extended.NewTaskStopTool(extended.TaskStopToolOptions{
+		Registry: taskRegistry,
+	})
+	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool), dive.ToolAdapter(monitorTool), dive.ToolAdapter(taskStopTool))
 
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")
@@ -361,7 +355,6 @@ func runInteractive(ctx *cli.Context) error {
 		ctx.String("api-endpoint"),
 	)
 	app.currentSession = currentSession
-	appRef.Store(app)
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {
@@ -369,8 +362,9 @@ func runInteractive(ctx *cli.Context) error {
 	}
 	app.startupAttachment = attachment
 
-	// Wire up dialog
+	// Wire up dialog and monitor notifier
 	tuiDialog.app = app
+	monNotifier.app = app
 
 	return app.Run()
 }
@@ -595,6 +589,23 @@ func runPrintJSON(ctx context.Context, agent *dive.Agent, input string) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(result)
+}
+
+// monitorNotifier sends monitor line batches to the app's event loop.
+// The app field is set after App creation (same deferred-init pattern as tuiDialog).
+type monitorNotifier struct {
+	app *App
+}
+
+func (n *monitorNotifier) notify(description string, lines []string) {
+	if n.app == nil || n.app.runner == nil {
+		return
+	}
+	n.app.runner.SendEvent(monitorNotificationEvent{
+		baseEvent:   newBaseEvent(),
+		description: description,
+		lines:       lines,
+	})
 }
 
 // tuiDialog implements dive.Dialog by routing to the App's TUI dialog system.

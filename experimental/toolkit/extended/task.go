@@ -37,6 +37,7 @@ type TaskRecord struct {
 	Agent       *dive.Agent
 	Suspension  *dive.SuspensionState
 	done        chan struct{}
+	cancel      context.CancelFunc // non-nil for cancellable tasks (e.g. monitors)
 }
 
 type taskRecordSnapshot struct {
@@ -138,14 +139,6 @@ type TaskToolInput struct {
 	Resume          string `json:"resume,omitempty"`
 }
 
-// SubagentStatusEvent is sent via OnEvent for sub-agent lifecycle changes.
-type SubagentStatusEvent struct {
-	TaskID      string
-	Description string
-	Status      TaskStatus
-	Output      string // set on completion/failure
-}
-
 // TaskToolOptions configures a new TaskTool
 type TaskToolOptions struct {
 	// Registry is the shared task registry
@@ -163,12 +156,6 @@ type TaskToolOptions struct {
 
 	// DefaultTimeout is the default timeout for synchronous task execution
 	DefaultTimeout time.Duration
-
-	// OnEvent is called with streaming events from sub-agents.
-	// The taskID identifies which sub-agent produced the event.
-	// Called from background goroutines — must be safe for concurrent use.
-	// If nil, no events are emitted.
-	OnEvent func(taskID string, item *dive.ResponseItem)
 }
 
 // TaskTool launches specialized agents for complex, multi-step tasks
@@ -178,7 +165,6 @@ type TaskTool struct {
 	subagentRegistry *subagent.Registry
 	parentTools      []dive.Tool
 	defaultTimeout   time.Duration
-	onEvent          func(taskID string, item *dive.ResponseItem)
 }
 
 // NewTaskTool creates a new TaskTool
@@ -192,7 +178,6 @@ func NewTaskTool(opts TaskToolOptions) *TaskTool {
 		subagentRegistry: opts.SubagentRegistry,
 		parentTools:      opts.ParentTools,
 		defaultTimeout:   opts.DefaultTimeout,
-		onEvent:          opts.OnEvent,
 	}
 }
 
@@ -207,9 +192,9 @@ The Task tool launches agents that autonomously handle complex tasks. Each agent
 
 Usage notes:
 - Always include a short description (3-5 words) summarizing what the agent will do
+- Run agents in the background by default (run_in_background: true) so you can continue working while they run
 - Launch multiple agents concurrently whenever possible to maximize performance
 - When the agent is done, it will return a single message back to you
-- You can run agents in the background using run_in_background parameter
 - Agents can be resumed using the resume parameter by passing the agent ID from a previous invocation
 - Provide clear, detailed prompts so the agent can work autonomously`
 
@@ -249,7 +234,7 @@ func (t *TaskTool) Schema() *schema.Schema {
 			},
 			"run_in_background": {
 				Type:        "boolean",
-				Description: "Set to true to run this agent in the background. Use TaskOutput to read the output later.",
+				Description: "Run this agent in the background so you can continue working (default: true). The result is delivered automatically when complete — do NOT call TaskOutput for background tasks. Set to false only when you need the result before continuing.",
 			},
 			"resume": {
 				Type:        "string",
@@ -351,37 +336,14 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	executeFunc := func() {
 		defer close(record.done)
 
-		// Notify start
-		if t.onEvent != nil {
-			t.onEvent(record.ID, &dive.ResponseItem{
-				Type:      "subagent_status",
-				Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusRunning},
-			})
-		}
-
 		message := &llm.Message{Role: llm.User}
 		message.Content = append(message.Content, &llm.TextContent{Text: input.Prompt})
 
-		opts := []dive.CreateResponseOption{dive.WithMessages(message)}
-		if t.onEvent != nil {
-			taskID := record.ID
-			opts = append(opts, dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-				t.onEvent(taskID, item)
-				return nil
-			}))
-		}
-
-		response, err := agent.CreateResponse(taskCtx, opts...)
+		response, err := agent.CreateResponse(taskCtx, dive.WithMessages(message))
 		endTime := time.Now()
 
 		if err != nil {
 			record.setResult(TaskStatusFailed, fmt.Sprintf("Task failed: %s", err.Error()), err, endTime)
-			if t.onEvent != nil {
-				t.onEvent(record.ID, &dive.ResponseItem{
-					Type:      "subagent_status",
-					Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusFailed},
-				})
-			}
 		} else if response != nil && response.Status == dive.ResponseStatusSuspended {
 			prompt := "Agent is waiting for input."
 			if response.Suspension != nil && len(response.Suspension.PendingToolCalls) > 0 {
@@ -393,28 +355,28 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 			record.Suspension = response.Suspension
 			record.mu.Unlock()
 			record.setResult(TaskStatusSuspended, prompt, nil, endTime)
-			if t.onEvent != nil {
-				t.onEvent(record.ID, &dive.ResponseItem{
-					Type:      "subagent_status",
-					Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusSuspended, Output: prompt},
-				})
-			}
 		} else {
 			output := response.OutputText()
 			record.setResult(TaskStatusCompleted, output, nil, endTime)
-			if t.onEvent != nil {
-				t.onEvent(record.ID, &dive.ResponseItem{
-					Type:      "subagent_status",
-					Extension: &SubagentStatusEvent{TaskID: record.ID, Description: record.Description, Status: TaskStatusCompleted, Output: output},
-				})
-			}
 		}
 	}
 
 	if input.RunInBackground {
-		go executeFunc()
-		return dive.NewToolResultText(fmt.Sprintf("Task started in background. Task ID: %s\nUse TaskOutput to retrieve results.", taskID)).
-			WithDisplay(fmt.Sprintf("Started background task: %s", input.Description)), nil
+		return dive.NewBackgroundResultFull(context.Background(), input.Description, func(_ context.Context) *dive.ToolResult {
+			executeFunc()
+			snapshot := record.snapshot()
+			switch snapshot.Status {
+			case TaskStatusFailed:
+				return dive.NewToolResultError(snapshot.Output).
+					WithDisplay(fmt.Sprintf("Task failed: %s", input.Description))
+			case TaskStatusSuspended:
+				return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\nStatus: suspended\n\n%s", taskID, snapshot.Output)).
+					WithDisplay(fmt.Sprintf("Suspended: %s", input.Description))
+			default:
+				return dive.NewToolResultText(fmt.Sprintf("Agent ID: %s\n\n%s", taskID, snapshot.Output)).
+					WithDisplay(fmt.Sprintf("Completed: %s", input.Description))
+			}
+		}), nil
 	}
 
 	// Synchronous execution with timeout

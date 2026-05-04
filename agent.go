@@ -74,6 +74,16 @@ type Hooks struct {
 	// before PostGeneration. Use to notify external systems that human input
 	// is needed.
 	OnSuspend []OnSuspendHook
+
+	// PostBackgroundToolUse hooks fire when background task results are
+	// delivered to the agent — i.e. when WithBackgroundResults is used on the
+	// next CreateResponse call. The hook receives the final *ToolResult and
+	// the original tool/call metadata from the HookContext. This is the
+	// correct point to close OTel spans opened at tool call time.
+	//
+	// Hooks run in the main agent goroutine, never from a background goroutine.
+	// Errors are logged but do not affect the response (same as PostGeneration).
+	PostBackgroundToolUse []PostBackgroundToolUseHook
 }
 
 // Extension bundles tools, hooks, and system prompt rules that extend an
@@ -471,7 +481,9 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	// Build the message list for generation
 	messages := fullHistory
-	if len(messages) == 0 {
+	// Allow empty messages when background results are provided — the
+	// synthetic completed-task message injected below serves as the input.
+	if len(messages) == 0 && len(options.BackgroundHandles) == 0 {
 		return nil, fmt.Errorf("no messages provided")
 	}
 
@@ -601,6 +613,21 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	var accumulatedOutput []*llm.Message
 	var accumulatedItems []*ResponseItem
 	accumulatedUsage := &llm.Usage{}
+	var accumulatedBackgroundTasks []*BackgroundTaskHandle
+
+	// Inject background results as a synthetic user message when the caller
+	// provided WithBackgroundResults. This fires PostBackgroundToolUse hooks
+	// and prepends the completed-task summary to the message history, so the
+	// LLM sees the results in its next turn. Happens once before the first
+	// generate() call; Stop-hook re-entries skip this block.
+	if len(options.BackgroundHandles) > 0 && options.BackgroundResults != nil {
+		var injErr error
+		messages, injErr = a.injectBackgroundResults(ctx, hctx, messages, options.BackgroundHandles, options.BackgroundResults)
+		if injErr != nil {
+			return nil, injErr
+		}
+		hctx.Messages = messages
+	}
 
 generateLoop:
 	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback, model)
@@ -614,6 +641,7 @@ generateLoop:
 	if genResult.Usage != nil {
 		accumulatedUsage.Add(genResult.Usage)
 	}
+	accumulatedBackgroundTasks = append(accumulatedBackgroundTasks, genResult.BackgroundTasks...)
 
 	response.FinishedAt = Ptr(time.Now())
 	response.Usage = accumulatedUsage
@@ -627,6 +655,7 @@ generateLoop:
 
 	// Handle suspension from generate.
 	if genResult.Suspended != nil {
+		response.BackgroundTasks = accumulatedBackgroundTasks
 		return a.finishSuspended(ctx, logger, hctx, response, inputMessages, genResult.Suspended, nil, eventCallback, sess, rs, false)
 	}
 
@@ -729,6 +758,9 @@ generateLoop:
 	}
 
 	response.Status = ResponseStatusCompleted
+	if len(accumulatedBackgroundTasks) > 0 {
+		response.BackgroundTasks = accumulatedBackgroundTasks
+	}
 	return response, nil
 }
 
@@ -1365,6 +1397,9 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	// All response items in chronological order
 	var items []*ResponseItem
 
+	// Background task handles collected across all tool batches
+	var backgroundTasks []*BackgroundTaskHandle
+
 	// Wrap callback to collect all items
 	collectingCallback := func(ctx context.Context, item *ResponseItem) error {
 		items = append(items, item)
@@ -1496,6 +1531,13 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			return nil, err
 		}
 
+		// Collect background task handles from completed outcomes.
+		for _, o := range batch.Outcomes {
+			if o.Result != nil && o.Result.BackgroundHandle != nil {
+				backgroundTasks = append(backgroundTasks, o.Result.BackgroundHandle)
+			}
+		}
+
 		// Build the tool_result message from completed outcomes only. On a
 		// suspended batch, this is the PARTIAL tool_result that gets persisted
 		// to the session for later merging with caller-supplied results.
@@ -1512,10 +1554,11 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		if batch.Suspended {
 			snapshot := buildSuspendedSnapshot(toolCalls, batch)
 			return &generateResult{
-				OutputMessages: outputMessages,
-				Items:          items,
-				Usage:          totalUsage,
-				Suspended:      snapshot,
+				OutputMessages:  outputMessages,
+				Items:           items,
+				Usage:           totalUsage,
+				Suspended:       snapshot,
+				BackgroundTasks: backgroundTasks,
 			}, nil
 		}
 
@@ -1541,9 +1584,10 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	}
 
 	return &generateResult{
-		OutputMessages: outputMessages,
-		Items:          items,
-		Usage:          totalUsage,
+		OutputMessages:  outputMessages,
+		Items:           items,
+		Usage:           totalUsage,
+		BackgroundTasks: backgroundTasks,
 	}, nil
 }
 
@@ -1843,6 +1887,19 @@ func (a *Agent) executeToolCallsParallel(
 			continue
 		}
 
+		// Background path: synthesize "started" message, build handle.
+		var bgHandle *BackgroundTaskHandle
+		if result != nil && result.Result != nil && result.Result.Background != nil {
+			bg := result.Result.Background
+			bgHandle = &BackgroundTaskHandle{
+				TaskID:      bg.id,
+				ToolUseID:   toolCalls[i].ID,
+				Description: bg.description,
+				Done:        bg.done,
+			}
+			result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
+		}
+
 		failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
 
 		postHctx := &HookContext{
@@ -1883,6 +1940,12 @@ func (a *Agent) executeToolCallsParallel(
 		}
 
 		result = postHctx.Result
+
+		// Re-attach background handle after hooks.
+		if bgHandle != nil {
+			bgHandle.hookCtx = postHctx
+			result.BackgroundHandle = bgHandle
+		}
 
 		additionalContext := prep.preHctx.AdditionalContext
 		if postHctx.AdditionalContext != "" {
@@ -2004,6 +2067,21 @@ func (a *Agent) executeOneToolCall(
 		return result, nil
 	}
 
+	// Background path: synthesize a "started" message as the tool result so
+	// the LLM knows the work began, build a BackgroundTaskHandle, then fall
+	// through to PostToolUse hooks normally.
+	var bgHandle *BackgroundTaskHandle
+	if result != nil && result.Result != nil && result.Result.Background != nil {
+		bg := result.Result.Background
+		bgHandle = &BackgroundTaskHandle{
+			TaskID:      bg.id,
+			ToolUseID:   toolCall.ID,
+			Description: bg.description,
+			Done:        bg.done,
+		}
+		result.Result = NewToolResultText(backgroundStartedMessage(bg.description, bg.id))
+	}
+
 	// Determine if the tool call failed
 	failed := result.Error != nil || (result.Result != nil && result.Result.IsError)
 
@@ -2048,6 +2126,14 @@ func (a *Agent) executeOneToolCall(
 
 	// Use potentially modified result from hooks
 	result = postHctx.Result
+
+	// Re-attach the background handle after hooks (hooks may have replaced
+	// postHctx.Result entirely; the handle must survive that replacement).
+	// Also save hookCtx for PostBackgroundToolUse hooks fired on the next turn.
+	if bgHandle != nil {
+		bgHandle.hookCtx = postHctx
+		result.BackgroundHandle = bgHandle
+	}
 
 	// Apply AdditionalContext from pre or post hooks
 	additionalContext := preHctx.AdditionalContext
@@ -2144,21 +2230,24 @@ func (a *Agent) executeTool(
 	if output == nil {
 		output = &ToolResult{Content: []*ToolResultContent{}}
 	}
-	// Validate ToolResult.Suspend mutual exclusion (M3). Suspend and the
-	// regular result fields are a tagged union; setting both is a bug on
-	// the tool author's side. Surface it as a normal IsError result so the
-	// agent converges instead of panicking, and so PostToolUseFailure hooks
-	// fire just like any other tool error.
-	if output.Suspend != nil && (len(output.Content) > 0 || output.Display != "" || output.IsError) {
+	// Validate ToolResult tagged-union invariants.
+	// Suspend, Background, and the regular result fields are mutually
+	// exclusive. Setting multiple is a bug on the tool author's side;
+	// surface it as a normal IsError result so the agent converges instead
+	// of panicking, and so PostToolUseFailure hooks fire like any other error.
+	suspendSet := output.Suspend != nil
+	backgroundSet := output.Background != nil
+	regularSet := len(output.Content) > 0 || output.Display != "" || output.IsError
+	if (suspendSet && (backgroundSet || regularSet)) || (backgroundSet && regularSet) {
 		msg := fmt.Sprintf(
-			"Tool %s returned a SuspendResult together with Content/Display/IsError; these fields are mutually exclusive.",
+			"Tool %s returned a ToolResult with multiple exclusive fields set (Suspend, Background, Content/Display/IsError are mutually exclusive).",
 			tool.Name(),
 		)
-		a.logger.Error("tool returned malformed suspend result",
+		a.logger.Error("tool returned malformed result",
 			"tool", tool.Name(),
-			"has_content", len(output.Content) > 0,
-			"has_display", output.Display != "",
-			"is_error", output.IsError,
+			"suspend_set", suspendSet,
+			"background_set", backgroundSet,
+			"regular_set", regularSet,
 		)
 		return &ToolCallResult{
 			ID:      call.ID,
@@ -2235,6 +2324,11 @@ type generateResult struct {
 	// because at least one tool returned SuspendResult. CreateResponse uses
 	// this to persist the partial turn and return a suspended Response.
 	Suspended *suspendedSnapshot
+
+	// BackgroundTasks collects handles for all background tasks that were
+	// started during this generate() call. Populated from ToolCallResult
+	// entries that have BackgroundHandle set.
+	BackgroundTasks []*BackgroundTaskHandle
 }
 
 // suspendedSnapshot describes the state captured when generate() returns
