@@ -21,7 +21,7 @@ import (
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/experimental/subagent"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
-	"github.com/deepnoodle-ai/dive/experimental/toolkit/firecrawl"
+	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
 	"github.com/deepnoodle-ai/dive/llm"
