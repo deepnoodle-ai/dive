@@ -2263,12 +2263,61 @@ func (a *Agent) executeTool(
 			Error: errors.New(msg),
 		}
 	}
+	// Apply MaxResultSizeHint truncation if the tool declares one.
+	if ann := tool.Annotations(); ann != nil && ann.MaxResultSizeHint > 0 {
+		output = applyResultSizeHint(tool.Name(), output, ann.MaxResultSizeHint)
+	}
 	return &ToolCallResult{
 		ID:      call.ID,
 		Name:    call.Name,
 		Input:   call.Input,
 		Preview: preview,
 		Result:  output,
+	}
+}
+
+// applyResultSizeHint checks all text content blocks in a ToolResult and
+// truncates any that exceed max characters, writing the full text to a temp
+// file so the model can access it via ReadFile if needed.
+func applyResultSizeHint(toolName string, result *ToolResult, max int) *ToolResult {
+	if result == nil || result.Suspend != nil || result.Background != nil || result.IsError {
+		return result
+	}
+	modified := false
+	newContent := make([]*ToolResultContent, len(result.Content))
+	for i, block := range result.Content {
+		if block.Type != ToolResultContentTypeText {
+			newContent[i] = block
+			continue
+		}
+		truncated, _, err := TruncateResult(block.Text, max)
+		if err != nil {
+			// If we can't write a temp file, fall back to a simple truncation.
+			runes := []rune(block.Text)
+			if len(runes) > max {
+				truncated = string(runes[:max]) + fmt.Sprintf("\n[Output truncated at %d chars. Full output unavailable: %v]", max, err)
+			} else {
+				newContent[i] = block
+				continue
+			}
+		}
+		if truncated == block.Text {
+			newContent[i] = block
+			continue
+		}
+		newContent[i] = &ToolResultContent{
+			Type: ToolResultContentTypeText,
+			Text: truncated,
+		}
+		modified = true
+	}
+	if !modified {
+		return result
+	}
+	return &ToolResult{
+		Content: newContent,
+		Display: result.Display,
+		IsError: result.IsError,
 	}
 }
 

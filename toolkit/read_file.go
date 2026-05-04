@@ -272,10 +272,11 @@ func isBinaryContent(content []byte) bool {
 // Read is marked as read-only and idempotent.
 func (t *ReadFileTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Read",
-		ReadOnlyHint:    true,
-		DestructiveHint: false,
-		IdempotentHint:  true,
-		OpenWorldHint:   false,
+		Title:             "Read",
+		ReadOnlyHint:      true,
+		DestructiveHint:   false,
+		IdempotentHint:    true,
+		OpenWorldHint:     false,
+		MaxResultSizeHint: 100_000,
 	}
 }

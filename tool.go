@@ -12,13 +12,14 @@ import (
 // ToolAnnotations contains optional metadata hints that describe a tool's behavior.
 // These hints help agents and permission systems make decisions about tool usage.
 type ToolAnnotations struct {
-	Title           string         `json:"title,omitempty"`
-	ReadOnlyHint    bool           `json:"readOnlyHint,omitempty"`
-	DestructiveHint bool           `json:"destructiveHint,omitempty"`
-	IdempotentHint  bool           `json:"idempotentHint,omitempty"`
-	OpenWorldHint   bool           `json:"openWorldHint,omitempty"`
-	EditHint        bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
-	Extra           map[string]any `json:"extra,omitempty"`
+	Title              string         `json:"title,omitempty"`
+	ReadOnlyHint       bool           `json:"readOnlyHint,omitempty"`
+	DestructiveHint    bool           `json:"destructiveHint,omitempty"`
+	IdempotentHint     bool           `json:"idempotentHint,omitempty"`
+	OpenWorldHint      bool           `json:"openWorldHint,omitempty"`
+	EditHint           bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
+	MaxResultSizeHint  int            `json:"maxResultSizeHint,omitempty"`
+	Extra              map[string]any `json:"extra,omitempty"`
 }
 
 func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
@@ -29,6 +30,9 @@ func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 		"idempotentHint":  a.IdempotentHint,
 		"openWorldHint":   a.OpenWorldHint,
 		"editHint":        a.EditHint,
+	}
+	if a.MaxResultSizeHint > 0 {
+		data["maxResultSizeHint"] = a.MaxResultSizeHint
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -61,6 +65,10 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 			json.Unmarshal(val, field)
 			delete(rawMap, name)
 		}
+	}
+	if val, ok := rawMap["maxResultSizeHint"]; ok {
+		json.Unmarshal(val, &a.MaxResultSizeHint)
+		delete(rawMap, "maxResultSizeHint")
 	}
 	// Remaining fields go to Extra
 	a.Extra = make(map[string]any)
