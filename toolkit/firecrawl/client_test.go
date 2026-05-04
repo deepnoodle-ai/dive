@@ -17,8 +17,7 @@ import (
 func TestNewClientMissingAPIKey(t *testing.T) {
 	t.Setenv("FIRECRAWL_API_KEY", "")
 	_, err := New()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "api_key is required")
+	assert.ErrorIs(t, err, ErrMissingCredentials)
 }
 
 

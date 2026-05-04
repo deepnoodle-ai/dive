@@ -27,6 +27,9 @@ const maxParseFileSize = 50 << 20    // 50 MiB
 // ErrMissingCredentials is returned when required credentials are absent.
 var ErrMissingCredentials = errors.New("firecrawl: missing required credentials")
 
+// ErrNilRequest is returned when a nil request is passed to Fetch.
+var ErrNilRequest = errors.New("firecrawl: nil request")
+
 var _ fetch.Fetcher = &Client{}
 
 // Client is a Firecrawl API client.
@@ -88,6 +91,9 @@ func NewClient(apiKey string, opts ...Option) (*Client, error) {
 
 // Scrape fetches a single URL and returns the scraped document.
 func (c *Client) Scrape(ctx context.Context, req ScrapeRequest) (*ScrapeResponse, error) {
+	if req.URL == "" {
+		return nil, errors.New("firecrawl: scrape requires a URL")
+	}
 	if len(req.Formats) == 0 {
 		req.Formats = []string{"markdown"}
 	}
@@ -104,6 +110,9 @@ func (c *Client) Scrape(ctx context.Context, req ScrapeRequest) (*ScrapeResponse
 
 // Search performs a web search and returns matching pages with their scraped content.
 func (c *Client) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
+	if req.Query == "" {
+		return nil, errors.New("firecrawl: search requires a query")
+	}
 	body := searchBody{
 		Query: req.Query,
 		Limit: req.Limit,
@@ -189,6 +198,9 @@ func (c *Client) Parse(ctx context.Context, req ParseRequest) (*ParseResponse, e
 // Fetch implements the wonton fetch.Fetcher interface, allowing this client to
 // be passed directly to toolkit.FetchTool.
 func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response, error) {
+	if req == nil {
+		return nil, ErrNilRequest
+	}
 	formats := req.Formats
 	if len(formats) == 0 {
 		formats = []string{"markdown"}

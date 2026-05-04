@@ -1,6 +1,9 @@
 package firecrawl
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Document is a scraped or parsed web document returned by Scrape and Parse.
 type Document struct {
@@ -121,7 +124,9 @@ type formatObject struct {
 func toFormatObjects(formats []string) []formatObject {
 	out := make([]formatObject, 0, len(formats))
 	for _, f := range formats {
-		out = append(out, formatObject{Type: f})
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, formatObject{Type: f})
+		}
 	}
 	return out
 }
