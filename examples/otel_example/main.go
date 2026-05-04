@@ -37,7 +37,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	otelext "github.com/deepnoodle-ai/dive/experimental/otel"
+	telemetry "github.com/deepnoodle-ai/dive/otel"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -78,15 +78,15 @@ func main() {
 		},
 	)
 
-	tracer := otelext.NewTracer(
-		otelext.WithProvider("anthropic"),
+	tracer := telemetry.NewTracer(
+		telemetry.WithProvider("anthropic"),
 		// Capture flags are off by default for privacy. Turn on for local
 		// debugging — the spans will then carry verbatim message and tool
 		// payloads.
-		otelext.WithCaptureMessages(true),
-		otelext.WithCaptureToolIO(true),
+		telemetry.WithCaptureMessages(true),
+		telemetry.WithCaptureToolIO(true),
 		// Arbitrary resource-style attributes any backend can correlate on.
-		otelext.WithAttributes(
+		telemetry.WithAttributes(
 			attribute.String("demo.run.id", "demo_run_1"),
 			attribute.String("demo.step.id", "demo_step_1"),
 		),

@@ -17,7 +17,7 @@ import (
 
 // InstrumentationName is the OTel instrumentation scope name set on every
 // span and metric emitted by this package.
-const InstrumentationName = "github.com/deepnoodle-ai/dive/experimental/otel"
+const InstrumentationName = "github.com/deepnoodle-ai/dive/otel"
 
 // InstrumentationVersion is reported on every span and metric. Resolved from
 // the build's module version when this package is consumed by a tagged

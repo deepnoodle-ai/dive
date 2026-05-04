@@ -1,9 +1,8 @@
 // Package otel emits OpenTelemetry spans and metrics from a Dive agent
 // following the GenAI semantic conventions (`gen_ai.*`).
 //
-// Status: experimental. The API may change. Vendored OTel deps are kept in a
-// separate Go module so callers who do not use this package don't pay for
-// them.
+// OTel deps live in a separate Go module so callers who don't use this
+// package don't pay for them.
 //
 // # Span shape
 //
@@ -22,7 +21,7 @@
 //	    Name:         "Research Assistant",
 //	    Model:        anthropic.New(),
 //	    SystemPrompt: "You are an enthusiastic researcher.",
-//	    Tracer:       otelext.NewTracer(otelext.WithProvider("anthropic")),
+//	    Tracer:       telemetry.NewTracer(telemetry.WithProvider("anthropic")),
 //	})
 //
 //	resp, err := agent.CreateResponse(ctx, dive.WithInput("hello"))

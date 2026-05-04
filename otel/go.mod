@@ -1,4 +1,4 @@
-module github.com/deepnoodle-ai/dive/experimental/otel
+module github.com/deepnoodle-ai/dive/otel
 
 go 1.25.0
 
@@ -21,4 +21,4 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 )
 
-replace github.com/deepnoodle-ai/dive => ../..
+replace github.com/deepnoodle-ai/dive => ..

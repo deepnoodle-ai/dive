@@ -23,19 +23,19 @@ collector — will render them.
 ## Quick start
 
 ```bash
-go get github.com/deepnoodle-ai/dive/experimental/otel
+go get github.com/deepnoodle-ai/dive/otel
 ```
 
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
-    otelext "github.com/deepnoodle-ai/dive/experimental/otel"
+    telemetry "github.com/deepnoodle-ai/dive/otel"
 )
 
 agent, _ := dive.NewAgent(dive.AgentOptions{
     Name:   "My Agent",
     Model:  anthropic.New(),
-    Tracer: otelext.NewTracer(otelext.WithProvider("anthropic")),
+    Tracer: telemetry.NewTracer(telemetry.WithProvider("anthropic")),
 })
 
 resp, err := agent.CreateResponse(ctx, dive.WithInput("hello"))
@@ -72,10 +72,10 @@ status — but **not** the raw text of messages or tool arguments. Opt in
 when you want it (review your destination's data retention first):
 
 ```go
-otelext.NewTracer(
-    otelext.WithProvider("anthropic"),
-    otelext.WithCaptureMessages(true), // chat input/output messages
-    otelext.WithCaptureToolIO(true),   // tool args and results
+telemetry.NewTracer(
+    telemetry.WithProvider("anthropic"),
+    telemetry.WithCaptureMessages(true), // chat input/output messages
+    telemetry.WithCaptureToolIO(true),   // tool args and results
 )
 ```
 
@@ -85,9 +85,9 @@ Pass any extra attributes you want on every span — useful for tying
 traces back to a workflow run, customer ID, etc.:
 
 ```go
-otelext.NewTracer(
-    otelext.WithProvider("anthropic"),
-    otelext.WithAttributes(
+telemetry.NewTracer(
+    telemetry.WithProvider("anthropic"),
+    telemetry.WithAttributes(
         attribute.String("workflow.run.id", runID),
         attribute.String("customer.id", customerID),
     ),
@@ -96,9 +96,9 @@ otelext.NewTracer(
 
 ## Going further
 
-- The [experimental/otel reference](experimental/otel.md) documents every
-  attribute and metric the adapter emits, plus how to nest your own HTTP
-  spans under `chat` using `otelhttp`.
+- The [dive/otel reference](otel.md) documents every attribute and metric
+  the adapter emits, plus how to nest your own HTTP spans under `chat`
+  using `otelhttp`.
 - Want to emit to something other than OpenTelemetry? Implement
   `dive.Tracer` directly — it's three small methods. See `tracer.go` in
   the dive package.

@@ -1,6 +1,6 @@
 # OpenTelemetry collector with the `debug` exporter.
 #
-# Use this to inspect the raw OTLP payload Dive's otel extension produces:
+# Use this to inspect the raw OTLP payload Dive's otel adapter produces:
 # the collector deserializes the protobuf and prints every span and metric
 # with full attribute detail, so you can verify that gen_ai.* keys land
 # correctly without needing a real backend account.

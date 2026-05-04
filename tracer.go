@@ -15,8 +15,8 @@ import (
 // It is intentionally separate from the hook system, which handles
 // modification (rewriting prompts, denying tool calls, injecting context).
 //
-// Implementations live in adapter packages — see experimental/otel for the
-// OpenTelemetry adapter. NopTracer is the default.
+// Implementations live in adapter packages — see the dive/otel module for
+// the OpenTelemetry adapter. NopTracer is the default.
 type Tracer interface {
 	// StartAgentRun is called once per CreateResponse. Implementations should
 	// open a root operation span (or equivalent) and return a derived ctx that
