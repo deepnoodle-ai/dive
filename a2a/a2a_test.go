@@ -383,6 +383,7 @@ func TestRemoteAgentSendText(t *testing.T) {
 	result, err := remote.SendText(context.Background(), "hi there")
 	assert.NoError(t, err)
 	assert.True(t, result.IsCompleted())
+	assert.Equal(t, "completed", result.State)
 	assert.Equal(t, "Hello from the remote agent!", result.Text)
 
 	// ContextID should be set after the first call.
@@ -408,11 +409,13 @@ func TestRemoteAgentSendTextOnTask(t *testing.T) {
 	result, err := remote.SendText(context.Background(), "do something")
 	assert.NoError(t, err)
 	assert.True(t, result.IsInputRequired())
+	assert.Equal(t, "input_required", result.State)
 
 	// Resume on the same task.
 	result2, err := remote.SendTextOnTask(context.Background(), result.ID, "yes")
 	assert.NoError(t, err)
 	assert.True(t, result2.IsCompleted())
+	assert.Equal(t, "completed", result2.State)
 	assert.Equal(t, "Resumed successfully.", result2.Text)
 }
 
