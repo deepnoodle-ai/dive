@@ -25,6 +25,7 @@ cd examples
 | `ollama_example` | Ollama | Local model usage |
 | `openrouter_example` | OpenRouter | Multi-provider routing |
 | `skills_example` | Anthropic | Agent with skill loading and auto-invocation |
+| `firecrawl_example` | Anthropic + Firecrawl | Agent with web search and fetch via Firecrawl |
 | `oauth_client` | — | OAuth client credential flow |
 
 Run any example with `go run`:
