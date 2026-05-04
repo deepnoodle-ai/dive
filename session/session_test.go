@@ -160,6 +160,20 @@ func TestSessionCompact(t *testing.T) {
 	assert.Equal(t, "Summary of 4 messages", msgs[0].Text())
 }
 
+func TestCompactSuspendedSession(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("s1")
+
+	msgs := suspendedTurnMessages()
+	err := sess.SaveSuspendedTurn(ctx, msgs, nil, singleSuspensionState())
+	assert.NoError(t, err)
+
+	err = sess.Compact(ctx, func(_ context.Context, _ []*llm.Message) ([]*llm.Message, error) {
+		return nil, nil
+	})
+	assert.ErrorIs(t, err, session.ErrSuspendedSession)
+}
+
 func TestCompactionHistory(t *testing.T) {
 	ctx := context.Background()
 
@@ -510,6 +524,37 @@ func TestFileStore(t *testing.T) {
 		msgs, _ := got.Messages(ctx)
 		assert.Equal(t, 1, len(msgs))
 		assert.Equal(t, "Summary", msgs[0].Text())
+	})
+
+	t.Run("CompactionHistory persists ReplacedMessages to file", func(t *testing.T) {
+		dir := t.TempDir()
+		store, _ := session.NewFileStore(dir)
+		ctx := context.Background()
+
+		sess, _ := store.Open(ctx, "s1")
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("original-user"),
+			llm.NewAssistantTextMessage("original-assistant"),
+		}, nil)
+
+		err := sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+			return []*llm.Message{llm.NewAssistantTextMessage("Summary")}, nil
+		})
+		assert.NoError(t, err)
+
+		// Re-open and verify CompactionHistory round-trips correctly.
+		got, _ := store.Open(ctx, "s1")
+		records, err := got.CompactionHistory(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(records))
+
+		rec := records[0]
+		assert.Equal(t, 1, len(rec.Summary))
+		assert.Equal(t, "Summary", rec.Summary[0].Text())
+		assert.Equal(t, 2, len(rec.ReplacedMessages))
+		assert.Equal(t, "original-user", rec.ReplacedMessages[0].Text())
+		assert.Equal(t, "original-assistant", rec.ReplacedMessages[1].Text())
+		assert.False(t, rec.CompactedAt.IsZero())
 	})
 }
 

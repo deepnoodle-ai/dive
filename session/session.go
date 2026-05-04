@@ -676,8 +676,10 @@ type CompactionRecord struct {
 	CompactedAt time.Time
 }
 
-// CompactionHistory returns all compaction records in chronological order.
-// Returns an empty slice when the session has never been compacted.
+// CompactionHistory returns the compaction records stored in the session.
+// Because Compact replaces all events with a single new event, there is at
+// most one record. Returns an empty slice when the session has never been
+// compacted.
 func (s *Session) CompactionHistory(_ context.Context) ([]CompactionRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
