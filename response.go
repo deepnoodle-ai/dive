@@ -267,6 +267,21 @@ type Response struct {
 	// resume. See the SuspensionState docs for the canonical stateless
 	// usage pattern.
 	Suspension *SuspensionState `json:"suspension,omitempty"`
+
+	// BackgroundTasks is non-nil and non-empty when one or more tools
+	// returned BackgroundResult during this turn. Each handle provides a Done
+	// channel that delivers exactly one *ToolResult when the background
+	// goroutine finishes. Status remains ResponseStatusCompleted — background
+	// tasks do not change the response's terminal status.
+	//
+	// Use AwaitBackgroundTasks to block for all results, then pass them to
+	// the next CreateResponse call via WithBackgroundResults. For the simple
+	// interactive loop case, use ContinueWithBackground.
+	//
+	// Handles may be dropped without causing goroutine leaks: the background
+	// goroutine sends to its buffered channel (cap 1) and exits regardless of
+	// whether any caller reads the result.
+	BackgroundTasks []*BackgroundTaskHandle `json:"-"`
 }
 
 // OutputText returns the text content from the last message in the response.

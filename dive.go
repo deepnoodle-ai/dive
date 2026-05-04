@@ -130,6 +130,12 @@ type CreateResponseOptions struct {
 	// holds a newer snapshot than what was persisted). Typically set via
 	// WithResume rather than assigned directly.
 	Suspension *SuspensionState
+
+	// BackgroundHandles and BackgroundResults, when both non-nil, inject
+	// completed background task results as a synthetic user message at the
+	// start of the next generation. Set via WithBackgroundResults.
+	BackgroundHandles []*BackgroundTaskHandle
+	BackgroundResults map[string]*ToolResult
 }
 
 // EventCallback is a function called with each item produced while an agent

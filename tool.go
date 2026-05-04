@@ -98,12 +98,12 @@ type ToolResultContent struct {
 // ToolResult is the output from a tool call.
 //
 // ToolResult is a tagged union between a normal result (Content / Display /
-// IsError) and a suspend result (Suspend). A single ToolResult must set
-// exactly one of the two — either the regular fields OR Suspend, never
-// both. The agent validates this at the boundary and a malformed result is
-// surfaced as an IsError result routed through the PostToolUseFailure
-// hook chain. Use NewToolResult*/NewSuspendResult* constructors rather
-// than filling the fields directly to stay on the safe side of the union.
+// IsError), a suspend result (Suspend), and a background result (Background).
+// A single ToolResult must set exactly one of the three — either the regular
+// fields OR Suspend OR Background, never multiple. The agent validates this at
+// the boundary and a malformed result is surfaced as an IsError result routed
+// through the PostToolUseFailure hook chain. Use NewToolResult*/NewSuspendResult*/
+// NewBackgroundResult* constructors rather than filling the fields directly.
 type ToolResult struct {
 	// Content is the tool output sent to the LLM.
 	Content []*ToolResultContent `json:"content"`
@@ -117,6 +117,11 @@ type ToolResult struct {
 	// ToolResult (no Content, no Display, no IsError). Use NewSuspendResult
 	// to construct.
 	Suspend *SuspendResult `json:"suspend,omitempty"`
+	// Background, when non-nil, tells the agent that work has been dispatched
+	// to a background goroutine. The goroutine sends exactly one *ToolResult
+	// to Background.done when it finishes. Must be the only field set on the
+	// ToolResult. Use NewBackgroundResult or NewBackgroundResultFull to construct.
+	Background *backgroundResult `json:"-"`
 }
 
 // SuspendReason classifies why a tool suspended so that adapters (A2A,
@@ -528,8 +533,9 @@ type ToolCallResult struct {
 	ID                string
 	Name              string
 	Input             any
-	Preview           *ToolCallPreview // Preview generated before execution (if tool implements ToolPreviewer)
-	Result            *ToolResult      // Protocol-level result sent to the LLM
-	Error             error            // Go error if tool.Call() itself failed
-	AdditionalContext string           // Context injected by hooks, appended to the tool result message
+	Preview           *ToolCallPreview  // Preview generated before execution (if tool implements ToolPreviewer)
+	Result            *ToolResult       // Protocol-level result sent to the LLM
+	Error             error             // Go error if tool.Call() itself failed
+	AdditionalContext string            // Context injected by hooks, appended to the tool result message
+	BackgroundHandle  *BackgroundTaskHandle // Non-nil when the tool returned BackgroundResult
 }
