@@ -234,7 +234,10 @@ func runInteractive(ctx *cli.Context) error {
 		Registry:       taskRegistry,
 		NotifyCallback: monNotifier.notify,
 	})
-	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool), dive.ToolAdapter(monitorTool))
+	taskStopTool := extended.NewTaskStopTool(extended.TaskStopToolOptions{
+		Registry: taskRegistry,
+	})
+	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool), dive.ToolAdapter(monitorTool), dive.ToolAdapter(taskStopTool))
 
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")

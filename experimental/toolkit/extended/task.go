@@ -37,6 +37,7 @@ type TaskRecord struct {
 	Agent       *dive.Agent
 	Suspension  *dive.SuspensionState
 	done        chan struct{}
+	cancel      context.CancelFunc // non-nil for cancellable tasks (e.g. monitors)
 }
 
 type taskRecordSnapshot struct {
