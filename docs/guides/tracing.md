@@ -7,7 +7,7 @@ and token usage — using OpenTelemetry. Add three lines to wire it up.
 
 One trace per `CreateResponse` call, shaped like this:
 
-```
+```text
 invoke_agent My Agent
 ├── chat claude-opus-4-6      (timing, tokens, model)
 ├── execute_tool get_weather  (args, result, status)
