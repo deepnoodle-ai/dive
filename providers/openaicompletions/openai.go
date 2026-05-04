@@ -122,26 +122,20 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	beforeHook := &llm.HookContext{
+	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
 			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
-			Endpoint: p.endpoint,
 		},
-	}
-	if err := config.FireHooks(ctx, beforeHook); err != nil {
+	}); err != nil {
 		return nil, err
-	}
-	reqCtx := ctx
-	if beforeHook.UpdatedCtx != nil {
-		reqCtx = beforeHook.UpdatedCtx
 	}
 
 	var result Response
-	err = retry.DoSimple(reqCtx, func() error {
-		req, err := p.createRequest(reqCtx, body, config, false)
+	err = retry.DoSimple(ctx, func() error {
+		req, err := p.createRequest(ctx, body, config, false)
 		if err != nil {
 			return err
 		}
@@ -220,7 +214,6 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			Messages: config.Messages,
 			Config:   config,
 			Body:     body,
-			Endpoint: p.endpoint,
 		},
 		Response: &llm.HookResponseContext{
 			Response: response,
@@ -264,27 +257,20 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	beforeHook := &llm.HookContext{
+	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.BeforeGenerate,
 		Request: &llm.HookRequestContext{
-			Messages:  config.Messages,
-			Config:    config,
-			Body:      body,
-			Endpoint:  p.endpoint,
-			Streaming: true,
+			Messages: config.Messages,
+			Config:   config,
+			Body:     body,
 		},
-	}
-	if err := config.FireHooks(ctx, beforeHook); err != nil {
+	}); err != nil {
 		return nil, err
-	}
-	reqCtx := ctx
-	if beforeHook.UpdatedCtx != nil {
-		reqCtx = beforeHook.UpdatedCtx
 	}
 
 	var stream *StreamIterator
-	err = retry.DoSimple(reqCtx, func() error {
-		req, err := p.createRequest(reqCtx, body, config, true)
+	err = retry.DoSimple(ctx, func() error {
+		req, err := p.createRequest(ctx, body, config, true)
 		if err != nil {
 			return err
 		}

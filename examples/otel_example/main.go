@@ -74,25 +74,24 @@ func main() {
 		},
 	)
 
-	ext := otelext.New(
+	tracer := otelext.NewTracer(
 		otelext.WithProvider("anthropic"),
 		// Capture flags are off by default for privacy. Turn on for local
 		// debugging — the spans will then carry verbatim message and tool
 		// payloads.
 		otelext.WithCaptureMessages(true),
 		otelext.WithCaptureToolIO(true),
-		// Resource-style identifiers any backend can correlate on. Mobius
-		// uses these to attach spans to the right run/step.
+		// Arbitrary resource-style attributes any backend can correlate on.
 		otelext.WithAttributes(
-			attribute.String(otelext.AttrMobiusRunID, "demo_run_1"),
-			attribute.String(otelext.AttrMobiusStepID, "demo_step_1"),
+			attribute.String("demo.run.id", "demo_run_1"),
+			attribute.String("demo.step.id", "demo_step_1"),
 		),
 	)
 
-	// Wire otelhttp on the provider's HTTP client. Because Dive's
-	// BeforeGenerate hook publishes the chat-span ctx via
-	// HookContext.UpdatedCtx, the provider uses that ctx for the request,
-	// and otelhttp's HTTP CLIENT span will nest under the chat span.
+	// Wire otelhttp on the provider's HTTP client. Because the agent passes
+	// the chat-span ctx directly into the model's Generate/Stream call, the
+	// provider's HTTP request inherits that ctx, and otelhttp's CLIENT span
+	// nests under the chat span automatically — no hook plumbing needed.
 	httpClient := &http.Client{
 		Timeout:   300 * time.Second,
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
@@ -105,13 +104,13 @@ func main() {
 		SystemPrompt: "You are a meteorologist. When asked about weather, use the get_weather tool.",
 		Model:        anthropic.New(anthropic.WithClient(httpClient)),
 		Tools:        []dive.Tool{weather},
-		Extensions:   []dive.Extension{ext},
+		Tracer:       tracer,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	resp, err := otelext.Run(ctx, agent,
+	resp, err := agent.CreateResponse(ctx,
 		dive.WithInput("What's the weather in San Francisco and Paris?"),
 	)
 	if err != nil {

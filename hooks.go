@@ -112,19 +112,6 @@ type HookContext struct {
 	// the tool is executed. Only the last hook's UpdatedInput takes effect.
 	UpdatedInput []byte
 
-	// UpdatedCtx, when set by a PreToolUse hook, replaces the context
-	// passed into Tool.Call. Use this to propagate values that the tool's
-	// internals need to see — most commonly an OpenTelemetry span context
-	// so that any child spans the tool emits nest under the agent's
-	// execute_tool span instead of escaping as siblings.
-	//
-	// The replacement context MUST be derived from the ctx the hook
-	// received (or a downstream context.WithValue / WithCancel chain
-	// from it), so the agent's deadlines and cancellation still apply.
-	// Only the last hook's UpdatedCtx takes effect; setting it to nil
-	// means "no replacement," not "clear the context."
-	UpdatedCtx context.Context
-
 	// AdditionalContext, when set by a hook, is appended as a text content
 	// block to the tool result message sent to the LLM. This lets hooks
 	// provide guidance without modifying the tool result itself.

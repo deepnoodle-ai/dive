@@ -91,13 +91,6 @@ type Extension interface {
 	Rules() string
 }
 
-// LLMHookExtension is implemented by extensions that also need provider-level
-// LLM hooks. NewAgent merges these hooks alongside the agent-level hooks from
-// Extension.Hooks.
-type LLMHookExtension interface {
-	LLMHooks() llm.Hooks
-}
-
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
 	// SystemPrompt is the system prompt sent to the LLM.
@@ -135,18 +128,24 @@ type AgentOptions struct {
 	// Optional name for logging.
 	Name string
 
-	// Description is a free-form purpose/role description. Surfaced as
-	// gen_ai.agent.description for telemetry.
+	// Description is a free-form purpose/role description. Surfaced via
+	// Tracer (e.g. as gen_ai.agent.description) for observability.
 	Description string
 
 	// Version identifies a revision of the agent's prompt/tooling/config
-	// (e.g. "1.0.0", "2025-05-01"). Surfaced as gen_ai.agent.version.
+	// (e.g. "1.0.0", "2025-05-01"). Surfaced via Tracer.
 	Version string
 
 	// ID is a stable identifier for the agent, useful in multi-tenant
 	// systems for correlating runs to a specific agent record. Surfaced
-	// as gen_ai.agent.id. Empty values are not auto-generated.
+	// via Tracer. Empty values are not auto-generated.
 	ID string
+
+	// Tracer observes the agent's lifecycle (run start/end, each chat
+	// iteration, each tool call) for tracing, metrics, or audit logging.
+	// Defaults to NopTracer. The OpenTelemetry adapter lives in
+	// experimental/otel.
+	Tracer Tracer
 
 	// Session enables persistent conversation state. When set, the agent
 	// automatically loads history before generation and saves new messages
@@ -186,6 +185,7 @@ type Agent struct {
 	modelSettings         *ModelSettings
 	systemPrompt          string
 	session               Session
+	tracer                Tracer
 
 	// mu protects model and systemPrompt for concurrent access via
 	// SetModel/SetSystemPrompt while CreateResponse is running.
@@ -224,14 +224,14 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		opts.Hooks.Stop = append(opts.Hooks.Stop, extHooks.Stop...)
 		opts.Hooks.PreIteration = append(opts.Hooks.PreIteration, extHooks.PreIteration...)
 		opts.Hooks.OnSuspend = append(opts.Hooks.OnSuspend, extHooks.OnSuspend...)
-		if llmExt, ok := ext.(LLMHookExtension); ok {
-			opts.LLMHooks = append(opts.LLMHooks, llmExt.LLMHooks()...)
-		}
 		if rules := ext.Rules(); rules != "" {
 			opts.SystemPrompt = strings.TrimRight(opts.SystemPrompt, "\n") + "\n\n" + rules
 		}
 	}
 
+	if opts.Tracer == nil {
+		opts.Tracer = NopTracer{}
+	}
 	agent := &Agent{
 		name:                  opts.Name,
 		id:                    opts.ID,
@@ -248,6 +248,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		hooks:                 opts.Hooks,
 		session:               opts.Session,
 		toolsets:              opts.Toolsets,
+		tracer:                opts.Tracer,
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -356,7 +357,7 @@ func (a *Agent) SetSystemPrompt(prompt string) {
 	a.systemPrompt = prompt
 }
 
-func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
+func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (response *Response, err error) {
 	var options CreateResponseOptions
 	options.Apply(opts)
 
@@ -474,10 +475,19 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil, fmt.Errorf("no messages provided")
 	}
 
-	// Publish the active session on ctx so provider-level LLM hooks (which
-	// only see llm.HookContext) can read it via SessionFromContext —
-	// e.g. to attach gen_ai.conversation.id on chat spans.
-	ctx = withSessionContext(ctx, sess)
+	// Open the agent-run span. The returned ctx carries the span so chat
+	// and tool spans nest under it. NopTracer makes this a zero-cost no-op
+	// for agents that don't configure a tracer.
+	ctx, runSpan := a.tracer.StartAgentRun(ctx, AgentRunInfo{Agent: a, Session: sess})
+	defer func() {
+		if response != nil {
+			runSpan.SetResponse(response)
+			if response.Usage != nil {
+				runSpan.SetUsage(response.Usage)
+			}
+		}
+		runSpan.End(err)
+	}()
 
 	// Initialize hook context shared across all phases
 	hctx := NewHookContext()
@@ -509,7 +519,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		defer cancel()
 	}
 
-	response := &Response{
+	response = &Response{
 		Model:     model.Name(),
 		CreatedAt: time.Now(),
 	}
@@ -1403,17 +1413,46 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
 		}
+
+		// Open chat span before invoking the model. The returned ctx carries
+		// the span so any HTTP-client middleware (e.g. otelhttp) the provider
+		// installs nests under it.
+		_, streaming := model.(llm.StreamingLLM)
+		infoCfg := &llm.Config{}
+		infoCfg.Apply(iterOpts...)
+		chatCtx, chatSpan := a.tracer.StartChat(ctx, ChatInfo{
+			Agent:            a,
+			Session:          hctx.Session,
+			Model:            infoCfg.Model,
+			Streaming:        streaming,
+			MaxTokens:        infoCfg.MaxTokens,
+			Temperature:      infoCfg.Temperature,
+			FrequencyPenalty: infoCfg.FrequencyPenalty,
+			PresencePenalty:  infoCfg.PresencePenalty,
+			SystemPrompt:     systemPrompt,
+			Messages:         updatedMessages,
+			Iteration:        i,
+		})
+
 		var err error
 		var response *llm.Response
+		var ttfc float64
 		if streamingLLM, ok := model.(llm.StreamingLLM); ok {
-			response, err = a.generateStreaming(ctx, streamingLLM, iterOpts, collectingCallback)
+			response, ttfc, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, collectingCallback)
 		} else {
-			response, err = model.Generate(ctx, iterOpts...)
+			response, err = model.Generate(chatCtx, iterOpts...)
 		}
 		if err == nil && response == nil {
 			// This indicates a bug in the LLM provider implementation
 			err = ErrLLMNoResponse
 		}
+		if response != nil {
+			chatSpan.SetResponse(response)
+		}
+		if ttfc > 0 {
+			chatSpan.SetTimeToFirstChunk(ttfc)
+		}
+		chatSpan.End(err)
 		if err != nil {
 			return nil, err
 		}
@@ -1509,60 +1548,46 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
-//
-// Streaming providers fire BeforeGenerate from Stream() but cannot fire
-// AfterGenerate themselves — the iterator is consumed by the caller, so the
-// final accumulated response only exists here. This method fires
-// AfterGenerate explicitly so observability hooks (e.g. the experimental
-// otel package) see a balanced Before/After pair regardless of whether the
-// provider streams or not.
+// Returns the accumulated response, the time-to-first-chunk in seconds
+// (zero for pre-first-chunk failures), and any error.
 func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
 	generateOpts []llm.Option,
 	callback EventCallback,
-) (*llm.Response, error) {
+) (*llm.Response, float64, error) {
 	accum := llm.NewResponseAccumulator()
 	streamStart := time.Now()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
 	if err != nil {
-		a.fireLLMAfterGenerate(ctx, nil, err, 0)
-		return nil, err
+		return nil, 0, err
 	}
 	defer iter.Close()
 
 	var ttfc float64
 	for iter.Next() {
 		event := iter.Event()
-		// Capture time-to-first-chunk on the first content-bearing event
-		// (delta with text or content_block_start carrying populated content).
-		// This becomes gen_ai.response.time_to_first_chunk.
 		if ttfc == 0 && eventHasContent(event) {
 			ttfc = time.Since(streamStart).Seconds()
 		}
 		if err := accum.AddEvent(event); err != nil {
-			a.fireLLMAfterGenerate(ctx, nil, err, ttfc)
-			return nil, err
+			return nil, ttfc, err
 		}
 		if err := callback(ctx, &ResponseItem{
 			Type:  ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
-			a.fireLLMAfterGenerate(ctx, nil, err, ttfc)
-			return nil, err
+			return nil, ttfc, err
 		}
 	}
 	if err := iter.Err(); err != nil {
-		a.fireLLMAfterGenerate(ctx, nil, err, ttfc)
-		return nil, err
+		return nil, ttfc, err
 	}
-	resp := accum.Response()
-	a.fireLLMAfterGenerate(ctx, resp, nil, ttfc)
-	return resp, nil
+	return accum.Response(), ttfc, nil
 }
 
 // eventHasContent reports whether the event carries assistant content
-// (text delta, populated content block, or input_json delta) — used to
+// (text delta, populated content block, or input_json delta). Used to
 // detect the first chunk for time-to-first-chunk telemetry. Lifecycle
 // events without payload (message_start, ping) don't count.
 func eventHasContent(event *llm.Event) bool {
@@ -1582,38 +1607,6 @@ func eventHasContent(event *llm.Event) bool {
 		return event.ContentBlock.Text != "" || event.ContentBlock.Name != "" || event.ContentBlock.Input != nil
 	}
 	return false
-}
-
-// fireLLMAfterGenerate fires the agent's LLM AfterGenerate (or OnError) hooks
-// against a synthetic Config that carries the accumulated response. Used to
-// close the streaming hook contract — providers can't fire AfterGenerate
-// themselves because they hand the iterator off to the caller. The
-// timeToFirstChunk argument carries the streaming TTFT measurement (zero
-// for non-streaming or pre-first-chunk failures).
-func (a *Agent) fireLLMAfterGenerate(ctx context.Context, resp *llm.Response, hookErr error, timeToFirstChunk float64) {
-	if a.llmHooks == nil {
-		return
-	}
-	cfg := &llm.Config{Hooks: a.llmHooks}
-	if resp != nil {
-		cfg.Model = resp.Model
-	}
-	hookType := llm.AfterGenerate
-	if hookErr != nil {
-		hookType = llm.OnError
-	}
-	hctx := &llm.HookContext{
-		Type:    hookType,
-		Request: &llm.HookRequestContext{Config: cfg, Streaming: true},
-		Response: &llm.HookResponseContext{
-			Response:         resp,
-			Error:            hookErr,
-			TimeToFirstChunk: timeToFirstChunk,
-		},
-	}
-	if err := cfg.FireHooks(ctx, hctx); err != nil {
-		a.logger.Debug("after-generate hook error", "error", err)
-	}
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
@@ -1674,10 +1667,6 @@ type toolCallPrep struct {
 	preHctx *HookContext
 	denied  bool
 	input   []byte
-	// toolCtx is the context Tool.Call will receive. It defaults to
-	// childCtx (so the agent's cancel chain still applies) and is
-	// replaced by HookContext.UpdatedCtx if a PreToolUse hook returns one.
-	toolCtx context.Context
 }
 
 // executeToolCallsParallel uses a two-phase approach:
@@ -1704,11 +1693,6 @@ func (a *Agent) executeToolCallsParallel(
 	batch := &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))}
 	deniedResults := make([]*ToolCallResult, len(toolCalls))
 
-	// childCtx exists outside phase 1 so PreToolUse hooks see a context that
-	// already carries the agent's cancel chain. A hook can derive
-	// HookContext.UpdatedCtx from this ctx (e.g. trace.ContextWithSpan) and
-	// the goroutine will use the derived ctx — preserving both span
-	// propagation and cancellation.
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1767,18 +1751,12 @@ func (a *Agent) executeToolCallsParallel(
 			preview: preview,
 			preHctx: preHctx,
 			input:   toolCall.Input,
-			toolCtx: childCtx,
 		}
 		if denialErr != nil {
 			prep.denied = true
 			deniedResults[i] = a.createDeniedResult(toolCall, denialErr.Error(), preview)
-		} else {
-			if preHctx.UpdatedInput != nil {
-				prep.input = preHctx.UpdatedInput
-			}
-			if preHctx.UpdatedCtx != nil {
-				prep.toolCtx = preHctx.UpdatedCtx
-			}
+		} else if preHctx.UpdatedInput != nil {
+			prep.input = preHctx.UpdatedInput
 		}
 		preps[i] = prep
 	}
@@ -1809,10 +1787,19 @@ func (a *Agent) executeToolCallsParallel(
 				ch <- completedTool{index: i, err: err}
 				return
 			}
-			// prep.toolCtx is childCtx, or a hook-derived child of it.
-			// Either way it carries the agent's cancel chain, so a
-			// downstream cancel still aborts the tool.
-			result := a.executeTool(prep.toolCtx, prep.tool, toolCalls[i], prep.input, prep.preview, callback)
+			toolCtx, toolSpan := a.tracer.StartToolCall(childCtx, ToolCallInfo{
+				Agent:   a,
+				Session: hctx.Session,
+				Tool:    prep.tool,
+				Call:    toolCalls[i],
+			})
+			result := a.executeTool(toolCtx, prep.tool, toolCalls[i], prep.input, prep.preview, callback)
+			toolSpan.SetResult(result)
+			if result != nil && result.Error != nil {
+				toolSpan.End(result.Error)
+			} else {
+				toolSpan.End(nil)
+			}
 			if result.Error != nil && childCtx.Err() != nil {
 				ch <- completedTool{index: i, err: childCtx.Err()}
 				return
@@ -1986,11 +1973,19 @@ func (a *Agent) executeOneToolCall(
 		if preHctx.UpdatedInput != nil {
 			input = preHctx.UpdatedInput
 		}
-		toolCtx := ctx
-		if preHctx.UpdatedCtx != nil {
-			toolCtx = preHctx.UpdatedCtx
-		}
+		toolCtx, toolSpan := a.tracer.StartToolCall(ctx, ToolCallInfo{
+			Agent:   a,
+			Session: hctx.Session,
+			Tool:    tool,
+			Call:    toolCall,
+		})
 		result = a.executeTool(toolCtx, tool, toolCall, input, preview, callback)
+		toolSpan.SetResult(result)
+		if result != nil && result.Error != nil {
+			toolSpan.End(result.Error)
+		} else {
+			toolSpan.End(nil)
+		}
 	}
 
 	// Suspend path: emit the tool_call_result event but skip PostToolUse

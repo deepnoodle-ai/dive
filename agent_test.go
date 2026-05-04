@@ -820,16 +820,14 @@ func TestParallelToolExecution(t *testing.T) {
 
 // mockExtension implements Extension for testing.
 type mockExtension struct {
-	tools    []Tool
-	hooks    Hooks
-	llmHooks llm.Hooks
-	rules    string
+	tools []Tool
+	hooks Hooks
+	rules string
 }
 
-func (e *mockExtension) Tools() []Tool       { return e.tools }
-func (e *mockExtension) Hooks() Hooks        { return e.hooks }
-func (e *mockExtension) LLMHooks() llm.Hooks { return e.llmHooks }
-func (e *mockExtension) Rules() string       { return e.rules }
+func (e *mockExtension) Tools() []Tool { return e.tools }
+func (e *mockExtension) Hooks() Hooks  { return e.hooks }
+func (e *mockExtension) Rules() string { return e.rules }
 
 func TestExtensionMerge(t *testing.T) {
 	mock := &mockLLM{nameFunc: func() string { return "test-model" }}
@@ -886,39 +884,6 @@ func TestExtensionMerge(t *testing.T) {
 		for _, hook := range agent.hooks.PreGeneration {
 			hook(context.Background(), &HookContext{})
 		}
-		assert.Equal(t, []string{"direct", "ext"}, order)
-	})
-
-	t.Run("merges LLM hooks from extensions", func(t *testing.T) {
-		var order []string
-		directHook := llm.Hook{
-			Type: llm.BeforeGenerate,
-			Func: func(ctx context.Context, hctx *llm.HookContext) error {
-				order = append(order, "direct")
-				return nil
-			},
-		}
-		extHook := llm.Hook{
-			Type: llm.BeforeGenerate,
-			Func: func(ctx context.Context, hctx *llm.HookContext) error {
-				order = append(order, "ext")
-				return nil
-			},
-		}
-
-		agent, err := NewAgent(AgentOptions{
-			Model:    mock,
-			LLMHooks: llm.Hooks{directHook},
-			Extensions: []Extension{
-				&mockExtension{llmHooks: llm.Hooks{extHook}},
-			},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(agent.llmHooks))
-
-		cfg := &llm.Config{Hooks: agent.llmHooks}
-		err = cfg.FireHooks(context.Background(), &llm.HookContext{Type: llm.BeforeGenerate})
-		assert.NoError(t, err)
 		assert.Equal(t, []string{"direct", "ext"}, order)
 	})
 

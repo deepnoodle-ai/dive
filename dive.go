@@ -190,34 +190,6 @@ func WithSession(s Session) CreateResponseOption {
 	}
 }
 
-// sessionCtxKey is the context-value key used to thread the active Session
-// through CreateResponse so downstream LLM hooks (which receive
-// llm.HookContext, not dive.HookContext) can correlate work to a chat
-// thread without bespoke wiring.
-type sessionCtxKey struct{}
-
-// SessionFromContext returns the Session attached to ctx by CreateResponse,
-// or nil if none. Useful for provider-level llm.Hooks that need the
-// conversation ID — the agent installs the active session on ctx before
-// invoking the model, so the same hook works for both stateful and
-// stateless calls (returning nil in the stateless case).
-func SessionFromContext(ctx context.Context) Session {
-	if ctx == nil {
-		return nil
-	}
-	s, _ := ctx.Value(sessionCtxKey{}).(Session)
-	return s
-}
-
-// withSessionContext returns a derived ctx carrying sess. Internal — used by
-// the agent to publish the active session to downstream LLM hooks.
-func withSessionContext(ctx context.Context, sess Session) context.Context {
-	if sess == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, sessionCtxKey{}, sess)
-}
-
 // WithToolResults supplies externally-obtained tool results to resume a
 // session-backed suspended agent. The keys are tool_call IDs taken from a
 // prior Response.Suspension.PendingToolCalls. The values are
