@@ -30,7 +30,11 @@ func TestIntegrationScrape(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 	assert.NotNil(t, resp.Data)
-	assert.True(t, len(resp.Data.Markdown) > 0)
+	assert.Contains(t, resp.Data.Markdown, "Example Domain")
+	assert.NotNil(t, resp.Data.Metadata)
+	assert.Equal(t, "Example Domain", resp.Data.Metadata.Title)
+	assert.Equal(t, 200, resp.Data.Metadata.StatusCode)
+	assert.Equal(t, "https://example.com", resp.Data.Metadata.SourceURL)
 }
 
 func TestIntegrationSearch(t *testing.T) {
@@ -42,14 +46,26 @@ func TestIntegrationSearch(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, resp.Success)
 	assert.True(t, len(resp.Data) > 0)
-	assert.True(t, len(resp.Data[0].URL) > 0)
+	first := resp.Data[0]
+	assert.True(t, len(first.URL) > 0)
+	assert.True(t, len(first.Title) > 0)
+	assert.True(t, len(first.Description) > 0)
+	assert.True(t, len(first.Markdown) > 0)
+	assert.True(t, first.Position >= 1)
 }
 
 func TestIntegrationFetch(t *testing.T) {
 	c := integrationClient(t)
-	resp, err := c.Fetch(context.Background(), &fetch.Request{URL: "https://example.com"})
+	resp, err := c.Fetch(context.Background(), &fetch.Request{
+		URL:     "https://example.com",
+		Formats: []string{"markdown", "links"},
+	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.True(t, len(resp.Markdown) > 0)
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Contains(t, resp.Markdown, "Example Domain")
+	assert.Equal(t, "Example Domain", resp.Metadata.Title)
+	assert.Equal(t, "https://example.com", resp.URL)
+	assert.True(t, len(resp.Links) > 0)
 	assert.True(t, resp.Timestamp.Before(time.Now()))
 }
