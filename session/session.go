@@ -184,12 +184,13 @@ const (
 // event is the internal unit of session persistence. Each CreateResponse
 // call produces one event containing the messages added during that turn.
 type event struct {
-	ID        string         `json:"id"`
-	Type      eventType      `json:"type"`
-	Timestamp time.Time      `json:"timestamp"`
-	Messages  []*llm.Message `json:"messages"`
-	Usage     *llm.Usage     `json:"usage,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	ID               string         `json:"id"`
+	Type             eventType      `json:"type"`
+	Timestamp        time.Time      `json:"timestamp"`
+	Messages         []*llm.Message `json:"messages"`
+	ReplacedMessages []*llm.Message `json:"replaced_messages,omitempty"`
+	Usage            *llm.Usage     `json:"usage,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
 }
 
 func (e *event) copy() *event {
@@ -202,6 +203,12 @@ func (e *event) copy() *event {
 		cp.Messages = make([]*llm.Message, len(e.Messages))
 		for i, msg := range e.Messages {
 			cp.Messages[i] = msg.Copy()
+		}
+	}
+	if len(e.ReplacedMessages) > 0 {
+		cp.ReplacedMessages = make([]*llm.Message, len(e.ReplacedMessages))
+		for i, msg := range e.ReplacedMessages {
+			cp.ReplacedMessages[i] = msg.Copy()
 		}
 	}
 	if e.Usage != nil {
@@ -641,10 +648,11 @@ func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 		return err
 	}
 	s.data.Events = []*event{{
-		ID:        newEventID(),
-		Type:      eventTypeCompaction,
-		Timestamp: time.Now(),
-		Messages:  compacted,
+		ID:               newEventID(),
+		Type:             eventTypeCompaction,
+		Timestamp:        time.Now(),
+		Messages:         compacted,
+		ReplacedMessages: msgs,
 		Metadata: map[string]any{
 			"original_event_count":   len(s.data.Events),
 			"original_message_count": len(msgs),
@@ -655,6 +663,47 @@ func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 		return s.appender.putSession(ctx, s.data)
 	}
 	return nil
+}
+
+// CompactionRecord describes a single compaction event in the session history.
+type CompactionRecord struct {
+	// Summary contains the compacted/summarized messages.
+	Summary []*llm.Message
+	// ReplacedMessages are the original messages that were replaced by compaction.
+	// Empty for sessions compacted before this feature was added.
+	ReplacedMessages []*llm.Message
+	// CompactedAt is when the compaction occurred.
+	CompactedAt time.Time
+}
+
+// CompactionHistory returns all compaction records in chronological order.
+// Returns an empty slice when the session has never been compacted.
+func (s *Session) CompactionHistory(_ context.Context) ([]CompactionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var records []CompactionRecord
+	for _, e := range s.data.Events {
+		if e.Type != eventTypeCompaction {
+			continue
+		}
+		rec := CompactionRecord{
+			CompactedAt: e.Timestamp,
+		}
+		if len(e.Messages) > 0 {
+			rec.Summary = make([]*llm.Message, len(e.Messages))
+			for i, msg := range e.Messages {
+				rec.Summary[i] = msg.Copy()
+			}
+		}
+		if len(e.ReplacedMessages) > 0 {
+			rec.ReplacedMessages = make([]*llm.Message, len(e.ReplacedMessages))
+			for i, msg := range e.ReplacedMessages {
+				rec.ReplacedMessages[i] = msg.Copy()
+			}
+		}
+		records = append(records, rec)
+	}
+	return records, nil
 }
 
 // Store is the storage abstraction for persistent sessions.

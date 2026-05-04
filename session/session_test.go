@@ -160,6 +160,75 @@ func TestSessionCompact(t *testing.T) {
 	assert.Equal(t, "Summary of 4 messages", msgs[0].Text())
 }
 
+func TestCompactionHistory(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns empty when never compacted", func(t *testing.T) {
+		sess := session.New("s1")
+		records, err := sess.CompactionHistory(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(records))
+	})
+
+	t.Run("ReplacedMessages contains original messages", func(t *testing.T) {
+		sess := session.New("s2")
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("turn1-user"),
+			llm.NewAssistantTextMessage("turn1-assistant"),
+		}, nil)
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("turn2-user"),
+			llm.NewAssistantTextMessage("turn2-assistant"),
+		}, nil)
+
+		err := sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+			return []*llm.Message{llm.NewAssistantTextMessage("summary")}, nil
+		})
+		assert.NoError(t, err)
+
+		records, err := sess.CompactionHistory(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(records))
+
+		rec := records[0]
+		assert.Equal(t, 1, len(rec.Summary))
+		assert.Equal(t, "summary", rec.Summary[0].Text())
+		assert.Equal(t, 4, len(rec.ReplacedMessages))
+		assert.Equal(t, "turn1-user", rec.ReplacedMessages[0].Text())
+		assert.False(t, rec.CompactedAt.IsZero())
+	})
+
+	t.Run("second compaction replaces everything including first summary", func(t *testing.T) {
+		sess := session.New("s3")
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("orig"),
+			llm.NewAssistantTextMessage("reply"),
+		}, nil)
+		// First compaction
+		err := sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+			return []*llm.Message{llm.NewAssistantTextMessage("summary-1")}, nil
+		})
+		assert.NoError(t, err)
+
+		// Add another turn and compact again
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("new"),
+			llm.NewAssistantTextMessage("new-reply"),
+		}, nil)
+		err = sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+			return []*llm.Message{llm.NewAssistantTextMessage("summary-2")}, nil
+		})
+		assert.NoError(t, err)
+
+		// Session now has one compaction event (the second compact replaced everything)
+		records, err := sess.CompactionHistory(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(records))
+		// The second compaction's replaced messages include summary-1 + new turn
+		assert.Equal(t, 3, len(records[0].ReplacedMessages))
+	})
+}
+
 // ---------------------------------------------------------------------------
 // dive.Session interface
 // ---------------------------------------------------------------------------
