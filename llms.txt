@@ -479,6 +479,7 @@ All constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
 - [LLM Providers](docs/guides/llm-guide.md)
 - [Permissions](docs/guides/permissions.md)
 - [Skills](docs/guides/skills.md)
+- [Tracing](docs/guides/tracing.md) - OpenTelemetry adapter (separate module: `github.com/deepnoodle-ai/dive/otel`)
 - [GoDoc](https://pkg.go.dev/github.com/deepnoodle-ai/dive)
 - [examples/](examples/) - runnable examples for each provider and feature
 

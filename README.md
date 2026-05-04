@@ -329,6 +329,7 @@ go run ./openai_responses_example
 - [Tools Overview](./docs/guides/tools.md) — Built-in toolkit reference
 - [Permissions](./docs/guides/permissions.md) — Rule-based tool permission management
 - [Skills](./docs/guides/skills.md) — Modular agent capabilities and slash commands
+- [Tracing](./docs/guides/tracing.md) — OpenTelemetry tracing and metrics for agent runs
 - [llms.txt](./llms.txt) — AI-optimized reference for agents developing with Dive
 
 ## See Also
