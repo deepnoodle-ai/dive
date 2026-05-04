@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
@@ -205,11 +204,6 @@ func runInteractive(ctx *cli.Context) error {
 	subagentRegistry := subagent.NewRegistry(true)
 	taskRegistry := extended.NewTaskRegistry()
 
-	// appRef allows the task tool's OnEvent callback to reach the App,
-	// which isn't created yet at this point. Uses atomic for safe
-	// concurrent access from background task goroutines.
-	var appRef atomic.Pointer[App]
-
 	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 		// Create sub-model (use parent model by default)
 		subModel := model
@@ -230,15 +224,6 @@ func runInteractive(ctx *cli.Context) error {
 		AgentFactory:     agentFactory,
 		SubagentRegistry: subagentRegistry,
 		ParentTools:      tools,
-		OnEvent: func(taskID string, item *dive.ResponseItem) {
-			if app := appRef.Load(); app != nil && app.runner != nil {
-				app.runner.SendEvent(subagentEvent{
-					baseEvent: newBaseEvent(),
-					taskID:    taskID,
-					item:      item,
-				})
-			}
-		},
 	})
 	taskOutputTool := extended.NewTaskOutputTool(extended.TaskOutputToolOptions{
 		Registry: taskRegistry,
@@ -361,7 +346,6 @@ func runInteractive(ctx *cli.Context) error {
 		ctx.String("api-endpoint"),
 	)
 	app.currentSession = currentSession
-	appRef.Store(app)
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {

@@ -16,7 +16,6 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
@@ -53,8 +52,9 @@ type toolResultEvent struct {
 
 type processingStartEvent struct {
 	baseEvent
-	userInput string
-	expanded  string
+	userInput      string
+	expanded       string
+	fromBackground bool // true when triggered by a native background task completion
 }
 
 type processingEndEvent struct {
@@ -91,27 +91,12 @@ type compactionEvent struct {
 	event *compaction.CompactionEvent
 }
 
-// subagentEvent carries streaming data from a sub-agent task.
-type subagentEvent struct {
-	baseEvent
-	taskID string
-	item   *dive.ResponseItem
-}
-
 // toolStreamEvent carries a chunk of streaming output for a tool call.
 // Used by any tool that produces incremental output (Bash stdout, sub-agents).
 type toolStreamEvent struct {
 	baseEvent
 	toolCallID string
 	text       string
-}
-
-// backgroundTaskDoneEvent is sent when a background task completes while
-// the main agent is idle, triggering an automatic retrieval turn.
-type backgroundTaskDoneEvent struct {
-	baseEvent
-	taskID      string
-	description string
 }
 
 // nativeBgTasksReadyEvent is sent when one or more native dive.BackgroundTaskHandle
@@ -317,12 +302,6 @@ type App struct {
 
 	// Streaming tool output state
 	toolStreamBuffers map[string]string // tool call ID -> accumulated streaming text
-	taskIDToMsgIndex  map[string]int    // sub-agent task ID -> original Task message index
-
-	// Background task auto-retrieval state
-	pendingBackgroundTasks   map[string]string         // taskID -> description
-	completedBackgroundTasks []backgroundTaskDoneEvent // queued completions waiting to be retrieved
-	backgroundFlushTimer     *time.Timer               // debounce timer for batching completions
 
 	// pendingNativeBgResults queues native background results that arrived while
 	// the agent was already processing; drained at the end of each turn.
@@ -370,19 +349,12 @@ func NewApp(
 		initialPrompt:          initialPrompt,
 		compactionConfig:       compactionConfig,
 		contextWindowMax:       contextWindowForModel(modelName),
-		toolStreamBuffers:      make(map[string]string),
-		taskIDToMsgIndex:       make(map[string]int),
-		pendingBackgroundTasks: make(map[string]string),
+		toolStreamBuffers: make(map[string]string),
 	}
 }
 
 // shutdown cleans up resources before exit.
-func (a *App) shutdown() {
-	if a.backgroundFlushTimer != nil {
-		a.backgroundFlushTimer.Stop()
-		a.backgroundFlushTimer = nil
-	}
-}
+func (a *App) shutdown() {}
 
 // LiveView implements tui.InlineApplication - returns the live region view.
 // Called only from the main event loop goroutine - no locking needed.
@@ -758,10 +730,6 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleCompaction(e.event)
 	case toolStreamEvent:
 		a.handleToolStream(e)
-	case subagentEvent:
-		a.handleSubagentEvent(e)
-	case backgroundTaskDoneEvent:
-		a.handleBackgroundTaskDone(e)
 	case nativeBgTasksReadyEvent:
 		a.handleNativeBgTasksReady(e)
 	case showDialogEvent:
@@ -1284,9 +1252,12 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 func (a *App) handleProcessingStart(e processingStartEvent) {
 	userInput := strings.TrimSpace(e.userInput)
 
-	// Add user message
+	role := "user"
+	if e.fromBackground {
+		role = "context"
+	}
 	userMsg := Message{
-		Role:    "user",
+		Role:    role,
 		Content: userInput,
 		Time:    time.Now(),
 		Type:    MessageTypeText,
@@ -1408,15 +1379,7 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 				a.messages[idx].ToolReadLines = strings.Count(textContent, "\n") + 1
 			}
 
-			// For Task tool with background tasks, extract task ID for redirect tracking
-			if a.messages[idx].ToolName == "Task" && textContent != "" {
-				if taskID := parseTaskID(textContent); taskID != "" {
-					a.taskIDToMsgIndex[taskID] = idx
-					// Replace the "Started background task" display with just the description
-					a.messages[idx].ToolResultLines = nil
-					a.messages[idx].ToolResult = ""
-				}
-			}
+
 		}
 	}
 }
@@ -1462,15 +1425,9 @@ func (a *App) handleProcessingEnd(err error) {
 	a.currentMessage = nil
 	a.toolCallIndex = make(map[string]int)
 	a.toolStreamBuffers = make(map[string]string)
-	a.taskIDToMsgIndex = make(map[string]int)
 
 	// Now print to scrollback - the live view will be re-rendered with correct height
 	a.printRecentMessagesToScrollback()
-
-	// Check if any background tasks completed while we were processing
-	if len(a.completedBackgroundTasks) > 0 {
-		a.scheduleBackgroundFlush()
-	}
 
 	// Drain any native background results that arrived while processing.
 	if len(a.pendingNativeBgResults) > 0 {
@@ -1512,86 +1469,6 @@ func (a *App) handleToolStream(e toolStreamEvent) {
 	}
 }
 
-// handleSubagentEvent routes streaming events from sub-agents, converting
-// them into generic toolStreamEvents for display.
-func (a *App) handleSubagentEvent(e subagentEvent) {
-	item := e.item
-
-	// Check for background task completion/failure status events
-	if item.Type == "subagent_status" {
-		if status, ok := item.Extension.(*extended.SubagentStatusEvent); ok {
-			if status.Status == extended.TaskStatusCompleted || status.Status == extended.TaskStatusFailed {
-				delete(a.pendingBackgroundTasks, e.taskID)
-				a.completedBackgroundTasks = append(a.completedBackgroundTasks, backgroundTaskDoneEvent{
-					baseEvent:   newBaseEvent(),
-					taskID:      status.TaskID,
-					description: status.Description,
-				})
-				if !a.processing {
-					a.scheduleBackgroundFlush()
-				}
-				return
-			}
-			if status.Status == extended.TaskStatusRunning {
-				a.pendingBackgroundTasks[status.TaskID] = status.Description
-			}
-		}
-	}
-
-	// Route sub-agent streaming to the Task tool call's message
-	msgIdx, ok := a.taskIDToMsgIndex[e.taskID]
-	if !ok {
-		return
-	}
-	// Find the tool call ID for this message so we can use the generic stream buffer
-	callID := a.messages[msgIdx].ToolID
-
-	if item.Type == dive.ResponseItemTypeModelEvent {
-		if item.Event != nil && item.Event.Delta != nil && item.Event.Delta.Text != "" {
-			a.handleToolStream(toolStreamEvent{
-				baseEvent:  newBaseEvent(),
-				toolCallID: callID,
-				text:       item.Event.Delta.Text,
-			})
-		}
-	}
-	if item.Type == dive.ResponseItemTypeToolCall && item.ToolCall != nil {
-		a.handleToolStream(toolStreamEvent{
-			baseEvent:  newBaseEvent(),
-			toolCallID: callID,
-			text:       fmt.Sprintf("\n[%s] ", item.ToolCall.Name),
-		})
-	}
-}
-
-// handleBackgroundTaskDone is fired by the debounce timer via SendEvent.
-func (a *App) handleBackgroundTaskDone(_ backgroundTaskDoneEvent) {
-	if a.processing || len(a.completedBackgroundTasks) == 0 {
-		return
-	}
-	// Drain the queue
-	tasks := a.completedBackgroundTasks
-	a.completedBackgroundTasks = nil
-	a.backgroundFlushTimer = nil
-
-	var lines []string
-	for _, t := range tasks {
-		lines = append(lines, fmt.Sprintf("- %s (task_id: %s)", t.description, t.taskID))
-	}
-	prompt := fmt.Sprintf("Background tasks completed:\n%s", strings.Join(lines, "\n"))
-	go a.processMessageAsync(prompt, false)
-}
-
-// scheduleBackgroundFlush starts or resets a 500ms debounce timer. When it
-// fires, it sends a backgroundTaskDoneEvent to flush all queued completions.
-func (a *App) scheduleBackgroundFlush() {
-	if a.backgroundFlushTimer != nil {
-		a.backgroundFlushTimer.Stop()
-	}
-	a.backgroundFlushTimer = time.AfterFunc(500*time.Millisecond, func() {
-		a.runner.SendEvent(backgroundTaskDoneEvent{baseEvent: newBaseEvent()})
-	})
-}
 
 // startNativeBgTaskWatcher starts a goroutine that awaits all tasks and sends
 // a nativeBgTasksReadyEvent when they complete. Discards results if the app
@@ -1638,9 +1515,10 @@ func (a *App) runBgContinuation(handles []*dive.BackgroundTaskHandle, results ma
 	}
 
 	a.runner.SendEvent(processingStartEvent{
-		baseEvent: newBaseEvent(),
-		userInput: display,
-		expanded:  display,
+		baseEvent:      newBaseEvent(),
+		userInput:      display,
+		expanded:       display,
+		fromBackground: true,
 	})
 
 	var lastUsage *llm.Usage
@@ -1662,19 +1540,6 @@ func (a *App) runBgContinuation(handles []*dive.BackgroundTaskHandle, results ma
 	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err, lastUsage: lastUsage})
 }
 
-// parseTaskID extracts a task ID from text like "Task started in background. Task ID: task_abc12345\n..."
-func parseTaskID(text string) string {
-	prefix := "Task started in background. Task ID: "
-	idx := strings.Index(text, prefix)
-	if idx < 0 {
-		return ""
-	}
-	rest := text[idx+len(prefix):]
-	if newline := strings.IndexByte(rest, '\n'); newline >= 0 {
-		rest = rest[:newline]
-	}
-	return strings.TrimSpace(rest)
-}
 
 // lastNonEmptyLine returns the last non-empty line from text.
 func lastNonEmptyLine(text string) string {
@@ -1692,8 +1557,8 @@ func (a *App) printRecentMessagesToScrollback() {
 	// Find start of current interaction
 	startIdx := 0
 	for i := len(a.messages) - 1; i >= 0; i-- {
-		if a.messages[i].Role == "user" {
-			startIdx = i + 1 // Start after user message (already printed)
+		if a.messages[i].Role == "user" || a.messages[i].Role == "context" {
+			startIdx = i + 1 // Start after user/context message (already printed)
 			break
 		}
 	}

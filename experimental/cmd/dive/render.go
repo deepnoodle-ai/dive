@@ -240,6 +240,13 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 			tui.Text("%s", content).Wrap().Flex(1),
 		)
 
+	case "context":
+		dimStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+		return tui.Group(
+			tui.Text("↩ ").Style(dimStyle),
+			tui.Text("%s", msg.Content).Wrap().Style(dimStyle),
+		)
+
 	case "system":
 		return tui.Text("%s", msg.Content).Wrap().Warning()
 
@@ -678,6 +685,13 @@ func (a *App) textMessageViewStatic(msg Message) tui.View {
 			tui.PaddingLTRB(2, 0, 0, 0, tui.Markdown(content, nil).Theme(diveMarkdownTheme())),
 			tui.Text("⏺"),
 		).Align(tui.AlignLeft)
+
+	case "context":
+		dimStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+		return tui.Group(
+			tui.Text("↩ ").Style(dimStyle),
+			tui.Text("%s", msg.Content).Wrap().Style(dimStyle),
+		)
 
 	case "system":
 		return tui.Text("%s", msg.Content).Wrap().Warning()

@@ -126,16 +126,20 @@ func TestTaskTool(t *testing.T) {
 			RunInBackground: true,
 		})
 		assert.NoError(t, err)
-		assert.False(t, result.IsError)
-		assert.Contains(t, result.Content[0].Text, "Task started in background")
-		assert.Contains(t, result.Content[0].Text, "task_")
+		// Background mode returns a native BackgroundResult, not a Content result.
+		assert.NotNil(t, result.Background)
+		assert.Equal(t, 0, len(result.Content))
 
-		// Verify task completed
+		// Wait for completion via the TaskRegistry record (done is accessible within the package).
 		tasks := registry.List()
 		assert.Equal(t, 1, len(tasks))
 		record, ok := registry.Get(tasks[0])
 		assert.True(t, ok)
-		<-record.done
+		select {
+		case <-record.done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("background task did not complete in time")
+		}
 		snapshot := record.snapshot()
 		assert.Equal(t, TaskStatusCompleted, snapshot.Status)
 		assert.Equal(t, "Background task done", snapshot.Output)
