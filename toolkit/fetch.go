@@ -236,11 +236,12 @@ func (t *FetchTool) Call(ctx context.Context, req *fetch.Request) (*dive.ToolRes
 // WebFetch is marked as read-only, idempotent, and open-world (accesses external systems).
 func (t *FetchTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "WebFetch",
-		ReadOnlyHint:    true,
-		DestructiveHint: false,
-		IdempotentHint:  true,
-		OpenWorldHint:   true,
+		Title:             "WebFetch",
+		ReadOnlyHint:      true,
+		DestructiveHint:   false,
+		IdempotentHint:    true,
+		OpenWorldHint:     true,
+		MaxResultSizeHint: 100_000,
 	}
 }
 

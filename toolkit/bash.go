@@ -173,11 +173,12 @@ func (t *BashTool) Schema() *schema.Schema {
 // (interacts with external systems).
 func (t *BashTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Bash",
-		ReadOnlyHint:    false,
-		IdempotentHint:  false,
-		DestructiveHint: true,
-		OpenWorldHint:   true,
+		Title:             "Bash",
+		ReadOnlyHint:      false,
+		IdempotentHint:    false,
+		DestructiveHint:   true,
+		OpenWorldHint:     true,
+		MaxResultSizeHint: 50_000,
 	}
 }
 
