@@ -85,19 +85,6 @@ func NewClient(apiKey string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// NewClientFromCredentials builds a client from a credentials map.
-// Only api_key is read; base URL is fixed to DefaultBaseURL to prevent SSRF.
-func NewClientFromCredentials(creds map[string]any) (*Client, error) {
-	if creds == nil {
-		return nil, ErrMissingCredentials
-	}
-	apiKey, err := stringCredential(creds, "api_key")
-	if err != nil {
-		return nil, err
-	}
-	return NewClient(apiKey)
-}
-
 // Scrape fetches a single URL and returns the scraped document.
 func (c *Client) Scrape(ctx context.Context, req ScrapeRequest) (*ScrapeResponse, error) {
 	if len(req.Formats) == 0 {
@@ -328,14 +315,3 @@ func escapeMultipartValue(value string) string {
 	return strings.NewReplacer("\\", "\\\\", `"`, "\\\"").Replace(value)
 }
 
-func stringCredential(creds map[string]any, key string) (string, error) {
-	raw, ok := creds[key]
-	if !ok || raw == nil {
-		return "", fmt.Errorf("%w: %s not found in credentials", ErrMissingCredentials, key)
-	}
-	s, ok := raw.(string)
-	if !ok {
-		return "", fmt.Errorf("firecrawl: credential %q must be a string, got %T", key, raw)
-	}
-	return s, nil
-}

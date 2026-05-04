@@ -21,16 +21,6 @@ func TestNewClientMissingAPIKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "api_key is required")
 }
 
-func TestNewClientFromCredentials(t *testing.T) {
-	_, err := NewClientFromCredentials(map[string]any{"api_key": "fc_test"})
-	assert.NoError(t, err)
-
-	_, err = NewClientFromCredentials(nil)
-	assert.Error(t, err)
-
-	_, err = NewClientFromCredentials(map[string]any{})
-	assert.Error(t, err)
-}
 
 func TestClientScrape(t *testing.T) {
 	var path, auth string
