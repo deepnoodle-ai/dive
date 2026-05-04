@@ -104,7 +104,14 @@ type Extension interface {
 // AgentOptions are used to configure an Agent.
 type AgentOptions struct {
 	// SystemPrompt is the system prompt sent to the LLM.
+	// Ignored when InstructionProvider is set.
 	SystemPrompt string
+
+	// InstructionProvider is called before each LLM request to produce the
+	// system prompt. Takes precedence over SystemPrompt when set.
+	// If both are set, InstructionProvider wins and a warning is logged at
+	// agent construction time.
+	InstructionProvider func(ctx context.Context, hctx *HookContext) (string, error)
 
 	// Model is the LLM to use for generation.
 	Model llm.LLM
@@ -194,6 +201,7 @@ type Agent struct {
 	parallelToolExecution bool
 	modelSettings         *ModelSettings
 	systemPrompt          string
+	instructionProvider   func(ctx context.Context, hctx *HookContext) (string, error)
 	session               Session
 	tracer                Tracer
 
@@ -242,6 +250,9 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	if opts.Tracer == nil {
 		opts.Tracer = NopTracer{}
 	}
+	if opts.InstructionProvider != nil && opts.SystemPrompt != "" {
+		opts.Logger.Warn("both SystemPrompt and InstructionProvider are set; InstructionProvider takes precedence")
+	}
 	agent := &Agent{
 		name:                  opts.Name,
 		id:                    opts.ID,
@@ -254,6 +265,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		llmHooks:              opts.LLMHooks,
 		logger:                opts.Logger,
 		systemPrompt:          opts.SystemPrompt,
+		instructionProvider:   opts.InstructionProvider,
 		modelSettings:         opts.ModelSettings,
 		hooks:                 opts.Hooks,
 		session:               opts.Session,
@@ -1421,6 +1433,22 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	generationLimit := a.toolIterationLimit + 1
 	lastIteration := false
 	for i := range generationLimit {
+		// InstructionProvider overrides systemPrompt before each LLM call.
+		if a.instructionProvider != nil {
+			providerHctx := &HookContext{
+				Agent:     a,
+				Session:   hctx.Session,
+				Values:    hctx.Values,
+				Messages:  updatedMessages,
+				Iteration: i,
+			}
+			provided, provErr := a.instructionProvider(ctx, providerHctx)
+			if provErr != nil {
+				return nil, fmt.Errorf("instruction provider error: %w", provErr)
+			}
+			systemPrompt = strings.TrimSpace(provided)
+		}
+
 		// Run PreIteration hooks
 		if len(a.hooks.PreIteration) > 0 {
 			hctx.Iteration = i

@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -959,5 +960,73 @@ func TestExtensionMerge(t *testing.T) {
 		})
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, `duplicate tool name: "same_name"`)
+	})
+}
+
+func TestInstructionProvider(t *testing.T) {
+	makeModel := func() (*mockLLM, *string) {
+		var capturedSystemPrompt string
+		m := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				var cfg llm.Config
+				cfg.Apply(opts...)
+				capturedSystemPrompt = cfg.SystemPrompt
+				return &llm.Response{
+					ID:         "resp_1",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "ok"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 5, OutputTokens: 2},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+		return m, &capturedSystemPrompt
+	}
+
+	t.Run("InstructionProvider overrides SystemPrompt", func(t *testing.T) {
+		m, captured := makeModel()
+		agent, err := NewAgent(AgentOptions{
+			Model:        m,
+			SystemPrompt: "static prompt",
+			InstructionProvider: func(ctx context.Context, hctx *HookContext) (string, error) {
+				return "dynamic prompt", nil
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, "dynamic prompt", *captured)
+	})
+
+	t.Run("InstructionProvider error aborts CreateResponse", func(t *testing.T) {
+		m, _ := makeModel()
+		agent, err := NewAgent(AgentOptions{
+			Model: m,
+			InstructionProvider: func(ctx context.Context, hctx *HookContext) (string, error) {
+				return "", errors.New("config unavailable")
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "config unavailable")
+	})
+
+	t.Run("static SystemPrompt used when no InstructionProvider", func(t *testing.T) {
+		m, captured := makeModel()
+		agent, err := NewAgent(AgentOptions{
+			Model:        m,
+			SystemPrompt: "static only",
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, "static only", *captured)
 	})
 }
