@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/wonton/fetch"
+	"github.com/deepnoodle-ai/wonton/web"
 )
 
 const DefaultBaseURL = "https://api.firecrawl.dev/v2"
@@ -198,8 +199,8 @@ func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response
 		OnlyMainContent:    true,
 		RemoveBase64Images: true,
 		BlockAds:           true,
-		Proxy:              "auto",             // use Firecrawl's auto proxy for better compatibility
-		StoreInCache:       true,               // cache responses to reduce API costs
+		Proxy:              "auto", // use Firecrawl's auto proxy for better compatibility
+		StoreInCache:       true,   // cache responses to reduce API costs
 		Headers:            req.Headers,
 		IncludeTags:        req.IncludeTags,
 		ExcludeTags:        req.ExcludeTags,
@@ -243,6 +244,30 @@ func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response
 		}
 	}
 	return resp, nil
+}
+
+// Searcher returns an adapter that implements web.Searcher using the metadata-only
+// (no-scrape) search path. Use this to back toolkit.WebSearchTool with Firecrawl.
+func (c *Client) Searcher() web.Searcher {
+	return &searcherAdapter{c}
+}
+
+type searcherAdapter struct{ c *Client }
+
+func (a *searcherAdapter) Search(ctx context.Context, input *web.SearchInput) (*web.SearchOutput, error) {
+	resp, err := a.c.Search(ctx, SearchRequest{Query: input.Query, Limit: input.Limit})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*web.SearchItem, 0, len(resp.Data))
+	for _, r := range resp.Data {
+		items = append(items, &web.SearchItem{
+			URL:         r.URL,
+			Title:       r.Title,
+			Description: r.Description,
+		})
+	}
+	return &web.SearchOutput{Items: items}, nil
 }
 
 // apiError carries an HTTP status code through the error chain so Fetch can
@@ -312,4 +337,3 @@ func formPartHeader(name, contentType string) textproto.MIMEHeader {
 func escapeMultipartValue(value string) string {
 	return strings.NewReplacer("\\", "\\\\", `"`, "\\\"").Replace(value)
 }
-
