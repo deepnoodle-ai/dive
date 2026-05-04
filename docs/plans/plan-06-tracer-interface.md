@@ -175,9 +175,9 @@ Removed from the current public surface:
 - `Run`, `Extension.Run` (no longer needed)
 - `LLMHooks()` method (no longer needed)
 - `OperationChat` / `OperationExecuteTool` / `OperationInvokeAgent` constants (internal)
-- `AttrMobiusRunID` / `AttrMobiusStepID` / `AttrMobiusJobID` / `AttrMobiusAgentID`
-  (vendor coupling — Mobius callers pass these via `WithAttributes` like
-  any other consumer)
+- Vendor-specific `Attr*` constants from `semconv.go` (vendor coupling —
+  callers pass any custom resource attributes via `WithAttributes` like any
+  other consumer)
 - `WithSystem` (deprecated alias — no released callers to preserve)
 - `gen_ai.system` legacy attribute (no migration window needed for a brand-new package)
 
@@ -229,7 +229,7 @@ For dive core:
   it on `End`. No queue, no ctx-keyed maps.
 - Metrics emission (`gen_ai.client.operation.duration`,
   `gen_ai.client.token.usage`) moves into `ChatSpan.End`.
-- Delete `run.go`. Delete `Mobius*` constants from `semconv.go`.
+- Delete `run.go`. Delete vendor-specific `Attr*` constants from `semconv.go`.
 - Update `experimental/otel/extension_test.go` and
   `coverage_test.go` to drive the agent normally (no `Run`).
 - Update `examples/otel_example/main.go` — drop `Run`, set `Tracer:`
