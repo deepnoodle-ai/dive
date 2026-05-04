@@ -189,6 +189,8 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Create TUI dialog for interactive user prompts (AskUserQuestion tool)
 	tuiDialog := &tuiDialog{}
+	// monitorNotifier forwards monitor line batches to the app event loop
+	monNotifier := &monitorNotifier{}
 
 	// Create path validator for workspace enforcement
 	pathValidator, err := toolkit.NewPathValidator(workspaceDir)
@@ -228,7 +230,11 @@ func runInteractive(ctx *cli.Context) error {
 	taskOutputTool := extended.NewTaskOutputTool(extended.TaskOutputToolOptions{
 		Registry: taskRegistry,
 	})
-	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool))
+	monitorTool := extended.NewMonitorTool(extended.MonitorToolOptions{
+		Registry:       taskRegistry,
+		NotifyCallback: monNotifier.notify,
+	})
+	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool), dive.ToolAdapter(monitorTool))
 
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")
@@ -353,8 +359,9 @@ func runInteractive(ctx *cli.Context) error {
 	}
 	app.startupAttachment = attachment
 
-	// Wire up dialog
+	// Wire up dialog and monitor notifier
 	tuiDialog.app = app
+	monNotifier.app = app
 
 	return app.Run()
 }
@@ -579,6 +586,23 @@ func runPrintJSON(ctx context.Context, agent *dive.Agent, input string) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(result)
+}
+
+// monitorNotifier sends monitor line batches to the app's event loop.
+// The app field is set after App creation (same deferred-init pattern as tuiDialog).
+type monitorNotifier struct {
+	app *App
+}
+
+func (n *monitorNotifier) notify(description string, lines []string) {
+	if n.app == nil || n.app.runner == nil {
+		return
+	}
+	n.app.runner.SendEvent(monitorNotificationEvent{
+		baseEvent:   newBaseEvent(),
+		description: description,
+		lines:       lines,
+	})
 }
 
 // tuiDialog implements dive.Dialog by routing to the App's TUI dialog system.

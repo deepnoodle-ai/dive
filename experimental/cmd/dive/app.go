@@ -107,6 +107,12 @@ type nativeBgTasksReadyEvent struct {
 	results map[string]*dive.ToolResult
 }
 
+type monitorNotificationEvent struct {
+	baseEvent
+	description string
+	lines       []string
+}
+
 // MessageType distinguishes regular messages from tool calls
 type MessageType int
 
@@ -306,6 +312,10 @@ type App struct {
 	// pendingNativeBgResults queues native background results that arrived while
 	// the agent was already processing; drained at the end of each turn.
 	pendingNativeBgResults []nativeBgTasksReadyEvent
+
+	// pendingMonitorNotifications queues monitor line batches that arrived
+	// while processing; drained one at a time at the end of each turn.
+	pendingMonitorNotifications []monitorNotificationEvent
 }
 
 // NewApp creates a new CLI application
@@ -732,6 +742,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleToolStream(e)
 	case nativeBgTasksReadyEvent:
 		a.handleNativeBgTasksReady(e)
+	case monitorNotificationEvent:
+		a.handleMonitorNotification(e)
 	case showDialogEvent:
 		a.dialogState = e.dialog
 		// Focus the dialog so it receives key events
@@ -1443,6 +1455,14 @@ func (a *App) handleProcessingEnd(err error) {
 		}
 		go a.runBgContinuation(allHandles, allResults)
 	}
+
+	// Drain one pending monitor notification (the next one will be drained
+	// after that turn completes, and so on).
+	if len(a.pendingMonitorNotifications) > 0 {
+		e := a.pendingMonitorNotifications[0]
+		a.pendingMonitorNotifications = a.pendingMonitorNotifications[1:]
+		go a.runMonitorNotification(e.description, e.lines)
+	}
 }
 
 // handleToolStream updates a tool call's result line with streaming output.
@@ -1540,6 +1560,44 @@ func (a *App) runBgContinuation(handles []*dive.BackgroundTaskHandle, results ma
 	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err, lastUsage: lastUsage})
 }
 
+// handleMonitorNotification is called when a monitor batch arrives.
+// Queues if processing; otherwise starts a continuation immediately.
+func (a *App) handleMonitorNotification(e monitorNotificationEvent) {
+	if a.processing {
+		a.pendingMonitorNotifications = append(a.pendingMonitorNotifications, e)
+		return
+	}
+	go a.runMonitorNotification(e.description, e.lines)
+}
+
+// runMonitorNotification injects a monitor line batch into the conversation.
+func (a *App) runMonitorNotification(description string, lines []string) {
+	content := fmt.Sprintf("Monitor: %s\n%s", description, strings.Join(lines, "\n"))
+
+	a.runner.SendEvent(processingStartEvent{
+		baseEvent:      newBaseEvent(),
+		userInput:      content,
+		expanded:       content,
+		fromBackground: true,
+	})
+
+	var lastUsage *llm.Usage
+	opts := []dive.CreateResponseOption{
+		dive.WithInput(content),
+		dive.WithSession(a.currentSession),
+		dive.WithEventCallback(a.agentEventCallback(&lastUsage)),
+	}
+
+	resp, err := a.agent.CreateResponse(a.ctx, opts...)
+	if err == nil && resp != nil && len(resp.BackgroundTasks) > 0 {
+		a.startNativeBgTaskWatcher(resp.BackgroundTasks)
+	}
+	if err == nil && resp != nil && a.compactionConfig != nil && a.sessionStore != nil {
+		a.checkAndPerformCompaction(lastUsage)
+	}
+
+	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err, lastUsage: lastUsage})
+}
 
 // lastNonEmptyLine returns the last non-empty line from text.
 func lastNonEmptyLine(text string) string {
