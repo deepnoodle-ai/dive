@@ -382,3 +382,87 @@ func TestToolResultText(t *testing.T) {
 	)
 	assert.Equal(t, toolResultText(multi), "part one\npart two")
 }
+
+// ---------------------------------------------------------------------------
+// AwaitBackgroundTasks — already-completed task
+// ---------------------------------------------------------------------------
+
+func TestAwaitBackgroundTasks_AlreadyCompleted(t *testing.T) {
+	ctx := context.Background()
+	r := NewBackgroundResult(ctx, "fast", func(ctx context.Context) (string, error) {
+		return "instant", nil
+	})
+	handle := &BackgroundTaskHandle{
+		TaskID: r.Background.id,
+		Done:   r.Background.done,
+	}
+
+	// Wait long enough for the goroutine to finish before calling Await
+	time.Sleep(100 * time.Millisecond)
+
+	results, err := AwaitBackgroundTasks(ctx, []*BackgroundTaskHandle{handle})
+	assert.NoError(t, err)
+	assert.Equal(t, toolResultText(results[handle.TaskID]), "instant")
+}
+
+// ---------------------------------------------------------------------------
+// toolResultText — Display field is not included
+// ---------------------------------------------------------------------------
+
+func TestToolResultText_DisplayNotIncluded(t *testing.T) {
+	r := NewToolResultText("content text").WithDisplay("display text")
+	assert.Equal(t, toolResultText(r), "content text")
+}
+
+// ---------------------------------------------------------------------------
+// backgroundCompletedMessage — Error: vs Result: label selection
+// ---------------------------------------------------------------------------
+
+func TestBackgroundCompletedMessage_Labels(t *testing.T) {
+	handles := []*BackgroundTaskHandle{
+		{TaskID: "ok", Description: "success task"},
+		{TaskID: "err", Description: "error task"},
+	}
+	results := map[string]*ToolResult{
+		"ok":  NewToolResultText("all good"),
+		"err": NewToolResultError("something broke"),
+	}
+	msg := backgroundCompletedMessage(handles, results)
+	assert.True(t, strings.Contains(msg, "Error:\nsomething broke"),
+		"error result should use Error: label, got: "+msg)
+	assert.True(t, strings.Contains(msg, "Result:\nall good"),
+		"success result should use Result: label, got: "+msg)
+}
+
+// ---------------------------------------------------------------------------
+// WithBackgroundResults — options wiring
+// ---------------------------------------------------------------------------
+
+func TestWithBackgroundResults_SetsOptions(t *testing.T) {
+	handles := []*BackgroundTaskHandle{
+		{TaskID: "t1", Description: "task one"},
+	}
+	results := map[string]*ToolResult{
+		"t1": NewToolResultText("done"),
+	}
+	opts := &CreateResponseOptions{}
+	WithBackgroundResults(handles, results)(opts)
+	assert.Equal(t, len(opts.BackgroundHandles), 1)
+	assert.Equal(t, opts.BackgroundHandles[0].TaskID, "t1")
+	assert.NotNil(t, opts.BackgroundResults["t1"])
+}
+
+// ---------------------------------------------------------------------------
+// NewBackgroundResult — empty description does not panic
+// ---------------------------------------------------------------------------
+
+func TestNewBackgroundResult_EmptyDescription(t *testing.T) {
+	ctx := context.Background()
+	result := NewBackgroundResult(ctx, "", func(ctx context.Context) (string, error) {
+		return "ok", nil
+	})
+	assert.NotNil(t, result.Background)
+	msg := backgroundStartedMessage(result.Background.description, result.Background.id)
+	assert.True(t, strings.Contains(msg, "Background task started:"))
+	assert.True(t, strings.Contains(msg, "The result will be delivered in a follow-up message."))
+}

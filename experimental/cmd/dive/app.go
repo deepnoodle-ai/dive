@@ -114,6 +114,14 @@ type backgroundTaskDoneEvent struct {
 	description string
 }
 
+// nativeBgTasksReadyEvent is sent when one or more native dive.BackgroundTaskHandle
+// goroutines have all completed, signaling the agent should re-enter with results.
+type nativeBgTasksReadyEvent struct {
+	baseEvent
+	handles []*dive.BackgroundTaskHandle
+	results map[string]*dive.ToolResult
+}
+
 // MessageType distinguishes regular messages from tool calls
 type MessageType int
 
@@ -315,6 +323,10 @@ type App struct {
 	pendingBackgroundTasks   map[string]string         // taskID -> description
 	completedBackgroundTasks []backgroundTaskDoneEvent // queued completions waiting to be retrieved
 	backgroundFlushTimer     *time.Timer               // debounce timer for batching completions
+
+	// pendingNativeBgResults queues native background results that arrived while
+	// the agent was already processing; drained at the end of each turn.
+	pendingNativeBgResults []nativeBgTasksReadyEvent
 }
 
 // NewApp creates a new CLI application
@@ -750,6 +762,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleSubagentEvent(e)
 	case backgroundTaskDoneEvent:
 		a.handleBackgroundTaskDone(e)
+	case nativeBgTasksReadyEvent:
+		a.handleNativeBgTasksReady(e)
 	case showDialogEvent:
 		a.dialogState = e.dialog
 		// Focus the dialog so it receives key events
@@ -1053,6 +1067,40 @@ func (a *App) processCommandAsync(displayText, expanded string, includeStartupAt
 	a.runAgent(expandedWithFiles, extraContent)
 }
 
+// agentEventCallback returns a dive.EventCallback that routes agent response
+// items to the appropriate UI events. lastUsage is updated in-place as LLM
+// usage events arrive.
+func (a *App) agentEventCallback(lastUsage **llm.Usage) dive.EventCallback {
+	return func(ctx context.Context, item *dive.ResponseItem) error {
+		switch item.Type {
+		case dive.ResponseItemTypeModelEvent:
+			if item.Event != nil && item.Event.Delta != nil {
+				if text := item.Event.Delta.Text; text != "" {
+					a.runner.SendEvent(streamTextEvent{baseEvent: newBaseEvent(), text: text})
+				}
+			}
+		case dive.ResponseItemTypeMessage:
+			if item.Usage != nil {
+				*lastUsage = item.Usage
+				a.runner.SendEvent(usageUpdateEvent{baseEvent: newBaseEvent(), usage: item.Usage.Copy()})
+			}
+		case dive.ResponseItemTypeToolCall:
+			a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
+		case dive.ResponseItemTypeToolCallResult:
+			a.runner.SendEvent(toolResultEvent{baseEvent: newBaseEvent(), result: item.ToolCallResult})
+		case dive.ResponseItemTypeToolStream:
+			if item.ToolStream != nil {
+				a.runner.SendEvent(toolStreamEvent{
+					baseEvent:  newBaseEvent(),
+					toolCallID: item.ToolStream.ToolCallID,
+					text:       item.ToolStream.Text,
+				})
+			}
+		}
+		return nil
+	}
+}
+
 // runAgent runs the agent with the given input. If extra content blocks are
 // provided (images, documents, etc.), they are sent as native content blocks
 // alongside the text in a single user message.
@@ -1077,36 +1125,7 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 	opts := []dive.CreateResponseOption{
 		inputOpt,
 		dive.WithSession(a.currentSession),
-		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
-			// Send events for each agent response item
-			switch item.Type {
-			case dive.ResponseItemTypeModelEvent:
-				if item.Event != nil && item.Event.Delta != nil {
-					if text := item.Event.Delta.Text; text != "" {
-						a.runner.SendEvent(streamTextEvent{baseEvent: newBaseEvent(), text: text})
-					}
-				}
-			case dive.ResponseItemTypeMessage:
-				// Track usage from each LLM response (last one = actual context size)
-				if item.Usage != nil {
-					lastUsage = item.Usage
-					a.runner.SendEvent(usageUpdateEvent{baseEvent: newBaseEvent(), usage: item.Usage.Copy()})
-				}
-			case dive.ResponseItemTypeToolCall:
-				a.runner.SendEvent(toolCallEvent{baseEvent: newBaseEvent(), call: item.ToolCall})
-			case dive.ResponseItemTypeToolCallResult:
-				a.runner.SendEvent(toolResultEvent{baseEvent: newBaseEvent(), result: item.ToolCallResult})
-			case dive.ResponseItemTypeToolStream:
-				if item.ToolStream != nil {
-					a.runner.SendEvent(toolStreamEvent{
-						baseEvent:  newBaseEvent(),
-						toolCallID: item.ToolStream.ToolCallID,
-						text:       item.ToolStream.Text,
-					})
-				}
-			}
-			return nil
-		}),
+		dive.WithEventCallback(a.agentEventCallback(&lastUsage)),
 	}
 
 	// Track if this is a new session (for metadata update)
@@ -1114,6 +1133,11 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 
 	// Create response with streaming
 	resp, err := a.agent.CreateResponse(a.ctx, opts...)
+
+	// Register any native background tasks so their results are auto-delivered.
+	if err == nil && resp != nil && len(resp.BackgroundTasks) > 0 {
+		a.startNativeBgTaskWatcher(resp.BackgroundTasks)
+	}
 
 	// Update session metadata for new sessions
 	if err == nil && resp != nil && a.sessionStore != nil && isNewSession {
@@ -1447,6 +1471,21 @@ func (a *App) handleProcessingEnd(err error) {
 	if len(a.completedBackgroundTasks) > 0 {
 		a.scheduleBackgroundFlush()
 	}
+
+	// Drain any native background results that arrived while processing.
+	if len(a.pendingNativeBgResults) > 0 {
+		pending := a.pendingNativeBgResults
+		a.pendingNativeBgResults = nil
+		var allHandles []*dive.BackgroundTaskHandle
+		allResults := make(map[string]*dive.ToolResult)
+		for _, e := range pending {
+			allHandles = append(allHandles, e.handles...)
+			for k, v := range e.results {
+				allResults[k] = v
+			}
+		}
+		go a.runBgContinuation(allHandles, allResults)
+	}
 }
 
 // handleToolStream updates a tool call's result line with streaming output.
@@ -1552,6 +1591,75 @@ func (a *App) scheduleBackgroundFlush() {
 	a.backgroundFlushTimer = time.AfterFunc(500*time.Millisecond, func() {
 		a.runner.SendEvent(backgroundTaskDoneEvent{baseEvent: newBaseEvent()})
 	})
+}
+
+// startNativeBgTaskWatcher starts a goroutine that awaits all tasks and sends
+// a nativeBgTasksReadyEvent when they complete. Discards results if the app
+// context is already cancelled (shutdown).
+func (a *App) startNativeBgTaskWatcher(tasks []*dive.BackgroundTaskHandle) {
+	go func() {
+		results, _ := dive.AwaitBackgroundTasks(a.ctx, tasks)
+		if a.ctx.Err() != nil {
+			return
+		}
+		a.runner.SendEvent(nativeBgTasksReadyEvent{
+			baseEvent: newBaseEvent(),
+			handles:   tasks,
+			results:   results,
+		})
+	}()
+}
+
+// handleNativeBgTasksReady is called when native background tasks complete.
+// If the agent is currently processing, the results are queued and delivered
+// at the end of the current turn. Otherwise a continuation is started immediately.
+func (a *App) handleNativeBgTasksReady(e nativeBgTasksReadyEvent) {
+	if a.processing {
+		a.pendingNativeBgResults = append(a.pendingNativeBgResults, e)
+		return
+	}
+	go a.runBgContinuation(e.handles, e.results)
+}
+
+// runBgContinuation re-enters the agent with completed background task results.
+// It is called from a goroutine, mirrors runAgent's flow, and handles chained
+// background tasks (continuations can themselves return BackgroundTasks).
+func (a *App) runBgContinuation(handles []*dive.BackgroundTaskHandle, results map[string]*dive.ToolResult) {
+	// Build a compact display label for the synthetic "user" turn header.
+	var descs []string
+	for _, h := range handles {
+		if h.Description != "" {
+			descs = append(descs, h.Description)
+		}
+	}
+	display := "background task completed"
+	if len(descs) > 0 {
+		display = strings.Join(descs, ", ") + " completed"
+	}
+
+	a.runner.SendEvent(processingStartEvent{
+		baseEvent: newBaseEvent(),
+		userInput: display,
+		expanded:  display,
+	})
+
+	var lastUsage *llm.Usage
+	opts := []dive.CreateResponseOption{
+		dive.WithBackgroundResults(handles, results),
+		dive.WithSession(a.currentSession),
+		dive.WithEventCallback(a.agentEventCallback(&lastUsage)),
+	}
+
+	resp, err := a.agent.CreateResponse(a.ctx, opts...)
+
+	if err == nil && resp != nil && len(resp.BackgroundTasks) > 0 {
+		a.startNativeBgTaskWatcher(resp.BackgroundTasks)
+	}
+	if err == nil && resp != nil && a.compactionConfig != nil && a.sessionStore != nil {
+		a.checkAndPerformCompaction(lastUsage)
+	}
+
+	a.runner.SendEvent(processingEndEvent{baseEvent: newBaseEvent(), err: err, lastUsage: lastUsage})
 }
 
 // parseTaskID extracts a task ID from text like "Task started in background. Task ID: task_abc12345\n..."

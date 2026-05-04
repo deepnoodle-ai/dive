@@ -7,6 +7,7 @@ package dive
 import (
 	"context"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -542,4 +543,289 @@ func TestAgent_WithBackgroundResults_InjectsMessage(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "LLM should have received the background completed message")
+}
+
+// ---------------------------------------------------------------------------
+// memSession: minimal in-package session for background integration tests
+// ---------------------------------------------------------------------------
+
+// memSession is a trivial in-memory Session implementation used by tests that
+// need session-backed history without importing the session sub-package (which
+// would create an import cycle from within package dive).
+type memSession struct {
+	mu       sync.Mutex
+	id       string
+	messages []*llm.Message
+}
+
+func newMemSession(id string) *memSession { return &memSession{id: id} }
+func (s *memSession) ID() string         { return s.id }
+func (s *memSession) Messages(_ context.Context) ([]*llm.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([]*llm.Message, len(s.messages))
+	copy(cp, s.messages)
+	return cp, nil
+}
+func (s *memSession) SaveTurn(_ context.Context, msgs []*llm.Message, _ *llm.Usage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messages = append(s.messages, msgs...)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Session-backed continuation (no WithMessages needed)
+// ---------------------------------------------------------------------------
+
+// TestAgent_BackgroundTool_SessionBacked verifies that a session-backed agent
+// can continue background results without passing WithMessages — the session
+// carries the conversation history automatically.
+func TestAgent_BackgroundTool_SessionBacked(t *testing.T) {
+	var callCount atomic.Int32
+
+	bgTool := &mockTool{
+		name: "analyze",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewBackgroundResult(ctx, "analyzing data", func(ctx context.Context) (string, error) {
+				return "analysis complete: 42 items found", nil
+			}), nil
+		},
+	}
+
+	mock := &mockLLM{
+		nameFunc: func() string { return "test-model" },
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			n := int(callCount.Add(1))
+			switch n {
+			case 1:
+				return &llm.Response{
+					ID:   "resp_1",
+					Role: llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{ID: "t1", Name: "analyze", Input: []byte(`{}`)},
+					},
+					StopReason: "tool_use",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			case 2:
+				return &llm.Response{
+					ID:         "resp_2",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Analyzing in background."}},
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 20, OutputTokens: 10},
+				}, nil
+			case 3:
+				return &llm.Response{
+					ID:         "resp_3",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Found 42 items."}},
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 30, OutputTokens: 10},
+				}, nil
+			}
+			t.Errorf("unexpected call count %d", n)
+			return nil, nil
+		},
+	}
+
+	sess := newMemSession("bg-session-test")
+	agent, err := NewAgent(AgentOptions{
+		Name:    "TestAgent",
+		Model:   mock,
+		Tools:   []Tool{bgTool},
+		Session: sess,
+	})
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	resp, err := agent.CreateResponse(ctx, WithInput("analyze the data"))
+	assert.NoError(t, err)
+	assert.Equal(t, len(resp.BackgroundTasks), 1)
+
+	// Session-backed: no WithMessages needed — session carries history
+	finalResp, err := ContinueWithBackground(ctx, agent, resp)
+	assert.NoError(t, err)
+	assert.Equal(t, finalResp.OutputText(), "Found 42 items.")
+	assert.Equal(t, int(callCount.Load()), 3)
+}
+
+// ---------------------------------------------------------------------------
+// Background task with Display field
+// ---------------------------------------------------------------------------
+
+// TestAgent_BackgroundTool_WithDisplay verifies that NewBackgroundResultFull
+// lets tools attach a Display field for richer UI output while keeping the
+// Content text for the LLM.
+func TestAgent_BackgroundTool_WithDisplay(t *testing.T) {
+	var callCount atomic.Int32
+
+	bgTool := &mockTool{
+		name: "generate_report",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewBackgroundResultFull(ctx, "generating report", func(ctx context.Context) *ToolResult {
+				return NewToolResultText("Report: 3 issues found").
+					WithDisplay("# Report\n\n- Issue 1\n- Issue 2\n- Issue 3")
+			}), nil
+		},
+	}
+
+	mock := &mockLLM{
+		nameFunc: func() string { return "test-model" },
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			n := int(callCount.Add(1))
+			switch n {
+			case 1:
+				return &llm.Response{
+					Role: llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{ID: "t1", Name: "generate_report", Input: []byte(`{}`)},
+					},
+					StopReason: "tool_use",
+					Usage:      llm.Usage{},
+				}, nil
+			default:
+				return &llm.Response{
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Report generated."}},
+					StopReason: "stop",
+					Usage:      llm.Usage{},
+				}, nil
+			}
+		},
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Name:  "TestAgent",
+		Model: mock,
+		Tools: []Tool{bgTool},
+	})
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	resp, err := agent.CreateResponse(ctx, WithInput("generate report"))
+	assert.NoError(t, err)
+	assert.Equal(t, len(resp.BackgroundTasks), 1)
+
+	results, err := AwaitBackgroundTasks(ctx, resp.BackgroundTasks)
+	assert.NoError(t, err)
+
+	result := results[resp.BackgroundTasks[0].TaskID]
+	assert.NotNil(t, result)
+	assert.Equal(t, result.Display, "# Report\n\n- Issue 1\n- Issue 2\n- Issue 3")
+	assert.Equal(t, toolResultText(result), "Report: 3 issues found")
+
+	// Continue: LLM receives the text (not Display), agent finishes
+	finalResp, err := agent.CreateResponse(ctx,
+		WithBackgroundResults(resp.BackgroundTasks, results),
+		WithMessages(resp.OutputMessages...),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, finalResp.OutputText(), "Report generated.")
+}
+
+// ---------------------------------------------------------------------------
+// Chained background tasks
+// ---------------------------------------------------------------------------
+
+// TestAgent_ChainedBackgroundTasks verifies that a background continuation
+// can itself spawn new background tasks, allowing multi-step async chains.
+func TestAgent_ChainedBackgroundTasks(t *testing.T) {
+	var callCount atomic.Int32
+
+	bgTool1 := &mockTool{
+		name: "step_one",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewBackgroundResult(ctx, "step one", func(ctx context.Context) (string, error) {
+				return "step one done", nil
+			}), nil
+		},
+	}
+	bgTool2 := &mockTool{
+		name: "step_two",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewBackgroundResult(ctx, "step two", func(ctx context.Context) (string, error) {
+				return "step two done", nil
+			}), nil
+		},
+	}
+
+	mock := &mockLLM{
+		nameFunc: func() string { return "test-model" },
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			n := int(callCount.Add(1))
+			switch n {
+			case 1: // initial: request step_one
+				return &llm.Response{
+					Role: llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{ID: "t1", Name: "step_one", Input: []byte(`{}`)},
+					},
+					StopReason: "tool_use",
+					Usage:      llm.Usage{},
+				}, nil
+			case 2: // step_one started: ack
+				return &llm.Response{
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Step one started."}},
+					StopReason: "stop",
+					Usage:      llm.Usage{},
+				}, nil
+			case 3: // step_one results delivered: request step_two
+				return &llm.Response{
+					Role: llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{ID: "t2", Name: "step_two", Input: []byte(`{}`)},
+					},
+					StopReason: "tool_use",
+					Usage:      llm.Usage{},
+				}, nil
+			case 4: // step_two started: ack
+				return &llm.Response{
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Step two started."}},
+					StopReason: "stop",
+					Usage:      llm.Usage{},
+				}, nil
+			case 5: // step_two results delivered: final answer
+				return &llm.Response{
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "All done!"}},
+					StopReason: "stop",
+					Usage:      llm.Usage{},
+				}, nil
+			}
+			t.Errorf("unexpected call count %d", n)
+			return nil, nil
+		},
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Name:  "TestAgent",
+		Model: mock,
+		Tools: []Tool{bgTool1, bgTool2},
+	})
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Turn 1: spawns step_one
+	resp, err := agent.CreateResponse(ctx, WithInput("run all steps"))
+	assert.NoError(t, err)
+	assert.Equal(t, len(resp.BackgroundTasks), 1, "first turn should have 1 bg task")
+	assert.Equal(t, resp.BackgroundTasks[0].Description, "step one")
+
+	// Turn 2: step_one result delivered → spawns step_two
+	resp2, err := ContinueWithBackground(ctx, agent, resp, WithMessages(resp.OutputMessages...))
+	assert.NoError(t, err)
+	assert.Equal(t, len(resp2.BackgroundTasks), 1, "second turn should spawn step two")
+	assert.Equal(t, resp2.BackgroundTasks[0].Description, "step two")
+
+	// Turn 3: step_two result delivered → final answer
+	finalResp, err := ContinueWithBackground(ctx, agent, resp2, WithMessages(resp2.OutputMessages...))
+	assert.NoError(t, err)
+	assert.Equal(t, len(finalResp.BackgroundTasks), 0)
+	assert.Equal(t, finalResp.OutputText(), "All done!")
+	assert.Equal(t, int(callCount.Load()), 5)
 }
