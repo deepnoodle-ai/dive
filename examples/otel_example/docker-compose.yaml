@@ -1,0 +1,23 @@
+# OpenTelemetry collector with the `debug` exporter.
+#
+# Use this to inspect the raw OTLP payload Dive's otel extension produces:
+# the collector deserializes the protobuf and prints every span and metric
+# with full attribute detail, so you can verify that gen_ai.* keys land
+# correctly without needing a real backend account.
+#
+# Usage (from examples/otel_example):
+#
+#   docker compose up -d
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+#     ANTHROPIC_API_KEY=... go run .
+#   docker compose logs -f otel-collector
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.119.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP

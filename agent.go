@@ -125,8 +125,27 @@ type AgentOptions struct {
 	// generation loop.
 	LLMHooks llm.Hooks
 
-	// Optional name for logging
+	// Optional name for logging.
 	Name string
+
+	// Description is a free-form purpose/role description. Surfaced via
+	// Tracer (e.g. as gen_ai.agent.description) for observability.
+	Description string
+
+	// Version identifies a revision of the agent's prompt/tooling/config
+	// (e.g. "1.0.0", "2025-05-01"). Surfaced via Tracer.
+	Version string
+
+	// ID is a stable identifier for the agent, useful in multi-tenant
+	// systems for correlating runs to a specific agent record. Surfaced
+	// via Tracer. Empty values are not auto-generated.
+	ID string
+
+	// Tracer observes the agent's lifecycle (run start/end, each chat
+	// iteration, each tool call) for tracing, metrics, or audit logging.
+	// Defaults to NopTracer. The OpenTelemetry adapter lives in
+	// experimental/otel.
+	Tracer Tracer
 
 	// Session enables persistent conversation state. When set, the agent
 	// automatically loads history before generation and saves new messages
@@ -151,6 +170,9 @@ type AgentOptions struct {
 // process information while responding to chat messages.
 type Agent struct {
 	name                  string
+	id                    string
+	description           string
+	version               string
 	model                 llm.LLM
 	tools                 []Tool
 	toolsets              []Toolset
@@ -163,6 +185,7 @@ type Agent struct {
 	modelSettings         *ModelSettings
 	systemPrompt          string
 	session               Session
+	tracer                Tracer
 
 	// mu protects model and systemPrompt for concurrent access via
 	// SetModel/SetSystemPrompt while CreateResponse is running.
@@ -206,8 +229,14 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		}
 	}
 
+	if opts.Tracer == nil {
+		opts.Tracer = NopTracer{}
+	}
 	agent := &Agent{
 		name:                  opts.Name,
+		id:                    opts.ID,
+		description:           opts.Description,
+		version:               opts.Version,
 		model:                 opts.Model,
 		responseTimeout:       opts.ResponseTimeout,
 		toolIterationLimit:    opts.ToolIterationLimit,
@@ -219,6 +248,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		hooks:                 opts.Hooks,
 		session:               opts.Session,
 		toolsets:              opts.Toolsets,
+		tracer:                opts.Tracer,
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -240,6 +270,24 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 
 func (a *Agent) Name() string {
 	return a.name
+}
+
+// ID returns the agent's stable identifier set via AgentOptions.ID, or "" if
+// none was provided.
+func (a *Agent) ID() string {
+	return a.id
+}
+
+// Description returns the free-form purpose/role description set via
+// AgentOptions.Description, or "" if none was provided.
+func (a *Agent) Description() string {
+	return a.description
+}
+
+// Version returns the agent's version string set via AgentOptions.Version,
+// or "" if none was provided.
+func (a *Agent) Version() string {
+	return a.version
 }
 
 func (a *Agent) HasTools() bool {
@@ -309,7 +357,7 @@ func (a *Agent) SetSystemPrompt(prompt string) {
 	a.systemPrompt = prompt
 }
 
-func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (*Response, error) {
+func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (response *Response, err error) {
 	var options CreateResponseOptions
 	options.Apply(opts)
 
@@ -427,9 +475,24 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		return nil, fmt.Errorf("no messages provided")
 	}
 
+	// Open the agent-run span. The returned ctx carries the span so chat
+	// and tool spans nest under it. NopTracer makes this a zero-cost no-op
+	// for agents that don't configure a tracer.
+	ctx, runSpan := a.tracer.StartAgentRun(ctx, AgentRunInfo{Agent: a, Session: sess})
+	defer func() {
+		if response != nil {
+			runSpan.SetResponse(response)
+			if response.Usage != nil {
+				runSpan.SetUsage(response.Usage)
+			}
+		}
+		runSpan.End(err)
+	}()
+
 	// Initialize hook context shared across all phases
 	hctx := NewHookContext()
 	hctx.Agent = a
+	hctx.Session = sess
 	hctx.SystemPrompt = systemPrompt
 	hctx.Messages = messages
 
@@ -456,7 +519,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		defer cancel()
 	}
 
-	response := &Response{
+	response = &Response{
 		Model:     model.Name(),
 		CreatedAt: time.Now(),
 	}
@@ -1159,6 +1222,7 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 		failed := result.Result != nil && result.Result.IsError
 		postHctx := &HookContext{
 			Agent:        a,
+			Session:      hctx.Session,
 			Values:       hctx.Values,
 			SystemPrompt: hctx.SystemPrompt,
 			Messages:     hctx.Messages,
@@ -1350,17 +1414,46 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
 		}
+
+		// Open chat span before invoking the model. The returned ctx carries
+		// the span so any HTTP-client middleware (e.g. otelhttp) the provider
+		// installs nests under it.
+		_, streaming := model.(llm.StreamingLLM)
+		infoCfg := &llm.Config{}
+		infoCfg.Apply(iterOpts...)
+		chatCtx, chatSpan := a.tracer.StartChat(ctx, ChatInfo{
+			Agent:            a,
+			Session:          hctx.Session,
+			Model:            infoCfg.Model,
+			Streaming:        streaming,
+			MaxTokens:        infoCfg.MaxTokens,
+			Temperature:      infoCfg.Temperature,
+			FrequencyPenalty: infoCfg.FrequencyPenalty,
+			PresencePenalty:  infoCfg.PresencePenalty,
+			SystemPrompt:     systemPrompt,
+			Messages:         updatedMessages,
+			Iteration:        i,
+		})
+
 		var err error
 		var response *llm.Response
+		var ttfc float64
 		if streamingLLM, ok := model.(llm.StreamingLLM); ok {
-			response, err = a.generateStreaming(ctx, streamingLLM, iterOpts, collectingCallback)
+			response, ttfc, err = a.generateStreaming(chatCtx, streamingLLM, iterOpts, collectingCallback)
 		} else {
-			response, err = model.Generate(ctx, iterOpts...)
+			response, err = model.Generate(chatCtx, iterOpts...)
 		}
 		if err == nil && response == nil {
 			// This indicates a bug in the LLM provider implementation
 			err = ErrLLMNoResponse
 		}
+		if response != nil {
+			chatSpan.SetResponse(response)
+		}
+		if ttfc > 0 {
+			chatSpan.SetTimeToFirstChunk(ttfc)
+		}
+		chatSpan.End(err)
 		if err != nil {
 			return nil, err
 		}
@@ -1456,35 +1549,65 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 
 // generateStreaming handles streaming generation with an LLM, including
 // receiving and republishing events, and accumulating a complete response.
+// Returns the accumulated response, the time-to-first-chunk in seconds
+// (zero for pre-first-chunk failures), and any error.
 func (a *Agent) generateStreaming(
 	ctx context.Context,
 	streamingLLM llm.StreamingLLM,
 	generateOpts []llm.Option,
 	callback EventCallback,
-) (*llm.Response, error) {
+) (*llm.Response, float64, error) {
 	accum := llm.NewResponseAccumulator()
+	streamStart := time.Now()
 	iter, err := streamingLLM.Stream(ctx, generateOpts...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer iter.Close()
 
+	var ttfc float64
 	for iter.Next() {
 		event := iter.Event()
+		if ttfc == 0 && eventHasContent(event) {
+			ttfc = time.Since(streamStart).Seconds()
+		}
 		if err := accum.AddEvent(event); err != nil {
-			return nil, err
+			return nil, ttfc, err
 		}
 		if err := callback(ctx, &ResponseItem{
 			Type:  ResponseItemTypeModelEvent,
 			Event: event,
 		}); err != nil {
-			return nil, err
+			return nil, ttfc, err
 		}
 	}
 	if err := iter.Err(); err != nil {
-		return nil, err
+		return nil, ttfc, err
 	}
-	return accum.Response(), nil
+	return accum.Response(), ttfc, nil
+}
+
+// eventHasContent reports whether the event carries assistant content
+// (text delta, populated content block, or input_json delta). Used to
+// detect the first chunk for time-to-first-chunk telemetry. Lifecycle
+// events without payload (message_start, ping) don't count.
+func eventHasContent(event *llm.Event) bool {
+	if event == nil {
+		return false
+	}
+	switch event.Type {
+	case llm.EventTypeContentBlockDelta:
+		if event.Delta == nil {
+			return false
+		}
+		return event.Delta.Text != "" || event.Delta.PartialJSON != "" || event.Delta.Thinking != ""
+	case llm.EventTypeContentBlockStart:
+		if event.ContentBlock == nil {
+			return false
+		}
+		return event.ContentBlock.Text != "" || event.ContentBlock.Name != "" || event.ContentBlock.Input != nil
+	}
+	return false
 }
 
 // executeToolCalls executes all tool calls and returns the tool call results.
@@ -1571,6 +1694,9 @@ func (a *Agent) executeToolCallsParallel(
 	batch := &toolBatchResult{Outcomes: make([]toolCallOutcome, len(toolCalls))}
 	deniedResults := make([]*ToolCallResult, len(toolCalls))
 
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// Phase 1: PreToolUse hooks (sequential)
 	preps := make([]toolCallPrep, len(toolCalls))
 	for i, toolCall := range toolCalls {
@@ -1586,10 +1712,10 @@ func (a *Agent) executeToolCallsParallel(
 
 		var preview *ToolCallPreview
 		if previewer, ok := tool.(ToolPreviewer); ok {
-			preview = previewer.PreviewCall(ctx, toolCall.Input)
+			preview = previewer.PreviewCall(childCtx, toolCall.Input)
 		}
 
-		if err := callback(ctx, &ResponseItem{
+		if err := callback(childCtx, &ResponseItem{
 			Type:     ResponseItemTypeToolCall,
 			ToolCall: toolCall,
 		}); err != nil {
@@ -1598,6 +1724,7 @@ func (a *Agent) executeToolCallsParallel(
 
 		preHctx := &HookContext{
 			Agent:        a,
+			Session:      hctx.Session,
 			Values:       hctx.Values,
 			SystemPrompt: hctx.SystemPrompt,
 			Messages:     hctx.Messages,
@@ -1607,7 +1734,7 @@ func (a *Agent) executeToolCallsParallel(
 
 		var denialErr error
 		for _, hook := range a.hooks.PreToolUse {
-			if err := hook(ctx, preHctx); err != nil {
+			if err := hook(childCtx, preHctx); err != nil {
 				var abortErr *HookAbortError
 				if errors.As(err, &abortErr) {
 					abortErr.HookType = "PreToolUse"
@@ -1643,9 +1770,6 @@ func (a *Agent) executeToolCallsParallel(
 		err    error // fatal error (e.g. context cancellation)
 	}
 
-	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	ch := make(chan completedTool, len(toolCalls))
 
 	// Send denied results immediately — no goroutine needed.
@@ -1665,7 +1789,19 @@ func (a *Agent) executeToolCallsParallel(
 				ch <- completedTool{index: i, err: err}
 				return
 			}
-			result := a.executeTool(childCtx, prep.tool, toolCalls[i], prep.input, prep.preview, callback)
+			toolCtx, toolSpan := a.tracer.StartToolCall(childCtx, ToolCallInfo{
+				Agent:   a,
+				Session: hctx.Session,
+				Tool:    prep.tool,
+				Call:    toolCalls[i],
+			})
+			result := a.executeTool(toolCtx, prep.tool, toolCalls[i], prep.input, prep.preview, callback)
+			toolSpan.SetResult(result)
+			if result != nil && result.Error != nil {
+				toolSpan.End(result.Error)
+			} else {
+				toolSpan.End(nil)
+			}
 			if result.Error != nil && childCtx.Err() != nil {
 				ch <- completedTool{index: i, err: childCtx.Err()}
 				return
@@ -1711,6 +1847,7 @@ func (a *Agent) executeToolCallsParallel(
 
 		postHctx := &HookContext{
 			Agent:        prep.preHctx.Agent,
+			Session:      prep.preHctx.Session,
 			Values:       prep.preHctx.Values,
 			SystemPrompt: prep.preHctx.SystemPrompt,
 			Messages:     prep.preHctx.Messages,
@@ -1806,6 +1943,7 @@ func (a *Agent) executeOneToolCall(
 
 	preHctx := &HookContext{
 		Agent:        a,
+		Session:      hctx.Session,
 		Values:       hctx.Values,
 		SystemPrompt: hctx.SystemPrompt,
 		Messages:     hctx.Messages,
@@ -1839,7 +1977,19 @@ func (a *Agent) executeOneToolCall(
 		if preHctx.UpdatedInput != nil {
 			input = preHctx.UpdatedInput
 		}
-		result = a.executeTool(ctx, tool, toolCall, input, preview, callback)
+		toolCtx, toolSpan := a.tracer.StartToolCall(ctx, ToolCallInfo{
+			Agent:   a,
+			Session: hctx.Session,
+			Tool:    tool,
+			Call:    toolCall,
+		})
+		result = a.executeTool(toolCtx, tool, toolCall, input, preview, callback)
+		toolSpan.SetResult(result)
+		if result != nil && result.Error != nil {
+			toolSpan.End(result.Error)
+		} else {
+			toolSpan.End(nil)
+		}
 	}
 
 	// Suspend path: emit the tool_call_result event but skip PostToolUse
@@ -1861,6 +2011,7 @@ func (a *Agent) executeOneToolCall(
 	// PreToolUse hooks are visible in PostToolUse hooks.
 	postHctx := &HookContext{
 		Agent:        preHctx.Agent,
+		Session:      preHctx.Session,
 		Values:       preHctx.Values,
 		SystemPrompt: preHctx.SystemPrompt,
 		Messages:     preHctx.Messages,

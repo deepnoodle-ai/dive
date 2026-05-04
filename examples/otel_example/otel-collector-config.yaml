@@ -1,0 +1,27 @@
+# OTel collector config that pipes everything to the `debug` exporter at
+# detailed verbosity. Pairs with docker-compose.yaml in this directory.
+#
+# Why detailed? It dumps every attribute on every span and every data point
+# on every metric — exactly what you need when verifying that the spec's
+# gen_ai.* keys (and any vendor keys) survive the OTLP round trip.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      exporters: [debug]
