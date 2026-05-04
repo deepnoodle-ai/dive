@@ -181,6 +181,12 @@ func (t *BashTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
+// ActivityDescription returns a human-readable description of what the command is doing.
+func (t *BashTool) ActivityDescription(input *BashInput) string {
+	cmd := truncateCommand(input.Command, 60)
+	return "Running: " + cmd
+}
+
 // PreviewCall returns a summary of what the command will do, used for
 // permission prompts and logging.
 func (t *BashTool) PreviewCall(ctx context.Context, input *BashInput) *dive.ToolCallPreview {

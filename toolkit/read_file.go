@@ -128,6 +128,10 @@ func (t *ReadFileTool) Schema() *schema.Schema {
 }
 
 // PreviewCall returns a summary of the read operation for permission prompts.
+func (t *ReadFileTool) ActivityDescription(input *ReadFileInput) string {
+	return "Reading " + input.FilePath
+}
+
 func (t *ReadFileTool) PreviewCall(ctx context.Context, input *ReadFileInput) *dive.ToolCallPreview {
 	return &dive.ToolCallPreview{
 		Summary: fmt.Sprintf("Read %s", input.FilePath),

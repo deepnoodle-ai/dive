@@ -109,3 +109,42 @@ func TestTypedToolAdapter_ConvertInput_EmptyObject(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.False(t, result.IsError)
 }
+
+func TestToolActivityDescriber(t *testing.T) {
+	t.Run("TypedToolAdapter delegates ActivityDescription", func(t *testing.T) {
+		tool := &mockTypedActivityTool{desc: "Doing something useful"}
+		adapter := ToolAdapter[string](tool)
+
+		raw := json.RawMessage(`"test-input"`)
+		desc := adapter.ActivityDescription(raw)
+		assert.Equal(t, "Doing something useful", desc)
+	})
+
+	t.Run("TypedToolAdapter returns empty when tool does not implement interface", func(t *testing.T) {
+		tool := &mockBasicTool{}
+		adapter := ToolAdapter[string](tool)
+
+		raw := json.RawMessage(`"test-input"`)
+		desc := adapter.ActivityDescription(raw)
+		assert.Equal(t, "", desc)
+	})
+}
+
+type mockTypedActivityTool struct {
+	desc string
+}
+
+func (m *mockTypedActivityTool) Name() string                                     { return "mock" }
+func (m *mockTypedActivityTool) Description() string                              { return "mock" }
+func (m *mockTypedActivityTool) Schema() *Schema                                  { return nil }
+func (m *mockTypedActivityTool) Annotations() *ToolAnnotations                    { return nil }
+func (m *mockTypedActivityTool) Call(_ context.Context, _ string) (*ToolResult, error) { return nil, nil }
+func (m *mockTypedActivityTool) ActivityDescription(_ string) string              { return m.desc }
+
+type mockBasicTool struct{}
+
+func (m *mockBasicTool) Name() string                                             { return "mock" }
+func (m *mockBasicTool) Description() string                                      { return "mock" }
+func (m *mockBasicTool) Schema() *Schema                                          { return nil }
+func (m *mockBasicTool) Annotations() *ToolAnnotations                            { return nil }
+func (m *mockBasicTool) Call(_ context.Context, _ string) (*ToolResult, error)   { return nil, nil }

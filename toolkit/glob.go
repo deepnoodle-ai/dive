@@ -170,6 +170,10 @@ func (t *GlobTool) Annotations() *dive.ToolAnnotations {
 }
 
 // PreviewCall returns a summary of the search operation for permission prompts.
+func (t *GlobTool) ActivityDescription(input *GlobInput) string {
+	return "Searching " + input.Pattern
+}
+
 func (t *GlobTool) PreviewCall(ctx context.Context, input *GlobInput) *dive.ToolCallPreview {
 	searchPath := input.Path
 	if searchPath == "" {

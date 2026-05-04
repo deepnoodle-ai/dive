@@ -96,6 +96,10 @@ func (t *WriteFileTool) Schema() *schema.Schema {
 }
 
 // PreviewCall returns a summary of the write operation for permission prompts.
+func (t *WriteFileTool) ActivityDescription(input *WriteFileInput) string {
+	return "Writing " + input.FilePath
+}
+
 func (t *WriteFileTool) PreviewCall(ctx context.Context, input *WriteFileInput) *dive.ToolCallPreview {
 	return &dive.ToolCallPreview{
 		Summary: fmt.Sprintf("Write to %s", input.FilePath),

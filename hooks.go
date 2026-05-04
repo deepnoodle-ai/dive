@@ -117,6 +117,13 @@ type HookContext struct {
 	// provide guidance without modifying the tool result itself.
 	AdditionalContext string
 
+	// ActivityDescription is a human-readable description of what the tool is
+	// doing, populated before PreToolUse hooks run when the tool implements
+	// ToolActivityDescriber. Empty string when the tool does not implement the
+	// interface or returns an empty description.
+	// Consumers display this in TUIs, web UIs, or log streams.
+	ActivityDescription string
+
 	// Stop hook
 
 	// StopHookActive is true when this stop check was triggered by a
