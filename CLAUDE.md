@@ -20,7 +20,7 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - **Session** (`dive.go`): `Session` interface (`ID`, `Messages`, `SaveTurn`). Set on `AgentOptions.Session` or per-call via `WithSession`. The `session` package provides `New()` (in-memory) and store-backed implementations.
 - **LLM** (`llm/llm.go`): `LLM` and `StreamingLLM` interfaces abstract over providers.
 - **Tool** (`tool.go`): `Tool` and `TypedTool[T]` interfaces. `FuncTool[T]()` creates tools from functions with auto-generated schemas. `Toolset` interface provides dynamic tool resolution per LLM request. Tool panics are auto-recovered. All toolkit constructors return `*dive.TypedToolAdapter[T]` (satisfies `dive.Tool`).
-- **Hooks** (`hooks.go`): `Hooks` struct groups hook slices on `AgentOptions`. Hook types: `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook`, `PostToolUseFailureHook`, `StopHook`, `PreIterationHook`, `OnSuspendHook`. All hooks receive `*HookContext`. PreToolUse hooks can set `HookContext.UpdatedInput` to rewrite the tool args.
+- **Hooks** (`hooks.go`): `Hooks` struct groups hook slices on `AgentOptions`. Hook types: `SessionStartHook`, `PreGenerationHook`, `PostGenerationHook`, `PreToolUseHook`, `PostToolUseHook`, `PostToolUseFailureHook`, `StopHook`, `PreIterationHook`, `OnSuspendHook`. All hooks receive `*HookContext`. PreToolUse hooks can set `HookContext.UpdatedInput` to rewrite the tool args. `SessionStartHook` fires once at the start of a fresh conversation (no prior messages, non-resume) and returns a `*SessionStartResult` to seed it (durable or ephemeral via `Persist`).
 - **Tracer** (`tracer.go`): `Tracer` interface for observation (tracing, metrics, audit logging). Three methods (`StartAgentRun`, `StartChat`, `StartToolCall`) return `(ctx, span)`; the agent threads ctx through downstream calls so spans nest naturally. `NopTracer` (default) and `MultiTracer` live in core; the OpenTelemetry adapter is `otel.NewTracer` in the `dive/otel` module.
 - **Suspend/Resume** (`tool.go`, `response.go`, `dive.go`): A tool can pause the agent mid-turn by returning `NewSuspendResult(prompt, metadata)` or `NewSuspendResultWithReason(prompt, reason, metadata)` (sets `ToolResult.Suspend`). `SuspendReason` classifies why: `SuspendReasonInput` (default) or `SuspendReasonAuth`. `CreateResponse` returns `(*Response, nil)` with `Status == ResponseStatusSuspended` and `Response.Suspension *SuspensionState`. Resume via `WithToolResults` (session-backed) or `WithResume(state, results)` (stateless). `SuspendableSession` is an optional `Session` extension for auto-persistence with `CancelSuspension(ctx)` to abandon a suspended turn. `OnSuspend` hooks fire before persistence. See `docs/guides/suspend-resume.md`.
 
@@ -42,7 +42,7 @@ Anthropic's tuning of Claude for these tool patterns.
 
 ### Hook Flow
 
-SessionLoad → PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration → SessionSave
+SessionLoad → SessionStart (first turn only) → PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse]* → Stop → PostGeneration → SessionSave
 
 On suspend: OnSuspend → PostGeneration → SaveSuspendedTurn → return `Status=Suspended`.
 

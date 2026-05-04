@@ -241,6 +241,48 @@ func TestResumeSimple(t *testing.T) {
 	assert.True(t, foundResult, "resumed tool_result should reference toolu_a")
 }
 
+func TestSessionStartHookNotFiredOnResume(t *testing.T) {
+	fireCount := 0
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "approve", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	tool := &scriptedTool{
+		name:     "approve",
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting", nil)}},
+	}
+	sess := session.New("resume-sess")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{tool},
+		Session: sess,
+		Hooks: Hooks{
+			SessionStart: []SessionStartHook{
+				func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+					fireCount++
+					return nil, nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	// Turn 1: fresh session — SessionStart fires once, then the turn suspends.
+	resp, err := agent.CreateResponse(context.Background(), WithInput("hi"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, fireCount, 1)
+
+	// Resume: SessionStart must NOT re-fire — resuming is not a session start.
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("approved")}))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, fireCount, 1, "SessionStart must not fire on resume")
+}
+
 func TestSuspendResumeSuspendAgain(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{

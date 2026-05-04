@@ -32,13 +32,15 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 ## Hook Flow
 
 ```text
-PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse / PostToolUseFailure]* → Stop → PostGeneration
-                                                                              ↓
-                                                                   (tool returned SuspendResult)
-                                                                              ↓
-                                                                   OnSuspend → PostGeneration
+SessionStart → PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse / PostToolUseFailure]* → Stop → PostGeneration
+                                                                                             ↓
+                                                                                  (tool returned SuspendResult)
+                                                                                             ↓
+                                                                                  OnSuspend → PostGeneration
 ```
 
+0. **SessionStart** runs once at the very beginning, only when the session has
+   no prior messages and the turn is not a resume. See [SessionStart](#sessionstart).
 1. **PreGeneration** runs once before the loop starts.
 2. Inside the loop, **PreIteration** runs before each LLM call.
 3. After the LLM responds with tool calls, **PreToolUse** runs before each tool, then
@@ -73,6 +75,46 @@ The `Values` map persists across all phases within one `CreateResponse` call, so
 hooks can pass data to each other.
 
 ## Generation Hooks
+
+### SessionStart
+
+Runs once at the start of a fresh conversation — before the first LLM call —
+when the loaded session has **no prior messages** and the turn is **not** a
+resume. Use it to seed a conversation from external state (project config, user
+preferences, memory) instead of writing a `PreGeneration` hook that checks for
+an empty history itself. It does not fire on later turns of an existing session
+or on resume.
+
+Return a `*dive.SessionStartResult` whose `Messages` are prepended to the
+conversation, ahead of the user input. Set `Persist` to choose how long the
+seed lives:
+
+- `Persist: true` — durable. The messages are saved to the session and stay in
+  the conversation on every later turn and on resume.
+- `Persist: false` — ephemeral. The messages influence only the first
+  generation and are not saved (`Persist` is always ephemeral for stateless
+  agents with no session).
+
+Returning a `nil` result is a no-op. Errors abort generation.
+`hctx.SessionStartSource` reports why the hook fired (currently always
+`dive.SessionStartStartup`).
+
+```go
+Hooks: dive.Hooks{
+    SessionStart: []dive.SessionStartHook{
+        func(ctx context.Context, hctx *dive.HookContext) (*dive.SessionStartResult, error) {
+            cfg, err := loadProjectConfig(ctx)
+            if err != nil {
+                return nil, err
+            }
+            return &dive.SessionStartResult{
+                Persist:  true, // keep the context for the whole conversation
+                Messages: []*llm.Message{llm.NewUserTextMessage("Project context:\n" + cfg)},
+            }, nil
+        },
+    },
+},
+```
 
 ### PreGeneration
 
