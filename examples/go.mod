@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/deepnoodle-ai/dive v1.4.0
+	github.com/deepnoodle-ai/dive/a2a v0.1.0
 	github.com/deepnoodle-ai/dive/experimental/mcp v1.4.0
 	github.com/deepnoodle-ai/dive/otel v0.1.0
 	github.com/deepnoodle-ai/dive/providers/google v1.4.0
@@ -25,6 +26,7 @@ require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.18.2 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/a2aproject/a2a-go/v2 v2.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -59,7 +61,9 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
 	golang.org/x/image v0.38.0 // indirect
+	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/genai v1.51.0 // indirect
@@ -72,6 +76,7 @@ require (
 
 replace (
 	github.com/deepnoodle-ai/dive => ..
+	github.com/deepnoodle-ai/dive/a2a => ../a2a
 	github.com/deepnoodle-ai/dive/experimental/mcp => ../experimental/mcp
 	github.com/deepnoodle-ai/dive/otel => ../otel
 	github.com/deepnoodle-ai/dive/providers/google => ../providers/google

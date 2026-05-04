@@ -1,4 +1,4 @@
-package a2alib
+package a2a
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
+	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -29,7 +29,7 @@ type Executor struct {
 	// inflight tracks cancel functions for in-progress Execute runs
 	// so Cancel can abort a running CreateResponse.
 	inflightMu sync.Mutex
-	inflight   map[a2a.TaskID]context.CancelFunc
+	inflight   map[a2asdk.TaskID]context.CancelFunc
 }
 
 // ExecutorOption configures an Executor.
@@ -44,7 +44,7 @@ func WithSessionProvider(sp SessionProvider) ExecutorOption {
 func NewExecutor(agent *dive.Agent, opts ...ExecutorOption) *Executor {
 	e := &Executor{
 		agent:    agent,
-		inflight: make(map[a2a.TaskID]context.CancelFunc),
+		inflight: make(map[a2asdk.TaskID]context.CancelFunc),
 	}
 	for _, o := range opts {
 		o(e)
@@ -55,31 +55,31 @@ func NewExecutor(agent *dive.Agent, opts ...ExecutorOption) *Executor {
 // Execute implements a2asrv.AgentExecutor. It runs a Dive agent turn and
 // yields a2a events. The method runs in a dedicated goroutine managed by
 // a2a-go's execution framework.
-func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
-	return func(yield func(a2a.Event, error) bool) {
+func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
+	return func(yield func(a2asdk.Event, error) bool) {
 		msg := execCtx.Message
 		if msg == nil {
-			yield(nil, fmt.Errorf("a2alib: nil message in executor context"))
+			yield(nil, fmt.Errorf("a2a: nil message in executor context"))
 			return
 		}
 
 		// Emit submitted task if this is a new task (no stored task).
 		if execCtx.StoredTask == nil {
-			if !yield(a2a.NewSubmittedTask(execCtx, msg), nil) {
+			if !yield(a2asdk.NewSubmittedTask(execCtx, msg), nil) {
 				return
 			}
 		}
 
 		// Emit working status.
-		if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, nil), nil) {
+		if !yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateWorking, nil), nil) {
 			return
 		}
 
 		// Convert the a2a message to Dive LLM content.
 		llmMsg, err := messageFromA2A(msg)
 		if err != nil {
-			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed,
-				a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(err.Error()))), nil)
+			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
+				a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart(err.Error()))), nil)
 			return
 		}
 
@@ -89,8 +89,8 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		if e.sessions != nil {
 			sess, err := e.sessions(ctx, execCtx.ContextID)
 			if err != nil {
-				yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed,
-					a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("session error: "+err.Error()))), nil)
+				yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
+					a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart("session error: "+err.Error()))), nil)
 				return
 			}
 			if sess != nil {
@@ -103,8 +103,8 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		if execCtx.StoredTask != nil {
 			resumeOpts, err := e.buildResumeOpts(execCtx, msg)
 			if err != nil {
-				yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed,
-					a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(err.Error()))), nil)
+				yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
+					a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart(err.Error()))), nil)
 				return
 			}
 			if resumeOpts != nil {
@@ -133,7 +133,7 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			resp *dive.Response
 			err  error
 		}
-		events := make(chan a2a.Event, 64)
+		events := make(chan a2asdk.Event, 64)
 		results := make(chan runResult, 1)
 
 		go func() {
@@ -168,8 +168,8 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		// CreateResponse finished. Yield final result.
 		result := <-results
 		if result.err != nil {
-			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed,
-				a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(result.err.Error()))), nil)
+			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
+				a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart(result.err.Error()))), nil)
 			return
 		}
 
@@ -179,8 +179,8 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 }
 
 // Cancel implements a2asrv.AgentExecutor.
-func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
-	return func(yield func(a2a.Event, error) bool) {
+func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
+	return func(yield func(a2asdk.Event, error) bool) {
 		// Abort any in-flight Execute for this task.
 		e.cancelInflight(execCtx.TaskID)
 
@@ -192,23 +192,23 @@ func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 				}
 			}
 		}
-		yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCanceled, nil), nil)
+		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCanceled, nil), nil)
 	}
 }
 
-func (e *Executor) trackInflight(id a2a.TaskID, cancel context.CancelFunc) {
+func (e *Executor) trackInflight(id a2asdk.TaskID, cancel context.CancelFunc) {
 	e.inflightMu.Lock()
 	e.inflight[id] = cancel
 	e.inflightMu.Unlock()
 }
 
-func (e *Executor) untrackInflight(id a2a.TaskID) {
+func (e *Executor) untrackInflight(id a2asdk.TaskID) {
 	e.inflightMu.Lock()
 	delete(e.inflight, id)
 	e.inflightMu.Unlock()
 }
 
-func (e *Executor) cancelInflight(id a2a.TaskID) {
+func (e *Executor) cancelInflight(id a2asdk.TaskID) {
 	e.inflightMu.Lock()
 	cancel, ok := e.inflight[id]
 	e.inflightMu.Unlock()
@@ -222,40 +222,48 @@ func (e *Executor) cancelInflight(id a2a.TaskID) {
 func (e *Executor) yieldResponseEvents(
 	execCtx *a2asrv.ExecutorContext,
 	resp *dive.Response,
-	yield func(a2a.Event, error) bool,
+	yield func(a2asdk.Event, error) bool,
 ) {
 	switch resp.Status {
 	case dive.ResponseStatusSuspended:
-		state := a2a.TaskStateInputRequired
-		if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) > 0 {
-			if resp.Suspension.PendingToolCalls[0].Reason == dive.SuspendReasonAuth {
-				state = a2a.TaskStateAuthRequired
-			}
-		}
+		// Always use TaskStateInputRequired so the executor goroutine terminates and
+		// the next SendMessage can resume via WithResume. TaskStateAuthRequired is
+		// designed for executors that keep running and receive auth through a side
+		// channel — incompatible with Dive's suspend/resume-via-message model.
+		// The SuspendReason is preserved in dive.suspension metadata for clients
+		// that need to distinguish auth-required from input-required.
+		state := a2asdk.TaskStateInputRequired
 
 		// Build the status message from the suspension prompt.
-		var statusMsg *a2a.Message
+		var statusMsg *a2asdk.Message
 		if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) > 0 {
 			prompt := resp.Suspension.PendingToolCalls[0].Prompt
 			if prompt == "" {
 				prompt = "Agent is waiting for input."
 			}
-			statusMsg = a2a.NewMessageForTask(a2a.MessageRoleAgent, execCtx,
-				a2a.NewTextPart(prompt))
+			statusMsg = a2asdk.NewMessageForTask(a2asdk.MessageRoleAgent, execCtx,
+				a2asdk.NewTextPart(prompt))
 		}
 
-		event := a2a.NewStatusUpdateEvent(execCtx, state, statusMsg)
+		event := a2asdk.NewStatusUpdateEvent(execCtx, state, statusMsg)
 
 		// Stash the suspension state in task metadata so we can resume later.
 		// We marshal to JSON then unmarshal to map[string]any because
 		// a2a-go's task store only permits basic metadata types.
+		// On any marshal/unmarshal failure fall back to a minimal map that
+		// still carries the reason so clients can distinguish auth-required
+		// from input-required.
 		if resp.Suspension != nil {
 			suspBytes, err := json.Marshal(resp.Suspension)
 			if err == nil {
 				var suspMap map[string]any
 				if json.Unmarshal(suspBytes, &suspMap) == nil {
 					event.SetMeta("dive.suspension", suspMap)
+				} else {
+					event.SetMeta("dive.suspension", suspensionFallbackMeta(resp.Suspension))
 				}
+			} else {
+				event.SetMeta("dive.suspension", suspensionFallbackMeta(resp.Suspension))
 			}
 		}
 
@@ -271,18 +279,18 @@ func (e *Executor) yieldResponseEvents(
 			if len(parts) == 0 {
 				continue
 			}
-			artEvent := a2a.NewArtifactEvent(execCtx, parts...)
+			artEvent := a2asdk.NewArtifactEvent(execCtx, parts...)
 			artEvent.LastChunk = true
 			if !yield(artEvent, nil) {
 				return
 			}
 		}
 
-		yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateCompleted, nil), nil)
+		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCompleted, nil), nil)
 
 	default:
-		yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed,
-			a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("unknown response status: "+string(resp.Status)))), nil)
+		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed,
+			a2asdk.NewMessage(a2asdk.MessageRoleAgent, a2asdk.NewTextPart("unknown response status: "+string(resp.Status)))), nil)
 	}
 }
 
@@ -290,7 +298,7 @@ func (e *Executor) yieldResponseEvents(
 // Dive options to resume the turn. Returns nil opts if no suspension.
 func (e *Executor) buildResumeOpts(
 	execCtx *a2asrv.ExecutorContext,
-	msg *a2a.Message,
+	msg *a2asdk.Message,
 ) ([]dive.CreateResponseOption, error) {
 	if execCtx.StoredTask == nil || execCtx.StoredTask.Metadata == nil {
 		return nil, nil
@@ -306,12 +314,12 @@ func (e *Executor) buildResumeOpts(
 	// round-tripped it.
 	suspBytes, err := json.Marshal(raw)
 	if err != nil {
-		return nil, fmt.Errorf("a2alib: marshal suspension metadata: %w", err)
+		return nil, fmt.Errorf("a2a: marshal suspension metadata: %w", err)
 	}
 
 	var suspension dive.SuspensionState
 	if err := json.Unmarshal(suspBytes, &suspension); err != nil {
-		return nil, fmt.Errorf("a2alib: unmarshal suspension state: %w", err)
+		return nil, fmt.Errorf("a2a: unmarshal suspension state: %w", err)
 	}
 
 	if len(suspension.PendingToolCalls) == 0 {
@@ -332,9 +340,9 @@ func (e *Executor) buildResumeOpts(
 // ---------------------------------------------------------------------------
 
 // messageFromA2A converts an a2a Message to a Dive LLM message.
-func messageFromA2A(msg *a2a.Message) (*llm.Message, error) {
+func messageFromA2A(msg *a2asdk.Message) (*llm.Message, error) {
 	if msg == nil || len(msg.Parts) == 0 {
-		return nil, fmt.Errorf("a2alib: message has no parts")
+		return nil, fmt.Errorf("a2a: message has no parts")
 	}
 	out := &llm.Message{Role: llm.User}
 	for _, p := range msg.Parts {
@@ -347,27 +355,27 @@ func messageFromA2A(msg *a2a.Message) (*llm.Message, error) {
 		}
 	}
 	if len(out.Content) == 0 {
-		return nil, fmt.Errorf("a2alib: message has no renderable content")
+		return nil, fmt.Errorf("a2a: message has no renderable content")
 	}
 	return out, nil
 }
 
-func contentFromPart(p *a2a.Part) llm.Content {
+func contentFromPart(p *a2asdk.Part) llm.Content {
 	switch v := p.Content.(type) {
-	case a2a.Text:
+	case a2asdk.Text:
 		if string(v) == "" {
 			return nil
 		}
 		return &llm.TextContent{Text: string(v)}
 
-	case a2a.Data:
+	case a2asdk.Data:
 		encoded, err := json.Marshal(v.Value)
 		if err != nil {
 			return nil
 		}
 		return &llm.TextContent{Text: "```json\n" + string(encoded) + "\n```"}
 
-	case a2a.Raw:
+	case a2asdk.Raw:
 		if isImageMIME(p.MediaType) {
 			return &llm.ImageContent{
 				Source: &llm.ContentSource{
@@ -386,7 +394,7 @@ func contentFromPart(p *a2a.Part) llm.Content {
 			Title: p.Filename,
 		}
 
-	case a2a.URL:
+	case a2asdk.URL:
 		if isImageMIME(p.MediaType) {
 			return &llm.ImageContent{
 				Source: &llm.ContentSource{
@@ -414,13 +422,13 @@ func contentFromPart(p *a2a.Part) llm.Content {
 
 // partsFromContent converts Dive LLM content to a2a parts. Internal content
 // types (tool use, tool result, thinking) are skipped.
-func partsFromContent(content []llm.Content) []*a2a.Part {
-	var parts []*a2a.Part
+func partsFromContent(content []llm.Content) []*a2asdk.Part {
+	var parts []*a2asdk.Part
 	for _, c := range content {
 		switch v := c.(type) {
 		case *llm.TextContent:
 			if v.Text != "" {
-				parts = append(parts, a2a.NewTextPart(v.Text))
+				parts = append(parts, a2asdk.NewTextPart(v.Text))
 			}
 		case *llm.ImageContent:
 			if v.Source != nil {
@@ -438,26 +446,26 @@ func partsFromContent(content []llm.Content) []*a2a.Part {
 			}
 		case *llm.RefusalContent:
 			if v.Text != "" {
-				parts = append(parts, a2a.NewTextPart(v.Text))
+				parts = append(parts, a2asdk.NewTextPart(v.Text))
 			}
 		}
 	}
 	return parts
 }
 
-func partFromSource(src *llm.ContentSource, title string) *a2a.Part {
+func partFromSource(src *llm.ContentSource, title string) *a2asdk.Part {
 	if src == nil {
 		return nil
 	}
 	switch src.Type {
 	case llm.ContentSourceTypeBase64:
 		data, _ := base64.StdEncoding.DecodeString(src.Data)
-		p := a2a.NewRawPart(data)
+		p := a2asdk.NewRawPart(data)
 		p.MediaType = src.MediaType
 		p.Filename = title
 		return p
 	case llm.ContentSourceTypeURL:
-		p := a2a.NewFileURLPart(a2a.URL(src.URL), src.MediaType)
+		p := a2asdk.NewFileURLPart(a2asdk.URL(src.URL), src.MediaType)
 		p.Filename = title
 		return p
 	}
@@ -471,15 +479,15 @@ func partFromSource(src *llm.ContentSource, title string) *a2a.Part {
 // streamEventFromItem converts a Dive ResponseItem into an a2a status update
 // for streaming progress. Returns nil for items that don't map to user-visible
 // progress.
-func streamEventFromItem(execCtx *a2asrv.ExecutorContext, item *dive.ResponseItem) a2a.Event {
+func streamEventFromItem(execCtx *a2asrv.ExecutorContext, item *dive.ResponseItem) a2asdk.Event {
 	switch item.Type {
 	case dive.ResponseItemTypeToolCall:
 		if item.ToolCall == nil {
 			return nil
 		}
-		return a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking,
-			a2a.NewMessageForTask(a2a.MessageRoleAgent, execCtx,
-				a2a.NewTextPart(fmt.Sprintf("Calling tool: %s", item.ToolCall.Name))))
+		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateWorking,
+			a2asdk.NewMessageForTask(a2asdk.MessageRoleAgent, execCtx,
+				a2asdk.NewTextPart(fmt.Sprintf("Calling tool: %s", item.ToolCall.Name))))
 	case dive.ResponseItemTypeMessage:
 		if item.Message == nil || item.Message.Role != llm.Assistant {
 			return nil
@@ -488,9 +496,9 @@ func streamEventFromItem(execCtx *a2asrv.ExecutorContext, item *dive.ResponseIte
 		if text == "" {
 			return nil
 		}
-		return a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking,
-			a2a.NewMessageForTask(a2a.MessageRoleAgent, execCtx,
-				a2a.NewTextPart(text)))
+		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateWorking,
+			a2asdk.NewMessageForTask(a2asdk.MessageRoleAgent, execCtx,
+				a2asdk.NewTextPart(text)))
 	}
 	return nil
 }
@@ -501,7 +509,7 @@ func streamEventFromItem(execCtx *a2asrv.ExecutorContext, item *dive.ResponseIte
 
 // resumeToolResults translates an inbound a2a message into Dive ToolResults
 // for suspended pending tool calls.
-func resumeToolResults(state *dive.SuspensionState, msg *a2a.Message) (map[string]*dive.ToolResult, error) {
+func resumeToolResults(state *dive.SuspensionState, msg *a2asdk.Message) (map[string]*dive.ToolResult, error) {
 	if len(state.PendingToolCalls) == 0 {
 		return nil, nil
 	}
@@ -516,7 +524,7 @@ func resumeToolResults(state *dive.SuspensionState, msg *a2a.Message) (map[strin
 		for _, call := range state.PendingToolCalls {
 			text, ok := mapped[call.ID]
 			if !ok {
-				return nil, fmt.Errorf("a2alib: toolResults map missing pending call ID %q", call.ID)
+				return nil, fmt.Errorf("a2a: toolResults map missing pending call ID %q", call.ID)
 			}
 			results[call.ID] = dive.NewToolResultText(text)
 		}
@@ -526,7 +534,7 @@ func resumeToolResults(state *dive.SuspensionState, msg *a2a.Message) (map[strin
 	// Fall back to text: broadcast for all pending calls.
 	text := strings.TrimSpace(textFromMessage(msg))
 	if text == "" {
-		return nil, fmt.Errorf("a2alib: resume message has no text and no structured toolResults")
+		return nil, fmt.Errorf("a2a: resume message has no text and no structured toolResults")
 	}
 	results := make(map[string]*dive.ToolResult, len(state.PendingToolCalls))
 	for _, call := range state.PendingToolCalls {
@@ -539,7 +547,7 @@ func resumeToolResults(state *dive.SuspensionState, msg *a2a.Message) (map[strin
 // Returns (map, true, nil) on success, (nil, false, nil) when no DataPart
 // has a toolResults key, and (nil, true, err) when a toolResults key is
 // present but malformed (not a map of strings).
-func extractToolResultsMap(msg *a2a.Message) (map[string]string, bool, error) {
+func extractToolResultsMap(msg *a2asdk.Message) (map[string]string, bool, error) {
 	if msg == nil {
 		return nil, false, nil
 	}
@@ -559,13 +567,13 @@ func extractToolResultsMap(msg *a2a.Message) (map[string]string, bool, error) {
 		// toolResults key is present — must be a valid map[string]string.
 		tm, ok := raw.(map[string]any)
 		if !ok {
-			return nil, true, fmt.Errorf("a2alib: toolResults must be an object, got %T", raw)
+			return nil, true, fmt.Errorf("a2a: toolResults must be an object, got %T", raw)
 		}
 		out := make(map[string]string, len(tm))
 		for k, v := range tm {
 			s, ok := v.(string)
 			if !ok {
-				return nil, true, fmt.Errorf("a2alib: toolResults value for %q must be a string, got %T", k, v)
+				return nil, true, fmt.Errorf("a2a: toolResults value for %q must be a string, got %T", k, v)
 			}
 			out[k] = s
 		}
@@ -574,7 +582,7 @@ func extractToolResultsMap(msg *a2a.Message) (map[string]string, bool, error) {
 	return nil, false, nil
 }
 
-func textFromMessage(msg *a2a.Message) string {
+func textFromMessage(msg *a2asdk.Message) string {
 	if msg == nil {
 		return ""
 	}
@@ -592,4 +600,15 @@ func textFromMessage(msg *a2a.Message) string {
 
 func isImageMIME(mime string) bool {
 	return strings.HasPrefix(mime, "image/")
+}
+
+// suspensionFallbackMeta returns a minimal metadata map when full JSON
+// marshaling of a SuspensionState fails. It preserves the suspend reason so
+// clients can still distinguish SuspendReasonAuth from SuspendReasonInput.
+func suspensionFallbackMeta(s *dive.SuspensionState) map[string]any {
+	reason := dive.SuspendReasonInput
+	if len(s.PendingToolCalls) > 0 && s.PendingToolCalls[0].Reason != "" {
+		reason = s.PendingToolCalls[0].Reason
+	}
+	return map[string]any{"reason": string(reason)}
 }

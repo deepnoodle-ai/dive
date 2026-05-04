@@ -1,4 +1,4 @@
-module github.com/deepnoodle-ai/dive/experimental/a2alib
+module github.com/deepnoodle-ai/dive/a2a
 
 go 1.25.0
 
@@ -16,5 +16,4 @@ require (
 	golang.org/x/sys v0.41.0 // indirect
 )
 
-// Local development: point at the parent module.
-replace github.com/deepnoodle-ai/dive => ../..
+replace github.com/deepnoodle-ai/dive => ..
