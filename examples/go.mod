@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/a2aproject/a2a-go/v2 v2.2.0
 	github.com/deepnoodle-ai/dive v1.4.0
+	github.com/deepnoodle-ai/dive/a2alib v0.1.0
 	github.com/deepnoodle-ai/dive/experimental/mcp v1.4.0
 	github.com/deepnoodle-ai/dive/otel v0.1.0
 	github.com/deepnoodle-ai/dive/providers/google v1.4.0
@@ -75,6 +76,7 @@ require (
 
 replace (
 	github.com/deepnoodle-ai/dive => ..
+	github.com/deepnoodle-ai/dive/a2alib => ../a2alib
 	github.com/deepnoodle-ai/dive/experimental/mcp => ../experimental/mcp
 	github.com/deepnoodle-ai/dive/otel => ../otel
 	github.com/deepnoodle-ai/dive/providers/google => ../providers/google

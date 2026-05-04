@@ -154,6 +154,7 @@ func buildStaticCard(agent *dive.Agent, baseURL, transport string, src *a2a.Agen
 
 // Handler returns an http.Handler that serves both the agent card endpoint and
 // the A2A protocol endpoint. Mount this at the root of your HTTP server.
+// Call Handler once and reuse the result — each call constructs a new ServeMux.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	if s.cardProvider != nil {
@@ -178,7 +179,7 @@ func (s *Server) serveCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(b) //nolint:errcheck
+	_, _ = w.Write(b)
 }
 
 // Card returns a deep copy of the server's static agent card. Returns nil when

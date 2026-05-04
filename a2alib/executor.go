@@ -226,12 +226,13 @@ func (e *Executor) yieldResponseEvents(
 ) {
 	switch resp.Status {
 	case dive.ResponseStatusSuspended:
+		// Always use TaskStateInputRequired so the executor goroutine terminates and
+		// the next SendMessage can resume via WithResume. TaskStateAuthRequired is
+		// designed for executors that keep running and receive auth through a side
+		// channel — incompatible with Dive's suspend/resume-via-message model.
+		// The SuspendReason is preserved in dive.suspension metadata for clients
+		// that need to distinguish auth-required from input-required.
 		state := a2a.TaskStateInputRequired
-		if resp.Suspension != nil && len(resp.Suspension.PendingToolCalls) > 0 {
-			if resp.Suspension.PendingToolCalls[0].Reason == dive.SuspendReasonAuth {
-				state = a2a.TaskStateAuthRequired
-			}
-		}
 
 		// Build the status message from the suspension prompt.
 		var statusMsg *a2a.Message

@@ -31,8 +31,8 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - `toolkit/` — Built-in tools (Bash, ReadFile, WriteFile, Edit, Glob, Grep, ListDirectory, TextEditor, WebSearch, Fetch, AskUser).
 - `permission/` — Rule-based tool permission management with modes, specifier patterns, and session allowlists.
 - `skill/` — Unified skills and slash commands. `skill.Loader` implements `dive.Extension` — pass it to `AgentOptions.Extensions` to wire up the Skill tool, catalog hook, and content hook. Three-layer architecture: rules in system prompt, catalog as `<system-reminder name="skills">` in first user message, tool as trigger with content via PostToolUseHook. Provider-based loading (filesystem, `.agents/skills/`), variable expansion, trigger matching. `dive.SetSystemReminder` manages named blocks in conversation context.
-- `a2alib/` — A2A (Agent-to-Agent) server and client adapter using the official `a2a-go/v2` SDK. `Server` exposes a Dive agent as an A2A endpoint (JSON-RPC or REST). `RemoteAgent` calls remote A2A agents. Suspend/resume maps to `input-required`/`auth-required` A2A states. `AgentCardProvider` supports dynamic card resolution per-request. See `docs/guides/a2a.md`.
-- `otel/` — OpenTelemetry tracer adapter (separate Go module so callers who don't use it don't pay for OTel deps).
+- `a2alib/` — A2A (Agent-to-Agent) server and client adapter using the official `a2a-go/v2` SDK (separate Go module: `github.com/deepnoodle-ai/dive/a2alib`). `Server` exposes a Dive agent as an A2A endpoint (JSON-RPC or REST). `RemoteAgent` calls remote A2A agents. Suspend/resume maps to `input-required`/`auth-required` A2A states. `AgentCardProvider` supports dynamic card resolution per-request. See `docs/guides/a2a.md`.
+- `otel/` — OpenTelemetry tracer adapter (separate Go module: `github.com/deepnoodle-ai/dive/otel`).
 - `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, subagent, compaction, todo, toolkit.
 
 ### Design Philosophy
