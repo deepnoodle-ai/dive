@@ -103,16 +103,14 @@ func (c *Client) Scrape(ctx context.Context, req ScrapeRequest) (*ScrapeResponse
 
 // Search performs a web search and returns matching pages with their scraped content.
 func (c *Client) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
-	formats := req.Formats
-	if len(formats) == 0 {
-		formats = []string{"markdown"}
-	}
 	body := searchBody{
 		Query: req.Query,
 		Limit: req.Limit,
-		ScrapeOptions: &scrapeOpts{
-			Formats: toFormatObjects(formats),
-		},
+	}
+	if len(req.Formats) > 0 {
+		body.ScrapeOptions = &scrapeOpts{
+			Formats: toFormatObjects(req.Formats),
+		}
 	}
 	raw, err := c.post(ctx, "/search", body)
 	if err != nil {

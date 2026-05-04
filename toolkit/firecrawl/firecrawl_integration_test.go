@@ -50,8 +50,21 @@ func TestIntegrationSearch(t *testing.T) {
 	assert.True(t, len(first.URL) > 0)
 	assert.True(t, len(first.Title) > 0)
 	assert.True(t, len(first.Description) > 0)
-	assert.True(t, len(first.Markdown) > 0)
+	assert.Equal(t, "", first.Markdown) // no scrape by default
 	assert.True(t, first.Position >= 1)
+}
+
+func TestIntegrationSearchWithMarkdown(t *testing.T) {
+	c := integrationClient(t)
+	resp, err := c.Search(context.Background(), SearchRequest{
+		Query:   "golang context package",
+		Limit:   1,
+		Formats: []string{"markdown"},
+	})
+	assert.NoError(t, err)
+	assert.True(t, resp.Success)
+	assert.True(t, len(resp.Data) > 0)
+	assert.True(t, len(resp.Data[0].Markdown) > 0)
 }
 
 func TestIntegrationFetch(t *testing.T) {

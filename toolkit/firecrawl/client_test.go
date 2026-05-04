@@ -52,14 +52,14 @@ func TestClientScrape(t *testing.T) {
 	assert.Equal(t, 200, resp.Data.Metadata.StatusCode)
 }
 
-func TestClientSearchInjectsDefaultScrapeOptions(t *testing.T) {
+func TestClientSearchNoScrapeOptionsByDefault(t *testing.T) {
 	var path, auth string
 	var body searchBody
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 		auth = r.Header.Get("Authorization")
 		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		_, _ = w.Write([]byte(`{"success":true,"data":{"web":[{"title":"Example","url":"https://example.com","markdown":"content"}]}}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"web":[{"title":"Example","url":"https://example.com","position":1}]}}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -72,9 +72,7 @@ func TestClientSearchInjectsDefaultScrapeOptions(t *testing.T) {
 	assert.Equal(t, "Bearer fc_test", auth)
 	assert.Equal(t, "mobius", body.Query)
 	assert.Equal(t, 5, body.Limit)
-	assert.NotNil(t, body.ScrapeOptions)
-	assert.Equal(t, 1, len(body.ScrapeOptions.Formats))
-	assert.Equal(t, "markdown", body.ScrapeOptions.Formats[0].Type)
+	assert.Nil(t, body.ScrapeOptions)
 	assert.Equal(t, true, resp.Success)
 	assert.Equal(t, 1, len(resp.Data))
 	assert.Equal(t, "Example", resp.Data[0].Title)
