@@ -3,13 +3,15 @@ package a2alib_test
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/experimental/a2alib"
+	"github.com/deepnoodle-ai/dive/a2alib"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -368,4 +370,47 @@ func TestGetTask(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, task.ID, fetched.ID)
 	assert.Equal(t, a2a.TaskStateCompleted, fetched.Status.State)
+}
+
+func TestAgentCardProvider(t *testing.T) {
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		return textResponse("hello"), nil
+	}}
+	agent := buildAgent(t, model)
+
+	callCount := 0
+	provider := func(ctx context.Context) (*a2a.AgentCard, error) {
+		callCount++
+		return &a2a.AgentCard{
+			Name:               "Dynamic Agent",
+			Description:        "v" + string(rune('0'+callCount)),
+			DefaultInputModes:  []string{"text/plain"},
+			DefaultOutputModes: []string{"text/plain"},
+		}, nil
+	}
+
+	srv, err := a2alib.NewServer(a2alib.ServerOptions{
+		Agent:        agent,
+		CardProvider: provider,
+	})
+	assert.NoError(t, err)
+
+	// Card() returns nil when a provider is set.
+	assert.True(t, srv.Card() == nil)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Each GET to /.well-known/agent-card.json calls the provider.
+	for i := 0; i < 3; i++ {
+		resp, err := http.Get(ts.URL + a2alib.WellKnownAgentCardPath)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var card a2a.AgentCard
+		assert.NoError(t, json.Unmarshal(body, &card))
+		assert.Equal(t, "Dynamic Agent", card.Name)
+	}
+	assert.Equal(t, 3, callCount)
 }
