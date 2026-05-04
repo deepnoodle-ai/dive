@@ -237,6 +237,34 @@ You are a code reviewer. Analyze the code and provide feedback.`
 		assert.Equal(t, "sonnet", def.Model)
 		assert.Equal(t, []string{"Read", "Grep"}, def.Tools)
 		assert.Contains(t, def.Prompt, "code reviewer")
+		assert.Equal(t, 0, def.MaxTurns)
+	})
+
+	t.Run("Load max-turns from frontmatter", func(t *testing.T) {
+		dir := t.TempDir()
+
+		content := `---
+description: Narrow search agent
+tools:
+  - Grep
+  - Glob
+max-turns: 10
+---
+Find usages in the codebase.`
+
+		err := os.WriteFile(filepath.Join(dir, "find-usages.md"), []byte(content), 0644)
+		assert.NoError(t, err)
+
+		loader := &FileLoader{
+			Directories: []string{dir},
+		}
+
+		defs, err := loader.Load(context.Background())
+		assert.NoError(t, err)
+
+		def := defs["find-usages"]
+		assert.Equal(t, 10, def.MaxTurns)
+		assert.Equal(t, []string{"Grep", "Glob"}, def.Tools)
 	})
 
 	t.Run("Load skips non-markdown files", func(t *testing.T) {

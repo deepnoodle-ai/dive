@@ -63,6 +63,11 @@ type Definition struct {
 	// Model overrides the LLM model for this subagent.
 	// Valid values: "sonnet", "opus", "haiku", or "" to inherit from parent.
 	Model string
+
+	// MaxTurns limits how many tool iterations the subagent may take.
+	// When > 0, passed as AgentOptions.ToolIterationLimit. When 0, the parent's
+	// limit or the package default applies.
+	MaxTurns int
 }
 
 // GeneralPurpose is the default subagent available to all agents.

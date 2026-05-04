@@ -214,10 +214,11 @@ func runInteractive(ctx *cli.Context) error {
 		}
 
 		return dive.NewAgent(dive.AgentOptions{
-			Name:         name,
-			SystemPrompt: def.Prompt,
-			Model:        subModel,
-			Tools:        subagent.FilterTools(def, parentTools),
+			Name:               name,
+			SystemPrompt:       def.Prompt,
+			Model:              subModel,
+			Tools:              subagent.FilterTools(def, parentTools),
+			ToolIterationLimit: def.MaxTurns,
 		})
 	}
 

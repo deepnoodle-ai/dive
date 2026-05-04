@@ -109,6 +109,7 @@ type frontmatter struct {
 	Description string   `yaml:"description"`
 	Model       string   `yaml:"model,omitempty"`
 	Tools       []string `yaml:"tools,omitempty"`
+	MaxTurns    int      `yaml:"max-turns,omitempty"`
 }
 
 // LoadFromDirectory loads subagent definitions from a single directory.
@@ -177,6 +178,7 @@ func loadFile(path string) (*Definition, error) {
 		Prompt:      strings.TrimSpace(body),
 		Tools:       frontm.Tools,
 		Model:       frontm.Model,
+		MaxTurns:    frontm.MaxTurns,
 	}, nil
 }
 
