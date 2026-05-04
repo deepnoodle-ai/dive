@@ -76,7 +76,7 @@ type ToolResult struct {
 }
 ```
 
-`Background` and `Suspend` are mutually exclusive. `executeTool()` at line 2077 already validates the `Suspend/result` invariant (M3) — extend that check to Background.
+`Background` and `Suspend` are mutually exclusive. `executeTool()` already validates the `Suspend/result` invariant (M3) — extend that check to Background.
 
 **`response.go`** — add one field to `Response`:
 
@@ -140,7 +140,7 @@ After `executeTool()` returns and the result has `Background != nil`:
 3. Return the synthesized "started" result (not the empty `Background` carrier) as the tool_result content going to the LLM.
 
 The "started" message text (stable, may appear in system prompts):
-```
+```text
 Background task started: <description>
 Task ID: <id>
 The result will be delivered in a follow-up message.
@@ -189,7 +189,7 @@ func ContinueWithBackground(
 
 `WithBackgroundResults` builds a synthetic user message injected before the LLM's next turn. Format for multiple tasks:
 
-```
+```text
 The following background tasks have completed:
 
 Background task completed: <description>

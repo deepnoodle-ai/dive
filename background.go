@@ -223,8 +223,8 @@ func backgroundCompletedMessage(handles []*BackgroundTaskHandle, results map[str
 			sb.WriteString("\n")
 		}
 		result := results[h.TaskID]
-		sb.WriteString(fmt.Sprintf("Background task completed: %s\n", h.Description))
-		sb.WriteString(fmt.Sprintf("Task ID: %s\n", h.TaskID))
+		fmt.Fprintf(&sb, "Background task completed: %s\n", h.Description)
+		fmt.Fprintf(&sb, "Task ID: %s\n", h.TaskID)
 		if result != nil && result.IsError {
 			sb.WriteString("Error:\n")
 		} else {
