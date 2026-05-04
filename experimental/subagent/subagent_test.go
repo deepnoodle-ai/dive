@@ -85,6 +85,29 @@ func TestRegistry(t *testing.T) {
 	})
 }
 
+func TestBuiltinDefinitions(t *testing.T) {
+	t.Run("Explore is read-only", func(t *testing.T) {
+		assert.NotEqual(t, "", Explore.Description)
+		assert.NotEqual(t, "", Explore.Prompt)
+		assert.True(t, len(Explore.DisallowedTools) > 0)
+		assert.Equal(t, 20, Explore.MaxTurns)
+	})
+
+	t.Run("Plan is read-only", func(t *testing.T) {
+		assert.NotEqual(t, "", Plan.Description)
+		assert.NotEqual(t, "", Plan.Prompt)
+		assert.True(t, len(Plan.DisallowedTools) > 0)
+		assert.Equal(t, 30, Plan.MaxTurns)
+	})
+
+	t.Run("clone and modify does not affect original", func(t *testing.T) {
+		clone := *Explore
+		clone.Model = "haiku"
+		assert.Equal(t, "", Explore.Model)
+		assert.Equal(t, "haiku", clone.Model)
+	})
+}
+
 // mockTool implements dive.Tool for testing
 type mockTool struct {
 	name string

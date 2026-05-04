@@ -60,6 +60,17 @@ type Definition struct {
 	// (except the Task tool, which is never available to subagents).
 	Tools []string
 
+	// DisallowedTools lists tool names to exclude from the subagent's tool set.
+	// When Tools is empty, starts from all parent tools and removes these.
+	// When Tools is set, starts from that allowlist and removes these.
+	// Names are matched case-insensitively.
+	DisallowedTools []string
+
+	// MaxTurns limits how many tool iterations the subagent may take.
+	// When > 0, passed as AgentOptions.ToolIterationLimit. When 0, the parent's
+	// limit or the package default applies.
+	MaxTurns int
+
 	// Model overrides the LLM model for this subagent.
 	// Valid values: "sonnet", "opus", "haiku", or "" to inherit from parent.
 	Model string
@@ -71,6 +82,31 @@ var GeneralPurpose = &Definition{
 	Prompt:      "You are a helpful assistant that can handle complex multi-step tasks autonomously. Work through the task step by step and provide a clear summary of your findings or results.",
 	Tools:       nil,
 	Model:       "",
+}
+
+// Explore is a read-only subagent optimized for file search, code reading, and summarization.
+// Clone and modify to override the model or adjust the tool set:
+//
+//	myExplore := *subagent.Explore
+//	myExplore.Model = "haiku"
+var Explore = &Definition{
+	Description:     "Fast read-only search agent for locating code. Use to find files, grep for symbols, or answer where-is-X questions.",
+	DisallowedTools: []string{"Edit", "Write", "Bash"},
+	MaxTurns:        20,
+	Prompt: `You are a focused exploration agent. Your job is to search, read,
+and summarize — not to make changes. Read files, search for patterns, and
+report what you find clearly and concisely.`,
+}
+
+// Plan is a read-only subagent optimized for architectural analysis and structured planning.
+// Clone and modify to override the model or adjust the tool set.
+var Plan = &Definition{
+	Description:     "Software architect agent for designing implementation plans. Use when you need to plan an implementation strategy.",
+	DisallowedTools: []string{"Edit", "Write", "Bash"},
+	MaxTurns:        30,
+	Prompt: `You are a planning agent. Analyze the codebase or problem space,
+enumerate tradeoffs, and produce a clear structured plan. Do not make any
+changes. Your output should be directly actionable by an implementation agent.`,
 }
 
 // Registry manages subagent definitions.
