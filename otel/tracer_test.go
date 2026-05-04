@@ -11,7 +11,7 @@ import (
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/dive/session"
 
-	otelext "github.com/deepnoodle-ai/dive/experimental/otel"
+	otelext "github.com/deepnoodle-ai/dive/otel"
 
 	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"

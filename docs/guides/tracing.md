@@ -23,13 +23,13 @@ collector — will render them.
 ## Quick start
 
 ```bash
-go get github.com/deepnoodle-ai/dive/experimental/otel
+go get github.com/deepnoodle-ai/dive/otel
 ```
 
 ```go
 import (
     "github.com/deepnoodle-ai/dive"
-    otelext "github.com/deepnoodle-ai/dive/experimental/otel"
+    otelext "github.com/deepnoodle-ai/dive/otel"
 )
 
 agent, _ := dive.NewAgent(dive.AgentOptions{
@@ -96,9 +96,9 @@ otelext.NewTracer(
 
 ## Going further
 
-- The [experimental/otel reference](experimental/otel.md) documents every
-  attribute and metric the adapter emits, plus how to nest your own HTTP
-  spans under `chat` using `otelhttp`.
+- The [dive/otel reference](otel.md) documents every attribute and metric
+  the adapter emits, plus how to nest your own HTTP spans under `chat`
+  using `otelhttp`.
 - Want to emit to something other than OpenTelemetry? Implement
   `dive.Tracer` directly — it's three small methods. See `tracer.go` in
   the dive package.

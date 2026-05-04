@@ -143,8 +143,8 @@ type AgentOptions struct {
 
 	// Tracer observes the agent's lifecycle (run start/end, each chat
 	// iteration, each tool call) for tracing, metrics, or audit logging.
-	// Defaults to NopTracer. The OpenTelemetry adapter lives in
-	// experimental/otel.
+	// Defaults to NopTracer. The OpenTelemetry adapter lives in the
+	// dive/otel module.
 	Tracer Tracer
 
 	// Session enables persistent conversation state. When set, the agent

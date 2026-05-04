@@ -37,7 +37,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	otelext "github.com/deepnoodle-ai/dive/experimental/otel"
+	otelext "github.com/deepnoodle-ai/dive/otel"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
