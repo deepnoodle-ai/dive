@@ -109,6 +109,18 @@ type SkillConfig struct {
 	// true = always a command (user-invocable only).
 	// false = always a skill (agent-invocable, even without description).
 	UserInvocable *bool `yaml:"user-invocable,omitempty"`
+
+	// agentskills.io standard fields (informational only, no runtime effect).
+
+	// License is the SPDX identifier or URL for this skill (e.g. "MIT", "Apache-2.0").
+	License string `yaml:"license,omitempty"`
+
+	// Compatibility lists agent runtimes or model identifiers this skill is known
+	// to work with (e.g. ["claude", "gpt-4o"]). No Dive behavior depends on this.
+	Compatibility []string `yaml:"compatibility,omitempty"`
+
+	// Metadata holds arbitrary string key-value pairs for ecosystem tooling.
+	Metadata map[string]string `yaml:"metadata,omitempty"`
 }
 
 // Trigger defines a pattern that causes automatic skill suggestion.
