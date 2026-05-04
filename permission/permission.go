@@ -105,6 +105,7 @@ type Manager struct {
 	config         *Config
 	dialog         dive.Dialog
 	sessionAllowed map[string]bool
+	turnAllowed    map[string]bool
 }
 
 // NewManager creates a new permission manager.
@@ -116,6 +117,7 @@ func NewManager(config *Config, dialog dive.Dialog) *Manager {
 		config:         config,
 		dialog:         dialog,
 		sessionAllowed: make(map[string]bool),
+		turnAllowed:    make(map[string]bool),
 	}
 }
 
@@ -136,11 +138,11 @@ func (pm *Manager) EvaluateToolUse(
 	tool dive.Tool,
 	call *llm.ToolUseContent,
 ) error {
-	// Check session allowlist
+	// Check session and turn allowlists
 	if tool != nil {
 		category := GetToolCategory(tool.Name())
 		pm.mu.RLock()
-		allowed := pm.sessionAllowed[category.Key]
+		allowed := pm.sessionAllowed[category.Key] || pm.turnAllowed[category.Key]
 		pm.mu.RUnlock()
 		if allowed {
 			return nil
@@ -383,6 +385,30 @@ func (pm *Manager) ClearSessionAllowlist() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.sessionAllowed = make(map[string]bool)
+}
+
+// AllowForTurn marks a tool category as allowed for the current turn only.
+// Turn-scoped grants are cleared by calling ClearTurnAllowlist, typically
+// in a PreGenerationHook at the start of each CreateResponse call.
+func (pm *Manager) AllowForTurn(categoryKey string) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.turnAllowed[categoryKey] = true
+}
+
+// IsTurnAllowed checks if a tool category is allowed for the current turn.
+func (pm *Manager) IsTurnAllowed(categoryKey string) bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.turnAllowed[categoryKey]
+}
+
+// ClearTurnAllowlist removes all turn-scoped allowlist entries.
+// Call this in a PreGenerationHook to reset grants at the start of each turn.
+func (pm *Manager) ClearTurnAllowlist() {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.turnAllowed = make(map[string]bool)
 }
 
 // Category represents a tool's category for session allowlist purposes.
