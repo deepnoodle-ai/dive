@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"net/http/httptest"
+	"strings"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive"
@@ -100,7 +101,7 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("State:    %s\n", result.State)
-	fmt.Printf("Response: %s\n", result.Text)
+	fmt.Printf("Response: %s\n", strings.TrimSpace(result.Text))
 
 	// --- Suspend / resume flow ---
 	fmt.Println("\n--- Suspend and resume ---")
@@ -109,21 +110,22 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// This message should trigger the approval tool and suspend.
-	result2, err := remote2.SendText(ctx, "Please delete all the log files.")
+	// Specific enough to trigger the approval tool without clarifying questions.
+	result2, err := remote2.SendText(ctx, "Use request_approval to get approval to delete /tmp/app.log.")
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("State:  %s\n", result2.State)
-	fmt.Printf("Prompt: %s\n", result2.Text)
-
 	if result2.IsInputRequired() {
+		fmt.Printf("Prompt: %s\n", strings.TrimSpace(result2.Text))
 		// Resume by approving on the same task.
 		result3, err := remote2.SendTextOnTask(ctx, result2.ID, "yes, approved")
 		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Printf("State:    %s\n", result3.State)
-		fmt.Printf("Response: %s\n", result3.Text)
+		fmt.Printf("Response: %s\n", strings.TrimSpace(result3.Text))
+	} else {
+		fmt.Printf("Response: %s\n", strings.TrimSpace(result2.Text))
 	}
 }

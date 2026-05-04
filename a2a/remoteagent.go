@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"strings"
 
 	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -22,22 +23,22 @@ type TaskResult struct {
 
 // IsCompleted reports whether the task completed successfully.
 func (r *TaskResult) IsCompleted() bool {
-	return r != nil && r.State == string(a2asdk.TaskStateCompleted)
+	return r != nil && r.State == "completed"
 }
 
 // IsInputRequired reports whether the agent is paused waiting for user input.
 func (r *TaskResult) IsInputRequired() bool {
-	return r != nil && r.State == string(a2asdk.TaskStateInputRequired)
+	return r != nil && r.State == "input_required"
 }
 
 // IsFailed reports whether the task failed.
 func (r *TaskResult) IsFailed() bool {
-	return r != nil && r.State == string(a2asdk.TaskStateFailed)
+	return r != nil && r.State == "failed"
 }
 
 // IsCanceled reports whether the task was canceled.
 func (r *TaskResult) IsCanceled() bool {
-	return r != nil && r.State == string(a2asdk.TaskStateCanceled)
+	return r != nil && r.State == "canceled"
 }
 
 // RemoteAgent is a higher-level wrapper around a2aclient.Client that
@@ -246,9 +247,15 @@ func toTaskResult(task *a2asdk.Task) *TaskResult {
 	return &TaskResult{
 		ID:        string(task.ID),
 		ContextID: task.ContextID,
-		State:     string(task.Status.State),
+		State:     normalizeState(task.Status.State),
 		Text:      extractText(task),
 	}
+}
+
+// normalizeState strips the "TASK_STATE_" prefix and lowercases, turning
+// e.g. "TASK_STATE_COMPLETED" into "completed".
+func normalizeState(s a2asdk.TaskState) string {
+	return strings.ToLower(strings.TrimPrefix(string(s), "TASK_STATE_"))
 }
 
 // extractText returns the most useful text from a task: prefers artifact
