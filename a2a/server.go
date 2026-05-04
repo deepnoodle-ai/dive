@@ -1,4 +1,4 @@
-package a2alib
+package a2a
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/a2aproject/a2a-go/v2/a2a"
+	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/deepnoodle-ai/dive"
 )
@@ -15,12 +15,25 @@ import (
 // WellKnownAgentCardPath is the canonical well-known URL path for the agent card.
 const WellKnownAgentCardPath = "/.well-known/agent-card.json"
 
+// CardOptions describes the agent card fields that most servers need to set.
+// The server fills in defaults for any omitted fields. For full control over
+// the card, use ServerOptions.CardProvider instead.
+type CardOptions struct {
+	Name        string
+	Description string
+	Version     string
+}
+
 // AgentCardProvider resolves an agent card on demand. It is called on every
 // request to /.well-known/agent-card.json, so the card can reflect dynamic
 // state (e.g. available tools, authentication requirements, version metadata)
 // without restarting the server. Callers wanting caching should wrap their
 // implementation themselves.
-type AgentCardProvider func(ctx context.Context) (*a2a.AgentCard, error)
+//
+// The returned card is normalized (BaseURL, SupportedInterfaces, default
+// modes, Capabilities.Streaming) before being served, so the provider only
+// needs to supply the fields it cares about.
+type AgentCardProvider func(ctx context.Context) (*a2asdk.AgentCard, error)
 
 // ServerOptions configures a Server.
 type ServerOptions struct {
@@ -29,7 +42,7 @@ type ServerOptions struct {
 
 	// Card provides static agent card fields. The server fills in defaults
 	// for any missing required fields. Ignored when CardProvider is set.
-	Card a2a.AgentCard
+	Card CardOptions
 
 	// CardProvider resolves the agent card dynamically on each request to
 	// /.well-known/agent-card.json. When set, Card is ignored. The provider
@@ -53,7 +66,7 @@ type ServerOptions struct {
 type Server struct {
 	handler      a2asrv.RequestHandler
 	httpHandler  http.Handler
-	card         *a2a.AgentCard
+	card         *a2asdk.AgentCard
 	cardProvider AgentCardProvider
 	agent        *dive.Agent
 	baseURL      string
@@ -63,7 +76,7 @@ type Server struct {
 // NewServer constructs a Server from the given options.
 func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.Agent == nil {
-		return nil, fmt.Errorf("a2alib: ServerOptions.Agent is required")
+		return nil, fmt.Errorf("a2a: ServerOptions.Agent is required")
 	}
 	if opts.Transport == "" {
 		opts.Transport = "jsonrpc"
@@ -78,7 +91,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 
 	// Build the a2a-go request handler.
 	handlerOpts := []a2asrv.RequestHandlerOption{
-		a2asrv.WithCapabilityChecks(&a2a.AgentCapabilities{
+		a2asrv.WithCapabilityChecks(&a2asdk.AgentCapabilities{
 			Streaming: true,
 		}),
 	}
@@ -92,7 +105,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	case "rest":
 		transportHandler = a2asrv.NewRESTHandler(handler)
 	default:
-		return nil, fmt.Errorf("a2alib: unsupported transport: %q", opts.Transport)
+		return nil, fmt.Errorf("a2a: unsupported transport: %q", opts.Transport)
 	}
 
 	srv := &Server{
@@ -105,15 +118,63 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 
 	if opts.CardProvider == nil {
-		srv.card = buildStaticCard(opts.Agent, opts.BaseURL, opts.Transport, &opts.Card)
+		srv.card = buildStaticCard(opts.Agent, opts.BaseURL, opts.Transport, opts.Card)
 	}
 
 	return srv, nil
 }
 
-// buildStaticCard applies defaults to a caller-supplied card and returns the
-// finalized copy. It does not modify the caller's value.
-func buildStaticCard(agent *dive.Agent, baseURL, transport string, src *a2a.AgentCard) *a2a.AgentCard {
+// buildStaticCard applies defaults to a caller-supplied CardOptions and
+// returns the finalized a2a.AgentCard.
+func buildStaticCard(agent *dive.Agent, baseURL, transport string, src CardOptions) *a2asdk.AgentCard {
+	card := &a2asdk.AgentCard{
+		Name:        src.Name,
+		Description: src.Description,
+		Version:     src.Version,
+	}
+
+	if card.Name == "" {
+		card.Name = agent.Name()
+		if card.Name == "" {
+			card.Name = "dive-agent"
+		}
+	}
+	if card.Description == "" {
+		card.Description = card.Name + " (Dive A2A agent)"
+	}
+	if card.Version == "" {
+		card.Version = "0.1.0"
+	}
+	card.DefaultInputModes = []string{"text/plain"}
+	card.DefaultOutputModes = []string{"text/plain"}
+	card.Skills = []a2asdk.AgentSkill{{
+		ID:          "chat",
+		Name:        "chat",
+		Description: "General purpose conversational interface.",
+		Tags:        []string{"chat"},
+	}}
+	if baseURL != "" {
+		url := strings.TrimRight(baseURL, "/")
+		proto := a2asdk.TransportProtocolJSONRPC
+		if transport == "rest" {
+			proto = a2asdk.TransportProtocolHTTPJSON
+		}
+		card.SupportedInterfaces = []*a2asdk.AgentInterface{{
+			URL:             url,
+			ProtocolBinding: proto,
+			ProtocolVersion: a2asdk.Version,
+		}}
+	}
+	card.Capabilities.Streaming = true
+	return card
+}
+
+// buildStaticCardFromFull applies normalization to a full a2asdk.AgentCard,
+// used by the dynamic card provider path.
+func buildStaticCardFromFull(agent *dive.Agent, baseURL, transport string, src *a2asdk.AgentCard) *a2asdk.AgentCard {
+	if src == nil {
+		return buildStaticCard(agent, baseURL, transport, CardOptions{})
+	}
 	card := deepCopyCard(src)
 
 	if card.Name == "" {
@@ -135,7 +196,7 @@ func buildStaticCard(agent *dive.Agent, baseURL, transport string, src *a2a.Agen
 		card.DefaultOutputModes = []string{"text/plain"}
 	}
 	if len(card.Skills) == 0 {
-		card.Skills = []a2a.AgentSkill{{
+		card.Skills = []a2asdk.AgentSkill{{
 			ID:          "chat",
 			Name:        "chat",
 			Description: "General purpose conversational interface.",
@@ -144,14 +205,14 @@ func buildStaticCard(agent *dive.Agent, baseURL, transport string, src *a2a.Agen
 	}
 	if len(card.SupportedInterfaces) == 0 && baseURL != "" {
 		url := strings.TrimRight(baseURL, "/")
-		proto := a2a.TransportProtocolJSONRPC
+		proto := a2asdk.TransportProtocolJSONRPC
 		if transport == "rest" {
-			proto = a2a.TransportProtocolHTTPJSON
+			proto = a2asdk.TransportProtocolHTTPJSON
 		}
-		card.SupportedInterfaces = []*a2a.AgentInterface{{
+		card.SupportedInterfaces = []*a2asdk.AgentInterface{{
 			URL:             url,
 			ProtocolBinding: proto,
-			ProtocolVersion: a2a.Version,
+			ProtocolVersion: a2asdk.Version,
 		}}
 	}
 	card.Capabilities.Streaming = true
@@ -182,7 +243,7 @@ func (s *Server) serveCard(w http.ResponseWriter, r *http.Request) {
 	// Normalize the provider card the same way static cards are normalized so
 	// BaseURL, SupportedInterfaces, default modes, and Capabilities.Streaming
 	// are applied even when the provider omits them.
-	card = buildStaticCard(s.agent, s.baseURL, s.transport, card)
+	card = buildStaticCardFromFull(s.agent, s.baseURL, s.transport, card)
 	b, err := json.Marshal(card)
 	if err != nil {
 		http.Error(w, "failed to marshal agent card", http.StatusInternalServerError)
@@ -195,36 +256,28 @@ func (s *Server) serveCard(w http.ResponseWriter, r *http.Request) {
 // Card returns a deep copy of the server's static agent card. Returns nil when
 // the server was created with a CardProvider — callers should invoke the
 // provider directly in that case.
-func (s *Server) Card() *a2a.AgentCard {
+//
+// This method returns the underlying SDK type for callers that need full card
+// access. Most callers do not need this.
+func (s *Server) Card() *a2asdk.AgentCard {
 	if s.card == nil {
 		return nil
 	}
-	b, err := json.Marshal(s.card)
-	if err != nil {
-		// Should never happen — we marshaled successfully in buildStaticCard.
-		cp := *s.card
-		return &cp
-	}
-	var cp a2a.AgentCard
-	if err := json.Unmarshal(b, &cp); err != nil {
-		cp2 := *s.card
-		return &cp2
-	}
-	return &cp
+	return deepCopyCard(s.card)
 }
 
 // deepCopyCard returns a deep copy of an AgentCard via JSON round-trip.
 // Falls back to a shallow copy if marshaling fails.
-func deepCopyCard(src *a2a.AgentCard) *a2a.AgentCard {
+func deepCopyCard(src *a2asdk.AgentCard) *a2asdk.AgentCard {
 	if src == nil {
-		return &a2a.AgentCard{}
+		return &a2asdk.AgentCard{}
 	}
 	b, err := json.Marshal(src)
 	if err != nil {
 		cp := *src
 		return &cp
 	}
-	var cp a2a.AgentCard
+	var cp a2asdk.AgentCard
 	if err := json.Unmarshal(b, &cp); err != nil {
 		cp2 := *src
 		return &cp2

@@ -1,4 +1,4 @@
-module github.com/deepnoodle-ai/dive/a2alib
+module github.com/deepnoodle-ai/dive/a2a
 
 go 1.25.0
 

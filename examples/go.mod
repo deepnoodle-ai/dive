@@ -3,9 +3,8 @@ module github.com/deepnoodle-ai/dive/examples
 go 1.25.0
 
 require (
-	github.com/a2aproject/a2a-go/v2 v2.2.0
 	github.com/deepnoodle-ai/dive v1.4.0
-	github.com/deepnoodle-ai/dive/a2alib v0.1.0
+	github.com/deepnoodle-ai/dive/a2a v0.1.0
 	github.com/deepnoodle-ai/dive/experimental/mcp v1.4.0
 	github.com/deepnoodle-ai/dive/otel v0.1.0
 	github.com/deepnoodle-ai/dive/providers/google v1.4.0
@@ -27,6 +26,7 @@ require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.18.2 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/a2aproject/a2a-go/v2 v2.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -76,7 +76,7 @@ require (
 
 replace (
 	github.com/deepnoodle-ai/dive => ..
-	github.com/deepnoodle-ai/dive/a2alib => ../a2alib
+	github.com/deepnoodle-ai/dive/a2a => ../a2a
 	github.com/deepnoodle-ai/dive/experimental/mcp => ../experimental/mcp
 	github.com/deepnoodle-ai/dive/otel => ../otel
 	github.com/deepnoodle-ai/dive/providers/google => ../providers/google

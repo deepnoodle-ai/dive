@@ -1,6 +1,6 @@
 # A2A (Agent-to-Agent) Support
 
-The `a2alib` package lets a Dive agent act as either end of the
+The `a2a` package lets a Dive agent act as either end of the
 [Agent-to-Agent protocol](https://google.github.io/A2A/):
 
 - **Server**: expose a `*dive.Agent` as a reachable A2A endpoint.
@@ -18,10 +18,8 @@ import (
     "net/http"
 
     "github.com/deepnoodle-ai/dive"
-    "github.com/deepnoodle-ai/dive/a2alib"
+    "github.com/deepnoodle-ai/dive/a2a"
     "github.com/deepnoodle-ai/dive/providers/anthropic"
-
-    "github.com/a2aproject/a2a-go/v2/a2a"
 )
 
 agent, _ := dive.NewAgent(dive.AgentOptions{
@@ -30,10 +28,10 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     Model:        anthropic.New(),
 })
 
-srv, err := a2alib.NewServer(a2alib.ServerOptions{
+srv, err := a2a.NewServer(a2a.ServerOptions{
     Agent:   agent,
     BaseURL: "https://my-agent.example.com",
-    Card: a2a.AgentCard{
+    Card: a2a.CardOptions{
         Name:        "My Agent",
         Description: "A helpful assistant.",
     },
@@ -49,7 +47,7 @@ http.ListenAndServe(":8080", srv.Handler())
 ### Transport selection
 
 ```go
-srv, _ := a2alib.NewServer(a2alib.ServerOptions{
+srv, _ := a2a.NewServer(a2a.ServerOptions{
     Agent:     agent,
     Transport: "rest",   // "jsonrpc" (default) or "rest"
 })
@@ -59,12 +57,15 @@ srv, _ := a2alib.NewServer(a2alib.ServerOptions{
 
 When card metadata may change without restarting the server (e.g. available
 tools vary by user, version metadata is hot-reloaded), use `CardProvider`
-instead of a static `Card`:
+instead of a static `Card`. The provider receives the full SDK `AgentCard`
+type for complete control:
 
 ```go
-srv, _ := a2alib.NewServer(a2alib.ServerOptions{
+import a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
+
+srv, _ := a2a.NewServer(a2a.ServerOptions{
     Agent: agent,
-    CardProvider: func(ctx context.Context) (*a2a.AgentCard, error) {
+    CardProvider: func(ctx context.Context) (*a2asdk.AgentCard, error) {
         return resolveCardFromDB(ctx)
     },
 })
@@ -83,10 +84,14 @@ context, supply a `SessionProvider`:
 ```go
 import "github.com/deepnoodle-ai/dive/session"
 
+var mu sync.Mutex
 store := make(map[string]dive.Session)
-srv, _ := a2alib.NewServer(a2alib.ServerOptions{
+
+srv, _ := a2a.NewServer(a2a.ServerOptions{
     Agent: agent,
     SessionProvider: func(ctx context.Context, contextID string) (dive.Session, error) {
+        mu.Lock()
+        defer mu.Unlock()
         if sess, ok := store[contextID]; ok {
             return sess, nil
         }
@@ -100,30 +105,37 @@ srv, _ := a2alib.NewServer(a2alib.ServerOptions{
 ## Calling a remote A2A agent
 
 `RemoteAgent` wraps the a2a-go client with ergonomic text-based methods and
-automatic context-ID tracking.
+automatic context-ID tracking. The return type is `*TaskResult` — a simple
+struct with `ID`, `ContextID`, `State`, and `Text` fields — so most callers
+need no SDK imports at all.
 
 ```go
-import (
-    "github.com/deepnoodle-ai/dive/a2alib"
-    "github.com/a2aproject/a2a-go/v2/a2a"
-)
+import "github.com/deepnoodle-ai/dive/a2a"
 
-card := &a2a.AgentCard{ /* resolved from /.well-known/agent-card.json */ }
-
-remote, err := a2alib.NewRemoteAgentFromCard(ctx, card)
+// Connect by URL (most common).
+remote, err := a2a.NewRemoteAgentFromURL(ctx, "https://my-agent.example.com")
 
 // Simple send-and-receive.
-task, err := remote.SendText(ctx, "What is the capital of France?")
-fmt.Println(a2alib.ResponseText(task))
+result, err := remote.SendText(ctx, "What is the capital of France?")
+fmt.Println(result.Text)           // extracted response text
+fmt.Println(result.IsCompleted())  // true
 
-// Streaming events.
-for event, err := range remote.StreamText(ctx, "Tell me a story") {
-    // handle event
-}
+// Streaming with a chunk callback.
+result, err = remote.StreamText(ctx, "Tell me a story", func(chunk string) {
+    fmt.Print(chunk)
+})
 ```
 
 `remote.ContextID()` is automatically updated from each response so
 follow-up calls continue the same A2A context without manual tracking.
+
+### Power-user escape hatches
+
+When you need full SDK access, use:
+
+- `remote.LastTask() *a2asdk.Task` — raw SDK task from the most recent call.
+- `remote.Client() *a2aclient.Client` — underlying SDK client.
+- `remote.StreamEvents(ctx, prompt)` — raw `iter.Seq2[a2asdk.Event, error]` iterator.
 
 ## Suspend / resume
 
@@ -143,15 +155,17 @@ approve := dive.FuncTool("request_approval", "Pause for human approval",
 )
 
 // Client-side: handle input-required and resume.
-task, _ := remote.SendText(ctx, "Do something consequential")
-if task.Status.State == a2a.TaskStateInputRequired {
-    task, _ = remote.SendTextOnTask(ctx, task.ID, "yes")
+result, _ := remote.SendText(ctx, "Do something consequential")
+if result.IsInputRequired() {
+    result, _ = remote.SendTextOnTask(ctx, result.ID, "yes")
 }
-fmt.Println(a2alib.ResponseText(task))
+fmt.Println(result.Text)
 ```
 
-For `SuspendReasonAuth`, the server maps to `TaskStateAuthRequired` instead
-of `TaskStateInputRequired`.
+Both `SuspendReasonInput` and `SuspendReasonAuth` map to `TaskStateInputRequired`
+so the executor goroutine terminates and resume works via a new `SendMessage`.
+The suspend reason is preserved in `dive.suspension` task metadata for clients
+that need to distinguish the two cases.
 
 ## Structured tool results on resume
 
@@ -174,12 +188,6 @@ a `toolResults` data part that maps call IDs to result strings:
 ```
 
 Plain text resume messages broadcast the same text to all pending calls.
-
-## ResponseText helper
-
-`a2alib.ResponseText(task)` extracts the most useful text from a completed
-task: it prefers artifact parts and falls back to the last agent message in
-the task history.
 
 ## See also
 
