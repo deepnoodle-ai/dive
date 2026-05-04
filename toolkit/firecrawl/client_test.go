@@ -59,7 +59,7 @@ func TestClientSearchInjectsDefaultScrapeOptions(t *testing.T) {
 		path = r.URL.Path
 		auth = r.Header.Get("Authorization")
 		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		_, _ = w.Write([]byte(`{"success":true,"data":[{"title":"Example","url":"https://example.com","markdown":"content"}]}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"web":[{"title":"Example","url":"https://example.com","markdown":"content"}]}}`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -85,7 +85,7 @@ func TestClientSearchPreservesExplicitFormats(t *testing.T) {
 	var body searchBody
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		_, _ = w.Write([]byte(`{"success":true,"data":[]}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"web":[]}}`))
 	}))
 	t.Cleanup(srv.Close)
 

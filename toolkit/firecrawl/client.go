@@ -118,11 +118,11 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (*SearchResponse
 	if err != nil {
 		return nil, err
 	}
-	var resp SearchResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
+	var wire searchResponseWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
 		return nil, fmt.Errorf("firecrawl: decode search response: %w", err)
 	}
-	return &resp, nil
+	return &SearchResponse{Success: wire.Success, Data: wire.Data.Web}, nil
 }
 
 // Parse converts an uploaded document (e.g. a PDF) to markdown.

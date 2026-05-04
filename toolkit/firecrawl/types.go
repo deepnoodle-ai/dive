@@ -81,12 +81,21 @@ type SearchResult struct {
 	URL         string `json:"url,omitempty"`
 	Description string `json:"description,omitempty"`
 	Markdown    string `json:"markdown,omitempty"`
+	Position    int    `json:"position,omitempty"`
 }
 
 // SearchResponse is the response from a Search call.
 type SearchResponse struct {
 	Success bool           `json:"success"`
-	Data    []SearchResult `json:"data,omitempty"`
+	Data    []SearchResult // flattened from data.web in the wire response
+}
+
+// searchResponseWire is the actual JSON shape returned by Firecrawl v2 /search.
+type searchResponseWire struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Web []SearchResult `json:"web"`
+	} `json:"data"`
 }
 
 // ParseRequest is the input for a Parse call.
