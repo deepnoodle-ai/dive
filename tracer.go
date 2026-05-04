@@ -181,15 +181,22 @@ func (nopToolCallSpan) End(error)                 {}
 // to the next, so each tracer's span context layers on top of the previous —
 // independent tracing systems can coexist without trampling each other.
 //
-// MultiTracer of zero tracers is equivalent to NopTracer.
+// Nil entries are filtered out. MultiTracer of zero non-nil tracers is
+// equivalent to NopTracer.
 func MultiTracer(tracers ...Tracer) Tracer {
-	switch len(tracers) {
+	filtered := tracers[:0:0]
+	for _, t := range tracers {
+		if t != nil {
+			filtered = append(filtered, t)
+		}
+	}
+	switch len(filtered) {
 	case 0:
 		return NopTracer{}
 	case 1:
-		return tracers[0]
+		return filtered[0]
 	default:
-		return multiTracer(tracers)
+		return multiTracer(filtered)
 	}
 }
 

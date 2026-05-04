@@ -66,14 +66,14 @@ gates, etc. Only the OTel extension stops using them.
 
 ```go
 type Tracer interface {
-    StartAgentRun(ctx context.Context, agent *Agent) (context.Context, AgentRunSpan)
-    StartChat(ctx context.Context, req *ChatRequest) (context.Context, ChatSpan)
-    StartToolCall(ctx context.Context, tool Tool, call *llm.ToolUseContent) (context.Context, ToolCallSpan)
+    StartAgentRun(ctx context.Context, info AgentRunInfo) (context.Context, AgentRunSpan)
+    StartChat(ctx context.Context, info ChatInfo) (context.Context, ChatSpan)
+    StartToolCall(ctx context.Context, info ToolCallInfo) (context.Context, ToolCallSpan)
 }
 
 type AgentRunSpan interface {
+    SetResponse(*Response)
     SetUsage(*llm.Usage)
-    SetSuspended()
     End(err error)
 }
 
@@ -89,11 +89,10 @@ type ToolCallSpan interface {
 }
 ```
 
-`ChatRequest` is a small, stable view of what's about to be sent to the
-model — model name, message count, sampling params, streaming flag,
-endpoint, session — without exposing internal `llm.Config` fields the
-tracer has no business with. Concrete shape decided during
-implementation.
+`AgentRunInfo`, `ChatInfo`, and `ToolCallInfo` are small, stable views of
+what's about to happen — model name, message count, sampling params,
+streaming flag, session, etc. — without exposing internal `llm.Config`
+fields the tracer has no business with.
 
 A package-level `NopTracer` implementation lets the agent skip nil
 checks. The agent's default tracer is `NopTracer{}`; setting one is
@@ -123,17 +122,17 @@ through:
 
 ```go
 func (a *Agent) CreateResponse(ctx context.Context, opts ...) (*Response, error) {
-    ctx, runSpan := a.tracer.StartAgentRun(ctx, a)
+    ctx, runSpan := a.tracer.StartAgentRun(ctx, AgentRunInfo{Agent: a, Session: sess})
     defer runSpan.End(retErr)
 
     for iteration := 0; iteration < limit; iteration++ {
-        ctx, chatSpan := a.tracer.StartChat(ctx, req)
+        ctx, chatSpan := a.tracer.StartChat(ctx, ChatInfo{Agent: a, /* ... */})
         resp, err := a.model.Generate(ctx, ...)   // model HTTP nests under chat
         chatSpan.SetResponse(resp)
         chatSpan.End(err)
 
         for _, call := range toolCalls {
-            toolCtx, toolSpan := a.tracer.StartToolCall(ctx, tool, call)
+            toolCtx, toolSpan := a.tracer.StartToolCall(ctx, ToolCallInfo{Tool: tool, Call: call})
             result := tool.Call(toolCtx, ...)     // tool-internal spans nest under execute_tool
             toolSpan.SetResult(result)
             toolSpan.End(nil)

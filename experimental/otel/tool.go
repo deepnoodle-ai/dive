@@ -71,6 +71,10 @@ func (s *toolCallSpan) End(err error) {
 		s.span.RecordError(err)
 		s.span.SetStatus(codes.Error, err.Error())
 		s.span.SetAttributes(semconv.ErrorTypeKey.String(exceptionTypeOf(err)))
+		s.span.AddEvent("gen_ai.client.operation.exception", trace.WithAttributes(
+			semconv.ExceptionType(exceptionTypeOf(err)),
+			semconv.ExceptionMessage(err.Error()),
+		))
 		return
 	}
 	failed := s.result != nil && (s.result.Error != nil || (s.result.Result != nil && s.result.Result.IsError))

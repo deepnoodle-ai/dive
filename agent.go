@@ -1222,6 +1222,7 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 		failed := result.Result != nil && result.Result.IsError
 		postHctx := &HookContext{
 			Agent:        a,
+			Session:      hctx.Session,
 			Values:       hctx.Values,
 			SystemPrompt: hctx.SystemPrompt,
 			Messages:     hctx.Messages,
@@ -1723,6 +1724,7 @@ func (a *Agent) executeToolCallsParallel(
 
 		preHctx := &HookContext{
 			Agent:        a,
+			Session:      hctx.Session,
 			Values:       hctx.Values,
 			SystemPrompt: hctx.SystemPrompt,
 			Messages:     hctx.Messages,
@@ -1845,6 +1847,7 @@ func (a *Agent) executeToolCallsParallel(
 
 		postHctx := &HookContext{
 			Agent:        prep.preHctx.Agent,
+			Session:      prep.preHctx.Session,
 			Values:       prep.preHctx.Values,
 			SystemPrompt: prep.preHctx.SystemPrompt,
 			Messages:     prep.preHctx.Messages,
@@ -1940,6 +1943,7 @@ func (a *Agent) executeOneToolCall(
 
 	preHctx := &HookContext{
 		Agent:        a,
+		Session:      hctx.Session,
 		Values:       hctx.Values,
 		SystemPrompt: hctx.SystemPrompt,
 		Messages:     hctx.Messages,
@@ -2007,6 +2011,7 @@ func (a *Agent) executeOneToolCall(
 	// PreToolUse hooks are visible in PostToolUse hooks.
 	postHctx := &HookContext{
 		Agent:        preHctx.Agent,
+		Session:      preHctx.Session,
 		Values:       preHctx.Values,
 		SystemPrompt: preHctx.SystemPrompt,
 		Messages:     preHctx.Messages,

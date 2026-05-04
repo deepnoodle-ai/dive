@@ -2,7 +2,7 @@
 // Dive agent.
 //
 // Spans follow the GenAI semantic conventions (gen_ai.*) and nest under a
-// single invoke_agent root, so a destination like Mobius / Phoenix / Datadog
+// single invoke_agent root, so a destination like Jaeger / Phoenix / Datadog
 // can render the agent's LLM calls and tool calls as a tree. Metrics
 // (gen_ai.client.operation.duration, gen_ai.client.token.usage) follow the
 // matching metric spec, with the spec-recommended bucket boundaries.
@@ -60,7 +60,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("setup providers: %v", err)
 	}
-	defer shutdown(ctx)
+	defer func() {
+		if err := shutdown(ctx); err != nil {
+			log.Printf("otel shutdown: %v", err)
+		}
+	}()
 	otel.SetTracerProvider(tp)
 	otel.SetMeterProvider(mp)
 

@@ -134,8 +134,9 @@ func findChatSpan(spans []sdktrace.ReadOnlySpan) sdktrace.ReadOnlySpan {
 
 func TestTracer_EmitsAgentChatToolSpans(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	llmResponses := []*llm.Response{
 		{
@@ -293,8 +294,9 @@ func TestTracer_EmitsAgentChatToolSpans(t *testing.T) {
 // under its own execute_tool span.
 func TestTracer_CtxPropagation_ParallelTools(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	llmResponses := []*llm.Response{
 		{
@@ -384,8 +386,9 @@ func TestTracer_CtxPropagation_ParallelTools(t *testing.T) {
 // under chat — no hook involvement needed.
 func TestTracer_ChatSpanCtxPropagation(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	tracer := tp.Tracer("test")
 
@@ -450,8 +453,9 @@ func TestTracer_ChatSpanCtxPropagation(t *testing.T) {
 // the chat span after iterator accumulation completes.
 func TestTracer_ChatSpanCtxPropagation_Streaming(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	tracer := tp.Tracer("test")
 
@@ -517,8 +521,9 @@ func TestTracer_ChatSpanCtxPropagation_Streaming(t *testing.T) {
 // emitted as gen_ai.usage.cache_*.input_tokens attributes when non-zero.
 func TestTracer_CacheTokenAttrs(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	model := &fakeLLM{
 		name: "fake",
@@ -568,8 +573,9 @@ func TestTracer_CacheTokenAttrs(t *testing.T) {
 // execute_tool, and invoke_agent spans when the agent has a session.
 func TestTracer_ConversationID(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	model := &fakeLLM{
 		name: "fake",
@@ -610,8 +616,9 @@ func TestTracer_ConversationID(t *testing.T) {
 // invoke_agent span.
 func TestTracer_AgentIdentityAttrs(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	model := &fakeLLM{
 		name: "fake",
@@ -667,12 +674,14 @@ func TestTracer_AgentIdentityAttrs(t *testing.T) {
 func TestTracer_Metrics(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	prevMP := otel.GetMeterProvider()
 	otel.SetMeterProvider(mp)
-	defer otel.SetMeterProvider(otel.GetMeterProvider())
+	defer otel.SetMeterProvider(prevMP)
 
 	tp, _ := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	model := &fakeLLM{
 		name: "fake",
@@ -742,8 +751,9 @@ func TestTracer_Metrics(t *testing.T) {
 // error.type=rate_limit on the chat span and the GenAI exception event.
 func TestTracer_ChatErrorClassifies(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	model := &errFakeLLM{err: providers.NewError(429, "slow down")}
 
@@ -781,8 +791,9 @@ func TestTracer_ChatErrorClassifies(t *testing.T) {
 // gen_ai.tool.type appear on execute_tool spans.
 func TestTracer_ToolDescriptionAndType(t *testing.T) {
 	tp, rec := newRecordingProvider()
+	prevTP := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
-	defer otel.SetTracerProvider(otel.GetTracerProvider())
+	defer otel.SetTracerProvider(prevTP)
 
 	type echoIn struct {
 		Text string `json:"text"`

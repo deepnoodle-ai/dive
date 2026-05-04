@@ -12,7 +12,7 @@ The package implements the `dive.Tracer` interface — set it on
 
 ## Span shape
 
-```
+```text
 invoke_agent {agent.name}        # one per CreateResponse call
 ├── chat {request.model}          # one per LLM iteration
 ├── execute_tool {tool.name}      # one per tool call

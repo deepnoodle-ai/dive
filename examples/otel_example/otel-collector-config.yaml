@@ -3,7 +3,7 @@
 #
 # Why detailed? It dumps every attribute on every span and every data point
 # on every metric — exactly what you need when verifying that the spec's
-# gen_ai.* keys (and Mobius vendor keys) survive the OTLP round trip.
+# gen_ai.* keys (and any vendor keys) survive the OTLP round trip.
 
 receivers:
   otlp:
