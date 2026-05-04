@@ -106,9 +106,10 @@ func (m *MapLoader) Load(ctx context.Context) (map[string]*Definition, error) {
 
 // frontmatter represents the YAML frontmatter in a subagent markdown file.
 type frontmatter struct {
-	Description string   `yaml:"description"`
-	Model       string   `yaml:"model,omitempty"`
-	Tools       []string `yaml:"tools,omitempty"`
+	Description     string   `yaml:"description"`
+	Model           string   `yaml:"model,omitempty"`
+	Tools           []string `yaml:"tools,omitempty"`
+	DisallowedTools []string `yaml:"disallowed-tools,omitempty"`
 }
 
 // LoadFromDirectory loads subagent definitions from a single directory.
@@ -173,10 +174,11 @@ func loadFile(path string) (*Definition, error) {
 	}
 
 	return &Definition{
-		Description: frontm.Description,
-		Prompt:      strings.TrimSpace(body),
-		Tools:       frontm.Tools,
-		Model:       frontm.Model,
+		Description:     frontm.Description,
+		Prompt:          strings.TrimSpace(body),
+		Tools:           frontm.Tools,
+		DisallowedTools: frontm.DisallowedTools,
+		Model:           frontm.Model,
 	}, nil
 }
 

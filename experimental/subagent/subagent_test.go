@@ -143,6 +143,43 @@ func TestFilterTools(t *testing.T) {
 		assert.Equal(t, 1, len(filtered))
 		assert.Equal(t, "Read", filtered[0].Name())
 	})
+
+	t.Run("denylist only removes named tools", func(t *testing.T) {
+		def := &Definition{DisallowedTools: []string{"Write", "Bash"}}
+		filtered := FilterTools(def, allTools)
+		names := make([]string, len(filtered))
+		for i, t := range filtered {
+			names[i] = t.Name()
+		}
+		assert.Equal(t, 1, len(filtered))
+		assert.Contains(t, names, "Read")
+	})
+
+	t.Run("denylist is case-insensitive", func(t *testing.T) {
+		def := &Definition{DisallowedTools: []string{"write", "BASH"}}
+		filtered := FilterTools(def, allTools)
+		names := make([]string, len(filtered))
+		for i, t := range filtered {
+			names[i] = t.Name()
+		}
+		assert.Equal(t, 1, len(filtered))
+		assert.Contains(t, names, "Read")
+	})
+
+	t.Run("allowlist and denylist combined", func(t *testing.T) {
+		def := &Definition{
+			Tools:           []string{"Read", "Write", "Bash"},
+			DisallowedTools: []string{"Bash"},
+		}
+		filtered := FilterTools(def, allTools)
+		names := make([]string, len(filtered))
+		for i, t := range filtered {
+			names[i] = t.Name()
+		}
+		assert.Equal(t, 2, len(filtered))
+		assert.Contains(t, names, "Read")
+		assert.Contains(t, names, "Write")
+	})
 }
 
 func TestMapLoader(t *testing.T) {

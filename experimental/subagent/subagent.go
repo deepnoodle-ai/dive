@@ -60,6 +60,12 @@ type Definition struct {
 	// (except the Task tool, which is never available to subagents).
 	Tools []string
 
+	// DisallowedTools lists tool names to exclude from the subagent's tool set.
+	// When Tools is empty, starts from all parent tools and removes these.
+	// When Tools is set, starts from that allowlist and removes these.
+	// Names are matched case-insensitively.
+	DisallowedTools []string
+
 	// Model overrides the LLM model for this subagent.
 	// Valid values: "sonnet", "opus", "haiku", or "" to inherit from parent.
 	Model string
@@ -162,14 +168,29 @@ func (r *Registry) GenerateToolDescription() string {
 	return sb.String()
 }
 
-// FilterTools filters a list of tools based on the subagent definition's allowed tools.
-// If def.Tools is nil or empty, all tools are returned except the Task tool.
+// FilterTools filters a list of tools based on the subagent definition's allowed and
+// disallowed tool lists. Rules:
+//
+//   - Denylist only (DisallowedTools set, Tools empty): all tools minus denied ones.
+//   - Allowlist only (Tools set, DisallowedTools empty): only tools in the allowlist.
+//   - Both set: tools in the allowlist minus denied ones.
+//
+// The Task tool is never included regardless of either list.
+// Tool names in DisallowedTools are matched case-insensitively.
 func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 	var allowedSet map[string]bool
 	if len(def.Tools) > 0 {
 		allowedSet = make(map[string]bool, len(def.Tools))
 		for _, name := range def.Tools {
 			allowedSet[name] = true
+		}
+	}
+
+	var deniedSet map[string]bool
+	if len(def.DisallowedTools) > 0 {
+		deniedSet = make(map[string]bool, len(def.DisallowedTools))
+		for _, name := range def.DisallowedTools {
+			deniedSet[strings.ToLower(name)] = true
 		}
 	}
 
@@ -182,10 +203,12 @@ func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 			continue
 		}
 
-		if allowedSet != nil {
-			if !allowedSet[name] {
-				continue
-			}
+		if allowedSet != nil && !allowedSet[name] {
+			continue
+		}
+
+		if deniedSet != nil && deniedSet[strings.ToLower(name)] {
+			continue
 		}
 
 		result = append(result, tool)
