@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"net/http/httptest"
+	"sync"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/a2alib"
@@ -58,8 +59,11 @@ func main() {
 
 	// Wrap the agent in an A2A server. Sessions are keyed by A2A contextID
 	// so follow-up messages from the same caller resume the same conversation.
+	var sessionsMu sync.Mutex
 	sessions := map[string]dive.Session{}
 	sessionProvider := func(ctx context.Context, contextID string) (dive.Session, error) {
+		sessionsMu.Lock()
+		defer sessionsMu.Unlock()
 		if sess, ok := sessions[contextID]; ok {
 			return sess, nil
 		}

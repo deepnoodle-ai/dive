@@ -55,6 +55,9 @@ type Server struct {
 	httpHandler  http.Handler
 	card         *a2a.AgentCard
 	cardProvider AgentCardProvider
+	agent        *dive.Agent
+	baseURL      string
+	transport    string
 }
 
 // NewServer constructs a Server from the given options.
@@ -96,6 +99,9 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		handler:      handler,
 		httpHandler:  transportHandler,
 		cardProvider: opts.CardProvider,
+		agent:        opts.Agent,
+		baseURL:      opts.BaseURL,
+		transport:    opts.Transport,
 	}
 
 	if opts.CardProvider == nil {
@@ -173,6 +179,10 @@ func (s *Server) serveCard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to resolve agent card: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Normalize the provider card the same way static cards are normalized so
+	// BaseURL, SupportedInterfaces, default modes, and Capabilities.Streaming
+	// are applied even when the provider omits them.
+	card = buildStaticCard(s.agent, s.baseURL, s.transport, card)
 	b, err := json.Marshal(card)
 	if err != nil {
 		http.Error(w, "failed to marshal agent card", http.StatusInternalServerError)
