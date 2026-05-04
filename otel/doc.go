@@ -21,7 +21,7 @@
 //	    Name:         "Research Assistant",
 //	    Model:        anthropic.New(),
 //	    SystemPrompt: "You are an enthusiastic researcher.",
-//	    Tracer:       otelext.NewTracer(otelext.WithProvider("anthropic")),
+//	    Tracer:       telemetry.NewTracer(telemetry.WithProvider("anthropic")),
 //	})
 //
 //	resp, err := agent.CreateResponse(ctx, dive.WithInput("hello"))

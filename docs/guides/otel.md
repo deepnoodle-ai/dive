@@ -28,7 +28,7 @@ semconv reads them out of the box.
 import (
     "github.com/deepnoodle-ai/dive"
     "github.com/deepnoodle-ai/dive/providers/anthropic"
-    otelext "github.com/deepnoodle-ai/dive/otel"
+    telemetry "github.com/deepnoodle-ai/dive/otel"
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/attribute"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -41,9 +41,9 @@ otel.SetTracerProvider(tp)
 
 // 2. Build the Tracer. Resource-style attributes here are added to every
 //    span so a destination can correlate spans to a run/step.
-tracer := otelext.NewTracer(
-    otelext.WithProvider("anthropic"),
-    otelext.WithAttributes(
+tracer := telemetry.NewTracer(
+    telemetry.WithProvider("anthropic"),
+    telemetry.WithAttributes(
         attribute.String("workflow.run.id", runID),
         attribute.String("workflow.step.id", stepID),
     ),
@@ -117,7 +117,7 @@ httpClient := &http.Client{
 }
 agent, _ := dive.NewAgent(dive.AgentOptions{
     Model:  anthropic.New(anthropic.WithClient(httpClient)),
-    Tracer: otelext.NewTracer(otelext.WithProvider("anthropic")),
+    Tracer: telemetry.NewTracer(telemetry.WithProvider("anthropic")),
 })
 ```
 

@@ -11,7 +11,7 @@ import (
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/dive/session"
 
-	otelext "github.com/deepnoodle-ai/dive/otel"
+	telemetry "github.com/deepnoodle-ai/dive/otel"
 
 	"go.opentelemetry.io/otel"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -179,10 +179,10 @@ func TestTracer_EmitsAgentChatToolSpans(t *testing.T) {
 		Model:        model,
 		SystemPrompt: "you are a test agent",
 		Tools:        []dive.Tool{echoTool},
-		Tracer: otelext.NewTracer(
-			otelext.WithProvider("fake"),
-			otelext.WithCaptureToolIO(true),
-			otelext.WithCaptureMessages(true),
+		Tracer: telemetry.NewTracer(
+			telemetry.WithProvider("fake"),
+			telemetry.WithCaptureToolIO(true),
+			telemetry.WithCaptureMessages(true),
 		),
 	})
 	if err != nil {
@@ -339,7 +339,7 @@ func TestTracer_CtxPropagation_ParallelTools(t *testing.T) {
 		Name:                  "ParallelTester",
 		Model:                 model,
 		Tools:                 []dive.Tool{echoTool},
-		Tracer:                otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer:                telemetry.NewTracer(telemetry.WithProvider("fake")),
 		ParallelToolExecution: true,
 	})
 	if err != nil {
@@ -411,7 +411,7 @@ func TestTracer_ChatSpanCtxPropagation(t *testing.T) {
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:   "CtxTester",
 		Model:  model,
-		Tracer: otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer: telemetry.NewTracer(telemetry.WithProvider("fake")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -478,7 +478,7 @@ func TestTracer_ChatSpanCtxPropagation_Streaming(t *testing.T) {
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name:   "CtxTesterStreaming",
 		Model:  model,
-		Tracer: otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer: telemetry.NewTracer(telemetry.WithProvider("fake")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -541,7 +541,7 @@ func TestTracer_CacheTokenAttrs(t *testing.T) {
 	}
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name: "Cache", Model: model,
-		Tracer: otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer: telemetry.NewTracer(telemetry.WithProvider("fake")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -588,7 +588,7 @@ func TestTracer_ConversationID(t *testing.T) {
 	}
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name: "ConvAgent", Model: model,
-		Tracer:  otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer:  telemetry.NewTracer(telemetry.WithProvider("fake")),
 		Session: session.New("convo-42"),
 	})
 	if err != nil {
@@ -635,7 +635,7 @@ func TestTracer_AgentIdentityAttrs(t *testing.T) {
 		Description: "Curious researcher",
 		Version:     "2025-05-04",
 		Model:       model,
-		Tracer:      otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer:      telemetry.NewTracer(telemetry.WithProvider("fake")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -694,7 +694,7 @@ func TestTracer_Metrics(t *testing.T) {
 	}
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name: "Metric", Model: model,
-		Tracer: otelext.NewTracer(otelext.WithProvider("anthropic")),
+		Tracer: telemetry.NewTracer(telemetry.WithProvider("anthropic")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -759,7 +759,7 @@ func TestTracer_ChatErrorClassifies(t *testing.T) {
 
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name: "ErrAgent", Model: model,
-		Tracer: otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer: telemetry.NewTracer(telemetry.WithProvider("fake")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -826,7 +826,7 @@ func TestTracer_ToolDescriptionAndType(t *testing.T) {
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Name: "ToolAgent", Model: model,
 		Tools:  []dive.Tool{echoTool},
-		Tracer: otelext.NewTracer(otelext.WithProvider("fake")),
+		Tracer: telemetry.NewTracer(telemetry.WithProvider("fake")),
 	})
 	if err != nil {
 		t.Fatal(err)
