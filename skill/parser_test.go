@@ -275,6 +275,28 @@ Deploy instructions.`
 	assert.False(t, *s.Config.UserInvocable)
 }
 
+func TestParseContent_AgentskillsFields(t *testing.T) {
+	content := `---
+name: my-skill
+description: A skill with ecosystem metadata.
+license: MIT
+compatibility:
+  - claude
+  - gpt-4o
+metadata:
+  author: Acme Corp
+  version: 1.2.0
+---
+
+Instructions.`
+
+	s, err := ParseContent([]byte(content), "/path/to/my-skill.md")
+	assert.NoError(t, err)
+	assert.Equal(t, "MIT", s.Config.License)
+	assert.Equal(t, []string{"claude", "gpt-4o"}, s.Config.Compatibility)
+	assert.Equal(t, map[string]string{"author": "Acme Corp", "version": "1.2.0"}, s.Config.Metadata)
+}
+
 func TestParseContent_AllowedToolsInlineArray(t *testing.T) {
 	content := `---
 name: inline-tools
