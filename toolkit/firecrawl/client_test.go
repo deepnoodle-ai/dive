@@ -20,7 +20,6 @@ func TestNewClientMissingAPIKey(t *testing.T) {
 	assert.ErrorIs(t, err, ErrMissingCredentials)
 }
 
-
 func TestClientScrape(t *testing.T) {
 	var path, auth string
 	var body scrapeBody

@@ -82,11 +82,11 @@ func classifyChatError(err error) string {
 
 // Tool error type buckets, paralleling the chat-side classifier.
 const (
-	errTypeToolPanic        = "panic"
-	errTypeToolNotFound     = "tool_not_found"
-	errTypeToolArgsInvalid  = "args_invalid"
-	errTypeToolReturnedErr  = "tool_returned_error"
-	errTypeToolDefault      = "tool_error"
+	errTypeToolPanic       = "panic"
+	errTypeToolNotFound    = "tool_not_found"
+	errTypeToolArgsInvalid = "args_invalid"
+	errTypeToolReturnedErr = "tool_returned_error"
+	errTypeToolDefault     = "tool_error"
 )
 
 // classifyToolError reduces a tool execution failure to a low-cardinality
