@@ -20,7 +20,6 @@ import (
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
 	"github.com/deepnoodle-ai/dive/experimental/subagent"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
-	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -28,6 +27,7 @@ import (
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/toolkit"
+	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
 )

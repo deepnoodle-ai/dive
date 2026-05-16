@@ -342,23 +342,23 @@ func NewApp(
 	}
 
 	return &App{
-		agent:                  agent,
-		sessionStore:           sessionStore,
-		workspaceDir:           workspaceDir,
-		modelName:              modelName,
-		resumeSessionID:        resumeSessionID,
-		skills:                 skills,
-		apiEndpoint:            apiEndpoint,
-		messages:               make([]Message, 0),
-		toolCallIndex:          make(map[string]int),
-		toolTitles:             toolTitles,
-		history:                make([]string, 0),
-		historyIndex:           -1,
-		ctx:                    ctx,
-		cancel:                 cancel,
-		initialPrompt:          initialPrompt,
-		compactionConfig:       compactionConfig,
-		contextWindowMax:       contextWindowForModel(modelName),
+		agent:             agent,
+		sessionStore:      sessionStore,
+		workspaceDir:      workspaceDir,
+		modelName:         modelName,
+		resumeSessionID:   resumeSessionID,
+		skills:            skills,
+		apiEndpoint:       apiEndpoint,
+		messages:          make([]Message, 0),
+		toolCallIndex:     make(map[string]int),
+		toolTitles:        toolTitles,
+		history:           make([]string, 0),
+		historyIndex:      -1,
+		ctx:               ctx,
+		cancel:            cancel,
+		initialPrompt:     initialPrompt,
+		compactionConfig:  compactionConfig,
+		contextWindowMax:  contextWindowForModel(modelName),
 		toolStreamBuffers: make(map[string]string),
 	}
 }
@@ -1391,7 +1391,6 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 				a.messages[idx].ToolReadLines = strings.Count(textContent, "\n") + 1
 			}
 
-
 		}
 	}
 }
@@ -1488,7 +1487,6 @@ func (a *App) handleToolStream(e toolStreamEvent) {
 		a.messages[idx].ToolResultLines = []string{last}
 	}
 }
-
 
 // startNativeBgTaskWatcher starts a goroutine that awaits all tasks and sends
 // a nativeBgTasksReadyEvent when they complete. Discards results if the app

@@ -152,9 +152,9 @@ type scrapeBody struct {
 
 // searchBody is the JSON wire type for search requests.
 type searchBody struct {
-	Query         string       `json:"query"`
-	Limit         int          `json:"limit,omitempty"`
-	ScrapeOptions *scrapeOpts  `json:"scrapeOptions,omitempty"`
+	Query         string      `json:"query"`
+	Limit         int         `json:"limit,omitempty"`
+	ScrapeOptions *scrapeOpts `json:"scrapeOptions,omitempty"`
 }
 
 type scrapeOpts struct {

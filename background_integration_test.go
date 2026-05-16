@@ -559,7 +559,7 @@ type memSession struct {
 }
 
 func newMemSession(id string) *memSession { return &memSession{id: id} }
-func (s *memSession) ID() string         { return s.id }
+func (s *memSession) ID() string          { return s.id }
 func (s *memSession) Messages(_ context.Context) ([]*llm.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

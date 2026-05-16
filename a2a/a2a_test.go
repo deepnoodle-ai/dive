@@ -62,30 +62,36 @@ func toolCallResponse(toolName, callID string) *llm.Response {
 
 type suspendingTool struct{}
 
-func (t *suspendingTool) Name() string                       { return "ask" }
-func (t *suspendingTool) Description() string                { return "Ask the human for input" }
-func (t *suspendingTool) Schema() *dive.Schema               { return nil }
-func (t *suspendingTool) Annotations() *dive.ToolAnnotations { return &dive.ToolAnnotations{Title: "Ask"} }
+func (t *suspendingTool) Name() string         { return "ask" }
+func (t *suspendingTool) Description() string  { return "Ask the human for input" }
+func (t *suspendingTool) Schema() *dive.Schema { return nil }
+func (t *suspendingTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{Title: "Ask"}
+}
 func (t *suspendingTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
 	return dive.NewSuspendResult("Need your approval", map[string]any{"kind": "approval"}), nil
 }
 
 type confirmTool struct{}
 
-func (t *confirmTool) Name() string                       { return "confirm" }
-func (t *confirmTool) Description() string                { return "Confirm with the human" }
-func (t *confirmTool) Schema() *dive.Schema               { return nil }
-func (t *confirmTool) Annotations() *dive.ToolAnnotations { return &dive.ToolAnnotations{Title: "Confirm"} }
+func (t *confirmTool) Name() string         { return "confirm" }
+func (t *confirmTool) Description() string  { return "Confirm with the human" }
+func (t *confirmTool) Schema() *dive.Schema { return nil }
+func (t *confirmTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{Title: "Confirm"}
+}
 func (t *confirmTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
 	return dive.NewSuspendResult("Please confirm", nil), nil
 }
 
 type authSuspendTool struct{}
 
-func (t *authSuspendTool) Name() string                       { return "auth_gate" }
-func (t *authSuspendTool) Description() string                { return "Require authentication" }
-func (t *authSuspendTool) Schema() *dive.Schema               { return nil }
-func (t *authSuspendTool) Annotations() *dive.ToolAnnotations { return &dive.ToolAnnotations{Title: "AuthGate"} }
+func (t *authSuspendTool) Name() string         { return "auth_gate" }
+func (t *authSuspendTool) Description() string  { return "Require authentication" }
+func (t *authSuspendTool) Schema() *dive.Schema { return nil }
+func (t *authSuspendTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{Title: "AuthGate"}
+}
 func (t *authSuspendTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
 	return dive.NewSuspendResultWithReason("Sign in to continue",
 		dive.SuspendReasonAuth, map[string]any{"auth_url": "https://example.com/oauth"}), nil

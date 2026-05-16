@@ -167,9 +167,9 @@ func (nopAgentRunSpan) End(error)             {}
 
 type nopChatSpan struct{}
 
-func (nopChatSpan) SetResponse(*llm.Response)      {}
-func (nopChatSpan) SetTimeToFirstChunk(float64)    {}
-func (nopChatSpan) End(error)                      {}
+func (nopChatSpan) SetResponse(*llm.Response)   {}
+func (nopChatSpan) SetTimeToFirstChunk(float64) {}
+func (nopChatSpan) End(error)                   {}
 
 type nopToolCallSpan struct{}
 

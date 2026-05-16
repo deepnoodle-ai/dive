@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.0] - 2026-05-15
+
+### Added
+
+- **`Extension` interface** for composable agent capabilities. Extensions bundle
+  tools, hooks, and system prompt rules and are merged during `NewAgent` via
+  `AgentOptions.Extensions`.
+- **Agent suspend/resume** for out-of-process tool results. Tools can return
+  `NewSuspendResult` to pause the agent; the response returns with
+  `Status == ResponseStatusSuspended` and a `Suspension *SuspensionState` for
+  later resumption via `WithToolResults` or `WithResume`. `SuspendableSession`
+  enables auto-persistence; `OnSuspend` hook fires before persistence.
+- **`Tracer` interface** for agent observability (tracing, metrics, audit
+  logging) with `StartAgentRun` / `StartChat` / `StartToolCall`. `NopTracer`
+  and `MultiTracer` ship in core; the OpenTelemetry adapter lives in the
+  promoted `dive/otel` module.
+- **A2A (Agent-to-Agent) support** as a stable submodule (`a2a/`), built on the
+  official `a2a-go/v2` SDK. `Server` exposes a Dive agent as JSON-RPC or REST;
+  `RemoteAgent` calls remote A2A endpoints. Suspend/resume maps to the A2A
+  `input-required` state. Static and dynamic agent cards supported.
+- **Background tool execution** — tools can opt into running in the background
+  while the agent continues, with results returned later.
+- **Skill system** as a stable package (`skill/`) — unified skills and slash
+  commands implementing the `Extension` interface. Provider-based loading
+  (filesystem, `.agents/skills/`), variable expansion, trigger matching, and a
+  three-layer architecture (rules in system prompt, catalog as system reminder,
+  tool with content via PostToolUseHook). agentskills.io standard frontmatter
+  fields supported in `SkillConfig`.
+- **Media generation tools** for images and videos with path traversal
+  protection, duration schema, and aspect ratio controls.
+- **CLI enhancements**: `models` command, interactive model switcher, status
+  line in the input area, hanging indent for assistant messages, and broad UI
+  polish.
+
+### Changed
+
+- **Subagent reliability** improvements with auto-retrieval of nested agent
+  results.
+- **Ollama provider** switched to the Anthropic Messages API; adds
+  `provider/model` syntax for unambiguous routing.
+- **Skip retrying permanent errors** in provider retry loops (auth failures,
+  4xx client errors).
+- **Promoted out of experimental**: `dive/otel`, `a2a` (renamed from `a2alib`),
+  and `toolkit/firecrawl` are now stable submodules.
+- **Upgraded dependencies**: OpenTelemetry 1.40→1.41, wonton 0.0.29→0.0.34.
+
 ## [1.4.0] - 2026-03-25
 
 ### Added
