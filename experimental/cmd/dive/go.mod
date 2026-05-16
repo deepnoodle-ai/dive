@@ -7,7 +7,8 @@ require (
 	github.com/deepnoodle-ai/dive/providers/google v1.4.0
 	github.com/deepnoodle-ai/dive/providers/grok v1.4.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.4.0
-	github.com/deepnoodle-ai/wonton v0.0.29
+	github.com/deepnoodle-ai/wonton v0.0.34
+	github.com/mattn/go-runewidth v0.0.21
 )
 
 require (
@@ -28,7 +29,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
 	github.com/googleapis/gax-go/v2 v2.18.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/mattn/go-runewidth v0.0.21 // indirect
 	github.com/openai/openai-go/v3 v3.29.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
