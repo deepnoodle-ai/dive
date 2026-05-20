@@ -18,17 +18,25 @@ type ToolAnnotations struct {
 	IdempotentHint  bool           `json:"idempotentHint,omitempty"`
 	OpenWorldHint   bool           `json:"openWorldHint,omitempty"`
 	EditHint        bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
-	Extra           map[string]any `json:"extra,omitempty"`
+	// SequentialOnlyHint marks a tool as unsafe for parallel execution.
+	// When the agent has ParallelToolExecution enabled and a batch of tool
+	// calls includes ANY tool with this hint set, the entire batch falls back
+	// to sequential execution. Use for tools that mutate shared state (a
+	// working-directory chdir, a non-thread-safe SDK, a singleton resource).
+	// Default false = parallel-safe, matching the existing behavior.
+	SequentialOnlyHint bool           `json:"sequentialOnlyHint,omitempty"`
+	Extra              map[string]any `json:"extra,omitempty"`
 }
 
 func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 	data := map[string]any{
-		"title":           a.Title,
-		"readOnlyHint":    a.ReadOnlyHint,
-		"destructiveHint": a.DestructiveHint,
-		"idempotentHint":  a.IdempotentHint,
-		"openWorldHint":   a.OpenWorldHint,
-		"editHint":        a.EditHint,
+		"title":              a.Title,
+		"readOnlyHint":       a.ReadOnlyHint,
+		"destructiveHint":    a.DestructiveHint,
+		"idempotentHint":     a.IdempotentHint,
+		"openWorldHint":      a.OpenWorldHint,
+		"editHint":           a.EditHint,
+		"sequentialOnlyHint": a.SequentialOnlyHint,
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -50,11 +58,12 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 	}
 	// Handle boolean hints
 	boolFields := map[string]*bool{
-		"readOnlyHint":    &a.ReadOnlyHint,
-		"destructiveHint": &a.DestructiveHint,
-		"idempotentHint":  &a.IdempotentHint,
-		"openWorldHint":   &a.OpenWorldHint,
-		"editHint":        &a.EditHint,
+		"readOnlyHint":       &a.ReadOnlyHint,
+		"destructiveHint":    &a.DestructiveHint,
+		"idempotentHint":     &a.IdempotentHint,
+		"openWorldHint":      &a.OpenWorldHint,
+		"editHint":           &a.EditHint,
+		"sequentialOnlyHint": &a.SequentialOnlyHint,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {

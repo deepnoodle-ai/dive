@@ -1670,10 +1670,28 @@ func (a *Agent) executeToolCalls(
 	toolsByName map[string]Tool,
 	callback EventCallback,
 ) (*toolBatchResult, error) {
-	if a.parallelToolExecution && len(toolCalls) > 1 {
+	if a.parallelToolExecution && len(toolCalls) > 1 && !batchHasSequentialOnlyTool(toolCalls, toolsByName) {
 		return a.executeToolCallsParallel(ctx, hctx, toolCalls, toolsByName, callback)
 	}
 	return a.executeToolCallsSequential(ctx, hctx, toolCalls, toolsByName, callback)
+}
+
+// batchHasSequentialOnlyTool reports whether any tool in the batch carries
+// the SequentialOnlyHint annotation. When true, the agent falls back to
+// sequential execution even with ParallelToolExecution enabled, so a single
+// non-thread-safe tool doesn't force every batch to be serial globally.
+func batchHasSequentialOnlyTool(toolCalls []*llm.ToolUseContent, toolsByName map[string]Tool) bool {
+	for _, call := range toolCalls {
+		tool, ok := toolsByName[call.Name]
+		if !ok {
+			continue
+		}
+		ann := tool.Annotations()
+		if ann != nil && ann.SequentialOnlyHint {
+			return true
+		}
+	}
+	return false
 }
 
 // executeToolCallsSequential executes tool calls one at a time in order.
