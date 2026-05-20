@@ -2206,6 +2206,15 @@ func (a *Agent) executeTool(
 				},
 			})
 		})
+		toolCtx = WithToolUpdateFunc(toolCtx, func(toolCallID string, update *ToolUpdate) {
+			_ = callback(ctx, &ResponseItem{
+				Type: ResponseItemTypeToolUpdate,
+				ToolUpdate: &ToolUpdateEvent{
+					ToolCallID: toolCallID,
+					Update:     update,
+				},
+			})
+		})
 	}
 
 	output, err := tool.Call(toolCtx, input)

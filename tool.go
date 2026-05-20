@@ -219,6 +219,38 @@ func NewToolResultText(text string) *ToolResult {
 	})
 }
 
+// ToolUpdate is a structured partial result a tool may emit during execution
+// via UpdateTool(ctx, *ToolUpdate). It carries the same shape consumers expect
+// from a final ToolResult, minus terminal-only fields (IsError, Suspend,
+// Background). Use this when text-only StreamOutput isn't enough — e.g. to
+// surface a running exit code, byte count, or other typed progress data to
+// UIs and evaluators before the tool returns.
+//
+// Each call to UpdateTool delivers one snapshot. The agent re-emits it as a
+// ResponseItem of type ResponseItemTypeToolUpdate; consumers receive it
+// through the EventCallback configured on the CreateResponse call.
+//
+// Metadata values are round-tripped through JSON whenever the event is
+// persisted or crosses a process boundary. Stick to JSON-friendly values and
+// expect that numeric types come back as float64 and custom struct types
+// become generic map[string]any after a round trip.
+type ToolUpdate struct {
+	// Content is a partial view of the tool's content blocks. Same shape as
+	// ToolResult.Content; populated with whatever the tool has produced so
+	// far (e.g. accumulated stdout, image previews).
+	Content []*ToolResultContent `json:"content,omitempty"`
+
+	// Display is a partial human-readable markdown summary. Same role as
+	// ToolResult.Display, but reflecting the in-progress state.
+	Display string `json:"display,omitempty"`
+
+	// Metadata is arbitrary structured progress data: exit_code, duration_ms,
+	// files_scanned, bytes_read, percent_complete, etc. Consumers (TUIs,
+	// audit logs, eval harnesses) read this to render live progress widgets
+	// or score partial outputs. JSON-friendly values only.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
 // Tool is an interface for a tool that can be called by an LLM.
 type Tool interface {
 	// Name of the tool.

@@ -35,6 +35,13 @@ const (
 	// The ToolStream field contains the tool call ID and a chunk of text.
 	ResponseItemTypeToolStream ResponseItemType = "tool_stream"
 
+	// ResponseItemTypeToolUpdate indicates a structured partial result from a
+	// tool during execution. The ToolUpdate field contains the tool call ID
+	// and a *ToolUpdate snapshot (Content/Display/Metadata). Use this when
+	// text-only ToolStream isn't enough — e.g. to render a live progress
+	// widget with structured fields like exit_code or files_scanned.
+	ResponseItemTypeToolUpdate ResponseItemType = "tool_update"
+
 	// ResponseItemTypeSuspended is a terminal item emitted when the agent
 	// transitions into a suspended state. The Suspension field carries the
 	// same SuspensionState as Response.Suspension. Stream consumers should
@@ -205,6 +212,9 @@ type ResponseItem struct {
 	// ToolStream is set if the response item is streaming tool output
 	ToolStream *ToolStreamEvent `json:"tool_stream,omitempty"`
 
+	// ToolUpdate is set if the response item is a structured tool update.
+	ToolUpdate *ToolUpdateEvent `json:"tool_update,omitempty"`
+
 	// Suspension is set on a ResponseItemTypeSuspended item. It mirrors
 	// Response.Suspension.
 	Suspension *SuspensionState `json:"suspension,omitempty"`
@@ -221,6 +231,15 @@ type ResponseItem struct {
 type ToolStreamEvent struct {
 	ToolCallID string `json:"tool_call_id"`
 	Text       string `json:"text"`
+}
+
+// ToolUpdateEvent contains a structured partial result emitted by a tool
+// during execution via UpdateTool. The Update snapshot mirrors the shape of
+// a final ToolResult (Content/Display/Metadata) but reflects in-progress
+// state. Distinct from ToolStreamEvent, which carries text-only chunks.
+type ToolUpdateEvent struct {
+	ToolCallID string      `json:"tool_call_id"`
+	Update     *ToolUpdate `json:"update"`
 }
 
 // Response represents the output from an Agent's response generation.
