@@ -205,9 +205,14 @@ func WithReasoningBudget(reasoningBudget int) Option {
 type ReasoningEffort string
 
 const (
-	ReasoningEffortLow    ReasoningEffort = "low"
-	ReasoningEffortMedium ReasoningEffort = "medium"
-	ReasoningEffortHigh   ReasoningEffort = "high"
+	// ReasoningEffortMinimal requests the smallest amount of reasoning the
+	// model supports. Useful for tasks where latency matters more than
+	// step-by-step deliberation. Supported on OpenAI gpt-5 family; other
+	// providers may map it to their lowest available level or ignore it.
+	ReasoningEffortMinimal ReasoningEffort = "minimal"
+	ReasoningEffortLow     ReasoningEffort = "low"
+	ReasoningEffortMedium  ReasoningEffort = "medium"
+	ReasoningEffortHigh    ReasoningEffort = "high"
 	// ReasoningEffortXHigh requests extended capability for long-horizon work.
 	// Supported on Claude Opus 4.7 and 4.8.
 	ReasoningEffortXHigh ReasoningEffort = "xhigh"
@@ -219,7 +224,8 @@ const (
 
 // IsValid returns true if the reasoning effort is a known, valid value.
 func (r ReasoningEffort) IsValid() bool {
-	return r == ReasoningEffortLow ||
+	return r == ReasoningEffortMinimal ||
+		r == ReasoningEffortLow ||
 		r == ReasoningEffortMedium ||
 		r == ReasoningEffortHigh ||
 		r == ReasoningEffortXHigh ||
