@@ -1426,6 +1426,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			hctx.Iteration = i
 			hctx.SystemPrompt = systemPrompt
 			hctx.Messages = updatedMessages
+			hctx.Model = model
 			for _, hook := range a.hooks.PreIteration {
 				if err := hook(ctx, hctx); err != nil {
 					return nil, fmt.Errorf("pre-iteration hook error: %w", err)
@@ -1434,6 +1435,9 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			// Apply any modifications from hooks
 			if hctx.SystemPrompt != systemPrompt {
 				systemPrompt = hctx.SystemPrompt
+			}
+			if hctx.Model != nil && hctx.Model != model {
+				model = hctx.Model
 			}
 		}
 

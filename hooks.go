@@ -55,7 +55,7 @@ import (
 //   - PostToolUse: Agent, Session, Values, Tool, Call, Result
 //   - PostToolUseFailure: Agent, Session, Values, Tool, Call, Result
 //   - Stop: Agent, Session, Values, Response, OutputMessages, Usage, StopHookActive
-//   - PreIteration: Agent, Session, Values, SystemPrompt, Messages, Iteration
+//   - PreIteration: Agent, Session, Values, SystemPrompt, Messages, Iteration, Model
 //
 // The Values map allows hooks to communicate with each other by storing
 // arbitrary data that persists across the hook chain within a single
@@ -127,6 +127,21 @@ type HookContext struct {
 
 	// Iteration is the zero-based iteration number within the generation loop.
 	Iteration int
+
+	// Model is the LLM that will be used for the next iteration's call.
+	// PreIteration hooks may replace this with a different LLM to swap models
+	// mid-generation — e.g. escalate from a cheap model to a more capable one
+	// after the first few iterations, or downshift after tool work completes.
+	//
+	// Reading Model is safe in any PreIteration hook. Setting Model to a
+	// non-nil value takes effect for the upcoming iteration; the previous
+	// model is replaced. Setting Model to nil is a no-op (the current model
+	// is retained). The change persists for subsequent iterations unless a
+	// later PreIteration hook updates it again.
+	//
+	// Populated only in PreIteration. Reading Model in other phases returns
+	// nil and is not a supported pattern.
+	Model llm.LLM
 }
 
 // PreGenerationHook is called before the LLM generation loop begins.

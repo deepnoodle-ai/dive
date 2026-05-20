@@ -874,6 +874,117 @@ func TestPreIterationHook(t *testing.T) {
 		assert.Equal(t, 1, len(capturedPrompts))
 		assert.Equal(t, "Modified prompt", capturedPrompts[0])
 	})
+
+	t.Run("can swap model mid-loop", func(t *testing.T) {
+		// Models that report their identity via the captured opts so we can tell
+		// which one served which iteration. The cheap model emits a tool call on
+		// its first invocation; the expensive model returns a final answer.
+		var cheapCalls, expensiveCalls int
+
+		cheap := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				cheapCalls++
+				return &llm.Response{
+					ID:    "cheap_1",
+					Model: "cheap-model",
+					Role:  llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{ID: "tool_1", Name: "test_tool", Input: []byte(`{}`)},
+					},
+					Type:       "message",
+					StopReason: "tool_use",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			},
+			nameFunc: func() string { return "cheap-model" },
+		}
+		expensive := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				expensiveCalls++
+				return &llm.Response{
+					ID:         "expensive_1",
+					Model:      "expensive-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Final answer from expensive"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "expensive-model" },
+		}
+
+		tool := &mockTool{
+			name: "test_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				return NewToolResultText("tool output"), nil
+			},
+		}
+
+		var seenModels []string
+		agent, err := NewAgent(AgentOptions{
+			Model: cheap,
+			Tools: []Tool{tool},
+			Hooks: Hooks{
+				PreIteration: []PreIterationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						assert.NotNil(t, hctx.Model, "Model should be populated for PreIteration hooks")
+						seenModels = append(seenModels, hctx.Model.Name())
+						// After the cheap model's tool turn (iter 0), escalate.
+						if hctx.Iteration == 1 {
+							hctx.Model = expensive
+						}
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Solve this"))
+		assert.NoError(t, err)
+		assert.Equal(t, "Final answer from expensive", resp.OutputText())
+
+		assert.Equal(t, []string{"cheap-model", "cheap-model"}, seenModels,
+			"hctx.Model reflects the model in effect when the hook runs (before any swap)")
+		assert.Equal(t, 1, cheapCalls, "cheap model should serve iter 0 only")
+		assert.Equal(t, 1, expensiveCalls, "expensive model should serve iter 1 only")
+	})
+
+	t.Run("nil hctx.Model preserves current model", func(t *testing.T) {
+		mockLLM := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				return &llm.Response{
+					ID:         "resp_1",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model: mockLLM,
+			Hooks: Hooks{
+				PreIteration: []PreIterationHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						// Deliberately blank — no swap requested.
+						hctx.Model = nil
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, "Done", resp.OutputText())
+	})
 }
 
 // newToolCallingMockLLM returns a mockLLM that issues one tool call on the
