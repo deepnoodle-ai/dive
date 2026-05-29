@@ -128,6 +128,10 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 | `ParallelToolCalls` | `*bool`               | Allow simultaneous tool calls                    |
 | `ToolChoice`        | `*llm.ToolChoice`     | auto, any, none, or specific tool                |
 
+Provider implementations normalize `ReasoningEffort` only where the model
+family is known. Unsupported providers may omit the option or pass it through
+for compatibility with custom OpenAI-compatible endpoints.
+
 ### Reasoning on Claude Opus 4.7 / 4.8
 
 Opus 4.7 and 4.8 support **only adaptive thinking** — the model decides when and

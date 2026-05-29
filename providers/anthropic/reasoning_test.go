@@ -29,6 +29,30 @@ func TestReasoningEffortOpus48UsesOutputConfig(t *testing.T) {
 	assert.Nil(t, req.Thinking)
 }
 
+func TestReasoningEffortMinimalMapsToLow(t *testing.T) {
+	req := buildReq(t, ModelClaudeOpus48, llm.WithReasoningEffort(llm.ReasoningEffortMinimal))
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "low", req.OutputConfig.Effort)
+}
+
+func TestReasoningEffortNoneErrors(t *testing.T) {
+	cfg := &llm.Config{}
+	cfg.Apply(
+		llm.WithModel(ModelClaudeOpus48),
+		llm.WithReasoningEffort(llm.ReasoningEffortNone),
+	)
+	var req Request
+	err := New().applyRequestConfig(&req, cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+}
+
+func TestReasoningEffortXHighUnsupportedNativeModelMapsToHigh(t *testing.T) {
+	req := buildReq(t, ModelClaudeSonnet46, llm.WithReasoningEffort(llm.ReasoningEffortXHigh))
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "high", req.OutputConfig.Effort)
+}
+
 func TestReasoningBudgetOpus48FallsBackToAdaptive(t *testing.T) {
 	// Opus 4.7/4.8 reject manual budgets; a budget transparently becomes
 	// adaptive thinking so existing callers keep working.
@@ -78,6 +102,14 @@ func TestReasoningEffortLegacyModelMapsToBudget(t *testing.T) {
 	assert.NotNil(t, req.Thinking)
 	assert.Equal(t, "enabled", req.Thinking.Type)
 	assert.Equal(t, 4096, req.Thinking.BudgetTokens)
+	assert.Nil(t, req.OutputConfig)
+}
+
+func TestReasoningEffortMinimalLegacyModelMapsToLowBudget(t *testing.T) {
+	req := buildReq(t, ModelClaude37Sonnet20250219, llm.WithReasoningEffort(llm.ReasoningEffortMinimal))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "enabled", req.Thinking.Type)
+	assert.Equal(t, 1024, req.Thinking.BudgetTokens)
 	assert.Nil(t, req.OutputConfig)
 }
 
