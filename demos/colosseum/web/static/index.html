@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Colosseum — AI Werewolf Replays</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- =================== Header =================== -->
+  <header class="site-header">
+    <div class="brand">
+      <h1 class="title">🏛 The Colosseum</h1>
+      <p class="tagline">Claude vs GPT vs Gemini vs Grok — who lies best?</p>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button class="tab is-active" data-view="replay" role="tab" aria-selected="true">Replay</button>
+      <button class="tab" data-view="leaderboard" role="tab" aria-selected="false">Leaderboard</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- =================== Replay view =================== -->
+    <section id="view-replay" class="view is-active" role="tabpanel">
+      <!-- Top control bar: match picker + reveal toggle -->
+      <div class="replay-toolbar">
+        <div class="match-picker">
+          <label for="match-select" class="picker-label">Match</label>
+          <select id="match-select" aria-label="Select a match"></select>
+        </div>
+
+        <label class="reveal-toggle" title="Unmask every player's hidden chain of thought">
+          <input type="checkbox" id="reveal-toggle">
+          <span class="switch" aria-hidden="true"></span>
+          <span class="reveal-label">🔓 Reveal private reasoning</span>
+        </label>
+      </div>
+
+      <!-- Empty / loading / error states for the whole replay view -->
+      <div id="replay-status" class="status-panel" hidden></div>
+
+      <!-- Main replay layout: feed + sidebar -->
+      <div id="replay-body" class="replay-layout" hidden>
+        <!-- Left column: phase context, scrubber, event feed -->
+        <div class="replay-main">
+          <div class="phase-context" id="phase-context">
+            <span class="phase-round" id="phase-round">—</span>
+          </div>
+
+          <div class="scrubber">
+            <div class="transport">
+              <button id="btn-prev" class="transport-btn" title="Previous step" aria-label="Previous step">⏮</button>
+              <button id="btn-play" class="transport-btn play" title="Play" aria-label="Play">▶</button>
+              <button id="btn-next" class="transport-btn" title="Next step" aria-label="Next step">⏭</button>
+            </div>
+            <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Timeline scrubber">
+            <span class="scrub-counter" id="scrub-counter">0 / 0</span>
+          </div>
+
+          <div id="feed" class="feed" aria-live="polite"></div>
+        </div>
+
+        <!-- Right column: result, roster, highlights, metrics -->
+        <aside class="replay-side">
+          <div id="result-banner" class="result-banner" hidden></div>
+
+          <section class="panel">
+            <h2 class="panel-title">Roster</h2>
+            <ul id="roster" class="roster"></ul>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">Highlights</h2>
+            <div id="highlights" class="highlights"></div>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">Metrics</h2>
+            <div id="metrics" class="metrics"></div>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <!-- =================== Leaderboard view =================== -->
+    <section id="view-leaderboard" class="view" role="tabpanel">
+      <div id="leaderboard-status" class="status-panel" hidden></div>
+      <div id="leaderboard-wrap" class="table-wrap" hidden>
+        <table class="leaderboard" id="leaderboard-table">
+          <thead>
+            <tr id="leaderboard-head"></tr>
+          </thead>
+          <tbody id="leaderboard-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>Built with <a href="https://github.com/deepnoodle-ai/dive" rel="noopener">Dive</a> — a Go library for AI agents.</span>
+  </footer>
+</body>
+</html>
