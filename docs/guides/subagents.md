@@ -75,6 +75,7 @@ Be specific. Reference line numbers. Suggest fixes.
 | `description` | string | When the LLM should use this agent (shown in the tool description) |
 | `model` | string | Optional, provider-agnostic model identifier a custom `AgentFactory` can route on. The built-in factory ignores it. |
 | `tools` | string[] | Allowed tool names. Omit to inherit all parent tools. |
+| `disallowed-tools` | string[] | Tool names to exclude (matched case-insensitively). Applied after `tools`, or to the full inherited set when `tools` is omitted. |
 
 Use `subagent.GeneralPurpose` for a general-purpose agent that inherits the parent's tools, even without custom definitions.
 

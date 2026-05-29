@@ -266,6 +266,37 @@ You are a code reviewer. Analyze the code and provide feedback.`
 		assert.Contains(t, def.Prompt, "code reviewer")
 	})
 
+	t.Run("Load parses disallowed-tools frontmatter", func(t *testing.T) {
+		dir := t.TempDir()
+
+		content := `---
+description: Read-only reviewer
+disallowed-tools:
+  - Edit
+  - Bash
+---
+You review code without modifying it.`
+
+		err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte(content), 0644)
+		assert.NoError(t, err)
+
+		loader := &FileLoader{
+			Directories: []string{dir},
+		}
+
+		defs, err := loader.Load(context.Background())
+		assert.NoError(t, err)
+
+		def := defs["reviewer"]
+		assert.Equal(t, []string{"Edit", "Bash"}, def.DisallowedTools)
+
+		// And it is honored by FilterTools.
+		allTools := []dive.Tool{&mockTool{name: "Read"}, &mockTool{name: "Edit"}, &mockTool{name: "Bash"}}
+		filtered := FilterTools(def, allTools)
+		assert.Equal(t, 1, len(filtered))
+		assert.Equal(t, "Read", filtered[0].Name())
+	})
+
 	t.Run("Load skips non-markdown files", func(t *testing.T) {
 		dir := t.TempDir()
 
