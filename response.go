@@ -74,6 +74,13 @@ type PendingToolCall struct {
 	Prompt   string          `json:"prompt,omitempty"`
 	Reason   SuspendReason   `json:"reason,omitempty"`
 	Metadata map[string]any  `json:"metadata,omitempty"`
+
+	// AwaitingApproval is true when this call was paused by a PreToolUse
+	// hook BEFORE the tool executed (an approval gate, via SuspendForApproval).
+	// The tool has NOT run. Resume it with WithApprovals: approving re-runs the
+	// tool, rejecting injects a denial. Input-required pendings (the tool
+	// returned a SuspendResult) are resumed with WithToolResults instead.
+	AwaitingApproval bool `json:\"awaiting_approval,omitempty\"`
 }
 
 // UnmarshalInput decodes the pending call's Input JSON into the given

@@ -163,6 +163,12 @@ type SuspendResult struct {
 	// types become generic map[string]any. Stick to JSON-friendly values
 	// and expect that loss of type fidelity.
 	Metadata map[string]any `json:"metadata,omitempty"`
+
+	// approval is set internally when this suspend originates from a
+	// PreToolUse approval gate (SuspendForApproval) rather than a tool's own
+	// NewSuspendResult. It drives PendingToolCall.AwaitingApproval and is not
+	// serialized; AwaitingApproval carries the bit across persistence.
+	approval bool
 }
 
 // NewSuspendResult returns a *ToolResult whose Suspend field is set. Use it

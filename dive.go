@@ -131,6 +131,12 @@ type CreateResponseOptions struct {
 	// WithResume rather than assigned directly.
 	Suspension *SuspensionState
 
+	// Approvals resolves approval-gated tool calls on resume (those with
+	// PendingToolCall.AwaitingApproval set). Keys are tool_call IDs; true
+	// approves (the tool is executed), false rejects (a denial is injected).
+	// Set via WithApprovals.
+	Approvals map[string]bool
+
 	// BackgroundHandles and BackgroundResults, when both non-nil, inject
 	// completed background task results as a synthetic user message at the
 	// start of the next generation. Set via WithBackgroundResults.

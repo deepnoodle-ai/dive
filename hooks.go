@@ -127,6 +127,19 @@ type HookContext struct {
 
 	// Iteration is the zero-based iteration number within the generation loop.
 	Iteration int
+
+	// Resume approval (PreToolUse only)
+
+	// Approved is true during a PreToolUse hook when the current tool call
+	// was approved by the caller via WithApprovals on resume. An
+	// approval-gate hook should check this and allow the call through
+	// (return nil) instead of requesting approval again.
+	Approved bool
+
+	// approvedToolCalls is internal plumbing: the set of tool_call IDs the
+	// caller approved on resume. Set on the shared HookContext and consulted
+	// by buildToolHookContext to populate Approved per call.
+	approvedToolCalls map[string]bool
 }
 
 // PreGenerationHook is called before the LLM generation loop begins.
