@@ -11,6 +11,10 @@ import (
 )
 
 func main() {
+	const defaultText = "Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do. " +
+		"Once or twice she had peeped into the book her sister was reading, but it had no pictures or conversations in it. " +
+		"What is the use of a book, thought Alice, without pictures or conversations?"
+
 	var (
 		text               string
 		out                string
@@ -20,7 +24,7 @@ func main() {
 		transcriptionModel string
 		transcribe         bool
 	)
-	flag.StringVar(&text, "text", "Say cheerfully: Welcome to Dive text-to-speech.", "text to synthesize")
+	flag.StringVar(&text, "text", defaultText, "text to synthesize")
 	flag.StringVar(&out, "out", "google-text-to-speech", "output path; extension is added if omitted")
 	flag.StringVar(&voice, "voice", "Kore", "Gemini prebuilt voice name")
 	flag.StringVar(&format, "format", "wav", "audio format: wav or pcm")
