@@ -6,13 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-29
+
 ### Added
 
-- **Latest OpenAI models** — added `gpt-5.5`, `gpt-5.4-mini`,
-  `gpt-5.4-nano`, and `gpt-image-2`; OpenAI defaults now use `gpt-5.5`
-  for text and `gpt-image-2` for image generation. Reasoning effort is now
-  normalized for known OpenAI, Grok, and Anthropic model families without
-  tightening the public `llm.ReasoningEffort` string type.
+- **Text-to-speech and transcription** — new `media.TextToSpeech` and
+  `media.Transcribe` functions backed by `TextToSpeechProvider` /
+  `TranscriptionProvider` interfaces, an `AudioFormat` type
+  (mp3/opus/aac/flac/wav/pcm), and options for voice, voice instructions,
+  speech speed, audio format, language, and transcription prompt. Supported on
+  OpenAI (`gpt-4o-mini-tts`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`,
+  `gpt-4o-transcribe-diarize`, `whisper-1`) and Google
+  (`gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts`,
+  `gemini-3.1-flash-tts-preview`), with new text-to-speech and transcription
+  examples.
+- **Latest OpenAI models** — added `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.4-nano`,
+  and `gpt-image-2`; OpenAI defaults now use `gpt-5.5` for text and
+  `gpt-image-2` for image generation. Reasoning effort is now normalized for
+  known OpenAI, Grok, and Anthropic model families without tightening the
+  public `llm.ReasoningEffort` string type.
 
 ## [1.6.0] - 2026-05-29
 
