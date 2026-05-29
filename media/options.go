@@ -16,6 +16,27 @@ type Config struct {
 	// OutputFormat requests a specific image format (png, jpeg, webp).
 	OutputFormat Format
 
+	// AudioFormat requests a specific audio output format.
+	AudioFormat AudioFormat
+
+	// AudioMIMEType hints the MIME type of input audio bytes.
+	AudioMIMEType string
+
+	// Voice selects the voice for speech generation.
+	Voice string
+
+	// SpeechInstructions controls voice style for speech generation when supported.
+	SpeechInstructions string
+
+	// SpeechSpeed controls generated speech speed when supported.
+	SpeechSpeed *float64
+
+	// Language sets the transcription or speech language when supported.
+	Language string
+
+	// TranscriptionPrompt gives recognition models context for transcription.
+	TranscriptionPrompt string
+
 	// Count is the number of images to generate per model.
 	Count int
 
@@ -68,6 +89,55 @@ func WithAspectRatio(ar AspectRatio) Option {
 func WithOutputFormat(f Format) Option {
 	return func(c *Config) {
 		c.OutputFormat = f
+	}
+}
+
+// WithAudioFormat sets the desired audio output format.
+func WithAudioFormat(f AudioFormat) Option {
+	return func(c *Config) {
+		c.AudioFormat = f
+	}
+}
+
+// WithAudioMIMEType sets the MIME type for input audio bytes.
+func WithAudioMIMEType(mimeType string) Option {
+	return func(c *Config) {
+		c.AudioMIMEType = mimeType
+	}
+}
+
+// WithVoice sets the voice for speech generation.
+func WithVoice(voice string) Option {
+	return func(c *Config) {
+		c.Voice = voice
+	}
+}
+
+// WithSpeechInstructions sets style instructions for speech generation.
+func WithSpeechInstructions(instructions string) Option {
+	return func(c *Config) {
+		c.SpeechInstructions = instructions
+	}
+}
+
+// WithSpeechSpeed sets the generated speech speed when supported.
+func WithSpeechSpeed(speed float64) Option {
+	return func(c *Config) {
+		c.SpeechSpeed = &speed
+	}
+}
+
+// WithLanguage sets the language for transcription or speech generation.
+func WithLanguage(language string) Option {
+	return func(c *Config) {
+		c.Language = language
+	}
+}
+
+// WithTranscriptionPrompt gives recognition models context for transcription.
+func WithTranscriptionPrompt(prompt string) Option {
+	return func(c *Config) {
+		c.TranscriptionPrompt = prompt
 	}
 }
 

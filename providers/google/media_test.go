@@ -3,10 +3,12 @@ package google
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/media"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"google.golang.org/genai"
 )
 
 func TestGoogleImageMatcher(t *testing.T) {
@@ -31,6 +33,40 @@ func TestGoogleVideoMatcher(t *testing.T) {
 	assert.True(t, matcher("veo-2-generate-preview"))
 	assert.True(t, !matcher("sora-2"))
 	assert.True(t, !matcher("gemini-3.1-flash-image-preview"))
+}
+
+func TestGoogleSpeechMatcher(t *testing.T) {
+	matcher := func(model string) bool {
+		lower := strings.ToLower(model)
+		return strings.HasPrefix(lower, "gemini-") && strings.Contains(lower, "tts")
+	}
+	assert.True(t, matcher("gemini-3.1-flash-tts-preview"))
+	assert.True(t, matcher("gemini-2.5-flash-preview-tts"))
+	assert.True(t, matcher("gemini-2.5-pro-preview-tts"))
+	assert.True(t, !matcher("gemini-2.5-flash"))
+	assert.True(t, !matcher("gpt-4o-mini-tts"))
+}
+
+func TestGoogleSpeechRecognitionMatcher(t *testing.T) {
+	matcher := media.PrefixMatcher("gemini-")
+	assert.True(t, matcher("gemini-2.5-flash"))
+	assert.True(t, matcher("gemini-3.1-flash-lite"))
+	assert.True(t, !matcher("gpt-4o-transcribe"))
+}
+
+func TestFirstInlineAudio(t *testing.T) {
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{{
+			Content: &genai.Content{
+				Parts: []*genai.Part{genai.NewPartFromBytes([]byte{1, 2, 3}, "audio/pcm")},
+			},
+		}},
+	}
+
+	data, mimeType, err := firstInlineAudio(resp)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{1, 2, 3}, data)
+	assert.Equal(t, "audio/pcm", mimeType)
 }
 
 func TestMediaProviderOptions(t *testing.T) {
@@ -121,4 +157,38 @@ func TestGoogleGenerateVideo_Integration(t *testing.T) {
 	assert.True(t, len(result.Data) > 0)
 	assert.Equal(t, "veo-3.1-generate-preview", result.Model)
 	assert.Equal(t, "mp4", result.Format)
+}
+
+func TestGoogleGenerateSpeech_Integration(t *testing.T) {
+	requireGoogleMediaIntegration(t)
+
+	p := NewMediaProvider()
+	config := &media.Config{
+		Model:       "gemini-3.1-flash-tts-preview",
+		Voice:       "Kore",
+		AudioFormat: media.AudioFormatWAV,
+	}
+	result, err := p.GenerateSpeech(context.Background(), "Say cheerfully: Hello from Dive.", config)
+	assert.NoError(t, err)
+	assert.True(t, len(result.Data) > 0)
+	assert.Equal(t, media.AudioFormatWAV, result.Format)
+}
+
+func TestGoogleTranscribeSpeech_Integration(t *testing.T) {
+	requireGoogleMediaIntegration(t)
+
+	speech, err := NewMediaProvider().GenerateSpeech(context.Background(), "This is a Dive transcription test.", &media.Config{
+		Model:       "gemini-3.1-flash-tts-preview",
+		Voice:       "Kore",
+		AudioFormat: media.AudioFormatWAV,
+	})
+	assert.NoError(t, err)
+
+	p := NewMediaProvider()
+	result, err := p.TranscribeSpeech(context.Background(), speech.Data, &media.Config{
+		Model:         "gemini-3.5-flash",
+		AudioMIMEType: "audio/wav",
+	})
+	assert.NoError(t, err)
+	assert.Contains(t, result.Text, "Dive")
 }

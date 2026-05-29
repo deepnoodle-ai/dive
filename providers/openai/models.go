@@ -28,6 +28,15 @@ const (
 	ModelGPTImage1         = "gpt-image-1"
 	ModelGPTImage1Mini     = "gpt-image-1-mini"
 
+	// Speech models
+	ModelGPT4oMiniTTS                = "gpt-4o-mini-tts"
+	ModelGPT4oMiniTTS20251215        = "gpt-4o-mini-tts-2025-12-15"
+	ModelGPT4oTranscribe             = "gpt-4o-transcribe"
+	ModelGPT4oMiniTranscribe         = "gpt-4o-mini-transcribe"
+	ModelGPT4oMiniTranscribe20251215 = "gpt-4o-mini-transcribe-2025-12-15"
+	ModelGPT4oTranscribeDiarize      = "gpt-4o-transcribe-diarize"
+	ModelWhisper1                    = "whisper-1"
+
 	// o-series reasoning models
 	ModelO3                 = "o3"
 	ModelO3Pro              = "o3-pro"

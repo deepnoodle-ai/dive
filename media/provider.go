@@ -23,3 +23,15 @@ type VideoProvider interface {
 	// The call blocks until generation is complete or ctx is cancelled.
 	GenerateVideo(ctx context.Context, prompt string, config *Config) (*VideoResult, error)
 }
+
+// SpeechProvider generates spoken audio from text.
+type SpeechProvider interface {
+	// GenerateSpeech generates audio from text.
+	GenerateSpeech(ctx context.Context, text string, config *Config) (*AudioResult, error)
+}
+
+// SpeechRecognitionProvider transcribes speech audio into text.
+type SpeechRecognitionProvider interface {
+	// TranscribeSpeech transcribes audio bytes into text.
+	TranscribeSpeech(ctx context.Context, audio []byte, config *Config) (*TranscriptionResult, error)
+}

@@ -13,8 +13,8 @@ import (
 	"github.com/deepnoodle-ai/dive/media"
 )
 
-// MediaProvider generates images and videos using Google's GenAI SDK.
-// Supports Gemini image models, Imagen models, and Veo video models.
+// MediaProvider generates images, videos, speech, and transcriptions using Google's GenAI SDK.
+// Supports Gemini image/audio models, Imagen models, and Veo video models.
 type MediaProvider struct {
 	apiKey         string
 	vertexAI       bool
@@ -357,9 +357,167 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 	return result, nil
 }
 
+// GenerateSpeech implements media.SpeechProvider.
+func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config *media.Config) (*media.AudioResult, error) {
+	if _, err := p.ensureClient(ctx); err != nil {
+		return nil, err
+	}
+
+	model := config.Model
+	if model == "" {
+		model = "gemini-3.1-flash-tts-preview"
+	}
+
+	format := config.AudioFormat
+	if format == "" {
+		format = media.AudioFormatWAV
+	}
+	if err := media.ValidateAudioFormat(format); err != nil {
+		return nil, err
+	}
+	if format != media.AudioFormatWAV && format != media.AudioFormatPCM {
+		return nil, fmt.Errorf("google speech generation supports wav or pcm output, got %q", format)
+	}
+
+	voice := config.Voice
+	if voice == "" {
+		voice = "Kore"
+	}
+
+	prompt := text
+	if config.SpeechInstructions != "" {
+		prompt = config.SpeechInstructions + "\n\n" + text
+	}
+
+	genConfig := &genai.GenerateContentConfig{
+		ResponseModalities: []string{"AUDIO"},
+		SpeechConfig: &genai.SpeechConfig{
+			VoiceConfig: &genai.VoiceConfig{
+				PrebuiltVoiceConfig: &genai.PrebuiltVoiceConfig{
+					VoiceName: voice,
+				},
+			},
+			LanguageCode: config.Language,
+		},
+	}
+
+	resp, err := p.client.Models.GenerateContent(ctx, model, genai.Text(prompt), genConfig)
+	if err != nil {
+		return nil, fmt.Errorf("gemini speech generation: %w", err)
+	}
+
+	audioData, mimeType, err := firstInlineAudio(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	rawMIMEType := mimeType
+	if format == media.AudioFormatPCM {
+		mimeType = media.AudioFormatPCM.MIMEType()
+	} else if media.DetectAudioMIMEFromBytes(audioData) != media.AudioFormatWAV.MIMEType() {
+		audioData = media.PCMToWAV(audioData, 24000, 1, 16)
+		mimeType = media.AudioFormatWAV.MIMEType()
+	} else {
+		mimeType = media.AudioFormatWAV.MIMEType()
+	}
+
+	result := &media.AudioResult{
+		Data:     audioData,
+		Model:    model,
+		Format:   format,
+		MimeType: mimeType,
+		Metadata: map[string]any{
+			"provider": "google",
+			"voice":    voice,
+		},
+	}
+	if rawMIMEType != "" {
+		result.Metadata["raw_mime_type"] = rawMIMEType
+	}
+	result.SetAudioFormat(mimeType)
+	return result, nil
+}
+
+// TranscribeSpeech implements media.SpeechRecognitionProvider.
+func (p *MediaProvider) TranscribeSpeech(ctx context.Context, audio []byte, config *media.Config) (*media.TranscriptionResult, error) {
+	if len(audio) == 0 {
+		return nil, fmt.Errorf("audio data is required for transcription")
+	}
+	if _, err := p.ensureClient(ctx); err != nil {
+		return nil, err
+	}
+
+	model := config.Model
+	if model == "" {
+		model = "gemini-3.5-flash"
+	}
+
+	mimeType := config.AudioMIMEType
+	if mimeType == "" {
+		mimeType = media.DetectAudioMIMEFromBytes(audio)
+	}
+
+	prompt := config.TranscriptionPrompt
+	if prompt == "" {
+		prompt = "Generate a transcript of the speech."
+	}
+	if config.Language != "" {
+		prompt += " Use language code " + config.Language + " when applicable."
+	}
+
+	parts := []*genai.Part{
+		genai.NewPartFromText(prompt),
+		genai.NewPartFromBytes(audio, mimeType),
+	}
+	resp, err := p.client.Models.GenerateContent(ctx, model, []*genai.Content{
+		genai.NewContentFromParts(parts, genai.RoleUser),
+	}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("gemini speech transcription: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("empty response from gemini")
+	}
+
+	text := strings.TrimSpace(resp.Text())
+	if text == "" {
+		return nil, fmt.Errorf("no transcript in gemini response")
+	}
+
+	return &media.TranscriptionResult{
+		Text:     text,
+		Model:    model,
+		Language: config.Language,
+		Metadata: map[string]any{
+			"provider":  "google",
+			"mime_type": mimeType,
+		},
+	}, nil
+}
+
+func firstInlineAudio(resp *genai.GenerateContentResponse) ([]byte, string, error) {
+	if resp == nil || len(resp.Candidates) == 0 {
+		return nil, "", fmt.Errorf("empty response from gemini")
+	}
+	for _, candidate := range resp.Candidates {
+		if candidate.Content == nil {
+			continue
+		}
+		for _, part := range candidate.Content.Parts {
+			if part.InlineData == nil || len(part.InlineData.Data) == 0 || part.Thought {
+				continue
+			}
+			return part.InlineData.Data, part.InlineData.MIMEType, nil
+		}
+	}
+	return nil, "", fmt.Errorf("no audio in gemini response")
+}
+
 // Compile-time interface checks.
 var (
-	_ media.ImageProvider = (*MediaProvider)(nil)
-	_ media.ImageEditor   = (*MediaProvider)(nil)
-	_ media.VideoProvider = (*MediaProvider)(nil)
+	_ media.ImageProvider             = (*MediaProvider)(nil)
+	_ media.ImageEditor               = (*MediaProvider)(nil)
+	_ media.VideoProvider             = (*MediaProvider)(nil)
+	_ media.SpeechProvider            = (*MediaProvider)(nil)
+	_ media.SpeechRecognitionProvider = (*MediaProvider)(nil)
 )
