@@ -113,17 +113,38 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 
 ### Settings Reference
 
-| Setting             | Type              | Description                             |
-| ------------------- | ----------------- | --------------------------------------- |
-| `Temperature`       | `*float64`        | Creativity vs consistency (0.0-1.0)     |
-| `MaxTokens`         | `*int`            | Maximum response length                 |
-| `PresencePenalty`   | `*float64`        | Reduce repetition                       |
-| `FrequencyPenalty`  | `*float64`        | Encourage topic variety                 |
-| `ReasoningBudget`   | `*int`            | Tokens for reasoning (o-series, Claude) |
-| `ReasoningEffort`   | `string`          | low, medium, high                       |
-| `Caching`           | `*bool`           | Enable prompt caching (Claude)          |
-| `ParallelToolCalls` | `*bool`           | Allow simultaneous tool calls           |
-| `ToolChoice`        | `*llm.ToolChoice` | auto, any, none, or specific tool       |
+| Setting             | Type                  | Description                                      |
+| ------------------- | --------------------- | ------------------------------------------------ |
+| `Temperature`       | `*float64`            | Creativity vs consistency (0.0-1.0)              |
+| `MaxTokens`         | `*int`                | Maximum response length                          |
+| `PresencePenalty`   | `*float64`            | Reduce repetition                                |
+| `FrequencyPenalty`  | `*float64`            | Encourage topic variety                          |
+| `ReasoningBudget`   | `*int`                | Manual thinking budget (o-series, older Claude)  |
+| `ReasoningEffort`   | `llm.ReasoningEffort` | low, medium, high, xhigh, max (Claude Opus 4.6+) |
+| `Thinking`          | `llm.ThinkingType`    | adaptive, enabled, or disabled extended thinking |
+| `ThinkingDisplay`   | `llm.ThinkingDisplay` | summarized or omitted thinking content           |
+| `Speed`             | `llm.Speed`           | fast or standard (Claude fast mode)              |
+| `Caching`           | `*bool`               | Enable prompt caching (Claude)                   |
+| `ParallelToolCalls` | `*bool`               | Allow simultaneous tool calls                    |
+| `ToolChoice`        | `*llm.ToolChoice`     | auto, any, none, or specific tool                |
+
+### Reasoning on Claude Opus 4.7 / 4.8
+
+Opus 4.7 and 4.8 support **only adaptive thinking** — the model decides when and
+how much to think — and reject manual `budget_tokens`. Use the `effort`
+parameter to guide depth:
+
+```go
+ModelSettings: &dive.ModelSettings{
+    ReasoningEffort: llm.ReasoningEffortXHigh,   // -> output_config.effort
+    Thinking:        llm.ThinkingTypeAdaptive,   // -> thinking: {type: adaptive}
+}
+```
+
+`WithReasoningBudget` still works against these models for backward
+compatibility — it transparently falls back to adaptive thinking. Fast mode
+(`Speed: llm.SpeedFast`) requires fast-mode access on your account and applies
+the `fast-mode-2026-02-01` beta header automatically.
 
 ## Provider Registry
 

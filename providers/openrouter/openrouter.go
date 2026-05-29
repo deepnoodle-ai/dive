@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	DefaultModel     = ModelClaudeOpus46
+	DefaultModel     = ModelClaudeOpus48
 	DefaultEndpoint  = "https://openrouter.ai/api/v1/chat/completions"
 	DefaultMaxTokens = 32768
 	DefaultClient    = &http.Client{Timeout: 300 * time.Second}

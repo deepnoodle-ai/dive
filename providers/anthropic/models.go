@@ -24,4 +24,10 @@ const (
 	// Claude 4.6 models
 	ModelClaudeSonnet46 = "claude-sonnet-4-6"
 	ModelClaudeOpus46   = "claude-opus-4-6"
+
+	// Claude 4.7 models
+	ModelClaudeOpus47 = "claude-opus-4-7"
+
+	// Claude 4.8 models (latest)
+	ModelClaudeOpus48 = "claude-opus-4-8"
 )

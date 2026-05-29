@@ -16,6 +16,8 @@ type modelInfo struct {
 // More specific patterns must appear before broader ones.
 var modelCatalog = []modelInfo{
 	// Anthropic models
+	{"claude-opus-4-8", "Opus 4.8", 1_000_000},
+	{"claude-opus-4-7", "Opus 4.7", 1_000_000},
 	{"claude-opus-4-6", "Opus 4.6", 1_000_000},
 	{"claude-opus-4-5", "Opus 4.5", 1_000_000},
 	{"claude-opus-4", "", 1_000_000},
@@ -32,6 +34,7 @@ var modelCatalog = []modelInfo{
 	{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", 1_000_000},
 	{"gemini-3.1-pro", "Gemini 3.1 Pro", 1_000_000},
 	{"gemini-3.1-flash", "Gemini 3.1 Flash", 1_000_000},
+	{"gemini-3.5-flash", "Gemini 3.5 Flash", 1_000_000},
 	{"gemini-3-flash-preview", "Gemini 3 Flash", 1_000_000},
 	{"gemini-3-flash", "Gemini 3 Flash", 1_000_000},
 	{"gemini-3", "", 1_000_000},
@@ -60,8 +63,10 @@ var modelCatalog = []modelInfo{
 	{"o3", "o3", 200_000},
 
 	// Grok models
-	{"grok-4.20-0309-reasoning", "Grok 4.20", 131_072},
-	{"grok-4.20", "Grok 4.20", 131_072},
+	{"grok-4.3", "Grok 4.3", 1_000_000},
+	{"grok-build-0.1", "Grok Build", 256_000},
+	{"grok-4.20-0309-reasoning", "Grok 4.20", 1_000_000},
+	{"grok-4.20", "Grok 4.20", 1_000_000},
 	{"grok-4-1-fast", "Grok 4.1 Fast", 131_072},
 	{"grok-4", "Grok 4", 131_072},
 	{"grok-3-mini", "Grok 3 Mini", 131_072},
@@ -126,7 +131,7 @@ var providerCatalog = []providerInfo{
 		Name:    "Anthropic",
 		EnvVars: []string{"ANTHROPIC_API_KEY"},
 		Models: []modelChoice{
-			{"claude-opus-4-6", "Opus 4.6", "Most capable for complex work"},
+			{"claude-opus-4-8", "Opus 4.8", "Most capable for complex work"},
 			{"claude-sonnet-4-6", "Sonnet 4.6", "Best for everyday tasks"},
 			{"claude-haiku-4-5", "Haiku 4.5", "Fastest for quick answers"},
 		},
@@ -137,7 +142,7 @@ var providerCatalog = []providerInfo{
 		Models: []modelChoice{
 			{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Google's latest flagship model"},
 			{"gemini-2.5-pro", "Gemini 2.5 Pro", "Strong all-around model"},
-			{"gemini-2.5-flash", "Gemini 2.5 Flash", "Fast and efficient"},
+			{"gemini-3.5-flash", "Gemini 3.5 Flash", "Frontier intelligence at high speed"},
 		},
 	},
 	{
@@ -153,8 +158,9 @@ var providerCatalog = []providerInfo{
 		Name:    "Grok",
 		EnvVars: []string{"XAI_API_KEY", "GROK_API_KEY"},
 		Models: []modelChoice{
-			{"grok-4.20-0309-reasoning", "Grok 4.20", "xAI's latest reasoning model"},
-			{"grok-4", "Grok 4", "Strong general-purpose model"},
+			{"grok-4.3", "Grok 4.3", "xAI's most intelligent and fastest model"},
+			{"grok-4.20-0309-reasoning", "Grok 4.20", "Reasoning model with 1M context"},
+			{"grok-build-0.1", "Grok Build", "Optimized for coding tasks"},
 		},
 	},
 	{

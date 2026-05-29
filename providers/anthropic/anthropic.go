@@ -19,7 +19,7 @@ import (
 const ProviderName = "anthropic"
 
 var (
-	DefaultModel         = ModelClaudeOpus46
+	DefaultModel         = ModelClaudeOpus48
 	DefaultEndpoint      = "https://api.anthropic.com/v1/messages"
 	DefaultMaxTokens     = 32768
 	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
@@ -333,33 +333,12 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.MaxTokens = &p.maxTokens
 	}
 
-	if config.ReasoningBudget != nil {
-		budget := *config.ReasoningBudget
-		if budget < 1024 {
-			return fmt.Errorf("reasoning budget must be at least 1024")
-		}
-		req.Thinking = &Thinking{
-			Type:         "enabled",
-			BudgetTokens: budget,
-		}
+	if err := applyReasoningConfig(req, config); err != nil {
+		return err
 	}
 
-	// Compatibility with the OpenAI "effort" parameter
-	if config.ReasoningEffort != "" {
-		if req.Thinking != nil {
-			return fmt.Errorf("cannot set both reasoning budget and effort")
-		}
-		req.Thinking = &Thinking{Type: "enabled"}
-		switch config.ReasoningEffort {
-		case llm.ReasoningEffortLow:
-			req.Thinking.BudgetTokens = 1024
-		case llm.ReasoningEffortMedium:
-			req.Thinking.BudgetTokens = 4096
-		case llm.ReasoningEffortHigh:
-			req.Thinking.BudgetTokens = 16384
-		default:
-			return fmt.Errorf("invalid reasoning effort: %s", config.ReasoningEffort)
-		}
+	if config.Speed != "" {
+		req.Speed = string(config.Speed)
 	}
 
 	if len(config.Tools) > 0 {
@@ -411,6 +390,126 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	return nil
 }
 
+// applyReasoningConfig maps Dive's reasoning/thinking options onto the Anthropic
+// request, accounting for per-model differences:
+//   - Opus 4.5+ and Sonnet 4.6 take the native effort parameter via
+//     output_config; older models emulate effort with a thinking budget.
+//   - Opus 4.6/4.7/4.8 and Sonnet 4.6 support adaptive thinking. Opus 4.7/4.8
+//     reject manual budgets, so a budget set against them transparently falls
+//     back to adaptive thinking.
+func applyReasoningConfig(req *Request, config *llm.Config) error {
+	model := req.Model
+
+	thinking, err := resolveThinking(model, config)
+	if err != nil {
+		return err
+	}
+
+	if config.ReasoningEffort != "" {
+		if modelSupportsEffortParam(model) {
+			req.OutputConfig = &OutputConfig{Effort: string(config.ReasoningEffort)}
+		} else {
+			// Legacy: emulate the effort parameter with a thinking budget.
+			// This model lacks the native effort parameter, so honoring effort
+			// here would re-enable thinking — don't silently override an
+			// explicit disable.
+			if config.Thinking == llm.ThinkingTypeDisabled {
+				return fmt.Errorf("cannot set reasoning effort with thinking disabled on model %s: it has no native effort parameter and effort is emulated with a thinking budget", model)
+			}
+			if thinking != nil && config.ReasoningBudget != nil {
+				return fmt.Errorf("cannot set both reasoning budget and effort on model %s", model)
+			}
+			budget, err := legacyEffortBudget(config.ReasoningEffort)
+			if err != nil {
+				return err
+			}
+			thinking = &Thinking{Type: "enabled", BudgetTokens: budget}
+		}
+	}
+
+	if thinking != nil {
+		if config.ThinkingDisplay != "" {
+			thinking.Display = string(config.ThinkingDisplay)
+		}
+		req.Thinking = thinking
+	}
+	return nil
+}
+
+// resolveThinking determines the thinking configuration from the budget and
+// explicit thinking-type options, independent of the effort parameter.
+func resolveThinking(model string, config *llm.Config) (*Thinking, error) {
+	adaptiveOnly := modelRejectsManualThinking(model) // Opus 4.7/4.8
+
+	switch config.Thinking {
+	case llm.ThinkingTypeDisabled:
+		return nil, nil
+	case llm.ThinkingTypeAdaptive:
+		return &Thinking{Type: "adaptive"}, nil
+	case llm.ThinkingTypeEnabled:
+		if adaptiveOnly {
+			return &Thinking{Type: "adaptive"}, nil
+		}
+		if config.ReasoningBudget == nil {
+			return nil, fmt.Errorf("thinking type %q requires a reasoning budget; use WithReasoningBudget or WithAdaptiveThinking", llm.ThinkingTypeEnabled)
+		}
+		// Budget provided: handled by the block below.
+	}
+
+	if config.ReasoningBudget != nil {
+		budget := *config.ReasoningBudget
+		if budget < 1024 {
+			return nil, fmt.Errorf("reasoning budget must be at least 1024")
+		}
+		if adaptiveOnly {
+			if config.Logger != nil {
+				config.Logger.Warn("model does not support manual thinking budgets; using adaptive thinking",
+					"model", model)
+			}
+			return &Thinking{Type: "adaptive"}, nil
+		}
+		return &Thinking{Type: "enabled", BudgetTokens: budget}, nil
+	}
+
+	return nil, nil
+}
+
+// legacyEffortBudget maps a reasoning effort level to a thinking token budget
+// for older models that lack the native effort parameter.
+func legacyEffortBudget(effort llm.ReasoningEffort) (int, error) {
+	switch effort {
+	case llm.ReasoningEffortLow:
+		return 1024, nil
+	case llm.ReasoningEffortMedium:
+		return 4096, nil
+	case llm.ReasoningEffortHigh, llm.ReasoningEffortXHigh, llm.ReasoningEffortMax:
+		return 16384, nil
+	default:
+		return 0, fmt.Errorf("invalid reasoning effort: %s", effort)
+	}
+}
+
+// modelSupportsEffortParam reports whether the model accepts the native
+// output_config.effort parameter (Opus 4.5+ and Sonnet 4.6).
+func modelSupportsEffortParam(model string) bool {
+	switch {
+	case strings.HasPrefix(model, "claude-opus-4-5"),
+		strings.HasPrefix(model, "claude-opus-4-6"),
+		strings.HasPrefix(model, "claude-opus-4-7"),
+		strings.HasPrefix(model, "claude-opus-4-8"),
+		strings.HasPrefix(model, "claude-sonnet-4-6"):
+		return true
+	}
+	return false
+}
+
+// modelRejectsManualThinking reports whether the model rejects manual extended
+// thinking budgets and supports only adaptive thinking (Opus 4.7 and 4.8).
+func modelRejectsManualThinking(model string) bool {
+	return strings.HasPrefix(model, "claude-opus-4-7") ||
+		strings.HasPrefix(model, "claude-opus-4-8")
+}
+
 // createRequest creates an HTTP request with appropriate headers for Anthropic API calls
 func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.Config, isStreaming bool) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", p.endpoint, bytes.NewBuffer(body))
@@ -454,6 +553,10 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 
 	if config.IsFeatureEnabled(FeatureContext1M) {
 		betaFeatures = append(betaFeatures, FeatureContext1M)
+	}
+
+	if config.Speed == llm.SpeedFast || config.IsFeatureEnabled(FeatureFastMode) {
+		betaFeatures = append(betaFeatures, FeatureFastMode)
 	}
 
 	if config.IsFeatureEnabled(FeatureCompact) {

@@ -1,6 +1,4 @@
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
-github.com/deepnoodle-ai/wonton v0.0.29 h1:ypjEoD8gUCvQwjJ1O8d8FZRlXWsxM68BYyFoa2OxtI0=
-github.com/deepnoodle-ai/wonton v0.0.29/go.mod h1:oyogeHwAHPrVxZ7jtik55Jnj6CwC1jkF+PfHpCRlUGA=
 github.com/deepnoodle-ai/wonton v0.0.34 h1:0jE1KtbwZkKPuoxnV0CdYWrQdnYO+r3O3jWnFvZgV40=
 github.com/deepnoodle-ai/wonton v0.0.34/go.mod h1:rQ484HIdk0XfBACtcBuLDMTfn3keow1DspiXZv4IlL8=
 github.com/gobwas/glob v0.2.3 h1:A4xDbljILXROh+kObIiy5kIaPYD8e96x1tgBhUI5J+Y=

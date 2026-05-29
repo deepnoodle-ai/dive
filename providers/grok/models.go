@@ -1,10 +1,16 @@
 package grok
 
 const (
-	// Grok 4.20 models (latest, 2M context)
+	// Grok 4.3 (latest, most intelligent and fastest, 1M context)
+	ModelGrok43 = "grok-4.3"
+
+	// Grok 4.20 models (1M context)
 	ModelGrok420Reasoning    = "grok-4.20-0309-reasoning"
 	ModelGrok420NonReasoning = "grok-4.20-0309-non-reasoning"
 	ModelGrok420MultiAgent   = "grok-4.20-multi-agent-0309"
+
+	// Grok coding model (256K context)
+	ModelGrokBuild01 = "grok-build-0.1"
 
 	// Grok 4.1 models (2M context)
 	ModelGrok41FastReasoning    = "grok-4-1-fast-reasoning"
@@ -26,8 +32,9 @@ const (
 	ModelGrokCodeFast1 = "grok-code-fast-1"
 
 	// Image generation models
-	ModelImagineImagePro = "grok-imagine-image-pro"
-	ModelImagineImage    = "grok-imagine-image"
+	ModelImagineImagePro     = "grok-imagine-image-pro"
+	ModelImagineImage        = "grok-imagine-image"
+	ModelImagineImageQuality = "grok-imagine-image-quality"
 
 	// Video generation model
 	ModelImagineVideo = "grok-imagine-video"

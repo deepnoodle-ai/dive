@@ -6,6 +6,9 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	// Speed indicates which inference speed served the request, either "fast"
+	// or "standard". Populated by Anthropic when fast mode is requested.
+	Speed string `json:"speed,omitempty"`
 }
 
 // Copy returns a deep copy of the usage data.
@@ -15,6 +18,7 @@ func (u *Usage) Copy() *Usage {
 		OutputTokens:             u.OutputTokens,
 		CacheCreationInputTokens: u.CacheCreationInputTokens,
 		CacheReadInputTokens:     u.CacheReadInputTokens,
+		Speed:                    u.Speed,
 	}
 }
 

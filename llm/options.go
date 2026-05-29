@@ -24,6 +24,9 @@ type Config struct {
 	ReasoningBudget    *int                     `json:"reasoning_budget,omitempty"`
 	ReasoningEffort    ReasoningEffort          `json:"reasoning_effort,omitempty"`
 	ReasoningSummary   ReasoningSummary         `json:"reasoning_summary,omitempty"`
+	Thinking           ThinkingType             `json:"thinking,omitempty"`
+	ThinkingDisplay    ThinkingDisplay          `json:"thinking_display,omitempty"`
+	Speed              Speed                    `json:"speed,omitempty"`
 	ContextManagement  *ContextManagementConfig `json:"context_management,omitempty"`
 	Tools              []Tool                   `json:"tools,omitempty"`
 	ToolChoice         *ToolChoice              `json:"tool_choice,omitempty"`
@@ -196,19 +199,31 @@ func WithReasoningBudget(reasoningBudget int) Option {
 }
 
 // ReasoningEffort defines the effort level for reasoning aka extended thinking.
+// It controls how eagerly the model spends tokens on a response, including
+// thinking, tool calls, and text. Not all providers support all levels:
+// ReasoningEffortXHigh and ReasoningEffortMax are Anthropic-specific (Opus 4.6+).
 type ReasoningEffort string
 
 const (
 	ReasoningEffortLow    ReasoningEffort = "low"
 	ReasoningEffortMedium ReasoningEffort = "medium"
 	ReasoningEffortHigh   ReasoningEffort = "high"
+	// ReasoningEffortXHigh requests extended capability for long-horizon work.
+	// Supported on Claude Opus 4.7 and 4.8.
+	ReasoningEffortXHigh ReasoningEffort = "xhigh"
+	// ReasoningEffortMax requests the absolute maximum capability with no
+	// constraints on token spend. Supported on Claude Opus 4.6, 4.7, 4.8 and
+	// Sonnet 4.6.
+	ReasoningEffortMax ReasoningEffort = "max"
 )
 
 // IsValid returns true if the reasoning effort is a known, valid value.
 func (r ReasoningEffort) IsValid() bool {
 	return r == ReasoningEffortLow ||
 		r == ReasoningEffortMedium ||
-		r == ReasoningEffortHigh
+		r == ReasoningEffortHigh ||
+		r == ReasoningEffortXHigh ||
+		r == ReasoningEffortMax
 }
 
 // WithReasoningEffort sets the reasoning effort for the interaction.
@@ -231,6 +246,77 @@ const (
 func WithReasoningSummary(reasoningSummary ReasoningSummary) Option {
 	return func(config *Config) {
 		config.ReasoningSummary = reasoningSummary
+	}
+}
+
+// ThinkingType controls the extended thinking mode used by the model.
+type ThinkingType string
+
+const (
+	// ThinkingTypeAdaptive lets the model decide when and how much to think
+	// based on request complexity. Recommended for Claude Opus 4.6+ and
+	// Sonnet 4.6, and the only supported thinking mode on Opus 4.7 and 4.8.
+	// Combine with WithReasoningEffort to guide thinking depth.
+	ThinkingTypeAdaptive ThinkingType = "adaptive"
+	// ThinkingTypeEnabled requests manual extended thinking with a fixed token
+	// budget (see WithReasoningBudget). Not supported on Opus 4.7 and 4.8.
+	ThinkingTypeEnabled ThinkingType = "enabled"
+	// ThinkingTypeDisabled explicitly turns thinking off.
+	ThinkingTypeDisabled ThinkingType = "disabled"
+)
+
+// ThinkingDisplay controls how thinking content is returned in responses.
+type ThinkingDisplay string
+
+const (
+	// ThinkingDisplaySummarized returns a summary of the model's thinking. This
+	// is the default on Claude Opus 4.6 and earlier 4.x models.
+	ThinkingDisplaySummarized ThinkingDisplay = "summarized"
+	// ThinkingDisplayOmitted returns thinking blocks with an empty thinking
+	// field (the encrypted signature is still present for multi-turn
+	// continuity). This is the default on Claude Opus 4.7 and 4.8 and reduces
+	// time-to-first text token when streaming.
+	ThinkingDisplayOmitted ThinkingDisplay = "omitted"
+)
+
+// WithThinking sets the extended thinking mode for the interaction.
+func WithThinking(thinking ThinkingType) Option {
+	return func(config *Config) {
+		config.Thinking = thinking
+	}
+}
+
+// WithAdaptiveThinking enables adaptive thinking, where the model decides when
+// and how much to think. Equivalent to WithThinking(ThinkingTypeAdaptive).
+func WithAdaptiveThinking() Option {
+	return func(config *Config) {
+		config.Thinking = ThinkingTypeAdaptive
+	}
+}
+
+// WithThinkingDisplay controls how thinking content is returned in responses.
+func WithThinkingDisplay(display ThinkingDisplay) Option {
+	return func(config *Config) {
+		config.ThinkingDisplay = display
+	}
+}
+
+// Speed controls the inference speed of the model.
+type Speed string
+
+const (
+	// SpeedFast requests fast mode: significantly higher output tokens per
+	// second at premium pricing. Anthropic research preview; supported on
+	// Claude Opus 4.6, 4.7, and 4.8 (requires fast-mode access).
+	SpeedFast Speed = "fast"
+	// SpeedStandard requests standard inference speed (the default).
+	SpeedStandard Speed = "standard"
+)
+
+// WithSpeed sets the inference speed for the interaction.
+func WithSpeed(speed Speed) Option {
+	return func(config *Config) {
+		config.Speed = speed
 	}
 }
 

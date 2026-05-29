@@ -25,7 +25,7 @@ func TestProvider_Name(t *testing.T) {
 }
 
 func TestProvider_DefaultModel(t *testing.T) {
-	assert.Equal(t, ModelGrok420Reasoning, DefaultModel)
+	assert.Equal(t, ModelGrok43, DefaultModel)
 }
 
 func TestProvider_GetAPIKey(t *testing.T) {

@@ -16,6 +16,9 @@ type ModelSettings struct {
 	MaxTokens         *int
 	ReasoningBudget   *int
 	ReasoningEffort   llm.ReasoningEffort
+	Thinking          llm.ThinkingType
+	ThinkingDisplay   llm.ThinkingDisplay
+	Speed             llm.Speed
 	ToolChoice        *llm.ToolChoice
 	Features          []string
 	RequestHeaders    http.Header
@@ -42,6 +45,15 @@ func (m *ModelSettings) Options() []llm.Option {
 	}
 	if m.ReasoningEffort != "" {
 		opts = append(opts, llm.WithReasoningEffort(m.ReasoningEffort))
+	}
+	if m.Thinking != "" {
+		opts = append(opts, llm.WithThinking(m.Thinking))
+	}
+	if m.ThinkingDisplay != "" {
+		opts = append(opts, llm.WithThinkingDisplay(m.ThinkingDisplay))
+	}
+	if m.Speed != "" {
+		opts = append(opts, llm.WithSpeed(m.Speed))
 	}
 	if m.MaxTokens != nil {
 		opts = append(opts, llm.WithMaxTokens(*m.MaxTokens))

@@ -79,6 +79,47 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		InputPrice:  5.00,
 		OutputPrice: 25.00,
 		Currency:    "USD",
-		UpdatedAt:   "2026-02-09",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelClaudeOpus47: {
+		Model:       ModelClaudeOpus47,
+		InputPrice:  5.00,
+		OutputPrice: 25.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelClaudeOpus48: {
+		Model:       ModelClaudeOpus48,
+		InputPrice:  5.00,
+		OutputPrice: 25.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
+}
+
+// FastModeTextPricing contains premium pricing for models when fast mode
+// (llm.SpeedFast) is used. Fast mode is a research preview; see
+// https://platform.claude.com/docs/en/build-with-claude/fast-mode.
+var FastModeTextPricing = map[string]llm.PricingInfo{
+	ModelClaudeOpus46: {
+		Model:       ModelClaudeOpus46,
+		InputPrice:  30.00,
+		OutputPrice: 150.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelClaudeOpus47: {
+		Model:       ModelClaudeOpus47,
+		InputPrice:  30.00,
+		OutputPrice: 150.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelClaudeOpus48: {
+		Model:       ModelClaudeOpus48,
+		InputPrice:  10.00,
+		OutputPrice: 50.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
 	},
 }
