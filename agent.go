@@ -2206,12 +2206,12 @@ func (a *Agent) executeTool(
 				},
 			})
 		})
-		toolCtx = WithToolUpdateFunc(toolCtx, func(toolCallID string, update *ToolUpdate) {
+		toolCtx = WithToolProgressFunc(toolCtx, func(toolCallID string, progress *ToolProgress) {
 			_ = callback(ctx, &ResponseItem{
-				Type: ResponseItemTypeToolUpdate,
-				ToolUpdate: &ToolUpdateEvent{
+				Type: ResponseItemTypeToolProgress,
+				ToolProgress: &ToolProgressEvent{
 					ToolCallID: toolCallID,
-					Update:     update,
+					Progress:   progress,
 				},
 			})
 		})

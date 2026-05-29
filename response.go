@@ -35,12 +35,12 @@ const (
 	// The ToolStream field contains the tool call ID and a chunk of text.
 	ResponseItemTypeToolStream ResponseItemType = "tool_stream"
 
-	// ResponseItemTypeToolUpdate indicates a structured partial result from a
-	// tool during execution. The ToolUpdate field contains the tool call ID
-	// and a *ToolUpdate snapshot (Content/Display/Metadata). Use this when
+	// ResponseItemTypeToolProgress indicates a structured progress snapshot
+	// from a tool during execution. The ToolProgress field contains the tool
+	// call ID and a *ToolProgress snapshot (Display/Metadata). Use this when
 	// text-only ToolStream isn't enough — e.g. to render a live progress
 	// widget with structured fields like exit_code or files_scanned.
-	ResponseItemTypeToolUpdate ResponseItemType = "tool_update"
+	ResponseItemTypeToolProgress ResponseItemType = "tool_progress"
 
 	// ResponseItemTypeSuspended is a terminal item emitted when the agent
 	// transitions into a suspended state. The Suspension field carries the
@@ -212,8 +212,8 @@ type ResponseItem struct {
 	// ToolStream is set if the response item is streaming tool output
 	ToolStream *ToolStreamEvent `json:"tool_stream,omitempty"`
 
-	// ToolUpdate is set if the response item is a structured tool update.
-	ToolUpdate *ToolUpdateEvent `json:"tool_update,omitempty"`
+	// ToolProgress is set if the response item is a structured progress snapshot.
+	ToolProgress *ToolProgressEvent `json:"tool_progress,omitempty"`
 
 	// Suspension is set on a ResponseItemTypeSuspended item. It mirrors
 	// Response.Suspension.
@@ -233,13 +233,12 @@ type ToolStreamEvent struct {
 	Text       string `json:"text"`
 }
 
-// ToolUpdateEvent contains a structured partial result emitted by a tool
-// during execution via UpdateTool. The Update snapshot mirrors the shape of
-// a final ToolResult (Content/Display/Metadata) but reflects in-progress
-// state. Distinct from ToolStreamEvent, which carries text-only chunks.
-type ToolUpdateEvent struct {
-	ToolCallID string      `json:"tool_call_id"`
-	Update     *ToolUpdate `json:"update"`
+// ToolProgressEvent contains a structured progress snapshot emitted by a tool
+// during execution via ReportProgress. Distinct from ToolStreamEvent, which
+// carries text deltas; each snapshot is latest-wins in-progress state.
+type ToolProgressEvent struct {
+	ToolCallID string        `json:"tool_call_id"`
+	Progress   *ToolProgress `json:"progress"`
 }
 
 // Response represents the output from an Agent's response generation.

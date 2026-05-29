@@ -219,29 +219,24 @@ func NewToolResultText(text string) *ToolResult {
 	})
 }
 
-// ToolUpdate is a structured partial result a tool may emit during execution
-// via UpdateTool(ctx, *ToolUpdate). It carries the same shape consumers expect
-// from a final ToolResult, minus terminal-only fields (IsError, Suspend,
-// Background). Use this when text-only StreamOutput isn't enough — e.g. to
-// surface a running exit code, byte count, or other typed progress data to
-// UIs and evaluators before the tool returns.
+// ToolProgress is a structured progress snapshot a tool may emit during
+// execution via ReportProgress(ctx, *ToolProgress). Use it when text-only
+// StreamOutput isn't enough — e.g. to surface a running exit code, byte count,
+// or percent-complete to UIs and evaluators before the tool returns.
 //
-// Each call to UpdateTool delivers one snapshot. The agent re-emits it as a
-// ResponseItem of type ResponseItemTypeToolUpdate; consumers receive it
-// through the EventCallback configured on the CreateResponse call.
+// Each snapshot is latest-wins, NOT a delta: every Display/Metadata replaces
+// the previous one. Text deltas belong on StreamOutput, which appends. The two
+// are independent channels — a tool may use either, both, or neither. The
+// agent re-emits each snapshot as a ResponseItem of type
+// ResponseItemTypeToolProgress; consumers receive it through the EventCallback
+// configured on the CreateResponse call.
 //
-// Metadata values are round-tripped through JSON whenever the event is
-// persisted or crosses a process boundary. Stick to JSON-friendly values and
-// expect that numeric types come back as float64 and custom struct types
-// become generic map[string]any after a round trip.
-type ToolUpdate struct {
-	// Content is a partial view of the tool's content blocks. Same shape as
-	// ToolResult.Content; populated with whatever the tool has produced so
-	// far (e.g. accumulated stdout, image previews).
-	Content []*ToolResultContent `json:"content,omitempty"`
-
-	// Display is a partial human-readable markdown summary. Same role as
-	// ToolResult.Display, but reflecting the in-progress state.
+// Delivered in-process, Metadata preserves its Go types. A consumer that
+// serializes the event itself gets JSON's usual coercions (numbers become
+// float64, structs become map[string]any), so stick to JSON-friendly values.
+type ToolProgress struct {
+	// Display is a human-readable markdown summary of the latest progress
+	// state, e.g. "47/100 files scanned, 2.3 MB".
 	Display string `json:"display,omitempty"`
 
 	// Metadata is arbitrary structured progress data: exit_code, duration_ms,
