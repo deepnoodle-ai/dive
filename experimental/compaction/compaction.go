@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -90,21 +89,6 @@ type CompactionEvent struct {
 
 	// Summary is the generated summary text.
 	Summary string `json:"summary"`
-
-	// MessagesCompacted is the number of messages that were replaced.
-	MessagesCompacted int `json:"messages_compacted"`
-}
-
-// CompactionRecord tracks a compaction event in thread history.
-type CompactionRecord struct {
-	// Timestamp is when the compaction occurred.
-	Timestamp time.Time `json:"timestamp"`
-
-	// TokensBefore is the total token count before compaction.
-	TokensBefore int `json:"tokens_before"`
-
-	// TokensAfter is the token count after compaction.
-	TokensAfter int `json:"tokens_after"`
 
 	// MessagesCompacted is the number of messages that were replaced.
 	MessagesCompacted int `json:"messages_compacted"`
