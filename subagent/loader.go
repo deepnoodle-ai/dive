@@ -201,13 +201,3 @@ func parseFrontmatter(content string) (fm, body string, err error) {
 
 	return fm, body, nil
 }
-
-// LoadIntoRegistry loads definitions from a Loader and registers them in a Registry.
-func LoadIntoRegistry(ctx context.Context, loader Loader, registry *Registry) error {
-	defs, err := loader.Load(ctx)
-	if err != nil {
-		return err
-	}
-	registry.RegisterAll(defs)
-	return nil
-}

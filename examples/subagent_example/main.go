@@ -6,10 +6,10 @@
 // Edit/Write/Bash so they can locate and reason about code but never change it.
 //
 // Wiring (the standard production pattern, mirroring experimental/cmd/dive):
-//   - A subagent.Registry holds the spawnable definitions (Explore, Plan).
+//   - A map[string]*subagent.Definition holds the spawnable definitions (Explore, Plan).
 //   - An AgentFactory turns a definition into a concrete agent on demand,
 //     giving it the read-only tool set via subagent.FilterTools.
-//   - extended.NewAgentTool exposes an "Agent" tool to the parent agent.
+//   - orchestration.NewAgentTool exposes an "Agent" tool to the parent agent.
 //   - The parent is given ONLY the Agent tool, so to search code it must
 //     delegate to the Explore subagent.
 //
@@ -31,10 +31,10 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/subagent"
-	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/subagent"
 	"github.com/deepnoodle-ai/dive/toolkit"
+	"github.com/deepnoodle-ai/dive/toolkit/orchestration"
 )
 
 func main() {
@@ -80,10 +80,11 @@ func main() {
 	printFiltered("Explore", subagent.Explore, subagentTools)
 	printFiltered("Plan", subagent.Plan, subagentTools)
 
-	// Register the spawnable subagents.
-	registry := subagent.NewRegistry(false)
-	registry.Register("Explore", subagent.Explore)
-	registry.Register("Plan", subagent.Plan)
+	// The spawnable subagents, keyed by type name.
+	subagents := map[string]*subagent.Definition{
+		"Explore": subagent.Explore,
+		"Plan":    subagent.Plan,
+	}
 
 	// The factory builds a fresh agent each time the parent spawns a subagent:
 	// the definition's prompt, the read-only tool set, and a hook that logs the
@@ -98,11 +99,10 @@ func main() {
 		})
 	}
 
-	agentTool := extended.NewAgentTool(extended.AgentToolOptions{
-		Registry:         extended.NewTaskRegistry(),
-		AgentFactory:     factory,
-		SubagentRegistry: registry,
-		ParentTools:      subagentTools,
+	agentTool := orchestration.NewAgentTool(orchestration.AgentToolOptions{
+		Subagents:    subagents,
+		AgentFactory: factory,
+		ParentTools:  subagentTools,
 	})
 
 	// The parent holds ONLY the Agent tool, so it cannot read files itself — it
@@ -114,7 +114,7 @@ func main() {
 			"using the Agent tool. Wait for the subagent to finish (do not run it in the " +
 			"background), then answer the user using its findings.",
 		Model: model,
-		Tools: []dive.Tool{dive.ToolAdapter(agentTool)},
+		Tools: []dive.Tool{agentTool},
 	})
 	if err != nil {
 		log.Fatalf("failed to create parent agent: %v", err)

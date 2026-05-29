@@ -1,39 +1,29 @@
-// Package subagent provides subagent management for Dive agents.
+// Package subagent defines specialized subagents that a parent agent can spawn
+// via the Agent tool (see toolkit/orchestration).
 //
-// This package contains types for defining and managing specialized subagents
-// that can be spawned by a parent agent via the Agent tool.
+// A subagent is described by a Definition (system prompt, allowed/disallowed
+// tools, optional model). Definitions are organized in a plain map keyed by type
+// name and handed to the Agent tool:
 //
-// # Migration from AgentOptions.Subagents
+//	subagents := map[string]*subagent.Definition{
+//	    "GeneralPurpose": subagent.GeneralPurpose,
+//	    "Explore":        subagent.Explore,
+//	    "Plan":           subagent.Plan,
+//	}
 //
-// Previously, subagents were configured via AgentOptions.Subagents and
-// AgentOptions.SubagentLoader. With the new architecture, subagent registries
-// should be passed directly to the Agent tool at construction time.
-//
-// Old approach:
-//
-//	agent, _ := dive.NewAgent(dive.AgentOptions{
-//	    Model: model,
-//	    Subagents: map[string]*dive.SubagentDefinition{
-//	        "code-reviewer": {...},
-//	    },
-//	    SubagentLoader: dive.NewFileSubagentLoader(),
-//	})
-//
-// New approach:
-//
-//	registry := subagent.NewRegistry(true) // Include general-purpose
-//	registry.Register("code-reviewer", &subagent.Definition{...})
-//
-//	agentTool := toolkit.NewAgentTool(toolkit.AgentToolOptions{
-//	    SubagentRegistry: registry,
-//	    ParentTools:      tools,
-//	    AgentFactory:     myAgentFactory,
+//	agentTool := orchestration.NewAgentTool(orchestration.AgentToolOptions{
+//	    Subagents:    subagents,
+//	    AgentFactory: myAgentFactory,
+//	    ParentTools:  tools,
 //	})
 //
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
 //	    Model: model,
-//	    Tools: []dive.Tool{agentTool, ...},
+//	    Tools: []dive.Tool{agentTool},
 //	})
+//
+// Definitions can also be loaded from markdown files with YAML frontmatter via a
+// Loader (see FileLoader); Load returns the same map type.
 package subagent
 
 import (
@@ -41,7 +31,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/deepnoodle-ai/dive"
 )
@@ -113,92 +102,25 @@ var Plan = &Definition{
 	Prompt:          planPrompt,
 }
 
-// Registry manages subagent definitions.
-type Registry struct {
-	mu     sync.RWMutex
-	agents map[string]*Definition
-}
-
-// NewRegistry creates a new Registry.
-// If includeGeneralPurpose is true, the GeneralPurpose subagent is registered
-// as "general-purpose".
-func NewRegistry(includeGeneralPurpose bool) *Registry {
-	r := &Registry{
-		agents: make(map[string]*Definition),
-	}
-	if includeGeneralPurpose {
-		r.agents["general-purpose"] = GeneralPurpose
-	}
-	return r
-}
-
-// Register adds or updates a subagent definition.
-func (r *Registry) Register(name string, def *Definition) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.agents[name] = def
-}
-
-// RegisterAll adds multiple subagent definitions.
-func (r *Registry) RegisterAll(defs map[string]*Definition) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for name, def := range defs {
-		r.agents[name] = def
-	}
-}
-
-// Get retrieves a subagent definition by name.
-func (r *Registry) Get(name string) (*Definition, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	def, ok := r.agents[name]
-	return def, ok
-}
-
-// List returns all registered subagent names in sorted order.
-func (r *Registry) List() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	names := make([]string, 0, len(r.agents))
-	for name := range r.agents {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// Len returns the number of registered subagents.
-func (r *Registry) Len() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.agents)
-}
-
-// GenerateToolDescription generates a description of available subagents
-// suitable for inclusion in the Agent tool's description.
-func (r *Registry) GenerateToolDescription() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	if len(r.agents) == 0 {
+// DescribeTypes renders a subagent catalog as a description suitable for
+// inclusion in the Agent tool's description. Types are listed in sorted order;
+// an empty catalog yields an empty string.
+func DescribeTypes(types map[string]*Definition) string {
+	if len(types) == 0 {
 		return ""
 	}
 
-	var sb strings.Builder
-	sb.WriteString("Available subagent types:\n")
-
-	names := make([]string, 0, len(r.agents))
-	for name := range r.agents {
+	names := make([]string, 0, len(types))
+	for name := range types {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
+	var sb strings.Builder
+	sb.WriteString("Available subagent types:\n")
 	for _, name := range names {
-		def := r.agents[name]
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", name, def.Description))
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", name, types[name].Description))
 	}
-
 	return sb.String()
 }
 

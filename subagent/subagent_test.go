@@ -4,84 +4,28 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
-func TestRegistry(t *testing.T) {
-	t.Run("NewRegistry without general-purpose", func(t *testing.T) {
-		r := NewRegistry(false)
-		assert.Equal(t, 0, r.Len())
-		_, ok := r.Get("general-purpose")
-		assert.False(t, ok)
-	})
-
-	t.Run("NewRegistry with general-purpose", func(t *testing.T) {
-		r := NewRegistry(true)
-		assert.Equal(t, 1, r.Len())
-		def, ok := r.Get("general-purpose")
-		assert.True(t, ok)
-		assert.Equal(t, GeneralPurpose.Description, def.Description)
-	})
-
-	t.Run("Register and Get", func(t *testing.T) {
-		r := NewRegistry(false)
-		def := &Definition{
-			Description: "Test agent",
-			Prompt:      "You are a test agent",
-		}
-
-		r.Register("test-agent", def)
-
-		retrieved, ok := r.Get("test-agent")
-		assert.True(t, ok)
-		assert.Equal(t, "Test agent", retrieved.Description)
-		assert.Equal(t, "You are a test agent", retrieved.Prompt)
-	})
-
-	t.Run("RegisterAll", func(t *testing.T) {
-		r := NewRegistry(false)
-		defs := map[string]*Definition{
-			"agent-a": {Description: "Agent A"},
-			"agent-b": {Description: "Agent B"},
-		}
-
-		r.RegisterAll(defs)
-
-		assert.Equal(t, 2, r.Len())
-		a, _ := r.Get("agent-a")
-		assert.Equal(t, "Agent A", a.Description)
-		b, _ := r.Get("agent-b")
-		assert.Equal(t, "Agent B", b.Description)
-	})
-
-	t.Run("List returns sorted names", func(t *testing.T) {
-		r := NewRegistry(false)
-		r.Register("zebra", &Definition{Description: "Z"})
-		r.Register("alpha", &Definition{Description: "A"})
-		r.Register("mango", &Definition{Description: "M"})
-
-		names := r.List()
-		assert.Equal(t, []string{"alpha", "mango", "zebra"}, names)
-	})
-
-	t.Run("GenerateToolDescription", func(t *testing.T) {
-		r := NewRegistry(false)
-		r.Register("code-review", &Definition{Description: "Reviews code"})
-		r.Register("doc-writer", &Definition{Description: "Writes documentation"})
-
-		desc := r.GenerateToolDescription()
+func TestDescribeTypes(t *testing.T) {
+	t.Run("lists types in sorted order", func(t *testing.T) {
+		desc := DescribeTypes(map[string]*Definition{
+			"doc-writer":  {Description: "Writes documentation"},
+			"code-review": {Description: "Reviews code"},
+		})
 		assert.Contains(t, desc, "Available subagent types:")
 		assert.Contains(t, desc, "code-review: Reviews code")
 		assert.Contains(t, desc, "doc-writer: Writes documentation")
+		assert.True(t, strings.Index(desc, "code-review") < strings.Index(desc, "doc-writer"))
 	})
 
-	t.Run("GenerateToolDescription empty registry", func(t *testing.T) {
-		r := NewRegistry(false)
-		desc := r.GenerateToolDescription()
-		assert.Equal(t, "", desc)
+	t.Run("empty catalog yields empty string", func(t *testing.T) {
+		assert.Equal(t, "", DescribeTypes(nil))
+		assert.Equal(t, "", DescribeTypes(map[string]*Definition{}))
 	})
 }
 
@@ -368,23 +312,5 @@ Body without description`
 		_, err := LoadFromDirectory(dir)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "description is required")
-	})
-}
-
-func TestLoadIntoRegistry(t *testing.T) {
-	t.Run("loads definitions into registry", func(t *testing.T) {
-		loader := &MapLoader{
-			Definitions: map[string]*Definition{
-				"loaded-agent": {Description: "Loaded"},
-			},
-		}
-
-		registry := NewRegistry(false)
-		err := LoadIntoRegistry(context.Background(), loader, registry)
-		assert.NoError(t, err)
-
-		def, ok := registry.Get("loaded-agent")
-		assert.True(t, ok)
-		assert.Equal(t, "Loaded", def.Description)
 	})
 }
