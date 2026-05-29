@@ -4,84 +4,72 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
-func TestRegistry(t *testing.T) {
-	t.Run("NewRegistry without general-purpose", func(t *testing.T) {
-		r := NewRegistry(false)
-		assert.Equal(t, 0, r.Len())
-		_, ok := r.Get("general-purpose")
-		assert.False(t, ok)
-	})
-
-	t.Run("NewRegistry with general-purpose", func(t *testing.T) {
-		r := NewRegistry(true)
-		assert.Equal(t, 1, r.Len())
-		def, ok := r.Get("general-purpose")
-		assert.True(t, ok)
-		assert.Equal(t, GeneralPurpose.Description, def.Description)
-	})
-
-	t.Run("Register and Get", func(t *testing.T) {
-		r := NewRegistry(false)
-		def := &Definition{
-			Description: "Test agent",
-			Prompt:      "You are a test agent",
-		}
-
-		r.Register("test-agent", def)
-
-		retrieved, ok := r.Get("test-agent")
-		assert.True(t, ok)
-		assert.Equal(t, "Test agent", retrieved.Description)
-		assert.Equal(t, "You are a test agent", retrieved.Prompt)
-	})
-
-	t.Run("RegisterAll", func(t *testing.T) {
-		r := NewRegistry(false)
-		defs := map[string]*Definition{
-			"agent-a": {Description: "Agent A"},
-			"agent-b": {Description: "Agent B"},
-		}
-
-		r.RegisterAll(defs)
-
-		assert.Equal(t, 2, r.Len())
-		a, _ := r.Get("agent-a")
-		assert.Equal(t, "Agent A", a.Description)
-		b, _ := r.Get("agent-b")
-		assert.Equal(t, "Agent B", b.Description)
-	})
-
-	t.Run("List returns sorted names", func(t *testing.T) {
-		r := NewRegistry(false)
-		r.Register("zebra", &Definition{Description: "Z"})
-		r.Register("alpha", &Definition{Description: "A"})
-		r.Register("mango", &Definition{Description: "M"})
-
-		names := r.List()
-		assert.Equal(t, []string{"alpha", "mango", "zebra"}, names)
-	})
-
-	t.Run("GenerateToolDescription", func(t *testing.T) {
-		r := NewRegistry(false)
-		r.Register("code-review", &Definition{Description: "Reviews code"})
-		r.Register("doc-writer", &Definition{Description: "Writes documentation"})
-
-		desc := r.GenerateToolDescription()
+func TestDescribeTypes(t *testing.T) {
+	t.Run("lists types in sorted order", func(t *testing.T) {
+		desc := DescribeTypes(map[string]*Definition{
+			"doc-writer":  {Description: "Writes documentation"},
+			"code-review": {Description: "Reviews code"},
+		})
 		assert.Contains(t, desc, "Available subagent types:")
 		assert.Contains(t, desc, "code-review: Reviews code")
 		assert.Contains(t, desc, "doc-writer: Writes documentation")
+		assert.True(t, strings.Index(desc, "code-review") < strings.Index(desc, "doc-writer"))
 	})
 
-	t.Run("GenerateToolDescription empty registry", func(t *testing.T) {
-		r := NewRegistry(false)
-		desc := r.GenerateToolDescription()
-		assert.Equal(t, "", desc)
+	t.Run("empty catalog yields empty string", func(t *testing.T) {
+		assert.Equal(t, "", DescribeTypes(nil))
+		assert.Equal(t, "", DescribeTypes(map[string]*Definition{}))
+	})
+}
+
+func TestBuiltinDefinitions(t *testing.T) {
+	t.Run("GeneralPurpose prompt is embedded", func(t *testing.T) {
+		assert.NotEqual(t, "", GeneralPurpose.Description)
+		assert.NotEqual(t, "", GeneralPurpose.Prompt)
+		// Distinctive content from prompts/subagent.md guards the embed mapping.
+		assert.Contains(t, GeneralPurpose.Prompt, "general-purpose agent")
+	})
+
+	t.Run("Explore is read-only", func(t *testing.T) {
+		assert.NotEqual(t, "", Explore.Description)
+		assert.NotEqual(t, "", Explore.Prompt)
+		assert.True(t, len(Explore.DisallowedTools) > 0)
+		// Distinctive content from prompts/explore.md guards the embed mapping.
+		assert.Contains(t, Explore.Prompt, "read-only code exploration agent")
+	})
+
+	t.Run("Plan is read-only", func(t *testing.T) {
+		assert.NotEqual(t, "", Plan.Description)
+		assert.NotEqual(t, "", Plan.Prompt)
+		assert.True(t, len(Plan.DisallowedTools) > 0)
+		// The required final section is distinctive to prompts/plan.md.
+		assert.Contains(t, Plan.Prompt, "Critical Files for Implementation")
+	})
+
+	t.Run("clone and modify does not affect original", func(t *testing.T) {
+		clone := *Explore
+
+		// Scalar field: a shallow copy already isolates it.
+		clone.Model = "haiku"
+		assert.Equal(t, "", Explore.Model)
+		assert.Equal(t, "haiku", clone.Model)
+
+		// Slice fields alias after a shallow copy, so copy them before
+		// mutating to keep the original independent.
+		clone.DisallowedTools = append([]string{}, Explore.DisallowedTools...)
+		clone.DisallowedTools = append(clone.DisallowedTools, "WebSearch")
+		clone.Tools = append([]string{}, Explore.Tools...)
+		clone.Tools = append(clone.Tools, "Glob")
+
+		assert.Equal(t, []string{"Edit", "Write", "Bash"}, Explore.DisallowedTools)
+		assert.Equal(t, 0, len(Explore.Tools))
 	})
 }
 
@@ -103,10 +91,10 @@ func TestFilterTools(t *testing.T) {
 		&mockTool{name: "Read"},
 		&mockTool{name: "Write"},
 		&mockTool{name: "Bash"},
-		&mockTool{name: "Task"},
+		&mockTool{name: "Agent"},
 	}
 
-	t.Run("nil tools allows all except Task", func(t *testing.T) {
+	t.Run("nil tools allows all except Agent", func(t *testing.T) {
 		def := &Definition{Tools: nil}
 		filtered := FilterTools(def, allTools)
 		assert.Equal(t, 3, len(filtered))
@@ -119,7 +107,7 @@ func TestFilterTools(t *testing.T) {
 		assert.Contains(t, names, "Bash")
 	})
 
-	t.Run("empty tools allows all except Task", func(t *testing.T) {
+	t.Run("empty tools allows all except Agent", func(t *testing.T) {
 		def := &Definition{Tools: []string{}}
 		filtered := FilterTools(def, allTools)
 		assert.Equal(t, 3, len(filtered))
@@ -137,11 +125,50 @@ func TestFilterTools(t *testing.T) {
 		assert.Contains(t, names, "Bash")
 	})
 
-	t.Run("Task is never allowed even if specified", func(t *testing.T) {
-		def := &Definition{Tools: []string{"Read", "Task"}}
+	t.Run("Agent is never allowed even if specified", func(t *testing.T) {
+		def := &Definition{Tools: []string{"Read", "Agent"}}
 		filtered := FilterTools(def, allTools)
 		assert.Equal(t, 1, len(filtered))
 		assert.Equal(t, "Read", filtered[0].Name())
+	})
+
+	t.Run("DisallowedTools removes tools from the inherited set", func(t *testing.T) {
+		def := &Definition{DisallowedTools: []string{"Write", "Bash"}}
+		filtered := FilterTools(def, allTools)
+		names := make([]string, len(filtered))
+		for i, t := range filtered {
+			names[i] = t.Name()
+		}
+		assert.Equal(t, []string{"Read"}, names)
+	})
+
+	t.Run("DisallowedTools matches case-insensitively", func(t *testing.T) {
+		def := &Definition{DisallowedTools: []string{"write", "BASH"}}
+		filtered := FilterTools(def, allTools)
+		names := make([]string, len(filtered))
+		for i, t := range filtered {
+			names[i] = t.Name()
+		}
+		assert.Equal(t, []string{"Read"}, names)
+	})
+
+	t.Run("DisallowedTools applies on top of the allowlist", func(t *testing.T) {
+		def := &Definition{Tools: []string{"Read", "Write"}, DisallowedTools: []string{"Write"}}
+		filtered := FilterTools(def, allTools)
+		assert.Equal(t, 1, len(filtered))
+		assert.Equal(t, "Read", filtered[0].Name())
+	})
+
+	t.Run("read-only builtins keep only read tools", func(t *testing.T) {
+		// Explore and Plan rely on DisallowedTools to enforce read-only.
+		for _, def := range []*Definition{Explore, Plan} {
+			filtered := FilterTools(def, allTools)
+			names := make([]string, len(filtered))
+			for i, t := range filtered {
+				names[i] = t.Name()
+			}
+			assert.Equal(t, []string{"Read"}, names)
+		}
 	})
 }
 
@@ -297,23 +324,5 @@ Body without description`
 		_, err := LoadFromDirectory(dir)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "description is required")
-	})
-}
-
-func TestLoadIntoRegistry(t *testing.T) {
-	t.Run("loads definitions into registry", func(t *testing.T) {
-		loader := &MapLoader{
-			Definitions: map[string]*Definition{
-				"loaded-agent": {Description: "Loaded"},
-			},
-		}
-
-		registry := NewRegistry(false)
-		err := LoadIntoRegistry(context.Background(), loader, registry)
-		assert.NoError(t, err)
-
-		def, ok := registry.Get("loaded-agent")
-		assert.True(t, ok)
-		assert.Equal(t, "Loaded", def.Description)
 	})
 }

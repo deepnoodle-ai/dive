@@ -1,4 +1,4 @@
-package extended
+package orchestration
 
 import (
 	"bufio"
@@ -18,42 +18,43 @@ const (
 	monitorBatchWindow      = 200 * time.Millisecond
 )
 
-// MonitorToolInput is the input for the MonitorTool
+// MonitorToolInput is the input for the Monitor tool.
 type MonitorToolInput struct {
 	Command     string `json:"command"`
 	Description string `json:"description"`
 	TimeoutMs   int    `json:"timeout_ms,omitempty"`
 }
 
-// MonitorToolOptions configures a new MonitorTool
+// MonitorToolOptions configures a new Monitor tool.
 type MonitorToolOptions struct {
-	Registry *TaskRegistry
+	// Runs, if non-nil, tracks the monitor so TaskStop can cancel it early.
+	Runs *Runs
 
 	// NotifyCallback is called (from a background goroutine) for each batch of
 	// stdout lines. Must be safe for concurrent use.
 	NotifyCallback func(description string, lines []string)
 }
 
-// MonitorTool starts a background watcher that streams stdout lines from a
-// shell command as chat notifications.
-type MonitorTool struct {
-	registry       *TaskRegistry
+// MonitorTool starts a background watcher that streams stdout lines from a shell
+// command as chat notifications.
+type monitorTool struct {
+	runs           *Runs
 	notifyCallback func(description string, lines []string)
 }
 
-var _ dive.TypedTool[*MonitorToolInput] = &MonitorTool{}
+var _ dive.TypedTool[*MonitorToolInput] = &monitorTool{}
 
-// NewMonitorTool creates a new MonitorTool
-func NewMonitorTool(opts MonitorToolOptions) *MonitorTool {
-	return &MonitorTool{
-		registry:       opts.Registry,
+// NewMonitorTool creates the Monitor tool.
+func NewMonitorTool(opts MonitorToolOptions) *dive.TypedToolAdapter[*MonitorToolInput] {
+	return dive.ToolAdapter(&monitorTool{
+		runs:           opts.Runs,
 		notifyCallback: opts.NotifyCallback,
-	}
+	})
 }
 
-func (t *MonitorTool) Name() string { return "Monitor" }
+func (t *monitorTool) Name() string { return "Monitor" }
 
-func (t *MonitorTool) Description() string {
+func (t *monitorTool) Description() string {
 	return `Start a background watcher that streams events from a long-running shell command. Each stdout line becomes a notification delivered to the chat while you continue working.
 
 Usage notes:
@@ -63,10 +64,10 @@ Usage notes:
 - Always use grep --line-buffered in pipes — without it, buffering delays events
 - For a single one-time notification, prefer Bash with run_in_background instead
 - Use TaskStop to cancel a monitor early
-- Do NOT call TaskOutput for monitors; notifications arrive automatically`
+- Notifications arrive automatically as the command produces output`
 }
 
-func (t *MonitorTool) Schema() *schema.Schema {
+func (t *monitorTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type:     "object",
 		Required: []string{"command", "description"},
@@ -87,16 +88,14 @@ func (t *MonitorTool) Schema() *schema.Schema {
 	}
 }
 
-func (t *MonitorTool) Annotations() *dive.ToolAnnotations {
+func (t *monitorTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
 		Title:         "Monitor",
 		OpenWorldHint: true,
 	}
 }
 
-func (t *MonitorTool) ShouldReturnResult() bool { return true }
-
-func (t *MonitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.ToolResult, error) {
+func (t *monitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.ToolResult, error) {
 	if input.Command == "" {
 		return dive.NewToolResultError("command is required"), nil
 	}
@@ -115,30 +114,24 @@ func (t *MonitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 
 	taskID := fmt.Sprintf("monitor_%s", uuid.New().String()[:8])
 
+	// Independent of the parent context so the monitor survives the turn that
+	// started it; bounded by its own timeout and cancellable via TaskStop.
 	cancelCtx, cancel := context.WithTimeout(context.Background(), timeout)
-
-	record := &TaskRecord{
-		ID:          taskID,
-		Description: input.Description,
-		Status:      TaskStatusRunning,
-		StartTime:   time.Now(),
-		done:        make(chan struct{}),
-		cancel:      cancel,
-	}
-	if t.registry != nil {
-		t.registry.Register(record)
+	if t.runs != nil {
+		t.runs.add(taskID, input.Description, cancel)
 	}
 
 	notifyCallback := t.notifyCallback
 
 	go func() {
 		defer cancel()
-		defer close(record.done)
+		if t.runs != nil {
+			defer t.runs.remove(taskID)
+		}
 
 		cmd := exec.CommandContext(cancelCtx, "sh", "-c", input.Command)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			record.setResult(TaskStatusFailed, fmt.Sprintf("failed to create stdout pipe: %s", err), err, time.Now())
 			if notifyCallback != nil {
 				notifyCallback(input.Description, []string{fmt.Sprintf("[Monitor error: %s]", err)})
 			}
@@ -147,7 +140,6 @@ func (t *MonitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 		cmd.Stderr = nil // discard stderr
 
 		if err := cmd.Start(); err != nil {
-			record.setResult(TaskStatusFailed, fmt.Sprintf("failed to start: %s", err), err, time.Now())
 			if notifyCallback != nil {
 				notifyCallback(input.Description, []string{fmt.Sprintf("[Monitor error: %s]", err)})
 			}
@@ -180,10 +172,6 @@ func (t *MonitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 		<-scanDone
 		cmd.Wait()
 
-		endTime := time.Now()
-		summary := fmt.Sprintf("Monitor finished: %s\nLines delivered: %d", input.Description, totalLines)
-		record.setResult(TaskStatusCompleted, summary, nil, endTime)
-
 		if notifyCallback != nil {
 			notifyCallback(input.Description, []string{
 				fmt.Sprintf("[Monitor done — %d lines delivered]", totalLines),
@@ -197,9 +185,9 @@ func (t *MonitorTool) Call(ctx context.Context, input *MonitorToolInput) (*dive.
 	)).WithDisplay(fmt.Sprintf("Monitor started: %s", input.Description)), nil
 }
 
-// monitorBatchLines reads from linesCh, batches lines that arrive within
-// window, and calls emit for each batch. Returns when linesCh is closed or
-// ctx is cancelled.
+// monitorBatchLines reads from linesCh, batches lines that arrive within window,
+// and calls emit for each batch. Returns when linesCh is closed or ctx is
+// cancelled.
 func monitorBatchLines(ctx context.Context, linesCh <-chan string, window time.Duration, emit func([]string)) {
 	var batch []string
 	timer := time.NewTimer(window)

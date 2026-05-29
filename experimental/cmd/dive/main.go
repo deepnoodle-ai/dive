@@ -18,16 +18,16 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
-	"github.com/deepnoodle-ai/dive/experimental/subagent"
-	"github.com/deepnoodle-ai/dive/experimental/toolkit/extended"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/google"
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
+	"github.com/deepnoodle-ai/dive/subagent"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
+	"github.com/deepnoodle-ai/dive/toolkit/orchestration"
 	"github.com/deepnoodle-ai/wonton/cli"
 	"github.com/deepnoodle-ai/wonton/fetch"
 )
@@ -102,6 +102,7 @@ func main() {
 		Run(runModels)
 
 	app.Main().
+		Args("prompt?").
 		Flags(
 			cli.String("model", "m").
 				Env("DIVE_MODEL").
@@ -202,9 +203,14 @@ func runInteractive(ctx *cli.Context) error {
 	tools := createTools(pathValidator, tuiDialog)
 	tools = append(tools, grokServerSideTools(modelName)...)
 
-	// Set up subagent registry and task tools
-	subagentRegistry := subagent.NewRegistry(true)
-	taskRegistry := extended.NewTaskRegistry()
+	// Set up the subagent catalog and orchestration tools. Runs is the shared
+	// tracker that lets TaskStop cancel background spawns and monitors by id.
+	subagents := map[string]*subagent.Definition{
+		"GeneralPurpose": subagent.GeneralPurpose,
+		"Explore":        subagent.Explore,
+		"Plan":           subagent.Plan,
+	}
+	runs := orchestration.NewRuns()
 
 	agentFactory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 		// Create sub-model (use parent model by default)
@@ -221,23 +227,20 @@ func runInteractive(ctx *cli.Context) error {
 		})
 	}
 
-	taskTool := extended.NewTaskTool(extended.TaskToolOptions{
-		Registry:         taskRegistry,
-		AgentFactory:     agentFactory,
-		SubagentRegistry: subagentRegistry,
-		ParentTools:      tools,
+	agentTool := orchestration.NewAgentTool(orchestration.AgentToolOptions{
+		Subagents:    subagents,
+		AgentFactory: agentFactory,
+		ParentTools:  tools,
+		Runs:         runs,
 	})
-	taskOutputTool := extended.NewTaskOutputTool(extended.TaskOutputToolOptions{
-		Registry: taskRegistry,
-	})
-	monitorTool := extended.NewMonitorTool(extended.MonitorToolOptions{
-		Registry:       taskRegistry,
+	monitorTool := orchestration.NewMonitorTool(orchestration.MonitorToolOptions{
+		Runs:           runs,
 		NotifyCallback: monNotifier.notify,
 	})
-	taskStopTool := extended.NewTaskStopTool(extended.TaskStopToolOptions{
-		Registry: taskRegistry,
+	taskStopTool := orchestration.NewTaskStopTool(orchestration.TaskStopToolOptions{
+		Runs: runs,
 	})
-	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool), dive.ToolAdapter(monitorTool), dive.ToolAdapter(taskStopTool))
+	tools = append(tools, agentTool, monitorTool, taskStopTool)
 
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")

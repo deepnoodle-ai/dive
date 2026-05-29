@@ -12,6 +12,7 @@ Dive is a Go library for building AI agents and integrating with leading LLMs.
 - [LLM Guide](guides/llm-guide.md) - Working with different LLM providers
 - [Permissions](guides/permissions.md) - Tool execution permissions
 - [Skills](guides/skills.md) - Modular agent capabilities and slash commands
+- [Sub-Agents](guides/subagents.md) - Spawning specialized agents (Agent tool) and background control (TaskStop, Monitor)
 - [Tracing](guides/tracing.md) - OpenTelemetry tracing and metrics for agent runs (full reference: [otel.md](guides/otel.md))
 
 ## Experimental Guides
