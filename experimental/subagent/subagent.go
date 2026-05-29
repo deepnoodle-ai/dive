@@ -37,6 +37,7 @@
 package subagent
 
 import (
+	_ "embed"
 	"fmt"
 	"sort"
 	"strings"
@@ -44,6 +45,20 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 )
+
+// Built-in subagent system prompts. The canonical, human-facing copies live in
+// docs/prompts/; these are byte-identical copies embedded for use at runtime
+// (go:embed cannot reference paths outside the package directory). Keep the two
+// in sync when editing.
+//
+//go:embed prompts/subagent.md
+var generalPurposePrompt string
+
+//go:embed prompts/explore.md
+var explorePrompt string
+
+//go:embed prompts/plan.md
+var planPrompt string
 
 // Definition defines a specialized subagent that can be spawned
 // by a parent agent via the Task tool.
@@ -66,11 +81,6 @@ type Definition struct {
 	// Names are matched case-insensitively.
 	DisallowedTools []string
 
-	// MaxTurns limits how many tool iterations the subagent may take.
-	// When > 0, passed as AgentOptions.ToolIterationLimit. When 0, the parent's
-	// limit or the package default applies.
-	MaxTurns int
-
 	// Model overrides the LLM model for this subagent.
 	// Valid values: "sonnet", "opus", "haiku", or "" to inherit from parent.
 	Model string
@@ -79,7 +89,7 @@ type Definition struct {
 // GeneralPurpose is the default subagent available to all agents.
 var GeneralPurpose = &Definition{
 	Description: "General-purpose agent for complex, multi-step tasks. Use when no specialized agent matches the task.",
-	Prompt:      "You are a helpful assistant that can handle complex multi-step tasks autonomously. Work through the task step by step and provide a clear summary of your findings or results.",
+	Prompt:      generalPurposePrompt,
 	Tools:       nil,
 	Model:       "",
 }
@@ -92,10 +102,7 @@ var GeneralPurpose = &Definition{
 var Explore = &Definition{
 	Description:     "Fast read-only search agent for locating code. Use to find files, grep for symbols, or answer where-is-X questions.",
 	DisallowedTools: []string{"Edit", "Write", "Bash"},
-	MaxTurns:        20,
-	Prompt: `You are a focused exploration agent. Your job is to search, read,
-and summarize — not to make changes. Read files, search for patterns, and
-report what you find clearly and concisely.`,
+	Prompt:          explorePrompt,
 }
 
 // Plan is a read-only subagent optimized for architectural analysis and structured planning.
@@ -103,10 +110,7 @@ report what you find clearly and concisely.`,
 var Plan = &Definition{
 	Description:     "Software architect agent for designing implementation plans. Use when you need to plan an implementation strategy.",
 	DisallowedTools: []string{"Edit", "Write", "Bash"},
-	MaxTurns:        30,
-	Prompt: `You are a planning agent. Analyze the codebase or problem space,
-enumerate tradeoffs, and produce a clear structured plan. Do not make any
-changes. Your output should be directly actionable by an implementation agent.`,
+	Prompt:          planPrompt,
 }
 
 // Registry manages subagent definitions.
@@ -198,14 +202,24 @@ func (r *Registry) GenerateToolDescription() string {
 	return sb.String()
 }
 
-// FilterTools filters a list of tools based on the subagent definition's allowed tools.
-// If def.Tools is nil or empty, all tools are returned except the Task tool.
+// FilterTools filters a list of tools based on the subagent definition.
+// If def.Tools is non-empty, only those tools are kept; otherwise all parent
+// tools are kept. Any tool named in def.DisallowedTools is then removed
+// (matched case-insensitively), and the Task tool is never included.
 func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 	var allowedSet map[string]bool
 	if len(def.Tools) > 0 {
 		allowedSet = make(map[string]bool, len(def.Tools))
 		for _, name := range def.Tools {
 			allowedSet[name] = true
+		}
+	}
+
+	var disallowedSet map[string]bool
+	if len(def.DisallowedTools) > 0 {
+		disallowedSet = make(map[string]bool, len(def.DisallowedTools))
+		for _, name := range def.DisallowedTools {
+			disallowedSet[strings.ToLower(name)] = true
 		}
 	}
 
@@ -218,10 +232,12 @@ func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 			continue
 		}
 
-		if allowedSet != nil {
-			if !allowedSet[name] {
-				continue
-			}
+		if allowedSet != nil && !allowedSet[name] {
+			continue
+		}
+
+		if disallowedSet != nil && disallowedSet[strings.ToLower(name)] {
+			continue
 		}
 
 		result = append(result, tool)

@@ -86,18 +86,27 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestBuiltinDefinitions(t *testing.T) {
+	t.Run("GeneralPurpose prompt is embedded", func(t *testing.T) {
+		assert.NotEqual(t, "", GeneralPurpose.Description)
+		assert.NotEqual(t, "", GeneralPurpose.Prompt)
+		// Distinctive content from prompts/subagent.md guards the embed mapping.
+		assert.Contains(t, GeneralPurpose.Prompt, "general-purpose agent")
+	})
+
 	t.Run("Explore is read-only", func(t *testing.T) {
 		assert.NotEqual(t, "", Explore.Description)
 		assert.NotEqual(t, "", Explore.Prompt)
 		assert.True(t, len(Explore.DisallowedTools) > 0)
-		assert.Equal(t, 20, Explore.MaxTurns)
+		// Distinctive content from prompts/explore.md guards the embed mapping.
+		assert.Contains(t, Explore.Prompt, "read-only code exploration agent")
 	})
 
 	t.Run("Plan is read-only", func(t *testing.T) {
 		assert.NotEqual(t, "", Plan.Description)
 		assert.NotEqual(t, "", Plan.Prompt)
 		assert.True(t, len(Plan.DisallowedTools) > 0)
-		assert.Equal(t, 30, Plan.MaxTurns)
+		// The required final section is distinctive to prompts/plan.md.
+		assert.Contains(t, Plan.Prompt, "Critical Files for Implementation")
 	})
 
 	t.Run("clone and modify does not affect original", func(t *testing.T) {
@@ -165,6 +174,45 @@ func TestFilterTools(t *testing.T) {
 		filtered := FilterTools(def, allTools)
 		assert.Equal(t, 1, len(filtered))
 		assert.Equal(t, "Read", filtered[0].Name())
+	})
+
+	t.Run("DisallowedTools removes tools from the inherited set", func(t *testing.T) {
+		def := &Definition{DisallowedTools: []string{"Write", "Bash"}}
+		filtered := FilterTools(def, allTools)
+		names := make([]string, len(filtered))
+		for i, t := range filtered {
+			names[i] = t.Name()
+		}
+		assert.Equal(t, []string{"Read"}, names)
+	})
+
+	t.Run("DisallowedTools matches case-insensitively", func(t *testing.T) {
+		def := &Definition{DisallowedTools: []string{"write", "BASH"}}
+		filtered := FilterTools(def, allTools)
+		names := make([]string, len(filtered))
+		for i, t := range filtered {
+			names[i] = t.Name()
+		}
+		assert.Equal(t, []string{"Read"}, names)
+	})
+
+	t.Run("DisallowedTools applies on top of the allowlist", func(t *testing.T) {
+		def := &Definition{Tools: []string{"Read", "Write"}, DisallowedTools: []string{"Write"}}
+		filtered := FilterTools(def, allTools)
+		assert.Equal(t, 1, len(filtered))
+		assert.Equal(t, "Read", filtered[0].Name())
+	})
+
+	t.Run("read-only builtins keep only read tools", func(t *testing.T) {
+		// Explore and Plan rely on DisallowedTools to enforce read-only.
+		for _, def := range []*Definition{Explore, Plan} {
+			filtered := FilterTools(def, allTools)
+			names := make([]string, len(filtered))
+			for i, t := range filtered {
+				names[i] = t.Name()
+			}
+			assert.Equal(t, []string{"Read"}, names)
+		}
 	})
 }
 
