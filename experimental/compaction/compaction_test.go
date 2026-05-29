@@ -1,6 +1,8 @@
 package compaction
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -285,4 +287,69 @@ func TestCompactionEventStructure(t *testing.T) {
 	assert.Equal(t, 5000, event.TokensAfter)
 	assert.Equal(t, "Test summary", event.Summary)
 	assert.Equal(t, 50, event.MessagesCompacted)
+}
+
+func totalTokens(msgs []*llm.Message) int {
+	total := 0
+	for _, m := range msgs {
+		total += estimateTokens(m)
+	}
+	return total
+}
+
+func TestReduceToSummaryBudget(t *testing.T) {
+	bigText := strings.Repeat("x", 200_000) // ~50k tokens
+
+	t.Run("no-op when under budget", func(t *testing.T) {
+		msgs := []*llm.Message{llm.NewUserTextMessage("hello")}
+		out := reduceToSummaryBudget(msgs, 1_000_000)
+		assert.Equal(t, 1, len(out))
+		assert.Equal(t, "hello", out[0].Text())
+	})
+
+	t.Run("clips the largest, preserves small, leaves originals untouched", func(t *testing.T) {
+		small := llm.NewUserTextMessage("hello")
+		big := llm.NewAssistantTextMessage(bigText)
+		msgs := []*llm.Message{small, big}
+		budget := 5_000
+
+		out := reduceToSummaryBudget(msgs, budget)
+
+		assert.True(t, totalTokens(out) <= budget)
+		assert.Equal(t, "hello", out[0].Text())                  // small preserved verbatim
+		assert.True(t, len(out[1].Text()) > 0)                   // big still has content
+		assert.True(t, len(out[1].Text()) < len(bigText))        // ...but truncated
+		assert.True(t, strings.Contains(out[1].Text(), "truncated"))
+		assert.Equal(t, len(bigText), len(big.Text()))           // original not mutated
+	})
+
+	t.Run("preserves tool_use/tool_result pairing (never drops messages)", func(t *testing.T) {
+		toolUse := &llm.Message{Role: llm.Assistant, Content: []llm.Content{
+			&llm.ToolUseContent{ID: "t1", Name: "read", Input: json.RawMessage(`{"path":"big.txt"}`)},
+		}}
+		bigResult := &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.ToolResultContent{ToolUseID: "t1", Content: strings.Repeat("y", 300_000)},
+		}}
+		msgs := []*llm.Message{toolUse, bigResult}
+		budget := 4_000
+
+		out := reduceToSummaryBudget(msgs, budget)
+
+		assert.Equal(t, 2, len(out)) // nothing dropped → pairing intact
+		_, isToolUse := out[0].Content[0].(*llm.ToolUseContent)
+		assert.True(t, isToolUse)
+		tr, isToolResult := out[1].Content[0].(*llm.ToolResultContent)
+		assert.True(t, isToolResult)
+		truncated, _ := tr.Content.(string)
+		assert.True(t, len(truncated) < 300_000)
+		assert.True(t, totalTokens(out) <= budget)
+	})
+}
+
+func TestTruncateText(t *testing.T) {
+	assert.Equal(t, "short", truncateText("short", 200)) // under limit unchanged
+
+	out := truncateText(strings.Repeat("a", 1000), 200)
+	assert.True(t, len(out) <= 200)
+	assert.True(t, strings.Contains(out, "truncated"))
 }

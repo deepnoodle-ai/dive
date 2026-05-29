@@ -21,6 +21,7 @@ package compaction
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -29,6 +30,22 @@ import (
 
 // DefaultContextTokenThreshold is the default token count that triggers compaction.
 const DefaultContextTokenThreshold = 100000
+
+// DefaultMaxSummaryInputTokens bounds how large the transcript handed to the
+// summarizer LLM may be, so summarization itself does not overflow the model's
+// context window. Conservative for a ~200k-context model, leaving room for the
+// prompt and the generated summary. Override per call with WithMaxInputTokens
+// when the summarizer model is smaller or larger.
+const DefaultMaxSummaryInputTokens = 150000
+
+// summaryOutputReserveTokens is held back from the input budget for the
+// generated summary.
+const summaryOutputReserveTokens = 8192
+
+// minSummaryItemTokens is the floor below which the reducer stops shrinking an
+// individual message — truncating further yields little and risks dropping the
+// gist of a turn.
+const minSummaryItemTokens = 256
 
 // DefaultCompactionSummaryPrompt is the default prompt used to generate summaries.
 // Based on Anthropic's SDK compaction spec.
@@ -117,6 +134,24 @@ func ShouldCompact(usage *llm.Usage, messageCount int, threshold int) bool {
 	return CalculateContextTokens(usage) >= threshold
 }
 
+// CompactMessagesOption configures a CompactMessages call.
+type CompactMessagesOption func(*compactMessagesConfig)
+
+type compactMessagesConfig struct {
+	maxInputTokens int
+}
+
+// WithMaxInputTokens overrides the token budget for the transcript handed to
+// the summarizer (default DefaultMaxSummaryInputTokens). Set it to your
+// summarizer model's context window minus headroom for the summary output.
+func WithMaxInputTokens(n int) CompactMessagesOption {
+	return func(c *compactMessagesConfig) {
+		if n > 0 {
+			c.maxInputTokens = n
+		}
+	}
+}
+
 // CompactMessages generates a summary of the conversation and returns compacted messages.
 // This is the main entry point for external compaction.
 //
@@ -127,6 +162,7 @@ func ShouldCompact(usage *llm.Usage, messageCount int, threshold int) bool {
 //   - systemPrompt: The system prompt to include in the summary request
 //   - summaryPrompt: The prompt instructing how to generate the summary (use DefaultCompactionSummaryPrompt if empty)
 //   - tokensBefore: The pre-compaction context token count (for accurate event reporting)
+//   - opts: Optional settings such as WithMaxInputTokens
 //
 // Returns the compacted messages, a compaction event with stats, and any error.
 func CompactMessages(
@@ -136,9 +172,14 @@ func CompactMessages(
 	systemPrompt string,
 	summaryPrompt string,
 	tokensBefore int,
+	opts ...CompactMessagesOption,
 ) ([]*llm.Message, *CompactionEvent, error) {
 	if model == nil {
 		return nil, nil, fmt.Errorf("model is required for compaction")
+	}
+	var cfg compactMessagesConfig
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
 	// Step 1: Filter out pending tool use blocks
@@ -147,27 +188,26 @@ func CompactMessages(
 		return nil, nil, fmt.Errorf("no messages to compact after filtering")
 	}
 
-	// Track original message count before any trimming for accurate reporting
+	// Track original message count for accurate reporting. The reducer below
+	// truncates oversized messages but never drops them, so the count is stable.
 	originalMessageCount := len(cleanedMessages)
 
-	// Step 2: Trim messages if too many to avoid exceeding context during summarization
-	// Keep first message (often contains important context) + recent messages.
-	// TODO: this is a crude message-count cap. A more robust approach (à la
-	// Codex) trims the oldest items by token budget and retries the summary on
-	// ContextWindowExceeded; deferred until we surface that error per-provider.
-	const maxMessagesForSummary = 50
-	if len(cleanedMessages) > maxMessagesForSummary {
-		cleanedMessages = append(
-			cleanedMessages[:1], // Keep first message
-			cleanedMessages[len(cleanedMessages)-maxMessagesForSummary+1:]..., // Keep recent messages
-		)
-	}
-
-	// Step 3: Build summary request
+	// Step 2: Resolve the prompt and reduce the transcript to fit the
+	// summarizer's own context window. Reducing by SIZE (not message count)
+	// keeps a single oversized item — a large file read or command output —
+	// from overflowing the summary request. Messages are truncated rather than
+	// dropped, so tool_use/tool_result pairing is preserved.
 	if summaryPrompt == "" {
 		summaryPrompt = DefaultCompactionSummaryPrompt
 	}
+	maxInput := cfg.maxInputTokens
+	if maxInput <= 0 {
+		maxInput = DefaultMaxSummaryInputTokens
+	}
+	inputBudget := maxInput - len(summaryPrompt)/4 - summaryOutputReserveTokens
+	cleanedMessages = reduceToSummaryBudget(cleanedMessages, inputBudget)
 
+	// Step 3: Build summary request.
 	// Add summary instruction as a user message
 	summaryMessages := make([]*llm.Message, len(cleanedMessages)+1)
 	copy(summaryMessages, cleanedMessages)
@@ -296,4 +336,165 @@ func filterPendingToolUse(messages []*llm.Message) []*llm.Message {
 		Content: filteredContent,
 	}
 	return result
+}
+
+// estimateTokens approximates a message's token footprint from its serialized
+// JSON size (~4 bytes per token). Marshaling the whole message counts tool
+// inputs and results — often the largest payloads — which Message.Text (text
+// content only) would miss. Best effort: a marshal error yields 0.
+func estimateTokens(m *llm.Message) int {
+	return messageBytes(m) / 4
+}
+
+func messageBytes(m *llm.Message) int {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return 0
+	}
+	return len(data)
+}
+
+// reduceToSummaryBudget shrinks the largest messages until the estimated total
+// fits within budget, returning a new slice. The inputs are never mutated —
+// they may be the session's stored originals — so oversized messages are
+// replaced with truncated copies while the rest are reused as-is.
+//
+// It works iteratively, the way you would by hand: each pass finds the single
+// largest message and truncates it just enough to clear the overage (down to a
+// floor), so the biggest items are clipped first. Messages are never dropped,
+// which keeps tool_use/tool_result pairing intact. Messages dominated by
+// non-text content (images, structured tool inputs) cannot be shrunk and may
+// keep the total above budget — a best-effort guard, not a hard guarantee.
+func reduceToSummaryBudget(messages []*llm.Message, budget int) []*llm.Message {
+	if budget <= 0 || len(messages) == 0 {
+		return messages
+	}
+	sizes := make([]int, len(messages))
+	total := 0
+	for i, m := range messages {
+		sizes[i] = estimateTokens(m)
+		total += sizes[i]
+	}
+	if total <= budget {
+		return messages
+	}
+
+	out := make([]*llm.Message, len(messages))
+	copy(out, messages)
+
+	// Bounded: each successful pass strictly reduces total.
+	for iter := 0; total > budget && iter < len(messages)*2; iter++ {
+		largest := 0
+		for i, s := range sizes {
+			if s > sizes[largest] {
+				largest = i
+			}
+		}
+		target := sizes[largest] - (total - budget)
+		if target < minSummaryItemTokens {
+			target = minSummaryItemTokens
+		}
+		if target >= sizes[largest] {
+			break // largest is already at the floor; nothing more to give
+		}
+		shrunk := shrinkMessage(messages[largest], target*4)
+		newSize := estimateTokens(shrunk)
+		if newSize >= sizes[largest] {
+			break // no progress (e.g. dominated by non-truncatable content)
+		}
+		out[largest] = shrunk
+		total += newSize - sizes[largest]
+		sizes[largest] = newSize
+	}
+	return out
+}
+
+// shrinkMessage returns a copy of m whose largest text-bearing content blocks
+// are truncated (head + tail with an elision marker) so the message's
+// serialized size approaches targetBytes. The original is left untouched.
+func shrinkMessage(m *llm.Message, targetBytes int) *llm.Message {
+	out := *m
+	out.Content = make([]llm.Content, len(m.Content))
+	copy(out.Content, m.Content)
+
+	// Bounded by the number of content blocks; each pass clips one block.
+	for i := 0; i < len(out.Content)+1; i++ {
+		size := messageBytes(&out)
+		if size <= targetBytes {
+			break
+		}
+		idx, text, rebuild := largestTextBlock(out.Content)
+		if idx < 0 {
+			break // nothing truncatable remains
+		}
+		newLen := len(text) - (size - targetBytes)
+		if newLen >= len(text) {
+			break
+		}
+		out.Content[idx] = rebuild(truncateText(text, newLen))
+	}
+	return &out
+}
+
+// largestTextBlock finds the content block holding the most truncatable text
+// and returns its index, current text, and a constructor that rebuilds the
+// block (a fresh struct, so the original is never mutated) with replacement
+// text. idx is -1 when no block is truncatable.
+func largestTextBlock(content []llm.Content) (int, string, func(string) llm.Content) {
+	bestIdx, bestLen := -1, 0
+	var bestText string
+	var rebuild func(string) llm.Content
+	for i, c := range content {
+		switch cc := c.(type) {
+		case *llm.TextContent:
+			if len(cc.Text) > bestLen {
+				bestIdx, bestLen, bestText = i, len(cc.Text), cc.Text
+				src := cc
+				rebuild = func(s string) llm.Content {
+					return &llm.TextContent{Text: s, CacheControl: src.CacheControl, Citations: src.Citations}
+				}
+			}
+		case *llm.ToolResultContent:
+			txt := toolResultText(cc)
+			if len(txt) > bestLen {
+				bestIdx, bestLen, bestText = i, len(txt), txt
+				src := cc
+				rebuild = func(s string) llm.Content {
+					return &llm.ToolResultContent{ToolUseID: src.ToolUseID, Content: s, IsError: src.IsError, CacheControl: src.CacheControl}
+				}
+			}
+		}
+	}
+	return bestIdx, bestText, rebuild
+}
+
+// toolResultText projects a tool result's content to a string for truncation.
+func toolResultText(c *llm.ToolResultContent) string {
+	switch v := c.Content.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	default:
+		if data, err := json.Marshal(v); err == nil {
+			return string(data)
+		}
+		return ""
+	}
+}
+
+// truncateText keeps the head and tail of s within roughly maxBytes, eliding
+// the middle with a marker. Slices are repaired to valid UTF-8.
+func truncateText(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	marker := fmt.Sprintf("\n\n[... %d bytes truncated for summarization ...]\n\n", len(s)-maxBytes)
+	budget := maxBytes - len(marker)
+	if budget < 0 {
+		budget = 0
+	}
+	head := budget * 2 / 3
+	tail := budget - head
+	return strings.ToValidUTF8(s[:head], "") + marker + strings.ToValidUTF8(s[len(s)-tail:], "")
 }
