@@ -1,0 +1,25 @@
+# Compiled binary (default `go build` output is the directory name)
+/colosseum
+
+# Go build/test artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Node dependencies (in case a JS toolchain is added for web/static)
+node_modules/
+
+# Local environment / secrets
+.env
+.env.local
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

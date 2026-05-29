@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NoodleVille</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="stage">
+        <div class="mast">
+          <p class="label">NoodleVille</p>
+          <h1>Live town loop</h1>
+        </div>
+        <canvas id="map" width="720" height="720" aria-label="NoodleVille map"></canvas>
+      </section>
+      <aside class="panel">
+        <div class="status">
+          <div>
+            <span class="kicker">Clock</span>
+            <strong id="clock">day 1 08:00</strong>
+          </div>
+          <div>
+            <span class="kicker">Villagers</span>
+            <strong id="villagers">0</strong>
+          </div>
+          <div>
+            <span class="kicker">Memories</span>
+            <strong id="memories">0</strong>
+          </div>
+          <div>
+            <span class="kicker">Party</span>
+            <strong id="party">0</strong>
+          </div>
+        </div>
+        <section class="inspect" aria-live="polite">
+          <div class="inspect-head">
+            <div>
+              <span class="kicker">Inspect</span>
+              <h2 id="inspect-name">Select a villager</h2>
+            </div>
+            <span id="party-badge" class="badge">unknown</span>
+          </div>
+          <dl class="facts">
+            <div>
+              <dt>Role</dt>
+              <dd id="inspect-role">-</dd>
+            </div>
+            <div>
+              <dt>Plan</dt>
+              <dd id="inspect-plan">-</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd id="inspect-source">-</dd>
+            </div>
+          </dl>
+          <div class="inspect-grid">
+            <div>
+              <span class="kicker">Ties</span>
+              <ol id="relationships" class="mini-list"></ol>
+            </div>
+            <div>
+              <span class="kicker">Memories</span>
+              <ol id="inspector-memories" class="mini-list"></ol>
+            </div>
+          </div>
+        </section>
+        <ol id="feed" class="feed" aria-live="polite"></ol>
+      </aside>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
