@@ -20,8 +20,11 @@ cd examples
 | `mcp_servers_example` | Anthropic | Model Context Protocol tool integration |
 | `openai_responses_example` | OpenAI | Web search, reasoning, structured output, and MCP |
 | `openai_responses_pdf_example` | OpenAI | PDF analysis via the Responses API |
+| `openai_speech_example` | OpenAI | Text-to-speech and transcription round trip |
 | `google_example` | Google | Gemini model usage |
+| `google_speech_example` | Google | Gemini text-to-speech and transcription round trip |
 | `google_tool_example` | Google | Gemini with tool calling |
+| `speech_transcription_example` | OpenAI or Google | Transcribe a local audio file |
 | `ollama_example` | Ollama | Local model usage |
 | `openrouter_example` | OpenRouter | Multi-provider routing |
 | `skills_example` | Anthropic | Agent with skill loading and auto-invocation |
