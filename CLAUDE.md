@@ -35,7 +35,7 @@ Library-first approach — the CLI in `experimental/cmd/dive/` is secondary.
 - `skill/` — Unified skills and slash commands. `skill.Loader` implements `dive.Extension` — pass it to `AgentOptions.Extensions` to wire up the Skill tool, catalog hook, and content hook. Three-layer architecture: rules in system prompt, catalog as `<system-reminder name="skills">` in first user message, tool as trigger with content via PostToolUseHook. Provider-based loading (filesystem, `.agents/skills/`), variable expansion, trigger matching. `dive.SetSystemReminder` manages named blocks in conversation context.
 - `a2a/` — A2A (Agent-to-Agent) server and client adapter using the official `a2a-go/v2` SDK (separate Go module: `github.com/deepnoodle-ai/dive/a2a`). `Server` exposes a Dive agent as an A2A endpoint (JSON-RPC or REST). `RemoteAgent` calls remote A2A agents with zero SDK imports needed by callers (returns `*TaskResult`). `CardOptions` for static cards; `AgentCardProvider` for dynamic cards. Suspend/resume maps to `input-required` state. See `docs/guides/a2a.md`.
 - `otel/` — OpenTelemetry tracer adapter (separate Go module: `github.com/deepnoodle-ai/dive/otel`).
-- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, compaction, todo, toolkit (Bash/shell/memory/code-execution + TodoWrite).
+- `experimental/` — Functional but unstable APIs: settings, sandbox, mcp, compaction, todo, toolkit.
 
 ### Design Philosophy
 
