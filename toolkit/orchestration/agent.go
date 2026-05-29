@@ -28,9 +28,32 @@ import (
 // AgentFactory creates an agent for a subagent spawn. It receives the subagent
 // type name, its definition, and the parent's tools so it can apply tool
 // filtering (subagent.FilterTools). The factory is the seam where an application
-// can layer in worktree isolation, sandboxing, a per-run session, or model
-// routing before returning the agent.
+// can layer in worktree isolation, sandboxing, a per-run session, hooks, or
+// model routing before returning the agent.
+//
+// Most callers don't need a custom factory: set AgentToolOptions.Model and the
+// built-in DefaultAgentFactory is used.
 type AgentFactory func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error)
+
+// DefaultAgentFactory returns the AgentFactory that NewAgentTool uses when no
+// AgentFactory is supplied but a Model is. It builds each subagent from its
+// definition: the prompt becomes the system prompt, model is the given LLM, and
+// the tool set is the parent's tools filtered by the definition's allow/deny
+// lists (subagent.FilterTools, which also strips the Agent tool so subagents
+// can't spawn). Supply your own AgentFactory instead when you need worktree
+// isolation, per-subagent sessions, sandboxing, hooks, or per-definition model
+// routing — the built-in factory applies one model to every subagent and does
+// not consult Definition.Model.
+func DefaultAgentFactory(model llm.LLM) AgentFactory {
+	return func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
+		return dive.NewAgent(dive.AgentOptions{
+			Name:         name,
+			SystemPrompt: def.Prompt,
+			Model:        model,
+			Tools:        subagent.FilterTools(def, parentTools),
+		})
+	}
+}
 
 // AgentToolInput is the input for the Agent tool.
 type AgentToolInput struct {
@@ -47,7 +70,13 @@ type AgentToolOptions struct {
 	// effect on the tool.
 	Subagents map[string]*subagent.Definition
 
-	// AgentFactory creates the agent for a spawn. Required.
+	// Model is the LLM the built-in default factory gives each spawned subagent.
+	// Set this for the simplest setup. Ignored when AgentFactory is set.
+	Model llm.LLM
+
+	// AgentFactory creates the agent for a spawn. Optional: when nil, a built-in
+	// factory (DefaultAgentFactory) is used with Model. Provide one for full
+	// control over subagent construction. Either AgentFactory or Model must be set.
 	AgentFactory AgentFactory
 
 	// ParentTools are the parent agent's tools, passed to the factory for tool
@@ -78,6 +107,11 @@ func NewAgentTool(opts AgentToolOptions) *dive.TypedToolAdapter[*AgentToolInput]
 	if opts.DefaultTimeout <= 0 {
 		opts.DefaultTimeout = 10 * time.Minute
 	}
+	// Fall back to the built-in factory when the caller only supplied a Model.
+	factory := opts.AgentFactory
+	if factory == nil && opts.Model != nil {
+		factory = DefaultAgentFactory(opts.Model)
+	}
 	// Defensive copy: freeze the catalog so caller mutation can't race tool reads.
 	subagents := make(map[string]*subagent.Definition, len(opts.Subagents))
 	for name, def := range opts.Subagents {
@@ -85,7 +119,7 @@ func NewAgentTool(opts AgentToolOptions) *dive.TypedToolAdapter[*AgentToolInput]
 	}
 	return dive.ToolAdapter(&agentTool{
 		subagents:      subagents,
-		factory:        opts.AgentFactory,
+		factory:        factory,
 		parentTools:    opts.ParentTools,
 		runs:           opts.Runs,
 		defaultTimeout: opts.DefaultTimeout,
@@ -166,7 +200,7 @@ func (t *agentTool) Call(ctx context.Context, input *AgentToolInput) (*dive.Tool
 	}
 
 	if t.factory == nil {
-		return dive.NewToolResultError("Agent tool is misconfigured: AgentFactory is nil"), nil
+		return dive.NewToolResultError("Agent tool is misconfigured: set AgentToolOptions.Model or AgentFactory"), nil
 	}
 
 	agent, err := t.factory(ctx, input.SubagentType, def, t.parentTools)

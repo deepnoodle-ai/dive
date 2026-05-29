@@ -233,6 +233,33 @@ func TestAgentTool(t *testing.T) {
 		assert.Contains(t, res.Content[0].Text, "subagent_type is required")
 	})
 
+	t.Run("Model option uses the built-in default factory", func(t *testing.T) {
+		tool := NewAgentTool(AgentToolOptions{
+			Subagents: testTypes(),
+			Model:     &mockLLM{response: "explored!"},
+		})
+		res, err := tool.Call(ctx, &AgentToolInput{Prompt: "x", Description: "t", SubagentType: "Explore"})
+		assert.NoError(t, err)
+		assert.False(t, res.IsError)
+		assert.Contains(t, res.Content[0].Text, "explored!")
+	})
+
+	t.Run("AgentFactory takes precedence over Model", func(t *testing.T) {
+		factoryCalled := false
+		tool := NewAgentTool(AgentToolOptions{
+			Subagents: testTypes(),
+			Model:     &mockLLM{response: "from model"},
+			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
+				factoryCalled = true
+				return mockAgent(name, "from factory", nil, 0)
+			},
+		})
+		res, err := tool.Call(ctx, &AgentToolInput{Prompt: "x", Description: "t", SubagentType: "Explore"})
+		assert.NoError(t, err)
+		assert.True(t, factoryCalled)
+		assert.Contains(t, res.Content[0].Text, "from factory")
+	})
+
 	t.Run("nil factory returns an error instead of panicking", func(t *testing.T) {
 		tool := NewAgentTool(AgentToolOptions{Subagents: testTypes()})
 		res, err := tool.Call(ctx, &AgentToolInput{Prompt: "x", Description: "t", SubagentType: "GeneralPurpose"})

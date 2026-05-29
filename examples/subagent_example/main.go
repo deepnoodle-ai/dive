@@ -91,29 +91,18 @@ func main() {
 	printFiltered("Explore", subagent.Explore, subagentTools)
 	printFiltered("Plan", subagent.Plan, subagentTools)
 
-	// The spawnable subagents, keyed by type name.
-	subagents := map[string]*subagent.Definition{
-		"Explore": subagent.Explore,
-		"Plan":    subagent.Plan,
-	}
-
-	// The factory builds a fresh agent each time the parent spawns a subagent:
-	// the definition's prompt, the read-only tool set, and a hook that logs the
-	// subagent's own tool calls so its work is visible from the outside.
-	factory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
-		return dive.NewAgent(dive.AgentOptions{
-			Name:         name,
-			SystemPrompt: def.Prompt,
-			Model:        model,
-			Tools:        subagent.FilterTools(def, parentTools),
-			Hooks:        dive.Hooks{PreToolUse: []dive.PreToolUseHook{logSubagentTool(name)}},
-		})
-	}
-
+	// Build the Agent tool from a catalog of spawnable subagents. With Model set,
+	// NewAgentTool uses a built-in factory that gives each subagent its
+	// definition's prompt and a tool set filtered by its allow/deny lists — no
+	// factory to write. For full control (worktree isolation, per-subagent
+	// sessions, hooks, model routing), pass an AgentFactory instead.
 	agentTool := orchestration.NewAgentTool(orchestration.AgentToolOptions{
-		Subagents:    subagents,
-		AgentFactory: factory,
-		ParentTools:  subagentTools,
+		Subagents: map[string]*subagent.Definition{
+			"Explore": subagent.Explore,
+			"Plan":    subagent.Plan,
+		},
+		Model:       model,
+		ParentTools: subagentTools,
 	})
 
 	// The parent holds ONLY the Agent tool, so it cannot read files itself — it
@@ -134,7 +123,7 @@ func main() {
 	task := "Where is the `Add` function defined in this workspace, and what does it do? " +
 		"Also list the other exported functions."
 
-	fmt.Printf("\nTask for parent: %s\n\n--- Activity ([parent] delegates; [Explore] does the work) ---\n", task)
+	fmt.Printf("\nTask for parent: %s\n\n--- Activity (parent delegates via the Agent tool) ---\n", task)
 
 	response, err := parent.CreateResponse(ctx,
 		dive.WithInput(task),
@@ -160,17 +149,6 @@ func logParent(ctx context.Context, item *dive.ResponseItem) error {
 		}
 	}
 	return nil
-}
-
-// logSubagentTool returns a PreToolUse hook that logs each tool call a spawned
-// subagent makes, indented under the parent's delegation.
-func logSubagentTool(name string) dive.PreToolUseHook {
-	return func(ctx context.Context, hctx *dive.HookContext) error {
-		if hctx.Call != nil {
-			fmt.Printf("    [%s] → %s %s\n", name, hctx.Call.Name, truncate(string(hctx.Call.Input), 120))
-		}
-		return nil
-	}
 }
 
 // printFiltered shows which of allTools a read-only definition keeps vs removes.

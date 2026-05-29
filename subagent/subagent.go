@@ -70,8 +70,10 @@ type Definition struct {
 	// Names are matched case-insensitively.
 	DisallowedTools []string
 
-	// Model overrides the LLM model for this subagent.
-	// Valid values: "sonnet", "opus", "haiku", or "" to inherit from parent.
+	// Model is an optional, provider-agnostic model identifier (e.g. loaded from
+	// markdown frontmatter) that an AgentFactory may use to route this subagent
+	// to a specific model. Empty means "no preference". The built-in
+	// DefaultAgentFactory ignores it; supply a custom AgentFactory to act on it.
 	Model string
 }
 

@@ -30,11 +30,13 @@ The `subagent` package ships three ready-made `Definition`s:
 - `subagent.Explore` — read-only code search and reading (`Edit`/`Write`/`Bash` stripped via `DisallowedTools`).
 - `subagent.Plan` — read-only architectural analysis and planning.
 
-Clone and modify to override the model or tool set:
+Clone and modify to tweak a built-in — for example, narrowing the tool set the
+default factory will allow (assign a fresh slice rather than mutating the
+shared one):
 
 ```go
 myExplore := *subagent.Explore
-myExplore.Model = "haiku"
+myExplore.Tools = []string{"Glob", "Grep"} // search only
 ```
 
 ## Custom Agent Definitions
@@ -71,7 +73,7 @@ Be specific. Reference line numbers. Suggest fixes.
 | Field | Type | Description |
 |-------|------|-------------|
 | `description` | string | When the LLM should use this agent (shown in the tool description) |
-| `model` | string | Model override: `sonnet`, `opus`, `haiku`, or empty to inherit |
+| `model` | string | Optional, provider-agnostic model identifier a custom `AgentFactory` can route on. The built-in factory ignores it. |
 | `tools` | string[] | Allowed tool names. Omit to inherit all parent tools. |
 
 Use `subagent.GeneralPurpose` for a general-purpose agent that inherits the parent's tools, even without custom definitions.
@@ -99,26 +101,18 @@ subagents := map[string]*subagent.Definition{
 loaded, _ := (&subagent.FileLoader{Directories: []string{".dive/agents"}}).Load(ctx)
 maps.Copy(subagents, loaded)
 
-// The factory turns a definition into a concrete agent on demand. It is the
-// seam where an application layers in worktree isolation, a sandbox, a per-run
-// session, or model routing before returning the agent.
-factory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
-    return dive.NewAgent(dive.AgentOptions{
-        Name:         name,
-        SystemPrompt: def.Prompt,
-        Model:        myModel,
-        Tools:        subagent.FilterTools(def, parentTools),
-    })
-}
-
 // Runs is the shared tracker that lets TaskStop cancel background runs by id.
 runs := orchestration.NewRuns()
 
+// Simplest setup: pass a Model and NewAgentTool builds each subagent with a
+// built-in factory — the definition's prompt plus the parent's tools filtered by
+// the definition's allow/deny lists. For full control, pass an AgentFactory
+// instead (see "Custom subagent construction" below).
 agentTool := orchestration.NewAgentTool(orchestration.AgentToolOptions{
-    Subagents:    subagents,
-    AgentFactory: factory,
-    ParentTools:  parentTools,
-    Runs:         runs,
+    Subagents:   subagents,
+    Model:       myModel,
+    ParentTools: parentTools,
+    Runs:        runs,
 })
 taskStop := orchestration.NewTaskStopTool(orchestration.TaskStopToolOptions{Runs: runs})
 
@@ -129,6 +123,29 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 ```
 
 The orchestration constructors return `*dive.TypedToolAdapter[T]`, which satisfies `dive.Tool` directly — no manual `dive.ToolAdapter(...)` wrapping needed.
+
+### Custom subagent construction
+
+`Model` is shorthand for the built-in `orchestration.DefaultAgentFactory`. When you need more — worktree isolation, a sandbox, a per-run session, hooks, or per-definition model routing — pass an `AgentFactory` instead. It receives the subagent's name, definition, and the parent's tools, and returns the agent to run:
+
+```go
+factory := func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
+    return dive.NewAgent(dive.AgentOptions{
+        Name:         name,
+        SystemPrompt: def.Prompt,
+        Model:        myModel,
+        Tools:        subagent.FilterTools(def, parentTools), // strips Edit/Write/etc. per def, and the Agent tool
+        // ...add hooks, a Session, a sandboxed Bash tool, route on def.Model, etc.
+    })
+}
+
+agentTool := orchestration.NewAgentTool(orchestration.AgentToolOptions{
+    Subagents:    subagents,
+    AgentFactory: factory, // takes precedence over Model
+    ParentTools:  parentTools,
+    Runs:         runs,
+})
+```
 
 ### Background results
 
