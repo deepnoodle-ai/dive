@@ -701,21 +701,22 @@ func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 		return err
 	}
 	now := time.Now()
-	s.data.Events = append(s.data.Events, &event{
-		ID:        newEventID(),
-		Type:      eventTypeCompaction,
-		Timestamp: now,
-		Messages:  compacted,
-		Metadata: map[string]any{
-			"original_event_count":   len(active),
-			"original_message_count": len(msgs),
-		},
+	// withRollback restores Events/UpdatedAt if putSession fails, so a
+	// persistence error never leaves the in-memory checkpoint diverged from
+	// the store (matching SaveTurn and the suspend paths).
+	return s.withRollback(ctx, func() {
+		s.data.Events = append(s.data.Events, &event{
+			ID:        newEventID(),
+			Type:      eventTypeCompaction,
+			Timestamp: now,
+			Messages:  compacted,
+			Metadata: map[string]any{
+				"original_event_count":   len(active),
+				"original_message_count": len(msgs),
+			},
+		})
+		s.data.UpdatedAt = now
 	})
-	s.data.UpdatedAt = now
-	if s.appender != nil {
-		return s.appender.putSession(ctx, s.data)
-	}
-	return nil
 }
 
 // CompactionRecord describes a single compaction checkpoint.
