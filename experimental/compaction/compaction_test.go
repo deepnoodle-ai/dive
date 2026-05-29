@@ -336,11 +336,11 @@ func TestReduceToSummaryBudget(t *testing.T) {
 		out := reduceToSummaryBudget(msgs, budget)
 
 		assert.True(t, totalTokens(out) <= budget)
-		assert.Equal(t, "hello", out[0].Text())                  // small preserved verbatim
-		assert.True(t, len(out[1].Text()) > 0)                   // big still has content
-		assert.True(t, len(out[1].Text()) < len(bigText))        // ...but truncated
+		assert.Equal(t, "hello", out[0].Text())           // small preserved verbatim
+		assert.True(t, len(out[1].Text()) > 0)            // big still has content
+		assert.True(t, len(out[1].Text()) < len(bigText)) // ...but truncated
 		assert.True(t, strings.Contains(out[1].Text(), "truncated"))
-		assert.Equal(t, len(bigText), len(big.Text()))           // original not mutated
+		assert.Equal(t, len(bigText), len(big.Text())) // original not mutated
 	})
 
 	t.Run("preserves tool_use/tool_result pairing (never drops messages)", func(t *testing.T) {
