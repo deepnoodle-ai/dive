@@ -156,9 +156,9 @@ sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message
 })
 ```
 
-`Compact` summarizes the older part of the active window and inserts a
-`compaction` event whose summary becomes the new active window. The original
-turn events stay in the log. From there:
+`Compact` summarizes the current active window and appends a `compaction`
+event whose summary becomes the new active window. The original turn events
+stay in the log. From there:
 
 - `Messages()` returns the summary plus any turns after it — fewer tokens to
   the model.
@@ -166,21 +166,11 @@ turn events stay in the log. From there:
 - `CompactionHistory()` returns one `CompactionRecord` per checkpoint
   (`Summary`, `ReplacedMessages`, `CompactedAt`), in order.
 
-### Keeping recent turns verbatim
-
-Summarization is lossy, and the most recent turns are usually the work still in
-progress. `WithKeepRecentEvents(n)` preserves the last `n` events verbatim:
-`Compact` summarizes only the older events and positions the checkpoint *before*
-the kept tail, so `Messages()` returns the summary followed by those raw turns.
-
-```go
-sess.Compact(ctx, summarize, session.WithKeepRecentEvents(2))
-// active window = [summary] + last 2 turns, verbatim
-```
-
-The default (`n = 0`) summarizes the whole active window. The token-budget
-policy for choosing `n` lives in the caller; the session layer only counts
-events. The CLI opts into a small default so the latest work survives intact.
+Compaction does **not** special-case the most recent turns — the whole active
+window is summarized uniformly. Keeping recent exchanges in high detail is a
+summarizer-prompt concern (content policy in the `CompactFunc`), not a
+structural carve-out in the session: an oversized recent turn is summarized
+like any other and its bytes stay recoverable via `AllMessages`.
 
 The trade-off is storage: a compacted session is larger on disk than the
 summary alone, because the originals are retained. That is deliberate —

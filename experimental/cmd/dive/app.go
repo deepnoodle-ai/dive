@@ -1211,10 +1211,6 @@ func generateSessionTitle(message string) string {
 	return title
 }
 
-// compactionKeepRecentEvents is how many recent turns the CLI preserves
-// verbatim when compacting, so the latest work survives summarization intact.
-const compactionKeepRecentEvents = 2
-
 // repeatedCompactionWarnThreshold is the checkpoint count past which the CLI
 // nudges the user toward a fresh session — repeated lossy compactions compound
 // and degrade accuracy.
@@ -1279,7 +1275,7 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 			tokensBefore,
 		)
 		return compactedMsgs, err
-	}, session.WithKeepRecentEvents(compactionKeepRecentEvents))
+	})
 	if err != nil {
 		return
 	}
@@ -2068,7 +2064,7 @@ func (a *App) handleCompactCommand() {
 		)
 		event = evt
 		return compactedMsgs, err
-	}, session.WithKeepRecentEvents(compactionKeepRecentEvents))
+	})
 	if err != nil {
 		a.runner.Printf("Compaction failed: %v", err)
 		return

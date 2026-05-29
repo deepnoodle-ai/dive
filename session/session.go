@@ -669,35 +669,8 @@ func (s *Session) Fork(newID string) *Session {
 // CompactFunc summarizes a conversation into a shorter form.
 type CompactFunc func(ctx context.Context, messages []*llm.Message) ([]*llm.Message, error)
 
-// CompactOption configures a Compact call.
-type CompactOption func(*compactConfig)
-
-type compactConfig struct {
-	keepRecentEvents int
-}
-
-// WithKeepRecentEvents preserves the n most recent events (turns) verbatim
-// instead of folding them into the summary. Compact summarizes only the older
-// events and positions the checkpoint before the kept tail, so the active
-// window (see Messages) becomes the summary followed by those verbatim turns.
-//
-// Summarization is lossy, and the latest turns are the work most likely still
-// in progress — keeping them intact avoids a fidelity cliff at the moment of
-// compaction. Defaults to 0, which summarizes the entire active window.
-//
-// If n covers the whole active window there is nothing older to summarize and
-// Compact is a no-op.
-func WithKeepRecentEvents(n int) CompactOption {
-	return func(c *compactConfig) {
-		if n > 0 {
-			c.keepRecentEvents = n
-		}
-	}
-}
-
-// Compact summarizes the older part of the active conversation window and
-// inserts a compaction checkpoint. The checkpoint's summary, plus any recent
-// turns preserved via WithKeepRecentEvents, becomes the new active window (see
+// Compact summarizes the active conversation window and appends a compaction
+// checkpoint. The checkpoint's summary becomes the new active window (see
 // Messages), shrinking the tokens sent to the model, while every original
 // message stays in the log and remains recoverable (see AllMessages and
 // CompactionHistory). If the session is backed by a store, it is persisted.
@@ -712,28 +685,15 @@ func WithKeepRecentEvents(n int) CompactOption {
 // Compaction would strand the in-progress tool_use/tool_result messages that
 // the resume path depends on, so the caller must first resume the turn to
 // completion (via WithResume/WithToolResults) before compacting.
-func (s *Session) Compact(ctx context.Context, summarize CompactFunc, opts ...CompactOption) error {
-	var cfg compactConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
+func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.data.Suspended {
 		return ErrSuspendedSession
 	}
 	active := s.activeEventsLocked()
-	keep := cfg.keepRecentEvents
-	if keep > len(active) {
-		keep = len(active)
-	}
-	older := active[:len(active)-keep]
-	if len(older) == 0 {
-		// Nothing older than the preserved tail to summarize.
-		return nil
-	}
 	var msgs []*llm.Message
-	for _, e := range older {
+	for _, e := range active {
 		msgs = append(msgs, e.Messages...)
 	}
 	compacted, err := summarize(ctx, msgs)
@@ -741,26 +701,16 @@ func (s *Session) Compact(ctx context.Context, summarize CompactFunc, opts ...Co
 		return err
 	}
 	now := time.Now()
-	checkpoint := &event{
+	s.data.Events = append(s.data.Events, &event{
 		ID:        newEventID(),
 		Type:      eventTypeCompaction,
 		Timestamp: now,
 		Messages:  compacted,
 		Metadata: map[string]any{
-			"original_event_count":   len(older),
+			"original_event_count":   len(active),
 			"original_message_count": len(msgs),
 		},
-	}
-	// Insert the checkpoint just before the preserved tail. The kept events
-	// are the last `keep` of the active window, which are also the last `keep`
-	// of the full log, so the checkpoint lands at len(Events)-keep. With
-	// keep == 0 this appends at the end (summarize the whole window).
-	insertAt := len(s.data.Events) - keep
-	newEvents := make([]*event, 0, len(s.data.Events)+1)
-	newEvents = append(newEvents, s.data.Events[:insertAt]...)
-	newEvents = append(newEvents, checkpoint)
-	newEvents = append(newEvents, s.data.Events[insertAt:]...)
-	s.data.Events = newEvents
+	})
 	s.data.UpdatedAt = now
 	if s.appender != nil {
 		return s.appender.putSession(ctx, s.data)
