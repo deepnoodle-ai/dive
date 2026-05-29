@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	DefaultModel     = ModelGrok420Reasoning
+	DefaultModel     = ModelGrok43
 	DefaultEndpoint  = "https://api.x.ai/v1"
 	DefaultMaxTokens = 32768
 )

@@ -22,8 +22,19 @@ const (
 	// Deprecated: Use FeatureComputerUse45_46 instead.
 	FeatureComputerUseOpus45 = FeatureComputerUse45_46
 
-	// 1M context window beta (Opus 4.6, Sonnet 4.6, Sonnet 4.5, Sonnet 4)
+	// 1M context window beta (Opus 4.6, Sonnet 4.6, Sonnet 4.5, Sonnet 4).
+	// Opus 4.7 and 4.8 include the 1M context window by default with no beta
+	// header required.
 	FeatureContext1M = "context-1m-2025-08-07"
+
+	// Fast mode: higher output tokens per second at premium pricing (research
+	// preview). Supported on Opus 4.6, 4.7, and 4.8. Sent automatically when
+	// llm.WithSpeed(llm.SpeedFast) is used.
+	FeatureFastMode = "fast-mode-2026-02-01"
+
+	// Extended output up to 300k tokens on the Message Batches API (Opus 4.6,
+	// 4.7, 4.8, Sonnet 4.6).
+	FeatureOutput300k = "output-300k-2026-03-24"
 
 	// Server-side compaction (Opus 4.6, Sonnet 4.6)
 	FeatureCompact = "compact-2026-01-12"

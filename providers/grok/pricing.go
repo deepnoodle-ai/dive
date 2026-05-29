@@ -4,26 +4,40 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing contains pricing for all text generation models
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelGrok43: {
+		Model:       ModelGrok43,
+		InputPrice:  1.25,
+		OutputPrice: 2.50,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
 	ModelGrok420Reasoning: {
 		Model:       ModelGrok420Reasoning,
-		InputPrice:  2.00,
-		OutputPrice: 6.00,
+		InputPrice:  1.25,
+		OutputPrice: 2.50,
 		Currency:    "USD",
-		UpdatedAt:   "2026-03-25",
+		UpdatedAt:   "2026-05-28",
 	},
 	ModelGrok420NonReasoning: {
 		Model:       ModelGrok420NonReasoning,
-		InputPrice:  2.00,
-		OutputPrice: 6.00,
+		InputPrice:  1.25,
+		OutputPrice: 2.50,
 		Currency:    "USD",
-		UpdatedAt:   "2026-03-25",
+		UpdatedAt:   "2026-05-28",
 	},
 	ModelGrok420MultiAgent: {
 		Model:       ModelGrok420MultiAgent,
-		InputPrice:  2.00,
-		OutputPrice: 6.00,
+		InputPrice:  1.25,
+		OutputPrice: 2.50,
 		Currency:    "USD",
-		UpdatedAt:   "2026-03-25",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelGrokBuild01: {
+		Model:       ModelGrokBuild01,
+		InputPrice:  1.00,
+		OutputPrice: 2.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
 	},
 	ModelGrok41FastReasoning: {
 		Model:       ModelGrok41FastReasoning,
@@ -80,5 +94,21 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		OutputPrice: 0.50,
 		Currency:    "USD",
 		UpdatedAt:   "2026-02-09",
+	},
+}
+
+// ImageModelPricing contains pricing for Grok Imagine image generation models.
+var ImageModelPricing = map[string]llm.ImagePricingInfo{
+	ModelImagineImage: {
+		Model:     ModelImagineImage,
+		Price:     0.02,
+		Currency:  "USD",
+		UpdatedAt: "2026-05-28",
+	},
+	ModelImagineImageQuality: {
+		Model:     ModelImagineImageQuality,
+		Price:     0.05,
+		Currency:  "USD",
+		UpdatedAt: "2026-05-28",
 	},
 }

@@ -4,12 +4,40 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing contains pricing for all text generation models
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelGemini35Flash: {
+		Model:       ModelGemini35Flash,
+		InputPrice:  1.50,
+		OutputPrice: 9.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
 	ModelGemini31ProPreview: {
 		Model:       ModelGemini31ProPreview,
-		InputPrice:  2.00, // Up to 200K tokens
-		OutputPrice: 12.00,
+		InputPrice:  2.00,  // Up to 200K tokens ($4.00 over 200K)
+		OutputPrice: 12.00, // $18.00 over 200K tokens
 		Currency:    "USD",
-		UpdatedAt:   "2026-03-10",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelGemini31ProPreviewCustomTools: {
+		Model:       ModelGemini31ProPreviewCustomTools,
+		InputPrice:  2.00,  // Up to 200K tokens ($4.00 over 200K)
+		OutputPrice: 12.00, // $18.00 over 200K tokens
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelGemini31FlashLite: {
+		Model:       ModelGemini31FlashLite,
+		InputPrice:  0.25, // text/image/video ($0.50 audio)
+		OutputPrice: 1.50,
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
+	},
+	ModelGemini31FlashLivePreview: {
+		Model:       ModelGemini31FlashLivePreview,
+		InputPrice:  0.75, // text input
+		OutputPrice: 4.50, // text output
+		Currency:    "USD",
+		UpdatedAt:   "2026-05-28",
 	},
 	ModelGemini31FlashLitePreview: {
 		Model:       ModelGemini31FlashLitePreview,
@@ -91,6 +119,20 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{
 		MaxSize:   "1024x1024",
 		Currency:  "USD",
 		UpdatedAt: "2025-01-15",
+	},
+	ModelGemini31FlashImage: {
+		Model:     ModelGemini31FlashImage,
+		Price:     0.067, // $60 per 1M output tokens; ~$0.067 per 1K-resolution image
+		MaxSize:   "1024x1024",
+		Currency:  "USD",
+		UpdatedAt: "2026-05-28",
+	},
+	ModelGemini31ProImage: {
+		Model:     ModelGemini31ProImage,
+		Price:     0.134, // $120 per 1M output tokens; ~$0.134 per 1K/2K image ($0.24 at 4K)
+		MaxSize:   "2048x2048",
+		Currency:  "USD",
+		UpdatedAt: "2026-05-28",
 	},
 }
 

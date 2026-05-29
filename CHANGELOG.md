@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- **Claude Opus 4.8 and 4.7** model constants (`anthropic.ModelClaudeOpus48`,
+  `ModelClaudeOpus47`) and pricing; the Anthropic and OpenRouter provider
+  defaults are now Opus 4.8. Added a `FastModeTextPricing` table.
+- **Native Anthropic effort parameter** — `WithReasoningEffort` now maps to
+  `output_config.effort` on Opus 4.5+ and Sonnet 4.6 (older models keep the
+  legacy effort→budget mapping). New effort levels `ReasoningEffortXHigh` and
+  `ReasoningEffortMax`.
+- **Adaptive thinking** — `WithAdaptiveThinking()` / `WithThinking(...)` and
+  `WithThinkingDisplay(...)`. On Opus 4.7/4.8 (adaptive-only models) a manual
+  `WithReasoningBudget` transparently falls back to adaptive thinking.
+- **Fast mode** — `WithSpeed(llm.SpeedFast)` sets `speed: "fast"` and the
+  `fast-mode-2026-02-01` beta header; `Usage.Speed` reports the speed used.
+- **Refusal `stop_details`** on `llm.Response` (`StopDetails`).
+- `dive.ModelSettings` gains `Thinking`, `ThinkingDisplay`, and `Speed`.
+- **Gemini**: `gemini-3.5-flash`, `gemini-3.1-flash-lite` (stable),
+  `gemini-3.1-pro-image`, `gemini-3.1-flash-image`, `gemini-3.1-flash-live-preview`,
+  `gemini-3.1-pro-preview-customtools`, plus pricing.
+- **Grok**: `grok-4.3` (new default), `grok-build-0.1`,
+  `grok-imagine-image-quality`, plus pricing.
+
+### Fixed
+
+- Effort/thinking requests no longer fail with a 400 on Claude Opus 4.7/4.8,
+  which reject manual thinking budgets.
+- Corrected Grok 4.20 pricing to $1.25/$2.50 per 1M tokens.
+
 ## [1.5.0] - 2026-05-15
 
 ### Added

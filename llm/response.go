@@ -17,9 +17,19 @@ type Response struct {
 	Content           []Content                  `json:"content"`
 	StopReason        string                     `json:"stop_reason"`
 	StopSequence      *string                    `json:"stop_sequence,omitempty"`
+	StopDetails       *StopDetails               `json:"stop_details,omitempty"`
 	Type              string                     `json:"type"`
 	Usage             Usage                      `json:"usage"`
 	ContextManagement *ContextManagementResponse `json:"context_management,omitempty"`
+}
+
+// StopDetails provides additional structured detail about why generation
+// stopped. It is populated alongside StopReason — most notably on refusals,
+// where Type categorizes the kind of refusal so applications can route the
+// user to the right next step.
+type StopDetails struct {
+	// Type categorizes the stop reason (e.g. the refusal category).
+	Type string `json:"type,omitempty"`
 }
 
 // ContextManagementResponse contains information about applied context edits.
@@ -84,6 +94,7 @@ func (r *Response) UnmarshalJSON(data []byte) error {
 		Content           []json.RawMessage          `json:"content"`
 		StopReason        string                     `json:"stop_reason"`
 		StopSequence      *string                    `json:"stop_sequence,omitempty"`
+		StopDetails       *StopDetails               `json:"stop_details,omitempty"`
 		Type              string                     `json:"type"`
 		Usage             Usage                      `json:"usage"`
 		ContextManagement *ContextManagementResponse `json:"context_management,omitempty"`
@@ -101,6 +112,7 @@ func (r *Response) UnmarshalJSON(data []byte) error {
 	r.Role = tmp.Role
 	r.StopReason = tmp.StopReason
 	r.StopSequence = tmp.StopSequence
+	r.StopDetails = tmp.StopDetails
 	r.Type = tmp.Type
 	r.Usage = tmp.Usage
 	r.ContextManagement = tmp.ContextManagement
