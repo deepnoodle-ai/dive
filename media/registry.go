@@ -11,6 +11,12 @@ type ImageProviderFactory func(model string) ImageProvider
 // VideoProviderFactory creates a VideoProvider for a given model name.
 type VideoProviderFactory func(model string) VideoProvider
 
+// TextToSpeechProviderFactory creates a TextToSpeechProvider for a given model name.
+type TextToSpeechProviderFactory func(model string) TextToSpeechProvider
+
+// TranscriptionProviderFactory creates a TranscriptionProvider for a given model name.
+type TranscriptionProviderFactory func(model string) TranscriptionProvider
+
 // ModelMatcher determines if a model name matches a provider.
 type ModelMatcher func(model string) bool
 
@@ -28,11 +34,27 @@ type VideoProviderEntry struct {
 	Factory VideoProviderFactory
 }
 
+// TextToSpeechProviderEntry pairs a matcher with its factory.
+type TextToSpeechProviderEntry struct {
+	Name    string
+	Match   ModelMatcher
+	Factory TextToSpeechProviderFactory
+}
+
+// TranscriptionProviderEntry pairs a matcher with its factory.
+type TranscriptionProviderEntry struct {
+	Name    string
+	Match   ModelMatcher
+	Factory TranscriptionProviderFactory
+}
+
 // Registry manages model-to-provider mappings for media generation.
 type Registry struct {
-	mu             sync.RWMutex
-	imageProviders []ImageProviderEntry
-	videoProviders []VideoProviderEntry
+	mu                     sync.RWMutex
+	imageProviders         []ImageProviderEntry
+	videoProviders         []VideoProviderEntry
+	textToSpeechProviders  []TextToSpeechProviderEntry
+	transcriptionProviders []TranscriptionProviderEntry
 }
 
 // RegisterImage adds an image provider entry to the registry.
@@ -47,6 +69,20 @@ func (r *Registry) RegisterVideo(entry VideoProviderEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.videoProviders = append(r.videoProviders, entry)
+}
+
+// RegisterTextToSpeech adds a text-to-speech provider entry to the registry.
+func (r *Registry) RegisterTextToSpeech(entry TextToSpeechProviderEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.textToSpeechProviders = append(r.textToSpeechProviders, entry)
+}
+
+// RegisterTranscription adds a transcription provider entry to the registry.
+func (r *Registry) RegisterTranscription(entry TranscriptionProviderEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.transcriptionProviders = append(r.transcriptionProviders, entry)
 }
 
 // ResolveImage returns an ImageProvider for the given model name.
@@ -73,6 +109,30 @@ func (r *Registry) ResolveVideo(model string) (VideoProvider, error) {
 	return nil, ErrProviderNotFound
 }
 
+// ResolveTextToSpeech returns a TextToSpeechProvider for the given model name.
+func (r *Registry) ResolveTextToSpeech(model string) (TextToSpeechProvider, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, entry := range r.textToSpeechProviders {
+		if entry.Match(model) {
+			return entry.Factory(model), nil
+		}
+	}
+	return nil, ErrProviderNotFound
+}
+
+// ResolveTranscription returns a TranscriptionProvider for the given model name.
+func (r *Registry) ResolveTranscription(model string) (TranscriptionProvider, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, entry := range r.transcriptionProviders {
+		if entry.Match(model) {
+			return entry.Factory(model), nil
+		}
+	}
+	return nil, ErrProviderNotFound
+}
+
 // ImageEntries returns a copy of all registered image provider entries.
 func (r *Registry) ImageEntries() []ImageProviderEntry {
 	r.mu.RLock()
@@ -91,6 +151,24 @@ func (r *Registry) VideoEntries() []VideoProviderEntry {
 	return result
 }
 
+// TextToSpeechEntries returns a copy of all registered text-to-speech provider entries.
+func (r *Registry) TextToSpeechEntries() []TextToSpeechProviderEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]TextToSpeechProviderEntry, len(r.textToSpeechProviders))
+	copy(result, r.textToSpeechProviders)
+	return result
+}
+
+// TranscriptionEntries returns a copy of all registered transcription provider entries.
+func (r *Registry) TranscriptionEntries() []TranscriptionProviderEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]TranscriptionProviderEntry, len(r.transcriptionProviders))
+	copy(result, r.transcriptionProviders)
+	return result
+}
+
 // Global default registry
 
 var defaultRegistry = &Registry{}
@@ -103,6 +181,16 @@ func RegisterImage(entry ImageProviderEntry) {
 // RegisterVideo adds a video provider entry to the default registry.
 func RegisterVideo(entry VideoProviderEntry) {
 	defaultRegistry.RegisterVideo(entry)
+}
+
+// RegisterTextToSpeech adds a text-to-speech provider entry to the default registry.
+func RegisterTextToSpeech(entry TextToSpeechProviderEntry) {
+	defaultRegistry.RegisterTextToSpeech(entry)
+}
+
+// RegisterTranscription adds a transcription provider entry to the default registry.
+func RegisterTranscription(entry TranscriptionProviderEntry) {
+	defaultRegistry.RegisterTranscription(entry)
 }
 
 // DefaultRegistry returns the default global registry.

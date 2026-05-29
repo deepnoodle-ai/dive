@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"strings"
 	"time"
 
 	// Register image decoders for DecodeConfig.
@@ -19,10 +20,12 @@ import (
 	"github.com/deepnoodle-ai/dive/media"
 )
 
-// MediaProvider generates images and videos using OpenAI APIs.
+// MediaProvider generates images, videos, speech, and transcriptions using OpenAI APIs.
 //
 // Supported image models: gpt-image-2, gpt-image-1.5, gpt-image-1, gpt-image-1-mini
 // Supported video models: sora-2, sora-2-pro
+// Supported speech models: gpt-4o-mini-tts, tts-1, tts-1-hd
+// Supported transcription models: gpt-4o-mini-transcribe, gpt-4o-transcribe, whisper-1
 type MediaProvider struct {
 	client *openai.Client
 }
@@ -190,6 +193,132 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 	return result, nil
 }
 
+// TextToSpeech implements media.TextToSpeechProvider.
+func (p *MediaProvider) TextToSpeech(ctx context.Context, text string, config *media.Config) (*media.AudioResult, error) {
+	model := config.Model
+	if model == "" {
+		model = "gpt-4o-mini-tts"
+	}
+
+	voice := config.Voice
+	if voice == "" {
+		voice = "alloy"
+	}
+
+	format := config.AudioFormat
+	if format == "" {
+		format = media.AudioFormatMP3
+	}
+	if err := media.ValidateAudioFormat(format); err != nil {
+		return nil, err
+	}
+
+	params := openai.AudioSpeechNewParams{
+		Input: text,
+		Model: openai.SpeechModel(model),
+		Voice: openai.AudioSpeechNewParamsVoiceUnion{
+			OfString: openai.String(voice),
+		},
+		ResponseFormat: openai.AudioSpeechNewParamsResponseFormat(format),
+	}
+	if config.VoiceInstructions != "" {
+		params.Instructions = openai.String(config.VoiceInstructions)
+	}
+	if config.SpeechSpeed != nil {
+		if *config.SpeechSpeed < 0.25 || *config.SpeechSpeed > 4.0 {
+			return nil, fmt.Errorf("speech speed must be between 0.25 and 4.0")
+		}
+		params.Speed = openai.Float(*config.SpeechSpeed)
+	}
+
+	resp, err := p.client.Audio.Speech.New(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("openai text-to-speech: %w", err)
+	}
+	defer resp.Body.Close()
+
+	audioData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading text-to-speech audio: %w", err)
+	}
+
+	result := &media.AudioResult{
+		Data:     audioData,
+		Model:    model,
+		Format:   format,
+		MimeType: format.MIMEType(),
+		Metadata: map[string]any{
+			"provider": "openai",
+			"voice":    voice,
+		},
+	}
+	if contentType := resp.Header.Get("Content-Type"); strings.HasPrefix(strings.ToLower(contentType), "audio/") {
+		result.SetAudioFormat(contentType)
+	}
+	return result, nil
+}
+
+// Transcribe implements media.TranscriptionProvider.
+func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *media.Config) (*media.TranscriptionResult, error) {
+	if len(audio) == 0 {
+		return nil, fmt.Errorf("audio data is required for transcription")
+	}
+
+	model := config.Model
+	if model == "" {
+		model = "gpt-4o-mini-transcribe"
+	}
+
+	mimeType := config.AudioMIMEType
+	if mimeType == "" {
+		mimeType = media.DetectAudioMIMEFromBytes(audio)
+	}
+	filename := "speech" + media.AudioExtensionFromMIME(mimeType)
+
+	params := openai.AudioTranscriptionNewParams{
+		File:           openai.File(bytes.NewReader(audio), filename, mimeType),
+		Model:          openai.AudioModel(model),
+		ResponseFormat: openai.AudioResponseFormatJSON,
+	}
+	if config.Language != "" {
+		params.Language = openai.String(config.Language)
+	}
+	if config.TranscriptionPrompt != "" {
+		params.Prompt = openai.String(config.TranscriptionPrompt)
+	}
+
+	resp, err := p.client.Audio.Transcriptions.New(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("openai transcription: %w", err)
+	}
+
+	result := &media.TranscriptionResult{
+		Text:     resp.Text,
+		Model:    model,
+		Language: resp.Language,
+		Metadata: map[string]any{
+			"provider":  "openai",
+			"mime_type": mimeType,
+		},
+	}
+	if result.Language == "" {
+		result.Language = config.Language
+	}
+	if resp.Duration > 0 {
+		result.Duration = time.Duration(resp.Duration * float64(time.Second))
+	}
+	if resp.Usage.Type != "" {
+		result.Metadata["usage_type"] = resp.Usage.Type
+	}
+	if resp.Usage.TotalTokens > 0 {
+		result.Metadata["total_tokens"] = resp.Usage.TotalTokens
+	}
+	if resp.Usage.Seconds > 0 {
+		result.Metadata["usage_seconds"] = resp.Usage.Seconds
+	}
+	return result, nil
+}
+
 // decodeImageResults extracts image data from OpenAI response items.
 func decodeImageResults(data []openai.Image, model string) ([]*media.ImageResult, error) {
 	var results []*media.ImageResult
@@ -285,7 +414,9 @@ func durationToSeconds(d time.Duration) string {
 
 // Compile-time interface checks.
 var (
-	_ media.ImageProvider = (*MediaProvider)(nil)
-	_ media.ImageEditor   = (*MediaProvider)(nil)
-	_ media.VideoProvider = (*MediaProvider)(nil)
+	_ media.ImageProvider         = (*MediaProvider)(nil)
+	_ media.ImageEditor           = (*MediaProvider)(nil)
+	_ media.VideoProvider         = (*MediaProvider)(nil)
+	_ media.TextToSpeechProvider  = (*MediaProvider)(nil)
+	_ media.TranscriptionProvider = (*MediaProvider)(nil)
 )

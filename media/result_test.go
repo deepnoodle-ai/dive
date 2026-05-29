@@ -77,6 +77,41 @@ func TestVideoResult_WriteTo_AutoExtension(t *testing.T) {
 	assert.Equal(t, []byte("fake-webm-data"), data)
 }
 
+func TestAudioResult_WriteTo(t *testing.T) {
+	dir := t.TempDir()
+	r := &AudioResult{
+		Data:   []byte("fake-audio-data"),
+		Format: AudioFormatMP3,
+	}
+
+	path := filepath.Join(dir, "test.mp3")
+	actual, err := r.WriteTo(path)
+	assert.NoError(t, err)
+	assert.Equal(t, path, actual)
+
+	data, err := os.ReadFile(path)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("fake-audio-data"), data)
+}
+
+func TestAudioResult_WriteTo_AutoExtension(t *testing.T) {
+	dir := t.TempDir()
+	r := &AudioResult{
+		Data:   []byte("fake-wav-data"),
+		Format: AudioFormatWAV,
+	}
+
+	path := filepath.Join(dir, "test")
+	actual, err := r.WriteTo(path)
+	assert.NoError(t, err)
+
+	expected := filepath.Join(dir, "test.wav")
+	assert.Equal(t, expected, actual)
+	data, err := os.ReadFile(expected)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("fake-wav-data"), data)
+}
+
 func TestUniquePath(t *testing.T) {
 	dir := t.TempDir()
 
@@ -132,6 +167,18 @@ func TestVideoResult_SetVideoFormat(t *testing.T) {
 	r.SetVideoFormat("video/unknown")
 	assert.Equal(t, "mp4", r.Format)
 	assert.Equal(t, "video/mp4", r.MimeType)
+}
+
+func TestAudioResult_SetAudioFormat(t *testing.T) {
+	r := &AudioResult{}
+
+	r.SetAudioFormat("audio/wav")
+	assert.Equal(t, AudioFormatWAV, r.Format)
+	assert.Equal(t, "audio/wav", r.MimeType)
+
+	r.SetAudioFormat("audio/mpeg")
+	assert.Equal(t, AudioFormatMP3, r.Format)
+	assert.Equal(t, "audio/mpeg", r.MimeType)
 }
 
 func TestSlugifyPrompt(t *testing.T) {

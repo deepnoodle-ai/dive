@@ -218,3 +218,71 @@ func GenerateVideo(ctx context.Context, prompt string, opts ...Option) (*VideoRe
 	}
 	return result, nil
 }
+
+// TextToSpeech generates spoken audio from text.
+func TextToSpeech(ctx context.Context, text string, opts ...Option) (*AudioResult, error) {
+	config := &Config{}
+	config.Apply(opts...)
+
+	if config.Model == "" {
+		return nil, ErrNoModel
+	}
+
+	provider, err := defaultRegistry.ResolveTextToSpeech(config.Model)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, config.Model)
+	}
+
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := provider.TextToSpeech(ctx, text, config)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ErrTimeout
+		}
+		return nil, err
+	}
+	if result == nil || len(result.Data) == 0 {
+		return nil, ErrNoResult
+	}
+	return result, nil
+}
+
+// Transcribe transcribes speech audio bytes into text.
+func Transcribe(ctx context.Context, audio []byte, opts ...Option) (*TranscriptionResult, error) {
+	config := &Config{}
+	config.Apply(opts...)
+
+	if config.Model == "" {
+		return nil, ErrNoModel
+	}
+
+	provider, err := defaultRegistry.ResolveTranscription(config.Model)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, config.Model)
+	}
+
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := provider.Transcribe(ctx, audio, config)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ErrTimeout
+		}
+		return nil, err
+	}
+	if result == nil || result.Text == "" {
+		return nil, ErrNoResult
+	}
+	return result, nil
+}

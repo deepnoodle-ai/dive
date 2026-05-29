@@ -3,9 +3,10 @@
 > **Experimental**: The media generation system is functional but its API may
 > change in future releases.
 
-Dive provides cross-provider image and video generation through the `media`
-package and corresponding toolkit tools. Supported providers include OpenAI
-(gpt-image, Sora), Google (Imagen, Gemini, Veo), and Grok (grok-imagine).
+Dive provides cross-provider image, video, and speech media through the `media`
+package. Image and video are also available as toolkit tools. Supported
+providers include OpenAI (gpt-image, Sora, GPT-4o mini TTS/transcribe), Google
+(Imagen, Gemini, Veo), and Grok (grok-imagine).
 
 ## Setup
 
@@ -120,6 +121,67 @@ fmt.Printf("Saved: %s (%dx%d %s, %s)\n",
 Video generation is synchronous from the caller's perspective — the call blocks
 until the provider completes or the context is cancelled.
 
+## Text-to-Speech
+
+Generate spoken audio from text with OpenAI TTS or Gemini TTS models:
+
+```go
+result, err := media.TextToSpeech(ctx, "Welcome to Dive.",
+    media.WithModel("gpt-4o-mini-tts"),
+    media.WithVoice("alloy"),
+    media.WithAudioFormat(media.AudioFormatMP3),
+    media.WithVoiceInstructions("Speak warmly and clearly."),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+path, err := result.WriteTo("welcome")
+fmt.Printf("Saved: %s (%s, %s)\n", path, result.Format, result.MimeType)
+```
+
+Gemini TTS returns PCM audio from the API; Dive wraps it as WAV by default so
+`WriteTo("welcome")` produces a playable `.wav` file:
+
+```go
+result, err := media.TextToSpeech(ctx, "Say cheerfully: Have a wonderful day!",
+    media.WithModel("gemini-3.1-flash-tts-preview"),
+    media.WithVoice("Kore"),
+    media.WithAudioFormat(media.AudioFormatWAV),
+)
+```
+
+## Transcription
+
+Transcribe audio bytes with OpenAI speech-to-text models or Gemini audio
+understanding models:
+
+```go
+audio, _ := os.ReadFile("meeting.wav")
+
+result, err := media.Transcribe(ctx, audio,
+    media.WithModel("gpt-4o-mini-transcribe"),
+    media.WithAudioMIMEType("audio/wav"),
+    media.WithLanguage("en"),
+    media.WithTranscriptionPrompt("The audio is about the Dive Go library."),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(result.Text)
+```
+
+For Gemini, use a general audio-capable Gemini model and an optional prompt:
+
+```go
+result, err := media.Transcribe(ctx, audio,
+    media.WithModel("gemini-3.5-flash"),
+    media.WithAudioMIMEType("audio/wav"),
+    media.WithTranscriptionPrompt("Generate a concise transcript of the speech."),
+)
+```
+
 ## Supported Models
 
 ### Image Models
@@ -138,6 +200,20 @@ until the provider completes or the context is cancelled.
 | OpenAI | `sora-2`, `sora-2-pro` |
 | Grok | `grok-imagine-video` |
 
+### Text-to-Speech Models
+
+| Provider | Models |
+|----------|--------|
+| OpenAI | `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd` |
+| Google | `gemini-3.1-flash-tts-preview`, `gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts` |
+
+### Transcription Models
+
+| Provider | Models |
+|----------|--------|
+| OpenAI | `gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`, `whisper-1` |
+| Google | Audio-capable Gemini models such as `gemini-3.5-flash` |
+
 ## Options Reference
 
 | Option | Description | Default |
@@ -149,11 +225,18 @@ until the provider completes or the context is cancelled.
 | `WithCount(n)` | Number of images to generate | 1 |
 | `WithReferenceImage(data)` | Reference image bytes for editing | — |
 | `WithDuration(d)` | Video duration | Provider default |
+| `WithAudioFormat(f)` | `AudioFormatMP3`, `AudioFormatWAV`, `AudioFormatPCM`, etc. | Provider default |
+| `WithAudioMIMEType(mime)` | Input audio MIME hint for transcription | Auto-detected |
+| `WithVoice(v)` | Text-to-speech voice | Provider default |
+| `WithVoiceInstructions(s)` | Text-to-speech style instructions | — |
+| `WithSpeechSpeed(n)` | Speech speed when supported | Provider default |
+| `WithLanguage(code)` | Transcription or speech language hint | Provider default |
+| `WithTranscriptionPrompt(p)` | Transcription context prompt | Provider default |
 | `WithTimeout(d)` | Max generation wait time | 5min (image), 15min (video) |
 
 ## File Output
 
-Both `ImageResult.WriteTo` and `VideoResult.WriteTo` handle file writing with
+`ImageResult.WriteTo`, `VideoResult.WriteTo`, and `AudioResult.WriteTo` handle file writing with
 two safety features:
 
 - **Auto-extension**: If the path has no extension, the appropriate one is

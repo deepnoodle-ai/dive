@@ -13,6 +13,13 @@ func TestOptions(t *testing.T) {
 		WithModel("imagen-4.0-generate-001"),
 		WithAspectRatio(Aspect16x9),
 		WithOutputFormat(FormatPNG),
+		WithAudioFormat(AudioFormatWAV),
+		WithAudioMIMEType("audio/wav"),
+		WithVoice("Kore"),
+		WithVoiceInstructions("Speak warmly."),
+		WithSpeechSpeed(1.25),
+		WithLanguage("en"),
+		WithTranscriptionPrompt("The speaker mentions Dive."),
 		WithCount(3),
 		WithDuration(8*time.Second),
 		WithTimeout(2*time.Minute),
@@ -22,6 +29,13 @@ func TestOptions(t *testing.T) {
 	assert.Equal(t, "imagen-4.0-generate-001", c.Model)
 	assert.Equal(t, Aspect16x9, c.AspectRatio)
 	assert.Equal(t, FormatPNG, c.OutputFormat)
+	assert.Equal(t, AudioFormatWAV, c.AudioFormat)
+	assert.Equal(t, "audio/wav", c.AudioMIMEType)
+	assert.Equal(t, "Kore", c.Voice)
+	assert.Equal(t, "Speak warmly.", c.VoiceInstructions)
+	assert.Equal(t, 1.25, *c.SpeechSpeed)
+	assert.Equal(t, "en", c.Language)
+	assert.Equal(t, "The speaker mentions Dive.", c.TranscriptionPrompt)
 	assert.Equal(t, 3, c.Count)
 	assert.Equal(t, 8*time.Second, c.Duration)
 	assert.Equal(t, 2*time.Minute, c.Timeout)

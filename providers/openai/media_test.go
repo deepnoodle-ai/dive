@@ -86,6 +86,24 @@ func TestOpenAIVideoMatcher(t *testing.T) {
 	assert.True(t, !matcher("veo-3"))
 }
 
+func TestOpenAISpeechMatcher(t *testing.T) {
+	matcher := media.PrefixesMatcher("tts-", "gpt-4o-mini-tts")
+	assert.True(t, matcher("tts-1"))
+	assert.True(t, matcher("tts-1-hd"))
+	assert.True(t, matcher("gpt-4o-mini-tts"))
+	assert.True(t, matcher("gpt-4o-mini-tts-2025-12-15"))
+	assert.True(t, !matcher("gpt-4o-mini-transcribe"))
+}
+
+func TestOpenAITranscriptionMatcher(t *testing.T) {
+	matcher := media.PrefixesMatcher("whisper-", "gpt-4o-transcribe", "gpt-4o-mini-transcribe")
+	assert.True(t, matcher("whisper-1"))
+	assert.True(t, matcher("gpt-4o-transcribe"))
+	assert.True(t, matcher("gpt-4o-mini-transcribe"))
+	assert.True(t, matcher("gpt-4o-transcribe-diarize"))
+	assert.True(t, !matcher("gpt-4o-mini-tts"))
+}
+
 func requireOpenAIMediaIntegration(t *testing.T) {
 	t.Helper()
 	if os.Getenv("RUN_INTEGRATION_TESTS") == "" {
@@ -128,4 +146,38 @@ func TestOpenAIGenerateVideo_Integration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, len(result.Data) > 0)
 	assert.Equal(t, "mp4", result.Format)
+}
+
+func TestOpenAITextToSpeech_Integration(t *testing.T) {
+	requireOpenAIMediaIntegration(t)
+
+	p := NewMediaProvider()
+	config := &media.Config{
+		Model:       "gpt-4o-mini-tts",
+		Voice:       "alloy",
+		AudioFormat: media.AudioFormatMP3,
+	}
+	result, err := p.TextToSpeech(context.Background(), "Hello from Dive.", config)
+	assert.NoError(t, err)
+	assert.True(t, len(result.Data) > 0)
+	assert.Equal(t, media.AudioFormatMP3, result.Format)
+}
+
+func TestOpenAITranscribe_Integration(t *testing.T) {
+	requireOpenAIMediaIntegration(t)
+
+	speech, err := NewMediaProvider().TextToSpeech(context.Background(), "This is a Dive transcription test.", &media.Config{
+		Model:       "gpt-4o-mini-tts",
+		Voice:       "alloy",
+		AudioFormat: media.AudioFormatMP3,
+	})
+	assert.NoError(t, err)
+
+	p := NewMediaProvider()
+	result, err := p.Transcribe(context.Background(), speech.Data, &media.Config{
+		Model:         "gpt-4o-mini-transcribe",
+		AudioMIMEType: "audio/mpeg",
+	})
+	assert.NoError(t, err)
+	assert.Contains(t, result.Text, "Dive")
 }

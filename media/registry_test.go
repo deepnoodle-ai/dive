@@ -37,6 +37,26 @@ func (m *mockVideoProvider) GenerateVideo(_ context.Context, _ string, _ *Config
 	return m.result, m.err
 }
 
+type mockTextToSpeechProvider struct {
+	model  string
+	result *AudioResult
+	err    error
+}
+
+func (m *mockTextToSpeechProvider) TextToSpeech(_ context.Context, _ string, _ *Config) (*AudioResult, error) {
+	return m.result, m.err
+}
+
+type mockTranscriptionProvider struct {
+	model  string
+	result *TranscriptionResult
+	err    error
+}
+
+func (m *mockTranscriptionProvider) Transcribe(_ context.Context, _ []byte, _ *Config) (*TranscriptionResult, error) {
+	return m.result, m.err
+}
+
 func TestRegistry_ResolveImage(t *testing.T) {
 	r := &Registry{}
 	called := false
@@ -82,6 +102,48 @@ func TestRegistry_ResolveVideo_NotFound(t *testing.T) {
 	assert.Equal(t, ErrProviderNotFound, err)
 }
 
+func TestRegistry_ResolveTextToSpeech(t *testing.T) {
+	r := &Registry{}
+	r.RegisterTextToSpeech(TextToSpeechProviderEntry{
+		Name:  "test",
+		Match: PrefixMatcher("tts-"),
+		Factory: func(model string) TextToSpeechProvider {
+			return &mockTextToSpeechProvider{model: model}
+		},
+	})
+
+	provider, err := r.ResolveTextToSpeech("tts-model")
+	assert.NoError(t, err)
+	assert.NotNil(t, provider)
+}
+
+func TestRegistry_ResolveTextToSpeech_NotFound(t *testing.T) {
+	r := &Registry{}
+	_, err := r.ResolveTextToSpeech("unknown")
+	assert.Equal(t, ErrProviderNotFound, err)
+}
+
+func TestRegistry_ResolveTranscription(t *testing.T) {
+	r := &Registry{}
+	r.RegisterTranscription(TranscriptionProviderEntry{
+		Name:  "test",
+		Match: PrefixMatcher("asr-"),
+		Factory: func(model string) TranscriptionProvider {
+			return &mockTranscriptionProvider{model: model}
+		},
+	})
+
+	provider, err := r.ResolveTranscription("asr-model")
+	assert.NoError(t, err)
+	assert.NotNil(t, provider)
+}
+
+func TestRegistry_ResolveTranscription_NotFound(t *testing.T) {
+	r := &Registry{}
+	_, err := r.ResolveTranscription("unknown")
+	assert.Equal(t, ErrProviderNotFound, err)
+}
+
 func TestRegistry_FirstMatchWins(t *testing.T) {
 	r := &Registry{}
 	r.RegisterImage(ImageProviderEntry{
@@ -118,7 +180,11 @@ func TestRegistry_Entries(t *testing.T) {
 	r.RegisterImage(ImageProviderEntry{Name: "a", Match: PrefixMatcher("a-"), Factory: func(string) ImageProvider { return nil }})
 	r.RegisterImage(ImageProviderEntry{Name: "b", Match: PrefixMatcher("b-"), Factory: func(string) ImageProvider { return nil }})
 	r.RegisterVideo(VideoProviderEntry{Name: "v", Match: PrefixMatcher("v-"), Factory: func(string) VideoProvider { return nil }})
+	r.RegisterTextToSpeech(TextToSpeechProviderEntry{Name: "s", Match: PrefixMatcher("s-"), Factory: func(string) TextToSpeechProvider { return nil }})
+	r.RegisterTranscription(TranscriptionProviderEntry{Name: "r", Match: PrefixMatcher("r-"), Factory: func(string) TranscriptionProvider { return nil }})
 
 	assert.Equal(t, 2, len(r.ImageEntries()))
 	assert.Equal(t, 1, len(r.VideoEntries()))
+	assert.Equal(t, 1, len(r.TextToSpeechEntries()))
+	assert.Equal(t, 1, len(r.TranscriptionEntries()))
 }

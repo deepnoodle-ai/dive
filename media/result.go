@@ -83,6 +83,67 @@ type VideoResult struct {
 	Metadata map[string]any
 }
 
+// AudioResult is the output of a text-to-speech operation.
+type AudioResult struct {
+	// Data is the raw audio bytes.
+	Data []byte
+
+	// Model is the model that generated this audio.
+	Model string
+
+	// Format is the audio container or codec format.
+	Format AudioFormat
+
+	// MimeType is the MIME type of the audio.
+	MimeType string
+
+	// Duration is the audio duration when known.
+	Duration time.Duration
+
+	// Metadata contains provider-specific metadata.
+	Metadata map[string]any
+}
+
+// WriteTo writes the audio data to the given file path.
+// If the path has no extension, the format's extension is appended.
+// If the path already exists, a numeric suffix is appended to avoid overwriting.
+func (r *AudioResult) WriteTo(path string) (string, error) {
+	if filepath.Ext(path) == "" {
+		path += r.Format.FileExtension()
+	}
+	path = UniquePath(path)
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return "", err
+		}
+	}
+	return path, os.WriteFile(path, r.Data, 0644)
+}
+
+// SetAudioFormat sets format fields from a MIME type.
+func (r *AudioResult) SetAudioFormat(mimeType string) {
+	r.MimeType = mimeType
+	r.Format = AudioFormatFromMIME(mimeType)
+}
+
+// TranscriptionResult is the output of a transcription operation.
+type TranscriptionResult struct {
+	// Text is the recognized transcript.
+	Text string
+
+	// Model is the model that transcribed the audio.
+	Model string
+
+	// Language is the recognized or requested language when known.
+	Language string
+
+	// Duration is the input audio duration when known.
+	Duration time.Duration
+
+	// Metadata contains provider-specific metadata.
+	Metadata map[string]any
+}
+
 // WriteTo writes the video data to the given file path.
 // If the path has no extension, ".mp4" is appended.
 // If the path already exists, a numeric suffix is appended to avoid
