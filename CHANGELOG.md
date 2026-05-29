@@ -39,6 +39,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`ResponsesIncludeProvider`** interface in `providers/openai` lets a
   server-side tool request response `include` data (e.g.
   `code_interpreter_call.outputs`, `file_search_call.results`).
+- **Structured tool progress streaming** — tools can emit typed progress
+  snapshots during execution via `dive.ReportProgress(ctx, *dive.ToolProgress)`,
+  complementing the existing text-only `StreamOutput`. Each snapshot carries a
+  `Display` summary and structured `Metadata` (exit code, bytes, percent
+  complete, etc.) and is delivered to consumers as a
+  `ResponseItemTypeToolProgress` event. The two channels are independent and
+  have distinct semantics: `StreamOutput` appends text deltas, `ReportProgress`
+  replaces a latest-wins snapshot. The built-in Bash tool now reports
+  line/byte/elapsed progress, the experimental CLI renders a live progress line
+  under running tool calls, and `examples/tool_progress_example` demonstrates
+  the full producer/consumer flow.
 
 ### Fixed
 

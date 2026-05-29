@@ -304,10 +304,31 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 	if stdoutPipe != nil {
 		scanner := bufio.NewScanner(stdoutPipe)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		start := time.Now()
+		var lineCount, byteCount int
+		var lastProgress time.Time
 		for scanner.Scan() {
 			line := scanner.Text() + "\n"
 			stdoutBuf.WriteString(line)
 			dive.StreamOutput(ctx, line)
+
+			// StreamOutput above carries the raw text deltas. ReportProgress is
+			// the parallel structured channel: a latest-wins snapshot of how far
+			// the command has gotten. Throttled to ~10/sec so the cadence tracks
+			// elapsed time rather than output volume.
+			lineCount++
+			byteCount += len(line)
+			if now := time.Now(); now.Sub(lastProgress) >= 100*time.Millisecond {
+				lastProgress = now
+				dive.ReportProgress(ctx, &dive.ToolProgress{
+					Display: fmt.Sprintf("%d lines · %s", lineCount, humanizeBytes(byteCount)),
+					Metadata: map[string]any{
+						"lines":      lineCount,
+						"bytes":      byteCount,
+						"elapsed_ms": time.Since(start).Milliseconds(),
+					},
+				})
+			}
 		}
 	}
 
@@ -335,6 +356,21 @@ func shellCommand() (string, []string) {
 		return "cmd", []string{"/C"}
 	}
 	return "/bin/bash", []string{"-c"}
+}
+
+// humanizeBytes formats a byte count as a compact human-readable string
+// (e.g. 2300 -> "2.2 KB"). Used for ReportProgress display summaries.
+func humanizeBytes(n int) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for v := int64(n) / unit; v >= unit; v /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // truncateOutput limits output length to prevent overwhelming the LLM.

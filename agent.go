@@ -2206,6 +2206,15 @@ func (a *Agent) executeTool(
 				},
 			})
 		})
+		toolCtx = WithToolProgressFunc(toolCtx, func(toolCallID string, progress *ToolProgress) {
+			_ = callback(ctx, &ResponseItem{
+				Type: ResponseItemTypeToolProgress,
+				ToolProgress: &ToolProgressEvent{
+					ToolCallID: toolCallID,
+					Progress:   progress,
+				},
+			})
+		})
 	}
 
 	output, err := tool.Call(toolCtx, input)

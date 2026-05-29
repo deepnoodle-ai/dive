@@ -35,6 +35,13 @@ const (
 	// The ToolStream field contains the tool call ID and a chunk of text.
 	ResponseItemTypeToolStream ResponseItemType = "tool_stream"
 
+	// ResponseItemTypeToolProgress indicates a structured progress snapshot
+	// from a tool during execution. The ToolProgress field contains the tool
+	// call ID and a *ToolProgress snapshot (Display/Metadata). Use this when
+	// text-only ToolStream isn't enough — e.g. to render a live progress
+	// widget with structured fields like exit_code or files_scanned.
+	ResponseItemTypeToolProgress ResponseItemType = "tool_progress"
+
 	// ResponseItemTypeSuspended is a terminal item emitted when the agent
 	// transitions into a suspended state. The Suspension field carries the
 	// same SuspensionState as Response.Suspension. Stream consumers should
@@ -205,6 +212,9 @@ type ResponseItem struct {
 	// ToolStream is set if the response item is streaming tool output
 	ToolStream *ToolStreamEvent `json:"tool_stream,omitempty"`
 
+	// ToolProgress is set if the response item is a structured progress snapshot.
+	ToolProgress *ToolProgressEvent `json:"tool_progress,omitempty"`
+
 	// Suspension is set on a ResponseItemTypeSuspended item. It mirrors
 	// Response.Suspension.
 	Suspension *SuspensionState `json:"suspension,omitempty"`
@@ -221,6 +231,14 @@ type ResponseItem struct {
 type ToolStreamEvent struct {
 	ToolCallID string `json:"tool_call_id"`
 	Text       string `json:"text"`
+}
+
+// ToolProgressEvent contains a structured progress snapshot emitted by a tool
+// during execution via ReportProgress. Distinct from ToolStreamEvent, which
+// carries text deltas; each snapshot is latest-wins in-progress state.
+type ToolProgressEvent struct {
+	ToolCallID string        `json:"tool_call_id"`
+	Progress   *ToolProgress `json:"progress"`
 }
 
 // Response represents the output from an Agent's response generation.

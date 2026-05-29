@@ -337,14 +337,25 @@ func (a *App) toolCallView(msg Message) tui.View {
 	toolCall := formatToolCall(msg.ToolTitle, msg.ToolName, msg.ToolInput)
 	header := tui.Group(statusView, tui.Text(" %s", toolCall))
 
+	views := []tui.View{header}
+
+	// While the tool is still running, surface its latest structured-progress
+	// snapshot. This is the ReportProgress channel — distinct from the streamed
+	// result line below — and is dropped once the tool completes.
+	if !msg.ToolDone && msg.ToolProgress != "" {
+		views = append(views, tui.Text("  ↳ %s", msg.ToolProgress).Hint())
+	}
+
 	if len(msg.ToolResultLines) > 0 {
-		resultView := a.formatToolResultView(msg)
-		if resultView != nil {
-			return tui.Stack(header, resultView).Gap(0)
+		if resultView := a.formatToolResultView(msg); resultView != nil {
+			views = append(views, resultView)
 		}
 	}
 
-	return header
+	if len(views) == 1 {
+		return header
+	}
+	return tui.Stack(views...).Gap(0)
 }
 
 // toolResultStyle returns the style for tool result text (brighter than muted)

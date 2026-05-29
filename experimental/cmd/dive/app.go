@@ -99,6 +99,15 @@ type toolStreamEvent struct {
 	text       string
 }
 
+// toolProgressEvent carries a structured progress snapshot for a tool call.
+// Distinct from toolStreamEvent (text deltas): each snapshot is latest-wins and
+// surfaces a short status line while the tool runs (e.g. "47 lines · 2.2 KB").
+type toolProgressEvent struct {
+	baseEvent
+	toolCallID string
+	display    string
+}
+
 // nativeBgTasksReadyEvent is sent when one or more native dive.BackgroundTaskHandle
 // goroutines have all completed, signaling the agent should re-enter with results.
 type nativeBgTasksReadyEvent struct {
@@ -152,6 +161,7 @@ type Message struct {
 	ToolResult      string   // Display summary (first line or truncated)
 	ToolResultLines []string // Full result lines for expansion display
 	ToolReadLines   int      // Line count for read_file results
+	ToolProgress    string   // Transient structured-progress line (live view only)
 	ToolError       bool
 	ToolDone        bool
 }
@@ -740,6 +750,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleCompaction(e.event)
 	case toolStreamEvent:
 		a.handleToolStream(e)
+	case toolProgressEvent:
+		a.handleToolProgress(e)
 	case nativeBgTasksReadyEvent:
 		a.handleNativeBgTasksReady(e)
 	case monitorNotificationEvent:
@@ -1074,6 +1086,14 @@ func (a *App) agentEventCallback(lastUsage **llm.Usage) dive.EventCallback {
 					baseEvent:  newBaseEvent(),
 					toolCallID: item.ToolStream.ToolCallID,
 					text:       item.ToolStream.Text,
+				})
+			}
+		case dive.ResponseItemTypeToolProgress:
+			if item.ToolProgress != nil && item.ToolProgress.Progress != nil {
+				a.runner.SendEvent(toolProgressEvent{
+					baseEvent:  newBaseEvent(),
+					toolCallID: item.ToolProgress.ToolCallID,
+					display:    item.ToolProgress.Progress.Display,
 				})
 			}
 		}
@@ -1486,6 +1506,22 @@ func (a *App) handleToolStream(e toolStreamEvent) {
 		}
 		a.messages[idx].ToolResultLines = []string{last}
 	}
+}
+
+// handleToolProgress stores a tool's latest structured-progress snapshot so the
+// live view can render a transient status line while the tool runs. The
+// snapshot is latest-wins (each event replaces the prior one) and is dropped
+// from the static scrollback once the tool completes.
+func (a *App) handleToolProgress(e toolProgressEvent) {
+	idx, ok := a.toolCallIndex[e.toolCallID]
+	if !ok {
+		return
+	}
+	display := e.display
+	if len(display) > 80 {
+		display = display[:77] + "..."
+	}
+	a.messages[idx].ToolProgress = display
 }
 
 // startNativeBgTaskWatcher starts a goroutine that awaits all tasks and sends

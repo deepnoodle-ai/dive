@@ -219,6 +219,33 @@ func NewToolResultText(text string) *ToolResult {
 	})
 }
 
+// ToolProgress is a structured progress snapshot a tool may emit during
+// execution via ReportProgress(ctx, *ToolProgress). Use it when text-only
+// StreamOutput isn't enough — e.g. to surface a running exit code, byte count,
+// or percent-complete to UIs and evaluators before the tool returns.
+//
+// Each snapshot is latest-wins, NOT a delta: every Display/Metadata replaces
+// the previous one. Text deltas belong on StreamOutput, which appends. The two
+// are independent channels — a tool may use either, both, or neither. The
+// agent re-emits each snapshot as a ResponseItem of type
+// ResponseItemTypeToolProgress; consumers receive it through the EventCallback
+// configured on the CreateResponse call.
+//
+// Delivered in-process, Metadata preserves its Go types. A consumer that
+// serializes the event itself gets JSON's usual coercions (numbers become
+// float64, structs become map[string]any), so stick to JSON-friendly values.
+type ToolProgress struct {
+	// Display is a human-readable markdown summary of the latest progress
+	// state, e.g. "47/100 files scanned, 2.3 MB".
+	Display string `json:"display,omitempty"`
+
+	// Metadata is arbitrary structured progress data: exit_code, duration_ms,
+	// files_scanned, bytes_read, percent_complete, etc. Consumers (TUIs,
+	// audit logs, eval harnesses) read this to render live progress widgets
+	// or score partial outputs. JSON-friendly values only.
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
 // Tool is an interface for a tool that can be called by an LLM.
 type Tool interface {
 	// Name of the tool.
