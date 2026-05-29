@@ -44,8 +44,10 @@ var modelCatalog = []modelInfo{
 	{"gemini", "", 1_000_000},
 
 	// OpenAI models
-	{"gpt-5.4-mini", "GPT-5.4 Mini", 1_000_000},
-	{"gpt-5.4", "GPT-5.4", 1_000_000},
+	{"gpt-5.5", "GPT-5.5", 1_050_000},
+	{"gpt-5.4-mini", "GPT-5.4 Mini", 400_000},
+	{"gpt-5.4-nano", "GPT-5.4 Nano", 400_000},
+	{"gpt-5.4", "GPT-5.4", 1_050_000},
 	{"gpt-5.3-codex-spark", "GPT-5.3 Codex Spark", 1_000_000},
 	{"gpt-5.3-codex", "GPT-5.3 Codex", 1_000_000},
 	{"gpt-5.3", "GPT-5.3", 1_000_000},
@@ -149,9 +151,10 @@ var providerCatalog = []providerInfo{
 		Name:    "OpenAI",
 		EnvVars: []string{"OPENAI_API_KEY"},
 		Models: []modelChoice{
-			{"gpt-5.4", "GPT-5.4", "Flagship frontier model"},
+			{"gpt-5.5", "GPT-5.5", "Flagship model for complex reasoning and coding"},
+			{"gpt-5.4", "GPT-5.4", "More affordable model for professional work"},
 			{"gpt-5.4-mini", "GPT-5.4 Mini", "Fast mini model for coding and subagents"},
-			{"gpt-5.3-codex", "GPT-5.3 Codex", "Industry-leading coding model"},
+			{"gpt-5.4-nano", "GPT-5.4 Nano", "Lowest-cost GPT-5.4-class model"},
 		},
 	},
 	{

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Latest OpenAI models** — added `gpt-5.5`, `gpt-5.4-mini`,
+  `gpt-5.4-nano`, and `gpt-image-2`; OpenAI defaults now use `gpt-5.5`
+  for text and `gpt-image-2` for image generation.
+
 ## [1.6.0] - 2026-05-29
 
 ### Added

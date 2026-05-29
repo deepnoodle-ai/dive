@@ -21,7 +21,7 @@ import (
 
 // MediaProvider generates images and videos using OpenAI APIs.
 //
-// Supported image models: gpt-image-1.5, gpt-image-1, gpt-image-1-mini
+// Supported image models: gpt-image-2, gpt-image-1.5, gpt-image-1, gpt-image-1-mini
 // Supported video models: sora-2, sora-2-pro
 type MediaProvider struct {
 	client *openai.Client
@@ -44,7 +44,7 @@ func (p *MediaProvider) GenerateImage(ctx context.Context, prompt string, config
 
 	model := config.Model
 	if model == "" {
-		model = "gpt-image-1"
+		model = ModelGPTImage2
 	}
 
 	params := openai.ImageGenerateParams{
@@ -78,7 +78,7 @@ func (p *MediaProvider) EditImage(ctx context.Context, prompt string, config *me
 
 	model := config.Model
 	if model == "" {
-		model = "gpt-image-1"
+		model = ModelGPTImage2
 	}
 	size := aspectRatioToSize(config.AspectRatio)
 	count := config.Count
@@ -229,6 +229,8 @@ func decodeImageResults(data []openai.Image, model string) ([]*media.ImageResult
 // and auto.
 func aspectRatioToSize(ar media.AspectRatio) string {
 	switch ar {
+	case media.AspectAuto:
+		return "auto"
 	case media.Aspect16x9:
 		return "1536x1024"
 	case media.Aspect9x16:

@@ -1,7 +1,10 @@
 package openaicompletions
 
 const (
+	ModelGPT55              = "gpt-5.5"
 	ModelGPT54              = "gpt-5.4"
+	ModelGPT54Mini          = "gpt-5.4-mini"
+	ModelGPT54Nano          = "gpt-5.4-nano"
 	ModelGPT53ChatLatest    = "gpt-5.3-chat-latest"
 	ModelGPT52              = "gpt-5.2"
 	ModelGPT51              = "gpt-5.1"

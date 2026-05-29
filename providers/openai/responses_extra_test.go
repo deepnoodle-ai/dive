@@ -101,3 +101,28 @@ func TestBuildRequestParams_NoIncludesWhenToolOptsOut(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, params.Include)
 }
+
+func TestProviderDefaultModel(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+
+	config := &llm.Config{}
+	config.Apply(llm.WithMessages(llm.NewUserTextMessage("hi")))
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, ModelGPT55, string(params.Model))
+}
+
+func TestBuildRequestParams_ReasoningEffortNone(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithReasoningEffort(llm.ReasoningEffortNone),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, responses.ReasoningEffort("none"), params.Reasoning.Effort)
+}
