@@ -102,6 +102,7 @@ func main() {
 		Run(runModels)
 
 	app.Main().
+		Args("prompt?").
 		Flags(
 			cli.String("model", "m").
 				Env("DIVE_MODEL").
