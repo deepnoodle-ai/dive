@@ -229,6 +229,81 @@ func TestResponseItemsContainToolCalls(t *testing.T) {
 	assert.Equal(t, resp.OutputText(), "Done")
 }
 
+// TestPreIterationCanRewriteMessages verifies that a PreIteration hook can
+// replace the working message set mid-turn (the seam mid-turn compaction relies
+// on): the next LLM iteration sees the rewritten messages, while the response's
+// OutputMessages keep full fidelity (the rewrite is model-facing only, so the
+// saved turn is unaffected).
+func TestPreIterationCanRewriteMessages(t *testing.T) {
+	const sentinel = "compacted-context-sentinel"
+
+	var secondCallMessages []*llm.Message
+	callCount := 0
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			callCount++
+			if callCount == 1 {
+				// First iteration: emit a tool call so the loop continues.
+				return &llm.Response{
+					ID:         "resp_1",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.ToolUseContent{ID: "t1", Name: "noop", Input: []byte(`{}`)}},
+					Type:       "message",
+					StopReason: "tool_use",
+				}, nil
+			}
+			// Second iteration: record what the model actually received.
+			cfg := &llm.Config{}
+			cfg.Apply(opts...)
+			secondCallMessages = cfg.Messages
+			return &llm.Response{
+				ID:         "resp_2",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+				Type:       "message",
+				StopReason: "stop",
+			}, nil
+		},
+	}
+
+	tool := &mockTool{
+		name:     "noop",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) { return NewToolResultText("ok"), nil },
+	}
+
+	// On the second iteration (i==1), replace the whole working set with a
+	// single sentinel message — standing in for a compaction summary.
+	rewrite := func(ctx context.Context, hctx *HookContext) error {
+		if hctx.Iteration == 1 {
+			hctx.Messages = []*llm.Message{llm.NewUserTextMessage(sentinel)}
+		}
+		return nil
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Tools: []Tool{tool},
+		Hooks: Hooks{PreIteration: []PreIterationHook{rewrite}},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("Use the tool"))
+	assert.NoError(t, err)
+	assert.Equal(t, "Done", resp.OutputText())
+
+	// The second LLM call saw exactly the rewritten message set.
+	assert.Len(t, secondCallMessages, 1)
+	assert.Equal(t, sentinel, secondCallMessages[0].Text())
+
+	// ...but the turn's OutputMessages keep full fidelity (assistant tool_use,
+	// tool_result, final assistant) — the model-facing rewrite never touched
+	// what gets persisted.
+	assert.Equal(t, 3, len(resp.OutputMessages))
+	for _, m := range resp.OutputMessages {
+		assert.NotEqual(t, sentinel, m.Text(), "persisted turn must not contain the model-facing compaction sentinel")
+	}
+}
+
 func TestResponseOutputMessages(t *testing.T) {
 	callCount := 0
 	mock := &mockLLM{

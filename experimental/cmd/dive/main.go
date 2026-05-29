@@ -340,13 +340,40 @@ func runInteractive(ctx *cli.Context) error {
 		},
 	}
 
+	// Mid-turn compaction: when compaction is enabled, summarize the working
+	// context within a turn if it grows past the threshold, so a long tool loop
+	// (many calls or large results) can't overflow the model's window before
+	// the turn finishes. The summary is model-facing only — the full turn is
+	// still saved (see compaction.MidTurnCompactionHook). app is assigned just
+	// below; the notify closure only runs once the agent processes input, well
+	// after that, so reading it here is safe.
+	var app *App
+	if compactionConfig != nil {
+		midTurnThreshold := compactionConfig.ContextTokenThreshold
+		if midTurnThreshold <= 0 {
+			midTurnThreshold = compaction.DefaultContextTokenThreshold
+		}
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration,
+			compaction.MidTurnCompactionHook(
+				compactionConfig.Model,
+				midTurnThreshold,
+				compaction.WithMidTurnSystemPrompt(systemPrompt),
+				compaction.WithMidTurnNotify(func(e *compaction.CompactionEvent) {
+					if app != nil {
+						app.notifyMidTurnCompaction(e)
+					}
+				}),
+			),
+		)
+	}
+
 	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
 	}
 
 	// Create App
-	app := NewApp(
+	app = NewApp(
 		agent,
 		sessionStore,
 		workspaceDir,

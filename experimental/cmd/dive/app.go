@@ -89,6 +89,9 @@ type initialPromptEvent struct {
 type compactionEvent struct {
 	baseEvent
 	event *compaction.CompactionEvent
+	// midTurn is true when compaction happened inside a turn's tool loop (via
+	// MidTurnCompactionHook) rather than between turns.
+	midTurn bool
 }
 
 // toolStreamEvent carries a chunk of streaming output for a tool call.
@@ -747,7 +750,7 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		}
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
-		a.handleCompaction(e.event)
+		a.handleCompaction(e.event, e.midTurn)
 	case toolStreamEvent:
 		a.handleToolStream(e)
 	case toolProgressEvent:
@@ -1446,14 +1449,29 @@ func shouldDisplayToolError(_ string, isError bool, _ string) bool {
 // handleCompaction processes a compaction event and updates UI state.
 // The compaction notification is shown in the live view for 3 seconds,
 // and detailed stats are displayed in the footer for 5 seconds.
-func (a *App) handleCompaction(event *compaction.CompactionEvent) {
+func (a *App) handleCompaction(event *compaction.CompactionEvent, midTurn bool) {
 	a.lastCompactionEvent = event
-	a.compactionEventTime = time.Now()
-	a.showCompactionStats = true
-	a.compactionStatsStartTime = time.Now()
 	// Reset usage so the context bar reflects post-compaction state.
 	// It will be repopulated on the next LLM response.
 	a.lastUsage = nil
+	if midTurn {
+		// Mid-turn compaction happens while the agent is still working, so
+		// surface it as a scrollback line rather than the transient footer
+		// stats used between turns.
+		a.runner.Printf(" ⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
+			event.TokensBefore, event.TokensAfter, event.MessagesCompacted)
+		return
+	}
+	a.compactionEventTime = time.Now()
+	a.showCompactionStats = true
+	a.compactionStatsStartTime = time.Now()
+}
+
+// notifyMidTurnCompaction surfaces a mid-turn compaction (from
+// MidTurnCompactionHook) in the UI. Safe to call from the agent's goroutine —
+// it just enqueues a UI event.
+func (a *App) notifyMidTurnCompaction(event *compaction.CompactionEvent) {
+	a.runner.SendEvent(compactionEvent{baseEvent: newBaseEvent(), event: event, midTurn: true})
 }
 
 func (a *App) handleProcessingEnd(err error) {
