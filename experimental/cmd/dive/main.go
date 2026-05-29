@@ -221,7 +221,7 @@ func runInteractive(ctx *cli.Context) error {
 		})
 	}
 
-	taskTool := extended.NewTaskTool(extended.TaskToolOptions{
+	agentTool := extended.NewAgentTool(extended.AgentToolOptions{
 		Registry:         taskRegistry,
 		AgentFactory:     agentFactory,
 		SubagentRegistry: subagentRegistry,
@@ -237,7 +237,7 @@ func runInteractive(ctx *cli.Context) error {
 	taskStopTool := extended.NewTaskStopTool(extended.TaskStopToolOptions{
 		Registry: taskRegistry,
 	})
-	tools = append(tools, dive.ToolAdapter(taskTool), dive.ToolAdapter(taskOutputTool), dive.ToolAdapter(monitorTool), dive.ToolAdapter(taskStopTool))
+	tools = append(tools, dive.ToolAdapter(agentTool), dive.ToolAdapter(taskOutputTool), dive.ToolAdapter(monitorTool), dive.ToolAdapter(taskStopTool))
 
 	// Create session store
 	sessionStore, err := session.NewFileStore("~/.dive/sessions")

@@ -1,5 +1,5 @@
 // Subagent example demonstrates a parent agent spawning a built-in read-only
-// subagent (Explore) through the Task tool.
+// subagent (Explore) through the Agent tool.
 //
 // The subagent package ships ready-made Definitions (Explore, Plan,
 // GeneralPurpose). Explore and Plan are read-only: their DisallowedTools strip
@@ -9,11 +9,11 @@
 //   - A subagent.Registry holds the spawnable definitions (Explore, Plan).
 //   - An AgentFactory turns a definition into a concrete agent on demand,
 //     giving it the read-only tool set via subagent.FilterTools.
-//   - extended.NewTaskTool exposes a "Task" tool to the parent agent.
-//   - The parent is given ONLY the Task tool, so to search code it must
+//   - extended.NewAgentTool exposes an "Agent" tool to the parent agent.
+//   - The parent is given ONLY the Agent tool, so to search code it must
 //     delegate to the Explore subagent.
 //
-// To keep the run visible, the parent logs every Task call via an event
+// To keep the run visible, the parent logs every Agent call via an event
 // callback, and each spawned subagent logs its own tool calls via a hook.
 //
 // Usage:
@@ -62,7 +62,7 @@ func main() {
 	model := anthropic.New(anthropic.WithModel(anthropic.ModelClaudeHaiku45))
 
 	// The standard toolkit. Subagents inherit a filtered view of these; the
-	// parent itself is given only the Task tool (below) so it must delegate.
+	// parent itself is given only the Agent tool (below) so it must delegate.
 	subagentTools := []dive.Tool{
 		toolkit.NewReadFileTool(toolkit.ReadFileToolOptions{Validator: validator}),
 		toolkit.NewGlobTool(toolkit.GlobToolOptions{Validator: validator}),
@@ -98,23 +98,23 @@ func main() {
 		})
 	}
 
-	taskTool := extended.NewTaskTool(extended.TaskToolOptions{
+	agentTool := extended.NewAgentTool(extended.AgentToolOptions{
 		Registry:         extended.NewTaskRegistry(),
 		AgentFactory:     factory,
 		SubagentRegistry: registry,
 		ParentTools:      subagentTools,
 	})
 
-	// The parent holds ONLY the Task tool, so it cannot read files itself — it
+	// The parent holds ONLY the Agent tool, so it cannot read files itself — it
 	// must delegate exploration to a subagent.
 	parent, err := dive.NewAgent(dive.AgentOptions{
 		Name: "Orchestrator",
 		SystemPrompt: "You are an orchestrator with no file access of your own. To answer " +
 			"questions about code in the workspace, delegate to the \"Explore\" subagent " +
-			"using the Task tool. Wait for the subagent to finish (do not run it in the " +
+			"using the Agent tool. Wait for the subagent to finish (do not run it in the " +
 			"background), then answer the user using its findings.",
 		Model: model,
-		Tools: []dive.Tool{dive.ToolAdapter(taskTool)},
+		Tools: []dive.Tool{dive.ToolAdapter(agentTool)},
 	})
 	if err != nil {
 		log.Fatalf("failed to create parent agent: %v", err)
@@ -136,7 +136,7 @@ func main() {
 	fmt.Printf("\n--- Parent's answer ---\n%s\n", response.OutputText())
 }
 
-// logParent prints the parent agent's tool calls (i.e. its Task delegations).
+// logParent prints the parent agent's tool calls (i.e. its Agent delegations).
 func logParent(ctx context.Context, item *dive.ResponseItem) error {
 	switch item.Type {
 	case dive.ResponseItemTypeToolCall:

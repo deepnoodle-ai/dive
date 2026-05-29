@@ -135,10 +135,10 @@ func TestFilterTools(t *testing.T) {
 		&mockTool{name: "Read"},
 		&mockTool{name: "Write"},
 		&mockTool{name: "Bash"},
-		&mockTool{name: "Task"},
+		&mockTool{name: "Agent"},
 	}
 
-	t.Run("nil tools allows all except Task", func(t *testing.T) {
+	t.Run("nil tools allows all except Agent", func(t *testing.T) {
 		def := &Definition{Tools: nil}
 		filtered := FilterTools(def, allTools)
 		assert.Equal(t, 3, len(filtered))
@@ -151,7 +151,7 @@ func TestFilterTools(t *testing.T) {
 		assert.Contains(t, names, "Bash")
 	})
 
-	t.Run("empty tools allows all except Task", func(t *testing.T) {
+	t.Run("empty tools allows all except Agent", func(t *testing.T) {
 		def := &Definition{Tools: []string{}}
 		filtered := FilterTools(def, allTools)
 		assert.Equal(t, 3, len(filtered))
@@ -169,8 +169,8 @@ func TestFilterTools(t *testing.T) {
 		assert.Contains(t, names, "Bash")
 	})
 
-	t.Run("Task is never allowed even if specified", func(t *testing.T) {
-		def := &Definition{Tools: []string{"Read", "Task"}}
+	t.Run("Agent is never allowed even if specified", func(t *testing.T) {
+		def := &Definition{Tools: []string{"Read", "Agent"}}
 		filtered := FilterTools(def, allTools)
 		assert.Equal(t, 1, len(filtered))
 		assert.Equal(t, "Read", filtered[0].Name())

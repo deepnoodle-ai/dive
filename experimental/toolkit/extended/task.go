@@ -125,12 +125,12 @@ func (r *TaskRegistry) List() []string {
 // The factory receives the subagent name, definition, and parent tools to enable tool filtering.
 type AgentFactory func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error)
 
-// --- TaskTool ---
+// --- AgentTool ---
 
-var _ dive.TypedTool[*TaskToolInput] = &TaskTool{}
+var _ dive.TypedTool[*AgentToolInput] = &AgentTool{}
 
-// TaskToolInput is the input for the TaskTool
-type TaskToolInput struct {
+// AgentToolInput is the input for the AgentTool
+type AgentToolInput struct {
 	Prompt          string `json:"prompt"`
 	Description     string `json:"description"`
 	SubagentType    string `json:"subagent_type"`
@@ -139,8 +139,8 @@ type TaskToolInput struct {
 	Resume          string `json:"resume,omitempty"`
 }
 
-// TaskToolOptions configures a new TaskTool
-type TaskToolOptions struct {
+// AgentToolOptions configures a new AgentTool
+type AgentToolOptions struct {
 	// Registry is the shared task registry
 	Registry *TaskRegistry
 
@@ -158,8 +158,8 @@ type TaskToolOptions struct {
 	DefaultTimeout time.Duration
 }
 
-// TaskTool launches specialized agents for complex, multi-step tasks
-type TaskTool struct {
+// AgentTool launches specialized agents for complex, multi-step tasks
+type AgentTool struct {
 	registry         *TaskRegistry
 	agentFactory     AgentFactory
 	subagentRegistry *subagent.Registry
@@ -167,12 +167,12 @@ type TaskTool struct {
 	defaultTimeout   time.Duration
 }
 
-// NewTaskTool creates a new TaskTool
-func NewTaskTool(opts TaskToolOptions) *TaskTool {
+// NewAgentTool creates a new AgentTool
+func NewAgentTool(opts AgentToolOptions) *AgentTool {
 	if opts.DefaultTimeout <= 0 {
 		opts.DefaultTimeout = 10 * time.Minute
 	}
-	return &TaskTool{
+	return &AgentTool{
 		registry:         opts.Registry,
 		agentFactory:     opts.AgentFactory,
 		subagentRegistry: opts.SubagentRegistry,
@@ -181,14 +181,14 @@ func NewTaskTool(opts TaskToolOptions) *TaskTool {
 	}
 }
 
-func (t *TaskTool) Name() string {
-	return "Task"
+func (t *AgentTool) Name() string {
+	return "Agent"
 }
 
-func (t *TaskTool) Description() string {
+func (t *AgentTool) Description() string {
 	desc := `Launch a specialized agent to handle complex, multi-step tasks autonomously.
 
-The Task tool launches agents that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
+The Agent tool launches subagents that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
 
 Usage notes:
 - Always include a short description (3-5 words) summarizing what the agent will do
@@ -206,7 +206,7 @@ Usage notes:
 	return desc
 }
 
-func (t *TaskTool) Schema() *schema.Schema {
+func (t *AgentTool) Schema() *schema.Schema {
 	return &schema.Schema{
 		Type: "object",
 		Required: []string{
@@ -244,9 +244,9 @@ func (t *TaskTool) Schema() *schema.Schema {
 	}
 }
 
-func (t *TaskTool) Annotations() *dive.ToolAnnotations {
+func (t *AgentTool) Annotations() *dive.ToolAnnotations {
 	return &dive.ToolAnnotations{
-		Title:           "Task",
+		Title:           "Agent",
 		ReadOnlyHint:    false,
 		DestructiveHint: false,
 		IdempotentHint:  false,
@@ -254,7 +254,7 @@ func (t *TaskTool) Annotations() *dive.ToolAnnotations {
 	}
 }
 
-func (t *TaskTool) Call(ctx context.Context, input *TaskToolInput) (*dive.ToolResult, error) {
+func (t *AgentTool) Call(ctx context.Context, input *AgentToolInput) (*dive.ToolResult, error) {
 	if input.Prompt == "" {
 		return dive.NewToolResultError("prompt is required"), nil
 	}
@@ -311,7 +311,7 @@ func (t *TaskTool) Call(ctx context.Context, input *TaskToolInput) (*dive.ToolRe
 	return t.executeTask(ctx, input, agent, taskID)
 }
 
-func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent *dive.Agent, taskID string) (*dive.ToolResult, error) {
+func (t *AgentTool) executeTask(ctx context.Context, input *AgentToolInput, agent *dive.Agent, taskID string) (*dive.ToolResult, error) {
 	record := &TaskRecord{
 		ID:          taskID,
 		Description: input.Description,
@@ -412,7 +412,7 @@ func (t *TaskTool) executeTask(ctx context.Context, input *TaskToolInput, agent 
 	}
 }
 
-func (t *TaskTool) ShouldReturnResult() bool {
+func (t *AgentTool) ShouldReturnResult() bool {
 	return true
 }
 

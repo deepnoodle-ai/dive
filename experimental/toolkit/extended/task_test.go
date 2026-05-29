@@ -87,12 +87,12 @@ func TestTaskRegistry(t *testing.T) {
 	})
 }
 
-func TestTaskTool(t *testing.T) {
+func TestAgentTool(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("synchronous task execution", func(t *testing.T) {
 		registry := NewTaskRegistry()
-		tool := NewTaskTool(TaskToolOptions{
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				return createMockAgent("test-agent", "Task completed successfully", nil, 0)
@@ -100,7 +100,7 @@ func TestTaskTool(t *testing.T) {
 			DefaultTimeout: 5 * time.Second,
 		})
 
-		result, err := tool.Call(ctx, &TaskToolInput{
+		result, err := tool.Call(ctx, &AgentToolInput{
 			Prompt:       "Do something",
 			Description:  "Test task",
 			SubagentType: "general-purpose",
@@ -112,14 +112,14 @@ func TestTaskTool(t *testing.T) {
 
 	t.Run("background task execution", func(t *testing.T) {
 		registry := NewTaskRegistry()
-		tool := NewTaskTool(TaskToolOptions{
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				return createMockAgent("test-agent", "Background task done", nil, 100*time.Millisecond)
 			},
 		})
 
-		result, err := tool.Call(ctx, &TaskToolInput{
+		result, err := tool.Call(ctx, &AgentToolInput{
 			Prompt:          "Do something in background",
 			Description:     "Background task",
 			SubagentType:    "Explore",
@@ -147,14 +147,14 @@ func TestTaskTool(t *testing.T) {
 
 	t.Run("task with agent error", func(t *testing.T) {
 		registry := NewTaskRegistry()
-		tool := NewTaskTool(TaskToolOptions{
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				return createMockAgent("failing-agent", "", errors.New("agent failed"), 0)
 			},
 		})
 
-		result, err := tool.Call(ctx, &TaskToolInput{
+		result, err := tool.Call(ctx, &AgentToolInput{
 			Prompt:       "This will fail",
 			Description:  "Failing task",
 			SubagentType: "general-purpose",
@@ -166,14 +166,14 @@ func TestTaskTool(t *testing.T) {
 
 	t.Run("task with factory error", func(t *testing.T) {
 		registry := NewTaskRegistry()
-		tool := NewTaskTool(TaskToolOptions{
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				return nil, errors.New("factory error")
 			},
 		})
 
-		result, err := tool.Call(ctx, &TaskToolInput{
+		result, err := tool.Call(ctx, &AgentToolInput{
 			Prompt:       "Do something",
 			Description:  "Test task",
 			SubagentType: "unknown-type",
@@ -185,7 +185,7 @@ func TestTaskTool(t *testing.T) {
 
 	t.Run("synchronous task timeout cancels sub-agent", func(t *testing.T) {
 		registry := NewTaskRegistry()
-		tool := NewTaskTool(TaskToolOptions{
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				// Agent that takes 5 seconds — well beyond the timeout
@@ -195,7 +195,7 @@ func TestTaskTool(t *testing.T) {
 		})
 
 		start := time.Now()
-		result, err := tool.Call(ctx, &TaskToolInput{
+		result, err := tool.Call(ctx, &AgentToolInput{
 			Prompt:       "Do something slow",
 			Description:  "Timeout test",
 			SubagentType: "general-purpose",
@@ -225,7 +225,7 @@ func TestTaskTool(t *testing.T) {
 
 	t.Run("missing required fields", func(t *testing.T) {
 		registry := NewTaskRegistry()
-		tool := NewTaskTool(TaskToolOptions{
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				return createMockAgent("test", "", nil, 0)
@@ -233,7 +233,7 @@ func TestTaskTool(t *testing.T) {
 		})
 
 		// Missing prompt
-		result, err := tool.Call(ctx, &TaskToolInput{
+		result, err := tool.Call(ctx, &AgentToolInput{
 			Description:  "Test",
 			SubagentType: "general-purpose",
 		})
@@ -242,7 +242,7 @@ func TestTaskTool(t *testing.T) {
 		assert.Contains(t, result.Content[0].Text, "prompt is required")
 
 		// Missing description
-		result, err = tool.Call(ctx, &TaskToolInput{
+		result, err = tool.Call(ctx, &AgentToolInput{
 			Prompt:       "Do something",
 			SubagentType: "general-purpose",
 		})
@@ -251,7 +251,7 @@ func TestTaskTool(t *testing.T) {
 		assert.Contains(t, result.Content[0].Text, "description is required")
 
 		// Missing subagent_type
-		result, err = tool.Call(ctx, &TaskToolInput{
+		result, err = tool.Call(ctx, &AgentToolInput{
 			Prompt:      "Do something",
 			Description: "Test",
 		})
@@ -262,14 +262,14 @@ func TestTaskTool(t *testing.T) {
 
 	t.Run("resume non-existent task", func(t *testing.T) {
 		registry := NewTaskRegistry()
-		tool := NewTaskTool(TaskToolOptions{
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				return createMockAgent("test", "", nil, 0)
 			},
 		})
 
-		result, err := tool.Call(ctx, &TaskToolInput{
+		result, err := tool.Call(ctx, &AgentToolInput{
 			Prompt:       "Continue work",
 			Description:  "Resume test",
 			SubagentType: "general-purpose",
@@ -416,15 +416,15 @@ func TestTaskOutputTool(t *testing.T) {
 func TestToolMetadata(t *testing.T) {
 	registry := NewTaskRegistry()
 
-	t.Run("TaskTool metadata", func(t *testing.T) {
-		tool := NewTaskTool(TaskToolOptions{
+	t.Run("AgentTool metadata", func(t *testing.T) {
+		tool := NewAgentTool(AgentToolOptions{
 			Registry: registry,
 			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
 				return nil, nil
 			},
 		})
 
-		assert.Equal(t, "Task", tool.Name())
+		assert.Equal(t, "Agent", tool.Name())
 		assert.NotEqual(t, "", tool.Description())
 		assert.True(t, tool.ShouldReturnResult())
 
@@ -435,7 +435,7 @@ func TestToolMetadata(t *testing.T) {
 		assert.Contains(t, schema.Required, "subagent_type")
 
 		annotations := tool.Annotations()
-		assert.Equal(t, "Task", annotations.Title)
+		assert.Equal(t, "Agent", annotations.Title)
 		assert.True(t, annotations.OpenWorldHint)
 	})
 

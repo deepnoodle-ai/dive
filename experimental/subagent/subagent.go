@@ -1,13 +1,13 @@
 // Package subagent provides subagent management for Dive agents.
 //
 // This package contains types for defining and managing specialized subagents
-// that can be spawned by a parent agent via the Task tool.
+// that can be spawned by a parent agent via the Agent tool.
 //
 // # Migration from AgentOptions.Subagents
 //
 // Previously, subagents were configured via AgentOptions.Subagents and
 // AgentOptions.SubagentLoader. With the new architecture, subagent registries
-// should be passed directly to the Task tool at construction time.
+// should be passed directly to the Agent tool at construction time.
 //
 // Old approach:
 //
@@ -24,7 +24,7 @@
 //	registry := subagent.NewRegistry(true) // Include general-purpose
 //	registry.Register("code-reviewer", &subagent.Definition{...})
 //
-//	taskTool := toolkit.NewTaskTool(toolkit.TaskToolOptions{
+//	agentTool := toolkit.NewAgentTool(toolkit.AgentToolOptions{
 //	    SubagentRegistry: registry,
 //	    ParentTools:      tools,
 //	    AgentFactory:     myAgentFactory,
@@ -32,7 +32,7 @@
 //
 //	agent, _ := dive.NewAgent(dive.AgentOptions{
 //	    Model: model,
-//	    Tools: []dive.Tool{taskTool, ...},
+//	    Tools: []dive.Tool{agentTool, ...},
 //	})
 package subagent
 
@@ -61,7 +61,7 @@ var explorePrompt string
 var planPrompt string
 
 // Definition defines a specialized subagent that can be spawned
-// by a parent agent via the Task tool.
+// by a parent agent via the Agent tool.
 type Definition struct {
 	// Description explains when this subagent should be used.
 	// Claude uses this to decide whether to invoke the subagent.
@@ -72,7 +72,7 @@ type Definition struct {
 
 	// Tools lists the tool names this subagent is allowed to use.
 	// If nil or empty, the subagent inherits all tools from the parent
-	// (except the Task tool, which is never available to subagents).
+	// (except the Agent tool, which is never available to subagents).
 	Tools []string
 
 	// DisallowedTools lists tool names to exclude from the subagent's tool set.
@@ -176,7 +176,7 @@ func (r *Registry) Len() int {
 }
 
 // GenerateToolDescription generates a description of available subagents
-// suitable for inclusion in the Task tool's description.
+// suitable for inclusion in the Agent tool's description.
 func (r *Registry) GenerateToolDescription() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -205,7 +205,7 @@ func (r *Registry) GenerateToolDescription() string {
 // FilterTools filters a list of tools based on the subagent definition.
 // If def.Tools is non-empty, only those tools are kept; otherwise all parent
 // tools are kept. Any tool named in def.DisallowedTools is then removed
-// (matched case-insensitively), and the Task tool is never included.
+// (matched case-insensitively), and the Agent tool is never included.
 func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 	var allowedSet map[string]bool
 	if len(def.Tools) > 0 {
@@ -227,8 +227,8 @@ func FilterTools(def *Definition, allTools []dive.Tool) []dive.Tool {
 	for _, tool := range allTools {
 		name := tool.Name()
 
-		// Never allow Task tool in subagents
-		if name == "Task" {
+		// Never allow the Agent tool in subagents
+		if name == "Agent" {
 			continue
 		}
 
