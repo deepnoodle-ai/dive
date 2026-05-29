@@ -6,62 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-05-29
+
 ### Added
 
-- **Claude Opus 4.8 and 4.7** model constants (`anthropic.ModelClaudeOpus48`,
-  `ModelClaudeOpus47`) and pricing; the Anthropic and OpenRouter provider
-  defaults are now Opus 4.8. Added a `FastModeTextPricing` table.
-- **Native Anthropic effort parameter** — `WithReasoningEffort` now maps to
-  `output_config.effort` on Opus 4.5+ and Sonnet 4.6 (older models keep the
-  legacy effort→budget mapping). New effort levels `ReasoningEffortXHigh` and
-  `ReasoningEffortMax`.
-- **Adaptive thinking** — `WithAdaptiveThinking()` / `WithThinking(...)` and
-  `WithThinkingDisplay(...)`. On Opus 4.7/4.8 (adaptive-only models) a manual
-  `WithReasoningBudget` transparently falls back to adaptive thinking.
-- **Fast mode** — `WithSpeed(llm.SpeedFast)` sets `speed: "fast"` and the
-  `fast-mode-2026-02-01` beta header; `Usage.Speed` reports the speed used.
-- **Refusal `stop_details`** on `llm.Response` (`StopDetails`).
-- `dive.ModelSettings` gains `Thinking`, `ThinkingDisplay`, and `Speed`.
-- **Gemini**: `gemini-3.5-flash`, `gemini-3.1-flash-lite` (stable),
-  `gemini-3.1-pro-image`, `gemini-3.1-flash-image`, `gemini-3.1-flash-live-preview`,
-  `gemini-3.1-pro-preview-customtools`, plus pricing.
-- **Grok**: `grok-4.3` (new default), `grok-build-0.1`,
-  `grok-imagine-image-quality`, plus pricing.
-- **Grok server-side tools**: `CodeExecutionTool` (sandboxed Python via the
-  xAI `code_interpreter` tool) and `CollectionsSearchTool` (search uploaded
-  collections via `file_search`). `WebSearchTool` gains `EnableImageSearch`.
-  Remote MCP servers already work for Grok via `llm.MCPServerConfig`. See the
-  new `docs/guides/grok.md` and the `grok_search_example` /
-  `grok_code_execution_example` programs.
-- **Reasoning token usage** — `llm.Usage.ReasoningTokens` now reports the output
-  tokens a provider spent on reasoning (populated for the OpenAI Responses API
-  and Grok). The streaming path also now fills `CacheReadInputTokens`.
-- **`ResponsesIncludeProvider`** interface in `providers/openai` lets a
-  server-side tool request response `include` data (e.g.
-  `code_interpreter_call.outputs`, `file_search_call.results`).
-- **Structured tool progress streaming** — tools can emit typed progress
-  snapshots during execution via `dive.ReportProgress(ctx, *dive.ToolProgress)`,
-  complementing the existing text-only `StreamOutput`. Each snapshot carries a
-  `Display` summary and structured `Metadata` (exit code, bytes, percent
-  complete, etc.) and is delivered to consumers as a
-  `ResponseItemTypeToolProgress` event. The two channels are independent and
-  have distinct semantics: `StreamOutput` appends text deltas, `ReportProgress`
-  replaces a latest-wins snapshot. The built-in Bash tool now reports
-  line/byte/elapsed progress, the experimental CLI renders a live progress line
-  under running tool calls, and `examples/tool_progress_example` demonstrates
-  the full producer/consumer flow.
+- **Claude Opus 4.8 / 4.7** model constants and pricing; Anthropic and
+  OpenRouter now default to Opus 4.8. Added a `FastModeTextPricing` table.
+- **Native Anthropic effort** — `WithReasoningEffort` maps to
+  `output_config.effort` on Opus 4.5+/Sonnet 4.6 (older models keep the legacy
+  effort→budget mapping). New levels `ReasoningEffortMinimal` (matches OpenAI
+  gpt-5), `ReasoningEffortXHigh`, and `ReasoningEffortMax`.
+- **Adaptive thinking** — `WithAdaptiveThinking()`, `WithThinking(...)`, and
+  `WithThinkingDisplay(...)`; on adaptive-only models (Opus 4.7/4.8) a manual
+  `WithReasoningBudget` falls back to adaptive thinking. `dive.ModelSettings`
+  gains `Thinking`, `ThinkingDisplay`, and `Speed`.
+- **Fast mode** — `WithSpeed(llm.SpeedFast)` sets the `fast-mode-2026-02-01`
+  beta header; `Usage.Speed` reports the speed used.
+- **Grok server-side tools** — `CodeExecutionTool` (sandboxed Python) and
+  `CollectionsSearchTool` (`file_search`); `WebSearchTool` gains
+  `EnableImageSearch`. New `docs/guides/grok.md` and examples. Adds `grok-4.3`
+  (new default) plus new Gemini/Grok models and pricing.
+- **Reasoning token usage** — `llm.Usage.ReasoningTokens` reports reasoning
+  output tokens (OpenAI Responses, Grok); the streaming path now fills
+  `CacheReadInputTokens`. `ResponsesIncludeProvider` lets a server-side tool
+  request response `include` data.
+- **Structured tool progress** — tools emit typed snapshots via
+  `dive.ReportProgress(ctx, *dive.ToolProgress)`, delivered as
+  `ResponseItemTypeToolProgress` events (latest-wins, distinct from the
+  text-delta `StreamOutput`). Bash now reports line/byte/elapsed progress.
+- **`SessionStartHook`** — fires once at the start of a fresh conversation to
+  seed it from external state, returning a `*SessionStartResult` (durable or
+  ephemeral via `Persist`).
+- **Model-judgment hook helpers** — `PromptStopHook` and `PromptToolGate` let a
+  model make a hook decision via a forced structured verdict.
+- **Refusal `stop_details`** on `llm.Response`.
+
+### Changed
+
+- **Subagents promoted to stable** — the subagent layer moves out of
+  experimental to core `subagent/` and `toolkit/orchestration/`, aligned with
+  Claude Code's tool model. Adds built-in read-only `Explore`/`Plan` personas;
+  `DisallowedTools` is now enforced in `FilterTools` and parseable from the
+  `disallowed-tools` key in `.dive/agents/*.md` frontmatter. The
+  subagent-spawner tool is `Agent` (renamed from the experimental `Task`), with
+  the `Task*` prefix reserved for background control (`TaskStop`/`Monitor`).
+- **Non-destructive compaction** — `Compact()` inserts a checkpoint instead of
+  collapsing the log. `Messages()` returns the active window (latest summary +
+  everything after); new `AllMessages()` returns the full transcript, and
+  `CompactionHistory()` returns one `CompactionRecord` per checkpoint.
 
 ### Fixed
 
-- Effort/thinking requests no longer fail with a 400 on Claude Opus 4.7/4.8,
-  which reject manual thinking budgets.
-- Setting `ReasoningEffort` together with `Thinking: disabled` on a legacy
-  Claude model (no native effort parameter) now returns an error instead of
-  silently re-enabling thinking via the emulated budget.
-- Corrected Grok 4.20 pricing to $1.25/$2.50 per 1M tokens.
-- Corrected the Grok X-search handle limit to 20 (was incorrectly capped at 10).
+- Effort/thinking requests no longer 400 on Opus 4.7/4.8 (which reject manual
+  thinking budgets); `ReasoningEffort` with `Thinking: disabled` on a legacy
+  model now errors instead of silently re-enabling thinking.
+- Corrected Grok 4.20 pricing ($1.25/$2.50 per 1M tokens) and the X-search
+  handle limit (now 20, was capped at 10).
 - `file_search` / collections-search responses now decode instead of returning
-  an "unsupported" error (`openai.FileSearchCallContent`).
+  an "unsupported" error.
 
 ## [1.5.0] - 2026-05-15
 
@@ -70,11 +72,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`Extension` interface** for composable agent capabilities. Extensions bundle
   tools, hooks, and system prompt rules and are merged during `NewAgent` via
   `AgentOptions.Extensions`.
-- **Agent suspend/resume** for out-of-process tool results. Tools can return
-  `NewSuspendResult` to pause the agent; the response returns with
-  `Status == ResponseStatusSuspended` and a `Suspension *SuspensionState` for
-  later resumption via `WithToolResults` or `WithResume`. `SuspendableSession`
-  enables auto-persistence; `OnSuspend` hook fires before persistence.
+- **Agent suspend/resume** for out-of-process tool results. A tool returns
+  `NewSuspendResult` to pause the agent; the response comes back with
+  `Status == ResponseStatusSuspended` and a `Suspension` state for later
+  resumption via `WithToolResults` or `WithResume`. `SuspendableSession` adds
+  auto-persistence; the `OnSuspend` hook fires before persistence.
 - **`Tracer` interface** for agent observability (tracing, metrics, audit
   logging) with `StartAgentRun` / `StartChat` / `StartToolCall`. `NopTracer`
   and `MultiTracer` ship in core; the OpenTelemetry adapter lives in the
@@ -86,11 +88,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Background tool execution** — tools can opt into running in the background
   while the agent continues, with results returned later.
 - **Skill system** as a stable package (`skill/`) — unified skills and slash
-  commands implementing the `Extension` interface. Provider-based loading
-  (filesystem, `.agents/skills/`), variable expansion, trigger matching, and a
-  three-layer architecture (rules in system prompt, catalog as system reminder,
-  tool with content via PostToolUseHook). agentskills.io standard frontmatter
-  fields supported in `SkillConfig`.
+  commands implementing the `Extension` interface, with provider-based loading
+  (filesystem, `.agents/skills/`), variable expansion, and trigger matching.
+  Supports agentskills.io standard frontmatter fields in `SkillConfig`.
 - **Media generation tools** for images and videos with path traversal
   protection, duration schema, and aspect ratio controls.
 - **CLI enhancements**: `models` command, interactive model switcher, status
