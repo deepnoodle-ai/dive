@@ -236,13 +236,13 @@ func TestGenerateVideo(t *testing.T) {
 	assert.Equal(t, "test-veo", result.Model)
 }
 
-func TestGenerateSpeech(t *testing.T) {
+func TestTextToSpeech(t *testing.T) {
 	r := testRegistry(t)
-	r.RegisterSpeech(SpeechProviderEntry{
+	r.RegisterTextToSpeech(TextToSpeechProviderEntry{
 		Name:  "test",
 		Match: PrefixMatcher("test-"),
-		Factory: func(model string) SpeechProvider {
-			return &mockSpeechProvider{
+		Factory: func(model string) TextToSpeechProvider {
+			return &mockTextToSpeechProvider{
 				result: &AudioResult{
 					Data:     []byte("audio-data"),
 					Model:    model,
@@ -253,7 +253,7 @@ func TestGenerateSpeech(t *testing.T) {
 		},
 	})
 
-	result, err := GenerateSpeech(context.Background(), "hello",
+	result, err := TextToSpeech(context.Background(), "hello",
 		WithModel("test-tts"),
 		WithVoice("alloy"),
 	)
@@ -262,33 +262,33 @@ func TestGenerateSpeech(t *testing.T) {
 	assert.Equal(t, "test-tts", result.Model)
 }
 
-func TestGenerateSpeech_NoModel(t *testing.T) {
+func TestTextToSpeech_NoModel(t *testing.T) {
 	testRegistry(t)
-	_, err := GenerateSpeech(context.Background(), "hello")
+	_, err := TextToSpeech(context.Background(), "hello")
 	assert.Equal(t, ErrNoModel, err)
 }
 
-func TestGenerateSpeech_EmptyResult(t *testing.T) {
+func TestTextToSpeech_EmptyResult(t *testing.T) {
 	r := testRegistry(t)
-	r.RegisterSpeech(SpeechProviderEntry{
+	r.RegisterTextToSpeech(TextToSpeechProviderEntry{
 		Name:  "test",
 		Match: PrefixMatcher("test-"),
-		Factory: func(model string) SpeechProvider {
-			return &mockSpeechProvider{result: &AudioResult{}}
+		Factory: func(model string) TextToSpeechProvider {
+			return &mockTextToSpeechProvider{result: &AudioResult{}}
 		},
 	})
 
-	_, err := GenerateSpeech(context.Background(), "hello", WithModel("test-tts"))
+	_, err := TextToSpeech(context.Background(), "hello", WithModel("test-tts"))
 	assert.Equal(t, ErrNoResult, err)
 }
 
-func TestTranscribeSpeech(t *testing.T) {
+func TestTranscribe(t *testing.T) {
 	r := testRegistry(t)
-	r.RegisterSpeechRecognition(SpeechRecognitionProviderEntry{
+	r.RegisterTranscription(TranscriptionProviderEntry{
 		Name:  "test",
 		Match: PrefixMatcher("test-"),
-		Factory: func(model string) SpeechRecognitionProvider {
-			return &mockSpeechRecognitionProvider{
+		Factory: func(model string) TranscriptionProvider {
+			return &mockTranscriptionProvider{
 				result: &TranscriptionResult{
 					Text:  "hello world",
 					Model: model,
@@ -297,7 +297,7 @@ func TestTranscribeSpeech(t *testing.T) {
 		},
 	})
 
-	result, err := TranscribeSpeech(context.Background(), []byte("audio"),
+	result, err := Transcribe(context.Background(), []byte("audio"),
 		WithModel("test-transcribe"),
 		WithAudioMIMEType("audio/wav"),
 	)
@@ -306,23 +306,23 @@ func TestTranscribeSpeech(t *testing.T) {
 	assert.Equal(t, "test-transcribe", result.Model)
 }
 
-func TestTranscribeSpeech_NoModel(t *testing.T) {
+func TestTranscribe_NoModel(t *testing.T) {
 	testRegistry(t)
-	_, err := TranscribeSpeech(context.Background(), []byte("audio"))
+	_, err := Transcribe(context.Background(), []byte("audio"))
 	assert.Equal(t, ErrNoModel, err)
 }
 
-func TestTranscribeSpeech_EmptyResult(t *testing.T) {
+func TestTranscribe_EmptyResult(t *testing.T) {
 	r := testRegistry(t)
-	r.RegisterSpeechRecognition(SpeechRecognitionProviderEntry{
+	r.RegisterTranscription(TranscriptionProviderEntry{
 		Name:  "test",
 		Match: PrefixMatcher("test-"),
-		Factory: func(model string) SpeechRecognitionProvider {
-			return &mockSpeechRecognitionProvider{result: &TranscriptionResult{}}
+		Factory: func(model string) TranscriptionProvider {
+			return &mockTranscriptionProvider{result: &TranscriptionResult{}}
 		},
 	})
 
-	_, err := TranscribeSpeech(context.Background(), []byte("audio"), WithModel("test-transcribe"))
+	_, err := Transcribe(context.Background(), []byte("audio"), WithModel("test-transcribe"))
 	assert.Equal(t, ErrNoResult, err)
 }
 

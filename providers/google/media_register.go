@@ -21,20 +21,20 @@ func init() {
 			return NewMediaProvider()
 		},
 	})
-	media.RegisterSpeech(media.SpeechProviderEntry{
+	media.RegisterTextToSpeech(media.TextToSpeechProviderEntry{
 		Name: "google",
 		Match: func(model string) bool {
 			lower := strings.ToLower(model)
 			return strings.HasPrefix(lower, "gemini-") && strings.Contains(lower, "tts")
 		},
-		Factory: func(model string) media.SpeechProvider {
+		Factory: func(model string) media.TextToSpeechProvider {
 			return NewMediaProvider()
 		},
 	})
-	media.RegisterSpeechRecognition(media.SpeechRecognitionProviderEntry{
+	media.RegisterTranscription(media.TranscriptionProviderEntry{
 		Name:  "google",
 		Match: media.PrefixMatcher("gemini-"),
-		Factory: func(model string) media.SpeechRecognitionProvider {
+		Factory: func(model string) media.TranscriptionProvider {
 			return NewMediaProvider()
 		},
 	})

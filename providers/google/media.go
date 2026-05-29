@@ -357,8 +357,8 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 	return result, nil
 }
 
-// GenerateSpeech implements media.SpeechProvider.
-func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config *media.Config) (*media.AudioResult, error) {
+// TextToSpeech implements media.TextToSpeechProvider.
+func (p *MediaProvider) TextToSpeech(ctx context.Context, text string, config *media.Config) (*media.AudioResult, error) {
 	if _, err := p.ensureClient(ctx); err != nil {
 		return nil, err
 	}
@@ -376,7 +376,7 @@ func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config 
 		return nil, err
 	}
 	if format != media.AudioFormatWAV && format != media.AudioFormatPCM {
-		return nil, fmt.Errorf("google speech generation supports wav or pcm output, got %q", format)
+		return nil, fmt.Errorf("google text-to-speech supports wav or pcm output, got %q", format)
 	}
 
 	voice := config.Voice
@@ -385,8 +385,8 @@ func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config 
 	}
 
 	prompt := text
-	if config.SpeechInstructions != "" {
-		prompt = config.SpeechInstructions + "\n\n" + text
+	if config.VoiceInstructions != "" {
+		prompt = config.VoiceInstructions + "\n\n" + text
 	}
 
 	genConfig := &genai.GenerateContentConfig{
@@ -403,7 +403,7 @@ func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config 
 
 	resp, err := p.client.Models.GenerateContent(ctx, model, genai.Text(prompt), genConfig)
 	if err != nil {
-		return nil, fmt.Errorf("gemini speech generation: %w", err)
+		return nil, fmt.Errorf("gemini text-to-speech: %w", err)
 	}
 
 	audioData, mimeType, err := firstInlineAudio(resp)
@@ -438,8 +438,8 @@ func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config 
 	return result, nil
 }
 
-// TranscribeSpeech implements media.SpeechRecognitionProvider.
-func (p *MediaProvider) TranscribeSpeech(ctx context.Context, audio []byte, config *media.Config) (*media.TranscriptionResult, error) {
+// Transcribe implements media.TranscriptionProvider.
+func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *media.Config) (*media.TranscriptionResult, error) {
 	if len(audio) == 0 {
 		return nil, fmt.Errorf("audio data is required for transcription")
 	}
@@ -473,7 +473,7 @@ func (p *MediaProvider) TranscribeSpeech(ctx context.Context, audio []byte, conf
 		genai.NewContentFromParts(parts, genai.RoleUser),
 	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("gemini speech transcription: %w", err)
+		return nil, fmt.Errorf("gemini transcription: %w", err)
 	}
 	if resp == nil {
 		return nil, fmt.Errorf("empty response from gemini")
@@ -515,9 +515,9 @@ func firstInlineAudio(resp *genai.GenerateContentResponse) ([]byte, string, erro
 
 // Compile-time interface checks.
 var (
-	_ media.ImageProvider             = (*MediaProvider)(nil)
-	_ media.ImageEditor               = (*MediaProvider)(nil)
-	_ media.VideoProvider             = (*MediaProvider)(nil)
-	_ media.SpeechProvider            = (*MediaProvider)(nil)
-	_ media.SpeechRecognitionProvider = (*MediaProvider)(nil)
+	_ media.ImageProvider         = (*MediaProvider)(nil)
+	_ media.ImageEditor           = (*MediaProvider)(nil)
+	_ media.VideoProvider         = (*MediaProvider)(nil)
+	_ media.TextToSpeechProvider  = (*MediaProvider)(nil)
+	_ media.TranscriptionProvider = (*MediaProvider)(nil)
 )

@@ -11,11 +11,11 @@ type ImageProviderFactory func(model string) ImageProvider
 // VideoProviderFactory creates a VideoProvider for a given model name.
 type VideoProviderFactory func(model string) VideoProvider
 
-// SpeechProviderFactory creates a SpeechProvider for a given model name.
-type SpeechProviderFactory func(model string) SpeechProvider
+// TextToSpeechProviderFactory creates a TextToSpeechProvider for a given model name.
+type TextToSpeechProviderFactory func(model string) TextToSpeechProvider
 
-// SpeechRecognitionProviderFactory creates a SpeechRecognitionProvider for a given model name.
-type SpeechRecognitionProviderFactory func(model string) SpeechRecognitionProvider
+// TranscriptionProviderFactory creates a TranscriptionProvider for a given model name.
+type TranscriptionProviderFactory func(model string) TranscriptionProvider
 
 // ModelMatcher determines if a model name matches a provider.
 type ModelMatcher func(model string) bool
@@ -34,27 +34,27 @@ type VideoProviderEntry struct {
 	Factory VideoProviderFactory
 }
 
-// SpeechProviderEntry pairs a matcher with its factory.
-type SpeechProviderEntry struct {
+// TextToSpeechProviderEntry pairs a matcher with its factory.
+type TextToSpeechProviderEntry struct {
 	Name    string
 	Match   ModelMatcher
-	Factory SpeechProviderFactory
+	Factory TextToSpeechProviderFactory
 }
 
-// SpeechRecognitionProviderEntry pairs a matcher with its factory.
-type SpeechRecognitionProviderEntry struct {
+// TranscriptionProviderEntry pairs a matcher with its factory.
+type TranscriptionProviderEntry struct {
 	Name    string
 	Match   ModelMatcher
-	Factory SpeechRecognitionProviderFactory
+	Factory TranscriptionProviderFactory
 }
 
 // Registry manages model-to-provider mappings for media generation.
 type Registry struct {
-	mu                         sync.RWMutex
-	imageProviders             []ImageProviderEntry
-	videoProviders             []VideoProviderEntry
-	speechProviders            []SpeechProviderEntry
-	speechRecognitionProviders []SpeechRecognitionProviderEntry
+	mu                     sync.RWMutex
+	imageProviders         []ImageProviderEntry
+	videoProviders         []VideoProviderEntry
+	textToSpeechProviders  []TextToSpeechProviderEntry
+	transcriptionProviders []TranscriptionProviderEntry
 }
 
 // RegisterImage adds an image provider entry to the registry.
@@ -71,18 +71,18 @@ func (r *Registry) RegisterVideo(entry VideoProviderEntry) {
 	r.videoProviders = append(r.videoProviders, entry)
 }
 
-// RegisterSpeech adds a speech provider entry to the registry.
-func (r *Registry) RegisterSpeech(entry SpeechProviderEntry) {
+// RegisterTextToSpeech adds a text-to-speech provider entry to the registry.
+func (r *Registry) RegisterTextToSpeech(entry TextToSpeechProviderEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.speechProviders = append(r.speechProviders, entry)
+	r.textToSpeechProviders = append(r.textToSpeechProviders, entry)
 }
 
-// RegisterSpeechRecognition adds a speech recognition provider entry to the registry.
-func (r *Registry) RegisterSpeechRecognition(entry SpeechRecognitionProviderEntry) {
+// RegisterTranscription adds a transcription provider entry to the registry.
+func (r *Registry) RegisterTranscription(entry TranscriptionProviderEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.speechRecognitionProviders = append(r.speechRecognitionProviders, entry)
+	r.transcriptionProviders = append(r.transcriptionProviders, entry)
 }
 
 // ResolveImage returns an ImageProvider for the given model name.
@@ -109,11 +109,11 @@ func (r *Registry) ResolveVideo(model string) (VideoProvider, error) {
 	return nil, ErrProviderNotFound
 }
 
-// ResolveSpeech returns a SpeechProvider for the given model name.
-func (r *Registry) ResolveSpeech(model string) (SpeechProvider, error) {
+// ResolveTextToSpeech returns a TextToSpeechProvider for the given model name.
+func (r *Registry) ResolveTextToSpeech(model string) (TextToSpeechProvider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, entry := range r.speechProviders {
+	for _, entry := range r.textToSpeechProviders {
 		if entry.Match(model) {
 			return entry.Factory(model), nil
 		}
@@ -121,11 +121,11 @@ func (r *Registry) ResolveSpeech(model string) (SpeechProvider, error) {
 	return nil, ErrProviderNotFound
 }
 
-// ResolveSpeechRecognition returns a SpeechRecognitionProvider for the given model name.
-func (r *Registry) ResolveSpeechRecognition(model string) (SpeechRecognitionProvider, error) {
+// ResolveTranscription returns a TranscriptionProvider for the given model name.
+func (r *Registry) ResolveTranscription(model string) (TranscriptionProvider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, entry := range r.speechRecognitionProviders {
+	for _, entry := range r.transcriptionProviders {
 		if entry.Match(model) {
 			return entry.Factory(model), nil
 		}
@@ -151,21 +151,21 @@ func (r *Registry) VideoEntries() []VideoProviderEntry {
 	return result
 }
 
-// SpeechEntries returns a copy of all registered speech provider entries.
-func (r *Registry) SpeechEntries() []SpeechProviderEntry {
+// TextToSpeechEntries returns a copy of all registered text-to-speech provider entries.
+func (r *Registry) TextToSpeechEntries() []TextToSpeechProviderEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make([]SpeechProviderEntry, len(r.speechProviders))
-	copy(result, r.speechProviders)
+	result := make([]TextToSpeechProviderEntry, len(r.textToSpeechProviders))
+	copy(result, r.textToSpeechProviders)
 	return result
 }
 
-// SpeechRecognitionEntries returns a copy of all registered speech recognition provider entries.
-func (r *Registry) SpeechRecognitionEntries() []SpeechRecognitionProviderEntry {
+// TranscriptionEntries returns a copy of all registered transcription provider entries.
+func (r *Registry) TranscriptionEntries() []TranscriptionProviderEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make([]SpeechRecognitionProviderEntry, len(r.speechRecognitionProviders))
-	copy(result, r.speechRecognitionProviders)
+	result := make([]TranscriptionProviderEntry, len(r.transcriptionProviders))
+	copy(result, r.transcriptionProviders)
 	return result
 }
 
@@ -183,14 +183,14 @@ func RegisterVideo(entry VideoProviderEntry) {
 	defaultRegistry.RegisterVideo(entry)
 }
 
-// RegisterSpeech adds a speech provider entry to the default registry.
-func RegisterSpeech(entry SpeechProviderEntry) {
-	defaultRegistry.RegisterSpeech(entry)
+// RegisterTextToSpeech adds a text-to-speech provider entry to the default registry.
+func RegisterTextToSpeech(entry TextToSpeechProviderEntry) {
+	defaultRegistry.RegisterTextToSpeech(entry)
 }
 
-// RegisterSpeechRecognition adds a speech recognition provider entry to the default registry.
-func RegisterSpeechRecognition(entry SpeechRecognitionProviderEntry) {
-	defaultRegistry.RegisterSpeechRecognition(entry)
+// RegisterTranscription adds a transcription provider entry to the default registry.
+func RegisterTranscription(entry TranscriptionProviderEntry) {
+	defaultRegistry.RegisterTranscription(entry)
 }
 
 // DefaultRegistry returns the default global registry.

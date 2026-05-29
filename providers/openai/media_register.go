@@ -20,18 +20,18 @@ func init() {
 		},
 	})
 	// tts-1, tts-1-hd, gpt-4o-mini-tts
-	media.RegisterSpeech(media.SpeechProviderEntry{
+	media.RegisterTextToSpeech(media.TextToSpeechProviderEntry{
 		Name:  "openai",
 		Match: media.PrefixesMatcher("tts-", "gpt-4o-mini-tts"),
-		Factory: func(model string) media.SpeechProvider {
+		Factory: func(model string) media.TextToSpeechProvider {
 			return NewMediaProvider()
 		},
 	})
 	// whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe, gpt-4o-transcribe-diarize
-	media.RegisterSpeechRecognition(media.SpeechRecognitionProviderEntry{
+	media.RegisterTranscription(media.TranscriptionProviderEntry{
 		Name:  "openai",
 		Match: media.PrefixesMatcher("whisper-", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"),
-		Factory: func(model string) media.SpeechRecognitionProvider {
+		Factory: func(model string) media.TranscriptionProvider {
 			return NewMediaProvider()
 		},
 	})

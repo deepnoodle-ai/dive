@@ -95,7 +95,7 @@ func TestOpenAISpeechMatcher(t *testing.T) {
 	assert.True(t, !matcher("gpt-4o-mini-transcribe"))
 }
 
-func TestOpenAISpeechRecognitionMatcher(t *testing.T) {
+func TestOpenAITranscriptionMatcher(t *testing.T) {
 	matcher := media.PrefixesMatcher("whisper-", "gpt-4o-transcribe", "gpt-4o-mini-transcribe")
 	assert.True(t, matcher("whisper-1"))
 	assert.True(t, matcher("gpt-4o-transcribe"))
@@ -148,7 +148,7 @@ func TestOpenAIGenerateVideo_Integration(t *testing.T) {
 	assert.Equal(t, "mp4", result.Format)
 }
 
-func TestOpenAIGenerateSpeech_Integration(t *testing.T) {
+func TestOpenAITextToSpeech_Integration(t *testing.T) {
 	requireOpenAIMediaIntegration(t)
 
 	p := NewMediaProvider()
@@ -157,16 +157,16 @@ func TestOpenAIGenerateSpeech_Integration(t *testing.T) {
 		Voice:       "alloy",
 		AudioFormat: media.AudioFormatMP3,
 	}
-	result, err := p.GenerateSpeech(context.Background(), "Hello from Dive.", config)
+	result, err := p.TextToSpeech(context.Background(), "Hello from Dive.", config)
 	assert.NoError(t, err)
 	assert.True(t, len(result.Data) > 0)
 	assert.Equal(t, media.AudioFormatMP3, result.Format)
 }
 
-func TestOpenAITranscribeSpeech_Integration(t *testing.T) {
+func TestOpenAITranscribe_Integration(t *testing.T) {
 	requireOpenAIMediaIntegration(t)
 
-	speech, err := NewMediaProvider().GenerateSpeech(context.Background(), "This is a Dive transcription test.", &media.Config{
+	speech, err := NewMediaProvider().TextToSpeech(context.Background(), "This is a Dive transcription test.", &media.Config{
 		Model:       "gpt-4o-mini-tts",
 		Voice:       "alloy",
 		AudioFormat: media.AudioFormatMP3,
@@ -174,7 +174,7 @@ func TestOpenAITranscribeSpeech_Integration(t *testing.T) {
 	assert.NoError(t, err)
 
 	p := NewMediaProvider()
-	result, err := p.TranscribeSpeech(context.Background(), speech.Data, &media.Config{
+	result, err := p.Transcribe(context.Background(), speech.Data, &media.Config{
 		Model:         "gpt-4o-mini-transcribe",
 		AudioMIMEType: "audio/mpeg",
 	})

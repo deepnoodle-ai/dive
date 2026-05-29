@@ -219,8 +219,8 @@ func GenerateVideo(ctx context.Context, prompt string, opts ...Option) (*VideoRe
 	return result, nil
 }
 
-// GenerateSpeech generates spoken audio from text.
-func GenerateSpeech(ctx context.Context, text string, opts ...Option) (*AudioResult, error) {
+// TextToSpeech generates spoken audio from text.
+func TextToSpeech(ctx context.Context, text string, opts ...Option) (*AudioResult, error) {
 	config := &Config{}
 	config.Apply(opts...)
 
@@ -228,7 +228,7 @@ func GenerateSpeech(ctx context.Context, text string, opts ...Option) (*AudioRes
 		return nil, ErrNoModel
 	}
 
-	provider, err := defaultRegistry.ResolveSpeech(config.Model)
+	provider, err := defaultRegistry.ResolveTextToSpeech(config.Model)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, config.Model)
 	}
@@ -240,7 +240,7 @@ func GenerateSpeech(ctx context.Context, text string, opts ...Option) (*AudioRes
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, err := provider.GenerateSpeech(ctx, text, config)
+	result, err := provider.TextToSpeech(ctx, text, config)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ErrTimeout
@@ -253,8 +253,8 @@ func GenerateSpeech(ctx context.Context, text string, opts ...Option) (*AudioRes
 	return result, nil
 }
 
-// TranscribeSpeech transcribes speech audio bytes into text.
-func TranscribeSpeech(ctx context.Context, audio []byte, opts ...Option) (*TranscriptionResult, error) {
+// Transcribe transcribes speech audio bytes into text.
+func Transcribe(ctx context.Context, audio []byte, opts ...Option) (*TranscriptionResult, error) {
 	config := &Config{}
 	config.Apply(opts...)
 
@@ -262,7 +262,7 @@ func TranscribeSpeech(ctx context.Context, audio []byte, opts ...Option) (*Trans
 		return nil, ErrNoModel
 	}
 
-	provider, err := defaultRegistry.ResolveSpeechRecognition(config.Model)
+	provider, err := defaultRegistry.ResolveTranscription(config.Model)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, config.Model)
 	}
@@ -274,7 +274,7 @@ func TranscribeSpeech(ctx context.Context, audio []byte, opts ...Option) (*Trans
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result, err := provider.TranscribeSpeech(ctx, audio, config)
+	result, err := provider.Transcribe(ctx, audio, config)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ErrTimeout

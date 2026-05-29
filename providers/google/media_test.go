@@ -47,7 +47,7 @@ func TestGoogleSpeechMatcher(t *testing.T) {
 	assert.True(t, !matcher("gpt-4o-mini-tts"))
 }
 
-func TestGoogleSpeechRecognitionMatcher(t *testing.T) {
+func TestGoogleTranscriptionMatcher(t *testing.T) {
 	matcher := media.PrefixMatcher("gemini-")
 	assert.True(t, matcher("gemini-2.5-flash"))
 	assert.True(t, matcher("gemini-3.1-flash-lite"))
@@ -159,7 +159,7 @@ func TestGoogleGenerateVideo_Integration(t *testing.T) {
 	assert.Equal(t, "mp4", result.Format)
 }
 
-func TestGoogleGenerateSpeech_Integration(t *testing.T) {
+func TestGoogleTextToSpeech_Integration(t *testing.T) {
 	requireGoogleMediaIntegration(t)
 
 	p := NewMediaProvider()
@@ -168,16 +168,16 @@ func TestGoogleGenerateSpeech_Integration(t *testing.T) {
 		Voice:       "Kore",
 		AudioFormat: media.AudioFormatWAV,
 	}
-	result, err := p.GenerateSpeech(context.Background(), "Say cheerfully: Hello from Dive.", config)
+	result, err := p.TextToSpeech(context.Background(), "Say cheerfully: Hello from Dive.", config)
 	assert.NoError(t, err)
 	assert.True(t, len(result.Data) > 0)
 	assert.Equal(t, media.AudioFormatWAV, result.Format)
 }
 
-func TestGoogleTranscribeSpeech_Integration(t *testing.T) {
+func TestGoogleTranscribe_Integration(t *testing.T) {
 	requireGoogleMediaIntegration(t)
 
-	speech, err := NewMediaProvider().GenerateSpeech(context.Background(), "This is a Dive transcription test.", &media.Config{
+	speech, err := NewMediaProvider().TextToSpeech(context.Background(), "This is a Dive transcription test.", &media.Config{
 		Model:       "gemini-3.1-flash-tts-preview",
 		Voice:       "Kore",
 		AudioFormat: media.AudioFormatWAV,
@@ -185,7 +185,7 @@ func TestGoogleTranscribeSpeech_Integration(t *testing.T) {
 	assert.NoError(t, err)
 
 	p := NewMediaProvider()
-	result, err := p.TranscribeSpeech(context.Background(), speech.Data, &media.Config{
+	result, err := p.Transcribe(context.Background(), speech.Data, &media.Config{
 		Model:         "gemini-3.5-flash",
 		AudioMIMEType: "audio/wav",
 	})

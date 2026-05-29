@@ -24,14 +24,14 @@ type VideoProvider interface {
 	GenerateVideo(ctx context.Context, prompt string, config *Config) (*VideoResult, error)
 }
 
-// SpeechProvider generates spoken audio from text.
-type SpeechProvider interface {
-	// GenerateSpeech generates audio from text.
-	GenerateSpeech(ctx context.Context, text string, config *Config) (*AudioResult, error)
+// TextToSpeechProvider generates spoken audio from text.
+type TextToSpeechProvider interface {
+	// TextToSpeech generates audio from text.
+	TextToSpeech(ctx context.Context, text string, config *Config) (*AudioResult, error)
 }
 
-// SpeechRecognitionProvider transcribes speech audio into text.
-type SpeechRecognitionProvider interface {
-	// TranscribeSpeech transcribes audio bytes into text.
-	TranscribeSpeech(ctx context.Context, audio []byte, config *Config) (*TranscriptionResult, error)
+// TranscriptionProvider transcribes speech audio into text.
+type TranscriptionProvider interface {
+	// Transcribe transcribes audio bytes into text.
+	Transcribe(ctx context.Context, audio []byte, config *Config) (*TranscriptionResult, error)
 }

@@ -16,15 +16,15 @@ func main() {
 		out                string
 		voice              string
 		format             string
-		speechModel        string
+		ttsModel           string
 		transcriptionModel string
 		transcribe         bool
 	)
-	flag.StringVar(&text, "text", "Say cheerfully: Welcome to Dive speech generation.", "text to synthesize")
-	flag.StringVar(&out, "out", "google-speech", "output path; extension is added if omitted")
+	flag.StringVar(&text, "text", "Say cheerfully: Welcome to Dive text-to-speech.", "text to synthesize")
+	flag.StringVar(&out, "out", "google-text-to-speech", "output path; extension is added if omitted")
 	flag.StringVar(&voice, "voice", "Kore", "Gemini prebuilt voice name")
 	flag.StringVar(&format, "format", "wav", "audio format: wav or pcm")
-	flag.StringVar(&speechModel, "speech-model", google.ModelGemini31FlashTTSPreview, "Gemini TTS model")
+	flag.StringVar(&ttsModel, "tts-model", google.ModelGemini31FlashTTSPreview, "Gemini text-to-speech model")
 	flag.StringVar(&transcriptionModel, "transcription-model", google.ModelGemini35Flash, "Gemini transcription model")
 	flag.BoolVar(&transcribe, "transcribe", true, "transcribe the generated audio")
 	flag.Parse()
@@ -35,8 +35,8 @@ func main() {
 	}
 
 	ctx := context.Background()
-	speech, err := media.GenerateSpeech(ctx, text,
-		media.WithModel(speechModel),
+	audio, err := media.TextToSpeech(ctx, text,
+		media.WithModel(ttsModel),
 		media.WithVoice(voice),
 		media.WithAudioFormat(audioFormat),
 	)
@@ -44,19 +44,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	path, err := speech.WriteTo(out)
+	path, err := audio.WriteTo(out)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Saved %s (%s, %s, %d bytes)\n", path, speech.Model, speech.Format, len(speech.Data))
+	fmt.Printf("Saved %s (%s, %s, %d bytes)\n", path, audio.Model, audio.Format, len(audio.Data))
 
 	if !transcribe {
 		return
 	}
 
-	transcript, err := media.TranscribeSpeech(ctx, speech.Data,
+	transcript, err := media.Transcribe(ctx, audio.Data,
 		media.WithModel(transcriptionModel),
-		media.WithAudioMIMEType(speech.MimeType),
+		media.WithAudioMIMEType(audio.MimeType),
 		media.WithTranscriptionPrompt("Generate a transcript of the speech."),
 	)
 	if err != nil {

@@ -193,8 +193,8 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 	return result, nil
 }
 
-// GenerateSpeech implements media.SpeechProvider.
-func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config *media.Config) (*media.AudioResult, error) {
+// TextToSpeech implements media.TextToSpeechProvider.
+func (p *MediaProvider) TextToSpeech(ctx context.Context, text string, config *media.Config) (*media.AudioResult, error) {
 	model := config.Model
 	if model == "" {
 		model = "gpt-4o-mini-tts"
@@ -221,8 +221,8 @@ func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config 
 		},
 		ResponseFormat: openai.AudioSpeechNewParamsResponseFormat(format),
 	}
-	if config.SpeechInstructions != "" {
-		params.Instructions = openai.String(config.SpeechInstructions)
+	if config.VoiceInstructions != "" {
+		params.Instructions = openai.String(config.VoiceInstructions)
 	}
 	if config.SpeechSpeed != nil {
 		if *config.SpeechSpeed < 0.25 || *config.SpeechSpeed > 4.0 {
@@ -233,13 +233,13 @@ func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config 
 
 	resp, err := p.client.Audio.Speech.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("openai speech generation: %w", err)
+		return nil, fmt.Errorf("openai text-to-speech: %w", err)
 	}
 	defer resp.Body.Close()
 
 	audioData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading speech audio: %w", err)
+		return nil, fmt.Errorf("reading text-to-speech audio: %w", err)
 	}
 
 	result := &media.AudioResult{
@@ -258,8 +258,8 @@ func (p *MediaProvider) GenerateSpeech(ctx context.Context, text string, config 
 	return result, nil
 }
 
-// TranscribeSpeech implements media.SpeechRecognitionProvider.
-func (p *MediaProvider) TranscribeSpeech(ctx context.Context, audio []byte, config *media.Config) (*media.TranscriptionResult, error) {
+// Transcribe implements media.TranscriptionProvider.
+func (p *MediaProvider) Transcribe(ctx context.Context, audio []byte, config *media.Config) (*media.TranscriptionResult, error) {
 	if len(audio) == 0 {
 		return nil, fmt.Errorf("audio data is required for transcription")
 	}
@@ -289,7 +289,7 @@ func (p *MediaProvider) TranscribeSpeech(ctx context.Context, audio []byte, conf
 
 	resp, err := p.client.Audio.Transcriptions.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("openai speech transcription: %w", err)
+		return nil, fmt.Errorf("openai transcription: %w", err)
 	}
 
 	result := &media.TranscriptionResult{
@@ -414,9 +414,9 @@ func durationToSeconds(d time.Duration) string {
 
 // Compile-time interface checks.
 var (
-	_ media.ImageProvider             = (*MediaProvider)(nil)
-	_ media.ImageEditor               = (*MediaProvider)(nil)
-	_ media.VideoProvider             = (*MediaProvider)(nil)
-	_ media.SpeechProvider            = (*MediaProvider)(nil)
-	_ media.SpeechRecognitionProvider = (*MediaProvider)(nil)
+	_ media.ImageProvider         = (*MediaProvider)(nil)
+	_ media.ImageEditor           = (*MediaProvider)(nil)
+	_ media.VideoProvider         = (*MediaProvider)(nil)
+	_ media.TextToSpeechProvider  = (*MediaProvider)(nil)
+	_ media.TranscriptionProvider = (*MediaProvider)(nil)
 )

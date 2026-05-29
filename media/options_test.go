@@ -16,7 +16,7 @@ func TestOptions(t *testing.T) {
 		WithAudioFormat(AudioFormatWAV),
 		WithAudioMIMEType("audio/wav"),
 		WithVoice("Kore"),
-		WithSpeechInstructions("Speak warmly."),
+		WithVoiceInstructions("Speak warmly."),
 		WithSpeechSpeed(1.25),
 		WithLanguage("en"),
 		WithTranscriptionPrompt("The speaker mentions Dive."),
@@ -32,7 +32,7 @@ func TestOptions(t *testing.T) {
 	assert.Equal(t, AudioFormatWAV, c.AudioFormat)
 	assert.Equal(t, "audio/wav", c.AudioMIMEType)
 	assert.Equal(t, "Kore", c.Voice)
-	assert.Equal(t, "Speak warmly.", c.SpeechInstructions)
+	assert.Equal(t, "Speak warmly.", c.VoiceInstructions)
 	assert.Equal(t, 1.25, *c.SpeechSpeed)
 	assert.Equal(t, "en", c.Language)
 	assert.Equal(t, "The speaker mentions Dive.", c.TranscriptionPrompt)

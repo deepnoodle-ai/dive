@@ -83,7 +83,7 @@ type VideoResult struct {
 	Metadata map[string]any
 }
 
-// AudioResult is the output of a speech generation operation.
+// AudioResult is the output of a text-to-speech operation.
 type AudioResult struct {
 	// Data is the raw audio bytes.
 	Data []byte
@@ -126,7 +126,7 @@ func (r *AudioResult) SetAudioFormat(mimeType string) {
 	r.Format = AudioFormatFromMIME(mimeType)
 }
 
-// TranscriptionResult is the output of a speech recognition operation.
+// TranscriptionResult is the output of a transcription operation.
 type TranscriptionResult struct {
 	// Text is the recognized transcript.
 	Text string

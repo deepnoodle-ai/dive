@@ -121,16 +121,16 @@ fmt.Printf("Saved: %s (%dx%d %s, %s)\n",
 Video generation is synchronous from the caller's perspective — the call blocks
 until the provider completes or the context is cancelled.
 
-## Speech Generation
+## Text-to-Speech
 
 Generate spoken audio from text with OpenAI TTS or Gemini TTS models:
 
 ```go
-result, err := media.GenerateSpeech(ctx, "Welcome to Dive.",
+result, err := media.TextToSpeech(ctx, "Welcome to Dive.",
     media.WithModel("gpt-4o-mini-tts"),
     media.WithVoice("alloy"),
     media.WithAudioFormat(media.AudioFormatMP3),
-    media.WithSpeechInstructions("Speak warmly and clearly."),
+    media.WithVoiceInstructions("Speak warmly and clearly."),
 )
 if err != nil {
     log.Fatal(err)
@@ -144,14 +144,14 @@ Gemini TTS returns PCM audio from the API; Dive wraps it as WAV by default so
 `WriteTo("welcome")` produces a playable `.wav` file:
 
 ```go
-result, err := media.GenerateSpeech(ctx, "Say cheerfully: Have a wonderful day!",
+result, err := media.TextToSpeech(ctx, "Say cheerfully: Have a wonderful day!",
     media.WithModel("gemini-3.1-flash-tts-preview"),
     media.WithVoice("Kore"),
     media.WithAudioFormat(media.AudioFormatWAV),
 )
 ```
 
-## Speech Recognition
+## Transcription
 
 Transcribe audio bytes with OpenAI speech-to-text models or Gemini audio
 understanding models:
@@ -159,7 +159,7 @@ understanding models:
 ```go
 audio, _ := os.ReadFile("meeting.wav")
 
-result, err := media.TranscribeSpeech(ctx, audio,
+result, err := media.Transcribe(ctx, audio,
     media.WithModel("gpt-4o-mini-transcribe"),
     media.WithAudioMIMEType("audio/wav"),
     media.WithLanguage("en"),
@@ -175,7 +175,7 @@ fmt.Println(result.Text)
 For Gemini, use a general audio-capable Gemini model and an optional prompt:
 
 ```go
-result, err := media.TranscribeSpeech(ctx, audio,
+result, err := media.Transcribe(ctx, audio,
     media.WithModel("gemini-3.5-flash"),
     media.WithAudioMIMEType("audio/wav"),
     media.WithTranscriptionPrompt("Generate a concise transcript of the speech."),
@@ -200,14 +200,14 @@ result, err := media.TranscribeSpeech(ctx, audio,
 | OpenAI | `sora-2`, `sora-2-pro` |
 | Grok | `grok-imagine-video` |
 
-### Speech Generation Models
+### Text-to-Speech Models
 
 | Provider | Models |
 |----------|--------|
 | OpenAI | `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd` |
 | Google | `gemini-3.1-flash-tts-preview`, `gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts` |
 
-### Speech Recognition Models
+### Transcription Models
 
 | Provider | Models |
 |----------|--------|
@@ -227,11 +227,11 @@ result, err := media.TranscribeSpeech(ctx, audio,
 | `WithDuration(d)` | Video duration | Provider default |
 | `WithAudioFormat(f)` | `AudioFormatMP3`, `AudioFormatWAV`, `AudioFormatPCM`, etc. | Provider default |
 | `WithAudioMIMEType(mime)` | Input audio MIME hint for transcription | Auto-detected |
-| `WithVoice(v)` | Speech generation voice | Provider default |
-| `WithSpeechInstructions(s)` | Speech style instructions | — |
+| `WithVoice(v)` | Text-to-speech voice | Provider default |
+| `WithVoiceInstructions(s)` | Text-to-speech style instructions | — |
 | `WithSpeechSpeed(n)` | Speech speed when supported | Provider default |
 | `WithLanguage(code)` | Transcription or speech language hint | Provider default |
-| `WithTranscriptionPrompt(p)` | Speech recognition context prompt | Provider default |
+| `WithTranscriptionPrompt(p)` | Transcription context prompt | Provider default |
 | `WithTimeout(d)` | Max generation wait time | 5min (image), 15min (video) |
 
 ## File Output

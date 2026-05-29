@@ -22,11 +22,11 @@ type Config struct {
 	// AudioMIMEType hints the MIME type of input audio bytes.
 	AudioMIMEType string
 
-	// Voice selects the voice for speech generation.
+	// Voice selects the voice for text-to-speech.
 	Voice string
 
-	// SpeechInstructions controls voice style for speech generation when supported.
-	SpeechInstructions string
+	// VoiceInstructions controls voice style for text-to-speech when supported.
+	VoiceInstructions string
 
 	// SpeechSpeed controls generated speech speed when supported.
 	SpeechSpeed *float64
@@ -34,7 +34,7 @@ type Config struct {
 	// Language sets the transcription or speech language when supported.
 	Language string
 
-	// TranscriptionPrompt gives recognition models context for transcription.
+	// TranscriptionPrompt gives transcription models context.
 	TranscriptionPrompt string
 
 	// Count is the number of images to generate per model.
@@ -106,17 +106,17 @@ func WithAudioMIMEType(mimeType string) Option {
 	}
 }
 
-// WithVoice sets the voice for speech generation.
+// WithVoice sets the voice for text-to-speech.
 func WithVoice(voice string) Option {
 	return func(c *Config) {
 		c.Voice = voice
 	}
 }
 
-// WithSpeechInstructions sets style instructions for speech generation.
-func WithSpeechInstructions(instructions string) Option {
+// WithVoiceInstructions sets style instructions for text-to-speech.
+func WithVoiceInstructions(instructions string) Option {
 	return func(c *Config) {
-		c.SpeechInstructions = instructions
+		c.VoiceInstructions = instructions
 	}
 }
 
@@ -127,14 +127,14 @@ func WithSpeechSpeed(speed float64) Option {
 	}
 }
 
-// WithLanguage sets the language for transcription or speech generation.
+// WithLanguage sets the language for transcription or text-to-speech.
 func WithLanguage(language string) Option {
 	return func(c *Config) {
 		c.Language = language
 	}
 }
 
-// WithTranscriptionPrompt gives recognition models context for transcription.
+// WithTranscriptionPrompt gives transcription models context.
 func WithTranscriptionPrompt(prompt string) Option {
 	return func(c *Config) {
 		c.TranscriptionPrompt = prompt

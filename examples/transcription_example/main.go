@@ -45,7 +45,7 @@ func main() {
 		mimeType = media.DetectAudioMIMEFromBytes(audio)
 	}
 
-	result, err := media.TranscribeSpeech(context.Background(), audio,
+	result, err := media.Transcribe(context.Background(), audio,
 		media.WithModel(model),
 		media.WithAudioMIMEType(mimeType),
 		media.WithLanguage(language),
