@@ -37,7 +37,6 @@ type AgentToolInput struct {
 	Prompt          string `json:"prompt"`
 	Description     string `json:"description"`
 	SubagentType    string `json:"subagent_type"`
-	Model           string `json:"model,omitempty"`
 	RunInBackground bool   `json:"run_in_background,omitempty"`
 }
 
@@ -130,11 +129,6 @@ func (t *agentTool) Schema() *schema.Schema {
 				Type:        "string",
 				Description: "The type of specialized agent to use (e.g., GeneralPurpose, Explore, Plan).",
 			},
-			"model": {
-				Type:        "string",
-				Description: "Optional model to use: sonnet, opus, or haiku. If not specified, inherits from parent.",
-				Enum:        []any{"sonnet", "opus", "haiku"},
-			},
 			"run_in_background": {
 				Type:        "boolean",
 				Description: "Run this agent in the background so you can continue working (default: true). The result is delivered automatically when complete. Set to false only when you need the result before continuing.",
@@ -169,13 +163,6 @@ func (t *agentTool) Call(ctx context.Context, input *AgentToolInput) (*dive.Tool
 		return dive.NewToolResultError(fmt.Sprintf(
 			"unknown subagent type %q. Available types: %v",
 			input.SubagentType, t.typeNames())), nil
-	}
-
-	// Apply the per-call model override without mutating the shared definition.
-	if input.Model != "" {
-		defCopy := *def
-		defCopy.Model = input.Model
-		def = &defCopy
 	}
 
 	agent, err := t.factory(ctx, input.SubagentType, def, t.parentTools)

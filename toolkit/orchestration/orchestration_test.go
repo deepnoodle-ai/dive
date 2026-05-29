@@ -233,22 +233,6 @@ func TestAgentTool(t *testing.T) {
 		assert.Contains(t, res.Content[0].Text, "subagent_type is required")
 	})
 
-	t.Run("model override does not mutate the shared definition", func(t *testing.T) {
-		shared := &subagent.Definition{Description: "d", Prompt: "p"}
-		var gotModel string
-		tool := NewAgentTool(AgentToolOptions{
-			Subagents: map[string]*subagent.Definition{"x": shared},
-			AgentFactory: func(ctx context.Context, name string, def *subagent.Definition, parentTools []dive.Tool) (*dive.Agent, error) {
-				gotModel = def.Model
-				return mockAgent("a", "ok", nil, 0)
-			},
-		})
-		_, err := tool.Call(ctx, &AgentToolInput{Prompt: "p", Description: "d", SubagentType: "x", Model: "haiku"})
-		assert.NoError(t, err)
-		assert.Equal(t, "haiku", gotModel)
-		assert.Equal(t, "", shared.Model)
-	})
-
 	t.Run("catalog is copied defensively", func(t *testing.T) {
 		types := map[string]*subagent.Definition{"x": {Description: "d", Prompt: "p"}}
 		tool := NewAgentTool(AgentToolOptions{
