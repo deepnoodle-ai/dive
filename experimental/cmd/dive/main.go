@@ -524,9 +524,9 @@ func appendAttachedContent(input, attachment string) string {
 }
 
 func getInput(args []string) (string, error) {
-	if len(args) > 1 {
-		return "", fmt.Errorf("expected at most 1 argument, got %d", len(args))
-	}
+	// The main command declares a single optional positional ("prompt?"), so the
+	// parser caps args at one element (extras are rejected as "unexpected
+	// argument" before we get here).
 	if len(args) == 1 {
 		return strings.TrimSpace(args[0]), nil
 	}
