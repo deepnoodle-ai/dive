@@ -101,3 +101,165 @@ func TestBuildRequestParams_NoIncludesWhenToolOptsOut(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, params.Include)
 }
+
+func TestProviderDefaultModel(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+
+	config := &llm.Config{}
+	config.Apply(llm.WithMessages(llm.NewUserTextMessage("hi")))
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, ModelGPT55, string(params.Model))
+}
+
+func TestBuildRequestParams_ReasoningEffortNone(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithReasoningEffort(llm.ReasoningEffortNone),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, responses.ReasoningEffort("none"), params.Reasoning.Effort)
+}
+
+func TestBuildRequestParams_NormalizesOpenAIReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		model  string
+		effort llm.ReasoningEffort
+		want   responses.ReasoningEffort
+	}{
+		{
+			name:   "minimal maps to low on latest models",
+			model:  ModelGPT55,
+			effort: llm.ReasoningEffortMinimal,
+			want:   responses.ReasoningEffort("low"),
+		},
+		{
+			name:   "max maps to xhigh on latest models",
+			model:  ModelGPT55,
+			effort: llm.ReasoningEffortMax,
+			want:   responses.ReasoningEffort("xhigh"),
+		},
+		{
+			name:   "xhigh maps to high on gpt-5.1",
+			model:  ModelGPT51,
+			effort: llm.ReasoningEffortXHigh,
+			want:   responses.ReasoningEffort("high"),
+		},
+		{
+			name:   "max maps to high on o-series",
+			model:  ModelO3,
+			effort: llm.ReasoningEffortMax,
+			want:   responses.ReasoningEffort("high"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := New(WithAPIKey("test"), WithModel(tt.model))
+			config := &llm.Config{}
+			config.Apply(
+				llm.WithMessages(llm.NewUserTextMessage("hi")),
+				llm.WithReasoningEffort(tt.effort),
+			)
+
+			params, err := provider.buildRequestParams(config)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, params.Reasoning.Effort)
+		})
+	}
+}
+
+func TestBuildRequestParams_ReasoningEffortUnsupportedForOpenAIModel(t *testing.T) {
+	provider := New(WithAPIKey("test"), WithModel(ModelGPT5))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithReasoningEffort(llm.ReasoningEffortNone),
+	)
+
+	_, err := provider.buildRequestParams(config)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+}
+
+func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name    string
+		model   string
+		effort  llm.ReasoningEffort
+		want    responses.ReasoningEffort
+		wantErr bool
+	}{
+		{
+			name:   "grok 4.3 max maps to high",
+			model:  "grok-4.3",
+			effort: llm.ReasoningEffortMax,
+			want:   responses.ReasoningEffort("high"),
+		},
+		{
+			name:   "grok multi-agent max maps to xhigh",
+			model:  "grok-4.20-multi-agent-0309",
+			effort: llm.ReasoningEffortMax,
+			want:   responses.ReasoningEffort("xhigh"),
+		},
+		{
+			name:    "grok multi-agent rejects none",
+			model:   "grok-4.20-multi-agent-0309",
+			effort:  llm.ReasoningEffortNone,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := New(WithAPIKey("test"), WithName("grok"), WithModel(tt.model))
+			config := &llm.Config{}
+			config.Apply(
+				llm.WithMessages(llm.NewUserTextMessage("hi")),
+				llm.WithReasoningEffort(tt.effort),
+			)
+
+			params, err := provider.buildRequestParams(config)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), "not supported")
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, params.Reasoning.Effort)
+		})
+	}
+}
+
+func TestBuildRequestParams_UnknownModelPassesReasoningEffortThrough(t *testing.T) {
+	provider := New(WithAPIKey("test"), WithModel("custom-reasoning-model"))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithReasoningEffort(llm.ReasoningEffort("superdeep")),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, responses.ReasoningEffort("superdeep"), params.Reasoning.Effort)
+}
+
+func TestBuildRequestParams_UnknownReasoningEffortPassesThroughKnownModel(t *testing.T) {
+	provider := New(WithAPIKey("test"), WithModel(ModelGPT55))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithReasoningEffort(llm.ReasoningEffort("superdeep")),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, responses.ReasoningEffort("superdeep"), params.Reasoning.Effort)
+}

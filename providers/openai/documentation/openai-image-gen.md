@@ -2,9 +2,9 @@
 
 Allow models to generate or edit images.
 
-The image generation tool allows you to generate images using a text prompt, and optionally image inputs. It leverages the [GPT Image model](/docs/models/gpt-image-1), and automatically optimizes text inputs for improved performance.
+The image generation tool allows you to generate images using a text prompt, and optionally image inputs. It leverages the [GPT Image model](/docs/models/gpt-image-2), and automatically optimizes text inputs for improved performance.
 
-To learn more about image generation, refer to our dedicated [image generation guide](/docs/guides/image-generation?image-generation-model=gpt-image-1&api=responses).
+To learn more about image generation, refer to our dedicated [image generation guide](/docs/guides/image-generation?image-generation-model=gpt-image-2&api=responses).
 
 ## Usage
 
@@ -62,7 +62,7 @@ if image_data:
         f.write(base64.b64decode(image_base64))
 ```
 
-You can [provide input images](/docs/guides/image-generation?image-generation-model=gpt-image-1#edit-images) using file IDs or base64 data.
+You can [provide input images](/docs/guides/image-generation?image-generation-model=gpt-image-2#edit-images) using file IDs or base64 data.
 
 To force the image generation tool call, you can set the parameter `tool_choice` to `{"type": "image_generation"}`.
 
@@ -374,6 +374,6 @@ The image generation tool is supported for the following models:
 - `gpt-4.1-nano`
 - `o3`
 
-The model used for the image generation process is always `gpt-image-1`, but these models can be used as the mainline model in the Responses API as they can reliably call the image generation tool when needed.g
+The model used for the image generation process is always `gpt-image-2`, but these models can be used as the mainline model in the Responses API as they can reliably call the image generation tool when needed.
 
 Was this page useful?

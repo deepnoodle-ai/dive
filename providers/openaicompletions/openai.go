@@ -41,7 +41,7 @@ const (
 )
 
 var (
-	DefaultModel              = ModelGPT5
+	DefaultModel              = ModelGPT55
 	DefaultEndpoint           = "https://api.openai.com/v1/chat/completions"
 	DefaultMaxTokens          = 16384
 	DefaultSystemRole         = "developer"
@@ -475,7 +475,13 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	req.Temperature = config.Temperature
 	req.PresencePenalty = config.PresencePenalty
 	req.FrequencyPenalty = config.FrequencyPenalty
-	req.ReasoningEffort = ReasoningEffort(config.ReasoningEffort)
+	reasoningEffort, includeReasoningEffort, err := p.resolveReasoningEffort(req.Model, config)
+	if err != nil {
+		return err
+	}
+	if includeReasoningEffort {
+		req.ReasoningEffort = reasoningEffort
+	}
 	return nil
 }
 

@@ -8,9 +8,11 @@ unlock new capabilities, especially **Claude Opus 4.8**.
 
 ## Summary
 
-Dive was already current on OpenAI (GPT-5.4), Gemini (3.1 Pro), and Grok (4.20).
-The gaps closed here:
+Dive was already current on Gemini (3.1 Pro) and Grok (4.20). The gaps closed
+here:
 
+- **OpenAI**: added GPT-5.5, GPT-5.4 nano, and GPT Image 2; defaulted OpenAI
+  text to `gpt-5.5` and OpenAI image generation to `gpt-image-2`.
 - **Anthropic**: added Opus 4.7 and 4.8; fixed a bug that made effort/thinking
   unusable on 4.7/4.8; added the native `effort` parameter, adaptive thinking,
   fast mode, thinking-display control, and refusal `stop_details`.
@@ -59,8 +61,13 @@ header `fast-mode-2026-02-01`, requires account access).
 
 ### OpenAI
 
-Already current: GPT-5.4 / 5.4-mini / 5.3-codex etc. (default `gpt-5.4`). No
-changes this pass.
+| Model | API ID | Input | Output | Context | Max output | Notes |
+|-------|--------|-------|--------|---------|------------|-------|
+| **GPT-5.5** | `gpt-5.5` | $5.00 | $30.00 | 1.05M | 128k | New OpenAI default |
+| GPT-5.4 | `gpt-5.4` | $2.50 | $15.00 | 1.05M | 128k | More affordable frontier model |
+| GPT-5.4 mini | `gpt-5.4-mini` | $0.75 | $4.50 | 400k | 128k | Fast mini model |
+| GPT-5.4 nano | `gpt-5.4-nano` | $0.20 | $1.25 | 400k | 128k | Lowest-cost GPT-5.4-class model |
+| GPT Image 2 | `gpt-image-2` | — | — | — | — | New OpenAI image-generation default |
 
 ## The critical bug (fixed)
 

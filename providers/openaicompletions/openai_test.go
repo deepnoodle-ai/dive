@@ -11,6 +11,75 @@ import (
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
+func TestApplyRequestConfig_NormalizesReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		model  string
+		effort llm.ReasoningEffort
+		want   ReasoningEffort
+	}{
+		{
+			name:   "openai latest max maps to xhigh",
+			model:  ModelGPT55,
+			effort: llm.ReasoningEffortMax,
+			want:   ReasoningEffortXHigh,
+		},
+		{
+			name:   "openai gpt-5.1 xhigh maps to high",
+			model:  ModelGPT51,
+			effort: llm.ReasoningEffortXHigh,
+			want:   ReasoningEffortHigh,
+		},
+		{
+			name:   "openrouter x-ai grok max maps to high",
+			model:  "x-ai/grok-4.3",
+			effort: llm.ReasoningEffortMax,
+			want:   ReasoningEffortHigh,
+		},
+		{
+			name:   "unknown model effort passes through",
+			model:  "custom/model",
+			effort: llm.ReasoningEffort("superdeep"),
+			want:   ReasoningEffort("superdeep"),
+		},
+		{
+			name:   "unknown effort passes through known model",
+			model:  ModelGPT55,
+			effort: llm.ReasoningEffort("superdeep"),
+			want:   ReasoningEffort("superdeep"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := New(WithModel(tt.model))
+			var req Request
+			err := provider.applyRequestConfig(&req, &llm.Config{ReasoningEffort: tt.effort})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, req.ReasoningEffort)
+		})
+	}
+}
+
+func TestApplyRequestConfig_UnsupportedReasoningEffortErrorsForKnownModel(t *testing.T) {
+	provider := New(WithModel(ModelGPT5))
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{ReasoningEffort: llm.ReasoningEffortNone})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+}
+
+func TestApplyRequestConfig_MistralOmitsReasoningEffort(t *testing.T) {
+	provider := New(
+		WithEndpoint("https://api.mistral.ai/v1/chat/completions"),
+		WithModel("mistral-large-3"),
+	)
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{ReasoningEffort: llm.ReasoningEffortHigh})
+	assert.NoError(t, err)
+	assert.Equal(t, ReasoningEffort(""), req.ReasoningEffort)
+}
+
 func skipIfNoAPIKey(t *testing.T) {
 	t.Helper()
 	if os.Getenv("OPENAI_API_KEY") == "" {

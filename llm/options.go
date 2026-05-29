@@ -201,10 +201,13 @@ func WithReasoningBudget(reasoningBudget int) Option {
 // ReasoningEffort defines the effort level for reasoning aka extended thinking.
 // It controls how eagerly the model spends tokens on a response, including
 // thinking, tool calls, and text. Not all providers support all levels:
-// ReasoningEffortXHigh and ReasoningEffortMax are Anthropic-specific (Opus 4.6+).
+// ReasoningEffortMax is Anthropic-specific (Opus 4.6+).
 type ReasoningEffort string
 
 const (
+	// ReasoningEffortNone requests no model-side reasoning. Supported on newer
+	// OpenAI GPT-5.4+ models; other providers may ignore or reject it.
+	ReasoningEffortNone ReasoningEffort = "none"
 	// ReasoningEffortMinimal requests the smallest amount of reasoning the
 	// model supports. Useful for tasks where latency matters more than
 	// step-by-step deliberation. Supported on OpenAI gpt-5 family; other
@@ -214,7 +217,7 @@ const (
 	ReasoningEffortMedium  ReasoningEffort = "medium"
 	ReasoningEffortHigh    ReasoningEffort = "high"
 	// ReasoningEffortXHigh requests extended capability for long-horizon work.
-	// Supported on Claude Opus 4.7 and 4.8.
+	// Supported on newer OpenAI GPT-5.4+ models and Claude Opus 4.7/4.8.
 	ReasoningEffortXHigh ReasoningEffort = "xhigh"
 	// ReasoningEffortMax requests the absolute maximum capability with no
 	// constraints on token spend. Supported on Claude Opus 4.6, 4.7, 4.8 and
@@ -224,7 +227,8 @@ const (
 
 // IsValid returns true if the reasoning effort is a known, valid value.
 func (r ReasoningEffort) IsValid() bool {
-	return r == ReasoningEffortMinimal ||
+	return r == ReasoningEffortNone ||
+		r == ReasoningEffortMinimal ||
 		r == ReasoningEffortLow ||
 		r == ReasoningEffortMedium ||
 		r == ReasoningEffortHigh ||

@@ -19,7 +19,7 @@ import (
 const ProviderName = "openai"
 
 var (
-	DefaultModel         = ModelGPT54
+	DefaultModel         = ModelGPT55
 	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = 2
 	DefaultRetryBaseWait = 1 * time.Second
@@ -192,8 +192,12 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 
 	// Handle reasoning effort
 	if config.ReasoningEffort != "" {
+		effort, err := normalizeResponsesReasoningEffort(p.Name(), string(params.Model), config.ReasoningEffort)
+		if err != nil {
+			return responses.ResponseNewParams{}, err
+		}
 		params.Reasoning = responses.ReasoningParam{
-			Effort: responses.ReasoningEffort(config.ReasoningEffort),
+			Effort: responses.ReasoningEffort(effort),
 		}
 		if config.ReasoningSummary != "" {
 			switch config.ReasoningSummary {

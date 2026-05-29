@@ -37,7 +37,7 @@ Each provider reads its API key from the environment:
 
 ```go
 result, err := media.GenerateImage(ctx, "a cat astronaut on the moon",
-    media.WithModel("gpt-image-1"),
+    media.WithModel("gpt-image-2"),
     media.WithAspectRatio(media.Aspect16x9),
     media.WithOutputFormat(media.FormatPNG),
 )
@@ -70,7 +70,7 @@ Generate the same prompt with multiple models concurrently:
 
 ```go
 results, err := media.GenerateImages(ctx, "a red panda",
-    media.WithModels("gpt-image-1", "imagen-4.0-generate-001", "grok-imagine-image"),
+    media.WithModels("gpt-image-2", "imagen-4.0-generate-001", "grok-imagine-image"),
 )
 for _, img := range results {
     if img.Err != nil {
@@ -92,7 +92,7 @@ Providers that support editing (OpenAI, Google Gemini) can modify existing image
 refImage, _ := os.ReadFile("photo.png")
 
 result, err := media.EditImage(ctx, "make the sky purple",
-    media.WithModel("gpt-image-1"),
+    media.WithModel("gpt-image-2"),
     media.WithReferenceImage(refImage),
 )
 ```
@@ -126,7 +126,7 @@ until the provider completes or the context is cancelled.
 
 | Provider | Models |
 |----------|--------|
-| OpenAI | `gpt-image-1`, `gpt-image-1.5`, `gpt-image-1-mini` |
+| OpenAI | `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini` |
 | Google | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `gemini-2.5-flash-image`, `gemini-3.1-flash-image-preview` |
 | Grok | `grok-imagine-image`, `grok-imagine-image-pro` |
 
@@ -175,7 +175,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
     SystemPrompt: "You help users create images and videos.",
     Model:        anthropic.New(),
     Tools: []dive.Tool{
-        toolkit.NewImageGenerationTool("gpt-image-1",
+        toolkit.NewImageGenerationTool("gpt-image-2",
             toolkit.WithImageToolWorkDir("/tmp/output"),
         ),
         toolkit.NewVideoGenerationTool("veo-3.1-generate-preview",

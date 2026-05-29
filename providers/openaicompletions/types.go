@@ -5,10 +5,12 @@ import "github.com/deepnoodle-ai/wonton/schema"
 type ReasoningEffort string
 
 const (
+	ReasoningEffortNone    ReasoningEffort = "none"
 	ReasoningEffortMinimal ReasoningEffort = "minimal"
 	ReasoningEffortLow     ReasoningEffort = "low"
 	ReasoningEffortMedium  ReasoningEffort = "medium"
 	ReasoningEffortHigh    ReasoningEffort = "high"
+	ReasoningEffortXHigh   ReasoningEffort = "xhigh"
 )
 
 type StreamOptions struct {
@@ -27,7 +29,7 @@ type Request struct {
 	ToolChoice          any             `json:"tool_choice,omitempty"`
 	PresencePenalty     *float64        `json:"presence_penalty,omitempty"`  // -2 to 2, default 0
 	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"` // -2 to 2, default 0
-	ReasoningEffort     ReasoningEffort `json:"reasoning_effort,omitempty"`  // o1 and o3-mini models only
+	ReasoningEffort     ReasoningEffort `json:"reasoning_effort,omitempty"`  // supported reasoning models only
 	ReasoningFormat     string          `json:"reasoning_format,omitempty"`  // groq only?
 }
 

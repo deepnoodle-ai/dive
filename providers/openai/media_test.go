@@ -18,7 +18,7 @@ func TestOpenAIAspectRatioToSize(t *testing.T) {
 		{media.Aspect1x1, "1024x1024"},
 		{media.Aspect16x9, "1536x1024"},
 		{media.Aspect9x16, "1024x1536"},
-		{media.AspectAuto, "1024x1024"},
+		{media.AspectAuto, "auto"},
 		{media.Aspect4x3, "1024x1024"}, // unsupported, falls to default
 	}
 	for _, tt := range tests {
@@ -70,6 +70,8 @@ func TestOpenAIVideoSizeToAspectRatio(t *testing.T) {
 
 func TestOpenAIImageMatcher(t *testing.T) {
 	matcher := media.PrefixMatcher("gpt-image-")
+	assert.True(t, matcher("gpt-image-2"))
+	assert.True(t, matcher("gpt-image-2-2026-04-21"))
 	assert.True(t, matcher("gpt-image-1"))
 	assert.True(t, matcher("gpt-image-1.5"))
 	assert.True(t, matcher("gpt-image-1-mini"))
@@ -99,7 +101,7 @@ func TestOpenAIGenerateImage_Integration(t *testing.T) {
 
 	p := NewMediaProvider()
 	config := &media.Config{
-		Model:       "gpt-image-1",
+		Model:       ModelGPTImage2,
 		AspectRatio: media.Aspect1x1,
 		Count:       1,
 	}
@@ -107,7 +109,7 @@ func TestOpenAIGenerateImage_Integration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, len(results) > 0)
 	assert.True(t, len(results[0].Data) > 0)
-	assert.Equal(t, "gpt-image-1", results[0].Model)
+	assert.Equal(t, ModelGPTImage2, results[0].Model)
 }
 
 func TestOpenAIGenerateVideo_Integration(t *testing.T) {

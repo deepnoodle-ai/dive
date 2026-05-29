@@ -406,8 +406,12 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 	}
 
 	if config.ReasoningEffort != "" {
+		effort, err := normalizeReasoningEffort(model, config.ReasoningEffort)
+		if err != nil {
+			return err
+		}
 		if modelSupportsEffortParam(model) {
-			req.OutputConfig = &OutputConfig{Effort: string(config.ReasoningEffort)}
+			req.OutputConfig = &OutputConfig{Effort: string(effort)}
 		} else {
 			// Legacy: emulate the effort parameter with a thinking budget.
 			// This model lacks the native effort parameter, so honoring effort
@@ -419,7 +423,7 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 			if thinking != nil && config.ReasoningBudget != nil {
 				return fmt.Errorf("cannot set both reasoning budget and effort on model %s", model)
 			}
-			budget, err := legacyEffortBudget(config.ReasoningEffort)
+			budget, err := legacyEffortBudget(effort)
 			if err != nil {
 				return err
 			}
@@ -474,11 +478,38 @@ func resolveThinking(model string, config *llm.Config) (*Thinking, error) {
 	return nil, nil
 }
 
+// normalizeReasoningEffort maps provider-neutral efforts onto Anthropic's
+// documented effort levels while keeping older low/medium/high behavior intact.
+func normalizeReasoningEffort(model string, effort llm.ReasoningEffort) (llm.ReasoningEffort, error) {
+	switch effort {
+	case llm.ReasoningEffortLow,
+		llm.ReasoningEffortMedium,
+		llm.ReasoningEffortHigh:
+		return effort, nil
+	case llm.ReasoningEffortMinimal:
+		return llm.ReasoningEffortLow, nil
+	case llm.ReasoningEffortNone:
+		return "", fmt.Errorf("reasoning effort %q is not supported by Anthropic models", effort)
+	case llm.ReasoningEffortXHigh:
+		if modelSupportsXHighEffort(model) {
+			return effort, nil
+		}
+		return llm.ReasoningEffortHigh, nil
+	case llm.ReasoningEffortMax:
+		if modelSupportsMaxEffort(model) {
+			return effort, nil
+		}
+		return llm.ReasoningEffortHigh, nil
+	default:
+		return effort, nil
+	}
+}
+
 // legacyEffortBudget maps a reasoning effort level to a thinking token budget
 // for older models that lack the native effort parameter.
 func legacyEffortBudget(effort llm.ReasoningEffort) (int, error) {
 	switch effort {
-	case llm.ReasoningEffortLow:
+	case llm.ReasoningEffortLow, llm.ReasoningEffortMinimal:
 		return 1024, nil
 	case llm.ReasoningEffortMedium:
 		return 4096, nil
@@ -501,6 +532,18 @@ func modelSupportsEffortParam(model string) bool {
 		return true
 	}
 	return false
+}
+
+func modelSupportsXHighEffort(model string) bool {
+	return strings.HasPrefix(model, "claude-opus-4-7") ||
+		strings.HasPrefix(model, "claude-opus-4-8")
+}
+
+func modelSupportsMaxEffort(model string) bool {
+	return strings.HasPrefix(model, "claude-opus-4-6") ||
+		strings.HasPrefix(model, "claude-opus-4-7") ||
+		strings.HasPrefix(model, "claude-opus-4-8") ||
+		strings.HasPrefix(model, "claude-sonnet-4-6")
 }
 
 // modelRejectsManualThinking reports whether the model rejects manual extended

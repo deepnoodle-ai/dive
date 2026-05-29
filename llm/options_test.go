@@ -11,6 +11,7 @@ func TestReasoningEffort_IsValid(t *testing.T) {
 		effort ReasoningEffort
 		valid  bool
 	}{
+		{ReasoningEffortNone, true},
 		{ReasoningEffortMinimal, true},
 		{ReasoningEffortLow, true},
 		{ReasoningEffortMedium, true},
@@ -18,7 +19,6 @@ func TestReasoningEffort_IsValid(t *testing.T) {
 		{ReasoningEffortXHigh, true},
 		{ReasoningEffortMax, true},
 		{ReasoningEffort(""), false},
-		{ReasoningEffort("none"), false},
 		{ReasoningEffort("nope"), false},
 	}
 	for _, c := range cases {

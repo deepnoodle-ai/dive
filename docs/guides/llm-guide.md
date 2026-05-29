@@ -21,12 +21,12 @@ model := anthropic.New() // defaults to claude-opus-4-5
 ```go
 import "github.com/deepnoodle-ai/dive/providers/openai"
 
-model := openai.New() // defaults to gpt-5.2
+model := openai.New() // defaults to gpt-5.5
 ```
 
 **Env:** `OPENAI_API_KEY`
 **Models:** See `providers/openai/models.go` for available models.
-**Features:** Streaming, tool calling, reasoning budget (o-series)
+**Features:** Streaming, tool calling, vision input, reasoning effort
 
 ### Google (Gemini)
 
@@ -120,13 +120,17 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 | `PresencePenalty`   | `*float64`            | Reduce repetition                                |
 | `FrequencyPenalty`  | `*float64`            | Encourage topic variety                          |
 | `ReasoningBudget`   | `*int`                | Manual thinking budget (o-series, older Claude)  |
-| `ReasoningEffort`   | `llm.ReasoningEffort` | low, medium, high, xhigh, max (Claude Opus 4.6+) |
+| `ReasoningEffort`   | `llm.ReasoningEffort` | none, minimal, low, medium, high, xhigh, max     |
 | `Thinking`          | `llm.ThinkingType`    | adaptive, enabled, or disabled extended thinking |
 | `ThinkingDisplay`   | `llm.ThinkingDisplay` | summarized or omitted thinking content           |
 | `Speed`             | `llm.Speed`           | fast or standard (Claude fast mode)              |
 | `Caching`           | `*bool`               | Enable prompt caching (Claude)                   |
 | `ParallelToolCalls` | `*bool`               | Allow simultaneous tool calls                    |
 | `ToolChoice`        | `*llm.ToolChoice`     | auto, any, none, or specific tool                |
+
+Provider implementations normalize `ReasoningEffort` only where the model
+family is known. Unsupported providers may omit the option or pass it through
+for compatibility with custom OpenAI-compatible endpoints.
 
 ### Reasoning on Claude Opus 4.7 / 4.8
 

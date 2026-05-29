@@ -2,8 +2,10 @@ package openai
 
 const (
 	// GPT-5 models (latest)
+	ModelGPT55           = "gpt-5.5"
 	ModelGPT54           = "gpt-5.4"
 	ModelGPT54Mini       = "gpt-5.4-mini"
+	ModelGPT54Nano       = "gpt-5.4-nano"
 	ModelGPT53ChatLatest = "gpt-5.3-chat-latest"
 	ModelGPT53ChatLast   = ModelGPT53ChatLatest // Deprecated: Use ModelGPT53ChatLatest.
 	ModelGPT52           = "gpt-5.2"
@@ -18,6 +20,13 @@ const (
 	// GPT-4 models
 	ModelGPT41 = "gpt-4.1"
 	ModelGPT4o = "gpt-4o"
+
+	// Image models
+	ModelGPTImage2         = "gpt-image-2"
+	ModelGPTImage220260421 = "gpt-image-2-2026-04-21"
+	ModelGPTImage15        = "gpt-image-1.5"
+	ModelGPTImage1         = "gpt-image-1"
+	ModelGPTImage1Mini     = "gpt-image-1-mini"
 
 	// o-series reasoning models
 	ModelO3                 = "o3"
