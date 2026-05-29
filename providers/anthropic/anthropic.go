@@ -410,6 +410,12 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 			req.OutputConfig = &OutputConfig{Effort: string(config.ReasoningEffort)}
 		} else {
 			// Legacy: emulate the effort parameter with a thinking budget.
+			// This model lacks the native effort parameter, so honoring effort
+			// here would re-enable thinking — don't silently override an
+			// explicit disable.
+			if config.Thinking == llm.ThinkingTypeDisabled {
+				return fmt.Errorf("cannot set reasoning effort with thinking disabled on model %s: it has no native effort parameter and effort is emulated with a thinking budget", model)
+			}
 			if thinking != nil && config.ReasoningBudget != nil {
 				return fmt.Errorf("cannot set both reasoning budget and effort on model %s", model)
 			}

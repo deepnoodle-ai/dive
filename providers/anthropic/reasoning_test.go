@@ -88,6 +88,32 @@ func TestThinkingDisabled(t *testing.T) {
 	assert.Nil(t, req.Thinking)
 }
 
+func TestEffortWithThinkingDisabledLegacyModelErrors(t *testing.T) {
+	// On a model without the native effort parameter, effort is emulated with a
+	// thinking budget — which would override an explicit thinking disable. That
+	// conflict must error rather than silently re-enable thinking.
+	cfg := &llm.Config{}
+	cfg.Apply(
+		llm.WithModel(ModelClaude37Sonnet20250219),
+		llm.WithReasoningEffort(llm.ReasoningEffortHigh),
+		llm.WithThinking(llm.ThinkingTypeDisabled),
+	)
+	var req Request
+	err := New().applyRequestConfig(&req, cfg)
+	assert.Error(t, err)
+}
+
+func TestEffortWithThinkingDisabledNativeModelOK(t *testing.T) {
+	// On a native-effort model, effort and a thinking disable are orthogonal:
+	// effort goes to output_config and thinking stays off, with no error.
+	req := buildReq(t, ModelClaudeOpus48,
+		llm.WithReasoningEffort(llm.ReasoningEffortHigh),
+		llm.WithThinking(llm.ThinkingTypeDisabled))
+	assert.Nil(t, req.Thinking)
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "high", req.OutputConfig.Effort)
+}
+
 func TestSpeedFastSetsRequestField(t *testing.T) {
 	req := buildReq(t, ModelClaudeOpus48, llm.WithSpeed(llm.SpeedFast))
 	assert.Equal(t, "fast", req.Speed)

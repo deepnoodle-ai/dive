@@ -32,6 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - Effort/thinking requests no longer fail with a 400 on Claude Opus 4.7/4.8,
   which reject manual thinking budgets.
+- Setting `ReasoningEffort` together with `Thinking: disabled` on a legacy
+  Claude model (no native effort parameter) now returns an error instead of
+  silently re-enabling thinking via the emulated budget.
 - Corrected Grok 4.20 pricing to $1.25/$2.50 per 1M tokens.
 
 ## [1.5.0] - 2026-05-15
