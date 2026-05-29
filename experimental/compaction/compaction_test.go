@@ -1,6 +1,7 @@
 package compaction
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -8,6 +9,25 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
+
+// TestCompactMessagesClampsTinyInputBudget guards the budget clamp: a tiny
+// WithMaxInputTokens drives the computed inputBudget negative, which without the
+// clamp would make reduceToSummaryBudget a no-op and hand the summarizer the
+// full, oversized transcript. The clamp must keep reduction engaged.
+func TestCompactMessagesClampsTinyInputBudget(t *testing.T) {
+	msgs := []*llm.Message{
+		llm.NewUserTextMessage(strings.Repeat("x", 40_000)),
+		llm.NewAssistantTextMessage(strings.Repeat("y", 40_000)),
+		llm.NewUserTextMessage(strings.Repeat("z", 40_000)),
+	}
+	before := totalTokens(msgs)
+
+	stub := &stubLLM{}
+	_, _, err := CompactMessages(context.Background(), stub, msgs, "", "", 0, WithMaxInputTokens(100))
+	assert.NoError(t, err)
+	assert.True(t, stub.sawTokens < before,
+		"tiny budget must still reduce the summarizer transcript (saw ~%d tokens, original ~%d)", stub.sawTokens, before)
+}
 
 func TestCalculateContextTokens(t *testing.T) {
 	tests := []struct {

@@ -90,6 +90,7 @@ func stemOf(path string) string {
 // can confirm the whole active window reached the model.
 type stubLLM struct {
 	sawMessages int
+	sawTokens   int // estimated size of the transcript handed to the summarizer
 }
 
 func (s *stubLLM) Name() string { return "stub" }
@@ -100,6 +101,10 @@ func (s *stubLLM) Generate(_ context.Context, opts ...llm.Option) (*llm.Response
 	// The last message is the injected summary instruction; the rest is the
 	// transcript handed to the summarizer.
 	s.sawMessages = len(cfg.Messages) - 1
+	s.sawTokens = 0
+	for _, m := range cfg.Messages {
+		s.sawTokens += estimateTokens(m)
+	}
 	return &llm.Response{
 		Role: llm.Assistant,
 		Content: []llm.Content{

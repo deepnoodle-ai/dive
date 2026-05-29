@@ -205,6 +205,13 @@ func CompactMessages(
 		maxInput = DefaultMaxSummaryInputTokens
 	}
 	inputBudget := maxInput - len(summaryPrompt)/4 - summaryOutputReserveTokens
+	// A small or misconfigured maxInput can drive the budget to zero or below.
+	// reduceToSummaryBudget treats a non-positive budget as "no reduction" — the
+	// opposite of intent — so clamp to a positive floor. An oversized transcript
+	// then still gets bounded (each message is floored at minSummaryItemTokens).
+	if inputBudget < 1 {
+		inputBudget = 1
+	}
 	cleanedMessages = reduceToSummaryBudget(cleanedMessages, inputBudget)
 
 	// Step 3: Build summary request.
