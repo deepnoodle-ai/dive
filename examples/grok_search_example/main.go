@@ -34,7 +34,7 @@ func main() {
 		log.Fatal(err)
 	}
 	xSearch, err := grok.NewXSearchTool(grok.XSearchToolOptions{
-		AllowedXHandles: []string{"xai", "elonmusk"},
+		AllowedXHandles: []string{"bcherny", "claudeai", "AnthropicAI"},
 	})
 	if err != nil {
 		log.Fatal(err)
