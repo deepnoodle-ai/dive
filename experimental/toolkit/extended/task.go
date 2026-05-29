@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
-	"github.com/deepnoodle-ai/dive/experimental/subagent"
+	"github.com/deepnoodle-ai/dive/subagent"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/schema"
 	"github.com/google/uuid"
