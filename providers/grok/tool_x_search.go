@@ -21,11 +21,11 @@ var (
 
 // XSearchToolOptions configures the Grok X (Twitter) search tool.
 type XSearchToolOptions struct {
-	// AllowedXHandles restricts search to posts from these handles (max 10).
+	// AllowedXHandles restricts search to posts from these handles (max 20).
 	// Cannot be used with ExcludedXHandles.
 	AllowedXHandles []string
 
-	// ExcludedXHandles excludes posts from these handles (max 10).
+	// ExcludedXHandles excludes posts from these handles (max 20).
 	// Cannot be used with AllowedXHandles.
 	ExcludedXHandles []string
 
@@ -46,11 +46,11 @@ func (o XSearchToolOptions) validate() error {
 	if len(o.AllowedXHandles) > 0 && len(o.ExcludedXHandles) > 0 {
 		return fmt.Errorf("AllowedXHandles and ExcludedXHandles cannot both be set")
 	}
-	if len(o.AllowedXHandles) > 10 {
-		return fmt.Errorf("AllowedXHandles exceeds maximum of 10 (got %d)", len(o.AllowedXHandles))
+	if len(o.AllowedXHandles) > 20 {
+		return fmt.Errorf("AllowedXHandles exceeds maximum of 20 (got %d)", len(o.AllowedXHandles))
 	}
-	if len(o.ExcludedXHandles) > 10 {
-		return fmt.Errorf("ExcludedXHandles exceeds maximum of 10 (got %d)", len(o.ExcludedXHandles))
+	if len(o.ExcludedXHandles) > 20 {
+		return fmt.Errorf("ExcludedXHandles exceeds maximum of 20 (got %d)", len(o.ExcludedXHandles))
 	}
 	if o.FromDate != "" {
 		if _, err := time.Parse("2006-01-02", o.FromDate); err != nil {

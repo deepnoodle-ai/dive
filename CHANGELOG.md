@@ -27,6 +27,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `gemini-3.1-pro-preview-customtools`, plus pricing.
 - **Grok**: `grok-4.3` (new default), `grok-build-0.1`,
   `grok-imagine-image-quality`, plus pricing.
+- **Grok server-side tools**: `CodeExecutionTool` (sandboxed Python via the
+  xAI `code_interpreter` tool) and `CollectionsSearchTool` (search uploaded
+  collections via `file_search`). `WebSearchTool` gains `EnableImageSearch`.
+  Remote MCP servers already work for Grok via `llm.MCPServerConfig`. See the
+  new `docs/guides/grok.md` and the `grok_search_example` /
+  `grok_code_execution_example` programs.
+- **Reasoning token usage** — `llm.Usage.ReasoningTokens` now reports the output
+  tokens a provider spent on reasoning (populated for the OpenAI Responses API
+  and Grok). The streaming path also now fills `CacheReadInputTokens`.
+- **`ResponsesIncludeProvider`** interface in `providers/openai` lets a
+  server-side tool request response `include` data (e.g.
+  `code_interpreter_call.outputs`, `file_search_call.results`).
 
 ### Fixed
 
@@ -36,6 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Claude model (no native effort parameter) now returns an error instead of
   silently re-enabling thinking via the emulated budget.
 - Corrected Grok 4.20 pricing to $1.25/$2.50 per 1M tokens.
+- Corrected the Grok X-search handle limit to 20 (was incorrectly capped at 10).
+- `file_search` / collections-search responses now decode instead of returning
+  an "unsupported" error (`openai.FileSearchCallContent`).
 
 ## [1.5.0] - 2026-05-15
 

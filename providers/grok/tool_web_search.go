@@ -27,8 +27,14 @@ type WebSearchToolOptions struct {
 	// Cannot be used with AllowedDomains.
 	ExcludedDomains []string
 
-	// EnableImageUnderstanding allows analysis of images found during browsing.
+	// EnableImageUnderstanding allows analysis of images found during browsing
+	// (equips the agent with the view_image tool).
 	EnableImageUnderstanding bool
+
+	// EnableImageSearch lets Grok search for relevant images and embed them in
+	// the response as Markdown image embeds. This is distinct from
+	// EnableImageUnderstanding, which inspects images found while browsing.
+	EnableImageSearch bool
 }
 
 func (o WebSearchToolOptions) validate() error {
@@ -54,6 +60,7 @@ func NewWebSearchTool(opts WebSearchToolOptions) (*WebSearchTool, error) {
 		allowedDomains:           opts.AllowedDomains,
 		excludedDomains:          opts.ExcludedDomains,
 		enableImageUnderstanding: opts.EnableImageUnderstanding,
+		enableImageSearch:        opts.EnableImageSearch,
 	}, nil
 }
 
@@ -63,6 +70,7 @@ type WebSearchTool struct {
 	allowedDomains           []string
 	excludedDomains          []string
 	enableImageUnderstanding bool
+	enableImageSearch        bool
 }
 
 func (t *WebSearchTool) Name() string {
@@ -96,6 +104,9 @@ func (t *WebSearchTool) ResponsesToolParam() responses.ToolUnionParam {
 	}
 	if t.enableImageUnderstanding {
 		extras["enable_image_understanding"] = true
+	}
+	if t.enableImageSearch {
+		extras["enable_image_search"] = true
 	}
 	if len(extras) > 0 {
 		param.SetExtraFields(extras)

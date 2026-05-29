@@ -8,6 +8,7 @@ require (
 	github.com/deepnoodle-ai/dive/experimental/mcp v1.5.0
 	github.com/deepnoodle-ai/dive/otel v1.5.0
 	github.com/deepnoodle-ai/dive/providers/google v1.5.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.5.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.5.0
 	github.com/deepnoodle-ai/wonton v0.0.34
 	github.com/fatih/color v1.18.0
@@ -80,5 +81,6 @@ replace (
 	github.com/deepnoodle-ai/dive/experimental/mcp => ../experimental/mcp
 	github.com/deepnoodle-ai/dive/otel => ../otel
 	github.com/deepnoodle-ai/dive/providers/google => ../providers/google
+	github.com/deepnoodle-ai/dive/providers/grok => ../providers/grok
 	github.com/deepnoodle-ai/dive/providers/openai => ../providers/openai
 )
