@@ -1211,6 +1211,30 @@ func generateSessionTitle(message string) string {
 	return title
 }
 
+// compactionKeepRecentEvents is how many recent turns the CLI preserves
+// verbatim when compacting, so the latest work survives summarization intact.
+const compactionKeepRecentEvents = 2
+
+// repeatedCompactionWarnThreshold is the checkpoint count past which the CLI
+// nudges the user toward a fresh session — repeated lossy compactions compound
+// and degrade accuracy.
+const repeatedCompactionWarnThreshold = 3
+
+// warnIfManyCompactions nudges the user to start a fresh session once a thread
+// has been compacted repeatedly.
+func (a *App) warnIfManyCompactions() {
+	if a.currentSession == nil {
+		return
+	}
+	records, err := a.currentSession.CompactionHistory(a.ctx)
+	if err != nil || len(records) < repeatedCompactionWarnThreshold {
+		return
+	}
+	a.runner.Printf("Note: this conversation has been compacted %d times. "+
+		"Repeated compactions lose detail and can reduce accuracy — consider starting a fresh session.",
+		len(records))
+}
+
 // checkAndPerformCompaction checks if compaction is needed and performs it.
 // Uses lastUsage (from final LLM call) for accurate context size measurement.
 func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
@@ -1255,10 +1279,11 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 			tokensBefore,
 		)
 		return compactedMsgs, err
-	})
+	}, session.WithKeepRecentEvents(compactionKeepRecentEvents))
 	if err != nil {
 		return
 	}
+	a.warnIfManyCompactions()
 
 	// Calculate rough tokens after for the event
 	compactedMsgs, _ := a.currentSession.Messages(a.ctx)
@@ -2043,7 +2068,7 @@ func (a *App) handleCompactCommand() {
 		)
 		event = evt
 		return compactedMsgs, err
-	})
+	}, session.WithKeepRecentEvents(compactionKeepRecentEvents))
 	if err != nil {
 		a.runner.Printf("Compaction failed: %v", err)
 		return
@@ -2053,6 +2078,7 @@ func (a *App) handleCompactCommand() {
 	if event != nil {
 		a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
 	}
+	a.warnIfManyCompactions()
 }
 
 func (a *App) printHelp() {

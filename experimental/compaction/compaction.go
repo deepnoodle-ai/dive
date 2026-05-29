@@ -151,7 +151,10 @@ func CompactMessages(
 	originalMessageCount := len(cleanedMessages)
 
 	// Step 2: Trim messages if too many to avoid exceeding context during summarization
-	// Keep first message (often contains important context) + recent messages
+	// Keep first message (often contains important context) + recent messages.
+	// TODO: this is a crude message-count cap. A more robust approach (à la
+	// Codex) trims the oldest items by token budget and retries the summary on
+	// ContextWindowExceeded; deferred until we surface that error per-provider.
 	const maxMessagesForSummary = 50
 	if len(cleanedMessages) > maxMessagesForSummary {
 		cleanedMessages = append(
@@ -189,9 +192,15 @@ func CompactMessages(
 		return nil, nil, fmt.Errorf("no summary found in compaction response (missing <summary> tags)")
 	}
 
-	// Step 6: Create new message list with the summary as a user message
-	// This ensures the first message is from the User role, which is required by most LLM APIs
-	summaryPrefix := "Here is a summary of our conversation so far:\n\n"
+	// Step 6: Create new message list with the summary as a user message.
+	// Using the User role keeps the first message from the User, which most
+	// LLM APIs require. The prefix frames the summary as a predecessor's
+	// handoff rather than the model's own recollection, so the model treats it
+	// as authoritative notes to continue from (the framing Codex uses).
+	summaryPrefix := "Your conversation history was compacted to free up context. " +
+		"A previous instance of you was working on this task and left the handoff " +
+		"notes below. Treat them as an accurate record of what happened and continue " +
+		"the work seamlessly.\n\n"
 	compactedMessages := []*llm.Message{
 		llm.NewUserTextMessage(summaryPrefix + summaryText),
 	}

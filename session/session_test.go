@@ -275,6 +275,75 @@ func TestCompactionHistory(t *testing.T) {
 	})
 }
 
+func TestCompactKeepRecentEvents(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("keeps recent turns verbatim in the active window", func(t *testing.T) {
+		sess := session.New("s1")
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("u1"),
+			llm.NewAssistantTextMessage("a1"),
+		}, nil)
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("u2"),
+			llm.NewAssistantTextMessage("a2"),
+		}, nil)
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("u3"),
+			llm.NewAssistantTextMessage("a3"),
+		}, nil)
+
+		// Summarize the older two turns; keep the most recent turn verbatim.
+		err := sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+			assert.Equal(t, 4, len(msgs)) // only the two older turns are summarized
+			return []*llm.Message{llm.NewUserTextMessage("summary")}, nil
+		}, session.WithKeepRecentEvents(1))
+		assert.NoError(t, err)
+
+		// turn1, turn2, checkpoint, turn3
+		assert.Equal(t, 4, sess.EventCount())
+
+		// Active window = summary + the verbatim recent turn.
+		msgs, _ := sess.Messages(ctx)
+		assert.Equal(t, 3, len(msgs))
+		assert.Equal(t, "summary", msgs[0].Text())
+		assert.Equal(t, "u3", msgs[1].Text())
+		assert.Equal(t, "a3", msgs[2].Text())
+
+		// History: the checkpoint replaced only the two older turns.
+		records, _ := sess.CompactionHistory(ctx)
+		assert.Equal(t, 1, len(records))
+		assert.Equal(t, 4, len(records[0].ReplacedMessages))
+		assert.Equal(t, "u1", records[0].ReplacedMessages[0].Text())
+
+		// Full transcript still holds everything, summary inline before turn3.
+		all, _ := sess.AllMessages(ctx)
+		assert.Equal(t, 7, len(all))
+		assert.Equal(t, "summary", all[4].Text())
+		assert.Equal(t, "u3", all[5].Text())
+	})
+
+	t.Run("no-op when keep covers the whole window", func(t *testing.T) {
+		sess := session.New("s2")
+		sess.SaveTurn(ctx, []*llm.Message{
+			llm.NewUserTextMessage("u1"),
+			llm.NewAssistantTextMessage("a1"),
+		}, nil)
+
+		called := false
+		err := sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
+			called = true
+			return []*llm.Message{llm.NewUserTextMessage("summary")}, nil
+		}, session.WithKeepRecentEvents(5))
+		assert.NoError(t, err)
+		assert.False(t, called) // nothing older to summarize
+		assert.Equal(t, 1, sess.EventCount())
+
+		msgs, _ := sess.Messages(ctx)
+		assert.Equal(t, 2, len(msgs))
+	})
+}
+
 // ---------------------------------------------------------------------------
 // dive.Session interface
 // ---------------------------------------------------------------------------
