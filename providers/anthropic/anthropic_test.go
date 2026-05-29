@@ -114,9 +114,16 @@ func TestToolCallStream(t *testing.T) {
 			},
 		})
 
+	// Force the calculator tool so the test deterministically exercises the
+	// tool-call streaming path. Without this, the model may answer "2+2"
+	// directly and emit no tool call (flaky).
 	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(llm.NewUserTextMessage("What is 2+2?")),
 		llm.WithTools(calculatorTool),
+		llm.WithToolChoice(&llm.ToolChoice{
+			Type: llm.ToolChoiceTypeTool,
+			Name: "calculator",
+		}),
 	)
 
 	assert.NoError(t, err)
