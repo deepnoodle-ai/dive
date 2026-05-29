@@ -1,11 +1,33 @@
 package compaction
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
+
+// TestCompactMessagesClampsTinyInputBudget guards the budget clamp: a tiny
+// WithMaxInputTokens drives the computed inputBudget negative, which without the
+// clamp would make reduceToSummaryBudget a no-op and hand the summarizer the
+// full, oversized transcript. The clamp must keep reduction engaged.
+func TestCompactMessagesClampsTinyInputBudget(t *testing.T) {
+	msgs := []*llm.Message{
+		llm.NewUserTextMessage(strings.Repeat("x", 40_000)),
+		llm.NewAssistantTextMessage(strings.Repeat("y", 40_000)),
+		llm.NewUserTextMessage(strings.Repeat("z", 40_000)),
+	}
+	before := totalTokens(msgs)
+
+	stub := &stubLLM{}
+	_, _, err := CompactMessages(context.Background(), stub, msgs, "", "", 0, WithMaxInputTokens(100))
+	assert.NoError(t, err)
+	assert.True(t, stub.sawTokens < before,
+		"tiny budget must still reduce the summarizer transcript (saw ~%d tokens, original ~%d)", stub.sawTokens, before)
+}
 
 func TestCalculateContextTokens(t *testing.T) {
 	tests := []struct {
@@ -285,4 +307,105 @@ func TestCompactionEventStructure(t *testing.T) {
 	assert.Equal(t, 5000, event.TokensAfter)
 	assert.Equal(t, "Test summary", event.Summary)
 	assert.Equal(t, 50, event.MessagesCompacted)
+}
+
+func totalTokens(msgs []*llm.Message) int {
+	total := 0
+	for _, m := range msgs {
+		total += estimateTokens(m)
+	}
+	return total
+}
+
+func TestReduceToSummaryBudget(t *testing.T) {
+	bigText := strings.Repeat("x", 200_000) // ~50k tokens
+
+	t.Run("no-op when under budget", func(t *testing.T) {
+		msgs := []*llm.Message{llm.NewUserTextMessage("hello")}
+		out := reduceToSummaryBudget(msgs, 1_000_000)
+		assert.Equal(t, 1, len(out))
+		assert.Equal(t, "hello", out[0].Text())
+	})
+
+	t.Run("clips the largest, preserves small, leaves originals untouched", func(t *testing.T) {
+		small := llm.NewUserTextMessage("hello")
+		big := llm.NewAssistantTextMessage(bigText)
+		msgs := []*llm.Message{small, big}
+		budget := 5_000
+
+		out := reduceToSummaryBudget(msgs, budget)
+
+		assert.True(t, totalTokens(out) <= budget)
+		assert.Equal(t, "hello", out[0].Text())           // small preserved verbatim
+		assert.True(t, len(out[1].Text()) > 0)            // big still has content
+		assert.True(t, len(out[1].Text()) < len(bigText)) // ...but truncated
+		assert.True(t, strings.Contains(out[1].Text(), "truncated"))
+		assert.Equal(t, len(bigText), len(big.Text())) // original not mutated
+	})
+
+	t.Run("preserves tool_use/tool_result pairing (never drops messages)", func(t *testing.T) {
+		toolUse := &llm.Message{Role: llm.Assistant, Content: []llm.Content{
+			&llm.ToolUseContent{ID: "t1", Name: "read", Input: json.RawMessage(`{"path":"big.txt"}`)},
+		}}
+		bigResult := &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.ToolResultContent{ToolUseID: "t1", Content: strings.Repeat("y", 300_000)},
+		}}
+		msgs := []*llm.Message{toolUse, bigResult}
+		budget := 4_000
+
+		out := reduceToSummaryBudget(msgs, budget)
+
+		assert.Equal(t, 2, len(out)) // nothing dropped → pairing intact
+		_, isToolUse := out[0].Content[0].(*llm.ToolUseContent)
+		assert.True(t, isToolUse)
+		tr, isToolResult := out[1].Content[0].(*llm.ToolResultContent)
+		assert.True(t, isToolResult)
+		truncated, _ := tr.Content.(string)
+		assert.True(t, len(truncated) < 300_000)
+		assert.True(t, totalTokens(out) <= budget)
+	})
+}
+
+func TestReduceToSummaryBudgetCullsUntruncatableContent(t *testing.T) {
+	t.Run("culls a large image to a placeholder", func(t *testing.T) {
+		image := &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.ImageContent{Source: &llm.ContentSource{
+				Type:      llm.ContentSourceTypeBase64,
+				MediaType: "image/png",
+				Data:      strings.Repeat("A", 400_000), // ~100k tokens of base64
+			}},
+		}}
+		out := reduceToSummaryBudget([]*llm.Message{image}, 2_000)
+
+		assert.Equal(t, 1, len(out)) // not dropped
+		txt, isText := out[0].Content[0].(*llm.TextContent)
+		assert.True(t, isText) // image culled to a text placeholder
+		assert.True(t, strings.Contains(txt.Text, "image content omitted"))
+		assert.True(t, totalTokens(out) <= 2_000)
+	})
+
+	t.Run("culls an oversized tool_use input but keeps the block paired", func(t *testing.T) {
+		toolUse := &llm.Message{Role: llm.Assistant, Content: []llm.Content{
+			&llm.ToolUseContent{ID: "t1", Name: "write", Input: json.RawMessage(`{"data":"` + strings.Repeat("z", 300_000) + `"}`)},
+		}}
+		result := &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.ToolResultContent{ToolUseID: "t1", Content: "ok"},
+		}}
+		out := reduceToSummaryBudget([]*llm.Message{toolUse, result}, 2_000)
+
+		assert.Equal(t, 2, len(out))
+		tu, isToolUse := out[0].Content[0].(*llm.ToolUseContent) // block kept → pairing intact
+		assert.True(t, isToolUse)
+		assert.Equal(t, "t1", tu.ID)
+		assert.True(t, len(tu.Input) < 1000) // input culled
+		assert.True(t, totalTokens(out) <= 2_000)
+	})
+}
+
+func TestTruncateText(t *testing.T) {
+	assert.Equal(t, "short", truncateText("short", 200)) // under limit unchanged
+
+	out := truncateText(strings.Repeat("a", 1000), 200)
+	assert.True(t, len(out) <= 200)
+	assert.True(t, strings.Contains(out, "truncated"))
 }

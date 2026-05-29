@@ -89,6 +89,9 @@ type initialPromptEvent struct {
 type compactionEvent struct {
 	baseEvent
 	event *compaction.CompactionEvent
+	// midTurn is true when compaction happened inside a turn's tool loop (via
+	// MidTurnCompactionHook) rather than between turns.
+	midTurn bool
 }
 
 // toolStreamEvent carries a chunk of streaming output for a tool call.
@@ -747,7 +750,7 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		}
 		a.handleProcessingEnd(e.err)
 	case compactionEvent:
-		a.handleCompaction(e.event)
+		a.handleCompaction(e.event, e.midTurn)
 	case toolStreamEvent:
 		a.handleToolStream(e)
 	case toolProgressEvent:
@@ -1211,6 +1214,26 @@ func generateSessionTitle(message string) string {
 	return title
 }
 
+// repeatedCompactionWarnThreshold is the checkpoint count past which the CLI
+// nudges the user toward a fresh session — repeated lossy compactions compound
+// and degrade accuracy.
+const repeatedCompactionWarnThreshold = 3
+
+// warnIfManyCompactions nudges the user to start a fresh session once a thread
+// has been compacted repeatedly.
+func (a *App) warnIfManyCompactions() {
+	if a.currentSession == nil {
+		return
+	}
+	records, err := a.currentSession.CompactionHistory(a.ctx)
+	if err != nil || len(records) < repeatedCompactionWarnThreshold {
+		return
+	}
+	a.runner.Printf("Note: this conversation has been compacted %d times. "+
+		"Repeated compactions lose detail and can reduce accuracy — consider starting a fresh session.",
+		len(records))
+}
+
 // checkAndPerformCompaction checks if compaction is needed and performs it.
 // Uses lastUsage (from final LLM call) for accurate context size measurement.
 func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
@@ -1259,6 +1282,7 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 	if err != nil {
 		return
 	}
+	a.warnIfManyCompactions()
 
 	// Calculate rough tokens after for the event
 	compactedMsgs, _ := a.currentSession.Messages(a.ctx)
@@ -1425,14 +1449,29 @@ func shouldDisplayToolError(_ string, isError bool, _ string) bool {
 // handleCompaction processes a compaction event and updates UI state.
 // The compaction notification is shown in the live view for 3 seconds,
 // and detailed stats are displayed in the footer for 5 seconds.
-func (a *App) handleCompaction(event *compaction.CompactionEvent) {
+func (a *App) handleCompaction(event *compaction.CompactionEvent, midTurn bool) {
 	a.lastCompactionEvent = event
-	a.compactionEventTime = time.Now()
-	a.showCompactionStats = true
-	a.compactionStatsStartTime = time.Now()
 	// Reset usage so the context bar reflects post-compaction state.
 	// It will be repopulated on the next LLM response.
 	a.lastUsage = nil
+	if midTurn {
+		// Mid-turn compaction happens while the agent is still working, so
+		// surface it as a scrollback line rather than the transient footer
+		// stats used between turns.
+		a.runner.Printf(" ⚡ Context compacted mid-turn: ~%d → ~%d tokens (%d messages summarized)",
+			event.TokensBefore, event.TokensAfter, event.MessagesCompacted)
+		return
+	}
+	a.compactionEventTime = time.Now()
+	a.showCompactionStats = true
+	a.compactionStatsStartTime = time.Now()
+}
+
+// notifyMidTurnCompaction surfaces a mid-turn compaction (from
+// MidTurnCompactionHook) in the UI. Safe to call from the agent's goroutine —
+// it just enqueues a UI event.
+func (a *App) notifyMidTurnCompaction(event *compaction.CompactionEvent) {
+	a.runner.SendEvent(compactionEvent{baseEvent: newBaseEvent(), event: event, midTurn: true})
 }
 
 func (a *App) handleProcessingEnd(err error) {
@@ -2053,6 +2092,7 @@ func (a *App) handleCompactCommand() {
 	if event != nil {
 		a.runner.Printf("Compacted: ~%d -> ~%d tokens", event.TokensBefore, event.TokensAfter)
 	}
+	a.warnIfManyCompactions()
 }
 
 func (a *App) printHelp() {

@@ -199,10 +199,7 @@ func (e *event) copy() *event {
 		Timestamp: e.Timestamp,
 	}
 	if len(e.Messages) > 0 {
-		cp.Messages = make([]*llm.Message, len(e.Messages))
-		for i, msg := range e.Messages {
-			cp.Messages[i] = msg.Copy()
-		}
+		cp.Messages = copyMessages(e.Messages)
 	}
 	if e.Usage != nil {
 		cp.Usage = e.Usage.Copy()
@@ -212,6 +209,19 @@ func (e *event) copy() *event {
 		maps.Copy(cp.Metadata, e.Metadata)
 	}
 	return cp
+}
+
+// copyMessages returns a deep copy of a message slice, or nil when empty, so
+// callers cannot mutate the session's internal messages through the result.
+func copyMessages(msgs []*llm.Message) []*llm.Message {
+	if len(msgs) == 0 {
+		return nil
+	}
+	out := make([]*llm.Message, len(msgs))
+	for i, msg := range msgs {
+		out[i] = msg.Copy()
+	}
+	return out
 }
 
 // eventAppender is the internal interface used by Session to persist events.
@@ -275,9 +285,50 @@ func (s *Session) ID() string {
 	return s.data.ID
 }
 
-// Messages returns the complete conversation history reconstructed from
-// all events. Returns a copy of the messages to prevent mutation.
+// activeEventsLocked returns the events that make up the live conversation:
+// everything from the most recent compaction checkpoint onward. A checkpoint's
+// summary stands in for all the events before it, so those earlier events stay
+// in the log (for AllMessages and CompactionHistory) but are not part of the
+// active context window. Caller must hold s.mu.
+func (s *Session) activeEventsLocked() []*event {
+	last := -1
+	for i, e := range s.data.Events {
+		if e.Type == eventTypeCompaction {
+			last = i
+		}
+	}
+	if last < 0 {
+		return s.data.Events
+	}
+	return s.data.Events[last:]
+}
+
+// Messages returns the active conversation window: the most recent compaction
+// summary (if any) plus every message recorded after it. This is what the
+// agent sends to the model, so compaction shrinks it. Returns copies to
+// prevent mutation. Use AllMessages to recover the pre-compaction originals.
 func (s *Session) Messages(ctx context.Context) ([]*llm.Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var msgs []*llm.Message
+	for _, e := range s.activeEventsLocked() {
+		for _, msg := range e.Messages {
+			msgs = append(msgs, msg.Copy())
+		}
+	}
+	return msgs, nil
+}
+
+// AllMessages returns the complete, uncompacted transcript: every message from
+// every event in order, with each compaction summary appearing inline at the
+// point it was created. Where Messages returns only the active window,
+// AllMessages returns everything ever recorded.
+//
+// This is the substrate for retrieval. A summary is lossy compression — the
+// specific tool results, file contents, and decision rationale it flattened
+// are gone from the active window but remain here, searchable and recoverable
+// after compaction.
+func (s *Session) AllMessages(ctx context.Context) ([]*llm.Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var msgs []*llm.Message
@@ -618,12 +669,20 @@ func (s *Session) Fork(newID string) *Session {
 // CompactFunc summarizes a conversation into a shorter form.
 type CompactFunc func(ctx context.Context, messages []*llm.Message) ([]*llm.Message, error)
 
-// Compact replaces all events with a single compaction event containing
-// the summarized messages. If the session is backed by a store, the
-// compacted session is persisted.
+// Compact summarizes the active conversation window and appends a compaction
+// checkpoint. The checkpoint's summary becomes the new active window (see
+// Messages), shrinking the tokens sent to the model, while every original
+// message stays in the log and remains recoverable (see AllMessages and
+// CompactionHistory). If the session is backed by a store, it is persisted.
+//
+// Compaction inserts a barrier rather than deleting history. The trade-off is
+// storage: a compacted session is larger on disk than its summary alone. That
+// is deliberate — retaining the originals is what makes post-compaction
+// retrieval possible, recovering the tool results and rationale a lossy
+// summary drops.
 //
 // Returns ErrSuspendedSession if the session is currently suspended.
-// Compaction destroys the in-progress tool_use/tool_result messages that
+// Compaction would strand the in-progress tool_use/tool_result messages that
 // the resume path depends on, so the caller must first resume the turn to
 // completion (via WithResume/WithToolResults) before compacting.
 func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
@@ -632,29 +691,71 @@ func (s *Session) Compact(ctx context.Context, summarize CompactFunc) error {
 	if s.data.Suspended {
 		return ErrSuspendedSession
 	}
+	active := s.activeEventsLocked()
 	var msgs []*llm.Message
-	for _, e := range s.data.Events {
+	for _, e := range active {
 		msgs = append(msgs, e.Messages...)
 	}
 	compacted, err := summarize(ctx, msgs)
 	if err != nil {
 		return err
 	}
-	s.data.Events = []*event{{
-		ID:        newEventID(),
-		Type:      eventTypeCompaction,
-		Timestamp: time.Now(),
-		Messages:  compacted,
-		Metadata: map[string]any{
-			"original_event_count":   len(s.data.Events),
-			"original_message_count": len(msgs),
-		},
-	}}
-	s.data.UpdatedAt = time.Now()
-	if s.appender != nil {
-		return s.appender.putSession(ctx, s.data)
+	now := time.Now()
+	// withRollback restores Events/UpdatedAt if putSession fails, so a
+	// persistence error never leaves the in-memory checkpoint diverged from
+	// the store (matching SaveTurn and the suspend paths).
+	return s.withRollback(ctx, func() {
+		s.data.Events = append(s.data.Events, &event{
+			ID:        newEventID(),
+			Type:      eventTypeCompaction,
+			Timestamp: now,
+			Messages:  compacted,
+			Metadata: map[string]any{
+				"original_event_count":   len(active),
+				"original_message_count": len(msgs),
+			},
+		})
+		s.data.UpdatedAt = now
+	})
+}
+
+// CompactionRecord describes a single compaction checkpoint.
+type CompactionRecord struct {
+	// Summary is the messages the checkpoint produced — the compacted form
+	// that became the active context window.
+	Summary []*llm.Message
+	// ReplacedMessages are the messages this checkpoint superseded: the turns
+	// since the previous checkpoint, plus the previous checkpoint's summary if
+	// there was one. They remain in the session log and stay recoverable.
+	ReplacedMessages []*llm.Message
+	// CompactedAt is when the compaction occurred.
+	CompactedAt time.Time
+}
+
+// CompactionHistory returns one record per compaction checkpoint, in order.
+// Because Compact appends a checkpoint rather than collapsing the log, this is
+// a genuine history: a session compacted three times returns three records,
+// each reporting what it summarized and what it replaced. Returns an empty
+// slice when the session has never been compacted.
+func (s *Session) CompactionHistory(_ context.Context) ([]CompactionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var records []CompactionRecord
+	var replaced []*llm.Message // accumulated since the previous checkpoint
+	for _, e := range s.data.Events {
+		if e.Type != eventTypeCompaction {
+			replaced = append(replaced, e.Messages...)
+			continue
+		}
+		records = append(records, CompactionRecord{
+			Summary:          copyMessages(e.Messages),
+			ReplacedMessages: copyMessages(replaced),
+			CompactedAt:      e.Timestamp,
+		})
+		// This checkpoint's summary is in turn replaced by the next one.
+		replaced = append([]*llm.Message(nil), e.Messages...)
 	}
-	return nil
+	return records, nil
 }
 
 // Store is the storage abstraction for persistent sessions.

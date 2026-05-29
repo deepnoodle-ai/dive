@@ -23,8 +23,8 @@ func TestHandleCompaction(t *testing.T) {
 		MessagesCompacted: 50,
 	}
 
-	// Handle the compaction
-	app.handleCompaction(event)
+	// Handle the compaction (between-turns path)
+	app.handleCompaction(event, false)
 
 	// Verify state was updated correctly
 	assert.NotNil(t, app.lastCompactionEvent, "lastCompactionEvent should be set")

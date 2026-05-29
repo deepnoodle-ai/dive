@@ -1478,10 +1478,19 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 					return nil, fmt.Errorf("pre-iteration hook error: %w", err)
 				}
 			}
-			// Apply any modifications from hooks
+			// Apply any modifications from hooks.
 			if hctx.SystemPrompt != systemPrompt {
 				systemPrompt = hctx.SystemPrompt
 			}
+			// PreIteration hooks may also rewrite the working message set —
+			// e.g. mid-turn compaction summarizing the context to keep a long
+			// tool-call loop under the model's window. Honor it, mirroring how
+			// PreGeneration reads hctx.Messages back. Only the model-facing
+			// slice changes; outputMessages (and therefore the saved turn) keep
+			// full fidelity, so this stays non-destructive. Reassigning the
+			// loop-local slice is picked up by newMessage's closure, so later
+			// assistant/tool messages append to the compacted set.
+			updatedMessages = hctx.Messages
 		}
 
 		// Resolve tools (static + dynamic toolsets)

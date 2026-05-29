@@ -72,6 +72,8 @@ Key methods beyond the interface:
 - `TotalUsage() *llm.Usage`
 - `Fork(newID string) *Session`
 - `Compact(ctx, summarizer) error`
+- `AllMessages(ctx) ([]*llm.Message, error)` — full uncompacted transcript
+- `CompactionHistory(ctx) ([]CompactionRecord, error)` — one record per checkpoint
 
 ### Event (internal)
 
@@ -88,8 +90,10 @@ type event struct {
 }
 ```
 
-Events are unexported. The `Messages()` method reconstructs the full
-conversation from all events.
+Events are unexported. `Messages()` reconstructs the **active window** — the
+most recent compaction summary plus everything after it — which is what the
+agent sends to the model. `AllMessages()` reconstructs the **full transcript**
+from every event, including the originals that compaction replaced.
 
 ### Store Interface
 
@@ -142,16 +146,42 @@ The `ForkSession(ctx, store, fromID, newID)` utility combines open + fork + put.
 
 ## Compaction
 
-Compaction replaces all events with a single compaction event:
+Compaction is **non-destructive**: it appends a compaction checkpoint rather
+than deleting history.
 
 ```go
 sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
-    // Summarize using an LLM or custom logic
+    // Summarize the active window using an LLM or custom logic
     return summarized, nil
 })
 ```
 
-If the session is store-backed, the compacted state is persisted via `putSession`.
+`Compact` summarizes the current active window and appends a `compaction`
+event whose summary becomes the new active window. The original turn events
+stay in the log. From there:
+
+- `Messages()` returns the summary plus any turns after it — fewer tokens to
+  the model.
+- `AllMessages()` returns every original message, still intact.
+- `CompactionHistory()` returns one `CompactionRecord` per checkpoint
+  (`Summary`, `ReplacedMessages`, `CompactedAt`), in order.
+
+Compaction does **not** special-case the most recent turns — the whole active
+window is summarized uniformly. Keeping recent exchanges in high detail is a
+summarizer-prompt concern (content policy in the `CompactFunc`), not a
+structural carve-out in the session: an oversized recent turn is summarized
+like any other and its bytes stay recoverable via `AllMessages`.
+
+The trade-off is storage: a compacted session is larger on disk than the
+summary alone, because the originals are retained. That is deliberate —
+summarization is lossy compression, and keeping the originals is what makes
+**post-compaction retrieval** possible (recovering the specific tool results,
+file contents, and rationale a summary flattens). See
+[`session-codex.md`](../reference/session-codex.md) for the retrieval-centric
+model this follows.
+
+If the session is store-backed, the compacted state is persisted via
+`putSession`.
 
 ## Usage Example
 
