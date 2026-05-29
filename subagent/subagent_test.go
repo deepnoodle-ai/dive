@@ -55,9 +55,21 @@ func TestBuiltinDefinitions(t *testing.T) {
 
 	t.Run("clone and modify does not affect original", func(t *testing.T) {
 		clone := *Explore
+
+		// Scalar field: a shallow copy already isolates it.
 		clone.Model = "haiku"
 		assert.Equal(t, "", Explore.Model)
 		assert.Equal(t, "haiku", clone.Model)
+
+		// Slice fields alias after a shallow copy, so copy them before
+		// mutating to keep the original independent.
+		clone.DisallowedTools = append([]string{}, Explore.DisallowedTools...)
+		clone.DisallowedTools = append(clone.DisallowedTools, "WebSearch")
+		clone.Tools = append([]string{}, Explore.Tools...)
+		clone.Tools = append(clone.Tools, "Glob")
+
+		assert.Equal(t, []string{"Edit", "Write", "Bash"}, Explore.DisallowedTools)
+		assert.Equal(t, 0, len(Explore.Tools))
 	})
 }
 

@@ -233,6 +233,14 @@ func TestAgentTool(t *testing.T) {
 		assert.Contains(t, res.Content[0].Text, "subagent_type is required")
 	})
 
+	t.Run("nil factory returns an error instead of panicking", func(t *testing.T) {
+		tool := NewAgentTool(AgentToolOptions{Subagents: testTypes()})
+		res, err := tool.Call(ctx, &AgentToolInput{Prompt: "x", Description: "t", SubagentType: "GeneralPurpose"})
+		assert.NoError(t, err)
+		assert.True(t, res.IsError)
+		assert.Contains(t, res.Content[0].Text, "misconfigured")
+	})
+
 	t.Run("catalog is copied defensively", func(t *testing.T) {
 		types := map[string]*subagent.Definition{"x": {Description: "d", Prompt: "p"}}
 		tool := NewAgentTool(AgentToolOptions{

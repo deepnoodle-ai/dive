@@ -165,6 +165,10 @@ func (t *agentTool) Call(ctx context.Context, input *AgentToolInput) (*dive.Tool
 			input.SubagentType, t.typeNames())), nil
 	}
 
+	if t.factory == nil {
+		return dive.NewToolResultError("Agent tool is misconfigured: AgentFactory is nil"), nil
+	}
+
 	agent, err := t.factory(ctx, input.SubagentType, def, t.parentTools)
 	if err != nil {
 		return dive.NewToolResultError(fmt.Sprintf("failed to create agent: %s", err.Error())), nil

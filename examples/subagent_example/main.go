@@ -49,10 +49,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create workspace: %v", err)
 	}
-	defer os.RemoveAll(workspace)
+	oldwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to get working directory: %v", err)
+	}
 	if err := os.Chdir(workspace); err != nil {
 		log.Fatalf("failed to enter workspace: %v", err)
 	}
+	defer func() {
+		// Restore the original cwd before removing the workspace, so the
+		// directory is not in use when we delete it (matters on Windows).
+		if err := os.Chdir(oldwd); err != nil {
+			log.Printf("failed to restore working directory: %v", err)
+		}
+		os.RemoveAll(workspace)
+	}()
 
 	validator, err := toolkit.NewPathValidator(workspace)
 	if err != nil {
