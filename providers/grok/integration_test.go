@@ -438,3 +438,26 @@ func TestIntegration_Grok420Models(t *testing.T) {
 		})
 	}
 }
+
+func TestIntegration_CodeExecution(t *testing.T) {
+	skipIfNoAPIKey(t)
+
+	provider := New()
+	ctx := testContext(t, 60*time.Second)
+
+	codeExec := NewCodeExecutionTool(CodeExecutionToolOptions{IncludeOutputs: true})
+
+	response, err := provider.Generate(ctx,
+		llm.WithMessages(
+			llm.NewUserTextMessage("What is the 12th Fibonacci number? Use code to compute it."),
+		),
+		llm.WithTools(codeExec),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, response)
+
+	text := response.Message().Text()
+	t.Logf("Code execution response: %s (reasoning tokens: %d)",
+		text, response.Usage.ReasoningTokens)
+	assert.True(t, strings.Contains(text, "144"))
+}

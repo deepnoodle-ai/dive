@@ -27,6 +27,7 @@ func decodeAssistantResponse(response *responses.Response) (*llm.Response, error
 	usage.InputTokens = int(response.Usage.InputTokens)
 	usage.OutputTokens = int(response.Usage.OutputTokens)
 	usage.CacheReadInputTokens = int(response.Usage.InputTokensDetails.CachedTokens)
+	usage.ReasoningTokens = int(response.Usage.OutputTokensDetails.ReasoningTokens)
 
 	// Determine stop reason based on the response content and status
 	stopReason := determineStopReason(response)
@@ -275,7 +276,23 @@ func decodeCodeInterpreterCallContent(codeCall responses.ResponseCodeInterpreter
 }
 
 func decodeFileSearchCallContent(fileSearchCall responses.ResponseFileSearchToolCall) ([]llm.Content, error) {
-	return nil, fmt.Errorf("file search call is not yet supported")
+	var results []FileSearchCallResult
+	for _, result := range fileSearchCall.Results {
+		results = append(results, FileSearchCallResult{
+			FileID:   result.FileID,
+			Filename: result.Filename,
+			Score:    result.Score,
+			Text:     result.Text,
+		})
+	}
+	return []llm.Content{
+		&FileSearchCallContent{
+			ID:      fileSearchCall.ID,
+			Queries: fileSearchCall.Queries,
+			Status:  string(fileSearchCall.Status),
+			Results: results,
+		},
+	}, nil
 }
 
 func decodeComputerCallContent(computerCall responses.ResponseComputerToolCall) ([]llm.Content, error) {

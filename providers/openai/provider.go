@@ -211,14 +211,6 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		includes[IncludeReasoningEncryptedContent] = true
 	}
 
-	// Includes are used to include additional data in the response
-	if len(includes) > 0 {
-		params.Include = make([]responses.ResponseIncludable, 0, len(includes))
-		for include := range includes {
-			params.Include = append(params.Include, responses.ResponseIncludable(include))
-		}
-	}
-
 	// Handle parallel tool calls
 	if config.ParallelToolCalls != nil {
 		params.ParallelToolCalls = openai.Bool(*config.ParallelToolCalls)
@@ -285,6 +277,13 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 			// Check for tools that provide native Responses API params
 			if responsesTool, ok := tool.(ResponsesToolProvider); ok {
 				tools = append(tools, responsesTool.ResponsesToolParam())
+				// Tools may also request that the server return their call
+				// outputs via the response `include` parameter.
+				if includeProvider, ok := tool.(ResponsesIncludeProvider); ok {
+					for _, inc := range includeProvider.ResponsesIncludes() {
+						includes[Include(inc)] = true
+					}
+				}
 				continue
 			}
 			if toolWebSearch, ok := tool.(*WebSearchPreviewTool); ok {
@@ -367,6 +366,16 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 			mcpParam.Headers = headers
 		}
 		params.Tools = append(params.Tools, tool)
+	}
+
+	// Includes are used to request additional data in the response. They are
+	// finalized here so tool-requested includes (set during tool conversion)
+	// are merged with any set earlier (e.g. reasoning encrypted content).
+	if len(includes) > 0 {
+		params.Include = make([]responses.ResponseIncludable, 0, len(includes))
+		for include := range includes {
+			params.Include = append(params.Include, responses.ResponseIncludable(include))
+		}
 	}
 	return params, nil
 }

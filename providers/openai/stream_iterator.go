@@ -447,8 +447,10 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 
 	case responses.ResponseCompletedEvent:
 		s.finalUsage = &llm.Usage{
-			InputTokens:  int(data.Response.Usage.InputTokens),
-			OutputTokens: int(data.Response.Usage.OutputTokens),
+			InputTokens:          int(data.Response.Usage.InputTokens),
+			OutputTokens:         int(data.Response.Usage.OutputTokens),
+			CacheReadInputTokens: int(data.Response.Usage.InputTokensDetails.CachedTokens),
+			ReasoningTokens:      int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
 		}
 		stopReason := determineStopReason(&data.Response)
 
@@ -468,8 +470,10 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 
 	case responses.ResponseIncompleteEvent:
 		s.finalUsage = &llm.Usage{
-			InputTokens:  int(data.Response.Usage.InputTokens),
-			OutputTokens: int(data.Response.Usage.OutputTokens),
+			InputTokens:          int(data.Response.Usage.InputTokens),
+			OutputTokens:         int(data.Response.Usage.OutputTokens),
+			CacheReadInputTokens: int(data.Response.Usage.InputTokensDetails.CachedTokens),
+			ReasoningTokens:      int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
 		}
 		stopReason := determineStopReason(&data.Response)
 
