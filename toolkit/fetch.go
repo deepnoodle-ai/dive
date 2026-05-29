@@ -159,6 +159,11 @@ func (t *FetchTool) Schema() *schema.Schema {
 	}
 }
 
+// ActivityDescription returns a human-readable description of the fetch.
+func (t *FetchTool) ActivityDescription(req *fetch.Request) string {
+	return "Fetching " + req.URL
+}
+
 // PreviewCall returns a summary of the fetch operation for permission prompts.
 func (t *FetchTool) PreviewCall(ctx context.Context, req *fetch.Request) *dive.ToolCallPreview {
 	return &dive.ToolCallPreview{

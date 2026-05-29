@@ -289,6 +289,10 @@ func (t *GrepTool) Annotations() *dive.ToolAnnotations {
 }
 
 // PreviewCall returns a summary of the search operation for permission prompts.
+func (t *GrepTool) ActivityDescription(input *GrepInput) string {
+	return fmt.Sprintf("Grepping for %q", input.Pattern)
+}
+
 func (t *GrepTool) PreviewCall(ctx context.Context, input *GrepInput) *dive.ToolCallPreview {
 	searchPath := input.Path
 	if searchPath == "" {

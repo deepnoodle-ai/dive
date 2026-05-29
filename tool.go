@@ -253,6 +253,17 @@ type ToolPreviewer interface {
 	PreviewCall(ctx context.Context, input any) *ToolCallPreview
 }
 
+// ToolActivityDescriber is an optional interface that tools implement to provide
+// a human-readable description of what they are doing during execution.
+// Consumers attach a PreToolUseHook and check hctx.ActivityDescription to
+// display real-time status in TUIs, web UIs, or structured log streams.
+//
+// The input parameter is the raw JSON provided by the LLM before it is decoded.
+// Returning an empty string suppresses the description.
+type ToolActivityDescriber interface {
+	ActivityDescription(input json.RawMessage) string
+}
+
 // TypedTool is a tool that can be called with a specific type of input.
 type TypedTool[T any] interface {
 	// Name of the tool.
@@ -276,6 +287,15 @@ type TypedTool[T any] interface {
 type TypedToolPreviewer[T any] interface {
 	// PreviewCall returns a markdown description of what the tool will do.
 	PreviewCall(ctx context.Context, input T) *ToolCallPreview
+}
+
+// TypedActivityDescriber is an optional interface that typed tools implement
+// to provide human-readable activity descriptions with typed input.
+// TypedToolAdapter delegates to this when the underlying tool implements it.
+type TypedActivityDescriber[T any] interface {
+	// ActivityDescription returns a short description of what the tool is doing,
+	// e.g. "Reading src/agent.go" or "Running: go test ./...". Empty string suppresses.
+	ActivityDescription(input T) string
 }
 
 // ToolAdapter creates a new TypedToolAdapter for the given tool.
@@ -326,6 +346,20 @@ func (t *TypedToolAdapter[T]) ToolConfiguration(providerName string) map[string]
 		return toolWithConfig.ToolConfiguration(providerName)
 	}
 	return nil
+}
+
+// ActivityDescription implements ToolActivityDescriber by delegating to the
+// underlying TypedTool if it implements TypedActivityDescriber[T].
+func (t *TypedToolAdapter[T]) ActivityDescription(input json.RawMessage) string {
+	describer, ok := t.tool.(TypedActivityDescriber[T])
+	if !ok {
+		return ""
+	}
+	typedInput, err := t.convertInput(input)
+	if err != nil {
+		return ""
+	}
+	return describer.ActivityDescription(typedInput)
 }
 
 // PreviewCall implements ToolPreviewer by delegating to the underlying TypedTool

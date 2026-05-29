@@ -144,6 +144,14 @@ func (t *ListDirectoryTool) Annotations() *dive.ToolAnnotations {
 }
 
 // PreviewCall returns a summary of the list operation for permission prompts.
+func (t *ListDirectoryTool) ActivityDescription(input *ListDirectoryInput) string {
+	path := input.Path
+	if path == "" {
+		path = t.defaultPath
+	}
+	return "Listing " + path
+}
+
 func (t *ListDirectoryTool) PreviewCall(ctx context.Context, input *ListDirectoryInput) *dive.ToolCallPreview {
 	path := input.Path
 	if path == "" {

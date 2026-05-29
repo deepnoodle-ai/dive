@@ -1759,6 +1759,11 @@ func (a *Agent) executeToolCallsParallel(
 			preview = previewer.PreviewCall(childCtx, toolCall.Input)
 		}
 
+		var activityDesc string
+		if describer, ok := tool.(ToolActivityDescriber); ok {
+			activityDesc = describer.ActivityDescription(toolCall.Input)
+		}
+
 		if err := callback(childCtx, &ResponseItem{
 			Type:     ResponseItemTypeToolCall,
 			ToolCall: toolCall,
@@ -1767,13 +1772,14 @@ func (a *Agent) executeToolCallsParallel(
 		}
 
 		preHctx := &HookContext{
-			Agent:        a,
-			Session:      hctx.Session,
-			Values:       hctx.Values,
-			SystemPrompt: hctx.SystemPrompt,
-			Messages:     hctx.Messages,
-			Tool:         tool,
-			Call:         toolCall,
+			Agent:               a,
+			Session:             hctx.Session,
+			Values:              hctx.Values,
+			SystemPrompt:        hctx.SystemPrompt,
+			Messages:            hctx.Messages,
+			Tool:                tool,
+			Call:                toolCall,
+			ActivityDescription: activityDesc,
 		}
 
 		var denialErr error
@@ -1996,6 +2002,11 @@ func (a *Agent) executeOneToolCall(
 		preview = previewer.PreviewCall(ctx, toolCall.Input)
 	}
 
+	var activityDesc string
+	if describer, ok := tool.(ToolActivityDescriber); ok {
+		activityDesc = describer.ActivityDescription(toolCall.Input)
+	}
+
 	// Emit tool call event
 	if err := callback(ctx, &ResponseItem{
 		Type:     ResponseItemTypeToolCall,
@@ -2005,13 +2016,14 @@ func (a *Agent) executeOneToolCall(
 	}
 
 	preHctx := &HookContext{
-		Agent:        a,
-		Session:      hctx.Session,
-		Values:       hctx.Values,
-		SystemPrompt: hctx.SystemPrompt,
-		Messages:     hctx.Messages,
-		Tool:         tool,
-		Call:         toolCall,
+		Agent:               a,
+		Session:             hctx.Session,
+		Values:              hctx.Values,
+		SystemPrompt:        hctx.SystemPrompt,
+		Messages:            hctx.Messages,
+		Tool:                tool,
+		Call:                toolCall,
+		ActivityDescription: activityDesc,
 	}
 
 	// Run PreToolUse hooks — any error denies the tool. All hooks run even
