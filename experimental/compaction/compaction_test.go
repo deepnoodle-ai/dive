@@ -346,6 +346,42 @@ func TestReduceToSummaryBudget(t *testing.T) {
 	})
 }
 
+func TestReduceToSummaryBudgetCullsUntruncatableContent(t *testing.T) {
+	t.Run("culls a large image to a placeholder", func(t *testing.T) {
+		image := &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.ImageContent{Source: &llm.ContentSource{
+				Type:      llm.ContentSourceTypeBase64,
+				MediaType: "image/png",
+				Data:      strings.Repeat("A", 400_000), // ~100k tokens of base64
+			}},
+		}}
+		out := reduceToSummaryBudget([]*llm.Message{image}, 2_000)
+
+		assert.Equal(t, 1, len(out)) // not dropped
+		txt, isText := out[0].Content[0].(*llm.TextContent)
+		assert.True(t, isText) // image culled to a text placeholder
+		assert.True(t, strings.Contains(txt.Text, "image content omitted"))
+		assert.True(t, totalTokens(out) <= 2_000)
+	})
+
+	t.Run("culls an oversized tool_use input but keeps the block paired", func(t *testing.T) {
+		toolUse := &llm.Message{Role: llm.Assistant, Content: []llm.Content{
+			&llm.ToolUseContent{ID: "t1", Name: "write", Input: json.RawMessage(`{"data":"` + strings.Repeat("z", 300_000) + `"}`)},
+		}}
+		result := &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.ToolResultContent{ToolUseID: "t1", Content: "ok"},
+		}}
+		out := reduceToSummaryBudget([]*llm.Message{toolUse, result}, 2_000)
+
+		assert.Equal(t, 2, len(out))
+		tu, isToolUse := out[0].Content[0].(*llm.ToolUseContent) // block kept → pairing intact
+		assert.True(t, isToolUse)
+		assert.Equal(t, "t1", tu.ID)
+		assert.True(t, len(tu.Input) < 1000) // input culled
+		assert.True(t, totalTokens(out) <= 2_000)
+	})
+}
+
 func TestTruncateText(t *testing.T) {
 	assert.Equal(t, "short", truncateText("short", 200)) // under limit unchanged
 

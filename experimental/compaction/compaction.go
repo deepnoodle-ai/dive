@@ -360,11 +360,13 @@ func messageBytes(m *llm.Message) int {
 // replaced with truncated copies while the rest are reused as-is.
 //
 // It works iteratively, the way you would by hand: each pass finds the single
-// largest message and truncates it just enough to clear the overage (down to a
+// largest message and shrinks it just enough to clear the overage (down to a
 // floor), so the biggest items are clipped first. Messages are never dropped,
-// which keeps tool_use/tool_result pairing intact. Messages dominated by
-// non-text content (images, structured tool inputs) cannot be shrunk and may
-// keep the total above budget — a best-effort guard, not a hard guarantee.
+// which keeps tool_use/tool_result pairing intact. Oversized text, tool
+// results, tool inputs, images, and documents are all reduced (see
+// shrinkMessage). Only pairing-sensitive or unrecognized block types are left
+// untouched, so in rare cases the total may stay above budget — a best-effort
+// guard, not a hard guarantee.
 func reduceToSummaryBudget(messages []*llm.Message, budget int) []*llm.Message {
 	if budget <= 0 || len(messages) == 0 {
 		return messages
@@ -409,63 +411,107 @@ func reduceToSummaryBudget(messages []*llm.Message, budget int) []*llm.Message {
 	return out
 }
 
-// shrinkMessage returns a copy of m whose largest text-bearing content blocks
-// are truncated (head + tail with an elision marker) so the message's
-// serialized size approaches targetBytes. The original is left untouched.
+// truncationMinKeepBytes is the floor below which an individual text block is
+// not truncated further.
+const truncationMinKeepBytes = 256
+
+// culledToolInput replaces an oversized tool_use input. Must be valid JSON:
+// ToolUseContent rejects invalid input on marshal.
+var culledToolInput = json.RawMessage(`{"_omitted":"tool input omitted for summarization"}`)
+
+// shrinkMessage returns a copy of m whose largest reducible content blocks are
+// shrunk so the message's serialized size approaches targetBytes. The original
+// is left untouched.
+//
+// Text-bearing blocks (text, tool results) are truncated head+tail; oversized
+// tool_use inputs are culled to a placeholder while keeping the block so its
+// matching tool_result stays paired; and standalone bulky blocks that can't be
+// truncated as text — images, documents — are culled to a short placeholder.
+// Culling an un-shrinkable payload is better than letting it overflow the
+// summarizer and break compaction. Pairing-sensitive or unrecognized block
+// types are left intact rather than risk corrupting the request.
 func shrinkMessage(m *llm.Message, targetBytes int) *llm.Message {
 	out := *m
 	out.Content = make([]llm.Content, len(m.Content))
 	copy(out.Content, m.Content)
 
-	// Bounded by the number of content blocks; each pass clips one block.
-	for i := 0; i < len(out.Content)+1; i++ {
+	prev := -1
+	// Bounded: each pass shrinks one block; the no-progress guard stops us once
+	// the largest reducible block is already at its floor.
+	for pass := 0; pass < len(out.Content)*2+2; pass++ {
 		size := messageBytes(&out)
-		if size <= targetBytes {
+		if size <= targetBytes || size == prev {
 			break
 		}
-		idx, text, rebuild := largestTextBlock(out.Content)
+		prev = size
+		idx := largestReducibleBlock(out.Content)
 		if idx < 0 {
-			break // nothing truncatable remains
+			break // nothing left we can safely reduce
 		}
-		newLen := len(text) - (size - targetBytes)
-		if newLen >= len(text) {
-			break
-		}
-		out.Content[idx] = rebuild(truncateText(text, newLen))
+		out.Content[idx] = reduceBlock(out.Content[idx], size-targetBytes)
 	}
 	return &out
 }
 
-// largestTextBlock finds the content block holding the most truncatable text
-// and returns its index, current text, and a constructor that rebuilds the
-// block (a fresh struct, so the original is never mutated) with replacement
-// text. idx is -1 when no block is truncatable.
-func largestTextBlock(content []llm.Content) (int, string, func(string) llm.Content) {
-	bestIdx, bestLen := -1, 0
-	var bestText string
-	var rebuild func(string) llm.Content
+// largestReducibleBlock returns the index of the largest content block that
+// reduceBlock can meaningfully shrink, or -1 if none.
+func largestReducibleBlock(content []llm.Content) int {
+	best, bestSize := -1, 0
 	for i, c := range content {
-		switch cc := c.(type) {
-		case *llm.TextContent:
-			if len(cc.Text) > bestLen {
-				bestIdx, bestLen, bestText = i, len(cc.Text), cc.Text
-				src := cc
-				rebuild = func(s string) llm.Content {
-					return &llm.TextContent{Text: s, CacheControl: src.CacheControl, Citations: src.Citations}
-				}
-			}
-		case *llm.ToolResultContent:
-			txt := toolResultText(cc)
-			if len(txt) > bestLen {
-				bestIdx, bestLen, bestText = i, len(txt), txt
-				src := cc
-				rebuild = func(s string) llm.Content {
-					return &llm.ToolResultContent{ToolUseID: src.ToolUseID, Content: s, IsError: src.IsError, CacheControl: src.CacheControl}
-				}
-			}
+		if !reducible(c) {
+			continue
+		}
+		if size := contentBytes(c); size > bestSize {
+			best, bestSize = i, size
 		}
 	}
-	return bestIdx, bestText, rebuild
+	return best
+}
+
+// reducible reports whether reduceBlock can shrink c below its current size.
+func reducible(c llm.Content) bool {
+	switch cc := c.(type) {
+	case *llm.TextContent:
+		return len(cc.Text) > truncationMinKeepBytes
+	case *llm.ToolResultContent:
+		return len(toolResultText(cc)) > truncationMinKeepBytes
+	case *llm.ToolUseContent:
+		return len(cc.Input) > len(culledToolInput)
+	case *llm.ImageContent, *llm.DocumentContent:
+		return true
+	default:
+		return false
+	}
+}
+
+// reduceBlock returns a smaller version of c — text-bearing blocks truncated by
+// `excess` bytes, tool_use inputs and image/document payloads culled to a
+// placeholder. Always a fresh struct, so the original block is never mutated.
+func reduceBlock(c llm.Content, excess int) llm.Content {
+	switch cc := c.(type) {
+	case *llm.TextContent:
+		return &llm.TextContent{Text: truncateText(cc.Text, len(cc.Text)-excess), CacheControl: cc.CacheControl, Citations: cc.Citations}
+	case *llm.ToolResultContent:
+		txt := toolResultText(cc)
+		return &llm.ToolResultContent{ToolUseID: cc.ToolUseID, Content: truncateText(txt, len(txt)-excess), IsError: cc.IsError, CacheControl: cc.CacheControl}
+	case *llm.ToolUseContent:
+		return &llm.ToolUseContent{ID: cc.ID, Name: cc.Name, Input: culledToolInput}
+	case *llm.ImageContent:
+		return &llm.TextContent{Text: "[image content omitted for summarization]"}
+	case *llm.DocumentContent:
+		return &llm.TextContent{Text: "[document content omitted for summarization]"}
+	default:
+		return c
+	}
+}
+
+// contentBytes is the serialized size of a single content block.
+func contentBytes(c llm.Content) int {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return 0
+	}
+	return len(data)
 }
 
 // toolResultText projects a tool result's content to a string for truncation.
