@@ -10,6 +10,21 @@ import (
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
+// seededSession is a minimal Session implementation that returns a fixed message list.
+type seededSession struct {
+	id       string
+	messages []*llm.Message
+}
+
+func (s *seededSession) ID() string { return s.id }
+func (s *seededSession) Messages(_ context.Context) ([]*llm.Message, error) {
+	return s.messages, nil
+}
+func (s *seededSession) SaveTurn(_ context.Context, msgs []*llm.Message, _ *llm.Usage) error {
+	s.messages = append(s.messages, msgs...)
+	return nil
+}
+
 func TestPreGenerationHooks(t *testing.T) {
 	t.Run("hooks can modify system prompt", func(t *testing.T) {
 		var capturedSystemPrompt string
@@ -1509,5 +1524,267 @@ func TestPreIterationHookErrors(t *testing.T) {
 		var abortErr *HookAbortError
 		assert.ErrorAs(t, err, &abortErr)
 		assert.Equal(t, "abort from pre-iteration", abortErr.Reason)
+	})
+}
+
+func TestSessionStartHook(t *testing.T) {
+	makeModel := func(responseText string) *mockLLM {
+		return &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				return &llm.Response{
+					ID:         "resp_123",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: responseText}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+	}
+
+	t.Run("hook fires and seed messages are visible to LLM", func(t *testing.T) {
+		var capturedMessages []*llm.Message
+
+		model := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				var cfg llm.Config
+				cfg.Apply(opts...)
+				capturedMessages = cfg.Messages
+				return &llm.Response{
+					ID:         "resp_1",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "ok"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 5, OutputTokens: 2},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model: model,
+			Hooks: Hooks{
+				SessionStart: []SessionStartHook{
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						return &SessionStartResult{Messages: []*llm.Message{
+							{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: "seed message"}}},
+						}}, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+
+		// LLM should have received: seed message + "hello"
+		assert.Equal(t, 2, len(capturedMessages))
+		assert.Equal(t, "seed message", capturedMessages[0].Text())
+	})
+
+	t.Run("hook error aborts CreateResponse", func(t *testing.T) {
+		agent, err := NewAgent(AgentOptions{
+			Model: makeModel("ok"),
+			Hooks: Hooks{
+				SessionStart: []SessionStartHook{
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						return nil, errors.New("config load failure")
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "config load failure")
+	})
+
+	t.Run("hook is skipped when session already has messages", func(t *testing.T) {
+		hookFired := false
+
+		model := makeModel("ok")
+
+		// Use a session that already has prior messages
+		sess := &seededSession{
+			id: "test-session",
+			messages: []*llm.Message{
+				{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: "prior turn"}}},
+				{Role: llm.Assistant, Content: []llm.Content{&llm.TextContent{Text: "prior reply"}}},
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:   model,
+			Session: sess,
+			Hooks: Hooks{
+				SessionStart: []SessionStartHook{
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						hookFired = true
+						return nil, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("new message"))
+		assert.NoError(t, err)
+		assert.False(t, hookFired)
+	})
+
+	t.Run("multiple hooks are all called and messages concatenated", func(t *testing.T) {
+		var capturedMessages []*llm.Message
+
+		model := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				var cfg llm.Config
+				cfg.Apply(opts...)
+				capturedMessages = cfg.Messages
+				return &llm.Response{
+					ID:         "resp_1",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "ok"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 5, OutputTokens: 2},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model: model,
+			Hooks: Hooks{
+				SessionStart: []SessionStartHook{
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						return &SessionStartResult{Messages: []*llm.Message{
+							{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: "seed A"}}},
+						}}, nil
+					},
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						return &SessionStartResult{Messages: []*llm.Message{
+							{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: "seed B"}}},
+						}}, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+
+		// seed A + seed B + "hello"
+		assert.Equal(t, 3, len(capturedMessages))
+		assert.Equal(t, "seed A", capturedMessages[0].Text())
+		assert.Equal(t, "seed B", capturedMessages[1].Text())
+	})
+
+	t.Run("source is startup", func(t *testing.T) {
+		var gotSource SessionStartSource
+		agent, err := NewAgent(AgentOptions{
+			Model: makeModel("ok"),
+			Hooks: Hooks{
+				SessionStart: []SessionStartHook{
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						gotSource = hctx.SessionStartSource
+						return nil, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, SessionStartStartup, gotSource)
+	})
+
+	t.Run("persistent seeds are saved and seen on later turns", func(t *testing.T) {
+		var lastCallMessages []*llm.Message
+		fireCount := 0
+		model := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				var cfg llm.Config
+				cfg.Apply(opts...)
+				lastCallMessages = cfg.Messages
+				return &llm.Response{
+					ID: "resp", Model: "test-model", Role: llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "ok"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 1, OutputTokens: 1},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		sess := &seededSession{id: "persist-sess"}
+		agent, err := NewAgent(AgentOptions{
+			Model:   model,
+			Session: sess,
+			Hooks: Hooks{
+				SessionStart: []SessionStartHook{
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						fireCount++
+						return &SessionStartResult{
+							Persist:  true,
+							Messages: []*llm.Message{{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: "durable seed"}}}},
+						}, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		// Turn 1: hook fires, seed is persisted (saved as its own pre-turn).
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fireCount)
+		// seed + input + assistant output all persisted.
+		assert.Equal(t, 3, len(sess.messages))
+		assert.Equal(t, "durable seed", sess.messages[0].Text())
+
+		// Turn 2: hook must NOT fire again, but the seed is still in history.
+		_, err = agent.CreateResponse(context.Background(), WithInput("again"))
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fireCount, "SessionStart must fire only once per session")
+		assert.Equal(t, "durable seed", lastCallMessages[0].Text())
+	})
+
+	t.Run("ephemeral seeds are not saved", func(t *testing.T) {
+		fireCount := 0
+		sess := &seededSession{id: "ephemeral-sess"}
+		agent, err := NewAgent(AgentOptions{
+			Model:   makeModel("ok"),
+			Session: sess,
+			Hooks: Hooks{
+				SessionStart: []SessionStartHook{
+					func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+						fireCount++
+						return &SessionStartResult{
+							Persist:  false,
+							Messages: []*llm.Message{{Role: llm.User, Content: []llm.Content{&llm.TextContent{Text: "ephemeral seed"}}}},
+						}, nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fireCount)
+		// Only input + assistant output saved; the ephemeral seed is not.
+		assert.Equal(t, 2, len(sess.messages))
+		assert.Equal(t, "hello", sess.messages[0].Text())
 	})
 }

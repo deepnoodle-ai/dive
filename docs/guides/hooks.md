@@ -32,13 +32,15 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 ## Hook Flow
 
 ```text
-PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse / PostToolUseFailure]* → Stop → PostGeneration
-                                                                              ↓
-                                                                   (tool returned SuspendResult)
-                                                                              ↓
-                                                                   OnSuspend → PostGeneration
+SessionStart → PreGeneration → [PreIteration → LLM → PreToolUse → Execute → PostToolUse / PostToolUseFailure]* → Stop → PostGeneration
+                                                                                             ↓
+                                                                                  (tool returned SuspendResult)
+                                                                                             ↓
+                                                                                  OnSuspend → PostGeneration
 ```
 
+0. **SessionStart** runs once at the very beginning, only when the session has
+   no prior messages and the turn is not a resume. See [SessionStart](#sessionstart).
 1. **PreGeneration** runs once before the loop starts.
 2. Inside the loop, **PreIteration** runs before each LLM call.
 3. After the LLM responds with tool calls, **PreToolUse** runs before each tool, then
@@ -73,6 +75,46 @@ The `Values` map persists across all phases within one `CreateResponse` call, so
 hooks can pass data to each other.
 
 ## Generation Hooks
+
+### SessionStart
+
+Runs once at the start of a fresh conversation — before the first LLM call —
+when the loaded session has **no prior messages** and the turn is **not** a
+resume. Use it to seed a conversation from external state (project config, user
+preferences, memory) instead of writing a `PreGeneration` hook that checks for
+an empty history itself. It does not fire on later turns of an existing session
+or on resume.
+
+Return a `*dive.SessionStartResult` whose `Messages` are prepended to the
+conversation, ahead of the user input. Set `Persist` to choose how long the
+seed lives:
+
+- `Persist: true` — durable. The messages are saved to the session and stay in
+  the conversation on every later turn and on resume.
+- `Persist: false` — ephemeral. The messages influence only the first
+  generation and are not saved (`Persist` is always ephemeral for stateless
+  agents with no session).
+
+Returning a `nil` result is a no-op. Errors abort generation.
+`hctx.SessionStartSource` reports why the hook fired (currently always
+`dive.SessionStartStartup`).
+
+```go
+Hooks: dive.Hooks{
+    SessionStart: []dive.SessionStartHook{
+        func(ctx context.Context, hctx *dive.HookContext) (*dive.SessionStartResult, error) {
+            cfg, err := loadProjectConfig(ctx)
+            if err != nil {
+                return nil, err
+            }
+            return &dive.SessionStartResult{
+                Persist:  true, // keep the context for the whole conversation
+                Messages: []*llm.Message{llm.NewUserTextMessage("Project context:\n" + cfg)},
+            }, nil
+        },
+    },
+},
+```
 
 ### PreGeneration
 
@@ -299,6 +341,29 @@ dive.MatchToolPostFailure("Bash", postToolUseFailureHook)
 
 The pattern is compiled once when the helper is called, not on every
 invocation.
+
+### Judgment-based helpers
+
+When a decision needs judgment rather than a fixed rule, let a model make it.
+These helpers force a `{ok, reason}` verdict from the model and plug into an
+ordinary hook. Pass a cheap model — each adds one LLM call.
+
+```go
+Hooks: dive.Hooks{
+    // Keep working until the model agrees the task is done (fails open).
+    Stop: []dive.StopHook{
+        dive.PromptStopHook(haiku, "Are all of the user's requests fully satisfied?"),
+    },
+    // Let the model veto risky shell commands (fails closed). Scope with MatchTool.
+    PreToolUse: []dive.PreToolUseHook{
+        dive.MatchTool("Bash", dive.PromptToolGate(haiku, "Is this command safe on a dev machine?")),
+    },
+},
+```
+
+`PromptStopHook` honors `hctx.StopHookActive` so it cannot loop. `PromptToolGate`
+denies by returning an error and fails closed on model errors. See the design
+doc for the agent-backed variant.
 
 ## Error Handling
 

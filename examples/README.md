@@ -26,6 +26,7 @@ cd examples
 | `openrouter_example` | OpenRouter | Multi-provider routing |
 | `skills_example` | Anthropic | Agent with skill loading and auto-invocation |
 | `tool_progress_example` | Anthropic | Tool streaming structured progress via ReportProgress |
+| `hooks_example` | Anthropic | SessionStart context seeding + model-judgment Stop/PreToolUse hooks |
 | `firecrawl_example` | Anthropic + Firecrawl | Agent with web search and fetch via Firecrawl |
 | `oauth_client` | — | OAuth client credential flow |
 

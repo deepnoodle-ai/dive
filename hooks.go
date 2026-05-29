@@ -84,6 +84,12 @@ type HookContext struct {
 	// Messages contains the conversation history plus new input messages.
 	Messages []*llm.Message
 
+	// SessionStart
+
+	// SessionStartSource is set for SessionStart hooks and reports why the hook
+	// is firing (see SessionStartSource). Empty for all other hook types.
+	SessionStartSource SessionStartSource
+
 	// Response (available in PostGeneration, Stop)
 
 	// Response is the complete Response object returned by CreateResponse.
@@ -220,6 +226,61 @@ type PreIterationHook func(ctx context.Context, hctx *HookContext) error
 //
 // Errors are logged but do not affect the response.
 type PostBackgroundToolUseHook func(ctx context.Context, hctx *HookContext) error
+
+// SessionStartSource describes why SessionStart hooks are firing for a turn.
+// It is reported on HookContext.SessionStartSource so a hook can tailor its
+// seeding to the situation.
+type SessionStartSource string
+
+const (
+	// SessionStartStartup is a brand-new conversation: the active session has
+	// no prior messages and the turn is not resuming a suspended one. It is the
+	// only source the agent emits today; the field exists so future sources
+	// (e.g. re-seeding after compaction) can reuse this hook without an API
+	// change.
+	SessionStartStartup SessionStartSource = "startup"
+)
+
+// SessionStartResult is returned by a SessionStartHook to seed a conversation
+// before its first LLM call.
+type SessionStartResult struct {
+	// Messages are prepended to the conversation, ahead of the user input, so
+	// the model sees them on the first generation. An empty slice is a no-op.
+	Messages []*llm.Message
+
+	// Persist controls whether Messages are written to the session so they
+	// survive beyond the first generation:
+	//
+	//   - true  — durable seed context. Messages are saved as a pre-turn and
+	//             remain in the conversation on every later turn and on resume
+	//             (e.g. project config, user preferences, long-lived memory).
+	//   - false — ephemeral priming. Messages influence only the first
+	//             generation and are never saved; later turns do not see them.
+	//
+	// Persist requires a Session. Stateless calls (no Session) have nowhere to
+	// save to, so seeds are always ephemeral regardless of this flag.
+	Persist bool
+}
+
+// SessionStartHook fires once at the start of a conversation — before the first
+// LLM call — when the active session has no prior messages and the turn is NOT
+// resuming a suspended one. It is not called on later turns of an existing
+// session, nor on resume.
+//
+// Use it to bootstrap a conversation from external state (project config, user
+// preferences, memory) without a PreGenerationHook that manually inspects the
+// history for emptiness. Return a *SessionStartResult whose Messages are
+// prepended to the conversation; set Persist to choose durable vs ephemeral
+// seeding (see SessionStartResult). Returning a nil result is a no-op. If a
+// hook returns an error, CreateResponse returns that error immediately.
+//
+// HookContext.SessionStartSource reports why the hook fired (see
+// SessionStartSource).
+//
+// Note: a stateless agent (no Session) has no prior messages on any call, so
+// the hook fires on every CreateResponse. The trigger is "no prior messages on
+// a non-resume turn", not "first ever call for this session object".
+type SessionStartHook func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error)
 
 // OnSuspendHook fires when the agent transitions into a suspended state,
 // BEFORE PostGeneration runs and BEFORE the suspended turn is persisted to

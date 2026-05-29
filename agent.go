@@ -48,6 +48,11 @@ func acquireSessionLock(id string) func() {
 
 // Hooks groups all agent hook slices.
 type Hooks struct {
+	// SessionStart hooks fire once per session, before the first LLM call, when
+	// the loaded session has no prior messages. Returned messages are prepended
+	// to the conversation as seed messages. Errors abort CreateResponse.
+	SessionStart []SessionStartHook
+
 	// PreGeneration hooks are called before the LLM generation loop.
 	PreGeneration []PreGenerationHook
 
@@ -226,6 +231,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		}
 		opts.Tools = append(opts.Tools, ext.Tools()...)
 		extHooks := ext.Hooks()
+		opts.Hooks.SessionStart = append(opts.Hooks.SessionStart, extHooks.SessionStart...)
 		opts.Hooks.PreGeneration = append(opts.Hooks.PreGeneration, extHooks.PreGeneration...)
 		opts.Hooks.PostGeneration = append(opts.Hooks.PostGeneration, extHooks.PostGeneration...)
 		opts.Hooks.PreToolUse = append(opts.Hooks.PreToolUse, extHooks.PreToolUse...)
@@ -445,6 +451,47 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// out rather than silently no-op re-saving the suspended turn.
 	if suspState != nil && !hasResumeIntent {
 		return nil, ErrResumeRequired
+	}
+
+	// Fire SessionStart hooks at the start of a fresh conversation: the session
+	// has no prior messages and this turn is not resuming a suspended one. The
+	// resume guards above guarantee suspState == nil here when hasResumeIntent
+	// is false, so seeds always flow into the non-resume history branch below.
+	// Returned messages are prepended to the conversation; those marked Persist
+	// are saved as a pre-turn so they survive later turns and resumes.
+	if !hasResumeIntent && len(sessionMsgs) == 0 && len(a.hooks.SessionStart) > 0 {
+		startHctx := NewHookContext()
+		startHctx.Agent = a
+		startHctx.Session = sess
+		startHctx.SystemPrompt = systemPrompt
+		startHctx.SessionStartSource = SessionStartStartup
+		maps.Copy(startHctx.Values, options.Values)
+
+		var persistentSeeds []*llm.Message
+		for _, hook := range a.hooks.SessionStart {
+			result, hookErr := hook(ctx, startHctx)
+			if hookErr != nil {
+				logger.Error("session start hook error", "error", hookErr)
+				return nil, fmt.Errorf("session start hook error: %w", hookErr)
+			}
+			if result == nil || len(result.Messages) == 0 {
+				continue
+			}
+			sessionMsgs = append(sessionMsgs, result.Messages...)
+			if result.Persist {
+				persistentSeeds = append(persistentSeeds, result.Messages...)
+			}
+		}
+
+		// Persist durable seeds as their own pre-turn so they remain in history
+		// on later turns and on resume, without polluting the turn delta below.
+		// Stateless calls (sess == nil) have nowhere to save, so Persist is a
+		// no-op there and the seeds stay ephemeral.
+		if len(persistentSeeds) > 0 && sess != nil {
+			if err := sess.SaveTurn(ctx, persistentSeeds, nil); err != nil {
+				return nil, fmt.Errorf("session start seed save error: %w", err)
+			}
+		}
 	}
 
 	// Build the full history the agent will operate on.
