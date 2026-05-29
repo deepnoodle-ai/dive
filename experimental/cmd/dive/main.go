@@ -206,6 +206,8 @@ func runInteractive(ctx *cli.Context) error {
 	// tracker that lets TaskStop cancel background spawns and monitors by id.
 	subagents := map[string]*subagent.Definition{
 		"GeneralPurpose": subagent.GeneralPurpose,
+		"Explore":        subagent.Explore,
+		"Plan":           subagent.Plan,
 	}
 	runs := orchestration.NewRuns()
 
