@@ -154,10 +154,21 @@ func TestSessionCompact(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	assert.Equal(t, 1, sess.EventCount())
+	// Compaction appends a checkpoint rather than collapsing the log, so the
+	// turn events remain (2 turns + 1 checkpoint = 3 events).
+	assert.Equal(t, 3, sess.EventCount())
+
+	// The active window is just the summary.
 	msgs, _ := sess.Messages(ctx)
 	assert.Equal(t, 1, len(msgs))
 	assert.Equal(t, "Summary of 4 messages", msgs[0].Text())
+
+	// The originals remain recoverable: 4 turn messages + the summary.
+	all, _ := sess.AllMessages(ctx)
+	assert.Equal(t, 5, len(all))
+	assert.Equal(t, "msg1", all[0].Text())
+	assert.Equal(t, "reply2", all[3].Text())
+	assert.Equal(t, "Summary of 4 messages", all[4].Text())
 }
 
 func TestCompactSuspendedSession(t *testing.T) {
@@ -212,19 +223,21 @@ func TestCompactionHistory(t *testing.T) {
 		assert.False(t, rec.CompactedAt.IsZero())
 	})
 
-	t.Run("second compaction replaces everything including first summary", func(t *testing.T) {
+	t.Run("each compaction is a distinct checkpoint in history", func(t *testing.T) {
 		sess := session.New("s3")
 		sess.SaveTurn(ctx, []*llm.Message{
 			llm.NewUserTextMessage("orig"),
 			llm.NewAssistantTextMessage("reply"),
 		}, nil)
-		// First compaction
+		// First compaction summarizes the two original messages.
 		err := sess.Compact(ctx, func(ctx context.Context, msgs []*llm.Message) ([]*llm.Message, error) {
 			return []*llm.Message{llm.NewAssistantTextMessage("summary-1")}, nil
 		})
 		assert.NoError(t, err)
 
-		// Add another turn and compact again
+		// Add another turn and compact again. The active window is now
+		// summary-1 + the new turn, so that is what the second checkpoint
+		// summarizes and replaces.
 		sess.SaveTurn(ctx, []*llm.Message{
 			llm.NewUserTextMessage("new"),
 			llm.NewAssistantTextMessage("new-reply"),
@@ -234,12 +247,31 @@ func TestCompactionHistory(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		// Session now has one compaction event (the second compact replaced everything)
+		// Genuine history: two checkpoints, two records.
 		records, err := sess.CompactionHistory(ctx)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(records))
-		// The second compaction's replaced messages include summary-1 + new turn
-		assert.Equal(t, 3, len(records[0].ReplacedMessages))
+		assert.Equal(t, 2, len(records))
+
+		// First checkpoint replaced the two originals and produced summary-1.
+		assert.Equal(t, 2, len(records[0].ReplacedMessages))
+		assert.Equal(t, "orig", records[0].ReplacedMessages[0].Text())
+		assert.Equal(t, "summary-1", records[0].Summary[0].Text())
+
+		// Second checkpoint replaced summary-1 + the new turn (3 messages).
+		assert.Equal(t, 3, len(records[1].ReplacedMessages))
+		assert.Equal(t, "summary-1", records[1].ReplacedMessages[0].Text())
+		assert.Equal(t, "new", records[1].ReplacedMessages[1].Text())
+		assert.Equal(t, "summary-2", records[1].Summary[0].Text())
+
+		// The active window is the latest summary only.
+		msgs, _ := sess.Messages(ctx)
+		assert.Equal(t, 1, len(msgs))
+		assert.Equal(t, "summary-2", msgs[0].Text())
+
+		// And the full transcript still holds every original.
+		all, _ := sess.AllMessages(ctx)
+		assert.Equal(t, "orig", all[0].Text())
+		assert.Equal(t, "new", all[3].Text())
 	})
 }
 
