@@ -342,6 +342,29 @@ dive.MatchToolPostFailure("Bash", postToolUseFailureHook)
 The pattern is compiled once when the helper is called, not on every
 invocation.
 
+### Judgment-based helpers
+
+When a decision needs judgment rather than a fixed rule, let a model make it.
+These helpers force a `{ok, reason}` verdict from the model and plug into an
+ordinary hook. Pass a cheap model — each adds one LLM call.
+
+```go
+Hooks: dive.Hooks{
+    // Keep working until the model agrees the task is done (fails open).
+    Stop: []dive.StopHook{
+        dive.PromptStopHook(haiku, "Are all of the user's requests fully satisfied?"),
+    },
+    // Let the model veto risky shell commands (fails closed). Scope with MatchTool.
+    PreToolUse: []dive.PreToolUseHook{
+        dive.MatchTool("Bash", dive.PromptToolGate(haiku, "Is this command safe on a dev machine?")),
+    },
+},
+```
+
+`PromptStopHook` honors `hctx.StopHookActive` so it cannot loop. `PromptToolGate`
+denies by returning an error and fails closed on model errors. See the design
+doc for the agent-backed variant.
+
 ## Error Handling
 
 How errors are handled depends on the hook type:

@@ -230,8 +230,53 @@ PreToolUse hooks can do more than allow/deny:
 | `MatchTool`            | `PreToolUseHook`         | Runs only for matching tool names     |
 | `MatchToolPost`        | `PostToolUseHook`        | Runs only for matching tool names     |
 | `MatchToolPostFailure` | `PostToolUseFailureHook` | Runs only for matching tool names     |
+| `PromptStopHook`       | `StopHook`               | Model judges whether the task is done; continues if not (fails open) |
+| `PromptToolGate`       | `PreToolUseHook`         | Model judges whether a tool call is safe; denies if not (fails closed) |
 
 All `Match*` helpers accept a Go regexp pattern compiled once at construction.
+
+## Judgment-Based Hooks
+
+`PromptStopHook` and `PromptToolGate` (`hookjudgment.go`) let a *model* make a
+hook decision that is hard to express as deterministic code — "is the task
+actually done?", "is this tool call safe in context?". They are constructors in
+the same spirit as `MatchTool`/`InjectContext`: the core hook types stay plain
+Go functions, which is the "prompt/agent hooks can be built on top" Non-Goal
+realized.
+
+### Decision contract
+
+Both force a single `{ ok bool, reason string }` verdict from the model. `ok`
+means "let it proceed"; on `!ok` the `reason` is surfaced back to the agent
+(Stop → next instruction; PreToolUse → tool denial). Structured output is
+guaranteed across providers by exposing a one-field `submit_decision` tool and
+forcing `ToolChoice{Type: tool, Name: "submit_decision"}`, then decoding the
+tool-call arguments — no JSON-from-free-text parsing. Evidence is rendered into
+a single user message rather than replaying the raw conversation, which keeps
+the judge call cheap and avoids provider validation of historical tool blocks.
+
+### The two helpers
+
+- `PromptStopHook(model, prompt)` — a `StopHook`. Asks whether the agent's
+  output satisfies `prompt`; if not, returns `StopDecision{Continue, Reason}`.
+  Honors `hctx.StopHookActive` (steps aside after one continuation, so it cannot
+  loop) and **fails open**: a model error is returned and logged, leaving the
+  agent free to stop.
+- `PromptToolGate(model, prompt)` — a `PreToolUseHook`. Judges the pending tool
+  call (`hctx.Call`); denies by returning an error and **fails closed**: a model
+  error denies, since a gate that allows-on-error is the worse failure. Scope it
+  with `MatchTool`.
+
+Pass a cheap model — each adds one LLM call per stop / matched tool invocation.
+
+### Future: agent-backed variant
+
+These judge from the hook's own data in one call. A planned
+`AgentStopHook(verifier *Agent, prompt)` would instead run a subagent with tools
+to verify against real state (run the test suite, read files) before deciding —
+same `{ok, reason}` contract. Pi's only structured-decision path is exactly
+this shape (a subagent run in JSON mode), which validates the approach. It
+likely belongs with `experimental/subagent`.
 
 ## Hooks Struct
 
