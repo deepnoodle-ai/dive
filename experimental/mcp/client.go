@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -79,7 +81,11 @@ func (c *Client) Connect(ctx context.Context) error {
 			if c.config.URL == "" {
 				return fmt.Errorf("url is required for http mcp server")
 			}
-			c.client, err = client.NewStreamableHttpClient(c.config.URL)
+			var opts []transport.StreamableHTTPCOption
+			if headers := buildRequestHeaders(c.config.AuthorizationToken, c.config.Headers); len(headers) > 0 {
+				opts = append(opts, transport.WithHTTPHeaders(headers))
+			}
+			c.client, err = client.NewStreamableHttpClient(c.config.URL, opts...)
 		case "stdio":
 			if c.config.Command == "" {
 				return fmt.Errorf("command is required for stdio mcp server")
@@ -137,7 +143,17 @@ func (c *Client) connectWithOAuth() error {
 		return fmt.Errorf("OAuth configuration is nil")
 	}
 	if c.tokenStore == nil {
-		c.tokenStore = client.NewMemoryTokenStore()
+		store, err := newClientTokenStore(c.oauthConfig.TokenStore)
+		if err != nil {
+			return fmt.Errorf("failed to create token store: %w", err)
+		}
+		c.tokenStore = store
+	}
+	// Custom headers are still sent on OAuth requests; the OAuth handler sets
+	// the Authorization header after custom headers, so it remains authoritative.
+	var opts []transport.StreamableHTTPCOption
+	if len(c.config.Headers) > 0 {
+		opts = append(opts, transport.WithHTTPHeaders(c.config.Headers))
 	}
 	var err error
 	c.client, err = client.NewOAuthStreamableHttpClient(c.config.URL, client.OAuthConfig{
@@ -147,7 +163,7 @@ func (c *Client) connectWithOAuth() error {
 		Scopes:       c.oauthConfig.Scopes,
 		TokenStore:   c.tokenStore,
 		PKCEEnabled:  c.oauthConfig.PKCEEnabled,
-	})
+	}, opts...)
 	return err
 }
 
@@ -211,6 +227,14 @@ func (c *Client) handleOAuthAuthorization(ctx context.Context, err error) error 
 	// Wait for authorization callback
 	params := <-callbackChan
 
+	// Surface authorization errors reported by the authorization server
+	if errCode := params["error"]; errCode != "" {
+		if desc := params["error_description"]; desc != "" {
+			return fmt.Errorf("authorization failed: %s: %s", errCode, desc)
+		}
+		return fmt.Errorf("authorization failed: %s", errCode)
+	}
+
 	if params["state"] != state {
 		return fmt.Errorf("state mismatch: expected %s, got %s", state, params["state"])
 	}
@@ -225,13 +249,34 @@ func (c *Client) handleOAuthAuthorization(ctx context.Context, err error) error 
 	return nil
 }
 
-// startCallbackServer starts a local HTTP server to handle the OAuth callback
+// startCallbackServer starts a local HTTP server to handle the OAuth callback.
+// A per-server ServeMux is used (rather than the package-global default mux)
+// so that multiple OAuth flows in the same process don't panic on duplicate
+// route registration.
 func (c *Client) startCallbackServer(callbackChan chan<- map[string]string) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/callback", oauthCallbackHandler(callbackChan))
+
 	server := &http.Server{
-		Addr: ":8085", // Use fixed port 8085
+		Addr:    ":8085", // Use fixed port 8085
+		Handler: mux,
 	}
 
-	http.HandleFunc("/oauth/callback", func(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	return server
+}
+
+// oauthCallbackHandler returns the HTTP handler for the OAuth callback
+// endpoint. It forwards the callback query parameters to callbackChan and
+// renders a success page, or an error page when the authorization server
+// reported an error via the error/error_description parameters.
+func oauthCallbackHandler(callbackChan chan<- map[string]string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract query parameters
 		params := make(map[string]string)
 		for key, values := range r.URL.Query() {
@@ -247,8 +292,30 @@ func (c *Client) startCallbackServer(callbackChan chan<- map[string]string) *htt
 			// Channel is full, ignore
 		}
 
-		// Respond to the user
 		w.Header().Set("Content-Type", "text/html")
+
+		// Render an error page if the authorization server reported an error
+		if errCode := params["error"]; errCode != "" {
+			message := html.EscapeString(errCode)
+			if desc := params["error_description"]; desc != "" {
+				message += ": " + html.EscapeString(desc)
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			if _, err := fmt.Fprintf(w, `
+			<html>
+				<body>
+					<h1>Authorization Failed</h1>
+					<p>%s</p>
+					<p>You can close this window and return to the application.</p>
+				</body>
+			</html>
+		`, message); err != nil {
+				log.Printf("Error writing response: %v", err)
+			}
+			return
+		}
+
+		// Respond to the user
 		_, err := w.Write([]byte(`
 			<html>
 				<body>
@@ -261,15 +328,7 @@ func (c *Client) startCallbackServer(callbackChan chan<- map[string]string) *htt
 		if err != nil {
 			log.Printf("Error writing response: %v", err)
 		}
-	})
-
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
-		}
-	}()
-
-	return server
+	}
 }
 
 // openBrowser opens the default browser to the specified URL
@@ -446,12 +505,12 @@ func (c *Client) IsConnected() bool {
 	return c.connected
 }
 
-// Close closes the MCP client connection
+// Close closes the MCP client connection, shutting down the underlying
+// transport (and terminating the child process for stdio servers).
 func (c *Client) Close() error {
-	if c.client != nil && c.connected {
-		c.connected = false
-		// Note: The mcp-go client doesn't seem to have a Close method
-		// This might need to be updated based on the actual API
+	c.connected = false
+	if c.client != nil {
+		return c.client.Close()
 	}
 	return nil
 }

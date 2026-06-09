@@ -1,12 +1,15 @@
 package mcp
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/mark3labs/mcp-go/client/transport"
 )
 
 func TestNewFileOAuthTokenStore(t *testing.T) {
@@ -291,4 +294,122 @@ func TestFileOAuthTokenStore_AtomicWrites(t *testing.T) {
 		}
 	}
 	assert.Empty(t, tmpFiles, "Should not leave temporary files behind")
+}
+
+func TestNewClientTokenStore(t *testing.T) {
+	t.Run("nil config returns memory store", func(t *testing.T) {
+		store, err := newClientTokenStore(nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, store)
+	})
+
+	t.Run("memory type", func(t *testing.T) {
+		store, err := newClientTokenStore(&TokenStore{Type: "memory"})
+		assert.NoError(t, err)
+		assert.NotNil(t, store)
+	})
+
+	t.Run("empty type defaults to memory", func(t *testing.T) {
+		store, err := newClientTokenStore(&TokenStore{})
+		assert.NoError(t, err)
+		assert.NotNil(t, store)
+	})
+
+	t.Run("file type", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "token.json")
+		store, err := newClientTokenStore(&TokenStore{Type: "file", Path: path})
+		assert.NoError(t, err)
+		assert.NotNil(t, store)
+	})
+
+	t.Run("file type without path", func(t *testing.T) {
+		store, err := newClientTokenStore(&TokenStore{Type: "file"})
+		assert.Error(t, err)
+		assert.Nil(t, store)
+	})
+
+	t.Run("keychain type unsupported", func(t *testing.T) {
+		store, err := newClientTokenStore(&TokenStore{Type: "keychain"})
+		assert.Error(t, err)
+		assert.Nil(t, store)
+		assert.Contains(t, err.Error(), "keychain")
+	})
+
+	t.Run("unknown type", func(t *testing.T) {
+		store, err := newClientTokenStore(&TokenStore{Type: "bogus"})
+		assert.Error(t, err)
+		assert.Nil(t, store)
+		assert.Contains(t, err.Error(), "bogus")
+	})
+}
+
+func TestClientTokenStoreAdapter_RoundTrip(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "token.json")
+	store, err := newClientTokenStore(&TokenStore{Type: "file", Path: path})
+	assert.NoError(t, err)
+
+	// Empty store reports the mcp-go sentinel error
+	_, err = store.GetToken(ctx)
+	assert.True(t, errors.Is(err, transport.ErrNoToken))
+
+	expiresAt := time.Now().Add(time.Hour)
+	err = store.SaveToken(ctx, &transport.Token{
+		AccessToken:  "access-123",
+		RefreshToken: "refresh-456",
+		TokenType:    "Bearer",
+		Scope:        "mcp.read",
+		ExpiresAt:    expiresAt,
+	})
+	assert.NoError(t, err)
+
+	token, err := store.GetToken(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, "access-123", token.AccessToken)
+	assert.Equal(t, "refresh-456", token.RefreshToken)
+	assert.Equal(t, "Bearer", token.TokenType)
+	assert.Equal(t, "mcp.read", token.Scope)
+	assert.True(t, token.ExpiresAt.Equal(expiresAt))
+
+	// Tokens survive process restarts: a fresh store reads the same file
+	store2, err := newClientTokenStore(&TokenStore{Type: "file", Path: path})
+	assert.NoError(t, err)
+	token2, err := store2.GetToken(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, "access-123", token2.AccessToken)
+}
+
+func TestClientTokenStoreAdapter_ExpiresInFallback(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "token.json")
+	store, err := newClientTokenStore(&TokenStore{Type: "file", Path: path})
+	assert.NoError(t, err)
+
+	before := time.Now()
+	err = store.SaveToken(ctx, &transport.Token{
+		AccessToken: "access-123",
+		TokenType:   "Bearer",
+		ExpiresIn:   3600,
+	})
+	assert.NoError(t, err)
+
+	token, err := store.GetToken(ctx)
+	assert.NoError(t, err)
+	assert.False(t, token.ExpiresAt.IsZero())
+	assert.True(t, token.ExpiresAt.After(before.Add(59*time.Minute)))
+}
+
+func TestClientTokenStoreAdapter_ContextCancelled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token.json")
+	store, err := newClientTokenStore(&TokenStore{Type: "file", Path: path})
+	assert.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = store.GetToken(ctx)
+	assert.True(t, errors.Is(err, context.Canceled))
+
+	err = store.SaveToken(ctx, &transport.Token{AccessToken: "x"})
+	assert.True(t, errors.Is(err, context.Canceled))
 }
