@@ -1,6 +1,9 @@
 package openaicompletions
 
-import "github.com/deepnoodle-ai/wonton/schema"
+import (
+	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/wonton/schema"
+)
 
 type ReasoningEffort string
 
@@ -80,9 +83,41 @@ type Choice struct {
 }
 
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
+}
+
+// PromptTokensDetails breaks down the prompt token count. CachedTokens is the
+// portion of prompt_tokens served from the prompt cache (a subset of
+// PromptTokens, not additive).
+type PromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// CompletionTokensDetails breaks down the completion token count.
+// ReasoningTokens is the portion of completion_tokens spent on reasoning (a
+// subset of CompletionTokens, not additive).
+type CompletionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// toLLMUsage converts wire usage to llm.Usage, carrying cache and reasoning
+// token detail when the server reports it.
+func (u Usage) toLLMUsage() llm.Usage {
+	usage := llm.Usage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+	}
+	if u.PromptTokensDetails != nil {
+		usage.CacheReadInputTokens = u.PromptTokensDetails.CachedTokens
+	}
+	if u.CompletionTokensDetails != nil {
+		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+	return usage
 }
 
 // {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1694268190,"model":"gpt-4o-mini", "system_fingerprint": "fp_44709d6fcb", "choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}]}

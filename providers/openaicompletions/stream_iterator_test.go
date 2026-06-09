@@ -157,3 +157,29 @@ func TestStreamIteratorUsageOnFinishChunk(t *testing.T) {
 	assert.Equal(t, 5, response.Usage.InputTokens)
 	assert.Equal(t, 2, response.Usage.OutputTokens)
 }
+
+// TestStreamIteratorUsageDetails verifies that cached prompt tokens and
+// reasoning tokens reported in the trailing usage chunk are carried into
+// llm.Usage.
+func TestStreamIteratorUsageDetails(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl-5","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`,
+		``,
+		`data: {"id":"chatcmpl-5","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: {"id":"chatcmpl-5","object":"chat.completion.chunk","model":"gpt-5","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":80},"completion_tokens_details":{"reasoning_tokens":30}}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	iterator := newTestStreamIterator(body)
+	defer iterator.Close()
+	_, accumulator := collectEvents(t, iterator)
+
+	response := accumulator.Response()
+	assert.Equal(t, 100, response.Usage.InputTokens)
+	assert.Equal(t, 50, response.Usage.OutputTokens)
+	assert.Equal(t, 80, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 30, response.Usage.ReasoningTokens)
+}

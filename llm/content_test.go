@@ -661,13 +661,14 @@ func TestWebSearchToolResultContent(t *testing.T) {
 				expected: `{"type":"web_search_tool_result","tool_use_id":"srvtool_123","content":[{"type":"web_search_result","url":"https://example.com/page1","title":"Example Page 1","encrypted_content":"encrypted123","page_age":"April 30, 2025"},{"type":"web_search_result","url":"https://example.com/page2","title":"Example Page 2","encrypted_content":"encrypted456","page_age":"May 1, 2025"}]}`,
 			},
 			{
+				// Errors encode as the API's error-object content variant
 				name: "with error code",
 				content: &WebSearchToolResultContent{
 					ToolUseID: "srvtool_123",
 					Content:   []*WebSearchResult{},
 					ErrorCode: "max_uses_exceeded",
 				},
-				expected: `{"type":"web_search_tool_result","tool_use_id":"srvtool_123","content":[],"error_code":"max_uses_exceeded"}`,
+				expected: `{"type":"web_search_tool_result","tool_use_id":"srvtool_123","content":{"type":"web_search_tool_result_error","error_code":"max_uses_exceeded"}}`,
 			},
 		}
 
@@ -1044,5 +1045,130 @@ func TestMCPContentTypes(t *testing.T) {
 			assert.Equal(t, "enhanced_tool", parsedList.Tools[0].Name)
 			assert.NotNil(t, parsedList.Tools[0].InputSchema)
 		})
+	})
+}
+
+func TestWebSearchToolResultContentUnmarshal(t *testing.T) {
+	t.Run("results array variant", func(t *testing.T) {
+		data := []byte(`{
+			"type": "web_search_tool_result",
+			"tool_use_id": "srvtoolu_01WYG3ziw53XMcoyKL4XcZmE",
+			"content": [
+				{
+					"type": "web_search_result",
+					"url": "https://en.wikipedia.org/wiki/Claude_Shannon",
+					"title": "Claude Shannon - Wikipedia",
+					"encrypted_content": "EqgfCioIARgBIiQ3YTAwMjY1Mi1mZjM5",
+					"page_age": "April 30, 2025"
+				}
+			]
+		}`)
+		content, err := UnmarshalContent(data)
+		assert.NoError(t, err)
+		result, ok := content.(*WebSearchToolResultContent)
+		assert.True(t, ok)
+		assert.Equal(t, "srvtoolu_01WYG3ziw53XMcoyKL4XcZmE", result.ToolUseID)
+		assert.Equal(t, "", result.ErrorCode)
+		assert.Len(t, result.Content, 1)
+		assert.Equal(t, "https://en.wikipedia.org/wiki/Claude_Shannon", result.Content[0].URL)
+		assert.Equal(t, "Claude Shannon - Wikipedia", result.Content[0].Title)
+	})
+
+	t.Run("error object variant", func(t *testing.T) {
+		data := []byte(`{
+			"type": "web_search_tool_result",
+			"tool_use_id": "servertoolu_a93jad",
+			"content": {
+				"type": "web_search_tool_result_error",
+				"error_code": "max_uses_exceeded"
+			}
+		}`)
+		content, err := UnmarshalContent(data)
+		assert.NoError(t, err)
+		result, ok := content.(*WebSearchToolResultContent)
+		assert.True(t, ok)
+		assert.Equal(t, "servertoolu_a93jad", result.ToolUseID)
+		assert.Equal(t, "max_uses_exceeded", result.ErrorCode)
+		assert.Len(t, result.Content, 0)
+	})
+
+	t.Run("error variant does not fail whole response decode", func(t *testing.T) {
+		data := []byte(`{
+			"id": "msg_123",
+			"type": "message",
+			"role": "assistant",
+			"model": "claude-opus-4-8",
+			"content": [
+				{"type": "text", "text": "Let me search for that."},
+				{
+					"type": "web_search_tool_result",
+					"tool_use_id": "servertoolu_a93jad",
+					"content": {
+						"type": "web_search_tool_result_error",
+						"error_code": "unavailable"
+					}
+				}
+			],
+			"stop_reason": "end_turn"
+		}`)
+		var response Response
+		err := json.Unmarshal(data, &response)
+		assert.NoError(t, err)
+		assert.Len(t, response.Content, 2)
+		result, ok := response.Content[1].(*WebSearchToolResultContent)
+		assert.True(t, ok)
+		assert.Equal(t, "unavailable", result.ErrorCode)
+	})
+}
+
+func TestWebSearchToolResultContentRoundTrip(t *testing.T) {
+	t.Run("results array variant", func(t *testing.T) {
+		original := &WebSearchToolResultContent{
+			ToolUseID: "srvtoolu_123",
+			Content: []*WebSearchResult{
+				{
+					Type:             "web_search_result",
+					URL:              "https://example.com",
+					Title:            "Example",
+					EncryptedContent: "abc123",
+					PageAge:          "May 1, 2026",
+				},
+			},
+		}
+		data, err := json.Marshal(original)
+		assert.NoError(t, err)
+		decoded, err := UnmarshalContent(data)
+		assert.NoError(t, err)
+		result, ok := decoded.(*WebSearchToolResultContent)
+		assert.True(t, ok)
+		assert.Equal(t, original.ToolUseID, result.ToolUseID)
+		assert.Equal(t, "", result.ErrorCode)
+		assert.Len(t, result.Content, 1)
+		assert.Equal(t, original.Content[0].URL, result.Content[0].URL)
+		assert.Equal(t, original.Content[0].EncryptedContent, result.Content[0].EncryptedContent)
+	})
+
+	t.Run("error variant", func(t *testing.T) {
+		original := &WebSearchToolResultContent{
+			ToolUseID: "srvtoolu_456",
+			ErrorCode: "max_uses_exceeded",
+		}
+		data, err := json.Marshal(original)
+		assert.NoError(t, err)
+		// The error encodes as the nested error-object content variant
+		var raw map[string]any
+		assert.NoError(t, json.Unmarshal(data, &raw))
+		contentObj, ok := raw["content"].(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "web_search_tool_result_error", contentObj["type"])
+		assert.Equal(t, "max_uses_exceeded", contentObj["error_code"])
+
+		decoded, err := UnmarshalContent(data)
+		assert.NoError(t, err)
+		result, ok := decoded.(*WebSearchToolResultContent)
+		assert.True(t, ok)
+		assert.Equal(t, original.ToolUseID, result.ToolUseID)
+		assert.Equal(t, original.ErrorCode, result.ErrorCode)
+		assert.Len(t, result.Content, 0)
 	})
 }

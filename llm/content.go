@@ -653,6 +653,12 @@ type WebSearchResult struct {
 }
 
 // WebSearchToolResultContent contains the results of a server-side web search tool call.
+//
+// The API returns "content" in one of two shapes: an array of web search
+// results on success, or an error object
+// ({"type": "web_search_tool_result_error", "error_code": "..."}) when the
+// server-side search failed. On error, ErrorCode is populated and Content is
+// empty.
 type WebSearchToolResultContent struct {
 	ToolUseID string             `json:"tool_use_id"`
 	Content   []*WebSearchResult `json:"content"`
@@ -663,7 +669,30 @@ func (c *WebSearchToolResultContent) Type() ContentType {
 	return ContentTypeWebSearchToolResult
 }
 
+// webSearchToolResultError is the error-object variant of the "content" field
+// in a web_search_tool_result block.
+type webSearchToolResultError struct {
+	Type      string `json:"type"`
+	ErrorCode string `json:"error_code"`
+}
+
 func (c *WebSearchToolResultContent) MarshalJSON() ([]byte, error) {
+	// Round-trip symmetry with the wire format: when the result is an error,
+	// encode the error-object content variant rather than an array.
+	if c.ErrorCode != "" && len(c.Content) == 0 {
+		return json.Marshal(struct {
+			Type      ContentType              `json:"type"`
+			ToolUseID string                   `json:"tool_use_id"`
+			Content   webSearchToolResultError `json:"content"`
+		}{
+			Type:      ContentTypeWebSearchToolResult,
+			ToolUseID: c.ToolUseID,
+			Content: webSearchToolResultError{
+				Type:      "web_search_tool_result_error",
+				ErrorCode: c.ErrorCode,
+			},
+		})
+	}
 	type Alias WebSearchToolResultContent
 	return json.Marshal(struct {
 		Type ContentType `json:"type"`
@@ -672,6 +701,42 @@ func (c *WebSearchToolResultContent) MarshalJSON() ([]byte, error) {
 		Type:  ContentTypeWebSearchToolResult,
 		Alias: (*Alias)(c),
 	})
+}
+
+// UnmarshalJSON accepts both documented variants of the "content" field: an
+// array of web search results, or an error object whose error_code is
+// surfaced via ErrorCode.
+func (c *WebSearchToolResultContent) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ToolUseID string          `json:"tool_use_id"`
+		Content   json.RawMessage `json:"content"`
+		ErrorCode string          `json:"error_code"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.ToolUseID = raw.ToolUseID
+	c.ErrorCode = raw.ErrorCode
+	c.Content = nil
+	content := bytes.TrimSpace(raw.Content)
+	if len(content) == 0 || bytes.Equal(content, []byte("null")) {
+		return nil
+	}
+	switch content[0] {
+	case '[':
+		return json.Unmarshal(content, &c.Content)
+	case '{':
+		var errObj webSearchToolResultError
+		if err := json.Unmarshal(content, &errObj); err != nil {
+			return err
+		}
+		if errObj.ErrorCode != "" {
+			c.ErrorCode = errObj.ErrorCode
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected web_search_tool_result content: %s", content)
+	}
 }
 
 //// ThinkingContent ///////////////////////////////////////////////////////////

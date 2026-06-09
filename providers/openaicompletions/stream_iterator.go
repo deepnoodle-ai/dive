@@ -154,10 +154,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				Role:    llm.Assistant,
 				Model:   s.responseModel,
 				Content: []llm.Content{},
-				Usage: llm.Usage{
-					InputTokens:  s.usage.PromptTokens,
-					OutputTokens: s.usage.CompletionTokens,
-				},
+				Usage:   s.usage.toLLMUsage(),
 			},
 		})
 	}
@@ -376,8 +373,7 @@ func (s *StreamIterator) flushFinalEvents() []*llm.Event {
 	s.finalEvents = nil
 	for _, event := range events {
 		if event.Type == llm.EventTypeMessageDelta && event.Usage != nil {
-			event.Usage.InputTokens = s.usage.PromptTokens
-			event.Usage.OutputTokens = s.usage.CompletionTokens
+			*event.Usage = s.usage.toLLMUsage()
 		}
 	}
 	return events
