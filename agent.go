@@ -240,6 +240,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		opts.Hooks.Stop = append(opts.Hooks.Stop, extHooks.Stop...)
 		opts.Hooks.PreIteration = append(opts.Hooks.PreIteration, extHooks.PreIteration...)
 		opts.Hooks.OnSuspend = append(opts.Hooks.OnSuspend, extHooks.OnSuspend...)
+		opts.Hooks.PostBackgroundToolUse = append(opts.Hooks.PostBackgroundToolUse, extHooks.PostBackgroundToolUse...)
 		if rules := ext.Rules(); rules != "" {
 			opts.SystemPrompt = strings.TrimRight(opts.SystemPrompt, "\n") + "\n\n" + rules
 		}
@@ -622,9 +623,15 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		}
 		// Execute not-started tool calls, if any.
 		if len(rs.NotStartedToolCalls) > 0 {
+			// The mutex guards the append: during parallel tool execution,
+			// tool goroutines invoke this callback for stream/progress
+			// events concurrently with the drain loop in the main goroutine.
 			var resumeItems []*ResponseItem
+			var resumeItemsMu sync.Mutex
 			resumeCallback := func(ctx context.Context, item *ResponseItem) error {
+				resumeItemsMu.Lock()
 				resumeItems = append(resumeItems, item)
+				resumeItemsMu.Unlock()
 				return eventCallback(ctx, item)
 			}
 			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback)
@@ -668,12 +675,22 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// LLM sees the results in its next turn. Happens once before the first
 	// generate() call; Stop-hook re-entries skip this block.
 	if len(options.BackgroundHandles) > 0 && options.BackgroundResults != nil {
+		preInjectLen := len(messages)
 		var injErr error
 		messages, injErr = a.injectBackgroundResults(ctx, hctx, messages, options.BackgroundHandles, options.BackgroundResults)
 		if injErr != nil {
 			return nil, injErr
 		}
 		hctx.Messages = messages
+		// The injected synthetic user message must also be part of the
+		// persisted turn: the session save below builds the turn from
+		// inputMessages + response.OutputMessages, so without this the
+		// saved history would pair two consecutive assistant messages and
+		// permanently lose the background results. Clone before appending
+		// so the caller's options.Messages backing array is not mutated.
+		if injected := messages[preInjectLen:]; len(injected) > 0 {
+			inputMessages = append(slices.Clone(inputMessages), injected...)
+		}
 	}
 
 generateLoop:
@@ -1342,7 +1359,13 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 		// Propagate hook mutations back into the caller-supplied result and
 		// the merged tool_result message, mirroring the normal execution path
 		// in executeOneToolCall which reads postHctx.Result and
-		// postHctx.AdditionalContext after hooks fire.
+		// postHctx.AdditionalContext after hooks fire. Hooks may modify or
+		// replace results but may not delete them — a missing result would
+		// orphan the tool_use block (no paired tool_result) — so restore the
+		// original if a hook set Result to nil.
+		if postHctx.Result == nil {
+			postHctx.Result = result
+		}
 		result = postHctx.Result
 		rs.CallerSupplied[toolUseID] = result
 
@@ -1447,9 +1470,15 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	// Background task handles collected across all tool batches
 	var backgroundTasks []*BackgroundTaskHandle
 
-	// Wrap callback to collect all items
+	// Wrap callback to collect all items. The mutex guards the append:
+	// during parallel tool execution, tool goroutines invoke this callback
+	// for stream/progress events concurrently with the drain loop in the
+	// main goroutine.
+	var itemsMu sync.Mutex
 	collectingCallback := func(ctx context.Context, item *ResponseItem) error {
+		itemsMu.Lock()
 		items = append(items, item)
+		itemsMu.Unlock()
 		return callback(ctx, item)
 	}
 
@@ -1995,6 +2024,13 @@ func (a *Agent) executeToolCallsParallel(
 			}
 		}
 
+		// Use potentially modified result from hooks. Hooks may modify or
+		// replace results but may not delete them — a missing result would
+		// orphan the tool_use block (no paired tool_result) and break the
+		// next LLM call — so restore the original if a hook set Result to nil.
+		if postHctx.Result == nil {
+			postHctx.Result = result
+		}
 		result = postHctx.Result
 
 		// Re-attach background handle after hooks.
@@ -2180,7 +2216,13 @@ func (a *Agent) executeOneToolCall(
 		}
 	}
 
-	// Use potentially modified result from hooks
+	// Use potentially modified result from hooks. Hooks may modify or
+	// replace results but may not delete them — a missing result would
+	// orphan the tool_use block (no paired tool_result) and break the next
+	// LLM call — so restore the original if a hook set Result to nil.
+	if postHctx.Result == nil {
+		postHctx.Result = result
+	}
 	result = postHctx.Result
 
 	// Re-attach the background handle after hooks (hooks may have replaced

@@ -1148,6 +1148,128 @@ func TestPostToolUseHookIntegration(t *testing.T) {
 		}
 		t.Fatal("expected to find a tool call result item")
 	})
+
+	t.Run("hook setting Result to nil restores original result", func(t *testing.T) {
+		// Hooks may modify or replace results but may not delete them. A
+		// hook that nils hctx.Result must not panic the agent or orphan the
+		// tool_use block — the original result is restored.
+		tool := &mockTool{
+			name: "test_tool",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				return NewToolResultText("tool output"), nil
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model: newToolCallingMockLLM("test_tool"),
+			Tools: []Tool{tool},
+			Hooks: Hooks{
+				PostToolUse: []PostToolUseHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						hctx.Result = nil
+						hctx.AdditionalContext = "post-hook context"
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use the tool"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+		assertToolResultPaired(t, resp, "tool_1", "tool output")
+	})
+
+	t.Run("hook setting Result to nil restores original result (parallel)", func(t *testing.T) {
+		makeTool := func(name string) Tool {
+			return &mockTool{
+				name: name,
+				callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+					return NewToolResultText(name + " output"), nil
+				},
+			}
+		}
+
+		callCount := 0
+		mock := &mockLLM{
+			nameFunc: func() string { return "test-model" },
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{ID: "tool_1", Name: "tool_a", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "tool_2", Name: "tool_b", Input: []byte(`{}`)},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:                 mock,
+			Tools:                 []Tool{makeTool("tool_a"), makeTool("tool_b")},
+			ParallelToolExecution: true,
+			Hooks: Hooks{
+				PostToolUse: []PostToolUseHook{
+					func(ctx context.Context, hctx *HookContext) error {
+						hctx.Result = nil
+						hctx.AdditionalContext = "post-hook context"
+						return nil
+					},
+				},
+			},
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use both tools"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+		assertToolResultPaired(t, resp, "tool_1", "tool_a output")
+		assertToolResultPaired(t, resp, "tool_2", "tool_b output")
+	})
+}
+
+// assertToolResultPaired asserts that the response's output messages contain
+// a tool_result block for the given tool_use ID carrying the expected text,
+// i.e. the tool_use block was not orphaned.
+func assertToolResultPaired(t *testing.T, resp *Response, toolUseID, expectedText string) {
+	t.Helper()
+	for _, msg := range resp.OutputMessages {
+		for _, c := range msg.Content {
+			trc, ok := c.(*llm.ToolResultContent)
+			if !ok || trc.ToolUseID != toolUseID {
+				continue
+			}
+			blocks, ok := trc.Content.([]*ToolResultContent)
+			assert.True(t, ok, "tool_result content should be []*ToolResultContent")
+			found := false
+			for _, b := range blocks {
+				if b.Text == expectedText {
+					found = true
+				}
+			}
+			assert.True(t, found, "tool_result for %q should carry text %q", toolUseID, expectedText)
+			return
+		}
+	}
+	t.Fatalf("no tool_result block found for tool_use %q", toolUseID)
 }
 
 func TestPostToolUseFailureHookIntegration(t *testing.T) {
