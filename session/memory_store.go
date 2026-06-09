@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -71,13 +72,20 @@ func (s *MemoryStore) List(ctx context.Context, opts *ListOptions) (*ListResult,
 			sess.mu.RUnlock()
 			continue
 		}
+		// Copy metadata so the returned info neither races with
+		// SetMetadata nor lets callers mutate the live session map.
+		var metadata map[string]any
+		if sess.data.Metadata != nil {
+			metadata = make(map[string]any, len(sess.data.Metadata))
+			maps.Copy(metadata, sess.data.Metadata)
+		}
 		info := &SessionInfo{
 			ID:         sess.data.ID,
 			Title:      sess.data.Title,
 			CreatedAt:  sess.data.CreatedAt,
 			UpdatedAt:  sess.data.UpdatedAt,
 			EventCount: len(sess.data.Events),
-			Metadata:   sess.data.Metadata,
+			Metadata:   metadata,
 			Suspended:  suspended,
 		}
 		sess.mu.RUnlock()

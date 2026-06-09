@@ -2,10 +2,12 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -58,6 +60,12 @@ var ErrInvalidSessionID = errors.New("invalid session ID")
 // loss between commit and the kernel flush can lose the most recent
 // completed turn. For most workloads this trade-off is correct — fsync
 // on every append costs a disk round-trip per message.
+//
+// Because appends are not atomic, a crash mid-append can also leave a
+// torn partial line at the end of the file. Open tolerates this: the
+// corrupt trailing line is dropped (consistent with the contract above
+// that the most recent turn may be lost) and the file is rewritten to
+// heal it. Corruption anywhere else in the file is treated as fatal.
 //
 // Callers who need power-loss durability for every turn can opt in by
 // constructing the store with NewFileStoreWithSync(dir, true). When
@@ -151,7 +159,7 @@ func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := s.readSession(id)
+	data, torn, err := s.readSession(id)
 	if err != nil {
 		if err != ErrNotFound {
 			return nil, err
@@ -166,6 +174,13 @@ func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
 		if err := s.writeSession(data); err != nil {
 			return nil, err
 		}
+	} else if torn {
+		// A torn trailing line (crash mid-append) was dropped during the
+		// read. Heal the file now so a future append cannot concatenate
+		// onto the garbage and turn it into fatal mid-file corruption.
+		if err := s.writeSession(data); err != nil {
+			return nil, err
+		}
 	}
 	return &Session{
 		data:     data,
@@ -174,6 +189,11 @@ func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
 }
 
 func (s *FileStore) Put(ctx context.Context, sess *Session) error {
+	// Lock order: session first, store second. This matches SaveTurn and
+	// the suspend/resume paths, which hold the session lock while
+	// appendEvent/putSession take the store lock. Do NOT invert.
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
 	if err := validateID(sess.data.ID); err != nil {
 		return err
 	}
@@ -204,7 +224,7 @@ func (s *FileStore) List(ctx context.Context, opts *ListOptions) (*ListResult, e
 			continue
 		}
 		id := strings.TrimSuffix(entry.Name(), ".jsonl")
-		data, err := s.readSession(id)
+		data, _, err := s.readSession(id)
 		if err != nil {
 			continue
 		}
@@ -304,55 +324,97 @@ func (s *FileStore) putSession(ctx context.Context, data *sessionData) error {
 
 // readSession parses a JSONL file into sessionData. Must be called with at
 // least a read lock held.
-func (s *FileStore) readSession(id string) (*sessionData, error) {
+//
+// The torn return value reports that a corrupt trailing line — the signature
+// of a crash mid-append — was dropped; callers holding the write lock should
+// rewrite the file to heal it.
+func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err error) {
 	p, err := s.path(id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	f, err := os.Open(p)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, ErrNotFound
+			return nil, false, ErrNotFound
 		}
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// Read line-by-line with bufio.Reader rather than bufio.Scanner so
+	// there is no cap on line length — appendEvent places no limit on
+	// event size, so an oversized event must remain readable.
+	r := bufio.NewReader(f)
 
 	var header sessionHeader
 	var events []*event
 	first := true
 
-	for scanner.Scan() {
+	parseLine := func(b []byte) error {
 		var line jsonlLine
-		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
-			return nil, err
+		if err := json.Unmarshal(b, &line); err != nil {
+			return err
 		}
 		switch line.LineType {
 		case "header":
 			if err := json.Unmarshal(line.Data, &header); err != nil {
-				return nil, err
+				return err
 			}
-			first = false
 		case "event":
 			var evt event
 			if err := json.Unmarshal(line.Data, &evt); err != nil {
-				return nil, err
+				return err
 			}
 			events = append(events, &evt)
 		default:
 			if first {
-				return nil, ErrNotFound
+				// Deliberately NOT ErrNotFound: Open treats ErrNotFound as
+				// "create a fresh session", which would overwrite the
+				// existing (unrecognized) file.
+				return fmt.Errorf("session file %s: unrecognized first line type %q", p, line.LineType)
 			}
+			// Unknown line types after the header are skipped for forward
+			// compatibility.
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
+		first = false
+		return nil
 	}
 
-	data := &sessionData{
+	// parseFailure defers a parse error until we know whether more content
+	// follows. appendEvent is not atomic, so a crash mid-append can leave a
+	// torn partial line at the end of the file. A corrupt final line (other
+	// than the header) is dropped — the documented append durability
+	// contract already allows losing the most recent turn. Corruption
+	// anywhere else in the file is fatal.
+	var parseFailure error
+
+	for {
+		raw, readErr := r.ReadBytes('\n')
+		if line := bytes.TrimSuffix(raw, []byte{'\n'}); len(line) > 0 {
+			if parseFailure != nil {
+				// The bad line was followed by more content, so it is not
+				// a torn final append — treat it as real corruption.
+				return nil, false, parseFailure
+			}
+			if err := parseLine(line); err != nil {
+				if first {
+					// A corrupt header line is never a torn append: the
+					// header is always written atomically by writeSession.
+					return nil, false, err
+				}
+				parseFailure = err
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, false, readErr
+		}
+	}
+
+	data = &sessionData{
 		ID:                 header.ID,
 		Title:              header.Title,
 		CreatedAt:          header.CreatedAt,
@@ -376,7 +438,7 @@ func (s *FileStore) readSession(id string) (*sessionData, error) {
 		}
 	}
 
-	return data, nil
+	return data, parseFailure != nil, nil
 }
 
 // writeSession writes a complete session as a JSONL file (header + events).
