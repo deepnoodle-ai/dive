@@ -16,6 +16,8 @@ type modelInfo struct {
 // More specific patterns must appear before broader ones.
 var modelCatalog = []modelInfo{
 	// Anthropic models
+	{"claude-fable-5", "Fable 5", 1_000_000},
+	{"claude-mythos-5", "Mythos 5", 1_000_000},
 	{"claude-opus-4-8", "Opus 4.8", 1_000_000},
 	{"claude-opus-4-7", "Opus 4.7", 1_000_000},
 	{"claude-opus-4-6", "Opus 4.6", 1_000_000},
@@ -133,7 +135,8 @@ var providerCatalog = []providerInfo{
 		Name:    "Anthropic",
 		EnvVars: []string{"ANTHROPIC_API_KEY"},
 		Models: []modelChoice{
-			{"claude-opus-4-8", "Opus 4.8", "Most capable for complex work"},
+			{"claude-fable-5", "Fable 5", "Most capable for demanding reasoning and long-horizon work"},
+			{"claude-opus-4-8", "Opus 4.8", "Most capable Opus-tier model for complex work"},
 			{"claude-sonnet-4-6", "Sonnet 4.6", "Best for everyday tasks"},
 			{"claude-haiku-4-5", "Haiku 4.5", "Fastest for quick answers"},
 		},
