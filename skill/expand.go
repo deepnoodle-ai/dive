@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -53,6 +54,17 @@ var shellPattern = regexp.MustCompile(`!\{([^}]+)\}`)
 //   - $1, $2, ..., $9 — positional arguments
 //   - !{command} — shell command substitution (requires WithShellExpansion(true))
 //
+// Security: shell expansion runs against the raw template only, before any
+// argument substitution. Arguments are model-controlled, so a !{...} sequence
+// carried in args is never executed — it appears as literal text in the
+// output. Shell command output is likewise inserted verbatim and never
+// re-scanned for !{...} or $N placeholders.
+//
+// Template authors can still reference arguments inside a !{command} block:
+// $1-$9 are passed to the shell as positional parameters and the full
+// argument string is exported as $ARGUMENTS in the environment, so the shell
+// receives argument values as data rather than as spliced command text.
+//
 // Returns the expanded instructions text.
 func (s *Skill) Expand(ctx context.Context, args string, opts ...ExpandOption) (string, error) {
 	cfg := defaultExpandConfig()
@@ -60,32 +72,41 @@ func (s *Skill) Expand(ctx context.Context, args string, opts ...ExpandOption) (
 		opt(cfg)
 	}
 
-	result := s.expandVariables(args)
-
-	if cfg.allowShellExpansion {
-		var expandErr error
-		result = shellPattern.ReplaceAllStringFunc(result, func(match string) string {
-			if expandErr != nil {
-				return match
-			}
-			submatch := shellPattern.FindStringSubmatch(match)
-			if len(submatch) < 2 {
-				return match
-			}
-			cmd := submatch[1]
-			output, err := runShellCommand(ctx, cmd, cfg.shellTimeout)
-			if err != nil {
-				expandErr = fmt.Errorf("shell expansion !{%s}: %w", cmd, err)
-				return match
-			}
-			return strings.TrimSpace(output)
-		})
-		if expandErr != nil {
-			return result, expandErr
-		}
+	if !cfg.allowShellExpansion {
+		return s.expandVariables(args), nil
 	}
 
-	return result, nil
+	positionalArgs := strings.Fields(args)
+	var sb strings.Builder
+	var expandErr error
+	last := 0
+	for _, loc := range shellPattern.FindAllStringSubmatchIndex(s.Instructions, -1) {
+		// Literal template text before the !{...} block: substitute args.
+		sb.WriteString(substituteArgs(s.Instructions[last:loc[0]], args, positionalArgs))
+		match := s.Instructions[loc[0]:loc[1]]
+		command := s.Instructions[loc[2]:loc[3]]
+		last = loc[1]
+		if expandErr != nil {
+			sb.WriteString(match)
+			continue
+		}
+		output, err := runShellCommand(ctx, command, args, positionalArgs, cfg.shellTimeout)
+		if err != nil {
+			expandErr = fmt.Errorf("shell expansion !{%s}: %w", command, err)
+			sb.WriteString(match)
+			continue
+		}
+		// Insert command output verbatim — never re-scanned for
+		// placeholders, so output cannot trigger further expansion.
+		sb.WriteString(strings.TrimSpace(output))
+	}
+	// Remaining literal template text after the last !{...} block.
+	sb.WriteString(substituteArgs(s.Instructions[last:], args, positionalArgs))
+
+	if expandErr != nil {
+		return sb.String(), expandErr
+	}
+	return sb.String(), nil
 }
 
 // ExpandArguments replaces $ARGUMENTS and $1-$9 placeholders only (no shell).
@@ -96,11 +117,15 @@ func (s *Skill) ExpandArguments(args string) string {
 
 // expandVariables handles $ARGUMENTS and positional $N substitution.
 func (s *Skill) expandVariables(argsString string) string {
-	positionalArgs := strings.Fields(argsString)
-	result := s.Instructions
+	return substituteArgs(s.Instructions, argsString, strings.Fields(argsString))
+}
 
+// substituteArgs replaces $1-$9 positional placeholders and $ARGUMENTS in the
+// given text. It performs plain text substitution and must never be applied
+// to text that will subsequently be shell-expanded.
+func substituteArgs(text, argsString string, positionalArgs []string) string {
 	// Replace positional arguments $1, $2, etc.
-	result = positionalArgPattern.ReplaceAllStringFunc(result, func(match string) string {
+	result := positionalArgPattern.ReplaceAllStringFunc(text, func(match string) string {
 		var num int
 		fmt.Sscanf(match, "$%d", &num)
 		if num > 0 && num <= len(positionalArgs) {
@@ -116,11 +141,18 @@ func (s *Skill) expandVariables(argsString string) string {
 }
 
 // runShellCommand executes a command with the user's shell and returns stdout.
-func runShellCommand(ctx context.Context, command string, timeout time.Duration) (string, error) {
+// Skill arguments are passed as data, not code: positional args become shell
+// positional parameters ($1, $2, ...) and the full argument string is
+// exported as $ARGUMENTS, so the command can reference them without the
+// argument text ever being interpreted as shell syntax.
+func runShellCommand(ctx context.Context, command, argsString string, positionalArgs []string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	// "skill" is $0; positional args follow as $1, $2, ...
+	shellArgs := append([]string{"-c", command, "skill"}, positionalArgs...)
+	cmd := exec.CommandContext(ctx, "sh", shellArgs...)
+	cmd.Env = append(os.Environ(), "ARGUMENTS="+argsString)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

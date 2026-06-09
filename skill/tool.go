@@ -96,7 +96,9 @@ func (t *toolImpl) Call(ctx context.Context, input *ToolInput) (*dive.ToolResult
 		return dive.NewToolResultError("skill name is required"), nil
 	}
 
-	s, ok := t.loader.Get(input.Skill)
+	// Resolve through the skills-only lookup: commands (user-invocable only)
+	// are hidden from the model's catalog and must not be invocable here.
+	s, ok := t.loader.GetSkill(input.Skill)
 	if !ok {
 		// Only list agent-invocable skills (not commands) in error
 		skillNames := make([]string, 0)

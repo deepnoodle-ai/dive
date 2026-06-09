@@ -2,6 +2,8 @@ package skill
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
@@ -460,4 +462,68 @@ func TestCatalogHook_RemovesOnReloadToEmpty(t *testing.T) {
 	hctx2 := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
 	assert.NoError(t, hook(context.Background(), hctx2))
 	assert.False(t, dive.HasSystemReminder(hctx2.Messages, "skills"))
+}
+
+// staticLLM is a minimal llm.LLM for exercising the agent loop in tests.
+type staticLLM struct{}
+
+func (s *staticLLM) Name() string { return "test-model" }
+
+func (s *staticLLM) Generate(_ context.Context, _ ...llm.Option) (*llm.Response, error) {
+	return &llm.Response{
+		ID:         "resp_1",
+		Model:      "test-model",
+		Role:       llm.Assistant,
+		Content:    []llm.Content{&llm.TextContent{Text: "ok"}},
+		Type:       "message",
+		StopReason: "stop",
+		Usage:      llm.Usage{InputTokens: 1, OutputTokens: 1},
+	}, nil
+}
+
+// TestCatalogHook_ConcurrentCreateResponse exercises the catalog hook's
+// shared lastHash state under concurrent CreateResponse calls on a single
+// agent. Run with -race to detect unsynchronized access.
+func TestCatalogHook_ConcurrentCreateResponse(t *testing.T) {
+	loader := &Loader{
+		skills: map[string]*Skill{
+			"reviewer": {
+				Name:        "reviewer",
+				Description: "Review code.",
+				Config:      SkillConfig{Description: "Review code."},
+			},
+		},
+		pendingInstructions: make(map[string]string),
+	}
+
+	agent, err := dive.NewAgent(dive.AgentOptions{
+		Name:       "TestAgent",
+		Model:      &staticLLM{},
+		Extensions: []dive.Extension{loader},
+	})
+	assert.NoError(t, err)
+
+	const goroutines = 16
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Mutate the catalog from some goroutines so CatalogHash
+			// changes and the hook takes the lastHash write path.
+			if i%4 == 0 {
+				loader.mu.Lock()
+				name := fmt.Sprintf("skill-%d", i)
+				loader.skills[name] = &Skill{
+					Name:        name,
+					Description: "Generated.",
+					Config:      SkillConfig{Description: "Generated."},
+				}
+				loader.mu.Unlock()
+			}
+			_, err := agent.CreateResponse(context.Background(), dive.WithInput("hello"))
+			assert.NoError(t, err)
+		}(i)
+	}
+	wg.Wait()
 }

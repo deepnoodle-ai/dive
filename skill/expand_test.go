@@ -2,6 +2,9 @@ package skill
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -121,6 +124,74 @@ func TestExpand_ShellWithEmptyArgs(t *testing.T) {
 	result, err := s.Expand(context.Background(), "", WithShellExpansion(true))
 	assert.NoError(t, err)
 	assert.Equal(t, "Branch: main. Args: ", result)
+}
+
+func TestExpand_ArgInjectionNotExecuted(t *testing.T) {
+	// Regression test for shell-expansion injection: model-controlled args
+	// containing !{...} must never be executed, even with shell expansion
+	// enabled. The injected sequence must appear as literal text.
+	marker := filepath.Join(t.TempDir(), "pwned")
+	hostileArgs := fmt.Sprintf("Bob !{touch %s}", marker)
+
+	s := &Skill{Instructions: "Hello $ARGUMENTS. Branch: !{echo main}"}
+	result, err := s.Expand(context.Background(), hostileArgs, WithShellExpansion(true))
+	assert.NoError(t, err)
+
+	// The template's own shell block ran.
+	assert.Contains(t, result, "Branch: main")
+	// The injected !{...} appears literally in the output.
+	assert.Contains(t, result, fmt.Sprintf("!{touch %s}", marker))
+	// The injected command did NOT run.
+	_, statErr := os.Stat(marker)
+	assert.True(t, os.IsNotExist(statErr), "injected command must not execute")
+}
+
+func TestExpand_ArgInjectionViaPositional(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "pwned")
+	// A whitespace-free injection so it survives positional splitting intact:
+	// `>file` would create the file if the shell executed it.
+	hostileArg := fmt.Sprintf("!{>%s}", marker)
+	s := &Skill{Instructions: "First: $1. Branch: !{echo main}"}
+	result, err := s.Expand(context.Background(), hostileArg, WithShellExpansion(true))
+	assert.NoError(t, err)
+	assert.Contains(t, result, "Branch: main")
+	assert.Contains(t, result, "First: "+hostileArg)
+	_, statErr := os.Stat(marker)
+	assert.True(t, os.IsNotExist(statErr), "injected command must not execute")
+}
+
+func TestExpand_ArgsInsideShellBlock(t *testing.T) {
+	// Template authors can reference arguments inside !{...}: positional
+	// args are shell positional parameters and $ARGUMENTS is exported in
+	// the environment. The shell receives them as data, not code.
+	s := &Skill{Instructions: `Result: !{echo "first=$1 all=$ARGUMENTS"}`}
+	result, err := s.Expand(context.Background(), "foo bar", WithShellExpansion(true))
+	assert.NoError(t, err)
+	assert.Equal(t, "Result: first=foo all=foo bar", result)
+}
+
+func TestExpand_ArgsInsideShellBlockAreData(t *testing.T) {
+	// Hostile args referenced inside a shell block must be expanded as data
+	// by the shell — command substitution syntax in args must not execute.
+	marker := filepath.Join(t.TempDir(), "pwned")
+	s := &Skill{Instructions: `Result: !{echo "$ARGUMENTS"}`}
+	hostileArgs := fmt.Sprintf("$(touch %s)", marker)
+	result, err := s.Expand(context.Background(), hostileArgs, WithShellExpansion(true))
+	assert.NoError(t, err)
+	assert.Contains(t, result, hostileArgs)
+	_, statErr := os.Stat(marker)
+	assert.True(t, os.IsNotExist(statErr), "command substitution in args must not execute")
+}
+
+func TestExpand_ShellOutputNotReexpanded(t *testing.T) {
+	// Shell output is inserted verbatim: placeholders or !{...} sequences
+	// in command output must not be substituted or executed. The command
+	// emits "!{echo nested}" via printf escapes (\041 = "!", \175 = "}")
+	// because a !{command} block cannot itself contain a literal "}".
+	s := &Skill{Instructions: `Result: !{printf '$1 $ARGUMENTS \041{echo nested\175'}`}
+	result, err := s.Expand(context.Background(), "foo", WithShellExpansion(true))
+	assert.NoError(t, err)
+	assert.Equal(t, "Result: $1 $ARGUMENTS !{echo nested}", result)
 }
 
 func TestExpand_NoPlaceholders(t *testing.T) {

@@ -49,7 +49,7 @@ Target: $ARGUMENTS
 | --------------- | -------- | ---------------------------------------------------- |
 | `name`          | No       | Unique identifier (defaults to filename/directory)   |
 | `description`   | No       | Brief explanation for the LLM; presence makes it agent-invocable |
-| `allowed-tools` | No       | Metadata only — parsed but not enforced at runtime   |
+| `allowed-tools` | No       | Parsed for compatibility; informational only — NOT enforced at runtime, so it provides no security guarantee. Use the `permission` package to restrict tool access. |
 | `model`         | No       | Model override for this skill (reserved for future use) |
 | `argument-hint` | No       | Describes expected arguments (shown in CLI help) |
 | `triggers`      | No       | Keyword/regex patterns for automatic skill suggestion |
@@ -81,6 +81,8 @@ Skills support three kinds of variable substitution in their instructions:
 Shell expansion (`!{...}`) is **disabled by default** for security. Enable it with `skill.LoaderOptions{ShellExpansion: true}`, or `skill.WithShellExpansion(true)` when calling `Expand()` directly.
 
 **Security:** Shell expansion is only allowed for local skills (`file://` or empty SourceURI). Skills loaded from remote providers (e.g., custom HTTP providers) never get shell expansion regardless of configuration. This is enforced by `Skill.IsLocal()`.
+
+**Expansion order:** `!{...}` blocks are executed against the raw template *before* `$ARGUMENTS`/`$N` substitution. Arguments may be model-controlled, so a `!{...}` sequence carried in arguments is never executed — it appears as literal text. Shell command output is also inserted verbatim and never re-scanned for placeholders. To reference arguments inside a `!{command}` block, use `$1`-`$9` (passed as shell positional parameters) or `$ARGUMENTS` (exported as an environment variable); the shell receives the values as data, so argument text is never interpreted as shell syntax.
 
 ## Skill Discovery
 

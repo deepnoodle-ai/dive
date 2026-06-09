@@ -91,8 +91,12 @@ type SkillConfig struct {
 	// Description explains what the skill does and when to use it.
 	Description string `yaml:"description,omitempty"`
 
-	// AllowedTools restricts which tools are available while this skill is active.
-	// An empty list means all tools are available.
+	// AllowedTools lists tools the skill author intends to be available while
+	// this skill is active. Parsed for compatibility with the skill file
+	// format, but NOT currently enforced by Dive — it is informational
+	// metadata only and provides no security guarantee. Runtime enforcement
+	// is planned as follow-up work; until then, use the permission package
+	// to restrict tool access.
 	AllowedTools []string `yaml:"allowed-tools,omitempty"`
 
 	// Model is an optional model override for this skill.
