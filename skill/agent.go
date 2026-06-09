@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/deepnoodle-ai/dive"
 )
@@ -135,9 +136,16 @@ const skillReminderName = "skills"
 // The hook uses dive.SetSystemReminder, which is idempotent: it inserts the
 // block on first call and replaces it in place if the catalog changes.
 func catalogHook(loader *Loader) dive.PreGenerationHook {
+	// lastHash is shared across invocations of the returned hook, which may
+	// run concurrently when multiple CreateResponse calls execute on one
+	// agent. The mutex guards it; per-call HookContext state needs no guard.
+	var mu sync.Mutex
 	var lastHash string
 
 	return func(_ context.Context, hctx *dive.HookContext) error {
+		mu.Lock()
+		defer mu.Unlock()
+
 		hash := CatalogHash(loader)
 		if hash == "" {
 			// No skills — remove stale catalog block if present.

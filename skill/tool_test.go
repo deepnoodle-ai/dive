@@ -169,6 +169,25 @@ func TestTool_Call(t *testing.T) {
 		assert.Contains(t, result.Content[0].Text, "Available skills:")
 	})
 
+	t.Run("command is not invocable via tool", func(t *testing.T) {
+		loader := setupTestLoader(t)
+		tool := NewTool(loader)
+
+		// "commit" is loaded as a user-invocable-only command. It is hidden
+		// from the model's catalog, so the Skill tool must reject it with
+		// the same not-found error shape as an unknown name.
+		s, ok := loader.Get("commit")
+		assert.True(t, ok)
+		assert.True(t, s.IsCommand())
+
+		result, err := tool.Call(ctx, &ToolInput{Skill: "commit"})
+		assert.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].Text, "skill \"commit\" not found")
+		// The available list contains only agent-invocable skills.
+		assert.Contains(t, result.Content[0].Text, "Available skills: code-reviewer, deploy, helper")
+	})
+
 	t.Run("empty skill name", func(t *testing.T) {
 		loader := setupTestLoader(t)
 		tool := NewTool(loader)

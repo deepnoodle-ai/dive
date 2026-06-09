@@ -565,3 +565,33 @@ Review the code.`), 0644))
 	assert.True(t, ok)
 	assert.Equal(t, "Review code.", s.Description)
 }
+
+func TestLoader_GetSkill(t *testing.T) {
+	loader := &Loader{
+		skills: map[string]*Skill{
+			"reviewer": {
+				Name:        "reviewer",
+				Description: "Review code.",
+				Config:      SkillConfig{Description: "Review code."},
+			},
+			"commit": {
+				Name: "commit", // no description: user-invocable-only command
+			},
+		},
+	}
+
+	// Agent-invocable skill is returned.
+	s, ok := loader.GetSkill("reviewer")
+	assert.True(t, ok)
+	assert.Equal(t, "reviewer", s.Name)
+
+	// Command exists via Get but is hidden from GetSkill.
+	_, ok = loader.Get("commit")
+	assert.True(t, ok)
+	_, ok = loader.GetSkill("commit")
+	assert.False(t, ok)
+
+	// Unknown name.
+	_, ok = loader.GetSkill("nonexistent")
+	assert.False(t, ok)
+}

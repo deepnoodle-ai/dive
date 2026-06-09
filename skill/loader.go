@@ -172,12 +172,26 @@ func (l *Loader) Load(ctx context.Context) error {
 	return nil
 }
 
-// Get retrieves a skill by exact name.
+// Get retrieves a skill or command by exact name.
 func (l *Loader) Get(name string) (*Skill, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	s, ok := l.skills[name]
 	return s, ok
+}
+
+// GetSkill retrieves an agent-invocable skill by exact name. Commands
+// (user-invocable only) are not returned, even if a command with the given
+// name exists. This is the lookup the Skill tool uses, so the model cannot
+// trigger commands that are hidden from its catalog.
+func (l *Loader) GetSkill(name string) (*Skill, bool) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	s, ok := l.skills[name]
+	if !ok || s.IsCommand() {
+		return nil, false
+	}
+	return s, true
 }
 
 // List returns all loaded skills and commands, sorted alphabetically.
