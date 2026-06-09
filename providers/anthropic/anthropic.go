@@ -392,11 +392,12 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 
 // applyReasoningConfig maps Dive's reasoning/thinking options onto the Anthropic
 // request, accounting for per-model differences:
-//   - Opus 4.5+ and Sonnet 4.6 take the native effort parameter via
-//     output_config; older models emulate effort with a thinking budget.
-//   - Opus 4.6/4.7/4.8 and Sonnet 4.6 support adaptive thinking. Opus 4.7/4.8
-//     reject manual budgets, so a budget set against them transparently falls
-//     back to adaptive thinking.
+//   - Opus 4.5+, Sonnet 4.6, and the Claude 5 models (Fable 5, Mythos 5) take
+//     the native effort parameter via output_config; older models emulate
+//     effort with a thinking budget.
+//   - Opus 4.6/4.7/4.8, Sonnet 4.6, and the Claude 5 models support adaptive
+//     thinking. Opus 4.7/4.8 and the Claude 5 models reject manual budgets, so
+//     a budget set against them transparently falls back to adaptive thinking.
 func applyReasoningConfig(req *Request, config *llm.Config) error {
 	model := req.Model
 
@@ -443,7 +444,7 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 // resolveThinking determines the thinking configuration from the budget and
 // explicit thinking-type options, independent of the effort parameter.
 func resolveThinking(model string, config *llm.Config) (*Thinking, error) {
-	adaptiveOnly := modelRejectsManualThinking(model) // Opus 4.7/4.8
+	adaptiveOnly := modelRejectsManualThinking(model) // Opus 4.7/4.8, Fable 5, Mythos 5
 
 	switch config.Thinking {
 	case llm.ThinkingTypeDisabled:
@@ -521,14 +522,16 @@ func legacyEffortBudget(effort llm.ReasoningEffort) (int, error) {
 }
 
 // modelSupportsEffortParam reports whether the model accepts the native
-// output_config.effort parameter (Opus 4.5+ and Sonnet 4.6).
+// output_config.effort parameter (Opus 4.5+, Sonnet 4.6, Fable 5, Mythos 5).
 func modelSupportsEffortParam(model string) bool {
 	switch {
 	case strings.HasPrefix(model, "claude-opus-4-5"),
 		strings.HasPrefix(model, "claude-opus-4-6"),
 		strings.HasPrefix(model, "claude-opus-4-7"),
 		strings.HasPrefix(model, "claude-opus-4-8"),
-		strings.HasPrefix(model, "claude-sonnet-4-6"):
+		strings.HasPrefix(model, "claude-sonnet-4-6"),
+		strings.HasPrefix(model, "claude-fable-5"),
+		strings.HasPrefix(model, "claude-mythos-5"):
 		return true
 	}
 	return false
@@ -536,21 +539,31 @@ func modelSupportsEffortParam(model string) bool {
 
 func modelSupportsXHighEffort(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-7") ||
-		strings.HasPrefix(model, "claude-opus-4-8")
+		strings.HasPrefix(model, "claude-opus-4-8") ||
+		strings.HasPrefix(model, "claude-fable-5") ||
+		strings.HasPrefix(model, "claude-mythos-5")
 }
 
 func modelSupportsMaxEffort(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-6") ||
 		strings.HasPrefix(model, "claude-opus-4-7") ||
 		strings.HasPrefix(model, "claude-opus-4-8") ||
-		strings.HasPrefix(model, "claude-sonnet-4-6")
+		strings.HasPrefix(model, "claude-sonnet-4-6") ||
+		strings.HasPrefix(model, "claude-fable-5") ||
+		strings.HasPrefix(model, "claude-mythos-5")
 }
 
 // modelRejectsManualThinking reports whether the model rejects manual extended
-// thinking budgets and supports only adaptive thinking (Opus 4.7 and 4.8).
+// thinking budgets and supports only adaptive thinking (Opus 4.7/4.8, Fable 5,
+// Mythos 5). On the Claude 5 models adaptive thinking is always on and an
+// explicit thinking disable is also rejected by the API; Dive already omits
+// the thinking parameter entirely when thinking is disabled, so disables are
+// safe across all of these models.
 func modelRejectsManualThinking(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-7") ||
-		strings.HasPrefix(model, "claude-opus-4-8")
+		strings.HasPrefix(model, "claude-opus-4-8") ||
+		strings.HasPrefix(model, "claude-fable-5") ||
+		strings.HasPrefix(model, "claude-mythos-5")
 }
 
 // createRequest creates an HTTP request with appropriate headers for Anthropic API calls

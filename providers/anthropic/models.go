@@ -28,6 +28,11 @@ const (
 	// Claude 4.7 models
 	ModelClaudeOpus47 = "claude-opus-4-7"
 
-	// Claude 4.8 models (latest)
+	// Claude 4.8 models
 	ModelClaudeOpus48 = "claude-opus-4-8"
+
+	// Claude 5 models (latest). Fable 5 is generally available; Mythos 5 is
+	// limited availability via Project Glasswing.
+	ModelClaudeFable5  = "claude-fable-5"
+	ModelClaudeMythos5 = "claude-mythos-5"
 )

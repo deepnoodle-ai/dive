@@ -163,10 +163,43 @@ func TestModelCapabilityHelpers(t *testing.T) {
 	assert.True(t, modelSupportsEffortParam(ModelClaudeOpus48))
 	assert.True(t, modelSupportsEffortParam(ModelClaudeSonnet46))
 	assert.True(t, modelSupportsEffortParam(ModelClaudeOpus45))
+	assert.True(t, modelSupportsEffortParam(ModelClaudeFable5))
+	assert.True(t, modelSupportsEffortParam(ModelClaudeMythos5))
 	assert.False(t, modelSupportsEffortParam(ModelClaude37Sonnet20250219))
 
 	assert.True(t, modelRejectsManualThinking(ModelClaudeOpus47))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeOpus48))
+	assert.True(t, modelRejectsManualThinking(ModelClaudeFable5))
+	assert.True(t, modelRejectsManualThinking(ModelClaudeMythos5))
 	assert.False(t, modelRejectsManualThinking(ModelClaudeOpus46))
 	assert.False(t, modelRejectsManualThinking(ModelClaudeSonnet46))
+
+	assert.True(t, modelSupportsXHighEffort(ModelClaudeFable5))
+	assert.True(t, modelSupportsMaxEffort(ModelClaudeFable5))
+	assert.True(t, modelSupportsXHighEffort(ModelClaudeMythos5))
+	assert.True(t, modelSupportsMaxEffort(ModelClaudeMythos5))
+}
+
+func TestReasoningEffortFable5UsesOutputConfig(t *testing.T) {
+	// Fable 5 takes the native effort parameter, including xhigh.
+	req := buildReq(t, ModelClaudeFable5, llm.WithReasoningEffort(llm.ReasoningEffortXHigh))
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "xhigh", req.OutputConfig.Effort)
+	assert.Nil(t, req.Thinking)
+}
+
+func TestReasoningBudgetFable5FallsBackToAdaptive(t *testing.T) {
+	// Fable 5 rejects manual budgets; a budget transparently becomes
+	// adaptive thinking so existing callers keep working.
+	req := buildReq(t, ModelClaudeFable5, llm.WithReasoningBudget(8000))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.Equal(t, 0, req.Thinking.BudgetTokens)
+}
+
+func TestThinkingDisabledFable5OmitsThinkingParam(t *testing.T) {
+	// Fable 5 rejects an explicit thinking disable; Dive omits the thinking
+	// parameter entirely, which is the accepted form.
+	req := buildReq(t, ModelClaudeFable5, llm.WithThinking(llm.ThinkingTypeDisabled))
+	assert.Nil(t, req.Thinking)
 }
