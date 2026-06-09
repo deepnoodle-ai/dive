@@ -426,9 +426,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// fresher one. When the option is absent and the session is
 	// suspendable, the session's stored state is used.
 	suspendable, _ := sess.(SuspendableSession)
+	var storedSuspension *SuspensionState
+	if suspendable != nil {
+		storedSuspension = suspendable.LoadSuspension()
+	}
 	suspState := options.Suspension
-	if suspState == nil && suspendable != nil {
-		suspState = suspendable.LoadSuspension()
+	if suspState == nil {
+		suspState = storedSuspension
 	}
 
 	hasToolResults := len(options.ToolResults) > 0
@@ -437,6 +441,14 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 
 	if hasResumeIntent && suspState == nil {
 		return nil, ErrNoSuspendedTurn
+	}
+	// An explicit WithResume against a SuspendableSession requires the
+	// session to actually hold a suspended turn: the resume completion is
+	// persisted via SaveResumedTurn, which fails when the session is not
+	// suspended. Detect the mismatch before calling the LLM so no tokens
+	// are spent on a turn that could never be saved.
+	if hasExplicitSuspension && suspendable != nil && storedSuspension == nil {
+		return nil, ErrSessionNotSuspended
 	}
 	// A session-backed resume cannot accept new user input — the new
 	// input belongs in a fresh turn after the suspended one resolves.
@@ -506,7 +518,22 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	var fullHistory []*llm.Message
 	switch {
 	case suspState != nil && hasExplicitSuspension:
-		fullHistory = append(fullHistory, inputMessages...)
+		// Pre-turn history: explicit WithMessages wins (stateless flow).
+		// Otherwise fall back to the loaded session history — the
+		// documented cross-process handoff resumes with a session attached
+		// and no explicit messages, and generating against only the
+		// suspended turn would silently drop all prior context. When the
+		// session itself persisted the suspended turn (SuspendableSession),
+		// strip that stored turn from the tail so the explicit snapshot's
+		// TurnMessages replace it rather than duplicate it.
+		preTurn := inputMessages
+		if len(preTurn) == 0 && len(sessionMsgs) > 0 {
+			preTurn = sessionMsgs
+			if storedSuspension != nil && len(storedSuspension.TurnMessages) <= len(preTurn) {
+				preTurn = preTurn[:len(preTurn)-len(storedSuspension.TurnMessages)]
+			}
+		}
+		fullHistory = append(fullHistory, preTurn...)
 		fullHistory = append(fullHistory, suspState.TurnMessages...)
 	case suspState != nil:
 		fullHistory = append(fullHistory, sessionMsgs...)

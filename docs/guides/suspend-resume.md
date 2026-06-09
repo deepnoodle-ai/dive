@@ -220,7 +220,10 @@ resp, err := agent.CreateResponse(ctx,
 
 `WithResume` overrides any session-stored state, which is also what you
 want when doing a cross-process handoff where the resumer holds a newer
-snapshot than what is on disk.
+snapshot than what is on disk. When a session is attached and no
+`WithMessages` is given, the loaded session history supplies the
+pre-turn context (with any session-stored suspended turn replaced by the
+explicit snapshot's `TurnMessages`).
 
 On completion, the agent populates `resp.Suspension` a second time —
 this time with `PendingToolCalls == nil` and `TurnMessages` holding the
@@ -371,6 +374,7 @@ observe `Response.Status` and `Response.Suspension` on the final return.
 | `ErrResumeRequired`             | `CreateResponse` was called on a suspended session without `WithResume`, `WithToolResults`, or new input. Resume is explicit — no silent no-op polling. |
 | `ErrInputOnSuspendedSession`    | New user input was supplied while the session is suspended. Resume the current turn first. |
 | `ErrNoSuspendedTurn`            | `WithResume` or `WithToolResults` was supplied but there is no suspended turn to resume. |
+| `ErrSessionNotSuspended`        | `WithResume` supplied an explicit state but the attached `SuspendableSession` is not suspended. Detected before any LLM call — the completed resume could never be saved (`SaveResumedTurn` requires a suspended session). |
 | `ErrUnknownPendingToolCall`     | A key in `WithToolResults` is not in the pending set. No state changes. |
 
 ## Concurrency
