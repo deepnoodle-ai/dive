@@ -2,6 +2,7 @@ package openaicompletions
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -480,4 +481,50 @@ func TestConvertToolUseAndResultMessages(t *testing.T) {
 	assert.Equal(t, "2", converted[2].Content)
 	assert.Equal(t, "call_999", converted[2].ToolCallID)
 
+}
+
+// TestConvertMessagesSkipsThinkingContent verifies that ThinkingContent (which
+// this provider's stream iterator can produce from "reasoning" deltas)
+// round-trips through convertMessages without error: it is skipped on encode
+// since the Chat Completions API has no field for replaying reasoning.
+func TestConvertMessagesSkipsThinkingContent(t *testing.T) {
+	messages := []*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []llm.Content{
+				&llm.ThinkingContent{Thinking: "Let me think about this..."},
+				&llm.TextContent{Text: "The answer is 4."},
+			},
+		},
+	}
+	result, err := convertMessages(messages)
+	assert.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.Equal(t, "assistant", result[0].Role)
+	assert.Equal(t, "The answer is 4.", result[0].Content)
+}
+
+// TestGenerateUsageDetails verifies that cached prompt tokens and reasoning
+// tokens from a non-streaming response are carried into llm.Usage.
+func TestGenerateUsageDetails(t *testing.T) {
+	var result Response
+	err := json.Unmarshal([]byte(`{
+		"id": "chatcmpl-9",
+		"object": "chat.completion",
+		"model": "gpt-5",
+		"choices": [{"index": 0, "message": {"role": "assistant", "content": "Hello"}, "finish_reason": "stop"}],
+		"usage": {
+			"prompt_tokens": 200,
+			"completion_tokens": 25,
+			"total_tokens": 225,
+			"prompt_tokens_details": {"cached_tokens": 150},
+			"completion_tokens_details": {"reasoning_tokens": 10}
+		}
+	}`), &result)
+	assert.NoError(t, err)
+	usage := result.Usage.toLLMUsage()
+	assert.Equal(t, 200, usage.InputTokens)
+	assert.Equal(t, 25, usage.OutputTokens)
+	assert.Equal(t, 150, usage.CacheReadInputTokens)
+	assert.Equal(t, 10, usage.ReasoningTokens)
 }

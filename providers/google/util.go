@@ -56,10 +56,7 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	// Convert usage information
 	var usage llm.Usage
 	if resp.UsageMetadata != nil {
-		usage = llm.Usage{
-			InputTokens:  int(resp.UsageMetadata.PromptTokenCount),
-			OutputTokens: int(resp.UsageMetadata.CandidatesTokenCount),
-		}
+		usage = convertUsageMetadata(resp.UsageMetadata)
 	}
 
 	diveResponse := &llm.Response{
@@ -72,16 +69,33 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	}
 
 	// Set stop reason
-	switch candidate.FinishReason {
-	case genai.FinishReasonStop:
-		diveResponse.StopReason = "stop"
-	case genai.FinishReasonMaxTokens:
-		diveResponse.StopReason = "max_tokens"
-	default:
-		diveResponse.StopReason = "other"
-	}
+	diveResponse.StopReason = convertFinishReason(candidate.FinishReason)
 
 	return diveResponse, nil
+}
+
+// convertUsageMetadata converts genai usage metadata to llm.Usage, carrying
+// cached-content and thoughts token counts where the API reports them.
+func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) llm.Usage {
+	return llm.Usage{
+		InputTokens:          int(metadata.PromptTokenCount),
+		OutputTokens:         int(metadata.CandidatesTokenCount),
+		CacheReadInputTokens: int(metadata.CachedContentTokenCount),
+		ReasoningTokens:      int(metadata.ThoughtsTokenCount),
+	}
+}
+
+// convertFinishReason maps a genai finish reason to Dive's stop reason
+// vocabulary for this provider (matching convertGoogleResponse).
+func convertFinishReason(reason genai.FinishReason) string {
+	switch reason {
+	case genai.FinishReasonStop:
+		return "stop"
+	case genai.FinishReasonMaxTokens:
+		return "max_tokens"
+	default:
+		return "other"
+	}
 }
 
 // toolCallCounter provides unique suffixes for synthesized tool call IDs.

@@ -57,7 +57,15 @@ func New(opts ...Option) *Provider {
 	// Bake the HTTP client into the SDK client at construction time so
 	// per-request options don't have to re-specify it. WithClient only
 	// updates p.httpClient; the actual plumbing happens here.
-	p.options = append(p.options, option.WithHTTPClient(p.httpClient))
+	//
+	// Disable the SDK's internal retries (default 2): Dive owns retries via
+	// the retry loop in Generate/Stream, governed by WithMaxRetries. Without
+	// this, the two layers multiply (up to 9 HTTP requests per persistent
+	// 429/500) with compounding backoff.
+	p.options = append(p.options,
+		option.WithHTTPClient(p.httpClient),
+		option.WithMaxRetries(0),
+	)
 	p.client = openai.NewClient(p.options...)
 	return p
 }
@@ -117,7 +125,25 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, err
 	}
 
-	return decodeAssistantResponse(resp)
+	result, err := decodeAssistantResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.AfterGenerate,
+		Request: &llm.HookRequestContext{
+			Messages: config.Messages,
+			Config:   config,
+		},
+		Response: &llm.HookResponseContext{
+			Response: result,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {

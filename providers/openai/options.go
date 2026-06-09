@@ -46,10 +46,14 @@ func WithMaxTokens(maxTokens int) Option {
 	}
 }
 
-// WithMaxRetries sets the maximum number of retry attempts.
+// WithMaxRetries sets the maximum number of retry attempts performed by
+// Dive's retry loop (total attempts = maxRetries + 1). The underlying
+// openai-go SDK's internal retries are pinned to zero so that retries are not
+// multiplied across the two layers — this option is the single knob for
+// retry behavior.
 func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
-		p.options = append(p.options, option.WithMaxRetries(maxRetries))
+		p.maxRetries = maxRetries
 	}
 }
 

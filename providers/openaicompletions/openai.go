@@ -202,10 +202,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		Model:   p.model,
 		Role:    llm.Assistant,
 		Content: contentBlocks,
-		Usage: llm.Usage{
-			InputTokens:  result.Usage.PromptTokens,
-			OutputTokens: result.Usage.CompletionTokens,
-		},
+		Usage:   result.Usage.toLLMUsage(),
 	}
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
@@ -395,6 +392,12 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 					})
 				case *llm.ToolUseContent:
 					// Already handled above
+				case *llm.ThinkingContent, *llm.RedactedThinkingContent:
+					// The Chat Completions API has no standard field for
+					// replaying assistant reasoning back to the server, so
+					// thinking content (which this provider's own stream
+					// iterator can produce from "reasoning" deltas) is
+					// skipped on encode rather than erroring.
 				default:
 					return nil, fmt.Errorf("unsupported content type: %s", c.Type())
 				}

@@ -242,6 +242,20 @@ func encodeAssistantRefusalContent() (responses.ResponseInputItemUnionParam, err
 }
 
 func encodeAssistantToolResultContent(c *llm.ToolResultContent) (responses.ResponseInputItemUnionParam, error) {
+	output, err := toolResultOutputText(c)
+	if err != nil {
+		return responses.ResponseInputItemUnionParam{}, err
+	}
+	param := responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output)
+	return param, nil
+}
+
+// toolResultOutputText renders a tool result as the output string for a
+// Responses API function_call_output item. The Responses API has no
+// equivalent of Anthropic's is_error flag on tool results, so when IsError is
+// set the output text is prefixed with "Error: " so the model can tell the
+// call failed rather than the flag being silently dropped.
+func toolResultOutputText(c *llm.ToolResultContent) (string, error) {
 	var output string
 	switch content := c.Content.(type) {
 	case string:
@@ -251,12 +265,14 @@ func encodeAssistantToolResultContent(c *llm.ToolResultContent) (responses.Respo
 	default:
 		resultJSON, err := json.Marshal(c.Content)
 		if err != nil {
-			return responses.ResponseInputItemUnionParam{}, fmt.Errorf("failed to marshal tool result: %v", err)
+			return "", fmt.Errorf("failed to marshal tool result: %v", err)
 		}
 		output = string(resultJSON)
 	}
-	param := responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output)
-	return param, nil
+	if c.IsError && !strings.HasPrefix(output, "Error:") {
+		output = "Error: " + output
+	}
+	return output, nil
 }
 
 func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses.ResponseInputItemUnionParam, error) {
@@ -453,23 +469,10 @@ func encodeToolResultContent(c *llm.ToolResultContent) (*responses.ResponseInput
 	if c.ToolUseID == "" {
 		return nil, fmt.Errorf("tool use id is not set")
 	}
-	var output string
-
-	// Handle different content types
-	switch content := c.Content.(type) {
-	case string:
-		output = content
-	case []byte:
-		output = string(content)
-	default:
-		resultJSON, err := json.Marshal(c.Content)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal tool result: %v", err)
-		}
-		output = string(resultJSON)
+	output, err := toolResultOutputText(c)
+	if err != nil {
+		return nil, err
 	}
-	// Note the IsError field is unused here...
-
 	param := responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output)
 	return &param, nil
 }

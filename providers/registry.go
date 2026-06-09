@@ -52,11 +52,21 @@ func (r *Registry) SetFallback(factory ProviderFactory) {
 // iterates through registered entries in order and returns the first match.
 // If no entry matches and a fallback is set, the fallback is used.
 // Returns nil if no match and no fallback.
+//
+// Precedence for "/"-containing model IDs: when the text before the first "/"
+// names a registered provider, that provider wins — e.g. "openai/gpt-4"
+// routes to the native OpenAI provider (with model "gpt-4"), not to a
+// matcher-based provider like OpenRouter. When the prefix is not a registered
+// provider name (e.g. "meta-llama/llama-3-70b"), the full model ID falls
+// through to the matcher loop so matchers such as OpenRouter's
+// ContainsMatcher("/") can claim it.
 func (r *Registry) CreateModel(model, endpoint string) llm.LLM {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Check for explicit "provider/model" syntax
+	// Check for explicit "provider/model" syntax. Only treat the text before
+	// the "/" as a provider selector when it matches a registered provider
+	// name; otherwise fall through to the matcher loop below.
 	if idx := strings.IndexByte(model, '/'); idx > 0 {
 		providerName := strings.ToLower(model[:idx])
 		modelName := model[idx+1:]
@@ -65,7 +75,6 @@ func (r *Registry) CreateModel(model, endpoint string) llm.LLM {
 				return entry.Factory(modelName, endpoint)
 			}
 		}
-		return nil
 	}
 
 	for _, entry := range r.entries {
