@@ -3415,3 +3415,132 @@ func TestCompletedToolCallsPreservedAcrossPartialResume(t *testing.T) {
 	}
 	assert.True(t, foundFast, "fast_tool should appear in CompletedToolCalls after partial resume")
 }
+
+// TestResumeWithSessionNoMessagesIncludesHistory pins the cross-process
+// handoff flow from review finding §4.3: resuming with WithResume against a
+// session-backed agent WITHOUT WithMessages must use the loaded session
+// history as the pre-turn context. Before the fix, the LLM saw only
+// suspState.TurnMessages — all prior turns were silently dropped.
+func TestResumeWithSessionNoMessagesIncludesHistory(t *testing.T) {
+	dir := t.TempDir()
+
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			finalTextTurn("hi there"), // turn 1: plain history
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)), // turn 2: suspends
+			finalTextTurn("resumed done"),                                       // resume completion
+		},
+	}
+	suspendTool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+
+	// Process A: build history, then suspend.
+	var savedState *SuspensionState
+	{
+		store, err := session.NewFileStore(dir)
+		assert.NoError(t, err)
+		sess, err := store.Open(context.Background(), "handoff")
+		assert.NoError(t, err)
+		agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{suspendTool}, Session: sess})
+		assert.NoError(t, err)
+
+		_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("start work"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status, ResponseStatusSuspended)
+		savedState = resp.Suspension
+		assert.NotNil(t, savedState)
+	}
+
+	// Process B: fresh store + session, resume via WithResume with NO
+	// WithMessages — the session must supply the pre-turn history.
+	{
+		store, err := session.NewFileStore(dir)
+		assert.NoError(t, err)
+		sess, err := store.Open(context.Background(), "handoff")
+		assert.NoError(t, err)
+		agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{suspendTool}, Session: sess})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(),
+			WithResume(savedState, map[string]*ToolResult{
+				"toolu_a": NewToolResultText("approved"),
+			}),
+		)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status, ResponseStatusCompleted)
+		assert.Equal(t, resp.OutputText(), "resumed done")
+
+		// The resumed LLM call must see the FULL history: turn 1 (user
+		// "hello" + assistant "hi there") followed by the suspended turn
+		// and its merged tool_result.
+		mock.mu.Lock()
+		resumeCallMsgs := mock.received[len(mock.received)-1]
+		mock.mu.Unlock()
+		assert.True(t, len(resumeCallMsgs) >= 5,
+			"resume call should include prior session history, got %d messages", len(resumeCallMsgs))
+		assert.Equal(t, resumeCallMsgs[0].Role, llm.User)
+		assert.Equal(t, resumeCallMsgs[0].Text(), "hello")
+		assert.Equal(t, resumeCallMsgs[1].Text(), "hi there")
+
+		// The suspended turn must not be duplicated: exactly one assistant
+		// tool_use message in the context.
+		toolUseCount := 0
+		for _, msg := range resumeCallMsgs {
+			for _, c := range msg.Content {
+				if _, ok := c.(*llm.ToolUseContent); ok {
+					toolUseCount++
+				}
+			}
+		}
+		assert.Equal(t, toolUseCount, 1, "suspended turn must not be duplicated in the LLM context")
+
+		// And the persisted history must be intact: turn 1 + completed turn 2.
+		msgs, err := sess.Messages(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, msgs[0].Text(), "hello")
+		assert.Equal(t, msgs[len(msgs)-1].Text(), "resumed done")
+		assert.False(t, sessIsSuspended(sess))
+	}
+}
+
+// TestResumeNonSuspendedSessionFailsBeforeGeneration pins the up-front
+// precondition check (review §3 / core C3): WithResume against a
+// SuspendableSession that is NOT currently suspended must fail before the
+// LLM is called — previously the mismatch surfaced only after generation,
+// when SaveResumedTurn rejected the save (tokens spent, turn discarded).
+func TestResumeNonSuspendedSessionFailsBeforeGeneration(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+			finalTextTurn("should never be generated"),
+		},
+	}
+	suspendTool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+
+	// Obtain a genuine SuspensionState from a stateless suspend.
+	statelessAgent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{suspendTool}})
+	assert.NoError(t, err)
+	resp, err := statelessAgent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	state := resp.Suspension
+	assert.NotNil(t, state)
+	callsAfterSuspend := mock.Calls()
+
+	// Attach a SuspendableSession that has never been suspended.
+	sess := session.New("not-suspended")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{suspendTool}, Session: sess})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(),
+		WithResume(state, map[string]*ToolResult{
+			"toolu_a": NewToolResultText("approved"),
+		}),
+	)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrSessionNotSuspended)
+	assert.Equal(t, mock.Calls(), callsAfterSuspend, "LLM must not be called when the precondition fails")
+	assert.Equal(t, sess.EventCount(), 0, "session must be untouched")
+}

@@ -1096,3 +1096,124 @@ func TestMemoryStoreListMetadataIsCopy(t *testing.T) {
 	result.Sessions[0].Metadata["key"] = "mutated"
 	assert.Equal(t, "original", sess.Metadata()["key"])
 }
+
+// TestSuspendResumeUsageAccumulates pins that the usage paid before a
+// suspension is carried into the completed turn when SaveResumedTurn
+// replaces the suspended event, so TotalUsage reflects both phases
+// (review finding §3.5).
+func TestSuspendResumeUsageAccumulates(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("usage-sum")
+
+	// Suspend with usage A.
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(),
+		&llm.Usage{InputTokens: 10, OutputTokens: 5}, singleSuspensionState())
+	assert.NoError(t, err)
+
+	// Resume with usage B.
+	complete := append(suspendedTurnMessages(), llm.NewAssistantTextMessage("done"))
+	err = sess.SaveResumedTurn(ctx, complete, &llm.Usage{InputTokens: 20, OutputTokens: 7})
+	assert.NoError(t, err)
+
+	total := sess.TotalUsage()
+	assert.Equal(t, total.InputTokens, 30)
+	assert.Equal(t, total.OutputTokens, 12)
+}
+
+// TestPartialResumeUsageAccumulates pins the replace-last branch of
+// SaveSuspendedTurn: a partial resume that re-suspends must also carry the
+// already-paid usage forward, and a final SaveResumedTurn adds its own on
+// top (review finding §3.5).
+func TestPartialResumeUsageAccumulates(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("usage-partial")
+
+	// Initial suspend with usage A.
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(),
+		&llm.Usage{InputTokens: 10, OutputTokens: 1}, singleSuspensionState())
+	assert.NoError(t, err)
+
+	// Partial resume re-suspends, replacing the suspended event with usage B.
+	err = sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(),
+		&llm.Usage{InputTokens: 20, OutputTokens: 2}, singleSuspensionState())
+	assert.NoError(t, err)
+	assert.Equal(t, sess.EventCount(), 1, "replace-last must not append a second event")
+
+	// Final resume completes the turn with usage C.
+	complete := append(suspendedTurnMessages(), llm.NewAssistantTextMessage("done"))
+	err = sess.SaveResumedTurn(ctx, complete, &llm.Usage{InputTokens: 40, OutputTokens: 4})
+	assert.NoError(t, err)
+
+	total := sess.TotalUsage()
+	assert.Equal(t, total.InputTokens, 70)
+	assert.Equal(t, total.OutputTokens, 7)
+}
+
+// TestSuspendResumeNilUsage pins that summation tolerates nil usage on
+// either side of a suspend/resume pair.
+func TestSuspendResumeNilUsage(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("usage-nil")
+
+	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(),
+		&llm.Usage{InputTokens: 10}, singleSuspensionState())
+	assert.NoError(t, err)
+	err = sess.SaveResumedTurn(ctx,
+		append(suspendedTurnMessages(), llm.NewAssistantTextMessage("done")), nil)
+	assert.NoError(t, err)
+	assert.Equal(t, sess.TotalUsage().InputTokens, 10)
+}
+
+// TestSaveTurnCopiesCallerMessages pins that SaveTurn deep-copies messages
+// and usage on ingestion: mutating the caller's message (or usage) after
+// the call must not rewrite stored history (review finding §3.4).
+func TestSaveTurnCopiesCallerMessages(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("no-alias")
+
+	userMsg := llm.NewUserTextMessage("original input")
+	assistantMsg := llm.NewAssistantTextMessage("original output")
+	usage := &llm.Usage{InputTokens: 10}
+	err := sess.SaveTurn(ctx, []*llm.Message{userMsg, assistantMsg}, usage)
+	assert.NoError(t, err)
+
+	// Mutate the caller-owned messages and usage after the save.
+	userMsg.Content[0].(*llm.TextContent).Text = "mutated input"
+	assistantMsg.Content[0].(*llm.TextContent).Text = "mutated output"
+	usage.InputTokens = 999
+
+	msgs, err := sess.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Len(t, msgs, 2)
+	assert.Equal(t, msgs[0].Text(), "original input")
+	assert.Equal(t, msgs[1].Text(), "original output")
+	assert.Equal(t, sess.TotalUsage().InputTokens, 10)
+}
+
+// TestSaveSuspendedTurnCopiesCallerMessages extends the §3.4 aliasing fix to
+// the suspend/resume ingestion paths.
+func TestSaveSuspendedTurnCopiesCallerMessages(t *testing.T) {
+	ctx := context.Background()
+	sess := session.New("no-alias-suspend")
+
+	turn := suspendedTurnMessages()
+	err := sess.SaveSuspendedTurn(ctx, turn, nil, singleSuspensionState())
+	assert.NoError(t, err)
+
+	// Mutate the caller's copy of the user message after the save.
+	turn[0].Content[0].(*llm.TextContent).Text = "mutated"
+
+	msgs, err := sess.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, msgs[0].Text(), "start")
+
+	// Same for the resume completion path.
+	complete := append(suspendedTurnMessages(), llm.NewAssistantTextMessage("done"))
+	err = sess.SaveResumedTurn(ctx, complete, nil)
+	assert.NoError(t, err)
+	complete[len(complete)-1].Content[0].(*llm.TextContent).Text = "mutated done"
+
+	msgs, err = sess.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, msgs[len(msgs)-1].Text(), "done")
+}

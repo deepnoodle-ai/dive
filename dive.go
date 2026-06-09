@@ -90,6 +90,13 @@ var ErrInputOnSuspendedSession = errors.New("dive: session is suspended; resume 
 // an idle suspended turn.
 var ErrResumeRequired = errors.New("dive: session is suspended; pass WithResume or WithToolResults to continue the turn")
 
+// ErrSessionNotSuspended is returned when WithResume supplies an explicit
+// SuspensionState but the attached SuspendableSession is not currently
+// suspended. The completed resume would be persisted via SaveResumedTurn,
+// which fails on a non-suspended session — so the mismatch is detected
+// before generation rather than after tokens have been spent.
+var ErrSessionNotSuspended = errors.New("dive: WithResume supplied but the attached session has no suspended turn to resume")
+
 // CreateResponseOptions contains configuration for LLM generations.
 //
 // This struct holds all the options that can be passed to Agent.CreateResponse.

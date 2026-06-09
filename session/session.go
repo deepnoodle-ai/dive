@@ -213,6 +213,9 @@ func (e *event) copy() *event {
 
 // copyMessages returns a deep copy of a message slice, or nil when empty, so
 // callers cannot mutate the session's internal messages through the result.
+// It is also used on ingestion (SaveTurn and friends) so caller mutations
+// after a save cannot rewrite stored history. llm.Message.Copy is a JSON
+// round-trip; a structural copy is a possible future optimization.
 func copyMessages(msgs []*llm.Message) []*llm.Message {
 	if len(msgs) == 0 {
 		return nil
@@ -222,6 +225,33 @@ func copyMessages(msgs []*llm.Message) []*llm.Message {
 		out[i] = msg.Copy()
 	}
 	return out
+}
+
+// copyUsage returns a deep copy of usage, or nil when usage is nil.
+func copyUsage(usage *llm.Usage) *llm.Usage {
+	if usage == nil {
+		return nil
+	}
+	return usage.Copy()
+}
+
+// sumUsage returns a new Usage holding the sum of a and b without mutating
+// either, or nil when both are nil. Used when a resumed (or re-suspended)
+// turn replaces a suspended event: the replaced event's usage covers tokens
+// already paid before suspension and must be carried forward so TotalUsage
+// does not undercount.
+func sumUsage(a, b *llm.Usage) *llm.Usage {
+	if a == nil && b == nil {
+		return nil
+	}
+	total := &llm.Usage{}
+	if a != nil {
+		total.Add(a)
+	}
+	if b != nil {
+		total.Add(b)
+	}
+	return total
 }
 
 // eventAppender is the internal interface used by Session to persist events.
@@ -358,8 +388,11 @@ func (s *Session) SaveTurn(ctx context.Context, messages []*llm.Message, usage *
 		ID:        newEventID(),
 		Type:      eventTypeTurn,
 		Timestamp: time.Now(),
-		Messages:  messages,
-		Usage:     usage,
+		// Deep-copy on ingestion: reads already deep-copy, so without this
+		// a caller mutating e.g. response.OutputMessages after SaveTurn
+		// would silently rewrite stored history.
+		Messages: copyMessages(messages),
+		Usage:    copyUsage(usage),
 	}
 	prevLen := len(s.data.Events)
 	prevUpdatedAt := s.data.UpdatedAt
@@ -472,8 +505,14 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 			s.data.Events[len(s.data.Events)-1].Type == eventTypeTurn
 
 		var evtID string
+		var priorUsage *llm.Usage
 		if replaceLast {
-			evtID = s.data.Events[len(s.data.Events)-1].ID
+			prev := s.data.Events[len(s.data.Events)-1]
+			evtID = prev.ID
+			// The replaced suspended event's usage covers tokens already
+			// paid before this partial resume; carry it forward so
+			// TotalUsage does not undercount.
+			priorUsage = prev.Usage
 		} else {
 			evtID = newEventID()
 		}
@@ -481,8 +520,8 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 			ID:        evtID,
 			Type:      eventTypeTurn,
 			Timestamp: now,
-			Messages:  messages,
-			Usage:     usage,
+			Messages:  copyMessages(messages),
+			Usage:     sumUsage(priorUsage, usage),
 			Metadata: map[string]any{
 				"suspended": true,
 			},
@@ -524,13 +563,16 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 
 	return s.withRollback(ctx, func() {
 		now := time.Now()
-		evtID := s.data.Events[len(s.data.Events)-1].ID
+		prev := s.data.Events[len(s.data.Events)-1]
 		evt := &event{
-			ID:        evtID,
+			ID:        prev.ID,
 			Type:      eventTypeTurn,
 			Timestamp: now,
-			Messages:  messages,
-			Usage:     usage,
+			Messages:  copyMessages(messages),
+			// The replaced suspended event's usage covers tokens already
+			// paid before suspension; the agent passes only the resume
+			// call's own usage. Sum so TotalUsage reflects both phases.
+			Usage: sumUsage(prev.Usage, usage),
 		}
 		s.data.Events[len(s.data.Events)-1] = evt
 		s.data.Suspended = false
