@@ -32,7 +32,9 @@ func MatchGlob(pattern, value string) bool {
 	return matched
 }
 
-// MatchDomain checks if a URL's host matches or is a subdomain of the given domain.
+// MatchDomain checks if a URL's host matches or is a subdomain of the given
+// domain. Matching is case-insensitive and tolerates a trailing dot on either
+// side (https://EXAMPLE.COM. matches example.com).
 func MatchDomain(urlStr, domain string) bool {
 	// Ensure the string has a scheme so url.Parse treats it as absolute.
 	if !strings.Contains(urlStr, "://") {
@@ -50,10 +52,37 @@ func MatchDomain(urlStr, domain string) bool {
 		host = strings.Trim(h, "[]")
 	}
 
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
+	if host == "" || domain == "" {
+		return false
+	}
+
 	if host == domain {
 		return true
 	}
 	return strings.HasSuffix(host, "."+domain)
+}
+
+// MatchURLSpecifier matches a URL specifier pattern against a URL. Three
+// pattern forms are supported:
+//   - "domain:example.com" matches the URL's host (exact or subdomain)
+//   - a bare domain with no wildcards, scheme, or path (e.g. "example.com")
+//     is treated the same as "domain:example.com"
+//   - anything else is glob-matched against the full URL string
+//
+// Domain-based forms are preferred: a glob like "*example.com*" also matches
+// "https://example.com.attacker.net".
+func MatchURLSpecifier(pattern, urlStr string) bool {
+	if domain, ok := strings.CutPrefix(pattern, "domain:"); ok {
+		return MatchDomain(urlStr, domain)
+	}
+	if !strings.ContainsAny(pattern, "*?{") &&
+		!strings.Contains(pattern, "://") &&
+		!strings.Contains(pattern, "/") {
+		return MatchDomain(urlStr, pattern)
+	}
+	return MatchGlob(pattern, urlStr)
 }
 
 // MatchPath performs glob-style matching on file paths.
@@ -75,9 +104,11 @@ func MatchPath(pattern, path string) bool {
 // If pathMode is true, * matches [^/]* (single segment); otherwise * matches .*.
 // ** always matches .* (any path).
 // Handles {a,b,c} alternatives.
+// The (?s) flag makes . match newlines so wildcards cannot be escaped by
+// embedding a newline in the value (relevant for deny rules on commands).
 func globToRegex(glob string, pathMode bool) string {
 	var result strings.Builder
-	result.WriteString("^")
+	result.WriteString("(?s)^")
 
 	i := 0
 	for i < len(glob) {

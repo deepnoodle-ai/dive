@@ -40,7 +40,7 @@ func TestManager(t *testing.T) {
 		manager := NewManager(config, nil)
 
 		tool := &mockTool{name: "Bash"}
-		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /tmp/dive-test-no-such-dir"}`)}
 
 		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
@@ -228,7 +228,7 @@ func TestManager(t *testing.T) {
 		manager := NewManager(config, nil)
 
 		tool := &mockTool{name: "Bash"}
-		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /tmp/dive-test-no-such-dir"}`)}
 
 		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.Error(t, err)
@@ -433,7 +433,7 @@ func TestMatchGlob(t *testing.T) {
 		// Specifier patterns
 		{"go test*", "go test ./...", true},
 		{"go test*", "go build", false},
-		{"rm -rf*", "rm -rf /", true},
+		{"rm -rf*", "rm -rf /tmp/dive-test-no-such-dir", true},
 		{"rm -rf*", "rm foo", false},
 	}
 
@@ -774,7 +774,7 @@ func TestConfirmDialogInput(t *testing.T) {
 }
 
 func TestConfirmAllowSession(t *testing.T) {
-	t.Run("AllowSession adds category to session allowlist", func(t *testing.T) {
+	t.Run("AllowSession grants the exact approved command", func(t *testing.T) {
 		config := &Config{Mode: ModeDefault}
 
 		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
@@ -790,10 +790,10 @@ func TestConfirmAllowSession(t *testing.T) {
 		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
 
-		// Category should now be in session allowlist
-		assert.True(t, manager.IsSessionAllowed("bash"))
+		// The grant is scoped, not a broad category grant
+		assert.False(t, manager.IsSessionAllowed("bash"))
 
-		// Second call should skip dialog entirely (session allowed)
+		// Second identical call should skip dialog entirely
 		dialogCalled := false
 		dialog.showFunc = func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
 			dialogCalled = true
@@ -803,9 +803,15 @@ func TestConfirmAllowSession(t *testing.T) {
 		err = manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
 		assert.False(t, dialogCalled)
+
+		// A different command on the same tool must prompt again
+		otherCall := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /tmp/dive-test-no-such-dir"}`)}
+		err = manager.EvaluateToolUse(context.Background(), tool, otherCall)
+		assert.NoError(t, err)
+		assert.True(t, dialogCalled)
 	})
 
-	t.Run("AllowSession uses correct category for edit tools", func(t *testing.T) {
+	t.Run("AllowSession grant does not extend to other tools in the category", func(t *testing.T) {
 		config := &Config{Mode: ModeDefault}
 
 		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
@@ -814,15 +820,142 @@ func TestConfirmAllowSession(t *testing.T) {
 
 		manager := NewManager(config, dialog)
 
-		tool := &mockTool{name: "Write"}
-		call := &llm.ToolUseContent{Name: "Write", Input: []byte(`{}`)}
+		// Approve a Write call with no extractable specifier (whole-tool grant)
+		writeTool := &mockTool{name: "Write"}
+		writeCall := &llm.ToolUseContent{Name: "Write", Input: []byte(`{}`)}
+		err := manager.EvaluateToolUse(context.Background(), writeTool, writeCall)
+		assert.NoError(t, err)
 
+		// No category grants were created
+		assert.False(t, manager.IsSessionAllowed("edit"))
+
+		// Another tool in the same "edit" category still prompts
+		dialogCalled := false
+		dialog.showFunc = func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			dialogCalled = true
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}
+		editTool := &mockTool{name: "Edit"}
+		editCall := &llm.ToolUseContent{Name: "Edit", Input: []byte(`{}`)}
+		err = manager.EvaluateToolUse(context.Background(), editTool, editCall)
+		assert.NoError(t, err)
+		assert.True(t, dialogCalled)
+
+		// But the approved tool itself is covered
+		dialogCalled = false
+		err = manager.EvaluateToolUse(context.Background(), writeTool, writeCall)
+		assert.NoError(t, err)
+		assert.False(t, dialogCalled)
+	})
+
+	t.Run("AllowSession grants domain scope for WebFetch", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Confirmed: true, AllowSession: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "WebFetch"}
+		call := &llm.ToolUseContent{Name: "WebFetch", Input: []byte(`{"url": "https://example.com/page"}`)}
 		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.NoError(t, err)
 
-		// Write is in the "edit" category
-		assert.True(t, manager.IsSessionAllowed("edit"))
-		assert.False(t, manager.IsSessionAllowed("bash"))
+		// Other URLs on the same domain are covered
+		dialogCalled := false
+		dialog.showFunc = func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			dialogCalled = true
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}
+		sameDomain := &llm.ToolUseContent{Name: "WebFetch", Input: []byte(`{"url": "https://example.com/other"}`)}
+		err = manager.EvaluateToolUse(context.Background(), tool, sameDomain)
+		assert.NoError(t, err)
+		assert.False(t, dialogCalled)
+
+		// A lookalike domain still prompts
+		lookalike := &llm.ToolUseContent{Name: "WebFetch", Input: []byte(`{"url": "https://example.com.attacker.net/"}`)}
+		err = manager.EvaluateToolUse(context.Background(), tool, lookalike)
+		assert.NoError(t, err)
+		assert.True(t, dialogCalled)
+	})
+
+	t.Run("glob characters in an approved command do not widen the grant", func(t *testing.T) {
+		config := &Config{Mode: ModeDefault}
+
+		dialog := &testDialog{showFunc: func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			return &dive.DialogOutput{Confirmed: true, AllowSession: true}, nil
+		}}
+
+		manager := NewManager(config, dialog)
+
+		tool := &mockTool{name: "Bash"}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm /tmp/dive-test-no-such-dir/*"}`)}
+		err := manager.EvaluateToolUse(context.Background(), tool, call)
+		assert.NoError(t, err)
+
+		// The * in the approved command was granted literally, not as a
+		// wildcard; a different rm command must still prompt.
+		dialogCalled := false
+		dialog.showFunc = func(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
+			dialogCalled = true
+			return &dive.DialogOutput{Confirmed: true}, nil
+		}
+		other := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm /tmp/dive-test-no-such-dir/other"}`)}
+		err = manager.EvaluateToolUse(context.Background(), tool, other)
+		assert.NoError(t, err)
+		assert.True(t, dialogCalled)
+	})
+}
+
+func TestAllowToolForSession(t *testing.T) {
+	t.Run("pattern grant covers matching commands only", func(t *testing.T) {
+		config := &Config{Mode: ModeDontAsk}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		tool := &mockTool{name: "Bash"}
+		manager.AllowToolForSession("Bash", "git status*")
+
+		ok := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "git status --short"}`)}
+		assert.NoError(t, manager.EvaluateToolUse(ctx, tool, ok))
+
+		other := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "git push"}`)}
+		assert.Error(t, manager.EvaluateToolUse(ctx, tool, other))
+
+		// Compound commands are not covered by an allow-side grant
+		compound := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "git status; rm -rf /tmp/dive-test-no-such-dir"}`)}
+		assert.Error(t, manager.EvaluateToolUse(ctx, tool, compound))
+	})
+
+	t.Run("empty specifier grants the whole tool", func(t *testing.T) {
+		config := &Config{Mode: ModeDontAsk}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		manager.AllowToolForSession("Glob", "")
+		tool := &mockTool{name: "Glob"}
+		call := &llm.ToolUseContent{Name: "Glob", Input: []byte(`{"pattern": "*.go"}`)}
+		assert.NoError(t, manager.EvaluateToolUse(ctx, tool, call))
+
+		// Other tools are unaffected
+		readTool := &mockTool{name: "Read"}
+		readCall := &llm.ToolUseContent{Name: "Read", Input: []byte(`{"file_path": "x"}`)}
+		assert.Error(t, manager.EvaluateToolUse(ctx, readTool, readCall))
+	})
+
+	t.Run("ClearSessionAllowlist removes scoped grants", func(t *testing.T) {
+		config := &Config{Mode: ModeDontAsk}
+		manager := NewManager(config, nil)
+		ctx := context.Background()
+
+		manager.AllowToolForSession("Glob", "")
+		tool := &mockTool{name: "Glob"}
+		call := &llm.ToolUseContent{Name: "Glob", Input: []byte(`{}`)}
+		assert.NoError(t, manager.EvaluateToolUse(ctx, tool, call))
+
+		manager.ClearSessionAllowlist()
+		assert.Error(t, manager.EvaluateToolUse(ctx, tool, call))
 	})
 }
 
@@ -999,7 +1132,7 @@ func TestInputMatchRule(t *testing.T) {
 							return false
 						}
 						cmd, _ := m["command"].(string)
-						return cmd == "rm -rf /"
+						return cmd == "rm -rf /tmp/dive-test-no-such-dir"
 					},
 					Message: "dangerous",
 				},
@@ -1010,7 +1143,7 @@ func TestInputMatchRule(t *testing.T) {
 		tool := &mockTool{name: "Bash"}
 
 		// Matching input - should deny
-		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)}
+		call := &llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /tmp/dive-test-no-such-dir"}`)}
 		err := manager.EvaluateToolUse(context.Background(), tool, call)
 		assert.Error(t, err)
 		assert.Equal(t, "dangerous", err.Error())
@@ -1224,7 +1357,7 @@ func TestIntegrationFlow(t *testing.T) {
 		// rm command should be denied by specifier rule
 		err = manager.EvaluateToolUse(ctx,
 			&mockTool{name: "Bash"},
-			&llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /"}`)})
+			&llm.ToolUseContent{Name: "Bash", Input: []byte(`{"command": "rm -rf /tmp/dive-test-no-such-dir"}`)})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "rm commands are not allowed")
 		assert.Equal(t, 0, dialogCalls) // deny rules don't trigger dialog
