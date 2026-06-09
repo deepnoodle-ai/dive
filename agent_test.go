@@ -143,14 +143,15 @@ func (m *mockLLM) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respon
 
 // mockTool is a simple tool for testing tool call flows.
 type mockTool struct {
-	name     string
-	callFunc func(ctx context.Context, input any) (*ToolResult, error)
+	name        string
+	callFunc    func(ctx context.Context, input any) (*ToolResult, error)
+	annotations *ToolAnnotations
 }
 
 func (t *mockTool) Name() string                  { return t.name }
 func (t *mockTool) Description() string           { return "mock tool" }
 func (t *mockTool) Schema() *Schema               { return nil }
-func (t *mockTool) Annotations() *ToolAnnotations { return nil }
+func (t *mockTool) Annotations() *ToolAnnotations { return t.annotations }
 func (t *mockTool) Call(ctx context.Context, input any) (*ToolResult, error) {
 	return t.callFunc(ctx, input)
 }
@@ -890,6 +891,149 @@ func TestParallelToolExecution(t *testing.T) {
 
 		// Both tools should have triggered the PostToolUse hook
 		assert.Equal(t, hookCalls.Load(), int32(2))
+	})
+}
+
+// TestSequentialOnlyHint verifies that when a batch contains any tool with
+// SequentialOnlyHint set, the agent falls back to sequential execution even
+// when ParallelToolExecution is enabled.
+func TestSequentialOnlyHint(t *testing.T) {
+	t.Run("hint forces sequential fallback", func(t *testing.T) {
+		callCount := 0
+		var concurrent atomic.Int32
+		var maxConcurrent atomic.Int32
+
+		mock := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{ID: "t1", Name: "parallel_tool", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "t2", Name: "serial_tool", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "t3", Name: "parallel_tool", Input: []byte(`{}`)},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		trackConcurrency := func(ctx context.Context, input any) (*ToolResult, error) {
+			cur := concurrent.Add(1)
+			defer concurrent.Add(-1)
+			for {
+				old := maxConcurrent.Load()
+				if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			return NewToolResultText("done"), nil
+		}
+
+		parallelTool := &mockTool{name: "parallel_tool", callFunc: trackConcurrency}
+		serialTool := &mockTool{
+			name:        "serial_tool",
+			callFunc:    trackConcurrency,
+			annotations: &ToolAnnotations{SequentialOnlyHint: true},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:                 mock,
+			Tools:                 []Tool{parallelTool, serialTool},
+			ParallelToolExecution: true,
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use tools"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+		assert.Len(t, resp.ToolCallResults(), 3)
+
+		assert.Equal(t, int32(1), maxConcurrent.Load(),
+			"sequential-only tool in batch should force sequential execution, max concurrent was %d", maxConcurrent.Load())
+	})
+
+	t.Run("no hint preserves parallel execution", func(t *testing.T) {
+		callCount := 0
+		var concurrent atomic.Int32
+		var maxConcurrent atomic.Int32
+
+		mock := &mockLLM{
+			generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &llm.Response{
+						ID:    "resp_1",
+						Model: "test-model",
+						Role:  llm.Assistant,
+						Content: []llm.Content{
+							&llm.ToolUseContent{ID: "t1", Name: "tool_a", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "t2", Name: "tool_a", Input: []byte(`{}`)},
+							&llm.ToolUseContent{ID: "t3", Name: "tool_a", Input: []byte(`{}`)},
+						},
+						Type:       "message",
+						StopReason: "tool_use",
+						Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+					}, nil
+				}
+				return &llm.Response{
+					ID:         "resp_2",
+					Model:      "test-model",
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+					Type:       "message",
+					StopReason: "stop",
+					Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+				}, nil
+			},
+			nameFunc: func() string { return "test-model" },
+		}
+
+		tool := &mockTool{
+			name: "tool_a",
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				cur := concurrent.Add(1)
+				defer concurrent.Add(-1)
+				for {
+					old := maxConcurrent.Load()
+					if cur <= old || maxConcurrent.CompareAndSwap(old, cur) {
+						break
+					}
+				}
+				time.Sleep(20 * time.Millisecond)
+				return NewToolResultText("done"), nil
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:                 mock,
+			Tools:                 []Tool{tool},
+			ParallelToolExecution: true,
+		})
+		assert.NoError(t, err)
+
+		resp, err := agent.CreateResponse(context.Background(), WithInput("Use tools"))
+		assert.NoError(t, err)
+		assert.Equal(t, resp.OutputText(), "Done")
+		assert.True(t, maxConcurrent.Load() > 1,
+			"expected concurrent execution without the hint, max concurrent was %d", maxConcurrent.Load())
 	})
 }
 

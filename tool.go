@@ -12,13 +12,20 @@ import (
 // ToolAnnotations contains optional metadata hints that describe a tool's behavior.
 // These hints help agents and permission systems make decisions about tool usage.
 type ToolAnnotations struct {
-	Title           string         `json:"title,omitempty"`
-	ReadOnlyHint    bool           `json:"readOnlyHint,omitempty"`
-	DestructiveHint bool           `json:"destructiveHint,omitempty"`
-	IdempotentHint  bool           `json:"idempotentHint,omitempty"`
-	OpenWorldHint   bool           `json:"openWorldHint,omitempty"`
-	EditHint        bool           `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
-	Extra           map[string]any `json:"extra,omitempty"`
+	Title           string `json:"title,omitempty"`
+	ReadOnlyHint    bool   `json:"readOnlyHint,omitempty"`
+	DestructiveHint bool   `json:"destructiveHint,omitempty"`
+	IdempotentHint  bool   `json:"idempotentHint,omitempty"`
+	OpenWorldHint   bool   `json:"openWorldHint,omitempty"`
+	EditHint        bool   `json:"editHint,omitempty"` // Indicates file edit operations for acceptEdits mode
+	// SequentialOnlyHint marks a tool as unsafe for parallel execution.
+	// When the agent has ParallelToolExecution enabled and a batch of tool
+	// calls includes ANY tool with this hint set, the entire batch falls back
+	// to sequential execution. Use for tools that mutate shared state (a
+	// working-directory chdir, a non-thread-safe SDK, a singleton resource).
+	// Default false = parallel-safe, matching the existing behavior.
+	SequentialOnlyHint bool           `json:"sequentialOnlyHint,omitempty"`
+	Extra              map[string]any `json:"extra,omitempty"`
 }
 
 func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
@@ -29,6 +36,9 @@ func (a *ToolAnnotations) MarshalJSON() ([]byte, error) {
 		"idempotentHint":  a.IdempotentHint,
 		"openWorldHint":   a.OpenWorldHint,
 		"editHint":        a.EditHint,
+	}
+	if a.SequentialOnlyHint {
+		data["sequentialOnlyHint"] = a.SequentialOnlyHint
 	}
 	if a.Extra != nil {
 		for k, v := range a.Extra {
@@ -50,15 +60,18 @@ func (a *ToolAnnotations) UnmarshalJSON(data []byte) error {
 	}
 	// Handle boolean hints
 	boolFields := map[string]*bool{
-		"readOnlyHint":    &a.ReadOnlyHint,
-		"destructiveHint": &a.DestructiveHint,
-		"idempotentHint":  &a.IdempotentHint,
-		"openWorldHint":   &a.OpenWorldHint,
-		"editHint":        &a.EditHint,
+		"readOnlyHint":       &a.ReadOnlyHint,
+		"destructiveHint":    &a.DestructiveHint,
+		"idempotentHint":     &a.IdempotentHint,
+		"openWorldHint":      &a.OpenWorldHint,
+		"editHint":           &a.EditHint,
+		"sequentialOnlyHint": &a.SequentialOnlyHint,
 	}
 	for name, field := range boolFields {
 		if val, ok := rawMap[name]; ok {
-			json.Unmarshal(val, field)
+			if err := json.Unmarshal(val, field); err != nil {
+				return fmt.Errorf("tool annotations: invalid value for %q: %w", name, err)
+			}
 			delete(rawMap, name)
 		}
 	}
