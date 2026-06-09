@@ -99,8 +99,8 @@ type TextEditorToolOptions struct {
 	FileSystem FileSystem
 
 	// WorkspaceDir restricts operations to paths within this directory.
-	// Defaults to the current working directory if empty.
-	// Ignored when Validator is set.
+	// If empty, no workspace restriction is applied (access to the entire
+	// filesystem). Ignored when Validator is set.
 	WorkspaceDir string
 
 	// Validator is an optional shared PathValidator. When set, it is used
@@ -133,17 +133,22 @@ func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*Te
 		resolvedOpts.MaxFileSize = MaxFileSize // Default 1MB
 	}
 	var pathValidator *PathValidator
+	var configErr error
 	if resolvedOpts.Validator != nil {
 		pathValidator = resolvedOpts.Validator
 	} else if resolvedOpts.WorkspaceDir != "" {
-		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
+		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		}
 	}
 	return dive.ToolAdapter(&TextEditorTool{
 		typeString:    resolvedOpts.Type,
 		name:          resolvedOpts.Name,
 		fs:            resolvedOpts.FileSystem,
 		pathValidator: pathValidator,
-		fileHistory:   make(map[string][]string),
+		workspaceDir:  resolvedOpts.WorkspaceDir,
+		configErr:     configErr,
 		maxFileSize:   resolvedOpts.MaxFileSize,
 	})
 }
@@ -155,8 +160,8 @@ func NewTextEditorTool(opts ...TextEditorToolOptions) *dive.TypedToolAdapter[*Te
 // files with commands that Claude models are specifically trained to use
 // effectively.
 //
-// The tool maintains edit history per file and provides detailed feedback
-// with code snippets showing the context around each change.
+// The tool provides detailed feedback with code snippets showing the
+// context around each change.
 //
 // Compatibility: This tool is designed for use with Anthropic Claude models.
 // The Type field in options should match the model version being used:
@@ -168,7 +173,8 @@ type TextEditorTool struct {
 	name          string
 	fs            FileSystem
 	pathValidator *PathValidator
-	fileHistory   map[string][]string // Edit history for potential undo
+	workspaceDir  string
+	configErr     error
 	maxFileSize   int
 }
 
@@ -283,6 +289,13 @@ func (t *TextEditorTool) Annotations() *dive.ToolAnnotations {
 // All paths must be absolute. Returns detailed feedback including
 // code snippets showing context around changes.
 func (t *TextEditorTool) Call(ctx context.Context, input *TextEditorToolInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	if err := t.validatePath(input.Command, input.Path); err != nil {
 		return dive.NewToolResultError(err.Error()), nil
 	}
@@ -447,9 +460,6 @@ func (t *TextEditorTool) handleStrReplace(path string, oldStr, newStr *string) (
 		return dive.NewToolResultError(fmt.Sprintf("No replacement was performed. Multiple occurrences of old_str `%s` in lines %v. Please ensure it is unique", *oldStr, lineNumbers)), nil
 	}
 
-	// Save original content to history
-	t.fileHistory[path] = append(t.fileHistory[path], content)
-
 	// Perform replacement
 	newContent := strings.Replace(content, *oldStr, newStrValue, 1)
 
@@ -489,9 +499,6 @@ func (t *TextEditorTool) handleInsert(path string, insertLine *int, newStr *stri
 	if *insertLine < 0 || *insertLine > nLines {
 		return dive.NewToolResultError(fmt.Sprintf("invalid `insert_line` parameter: %d. It should be within the range [0, %d]", *insertLine, nLines)), nil
 	}
-
-	// Save original content to history
-	t.fileHistory[path] = append(t.fileHistory[path], content)
 
 	// Insert new content
 	newStrLines := strings.Split(*newStr, "\n")

@@ -43,8 +43,8 @@ type EditToolOptions struct {
 	MaxFileSize int64
 
 	// WorkspaceDir restricts file edits to paths within this directory.
-	// Defaults to the current working directory if empty.
-	// Ignored when Validator is set.
+	// If empty, no workspace restriction is applied (access to the entire
+	// filesystem). Ignored when Validator is set.
 	WorkspaceDir string
 
 	// Validator is an optional shared PathValidator. When set, it is used
@@ -70,6 +70,8 @@ type EditToolOptions struct {
 type EditTool struct {
 	maxFileSize   int64
 	pathValidator *PathValidator
+	workspaceDir  string
+	configErr     error
 }
 
 // NewEditTool creates a new EditTool with the given options.
@@ -83,14 +85,20 @@ func NewEditTool(opts ...EditToolOptions) *dive.TypedToolAdapter[*EditInput] {
 		resolvedOpts.MaxFileSize = 10 * 1024 * 1024 // 10MB
 	}
 	var pathValidator *PathValidator
+	var configErr error
 	if resolvedOpts.Validator != nil {
 		pathValidator = resolvedOpts.Validator
 	} else if resolvedOpts.WorkspaceDir != "" {
-		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
+		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		}
 	}
 	return dive.ToolAdapter(&EditTool{
 		maxFileSize:   resolvedOpts.MaxFileSize,
 		pathValidator: pathValidator,
+		workspaceDir:  resolvedOpts.WorkspaceDir,
+		configErr:     configErr,
 	})
 }
 
@@ -191,6 +199,13 @@ func (t *EditTool) PreviewCall(ctx context.Context, input *EditInput) *dive.Tool
 // On success, returns the replacement count and a diff showing context
 // around the changes.
 func (t *EditTool) Call(ctx context.Context, input *EditInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	// Validate inputs
 	if input.OldString == input.NewString {
 		return dive.NewToolResultError("old_string and new_string must be different"), nil

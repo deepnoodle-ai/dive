@@ -25,8 +25,8 @@ type WriteFileInput struct {
 // WriteFileToolOptions configures the behavior of [WriteFileTool].
 type WriteFileToolOptions struct {
 	// WorkspaceDir restricts file writes to paths within this directory.
-	// Defaults to the current working directory if empty.
-	// Ignored when Validator is set.
+	// If empty, no workspace restriction is applied (access to the entire
+	// filesystem). Ignored when Validator is set.
 	WorkspaceDir string
 
 	// Validator is an optional shared PathValidator. When set, it is used
@@ -48,6 +48,8 @@ type WriteFileToolOptions struct {
 // permission system should be used to control which files can be written.
 type WriteFileTool struct {
 	pathValidator *PathValidator
+	workspaceDir  string
+	configErr     error
 }
 
 // NewWriteFileTool creates a new WriteFileTool with the given options.
@@ -57,13 +59,19 @@ func NewWriteFileTool(opts ...WriteFileToolOptions) *dive.TypedToolAdapter[*Writ
 		options = opts[0]
 	}
 	var pathValidator *PathValidator
+	var configErr error
 	if options.Validator != nil {
 		pathValidator = options.Validator
 	} else if options.WorkspaceDir != "" {
-		pathValidator, _ = NewPathValidator(options.WorkspaceDir)
+		pathValidator, configErr = NewPathValidator(options.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", options.WorkspaceDir, configErr)
+		}
 	}
 	return dive.ToolAdapter(&WriteFileTool{
 		pathValidator: pathValidator,
+		workspaceDir:  options.WorkspaceDir,
+		configErr:     configErr,
 	})
 }
 
@@ -108,6 +116,13 @@ func (t *WriteFileTool) PreviewCall(ctx context.Context, input *WriteFileInput) 
 // Creates parent directories as needed. Overwrites existing files.
 // Returns the number of bytes written on success.
 func (t *WriteFileTool) Call(ctx context.Context, input *WriteFileInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	filePath := input.FilePath
 	if filePath == "" {
 		return dive.NewToolResultError("Error: No file path provided. Please provide a file path either in the constructor or as an argument."), nil
