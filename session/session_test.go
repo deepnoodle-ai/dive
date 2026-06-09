@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
@@ -1216,4 +1217,162 @@ func TestSaveSuspendedTurnCopiesCallerMessages(t *testing.T) {
 	msgs, err = sess.Messages(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, msgs[len(msgs)-1].Text(), "done")
+}
+
+// ---------------------------------------------------------------------------
+// FileStore Open caching (review §3.3: double-Open divergence)
+// ---------------------------------------------------------------------------
+
+func TestFileStoreOpenReturnsSharedInstance(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	ctx := context.Background()
+
+	h1, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+	h2, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+
+	// Both handles must be the same shared instance, mirroring MemoryStore.
+	assert.True(t, h1 == h2)
+
+	// A turn saved through one handle is visible through the other.
+	assert.NoError(t, h1.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("one")}, nil))
+	msgs, err := h2.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(msgs))
+	assert.Equal(t, "one", msgs[0].Text())
+
+	// Distinct IDs still get distinct sessions.
+	other, err := store.Open(ctx, "s2")
+	assert.NoError(t, err)
+	assert.True(t, h1 != other)
+}
+
+func TestFileStoreDoubleOpenFullRewriteNoDataLoss(t *testing.T) {
+	// The original §3.3 data-loss scenario: open the same ID twice, append
+	// a turn through each handle, then trigger a full file rewrite through
+	// one of them. Before Open caching, each Open returned a divergent
+	// in-memory copy and the rewrite silently deleted the other handle's
+	// turn from disk.
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	ctx := context.Background()
+
+	h1, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+	h2, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+
+	assert.NoError(t, h1.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("from-h1")}, nil))
+	assert.NoError(t, h2.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("from-h2")}, nil))
+
+	// SaveSuspendedTurn performs a full rewrite of the JSONL file from h1's
+	// in-memory state.
+	assert.NoError(t, h1.SaveSuspendedTurn(ctx, []*llm.Message{
+		llm.NewUserTextMessage("suspend-turn"),
+	}, nil, singleSuspensionState()))
+
+	// Re-read from disk with a fresh store: every turn must have survived.
+	store2, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	got, err := store2.Open(ctx, "s1")
+	assert.NoError(t, err)
+	msgs, err := got.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(msgs))
+	assert.Equal(t, "from-h1", msgs[0].Text())
+	assert.Equal(t, "from-h2", msgs[1].Text())
+	assert.Equal(t, "suspend-turn", msgs[2].Text())
+	assert.True(t, got.IsSuspended())
+
+	// store.Put is the other full-rewrite path; it must also rewrite from
+	// the single shared state.
+	assert.NoError(t, h2.CancelSuspension(ctx))
+	assert.NoError(t, store.Put(ctx, h1))
+	store3, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	got, err = store3.Open(ctx, "s1")
+	assert.NoError(t, err)
+	msgs, err = got.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(msgs))
+	assert.Equal(t, "from-h1", msgs[0].Text())
+	assert.Equal(t, "from-h2", msgs[1].Text())
+}
+
+func TestFileStoreDeleteEvictsCachedSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	ctx := context.Background()
+
+	h1, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+	assert.NoError(t, h1.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("old")}, nil))
+
+	assert.NoError(t, store.Delete(ctx, "s1"))
+
+	// A subsequent Open must create fresh state, not resurrect the deleted
+	// session from the cache.
+	h2, err := store.Open(ctx, "s1")
+	assert.NoError(t, err)
+	assert.True(t, h1 != h2)
+	msgs, err := h2.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(msgs))
+}
+
+func TestFileStorePutAdoptsSessionIntoCache(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	ctx := context.Background()
+
+	orig, err := store.Open(ctx, "orig")
+	assert.NoError(t, err)
+	assert.NoError(t, orig.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("hello")}, nil))
+
+	// Fork creates a detached session; Put must both persist it and adopt
+	// it into the cache so Open aliases the same instance (as MemoryStore
+	// does).
+	forked := orig.Fork("forked")
+	assert.NoError(t, store.Put(ctx, forked))
+
+	got, err := store.Open(ctx, "forked")
+	assert.NoError(t, err)
+	assert.True(t, got == forked)
+}
+
+func TestFileStoreConcurrentOpenSingleInstance(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.NewFileStore(dir)
+	assert.NoError(t, err)
+	ctx := context.Background()
+
+	// Concurrent Opens of the same ID must all resolve to one instance and
+	// concurrent SaveTurns through them must not race (run under -race).
+	const n = 8
+	handles := make([]*session.Session, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			h, err := store.Open(ctx, "s1")
+			assert.NoError(t, err)
+			assert.NoError(t, h.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("hi")}, nil))
+			handles[i] = h
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 1; i < n; i++ {
+		assert.True(t, handles[0] == handles[i])
+	}
+	msgs, err := handles[0].Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, n, len(msgs))
 }

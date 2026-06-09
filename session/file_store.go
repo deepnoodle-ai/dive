@@ -48,7 +48,12 @@ var ErrInvalidSessionID = errors.New("invalid session ID")
 //
 // Within a single process, a FileStore is safe for concurrent use across
 // distinct sessions and serializes writes to the same session via an
-// internal mutex.
+// internal mutex. Open caches live *Session instances per ID (mirroring
+// MemoryStore), so repeated Open calls for the same ID return the same
+// shared, internally-synchronized instance — two handles can never
+// diverge and clobber each other's turns on a full rewrite. Cached
+// instances are evicted by Delete and replaced by Put; they otherwise
+// live for the lifetime of the store.
 //
 // # Durability
 //
@@ -77,6 +82,11 @@ type FileStore struct {
 	mu   sync.RWMutex
 	dir  string
 	sync bool
+	// sessions caches the live *Session per ID so repeated Open calls
+	// return the same shared instance (see the concurrency model above).
+	// Guarded by mu. Never take a session's lock while holding mu — the
+	// established lock order is session first, store second.
+	sessions map[string]*Session
 }
 
 // NewFileStore creates a FileStore rooted at dir. The directory is created
@@ -105,7 +115,7 @@ func NewFileStoreWithSync(dir string, sync bool) (*FileStore, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-	return &FileStore{dir: dir, sync: sync}, nil
+	return &FileStore{dir: dir, sync: sync, sessions: make(map[string]*Session)}, nil
 }
 
 // validateID rejects session IDs that could escape the store directory.
@@ -152,12 +162,24 @@ type sessionHeader struct {
 	CompletedToolCalls []*dive.CompletedToolCall `json:"completed_tool_calls,omitempty"`
 }
 
+// Open returns the session with the given ID, creating it (and its backing
+// file) if it does not exist.
+//
+// Open caches live sessions: all callers opening the same ID receive the
+// same shared, internally-synchronized *Session instance, so turns saved
+// through one handle are immediately visible through every other. The disk
+// file is only read on the first Open for an ID (or the first after a
+// Delete); thereafter the cached instance is the authority.
 func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
 	if err := validateID(id); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if sess, ok := s.sessions[id]; ok {
+		return sess, nil
+	}
 
 	data, torn, err := s.readSession(id)
 	if err != nil {
@@ -182,10 +204,12 @@ func (s *FileStore) Open(ctx context.Context, id string) (*Session, error) {
 			return nil, err
 		}
 	}
-	return &Session{
+	sess := &Session{
 		data:     data,
 		appender: s,
-	}, nil
+	}
+	s.sessions[id] = sess
+	return sess, nil
 }
 
 func (s *FileStore) Put(ctx context.Context, sess *Session) error {
@@ -203,6 +227,9 @@ func (s *FileStore) Put(ctx context.Context, sess *Session) error {
 		return err
 	}
 	sess.appender = s
+	// Adopt the session into the cache so subsequent Opens of this ID
+	// alias it rather than a stale prior instance (mirrors MemoryStore).
+	s.sessions[sess.data.ID] = sess
 	return nil
 }
 
@@ -276,6 +303,10 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	// Evict the cached instance so a subsequent Open creates fresh state
+	// instead of resurrecting the deleted session. Any handle still held
+	// by a caller keeps working in memory but is orphaned from the store.
+	delete(s.sessions, id)
 	return nil
 }
 
