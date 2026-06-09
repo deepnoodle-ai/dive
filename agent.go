@@ -23,7 +23,61 @@ const (
 var (
 	ErrLLMNoResponse = errors.New("llm did not return a response")
 	ErrNoLLM         = errors.New("no llm provided")
+
+	// ErrReentrantSession is returned when CreateResponse is invoked on a
+	// session whose lock is already held by the calling context — i.e. a
+	// tool, hook, or subagent reachable from an in-flight CreateResponse
+	// called back into the same session ID. Without this check the nested
+	// call would deadlock waiting on a lock its own caller holds. Use a
+	// separate session for nested agent calls.
+	ErrReentrantSession = errors.New("dive: reentrant CreateResponse on a session whose turn is already in progress")
 )
+
+// GenerationError wraps a failure that occurred inside the generation loop,
+// carrying the usage, output messages, and response items accumulated before
+// the failure. When iteration N of a turn fails after earlier iterations
+// succeeded — meaning tools with real side effects may have already run and
+// tokens have already been paid for — CreateResponse still returns
+// (nil, err), but err wraps a *GenerationError so callers can recover cost
+// accounting and partial work via errors.As:
+//
+//	resp, err := agent.CreateResponse(ctx, ...)
+//	if err != nil {
+//	    var genErr *dive.GenerationError
+//	    if errors.As(err, &genErr) {
+//	        recordUsage(genErr.Usage)
+//	    }
+//	}
+//
+// The partial turn is intentionally NOT persisted to the session: a turn
+// that ends mid-loop (e.g. with a trailing tool_result and no final
+// assistant message) can violate the role-alternation invariants providers
+// enforce, permanently corrupting the saved history. Callers that want to
+// keep the partial work must reconcile and persist it themselves.
+type GenerationError struct {
+	// Err is the underlying error that terminated the generation loop.
+	Err error
+
+	// Usage is the token usage accumulated across all LLM calls that
+	// completed in the failed turn. Never nil, but may be zero-valued when
+	// the very first call failed.
+	Usage *llm.Usage
+
+	// OutputMessages are the messages produced in the turn before the
+	// failure: assistant messages and tool_result messages, in order.
+	OutputMessages []*llm.Message
+
+	// Items are the response items accumulated before the failure.
+	Items []*ResponseItem
+}
+
+func (e *GenerationError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *GenerationError) Unwrap() error {
+	return e.Err
+}
 
 // sessionLocks serializes CreateResponse calls that share a session ID.
 // Concurrent calls on the same session would otherwise interleave their
@@ -31,19 +85,42 @@ var (
 // — on suspended sessions — mixed pending-call sets. The lock is keyed by
 // Session.ID() so it also covers cross-agent usage of a single session.
 //
+// Each entry is a 1-buffered channel used as a semaphore so acquisition
+// can race against context cancellation instead of blocking forever.
+//
 // Entries accumulate in the map for the lifetime of the process; if you
-// create unbounded fresh session IDs, the memory cost is a small *sync.Mutex
+// create unbounded fresh session IDs, the memory cost is a small channel
 // per distinct ID. For typical workloads this is negligible.
 var sessionLocks sync.Map
 
-// acquireSessionLock blocks until the caller holds the exclusive lock for
-// the given session ID. The returned function releases the lock and must
-// be deferred by the caller.
-func acquireSessionLock(id string) func() {
-	v, _ := sessionLocks.LoadOrStore(id, &sync.Mutex{})
-	mu := v.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
+// sessionLockHeldKey is the context key marking that the context's call
+// chain currently holds the lock for a given session ID. Set while the lock
+// is held so a reentrant CreateResponse (from a tool/hook/subagent) fails
+// fast with ErrReentrantSession instead of deadlocking.
+type sessionLockHeldKey struct{ id string }
+
+// acquireSessionLock acquires the exclusive lock for the given session ID.
+// It returns a derived context that marks the lock as held (for reentrancy
+// detection) and a release function that must be deferred by the caller.
+//
+// It fails immediately with ErrReentrantSession when ctx already holds the
+// lock for this ID (same call chain), and with ctx.Err() if the context is
+// cancelled or times out while waiting — so a reentrant call from a
+// different goroutine that would otherwise deadlock forever instead fails
+// when the caller's deadline expires.
+func acquireSessionLock(ctx context.Context, id string) (context.Context, func(), error) {
+	if held, _ := ctx.Value(sessionLockHeldKey{id: id}).(bool); held {
+		return nil, nil, fmt.Errorf("%w (session %q)", ErrReentrantSession, id)
+	}
+	v, _ := sessionLocks.LoadOrStore(id, make(chan struct{}, 1))
+	sem := v.(chan struct{})
+	select {
+	case sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	}
+	release := func() { <-sem }
+	return context.WithValue(ctx, sessionLockHeldKey{id: id}, true), release, nil
 }
 
 // Hooks groups all agent hook slices.
@@ -89,6 +166,25 @@ type Hooks struct {
 	// Hooks run in the main agent goroutine, never from a background goroutine.
 	// Errors are logged but do not affect the response (same as PostGeneration).
 	PostBackgroundToolUse []PostBackgroundToolUseHook
+}
+
+// cloneSlices returns a copy of h with every hook slice cloned, so appends
+// to the copy never write into the original slices' backing arrays. Used by
+// NewAgent before merging extension hooks, so a caller reusing one
+// AgentOptions value across multiple NewAgent calls doesn't get
+// cross-contaminated hook registrations.
+func (h Hooks) cloneSlices() Hooks {
+	h.SessionStart = slices.Clone(h.SessionStart)
+	h.PreGeneration = slices.Clone(h.PreGeneration)
+	h.PostGeneration = slices.Clone(h.PostGeneration)
+	h.PreToolUse = slices.Clone(h.PreToolUse)
+	h.PostToolUse = slices.Clone(h.PostToolUse)
+	h.PostToolUseFailure = slices.Clone(h.PostToolUseFailure)
+	h.Stop = slices.Clone(h.Stop)
+	h.PreIteration = slices.Clone(h.PreIteration)
+	h.OnSuspend = slices.Clone(h.OnSuspend)
+	h.PostBackgroundToolUse = slices.Clone(h.PostBackgroundToolUse)
+	return h
 }
 
 // Extension bundles tools, hooks, and system prompt rules that extend an
@@ -224,7 +320,14 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	if opts.Logger == nil {
 		opts.Logger = &llm.NullLogger{}
 	}
-	// Merge extensions into opts before building the agent.
+	// Merge extensions into opts before building the agent. Clone the
+	// caller's slices first: appending directly may write into the caller's
+	// backing arrays, cross-contaminating a reused AgentOptions value
+	// across multiple NewAgent calls.
+	if len(opts.Extensions) > 0 {
+		opts.Tools = slices.Clone(opts.Tools)
+		opts.Hooks = opts.Hooks.cloneSlices()
+	}
 	for _, ext := range opts.Extensions {
 		if ext == nil {
 			continue
@@ -404,7 +507,11 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// Stateless callers (sess == nil) have no shared state to protect and
 	// skip the lock entirely.
 	if sess != nil {
-		release := acquireSessionLock(sess.ID())
+		lockCtx, release, lockErr := acquireSessionLock(ctx, sess.ID())
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		ctx = lockCtx
 		defer release()
 	}
 
@@ -472,6 +579,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	// is false, so seeds always flow into the non-resume history branch below.
 	// Returned messages are prepended to the conversation; those marked Persist
 	// are saved as a pre-turn so they survive later turns and resumes.
+	var sessionStartValues map[string]any
 	if !hasResumeIntent && len(sessionMsgs) == 0 && len(a.hooks.SessionStart) > 0 {
 		startHctx := NewHookContext()
 		startHctx.Agent = a
@@ -495,6 +603,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				persistentSeeds = append(persistentSeeds, result.Messages...)
 			}
 		}
+
+		// HookContext.Values is documented to persist across the whole hook
+		// chain within one CreateResponse call, so values set by SessionStart
+		// hooks must carry into the main hook context created below. Captured
+		// after the hooks run so a hook that replaces startHctx.Values
+		// wholesale is honored too.
+		sessionStartValues = startHctx.Values
 
 		// Persist durable seeds as their own pre-turn so they remain in history
 		// on later turns and on resume, without polluting the turn delta below.
@@ -583,8 +698,11 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	hctx.SystemPrompt = systemPrompt
 	hctx.Messages = messages
 
-	// Copy caller-provided values into hook context
+	// Copy caller-provided values into hook context, then layer any values
+	// set by SessionStart hooks on top (they ran later and already saw the
+	// caller's values). A nil source map is a no-op.
 	maps.Copy(hctx.Values, options.Values)
+	maps.Copy(hctx.Values, sessionStartValues)
 
 	// Run PreGeneration hooks
 	for _, hook := range a.hooks.PreGeneration {
@@ -663,7 +781,19 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			}
 			batch, err := a.executeToolCalls(ctx, hctx, rs.NotStartedToolCalls, resumeToolsByName, resumeCallback)
 			if err != nil {
-				return nil, err
+				// Mirror the generate loop: expose the items accumulated
+				// during the resume phase via a *GenerationError so callers
+				// can recover partial work (no LLM calls have happened yet,
+				// so usage is zero). Snapshot under the mutex — parallel
+				// tool goroutines may still be appending as we unwind.
+				resumeItemsMu.Lock()
+				itemsSnapshot := slices.Clone(resumeItems)
+				resumeItemsMu.Unlock()
+				return nil, &GenerationError{
+					Err:   err,
+					Usage: &llm.Usage{},
+					Items: itemsSnapshot,
+				}
 			}
 			resumeExtraItems = resumeItems
 			// Merge completed outcomes into the tool_result message.
@@ -680,6 +810,20 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				snap.CompletedToolCalls = append(rs.CompletedToolCalls(), snap.CompletedToolCalls...)
 				return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs, false)
 			}
+		}
+
+		// The resume phase above mutates the merged tool_result message held
+		// in rs — a pointer that is normally shared with the model-facing
+		// `messages` slice. A PreGeneration hook that replaced hctx.Messages
+		// with copies (e.g. compaction) breaks that pointer sharing, so the
+		// post-hook result updates and re-executed not-started tool results
+		// would silently vanish from what the LLM sees, leaving orphaned
+		// tool_use blocks. Re-sync by locating the suspended turn's
+		// tool_result in the slice actually being sent and substituting the
+		// merged message.
+		if rs.ToolResultMessageIdx >= 0 {
+			messages = syncMergedToolResult(messages, rs.TurnMessages[rs.ToolResultMessageIdx], rs.AssistantToolUse)
+			hctx.Messages = messages
 		}
 	}
 
@@ -724,6 +868,25 @@ generateLoop:
 	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback, model)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
+		// generate wraps loop failures in *GenerationError scoped to that
+		// single generate call. Fold in state accumulated before it —
+		// resume-phase items and prior Stop-hook continuation iterations —
+		// so the error reflects the whole turn's partial work. The partial
+		// turn is deliberately NOT saved to the session: a half-turn can
+		// violate provider role-alternation invariants (see GenerationError).
+		var genErr *GenerationError
+		if errors.As(err, &genErr) {
+			if genErr.Usage == nil {
+				genErr.Usage = &llm.Usage{}
+			}
+			accumulatedUsage.Add(genErr.Usage)
+			genErr.Usage = accumulatedUsage
+			genErr.OutputMessages = append(slices.Clone(accumulatedOutput), genErr.OutputMessages...)
+			turnItems := slices.Clone(resumeExtraItems)
+			turnItems = append(turnItems, accumulatedItems...)
+			turnItems = append(turnItems, genErr.Items...)
+			genErr.Items = turnItems
+		}
 		return nil, err
 	}
 
@@ -1187,7 +1350,10 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		}
 	}
 	callerSupplied := make(map[string]*ToolCallResult)
-	for id, result := range toolResults {
+	// Iterate sorted IDs so the merged tool_result content blocks land in a
+	// deterministic order rather than nondeterministic map order.
+	for _, id := range slices.Sorted(maps.Keys(toolResults)) {
+		result := toolResults[id]
 		toolUse := findToolUseByID(assistant, id)
 		name := ""
 		var input json.RawMessage
@@ -1366,7 +1532,7 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 						a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
 						return abortErr
 					}
-					a.logger.Debug("post-tool-use-failure hook error", "error", err)
+					a.logger.Warn("post-tool-use-failure hook error", "error", err)
 				}
 			}
 		} else {
@@ -1378,7 +1544,7 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 						a.logger.Error("post-tool-use hook aborted", "error", abortErr)
 						return abortErr
 					}
-					a.logger.Debug("post-tool-use hook error", "error", err)
+					a.logger.Warn("post-tool-use hook error", "error", err)
 				}
 			}
 		}
@@ -1405,6 +1571,86 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 		rs.UpdateToolResultContent(toolUseID, result)
 	}
 	return nil
+}
+
+// syncMergedToolResult ensures the merged tool_result message for a resumed
+// turn is present in the model-facing message slice. Normally `merged` is
+// already in the slice by shared pointer and this is a no-op. But if a
+// PreGeneration hook replaced hctx.Messages with copies, resume-phase
+// mutations to `merged` (post-hook result updates, results of re-executed
+// not-started tools) would not be visible to the LLM. This locates the
+// copied tool_result message — or, failing that, the paired assistant
+// tool_use message — by ID and substitutes the merged message, returning a
+// new slice (the input is never mutated). If the hook removed the suspended
+// turn entirely (e.g. a full-compaction rewrite), the slice is returned
+// unchanged: the hook owns the rewrite at that point.
+func syncMergedToolResult(messages []*llm.Message, merged *llm.Message, assistant *llm.Message) []*llm.Message {
+	// Fast path: merged message already present by pointer.
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i] == merged {
+			return messages
+		}
+	}
+
+	// Locate a user message holding a tool_result for one of the merged IDs.
+	mergedIDs := make(map[string]bool)
+	for _, c := range merged.Content {
+		if trc, ok := c.(*llm.ToolResultContent); ok {
+			mergedIDs[trc.ToolUseID] = true
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != llm.User {
+			continue
+		}
+		for _, c := range msg.Content {
+			if trc, ok := c.(*llm.ToolResultContent); ok && mergedIDs[trc.ToolUseID] {
+				out := slices.Clone(messages)
+				out[i] = merged
+				return out
+			}
+		}
+	}
+
+	// No matching tool_result found — the copy may predate the merged
+	// message gaining content (it starts as an empty placeholder when all
+	// suspended-turn tools were not-started). Fall back to the paired
+	// assistant tool_use message: substitute the message right after it if
+	// it's the (empty) tool_result copy, otherwise insert.
+	if assistant == nil {
+		return messages
+	}
+	assistantIDs := make(map[string]bool)
+	for _, c := range assistant.Content {
+		if tu, ok := c.(*llm.ToolUseContent); ok {
+			assistantIDs[tu.ID] = true
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != llm.Assistant {
+			continue
+		}
+		match := false
+		for _, c := range msg.Content {
+			if tu, ok := c.(*llm.ToolUseContent); ok && assistantIDs[tu.ID] {
+				match = true
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		out := slices.Clone(messages)
+		if i+1 < len(out) && out[i+1].Role == llm.User && (len(out[i+1].Content) == 0 || hasToolResultContent(out[i+1])) {
+			out[i+1] = merged
+		} else {
+			out = slices.Insert(out, i+1, merged)
+		}
+		return out
+	}
+	return messages
 }
 
 // hasToolUseContent reports whether a message contains any tool_use blocks.
@@ -1482,7 +1728,7 @@ func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback, model llm.LLM) (*generateResult, error) {
+func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback, model llm.LLM) (result *generateResult, err error) {
 
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
@@ -1512,6 +1758,25 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	// Accumulates usage across multiple LLM calls
 	totalUsage := &llm.Usage{}
 
+	// Wrap any loop failure in a *GenerationError carrying the state
+	// accumulated before the failure, so callers can recover cost
+	// accounting and partial work via errors.As. The items snapshot is
+	// taken under the mutex because parallel tool goroutines may still be
+	// appending via collectingCallback as an error unwinds.
+	defer func() {
+		if err != nil {
+			itemsMu.Lock()
+			itemsSnapshot := slices.Clone(items)
+			itemsMu.Unlock()
+			err = &GenerationError{
+				Err:            err,
+				Usage:          totalUsage,
+				OutputMessages: outputMessages,
+				Items:          itemsSnapshot,
+			}
+		}
+	}()
+
 	newMessage := func(msg *llm.Message) {
 		updatedMessages = append(updatedMessages, msg)
 		outputMessages = append(outputMessages, msg)
@@ -1524,11 +1789,18 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	generationLimit := a.toolIterationLimit + 1
 	lastIteration := false
 	for i := range generationLimit {
+		// Refresh per-iteration hook context state unconditionally, so every
+		// hook that fires during this iteration (PreIteration, PreToolUse,
+		// PostToolUse, ...) observes the current message set rather than a
+		// stale snapshot from the start of the turn. This must not depend on
+		// whether PreIteration hooks happen to be registered. The refresh is
+		// a cheap slice-header assignment — no copying.
+		hctx.Iteration = i
+		hctx.SystemPrompt = systemPrompt
+		hctx.Messages = updatedMessages
+
 		// Run PreIteration hooks
 		if len(a.hooks.PreIteration) > 0 {
-			hctx.Iteration = i
-			hctx.SystemPrompt = systemPrompt
-			hctx.Messages = updatedMessages
 			for _, hook := range a.hooks.PreIteration {
 				if err := hook(ctx, hctx); err != nil {
 					return nil, fmt.Errorf("pre-iteration hook error: %w", err)
@@ -2052,7 +2324,7 @@ func (a *Agent) executeToolCallsParallel(
 						a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
 						return nil, abortErr
 					}
-					a.logger.Debug("post-tool-use-failure hook error", "error", err)
+					a.logger.Warn("post-tool-use-failure hook error", "error", err)
 				}
 			}
 		} else {
@@ -2064,7 +2336,7 @@ func (a *Agent) executeToolCallsParallel(
 						a.logger.Error("post-tool-use hook aborted", "error", abortErr)
 						return nil, abortErr
 					}
-					a.logger.Debug("post-tool-use hook error", "error", err)
+					a.logger.Warn("post-tool-use hook error", "error", err)
 				}
 			}
 		}
@@ -2244,7 +2516,7 @@ func (a *Agent) executeOneToolCall(
 					a.logger.Error("post-tool-use-failure hook aborted", "error", abortErr)
 					return nil, abortErr
 				}
-				a.logger.Debug("post-tool-use-failure hook error", "error", err)
+				a.logger.Warn("post-tool-use-failure hook error", "error", err)
 			}
 		}
 	} else {
@@ -2256,7 +2528,7 @@ func (a *Agent) executeOneToolCall(
 					a.logger.Error("post-tool-use hook aborted", "error", abortErr)
 					return nil, abortErr
 				}
-				a.logger.Debug("post-tool-use hook error", "error", err)
+				a.logger.Warn("post-tool-use hook error", "error", err)
 			}
 		}
 	}
