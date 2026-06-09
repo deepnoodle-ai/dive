@@ -295,6 +295,7 @@ func runInteractive(ctx *cli.Context) error {
 		Rules: defaultPermissionRules(tools),
 	}
 	permManager := permission.NewManager(permConfig, tuiDialog)
+	tuiDialog.perm = permManager
 	permissionHook := permission.HookFromManager(permManager)
 
 	// Set up compaction config
@@ -639,9 +640,11 @@ func (n *monitorNotifier) notify(description string, lines []string) {
 }
 
 // tuiDialog implements dive.Dialog by routing to the App's TUI dialog system.
-// The app field is set after App creation (same pattern as the confirmer closure).
+// The app and perm fields are set after App and Manager creation (same
+// pattern as the confirmer closure).
 type tuiDialog struct {
-	app *App
+	app  *App
+	perm *permission.Manager
 }
 
 func (d *tuiDialog) Show(ctx context.Context, in *dive.DialogInput) (*dive.DialogOutput, error) {
@@ -676,11 +679,12 @@ func (d *tuiDialog) showConfirm(ctx context.Context, in *dive.DialogInput) (*div
 	}
 	question := tp.question
 
-	// Get tool category for "allow all X this session" option
+	// Describe what an "allow all X this session" approval would grant
 	categoryLabel := "this action"
-	if in.Tool != nil {
-		category := permission.GetToolCategory(in.Tool.Name())
-		categoryLabel = category.Label
+	if d.perm != nil {
+		categoryLabel = d.perm.SessionGrantLabel(in.Tool, in.Call)
+	} else if in.Tool != nil {
+		categoryLabel = in.Tool.Name() + " operations"
 	}
 
 	confirmChan := make(chan ConfirmResult, 1)

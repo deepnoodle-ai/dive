@@ -83,6 +83,17 @@ Default specifier fields:
 
 Override with `Config.SpecifierFields` for custom tools.
 
+**Deny rules fail closed:** if a deny rule has a specifier but no specifier can be extracted from the tool input (unknown tool shape, missing field, unparsable JSON), the rule matches and the call is denied. Allow and ask rules fail open (they simply don't match).
+
+### How Specifiers Are Matched
+
+Matching is type-aware per tool (`DefaultSpecifierMatchers`, overridable via `Config.SpecifierMatchers`):
+
+- **Bash (command-aware).** The command is split on unquoted shell control operators (`;`, `&&`, `||`, `|`, `&`, newlines). An *allow* rule matches only if **every** segment matches the pattern, and never matches commands containing command/process substitution (`$(...)`, backticks, `<(...)`) — so `Bash(go test *)` does not authorize `go test ./...; rm -rf /` or `go test $(...)`. A *deny* rule matches if the full command **or any** segment matches, so `Bash(*rm*)` catches `ls\nrm -rf /`. Note: a compound command only matches an allow rule if all of its segments match that one rule; segments covered by different allow rules fall through to ask.
+- **Read/Write/Edit (path-aware).** Paths are cleaned before matching (`/safe/dir/../../etc/shadow` becomes `/etc/shadow`), `*` stays within one path segment, and `**` crosses segments — so `Read(/safe/dir/*)` covers files directly in that directory and `Read(/safe/dir/**)` covers the whole tree. Deny rules additionally match the absolutized form of relative paths. Symlinks are **not** resolved — pair path rules with the toolkit's workspace validation for filesystem-level enforcement.
+- **WebFetch (domain-aware).** `domain:example.com` (or a bare domain like `example.com`) matches the URL's host exactly or as a subdomain, case-insensitively — `*example.com*`-style globs are discouraged because they also match `https://example.com.attacker.net`. Patterns containing wildcards, a scheme, or a path are glob-matched against the full URL.
+- **Other tools** fall back to plain glob matching (`MatchGlob`).
+
 ### Parsing Rules from Strings
 
 ```go
@@ -115,21 +126,29 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 When using the full `Manager`:
 
 ```text
-Session Allowlist -> Deny Rules -> Allow Rules -> Ask Rules -> Mode Check -> Default (confirm)
+Deny Rules -> Session Allowlist -> Allow Rules -> Ask Rules -> Mode Check -> Default (confirm)
 ```
+
+Deny rules are absolute: they are evaluated first and cannot be bypassed by session grants or by any mode, including `BypassPermissions`.
 
 ### Session Allowlists
 
-Users can approve "allow all X this session" for a tool category:
+When a user approves a dialog with "allow for session", the grant is scoped to the tool **and the approved value**: the exact command for Bash, the exact path for file tools, the URL's domain for WebFetch, or the whole tool when no specifier can be extracted. Approving `ls` does not approve `rm -rf /`, and approving one Bash command does not approve other command-like tools.
+
+Hosts can also grant scopes programmatically, with an optional specifier pattern:
 
 ```go
 manager := permission.NewManager(config, dialog)
 hook := permission.HookFromManager(manager)
 
-// Later, allow a category for the session
-manager.AllowForSession("bash")
-manager.AllowForSession(permission.CategoryEdit.Key)
+// Grant a specific command prefix for the session
+manager.AllowToolForSession("Bash", "git status*")
+
+// Grant an entire tool for the session
+manager.AllowToolForSession("Glob", "")
 ```
+
+`AllowForSession(categoryKey)` (category-wide grants like `"bash"`) is deprecated: categories are very broad, collapsing every command-like tool into one bucket. It is still honored for backward compatibility, but dialog approvals no longer create category grants.
 
 ### DontAsk Mode
 
