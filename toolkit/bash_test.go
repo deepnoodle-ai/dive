@@ -260,3 +260,22 @@ func TestBashTool_Call_ReturnsWorkspaceConfigErrorWhenValidatorMissing(t *testin
 	assert.Contains(t, result.Content[0].Text, "WorkspaceDir \"/bad/workspace\"")
 	assert.Contains(t, result.Content[0].Text, "path validator is not initialized")
 }
+
+func TestBashTool_Call_LongLineSurfacesError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - bash not available")
+	}
+
+	tool := NewBashTool()
+	ctx := context.Background()
+
+	// Produce a single line larger than the 1 MB scanner buffer. Previously
+	// the scan error was ignored, silently truncating output while reporting
+	// success; now the error must be surfaced.
+	result, err := tool.Call(ctx, &BashInput{
+		Command: "head -c 2000000 /dev/zero | tr '\\0' 'a'",
+	})
+	assert.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "error reading command output")
+}

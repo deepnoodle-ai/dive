@@ -363,3 +363,32 @@ func TestGlobTool_Call_ReturnsWorkspaceConfigErrorWhenValidatorMissing(t *testin
 	assert.Contains(t, result.Content[0].Text, "WorkspaceDir \"/bad/workspace\"")
 	assert.Contains(t, result.Content[0].Text, "path validator is not initialized")
 }
+
+func TestGlobTool_DefaultExcludesTopLevelDirs(t *testing.T) {
+	// Regression test: gobwas/glob requires a literal separator after "**/",
+	// so "**/node_modules/**" did not match entries directly under the search
+	// root (e.g. "node_modules/dep.js"). Default excludes must also apply to
+	// top-level directories.
+	tempDir := t.TempDir()
+
+	nodeModules := filepath.Join(tempDir, "node_modules")
+	assert.NoError(t, os.MkdirAll(nodeModules, 0755))
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "src"), 0755))
+
+	assert.NoError(t, os.WriteFile(filepath.Join(nodeModules, "dep.js"), []byte("dep"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "src", "app.js"), []byte("code"), 0644))
+
+	tool := NewGlobTool(GlobToolOptions{WorkspaceDir: tempDir})
+
+	result, err := tool.Call(context.Background(), &GlobInput{
+		Pattern: "**/*.js",
+		Path:    tempDir,
+	})
+
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	output := result.Content[0].Text
+	assert.Contains(t, output, "src/app.js")
+	assert.NotContains(t, output, "node_modules")
+}

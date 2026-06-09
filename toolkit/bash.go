@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -301,6 +302,7 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 
 	// Read stdout, streaming lines as they arrive.
 	// bufio.Scanner with ScanLines handles the final non-newline-terminated line.
+	var scanErr error
 	if stdoutPipe != nil {
 		scanner := bufio.NewScanner(stdoutPipe)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -330,6 +332,14 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 				})
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			// A scan error (e.g. a line exceeding the buffer limit, or a read
+			// failure) means output was lost; record it so we don't silently
+			// truncate and report success. Drain the rest of the pipe so the
+			// child process can't block writing to a full pipe before Wait.
+			scanErr = err
+			io.Copy(io.Discard, stdoutPipe)
+		}
 	}
 
 	runErr = cmd.Wait()
@@ -342,6 +352,10 @@ func (t *BashTool) execute(ctx context.Context, command, workingDir string, time
 		} else {
 			return "", "", -1, fmt.Errorf("error: %s", runErr.Error())
 		}
+	}
+
+	if scanErr != nil {
+		return "", "", -1, fmt.Errorf("error reading command output: %s", scanErr.Error())
 	}
 
 	stdout = truncateOutput(stdoutBuf.String(), t.maxOutputLen)

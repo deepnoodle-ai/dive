@@ -601,3 +601,29 @@ func TestWriteFileTool_EmptyContent(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "", string(content))
 }
+
+func TestReadFileTool_OffsetLimitWithLongLine(t *testing.T) {
+	// Regression test: the offset/limit path used a default 64 KB
+	// bufio.Scanner buffer, so a single long line failed the read even though
+	// whole-file reads handled it fine. The buffer now matches bash.go (1 MB).
+	tempDir := t.TempDir()
+
+	longLine := strings.Repeat("a", 100*1024) // 100 KB, > 64 KB scanner default
+	content := longLine + "\nshort line\n"
+	testFile := filepath.Join(tempDir, "longline.txt")
+	assert.NoError(t, os.WriteFile(testFile, []byte(content), 0644))
+
+	tool := NewReadFileTool(ReadFileToolOptions{WorkspaceDir: tempDir})
+
+	result, err := tool.Call(context.Background(), &ReadFileInput{
+		FilePath: testFile,
+		Offset:   1,
+		Limit:    2,
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	output := result.Content[0].Text
+	assert.Contains(t, output, longLine)
+	assert.Contains(t, output, "short line")
+}

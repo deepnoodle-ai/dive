@@ -217,8 +217,11 @@ func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.To
 			WithDisplay(fmt.Sprintf("Read %s (%d bytes)", filePath, len(content))), nil
 	}
 
-	// Read with offset/limit (line-based)
+	// Read with offset/limit (line-based). Raise the scanner buffer above the
+	// 64 KB default (mirroring bash.go) so a single long line doesn't fail
+	// the read and diverge from whole-file reads.
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var lines []string
 	lineNum := 0
 	startLine := input.Offset

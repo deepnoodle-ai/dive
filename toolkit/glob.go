@@ -114,6 +114,17 @@ func NewGlobTool(opts ...GlobToolOptions) *dive.TypedToolAdapter[*GlobInput] {
 	})
 }
 
+// matchesExclude reports whether relPath matches the exclude pattern.
+// Patterns are tested against both the bare relative path and a "./"-prefixed
+// variant: under gobwas/glob, "**/" requires a literal separator, so a pattern
+// like "**/node_modules/**" would otherwise never match entries at the search
+// root (e.g. "node_modules/foo.js"). Testing the "./" form makes the pure-Go
+// matching agree with ripgrep's gitignore-style globs, where "**/" also
+// matches zero directories.
+func matchesExclude(eg glob.Glob, relPath string) bool {
+	return eg.Match(relPath) || eg.Match("./"+relPath)
+}
+
 // Name returns "Glob" as the tool identifier.
 func (t *GlobTool) Name() string {
 	return "Glob"
@@ -266,7 +277,7 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 		if info.IsDir() {
 			// Check if directory should be excluded
 			for _, eg := range excludeGlobs {
-				if eg.Match(relPath) || eg.Match(relPath+"/") {
+				if matchesExclude(eg, relPath) || matchesExclude(eg, relPath+"/") {
 					return filepath.SkipDir
 				}
 			}
@@ -275,7 +286,7 @@ func (t *GlobTool) Call(ctx context.Context, input *GlobInput) (*dive.ToolResult
 
 		// Check excludes
 		for _, eg := range excludeGlobs {
-			if eg.Match(relPath) {
+			if matchesExclude(eg, relPath) {
 				return nil
 			}
 		}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
@@ -57,6 +58,10 @@ var _ dive.TypedToolPreviewer[*fetch.Request] = &FetchTool{}
 //   - Non-HTTP(S) schemes (file://, javascript://, etc.)
 //   - Localhost and private IP addresses
 //   - URLs that resolve to internal networks
+//
+// With the default fetcher, IP validation is also enforced at connect time
+// on every connection (see [SafeHTTPClient]), so DNS rebinding between the
+// pre-flight check and the actual dial cannot bypass the policy.
 type FetchTool struct {
 	fetcher         fetch.Fetcher
 	maxSize         int
@@ -89,13 +94,54 @@ type FetchToolOptions struct {
 	Fetcher fetch.Fetcher `json:"-"`
 }
 
-// SafeHTTPClient returns an *http.Client that validates redirect targets
-// against SSRF rules. Each redirect URL is checked for blocked schemes,
-// localhost, and private IP addresses using the same rules as the initial
-// URL validation.
+// validateConnAddress is a [net.Dialer] Control function that validates the
+// IP address actually being connected to, after DNS resolution. Pre-connect
+// hostname validation alone is bypassable via DNS rebinding (the transport
+// re-resolves at connect time); pinning validation to the connection closes
+// that window and naturally covers redirects, since every connection the
+// client opens passes through here.
+func validateConnAddress(network, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("invalid dial address %q: %w", address, err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("dial address %q is not an IP address", host)
+	}
+	if isPrivateIP(ip) {
+		return fmt.Errorf("access to private/internal IP address %s is not allowed", ip.String())
+	}
+	return nil
+}
+
+// SafeHTTPClient returns an *http.Client that enforces SSRF rules at two
+// layers:
+//
+//   - Connect time: a custom dialer validates the resolved IP for every
+//     connection (including redirect targets), preventing DNS-rebinding
+//     bypasses of hostname-based checks.
+//   - Redirects: each redirect URL is additionally checked for blocked
+//     schemes, localhost, and private IP addresses using the same rules
+//     as the initial URL validation.
 func SafeHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   validateConnAddress,
+	}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 	return &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("stopped after 10 redirects")
@@ -290,7 +336,10 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-// validateFetchURL validates a URL for safe fetching, preventing SSRF attacks
+// validateFetchURL validates a URL for safe fetching, preventing SSRF attacks.
+// This is a pre-flight check (scheme, hostname, and a DNS lookup); the
+// connect-time enforcement that closes the DNS-rebinding window lives in
+// validateConnAddress.
 func validateFetchURL(rawURL string) error {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
