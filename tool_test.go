@@ -109,3 +109,40 @@ func TestTypedToolAdapter_ConvertInput_EmptyObject(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.False(t, result.IsError)
 }
+
+func TestToolAnnotations_MarshalSequentialOnlyHint(t *testing.T) {
+	// The key is omitted when false so existing serialized annotations are
+	// unchanged by the new hint.
+	data, err := json.Marshal(&ToolAnnotations{Title: "t"})
+	assert.NoError(t, err)
+	var m map[string]any
+	assert.NoError(t, json.Unmarshal(data, &m))
+	_, present := m["sequentialOnlyHint"]
+	assert.False(t, present)
+
+	data, err = json.Marshal(&ToolAnnotations{Title: "t", SequentialOnlyHint: true})
+	assert.NoError(t, err)
+	m = nil
+	assert.NoError(t, json.Unmarshal(data, &m))
+	assert.Equal(t, true, m["sequentialOnlyHint"])
+}
+
+func TestToolAnnotations_UnmarshalInvalidBoolHint(t *testing.T) {
+	// Non-boolean hint values must fail fast instead of being silently
+	// ignored (which would leave the zero-value default in place).
+	var ann ToolAnnotations
+	err := json.Unmarshal([]byte(`{"sequentialOnlyHint":"true"}`), &ann)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "sequentialOnlyHint")
+
+	err = json.Unmarshal([]byte(`{"readOnlyHint":1}`), &ann)
+	assert.Error(t, err)
+
+	// Valid booleans still round-trip, with unknown keys going to Extra.
+	ann = ToolAnnotations{}
+	err = json.Unmarshal([]byte(`{"sequentialOnlyHint":true,"editHint":false,"custom":"x"}`), &ann)
+	assert.NoError(t, err)
+	assert.True(t, ann.SequentialOnlyHint)
+	assert.False(t, ann.EditHint)
+	assert.Equal(t, "x", ann.Extra["custom"])
+}
