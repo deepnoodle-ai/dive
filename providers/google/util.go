@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -34,14 +35,18 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 			if err != nil {
 				return nil, fmt.Errorf("error marshaling function call args: %w", err)
 			}
-			// toolCallID := generateToolCallID(part.FunctionCall.Name)
-			// Hmm, why not just use part.FunctionCall.ID?
+			// Gemini does not always populate FunctionCall.ID, so synthesize a
+			// unique ID when it is missing. Tool result matching is keyed by
+			// this ID, so it must be unique within the conversation.
+			toolCallID := part.FunctionCall.ID
+			if toolCallID == "" {
+				toolCallID = generateToolCallID(part.FunctionCall.Name)
+			}
 			content = append(content, &llm.ToolUseContent{
-				ID:    part.FunctionCall.ID,
+				ID:    toolCallID,
 				Name:  part.FunctionCall.Name,
 				Input: json.RawMessage(args),
 			})
-			fmt.Printf("Tool use content: %+v\n", content[len(content)-1])
 		} else {
 			// Handle other types as text (fallback)
 			content = append(content, &llm.TextContent{Text: fmt.Sprintf("%v", part)})
@@ -79,23 +84,30 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	return diveResponse, nil
 }
 
-// generateToolCallID generates a consistent ID for tool calls
+// toolCallCounter provides unique suffixes for synthesized tool call IDs.
+var toolCallCounter atomic.Int64
+
+// generateToolCallID generates a unique ID for a tool call. Gemini does not
+// always supply IDs for function calls, so we synthesize one using a
+// package-level counter. The ID is generated once when the model's response
+// is received and is carried on the ToolUseContent (and the corresponding
+// ToolResultContent.ToolUseID) thereafter, so converting messages back to
+// Google format reuses the stored ID rather than regenerating it.
 func generateToolCallID(toolName string) string {
-	return fmt.Sprintf("call_%s_%d", toolName, len(toolName))
+	return fmt.Sprintf("call_%s_%d", toolName, toolCallCounter.Add(1))
 }
 
 // convertToolUseToFunctionCall converts a Dive ToolUseContent back to Google FunctionCall format
-func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) *genai.Part {
+func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) (*genai.Part, error) {
 	if toolUse == nil {
-		return nil
+		return nil, fmt.Errorf("tool use content is nil")
 	}
 
 	// Parse the input JSON to a map
 	var args map[string]any
 	if len(toolUse.Input) > 0 {
 		if err := json.Unmarshal(toolUse.Input, &args); err != nil {
-			fmt.Printf("Error unmarshaling tool input: %v\n", err)
-			args = map[string]any{}
+			return nil, fmt.Errorf("error unmarshaling input for tool %q: %w", toolUse.Name, err)
 		}
 	} else {
 		args = map[string]any{}
@@ -107,7 +119,7 @@ func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) *genai.Part {
 			Name: toolUse.Name,
 			Args: args,
 		},
-	}
+	}, nil
 }
 
 // convertToolResultToFunctionResponse converts a generic llm.ToolResultContent to a genai.FunctionResponse part
@@ -192,9 +204,11 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 			case *llm.ToolUseContent:
 				// Track tool use for later matching
 				toolUses[ct.ID] = ct
-				if part := convertToolUseToFunctionCall(ct); part != nil {
-					content.Parts = append(content.Parts, part)
+				part, err := convertToolUseToFunctionCall(ct)
+				if err != nil {
+					return nil, err
 				}
+				content.Parts = append(content.Parts, part)
 			case *llm.ToolResultContent:
 				// Get the function name from the tracked tool uses
 				var functionName string

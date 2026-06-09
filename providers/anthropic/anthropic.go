@@ -133,7 +133,9 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
 	if config.Prefill != "" {
-		addPrefill(result.Content, config.Prefill, config.PrefillClosingTag)
+		if err := addPrefill(result.Content, config.Prefill, config.PrefillClosingTag); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
@@ -241,8 +243,6 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 		return nil, fmt.Errorf("all messages are empty")
 	}
 	messages = filtered
-	// Workaround for Anthropic bug
-	reorderMessageContent(messages)
 	// Anthropic errors if a message ID is set, so make a copy of the messages
 	// and omit the ID field
 	copied := make([]*llm.Message, len(messages))
@@ -290,6 +290,9 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 			Content: copiedContent,
 		}
 	}
+	// Workaround for Anthropic bug. Run on the copies so the caller's
+	// messages are not mutated.
+	reorderMessageContent(copied)
 	return copied, nil
 }
 

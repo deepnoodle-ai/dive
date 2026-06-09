@@ -35,7 +35,9 @@ func NewError(statusCode int, body string) error {
 func shouldRetry(statusCode int) bool {
 	return statusCode == http.StatusTooManyRequests || // 429
 		statusCode == http.StatusInternalServerError || // 500
+		statusCode == http.StatusBadGateway || // 502
 		statusCode == http.StatusServiceUnavailable || // 503
 		statusCode == http.StatusGatewayTimeout || // 504
-		statusCode == 520 // Cloudflare
+		statusCode == 520 || // Cloudflare
+		statusCode == 529 // Anthropic overloaded_error
 }

@@ -77,6 +77,7 @@ type EventDelta struct {
 type ResponseAccumulator struct {
 	response      *Response
 	contentBlocks map[int]Content // Map of content blocks by index
+	skippedBlocks map[int]bool    // Indices of unrecognized content block types
 	complete      bool
 }
 
@@ -84,6 +85,7 @@ type ResponseAccumulator struct {
 func NewResponseAccumulator() *ResponseAccumulator {
 	return &ResponseAccumulator{
 		contentBlocks: make(map[int]Content),
+		skippedBlocks: make(map[int]bool),
 	}
 }
 
@@ -123,6 +125,16 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		case ContentTypeRedactedThinking:
 			content = &RedactedThinkingContent{}
 		}
+		if content == nil {
+			// Unrecognized content block type (e.g. server-tool blocks like
+			// server_tool_use or web_search_tool_result). Skip it rather than
+			// storing a nil entry, and remember the index so subsequent delta
+			// events for this block are ignored.
+			if event.Index != nil {
+				r.skippedBlocks[*event.Index] = true
+			}
+			return nil
+		}
 
 		if event.Index != nil {
 			// Store content by index in map
@@ -140,6 +152,10 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 
 		content, exists := r.contentBlocks[*event.Index]
 		if !exists {
+			if r.skippedBlocks[*event.Index] {
+				// Delta for a skipped (unrecognized) content block; ignore it.
+				return nil
+			}
 			return errors.New("content block not found for index")
 		}
 
@@ -183,15 +199,19 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 	}
 
 	// Update usage information if provided
-	if event.Usage != nil {
+	if event.Usage != nil && r.response != nil {
 		r.response.Usage.InputTokens += event.Usage.InputTokens
 		r.response.Usage.OutputTokens += event.Usage.OutputTokens
 		r.response.Usage.CacheReadInputTokens += event.Usage.CacheReadInputTokens
 		r.response.Usage.CacheCreationInputTokens += event.Usage.CacheCreationInputTokens
+		r.response.Usage.ReasoningTokens += event.Usage.ReasoningTokens
+		if event.Usage.Speed != "" {
+			r.response.Usage.Speed = event.Usage.Speed
+		}
 	}
 
 	// Update context management information if provided
-	if event.ContextManagement != nil {
+	if event.ContextManagement != nil && r.response != nil {
 		r.response.ContextManagement = event.ContextManagement
 	}
 	return nil
