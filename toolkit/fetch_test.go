@@ -2,7 +2,10 @@ package toolkit
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/wonton/assert"
 )
@@ -195,4 +198,57 @@ func TestValidateFetchURL_IPv6(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateConnAddress(t *testing.T) {
+	blocked := []string{
+		"127.0.0.1:80",
+		"10.0.0.5:443",
+		"172.16.0.1:8080",
+		"192.168.1.1:8080",
+		"169.254.169.254:80",
+		"0.0.0.0:80",
+		"[::1]:443",
+		"[fe80::1]:80",
+	}
+	for _, addr := range blocked {
+		err := validateConnAddress("tcp", addr, nil)
+		assert.Error(t, err, "Expected error for address: %s", addr)
+		assert.Contains(t, err.Error(), "not allowed")
+	}
+
+	allowed := []string{
+		"93.184.216.34:80",
+		"8.8.8.8:443",
+		"[2606:4700:4700::1111]:443",
+	}
+	for _, addr := range allowed {
+		err := validateConnAddress("tcp", addr, nil)
+		assert.NoError(t, err, "Expected no error for address: %s", addr)
+	}
+
+	// Non-IP hosts and malformed addresses fail closed
+	assert.Error(t, validateConnAddress("tcp", "example.com:80", nil))
+	assert.Error(t, validateConnAddress("tcp", "missing-port", nil))
+}
+
+func TestSafeHTTPClient_BlocksLoopbackAtDial(t *testing.T) {
+	// Regression test for DNS rebinding: even if a URL passes pre-flight
+	// validation, the connection itself must be refused when it resolves to
+	// a blocked IP. The httptest server listens on 127.0.0.1, so the dial
+	// must fail before the request reaches the handler.
+	handlerReached := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerReached = true
+	}))
+	defer server.Close()
+
+	client := SafeHTTPClient(5 * time.Second)
+	resp, err := client.Get(server.URL)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not allowed")
+	assert.False(t, handlerReached)
 }

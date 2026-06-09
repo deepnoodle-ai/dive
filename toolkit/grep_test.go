@@ -3,6 +3,7 @@ package toolkit
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -291,7 +292,8 @@ func TestGrepTool_HeadLimit(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.False(t, result.IsError)
-	assert.Contains(t, result.Display, "limited to 3")
+	assert.Contains(t, result.Display, "showing 3")
+	assert.Equal(t, 3, strings.Count(result.Content[0].Text, "match"))
 }
 
 func TestGrepTool_DefaultExcludes(t *testing.T) {
@@ -408,4 +410,180 @@ func TestGrepTool_RecursiveSearch(t *testing.T) {
 	output := result.Content[0].Text
 	assert.Contains(t, output, "root.txt")
 	assert.Contains(t, output, "deep.txt")
+}
+
+func requireRipgrep(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("ripgrep not available")
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func TestGrepTool_DefaultExcludesTopLevelDirs(t *testing.T) {
+	// Regression test: gobwas/glob requires a literal separator after "**/",
+	// so "**/node_modules/**" did not match entries directly under the search
+	// root on the pure-Go path. Default excludes must also apply to top-level
+	// directories, matching ripgrep's behavior.
+	tempDir := t.TempDir()
+
+	nodeModules := filepath.Join(tempDir, "node_modules")
+	assert.NoError(t, os.MkdirAll(nodeModules, 0755))
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "src"), 0755))
+
+	assert.NoError(t, os.WriteFile(filepath.Join(nodeModules, "dep.js"), []byte("World"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "src", "app.js"), []byte("World"), 0644))
+
+	tool := NewGrepTool(GrepToolOptions{WorkspaceDir: tempDir}) // pure-Go path
+
+	result, err := tool.Call(context.Background(), &GrepInput{
+		Pattern: "World",
+		Path:    tempDir,
+	})
+
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	output := result.Content[0].Text
+	assert.Contains(t, output, "src/app.js")
+	assert.NotContains(t, output, "node_modules")
+}
+
+func TestGrepTool_PaginationContent(t *testing.T) {
+	tempDir := t.TempDir()
+
+	content := "match a\nmatch b\nmatch c\nmatch d\nmatch e"
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte(content), 0644))
+
+	tool := NewGrepTool(GrepToolOptions{WorkspaceDir: tempDir}) // pure-Go path
+
+	result, err := tool.Call(context.Background(), &GrepInput{
+		Pattern:    "match",
+		Path:       tempDir,
+		OutputMode: GrepOutputContent,
+		Offset:     2,
+		HeadLimit:  2,
+	})
+
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	output := result.Content[0].Text
+	assert.Contains(t, output, "match c")
+	assert.Contains(t, output, "match d")
+	assert.NotContains(t, output, "match a")
+	assert.NotContains(t, output, "match b")
+	assert.NotContains(t, output, "match e")
+
+	// Offset beyond the result set
+	result, err = tool.Call(context.Background(), &GrepInput{
+		Pattern:    "match",
+		Path:       tempDir,
+		OutputMode: GrepOutputContent,
+		Offset:     10,
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "No results at offset 10")
+}
+
+func TestGrepTool_PaginationFilesWithMatches(t *testing.T) {
+	tempDir := t.TempDir()
+
+	for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"} {
+		assert.NoError(t, os.WriteFile(filepath.Join(tempDir, name), []byte("pattern"), 0644))
+	}
+
+	tool := NewGrepTool(GrepToolOptions{WorkspaceDir: tempDir}) // pure-Go path
+
+	result, err := tool.Call(context.Background(), &GrepInput{
+		Pattern:    "pattern",
+		Path:       tempDir,
+		OutputMode: GrepOutputFilesWithMatches,
+		Offset:     2,
+		HeadLimit:  2,
+	})
+
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	output := result.Content[0].Text
+	assert.Contains(t, output, "c.txt")
+	assert.Contains(t, output, "d.txt")
+	assert.NotContains(t, output, "a.txt")
+	assert.NotContains(t, output, "b.txt")
+	assert.NotContains(t, output, "e.txt")
+}
+
+func TestGrepTool_ShowLines(t *testing.T) {
+	tempDir := t.TempDir()
+
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte("alpha\nbeta match"), 0644))
+
+	tool := NewGrepTool(GrepToolOptions{WorkspaceDir: tempDir}) // pure-Go path
+
+	// Defaults to showing line numbers
+	result, err := tool.Call(context.Background(), &GrepInput{
+		Pattern:    "match",
+		Path:       tempDir,
+		OutputMode: GrepOutputContent,
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "2: beta match")
+
+	// Explicitly disabled
+	result, err = tool.Call(context.Background(), &GrepInput{
+		Pattern:    "match",
+		Path:       tempDir,
+		OutputMode: GrepOutputContent,
+		ShowLines:  boolPtr(false),
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "beta match")
+	assert.NotContains(t, result.Content[0].Text, "2: beta match")
+}
+
+func TestGrepTool_Ripgrep_PaginationAndShowLines(t *testing.T) {
+	requireRipgrep(t)
+
+	tempDir := t.TempDir()
+	content := "match a\nmatch b\nmatch c\nmatch d\nmatch e"
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte(content), 0644))
+
+	tool := NewGrepTool(GrepToolOptions{WorkspaceDir: tempDir, UseRipgrep: true})
+
+	// Pagination
+	result, err := tool.Call(context.Background(), &GrepInput{
+		Pattern:    "match",
+		Path:       tempDir,
+		OutputMode: GrepOutputContent,
+		Offset:     2,
+		HeadLimit:  2,
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	output := result.Content[0].Text
+	assert.Contains(t, output, "3: match c")
+	assert.Contains(t, output, "4: match d")
+	assert.NotContains(t, output, "match a")
+	assert.NotContains(t, output, "match b")
+	assert.NotContains(t, output, "match e")
+
+	// Line numbers disabled
+	result, err = tool.Call(context.Background(), &GrepInput{
+		Pattern:    "match c",
+		Path:       tempDir,
+		OutputMode: GrepOutputContent,
+		ShowLines:  boolPtr(false),
+	})
+	assert.NoError(t, err)
+	assert.False(t, result.IsError)
+	assert.Contains(t, result.Content[0].Text, "match c")
+	assert.NotContains(t, result.Content[0].Text, "3: match c")
 }

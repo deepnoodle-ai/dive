@@ -63,7 +63,8 @@ type GrepInput struct {
 
 	// ShowLines includes line numbers in output (default true).
 	// Only applies when OutputMode is GrepOutputContent.
-	ShowLines bool `json:"-n,omitempty"`
+	// A nil value means true.
+	ShowLines *bool `json:"-n,omitempty"`
 
 	// Context shows N lines before and after each match.
 	// Only applies when OutputMode is GrepOutputContent.
@@ -446,11 +447,9 @@ func (t *GrepTool) parseRipgrepOutput(output, basePath string, input *GrepInput)
 			line:       strings.TrimRight(m.Data.Lines.Text, "\n\r"),
 		})
 
-		limit := input.HeadLimit
-		if limit == 0 {
-			limit = t.maxResults
-		}
-		if len(matches) >= limit {
+		// Collect up to maxResults; offset/head_limit pagination is applied
+		// in formatResults so both search paths paginate identically.
+		if len(matches) >= t.maxResults {
 			break
 		}
 	}
@@ -542,11 +541,6 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 
 	var matches []grepMatch
 
-	limit := input.HeadLimit
-	if limit == 0 {
-		limit = t.maxResults
-	}
-
 	err = filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -558,7 +552,7 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 		// Skip directories but check excludes
 		if info.IsDir() {
 			for _, eg := range excludeGlobs {
-				if eg.Match(relPath) || eg.Match(relPath+"/") {
+				if matchesExclude(eg, relPath) || matchesExclude(eg, relPath+"/") {
 					return filepath.SkipDir
 				}
 			}
@@ -567,7 +561,7 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 
 		// Check excludes
 		for _, eg := range excludeGlobs {
-			if eg.Match(relPath) {
+			if matchesExclude(eg, relPath) {
 				return nil
 			}
 		}
@@ -614,7 +608,10 @@ func (t *GrepTool) callPureGo(ctx context.Context, input *GrepInput) (*dive.Tool
 					lineNumber: i + 1,
 					line:       strings.TrimRight(line, "\r"),
 				})
-				if len(matches) >= limit {
+				// Collect up to maxResults; offset/head_limit pagination is
+				// applied in formatResults so both search paths paginate
+				// identically.
+				if len(matches) >= t.maxResults {
 					return filepath.SkipAll
 				}
 			}
@@ -637,7 +634,26 @@ type grepMatch struct {
 	line       string // Content of the matching line
 }
 
+// paginate applies offset and limit to a slice of entries.
+// A limit of 0 means no limit.
+func paginate[T any](entries []T, offset, limit int) []T {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(entries) {
+		return nil
+	}
+	entries = entries[offset:]
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries
+}
+
 // formatResults converts matches into the output format specified by OutputMode.
+// Pagination (offset + head_limit) is applied here, after the full result set
+// is grouped into entries, so both the ripgrep and pure-Go paths paginate
+// identically.
 func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.ToolResult, error) {
 	if len(matches) == 0 {
 		return t.formatNoMatches(input), nil
@@ -648,6 +664,18 @@ func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.T
 		outputMode = GrepOutputFilesWithMatches
 	}
 
+	offset := input.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	limit := input.HeadLimit
+
+	showLines := true
+	if input.ShowLines != nil {
+		showLines = *input.ShowLines
+	}
+
+	var shown int
 	var result strings.Builder
 
 	switch outputMode {
@@ -662,6 +690,8 @@ func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.T
 			}
 		}
 		sort.Strings(files)
+		files = paginate(files, offset, limit)
+		shown = len(files)
 		for _, f := range files {
 			result.WriteString(f)
 			result.WriteString("\n")
@@ -678,15 +708,19 @@ func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.T
 			files = append(files, f)
 		}
 		sort.Strings(files)
+		files = paginate(files, offset, limit)
+		shown = len(files)
 		for _, f := range files {
 			result.WriteString(fmt.Sprintf("%s:%d\n", f, counts[f]))
 		}
 
 	case GrepOutputContent:
-		// Group by file
+		// Paginate matches, then group by file
+		paged := paginate(matches, offset, limit)
+		shown = len(paged)
 		byFile := make(map[string][]grepMatch)
 		var files []string
-		for _, m := range matches {
+		for _, m := range paged {
 			if _, ok := byFile[m.file]; !ok {
 				files = append(files, m.file)
 			}
@@ -697,19 +731,29 @@ func (t *GrepTool) formatResults(matches []grepMatch, input *GrepInput) (*dive.T
 		for _, f := range files {
 			result.WriteString(fmt.Sprintf("## %s\n", f))
 			for _, m := range byFile[f] {
-				result.WriteString(fmt.Sprintf("%d: %s\n", m.lineNumber, m.line))
+				if showLines {
+					result.WriteString(fmt.Sprintf("%d: %s\n", m.lineNumber, m.line))
+				} else {
+					result.WriteString(m.line)
+					result.WriteString("\n")
+				}
 			}
 			result.WriteString("\n")
 		}
 	}
 
-	display := fmt.Sprintf("Found %d match(es) for %q", len(matches), input.Pattern)
-	limit := input.HeadLimit
-	if limit == 0 {
-		limit = t.maxResults
+	if shown == 0 {
+		text := fmt.Sprintf("No results at offset %d (%d total match(es))", offset, len(matches))
+		display := fmt.Sprintf("No results for %q at offset %d", input.Pattern, offset)
+		return dive.NewToolResultText(text).WithDisplay(display), nil
 	}
-	if len(matches) >= limit {
-		display += fmt.Sprintf(" (limited to %d)", limit)
+
+	display := fmt.Sprintf("Found %d match(es) for %q", len(matches), input.Pattern)
+	if len(matches) >= t.maxResults {
+		display += fmt.Sprintf(" (limited to %d)", t.maxResults)
+	}
+	if offset > 0 || limit > 0 {
+		display += fmt.Sprintf(" (showing %d)", shown)
 	}
 
 	return dive.NewToolResultText(strings.TrimSpace(result.String())).WithDisplay(display), nil
