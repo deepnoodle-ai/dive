@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
@@ -933,4 +934,165 @@ func TestSuspendReasonRoundTrip(t *testing.T) {
 	loaded := sess2.LoadSuspension()
 	assert.NotNil(t, loaded)
 	assert.Equal(t, loaded.PendingToolCalls[0].Reason, dive.SuspendReasonAuth)
+}
+
+// ---------------------------------------------------------------------------
+// FileStore durability
+// ---------------------------------------------------------------------------
+
+func TestFileStoreTornAppendRecovery(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("corrupt final line is dropped and healed", func(t *testing.T) {
+		dir := t.TempDir()
+		store, _ := session.NewFileStore(dir)
+
+		sess, _ := store.Open(ctx, "s1")
+		assert.NoError(t, sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("one")}, nil))
+		assert.NoError(t, sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("two")}, nil))
+
+		// Simulate a crash mid-append: a partial JSONL line with no
+		// trailing newline.
+		p := filepath.Join(dir, "s1.jsonl")
+		f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0644)
+		assert.NoError(t, err)
+		_, err = f.Write([]byte(`{"line_type":"event","data":{"trunc`))
+		assert.NoError(t, err)
+		assert.NoError(t, f.Close())
+
+		// Open succeeds with the prior events intact.
+		store2, _ := session.NewFileStore(dir)
+		got, err := store2.Open(ctx, "s1")
+		assert.NoError(t, err)
+		msgs, err := got.Messages(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(msgs))
+		assert.Equal(t, "one", msgs[0].Text())
+		assert.Equal(t, "two", msgs[1].Text())
+
+		// Open healed the file, so subsequent appends must not concatenate
+		// onto the torn garbage and corrupt the session.
+		assert.NoError(t, got.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("three")}, nil))
+		store3, _ := session.NewFileStore(dir)
+		again, err := store3.Open(ctx, "s1")
+		assert.NoError(t, err)
+		msgs, err = again.Messages(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(msgs))
+		assert.Equal(t, "three", msgs[2].Text())
+	})
+
+	t.Run("mid-file corruption still errors", func(t *testing.T) {
+		dir := t.TempDir()
+		store, _ := session.NewFileStore(dir)
+
+		sess, _ := store.Open(ctx, "s1")
+		assert.NoError(t, sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("one")}, nil))
+		assert.NoError(t, sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("two")}, nil))
+
+		// Corrupt a line in the middle of the file (a bad line followed by
+		// valid lines is real corruption, not a torn append).
+		p := filepath.Join(dir, "s1.jsonl")
+		b, err := os.ReadFile(p)
+		assert.NoError(t, err)
+		lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+		assert.Equal(t, 3, len(lines)) // header + 2 events
+		lines[1] = `{"line_type":"event","data":{"trunc`
+		assert.NoError(t, os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0644))
+
+		store2, _ := session.NewFileStore(dir)
+		_, err = store2.Open(ctx, "s1")
+		assert.Error(t, err)
+	})
+}
+
+func TestFileStoreLargeEvent(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := session.NewFileStore(dir)
+	ctx := context.Background()
+
+	// 2MB message — beyond the 1MB line cap the old scanner-based reader
+	// imposed, which made oversized sessions unreadable after a save.
+	large := strings.Repeat("x", 2*1024*1024)
+	sess, _ := store.Open(ctx, "big")
+	assert.NoError(t, sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage(large)}, nil))
+
+	store2, _ := session.NewFileStore(dir)
+	got, err := store2.Open(ctx, "big")
+	assert.NoError(t, err)
+	msgs, err := got.Messages(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(msgs))
+	assert.Equal(t, large, msgs[0].Text())
+
+	// List must also tolerate the oversized line.
+	result, err := store2.List(ctx, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(result.Sessions))
+}
+
+func TestFileStoreUnrecognizedHeaderNotOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := session.NewFileStore(dir)
+	ctx := context.Background()
+
+	// A file with an unrecognized first line type (e.g. written by a future
+	// version) must cause Open to fail, NOT to treat the session as missing
+	// and destructively overwrite the file with a fresh empty session.
+	content := `{"line_type":"header_v2","data":{"id":"s1"}}` + "\n"
+	p := filepath.Join(dir, "s1.jsonl")
+	assert.NoError(t, os.WriteFile(p, []byte(content), 0644))
+
+	_, err := store.Open(ctx, "s1")
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "unrecognized first line type")
+
+	// The file must be untouched.
+	b, err := os.ReadFile(p)
+	assert.NoError(t, err)
+	assert.Equal(t, content, string(b))
+}
+
+func TestFileStorePutConcurrentWithSessionMutation(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := session.NewFileStore(dir)
+	ctx := context.Background()
+
+	sess, _ := store.Open(ctx, "s1")
+
+	// Put reads sess.data (events + metadata) while other goroutines mutate
+	// the session. Put must take the session lock; run under -race to catch
+	// regressions.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			sess.SetMetadata("k", i)
+			_ = sess.SaveTurn(ctx, []*llm.Message{llm.NewUserTextMessage("hi")}, nil)
+		}
+	}()
+	for i := 0; i < 50; i++ {
+		assert.NoError(t, store.Put(ctx, sess))
+	}
+	<-done
+}
+
+// ---------------------------------------------------------------------------
+// MemoryStore metadata isolation
+// ---------------------------------------------------------------------------
+
+func TestMemoryStoreListMetadataIsCopy(t *testing.T) {
+	store := session.NewMemoryStore()
+	ctx := context.Background()
+
+	sess, _ := store.Open(ctx, "s1")
+	sess.SetMetadata("key", "original")
+
+	result, err := store.List(ctx, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(result.Sessions))
+
+	// Mutating the returned metadata must not affect the live session.
+	result.Sessions[0].Metadata["key"] = "mutated"
+	assert.Equal(t, "original", sess.Metadata()["key"])
 }
