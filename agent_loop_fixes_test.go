@@ -86,6 +86,48 @@ func TestSessionStartValuesVisibleToLaterHooks(t *testing.T) {
 	assert.Equal(t, preToolSaw, "from-session-start")
 }
 
+// TestSessionStartValuesReplacementHonored pins that a SessionStart hook
+// replacing hctx.Values wholesale (rather than mutating the seeded map) is
+// still carried into the main hook chain — the map is captured after the
+// hooks run, not before.
+func TestSessionStartValuesReplacementHonored(t *testing.T) {
+	mock := &mockLLM{
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			return &llm.Response{
+				ID:         "resp_1",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+				Type:       "message",
+				StopReason: "stop",
+			}, nil
+		},
+	}
+
+	var preGenSaw any
+	agent, err := NewAgent(AgentOptions{
+		Model: mock,
+		Hooks: Hooks{
+			SessionStart: []SessionStartHook{
+				func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) {
+					hctx.Values = map[string]any{"replaced": "yes"}
+					return nil, nil
+				},
+			},
+			PreGeneration: []PreGenerationHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					preGenSaw = hctx.Values["replaced"]
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+	assert.NoError(t, err)
+	assert.Equal(t, preGenSaw, "yes")
+}
+
 // TestGenerationErrorExposesPartialWork pins §4.7: when iteration N of a turn
 // fails after iteration N-1 succeeded (and a tool with side effects already
 // ran), CreateResponse still returns (nil, err) — but err wraps a

@@ -587,10 +587,6 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		startHctx.SystemPrompt = systemPrompt
 		startHctx.SessionStartSource = SessionStartStartup
 		maps.Copy(startHctx.Values, options.Values)
-		// HookContext.Values is documented to persist across the whole hook
-		// chain within one CreateResponse call, so values set by SessionStart
-		// hooks must carry into the main hook context created below.
-		sessionStartValues = startHctx.Values
 
 		var persistentSeeds []*llm.Message
 		for _, hook := range a.hooks.SessionStart {
@@ -607,6 +603,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				persistentSeeds = append(persistentSeeds, result.Messages...)
 			}
 		}
+
+		// HookContext.Values is documented to persist across the whole hook
+		// chain within one CreateResponse call, so values set by SessionStart
+		// hooks must carry into the main hook context created below. Captured
+		// after the hooks run so a hook that replaces startHctx.Values
+		// wholesale is honored too.
+		sessionStartValues = startHctx.Values
 
 		// Persist durable seeds as their own pre-turn so they remain in history
 		// on later turns and on resume, without polluting the turn delta below.
