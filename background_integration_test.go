@@ -649,6 +649,108 @@ func TestAgent_BackgroundTool_SessionBacked(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, finalResp.OutputText(), "Found 42 items.")
 	assert.Equal(t, int(callCount.Load()), 3)
+
+	// The synthetic background-results user message must be persisted to the
+	// session as part of the continuation turn. Without it, the saved history
+	// would pair two consecutive assistant messages and the model would
+	// permanently lose the background results on later turns.
+	msgs, err := sess.Messages(ctx)
+	assert.NoError(t, err)
+
+	ackIdx, resultsIdx, finalIdx := -1, -1, -1
+	for i, msg := range msgs {
+		text := msg.Text()
+		switch {
+		case msg.Role == llm.Assistant && strings.Contains(text, "Analyzing in background."):
+			ackIdx = i
+		case msg.Role == llm.User && strings.Contains(text, "Background task completed: analyzing data") &&
+			strings.Contains(text, "analysis complete: 42 items found"):
+			resultsIdx = i
+		case msg.Role == llm.Assistant && strings.Contains(text, "Found 42 items."):
+			finalIdx = i
+		}
+	}
+	assert.True(t, resultsIdx >= 0, "synthetic background-results user message should be persisted")
+	assert.True(t, ackIdx >= 0 && finalIdx >= 0, "both assistant turns should be persisted")
+	assert.True(t, ackIdx < resultsIdx && resultsIdx < finalIdx,
+		"background-results message should sit between the two assistant messages")
+
+	// No two consecutive assistant messages in the persisted history.
+	for i := 1; i < len(msgs); i++ {
+		if msgs[i].Role == llm.Assistant && msgs[i-1].Role == llm.Assistant {
+			t.Errorf("persisted history has consecutive assistant messages at %d and %d", i-1, i)
+		}
+	}
+}
+
+// TestAgent_PostBackgroundToolUseHook_FromExtension verifies that a
+// PostBackgroundToolUse hook registered via an Extension is merged into the
+// agent's hooks and fires when background results are delivered.
+func TestAgent_PostBackgroundToolUseHook_FromExtension(t *testing.T) {
+	var callCount atomic.Int32
+	var hookFired atomic.Bool
+
+	bgTool := &mockTool{
+		name: "bg_task",
+		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+			return NewBackgroundResult(ctx, "ext hook test", func(ctx context.Context) (string, error) {
+				return "ext hook result", nil
+			}), nil
+		},
+	}
+
+	mock := &mockLLM{
+		nameFunc: func() string { return "test-model" },
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			n := int(callCount.Add(1))
+			switch n {
+			case 1:
+				return &llm.Response{
+					Role: llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{ID: "t1", Name: "bg_task", Input: []byte(`{}`)},
+					},
+					StopReason: "tool_use",
+					Usage:      llm.Usage{},
+				}, nil
+			default:
+				return &llm.Response{
+					Role:       llm.Assistant,
+					Content:    []llm.Content{&llm.TextContent{Text: "done"}},
+					StopReason: "stop",
+					Usage:      llm.Usage{},
+				}, nil
+			}
+		},
+	}
+
+	ext := &mockExtension{hooks: Hooks{
+		PostBackgroundToolUse: []PostBackgroundToolUseHook{
+			func(ctx context.Context, hctx *HookContext) error {
+				hookFired.Store(true)
+				return nil
+			},
+		},
+	}}
+
+	agent, err := NewAgent(AgentOptions{
+		Name:       "TestAgent",
+		Model:      mock,
+		Tools:      []Tool{bgTool},
+		Extensions: []Extension{ext},
+	})
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	resp, err := agent.CreateResponse(ctx, WithInput("run it"))
+	assert.NoError(t, err)
+	assert.Equal(t, len(resp.BackgroundTasks), 1)
+
+	_, err = ContinueWithBackground(ctx, agent, resp,
+		WithMessages(resp.OutputMessages...),
+	)
+	assert.NoError(t, err)
+	assert.True(t, hookFired.Load(), "extension-provided PostBackgroundToolUse hook should fire")
 }
 
 // ---------------------------------------------------------------------------

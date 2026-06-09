@@ -1035,4 +1035,135 @@ func TestExtensionMerge(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, `duplicate tool name: "same_name"`)
 	})
+
+	t.Run("merges every hook type from extensions", func(t *testing.T) {
+		// One hook of each type — if a new hook slice is added to Hooks
+		// without a matching line in the NewAgent extension merge, this
+		// test catches the omission.
+		extHooks := Hooks{
+			SessionStart: []SessionStartHook{
+				func(ctx context.Context, hctx *HookContext) (*SessionStartResult, error) { return nil, nil },
+			},
+			PreGeneration: []PreGenerationHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+			PostGeneration: []PostGenerationHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+			PreToolUse: []PreToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+			PostToolUse: []PostToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+			PostToolUseFailure: []PostToolUseFailureHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+			Stop: []StopHook{
+				func(ctx context.Context, hctx *HookContext) (*StopDecision, error) { return nil, nil },
+			},
+			PreIteration: []PreIterationHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+			OnSuspend: []OnSuspendHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+			PostBackgroundToolUse: []PostBackgroundToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error { return nil },
+			},
+		}
+
+		agent, err := NewAgent(AgentOptions{
+			Model:      mock,
+			Extensions: []Extension{&mockExtension{hooks: extHooks}},
+		})
+		assert.NoError(t, err)
+		assert.Len(t, agent.hooks.SessionStart, 1)
+		assert.Len(t, agent.hooks.PreGeneration, 1)
+		assert.Len(t, agent.hooks.PostGeneration, 1)
+		assert.Len(t, agent.hooks.PreToolUse, 1)
+		assert.Len(t, agent.hooks.PostToolUse, 1)
+		assert.Len(t, agent.hooks.PostToolUseFailure, 1)
+		assert.Len(t, agent.hooks.Stop, 1)
+		assert.Len(t, agent.hooks.PreIteration, 1)
+		assert.Len(t, agent.hooks.OnSuspend, 1)
+		assert.Len(t, agent.hooks.PostBackgroundToolUse, 1)
+	})
+}
+
+// TestParallelToolStreaming_NoDataRace verifies that the response item
+// accumulator is synchronized when parallel tools stream output from their
+// own goroutines while the drain loop processes completions on the main
+// goroutine. Run with -race to catch regressions.
+func TestParallelToolStreaming_NoDataRace(t *testing.T) {
+	const chunksPerTool = 50
+
+	// Both tools rendezvous before streaming so their StreamOutput calls
+	// are guaranteed to overlap.
+	var ready sync.WaitGroup
+	ready.Add(2)
+	makeStreamTool := func(name string) Tool {
+		return &mockTool{
+			name: name,
+			callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
+				ready.Done()
+				ready.Wait()
+				for i := 0; i < chunksPerTool; i++ {
+					StreamOutput(ctx, "chunk")
+				}
+				return NewToolResultText(name + " done"), nil
+			},
+		}
+	}
+
+	callCount := 0
+	mock := &mockLLM{
+		nameFunc: func() string { return "test-model" },
+		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+			callCount++
+			if callCount == 1 {
+				return &llm.Response{
+					ID:    "resp_1",
+					Model: "test-model",
+					Role:  llm.Assistant,
+					Content: []llm.Content{
+						&llm.ToolUseContent{ID: "t1", Name: "stream_a", Input: []byte(`{}`)},
+						&llm.ToolUseContent{ID: "t2", Name: "stream_b", Input: []byte(`{}`)},
+					},
+					Type:       "message",
+					StopReason: "tool_use",
+					Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+				}, nil
+			}
+			return &llm.Response{
+				ID:         "resp_2",
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
+				Type:       "message",
+				StopReason: "stop",
+				Usage:      llm.Usage{InputTokens: 15, OutputTokens: 3},
+			}, nil
+		},
+	}
+
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{makeStreamTool("stream_a"), makeStreamTool("stream_b")},
+		ParallelToolExecution: true,
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("stream both"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.OutputText(), "Done")
+
+	// All stream events from both tool goroutines must be collected.
+	streamItems := 0
+	for _, item := range resp.Items {
+		if item.Type == ResponseItemTypeToolStream {
+			streamItems++
+		}
+	}
+	assert.Equal(t, streamItems, 2*chunksPerTool)
 }

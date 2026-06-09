@@ -734,6 +734,64 @@ func TestResumePostHooksFireInToolUseOrder(t *testing.T) {
 	}
 }
 
+func TestResumePostHookNilResultRestored(t *testing.T) {
+	// A PostToolUse hook that nils hctx.Result during resume must not panic
+	// or drop the caller-supplied tool result: hooks may modify or replace
+	// results but may not delete them, so the original is restored.
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "approve", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	tool := &scriptedTool{
+		name:     "approve",
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting", nil)}},
+	}
+	sess := session.New("nil-result-resume")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{tool},
+		Session: sess,
+		Hooks: Hooks{
+			PostToolUse: []PostToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					hctx.Result = nil
+					hctx.AdditionalContext = "post-hook context"
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("hi"))
+	assert.NoError(t, err)
+	assert.True(t, sessIsSuspended(sess))
+
+	resp, err := agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_a": NewToolResultText("approved"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, resp.OutputText(), "done")
+
+	// The second LLM call must still see the caller-supplied tool_result —
+	// the hook nilling Result must not orphan the tool_use block.
+	lastCallMsgs := mock.received[1]
+	lastMsg := lastCallMsgs[len(lastCallMsgs)-1]
+	assert.Equal(t, lastMsg.Role, llm.User)
+	foundResult := false
+	for _, c := range lastMsg.Content {
+		if trc, ok := c.(*llm.ToolResultContent); ok && trc.ToolUseID == "toolu_a" {
+			foundResult = true
+		}
+	}
+	assert.True(t, foundResult, "resumed tool_result should reference toolu_a despite hook nilling Result")
+}
+
 func TestResumeNotStartedRunsInParallel(t *testing.T) {
 	// A sequential agent lets tool A suspend and leaves B, C not-started.
 	// On resume with a parallel-enabled agent, the not-started tools should

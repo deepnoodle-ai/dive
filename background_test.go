@@ -274,9 +274,15 @@ func TestAwaitBackgroundTasks_PartialResultsOnCancellation(t *testing.T) {
 		Done:   fastR.Background.done,
 	}
 
-	// slow task — blocks until context cancelled
+	// slow task — blocks until the test ends, so it can never deliver a
+	// result before AwaitBackgroundTasks observes the cancellation. (If the
+	// task returned on ctx.Done() instead, its error result could land on
+	// the Done channel first and Await's select would non-deterministically
+	// return it with a nil error, making the test flaky.)
+	release := make(chan struct{})
+	defer close(release)
 	slowR := NewBackgroundResult(ctx, "slow", func(ctx context.Context) (string, error) {
-		<-ctx.Done()
+		<-release
 		return "", ctx.Err()
 	})
 	slowHandle := &BackgroundTaskHandle{
