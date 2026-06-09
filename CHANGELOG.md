@@ -6,6 +6,112 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-09
+
+### Added
+
+- **Claude Fable 5 / Mythos 5** — new `ModelClaudeFable5` and
+  `ModelClaudeMythos5` constants with pricing (1M context / 128k output),
+  adaptive-thinking and native-effort support (all five levels including
+  `xhigh`/`max`), an OpenRouter `anthropic/claude-fable-5` ID, and a CLI
+  model-picker entry for Fable 5. The Anthropic default stays
+  `claude-opus-4-8`.
+- **`SequentialOnlyHint` tool annotation** — a tool that mutates shared state
+  can opt out of parallel execution; any batch containing such a tool runs
+  sequentially even when `ParallelToolExecution` is enabled.
+- **Scoped session permission grants** — `AllowToolForSession(tool, pattern)`
+  grants (tool, specifier)-scoped session approvals. Dialog approvals now
+  grant the exact approved command/path (or WebFetch domain) instead of a
+  whole tool category; `AllowForSession`/`IsSessionAllowed` are deprecated but
+  still honored.
+- **Partial-work error reporting** — a mid-turn LLM failure now returns
+  `*GenerationError` carrying the accumulated `Usage`, `OutputMessages`, and
+  `Items` (recover via `errors.As`). New sentinels: `ErrReentrantSession` (a
+  tool calling back into its own session fails fast instead of deadlocking)
+  and `ErrSessionNotSuspended` (resume against a non-suspended session is
+  detected before the LLM call, not after).
+- **Demos** — `demos/colosseum` (agent tournament arena with A2A remote
+  players) and `demos/noodleville` (agent-driven village simulation).
+
+### Security
+
+- **Permission deny rules are now absolute** — deny rules evaluate before the
+  session allowlist, and specifier-bearing deny rules fail closed when no
+  specifier can be extracted. Bash patterns match per command segment,
+  quote-aware (`Bash(go test *)` no longer authorizes
+  `go test ./...; rm -rf /`; command substitution never matches an allow
+  rule). File path specifiers are cleaned and segment-aware (`*` no longer
+  crosses `/`; `..` traversal can't escape an allowed prefix), and WebFetch
+  patterns match the real URL host so lookalike domains don't pass. Matching
+  dispatches per tool through `DefaultSpecifierMatchers`, overridable via
+  `Config.SpecifierMatchers`.
+- **Skill hardening** — `!{...}` shell expansion runs against the raw template
+  before argument substitution, so model-controlled arguments can't inject
+  commands (`$1`–`$9`/`$ARGUMENTS` are passed to the shell as data); the Skill
+  tool can no longer invoke user-invocable-only commands hidden from the
+  catalog; `allowed-tools` is documented as informational only.
+- **Toolkit fail-closed** — the file tools now return their workspace
+  validator construction error instead of silently granting unrestricted
+  filesystem access; Fetch's SSRF protection validates the IP actually dialed
+  after DNS resolution (closing the DNS-rebinding window); Glob/Grep default
+  excludes now match top-level directories like `node_modules/`.
+
+### Changed
+
+- **A2A final-answer extraction** — the server emits a single final artifact
+  built from the last renderable assistant message (previously one artifact
+  per message), and `RemoteAgent` extracts the latest artifact, so
+  `TaskResult.Text` is the final answer rather than a tool-use preamble.
+  Intermediate messages still stream as `working` status updates.
+- **FileStore session aliasing** — `FileStore` caches the live `*Session` per
+  ID, so every `Open` of the same ID returns the same shared, synchronized
+  instance (fixes double-Open divergence that could silently delete turns on
+  disk).
+- **`settings.local.json` deep-merges** with `settings.json` instead of
+  shadowing it: objects merge per key (local wins), arrays replace wholesale,
+  and scalar keys present in the local file win.
+- **OpenAI `WithMaxRetries`** is now the single retry knob: it configures
+  Dive's retry loop and SDK-internal retries are disabled, eliminating
+  double-retry amplification (up to 9 requests per persistent error). Also
+  applies to Grok.
+
+### Fixed
+
+- **Agent loop** — data race on the response-item accumulator under parallel
+  tool execution; extension `PostBackgroundToolUse` hooks were silently
+  dropped; a PostToolUse hook setting `Result = nil` no longer panics or
+  orphans the tool_use block; injected background-results messages are now
+  persisted to the session; hook `Messages`/`Iteration` refresh every loop
+  iteration; SessionStart hook `Values` are visible to later hooks; the
+  per-session lock is context-aware.
+- **Suspend/resume** — `WithResume` on a session-backed agent no longer drops
+  prior history; suspend-phase usage now accumulates into `TotalUsage()`;
+  sessions deep-copy messages on ingestion so later caller mutations can't
+  rewrite stored history; resume tool-result merges are deterministic and
+  survive message-replacing PreGeneration hooks.
+- **Session durability** — a torn final JSONL line no longer makes a FileStore
+  session permanently unreadable (healed on open); removed the 1 MB read cap
+  that broke sessions containing large events; fixed `Put`/`List` races; an
+  unrecognized header line no longer triggers a destructive overwrite.
+- **Providers** — openaicompletions streaming no longer reports zero token
+  usage (Mistral, OpenRouter); OpenAI stream content-block indices are no
+  longer off by one; Anthropic web-search error results decode instead of
+  failing the whole response; the Google stream iterator now emits usage, stop
+  reason, sequential indices, and parallel tool calls, with unique synthetic
+  tool-call IDs and no stdout debug logging; 502/529 are retryable while
+  permanent errors are no longer retried in openaicompletions; cached and
+  reasoning token details are parsed across providers; Anthropic no longer
+  mutates caller-owned messages; registry routing of `/`-containing model IDs
+  reaches the OpenRouter matcher.
+- **Toolkit** — Grep `offset` and `-n` are honored (working pagination and
+  line numbers on both search paths); Bash scanner failures return an error
+  instead of silently truncating output; ReadFile offset/limit reads handle
+  long lines; TextEditor's unbounded, racy file history was removed.
+- **MCP (experimental)** — `Client.Close` actually closes the underlying
+  client (no more subprocess leaks); the HTTP transport sends configured auth
+  headers; a second OAuth flow no longer panics and the configured token store
+  is honored; `RefreshTools` cleans up server-side-removed tools.
+
 ## [1.7.0] - 2026-05-29
 
 ### Added
