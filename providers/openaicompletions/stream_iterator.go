@@ -27,6 +27,11 @@ type StreamIterator struct {
 	nextBlockIndex    int
 	closeOnce         sync.Once
 	eventQueue        []*llm.Event
+	// finalEvents holds the message_delta and message_stop events generated
+	// when a finish_reason is seen. They are deferred until the trailing
+	// usage chunk (stream_options.include_usage) has been consumed, so the
+	// message_delta carries the real token usage.
+	finalEvents []*llm.Event
 	// thinkingIndex and textIndex track the sequential content block index
 	// assigned to each block type, or -1 if not yet started.
 	thinkingIndex int
@@ -91,6 +96,14 @@ func (s *StreamIterator) Event() *llm.Event {
 func (s *StreamIterator) next() ([]*llm.Event, error) {
 	line, err := s.reader.ReadBytes('\n')
 	if err != nil {
+		// If the stream ends before a trailing usage chunk or [DONE] marker
+		// arrives, flush any deferred final events so the message still
+		// terminates with message_delta and message_stop.
+		if err == io.EOF {
+			if events := s.flushFinalEvents(); len(events) > 0 {
+				return events, nil
+			}
+		}
 		return nil, err
 	}
 	// Skip empty lines
@@ -105,7 +118,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	line = bytes.TrimPrefix(line, []byte("data: "))
 	// Check for stream end
 	if bytes.Equal(bytes.TrimSpace(line), []byte("[DONE]")) {
-		return nil, nil
+		return s.flushFinalEvents(), nil
 	}
 	// Unmarshal the event
 	var event StreamResponse
@@ -122,7 +135,10 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 		s.usage = event.Usage
 	}
 	if len(event.Choices) == 0 {
-		return nil, nil
+		// With stream_options.include_usage set, the API sends a final chunk
+		// with empty choices that carries the usage, after the finish_reason
+		// chunk. Now that usage is known, flush the deferred final events.
+		return s.flushFinalEvents(), nil
 	}
 	choice := event.Choices[0]
 	var events []*llm.Event
@@ -327,25 +343,44 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 				toolCall.IsComplete = true
 			}
 		}
-		// Add message_delta event with stop reason
+		// Build the message_delta event with the stop reason, but defer it
+		// (along with message_stop) until the trailing usage chunk, [DONE]
+		// marker, or EOF, so the message_delta carries the real token usage.
 		stopReason := choice.FinishReason
 		if stopReason == "tool_calls" {
 			stopReason = "tool_use" // Match Anthropic
 		}
-		events = append(events, &llm.Event{
-			Type:  llm.EventTypeMessageDelta,
-			Delta: &llm.EventDelta{StopReason: stopReason},
-			Usage: &llm.Usage{
-				InputTokens:  s.usage.PromptTokens,
-				OutputTokens: s.usage.CompletionTokens,
+		s.finalEvents = []*llm.Event{
+			{
+				Type:  llm.EventTypeMessageDelta,
+				Delta: &llm.EventDelta{StopReason: stopReason},
+				Usage: &llm.Usage{},
 			},
-		})
-		events = append(events, &llm.Event{
-			Type: llm.EventTypeMessageStop,
-		})
+			{
+				Type: llm.EventTypeMessageStop,
+			},
+		}
 	}
 
 	return events, nil
+}
+
+// flushFinalEvents returns the deferred message_delta and message_stop events,
+// stamping the message_delta with the most recent usage. Returns nil if there
+// are no deferred events (or they were already flushed).
+func (s *StreamIterator) flushFinalEvents() []*llm.Event {
+	if len(s.finalEvents) == 0 {
+		return nil
+	}
+	events := s.finalEvents
+	s.finalEvents = nil
+	for _, event := range events {
+		if event.Type == llm.EventTypeMessageDelta && event.Usage != nil {
+			event.Usage.InputTokens = s.usage.PromptTokens
+			event.Usage.OutputTokens = s.usage.CompletionTokens
+		}
+	}
+	return events
 }
 
 func (s *StreamIterator) Close() error {

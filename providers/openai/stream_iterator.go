@@ -496,12 +496,5 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		// For now, just ignore unhandled events
 	}
 
-	// Switch event to zero-based indexing to match Anthropic's event behavior
-	for _, event := range diveEvents {
-		if event.Index != nil {
-			*event.Index--
-		}
-	}
-
 	return diveEvents, nil
 }
