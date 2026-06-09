@@ -42,8 +42,8 @@ type GlobToolOptions struct {
 	MaxResults int
 
 	// WorkspaceDir restricts searches to paths within this directory.
-	// Defaults to the current working directory if empty.
-	// Ignored when Validator is set.
+	// If empty, no workspace restriction is applied (access to the entire
+	// filesystem). Ignored when Validator is set.
 	WorkspaceDir string
 
 	// Validator is an optional shared PathValidator. When set, it is used

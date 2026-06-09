@@ -59,8 +59,8 @@ type ListDirectoryToolOptions struct {
 	MaxEntries int
 
 	// WorkspaceDir restricts listings to paths within this directory.
-	// Defaults to the current working directory if empty.
-	// Ignored when Validator is set.
+	// If empty, no workspace restriction is applied (access to the entire
+	// filesystem). Ignored when Validator is set.
 	WorkspaceDir string
 
 	// Validator is an optional shared PathValidator. When set, it is used
@@ -83,6 +83,8 @@ type ListDirectoryTool struct {
 	defaultPath   string
 	maxEntries    int
 	pathValidator *PathValidator
+	workspaceDir  string
+	configErr     error
 }
 
 // NewListDirectoryTool creates a new ListDirectoryTool with the given options.
@@ -95,15 +97,21 @@ func NewListDirectoryTool(opts ...ListDirectoryToolOptions) *dive.TypedToolAdapt
 		options.MaxEntries = DefaultListDirectoryMaxEntries
 	}
 	var pathValidator *PathValidator
+	var configErr error
 	if options.Validator != nil {
 		pathValidator = options.Validator
 	} else if options.WorkspaceDir != "" {
-		pathValidator, _ = NewPathValidator(options.WorkspaceDir)
+		pathValidator, configErr = NewPathValidator(options.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", options.WorkspaceDir, configErr)
+		}
 	}
 	return dive.ToolAdapter(&ListDirectoryTool{
 		defaultPath:   options.DefaultPath,
 		maxEntries:    options.MaxEntries,
 		pathValidator: pathValidator,
+		workspaceDir:  options.WorkspaceDir,
+		configErr:     configErr,
 	})
 }
 
@@ -160,6 +168,13 @@ func (t *ListDirectoryTool) PreviewCall(ctx context.Context, input *ListDirector
 // array of [DirectoryEntry] objects. If the entry count exceeds MaxEntries,
 // only the first MaxEntries items are returned with a note about the limit.
 func (t *ListDirectoryTool) Call(ctx context.Context, input *ListDirectoryInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	dirPath := input.Path
 	if dirPath == "" {
 		dirPath = t.defaultPath

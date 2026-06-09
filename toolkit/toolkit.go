@@ -28,8 +28,11 @@
 // # Path Validation
 //
 // Tools that access the filesystem use [PathValidator] to enforce workspace
-// boundaries and prevent path traversal attacks. By default, operations are
-// restricted to the configured workspace directory.
+// boundaries and prevent path traversal attacks. The file tools only apply
+// this restriction when a WorkspaceDir (or shared Validator) is configured;
+// if left empty, no workspace restriction is applied and the tool has access
+// to the entire filesystem. [BashTool] is the exception: it defaults to the
+// current working directory when WorkspaceDir is empty.
 //
 // # Creating Tools
 //

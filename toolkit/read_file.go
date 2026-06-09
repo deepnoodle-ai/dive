@@ -43,8 +43,8 @@ type ReadFileToolOptions struct {
 	MaxSize int `json:"max_size,omitempty"`
 
 	// WorkspaceDir restricts file reads to paths within this directory.
-	// Defaults to the current working directory if empty.
-	// Ignored when Validator is set.
+	// If empty, no workspace restriction is applied (access to the entire
+	// filesystem). Ignored when Validator is set.
 	WorkspaceDir string
 
 	// Validator is an optional shared PathValidator. When set, it is used
@@ -67,6 +67,8 @@ type ReadFileToolOptions struct {
 type ReadFileTool struct {
 	maxSize       int
 	pathValidator *PathValidator
+	workspaceDir  string
+	configErr     error
 }
 
 // NewReadFileTool creates a new ReadFileTool with the given options.
@@ -79,14 +81,20 @@ func NewReadFileTool(opts ...ReadFileToolOptions) *dive.TypedToolAdapter[*ReadFi
 		options.MaxSize = DefaultReadFileMaxSize
 	}
 	var pathValidator *PathValidator
+	var configErr error
 	if options.Validator != nil {
 		pathValidator = options.Validator
 	} else if options.WorkspaceDir != "" {
-		pathValidator, _ = NewPathValidator(options.WorkspaceDir)
+		pathValidator, configErr = NewPathValidator(options.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", options.WorkspaceDir, configErr)
+		}
 	}
 	return dive.ToolAdapter(&ReadFileTool{
 		maxSize:       options.MaxSize,
 		pathValidator: pathValidator,
+		workspaceDir:  options.WorkspaceDir,
+		configErr:     configErr,
 	})
 }
 
@@ -143,6 +151,13 @@ func (t *ReadFileTool) PreviewCall(ctx context.Context, input *ReadFileInput) *d
 // Binary files are detected by checking for null bytes and control characters.
 // If detected, an error is returned instead of garbled content.
 func (t *ReadFileTool) Call(ctx context.Context, input *ReadFileInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	filePath := input.FilePath
 	if filePath == "" {
 		return NewToolResultError("Error: No file path provided."), nil

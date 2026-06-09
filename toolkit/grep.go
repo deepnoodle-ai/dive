@@ -103,8 +103,8 @@ type GrepToolOptions struct {
 	UseRipgrep bool
 
 	// WorkspaceDir restricts searches to paths within this directory.
-	// Defaults to the current working directory if empty.
-	// Ignored when Validator is set.
+	// If empty, no workspace restriction is applied (access to the entire
+	// filesystem). Ignored when Validator is set.
 	WorkspaceDir string
 
 	// Validator is an optional shared PathValidator. When set, it is used
@@ -133,6 +133,8 @@ type GrepTool struct {
 	useRipgrep      bool
 	ripgrepPath     string
 	pathValidator   *PathValidator
+	workspaceDir    string
+	configErr       error
 }
 
 // NewGrepTool creates a new GrepTool with the given options.
@@ -166,10 +168,14 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 	}
 
 	var pathValidator *PathValidator
+	var configErr error
 	if resolvedOpts.Validator != nil {
 		pathValidator = resolvedOpts.Validator
 	} else if resolvedOpts.WorkspaceDir != "" {
-		pathValidator, _ = NewPathValidator(resolvedOpts.WorkspaceDir)
+		pathValidator, configErr = NewPathValidator(resolvedOpts.WorkspaceDir)
+		if configErr != nil {
+			configErr = fmt.Errorf("invalid workspace configuration for WorkspaceDir %q: %w", resolvedOpts.WorkspaceDir, configErr)
+		}
 	}
 
 	return dive.ToolAdapter(&GrepTool{
@@ -178,6 +184,8 @@ func NewGrepTool(opts ...GrepToolOptions) *dive.TypedToolAdapter[*GrepInput] {
 		useRipgrep:      resolvedOpts.UseRipgrep,
 		ripgrepPath:     ripgrepPath,
 		pathValidator:   pathValidator,
+		workspaceDir:    resolvedOpts.WorkspaceDir,
+		configErr:       configErr,
 	})
 }
 
@@ -311,6 +319,13 @@ func (t *GrepTool) PreviewCall(ctx context.Context, input *GrepInput) *dive.Tool
 // using Go's built-in regexp package. Results are formatted according to
 // the OutputMode setting.
 func (t *GrepTool) Call(ctx context.Context, input *GrepInput) (*dive.ToolResult, error) {
+	if t.configErr != nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: %s", t.configErr.Error())), nil
+	}
+	if t.workspaceDir != "" && t.pathValidator == nil {
+		return dive.NewToolResultError(fmt.Sprintf("error: invalid workspace configuration for WorkspaceDir %q: path validator is not initialized", t.workspaceDir)), nil
+	}
+
 	// Use ripgrep if available
 	if t.ripgrepPath != "" {
 		return t.callRipgrep(ctx, input)

@@ -22,7 +22,6 @@ func TestTextEditorTool_View_File(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	input := &TextEditorToolInput{
@@ -52,7 +51,6 @@ func TestTextEditorTool_View_FileWithRange(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	input := &TextEditorToolInput{
@@ -88,7 +86,6 @@ func TestTextEditorTool_View_Directory(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	input := &TextEditorToolInput{
@@ -113,7 +110,6 @@ func TestTextEditorTool_Create(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	content := "Hello, World!\nThis is a test file."
@@ -134,9 +130,6 @@ func TestTextEditorTool_Create(t *testing.T) {
 	// Verify content
 	actualContent, _ := fs.ReadFile("/test/new_file.txt")
 	assert.Equal(t, content, actualContent, "Expected content to match")
-
-	// Verify no history for create operation
-	assert.Len(t, tool.fileHistory["/test/new_file.txt"], 0, "Expected 0 history entries for create operation")
 }
 
 func TestTextEditorTool_StrReplace(t *testing.T) {
@@ -148,7 +141,6 @@ func TestTextEditorTool_StrReplace(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	oldStr := "This is a test."
@@ -169,10 +161,6 @@ func TestTextEditorTool_StrReplace(t *testing.T) {
 	newContent, _ := fs.ReadFile("/test/file.txt")
 	expectedContent := "Hello, World!\nThis is a successful test.\nHello, Universe!"
 	assert.Equal(t, expectedContent, newContent, "Expected content to match")
-
-	// Verify history contains original content
-	assert.Len(t, tool.fileHistory["/test/file.txt"], 1, "Expected 1 history entry")
-	assert.Equal(t, originalContent, tool.fileHistory["/test/file.txt"][0], "Expected history to contain original content")
 }
 
 func TestTextEditorTool_StrReplace_MultipleOccurrences(t *testing.T) {
@@ -183,7 +171,6 @@ func TestTextEditorTool_StrReplace_MultipleOccurrences(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	oldStr := "Hello, World!"
@@ -211,7 +198,6 @@ func TestTextEditorTool_Insert(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	insertLine := 2
@@ -232,9 +218,6 @@ func TestTextEditorTool_Insert(t *testing.T) {
 	newContent, _ := fs.ReadFile("/test/file.txt")
 	expectedContent := "line 1\nline 2\nline 3\nline 4"
 	assert.Equal(t, expectedContent, newContent, "Expected content to match")
-
-	// Verify history
-	assert.Len(t, tool.fileHistory["/test/file.txt"], 1, "Expected 1 history entry")
 }
 
 func TestTextEditorTool_ValidationErrors(t *testing.T) {
@@ -243,7 +226,6 @@ func TestTextEditorTool_ValidationErrors(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	tests := []struct {
@@ -364,7 +346,6 @@ func TestTextEditorTool_Integration(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	// 1. Create a file
@@ -422,9 +403,6 @@ func TestTextEditorTool_Integration(t *testing.T) {
 	expectedFinal := "# README\n\nThis is a comprehensive documentation file.\n\n## Features\n- Feature 1\n- Feature 3\n- Feature 2"
 
 	assert.Equal(t, expectedFinal, finalContent, "Final content should match expected content")
-
-	// 6. Verify history tracking
-	assert.Len(t, tool.fileHistory["/project/README.md"], 2, "Expected 2 history entries")
 }
 
 func TestNewTextEditorTool(t *testing.T) {
@@ -459,7 +437,6 @@ func TestTextEditorTool_PathValidation(t *testing.T) {
 		fs:            fs,
 		pathValidator: pathValidator,
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	tests := []struct {
@@ -557,7 +534,6 @@ func TestTextEditorTool_TabPreservation(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	// Test str_replace preserves tabs
@@ -591,7 +567,6 @@ func TestTextEditorTool_InsertTabPreservation(t *testing.T) {
 		fs:            fs,
 		pathValidator: testPathValidator("/"),
 		maxFileSize:   MaxFileSize,
-		fileHistory:   make(map[string][]string),
 	}
 
 	// Insert a new line with a tab
