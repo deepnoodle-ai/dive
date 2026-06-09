@@ -2,6 +2,9 @@ package mcp
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -304,4 +307,69 @@ func TestClient_Connect_StdioWithEnvAndArgs(t *testing.T) {
 	// Note: We don't actually call Connect() here because it would try to start
 	// a real subprocess, which would fail in the test environment.
 	// The important part is that the configuration is properly stored and accessible.
+}
+
+func TestClient_Connect_HTTPSendsAuthHeaders(t *testing.T) {
+	var mu sync.Mutex
+	var gotAuth, gotCustom, gotAccept string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = r.Header.Get("Authorization")
+		gotCustom = r.Header.Get("X-Custom-Header")
+		gotAccept = r.Header.Get("Accept")
+		mu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(&ServerConfig{
+		Type:               "http",
+		Name:               "header-test",
+		URL:                ts.URL,
+		AuthorizationToken: "secret-token",
+		Headers:            map[string]string{"X-Custom-Header": "custom-value"},
+	})
+	assert.NoError(t, err)
+
+	// The server always returns 500 so Connect fails, but the request it
+	// received proves which headers the transport sent.
+	err = client.Connect(context.Background())
+	assert.Error(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, "Bearer secret-token", gotAuth)
+	assert.Equal(t, "custom-value", gotCustom)
+	// The transport's own Accept header must not be clobbered
+	assert.Contains(t, gotAccept, "text/event-stream")
+}
+
+func TestClient_Close(t *testing.T) {
+	// Close with no underlying client is a no-op
+	client, err := NewClient(&ServerConfig{
+		Type: "http",
+		Name: "close-test",
+		URL:  "https://example.com",
+	})
+	assert.NoError(t, err)
+	client.connected = true
+	assert.NoError(t, client.Close())
+	assert.False(t, client.IsConnected())
+
+	// Close after a failed Connect closes the underlying mcp-go client
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	client2, err := NewClient(&ServerConfig{
+		Type: "http",
+		Name: "close-test-2",
+		URL:  ts.URL,
+	})
+	assert.NoError(t, err)
+	assert.Error(t, client2.Connect(context.Background()))
+	assert.NotNil(t, client2.client)
+	assert.NoError(t, client2.Close())
+	assert.False(t, client2.IsConnected())
 }

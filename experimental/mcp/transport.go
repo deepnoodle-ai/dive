@@ -84,6 +84,22 @@ func BuildHTTPHeaders(authToken string, additionalHeaders map[string]string) map
 	return headers
 }
 
+// buildRequestHeaders builds the extra HTTP headers passed to the mcp-go
+// streamable HTTP transport. Unlike BuildHTTPHeaders, it deliberately omits
+// Content-Type and Accept: the transport manages those itself and requires
+// Accept values that include text/event-stream, which a blanket
+// "application/json" override would break.
+func buildRequestHeaders(authToken string, additionalHeaders map[string]string) map[string]string {
+	headers := make(map[string]string, len(additionalHeaders)+1)
+	if authToken != "" {
+		headers["Authorization"] = "Bearer " + authToken
+	}
+	for key, value := range additionalHeaders {
+		headers[key] = value
+	}
+	return headers
+}
+
 // TransportConfig holds configuration for different transport types
 type TransportConfig struct {
 	Type      TransportType
