@@ -284,7 +284,7 @@ func (a *Agent) firePostBackgroundToolUse(ctx context.Context, hctx *HookContext
 				a.logger.Error("post-background-tool-use hook aborted", "error", abortErr)
 				return abortErr
 			}
-			a.logger.Debug("post-background-tool-use hook error", "error", err)
+			a.logger.Warn("post-background-tool-use hook error", "error", err)
 		}
 	}
 	return nil
