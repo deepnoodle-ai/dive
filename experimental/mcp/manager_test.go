@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"context"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
 func TestNewManager(t *testing.T) {
@@ -159,10 +161,10 @@ func TestMCPManager_WithMockServer(t *testing.T) {
 		Tools:  diveTools,
 	}
 
-	// Add tools to the global tools map
+	// Add tools to the global tools map (keyed by bare tool name, matching
+	// what initializeServer does)
 	for _, tool := range diveTools {
-		toolKey := testConfig.Name + "." + tool.Name()
-		manager.tools[toolKey] = tool
+		manager.tools[tool.Name()] = tool
 	}
 
 	// Test GetServerNames
@@ -177,11 +179,11 @@ func TestMCPManager_WithMockServer(t *testing.T) {
 	// Test GetAllTools
 	allTools := manager.GetAllTools()
 	assert.Len(t, allTools, 2)
-	assert.Contains(t, allTools, "test-server.test-tool-1")
-	assert.Contains(t, allTools, "test-server.test-tool-2")
+	assert.Contains(t, allTools, "test-tool-1")
+	assert.Contains(t, allTools, "test-tool-2")
 
 	// Test GetTool
-	tool1 := manager.GetTool("test-server.test-tool-1")
+	tool1 := manager.GetTool("test-tool-1")
 	assert.NotNil(t, tool1)
 	assert.Equal(t, "test-tool-1", tool1.Name())
 
@@ -240,10 +242,10 @@ func TestMCPManager_RefreshTools_WithMockServer(t *testing.T) {
 		Tools:  diveTools,
 	}
 
-	// Add initial tools to global map
+	// Add initial tools to global map (keyed by bare tool name, matching
+	// what initializeServer does)
 	for _, tool := range diveTools {
-		toolKey := testConfig.Name + "." + tool.Name()
-		manager.tools[toolKey] = tool
+		manager.tools[tool.Name()] = tool
 	}
 
 	// Verify initial state
@@ -290,4 +292,120 @@ func TestMCPManager_RefreshTools_DisconnectedServer(t *testing.T) {
 	ctx := context.Background()
 	err = manager.RefreshTools(ctx)
 	assert.NoError(t, err) // Should succeed by skipping disconnected servers
+}
+
+// ---------------------------------------------------------------------------
+// RefreshTools integration tests against a real in-process MCP server
+// ---------------------------------------------------------------------------
+
+// newTestMCPServer starts an in-process streamable HTTP MCP server exposing
+// the given tools.
+func newTestMCPServer(t *testing.T, toolNames ...string) (*mcpserver.MCPServer, *httptest.Server) {
+	t.Helper()
+	srv := mcpserver.NewMCPServer("test-mcp-server", "1.0.0",
+		mcpserver.WithToolCapabilities(true))
+	for _, name := range toolNames {
+		addTestTool(srv, name)
+	}
+	ts := mcpserver.NewTestStreamableHTTPServer(srv)
+	t.Cleanup(ts.Close)
+	return srv, ts
+}
+
+func addTestTool(srv *mcpserver.MCPServer, name string) {
+	srv.AddTool(mcp.NewTool(name, mcp.WithDescription("Test tool "+name)),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText("ok"), nil
+		})
+}
+
+// TestMCPManager_RefreshTools_RemovesStaleTools is a regression test for the
+// stale-key cleanup in RefreshTools: it previously deleted keys prefixed
+// "server." even though tools are registered under bare names, so tools
+// removed server-side accumulated in the manager forever.
+func TestMCPManager_RefreshTools_RemovesStaleTools(t *testing.T) {
+	srv, ts := newTestMCPServer(t, "alpha", "beta")
+
+	manager := NewManager()
+	t.Cleanup(func() { manager.Close() })
+
+	ctx := context.Background()
+	err := manager.InitializeServers(ctx, []*ServerConfig{
+		{Type: "http", Name: "test-server", URL: ts.URL},
+	})
+	assert.NoError(t, err)
+
+	allTools := manager.GetAllTools()
+	assert.Len(t, allTools, 2)
+	assert.Contains(t, allTools, "alpha")
+	assert.Contains(t, allTools, "beta")
+
+	// Remove "beta" server-side, then refresh.
+	srv.DeleteTools("beta")
+	assert.NoError(t, manager.RefreshTools(ctx))
+
+	allTools = manager.GetAllTools()
+	assert.Len(t, allTools, 1)
+	assert.Contains(t, allTools, "alpha")
+	assert.Nil(t, manager.GetTool("beta"))
+	assert.Len(t, manager.GetToolsByServer("test-server"), 1)
+}
+
+// TestMCPManager_InitializeServers_DuplicateToolName verifies the existing
+// duplicate-name guard on initial connect: two servers exposing the same
+// tool name is an error.
+func TestMCPManager_InitializeServers_DuplicateToolName(t *testing.T) {
+	_, ts1 := newTestMCPServer(t, "shared")
+	_, ts2 := newTestMCPServer(t, "shared")
+
+	manager := NewManager()
+	t.Cleanup(func() { manager.Close() })
+
+	err := manager.InitializeServers(context.Background(), []*ServerConfig{
+		{Type: "http", Name: "server-one", URL: ts1.URL},
+		{Type: "http", Name: "server-two", URL: ts2.URL},
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate tool name")
+}
+
+// TestMCPManager_RefreshTools_DuplicateToolName verifies that a duplicate
+// tool name appearing across servers on refresh is handled the same way as
+// on initial connect: an error is reported and the original registration is
+// not clobbered.
+func TestMCPManager_RefreshTools_DuplicateToolName(t *testing.T) {
+	_, ts1 := newTestMCPServer(t, "shared")
+	srv2, ts2 := newTestMCPServer(t, "other")
+
+	manager := NewManager()
+	t.Cleanup(func() { manager.Close() })
+
+	ctx := context.Background()
+	err := manager.InitializeServers(ctx, []*ServerConfig{
+		{Type: "http", Name: "server-one", URL: ts1.URL},
+		{Type: "http", Name: "server-two", URL: ts2.URL},
+	})
+	assert.NoError(t, err)
+	assert.Len(t, manager.GetAllTools(), 2)
+
+	// server-two now also exposes "shared", colliding with server-one.
+	addTestTool(srv2, "shared")
+
+	err = manager.RefreshTools(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate tool name")
+
+	// server-one's registration of "shared" must be preserved.
+	tool := manager.GetTool("shared")
+	assert.NotNil(t, tool)
+	adapter, ok := tool.(*ToolAdapter)
+	assert.True(t, ok)
+	assert.Equal(t, "server-one", adapter.serverName)
+
+	// server-two keeps its non-conflicting tool.
+	tool = manager.GetTool("other")
+	assert.NotNil(t, tool)
+	adapter, ok = tool.(*ToolAdapter)
+	assert.True(t, ok)
+	assert.Equal(t, "server-two", adapter.serverName)
 }

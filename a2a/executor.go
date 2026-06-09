@@ -270,15 +270,21 @@ func (e *Executor) yieldResponseEvents(
 		yield(event, nil)
 
 	case "", dive.ResponseStatusCompleted:
-		// Emit artifacts from assistant messages.
+		// Emit a single artifact built from the final assistant message,
+		// matching Response.OutputText() semantics. In a tool-using turn the
+		// intermediate assistant messages ("Let me check...") are streamed as
+		// working status updates but must not become the task's result —
+		// only the last assistant message with renderable content does.
+		var parts []*a2asdk.Part
 		for _, out := range resp.OutputMessages {
 			if out.Role != llm.Assistant {
 				continue
 			}
-			parts := partsFromContent(out.Content)
-			if len(parts) == 0 {
-				continue
+			if p := partsFromContent(out.Content); len(p) > 0 {
+				parts = p
 			}
+		}
+		if len(parts) > 0 {
 			artEvent := a2asdk.NewArtifactEvent(execCtx, parts...)
 			artEvent.LastChunk = true
 			if !yield(artEvent, nil) {
