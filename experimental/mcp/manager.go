@@ -154,7 +154,9 @@ func (m *Manager) GetToolsByServer(serverName string) []dive.Tool {
 	return nil
 }
 
-// GetTool returns a specific tool by name (with server prefix)
+// GetTool returns a specific tool by name. Tools are keyed by bare tool name
+// (no server prefix); duplicate names across servers are rejected at
+// registration time.
 func (m *Manager) GetTool(toolKey string) dive.Tool {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -193,16 +195,26 @@ func (m *Manager) RefreshTools(ctx context.Context) error {
 			continue
 		}
 
-		// Remove old tools for this server
-		for toolKey := range m.tools {
-			if len(toolKey) > len(serverName)+1 && toolKey[:len(serverName)+1] == serverName+"." {
-				delete(m.tools, toolKey)
+		// Remove this server's old tools from the global map. Tools are
+		// keyed by bare tool name (no server prefix), so delete by identity:
+		// only remove an entry when it is one of this server's adapters, to
+		// avoid clobbering a same-named tool owned by another server.
+		for _, old := range server.Tools {
+			if existing, ok := m.tools[old.Name()]; ok && existing == old {
+				delete(m.tools, old.Name())
 			}
 		}
 
-		// Create new tool adapters
+		// Create new tool adapters, mirroring the duplicate-name guard used
+		// during initial registration: a name already registered (by another
+		// server, or twice by this one) is an error and is not overwritten.
 		var tools []dive.Tool
 		for _, mcpTool := range mcpTools {
+			if _, exists := m.tools[mcpTool.Name]; exists {
+				errors = append(errors, fmt.Errorf("mcp server %s has duplicate tool name %q",
+					serverName, mcpTool.Name))
+				continue
+			}
 			adapter := NewToolAdapter(server.Client, mcpTool, serverName)
 			tools = append(tools, adapter)
 			m.tools[mcpTool.Name] = adapter

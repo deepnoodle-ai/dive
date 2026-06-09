@@ -2,6 +2,7 @@ package settings
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,34 +36,92 @@ type SettingsPermissions struct {
 }
 
 // LoadSettings loads settings from the .dive directory in the given directory.
-// It checks for settings.local.json first (user-specific), then settings.json.
+// Both settings.json (the project base) and settings.local.json (user-specific
+// overrides) are read when present and merged, mirroring Claude Code
+// semantics: settings.local.json overrides settings.json rather than
+// replacing it wholesale.
+//
+// Merge rules, applied recursively to the raw JSON documents:
+//   - Objects/maps merge per key, with the local value winning on conflict.
+//     This applies at every nesting level (e.g. "permissions", "sandbox",
+//     "sandbox.environment").
+//   - Arrays/slices replace wholesale: a local "permissions.allow" list
+//     replaces the entire base list rather than appending to it.
+//   - Scalar keys present in the local file win, including explicit zero
+//     values such as false or "" (presence in the file is the override
+//     signal); keys absent from the local file keep the base value.
+//
 // If neither file exists, returns an empty Settings with no error.
 func LoadSettings(dir string) (*Settings, error) {
 	diveDir := filepath.Join(dir, ".dive")
 
-	// Try settings.local.json first (takes precedence, like Claude Code)
-	// Then fall back to settings.json
-	filenames := []string{"settings.local.json", "settings.json"}
-
-	for _, filename := range filenames {
-		settingsPath := filepath.Join(diveDir, filename)
-		data, err := os.ReadFile(settingsPath)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		var settings Settings
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return nil, err
-		}
-
-		return &settings, nil
+	base, err := readSettingsMap(filepath.Join(diveDir, "settings.json"))
+	if err != nil {
+		return nil, err
+	}
+	local, err := readSettingsMap(filepath.Join(diveDir, "settings.local.json"))
+	if err != nil {
+		return nil, err
 	}
 
-	return &Settings{}, nil
+	merged := mergeSettingsMaps(base, local)
+	if merged == nil {
+		return &Settings{}, nil
+	}
+
+	data, err := json.Marshal(merged)
+	if err != nil {
+		return nil, err
+	}
+	var settings Settings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// readSettingsMap reads a settings file into a generic JSON map. Returns
+// (nil, nil) if the file does not exist.
+func readSettingsMap(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("settings: parse %s: %w", path, err)
+	}
+	return m, nil
+}
+
+// mergeSettingsMaps deep-merges override into base and returns the result.
+// Objects merge per key recursively with override winning; any other value
+// type (arrays, scalars, null) present in override replaces the base value.
+// Either argument may be nil, in which case the other is returned.
+func mergeSettingsMaps(base, override map[string]any) map[string]any {
+	if base == nil {
+		return override
+	}
+	if override == nil {
+		return base
+	}
+	out := make(map[string]any, len(base)+len(override))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range override {
+		if baseMap, ok := out[k].(map[string]any); ok {
+			if overrideMap, ok := v.(map[string]any); ok {
+				out[k] = mergeSettingsMaps(baseMap, overrideMap)
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // ToPermissionRules converts the settings permissions to permission.Rules.

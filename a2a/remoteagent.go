@@ -258,14 +258,17 @@ func normalizeState(s a2asdk.TaskState) string {
 	return strings.ToLower(strings.TrimPrefix(string(s), "TASK_STATE_"))
 }
 
-// extractText returns the most useful text from a task: prefers artifact
-// text parts, falls back to the last agent message in history.
+// extractText returns the most useful text from a task: prefers the latest
+// artifact's text parts (Dive's A2A server emits one final artifact per turn,
+// matching Response.OutputText() semantics; other servers may emit several,
+// in which case the most recent one is the final answer), falling back to
+// the last agent message in history.
 func extractText(task *a2asdk.Task) string {
 	if task == nil {
 		return ""
 	}
-	for _, art := range task.Artifacts {
-		for _, p := range art.Parts {
+	for i := len(task.Artifacts) - 1; i >= 0; i-- {
+		for _, p := range task.Artifacts[i].Parts {
 			if t := p.Text(); t != "" {
 				return t
 			}

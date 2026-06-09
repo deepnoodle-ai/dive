@@ -66,6 +66,73 @@ func TestLoadSettings(t *testing.T) {
 		assert.NotNil(t, settings)
 		assert.Len(t, settings.Permissions.Allow, 2) // local has 2, regular has 1
 	})
+
+	t.Run("settings.local.json merges with settings.json instead of shadowing it", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		diveDir := filepath.Join(tmpDir, ".dive")
+		assert.NoError(t, os.Mkdir(diveDir, 0755))
+
+		settingsJSON := `{
+  "permissions": {
+    "allow": ["WebSearch", "Bash(go build:*)"],
+    "deny": ["Bash(rm -rf:*)"]
+  },
+  "sandbox": {
+    "enabled": true,
+    "environment": {"BASE_VAR": "base", "SHARED_VAR": "from-base"},
+    "docker": {"image": "ubuntu:22.04"}
+  }
+}`
+		localJSON := `{
+  "permissions": {
+    "allow": ["Bash(go test:*)"]
+  },
+  "sandbox": {
+    "environment": {"SHARED_VAR": "from-local", "LOCAL_VAR": "local"},
+    "docker": {"command": "podman"}
+  }
+}`
+		assert.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.json"), []byte(settingsJSON), 0644))
+		assert.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.local.json"), []byte(localJSON), 0644))
+
+		settings, err := LoadSettings(tmpDir)
+		assert.NoError(t, err)
+		assert.NotNil(t, settings)
+
+		// Slice field: the local allow list replaces the base list wholesale.
+		assert.Equal(t, []string{"Bash(go test:*)"}, settings.Permissions.Allow)
+		// Slice field absent from local: the base deny list is preserved
+		// (previously the entire settings.json — deny rules included — was
+		// silently discarded when settings.local.json existed).
+		assert.Equal(t, []string{"Bash(rm -rf:*)"}, settings.Permissions.Deny)
+
+		// Map field: merged per key, local winning on conflict.
+		assert.NotNil(t, settings.Sandbox)
+		assert.Equal(t, map[string]string{
+			"BASE_VAR":   "base",
+			"SHARED_VAR": "from-local",
+			"LOCAL_VAR":  "local",
+		}, settings.Sandbox.Environment)
+
+		// Scalar fields: base values absent from local are kept; local
+		// values win where present.
+		assert.True(t, settings.Sandbox.Enabled)
+		assert.Equal(t, "ubuntu:22.04", settings.Sandbox.Docker.Image)
+		assert.Equal(t, "podman", settings.Sandbox.Docker.Command)
+	})
+
+	t.Run("only settings.local.json present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		diveDir := filepath.Join(tmpDir, ".dive")
+		assert.NoError(t, os.Mkdir(diveDir, 0755))
+
+		localJSON := `{"permissions": {"allow": ["WebSearch"]}}`
+		assert.NoError(t, os.WriteFile(filepath.Join(diveDir, "settings.local.json"), []byte(localJSON), 0644))
+
+		settings, err := LoadSettings(tmpDir)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"WebSearch"}, settings.Permissions.Allow)
+	})
 }
 
 func TestParsePermissionPattern(t *testing.T) {

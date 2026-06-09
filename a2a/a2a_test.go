@@ -84,6 +84,18 @@ func (t *confirmTool) Call(ctx context.Context, input any) (*dive.ToolResult, er
 	return dive.NewSuspendResult("Please confirm", nil), nil
 }
 
+type lookupTool struct{}
+
+func (t *lookupTool) Name() string         { return "lookup" }
+func (t *lookupTool) Description() string  { return "Look something up" }
+func (t *lookupTool) Schema() *dive.Schema { return nil }
+func (t *lookupTool) Annotations() *dive.ToolAnnotations {
+	return &dive.ToolAnnotations{Title: "Lookup"}
+}
+func (t *lookupTool) Call(ctx context.Context, input any) (*dive.ToolResult, error) {
+	return dive.NewToolResultText("lookup result"), nil
+}
+
 type authSuspendTool struct{}
 
 func (t *authSuspendTool) Name() string         { return "auth_gate" }
@@ -196,10 +208,12 @@ func startServer(t *testing.T, agent *dive.Agent) (*httptest.Server, *a2aclient.
 	return ts, client
 }
 
-// taskText extracts the first text from a raw SDK task's artifacts, falling
-// back to the last agent message in history.
+// taskText extracts the text from a raw SDK task's artifacts (latest artifact
+// first, mirroring RemoteAgent's extraction), falling back to the last agent
+// message in history.
 func taskText(task *a2asdk.Task) string {
-	for _, art := range task.Artifacts {
+	for i := len(task.Artifacts) - 1; i >= 0; i-- {
+		art := task.Artifacts[i]
 		for _, p := range art.Parts {
 			if t := p.Text(); t != "" {
 				return t
@@ -342,6 +356,51 @@ func TestSuspendAndResume(t *testing.T) {
 	assert.Equal(t, a2asdk.TaskStateCompleted, task2.Status.State)
 	assert.True(t, len(task2.Artifacts) > 0)
 	assert.Equal(t, "Done! You approved it.", task2.Artifacts[0].Parts[0].Text())
+}
+
+// TestMultiMessageTurnReturnsFinalText is a regression test for the bug where
+// a tool-using turn emitted one artifact per assistant message and clients
+// returned the first artifact's text — i.e. the "Let me check..." preamble
+// instead of the final answer. The server must emit a single final artifact
+// (matching Response.OutputText() semantics) and RemoteAgent must surface it.
+func TestMultiMessageTurnReturnsFinalText(t *testing.T) {
+	var callNum atomic.Int32
+	model := &fakeLLM{generate: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+		// Odd calls: a text preamble plus a tool call. Even calls: the answer.
+		if callNum.Add(1)%2 == 1 {
+			return &llm.Response{
+				ID:    "resp_preamble",
+				Model: "fake-model",
+				Role:  llm.Assistant,
+				Content: []llm.Content{
+					&llm.TextContent{Text: "Let me check..."},
+					&llm.ToolUseContent{ID: "call_1", Name: "lookup", Input: json.RawMessage(`{}`)},
+				},
+				Type:       "message",
+				StopReason: "tool_use",
+				Usage:      llm.Usage{InputTokens: 10, OutputTokens: 5},
+			}, nil
+		}
+		return textResponse("The answer is 42."), nil
+	}}
+	agent := buildAgent(t, model, &lookupTool{})
+	ts, client := startServer(t, agent)
+
+	// Raw SDK client: the task must carry exactly one artifact, holding the
+	// final assistant message's text, not the preamble.
+	msg := a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart("What is the answer?"))
+	task := sendAndExpectTask(t, client, msg)
+	assert.Equal(t, a2asdk.TaskStateCompleted, task.Status.State)
+	assert.Len(t, task.Artifacts, 1)
+	assert.Equal(t, "The answer is 42.", taskText(task))
+
+	// RemoteAgent: TaskResult.Text must be the final answer.
+	remote, err := a2a.NewRemoteAgentFromURL(context.Background(), ts.URL)
+	assert.NoError(t, err)
+	result, err := remote.SendText(context.Background(), "What is the answer?")
+	assert.NoError(t, err)
+	assert.True(t, result.IsCompleted())
+	assert.Equal(t, "The answer is 42.", result.Text)
 }
 
 func TestStreamMessage(t *testing.T) {
