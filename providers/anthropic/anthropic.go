@@ -388,7 +388,12 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.ContextManagement = config.ContextManagement
 	}
 
-	req.Temperature = config.Temperature
+	if !modelRejectsTemperature(req.Model) {
+		req.Temperature = config.Temperature
+	} else if config.Temperature != nil && config.Logger != nil {
+		config.Logger.Warn("temperature is not supported by this model and will be ignored",
+			"model", req.Model)
+	}
 	req.System = config.SystemPrompt
 	return nil
 }
@@ -553,6 +558,13 @@ func modelSupportsMaxEffort(model string) bool {
 		strings.HasPrefix(model, "claude-opus-4-8") ||
 		strings.HasPrefix(model, "claude-sonnet-4-6") ||
 		strings.HasPrefix(model, "claude-fable-5") ||
+		strings.HasPrefix(model, "claude-mythos-5")
+}
+
+// modelRejectsTemperature reports whether the model rejects the temperature
+// parameter (Claude 5 models: Fable 5, Mythos 5).
+func modelRejectsTemperature(model string) bool {
+	return strings.HasPrefix(model, "claude-fable-5") ||
 		strings.HasPrefix(model, "claude-mythos-5")
 }
 

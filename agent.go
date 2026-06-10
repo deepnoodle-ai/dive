@@ -2143,6 +2143,12 @@ func (a *Agent) executeToolCallsParallel(
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// Store the outer ctx so background goroutines started by tools can use it
+	// via backgroundCtxFrom. The batch-level cancel fires when runToolBatch
+	// returns, which would prematurely cancel background tasks if they used
+	// childCtx directly.
+	childCtx = withBackgroundCtx(childCtx, ctx)
+
 	// Phase 1: PreToolUse hooks (sequential)
 	preps := make([]toolCallPrep, len(toolCalls))
 	for i, toolCall := range toolCalls {

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-06-09
+
+### Fixed
+
+- **Background task cancellation** — background goroutines spawned by tools
+  were prematurely cancelled when their tool batch completed, because they
+  inherited the batch-scoped `childCtx`. They now receive the outer
+  `CreateResponse` context via a new `withBackgroundCtx`/`backgroundCtxFrom`
+  helper, so background tasks live for the full agent turn.
+- **CLI temperature zero-value** — the `--temperature` flag was always written
+  to `ModelSettings.Temperature` (even when not set), forcing every request to
+  `temperature=0`. The CLI now uses `ctx.IsSet("temperature")` and only sets
+  the field when the flag is explicitly provided.
+- **Claude 5 temperature rejection** — Fable 5 and Mythos 5 reject the
+  temperature parameter at the API level. The Anthropic provider now skips
+  setting temperature for these models, and logs a warning when a non-nil
+  temperature is silently dropped.
+
 ## [1.8.0] - 2026-06-09
 
 ### Added
