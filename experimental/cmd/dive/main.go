@@ -323,19 +323,22 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Create model settings
-	temperature := ctx.Float64("temperature")
 	maxTokens := ctx.Int("max-tokens")
+	modelSettings := &dive.ModelSettings{
+		MaxTokens: &maxTokens,
+	}
+	if ctx.IsSet("temperature") {
+		t := ctx.Float64("temperature")
+		modelSettings.Temperature = &t
+	}
 
 	// Create agent options with hooks and extensions
 	agentOpts := dive.AgentOptions{
-		SystemPrompt: systemPrompt,
-		Model:        model,
-		Tools:        tools,
-		Extensions:   []dive.Extension{skills},
-		ModelSettings: &dive.ModelSettings{
-			Temperature: &temperature,
-			MaxTokens:   &maxTokens,
-		},
+		SystemPrompt:  systemPrompt,
+		Model:         model,
+		Tools:         tools,
+		Extensions:    []dive.Extension{skills},
+		ModelSettings: modelSettings,
 		Hooks: dive.Hooks{
 			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
@@ -492,17 +495,20 @@ func runPrint(ctx *cli.Context) error {
 	tools = append(tools, grokServerSideTools(modelName)...)
 
 	// Create agent
-	temperature := ctx.Float64("temperature")
 	maxTokens := ctx.Int("max-tokens")
+	printModelSettings := &dive.ModelSettings{
+		MaxTokens: &maxTokens,
+	}
+	if ctx.IsSet("temperature") {
+		t := ctx.Float64("temperature")
+		printModelSettings.Temperature = &t
+	}
 
 	agent, err := dive.NewAgent(dive.AgentOptions{
-		SystemPrompt: systemPrompt,
-		Model:        model,
-		Tools:        tools,
-		ModelSettings: &dive.ModelSettings{
-			Temperature: &temperature,
-			MaxTokens:   &maxTokens,
-		},
+		SystemPrompt:  systemPrompt,
+		Model:         model,
+		Tools:         tools,
+		ModelSettings: printModelSettings,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)

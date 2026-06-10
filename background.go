@@ -11,6 +11,28 @@ import (
 	"github.com/google/uuid"
 )
 
+// backgroundCtxKey is the context key used to propagate a long-lived context
+// for background goroutines. The tool execution context is cancelled as soon as
+// the tool batch completes; background goroutines need a context tied to the
+// outer CreateResponse call, not the batch.
+type backgroundCtxKey struct{}
+
+// withBackgroundCtx stores the outer (pre-batch-cancel) context so that
+// newBackgroundResult can retrieve it. Called by runToolBatch in agent.go.
+func withBackgroundCtx(ctx, outer context.Context) context.Context {
+	return context.WithValue(ctx, backgroundCtxKey{}, outer)
+}
+
+// backgroundCtxFrom returns the background-safe context stored by
+// withBackgroundCtx, falling back to ctx if none was stored (e.g. in tests
+// that construct tool contexts directly).
+func backgroundCtxFrom(ctx context.Context) context.Context {
+	if val := ctx.Value(backgroundCtxKey{}); val != nil {
+		return val.(context.Context)
+	}
+	return ctx
+}
+
 // backgroundResult is the internal state carried on ToolResult.Background.
 // Tool authors do not construct this directly; they use NewBackgroundResult or
 // NewBackgroundResultFull.
@@ -90,13 +112,18 @@ func newBackgroundResult(ctx context.Context, description string, fn func(ctx co
 	ch := make(chan *ToolResult, 1)
 	id := uuid.New().String()
 
+	// Use the outer (pre-batch-cancel) context so the goroutine lives past
+	// the end of the tool batch. backgroundCtxFrom falls back to ctx when no
+	// outer context was injected (e.g. in unit tests).
+	bgCtx := backgroundCtxFrom(ctx)
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				ch <- NewToolResultError(fmt.Sprintf("background task panicked: %v\n%s", r, debug.Stack()))
 			}
 		}()
-		result := fn(ctx)
+		result := fn(bgCtx)
 		if result == nil {
 			result = NewToolResultText("")
 		}
