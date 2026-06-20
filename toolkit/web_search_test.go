@@ -18,9 +18,9 @@ func (m *mockSearcher) Search(ctx context.Context, input *web.SearchInput) (*web
 	m.receivedLimit = input.Limit
 
 	// Generate items up to the requested count
-	items := []*web.SearchItem{}
+	items := []web.SearchItem{}
 	for i := 0; i < m.itemCount; i++ {
-		items = append(items, &web.SearchItem{
+		items = append(items, web.SearchItem{
 			URL:         "https://example.com",
 			Title:       "Test Result",
 			Description: "Test description",

@@ -80,16 +80,16 @@ func TestAppWithInlineRunner(t *testing.T) {
 	app := NewApp(agent, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
 
 	var buf bytes.Buffer
-	runner := tui.NewInlineApp(tui.InlineAppConfig{
-		Width:  80,
-		Output: &buf,
-	})
+	runner := tui.NewInlineApp(
+		tui.WithInlineWidth(80),
+		tui.WithInlineOutput(&buf),
+	)
 
 	// Wire up the runner
 	app.runner = runner
 
 	// Create a live printer for testing render cycles
-	live := tui.NewLivePrinter(tui.PrintConfig{Width: 80, Output: &buf})
+	live := tui.NewLivePrinter(tui.WithWidth(80), tui.WithOutput(&buf))
 
 	t.Run("render produces valid ANSI output", func(t *testing.T) {
 		// Manually render the live view
@@ -124,7 +124,7 @@ func TestAppFooterCollapse(t *testing.T) {
 		// Render to buffer to count actual output lines (not screen lines)
 		var buf bytes.Buffer
 		view := app.LiveView()
-		tui.Fprint(&buf, view, tui.PrintConfig{Width: 80})
+		tui.Fprint(&buf, view, tui.WithWidth(80))
 		output := buf.String()
 
 		// Count lines in the actual output
@@ -189,7 +189,7 @@ func renderLiveView(t *testing.T, app *App, width, height int) *termtest.Screen 
 
 	var buf bytes.Buffer
 	view := app.LiveView()
-	tui.Fprint(&buf, view, tui.PrintConfig{Width: width})
+	tui.Fprint(&buf, view, tui.WithWidth(width))
 
 	screen := termtest.NewScreen(width, height)
 	// Use Write (not WriteString) to process ANSI escape sequences
@@ -206,10 +206,10 @@ func TestAppEventHandling(t *testing.T) {
 
 	// Create a runner with captured output
 	var buf bytes.Buffer
-	app.runner = tui.NewInlineApp(tui.InlineAppConfig{
-		Width:  80,
-		Output: &buf,
-	})
+	app.runner = tui.NewInlineApp(
+		tui.WithInlineWidth(80),
+		tui.WithInlineOutput(&buf),
+	)
 
 	t.Run("Ctrl+C shows exit hint", func(t *testing.T) {
 		// Simulate first Ctrl+C

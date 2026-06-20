@@ -7,7 +7,7 @@ require (
 	github.com/deepnoodle-ai/dive/providers/google v1.8.0
 	github.com/deepnoodle-ai/dive/providers/grok v1.8.0
 	github.com/deepnoodle-ai/dive/providers/openai v1.8.0
-	github.com/deepnoodle-ai/wonton v0.0.34
+	github.com/deepnoodle-ai/wonton v0.0.36
 	github.com/mattn/go-runewidth v0.0.21
 )
 

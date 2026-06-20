@@ -206,10 +206,9 @@ func TestClientFetchErrorHandling(t *testing.T) {
 
 			_, err = client.Fetch(context.Background(), &fetch.Request{URL: "https://example.com"})
 			assert.Error(t, err)
-			assert.True(t, fetch.IsRequestError(err))
-			var reqErr *fetch.RequestError
+			var reqErr *fetch.Error
 			assert.True(t, errors.As(err, &reqErr))
-			assert.Equal(t, tt.statusCode, reqErr.StatusCode())
+			assert.Equal(t, tt.statusCode, reqErr.StatusCode)
 		})
 	}
 }

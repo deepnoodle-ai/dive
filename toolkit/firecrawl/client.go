@@ -226,7 +226,11 @@ func (c *Client) Fetch(ctx context.Context, req *fetch.Request) (*fetch.Response
 	if err != nil {
 		var apiErr *apiError
 		if errors.As(err, &apiErr) {
-			return nil, fetch.NewRequestErrorf("%s", apiErr.message).WithStatusCode(apiErr.statusCode)
+			return nil, &fetch.Error{
+				StatusCode: apiErr.statusCode,
+				URL:        req.URL,
+				Err:        errors.New(apiErr.message),
+			}
 		}
 		return nil, err
 	}
@@ -271,9 +275,9 @@ func (a *searcherAdapter) Search(ctx context.Context, input *web.SearchInput) (*
 	if err != nil {
 		return nil, err
 	}
-	items := make([]*web.SearchItem, 0, len(resp.Data))
+	items := make([]web.SearchItem, 0, len(resp.Data))
 	for _, r := range resp.Data {
-		items = append(items, &web.SearchItem{
+		items = append(items, web.SearchItem{
 			URL:         r.URL,
 			Title:       r.Title,
 			Description: r.Description,
@@ -283,7 +287,7 @@ func (a *searcherAdapter) Search(ctx context.Context, input *web.SearchInput) (*
 }
 
 // apiError carries an HTTP status code through the error chain so Fetch can
-// convert it to a fetch.RequestError without exposing wonton in the core API.
+// convert it to a fetch.Error without exposing wonton in the core API.
 type apiError struct {
 	statusCode int
 	message    string

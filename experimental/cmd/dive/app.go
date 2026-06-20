@@ -419,6 +419,22 @@ func (a *App) LiveView() tui.View {
 			Placeholder("Type a message... (@filename for autocomplete)").
 			Multiline(true).
 			MaxHeight(10).
+			OnChange(func(string) {
+				// A focused input consumes its own keystrokes (wonton
+				// >= v0.0.35), so refresh autocomplete on edits here
+				// rather than from HandleEvent.
+				a.updateAutocomplete()
+			}).
+			OnKey(func(e tui.KeyEvent) bool {
+				// Claim the keys the input would otherwise consume so
+				// autocomplete navigation and history recall still work
+				// while the input is focused.
+				if a.handleInputNavKey(e) {
+					a.updateAutocomplete()
+					return true
+				}
+				return false
+			}).
 			OnSubmit(func(value string) {
 				a.submitInput(value)
 			}),
@@ -924,26 +940,11 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 		return a.handleDialogKey(e)
 	}
 
-	// Handle autocomplete navigation
-	if len(a.autocompleteMatches) > 0 {
-		switch e.Key {
-		case tui.KeyArrowUp:
-			if a.autocompleteIndex > 0 {
-				a.autocompleteIndex--
-			}
-			return nil
-		case tui.KeyArrowDown:
-			if a.autocompleteIndex < len(a.autocompleteMatches)-1 {
-				a.autocompleteIndex++
-			}
-			return nil
-		case tui.KeyTab:
-			a.selectAutocomplete()
-			return nil
-		case tui.KeyEscape:
-			a.clearAutocomplete()
-			return nil
-		}
+	// Autocomplete navigation and command-history recall. These normally
+	// arrive through the focused input's OnKey hook; consulting them here too
+	// covers any key that reaches the app directly.
+	if a.handleInputNavKey(e) {
+		return nil
 	}
 
 	// Handle global keys
@@ -967,6 +968,42 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 			a.cancel()
 		}
 		return nil
+	}
+
+	return nil
+}
+
+// handleInputNavKey processes autocomplete navigation and command-history
+// recall for the main input, returning true when it consumes the key. Since
+// wonton >= v0.0.35 a focused InputField owns its keystrokes, this is wired
+// through the input's OnKey hook; handleKeyEvent also consults it for keys
+// that reach the app directly. Returning false lets the input handle the key
+// itself (e.g. moving the cursor when there is no history to recall).
+func (a *App) handleInputNavKey(e tui.KeyEvent) bool {
+	// Autocomplete navigation takes precedence while suggestions are shown.
+	if len(a.autocompleteMatches) > 0 {
+		switch e.Key {
+		case tui.KeyArrowUp:
+			if a.autocompleteIndex > 0 {
+				a.autocompleteIndex--
+			}
+			return true
+		case tui.KeyArrowDown:
+			if a.autocompleteIndex < len(a.autocompleteMatches)-1 {
+				a.autocompleteIndex++
+			}
+			return true
+		case tui.KeyTab:
+			a.selectAutocomplete()
+			return true
+		case tui.KeyEscape:
+			a.clearAutocomplete()
+			return true
+		}
+	}
+
+	// Command-history recall on Up/Down when the input is idle.
+	switch e.Key {
 	case tui.KeyArrowUp:
 		// History navigation (only when no autocomplete and input is empty or navigating)
 		if !a.processing && len(a.history) > 0 && len(a.autocompleteMatches) == 0 {
@@ -978,8 +1015,8 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 			if a.historyIndex >= 0 && a.historyIndex < len(a.history) {
 				a.inputText = a.history[a.historyIndex]
 			}
+			return true
 		}
-		return nil
 	case tui.KeyArrowDown:
 		// History navigation (only when no autocomplete)
 		if !a.processing && a.historyIndex >= 0 && len(a.autocompleteMatches) == 0 {
@@ -990,11 +1027,11 @@ func (a *App) handleKeyEvent(e tui.KeyEvent) []tui.Cmd {
 			} else {
 				a.inputText = a.history[a.historyIndex]
 			}
+			return true
 		}
-		return nil
 	}
 
-	return nil
+	return false
 }
 
 // submitInput handles input submission
@@ -1713,11 +1750,11 @@ func (a *App) printRecentMessagesToScrollback() {
 // Run starts the CLI application
 func (a *App) Run() error {
 	// Create InlineApp runner with 30 FPS for animations
-	a.runner = tui.NewInlineApp(tui.InlineAppConfig{
-		FPS:            30,
-		BracketedPaste: true,
-		KittyKeyboard:  true,
-	})
+	a.runner = tui.NewInlineApp(
+		tui.WithInlineFPS(30),
+		tui.WithInlineBracketedPaste(true),
+		tui.WithInlineKittyKeyboard(true),
+	)
 
 	// If resuming a session, print the conversation history instead of the intro
 	if a.resumeSessionID != "" {
