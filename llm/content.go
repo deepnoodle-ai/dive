@@ -56,6 +56,10 @@ func (c ContentSourceType) String() string {
 // CacheControl is used to control caching of content blocks.
 type CacheControl struct {
 	Type CacheControlType `json:"type"`
+	// TTL selects the cache lifetime when the provider supports an extended
+	// cache duration. Empty means the provider default (5 minutes); "1h"
+	// requests the extended 1-hour cache. See CacheTTL5m / CacheTTL1h.
+	TTL string `json:"ttl,omitempty"`
 }
 
 // ContentChunk is used within a Content block to pass chunks of content.
@@ -420,9 +424,10 @@ func (c *DocumentContent) CloneContent() Content {
 */
 
 type ToolUseContent struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Input        json.RawMessage `json:"input"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }
 
 func (c *ToolUseContent) Type() ContentType {
@@ -438,16 +443,28 @@ func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("invalid JSON in tool_use input for %q (id=%s): %s", c.Name, c.ID, string(input))
 	}
 	return json.Marshal(struct {
-		Type  ContentType     `json:"type"`
-		ID    string          `json:"id"`
-		Name  string          `json:"name"`
-		Input json.RawMessage `json:"input"`
+		Type         ContentType     `json:"type"`
+		ID           string          `json:"id"`
+		Name         string          `json:"name"`
+		Input        json.RawMessage `json:"input"`
+		CacheControl *CacheControl   `json:"cache_control,omitempty"`
 	}{
-		Type:  ContentTypeToolUse,
-		ID:    c.ID,
-		Name:  c.Name,
-		Input: input,
+		Type:         ContentTypeToolUse,
+		ID:           c.ID,
+		Name:         c.Name,
+		Input:        input,
+		CacheControl: c.CacheControl,
 	})
+}
+
+func (c *ToolUseContent) SetCacheControl(cacheControl *CacheControl) {
+	c.CacheControl = cacheControl
+}
+
+func (c *ToolUseContent) CloneContent() Content {
+	cp := *c
+	cp.CacheControl = nil
+	return &cp
 }
 
 // ToolResultContent carries the result of a tool call back to the LLM.

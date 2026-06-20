@@ -288,25 +288,244 @@ func TestDocumentContentHandling(t *testing.T) {
 	}
 }
 
-func TestApplyCacheControlDoesNotMutateOriginal(t *testing.T) {
-	// Build an original message with TextContent that has no CacheControl
+// applyTestCaching builds a Request from system/messages and runs the hybrid
+// cache placement against a provider configured for the default endpoint
+// (automatic caching supported) unless overridden.
+func applyTestCaching(t *testing.T, p *Provider, config *llm.Config, system string, messages []*llm.Message) *Request {
+	t.Helper()
+	converted, err := convertMessages(messages)
+	assert.NoError(t, err)
+	req := &Request{Messages: converted}
+	if system != "" {
+		req.System = []*SystemBlock{{Type: "text", Text: system}}
+	}
+	p.applyCaching(req, config)
+	return req
+}
+
+func lastBlockCacheControl(msg *llm.Message) *llm.CacheControl {
+	contents := msg.Content
+	switch c := contents[len(contents)-1].(type) {
+	case *llm.TextContent:
+		return c.CacheControl
+	case *llm.ToolResultContent:
+		return c.CacheControl
+	case *llm.ToolUseContent:
+		return c.CacheControl
+	}
+	return nil
+}
+
+func countMessageBreakpoints(messages []*llm.Message) int {
+	n := 0
+	for _, m := range messages {
+		for _, content := range m.Content {
+			switch c := content.(type) {
+			case *llm.TextContent:
+				if c.CacheControl != nil {
+					n++
+				}
+			case *llm.ToolResultContent:
+				if c.CacheControl != nil {
+					n++
+				}
+			case *llm.ToolUseContent:
+				if c.CacheControl != nil {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}
+
+func TestApplyCachingDoesNotMutateOriginal(t *testing.T) {
+	// convertMessages clones content, so applyCaching must not touch the original.
 	original := &llm.TextContent{Text: "hello"}
 	messages := []*llm.Message{
 		{Role: llm.User, Content: []llm.Content{original}},
 	}
-
-	// convertMessages should clone content, so applyCacheControl won't touch the original
-	converted, err := convertMessages(messages)
-	assert.NoError(t, err)
-
-	config := &llm.Config{}
-	applyCacheControl(converted, config)
-
-	// The converted message's content should have cache control set
-	setter, ok := converted[0].Content[0].(llm.CacheControlSetter)
-	assert.True(t, ok)
-	_ = setter // applyCacheControl sets it on the last content of the last message
-
-	// The original content must NOT have been mutated
+	applyTestCaching(t, New(), &llm.Config{}, "you are helpful", messages)
 	assert.Nil(t, original.CacheControl)
+}
+
+func TestApplyCachingSystemBreakpoint(t *testing.T) {
+	// The system prefix gets its own breakpoint, independent of the message tail.
+	messages := []*llm.Message{llm.NewUserTextMessage("hi")}
+	req := applyTestCaching(t, New(), &llm.Config{}, "you are helpful", messages)
+
+	assert.Len(t, req.System, 1)
+	assert.NotNil(t, req.System[0].CacheControl)
+	assert.Equal(t, llm.CacheControlTypeEphemeral, req.System[0].CacheControl.Type)
+	assert.Equal(t, "", req.System[0].CacheControl.TTL) // default 5m without extended cache
+}
+
+func TestApplyCachingAutomaticOwnsTail(t *testing.T) {
+	// On the default endpoint, automatic caching owns the tail: top-level
+	// cache_control is set and the last message block carries no explicit marker.
+	messages := []*llm.Message{llm.NewUserTextMessage("hi")}
+	req := applyTestCaching(t, New(), &llm.Config{}, "sys", messages)
+
+	assert.NotNil(t, req.CacheControl)
+	assert.Equal(t, llm.CacheControlTypeEphemeral, req.CacheControl.Type)
+	assert.Nil(t, lastBlockCacheControl(req.Messages[len(req.Messages)-1]))
+}
+
+func TestApplyCachingPortabilityFallback(t *testing.T) {
+	// On a non-default endpoint (e.g. Bedrock/Vertex/custom) automatic caching
+	// is unavailable, so the tail gets an explicit breakpoint and no top-level
+	// cache_control is set.
+	p := New(WithEndpoint("https://bedrock.example.com/v1/messages"))
+	messages := []*llm.Message{llm.NewUserTextMessage("hi")}
+	req := applyTestCaching(t, p, &llm.Config{}, "sys", messages)
+
+	assert.Nil(t, req.CacheControl)
+	assert.NotNil(t, lastBlockCacheControl(req.Messages[len(req.Messages)-1]))
+	assert.NotNil(t, req.System[0].CacheControl)
+}
+
+func TestApplyCachingOptOut(t *testing.T) {
+	off := false
+	messages := []*llm.Message{llm.NewUserTextMessage("hi")}
+	req := applyTestCaching(t, New(), &llm.Config{Caching: &off}, "sys", messages)
+
+	assert.Nil(t, req.CacheControl)
+	assert.Nil(t, req.System[0].CacheControl)
+	assert.Equal(t, 0, countMessageBreakpoints(req.Messages))
+}
+
+func TestApplyCachingOptOutClearsCallerMarkers(t *testing.T) {
+	// Opt-out must strip caller-provided cache markers so none leak into the
+	// request — including the top-level cache_control, system, and messages.
+	off := false
+	msgs, err := convertMessages([]*llm.Message{llm.NewUserTextMessage("hi")})
+	assert.NoError(t, err)
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if s, ok := c.(llm.CacheControlSetter); ok {
+				s.SetCacheControl(&llm.CacheControl{Type: llm.CacheControlTypeEphemeral})
+			}
+		}
+	}
+	req := &Request{
+		CacheControl: &llm.CacheControl{Type: llm.CacheControlTypeEphemeral},
+		System:       []*SystemBlock{{Type: "text", Text: "sys", CacheControl: &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}}},
+		Messages:     msgs,
+	}
+
+	New().applyCaching(req, &llm.Config{Caching: &off})
+
+	assert.Nil(t, req.CacheControl, "top-level cache_control should be cleared on opt-out")
+	assert.Nil(t, req.System[0].CacheControl, "system marker should be cleared on opt-out")
+	assert.Equal(t, 0, countMessageBreakpoints(req.Messages), "message markers should be cleared on opt-out")
+}
+
+func TestApplyCachingExtendedTTL(t *testing.T) {
+	// With the extended-cache feature enabled, the stable prefix uses the
+	// 1-hour TTL while the tail (automatic) stays at the default 5m.
+	config := &llm.Config{}
+	config.Apply(llm.WithFeatures(FeatureExtendedCache))
+	messages := []*llm.Message{llm.NewUserTextMessage("hi")}
+	req := applyTestCaching(t, New(), config, "sys", messages)
+
+	assert.Equal(t, llm.CacheTTL1h, req.System[0].CacheControl.TTL)
+	assert.Equal(t, "", req.CacheControl.TTL)
+}
+
+func TestApplyCachingNeverExceedsBudget(t *testing.T) {
+	// A turn with a large tool-call fan-out must keep total breakpoints within
+	// the API's 4-slot budget (automatic consumes one; explicit blocks <= 3).
+	var assistant []llm.Content
+	var results []llm.Content
+	for range 13 {
+		assistant = append(assistant, &llm.ToolUseContent{ID: "t", Name: "upsert", Input: json.RawMessage(`{}`)})
+		results = append(results, &llm.ToolResultContent{ToolUseID: "t", Content: "ok"})
+	}
+	messages := []*llm.Message{
+		llm.NewUserTextMessage("start"),
+		{Role: llm.Assistant, Content: assistant},
+		{Role: llm.User, Content: results},
+	}
+	req := applyTestCaching(t, New(), &llm.Config{}, "sys", messages)
+
+	explicit := countMessageBreakpoints(req.Messages)
+	if req.System[0].CacheControl != nil {
+		explicit++
+	}
+	// Automatic caching consumes one slot, so explicit must stay <= 3.
+	assert.True(t, explicit <= 3, "explicit breakpoints %d exceed budget", explicit)
+}
+
+func TestApplyCachingFanoutAnchorWithinWindow(t *testing.T) {
+	// Regression for the incident: a turn appending >20 content blocks must
+	// leave an anchor within the 20-block lookback window of the tail so the
+	// message history is not fully rewritten.
+	var assistant []llm.Content
+	var results []llm.Content
+	for range 13 {
+		assistant = append(assistant, &llm.ToolUseContent{ID: "t", Name: "upsert", Input: json.RawMessage(`{}`)})
+		results = append(results, &llm.ToolResultContent{ToolUseID: "t", Content: "ok"})
+	}
+	messages := []*llm.Message{
+		llm.NewUserTextMessage("start"),
+		{Role: llm.Assistant, Content: []llm.Content{llm.NewTextContent("older turn")}},
+		{Role: llm.User, Content: []llm.Content{llm.NewTextContent("older user")}},
+		{Role: llm.Assistant, Content: assistant},
+		{Role: llm.User, Content: results},
+	}
+	req := applyTestCaching(t, New(), &llm.Config{}, "sys", messages)
+
+	// Find the distance (in content blocks from the tail) of the nearest anchor.
+	nearest := -1
+	dist := 0
+	for mi := len(req.Messages) - 1; mi >= 0; mi-- {
+		contents := req.Messages[mi].Content
+		for bi := len(contents) - 1; bi >= 0; bi-- {
+			if cc := blockCacheControl(contents[bi]); cc != nil {
+				if nearest == -1 {
+					nearest = dist
+				}
+			}
+			dist++
+		}
+	}
+	assert.True(t, nearest >= 0, "expected at least one message anchor for the fan-out turn")
+	assert.True(t, nearest <= cacheLookbackWindow, "nearest anchor %d blocks from tail exceeds lookback window", nearest)
+}
+
+func TestApplyCachingWireFormat(t *testing.T) {
+	// The serialized request must render system as an array of text blocks (so a
+	// breakpoint can attach) and carry a top-level cache_control for automatic
+	// caching on the default endpoint.
+	messages := []*llm.Message{llm.NewUserTextMessage("hi")}
+	req := applyTestCaching(t, New(), &llm.Config{}, "you are helpful", messages)
+	req.Model = "claude-opus-4-8"
+
+	body, err := json.Marshal(req)
+	assert.NoError(t, err)
+	var decoded map[string]any
+	assert.NoError(t, json.Unmarshal(body, &decoded))
+
+	system, ok := decoded["system"].([]any)
+	assert.True(t, ok, "system should marshal as an array")
+	assert.Len(t, system, 1)
+	block := system[0].(map[string]any)
+	assert.Equal(t, "text", block["type"])
+	assert.NotNil(t, block["cache_control"])
+
+	cc, ok := decoded["cache_control"].(map[string]any)
+	assert.True(t, ok, "top-level cache_control should be present")
+	assert.Equal(t, "ephemeral", cc["type"])
+}
+
+func blockCacheControl(c llm.Content) *llm.CacheControl {
+	switch v := c.(type) {
+	case *llm.TextContent:
+		return v.CacheControl
+	case *llm.ToolResultContent:
+		return v.CacheControl
+	case *llm.ToolUseContent:
+		return v.CacheControl
+	}
+	return nil
 }

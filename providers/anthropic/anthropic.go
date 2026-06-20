@@ -76,11 +76,11 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, err
 	}
-	applyCacheControl(msgs, config)
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
 	request.Messages = msgs
+	p.applyCaching(&request, config)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -132,6 +132,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
+	finalizeUsage(config, request.Model, &result.Usage)
 	if config.Prefill != "" {
 		if err := addPrefill(result.Content, config.Prefill, config.PrefillClosingTag); err != nil {
 			return nil, err
@@ -166,12 +167,12 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
-	applyCacheControl(msgs, config)
 	if config.Prefill != "" {
 		msgs = append(msgs, llm.NewAssistantTextMessage(config.Prefill))
 	}
 	request.Messages = msgs
 	request.Stream = true
+	p.applyCaching(&request, config)
 
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -296,30 +297,216 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	return copied, nil
 }
 
-// applyCacheControl sets ephemeral cache control on the last content block of
-// the last message. This is applied automatically unless the user explicitly
-// opts out by setting Caching to false. The messages slice should already be a
-// copy (from convertMessages) so mutation is safe.
-func applyCacheControl(messages []*llm.Message, config *llm.Config) {
+const (
+	// cacheLookbackWindow is the number of trailing content blocks Anthropic
+	// searches backward from a cache breakpoint to find a reusable cache entry.
+	// A breakpoint further than this from the prior cached prefix forces a full
+	// rewrite of the intervening blocks.
+	cacheLookbackWindow = 20
+	// cacheAnchorGap is the maximum number of content blocks we allow between
+	// consecutive breakpoints. Kept safely under cacheLookbackWindow so the
+	// chain of breakpoints stays reachable even when a single turn appends a
+	// large fan-out of tool-call / tool-result blocks.
+	cacheAnchorGap = 15
+)
+
+// applyCaching places cache-control breakpoints across the request using the
+// hybrid strategy from docs/specs/anthropic-prompt-caching-hybrid.md:
+//
+//   - An explicit breakpoint on the last system block caches the stable
+//     tools+system prefix independently of the moving message tail, so a
+//     message-tier cache miss reads the (large) prefix instead of rewriting it.
+//   - The moving conversation tail is cached via Anthropic automatic caching
+//     (a top-level cache_control) when the endpoint supports it, or via an
+//     explicit tail breakpoint on endpoints that don't (Bedrock / Vertex /
+//     custom).
+//   - Explicit anchor breakpoints are placed walking backward from the tail so
+//     no two breakpoints are more than cacheAnchorGap blocks apart, keeping the
+//     chain inside the 20-block lookback window during high tool-call fan-out.
+//
+// Stable-prefix breakpoints (system + anchors) use the 1-hour TTL when the
+// extended-cache feature is enabled; the tail stays at the default 5-minute
+// TTL. Breakpoints are capped at the 4 the API allows (automatic consumes one).
+//
+// The request's messages/system should already be copies (system is built
+// fresh; messages come from convertMessages) so mutation here is safe.
+func (p *Provider) applyCaching(req *Request, config *llm.Config) {
+	// Start from a clean slate so caller-provided cache markers never leak
+	// through — in particular on opt-out, where we strip them and bail.
+	clearRequestCacheControl(req)
 	if config.Caching != nil && !*config.Caching {
 		return
 	}
-	if len(messages) == 0 {
+
+	stableTTL := stablePrefixTTL(config)
+
+	// Total explicit block-level breakpoints used so far. The API allows 4; when
+	// automatic caching is on it consumes one, leaving 3 for explicit blocks.
+	explicitUsed := 0
+	explicitBudget := 4
+
+	automatic := p.supportsAutomaticCaching()
+	if automatic {
+		explicitBudget = 3
+		req.CacheControl = &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}
+	}
+
+	// Slot: stable tools+system prefix.
+	if setLastSystemBreakpoint(req.System, stableTTL) {
+		explicitUsed++
+	}
+
+	if len(req.Messages) == 0 {
 		return
 	}
-	// Clear any existing cache control
-	for _, message := range messages {
+
+	// Tail handling. Automatic caching owns the tail when supported; otherwise
+	// fall back to an explicit breakpoint on the last content block.
+	if !automatic {
+		if setLastMessageTailBreakpoint(req.Messages) {
+			explicitUsed++
+		}
+	}
+
+	// Anchors defend the 20-block lookback window for the recent conversation.
+	remaining := explicitBudget - explicitUsed
+	placeCacheAnchors(req.Messages, remaining, stableTTL)
+}
+
+// logCacheThrash surfaces prompt-cache thrash: when caching is enabled but a
+// request writes far more cache than it reads, a large prefix was rewritten
+// instead of reused (e.g. a breakpoint fell outside the 20-block lookback
+// window). It warns only on a meaningful write that dominates the read, so
+// steady-state cold starts and small requests stay quiet. No-ops without a
+// logger or when caching is disabled.
+func logCacheThrash(config *llm.Config, usage *llm.Usage) {
+	if config.Logger == nil || (config.Caching != nil && !*config.Caching) {
+		return
+	}
+	const minWriteTokens = 4096
+	write := usage.CacheCreationInputTokens
+	read := usage.CacheReadInputTokens
+	if write >= minWriteTokens && write > read {
+		config.Logger.Warn("prompt cache write exceeded read; prefix likely rewritten",
+			"cache_creation_tokens", write,
+			"cache_read_tokens", read,
+			"input_tokens", usage.InputTokens)
+	}
+}
+
+// finalizeUsage runs post-response usage bookkeeping for the non-streaming
+// path: it logs cache thrash and attaches an estimated cost from registered
+// model pricing. Fast mode is detected from the served speed or the request so
+// premium fast-mode pricing is used when applicable. (Streamed responses get
+// the same cost treatment centrally via llm.ResponseAccumulator.)
+func finalizeUsage(config *llm.Config, model string, usage *llm.Usage) {
+	logCacheThrash(config, usage)
+	fast := usage.Speed == string(llm.SpeedFast) ||
+		config.Speed == llm.SpeedFast ||
+		config.IsFeatureEnabled(FeatureFastMode)
+	llm.PopulateCost(model, fast, usage)
+}
+
+// supportsAutomaticCaching reports whether the configured endpoint supports
+// Anthropic automatic prompt caching (top-level cache_control). It is available
+// on the first-party Claude API but not on Bedrock or Vertex, which are reached
+// through different endpoints.
+func (p *Provider) supportsAutomaticCaching() bool {
+	return p.endpoint == DefaultEndpoint
+}
+
+// stablePrefixTTL returns the TTL to use for stable-prefix breakpoints (system
+// and anchors). The 1-hour cache is used only when the extended-cache feature
+// is enabled; otherwise the default 5-minute cache (empty TTL) applies.
+func stablePrefixTTL(config *llm.Config) string {
+	if config.IsFeatureEnabled(FeatureExtendedCache) {
+		return llm.CacheTTL1h
+	}
+	return ""
+}
+
+// clearRequestCacheControl removes any pre-existing cache_control markers from
+// the system blocks and message contents so placement starts from a clean
+// slate (some content types preserve CacheControl across convertMessages).
+func clearRequestCacheControl(req *Request) {
+	req.CacheControl = nil
+	for _, block := range req.System {
+		block.CacheControl = nil
+	}
+	for _, message := range req.Messages {
 		for _, content := range message.Content {
 			if setter, ok := content.(llm.CacheControlSetter); ok {
 				setter.SetCacheControl(nil)
 			}
 		}
 	}
-	// Set cache control on the last content block of the last message
-	lastMessage := messages[len(messages)-1]
-	if contents := lastMessage.Content; len(contents) > 0 {
-		if setter, ok := contents[len(contents)-1].(llm.CacheControlSetter); ok {
+}
+
+// setLastSystemBreakpoint marks the final system block with cache control,
+// caching the tools+system prefix. Returns false when there is no system prompt.
+func setLastSystemBreakpoint(system []*SystemBlock, ttl string) bool {
+	if len(system) == 0 {
+		return false
+	}
+	system[len(system)-1].CacheControl = &llm.CacheControl{
+		Type: llm.CacheControlTypeEphemeral,
+		TTL:  ttl,
+	}
+	return true
+}
+
+// setLastMessageTailBreakpoint sets an explicit ephemeral (5-minute) breakpoint
+// on the last cacheable content block of the last message. Used as the
+// portability fallback when automatic caching is unavailable.
+func setLastMessageTailBreakpoint(messages []*llm.Message) bool {
+	contents := messages[len(messages)-1].Content
+	for i := len(contents) - 1; i >= 0; i-- {
+		if setter, ok := contents[i].(llm.CacheControlSetter); ok {
 			setter.SetCacheControl(&llm.CacheControl{Type: llm.CacheControlTypeEphemeral})
+			return true
+		}
+	}
+	return false
+}
+
+// placeCacheAnchors walks backward over the message content blocks and drops up
+// to maxAnchors explicit breakpoints so that consecutive breakpoints are never
+// more than cacheAnchorGap blocks apart. This keeps every breakpoint within the
+// API's lookback window even when one turn appends a large fan-out of blocks,
+// bounding a cache miss to a single gap instead of the whole message prefix.
+//
+// The tail block (whether owned by automatic caching or an explicit fallback
+// breakpoint) is counted toward the first gap but is never itself anchored.
+func placeCacheAnchors(messages []*llm.Message, maxAnchors int, ttl string) {
+	if maxAnchors <= 0 {
+		return
+	}
+	placed := 0
+	blocks := 0
+	first := true
+	for mi := len(messages) - 1; mi >= 0 && placed < maxAnchors; mi-- {
+		contents := messages[mi].Content
+		for bi := len(contents) - 1; bi >= 0 && placed < maxAnchors; bi-- {
+			// The tail block is already the tail breakpoint (automatic owns the
+			// real tail; the explicit fallback marked the last block). Count it
+			// toward the first gap but never anchor on it.
+			if first {
+				first = false
+				blocks++
+				continue
+			}
+			blocks++
+			if blocks < cacheAnchorGap {
+				continue
+			}
+			if setter, ok := contents[bi].(llm.CacheControlSetter); ok {
+				setter.SetCacheControl(&llm.CacheControl{
+					Type: llm.CacheControlTypeEphemeral,
+					TTL:  ttl,
+				})
+				placed++
+				blocks = 0
+			}
 		}
 	}
 }
@@ -394,7 +581,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		config.Logger.Warn("temperature is not supported by this model and will be ignored",
 			"model", req.Model)
 	}
-	req.System = config.SystemPrompt
+	if config.SystemPrompt != "" {
+		req.System = []*SystemBlock{{Type: "text", Text: config.SystemPrompt}}
+	}
 	return nil
 }
 
@@ -596,11 +785,11 @@ func (p *Provider) createRequest(ctx context.Context, body []byte, config *llm.C
 	}
 
 	var betaFeatures []string
+	// Prompt caching is GA and needs no beta header; the extended (1-hour) cache
+	// still advertises its beta. Both are only sent when explicitly enabled.
 	if config.IsFeatureEnabled(FeatureExtendedCache) {
 		betaFeatures = append(betaFeatures, FeatureExtendedCache)
 	} else if config.IsFeatureEnabled(FeaturePromptCaching) {
-		betaFeatures = append(betaFeatures, FeaturePromptCaching)
-	} else if config.Caching == nil || *config.Caching {
 		betaFeatures = append(betaFeatures, FeaturePromptCaching)
 	}
 

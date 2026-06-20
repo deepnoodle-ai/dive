@@ -13,11 +13,16 @@ type Usage struct {
 	// Speed indicates which inference speed served the request, either "fast"
 	// or "standard". Populated by Anthropic when fast mode is requested.
 	Speed string `json:"speed,omitempty"`
+	// Cost is the estimated monetary cost of this usage, populated by the
+	// provider (or the streaming accumulator) when model pricing is known. Nil
+	// means cost is unknown — distinct from a known cost of zero (e.g. a local
+	// model). It is an estimate at list prices, not a billing figure.
+	Cost *Cost `json:"cost,omitempty"`
 }
 
 // Copy returns a deep copy of the usage data.
 func (u *Usage) Copy() *Usage {
-	return &Usage{
+	cp := &Usage{
 		InputTokens:              u.InputTokens,
 		OutputTokens:             u.OutputTokens,
 		CacheCreationInputTokens: u.CacheCreationInputTokens,
@@ -25,6 +30,11 @@ func (u *Usage) Copy() *Usage {
 		ReasoningTokens:          u.ReasoningTokens,
 		Speed:                    u.Speed,
 	}
+	if u.Cost != nil {
+		costCopy := *u.Cost
+		cp.Cost = &costCopy
+	}
+	return cp
 }
 
 // Add incremental usage to this usage object.
@@ -34,4 +44,10 @@ func (u *Usage) Add(other *Usage) {
 	u.CacheCreationInputTokens += other.CacheCreationInputTokens
 	u.CacheReadInputTokens += other.CacheReadInputTokens
 	u.ReasoningTokens += other.ReasoningTokens
+	if other.Cost != nil {
+		if u.Cost == nil {
+			u.Cost = &Cost{}
+		}
+		u.Cost.Add(other.Cost)
+	}
 }
