@@ -9,7 +9,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers/anthropic"
-	"github.com/deepnoodle-ai/wonton/web"
+	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 const DefaultImageURL = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=400"
@@ -22,8 +22,7 @@ func main() {
 
 	ctx := context.Background()
 
-	fetcher := web.NewDefaultBinaryFetcher()
-	binary, err := fetcher.FetchBinary(ctx, &web.BinaryFetchInput{URL: url})
+	binary, err := fetch.Download(ctx, url, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

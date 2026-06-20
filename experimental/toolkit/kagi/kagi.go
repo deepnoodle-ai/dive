@@ -77,11 +77,11 @@ func (s *KagiClient) Search(ctx context.Context, q *web.SearchInput) (*web.Searc
 		return nil, err
 	}
 
-	var items []*web.SearchItem
+	var items []web.SearchItem
 
 	for _, item := range results.Data {
 		if item.Type == 0 {
-			items = append(items, &web.SearchItem{
+			items = append(items, web.SearchItem{
 				URL:         item.URL,
 				Title:       item.Title,
 				Description: item.Snippet,

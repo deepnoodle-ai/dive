@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/deepnoodle-ai/dive v1.8.0
-	github.com/deepnoodle-ai/wonton v0.0.34
+	github.com/deepnoodle-ai/wonton v0.0.36
 	github.com/openai/openai-go/v3 v3.29.0
 	golang.org/x/image v0.38.0
 )

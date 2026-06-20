@@ -45,10 +45,10 @@ func main() {
 			cli.String("model", "m").
 				Default("").
 				Help("Model to use (default: gpt-image-2)"),
-			cli.String("aspect", "").
+			cli.String("aspect").
 				Default("").
 				Help("Aspect ratio: 1:1, 16:9, 9:16"),
-			cli.String("format", "").
+			cli.String("format").
 				Default("").
 				Help("Output format: png, jpeg, webp"),
 			cli.String("out", "o").
@@ -62,7 +62,7 @@ func main() {
 			cli.Bool("edit", "e").
 				Default(false).
 				Help("Edit reference images instead of generating new ones"),
-			cli.Bool("open", "").
+			cli.Bool("open").
 				Default(false).
 				Help("Open result in default viewer"),
 		).
@@ -76,7 +76,7 @@ func main() {
 			cli.String("model", "m").
 				Default("").
 				Help("Model to use (default: veo-3.1-generate-preview)"),
-			cli.String("aspect", "").
+			cli.String("aspect").
 				Default("").
 				Help("Aspect ratio: 16:9, 9:16, 1:1"),
 			cli.String("duration", "d").
@@ -85,7 +85,7 @@ func main() {
 			cli.String("out", "o").
 				Default("").
 				Help("Output file path"),
-			cli.Bool("open", "").
+			cli.Bool("open").
 				Default(false).
 				Help("Open result in default viewer"),
 		).
@@ -113,31 +113,31 @@ func main() {
 			cli.Float("temperature", "t").
 				Env("DIVE_TEMPERATURE").
 				Help("Sampling temperature (0.0-1.0)"),
-			cli.Int("max-tokens", "").
+			cli.Int("max-tokens").
 				Default(16000).
 				Env("DIVE_MAX_TOKENS").
 				Help("Maximum tokens in response"),
-			cli.String("system-prompt", "").
+			cli.String("system-prompt").
 				Default("").
 				Help("System prompt to use for the session"),
 			cli.Bool("print", "p").
 				Default(false).
 				Help("Print response and exit (useful for pipes)"),
-			cli.String("output-format", "").
+			cli.String("output-format").
 				Default("text").
 				Help("Output format (only works with --print): \"text\" (default) or \"json\""),
-			cli.String("api-endpoint", "").
+			cli.String("api-endpoint").
 				Default("").
 				Env("DIVE_API_ENDPOINT").
 				Help("Override the API endpoint URL for the provider"),
 			cli.Bool("resume", "r").
 				Default(false).
 				Help("Resume a previous session"),
-			cli.Bool("compaction", "").
+			cli.Bool("compaction").
 				Default(true).
 				Env("DIVE_COMPACTION").
 				Help("Enable automatic context compaction"),
-			cli.Int("compaction-threshold", "").
+			cli.Int("compaction-threshold").
 				Default(100000).
 				Env("DIVE_COMPACTION_THRESHOLD").
 				Help("Token threshold for automatic context compaction"),

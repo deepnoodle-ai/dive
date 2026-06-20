@@ -76,10 +76,10 @@ func RunSessionPicker(store session.Store, filter string, workspaceDir string) (
 	}
 
 	// Run the picker
-	runner := tui.NewInlineApp(tui.InlineAppConfig{
-		FPS:           30,
-		KittyKeyboard: true,
-	})
+	runner := tui.NewInlineApp(
+		tui.WithInlineFPS(30),
+		tui.WithInlineKittyKeyboard(true),
+	)
 
 	if err := runner.Run(picker); err != nil {
 		return nil, err
