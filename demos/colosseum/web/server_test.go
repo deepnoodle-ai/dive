@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,6 +47,21 @@ func newTestServer(t *testing.T) *httptest.Server {
 	dir := t.TempDir()
 	writeSampleTranscript(t, dir, "match-1")
 	srv, err := NewServer(dir)
+	assert.NoError(t, err)
+	return httptest.NewServer(srv.Handler())
+}
+
+// newTestServerWithArtifacts spins up a server backed by both a transcripts dir
+// (with one sample match) and an artifacts dir seeded by the caller.
+func newTestServerWithArtifacts(t *testing.T, seed func(artifactsDir string)) *httptest.Server {
+	t.Helper()
+	dir := t.TempDir()
+	writeSampleTranscript(t, dir, "match-1")
+	artDir := t.TempDir()
+	if seed != nil {
+		seed(artDir)
+	}
+	srv, err := NewServer(dir, WithArtifactsDir(artDir))
 	assert.NoError(t, err)
 	return httptest.NewServer(srv.Handler())
 }
@@ -146,6 +162,87 @@ func TestAPILeaderboard(t *testing.T) {
 	assert.Equal(t, 1, body.Standings[0].Rank)
 	// Village winners (seer, villager) should outrank the lynched wolf.
 	assert.Equal(t, "werewolf", lastModelRole(body.Standings))
+}
+
+func TestAPIArtifactsList(t *testing.T) {
+	ts := newTestServerWithArtifacts(t, func(dir string) {
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "diagram.png"), []byte("\x89PNG\r\n"), 0o644))
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "notes.md"), []byte("# Title\n\nbody"), 0o644))
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "clip.mp4"), []byte("fakevideo"), 0o644))
+		// A subdirectory must be skipped (only top-level files are listed).
+		assert.NoError(t, os.Mkdir(filepath.Join(dir, "nested"), 0o755))
+	})
+	defer ts.Close()
+
+	var body struct {
+		Artifacts []struct {
+			Name        string `json:"name"`
+			Size        int64  `json:"size"`
+			Kind        string `json:"kind"`
+			ContentType string `json:"content_type"`
+			Modified    string `json:"modified"`
+		} `json:"artifacts"`
+	}
+	code := getJSON(t, ts.URL+"/api/artifacts", &body)
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, 3, len(body.Artifacts))
+
+	kinds := map[string]string{}
+	for _, a := range body.Artifacts {
+		kinds[a.Name] = a.Kind
+		assert.True(t, a.Modified != "")
+	}
+	assert.Equal(t, "image", kinds["diagram.png"])
+	assert.Equal(t, "markdown", kinds["notes.md"])
+	assert.Equal(t, "video", kinds["clip.mp4"])
+}
+
+func TestAPIArtifactsEmptyWhenMissingDir(t *testing.T) {
+	// artifactsDir points somewhere that does not exist: list is empty, not an error.
+	dir := t.TempDir()
+	writeSampleTranscript(t, dir, "match-1")
+	srv, err := NewServer(dir, WithArtifactsDir(filepath.Join(dir, "does-not-exist")))
+	assert.NoError(t, err)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var body struct {
+		Artifacts []json.RawMessage `json:"artifacts"`
+	}
+	code := getJSON(t, ts.URL+"/api/artifacts", &body)
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, 0, len(body.Artifacts))
+}
+
+func TestAPIArtifactContent(t *testing.T) {
+	ts := newTestServerWithArtifacts(t, func(dir string) {
+		assert.NoError(t, os.WriteFile(filepath.Join(dir, "notes.md"), []byte("# Hello"), 0o644))
+	})
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/artifacts/notes.md")
+	assert.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	data, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, "# Hello", string(data))
+}
+
+func TestAPIArtifactNotFound(t *testing.T) {
+	ts := newTestServerWithArtifacts(t, nil)
+	defer ts.Close()
+	code := getJSON(t, ts.URL+"/api/artifacts/missing.png", nil)
+	assert.Equal(t, http.StatusNotFound, code)
+}
+
+func TestAPIArtifactRejectsTraversal(t *testing.T) {
+	ts := newTestServerWithArtifacts(t, nil)
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/api/artifacts/..%2f..%2fetc%2fpasswd")
+	assert.NoError(t, err)
+	resp.Body.Close()
+	assert.NotEqual(t, http.StatusOK, resp.StatusCode)
 }
 
 // lastModelRole returns the model name of the lowest-ranked standing; in the

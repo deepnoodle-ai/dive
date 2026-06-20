@@ -71,6 +71,12 @@ async function fetchJSON(url) {
   return res.json();
 }
 
+async function fetchText(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+  return res.text();
+}
+
 /* ---- App state ----------------------------------------------------------- */
 const state = {
   matches: [],        // MatchSummary list (newest first)
@@ -102,7 +108,9 @@ function switchView(view) {
   });
   $("#view-replay").classList.toggle("is-active", view === "replay");
   $("#view-leaderboard").classList.toggle("is-active", view === "leaderboard");
+  $("#view-artifacts").classList.toggle("is-active", view === "artifacts");
   if (view === "leaderboard" && !leaderboardLoaded) loadLeaderboard();
+  if (view === "artifacts" && !artifactsLoaded) loadArtifacts();
 }
 
 /* ===========================================================================
@@ -726,6 +734,339 @@ function showLeaderboardStatus(msg, isError = false, isEmpty = false) {
 }
 function hideLeaderboardStatus() { $("#leaderboard-status").hidden = true; }
 
+/* ===========================================================================
+   Artifacts view — render images / video / audio / markdown / text / pdf with a
+   file-details panel alongside. All content fetched same-origin from
+   /api/artifacts (list) and /api/artifacts/{name} (raw bytes).
+   =========================================================================== */
+let artifactsLoaded = false;
+const artifactsState = {
+  items: [],        // [artifactInfo]
+  selected: null,   // currently shown artifact name
+};
+
+const KIND_ICONS = {
+  image: "🖼", video: "🎬", audio: "🎧",
+  markdown: "📝", text: "📄", pdf: "📕", other: "📦",
+};
+
+function artifactURL(name) {
+  return "/api/artifacts/" + encodeURIComponent(name);
+}
+
+async function loadArtifacts() {
+  artifactsLoaded = true;
+  showArtifactsStatus("Loading artifacts…");
+  let data;
+  try {
+    data = await fetchJSON("/api/artifacts");
+  } catch (err) {
+    showArtifactsStatus("Could not load artifacts: " + err.message, true);
+    artifactsLoaded = false; // allow retry on next tab switch
+    return;
+  }
+  artifactsState.items = Array.isArray(data.artifacts) ? data.artifacts : [];
+
+  if (artifactsState.items.length === 0) {
+    showArtifactsStatus(
+      "No artifacts yet — point the server at an artifacts directory with --artifacts.",
+      false, true
+    );
+    return;
+  }
+
+  hideArtifactsStatus();
+  $("#artifacts-body").hidden = false;
+  renderArtifactList();
+  selectArtifact(artifactsState.items[0].name);
+}
+
+function renderArtifactList() {
+  const list = $("#artifact-list");
+  clear(list);
+  for (const a of artifactsState.items) {
+    const active = a.name === artifactsState.selected;
+    const item = el("li", {
+      class: "artifact-item" + (active ? " active" : ""),
+      title: a.name,
+    }, [
+      el("span", { class: "artifact-icon", text: KIND_ICONS[a.kind] || KIND_ICONS.other }),
+      el("div", { class: "artifact-item-main" }, [
+        el("div", { class: "artifact-item-name", text: a.name }),
+        el("div", { class: "artifact-item-meta", text: `${a.kind} · ${humanSize(a.size)}` }),
+      ]),
+    ]);
+    item.addEventListener("click", () => selectArtifact(a.name));
+    list.appendChild(item);
+  }
+}
+
+function selectArtifact(name) {
+  artifactsState.selected = name;
+  const a = artifactsState.items.find((x) => x.name === name);
+  if (!a) return;
+
+  // Highlight the active row without re-rendering the whole list.
+  document.querySelectorAll("#artifact-list .artifact-item").forEach((li) => {
+    li.classList.toggle("active", li.title === name);
+  });
+
+  $("#artifact-name").textContent = a.name;
+  const dl = $("#artifact-download");
+  dl.href = artifactURL(a.name);
+  dl.setAttribute("download", a.name);
+  dl.hidden = false;
+
+  renderArtifactDetails(a);
+  renderArtifactPreview(a);
+}
+
+function renderArtifactDetails(a) {
+  const dl = $("#artifact-details");
+  clear(dl);
+  const rows = [
+    ["Name", a.name],
+    ["Kind", a.kind],
+    ["Type", a.content_type || "—"],
+    ["Size", humanSize(a.size)],
+    ["Modified", formatDate(a.modified)],
+  ];
+  for (const [k, v] of rows) {
+    dl.appendChild(el("dt", { text: k }));
+    dl.appendChild(el("dd", { text: v }));
+  }
+  // Image dimensions are filled in asynchronously once the preview loads.
+  if (a.kind === "image") {
+    dl.appendChild(el("dt", { text: "Dimensions" }));
+    dl.appendChild(el("dd", { id: "artifact-dimensions", text: "…" }));
+  }
+}
+
+function renderArtifactPreview(a) {
+  const wrap = $("#artifact-preview");
+  clear(wrap);
+  const url = artifactURL(a.name);
+
+  switch (a.kind) {
+    case "image": {
+      const img = el("img", { class: "preview-image", src: url, alt: a.name });
+      img.addEventListener("load", () => {
+        const dim = $("#artifact-dimensions");
+        if (dim) dim.textContent = `${img.naturalWidth} × ${img.naturalHeight}`;
+      });
+      img.addEventListener("error", () => showPreviewError(wrap, a));
+      wrap.appendChild(img);
+      return;
+    }
+    case "video": {
+      const video = el("video", { class: "preview-video", controls: "", preload: "metadata" }, [
+        el("source", { src: url, type: a.content_type || "" }),
+      ]);
+      wrap.appendChild(video);
+      return;
+    }
+    case "audio": {
+      wrap.appendChild(el("audio", { class: "preview-audio", controls: "", src: url }));
+      return;
+    }
+    case "pdf": {
+      wrap.appendChild(el("iframe", { class: "preview-pdf", src: url, title: a.name }));
+      return;
+    }
+    case "markdown":
+    case "text": {
+      // Fetch the text and render it; guard against a stale selection.
+      wrap.appendChild(el("div", { class: "preview-loading", text: "Loading…" }));
+      const requested = a.name;
+      fetchText(url).then((txt) => {
+        if (artifactsState.selected !== requested) return; // user moved on
+        clear(wrap);
+        if (a.kind === "markdown") {
+          wrap.appendChild(renderMarkdown(txt));
+        } else {
+          wrap.appendChild(el("pre", { class: "preview-text", text: txt }));
+        }
+      }).catch(() => showPreviewError(wrap, a));
+      return;
+    }
+    default:
+      showPreviewError(wrap, a, "No inline preview for this file type.");
+  }
+}
+
+function showPreviewError(wrap, a, msg) {
+  clear(wrap);
+  wrap.appendChild(el("div", { class: "preview-fallback" }, [
+    el("div", { class: "preview-fallback-icon", text: KIND_ICONS[a.kind] || KIND_ICONS.other }),
+    el("div", { text: msg || "This artifact could not be previewed." }),
+    el("a", { class: "artifact-download", href: artifactURL(a.name), download: a.name, text: "⤓ Download " + a.name }),
+  ]));
+}
+
+function showArtifactsStatus(msg, isError = false, isEmpty = false) {
+  const panel = $("#artifacts-status");
+  $("#artifacts-body").hidden = true;
+  panel.hidden = false;
+  panel.className = "status-panel" + (isError ? " error" : "");
+  clear(panel);
+  if (isEmpty) {
+    panel.appendChild(document.createTextNode("No artifacts yet — start the server with "));
+    panel.appendChild(el("code", { text: "colosseum serve --artifacts <dir>" }));
+    panel.appendChild(document.createTextNode("."));
+  } else {
+    panel.textContent = msg;
+  }
+}
+function hideArtifactsStatus() { $("#artifacts-status").hidden = true; }
+
+/* ===========================================================================
+   Minimal, dependency-free Markdown → DOM renderer.
+
+   Builds real DOM nodes (never innerHTML), so artifact content can't inject
+   markup. Supports headings, paragraphs, bold/italic/code/links inline,
+   fenced + indented code blocks, blockquotes, ordered/unordered lists, images,
+   and horizontal rules. Unknown syntax degrades to plain text.
+   =========================================================================== */
+function renderMarkdown(src) {
+  const root = el("div", { class: "markdown" });
+  const lines = src.replace(/\r\n?/g, "\n").split("\n");
+  let i = 0;
+
+  const flushParagraph = (buf) => {
+    if (buf.length === 0) return;
+    const p = el("p");
+    appendInline(p, buf.join(" "));
+    root.appendChild(p);
+    buf.length = 0;
+  };
+
+  const para = [];
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block ```lang
+    const fence = line.match(/^```(.*)$/);
+    if (fence) {
+      flushParagraph(para);
+      const code = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
+      i++; // skip closing fence
+      const pre = el("pre", { class: "md-code" }, el("code", { text: code.join("\n") }));
+      root.appendChild(pre);
+      continue;
+    }
+
+    // Blank line ends a paragraph.
+    if (/^\s*$/.test(line)) { flushParagraph(para); i++; continue; }
+
+    // Horizontal rule
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flushParagraph(para);
+      root.appendChild(el("hr"));
+      i++;
+      continue;
+    }
+
+    // Heading
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      flushParagraph(para);
+      const tag = "h" + h[1].length;
+      const node = el(tag);
+      appendInline(node, h[2].trim());
+      root.appendChild(node);
+      i++;
+      continue;
+    }
+
+    // Blockquote (consume consecutive '>' lines)
+    if (/^\s*>/.test(line)) {
+      flushParagraph(para);
+      const quote = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) {
+        quote.push(lines[i].replace(/^\s*>\s?/, ""));
+        i++;
+      }
+      const bq = el("blockquote");
+      appendInline(bq, quote.join(" "));
+      root.appendChild(bq);
+      continue;
+    }
+
+    // Lists (ordered or unordered)
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      flushParagraph(para);
+      const ordered = /^\s*\d+\.\s+/.test(line);
+      const listEl = el(ordered ? "ol" : "ul");
+      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+        const item = lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, "");
+        const li = el("li");
+        appendInline(li, item);
+        listEl.appendChild(li);
+        i++;
+      }
+      root.appendChild(listEl);
+      continue;
+    }
+
+    // Otherwise accumulate into the current paragraph.
+    para.push(line.trim());
+    i++;
+  }
+  flushParagraph(para);
+  return root;
+}
+
+// safeURL only allows http(s)/mailto and protocol-relative paths, blocking
+// javascript: and data: URIs in links.
+function safeURL(url) {
+  const u = (url || "").trim();
+  if (/^(https?:\/\/|mailto:|\/|\.\/|#)/i.test(u)) return u;
+  return null;
+}
+
+// appendInline parses inline markdown (images, links, bold, italic, code) into
+// text/element nodes appended to parent.
+function appendInline(parent, text) {
+  // Token regex, tried left-to-right at each position:
+  //  ![alt](src) | [text](href) | `code` | **bold** | *italic* | _italic_
+  const re = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*|_([^_]+)_/;
+  let rest = text;
+  let guard = 0;
+  while (rest && guard++ < 10000) {
+    const m = rest.match(re);
+    if (!m) { parent.appendChild(document.createTextNode(rest)); break; }
+    if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+
+    if (m[1] !== undefined && m[2] !== undefined) {          // image
+      const src = safeURL(m[2]);
+      if (src) parent.appendChild(el("img", { class: "md-img", src, alt: m[1] }));
+      else parent.appendChild(document.createTextNode(m[0]));
+    } else if (m[3] !== undefined && m[4] !== undefined) {    // link
+      const href = safeURL(m[4]);
+      if (href) {
+        const a = el("a", { href, rel: "noopener noreferrer", target: "_blank" });
+        appendInline(a, m[3]);
+        parent.appendChild(a);
+      } else {
+        parent.appendChild(document.createTextNode(m[3]));
+      }
+    } else if (m[5] !== undefined) {                          // inline code
+      parent.appendChild(el("code", { class: "md-inline-code", text: m[5] }));
+    } else if (m[6] !== undefined) {                          // bold
+      const strong = el("strong");
+      appendInline(strong, m[6]);
+      parent.appendChild(strong);
+    } else if (m[7] !== undefined || m[8] !== undefined) {    // italic
+      const em = el("em");
+      appendInline(em, m[7] !== undefined ? m[7] : m[8]);
+      parent.appendChild(em);
+    }
+    rest = rest.slice(m.index + m[0].length);
+  }
+}
+
 /* ---- Formatting helpers -------------------------------------------------- */
 function pct(v) {
   return (typeof v === "number" && isFinite(v)) ? Math.round(v * 100) + "%" : "—";
@@ -734,6 +1075,22 @@ function num2(v) {
   return (typeof v === "number" && isFinite(v)) ? v.toFixed(2) : "—";
 }
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+function humanSize(bytes) {
+  if (typeof bytes !== "number" || !isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return bytes + " B";
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = bytes / 1024, u = 0;
+  while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
+  return `${v.toFixed(v < 10 ? 1 : 0)} ${units[u]}`;
+}
+
+function formatDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
 
 /* ===========================================================================
    Boot

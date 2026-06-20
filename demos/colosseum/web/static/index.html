@@ -17,6 +17,7 @@
     <nav class="tabs" role="tablist" aria-label="Views">
       <button class="tab is-active" data-view="replay" role="tab" aria-selected="true">Replay</button>
       <button class="tab" data-view="leaderboard" role="tab" aria-selected="false">Leaderboard</button>
+      <button class="tab" data-view="artifacts" role="tab" aria-selected="false">Artifacts</button>
     </nav>
   </header>
 
@@ -78,6 +79,36 @@
           <section class="panel">
             <h2 class="panel-title">Metrics</h2>
             <div id="metrics" class="metrics"></div>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <!-- =================== Artifacts view =================== -->
+    <section id="view-artifacts" class="view" role="tabpanel">
+      <div id="artifacts-status" class="status-panel" hidden></div>
+
+      <!-- Detail layout: rendered preview (main) + file list & details (side) -->
+      <div id="artifacts-body" class="artifacts-layout" hidden>
+        <!-- Left column: the rendered artifact -->
+        <div class="artifacts-main">
+          <div class="artifact-titlebar">
+            <h2 id="artifact-name" class="artifact-name">—</h2>
+            <a id="artifact-download" class="artifact-download" download hidden>⤓ Download</a>
+          </div>
+          <div id="artifact-preview" class="artifact-preview" aria-live="polite"></div>
+        </div>
+
+        <!-- Right column: file picker + details -->
+        <aside class="artifacts-side">
+          <section class="panel">
+            <h2 class="panel-title">Files</h2>
+            <ul id="artifact-list" class="artifact-list"></ul>
+          </section>
+
+          <section class="panel">
+            <h2 class="panel-title">Details</h2>
+            <dl id="artifact-details" class="artifact-details"></dl>
           </section>
         </aside>
       </div>

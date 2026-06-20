@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/deepnoodle-ai/dive/demos/colosseum/analytics"
 	"github.com/deepnoodle-ai/dive/demos/colosseum/transcript"
@@ -24,16 +26,30 @@ var staticFS embed.FS
 
 // Server serves the viewer and API over a transcripts directory.
 type Server struct {
-	dir string
-	mux *http.ServeMux
+	dir          string // match transcripts
+	artifactsDir string // optional directory of renderable artifacts (images, video, markdown…)
+	mux          *http.ServeMux
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithArtifactsDir serves files from dir under the /api/artifacts endpoints,
+// powering the Artifacts tab in the viewer. The directory is optional: if it is
+// empty or missing, the artifacts list simply renders empty.
+func WithArtifactsDir(dir string) Option {
+	return func(s *Server) { s.artifactsDir = dir }
 }
 
 // NewServer builds a server reading transcripts from dir.
-func NewServer(dir string) (*Server, error) {
+func NewServer(dir string, opts ...Option) (*Server, error) {
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return nil, fmt.Errorf("transcripts directory %q does not exist", dir)
 	}
 	s := &Server{dir: dir, mux: http.NewServeMux()}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.routes()
 	return s, nil
 }
@@ -48,6 +64,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/matches", s.handleMatches)
 	s.mux.HandleFunc("GET /api/matches/{id}", s.handleMatch)
 	s.mux.HandleFunc("GET /api/leaderboard", s.handleLeaderboard)
+	s.mux.HandleFunc("GET /api/artifacts", s.handleArtifacts)
+	s.mux.HandleFunc("GET /api/artifacts/{name}", s.handleArtifactContent)
 	s.mux.Handle("GET /", fileServer)
 }
 
@@ -136,6 +154,116 @@ func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{"standings": rows})
+}
+
+// artifactInfo is one entry in the Artifacts tab: enough metadata for the
+// detail panel plus a kind hint so the frontend knows how to render it.
+type artifactInfo struct {
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	Modified    string `json:"modified"`     // RFC3339 UTC
+	ContentType string `json:"content_type"` // best-effort MIME type by extension
+	Kind        string `json:"kind"`         // image|video|audio|markdown|text|pdf|other
+}
+
+// handleArtifacts lists the (top-level) files in the artifacts directory,
+// newest first. A missing or unconfigured directory yields an empty list so the
+// frontend can show a friendly empty state rather than an error.
+func (s *Server) handleArtifacts(w http.ResponseWriter, r *http.Request) {
+	infos := []artifactInfo{}
+	if s.artifactsDir != "" {
+		entries, err := os.ReadDir(s.artifactsDir)
+		if err != nil && !os.IsNotExist(err) {
+			httpError(w, http.StatusInternalServerError, err)
+			return
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			infos = append(infos, newArtifactInfo(e.Name(), info))
+		}
+		// Newest first; RFC3339 UTC strings sort chronologically.
+		sort.Slice(infos, func(i, j int) bool {
+			if infos[i].Modified != infos[j].Modified {
+				return infos[i].Modified > infos[j].Modified
+			}
+			return infos[i].Name < infos[j].Name
+		})
+	}
+	writeJSON(w, map[string]any{"artifacts": infos})
+}
+
+// handleArtifactContent serves a single artifact's raw bytes. It uses
+// http.ServeFile so range requests work (important for seeking video/audio) and
+// the Content-Type is set from the extension.
+func (s *Server) handleArtifactContent(w http.ResponseWriter, r *http.Request) {
+	if s.artifactsDir == "" {
+		httpError(w, http.StatusNotFound, fmt.Errorf("no artifacts configured"))
+		return
+	}
+	name := r.PathValue("name")
+	if !validName(name) {
+		httpError(w, http.StatusBadRequest, fmt.Errorf("invalid artifact name"))
+		return
+	}
+	full := filepath.Join(s.artifactsDir, name)
+	info, err := os.Stat(full)
+	if err != nil || info.IsDir() {
+		httpError(w, http.StatusNotFound, fmt.Errorf("artifact not found"))
+		return
+	}
+	http.ServeFile(w, r, full)
+}
+
+// newArtifactInfo builds the metadata record for a single file.
+func newArtifactInfo(name string, info os.FileInfo) artifactInfo {
+	ct := mime.TypeByExtension(filepath.Ext(name))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	return artifactInfo{
+		Name:        name,
+		Size:        info.Size(),
+		Modified:    info.ModTime().UTC().Format(time.RFC3339),
+		ContentType: ct,
+		Kind:        artifactKind(name, ct),
+	}
+}
+
+// artifactKind classifies a file so the frontend can pick a renderer.
+func artifactKind(name, contentType string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".md", ".markdown":
+		return "markdown"
+	}
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		return "image"
+	case strings.HasPrefix(contentType, "video/"):
+		return "video"
+	case strings.HasPrefix(contentType, "audio/"):
+		return "audio"
+	case contentType == "application/pdf":
+		return "pdf"
+	case strings.HasPrefix(contentType, "text/"),
+		contentType == "application/json",
+		contentType == "application/xml":
+		return "text"
+	}
+	return "other"
+}
+
+// validName rejects names that could escape the artifacts directory.
+func validName(name string) bool {
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return false
+	}
+	return true
 }
 
 // transcriptIDs lists the available match ids (filenames without .jsonl),
