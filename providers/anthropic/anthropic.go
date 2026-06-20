@@ -331,12 +331,14 @@ const (
 // The request's messages/system should already be copies (system is built
 // fresh; messages come from convertMessages) so mutation here is safe.
 func (p *Provider) applyCaching(req *Request, config *llm.Config) {
+	// Start from a clean slate so caller-provided cache markers never leak
+	// through — in particular on opt-out, where we strip them and bail.
+	clearRequestCacheControl(req)
 	if config.Caching != nil && !*config.Caching {
 		return
 	}
 
 	stableTTL := stablePrefixTTL(config)
-	clearRequestCacheControl(req)
 
 	// Total explicit block-level breakpoints used so far. The API allows 4; when
 	// automatic caching is on it consumes one, leaving 3 for explicit blocks.
@@ -427,6 +429,7 @@ func stablePrefixTTL(config *llm.Config) string {
 // the system blocks and message contents so placement starts from a clean
 // slate (some content types preserve CacheControl across convertMessages).
 func clearRequestCacheControl(req *Request) {
+	req.CacheControl = nil
 	for _, block := range req.System {
 		block.CacheControl = nil
 	}

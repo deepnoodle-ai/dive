@@ -31,6 +31,14 @@ func TestPricingInfoCostOf(t *testing.T) {
 	assert.Equal(t, "test-model", c.Model)
 }
 
+func TestPricingInfoCostOf_NilUsage(t *testing.T) {
+	p := PricingInfo{Model: "m", InputPrice: 5, Currency: "USD"}
+	c := p.CostOf(nil) // must not panic
+	assert.Equal(t, 0.0, c.Total)
+	assert.Equal(t, "USD", c.Currency)
+	assert.Equal(t, "m", c.Model)
+}
+
 func TestPricingInfoCostOf_ZeroCachePrices(t *testing.T) {
 	// A provider that does not bill cache separately: cache tokens contribute 0.
 	p := PricingInfo{InputPrice: 3.00, OutputPrice: 15.00, Currency: "USD"}

@@ -394,6 +394,32 @@ func TestApplyCachingOptOut(t *testing.T) {
 	assert.Equal(t, 0, countMessageBreakpoints(req.Messages))
 }
 
+func TestApplyCachingOptOutClearsCallerMarkers(t *testing.T) {
+	// Opt-out must strip caller-provided cache markers so none leak into the
+	// request — including the top-level cache_control, system, and messages.
+	off := false
+	msgs, err := convertMessages([]*llm.Message{llm.NewUserTextMessage("hi")})
+	assert.NoError(t, err)
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if s, ok := c.(llm.CacheControlSetter); ok {
+				s.SetCacheControl(&llm.CacheControl{Type: llm.CacheControlTypeEphemeral})
+			}
+		}
+	}
+	req := &Request{
+		CacheControl: &llm.CacheControl{Type: llm.CacheControlTypeEphemeral},
+		System:       []*SystemBlock{{Type: "text", Text: "sys", CacheControl: &llm.CacheControl{Type: llm.CacheControlTypeEphemeral}}},
+		Messages:     msgs,
+	}
+
+	New().applyCaching(req, &llm.Config{Caching: &off})
+
+	assert.Nil(t, req.CacheControl, "top-level cache_control should be cleared on opt-out")
+	assert.Nil(t, req.System[0].CacheControl, "system marker should be cleared on opt-out")
+	assert.Equal(t, 0, countMessageBreakpoints(req.Messages), "message markers should be cleared on opt-out")
+}
+
 func TestApplyCachingExtendedTTL(t *testing.T) {
 	// With the extended-cache feature enabled, the stable prefix uses the
 	// 1-hour TTL while the tail (automatic) stays at the default 5m.

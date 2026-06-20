@@ -2229,8 +2229,13 @@ func (a *App) usageReportView() tui.View {
 		name string
 		u    *llm.Usage
 	}
-	cols := []scopeCol{{"turn", turn}}
-	if sessHas && a.sessionUsageDiffers() {
+	// Only show scopes that actually have usage, so session-only data is not
+	// hidden behind an empty turn column.
+	var cols []scopeCol
+	if turnHas {
+		cols = append(cols, scopeCol{"turn", turn})
+	}
+	if sessHas && (!turnHas || a.sessionUsageDiffers()) {
 		cols = append(cols, scopeCol{"session", sess})
 	}
 

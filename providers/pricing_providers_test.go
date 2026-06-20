@@ -19,12 +19,14 @@ import (
 // tests; these are the providers that share the root module.)
 func assertRegistered(t *testing.T, name string, table map[string]llm.PricingInfo) {
 	t.Helper()
+	if len(table) == 0 {
+		t.Skipf("%s has no pricing entries", name)
+		return
+	}
 	for model := range table {
 		_, ok := providers.PricingFor(model, false)
 		assert.True(t, ok, name+" pricing should be registered for "+model)
-		return
 	}
-	t.Skipf("%s has no pricing entries", name)
 }
 
 func TestProvidersRegisterPricing(t *testing.T) {

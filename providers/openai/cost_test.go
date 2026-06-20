@@ -9,12 +9,13 @@ import (
 )
 
 func TestOpenAIPricingRegistered(t *testing.T) {
+	if len(TextModelPricing) == 0 {
+		t.Skip("no openai pricing entries")
+	}
 	for model := range TextModelPricing {
 		_, ok := providers.PricingFor(model, false)
 		assert.True(t, ok, "openai pricing should be registered: "+model)
-		return
 	}
-	t.Skip("no openai pricing entries")
 }
 
 func TestOpenAIPopulateCost(t *testing.T) {

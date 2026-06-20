@@ -111,6 +111,20 @@ func TestUsageReportView_NilWhenNoUsage(t *testing.T) {
 	assert.Nil(t, app.usageReportView(), "report should be nil before any tokens are recorded")
 }
 
+func TestUsageReportView_SessionOnly(t *testing.T) {
+	// When only session usage is present (empty/nil turn), the report must
+	// still render the session column rather than hide it behind an empty turn.
+	app := newTestApp()
+	app.interactionUsage = &llm.Usage{} // empty turn
+	app.sessionUsage = &llm.Usage{InputTokens: 4800, OutputTokens: 892}
+
+	view := app.usageReportView()
+	assert.NotNil(t, view, "report should render when only session has usage")
+	text := tui.Sprint(view, tui.WithWidth(100))
+	assert.True(t, strings.Contains(text, "session"), "should show the session column")
+	assert.True(t, strings.Contains(text, "4.8k"), "should show session input tokens")
+}
+
 func TestUsageReportView_IncludesTotalsAndLegend(t *testing.T) {
 	app := newTestApp()
 	app.interactionUsage = &llm.Usage{

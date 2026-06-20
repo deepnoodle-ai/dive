@@ -47,7 +47,11 @@ func (c *Cost) Add(other *Cost) {
 }
 
 // CostOf computes the estimated cost of the given usage at these prices.
+// A nil usage yields a zero cost (still tagged with currency and model).
 func (p PricingInfo) CostOf(u *Usage) Cost {
+	if u == nil {
+		return Cost{Currency: p.Currency, Model: p.Model}
+	}
 	const perMillion = 1_000_000.0
 	c := Cost{
 		Input:      float64(u.InputTokens) * p.InputPrice / perMillion,
