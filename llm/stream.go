@@ -214,6 +214,13 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 	if event.ContextManagement != nil && r.response != nil {
 		r.response.ContextManagement = event.ContextManagement
 	}
+
+	// Once the message is complete, attach an estimated cost from resolved
+	// model pricing. No-op when no resolver/pricing is registered. Done here,
+	// after usage accumulation, so the final token counts are reflected.
+	if r.complete && r.response != nil {
+		PopulateCost(r.response.Model, r.response.Usage.Speed == string(SpeedFast), &r.response.Usage)
+	}
 	return nil
 }
 

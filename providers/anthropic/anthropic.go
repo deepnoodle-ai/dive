@@ -132,7 +132,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if len(result.Content) == 0 {
 		return nil, fmt.Errorf("empty response from anthropic api")
 	}
-	logCacheThrash(config, &result.Usage)
+	finalizeUsage(config, request.Model, &result.Usage)
 	if config.Prefill != "" {
 		if err := addPrefill(result.Content, config.Prefill, config.PrefillClosingTag); err != nil {
 			return nil, err
@@ -390,6 +390,19 @@ func logCacheThrash(config *llm.Config, usage *llm.Usage) {
 			"cache_read_tokens", read,
 			"input_tokens", usage.InputTokens)
 	}
+}
+
+// finalizeUsage runs post-response usage bookkeeping for the non-streaming
+// path: it logs cache thrash and attaches an estimated cost from registered
+// model pricing. Fast mode is detected from the served speed or the request so
+// premium fast-mode pricing is used when applicable. (Streamed responses get
+// the same cost treatment centrally via llm.ResponseAccumulator.)
+func finalizeUsage(config *llm.Config, model string, usage *llm.Usage) {
+	logCacheThrash(config, usage)
+	fast := usage.Speed == string(llm.SpeedFast) ||
+		config.Speed == llm.SpeedFast ||
+		config.IsFeatureEnabled(FeatureFastMode)
+	llm.PopulateCost(model, fast, usage)
 }
 
 // supportsAutomaticCaching reports whether the configured endpoint supports

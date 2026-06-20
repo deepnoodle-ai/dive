@@ -1,13 +1,6 @@
 package mistral
 
-// PricingInfo represents pricing information for a specific service
-type PricingInfo struct {
-	Model       string  `json:"model"`
-	InputPrice  float64 `json:"input_price_per_1m_tokens"`  // per 1M input tokens (USD)
-	OutputPrice float64 `json:"output_price_per_1m_tokens"` // per 1M output tokens (USD)
-	Currency    string  `json:"currency"`
-	UpdatedAt   string  `json:"updated_at"` // YYYY-MM-DD format
-}
+import "github.com/deepnoodle-ai/dive/llm"
 
 // ImagePricingInfo represents pricing for image generation services
 type ImagePricingInfo struct {
@@ -27,7 +20,7 @@ type EmbeddingPricingInfo struct {
 }
 
 // TextModelPricing contains pricing for all text generation models
-var TextModelPricing = map[string]PricingInfo{
+var TextModelPricing = map[string]llm.PricingInfo{
 	ModelMistralLarge2411: {
 		Model:       ModelMistralLarge2411,
 		InputPrice:  2.0,

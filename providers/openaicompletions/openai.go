@@ -205,6 +205,8 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		Usage:   result.Usage.toLLMUsage(),
 	}
 
+	llm.PopulateCost(response.Model, response.Usage.Speed == string(llm.SpeedFast), &response.Usage)
+
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.AfterGenerate,
 		Request: &llm.HookRequestContext{
