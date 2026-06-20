@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-06-20
+
+### Added
+
+- **Anthropic hybrid prompt caching** — the single tail-only cache breakpoint
+  is replaced with a 4-slot automatic + explicit strategy that fixes the
+  full-prefix rewrites and 20-block lookback overruns behind the prior cost
+  incident. Slot 2 puts an explicit breakpoint on the last system block
+  (caching tools + system); slot 1 lets the first-party endpoint's top-level
+  automatic `cache_control` own the moving tail, with a portability fallback to
+  an explicit tail breakpoint on Bedrock/Vertex/custom endpoints; slots 3–4
+  walk backward keeping ≤15 blocks between breakpoints within the remaining
+  budget. `ToolUseContent` is now anchorable so an anchor can land inside a
+  parallel tool-call fan-out turn. `CacheControl` gains a `TTL` field with
+  `CacheTTL5m`/`CacheTTL1h` constants (1h applied to the stable prefix only
+  when `FeatureExtendedCache` is on; the tail stays 5m), and a cache-thrash
+  warning fires when cache writes dominate reads.
+- **Per-call usage cost estimation** — monetary cost is now a first-class part
+  of every generation, computed where the tokens are produced so per-call
+  costs sum correctly across model/speed changes. `llm.PricingInfo` gains
+  `CacheReadPrice`/`CacheWritePrice` and a `Cost` breakdown via
+  `PricingInfo.CostOf(usage)`; `llm.Usage` carries `Cost *Cost` (nil = unknown,
+  distinct from a known $0) with cost-aware `Add`/`Copy`. A cost-resolver hook
+  (`SetCostResolver`/`PopulateCost`) lets `llm` price usage without importing
+  providers, and the streaming accumulator attaches cost at message completion
+  for all providers. The providers registry adds
+  `RegisterPricing`/`PricingFor`, populated from each provider's `init()`,
+  wiring up the previously unused per-provider pricing tables across Anthropic,
+  OpenAI, Google, Grok, Mistral, Ollama, OpenRouter, and openaicompletions.
+- **CLI token/cost visibility** — the ambiguous "in / cache / out" status line
+  is replaced with a labeled per-scope table (input, cache read, cache write,
+  output, hit rate, cost) that colors the hit rate by health so cache thrash is
+  immediately visible, with a fast-mode badge and a reasoning column when
+  present. A new `/usage` command (alias `/cost`) renders a persistent,
+  fully-labeled breakdown per scope with a legend. The cost column appears only
+  when pricing is known; "—" marks an unknown per-scope cost, and cost is
+  labeled an estimate at list prices, not a bill.
+
+### Changed
+
+- **`wonton` upgraded to v0.0.36** across all 11 modules, with call sites
+  adapted to the updated API: CLI option constructors drop the empty short-flag
+  argument, the image example's binary fetch moves to `fetch.Download`,
+  firecrawl maps API errors onto the new `fetch.Error` struct, and the
+  firecrawl/google/kagi web-search adapters return `[]web.SearchItem` value
+  slices. Adds locking around the focused-`InputField` key-routing contract
+  introduced in wonton ≥ v0.0.35.
+- **Anthropic request shape** — `Request.System` is now `[]*SystemBlock`
+  instead of a string, and a top-level `Request.CacheControl` supports
+  automatic caching. The GA `prompt-caching-2024-07-31` beta header is no
+  longer sent by default and the invalid `CacheControlTypePersistent` constant
+  is removed.
+
 ## [1.8.1] - 2026-06-09
 
 ### Fixed

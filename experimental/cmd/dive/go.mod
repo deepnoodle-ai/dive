@@ -3,10 +3,10 @@ module github.com/deepnoodle-ai/dive/experimental/cmd/dive
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.8.0
-	github.com/deepnoodle-ai/dive/providers/google v1.8.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.8.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.8.0
+	github.com/deepnoodle-ai/dive v1.9.0
+	github.com/deepnoodle-ai/dive/providers/google v1.9.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.9.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.9.0
 	github.com/deepnoodle-ai/wonton v0.0.36
 	github.com/mattn/go-runewidth v0.0.21
 )
