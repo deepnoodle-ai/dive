@@ -2030,6 +2030,10 @@ func (a *App) handleCommand(input string) bool {
 	case "model":
 		a.handleModelCommand(cmdArgs)
 		return true
+
+	case "usage", "cost":
+		a.printUsageReport()
+		return true
 	}
 
 	// Check for custom slash commands and skills
@@ -2141,6 +2145,7 @@ func (a *App) printHelp() {
 		tui.Text("  /compact       Compact conversation to save context"),
 		tui.Text("  /model         Switch model"),
 		tui.Text("  /todos, /t     Toggle todo list"),
+		tui.Text("  /usage, /cost  Show token & cache usage breakdown"),
 		tui.Text("  /help, /?      Show this help"),
 	}
 
@@ -2173,6 +2178,127 @@ func (a *App) printHelp() {
 	)
 
 	a.runner.Print(tui.Stack(views...))
+}
+
+// printUsageReport prints the detailed token + cache usage breakdown to
+// scrollback, or a placeholder when nothing has been recorded yet.
+func (a *App) printUsageReport() {
+	view := a.usageReportView()
+	if view == nil {
+		a.runner.Printf("No token usage recorded yet.")
+		return
+	}
+	a.runner.Print(view)
+}
+
+// usageReportView builds a detailed token + cache usage breakdown (turn and,
+// when it differs, session) followed by a short legend. It is the persistent,
+// fully-labeled counterpart to the compact status-line panel. Returns nil when
+// no usage has been recorded yet.
+func (a *App) usageReportView() tui.View {
+	turn := a.interactionUsage
+	sess := a.sessionUsage
+	turnHas := turn != nil && hasUsage(turn)
+	sessHas := sess != nil && hasUsage(sess)
+	if !turnHas && !sessHas {
+		return nil
+	}
+	if turn == nil {
+		turn = &llm.Usage{}
+	}
+	if sess == nil {
+		sess = &llm.Usage{}
+	}
+
+	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 110, B: 120})
+	rowLabelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170})
+	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
+
+	const (
+		labelW = 16
+		colW   = 12
+	)
+	left := func(w int, s string, st tui.Style) tui.View {
+		return tui.Width(w, tui.Stack(tui.Text("%s", s).Style(st)).Align(tui.AlignLeft))
+	}
+	right := func(w int, s string, st tui.Style) tui.View {
+		return tui.Width(w, tui.Stack(tui.Text("%s", s).Style(st)).Align(tui.AlignRight))
+	}
+
+	type scopeCol struct {
+		name string
+		u    *llm.Usage
+	}
+	cols := []scopeCol{{"turn", turn}}
+	if sessHas && a.sessionUsageDiffers() {
+		cols = append(cols, scopeCol{"session", sess})
+	}
+
+	tokRow := func(label string, get func(*llm.Usage) int) tui.View {
+		cells := []tui.View{left(labelW, "  "+label, rowLabelStyle)}
+		for _, c := range cols {
+			cells = append(cells, right(colW, formatTokenCount(get(c.u)), valStyle))
+		}
+		return tui.Group(cells...)
+	}
+
+	headerCells := []tui.View{left(labelW, "", labelStyle)}
+	for _, c := range cols {
+		headerCells = append(headerCells, right(colW, c.name, labelStyle))
+	}
+
+	views := []tui.View{
+		tui.Text(""),
+		tui.Text("Token usage").Bold(),
+		tui.Group(headerCells...),
+		tokRow("input", func(u *llm.Usage) int { return u.InputTokens }),
+		tokRow("cache read", func(u *llm.Usage) int { return u.CacheReadInputTokens }),
+		tokRow("cache write", func(u *llm.Usage) int { return u.CacheCreationInputTokens }),
+		tokRow("output", func(u *llm.Usage) int { return u.OutputTokens }),
+	}
+	if turn.ReasoningTokens > 0 || sess.ReasoningTokens > 0 {
+		views = append(views, tokRow("reasoning", func(u *llm.Usage) int { return u.ReasoningTokens }))
+	}
+	views = append(views, tokRow("total input", func(u *llm.Usage) int {
+		return u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	}))
+
+	hitCells := []tui.View{left(labelW, "  cache hit", rowLabelStyle)}
+	for _, c := range cols {
+		rate, _ := cacheHitRate(c.u)
+		hitCells = append(hitCells, right(colW, rate, valStyle))
+	}
+	views = append(views, tui.Group(hitCells...))
+
+	hasCost := false
+	for _, c := range cols {
+		if c.u.Cost != nil {
+			hasCost = true
+		}
+	}
+	if hasCost {
+		costCells := []tui.View{left(labelW, "  est. cost", rowLabelStyle)}
+		for _, c := range cols {
+			costCells = append(costCells, right(colW, costString(c.u), valStyle))
+		}
+		views = append(views, tui.Group(costCells...))
+	}
+
+	views = append(views,
+		tui.Text(""),
+		tui.Text("  cache read  — prompt tokens served from cache (cheap, ~0.1x)").Style(labelStyle),
+		tui.Text("  cache write — prompt tokens written to cache (premium, 1.25-2x)").Style(labelStyle),
+		tui.Text("  cache hit   — cache read / (cache read + cache write)").Style(labelStyle),
+	)
+	if hasCost {
+		views = append(views, tui.Text("  est. cost   — estimated at list prices; not a bill").Style(labelStyle))
+	}
+	if a.lastUsage != nil && a.lastUsage.Speed != "" {
+		views = append(views, tui.Text("  speed       — %s mode", a.lastUsage.Speed).Style(labelStyle))
+	}
+	views = append(views, tui.Text(""))
+
+	return tui.Stack(views...)
 }
 
 func (a *App) printTodosToScrollback() {
@@ -2478,7 +2604,7 @@ func fuzzyMatch(pattern, text string) int {
 // getCommandMatches returns slash commands matching the prefix for autocomplete
 func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
-	builtins := []string{"clear", "compact", "help", "model", "quit", "todos"}
+	builtins := []string{"clear", "compact", "cost", "help", "model", "quit", "todos", "usage"}
 
 	var matches []string
 

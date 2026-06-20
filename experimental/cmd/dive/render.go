@@ -61,29 +61,15 @@ func (a *App) statusLineView() tui.View {
 			tui.Text("%s", branch).Style(accentStyle),
 		)
 	}
-	// Right-aligned token usage lines (turn above session)
-	sectionStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170}).WithBold()
-	var usageLines []tui.View
-	if u := a.interactionUsage; u != nil && hasUsage(u) {
-		usageLines = append(usageLines, tui.Group(
-			tui.Width(9, tui.Stack(tui.Text("turn").Style(sectionStyle)).Align(tui.AlignRight)),
-			tui.Text("  "),
-			usageView(u),
-		))
-	}
-	if u := a.sessionUsage; u != nil && hasUsage(u) && a.sessionUsageDiffers() {
-		usageLines = append(usageLines, tui.Group(
-			tui.Width(9, tui.Stack(tui.Text("session").Style(sectionStyle)).Align(tui.AlignRight)),
-			tui.Text("  "),
-			usageView(u),
-		))
+	// Speed badge — fast mode bills at a different rate, so surface it.
+	if a.lastUsage != nil && a.lastUsage.Speed == "fast" {
+		parts = append(parts, tui.Text(" ⚡fast").Style(
+			tui.NewStyle().WithFgRGB(tui.RGB{R: 230, G: 190, B: 80}).WithBold()))
 	}
 
-	// Line 2: progress bar with context %
-	var line2LeftParts []tui.View
-	line2LeftParts = append(line2LeftParts, tui.Text(" ").Style(mutedStyle))
+	rows := []tui.View{tui.Group(parts...)}
 
-	// Context usage progress bar (show after first LLM response)
+	// Line 2: context-window usage bar (shown after the first LLM response).
 	if a.lastUsage != nil {
 		contextPct := a.contextPercent()
 		barColor := accentDim
@@ -98,41 +84,23 @@ func (a *App) statusLineView() tui.View {
 			HidePercent().
 			Style(tui.NewStyle().WithFgRGB(barColor)).
 			EmptyStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 80, G: 80, B: 90}))
-		line2LeftParts = append(line2LeftParts, bar)
-		line2LeftParts = append(line2LeftParts, tui.Text(" %d%%", contextPct).Style(mutedStyle))
+		rows = append(rows, tui.Group(
+			tui.Text(" ").Style(mutedStyle),
+			bar,
+			tui.Text(" %d%% context", contextPct).Style(mutedStyle),
+		))
 	}
 
-	hasLine2Left := len(line2LeftParts) > 1
-	hasUsageLines := len(usageLines) > 0
-
-	if !hasLine2Left && !hasUsageLines {
-		return tui.Group(parts...)
+	// Tokens panel: a clearly-labeled per-scope breakdown of input, cache
+	// reads (hits) vs writes (misses), output, and hit rate.
+	if panel := a.tokensPanelView(); panel != nil {
+		rows = append(rows, panel)
 	}
 
-	// Build the line 1 row: model info on left, turn usage on right
-	line1Row := tui.Group(parts...)
-	if len(usageLines) > 0 {
-		line1Row = tui.Group(tui.Group(parts...), tui.Spacer(), usageLines[0], tui.Text(" "))
+	if len(rows) == 1 {
+		return rows[0]
 	}
-
-	// Build the line 2 row: context bar on left, session usage on right
-	if hasLine2Left || len(usageLines) > 1 {
-		var line2Left tui.View
-		if hasLine2Left {
-			line2Left = tui.Group(line2LeftParts...)
-		} else {
-			line2Left = tui.Text("")
-		}
-		var line2Row tui.View
-		if len(usageLines) > 1 {
-			line2Row = tui.Group(line2Left, tui.Spacer(), usageLines[1], tui.Text(" "))
-		} else {
-			line2Row = line2Left
-		}
-		return tui.Stack(line1Row, line2Row).Gap(0)
-	}
-
-	return line1Row
+	return tui.Stack(rows...).Gap(0)
 }
 
 // formatTokenCount formats a token count for display (e.g. 1234 -> "1.2k", 56 -> "56").
@@ -151,21 +119,145 @@ func hasUsage(u *llm.Usage) bool {
 	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0
 }
 
-// usageView renders a compact token usage display with right-aligned number columns:
+// tokensPanelView renders a clearly-labeled token + cache breakdown table, one
+// row per scope (turn / session). It makes cache reads (hits, cheap) and cache
+// writes (misses, premium) explicit and adds a per-scope hit rate, so cache
+// thrash is immediately visible. Returns nil before the first response.
 //
-//	"in:  13.7k  cache:  13.5k  out:    53"
-func usageView(u *llm.Usage) tui.View {
-	labelStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
-	valueStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
-	totalIn := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-	col := func(val string) tui.View {
-		return tui.Width(6, tui.Stack(tui.Text("%s", val).Style(valueStyle)).Align(tui.AlignRight))
+//	tokens       input   cache read   cache write   output    hit
+//	turn          1.2k        13.5k          0.5k       53     96%
+//	session       4.8k        54.0k          1.2k      892     98%
+func (a *App) tokensPanelView() tui.View {
+	turn := a.interactionUsage
+	if turn == nil || !hasUsage(turn) {
+		return nil
 	}
-	return tui.Group(
-		tui.Text("in: ").Style(labelStyle), col(formatTokenCount(totalIn)),
-		tui.Text("  cache: ").Style(labelStyle), col(formatTokenCount(u.CacheReadInputTokens)),
-		tui.Text("  out: ").Style(labelStyle), col(formatTokenCount(u.OutputTokens)),
+	sess := a.sessionUsage
+	showSession := sess != nil && hasUsage(sess) && a.sessionUsageDiffers()
+	showReasoning := turn.ReasoningTokens > 0 || (showSession && sess.ReasoningTokens > 0)
+	showCost := turn.Cost != nil || (showSession && sess.Cost != nil)
+
+	headerStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 110, B: 120})
+	scopeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170}).WithBold()
+	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
+	readStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 200, B: 130}).WithBold() // green: cheap hits
+	writeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 225, G: 175, B: 80}).WithBold() // amber: premium writes
+	costStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 120, G: 205, B: 150}).WithBold() // green: money
+
+	const (
+		labelW = 10
+		inW    = 8
+		readW  = 13
+		writeW = 14
+		outW   = 9
+		reasW  = 9
+		hitW   = 7
+		costW  = 10
 	)
+
+	left := func(w int, s string, st tui.Style) tui.View {
+		return tui.Width(w, tui.Stack(tui.Text("%s", s).Style(st)).Align(tui.AlignLeft))
+	}
+	right := func(w int, s string, st tui.Style) tui.View {
+		return tui.Width(w, tui.Stack(tui.Text("%s", s).Style(st)).Align(tui.AlignRight))
+	}
+
+	header := []tui.View{
+		left(labelW, " tokens", headerStyle),
+		right(inW, "input", headerStyle),
+		right(readW, "cache read", headerStyle),
+		right(writeW, "cache write", headerStyle),
+		right(outW, "output", headerStyle),
+	}
+	if showReasoning {
+		header = append(header, right(reasW, "reason", headerStyle))
+	}
+	header = append(header, right(hitW, "hit", headerStyle))
+	if showCost {
+		header = append(header, right(costW, "cost", headerStyle))
+	}
+
+	dataRow := func(label string, u *llm.Usage) tui.View {
+		cells := []tui.View{
+			left(labelW, " "+label, scopeStyle),
+			right(inW, formatTokenCount(u.InputTokens), valStyle),
+			right(readW, formatTokenCount(u.CacheReadInputTokens), readStyle),
+			right(writeW, formatTokenCount(u.CacheCreationInputTokens), writeStyle),
+			right(outW, formatTokenCount(u.OutputTokens), valStyle),
+		}
+		if showReasoning {
+			cells = append(cells, right(reasW, formatTokenCount(u.ReasoningTokens), valStyle))
+		}
+		rate, ok := cacheHitRate(u)
+		cells = append(cells, right(hitW, rate, cacheHitStyle(u, ok)))
+		if showCost {
+			cells = append(cells, right(costW, costString(u), costStyle))
+		}
+		return tui.Group(cells...)
+	}
+
+	rows := []tui.View{
+		tui.Group(header...),
+		dataRow("turn", turn),
+	}
+	if showSession {
+		rows = append(rows, dataRow("session", sess))
+	}
+	return tui.Stack(rows...).Gap(0)
+}
+
+// cacheHitRate returns the share of cacheable prompt tokens served from cache
+// (reads) versus freshly written (writes), as a percentage string. ok is false
+// when no caching occurred for the scope (zero denominator).
+func cacheHitRate(u *llm.Usage) (string, bool) {
+	denom := u.CacheReadInputTokens + u.CacheCreationInputTokens
+	if denom == 0 {
+		return "—", false
+	}
+	pct := (u.CacheReadInputTokens * 100) / denom
+	return fmt.Sprintf("%d%%", pct), true
+}
+
+// cacheHitStyle colors the hit rate by health: green (>=80%), amber (50-79%),
+// red (<50%, i.e. cache thrash). Muted when no caching occurred.
+func cacheHitStyle(u *llm.Usage, ok bool) tui.Style {
+	if !ok {
+		return tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
+	}
+	denom := u.CacheReadInputTokens + u.CacheCreationInputTokens
+	pct := (u.CacheReadInputTokens * 100) / denom
+	switch {
+	case pct >= 80:
+		return tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 200, B: 130}).WithBold()
+	case pct >= 50:
+		return tui.NewStyle().WithFgRGB(tui.RGB{R: 225, G: 175, B: 80}).WithBold()
+	default:
+		return tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 90, B: 90}).WithBold()
+	}
+}
+
+// costString renders a usage's estimated total cost, or an em dash when cost is
+// unknown (no pricing for the model) — distinct from a known $0 (local models).
+func costString(u *llm.Usage) string {
+	if u.Cost == nil {
+		return "—"
+	}
+	return formatCost(u.Cost.Total)
+}
+
+// formatCost formats a USD amount with precision that scales to the magnitude,
+// so sub-cent estimates stay legible (e.g. "$0.0021", "$0.043", "$1.27").
+func formatCost(c float64) string {
+	switch {
+	case c <= 0:
+		return "$0"
+	case c < 0.01:
+		return fmt.Sprintf("$%.4f", c)
+	case c < 1:
+		return fmt.Sprintf("$%.3f", c)
+	default:
+		return fmt.Sprintf("$%.2f", c)
+	}
 }
 
 // sessionUsageDiffers returns true if session usage differs from interaction usage
