@@ -424,10 +424,11 @@ func (c *DocumentContent) CloneContent() Content {
 */
 
 type ToolUseContent struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	Input        json.RawMessage `json:"input"`
-	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Input            json.RawMessage   `json:"input"`
+	CacheControl     *CacheControl     `json:"cache_control,omitempty"`
+	ProviderMetadata map[string]string `json:"provider_metadata,omitempty"`
 }
 
 func (c *ToolUseContent) Type() ContentType {
@@ -443,17 +444,19 @@ func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("invalid JSON in tool_use input for %q (id=%s): %s", c.Name, c.ID, string(input))
 	}
 	return json.Marshal(struct {
-		Type         ContentType     `json:"type"`
-		ID           string          `json:"id"`
-		Name         string          `json:"name"`
-		Input        json.RawMessage `json:"input"`
-		CacheControl *CacheControl   `json:"cache_control,omitempty"`
+		Type             ContentType       `json:"type"`
+		ID               string            `json:"id"`
+		Name             string            `json:"name"`
+		Input            json.RawMessage   `json:"input"`
+		CacheControl     *CacheControl     `json:"cache_control,omitempty"`
+		ProviderMetadata map[string]string `json:"provider_metadata,omitempty"`
 	}{
-		Type:         ContentTypeToolUse,
-		ID:           c.ID,
-		Name:         c.Name,
-		Input:        input,
-		CacheControl: c.CacheControl,
+		Type:             ContentTypeToolUse,
+		ID:               c.ID,
+		Name:             c.Name,
+		Input:            input,
+		CacheControl:     c.CacheControl,
+		ProviderMetadata: c.ProviderMetadata,
 	})
 }
 
@@ -464,6 +467,12 @@ func (c *ToolUseContent) SetCacheControl(cacheControl *CacheControl) {
 func (c *ToolUseContent) CloneContent() Content {
 	cp := *c
 	cp.CacheControl = nil
+	if c.ProviderMetadata != nil {
+		cp.ProviderMetadata = make(map[string]string, len(c.ProviderMetadata))
+		for k, v := range c.ProviderMetadata {
+			cp.ProviderMetadata[k] = v
+		}
+	}
 	return &cp
 }
 

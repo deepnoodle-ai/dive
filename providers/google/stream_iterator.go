@@ -167,7 +167,7 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 	for _, part := range candidate.Content.Parts {
 		switch {
 		case part.FunctionCall != nil:
-			if err := s.queueFunctionCall(part.FunctionCall); err != nil {
+			if err := s.queueFunctionCall(part); err != nil {
 				return err
 			}
 		case part.Text != "":
@@ -213,7 +213,8 @@ func (s *StreamIterator) queueText(text string) {
 // is no partial-JSON streaming), so the block starts, receives its full input
 // as one delta, and stops immediately. Parallel calls each get their own
 // sequential block index.
-func (s *StreamIterator) queueFunctionCall(call *genai.FunctionCall) error {
+func (s *StreamIterator) queueFunctionCall(part *genai.Part) error {
+	call := part.FunctionCall
 	args, err := json.Marshal(call.Args)
 	if err != nil {
 		return fmt.Errorf("error marshaling function call args: %w", err)
@@ -236,9 +237,10 @@ func (s *StreamIterator) queueFunctionCall(call *genai.FunctionCall) error {
 			Type:  llm.EventTypeContentBlockStart,
 			Index: &index,
 			ContentBlock: &llm.EventContentBlock{
-				Type: llm.ContentTypeToolUse,
-				ID:   toolCallID,
-				Name: call.Name,
+				Type:             llm.ContentTypeToolUse,
+				ID:               toolCallID,
+				Name:             call.Name,
+				ProviderMetadata: providerMetadataForGooglePart(part),
 			},
 		},
 		&llm.Event{
