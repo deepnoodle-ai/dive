@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-06-29
+
+### Added
+
+- **Google Vertex AI backend** — `google.WithVertexAI(location)` routes a single
+  Google provider instance through the Vertex AI backend using Application
+  Default Credentials, independent of the process-wide
+  `GOOGLE_GENAI_USE_VERTEXAI` environment variable. An empty location is
+  resolved by the genai SDK from `GOOGLE_CLOUD_LOCATION`/`GOOGLE_CLOUD_REGION`
+  before defaulting to `global`. The provider's client initialization now
+  selects the backend explicitly: the Vertex path passes only project/location
+  (the genai SDK treats an API key as mutually exclusive with them), while the
+  Gemini API path passes only the API key.
+
 ## [1.9.0] - 2026-06-20
 
 ### Added
