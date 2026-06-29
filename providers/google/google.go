@@ -35,6 +35,7 @@ type Provider struct {
 	projectID     string
 	location      string
 	apiKey        string
+	vertexAI      bool
 	model         string
 	maxTokens     int
 	maxRetries    int
@@ -72,11 +73,26 @@ func (p *Provider) initClient(ctx context.Context) (*genai.Client, error) {
 	if p.client != nil {
 		return p.client, nil
 	}
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:   p.apiKey,
-		Project:  p.projectID,
-		Location: p.location,
-	})
+	var cfg *genai.ClientConfig
+	if p.vertexAI {
+		// Vertex AI authenticates with Application Default Credentials. An API
+		// key is mutually exclusive with project/location in the genai client
+		// config, and this backend resolves auth via ADC, so we pass only the
+		// project and location. An empty location is resolved by the SDK from
+		// GOOGLE_CLOUD_LOCATION/GOOGLE_CLOUD_REGION, defaulting to "global".
+		cfg = &genai.ClientConfig{
+			Backend:  genai.BackendVertexAI,
+			Project:  p.projectID,
+			Location: p.location,
+		}
+	} else {
+		// The Gemini API backend authenticates with an API key, which is
+		// mutually exclusive with project/location, so we pass only the key.
+		cfg = &genai.ClientConfig{
+			APIKey: p.apiKey,
+		}
+	}
+	client, err := genai.NewClient(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create google genai client: %v", err)
 	}

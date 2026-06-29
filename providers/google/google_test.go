@@ -136,6 +136,19 @@ func TestProviderOptions(t *testing.T) {
 	assert.Equal(t, 1000, provider.maxTokens)
 }
 
+func TestProviderVertexAIOption(t *testing.T) {
+	// By default the provider is on the Gemini API (key) backend.
+	assert.False(t, New().vertexAI, "vertexAI should default to false")
+
+	// WithVertexAI flips the backend and records the region. An API key, if
+	// present in the environment, is left untouched on the struct but is not
+	// passed to the Vertex client config (see initClient).
+	provider := New(WithVertexAI("us-central1"), WithProjectID("test-project"))
+	assert.True(t, provider.vertexAI, "WithVertexAI should enable the Vertex backend")
+	assert.Equal(t, "us-central1", provider.location)
+	assert.Equal(t, "test-project", provider.projectID)
+}
+
 // func TestConvertMessages(t *testing.T) {
 // 	messages := []*llm.Message{
 // 		llm.NewUserTextMessage("Hello"),
