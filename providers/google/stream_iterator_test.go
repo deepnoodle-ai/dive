@@ -145,7 +145,7 @@ func TestStreamIteratorParallelFunctionCalls(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "get_weather", first.Name)
 	assert.True(t, strings.Contains(string(first.Input), "Paris"))
-	assert.Equal(t, "cGFyaXMtc2ln", first.ProviderMetadata[googleThoughtSignatureMetadataKey])
+	assert.Equal(t, "cGFyaXMtc2ln", first.Metadata[googleThoughtSignatureMetadataKey])
 
 	second, ok := response.Content[2].(*llm.ToolUseContent)
 	assert.True(t, ok)

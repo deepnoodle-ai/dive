@@ -423,12 +423,36 @@ func (c *DocumentContent) CloneContent() Content {
 }
 */
 
+// ProviderMetadata carries opaque, provider-specific data attached to a content
+// block that must round-trip through the conversation unchanged for a later
+// request to the same provider. Keys are namespaced by provider to avoid
+// collisions (for example "google.thought_signature"). Values are strings;
+// binary payloads are base64-encoded by the provider that owns them. The core
+// library never interprets these values — only the originating provider reads
+// them back.
+type ProviderMetadata map[string]string
+
+// Clone returns a deep copy of the metadata, or nil if the receiver is nil.
+func (m ProviderMetadata) Clone() ProviderMetadata {
+	if m == nil {
+		return nil
+	}
+	cp := make(ProviderMetadata, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
+}
+
 type ToolUseContent struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Input            json.RawMessage   `json:"input"`
-	CacheControl     *CacheControl     `json:"cache_control,omitempty"`
-	ProviderMetadata map[string]string `json:"provider_metadata,omitempty"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Input        json.RawMessage `json:"input"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+	// Metadata carries opaque provider-specific data (see ProviderMetadata) that
+	// must be replayed to the provider on later requests — for example a Google
+	// function-call thought signature.
+	Metadata ProviderMetadata `json:"metadata,omitempty"`
 }
 
 func (c *ToolUseContent) Type() ContentType {
@@ -444,19 +468,19 @@ func (c *ToolUseContent) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("invalid JSON in tool_use input for %q (id=%s): %s", c.Name, c.ID, string(input))
 	}
 	return json.Marshal(struct {
-		Type             ContentType       `json:"type"`
-		ID               string            `json:"id"`
-		Name             string            `json:"name"`
-		Input            json.RawMessage   `json:"input"`
-		CacheControl     *CacheControl     `json:"cache_control,omitempty"`
-		ProviderMetadata map[string]string `json:"provider_metadata,omitempty"`
+		Type         ContentType      `json:"type"`
+		ID           string           `json:"id"`
+		Name         string           `json:"name"`
+		Input        json.RawMessage  `json:"input"`
+		CacheControl *CacheControl    `json:"cache_control,omitempty"`
+		Metadata     ProviderMetadata `json:"metadata,omitempty"`
 	}{
-		Type:             ContentTypeToolUse,
-		ID:               c.ID,
-		Name:             c.Name,
-		Input:            input,
-		CacheControl:     c.CacheControl,
-		ProviderMetadata: c.ProviderMetadata,
+		Type:         ContentTypeToolUse,
+		ID:           c.ID,
+		Name:         c.Name,
+		Input:        input,
+		CacheControl: c.CacheControl,
+		Metadata:     c.Metadata,
 	})
 }
 
@@ -467,12 +491,7 @@ func (c *ToolUseContent) SetCacheControl(cacheControl *CacheControl) {
 func (c *ToolUseContent) CloneContent() Content {
 	cp := *c
 	cp.CacheControl = nil
-	if c.ProviderMetadata != nil {
-		cp.ProviderMetadata = make(map[string]string, len(c.ProviderMetadata))
-		for k, v := range c.ProviderMetadata {
-			cp.ProviderMetadata[k] = v
-		}
-	}
+	cp.Metadata = c.Metadata.Clone()
 	return &cp
 }
 

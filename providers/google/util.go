@@ -46,10 +46,10 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 				toolCallID = generateToolCallID(part.FunctionCall.Name)
 			}
 			content = append(content, &llm.ToolUseContent{
-				ID:               toolCallID,
-				Name:             part.FunctionCall.Name,
-				Input:            json.RawMessage(args),
-				ProviderMetadata: providerMetadataForGooglePart(part),
+				ID:       toolCallID,
+				Name:     part.FunctionCall.Name,
+				Input:    json.RawMessage(args),
+				Metadata: providerMetadataForGooglePart(part),
 			})
 		} else {
 			// Handle other types as text (fallback)
@@ -181,20 +181,20 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 	}, nil
 }
 
-func providerMetadataForGooglePart(part *genai.Part) map[string]string {
+func providerMetadataForGooglePart(part *genai.Part) llm.ProviderMetadata {
 	if part == nil || len(part.ThoughtSignature) == 0 {
 		return nil
 	}
-	return map[string]string{
+	return llm.ProviderMetadata{
 		googleThoughtSignatureMetadataKey: base64.StdEncoding.EncodeToString(part.ThoughtSignature),
 	}
 }
 
 func googleThoughtSignatureFromToolUse(toolUse *llm.ToolUseContent) ([]byte, error) {
-	if toolUse == nil || toolUse.ProviderMetadata == nil {
+	if toolUse == nil || toolUse.Metadata == nil {
 		return nil, nil
 	}
-	encoded := strings.TrimSpace(toolUse.ProviderMetadata[googleThoughtSignatureMetadataKey])
+	encoded := strings.TrimSpace(toolUse.Metadata[googleThoughtSignatureMetadataKey])
 	if encoded == "" {
 		return nil, nil
 	}

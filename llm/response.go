@@ -74,18 +74,11 @@ func (r *Response) ToolCalls() []*ToolUseContent {
 	var toolCalls []*ToolUseContent
 	for _, content := range r.Content {
 		if toolUse, ok := content.(*ToolUseContent); ok {
-			var providerMetadata map[string]string
-			if toolUse.ProviderMetadata != nil {
-				providerMetadata = make(map[string]string, len(toolUse.ProviderMetadata))
-				for k, v := range toolUse.ProviderMetadata {
-					providerMetadata[k] = v
-				}
-			}
 			toolCalls = append(toolCalls, &ToolUseContent{
-				ID:               toolUse.ID,    // e.g. "toolu_01A09q90qw90lq917835lq9"
-				Name:             toolUse.Name,  // tool name e.g. "get_weather"
-				Input:            toolUse.Input, // tool call input JSON
-				ProviderMetadata: providerMetadata,
+				ID:       toolUse.ID,    // e.g. "toolu_01A09q90qw90lq917835lq9"
+				Name:     toolUse.Name,  // tool name e.g. "get_weather"
+				Input:    toolUse.Input, // tool call input JSON
+				Metadata: toolUse.Metadata.Clone(),
 			})
 		}
 	}

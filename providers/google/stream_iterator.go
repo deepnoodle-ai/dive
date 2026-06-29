@@ -237,10 +237,10 @@ func (s *StreamIterator) queueFunctionCall(part *genai.Part) error {
 			Type:  llm.EventTypeContentBlockStart,
 			Index: &index,
 			ContentBlock: &llm.EventContentBlock{
-				Type:             llm.ContentTypeToolUse,
-				ID:               toolCallID,
-				Name:             call.Name,
-				ProviderMetadata: providerMetadataForGooglePart(part),
+				Type:     llm.ContentTypeToolUse,
+				ID:       toolCallID,
+				Name:     call.Name,
+				Metadata: providerMetadataForGooglePart(part),
 			},
 		},
 		&llm.Event{

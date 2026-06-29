@@ -35,7 +35,7 @@ func TestMessagesToContentsToolRoundTrip(t *testing.T) {
 					ID:    id,
 					Name:  "calculator",
 					Input: []byte(`{"expression":"1+1"}`),
-					ProviderMetadata: map[string]string{
+					Metadata: llm.ProviderMetadata{
 						googleThoughtSignatureMetadataKey: base64.StdEncoding.EncodeToString([]byte("sig-123")),
 					},
 				},
@@ -86,7 +86,7 @@ func TestGoogleThoughtSignatureSurvivesMessageRoundTrip(t *testing.T) {
 
 	toolUse, ok := converted.Content[0].(*llm.ToolUseContent)
 	assert.True(t, ok)
-	assert.Equal(t, base64.StdEncoding.EncodeToString(signature), toolUse.ProviderMetadata[googleThoughtSignatureMetadataKey])
+	assert.Equal(t, base64.StdEncoding.EncodeToString(signature), toolUse.Metadata[googleThoughtSignatureMetadataKey])
 
 	body, err := json.Marshal(converted.Message())
 	assert.NoError(t, err)
