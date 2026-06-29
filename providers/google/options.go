@@ -62,3 +62,17 @@ func WithAPIKey(apiKey string) Option {
 		p.apiKey = apiKey
 	}
 }
+
+// WithVertexAI routes requests through the Vertex AI backend, authenticating
+// with Application Default Credentials instead of an API key. The location is
+// the Vertex region (e.g. "us-central1"); pass "" to let the SDK default it to
+// "global". The GCP project is taken from WithProjectID when set, otherwise the
+// SDK resolves it from the environment (GOOGLE_CLOUD_PROJECT). This forces the
+// backend on this provider instance, so it does not depend on the global
+// GOOGLE_GENAI_USE_VERTEXAI environment variable and never consumes an API key.
+func WithVertexAI(location string) Option {
+	return func(p *Provider) {
+		p.vertexAI = true
+		p.location = location
+	}
+}
