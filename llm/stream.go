@@ -37,13 +37,14 @@ type Event struct {
 
 // EventContentBlock carries the start of a content block in an LLM event.
 type EventContentBlock struct {
-	Type      ContentType     `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Thinking  string          `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
+	Type      ContentType      `json:"type"`
+	Text      string           `json:"text,omitempty"`
+	ID        string           `json:"id,omitempty"`
+	Name      string           `json:"name,omitempty"`
+	Input     json.RawMessage  `json:"input,omitempty"`
+	Thinking  string           `json:"thinking,omitempty"`
+	Signature string           `json:"signature,omitempty"`
+	Metadata  ProviderMetadata `json:"metadata,omitempty"`
 }
 
 // EventDeltaType indicates the type of delta in an LLM event.
@@ -114,8 +115,9 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			}
 		case ContentTypeToolUse:
 			content = &ToolUseContent{
-				ID:   event.ContentBlock.ID,
-				Name: event.ContentBlock.Name,
+				ID:       event.ContentBlock.ID,
+				Name:     event.ContentBlock.Name,
+				Metadata: event.ContentBlock.Metadata.Clone(),
 			}
 		case ContentTypeThinking:
 			content = &ThinkingContent{

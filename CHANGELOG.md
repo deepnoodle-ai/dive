@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-06-29
+
+### Fixed
+
+- **Google thought signatures** — Gemini 3 returns an opaque `thought_signature`
+  on each function-call part and rejects later requests (HTTP 400) if it is not
+  echoed back. Tool calls now carry this signature on a new
+  `llm.ToolUseContent.Metadata` field (type `llm.ProviderMetadata`, an opaque
+  per-provider round-trip bag namespaced by provider key) and the Google
+  provider replays it on subsequent turns. Preserved across both streaming and
+  non-streaming responses and through session serialization.
+
 ## [1.10.0] - 2026-06-29
 
 ### Added

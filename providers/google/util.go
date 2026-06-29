@@ -1,6 +1,7 @@
 package google
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -12,6 +13,8 @@ import (
 	"github.com/deepnoodle-ai/wonton/schema"
 	"google.golang.org/genai"
 )
+
+const googleThoughtSignatureMetadataKey = "google.thought_signature"
 
 // convertGoogleResponse converts a Google GenAI response to a Dive LLM response
 func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*llm.Response, error) {
@@ -43,9 +46,10 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 				toolCallID = generateToolCallID(part.FunctionCall.Name)
 			}
 			content = append(content, &llm.ToolUseContent{
-				ID:    toolCallID,
-				Name:  part.FunctionCall.Name,
-				Input: json.RawMessage(args),
+				ID:       toolCallID,
+				Name:     part.FunctionCall.Name,
+				Input:    json.RawMessage(args),
+				Metadata: providerMetadataForGooglePart(part),
 			})
 		} else {
 			// Handle other types as text (fallback)
@@ -127,13 +131,19 @@ func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) (*genai.Part, err
 		args = map[string]any{}
 	}
 
-	return &genai.Part{
+	part := &genai.Part{
 		FunctionCall: &genai.FunctionCall{
 			ID:   toolUse.ID,
 			Name: toolUse.Name,
 			Args: args,
 		},
-	}, nil
+	}
+	signature, err := googleThoughtSignatureFromToolUse(toolUse)
+	if err != nil {
+		return nil, err
+	}
+	part.ThoughtSignature = signature
+	return part, nil
 }
 
 // convertToolResultToFunctionResponse converts a generic llm.ToolResultContent to a genai.FunctionResponse part
@@ -169,6 +179,30 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 			Response: responseData,
 		},
 	}, nil
+}
+
+func providerMetadataForGooglePart(part *genai.Part) llm.ProviderMetadata {
+	if part == nil || len(part.ThoughtSignature) == 0 {
+		return nil
+	}
+	return llm.ProviderMetadata{
+		googleThoughtSignatureMetadataKey: base64.StdEncoding.EncodeToString(part.ThoughtSignature),
+	}
+}
+
+func googleThoughtSignatureFromToolUse(toolUse *llm.ToolUseContent) ([]byte, error) {
+	if toolUse == nil || toolUse.Metadata == nil {
+		return nil, nil
+	}
+	encoded := strings.TrimSpace(toolUse.Metadata[googleThoughtSignatureMetadataKey])
+	if encoded == "" {
+		return nil, nil
+	}
+	signature, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Google thought signature for tool %q: %w", toolUse.Name, err)
+	}
+	return signature, nil
 }
 
 // messagesToContents converts Dive messages to genai.Content format for GenerateContent API

@@ -1,10 +1,13 @@
 package google
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"google.golang.org/genai"
 )
 
 func TestGenerateToolCallIDUnique(t *testing.T) {
@@ -32,6 +35,9 @@ func TestMessagesToContentsToolRoundTrip(t *testing.T) {
 					ID:    id,
 					Name:  "calculator",
 					Input: []byte(`{"expression":"1+1"}`),
+					Metadata: llm.ProviderMetadata{
+						googleThoughtSignatureMetadataKey: base64.StdEncoding.EncodeToString([]byte("sig-123")),
+					},
 				},
 			},
 		},
@@ -45,7 +51,56 @@ func TestMessagesToContentsToolRoundTrip(t *testing.T) {
 	assert.Len(t, contents, 3)
 	assert.NotNil(t, contents[1].Parts[0].FunctionCall)
 	assert.Equal(t, contents[1].Parts[0].FunctionCall.ID, id)
+	assert.Equal(t, []byte("sig-123"), contents[1].Parts[0].ThoughtSignature)
 	assert.NotNil(t, contents[2].Parts[0].FunctionResponse)
 	assert.Equal(t, contents[2].Parts[0].FunctionResponse.ID, id)
 	assert.Equal(t, contents[2].Parts[0].FunctionResponse.Name, "calculator")
+}
+
+func TestGoogleThoughtSignatureSurvivesMessageRoundTrip(t *testing.T) {
+	signature := []byte("opaque-google-signature")
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{
+			{
+				Index: 0,
+				Content: &genai.Content{
+					Role: "model",
+					Parts: []*genai.Part{
+						{
+							FunctionCall: &genai.FunctionCall{
+								ID:   "call_1",
+								Name: "default_api:mobius",
+								Args: map[string]any{"command": "status"},
+							},
+							ThoughtSignature: signature,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	converted, err := convertGoogleResponse(resp, "gemini-3.1-flash-lite")
+	assert.NoError(t, err)
+	assert.Len(t, converted.Content, 1)
+
+	toolUse, ok := converted.Content[0].(*llm.ToolUseContent)
+	assert.True(t, ok)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(signature), toolUse.Metadata[googleThoughtSignatureMetadataKey])
+
+	body, err := json.Marshal(converted.Message())
+	assert.NoError(t, err)
+	var replayed llm.Message
+	assert.NoError(t, json.Unmarshal(body, &replayed))
+
+	contents, err := messagesToContents([]*llm.Message{
+		&replayed,
+		llm.NewToolResultMessage(&llm.ToolResultContent{
+			ToolUseID: toolUse.ID,
+			Content:   "ok",
+		}),
+	})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 2)
+	assert.Equal(t, signature, contents[0].Parts[0].ThoughtSignature)
 }
