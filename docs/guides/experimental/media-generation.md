@@ -189,7 +189,7 @@ result, err := media.Transcribe(ctx, audio,
 | Provider | Models |
 |----------|--------|
 | OpenAI | `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini` |
-| Google | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `gemini-2.5-flash-image`, `gemini-3.1-flash-image-preview` |
+| Google | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`, `gemini-2.5-flash-image` |
 | Grok | `grok-imagine-image`, `grok-imagine-image-pro` |
 
 ### Video Models

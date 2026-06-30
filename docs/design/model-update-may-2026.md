@@ -1,6 +1,6 @@
 # Model & Capability Update — May 2026
 
-_Last updated: 2026-05-28_
+_Last updated: 2026-06-30_
 
 This document records the latest models and pricing across providers (verified
 against official docs) and the changes made to Dive to add the new models and
@@ -16,7 +16,7 @@ here:
 - **Anthropic**: added Opus 4.7 and 4.8; fixed a bug that made effort/thinking
   unusable on 4.7/4.8; added the native `effort` parameter, adaptive thinking,
   fast mode, thinking-display control, and refusal `stop_details`.
-- **Google**: added Gemini 3.5 Flash, 3.1 Flash-Lite (stable), 3.1 Pro Image
+- **Google**: added Gemini 3.5 Flash, 3.1 Flash-Lite (stable), 3 Pro Image
   (Nano Banana Pro), 3.1 Flash Image (Nano Banana 2), 3.1 Flash Live, and the
   custom-tools Pro endpoint.
 - **xAI/Grok**: added Grok 4.3 (new default) and grok-build-0.1; corrected
@@ -46,7 +46,8 @@ header `fast-mode-2026-02-01`, requires account access).
 | `gemini-3.1-pro-preview` | $2.00 / $4.00 (>200k) | $12.00 / $18.00 | Flagship preview |
 | `gemini-3.1-flash-lite` | $0.25 | $1.50 | Stable; low-latency |
 | `gemini-3.1-flash-live-preview` | $0.75 (text) | $4.50 (text) | Live API, audio-to-audio |
-| `gemini-3.1-pro-image` | $2.00 | $120 (img tokens) | Nano Banana Pro, ~$0.134/image |
+| `gemini-3-pro-image` | $2.00 | $120 (img tokens) | Nano Banana Pro, ~$0.134/image |
+| `gemini-3.1-flash-lite-image` | $0.30 | $30 (img tokens) | Nano Banana family, ~$0.034/image |
 | `gemini-3.1-flash-image` | $0.50 | $60 (img tokens) | Nano Banana 2, ~$0.067/image |
 
 ### xAI (Grok)

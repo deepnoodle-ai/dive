@@ -118,21 +118,28 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{
 		Price:     0.039, // $30 per 1M tokens, 1290 tokens per 1024x1024 image
 		MaxSize:   "1024x1024",
 		Currency:  "USD",
-		UpdatedAt: "2025-01-15",
+		UpdatedAt: "2026-06-30",
+	},
+	ModelGemini31FlashLiteImage: {
+		Model:     ModelGemini31FlashLiteImage,
+		Price:     0.0336, // $30 per 1M output tokens; 1120 tokens per 1K image
+		MaxSize:   "1024x1024",
+		Currency:  "USD",
+		UpdatedAt: "2026-06-30",
 	},
 	ModelGemini31FlashImage: {
 		Model:     ModelGemini31FlashImage,
 		Price:     0.067, // $60 per 1M output tokens; ~$0.067 per 1K-resolution image
-		MaxSize:   "1024x1024",
+		MaxSize:   "4096x4096",
 		Currency:  "USD",
-		UpdatedAt: "2026-05-28",
+		UpdatedAt: "2026-06-30",
 	},
-	ModelGemini31ProImage: {
-		Model:     ModelGemini31ProImage,
+	ModelGemini3ProImage: {
+		Model:     ModelGemini3ProImage,
 		Price:     0.134, // $120 per 1M output tokens; ~$0.134 per 1K/2K image ($0.24 at 4K)
-		MaxSize:   "2048x2048",
+		MaxSize:   "4096x4096",
 		Currency:  "USD",
-		UpdatedAt: "2026-05-28",
+		UpdatedAt: "2026-06-30",
 	},
 }
 
