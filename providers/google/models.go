@@ -11,13 +11,17 @@ const (
 	ModelGemini31FlashLitePreview      = "gemini-3.1-flash-lite-preview"
 	ModelGemini31FlashLivePreview      = "gemini-3.1-flash-live-preview" // Live API (audio-to-audio)
 	ModelGemini31FlashTTSPreview       = "gemini-3.1-flash-tts-preview"
-	ModelGemini31ProImage              = "gemini-3.1-pro-image"   // Nano Banana Pro (stable)
-	ModelGemini31FlashImage            = "gemini-3.1-flash-image" // Nano Banana 2 (stable)
+	ModelGemini31FlashLiteImage        = "gemini-3.1-flash-lite-image" // Nano Banana family (stable)
+	ModelGemini31FlashImage            = "gemini-3.1-flash-image"      // Nano Banana 2 (stable)
 	ModelGemini31FlashImagePrev        = "gemini-3.1-flash-image-preview"
 
-	// Gemini 3 models (preview)
+	// Gemini 3 models
+	ModelGemini3ProImage        = "gemini-3-pro-image" // Nano Banana Pro (stable)
 	ModelGemini3ProImagePreview = "gemini-3-pro-image-preview"
 	ModelGemini3FlashPreview    = "gemini-3-flash-preview" // preview alias for Gemini 3.5 Flash
+
+	// Deprecated: use ModelGemini3ProImage.
+	ModelGemini31ProImage = ModelGemini3ProImage
 
 	// Deprecated: Model was shut down March 9, 2026. Use ModelGemini31ProPreview instead.
 	ModelGemini3ProPreview = "gemini-3-pro-preview"

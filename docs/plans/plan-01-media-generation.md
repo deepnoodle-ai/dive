@@ -358,8 +358,11 @@ Model matchers: prefix-based for `gemini-*-image*`, `imagen-*`, `veo-*`.
 
 ```
 // Image models
-gemini-3.1-flash-image-preview
+gemini-3.1-flash-lite-image
+gemini-3.1-flash-image
+gemini-3-pro-image
 gemini-2.5-flash-image
+gemini-3.1-flash-image-preview
 gemini-3-pro-image-preview
 imagen-3.0-generate-001
 imagen-3.0-fast-generate-001

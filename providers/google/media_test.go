@@ -14,9 +14,12 @@ import (
 func TestGoogleImageMatcher(t *testing.T) {
 	matcher := media.PrefixesMatcher("gemini-", "imagen-")
 	// Gemini image models
-	assert.True(t, matcher("gemini-3.1-flash-image-preview"))
-	assert.True(t, matcher("gemini-2.5-flash-image"))
-	assert.True(t, matcher("gemini-3-pro-image-preview"))
+	assert.True(t, matcher(ModelGemini31FlashLiteImage))
+	assert.True(t, matcher(ModelGemini31FlashImage))
+	assert.True(t, matcher(ModelGemini3ProImage))
+	assert.True(t, matcher(ModelGemini25FlashImage))
+	assert.True(t, matcher(ModelGemini31FlashImagePrev))
+	assert.True(t, matcher(ModelGemini3ProImagePreview))
 	// Imagen 4 models (current)
 	assert.True(t, matcher("imagen-4.0-generate-001"))
 	assert.True(t, matcher("imagen-4.0-ultra-generate-001"))
@@ -32,7 +35,7 @@ func TestGoogleVideoMatcher(t *testing.T) {
 	assert.True(t, matcher("veo-3-generate-preview"))
 	assert.True(t, matcher("veo-2-generate-preview"))
 	assert.True(t, !matcher("sora-2"))
-	assert.True(t, !matcher("gemini-3.1-flash-image-preview"))
+	assert.True(t, !matcher(ModelGemini31FlashImagePrev))
 }
 
 func TestGoogleSpeechMatcher(t *testing.T) {
