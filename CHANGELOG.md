@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-06-30
+
+### Fixed
+
+- **OpenRouter SSE keep-alive comments** — the OpenAI-completions stream parser
+  now skips SSE comment lines (any line beginning with `:`) per the SSE spec.
+  OpenRouter emits `: OPENROUTER PROCESSING` keep-alives while a model warms up,
+  which previously failed with `invalid character ':' looking for beginning of
+  value` on slower models.
+
 ## [1.10.1] - 2026-06-29
 
 ### Fixed
