@@ -72,6 +72,40 @@ func TestStreamIteratorUsageFromTrailingChunk(t *testing.T) {
 	assert.Equal(t, 7, response.Usage.OutputTokens)
 }
 
+// TestStreamIteratorSkipsSSEComments verifies that SSE comment lines (any
+// line beginning with ':') are ignored rather than parsed as JSON. OpenRouter
+// emits ": OPENROUTER PROCESSING" keep-alive comments while a model is queued
+// or warming up; parsing one as a data chunk previously failed with
+// "invalid character ':' looking for beginning of value".
+func TestStreamIteratorSkipsSSEComments(t *testing.T) {
+	body := strings.Join([]string{
+		`: OPENROUTER PROCESSING`,
+		``,
+		`data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"z-ai/glm-5.2","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`,
+		``,
+		`: OPENROUTER PROCESSING`,
+		``,
+		`data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"z-ai/glm-5.2","choices":[{"index":0,"delta":{"content":" there"}}]}`,
+		``,
+		`data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"z-ai/glm-5.2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	iterator := newTestStreamIterator(body)
+	defer iterator.Close()
+	events, accumulator := collectEvents(t, iterator)
+
+	assert.NotEmpty(t, events)
+	assert.Equal(t, llm.EventTypeMessageStop, events[len(events)-1].Type)
+	assert.True(t, accumulator.IsComplete())
+
+	response := accumulator.Response()
+	assert.Equal(t, "Hi there", response.Message().Text())
+	assert.Equal(t, "stop", response.StopReason)
+}
+
 // TestStreamIteratorToolUseWithTrailingUsage verifies that tool-use streams
 // still terminate correctly and report usage from the trailing usage chunk.
 func TestStreamIteratorToolUseWithTrailingUsage(t *testing.T) {

@@ -110,6 +110,12 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	if len(bytes.TrimSpace(line)) == 0 {
 		return nil, nil
 	}
+	// Skip SSE comment lines. Per the SSE spec any line beginning with ':'
+	// is a comment and must be ignored. OpenRouter emits ": OPENROUTER
+	// PROCESSING" keep-alive comments while a model is queued/warming up.
+	if bytes.HasPrefix(bytes.TrimSpace(line), []byte(":")) {
+		return nil, nil
+	}
 	// Parse the event type from the SSE format
 	if bytes.HasPrefix(line, []byte("event: ")) {
 		return nil, nil
