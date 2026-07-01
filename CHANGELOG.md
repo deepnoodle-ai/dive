@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-06-30
+
+### Added
+
+- **Claude Sonnet 5** — `claude-sonnet-5` added to the Anthropic provider
+  catalog, pricing, and capabilities, and to the CLI.
+- **Nano Banana image models** — Gemini image-generation models added to the
+  Google provider catalog and pricing.
+
+### Fixed
+
+- **OpenRouter SSE keep-alive comments** — the OpenAI-completions stream parser
+  now skips SSE comment lines (`: OPENROUTER PROCESSING` keep-alives), which
+  previously failed with `invalid character ':'` on slower models.
+
 ## [1.10.1] - 2026-06-29
 
 ### Fixed
