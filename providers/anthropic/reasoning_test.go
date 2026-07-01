@@ -165,12 +165,14 @@ func TestModelCapabilityHelpers(t *testing.T) {
 	assert.True(t, modelSupportsEffortParam(ModelClaudeOpus45))
 	assert.True(t, modelSupportsEffortParam(ModelClaudeFable5))
 	assert.True(t, modelSupportsEffortParam(ModelClaudeMythos5))
+	assert.True(t, modelSupportsEffortParam(ModelClaudeSonnet5))
 	assert.False(t, modelSupportsEffortParam(ModelClaude37Sonnet20250219))
 
 	assert.True(t, modelRejectsManualThinking(ModelClaudeOpus47))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeOpus48))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeFable5))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeMythos5))
+	assert.True(t, modelRejectsManualThinking(ModelClaudeSonnet5))
 	assert.False(t, modelRejectsManualThinking(ModelClaudeOpus46))
 	assert.False(t, modelRejectsManualThinking(ModelClaudeSonnet46))
 
@@ -178,6 +180,16 @@ func TestModelCapabilityHelpers(t *testing.T) {
 	assert.True(t, modelSupportsMaxEffort(ModelClaudeFable5))
 	assert.True(t, modelSupportsXHighEffort(ModelClaudeMythos5))
 	assert.True(t, modelSupportsMaxEffort(ModelClaudeMythos5))
+
+	// Sonnet 5 supports max effort (like Sonnet 4.6) but not xhigh.
+	assert.False(t, modelSupportsXHighEffort(ModelClaudeSonnet5))
+	assert.True(t, modelSupportsMaxEffort(ModelClaudeSonnet5))
+
+	// Sonnet 5 rejects sampling params and defaults thinking on.
+	assert.True(t, modelRejectsTemperature(ModelClaudeSonnet5))
+	assert.True(t, modelDefaultsThinkingOn(ModelClaudeSonnet5))
+	assert.False(t, modelDefaultsThinkingOn(ModelClaudeFable5))
+	assert.False(t, modelDefaultsThinkingOn(ModelClaudeSonnet46))
 }
 
 func TestReasoningEffortFable5UsesOutputConfig(t *testing.T) {
@@ -202,4 +214,36 @@ func TestThinkingDisabledFable5OmitsThinkingParam(t *testing.T) {
 	// parameter entirely, which is the accepted form.
 	req := buildReq(t, ModelClaudeFable5, llm.WithThinking(llm.ThinkingTypeDisabled))
 	assert.Nil(t, req.Thinking)
+}
+
+func TestReasoningEffortSonnet5UsesOutputConfig(t *testing.T) {
+	// Sonnet 5 takes the native effort parameter. It does not support xhigh, so
+	// that request degrades to high rather than erroring.
+	req := buildReq(t, ModelClaudeSonnet5, llm.WithReasoningEffort(llm.ReasoningEffortXHigh))
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "high", req.OutputConfig.Effort)
+	assert.Nil(t, req.Thinking)
+}
+
+func TestReasoningBudgetSonnet5FallsBackToAdaptive(t *testing.T) {
+	// Manual extended thinking returns a 400 on Sonnet 5; a budget transparently
+	// becomes adaptive thinking so existing callers keep working.
+	req := buildReq(t, ModelClaudeSonnet5, llm.WithReasoningBudget(8000))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.Equal(t, 0, req.Thinking.BudgetTokens)
+}
+
+func TestThinkingDisabledSonnet5EmitsExplicitDisable(t *testing.T) {
+	// Sonnet 5 defaults thinking on, so a disable must be sent explicitly —
+	// omitting the parameter would leave adaptive thinking enabled.
+	req := buildReq(t, ModelClaudeSonnet5, llm.WithThinking(llm.ThinkingTypeDisabled))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "disabled", req.Thinking.Type)
+}
+
+func TestSonnet5RejectsTemperature(t *testing.T) {
+	// Sampling parameters return a 400 on Sonnet 5; Dive drops temperature.
+	req := buildReq(t, ModelClaudeSonnet5, llm.WithTemperature(0.7))
+	assert.Nil(t, req.Temperature)
 }

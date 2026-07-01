@@ -109,6 +109,15 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-06-09",
 	},
+	// Sonnet 5 launch pricing. Introductory rates of $2/$10 per MTok are in
+	// effect through 2026-08-31, after which standard pricing of $3/$15 applies.
+	ModelClaudeSonnet5: {
+		Model:       ModelClaudeSonnet5,
+		InputPrice:  2.00,
+		OutputPrice: 10.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-06-30",
+	},
 }
 
 // FastModeTextPricing contains premium pricing for models when fast mode
