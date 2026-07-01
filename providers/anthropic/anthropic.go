@@ -630,7 +630,7 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 	}
 
 	if thinking != nil {
-		if config.ThinkingDisplay != "" {
+		if config.ThinkingDisplay != "" && thinking.Type != "disabled" {
 			thinking.Display = string(config.ThinkingDisplay)
 		}
 		req.Thinking = thinking
@@ -645,6 +645,13 @@ func resolveThinking(model string, config *llm.Config) (*Thinking, error) {
 
 	switch config.Thinking {
 	case llm.ThinkingTypeDisabled:
+		// Models that default thinking on (Sonnet 5) require an explicit
+		// disable to actually turn thinking off; omitting the parameter would
+		// leave adaptive thinking enabled. All other models treat an omitted
+		// thinking parameter as off.
+		if modelDefaultsThinkingOn(model) {
+			return &Thinking{Type: "disabled"}, nil
+		}
 		return nil, nil
 	case llm.ThinkingTypeAdaptive:
 		return &Thinking{Type: "adaptive"}, nil
@@ -727,6 +734,7 @@ func modelSupportsEffortParam(model string) bool {
 		strings.HasPrefix(model, "claude-opus-4-7"),
 		strings.HasPrefix(model, "claude-opus-4-8"),
 		strings.HasPrefix(model, "claude-sonnet-4-6"),
+		strings.HasPrefix(model, "claude-sonnet-5"),
 		strings.HasPrefix(model, "claude-fable-5"),
 		strings.HasPrefix(model, "claude-mythos-5"):
 		return true
@@ -746,28 +754,42 @@ func modelSupportsMaxEffort(model string) bool {
 		strings.HasPrefix(model, "claude-opus-4-7") ||
 		strings.HasPrefix(model, "claude-opus-4-8") ||
 		strings.HasPrefix(model, "claude-sonnet-4-6") ||
+		strings.HasPrefix(model, "claude-sonnet-5") ||
 		strings.HasPrefix(model, "claude-fable-5") ||
 		strings.HasPrefix(model, "claude-mythos-5")
 }
 
 // modelRejectsTemperature reports whether the model rejects the temperature
-// parameter (Claude 5 models: Fable 5, Mythos 5).
+// parameter (Claude 5 models: Fable 5, Mythos 5, Sonnet 5).
 func modelRejectsTemperature(model string) bool {
 	return strings.HasPrefix(model, "claude-fable-5") ||
-		strings.HasPrefix(model, "claude-mythos-5")
+		strings.HasPrefix(model, "claude-mythos-5") ||
+		strings.HasPrefix(model, "claude-sonnet-5")
 }
 
 // modelRejectsManualThinking reports whether the model rejects manual extended
 // thinking budgets and supports only adaptive thinking (Opus 4.7/4.8, Fable 5,
-// Mythos 5). On the Claude 5 models adaptive thinking is always on and an
-// explicit thinking disable is also rejected by the API; Dive already omits
-// the thinking parameter entirely when thinking is disabled, so disables are
-// safe across all of these models.
+// Mythos 5, Sonnet 5). On Fable 5 and Mythos 5 adaptive thinking is always on
+// and an explicit thinking disable is also rejected by the API; Dive omits the
+// thinking parameter entirely when thinking is disabled, which is the accepted
+// form. Sonnet 5 also defaults thinking on but, unlike Fable/Mythos, accepts an
+// explicit disable — see modelDefaultsThinkingOn.
 func modelRejectsManualThinking(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-7") ||
 		strings.HasPrefix(model, "claude-opus-4-8") ||
 		strings.HasPrefix(model, "claude-fable-5") ||
-		strings.HasPrefix(model, "claude-mythos-5")
+		strings.HasPrefix(model, "claude-mythos-5") ||
+		strings.HasPrefix(model, "claude-sonnet-5")
+}
+
+// modelDefaultsThinkingOn reports whether the model runs with adaptive thinking
+// when the request omits the thinking parameter. For these models a caller that
+// asks to disable thinking must send an explicit thinking:{type:"disabled"} —
+// omitting the field would leave thinking on. Currently only Sonnet 5 both
+// defaults thinking on and accepts an explicit disable (Fable 5 and Mythos 5
+// default on but reject the explicit disable, so Dive omits the field for them).
+func modelDefaultsThinkingOn(model string) bool {
+	return strings.HasPrefix(model, "claude-sonnet-5")
 }
 
 // createRequest creates an HTTP request with appropriate headers for Anthropic API calls

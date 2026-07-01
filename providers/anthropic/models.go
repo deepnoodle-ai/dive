@@ -32,7 +32,9 @@ const (
 	ModelClaudeOpus48 = "claude-opus-4-8"
 
 	// Claude 5 models (latest). Fable 5 is generally available; Mythos 5 is
-	// limited availability via Project Glasswing.
+	// limited availability via Project Glasswing. Sonnet 5 is a drop-in upgrade
+	// for Sonnet 4.6 with adaptive thinking on by default and a new tokenizer.
 	ModelClaudeFable5  = "claude-fable-5"
 	ModelClaudeMythos5 = "claude-mythos-5"
+	ModelClaudeSonnet5 = "claude-sonnet-5"
 )
