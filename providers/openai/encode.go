@@ -35,16 +35,34 @@ func encodeMessages(messages []*llm.Message) ([]responses.ResponseInputItemUnion
 			}
 			items = append(items, outMessages...)
 		case "tool_result":
+			// A single user message can carry tool_result blocks alongside
+			// auxiliary content (e.g. text injected via a PostToolUse hook's
+			// AdditionalContext). Emit every tool output first — the Responses
+			// API matches function_call_output items to their function_call by
+			// call_id — then encode the remaining content as a trailing user
+			// message rather than erroring on the mix.
+			var auxiliary []llm.Content
 			for _, c := range message.Content {
 				toolResultContent, ok := c.(*llm.ToolResultContent)
 				if !ok {
-					return nil, fmt.Errorf("tool result mixed with other content")
+					auxiliary = append(auxiliary, c)
+					continue
 				}
 				outMessage, err := encodeToolResultContent(toolResultContent)
 				if err != nil {
 					return nil, fmt.Errorf("error encoding tool result message: %w", err)
 				}
 				items = append(items, *outMessage)
+			}
+			if len(auxiliary) > 0 {
+				auxItems, err := encodeUserMessage(&llm.Message{
+					Role:    llm.User,
+					Content: auxiliary,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("error encoding auxiliary tool result content: %w", err)
+				}
+				items = append(items, auxItems...)
 			}
 		}
 	}
