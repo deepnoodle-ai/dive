@@ -3346,6 +3346,126 @@ func TestResumePostHookMutationsPropagate(t *testing.T) {
 	assert.True(t, foundContext, "hook-injected AdditionalContext should appear in the tool_result sent to the LLM")
 }
 
+func TestAdditionalContextFollowsParallelToolResultBatch(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+				newScriptedToolUse("toolu_c", "tool_c", `{}`),
+			),
+			finalTextTurn("done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewToolResultText("A")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewToolResultText("B")}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewToolResultText("C")}}}
+
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB, toolC},
+		ParallelToolExecution: true,
+		Hooks: Hooks{
+			PostToolUse: []PostToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					if hctx.Call.ID == "toolu_a" {
+						hctx.AdditionalContext = "extra context for tool A"
+					}
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+
+	assert.True(t, len(mock.received) >= 2, "expected final LLM call")
+	finalCall := mock.received[1]
+	assertToolResultBatchBeforeAuxText(t, finalCall[len(finalCall)-1],
+		[]string{"toolu_a", "toolu_b", "toolu_c"},
+		[]string{"extra context for tool A"},
+	)
+}
+
+func TestResumeAdditionalContextStaysAfterMergedToolResultBatch(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+				newScriptedToolUse("toolu_c", "tool_c", `{}`),
+				newScriptedToolUse("toolu_d", "tool_d", `{}`),
+			),
+			finalTextTurn("done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewToolResultText("A")}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait on B", nil)}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewToolResultText("C")}}}
+	toolD := &scriptedTool{name: "tool_d", outcomes: []toolOutcome{{result: NewToolResultText("D")}}}
+	sess := session.New("resume-additional-context-order")
+
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{toolA, toolB, toolC, toolD},
+		Session: sess,
+		Hooks: Hooks{
+			PostToolUse: []PostToolUseHook{
+				func(ctx context.Context, hctx *HookContext) error {
+					if hctx.Call.ID == "toolu_a" {
+						hctx.AdditionalContext = "extra context for tool A"
+					}
+					return nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{
+			"toolu_b": NewToolResultText("B"),
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+
+	assert.True(t, len(mock.received) >= 2, "expected resumed LLM call")
+	resumeCall := mock.received[1]
+	assertToolResultBatchBeforeAuxText(t, resumeCall[len(resumeCall)-1],
+		[]string{"toolu_a", "toolu_b", "toolu_c", "toolu_d"},
+		[]string{"extra context for tool A"},
+	)
+}
+
+func assertToolResultBatchBeforeAuxText(t *testing.T, msg *llm.Message, wantToolUseIDs []string, wantTexts []string) {
+	t.Helper()
+	assert.Equal(t, msg.Role, llm.User)
+
+	var gotToolUseIDs []string
+	var gotTexts []string
+	seenText := false
+	for _, c := range msg.Content {
+		switch c := c.(type) {
+		case *llm.ToolResultContent:
+			assert.False(t, seenText, "tool_result %q appeared after auxiliary text", c.ToolUseID)
+			gotToolUseIDs = append(gotToolUseIDs, c.ToolUseID)
+		case *llm.TextContent:
+			seenText = true
+			gotTexts = append(gotTexts, c.Text)
+		}
+	}
+	assert.Equal(t, gotToolUseIDs, wantToolUseIDs)
+	assert.Equal(t, gotTexts, wantTexts)
+}
+
 func TestCompletedToolCallsPreservedAcrossPartialResume(t *testing.T) {
 	// Verify that CompletedToolCall.Result and .Error survive across
 	// partial resumes — i.e. the second suspended response carries the

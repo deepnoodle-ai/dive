@@ -1203,6 +1203,7 @@ func (rs *resumeState) AppendToolResults(contents []*llm.ToolResultContent) {
 	for _, c := range contents {
 		msg.Content = append(msg.Content, c)
 	}
+	msg.Content = toolResultsBeforeAuxiliaryContent(msg.Content)
 }
 
 // AppendToolResultTextContent appends an auxiliary text content block (from
@@ -1213,6 +1214,7 @@ func (rs *resumeState) AppendToolResultTextContent(tc *llm.TextContent) {
 	}
 	msg := rs.TurnMessages[rs.ToolResultMessageIdx]
 	msg.Content = append(msg.Content, tc)
+	msg.Content = toolResultsBeforeAuxiliaryContent(msg.Content)
 }
 
 // UpdateToolResultContent updates the tool_result content block for the given
@@ -1252,6 +1254,7 @@ func (rs *resumeState) UpdateToolResultContent(toolUseID string, result *ToolCal
 		msg.Content = append(msg.Content, &llm.TextContent{
 			Text: result.AdditionalContext,
 		})
+		msg.Content = toolResultsBeforeAuxiliaryContent(msg.Content)
 	}
 }
 
@@ -1392,6 +1395,7 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		for _, aux := range mergedAux {
 			mergedMessage.Content = append(mergedMessage.Content, aux)
 		}
+		mergedMessage.Content = toolResultsBeforeAuxiliaryContent(mergedMessage.Content)
 		if toolResultIdx >= 0 {
 			turnMessages[toolResultIdx] = mergedMessage
 		} else {
@@ -1932,6 +1936,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			for _, tc := range getAdditionalContextContent(completedResults) {
 				toolResultMessage.Content = append(toolResultMessage.Content, tc)
 			}
+			toolResultMessage.Content = toolResultsBeforeAuxiliaryContent(toolResultMessage.Content)
 			newMessage(toolResultMessage)
 		}
 

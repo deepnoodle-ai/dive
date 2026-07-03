@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/schema"
@@ -481,6 +482,64 @@ func TestConvertToolUseAndResultMessages(t *testing.T) {
 	assert.Equal(t, "2", converted[2].Content)
 	assert.Equal(t, "call_999", converted[2].ToolCallID)
 
+}
+
+func TestConvertMixedToolResultsAndAuxTextKeepsToolBatchContiguous(t *testing.T) {
+	assistant := &llm.Message{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.ToolUseContent{ID: "call_K4TI", Name: "memory_recall", Input: []byte(`{}`)},
+			&llm.ToolUseContent{ID: "call_LQW", Name: "read_file", Input: []byte(`{}`)},
+			&llm.ToolUseContent{ID: "call_nSK", Name: "grep", Input: []byte(`{}`)},
+			&llm.ToolUseContent{ID: "call_xlO", Name: "list_dir", Input: []byte(`{}`)},
+		},
+	}
+	toolResults := (&llm.Message{
+		Role: llm.User,
+		Content: []llm.Content{
+			toolResult("call_K4TI", "memory result"),
+			&llm.TextContent{Text: "No memories matched this recall."},
+			toolResult("call_LQW", "read result"),
+			toolResult("call_nSK", "grep result"),
+			toolResult("call_xlO", "list result"),
+		},
+	}).Copy()
+
+	converted, err := convertMessages([]*llm.Message{assistant, toolResults})
+	assert.NoError(t, err)
+	assert.Len(t, converted, 6)
+
+	assert.Equal(t, converted[0].Role, "assistant")
+	assert.Len(t, converted[0].ToolCalls, 4)
+
+	for i, want := range []struct {
+		id      string
+		content string
+	}{
+		{id: "call_K4TI", content: "memory result"},
+		{id: "call_LQW", content: "read result"},
+		{id: "call_nSK", content: "grep result"},
+		{id: "call_xlO", content: "list result"},
+	} {
+		msg := converted[i+1]
+		assert.Equal(t, msg.Role, "tool")
+		assert.Equal(t, msg.ToolCallID, want.id)
+		assert.Equal(t, msg.Content, want.content)
+	}
+
+	assert.Equal(t, converted[5].Role, "user")
+	assert.Equal(t, converted[5].Content, "No memories matched this recall.")
+	assert.Equal(t, converted[5].ToolCallID, "")
+}
+
+func toolResult(id, text string) *llm.ToolResultContent {
+	return &llm.ToolResultContent{
+		ToolUseID: id,
+		Content: []*dive.ToolResultContent{{
+			Type: dive.ToolResultContentTypeText,
+			Text: text,
+		}},
+	}
 }
 
 // TestConvertMessagesSkipsThinkingContent verifies that ThinkingContent (which
