@@ -3,7 +3,7 @@ module github.com/deepnoodle-ai/dive/otel
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.11.0
+	github.com/deepnoodle-ai/dive v1.11.1
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/metric v1.43.0
 	go.opentelemetry.io/otel/sdk v1.43.0

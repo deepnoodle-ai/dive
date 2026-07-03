@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-07-03
+
+### Fixed
+
+- **OpenAI tool-result ordering** — hook `AdditionalContext` text mixed with
+  `tool_result` blocks no longer breaks the OpenAI providers. Tool results are
+  now emitted before the auxiliary text on both Chat Completions and the
+  Responses API (which previously errored; also covers Grok), and
+  durable-storage tool results decode correctly.
+
 ## [1.11.0] - 2026-06-30
 
 ### Added
