@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-07-03
+
+### Fixed
+
+- **OpenAI tool-result context ordering** — when a hook injects
+  `AdditionalContext`, Dive appended it as auxiliary text alongside the
+  `tool_result` blocks. Tool-result messages are now normalized so every tool
+  result precedes the auxiliary text, and the OpenAI **Chat Completions**
+  converter emits contiguous `tool` messages before the auxiliary `user`
+  message (previously it could interleave `tool`/`user`/`tool`, which the API
+  rejects). Tool results loaded from durable storage (JSON round-tripped) now
+  convert instead of erroring with `unsupported tool result content type`.
+- **OpenAI Responses API mixed tool-result content** — the Responses API
+  converter (default provider for `gpt-*`/`o3`/`o4`/`codex`, and embedded by
+  Grok) previously hard-errored with `tool result mixed with other content`
+  whenever a `tool_result` message also carried auxiliary text. It now emits
+  every tool output first and encodes the remaining content as a trailing user
+  message.
+
 ## [1.11.0] - 2026-06-30
 
 ### Added
