@@ -127,6 +127,43 @@ func TestEncodeMessages(t *testing.T) {
 			want: `[{"call_id":"tool_123","output":"The weather is sunny","type":"function_call_output"}]`,
 		},
 		{
+			// A PostToolUse hook's AdditionalContext lands as auxiliary
+			// TextContent in the same user message as the tool_result. The
+			// tool output must still be emitted as a function_call_output, and
+			// the auxiliary text follows as a separate user message rather than
+			// erroring on the mix.
+			name: "tool result with auxiliary text stays contiguous",
+			messages: []*llm.Message{
+				{
+					Role: llm.User,
+					Content: []llm.Content{
+						&llm.ToolResultContent{
+							ToolUseID: "tool_123",
+							Content:   "The weather is sunny",
+						},
+						&llm.TextContent{Text: "note: weather source verified"},
+					},
+				},
+			},
+			want: `[{"call_id":"tool_123","output":"The weather is sunny","type":"function_call_output"},{"content":[{"text":"note: weather source verified","type":"input_text"}],"role":"user"}]`,
+		},
+		{
+			// Even when a durable transcript stores the auxiliary text before
+			// a sibling tool_result, encoding emits all tool outputs first.
+			name: "tool results ahead of interleaved auxiliary text",
+			messages: []*llm.Message{
+				{
+					Role: llm.User,
+					Content: []llm.Content{
+						&llm.ToolResultContent{ToolUseID: "tool_a", Content: "A"},
+						&llm.TextContent{Text: "aux for A"},
+						&llm.ToolResultContent{ToolUseID: "tool_b", Content: "B"},
+					},
+				},
+			},
+			want: `[{"call_id":"tool_a","output":"A","type":"function_call_output"},{"call_id":"tool_b","output":"B","type":"function_call_output"},{"content":[{"text":"aux for A","type":"input_text"}],"role":"user"}]`,
+		},
+		{
 			name: "empty messages are skipped",
 			messages: []*llm.Message{
 				{

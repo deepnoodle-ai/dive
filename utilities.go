@@ -48,6 +48,28 @@ func getAdditionalContextContent(callResults []*ToolCallResult) []*llm.TextConte
 	return contexts
 }
 
+func toolResultsBeforeAuxiliaryContent(content []llm.Content) []llm.Content {
+	if len(content) < 2 {
+		return content
+	}
+	var results []llm.Content
+	var auxiliary []llm.Content
+	for _, c := range content {
+		if _, ok := c.(*llm.ToolResultContent); ok {
+			results = append(results, c)
+		} else {
+			auxiliary = append(auxiliary, c)
+		}
+	}
+	if len(results) == 0 || len(auxiliary) == 0 {
+		return content
+	}
+	out := make([]llm.Content, 0, len(content))
+	out = append(out, results...)
+	out = append(out, auxiliary...)
+	return out
+}
+
 // Ptr returns a pointer to the given value. This is useful for setting
 // optional pointer fields in structs like ModelSettings.
 func Ptr[T any](t T) *T {

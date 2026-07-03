@@ -362,36 +362,45 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 			})
 		}
 
-		// Process non-tool-use content blocks
-		if !hasToolUse || hasToolResult {
+		if hasToolResult {
+			for _, c := range msg.Content {
+				trc, ok := c.(*llm.ToolResultContent)
+				if !ok {
+					continue
+				}
+				toolMessage, err := convertToolResultContent(trc)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, toolMessage)
+			}
 			for _, c := range msg.Content {
 				switch c := c.(type) {
 				case *llm.TextContent:
 					if !hasToolUse {
 						result = append(result, Message{Role: role, Content: c.Text})
 					}
-				case *llm.ToolResultContent:
-					// Each tool result goes in its own message
-					var contentStr string
-					switch content := c.Content.(type) {
-					case string:
-						contentStr = content
-					case []*dive.ToolResultContent:
-						var texts []string
-						for _, c := range content {
-							if c.Text != "" {
-								texts = append(texts, c.Text)
-							}
-						}
-						contentStr = strings.Join(texts, "\n")
-					default:
-						return nil, fmt.Errorf("unsupported tool result content type")
-					}
-					result = append(result, Message{
-						Role:       "tool",
-						Content:    contentStr,
-						ToolCallID: c.ToolUseID,
-					})
+				case *llm.ToolResultContent, *llm.ToolUseContent:
+					// Already handled above
+				case *llm.ThinkingContent, *llm.RedactedThinkingContent:
+					// The Chat Completions API has no standard field for
+					// replaying assistant reasoning back to the server, so
+					// thinking content (which this provider's own stream
+					// iterator can produce from "reasoning" deltas) is
+					// skipped on encode rather than erroring.
+				default:
+					return nil, fmt.Errorf("unsupported content type: %s", c.Type())
+				}
+			}
+			continue
+		}
+
+		// Process non-tool-use content blocks
+		if !hasToolUse {
+			for _, c := range msg.Content {
+				switch c := c.(type) {
+				case *llm.TextContent:
+					result = append(result, Message{Role: role, Content: c.Text})
 				case *llm.ToolUseContent:
 					// Already handled above
 				case *llm.ThinkingContent, *llm.RedactedThinkingContent:
@@ -407,6 +416,43 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		}
 	}
 	return result, nil
+}
+
+func convertToolResultContent(c *llm.ToolResultContent) (Message, error) {
+	contentStr, err := toolResultContentString(c)
+	if err != nil {
+		return Message{}, err
+	}
+	return Message{
+		Role:       "tool",
+		Content:    contentStr,
+		ToolCallID: c.ToolUseID,
+	}, nil
+}
+
+func toolResultContentString(c *llm.ToolResultContent) (string, error) {
+	switch content := c.Content.(type) {
+	case string:
+		return content, nil
+	case []*dive.ToolResultContent:
+		return toolResultTextBlocks(content), nil
+	default:
+		var blocks []*dive.ToolResultContent
+		if err := c.DecodeContent(&blocks); err == nil && blocks != nil {
+			return toolResultTextBlocks(blocks), nil
+		}
+		return "", fmt.Errorf("unsupported tool result content type")
+	}
+}
+
+func toolResultTextBlocks(content []*dive.ToolResultContent) string {
+	var texts []string
+	for _, c := range content {
+		if c.Text != "" {
+			texts = append(texts, c.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
