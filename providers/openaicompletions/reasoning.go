@@ -35,6 +35,21 @@ func (p *Provider) resolveReasoningEffort(model string, config *llm.Config) (Rea
 	}
 }
 
+// normalizeToolReasoningEffort handles Chat Completions constraints that only
+// apply when function tools and reasoning are requested together. GPT-5.4 mini
+// rejects that combination unless reasoning_effort is "none".
+func normalizeToolReasoningEffort(model string, effort ReasoningEffort, hasFunctionTools bool) (ReasoningEffort, bool) {
+	if !hasFunctionTools || effort == ReasoningEffortNone {
+		return effort, false
+	}
+
+	model = strings.TrimPrefix(strings.ToLower(model), "openai/")
+	if model == ModelGPT54Mini || strings.HasPrefix(model, ModelGPT54Mini+"-") {
+		return ReasoningEffortNone, true
+	}
+	return effort, false
+}
+
 func normalizeOpenAIReasoningEffort(model string, effort llm.ReasoningEffort) (llm.ReasoningEffort, error) {
 	if strings.Contains(model, "codex") {
 		return effort, nil

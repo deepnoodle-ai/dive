@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **GPT-5.4 mini Chat Completions tools** — requests that combine function
+  tools with a non-`none` reasoning effort now preserve the tools, use
+  `reasoning_effort: none`, and emit a warning instead of failing with an
+  OpenAI HTTP 400 response.
+
 ## [1.13.0] - 2026-07-09
 
 ### Added
