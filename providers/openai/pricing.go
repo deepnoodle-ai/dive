@@ -4,6 +4,42 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing contains pricing for all text generation models
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelGPT56: {
+		Model:           ModelGPT56,
+		InputPrice:      5.00,
+		OutputPrice:     30.00,
+		CacheReadPrice:  0.50,
+		CacheWritePrice: 6.25,
+		Currency:        "USD",
+		UpdatedAt:       "2026-07-09",
+	},
+	ModelGPT56Sol: {
+		Model:           ModelGPT56Sol,
+		InputPrice:      5.00,
+		OutputPrice:     30.00,
+		CacheReadPrice:  0.50,
+		CacheWritePrice: 6.25,
+		Currency:        "USD",
+		UpdatedAt:       "2026-07-09",
+	},
+	ModelGPT56Terra: {
+		Model:           ModelGPT56Terra,
+		InputPrice:      2.50,
+		OutputPrice:     15.00,
+		CacheReadPrice:  0.25,
+		CacheWritePrice: 3.125,
+		Currency:        "USD",
+		UpdatedAt:       "2026-07-09",
+	},
+	ModelGPT56Luna: {
+		Model:           ModelGPT56Luna,
+		InputPrice:      1.00,
+		OutputPrice:     6.00,
+		CacheReadPrice:  0.10,
+		CacheWritePrice: 1.25,
+		Currency:        "USD",
+		UpdatedAt:       "2026-07-09",
+	},
 	ModelGPT55: {
 		Model:       ModelGPT55,
 		InputPrice:  5.00,

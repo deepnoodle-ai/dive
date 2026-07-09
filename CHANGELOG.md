@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-07-09
+
+### Added
+
+- **OpenAI GPT-5.6** — `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, and
+  the `gpt-5.6` alias are now in the OpenAI catalogs with pricing, context
+  metadata, and `max` reasoning effort support. The Responses provider and CLI
+  now default to `gpt-5.6-sol`, and `openai-go` is pinned to the GPT-5.6 SDK
+  commit until the `v3.42.0` tag is available.
+
 ## [1.12.0] - 2026-07-09
 
 ### Added

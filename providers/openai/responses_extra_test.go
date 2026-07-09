@@ -110,7 +110,7 @@ func TestProviderDefaultModel(t *testing.T) {
 
 	params, err := provider.buildRequestParams(config)
 	assert.NoError(t, err)
-	assert.Equal(t, ModelGPT55, string(params.Model))
+	assert.Equal(t, ModelGPT56Sol, string(params.Model))
 }
 
 func TestBuildRequestParams_ReasoningEffortNone(t *testing.T) {
@@ -135,13 +135,19 @@ func TestBuildRequestParams_NormalizesOpenAIReasoningEffort(t *testing.T) {
 		want   responses.ReasoningEffort
 	}{
 		{
-			name:   "minimal maps to low on latest models",
-			model:  ModelGPT55,
+			name:   "max passes through on gpt-5.6",
+			model:  ModelGPT56Sol,
+			effort: llm.ReasoningEffortMax,
+			want:   responses.ReasoningEffort("max"),
+		},
+		{
+			name:   "minimal maps to low on gpt-5.6",
+			model:  ModelGPT56Terra,
 			effort: llm.ReasoningEffortMinimal,
 			want:   responses.ReasoningEffort("low"),
 		},
 		{
-			name:   "max maps to xhigh on latest models",
+			name:   "max maps to xhigh on gpt-5.5",
 			model:  ModelGPT55,
 			effort: llm.ReasoningEffortMax,
 			want:   responses.ReasoningEffort("xhigh"),

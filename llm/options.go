@@ -201,7 +201,7 @@ func WithReasoningBudget(reasoningBudget int) Option {
 // ReasoningEffort defines the effort level for reasoning aka extended thinking.
 // It controls how eagerly the model spends tokens on a response, including
 // thinking, tool calls, and text. Not all providers support all levels:
-// ReasoningEffortMax is Anthropic-specific (Opus 4.6+).
+// ReasoningEffortMax is supported by OpenAI GPT-5.6 and newer Anthropic models.
 type ReasoningEffort string
 
 const (
@@ -220,8 +220,8 @@ const (
 	// Supported on newer OpenAI GPT-5.4+ models and Claude Opus 4.7/4.8.
 	ReasoningEffortXHigh ReasoningEffort = "xhigh"
 	// ReasoningEffortMax requests the absolute maximum capability with no
-	// constraints on token spend. Supported on Claude Opus 4.6, 4.7, 4.8 and
-	// Sonnet 4.6.
+	// constraints on token spend. Supported on OpenAI GPT-5.6, Claude Opus
+	// 4.6, 4.7, 4.8, and Sonnet 4.6.
 	ReasoningEffortMax ReasoningEffort = "max"
 )
 

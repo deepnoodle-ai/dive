@@ -298,7 +298,7 @@ func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses
 	case "web_search_call":
 		return responses.ResponseInputItemParamOfWebSearchCall(
 			responses.ResponseFunctionWebSearchActionSearchParam{
-				Query: "", // Empty query for completed search
+				Query: openai.String(""), // Empty query for completed search
 				Type:  "search",
 			},
 			c.ID,

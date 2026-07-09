@@ -3,13 +3,13 @@ module github.com/deepnoodle-ai/dive/examples
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.12.0
-	github.com/deepnoodle-ai/dive/a2a v1.12.0
-	github.com/deepnoodle-ai/dive/experimental/mcp v1.12.0
-	github.com/deepnoodle-ai/dive/otel v1.12.0
-	github.com/deepnoodle-ai/dive/providers/google v1.12.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.12.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.12.0
+	github.com/deepnoodle-ai/dive v1.13.0
+	github.com/deepnoodle-ai/dive/a2a v1.13.0
+	github.com/deepnoodle-ai/dive/experimental/mcp v1.13.0
+	github.com/deepnoodle-ai/dive/otel v1.13.0
+	github.com/deepnoodle-ai/dive/providers/google v1.13.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.13.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.13.0
 	github.com/deepnoodle-ai/wonton v0.0.36
 	github.com/fatih/color v1.18.0
 	github.com/mark3labs/mcp-go v0.45.0
@@ -47,7 +47,7 @@ require (
 	github.com/mailru/easyjson v0.9.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/openai/openai-go/v3 v3.29.0 // indirect
+	github.com/openai/openai-go/v3 v3.41.2-0.20260709175524-86bbd3d91826 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect

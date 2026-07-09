@@ -21,7 +21,7 @@ model := anthropic.New() // defaults to claude-opus-4-8
 ```go
 import "github.com/deepnoodle-ai/dive/providers/openai"
 
-model := openai.New() // defaults to gpt-5.5
+model := openai.New() // defaults to gpt-5.6-sol
 ```
 
 **Env:** `OPENAI_API_KEY`
