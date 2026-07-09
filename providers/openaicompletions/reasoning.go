@@ -111,7 +111,9 @@ func normalizeOpenAIReasoningEffort(model string, effort llm.ReasoningEffort) (l
 
 func normalizeGrokReasoningEffort(model string, effort llm.ReasoningEffort) (llm.ReasoningEffort, error) {
 	switch {
-	case strings.HasPrefix(model, "grok-4.3"):
+	case strings.HasPrefix(model, "grok-4.5"),
+		strings.HasPrefix(model, "grok-4.3"),
+		strings.HasPrefix(model, "grok-build-latest"):
 		return mapReasoningEffort(model, effort,
 			[]llm.ReasoningEffort{
 				llm.ReasoningEffortNone,

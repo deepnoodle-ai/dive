@@ -20,7 +20,7 @@ import (
 )
 
 // defaultGrokModel is the default model used when a Grok API key is detected.
-var defaultGrokModel = grok.ModelGrok420Reasoning
+var defaultGrokModel = grok.ModelGrok45
 
 // createModel creates an LLM provider using the global registry.
 // Providers are registered via init() when imported above.

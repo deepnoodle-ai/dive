@@ -69,7 +69,7 @@ var registry = []*Spec{
 		Aliases: []string{"xai"},
 		EnvKeys: []string{"XAI_API_KEY", "GROK_API_KEY"},
 		Cheap:   grok.ModelGrok41FastNonReasoning,
-		Premium: grok.ModelGrok43,
+		Premium: grok.ModelGrok45,
 		newLLM:  func(m string) llm.LLM { return grok.New(grok.WithModel(m)) },
 	},
 }

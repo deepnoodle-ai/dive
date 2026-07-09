@@ -1,7 +1,12 @@
 package grok
 
 const (
-	// Grok 4.3 (latest, most intelligent and fastest, 1M context)
+	// Grok 4.5 (flagship reasoning model, 500K context)
+	ModelGrok45          = "grok-4.5"
+	ModelGrok45Latest    = "grok-4.5-latest"
+	ModelGrokBuildLatest = "grok-build-latest"
+
+	// Grok 4.3 (1M context)
 	ModelGrok43 = "grok-4.3"
 
 	// Grok 4.20 models (1M context)

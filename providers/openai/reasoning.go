@@ -94,7 +94,9 @@ func normalizeGrokReasoningEffort(model string, effort llm.ReasoningEffort) (llm
 	model = strings.ToLower(strings.TrimPrefix(model, "x-ai/"))
 
 	switch {
-	case strings.HasPrefix(model, "grok-4.3"):
+	case strings.HasPrefix(model, "grok-4.5"),
+		strings.HasPrefix(model, "grok-4.3"),
+		strings.HasPrefix(model, "grok-build-latest"):
 		return mapReasoningEffort(model, effort,
 			[]llm.ReasoningEffort{
 				llm.ReasoningEffortNone,

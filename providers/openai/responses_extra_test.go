@@ -198,10 +198,16 @@ func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:   "grok 4.3 max maps to high",
-			model:  "grok-4.3",
+			name:   "grok 4.5 max maps to high",
+			model:  "grok-4.5",
 			effort: llm.ReasoningEffortMax,
 			want:   responses.ReasoningEffort("high"),
+		},
+		{
+			name:   "grok build latest alias minimal maps to low",
+			model:  "grok-build-latest",
+			effort: llm.ReasoningEffortMinimal,
+			want:   responses.ReasoningEffort("low"),
 		},
 		{
 			name:   "grok multi-agent max maps to xhigh",

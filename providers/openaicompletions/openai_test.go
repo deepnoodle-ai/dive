@@ -34,9 +34,15 @@ func TestApplyRequestConfig_NormalizesReasoningEffort(t *testing.T) {
 		},
 		{
 			name:   "openrouter x-ai grok max maps to high",
-			model:  "x-ai/grok-4.3",
+			model:  "x-ai/grok-4.5",
 			effort: llm.ReasoningEffortMax,
 			want:   ReasoningEffortHigh,
+		},
+		{
+			name:   "openrouter x-ai grok build latest minimal maps to low",
+			model:  "x-ai/grok-build-latest",
+			effort: llm.ReasoningEffortMinimal,
+			want:   ReasoningEffortLow,
 		},
 		{
 			name:   "unknown model effort passes through",
