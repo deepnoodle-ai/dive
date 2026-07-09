@@ -47,6 +47,10 @@ var modelCatalog = []modelInfo{
 	{"gemini", "", 1_000_000},
 
 	// OpenAI models
+	{"gpt-5.6-sol", "GPT-5.6 Sol", 1_050_000},
+	{"gpt-5.6-terra", "GPT-5.6 Terra", 1_050_000},
+	{"gpt-5.6-luna", "GPT-5.6 Luna", 1_050_000},
+	{"gpt-5.6", "GPT-5.6", 1_050_000},
 	{"gpt-5.5", "GPT-5.5", 1_050_000},
 	{"gpt-5.4-mini", "GPT-5.4 Mini", 400_000},
 	{"gpt-5.4-nano", "GPT-5.4 Nano", 400_000},
@@ -157,7 +161,10 @@ var providerCatalog = []providerInfo{
 		Name:    "OpenAI",
 		EnvVars: []string{"OPENAI_API_KEY"},
 		Models: []modelChoice{
-			{"gpt-5.5", "GPT-5.5", "Flagship model for complex reasoning and coding"},
+			{"gpt-5.6-sol", "GPT-5.6 Sol", "Flagship GPT-5.6 model for complex reasoning and coding"},
+			{"gpt-5.6-terra", "GPT-5.6 Terra", "GPT-5.6 model balancing intelligence and cost"},
+			{"gpt-5.6-luna", "GPT-5.6 Luna", "GPT-5.6 model for efficient high-volume workloads"},
+			{"gpt-5.5", "GPT-5.5", "Previous flagship model for complex reasoning and coding"},
 			{"gpt-5.4", "GPT-5.4", "More affordable model for professional work"},
 			{"gpt-5.4-mini", "GPT-5.4 Mini", "Fast mini model for coding and subagents"},
 			{"gpt-5.4-nano", "GPT-5.4 Nano", "Lowest-cost GPT-5.4-class model"},

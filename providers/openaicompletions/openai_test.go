@@ -21,7 +21,19 @@ func TestApplyRequestConfig_NormalizesReasoningEffort(t *testing.T) {
 		want   ReasoningEffort
 	}{
 		{
-			name:   "openai latest max maps to xhigh",
+			name:   "openai gpt-5.6 max passes through",
+			model:  ModelGPT56Sol,
+			effort: llm.ReasoningEffortMax,
+			want:   ReasoningEffortMax,
+		},
+		{
+			name:   "openai gpt-5.6 minimal maps to low",
+			model:  ModelGPT56Terra,
+			effort: llm.ReasoningEffortMinimal,
+			want:   ReasoningEffortLow,
+		},
+		{
+			name:   "openai gpt-5.5 max maps to xhigh",
 			model:  ModelGPT55,
 			effort: llm.ReasoningEffortMax,
 			want:   ReasoningEffortXHigh,

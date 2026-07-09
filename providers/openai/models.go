@@ -1,7 +1,13 @@
 package openai
 
+import openaisdk "github.com/openai/openai-go/v3"
+
 const (
 	// GPT-5 models (latest)
+	ModelGPT56           = "gpt-5.6"
+	ModelGPT56Sol        = openaisdk.ChatModelGPT5_6Sol
+	ModelGPT56Terra      = openaisdk.ChatModelGPT5_6Terra
+	ModelGPT56Luna       = openaisdk.ChatModelGPT5_6Luna
 	ModelGPT55           = "gpt-5.5"
 	ModelGPT54           = "gpt-5.4"
 	ModelGPT54Mini       = "gpt-5.4-mini"

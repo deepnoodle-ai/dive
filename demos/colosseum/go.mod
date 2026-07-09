@@ -3,11 +3,11 @@ module github.com/deepnoodle-ai/dive/demos/colosseum
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.12.0
-	github.com/deepnoodle-ai/dive/a2a v1.12.0
-	github.com/deepnoodle-ai/dive/providers/google v1.12.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.12.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.12.0
+	github.com/deepnoodle-ai/dive v1.13.0
+	github.com/deepnoodle-ai/dive/a2a v1.13.0
+	github.com/deepnoodle-ai/dive/providers/google v1.13.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.13.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.13.0
 	github.com/deepnoodle-ai/wonton v0.0.36
 )
 
@@ -26,7 +26,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.11 // indirect
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/openai/openai-go/v3 v3.29.0 // indirect
+	github.com/openai/openai-go/v3 v3.41.2-0.20260709175524-86bbd3d91826 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect

@@ -22,6 +22,19 @@ func normalizeOpenAIReasoningEffort(model string, effort llm.ReasoningEffort) (l
 	}
 
 	switch {
+	case strings.HasPrefix(model, "gpt-5.6"):
+		return mapReasoningEffort(model, effort,
+			[]llm.ReasoningEffort{
+				llm.ReasoningEffortNone,
+				llm.ReasoningEffortLow,
+				llm.ReasoningEffortMedium,
+				llm.ReasoningEffortHigh,
+				llm.ReasoningEffortXHigh,
+				llm.ReasoningEffortMax,
+			},
+			map[llm.ReasoningEffort]llm.ReasoningEffort{
+				llm.ReasoningEffortMinimal: llm.ReasoningEffortLow,
+			})
 	case strings.HasPrefix(model, "gpt-5.5"),
 		strings.HasPrefix(model, "gpt-5.4"),
 		strings.HasPrefix(model, "gpt-5.3"),

@@ -2,7 +2,7 @@
 
 _Last updated: 2026-07-09_
 
-This document records the latest models and pricing across providers (verified
+This document records recent model and pricing updates across providers (verified
 against official docs) and the changes made to Dive to add the new models and
 unlock new capabilities, especially **Claude Opus 4.8**.
 
@@ -11,8 +11,9 @@ unlock new capabilities, especially **Claude Opus 4.8**.
 Dive was already current on Gemini (3.1 Pro) and Grok (4.20). The gaps closed
 here:
 
-- **OpenAI**: added GPT-5.5, GPT-5.4 nano, and GPT Image 2; defaulted OpenAI
-  text to `gpt-5.5` and OpenAI image generation to `gpt-image-2`.
+- **OpenAI**: added GPT-5.6 Sol/Terra/Luna and updated the OpenAI text default
+  to `gpt-5.6-sol`; earlier updates added GPT-5.5, GPT-5.4 nano, and GPT Image
+  2 with OpenAI image generation defaulted to `gpt-image-2`.
 - **Anthropic**: added Opus 4.7 and 4.8; fixed a bug that made effort/thinking
   unusable on 4.7/4.8; added the native `effort` parameter, adaptive thinking,
   fast mode, thinking-display control, and refusal `stop_details`.
@@ -66,7 +67,10 @@ header `fast-mode-2026-02-01`, requires account access).
 
 | Model | API ID | Input | Output | Context | Max output | Notes |
 |-------|--------|-------|--------|---------|------------|-------|
-| **GPT-5.5** | `gpt-5.5` | $5.00 | $30.00 | 1.05M | 128k | New OpenAI default |
+| **GPT-5.6 Sol** | `gpt-5.6-sol` | $5.00 | $30.00 | 1.05M | 128k | New OpenAI default; `gpt-5.6` aliases to Sol |
+| GPT-5.6 Terra | `gpt-5.6-terra` | $2.50 | $15.00 | 1.05M | 128k | Balances intelligence and cost |
+| GPT-5.6 Luna | `gpt-5.6-luna` | $1.00 | $6.00 | 1.05M | 128k | Efficient high-volume model |
+| GPT-5.5 | `gpt-5.5` | $5.00 | $30.00 | 1.05M | 128k | Previous OpenAI default |
 | GPT-5.4 | `gpt-5.4` | $2.50 | $15.00 | 1.05M | 128k | More affordable frontier model |
 | GPT-5.4 mini | `gpt-5.4-mini` | $0.75 | $4.50 | 400k | 128k | Fast mini model |
 | GPT-5.4 nano | `gpt-5.4-nano` | $0.20 | $1.25 | 400k | 128k | Lowest-cost GPT-5.4-class model |
@@ -127,3 +131,5 @@ Agent-level: the same knobs are exposed on `dive.ModelSettings`
 - Effort, Adaptive thinking, Fast mode docs (platform.claude.com/docs/en/build-with-claude/*).
 - Gemini API pricing (ai.google.dev/gemini-api/docs/pricing) and model cards (provided).
 - xAI model & pricing tables (provided).
+- OpenAI API models, GPT-5.6 guide, and API pricing
+  (developers.openai.com/api/docs/models, /guides/latest-model, /pricing).
