@@ -3,6 +3,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -11,7 +12,16 @@ import (
 	"github.com/deepnoodle-ai/wonton/schema"
 )
 
+func requireAnthropicAPIKey(t *testing.T) {
+	t.Helper()
+	if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" {
+		t.Skip("ANTHROPIC_API_KEY not set; skipping live Anthropic provider test")
+	}
+}
+
 func TestHelloWorld(t *testing.T) {
+	requireAnthropicAPIKey(t)
+
 	ctx := context.Background()
 	provider := New()
 	response, err := provider.Generate(ctx, llm.WithMessages(
@@ -22,6 +32,8 @@ func TestHelloWorld(t *testing.T) {
 }
 
 func TestStreamCountTo10(t *testing.T) {
+	requireAnthropicAPIKey(t)
+
 	ctx := context.Background()
 	provider := New()
 	iterator, err := provider.Stream(ctx, llm.WithMessages(
@@ -50,6 +62,8 @@ func TestStreamCountTo10(t *testing.T) {
 }
 
 func TestToolUse(t *testing.T) {
+	requireAnthropicAPIKey(t)
+
 	ctx := context.Background()
 	provider := New()
 
@@ -86,6 +100,7 @@ func TestToolUse(t *testing.T) {
 }
 
 func TestToolCallStream(t *testing.T) {
+	requireAnthropicAPIKey(t)
 
 	ctx := context.Background()
 	provider := New()
