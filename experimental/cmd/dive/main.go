@@ -121,6 +121,10 @@ func main() {
 				Default(false).
 				Env("DIVE_SHOW_THINKING").
 				Help("Request and show summarized model thinking when supported"),
+			cli.String("thinking-effort").
+				Default("").
+				Env("DIVE_THINKING_EFFORT").
+				Help("Thinking effort: none, minimal, low, medium, high, xhigh, max, or provider-specific value"),
 			cli.String("system-prompt").
 				Default("").
 				Help("System prompt to use for the session"),
@@ -327,18 +331,7 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Create model settings
-	maxTokens := ctx.Int("max-tokens")
-	modelSettings := &dive.ModelSettings{
-		MaxTokens: &maxTokens,
-	}
-	if ctx.Bool("show-thinking") {
-		modelSettings.Thinking = llm.ThinkingTypeAdaptive
-		modelSettings.ThinkingDisplay = llm.ThinkingDisplaySummarized
-	}
-	if ctx.IsSet("temperature") {
-		t := ctx.Float64("temperature")
-		modelSettings.Temperature = &t
-	}
+	modelSettings, _ := newCLIModelSettings(ctx)
 
 	// Create agent options with hooks and extensions
 	agentOpts := dive.AgentOptions{
@@ -503,19 +496,7 @@ func runPrint(ctx *cli.Context) error {
 	tools = append(tools, grokServerSideTools(modelName)...)
 
 	// Create agent
-	maxTokens := ctx.Int("max-tokens")
-	printModelSettings := &dive.ModelSettings{
-		MaxTokens: &maxTokens,
-	}
-	showThinking := ctx.Bool("show-thinking")
-	if showThinking {
-		printModelSettings.Thinking = llm.ThinkingTypeAdaptive
-		printModelSettings.ThinkingDisplay = llm.ThinkingDisplaySummarized
-	}
-	if ctx.IsSet("temperature") {
-		t := ctx.Float64("temperature")
-		printModelSettings.Temperature = &t
-	}
+	printModelSettings, showThinking := newCLIModelSettings(ctx)
 
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		SystemPrompt:  systemPrompt,
@@ -544,6 +525,50 @@ func runPrint(ctx *cli.Context) error {
 		return runPrintText(bgCtx, agent, input, showThinking)
 	default:
 		return fmt.Errorf("unsupported --output-format %q; valid values are: json, text", outputFormat)
+	}
+}
+
+func newCLIModelSettings(ctx *cli.Context) (*dive.ModelSettings, bool) {
+	maxTokens := ctx.Int("max-tokens")
+	modelSettings := &dive.ModelSettings{
+		MaxTokens: &maxTokens,
+	}
+	showThinking := ctx.Bool("show-thinking")
+	if showThinking {
+		modelSettings.Thinking = llm.ThinkingTypeAdaptive
+		modelSettings.ThinkingDisplay = llm.ThinkingDisplaySummarized
+	}
+	if effort := parseThinkingEffort(ctx.String("thinking-effort")); effort != "" {
+		modelSettings.ReasoningEffort = effort
+	}
+	if ctx.IsSet("temperature") {
+		t := ctx.Float64("temperature")
+		modelSettings.Temperature = &t
+	}
+	return modelSettings, showThinking
+}
+
+func parseThinkingEffort(value string) llm.ReasoningEffort {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "":
+		return ""
+	case string(llm.ReasoningEffortNone):
+		return llm.ReasoningEffortNone
+	case string(llm.ReasoningEffortMinimal):
+		return llm.ReasoningEffortMinimal
+	case string(llm.ReasoningEffortLow):
+		return llm.ReasoningEffortLow
+	case string(llm.ReasoningEffortMedium):
+		return llm.ReasoningEffortMedium
+	case string(llm.ReasoningEffortHigh):
+		return llm.ReasoningEffortHigh
+	case string(llm.ReasoningEffortXHigh):
+		return llm.ReasoningEffortXHigh
+	case string(llm.ReasoningEffortMax):
+		return llm.ReasoningEffortMax
+	default:
+		return llm.ReasoningEffort(value)
 	}
 }
 

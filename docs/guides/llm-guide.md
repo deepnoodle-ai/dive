@@ -157,7 +157,10 @@ signatures.
 
 In the Dive CLI, pass `--show-thinking` (or set `DIVE_SHOW_THINKING=true`) to
 request adaptive summarized thinking and render visible thinking summaries in
-the interactive transcript.
+the interactive transcript. Add `--thinking-effort high` (or set
+`DIVE_THINKING_EFFORT=high`) to choose the thinking effort level. Supported
+provider-neutral values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+and `max`; provider-specific values pass through to compatible backends.
 
 When thinking is active, Anthropic only allows `tool_choice` `auto` or `none`.
 Dive returns a request-building error for forced tool choices (`any` or a

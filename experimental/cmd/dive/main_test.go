@@ -5,8 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/cli"
 )
 
 func TestGetDefaultModel(t *testing.T) {
@@ -117,6 +120,71 @@ func TestDefaultPermissionRules_AllowsReadOnlyToolsByDefault(t *testing.T) {
 	assert.False(t, allowed["Write"], "Write should not be auto-allowed")
 	assert.False(t, allowed["Edit"], "Edit should not be auto-allowed")
 	assert.False(t, allowed["Bash"], "Bash should not be auto-allowed")
+}
+
+func TestNewCLIModelSettingsThinkingFlags(t *testing.T) {
+	app := cli.New("test")
+	var settings *dive.ModelSettings
+	var showThinking bool
+	app.Main().
+		Flags(
+			cli.Int("max-tokens").
+				Default(16000).
+				Env("DIVE_MAX_TOKENS"),
+			cli.Float("temperature", "t").
+				Env("DIVE_TEMPERATURE"),
+			cli.Bool("show-thinking").
+				Default(false).
+				Env("DIVE_SHOW_THINKING"),
+			cli.String("thinking-effort").
+				Default("").
+				Env("DIVE_THINKING_EFFORT"),
+		).
+		Run(func(ctx *cli.Context) error {
+			settings, showThinking = newCLIModelSettings(ctx)
+			return nil
+		})
+
+	result := app.Test(t, cli.TestArgs("--show-thinking", "--thinking-effort", "High"))
+	assert.True(t, result.Success(), result.Stderr)
+	assert.True(t, showThinking)
+	assert.Equal(t, settings.ReasoningEffort, llm.ReasoningEffortHigh)
+	assert.Equal(t, settings.Thinking, llm.ThinkingTypeAdaptive)
+	assert.Equal(t, settings.ThinkingDisplay, llm.ThinkingDisplaySummarized)
+}
+
+func TestNewCLIModelSettingsThinkingEffortEnv(t *testing.T) {
+	app := cli.New("test")
+	var settings *dive.ModelSettings
+	var showThinking bool
+	app.Main().
+		Flags(
+			cli.Int("max-tokens").
+				Default(16000).
+				Env("DIVE_MAX_TOKENS"),
+			cli.Bool("show-thinking").
+				Default(false).
+				Env("DIVE_SHOW_THINKING"),
+			cli.String("thinking-effort").
+				Default("").
+				Env("DIVE_THINKING_EFFORT"),
+		).
+		Run(func(ctx *cli.Context) error {
+			settings, showThinking = newCLIModelSettings(ctx)
+			return nil
+		})
+
+	result := app.Test(t, cli.TestEnv("DIVE_THINKING_EFFORT", "xhigh"))
+	assert.True(t, result.Success(), result.Stderr)
+	assert.False(t, showThinking)
+	assert.Equal(t, settings.ReasoningEffort, llm.ReasoningEffortXHigh)
+	assert.Equal(t, settings.Thinking, llm.ThinkingType(""))
+	assert.Equal(t, settings.ThinkingDisplay, llm.ThinkingDisplay(""))
+}
+
+func TestParseThinkingEffortAllowsProviderSpecificValues(t *testing.T) {
+	assert.Equal(t, parseThinkingEffort("  High  "), llm.ReasoningEffortHigh)
+	assert.Equal(t, parseThinkingEffort("vendor-custom"), llm.ReasoningEffort("vendor-custom"))
 }
 
 func TestLoadStartupInstructionAttachment_PrefersAgents(t *testing.T) {
