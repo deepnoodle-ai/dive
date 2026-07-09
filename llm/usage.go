@@ -1,5 +1,7 @@
 package llm
 
+import "encoding/json"
+
 // Usage contains token usage information for an LLM response.
 type Usage struct {
 	InputTokens              int `json:"input_tokens"`
@@ -7,8 +9,9 @@ type Usage struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	// ReasoningTokens is the number of output tokens spent on reasoning, when
-	// the provider reports it separately (e.g. OpenAI o-series and Grok
-	// reasoning models). It is a subset of OutputTokens, not additive.
+	// the provider reports it separately (e.g. OpenAI o-series, Grok reasoning
+	// models, and Anthropic extended thinking). It is a subset of OutputTokens,
+	// not additive.
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 	// Speed indicates which inference speed served the request, either "fast"
 	// or "standard". Populated by Anthropic when fast mode is requested.
@@ -18,6 +21,32 @@ type Usage struct {
 	// means cost is unknown — distinct from a known cost of zero (e.g. a local
 	// model). It is an estimate at list prices, not a billing figure.
 	Cost *Cost `json:"cost,omitempty"`
+}
+
+// UnmarshalJSON accepts provider-native usage shapes and maps their reasoning
+// breakdowns onto ReasoningTokens.
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	type usageAlias Usage
+	var raw struct {
+		usageAlias
+		OutputTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+			ThinkingTokens  int `json:"thinking_tokens,omitempty"`
+		} `json:"output_tokens_details,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*u = Usage(raw.usageAlias)
+	if u.ReasoningTokens == 0 && raw.OutputTokensDetails != nil {
+		switch {
+		case raw.OutputTokensDetails.ReasoningTokens != 0:
+			u.ReasoningTokens = raw.OutputTokensDetails.ReasoningTokens
+		case raw.OutputTokensDetails.ThinkingTokens != 0:
+			u.ReasoningTokens = raw.OutputTokensDetails.ThinkingTokens
+		}
+	}
+	return nil
 }
 
 // Copy returns a deep copy of the usage data.

@@ -101,3 +101,52 @@ func TestResponseAccumulatorUsageIncludesReasoningAndSpeed(t *testing.T) {
 	assert.Equal(t, usage.ReasoningTokens, 7)
 	assert.Equal(t, usage.Speed, "fast")
 }
+
+func TestResponseAccumulatorPreservesOmittedThinkingSignature(t *testing.T) {
+	acc := NewResponseAccumulator()
+	idx0, idx1 := 0, 1
+
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:    EventTypeMessageStart,
+		Message: &Response{ID: "msg_1", Role: Assistant},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockStart,
+		Index: &idx0,
+		ContentBlock: &EventContentBlock{
+			Type:      ContentTypeThinking,
+			Thinking:  "",
+			Signature: "",
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockDelta,
+		Index: &idx0,
+		Delta: &EventDelta{
+			Type:      EventDeltaTypeSignature,
+			Signature: "encrypted-thinking",
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeContentBlockStop, Index: &idx0}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:         EventTypeContentBlockStart,
+		Index:        &idx1,
+		ContentBlock: &EventContentBlock{Type: ContentTypeText},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockDelta,
+		Index: &idx1,
+		Delta: &EventDelta{Type: EventDeltaTypeText, Text: "done"},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeMessageStop}))
+
+	response := acc.Response()
+	assert.Len(t, response.Content, 2)
+	thinking, ok := response.Content[0].(*ThinkingContent)
+	assert.True(t, ok)
+	assert.Equal(t, "", thinking.Thinking)
+	assert.Equal(t, "encrypted-thinking", thinking.Signature)
+	text, ok := response.Content[1].(*TextContent)
+	assert.True(t, ok)
+	assert.Equal(t, "done", text.Text)
+}
