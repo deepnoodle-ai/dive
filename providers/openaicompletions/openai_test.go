@@ -100,6 +100,97 @@ func TestApplyRequestConfig_MistralOmitsReasoningEffort(t *testing.T) {
 	assert.Equal(t, ReasoningEffort(""), req.ReasoningEffort)
 }
 
+func TestApplyRequestConfig_NormalizesReasoningEffortForTools(t *testing.T) {
+	tool := llm.NewToolDefinition().
+		WithName("lookup").
+		WithDescription("Looks up a value").
+		WithSchema(&schema.Schema{Type: "object"})
+
+	tests := []struct {
+		name         string
+		model        string
+		effort       llm.ReasoningEffort
+		withTools    bool
+		want         ReasoningEffort
+		wantWarnings int
+	}{
+		{
+			name:         "gpt-5.4-mini uses none with function tools",
+			model:        ModelGPT54Mini,
+			effort:       llm.ReasoningEffortHigh,
+			withTools:    true,
+			want:         ReasoningEffortNone,
+			wantWarnings: 1,
+		},
+		{
+			name:         "gpt-5.4-mini snapshot uses none with function tools",
+			model:        "gpt-5.4-mini-2026-03-17",
+			effort:       llm.ReasoningEffortXHigh,
+			withTools:    true,
+			want:         ReasoningEffortNone,
+			wantWarnings: 1,
+		},
+		{
+			name:         "openai-prefixed gpt-5.4-mini uses none with function tools",
+			model:        "openai/gpt-5.4-mini",
+			effort:       llm.ReasoningEffortMedium,
+			withTools:    true,
+			want:         ReasoningEffortNone,
+			wantWarnings: 1,
+		},
+		{
+			name:      "gpt-5.4-mini preserves reasoning without tools",
+			model:     ModelGPT54Mini,
+			effort:    llm.ReasoningEffortHigh,
+			withTools: false,
+			want:      ReasoningEffortHigh,
+		},
+		{
+			name:      "gpt-5.4 preserves reasoning with tools",
+			model:     ModelGPT54,
+			effort:    llm.ReasoningEffortHigh,
+			withTools: true,
+			want:      ReasoningEffortHigh,
+		},
+		{
+			name:      "gpt-5.4-mini preserves none with tools",
+			model:     ModelGPT54Mini,
+			effort:    llm.ReasoningEffortNone,
+			withTools: true,
+			want:      ReasoningEffortNone,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := &recordingLogger{}
+			config := &llm.Config{ReasoningEffort: tt.effort, Logger: logger}
+			if tt.withTools {
+				config.Tools = []llm.Tool{tool}
+			}
+
+			provider := New(WithModel(tt.model))
+			var req Request
+			err := provider.applyRequestConfig(&req, config)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, req.ReasoningEffort)
+			assert.Len(t, logger.warnings, tt.wantWarnings)
+		})
+	}
+}
+
+type recordingLogger struct {
+	warnings []string
+}
+
+func (l *recordingLogger) Debug(string, ...any) {}
+func (l *recordingLogger) Info(string, ...any)  {}
+func (l *recordingLogger) Warn(msg string, _ ...any) {
+	l.warnings = append(l.warnings, msg)
+}
+func (l *recordingLogger) Error(string, ...any)   {}
+func (l *recordingLogger) With(...any) llm.Logger { return l }
+
 func skipIfNoAPIKey(t *testing.T) {
 	t.Helper()
 	if os.Getenv("OPENAI_API_KEY") == "" {
