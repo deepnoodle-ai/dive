@@ -14,6 +14,7 @@ const (
 	User      Role = "user"
 	Assistant Role = "assistant"
 	System    Role = "system"
+	Developer Role = "developer"
 )
 
 func (r Role) String() string {

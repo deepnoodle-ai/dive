@@ -160,6 +160,7 @@ type sessionHeader struct {
 	Suspended          bool                      `json:"suspended,omitempty"`
 	PendingToolCalls   []*dive.PendingToolCall   `json:"pending_tool_calls,omitempty"`
 	CompletedToolCalls []*dive.CompletedToolCall `json:"completed_tool_calls,omitempty"`
+	DeferredReminders  []*dive.DeferredReminder  `json:"deferred_reminders,omitempty"`
 }
 
 // Open returns the session with the given ID, creating it (and its backing
@@ -455,6 +456,7 @@ func (s *FileStore) readSession(id string) (data *sessionData, torn bool, err er
 		Suspended:          header.Suspended,
 		PendingToolCalls:   header.PendingToolCalls,
 		CompletedToolCalls: header.CompletedToolCalls,
+		DeferredReminders:  header.DeferredReminders,
 	}
 	if header.Metadata != nil {
 		data.Metadata = make(map[string]any, len(header.Metadata))
@@ -512,6 +514,7 @@ func (s *FileStore) writeSession(data *sessionData) error {
 		Suspended:          data.Suspended,
 		PendingToolCalls:   data.PendingToolCalls,
 		CompletedToolCalls: data.CompletedToolCalls,
+		DeferredReminders:  data.DeferredReminders,
 	}
 	hdrData, err := json.Marshal(hdr)
 	if err != nil {

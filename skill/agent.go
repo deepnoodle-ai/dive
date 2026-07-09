@@ -3,7 +3,6 @@ package skill
 import (
 	"context"
 	"strings"
-	"sync"
 
 	"github.com/deepnoodle-ai/dive"
 )
@@ -25,8 +24,8 @@ func (l *Loader) Tools() []dive.Tool {
 }
 
 // Hooks returns the catalog injection and skill content hooks.
-// Hooks are always returned even when no skills are loaded, because a
-// resumed session may contain a stale catalog block that needs cleanup.
+// Hooks are always returned even when no skills are loaded so a pinned empty
+// catalog can mask a stale legacy block from an older session.
 // Implements dive.Extension.
 func (l *Loader) Hooks() dive.Hooks {
 	return dive.Hooks{
@@ -132,47 +131,13 @@ const skillReminderName = "skills"
 // Using the first user message (not the last) ensures the catalog is in a
 // stable position for prompt caching — it sits right after the system prompt
 // and doesn't move as the conversation grows.
-//
-// The hook uses dive.SetSystemReminder, which is idempotent: it inserts the
-// block on first call and replaces it in place if the catalog changes.
 func catalogHook(loader *Loader) dive.PreGenerationHook {
-	// lastHash is shared across invocations of the returned hook, which may
-	// run concurrently when multiple CreateResponse calls execute on one
-	// agent. The mutex guards it; per-call HookContext state needs no guard.
-	var mu sync.Mutex
-	var lastHash string
-
 	return func(_ context.Context, hctx *dive.HookContext) error {
-		mu.Lock()
-		defer mu.Unlock()
-
-		hash := CatalogHash(loader)
-		if hash == "" {
-			// No skills — remove stale catalog block if present.
-			// Check messages directly (not just lastHash) to handle
-			// session resume where a previous process left a block.
-			if dive.HasSystemReminder(hctx.Messages, skillReminderName) {
-				hctx.Messages = dive.RemoveSystemReminder(hctx.Messages, skillReminderName)
-			}
-			lastHash = ""
-			return nil
-		}
-		if hash == lastHash {
-			// Catalog unchanged, but ensure the block exists in messages
-			// (handles session resume where hook state is fresh but
-			// messages already contain the block)
-			if dive.HasSystemReminder(hctx.Messages, skillReminderName) {
-				return nil
-			}
-		}
-		lastHash = hash
-
 		catalog := BuildCatalog(loader)
-		if catalog == "" {
-			return nil
+		reminder, err := dive.NewContextReminder(skillReminderName, catalog)
+		if err != nil {
+			return err
 		}
-
-		hctx.Messages = dive.SetSystemReminder(hctx.Messages, skillReminderName, catalog)
-		return nil
+		return hctx.PinReminder(reminder)
 	}
 }

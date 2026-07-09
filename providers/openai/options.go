@@ -19,6 +19,7 @@ func WithAPIKey(apiKey string) Option {
 // WithEndpoint sets the API endpoint URL.
 func WithEndpoint(endpoint string) Option {
 	return func(p *Provider) {
+		p.endpoint = endpoint
 		p.options = append(p.options, option.WithBaseURL(endpoint))
 	}
 }

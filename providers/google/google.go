@@ -105,12 +105,15 @@ func (p *Provider) Name() string {
 }
 
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
+	config := &llm.Config{}
+	config.Apply(opts...)
+	rendered, err := renderReminderMessages(config.Messages, config.OperatorAuthority)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := p.initClient(ctx); err != nil {
 		return nil, err
 	}
-
-	config := &llm.Config{}
-	config.Apply(opts...)
 
 	var request Request
 	if err := p.applyRequestConfig(&request, config); err != nil {
@@ -118,7 +121,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 
 	// Convert messages to genai.Content format
-	contents, err := messagesToContents(config.Messages)
+	contents, err := messagesToContents(rendered)
 	if err != nil {
 		return nil, err
 	}
@@ -185,12 +188,15 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 }
 
 func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
+	config := &llm.Config{}
+	config.Apply(opts...)
+	rendered, err := renderReminderMessages(config.Messages, config.OperatorAuthority)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := p.initClient(ctx); err != nil {
 		return nil, err
 	}
-
-	config := &llm.Config{}
-	config.Apply(opts...)
 
 	var request Request
 	if err := p.applyRequestConfig(&request, config); err != nil {
@@ -198,7 +204,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	}
 
 	// Convert messages to genai.Content format
-	contents, err := messagesToContents(config.Messages)
+	contents, err := messagesToContents(rendered)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -215,6 +221,10 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	stream := NewStreamIteratorFromSeq(ctx, streamSeq, request.Model)
 
 	return stream, nil
+}
+
+func renderReminderMessages(messages []*llm.Message, mode llm.OperatorAuthorityMode) ([]*llm.Message, error) {
+	return llm.RenderReminders(messages, mode, nil)
 }
 
 // wrapGoogleError converts a Google API error to a providers.NewError so that

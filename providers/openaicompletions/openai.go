@@ -106,7 +106,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages)
+	msgs, err := convertMessages(config.Messages, config.OperatorAuthority)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -238,7 +238,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages)
+	msgs, err := convertMessages(config.Messages, config.OperatorAuthority)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -318,7 +318,16 @@ func validateMessages(messages []*llm.Message) error {
 	return nil
 }
 
-func convertMessages(messages []*llm.Message) ([]Message, error) {
+func convertMessages(messages []*llm.Message, authorityModes ...llm.OperatorAuthorityMode) ([]Message, error) {
+	mode := llm.OperatorAuthorityBestEffort
+	if len(authorityModes) > 0 {
+		mode = authorityModes[0]
+	}
+	var err error
+	messages, err = llm.RenderReminders(messages, mode, nil)
+	if err != nil {
+		return nil, err
+	}
 	var result []Message
 	for _, msg := range messages {
 		// Skip empty messages - they can occur in edge cases during long tool-calling loops

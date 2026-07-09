@@ -296,12 +296,13 @@ func (a *Agent) firePostBackgroundToolUse(ctx context.Context, hctx *HookContext
 		Result: result,
 	}
 	bgHctx := &HookContext{
-		Agent:   a,
-		Session: hctx.Session,
-		Values:  hctx.Values,
-		Tool:    savedCtx.Tool,
-		Call:    savedCtx.Call,
-		Result:  tcr,
+		Agent:     a,
+		Session:   hctx.Session,
+		Values:    hctx.Values,
+		Tool:      savedCtx.Tool,
+		Call:      savedCtx.Call,
+		Result:    tcr,
+		reminders: hctx.reminders,
 	}
 	for _, hook := range a.hooks.PostBackgroundToolUse {
 		if err := hook(ctx, bgHctx); err != nil {
@@ -331,7 +332,11 @@ func (a *Agent) injectBackgroundResults(
 	if msg == "" {
 		return messages, nil
 	}
-	messages = append(messages, llm.NewUserTextMessage(msg))
+	reminder, err := NewContextReminder("background-tasks", msg)
+	if err != nil {
+		return nil, err
+	}
+	messages = append(messages, NewReminderMessage(reminder))
 	for _, handle := range handles {
 		result := results[handle.TaskID]
 		if result == nil {

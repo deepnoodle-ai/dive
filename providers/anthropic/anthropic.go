@@ -72,7 +72,11 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages)
+	rendered, err := p.renderReminders(config.Messages, request.Model, config.OperatorAuthority)
+	if err != nil {
+		return nil, err
+	}
+	msgs, err := convertMessages(rendered)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +167,11 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages)
+	rendered, err := p.renderReminders(config.Messages, request.Model, config.OperatorAuthority)
+	if err != nil {
+		return nil, err
+	}
+	msgs, err := convertMessages(rendered)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -413,6 +421,46 @@ func finalizeUsage(config *llm.Config, model string, usage *llm.Usage) {
 // through different endpoints.
 func (p *Provider) supportsAutomaticCaching() bool {
 	return p.endpoint == DefaultEndpoint
+}
+
+func (p *Provider) renderReminders(messages []*llm.Message, model string, mode llm.OperatorAuthorityMode) ([]*llm.Message, error) {
+	return llm.RenderReminders(messages, mode, func(index int, all []*llm.Message) (llm.Role, bool) {
+		if !p.supportsNativeSystemReminders(model) || !nativeSystemReminderPlacement(index, all) {
+			return llm.User, false
+		}
+		return llm.System, true
+	})
+}
+
+func (p *Provider) supportsNativeSystemReminders(model string) bool {
+	return p.endpoint == DefaultEndpoint && strings.HasPrefix(model, ModelClaudeOpus48)
+}
+
+func nativeSystemReminderPlacement(index int, messages []*llm.Message) bool {
+	if index <= 0 || index >= len(messages) {
+		return false
+	}
+	previous := messages[index-1]
+	if previous == nil || (previous.Role != llm.User && !messageHasServerToolUse(previous)) {
+		return false
+	}
+	if index+1 == len(messages) {
+		return true
+	}
+	next := messages[index+1]
+	return next != nil && next.Role == llm.Assistant
+}
+
+func messageHasServerToolUse(message *llm.Message) bool {
+	if message.Role != llm.Assistant {
+		return false
+	}
+	for _, content := range message.Content {
+		if _, ok := content.(*llm.ServerToolUseContent); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // stablePrefixTTL returns the TTL to use for stable-prefix breakpoints (system

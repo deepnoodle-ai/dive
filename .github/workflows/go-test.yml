@@ -41,3 +41,9 @@ jobs:
           cd experimental/cmd/dive
           go mod download
           go test -v ./...
+
+      - name: Run provider module tests
+        run: |
+          for module in providers/openai providers/google providers/grok; do
+            (cd "$module" && go test -v ./...)
+          done

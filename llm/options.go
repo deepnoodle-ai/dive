@@ -40,6 +40,7 @@ type Config struct {
 	ProviderOptions    map[string]interface{}   `json:"provider_options,omitempty"`
 	ResponseFormat     *ResponseFormat          `json:"response_format,omitempty"`
 	Messages           Messages                 `json:"messages"`
+	OperatorAuthority  OperatorAuthorityMode    `json:"operator_authority,omitempty"`
 	Hooks              Hooks                    `json:"-"`
 	Client             *http.Client             `json:"-"`
 	Logger             Logger                   `json:"-"`
@@ -121,6 +122,13 @@ func WithTemperature(temperature float64) Option {
 func WithSystemPrompt(systemPrompt string) Option {
 	return func(config *Config) {
 		config.SystemPrompt = systemPrompt
+	}
+}
+
+// WithOperatorAuthority sets the fallback policy for operator reminders.
+func WithOperatorAuthority(mode OperatorAuthorityMode) Option {
+	return func(config *Config) {
+		config.OperatorAuthority = mode
 	}
 }
 

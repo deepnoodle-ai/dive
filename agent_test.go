@@ -1115,7 +1115,7 @@ func TestExtensionMerge(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, "Base prompt.\n\nExtension rules.", agent.SystemPrompt())
+		assert.Equal(t, "Base prompt.\n\nExtension rules.\n\n"+reminderPrimingRule, agent.SystemPrompt())
 	})
 
 	t.Run("empty rules not appended", func(t *testing.T) {
@@ -1127,7 +1127,7 @@ func TestExtensionMerge(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, "Base prompt.", agent.SystemPrompt())
+		assert.Equal(t, "Base prompt.\n\n"+reminderPrimingRule, agent.SystemPrompt())
 	})
 
 	t.Run("nil extensions skipped", func(t *testing.T) {
