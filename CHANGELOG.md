@@ -6,12 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-07-09
+
 ### Added
 
-- **Grok 4.5** — added `grok-4.5` plus `grok-4.5-latest` and
-  `grok-build-latest` aliases to the Grok provider catalog and pricing. Grok
-  now defaults to `grok-4.5`, with cached-input pricing represented in usage
-  cost estimates and CLI context metadata updated to 500k tokens.
+- **Grok 4.5** — `grok-4.5` (with `grok-4.5-latest` and `grok-build-latest`
+  aliases) added to the Grok catalog and pricing; now the Grok default, with
+  500k context and cached-input cost estimates.
+- **Anthropic summarized thinking** — `ThinkingDisplaySummarized` requests
+  visible summarized thinking on Claude models that otherwise omit it (Sonnet 5,
+  Opus 4.7/4.8, Fable/Mythos 5), and `Usage.ReasoningTokens` now counts
+  Anthropic's reported thinking tokens. The CLI gains `--show-thinking` and
+  `--thinking-effort` (env `DIVE_SHOW_THINKING` / `DIVE_THINKING_EFFORT`).
 
 ## [1.11.1] - 2026-07-03
 
