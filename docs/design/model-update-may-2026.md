@@ -1,6 +1,6 @@
 # Model & Capability Update — May 2026
 
-_Last updated: 2026-06-30_
+_Last updated: 2026-07-09_
 
 This document records the latest models and pricing across providers (verified
 against official docs) and the changes made to Dive to add the new models and
@@ -19,8 +19,9 @@ here:
 - **Google**: added Gemini 3.5 Flash, 3.1 Flash-Lite (stable), 3 Pro Image
   (Nano Banana Pro), 3.1 Flash Image (Nano Banana 2), 3.1 Flash Live, and the
   custom-tools Pro endpoint.
-- **xAI/Grok**: added Grok 4.3 (new default) and grok-build-0.1; corrected
-  Grok 4.20 pricing; added Grok Imagine image pricing.
+- **xAI/Grok**: added Grok 4.5 (new default), its `grok-4.5-latest` and
+  `grok-build-latest` aliases, Grok 4.3, and grok-build-0.1; corrected Grok
+  4.20 pricing; added Grok Imagine image pricing.
 
 ## Latest models & pricing (per 1M tokens, USD)
 
@@ -54,7 +55,8 @@ header `fast-mode-2026-02-01`, requires account access).
 
 | Model | Input | Output | Context |
 |-------|-------|--------|---------|
-| `grok-4.3` | $1.25 | $2.50 | 1M (new flagship/default) |
+| `grok-4.5` | $2.00 ($0.50 cached) | $6.00 | 500k (new default) |
+| `grok-4.3` | $1.25 | $2.50 | 1M |
 | `grok-4.20-*` | $1.25 | $2.50 | 1M (corrected from $2/$6) |
 | `grok-build-0.1` | $1.00 | $2.00 | 256k (coding) |
 | `grok-imagine-image` | $0.02/image | — | — |

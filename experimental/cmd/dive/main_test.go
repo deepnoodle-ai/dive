@@ -52,6 +52,13 @@ func TestGetDefaultModel(t *testing.T) {
 			},
 			expected: "gpt-5.5",
 		},
+		{
+			name: "grok key present",
+			envVars: map[string]string{
+				"XAI_API_KEY": "test",
+			},
+			expected: "grok-4.5",
+		},
 	}
 
 	for _, tt := range tests {

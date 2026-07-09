@@ -68,6 +68,8 @@ var modelCatalog = []modelInfo{
 	{"o3", "o3", 200_000},
 
 	// Grok models
+	{"grok-4.5", "Grok 4.5", 500_000},
+	{"grok-build-latest", "Grok 4.5", 500_000},
 	{"grok-4.3", "Grok 4.3", 1_000_000},
 	{"grok-build-0.1", "Grok Build", 256_000},
 	{"grok-4.20-0309-reasoning", "Grok 4.20", 1_000_000},
@@ -165,7 +167,8 @@ var providerCatalog = []providerInfo{
 		Name:    "Grok",
 		EnvVars: []string{"XAI_API_KEY", "GROK_API_KEY"},
 		Models: []modelChoice{
-			{"grok-4.3", "Grok 4.3", "xAI's most intelligent and fastest model"},
+			{"grok-4.5", "Grok 4.5", "xAI flagship reasoning model with vision input"},
+			{"grok-4.3", "Grok 4.3", "Previous flagship model with 1M context"},
 			{"grok-4.20-0309-reasoning", "Grok 4.20", "Reasoning model with 1M context"},
 			{"grok-build-0.1", "Grok Build", "Optimized for coding tasks"},
 		},

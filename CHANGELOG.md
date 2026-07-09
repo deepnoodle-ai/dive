@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Grok 4.5** — added `grok-4.5` plus `grok-4.5-latest` and
+  `grok-build-latest` aliases to the Grok provider catalog and pricing. Grok
+  now defaults to `grok-4.5`, with cached-input pricing represented in usage
+  cost estimates and CLI context metadata updated to 500k tokens.
+
 ## [1.11.1] - 2026-07-03
 
 ### Fixed
