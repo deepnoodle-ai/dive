@@ -54,6 +54,28 @@ func TestAppLiveView(t *testing.T) {
 		app.messages = app.messages[:len(app.messages)-1]
 	})
 
+	t.Run("streamed thinking summary appears in live view", func(t *testing.T) {
+		app.processing = true
+		app.streamingMessageIndex = len(app.messages)
+		app.currentMessage = &Message{
+			Role:    "assistant",
+			Content: "",
+			Time:    time.Now(),
+		}
+		app.messages = append(app.messages, *app.currentMessage)
+
+		app.handleStreamThinking("I should inspect the request shape first.")
+		screen := renderLiveView(t, app, 80, 24)
+
+		termtest.AssertContains(t, screen, "inspect the request shape")
+
+		app.processing = false
+		app.currentMessage = nil
+		app.messages = app.messages[:0]
+		app.streamingMessageIndex = -1
+		app.thinkingMessageIndex = -1
+	})
+
 	t.Run("todo list renders when visible", func(t *testing.T) {
 		app.showTodos = true
 		app.todos = []Todo{

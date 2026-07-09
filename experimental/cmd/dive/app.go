@@ -1405,6 +1405,7 @@ func (a *App) handleStreamThinking(text string) {
 	a.flushStreamBuffer()
 	a.needNewTextMessage = true
 	a.thinkingStreamBuffer += text
+	a.flushThinkingStreamBuffer()
 }
 
 func (a *App) flushStreamingBuffers() {
@@ -2402,26 +2403,32 @@ func (a *App) buildLiveView() tui.View {
 
 	elapsed := time.Since(a.processingStartTime)
 
-	// Show recent tool calls (last 3 max, in chronological order)
-	// Includes both completed and in-progress tool calls so users can see
-	// long-running operations like subagent tasks while they're working
-	var toolViews []tui.View
+	// Show recent live activity (tool calls and summarized thinking) in
+	// chronological order. This keeps streamed thinking visible before the turn
+	// is committed to scrollback.
+	var activityViews []tui.View
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		msg := a.messages[i]
-		if msg.Role == "user" {
+		if msg.Role == "user" || msg.Role == "context" {
 			break
 		}
-		if msg.Type == MessageTypeToolCall {
+		switch {
+		case msg.Type == MessageTypeToolCall:
 			view := a.toolCallView(msg)
 			if view != nil {
-				toolViews = append([]tui.View{view}, toolViews...) // prepend for chronological order
+				activityViews = append([]tui.View{view}, activityViews...)
 			}
-			if len(toolViews) >= 3 {
-				break
+		case msg.Role == "reasoning":
+			view := a.textMessageView(msg, i)
+			if view != nil {
+				activityViews = append([]tui.View{view}, activityViews...)
 			}
 		}
+		if len(activityViews) >= 4 {
+			break
+		}
 	}
-	views = append(views, toolViews...)
+	views = append(views, activityViews...)
 
 	// Show compaction notification (if recent)
 	if a.lastCompactionEvent != nil && time.Since(a.compactionEventTime) < 3*time.Second {
