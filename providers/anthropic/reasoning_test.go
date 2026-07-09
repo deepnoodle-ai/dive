@@ -6,6 +6,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/schema"
 )
 
 // buildReq applies the given options to a config for the given model and
@@ -18,6 +19,13 @@ func buildReq(t *testing.T, model string, opts ...llm.Option) *Request {
 	var req Request
 	assert.NoError(t, p.applyRequestConfig(&req, cfg))
 	return &req
+}
+
+func reasoningTestTool() llm.Tool {
+	return llm.NewToolDefinition().
+		WithName("lookup").
+		WithDescription("Look up a value").
+		WithSchema(&schema.Schema{Type: "object"})
 }
 
 func TestReasoningEffortOpus48UsesOutputConfig(t *testing.T) {
@@ -76,6 +84,15 @@ func TestThinkingDisplay(t *testing.T) {
 	assert.Equal(t, "summarized", req.Thinking.Display)
 }
 
+func TestSummarizedThinkingDisplayOnDefaultOmittedModel(t *testing.T) {
+	req := buildReq(t, ModelClaudeSonnet5,
+		llm.WithAdaptiveThinking(),
+		llm.WithThinkingDisplay(llm.ThinkingDisplaySummarized))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.Equal(t, "summarized", req.Thinking.Display)
+}
+
 func TestReasoningEffortAndAdaptiveCombine(t *testing.T) {
 	// Effort and adaptive thinking are orthogonal on Opus 4.8.
 	req := buildReq(t, ModelClaudeOpus48,
@@ -118,6 +135,90 @@ func TestThinkingDisabled(t *testing.T) {
 		llm.WithReasoningBudget(8000),
 		llm.WithThinking(llm.ThinkingTypeDisabled))
 	assert.Nil(t, req.Thinking)
+}
+
+func TestThinkingDropsTemperature(t *testing.T) {
+	req := buildReq(t, ModelClaudeOpus46,
+		llm.WithReasoningBudget(8000),
+		llm.WithTemperature(0.7))
+	assert.NotNil(t, req.Thinking)
+	assert.Nil(t, req.Temperature)
+}
+
+func TestThinkingWithPrefillErrors(t *testing.T) {
+	cfg := &llm.Config{}
+	cfg.Apply(
+		llm.WithModel(ModelClaudeOpus46),
+		llm.WithReasoningBudget(8000),
+		llm.WithPrefill("prefilled answer", ""),
+	)
+	var req Request
+	err := New().applyRequestConfig(&req, cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "prefilled assistant responses")
+}
+
+func TestThinkingWithForcedToolChoiceErrors(t *testing.T) {
+	cfg := &llm.Config{}
+	cfg.Apply(
+		llm.WithModel(ModelClaudeOpus46),
+		llm.WithReasoningBudget(8000),
+		llm.WithTools(reasoningTestTool()),
+		llm.WithToolChoice(&llm.ToolChoice{
+			Type: llm.ToolChoiceTypeTool,
+			Name: "lookup",
+		}),
+	)
+	var req Request
+	err := New().applyRequestConfig(&req, cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice auto or none")
+}
+
+func TestDefaultThinkingWithForcedToolChoiceErrors(t *testing.T) {
+	cfg := &llm.Config{}
+	cfg.Apply(
+		llm.WithModel(ModelClaudeFable5),
+		llm.WithTools(reasoningTestTool()),
+		llm.WithToolChoice(llm.ToolChoiceAny),
+	)
+	var req Request
+	err := New().applyRequestConfig(&req, cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice auto or none")
+}
+
+func TestThinkingAllowsToolChoiceAutoAndNone(t *testing.T) {
+	for _, choice := range []*llm.ToolChoice{llm.ToolChoiceAuto, llm.ToolChoiceNone} {
+		req := buildReq(t, ModelClaudeOpus46,
+			llm.WithReasoningBudget(8000),
+			llm.WithTools(reasoningTestTool()),
+			llm.WithToolChoice(choice))
+		assert.NotNil(t, req.ToolChoice)
+		assert.Equal(t, ToolChoiceType(choice.Type), req.ToolChoice.Type)
+	}
+}
+
+func TestManualThinkingBudgetMustBeLessThanMaxTokens(t *testing.T) {
+	cfg := &llm.Config{}
+	cfg.Apply(
+		llm.WithModel(ModelClaudeOpus46),
+		llm.WithMaxTokens(4096),
+		llm.WithReasoningBudget(4096),
+	)
+	var req Request
+	err := New().applyRequestConfig(&req, cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "must be less than max_tokens")
+}
+
+func TestInterleavedThinkingAllowsBudgetAtOrAboveMaxTokens(t *testing.T) {
+	req := buildReq(t, ModelClaudeOpus45,
+		llm.WithMaxTokens(4096),
+		llm.WithReasoningBudget(8192),
+		llm.WithFeatures(FeatureInterleavedThinking))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, 8192, req.Thinking.BudgetTokens)
 }
 
 func TestEffortWithThinkingDisabledLegacyModelErrors(t *testing.T) {
@@ -188,6 +289,10 @@ func TestModelCapabilityHelpers(t *testing.T) {
 	// Sonnet 5 rejects sampling params and defaults thinking on.
 	assert.True(t, modelRejectsTemperature(ModelClaudeSonnet5))
 	assert.True(t, modelDefaultsThinkingOn(ModelClaudeSonnet5))
+	assert.True(t, modelRunsThinkingByDefault(ModelClaudeFable5))
+	assert.True(t, modelRunsThinkingByDefault(ModelClaudeMythos5))
+	assert.True(t, modelRunsThinkingByDefault(ModelClaudeSonnet5))
+	assert.False(t, modelRunsThinkingByDefault(ModelClaudeOpus48))
 	assert.False(t, modelDefaultsThinkingOn(ModelClaudeFable5))
 	assert.False(t, modelDefaultsThinkingOn(ModelClaudeSonnet46))
 }

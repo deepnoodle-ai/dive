@@ -526,6 +526,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	if err := applyReasoningConfig(req, config); err != nil {
 		return err
 	}
+	if requestHasThinkingEnabled(req.Model, req.Thinking) && config.Prefill != "" {
+		return fmt.Errorf("anthropic extended thinking cannot be used with prefilled assistant responses")
+	}
 
 	if config.Speed != "" {
 		req.Speed = string(config.Speed)
@@ -558,6 +561,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	if config.ToolChoice != nil && len(config.Tools) > 0 {
+		if requestHasThinkingEnabled(req.Model, req.Thinking) && forcedToolChoice(config.ToolChoice.Type) {
+			return fmt.Errorf("anthropic extended thinking only supports tool_choice auto or none; got %q", config.ToolChoice.Type)
+		}
 		req.ToolChoice = &ToolChoice{
 			Type: ToolChoiceType(config.ToolChoice.Type),
 			Name: config.ToolChoice.Name,
@@ -575,10 +581,10 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.ContextManagement = config.ContextManagement
 	}
 
-	if !modelRejectsTemperature(req.Model) {
+	if !modelRejectsTemperature(req.Model) && !requestHasThinkingEnabled(req.Model, req.Thinking) {
 		req.Temperature = config.Temperature
 	} else if config.Temperature != nil && config.Logger != nil {
-		config.Logger.Warn("temperature is not supported by this model and will be ignored",
+		config.Logger.Warn("temperature is not supported by this Anthropic request and will be ignored",
 			"model", req.Model)
 	}
 	if config.SystemPrompt != "" {
@@ -630,6 +636,9 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 	}
 
 	if thinking != nil {
+		if err := validateThinkingBudget(req, config, thinking); err != nil {
+			return err
+		}
 		if config.ThinkingDisplay != "" && thinking.Type != "disabled" {
 			thinking.Display = string(config.ThinkingDisplay)
 		}
@@ -725,6 +734,30 @@ func legacyEffortBudget(effort llm.ReasoningEffort) (int, error) {
 	}
 }
 
+func validateThinkingBudget(req *Request, config *llm.Config, thinking *Thinking) error {
+	if thinking.Type != "enabled" || config.IsFeatureEnabled(FeatureInterleavedThinking) {
+		return nil
+	}
+	if req.MaxTokens == nil {
+		return nil
+	}
+	if thinking.BudgetTokens >= *req.MaxTokens {
+		return fmt.Errorf("anthropic reasoning budget (%d) must be less than max_tokens (%d)", thinking.BudgetTokens, *req.MaxTokens)
+	}
+	return nil
+}
+
+func requestHasThinkingEnabled(model string, thinking *Thinking) bool {
+	if thinking != nil {
+		return thinking.Type != "disabled"
+	}
+	return modelRunsThinkingByDefault(model)
+}
+
+func forcedToolChoice(choice llm.ToolChoiceType) bool {
+	return choice == llm.ToolChoiceTypeAny || choice == llm.ToolChoiceTypeTool
+}
+
 // modelSupportsEffortParam reports whether the model accepts the native
 // output_config.effort parameter (Opus 4.5+, Sonnet 4.6, Fable 5, Mythos 5).
 func modelSupportsEffortParam(model string) bool {
@@ -790,6 +823,15 @@ func modelRejectsManualThinking(model string) bool {
 // default on but reject the explicit disable, so Dive omits the field for them).
 func modelDefaultsThinkingOn(model string) bool {
 	return strings.HasPrefix(model, "claude-sonnet-5")
+}
+
+// modelRunsThinkingByDefault reports whether omitting the thinking parameter
+// still leaves adaptive thinking active.
+func modelRunsThinkingByDefault(model string) bool {
+	return strings.HasPrefix(model, "claude-fable-5") ||
+		strings.HasPrefix(model, "claude-mythos-5") ||
+		strings.HasPrefix(model, "claude-mythos-preview") ||
+		modelDefaultsThinkingOn(model)
 }
 
 // createRequest creates an HTTP request with appropriate headers for Anthropic API calls

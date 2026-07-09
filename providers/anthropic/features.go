@@ -45,6 +45,7 @@ const (
 	// Files API for upload/download/reuse
 	FeatureFilesAPI = "files-api-2025-04-14"
 
-	// Interleaved thinking (manual mode, Sonnet 4.6)
+	// Interleaved thinking beta for Opus 4.5 and earlier Claude 4 models.
+	// Adaptive-thinking models handle interleaved thinking automatically.
 	FeatureInterleavedThinking = "interleaved-thinking-2025-05-14"
 )

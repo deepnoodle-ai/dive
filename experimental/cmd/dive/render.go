@@ -270,7 +270,8 @@ func (a *App) sessionUsageDiffers() bool {
 	return s.InputTokens != i.InputTokens ||
 		s.OutputTokens != i.OutputTokens ||
 		s.CacheReadInputTokens != i.CacheReadInputTokens ||
-		s.CacheCreationInputTokens != i.CacheCreationInputTokens
+		s.CacheCreationInputTokens != i.CacheCreationInputTokens ||
+		s.ReasoningTokens != i.ReasoningTokens
 }
 
 // modelDisplayName returns a human-friendly model name.
@@ -330,6 +331,17 @@ func (a *App) textMessageView(msg Message, index int) tui.View {
 		return tui.Group(
 			tui.Text("⏺ "),
 			tui.Text("%s", content).Wrap().Flex(1),
+		)
+
+	case "reasoning":
+		content := strings.TrimRight(msg.Content, "\n")
+		if content == "" {
+			return nil
+		}
+		reasoningStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 125, G: 125, B: 138})
+		return tui.Group(
+			tui.Text("◌ ").Style(reasoningStyle),
+			tui.Text("%s", content).Wrap().Style(reasoningStyle).Flex(1),
 		)
 
 	case "context":
@@ -788,6 +800,17 @@ func (a *App) textMessageViewStatic(msg Message) tui.View {
 			tui.PaddingLTRB(2, 0, 0, 0, tui.Markdown(content, nil).Theme(diveMarkdownTheme())),
 			tui.Text("⏺"),
 		).Align(tui.AlignLeft)
+
+	case "reasoning":
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			return nil
+		}
+		reasoningStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 125, G: 125, B: 138})
+		return tui.Group(
+			tui.Text("◌ ").Style(reasoningStyle),
+			tui.Text("%s", content).Wrap().Style(reasoningStyle).Flex(1),
+		)
 
 	case "context":
 		dimStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})

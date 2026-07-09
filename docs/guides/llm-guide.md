@@ -9,7 +9,7 @@ Dive supports multiple LLM providers through a unified interface. Each provider 
 ```go
 import "github.com/deepnoodle-ai/dive/providers/anthropic"
 
-model := anthropic.New() // defaults to claude-opus-4-5
+model := anthropic.New() // defaults to claude-opus-4-8
 ```
 
 **Env:** `ANTHROPIC_API_KEY`
@@ -132,21 +132,45 @@ Provider implementations normalize `ReasoningEffort` only where the model
 family is known. Unsupported providers may omit the option or pass it through
 for compatibility with custom OpenAI-compatible endpoints.
 
-### Reasoning on Claude Opus 4.7 / 4.8
+### Reasoning And Summarized Thinking On Claude
 
-Opus 4.7 and 4.8 support **only adaptive thinking** — the model decides when and
-how much to think — and reject manual `budget_tokens`. Use the `effort`
-parameter to guide depth:
+Newer Claude models prefer **adaptive thinking** — the model decides when and how
+much to think — with `effort` guiding depth. Opus 4.7, Opus 4.8, Sonnet 5, Fable
+5, and Mythos 5 reject manual `budget_tokens`; Dive keeps older callers working
+by mapping `ReasoningBudget` to adaptive thinking on those models.
 
 ```go
 ModelSettings: &dive.ModelSettings{
     ReasoningEffort: llm.ReasoningEffortXHigh,   // -> output_config.effort
     Thinking:        llm.ThinkingTypeAdaptive,   // -> thinking: {type: adaptive}
+    ThinkingDisplay: llm.ThinkingDisplaySummarized,
 }
 ```
 
-`WithReasoningBudget` still works against these models for backward
-compatibility — it transparently falls back to adaptive thinking. Fast mode
+`ThinkingDisplaySummarized` requests visible summarized thinking blocks. This is
+important on Sonnet 5, Fable 5, Mythos 5, Opus 4.7, and Opus 4.8, where Claude
+defaults to `omitted` display and returns an empty `thinking` field plus an
+encrypted signature. Dive preserves both normal `thinking` blocks and
+`redacted_thinking` blocks in responses; when continuing a tool-use turn, pass
+the assistant message content back unchanged so Anthropic can verify the
+signatures.
+
+In the Dive CLI, pass `--show-thinking` (or set `DIVE_SHOW_THINKING=true`) to
+request adaptive summarized thinking and render visible thinking summaries in
+the interactive transcript. Add `--thinking-effort high` (or set
+`DIVE_THINKING_EFFORT=high`) to choose the thinking effort level. Supported
+provider-neutral values are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+and `max`; provider-specific values pass through to compatible backends.
+
+When thinking is active, Anthropic only allows `tool_choice` `auto` or `none`.
+Dive returns a request-building error for forced tool choices (`any` or a
+specific tool), prefilled assistant responses, and manual thinking budgets that
+are not less than `MaxTokens` unless interleaved thinking is enabled.
+Temperature is ignored on thinking requests because Anthropic rejects sampling
+changes with extended thinking.
+
+`Usage.ReasoningTokens` includes Anthropic's reported
+`output_tokens_details.thinking_tokens` value when it is present. Fast mode
 (`Speed: llm.SpeedFast`) requires fast-mode access on your account and applies
 the `fast-mode-2026-02-01` beta header automatically.
 

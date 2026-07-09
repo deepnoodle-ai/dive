@@ -284,8 +284,9 @@ const (
 	ThinkingDisplaySummarized ThinkingDisplay = "summarized"
 	// ThinkingDisplayOmitted returns thinking blocks with an empty thinking
 	// field (the encrypted signature is still present for multi-turn
-	// continuity). This is the default on Claude Opus 4.7 and 4.8 and reduces
-	// time-to-first text token when streaming.
+	// continuity). This is the default on Claude Fable 5, Mythos 5, Sonnet 5,
+	// Opus 4.7, and Opus 4.8, and reduces time-to-first text token when
+	// streaming.
 	ThinkingDisplayOmitted ThinkingDisplay = "omitted"
 )
 
