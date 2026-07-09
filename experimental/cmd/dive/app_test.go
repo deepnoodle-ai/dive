@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/experimental/compaction"
+	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/deepnoodle-ai/wonton/tui"
 )
 
 func TestHandleCompaction(t *testing.T) {
@@ -57,4 +61,67 @@ func TestShouldDisplayToolError(t *testing.T) {
 		assert.True(t, shouldDisplayToolError("request_user_input", true, "Ask me another question please."))
 		assert.True(t, shouldDisplayToolError("AskUserQuestion", true, "No options provided for selection"))
 	})
+}
+
+func TestHandleStreamThinkingCreatesReasoningMessage(t *testing.T) {
+	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	var buf bytes.Buffer
+	app.runner = tui.NewInlineApp(
+		tui.WithInlineWidth(80),
+		tui.WithInlineOutput(&buf),
+	)
+	app.handleProcessingStart(processingStartEvent{baseEvent: newBaseEvent(), userInput: "explain this"})
+
+	app.handleStreamThinking("I should compare the code paths.")
+	app.flushThinkingStreamBuffer()
+	app.handleStreamText("The code paths differ here.")
+	app.flushStreamBuffer()
+
+	reasoningIdx := -1
+	answerIdx := -1
+	for i, msg := range app.messages {
+		switch msg.Role {
+		case "reasoning":
+			if strings.Contains(msg.Content, "compare the code paths") {
+				reasoningIdx = i
+			}
+		case "assistant":
+			if strings.Contains(msg.Content, "code paths differ") {
+				answerIdx = i
+			}
+		}
+	}
+	assert.True(t, reasoningIdx >= 0, "expected reasoning message")
+	assert.True(t, answerIdx >= 0, "expected assistant answer message")
+	assert.True(t, reasoningIdx < answerIdx, "reasoning should render before answer")
+}
+
+func TestConvertLLMMessageToViewsShowsThinkingContent(t *testing.T) {
+	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	views := app.convertLLMMessageToViews(&llm.Message{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.ThinkingContent{Thinking: "I considered the API contract."},
+			&llm.TextContent{Text: "The final answer."},
+		},
+	}, nil)
+
+	var buf bytes.Buffer
+	tui.Fprint(&buf, tui.Stack(views...), tui.WithWidth(80))
+	out := buf.String()
+	assert.Contains(t, out, "I considered the API contract.")
+	assert.Contains(t, out, "The final answer.")
+}
+
+func TestMessageThinkingText(t *testing.T) {
+	text := messageThinkingText(&llm.Message{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.ThinkingContent{Thinking: " first thought "},
+			&llm.TextContent{Text: "answer"},
+			&llm.ThinkingContent{Thinking: "second thought"},
+		},
+	})
+
+	assert.Equal(t, "first thought\n\nsecond thought", text)
 }

@@ -155,6 +155,10 @@ encrypted signature. Dive preserves both normal `thinking` blocks and
 the assistant message content back unchanged so Anthropic can verify the
 signatures.
 
+In the Dive CLI, pass `--show-thinking` (or set `DIVE_SHOW_THINKING=true`) to
+request adaptive summarized thinking and render visible thinking summaries in
+the interactive transcript.
+
 When thinking is active, Anthropic only allows `tool_choice` `auto` or `none`.
 Dive returns a request-building error for forced tool choices (`any` or a
 specific tool), prefilled assistant responses, and manual thinking budgets that

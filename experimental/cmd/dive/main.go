@@ -117,6 +117,10 @@ func main() {
 				Default(16000).
 				Env("DIVE_MAX_TOKENS").
 				Help("Maximum tokens in response"),
+			cli.Bool("show-thinking").
+				Default(false).
+				Env("DIVE_SHOW_THINKING").
+				Help("Request and show summarized model thinking when supported"),
 			cli.String("system-prompt").
 				Default("").
 				Help("System prompt to use for the session"),
@@ -327,6 +331,10 @@ func runInteractive(ctx *cli.Context) error {
 	modelSettings := &dive.ModelSettings{
 		MaxTokens: &maxTokens,
 	}
+	if ctx.Bool("show-thinking") {
+		modelSettings.Thinking = llm.ThinkingTypeAdaptive
+		modelSettings.ThinkingDisplay = llm.ThinkingDisplaySummarized
+	}
 	if ctx.IsSet("temperature") {
 		t := ctx.Float64("temperature")
 		modelSettings.Temperature = &t
@@ -499,6 +507,11 @@ func runPrint(ctx *cli.Context) error {
 	printModelSettings := &dive.ModelSettings{
 		MaxTokens: &maxTokens,
 	}
+	showThinking := ctx.Bool("show-thinking")
+	if showThinking {
+		printModelSettings.Thinking = llm.ThinkingTypeAdaptive
+		printModelSettings.ThinkingDisplay = llm.ThinkingDisplaySummarized
+	}
 	if ctx.IsSet("temperature") {
 		t := ctx.Float64("temperature")
 		printModelSettings.Temperature = &t
@@ -528,7 +541,7 @@ func runPrint(ctx *cli.Context) error {
 	case "json":
 		return runPrintJSON(bgCtx, agent, input)
 	case "text":
-		return runPrintText(bgCtx, agent, input)
+		return runPrintText(bgCtx, agent, input, showThinking)
 	default:
 		return fmt.Errorf("unsupported --output-format %q; valid values are: json, text", outputFormat)
 	}
@@ -580,16 +593,37 @@ func getInput(args []string) (string, error) {
 	return "", nil
 }
 
-func runPrintText(ctx context.Context, agent *dive.Agent, input string) error {
+func runPrintText(ctx context.Context, agent *dive.Agent, input string, showThinking bool) error {
 	var outputText strings.Builder
+	var thinkingText strings.Builder
+	thinkingStarted := false
+	textStarted := false
 
 	resp, err := agent.CreateResponse(ctx,
 		dive.WithInput(input),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
 			if item.Type == dive.ResponseItemTypeModelEvent && item.Event != nil {
-				if item.Event.Delta != nil && item.Event.Delta.Text != "" {
-					fmt.Print(item.Event.Delta.Text)
-					outputText.WriteString(item.Event.Delta.Text)
+				if item.Event.Delta != nil {
+					if showThinking && item.Event.Delta.Thinking != "" {
+						if !thinkingStarted {
+							fmt.Println("Thinking:")
+							thinkingStarted = true
+						}
+						fmt.Print(item.Event.Delta.Thinking)
+						thinkingText.WriteString(item.Event.Delta.Thinking)
+					}
+					if item.Event.Delta.Text != "" {
+						if showThinking && thinkingStarted && !textStarted {
+							if thinkingText.Len() > 0 && !strings.HasSuffix(thinkingText.String(), "\n") {
+								fmt.Println()
+							}
+							fmt.Println()
+							fmt.Println("Response:")
+							textStarted = true
+						}
+						fmt.Print(item.Event.Delta.Text)
+						outputText.WriteString(item.Event.Delta.Text)
+					}
 				}
 			}
 			return nil
@@ -597,6 +631,14 @@ func runPrintText(ctx context.Context, agent *dive.Agent, input string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("agent error: %w", err)
+	}
+
+	if showThinking && thinkingStarted && outputText.Len() == 0 {
+		if thinkingText.Len() > 0 && !strings.HasSuffix(thinkingText.String(), "\n") {
+			fmt.Println()
+		}
+		fmt.Println()
+		fmt.Println("Response:")
 	}
 
 	if outputText.Len() > 0 && !strings.HasSuffix(outputText.String(), "\n") {
@@ -618,6 +660,9 @@ func runPrintJSON(ctx context.Context, agent *dive.Agent, input string) error {
 		result["error"] = err.Error()
 	} else {
 		result["output"] = resp.OutputText()
+		if thinking := responseThinkingText(resp); thinking != "" {
+			result["thinking"] = thinking
+		}
 		if resp.Usage != nil {
 			result["usage"] = resp.Usage
 		}
@@ -626,6 +671,37 @@ func runPrintJSON(ctx context.Context, agent *dive.Agent, input string) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(result)
+}
+
+func responseThinkingText(resp *dive.Response) string {
+	if resp == nil {
+		return ""
+	}
+	var parts []string
+	for _, item := range resp.Items {
+		if item.Type == dive.ResponseItemTypeMessage && item.Message != nil {
+			if thinking := messageThinkingText(item.Message); thinking != "" {
+				parts = append(parts, thinking)
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func messageThinkingText(msg *llm.Message) string {
+	if msg == nil {
+		return ""
+	}
+	var parts []string
+	for _, content := range msg.Content {
+		if thinking, ok := content.(*llm.ThinkingContent); ok {
+			text := strings.TrimSpace(thinking.Thinking)
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // monitorNotifier sends monitor line batches to the app's event loop.

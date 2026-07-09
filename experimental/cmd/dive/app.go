@@ -40,6 +40,11 @@ type streamTextEvent struct {
 	text string
 }
 
+type streamThinkingEvent struct {
+	baseEvent
+	text string
+}
+
 type toolCallEvent struct {
 	baseEvent
 	call *llm.ToolUseContent
@@ -151,7 +156,7 @@ type Todo struct {
 
 // Message represents a chat message
 type Message struct {
-	Role    string // "user", "assistant", "system", or "intro"
+	Role    string // "user", "assistant", "reasoning", "system", "context", or "intro"
 	Content string // Text content
 	Time    time.Time
 	Type    MessageType
@@ -258,6 +263,7 @@ type App struct {
 	// Chat state
 	messages              []Message
 	streamingMessageIndex int
+	thinkingMessageIndex  int
 	currentMessage        *Message
 
 	// Tool call tracking
@@ -286,8 +292,9 @@ type App struct {
 	autocompletePrefix  string
 	autocompleteType    string // "file" or "command"
 
-	// Streaming text buffer (flushed on tick for batched updates)
-	streamBuffer string
+	// Streaming buffers (flushed on tick for batched updates)
+	streamBuffer         string
+	thinkingStreamBuffer string
 
 	// Context for cancellation
 	ctx    context.Context
@@ -355,24 +362,26 @@ func NewApp(
 	}
 
 	return &App{
-		agent:             agent,
-		sessionStore:      sessionStore,
-		workspaceDir:      workspaceDir,
-		modelName:         modelName,
-		resumeSessionID:   resumeSessionID,
-		skills:            skills,
-		apiEndpoint:       apiEndpoint,
-		messages:          make([]Message, 0),
-		toolCallIndex:     make(map[string]int),
-		toolTitles:        toolTitles,
-		history:           make([]string, 0),
-		historyIndex:      -1,
-		ctx:               ctx,
-		cancel:            cancel,
-		initialPrompt:     initialPrompt,
-		compactionConfig:  compactionConfig,
-		contextWindowMax:  contextWindowForModel(modelName),
-		toolStreamBuffers: make(map[string]string),
+		agent:                 agent,
+		sessionStore:          sessionStore,
+		workspaceDir:          workspaceDir,
+		modelName:             modelName,
+		resumeSessionID:       resumeSessionID,
+		skills:                skills,
+		apiEndpoint:           apiEndpoint,
+		messages:              make([]Message, 0),
+		streamingMessageIndex: -1,
+		thinkingMessageIndex:  -1,
+		toolCallIndex:         make(map[string]int),
+		toolTitles:            toolTitles,
+		history:               make([]string, 0),
+		historyIndex:          -1,
+		ctx:                   ctx,
+		cancel:                cancel,
+		initialPrompt:         initialPrompt,
+		compactionConfig:      compactionConfig,
+		contextWindowMax:      contextWindowForModel(modelName),
+		toolStreamBuffers:     make(map[string]string),
 	}
 }
 
@@ -749,6 +758,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleProcessingStart(e)
 	case streamTextEvent:
 		a.handleStreamText(e.text)
+	case streamThinkingEvent:
+		a.handleStreamThinking(e.text)
 	case toolCallEvent:
 		a.handleToolCall(e.call)
 	case toolResultEvent:
@@ -1107,6 +1118,9 @@ func (a *App) agentEventCallback(lastUsage **llm.Usage) dive.EventCallback {
 		switch item.Type {
 		case dive.ResponseItemTypeModelEvent:
 			if item.Event != nil && item.Event.Delta != nil {
+				if thinking := item.Event.Delta.Thinking; thinking != "" {
+					a.runner.SendEvent(streamThinkingEvent{baseEvent: newBaseEvent(), text: thinking})
+				}
 				if text := item.Event.Delta.Text; text != "" {
 					a.runner.SendEvent(streamTextEvent{baseEvent: newBaseEvent(), text: text})
 				}
@@ -1369,6 +1383,7 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 	}
 	a.messages = append(a.messages, *a.currentMessage)
 	a.streamingMessageIndex = len(a.messages) - 1
+	a.thinkingMessageIndex = -1
 	a.needNewTextMessage = false
 
 	a.processing = true
@@ -1380,8 +1395,21 @@ func (a *App) handleProcessingStart(e processingStartEvent) {
 }
 
 func (a *App) handleStreamText(text string) {
+	a.flushThinkingStreamBuffer()
+	a.thinkingMessageIndex = -1
 	// Buffer text for batched updates (flushed on tick)
 	a.streamBuffer += text
+}
+
+func (a *App) handleStreamThinking(text string) {
+	a.flushStreamBuffer()
+	a.needNewTextMessage = true
+	a.thinkingStreamBuffer += text
+}
+
+func (a *App) flushStreamingBuffers() {
+	a.flushThinkingStreamBuffer()
+	a.flushStreamBuffer()
 }
 
 func (a *App) flushStreamBuffer() {
@@ -1408,7 +1436,32 @@ func (a *App) flushStreamBuffer() {
 	a.streamBuffer = ""
 }
 
+func (a *App) flushThinkingStreamBuffer() {
+	if a.thinkingStreamBuffer == "" {
+		return
+	}
+
+	needNewMessage := a.thinkingMessageIndex < 0 ||
+		a.thinkingMessageIndex >= len(a.messages) ||
+		a.messages[a.thinkingMessageIndex].Role != "reasoning"
+
+	if needNewMessage {
+		a.messages = append(a.messages, Message{
+			Role:    "reasoning",
+			Content: "",
+			Time:    time.Now(),
+			Type:    MessageTypeText,
+		})
+		a.thinkingMessageIndex = len(a.messages) - 1
+	}
+
+	a.messages[a.thinkingMessageIndex].Content += a.thinkingStreamBuffer
+	a.thinkingStreamBuffer = ""
+}
+
 func (a *App) handleToolCall(call *llm.ToolUseContent) {
+	a.flushStreamingBuffers()
+
 	// Parse TodoWrite tool calls
 	if call.Name == "TodoWrite" {
 		a.parseTodoWriteInput(call.Input)
@@ -1433,6 +1486,7 @@ func (a *App) handleToolCall(call *llm.ToolUseContent) {
 	a.messages = append(a.messages, msg)
 	a.toolCallIndex[call.ID] = len(a.messages) - 1
 	a.needNewTextMessage = true
+	a.thinkingMessageIndex = -1
 }
 
 func (a *App) handleToolResult(result *dive.ToolCallResult) {
@@ -1512,8 +1566,8 @@ func (a *App) notifyMidTurnCompaction(event *compaction.CompactionEvent) {
 }
 
 func (a *App) handleProcessingEnd(err error) {
-	// Flush any remaining buffered text
-	a.flushStreamBuffer()
+	// Flush any remaining buffered model content.
+	a.flushStreamingBuffers()
 
 	if err != nil && err != context.Canceled {
 		errMsg := Message{
@@ -1530,8 +1584,12 @@ func (a *App) handleProcessingEnd(err error) {
 	// (without thinking animation), preventing orphaned blank lines.
 	a.processing = false
 	a.currentMessage = nil
+	a.streamingMessageIndex = -1
+	a.thinkingMessageIndex = -1
 	a.toolCallIndex = make(map[string]int)
 	a.toolStreamBuffers = make(map[string]string)
+	a.streamBuffer = ""
+	a.thinkingStreamBuffer = ""
 
 	// Now print to scrollback - the live view will be re-rendered with correct height
 	a.printRecentMessagesToScrollback()
@@ -1868,6 +1926,21 @@ func (a *App) convertLLMMessageToViews(msg *llm.Message, toolResults map[string]
 				views = append(views, tui.Text(""), view)
 			}
 
+		case *llm.ThinkingContent:
+			if strings.TrimSpace(c.Thinking) == "" {
+				continue
+			}
+			appMsg := Message{
+				Role:    "reasoning",
+				Content: c.Thinking,
+				Time:    time.Now(),
+				Type:    MessageTypeText,
+			}
+			view := a.textMessageViewStatic(appMsg)
+			if view != nil {
+				views = append(views, tui.Text(""), view)
+			}
+
 		case *llm.ToolUseContent:
 			// Find the corresponding result if available
 			result := toolResults[c.ID]
@@ -2001,7 +2074,10 @@ func (a *App) handleCommand(input string) bool {
 		a.toolCallIndex = make(map[string]int)
 		a.needNewTextMessage = false
 		a.currentMessage = nil
-		a.streamingMessageIndex = 0
+		a.streamingMessageIndex = -1
+		a.thinkingMessageIndex = -1
+		a.streamBuffer = ""
+		a.thinkingStreamBuffer = ""
 		a.firstUserSent = false
 		a.lastUsage = nil
 		a.sessionUsage = nil
