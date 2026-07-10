@@ -1,11 +1,11 @@
 # PRD: Production Skills System
 
-| Field | Content |
-|-------|---------|
-| Title | Production Skills & Slash Commands |
-| Author | Curtis / DeepNoodle |
-| Status | Implemented |
-| Last Updated | 2026-03-26 |
+| Field        | Content                                       |
+| ------------ | --------------------------------------------- |
+| Title        | Production Skills & Slash Commands            |
+| Author       | Curtis / DeepNoodle                           |
+| Status       | Implemented                                   |
+| Last Updated | 2026-07-10                                    |
 | Stakeholders | Dive library users, CLI users, agent builders |
 
 ## Problem & Opportunity
@@ -31,14 +31,14 @@ Dive has experimental skill support (`experimental/skill/`) that handles basic l
 
 ## Goals & Success Metrics
 
-| Goal | Metric |
-|------|--------|
-| **Primary:** Go developers can load, discover, and invoke skills with a production-quality API | Skills load from filesystem and custom providers with one unified interface |
-| **Primary:** Full feature parity with Claude Code / Codex skill semantics | Variable substitution, command substitution, auto-invocation triggers all working |
-| **Secondary:** The CLI provides a complete skill experience | `dive skills list`, `/skill-name`, and agent auto-invocation all work in the CLI |
-| **Secondary:** Cross-tool compatibility | Claude Code SKILL.md files work in Dive without modification |
-| **Guardrail:** No breaking changes to the core `dive` package | Existing agent code compiles and runs unchanged |
-| **Guardrail:** The API is simple for the common case | Loading filesystem skills requires <5 lines of Go |
+| Goal                                                                                           | Metric                                                                            |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **Primary:** Go developers can load, discover, and invoke skills with a production-quality API | Skills load from filesystem and custom providers with one unified interface       |
+| **Primary:** Full feature parity with Claude Code / Codex skill semantics                      | Variable substitution, command substitution, auto-invocation triggers all working |
+| **Secondary:** The CLI provides a complete skill experience                                    | `dive skills list`, `/skill-name`, and agent auto-invocation all work in the CLI  |
+| **Secondary:** Cross-tool compatibility                                                        | Claude Code SKILL.md files work in Dive without modification                      |
+| **Guardrail:** No breaking changes to the core `dive` package                                  | Existing agent code compiles and runs unchanged                                   |
+| **Guardrail:** The API is simple for the common case                                           | Loading filesystem skills requires <5 lines of Go                                 |
 
 ## Target Users
 
@@ -92,7 +92,9 @@ skill/                        # Core types, parsing, variable expansion
 └── agent.go                  # ConfigureAgent, catalog hook, content hook
 
 context.go                    # Core dive package: tool call ID context propagation
-system_reminder.go            # Core dive package: named <system-reminder> blocks
+reminder.go                   # Typed reminder API and delivery state
+llm/reminder.go               # Reminder content, validation, and provider-edge rendering
+system_reminder.go            # Legacy plain-text reminder compatibility
 ```
 
 ### How `ConfigureAgent` Works (Implemented)
@@ -111,12 +113,13 @@ agent, _ := dive.NewAgent(opts)
 1. **Always registers hooks** — even with zero skills. This ensures stale catalog blocks from a previous session can be cleaned up on resume.
 2. **Registers the Skill tool** (only when skills are loaded) — static description, no skill listing. The tool is a trigger: returns `"Launching skill: X"` and stores expanded instructions keyed by tool call ID for the PostToolUse hook.
 3. **Appends skill usage rules** to the system prompt (only when skills are loaded).
-4. **Registers a PreGenerationHook** that injects the skill catalog as a `<system-reminder name="skills">` block into the first user message via `dive.SetSystemReminder`. Replaced in place if catalog changes; removed if skills become empty. Handles fresh-process session resume.
+4. **Registers a PreGenerationHook** that creates the skill catalog with `dive.NewContextReminder` and pins it with `hctx.PinReminder`. The typed overlay appears in a copy of the first user message, refreshes by name, masks stale legacy blocks, and is not persisted.
 5. **Registers a PostToolUseHook** that reads `hctx.Call.ID` to retrieve the correct expanded instructions from the per-call-ID map and sets them as `hctx.AdditionalContext`. Safe under parallel tool execution.
 
 ### The Skill Tool (Trigger)
 
 When called, the tool:
+
 - Looks up the skill by name
 - Performs variable expansion (`$ARGUMENTS`, `$1`, `!{command}` — shell only for local skills)
 - Stores expanded instructions keyed by `dive.ToolCallID(ctx)` for the PostToolUse hook
@@ -124,7 +127,7 @@ When called, the tool:
 
 ### The Skill Catalog (Context Injection)
 
-Built by `skill.BuildCatalog(loader)` and injected into the first user message via `dive.SetSystemReminder`:
+Built by `skill.BuildCatalog(loader)` and pinned into a model-facing copy of the first user message with Dive's typed reminder API:
 
 ```xml
 <system-reminder name="skills">
@@ -142,26 +145,27 @@ only use skills listed above.
 </system-reminder>
 ```
 
-Each catalog entry includes its file path (`Location:`) so the agent can tell the user where skills live on disk. Injected into the first user message for prompt caching stability. `dive.SetSystemReminder` is a general-purpose core API for managing named blocks — any system can use it, not just skills.
+Each catalog entry includes its file path (`Location:`) so the agent can tell the user where skills live on disk. The contextual, model-only overlay stays in the stable prompt prefix without mutating or persisting session history.
 
 ## Unification: Skills and Slash Commands
 
 The `experimental/slashcmd/` package is **deprecated and merged into `skill/`**. The unified model:
 
-| Attribute | Skill (agent-invocable) | Command (user-invocable) |
-|-----------|------------------------|--------------------------|
-| Has `description` in frontmatter | Yes | Optional |
-| Has `user-invocable: false` | Optional | No |
-| Agent can auto-invoke | Yes | No |
-| User can invoke via `/name` | Yes | Yes |
-| Supports variable expansion | Yes | Yes |
-| File format | SKILL.md or .md with frontmatter | .md (with or without frontmatter) |
+| Attribute                        | Skill (agent-invocable)          | Command (user-invocable)          |
+| -------------------------------- | -------------------------------- | --------------------------------- |
+| Has `description` in frontmatter | Yes                              | Optional                          |
+| Has `user-invocable: false`      | Optional                         | No                                |
+| Agent can auto-invoke            | Yes                              | No                                |
+| User can invoke via `/name`      | Yes                              | Yes                               |
+| Supports variable expansion      | Yes                              | Yes                               |
+| File format                      | SKILL.md or .md with frontmatter | .md (with or without frontmatter) |
 
 ## Edge Cases & Constraints
 
 ### Shell Expansion Security
 
 `!{command}` executes arbitrary shell commands. Rules:
+
 - **Disabled by default** in the Go API. Must opt in with `WithShellExpansion(true)`.
 - **Enabled by default** in the CLI for skills loaded from the local filesystem.
 - **Always disabled** for non-local skills (any `SourceURI` that doesn't start with `file://`). Enforced by `Skill.IsLocal()` in `tool.Call()` regardless of global config.
@@ -171,6 +175,7 @@ The `experimental/slashcmd/` package is **deprecated and merged into `skill/`**.
 ### Parallel Tool Execution Safety
 
 The Skill tool supports parallel execution. When the agent issues multiple Skill tool calls in one response:
+
 - Each `tool.Call()` reads `dive.ToolCallID(ctx)` and stores expanded instructions keyed by that ID.
 - The PostToolUse hook reads `hctx.Call.ID` to retrieve the correct instructions.
 - This ensures correct association even when results arrive out of completion order.
@@ -178,6 +183,7 @@ The Skill tool supports parallel execution. When the agent issues multiple Skill
 ### Name Collisions
 
 When a skill and a command have the same name:
+
 - The skill wins (skills paths are searched before command paths). The command is shadowed.
 - A warning is logged during loading.
 
@@ -223,6 +229,7 @@ When a skill and a command have the same name:
 ### Phase 1: Core Package (DONE)
 
 Promoted `experimental/skill/` to `skill/` with:
+
 - Enhanced `Skill` and `SkillConfig` types (all frontmatter fields)
 - Variable expansion (`$ARGUMENTS`, `$1`-`$9`, `!{command}`)
 - Thread-safe Loader with Provider support
@@ -238,9 +245,9 @@ Promoted `experimental/skill/` to `skill/` with:
 1. **Skill tool as trigger** — static description, returns "Launching skill: X", stores expanded instructions keyed by tool call ID for PostToolUseHook
 2. **`skill/catalog.go`** — `BuildCatalog`, `CatalogHash`, `SkillRules`
 3. **`skill/agent.go`** — `ConfigureAgent` wires tool, PreGenerationHook (catalog), PostToolUseHook (skill content)
-4. **`system_reminder.go`** — `dive.SetSystemReminder/RemoveSystemReminder/HasSystemReminder` for named blocks in first user message
+4. **`reminder.go` and `llm/reminder.go`** — typed reminder construction, pinned delivery, and provider-edge rendering (`system_reminder.go` remains the legacy text compatibility layer)
 5. **`context.go`** — `dive.WithToolCallID/ToolCallID` for tool call ID propagation via context
-6. **Catalog injection** — `<system-reminder name="skills">` block in first user message, replaced in place on change, removed on empty, handles session resume
+6. **Catalog injection** — typed `<system-reminder name="skills">` overlay in a copy of the first user message, refreshed by name and able to mask stale legacy blocks on resume
 7. **Skill content injection** — PostToolUseHook sets `AdditionalContext` with expanded instructions + base directory, keyed by call ID
 8. **CLI updated** to use `skill.ConfigureAgent`
 
@@ -252,7 +259,7 @@ Promoted `experimental/skill/` to `skill/` with:
 
 ## Open Questions
 
-1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** Injected into the first user message via `dive.SetSystemReminder`. Replaced in place if the catalog hash changes. Removed when skills become empty. Handles session resume by checking messages directly.
+1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** The PreGeneration hook pins the current typed catalog on each `CreateResponse`. Dive renders it into a copy of the first user message for every model call, replaces the model-facing value by name, and does not persist it. On resume, a same-name overlay masks stale legacy text.
 
 2. **Should command expansion timeout be configurable?** The 10-second default for `!{command}` may be too short for some use cases (e.g., `!{go test ./...}`). Recommendation: make it configurable via `ExpandOptions` with a sensible default. Currently configurable via `WithShellTimeout`.
 

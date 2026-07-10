@@ -1,7 +1,7 @@
 ---
 Title: Context injection demos for the experimental CLI
 Author: Curtis Myzie
-Status: Draft
+Status: Implemented
 Last Updated: 2026-07-10
 ---
 
@@ -11,13 +11,14 @@ Last Updated: 2026-07-10
 
 ## Context
 
-Dive's experimental CLI currently demonstrates static pinned context and one-time
-operator reminders through `--context` and `--operator-reminder`. Those flags
-prove the wire format, but they do not show why typed reminders are useful in an
-agent loop: context can be replaced as reality changes, derived from tool use,
-scoped to one response, and assigned contextual or operator authority. We want a
-small set of opt-in demos that make those properties visible without turning
-advisory reminders into permission or policy enforcement.
+Before this work, Dive's experimental CLI demonstrated static pinned context and
+one-time operator reminders through `--context` and `--operator-reminder`. Those
+flags proved the wire format, but they did not show why typed reminders are
+useful in an agent loop: context can be replaced as reality changes, derived
+from tool use, scoped to one response, and assigned contextual or operator
+authority. We wanted a small set of opt-in demos that make those properties
+visible without turning advisory reminders into permission or policy
+enforcement.
 
 ## Brainstorm
 
@@ -84,14 +85,20 @@ verification debt. The public set was reduced to `workspace`, `pipeline`,
 quiet during ordinary edits; its rarity is part of its signal rather than an
 activation problem.
 
-## Proposal
+## Implemented scope
 
-Add a repeatable `--context-demo NAME` flag to the experimental CLI. It accepts
+The experimental CLI exposes a repeatable `--context-demo NAME` flag. It accepts
 five demos, plus `all` as a convenience:
 
 - `workspace`: pin a live workspace snapshot before generation and refresh it
   after successful tools, so branch and dirty-state changes are visible without
   persisting stale state.
+- `pipeline`: pin a read-only delivery map built from recognized repository
+  surfaces such as Go modules, package scripts, Make targets, containers, and CI
+  workflows. Only fixed labels, allowlisted target names, and counts are
+  injected; arbitrary file contents and workflow names are not. When Go is
+  detected, the same reminder adds a validated version, fixed workflow guidance,
+  bounded module counts, and whether the CLI scope sits below the Git root.
 - `verification`: append model-only operator reminders after `Write` or `Edit`,
   and append a verification checkpoint after a successful recognized test or
   lint command. It also pins a turn-local ledger of observed build, test,
@@ -101,12 +108,6 @@ five demos, plus `all` as a convenience:
 - `recovery`: append a model-only operator reminder after a failed tool call,
   naming the failed call and coaching the model to change one variable before
   retrying.
-- `pipeline`: pin a read-only delivery map built from recognized repository
-  surfaces such as Go modules, package scripts, Make targets, containers, and CI
-  workflows. Only fixed labels, allowlisted target names, and counts are
-  injected; arbitrary file contents and workflow names are not. When Go is
-  detected, the same reminder adds a validated version, fixed workflow guidance,
-  bounded module counts, and whether the CLI scope sits below the Git root.
 - `security`: append a model-only operator review trigger after successful
   changes to security-sensitive paths or attempted high-impact dependency,
   privilege, and deployment commands. It reports only fixed risk categories and
@@ -117,9 +118,8 @@ The implementation lives entirely in `experimental/cmd/dive`, with focused Go
 files for each concern and shared option/state wiring in `context_demos.go`. A
 small turn-local tracker is installed through `HookContext.Values`; it is
 protected by a mutex because parallel tool batches can run hooks concurrently.
-Model-facing
-path sets are deterministically ordered, capped at 12 entries, and report
-omission counts. Verification recognizes direct toolchain invocations
+Model-facing path sets are deterministically ordered, capped at 12 entries, and
+report omission counts. Verification recognizes direct toolchain invocations
 only when the verifier is the final shell segment. Both print and interactive
 paths use the same option-wiring helper. `dive context-demos` provides discovery
 without starting a model, the interactive splash summarizes enabled demos and
@@ -159,12 +159,13 @@ checks ran.
 Repository filenames, workflow names, manifest contents, and shell commands can
 all contain attacker-controlled text. The new pipeline and security reminders
 therefore render only fixed vocabulary, allowlisted target/script names, and
-numeric counts. Quality observations use normalized labels from a deterministic
-classifier instead of echoing command text. The Go reminder emits only a
-validated version, counts, fixed workflow text, and a fixed scope label; it does
-not expose module declarations. All collections are bounded and turn-local. The
-security reminder is advisory: permissions, sandboxing, user approval, and
-downstream authorization remain the enforcement boundaries.
+numeric counts. Verification gate observations use normalized labels from a
+deterministic classifier instead of echoing command text. The Go section of the
+pipeline reminder emits only a validated version, counts, fixed workflow text,
+and a fixed scope label; it does not expose module declarations. All collections
+are bounded and turn-local. The security reminder is advisory: permissions,
+sandboxing, user approval, and downstream authorization remain the enforcement
+boundaries.
 
 ## Open questions
 

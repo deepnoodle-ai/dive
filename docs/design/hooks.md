@@ -29,16 +29,16 @@ lifecycle is CLI-centric while Dive's is API-centric.
 
 ## Hook Types
 
-| Hook Type                | When it fires                                         | Claude Code equivalent |
-| :----------------------- | :---------------------------------------------------- | :--------------------- |
-| `SessionStartHook`       | Start of a fresh conversation, before the first LLM call | `SessionStart`      |
-| `PreGenerationHook`      | Before the LLM generation loop                        | —                      |
-| `PostGenerationHook`     | After the generation loop completes                   | —                      |
-| `PreToolUseHook`         | Before a tool call executes                           | `PreToolUse`           |
-| `PostToolUseHook`        | After a tool call succeeds                            | `PostToolUse`          |
-| `PostToolUseFailureHook` | After a tool call fails                               | `PostToolUseFailure`   |
-| `StopHook`               | When the agent is about to stop                       | `Stop`                 |
-| `PreIterationHook`       | Before each LLM call in the loop                      | —                      |
+| Hook Type                | When it fires                                            | Claude Code equivalent |
+| :----------------------- | :------------------------------------------------------- | :--------------------- |
+| `SessionStartHook`       | Start of a fresh conversation, before the first LLM call | `SessionStart`         |
+| `PreGenerationHook`      | Before the LLM generation loop                           | —                      |
+| `PostGenerationHook`     | After the generation loop completes                      | —                      |
+| `PreToolUseHook`         | Before a tool call executes                              | `PreToolUse`           |
+| `PostToolUseHook`        | After a tool call succeeds                               | `PostToolUse`          |
+| `PostToolUseFailureHook` | After a tool call fails                                  | `PostToolUseFailure`   |
+| `StopHook`               | When the agent is about to stop                          | `Stop`                 |
+| `PreIterationHook`       | Before each LLM call in the loop                         | —                      |
 
 Most hook types are `func(ctx context.Context, hctx *HookContext) error`. The
 exceptions return richer values: `StopHook` returns `(*StopDecision, error)` and
@@ -123,7 +123,7 @@ The hook fires when **both** conditions hold:
 1. The loaded session has **no prior messages**, and
 2. The turn is **not** resuming a suspended one (`hasResumeIntent == false`).
 
-This placement is deliberate. The block runs *after* the suspend/resume guards
+This placement is deliberate. The block runs _after_ the suspend/resume guards
 in `CreateResponse`, so a resume — including a stateless `WithResume` call,
 whose synthetic empty history would otherwise look like a fresh start — never
 re-fires it. Resuming a turn is not starting a session; firing seed logic there
@@ -138,7 +138,7 @@ for this session object."
 
 ### Source
 
-`HookContext.SessionStartSource` tells the hook *why* it fired, mirroring Claude
+`HookContext.SessionStartSource` tells the hook _why_ it fired, mirroring Claude
 Code's `SessionStart` source matcher. Today the agent emits only
 `SessionStartStartup`. Carrying the source on the context (rather than gating
 behavior with a bare boolean) keeps the API open to future sources — e.g.
@@ -150,7 +150,7 @@ signature change.
 `SessionStartResult.Persist` chooses how long the seed lives:
 
 - **`Persist: true`** — durable context. The seed messages are written to the
-  session as their own *pre-turn* via a `SaveTurn` call before generation, so
+  session as their own _pre-turn_ via a `SaveTurn` call before generation, so
   they remain in `Messages()` on every later turn and survive suspend/resume.
   Saving them as a separate pre-turn (rather than splicing them into the first
   turn's input→output delta) keeps the persistence path simple: the normal turn
@@ -205,6 +205,10 @@ PreToolUse hooks can do more than allow/deny:
   before execution. Only the last hook's value takes effect.
 - **Context injection**: Set `hctx.AdditionalContext` to append text to the
   tool result message sent to the LLM.
+- **Typed runtime context**: Call `hctx.PinReminder` for a contextual request
+  overlay, or `hctx.AppendReminder` for a recorded or model-only event delivered
+  after the tool-result batch. See the
+  [runtime context guide](../guides/context-injection.md).
 
 ## Error Handling
 
@@ -221,23 +225,23 @@ PreToolUse hooks can do more than allow/deny:
 
 ## Hook Helpers
 
-| Helper                 | Type                     | Description                           |
-| :--------------------- | :----------------------- | :------------------------------------ |
-| `InjectContext`        | `PreGenerationHook`      | Prepends content as a user message    |
-| `CompactionHook`       | `PreGenerationHook`      | Triggers compaction above a threshold |
-| `UsageLogger`          | `PostGenerationHook`     | Logs token usage via callback         |
-| `UsageLoggerWithSlog`  | `PostGenerationHook`     | Logs token usage via slog             |
-| `MatchTool`            | `PreToolUseHook`         | Runs only for matching tool names     |
-| `MatchToolPost`        | `PostToolUseHook`        | Runs only for matching tool names     |
-| `MatchToolPostFailure` | `PostToolUseFailureHook` | Runs only for matching tool names     |
-| `PromptStopHook`       | `StopHook`               | Model judges whether the task is done; continues if not (fails open) |
+| Helper                 | Type                     | Description                                                            |
+| :--------------------- | :----------------------- | :--------------------------------------------------------------------- |
+| `InjectContext`        | `PreGenerationHook`      | Prepends content as a user message                                     |
+| `CompactionHook`       | `PreGenerationHook`      | Triggers compaction above a threshold                                  |
+| `UsageLogger`          | `PostGenerationHook`     | Logs token usage via callback                                          |
+| `UsageLoggerWithSlog`  | `PostGenerationHook`     | Logs token usage via slog                                              |
+| `MatchTool`            | `PreToolUseHook`         | Runs only for matching tool names                                      |
+| `MatchToolPost`        | `PostToolUseHook`        | Runs only for matching tool names                                      |
+| `MatchToolPostFailure` | `PostToolUseFailureHook` | Runs only for matching tool names                                      |
+| `PromptStopHook`       | `StopHook`               | Model judges whether the task is done; continues if not (fails open)   |
 | `PromptToolGate`       | `PreToolUseHook`         | Model judges whether a tool call is safe; denies if not (fails closed) |
 
 All `Match*` helpers accept a Go regexp pattern compiled once at construction.
 
 ## Judgment-Based Hooks
 
-`PromptStopHook` and `PromptToolGate` (`hookjudgment.go`) let a *model* make a
+`PromptStopHook` and `PromptToolGate` (`hookjudgment.go`) let a _model_ make a
 hook decision that is hard to express as deterministic code — "is the task
 actually done?", "is this tool call safe in context?". They are constructors in
 the same spirit as `MatchTool`/`InjectContext`: the core hook types stay plain

@@ -42,29 +42,29 @@ func main() {
 
 ## AgentOptions
 
-| Field                | Type                   | Description                                       |
-| -------------------- | ---------------------- | ------------------------------------------------- |
-| `Name`               | `string`               | Agent identifier (for logging)                    |
-| `SystemPrompt`       | `string`               | System prompt sent to the LLM                     |
-| `Model`              | `llm.LLM`              | LLM provider (required)                           |
-| `Tools`              | `[]Tool`               | Static tools available to the agent               |
-| `Toolsets`           | `[]Toolset`            | Dynamic tool providers resolved per LLM request   |
-| `Hooks`              | `Hooks`                | Hook functions grouped in a struct (see below)    |
-| `Session`            | `Session`              | Persistent conversation state (see below)         |
-| `ModelSettings`      | `*ModelSettings`       | Temperature, max tokens, reasoning, caching       |
-| `ResponseTimeout`      | `time.Duration`        | Max time for a response (default: 30 min)         |
-| `ToolIterationLimit`   | `int`                  | Max tool call iterations (default: 100)           |
-| `ParallelToolExecution`| `bool`                 | Execute tool calls concurrently (default: false)  |
+| Field                   | Type             | Description                                      |
+| ----------------------- | ---------------- | ------------------------------------------------ |
+| `Name`                  | `string`         | Agent identifier (for logging)                   |
+| `SystemPrompt`          | `string`         | System prompt sent to the LLM                    |
+| `Model`                 | `llm.LLM`        | LLM provider (required)                          |
+| `Tools`                 | `[]Tool`         | Static tools available to the agent              |
+| `Toolsets`              | `[]Toolset`      | Dynamic tool providers resolved per LLM request  |
+| `Hooks`                 | `Hooks`          | Hook functions grouped in a struct (see below)   |
+| `Session`               | `Session`        | Persistent conversation state (see below)        |
+| `ModelSettings`         | `*ModelSettings` | Temperature, max tokens, reasoning, caching      |
+| `ResponseTimeout`       | `time.Duration`  | Max time for a response (default: 30 min)        |
+| `ToolIterationLimit`    | `int`            | Max tool call iterations (default: 100)          |
+| `ParallelToolExecution` | `bool`           | Execute tool calls concurrently (default: false) |
 
 ### Hooks Struct
 
 The `Hooks` struct groups all hook slices:
 
-| Field            | Type                   | Description                                       |
-| ---------------- | ---------------------- | ------------------------------------------------- |
-| `PreGeneration`  | `[]PreGenerationHook`  | Hooks called before LLM generation                |
-| `PostGeneration` | `[]PostGenerationHook` | Hooks called after LLM generation                 |
-| `PreToolUse`     | `[]PreToolUseHook`     | Hooks called before each tool execution           |
+| Field                | Type                       | Description                                       |
+| -------------------- | -------------------------- | ------------------------------------------------- |
+| `PreGeneration`      | `[]PreGenerationHook`      | Hooks called before LLM generation                |
+| `PostGeneration`     | `[]PostGenerationHook`     | Hooks called after LLM generation                 |
+| `PreToolUse`         | `[]PreToolUseHook`         | Hooks called before each tool execution           |
 | `PostToolUse`        | `[]PostToolUseHook`        | Hooks called after each successful tool execution |
 | `PostToolUseFailure` | `[]PostToolUseFailureHook` | Hooks called after each failed tool execution     |
 | `Stop`               | `[]StopHook`               | Hooks called when agent is about to stop          |
@@ -196,6 +196,7 @@ Hooks: dive.Hooks{
 ```
 
 PreToolUse hooks can also:
+
 - Set `hctx.UpdatedInput` to rewrite tool arguments before execution
 - Set `hctx.AdditionalContext` to inject context into the tool result message
 
@@ -267,15 +268,30 @@ response, err := agent.CreateResponse(ctx,
 
 ## CreateResponse Options
 
-| Option                     | Description                                                 |
-| -------------------------- | ----------------------------------------------------------- |
-| `WithInput(text)`          | Simple text input (creates a user message)                  |
-| `WithMessages(msgs...)`    | Multiple messages                                           |
-| `WithEventCallback(fn)`    | Receive events during generation                            |
-| `WithSession(sess)`        | Per-call session override                                   |
-| `WithValue(key, val)`      | Pass data to hooks via HookContext.Values                   |
-| `WithToolResults(results)` | Resume a session-backed suspended turn (see suspend-resume) |
-| `WithResume(state, results)` | Resume statelessly with an explicit `SuspensionState`     |
+| Option                       | Description                                                 |
+| ---------------------------- | ----------------------------------------------------------- |
+| `WithInput(text)`            | Simple text input (creates a user message)                  |
+| `WithMessages(msgs...)`      | Multiple messages                                           |
+| `WithEventCallback(fn)`      | Receive events during generation                            |
+| `WithSession(sess)`          | Per-call session override                                   |
+| `WithPinnedReminder(r)`      | Add a contextual, model-only request overlay                |
+| `WithValue(key, val)`        | Pass data to hooks via HookContext.Values                   |
+| `WithToolResults(results)`   | Resume a session-backed suspended turn (see suspend-resume) |
+| `WithResume(state, results)` | Resume statelessly with an explicit `SuspensionState`       |
+
+## Runtime Context
+
+Use typed reminders when the application needs to supply context the user did
+not type. `WithPinnedReminder` carries current contextual state for one
+`CreateResponse` call without persisting it. Hooks can call
+`hctx.PinReminder` to refresh that overlay or `hctx.AppendReminder` to add a
+recorded or model-only event between tool iterations.
+
+Reminder tier and lifetime are separate choices. Operator reminders receive a
+native operator role only where the target and message placement are known to
+support it; otherwise Dive renders the same typed reminder as tagged user
+content. See [Runtime Context and System Reminders](context-injection.md) for
+the decision table, examples, provider behavior, and persistence rules.
 
 ## Model Settings
 
@@ -415,5 +431,6 @@ Subagent support is available in `experimental/subagent/`. See the experimental 
 
 - [Tools Guide](tools.md) - Built-in tools
 - [Custom Tools](custom-tools.md) - Create your own tools
+- [Runtime Context](context-injection.md) - Inject typed system reminders
 - [Suspend & Resume](suspend-resume.md) - Pause mid-turn for human input or async callbacks
 - [LLM Guide](llm-guide.md) - Provider configuration

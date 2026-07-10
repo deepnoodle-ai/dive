@@ -54,22 +54,22 @@ SessionStart → PreGeneration → [PreIteration → LLM → PreToolUse → Exec
 
 All hooks receive `*HookContext`. Which fields are populated depends on the phase:
 
-| Field             | PreGen | PostGen | PreToolUse | PostToolUse | PostToolUseFailure | Stop  | PreIter |
-| :---------------- | :----: | :-----: | :--------: | :---------: | :----------------: | :---: | :-----: |
-| Agent             |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |   ✓   |    ✓    |
-| Values            |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |   ✓   |    ✓    |
-| SystemPrompt      |   ✓    |    ✓    |            |             |                    |       |    ✓    |
-| Messages          |   ✓    |    ✓    |            |             |                    |       |    ✓    |
-| Response          |        |    ✓    |            |             |                    |   ✓   |         |
-| OutputMessages    |        |    ✓    |            |             |                    |   ✓   |         |
-| Usage             |        |    ✓    |            |             |                    |   ✓   |         |
-| Tool              |        |         |     ✓      |      ✓      |         ✓          |       |         |
-| Call              |        |         |     ✓      |      ✓      |         ✓          |       |         |
-| Result            |        |         |            |      ✓      |         ✓          |       |         |
-| UpdatedInput      |        |         |     ✓      |             |                    |       |         |
-| AdditionalContext |        |         |     ✓      |      ✓      |         ✓          |       |         |
-| StopHookActive    |        |         |            |             |                    |   ✓   |         |
-| Iteration         |        |         |            |             |                    |       |    ✓    |
+| Field             | PreGen | PostGen | PreToolUse | PostToolUse | PostToolUseFailure | Stop | PreIter |
+| :---------------- | :----: | :-----: | :--------: | :---------: | :----------------: | :--: | :-----: |
+| Agent             |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |  ✓   |    ✓    |
+| Values            |   ✓    |    ✓    |     ✓      |      ✓      |         ✓          |  ✓   |    ✓    |
+| SystemPrompt      |   ✓    |    ✓    |            |             |                    |      |    ✓    |
+| Messages          |   ✓    |    ✓    |            |             |                    |      |    ✓    |
+| Response          |        |    ✓    |            |             |                    |  ✓   |         |
+| OutputMessages    |        |    ✓    |            |             |                    |  ✓   |         |
+| Usage             |        |    ✓    |            |             |                    |  ✓   |         |
+| Tool              |        |         |     ✓      |      ✓      |         ✓          |      |         |
+| Call              |        |         |     ✓      |      ✓      |         ✓          |      |         |
+| Result            |        |         |            |      ✓      |         ✓          |      |         |
+| UpdatedInput      |        |         |     ✓      |             |                    |      |         |
+| AdditionalContext |        |         |     ✓      |      ✓      |         ✓          |      |         |
+| StopHookActive    |        |         |            |             |                    |  ✓   |         |
+| Iteration         |        |         |            |             |                    |      |    ✓    |
 
 The `Values` map persists across all phases within one `CreateResponse` call, so
 hooks can pass data to each other.
@@ -235,6 +235,39 @@ Hooks: dive.Hooks{
 This separation mirrors Claude Code's distinct `PostToolUse` and
 `PostToolUseFailure` events.
 
+### Injecting typed reminders
+
+Use `hctx.PinReminder` for contextual state that should be refreshed in the
+stable request prefix. Use `hctx.AppendReminder` for an event that should appear
+after the current tool-result batch:
+
+```go
+Hooks: dive.Hooks{
+    PostToolUseFailure: []dive.PostToolUseFailureHook{
+        func(ctx context.Context, hctx *dive.HookContext) error {
+            reminder, err := dive.NewOperatorReminder(
+                "recovery",
+                "The tool failed. Change the input or approach before retrying.",
+            )
+            if err != nil {
+                return err
+            }
+            return hctx.AppendReminder(reminder, dive.ModelOnly)
+        },
+    },
+},
+```
+
+`Recorded` reminders are returned in `OutputMessages` and can be persisted by a
+session. `ModelOnly` reminders last through the rest of the current
+`CreateResponse` call. Tool-scoped deliveries wait for the complete batch and
+follow tool-call declaration order under parallel execution.
+
+Only application-asserted facts belong in operator reminders. Keep raw tool,
+model, retrieved, and remote content contextual. See
+[Runtime Context and System Reminders](context-injection.md) for the full tier,
+lifetime, provider-fallback, and compaction contract.
+
 ## Stop Hook
 
 Runs when the agent is about to stop responding. A hook can return
@@ -369,15 +402,15 @@ doc for the agent-backed variant.
 
 How errors are handled depends on the hook type:
 
-| Hook type          | Regular error              | `*HookAbortError`     |
-| :----------------- | :------------------------- | :-------------------- |
-| PreGeneration      | Aborts generation          | Aborts generation     |
-| PostGeneration     | Logged, response preserved | Aborts, returns error |
-| PreToolUse         | Denies tool call           | Aborts generation     |
-| PostToolUse        | Logged, result preserved   | Aborts generation     |
-| PostToolUseFailure | Logged, result preserved   | Aborts generation     |
-| Stop               | Logged, continues          | Aborts generation     |
-| PreIteration       | Aborts generation          | Aborts generation     |
+| Hook type          | Regular error              | `*HookAbortError`          |
+| :----------------- | :------------------------- | :------------------------- |
+| PreGeneration      | Aborts generation          | Aborts generation          |
+| PostGeneration     | Logged, response preserved | Aborts, returns error      |
+| PreToolUse         | Denies tool call           | Aborts generation          |
+| PostToolUse        | Logged, result preserved   | Aborts generation          |
+| PostToolUseFailure | Logged, result preserved   | Aborts generation          |
+| Stop               | Logged, continues          | Aborts generation          |
+| PreIteration       | Aborts generation          | Aborts generation          |
 | OnSuspend          | Aborts suspend persistence | Aborts suspend persistence |
 
 Use `dive.AbortGeneration("reason")` to create a `*HookAbortError` when a
@@ -419,4 +452,5 @@ Hooks: dive.Hooks{
 - [Custom Tools](custom-tools.md) — Build tools that hooks can intercept
 - [Suspend & Resume](suspend-resume.md) — OnSuspend hook and pause-mid-turn flow
 - [Permissions Guide](permissions.md) — Hook-based permission system
+- [Runtime Context](context-injection.md) — Typed reminders from hooks
 - [Compaction Guide](experimental/compaction.md) — Hook-based context compaction

@@ -45,26 +45,26 @@ Target: $ARGUMENTS
 
 ### Frontmatter Fields
 
-| Field           | Required | Description                                          |
-| --------------- | -------- | ---------------------------------------------------- |
-| `name`          | No       | Unique identifier (defaults to filename/directory)   |
-| `description`   | No       | Brief explanation for the LLM; presence makes it agent-invocable |
-| `allowed-tools` | No       | Parsed for compatibility; informational only — NOT enforced at runtime, so it provides no security guarantee. Use the `permission` package to restrict tool access. |
-| `model`         | No       | Model override for this skill (reserved for future use) |
-| `argument-hint` | No       | Describes expected arguments (shown in CLI help) |
-| `triggers`      | No       | Keyword/regex patterns for automatic skill suggestion |
-| `user-invocable`| No       | Override: `true` = command only, `false` = skill only |
+| Field            | Required | Description                                                                                                                                                         |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`           | No       | Unique identifier (defaults to filename/directory)                                                                                                                  |
+| `description`    | No       | Brief explanation for the LLM; presence makes it agent-invocable                                                                                                    |
+| `allowed-tools`  | No       | Parsed for compatibility; informational only — NOT enforced at runtime, so it provides no security guarantee. Use the `permission` package to restrict tool access. |
+| `model`          | No       | Model override for this skill (reserved for future use)                                                                                                             |
+| `argument-hint`  | No       | Describes expected arguments (shown in CLI help)                                                                                                                    |
+| `triggers`       | No       | Keyword/regex patterns for automatic skill suggestion                                                                                                               |
+| `user-invocable` | No       | Override: `true` = command only, `false` = skill only                                                                                                               |
 
 Frontmatter is optional. Files without `---` are treated as commands.
 
 ### Skills vs. Commands
 
-| | Skill | Command |
-|---|---|---|
-| Has `description` | Yes | No |
-| Agent can auto-invoke | Yes | No |
-| User can invoke via `/name` | Yes | Yes |
-| Appears in skill catalog | Yes | No |
+|                             | Skill | Command |
+| --------------------------- | ----- | ------- |
+| Has `description`           | Yes   | No      |
+| Agent can auto-invoke       | Yes   | No      |
+| User can invoke via `/name` | Yes   | Yes     |
+| Appears in skill catalog    | Yes   | No      |
 
 A skill with a description is both agent-invocable and user-invocable. Setting `user-invocable: true` forces it to be user-only even with a description.
 
@@ -72,34 +72,34 @@ A skill with a description is both agent-invocable and user-invocable. Setting `
 
 Skills support three kinds of variable substitution in their instructions:
 
-| Syntax | Description | Example |
-|--------|-------------|---------|
-| `$ARGUMENTS` | Full argument string | `/deploy staging prod` → `"staging prod"` |
-| `$1`, `$2`, ..., `$9` | Positional arguments | `/deploy staging` → `$1` = `"staging"` |
-| `!{command}` | Shell command output | `!{git branch --show-current}` → `"main"` |
+| Syntax                | Description          | Example                                   |
+| --------------------- | -------------------- | ----------------------------------------- |
+| `$ARGUMENTS`          | Full argument string | `/deploy staging prod` → `"staging prod"` |
+| `$1`, `$2`, ..., `$9` | Positional arguments | `/deploy staging` → `$1` = `"staging"`    |
+| `!{command}`          | Shell command output | `!{git branch --show-current}` → `"main"` |
 
 Shell expansion (`!{...}`) is **disabled by default** for security. Enable it with `skill.LoaderOptions{ShellExpansion: true}`, or `skill.WithShellExpansion(true)` when calling `Expand()` directly.
 
 **Security:** Shell expansion is only allowed for local skills (`file://` or empty SourceURI). Skills loaded from remote providers (e.g., custom HTTP providers) never get shell expansion regardless of configuration. This is enforced by `Skill.IsLocal()`.
 
-**Expansion order:** `!{...}` blocks are executed against the raw template *before* `$ARGUMENTS`/`$N` substitution. Arguments may be model-controlled, so a `!{...}` sequence carried in arguments is never executed — it appears as literal text. Shell command output is also inserted verbatim and never re-scanned for placeholders. To reference arguments inside a `!{command}` block, use `$1`-`$9` (passed as shell positional parameters) or `$ARGUMENTS` (exported as an environment variable); the shell receives the values as data, so argument text is never interpreted as shell syntax.
+**Expansion order:** `!{...}` blocks are executed against the raw template _before_ `$ARGUMENTS`/`$N` substitution. Arguments may be model-controlled, so a `!{...}` sequence carried in arguments is never executed — it appears as literal text. Shell command output is also inserted verbatim and never re-scanned for placeholders. To reference arguments inside a `!{command}` block, use `$1`-`$9` (passed as shell positional parameters) or `$ARGUMENTS` (exported as an environment variable); the shell receives the values as data, so argument text is never interpreted as shell syntax.
 
 ## Skill Discovery
 
 Skills are discovered from multiple locations in priority order:
 
-| Priority | Path | Scope |
-|----------|------|-------|
-| 1 | `.dive/skills/` | Project |
-| 2 | `.dive/commands/` | Project |
-| 3 | `.agents/skills/` | Project (generic cross-tool standard) |
-| 4 | `.claude/skills/` | Project (Claude compatibility) |
-| 5 | `.claude/commands/` | Project (Claude compatibility) |
-| 6 | `~/.dive/skills/` | User |
-| 7 | `~/.dive/commands/` | User |
-| 8 | `~/.agents/skills/` | User (generic cross-tool standard) |
-| 9 | `~/.claude/skills/` | User (Claude compatibility) |
-| 10 | `~/.claude/commands/` | User (Claude compatibility) |
+| Priority | Path                  | Scope                                 |
+| -------- | --------------------- | ------------------------------------- |
+| 1        | `.dive/skills/`       | Project                               |
+| 2        | `.dive/commands/`     | Project                               |
+| 3        | `.agents/skills/`     | Project (generic cross-tool standard) |
+| 4        | `.claude/skills/`     | Project (Claude compatibility)        |
+| 5        | `.claude/commands/`   | Project (Claude compatibility)        |
+| 6        | `~/.dive/skills/`     | User                                  |
+| 7        | `~/.dive/commands/`   | User                                  |
+| 8        | `~/.agents/skills/`   | User (generic cross-tool standard)    |
+| 9        | `~/.claude/skills/`   | User (Claude compatibility)           |
+| 10       | `~/.claude/commands/` | User (Claude compatibility)           |
 
 The first skill found with a given name takes precedence. The `.agents/skills/` path follows the generic standard used by Codex CLI, enabling cross-tool skill sharing.
 
@@ -108,6 +108,7 @@ Symlinked skill directories are supported — the filesystem provider resolves s
 ### Organization Patterns
 
 **Directory-based** (for skills with supporting files):
+
 ```text
 .dive/skills/
 └── code-reviewer/
@@ -117,6 +118,7 @@ Symlinked skill directories are supported — the filesystem provider resolves s
 ```
 
 **File-based** (for simple skills):
+
 ```text
 .dive/skills/
 └── helper.md
@@ -149,10 +151,11 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 ```
 
 What the extension provides:
+
 1. **Tools** — the Skill tool (only when skills are loaded)
 2. **Rules** — skill usage instructions appended to the system prompt (only when skills are loaded)
 3. **Hooks** — always provided, even with zero skills:
-   - A **PreGenerationHook** that injects the skill catalog as a `<system-reminder name="skills">` block into the first user message (replaced in place if the catalog changes; removed if skills become empty)
+   - A **PreGenerationHook** that pins the typed skill catalog as a `<system-reminder name="skills">` overlay in the first user message. The overlay refreshes when the catalog changes, masks stale legacy blocks, and is never persisted.
    - A **PostToolUseHook** that injects expanded skill instructions as `AdditionalContext` on the tool result message, keyed by tool call ID for correct association under parallel execution
 
 ### Three-Layer Architecture
@@ -175,7 +178,11 @@ Dive's skill integration follows Claude Code's three-layer architecture:
 └──────────────────────────────────────────────────────┘
 ```
 
-The key insight: the skill catalog is injected into the **first user message** via `dive.SetSystemReminder`, not repeated in the tool description on every LLM request. This is stable for prompt caching — it sits right after the system prompt and doesn't move as the conversation grows.
+The key insight: the skill catalog is created with `dive.NewContextReminder`
+and pinned with `hctx.PinReminder`, not repeated in the tool description on
+every LLM request. The model sees it in a copy of the **first user message**,
+immediately after the system prompt. The stable placement supports prompt
+caching without mutating or persisting loaded history.
 
 ### Catalog Injection
 
@@ -197,13 +204,18 @@ only use skills listed above.
 </system-reminder>
 ```
 
-Only agent-invocable skills appear in the catalog. Commands are excluded. Each entry includes its `Location:` on disk so the agent can tell the user where a skill lives. The block is managed by `dive.SetSystemReminder` — a general-purpose API for named blocks that any system can use.
+Only agent-invocable skills appear in the catalog. Commands are excluded. Each
+entry includes its `Location:` on disk so the agent can tell the user where a
+skill lives. The block uses Dive's typed contextual reminder API. See
+[Runtime Context and System Reminders](context-injection.md) for its authority,
+lifetime, provider rendering, and legacy-migration behavior.
 
 ### Skill Content Injection
 
 When the Skill tool is invoked, it returns a brief `"Launching skill: X"`. The full expanded instructions are injected by the `PostToolUseHook` as `AdditionalContext` — a text block appended to the tool result message. This matches Claude Code's pattern where the tool triggers loading and the content appears separately.
 
 The injected content includes:
+
 - **Base directory** — the skill's file path parent, so the agent can resolve relative paths to reference files (e.g., `references/05-prd.md`)
 - **Expanded instructions** — with `$ARGUMENTS`, `$1`-`$9`, and `!{command}` substituted
 
@@ -236,7 +248,9 @@ All toolkit tools accept a `Validator` field that takes precedence over `Workspa
 ### Session Resume
 
 The catalog hook handles session resume correctly:
-- On a fresh process resuming a session, stale catalog blocks from a previous run are detected and updated (or removed if skills are no longer available)
+
+- On a fresh process resuming a session, the current typed overlay masks a stale legacy catalog block without rewriting stored history
+- If no skills remain, an empty same-name overlay masks the legacy block from the model
 - Hooks are always returned by the extension (even with zero skills) specifically to handle this cleanup
 
 ## Provider System
@@ -266,8 +280,8 @@ Skills can define triggers for automatic suggestion:
 
 ```yaml
 triggers:
-  - keyword: deploy       # Case-insensitive substring match
-  - pattern: "deploy .+"  # Regular expression match
+  - keyword: deploy # Case-insensitive substring match
+  - pattern: "deploy .+" # Regular expression match
 ```
 
 Use `loader.Match(input)` to find skills whose triggers match user input. This enables CLI-level skill suggestions before the LLM sees the input.
