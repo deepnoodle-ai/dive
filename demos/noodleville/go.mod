@@ -3,7 +3,7 @@ module github.com/deepnoodle-ai/dive/demos/noodleville
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.14.0
+	github.com/deepnoodle-ai/dive v1.15.0
 	github.com/deepnoodle-ai/wonton v0.0.36
 )
 

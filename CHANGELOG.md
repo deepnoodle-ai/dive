@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-07-10
+
 ### Added
 
 - **Dynamic context-injection demos** — the experimental CLI's repeatable
