@@ -106,7 +106,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages, config.OperatorAuthority)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -238,7 +238,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages, config.OperatorAuthority)
+	msgs, err := convertMessages(config.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -318,13 +318,10 @@ func validateMessages(messages []*llm.Message) error {
 	return nil
 }
 
-func convertMessages(messages []*llm.Message, authorityModes ...llm.OperatorAuthorityMode) ([]Message, error) {
-	mode := llm.OperatorAuthorityBestEffort
-	if len(authorityModes) > 0 {
-		mode = authorityModes[0]
-	}
-	var err error
-	messages, err = llm.RenderReminders(messages, mode, nil)
+func convertMessages(messages []*llm.Message) ([]Message, error) {
+	// Chat Completions has no operator-authority role, so operator reminders
+	// always render as tagged user messages (nil resolver = no native authority).
+	messages, err := llm.RenderReminders(messages, nil)
 	if err != nil {
 		return nil, err
 	}

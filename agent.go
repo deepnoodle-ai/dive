@@ -228,10 +228,6 @@ type AgentOptions struct {
 	// Hooks groups all agent-level hooks.
 	Hooks Hooks
 
-	// OperatorAuthority controls whether operator reminders may fall back to a
-	// tagged user message. The zero value is best effort.
-	OperatorAuthority OperatorAuthorityMode
-
 	// Infrastructure
 	Logger        llm.Logger
 	ModelSettings *ModelSettings
@@ -298,7 +294,6 @@ type Agent struct {
 	logger                llm.Logger
 	toolIterationLimit    int
 	parallelToolExecution bool
-	operatorAuthority     OperatorAuthorityMode
 	modelSettings         *ModelSettings
 	systemPrompt          string
 	session               Session
@@ -325,12 +320,6 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 	}
 	if opts.Logger == nil {
 		opts.Logger = &llm.NullLogger{}
-	}
-	if opts.OperatorAuthority == "" {
-		opts.OperatorAuthority = OperatorAuthorityBestEffort
-	}
-	if opts.OperatorAuthority != OperatorAuthorityBestEffort && opts.OperatorAuthority != OperatorAuthorityStrict {
-		return nil, fmt.Errorf("invalid operator authority mode %q", opts.OperatorAuthority)
 	}
 	// Merge extensions into opts before building the agent. Clone the
 	// caller's slices first: appending directly may write into the caller's
@@ -374,7 +363,6 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		responseTimeout:       opts.ResponseTimeout,
 		toolIterationLimit:    opts.ToolIterationLimit,
 		parallelToolExecution: opts.ParallelToolExecution,
-		operatorAuthority:     opts.OperatorAuthority,
 		llmHooks:              opts.LLMHooks,
 		logger:                opts.Logger,
 		systemPrompt:          opts.SystemPrompt,
@@ -504,13 +492,6 @@ func ensureReminderPriming(prompt string) string {
 func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption) (response *Response, err error) {
 	var options CreateResponseOptions
 	options.Apply(opts)
-	authorityMode := a.operatorAuthority
-	if options.OperatorAuthority != nil {
-		authorityMode = *options.OperatorAuthority
-	}
-	if authorityMode != OperatorAuthorityBestEffort && authorityMode != OperatorAuthorityStrict {
-		return nil, fmt.Errorf("invalid operator authority mode %q", authorityMode)
-	}
 	for _, reminder := range options.PinnedReminders {
 		if err := validateReminder(reminder); err != nil {
 			return nil, err
@@ -910,7 +891,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 
 generateLoop:
-	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback, model, authorityMode)
+	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback, model)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
 		// generate wraps loop failures in *GenerationError scoped to that
@@ -1827,7 +1808,7 @@ func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback, model llm.LLM, authorityMode OperatorAuthorityMode) (result *generateResult, err error) {
+func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback, model llm.LLM) (result *generateResult, err error) {
 
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
@@ -1949,7 +1930,7 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 
 		// Build per-iteration LLM options
 		modelMessages := applyPinnedReminders(updatedMessages, hctx.reminders.pinned)
-		baseOpts := a.getGenerationOptions(systemPrompt, resolvedTools, authorityMode)
+		baseOpts := a.getGenerationOptions(systemPrompt, resolvedTools)
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(modelMessages...))
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
@@ -2860,7 +2841,7 @@ func (a *Agent) createDeniedResult(call *llm.ToolUseContent, message string, pre
 
 // getGenerationOptions builds LLM options for a generation iteration using
 // the resolved tool set and effective system prompt.
-func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool, authorityMode OperatorAuthorityMode) []llm.Option {
+func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool) []llm.Option {
 	var generateOpts []llm.Option
 	if systemPrompt != "" {
 		generateOpts = append(generateOpts, llm.WithSystemPrompt(systemPrompt))
@@ -2878,7 +2859,6 @@ func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool, authorit
 	if a.logger != nil {
 		generateOpts = append(generateOpts, llm.WithLogger(a.logger))
 	}
-	generateOpts = append(generateOpts, llm.WithOperatorAuthority(authorityMode))
 	generateOpts = append(generateOpts, a.modelSettings.Options()...)
 	return generateOpts
 }

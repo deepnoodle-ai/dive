@@ -2,7 +2,6 @@ package llm
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 )
@@ -17,19 +16,6 @@ const (
 	// ReminderTierOperator is context asserted by the application operator.
 	ReminderTierOperator ReminderTier = "operator"
 )
-
-// OperatorAuthorityMode controls whether an operator reminder may fall back to
-// a tagged user message when a provider cannot give it native authority.
-type OperatorAuthorityMode string
-
-const (
-	OperatorAuthorityBestEffort OperatorAuthorityMode = "best_effort"
-	OperatorAuthorityStrict     OperatorAuthorityMode = "strict"
-)
-
-// ErrOperatorAuthorityUnavailable is returned before a provider request when
-// strict mode is active and an operator reminder cannot use a native role.
-var ErrOperatorAuthorityUnavailable = errors.New("operator reminder authority unavailable")
 
 var reminderNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
@@ -67,10 +53,11 @@ type ReminderAuthorityResolver func(index int, messages []*Message) (Role, bool)
 // RenderReminders converts typed reminder blocks to provider-wire text without
 // mutating caller-owned messages. Only messages containing ReminderContent are
 // normalized; raw system/developer messages retain their existing behavior.
-func RenderReminders(messages []*Message, mode OperatorAuthorityMode, resolve ReminderAuthorityResolver) ([]*Message, error) {
-	if mode == "" {
-		mode = OperatorAuthorityBestEffort
-	}
+//
+// Operator reminders render with the strongest role the resolver reports as
+// legal for their position, falling back to a tagged user message everywhere
+// else. A nil resolver means native operator authority is unavailable.
+func RenderReminders(messages []*Message, resolve ReminderAuthorityResolver) ([]*Message, error) {
 	out := make([]*Message, len(messages))
 	copy(out, messages)
 	for i, message := range messages {
@@ -79,7 +66,6 @@ func RenderReminders(messages []*Message, mode OperatorAuthorityMode, resolve Re
 		}
 		containsReminder := false
 		operator := false
-		var operatorName string
 		content := make([]Content, len(message.Content))
 		for j, block := range message.Content {
 			reminder, ok := block.(*ReminderContent)
@@ -96,7 +82,6 @@ func RenderReminders(messages []*Message, mode OperatorAuthorityMode, resolve Re
 			containsReminder = true
 			if reminder.Tier == ReminderTierOperator {
 				operator = true
-				operatorName = reminder.Name
 			}
 			content[j] = &TextContent{Text: FormatReminder(reminder)}
 		}
@@ -104,16 +89,9 @@ func RenderReminders(messages []*Message, mode OperatorAuthorityMode, resolve Re
 			continue
 		}
 		role := User
-		if operator {
-			var native bool
-			if resolve != nil {
-				role, native = resolve(i, messages)
-			}
-			if !native {
-				if mode == OperatorAuthorityStrict {
-					return nil, fmt.Errorf("%w: reminder %q", ErrOperatorAuthorityUnavailable, operatorName)
-				}
-				role = User
+		if operator && resolve != nil {
+			if nativeRole, native := resolve(i, messages); native {
+				role = nativeRole
 			}
 		}
 		out[i] = &Message{ID: message.ID, Role: role, Content: content}

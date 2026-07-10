@@ -111,9 +111,6 @@ type CreateResponseOptions struct {
 	// of the first user message for this request.
 	PinnedReminders []Reminder
 
-	// OperatorAuthority overrides the agent's reminder fallback policy.
-	OperatorAuthority *OperatorAuthorityMode
-
 	// EventCallback is invoked for each response item during generation.
 	// Callbacks include messages, tool calls, and tool results.
 	EventCallback EventCallback
@@ -179,14 +176,6 @@ func WithMessages(messages ...*llm.Message) CreateResponseOption {
 func WithPinnedReminder(reminder Reminder) CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
 		opts.PinnedReminders = append(opts.PinnedReminders, reminder)
-	}
-}
-
-// WithOperatorAuthority overrides the agent's operator reminder policy for
-// this request.
-func WithOperatorAuthority(mode OperatorAuthorityMode) CreateResponseOption {
-	return func(opts *CreateResponseOptions) {
-		opts.OperatorAuthority = &mode
 	}
 }
 

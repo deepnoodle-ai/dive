@@ -107,7 +107,7 @@ func (p *Provider) Name() string {
 func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)
-	rendered, err := renderReminderMessages(config.Messages, config.OperatorAuthority)
+	rendered, err := renderReminderMessages(config.Messages)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +190,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIterator, error) {
 	config := &llm.Config{}
 	config.Apply(opts...)
-	rendered, err := renderReminderMessages(config.Messages, config.OperatorAuthority)
+	rendered, err := renderReminderMessages(config.Messages)
 	if err != nil {
 		return nil, err
 	}
@@ -223,8 +223,10 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	return stream, nil
 }
 
-func renderReminderMessages(messages []*llm.Message, mode llm.OperatorAuthorityMode) ([]*llm.Message, error) {
-	return llm.RenderReminders(messages, mode, nil)
+func renderReminderMessages(messages []*llm.Message) ([]*llm.Message, error) {
+	// Gemini contents allow only user/model roles, so operator reminders always
+	// render as tagged user messages (nil resolver = no native authority).
+	return llm.RenderReminders(messages, nil)
 }
 
 // wrapGoogleError converts a Google API error to a providers.NewError so that

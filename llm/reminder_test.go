@@ -2,7 +2,6 @@ package llm
 
 import (
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -42,7 +41,7 @@ func TestRenderReminders(t *testing.T) {
 	}}}
 	messages := []*Message{NewUserTextMessage("continue"), operator}
 
-	rendered, err := RenderReminders(messages, OperatorAuthorityBestEffort,
+	rendered, err := RenderReminders(messages,
 		func(_ int, _ []*Message) (Role, bool) { return Developer, true })
 	assert.NoError(t, err)
 	assert.Equal(t, Developer, rendered[1].Role)
@@ -50,11 +49,9 @@ func TestRenderReminders(t *testing.T) {
 	_, stillTyped := messages[1].Content[0].(*ReminderContent)
 	assert.True(t, stillTyped, "rendering must not mutate stored messages")
 
-	fallback, err := RenderReminders(messages, OperatorAuthorityBestEffort, nil)
+	// A nil resolver reports no native authority, so operator reminders fall
+	// back to a tagged user message.
+	fallback, err := RenderReminders(messages, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, User, fallback[1].Role)
-
-	_, err = RenderReminders(messages, OperatorAuthorityStrict, nil)
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, ErrOperatorAuthorityUnavailable))
 }

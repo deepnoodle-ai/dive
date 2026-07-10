@@ -72,7 +72,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	rendered, err := p.renderReminders(config.Messages, request.Model, config.OperatorAuthority)
+	rendered, err := p.renderReminders(config.Messages, request.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err := p.applyRequestConfig(&request, config); err != nil {
 		return nil, err
 	}
-	rendered, err := p.renderReminders(config.Messages, request.Model, config.OperatorAuthority)
+	rendered, err := p.renderReminders(config.Messages, request.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -423,8 +423,8 @@ func (p *Provider) supportsAutomaticCaching() bool {
 	return p.endpoint == DefaultEndpoint
 }
 
-func (p *Provider) renderReminders(messages []*llm.Message, model string, mode llm.OperatorAuthorityMode) ([]*llm.Message, error) {
-	return llm.RenderReminders(messages, mode, func(index int, all []*llm.Message) (llm.Role, bool) {
+func (p *Provider) renderReminders(messages []*llm.Message, model string) ([]*llm.Message, error) {
+	return llm.RenderReminders(messages, func(index int, all []*llm.Message) (llm.Role, bool) {
 		if !p.supportsNativeSystemReminders(model) || !nativeSystemReminderPlacement(index, all) {
 			return llm.User, false
 		}

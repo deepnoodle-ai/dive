@@ -1,7 +1,6 @@
 package openaicompletions
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -17,8 +16,4 @@ func TestReminderRenderingFallsBackForChatCompletions(t *testing.T) {
 	assert.Len(t, converted, 1)
 	assert.Equal(t, "user", converted[0].Role)
 	assert.Contains(t, converted[0].Content, `name="mode"`)
-
-	_, err = convertMessages([]*llm.Message{message}, llm.OperatorAuthorityStrict)
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, llm.ErrOperatorAuthorityUnavailable))
 }

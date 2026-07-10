@@ -132,9 +132,6 @@ func main() {
 				Help("Pinned contextual reminder as NAME=TEXT (repeatable)"),
 			cli.Strings("operator-reminder").
 				Help("Operator reminder appended after the first input as NAME=TEXT (repeatable)"),
-			cli.Bool("strict-operator-authority").
-				Default(false).
-				Help("Fail if an operator reminder cannot use a native authority role"),
 			cli.Bool("print", "p").
 				Default(false).
 				Help("Print response and exit (useful for pipes)"),
@@ -355,7 +352,7 @@ func runInteractive(ctx *cli.Context) error {
 			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
 	}
-	applyReminderAgentOptions(&agentOpts, ctx, pinnedReminders)
+	applyReminderAgentOptions(&agentOpts, pinnedReminders)
 
 	// Mid-turn compaction: when compaction is enabled, summarize the working
 	// context within a turn if it grows past the threshold, so a long tool loop
@@ -521,7 +518,7 @@ func runPrint(ctx *cli.Context) error {
 		Tools:         tools,
 		ModelSettings: printModelSettings,
 	}
-	applyReminderAgentOptions(&agentOpts, ctx, pinnedReminders)
+	applyReminderAgentOptions(&agentOpts, pinnedReminders)
 	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)

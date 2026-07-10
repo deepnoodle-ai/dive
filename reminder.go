@@ -16,16 +16,6 @@ const (
 	ReminderTierOperator   = llm.ReminderTierOperator
 )
 
-// OperatorAuthorityMode controls fallback behavior for operator reminders.
-type OperatorAuthorityMode = llm.OperatorAuthorityMode
-
-const (
-	OperatorAuthorityBestEffort = llm.OperatorAuthorityBestEffort
-	OperatorAuthorityStrict     = llm.OperatorAuthorityStrict
-)
-
-var ErrOperatorAuthorityUnavailable = llm.ErrOperatorAuthorityUnavailable
-
 // Reminder is a validated, named block of runtime-injected context.
 type Reminder struct {
 	Name    string       `json:"name"`
@@ -71,7 +61,8 @@ func reminderFromContent(c *llm.ReminderContent) Reminder {
 
 // NewReminderMessage builds a recorded input message for an appended reminder.
 // Operator reminders use the system role internally; providers normalize that
-// role according to their known capabilities and the configured policy.
+// role according to their known capabilities, falling back to a tagged user
+// message where native operator authority is unavailable.
 func NewReminderMessage(r Reminder) *llm.Message {
 	role := llm.User
 	if r.Tier == ReminderTierOperator {

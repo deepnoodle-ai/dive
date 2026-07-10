@@ -122,8 +122,9 @@ content blocks (never confusable with user text), providers render them to
 strongest authority the target is *known* to support — a native `system`
 message on Anthropic Opus 4.8, a `developer` item on OpenAI, and a tagged
 user message everywhere else. Appending never invalidates the prompt-cache
-prefix. If a mode genuinely must not run without native authority, opt in
-to strict mode and handle `ErrOperatorAuthorityUnavailable`.
+prefix. The downgrade to a tagged user message is silent: operator authority
+raises instruction priority, never enforces (Non-Goal 6), so a weaker role is
+a weaker instruction rather than a failed request.
 
 | I want to… | Use |
 | :--- | :--- |
@@ -275,10 +276,10 @@ form; auditing captured API traffic greps the tag.
 ## Provider Rendering
 
 Providers translate reminders at encode time. The rendering contract for
-reminder messages is: **best-effort rendering never knowingly emits an
-unsupported reminder role or placement.** (Remote services can always
-reject a request for unrelated reasons; the contract is about what Dive
-knowingly sends.) The contract applies to reminder messages only — a raw
+reminder messages is: **rendering never knowingly emits an unsupported
+reminder role or placement** — it downgrades to a tagged user message
+instead. (Remote services can always reject a request for unrelated reasons;
+the contract is about what Dive knowingly sends.) The contract applies to reminder messages only — a raw
 `llm.System` message constructed by the caller passes through verbatim,
 exactly as today: this design does not change the meaning of an existing
 low-level role. Callers using the raw role own the compatibility
@@ -289,8 +290,12 @@ Capability resolution for operator reminders:
 - **Known native support** → native operator role.
 - **Unknown or known-unsupported** → tagged user-role rendering. Unknown
   means fallback — never "send the native role and hope."
-- **Strict mode** (below) → a typed error before any network call when
-  native authority is unavailable.
+
+v1 ships a single policy: best-effort. There is no configuration axis and no
+error path for authority — the downgrade is always silent. A strict "native
+authority or error" mode is a deliberate follow-up (see Rollout), deferred
+until a concrete consumer needs a hard guarantee, because operator authority
+is not an enforcement mechanism (Non-Goal 6) and no current caller does.
 
 | Provider (basis) | Operator reminder rendering |
 | :--- | :--- |
@@ -319,20 +324,18 @@ boundary after a complete tool-result batch) satisfies this by
 construction — but not every seam does. Between-turn appends can follow an
 assistant message, and the Stop-hook continuation seam always does.
 
-In best-effort mode, providers therefore normalize **every** recognized
-reminder message in a position where the native role is illegal — not just
-leading or consecutive ones — by rendering it in the tagged-user form.
-Under strict mode there is no silent normalization of operator reminders:
-an illegally placed one is an error (see below), because a downgrade is a
-downgrade regardless of whether capability or placement caused it.
+Providers therefore normalize **every** recognized reminder message in a
+position where the native role is illegal — not just leading or consecutive
+ones — by rendering it in the tagged-user form. Placement and capability are
+treated identically: either one that rules out the native role produces the
+same silent tagged-user fallback.
 
 Placement is judged per message against the caller's ordering, so
-**adjacent operator reminder messages all demote** (and all fail under
-strict mode): each breaks the other's seam, mirroring Anthropic's
-no-consecutive-system-messages rule. Callers that need several operator
-facts at one seam should put them in a single reminder. Merging adjacent
-operator reminders into one native system message is a possible future
-refinement, not part of this design.
+**adjacent operator reminder messages all demote**: each breaks the other's
+seam, mirroring Anthropic's no-consecutive-system-messages rule. Callers that
+need several operator facts at one seam should put them in a single reminder.
+Merging adjacent operator reminders into one native system message is a
+possible future refinement, not part of this design.
 
 ### Fallback is an authority downgrade
 
@@ -341,22 +344,23 @@ When an operator reminder renders as a tagged user message, it loses its
 change, not a cosmetic one. The design makes this explicit rather than
 hiding it:
 
-- Default policy is **best-effort**: render with the strongest authority
-  the target is known to support, downgrading silently on unknown
-  capability or illegal placement.
-- **Strict mode** — configured per agent or per request, not per reminder
-  in v1 (per-reminder strictness would have to be persisted to survive
-  replay; agent/request scope stays meaningful when a stored session is
-  replayed against another provider) — fails fast with a typed error
-  (e.g. `ErrOperatorAuthorityUnavailable`) before the network call whenever
-  an operator reminder cannot receive native authority, **whatever the
-  cause**: missing capability, unknown capability, or illegal placement.
-  Strict means native authority or an error — never a silent downgrade.
-  The corollary is that strict-mode callers own placement: put between-turn
-  reminders after the user message, and rely on the hook channel (whose
-  iteration-boundary seam is always legal) for mid-turn injection.
-- Either way, anything that actually matters is enforced outside the model
-  (Non-Goal 6).
+- v1 policy is **best-effort only**: render with the strongest authority the
+  target is known to support, downgrading silently on unknown capability or
+  illegal placement. There is no per-agent or per-request configuration knob.
+- The silent downgrade is acceptable because anything that actually matters
+  is enforced outside the model (Non-Goal 6). Operator authority raises
+  instruction priority; it is not a guarantee, so there is nothing for a
+  failed request to protect.
+- A **strict** mode — "native authority or a typed error before the network
+  call" — is a deliberate follow-up, not shipped in v1. It was cut because
+  no current consumer needs a hard authority guarantee, and adding the
+  configuration axis (agent- and request-scoped, threaded through the
+  provider layer) ahead of that need is speculative surface. When a real
+  consumer appears, strict mode can be added without changing the primitive:
+  the resolver already reports whether the native role is available, so a
+  policy layer can turn "not available" into an error instead of a fallback.
+  Deferring it also keeps Dive-internal injections (Stop-hook continuation,
+  background results) from having to reason about a mode they must never trip.
 
 ## Delivery Semantics
 
@@ -443,7 +447,7 @@ existing parallel-tool ordering tests.
   next `CreateResponse` input. No new agent machinery. Place the reminder
   *after* the accompanying user message (`assistant → user → system` is
   legal; `assistant → system` is not); a reminder sent with no user message
-  falls back in best-effort mode and errors in strict mode.
+  falls back to a tagged user message.
 
 A steering mailbox (enqueue a message for a running agent — the Claude Code
 "user typed while the agent was working" pattern) is an intended follow-up
@@ -473,12 +477,12 @@ and explicitly stay put where it does not:
   appended **contextual** reminder phrased as context ("the following input
   arrived from the user: …"). Its seam immediately follows an assistant
   turn, a position where native operator authority is structurally illegal
-  on Anthropic — an operator-tier reminder here would either silently
-  downgrade (breaking the strict guarantee) or make every strict-mode agent
-  fail on Stop continuation. Dive-internal injections must never be able to
-  trip strict mode, so the tier is contextual by design. An embedder whose
-  continuation genuinely carries an operator fact can append its own
-  operator reminder at a legal seam.
+  on Anthropic, so an operator-tier reminder here would always downgrade to a
+  tagged user message anyway. The tier is contextual by design: it is the
+  honest classification (relayed user input, not an operator assertion), and
+  it keeps the internal injection from depending on a native role it can
+  never get at this seam. An embedder whose continuation genuinely carries an
+  operator fact can append its own operator reminder at a legal seam.
 - **Suspend/resume payloads stay tool results.** Resume input must satisfy
   the pending `tool_use`/`tool_result` pairing (see
   `a2a/executor.go`'s `resumeToolResults`); promoting the raw payload to a
@@ -546,8 +550,9 @@ allowing re-surfacing.)
   genuine injection, and even that proves protocol conformance in storage,
   not origin, to an outside auditor. Legacy text parsing is heuristic and
   excluded from security-sensitive paths by API design.
-- **Fallback weakens authority.** The best-effort/strict policy exists so
-  embedders can choose; neither substitutes for out-of-model enforcement.
+- **Fallback weakens authority.** When an operator reminder downgrades to a
+  tagged user message it silently loses priority; this is never a substitute
+  for out-of-model enforcement, which is where anything that matters lives.
 - Reminders are visible in API traffic and stored sessions. Embedders that
   hide them from a transcript view are cleaning the display, not concealing
   data.
@@ -565,17 +570,17 @@ allowing re-surfacing.)
    keyed on endpoint + model; Anthropic native pass-through; OpenAI
    developer-role mapping (Grok stays tagged-user until a contract test
    proves developer-role support on x.ai); best-effort position
-   normalization for all illegal placements; strict-mode typed error on
-   any authority downgrade; contract tests per provider.
+   normalization for all illegal placements; contract tests per provider.
 3. **Delivery** — agent-owned overlay/recorded paths,
    `WithPinnedReminder` / `hctx.PinReminder` / `hctx.AppendReminder`,
    model-only lifetime, declaration-order draining with regression tests,
    skill package migration (overlay + legacy masking).
 4. **Internal adoption** — Stop-hook reason and background-task completion
    messages move onto the mechanism (resume payloads stay tool results).
-5. **Follow-ups (separate designs)** — steering mailbox; compaction
-   carry-forward; embedder-side budget/dedup helpers; typed fragment
-   catalog if repetition demands it.
+5. **Follow-ups (separate designs)** — strict operator-authority mode
+   (native-or-error), added when a concrete consumer needs a hard guarantee;
+   steering mailbox; compaction carry-forward; embedder-side budget/dedup
+   helpers; typed fragment catalog if repetition demands it.
 
 ## References
 

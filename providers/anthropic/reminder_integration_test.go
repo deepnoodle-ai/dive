@@ -28,7 +28,6 @@ func TestIntegration_OperatorReminderNativeSystemRole(t *testing.T) {
 				Content: "Reply with exactly DIVE_ANTHROPIC_REMINDER_OK and no punctuation.",
 			}}},
 		),
-		llm.WithOperatorAuthority(llm.OperatorAuthorityStrict),
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, "DIVE_ANTHROPIC_REMINDER_OK", strings.TrimSpace(response.Message().Text()))

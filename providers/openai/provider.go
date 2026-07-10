@@ -193,7 +193,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	}
 
 	// Convert input messages to the OpenAI SDK input type
-	rendered, err := llm.RenderReminders(config.Messages, config.OperatorAuthority, func(_ int, _ []*llm.Message) (llm.Role, bool) {
+	rendered, err := llm.RenderReminders(config.Messages, func(_ int, _ []*llm.Message) (llm.Role, bool) {
 		if p.Name() == ProviderName && strings.TrimRight(p.endpoint, "/") == DefaultEndpoint {
 			return llm.Developer, true
 		}

@@ -9,9 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - **Typed context reminders** — hooks can append or pin tiered reminders with
-  explicit recording policy, provider-aware authority rendering, and strict
-  capability checks. The experimental Dive CLI exposes reminders as a demo
-  platform, and provider-tagged integration tests exercise live delivery.
+  explicit recording policy and provider-aware authority rendering: operator
+  reminders use a native `system` (Anthropic Opus 4.8) or `developer` (OpenAI)
+  role where known-supported, falling back to a tagged user message everywhere
+  else. The experimental Dive CLI exposes reminders as a demo platform, and
+  provider-tagged integration tests exercise live delivery.
 
 ### Changed
 
