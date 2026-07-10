@@ -113,7 +113,7 @@ agent, _ := dive.NewAgent(opts)
 1. **Always registers hooks** — even with zero skills. This ensures stale catalog blocks from a previous session can be cleaned up on resume.
 2. **Registers the Skill tool** (only when skills are loaded) — static description, no skill listing. The tool is a trigger: returns `"Launching skill: X"` and stores expanded instructions keyed by tool call ID for the PostToolUse hook.
 3. **Appends skill usage rules** to the system prompt (only when skills are loaded).
-4. **Registers a PreGenerationHook** that creates the skill catalog with `dive.NewContextReminder` and appends it with `hctx.AppendReminder(..., dive.ModelOnly)`. The typed block appears at the request tail, supersedes stale same-name blocks, and is not persisted.
+4. **Registers a PreGenerationHook** that creates the skill catalog with `dive.NewContextReminder` and appends it with `hctx.AppendReminder(..., dive.ModelOnly)`. The typed block appears at the request tail, conflicts with stale same-name catalog facts, and is not persisted.
 5. **Registers a PostToolUseHook** that reads `hctx.Call.ID` to retrieve the correct expanded instructions from the per-call-ID map and sets them as `hctx.AdditionalContext`. Safe under parallel tool execution.
 
 ### The Skill Tool (Trigger)
@@ -247,7 +247,7 @@ Promoted `experimental/skill/` to `skill/` with:
 3. **`skill/agent.go`** — `ConfigureAgent` wires tool, PreGenerationHook (catalog), PostToolUseHook (skill content)
 4. **`reminder.go` and `llm/reminder.go`** — typed reminder construction, recorded/model-only lifetimes, and provider-edge rendering (`system_reminder.go` remains the legacy text compatibility layer)
 5. **`context.go`** — `dive.WithToolCallID/ToolCallID` for tool call ID propagation via context
-6. **Catalog injection** — typed model-only `<system-reminder name="skills">` at the request tail, with later same-name blocks superseding stale legacy values on resume
+6. **Catalog injection** — typed model-only `<system-reminder name="skills">` at the request tail, with a later full snapshot winning conflicts with stale legacy catalog values on resume
 7. **Skill content injection** — PostToolUseHook sets `AdditionalContext` with expanded instructions + base directory, keyed by call ID
 8. **CLI updated** to use `skill.ConfigureAgent`
 
@@ -259,7 +259,7 @@ Promoted `experimental/skill/` to `skill/` with:
 
 ## Open Questions
 
-1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** The PreGeneration hook appends the typed catalog model-only on each `CreateResponse`. Dive places it at the request tail and does not persist it. On resume, the later same-name reminder supersedes stale legacy text for model interpretation.
+1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** The PreGeneration hook appends the typed catalog model-only on each `CreateResponse`. Dive places it at the request tail and does not persist it. On resume, the later full snapshot wins conflicts with stale same-name legacy catalog text for model interpretation.
 
 2. **Should command expansion timeout be configurable?** The 10-second default for `!{command}` may be too short for some use cases (e.g., `!{go test ./...}`). Recommendation: make it configurable via `ExpandOptions` with a sensible default. Currently configurable via `WithShellTimeout`.
 

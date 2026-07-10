@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Same-name reminder interpretation** — the standing priming rule now keeps
+  independent same-name facts and instructions cumulative, using later-wins
+  ordering only where two blocks conflict.
+
 ## [1.15.0] - 2026-07-10
 
 ### Added

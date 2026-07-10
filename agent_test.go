@@ -1048,6 +1048,13 @@ func (e *mockExtension) Tools() []Tool { return e.tools }
 func (e *mockExtension) Hooks() Hooks  { return e.hooks }
 func (e *mockExtension) Rules() string { return e.rules }
 
+func TestReminderPrimingRuleAccumulatesIndependentSameNameContext(t *testing.T) {
+	assert.Contains(t, reminderPrimingRule, "same name accumulate")
+	assert.Contains(t, reminderPrimingRule, "unless their facts or instructions conflict")
+	assert.Contains(t, reminderPrimingRule, "where they conflict, the later block wins")
+	assert.NotContains(t, reminderPrimingRule, "supersede")
+}
+
 func TestExtensionMerge(t *testing.T) {
 	mock := &mockLLM{nameFunc: func() string { return "test-model" }}
 

@@ -78,9 +78,10 @@ response, err := agent.CreateResponse(ctx,
 
 Model-only reminders are appended in order at the request tail without mutating
 the caller's messages. They remain available through later tool iterations in
-the same `CreateResponse`, then disappear. A later reminder with the same name
-supersedes an earlier one for model interpretation; Dive does not rewrite or
-remove the earlier block.
+the same `CreateResponse`, then disappear. Reminders with the same name
+accumulate when they carry independent facts or instructions. When they
+conflict, the later block wins only that conflict; Dive does not rewrite or
+remove either block.
 
 Appending at the tail preserves the long conversation prefix. When a previous
 turn's model-only reminder disappears on the next request, cache reuse can stop
@@ -200,11 +201,12 @@ interpret reminders even before the first one appears:
 
 > Runtime context may appear in `<system-reminder>` blocks. The enclosing
 > message role determines its authority; the tag itself does not confer
-> authority. Later reminder blocks with the same name supersede earlier ones.
+> authority. Reminder blocks with the same name accumulate unless their facts
+> or instructions conflict; where they conflict, the later block wins.
 
 This stable priming rule avoids changing the system-prompt prefix only when a
-reminder first appears. It also says that a later reminder with the same name
-supersedes an earlier one without requiring history rewrites.
+reminder first appears. It also preserves independent same-name events while
+making refreshed, conflicting state unambiguous without history rewrites.
 
 The [runtime context design and contract](../design/context-injection.md)
 contains the complete endpoint, model, and placement matrix.
@@ -258,9 +260,9 @@ compatibility. They mutate plain-text blocks in the first user message, cannot
 express operator tier or recording lifetime, and do not have typed provenance.
 
 Use `Reminder`, `WithModelOnlyReminder`, `NewReminderMessage`, and
-`AppendReminder` for new agent integrations. A later typed reminder supersedes
-a same-name legacy block for model interpretation without rewriting the loaded
-session.
+`AppendReminder` for new agent integrations. A later typed reminder that
+conflicts with a same-name legacy block wins that conflict for model
+interpretation without rewriting the loaded session.
 
 ## Experimental CLI
 

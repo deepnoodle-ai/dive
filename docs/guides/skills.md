@@ -155,7 +155,7 @@ What the extension provides:
 1. **Tools** — the Skill tool (only when skills are loaded)
 2. **Rules** — skill usage instructions appended to the system prompt (only when skills are loaded)
 3. **Hooks** — always provided, even with zero skills:
-   - A **PreGenerationHook** that appends the typed skill catalog as a model-only `<system-reminder name="skills">` at the request tail. A later catalog supersedes stale same-name blocks and is never persisted.
+   - A **PreGenerationHook** that appends the typed skill catalog as a model-only `<system-reminder name="skills">` at the request tail. A later full catalog conflicts with stale same-name catalog facts and is never persisted.
    - A **PostToolUseHook** that injects expanded skill instructions as `AdditionalContext` on the tool result message, keyed by tool call ID for correct association under parallel execution
 
 ### Three-Layer Architecture
@@ -181,8 +181,9 @@ Dive's skill integration follows Claude Code's three-layer architecture:
 The key insight: the skill catalog is created with `dive.NewContextReminder`
 and appended with `hctx.AppendReminder(..., dive.ModelOnly)`, not repeated in
 the tool description on every LLM request. The model sees it at the **request
-tail**. A later same-name catalog supersedes stale history without mutating or
-persisting loaded messages, while leaving the preceding conversation cacheable.
+tail**. A later full catalog conflicts with stale catalog history and wins those
+conflicts without mutating or persisting loaded messages, while leaving the
+preceding conversation cacheable.
 
 ### Catalog Injection
 
@@ -249,8 +250,8 @@ All toolkit tools accept a `Validator` field that takes precedence over `Workspa
 
 The catalog hook handles session resume correctly:
 
-- On a fresh process resuming a session, a later typed catalog supersedes a stale legacy catalog block without rewriting stored history
-- If no skills remain, an empty same-name model-only reminder supersedes the legacy block for model interpretation
+- On a fresh process resuming a session, a later typed full catalog conflicts with and replaces stale legacy catalog facts without rewriting stored history
+- If no skills remain, an empty same-name model-only reminder conflicts with the non-empty legacy catalog for model interpretation
 - Hooks are always returned by the extension (even with zero skills) specifically to handle this cleanup
 
 ## Provider System

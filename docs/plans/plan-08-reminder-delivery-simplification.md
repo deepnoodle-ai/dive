@@ -117,8 +117,9 @@ new recorded or model-only reminders
   existing tagged-user fallback elsewhere.
 
 Dive does not replace or remove an earlier same-name reminder. The standing
-priming rule says that later same-name blocks supersede earlier ones, preserving
-append-only history while making refreshed state unambiguous.
+priming rule says same-name blocks accumulate unless their facts or instructions
+conflict; a later block wins only the conflict. This preserves append-only
+events while making refreshed state unambiguous.
 
 ### Prompt caching
 
@@ -130,10 +131,10 @@ the old behavior where changing live state rewrote the first user message.
 
 ### Legacy sessions
 
-A newly appended typed reminder can supersede a same-name legacy plain-text
-block for model interpretation. Dive leaves caller-owned and stored messages
-unchanged. Typed inspection helpers continue to distinguish genuine reminder
-content from legacy text and user-authored lookalikes.
+A newly appended typed reminder can override conflicting facts in a same-name
+legacy plain-text block for model interpretation. Dive leaves caller-owned and
+stored messages unchanged. Typed inspection helpers continue to distinguish
+genuine reminder content from legacy text and user-authored lookalikes.
 
 ## CLI and built-in adoption
 
@@ -161,7 +162,7 @@ actually achieve the requested two-lifetime model.
 
 Rejected because replacement would recreate a hidden third behavior and make
 “append” misleading. Demos instead skip unchanged payloads, while changed
-values append chronologically and rely on latest-wins interpretation.
+values append chronologically and rely on later-wins conflict resolution.
 
 ### Use only recorded reminders
 
@@ -172,8 +173,9 @@ should not automatically become conversation history.
 
 - Repeated changed values within one long response consume context until that
   response ends. Demos suppress identical repeats to bound the common case.
-- Recorded same-name reminders remain visible in history; the model relies on
-  the latest-wins rule rather than historical rewriting.
+- Recorded same-name reminders remain visible in history; the model keeps
+  independent context and uses later-wins only for conflicts rather than
+  historical rewriting.
 - The direct request API is intentionally asymmetric:
   `WithModelOnlyReminder` is needed for non-recorded context, while recorded
   input already has the ordinary `NewReminderMessage` path.
