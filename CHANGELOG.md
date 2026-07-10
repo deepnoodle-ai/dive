@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-07-09
+
 ### Added
 
 - **Typed context reminders** — hooks can append or pin tiered reminders with
@@ -28,6 +30,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   tools with a non-`none` reasoning effort now preserve the tools, use
   `reasoning_effort: none`, and emit a warning instead of failing with an
   OpenAI HTTP 400 response.
+
+### Security
+
+- **Dependency updates** — bumped `golang.org/x/crypto`, `x/net`, `x/sys`,
+  `x/term`, `x/text`, and `x/image` (the latter a direct dependency of
+  `media/format.go` and the OpenAI/Grok media decoders) to their latest patch
+  releases across every module, including `demos/colosseum`, closing all 20
+  Dependabot alerts open against the repo (7 critical, 8 high, 5 moderate).
 
 ## [1.13.0] - 2026-07-09
 

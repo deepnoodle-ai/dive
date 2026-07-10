@@ -3,13 +3,13 @@ module github.com/deepnoodle-ai/dive/examples
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.13.0
-	github.com/deepnoodle-ai/dive/a2a v1.13.0
-	github.com/deepnoodle-ai/dive/experimental/mcp v1.13.0
-	github.com/deepnoodle-ai/dive/otel v1.13.0
-	github.com/deepnoodle-ai/dive/providers/google v1.13.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.13.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.13.0
+	github.com/deepnoodle-ai/dive v1.14.0
+	github.com/deepnoodle-ai/dive/a2a v1.14.0
+	github.com/deepnoodle-ai/dive/experimental/mcp v1.14.0
+	github.com/deepnoodle-ai/dive/otel v1.14.0
+	github.com/deepnoodle-ai/dive/providers/google v1.14.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.14.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.14.0
 	github.com/deepnoodle-ai/wonton v0.0.36
 	github.com/fatih/color v1.18.0
 	github.com/mark3labs/mcp-go v0.45.0
@@ -61,7 +61,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/image v0.38.0 // indirect
+	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
