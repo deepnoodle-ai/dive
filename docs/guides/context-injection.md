@@ -144,7 +144,9 @@ that diagnostic view.
   build files, allowlisted package scripts and Make targets, CI configuration,
   containers, and dependency automation. It exposes only fixed labels and
   counts—not file contents or workflow names—and reports presence rather than
-  claiming a gate ran.
+  claiming a gate ran. Discovery reads at most 64 KiB from a recognized file
+  and samples at most 256 workflow-directory entries, so gaps in larger
+  repositories are intentional.
 - `go` pins a `go-workflow` reminder when the workspace contains a Go module or
   workspace. It reports the declared Go version, bounded nested-module counts,
   and an advisory `gofmt`/test/vet/race-check loop. It explicitly warns that
@@ -158,6 +160,8 @@ that diagnostic view.
   cryptography, and deployment commands. It contains fixed risk categories and
   counts only, so repository or shell text is not promoted to operator
   authority. The trigger is advisory, not a vulnerability finding or approval.
+  Its categories are heuristic risk indicators, not a complete policy model or
+  security audit.
 
 These presets demonstrate reminder delivery and authority. They are advisory
 and turn-local; they are not enforcement boundaries. Use permissions and
