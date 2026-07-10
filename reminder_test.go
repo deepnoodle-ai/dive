@@ -194,12 +194,15 @@ func TestModelOnlyReminderSurvivesStopHookReentry(t *testing.T) {
 	assert.False(t, recorded)
 }
 
-func TestRecordedRemindersSurvivePartialResumeInToolOrder(t *testing.T) {
-	var received []*llm.Message
+// resumeReminderAgent builds an agent whose PostToolUse hook appends a
+// recorded reminder named "resumed-<toolID>" for each completed tool, capturing
+// the messages sent to the model in received.
+func resumeReminderAgent(t *testing.T, received *[]*llm.Message) *Agent {
+	t.Helper()
 	model := &mockLLM{generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
 		cfg := &llm.Config{}
 		cfg.Apply(opts...)
-		received = cfg.Messages
+		*received = cfg.Messages
 		return textResponse("done"), nil
 	}}
 	agent, err := NewAgent(AgentOptions{
@@ -213,31 +216,62 @@ func TestRecordedRemindersSurvivePartialResumeInToolOrder(t *testing.T) {
 		}}},
 	})
 	assert.NoError(t, err)
+	return agent
+}
+
+// resumeReminderState is a suspended two-tool parallel batch ("first", "second"
+// in declaration order) awaiting external results.
+func resumeReminderState() *SuspensionState {
 	assistant := &llm.Message{Role: llm.Assistant, Content: []llm.Content{
 		&llm.ToolUseContent{ID: "first", Name: "approval", Input: []byte(`{}`)},
 		&llm.ToolUseContent{ID: "second", Name: "approval", Input: []byte(`{}`)},
 	}}
-	state := &SuspensionState{
+	return &SuspensionState{
 		PendingToolCalls: []*PendingToolCall{
 			{ID: "first", Name: "approval", Input: []byte(`{}`)},
 			{ID: "second", Name: "approval", Input: []byte(`{}`)},
 		},
 		TurnMessages: []*llm.Message{llm.NewUserTextMessage("start"), assistant},
 	}
-	partial, err := agent.CreateResponse(context.Background(), WithResume(state, map[string]*ToolResult{
+}
+
+func TestRecordedRemindersDeliveredInToolOrderOnResume(t *testing.T) {
+	var received []*llm.Message
+	agent := resumeReminderAgent(t, &received)
+
+	// Supplying both results completes the batch in one resume round; recorded
+	// reminders from the post-tool hooks drain in tool-call declaration order,
+	// not completion order.
+	final, err := agent.CreateResponse(context.Background(), WithResume(resumeReminderState(), map[string]*ToolResult{
+		"second": NewToolResultText("ok"),
+		"first":  NewToolResultText("ok"),
+	}))
+	assert.NoError(t, err)
+	assert.Equal(t, ResponseStatusCompleted, final.Status)
+	assertReminderOrder(t, received, "resumed-first", "resumed-second")
+}
+
+func TestRecordedRemindersFromEarlierPartialResumeAreDropped(t *testing.T) {
+	var received []*llm.Message
+	agent := resumeReminderAgent(t, &received)
+
+	// Round 1 completes "second" only; "first" stays pending so the turn
+	// suspends again. Recorded reminders are not carried across the suspend
+	// boundary — the embedder re-asserts standing state instead.
+	partial, err := agent.CreateResponse(context.Background(), WithResume(resumeReminderState(), map[string]*ToolResult{
 		"second": NewToolResultText("ok"),
 	}))
 	assert.NoError(t, err)
 	assert.Equal(t, ResponseStatusSuspended, partial.Status)
-	assert.Len(t, partial.Suspension.DeferredReminders, 1)
-	assert.Equal(t, "second", partial.Suspension.DeferredReminders[0].ToolUseID)
 
+	// Round 2 completes the batch. Only this round's reminder is delivered;
+	// "resumed-second" from round 1 was dropped.
 	final, err := agent.CreateResponse(context.Background(), WithResume(partial.Suspension, map[string]*ToolResult{
 		"first": NewToolResultText("ok"),
 	}))
 	assert.NoError(t, err)
 	assert.Equal(t, ResponseStatusCompleted, final.Status)
-	assertReminderOrder(t, received, "resumed-first", "resumed-second")
+	assertReminderOrder(t, received, "resumed-first")
 }
 
 func assertReminderOrder(t *testing.T, messages []*llm.Message, names ...string) {

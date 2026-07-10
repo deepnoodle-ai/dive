@@ -925,10 +925,6 @@ func TestSuspendReasonRoundTrip(t *testing.T) {
 				Prompt: "Sign in to continue",
 			},
 		},
-		DeferredReminders: []*dive.DeferredReminder{{
-			ToolUseID: "toolu_a",
-			Reminder:  dive.Reminder{Name: "approval", Tier: dive.ReminderTierContextual, Content: "Authentication completed."},
-		}},
 	}
 	err := sess.SaveSuspendedTurn(ctx, suspendedTurnMessages(), nil, state)
 	assert.NoError(t, err)
@@ -939,8 +935,6 @@ func TestSuspendReasonRoundTrip(t *testing.T) {
 	loaded := sess2.LoadSuspension()
 	assert.NotNil(t, loaded)
 	assert.Equal(t, loaded.PendingToolCalls[0].Reason, dive.SuspendReasonAuth)
-	assert.Len(t, loaded.DeferredReminders, 1)
-	assert.Equal(t, "approval", loaded.DeferredReminders[0].Reminder.Name)
 }
 
 // ---------------------------------------------------------------------------

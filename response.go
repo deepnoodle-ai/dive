@@ -189,18 +189,6 @@ type SuspensionState struct {
 	// final assistant message), so stateless callers can append it to
 	// their pre-turn history in one operation.
 	TurnMessages []*llm.Message `json:"turn_messages,omitempty"`
-
-	// DeferredReminders retains recorded reminders produced by post-tool hooks
-	// during a partial resume. They are delivered only after the complete tool
-	// result batch is available, in original tool-call order.
-	DeferredReminders []*DeferredReminder `json:"deferred_reminders,omitempty"`
-}
-
-// DeferredReminder is delivery state exposed so a stateless SuspensionState
-// can round-trip through JSON between partial resumes.
-type DeferredReminder struct {
-	ToolUseID string   `json:"tool_use_id"`
-	Reminder  Reminder `json:"reminder"`
 }
 
 // ResponseItem contains either a message, tool call, tool result, or LLM event.

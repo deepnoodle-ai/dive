@@ -434,6 +434,17 @@ injected from non-tool hooks (PreIteration, Stop) drain in hook
 registration order. This invariant gets a regression test alongside the
 existing parallel-tool ordering tests.
 
+The invariant holds within the resume round that completes the batch.
+Recorded reminders from a per-tool hook that fired in an *earlier* partial
+resume round (its tool completed, but siblings stayed pending and the turn
+suspended again) are **not** carried across the suspend boundary — they are
+dropped, and the embedder re-asserts any standing state on resume. Persisting
+them through `SuspensionState` for this narrow case was deliberately cut: the
+batch cannot deliver mid-suspend anyway, and the tier for such content is
+contextual, which is the embedder's to re-surface (see Compaction). Automatic
+carry-forward across the suspend boundary is a possible follow-up, symmetric
+with compaction carry-forward.
+
 ### Injection points
 
 - **Conversation start** — `SessionStartHook` with its existing `Persist`

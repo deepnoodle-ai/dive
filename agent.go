@@ -1098,9 +1098,6 @@ func (a *Agent) finishSuspended(
 		CompletedToolCalls: snap.CompletedToolCalls,
 		TurnMessages:       turnMsgs,
 	}
-	if rs != nil {
-		response.Suspension.DeferredReminders = rs.deferredReminderList()
-	}
 	if len(extraItems) > 0 {
 		response.Items = append(extraItems, response.Items...)
 	}
@@ -1214,24 +1211,10 @@ type resumeState struct {
 	// RemainingPendingCalls is the PendingToolCall list matching
 	// RemainingPending, preserved from the original suspend's pending set.
 	RemainingPendingCalls []*PendingToolCall
-
-	// DeferredReminders keeps recorded post-hook injections attached to their
-	// tool outcome until a partially-resumed batch is complete.
-	DeferredReminders map[string][]Reminder
 }
 
 func (rs *resumeState) CompletedToolCalls() []*CompletedToolCall {
 	return rs.PreviouslyCompleted
-}
-
-func (rs *resumeState) deferredReminderList() []*DeferredReminder {
-	var reminders []*DeferredReminder
-	for _, toolUseID := range collectToolUseIDs(rs.AssistantToolUse) {
-		for _, reminder := range rs.DeferredReminders[toolUseID] {
-			reminders = append(reminders, &DeferredReminder{ToolUseID: toolUseID, Reminder: reminder})
-		}
-	}
-	return reminders
 }
 
 // AppendToolResults appends additional tool_result content blocks to the
@@ -1522,13 +1505,6 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		})
 	}
 
-	deferredReminders := make(map[string][]Reminder)
-	for _, deferred := range state.DeferredReminders {
-		if deferred != nil {
-			deferredReminders[deferred.ToolUseID] = append(deferredReminders[deferred.ToolUseID], deferred.Reminder)
-		}
-	}
-
 	return &resumeState{
 		TurnMessages:              turnMessages,
 		SessionMessagesWithMerged: sessionWithMerged,
@@ -1539,7 +1515,6 @@ func (a *Agent) prepareResume(fullHistory []*llm.Message, state *SuspensionState
 		PreviouslyCompleted:       previouslyCompleted,
 		RemainingPending:          remaining,
 		RemainingPendingCalls:     remainingCalls,
-		DeferredReminders:         deferredReminders,
 	}, nil
 }
 
@@ -1627,26 +1602,19 @@ func (a *Agent) fireResumePostHooks(ctx context.Context, hctx *HookContext, rs *
 			result.AdditionalContext = postHctx.AdditionalContext
 		}
 		result.reminderDeliveries = slices.Clone(postHctx.reminderDeliveries)
-		for _, delivery := range result.reminderDeliveries {
-			if delivery.kind == reminderDeliveryAppend && delivery.recording == Recorded {
-				rs.DeferredReminders[toolUseID] = append(rs.DeferredReminders[toolUseID], delivery.reminder)
-			}
-		}
 
 		// Update the corresponding tool_result content block in the merged
 		// message so the LLM sees the hook-modified result.
 		rs.UpdateToolResultContent(toolUseID, result)
 	}
+	// Deliver hook-appended reminders only once the tool batch is complete, in
+	// tool-call declaration order. Reminders emitted by hooks during an earlier
+	// partial-resume round are not carried across the suspend boundary — the
+	// embedder re-asserts standing state (see the context-injection design).
 	if len(rs.RemainingPending) == 0 {
 		for _, toolUseID := range collectToolUseIDs(rs.AssistantToolUse) {
 			if result := rs.CallerSupplied[toolUseID]; result != nil {
 				queueReminderDeliveries(hctx.reminders, result.reminderDeliveries)
-				continue
-			}
-			for _, reminder := range rs.DeferredReminders[toolUseID] {
-				queueReminderDeliveries(hctx.reminders, []reminderDelivery{{
-					reminder: reminder, recording: Recorded, kind: reminderDeliveryAppend,
-				}})
 			}
 		}
 	}

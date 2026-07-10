@@ -87,15 +87,6 @@ func cloneSuspensionState(src *dive.SuspensionState) *dive.SuspensionState {
 		out.TurnMessages = make([]*llm.Message, len(src.TurnMessages))
 		copy(out.TurnMessages, src.TurnMessages)
 	}
-	if src.DeferredReminders != nil {
-		out.DeferredReminders = make([]*dive.DeferredReminder, len(src.DeferredReminders))
-		for i, deferred := range src.DeferredReminders {
-			if deferred != nil {
-				copy := *deferred
-				out.DeferredReminders[i] = &copy
-			}
-		}
-	}
 	return out
 }
 
@@ -295,8 +286,6 @@ type sessionData struct {
 	// suspending tools in the same iteration. Informational — the results
 	// are also present in the tool_result message on the last event.
 	CompletedToolCalls []*dive.CompletedToolCall `json:"completed_tool_calls,omitempty"`
-
-	DeferredReminders []*dive.DeferredReminder `json:"deferred_reminders,omitempty"`
 }
 
 // Session implements dive.Session with event-based persistence.
@@ -431,7 +420,6 @@ func (s *Session) LoadSuspension() *dive.SuspensionState {
 	state := &dive.SuspensionState{
 		PendingToolCalls:   s.data.PendingToolCalls,
 		CompletedToolCalls: s.data.CompletedToolCalls,
-		DeferredReminders:  s.data.DeferredReminders,
 	}
 	// TurnMessages carries the last event's messages (the in-progress
 	// suspended turn). The agent uses len(TurnMessages) to locate the turn
@@ -452,7 +440,6 @@ type sessionSnapshot struct {
 	suspended bool
 	pending   []*dive.PendingToolCall
 	completed []*dive.CompletedToolCall
-	deferred  []*dive.DeferredReminder
 	updatedAt time.Time
 }
 
@@ -468,7 +455,6 @@ func (s *Session) snapshotMutated() sessionSnapshot {
 		suspended: s.data.Suspended,
 		pending:   s.data.PendingToolCalls,
 		completed: s.data.CompletedToolCalls,
-		deferred:  s.data.DeferredReminders,
 		updatedAt: s.data.UpdatedAt,
 	}
 }
@@ -479,7 +465,6 @@ func (s *Session) restoreSnapshot(snap sessionSnapshot) {
 	s.data.Suspended = snap.suspended
 	s.data.PendingToolCalls = snap.pending
 	s.data.CompletedToolCalls = snap.completed
-	s.data.DeferredReminders = snap.deferred
 	s.data.UpdatedAt = snap.updatedAt
 }
 
@@ -551,11 +536,9 @@ func (s *Session) SaveSuspendedTurn(ctx context.Context, messages []*llm.Message
 		if cloned != nil {
 			s.data.PendingToolCalls = cloned.PendingToolCalls
 			s.data.CompletedToolCalls = cloned.CompletedToolCalls
-			s.data.DeferredReminders = cloned.DeferredReminders
 		} else {
 			s.data.PendingToolCalls = nil
 			s.data.CompletedToolCalls = nil
-			s.data.DeferredReminders = nil
 		}
 		s.data.UpdatedAt = now
 	})
@@ -595,7 +578,6 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 		s.data.Suspended = false
 		s.data.PendingToolCalls = nil
 		s.data.CompletedToolCalls = nil
-		s.data.DeferredReminders = nil
 		s.data.UpdatedAt = now
 	})
 }
@@ -618,7 +600,6 @@ func (s *Session) CancelSuspension(ctx context.Context) error {
 		s.data.Suspended = false
 		s.data.PendingToolCalls = nil
 		s.data.CompletedToolCalls = nil
-		s.data.DeferredReminders = nil
 		s.data.UpdatedAt = time.Now()
 	})
 }
@@ -714,7 +695,7 @@ func (s *Session) Fork(newID string) *Session {
 			UpdatedAt:  now,
 			Events:     events,
 			ForkedFrom: s.data.ID,
-			// Suspended / PendingToolCalls / CompletedToolCalls / DeferredReminders intentionally
+			// Suspended / PendingToolCalls / CompletedToolCalls intentionally
 			// not copied: pending out-of-band tool calls are owned by whoever
 			// launched the original suspend and cannot be resumed against a
 			// divergent branch.
