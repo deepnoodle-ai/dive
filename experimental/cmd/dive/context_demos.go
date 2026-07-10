@@ -71,8 +71,8 @@ func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir str
 		runtime.report = reporters[0]
 	}
 
-	needsState := selection.enabled(contextDemoSources) || selection.enabled(contextDemoVerification) ||
-		selection.enabled(contextDemoQuality) || selection.enabled(contextDemoSecurity) || runtime.report != nil
+	needsState := selection.enabled(contextDemoVerification) ||
+		selection.enabled(contextDemoSecurity) || runtime.report != nil
 	if needsState {
 		// Install turn-local state before the first iteration. Tool hooks can run
 		// in parallel, so the state object protects its own collections.
@@ -85,27 +85,18 @@ func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir str
 	if selection.enabled(contextDemoWorkspace) {
 		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, workspaceContextDemoHook(workspaceDir, runtime))
 	}
-	if selection.enabled(contextDemoSources) {
-		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, sourceLedgerCollectorHook())
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, sourceLedgerReminderHook(runtime))
-	}
-	if selection.enabled(contextDemoVerification) {
-		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, verificationCollectorHook())
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, verificationReminderHook(runtime))
-	}
-	if selection.enabled(contextDemoRecovery) {
-		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, recoveryContextDemoHook(runtime))
-	}
 	if selection.enabled(contextDemoPipeline) {
 		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, pipelineContextDemoHook(workspaceDir, runtime))
 	}
-	if selection.enabled(contextDemoGo) {
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, goDevelopmentContextDemoHook(workspaceDir, runtime))
-	}
-	if selection.enabled(contextDemoQuality) {
+	if selection.enabled(contextDemoVerification) {
+		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, verificationCollectorHook())
 		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, qualityGateCollectorHook(qualityGatePassed))
 		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, qualityGateCollectorFailureHook())
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, qualityGateReminderHook(runtime))
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, verificationReminderHook(runtime))
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, verificationGateReminderHook(runtime))
+	}
+	if selection.enabled(contextDemoRecovery) {
+		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, recoveryContextDemoHook(runtime))
 	}
 	if selection.enabled(contextDemoSecurity) {
 		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, securityAwarenessSuccessHook())
@@ -118,9 +109,6 @@ func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir str
 // by tool hooks within that call and discarded before the next user turn.
 type contextDemoTurnState struct {
 	mu sync.Mutex
-
-	sources                   []string
-	omittedSourceObservations int
 
 	unverified          []string
 	omittedUnverified   int
@@ -156,26 +144,6 @@ func (s *contextDemoTurnState) recordPinnedReminder(reminder dive.Reminder) (act
 		return "updated", true
 	}
 	return "set", true
-}
-
-func (s *contextDemoTurnState) addSource(source string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	addBoundedContextDemoItem(&s.sources, &s.omittedSourceObservations, source)
-}
-
-type sourceLedgerSnapshot struct {
-	sources []string
-	omitted int
-}
-
-func (s *contextDemoTurnState) sourceSnapshot() sourceLedgerSnapshot {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return sourceLedgerSnapshot{
-		sources: append([]string(nil), s.sources...),
-		omitted: s.omittedSourceObservations,
-	}
 }
 
 func (s *contextDemoTurnState) addBatchChange(path string) {

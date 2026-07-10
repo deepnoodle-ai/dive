@@ -82,6 +82,10 @@ func pipelineSnapshot(workspaceDir string) string {
 		}
 	}
 	content.WriteString("\nThis map reports configuration presence only. It does not establish that any gate ran or passed.")
+	if goContext, ok := goDevelopmentSnapshot(workspaceDir); ok {
+		content.WriteString("\n\n")
+		content.WriteString(goContext)
+	}
 	return content.String()
 }
 

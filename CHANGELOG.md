@@ -9,12 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - **Dynamic context-injection demos** — the experimental CLI's repeatable
-  `--context-demo` flag can pin a live workspace pulse and evidence ledger,
-  append verification-debt checkpoints after edits, and coach recovery after
-  failed tool calls. Three SDLC presets add a read-only delivery-pipeline map,
-  a live build/test/analysis/security gate ledger, and security-review triggers
-  for sensitive changes and high-impact commands. A Go-specific preset adds
-  module-scope and format/test/vet/race guidance. Interactive runs now trace
+  `--context-demo` flag offers five focused presets: a live workspace pulse, a
+  delivery-pipeline map with automatic Go module and format/test/vet/race
+  guidance, verification debt plus observed gate outcomes, failure-specific
+  recovery coaching, and security-review triggers for sensitive changes and
+  high-impact commands. Interactive runs now trace
   reminder lifecycle events, expose exact latest-turn payloads through `/context`,
   list presets with `dive context-demos`, and warn when the workspace is below
   the Git root. Turn-local ledgers are bounded and deterministic, untrusted

@@ -15,25 +15,27 @@ import (
 )
 
 func TestParseContextDemoNames(t *testing.T) {
-	selection, err := parseContextDemoNames([]string{"workspace,sources", "verification", "workspace"})
+	selection, err := parseContextDemoNames([]string{"workspace,pipeline", "verification", "workspace"})
 	assert.NoError(t, err)
 	assert.True(t, selection.enabled(contextDemoWorkspace))
-	assert.True(t, selection.enabled(contextDemoSources))
+	assert.True(t, selection.enabled(contextDemoPipeline))
 	assert.True(t, selection.enabled(contextDemoVerification))
 	assert.False(t, selection.enabled(contextDemoRecovery))
-	assert.False(t, selection.enabled(contextDemoPipeline))
-	assert.False(t, selection.enabled(contextDemoGo))
-	assert.False(t, selection.enabled(contextDemoQuality))
 	assert.False(t, selection.enabled(contextDemoSecurity))
 
 	all, err := parseContextDemoNames([]string{"all"})
 	assert.NoError(t, err)
 	assert.Equal(t, allContextDemos(), all)
-	assert.Equal(t, "all 8 demos", all.displaySummary())
+	assert.Equal(t, "all 5 demos", all.displaySummary())
 
 	_, err = parseContextDemoNames([]string{"telepathy"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "run 'dive context-demos' to list presets")
+
+	for _, removed := range []string{"sources", "go", "quality"} {
+		_, err = parseContextDemoNames([]string{removed})
+		assert.Error(t, err, removed)
+	}
 }
 
 func TestContextDemoCatalogIsTheSingleDisplaySource(t *testing.T) {
@@ -44,8 +46,8 @@ func TestContextDemoCatalogIsTheSingleDisplaySource(t *testing.T) {
 		assert.Contains(t, output.String(), demo.Description)
 	}
 	assert.Contains(t, output.String(), "/context")
-	assert.Equal(t, []string{"pipeline", "quality", "security"}, contextDemoSelection(contextDemoPipeline|contextDemoQuality|contextDemoSecurity).names())
-	assert.Equal(t, "pipeline, quality, security", contextDemoSelection(contextDemoPipeline|contextDemoQuality|contextDemoSecurity).displaySummary())
+	assert.Equal(t, []string{"pipeline", "verification", "security"}, contextDemoSelection(contextDemoPipeline|contextDemoVerification|contextDemoSecurity).names())
+	assert.Equal(t, "pipeline, verification, security", contextDemoSelection(contextDemoPipeline|contextDemoVerification|contextDemoSecurity).displaySummary())
 }
 
 func TestPinnedContextDemoNoticesReportOnlyMeaningfulChanges(t *testing.T) {
@@ -75,28 +77,6 @@ func TestWorkspaceSnapshotTracksGitState(t *testing.T) {
 	assert.Contains(t, snapshot, "git branch: main")
 	assert.Contains(t, snapshot, "1 changed path")
 	assert.Contains(t, snapshot, "note.txt")
-}
-
-func TestToolSourceSummary(t *testing.T) {
-	tests := []struct {
-		name  string
-		call  *llm.ToolUseContent
-		match string
-		ok    bool
-	}{
-		{name: "read", call: &llm.ToolUseContent{Name: "Read", Input: []byte(`{"file_path":"README.md"}`)}, match: "file: README.md", ok: true},
-		{name: "grep", call: &llm.ToolUseContent{Name: "Grep", Input: []byte(`{"pattern":"TODO","path":"docs"}`)}, match: `text search: "TODO" in docs`, ok: true},
-		{name: "web", call: &llm.ToolUseContent{Name: "WebFetch", Input: []byte(`{"url":"https://example.com"}`)}, match: "web page: https://example.com", ok: true},
-		{name: "mutation is not evidence", call: &llm.ToolUseContent{Name: "Write", Input: []byte(`{"file_path":"main.go"}`)}, ok: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			summary, ok := toolSourceSummary(tt.call)
-			assert.Equal(t, tt.ok, ok)
-			assert.Equal(t, tt.match, summary)
-		})
-	}
 }
 
 func TestVerificationCommandDetection(t *testing.T) {
@@ -137,31 +117,25 @@ func TestApplyContextDemoAgentOptionsInstallsOnlyNeededState(t *testing.T) {
 	assert.Len(t, stateless.Hooks.PostToolUseFailure, 1)
 
 	var stateful dive.AgentOptions
-	applyContextDemoAgentOptions(&stateful, t.TempDir(), contextDemoSelection(contextDemoSources|contextDemoVerification))
+	applyContextDemoAgentOptions(&stateful, t.TempDir(), contextDemoSelection(contextDemoVerification))
 	assert.Len(t, stateful.Hooks.PreGeneration, 1)
 	assert.Len(t, stateful.Hooks.PreIteration, 2)
 	assert.Len(t, stateful.Hooks.PostToolUse, 2)
+	assert.Len(t, stateful.Hooks.PostToolUseFailure, 1)
 
 	var all dive.AgentOptions
 	applyContextDemoAgentOptions(&all, t.TempDir(), allContextDemos())
 	assert.Len(t, all.Hooks.PreGeneration, 1)
-	assert.Len(t, all.Hooks.PreIteration, 7)
-	assert.Len(t, all.Hooks.PostToolUse, 4)
+	assert.Len(t, all.Hooks.PreIteration, 5)
+	assert.Len(t, all.Hooks.PostToolUse, 3)
 	assert.Len(t, all.Hooks.PostToolUseFailure, 3)
 }
 
 func TestContextDemoStateIsBounded(t *testing.T) {
 	state := &contextDemoTurnState{}
 	for i := contextDemoItemLimit + 2; i >= 0; i-- {
-		state.addSource(fmt.Sprintf("file: source-%02d.go", i))
 		state.addBatchChange(fmt.Sprintf("change-%02d.go", i))
 	}
-
-	ledger := state.sourceSnapshot()
-	assert.Len(t, ledger.sources, contextDemoItemLimit)
-	assert.Equal(t, 3, ledger.omitted)
-	assert.Equal(t, "file: source-00.go", ledger.sources[0])
-	assert.Equal(t, "file: source-11.go", ledger.sources[contextDemoItemLimit-1])
 
 	debt := state.applyVerificationBatch()
 	assert.Len(t, debt.unverified, contextDemoItemLimit)
@@ -301,9 +275,6 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, pipeline.Content, "Detected repository delivery surfaces")
 
-	ledger, ok := dive.FindLatestReminder(model.calls[1], "evidence-ledger")
-	assert.True(t, ok)
-	assert.Contains(t, ledger.Content, "file: README.md")
 	debt, ok := dive.FindLatestReminder(model.calls[1], "verification-debt")
 	assert.True(t, ok)
 	assert.Contains(t, debt.Content, "auth/policy.go")
@@ -321,7 +292,7 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, recovery.Content, "Broken")
 	assert.Contains(t, recovery.Content, "missing.txt")
-	quality, ok := dive.FindLatestReminder(model.calls[2], "quality-gates")
+	quality, ok := dive.FindLatestReminder(model.calls[2], "verification-gates")
 	assert.True(t, ok)
 	assert.Contains(t, quality.Content, "test: passed (go test)")
 	assert.Equal(t, dive.ReminderTierContextual, quality.Tier)
@@ -331,8 +302,8 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 		noticeByName[notice.Reminder.Name] = notice
 	}
 	for _, name := range []string{
-		"workspace-pulse", "delivery-pipeline", "evidence-ledger", "verification-debt",
-		"security-review", "recovery-coach", "verification-checkpoint", "quality-gates",
+		"workspace-pulse", "delivery-pipeline", "verification-debt", "security-review",
+		"recovery-coach", "verification-checkpoint", "verification-gates",
 	} {
 		_, ok := noticeByName[name]
 		assert.True(t, ok, name)
@@ -345,9 +316,7 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	_, err = agent.CreateResponse(context.Background(), dive.WithInput("start a new turn"))
 	assert.NoError(t, err)
 	assert.Len(t, model.calls, 4)
-	_, ok = dive.FindLatestReminder(model.calls[3], "evidence-ledger")
-	assert.False(t, ok, "turn-local evidence must not leak into a later CreateResponse call")
-	_, ok = dive.FindLatestReminder(model.calls[3], "quality-gates")
+	_, ok = dive.FindLatestReminder(model.calls[3], "verification-gates")
 	assert.False(t, ok, "turn-local quality results must not leak into a later CreateResponse call")
 	_, ok = dive.FindLatestReminder(model.calls[3], "security-review")
 	assert.False(t, ok, "batch-local security triggers must not leak into a later CreateResponse call")

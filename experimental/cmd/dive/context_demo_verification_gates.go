@@ -9,6 +9,8 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
+// qualityGateKind classifies concrete build and test evidence tracked by the
+// verification preset; it is not a separately selectable context demo.
 type qualityGateKind string
 
 const (
@@ -92,7 +94,7 @@ func (s *contextDemoTurnState) qualityGateSnapshot() []qualityGateObservation {
 	return observations
 }
 
-func qualityGateReminderHook(runtime contextDemoRuntime) dive.PreIterationHook {
+func verificationGateReminderHook(runtime contextDemoRuntime) dive.PreIterationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		state := contextDemoState(hctx)
 		if state == nil {
@@ -108,7 +110,7 @@ func qualityGateReminderHook(runtime contextDemoRuntime) dive.PreIterationHook {
 			fmt.Fprintf(&content, "\n- %s: %s (%s)", observation.Kind, observation.Outcome, observation.Label)
 		}
 		content.WriteString("\nUse failed or blocked gates as unresolved evidence; passing gates establish only the scope their command actually covered.")
-		reminder, err := dive.NewContextReminder("quality-gates", content.String())
+		reminder, err := dive.NewContextReminder("verification-gates", content.String())
 		if err != nil {
 			return err
 		}

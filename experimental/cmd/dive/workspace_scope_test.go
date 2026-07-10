@@ -36,7 +36,7 @@ func TestWorkspaceBoundaryExplainsNestedGitScope(t *testing.T) {
 	app.contextDemos = allContextDemos()
 	var output bytes.Buffer
 	tui.Fprint(&output, app.buildIntroView(), tui.WithWidth(120))
-	assert.Contains(t, output.String(), "context: all 8 demos · /context to inspect")
+	assert.Contains(t, output.String(), "context: all 5 demos · /context to inspect")
 	assert.Contains(t, output.String(), "scope: directory only · Git root:")
 }
 

@@ -103,7 +103,7 @@ input.
 
 ### Try dynamic context demos
 
-The CLI also includes eight opt-in demos that derive context from the live agent
+The CLI also includes five opt-in demos that derive context from the live agent
 loop:
 
 ```bash
@@ -116,7 +116,7 @@ Use `--context-demo` more than once, or pass a comma-separated set, to run only
 the patterns you want:
 
 ```bash
-dive --context-demo pipeline,quality --context-demo security
+dive --context-demo pipeline,verification --context-demo security
 ```
 
 Run `dive context-demos` to list every preset and its purpose. In interactive
@@ -128,33 +128,27 @@ that diagnostic view.
 - `workspace` replaces a pinned `workspace-pulse` before each model call with
   the current Git branch and dirty paths. It demonstrates live overlays without
   persisting a stale snapshot.
-- `sources` pins an `evidence-ledger` built from successful file reads, searches,
-  directory listings, and web fetches during the current response. The ledger
-  records what was consulted; it does not claim that a source is correct. Its
-  deterministic list is capped at 12 entries and reports omitted observations.
 - `verification` appends model-only operator reminders after `Write` and `Edit`,
   then reports a checkpoint when a later tool batch successfully runs a
   recognized direct test, lint, or check command. The verifier must be the final
   shell segment so masked commands such as `go test || true` cannot clear debt.
   A check launched in parallel with an edit intentionally does not clear the
-  debt, and tracked paths use the same 12-entry bound.
+  debt, and tracked paths use the same 12-entry bound. It also pins a turn-local
+  `verification-gates` ledger for recognized build, test, static-analysis, and
+  security command outcomes. A failed or blocked gate dominates a passing
+  observation in the same category.
 - `recovery` appends a model-only operator reminder after a failed tool call,
   identifying the failed input and asking the model to change its retry strategy.
 - `pipeline` pins a read-only `delivery-pipeline` map derived from recognized
   build files, allowlisted package scripts and Make targets, CI configuration,
   containers, and dependency automation. It exposes only fixed labels and
   counts—not file contents or workflow names—and reports presence rather than
-  claiming a gate ran. Discovery reads at most 64 KiB from a recognized file
+  claiming a gate ran. In Go workspaces the same reminder automatically adds
+  the declared Go version, bounded nested-module counts, and an advisory
+  `gofmt`/test/vet/race-check loop; root-module checks do not cover nested
+  modules automatically. Discovery reads at most 64 KiB from a recognized file
   and samples at most 256 workflow-directory entries, so gaps in larger
   repositories are intentional.
-- `go` pins a `go-workflow` reminder when the workspace contains a Go module or
-  workspace. It reports the declared Go version, bounded nested-module counts,
-  and an advisory `gofmt`/test/vet/race-check loop. It explicitly warns that
-  root-module checks do not cover nested modules automatically.
-- `quality` pins a `quality-gates` ledger for recognized build, test,
-  static-analysis, and security commands observed during the current response.
-  It records normalized labels and tool outcomes; a failed or blocked gate
-  dominates a passing observation in the same category.
 - `security` appends a model-only operator `security-review` trigger after
   sensitive file changes or high-impact dependency, privilege, credential,
   cryptography, and deployment commands. It contains fixed risk categories and

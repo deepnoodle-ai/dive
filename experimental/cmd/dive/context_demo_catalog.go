@@ -10,12 +10,9 @@ type contextDemoID uint16
 
 const (
 	contextDemoWorkspace contextDemoID = 1 << iota
-	contextDemoSources
 	contextDemoVerification
 	contextDemoRecovery
 	contextDemoPipeline
-	contextDemoGo
-	contextDemoQuality
 	contextDemoSecurity
 )
 
@@ -27,12 +24,9 @@ type contextDemoDefinition struct {
 
 var contextDemoCatalog = []contextDemoDefinition{
 	{contextDemoWorkspace, "workspace", "Refresh the Git branch and dirty paths before every model call."},
-	{contextDemoSources, "sources", "Track successful reads, searches, directory listings, and web fetches."},
-	{contextDemoVerification, "verification", "Carry edit debt until a later direct test or analysis command passes."},
+	{contextDemoPipeline, "pipeline", "Map build and CI surfaces, with tailored workflow guidance where available."},
+	{contextDemoVerification, "verification", "Track edits, build/test outcomes, and remaining verification debt."},
 	{contextDemoRecovery, "recovery", "Coach a changed approach after a failed or denied tool call."},
-	{contextDemoPipeline, "pipeline", "Map recognized build, task-runner, CI, container, and dependency surfaces."},
-	{contextDemoGo, "go", "Surface Go module scope and an advisory format, build, test, vet, and race-check loop."},
-	{contextDemoQuality, "quality", "Track observed build, test, analysis, and security command outcomes."},
 	{contextDemoSecurity, "security", "Request review after sensitive edits or high-impact SDLC commands."},
 }
 
@@ -77,8 +71,8 @@ func allContextDemos() contextDemoSelection {
 }
 
 // parseContextDemoNames accepts repeatable values and comma-separated groups so
-// both --context-demo workspace --context-demo sources and
-// --context-demo workspace,sources are convenient at the shell.
+// both --context-demo workspace --context-demo pipeline and
+// --context-demo workspace,pipeline are convenient at the shell.
 func parseContextDemoNames(specs []string) (contextDemoSelection, error) {
 	var selection contextDemoSelection
 	for _, spec := range specs {
@@ -119,7 +113,7 @@ func writeContextDemoCatalog(w io.Writer) error {
 	_, err := fmt.Fprint(w, `
 Usage:
   dive --context-demo all
-  dive --context-demo pipeline,quality --context-demo security
+  dive --context-demo pipeline,verification --context-demo security
 
 In interactive mode, /context shows the exact context-demo reminder payloads
 observed during the latest turn. Model-only reminders are not saved to

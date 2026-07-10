@@ -46,7 +46,7 @@ func TestSafeGoVersion(t *testing.T) {
 	}
 }
 
-func TestGoContextDemoIsDeliveredAndReported(t *testing.T) {
+func TestPipelineIncludesGoDevelopmentContext(t *testing.T) {
 	workspace := t.TempDir()
 	assert.NoError(t, os.WriteFile(filepath.Join(workspace, "go.mod"), []byte("module example.com/demo\n\ngo 1.24\n"), 0o644))
 	model := &contextDemoScriptedModel{responses: []*llm.Response{{
@@ -56,7 +56,7 @@ func TestGoContextDemoIsDeliveredAndReported(t *testing.T) {
 	}}}
 	var notices []contextDemoNotice
 	options := dive.AgentOptions{Model: model}
-	applyContextDemoAgentOptions(&options, workspace, contextDemoSelection(contextDemoGo), func(notice contextDemoNotice) {
+	applyContextDemoAgentOptions(&options, workspace, contextDemoSelection(contextDemoPipeline), func(notice contextDemoNotice) {
 		notices = append(notices, notice)
 	})
 	agent, err := dive.NewAgent(options)
@@ -64,10 +64,11 @@ func TestGoContextDemoIsDeliveredAndReported(t *testing.T) {
 	_, err = agent.CreateResponse(context.Background(), dive.WithInput("inspect the Go module"))
 	assert.NoError(t, err)
 
-	reminder, ok := dive.FindLatestReminder(model.calls[0], "go-workflow")
+	reminder, ok := dive.FindLatestReminder(model.calls[0], "delivery-pipeline")
 	assert.True(t, ok)
+	assert.Contains(t, reminder.Content, "Go module/workspace: build, test, vet")
 	assert.Contains(t, reminder.Content, "declared Go version: 1.24")
 	assert.Len(t, notices, 1)
-	assert.Equal(t, "go-workflow", notices[0].Reminder.Name)
+	assert.Equal(t, "delivery-pipeline", notices[0].Reminder.Name)
 	assert.Equal(t, contextDemoPinned, notices[0].Delivery)
 }

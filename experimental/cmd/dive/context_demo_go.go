@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
-
-	"github.com/deepnoodle-ai/dive"
 )
 
 const (
@@ -15,20 +12,6 @@ const (
 	goModuleCountLimit = 32
 	goModuleDepthLimit = 4
 )
-
-func goDevelopmentContextDemoHook(workspaceDir string, runtime contextDemoRuntime) dive.PreIterationHook {
-	return func(_ context.Context, hctx *dive.HookContext) error {
-		content, ok := goDevelopmentSnapshot(workspaceDir)
-		if !ok {
-			return nil
-		}
-		reminder, err := dive.NewContextReminder("go-workflow", content)
-		if err != nil {
-			return err
-		}
-		return runtime.pin(hctx, reminder)
-	}
-}
 
 func goDevelopmentSnapshot(workspaceDir string) (string, bool) {
 	goMod := filepath.Join(workspaceDir, "go.mod")

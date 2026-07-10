@@ -37,7 +37,7 @@ The divergent pass produced twelve candidates before evaluation:
 12. a resumable handoff summary for another agent.
 
 These clustered into live state (1, 5, 6, 10, 11), evidence and continuity
-(2, 7, 12), and tool-loop guidance (3, 4, 8, 9). The selected four have high
+(2, 7, 12), and tool-loop guidance (3, 4, 8, 9). The initial four had high
 day-to-day value, need no external service or additional user configuration,
 and collectively demonstrate pinned replacement, accumulated context,
 late-arriving operator events, model-only recording, and failure hooks. The
@@ -62,58 +62,64 @@ A second divergent pass focused on delivery produced twelve candidates:
 12. deployment-window or change-freeze awareness.
 
 These cluster into standing delivery context (1, 4, 7, 10, 12), observed gate
-evidence (2, 5, 6, 11), and change risk (3, 8, 9). The selected three are
-`pipeline`, `quality`, and `security`: together they tell the model what delivery
-surfaces exist, which gates actually ran, and when a change deserves explicit
-security review. They remain useful without a hosted CI API, coverage service,
-or organization-specific release configuration.
+evidence (2, 5, 6, 11), and change risk (3, 8, 9). The selected capabilities tell
+the model what delivery surfaces exist, which gates actually ran, and when a
+change deserves explicit security review. They remain useful without a hosted
+CI API, coverage service, or organization-specific release configuration.
 
 Live testing then exposed a useful language-specific layer: the generic
 pipeline map could identify Go but could not explain nested-module coverage or
-the expected Go completion loop. A `go` preset was added as an eighth pattern to
-surface bounded module topology plus `gofmt`, test, vet, race, dependency, and
-generated-code guidance.
+the expected Go completion loop. Bounded module topology plus `gofmt`, test,
+vet, race, dependency, and generated-code guidance was therefore added to the
+pipeline reminder for Go repositories.
+
+### Consolidation after live testing
+
+Hands-on use showed that eight switches exposed implementation details rather
+than five distinct user intents. The `sources` ledger mostly repeated the tool
+transcript, Go guidance was useful whenever `pipeline` detected Go rather than
+only when a second preset was enabled, and quality-gate outcomes belonged with
+verification debt. The public set was reduced to `workspace`, `pipeline`,
+`verification`, `recovery`, and `security`. Security remains event-driven and
+quiet during ordinary edits; its rarity is part of its signal rather than an
+activation problem.
 
 ## Proposal
 
 Add a repeatable `--context-demo NAME` flag to the experimental CLI. It accepts
-eight demos, plus `all` as a convenience:
+five demos, plus `all` as a convenience:
 
 - `workspace`: pin a live workspace snapshot before generation and refresh it
   after successful tools, so branch and dirty-state changes are visible without
   persisting stale state.
-- `sources`: build a contextual evidence ledger from successful read, search,
-  and fetch tools. Replace the pinned ledger as sources accumulate during the
-  current response.
 - `verification`: append model-only operator reminders after `Write` or `Edit`,
   and append a verification checkpoint after a successful recognized test or
-  lint command. This demonstrates late events without polluting saved sessions.
+  lint command. It also pins a turn-local ledger of observed build, test,
+  static-analysis, and security gate outcomes. Failed observations dominate
+  passing ones in the same category, and labels come from a fixed command
+  classifier rather than raw shell text.
 - `recovery`: append a model-only operator reminder after a failed tool call,
   naming the failed call and coaching the model to change one variable before
   retrying.
 - `pipeline`: pin a read-only delivery map built from recognized repository
   surfaces such as Go modules, package scripts, Make targets, containers, and CI
   workflows. Only fixed labels, allowlisted target names, and counts are
-  injected; arbitrary file contents and workflow names are not.
-- `go`: pin an advisory Go workflow reminder when a module or workspace is
-  detected. Report only a validated Go version, fixed workflow guidance, bounded
-  module counts, and whether the CLI scope sits below the Git root.
-- `quality`: pin a turn-local ledger of observed build, test, static-analysis,
-  and security gate outcomes. A failed observation dominates a passing one in
-  the same category, and labels come from a fixed command classifier rather than
-  raw shell text.
+  injected; arbitrary file contents and workflow names are not. When Go is
+  detected, the same reminder adds a validated version, fixed workflow guidance,
+  bounded module counts, and whether the CLI scope sits below the Git root.
 - `security`: append a model-only operator review trigger after successful
   changes to security-sensitive paths or attempted high-impact dependency,
   privilege, and deployment commands. It reports only fixed risk categories and
   counts, never raw paths or commands, and explicitly says it is not a
   vulnerability finding or enforcement control.
 
-The implementation lives entirely in `experimental/cmd/dive`, with one flat Go
-file per demo and shared option/state wiring in `context_demos.go`. A small
-turn-local tracker is installed through `HookContext.Values`; it is protected by
-a mutex because parallel tool batches can run hooks concurrently. Model-facing
-source and path sets are deterministically ordered, capped at 12 entries, and
-report omission counts. Verification recognizes direct toolchain invocations
+The implementation lives entirely in `experimental/cmd/dive`, with focused Go
+files for each concern and shared option/state wiring in `context_demos.go`. A
+small turn-local tracker is installed through `HookContext.Values`; it is
+protected by a mutex because parallel tool batches can run hooks concurrently.
+Model-facing
+path sets are deterministically ordered, capped at 12 entries, and report
+omission counts. Verification recognizes direct toolchain invocations
 only when the verifier is the final shell segment. Both print and interactive
 paths use the same option-wiring helper. `dive context-demos` provides discovery
 without starting a model, the interactive splash summarizes enabled demos and
@@ -138,8 +144,7 @@ The workspace snapshot shells out to `git`, and verification-command detection
 is intentionally conservative: indirect wrapper scripts are not recognized.
 The demos are opt-in and experimental, their reminders say what was observed
 rather than claiming complete coverage, and failures to inspect Git degrade to a
-plain working-directory snapshot. The evidence ledger records bounded tool
-inputs, not truth or citation correctness. Pipeline discovery reads only regular
+plain working-directory snapshot. Pipeline discovery reads only regular
 workspace-root files, refuses symlinks, caps file reads at 64 KiB, and samples at
 most 256 workflow-directory entries. It favors a safe, incomplete map over
 recursively interpreting arbitrary build configuration.
