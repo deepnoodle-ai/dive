@@ -62,11 +62,15 @@ four demos, plus `all` as a convenience:
   naming the failed call and coaching the model to change one variable before
   retrying.
 
-The implementation lives entirely in `experimental/cmd/dive`. A small
+The implementation lives entirely in `experimental/cmd/dive`, with one flat Go
+file per demo and shared option/state wiring in `context_demos.go`. A small
 turn-local tracker is installed through `HookContext.Values`; it is protected by
-a mutex because parallel tool batches can run hooks concurrently. Both print and
-interactive paths use the same option-wiring helper. Documentation will show a
-single `--context-demo all` command and individual examples.
+a mutex because parallel tool batches can run hooks concurrently. Model-facing
+source and path sets are deterministically ordered, capped at 12 entries, and
+report omission counts. Verification recognizes direct toolchain invocations
+only when the verifier is the final shell segment. Both print and interactive
+paths use the same option-wiring helper. Documentation shows a single
+`--context-demo all` command and individual examples.
 
 ## Alternatives considered
 
@@ -83,10 +87,11 @@ single `--context-demo all` command and individual examples.
 ## Tradeoffs and consequences
 
 The workspace snapshot shells out to `git`, and verification-command detection
-is intentionally heuristic. The demos are opt-in and experimental, their
-reminders say what was observed rather than claiming complete coverage, and
-failures to inspect Git degrade to a plain working-directory snapshot. The
-evidence ledger records tool inputs, not truth or citation correctness.
+is intentionally conservative: indirect wrapper scripts are not recognized.
+The demos are opt-in and experimental, their reminders say what was observed
+rather than claiming complete coverage, and failures to inspect Git degrade to a
+plain working-directory snapshot. The evidence ledger records bounded tool
+inputs, not truth or citation correctness.
 
 ## Open questions
 

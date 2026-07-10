@@ -41,7 +41,7 @@ func TestWorkspaceSnapshotTracksGitState(t *testing.T) {
 
 	snapshot := workspaceSnapshot(context.Background(), workspace)
 	assert.Contains(t, snapshot, "git branch: main")
-	assert.Contains(t, snapshot, "1 changed path(s)")
+	assert.Contains(t, snapshot, "1 changed path")
 	assert.Contains(t, snapshot, "note.txt")
 }
 
@@ -73,7 +73,10 @@ func TestVerificationCommandDetection(t *testing.T) {
 		"npm run test:unit",
 		"make lint && go vet ./...",
 		"echo prepare; pytest -q",
-		"xcodebuild -scheme Dive test",
+		"xcodebuild test -scheme Dive",
+		"VERIFY_MODE=full go test ./...",
+		"A=1 B=2 /usr/local/bin/pytest -q",
+		"make design-check",
 	} {
 		assert.True(t, isVerificationCommand(command), command)
 	}
@@ -82,9 +85,57 @@ func TestVerificationCommandDetection(t *testing.T) {
 		`echo "later; go test ./..."`,
 		"go build ./...",
 		"make release",
+		`bash -c "go test ./..."`,
+		"go test ./... || true",
+		"go test ./...; echo done",
+		"go test $(go list ./...)",
+		"xcodebuild -resultBundlePath test build",
 	} {
 		assert.False(t, isVerificationCommand(command), command)
 	}
+}
+
+func TestApplyContextDemoAgentOptionsInstallsOnlyNeededState(t *testing.T) {
+	var stateless dive.AgentOptions
+	applyContextDemoAgentOptions(&stateless, t.TempDir(), contextDemoSelection{workspace: true, recovery: true})
+	assert.Len(t, stateless.Hooks.PreGeneration, 0)
+	assert.Len(t, stateless.Hooks.PreIteration, 1)
+	assert.Len(t, stateless.Hooks.PostToolUseFailure, 1)
+
+	var stateful dive.AgentOptions
+	applyContextDemoAgentOptions(&stateful, t.TempDir(), contextDemoSelection{sources: true, verification: true})
+	assert.Len(t, stateful.Hooks.PreGeneration, 1)
+	assert.Len(t, stateful.Hooks.PreIteration, 2)
+	assert.Len(t, stateful.Hooks.PostToolUse, 2)
+}
+
+func TestContextDemoStateIsBounded(t *testing.T) {
+	state := &contextDemoTurnState{}
+	for i := contextDemoItemLimit + 2; i >= 0; i-- {
+		state.addSource(fmt.Sprintf("file: source-%02d.go", i))
+		state.addBatchChange(fmt.Sprintf("change-%02d.go", i))
+	}
+
+	ledger := state.sourceSnapshot()
+	assert.Len(t, ledger.sources, contextDemoItemLimit)
+	assert.Equal(t, 3, ledger.omitted)
+	assert.Equal(t, "file: source-00.go", ledger.sources[0])
+	assert.Equal(t, "file: source-11.go", ledger.sources[contextDemoItemLimit-1])
+
+	debt := state.applyVerificationBatch()
+	assert.Len(t, debt.unverified, contextDemoItemLimit)
+	assert.Equal(t, 3, debt.unverifiedOmitted)
+	assert.True(t, debt.emitDebt)
+	assert.Equal(t, "change-00.go", debt.unverified[0])
+	assert.Equal(t, "change-11.go", debt.unverified[contextDemoItemLimit-1])
+
+	state.addBatchCheck("go test ./...")
+	state.addBatchCheck("make lint")
+	checkpoint := state.applyVerificationBatch()
+	assert.Len(t, checkpoint.checkedPaths, contextDemoItemLimit)
+	assert.Equal(t, 3, checkpoint.checkedOmitted)
+	assert.Len(t, checkpoint.unverified, 0)
+	assert.Equal(t, "go test ./...", checkpoint.checkCommand)
 }
 
 func TestVerificationBatchDoesNotTreatParallelCheckAsCoverage(t *testing.T) {
@@ -164,6 +215,11 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 			Content:    []llm.Content{&llm.TextContent{Text: "done"}},
 			StopReason: "stop",
 		},
+		{
+			Role:       llm.Assistant,
+			Content:    []llm.Content{&llm.TextContent{Text: "fresh turn"}},
+			StopReason: "stop",
+		},
 	}}
 
 	fileTool := func(name string) dive.Tool {
@@ -184,7 +240,9 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 			}),
 		},
 	}
-	assert.NoError(t, applyContextDemoAgentOptions(&agentOpts, t.TempDir(), []string{"all"}))
+	selection, err := parseContextDemoNames([]string{"all"})
+	assert.NoError(t, err)
+	applyContextDemoAgentOptions(&agentOpts, t.TempDir(), selection)
 	agent, err := dive.NewAgent(agentOpts)
 	assert.NoError(t, err)
 
@@ -211,4 +269,10 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, recovery.Content, "Broken")
 	assert.Contains(t, recovery.Content, "missing.txt")
+
+	_, err = agent.CreateResponse(context.Background(), dive.WithInput("start a new turn"))
+	assert.NoError(t, err)
+	assert.Len(t, model.calls, 4)
+	_, ok = dive.FindLatestReminder(model.calls[3], "evidence-ledger")
+	assert.False(t, ok, "turn-local evidence must not leak into a later CreateResponse call")
 }

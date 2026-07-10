@@ -133,7 +133,7 @@ func main() {
 			cli.Strings("operator-reminder").
 				Help("Operator reminder appended after the first input as NAME=TEXT (repeatable)"),
 			cli.Strings("context-demo").
-				Help("Enable a runtime context demo: workspace, sources, verification, recovery, or all (repeatable)"),
+				Help("Enable runtime context demos: all, workspace, sources, verification, recovery (repeatable or comma-separated)"),
 			cli.Bool("print", "p").
 				Default(false).
 				Help("Print response and exit (useful for pipes)"),
@@ -196,6 +196,10 @@ func runInteractive(ctx *cli.Context) error {
 	// Create model
 	model := createModel(modelName, ctx.String("api-endpoint"))
 	pinnedReminders, operatorReminders, err := parseReminderSpecs(ctx.Strings("context"), ctx.Strings("operator-reminder"))
+	if err != nil {
+		return err
+	}
+	contextDemos, err := parseContextDemoNames(ctx.Strings("context-demo"))
 	if err != nil {
 		return err
 	}
@@ -355,9 +359,7 @@ func runInteractive(ctx *cli.Context) error {
 		},
 	}
 	applyReminderAgentOptions(&agentOpts, pinnedReminders)
-	if err := applyContextDemoAgentOptions(&agentOpts, workspaceDir, ctx.Strings("context-demo")); err != nil {
-		return err
-	}
+	applyContextDemoAgentOptions(&agentOpts, workspaceDir, contextDemos)
 
 	// Mid-turn compaction: when compaction is enabled, summarize the working
 	// context within a turn if it grows past the threshold, so a long tool loop
@@ -505,6 +507,10 @@ func runPrint(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	contextDemos, err := parseContextDemoNames(ctx.Strings("context-demo"))
+	if err != nil {
+		return err
+	}
 
 	// Create tools (auto-approve dialog for non-interactive print mode)
 	printValidator, err := toolkit.NewPathValidator(workspaceDir)
@@ -524,9 +530,7 @@ func runPrint(ctx *cli.Context) error {
 		ModelSettings: printModelSettings,
 	}
 	applyReminderAgentOptions(&agentOpts, pinnedReminders)
-	if err := applyContextDemoAgentOptions(&agentOpts, workspaceDir, ctx.Strings("context-demo")); err != nil {
-		return err
-	}
+	applyContextDemoAgentOptions(&agentOpts, workspaceDir, contextDemos)
 	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)

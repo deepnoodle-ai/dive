@@ -124,16 +124,20 @@ dive --context-demo workspace,sources --context-demo recovery
   persisting a stale snapshot.
 - `sources` pins an `evidence-ledger` built from successful file reads, searches,
   directory listings, and web fetches during the current response. The ledger
-  records what was consulted; it does not claim that a source is correct.
+  records what was consulted; it does not claim that a source is correct. Its
+  deterministic list is capped at 12 entries and reports omitted observations.
 - `verification` appends model-only operator reminders after `Write` and `Edit`,
   then reports a checkpoint when a later tool batch successfully runs a
-  recognized test, lint, or check command. A check launched in parallel with an
-  edit intentionally does not clear the debt.
+  recognized direct test, lint, or check command. The verifier must be the final
+  shell segment so masked commands such as `go test || true` cannot clear debt. A check
+  launched in parallel with an edit intentionally does not clear the debt, and
+  tracked paths use the same 12-entry bound.
 - `recovery` appends a model-only operator reminder after a failed tool call,
   identifying the failed input and asking the model to change its retry strategy.
 
-These presets demonstrate reminder delivery and authority. They are advisory,
-not enforcement boundaries; use permissions and denying hooks for hard policy.
+These presets demonstrate reminder delivery and authority. They are advisory
+and turn-local; they are not enforcement boundaries. Use permissions and denying
+hooks for hard policy.
 
 For the full contract and provider matrix, see the
 [context injection design](../design/context-injection.md).
