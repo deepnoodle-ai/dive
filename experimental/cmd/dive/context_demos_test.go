@@ -20,6 +20,9 @@ func TestParseContextDemoNames(t *testing.T) {
 	assert.True(t, selection.sources)
 	assert.True(t, selection.verification)
 	assert.False(t, selection.recovery)
+	assert.False(t, selection.pipeline)
+	assert.False(t, selection.quality)
+	assert.False(t, selection.security)
 
 	all, err := parseContextDemoNames([]string{"all"})
 	assert.NoError(t, err)
@@ -27,10 +30,13 @@ func TestParseContextDemoNames(t *testing.T) {
 	assert.True(t, all.sources)
 	assert.True(t, all.verification)
 	assert.True(t, all.recovery)
+	assert.True(t, all.pipeline)
+	assert.True(t, all.quality)
+	assert.True(t, all.security)
 
 	_, err = parseContextDemoNames([]string{"telepathy"})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "workspace, sources, verification, recovery")
+	assert.Contains(t, err.Error(), "workspace, sources, verification, recovery, pipeline, quality, security")
 }
 
 func TestWorkspaceSnapshotTracksGitState(t *testing.T) {
@@ -75,6 +81,8 @@ func TestVerificationCommandDetection(t *testing.T) {
 		"echo prepare; pytest -q",
 		"xcodebuild test -scheme Dive",
 		"VERIFY_MODE=full go test ./...",
+		"env VERIFY_MODE=full go test ./...",
+		"command go test ./...",
 		"A=1 B=2 /usr/local/bin/pytest -q",
 		"make design-check",
 	} {
@@ -107,6 +115,16 @@ func TestApplyContextDemoAgentOptionsInstallsOnlyNeededState(t *testing.T) {
 	assert.Len(t, stateful.Hooks.PreGeneration, 1)
 	assert.Len(t, stateful.Hooks.PreIteration, 2)
 	assert.Len(t, stateful.Hooks.PostToolUse, 2)
+
+	var all dive.AgentOptions
+	applyContextDemoAgentOptions(&all, t.TempDir(), contextDemoSelection{
+		workspace: true, sources: true, verification: true, recovery: true,
+		pipeline: true, quality: true, security: true,
+	})
+	assert.Len(t, all.Hooks.PreGeneration, 1)
+	assert.Len(t, all.Hooks.PreIteration, 6)
+	assert.Len(t, all.Hooks.PostToolUse, 4)
+	assert.Len(t, all.Hooks.PostToolUseFailure, 3)
 }
 
 func TestContextDemoStateIsBounded(t *testing.T) {
@@ -198,7 +216,7 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 			Role: llm.Assistant,
 			Content: []llm.Content{
 				&llm.ToolUseContent{ID: "read-1", Name: "Read", Input: []byte(`{"file_path":"README.md"}`)},
-				&llm.ToolUseContent{ID: "write-1", Name: "Write", Input: []byte(`{"file_path":"main.go"}`)},
+				&llm.ToolUseContent{ID: "write-1", Name: "Write", Input: []byte(`{"file_path":"auth/policy.go"}`)},
 			},
 			StopReason: "tool_use",
 		},
@@ -253,14 +271,22 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	workspace, ok := dive.FindLatestReminder(model.calls[0], "workspace-pulse")
 	assert.True(t, ok)
 	assert.Contains(t, workspace.Content, "Live workspace snapshot")
+	pipeline, ok := dive.FindLatestReminder(model.calls[0], "delivery-pipeline")
+	assert.True(t, ok)
+	assert.Contains(t, pipeline.Content, "Detected repository delivery surfaces")
 
 	ledger, ok := dive.FindLatestReminder(model.calls[1], "evidence-ledger")
 	assert.True(t, ok)
 	assert.Contains(t, ledger.Content, "file: README.md")
 	debt, ok := dive.FindLatestReminder(model.calls[1], "verification-debt")
 	assert.True(t, ok)
-	assert.Contains(t, debt.Content, "main.go")
+	assert.Contains(t, debt.Content, "auth/policy.go")
 	assert.Equal(t, dive.ReminderTierOperator, debt.Tier)
+	security, ok := dive.FindLatestReminder(model.calls[1], "security-review")
+	assert.True(t, ok)
+	assert.Contains(t, security.Content, "identity and access: 1 file change")
+	assert.NotContains(t, security.Content, "auth/policy.go")
+	assert.Equal(t, dive.ReminderTierOperator, security.Tier)
 
 	checkpoint, ok := dive.FindLatestReminder(model.calls[2], "verification-checkpoint")
 	assert.True(t, ok)
@@ -269,10 +295,18 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, recovery.Content, "Broken")
 	assert.Contains(t, recovery.Content, "missing.txt")
+	quality, ok := dive.FindLatestReminder(model.calls[2], "quality-gates")
+	assert.True(t, ok)
+	assert.Contains(t, quality.Content, "test: passed (go test)")
+	assert.Equal(t, dive.ReminderTierContextual, quality.Tier)
 
 	_, err = agent.CreateResponse(context.Background(), dive.WithInput("start a new turn"))
 	assert.NoError(t, err)
 	assert.Len(t, model.calls, 4)
 	_, ok = dive.FindLatestReminder(model.calls[3], "evidence-ledger")
 	assert.False(t, ok, "turn-local evidence must not leak into a later CreateResponse call")
+	_, ok = dive.FindLatestReminder(model.calls[3], "quality-gates")
+	assert.False(t, ok, "turn-local quality results must not leak into a later CreateResponse call")
+	_, ok = dive.FindLatestReminder(model.calls[3], "security-review")
+	assert.False(t, ok, "batch-local security triggers must not leak into a later CreateResponse call")
 }

@@ -11,9 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Dynamic context-injection demos** — the experimental CLI's repeatable
   `--context-demo` flag can pin a live workspace pulse and evidence ledger,
   append verification-debt checkpoints after edits, and coach recovery after
-  failed tool calls. Turn-local ledgers are bounded and deterministic, and
-  verification recognizes direct, unmasked check commands. `--context-demo all`
-  enables the complete demo set.
+  failed tool calls. Three SDLC presets add a read-only delivery-pipeline map,
+  a live build/test/analysis/security gate ledger, and security-review triggers
+  for sensitive changes and high-impact commands. Turn-local ledgers are bounded
+  and deterministic, untrusted repository text is excluded from elevated
+  reminders, and verification recognizes direct, unmasked check commands.
+  `--context-demo all` enables the complete demo set.
 
 ## [1.14.0] - 2026-07-09
 

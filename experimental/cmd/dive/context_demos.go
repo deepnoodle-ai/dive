@@ -17,17 +17,24 @@ const (
 	contextDemoItemLimit = 12
 )
 
-var contextDemoNames = []string{"workspace", "sources", "verification", "recovery"}
+var contextDemoNames = []string{
+	"workspace", "sources", "verification", "recovery",
+	"pipeline", "quality", "security",
+}
 
 type contextDemoSelection struct {
 	workspace    bool
 	sources      bool
 	verification bool
 	recovery     bool
+	pipeline     bool
+	quality      bool
+	security     bool
 }
 
 func (s contextDemoSelection) empty() bool {
-	return !s.workspace && !s.sources && !s.verification && !s.recovery
+	return !s.workspace && !s.sources && !s.verification && !s.recovery &&
+		!s.pipeline && !s.quality && !s.security
 }
 
 // parseContextDemoNames accepts repeatable values and comma-separated groups so
@@ -44,6 +51,9 @@ func parseContextDemoNames(specs []string) (contextDemoSelection, error) {
 				selection.sources = true
 				selection.verification = true
 				selection.recovery = true
+				selection.pipeline = true
+				selection.quality = true
+				selection.security = true
 			case "workspace":
 				selection.workspace = true
 			case "sources":
@@ -52,6 +62,12 @@ func parseContextDemoNames(specs []string) (contextDemoSelection, error) {
 				selection.verification = true
 			case "recovery":
 				selection.recovery = true
+			case "pipeline":
+				selection.pipeline = true
+			case "quality":
+				selection.quality = true
+			case "security":
+				selection.security = true
 			case "":
 				return contextDemoSelection{}, fmt.Errorf("context demo name cannot be empty")
 			default:
@@ -71,7 +87,7 @@ func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir str
 		return
 	}
 
-	if selection.sources || selection.verification {
+	if selection.sources || selection.verification || selection.quality || selection.security {
 		// Install turn-local state before the first iteration. Tool hooks can run
 		// in parallel, so the state object protects its own collections.
 		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, func(_ context.Context, hctx *dive.HookContext) error {
@@ -94,6 +110,19 @@ func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir str
 	if selection.recovery {
 		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, recoveryContextDemoHook())
 	}
+	if selection.pipeline {
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, pipelineContextDemoHook(workspaceDir))
+	}
+	if selection.quality {
+		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, qualityGateCollectorHook(qualityGatePassed))
+		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, qualityGateCollectorFailureHook())
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, qualityGateReminderHook())
+	}
+	if selection.security {
+		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, securityAwarenessSuccessHook())
+		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, securityAwarenessFailureHook())
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, securityAwarenessReminderHook())
+	}
 }
 
 // contextDemoTurnState is allocated for each CreateResponse call. It is shared
@@ -109,6 +138,9 @@ type contextDemoTurnState struct {
 	batchChanges        []string
 	omittedBatchChanges int
 	batchCheck          string
+
+	qualityGates      map[qualityGateKind]qualityGateObservation
+	batchSecurityRisk map[securityRiskCategory]securityRiskObservation
 }
 
 func contextDemoState(hctx *dive.HookContext) *contextDemoTurnState {

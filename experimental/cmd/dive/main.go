@@ -133,7 +133,7 @@ func main() {
 			cli.Strings("operator-reminder").
 				Help("Operator reminder appended after the first input as NAME=TEXT (repeatable)"),
 			cli.Strings("context-demo").
-				Help("Enable runtime context demos: all, workspace, sources, verification, recovery (repeatable or comma-separated)"),
+				Help("Enable runtime context demos: all, workspace, sources, verification, recovery, pipeline, quality, security (repeatable or comma-separated)"),
 			cli.Bool("print", "p").
 				Default(false).
 				Help("Print response and exit (useful for pipes)"),

@@ -44,10 +44,34 @@ late-arriving operator events, model-only recording, and failure hooks. The
 remaining ideas are useful follow-ups but either need a richer contract or
 overlap with the selected patterns.
 
+### SDLC expansion brainstorm
+
+A second divergent pass focused on delivery produced twelve candidates:
+
+1. repository pipeline and build-topology discovery;
+2. a live quality-gate outcome ledger;
+3. security-sensitive change review triggers;
+4. CI-versus-local command parity detection;
+5. test-impact mapping from changed paths;
+6. repeated/flaky test failure awareness;
+7. release-readiness checkpoints;
+8. dependency provenance and SBOM awareness;
+9. schema and migration risk reminders;
+10. build-cache invalidation context;
+11. coverage-delta awareness;
+12. deployment-window or change-freeze awareness.
+
+These cluster into standing delivery context (1, 4, 7, 10, 12), observed gate
+evidence (2, 5, 6, 11), and change risk (3, 8, 9). The selected three are
+`pipeline`, `quality`, and `security`: together they tell the model what delivery
+surfaces exist, which gates actually ran, and when a change deserves explicit
+security review. They remain useful without a hosted CI API, coverage service,
+or organization-specific release configuration.
+
 ## Proposal
 
 Add a repeatable `--context-demo NAME` flag to the experimental CLI. It accepts
-four demos, plus `all` as a convenience:
+seven demos, plus `all` as a convenience:
 
 - `workspace`: pin a live workspace snapshot before generation and refresh it
   after successful tools, so branch and dirty-state changes are visible without
@@ -61,6 +85,19 @@ four demos, plus `all` as a convenience:
 - `recovery`: append a model-only operator reminder after a failed tool call,
   naming the failed call and coaching the model to change one variable before
   retrying.
+- `pipeline`: pin a read-only delivery map built from recognized repository
+  surfaces such as Go modules, package scripts, Make targets, containers, and CI
+  workflows. Only fixed labels, allowlisted target names, and counts are
+  injected; arbitrary file contents and workflow names are not.
+- `quality`: pin a turn-local ledger of observed build, test, static-analysis,
+  and security gate outcomes. A failed observation dominates a passing one in
+  the same category, and labels come from a fixed command classifier rather than
+  raw shell text.
+- `security`: append a model-only operator review trigger after successful
+  changes to security-sensitive paths or attempted high-impact dependency,
+  privilege, and deployment commands. It reports only fixed risk categories and
+  counts, never raw paths or commands, and explicitly says it is not a
+  vulnerability finding or enforcement control.
 
 The implementation lives entirely in `experimental/cmd/dive`, with one flat Go
 file per demo and shared option/state wiring in `context_demos.go`. A small
@@ -91,7 +128,20 @@ is intentionally conservative: indirect wrapper scripts are not recognized.
 The demos are opt-in and experimental, their reminders say what was observed
 rather than claiming complete coverage, and failures to inspect Git degrade to a
 plain working-directory snapshot. The evidence ledger records bounded tool
-inputs, not truth or citation correctness.
+inputs, not truth or citation correctness. Pipeline discovery reads only regular
+workspace-root files, refuses symlinks, caps file reads at 64 KiB, and samples at
+most 256 workflow-directory entries. It favors a safe, incomplete map over
+recursively interpreting arbitrary build configuration.
+
+## Security considerations
+
+Repository filenames, workflow names, manifest contents, and shell commands can
+all contain attacker-controlled text. The new pipeline and security reminders
+therefore render only fixed vocabulary, allowlisted target/script names, and
+numeric counts. Quality observations use normalized labels from a deterministic
+classifier instead of echoing command text. All collections are bounded and
+turn-local. The security reminder is advisory: permissions, sandboxing, user
+approval, and downstream authorization remain the enforcement boundaries.
 
 ## Open questions
 

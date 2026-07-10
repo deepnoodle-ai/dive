@@ -103,7 +103,7 @@ input.
 
 ### Try dynamic context demos
 
-The CLI also includes four opt-in demos that derive context from the live agent
+The CLI also includes seven opt-in demos that derive context from the live agent
 loop:
 
 ```bash
@@ -116,7 +116,7 @@ Use `--context-demo` more than once, or pass a comma-separated set, to run only
 the patterns you want:
 
 ```bash
-dive --context-demo workspace,sources --context-demo recovery
+dive --context-demo pipeline,quality --context-demo security
 ```
 
 - `workspace` replaces a pinned `workspace-pulse` before each model call with
@@ -129,15 +129,29 @@ dive --context-demo workspace,sources --context-demo recovery
 - `verification` appends model-only operator reminders after `Write` and `Edit`,
   then reports a checkpoint when a later tool batch successfully runs a
   recognized direct test, lint, or check command. The verifier must be the final
-  shell segment so masked commands such as `go test || true` cannot clear debt. A check
-  launched in parallel with an edit intentionally does not clear the debt, and
-  tracked paths use the same 12-entry bound.
+  shell segment so masked commands such as `go test || true` cannot clear debt.
+  A check launched in parallel with an edit intentionally does not clear the
+  debt, and tracked paths use the same 12-entry bound.
 - `recovery` appends a model-only operator reminder after a failed tool call,
   identifying the failed input and asking the model to change its retry strategy.
+- `pipeline` pins a read-only `delivery-pipeline` map derived from recognized
+  build files, allowlisted package scripts and Make targets, CI configuration,
+  containers, and dependency automation. It exposes only fixed labels and
+  counts—not file contents or workflow names—and reports presence rather than
+  claiming a gate ran.
+- `quality` pins a `quality-gates` ledger for recognized build, test,
+  static-analysis, and security commands observed during the current response.
+  It records normalized labels and tool outcomes; a failed or blocked gate
+  dominates a passing observation in the same category.
+- `security` appends a model-only operator `security-review` trigger after
+  sensitive file changes or high-impact dependency, privilege, credential,
+  cryptography, and deployment commands. It contains fixed risk categories and
+  counts only, so repository or shell text is not promoted to operator
+  authority. The trigger is advisory, not a vulnerability finding or approval.
 
 These presets demonstrate reminder delivery and authority. They are advisory
-and turn-local; they are not enforcement boundaries. Use permissions and denying
-hooks for hard policy.
+and turn-local; they are not enforcement boundaries. Use permissions and
+denying hooks for hard policy.
 
 For the full contract and provider matrix, see the
 [context injection design](../design/context-injection.md).
