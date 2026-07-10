@@ -6,15 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Dynamic context-injection demos** — the experimental CLI's repeatable
+  `--context-demo` flag offers five focused presets: a live workspace pulse, a
+  delivery-pipeline map with automatic Go module and format/test/vet/race
+  guidance, verification debt plus observed gate outcomes, failure-specific
+  recovery coaching, and security-review triggers for sensitive changes and
+  high-impact commands. Interactive runs now trace
+  reminder lifecycle events, expose exact latest-turn payloads through `/context`,
+  list presets with `dive context-demos`, and warn when the workspace is below
+  the Git root. Turn-local ledgers are bounded and deterministic, untrusted
+  repository text is excluded from elevated reminders, and verification
+  recognizes direct, unmasked check commands. `--context-demo all` enables the
+  complete demo set.
+
+### Fixed
+
+- **Failed Read status** — failed Read tool calls now show the actual error
+  instead of misleadingly reporting that one line was read.
+
 ## [1.14.0] - 2026-07-09
 
 ### Added
 
-- **Typed context reminders** — hooks can append or pin tiered reminders with
-  explicit recording policy and provider-aware authority rendering: operator
-  reminders use a native `system` (Anthropic Opus 4.8) or `developer` (OpenAI)
-  role where known-supported, falling back to a tagged user message everywhere
-  else. The experimental Dive CLI exposes reminders as a demo platform, and
+- **Typed context reminders** — reminders are appended with one of two explicit
+  lifetimes: `Recorded` reminders enter conversation history, while `ModelOnly`
+  reminders disappear after the current response. Operator reminders use a native
+  `system` (Anthropic Opus 4.8) or `developer` (OpenAI) role where
+  known-supported, falling back to a tagged user message everywhere else. The
+  experimental Dive CLI exposes reminders as a demo platform, and
   provider-tagged integration tests exercise live delivery.
 
 ### Changed

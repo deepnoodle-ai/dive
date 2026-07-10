@@ -24,8 +24,8 @@ func (l *Loader) Tools() []dive.Tool {
 }
 
 // Hooks returns the catalog injection and skill content hooks.
-// Hooks are always returned even when no skills are loaded so a pinned empty
-// catalog can mask a stale legacy block from an older session.
+// Hooks are always returned even when no skills are loaded so an empty catalog
+// can supersede a stale legacy block from an older session.
 // Implements dive.Extension.
 func (l *Loader) Hooks() dive.Hooks {
 	return dive.Hooks{
@@ -125,18 +125,14 @@ func skillContentHook(loader *Loader) dive.PostToolUseHook {
 // skillReminderName is the system-reminder block name for the skill catalog.
 const skillReminderName = "skills"
 
-// catalogHook returns a PreGenerationHook that injects the skill catalog
-// as a named <system-reminder> block in the first user message.
-//
-// Using the first user message (not the last) ensures the catalog is in a
-// stable position for prompt caching — it sits right after the system prompt
-// and doesn't move as the conversation grows.
+// catalogHook returns a PreGenerationHook that appends the skill catalog as a
+// model-only <system-reminder> block at the request tail.
 func catalogHook(loader *Loader) dive.PreGenerationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		catalog := BuildCatalog(loader)
-		// A fresh empty catalog has nothing to inject. Keep pinning an empty
-		// reminder only when loaded history contains a stale catalog, so the
-		// agent-owned overlay can mask it without mutating persisted messages.
+		// A fresh empty catalog has nothing to inject. Append an empty reminder
+		// only when loaded history contains a stale catalog so latest-wins
+		// semantics supersede it without mutating persisted messages.
 		if catalog == "" && !dive.HasSystemReminder(hctx.Messages, skillReminderName) {
 			return nil
 		}
@@ -144,6 +140,6 @@ func catalogHook(loader *Loader) dive.PreGenerationHook {
 		if err != nil {
 			return err
 		}
-		return hctx.PinReminder(reminder)
+		return hctx.AppendReminder(reminder, dive.ModelOnly)
 	}
 }

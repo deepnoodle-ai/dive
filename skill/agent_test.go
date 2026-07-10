@@ -235,7 +235,7 @@ func TestLoaderExtension(t *testing.T) {
 	})
 }
 
-func TestCatalogHook_InjectsIntoFirstUserMessage(t *testing.T) {
+func TestCatalogHook_QueuesWithoutMutatingInput(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
 			"reviewer": {
@@ -258,11 +258,11 @@ func TestCatalogHook_InjectsIntoFirstUserMessage(t *testing.T) {
 
 	// User text should be unchanged
 	assert.Equal(t, "Review my code", hctx.Messages[0].Content[0].(*llm.TextContent).Text)
-	// Pinned delivery is copy-on-write; the hook must not mutate history.
+	// Model-only delivery is agent-owned; the hook must not mutate history.
 	assert.Equal(t, 1, len(hctx.Messages[0].Content))
 }
 
-func TestCatalogHook_StableAcrossGenerations(t *testing.T) {
+func TestCatalogHook_LeavesHistoryUnchangedAcrossCalls(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
 			"reviewer": {
@@ -275,7 +275,7 @@ func TestCatalogHook_StableAcrossGenerations(t *testing.T) {
 
 	hook := catalogHook(loader)
 
-	// First generation — injects catalog as separate content block
+	// First generation queues a model-only catalog.
 	firstMsg := llm.NewUserTextMessage("First")
 	hctx := &dive.HookContext{
 		Messages: []*llm.Message{firstMsg},
@@ -284,11 +284,10 @@ func TestCatalogHook_StableAcrossGenerations(t *testing.T) {
 	assert.Equal(t, 1, len(firstMsg.Content))
 	assert.Equal(t, "First", firstMsg.Content[0].(*llm.TextContent).Text)
 
-	// Second generation — same messages plus a new turn
-	// The catalog should already be in firstMsg, hook should be a no-op
+	// A later generation queues it again after a new turn.
 	hctx2 := &dive.HookContext{
 		Messages: []*llm.Message{
-			firstMsg, // already has catalog content block
+			firstMsg,
 			{Role: llm.Assistant, Content: []llm.Content{&llm.TextContent{Text: "Done"}}},
 			llm.NewUserTextMessage("Second turn"),
 		},
@@ -298,12 +297,12 @@ func TestCatalogHook_StableAcrossGenerations(t *testing.T) {
 	// First message remains caller-owned and unchanged.
 	assert.Equal(t, 1, len(firstMsg.Content))
 
-	// Second user message should NOT have a catalog
+	// The second user message is also unchanged.
 	assert.Equal(t, 1, len(hctx2.Messages[2].Content))
 	assert.Equal(t, "Second turn", hctx2.Messages[2].Content[0].(*llm.TextContent).Text)
 }
 
-func TestCatalogHook_ReinjectsOnChange(t *testing.T) {
+func TestCatalogHook_CatalogChangeDoesNotMutateHistory(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
 			"reviewer": {
@@ -330,7 +329,7 @@ func TestCatalogHook_ReinjectsOnChange(t *testing.T) {
 	}
 	loader.mu.Unlock()
 
-	// Next generation — should replace the catalog content block
+	// The next generation queues the changed catalog.
 	hctx2 := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
 	assert.NoError(t, hook(context.Background(), hctx2))
 
@@ -339,7 +338,7 @@ func TestCatalogHook_ReinjectsOnChange(t *testing.T) {
 	assert.Equal(t, "Hello", firstMsg.Content[0].(*llm.TextContent).Text)
 }
 
-func TestCatalogHook_SessionResume(t *testing.T) {
+func TestCatalogHook_ResumeDoesNotMutateLegacyHistory(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
 			"reviewer": {
@@ -350,8 +349,7 @@ func TestCatalogHook_SessionResume(t *testing.T) {
 		},
 	}
 
-	// Simulate a resumed session: messages already have the catalog
-	// from a previous session, but the hook is fresh (lastHash is "")
+	// Simulate a resumed session whose first message contains a legacy catalog.
 	existingMsg := llm.NewUserTextMessage("Hello")
 	dive.SetSystemReminder([]*llm.Message{existingMsg}, "skills", BuildCatalog(loader))
 
@@ -366,12 +364,12 @@ func TestCatalogHook_SessionResume(t *testing.T) {
 
 	assert.NoError(t, hook(context.Background(), hctx))
 
-	// Should detect existing block and not duplicate — still two content blocks
+	// The hook queues the typed catalog without rewriting the legacy message.
 	assert.Equal(t, 2, len(existingMsg.Content))
 	assert.Equal(t, "Hello", existingMsg.Content[0].(*llm.TextContent).Text)
 }
 
-func TestCatalogHook_NoUserMessage(t *testing.T) {
+func TestCatalogHook_QueuesWithoutUserMessage(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
 			"reviewer": {
@@ -389,7 +387,7 @@ func TestCatalogHook_NoUserMessage(t *testing.T) {
 		},
 	}
 
-	// Pinning is deferred to the agent-owned model overlay.
+	// Appending is deferred to the agent-owned model-facing history.
 	err := hook(context.Background(), hctx)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(hctx.Messages))
@@ -407,7 +405,7 @@ func TestCatalogHook_EmptySkills(t *testing.T) {
 	assert.Equal(t, "Hello", hctx.Messages[0].Content[0].(*llm.TextContent).Text)
 }
 
-func TestCatalogHook_DoesNotPinFreshEmptyCatalog(t *testing.T) {
+func TestCatalogHook_SkipsFreshEmptyCatalog(t *testing.T) {
 	loader := &Loader{skills: map[string]*Skill{}}
 	model := &catalogCaptureLLM{}
 	agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Extensions: []dive.Extension{loader}})
@@ -419,10 +417,10 @@ func TestCatalogHook_DoesNotPinFreshEmptyCatalog(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestCatalogHook_RemovesStaleCatalogOnFreshResume(t *testing.T) {
+func TestCatalogHook_QueuesEmptyValueForStaleCatalog(t *testing.T) {
 	// Simulate: skills were available in a previous process, which wrote
 	// a catalog block. Now skills are gone and a fresh process resumes
-	// the session. lastHash starts empty, but the block is in messages.
+	// the session with that block still in history.
 	loader := &Loader{skills: map[string]*Skill{}} // no skills
 
 	// Messages from a previous session with a catalog block
@@ -433,12 +431,12 @@ func TestCatalogHook_RemovesStaleCatalogOnFreshResume(t *testing.T) {
 	hook := catalogHook(loader)
 	hctx := &dive.HookContext{Messages: []*llm.Message{existingMsg}}
 
-	// Hook should remove the stale block even though lastHash is ""
+	// The hook queues an empty latest value without mutating the stale block.
 	assert.NoError(t, hook(context.Background(), hctx))
 	assert.True(t, dive.HasSystemReminder(hctx.Messages, "skills"), "hook must not mutate loaded history")
 }
 
-func TestCatalogHook_RemovesOnReloadToEmpty(t *testing.T) {
+func TestCatalogHook_QueuesEmptyValueAfterReload(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
 			"reviewer": {
@@ -453,7 +451,7 @@ func TestCatalogHook_RemovesOnReloadToEmpty(t *testing.T) {
 	firstMsg := llm.NewUserTextMessage("Hello")
 	hctx := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
 
-	// First call — injects catalog
+	// First call — queues the catalog without mutating hook messages.
 	assert.NoError(t, hook(context.Background(), hctx))
 	assert.False(t, dive.HasSystemReminder(hctx.Messages, "skills"))
 
@@ -462,7 +460,7 @@ func TestCatalogHook_RemovesOnReloadToEmpty(t *testing.T) {
 	loader.skills = map[string]*Skill{}
 	loader.mu.Unlock()
 
-	// Next generation — should remove the stale catalog
+	// Next generation — queues an empty latest value without rewriting history.
 	hctx2 := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
 	assert.NoError(t, hook(context.Background(), hctx2))
 	assert.False(t, dive.HasSystemReminder(hctx2.Messages, "skills"))
@@ -498,7 +496,7 @@ func (m *catalogCaptureLLM) Generate(_ context.Context, opts ...llm.Option) (*ll
 	return (&staticLLM{}).Generate(context.Background())
 }
 
-func TestCatalogHook_AgentOwnedOverlay(t *testing.T) {
+func TestCatalogHook_AgentOwnedModelOnlyReminder(t *testing.T) {
 	loader := &Loader{skills: map[string]*Skill{
 		"reviewer": {Name: "reviewer", Description: "Review code.", Config: SkillConfig{Description: "Review code."}},
 	}}
@@ -511,7 +509,7 @@ func TestCatalogHook_AgentOwnedOverlay(t *testing.T) {
 	reminder, ok := dive.FindLatestReminder(model.messages, "skills")
 	assert.True(t, ok)
 	assert.Contains(t, reminder.Content, "reviewer: Review code.")
-	assert.Equal(t, 1, len(input.Content), "catalog overlay must not mutate caller input")
+	assert.Equal(t, 1, len(input.Content), "model-only catalog must not mutate caller input")
 
 	loader.mu.Lock()
 	loader.skills["deploy"] = &Skill{Name: "deploy", Description: "Deploy.", Config: SkillConfig{Description: "Deploy."}}
@@ -523,7 +521,7 @@ func TestCatalogHook_AgentOwnedOverlay(t *testing.T) {
 	assert.Contains(t, reminder.Content, "deploy: Deploy.")
 }
 
-func TestCatalogHook_MasksLegacyCatalogWhenEmpty(t *testing.T) {
+func TestCatalogHook_SupersedesLegacyCatalogWhenEmpty(t *testing.T) {
 	loader := &Loader{skills: map[string]*Skill{}}
 	model := &catalogCaptureLLM{}
 	agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Extensions: []dive.Extension{loader}})
@@ -533,16 +531,16 @@ func TestCatalogHook_MasksLegacyCatalogWhenEmpty(t *testing.T) {
 
 	_, err = agent.CreateResponse(context.Background(), dive.WithMessages(legacy))
 	assert.NoError(t, err)
-	assert.False(t, dive.HasSystemReminder(model.messages, "skills"))
+	assert.True(t, dive.HasSystemReminder(model.messages, "skills"), "recorded history remains append-only")
 	reminder, ok := dive.FindLatestReminder(model.messages, "skills")
 	assert.True(t, ok)
 	assert.Equal(t, "", reminder.Content)
 	assert.True(t, dive.HasSystemReminder([]*llm.Message{legacy}, "skills"), "loaded history must remain unchanged")
 }
 
-// TestCatalogHook_ConcurrentCreateResponse exercises the catalog hook's
-// shared lastHash state under concurrent CreateResponse calls on a single
-// agent. Run with -race to detect unsynchronized access.
+// TestCatalogHook_ConcurrentCreateResponse exercises catalog reads and writes
+// under concurrent CreateResponse calls on a single agent. Run with -race to
+// detect unsynchronized access.
 func TestCatalogHook_ConcurrentCreateResponse(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
@@ -568,8 +566,7 @@ func TestCatalogHook_ConcurrentCreateResponse(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			// Mutate the catalog from some goroutines so CatalogHash
-			// changes and the hook takes the lastHash write path.
+			// Mutate the catalog from some goroutines while others build it.
 			if i%4 == 0 {
 				loader.mu.Lock()
 				name := fmt.Sprintf("skill-%d", i)

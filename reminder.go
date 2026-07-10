@@ -3,7 +3,6 @@ package dive
 import (
 	"fmt"
 	"regexp"
-	"slices"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -144,7 +143,7 @@ func ParseLegacyReminderText(text string) (Reminder, bool) {
 	return Reminder{Name: match[1], Tier: ReminderTierContextual, Content: match[2]}, true
 }
 
-// ReminderRecording controls whether a hook-appended reminder is returned in
+// ReminderRecording controls whether an appended reminder is returned in
 // OutputMessages and therefore eligible for session persistence.
 type ReminderRecording string
 
@@ -153,37 +152,18 @@ const (
 	ModelOnly ReminderRecording = "model_only"
 )
 
-type reminderDeliveryKind uint8
-
-const (
-	reminderDeliveryAppend reminderDeliveryKind = iota
-	reminderDeliveryPin
-)
-
 type reminderDelivery struct {
 	reminder  Reminder
 	recording ReminderRecording
-	kind      reminderDeliveryKind
 }
 
 type reminderState struct {
-	pinned    []Reminder
 	pending   []reminderDelivery
 	modelOnly []*llm.Message
 }
 
 func (s *reminderState) appendModelOnly(message *llm.Message) {
 	s.modelOnly = append(s.modelOnly, message)
-}
-
-func (s *reminderState) pin(r Reminder) {
-	for i := range s.pinned {
-		if s.pinned[i].Name == r.Name {
-			s.pinned[i] = r
-			return
-		}
-	}
-	s.pinned = append(s.pinned, r)
 }
 
 func (s *reminderState) drainPending() []reminderDelivery {
@@ -196,56 +176,5 @@ func queueReminderDeliveries(state *reminderState, deliveries []reminderDelivery
 	if state == nil {
 		return
 	}
-	for _, delivery := range deliveries {
-		if delivery.kind == reminderDeliveryPin {
-			state.pin(delivery.reminder)
-		} else {
-			state.pending = append(state.pending, delivery)
-		}
-	}
-}
-
-func applyPinnedReminders(messages []*llm.Message, pinned []Reminder) []*llm.Message {
-	if len(pinned) == 0 {
-		return messages
-	}
-	names := make(map[string]bool, len(pinned))
-	for _, r := range pinned {
-		names[r.Name] = true
-	}
-
-	out := slices.Clone(messages)
-	userIndex := -1
-	for i, message := range out {
-		if message != nil && message.Role == llm.User {
-			userIndex = i
-			break
-		}
-	}
-	if userIndex < 0 {
-		message := &llm.Message{Role: llm.User}
-		out = append([]*llm.Message{message}, out...)
-		userIndex = 0
-	}
-
-	original := out[userIndex]
-	copyMessage := &llm.Message{ID: original.ID, Role: llm.User}
-	for _, block := range original.Content {
-		switch c := block.(type) {
-		case *llm.ReminderContent:
-			if names[c.Name] {
-				continue
-			}
-		case *llm.TextContent:
-			if legacy, ok := ParseLegacyReminderText(c.Text); ok && names[legacy.Name] {
-				continue
-			}
-		}
-		copyMessage.Content = append(copyMessage.Content, block)
-	}
-	for _, r := range pinned {
-		copyMessage.Content = append(copyMessage.Content, reminderContent(r))
-	}
-	out[userIndex] = copyMessage
-	return out
+	state.pending = append(state.pending, deliveries...)
 }

@@ -42,10 +42,10 @@ func TestReminderConstructorsAndTypedHelpers(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestPinnedReminderIsCopyOnWriteAndModelOnly(t *testing.T) {
+func TestModelOnlyReminderIsAppendedAtTailAndNotPersisted(t *testing.T) {
 	legacy := llm.NewUserTextMessage("deploy")
 	SetSystemReminder([]*llm.Message{legacy}, "environment", "stale")
-	sess := newMemSession("pinned-copy-on-write")
+	sess := newMemSession("model-only-tail")
 	sess.messages = []*llm.Message{legacy}
 
 	current, err := NewContextReminder("environment", "cwd=/srv/app")
@@ -60,20 +60,99 @@ func TestPinnedReminderIsCopyOnWriteAndModelOnly(t *testing.T) {
 	agent, err := NewAgent(AgentOptions{Model: model, Session: sess})
 	assert.NoError(t, err)
 
-	resp, err := agent.CreateResponse(context.Background(), WithInput("continue"), WithPinnedReminder(current))
+	resp, err := agent.CreateResponse(context.Background(), WithInput("continue"), WithModelOnlyReminder(current))
 	assert.NoError(t, err)
 	assert.Equal(t, "done", resp.OutputText())
 	found, ok := FindLatestReminder(received, "environment")
 	assert.True(t, ok)
 	assert.Equal(t, "cwd=/srv/app", found.Content)
-	assert.False(t, HasSystemReminder(received, "environment"), "legacy block should be masked from the model")
+	assert.Equal(t, llm.User, received[len(received)-1].Role)
+	_, ok = FindReminder(received[len(received)-1], "environment")
+	assert.True(t, ok, "model-only reminder must be at the conversation tail")
+	assert.True(t, HasSystemReminder(received, "environment"), "recorded history remains append-only")
 	assert.True(t, HasSystemReminder([]*llm.Message{legacy}, "environment"), "loaded history must remain unchanged")
 
 	persisted, err := sess.Messages(context.Background())
 	assert.NoError(t, err)
 	if _, ok := FindLatestReminder(persisted, "environment"); ok {
-		t.Fatal("pinned reminder was persisted")
+		t.Fatal("model-only reminder was persisted")
 	}
+}
+
+func TestModelOnlyRemindersPreserveChronologyAndAuthorityAtTail(t *testing.T) {
+	oldEnvironment, _ := NewContextReminder("environment", "old")
+	mode, _ := NewOperatorReminder("mode", "read only")
+	currentEnvironment, _ := NewContextReminder("environment", "current")
+	var received []*llm.Message
+	model := &mockLLM{generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
+		cfg := &llm.Config{}
+		cfg.Apply(opts...)
+		received = cfg.Messages
+		return textResponse("done"), nil
+	}}
+	agent, err := NewAgent(AgentOptions{Model: model})
+	assert.NoError(t, err)
+
+	response, err := agent.CreateResponse(context.Background(),
+		WithInput("inspect"),
+		WithModelOnlyReminder(oldEnvironment),
+		WithModelOnlyReminder(mode),
+		WithModelOnlyReminder(currentEnvironment),
+	)
+	assert.NoError(t, err)
+	assertReminderOrder(t, received, "environment", "mode", "environment")
+	assert.Equal(t, llm.User, received[len(received)-3].Role)
+	assert.Equal(t, llm.System, received[len(received)-2].Role)
+	assert.Equal(t, llm.User, received[len(received)-1].Role)
+	environment, ok := FindLatestReminder(received, "environment")
+	assert.True(t, ok)
+	assert.Equal(t, "current", environment.Content)
+	_, recorded := FindLatestReminder(response.OutputMessages, "environment")
+	assert.False(t, recorded)
+}
+
+func TestModelOnlyRemindersAppendAcrossIterationsAtTheRequestTail(t *testing.T) {
+	var calls atomic.Int32
+	var modelCalls [][]*llm.Message
+	model := &mockLLM{generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
+		cfg := &llm.Config{}
+		cfg.Apply(opts...)
+		modelCalls = append(modelCalls, cfg.Messages)
+		if calls.Add(1) == 1 {
+			return toolResponse("call-1", "lookup"), nil
+		}
+		return textResponse("done"), nil
+	}}
+	agent, err := NewAgent(AgentOptions{
+		Model: model,
+		Tools: []Tool{&mockTool{name: "lookup", callFunc: func(context.Context, any) (*ToolResult, error) {
+			return NewToolResultText("ok"), nil
+		}}},
+		Hooks: Hooks{PreIteration: []PreIterationHook{func(_ context.Context, hctx *HookContext) error {
+			reminder, reminderErr := NewContextReminder("workspace", fmt.Sprintf("iteration=%d", hctx.Iteration))
+			if reminderErr != nil {
+				return reminderErr
+			}
+			return hctx.AppendReminder(reminder, ModelOnly)
+		}}},
+	})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("inspect"))
+	assert.NoError(t, err)
+	assert.Len(t, modelCalls, 2)
+	for index, messages := range modelCalls {
+		expected := make([]string, index+1)
+		for i := range expected {
+			expected[i] = "workspace"
+		}
+		assertReminderOrder(t, messages, expected...)
+		reminder, ok := FindReminder(messages[len(messages)-1], "workspace")
+		assert.True(t, ok)
+		assert.Equal(t, fmt.Sprintf("iteration=%d", index), reminder.Content)
+	}
+	assert.Len(t, modelCalls[0], 2, "first model-only reminder follows the user input")
+	assert.True(t, len(modelCalls[1]) > len(modelCalls[0]), "later history stays before the newly appended reminder")
 }
 
 func TestHookAppendedReminderRecordingAndLifetime(t *testing.T) {

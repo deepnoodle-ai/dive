@@ -1,14 +1,18 @@
-# Runtime Context Injection Design Document
+# Runtime Context Injection: Design and Contract
 
-This document describes the design for Dive's runtime context injection
+**Status:** Implemented
+**Last updated:** 2026-07-10
+
+This document records Dive's implemented runtime context injection
 system: how an application feeds the model context that the end user did not
 type — environment facts, surfaced memory, policy changes, budget notices,
 mid-turn steering — in a way that is portable across providers, safe for
 prompt caching, and recognizable after the fact.
 
-It generalizes the existing `SetSystemReminder` mechanism (`system_reminder.go`)
-and defines how Dive adopts Anthropic's mid-conversation system messages
-(Opus 4.8+) without forking the API per provider.
+It supersedes the legacy `SetSystemReminder` mechanism (`system_reminder.go`)
+for new integrations and defines how Dive uses Anthropic's mid-conversation
+system messages (Opus 4.8+) without forking the API per provider. The legacy
+functions remain available for compatibility.
 
 ## Background
 
@@ -38,18 +42,18 @@ yet. The tagged-user-message pattern is the proven, universally portable
 baseline; the native system role is an authority upgrade available on some
 models and endpoints. Dive's design treats it exactly that way.
 
-Dive today has one cell of this design: `SetSystemReminder` pins a named
-`<system-reminder>` block into the first user message by mutating it in
-place. It cannot inject later in the conversation, has no notion of
-authority, interacts poorly with session persistence (see
-[Delivery semantics](#delivery-semantics)), and nothing in the agent
-explains the tags to the model unless the skill package happens to be
-loaded.
+Before typed reminders, Dive had one cell of this design:
+`SetSystemReminder` placed a named `<system-reminder>` block into the first user
+message by mutating it in place. It could not inject later in the conversation,
+had no notion of authority, interacted poorly with session persistence (see
+[Delivery semantics](#delivery-semantics)), and depended on the skill package to
+explain the tags to the model. The typed path fixes those limits; the old API is
+now the compatibility layer.
 
 ## Usage at a Glance
 
-What the design looks like to an embedder. Create a reminder with the
-constructor that matches its trust level, then deliver it:
+Create a reminder with the constructor that matches its trust level, then
+deliver it:
 
 ```go
 // Contextual: information adjacent to the user (memory, environment, catalogs).
@@ -60,19 +64,16 @@ env, _ := dive.NewContextReminder("environment", "Working directory: /srv/app\nO
 budget, _ := dive.NewOperatorReminder("budget", "The remaining token budget for this run is 40,000 tokens.")
 ```
 
-**Standing context you supply with every request** — pin it. A turn is one
-`CreateResponse` call, and pinning works on any turn of a session, not just
-the first: it is a per-request overlay, supplied on each call (or by a
-hook), rendered into a copy of the conversation's first user message, and
-never persisted. Identical content re-renders byte-identically, so the
-prompt cache stays warm across turns; changing the content mid-session is
-supported and simply re-reads the prefix once. Pin *current values*
-(environment, catalogs); append *events* (mode switches, budget notices):
+**Standing context you supply with every request** — append it model-only. A
+turn is one `CreateResponse` call. Model-only reminders can be supplied on any
+turn, are rendered at the request tail, survive later tool iterations in that
+response, and are never recorded. A later same-name reminder supersedes an
+earlier one without rewriting it:
 
 ```go
 resp, err := agent.CreateResponse(ctx,
     dive.WithInput("Deploy the staging build."),
-    dive.WithPinnedReminder(env),
+    dive.WithModelOnlyReminder(env),
 )
 ```
 
@@ -87,7 +88,7 @@ resp, err := agent.CreateResponse(ctx,
 )
 ```
 
-Order matters: the reminder goes *after* the user message. That yields
+Order matters: the reminder goes _after_ the user message. That yields
 `assistant → user → system` in history, which is a legal native placement
 on Anthropic; reminder-first would follow the prior assistant turn and
 force a fallback.
@@ -119,37 +120,38 @@ if _, ok := dive.FindLatestReminder(messages, "mode"); !ok {
 What happens underneath, in one line each: reminders travel as typed
 content blocks (never confusable with user text), providers render them to
 `<system-reminder>` tags at the wire, and operator-tier reminders get the
-strongest authority the target is *known* to support — a native `system`
+strongest authority the target is _known_ to support — a native `system`
 message on Anthropic Opus 4.8, a `developer` item on OpenAI, and a tagged
 user message everywhere else. Appending never invalidates the prompt-cache
 prefix. The downgrade to a tagged user message is silent: operator authority
 raises instruction priority, never enforces (Non-Goal 6), so a weaker role is
 a weaker instruction rather than a failed request.
 
-| I want to… | Use |
-| :--- | :--- |
-| Provide stable per-request context (env, catalog) | `WithPinnedReminder` |
+| I want to…                                     | Use                                                                  |
+| :--------------------------------------------- | :------------------------------------------------------------------- |
+| Provide per-request context (env, catalog)     | `WithModelOnlyReminder`                                              |
 | Assert a fact for the rest of the conversation | `NewReminderMessage` as input, or `hctx.AppendReminder(r, Recorded)` |
-| Nudge the model for this request only | `hctx.AppendReminder(r, ModelOnly)` |
-| Check whether a reminder is still in context | `FindLatestReminder` |
-| Hide reminders in my UI | typed strip helpers (never the legacy text parser) |
+| Nudge the model for this request only          | `hctx.AppendReminder(r, ModelOnly)`                                  |
+| Check whether a reminder is still in context   | `FindLatestReminder`                                                 |
+| Hide reminders in my UI                        | typed strip helpers (never the legacy text parser)                   |
 
-The rest of this document defines the contracts behind these calls.
+The rest of this document defines the contracts behind these calls. For a
+task-oriented introduction, see the
+[Runtime Context and System Reminders guide](../guides/context-injection.md).
 
 ## Goals
 
-1. **One primitive** — A single reminder concept with a validated name
-   (identity), a tier (authority), a position (pinned or appended), and a
-   recording mode (recorded or model-only).
+1. **One primitive** — A single appended reminder concept with a validated name
+   (identity), a tier (authority), and a lifetime (recorded or model-only).
 2. **Portable with graceful upgrade** — The same application code works on
-   every provider. Where native operator-authority rendering is *known* to
+   every provider. Where native operator-authority rendering is _known_ to
    be supported (Anthropic system, OpenAI developer), Dive uses it;
    everywhere else — including targets whose behavior is unknown — it uses
    the tagged-user-message pattern Claude Code ships today.
-3. **Cache-conscious by construction** — Appending is cache-safe: it never
-   touches the cached prefix. Pinning is cache-efficient while immutable:
-   it lives in the stable prefix and re-renders byte-identically until its
-   content actually changes.
+3. **Cache-conscious by construction** — Appending never rewrites the cached
+   prefix. When a prior model-only reminder disappears on the next request,
+   reuse can stop at its recent tail position rather than at the first user
+   message.
 4. **Provenance inside Dive, recognition outside** — Within Dive-controlled
    state, injected content is a distinct content type that cannot be
    confused with user-typed text. The rendered `<system-reminder>` tag is a
@@ -176,8 +178,7 @@ The rest of this document defines the contracts behind these calls.
    caps). Dive makes these easy to build by keeping reminders identifiable;
    it does not implement them.
 5. A session rewrite API. Reminders never edit historical session events;
-   anything that must change is superseded by appending or re-rendered as a
-   request overlay.
+   anything that changes is superseded by appending a later same-name block.
 6. Model-enforced policy. Operator-tier reminders raise instruction
    priority; they are not an enforcement mechanism. Real permissions and
    policy checks live outside the model (the `permission` package, hooks).
@@ -215,27 +216,23 @@ hazard.
 
 ### Supported matrix
 
-The axes are not fully independent. A pinned operator reminder is
-impossible in the native representation (a leading system message is
-illegal in Anthropic's placement rules), and its use case — operator
-context known at conversation start — already belongs in the top-level
-system prompt. v1 supports:
+Both lifetimes support both tiers because every reminder is appended at a legal
+conversation tail:
 
-| Position | Tier | Recording |
-| :--- | :--- | :--- |
-| Pinned (first user message) | contextual only | model-only (re-rendered per request) |
-| Appended (conversation tail) | contextual or operator | recorded or model-only |
+| Lifetime   | Tier                   | Placement         |
+| :--------- | :--------------------- | :---------------- |
+| Recorded   | contextual or operator | conversation tail |
+| Model-only | contextual or operator | conversation tail |
 
-Operator context needed from the very start is a system-prompt concern,
-handled at agent construction, outside this design. `SessionStartHook`'s
-existing `Persist` flag likewise remains available for seeding general
-messages, but it does not create a recorded pinned reminder — pinning is
-model-only in v1.
+Operator policy known when constructing the agent still usually belongs in the
+top-level system prompt. `SessionStartHook`'s existing `Persist` flag remains
+available for seeding general messages. At session start, an appended reminder
+is already at the initial request tail; no third placement mode is needed.
 
 ## Representation
 
-Reminders are carried as a dedicated content block type (working name
-`llm.ReminderContent`) holding the name, tier, and text. It joins the
+Reminders are carried as a dedicated `llm.ReminderContent` block holding the
+name, tier, and text. It joins the
 existing polymorphic content types and round-trips through session storage
 with its type intact. Providers render it at encode time to the tagged text
 form the model sees:
@@ -261,7 +258,7 @@ This split does two jobs the plain-text design cannot:
 **Tier lives in the content block and the block is authoritative.**
 `ReminderTier` is defined in `llm` (the root `dive` package aliases it —
 `dive` imports `llm`, so the dependency can only point that way). The
-enclosing message role is *derived* from the tier at construction: operator
+enclosing message role is _derived_ from the tier at construction: operator
 reminders become standalone `Role: llm.System` messages, contextual
 reminders live in user-role messages. If a hand-built message disagrees
 with its block's tier, providers normalize to the block's tier. Because
@@ -291,21 +288,22 @@ Capability resolution for operator reminders:
 - **Unknown or known-unsupported** → tagged user-role rendering. Unknown
   means fallback — never "send the native role and hope."
 
-v1 ships a single policy: best-effort. There is no configuration axis and no
+Dive ships a single policy: best-effort. There is no configuration axis and no
 error path for authority — the downgrade is always silent. A strict "native
-authority or error" mode is a deliberate follow-up (see Rollout), deferred
-until a concrete consumer needs a hard guarantee, because operator authority
-is not an enforcement mechanism (Non-Goal 6) and no current caller does.
+authority or error" mode is a deliberate follow-up (see
+[Implementation status](#implementation-status)), deferred until a concrete
+consumer needs a hard guarantee, because operator authority is not an
+enforcement mechanism (Non-Goal 6) and no current caller does.
 
-| Provider (basis) | Operator reminder rendering |
-| :--- | :--- |
-| Anthropic — first-party API, model supports it (Opus 4.8+) | Known-supported: native mid-conversation `system` message. |
-| Anthropic — Bedrock/Vertex, or older models | Known-unsupported: tagged user-role message. |
-| OpenAI (Responses API, first-party) | Known-supported: `developer`-role input item — the role this provider already uses for the top-level prompt, and the choice Codex made. |
-| Grok (x.ai Responses-compatible endpoint) | Unknown: tagged user-role message. Grok embeds Dive's OpenAI provider, but x.ai's documentation demonstrates only `system`/`user` roles; `developer` support is unproven. Promote to known-supported only via a provider contract test. |
-| Mistral, OpenRouter, generic Chat Completions | Unknown: tagged user-role message. (Mistral documents the system prompt as conversation-leading; OpenRouter behavior depends on the routed model.) Native rendering can be enabled per target as support is verified. |
-| Ollama (Anthropic-compatible endpoint) | Unknown (depends on local server/model): tagged user-role message. |
-| Google (Gemini) | Known-unsupported: tagged user-role message (Gemini contents allow only `user`/`model`). |
+| Provider (basis)                                           | Operator reminder rendering                                                                                                                                                                                                             |
+| :--------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Anthropic — first-party API, model supports it (Opus 4.8+) | Known-supported: native mid-conversation `system` message.                                                                                                                                                                              |
+| Anthropic — Bedrock/Vertex, or older models                | Known-unsupported: tagged user-role message.                                                                                                                                                                                            |
+| OpenAI (Responses API, first-party)                        | Known-supported: `developer`-role input item — the role this provider already uses for the top-level prompt, and the choice Codex made.                                                                                                 |
+| Grok (x.ai Responses-compatible endpoint)                  | Unknown: tagged user-role message. Grok embeds Dive's OpenAI provider, but x.ai's documentation demonstrates only `system`/`user` roles; `developer` support is unproven. Promote to known-supported only via a provider contract test. |
+| Mistral, OpenRouter, generic Chat Completions              | Unknown: tagged user-role message. (Mistral documents the system prompt as conversation-leading; OpenRouter behavior depends on the routed model.) Native rendering can be enabled per target as support is verified.                   |
+| Ollama (Anthropic-compatible endpoint)                     | Unknown (depends on local server/model): tagged user-role message.                                                                                                                                                                      |
+| Google (Gemini)                                            | Known-unsupported: tagged user-role message (Gemini contents allow only `user`/`model`).                                                                                                                                                |
 
 Capability detection is a function of **endpoint + model**, not model
 alone — Anthropic's feature is first-party-API (plus AWS Claude Platform /
@@ -344,7 +342,7 @@ When an operator reminder renders as a tagged user message, it loses its
 change, not a cosmetic one. The design makes this explicit rather than
 hiding it:
 
-- v1 policy is **best-effort only**: render with the strongest authority the
+- The current policy is **best-effort only**: render with the strongest authority the
   target is known to support, downgrading silently on unknown capability or
   illegal placement. There is no per-agent or per-request configuration knob.
 - The silent downgrade is acceptable because anything that actually matters
@@ -352,7 +350,7 @@ hiding it:
   instruction priority; it is not a guarantee, so there is nothing for a
   failed request to protect.
 - A **strict** mode — "native authority or a typed error before the network
-  call" — is a deliberate follow-up, not shipped in v1. It was cut because
+  call" — is a deliberate follow-up and is not shipped. It was cut because
   no current consumer needs a hard authority guarantee, and adding the
   configuration axis (agent- and request-scoped, threaded through the
   provider layer) ahead of that need is speculative surface. When a real
@@ -364,27 +362,26 @@ hiding it:
 
 ## Delivery Semantics
 
-The current `SetSystemReminder` mutates caller-owned message objects in
+The legacy `SetSystemReminder` mutates caller-owned message objects in
 place. Combined with how the agent persists turns (input messages plus
 generated output; historical messages are never rewritten), mutation
 produces two opposite failure modes: an intended-ephemeral reminder written
 into a fresh conversation's input message gets persisted with it, while an
-intended-durable update to a pinned reminder in loaded history is
+intended-durable update to a legacy reminder in loaded history is
 model-visible for one request and then lost. The skill package exhibits a
 concrete case: its catalog hash check can accept a stale persisted catalog
 block after a mid-session change, because presence is checked by name, not
 content.
 
-The new delivery path is therefore **agent-owned and copy-on-write**. A
+The typed delivery path is therefore **agent-owned and copy-on-write**. A
 free function that returns ordinary messages cannot guarantee "model-only"
 — the caller could pass its output back as input and Dive would save it. So
 the model-only paths are expressed only through the agent:
 
 ```go
-dive.WithPinnedReminder(reminder)              // CreateResponse option
+dive.WithModelOnlyReminder(reminder)           // request input, model-only
 
-hctx.PinReminder(reminder)                     // from hooks: pinned overlay
-hctx.AppendReminder(reminder, dive.Recorded)   // from hooks: appended
+hctx.AppendReminder(reminder, dive.Recorded)   // from hooks: recorded
 hctx.AppendReminder(reminder, dive.ModelOnly)
 
 dive.NewReminderMessage(reminder)              // between turns: builds an
@@ -392,33 +389,26 @@ dive.NewReminderMessage(reminder)              // between turns: builds an
                                                // definition — it is input)
 ```
 
-The three delivery modes:
+The two lifetimes:
 
-- **Pinned reminders are request overlays.** They are re-rendered into a
-  copy of the first user message on every request and are never written to
-  the session. Because rendering is deterministic, an unchanged pinned
-  reminder produces byte-identical prefixes and keeps the cache hit; when
-  its content changes, the prefix legitimately changes. This replaces the
-  skill package's mutation approach and structurally fixes its staleness
-  case. The overlay also replaces or masks a same-name *legacy text* block
-  present in loaded history (older sessions), so the model never sees both
-  a stale legacy block and the current typed one.
-- **Appended, recorded reminders** flow through the same path as generated
-  messages: into the model-facing history *and* `OutputMessages`, so
+- **Recorded reminders** flow through the same path as generated
+  messages: into the model-facing history _and_ `OutputMessages`, so
   session saving captures them naturally. Without a session, they are
   returned on the response for the caller to persist — which is why the
-  mode is called *recorded* rather than *durable*: Dive records it; storage
+  lifetime is called _recorded_ rather than _durable_: Dive records it; storage
   is wherever the conversation lives.
-- **Appended, model-only reminders** join the request overlay. Their
-  lifetime is precise: from injection through the remainder of the current
+- **Model-only reminders** join the model-facing working history only. Their
+  lifetime is precise: from append through the remainder of the current
   `CreateResponse`, including subsequent tool iterations and Stop-hook
   re-entry, and excluded from `OutputMessages` and persistence. (The
   existing `PreIteration` slice-rewrite remains as the low-level escape
   hatch with the same non-persistence semantics.)
 
-Recorded reminders are append-only: superseding means appending a new
-reminder with the same name (latest wins); nothing edits an already-saved
-one — the same rule Anthropic's caching guidance imposes.
+All reminders are append-only: superseding means appending a new reminder with
+the same name (latest wins); nothing edits an earlier model-facing or saved
+block. This structurally fixes the skill package's staleness case without
+rewriting caller-owned history. A later typed reminder can also supersede a
+same-name legacy text block for model interpretation.
 
 ### Ordering
 
@@ -435,7 +425,7 @@ registration order. This invariant gets a regression test alongside the
 existing parallel-tool ordering tests.
 
 The invariant holds within the resume round that completes the batch.
-Recorded reminders from a per-tool hook that fired in an *earlier* partial
+Recorded reminders from a per-tool hook that fired in an _earlier_ partial
 resume round (its tool completed, but siblings stayed pending and the turn
 suspended again) are **not** carried across the suspend boundary — they are
 dropped, and the embedder re-asserts any standing state on resume. Persisting
@@ -448,15 +438,15 @@ with compaction carry-forward.
 ### Injection points
 
 - **Conversation start** — `SessionStartHook` with its existing `Persist`
-  flag, unchanged (general messages; not a pinned reminder — see the
-  supported matrix).
-- **Mid-turn, from hooks** — `hctx.PinReminder` / `hctx.AppendReminder` as
-  above. Appended reminders are delivered at the iteration boundary, after
+  flag, unchanged, an initial recorded reminder, or
+  `WithModelOnlyReminder`. The initial request tail is also the session tail.
+- **Mid-turn, from hooks** — `hctx.AppendReminder` as above. Reminders are
+  delivered at the iteration boundary, after
   a complete tool-result batch, which keeps Anthropic placement legal by
   construction.
 - **Between turns** — `dive.NewReminderMessage` builds the message for the
   next `CreateResponse` input. No new agent machinery. Place the reminder
-  *after* the accompanying user message (`assistant → user → system` is
+  _after_ the accompanying user message (`assistant → user → system` is
   legal; `assistant → system` is not); a reminder sent with no user message
   falls back to a tagged user message.
 
@@ -469,12 +459,12 @@ built on the mid-turn recorded channel, not part of this design's core.
 The agent's system prompt gains a short standing rule explaining reminder
 semantics — the equivalent of Claude Code's priming section, added whenever
 the agent is constructed. The phrasing must not overclaim: at the rendered
-prompt boundary a user *can* imitate the tag, so the rule ties authority to
+prompt boundary a user _can_ imitate the tag, so the rule ties authority to
 the message role, not the tag:
 
 > Runtime context may appear in `<system-reminder>` blocks. The enclosing
 > message role determines its authority; the tag itself does not confer
-> authority.
+> authority. Later reminder blocks with the same name supersede earlier ones.
 
 Today only the skill package primes its own block; centralizing this is
 what makes the contextual tier work on models with no native operator role.
@@ -484,8 +474,8 @@ what makes the contextual tier work on models with no native operator role.
 Dive's own synthetic injections migrate onto the mechanism where it fits —
 and explicitly stay put where it does not:
 
-- **Stop-hook `Continue` reason** — currently plain user text; becomes an
-  appended **contextual** reminder phrased as context ("the following input
+- **Stop-hook `Continue` reason** — is an appended **contextual** reminder
+  phrased as context ("the following input
   arrived from the user: …"). Its seam immediately follows an assistant
   turn, a position where native operator authority is structurally illegal
   on Anthropic, so an operator-tier reminder here would always downgrade to a
@@ -500,20 +490,20 @@ and explicitly stay put where it does not:
   reminder would break the protocol. If the application additionally needs
   to assert an operator fact ("the user approved deployment"), it appends a
   separate operator reminder after the complete tool-result batch.
-- **Completed background-task results** — currently synthetic user text
-  carrying raw tool output; become appended **contextual** reminders. They
+- **Completed background-task results** — are appended **contextual** reminders
+  carrying raw tool output. They
   contain third-party content and are never operator tier.
 
 ## Relationship to the Existing API
 
 **Evolve in place; nothing breaks.** `SetSystemReminder`,
 `RemoveSystemReminder`, and `HasSystemReminder` keep their signatures and
-their pinned-only, first-user-message semantics — they are not silently
+their first-user-message-only semantics — they are not silently
 widened to conversation-wide behavior. The new surface is additive:
 
 - `Reminder` with validating constructors (the current `Set` signature has
   no way to report an invalid name).
-- `dive.WithPinnedReminder`, `hctx.PinReminder`, `hctx.AppendReminder`,
+- `dive.WithModelOnlyReminder`, `hctx.AppendReminder`,
   and `dive.NewReminderMessage` — delivery expressed through the agent (or
   explicit input construction), never by mutating caller-owned history.
 - `FindLatestReminder(messages, name)` — conversation-wide, latest-wins
@@ -528,9 +518,9 @@ widened to conversation-wide behavior. The new surface is additive:
   permissive to export as-is; the legacy parser matches complete,
   well-formed blocks only.
 
-The skill package migrates from mutation to the pinned-overlay path
-(including legacy-block masking) — an internal change that fixes its
-staleness case; its public API is untouched.
+The skill package appends its catalog model-only. A later same-name catalog
+supersedes stale legacy text without rewriting loaded history; its public API is
+untouched.
 
 ## Compaction
 
@@ -540,14 +530,13 @@ leave the model's context. Recorded reminders therefore **expire from
 model context at compaction** while remaining auditable in the full
 transcript.
 
-v1 makes this the documented contract: long-lived state (an active mode, a
-standing policy) is the embedder's to re-assert, and `FindLatestReminder`
-over the active window is the primitive that makes "is my reminder still
-in context?" a one-liner. Automatic carry-forward of the latest reminder
-per name across a compaction checkpoint is a natural follow-up in the
-compaction package, not part of v1. (Claude Code's surfacer gets this
-behavior implicitly — its transcript-scan dedup resets at compaction,
-allowing re-surfacing.)
+The implemented contract leaves long-lived state (an active mode, a standing
+policy) for the embedder to reassert. `FindLatestReminder` over the active
+window makes "is my reminder still in context?" a one-liner. Automatic
+carry-forward of the latest reminder per name across a compaction checkpoint is
+a natural follow-up in the compaction package, not part of the current contract.
+(Claude Code's surfacer gets this behavior implicitly: its transcript-scan dedup
+resets at compaction, allowing re-surfacing.)
 
 ## Security Considerations
 
@@ -570,7 +559,9 @@ allowing re-surfacing.)
 - The constrained name charset keeps reminders greppable — as typed JSON in
   stored sessions, as rendered tags in captured wire traffic.
 
-## Rollout
+## Implementation status
+
+The shipped implementation includes:
 
 1. **Core** — `Reminder` type and constructors, `llm.ReminderTier` +
    `llm.ReminderContent` block, `NewReminderMessage`, conversation-wide
@@ -582,16 +573,21 @@ allowing re-surfacing.)
    developer-role mapping (Grok stays tagged-user until a contract test
    proves developer-role support on x.ai); best-effort position
    normalization for all illegal placements; contract tests per provider.
-3. **Delivery** — agent-owned overlay/recorded paths,
-   `WithPinnedReminder` / `hctx.PinReminder` / `hctx.AppendReminder`,
+3. **Delivery** — agent-owned recorded/model-only paths,
+   `WithModelOnlyReminder` / `hctx.AppendReminder`,
    model-only lifetime, declaration-order draining with regression tests,
-   skill package migration (overlay + legacy masking).
-4. **Internal adoption** — Stop-hook reason and background-task completion
-   messages move onto the mechanism (resume payloads stay tool results).
-5. **Follow-ups (separate designs)** — strict operator-authority mode
-   (native-or-error), added when a concrete consumer needs a hard guarantee;
-   steering mailbox; compaction carry-forward; embedder-side budget/dedup
-   helpers; typed fragment catalog if repetition demands it.
+   skill package migration (model-only append + latest-wins legacy handling).
+4. **Internal adoption** — Stop-hook reasons and background-task completion
+   messages use typed contextual reminders (resume payloads stay tool results).
+
+Potential follow-ups require separate designs:
+
+1. **Strict operator-authority mode** — native-or-error behavior, added when a
+   concrete consumer needs a hard guarantee.
+2. **Steering mailbox** — enqueue input while an agent is already running.
+3. **Compaction carry-forward** — re-surface selected long-lived reminders.
+4. **Embedder helpers** — byte budgets, deduplication, and a typed fragment
+   catalog if repetition demands it.
 
 ## References
 
@@ -601,7 +597,7 @@ allowing re-surfacing.)
   `mobius-cloud/docs/research/technical/2026-07-09-claude-system-reminders.md`
 - Codex context fragments research:
   `mobius-cloud/docs/research/technical/2026-07-09-codex-system-reminders.md`
-- Existing implementation: `system_reminder.go`, `skill/agent.go`
+- Implementation: `reminder.go`, `llm/reminder.go`, `system_reminder.go`, `skill/agent.go`
   (catalog hook), `providers/anthropic/anthropic.go` (`convertMessages`,
   `applyCaching`, `supportsAutomaticCaching`), `agent.go`
   (`executeToolCallsParallel` ordering, Stop-hook continuation seam),

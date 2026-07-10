@@ -328,6 +328,12 @@ type App struct {
 	sessionUsage     *llm.Usage // Cumulative usage across all interactions
 	contextWindowMax int        // Max context window tokens for the model
 
+	// Runtime context demo diagnostics. These are UI-only observations of hook
+	// activity during the latest turn; they are never session data.
+	contextDemos       contextDemoSelection
+	contextDemoNotices map[string]contextDemoNotice
+	contextDemoOrder   []string
+
 	// Streaming tool output state
 	toolStreamBuffers map[string]string // tool call ID -> accumulated streaming text
 
@@ -384,6 +390,7 @@ func NewApp(
 		compactionConfig:      compactionConfig,
 		contextWindowMax:      contextWindowForModel(modelName),
 		toolStreamBuffers:     make(map[string]string),
+		contextDemoNotices:    make(map[string]contextDemoNotice),
 	}
 }
 
@@ -788,6 +795,8 @@ func (a *App) HandleEvent(event tui.Event) []tui.Cmd {
 		a.handleNativeBgTasksReady(e)
 	case monitorNotificationEvent:
 		a.handleMonitorNotification(e)
+	case contextDemoNoticeEvent:
+		a.handleContextDemoNotice(e.notice)
 	case showDialogEvent:
 		a.dialogState = e.dialog
 		// Focus the dialog so it receives key events
@@ -1360,6 +1369,7 @@ func (a *App) checkAndPerformCompaction(lastUsage *llm.Usage) {
 // Event handlers for background goroutine events
 
 func (a *App) handleProcessingStart(e processingStartEvent) {
+	a.resetContextDemoTrace()
 	userInput := strings.TrimSpace(e.userInput)
 
 	role := "user"
@@ -1526,7 +1536,7 @@ func (a *App) handleToolResult(result *dive.ToolCallResult) {
 				a.messages[idx].ToolResult = a.messages[idx].ToolResultLines[0]
 			}
 			// For Read tool, count lines in the actual content
-			if strings.ToLower(a.messages[idx].ToolName) == "read" && textContent != "" {
+			if strings.ToLower(a.messages[idx].ToolName) == "read" && textContent != "" && !a.messages[idx].ToolError {
 				a.messages[idx].ToolReadLines = strings.Count(textContent, "\n") + 1
 			}
 
@@ -1859,6 +1869,12 @@ func (a *App) buildIntroView() tui.View {
 	}
 
 	content := a.modelDisplayName() + "\n" + wsDisplay
+	if !a.contextDemos.empty() {
+		content += "\ncontext: " + a.contextDemos.displaySummary() + " · /context to inspect"
+	}
+	if scope := workspaceScopeSummary(a.workspaceDir); scope != "" {
+		content += "\nscope: " + scope
+	}
 	if a.resumeSessionID != "" {
 		content += "\nResuming session: " + a.resumeSessionID
 	}
@@ -2086,6 +2102,7 @@ func (a *App) handleCommand(input string) bool {
 		a.lastUsage = nil
 		a.sessionUsage = nil
 		a.interactionUsage = nil
+		a.resetContextDemoTrace()
 
 		// Show fresh intro using runner.Print (not tui.Print) since we're
 		// in the middle of the running InlineApp event loop
@@ -2113,6 +2130,10 @@ func (a *App) handleCommand(input string) bool {
 
 	case "usage", "cost":
 		a.printUsageReport()
+		return true
+
+	case "context":
+		a.printContextDemoReport()
 		return true
 	}
 
@@ -2226,6 +2247,7 @@ func (a *App) printHelp() {
 		tui.Text("  /model         Switch model"),
 		tui.Text("  /todos, /t     Toggle todo list"),
 		tui.Text("  /usage, /cost  Show token & cache usage breakdown"),
+		tui.Text("  /context       Inspect context-demo reminders from the latest turn"),
 		tui.Text("  /help, /?      Show this help"),
 	}
 
@@ -2695,7 +2717,7 @@ func fuzzyMatch(pattern, text string) int {
 // getCommandMatches returns slash commands matching the prefix for autocomplete
 func (a *App) getCommandMatches(prefix string) []string {
 	// Built-in commands
-	builtins := []string{"clear", "compact", "cost", "help", "model", "quit", "todos", "usage"}
+	builtins := []string{"clear", "compact", "context", "cost", "help", "model", "quit", "todos", "usage"}
 
 	var matches []string
 

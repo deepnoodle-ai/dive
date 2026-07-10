@@ -19,8 +19,9 @@ Claude Code's patterns, so you benefit from any model tuning that Anthropic has
 done for these tool shapes.
 
 Dive is unopinionated. You provide the system prompt and decide which tools and
-hooks to install. Your agents do what you tell them. There are no hidden prompts
-or library-imposed behaviors.
+hooks to install. Dive does not install a persona or task policy. Agents append
+one fixed interpretation rule for typed runtime reminders so models understand
+their authority; the rule does not enforce behavior.
 
 Use the LLM layer when you want direct access to model capabilities. Use the
 agent layer when you want the tool-calling loop handled for you. Use Dive to
@@ -209,6 +210,36 @@ resp, _ := agent.CreateResponse(ctx,
 
 See the [Agents Guide](./docs/guides/agents.md#sessions) for fork, compact, and multi-turn patterns.
 
+### Runtime Context and System Reminders
+
+Typed reminders carry context that the end user did not type, while keeping it
+distinct from user-authored text. Use a model-only reminder for runtime context
+that should affect this response without entering conversation history:
+
+```go
+environment, _ := dive.NewContextReminder(
+    "environment",
+    "Working directory: /srv/app\nEnvironment: staging",
+)
+
+response, err := agent.CreateResponse(ctx,
+    dive.WithInput("Inspect the deployment."),
+    dive.WithModelOnlyReminder(environment),
+)
+```
+
+Use `NewOperatorReminder` only for facts asserted by the application operator,
+`NewReminderMessage` for a recorded reminder, and
+`HookContext.AppendReminder` with `Recorded` or `ModelOnly` for reminders
+discovered inside the agent loop. Providers render reminders as
+`<system-reminder>` blocks, using native operator roles only where support and
+placement are known to be legal. The tag alone does not grant authority, and
+reminders do not replace permissions or application policy.
+
+See [Runtime Context and System Reminders](./docs/guides/context-injection.md)
+for tiers, delivery lifetime, provider fallback, sessions, compaction, typed
+inspection helpers, and CLI demos.
+
 ### Dialog
 
 The `Dialog` interface handles user-facing prompts during agent execution.
@@ -233,6 +264,7 @@ Messages sent to and received from LLMs contain typed content blocks
 | `DocumentContent`   | A document (e.g. PDF), inline bytes or URL          |
 | `ToolUseContent`    | A tool call requested by the model                  |
 | `ToolResultContent` | The result returned to the model after a tool call  |
+| `ReminderContent`   | Typed runtime context rendered at the provider edge |
 | `ThinkingContent`   | Extended thinking / chain-of-thought from the model |
 | `RefusalContent`    | The model declined to respond                       |
 
@@ -324,6 +356,7 @@ go run ./openai_responses_example
 - [Agents Guide](./docs/guides/agents.md) — Agent loop, hooks, and configuration
 - [Custom Tools](./docs/guides/custom-tools.md) — Build and register your own tools
 - [Hooks](./docs/guides/hooks.md) — Lifecycle hooks for tools and generation
+- [Runtime Context](./docs/guides/context-injection.md) — Typed system reminders, authority, and delivery lifetime
 - [Suspend & Resume](./docs/guides/suspend-resume.md) — Pause mid-turn for human input or async callbacks
 - [LLM Guide](./docs/guides/llm-guide.md) — Direct model access without the agent loop
 - [Tools Overview](./docs/guides/tools.md) — Built-in toolkit reference

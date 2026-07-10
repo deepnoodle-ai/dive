@@ -6,9 +6,10 @@ orchestrators. Apache 2.0, Go 1.25+.
 
 Dive gives you consistent access to 8+ LLM providers, a tool-calling system
 aligned with Claude Code patterns, and an agent loop with hooks. Images,
-documents, and structured output work across all providers. The library is
-unopinionated. It has no hidden prompts or library-imposed behaviors. You
-provide the system prompt and decide which tools and hooks to install.
+documents, and structured output work across all providers. The library does
+not install a persona or task policy. You provide the system prompt and decide
+which tools and hooks to install. Agents append one fixed rule that explains
+the authority of typed runtime reminders.
 
 A single `CreateResponse` call runs the full agent loop. It generates, calls
 tools, feeds results back to the LLM, and repeats until the model produces a
@@ -194,6 +195,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 ```
 
 Hook types:
+
 - `PreGenerationHook` — runs before the LLM generation loop
 - `PostGenerationHook` — runs after the generation loop completes
 - `PreToolUseHook` — runs before each tool execution (can modify input via `hctx.UpdatedInput`)
@@ -207,6 +209,33 @@ Hook flow: PreGeneration -> [PreIteration -> LLM -> PreToolUse -> Execute -> Pos
 On suspend: OnSuspend -> PostGeneration -> persist -> return
 
 Hook helpers: `InjectContext`, `CompactionHook`, `UsageLogger`, `UsageLoggerWithSlog`, `MatchTool`, `MatchToolPost`, `MatchToolPostFailure`
+
+## Runtime context and system reminders
+
+Use typed reminders for runtime context the user did not type. The
+`<system-reminder>` tag is a provider-wire marker, not a guarantee that the
+message has system authority.
+
+```go
+environment, _ := dive.NewContextReminder("environment", "Working directory: /srv/app")
+response, _ := agent.CreateResponse(ctx,
+    dive.WithInput("Inspect the project."),
+    dive.WithModelOnlyReminder(environment),
+)
+```
+
+- `NewContextReminder` creates user-adjacent context such as environment state, memory, catalogs, and tool-produced notices.
+- `NewOperatorReminder` creates facts asserted by the application operator. It does not enforce policy.
+- `WithModelOnlyReminder` and `hctx.AppendReminder(..., dive.ModelOnly)` append context that is visible only during the current response.
+- `NewReminderMessage` and `hctx.AppendReminder(..., dive.Recorded)` append context that enters conversation history.
+- `NewReminderMessage` creates recorded input. `hctx.AppendReminder` accepts `Recorded` or `ModelOnly` lifetime.
+- `FindReminder`, `FindLatestReminder`, `RemoveReminder`, and `StripReminders` inspect typed blocks without removing user-authored lookalike text.
+
+Operator reminders use native roles only where the provider and placement are
+known to support them, falling back silently to tagged user content elsewhere.
+Recorded reminders can leave the active model window after compaction, so
+applications must reassert long-lived state. See
+`docs/guides/context-injection.md` for the full contract.
 
 ## Extensions
 
@@ -259,6 +288,7 @@ from custom sources. See [Skills Guide](docs/guides/skills.md).
 - `dive.Toolset` - interface: Name, Tools(ctx) — dynamic tool resolution per LLM request
 - `dive.ToolsetFunc` - adapts a function into a Toolset
 - `dive.Response` - returned by CreateResponse; use OutputText() or Items
+- `dive.Reminder` - validated, named runtime context with contextual or operator authority
 - `dive.ResponseItem` - message, tool_call, tool_call_result, or model_event
 - `dive.ToolCallResult` - completed tool call; fields: ID (string), Name (string), Input (any), Result (*ToolResult), Error (error)
 - `dive.ToolResult` - tool output; tagged union (regular fields XOR `Suspend`); create with NewToolResultText(), NewToolResultError(), or NewSuspendResult()
@@ -344,6 +374,7 @@ resp, _ := agent.CreateResponse(ctx,
 ```
 
 Session types (`session` package):
+
 - `session.New(id)` - in-memory session
 - `session.NewMemoryStore()` - in-memory store
 - `session.NewFileStore(dir)` - JSONL file store
@@ -394,6 +425,7 @@ final, _ := agent.CreateResponse(ctx,
 ```
 
 Key types and helpers:
+
 - `dive.SuspendResult{Prompt, Metadata}` — signal returned from a tool; construct with `NewSuspendResult`
 - `dive.ToolResult.Suspend` — tagged union; never set alongside `Content`/`Display`/`IsError`
 - `dive.Response.Status` — `ResponseStatusCompleted` or `ResponseStatusSuspended`
