@@ -3,11 +3,11 @@ module github.com/deepnoodle-ai/dive/demos/colosseum
 go 1.25.0
 
 require (
-	github.com/deepnoodle-ai/dive v1.14.0
-	github.com/deepnoodle-ai/dive/a2a v1.14.0
-	github.com/deepnoodle-ai/dive/providers/google v1.14.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.14.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.14.0
+	github.com/deepnoodle-ai/dive v1.15.0
+	github.com/deepnoodle-ai/dive/a2a v1.15.0
+	github.com/deepnoodle-ai/dive/providers/google v1.15.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.15.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.15.0
 	github.com/deepnoodle-ai/wonton v0.0.36
 )
 
