@@ -407,6 +407,18 @@ func TestCatalogHook_EmptySkills(t *testing.T) {
 	assert.Equal(t, "Hello", hctx.Messages[0].Content[0].(*llm.TextContent).Text)
 }
 
+func TestCatalogHook_DoesNotPinFreshEmptyCatalog(t *testing.T) {
+	loader := &Loader{skills: map[string]*Skill{}}
+	model := &catalogCaptureLLM{}
+	agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Extensions: []dive.Extension{loader}})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), dive.WithInput("Continue"))
+	assert.NoError(t, err)
+	_, ok := dive.FindLatestReminder(model.messages, skillReminderName)
+	assert.False(t, ok)
+}
+
 func TestCatalogHook_RemovesStaleCatalogOnFreshResume(t *testing.T) {
 	// Simulate: skills were available in a previous process, which wrote
 	// a catalog block. Now skills are gone and a fresh process resumes

@@ -7,6 +7,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/wonton/cli"
 )
 
 func parseReminderSpecs(contextual, operator []string) ([]dive.Reminder, []dive.Reminder, error) {
@@ -34,6 +35,18 @@ func parseReminderSpecs(contextual, operator []string) ([]dive.Reminder, []dive.
 		return nil, nil, err
 	}
 	return pinned, appended, nil
+}
+
+// applyReminderAgentOptions wires operator authority and pinned reminders
+// into agentOpts, shared by the interactive and print CLI entry points so
+// the two paths can't drift apart.
+func applyReminderAgentOptions(agentOpts *dive.AgentOptions, ctx *cli.Context, pinnedReminders []dive.Reminder) {
+	if ctx.Bool("strict-operator-authority") {
+		agentOpts.OperatorAuthority = dive.OperatorAuthorityStrict
+	}
+	if len(pinnedReminders) > 0 {
+		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, pinRemindersHook(pinnedReminders))
+	}
 }
 
 func pinRemindersHook(reminders []dive.Reminder) dive.PreGenerationHook {

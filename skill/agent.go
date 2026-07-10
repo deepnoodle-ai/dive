@@ -134,6 +134,12 @@ const skillReminderName = "skills"
 func catalogHook(loader *Loader) dive.PreGenerationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		catalog := BuildCatalog(loader)
+		// A fresh empty catalog has nothing to inject. Keep pinning an empty
+		// reminder only when loaded history contains a stale catalog, so the
+		// agent-owned overlay can mask it without mutating persisted messages.
+		if catalog == "" && !dive.HasSystemReminder(hctx.Messages, skillReminderName) {
+			return nil
+		}
 		reminder, err := dive.NewContextReminder(skillReminderName, catalog)
 		if err != nil {
 			return err

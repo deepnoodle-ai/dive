@@ -39,6 +39,17 @@ func TestAnthropicReminderRendering(t *testing.T) {
 		assert.True(t, errors.Is(err, llm.ErrOperatorAuthorityUnavailable))
 	})
 
+	t.Run("native system after server tool use turn", func(t *testing.T) {
+		serverToolUseMessage := &llm.Message{Role: llm.Assistant, Content: []llm.Content{
+			&llm.ServerToolUseContent{ID: "srvtool_1", Name: "web_search", Input: map[string]any{"query": "weather"}},
+		}}
+		messages := []*llm.Message{llm.NewUserTextMessage("continue"), serverToolUseMessage, operatorReminderMessage()}
+		rendered, err := provider.renderReminders(messages, ModelClaudeOpus48, llm.OperatorAuthorityStrict)
+		assert.NoError(t, err)
+		assert.Equal(t, llm.System, rendered[2].Role)
+		assert.Contains(t, rendered[2].Content[0].(*llm.TextContent).Text, `name="mode"`)
+	})
+
 	t.Run("custom endpoint is not assumed native", func(t *testing.T) {
 		custom := New(WithEndpoint("https://example.test/v1/messages"), WithModel(ModelClaudeOpus48))
 		messages := []*llm.Message{llm.NewUserTextMessage("continue"), operatorReminderMessage()}

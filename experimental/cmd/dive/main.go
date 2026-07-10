@@ -355,12 +355,7 @@ func runInteractive(ctx *cli.Context) error {
 			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
 	}
-	if ctx.Bool("strict-operator-authority") {
-		agentOpts.OperatorAuthority = dive.OperatorAuthorityStrict
-	}
-	if len(pinnedReminders) > 0 {
-		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, pinRemindersHook(pinnedReminders))
-	}
+	applyReminderAgentOptions(&agentOpts, ctx, pinnedReminders)
 
 	// Mid-turn compaction: when compaction is enabled, summarize the working
 	// context within a turn if it grows past the threshold, so a long tool loop
@@ -526,12 +521,7 @@ func runPrint(ctx *cli.Context) error {
 		Tools:         tools,
 		ModelSettings: printModelSettings,
 	}
-	if ctx.Bool("strict-operator-authority") {
-		agentOpts.OperatorAuthority = dive.OperatorAuthorityStrict
-	}
-	if len(pinnedReminders) > 0 {
-		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, pinRemindersHook(pinnedReminders))
-	}
+	applyReminderAgentOptions(&agentOpts, ctx, pinnedReminders)
 	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)

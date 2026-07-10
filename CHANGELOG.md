@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Typed context reminders** — hooks can append or pin tiered reminders with
+  explicit recording policy, provider-aware authority rendering, and strict
+  capability checks. The experimental Dive CLI exposes reminders as a demo
+  platform, and provider-tagged integration tests exercise live delivery.
+
+### Changed
+
+- **Reminder priming** — agent system prompts now include the reminder
+  interpretation rule on every generation, even when no reminder is currently
+  present. This keeps prompt caching stable when reminders appear later, with a
+  one-time cache-prefix change for existing agents after upgrading.
+
 ### Fixed
 
 - **GPT-5.4 mini Chat Completions tools** — requests that combine function

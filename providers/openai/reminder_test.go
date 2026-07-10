@@ -44,4 +44,24 @@ func TestOpenAIReminderRendering(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, llm.ErrOperatorAuthorityUnavailable))
 	})
+
+	t.Run("custom endpoint from environment falls back to user", func(t *testing.T) {
+		t.Setenv("OPENAI_BASE_URL", "https://proxy.example.test/v1")
+		provider := New()
+		params, err := provider.buildRequestParams(&llm.Config{Messages: []*llm.Message{message}})
+		assert.NoError(t, err)
+		body, err := json.Marshal(params)
+		assert.NoError(t, err)
+		assert.Contains(t, string(body), `"role":"user"`)
+	})
+
+	t.Run("custom endpoint from environment rejects strict authority", func(t *testing.T) {
+		t.Setenv("OPENAI_BASE_URL", "https://proxy.example.test/v1")
+		provider := New()
+		_, err := provider.buildRequestParams(&llm.Config{
+			Messages: []*llm.Message{message}, OperatorAuthority: llm.OperatorAuthorityStrict,
+		})
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, llm.ErrOperatorAuthorityUnavailable))
+	})
 }

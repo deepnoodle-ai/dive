@@ -239,7 +239,7 @@ existing polymorphic content types and round-trips through session storage
 with its type intact. Providers render it at encode time to the tagged text
 form the model sees:
 
-```
+```text
 <system-reminder name="budget">
 The remaining token budget for this run is 40,000 tokens.
 </system-reminder>
@@ -325,6 +325,14 @@ leading or consecutive ones — by rendering it in the tagged-user form.
 Under strict mode there is no silent normalization of operator reminders:
 an illegally placed one is an error (see below), because a downgrade is a
 downgrade regardless of whether capability or placement caused it.
+
+Placement is judged per message against the caller's ordering, so
+**adjacent operator reminder messages all demote** (and all fail under
+strict mode): each breaks the other's seam, mirroring Anthropic's
+no-consecutive-system-messages rule. Callers that need several operator
+facts at one seam should put them in a single reminder. Merging adjacent
+operator reminders into one native system message is a possible future
+refinement, not part of this design.
 
 ### Fallback is an authority downgrade
 

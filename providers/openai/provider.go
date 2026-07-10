@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -46,9 +47,13 @@ type Provider struct {
 
 // New creates a new OpenAI provider with the given options.
 func New(opts ...Option) *Provider {
+	endpoint := DefaultEndpoint
+	if configured, ok := os.LookupEnv("OPENAI_BASE_URL"); ok {
+		endpoint = configured
+	}
 	p := &Provider{
 		model:         DefaultModel,
-		endpoint:      DefaultEndpoint,
+		endpoint:      endpoint,
 		maxTokens:     DefaultMaxTokens,
 		maxRetries:    DefaultMaxRetries,
 		retryBaseWait: DefaultRetryBaseWait,
@@ -189,7 +194,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 
 	// Convert input messages to the OpenAI SDK input type
 	rendered, err := llm.RenderReminders(config.Messages, config.OperatorAuthority, func(_ int, _ []*llm.Message) (llm.Role, bool) {
-		if p.Name() == ProviderName && p.endpoint == DefaultEndpoint {
+		if p.Name() == ProviderName && strings.TrimRight(p.endpoint, "/") == DefaultEndpoint {
 			return llm.Developer, true
 		}
 		return llm.User, false

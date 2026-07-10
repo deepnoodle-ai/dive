@@ -1832,6 +1832,9 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
 	copy(updatedMessages, messages)
+	// Model-only reminders survive a Stop-hook re-entry but are intentionally
+	// re-appended at the working-history tail. They are ephemeral nudges, not
+	// durable transcript blocks whose original adjacency must be preserved.
 	updatedMessages = append(updatedMessages, hctx.reminders.modelOnly...)
 
 	// New messages that are the output

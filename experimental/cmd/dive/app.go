@@ -1169,8 +1169,6 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 	operatorReminders := a.operatorReminders
 	if a.operatorRemindersSent {
 		operatorReminders = nil
-	} else {
-		a.operatorRemindersSent = true
 	}
 	inputMessages := reminderInputMessages(expanded, extraContent, operatorReminders)
 
@@ -1186,6 +1184,12 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 
 	// Create response with streaming
 	resp, err := a.agent.CreateResponse(a.ctx, opts...)
+
+	// Only mark reminders as sent once the turn actually succeeds, so a failed
+	// CreateResponse leaves them queued for the next attempt to deliver.
+	if err == nil {
+		a.operatorRemindersSent = true
+	}
 
 	// Register any native background tasks so their results are auto-delivered.
 	if err == nil && resp != nil && len(resp.BackgroundTasks) > 0 {
