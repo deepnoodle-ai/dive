@@ -101,5 +101,39 @@ dive --print \
 `--operator-reminder NAME=TEXT` is repeatable and appended after the first user
 input.
 
+### Try dynamic context demos
+
+The CLI also includes four opt-in demos that derive context from the live agent
+loop:
+
+```bash
+dive --print \
+  --context-demo all \
+  'Inspect this project, make one small improvement, and verify it.'
+```
+
+Use `--context-demo` more than once, or pass a comma-separated set, to run only
+the patterns you want:
+
+```bash
+dive --context-demo workspace,sources --context-demo recovery
+```
+
+- `workspace` replaces a pinned `workspace-pulse` before each model call with
+  the current Git branch and dirty paths. It demonstrates live overlays without
+  persisting a stale snapshot.
+- `sources` pins an `evidence-ledger` built from successful file reads, searches,
+  directory listings, and web fetches during the current response. The ledger
+  records what was consulted; it does not claim that a source is correct.
+- `verification` appends model-only operator reminders after `Write` and `Edit`,
+  then reports a checkpoint when a later tool batch successfully runs a
+  recognized test, lint, or check command. A check launched in parallel with an
+  edit intentionally does not clear the debt.
+- `recovery` appends a model-only operator reminder after a failed tool call,
+  identifying the failed input and asking the model to change its retry strategy.
+
+These presets demonstrate reminder delivery and authority. They are advisory,
+not enforcement boundaries; use permissions and denying hooks for hard policy.
+
 For the full contract and provider matrix, see the
 [context injection design](../design/context-injection.md).

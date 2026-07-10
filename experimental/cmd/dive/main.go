@@ -132,6 +132,8 @@ func main() {
 				Help("Pinned contextual reminder as NAME=TEXT (repeatable)"),
 			cli.Strings("operator-reminder").
 				Help("Operator reminder appended after the first input as NAME=TEXT (repeatable)"),
+			cli.Strings("context-demo").
+				Help("Enable a runtime context demo: workspace, sources, verification, recovery, or all (repeatable)"),
 			cli.Bool("print", "p").
 				Default(false).
 				Help("Print response and exit (useful for pipes)"),
@@ -353,6 +355,9 @@ func runInteractive(ctx *cli.Context) error {
 		},
 	}
 	applyReminderAgentOptions(&agentOpts, pinnedReminders)
+	if err := applyContextDemoAgentOptions(&agentOpts, workspaceDir, ctx.Strings("context-demo")); err != nil {
+		return err
+	}
 
 	// Mid-turn compaction: when compaction is enabled, summarize the working
 	// context within a turn if it grows past the threshold, so a long tool loop
@@ -519,6 +524,9 @@ func runPrint(ctx *cli.Context) error {
 		ModelSettings: printModelSettings,
 	}
 	applyReminderAgentOptions(&agentOpts, pinnedReminders)
+	if err := applyContextDemoAgentOptions(&agentOpts, workspaceDir, ctx.Strings("context-demo")); err != nil {
+		return err
+	}
 	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
