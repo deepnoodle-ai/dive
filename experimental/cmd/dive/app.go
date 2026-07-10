@@ -303,8 +303,10 @@ type App struct {
 	// Initial prompt to submit on startup
 	initialPrompt string
 	// Content attached to the first outbound user message only.
-	startupAttachment string
-	firstUserSent     bool
+	startupAttachment     string
+	firstUserSent         bool
+	operatorReminders     []dive.Reminder
+	operatorRemindersSent bool
 
 	// Ctrl+C exit confirmation state
 	lastCtrlC    time.Time
@@ -1164,20 +1166,15 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 	// resp.Usage is accumulated across tool iterations which inflates context size
 	var lastUsage *llm.Usage
 
-	// Build the input option: use WithMessages when extra content blocks are
-	// present so they are sent as native content blocks rather than text.
-	var inputOpt dive.CreateResponseOption
-	if len(extraContent) > 0 {
-		content := []llm.Content{&llm.TextContent{Text: expanded}}
-		content = append(content, extraContent...)
-		inputOpt = dive.WithMessages(llm.NewUserMessage(content...))
-	} else {
-		inputOpt = dive.WithInput(expanded)
+	operatorReminders := a.operatorReminders
+	if a.operatorRemindersSent {
+		operatorReminders = nil
 	}
+	inputMessages := reminderInputMessages(expanded, extraContent, operatorReminders)
 
 	// Build options for CreateResponse
 	opts := []dive.CreateResponseOption{
-		inputOpt,
+		dive.WithMessages(inputMessages...),
 		dive.WithSession(a.currentSession),
 		dive.WithEventCallback(a.agentEventCallback(&lastUsage)),
 	}
@@ -1187,6 +1184,12 @@ func (a *App) runAgent(expanded string, extraContent []llm.Content) {
 
 	// Create response with streaming
 	resp, err := a.agent.CreateResponse(a.ctx, opts...)
+
+	// Only mark reminders as sent once the turn actually succeeds, so a failed
+	// CreateResponse leaves them queued for the next attempt to deliver.
+	if err == nil {
+		a.operatorRemindersSent = true
+	}
 
 	// Register any native background tasks so their results are auto-delivered.
 	if err == nil && resp != nil && len(resp.BackgroundTasks) > 0 {

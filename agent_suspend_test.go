@@ -2295,7 +2295,9 @@ func TestStopHookContinueThenSuspend(t *testing.T) {
 	assert.Equal(t, resp.OutputMessages[0].Role, llm.Assistant)
 	assert.Equal(t, resp.OutputMessages[0].Text(), "first round")
 	assert.Equal(t, resp.OutputMessages[1].Role, llm.User)
-	assert.Equal(t, resp.OutputMessages[1].Text(), "please call the approval tool")
+	stopReminder, ok := FindReminder(resp.OutputMessages[1], "stop-continuation")
+	assert.True(t, ok)
+	assert.Equal(t, stopReminder.Content, "The following input arrived from the user: please call the approval tool")
 	assert.Equal(t, resp.OutputMessages[2].Role, llm.Assistant)
 	foundToolUse := false
 	for _, c := range resp.OutputMessages[2].Content {
@@ -2320,7 +2322,9 @@ func TestStopHookContinueThenSuspend(t *testing.T) {
 	assert.Equal(t, secondCall[1].Role, llm.Assistant)
 	assert.Equal(t, secondCall[1].Text(), "first round")
 	assert.Equal(t, secondCall[2].Role, llm.User)
-	assert.Equal(t, secondCall[2].Text(), "please call the approval tool")
+	secondReminder, ok := FindReminder(secondCall[2], "stop-continuation")
+	assert.True(t, ok)
+	assert.Contains(t, secondReminder.Content, "please call the approval tool")
 
 	// The persisted session turn must match what's on the Response: user
 	// input plus every accumulated output message. Before the fix the
@@ -2335,7 +2339,9 @@ func TestStopHookContinueThenSuspend(t *testing.T) {
 	assert.Equal(t, savedMsgs[1].Role, llm.Assistant)
 	assert.Equal(t, savedMsgs[1].Text(), "first round")
 	assert.Equal(t, savedMsgs[2].Role, llm.User)
-	assert.Equal(t, savedMsgs[2].Text(), "please call the approval tool")
+	savedReminder, ok := FindReminder(savedMsgs[2], "stop-continuation")
+	assert.True(t, ok)
+	assert.Contains(t, savedReminder.Content, "please call the approval tool")
 	assert.Equal(t, savedMsgs[3].Role, llm.Assistant)
 	foundSavedToolUse := false
 	for _, c := range savedMsgs[3].Content {

@@ -128,6 +128,10 @@ func main() {
 			cli.String("system-prompt").
 				Default("").
 				Help("System prompt to use for the session"),
+			cli.Strings("context").
+				Help("Pinned contextual reminder as NAME=TEXT (repeatable)"),
+			cli.Strings("operator-reminder").
+				Help("Operator reminder appended after the first input as NAME=TEXT (repeatable)"),
 			cli.Bool("print", "p").
 				Default(false).
 				Help("Print response and exit (useful for pipes)"),
@@ -189,6 +193,10 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Create model
 	model := createModel(modelName, ctx.String("api-endpoint"))
+	pinnedReminders, operatorReminders, err := parseReminderSpecs(ctx.Strings("context"), ctx.Strings("operator-reminder"))
+	if err != nil {
+		return err
+	}
 
 	// Build system prompt
 	systemPrompt := ctx.String("system-prompt")
@@ -344,6 +352,7 @@ func runInteractive(ctx *cli.Context) error {
 			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
 	}
+	applyReminderAgentOptions(&agentOpts, pinnedReminders)
 
 	// Mid-turn compaction: when compaction is enabled, summarize the working
 	// context within a turn if it grows past the threshold, so a long tool loop
@@ -390,6 +399,7 @@ func runInteractive(ctx *cli.Context) error {
 		ctx.String("api-endpoint"),
 	)
 	app.currentSession = currentSession
+	app.operatorReminders = operatorReminders
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {
@@ -486,6 +496,10 @@ func runPrint(ctx *cli.Context) error {
 
 	// Create model
 	model := createModel(modelName, ctx.String("api-endpoint"))
+	pinnedReminders, operatorReminders, err := parseReminderSpecs(ctx.Strings("context"), ctx.Strings("operator-reminder"))
+	if err != nil {
+		return err
+	}
 
 	// Create tools (auto-approve dialog for non-interactive print mode)
 	printValidator, err := toolkit.NewPathValidator(workspaceDir)
@@ -498,12 +512,14 @@ func runPrint(ctx *cli.Context) error {
 	// Create agent
 	printModelSettings, showThinking := newCLIModelSettings(ctx)
 
-	agent, err := dive.NewAgent(dive.AgentOptions{
+	agentOpts := dive.AgentOptions{
 		SystemPrompt:  systemPrompt,
 		Model:         model,
 		Tools:         tools,
 		ModelSettings: printModelSettings,
-	})
+	}
+	applyReminderAgentOptions(&agentOpts, pinnedReminders)
+	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
 	}
@@ -520,9 +536,9 @@ func runPrint(ctx *cli.Context) error {
 
 	switch outputFormat {
 	case "json":
-		return runPrintJSON(bgCtx, agent, input)
+		return runPrintJSON(bgCtx, agent, input, operatorReminders)
 	case "text":
-		return runPrintText(bgCtx, agent, input, showThinking)
+		return runPrintText(bgCtx, agent, input, showThinking, operatorReminders)
 	default:
 		return fmt.Errorf("unsupported --output-format %q; valid values are: json, text", outputFormat)
 	}
@@ -618,14 +634,15 @@ func getInput(args []string) (string, error) {
 	return "", nil
 }
 
-func runPrintText(ctx context.Context, agent *dive.Agent, input string, showThinking bool) error {
+func runPrintText(ctx context.Context, agent *dive.Agent, input string, showThinking bool, operatorReminders []dive.Reminder) error {
 	var outputText strings.Builder
 	var thinkingText strings.Builder
 	thinkingStarted := false
 	textStarted := false
 
+	inputMessages := reminderInputMessages(input, nil, operatorReminders)
 	resp, err := agent.CreateResponse(ctx,
-		dive.WithInput(input),
+		dive.WithMessages(inputMessages...),
 		dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
 			if item.Type == dive.ResponseItemTypeModelEvent && item.Event != nil {
 				if item.Event.Delta != nil {
@@ -675,11 +692,11 @@ func runPrintText(ctx context.Context, agent *dive.Agent, input string, showThin
 	return nil
 }
 
-func runPrintJSON(ctx context.Context, agent *dive.Agent, input string) error {
+func runPrintJSON(ctx context.Context, agent *dive.Agent, input string, operatorReminders []dive.Reminder) error {
 	result := map[string]interface{}{}
 
 	resp, err := agent.CreateResponse(ctx,
-		dive.WithInput(input),
+		dive.WithMessages(reminderInputMessages(input, nil, operatorReminders)...),
 	)
 	if err != nil {
 		result["error"] = err.Error()

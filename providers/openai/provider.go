@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 const ProviderName = "openai"
 
 var (
+	DefaultEndpoint      = "https://api.openai.com/v1"
 	DefaultModel         = ModelGPT56Sol
 	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = 2
@@ -32,6 +34,7 @@ var _ llm.StreamingLLM = &Provider{}
 // Provider implements the OpenAI LLM provider using the Responses API.
 type Provider struct {
 	name                string
+	endpoint            string
 	client              openai.Client
 	model               openai.ChatModel
 	maxTokens           int
@@ -44,8 +47,13 @@ type Provider struct {
 
 // New creates a new OpenAI provider with the given options.
 func New(opts ...Option) *Provider {
+	endpoint := DefaultEndpoint
+	if configured, ok := os.LookupEnv("OPENAI_BASE_URL"); ok {
+		endpoint = configured
+	}
 	p := &Provider{
 		model:         DefaultModel,
+		endpoint:      endpoint,
 		maxTokens:     DefaultMaxTokens,
 		maxRetries:    DefaultMaxRetries,
 		retryBaseWait: DefaultRetryBaseWait,
@@ -185,7 +193,16 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	}
 
 	// Convert input messages to the OpenAI SDK input type
-	input, err := encodeMessages(config.Messages)
+	rendered, err := llm.RenderReminders(config.Messages, func(_ int, _ []*llm.Message) (llm.Role, bool) {
+		if p.Name() == ProviderName && strings.TrimRight(p.endpoint, "/") == DefaultEndpoint {
+			return llm.Developer, true
+		}
+		return llm.User, false
+	})
+	if err != nil {
+		return responses.ResponseNewParams{}, err
+	}
+	input, err := encodeMessages(rendered)
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}

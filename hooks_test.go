@@ -887,7 +887,7 @@ func TestPreIterationHook(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, 1, len(capturedPrompts))
-		assert.Equal(t, "Modified prompt", capturedPrompts[0])
+		assert.Equal(t, "Modified prompt\n\n"+reminderPrimingRule, capturedPrompts[0])
 	})
 }
 

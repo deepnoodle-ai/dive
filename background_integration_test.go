@@ -49,7 +49,7 @@ func TestAgent_BackgroundTool_SingleTask(t *testing.T) {
 			// Capture user-role message text for assertions
 			for _, msg := range cfg.Messages {
 				if msg.Role == llm.User {
-					capturedUserMessages = append(capturedUserMessages, msg.Text())
+					capturedUserMessages = append(capturedUserMessages, messageTextWithReminders(msg))
 				}
 			}
 
@@ -500,7 +500,7 @@ func TestAgent_WithBackgroundResults_InjectsMessage(t *testing.T) {
 			// Capture user message text (using msg.Text() for combined text)
 			for _, msg := range cfg.Messages {
 				if msg.Role == llm.User {
-					capturedUserMessages = append(capturedUserMessages, msg.Text())
+					capturedUserMessages = append(capturedUserMessages, messageTextWithReminders(msg))
 				}
 			}
 
@@ -659,7 +659,7 @@ func TestAgent_BackgroundTool_SessionBacked(t *testing.T) {
 
 	ackIdx, resultsIdx, finalIdx := -1, -1, -1
 	for i, msg := range msgs {
-		text := msg.Text()
+		text := messageTextWithReminders(msg)
 		switch {
 		case msg.Role == llm.Assistant && strings.Contains(text, "Analyzing in background."):
 			ackIdx = i
@@ -681,6 +681,16 @@ func TestAgent_BackgroundTool_SessionBacked(t *testing.T) {
 			t.Errorf("persisted history has consecutive assistant messages at %d and %d", i-1, i)
 		}
 	}
+}
+
+func messageTextWithReminders(message *llm.Message) string {
+	parts := []string{message.Text()}
+	for _, content := range message.Content {
+		if reminder, ok := content.(*llm.ReminderContent); ok {
+			parts = append(parts, reminder.Content)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // TestAgent_PostBackgroundToolUseHook_FromExtension verifies that a

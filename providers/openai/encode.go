@@ -34,6 +34,12 @@ func encodeMessages(messages []*llm.Message) ([]responses.ResponseInputItemUnion
 				return nil, fmt.Errorf("error encoding user message: %w", err)
 			}
 			items = append(items, outMessages...)
+		case "developer":
+			outMessages, err := encodeInputMessage(message)
+			if err != nil {
+				return nil, fmt.Errorf("error encoding developer message: %w", err)
+			}
+			items = append(items, outMessages...)
 		case "tool_result":
 			// A single user message can carry tool_result blocks alongside
 			// auxiliary content (e.g. text injected via a PostToolUse hook's
@@ -74,6 +80,9 @@ func messageType(message *llm.Message) (string, error) {
 		return "assistant", nil
 	}
 	if message.Role != "" && message.Role != llm.User {
+		if message.Role == llm.Developer {
+			return "developer", nil
+		}
 		return "", fmt.Errorf("unknown message role: %s", message.Role)
 	}
 	for _, c := range message.Content {
@@ -332,6 +341,13 @@ func encodeUserMessage(message *llm.Message) ([]responses.ResponseInputItemUnion
 	if message.Role != llm.User {
 		return nil, fmt.Errorf("message role is not user")
 	}
+	return encodeInputMessage(message)
+}
+
+func encodeInputMessage(message *llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
+	if message.Role != llm.User && message.Role != llm.Developer {
+		return nil, fmt.Errorf("message role is not an input role")
+	}
 	contentItems := make([]responses.ResponseInputContentUnionParam, 0, len(message.Content))
 	var standaloneItems []responses.ResponseInputItemUnionParam
 
@@ -375,7 +391,7 @@ func encodeUserMessage(message *llm.Message) ([]responses.ResponseInputItemUnion
 
 	var items []responses.ResponseInputItemUnionParam
 	if len(contentItems) > 0 {
-		items = append(items, responses.ResponseInputItemParamOfInputMessage(contentItems, "user"))
+		items = append(items, responses.ResponseInputItemParamOfInputMessage(contentItems, string(message.Role)))
 	}
 	items = append(items, standaloneItems...)
 	return items, nil

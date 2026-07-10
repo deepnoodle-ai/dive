@@ -133,6 +133,10 @@ type HookContext struct {
 
 	// Iteration is the zero-based iteration number within the generation loop.
 	Iteration int
+
+	reminders          *reminderState
+	reminderDeliveries []reminderDelivery
+	toolScoped         bool
 }
 
 // PreGenerationHook is called before the LLM generation loop begins.
@@ -316,8 +320,52 @@ type StopDecision struct {
 // NewHookContext creates a new HookContext with initialized Values map.
 func NewHookContext() *HookContext {
 	return &HookContext{
-		Values: make(map[string]any),
+		Values:    make(map[string]any),
+		reminders: &reminderState{},
 	}
+}
+
+// PinReminder updates a contextual request overlay. The reminder is rendered
+// into a copy of the first user message and is never persisted.
+func (h *HookContext) PinReminder(reminder Reminder) error {
+	if err := validateReminder(reminder); err != nil {
+		return err
+	}
+	if reminder.Tier != ReminderTierContextual {
+		return fmt.Errorf("pinned reminder %q must be contextual", reminder.Name)
+	}
+	if h.reminders == nil {
+		h.reminders = &reminderState{}
+	}
+	delivery := reminderDelivery{reminder: reminder, kind: reminderDeliveryPin}
+	if h.toolScoped {
+		h.reminderDeliveries = append(h.reminderDeliveries, delivery)
+	} else {
+		h.reminders.pin(reminder)
+	}
+	return nil
+}
+
+// AppendReminder queues a reminder for the next iteration boundary. Recorded
+// reminders are included in OutputMessages; ModelOnly reminders live only for
+// the remainder of this CreateResponse call.
+func (h *HookContext) AppendReminder(reminder Reminder, recording ReminderRecording) error {
+	if err := validateReminder(reminder); err != nil {
+		return err
+	}
+	if recording != Recorded && recording != ModelOnly {
+		return fmt.Errorf("invalid reminder recording mode %q", recording)
+	}
+	if h.reminders == nil {
+		h.reminders = &reminderState{}
+	}
+	delivery := reminderDelivery{reminder: reminder, recording: recording, kind: reminderDeliveryAppend}
+	if h.toolScoped {
+		h.reminderDeliveries = append(h.reminderDeliveries, delivery)
+	} else {
+		h.reminders.pending = append(h.reminders.pending, delivery)
+	}
+	return nil
 }
 
 // InjectContext returns a PreGenerationHook that prepends the given content

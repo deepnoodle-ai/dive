@@ -33,6 +33,7 @@ const (
 	ContentTypeRefusal                 ContentType = "refusal"
 	ContentTypeDynamic                 ContentType = "dynamic"
 	ContentTypeSummary                 ContentType = "summary"
+	ContentTypeReminder                ContentType = "reminder"
 
 	// Code execution tool result types (code_execution_20250825)
 	ContentTypeBashCodeExecutionToolResult       ContentType = "bash_code_execution_tool_result"
@@ -1410,6 +1411,8 @@ func UnmarshalContent(data []byte) (Content, error) {
 		content = &MCPApprovalResponseContent{}
 	case ContentTypeSummary:
 		content = &SummaryContent{}
+	case ContentTypeReminder:
+		content = &ReminderContent{}
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", ct.Type)
 	}

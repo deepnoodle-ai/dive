@@ -10,6 +10,7 @@ Dive is a Go library for building AI agents and integrating with leading LLMs.
 - [Tools](guides/tools.md) - Built-in tools
 - [Custom Tools](guides/custom-tools.md) - Creating your own tools
 - [LLM Guide](guides/llm-guide.md) - Working with different LLM providers
+- [Runtime Context Injection](guides/context-injection.md) - Pinned and appended typed reminders
 - [Permissions](guides/permissions.md) - Tool execution permissions
 - [Skills](guides/skills.md) - Modular agent capabilities and slash commands
 - [Sub-Agents](guides/subagents.md) - Spawning specialized agents (Agent tool) and background control (TaskStop, Monitor)
@@ -26,3 +27,4 @@ These cover packages in `experimental/` with unstable APIs:
 ## Design Documents
 
 - [Sandboxing](design/sandboxing.md) - Sandboxing design
+- [Runtime Context Injection](design/context-injection.md) - Context authority, delivery, and provider rendering

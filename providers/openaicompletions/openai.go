@@ -319,6 +319,12 @@ func validateMessages(messages []*llm.Message) error {
 }
 
 func convertMessages(messages []*llm.Message) ([]Message, error) {
+	// Chat Completions has no operator-authority role, so operator reminders
+	// always render as tagged user messages (nil resolver = no native authority).
+	messages, err := llm.RenderReminders(messages, nil)
+	if err != nil {
+		return nil, err
+	}
 	var result []Message
 	for _, msg := range messages {
 		// Skip empty messages - they can occur in edge cases during long tool-calling loops
