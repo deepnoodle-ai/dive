@@ -6,7 +6,7 @@ require (
 	github.com/deepnoodle-ai/dive v1.14.0
 	github.com/deepnoodle-ai/wonton v0.0.36
 	github.com/openai/openai-go/v3 v3.41.2-0.20260709175524-86bbd3d91826
-	golang.org/x/image v0.38.0
+	golang.org/x/image v0.41.0
 )
 
 require (

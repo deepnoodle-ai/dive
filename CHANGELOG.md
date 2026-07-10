@@ -33,10 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
-- **Dependency updates** — bumped transitive `golang.org/x/crypto`, `x/net`,
-  `x/sys`, `x/term`, `x/text`, and `x/image` to their latest patch releases
-  across the root, `providers/google`, `experimental/cmd/dive`, and `examples`
-  modules, picking up upstream security fixes.
+- **Dependency updates** — bumped `golang.org/x/crypto`, `x/net`, `x/sys`,
+  `x/term`, `x/text`, and `x/image` (the latter a direct dependency of
+  `media/format.go` and the OpenAI/Grok media decoders) to their latest patch
+  releases across every module, including `demos/colosseum`, closing all 20
+  Dependabot alerts open against the repo (7 critical, 8 high, 5 moderate).
 
 ## [1.13.0] - 2026-07-09
 
