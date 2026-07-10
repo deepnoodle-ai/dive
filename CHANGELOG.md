@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-07-09
+
 ### Added
 
 - **Typed context reminders** — hooks can append or pin tiered reminders with
@@ -28,6 +30,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   tools with a non-`none` reasoning effort now preserve the tools, use
   `reasoning_effort: none`, and emit a warning instead of failing with an
   OpenAI HTTP 400 response.
+
+### Security
+
+- **Dependency updates** — bumped transitive `golang.org/x/crypto`, `x/net`,
+  `x/sys`, `x/term`, `x/text`, and `x/image` to their latest patch releases
+  across the root, `providers/google`, `experimental/cmd/dive`, and `examples`
+  modules, picking up upstream security fixes.
 
 ## [1.13.0] - 2026-07-09
 
