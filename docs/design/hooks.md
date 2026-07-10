@@ -205,9 +205,9 @@ PreToolUse hooks can do more than allow/deny:
   before execution. Only the last hook's value takes effect.
 - **Context injection**: Set `hctx.AdditionalContext` to append text to the
   tool result message sent to the LLM.
-- **Typed runtime context**: Call `hctx.PinReminder` for a contextual request
-  overlay, or `hctx.AppendReminder` for a recorded or model-only event delivered
-  after the tool-result batch. See the
+- **Typed runtime context**: Call `hctx.AppendReminder` with `Recorded` or
+  `ModelOnly` to append context after the tool-result batch and choose whether
+  it enters conversation history. See the
   [runtime context guide](../guides/context-injection.md).
 
 ## Error Handling

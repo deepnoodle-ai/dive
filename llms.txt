@@ -220,13 +220,14 @@ message has system authority.
 environment, _ := dive.NewContextReminder("environment", "Working directory: /srv/app")
 response, _ := agent.CreateResponse(ctx,
     dive.WithInput("Inspect the project."),
-    dive.WithPinnedReminder(environment),
+    dive.WithModelOnlyReminder(environment),
 )
 ```
 
 - `NewContextReminder` creates user-adjacent context such as environment state, memory, catalogs, and tool-produced notices.
 - `NewOperatorReminder` creates facts asserted by the application operator. It does not enforce policy.
-- `WithPinnedReminder` and `hctx.PinReminder` create contextual, model-only request overlays.
+- `WithModelOnlyReminder` and `hctx.AppendReminder(..., dive.ModelOnly)` append context that is visible only during the current response.
+- `NewReminderMessage` and `hctx.AppendReminder(..., dive.Recorded)` append context that enters conversation history.
 - `NewReminderMessage` creates recorded input. `hctx.AppendReminder` accepts `Recorded` or `ModelOnly` lifetime.
 - `FindReminder`, `FindLatestReminder`, `RemoveReminder`, and `StripReminders` inspect typed blocks without removing user-authored lookalike text.
 

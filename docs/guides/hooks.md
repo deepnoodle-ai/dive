@@ -237,9 +237,9 @@ This separation mirrors Claude Code's distinct `PostToolUse` and
 
 ### Injecting typed reminders
 
-Use `hctx.PinReminder` for contextual state that should be refreshed in the
-stable request prefix. Use `hctx.AppendReminder` for an event that should appear
-after the current tool-result batch:
+Use `hctx.AppendReminder` for contextual or operator context that should appear
+after the current tool-result batch. Choose `Recorded` to add it to conversation
+history or `ModelOnly` to keep it only for the remainder of this response:
 
 ```go
 Hooks: dive.Hooks{

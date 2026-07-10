@@ -155,7 +155,7 @@ What the extension provides:
 1. **Tools** — the Skill tool (only when skills are loaded)
 2. **Rules** — skill usage instructions appended to the system prompt (only when skills are loaded)
 3. **Hooks** — always provided, even with zero skills:
-   - A **PreGenerationHook** that pins the typed skill catalog as a `<system-reminder name="skills">` overlay in the first user message. The overlay refreshes when the catalog changes, masks stale legacy blocks, and is never persisted.
+   - A **PreGenerationHook** that appends the typed skill catalog as a model-only `<system-reminder name="skills">` at the request tail. A later catalog supersedes stale same-name blocks and is never persisted.
    - A **PostToolUseHook** that injects expanded skill instructions as `AdditionalContext` on the tool result message, keyed by tool call ID for correct association under parallel execution
 
 ### Three-Layer Architecture
@@ -179,14 +179,14 @@ Dive's skill integration follows Claude Code's three-layer architecture:
 ```
 
 The key insight: the skill catalog is created with `dive.NewContextReminder`
-and pinned with `hctx.PinReminder`, not repeated in the tool description on
-every LLM request. The model sees it in a copy of the **first user message**,
-immediately after the system prompt. The stable placement supports prompt
-caching without mutating or persisting loaded history.
+and appended with `hctx.AppendReminder(..., dive.ModelOnly)`, not repeated in
+the tool description on every LLM request. The model sees it at the **request
+tail**. A later same-name catalog supersedes stale history without mutating or
+persisting loaded messages, while leaving the preceding conversation cacheable.
 
 ### Catalog Injection
 
-The catalog is injected into the first user message as a named `<system-reminder>` block:
+The catalog is injected at the request tail as a named `<system-reminder>` block:
 
 ```xml
 <system-reminder name="skills">
@@ -249,8 +249,8 @@ All toolkit tools accept a `Validator` field that takes precedence over `Workspa
 
 The catalog hook handles session resume correctly:
 
-- On a fresh process resuming a session, the current typed overlay masks a stale legacy catalog block without rewriting stored history
-- If no skills remain, an empty same-name overlay masks the legacy block from the model
+- On a fresh process resuming a session, a later typed catalog supersedes a stale legacy catalog block without rewriting stored history
+- If no skills remain, an empty same-name model-only reminder supersedes the legacy block for model interpretation
 - Hooks are always returned by the extension (even with zero skills) specifically to handle this cleanup
 
 ## Provider System

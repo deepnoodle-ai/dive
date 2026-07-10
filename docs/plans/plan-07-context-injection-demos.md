@@ -11,10 +11,10 @@ Last Updated: 2026-07-10
 
 ## Context
 
-Before this work, Dive's experimental CLI demonstrated static pinned context and
+Before this work, Dive's experimental CLI demonstrated static model-only context and
 one-time operator reminders through `--context` and `--operator-reminder`. Those
 flags proved the wire format, but they did not show why typed reminders are
-useful in an agent loop: context can be replaced as reality changes, derived
+useful in an agent loop: context can be superseded as reality changes, derived
 from tool use, scoped to one response, and assigned contextual or operator
 authority. We wanted a small set of opt-in demos that make those properties
 visible without turning advisory reminders into permission or policy
@@ -40,7 +40,7 @@ The divergent pass produced twelve candidates before evaluation:
 These clustered into live state (1, 5, 6, 10, 11), evidence and continuity
 (2, 7, 12), and tool-loop guidance (3, 4, 8, 9). The initial four had high
 day-to-day value, need no external service or additional user configuration,
-and collectively demonstrate pinned replacement, accumulated context,
+and collectively demonstrate latest-wins reminders, accumulated context,
 late-arriving operator events, model-only recording, and failure hooks. The
 remaining ideas are useful follow-ups but either need a richer contract or
 overlap with the selected patterns.
@@ -90,10 +90,9 @@ activation problem.
 The experimental CLI exposes a repeatable `--context-demo NAME` flag. It accepts
 five demos, plus `all` as a convenience:
 
-- `workspace`: pin a live workspace snapshot before generation and refresh it
-  after successful tools, so branch and dirty-state changes are visible without
-  persisting stale state.
-- `pipeline`: pin a read-only delivery map built from recognized repository
+- `workspace`: append a model-only workspace snapshot before generation and
+  append a new value after tools only when branch or dirty state changes.
+- `pipeline`: append a model-only read-only delivery map built from recognized repository
   surfaces such as Go modules, package scripts, Make targets, containers, and CI
   workflows. Only fixed labels, allowlisted target names, and counts are
   injected; arbitrary file contents and workflow names are not. When Go is
@@ -101,7 +100,7 @@ five demos, plus `all` as a convenience:
   bounded module counts, and whether the CLI scope sits below the Git root.
 - `verification`: append model-only operator reminders after `Write` or `Edit`,
   and append a verification checkpoint after a successful recognized test or
-  lint command. It also pins a turn-local ledger of observed build, test,
+  lint command. It also appends a model-only turn-local ledger of observed build, test,
   static-analysis, and security gate outcomes. Failed observations dominate
   passing ones in the same category, and labels come from a fixed command
   classifier rather than raw shell text.

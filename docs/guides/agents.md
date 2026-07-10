@@ -274,7 +274,7 @@ response, err := agent.CreateResponse(ctx,
 | `WithMessages(msgs...)`      | Multiple messages                                           |
 | `WithEventCallback(fn)`      | Receive events during generation                            |
 | `WithSession(sess)`          | Per-call session override                                   |
-| `WithPinnedReminder(r)`      | Add a contextual, model-only request overlay                |
+| `WithModelOnlyReminder(r)`   | Append a reminder for this response without recording it    |
 | `WithValue(key, val)`        | Pass data to hooks via HookContext.Values                   |
 | `WithToolResults(results)`   | Resume a session-backed suspended turn (see suspend-resume) |
 | `WithResume(state, results)` | Resume statelessly with an explicit `SuspensionState`       |
@@ -282,10 +282,10 @@ response, err := agent.CreateResponse(ctx,
 ## Runtime Context
 
 Use typed reminders when the application needs to supply context the user did
-not type. `WithPinnedReminder` carries current contextual state for one
-`CreateResponse` call without persisting it. Hooks can call
-`hctx.PinReminder` to refresh that overlay or `hctx.AppendReminder` to add a
-recorded or model-only event between tool iterations.
+not type. `WithModelOnlyReminder` appends contextual or operator state for one
+`CreateResponse` call without recording it. Hooks call `hctx.AppendReminder`
+with `Recorded` or `ModelOnly` to choose whether an appended reminder enters
+conversation history.
 
 Reminder tier and lifetime are separate choices. Operator reminders receive a
 native operator role only where the target and message placement are known to

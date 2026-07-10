@@ -19,7 +19,6 @@ const (
 type contextDemoDelivery string
 
 const (
-	contextDemoPinned    contextDemoDelivery = "pinned"
 	contextDemoModelOnly contextDemoDelivery = "model-only"
 )
 
@@ -35,19 +34,19 @@ type contextDemoRuntime struct {
 	report contextDemoReporter
 }
 
-func (r contextDemoRuntime) pin(hctx *dive.HookContext, reminder dive.Reminder) error {
-	if err := hctx.PinReminder(reminder); err != nil {
-		return err
+func (r contextDemoRuntime) appendChangedModelOnly(hctx *dive.HookContext, reminder dive.Reminder) error {
+	action, changed := "queued", true
+	if state := contextDemoState(hctx); state != nil {
+		action, changed = state.recordModelOnlyReminder(reminder)
 	}
-	if r.report == nil {
+	if !changed {
 		return nil
 	}
-	action, changed := "set", true
-	if state := contextDemoState(hctx); state != nil {
-		action, changed = state.recordPinnedReminder(reminder)
+	if err := hctx.AppendReminder(reminder, dive.ModelOnly); err != nil {
+		return err
 	}
-	if changed {
-		r.report(contextDemoNotice{Reminder: reminder, Delivery: contextDemoPinned, Action: action})
+	if r.report != nil {
+		r.report(contextDemoNotice{Reminder: reminder, Delivery: contextDemoModelOnly, Action: action})
 	}
 	return nil
 }
@@ -71,16 +70,14 @@ func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir str
 		runtime.report = reporters[0]
 	}
 
-	needsState := selection.enabled(contextDemoVerification) ||
-		selection.enabled(contextDemoSecurity) || runtime.report != nil
-	if needsState {
-		// Install turn-local state before the first iteration. Tool hooks can run
-		// in parallel, so the state object protects its own collections.
-		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, func(_ context.Context, hctx *dive.HookContext) error {
-			hctx.Values[contextDemoStateKey] = &contextDemoTurnState{}
-			return nil
-		})
-	}
+	// Install turn-local state before the first iteration. Besides tracking
+	// verification and security observations, it prevents unchanged snapshots
+	// from being appended again during a long tool loop. Tool hooks can run in
+	// parallel, so the state object protects its own collections.
+	agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, func(_ context.Context, hctx *dive.HookContext) error {
+		hctx.Values[contextDemoStateKey] = &contextDemoTurnState{}
+		return nil
+	})
 
 	if selection.enabled(contextDemoWorkspace) {
 		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, workspaceContextDemoHook(workspaceDir, runtime))
@@ -118,7 +115,7 @@ type contextDemoTurnState struct {
 
 	qualityGates      map[qualityGateKind]qualityGateObservation
 	batchSecurityRisk map[securityRiskCategory]securityRiskObservation
-	reportedPinned    map[string]string
+	reportedModelOnly map[string]string
 }
 
 func contextDemoState(hctx *dive.HookContext) *contextDemoTurnState {
@@ -129,21 +126,21 @@ func contextDemoState(hctx *dive.HookContext) *contextDemoTurnState {
 	return state
 }
 
-func (s *contextDemoTurnState) recordPinnedReminder(reminder dive.Reminder) (action string, changed bool) {
+func (s *contextDemoTurnState) recordModelOnlyReminder(reminder dive.Reminder) (action string, changed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.reportedPinned == nil {
-		s.reportedPinned = make(map[string]string)
+	if s.reportedModelOnly == nil {
+		s.reportedModelOnly = make(map[string]string)
 	}
-	previous, exists := s.reportedPinned[reminder.Name]
+	previous, exists := s.reportedModelOnly[reminder.Name]
 	if exists && previous == reminder.Content {
 		return "", false
 	}
-	s.reportedPinned[reminder.Name] = reminder.Content
+	s.reportedModelOnly[reminder.Name] = reminder.Content
 	if exists {
-		return "updated", true
+		return "refreshed", true
 	}
-	return "set", true
+	return "queued", true
 }
 
 func (s *contextDemoTurnState) addBatchChange(path string) {

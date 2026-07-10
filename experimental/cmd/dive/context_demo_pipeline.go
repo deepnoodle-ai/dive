@@ -24,7 +24,7 @@ func pipelineContextDemoHook(workspaceDir string, runtime contextDemoRuntime) di
 		if err != nil {
 			return err
 		}
-		return runtime.pin(hctx, reminder)
+		return runtime.appendChangedModelOnly(hctx, reminder)
 	}
 }
 

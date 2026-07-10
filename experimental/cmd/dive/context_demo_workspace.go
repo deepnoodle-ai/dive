@@ -16,7 +16,7 @@ func workspaceContextDemoHook(workspaceDir string, runtime contextDemoRuntime) d
 		if err != nil {
 			return err
 		}
-		return runtime.pin(hctx, reminder)
+		return runtime.appendChangedModelOnly(hctx, reminder)
 	}
 }
 

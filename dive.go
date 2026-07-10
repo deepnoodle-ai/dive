@@ -107,9 +107,9 @@ type CreateResponseOptions struct {
 	// appended to any existing session messages before sending to the LLM.
 	Messages []*llm.Message
 
-	// PinnedReminders are contextual, model-only overlays rendered into a copy
-	// of the first user message for this request.
-	PinnedReminders []Reminder
+	// ModelOnlyReminders are appended at the conversation tail for this request
+	// but excluded from OutputMessages and session persistence.
+	ModelOnlyReminders []Reminder
 
 	// EventCallback is invoked for each response item during generation.
 	// Callbacks include messages, tool calls, and tool results.
@@ -172,10 +172,11 @@ func WithMessages(messages ...*llm.Message) CreateResponseOption {
 	}
 }
 
-// WithPinnedReminder adds stable contextual runtime context to this request.
-func WithPinnedReminder(reminder Reminder) CreateResponseOption {
+// WithModelOnlyReminder appends runtime context for this CreateResponse without
+// including it in OutputMessages or session persistence.
+func WithModelOnlyReminder(reminder Reminder) CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
-		opts.PinnedReminders = append(opts.PinnedReminders, reminder)
+		opts.ModelOnlyReminders = append(opts.ModelOnlyReminders, reminder)
 	}
 }
 

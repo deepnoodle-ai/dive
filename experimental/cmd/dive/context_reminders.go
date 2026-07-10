@@ -25,7 +25,7 @@ func parseReminderSpecs(contextual, operator []string) ([]dive.Reminder, []dive.
 		}
 		return reminders, nil
 	}
-	pinned, err := parse(contextual, dive.NewContextReminder)
+	modelOnly, err := parse(contextual, dive.NewContextReminder)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -33,22 +33,21 @@ func parseReminderSpecs(contextual, operator []string) ([]dive.Reminder, []dive.
 	if err != nil {
 		return nil, nil, err
 	}
-	return pinned, appended, nil
+	return modelOnly, appended, nil
 }
 
-// applyReminderAgentOptions wires pinned reminders into agentOpts, shared by
-// the interactive and print CLI entry points so the two paths can't drift
-// apart.
-func applyReminderAgentOptions(agentOpts *dive.AgentOptions, pinnedReminders []dive.Reminder) {
-	if len(pinnedReminders) > 0 {
-		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, pinRemindersHook(pinnedReminders))
+// applyReminderAgentOptions wires model-only reminders into agentOpts, shared
+// by the interactive and print CLI entry points so the two paths can't drift.
+func applyReminderAgentOptions(agentOpts *dive.AgentOptions, modelOnlyReminders []dive.Reminder) {
+	if len(modelOnlyReminders) > 0 {
+		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, appendModelOnlyRemindersHook(modelOnlyReminders))
 	}
 }
 
-func pinRemindersHook(reminders []dive.Reminder) dive.PreGenerationHook {
+func appendModelOnlyRemindersHook(reminders []dive.Reminder) dive.PreGenerationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		for _, reminder := range reminders {
-			if err := hctx.PinReminder(reminder); err != nil {
+			if err := hctx.AppendReminder(reminder, dive.ModelOnly); err != nil {
 				return err
 			}
 		}

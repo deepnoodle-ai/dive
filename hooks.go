@@ -325,27 +325,6 @@ func NewHookContext() *HookContext {
 	}
 }
 
-// PinReminder updates a contextual request overlay. The reminder is rendered
-// into a copy of the first user message and is never persisted.
-func (h *HookContext) PinReminder(reminder Reminder) error {
-	if err := validateReminder(reminder); err != nil {
-		return err
-	}
-	if reminder.Tier != ReminderTierContextual {
-		return fmt.Errorf("pinned reminder %q must be contextual", reminder.Name)
-	}
-	if h.reminders == nil {
-		h.reminders = &reminderState{}
-	}
-	delivery := reminderDelivery{reminder: reminder, kind: reminderDeliveryPin}
-	if h.toolScoped {
-		h.reminderDeliveries = append(h.reminderDeliveries, delivery)
-	} else {
-		h.reminders.pin(reminder)
-	}
-	return nil
-}
-
 // AppendReminder queues a reminder for the next iteration boundary. Recorded
 // reminders are included in OutputMessages; ModelOnly reminders live only for
 // the remainder of this CreateResponse call.
@@ -359,7 +338,7 @@ func (h *HookContext) AppendReminder(reminder Reminder, recording ReminderRecord
 	if h.reminders == nil {
 		h.reminders = &reminderState{}
 	}
-	delivery := reminderDelivery{reminder: reminder, recording: recording, kind: reminderDeliveryAppend}
+	delivery := reminderDelivery{reminder: reminder, recording: recording}
 	if h.toolScoped {
 		h.reminderDeliveries = append(h.reminderDeliveries, delivery)
 	} else {

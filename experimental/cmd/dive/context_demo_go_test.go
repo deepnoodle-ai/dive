@@ -70,5 +70,5 @@ func TestPipelineIncludesGoDevelopmentContext(t *testing.T) {
 	assert.Contains(t, reminder.Content, "declared Go version: 1.24")
 	assert.Len(t, notices, 1)
 	assert.Equal(t, "delivery-pipeline", notices[0].Reminder.Name)
-	assert.Equal(t, contextDemoPinned, notices[0].Delivery)
+	assert.Equal(t, contextDemoModelOnly, notices[0].Delivery)
 }

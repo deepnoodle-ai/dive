@@ -133,9 +133,9 @@ func main() {
 				Default("").
 				Help("System prompt to use for the session"),
 			cli.Strings("context").
-				Help("Pinned contextual reminder as NAME=TEXT (repeatable)"),
+				Help("Model-only contextual reminder as NAME=TEXT (repeatable)"),
 			cli.Strings("operator-reminder").
-				Help("Operator reminder appended after the first input as NAME=TEXT (repeatable)"),
+				Help("Recorded operator reminder after the first input as NAME=TEXT (repeatable)"),
 			cli.Strings("context-demo").
 				Help("Enable runtime context demos (repeatable; run 'dive context-demos' to list presets)"),
 			cli.Bool("print", "p").
@@ -199,7 +199,7 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Create model
 	model := createModel(modelName, ctx.String("api-endpoint"))
-	pinnedReminders, operatorReminders, err := parseReminderSpecs(ctx.Strings("context"), ctx.Strings("operator-reminder"))
+	modelOnlyReminders, operatorReminders, err := parseReminderSpecs(ctx.Strings("context"), ctx.Strings("operator-reminder"))
 	if err != nil {
 		return err
 	}
@@ -362,7 +362,7 @@ func runInteractive(ctx *cli.Context) error {
 			PreToolUse: []dive.PreToolUseHook{permissionHook},
 		},
 	}
-	applyReminderAgentOptions(&agentOpts, pinnedReminders)
+	applyReminderAgentOptions(&agentOpts, modelOnlyReminders)
 	var app *App
 	applyContextDemoAgentOptions(&agentOpts, workspaceDir, contextDemos, func(notice contextDemoNotice) {
 		if app != nil {
@@ -515,7 +515,7 @@ func runPrint(ctx *cli.Context) error {
 
 	// Create model
 	model := createModel(modelName, ctx.String("api-endpoint"))
-	pinnedReminders, operatorReminders, err := parseReminderSpecs(ctx.Strings("context"), ctx.Strings("operator-reminder"))
+	modelOnlyReminders, operatorReminders, err := parseReminderSpecs(ctx.Strings("context"), ctx.Strings("operator-reminder"))
 	if err != nil {
 		return err
 	}
@@ -541,7 +541,7 @@ func runPrint(ctx *cli.Context) error {
 		Tools:         tools,
 		ModelSettings: printModelSettings,
 	}
-	applyReminderAgentOptions(&agentOpts, pinnedReminders)
+	applyReminderAgentOptions(&agentOpts, modelOnlyReminders)
 	applyContextDemoAgentOptions(&agentOpts, workspaceDir, contextDemos)
 	agent, err := dive.NewAgent(agentOpts)
 	if err != nil {

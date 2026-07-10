@@ -52,7 +52,7 @@ func (a *App) printContextDemoReport() {
 		tui.Text("Context demo reminders").Bold(),
 		tui.Text("  enabled: %s", a.contextDemos.displaySummary()),
 		tui.Text("  shows --context-demo reminders only; skill and application reminders are not included").Hint(),
-		tui.Text("  pinned reminders are refreshed request overlays; model-only reminders are not saved to conversation history").Hint(),
+		tui.Text("  model-only reminders are appended at the request tail and are not saved to conversation history").Hint(),
 	}
 	if len(a.contextDemoOrder) == 0 {
 		views = append(views,

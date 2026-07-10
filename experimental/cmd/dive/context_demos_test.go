@@ -50,20 +50,20 @@ func TestContextDemoCatalogIsTheSingleDisplaySource(t *testing.T) {
 	assert.Equal(t, "pipeline, verification, security", contextDemoSelection(contextDemoPipeline|contextDemoVerification|contextDemoSecurity).displaySummary())
 }
 
-func TestPinnedContextDemoNoticesReportOnlyMeaningfulChanges(t *testing.T) {
+func TestModelOnlyContextDemoNoticesReportOnlyMeaningfulChanges(t *testing.T) {
 	state := &contextDemoTurnState{}
 	first, err := dive.NewContextReminder("workspace-pulse", "clean")
 	assert.NoError(t, err)
 	updated, err := dive.NewContextReminder("workspace-pulse", "dirty")
 	assert.NoError(t, err)
 
-	action, changed := state.recordPinnedReminder(first)
-	assert.Equal(t, "set", action)
+	action, changed := state.recordModelOnlyReminder(first)
+	assert.Equal(t, "queued", action)
 	assert.True(t, changed)
-	_, changed = state.recordPinnedReminder(first)
+	_, changed = state.recordModelOnlyReminder(first)
 	assert.False(t, changed)
-	action, changed = state.recordPinnedReminder(updated)
-	assert.Equal(t, "updated", action)
+	action, changed = state.recordModelOnlyReminder(updated)
+	assert.Equal(t, "refreshed", action)
 	assert.True(t, changed)
 }
 
@@ -109,12 +109,12 @@ func TestVerificationCommandDetection(t *testing.T) {
 	}
 }
 
-func TestApplyContextDemoAgentOptionsInstallsOnlyNeededState(t *testing.T) {
-	var stateless dive.AgentOptions
-	applyContextDemoAgentOptions(&stateless, t.TempDir(), contextDemoSelection(contextDemoWorkspace|contextDemoRecovery))
-	assert.Len(t, stateless.Hooks.PreGeneration, 0)
-	assert.Len(t, stateless.Hooks.PreIteration, 1)
-	assert.Len(t, stateless.Hooks.PostToolUseFailure, 1)
+func TestApplyContextDemoAgentOptionsInstallsTurnState(t *testing.T) {
+	var workspace dive.AgentOptions
+	applyContextDemoAgentOptions(&workspace, t.TempDir(), contextDemoSelection(contextDemoWorkspace|contextDemoRecovery))
+	assert.Len(t, workspace.Hooks.PreGeneration, 1)
+	assert.Len(t, workspace.Hooks.PreIteration, 1)
+	assert.Len(t, workspace.Hooks.PostToolUseFailure, 1)
 
 	var stateful dive.AgentOptions
 	applyContextDemoAgentOptions(&stateful, t.TempDir(), contextDemoSelection(contextDemoVerification))
@@ -308,8 +308,8 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 		_, ok := noticeByName[name]
 		assert.True(t, ok, name)
 	}
-	assert.Equal(t, contextDemoPinned, noticeByName["workspace-pulse"].Delivery)
-	assert.Equal(t, "set", noticeByName["workspace-pulse"].Action)
+	assert.Equal(t, contextDemoModelOnly, noticeByName["workspace-pulse"].Delivery)
+	assert.Equal(t, "queued", noticeByName["workspace-pulse"].Action)
 	assert.Equal(t, contextDemoModelOnly, noticeByName["verification-debt"].Delivery)
 	assert.Equal(t, "queued", noticeByName["verification-debt"].Action)
 

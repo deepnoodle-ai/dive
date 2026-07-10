@@ -114,7 +114,7 @@ func verificationGateReminderHook(runtime contextDemoRuntime) dive.PreIterationH
 		if err != nil {
 			return err
 		}
-		return runtime.pin(hctx, reminder)
+		return runtime.appendChangedModelOnly(hctx, reminder)
 	}
 }
 

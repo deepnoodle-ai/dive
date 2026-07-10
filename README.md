@@ -213,8 +213,8 @@ See the [Agents Guide](./docs/guides/agents.md#sessions) for fork, compact, and 
 ### Runtime Context and System Reminders
 
 Typed reminders carry context that the end user did not type, while keeping it
-distinct from user-authored text. Use a contextual pinned reminder for current
-state such as an environment or catalog:
+distinct from user-authored text. Use a model-only reminder for runtime context
+that should affect this response without entering conversation history:
 
 ```go
 environment, _ := dive.NewContextReminder(
@@ -224,16 +224,17 @@ environment, _ := dive.NewContextReminder(
 
 response, err := agent.CreateResponse(ctx,
     dive.WithInput("Inspect the deployment."),
-    dive.WithPinnedReminder(environment),
+    dive.WithModelOnlyReminder(environment),
 )
 ```
 
 Use `NewOperatorReminder` only for facts asserted by the application operator,
-and `HookContext.AppendReminder` for recorded or model-only events discovered
-inside the agent loop. Providers render reminders as `<system-reminder>` blocks,
-using native operator roles only where support and placement are known to be
-legal. The tag alone does not grant authority, and reminders do not replace
-permissions or application policy.
+`NewReminderMessage` for a recorded reminder, and
+`HookContext.AppendReminder` with `Recorded` or `ModelOnly` for reminders
+discovered inside the agent loop. Providers render reminders as
+`<system-reminder>` blocks, using native operator roles only where support and
+placement are known to be legal. The tag alone does not grant authority, and
+reminders do not replace permissions or application policy.
 
 See [Runtime Context and System Reminders](./docs/guides/context-injection.md)
 for tiers, delivery lifetime, provider fallback, sessions, compaction, typed

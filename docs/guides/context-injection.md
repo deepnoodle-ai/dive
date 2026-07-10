@@ -22,7 +22,7 @@ layers. Rendering to XML-like text happens only when a provider builds its
 request. This lets applications inspect or hide genuine reminders without
 mistaking user-authored lookalike text for injected context.
 
-## Choose a tier and delivery mode
+## Choose a tier and lifetime
 
 Every reminder has a validated name, a tier, and content:
 
@@ -47,19 +47,19 @@ application authorization for controls that must hold.
 
 Then choose how long the reminder should live:
 
-| Delivery         | Allowed tiers          | API                                                        | Model lifetime                                          | Recorded |
-| :--------------- | :--------------------- | :--------------------------------------------------------- | :------------------------------------------------------ | :------- |
-| Pinned overlay   | Contextual             | `WithPinnedReminder`, `hctx.PinReminder`                   | Every model call in the current `CreateResponse`        | No       |
-| Appended event   | Contextual or operator | `NewReminderMessage`, `hctx.AppendReminder(..., Recorded)` | Conversation history until it leaves the active context | Yes      |
-| Model-only event | Contextual or operator | `hctx.AppendReminder(..., ModelOnly)`                      | Remainder of the current `CreateResponse`               | No       |
+| Lifetime   | Allowed tiers          | API                                                            | Model lifetime                                          | Recorded |
+| :--------- | :--------------------- | :------------------------------------------------------------- | :------------------------------------------------------ | :------- |
+| Recorded   | Contextual or operator | `NewReminderMessage`, `hctx.AppendReminder(..., Recorded)`     | Conversation history until it leaves the active context | Yes      |
+| Model-only | Contextual or operator | `WithModelOnlyReminder`, `hctx.AppendReminder(..., ModelOnly)` | Remainder of the current `CreateResponse`               | No       |
 
 “Recorded” means Dive includes the message in `OutputMessages` or the active
 session turn. Without a session, the caller still owns long-term storage.
 
-## Pin current state
+## Append model-only context
 
-Pin values that should be recomputed or supplied on each request, such as the
-current directory, branch, feature catalog, or account limits:
+Use model-only reminders for values that should be recomputed or supplied on
+each request, such as the current directory, branch, feature catalog, or
+account limits:
 
 ```go
 environment, err := dive.NewContextReminder(
@@ -72,19 +72,26 @@ if err != nil {
 
 response, err := agent.CreateResponse(ctx,
     dive.WithInput("Inspect the staging deployment."),
-    dive.WithPinnedReminder(environment),
+    dive.WithModelOnlyReminder(environment),
 )
 ```
 
-Pinned reminders are contextual by design. Dive renders them into a copy of the
-first user message, immediately after the system prompt, without mutating the
-caller's messages or saving the overlay. Supplying the same content again keeps
-the prompt prefix byte-identical. Supplying a reminder with the same name
-replaces the previous pinned value in the model-facing copy.
+Model-only reminders are appended in order at the request tail without mutating
+the caller's messages. They remain available through later tool iterations in
+the same `CreateResponse`, then disappear. A later reminder with the same name
+supersedes an earlier one for model interpretation; Dive does not rewrite or
+remove the earlier block.
 
-Pinned state is per request. Pass `WithPinnedReminder` on each
-`CreateResponse`, or install a `PreGeneration`/`PreIteration` hook that calls
-`hctx.PinReminder`:
+Appending at the tail preserves the long conversation prefix. When a previous
+turn's model-only reminder disappears on the next request, cache reuse can stop
+at that prior insertion point, but it does not invalidate the session from the
+first user message. At session start there is no special case: the model-only
+reminder is simply appended after the initial input. Use `Recorded` instead when
+the fact should become conversation history.
+
+Pass `WithModelOnlyReminder` on a `CreateResponse`, or install a
+`PreGeneration`/`PreIteration` hook that calls `hctx.AppendReminder` with
+`ModelOnly`:
 
 ```go
 Hooks: dive.Hooks{
@@ -98,13 +105,13 @@ Hooks: dive.Hooks{
             if err != nil {
                 return err
             }
-            return hctx.PinReminder(reminder)
+            return hctx.AppendReminder(reminder, dive.ModelOnly)
         },
     },
 }
 ```
 
-## Append a recorded event
+## Append a recorded reminder
 
 Append facts that happened at a point in the conversation. Between turns, put
 the reminder after its accompanying user message:
@@ -193,10 +200,11 @@ interpret reminders even before the first one appears:
 
 > Runtime context may appear in `<system-reminder>` blocks. The enclosing
 > message role determines its authority; the tag itself does not confer
-> authority.
+> authority. Later reminder blocks with the same name supersede earlier ones.
 
 This stable priming rule avoids changing the system-prompt prefix only when a
-reminder first appears.
+reminder first appears. It also says that a later reminder with the same name
+supersedes an earlier one without requiring history rewrites.
 
 The [runtime context design and contract](../design/context-injection.md)
 contains the complete endpoint, model, and placement matrix.
@@ -208,10 +216,10 @@ Stored Dive sessions contain typed `ReminderContent` JSON, not rendered
 is replayed, so the same recorded reminder can use a different legal role with a
 different provider.
 
-Pinned and model-only reminders are never saved. Recorded reminders remain in
-the full transcript. If compaction moves one outside the active model window,
-it is still auditable but no longer influences the model. Applications should
-reassert long-lived state after compaction:
+Model-only reminders are never saved. Recorded reminders remain in the full
+transcript. If compaction moves one outside the active model window, it is still
+auditable but no longer influences the model. Applications should reassert
+long-lived state after compaction:
 
 ```go
 if _, ok := dive.FindLatestReminder(activeMessages, "mode"); !ok {
@@ -249,9 +257,10 @@ decisions, or authorization.
 compatibility. They mutate plain-text blocks in the first user message, cannot
 express operator tier or recording lifetime, and do not have typed provenance.
 
-Use `Reminder`, `WithPinnedReminder`, `PinReminder`, and `AppendReminder` for new
-agent integrations. The typed pinned path also masks a same-name legacy block in
-loaded history, which supports gradual migration without rewriting sessions.
+Use `Reminder`, `WithModelOnlyReminder`, `NewReminderMessage`, and
+`AppendReminder` for new agent integrations. A later typed reminder supersedes
+a same-name legacy block for model interpretation without rewriting the loaded
+session.
 
 ## Experimental CLI
 
@@ -264,7 +273,7 @@ dive --print \
   'Inspect the project.'
 ```
 
-`--context NAME=TEXT` is repeatable and pinned on every request.
+`--context NAME=TEXT` is repeatable and appended model-only on every request.
 `--operator-reminder NAME=TEXT` is repeatable and appended after the first user
 input.
 
@@ -289,10 +298,11 @@ compact trace lines show reminder lifecycle events. `/context` displays the
 exact latest-turn demo payloads without relying on the model to recall them.
 Skill and application reminders are outside that diagnostic view.
 
-- `workspace` refreshes a pinned `workspace-pulse` with the Git branch and dirty
-  paths before each model call.
-- `pipeline` pins a read-only `delivery-pipeline` map. In Go workspaces it also
-  adds bounded module topology and `gofmt`/test/vet/race guidance.
+- `workspace` appends a model-only `workspace-pulse` when the Git branch or dirty
+  paths change.
+- `pipeline` appends a model-only read-only `delivery-pipeline` map. In Go
+  workspaces it also adds bounded module topology and `gofmt`/test/vet/race
+  guidance.
 - `verification` carries edit debt until a later direct check and tracks
   normalized build, test, analysis, and security gate outcomes.
 - `recovery` appends model-only guidance after a failed or denied tool call.

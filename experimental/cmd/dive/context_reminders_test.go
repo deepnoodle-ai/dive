@@ -20,14 +20,14 @@ func (m *contextCaptureModel) Generate(_ context.Context, opts ...llm.Option) (*
 }
 
 func TestParseReminderSpecs(t *testing.T) {
-	pinned, operator, err := parseReminderSpecs(
+	modelOnly, operator, err := parseReminderSpecs(
 		[]string{"environment=cwd=/srv/app"},
 		[]string{"mode=read only"},
 	)
 	assert.NoError(t, err)
-	assert.Len(t, pinned, 1)
-	assert.Equal(t, "environment", pinned[0].Name)
-	assert.Equal(t, "cwd=/srv/app", pinned[0].Content)
+	assert.Len(t, modelOnly, 1)
+	assert.Equal(t, "environment", modelOnly[0].Name)
+	assert.Equal(t, "cwd=/srv/app", modelOnly[0].Content)
 	assert.Len(t, operator, 1)
 	assert.Equal(t, dive.ReminderTierOperator, operator[0].Tier)
 
@@ -36,7 +36,7 @@ func TestParseReminderSpecs(t *testing.T) {
 }
 
 func TestCLIContextDemoWiring(t *testing.T) {
-	pinned, operator, err := parseReminderSpecs(
+	modelOnly, operator, err := parseReminderSpecs(
 		[]string{"environment=cwd=/srv/app"},
 		[]string{"mode=read only"},
 	)
@@ -44,7 +44,7 @@ func TestCLIContextDemoWiring(t *testing.T) {
 	model := &contextCaptureModel{}
 	agent, err := dive.NewAgent(dive.AgentOptions{
 		Model: model,
-		Hooks: dive.Hooks{PreGeneration: []dive.PreGenerationHook{pinRemindersHook(pinned)}},
+		Hooks: dive.Hooks{PreGeneration: []dive.PreGenerationHook{appendModelOnlyRemindersHook(modelOnly)}},
 	})
 	assert.NoError(t, err)
 	input := reminderInputMessages("continue", nil, operator)
