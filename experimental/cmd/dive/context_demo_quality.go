@@ -92,7 +92,7 @@ func (s *contextDemoTurnState) qualityGateSnapshot() []qualityGateObservation {
 	return observations
 }
 
-func qualityGateReminderHook() dive.PreIterationHook {
+func qualityGateReminderHook(runtime contextDemoRuntime) dive.PreIterationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		state := contextDemoState(hctx)
 		if state == nil {
@@ -112,7 +112,7 @@ func qualityGateReminderHook() dive.PreIterationHook {
 		if err != nil {
 			return err
 		}
-		return hctx.PinReminder(reminder)
+		return runtime.pin(hctx, reminder)
 	}
 }
 

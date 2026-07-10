@@ -101,6 +101,10 @@ func main() {
 		).
 		Run(runModels)
 
+	app.Command("context-demos").
+		Description("List runtime context demo presets").
+		Run(func(_ *cli.Context) error { return writeContextDemoCatalog(os.Stdout) })
+
 	app.Main().
 		Args("prompt?").
 		Flags(
@@ -133,7 +137,7 @@ func main() {
 			cli.Strings("operator-reminder").
 				Help("Operator reminder appended after the first input as NAME=TEXT (repeatable)"),
 			cli.Strings("context-demo").
-				Help("Enable runtime context demos: all, workspace, sources, verification, recovery, pipeline, quality, security (repeatable or comma-separated)"),
+				Help("Enable runtime context demos (repeatable; run 'dive context-demos' to list presets)"),
 			cli.Bool("print", "p").
 				Default(false).
 				Help("Print response and exit (useful for pipes)"),
@@ -182,9 +186,9 @@ func runInteractive(ctx *cli.Context) error {
 	}
 
 	// Parse workspace
-	workspaceDir := ctx.String("workspace")
-	if workspaceDir == "" {
-		workspaceDir = cwd
+	workspaceDir, err := resolveWorkspaceDir(ctx.String("workspace"), cwd)
+	if err != nil {
+		return err
 	}
 
 	// Parse model
@@ -359,7 +363,12 @@ func runInteractive(ctx *cli.Context) error {
 		},
 	}
 	applyReminderAgentOptions(&agentOpts, pinnedReminders)
-	applyContextDemoAgentOptions(&agentOpts, workspaceDir, contextDemos)
+	var app *App
+	applyContextDemoAgentOptions(&agentOpts, workspaceDir, contextDemos, func(notice contextDemoNotice) {
+		if app != nil {
+			app.notifyContextDemoNotice(notice)
+		}
+	})
 
 	// Mid-turn compaction: when compaction is enabled, summarize the working
 	// context within a turn if it grows past the threshold, so a long tool loop
@@ -368,7 +377,6 @@ func runInteractive(ctx *cli.Context) error {
 	// still saved (see compaction.MidTurnCompactionHook). app is assigned just
 	// below; the notify closure only runs once the agent processes input, well
 	// after that, so reading it here is safe.
-	var app *App
 	if compactionConfig != nil {
 		midTurnThreshold := compactionConfig.ContextTokenThreshold
 		if midTurnThreshold <= 0 {
@@ -407,6 +415,7 @@ func runInteractive(ctx *cli.Context) error {
 	)
 	app.currentSession = currentSession
 	app.operatorReminders = operatorReminders
+	app.contextDemos = contextDemos
 
 	attachment, err := loadStartupInstructionAttachment(cwd)
 	if err != nil {
@@ -433,6 +442,9 @@ func defaultSystemPrompt(workspaceDir, modelName string) string {
 	b.WriteString(fmt.Sprintf("- Working directory: %s\n", workspaceDir))
 	if isGitRepo(workspaceDir) {
 		b.WriteString("  - Is a git repository: true\n")
+	}
+	if boundary, limited := detectWorkspaceBoundary(workspaceDir); limited {
+		b.WriteString(fmt.Sprintf("- Workspace boundary: tools are limited to the working directory; Git root %s is outside that scope\n", boundary.GitRoot))
 	}
 
 	// Platform and OS
@@ -480,13 +492,13 @@ func runPrint(ctx *cli.Context) error {
 	}
 
 	// Get workspace
-	workspaceDir := ctx.String("workspace")
-	if workspaceDir == "" {
-		var err error
-		workspaceDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get working directory: %w", err)
-		}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	workspaceDir, err := resolveWorkspaceDir(ctx.String("workspace"), cwd)
+	if err != nil {
+		return err
 	}
 
 	// Get model

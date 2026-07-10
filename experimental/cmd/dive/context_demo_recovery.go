@@ -8,7 +8,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
-func recoveryContextDemoHook() dive.PostToolUseFailureHook {
+func recoveryContextDemoHook(runtime contextDemoRuntime) dive.PostToolUseFailureHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		reminder, err := dive.NewOperatorReminder(
 			"recovery-coach",
@@ -17,7 +17,7 @@ func recoveryContextDemoHook() dive.PostToolUseFailureHook {
 		if err != nil {
 			return err
 		}
-		return hctx.AppendReminder(reminder, dive.ModelOnly)
+		return runtime.appendModelOnly(hctx, reminder)
 	}
 }
 

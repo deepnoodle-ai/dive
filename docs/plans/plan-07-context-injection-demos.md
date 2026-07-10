@@ -68,10 +68,16 @@ surfaces exist, which gates actually ran, and when a change deserves explicit
 security review. They remain useful without a hosted CI API, coverage service,
 or organization-specific release configuration.
 
+Live testing then exposed a useful language-specific layer: the generic
+pipeline map could identify Go but could not explain nested-module coverage or
+the expected Go completion loop. A `go` preset was added as an eighth pattern to
+surface bounded module topology plus `gofmt`, test, vet, race, dependency, and
+generated-code guidance.
+
 ## Proposal
 
 Add a repeatable `--context-demo NAME` flag to the experimental CLI. It accepts
-seven demos, plus `all` as a convenience:
+eight demos, plus `all` as a convenience:
 
 - `workspace`: pin a live workspace snapshot before generation and refresh it
   after successful tools, so branch and dirty-state changes are visible without
@@ -89,6 +95,9 @@ seven demos, plus `all` as a convenience:
   surfaces such as Go modules, package scripts, Make targets, containers, and CI
   workflows. Only fixed labels, allowlisted target names, and counts are
   injected; arbitrary file contents and workflow names are not.
+- `go`: pin an advisory Go workflow reminder when a module or workspace is
+  detected. Report only a validated Go version, fixed workflow guidance, bounded
+  module counts, and whether the CLI scope sits below the Git root.
 - `quality`: pin a turn-local ledger of observed build, test, static-analysis,
   and security gate outcomes. A failed observation dominates a passing one in
   the same category, and labels come from a fixed command classifier rather than
@@ -106,8 +115,10 @@ a mutex because parallel tool batches can run hooks concurrently. Model-facing
 source and path sets are deterministically ordered, capped at 12 entries, and
 report omission counts. Verification recognizes direct toolchain invocations
 only when the verifier is the final shell segment. Both print and interactive
-paths use the same option-wiring helper. Documentation shows a single
-`--context-demo all` command and individual examples.
+paths use the same option-wiring helper. `dive context-demos` provides discovery
+without starting a model, the interactive splash summarizes enabled demos and
+workspace scope, compact trace lines make deliveries observable, and `/context`
+prints exact latest-turn payloads. Print and JSON output remain unchanged.
 
 ## Alternatives considered
 
@@ -133,15 +144,22 @@ workspace-root files, refuses symlinks, caps file reads at 64 KiB, and samples a
 most 256 workflow-directory entries. It favors a safe, incomplete map over
 recursively interpreting arbitrary build configuration.
 
+The Go topology scan skips common dependency/cache directories, refuses to
+follow symlinks, limits traversal depth, and stops after bounded entries or
+module counts. Its workflow reminder is guidance, not proof that formatting or
+checks ran.
+
 ## Security considerations
 
 Repository filenames, workflow names, manifest contents, and shell commands can
 all contain attacker-controlled text. The new pipeline and security reminders
 therefore render only fixed vocabulary, allowlisted target/script names, and
 numeric counts. Quality observations use normalized labels from a deterministic
-classifier instead of echoing command text. All collections are bounded and
-turn-local. The security reminder is advisory: permissions, sandboxing, user
-approval, and downstream authorization remain the enforcement boundaries.
+classifier instead of echoing command text. The Go reminder emits only a
+validated version, counts, fixed workflow text, and a fixed scope label; it does
+not expose module declarations. All collections are bounded and turn-local. The
+security reminder is advisory: permissions, sandboxing, user approval, and
+downstream authorization remain the enforcement boundaries.
 
 ## Open questions
 

@@ -63,6 +63,67 @@ func TestShouldDisplayToolError(t *testing.T) {
 	})
 }
 
+func TestFailedReadRendersTheErrorInsteadOfAFalseLineCount(t *testing.T) {
+	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	app.messages = append(app.messages, Message{
+		Type:     MessageTypeToolCall,
+		ToolID:   "read-1",
+		ToolName: "Read",
+	})
+	app.toolCallIndex["read-1"] = 0
+	app.handleToolResult(&dive.ToolCallResult{
+		ID:     "read-1",
+		Name:   "Read",
+		Result: dive.NewToolResultError("file does not exist"),
+	})
+
+	msg := app.messages[0]
+	assert.True(t, msg.ToolError)
+	assert.Equal(t, 0, msg.ToolReadLines)
+	var output bytes.Buffer
+	tui.Fprint(&output, app.formatToolResultView(msg), tui.WithWidth(80))
+	assert.Contains(t, output.String(), "file does not exist")
+	assert.NotContains(t, output.String(), "Read 1 line")
+}
+
+func TestSuccessfulReadUsesCorrectSingularLineCount(t *testing.T) {
+	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	var output bytes.Buffer
+	tui.Fprint(&output, app.formatToolResultView(Message{
+		Type:          MessageTypeToolCall,
+		ToolName:      "Read",
+		ToolReadLines: 1,
+	}), tui.WithWidth(80))
+	assert.Contains(t, output.String(), "Read 1 line")
+	assert.NotContains(t, output.String(), "Read 1 lines")
+}
+
+func TestContextDemoTraceAndReportExposeExactPayloads(t *testing.T) {
+	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
+	app.contextDemos = allContextDemos()
+	var output bytes.Buffer
+	app.runner = tui.NewInlineApp(
+		tui.WithInlineWidth(180),
+		tui.WithInlineOutput(&output),
+	)
+	reminder, err := dive.NewOperatorReminder("verification-debt", "Run the relevant checks before completion.")
+	assert.NoError(t, err)
+	app.handleContextDemoNotice(contextDemoNotice{
+		Reminder: reminder,
+		Delivery: contextDemoModelOnly,
+		Action:   "queued",
+	})
+	app.printContextDemoReport()
+
+	rendered := output.String()
+	assert.Contains(t, rendered, "verification-debt queued")
+	assert.Contains(t, rendered, "operator")
+	assert.Contains(t, rendered, "model-only")
+	assert.Contains(t, rendered, "Run the relevant checks before completion.")
+	assert.Contains(t, rendered, "not saved to conversation history")
+	assert.NotContains(t, rendered, "<system-reminder")
+}
+
 func TestHandleStreamThinkingCreatesReasoningMessage(t *testing.T) {
 	app := NewApp(&dive.Agent{}, nil, "/tmp/test", "test-model", "", nil, "", nil, "")
 	var buf bytes.Buffer

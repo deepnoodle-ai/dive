@@ -32,7 +32,7 @@ func verificationCollectorHook() dive.PostToolUseHook {
 	}
 }
 
-func verificationReminderHook() dive.PreIterationHook {
+func verificationReminderHook(runtime contextDemoRuntime) dive.PreIterationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		state := contextDemoState(hctx)
 		if state == nil {
@@ -49,7 +49,7 @@ func verificationReminderHook() dive.PreIterationHook {
 			if err != nil {
 				return err
 			}
-			if err := hctx.AppendReminder(reminder, dive.ModelOnly); err != nil {
+			if err := runtime.appendModelOnly(hctx, reminder); err != nil {
 				return err
 			}
 		}
@@ -64,7 +64,7 @@ func verificationReminderHook() dive.PreIterationHook {
 			if err != nil {
 				return err
 			}
-			if err := hctx.AppendReminder(reminder, dive.ModelOnly); err != nil {
+			if err := runtime.appendModelOnly(hctx, reminder); err != nil {
 				return err
 			}
 		}

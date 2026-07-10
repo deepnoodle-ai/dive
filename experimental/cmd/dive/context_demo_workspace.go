@@ -10,13 +10,13 @@ import (
 	"github.com/deepnoodle-ai/dive"
 )
 
-func workspaceContextDemoHook(workspaceDir string) dive.PreIterationHook {
+func workspaceContextDemoHook(workspaceDir string, runtime contextDemoRuntime) dive.PreIterationHook {
 	return func(ctx context.Context, hctx *dive.HookContext) error {
 		reminder, err := dive.NewContextReminder("workspace-pulse", workspaceSnapshot(ctx, workspaceDir))
 		if err != nil {
 			return err
 		}
-		return hctx.PinReminder(reminder)
+		return runtime.pin(hctx, reminder)
 	}
 }
 

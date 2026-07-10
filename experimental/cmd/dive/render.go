@@ -471,10 +471,7 @@ func toolResultStyle() tui.Style {
 func (a *App) formatToolResultView(msg Message) tui.View {
 	// Special handling for Read tool - show line count
 	if msg.ToolName == "Read" && msg.ToolReadLines > 0 {
-		resultText := fmt.Sprintf("Read %d lines", msg.ToolReadLines)
-		if msg.ToolError {
-			return tui.Text("  ⎿  %s", resultText).Error()
-		}
+		resultText := fmt.Sprintf("Read %d line%s", msg.ToolReadLines, pluralSuffix(msg.ToolReadLines))
 		return tui.Text("  ⎿  %s", resultText).Style(toolResultStyle())
 	}
 

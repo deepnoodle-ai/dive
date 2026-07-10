@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -17,77 +16,64 @@ const (
 	contextDemoItemLimit = 12
 )
 
-var contextDemoNames = []string{
-	"workspace", "sources", "verification", "recovery",
-	"pipeline", "quality", "security",
+type contextDemoDelivery string
+
+const (
+	contextDemoPinned    contextDemoDelivery = "pinned"
+	contextDemoModelOnly contextDemoDelivery = "model-only"
+)
+
+type contextDemoNotice struct {
+	Reminder dive.Reminder
+	Delivery contextDemoDelivery
+	Action   string
 }
 
-type contextDemoSelection struct {
-	workspace    bool
-	sources      bool
-	verification bool
-	recovery     bool
-	pipeline     bool
-	quality      bool
-	security     bool
+type contextDemoReporter func(contextDemoNotice)
+
+type contextDemoRuntime struct {
+	report contextDemoReporter
 }
 
-func (s contextDemoSelection) empty() bool {
-	return !s.workspace && !s.sources && !s.verification && !s.recovery &&
-		!s.pipeline && !s.quality && !s.security
-}
-
-// parseContextDemoNames accepts repeatable values and comma-separated groups so
-// both --context-demo workspace --context-demo sources and
-// --context-demo workspace,sources are convenient at the shell.
-func parseContextDemoNames(specs []string) (contextDemoSelection, error) {
-	var selection contextDemoSelection
-	for _, spec := range specs {
-		for _, rawName := range strings.Split(spec, ",") {
-			name := strings.ToLower(strings.TrimSpace(rawName))
-			switch name {
-			case "all":
-				selection.workspace = true
-				selection.sources = true
-				selection.verification = true
-				selection.recovery = true
-				selection.pipeline = true
-				selection.quality = true
-				selection.security = true
-			case "workspace":
-				selection.workspace = true
-			case "sources":
-				selection.sources = true
-			case "verification":
-				selection.verification = true
-			case "recovery":
-				selection.recovery = true
-			case "pipeline":
-				selection.pipeline = true
-			case "quality":
-				selection.quality = true
-			case "security":
-				selection.security = true
-			case "":
-				return contextDemoSelection{}, fmt.Errorf("context demo name cannot be empty")
-			default:
-				return contextDemoSelection{}, fmt.Errorf(
-					"unknown context demo %q: expected one of all, %s",
-					name,
-					strings.Join(contextDemoNames, ", "),
-				)
-			}
-		}
+func (r contextDemoRuntime) pin(hctx *dive.HookContext, reminder dive.Reminder) error {
+	if err := hctx.PinReminder(reminder); err != nil {
+		return err
 	}
-	return selection, nil
+	if r.report == nil {
+		return nil
+	}
+	action, changed := "set", true
+	if state := contextDemoState(hctx); state != nil {
+		action, changed = state.recordPinnedReminder(reminder)
+	}
+	if changed {
+		r.report(contextDemoNotice{Reminder: reminder, Delivery: contextDemoPinned, Action: action})
+	}
+	return nil
 }
 
-func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir string, selection contextDemoSelection) {
+func (r contextDemoRuntime) appendModelOnly(hctx *dive.HookContext, reminder dive.Reminder) error {
+	if err := hctx.AppendReminder(reminder, dive.ModelOnly); err != nil {
+		return err
+	}
+	if r.report != nil {
+		r.report(contextDemoNotice{Reminder: reminder, Delivery: contextDemoModelOnly, Action: "queued"})
+	}
+	return nil
+}
+
+func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir string, selection contextDemoSelection, reporters ...contextDemoReporter) {
 	if selection.empty() {
 		return
 	}
+	var runtime contextDemoRuntime
+	if len(reporters) > 0 {
+		runtime.report = reporters[0]
+	}
 
-	if selection.sources || selection.verification || selection.quality || selection.security {
+	needsState := selection.enabled(contextDemoSources) || selection.enabled(contextDemoVerification) ||
+		selection.enabled(contextDemoQuality) || selection.enabled(contextDemoSecurity) || runtime.report != nil
+	if needsState {
 		// Install turn-local state before the first iteration. Tool hooks can run
 		// in parallel, so the state object protects its own collections.
 		agentOpts.Hooks.PreGeneration = append(agentOpts.Hooks.PreGeneration, func(_ context.Context, hctx *dive.HookContext) error {
@@ -96,32 +82,35 @@ func applyContextDemoAgentOptions(agentOpts *dive.AgentOptions, workspaceDir str
 		})
 	}
 
-	if selection.workspace {
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, workspaceContextDemoHook(workspaceDir))
+	if selection.enabled(contextDemoWorkspace) {
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, workspaceContextDemoHook(workspaceDir, runtime))
 	}
-	if selection.sources {
+	if selection.enabled(contextDemoSources) {
 		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, sourceLedgerCollectorHook())
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, sourceLedgerReminderHook())
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, sourceLedgerReminderHook(runtime))
 	}
-	if selection.verification {
+	if selection.enabled(contextDemoVerification) {
 		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, verificationCollectorHook())
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, verificationReminderHook())
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, verificationReminderHook(runtime))
 	}
-	if selection.recovery {
-		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, recoveryContextDemoHook())
+	if selection.enabled(contextDemoRecovery) {
+		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, recoveryContextDemoHook(runtime))
 	}
-	if selection.pipeline {
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, pipelineContextDemoHook(workspaceDir))
+	if selection.enabled(contextDemoPipeline) {
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, pipelineContextDemoHook(workspaceDir, runtime))
 	}
-	if selection.quality {
+	if selection.enabled(contextDemoGo) {
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, goDevelopmentContextDemoHook(workspaceDir, runtime))
+	}
+	if selection.enabled(contextDemoQuality) {
 		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, qualityGateCollectorHook(qualityGatePassed))
 		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, qualityGateCollectorFailureHook())
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, qualityGateReminderHook())
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, qualityGateReminderHook(runtime))
 	}
-	if selection.security {
+	if selection.enabled(contextDemoSecurity) {
 		agentOpts.Hooks.PostToolUse = append(agentOpts.Hooks.PostToolUse, securityAwarenessSuccessHook())
 		agentOpts.Hooks.PostToolUseFailure = append(agentOpts.Hooks.PostToolUseFailure, securityAwarenessFailureHook())
-		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, securityAwarenessReminderHook())
+		agentOpts.Hooks.PreIteration = append(agentOpts.Hooks.PreIteration, securityAwarenessReminderHook(runtime))
 	}
 }
 
@@ -141,6 +130,7 @@ type contextDemoTurnState struct {
 
 	qualityGates      map[qualityGateKind]qualityGateObservation
 	batchSecurityRisk map[securityRiskCategory]securityRiskObservation
+	reportedPinned    map[string]string
 }
 
 func contextDemoState(hctx *dive.HookContext) *contextDemoTurnState {
@@ -149,6 +139,23 @@ func contextDemoState(hctx *dive.HookContext) *contextDemoTurnState {
 	}
 	state, _ := hctx.Values[contextDemoStateKey].(*contextDemoTurnState)
 	return state
+}
+
+func (s *contextDemoTurnState) recordPinnedReminder(reminder dive.Reminder) (action string, changed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reportedPinned == nil {
+		s.reportedPinned = make(map[string]string)
+	}
+	previous, exists := s.reportedPinned[reminder.Name]
+	if exists && previous == reminder.Content {
+		return "", false
+	}
+	s.reportedPinned[reminder.Name] = reminder.Content
+	if exists {
+		return "updated", true
+	}
+	return "set", true
 }
 
 func (s *contextDemoTurnState) addSource(source string) {

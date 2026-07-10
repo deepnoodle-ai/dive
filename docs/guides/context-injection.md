@@ -103,7 +103,7 @@ input.
 
 ### Try dynamic context demos
 
-The CLI also includes seven opt-in demos that derive context from the live agent
+The CLI also includes eight opt-in demos that derive context from the live agent
 loop:
 
 ```bash
@@ -118,6 +118,12 @@ the patterns you want:
 ```bash
 dive --context-demo pipeline,quality --context-demo security
 ```
+
+Run `dive context-demos` to list every preset and its purpose. In interactive
+mode, each reminder lifecycle event produces a compact trace line. `/context`
+then shows the exact latest-turn context-demo payloads without relying on the
+model to remember or describe them. Skill and application reminders are outside
+that diagnostic view.
 
 - `workspace` replaces a pinned `workspace-pulse` before each model call with
   the current Git branch and dirty paths. It demonstrates live overlays without
@@ -139,6 +145,10 @@ dive --context-demo pipeline,quality --context-demo security
   containers, and dependency automation. It exposes only fixed labels and
   counts—not file contents or workflow names—and reports presence rather than
   claiming a gate ran.
+- `go` pins a `go-workflow` reminder when the workspace contains a Go module or
+  workspace. It reports the declared Go version, bounded nested-module counts,
+  and an advisory `gofmt`/test/vet/race-check loop. It explicitly warns that
+  root-module checks do not cover nested modules automatically.
 - `quality` pins a `quality-gates` ledger for recognized build, test,
   static-analysis, and security commands observed during the current response.
   It records normalized labels and tool outcomes; a failed or blocked gate
@@ -152,6 +162,13 @@ dive --context-demo pipeline,quality --context-demo security
 These presets demonstrate reminder delivery and authority. They are advisory
 and turn-local; they are not enforcement boundaries. Use permissions and
 denying hooks for hard policy.
+
+Pinned reminders are refreshed request overlays. Model-only reminders disappear
+after the response and are not available for the model to recall on a later
+turn; `/context` is the reliable diagnostic surface. When the selected workspace
+is below the Git root, the splash and model prompt also identify that boundary.
+Use `--workspace`/`-w` with the Git root when the agent should be able to inspect
+and test the whole repository.
 
 For the full contract and provider matrix, see the
 [context injection design](../design/context-injection.md).

@@ -18,13 +18,13 @@ const (
 	pipelineDirEntryLimit = 256
 )
 
-func pipelineContextDemoHook(workspaceDir string) dive.PreIterationHook {
+func pipelineContextDemoHook(workspaceDir string, runtime contextDemoRuntime) dive.PreIterationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		reminder, err := dive.NewContextReminder("delivery-pipeline", pipelineSnapshot(workspaceDir))
 		if err != nil {
 			return err
 		}
-		return hctx.PinReminder(reminder)
+		return runtime.pin(hctx, reminder)
 	}
 }
 

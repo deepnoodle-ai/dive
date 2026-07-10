@@ -22,7 +22,7 @@ func sourceLedgerCollectorHook() dive.PostToolUseHook {
 	}
 }
 
-func sourceLedgerReminderHook() dive.PreIterationHook {
+func sourceLedgerReminderHook(runtime contextDemoRuntime) dive.PreIterationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		state := contextDemoState(hctx)
 		if state == nil {
@@ -46,7 +46,7 @@ func sourceLedgerReminderHook() dive.PreIterationHook {
 		if err != nil {
 			return err
 		}
-		return hctx.PinReminder(reminder)
+		return runtime.pin(hctx, reminder)
 	}
 }
 

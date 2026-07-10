@@ -13,10 +13,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   append verification-debt checkpoints after edits, and coach recovery after
   failed tool calls. Three SDLC presets add a read-only delivery-pipeline map,
   a live build/test/analysis/security gate ledger, and security-review triggers
-  for sensitive changes and high-impact commands. Turn-local ledgers are bounded
-  and deterministic, untrusted repository text is excluded from elevated
-  reminders, and verification recognizes direct, unmasked check commands.
-  `--context-demo all` enables the complete demo set.
+  for sensitive changes and high-impact commands. A Go-specific preset adds
+  module-scope and format/test/vet/race guidance. Interactive runs now trace
+  reminder lifecycle events, expose exact latest-turn payloads through `/context`,
+  list presets with `dive context-demos`, and warn when the workspace is below
+  the Git root. Turn-local ledgers are bounded and deterministic, untrusted
+  repository text is excluded from elevated reminders, and verification
+  recognizes direct, unmasked check commands. `--context-demo all` enables the
+  complete demo set.
+
+### Fixed
+
+- **Failed Read status** — failed Read tool calls now show the actual error
+  instead of misleadingly reporting that one line was read.
 
 ## [1.14.0] - 2026-07-09
 

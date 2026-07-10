@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -16,27 +17,52 @@ import (
 func TestParseContextDemoNames(t *testing.T) {
 	selection, err := parseContextDemoNames([]string{"workspace,sources", "verification", "workspace"})
 	assert.NoError(t, err)
-	assert.True(t, selection.workspace)
-	assert.True(t, selection.sources)
-	assert.True(t, selection.verification)
-	assert.False(t, selection.recovery)
-	assert.False(t, selection.pipeline)
-	assert.False(t, selection.quality)
-	assert.False(t, selection.security)
+	assert.True(t, selection.enabled(contextDemoWorkspace))
+	assert.True(t, selection.enabled(contextDemoSources))
+	assert.True(t, selection.enabled(contextDemoVerification))
+	assert.False(t, selection.enabled(contextDemoRecovery))
+	assert.False(t, selection.enabled(contextDemoPipeline))
+	assert.False(t, selection.enabled(contextDemoGo))
+	assert.False(t, selection.enabled(contextDemoQuality))
+	assert.False(t, selection.enabled(contextDemoSecurity))
 
 	all, err := parseContextDemoNames([]string{"all"})
 	assert.NoError(t, err)
-	assert.True(t, all.workspace)
-	assert.True(t, all.sources)
-	assert.True(t, all.verification)
-	assert.True(t, all.recovery)
-	assert.True(t, all.pipeline)
-	assert.True(t, all.quality)
-	assert.True(t, all.security)
+	assert.Equal(t, allContextDemos(), all)
+	assert.Equal(t, "all 8 demos", all.displaySummary())
 
 	_, err = parseContextDemoNames([]string{"telepathy"})
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "workspace, sources, verification, recovery, pipeline, quality, security")
+	assert.Contains(t, err.Error(), "run 'dive context-demos' to list presets")
+}
+
+func TestContextDemoCatalogIsTheSingleDisplaySource(t *testing.T) {
+	var output bytes.Buffer
+	assert.NoError(t, writeContextDemoCatalog(&output))
+	for _, demo := range contextDemoCatalog {
+		assert.Contains(t, output.String(), demo.Name)
+		assert.Contains(t, output.String(), demo.Description)
+	}
+	assert.Contains(t, output.String(), "/context")
+	assert.Equal(t, []string{"pipeline", "quality", "security"}, contextDemoSelection(contextDemoPipeline|contextDemoQuality|contextDemoSecurity).names())
+	assert.Equal(t, "pipeline, quality, security", contextDemoSelection(contextDemoPipeline|contextDemoQuality|contextDemoSecurity).displaySummary())
+}
+
+func TestPinnedContextDemoNoticesReportOnlyMeaningfulChanges(t *testing.T) {
+	state := &contextDemoTurnState{}
+	first, err := dive.NewContextReminder("workspace-pulse", "clean")
+	assert.NoError(t, err)
+	updated, err := dive.NewContextReminder("workspace-pulse", "dirty")
+	assert.NoError(t, err)
+
+	action, changed := state.recordPinnedReminder(first)
+	assert.Equal(t, "set", action)
+	assert.True(t, changed)
+	_, changed = state.recordPinnedReminder(first)
+	assert.False(t, changed)
+	action, changed = state.recordPinnedReminder(updated)
+	assert.Equal(t, "updated", action)
+	assert.True(t, changed)
 }
 
 func TestWorkspaceSnapshotTracksGitState(t *testing.T) {
@@ -105,24 +131,21 @@ func TestVerificationCommandDetection(t *testing.T) {
 
 func TestApplyContextDemoAgentOptionsInstallsOnlyNeededState(t *testing.T) {
 	var stateless dive.AgentOptions
-	applyContextDemoAgentOptions(&stateless, t.TempDir(), contextDemoSelection{workspace: true, recovery: true})
+	applyContextDemoAgentOptions(&stateless, t.TempDir(), contextDemoSelection(contextDemoWorkspace|contextDemoRecovery))
 	assert.Len(t, stateless.Hooks.PreGeneration, 0)
 	assert.Len(t, stateless.Hooks.PreIteration, 1)
 	assert.Len(t, stateless.Hooks.PostToolUseFailure, 1)
 
 	var stateful dive.AgentOptions
-	applyContextDemoAgentOptions(&stateful, t.TempDir(), contextDemoSelection{sources: true, verification: true})
+	applyContextDemoAgentOptions(&stateful, t.TempDir(), contextDemoSelection(contextDemoSources|contextDemoVerification))
 	assert.Len(t, stateful.Hooks.PreGeneration, 1)
 	assert.Len(t, stateful.Hooks.PreIteration, 2)
 	assert.Len(t, stateful.Hooks.PostToolUse, 2)
 
 	var all dive.AgentOptions
-	applyContextDemoAgentOptions(&all, t.TempDir(), contextDemoSelection{
-		workspace: true, sources: true, verification: true, recovery: true,
-		pipeline: true, quality: true, security: true,
-	})
+	applyContextDemoAgentOptions(&all, t.TempDir(), allContextDemos())
 	assert.Len(t, all.Hooks.PreGeneration, 1)
-	assert.Len(t, all.Hooks.PreIteration, 6)
+	assert.Len(t, all.Hooks.PreIteration, 7)
 	assert.Len(t, all.Hooks.PostToolUse, 4)
 	assert.Len(t, all.Hooks.PostToolUseFailure, 3)
 }
@@ -260,7 +283,10 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	}
 	selection, err := parseContextDemoNames([]string{"all"})
 	assert.NoError(t, err)
-	applyContextDemoAgentOptions(&agentOpts, t.TempDir(), selection)
+	var notices []contextDemoNotice
+	applyContextDemoAgentOptions(&agentOpts, t.TempDir(), selection, func(notice contextDemoNotice) {
+		notices = append(notices, notice)
+	})
 	agent, err := dive.NewAgent(agentOpts)
 	assert.NoError(t, err)
 
@@ -299,6 +325,22 @@ func TestContextDemosEvolveAcrossToolIterations(t *testing.T) {
 	assert.True(t, ok)
 	assert.Contains(t, quality.Content, "test: passed (go test)")
 	assert.Equal(t, dive.ReminderTierContextual, quality.Tier)
+
+	noticeByName := make(map[string]contextDemoNotice)
+	for _, notice := range notices {
+		noticeByName[notice.Reminder.Name] = notice
+	}
+	for _, name := range []string{
+		"workspace-pulse", "delivery-pipeline", "evidence-ledger", "verification-debt",
+		"security-review", "recovery-coach", "verification-checkpoint", "quality-gates",
+	} {
+		_, ok := noticeByName[name]
+		assert.True(t, ok, name)
+	}
+	assert.Equal(t, contextDemoPinned, noticeByName["workspace-pulse"].Delivery)
+	assert.Equal(t, "set", noticeByName["workspace-pulse"].Action)
+	assert.Equal(t, contextDemoModelOnly, noticeByName["verification-debt"].Delivery)
+	assert.Equal(t, "queued", noticeByName["verification-debt"].Action)
 
 	_, err = agent.CreateResponse(context.Background(), dive.WithInput("start a new turn"))
 	assert.NoError(t, err)

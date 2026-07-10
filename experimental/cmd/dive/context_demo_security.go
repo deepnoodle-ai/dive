@@ -111,7 +111,7 @@ func (s *contextDemoTurnState) drainSecurityRisks() []securityRiskObservation {
 	return observations
 }
 
-func securityAwarenessReminderHook() dive.PreIterationHook {
+func securityAwarenessReminderHook(runtime contextDemoRuntime) dive.PreIterationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		state := contextDemoState(hctx)
 		if state == nil {
@@ -131,7 +131,7 @@ func securityAwarenessReminderHook() dive.PreIterationHook {
 		if err != nil {
 			return err
 		}
-		return hctx.AppendReminder(reminder, dive.ModelOnly)
+		return runtime.appendModelOnly(hctx, reminder)
 	}
 }
 
