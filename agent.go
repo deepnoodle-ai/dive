@@ -2,6 +2,8 @@ package dive
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1949,8 +1951,15 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			"generation_number", i+1,
 		)
 
-		// Remember the assistant response message
+		// Resolve model-emitted aliases before the response is observed or
+		// persisted. Response.ToolCalls and Response.Message may return distinct
+		// content objects, so mirror the repaired names into the message by call ID.
 		assistantMsg := response.Message()
+		toolCalls := response.ToolCalls()
+		toolAliasErr := a.resolveToolCallAliases(toolCalls, toolsByName)
+		if toolAliasErr == nil {
+			applyResolvedToolCallNames(assistantMsg, toolCalls)
+		}
 		newMessage(assistantMsg)
 
 		// Track total token usage
@@ -1965,8 +1974,9 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 			return nil, err
 		}
 
-		// Check for tool calls
-		toolCalls := response.ToolCalls()
+		if toolAliasErr != nil {
+			return nil, toolAliasErr
+		}
 		if len(toolCalls) == 0 {
 			break
 		}
@@ -2124,6 +2134,102 @@ func (a *Agent) executeToolCalls(
 		return a.executeToolCallsParallel(ctx, hctx, toolCalls, toolsByName, callback)
 	}
 	return a.executeToolCallsSequential(ctx, hctx, toolCalls, toolsByName, callback)
+}
+
+func applyResolvedToolCallNames(
+	message *llm.Message,
+	toolCalls []*llm.ToolUseContent,
+) {
+	if message == nil || len(toolCalls) == 0 {
+		return
+	}
+	resolved := make(map[string]string, len(toolCalls))
+	for _, call := range toolCalls {
+		if call != nil && call.ID != "" {
+			resolved[call.ID] = call.Name
+		}
+	}
+	for _, content := range message.Content {
+		toolUse, ok := content.(*llm.ToolUseContent)
+		if !ok {
+			continue
+		}
+		if name, ok := resolved[toolUse.ID]; ok {
+			toolUse.Name = name
+		}
+	}
+}
+
+// resolveToolCallAliases repairs a narrow class of model-side tool-name error:
+// calling the canonical dotted name after the provider was offered its safe
+// underscore form (for example, naming.concept.walk vs naming_concept_walk).
+// Exact matches always win. A fallback is accepted only when the normalized
+// name already exists in this turn's authorized tool map, so it cannot expand
+// the agent's tool authority.
+func (a *Agent) resolveToolCallAliases(
+	toolCalls []*llm.ToolUseContent,
+	toolsByName map[string]Tool,
+) error {
+	for _, toolCall := range toolCalls {
+		if toolCall == nil {
+			continue
+		}
+		if _, ok := toolsByName[toolCall.Name]; ok {
+			continue
+		}
+		original := toolCall.Name
+		alias := providerSafeToolAlias(original)
+		if alias == original {
+			return fmt.Errorf("tool call error: unknown tool %q", original)
+		}
+		if _, ok := toolsByName[alias]; !ok {
+			return fmt.Errorf("tool call error: unknown tool %q", original)
+		}
+		toolCall.Name = alias
+		a.logger.Warn(
+			"resolved model tool call through provider-safe alias",
+			"original_name", original,
+			"resolved_name", alias,
+		)
+	}
+	return nil
+}
+
+// providerSafeToolAlias mirrors the conservative cross-provider tool-name
+// projection used by runtimes that expose canonical action names to LLMs.
+// Runs of unsupported characters collapse to one underscore; long names keep
+// a stable hash suffix so the projection remains deterministic.
+func providerSafeToolAlias(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range name {
+		valid := r == '_' || r == '-' ||
+			(r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9')
+		if valid {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	out := strings.Trim(b.String(), "_-")
+	if out == "" {
+		return ""
+	}
+	if len(out) <= 64 {
+		return out
+	}
+	sum := sha256.Sum256([]byte(out))
+	return out[:55] + "_" + hex.EncodeToString(sum[:])[:8]
 }
 
 // batchHasSequentialOnlyTool reports whether any tool in the batch carries
