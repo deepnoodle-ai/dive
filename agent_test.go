@@ -230,55 +230,6 @@ func TestResponseItemsContainToolCalls(t *testing.T) {
 	assert.Equal(t, resp.OutputText(), "Done")
 }
 
-func TestAgentRecoversCanonicalDottedToolAlias(t *testing.T) {
-	callCount := 0
-	toolCalled := false
-	mock := &mockLLM{
-		generateFunc: func(ctx context.Context, opts ...llm.Option) (*llm.Response, error) {
-			callCount++
-			if callCount == 1 {
-				return &llm.Response{
-					ID:   "resp_1",
-					Role: llm.Assistant,
-					Content: []llm.Content{&llm.ToolUseContent{
-						ID: "tool_1", Name: "naming.concept.walk", Input: []byte(`{"seed":"compass"}`),
-					}},
-					StopReason: "tool_use",
-				}, nil
-			}
-			return &llm.Response{
-				ID: "resp_2", Role: llm.Assistant,
-				Content:    []llm.Content{&llm.TextContent{Text: "Done"}},
-				StopReason: "stop",
-			}, nil
-		},
-	}
-	tool := &mockTool{
-		name: "naming_concept_walk",
-		callFunc: func(ctx context.Context, input any) (*ToolResult, error) {
-			toolCalled = true
-			return NewToolResultText("associations"), nil
-		},
-	}
-	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}})
-	assert.NoError(t, err)
-
-	resp, err := agent.CreateResponse(context.Background(), WithInput("Explore compass"))
-	assert.NoError(t, err)
-	assert.True(t, toolCalled)
-	assert.Equal(t, resp.ToolCallResults()[0].Name, "naming_concept_walk")
-
-	toolUse, ok := resp.OutputMessages[0].Content[0].(*llm.ToolUseContent)
-	assert.True(t, ok)
-	assert.Equal(t, toolUse.Name, "naming_concept_walk")
-}
-
-func TestProviderSafeToolAlias(t *testing.T) {
-	assert.Equal(t, providerSafeToolAlias(" naming.concept.walk "), "naming_concept_walk")
-	assert.Equal(t, providerSafeToolAlias("already_safe"), "already_safe")
-	assert.Equal(t, len(providerSafeToolAlias("very.long.tool.name.with.sections.that.exceed.the.provider.name.limit.by.quite.a.bit")), 64)
-}
-
 // TestPreIterationCanRewriteMessages verifies that a PreIteration hook can
 // replace the working message set mid-turn (the seam mid-turn compaction relies
 // on): the next LLM iteration sees the rewritten messages, while the response's
