@@ -8,6 +8,14 @@ import (
 // Option is a function that configures the Provider
 type Option func(*Provider)
 
+// WithName overrides the provider name used for logging and observability.
+// It is intended for providers that embed the Chat Completions adapter.
+func WithName(name string) Option {
+	return func(p *Provider) {
+		p.name = name
+	}
+}
+
 // WithAPIKey sets the API key for the provider
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {

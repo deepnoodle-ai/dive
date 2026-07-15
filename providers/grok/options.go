@@ -9,6 +9,7 @@ type config struct {
 	endpoint            string
 	model               string
 	maxTokens           int
+	maxRetries          int
 	extraRequestOptions []option.RequestOption
 }
 
@@ -33,6 +34,14 @@ func WithEndpoint(endpoint string) Option {
 func WithMaxTokens(maxTokens int) Option {
 	return func(c *config) {
 		c.maxTokens = maxTokens
+	}
+}
+
+// WithMaxRetries sets the maximum number of retry attempts performed by Dive
+// for transient generation failures (total attempts = maxRetries + 1).
+func WithMaxRetries(maxRetries int) Option {
+	return func(c *config) {
+		c.maxRetries = maxRetries
 	}
 }
 

@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	DefaultModel     = ModelGrok45
-	DefaultEndpoint  = "https://api.x.ai/v1"
-	DefaultMaxTokens = 32768
+	DefaultModel      = ModelGrok45
+	DefaultEndpoint   = "https://api.x.ai/v1"
+	DefaultMaxTokens  = 32768
+	DefaultMaxRetries = openaiProvider.DefaultMaxRetries
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -24,10 +25,11 @@ type Provider struct {
 // New creates a new Grok provider with the given options.
 func New(opts ...Option) *Provider {
 	cfg := &config{
-		apiKey:    getAPIKey(),
-		endpoint:  DefaultEndpoint,
-		model:     DefaultModel,
-		maxTokens: DefaultMaxTokens,
+		apiKey:     getAPIKey(),
+		endpoint:   DefaultEndpoint,
+		model:      DefaultModel,
+		maxTokens:  DefaultMaxTokens,
+		maxRetries: DefaultMaxRetries,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -38,6 +40,7 @@ func New(opts ...Option) *Provider {
 		openaiProvider.WithEndpoint(cfg.endpoint),
 		openaiProvider.WithModel(cfg.model),
 		openaiProvider.WithMaxTokens(cfg.maxTokens),
+		openaiProvider.WithMaxRetries(cfg.maxRetries),
 	}
 	if len(cfg.extraRequestOptions) > 0 {
 		openaiOpts = append(openaiOpts,

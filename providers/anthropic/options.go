@@ -8,6 +8,14 @@ import (
 // Option configures the Anthropic provider.
 type Option func(*Provider)
 
+// WithName overrides the provider name used for logging and observability.
+// It is intended for providers that embed the Anthropic-compatible adapter.
+func WithName(name string) Option {
+	return func(p *Provider) {
+		p.name = name
+	}
+}
+
 // WithAPIKey sets the Anthropic API key.
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {

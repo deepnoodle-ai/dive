@@ -33,6 +33,14 @@ func WithMaxTokens(maxTokens int) Option {
 	}
 }
 
+// WithMaxRetries sets the maximum number of retries for transient generation
+// failures (total attempts = maxRetries + 1).
+func WithMaxRetries(maxRetries int) Option {
+	return func(p *Provider) {
+		p.maxRetries = maxRetries
+	}
+}
+
 // WithModel sets the LLM model name to use for the provider
 func WithModel(model string) Option {
 	return func(p *Provider) {
