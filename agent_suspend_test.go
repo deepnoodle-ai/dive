@@ -1044,6 +1044,79 @@ func TestPartialResumeTwice(t *testing.T) {
 	assert.Equal(t, sess.EventCount(), 1)
 }
 
+// Across multiple partial resumes, each caller-supplied result must be
+// emitted as a tool_call_result item exactly once — in the round it was
+// supplied — with no re-emission of earlier rounds' results. Transcript
+// consumers (which map items to history messages) depend on this.
+func TestPartialResumeEmitsEachResultOnce(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+				newScriptedToolUse("toolu_c", "tool_c", `{}`),
+			),
+			finalTextTurn("done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait a", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewSuspendResult("wait b", nil)}}}
+	toolC := &scriptedTool{name: "tool_c", outcomes: []toolOutcome{{result: NewSuspendResult("wait c", nil)}}}
+	sess := session.New("partial-emit-once")
+	agent, err := NewAgent(AgentOptions{
+		Model:                 mock,
+		Tools:                 []Tool{toolA, toolB, toolC},
+		Session:               sess,
+		ParallelToolExecution: true,
+	})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+
+	collect := func() (*[]*ResponseItem, CreateResponseOption) {
+		var items []*ResponseItem
+		return &items, WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			items = append(items, item)
+			return nil
+		})
+	}
+
+	// Round 1: supply A only.
+	items1, cb1 := collect()
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}), cb1)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, 1, countToolResultItems(*items1, "toolu_a"))
+	assert.Equal(t, 0, countToolResultItems(*items1, "toolu_b"))
+	assert.Equal(t, 0, countToolResultItems(*items1, "toolu_c"))
+
+	// Round 2: supply B only — A must NOT re-emit.
+	items2, cb2 := collect()
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_b": NewToolResultText("B done")}), cb2)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, 0, countToolResultItems(*items2, "toolu_a"))
+	assert.Equal(t, 1, countToolResultItems(*items2, "toolu_b"))
+
+	// Round 3: supply C → completes. Only C emits, in both the stream and
+	// Response.Items.
+	items3, cb3 := collect()
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_c": NewToolResultText("C done")}), cb3)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, 0, countToolResultItems(*items3, "toolu_a"))
+	assert.Equal(t, 0, countToolResultItems(*items3, "toolu_b"))
+	assert.Equal(t, 1, countToolResultItems(*items3, "toolu_c"))
+	assert.Equal(t, 0, countToolResultItems(resp.Items, "toolu_a"))
+	assert.Equal(t, 0, countToolResultItems(resp.Items, "toolu_b"))
+	assert.Equal(t, 1, countToolResultItems(resp.Items, "toolu_c"))
+}
+
 func TestResumePostHookAbortPropagates(t *testing.T) {
 	mock := &scriptedLLM{
 		script: []scriptedTurn{
@@ -2121,6 +2194,52 @@ func TestStatelessResumeEmitsCallerSuppliedToolResult(t *testing.T) {
 	assert.True(t, len(streamed) > 1)
 	assert.Equal(t, ResponseItemTypeToolCallResult, streamed[0].Type,
 		"resumed result must stream before the next model response")
+}
+
+// An event-callback failure while emitting a caller-supplied resume result
+// wraps the error in *GenerationError carrying the items emitted so far,
+// matching the contract of the generate loop and the not-started execution
+// path. Nothing is persisted: the session keeps its suspended turn, so the
+// caller can retry the resume.
+func TestResumeEmitCallbackErrorWrapsGenerationError(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "tool_a", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	tool := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+	sess := session.New("emit-cb-err")
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}, Session: sess})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+
+	callbackErr := errors.New("consumer failed")
+	_, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+		WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			if item.Type == ResponseItemTypeToolCallResult {
+				return callbackErr
+			}
+			return nil
+		}),
+	)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, callbackErr))
+	var genErr *GenerationError
+	assert.True(t, errors.As(err, &genErr))
+	assert.Equal(t, 1, countToolResultItems(genErr.Items, "toolu_a"))
+
+	// The session still holds the suspended turn — the resume is retryable.
+	assert.True(t, sessIsSuspended(sess))
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
 }
 
 func countToolResultItems(items []*ResponseItem, id string) int {
@@ -3367,13 +3486,30 @@ func TestResumePostHookMutationsPropagate(t *testing.T) {
 	_, err = agent.CreateResponse(context.Background(), WithInput("start"))
 	assert.NoError(t, err)
 
+	var streamed []*ResponseItem
 	resp, err := agent.CreateResponse(context.Background(),
 		WithToolResults(map[string]*ToolResult{
 			"toolu_a": NewToolResultText("original content"),
 		}),
+		WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			streamed = append(streamed, item)
+			return nil
+		}),
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+
+	// The emitted tool_call_result item must carry the hook-mutated result,
+	// not the original caller-supplied value.
+	assert.Equal(t, 1, countToolResultItems(streamed, "toolu_a"))
+	for _, item := range streamed {
+		if item.Type != ResponseItemTypeToolCallResult || item.ToolCallResult.ID != "toolu_a" {
+			continue
+		}
+		raw, _ := json.Marshal(item.ToolCallResult.Result)
+		assert.True(t, strings.Contains(string(raw), "REDACTED"),
+			"streamed resume result should reflect hook mutations")
+	}
 
 	// The LLM should have seen the hook-modified result, not the original.
 	// Check the second LLM call's messages for the tool_result content.

@@ -791,7 +791,14 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 			}
 			resumeExtraItems = append(resumeExtraItems, item)
 			if err := eventCallback(ctx, item); err != nil {
-				return nil, fmt.Errorf("resume tool-result event callback: %w", err)
+				// Mirror the not-started execution path below: expose the
+				// items already emitted via *GenerationError so callers can
+				// recover partial work (no LLM calls yet, so usage is zero).
+				return nil, &GenerationError{
+					Err:   fmt.Errorf("resume tool-result event callback: %w", err),
+					Usage: &llm.Usage{},
+					Items: slices.Clone(resumeExtraItems),
+				}
 			}
 		}
 		if len(rs.RemainingPending) > 0 {
@@ -830,7 +837,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				return nil, &GenerationError{
 					Err:   err,
 					Usage: &llm.Usage{},
-					Items: itemsSnapshot,
+					Items: append(slices.Clone(resumeExtraItems), itemsSnapshot...),
 				}
 			}
 			resumeExtraItems = append(resumeExtraItems, resumeItems...)

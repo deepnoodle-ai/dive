@@ -367,6 +367,45 @@ dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error 
 Stream consumers should treat this item as end-of-stream and then
 observe `Response.Status` and `Response.Suspension` on the final return.
 
+### Resume streams
+
+A resume call (`WithToolResults` or `WithResume`) emits each
+caller-supplied result as a `ResponseItemTypeToolCallResult` item —
+the same event an in-process tool produces when it completes. These
+items are emitted:
+
+- after PostToolUse/PostToolUseFailure hooks, so observers receive the
+  final hook-mutated result;
+- in the original tool-call order, so multi-tool resumes are
+  deterministic;
+- before any model items from the continued generation;
+- on both complete and partial resumes, and in `Response.Items` as
+  well as through the event callback.
+
+Across multiple partial resumes, each result is emitted exactly once —
+in the round it was supplied. This gives transcript consumers one
+response item for every message-bearing event in the turn history.
+
+Note that a suspended tool call produces **two** `tool_call_result`
+items over the life of the conversation: one at suspend time whose
+`Result.Suspend` field is non-nil (the suspend signal — no
+`tool_result` exists in the turn history yet), and one at resume time
+carrying the real result. Consumers that map items to history messages
+must treat `Suspend != nil` items as non-message-bearing:
+
+```go
+dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error {
+    if item.Type == dive.ResponseItemTypeToolCallResult {
+        r := item.ToolCallResult
+        if r.Result != nil && r.Result.Suspend != nil {
+            return nil // suspend signal — not part of the message history
+        }
+        // ... index the settled result
+    }
+    return nil
+})
+```
+
 ## Errors
 
 | Error                           | Cause |
