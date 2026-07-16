@@ -776,6 +776,24 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 		if err := a.fireResumePostHooks(ctx, hctx, rs, resumeToolsByName); err != nil {
 			return nil, err
 		}
+		// Caller-supplied resume results are part of the turn just like results
+		// produced by in-process tools. Emit them after post hooks so streaming
+		// observers see the final, hook-mutated value and can keep their
+		// transcript indexes aligned with rs.TurnMessages.
+		for _, toolUseID := range collectToolUseIDs(rs.AssistantToolUse) {
+			result := rs.CallerSupplied[toolUseID]
+			if result == nil {
+				continue
+			}
+			item := &ResponseItem{
+				Type:           ResponseItemTypeToolCallResult,
+				ToolCallResult: result,
+			}
+			resumeExtraItems = append(resumeExtraItems, item)
+			if err := eventCallback(ctx, item); err != nil {
+				return nil, fmt.Errorf("resume tool-result event callback: %w", err)
+			}
+		}
 		if len(rs.RemainingPending) > 0 {
 			// Partial resume: update session and return a new suspended response.
 			// This is not a fresh transition — the session was already suspended —
@@ -784,7 +802,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 				PendingToolCalls:   rs.RemainingPendingCalls,
 				CompletedToolCalls: rs.CompletedToolCalls(),
 			}
-			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, nil, eventCallback, sess, rs, true)
+			return a.finishSuspended(ctx, logger, hctx, response, inputMessages, snap, resumeExtraItems, eventCallback, sess, rs, true)
 		}
 		// Execute not-started tool calls, if any.
 		if len(rs.NotStartedToolCalls) > 0 {
@@ -815,7 +833,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 					Items: itemsSnapshot,
 				}
 			}
-			resumeExtraItems = resumeItems
+			resumeExtraItems = append(resumeExtraItems, resumeItems...)
 			// Merge completed outcomes into the tool_result message.
 			completed := batch.Completed()
 			if len(completed) > 0 {

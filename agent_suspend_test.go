@@ -2001,13 +2001,20 @@ func TestSuspendedOutputMessagesInvariant(t *testing.T) {
 
 	// Partial resume: provide A, B still pending → suspended without
 	// re-entering generate.
+	var partialStream []*ResponseItem
 	resp, err = agent2.CreateResponse(context.Background(),
 		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A")}),
+		WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			partialStream = append(partialStream, item)
+			return nil
+		}),
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, resp.Status, ResponseStatusSuspended)
 	assert.Equal(t, len(resp.OutputMessages), 0,
 		"partial-resume-only suspend must not carry OutputMessages (caller should read from session)")
+	assert.Equal(t, 1, countToolResultItems(partialStream, "toolu_a"))
+	assert.Equal(t, 1, countToolResultItems(resp.Items, "toolu_a"))
 }
 
 // ---------------------------------------------------------------------------
@@ -2076,6 +2083,54 @@ func TestStatelessSuspendAndResume(t *testing.T) {
 	assert.True(t, len(resp.Suspension.TurnMessages) > len(savedState.TurnMessages),
 		"merged turn must include the final assistant message")
 	_ = append(preHistory, resp.Suspension.TurnMessages...)
+}
+
+func TestStatelessResumeEmitsCallerSuppliedToolResult(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(newScriptedToolUse("toolu_a", "approve", `{}`)),
+			finalTextTurn("done"),
+		},
+	}
+	tool := &scriptedTool{
+		name:     "approve",
+		outcomes: []toolOutcome{{result: NewSuspendResult("waiting", nil)}},
+	}
+	agent, err := NewAgent(AgentOptions{Model: mock, Tools: []Tool{tool}})
+	assert.NoError(t, err)
+
+	resp, err := agent.CreateResponse(context.Background(), WithMessages(llm.NewUserTextMessage("go")))
+	assert.NoError(t, err)
+	assert.Equal(t, ResponseStatusSuspended, resp.Status)
+
+	var streamed []*ResponseItem
+	resp, err = agent.CreateResponse(context.Background(),
+		WithResume(resp.Suspension, map[string]*ToolResult{
+			"toolu_a": NewToolResultText("approved"),
+		}),
+		WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			streamed = append(streamed, item)
+			return nil
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, ResponseStatusCompleted, resp.Status)
+
+	assert.Equal(t, 1, countToolResultItems(streamed, "toolu_a"))
+	assert.Equal(t, 1, countToolResultItems(resp.Items, "toolu_a"))
+	assert.True(t, len(streamed) > 1)
+	assert.Equal(t, ResponseItemTypeToolCallResult, streamed[0].Type,
+		"resumed result must stream before the next model response")
+}
+
+func countToolResultItems(items []*ResponseItem, id string) int {
+	count := 0
+	for _, item := range items {
+		if item != nil && item.Type == ResponseItemTypeToolCallResult && item.ToolCallResult != nil && item.ToolCallResult.ID == id {
+			count++
+		}
+	}
+	return count
 }
 
 // Stateless multi-pending resume: two parallel suspends, both resolved in
