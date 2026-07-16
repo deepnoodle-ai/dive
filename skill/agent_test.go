@@ -417,7 +417,7 @@ func TestCatalogHook_SkipsFreshEmptyCatalog(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestCatalogHook_QueuesEmptyValueForStaleCatalog(t *testing.T) {
+func TestCatalogHook_QueuesNoSkillsNoticeForStaleCatalog(t *testing.T) {
 	// Simulate: skills were available in a previous process, which wrote
 	// a catalog block. Now skills are gone and a fresh process resumes
 	// the session with that block still in history.
@@ -431,12 +431,12 @@ func TestCatalogHook_QueuesEmptyValueForStaleCatalog(t *testing.T) {
 	hook := catalogHook(loader)
 	hctx := &dive.HookContext{Messages: []*llm.Message{existingMsg}}
 
-	// The hook queues an empty latest value without mutating the stale block.
+	// The hook queues the no-skills notice without mutating the stale block.
 	assert.NoError(t, hook(context.Background(), hctx))
 	assert.True(t, dive.HasSystemReminder(hctx.Messages, "skills"), "hook must not mutate loaded history")
 }
 
-func TestCatalogHook_QueuesEmptyValueAfterReload(t *testing.T) {
+func TestCatalogHook_NoNoticeAfterReloadWithoutPersistedCatalog(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
 			"reviewer": {
@@ -460,7 +460,8 @@ func TestCatalogHook_QueuesEmptyValueAfterReload(t *testing.T) {
 	loader.skills = map[string]*Skill{}
 	loader.mu.Unlock()
 
-	// Next generation — queues an empty latest value without rewriting history.
+	// Next generation — the earlier catalog was model-only and never
+	// persisted, so history holds nothing stale and nothing is queued.
 	hctx2 := &dive.HookContext{Messages: []*llm.Message{firstMsg}}
 	assert.NoError(t, hook(context.Background(), hctx2))
 	assert.False(t, dive.HasSystemReminder(hctx2.Messages, "skills"))
@@ -521,7 +522,7 @@ func TestCatalogHook_AgentOwnedModelOnlyReminder(t *testing.T) {
 	assert.Contains(t, reminder.Content, "deploy: Deploy.")
 }
 
-func TestCatalogHook_SupersedesLegacyCatalogWhenEmpty(t *testing.T) {
+func TestCatalogHook_EvictsStaleLegacyCatalogWhenEmpty(t *testing.T) {
 	loader := &Loader{skills: map[string]*Skill{}}
 	model := &catalogCaptureLLM{}
 	agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Extensions: []dive.Extension{loader}})
@@ -534,8 +535,20 @@ func TestCatalogHook_SupersedesLegacyCatalogWhenEmpty(t *testing.T) {
 	assert.True(t, dive.HasSystemReminder(model.messages, "skills"), "recorded history remains append-only")
 	reminder, ok := dive.FindLatestReminder(model.messages, "skills")
 	assert.True(t, ok)
-	assert.Equal(t, "", reminder.Content)
+	assert.Equal(t, emptyCatalogNotice, reminder.Content,
+		"eviction must state absence as a fact; an empty block asserts nothing and cannot conflict")
 	assert.True(t, dive.HasSystemReminder([]*llm.Message{legacy}, "skills"), "loaded history must remain unchanged")
+}
+
+func TestCatalogHook_NoReminderWithoutSkillsOrStaleCatalog(t *testing.T) {
+	loader := &Loader{skills: map[string]*Skill{}}
+	model := &catalogCaptureLLM{}
+	agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Extensions: []dive.Extension{loader}})
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), dive.WithInput("Continue"))
+	assert.NoError(t, err)
+	assert.False(t, dive.HasSystemReminder(model.messages, "skills"),
+		"a skill-less agent with clean history must not pay for a no-skills block")
 }
 
 // TestCatalogHook_ConcurrentCreateResponse exercises catalog reads and writes

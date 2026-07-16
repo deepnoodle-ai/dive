@@ -21,7 +21,10 @@ func BuildCatalog(loader *Loader) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("The following skills are available for use with the Skill tool:\n\n")
+	// The header is a completeness claim, not an additive one, so a later
+	// catalog's facts conflict with any earlier catalog's — including skills
+	// that were removed — and the priming rule resolves to the later block.
+	sb.WriteString("Complete list of skills available for use with the Skill tool; any skill not listed here is unavailable:\n\n")
 
 	for _, s := range skills {
 		fmt.Fprintf(&sb, "- %s: %s\n", s.Name, s.Description)

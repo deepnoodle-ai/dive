@@ -155,7 +155,7 @@ What the extension provides:
 1. **Tools** — the Skill tool (only when skills are loaded)
 2. **Rules** — skill usage instructions appended to the system prompt (only when skills are loaded)
 3. **Hooks** — always provided, even with zero skills:
-   - A **PreGenerationHook** that appends the typed skill catalog as a model-only `<system-reminder name="skills">` at the request tail. A later catalog supersedes stale same-name blocks and is never persisted.
+   - A **PreGenerationHook** that appends the typed skill catalog as a model-only `<system-reminder name="skills">` at the request tail. The catalog header is a completeness claim ("any skill not listed here is unavailable"), so a later catalog conflicts with stale same-name catalog facts — including removed skills — and is never persisted.
    - A **PostToolUseHook** that injects expanded skill instructions as `AdditionalContext` on the tool result message, keyed by tool call ID for correct association under parallel execution
 
 ### Three-Layer Architecture
@@ -181,8 +181,11 @@ Dive's skill integration follows Claude Code's three-layer architecture:
 The key insight: the skill catalog is created with `dive.NewContextReminder`
 and appended with `hctx.AppendReminder(..., dive.ModelOnly)`, not repeated in
 the tool description on every LLM request. The model sees it at the **request
-tail**. A later same-name catalog supersedes stale history without mutating or
+tail**. Because the catalog is a completeness claim, a later catalog conflicts
+with stale catalog history and wins those conflicts without mutating or
 persisting loaded messages, while leaving the preceding conversation cacheable.
+Same-name reminder blocks otherwise accumulate; a merely additive list would
+never conflict with an earlier one, and removed skills would linger.
 
 ### Catalog Injection
 
@@ -190,7 +193,7 @@ The catalog is injected at the request tail as a named `<system-reminder>` block
 
 ```xml
 <system-reminder name="skills">
-The following skills are available for use with the Skill tool:
+Complete list of skills available for use with the Skill tool; any skill not listed here is unavailable:
 
 - code-reviewer: Review code for best practices and potential issues.
   Location: /home/user/.dive/skills/code-reviewer/SKILL.md
@@ -249,8 +252,9 @@ All toolkit tools accept a `Validator` field that takes precedence over `Workspa
 
 The catalog hook handles session resume correctly:
 
-- On a fresh process resuming a session, a later typed catalog supersedes a stale legacy catalog block without rewriting stored history
-- If no skills remain, an empty same-name model-only reminder supersedes the legacy block for model interpretation
+- On a fresh process resuming a session, a later typed full catalog conflicts with and replaces stale legacy catalog facts without rewriting stored history — the header's completeness claim is what makes the whole stale catalog conflict, not just skills whose descriptions changed
+- If no skills remain, an explicit no-skills notice ("No skills are available via the Skill tool; any skill listed earlier is no longer available.") conflicts with the non-empty legacy catalog for model interpretation. An empty block would not: it asserts no facts, so under the accumulate-unless-conflict rule it would coexist with the stale catalog instead of replacing it
+- The notice is only appended when loaded history actually contains a stale catalog; a skill-less agent with clean history gets no `skills` reminder at all
 - Hooks are always returned by the extension (even with zero skills) specifically to handle this cleanup
 
 ## Provider System

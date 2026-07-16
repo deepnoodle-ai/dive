@@ -67,8 +67,8 @@ budget, _ := dive.NewOperatorReminder("budget", "The remaining token budget for 
 **Standing context you supply with every request** — append it model-only. A
 turn is one `CreateResponse` call. Model-only reminders can be supplied on any
 turn, are rendered at the request tail, survive later tool iterations in that
-response, and are never recorded. A later same-name reminder supersedes an
-earlier one without rewriting it:
+response, and are never recorded. Same-name reminders accumulate unless they
+conflict; a later block wins only the conflict without rewriting history:
 
 ```go
 resp, err := agent.CreateResponse(ctx,
@@ -178,7 +178,7 @@ task-oriented introduction, see the
    caps). Dive makes these easy to build by keeping reminders identifiable;
    it does not implement them.
 5. A session rewrite API. Reminders never edit historical session events;
-   anything that changes is superseded by appending a later same-name block.
+   changed state is expressed by appending a later, conflicting same-name block.
 6. Model-enforced policy. Operator-tier reminders raise instruction
    priority; they are not an enforcement mechanism. Real permissions and
    policy checks live outside the model (the `permission` package, hooks).
@@ -404,11 +404,17 @@ The two lifetimes:
   existing `PreIteration` slice-rewrite remains as the low-level escape
   hatch with the same non-persistence semantics.)
 
-All reminders are append-only: superseding means appending a new reminder with
-the same name (latest wins); nothing edits an earlier model-facing or saved
-block. This structurally fixes the skill package's staleness case without
-rewriting caller-owned history. A later typed reminder can also supersede a
-same-name legacy text block for model interpretation.
+All reminders are append-only. Same-name blocks remain jointly applicable when
+they carry independent facts or instructions; a later block wins only where it
+conflicts with an earlier block. Nothing edits an earlier model-facing or saved
+block. This structurally fixes the skill package's staleness case: the catalog
+header is a completeness claim ("any skill not listed here is unavailable"),
+so a new catalog snapshot conflicts with the old snapshot — including removed
+skills — without rewriting caller-owned history. Snapshot-shaped blocks must
+state completeness in their content this way; a merely additive list never
+conflicts with an earlier one, and absence alone asserts nothing. A later
+typed reminder can likewise override conflicting facts in a same-name legacy
+text block for model interpretation.
 
 ### Ordering
 
@@ -464,7 +470,8 @@ the message role, not the tag:
 
 > Runtime context may appear in `<system-reminder>` blocks. The enclosing
 > message role determines its authority; the tag itself does not confer
-> authority. Later reminder blocks with the same name supersede earlier ones.
+> authority. Reminder blocks with the same name accumulate unless their facts
+> or instructions conflict; where they conflict, the later block wins.
 
 Today only the skill package primes its own block; centralizing this is
 what makes the contextual tier work on models with no native operator role.
@@ -518,9 +525,11 @@ widened to conversation-wide behavior. The new surface is additive:
   permissive to export as-is; the legacy parser matches complete,
   well-formed blocks only.
 
-The skill package appends its catalog model-only. A later same-name catalog
-supersedes stale legacy text without rewriting loaded history; its public API is
-untouched.
+The skill package appends its catalog model-only. Its catalog header states
+completeness, so a later catalog snapshot conflicts with and replaces stale
+legacy catalog facts without rewriting loaded history; when no skills remain
+it appends an explicit no-skills notice rather than an empty block, since an
+empty block asserts nothing and cannot conflict. Its public API is untouched.
 
 ## Compaction
 
@@ -576,7 +585,7 @@ The shipped implementation includes:
 3. **Delivery** — agent-owned recorded/model-only paths,
    `WithModelOnlyReminder` / `hctx.AppendReminder`,
    model-only lifetime, declaration-order draining with regression tests,
-   skill package migration (model-only append + latest-wins legacy handling).
+   skill package migration (model-only append + conflicting legacy handling).
 4. **Internal adoption** — Stop-hook reasons and background-task completion
    messages use typed contextual reminders (resume payloads stay tool results).
 

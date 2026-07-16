@@ -32,7 +32,7 @@ Aligned with Claude Code's architecture based on direct investigation:
 ### Three Layers
 
 1. **Rules** — skill usage instructions appended to system prompt by `ConfigureAgent`
-2. **Catalog** — skill names/descriptions/triggers created as a typed contextual reminder and appended at the request tail via `hctx.AppendReminder(..., dive.ModelOnly)`. A later same-name block supersedes stale history without rewriting it.
+2. **Catalog** — skill names/descriptions/triggers created as a typed contextual reminder and appended at the request tail via `hctx.AppendReminder(..., dive.ModelOnly)`. A later full catalog wins conflicts with stale catalog history without rewriting it.
 3. **Tool** — trigger mechanism. Returns `"Launching skill: X"`. Full content delivered via PostToolUseHook as `AdditionalContext` on the tool result message, keyed by tool call ID for parallel safety.
 
 ### What Was Built
@@ -51,12 +51,12 @@ Aligned with Claude Code's architecture based on direct investigation:
 - **`skill.ConfigureAgent(&opts, loader)`** avoids circular import (skill→dive, not dive→skill). Follows the same one-call pattern as `AgentOptions.Session`.
 - **Hooks always installed** — even with zero skills, hooks are registered so that stale catalog blocks from a previous session can be cleaned up on resume.
 - **Request tail** for catalog — appending does not rewrite the first user message as the conversation grows, so the long session prefix remains cacheable.
-- **Typed model-only reminder** — the catalog hook uses `NewContextReminder` plus `hctx.AppendReminder(..., dive.ModelOnly)`. A later same-name block supersedes older values, does not mutate loaded messages, and is not persisted.
+- **Typed model-only reminder** — the catalog hook uses `NewContextReminder` plus `hctx.AppendReminder(..., dive.ModelOnly)`. A later full snapshot wins conflicts with older catalog values, does not mutate loaded messages, and is not persisted.
 - **Per-call-ID content association** — `tool.Call()` reads `dive.ToolCallID(ctx)` to key pending instructions; the PostToolUse hook reads `hctx.Call.ID` to retrieve the correct content. This is safe under parallel tool execution where results arrive out of order.
 - **No tool restrictions** — `allowed-tools` is parsed as metadata but not enforced at runtime. Simplifies the implementation and avoids the complexity of skill activation/deactivation lifecycle.
 - **No HTTP provider** — removed due to security implications (remote code could exploit shell expansion). The `Provider` interface remains extensible for custom backends.
 - **Shell expansion gated by `IsLocal()`** — only skills with `file://` or empty `SourceURI` can have `!{command}` expanded, regardless of global config.
-- **Session resume** — catalog hook detects legacy `<system-reminder name="skills">` blocks and appends a same-name typed reminder so stale text is superseded without rewriting history.
+- **Session resume** — catalog hook detects legacy `<system-reminder name="skills">` blocks and appends a same-name typed full snapshot so stale catalog conflicts resolve without rewriting history.
 - **Base directory** included in skill content so the agent can resolve relative paths to reference files within the skill directory.
 - **File path in catalog** — each catalog entry includes `Location:` so the agent can answer "where is this skill?" without guessing.
 - **Symlink resolution** — filesystem provider resolves symlinked skill directories, so `~/.claude/skills/` entries that are symlinks are discovered correctly.
