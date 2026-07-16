@@ -843,6 +843,74 @@ func TestResumeNotStartedRunsInParallel(t *testing.T) {
 	assert.Equal(t, toolC.CallCount(), 1, "C should have run during resume")
 }
 
+// Combined resume path: one caller-supplied result AND not-started tools in
+// the same resume call. Both must land in the stream and Response.Items —
+// caller-supplied first, then not-started execution results, matching the
+// callback emission order. Regression test for the overwrite bug where
+// `resumeExtraItems = resumeItems` dropped the caller-supplied items.
+func TestResumeEmitsCallerSuppliedAndNotStartedItems(t *testing.T) {
+	mock := &scriptedLLM{
+		script: []scriptedTurn{
+			toolUseAssistantTurn(
+				newScriptedToolUse("toolu_a", "tool_a", `{}`),
+				newScriptedToolUse("toolu_b", "tool_b", `{}`),
+			),
+			finalTextTurn("done"),
+		},
+	}
+	toolA := &scriptedTool{name: "tool_a", outcomes: []toolOutcome{{result: NewSuspendResult("wait", nil)}}}
+	toolB := &scriptedTool{name: "tool_b", outcomes: []toolOutcome{{result: NewToolResultText("B done")}}}
+	sess := session.New("combined-emit")
+	agent, err := NewAgent(AgentOptions{
+		Model:   mock,
+		Tools:   []Tool{toolA, toolB},
+		Session: sess,
+	})
+	assert.NoError(t, err)
+
+	// Sequential: A suspends, B is left not-started.
+	resp, err := agent.CreateResponse(context.Background(), WithInput("start"))
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusSuspended)
+	assert.Equal(t, toolB.CallCount(), 0, "B should not have run (sequential, A suspended)")
+
+	// Resume with A's result: B executes as not-started during the resume.
+	var streamed []*ResponseItem
+	resp, err = agent.CreateResponse(context.Background(),
+		WithToolResults(map[string]*ToolResult{"toolu_a": NewToolResultText("A done")}),
+		WithEventCallback(func(_ context.Context, item *ResponseItem) error {
+			streamed = append(streamed, item)
+			return nil
+		}),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, resp.Status, ResponseStatusCompleted)
+	assert.Equal(t, toolB.CallCount(), 1, "B should have run during resume")
+
+	// Both results appear exactly once in the stream and in Response.Items.
+	assert.Equal(t, 1, countToolResultItems(streamed, "toolu_a"))
+	assert.Equal(t, 1, countToolResultItems(streamed, "toolu_b"))
+	assert.Equal(t, 1, countToolResultItems(resp.Items, "toolu_a"))
+	assert.Equal(t, 1, countToolResultItems(resp.Items, "toolu_b"))
+
+	// Caller-supplied result precedes the not-started execution result.
+	assert.True(t, toolResultItemIndex(streamed, "toolu_a") < toolResultItemIndex(streamed, "toolu_b"),
+		"caller-supplied result must stream before not-started execution results")
+	assert.True(t, toolResultItemIndex(resp.Items, "toolu_a") < toolResultItemIndex(resp.Items, "toolu_b"),
+		"Response.Items must preserve callback emission order")
+}
+
+// toolResultItemIndex returns the index of the first tool_call_result item
+// with the given tool_use ID, or -1 if absent.
+func toolResultItemIndex(items []*ResponseItem, id string) int {
+	for i, item := range items {
+		if item != nil && item.Type == ResponseItemTypeToolCallResult && item.ToolCallResult != nil && item.ToolCallResult.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestResumeNotStartedReSuspends(t *testing.T) {
 	// Sequential: A suspends, B and C are not-started. Resume with A's
 	// result causes B to run and suspend (re-suspend). C is not-started
