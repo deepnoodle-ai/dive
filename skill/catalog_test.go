@@ -35,7 +35,8 @@ func TestBuildCatalog(t *testing.T) {
 
 	catalog := BuildCatalog(loader)
 
-	assert.Contains(t, catalog, "The following skills are available")
+	assert.Contains(t, catalog, "Complete list of skills available")
+	assert.Contains(t, catalog, "any skill not listed here is unavailable")
 	assert.Contains(t, catalog, "reviewer: Review code for issues.")
 	assert.Contains(t, catalog, "deploy: Deploy to an environment.")
 	assert.Contains(t, catalog, "Location: /home/user/.dive/skills/reviewer/SKILL.md")

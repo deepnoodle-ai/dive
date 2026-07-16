@@ -131,7 +131,7 @@ Built by `skill.BuildCatalog(loader)` and appended model-only at the request tai
 
 ```xml
 <system-reminder name="skills">
-The following skills are available for use with the Skill tool:
+Complete list of skills available for use with the Skill tool; any skill not listed here is unavailable:
 
 - code-reviewer: Review code for best practices and potential issues.
   Location: /home/user/.dive/skills/code-reviewer/SKILL.md

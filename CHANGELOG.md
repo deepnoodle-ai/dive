@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Same-name reminder interpretation** — the standing priming rule now keeps
   independent same-name facts and instructions cumulative, using later-wins
   ordering only where two blocks conflict.
+- **Skill catalog under the cumulative rule** — the catalog header is now a
+  completeness claim ("any skill not listed here is unavailable"), so a later
+  catalog conflicts with and replaces a stale one even when skills were
+  removed, and evicting a stale catalog when no skills remain emits an
+  explicit no-skills notice instead of an empty block (an empty block asserts
+  no facts, so nothing would conflict and the stale catalog would survive).
 
 ## [1.15.0] - 2026-07-10
 

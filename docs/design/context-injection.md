@@ -407,10 +407,14 @@ The two lifetimes:
 All reminders are append-only. Same-name blocks remain jointly applicable when
 they carry independent facts or instructions; a later block wins only where it
 conflicts with an earlier block. Nothing edits an earlier model-facing or saved
-block. This structurally fixes the skill package's staleness case because a new
-full catalog snapshot conflicts with the old snapshot without rewriting
-caller-owned history. A later typed reminder can likewise override conflicting
-facts in a same-name legacy text block for model interpretation.
+block. This structurally fixes the skill package's staleness case: the catalog
+header is a completeness claim ("any skill not listed here is unavailable"),
+so a new catalog snapshot conflicts with the old snapshot — including removed
+skills — without rewriting caller-owned history. Snapshot-shaped blocks must
+state completeness in their content this way; a merely additive list never
+conflicts with an earlier one, and absence alone asserts nothing. A later
+typed reminder can likewise override conflicting facts in a same-name legacy
+text block for model interpretation.
 
 ### Ordering
 
@@ -521,9 +525,11 @@ widened to conversation-wide behavior. The new surface is additive:
   permissive to export as-is; the legacy parser matches complete,
   well-formed blocks only.
 
-The skill package appends its catalog model-only. A later full catalog snapshot
-conflicts with and replaces stale legacy catalog facts without rewriting loaded
-history; its public API is untouched.
+The skill package appends its catalog model-only. Its catalog header states
+completeness, so a later catalog snapshot conflicts with and replaces stale
+legacy catalog facts without rewriting loaded history; when no skills remain
+it appends an explicit no-skills notice rather than an empty block, since an
+empty block asserts nothing and cannot conflict. Its public API is untouched.
 
 ## Compaction
 
