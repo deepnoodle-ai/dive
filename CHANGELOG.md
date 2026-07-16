@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-07-16
+
+### Fixed
+
+- **Resumed tool results in the response stream** — results supplied via
+  `WithToolResults`/`WithResume` are now emitted as `tool_call_result`
+  response items (after post-tool hooks, in tool-call order, exactly once
+  per result). Previously they were invisible to stream consumers, so
+  transcripts built from response items drifted behind the authoritative
+  history. See the suspend-resume guide's Streaming section.
+
+### Changed
+
+- **Resume-phase partial-work errors** — failures during resume emission or
+  not-started tool execution now carry all items emitted so far in
+  `*GenerationError`, matching the generate loop. The session keeps its
+  suspended turn, so the resume can be retried.
+
 ## [1.15.1] - 2026-07-15
 
 ### Fixed
