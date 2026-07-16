@@ -10,29 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Resumed tool results in the response stream** — caller-supplied results
-  delivered via `WithToolResults` or `WithResume` are now emitted as
-  `ResponseItemTypeToolCallResult` items through the event callback and in
-  `Response.Items`: after post-tool hooks (observers see the final
-  hook-mutated value), in the original tool-call order, exactly once per
-  result across partial resumes, and on both complete and partial resumes.
-  Previously a resumed result reached the model and the saved turn but was
-  invisible to streaming consumers, so transcripts built from response items
-  drifted one position behind the authoritative history on every resume.
-  Note that a suspended tool call now yields two `tool_call_result` items
-  over its lifetime — the suspend signal (`Result.Suspend != nil`) and the
-  later settlement; consumers that map items to history messages should skip
-  the suspend signal (see the suspend-resume guide's Streaming section).
+- **Resumed tool results in the response stream** — results supplied via
+  `WithToolResults`/`WithResume` are now emitted as `tool_call_result`
+  response items (after post-tool hooks, in tool-call order, exactly once
+  per result). Previously they were invisible to stream consumers, so
+  transcripts built from response items drifted behind the authoritative
+  history. See the suspend-resume guide's Streaming section.
 
 ### Changed
 
-- **Resume-phase partial-work errors** — an event-callback failure while
-  emitting a caller-supplied resume result is now wrapped in
-  `*GenerationError` carrying the items emitted so far, and a failure during
-  not-started tool execution includes the already-emitted caller-supplied
-  items in `GenerationError.Items` — both matching the generate loop's
-  partial-work recovery contract. The session keeps its suspended turn in
-  these cases, so the resume can be retried.
+- **Resume-phase partial-work errors** — failures during resume emission or
+  not-started tool execution now carry all items emitted so far in
+  `*GenerationError`, matching the generate loop. The session keeps its
+  suspended turn, so the resume can be retried.
 
 ## [1.15.1] - 2026-07-15
 
