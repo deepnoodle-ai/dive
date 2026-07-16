@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	openaiProvider "github.com/deepnoodle-ai/dive/providers/openai"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -65,16 +64,15 @@ func TestWithMaxRetriesControlsStreamingAttempts(t *testing.T) {
 	}))
 	defer server.Close()
 
-	oldRetryBaseWait := openaiProvider.DefaultRetryBaseWait
-	openaiProvider.DefaultRetryBaseWait = time.Millisecond
-	t.Cleanup(func() { openaiProvider.DefaultRetryBaseWait = oldRetryBaseWait })
-
 	provider := New(
 		WithAPIKey("test-key"),
 		WithEndpoint(server.URL),
 		WithMaxRetries(1),
+		WithRetryBaseWait(time.Millisecond),
 	)
-	iterator, err := provider.Stream(context.Background(),
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(llm.NewUserTextMessage("hello")),
 	)
 	assert.NoError(t, err)

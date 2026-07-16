@@ -11,11 +11,12 @@ import (
 )
 
 var (
-	DefaultModel      = "llama3.2:3b"
-	DefaultEndpoint   = "http://localhost:11434/v1/messages"
-	DefaultMaxTokens  = 32768
-	DefaultMaxRetries = anthropic.DefaultMaxRetries
-	DefaultClient     = &http.Client{Timeout: 300 * time.Second}
+	DefaultModel         = "llama3.2:3b"
+	DefaultEndpoint      = "http://localhost:11434/v1/messages"
+	DefaultMaxTokens     = 32768
+	DefaultMaxRetries    = anthropic.DefaultMaxRetries
+	DefaultRetryBaseWait = anthropic.DefaultRetryBaseWait
+	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
 )
 
 var _ llm.StreamingLLM = &Provider{}
@@ -23,12 +24,13 @@ var _ llm.StreamingLLM = &Provider{}
 // Provider implements the Ollama LLM provider for local model serving.
 // It uses Ollama's Anthropic-compatible Messages API endpoint.
 type Provider struct {
-	apiKey     string
-	endpoint   string
-	model      string
-	maxTokens  int
-	maxRetries int
-	client     *http.Client
+	apiKey        string
+	endpoint      string
+	model         string
+	maxTokens     int
+	maxRetries    int
+	retryBaseWait time.Duration
+	client        *http.Client
 
 	// Embedded Anthropic provider
 	*anthropic.Provider
@@ -37,12 +39,13 @@ type Provider struct {
 // New creates a new Ollama provider with the given options.
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:     getAPIKey(),
-		endpoint:   DefaultEndpoint,
-		client:     DefaultClient,
-		model:      DefaultModel,
-		maxTokens:  DefaultMaxTokens,
-		maxRetries: DefaultMaxRetries,
+		apiKey:        getAPIKey(),
+		endpoint:      DefaultEndpoint,
+		client:        DefaultClient,
+		model:         DefaultModel,
+		maxTokens:     DefaultMaxTokens,
+		maxRetries:    DefaultMaxRetries,
+		retryBaseWait: DefaultRetryBaseWait,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -55,6 +58,7 @@ func New(opts ...Option) *Provider {
 		anthropic.WithEndpoint(p.endpoint),
 		anthropic.WithMaxTokens(p.maxTokens),
 		anthropic.WithMaxRetries(p.maxRetries),
+		anthropic.WithBaseWait(p.retryBaseWait),
 		anthropic.WithModel(p.model),
 	)
 	return p

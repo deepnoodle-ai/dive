@@ -195,10 +195,12 @@ budget.
 
 Add provider-local passthrough options for the adapters:
 
-- `grok.WithMaxRetries` -> OpenAI Responses;
-- `mistral.WithMaxRetries` and `openrouter.WithMaxRetries` -> OpenAI-compatible
-  Chat Completions;
-- `ollama.WithMaxRetries` -> Anthropic-compatible Messages.
+- `grok.WithMaxRetries` and `grok.WithRetryBaseWait` -> OpenAI Responses;
+- `mistral.WithMaxRetries`, `mistral.WithBaseWait`,
+  `openrouter.WithMaxRetries`, and `openrouter.WithBaseWait` ->
+  OpenAI-compatible Chat Completions;
+- `ollama.WithMaxRetries` and `ollama.WithBaseWait` -> Anthropic-compatible
+  Messages.
 
 The embedded base provider also receives the adapter's provider name so retry
 logs identify Grok, Mistral, Ollama, or OpenRouter rather than the underlying
@@ -343,11 +345,17 @@ The implementation follows the shared provider-layer design:
   structured retry logging.
 - Anthropic, Google, OpenAI Responses, and OpenAI-compatible Chat Completions
   build one logical request and give the helper a fresh-stream factory.
-- OpenAI Responses and Google supply their SDK error normalizers.
+- OpenAI Responses supplies its SDK error normalizer to the shared helper.
+- Google's exported stream iterator normalizes its lazy SDK errors before they
+  reach the helper, avoiding a redundant second normalization pass.
 - Google's normalizer handles both `genai.APIError` and `*genai.APIError`, so
   permanent SDK errors do not consume the transient retry budget.
-- Grok, Mistral, Ollama, and OpenRouter expose `WithMaxRetries` and pass the
-  configured budget and adapter name into their embedded provider.
+- Grok, Mistral, Ollama, and OpenRouter expose retry-budget and base-wait
+  options and pass those values plus the adapter name into their embedded
+  provider.
+- If pre-commit stream reading and cleanup both fail, the iterator preserves
+  both errors for diagnosis while retaining retry classification through the
+  stream error.
 - Provider SDK/internal retry layers remain disabled where Dive owns the
   budget, so total transport attempts remain `maxRetries + 1`.
 
@@ -360,7 +368,8 @@ recoverable and persistent 429s, permanent 400s, cancellation during backoff,
 pre-header and post-`200 OK` transport failures, default attempt budgets,
 failed-stream cleanup, the no-retry-after-first-event commit point, full normal
 response accumulation, one-shot provider hooks, adapter names, retry-option
-passthrough, and structured retry fields without provider response bodies.
+passthrough without mutable package defaults, simultaneous stream/close error
+preservation, and structured retry fields without provider response bodies.
 
 The end-to-end agent regression runs two model generations around one tool
 call. The second generation receives `429 -> success`; both attempts carry the
@@ -382,10 +391,13 @@ rollout is:
 
 1. Release the root, Google, OpenAI, and Grok modules together. Anthropic,
    Chat Completions, Mistral, Ollama, and OpenRouter ship in the root module.
-2. Update Mobius Cloud's Dive provider pins.
-3. Exercise a synthetic `429 -> success` Grok turn in a non-production Mobius
+2. Confirm the root module containing `providers.NewRetryingStreamIterator` is
+   published before the nested Google, OpenAI, and Grok module tags.
+3. Update Mobius Cloud's root Dive pin first, then update its nested provider
+   pins only after that root version is available.
+4. Exercise a synthetic `429 -> success` Grok turn in a non-production Mobius
    environment.
-4. After production rollout, monitor terminal `generation_failed` turns whose
+5. After production rollout, monitor terminal `generation_failed` turns whose
    provider error is 429/5xx and confirm retry logs precede either success or
    retry exhaustion.
 

@@ -107,14 +107,18 @@ func (s *retryingStreamIterator) Next() bool {
 		closeErr := s.current.Close()
 		s.current = nil // Close every failed attempt before creating a replacement.
 
-		if streamErr == nil || errors.Is(streamErr, io.EOF) {
+		normalizedStreamErr := s.normalizeError(streamErr)
+		if normalizedStreamErr == nil {
 			if closeErr != nil {
 				return s.normalizeError(closeErr)
 			}
 			s.ended = true
 			return nil
 		}
-		return s.normalizeError(streamErr)
+		if closeErr != nil {
+			return errors.Join(normalizedStreamErr, closeErr)
+		}
+		return normalizedStreamErr
 	},
 		retry.WithMaxAttempts(s.config.MaxRetries+1),
 		retry.WithBackoff(s.config.RetryBaseWait, maxStreamRetryBackoff),

@@ -226,11 +226,10 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	}
 
 	stream := providers.NewRetryingStreamIterator(ctx, providers.StreamRetryConfig{
-		Provider:       p.Name(),
-		MaxRetries:     p.maxRetries,
-		RetryBaseWait:  p.retryBaseWait,
-		Logger:         config.Logger,
-		NormalizeError: wrapGoogleError,
+		Provider:      p.Name(),
+		MaxRetries:    p.maxRetries,
+		RetryBaseWait: p.retryBaseWait,
+		Logger:        config.Logger,
 	}, func() (llm.StreamIterator, error) {
 		// GenerateContentStream reports request failures through its lazy
 		// sequence. The shared iterator consumes the first result as part of

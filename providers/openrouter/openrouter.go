@@ -10,25 +10,27 @@ import (
 )
 
 var (
-	DefaultModel      = ModelClaudeOpus48
-	DefaultEndpoint   = "https://openrouter.ai/api/v1/chat/completions"
-	DefaultMaxTokens  = 32768
-	DefaultMaxRetries = openaic.DefaultMaxRetries
-	DefaultClient     = &http.Client{Timeout: 300 * time.Second}
+	DefaultModel         = ModelClaudeOpus48
+	DefaultEndpoint      = "https://openrouter.ai/api/v1/chat/completions"
+	DefaultMaxTokens     = 32768
+	DefaultMaxRetries    = openaic.DefaultMaxRetries
+	DefaultRetryBaseWait = openaic.DefaultRetryBaseWait
+	DefaultClient        = &http.Client{Timeout: 300 * time.Second}
 )
 
 var _ llm.StreamingLLM = &Provider{}
 
 // Provider implements the OpenRouter multi-provider LLM proxy.
 type Provider struct {
-	apiKey     string
-	endpoint   string
-	model      string
-	maxTokens  int
-	maxRetries int
-	client     *http.Client
-	siteURL    string
-	siteName   string
+	apiKey        string
+	endpoint      string
+	model         string
+	maxTokens     int
+	maxRetries    int
+	retryBaseWait time.Duration
+	client        *http.Client
+	siteURL       string
+	siteName      string
 
 	// Embedded OpenAI completions provider
 	*openaic.Provider
@@ -37,12 +39,13 @@ type Provider struct {
 // New creates a new OpenRouter provider with the given options.
 func New(opts ...Option) *Provider {
 	p := &Provider{
-		apiKey:     getAPIKey(),
-		endpoint:   DefaultEndpoint,
-		client:     DefaultClient,
-		model:      DefaultModel,
-		maxTokens:  DefaultMaxTokens,
-		maxRetries: DefaultMaxRetries,
+		apiKey:        getAPIKey(),
+		endpoint:      DefaultEndpoint,
+		client:        DefaultClient,
+		model:         DefaultModel,
+		maxTokens:     DefaultMaxTokens,
+		maxRetries:    DefaultMaxRetries,
+		retryBaseWait: DefaultRetryBaseWait,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -73,6 +76,7 @@ func New(opts ...Option) *Provider {
 		openaic.WithEndpoint(p.endpoint),
 		openaic.WithMaxTokens(p.maxTokens),
 		openaic.WithMaxRetries(p.maxRetries),
+		openaic.WithBaseWait(p.retryBaseWait),
 		openaic.WithModel(p.model),
 		openaic.WithSystemRole("system"),
 	)

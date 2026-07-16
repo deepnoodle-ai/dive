@@ -136,6 +136,25 @@ func TestRetryingStreamRetriesCloseErrorBeforeFirstEvent(t *testing.T) {
 	assert.Equal(t, 1, failed.closeCount)
 }
 
+func TestRetryingStreamPreservesStreamAndCloseErrors(t *testing.T) {
+	streamErr := errors.New("stream read failed")
+	closeErr := errors.New("stream close failed")
+	stream := &testStreamIterator{err: streamErr, closeErr: closeErr}
+	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{
+		Provider:      "test",
+		MaxRetries:    0,
+		RetryBaseWait: time.Millisecond,
+	}, func() (llm.StreamIterator, error) {
+		return stream, nil
+	})
+	defer iterator.Close()
+
+	assert.False(t, iterator.Next())
+	assert.True(t, errors.Is(iterator.Err(), streamErr))
+	assert.True(t, errors.Is(iterator.Err(), closeErr))
+	assert.Equal(t, 1, stream.closeCount)
+}
+
 func TestRetryingStreamStopsOnPermanentFactoryError(t *testing.T) {
 	var attempts atomic.Int64
 	iterator := NewRetryingStreamIterator(context.Background(), StreamRetryConfig{

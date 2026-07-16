@@ -1,6 +1,9 @@
 package mistral
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
 // Option is a function that configures the Provider
 type Option func(*Provider)
@@ -38,6 +41,13 @@ func WithMaxTokens(maxTokens int) Option {
 func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
 		p.maxRetries = maxRetries
+	}
+}
+
+// WithBaseWait sets the base wait duration between retries.
+func WithBaseWait(baseWait time.Duration) Option {
+	return func(p *Provider) {
+		p.retryBaseWait = baseWait
 	}
 }
 

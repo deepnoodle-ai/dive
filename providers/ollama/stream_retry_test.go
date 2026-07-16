@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
-	"github.com/deepnoodle-ai/dive/providers/anthropic"
 	"github.com/deepnoodle-ai/wonton/assert"
 )
 
@@ -23,15 +22,14 @@ func TestWithMaxRetriesControlsStreamingAttempts(t *testing.T) {
 	}))
 	defer server.Close()
 
-	oldRetryBaseWait := anthropic.DefaultRetryBaseWait
-	anthropic.DefaultRetryBaseWait = time.Millisecond
-	t.Cleanup(func() { anthropic.DefaultRetryBaseWait = oldRetryBaseWait })
-
 	provider := New(
 		WithEndpoint(server.URL),
 		WithMaxRetries(1),
+		WithBaseWait(time.Millisecond),
 	)
-	iterator, err := provider.Stream(context.Background(),
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	iterator, err := provider.Stream(ctx,
 		llm.WithMessages(llm.NewUserTextMessage("hello")),
 	)
 	assert.NoError(t, err)
