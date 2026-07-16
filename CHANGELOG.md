@@ -6,8 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-07-15
+
 ### Fixed
 
+- **Streaming generation retries** — transient failures (rate limits,
+  overload, disconnects) that occur before a streaming generation's first
+  event are now retried across providers, so a multi-generation turn no
+  longer fails outright on a momentary capacity error.
 - **Same-name reminder interpretation** — the standing priming rule now keeps
   independent same-name facts and instructions cumulative, using later-wins
   ordering only where two blocks conflict.
