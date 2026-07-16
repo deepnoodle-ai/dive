@@ -2,7 +2,6 @@ package openai
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -120,11 +119,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 			reqOpts...,
 		)
 		if err != nil {
-			var apierr *openai.Error
-			if errors.As(err, &apierr) {
-				return providers.NewError(apierr.StatusCode, apierr.Message)
-			}
-			return err
+			return normalizeOpenAIError(err)
 		}
 		return nil
 	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
@@ -177,13 +172,22 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	streamOpts := append([]option.RequestOption{
 		option.WithRequestTimeout(5 * time.Minute),
 	}, p.extraRequestOptions...)
-	streamSDK := p.client.Responses.NewStreaming(
+	stream := providers.NewRetryingStreamIterator(
 		ctx,
-		params,
-		streamOpts...,
+		providers.StreamRetryConfig{
+			Provider:       p.Name(),
+			MaxRetries:     p.maxRetries,
+			RetryBaseWait:  p.retryBaseWait,
+			Logger:         config.Logger,
+			NormalizeError: normalizeOpenAIError,
+		},
+		func() (llm.StreamIterator, error) {
+			streamSDK := p.client.Responses.NewStreaming(ctx, params, streamOpts...)
+			return newOpenAIStreamIterator(streamSDK, config), nil
+		},
 	)
 
-	return newOpenAIStreamIterator(streamSDK, config), nil
+	return stream, nil
 }
 
 // buildRequestParams converts llm.Config to responses.ResponseNewParams

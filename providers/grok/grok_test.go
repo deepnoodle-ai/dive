@@ -1,7 +1,12 @@
 package grok
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -47,4 +52,34 @@ func TestProvider_GetAPIKey(t *testing.T) {
 	t.Setenv("XAI_API_KEY", "xai-key")
 	t.Setenv("GROK_API_KEY", "grok-key")
 	assert.Equal(t, "xai-key", getAPIKey())
+}
+
+func TestWithMaxRetriesControlsStreamingAttempts(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"temporarily at capacity","type":"rate_limit_error"}}`))
+	}))
+	defer server.Close()
+
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithMaxRetries(1),
+		WithRetryBaseWait(time.Millisecond),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	iterator, err := provider.Stream(ctx,
+		llm.WithMessages(llm.NewUserTextMessage("hello")),
+	)
+	assert.NoError(t, err)
+	defer iterator.Close()
+
+	for iterator.Next() {
+	}
+	assert.Error(t, iterator.Err())
+	assert.Equal(t, int64(2), requests.Load())
 }

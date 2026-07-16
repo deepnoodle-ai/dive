@@ -62,6 +62,7 @@ var _ llm.StreamingLLM = &Provider{}
 // This is used as the base for several providers including Grok, Groq, Mistral,
 // Ollama, and OpenRouter.
 type Provider struct {
+	name          string
 	client        *http.Client
 	apiKey        string
 	endpoint      string
@@ -91,6 +92,9 @@ func New(opts ...Option) *Provider {
 }
 
 func (p *Provider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
 	return "openai-completions"
 }
 
@@ -267,29 +271,27 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
-	var stream *StreamIterator
-	err = retry.DoSimple(ctx, func() error {
+	stream := providers.NewRetryingStreamIterator(ctx, providers.StreamRetryConfig{
+		Provider:      p.Name(),
+		MaxRetries:    p.maxRetries,
+		RetryBaseWait: p.retryBaseWait,
+		Logger:        config.Logger,
+	}, func() (llm.StreamIterator, error) {
 		req, err := p.createRequest(ctx, body, config, true)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		resp, err := p.client.Do(req)
 		if err != nil {
-			return fmt.Errorf("error making request: %w", err)
+			return nil, fmt.Errorf("error making request: %w", err)
 		}
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode == 429 {
-				if config.Logger != nil {
-					config.Logger.Warn("rate limit exceeded",
-						"status", resp.StatusCode, "body", string(body))
-				}
-			}
-			return providers.NewError(resp.StatusCode, string(body))
+			return nil, providers.NewError(resp.StatusCode, string(body))
 		}
-		stream = &StreamIterator{
+		return &StreamIterator{
 			body:              resp.Body,
 			reader:            bufio.NewReader(resp.Body),
 			contentBlocks:     map[int]*ContentBlockAccumulator{},
@@ -299,13 +301,8 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			prefillClosingTag: config.PrefillClosingTag,
 			thinkingIndex:     -1,
 			textIndex:         -1,
-		}
-		return nil
-	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
-
-	if err != nil {
-		return nil, err
-	}
+		}, nil
+	})
 	return stream, nil
 }
 

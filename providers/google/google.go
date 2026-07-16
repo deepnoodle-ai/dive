@@ -215,10 +215,28 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		return nil, err
 	}
 
-	// Note: GenerateContentStream returns an iterator; errors surface during
-	// iteration, not at creation time, so retry.DoSimple cannot help here.
-	streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
-	stream := NewStreamIteratorFromSeq(ctx, streamSeq, request.Model)
+	if err := config.FireHooks(ctx, &llm.HookContext{
+		Type: llm.BeforeGenerate,
+		Request: &llm.HookRequestContext{
+			Messages: config.Messages,
+			Config:   config,
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	stream := providers.NewRetryingStreamIterator(ctx, providers.StreamRetryConfig{
+		Provider:      p.Name(),
+		MaxRetries:    p.maxRetries,
+		RetryBaseWait: p.retryBaseWait,
+		Logger:        config.Logger,
+	}, func() (llm.StreamIterator, error) {
+		// GenerateContentStream reports request failures through its lazy
+		// sequence. The shared iterator consumes the first result as part of
+		// the provider's pre-event retry boundary.
+		streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
+		return NewStreamIteratorFromSeq(ctx, streamSeq, request.Model), nil
+	})
 
 	return stream, nil
 }
@@ -231,11 +249,17 @@ func renderReminderMessages(messages []*llm.Message) ([]*llm.Message, error) {
 
 // wrapGoogleError converts a Google API error to a providers.NewError so that
 // retry.SkipPermanent can detect non-retryable status codes. Falls back to the
-// original error if it's not a genai.APIError.
+// original error if it's not a genai.APIError. The SDK returns APIError as a
+// value today, while callers and wrappers may still expose a pointer, so both
+// forms must be handled.
 func wrapGoogleError(err error) error {
-	var apiErr *genai.APIError
+	var apiErr genai.APIError
 	if errors.As(err, &apiErr) {
 		return providers.NewError(apiErr.Code, apiErr.Message)
+	}
+	var apiErrPtr *genai.APIError
+	if errors.As(err, &apiErrPtr) {
+		return providers.NewError(apiErrPtr.Code, apiErrPtr.Message)
 	}
 	return err
 }

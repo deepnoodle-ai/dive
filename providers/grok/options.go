@@ -1,6 +1,10 @@
 package grok
 
-import "github.com/openai/openai-go/v3/option"
+import (
+	"time"
+
+	"github.com/openai/openai-go/v3/option"
+)
 
 // config holds the Grok provider configuration before passing to the
 // embedded OpenAI Responses API provider.
@@ -9,6 +13,8 @@ type config struct {
 	endpoint            string
 	model               string
 	maxTokens           int
+	maxRetries          int
+	retryBaseWait       time.Duration
 	extraRequestOptions []option.RequestOption
 }
 
@@ -33,6 +39,21 @@ func WithEndpoint(endpoint string) Option {
 func WithMaxTokens(maxTokens int) Option {
 	return func(c *config) {
 		c.maxTokens = maxTokens
+	}
+}
+
+// WithMaxRetries sets the maximum number of retry attempts performed by Dive
+// for transient generation failures (total attempts = maxRetries + 1).
+func WithMaxRetries(maxRetries int) Option {
+	return func(c *config) {
+		c.maxRetries = maxRetries
+	}
+}
+
+// WithRetryBaseWait sets the base wait duration between retries.
+func WithRetryBaseWait(retryBaseWait time.Duration) Option {
+	return func(c *config) {
+		c.retryBaseWait = retryBaseWait
 	}
 }
 

@@ -2,6 +2,7 @@ package openai
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/openai/openai-go/v3/option"
 )
@@ -55,6 +56,13 @@ func WithMaxTokens(maxTokens int) Option {
 func WithMaxRetries(maxRetries int) Option {
 	return func(p *Provider) {
 		p.maxRetries = maxRetries
+	}
+}
+
+// WithRetryBaseWait sets the base wait duration between retries.
+func WithRetryBaseWait(retryBaseWait time.Duration) Option {
+	return func(p *Provider) {
+		p.retryBaseWait = retryBaseWait
 	}
 }
 
