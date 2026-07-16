@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-07-16
+
+### Fixed
+
+- **Resumed tool results in the response stream** — caller-supplied results
+  delivered via `WithToolResults` or `WithResume` are now emitted as
+  `ResponseItemTypeToolCallResult` items through the event callback and in
+  `Response.Items`: after post-tool hooks (observers see the final
+  hook-mutated value), in the original tool-call order, exactly once per
+  result across partial resumes, and on both complete and partial resumes.
+  Previously a resumed result reached the model and the saved turn but was
+  invisible to streaming consumers, so transcripts built from response items
+  drifted one position behind the authoritative history on every resume.
+  Note that a suspended tool call now yields two `tool_call_result` items
+  over its lifetime — the suspend signal (`Result.Suspend != nil`) and the
+  later settlement; consumers that map items to history messages should skip
+  the suspend signal (see the suspend-resume guide's Streaming section).
+
+### Changed
+
+- **Resume-phase partial-work errors** — an event-callback failure while
+  emitting a caller-supplied resume result is now wrapped in
+  `*GenerationError` carrying the items emitted so far, and a failure during
+  not-started tool execution includes the already-emitted caller-supplied
+  items in `GenerationError.Items` — both matching the generate loop's
+  partial-work recovery contract. The session keeps its suspended turn in
+  these cases, so the resume can be retried.
+
 ## [1.15.1] - 2026-07-15
 
 ### Fixed
