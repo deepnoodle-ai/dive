@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-07-21
+
 ### Added
 
 - **Gemini 3.6 Flash and 3.5 Flash-Lite** — added stable model constants,
@@ -13,6 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   defaults to Gemini 3.6 Flash when Google credentials are available, and the
   Google adapter omits deprecated temperature settings for the new request
   generation and logs a warning when a configured temperature is ignored.
+
+### Fixed
+
+- **Google tool results after session replay** — tool result content that
+  round-trips through JSON (session persistence, `Message.Copy`) arrives as
+  `[]any` rather than typed `[]*dive.ToolResultContent`, so the next turn of a
+  multi-turn conversation with tool calls failed with
+  `unknown content type: []interface {}`. The Google adapter now decodes the
+  round-tripped shape into typed blocks, matching the openaicompletions
+  provider.
 
 ## [1.16.0] - 2026-07-16
 
