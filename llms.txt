@@ -79,7 +79,7 @@ agent.CreateResponse(ctx,
 ## Direct LLM usage (no agent loop)
 
 ```go
-model := google.New(google.WithModel("gemini-3-flash-preview"))
+model := google.New(google.WithModel(google.ModelGemini36Flash))
 response, _ := model.Generate(ctx,
     llm.WithMessages(llm.NewUserMessage(
         llm.NewTextContent("What is in this image?"),

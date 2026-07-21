@@ -1,8 +1,12 @@
 package google
 
 const (
+	// Gemini 3.6 models (stable)
+	ModelGemini36Flash = "gemini-3.6-flash"
+
 	// Gemini 3.5 models (stable)
-	ModelGemini35Flash = "gemini-3.5-flash"
+	ModelGemini35Flash     = "gemini-3.5-flash"
+	ModelGemini35FlashLite = "gemini-3.5-flash-lite"
 
 	// Gemini 3.1 models
 	ModelGemini31ProPreview            = "gemini-3.1-pro-preview"
@@ -42,3 +46,16 @@ const (
 	ModelGemini15Pro   = "gemini-1.5-pro"
 	ModelGemini15Flash = "gemini-1.5-flash"
 )
+
+// omitsSamplingParameters reports whether a model rejects the legacy Gemini
+// sampling controls. Gemini 3.6 Flash and Gemini 3.5 Flash-Lite ignore these
+// controls today and future model generations return an error when they are
+// supplied, so Dive leaves them off the wire for these model families.
+func omitsSamplingParameters(model string) bool {
+	switch model {
+	case ModelGemini36Flash, ModelGemini35FlashLite:
+		return true
+	default:
+		return false
+	}
+}

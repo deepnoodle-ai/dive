@@ -292,7 +292,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.Tools = tools
 	}
 
-	req.Temperature = config.Temperature
+	if !omitsSamplingParameters(req.Model) {
+		req.Temperature = config.Temperature
+	}
 	req.System = config.SystemPrompt
 
 	return nil

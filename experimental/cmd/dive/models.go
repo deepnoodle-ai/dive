@@ -34,9 +34,11 @@ var modelCatalog = []modelInfo{
 	{"claude", "", 200_000},
 
 	// Google models
+	{"gemini-3.6-flash", "Gemini 3.6 Flash", 1_000_000},
 	{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", 1_000_000},
 	{"gemini-3.1-pro", "Gemini 3.1 Pro", 1_000_000},
 	{"gemini-3.1-flash", "Gemini 3.1 Flash", 1_000_000},
+	{"gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", 1_000_000},
 	{"gemini-3.5-flash", "Gemini 3.5 Flash", 1_000_000},
 	{"gemini-3-flash-preview", "Gemini 3 Flash", 1_000_000},
 	{"gemini-3-flash", "Gemini 3 Flash", 1_000_000},
@@ -152,9 +154,11 @@ var providerCatalog = []providerInfo{
 		Name:    "Google",
 		EnvVars: []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
 		Models: []modelChoice{
-			{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Google's latest flagship model"},
-			{"gemini-2.5-pro", "Gemini 2.5 Pro", "Strong all-around model"},
+			{"gemini-3.6-flash", "Gemini 3.6 Flash", "Fast agentic and multimodal model with strong coding performance"},
 			{"gemini-3.5-flash", "Gemini 3.5 Flash", "Frontier intelligence at high speed"},
+			{"gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Lowest-cost model for high-throughput execution"},
+			{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Flagship Pro model for complex reasoning"},
+			{"gemini-2.5-pro", "Gemini 2.5 Pro", "Strong all-around model"},
 		},
 	},
 	{
