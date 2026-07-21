@@ -292,7 +292,14 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.Tools = tools
 	}
 
-	req.Temperature = config.Temperature
+	if !shouldOmitTemperature(req.Model) {
+		req.Temperature = config.Temperature
+	} else if config.Temperature != nil && config.Logger != nil {
+		config.Logger.Warn("temperature is not supported by this Google model and will be ignored",
+			"model", req.Model)
+	}
+	// Dive does not currently expose top_p or top_k. If those controls are
+	// added, apply the same Gemini request-generation cutoff used above.
 	req.System = config.SystemPrompt
 
 	return nil

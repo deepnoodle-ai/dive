@@ -1232,7 +1232,7 @@ func getDefaultModel() string {
 		return "claude-haiku-4-5"
 	}
 	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
-		return "gemini-3-flash-preview"
+		return "gemini-3.6-flash"
 	}
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		return "gpt-5.6-sol"

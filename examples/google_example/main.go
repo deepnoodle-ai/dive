@@ -11,7 +11,7 @@ import (
 
 func main() {
 	// Create the Google provider
-	provider := google.New(google.WithModel("gemini-2.0-flash-exp"))
+	provider := google.New(google.WithModel(google.ModelGemini36Flash))
 
 	ctx := context.Background()
 
@@ -47,14 +47,14 @@ func main() {
 	}
 	fmt.Println()
 
-	// Example 3: With system prompt and temperature
-	fmt.Println("=== With System Prompt and Temperature ===")
+	// Example 3: With system prompt. Gemini 3.6 Flash uses fixed sampling
+	// controls, so requests should not set a temperature.
+	fmt.Println("=== With System Prompt ===")
 	response, err = provider.Generate(ctx,
 		llm.WithMessages(
 			llm.NewUserTextMessage("Write a haiku about programming."),
 		),
 		llm.WithSystemPrompt("You are a poetic assistant who speaks in haikus."),
-		llm.WithTemperature(0.8),
 	)
 	if err != nil {
 		log.Fatalf("Error generating response: %v", err)

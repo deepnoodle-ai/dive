@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"sync/atomic"
 
@@ -146,6 +145,15 @@ func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) (*genai.Part, err
 	return part, nil
 }
 
+// joinToolResultText flattens tool result content blocks to a single string.
+func joinToolResultText(blocks []*dive.ToolResultContent) string {
+	var parts []string
+	for _, b := range blocks {
+		parts = append(parts, b.Text)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 // convertToolResultToFunctionResponse converts a generic llm.ToolResultContent to a genai.FunctionResponse part
 func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functionName string) (*genai.Part, error) {
 	if content == nil {
@@ -158,13 +166,20 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 	case []byte:
 		outputValue = string(c)
 	case []*dive.ToolResultContent:
-		var parts []string
-		for _, ch := range c {
-			parts = append(parts, ch.Text)
-		}
-		outputValue = strings.Join(parts, "\n\n")
+		outputValue = joinToolResultText(c)
 	default:
-		return nil, fmt.Errorf("unknown content type: %v", reflect.TypeOf(c))
+		// Content that round-tripped through JSON (session persistence,
+		// Message.Copy) arrives as generic []any rather than typed blocks.
+		var blocks []*dive.ToolResultContent
+		if err := content.DecodeContent(&blocks); err == nil && blocks != nil {
+			outputValue = joinToolResultText(blocks)
+		} else {
+			data, err := json.Marshal(content.Content)
+			if err != nil {
+				return nil, fmt.Errorf("error marshaling tool result content: %w", err)
+			}
+			outputValue = string(data)
+		}
 	}
 	responseData := map[string]any{}
 	if content.IsError {

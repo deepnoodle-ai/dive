@@ -1,8 +1,17 @@
 package google
 
+import (
+	"strconv"
+	"strings"
+)
+
 const (
+	// Gemini 3.6 models (stable)
+	ModelGemini36Flash = "gemini-3.6-flash"
+
 	// Gemini 3.5 models (stable)
-	ModelGemini35Flash = "gemini-3.5-flash"
+	ModelGemini35Flash     = "gemini-3.5-flash"
+	ModelGemini35FlashLite = "gemini-3.5-flash-lite"
 
 	// Gemini 3.1 models
 	ModelGemini31ProPreview            = "gemini-3.1-pro-preview"
@@ -42,3 +51,32 @@ const (
 	ModelGemini15Pro   = "gemini-1.5-pro"
 	ModelGemini15Flash = "gemini-1.5-flash"
 )
+
+// shouldOmitTemperature reports whether a model belongs to the Gemini request
+// generation that deprecated temperature. The cutover starts with Gemini 3.5
+// Flash-Lite and all Gemini 3.6+ models.
+func shouldOmitTemperature(model string) bool {
+	model = strings.TrimPrefix(model, "models/")
+	if model == ModelGemini35FlashLite || strings.HasPrefix(model, ModelGemini35FlashLite+"-") {
+		return true
+	}
+
+	version, ok := strings.CutPrefix(model, "gemini-")
+	if !ok {
+		return false
+	}
+	version, _, _ = strings.Cut(version, "-")
+	majorText, minorText, hasMinor := strings.Cut(version, ".")
+	major, err := strconv.Atoi(majorText)
+	if err != nil {
+		return false
+	}
+	minor := 0
+	if hasMinor {
+		minor, err = strconv.Atoi(minorText)
+		if err != nil {
+			return false
+		}
+	}
+	return major > 3 || (major == 3 && minor >= 6)
+}

@@ -109,7 +109,7 @@ fmt.Println(response.OutputText())
 Use the LLM interface for direct model access without the agent loop:
 
 ```go
-model := google.New(google.WithModel("gemini-3-flash-preview"))
+model := google.New(google.WithModel(google.ModelGemini36Flash))
 response, err := model.Generate(ctx,
     llm.WithMessages(llm.NewUserMessage(
         llm.NewTextContent("What is in this image?"),
