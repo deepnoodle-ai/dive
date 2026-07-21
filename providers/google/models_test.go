@@ -35,17 +35,43 @@ func TestLatestGeminiFlashModelsOmitTemperature(t *testing.T) {
 
 	for _, model := range []string{ModelGemini36Flash, ModelGemini35FlashLite} {
 		t.Run(model, func(t *testing.T) {
+			logger := &recordingWarningLogger{}
 			var request Request
 			err := provider.applyRequestConfig(&request, &llm.Config{
 				Model:       model,
 				Temperature: &temperature,
+				Logger:      logger,
 			})
 			assert.NoError(t, err)
 			assert.Nil(t, request.Temperature)
+			assert.Len(t, logger.warnings, 1)
 
 			generateConfig, err := buildGenAIGenerateConfig(&request)
 			assert.NoError(t, err)
 			assert.Nil(t, generateConfig.Temperature)
+		})
+	}
+}
+
+func TestShouldOmitTemperatureCoversFutureGeminiModels(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{ModelGemini35FlashLite, true},
+		{"gemini-3.5-flash-lite-001", true},
+		{ModelGemini36Flash, true},
+		{"gemini-3.7-pro", true},
+		{"gemini-4-pro", true},
+		{"models/gemini-4.1-flash", true},
+		{ModelGemini35Flash, false},
+		{ModelGemini31ProPreview, false},
+		{"not-a-gemini-model", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			assert.Equal(t, tt.want, shouldOmitTemperature(tt.model))
 		})
 	}
 }
@@ -62,3 +88,15 @@ func TestGemini35FlashKeepsTemperature(t *testing.T) {
 	assert.NotNil(t, request.Temperature)
 	assert.Equal(t, temperature, *request.Temperature)
 }
+
+type recordingWarningLogger struct {
+	warnings []string
+}
+
+func (l *recordingWarningLogger) Debug(string, ...any) {}
+func (l *recordingWarningLogger) Info(string, ...any)  {}
+func (l *recordingWarningLogger) Warn(message string, _ ...any) {
+	l.warnings = append(l.warnings, message)
+}
+func (l *recordingWarningLogger) Error(string, ...any)   {}
+func (l *recordingWarningLogger) With(...any) llm.Logger { return l }

@@ -11,7 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Gemini 3.6 Flash and 3.5 Flash-Lite** — added stable model constants,
   pricing, 1M-context CLI metadata, and model-picker entries. The CLI now
   defaults to Gemini 3.6 Flash when Google credentials are available, and the
-  Google adapter omits deprecated sampling parameters for both new models.
+  Google adapter omits deprecated temperature settings for the new request
+  generation and logs a warning when a configured temperature is ignored.
 
 ## [1.16.0] - 2026-07-16
 

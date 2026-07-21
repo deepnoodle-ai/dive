@@ -1,5 +1,10 @@
 package google
 
+import (
+	"strconv"
+	"strings"
+)
+
 const (
 	// Gemini 3.6 models (stable)
 	ModelGemini36Flash = "gemini-3.6-flash"
@@ -47,15 +52,31 @@ const (
 	ModelGemini15Flash = "gemini-1.5-flash"
 )
 
-// omitsSamplingParameters reports whether a model rejects the legacy Gemini
-// sampling controls. Gemini 3.6 Flash and Gemini 3.5 Flash-Lite ignore these
-// controls today and future model generations return an error when they are
-// supplied, so Dive leaves them off the wire for these model families.
-func omitsSamplingParameters(model string) bool {
-	switch model {
-	case ModelGemini36Flash, ModelGemini35FlashLite:
+// shouldOmitTemperature reports whether a model belongs to the Gemini request
+// generation that deprecated temperature. The cutover starts with Gemini 3.5
+// Flash-Lite and all Gemini 3.6+ models.
+func shouldOmitTemperature(model string) bool {
+	model = strings.TrimPrefix(model, "models/")
+	if model == ModelGemini35FlashLite || strings.HasPrefix(model, ModelGemini35FlashLite+"-") {
 		return true
-	default:
+	}
+
+	version, ok := strings.CutPrefix(model, "gemini-")
+	if !ok {
 		return false
 	}
+	version, _, _ = strings.Cut(version, "-")
+	majorText, minorText, hasMinor := strings.Cut(version, ".")
+	major, err := strconv.Atoi(majorText)
+	if err != nil {
+		return false
+	}
+	minor := 0
+	if hasMinor {
+		minor, err = strconv.Atoi(minorText)
+		if err != nil {
+			return false
+		}
+	}
+	return major > 3 || (major == 3 && minor >= 6)
 }
