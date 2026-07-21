@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"google.golang.org/genai"
@@ -55,6 +56,40 @@ func TestMessagesToContentsToolRoundTrip(t *testing.T) {
 	assert.NotNil(t, contents[2].Parts[0].FunctionResponse)
 	assert.Equal(t, contents[2].Parts[0].FunctionResponse.ID, id)
 	assert.Equal(t, contents[2].Parts[0].FunctionResponse.Name, "calculator")
+}
+
+func TestToolResultSurvivesJSONRoundTrip(t *testing.T) {
+	// Session persistence and Message.Copy round-trip messages through JSON,
+	// which turns typed []*dive.ToolResultContent tool result content into
+	// generic []any. The converter must decode that shape rather than fail
+	// with "unknown content type: []interface {}".
+	id := generateToolCallID("bash")
+	original := llm.NewToolResultMessage(&llm.ToolResultContent{
+		ToolUseID: id,
+		Content: []*dive.ToolResultContent{
+			{Type: dive.ToolResultContentTypeText, Text: "line one"},
+			{Type: dive.ToolResultContentTypeText, Text: "line two"},
+		},
+	})
+	body, err := json.Marshal(original)
+	assert.NoError(t, err)
+	var replayed llm.Message
+	assert.NoError(t, json.Unmarshal(body, &replayed))
+
+	contents, err := messagesToContents([]*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []llm.Content{
+				&llm.ToolUseContent{ID: id, Name: "bash", Input: []byte(`{"command":"ls"}`)},
+			},
+		},
+		&replayed,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 2)
+	response := contents[1].Parts[0].FunctionResponse
+	assert.NotNil(t, response)
+	assert.Equal(t, response.Response["output"], "line one\n\nline two")
 }
 
 func TestGoogleThoughtSignatureSurvivesMessageRoundTrip(t *testing.T) {
