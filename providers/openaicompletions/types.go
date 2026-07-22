@@ -1,6 +1,10 @@
 package openaicompletions
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/schema"
 )
@@ -38,11 +42,86 @@ type Request struct {
 }
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	Name       string     `json:"name,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// ContentParts, when non-empty, replaces Content in the marshaled JSON
+	// with a content-part array (multimodal messages). Set at most one of
+	// Content and ContentParts.
+	ContentParts []ContentPart `json:"-"`
+	Name         string        `json:"name,omitempty"`
+	ToolCallID   string        `json:"tool_call_id,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+}
+
+func (m Message) MarshalJSON() ([]byte, error) {
+	if len(m.ContentParts) == 0 {
+		type alias Message
+		return json.Marshal(alias(m))
+	}
+	return json.Marshal(struct {
+		Role       string        `json:"role"`
+		Content    []ContentPart `json:"content"`
+		Name       string        `json:"name,omitempty"`
+		ToolCallID string        `json:"tool_call_id,omitempty"`
+		ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
+	}{m.Role, m.ContentParts, m.Name, m.ToolCallID, m.ToolCalls})
+}
+
+// UnmarshalJSON accepts both content shapes: a plain string (the usual
+// response form) or a content-part array.
+func (m *Message) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		Role       string          `json:"role"`
+		Content    json.RawMessage `json:"content"`
+		Name       string          `json:"name"`
+		ToolCallID string          `json:"tool_call_id"`
+		ToolCalls  []ToolCall      `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	m.Role = aux.Role
+	m.Name = aux.Name
+	m.ToolCallID = aux.ToolCallID
+	m.ToolCalls = aux.ToolCalls
+	m.Content = ""
+	m.ContentParts = nil
+	content := bytes.TrimSpace(aux.Content)
+	if len(content) == 0 || bytes.Equal(content, []byte("null")) {
+		return nil
+	}
+	switch content[0] {
+	case '"':
+		return json.Unmarshal(content, &m.Content)
+	case '[':
+		return json.Unmarshal(content, &m.ContentParts)
+	default:
+		return fmt.Errorf("unexpected message content shape: %s", content)
+	}
+}
+
+// ContentPart is one element of a multimodal content array in a Chat
+// Completions message.
+type ContentPart struct {
+	Type     string        `json:"type"` // "text", "image_url", or "file"
+	Text     string        `json:"text,omitempty"`
+	ImageURL *ImageURLPart `json:"image_url,omitempty"`
+	File     *FilePart     `json:"file,omitempty"`
+}
+
+// ImageURLPart carries an image in a content-part array, referenced by
+// public URL or data URL.
+type ImageURLPart struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// FilePart carries a file (typically a PDF) in a content-part array, either
+// inline as a data URL or by Files API ID.
+type FilePart struct {
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
 }
 
 type ToolFunction struct {

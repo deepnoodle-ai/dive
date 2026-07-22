@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 )
@@ -269,37 +271,115 @@ func encodeAssistantRefusalContent() (responses.ResponseInputItemUnionParam, err
 }
 
 func encodeAssistantToolResultContent(c *llm.ToolResultContent) (responses.ResponseInputItemUnionParam, error) {
-	output, err := toolResultOutputText(c)
-	if err != nil {
-		return responses.ResponseInputItemUnionParam{}, err
+	return encodeFunctionCallOutput(c)
+}
+
+// encodeFunctionCallOutput renders a tool result as a Responses API
+// function_call_output item. Typed tool result blocks are flattened to plain
+// text rather than JSON-marshaled; results carrying images are emitted as a
+// content-part list so the model can actually see them.
+func encodeFunctionCallOutput(c *llm.ToolResultContent) (responses.ResponseInputItemUnionParam, error) {
+	blocks := providers.ToolResultBlocks(c)
+	if blocks == nil || c.IsError || !blocksContainImage(blocks) {
+		output, err := toolResultOutputText(c)
+		if err != nil {
+			return responses.ResponseInputItemUnionParam{}, err
+		}
+		return responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output), nil
 	}
-	param := responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output)
-	return param, nil
+	items := make(responses.ResponseFunctionCallOutputItemListParam, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case dive.ToolResultContentTypeImage:
+			mediaType := b.MimeType
+			if mediaType == "" {
+				if detected, err := llm.DetectImageType(b.Data); err == nil {
+					mediaType = string(detected)
+				}
+			}
+			if mediaType == "" || b.Data == "" {
+				items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{
+					OfInputText: &responses.ResponseInputTextContentParam{Text: "[image content omitted]"},
+				})
+				continue
+			}
+			dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, b.Data)
+			items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{
+				OfInputImage: &responses.ResponseInputImageContentParam{
+					ImageURL: openai.String(dataURL),
+				},
+			})
+		case dive.ToolResultContentTypeText, "":
+			if b.Text != "" {
+				items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{
+					OfInputText: &responses.ResponseInputTextContentParam{Text: b.Text},
+				})
+			}
+		default:
+			items = append(items, responses.ResponseFunctionCallOutputItemUnionParam{
+				OfInputText: &responses.ResponseInputTextContentParam{Text: fmt.Sprintf("[%s content omitted]", b.Type)},
+			})
+		}
+	}
+	return responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, items), nil
+}
+
+func blocksContainImage(blocks []*dive.ToolResultContent) bool {
+	for _, b := range blocks {
+		if b.Type == dive.ToolResultContentTypeImage {
+			return true
+		}
+	}
+	return false
 }
 
 // toolResultOutputText renders a tool result as the output string for a
-// Responses API function_call_output item. The Responses API has no
+// Responses API function_call_output item. Typed tool result blocks are
+// flattened to their joined text (with placeholders for non-text blocks);
+// other structured content is JSON-marshaled. The Responses API has no
 // equivalent of Anthropic's is_error flag on tool results, so when IsError is
 // set the output text is prefixed with "Error: " so the model can tell the
 // call failed rather than the flag being silently dropped.
 func toolResultOutputText(c *llm.ToolResultContent) (string, error) {
 	var output string
-	switch content := c.Content.(type) {
-	case string:
-		output = content
-	case []byte:
-		output = string(content)
-	default:
-		resultJSON, err := json.Marshal(c.Content)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal tool result: %v", err)
+	if blocks := providers.ToolResultBlocks(c); blocks != nil {
+		output = joinToolResultBlockText(blocks)
+	} else {
+		switch content := c.Content.(type) {
+		case string:
+			output = content
+		case []byte:
+			output = string(content)
+		default:
+			resultJSON, err := json.Marshal(c.Content)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal tool result: %v", err)
+			}
+			output = string(resultJSON)
 		}
-		output = string(resultJSON)
 	}
 	if c.IsError && !strings.HasPrefix(output, "Error:") {
 		output = "Error: " + output
 	}
 	return output, nil
+}
+
+// joinToolResultBlockText flattens typed tool result blocks to a single
+// string, representing non-text blocks with a placeholder rather than
+// dropping them silently.
+func joinToolResultBlockText(blocks []*dive.ToolResultContent) string {
+	var parts []string
+	for _, b := range blocks {
+		switch b.Type {
+		case dive.ToolResultContentTypeText, "":
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		default:
+			parts = append(parts, fmt.Sprintf("[%s content omitted]", b.Type))
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func encodeAssistantServerToolUseContent(c *llm.ServerToolUseContent) (responses.ResponseInputItemUnionParam, error) {
@@ -491,7 +571,19 @@ func encodeInputDocumentContent(c *llm.DocumentContent) (*responses.ResponseInpu
 		fileParam.FileID = openai.String(c.Source.FileID)
 
 	case llm.ContentSourceTypeURL:
-		return nil, fmt.Errorf("url-based document content is not supported by openai")
+		if c.Source.URL == "" {
+			return nil, fmt.Errorf("URL is required for URL-based document content")
+		}
+		fileParam.FileURL = openai.String(c.Source.URL)
+
+	case llm.ContentSourceTypeText:
+		// The Responses API has no plain-text document shape, so inline the
+		// document text as an input_text part.
+		if c.Source.Data == "" {
+			return nil, fmt.Errorf("data is required for text document content")
+		}
+		param := responses.ResponseInputContentParamOfInputText(c.Source.Data)
+		return &param, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported content source type for document: %v", c.Source.Type)
@@ -503,10 +595,9 @@ func encodeToolResultContent(c *llm.ToolResultContent) (*responses.ResponseInput
 	if c.ToolUseID == "" {
 		return nil, fmt.Errorf("tool use id is not set")
 	}
-	output, err := toolResultOutputText(c)
+	param, err := encodeFunctionCallOutput(c)
 	if err != nil {
 		return nil, err
 	}
-	param := responses.ResponseInputItemParamOfFunctionCallOutput(c.ToolUseID, output)
 	return &param, nil
 }

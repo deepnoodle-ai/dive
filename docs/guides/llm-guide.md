@@ -84,6 +84,52 @@ model := openrouter.New()
 **Env:** `OPENROUTER_API_KEY`
 **Features:** Access to 200+ models from multiple providers
 
+## Multimodal Input
+
+Messages can carry images and documents alongside text using
+`llm.ImageContent` and `llm.DocumentContent` blocks:
+
+```go
+message := llm.NewUserMessage(
+    &llm.TextContent{Text: "Summarize this report."},
+    &llm.DocumentContent{
+        Title: "report.pdf",
+        Source: &llm.ContentSource{
+            Type:      llm.ContentSourceTypeBase64,
+            MediaType: "application/pdf",
+            Data:      pdfBase64,
+        },
+    },
+)
+```
+
+Each provider encodes these blocks into its native request format. Supported
+content sources by provider:
+
+| Provider                                 | Images                | Documents                              |
+| ---------------------------------------- | --------------------- | -------------------------------------- |
+| anthropic                                | base64, URL, file ID  | base64, URL, file ID, text             |
+| openai (Responses)                       | base64, URL, file ID  | base64, URL, file ID, text             |
+| grok                                     | base64, URL, file ID  | same as openai (server support varies) |
+| google                                   | base64, URL/file URI  | base64, URL/file URI, text             |
+| openaicompletions, mistral, openrouter   | base64, URL           | base64, file ID, text (no URL)         |
+| ollama                                   | base64 (model-dependent) | model-dependent                     |
+
+Notes:
+
+- Base64 sources require `MediaType`. Providers convert to the wire format
+  they need (e.g. data URLs for OpenAI-style APIs, inline bytes for Gemini).
+- Text-source documents are sent natively on Anthropic and inlined as plain
+  text on providers without a text-document type.
+- A content block a provider cannot encode is a request-building error, never
+  a silent drop.
+
+Tool results can also carry media (e.g. an MCP tool returning a screenshot).
+Anthropic and OpenAI (Responses) receive tool-result images natively; on
+providers whose tool messages are text-only (google, openaicompletions,
+mistral, openrouter), non-text blocks are replaced with a
+`[image content omitted]` placeholder so the model knows content was elided.
+
 ## Provider Options
 
 All providers accept variadic options. For example, to specify a model:
