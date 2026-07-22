@@ -122,6 +122,7 @@ func TestConvertToolResultEmptyBlocks(t *testing.T) {
 		{"single empty text block", []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: ""}}},
 		{"no blocks at all", []*dive.ToolResultContent{}},
 		{"no blocks after round trip", []any{}},
+		{"nil content", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

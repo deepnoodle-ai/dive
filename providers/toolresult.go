@@ -12,11 +12,15 @@ import (
 // neither of which tells the model the call actually produced nothing.
 const EmptyToolResultText = "(no output)"
 
-// IsEmptyToolResultContent reports whether tool result content is an empty
-// list of blocks, in either the typed in-memory shape or the generic shape it
-// takes after a JSON round-trip.
+// IsEmptyToolResultContent reports whether tool result content carries
+// nothing: nil (reachable when a caller supplies a nil ToolResult on resume)
+// or an empty list of blocks, in either the typed in-memory shape or the
+// generic shape it takes after a JSON round-trip. An empty string is not
+// treated as empty, since a caller chose it explicitly.
 func IsEmptyToolResultContent(content any) bool {
 	switch v := content.(type) {
+	case nil:
+		return true
 	case []*dive.ToolResultContent:
 		return len(v) == 0
 	case []any:

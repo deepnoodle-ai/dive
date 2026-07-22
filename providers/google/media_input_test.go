@@ -205,3 +205,14 @@ func TestJoinToolResultTextEmpty(t *testing.T) {
 		{Type: dive.ToolResultContentTypeText, Text: ""},
 	}))
 }
+
+// TestFunctionResponseNilContent verifies nil tool result content (reachable
+// when a caller supplies a nil result on resume) renders the placeholder
+// rather than the literal "null".
+func TestFunctionResponseNilContent(t *testing.T) {
+	part, err := convertToolResultToFunctionResponse(&llm.ToolResultContent{
+		ToolUseID: "call_1",
+	}, "my_tool")
+	assert.NoError(t, err)
+	assert.Equal(t, "(no output)", part.FunctionResponse.Response["output"])
+}

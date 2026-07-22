@@ -497,6 +497,9 @@ func convertToolResultContent(c *llm.ToolResultContent) (Message, error) {
 }
 
 func toolResultContentString(c *llm.ToolResultContent) (string, error) {
+	if providers.IsEmptyToolResultContent(c.Content) {
+		return providers.EmptyToolResultText, nil
+	}
 	switch content := c.Content.(type) {
 	case string:
 		return content, nil

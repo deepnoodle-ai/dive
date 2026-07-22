@@ -273,17 +273,30 @@ func TestToolResultImageBlockPlaceholder(t *testing.T) {
 }
 
 // TestToolResultEmptyPlaceholder verifies a tool result with no renderable
-// text produces an explicit placeholder rather than an empty tool message.
+// text produces an explicit placeholder rather than an empty tool message or,
+// for nil content, a request-building error.
 func TestToolResultEmptyPlaceholder(t *testing.T) {
-	converted, err := convertMessages([]*llm.Message{
-		llm.NewToolResultMessage(&llm.ToolResultContent{
-			ToolUseID: "call_1",
-			Content:   []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: ""}},
-		}),
-	})
-	assert.NoError(t, err)
-	assert.Len(t, converted, 1)
-	assert.Equal(t, "(no output)", converted[0].Content)
+	tests := []struct {
+		name    string
+		content any
+	}{
+		{"single empty text block", []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: ""}}},
+		{"no blocks at all", []*dive.ToolResultContent{}},
+		{"nil content", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converted, err := convertMessages([]*llm.Message{
+				llm.NewToolResultMessage(&llm.ToolResultContent{
+					ToolUseID: "call_1",
+					Content:   tt.content,
+				}),
+			})
+			assert.NoError(t, err)
+			assert.Len(t, converted, 1)
+			assert.Equal(t, "(no output)", converted[0].Content)
+		})
+	}
 }
 
 // TestRequestMarshalMultimodal verifies the full request wire shape for a

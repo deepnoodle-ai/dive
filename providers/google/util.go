@@ -175,6 +175,8 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 	}
 	var outputValue any
 	switch c := content.Content.(type) {
+	case nil:
+		outputValue = providers.EmptyToolResultText
 	case string:
 		outputValue = c
 	case []byte:
