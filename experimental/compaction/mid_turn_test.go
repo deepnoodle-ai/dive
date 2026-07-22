@@ -66,3 +66,27 @@ func TestMidTurnCompactionHook(t *testing.T) {
 		assert.Equal(t, 0, stub.sawMessages)
 	})
 }
+
+func TestMidTurnCompactionIgnoresAttachedImageBytes(t *testing.T) {
+	// The regression: attaching an image used to push the working set past the
+	// threshold on the first iteration, compacting a two-message conversation.
+	stub := &stubLLM{}
+	hook := MidTurnCompactionHook(stub, DefaultContextTokenThreshold)
+
+	hctx := dive.NewHookContext()
+	hctx.Messages = []*llm.Message{
+		{Role: llm.User, Content: []llm.Content{
+			&llm.TextContent{Text: "what does this image say?"},
+			&llm.ImageContent{Source: &llm.ContentSource{
+				Type:      llm.ContentSourceTypeBase64,
+				MediaType: "image/png",
+				Data:      strings.Repeat("A", 1_900_000),
+			}},
+		}},
+		llm.NewAssistantTextMessage("It says: Early Warning Signs of Fascism"),
+	}
+
+	assert.NoError(t, hook(context.Background(), hctx))
+	assert.Equal(t, 2, len(hctx.Messages), "an attached image must not trigger compaction")
+	assert.Equal(t, 0, stub.sawMessages, "the summarizer should never have been called")
+}
