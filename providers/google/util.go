@@ -9,6 +9,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/wonton/schema"
 	"google.golang.org/genai"
 )
@@ -146,10 +147,23 @@ func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) (*genai.Part, err
 }
 
 // joinToolResultText flattens tool result content blocks to a single string.
+// Gemini function responses are JSON-only, so non-text blocks (e.g. images
+// from an MCP tool) are represented with a placeholder rather than being
+// dropped silently, as is a result with no renderable text at all.
 func joinToolResultText(blocks []*dive.ToolResultContent) string {
 	var parts []string
 	for _, b := range blocks {
-		parts = append(parts, b.Text)
+		switch b.Type {
+		case dive.ToolResultContentTypeText, "":
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		default:
+			parts = append(parts, fmt.Sprintf("[%s content omitted]", b.Type))
+		}
+	}
+	if len(parts) == 0 {
+		return providers.EmptyToolResultText
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -161,6 +175,8 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 	}
 	var outputValue any
 	switch c := content.Content.(type) {
+	case nil:
+		outputValue = providers.EmptyToolResultText
 	case string:
 		outputValue = c
 	case []byte:
@@ -254,8 +270,14 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 				}
 				switch ct.Source.Type {
 				case llm.ContentSourceTypeURL:
+					if ct.Source.URL == "" {
+						return nil, fmt.Errorf("URL is required for URL-based image content")
+					}
 					content.Parts = append(content.Parts, genai.NewPartFromURI(ct.Source.URL, ct.Source.MediaType))
 				case llm.ContentSourceTypeBase64:
+					if ct.Source.MediaType == "" {
+						return nil, fmt.Errorf("media type is required for base64 image content")
+					}
 					data, err := ct.Source.DecodedData()
 					if err != nil {
 						return nil, fmt.Errorf("failed to decode image data: %w", err)
@@ -263,6 +285,33 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 					content.Parts = append(content.Parts, genai.NewPartFromBytes(data, ct.Source.MediaType))
 				default:
 					return nil, fmt.Errorf("unsupported image source type: %s", ct.Source.Type)
+				}
+			case *llm.DocumentContent:
+				if ct.Source == nil {
+					return nil, fmt.Errorf("document content has nil source")
+				}
+				switch ct.Source.Type {
+				case llm.ContentSourceTypeURL:
+					if ct.Source.URL == "" {
+						return nil, fmt.Errorf("URL is required for URL-based document content")
+					}
+					content.Parts = append(content.Parts, genai.NewPartFromURI(ct.Source.URL, ct.Source.MediaType))
+				case llm.ContentSourceTypeBase64:
+					if ct.Source.MediaType == "" {
+						return nil, fmt.Errorf("media type is required for base64 document content")
+					}
+					data, err := ct.Source.DecodedData()
+					if err != nil {
+						return nil, fmt.Errorf("failed to decode document data: %w", err)
+					}
+					content.Parts = append(content.Parts, genai.NewPartFromBytes(data, ct.Source.MediaType))
+				case llm.ContentSourceTypeText:
+					if ct.Source.Data == "" {
+						return nil, fmt.Errorf("data is required for text document content")
+					}
+					content.Parts = append(content.Parts, genai.NewPartFromText(ct.Source.Data))
+				default:
+					return nil, fmt.Errorf("unsupported document source type: %s", ct.Source.Type)
 				}
 			case *llm.ToolUseContent:
 				// Track tool use for later matching
@@ -285,6 +334,12 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 					return nil, err
 				}
 				content.Parts = append(content.Parts, part)
+			case *llm.ThinkingContent, *llm.RedactedThinkingContent:
+				// Gemini has no field for replaying another model's reasoning,
+				// so thinking blocks (e.g. from a session started on Anthropic)
+				// are skipped on encode rather than erroring.
+			default:
+				return nil, fmt.Errorf("unsupported content type for google provider: %s", c.Type())
 			}
 		}
 		contents = append(contents, content)

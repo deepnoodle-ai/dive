@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/wonton/retry"
@@ -259,7 +260,7 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 			switch c := content.(type) {
 			case *llm.ToolResultContent:
 				copiedContent = append(copiedContent, &llm.ToolResultContent{
-					Content:      c.Content,
+					Content:      convertToolResultBlocks(c),
 					ToolUseID:    c.ToolUseID,
 					IsError:      c.IsError,
 					CacheControl: c.CacheControl,
@@ -300,6 +301,58 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 	// messages are not mutated.
 	reorderMessageContent(copied)
 	return copied, nil
+}
+
+// convertToolResultBlocks renders tool_result content in the Anthropic wire
+// shape. Typed tool result blocks (from toolkit and MCP tools) carry text in
+// {"type":"text","text":...} form, which happens to match Anthropic's text
+// block — but image blocks ({"type":"image","data":...,"mimeType":...}) do
+// not, so they are converted to native image blocks with a base64 source.
+// Content that is not block-shaped passes through unchanged. A result with no
+// renderable blocks becomes a single placeholder text block, since Anthropic
+// accepts neither an empty text block nor an empty content array.
+func convertToolResultBlocks(c *llm.ToolResultContent) any {
+	blocks := providers.ToolResultBlocks(c)
+	if blocks == nil {
+		if providers.IsEmptyToolResultContent(c.Content) {
+			return []llm.Content{&llm.TextContent{Text: providers.EmptyToolResultText}}
+		}
+		return c.Content
+	}
+	content := make([]llm.Content, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case dive.ToolResultContentTypeImage:
+			mediaType := b.MimeType
+			if mediaType == "" {
+				if detected, err := llm.DetectImageType(b.Data); err == nil {
+					mediaType = string(detected)
+				}
+			}
+			if mediaType == "" || b.Data == "" {
+				content = append(content, &llm.TextContent{Text: "[image content omitted]"})
+				continue
+			}
+			content = append(content, &llm.ImageContent{
+				Source: &llm.ContentSource{
+					Type:      llm.ContentSourceTypeBase64,
+					MediaType: mediaType,
+					Data:      b.Data,
+				},
+			})
+		case dive.ToolResultContentTypeText, "":
+			// Anthropic rejects empty text blocks, so skip them.
+			if b.Text != "" {
+				content = append(content, &llm.TextContent{Text: b.Text})
+			}
+		default:
+			content = append(content, &llm.TextContent{Text: fmt.Sprintf("[%s content omitted]", b.Type)})
+		}
+	}
+	if len(content) == 0 {
+		content = append(content, &llm.TextContent{Text: providers.EmptyToolResultText})
+	}
+	return content
 }
 
 const (

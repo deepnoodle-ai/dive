@@ -95,6 +95,77 @@ func TestEncodeMessages(t *testing.T) {
 			want: `[{"content":[{"detail":"auto","image_url":"data:image/jpeg;base64,base64data","type":"input_image"}],"role":"user"}]`,
 		},
 		{
+			name: "document content via URL",
+			messages: []*llm.Message{
+				{
+					Role: llm.User,
+					Content: []llm.Content{
+						&llm.DocumentContent{
+							Title: "report.pdf",
+							Source: &llm.ContentSource{
+								Type: llm.ContentSourceTypeURL,
+								URL:  "https://example.com/doc.pdf",
+							},
+						},
+					},
+				},
+			},
+			want: `[{"content":[{"file_url":"https://example.com/doc.pdf","filename":"report.pdf","type":"input_file"}],"role":"user"}]`,
+		},
+		{
+			name: "document content via base64",
+			messages: []*llm.Message{
+				{
+					Role: llm.User,
+					Content: []llm.Content{
+						&llm.DocumentContent{
+							Source: &llm.ContentSource{
+								Type:      llm.ContentSourceTypeBase64,
+								MediaType: "application/pdf",
+								Data:      "cGRmZGF0YQ==",
+							},
+						},
+					},
+				},
+			},
+			want: `[{"content":[{"file_data":"data:application/pdf;base64,cGRmZGF0YQ==","filename":"document","type":"input_file"}],"role":"user"}]`,
+		},
+		{
+			name: "document content via file ID",
+			messages: []*llm.Message{
+				{
+					Role: llm.User,
+					Content: []llm.Content{
+						&llm.DocumentContent{
+							Source: &llm.ContentSource{
+								Type:   llm.ContentSourceTypeFile,
+								FileID: "file_abc123",
+							},
+						},
+					},
+				},
+			},
+			want: `[{"content":[{"file_id":"file_abc123","filename":"document","type":"input_file"}],"role":"user"}]`,
+		},
+		{
+			name: "document content via text source",
+			messages: []*llm.Message{
+				{
+					Role: llm.User,
+					Content: []llm.Content{
+						&llm.DocumentContent{
+							Source: &llm.ContentSource{
+								Type:      llm.ContentSourceTypeText,
+								MediaType: "text/plain",
+								Data:      "The grass is green.",
+							},
+						},
+					},
+				},
+			},
+			want: `[{"content":[{"text":"The grass is green.","type":"input_text"}],"role":"user"}]`,
+		},
+		{
 			name: "tool use content",
 			messages: []*llm.Message{
 				{
@@ -242,7 +313,7 @@ func TestEncodeMessagesErrors(t *testing.T) {
 			wantErr: "media type and data are required for base64 image content",
 		},
 		{
-			name: "document with URL source",
+			name: "document with empty URL",
 			messages: []*llm.Message{
 				{
 					Role: llm.User,
@@ -250,13 +321,28 @@ func TestEncodeMessagesErrors(t *testing.T) {
 						&llm.DocumentContent{
 							Source: &llm.ContentSource{
 								Type: llm.ContentSourceTypeURL,
-								URL:  "https://example.com/doc.pdf",
 							},
 						},
 					},
 				},
 			},
-			wantErr: "url-based document content is not supported by openai",
+			wantErr: "URL is required for URL-based document content",
+		},
+		{
+			name: "text document without data",
+			messages: []*llm.Message{
+				{
+					Role: llm.User,
+					Content: []llm.Content{
+						&llm.DocumentContent{
+							Source: &llm.ContentSource{
+								Type: llm.ContentSourceTypeText,
+							},
+						},
+					},
+				},
+			},
+			wantErr: "data is required for text document content",
 		},
 	}
 

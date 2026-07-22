@@ -330,17 +330,15 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		}
 		role := strings.ToLower(string(msg.Role))
 
-		// Group all tool use content blocks into a single message
+		// Partition the content blocks: tool calls, tool results, and the
+		// remaining text/media content parts (order preserved).
 		var toolCalls []ToolCall
-		var textContent string
-		var hasToolUse bool
-		var hasToolResult bool
-
-		// First pass: collect all tool use content blocks and check for tool results
+		var toolResults []*llm.ToolResultContent
+		var parts []ContentPart
+		var hasMedia bool
 		for _, c := range msg.Content {
 			switch c := c.(type) {
 			case *llm.ToolUseContent:
-				hasToolUse = true
 				toolCalls = append(toolCalls, ToolCall{
 					ID:   c.ID,
 					Type: "function",
@@ -349,76 +347,141 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 						Arguments: string(c.Input),
 					},
 				})
-			case *llm.TextContent:
-				textContent = c.Text
 			case *llm.ToolResultContent:
-				hasToolResult = true
-			}
-		}
-
-		// Create a single message for all tool use content blocks
-		if hasToolUse {
-			result = append(result, Message{
-				Role:      role,
-				Content:   textContent,
-				ToolCalls: toolCalls,
-			})
-		}
-
-		if hasToolResult {
-			for _, c := range msg.Content {
-				trc, ok := c.(*llm.ToolResultContent)
-				if !ok {
-					continue
-				}
-				toolMessage, err := convertToolResultContent(trc)
+				toolResults = append(toolResults, c)
+			case *llm.TextContent:
+				parts = append(parts, ContentPart{Type: "text", Text: c.Text})
+			case *llm.ImageContent:
+				part, err := encodeImageContentPart(c)
 				if err != nil {
 					return nil, err
 				}
-				result = append(result, toolMessage)
-			}
-			for _, c := range msg.Content {
-				switch c := c.(type) {
-				case *llm.TextContent:
-					if !hasToolUse {
-						result = append(result, Message{Role: role, Content: c.Text})
-					}
-				case *llm.ToolResultContent, *llm.ToolUseContent:
-					// Already handled above
-				case *llm.ThinkingContent, *llm.RedactedThinkingContent:
-					// The Chat Completions API has no standard field for
-					// replaying assistant reasoning back to the server, so
-					// thinking content (which this provider's own stream
-					// iterator can produce from "reasoning" deltas) is
-					// skipped on encode rather than erroring.
-				default:
-					return nil, fmt.Errorf("unsupported content type: %s", c.Type())
+				parts = append(parts, part)
+				hasMedia = true
+			case *llm.DocumentContent:
+				part, err := encodeDocumentContentPart(c)
+				if err != nil {
+					return nil, err
 				}
+				parts = append(parts, part)
+				hasMedia = true
+			case *llm.ThinkingContent, *llm.RedactedThinkingContent:
+				// The Chat Completions API has no standard field for
+				// replaying assistant reasoning back to the server, so
+				// thinking content (which this provider's own stream
+				// iterator can produce from "reasoning" deltas) is
+				// skipped on encode rather than erroring.
+			default:
+				return nil, fmt.Errorf("unsupported content type: %s", c.Type())
 			}
-			continue
+		}
+		if hasMedia && role == "assistant" {
+			return nil, fmt.Errorf("image and document content is not supported in assistant messages by the chat completions API")
 		}
 
-		// Process non-tool-use content blocks
-		if !hasToolUse {
-			for _, c := range msg.Content {
-				switch c := c.(type) {
-				case *llm.TextContent:
-					result = append(result, Message{Role: role, Content: c.Text})
-				case *llm.ToolUseContent:
-					// Already handled above
-				case *llm.ThinkingContent, *llm.RedactedThinkingContent:
-					// The Chat Completions API has no standard field for
-					// replaying assistant reasoning back to the server, so
-					// thinking content (which this provider's own stream
-					// iterator can produce from "reasoning" deltas) is
-					// skipped on encode rather than erroring.
-				default:
-					return nil, fmt.Errorf("unsupported content type: %s", c.Type())
+		// A single message carries all tool calls, plus any accompanying text.
+		if len(toolCalls) > 0 {
+			result = append(result, Message{
+				Role:      role,
+				Content:   joinTextParts(parts),
+				ToolCalls: toolCalls,
+			})
+			parts = nil
+		}
+
+		// One "tool" message per tool result.
+		for _, trc := range toolResults {
+			toolMessage, err := convertToolResultContent(trc)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, toolMessage)
+		}
+
+		// Remaining content: messages with media carry a content-part array;
+		// text-only messages keep the plain-string content shape.
+		if len(parts) > 0 {
+			if hasMedia {
+				result = append(result, Message{Role: role, ContentParts: parts})
+			} else {
+				for _, p := range parts {
+					result = append(result, Message{Role: role, Content: p.Text})
 				}
 			}
 		}
 	}
 	return result, nil
+}
+
+// joinTextParts flattens text content parts into a single string for message
+// shapes that only accept plain-string content.
+func joinTextParts(parts []ContentPart) string {
+	var texts []string
+	for _, p := range parts {
+		if p.Type == "text" && p.Text != "" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.Join(texts, "\n\n")
+}
+
+// encodeImageContentPart converts an ImageContent block to an image_url
+// content part. Base64 sources are inlined as data URLs; URL sources pass
+// through. The Chat Completions API has no file-ID image reference.
+func encodeImageContentPart(c *llm.ImageContent) (ContentPart, error) {
+	if c.Source == nil {
+		return ContentPart{}, fmt.Errorf("image content has nil source")
+	}
+	switch c.Source.Type {
+	case llm.ContentSourceTypeBase64:
+		if c.Source.MediaType == "" || c.Source.Data == "" {
+			return ContentPart{}, fmt.Errorf("media type and data are required for base64 image content")
+		}
+		dataURL := fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
+		return ContentPart{Type: "image_url", ImageURL: &ImageURLPart{URL: dataURL}}, nil
+	case llm.ContentSourceTypeURL:
+		if c.Source.URL == "" {
+			return ContentPart{}, fmt.Errorf("URL is required for URL-based image content")
+		}
+		return ContentPart{Type: "image_url", ImageURL: &ImageURLPart{URL: c.Source.URL}}, nil
+	default:
+		return ContentPart{}, fmt.Errorf("unsupported image source type for the chat completions API: %s", c.Source.Type)
+	}
+}
+
+// encodeDocumentContentPart converts a DocumentContent block to a file
+// content part (base64 and file-ID sources) or a text part (text sources).
+// The Chat Completions API has no URL-based file reference.
+func encodeDocumentContentPart(c *llm.DocumentContent) (ContentPart, error) {
+	if c.Source == nil {
+		return ContentPart{}, fmt.Errorf("document content has nil source")
+	}
+	switch c.Source.Type {
+	case llm.ContentSourceTypeBase64:
+		if c.Source.MediaType == "" || c.Source.Data == "" {
+			return ContentPart{}, fmt.Errorf("media type and data are required for base64 document content")
+		}
+		filename := c.Title
+		if filename == "" {
+			filename = "document"
+		}
+		dataURL := fmt.Sprintf("data:%s;base64,%s", c.Source.MediaType, c.Source.Data)
+		return ContentPart{Type: "file", File: &FilePart{Filename: filename, FileData: dataURL}}, nil
+	case llm.ContentSourceTypeFile:
+		if c.Source.FileID == "" {
+			return ContentPart{}, fmt.Errorf("file ID is required for file-based document content")
+		}
+		return ContentPart{Type: "file", File: &FilePart{FileID: c.Source.FileID}}, nil
+	case llm.ContentSourceTypeText:
+		if c.Source.Data == "" {
+			return ContentPart{}, fmt.Errorf("data is required for text document content")
+		}
+		return ContentPart{Type: "text", Text: c.Source.Data}, nil
+	case llm.ContentSourceTypeURL:
+		return ContentPart{}, fmt.Errorf("url-based document content is not supported by the chat completions API; use a base64 or file source")
+	default:
+		return ContentPart{}, fmt.Errorf("unsupported document source type: %s", c.Source.Type)
+	}
 }
 
 func convertToolResultContent(c *llm.ToolResultContent) (Message, error) {
@@ -434,6 +497,9 @@ func convertToolResultContent(c *llm.ToolResultContent) (Message, error) {
 }
 
 func toolResultContentString(c *llm.ToolResultContent) (string, error) {
+	if providers.IsEmptyToolResultContent(c.Content) {
+		return providers.EmptyToolResultText, nil
+	}
 	switch content := c.Content.(type) {
 	case string:
 		return content, nil
@@ -448,12 +514,24 @@ func toolResultContentString(c *llm.ToolResultContent) (string, error) {
 	}
 }
 
+// toolResultTextBlocks flattens tool result content blocks to a single
+// string. Chat Completions tool messages are text-only, so non-text blocks
+// (e.g. images from an MCP tool) are represented with a placeholder rather
+// than being dropped silently, as is a result with no renderable text at all.
 func toolResultTextBlocks(content []*dive.ToolResultContent) string {
 	var texts []string
 	for _, c := range content {
-		if c.Text != "" {
-			texts = append(texts, c.Text)
+		switch c.Type {
+		case dive.ToolResultContentTypeText, "":
+			if c.Text != "" {
+				texts = append(texts, c.Text)
+			}
+		default:
+			texts = append(texts, fmt.Sprintf("[%s content omitted]", c.Type))
 		}
+	}
+	if len(texts) == 0 {
+		return providers.EmptyToolResultText
 	}
 	return strings.Join(texts, "\n")
 }
