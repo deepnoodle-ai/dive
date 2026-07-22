@@ -317,6 +317,58 @@ func totalTokens(msgs []*llm.Message) int {
 	return total
 }
 
+func TestEstimateTokensSizesMediaByCostNotBytes(t *testing.T) {
+	// A 1.4 MB screenshot, the size a drag-and-drop attachment routinely is.
+	screenshot := &llm.Message{Role: llm.User, Content: []llm.Content{
+		&llm.TextContent{Text: "what does this image say?"},
+		&llm.ImageContent{Source: &llm.ContentSource{
+			Type:      llm.ContentSourceTypeBase64,
+			MediaType: "image/png",
+			Data:      strings.Repeat("A", 1_900_000),
+		}},
+	}}
+
+	got := estimateTokens(screenshot)
+
+	// Sizing the base64 at 4 bytes per token would call this ~475k — enough to
+	// blow past any compaction threshold and summarize the conversation away
+	// the moment an image is attached.
+	assert.True(t, got < 2_500, "one image should not read as a full context window, got %d", got)
+	assert.True(t, got >= base64ImageTokens, "the image still has to be counted, got %d", got)
+
+	// A URL source carries no payload, so it stays on the serialized-size path.
+	linked := &llm.Message{Role: llm.User, Content: []llm.Content{
+		&llm.ImageContent{Source: &llm.ContentSource{
+			Type: llm.ContentSourceTypeURL,
+			URL:  "https://example.com/a.png",
+		}},
+	}}
+	assert.True(t, estimateTokens(linked) < base64ImageTokens)
+
+	// Text and tool payloads keep their serialized-size estimate.
+	text := llm.NewUserTextMessage(strings.Repeat("x", 4_000))
+	assert.True(t, estimateTokens(text) >= 1_000, "text is still ~4 bytes per token")
+}
+
+func TestEstimateTokensSizesDocumentsByDecodedLength(t *testing.T) {
+	doc := func(base64Len int) *llm.Message {
+		return &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.DocumentContent{Source: &llm.ContentSource{
+				Type:      llm.ContentSourceTypeBase64,
+				MediaType: "application/pdf",
+				Data:      strings.Repeat("A", base64Len),
+			}},
+		}}
+	}
+
+	// A big PDF costs more than a small one, but nothing like its byte count.
+	small := estimateTokens(doc(20_000))
+	large := estimateTokens(doc(2_000_000))
+	assert.True(t, large > small, "a longer document should cost more")
+	assert.True(t, small >= base64ImageTokens, "a short document still costs at least a page")
+	assert.True(t, large < 2_000_000/4, "a document must not be sized as if it were text")
+}
+
 func TestReduceToSummaryBudget(t *testing.T) {
 	bigText := strings.Repeat("x", 200_000) // ~50k tokens
 
@@ -367,21 +419,41 @@ func TestReduceToSummaryBudget(t *testing.T) {
 }
 
 func TestReduceToSummaryBudgetCullsUntruncatableContent(t *testing.T) {
-	t.Run("culls a large image to a placeholder", func(t *testing.T) {
+	t.Run("culls an image that does not fit the budget", func(t *testing.T) {
 		image := &llm.Message{Role: llm.User, Content: []llm.Content{
 			&llm.ImageContent{Source: &llm.ContentSource{
 				Type:      llm.ContentSourceTypeBase64,
 				MediaType: "image/png",
-				Data:      strings.Repeat("A", 400_000), // ~100k tokens of base64
+				Data:      strings.Repeat("A", 400_000),
 			}},
 		}}
-		out := reduceToSummaryBudget([]*llm.Message{image}, 2_000)
+		// An image costs base64ImageTokens however long its encoding is, so the
+		// budget has to be under that for culling to be the right call.
+		out := reduceToSummaryBudget([]*llm.Message{image}, base64ImageTokens/2)
 
 		assert.Equal(t, 1, len(out)) // not dropped
 		txt, isText := out[0].Content[0].(*llm.TextContent)
 		assert.True(t, isText) // image culled to a text placeholder
 		assert.True(t, strings.Contains(txt.Text, "image content omitted"))
-		assert.True(t, totalTokens(out) <= 2_000)
+		assert.True(t, totalTokens(out) <= base64ImageTokens/2)
+	})
+
+	t.Run("keeps an image that fits the budget", func(t *testing.T) {
+		// The same megabytes of base64, but a budget that accommodates what the
+		// image actually costs: it must survive intact. Sizing media by encoded
+		// bytes instead would read as ~100k tokens and cull it every time.
+		image := &llm.Message{Role: llm.User, Content: []llm.Content{
+			&llm.ImageContent{Source: &llm.ContentSource{
+				Type:      llm.ContentSourceTypeBase64,
+				MediaType: "image/png",
+				Data:      strings.Repeat("A", 400_000),
+			}},
+		}}
+		out := reduceToSummaryBudget([]*llm.Message{image}, 10_000)
+
+		assert.Equal(t, 1, len(out))
+		_, isImage := out[0].Content[0].(*llm.ImageContent)
+		assert.True(t, isImage, "an image within budget should not be culled")
 	})
 
 	t.Run("culls an oversized tool_use input but keeps the block paired", func(t *testing.T) {
