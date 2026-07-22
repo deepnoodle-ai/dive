@@ -39,6 +39,17 @@ func TestToolResultBlocksJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "hello", blocks[0].Text)
 }
 
+// TestToolResultBlocksUntypedText verifies a block with no explicit type but
+// real text survives the round-trip guard, matching how the typed in-memory
+// path treats it.
+func TestToolResultBlocksUntypedText(t *testing.T) {
+	blocks := ToolResultBlocks(&llm.ToolResultContent{
+		Content: []any{map[string]any{"text": "hello"}},
+	})
+	assert.Len(t, blocks, 1)
+	assert.Equal(t, "hello", blocks[0].Text)
+}
+
 func TestToolResultBlocksNonBlockContent(t *testing.T) {
 	assert.Nil(t, ToolResultBlocks(&llm.ToolResultContent{Content: "plain string"}))
 	assert.Nil(t, ToolResultBlocks(&llm.ToolResultContent{Content: nil}))

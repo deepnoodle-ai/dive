@@ -48,7 +48,10 @@ func ToolResultBlocks(c *llm.ToolResultContent) []*dive.ToolResultContent {
 		return nil
 	}
 	// Guard against arbitrary JSON arrays decoding into zero-valued blocks:
-	// every element must carry a known content block type.
+	// every element must carry a known content block type. An absent type is
+	// accepted when the element still carries a block payload, since providers
+	// render an untyped block as text; that keeps a hand-built untyped block
+	// rendering the same before and after a JSON round-trip.
 	for _, b := range blocks {
 		if b == nil {
 			return nil
@@ -57,6 +60,10 @@ func ToolResultBlocks(c *llm.ToolResultContent) []*dive.ToolResultContent {
 		case dive.ToolResultContentTypeText,
 			dive.ToolResultContentTypeImage,
 			dive.ToolResultContentTypeAudio:
+		case "":
+			if b.Text == "" && b.Data == "" {
+				return nil
+			}
 		default:
 			return nil
 		}

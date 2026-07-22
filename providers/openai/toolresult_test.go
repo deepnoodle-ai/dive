@@ -77,6 +77,7 @@ func TestEncodeToolResultEmptyOutput(t *testing.T) {
 	}{
 		{"single empty text block", []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: ""}}},
 		{"no blocks at all", []*dive.ToolResultContent{}},
+		{"no blocks after JSON round trip", []any{}},
 		{"nil content", nil},
 	}
 	for _, tt := range tests {
