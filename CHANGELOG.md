@@ -6,6 +6,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-07-22
+
+### Added
+
+- **Dragged-in files as CLI attachments** — dropping a file onto the terminal
+  pastes its path; the interactive CLI now recognizes those insertions and
+  turns them into attachments. Images, PDFs, and videos become native content
+  blocks and text files are inlined the way an `@reference` is. Detection is
+  deliberately narrow: an inserted run counts as a drop only when it consists
+  entirely of paths to files that exist, so typing and pasted logs that merely
+  mention absolute paths can't trigger it. Path parsing covers what terminals
+  actually emit (backslash-escaped spaces, quotes, `file://` URLs with
+  percent-encoding, `~`, multi-file drops). Each file is replaced with a
+  placeholder (`[Image #1]`) listed under the input divider; deleting the
+  placeholder releases the attachment, files are read at send time rather than
+  drop time, and unsupported or oversized files leave their path as text with a
+  one-line reason.
+- **Multimodal input support matrix** in the LLM guide, documenting which
+  content types each provider accepts.
+
+### Fixed
+
+- **Caller-supplied media across providers** — images and documents were
+  failing or silently dropping in several provider encoders. Google now encodes
+  `DocumentContent` (base64 as inline bytes, URL as file URI, text inline)
+  instead of dropping it silently, and its content switch ends in a default
+  error so no future content type falls through unnoticed. OpenAI (Responses)
+  now passes URL-source documents through as `file_url` and inlines
+  text-source documents rather than erroring. The openaicompletions encoder —
+  and therefore Mistral and OpenRouter, which embed it — was text-only, so no
+  Chat Completions endpoint could receive images or PDFs; messages now support
+  a content-part array (still marshaled as a plain string when there are no
+  parts, so existing requests are byte-compatible), and assistant tool-call
+  messages keep all their text blocks instead of only the last one.
+- **Typed blocks in tool results** (e.g. MCP tools returning screenshots) —
+  Anthropic marshaled image blocks in Dive's flat shape, which is not valid
+  Anthropic wire format; they are now converted to native image blocks with a
+  base64 source, with the media type auto-detected when missing. OpenAI
+  (Responses) JSON-marshaled typed text blocks into the output string; text is
+  now flattened and results containing images are emitted as a
+  `function_call_output` content-part list so the model can see them.
+  Google and openaicompletions dropped non-text blocks silently and now render
+  an explicit placeholder. A new shared `providers.ToolResultBlocks` helper
+  decodes typed blocks in both their in-memory and JSON-round-tripped shapes,
+  including hand-built blocks that carry no explicit type.
+- **Empty and nil tool results** — a tool that returned no output reached the
+  wire as `"content":[]` on Anthropic (which rejects it) or an empty output
+  string on OpenAI, telling the model nothing about whether the call ran. All
+  four providers now substitute a shared `providers.EmptyToolResultText`
+  placeholder, covering the typed-empty, zero-block, and post-round-trip
+  shapes. A nil `ToolResult` supplied on resume — previously `"content":null`
+  on Anthropic, the literal string `"null"` on Google, and a hard error on the
+  chat completions path — is treated the same way. Empty strings are left
+  alone, since a caller chose that value explicitly.
+- **Media sizing during compaction** (experimental) — `estimateTokens` sized
+  every message as its serialized JSON over four, which over-counts embedded
+  media by two orders of magnitude: a 1.4 MB screenshot read as ~475k tokens
+  against a 100k default threshold, so attaching a single image tripped
+  mid-turn compaction on the first iteration of the first turn and summarized
+  the image away. Media is now sized by what it actually costs — a flat ~1600
+  tokens per base64 image and roughly a page per 50 KB for documents, both
+  erring high — while text, tool inputs, and tool results keep the
+  serialized-size estimate. This also corrects `reduceToSummaryBudget`, which
+  culled attached images from the summarizer transcript regardless of remaining
+  budget.
+- **Video content labeling** — videos passed as `@references` were labeled
+  `[document: ...]` in the prompt; the media-block builder is now shared
+  between references and attachments and labels them correctly.
+
 ## [1.17.0] - 2026-07-21
 
 ### Added
