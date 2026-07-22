@@ -45,8 +45,11 @@ type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 	// ContentParts, when non-empty, replaces Content in the marshaled JSON
-	// with a content-part array (multimodal messages). Set at most one of
-	// Content and ContentParts.
+	// with a content-part array (multimodal messages). When building a
+	// request, set at most one of Content and ContentParts. When decoding a
+	// response that used the array shape, both are populated: ContentParts
+	// holds the parts and Content holds their joined text, so callers that
+	// only read Content never silently see an empty message.
 	ContentParts []ContentPart `json:"-"`
 	Name         string        `json:"name,omitempty"`
 	ToolCallID   string        `json:"tool_call_id,omitempty"`
@@ -94,7 +97,13 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	case '"':
 		return json.Unmarshal(content, &m.Content)
 	case '[':
-		return json.Unmarshal(content, &m.ContentParts)
+		if err := json.Unmarshal(content, &m.ContentParts); err != nil {
+			return err
+		}
+		// Mirror the text into Content so consumers reading only the string
+		// field don't silently observe an empty message.
+		m.Content = joinTextParts(m.ContentParts)
+		return nil
 	default:
 		return fmt.Errorf("unexpected message content shape: %s", content)
 	}

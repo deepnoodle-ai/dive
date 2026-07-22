@@ -68,6 +68,32 @@ func TestEncodeToolResultErrorKeepsTextForm(t *testing.T) {
 	assert.Contains(t, string(data), `"output":"Error: boom\n\n[image content omitted]"`)
 }
 
+// TestEncodeToolResultEmptyOutput verifies a tool result with nothing to
+// render produces an explicit placeholder rather than an empty output string.
+func TestEncodeToolResultEmptyOutput(t *testing.T) {
+	tests := []struct {
+		name    string
+		content any
+	}{
+		{"single empty text block", []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: ""}}},
+		{"no blocks at all", []*dive.ToolResultContent{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items, err := encodeMessages([]*llm.Message{
+				llm.NewToolResultMessage(&llm.ToolResultContent{
+					ToolUseID: "call_1",
+					Content:   tt.content,
+				}),
+			})
+			assert.NoError(t, err)
+			data, err := json.Marshal(items)
+			assert.NoError(t, err)
+			assert.Equal(t, `[{"call_id":"call_1","output":"(no output)","type":"function_call_output"}]`, string(data))
+		})
+	}
+}
+
 // TestEncodeToolResultBlocksSurviveJSONRoundTrip verifies session-replayed
 // tool results (blocks arriving as []any) get the same flattening.
 func TestEncodeToolResultBlocksSurviveJSONRoundTrip(t *testing.T) {

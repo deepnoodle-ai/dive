@@ -9,6 +9,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/wonton/schema"
 	"google.golang.org/genai"
 )
@@ -148,16 +149,21 @@ func convertToolUseToFunctionCall(toolUse *llm.ToolUseContent) (*genai.Part, err
 // joinToolResultText flattens tool result content blocks to a single string.
 // Gemini function responses are JSON-only, so non-text blocks (e.g. images
 // from an MCP tool) are represented with a placeholder rather than being
-// dropped silently.
+// dropped silently, as is a result with no renderable text at all.
 func joinToolResultText(blocks []*dive.ToolResultContent) string {
 	var parts []string
 	for _, b := range blocks {
 		switch b.Type {
 		case dive.ToolResultContentTypeText, "":
-			parts = append(parts, b.Text)
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
 		default:
 			parts = append(parts, fmt.Sprintf("[%s content omitted]", b.Type))
 		}
+	}
+	if len(parts) == 0 {
+		return providers.EmptyToolResultText
 	}
 	return strings.Join(parts, "\n\n")
 }

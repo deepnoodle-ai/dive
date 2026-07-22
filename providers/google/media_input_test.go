@@ -196,3 +196,12 @@ func TestJoinToolResultTextPlaceholders(t *testing.T) {
 	})
 	assert.Equal(t, "captured screenshot\n\n[image content omitted]", joined)
 }
+
+// TestJoinToolResultTextEmpty verifies a result with no renderable text says
+// so explicitly instead of producing an empty function response.
+func TestJoinToolResultTextEmpty(t *testing.T) {
+	assert.Equal(t, "(no output)", joinToolResultText(nil))
+	assert.Equal(t, "(no output)", joinToolResultText([]*dive.ToolResultContent{
+		{Type: dive.ToolResultContentTypeText, Text: ""},
+	}))
+}

@@ -344,6 +344,11 @@ func toolResultOutputText(c *llm.ToolResultContent) (string, error) {
 	var output string
 	if blocks := providers.ToolResultBlocks(c); blocks != nil {
 		output = joinToolResultBlockText(blocks)
+		if output == "" {
+			output = providers.EmptyToolResultText
+		}
+	} else if providers.IsEmptyToolResultContent(c.Content) {
+		output = providers.EmptyToolResultText
 	} else {
 		switch content := c.Content.(type) {
 		case string:

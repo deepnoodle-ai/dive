@@ -5,6 +5,27 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 )
 
+// EmptyToolResultText stands in for a tool result that carries no renderable
+// text (a tool that returned no output, or only empty text blocks). Providers
+// substitute it rather than emitting an empty content block or an empty
+// content array, both of which are rejected or ambiguous on some APIs, and
+// neither of which tells the model the call actually produced nothing.
+const EmptyToolResultText = "(no output)"
+
+// IsEmptyToolResultContent reports whether tool result content is an empty
+// list of blocks, in either the typed in-memory shape or the generic shape it
+// takes after a JSON round-trip.
+func IsEmptyToolResultContent(content any) bool {
+	switch v := content.(type) {
+	case []*dive.ToolResultContent:
+		return len(v) == 0
+	case []any:
+		return len(v) == 0
+	default:
+		return false
+	}
+}
+
 // ToolResultBlocks extracts typed tool result content blocks from a
 // tool_result content block, handling both the in-memory shape
 // ([]*dive.ToolResultContent) and the generic shape the same data takes after

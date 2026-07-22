@@ -110,6 +110,41 @@ func TestConvertToolResultStringContentUnchanged(t *testing.T) {
 	assert.Equal(t, "plain output", trc.Content)
 }
 
+// TestConvertToolResultEmptyBlocks verifies a tool result with nothing to
+// render becomes a placeholder text block. Anthropic rejects empty text
+// blocks, and an empty content array tells the model nothing about whether
+// the call ran.
+func TestConvertToolResultEmptyBlocks(t *testing.T) {
+	tests := []struct {
+		name    string
+		content any
+	}{
+		{"single empty text block", []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: ""}}},
+		{"no blocks at all", []*dive.ToolResultContent{}},
+		{"no blocks after round trip", []any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trc := toolResultFromMessages(t, []*llm.Message{
+				llm.NewToolResultMessage(&llm.ToolResultContent{
+					ToolUseID: "toolu_1",
+					Content:   tt.content,
+				}),
+			})
+			content, ok := trc.Content.([]llm.Content)
+			assert.True(t, ok)
+			assert.Len(t, content, 1)
+			text, ok := content[0].(*llm.TextContent)
+			assert.True(t, ok)
+			assert.Equal(t, "(no output)", text.Text)
+
+			wire, err := json.Marshal(trc)
+			assert.NoError(t, err)
+			assert.Contains(t, string(wire), `"content":[{"type":"text","text":"(no output)"}]`)
+		})
+	}
+}
+
 // TestConvertToolResultAudioBlockPlaceholder verifies block types Anthropic
 // cannot accept are replaced with a text placeholder instead of producing an
 // invalid request.

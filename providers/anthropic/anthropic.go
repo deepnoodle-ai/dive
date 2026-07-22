@@ -308,10 +308,15 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 // {"type":"text","text":...} form, which happens to match Anthropic's text
 // block — but image blocks ({"type":"image","data":...,"mimeType":...}) do
 // not, so they are converted to native image blocks with a base64 source.
-// Content that is not block-shaped passes through unchanged.
+// Content that is not block-shaped passes through unchanged. A result with no
+// renderable blocks becomes a single placeholder text block, since Anthropic
+// accepts neither an empty text block nor an empty content array.
 func convertToolResultBlocks(c *llm.ToolResultContent) any {
 	blocks := providers.ToolResultBlocks(c)
 	if blocks == nil {
+		if providers.IsEmptyToolResultContent(c.Content) {
+			return []llm.Content{&llm.TextContent{Text: providers.EmptyToolResultText}}
+		}
 		return c.Content
 	}
 	content := make([]llm.Content, 0, len(blocks))
@@ -343,6 +348,9 @@ func convertToolResultBlocks(c *llm.ToolResultContent) any {
 		default:
 			content = append(content, &llm.TextContent{Text: fmt.Sprintf("[%s content omitted]", b.Type)})
 		}
+	}
+	if len(content) == 0 {
+		content = append(content, &llm.TextContent{Text: providers.EmptyToolResultText})
 	}
 	return content
 }

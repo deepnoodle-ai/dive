@@ -129,6 +129,8 @@ Anthropic and OpenAI (Responses) receive tool-result images natively; on
 providers whose tool messages are text-only (google, openaicompletions,
 mistral, openrouter), non-text blocks are replaced with a
 `[image content omitted]` placeholder so the model knows content was elided.
+A tool result with nothing to render is sent as `(no output)` rather than an
+empty block or empty array, which are variously rejected or ambiguous.
 
 ## Provider Options
 

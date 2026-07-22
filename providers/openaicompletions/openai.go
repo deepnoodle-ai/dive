@@ -514,7 +514,7 @@ func toolResultContentString(c *llm.ToolResultContent) (string, error) {
 // toolResultTextBlocks flattens tool result content blocks to a single
 // string. Chat Completions tool messages are text-only, so non-text blocks
 // (e.g. images from an MCP tool) are represented with a placeholder rather
-// than being dropped silently.
+// than being dropped silently, as is a result with no renderable text at all.
 func toolResultTextBlocks(content []*dive.ToolResultContent) string {
 	var texts []string
 	for _, c := range content {
@@ -526,6 +526,9 @@ func toolResultTextBlocks(content []*dive.ToolResultContent) string {
 		default:
 			texts = append(texts, fmt.Sprintf("[%s content omitted]", c.Type))
 		}
+	}
+	if len(texts) == 0 {
+		return providers.EmptyToolResultText
 	}
 	return strings.Join(texts, "\n")
 }

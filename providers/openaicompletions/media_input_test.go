@@ -57,6 +57,8 @@ func TestMessageUnmarshalContentShapes(t *testing.T) {
 	assert.Len(t, m3.ContentParts, 2)
 	assert.Equal(t, "hi", m3.ContentParts[0].Text)
 	assert.Equal(t, "https://example.com/a.png", m3.ContentParts[1].ImageURL.URL)
+	// Text is mirrored into Content so string-only readers see the text.
+	assert.Equal(t, "hi", m3.Content)
 }
 
 func TestConvertMessagesImageBase64(t *testing.T) {
@@ -268,6 +270,20 @@ func TestToolResultImageBlockPlaceholder(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, converted, 1)
 	assert.Equal(t, "captured screenshot\n[image content omitted]", converted[0].Content)
+}
+
+// TestToolResultEmptyPlaceholder verifies a tool result with no renderable
+// text produces an explicit placeholder rather than an empty tool message.
+func TestToolResultEmptyPlaceholder(t *testing.T) {
+	converted, err := convertMessages([]*llm.Message{
+		llm.NewToolResultMessage(&llm.ToolResultContent{
+			ToolUseID: "call_1",
+			Content:   []*dive.ToolResultContent{{Type: dive.ToolResultContentTypeText, Text: ""}},
+		}),
+	})
+	assert.NoError(t, err)
+	assert.Len(t, converted, 1)
+	assert.Equal(t, "(no output)", converted[0].Content)
 }
 
 // TestRequestMarshalMultimodal verifies the full request wire shape for a
