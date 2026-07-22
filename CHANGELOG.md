@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-07-22
+
+### Added
+
+- **Dragged-in files as CLI attachments** — dropping a file onto the terminal
+  pastes its path, and the interactive CLI now turns those insertions into
+  attachments: images, PDFs, and videos become native content blocks, text
+  files are inlined like an `@reference`. Each file is replaced with a
+  placeholder (`[Image #1]`) that releases the attachment when deleted.
+  Detection is narrow — an inserted run counts as a drop only when it is
+  entirely paths to files that exist — so typing and pasted logs can't trigger
+  it.
+- **Multimodal input support matrix** in the LLM guide.
+
+### Fixed
+
+- **Caller-supplied media across providers** — images and documents were
+  failing or silently dropping in several encoders. Google now encodes
+  `DocumentContent` instead of dropping it, and its content switch errors by
+  default so nothing falls through unnoticed. OpenAI (Responses) accepts
+  URL-source and text-source documents. The openaicompletions encoder was
+  text-only, so no Chat Completions endpoint could receive images or PDFs; it
+  now supports content parts, which also covers Mistral and OpenRouter.
+- **Typed blocks in tool results** (e.g. MCP tools returning screenshots) —
+  Anthropic emitted image blocks in a shape it does not accept, and OpenAI
+  (Responses) JSON-marshaled typed text into the output string; both now encode
+  natively. Google and openaicompletions render an explicit placeholder instead
+  of dropping non-text blocks. Adds a shared `providers.ToolResultBlocks`
+  helper for decoding typed blocks in both in-memory and round-tripped shapes.
+- **Empty and nil tool results** — a tool returning no output reached the wire
+  as `"content":[]` on Anthropic (rejected), `"null"` on Google, or a hard
+  error on the chat completions path. All four providers now substitute a
+  shared `providers.EmptyToolResultText` placeholder. Empty strings are left
+  alone, since a caller chose that value explicitly.
+- **Media sizing during compaction** (experimental) — `estimateTokens` sized
+  media by serialized JSON, over-counting by two orders of magnitude, so a
+  single attached image tripped mid-turn compaction on the first turn and
+  summarized itself away. Media is now sized by actual cost. Also fixes
+  `reduceToSummaryBudget` culling attached images regardless of budget.
+- **Video content labeling** — videos passed as `@references` were labeled
+  `[document: ...]` in the prompt.
+
 ## [1.17.0] - 2026-07-21
 
 ### Added
