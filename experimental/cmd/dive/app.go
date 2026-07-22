@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/deepnoodle-ai/dive"
@@ -260,6 +260,13 @@ type App struct {
 	inputText    string
 	historyIndex int // -1 when not navigating history
 
+	// Dropped-file attachments pending on the current draft. lastInput is the
+	// previous value of inputText, used to isolate the run of text a paste (or
+	// a terminal file drop) inserted.
+	lastInput   string
+	attachments []attachment
+	attachSeq   int
+
 	// Chat state
 	messages              []Message
 	streamingMessageIndex int
@@ -429,18 +436,22 @@ func (a *App) LiveView() tui.View {
 
 	// Input area
 	views = append(views, tui.Divider())
+	if attachmentsView := a.attachmentsView(); attachmentsView != nil {
+		views = append(views, attachmentsView)
+	}
 	views = append(views,
 		tui.InputField(&a.inputText).
 			ID("main-input").
 			Prompt(" ❯ ").
 			PromptStyle(tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})).
-			Placeholder("Type a message... (@filename for autocomplete)").
+			Placeholder("Type a message... (@filename, or drop a file to attach)").
 			Multiline(true).
 			MaxHeight(10).
-			OnChange(func(string) {
+			OnChange(func(value string) {
 				// A focused input consumes its own keystrokes (wonton
-				// >= v0.0.35), so refresh autocomplete on edits here
-				// rather than from HandleEvent.
+				// >= v0.0.35), so capture dropped files and refresh
+				// autocomplete on edits here rather than from HandleEvent.
+				a.handleInputChange(value)
 				a.updateAutocomplete()
 			}).
 			OnKey(func(e tui.KeyEvent) bool {
@@ -512,6 +523,23 @@ func (a *App) LiveView() tui.View {
 	}
 
 	return tui.Stack(views...).Gap(0)
+}
+
+// attachmentsView names the files attached to the draft message, rendered just
+// inside the input box. The rows are listed in placeholder order, so the "#N" in
+// the text is not repeated here. Returns nil when nothing is attached.
+func (a *App) attachmentsView() tui.View {
+	if len(a.attachments) == 0 {
+		return nil
+	}
+	rows := make([]tui.View, 0, len(a.attachments))
+	for _, att := range a.attachments {
+		rows = append(rows, tui.Group(
+			tui.Text(" ⏺ ").Fg(tui.ColorCyan),
+			tui.Text("%s (%s)", att.Name, formatBytes(int(att.Size))).Hint(),
+		))
+	}
+	return tui.Stack(rows...).Gap(0)
 }
 
 // Purple color for Claude Code style UI elements
@@ -924,6 +952,132 @@ func (a *App) updateAutocomplete() {
 	}
 }
 
+// setInputText replaces the input buffer from application code (history recall,
+// autocomplete, clearing on submit). Keeping the drop-detection baseline in sync
+// here means a programmatic change is never mistaken for a paste.
+func (a *App) setInputText(value string) {
+	a.inputText = value
+	a.lastInput = value
+}
+
+// handleInputChange watches the input for terminal file drops. A drop arrives as
+// a paste — one contiguous insertion of the dropped file's path — so the newly
+// inserted run is the only text worth scanning, and a single typed character
+// never triggers a filesystem lookup.
+func (a *App) handleInputChange(value string) {
+	prev := a.lastInput
+	a.lastInput = value
+	a.pruneAttachments(value)
+
+	start, end, ok := insertedRange(prev, value)
+	if !ok {
+		return
+	}
+	inserted := value[start:end]
+	replaced := a.captureDroppedFiles(inserted)
+	if replaced == inserted {
+		return
+	}
+
+	// Space the placeholders off from whatever surrounds them. Terminals pad a
+	// drop with their own whitespace — a trailing space, sometimes a leading
+	// newline — which would otherwise strand the placeholder on its own line.
+	before, after := value[:start], value[end:]
+	if before != "" && !endsWithSpace(before) {
+		replaced = " " + replaced
+	}
+	if after == "" || !startsWithSpace(after) {
+		replaced += " "
+	}
+
+	a.inputText = before + replaced + after
+	a.lastInput = a.inputText
+}
+
+func endsWithSpace(s string) bool {
+	r, _ := utf8.DecodeLastRuneInString(s)
+	return unicode.IsSpace(r)
+}
+
+func startsWithSpace(s string) bool {
+	r, _ := utf8.DecodeRuneInString(s)
+	return unicode.IsSpace(r)
+}
+
+// captureDroppedFiles turns a run of inserted text into placeholders such as
+// "[Image #1]", registering each file as an attachment on the current draft. The
+// run is left untouched unless it is a file drop — nothing but paths to files
+// that exist — in which case it is rebuilt from the placeholders alone, since
+// the whitespace a terminal wraps a drop in carries no meaning. A path that
+// can't be attached is kept as text. Returns the rewritten run.
+func (a *App) captureDroppedFiles(inserted string) string {
+	tokens := scanPathTokens(inserted)
+	paths, ok := isFileDrop(tokens)
+	if !ok {
+		return inserted
+	}
+
+	parts := make([]string, 0, len(paths))
+	found := 0
+	for i, path := range paths {
+		kind, size, err := classifyAttachment(path)
+		if err != nil {
+			// The drop was deliberate, so say why nothing was attached and
+			// leave the path in the message as text.
+			if a.runner != nil {
+				a.runner.Printf("Did not attach %s: %s.", filepath.Base(path), err)
+			}
+			parts = append(parts, tokens[i].value)
+			continue
+		}
+		a.attachSeq++
+		att := attachment{
+			Placeholder: fmt.Sprintf("[%s #%d]", kind.label(), a.attachSeq),
+			Path:        path,
+			Name:        filepath.Base(path),
+			Kind:        kind,
+			Size:        size,
+		}
+		a.attachments = append(a.attachments, att)
+		parts = append(parts, att.Placeholder)
+		found++
+	}
+	if found == 0 {
+		return inserted
+	}
+	return strings.Join(parts, " ")
+}
+
+// pruneAttachments drops attachments whose placeholder the user has deleted from
+// the input, so the attachment list and the outbound message stay in sync with
+// what is actually on screen.
+func (a *App) pruneAttachments(value string) {
+	if len(a.attachments) == 0 {
+		return
+	}
+	kept := a.attachments[:0]
+	for _, att := range a.attachments {
+		if strings.Contains(value, att.Placeholder) {
+			kept = append(kept, att)
+		}
+	}
+	a.attachments = kept
+	if len(a.attachments) == 0 {
+		a.attachments = nil
+		a.attachSeq = 0
+	}
+}
+
+// takeAttachments returns the attachments still referenced by the submitted text
+// and clears the pending set.
+func (a *App) takeAttachments(value string) []attachment {
+	a.pruneAttachments(value)
+	taken := a.attachments
+	a.attachments = nil
+	a.attachSeq = 0
+	return taken
+}
+
 // clearAutocomplete resets autocomplete state
 func (a *App) clearAutocomplete() {
 	a.autocompleteMatches = nil
@@ -942,12 +1096,12 @@ func (a *App) selectAutocomplete() bool {
 
 	if a.autocompleteType == "command" {
 		// Replace entire input with selected command (add space for args)
-		a.inputText = "/" + selected + " "
+		a.setInputText("/" + selected + " ")
 	} else {
 		// Find the last @ and replace prefix with selected match
 		lastAt := strings.LastIndex(a.inputText, "@")
 		if lastAt >= 0 {
-			a.inputText = a.inputText[:lastAt+1] + selected + " "
+			a.setInputText(a.inputText[:lastAt+1] + selected + " ")
 		}
 	}
 
@@ -1035,7 +1189,7 @@ func (a *App) handleInputNavKey(e tui.KeyEvent) bool {
 				a.historyIndex--
 			}
 			if a.historyIndex >= 0 && a.historyIndex < len(a.history) {
-				a.inputText = a.history[a.historyIndex]
+				a.setInputText(a.history[a.historyIndex])
 			}
 			return true
 		}
@@ -1045,9 +1199,9 @@ func (a *App) handleInputNavKey(e tui.KeyEvent) bool {
 			a.historyIndex++
 			if a.historyIndex >= len(a.history) {
 				a.historyIndex = -1
-				a.inputText = ""
+				a.setInputText("")
 			} else {
-				a.inputText = a.history[a.historyIndex]
+				a.setInputText(a.history[a.historyIndex])
 			}
 			return true
 		}
@@ -1064,18 +1218,30 @@ func (a *App) submitInput(value string) {
 		return
 	}
 
-	trimmed := strings.TrimSpace(value)
+	// The input reports its own value, which a drop landing in the same event
+	// batch as Enter may not yet have been through the change hook. Fold it in
+	// so the submitted text is the placeholder form, not a raw path.
+	if value != a.lastInput {
+		a.inputText = value
+		a.handleInputChange(value)
+	}
+
+	trimmed := strings.TrimSpace(a.inputText)
 	if trimmed == "" || a.processing {
 		return
 	}
 
-	a.inputText = "" // Clear input
+	// Claim the attachments the submitted text still refers to; any whose
+	// placeholder the user deleted are dropped along with the draft.
+	attachments := a.takeAttachments(trimmed)
+
+	a.setInputText("") // Clear input
 	a.historyIndex = -1
 	a.history = append(a.history, trimmed)
 
 	// Handle commands
 	if strings.HasPrefix(trimmed, "/") {
-		if a.handleCommand(trimmed) {
+		if a.handleCommand(trimmed, attachments) {
 			return
 		}
 	}
@@ -1083,17 +1249,22 @@ func (a *App) submitInput(value string) {
 	// Process message asynchronously
 	includeStartupAttachment := !a.firstUserSent
 	a.firstUserSent = true
-	go a.processMessageAsync(trimmed, includeStartupAttachment)
+	go a.processMessageAsync(trimmed, attachments, includeStartupAttachment)
 }
 
 // processMessageAsync handles message processing in background.
 // Sends events to the main event loop instead of modifying state directly.
-func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
+func (a *App) processMessageAsync(input string, attachments []attachment, includeStartupAttachment bool) {
 	// Expand file references (uses only immutable workspaceDir)
 	expanded, extraContent, err := a.expandFileReferences(input)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
 	}
+	expanded, attachedContent, err := expandAttachments(expanded, attachments)
+	if err != nil {
+		a.runner.Printf("Warning: %s", err.Error())
+	}
+	extraContent = append(extraContent, attachedContent...)
 	if includeStartupAttachment {
 		expanded = appendAttachedContent(expanded, a.startupAttachment)
 	}
@@ -1106,12 +1277,17 @@ func (a *App) processMessageAsync(input string, includeStartupAttachment bool) {
 // processCommandAsync handles slash command processing in background.
 // displayText is what the user typed (e.g., "/explain go.mod")
 // expanded is the full prompt to send to the agent
-func (a *App) processCommandAsync(displayText, expanded string, includeStartupAttachment bool) {
+func (a *App) processCommandAsync(displayText, expanded string, attachments []attachment, includeStartupAttachment bool) {
 	// Expand file references in the expanded text
 	expandedWithFiles, extraContent, err := a.expandFileReferences(expanded)
 	if err != nil {
 		a.runner.Printf("Warning: %s", err.Error())
 	}
+	expandedWithFiles, attachedContent, err := expandAttachments(expandedWithFiles, attachments)
+	if err != nil {
+		a.runner.Printf("Warning: %s", err.Error())
+	}
+	extraContent = append(extraContent, attachedContent...)
 	if includeStartupAttachment {
 		expandedWithFiles = appendAttachedContent(expandedWithFiles, a.startupAttachment)
 	}
@@ -2052,7 +2228,10 @@ func extractToolResultText(result *llm.ToolResultContent) string {
 	}
 }
 
-func (a *App) handleCommand(input string) bool {
+// handleCommand runs a built-in or custom slash command, returning true when it
+// handled the input. Attachments pending on the draft are forwarded to custom
+// commands and skills; built-ins take no input beyond their arguments.
+func (a *App) handleCommand(input string, attachments []attachment) bool {
 	// Parse command name and arguments
 	parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)
 	cmdName := parts[0]
@@ -2160,7 +2339,7 @@ func (a *App) handleCommand(input string) bool {
 			// Send the expanded instructions to the agent (async like regular messages)
 			includeStartupAttachment := !a.firstUserSent
 			a.firstUserSent = true
-			go a.processCommandAsync(displayCmd, expanded, includeStartupAttachment)
+			go a.processCommandAsync(displayCmd, expanded, attachments, includeStartupAttachment)
 			return true
 		}
 	}
@@ -2273,6 +2452,7 @@ func (a *App) printHelp() {
 		tui.Text(""),
 		tui.Text("Input:").Bold(),
 		tui.Text("  @filename      Include file contents"),
+		tui.Text("  drag & drop    Attach an image, PDF, video, or text file"),
 		tui.Text("  Enter          Send message"),
 		tui.Text("  Shift+Enter    New line"),
 		tui.Text("  Ctrl+C twice   Exit"),
@@ -2606,45 +2786,10 @@ func (a *App) expandFileReferences(input string) (string, []llm.Content, error) 
 			return match
 		}
 
-		ext := strings.ToLower(filepath.Ext(path))
-		filename := filepath.Base(path)
-
-		// Images → ImageContent
-		if mediaType, ok := fileMediaTypes[ext]; ok && strings.HasPrefix(mediaType, "image/") {
-			contentBlocks = append(contentBlocks, &llm.ImageContent{
-				Source: &llm.ContentSource{
-					Type:      llm.ContentSourceTypeBase64,
-					MediaType: mediaType,
-					Data:      base64.StdEncoding.EncodeToString(data),
-				},
-			})
-			return fmt.Sprintf("[image: %s]%s", path, trailing)
-		}
-
-		// PDFs and videos → DocumentContent (base64)
-		if mediaType, ok := fileMediaTypes[ext]; ok {
-			contentBlocks = append(contentBlocks, &llm.DocumentContent{
-				Source: &llm.ContentSource{
-					Type:      llm.ContentSourceTypeBase64,
-					MediaType: mediaType,
-					Data:      base64.StdEncoding.EncodeToString(data),
-				},
-				Title: filename,
-			})
-			return fmt.Sprintf("[document: %s]%s", path, trailing)
-		}
-
-		// Structured text files → DocumentContent (text source)
-		if textDocExtensions[ext] {
-			contentBlocks = append(contentBlocks, &llm.DocumentContent{
-				Source: &llm.ContentSource{
-					Type:      llm.ContentSourceTypeText,
-					MediaType: "text/plain",
-					Data:      string(data),
-				},
-				Title: filename,
-			})
-			return fmt.Sprintf("[document: %s]%s", path, trailing)
+		// Images, PDFs, videos, and structured text → native content blocks
+		if content, kind, ok := mediaContentFor(filepath.Base(path), data); ok {
+			contentBlocks = append(contentBlocks, content)
+			return fmt.Sprintf("[%s: %s]%s", kind, path, trailing)
 		}
 
 		// Default: inline as XML-style tag
