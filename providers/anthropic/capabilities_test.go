@@ -97,6 +97,38 @@ func TestBudgetAndEffortCombineOnNativeModel(t *testing.T) {
 	}
 }
 
+// TestDisabledThinkingCapNeverRaisesEffort guards a regression: the Opus 5 cap
+// was applied by passing the cap alone as the supported set, which clamped a
+// below-cap request *up* to it — asking for low with thinking disabled sent
+// high. The cap must only ever lower an effort.
+func TestDisabledThinkingCapNeverRaisesEffort(t *testing.T) {
+	for _, tt := range []struct {
+		requested llm.ReasoningEffort
+		want      string
+	}{
+		{llm.ReasoningEffortLow, "low"},
+		{llm.ReasoningEffortMedium, "medium"},
+		{llm.ReasoningEffortHigh, "high"},
+		// Above the cap, it still clamps down.
+		{llm.ReasoningEffortXHigh, "high"},
+		{llm.ReasoningEffortMax, "high"},
+	} {
+		t.Run(string(tt.requested), func(t *testing.T) {
+			req := buildReq(t, ModelClaudeOpus5,
+				llm.WithReasoningEffort(tt.requested),
+				llm.WithThinking(llm.ThinkingTypeDisabled))
+			assert.NotNil(t, req.OutputConfig)
+			assert.Equal(t, tt.want, req.OutputConfig.Effort)
+		})
+	}
+}
+
+func TestLookupCapabilitiesStripsAllVendorSegments(t *testing.T) {
+	caps, known := lookupCapabilities("openrouter/anthropic/claude-sonnet-5")
+	assert.True(t, known)
+	assert.True(t, caps.thinkingOnByDefault)
+}
+
 func TestReasoningBudgetBelowMinimumClamps(t *testing.T) {
 	req := buildReq(t, ModelClaudeOpus46, llm.WithReasoningBudget(10))
 	assert.NotNil(t, req.Thinking)

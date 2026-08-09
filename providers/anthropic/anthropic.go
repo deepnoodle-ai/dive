@@ -766,7 +766,7 @@ func applyEffort(
 		// Opus 5 rejects an effort above high while thinking is explicitly
 		// disabled, so the cap applies only to that combination.
 		if config.Thinking == llm.ThinkingTypeDisabled && caps.disabledEffortCap != "" {
-			capped, ok := llm.ClampReasoningEffort(effort, []llm.ReasoningEffort{caps.disabledEffortCap})
+			capped, ok := llm.ClampReasoningEffort(effort, effortsUpTo(caps.efforts, caps.disabledEffortCap))
 			if ok && capped != effort {
 				warnf(config, "model caps reasoning effort while thinking is disabled; clamping",
 					"model", model, "requested", effort, "using", capped)
@@ -1002,13 +1002,6 @@ func modelAcceptsTemperature(model string) bool {
 func modelRejectsManualThinking(model string) bool {
 	caps, known := lookupCapabilities(model)
 	return known && !caps.manualBudget && caps.adaptive
-}
-
-// modelSupportsAdaptiveThinking reports whether thinking:{type:"adaptive"} is
-// accepted. The 4.5 generation predates it and answers 400.
-func modelSupportsAdaptiveThinking(model string) bool {
-	caps, known := lookupCapabilities(model)
-	return !known || caps.adaptive
 }
 
 // modelDefaultsThinkingOn reports whether the model runs with adaptive thinking

@@ -193,15 +193,38 @@ var sortedCapabilityTable = func() []capabilityEntry {
 	return entries
 }()
 
+// effortsUpTo returns the levels of an ordered ladder up to and including the
+// given cap. It exists so a cap can only ever lower a requested effort: passing
+// the cap alone as the supported set would clamp a below-cap request *up* to it.
+func effortsUpTo(efforts []llm.ReasoningEffort, capLevel llm.ReasoningEffort) []llm.ReasoningEffort {
+	for i, level := range efforts {
+		if level == capLevel {
+			return efforts[:i+1]
+		}
+	}
+	return efforts
+}
+
 // lookupCapabilities returns the capabilities for a model id. The bool reports
 // whether the model is known: an unknown model — a fine-tune, a custom
 // deployment, or a base-URL passthrough — gets its parameters forwarded
 // untouched, since Dive cannot tell what it accepts.
+//
+// Known limitation: matching is a plain prefix test, so an unreleased point
+// release inherits its family's entry — a future "claude-opus-4-9" would match
+// "claude-opus-4" and be treated as legacy-budget. providers/modelcaps guards
+// the same hazard by requiring the next character to begin a variant suffix,
+// but that rule cannot work here: Anthropic writes versions with the same "-"
+// that separates variants and dates ("claude-opus-4-5-20251101"), so there is
+// nothing to key on. Adding a model to catalog.json therefore means checking
+// that it lands on the right entry, not only that it lands on one.
 func lookupCapabilities(model string) (modelCapabilities, bool) {
 	id := strings.ToLower(strings.TrimSpace(model))
-	// Accept vendor-qualified ids such as "anthropic/claude-sonnet-5".
-	if _, rest, ok := strings.Cut(id, "/"); ok {
-		id = rest
+	// Accept vendor-qualified ids such as "anthropic/claude-sonnet-5" and
+	// doubly-qualified ones such as "openrouter/anthropic/claude-sonnet-5":
+	// only the final segment names the model.
+	if idx := strings.LastIndex(id, "/"); idx >= 0 {
+		id = id[idx+1:]
 	}
 	for _, entry := range sortedCapabilityTable {
 		if strings.HasPrefix(id, entry.prefix) {

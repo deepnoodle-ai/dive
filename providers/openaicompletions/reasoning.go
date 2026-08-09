@@ -49,4 +49,3 @@ func normalizeToolReasoningEffort(model string, effort ReasoningEffort, hasFunct
 	}
 	return effort, false
 }
-

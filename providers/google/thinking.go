@@ -1,6 +1,8 @@
 package google
 
 import (
+	"math"
+
 	"github.com/deepnoodle-ai/dive/llm"
 	"google.golang.org/genai"
 )
@@ -158,6 +160,15 @@ func clampThinkingBudget(config *llm.Config, model string, caps modelCapabilitie
 		return dynamicThinkingBudget
 	}
 	if !known {
+		// No table entry to clamp against, but the conversion still has to be
+		// safe: int is 64-bit here, so a wild value would otherwise wrap into a
+		// plausible-looking budget.
+		switch {
+		case budget > math.MaxInt32:
+			return math.MaxInt32
+		case budget < math.MinInt32:
+			return math.MinInt32
+		}
 		return int32(budget)
 	}
 	if budget == 0 && caps.canDisableThinking {

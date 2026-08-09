@@ -24,11 +24,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   separate copies of the same prefix switches.
 - **New `llm.ClampReasoningEffort`** maps a requested effort onto the closest
   level a model accepts.
-
 - **Gemini thinking control is now wired up.** `WithReasoningEffort` maps to
-  `thinkingConfig.thinkingLevel`, `WithReasoningBudget` to `thinkingBudget`,
-  `WithAdaptiveThinking` to a dynamic budget, and `WithThinkingDisplay` to
-  `includeThoughts`. All four were previously discarded before the request.
+  `thinkingConfig.thinkingLevel`, or to a clamped `thinkingBudget` on models
+  with no thinking level (the 2.5 generation); `WithReasoningBudget` maps to
+  `thinkingBudget`, `WithAdaptiveThinking` to a dynamic budget, and
+  `WithThinkingDisplay` to `includeThoughts`. All four were previously
+  discarded before the request was built.
 
 ### Fixed
 
@@ -52,7 +53,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (was downgraded to `high`) and rejects `none`; the Grok multi-agent model
   accepts `max` and `none`; `gpt-5.2-pro` accepts only `medium`/`high`/`xhigh`;
   `gpt-5.3-chat-latest` accepts only `medium`.
-
 - **`claude-opus-5` was missing from every Anthropic reasoning classification**,
   so effort fell through to the legacy thinking-budget path and `max`/`xhigh`
   silently became `high`. It now uses native `output_config.effort`.

@@ -24,7 +24,7 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			_, found := modelcaps.LookupEntry("openai", id)
 			assert.True(t, found,
-				"model %q (%s) has no entry in modelcaps.OpenAI; add one so its "+
+				"model %q (%s) has no entry in the modelcaps OpenAI table; add one so its "+
 					"reasoning and temperature parameters are gated, or mark it "+
 					"Unverified if it cannot be reached", id, model.GoName)
 		})

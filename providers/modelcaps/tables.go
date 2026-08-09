@@ -52,9 +52,11 @@ var (
 	grokThroughMax = append(append([]llm.ReasoningEffort{}, grokBelowMax...), llm.ReasoningEffortMax)
 )
 
-// OpenAI maps OpenAI model-id prefixes to capabilities. Lookup takes the
-// longest matching prefix, so "gpt-5" and "gpt-5-pro" can coexist.
-var OpenAI = Table{
+// openAITable maps OpenAI model-id prefixes to capabilities. It is declared in
+// readable order rather than lookup order and so is unexported; callers go
+// through Lookup, which searches the longest-prefix-first copy below so that
+// "gpt-5" and "gpt-5-pro" can coexist.
+var openAITable = Table{
 	// No reasoning parameter at all. Sending one is rejected outright, which is
 	// what makes a non-empty default effort a request-breaking change.
 	{Prefix: "gpt-4o", Caps: Capabilities{Temperature: true}},
@@ -117,11 +119,11 @@ var OpenAI = Table{
 	{Prefix: "codex-ask", Unverified: true},
 }
 
-// Grok maps xAI model-id prefixes to capabilities. Grok is broadly more
-// permissive than OpenAI — most models take the full ladder below max — but
-// several reject the reasoning parameter entirely, including one whose name
-// says "reasoning".
-var Grok = Table{
+// grokTable maps xAI model-id prefixes to capabilities, unexported for the same
+// reason as openAITable. Grok is broadly more permissive than OpenAI — most
+// models take the full ladder below max — but several reject the reasoning
+// parameter entirely, including one whose name says "reasoning".
+var grokTable = Table{
 	// "does not support parameter reasoningEffort". Note that
 	// grok-4.20-0309-reasoning is among them despite its name.
 	{Prefix: "grok-4.20-0309-reasoning", Caps: Capabilities{Temperature: true}},
@@ -152,6 +154,6 @@ var Grok = Table{
 }
 
 var (
-	sortedOpenAI = sortByPrefixLength(OpenAI)
-	sortedGrok   = sortByPrefixLength(Grok)
+	sortedOpenAI = sortByPrefixLength(openAITable)
+	sortedGrok   = sortByPrefixLength(grokTable)
 )

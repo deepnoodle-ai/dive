@@ -228,11 +228,10 @@ func TestBuildRequestParams_ModelWithoutTemperatureOmitsIt(t *testing.T) {
 
 func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
 	tests := []struct {
-		name    string
-		model   string
-		effort  llm.ReasoningEffort
-		want    responses.ReasoningEffort
-		wantErr bool
+		name   string
+		model  string
+		effort llm.ReasoningEffort
+		want   responses.ReasoningEffort
 	}{
 		{
 			// grok-4.5 accepts xhigh, so max clamps one level rather than two.
@@ -294,11 +293,6 @@ func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
 			)
 
 			params, err := provider.buildRequestParams(config)
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), "not supported")
-				return
-			}
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, params.Reasoning.Effort)
 		})

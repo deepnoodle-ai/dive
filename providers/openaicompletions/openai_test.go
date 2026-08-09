@@ -95,6 +95,36 @@ func TestApplyRequestConfig_UnsupportedReasoningEffortClampsForKnownModel(t *tes
 	assert.Equal(t, ReasoningEffortMinimal, req.ReasoningEffort)
 }
 
+func TestApplyRequestConfig_OmitsTemperatureForModelsThatRejectIt(t *testing.T) {
+	// gpt-5 answers 400 "Unsupported parameter: 'temperature'".
+	temperature := 0.5
+	logger := &recordingLogger{}
+	provider := New(WithModel(ModelGPT5))
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{
+		Temperature: &temperature,
+		Logger:      logger,
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, req.Temperature)
+	assert.Len(t, logger.warnings, 1)
+}
+
+func TestApplyRequestConfig_KeepsTemperatureForModelsThatAcceptIt(t *testing.T) {
+	temperature := 0.5
+	logger := &recordingLogger{}
+	provider := New(WithModel(ModelGPT51))
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{
+		Temperature: &temperature,
+		Logger:      logger,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, req.Temperature)
+	assert.Equal(t, temperature, *req.Temperature)
+	assert.Len(t, logger.warnings, 0)
+}
+
 func TestApplyRequestConfig_MistralOmitsReasoningEffort(t *testing.T) {
 	provider := New(
 		WithEndpoint("https://api.mistral.ai/v1/chat/completions"),

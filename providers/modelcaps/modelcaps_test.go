@@ -144,6 +144,52 @@ func TestLookupHandlesVendorPrefixes(t *testing.T) {
 	assert.True(t, known)
 }
 
+// TestUnknownPointReleasesDoNotInheritFamilyLadder guards the prefix boundary.
+// "gpt-5" prefixes "gpt-5.7" as a string, so a plain HasPrefix would hand the
+// next point release gpt-5's narrower ladder and silently clamp max to high —
+// and the catalog coverage test would not catch it, since the id does resolve.
+func TestUnknownPointReleasesDoNotInheritFamilyLadder(t *testing.T) {
+	for _, model := range []string{"gpt-5.7", "gpt-5.9-turbo", "grok-4.7", "grok-3.9"} {
+		t.Run(model, func(t *testing.T) {
+			_, found := LookupEntry("", model)
+			assert.False(t, found)
+			// Unknown means the caller forwards what it was given.
+			effort, send := ResolveEffort("", model, llm.ReasoningEffortMax, nil)
+			assert.True(t, send)
+			assert.Equal(t, llm.ReasoningEffortMax, effort)
+		})
+	}
+}
+
+func TestVariantAndDateSuffixesStillMatch(t *testing.T) {
+	for _, tt := range []struct{ model, prefix string }{
+		{"gpt-5-pro", "gpt-5-pro"},
+		{"gpt-5-mini", "gpt-5-mini"},
+		{"o4-mini-deep-research", "o4-mini-deep-research"},
+		{"gpt-5.3-chat-latest", "gpt-5.3-chat"},
+		{"grok-4-1-fast-reasoning", "grok-4"},
+		{"grok-4-0709", "grok-4"},
+		{"grok-build-0.1", "grok-build"},
+		{"grok-code-fast-1", "grok-code-fast"},
+	} {
+		t.Run(tt.model, func(t *testing.T) {
+			entry, found := LookupEntry("", tt.model)
+			assert.True(t, found)
+			assert.Equal(t, tt.prefix, entry.Prefix)
+		})
+	}
+}
+
+func TestLookupReturnsIndependentEffortSlice(t *testing.T) {
+	first, known := Lookup("openai", "gpt-5.6")
+	assert.True(t, known)
+	assert.True(t, len(first.Efforts) > 0)
+	first.Efforts[0] = llm.ReasoningEffort("mutated")
+
+	second, _ := Lookup("openai", "gpt-5.6")
+	assert.Equal(t, llm.ReasoningEffortNone, second.Efforts[0])
+}
+
 func TestTableForUnknownVendorIsNil(t *testing.T) {
 	assert.Nil(t, TableFor("openrouter", "mistralai/mistral-large"))
 }

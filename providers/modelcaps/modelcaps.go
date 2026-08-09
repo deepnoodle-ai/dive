@@ -63,6 +63,24 @@ func NormalizeModelID(model string) string {
 	return id
 }
 
+// matchesPrefix reports whether an id belongs to the family a prefix names.
+//
+// A plain strings.HasPrefix is not enough: OpenAI and xAI separate versions with
+// "." and variants with "-", so "gpt-5" prefixes "gpt-5.7" and "grok-4" prefixes
+// "grok-4.7". Inheriting a family's ladder that way silently misclassifies the
+// next point release — gpt-5.7 would be capped at gpt-5's "high" — and the
+// catalog coverage test would still pass, because the id does resolve to an
+// entry. Requiring the next character to start a variant or date suffix keeps
+// "gpt-5-pro", "o4-mini-deep-research" and "grok-4-1-fast-reasoning" matching
+// while letting unknown point releases fall through as unknown.
+func matchesPrefix(id, prefix string) bool {
+	if !strings.HasPrefix(id, prefix) {
+		return false
+	}
+	rest := id[len(prefix):]
+	return rest == "" || rest[0] == '-'
+}
+
 // TableFor picks the table for a provider and model. It consults the model id
 // as well as the provider name, because OpenRouter serves both vendors' models
 // through one provider. An unrecognized vendor returns nil, which Lookup
@@ -92,11 +110,31 @@ func TableFor(providerName, model string) Table {
 // deployment, an unverified entry — is reported as unknown, and the caller must
 // forward its parameters untouched, since Dive cannot tell what it accepts.
 func Lookup(providerName, model string) (Capabilities, bool) {
+	caps, known := lookup(providerName, model)
+	if !known {
+		return Capabilities{}, false
+	}
+	// Hand back an independent slice: the tables are package-level and a caller
+	// indexing or appending into Efforts would corrupt every later lookup.
+	return Capabilities{Efforts: cloneEfforts(caps.Efforts), Temperature: caps.Temperature}, true
+}
+
+// lookup is the internal, allocation-free form used on the request path.
+func lookup(providerName, model string) (Capabilities, bool) {
 	entry, found := LookupEntry(providerName, model)
 	if !found || entry.Unverified {
 		return Capabilities{}, false
 	}
 	return entry.Caps, true
+}
+
+func cloneEfforts(efforts []llm.ReasoningEffort) []llm.ReasoningEffort {
+	if len(efforts) == 0 {
+		return nil
+	}
+	out := make([]llm.ReasoningEffort, len(efforts))
+	copy(out, efforts)
+	return out
 }
 
 // LookupEntry returns the raw entry, including unverified ones. It backs the
@@ -105,7 +143,7 @@ func Lookup(providerName, model string) (Capabilities, bool) {
 func LookupEntry(providerName, model string) (Entry, bool) {
 	id := NormalizeModelID(model)
 	for _, entry := range TableFor(providerName, model) {
-		if strings.HasPrefix(id, entry.Prefix) {
+		if matchesPrefix(id, entry.Prefix) {
 			return entry, true
 		}
 	}
@@ -126,7 +164,7 @@ func ResolveEffort(
 	if effort == "" {
 		return "", false
 	}
-	caps, known := Lookup(providerName, model)
+	caps, known := lookup(providerName, model)
 	if !known {
 		return effort, true // unknown model: forward untouched
 	}
@@ -146,7 +184,7 @@ func ResolveEffort(
 // AcceptsTemperature reports whether the model takes a temperature. Unknown
 // models are assumed to accept it, as they did before these tables existed.
 func AcceptsTemperature(providerName, model string) bool {
-	caps, known := Lookup(providerName, model)
+	caps, known := lookup(providerName, model)
 	return !known || caps.Temperature
 }
 

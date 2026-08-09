@@ -23,7 +23,7 @@ func TestEveryCatalogModelHasCapabilities(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			_, found := modelcaps.LookupEntry("grok", id)
 			assert.True(t, found,
-				"model %q (%s) has no entry in modelcaps.Grok; add one so its "+
+				"model %q (%s) has no entry in the modelcaps Grok table; add one so its "+
 					"reasoning parameters are gated", id, model.GoName)
 		})
 	}

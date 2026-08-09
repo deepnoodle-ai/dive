@@ -1,6 +1,7 @@
 package google
 
 import (
+	"math"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -171,6 +172,24 @@ func TestBudgetOnlyModelCannotDisableDegradesToMinimum(t *testing.T) {
 	assert.NotNil(t, thinking)
 	assert.NotNil(t, thinking.ThinkingBudget)
 	assert.Equal(t, int32(128), *thinking.ThinkingBudget)
+}
+
+// TestUnknownModelBudgetDoesNotWrap guards the int32 narrowing on the
+// unknown-model path: without a bound check a wild value wraps into a
+// plausible-looking budget rather than being obviously clamped.
+func TestUnknownModelBudgetDoesNotWrap(t *testing.T) {
+	thinking := buildThinking(t, "my-tuned-gemini", llm.WithReasoningBudget(math.MaxInt32+1))
+	assert.NotNil(t, thinking)
+	assert.Equal(t, int32(math.MaxInt32), *thinking.ThinkingBudget)
+
+	thinking = buildThinking(t, "my-tuned-gemini", llm.WithReasoningBudget(math.MinInt32-1))
+	assert.NotNil(t, thinking)
+	assert.Equal(t, int32(math.MinInt32), *thinking.ThinkingBudget)
+
+	// In-range values still pass through untouched.
+	thinking = buildThinking(t, "my-tuned-gemini", llm.WithReasoningBudget(4096))
+	assert.NotNil(t, thinking)
+	assert.Equal(t, int32(4096), *thinking.ThinkingBudget)
 }
 
 func TestRetiredModelPassesThrough(t *testing.T) {
