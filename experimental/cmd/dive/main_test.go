@@ -30,16 +30,19 @@ func TestGetDefaultModel(t *testing.T) {
 		expected string
 	}{
 		{
+			// Both Anthropic cases track anthropic.DefaultModel rather than a
+			// separate CLI-only pin; the literal is spelled out so a change to
+			// the library default has to be acknowledged here too.
 			name:     "no api keys defaults to claude",
 			envVars:  map[string]string{},
-			expected: "claude-haiku-4-5",
+			expected: "claude-sonnet-5",
 		},
 		{
 			name: "anthropic key present",
 			envVars: map[string]string{
 				"ANTHROPIC_API_KEY": "test",
 			},
-			expected: "claude-haiku-4-5",
+			expected: "claude-sonnet-5",
 		},
 		{
 			name: "google key present",
@@ -187,6 +190,48 @@ func TestNewCLIModelSettingsThinkingEffortEnv(t *testing.T) {
 	assert.Equal(t, settings.ReasoningEffort, llm.ReasoningEffortXHigh)
 	assert.Equal(t, settings.Thinking, llm.ThinkingType(""))
 	assert.Equal(t, settings.ThinkingDisplay, llm.ThinkingDisplay(""))
+}
+
+func TestNewCLIModelSettingsThinkingEffortDefaultsToMedium(t *testing.T) {
+	// Mirrors the real flag definition in main(): unset means medium, and an
+	// explicitly empty value omits the parameter so non-reasoning models can
+	// still be driven from the CLI.
+	for _, tt := range []struct {
+		name     string
+		args     []string
+		expected llm.ReasoningEffort
+	}{
+		{"unset defaults to medium", nil, llm.ReasoningEffortMedium},
+		{"explicit empty omits effort", []string{"--thinking-effort", ""}, llm.ReasoningEffort("")},
+		{"explicit value wins", []string{"--thinking-effort", "low"}, llm.ReasoningEffortLow},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app := cli.New("test")
+			var settings *dive.ModelSettings
+			app.Main().
+				Flags(
+					cli.Int("max-tokens").
+						Default(16000).
+						Env("DIVE_MAX_TOKENS"),
+					cli.Bool("show-thinking").
+						Default(false).
+						Env("DIVE_SHOW_THINKING"),
+					cli.String("thinking-effort").
+						Default(string(llm.ReasoningEffortMedium)).
+						Env("DIVE_THINKING_EFFORT"),
+				).
+				Run(func(ctx *cli.Context) error {
+					settings, _ = newCLIModelSettings(ctx)
+					return nil
+				})
+
+			result := app.Test(t, cli.TestArgs(tt.args...))
+			assert.True(t, result.Success(), result.Stderr)
+			assert.Equal(t, settings.ReasoningEffort, tt.expected)
+			// The default must not imply thinking; --show-thinking owns that.
+			assert.Equal(t, settings.Thinking, llm.ThinkingType(""))
+		})
+	}
 }
 
 func TestParseThinkingEffortAllowsProviderSpecificValues(t *testing.T) {

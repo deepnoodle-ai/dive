@@ -22,6 +22,7 @@ import (
 	"github.com/deepnoodle-ai/dive/experimental/toolkit/kagi"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/permission"
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
 	"github.com/deepnoodle-ai/dive/session"
 	"github.com/deepnoodle-ai/dive/skill"
 	"github.com/deepnoodle-ai/dive/subagent"
@@ -126,9 +127,9 @@ func main() {
 				Env("DIVE_SHOW_THINKING").
 				Help("Request and show summarized model thinking when supported"),
 			cli.String("thinking-effort").
-				Default("").
+				Default(string(llm.ReasoningEffortMedium)).
 				Env("DIVE_THINKING_EFFORT").
-				Help("Thinking effort: none, minimal, low, medium, high, xhigh, max, or provider-specific value"),
+				Help("Thinking effort: none, minimal, low, medium, high, xhigh, max, or provider-specific value. Pass an empty value to omit the parameter entirely"),
 			cli.String("system-prompt").
 				Default("").
 				Help("System prompt to use for the session"),
@@ -1229,7 +1230,7 @@ func getDefaultVideoModel() string {
 
 func getDefaultModel() string {
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		return "claude-haiku-4-5"
+		return anthropic.DefaultModel
 	}
 	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
 		return "gemini-3.6-flash"
@@ -1243,5 +1244,5 @@ func getDefaultModel() string {
 	if os.Getenv("MISTRAL_API_KEY") != "" {
 		return "mistral-small-latest"
 	}
-	return "claude-haiku-4-5"
+	return anthropic.DefaultModel
 }

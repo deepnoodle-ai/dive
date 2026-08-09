@@ -8,26 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **`anthropic.DefaultModel` is now `ModelClaudeSonnet5`** (`claude-sonnet-5`,
-  1M context, $3/$15 per MTok), replacing `claude-opus-5`. Callers that relied on
-  the default now get a cheaper, faster model; pass `WithModel(ModelClaudeOpus5)`
-  to keep Opus 5. The CLI's own default (`claude-haiku-4-5`) is unchanged.
+- **`anthropic.DefaultModel` is now `ModelClaudeSonnet5`** (`claude-sonnet-5`),
+  replacing `claude-opus-5`. Pass `WithModel(ModelClaudeOpus5)` to keep Opus 5.
+- **`openrouter.DefaultModel` is now `ModelClaudeSonnet5`**
+  (`anthropic/claude-sonnet-5`), matching the Anthropic provider default.
+- **The CLI's Anthropic default follows `anthropic.DefaultModel`** rather than a
+  separate hardcoded `claude-haiku-4-5`.
+- **The CLI defaults `--thinking-effort` to `medium`.** Pass an empty value to
+  omit the parameter on models that reject it.
 
 ### Fixed
 
-- **Anthropic per-model capability gaps.** `claude-opus-5` was absent from every
-  reasoning/thinking classification in `providers/anthropic`, so effort requests
-  fell through to the legacy thinking-budget path and `max`/`xhigh` were silently
-  downgraded to `high`. Opus 5 now uses native `output_config.effort`, the full
-  effort ladder, adaptive-only thinking, and thinking-on-by-default.
-- **Temperature is now dropped on Opus 4.7/4.8.** These models reject sampling
-  parameters with a 400; because thinking is off by default on them, a
-  caller-supplied `Temperature` was forwarded and rejected by the API.
-- **`xhigh` effort is no longer downgraded on Sonnet 5**, which supports the full
-  `low`–`max` ladder.
-- **Forced `tool_choice` no longer fails client-side on thinking-by-default
-  models** that accept an explicit thinking disable (Opus 5, Sonnet 5). An
-  explicit thinking config still takes precedence.
+- **`claude-opus-5` was missing from every Anthropic reasoning classification**,
+  so effort fell through to the legacy thinking-budget path and `max`/`xhigh`
+  silently became `high`. It now uses native `output_config.effort`.
+- **`temperature` is now dropped on Opus 4.7/4.8**, which reject it with a 400.
+- **`xhigh` is no longer downgraded on Sonnet 5**, which supports the full ladder.
+- **Forced `tool_choice` no longer fails client-side on Opus 5 and Sonnet 5**,
+  which default thinking on but accept an explicit disable.
 
 ## [1.19.0] - 2026-08-09
 
