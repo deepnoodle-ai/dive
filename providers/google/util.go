@@ -31,6 +31,13 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	var content []llm.Content
 	for _, part := range candidate.Content.Parts {
 		if part.Text != "" {
+			// Thought summaries arrive as text parts flagged Thought. Emitting
+			// them as TextContent would splice the model's reasoning into its
+			// answer.
+			if part.Thought {
+				content = append(content, &llm.ThinkingContent{Thinking: part.Text})
+				continue
+			}
 			content = append(content, &llm.TextContent{Text: part.Text})
 		} else if part.FunctionCall != nil {
 			// Handle function calls - convert args to JSON
@@ -420,6 +427,9 @@ func buildGenAIGenerateConfig(request *Request) (*genai.GenerateContentConfig, e
 	}
 	if request.MaxTokens > 0 {
 		genConfig.MaxOutputTokens = int32(request.MaxTokens)
+	}
+	if request.Thinking != nil {
+		genConfig.ThinkingConfig = request.Thinking
 	}
 	if request.System != "" {
 		genConfig.SystemInstruction = &genai.Content{

@@ -45,16 +45,20 @@ func TestApplyRequestConfig_NormalizesReasoningEffort(t *testing.T) {
 			want:   ReasoningEffortHigh,
 		},
 		{
-			name:   "openrouter x-ai grok max maps to high",
+			// grok-4.5 accepts xhigh, so max clamps to xhigh rather than
+			// dropping two levels to high.
+			name:   "openrouter x-ai grok max maps to xhigh",
 			model:  "x-ai/grok-4.5",
 			effort: llm.ReasoningEffortMax,
-			want:   ReasoningEffortHigh,
+			want:   ReasoningEffortXHigh,
 		},
 		{
-			name:   "openrouter x-ai grok build minimal maps to low",
+			// grok-build rejects the reasoning parameter entirely
+			// ("does not support parameter reasoningEffort"), so it is omitted.
+			name:   "openrouter x-ai grok build omits effort",
 			model:  "x-ai/grok-build-0.1",
 			effort: llm.ReasoningEffortMinimal,
-			want:   ReasoningEffortLow,
+			want:   ReasoningEffort(""),
 		},
 		{
 			name:   "unknown model effort passes through",
@@ -81,12 +85,44 @@ func TestApplyRequestConfig_NormalizesReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestApplyRequestConfig_UnsupportedReasoningEffortErrorsForKnownModel(t *testing.T) {
+func TestApplyRequestConfig_UnsupportedReasoningEffortClampsForKnownModel(t *testing.T) {
+	// The gpt-5 family takes minimal but not none, so none clamps up to the
+	// least eager level the model actually accepts instead of failing.
 	provider := New(WithModel(ModelGPT5))
 	var req Request
 	err := provider.applyRequestConfig(&req, &llm.Config{ReasoningEffort: llm.ReasoningEffortNone})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not supported")
+	assert.NoError(t, err)
+	assert.Equal(t, ReasoningEffortMinimal, req.ReasoningEffort)
+}
+
+func TestApplyRequestConfig_OmitsTemperatureForModelsThatRejectIt(t *testing.T) {
+	// gpt-5 answers 400 "Unsupported parameter: 'temperature'".
+	temperature := 0.5
+	logger := &recordingLogger{}
+	provider := New(WithModel(ModelGPT5))
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{
+		Temperature: &temperature,
+		Logger:      logger,
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, req.Temperature)
+	assert.Len(t, logger.warnings, 1)
+}
+
+func TestApplyRequestConfig_KeepsTemperatureForModelsThatAcceptIt(t *testing.T) {
+	temperature := 0.5
+	logger := &recordingLogger{}
+	provider := New(WithModel(ModelGPT51))
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{
+		Temperature: &temperature,
+		Logger:      logger,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, req.Temperature)
+	assert.Equal(t, temperature, *req.Temperature)
+	assert.Len(t, logger.warnings, 0)
 }
 
 func TestApplyRequestConfig_MistralOmitsReasoningEffort(t *testing.T) {

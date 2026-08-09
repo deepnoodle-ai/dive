@@ -15,6 +15,7 @@ import (
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
+	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 	"github.com/deepnoodle-ai/wonton/retry"
 )
 
@@ -604,13 +605,16 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	req.Tools = tools
-	req.Temperature = config.Temperature
+	if config.Temperature != nil && !modelcaps.AcceptsTemperature(p.Name(), req.Model) {
+		if config.Logger != nil {
+			config.Logger.Warn("model does not support temperature; omitting it", "model", req.Model)
+		}
+	} else {
+		req.Temperature = config.Temperature
+	}
 	req.PresencePenalty = config.PresencePenalty
 	req.FrequencyPenalty = config.FrequencyPenalty
-	reasoningEffort, includeReasoningEffort, err := p.resolveReasoningEffort(req.Model, config)
-	if err != nil {
-		return err
-	}
+	reasoningEffort, includeReasoningEffort := p.resolveReasoningEffort(req.Model, config)
 	if includeReasoningEffort {
 		requestedReasoningEffort := config.ReasoningEffort
 		var adjusted bool

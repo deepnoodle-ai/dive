@@ -678,7 +678,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.ContextManagement = config.ContextManagement
 	}
 
-	if !modelRejectsTemperature(req.Model) && !requestHasThinkingEnabled(req.Model, req.Thinking) {
+	if modelAcceptsTemperature(req.Model) && !requestHasThinkingEnabled(req.Model, req.Thinking) {
 		req.Temperature = config.Temperature
 	} else if config.Temperature != nil && config.Logger != nil {
 		config.Logger.Warn("temperature is not supported by this Anthropic request and will be ignored",
@@ -690,58 +690,41 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	return nil
 }
 
+// defaultThinkingBudget is the budget used when a caller asks for thinking
+// without saying how much — it matches the budget medium effort maps to.
+const defaultThinkingBudget = 4096
+
+// minThinkingBudget is the smallest budget the API accepts.
+const minThinkingBudget = 1024
+
+func warnf(config *llm.Config, msg string, args ...any) {
+	if config.Logger != nil {
+		config.Logger.Warn(msg, args...)
+	}
+}
+
 // applyReasoningConfig maps Dive's reasoning/thinking options onto the Anthropic
-// request, accounting for per-model differences:
-//   - Opus 4.5+, Sonnet 4.6, and the Claude 5 models (Opus 5, Fable 5, Mythos 5,
-//     Sonnet 5) take the native effort parameter via output_config; older models
-//     emulate effort with a thinking budget.
-//   - Opus 4.6/4.7/4.8, Sonnet 4.6, and the Claude 5 models support adaptive
-//     thinking. Opus 4.7/4.8 and the Claude 5 models reject manual budgets, so
-//     a budget set against them transparently falls back to adaptive thinking.
-//   - Opus 5 accepts an explicit thinking disable only at effort high or below.
+// request. Per-model differences come from modelCapabilityTable rather than from
+// prefix tests scattered through this file.
+//
+// Settings a model cannot accept are clamped or dropped with a warning, never
+// turned into an error: one ModelSettings is meant to survive being pointed at a
+// different model. Unknown models — fine-tunes, gateways, custom deployments —
+// keep their parameters untouched, since Dive cannot know what they accept.
 func applyReasoningConfig(req *Request, config *llm.Config) error {
 	model := req.Model
+	caps, known := lookupCapabilities(model)
 
-	thinking, err := resolveThinking(model, config)
-	if err != nil {
-		return err
-	}
+	thinking := resolveThinking(model, caps, known, config)
 
 	if config.ReasoningEffort != "" {
-		effort, err := normalizeReasoningEffort(model, config.ReasoningEffort)
-		if err != nil {
-			return err
-		}
-		if config.Thinking == llm.ThinkingTypeDisabled &&
-			modelRejectsDisabledThinkingAboveHighEffort(model) &&
-			(effort == llm.ReasoningEffortXHigh || effort == llm.ReasoningEffortMax) {
-			return fmt.Errorf("cannot set reasoning effort %s with thinking disabled on model %s: it accepts an explicit thinking disable only at effort high or below", effort, model)
-		}
-		if modelSupportsEffortParam(model) {
-			req.OutputConfig = &OutputConfig{Effort: string(effort)}
-		} else {
-			// Legacy: emulate the effort parameter with a thinking budget.
-			// This model lacks the native effort parameter, so honoring effort
-			// here would re-enable thinking — don't silently override an
-			// explicit disable.
-			if config.Thinking == llm.ThinkingTypeDisabled {
-				return fmt.Errorf("cannot set reasoning effort with thinking disabled on model %s: it has no native effort parameter and effort is emulated with a thinking budget", model)
-			}
-			if thinking != nil && config.ReasoningBudget != nil {
-				return fmt.Errorf("cannot set both reasoning budget and effort on model %s", model)
-			}
-			budget, err := legacyEffortBudget(effort)
-			if err != nil {
-				return err
-			}
-			thinking = &Thinking{Type: "enabled", BudgetTokens: budget}
-		}
+		thinking = applyEffort(req, config, model, caps, known, thinking)
 	}
 
 	if thinking != nil {
-		if err := validateThinkingBudget(req, config, thinking); err != nil {
-			return err
-		}
+		thinking = clampThinkingBudget(req, config, thinking)
+	}
+	if thinking != nil {
 		if config.ThinkingDisplay != "" && thinking.Type != "disabled" {
 			thinking.Display = string(config.ThinkingDisplay)
 		}
@@ -750,104 +733,205 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 	return nil
 }
 
+// applyEffort places the requested effort on the request using whichever
+// mechanism the model has: the native effort parameter, an emulated thinking
+// budget, or neither.
+func applyEffort(
+	req *Request,
+	config *llm.Config,
+	model string,
+	caps modelCapabilities,
+	known bool,
+	thinking *Thinking,
+) *Thinking {
+	// An unknown model keeps the pre-table behavior: effort is emulated with a
+	// thinking budget, since the native parameter is newer than most gateways.
+	kind := reasoningLegacyBudget
+	if known {
+		kind = caps.reasoningKind()
+	}
+
+	switch kind {
+	case reasoningNone:
+		warnf(config, "model does not support reasoning; ignoring reasoning effort",
+			"model", model, "effort", config.ReasoningEffort)
+		return thinking
+
+	case reasoningNative:
+		effort, clamped := llm.ClampReasoningEffort(config.ReasoningEffort, caps.efforts)
+		if clamped {
+			warnf(config, "model does not support the requested reasoning effort; clamping",
+				"model", model, "requested", config.ReasoningEffort, "using", effort)
+		}
+		// Opus 5 rejects an effort above high while thinking is explicitly
+		// disabled, so the cap applies only to that combination.
+		if config.Thinking == llm.ThinkingTypeDisabled && caps.disabledEffortCap != "" {
+			capped, ok := llm.ClampReasoningEffort(effort, effortsUpTo(caps.efforts, caps.disabledEffortCap))
+			if ok && capped != effort {
+				warnf(config, "model caps reasoning effort while thinking is disabled; clamping",
+					"model", model, "requested", effort, "using", capped)
+				effort = capped
+			}
+		}
+		req.OutputConfig = &OutputConfig{Effort: string(effort)}
+		return thinking
+
+	default: // reasoningLegacyBudget
+		// The model has no native effort parameter, so effort is emulated with
+		// a thinking budget. That cannot coexist with an explicit disable or
+		// with a budget the caller set themselves. The disable is checked on
+		// the config rather than the resolved value, because for most models
+		// "disabled" is expressed by omitting the thinking parameter entirely.
+		if config.Thinking == llm.ThinkingTypeDisabled {
+			warnf(config, "model emulates reasoning effort with a thinking budget; ignoring effort because thinking is disabled",
+				"model", model, "effort", config.ReasoningEffort)
+			return thinking
+		}
+		if config.ReasoningBudget != nil {
+			warnf(config, "model emulates reasoning effort with a thinking budget; keeping the explicit budget and ignoring effort",
+				"model", model, "effort", config.ReasoningEffort)
+			return thinking
+		}
+		budget, ok := legacyEffortBudget(config.ReasoningEffort)
+		if !ok {
+			warnf(config, "unrecognized reasoning effort for a model without a native effort parameter; ignoring it",
+				"model", model, "effort", config.ReasoningEffort)
+			return thinking
+		}
+		return &Thinking{Type: "enabled", BudgetTokens: budget}
+	}
+}
+
 // resolveThinking determines the thinking configuration from the budget and
 // explicit thinking-type options, independent of the effort parameter.
-func resolveThinking(model string, config *llm.Config) (*Thinking, error) {
-	adaptiveOnly := modelRejectsManualThinking(model) // Opus 4.7/4.8, Fable 5, Mythos 5
+func resolveThinking(model string, caps modelCapabilities, known bool, config *llm.Config) *Thinking {
+	// Unknown models keep the pre-table assumption: manual budgets work,
+	// adaptive thinking is passed through as asked.
+	canBudget := !known || caps.manualBudget
+	canAdapt := !known || caps.adaptive
 
 	switch config.Thinking {
 	case llm.ThinkingTypeDisabled:
-		// Models that default thinking on (Sonnet 5) require an explicit
-		// disable to actually turn thinking off; omitting the parameter would
-		// leave adaptive thinking enabled. All other models treat an omitted
-		// thinking parameter as off.
-		if modelDefaultsThinkingOn(model) {
-			return &Thinking{Type: "disabled"}, nil
+		// Fable 5 and Mythos 5 reject an explicit disable; omitting the
+		// parameter is the accepted way to ask them for less.
+		if known && !caps.explicitDisable {
+			warnf(config, "model does not accept an explicit thinking disable; omitting the thinking parameter",
+				"model", model)
+			return nil
 		}
-		return nil, nil
+		// Models that think by default need the explicit disable to actually
+		// turn it off. Everywhere else an omitted parameter already means off.
+		if known && caps.thinkingOnByDefault {
+			return &Thinking{Type: "disabled"}
+		}
+		return nil
+
 	case llm.ThinkingTypeAdaptive:
-		return &Thinking{Type: "adaptive"}, nil
+		if canAdapt {
+			return &Thinking{Type: "adaptive"}
+		}
+		// The 4.5 generation answers 400 for adaptive thinking. The caller
+		// still asked to think, so fall back to the mechanism it does have.
+		if canBudget {
+			budget := defaultThinkingBudget
+			if config.ReasoningBudget != nil {
+				budget = *config.ReasoningBudget
+			} else if b, ok := legacyEffortBudget(config.ReasoningEffort); ok {
+				budget = b
+			}
+			warnf(config, "model does not support adaptive thinking; using a manual thinking budget",
+				"model", model, "budget", budget)
+			return &Thinking{Type: "enabled", BudgetTokens: clampBudgetFloor(budget)}
+		}
+		warnf(config, "model does not support thinking; ignoring the thinking setting", "model", model)
+		return nil
+
 	case llm.ThinkingTypeEnabled:
-		if adaptiveOnly {
-			return &Thinking{Type: "adaptive"}, nil
+		if !canBudget {
+			if canAdapt {
+				return &Thinking{Type: "adaptive"}
+			}
+			warnf(config, "model does not support thinking; ignoring the thinking setting", "model", model)
+			return nil
 		}
 		if config.ReasoningBudget == nil {
-			return nil, fmt.Errorf("thinking type %q requires a reasoning budget; use WithReasoningBudget or WithAdaptiveThinking", llm.ThinkingTypeEnabled)
+			// Asking to think without saying how much: prefer adaptive where
+			// the model has it, otherwise pick the default budget.
+			if canAdapt {
+				return &Thinking{Type: "adaptive"}
+			}
+			warnf(config, "thinking was enabled without a reasoning budget; using the default budget",
+				"model", model, "budget", defaultThinkingBudget)
+			return &Thinking{Type: "enabled", BudgetTokens: defaultThinkingBudget}
 		}
 		// Budget provided: handled by the block below.
 	}
 
 	if config.ReasoningBudget != nil {
 		budget := *config.ReasoningBudget
-		if budget < 1024 {
-			return nil, fmt.Errorf("reasoning budget must be at least 1024")
+		if budget < minThinkingBudget {
+			warnf(config, "reasoning budget is below the minimum; clamping",
+				"model", model, "requested", budget, "using", minThinkingBudget)
+			budget = minThinkingBudget
 		}
-		if adaptiveOnly {
-			if config.Logger != nil {
-				config.Logger.Warn("model does not support manual thinking budgets; using adaptive thinking",
+		if !canBudget {
+			if canAdapt {
+				warnf(config, "model does not support manual thinking budgets; using adaptive thinking",
 					"model", model)
+				return &Thinking{Type: "adaptive"}
 			}
-			return &Thinking{Type: "adaptive"}, nil
+			warnf(config, "model does not support thinking; ignoring the reasoning budget", "model", model)
+			return nil
 		}
-		return &Thinking{Type: "enabled", BudgetTokens: budget}, nil
+		return &Thinking{Type: "enabled", BudgetTokens: budget}
 	}
 
-	return nil, nil
+	return nil
 }
 
-// normalizeReasoningEffort maps provider-neutral efforts onto Anthropic's
-// documented effort levels while keeping older low/medium/high behavior intact.
-func normalizeReasoningEffort(model string, effort llm.ReasoningEffort) (llm.ReasoningEffort, error) {
-	switch effort {
-	case llm.ReasoningEffortLow,
-		llm.ReasoningEffortMedium,
-		llm.ReasoningEffortHigh:
-		return effort, nil
-	case llm.ReasoningEffortMinimal:
-		return llm.ReasoningEffortLow, nil
-	case llm.ReasoningEffortNone:
-		return "", fmt.Errorf("reasoning effort %q is not supported by Anthropic models", effort)
-	case llm.ReasoningEffortXHigh:
-		if modelSupportsXHighEffort(model) {
-			return effort, nil
-		}
-		return llm.ReasoningEffortHigh, nil
-	case llm.ReasoningEffortMax:
-		if modelSupportsMaxEffort(model) {
-			return effort, nil
-		}
-		return llm.ReasoningEffortHigh, nil
-	default:
-		return effort, nil
+func clampBudgetFloor(budget int) int {
+	if budget < minThinkingBudget {
+		return minThinkingBudget
 	}
+	return budget
 }
 
 // legacyEffortBudget maps a reasoning effort level to a thinking token budget
-// for older models that lack the native effort parameter.
-func legacyEffortBudget(effort llm.ReasoningEffort) (int, error) {
+// for models that lack the native effort parameter. The bool reports whether
+// the effort was recognized.
+func legacyEffortBudget(effort llm.ReasoningEffort) (int, bool) {
 	switch effort {
 	case llm.ReasoningEffortLow, llm.ReasoningEffortMinimal:
-		return 1024, nil
+		return 1024, true
 	case llm.ReasoningEffortMedium:
-		return 4096, nil
+		return 4096, true
 	case llm.ReasoningEffortHigh, llm.ReasoningEffortXHigh, llm.ReasoningEffortMax:
-		return 16384, nil
+		return 16384, true
 	default:
-		return 0, fmt.Errorf("invalid reasoning effort: %s", effort)
+		return 0, false
 	}
 }
 
-func validateThinkingBudget(req *Request, config *llm.Config, thinking *Thinking) error {
+// clampThinkingBudget keeps the thinking budget below max_tokens, which the API
+// requires outside interleaved thinking. When max_tokens leaves no room for a
+// valid budget at all, thinking is dropped rather than sent as a doomed request.
+func clampThinkingBudget(req *Request, config *llm.Config, thinking *Thinking) *Thinking {
 	if thinking.Type != "enabled" || config.IsFeatureEnabled(FeatureInterleavedThinking) {
+		return thinking
+	}
+	if req.MaxTokens == nil || thinking.BudgetTokens < *req.MaxTokens {
+		return thinking
+	}
+	capped := *req.MaxTokens - 1
+	if capped < minThinkingBudget {
+		warnf(config, "max_tokens leaves no room for a thinking budget; disabling thinking",
+			"model", req.Model, "max_tokens", *req.MaxTokens, "budget", thinking.BudgetTokens)
 		return nil
 	}
-	if req.MaxTokens == nil {
-		return nil
-	}
-	if thinking.BudgetTokens >= *req.MaxTokens {
-		return fmt.Errorf("anthropic reasoning budget (%d) must be less than max_tokens (%d)", thinking.BudgetTokens, *req.MaxTokens)
-	}
-	return nil
+	warnf(config, "reasoning budget must be below max_tokens; clamping",
+		"model", req.Model, "requested", thinking.BudgetTokens, "using", capped)
+	thinking.BudgetTokens = capped
+	return thinking
 }
 
 func requestHasThinkingEnabled(model string, thinking *Thinking) bool {
@@ -874,101 +958,73 @@ func forcedToolChoice(choice llm.ToolChoiceType) bool {
 	return choice == llm.ToolChoiceTypeAny || choice == llm.ToolChoiceTypeTool
 }
 
+// The predicates below read modelCapabilityTable. Each keeps the permissive
+// answer for an unknown model, so a fine-tune or gateway deployment behaves as
+// it did before the table existed.
+
 // modelSupportsEffortParam reports whether the model accepts the native
-// output_config.effort parameter (Opus 4.5+, Opus 5, Sonnet 4.6, Sonnet 5,
-// Fable 5, Mythos 5).
+// output_config.effort parameter.
 func modelSupportsEffortParam(model string) bool {
-	switch {
-	case strings.HasPrefix(model, "claude-opus-4-5"),
-		strings.HasPrefix(model, "claude-opus-4-6"),
-		strings.HasPrefix(model, "claude-opus-4-7"),
-		strings.HasPrefix(model, "claude-opus-4-8"),
-		strings.HasPrefix(model, "claude-opus-5"),
-		strings.HasPrefix(model, "claude-sonnet-4-6"),
-		strings.HasPrefix(model, "claude-sonnet-5"),
-		strings.HasPrefix(model, "claude-fable-5"),
-		strings.HasPrefix(model, "claude-mythos-5"):
-		return true
+	caps, known := lookupCapabilities(model)
+	return known && caps.reasoningKind() == reasoningNative
+}
+
+func modelSupportsXHighEffort(model string) bool {
+	return modelSupportsEffortLevel(model, llm.ReasoningEffortXHigh)
+}
+
+func modelSupportsMaxEffort(model string) bool {
+	return modelSupportsEffortLevel(model, llm.ReasoningEffortMax)
+}
+
+func modelSupportsEffortLevel(model string, effort llm.ReasoningEffort) bool {
+	caps, known := lookupCapabilities(model)
+	if !known {
+		return false
+	}
+	for _, level := range caps.efforts {
+		if level == effort {
+			return true
+		}
 	}
 	return false
 }
 
-func modelSupportsXHighEffort(model string) bool {
-	return strings.HasPrefix(model, "claude-opus-4-7") ||
-		strings.HasPrefix(model, "claude-opus-4-8") ||
-		strings.HasPrefix(model, "claude-opus-5") ||
-		strings.HasPrefix(model, "claude-sonnet-5") ||
-		strings.HasPrefix(model, "claude-fable-5") ||
-		strings.HasPrefix(model, "claude-mythos-5")
-}
-
-func modelSupportsMaxEffort(model string) bool {
-	return strings.HasPrefix(model, "claude-opus-4-6") ||
-		strings.HasPrefix(model, "claude-opus-4-7") ||
-		strings.HasPrefix(model, "claude-opus-4-8") ||
-		strings.HasPrefix(model, "claude-opus-5") ||
-		strings.HasPrefix(model, "claude-sonnet-4-6") ||
-		strings.HasPrefix(model, "claude-sonnet-5") ||
-		strings.HasPrefix(model, "claude-fable-5") ||
-		strings.HasPrefix(model, "claude-mythos-5")
-}
-
-// modelRejectsTemperature reports whether the model rejects the temperature
-// parameter (Opus 4.7/4.8, Opus 5, and the rest of the Claude 5 family: Fable 5,
-// Mythos 5, Sonnet 5). Opus 4.6 and Sonnet 4.6 still accept it.
-func modelRejectsTemperature(model string) bool {
-	return strings.HasPrefix(model, "claude-opus-4-7") ||
-		strings.HasPrefix(model, "claude-opus-4-8") ||
-		strings.HasPrefix(model, "claude-opus-5") ||
-		strings.HasPrefix(model, "claude-fable-5") ||
-		strings.HasPrefix(model, "claude-mythos-5") ||
-		strings.HasPrefix(model, "claude-sonnet-5")
+// modelAcceptsTemperature reports whether the model accepts the temperature
+// parameter. Unknown models are assumed to accept it, as they did before.
+func modelAcceptsTemperature(model string) bool {
+	caps, known := lookupCapabilities(model)
+	return !known || caps.temperature
 }
 
 // modelRejectsManualThinking reports whether the model rejects manual extended
-// thinking budgets and supports only adaptive thinking (Opus 4.7/4.8, Opus 5,
-// Fable 5, Mythos 5, Sonnet 5). On Fable 5 and Mythos 5 adaptive thinking is
-// always on and an explicit thinking disable is also rejected by the API; Dive
-// omits the thinking parameter entirely when thinking is disabled, which is the
-// accepted form. Opus 5 and Sonnet 5 also default thinking on but, unlike
-// Fable/Mythos, accept an explicit disable — see modelDefaultsThinkingOn.
+// thinking budgets and supports only adaptive thinking.
 func modelRejectsManualThinking(model string) bool {
-	return strings.HasPrefix(model, "claude-opus-4-7") ||
-		strings.HasPrefix(model, "claude-opus-4-8") ||
-		strings.HasPrefix(model, "claude-opus-5") ||
-		strings.HasPrefix(model, "claude-fable-5") ||
-		strings.HasPrefix(model, "claude-mythos-5") ||
-		strings.HasPrefix(model, "claude-sonnet-5")
+	caps, known := lookupCapabilities(model)
+	return known && !caps.manualBudget && caps.adaptive
 }
 
 // modelDefaultsThinkingOn reports whether the model runs with adaptive thinking
-// when the request omits the thinking parameter. For these models a caller that
-// asks to disable thinking must send an explicit thinking:{type:"disabled"} —
-// omitting the field would leave thinking on. Opus 5 and Sonnet 5 both default
-// thinking on and accept an explicit disable (Fable 5 and Mythos 5 default on
-// but reject the explicit disable, so Dive omits the field for them). On Opus 5
-// the explicit disable is only accepted at effort high or below — see
-// modelRejectsDisabledThinkingAboveHighEffort.
+// when the request omits the thinking parameter *and* accepts an explicit
+// disable to turn it off. Fable 5 and Mythos 5 also think by default but reject
+// the disable, so they are excluded here — see modelRunsThinkingByDefault.
 func modelDefaultsThinkingOn(model string) bool {
-	return strings.HasPrefix(model, "claude-opus-5") ||
-		strings.HasPrefix(model, "claude-sonnet-5")
+	caps, known := lookupCapabilities(model)
+	return known && caps.thinkingOnByDefault && caps.explicitDisable
 }
 
 // modelRejectsDisabledThinkingAboveHighEffort reports whether the model rejects
-// an explicit thinking disable combined with an effort level above high. Opus 5
-// accepts thinking:{type:"disabled"} only at effort high or below and returns a
-// 400 when it is paired with xhigh or max.
+// an explicit thinking disable combined with an effort level above high.
 func modelRejectsDisabledThinkingAboveHighEffort(model string) bool {
-	return strings.HasPrefix(model, "claude-opus-5")
+	caps, known := lookupCapabilities(model)
+	return known && caps.disabledEffortCap != ""
 }
 
 // modelRunsThinkingByDefault reports whether omitting the thinking parameter
 // still leaves adaptive thinking active.
 func modelRunsThinkingByDefault(model string) bool {
-	return strings.HasPrefix(model, "claude-fable-5") ||
-		strings.HasPrefix(model, "claude-mythos-5") ||
-		strings.HasPrefix(model, "claude-mythos-preview") ||
-		modelDefaultsThinkingOn(model)
+	caps, known := lookupCapabilities(model)
+	return known && caps.thinkingOnByDefault
 }
 
 // createRequest creates an HTTP request with appropriate headers for Anthropic API calls

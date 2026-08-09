@@ -183,6 +183,8 @@ func TestBuildRequestParams_NormalizesOpenAIReasoningEffort(t *testing.T) {
 }
 
 func TestBuildRequestParams_ReasoningEffortUnsupportedForOpenAIModel(t *testing.T) {
+	// The gpt-5 family takes minimal but not none, so none clamps up to the
+	// least eager supported level rather than failing the request.
 	provider := New(WithAPIKey("test"), WithModel(ModelGPT5))
 	config := &llm.Config{}
 	config.Apply(
@@ -190,42 +192,94 @@ func TestBuildRequestParams_ReasoningEffortUnsupportedForOpenAIModel(t *testing.
 		llm.WithReasoningEffort(llm.ReasoningEffortNone),
 	)
 
-	_, err := provider.buildRequestParams(config)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not supported")
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, responses.ReasoningEffort("minimal"), params.Reasoning.Effort)
+}
+
+func TestBuildRequestParams_ModelWithoutReasoningOmitsEffort(t *testing.T) {
+	// gpt-4o rejects the field outright ("Unsupported parameter:
+	// 'reasoning.effort'"), and the CLI now defaults effort to medium, so this
+	// would otherwise 400 on every request.
+	provider := New(WithAPIKey("test"), WithModel("gpt-4o"))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithReasoningEffort(llm.ReasoningEffortMedium),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.Equal(t, responses.ReasoningEffort(""), params.Reasoning.Effort)
+}
+
+func TestBuildRequestParams_ModelWithoutTemperatureOmitsIt(t *testing.T) {
+	provider := New(WithAPIKey("test"), WithModel(ModelGPT5))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithMessages(llm.NewUserTextMessage("hi")),
+		llm.WithTemperature(0.5),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.False(t, params.Temperature.Valid())
 }
 
 func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
 	tests := []struct {
-		name    string
-		model   string
-		effort  llm.ReasoningEffort
-		want    responses.ReasoningEffort
-		wantErr bool
+		name   string
+		model  string
+		effort llm.ReasoningEffort
+		want   responses.ReasoningEffort
 	}{
 		{
-			name:   "grok 4.5 max maps to high",
+			// grok-4.5 accepts xhigh, so max clamps one level rather than two.
+			name:   "grok 4.5 max maps to xhigh",
 			model:  "grok-4.5",
-			effort: llm.ReasoningEffortMax,
-			want:   responses.ReasoningEffort("high"),
-		},
-		{
-			name:   "grok build minimal maps to low",
-			model:  "grok-build-0.1",
-			effort: llm.ReasoningEffortMinimal,
-			want:   responses.ReasoningEffort("low"),
-		},
-		{
-			name:   "grok multi-agent max maps to xhigh",
-			model:  "grok-4.20-multi-agent-0309",
 			effort: llm.ReasoningEffortMax,
 			want:   responses.ReasoningEffort("xhigh"),
 		},
 		{
-			name:    "grok multi-agent rejects none",
-			model:   "grok-4.20-multi-agent-0309",
-			effort:  llm.ReasoningEffortNone,
-			wantErr: true,
+			// grok-4.5 is the one Grok model that rejects none.
+			name:   "grok 4.5 none clamps to minimal",
+			model:  "grok-4.5",
+			effort: llm.ReasoningEffortNone,
+			want:   responses.ReasoningEffort("minimal"),
+		},
+		{
+			// "does not support parameter reasoningEffort": omit the field.
+			name:   "grok build omits effort",
+			model:  "grok-build-0.1",
+			effort: llm.ReasoningEffortMinimal,
+			want:   responses.ReasoningEffort(""),
+		},
+		{
+			// grok-code-fast-1 likewise has no reasoning parameter.
+			name:   "grok code fast omits effort",
+			model:  "grok-code-fast-1",
+			effort: llm.ReasoningEffortHigh,
+			want:   responses.ReasoningEffort(""),
+		},
+		{
+			// Despite the name, this model rejects the reasoning parameter.
+			name:   "grok 4.20 reasoning omits effort",
+			model:  "grok-4.20-0309-reasoning",
+			effort: llm.ReasoningEffortHigh,
+			want:   responses.ReasoningEffort(""),
+		},
+		{
+			// The multi-agent model is the only Grok model that accepts max.
+			name:   "grok multi-agent keeps max",
+			model:  "grok-4.20-multi-agent-0309",
+			effort: llm.ReasoningEffortMax,
+			want:   responses.ReasoningEffort("max"),
+		},
+		{
+			name:   "grok multi-agent accepts none",
+			model:  "grok-4.20-multi-agent-0309",
+			effort: llm.ReasoningEffortNone,
+			want:   responses.ReasoningEffort("none"),
 		},
 	}
 
@@ -239,11 +293,6 @@ func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
 			)
 
 			params, err := provider.buildRequestParams(config)
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), "not supported")
-				return
-			}
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, params.Reasoning.Effort)
 		})

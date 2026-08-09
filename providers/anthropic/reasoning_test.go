@@ -43,16 +43,12 @@ func TestReasoningEffortMinimalMapsToLow(t *testing.T) {
 	assert.Equal(t, "low", req.OutputConfig.Effort)
 }
 
-func TestReasoningEffortNoneErrors(t *testing.T) {
-	cfg := &llm.Config{}
-	cfg.Apply(
-		llm.WithModel(ModelClaudeOpus48),
-		llm.WithReasoningEffort(llm.ReasoningEffortNone),
-	)
-	var req Request
-	err := New().applyRequestConfig(&req, cfg)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not supported")
+func TestReasoningEffortNoneClampsToLow(t *testing.T) {
+	// Anthropic has no "none" level — the API enumerates low..max — so the
+	// request clamps up to the least eager level instead of failing.
+	req := buildReq(t, ModelClaudeOpus48, llm.WithReasoningEffort(llm.ReasoningEffortNone))
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "low", req.OutputConfig.Effort)
 }
 
 func TestReasoningEffortXHighUnsupportedNativeModelMapsToHigh(t *testing.T) {
@@ -229,17 +225,21 @@ func TestThinkingAllowsToolChoiceAutoAndNone(t *testing.T) {
 	}
 }
 
-func TestManualThinkingBudgetMustBeLessThanMaxTokens(t *testing.T) {
-	cfg := &llm.Config{}
-	cfg.Apply(
-		llm.WithModel(ModelClaudeOpus46),
+func TestManualThinkingBudgetClampsBelowMaxTokens(t *testing.T) {
+	req := buildReq(t, ModelClaudeOpus46,
 		llm.WithMaxTokens(4096),
-		llm.WithReasoningBudget(4096),
-	)
-	var req Request
-	err := New().applyRequestConfig(&req, cfg)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "must be less than max_tokens")
+		llm.WithReasoningBudget(4096))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, 4095, req.Thinking.BudgetTokens)
+}
+
+func TestThinkingDroppedWhenMaxTokensLeavesNoRoom(t *testing.T) {
+	// Below the 1024 minimum there is no valid budget to clamp to, so thinking
+	// is dropped rather than sent as a request that cannot succeed.
+	req := buildReq(t, ModelClaudeOpus46,
+		llm.WithMaxTokens(512),
+		llm.WithReasoningBudget(4096))
+	assert.Nil(t, req.Thinking)
 }
 
 func TestInterleavedThinkingAllowsBudgetAtOrAboveMaxTokens(t *testing.T) {
@@ -251,19 +251,16 @@ func TestInterleavedThinkingAllowsBudgetAtOrAboveMaxTokens(t *testing.T) {
 	assert.Equal(t, 8192, req.Thinking.BudgetTokens)
 }
 
-func TestEffortWithThinkingDisabledLegacyModelErrors(t *testing.T) {
+func TestEffortWithThinkingDisabledLegacyModelDropsEffort(t *testing.T) {
 	// On a model without the native effort parameter, effort is emulated with a
-	// thinking budget — which would override an explicit thinking disable. That
-	// conflict must error rather than silently re-enable thinking.
-	cfg := &llm.Config{}
-	cfg.Apply(
-		llm.WithModel(ModelClaude37Sonnet20250219),
+	// thinking budget — which would override an explicit thinking disable. The
+	// disable wins and the effort is dropped rather than silently re-enabling
+	// thinking.
+	req := buildReq(t, ModelClaudeSonnet45,
 		llm.WithReasoningEffort(llm.ReasoningEffortHigh),
-		llm.WithThinking(llm.ThinkingTypeDisabled),
-	)
-	var req Request
-	err := New().applyRequestConfig(&req, cfg)
-	assert.Error(t, err)
+		llm.WithThinking(llm.ThinkingTypeDisabled))
+	assert.Nil(t, req.Thinking)
+	assert.Nil(t, req.OutputConfig)
 }
 
 func TestEffortWithThinkingDisabledNativeModelOK(t *testing.T) {
@@ -326,12 +323,12 @@ func TestModelCapabilityHelpers(t *testing.T) {
 
 	// Opus 4.7/4.8 and the Claude 5 family reject sampling params; Opus 4.6 and
 	// Sonnet 4.6 still accept them.
-	assert.True(t, modelRejectsTemperature(ModelClaudeOpus47))
-	assert.True(t, modelRejectsTemperature(ModelClaudeOpus48))
-	assert.True(t, modelRejectsTemperature(ModelClaudeOpus5))
-	assert.True(t, modelRejectsTemperature(ModelClaudeSonnet5))
-	assert.False(t, modelRejectsTemperature(ModelClaudeOpus46))
-	assert.False(t, modelRejectsTemperature(ModelClaudeSonnet46))
+	assert.False(t, modelAcceptsTemperature(ModelClaudeOpus47))
+	assert.False(t, modelAcceptsTemperature(ModelClaudeOpus48))
+	assert.False(t, modelAcceptsTemperature(ModelClaudeOpus5))
+	assert.False(t, modelAcceptsTemperature(ModelClaudeSonnet5))
+	assert.True(t, modelAcceptsTemperature(ModelClaudeOpus46))
+	assert.True(t, modelAcceptsTemperature(ModelClaudeSonnet46))
 
 	// Opus 5 and Sonnet 5 default thinking on and accept an explicit disable.
 	assert.True(t, modelDefaultsThinkingOn(ModelClaudeOpus5))
@@ -458,22 +455,20 @@ func TestThinkingDisabledOpus5EmitsExplicitDisable(t *testing.T) {
 	assert.Equal(t, "disabled", req.Thinking.Type)
 }
 
-func TestThinkingDisabledOpus5AboveHighEffortErrors(t *testing.T) {
-	// Opus 5 accepts an explicit thinking disable only at effort high or below.
+func TestThinkingDisabledOpus5AboveHighEffortClampsToHigh(t *testing.T) {
+	// Opus 5 accepts an explicit thinking disable only at effort high or below,
+	// so the effort clamps down to high and the disable is preserved.
 	for _, effort := range []llm.ReasoningEffort{
 		llm.ReasoningEffortXHigh,
 		llm.ReasoningEffortMax,
 	} {
-		cfg := &llm.Config{}
-		cfg.Apply(
-			llm.WithModel(ModelClaudeOpus5),
+		req := buildReq(t, ModelClaudeOpus5,
 			llm.WithReasoningEffort(effort),
-			llm.WithThinking(llm.ThinkingTypeDisabled),
-		)
-		var req Request
-		err := New().applyRequestConfig(&req, cfg)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "effort high or below")
+			llm.WithThinking(llm.ThinkingTypeDisabled))
+		assert.NotNil(t, req.OutputConfig)
+		assert.Equal(t, "high", req.OutputConfig.Effort)
+		assert.NotNil(t, req.Thinking)
+		assert.Equal(t, "disabled", req.Thinking.Type)
 	}
 }
 
