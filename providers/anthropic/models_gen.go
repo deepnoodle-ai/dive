@@ -26,4 +26,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelClaudeOpus5
+var DefaultModel = ModelClaudeSonnet5

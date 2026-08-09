@@ -144,7 +144,6 @@
     {
       "go_name": "ModelClaudeOpus5",
       "id": "claude-opus-5",
-      "default": true,
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Opus 5",
@@ -172,6 +171,7 @@
     {
       "go_name": "ModelClaudeSonnet5",
       "id": "claude-sonnet-5",
+      "default": true,
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Sonnet 5",

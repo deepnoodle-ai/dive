@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`anthropic.DefaultModel` is now `ModelClaudeSonnet5`** (`claude-sonnet-5`,
+  1M context, $3/$15 per MTok), replacing `claude-opus-5`. Callers that relied on
+  the default now get a cheaper, faster model; pass `WithModel(ModelClaudeOpus5)`
+  to keep Opus 5. The CLI's own default (`claude-haiku-4-5`) is unchanged.
+
 ### Fixed
 
 - **Anthropic per-model capability gaps.** `claude-opus-5` was absent from every

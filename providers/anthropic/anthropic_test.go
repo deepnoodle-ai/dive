@@ -359,6 +359,13 @@ func countMessageBreakpoints(messages []*llm.Message) int {
 	return n
 }
 
+func TestProvider_DefaultModel(t *testing.T) {
+	// Generated from the catalog's default model; pinned here so a catalog
+	// regeneration cannot move the default without an explicit test change.
+	assert.Equal(t, ModelClaudeSonnet5, DefaultModel)
+	assert.Equal(t, DefaultModel, New().model)
+}
+
 func TestApplyCachingDoesNotMutateOriginal(t *testing.T) {
 	// convertMessages clones content, so applyCaching must not touch the original.
 	original := &llm.TextContent{Text: "hello"}
