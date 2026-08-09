@@ -53,8 +53,8 @@ class FakeResponse:
     def __exit__(self, *_: object) -> None:
         return None
 
-    def read(self, _: int) -> bytes:
-        return self.data
+    def read(self, size: int) -> bytes:
+        return self.data[:size]
 
     def geturl(self) -> str:
         return self.url
