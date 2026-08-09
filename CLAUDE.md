@@ -54,6 +54,34 @@ Session load/save is automatic when `AgentOptions.Session` or `WithSession` is s
 
 Guides in `docs/guides/` (core) and `docs/guides/experimental/`.
 
+## Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/).
+
+**Keep entries short — one to three lines.** An entry tells a user what changed
+and what they must do about it. Lead with a bold summary, then only what the
+reader cannot infer: the new value, the breaking change, the migration.
+
+Leave out the investigation. How a bug was found, why it went unnoticed, what
+tooling caught it, how many things it caught, and evidence for the diagnosis all
+belong in the commit message, not here. If an entry is explaining rather than
+announcing, cut it.
+
+```markdown
+<!-- Good -->
+
+- **`google.DefaultModel` is now `ModelGemini36Flash`** (`gemini-3.6-flash`),
+  replacing `gemini-2.5-pro`.
+
+<!-- Too long: narrates the diagnosis and the tooling -->
+
+- **Grok reasoning-effort clamping skipped the real Grok Build model.**
+  `normalizeGrokReasoningEffort` keyed on `grok-build-latest`, an id xAI does not
+  serve, so `grok-build-0.1` fell through without clamping and `xhigh`/`max`
+  reached the API unmapped. Found by the provider-watch `unverified` check,
+  which surfaced 16 such ids. It now matches on the `grok-build` prefix.
+```
+
 ## Example
 
 ```go
