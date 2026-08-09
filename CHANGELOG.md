@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Provider catalogs** — each provider's models, pricing, feature flags, and
+  documentation sources now live in a checked-in `providers/<name>/catalog.json`
+  that generates `models_gen.go`, `pricing_gen.go`, and `features_gen.go` via
+  `make provider-catalog-generate`. `providers/modelcatalog` parses and
+  validates the embedded document; every provider exposes `Catalog()` and
+  `CatalogJSON()`.
+- **Provider watch** — a weekly workflow (`scripts/provider_watch.py`) diffs
+  upstream provider documentation and APIs against an accepted baseline and
+  files a single refreshed issue when something material changes.
+- **`make release-prep VERSION=vX.Y.Z`** points every sub-module's intra-repo
+  requirement at the version being released. `make tag-modules` now refuses to
+  tag while those requirements are stale — sub-modules build locally through
+  `replace` directives, which consumers never see.
+
+### Changed
+
+- **`mistral.DefaultModel` is now `ModelMistralLarge`** (`mistral-large-latest`)
+  rather than the pinned `mistral-large-2412` snapshot, matching the model the
+  CLI recommends. Pass `WithModel` explicitly to pin a dated snapshot.
+- **`openrouter.ModelMistralLarge3` is now `mistralai/mistral-large-2512`**
+  (was `mistral/mistral-large-3`, which is not an id OpenRouter serves). Code
+  comparing against the old string — routing tables, stored session metadata —
+  needs updating.
+
+### Removed
+
+- **`grok.ModelGrok2Vision1212` and `grok.ModelGrok2Image1212`** — xAI no longer
+  lists either model; both were already marked deprecated.
+
 ## [1.18.0] - 2026-07-22
 
 ### Added

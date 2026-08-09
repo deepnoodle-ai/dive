@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,14 +139,24 @@ func MustParse(expectedProvider string, data []byte) Catalog {
 
 // Clone returns a deep copy that callers may modify without changing package state.
 func (c Catalog) Clone() Catalog {
-	data, err := json.Marshal(c)
-	if err != nil {
-		panic(fmt.Errorf("clone provider catalog: %w", err))
+	clone := c
+	clone.Sources = slices.Clone(c.Sources)
+	for i := range clone.Sources {
+		clone.Sources[i].DiscoveryPatterns = slices.Clone(c.Sources[i].DiscoveryPatterns)
 	}
-	clone, err := Parse(c.Provider, data)
-	if err != nil {
-		panic(fmt.Errorf("clone provider catalog: %w", err))
+	clone.Models = slices.Clone(c.Models)
+	for i := range clone.Models {
+		clone.Models[i].Capabilities = slices.Clone(c.Models[i].Capabilities)
+		clone.Models[i].Adapters = slices.Clone(c.Models[i].Adapters)
 	}
+	clone.FeatureFlags = slices.Clone(c.FeatureFlags)
+	for i := range clone.FeatureFlags {
+		clone.FeatureFlags[i].Models = slices.Clone(c.FeatureFlags[i].Models)
+	}
+	clone.Pricing.Text = slices.Clone(c.Pricing.Text)
+	clone.Pricing.FastText = slices.Clone(c.Pricing.FastText)
+	clone.Pricing.Image = slices.Clone(c.Pricing.Image)
+	clone.Pricing.Embedding = slices.Clone(c.Pricing.Embedding)
 	return clone
 }
 

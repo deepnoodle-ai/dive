@@ -31,13 +31,24 @@ def snapshot(provider: dict[str, object]) -> dict[str, object]:
 
 
 class FakeClient:
-    def __init__(self, responses: dict[str, bytes]) -> None:
+    def __init__(
+        self, responses: dict[str, bytes], content_type: str = "application/xml"
+    ) -> None:
         self.responses = responses
+        self.content_type = content_type
         self.requested: list[str] = []
 
     def request(self, url: str, **_: object) -> tuple[bytes, str, str]:
         self.requested.append(url)
-        return self.responses[url], "application/xml", url
+        return self.responses[url], self.content_type, url
+
+
+class FakeJSONClient:
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+
+    def json(self, url: str, **_: object) -> object:
+        return self.payload
 
 
 class FakeResponse:
@@ -495,6 +506,206 @@ class RepoInspectionTests(unittest.TestCase):
             self.assertEqual(
                 provider_watch.load_json(path), {"models": ["gpt-new"]}
             )
+
+
+class OpenRouterCollectionTests(unittest.TestCase):
+    def test_prefixes_cover_every_namespace_dive_exports(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        catalog = provider_watch.load_provider_catalog(repo_root, "openrouter")
+        prefixes = tuple(provider_watch.openrouter_prefixes(repo_root))
+
+        namespaced = [
+            str(model["id"])
+            for model in catalog["models"]
+            if "/" in str(model.get("id", ""))
+        ]
+        self.assertTrue(namespaced)
+        for model_id in namespaced:
+            self.assertTrue(
+                model_id.startswith(prefixes),
+                f"{model_id} would be filtered out of the OpenRouter snapshot",
+            )
+
+    def test_collect_keeps_models_in_the_requested_namespaces(self) -> None:
+        client = FakeJSONClient(
+            {
+                "data": [
+                    {"id": "mistralai/mistral-large-2512", "context_length": 128000},
+                    {"id": "cohere/command", "context_length": 4096},
+                ]
+            }
+        )
+
+        result = provider_watch.collect_openrouter_api(client, None, ("mistralai/",))
+
+        self.assertEqual(list(result["models"]), ["mistralai/mistral-large-2512"])
+
+
+class RedactionTests(unittest.TestCase):
+    def test_redact_url_masks_credential_query_parameters(self) -> None:
+        masked = provider_watch.redact_url(
+            "https://example.test/models?key=super-secret&pageSize=1000"
+        )
+
+        self.assertNotIn("super-secret", masked)
+        self.assertIn("pageSize=1000", masked)
+
+    def test_fetch_failure_hides_percent_encoded_google_key(self) -> None:
+        key = "abc+def/ghi="
+        url = provider_watch.query_url(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            {"key": key, "pageSize": 1000},
+        )
+        self.assertNotIn(key, url)  # urlencode escaped it, so a literal replace misses
+
+        client = provider_watch.HTTPClient(retries=0)
+        with (
+            mock.patch.dict(os.environ, {"GEMINI_API_KEY": key}),
+            mock.patch.object(
+                provider_watch, "urlopen", side_effect=OSError("connection reset")
+            ),
+        ):
+            with self.assertRaises(provider_watch.FetchFailure) as raised:
+                client.request(url)
+            rendered = provider_watch.safe_error(raised.exception)
+
+        self.assertNotIn(key, rendered)
+        self.assertNotIn("abc%2Bdef", rendered)
+        self.assertIn("[redacted]", rendered)
+
+
+class SnapshotResilienceTests(unittest.TestCase):
+    def test_unparsable_discovery_pattern_degrades_one_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            provider = root / "providers" / "openai"
+            provider.mkdir(parents=True)
+            (provider / "catalog.json").write_text(
+                """{
+  "schema_version": 1,
+  "provider": "openai",
+  "sources": [
+    {"name": "sitemap", "url": "https://example.test/sitemap.xml", "kind": "sitemap",
+     "discovery_patterns": ["models("]},
+    {"name": "docs", "url": "https://example.test/docs", "kind": "document"}
+  ],
+  "models": [{"go_name": "ModelNew", "id": "gpt-new", "default": true}],
+  "pricing": {}
+}
+""",
+                encoding="utf-8",
+            )
+            client = FakeClient(
+                {
+                    "https://example.test/sitemap.xml": (
+                        b"<urlset><url><loc>https://example.test/models</loc></url></urlset>"
+                    ),
+                    "https://example.test/docs": b"GPT pricing: $1 per million tokens",
+                }
+            )
+
+            result = provider_watch.build_snapshot(
+                client=client,
+                providers=("openai",),
+                public_only=True,
+                include_local_ollama=False,
+                ollama_url="http://localhost:11434",
+                repo_root=root,
+                check_sdks=False,
+            )
+
+        documents = result["providers"]["openai"]["documents"]
+        self.assertEqual(documents["sitemap"]["status"], "error")
+        self.assertTrue(documents["sitemap"]["error"])
+        # The healthy source in the same provider still lands in the snapshot.
+        self.assertEqual(documents["docs"]["status"], "ok")
+
+    def test_describe_error_names_unexpected_failure_types(self) -> None:
+        self.assertEqual(
+            provider_watch.describe_error(ValueError("boom")), "ValueError: boom"
+        )
+        self.assertEqual(
+            provider_watch.describe_error(provider_watch.FetchFailure("boom")), "boom"
+        )
+
+
+class FeatureTokenTests(unittest.TestCase):
+    def test_capitalized_beta_headers_are_collected_and_normalized(self) -> None:
+        client = FakeClient(
+            {
+                "https://example.test/beta": (
+                    b"<html><body><p>Set the Interleaved-Thinking-2026-08-08 beta "
+                    b"header to enable extended thinking with tools.</p></body></html>"
+                )
+            },
+            content_type="text/html",
+        )
+        source = provider_watch.DocumentSource(
+            provider="anthropic", name="beta", url="https://example.test/beta"
+        )
+
+        document = provider_watch.collect_document(client, source)
+
+        self.assertIn("interleaved-thinking-2026-08-08", document["feature_tokens"])
+
+
+class ReportSizeTests(unittest.TestCase):
+    def test_report_stays_within_the_github_issue_body_limit(self) -> None:
+        # normalize_lines caps a signal at 600 characters and escape_markdown
+        # expands punctuation up to six-fold, so a handful of document changes
+        # is enough to blow past GitHub's limit without a byte budget.
+        signal = "model-name.v2 {beta} " * 30
+        changes = [
+            {
+                "provider": "anthropic",
+                "kind": "document_changed",
+                "document": f"docs/page-{index}",
+                "added": [f"{signal} #{item}" for item in range(25)],
+                "removed": [f"{signal} -{item}" for item in range(25)],
+            }
+            for index in range(provider_watch.MAX_REPORT_CHANGES)
+        ]
+        diff = {
+            "generated_at": "2026-08-08T00:00:00+00:00",
+            "change_hash": "abc123",
+            "changes": changes,
+        }
+
+        body = provider_watch.report_markdown(diff, {"repo": {"providers": {}}})
+
+        self.assertLessEqual(len(body), provider_watch.MAX_REPORT_BYTES)
+        self.assertIn("# Dive provider watch report", body)
+        self.assertIn("line(s) omitted", body)
+        # The summary table survives truncation, so nothing goes unreported.
+        self.assertEqual(
+            body.count("| anthropic | `document_changed` |"),
+            provider_watch.MAX_REPORT_CHANGES,
+        )
+
+    def test_report_stays_bounded_when_subjects_are_hostile(self) -> None:
+        # Every table row is provider-controlled text too, so the table alone
+        # must not be able to blow the budget.
+        subject = "model.name-{beta}" * 40
+        changes = [
+            {
+                "provider": "openai",
+                "kind": "model_added",
+                "model": f"{subject}-{index}",
+                "added": [subject] * 25,
+            }
+            for index in range(provider_watch.MAX_REPORT_CHANGES)
+        ]
+        diff = {
+            "generated_at": "2026-08-08T00:00:00+00:00",
+            "change_hash": "abc123",
+            "changes": changes,
+        }
+
+        body = provider_watch.report_markdown(diff, {"repo": {"providers": {}}})
+
+        self.assertLessEqual(len(body), provider_watch.MAX_REPORT_BYTES)
+        self.assertIn("Detected **100** material change(s).", body)
+        self.assertIn("line(s) omitted", body)
 
 
 if __name__ == "__main__":

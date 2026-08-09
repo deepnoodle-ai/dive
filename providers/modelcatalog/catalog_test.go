@@ -51,6 +51,26 @@ func TestParseAndCatalogHelpers(t *testing.T) {
 	assert.Equal(t, "model-primary", catalog.Models[0].ID)
 }
 
+func TestCloneDetachesNestedSlicesAndAcceptsZeroValue(t *testing.T) {
+	catalog := Catalog{
+		Models:       []Model{{GoName: "ModelPrimary", Capabilities: []string{"text"}}},
+		FeatureFlags: []Feature{{GoName: "FeatureExample", Models: []string{"model-primary"}}},
+		Sources:      []Source{{Name: "models", DiscoveryPatterns: []string{"/models"}}},
+	}
+
+	clone := catalog.Clone()
+	clone.Models[0].Capabilities[0] = "changed"
+	clone.FeatureFlags[0].Models[0] = "changed"
+	clone.Sources[0].DiscoveryPatterns[0] = "changed"
+
+	assert.Equal(t, "text", catalog.Models[0].Capabilities[0])
+	assert.Equal(t, "model-primary", catalog.FeatureFlags[0].Models[0])
+	assert.Equal(t, "/models", catalog.Sources[0].DiscoveryPatterns[0])
+
+	// A copy method must not depend on the value being valid.
+	assert.Equal(t, Catalog{}, Catalog{}.Clone())
+}
+
 func TestParseRejectsUnknownFields(t *testing.T) {
 	_, err := Parse("test", []byte(`{"schema_version":1,"provider":"test","unknown":true}`))
 	assert.Error(t, err)

@@ -33,7 +33,15 @@ import time
 from typing import Any, Callable, Iterable, Mapping, Sequence
 import unicodedata
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import (
+    parse_qsl,
+    quote,
+    quote_plus,
+    urlencode,
+    urljoin,
+    urlparse,
+    urlunparse,
+)
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
@@ -44,6 +52,17 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_RETRIES = 2
 MAX_REPORT_CHANGES = 100
+# GitHub rejects issue bodies longer than 65,536 characters; leave headroom.
+MAX_REPORT_BYTES = 60000
+# The summary table is the part worth keeping when the body has to be cut, so
+# it gets a reserved share rather than competing with the detail sections.
+MAX_TABLE_BYTES = MAX_REPORT_BYTES // 3
+MAX_SIGNAL_CHARS = 200
+MAX_SUBJECT_CHARS = 80
+OMITTED_NOTICE = (
+    "… {count} line(s) omitted to stay within the GitHub issue body limit; "
+    "the JSON artifact contains the complete diff."
+)
 
 PROVIDERS = (
     "openai",
@@ -65,11 +84,14 @@ CATALOG_DIRECTORIES = {
     "ollama": "ollama",
 }
 
+# Fallback namespaces, used only when the OpenRouter catalog cannot be read.
+# openrouter_prefixes() derives the real list from the catalog so a namespace
+# Dive exports can never be filtered out of the snapshot.
 OPENROUTER_PREFIXES = (
     "anthropic/",
     "deepseek/",
     "google/",
-    "mistral/",
+    "mistralai/",
     "openai/",
     "x-ai/",
 )
@@ -88,7 +110,26 @@ MATERIAL_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 
-FEATURE_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9-]+-20\d{2}-\d{2}-\d{2}\b")
+API_KEY_ENV_NAMES = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "MISTRAL_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+
+SENSITIVE_QUERY_PARAMS = frozenset(
+    {"key", "api_key", "apikey", "access_token", "token"}
+)
+SENSITIVE_QUERY_RE = re.compile(
+    r"([?&](?:key|api[-_]?key|access[-_]?token|token)=)[^&\s\"']+",
+    re.IGNORECASE,
+)
+
+FEATURE_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9-]+-20\d{2}-\d{2}-\d{2}\b", re.IGNORECASE)
 ISO_DATE_RE = re.compile(r"\b20\d{2}-\d{2}-\d{2}\b")
 MODEL_TOKEN_RE = re.compile(
     r"\b(?:"
@@ -253,7 +294,7 @@ class HTTPClient:
         json_body: Any | None = None,
     ) -> tuple[bytes, str, str]:
         if urlparse(url).scheme.lower() not in {"http", "https"}:
-            raise FetchFailure(f"unsupported URL scheme: {url}")
+            raise FetchFailure(f"unsupported URL scheme: {redact_url(url)}")
         request_headers = {
             "Accept": "application/json, text/markdown, text/plain, text/html, application/xml;q=0.9, */*;q=0.1",
             "User-Agent": USER_AGENT,
@@ -277,7 +318,7 @@ class HTTPClient:
                     data = response.read(MAX_RESPONSE_BYTES + 1)
                     if len(data) > MAX_RESPONSE_BYTES:
                         raise FetchFailure(
-                            f"response exceeded {MAX_RESPONSE_BYTES} bytes: {url}"
+                            f"response exceeded {MAX_RESPONSE_BYTES} bytes: {redact_url(url)}"
                         )
                     content_type = response.headers.get_content_type()
                     return data, content_type, response.geturl()
@@ -291,7 +332,7 @@ class HTTPClient:
                 last_error = error
             if attempt < self.retries:
                 time.sleep(0.5 * (2**attempt))
-        raise FetchFailure(f"failed to fetch {url}: {last_error}")
+        raise FetchFailure(f"failed to fetch {redact_url(url)}: {last_error}")
 
     def json(
         self,
@@ -471,7 +512,11 @@ def collect_document(client: HTTPClient, source: DocumentSource) -> dict[str, An
         "semantic_sha256": sha256_text(semantic_text),
         "signals": signals,
         "model_tokens": sorted(set(MODEL_TOKEN_RE.findall(semantic_text))),
-        "feature_tokens": sorted(set(FEATURE_TOKEN_RE.findall(semantic_text))),
+        # Lowercased so a header capitalized in prose still matches the flag
+        # ids in Dive's catalogs and in classify_document_change.
+        "feature_tokens": sorted(
+            {token.lower() for token in FEATURE_TOKEN_RE.findall(semantic_text)}
+        ),
         "dates": sorted(set(ISO_DATE_RE.findall(semantic_text))),
     }
 
@@ -660,7 +705,26 @@ def collect_mistral_api(client: HTTPClient, key: str) -> dict[str, Any]:
     return {"status": "ok", "source": url, "models": models}
 
 
-def collect_openrouter_api(client: HTTPClient, key: str | None) -> dict[str, Any]:
+def openrouter_prefixes(repo_root: Path) -> tuple[str, ...]:
+    """Namespaces to keep from OpenRouter's catalog, derived from Dive's own."""
+
+    try:
+        catalog = load_provider_catalog(repo_root, "openrouter")
+    except FetchFailure:
+        return OPENROUTER_PREFIXES
+    prefixes = {
+        f"{str(model['id']).split('/', 1)[0]}/"
+        for model in catalog.get("models", [])
+        if "/" in str(model.get("id", ""))
+    }
+    return tuple(sorted(prefixes.union(OPENROUTER_PREFIXES)))
+
+
+def collect_openrouter_api(
+    client: HTTPClient,
+    key: str | None,
+    prefixes: Sequence[str] = OPENROUTER_PREFIXES,
+) -> dict[str, Any]:
     url = "https://openrouter.ai/api/v1/models?output_modalities=all"
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     payload = client.json(url, headers=headers)
@@ -683,7 +747,7 @@ def collect_openrouter_api(client: HTTPClient, key: str | None) -> dict[str, Any
     models = records_by_id(
         payload.get("data", []),
         fields,
-        include=lambda item: str(item.get("id", "")).startswith(OPENROUTER_PREFIXES),
+        include=lambda item: str(item.get("id", "")).startswith(tuple(prefixes)),
     )
     return {"status": "ok", "source": url, "models": models}
 
@@ -739,22 +803,45 @@ def first_env(names: Sequence[str]) -> str | None:
     return None
 
 
+def redact_url(url: str) -> str:
+    """Mask credentials that providers accept as query parameters."""
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return url
+    if not parsed.query:
+        return url
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    if not any(name.lower() in SENSITIVE_QUERY_PARAMS for name, _ in params):
+        return url
+    masked = [
+        (name, "[redacted]" if name.lower() in SENSITIVE_QUERY_PARAMS else value)
+        for name, value in params
+    ]
+    return urlunparse(parsed._replace(query=urlencode(masked)))
+
+
 def safe_error(error: Exception) -> str:
-    message = str(error)
-    for env_name in (
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "XAI_API_KEY",
-        "GROK_API_KEY",
-        "MISTRAL_API_KEY",
-        "OPENROUTER_API_KEY",
-    ):
+    message = SENSITIVE_QUERY_RE.sub(r"\1[redacted]", str(error))
+    for env_name in API_KEY_ENV_NAMES:
         value = os.getenv(env_name)
-        if value:
-            message = message.replace(value, "[redacted]")
+        if not value:
+            continue
+        # Google passes the key in the query string, so the URL-encoded form of
+        # the value is what actually reaches an error message.
+        for variant in {value, quote(value, safe=""), quote_plus(value)}:
+            message = message.replace(variant, "[redacted]")
     return message
+
+
+def describe_error(error: Exception) -> str:
+    """Render an unexpected failure without hiding what kind of failure it was."""
+
+    message = safe_error(error)
+    if isinstance(error, FetchFailure):
+        return message
+    return f"{type(error).__name__}: {message}"
 
 
 def collect_repo_facts(repo_root: Path) -> dict[str, Any]:
@@ -884,11 +971,13 @@ def build_snapshot(
             source = pending[future]
             try:
                 document = future.result()
-            except FetchFailure as error:
+            except Exception as error:
+                # A malformed page or a bad discovery pattern degrades one
+                # source; it must never abort the whole audit.
                 document = {
                     "status": "error",
                     "url": source.url,
-                    "error": safe_error(error),
+                    "error": describe_error(error),
                 }
             result["providers"][source.provider]["documents"][source.name] = document
 
@@ -897,7 +986,9 @@ def build_snapshot(
         try:
             if provider == "openrouter":
                 provider_result["api"] = collect_openrouter_api(
-                    client, first_env(("OPENROUTER_API_KEY",))
+                    client,
+                    first_env(("OPENROUTER_API_KEY",)),
+                    openrouter_prefixes(repo_root),
                 )
             elif provider == "ollama":
                 try:
@@ -929,10 +1020,10 @@ def build_snapshot(
                         "reason": f"none of {', '.join(env_names)} is set",
                         "models": {},
                     }
-        except FetchFailure as error:
+        except Exception as error:
             provider_result["api"] = {
                 "status": "error",
-                "error": safe_error(error),
+                "error": describe_error(error),
                 "models": {},
             }
 
@@ -1134,11 +1225,12 @@ def diff_snapshots(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[
                 set(new_doc.get("feature_tokens", []))
                 - set(old_doc.get("feature_tokens", []))
             )
-            supported_features = set(
-                ((after.get("repo", {}) or {}).get("providers", {}) or {})
+            supported_features = {
+                str(feature).lower()
+                for feature in ((after.get("repo", {}) or {}).get("providers", {}) or {})
                 .get(provider, {})
                 .get("feature_flags", [])
-            )
+            }
             change = {
                 "provider": provider,
                 "kind": classify_document_change(added, removed),
@@ -1225,10 +1317,13 @@ def diff_snapshots(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[
 
 
 def summarize_value(value: Any, limit: int = 180) -> str:
-    rendered = stable_json(value)
-    if len(rendered) > limit:
-        return rendered[: limit - 3] + "..."
-    return rendered
+    return truncate_text(stable_json(value), limit)
+
+
+def truncate_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
 
 
 def escape_markdown(value: Any) -> str:
@@ -1262,20 +1357,114 @@ def escape_markdown(value: Any) -> str:
     )
 
 
+def take_within_budget(lines: Sequence[str], budget: int) -> tuple[list[str], int]:
+    """Return the leading lines that fit in budget, plus the number dropped."""
+
+    kept: list[str] = []
+    used = 0
+    for index, line in enumerate(lines):
+        size = len(line) + 1
+        if used + size > budget:
+            return kept, len(lines) - index
+        kept.append(line)
+        used += size
+    return kept, 0
+
+
+def change_subject(change: Mapping[str, Any], fallback: str) -> str:
+    return (
+        change.get("model")
+        or change.get("document")
+        or change.get("module")
+        or change.get("source")
+        or fallback
+    )
+
+
+def change_section(change: Mapping[str, Any]) -> list[str]:
+    subject = truncate_text(str(change_subject(change, "change")), MAX_SUBJECT_CHARS)
+    lines = [
+        "",
+        f"## {change.get('provider')}: {escape_markdown(subject)}",
+        "",
+        f"Type: `{change.get('kind')}`",
+    ]
+    if change.get("url"):
+        lines.extend(("", f"Source: {change['url']}"))
+    if change.get("details"):
+        lines.extend(
+            ("", f"Details: {escape_markdown(summarize_value(change['details']))}")
+        )
+    if change.get("dive") is not None:
+        dive = change["dive"]
+        lines.extend(
+            (
+                "",
+                "Dive provider catalog: "
+                + ("listed" if dive.get("provider_catalog") else "not listed"),
+                "Dive CLI recommendations: "
+                + ("listed" if dive.get("cli_recommended") else "not listed"),
+            )
+        )
+    if change.get("before") is not None:
+        lines.extend(
+            (
+                "",
+                f"Before: <code>{escape_markdown(summarize_value(change['before']))}</code>",
+            )
+        )
+    if change.get("after") is not None:
+        lines.extend(
+            (
+                "",
+                f"After: <code>{escape_markdown(summarize_value(change['after']))}</code>",
+            )
+        )
+    fields = change.get("fields", [])
+    if fields:
+        lines.extend(("", "Changed fields:", ""))
+        for field in fields[:30]:
+            lines.append(
+                f"- <code>{escape_markdown(field['field'])}</code>: "
+                f"<code>{escape_markdown(summarize_value(field.get('before')))}</code> → "
+                f"<code>{escape_markdown(summarize_value(field.get('after')))}</code>"
+            )
+        if len(fields) > 30:
+            lines.append(f"- … {len(fields) - 30} more field changes")
+    for label, key in (("Added signals", "added"), ("Removed signals", "removed")):
+        values = change.get(key, [])
+        if not values:
+            continue
+        lines.extend(("", f"{label}:", ""))
+        for value in values[:25]:
+            lines.append(
+                f"- {escape_markdown(truncate_text(str(value), MAX_SIGNAL_CHARS))}"
+            )
+        if len(values) > 25:
+            lines.append(f"- … {len(values) - 25} more")
+    if change.get("feature_flags_added"):
+        lines.extend(("", "New upstream feature flags:", ""))
+        unlisted = set(change.get("unlisted_feature_flags", []))
+        for feature in change["feature_flags_added"]:
+            status = "not listed in Dive" if feature in unlisted else "listed in Dive"
+            lines.append(f"- <code>{escape_markdown(feature)}</code> — {status}")
+    return lines
+
+
 def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
     changes = diff.get("changes", [])
     displayed_changes = changes[:MAX_REPORT_CHANGES]
-    lines = [
+    head = [
         "# Dive provider watch report",
         "",
         f"Generated: `{diff.get('generated_at')}`",
         "",
     ]
     if not changes:
-        lines.extend(("No material upstream changes detected.", ""))
-        return "\n".join(lines)
+        head.extend(("No material upstream changes detected.", ""))
+        return "\n".join(head)
 
-    lines.extend(
+    head.extend(
         (
             f"Detected **{len(changes)}** material change(s).",
             "",
@@ -1284,117 +1473,69 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
         )
     )
     if len(changes) > len(displayed_changes):
-        lines.extend(
+        head.extend(
             (
                 f"Showing the first {len(displayed_changes)} changes; "
                 "the JSON artifact contains the complete diff.",
                 "",
             )
         )
-    lines.extend(
+    head.extend(
         (
             "| Provider | Change | Subject | Dive catalog |",
             "| --- | --- | --- | --- |",
         )
     )
+    rows: list[str] = []
     for change in displayed_changes:
-        subject = (
-            change.get("model")
-            or change.get("document")
-            or change.get("module")
-            or change.get("source")
-            or "-"
-        )
+        subject = truncate_text(str(change_subject(change, "-")), MAX_SUBJECT_CHARS)
         dive = change.get("dive")
         dive_status = (
-            "listed" if dive and dive.get("provider_catalog") else "not listed"
-        ) if dive is not None else "-"
-        lines.append(
+            ("listed" if dive and dive.get("provider_catalog") else "not listed")
+            if dive is not None
+            else "-"
+        )
+        rows.append(
             f"| {change.get('provider')} | `{change.get('kind')}` | "
             f"<code>{escape_markdown(subject)}</code> | "
             f"{dive_status} |"
         )
 
-    for change in displayed_changes:
-        subject = (
-            change.get("model")
-            or change.get("document")
-            or change.get("module")
-            or change.get("source")
-            or "change"
-        )
-        lines.extend(
-            ("", f"## {change.get('provider')}: {escape_markdown(subject)}", "")
-        )
-        lines.append(f"Type: `{change.get('kind')}`")
-        if change.get("url"):
-            lines.extend(("", f"Source: {change['url']}"))
-        if change.get("details"):
-            lines.extend(("", f"Details: {escape_markdown(change['details'])}"))
-        if change.get("dive") is not None:
-            dive = change["dive"]
-            lines.extend(
-                (
-                    "",
-                    "Dive provider catalog: "
-                    + ("listed" if dive.get("provider_catalog") else "not listed"),
-                    "Dive CLI recommendations: "
-                    + ("listed" if dive.get("cli_recommended") else "not listed"),
-                )
-            )
-        if change.get("before") is not None:
-            lines.extend(
-                (
-                    "",
-                    f"Before: <code>{escape_markdown(summarize_value(change['before']))}</code>",
-                )
-            )
-        if change.get("after") is not None:
-            lines.extend(
-                (
-                    "",
-                    f"After: <code>{escape_markdown(summarize_value(change['after']))}</code>",
-                )
-            )
-        fields = change.get("fields", [])
-        if fields:
-            lines.extend(("", "Changed fields:", ""))
-            for field in fields[:30]:
-                lines.append(
-                    f"- <code>{escape_markdown(field['field'])}</code>: "
-                    f"<code>{escape_markdown(summarize_value(field.get('before')))}</code> → "
-                    f"<code>{escape_markdown(summarize_value(field.get('after')))}</code>"
-                )
-            if len(fields) > 30:
-                lines.append(f"- … {len(fields) - 30} more field changes")
-        for label, key in (("Added signals", "added"), ("Removed signals", "removed")):
-            values = change.get(key, [])
-            if not values:
-                continue
-            lines.extend(("", f"{label}:", ""))
-            for value in values[:25]:
-                lines.append(f"- {escape_markdown(value)}")
-            if len(values) > 25:
-                lines.append(f"- … {len(values) - 25} more")
-        if change.get("feature_flags_added"):
-            lines.extend(("", "New upstream feature flags:", ""))
-            unlisted = set(change.get("unlisted_feature_flags", []))
-            for feature in change["feature_flags_added"]:
-                status = "not listed in Dive" if feature in unlisted else "listed in Dive"
-                lines.append(f"- <code>{escape_markdown(feature)}</code> — {status}")
-
+    footer: list[str] = []
     repo_models = {
         provider: len(data.get("models", []))
         for provider, data in (current.get("repo", {}).get("providers", {}) or {}).items()
     }
     if repo_models:
-        lines.extend(("", "## Dive context", ""))
-        lines.append(
+        footer.extend(("", "## Dive context", ""))
+        footer.append(
             "Current model constants found in the repository: "
             + ", ".join(f"{provider}={count}" for provider, count in sorted(repo_models.items()))
             + "."
         )
-    lines.append("")
+    footer.append("")
+
+    # GitHub rejects issue bodies over 65,536 characters, and escape_markdown
+    # expands provider-controlled text several times over, so capping the number
+    # of changes is not a bound on size. Trim the body rather than lose the
+    # report to an HTTP 422 on a cron run nobody is watching.
+    sections: list[str] = []
+    for change in displayed_changes:
+        sections.extend(change_section(change))
+    reserved = len("\n".join(head + footer)) + len(OMITTED_NOTICE) + 2
+    kept_rows, dropped_rows = take_within_budget(
+        rows, min(MAX_TABLE_BYTES, MAX_REPORT_BYTES - reserved)
+    )
+    kept_sections, dropped_sections = take_within_budget(
+        sections,
+        MAX_REPORT_BYTES - reserved - len("\n".join(kept_rows)),
+    )
+
+    lines = [*head, *kept_rows, *kept_sections]
+    omitted = dropped_rows + dropped_sections
+    if omitted:
+        lines.extend(("", OMITTED_NOTICE.format(count=omitted)))
+    lines.extend(footer)
     return "\n".join(lines)
 
 

@@ -32,8 +32,10 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Deliberately not provider-catalog-check: that target shells out to
+      # gofmt, and go-test.yml already runs it with a Go toolchain set up.
       - name: Test the watcher
-        run: make provider-catalog-check
+        run: make provider-watch-test
 
       - name: Check provider sources
         id: audit

@@ -26,8 +26,6 @@ const (
 	ModelImagineImage           = "grok-imagine-image"
 	ModelImagineImageQuality    = "grok-imagine-image-quality"
 	ModelImagineVideo           = "grok-imagine-video"
-	ModelGrok2Vision1212        = "grok-2-vision-1212"
-	ModelGrok2Image1212         = "grok-2-image-1212"
 )
 
 // DefaultModel is generated from the catalog's default model.

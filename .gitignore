@@ -25,6 +25,7 @@
 .env
 
 .venv
+__pycache__/
 output
 /cmd/dive/dive
 tmp.json

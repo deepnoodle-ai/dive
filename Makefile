@@ -1,5 +1,5 @@
 
-.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy tidy-all tag-modules provider-catalog-generate provider-catalog-check check
+.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy tidy-all release-prep tag-modules provider-catalog-generate provider-catalog-check provider-watch-test check
 
 COVER_PROFILE := cover.out
 
@@ -19,8 +19,10 @@ help:
 	@echo "  make build       - Build the dive CLI"
 	@echo "  make provider-catalog-generate - Generate provider Go files from catalog.json"
 	@echo "  make provider-catalog-check - Verify provider catalogs and generated Go files"
+	@echo "  make provider-watch-test - Run the provider watcher unit tests"
+	@echo "  make release-prep VERSION=v1.0.0 - Point sub-module requirements at VERSION"
 	@echo "  make tag-modules VERSION=v1.0.0 - Tag all sub-modules"
-	@echo "  make check       - Run provider-catalog-check, fmt-check, vet, and test"
+	@echo "  make check       - Run catalog checks, watcher tests, fmt-check, vet, and test"
 
 test:
 	go test ./...
@@ -71,10 +73,19 @@ build:
 
 SUB_MODULES := providers/google providers/openai providers/grok a2a otel experimental/mcp experimental/cmd/dive examples
 
+release-prep:
+ifndef VERSION
+	$(error VERSION is required. Usage: make release-prep VERSION=v1.0.0)
+endif
+	python3 scripts/sync_module_versions.py $(VERSION) --write
+	@echo ""
+	@echo "Commit the go.mod updates, then run: make tag-modules VERSION=$(VERSION)"
+
 tag-modules:
 ifndef VERSION
 	$(error VERSION is required. Usage: make tag-modules VERSION=v1.0.0)
 endif
+	@python3 scripts/sync_module_versions.py $(VERSION) --check
 	@for mod in $(SUB_MODULES); do \
 		echo "Tagging $$mod/$(VERSION)"; \
 		git tag "$$mod/$(VERSION)"; \
@@ -85,8 +96,11 @@ endif
 provider-catalog-generate:
 	python3 scripts/generate_provider_catalogs.py
 
+# Requires gofmt on PATH; the watcher tests do not.
 provider-catalog-check:
 	python3 scripts/generate_provider_catalogs.py --check
-	python3 -m unittest -v scripts/test_provider_watch.py
 
-check: provider-catalog-check fmt-check vet test
+provider-watch-test:
+	python3 -B -m unittest -v scripts/test_provider_watch.py
+
+check: provider-catalog-check provider-watch-test fmt-check vet test
