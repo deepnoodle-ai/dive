@@ -23,7 +23,6 @@ const (
 	// Deprecated: Model was shut down March 9, 2026. Use ModelGemini31ProPreview instead.
 	ModelGemini3ProPreview  = "gemini-3-pro-preview"
 	ModelGemini25Pro        = "gemini-2.5-pro"
-	ModelGemini25ProLong    = "gemini-2.5-pro-long"
 	ModelGemini25Flash      = "gemini-2.5-flash"
 	ModelGemini25FlashLite  = "gemini-2.5-flash-lite"
 	ModelGemini25FlashImage = "gemini-2.5-flash-image"

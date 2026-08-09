@@ -22,6 +22,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **`make release-prep VERSION=vX.Y.Z`** points every sub-module's intra-repo
   requirement at the version being released. `make tag-modules` now refuses to
   tag while those requirements are stale.
+- **`grok.ModelImagineVideo15`** (`grok-imagine-video-1.5`).
+
+### Deprecated
+
+- **Twelve Grok constants xAI has retired** — `grok-3`, `grok-3-latest`,
+  `grok-3-mini`, `grok-4`, `grok-4-latest`, `grok-4-0709`, the four
+  `grok-4[-1]-fast-*` slugs, `grok-code-fast-1`, and `grok-imagine-image-pro`.
+  The slugs still resolve but redirect to `grok-4.3`, `grok-build-0.1`, or
+  `grok-imagine-image-quality`, and bill at the target's rates.
 
 ### Fixed
 
@@ -75,6 +84,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Removed
 
+- **`google.ModelGemini25ProLong`** — never a callable model, only a key for
+  Gemini 2.5 Pro's over-200K pricing tier, now folded into the `gemini-2.5-pro`
+  pricing note.
 - **Four constants naming models that do not exist** —
   `grok.ModelGrok45Latest`, `grok.ModelGrokBuildLatest`, `openai.ModelGPT51Mini`,
   and `openai.ModelGPT53CodexSpark`. xAI publishes no `-latest` aliases, and

@@ -3,27 +3,40 @@
 package grok
 
 const (
-	ModelGrok45                 = "grok-4.5"
-	ModelGrok43                 = "grok-4.3"
-	ModelGrok420Reasoning       = "grok-4.20-0309-reasoning"
-	ModelGrok420NonReasoning    = "grok-4.20-0309-non-reasoning"
-	ModelGrok420MultiAgent      = "grok-4.20-multi-agent-0309"
-	ModelGrokBuild01            = "grok-build-0.1"
-	ModelGrok41FastReasoning    = "grok-4-1-fast-reasoning"
+	ModelGrok45              = "grok-4.5"
+	ModelGrok43              = "grok-4.3"
+	ModelGrok420Reasoning    = "grok-4.20-0309-reasoning"
+	ModelGrok420NonReasoning = "grok-4.20-0309-non-reasoning"
+	ModelGrok420MultiAgent   = "grok-4.20-multi-agent-0309"
+	ModelGrokBuild01         = "grok-build-0.1"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok41FastReasoning = "grok-4-1-fast-reasoning"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43 with reasoning effort none.
 	ModelGrok41FastNonReasoning = "grok-4-1-fast-non-reasoning"
-	ModelGrok4FastReasoning     = "grok-4-fast-reasoning"
-	ModelGrok4FastNonReasoning  = "grok-4-fast-non-reasoning"
-	ModelGrok40709              = "grok-4-0709"
-	ModelGrok4                  = "grok-4"
-	ModelGrok4Latest            = "grok-4-latest"
-	ModelGrok3                  = "grok-3"
-	ModelGrok3Latest            = "grok-3-latest"
-	ModelGrok3Mini              = "grok-3-mini"
-	ModelGrokCodeFast1          = "grok-code-fast-1"
-	ModelImagineImagePro        = "grok-imagine-image-pro"
-	ModelImagineImage           = "grok-imagine-image"
-	ModelImagineImageQuality    = "grok-imagine-image-quality"
-	ModelImagineVideo           = "grok-imagine-video"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok4FastReasoning = "grok-4-fast-reasoning"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43 with reasoning effort none.
+	ModelGrok4FastNonReasoning = "grok-4-fast-non-reasoning"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok40709 = "grok-4-0709"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok4 = "grok-4"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok4Latest = "grok-4-latest"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok3 = "grok-3"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok3Latest = "grok-3-latest"
+	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	ModelGrok3Mini = "grok-3-mini"
+	// Deprecated: Retired by xAI; requests route to grok-build-0.1. Use ModelGrokBuild01.
+	ModelGrokCodeFast1 = "grok-code-fast-1"
+	// Deprecated: Retired by xAI; requests redirect to grok-imagine-image-quality. Use ModelImagineImageQuality.
+	ModelImagineImagePro     = "grok-imagine-image-pro"
+	ModelImagineImage        = "grok-imagine-image"
+	ModelImagineImageQuality = "grok-imagine-image-quality"
+	ModelImagineVideo        = "grok-imagine-video"
+	ModelImagineVideo15      = "grok-imagine-video-1.5"
 )
 
 // DefaultModel is generated from the catalog's default model.

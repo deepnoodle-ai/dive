@@ -94,19 +94,11 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-02-09",
 	},
-	// Up to 200K tokens
+	// Input $1.25 up to 200K tokens, $2.50 above; output $10.00 up to 200K tokens, $15.00 above.
 	ModelGemini25Pro: {
 		Model:       ModelGemini25Pro,
 		InputPrice:  1.25,
 		OutputPrice: 10.00,
-		Currency:    "USD",
-		UpdatedAt:   "2026-02-09",
-	},
-	// Over 200K tokens
-	ModelGemini25ProLong: {
-		Model:       ModelGemini25ProLong,
-		InputPrice:  2.50,
-		OutputPrice: 15.00,
 		Currency:    "USD",
 		UpdatedAt:   "2026-02-09",
 	},

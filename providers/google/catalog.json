@@ -156,13 +156,6 @@
       "display_name": "Gemini 2.5 Pro"
     },
     {
-      "go_name": "ModelGemini25ProLong",
-      "id": "gemini-2.5-pro-long",
-      "kind": "text",
-      "context_window": 1000000,
-      "display_name": "Gemini 2.5 Pro"
-    },
-    {
       "go_name": "ModelGemini25Flash",
       "id": "gemini-2.5-flash",
       "kind": "text",
@@ -318,15 +311,7 @@
         "output_price_per_1m_tokens": "10.00",
         "currency": "USD",
         "updated_at": "2026-02-09",
-        "note": "Up to 200K tokens"
-      },
-      {
-        "model": "gemini-2.5-pro-long",
-        "input_price_per_1m_tokens": "2.50",
-        "output_price_per_1m_tokens": "15.00",
-        "currency": "USD",
-        "updated_at": "2026-02-09",
-        "note": "Over 200K tokens"
+        "note": "Input $1.25 up to 200K tokens, $2.50 above; output $10.00 up to 200K tokens, $15.00 above."
       },
       {
         "model": "gemini-2.0-flash",

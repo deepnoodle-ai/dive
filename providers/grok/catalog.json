@@ -79,6 +79,8 @@
     {
       "go_name": "ModelGrok41FastReasoning",
       "id": "grok-4-1-fast-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4.1 Fast"
@@ -86,6 +88,8 @@
     {
       "go_name": "ModelGrok41FastNonReasoning",
       "id": "grok-4-1-fast-non-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43 with reasoning effort none.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4.1 Fast"
@@ -93,6 +97,8 @@
     {
       "go_name": "ModelGrok4FastReasoning",
       "id": "grok-4-fast-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4"
@@ -100,6 +106,8 @@
     {
       "go_name": "ModelGrok4FastNonReasoning",
       "id": "grok-4-fast-non-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43 with reasoning effort none.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4"
@@ -107,6 +115,8 @@
     {
       "go_name": "ModelGrok40709",
       "id": "grok-4-0709",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4"
@@ -114,6 +124,8 @@
     {
       "go_name": "ModelGrok4",
       "id": "grok-4",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4"
@@ -121,6 +133,8 @@
     {
       "go_name": "ModelGrok4Latest",
       "id": "grok-4-latest",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4"
@@ -128,6 +142,8 @@
     {
       "go_name": "ModelGrok3",
       "id": "grok-3",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 3"
@@ -135,6 +151,8 @@
     {
       "go_name": "ModelGrok3Latest",
       "id": "grok-3-latest",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 3"
@@ -142,6 +160,8 @@
     {
       "go_name": "ModelGrok3Mini",
       "id": "grok-3-mini",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 3 Mini"
@@ -149,6 +169,8 @@
     {
       "go_name": "ModelGrokCodeFast1",
       "id": "grok-code-fast-1",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests route to grok-build-0.1. Use ModelGrokBuild01.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok Code"
@@ -156,6 +178,8 @@
     {
       "go_name": "ModelImagineImagePro",
       "id": "grok-imagine-image-pro",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-imagine-image-quality. Use ModelImagineImageQuality.",
       "kind": "image",
       "context_window": 131072
     },
@@ -174,6 +198,12 @@
     {
       "go_name": "ModelImagineVideo",
       "id": "grok-imagine-video",
+      "kind": "video",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelImagineVideo15",
+      "id": "grok-imagine-video-1.5",
       "kind": "video",
       "context_window": 131072
     }
