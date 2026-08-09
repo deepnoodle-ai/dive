@@ -121,7 +121,7 @@ interface:
   deferral, and modeling it as an error fights the existing
   `PostToolUseFailure` hook semantics.
 - A separate `SuspendingTool` interface doubles the tool-author surface and
-  forces tools that *sometimes* suspend to choose between two interfaces.
+  forces tools that _sometimes_ suspend to choose between two interfaces.
 
 ### 3.2 Response status and pending/completed tool calls
 
@@ -462,7 +462,7 @@ classifies it as pending.
 Three changes:
 
 1. `generate`'s return value carries suspend state.
-2. After `executeToolCalls`, if `batch.Suspended` is true, build a *partial*
+2. After `executeToolCalls`, if `batch.Suspended` is true, build a _partial_
    tool_result message containing only completed outcomes' tool_results,
    append it to outputMessages, and return early with the suspended snapshot.
 3. Add a new input `resumeState` that, when non-nil, tells `generate` to
@@ -542,7 +542,7 @@ if batch.Suspended {
 **Critical invariant:** the partial tool_result message is saved to the
 session but is NEVER sent to the LLM. The agent returns before the next
 iteration's LLM call. On resume, the tool_result message is reused (extended
-with the caller-supplied results) and *then* sent to the LLM.
+with the caller-supplied results) and _then_ sent to the LLM.
 
 ### 4.7 Resume path inside `generate`
 
@@ -717,7 +717,7 @@ to the error results.
 
 Per FR-19, suspend state must be queryable authoritatively. Adding methods
 to `dive.Session` would technically break third-party implementations. The
-design adds an *optional* interface in `dive.go`:
+design adds an _optional_ interface in `dive.go`:
 
 ```go
 // SuspendableSession is an optional extension of Session for callers who
@@ -783,7 +783,7 @@ func (s *Session) SaveResumedTurn(ctx context.Context, messages []*llm.Message, 
 turn and clears `Suspended`, `PendingToolCalls`, and `CompletedToolCalls`.
 Returns `ErrNotSuspended` if the session is not actually suspended.
 
-On a successful resume we *replace* the last suspended event rather than
+On a successful resume we _replace_ the last suspended event rather than
 append a new one (the suspended event's assistant msg is still part of the
 turn). So the resume-completion path:
 
@@ -964,6 +964,7 @@ be surprised to run mid-turn.
 ### 7.2 Streaming: `ResponseItemTypeSuspended` emission
 
 During a suspended iteration, stream events are emitted as normal for:
+
 - the assistant message (tool_use blocks)
 - each completed sibling's tool_call_result event
 
@@ -1013,7 +1014,7 @@ errors and produces a final answer (typically a graceful "Okay, I'll stop
 and wait for a new instruction"). Also: `PostToolUseFailure` hooks fire for
 each error result, per FR-17.
 
-One subtlety: `PostToolUseFailure` is a *tool-level* hook that today fires
+One subtlety: `PostToolUseFailure` is a _tool-level_ hook that today fires
 from inside `executeToolCalls`. On resume, we're not executing tools at
 all — we're injecting pre-computed results. The resume path must explicitly
 fire `PostToolUseFailure` (or `PostToolUse`) for each merged result so the
@@ -1089,32 +1090,32 @@ third call suspends again" deterministically.
 
 ### 8.2 Core cases
 
-| # | Name | Script | Assertion |
-|---|------|--------|-----------|
-| 1 | `TestSuspendSimple` | LLM→[tool A], tool A suspends | `resp.Status==Suspended`, `len(pending)==1`, session Suspended=true, no LLM call after suspend |
-| 2 | `TestResumeSimple` | as #1, then resume with result | final resp Completed, LLM called once more with full tool_result, session Suspended=false |
-| 3 | `TestSuspendResumeSuspendAgain` | LLM turn 1: [A], A suspends; resume with A's result → LLM turn 2: [B], B suspends; resume with B's result → LLM turn 3: final text | final Completed, total 3 LLM calls, session flag toggled correctly across transitions |
-| 4 | `TestParallelOneSuspends` | LLM→[A, B], A completes, B suspends (parallelToolExecution=true) | 1 pending, 1 completed in Response; session tool_result msg has only A's result; resume with B → full completion |
-| 5 | `TestParallelMultipleSuspend` | LLM→[A, B, C], A completes, B+C suspend | 2 pending, 1 completed; resume with only B → stays suspended with C pending; resume with C → completes |
-| 6 | `TestSequentialSuspendSkipsTail` | LLM→[A, B, C], A completes, B suspends (parallelToolExecution=false) | C is NOT called (assert scripted tool C's call count is 0); resume supplying B's result executes C, then final LLM call |
-| 7 | `TestResumeUnknownID` | Suspended state with pending [A]; resume with {X: ...} | returns `ErrUnknownPendingToolCall`, session unchanged |
-| 8 | `TestResumeNoSuspendedState` | Fresh session; resume with {A: ...} | returns `ErrNoSuspendedState`, session unchanged |
-| 9 | `TestResumeErrorResultCancelsTurn` | Suspended on [A]; resume with IsError result for A | PostToolUseFailure fires once, LLM sees error, final completed Response |
-| 10 | `TestOnSuspendHookOrder` | Suspended turn with OnSuspend + PostGeneration hooks | OnSuspend runs strictly before PostGeneration; both receive Status=Suspended |
-| 11 | `TestOnSuspendHookSeesPending` | OnSuspend hook captures `hctx.Response.PendingToolCalls` | matches expected IDs |
-| 12 | `TestStreamingSuspendedItem` | Streaming suspend turn | callback receives `ResponseItemTypeSuspended` as terminal item, with correct pending/completed lists |
-| 13 | `TestSuspendNoRegressionForNonSuspendingTools` | Run a normal turn with no suspend | Response.Status is "" or Completed, no new allocations on the hot path (verified via a benchmark or an allocs-per-op assertion) |
-| 14 | `TestSetModelBetweenSuspendResume` | Suspend, `agent.SetModel(newModel)`, resume | newModel.Generate is called, not the original |
+| #   | Name                                           | Script                                                                                                                             | Assertion                                                                                                                       |
+| --- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `TestSuspendSimple`                            | LLM→[tool A], tool A suspends                                                                                                      | `resp.Status==Suspended`, `len(pending)==1`, session Suspended=true, no LLM call after suspend                                  |
+| 2   | `TestResumeSimple`                             | as #1, then resume with result                                                                                                     | final resp Completed, LLM called once more with full tool_result, session Suspended=false                                       |
+| 3   | `TestSuspendResumeSuspendAgain`                | LLM turn 1: [A], A suspends; resume with A's result → LLM turn 2: [B], B suspends; resume with B's result → LLM turn 3: final text | final Completed, total 3 LLM calls, session flag toggled correctly across transitions                                           |
+| 4   | `TestParallelOneSuspends`                      | LLM→[A, B], A completes, B suspends (parallelToolExecution=true)                                                                   | 1 pending, 1 completed in Response; session tool_result msg has only A's result; resume with B → full completion                |
+| 5   | `TestParallelMultipleSuspend`                  | LLM→[A, B, C], A completes, B+C suspend                                                                                            | 2 pending, 1 completed; resume with only B → stays suspended with C pending; resume with C → completes                          |
+| 6   | `TestSequentialSuspendSkipsTail`               | LLM→[A, B, C], A completes, B suspends (parallelToolExecution=false)                                                               | C is NOT called (assert scripted tool C's call count is 0); resume supplying B's result executes C, then final LLM call         |
+| 7   | `TestResumeUnknownID`                          | Suspended state with pending [A]; resume with {X: ...}                                                                             | returns `ErrUnknownPendingToolCall`, session unchanged                                                                          |
+| 8   | `TestResumeNoSuspendedState`                   | Fresh session; resume with {A: ...}                                                                                                | returns `ErrNoSuspendedState`, session unchanged                                                                                |
+| 9   | `TestResumeErrorResultCancelsTurn`             | Suspended on [A]; resume with IsError result for A                                                                                 | PostToolUseFailure fires once, LLM sees error, final completed Response                                                         |
+| 10  | `TestOnSuspendHookOrder`                       | Suspended turn with OnSuspend + PostGeneration hooks                                                                               | OnSuspend runs strictly before PostGeneration; both receive Status=Suspended                                                    |
+| 11  | `TestOnSuspendHookSeesPending`                 | OnSuspend hook captures `hctx.Response.PendingToolCalls`                                                                           | matches expected IDs                                                                                                            |
+| 12  | `TestStreamingSuspendedItem`                   | Streaming suspend turn                                                                                                             | callback receives `ResponseItemTypeSuspended` as terminal item, with correct pending/completed lists                            |
+| 13  | `TestSuspendNoRegressionForNonSuspendingTools` | Run a normal turn with no suspend                                                                                                  | Response.Status is "" or Completed, no new allocations on the hot path (verified via a benchmark or an allocs-per-op assertion) |
+| 14  | `TestSetModelBetweenSuspendResume`             | Suspend, `agent.SetModel(newModel)`, resume                                                                                        | newModel.Generate is called, not the original                                                                                   |
 
 ### 8.3 Store round-trip cases (in `session/session_test.go`)
 
-| # | Name | Assertion |
-|---|------|-----------|
-| S1 | `TestMemoryStoreSuspendRoundTrip` | `SaveSuspendedTurn` then read via Messages + Suspended + PendingToolCallIDs returns the same values |
-| S2 | `TestFileStoreSuspendRoundTrip` | `SaveSuspendedTurn`, close, reopen from disk via `NewFileStore(dir)`, `Open(id)`; verify Suspended=true, PendingToolCallIDs equal, messages byte-identical |
-| S3 | `TestFileStoreListReportsSuspended` | Multiple sessions, some suspended; `List()` returns `SessionInfo.Suspended` matching state |
-| S4 | `TestSaveTurnClearsSuspension` | After SaveSuspendedTurn, a follow-up SaveTurn (or SaveResumedTurn) clears Suspended + PendingToolCallIDs |
-| S5 | `TestCrossProcessResume` | FileStore-backed: suspend in "process A" (first agent instance), instantiate a fresh agent + session from disk, resume; final response matches the single-process baseline |
+| #   | Name                                | Assertion                                                                                                                                                                  |
+| --- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | `TestMemoryStoreSuspendRoundTrip`   | `SaveSuspendedTurn` then read via Messages + Suspended + PendingToolCallIDs returns the same values                                                                        |
+| S2  | `TestFileStoreSuspendRoundTrip`     | `SaveSuspendedTurn`, close, reopen from disk via `NewFileStore(dir)`, `Open(id)`; verify Suspended=true, PendingToolCallIDs equal, messages byte-identical                 |
+| S3  | `TestFileStoreListReportsSuspended` | Multiple sessions, some suspended; `List()` returns `SessionInfo.Suspended` matching state                                                                                 |
+| S4  | `TestSaveTurnClearsSuspension`      | After SaveSuspendedTurn, a follow-up SaveTurn (or SaveResumedTurn) clears Suspended + PendingToolCallIDs                                                                   |
+| S5  | `TestCrossProcessResume`            | FileStore-backed: suspend in "process A" (first agent instance), instantiate a fresh agent + session from disk, resume; final response matches the single-process baseline |
 
 ### 8.4 Integration test across `agent_test.go`
 

@@ -13,6 +13,7 @@ ran. Everything that matters must be in your final message.
 # Tools and constraints
 
 You operate strictly READ-ONLY. Your tools are:
+
 - `Read` — read a file's contents (use `offset`/`limit` for large files).
 - `Glob` — find files by name pattern (e.g. `**/*.go`).
 - `Grep` — search file contents by regular expression (ripgrep-backed; narrow with

@@ -67,6 +67,7 @@ sess, _ := store.Open(ctx, "my-session")    // store-backed
 ```
 
 Key methods beyond the interface:
+
 - `Title() string` / `SetTitle(string)`
 - `EventCount() int`
 - `TotalUsage() *llm.Usage`
@@ -215,15 +216,15 @@ resp, _ := agent.CreateResponse(ctx,
 
 ## Migration from Previous Design
 
-| Previous                          | Current                                                       |
-| --------------------------------- | ------------------------------------------------------------- |
-| Hook-based session load/save      | Agent handles session internally                              |
-| `session.WithID("id")` per call   | `AgentOptions{Session: sess}` or `WithSession(sess)` per call |
-| Exported `Event`, `EventType`     | Unexported `event`, `eventType`                               |
-| `Store.GetSession` / `PutSession` | `Store.Open` / `Put`                                          |
-| `Store.AppendEvent`               | Internal `eventAppender` interface                            |
-| `session.Hooks(store)` returns hooks | Not needed — agent handles it                              |
-| `session.Loader` / `session.Saver` | Not needed — agent handles it                               |
+| Previous                             | Current                                                       |
+| ------------------------------------ | ------------------------------------------------------------- |
+| Hook-based session load/save         | Agent handles session internally                              |
+| `session.WithID("id")` per call      | `AgentOptions{Session: sess}` or `WithSession(sess)` per call |
+| Exported `Event`, `EventType`        | Unexported `event`, `eventType`                               |
+| `Store.GetSession` / `PutSession`    | `Store.Open` / `Put`                                          |
+| `Store.AppendEvent`                  | Internal `eventAppender` interface                            |
+| `session.Hooks(store)` returns hooks | Not needed — agent handles it                                 |
+| `session.Loader` / `session.Saver`   | Not needed — agent handles it                                 |
 
 ## Ideas Considered and Not Adopted
 

@@ -1,11 +1,11 @@
 # PRD: Multi-Provider Media Generation
 
-| Field | Content |
-|-------|---------|
-| Title | Multi-Provider Image & Video Generation |
-| Author | Curtis / DeepNoodle |
-| Status | Draft |
-| Last Updated | 2026-03-25 |
+| Field        | Content                                       |
+| ------------ | --------------------------------------------- |
+| Title        | Multi-Provider Image & Video Generation       |
+| Author       | Curtis / DeepNoodle                           |
+| Status       | Draft                                         |
+| Last Updated | 2026-03-25                                    |
 | Stakeholders | Dive library users, CLI users, agent builders |
 
 ## Problem & Opportunity
@@ -37,12 +37,12 @@ Dive remains an LLM-only library while the market moves toward multimodal workfl
 
 ## Goals & Success Metrics
 
-| Goal | Metric |
-|------|--------|
-| **Primary:** Developers can generate images across providers with one API | Generate identical-prompt images from 3+ providers with zero code changes beyond model name |
-| **Secondary:** Video generation works with the same pattern | At least 2 video providers supported with unified interface |
-| **Secondary:** The CLI is the fastest way to generate an image from the terminal | `dive image "a cat in space"` produces output in one command |
-| **Guardrail:** No regression to LLM capabilities | All existing LLM tests pass, no breaking API changes |
+| Goal                                                                             | Metric                                                                                      |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| **Primary:** Developers can generate images across providers with one API        | Generate identical-prompt images from 3+ providers with zero code changes beyond model name |
+| **Secondary:** Video generation works with the same pattern                      | At least 2 video providers supported with unified interface                                 |
+| **Secondary:** The CLI is the fastest way to generate an image from the terminal | `dive image "a cat in space"` produces output in one command                                |
+| **Guardrail:** No regression to LLM capabilities                                 | All existing LLM tests pass, no breaking API changes                                        |
 
 ## Target Users
 
@@ -153,6 +153,7 @@ result.WriteTo("flower.mp4")
 **Description:** As a developer, I want to generate an image from a text prompt using any supported provider so that I don't need to learn provider-specific APIs.
 
 **Acceptance Criteria:**
+
 - [ ] `media.GenerateImage(ctx, prompt, opts...)` returns an `*ImageResult`
 - [ ] Result contains image bytes, dimensions, format, model used, and generation metadata
 - [ ] Works with Google (Imagen, Gemini), OpenAI (gpt-image-1) at minimum
@@ -165,6 +166,7 @@ result.WriteTo("flower.mp4")
 **Description:** As a developer, I want to generate a video from a text prompt using any supported provider.
 
 **Acceptance Criteria:**
+
 - [ ] `media.GenerateVideo(ctx, prompt, opts...)` returns a `*VideoResult`
 - [ ] Result contains video bytes, dimensions, duration, format, and model used
 - [ ] Works with Google (Veo) and OpenAI (Sora) at minimum
@@ -177,6 +179,7 @@ result.WriteTo("flower.mp4")
 **Description:** As a developer, I want to edit an existing image using a text prompt.
 
 **Acceptance Criteria:**
+
 - [ ] `media.EditImage(ctx, prompt, opts...)` accepts reference image bytes via option
 - [ ] Works with providers that support editing (OpenAI initially)
 - [ ] Returns `*ImageResult` with the same shape as generation
@@ -187,6 +190,7 @@ result.WriteTo("flower.mp4")
 **Description:** As a developer, I want to send the same prompt to multiple models and collect all results.
 
 **Acceptance Criteria:**
+
 - [ ] `media.GenerateImages(ctx, prompt, opts...)` with `WithModels(...)` fans out concurrently
 - [ ] Returns `[]*ImageResult` with one result per model (or an error per model)
 - [ ] Individual provider failures don't fail the entire call
@@ -197,6 +201,7 @@ result.WriteTo("flower.mp4")
 **Description:** As a CLI user, I want to generate an image with a single command.
 
 **Acceptance Criteria:**
+
 - [ ] `dive image "prompt"` generates an image and saves it to the current directory
 - [ ] `--model` flag selects the model (defaults to a sensible default)
 - [ ] `--aspect` flag sets aspect ratio (e.g., `16:9`, `1:1`)
@@ -210,6 +215,7 @@ result.WriteTo("flower.mp4")
 **Description:** As a CLI user, I want to generate a video with a single command.
 
 **Acceptance Criteria:**
+
 - [ ] `dive video "prompt"` generates a video and saves it
 - [ ] `--duration` flag sets duration (e.g., `4s`, `8s`, `12s`)
 - [ ] Progress indication while waiting for generation
@@ -220,6 +226,7 @@ result.WriteTo("flower.mp4")
 **Description:** As an agent builder, I want to give my agent the ability to generate images as a tool.
 
 **Acceptance Criteria:**
+
 - [ ] `toolkit.ImageGenerationTool(model)` returns a `dive.Tool`
 - [ ] Tool accepts prompt, aspect ratio, and output path as parameters
 - [ ] Tool writes the generated image to disk and returns the file path
@@ -231,6 +238,7 @@ result.WriteTo("flower.mp4")
 **Description:** As a library author, I want to add new image/video providers using the same registry pattern as LLM providers.
 
 **Acceptance Criteria:**
+
 - [ ] `media.Registry` follows the same pattern as `providers.Registry`
 - [ ] Providers self-register via `init()`
 - [ ] Model name matching routes to the correct provider
@@ -255,40 +263,43 @@ result.WriteTo("flower.mp4")
 
 ## Non-Goals (Out of Scope)
 
-| Non-Goal | Rationale |
-|----------|-----------|
-| **Cost tracking / routing optimization** | Valuable but separate concern. Build the generation layer first; cost intelligence can layer on top. |
-| **LoRA / custom model support** | Provider-specific and complex. Defer until base generation is solid. Can be added via provider-specific options later. |
-| **Image-to-image (ControlNet, IP-Adapter)** | Advanced workflows beyond basic edit. Defer to a future iteration. |
-| **Streaming partial image results** | No providers support this meaningfully yet for images. Video streaming may come later. |
-| **Hosted proxy / API gateway** | This is a Go library, not a SaaS. Network APIs are out of scope. |
-| **Audio generation** | Different enough modality to deserve its own PRD. |
-| **Batch/queue job management** | Job queuing belongs at the application layer. Dive stays synchronous (or context-aware blocking for video). |
+| Non-Goal                                    | Rationale                                                                                                              |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Cost tracking / routing optimization**    | Valuable but separate concern. Build the generation layer first; cost intelligence can layer on top.                   |
+| **LoRA / custom model support**             | Provider-specific and complex. Defer until base generation is solid. Can be added via provider-specific options later. |
+| **Image-to-image (ControlNet, IP-Adapter)** | Advanced workflows beyond basic edit. Defer to a future iteration.                                                     |
+| **Streaming partial image results**         | No providers support this meaningfully yet for images. Video streaming may come later.                                 |
+| **Hosted proxy / API gateway**              | This is a Go library, not a SaaS. Network APIs are out of scope.                                                       |
+| **Audio generation**                        | Different enough modality to deserve its own PRD.                                                                      |
+| **Batch/queue job management**              | Job queuing belongs at the application layer. Dive stays synchronous (or context-aware blocking for video).            |
 
 **Future considerations worth designing for:**
+
 - Provider-specific option pass-through (e.g., `WithProviderOption("seed", 42)`) for power users
 - Callback/progress reporting for video generation polling
 - Image evaluation/comparison (e.g., using Gemini to score or compare generated images)
 
 ## Dependencies & Risks
 
-| Risk / Dependency | Impact | Mitigation |
-|-------------------|--------|------------|
-| Provider API instability | APIs are young and change frequently (Imagen went through 3 versions in a year) | Isolate provider specifics behind interfaces; encode/decode pattern from existing LLM providers |
-| Async video polling complexity | Veo uses long-polling (up to 10 min), Sora uses `NewAndPoll` -- different patterns | Abstract behind blocking call with context; each provider implements its own poll loop |
-| WebP encoding not in Go stdlib | Can't convert to WebP output format | Document limitation; return WebP as-is when provider generates it natively |
-| Large binary data in memory | Images are megabytes, videos can be hundreds of megabytes | `WriteTo` method streams to disk; consider `io.Reader` interface for large video results |
-| Rate limiting varies wildly by provider | Google Imagen has strict quotas; OpenAI is more generous | Surface rate limit errors clearly; don't retry automatically (let caller decide) |
+| Risk / Dependency                       | Impact                                                                             | Mitigation                                                                                      |
+| --------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Provider API instability                | APIs are young and change frequently (Imagen went through 3 versions in a year)    | Isolate provider specifics behind interfaces; encode/decode pattern from existing LLM providers |
+| Async video polling complexity          | Veo uses long-polling (up to 10 min), Sora uses `NewAndPoll` -- different patterns | Abstract behind blocking call with context; each provider implements its own poll loop          |
+| WebP encoding not in Go stdlib          | Can't convert to WebP output format                                                | Document limitation; return WebP as-is when provider generates it natively                      |
+| Large binary data in memory             | Images are megabytes, videos can be hundreds of megabytes                          | `WriteTo` method streams to disk; consider `io.Reader` interface for large video results        |
+| Rate limiting varies wildly by provider | Google Imagen has strict quotas; OpenAI is more generous                           | Surface rate limit errors clearly; don't retry automatically (let caller decide)                |
 
 ## Assumptions & Constraints
 
 **Assumptions:**
+
 - Developers have their own API keys for each provider they want to use
 - Provider SDKs (google/genai, openai-go) are available as Go modules
 - Image generation latency (2-30 seconds) is acceptable as a blocking call
 - Video generation latency (1-10 minutes) requires context-aware blocking, not a job queue
 
 **Constraints:**
+
 - Must not break existing Dive APIs (additive only)
 - Must follow Dive's existing patterns: provider registry, tool interface, option functions
 - Go stdlib only for image format handling (no CGo image libraries)
@@ -322,6 +333,7 @@ toolkit/
 ### Proven Internal Patterns to Adapt
 
 We have battle-tested code from internal projects covering:
+
 - Image format detection from magic bytes
 - Aspect ratio to dimension mapping
 - Google GenAI SDK integration (Gemini vs Imagen model detection, Vertex AI support)

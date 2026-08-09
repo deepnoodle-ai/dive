@@ -41,6 +41,7 @@ http.ListenAndServe(":8080", srv.Handler())
 ```
 
 `srv.Handler()` mounts two routes:
+
 - `/.well-known/agent-card.json` — agent card discovery
 - `/` — the A2A protocol endpoint (JSON-RPC by default; set `Transport: "rest"` for REST)
 
@@ -175,15 +176,17 @@ a `toolResults` data part that maps call IDs to result strings:
 ```json
 {
   "role": "user",
-  "parts": [{
-    "kind": "data",
-    "data": {
-      "toolResults": {
-        "call_abc": "approved",
-        "call_def": "denied"
+  "parts": [
+    {
+      "kind": "data",
+      "data": {
+        "toolResults": {
+          "call_abc": "approved",
+          "call_def": "denied"
+        }
       }
     }
-  }]
+  ]
 }
 ```
 

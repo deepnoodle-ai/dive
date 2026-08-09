@@ -26,11 +26,11 @@ import (
 
 Each provider reads its API key from the environment:
 
-| Provider | Environment Variable |
-|----------|---------------------|
-| OpenAI | `OPENAI_API_KEY` |
-| Google | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
-| Grok | `XAI_API_KEY` or `GROK_API_KEY` |
+| Provider | Environment Variable                 |
+| -------- | ------------------------------------ |
+| OpenAI   | `OPENAI_API_KEY`                     |
+| Google   | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
+| Grok     | `XAI_API_KEY` or `GROK_API_KEY`      |
 
 ## Image Generation
 
@@ -186,53 +186,53 @@ result, err := media.Transcribe(ctx, audio,
 
 ### Image Models
 
-| Provider | Models |
-|----------|--------|
-| OpenAI | `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini` |
-| Google | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`, `gemini-2.5-flash-image` |
-| Grok | `grok-imagine-image`, `grok-imagine-image-pro` |
+| Provider | Models                                                                                                                                                                                              |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI   | `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`                                                                                                                                   |
+| Google   | `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`, `imagen-4.0-fast-generate-001`, `gemini-3.1-flash-lite-image`, `gemini-3.1-flash-image`, `gemini-3-pro-image`, `gemini-2.5-flash-image` |
+| Grok     | `grok-imagine-image`, `grok-imagine-image-pro`                                                                                                                                                      |
 
 ### Video Models
 
-| Provider | Models |
-|----------|--------|
-| Google | `veo-3.1-generate-preview`, `veo-3-generate-preview` |
-| OpenAI | `sora-2`, `sora-2-pro` |
-| Grok | `grok-imagine-video` |
+| Provider | Models                                               |
+| -------- | ---------------------------------------------------- |
+| Google   | `veo-3.1-generate-preview`, `veo-3-generate-preview` |
+| OpenAI   | `sora-2`, `sora-2-pro`                               |
+| Grok     | `grok-imagine-video`                                 |
 
 ### Text-to-Speech Models
 
-| Provider | Models |
-|----------|--------|
-| OpenAI | `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd` |
-| Google | `gemini-3.1-flash-tts-preview`, `gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts` |
+| Provider | Models                                                                                       |
+| -------- | -------------------------------------------------------------------------------------------- |
+| OpenAI   | `gpt-4o-mini-tts`, `tts-1`, `tts-1-hd`                                                       |
+| Google   | `gemini-3.1-flash-tts-preview`, `gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts` |
 
 ### Transcription Models
 
-| Provider | Models |
-|----------|--------|
-| OpenAI | `gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`, `whisper-1` |
-| Google | Audio-capable Gemini models such as `gemini-3.5-flash` |
+| Provider | Models                                                                                  |
+| -------- | --------------------------------------------------------------------------------------- |
+| OpenAI   | `gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`, `whisper-1` |
+| Google   | Audio-capable Gemini models such as `gemini-3.5-flash`                                  |
 
 ## Options Reference
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `WithModel(m)` | Model name for generation | (required) |
-| `WithModels(m...)` | Multiple models for fan-out | — |
-| `WithAspectRatio(ar)` | `1:1`, `16:9`, `9:16` | `1:1` (image), `16:9` (video) |
-| `WithOutputFormat(f)` | `FormatPNG`, `FormatJPEG`, `FormatWebP` | Provider default |
-| `WithCount(n)` | Number of images to generate | 1 |
-| `WithReferenceImage(data)` | Reference image bytes for editing | — |
-| `WithDuration(d)` | Video duration | Provider default |
-| `WithAudioFormat(f)` | `AudioFormatMP3`, `AudioFormatWAV`, `AudioFormatPCM`, etc. | Provider default |
-| `WithAudioMIMEType(mime)` | Input audio MIME hint for transcription | Auto-detected |
-| `WithVoice(v)` | Text-to-speech voice | Provider default |
-| `WithVoiceInstructions(s)` | Text-to-speech style instructions | — |
-| `WithSpeechSpeed(n)` | Speech speed when supported | Provider default |
-| `WithLanguage(code)` | Transcription or speech language hint | Provider default |
-| `WithTranscriptionPrompt(p)` | Transcription context prompt | Provider default |
-| `WithTimeout(d)` | Max generation wait time | 5min (image), 15min (video) |
+| Option                       | Description                                                | Default                       |
+| ---------------------------- | ---------------------------------------------------------- | ----------------------------- |
+| `WithModel(m)`               | Model name for generation                                  | (required)                    |
+| `WithModels(m...)`           | Multiple models for fan-out                                | —                             |
+| `WithAspectRatio(ar)`        | `1:1`, `16:9`, `9:16`                                      | `1:1` (image), `16:9` (video) |
+| `WithOutputFormat(f)`        | `FormatPNG`, `FormatJPEG`, `FormatWebP`                    | Provider default              |
+| `WithCount(n)`               | Number of images to generate                               | 1                             |
+| `WithReferenceImage(data)`   | Reference image bytes for editing                          | —                             |
+| `WithDuration(d)`            | Video duration                                             | Provider default              |
+| `WithAudioFormat(f)`         | `AudioFormatMP3`, `AudioFormatWAV`, `AudioFormatPCM`, etc. | Provider default              |
+| `WithAudioMIMEType(mime)`    | Input audio MIME hint for transcription                    | Auto-detected                 |
+| `WithVoice(v)`               | Text-to-speech voice                                       | Provider default              |
+| `WithVoiceInstructions(s)`   | Text-to-speech style instructions                          | —                             |
+| `WithSpeechSpeed(n)`         | Speech speed when supported                                | Provider default              |
+| `WithLanguage(code)`         | Transcription or speech language hint                      | Provider default              |
+| `WithTranscriptionPrompt(p)` | Transcription context prompt                               | Provider default              |
+| `WithTimeout(d)`             | Max generation wait time                                   | 5min (image), 15min (video)   |
 
 ## File Output
 
@@ -269,6 +269,7 @@ agent, _ := dive.NewAgent(dive.AgentOptions{
 ```
 
 The tools automatically:
+
 - Generate filenames from the prompt if no output path is specified
 - Return the absolute file path to the agent
 - Avoid overwriting existing files

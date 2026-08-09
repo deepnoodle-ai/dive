@@ -23,6 +23,7 @@ This plan implements the `media` package for Dive, adding unified image and vide
 ### Files to Create
 
 **`media/aspect_ratio.go`**
+
 ```go
 type AspectRatio string
 
@@ -45,6 +46,7 @@ func StandardVideoDimensions(ar AspectRatio) (width, height int)
 Adapt dimension tables from internal reference code. Include the extended ratios (4:1, 1:4, 8:1, 1:8) but mark them as less common.
 
 **`media/format.go`**
+
 ```go
 type Format string
 
@@ -75,6 +77,7 @@ func ConvertImage(data []byte, target Format) ([]byte, error)
 Adapt magic byte detection and conversion from internal reference. Use `image/png`, `image/jpeg`, `golang.org/x/image/webp` (decode only).
 
 **`media/result.go`**
+
 ```go
 type ImageResult struct {
     Data     []byte
@@ -109,6 +112,7 @@ func (r *VideoResult) WriteTo(path string) error
 `WriteTo` uses `os.WriteFile` with 0644 permissions. Auto-detect extension from format if path has none.
 
 **`media/options.go`**
+
 ```go
 type Config struct {
     Model           string
@@ -141,22 +145,26 @@ Defaults: Count=1, Timeout=5min (image) / 15min (video), AspectRatio=AspectAuto.
 ### Tests
 
 **`media/format_test.go`** — Table-driven tests for:
+
 - `DetectFormat` with PNG, JPEG, WebP, and unknown magic bytes
 - `Format.MIMEType()` and `Format.FileExtension()`
 - `ConvertImage` between PNG and JPEG (use a small test image)
 - `ValidateFormat` with valid and invalid inputs
 
 **`media/aspect_ratio_test.go`** — Table-driven tests for:
+
 - `StandardImageDimensions` for each defined ratio
 - `StandardVideoDimensions` for each defined ratio
 - Unknown ratio returns sensible default (1024x1024 for images, 1920x1080 for video)
 
 **`media/options_test.go`** — Tests for:
+
 - Each `With*` function sets the correct field
 - `Apply` with multiple options
 - Default values when no options given
 
 **`media/result_test.go`** — Tests for:
+
 - `WriteTo` creates a file with correct contents (use `t.TempDir()`)
 - `WriteTo` auto-appends extension if path lacks one
 
@@ -169,6 +177,7 @@ Defaults: Count=1, Timeout=5min (image) / 15min (video), AspectRatio=AspectAuto.
 ### Files to Create
 
 **`media/provider.go`**
+
 ```go
 // ImageProvider generates images from text prompts.
 type ImageProvider interface {
@@ -190,6 +199,7 @@ type VideoProvider interface {
 Note: `Config` carries `ReferenceImages` for editing. `ImageEditor` reads them from there.
 
 **`media/registry.go`**
+
 ```go
 type ImageProviderFactory func(model string) ImageProvider
 type VideoProviderFactory func(model string) VideoProvider
@@ -229,6 +239,7 @@ func RegisterVideo(entry VideoProviderEntry)
 Reuse matcher helpers from `providers` package: `PrefixMatcher`, `PrefixesMatcher`.
 
 **`media/media.go`** — Top-level API functions
+
 ```go
 // GenerateImage generates a single image (or Count images) using one provider.
 func GenerateImage(ctx context.Context, prompt string, opts ...Option) (*ImageResult, error)
@@ -249,6 +260,7 @@ func GenerateVideo(ctx context.Context, prompt string, opts ...Option) (*VideoRe
 ```
 
 Implementation:
+
 - Resolve provider from registry using `config.Model`
 - Apply context timeout from `config.Timeout`
 - For `GenerateImages`: launch goroutines per model, collect results, return all
@@ -256,6 +268,7 @@ Implementation:
 - For `GenerateVideo`: resolve from video registry, call with context
 
 **`media/errors.go`**
+
 ```go
 var (
     ErrNoModel          = errors.New("media: no model specified")
@@ -269,12 +282,14 @@ var (
 ### Tests
 
 **`media/registry_test.go`** — Tests for:
+
 - Register and resolve image provider by model prefix
 - Register and resolve video provider
 - Unknown model returns `ErrProviderNotFound`
 - Multiple providers, first match wins
 
 **`media/media_test.go`** — Tests using a mock provider:
+
 - `GenerateImage` with mock returns expected result
 - `GenerateImages` fan-out with 2 mock providers returns 2 results
 - `GenerateImages` with one failing provider returns partial results (Err on failed one)
@@ -283,6 +298,7 @@ var (
 - Context cancellation propagates
 
 Create a `media/testing.go` (or `media/mock_test.go`) with:
+
 ```go
 type mockImageProvider struct {
     result []*ImageResult
@@ -303,6 +319,7 @@ func (m *mockImageProvider) GenerateImage(ctx context.Context, prompt string, co
 ### Files to Create
 
 **`providers/google/media.go`**
+
 ```go
 type MediaProvider struct {
     apiKey         string
@@ -322,6 +339,7 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 ```
 
 Implementation details:
+
 - **Client initialization:** Lazy via `sync.Mutex`, same pattern as existing Google LLM provider. Reads `GEMINI_API_KEY` / `GOOGLE_API_KEY`. Supports Vertex AI backend via option.
 - **Model branching:** Detect `gemini-*` prefix → `generateImageWithGemini()`. Otherwise → `generateImageWithImagen()`.
 - **Gemini image generation:** Call `client.Models.GenerateContent` with `ResponseModalities: []string{"IMAGE"}` and `ImageConfig`. Extract `InlineData` from response parts. Apply format conversion if requested format differs from provider output.
@@ -331,6 +349,7 @@ Implementation details:
 - **Format handling:** Imagen returns the requested MIME type. Gemini returns PNG by default. Convert if `config.OutputFormat` differs.
 
 **`providers/google/media_register.go`**
+
 ```go
 func init() {
     media.RegisterImage(media.ImageProviderEntry{
@@ -378,11 +397,13 @@ veo-3.1-generate-preview
 **`providers/google/media_test.go`**
 
 Unit tests (no API key required):
+
 - `TestGoogleMediaProvider_ModelBranching` — verify Gemini vs Imagen detection logic
 - `TestGoogleImageMatcher` — verify model matcher hits and misses
 - `TestGoogleVideoMatcher` — verify model matcher
 
 Integration tests (require `GOOGLE_API_KEY` or `GEMINI_API_KEY`):
+
 - `TestGoogleGenerateImage_Imagen` — generate with `imagen-4.0-generate-001`, verify result has data, dimensions, PNG format
 - `TestGoogleGenerateImage_Gemini` — generate with `gemini-2.5-flash-image`, verify result
 - `TestGoogleGenerateImage_AspectRatio` — generate 16:9, verify dimensions
@@ -390,6 +411,7 @@ Integration tests (require `GOOGLE_API_KEY` or `GEMINI_API_KEY`):
 - `TestGoogleGenerateVideo_Veo` — generate short video, verify result has data and MP4 format (long-running, use `testing.Short()` skip)
 
 All integration tests follow the skip pattern:
+
 ```go
 func requireGoogleAPIKey(t *testing.T) {
     if os.Getenv("GOOGLE_API_KEY") == "" && os.Getenv("GEMINI_API_KEY") == "" {
@@ -407,6 +429,7 @@ func requireGoogleAPIKey(t *testing.T) {
 ### Files to Create
 
 **`providers/openai/media.go`**
+
 ```go
 type MediaProvider struct {
     client openai.Client
@@ -423,6 +446,7 @@ func (p *MediaProvider) GenerateVideo(ctx context.Context, prompt string, config
 ```
 
 Implementation details:
+
 - **Client init:** `openai.NewClient()` reads `OPENAI_API_KEY` from environment.
 - **Image generation:** Call `client.Images.Generate` with `ImageGenerateParams{Model: ImageModelGPTImage1, Prompt, Size, Quality: High, N, OutputFormat}`. Decode base64 results. Detect format from data bytes.
 - **Image editing:** Call `client.Images.Generate` with reference image bytes. OpenAI's edit endpoint accepts the reference in the request.
@@ -431,6 +455,7 @@ Implementation details:
 - **Duration mapping:** `<= 5s` → 4, `<= 10s` → 8, else → 12.
 
 **`providers/openai/media_register.go`**
+
 ```go
 func init() {
     media.RegisterImage(media.ImageProviderEntry{
@@ -457,11 +482,13 @@ Model matchers: `gpt-image-*` for images, `sora*` for video.
 **`providers/openai/media_test.go`**
 
 Unit tests:
+
 - `TestOpenAIAspectRatioToSize` — verify mapping for all aspect ratios
 - `TestOpenAIDurationMapping` — verify 3s→4, 5s→4, 8s→8, 12s→12
 - `TestOpenAIImageMatcher` / `TestOpenAIVideoMatcher`
 
 Integration tests (require `OPENAI_API_KEY`):
+
 - `TestOpenAIGenerateImage` — generate with `gpt-image-1`, verify result
 - `TestOpenAIEditImage` — edit with reference image, verify result
 - `TestOpenAIGenerateVideo` — generate short video (long-running, `testing.Short()` skip)
@@ -489,6 +516,7 @@ Flags:
 ```
 
 Implementation:
+
 - Parse flags, build `media.Option` slice
 - Call `media.GenerateImage(ctx, prompt, opts...)`
 - Auto-generate filename: slugify first 50 chars of prompt + timestamp + extension
@@ -510,6 +538,7 @@ Flags:
 ```
 
 Implementation:
+
 - Same pattern as `cmd_image.go`
 - Add a simple progress indicator (spinner or dots) while waiting for video generation
 - Print elapsed time on completion
@@ -519,6 +548,7 @@ Implementation:
 ### Provider Import Side Effects
 
 The CLI's `main.go` must import the provider registration packages for side effects:
+
 ```go
 import (
     _ "github.com/deepnoodle-ai/dive/providers/google"
@@ -544,6 +574,7 @@ This triggers `init()` and registers both LLM and media providers.
 ### Files to Create
 
 **`toolkit/image_generation.go`**
+
 ```go
 type imageGenerationTool struct {
     model    string
@@ -562,6 +593,7 @@ func ImageGenerationTool(model string, opts ...ImageGenerationToolOption) *dive.
 ```
 
 Tool behavior:
+
 - `Name()`: `"ImageGeneration"`
 - `Description()`: `"Generate an image from a text prompt. Saves the image to disk and returns the file path."`
 - `Annotations()`: `ReadOnlyHint: false, DestructiveHint: false, OpenWorldHint: true`
@@ -569,6 +601,7 @@ Tool behavior:
 - Auto-generate output path in `workDir` if not specified (slugified prompt + extension)
 
 **`toolkit/video_generation.go`**
+
 ```go
 type videoGenerationTool struct {
     model    string
@@ -591,6 +624,7 @@ Same pattern. Parse duration string to `time.Duration`.
 ### Tests
 
 **`toolkit/image_generation_test.go`**
+
 - `TestImageGenerationTool_Name` — verify name
 - `TestImageGenerationTool_Description` — verify non-empty
 - `TestImageGenerationTool_Annotations` — verify hints
@@ -598,24 +632,26 @@ Same pattern. Parse duration string to `time.Duration`.
 - Integration test: `TestImageGenerationTool_Call` — requires API key, generates real image, verifies file exists on disk
 
 **`toolkit/video_generation_test.go`**
+
 - Same pattern. Video integration test uses `testing.Short()` skip.
 
 ---
 
 ## File Summary
 
-| Phase | New Files | Modified Files |
-|-------|-----------|----------------|
-| 1 | `media/aspect_ratio.go`, `media/format.go`, `media/result.go`, `media/options.go` + tests | — |
-| 2 | `media/provider.go`, `media/registry.go`, `media/media.go`, `media/errors.go` + tests | — |
-| 3 | `providers/google/media.go`, `providers/google/media_register.go`, `providers/google/media_options.go` + tests | — |
-| 4 | `providers/openai/media.go`, `providers/openai/media_register.go` + tests | — |
-| 5 | `experimental/cmd/dive/cmd_image.go`, `experimental/cmd/dive/cmd_video.go` | `experimental/cmd/dive/main.go` |
-| 6 | `toolkit/image_generation.go`, `toolkit/video_generation.go` + tests | — |
+| Phase | New Files                                                                                                      | Modified Files                  |
+| ----- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| 1     | `media/aspect_ratio.go`, `media/format.go`, `media/result.go`, `media/options.go` + tests                      | —                               |
+| 2     | `media/provider.go`, `media/registry.go`, `media/media.go`, `media/errors.go` + tests                          | —                               |
+| 3     | `providers/google/media.go`, `providers/google/media_register.go`, `providers/google/media_options.go` + tests | —                               |
+| 4     | `providers/openai/media.go`, `providers/openai/media_register.go` + tests                                      | —                               |
+| 5     | `experimental/cmd/dive/cmd_image.go`, `experimental/cmd/dive/cmd_video.go`                                     | `experimental/cmd/dive/main.go` |
+| 6     | `toolkit/image_generation.go`, `toolkit/video_generation.go` + tests                                           | —                               |
 
 ## Testing Strategy
 
 ### Unit Tests (no API keys, run in CI)
+
 - All type methods, format detection, aspect ratio mapping, option application
 - Registry resolution with mock providers
 - Fan-out concurrency with mock providers (verify partial failure handling)
@@ -623,12 +659,14 @@ Same pattern. Parse duration string to `time.Duration`.
 - Tool schema, name, annotations
 
 ### Integration Tests (require API keys, skipped in CI by default)
+
 - Each provider × each operation (image gen, image edit, video gen)
 - End-to-end: `media.GenerateImage` with real providers
 - Video tests gated behind `testing.Short()` due to long polling times
 - CLI smoke tests documented as manual steps
 
 ### Test Conventions
+
 - `wonton/assert` for all assertions
 - `t.TempDir()` for file output tests
 - `requireGoogleAPIKey(t)` / `requireOpenAIAPIKey(t)` skip helpers

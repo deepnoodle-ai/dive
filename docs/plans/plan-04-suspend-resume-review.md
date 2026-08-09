@@ -15,6 +15,7 @@ planned from a single source.
 pass before merge: suspend/resume must work without a `Session`.**
 
 The internal algorithm is sound:
+
 - Sequential vs parallel split is coherent.
 - Persisted pending payloads (full `Prompt`/`Metadata`) are the right
   call for cross-process resume.
@@ -42,8 +43,8 @@ The next pass must remove that requirement. The information needed
 to resume already lives on `Response` (`PendingToolCalls`,
 `CompletedToolCalls`, `OutputMessages`) — what's missing is a way to
 feed it back in on the next call. Once that loop closes, sessions
-become a *convenience* for users who want the agent to auto-persist
-on their behalf, not a *gate* on whether suspend/resume works at all.
+become a _convenience_ for users who want the agent to auto-persist
+on their behalf, not a _gate_ on whether suspend/resume works at all.
 
 This single redesign collapses the original H2, H3, and M4 findings
 into one coherent change and unlocks the feature for stateless users.
@@ -55,6 +56,7 @@ into one coherent change and unlocks the feature for stateless users.
 ### High
 
 #### H1. Cross-process file locking — RESOLVED BY DOCUMENTATION
+
 **Source:** correctness review.
 **Where:** `session/file_store.go`.
 **Status:** descoped — `FileStore` is now documented as
@@ -80,6 +82,7 @@ advisory `syscall.Flock(LOCK_EX|LOCK_NB)` on `Open()` held for the
 Linux/macOS; Windows needs `LockFileEx`).
 
 #### H2. Suspend/resume hard-requires a `Session` (and the interface is too storage-shaped)
+
 **Source:** API review + reframe based on user-base reality.
 **Where:** `agent.go:589-595` (the hard requirement); `dive.go:32-65`
 (the interface shape); leaks `session.PendingCall` across the package
@@ -102,6 +105,7 @@ Six storage-level methods exposed: `Suspended`, `PendingCalls`,
 `AbandonSuspension`.
 
 **Fix path (combined):**
+
 1. Add `WithPendingToolCalls([]*PendingToolCall)` (or equivalent
    `WithSuspendedState`) so callers can pass pending state in
    directly.
@@ -115,7 +119,7 @@ Six storage-level methods exposed: `Suspended`, `PendingCalls`,
 5. Shrink `SuspendableSession` to the minimum the agent actually
    needs for auto-persistence — likely just two methods: "save this
    suspended turn" and "save this resumed turn." Everything the agent
-   currently *reads* from the session (`Suspended`, `PendingCalls`,
+   currently _reads_ from the session (`Suspended`, `PendingCalls`,
    `LastEventMessageCount`) becomes derivable from the messages
    passed to `CreateResponse` plus the new `WithPendingToolCalls`
    option.
@@ -138,12 +142,13 @@ resp, _ := agent.CreateResponse(ctx,
 )
 ```
 
-Users who *do* want auto-persistence still get it by setting
+Users who _do_ want auto-persistence still get it by setting
 `AgentOptions.Session` to a `SuspendableSession`. The behavior is
 identical from their perspective; the agent just calls the save
 methods on their behalf instead of returning state on the Response.
 
 #### H3. Resume is too implicit
+
 **Source:** API review.
 **Where:** `agent.go:327-336`.
 **Linked to H2:** falls out naturally once H2 is fixed.
@@ -171,6 +176,7 @@ suspended session should error out, not silently no-op.
 ### Medium
 
 #### M1. `appendEvent` does not fsync (durability gap on the hot path)
+
 **Source:** correctness review.
 **Where:** `session/file_store.go:205`.
 
@@ -183,31 +189,35 @@ should be a configurable knob (`Sync bool` on `FileStore`) and
 documented.
 
 #### M2. Concurrent `CreateResponse` on the same session is unsafe (pre-existing)
+
 **Source:** correctness review.
 **Where:** `agent.go:CreateResponse`.
 
 Two concurrent `CreateResponse` calls on the same session can
 interleave their reads of `Messages()` and writes via `SaveTurn`,
-producing tangled events. The PR doc warns that *resume* isn't safe
+producing tangled events. The PR doc warns that _resume_ isn't safe
 to run concurrently — the issue is broader: any two `CreateResponse`
 calls on one session are unsafe. Suspend/resume makes this riskier
 because cross-process resume implies callers may not coordinate.
 
 **Fix paths:**
+
 - Per-session lock at the agent layer.
 - Or document prominently and provide a recipe for caller-side
   coordination.
 
 #### M3. `ToolResult.Suspend` is a tagged union without enforcement
+
 **Source:** API review.
 **Where:** `tool.go:99-126`.
 
 The shape is pragmatic and additive but not Go-crisp. Callers can set
-`Content`, `Display`, `IsError`, *and* `Suspend` simultaneously and
+`Content`, `Display`, `IsError`, _and_ `Suspend` simultaneously and
 the contract is "some of those are silently ignored." That's
 survivable but not idiomatic.
 
 **Fix paths:**
+
 - Validate at construction time and reject mixed states.
 - Or split into two distinct return types (e.g. `Tool.Call` returns
   `(any, error)` where `any` is `*ToolResult` xor `*SuspendResult`).
@@ -215,6 +225,7 @@ survivable but not idiomatic.
   probably too invasive for v1.
 
 #### M4. Public suspension surface is too spread out
+
 **Source:** API review.
 **Where:** `response.go:38, 149, 154, 159`, plus authoritative state
 on the session via `dive.go:39`.
@@ -237,6 +248,7 @@ caller needs to round-trip back via `WithPendingToolCalls`. The
 passes back — symmetric in/out, no impedance mismatch.
 
 #### M5. Caller ergonomics — input decoding is manual
+
 **Source:** API review.
 **Where:** examples in `examples/suspend/human_approval/main.go:66`,
 `examples/suspend/partial_resume/main.go:52`.
@@ -245,6 +257,7 @@ Callers have to manually `json.Unmarshal` `PendingToolCall.Input` to
 get at the original tool input. Low-level and flexible, not turnkey.
 
 **Fix paths:**
+
 - Add `(p *PendingToolCall) UnmarshalInput(into any) error` helper.
 - Add a generic `DecodePendingInput[T](*PendingToolCall) (T, error)`
   helper.
@@ -256,6 +269,7 @@ get at the original tool input. Low-level and flexible, not turnkey.
 ### Low
 
 #### L1. Stop hook + suspend interaction has a latent bug (pre-existing)
+
 **Source:** correctness review.
 **Where:** `agent.go:501-509`.
 
@@ -269,6 +283,7 @@ loses the first iteration's assistant turn plus the Stop hook's reason
 message. Pre-existing bug; suspend/resume makes the consequence worse.
 
 #### L2. JSON metadata type fidelity loss
+
 **Source:** correctness review.
 **Where:** `session/session.go:108-138` (`deepCopyJSONValue`).
 
@@ -283,6 +298,7 @@ godoc that values must be JSON-friendly and that numeric values come
 back as `float64`.
 
 #### L3. Polling-with-empty-input has undefined semantics
+
 **Source:** correctness review.
 **Where:** `agent.go:327-336, 415-424`.
 
@@ -292,6 +308,7 @@ It's a no-op rewrite of the JSONL file every poll. Mostly subsumed by
 **H3** above.
 
 #### L4. Hook contract doc/code mismatch
+
 **Source:** API review.
 **Where:** `hooks.go:206`, `agent.go:601-615`, PR description.
 
@@ -302,6 +319,7 @@ and PR description need to say exactly one thing — webhook/outbox
 designs depend on this ordering.
 
 #### L5. No backpressure / max suspended sessions
+
 **Source:** correctness review.
 
 A misbehaving caller can suspend forever and accumulate JSONL files
@@ -366,7 +384,7 @@ should mention an "abandon stale suspended sessions" pattern.
 v1 surface):**
 
 1. ✅ **(H2 + H3 + M4) The combined "sessions are optional" redesign.**
-   *Shipped in the same PR as this review.* Concretely:
+   _Shipped in the same PR as this review._ Concretely:
    - New `WithSuspension(*SuspensionState)` option; resume path reads
      authoritative state from options first and falls back to the
      session only when the option is absent.
@@ -441,7 +459,7 @@ contract. Optional flock guardrail can be added later if useful.)
 
 ## Final API polish pass (shipped in this PR)
 
-A second review pass focused on the *shape* of the public API. The
+A second review pass focused on the _shape_ of the public API. The
 priorities were (a) closing the stateless resume ergonomics gap,
 (b) eliminating the "three options to remember" pattern, and
 (c) killing confusing symbol names. Concretely:
@@ -472,7 +490,7 @@ session to provide the state automatically.
 ### `Response.Suspension` on resume completion
 
 To close the last rough edge in the stateless flow, the agent now
-populates `Response.Suspension` on a *resume-completed* response as
+populates `Response.Suspension` on a _resume-completed_ response as
 well as on a suspended one. The completed case has
 `PendingToolCalls == nil` but `TurnMessages` holds the final merged
 view (including the tool_result that got filled in during this

@@ -35,9 +35,9 @@ The motivating problems with the current hook-based design:
 - Composition is hostile — two extensions that both want to install spans
   hit `UpdatedCtx` last-write-wins.
 
-Hooks are still the right shape for *modification* concerns (rewriting
+Hooks are still the right shape for _modification_ concerns (rewriting
 prompts, denying tool calls, injecting context, skills). They are the
-wrong shape for *observation*. This plan separates the two.
+wrong shape for _observation_. This plan separates the two.
 
 ## Approach
 
@@ -146,7 +146,7 @@ No `UpdatedCtx`. No hook queues. No "did you remember to call `Run`."
 ### Composition
 
 `MultiTracer(t1, t2, ...)` fans Start/End calls out to N tracers. Each
-returned ctx is the *last* tracer's ctx (since OTel only respects one
+returned ctx is the _last_ tracer's ctx (since OTel only respects one
 parent — multiple tracers writing into the same ctx is fine because each
 adds its own span via `WithValue`-style key, and parent linkage is per
 tracer-provider). Adapter detail; covered during implementation.

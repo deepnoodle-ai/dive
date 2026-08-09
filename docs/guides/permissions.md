@@ -73,13 +73,13 @@ The `Specifier` field on a rule matches against tool-specific values extracted f
 
 Default specifier fields:
 
-| Tool     | Input fields checked                         |
-| -------- | --------------------------------------------- |
-| Bash     | `command`, `cmd`, `script`, `code`            |
-| Read     | `file_path`, `filePath`, `path`               |
-| Write    | `file_path`, `filePath`, `path`               |
-| Edit     | `file_path`, `filePath`, `path`               |
-| WebFetch | `url`                                         |
+| Tool     | Input fields checked               |
+| -------- | ---------------------------------- |
+| Bash     | `command`, `cmd`, `script`, `code` |
+| Read     | `file_path`, `filePath`, `path`    |
+| Write    | `file_path`, `filePath`, `path`    |
+| Edit     | `file_path`, `filePath`, `path`    |
+| WebFetch | `url`                              |
 
 Override with `Config.SpecifierFields` for custom tools.
 
@@ -89,7 +89,7 @@ Override with `Config.SpecifierFields` for custom tools.
 
 Matching is type-aware per tool (`DefaultSpecifierMatchers`, overridable via `Config.SpecifierMatchers`):
 
-- **Bash (command-aware).** The command is split on unquoted shell control operators (`;`, `&&`, `||`, `|`, `&`, newlines). An *allow* rule matches only if **every** segment matches the pattern, and never matches commands containing command/process substitution (`$(...)`, backticks, `<(...)`) — so `Bash(go test *)` does not authorize `go test ./...; rm -rf /` or `go test $(...)`. A *deny* rule matches if the full command **or any** segment matches, so `Bash(*rm*)` catches `ls\nrm -rf /`. Note: a compound command only matches an allow rule if all of its segments match that one rule; segments covered by different allow rules fall through to ask.
+- **Bash (command-aware).** The command is split on unquoted shell control operators (`;`, `&&`, `||`, `|`, `&`, newlines). An _allow_ rule matches only if **every** segment matches the pattern, and never matches commands containing command/process substitution (`$(...)`, backticks, `<(...)`) — so `Bash(go test *)` does not authorize `go test ./...; rm -rf /` or `go test $(...)`. A _deny_ rule matches if the full command **or any** segment matches, so `Bash(*rm*)` catches `ls\nrm -rf /`. Note: a compound command only matches an allow rule if all of its segments match that one rule; segments covered by different allow rules fall through to ask.
 - **Read/Write/Edit (path-aware).** Paths are cleaned before matching (`/safe/dir/../../etc/shadow` becomes `/etc/shadow`), `*` stays within one path segment, and `**` crosses segments — so `Read(/safe/dir/*)` covers files directly in that directory and `Read(/safe/dir/**)` covers the whole tree. Deny rules additionally match the absolutized form of relative paths. Symlinks are **not** resolved — pair path rules with the toolkit's workspace validation for filesystem-level enforcement.
 - **WebFetch (domain-aware).** `domain:example.com` (or a bare domain like `example.com`) matches the URL's host exactly or as a subdomain, case-insensitively — `*example.com*`-style globs are discouraged because they also match `https://example.com.attacker.net`. Patterns containing wildcards, a scheme, or a path are glob-matched against the full URL.
 - **Other tools** fall back to plain glob matching (`MatchGlob`).

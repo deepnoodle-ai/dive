@@ -106,14 +106,14 @@ message := llm.NewUserMessage(
 Each provider encodes these blocks into its native request format. Supported
 content sources by provider:
 
-| Provider                                 | Images                | Documents                              |
-| ---------------------------------------- | --------------------- | -------------------------------------- |
-| anthropic                                | base64, URL, file ID  | base64, URL, file ID, text             |
-| openai (Responses)                       | base64, URL, file ID  | base64, URL, file ID, text             |
-| grok                                     | base64, URL, file ID  | same as openai (server support varies) |
-| google                                   | base64, URL/file URI  | base64, URL/file URI, text             |
-| openaicompletions, mistral, openrouter   | base64, URL           | base64, file ID, text (no URL)         |
-| ollama                                   | base64 (model-dependent) | model-dependent                     |
+| Provider                               | Images                   | Documents                              |
+| -------------------------------------- | ------------------------ | -------------------------------------- |
+| anthropic                              | base64, URL, file ID     | base64, URL, file ID, text             |
+| openai (Responses)                     | base64, URL, file ID     | base64, URL, file ID, text             |
+| grok                                   | base64, URL, file ID     | same as openai (server support varies) |
+| google                                 | base64, URL/file URI     | base64, URL/file URI, text             |
+| openaicompletions, mistral, openrouter | base64, URL              | base64, file ID, text (no URL)         |
+| ollama                                 | base64 (model-dependent) | model-dependent                        |
 
 Notes:
 

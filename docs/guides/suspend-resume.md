@@ -68,10 +68,10 @@ return dive.NewSuspendResultWithReason("Sign in to continue",
     dive.SuspendReasonAuth, map[string]any{"auth_url": url}), nil
 ```
 
-| Reason | Meaning |
-|---|---|
-| `""` or `SuspendReasonInput` | Waiting for user input (default) |
-| `SuspendReasonAuth` | Blocked on authentication or authorization |
+| Reason                       | Meaning                                    |
+| ---------------------------- | ------------------------------------------ |
+| `""` or `SuspendReasonInput` | Waiting for user input (default)           |
+| `SuspendReasonAuth`          | Blocked on authentication or authorization |
 
 When empty, callers should treat the reason as `SuspendReasonInput`.
 
@@ -158,10 +158,10 @@ for _, pending := range resp.Suspension.PendingToolCalls {
 
 `Response.Suspension` is a `*SuspensionState` carrying:
 
-| Field                | Purpose |
-| -------------------- | ------- |
-| `PendingToolCalls`   | Tool calls awaiting external results. Contains ID, name, input JSON, prompt, metadata. |
-| `CompletedToolCalls` | Sibling tool calls that ran to completion in the same iteration as the suspender (parallel execution). Informational — their results are already merged into the persisted turn. |
+| Field                | Purpose                                                                                                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PendingToolCalls`   | Tool calls awaiting external results. Contains ID, name, input JSON, prompt, metadata.                                                                                                 |
+| `CompletedToolCalls` | Sibling tool calls that ran to completion in the same iteration as the suspender (parallel execution). Informational — their results are already merged into the persisted turn.       |
 | `TurnMessages`       | Snapshot of the in-progress turn (user input + any assistant/tool_result messages produced so far). Stateless callers pass this back via `WithResume` to reconstruct the conversation. |
 
 Decode a pending call's input with either the method or the generic
@@ -408,13 +408,13 @@ dive.WithEventCallback(func(ctx context.Context, item *dive.ResponseItem) error 
 
 ## Errors
 
-| Error                           | Cause |
-| ------------------------------- | ----- |
-| `ErrResumeRequired`             | `CreateResponse` was called on a suspended session without `WithResume`, `WithToolResults`, or new input. Resume is explicit — no silent no-op polling. |
-| `ErrInputOnSuspendedSession`    | New user input was supplied while the session is suspended. Resume the current turn first. |
-| `ErrNoSuspendedTurn`            | `WithResume` or `WithToolResults` was supplied but there is no suspended turn to resume. |
-| `ErrSessionNotSuspended`        | `WithResume` supplied an explicit state but the attached `SuspendableSession` is not suspended. Detected before any LLM call — the completed resume could never be saved (`SaveResumedTurn` requires a suspended session). |
-| `ErrUnknownPendingToolCall`     | A key in `WithToolResults` is not in the pending set. No state changes. |
+| Error                        | Cause                                                                                                                                                                                                                      |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ErrResumeRequired`          | `CreateResponse` was called on a suspended session without `WithResume`, `WithToolResults`, or new input. Resume is explicit — no silent no-op polling.                                                                    |
+| `ErrInputOnSuspendedSession` | New user input was supplied while the session is suspended. Resume the current turn first.                                                                                                                                 |
+| `ErrNoSuspendedTurn`         | `WithResume` or `WithToolResults` was supplied but there is no suspended turn to resume.                                                                                                                                   |
+| `ErrSessionNotSuspended`     | `WithResume` supplied an explicit state but the attached `SuspendableSession` is not suspended. Detected before any LLM call — the completed resume could never be saved (`SaveResumedTurn` requires a suspended session). |
+| `ErrUnknownPendingToolCall`  | A key in `WithToolResults` is not in the pending set. No state changes.                                                                                                                                                    |
 
 ## Concurrency
 
