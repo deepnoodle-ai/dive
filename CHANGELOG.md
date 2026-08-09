@@ -17,6 +17,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Provider watch** — a weekly workflow (`scripts/provider_watch.py`) diffs
   upstream provider documentation and APIs against an accepted baseline and
   files a single refreshed issue when something material changes.
+- **Provider watch reports models missing from Dive's catalogs.** Snapshots now
+  carry a `gaps` map of upstream model ids with no catalog entry, and the report
+  leads with them. This is a completeness check rather than a drift check: the
+  diff only ever saw models that *changed* between two runs, so a model
+  published upstream that Dive had simply never carried stayed invisible
+  indefinitely — which is how `claude-opus-5` went missing. Only gaps that are
+  new relative to the accepted baseline are reported, so the tail of retired ids
+  stays quiet.
 - **`make release-prep VERSION=vX.Y.Z`** points every sub-module's intra-repo
   requirement at the version being released. `make tag-modules` now refuses to
   tag while those requirements are stale — sub-modules build locally through

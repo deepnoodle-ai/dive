@@ -708,5 +708,189 @@ class ReportSizeTests(unittest.TestCase):
         self.assertIn("line(s) omitted", body)
 
 
+class CatalogGapTests(unittest.TestCase):
+    """Completeness checks.
+
+    A drift diff only ever sees models that changed between two runs, so a model
+    that has been published upstream all along and was never added to Dive stays
+    invisible forever. That is how claude-opus-5 was missed, and these tests pin
+    the behaviour that catches the next one.
+    """
+
+    def gap_snapshot(
+        self,
+        *,
+        model_tokens: list[str],
+        listed: list[str],
+        api_status: str = "skipped",
+        api_models: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        providers = {
+            "anthropic": {
+                "api": {"status": api_status, "models": api_models or {}},
+                "documents": {
+                    "pricing": {"status": "ok", "model_tokens": model_tokens}
+                },
+            }
+        }
+        repo = {"providers": {"anthropic": {"models": listed}}}
+        return {
+            "schema_version": provider_watch.SCHEMA_VERSION,
+            "generated_at": "2026-08-08T00:00:00+00:00",
+            "providers": providers,
+            "repo": repo,
+            "gaps": provider_watch.catalog_gaps(providers, repo),
+        }
+
+    def test_documents_alone_surface_a_model_dive_never_listed(self) -> None:
+        # The scheduled audit runs --public-only, so every provider except
+        # OpenRouter reports api.status == "skipped" and scraped pages are the
+        # only evidence there is. Gap detection has to work from them alone.
+        snapshot = self.gap_snapshot(
+            model_tokens=["claude-opus-5", "claude-opus-4-8"],
+            listed=["claude-opus-4-8"],
+        )
+
+        self.assertEqual(snapshot["gaps"], {"anthropic": ["claude-opus-5"]})
+
+    def test_prose_slugs_and_urls_are_not_mistaken_for_models(self) -> None:
+        snapshot = self.gap_snapshot(
+            model_tokens=[
+                "claude-opus-5",
+                "Claude",  # prose
+                "claude-code",  # no version digit
+                "CLAUDE_OPUS_5",  # constant name
+                "claude.com/docs/en/about-claude/pricing",  # url
+                "anthropic/v1/messages",  # api path
+            ],
+            listed=["claude-opus-4-8"],
+        )
+
+        self.assertEqual(snapshot["gaps"], {"anthropic": ["claude-opus-5"]})
+
+    def test_dated_variants_of_listed_models_are_not_gaps(self) -> None:
+        snapshot = self.gap_snapshot(
+            model_tokens=["claude-opus-4-8", "claude-opus-4-8-20260115"],
+            listed=["claude-opus-4-8"],
+        )
+
+        self.assertEqual(snapshot["gaps"], {})
+
+    def test_only_newly_appearing_gaps_are_reported(self) -> None:
+        # The retired-model tail lives in the accepted baseline so it never files
+        # an issue twice; a model that shows up after the baseline does.
+        before = self.gap_snapshot(
+            model_tokens=["claude-2.1"], listed=["claude-opus-4-8"]
+        )
+        after = self.gap_snapshot(
+            model_tokens=["claude-2.1", "claude-opus-5"], listed=["claude-opus-4-8"]
+        )
+
+        diff = provider_watch.diff_snapshots(before, after)
+
+        gaps = [
+            change
+            for change in diff["changes"]
+            if change["kind"] == "model_missing_from_dive"
+        ]
+        self.assertEqual([change["model"] for change in gaps], ["claude-opus-5"])
+        self.assertEqual(gaps[0]["sources"], ["document:pricing"])
+
+    def test_adding_the_model_to_the_catalog_clears_the_gap(self) -> None:
+        before = self.gap_snapshot(
+            model_tokens=["claude-opus-5"], listed=["claude-opus-4-8"]
+        )
+        after = self.gap_snapshot(
+            model_tokens=["claude-opus-5"],
+            listed=["claude-opus-4-8", "claude-opus-5"],
+        )
+
+        diff = provider_watch.diff_snapshots(before, after)
+
+        self.assertEqual(after["gaps"], {})
+        self.assertFalse(
+            [c for c in diff["changes"] if c["kind"] == "model_missing_from_dive"]
+        )
+
+    def test_baseline_without_gap_data_does_not_report_the_backlog(self) -> None:
+        before = self.gap_snapshot(
+            model_tokens=["claude-opus-5"], listed=["claude-opus-4-8"]
+        )
+        del before["gaps"]
+        after = self.gap_snapshot(
+            model_tokens=["claude-opus-5"], listed=["claude-opus-4-8"]
+        )
+
+        diff = provider_watch.diff_snapshots(before, after)
+
+        self.assertFalse(
+            [c for c in diff["changes"] if c["kind"] == "model_missing_from_dive"]
+        )
+
+    def test_provider_without_a_catalog_is_not_reported_as_all_gaps(self) -> None:
+        providers = {
+            "anthropic": {
+                "api": {"status": "ok", "models": {"claude-opus-5": {}}},
+                "documents": {},
+            }
+        }
+
+        gaps = provider_watch.catalog_gaps(providers, {"providers": {}})
+
+        self.assertEqual(gaps, {})
+
+    def test_xai_prefixed_ids_are_normalized_before_comparison(self) -> None:
+        providers = {
+            "xai": {
+                "api": {"status": "ok", "models": {"xai:grok-4.5": {}}},
+                "documents": {},
+            }
+        }
+        repo = {"providers": {"xai": {"models": ["grok-4.5"]}}}
+
+        self.assertEqual(provider_watch.catalog_gaps(providers, repo), {})
+
+    def test_report_leads_with_missing_models(self) -> None:
+        diff = {
+            "generated_at": "2026-08-08T00:00:00+00:00",
+            "change_hash": "abc123",
+            "changes": [
+                {
+                    "provider": "anthropic",
+                    "kind": "document_changed",
+                    "document": "pricing",
+                },
+                {
+                    "provider": "anthropic",
+                    "kind": "model_missing_from_dive",
+                    "model": "claude-opus-5",
+                    "sources": ["document:pricing"],
+                    "dive": {"provider_catalog": False, "cli_recommended": False},
+                },
+            ],
+        }
+
+        body = provider_watch.report_markdown(diff, {"repo": {"providers": {}}})
+
+        self.assertIn("1 model(s) published upstream are missing", body)
+        rows = [line for line in body.splitlines() if line.startswith("| anthropic")]
+        self.assertIn("model_missing_from_dive", rows[0])
+        self.assertIn("no entry in `providers/anthropic/catalog.json`", body)
+
+
+class CheckedInBaselineTests(unittest.TestCase):
+    def test_baseline_carries_accepted_gaps_for_the_current_schema(self) -> None:
+        # Without this the first scheduled run after the schema bump would file
+        # an issue listing every historical model id at once.
+        path = SCRIPT.with_name("provider_watch_baseline.json.gz")
+        baseline = provider_watch.load_json(path)
+
+        self.assertEqual(baseline["schema_version"], provider_watch.SCHEMA_VERSION)
+        self.assertIn("gaps", baseline)
+        self.assertNotIn(
+            "claude-opus-5", baseline["gaps"].get("anthropic", [])
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

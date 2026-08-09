@@ -46,7 +46,13 @@ from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 
-SCHEMA_VERSION = 1
+# Snapshot/diff schema. Bumped to 2 when snapshots gained the "gaps" key.
+SCHEMA_VERSION = 2
+# providers/*/catalog.json schema. Separate from SCHEMA_VERSION: the watcher's
+# own output format and the catalog file format evolve independently, and
+# sharing one constant meant a snapshot change could not be versioned without
+# rejecting every catalog on disk.
+CATALOG_SCHEMA_VERSION = 1
 USER_AGENT = "dive-provider-watch/0.1 (+https://github.com/deepnoodle-ai/dive)"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -139,6 +145,15 @@ MODEL_TOKEN_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+# A published model id, as distinct from the prose, doc slugs, and URLs that
+# MODEL_TOKEN_RE also sweeps up: lowercase, at least one separator, and (via the
+# digit check in catalog_gaps) a version number somewhere. One optional
+# namespace segment covers aggregators like OpenRouter. Deliberately permissive
+# — a model this drops is a silent miss, while one it wrongly admits costs a
+# single line in one weekly report before the accepted baseline absorbs it.
+MODEL_CANDIDATE_RE = re.compile(r"^(?:[a-z0-9-]+/)?[a-z][a-z0-9]*(?:[.\-:][a-z0-9]+)+$")
+# Change kinds that lead the report; everything else keeps its natural order.
+CHANGE_PRIORITY = {"model_missing_from_dive": 0}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -158,7 +173,7 @@ def load_provider_catalog(repo_root: Path, provider: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as error:
         raise FetchFailure(f"failed to read provider catalog {path}: {error}") from error
     expected = directory
-    if catalog.get("schema_version") != SCHEMA_VERSION:
+    if catalog.get("schema_version") != CATALOG_SCHEMA_VERSION:
         raise FetchFailure(f"unsupported provider catalog schema in {path}")
     if catalog.get("provider") != expected:
         raise FetchFailure(
@@ -1027,6 +1042,8 @@ def build_snapshot(
                 "models": {},
             }
 
+    result["gaps"] = catalog_gaps(result["providers"], result["repo"])
+
     if check_sdks:
         result["sdks"] = collect_sdk_versions(repo_root)
     return canonicalize(result)
@@ -1104,12 +1121,97 @@ def classify_model_change(fields: Sequence[Mapping[str, Any]]) -> str:
     return "model_changed"
 
 
+def normalize_upstream_id(provider: str, model_id: str) -> str:
+    """Reduce an upstream id to the form Dive's catalogs use."""
+    if provider == "xai" and ":" in model_id:
+        return model_id.split(":", 1)[1]
+    return model_id
+
+
+def upstream_model_ids(provider_data: Mapping[str, Any]) -> set[str]:
+    """Every model id a provider's sources mentioned, from APIs and docs alike.
+
+    Documents matter as much as the API here: the scheduled audit runs
+    --public-only, so for every provider except OpenRouter the scraped pages are
+    the only evidence available.
+    """
+    tokens: set[str] = set()
+    api = provider_data.get("api") or {}
+    if api.get("status") == "ok":
+        tokens.update(api.get("models") or {})
+    for document in (provider_data.get("documents") or {}).values():
+        if document.get("status") == "ok":
+            tokens.update(document.get("model_tokens") or [])
+    return tokens
+
+
+def catalog_gaps(
+    providers_data: Mapping[str, Any], repo_facts: Mapping[str, Any]
+) -> dict[str, list[str]]:
+    """Upstream model ids that Dive's catalogs do not list.
+
+    This is a completeness check, not a drift check. A model can sit upstream
+    unchanged for months, so comparing consecutive snapshots never surfaces one
+    that Dive has simply never carried — which is exactly how claude-opus-5 went
+    missing while every document diff reported "changed" as usual.
+    """
+    gaps: dict[str, list[str]] = {}
+    for provider, provider_data in providers_data.items():
+        listed = {
+            str(model).lower()
+            for model in (repo_facts.get("providers", {}) or {})
+            .get(provider, {})
+            .get("models", [])
+        }
+        if not listed:
+            # No catalog to compare against; reporting every id as missing would
+            # bury the signal rather than surface it.
+            continue
+        found: set[str] = set()
+        for token in upstream_model_ids(provider_data):
+            candidate = normalize_upstream_id(provider, str(token).lower())
+            if not MODEL_CANDIDATE_RE.match(candidate):
+                continue
+            if not any(char.isdigit() for char in candidate):
+                continue
+            if candidate in listed:
+                continue
+            # A dated or otherwise-suffixed sibling of something already listed
+            # is a naming variant, not a model Dive is missing.
+            if any(
+                candidate.startswith(model) or model.startswith(candidate)
+                for model in listed
+            ):
+                continue
+            found.add(candidate)
+        if found:
+            gaps[provider] = sorted(found)
+    return gaps
+
+
+def gap_sources(
+    provider: str, provider_data: Mapping[str, Any], model_id: str
+) -> list[str]:
+    """Where a gap was observed, so a reviewer can confirm it without a re-fetch."""
+    hits: list[str] = []
+    api = provider_data.get("api") or {}
+    if api.get("status") == "ok" and model_id in (api.get("models") or {}):
+        hits.append("api")
+    for name, document in sorted((provider_data.get("documents") or {}).items()):
+        if document.get("status") != "ok":
+            continue
+        if any(
+            normalize_upstream_id(provider, str(token).lower()) == model_id
+            for token in (document.get("model_tokens") or [])
+        ):
+            hits.append(f"document:{name}")
+    return hits
+
+
 def dive_model_status(
     snapshot: Mapping[str, Any], provider: str, upstream_model_id: str
 ) -> dict[str, bool]:
-    model_id = upstream_model_id
-    if provider == "xai" and ":" in model_id:
-        model_id = model_id.split(":", 1)[1]
+    model_id = normalize_upstream_id(provider, upstream_model_id)
     repo = snapshot.get("repo", {}) or {}
     provider_facts = (repo.get("providers", {}) or {}).get(provider, {})
     return {
@@ -1289,6 +1391,31 @@ def diff_snapshots(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[
                     }
                 )
 
+    # Report only gaps that are new relative to the accepted baseline. The long
+    # tail of retired ids that no longer warrant a Dive constant stays in the
+    # baseline and stays quiet; the next launch does not. A baseline predating
+    # the "gaps" key is treated as having accepted whatever it captured, so
+    # upgrading the schema does not file an issue for the entire backlog.
+    if "gaps" in before:
+        before_gaps = before.get("gaps") or {}
+        after_gaps = after.get("gaps") or {}
+        for provider in sorted(after_gaps):
+            accepted = set(before_gaps.get(provider, []))
+            provider_data = (after.get("providers") or {}).get(provider, {})
+            for model_id in sorted(set(after_gaps[provider]) - accepted):
+                changes.append(
+                    {
+                        "provider": provider,
+                        "kind": "model_missing_from_dive",
+                        "model": model_id,
+                        "sources": gap_sources(provider, provider_data, model_id),
+                        "dive": {
+                            "provider_catalog": False,
+                            "cli_recommended": False,
+                        },
+                    }
+                )
+
     before_sdks = before.get("sdks") or {}
     after_sdks = after.get("sdks") or {}
     for module in sorted(set(before_sdks).intersection(after_sdks)):
@@ -1389,6 +1516,24 @@ def change_section(change: Mapping[str, Any]) -> list[str]:
         "",
         f"Type: `{change.get('kind')}`",
     ]
+    if change.get("kind") == "model_missing_from_dive":
+        lines.extend(
+            (
+                "",
+                "This model is published upstream but has no entry in "
+                f"`providers/{change.get('provider')}/catalog.json`.",
+            )
+        )
+    if change.get("sources"):
+        lines.extend(
+            (
+                "",
+                "Seen in: "
+                + ", ".join(
+                    f"`{escape_markdown(source)}`" for source in change["sources"][:10]
+                ),
+            )
+        )
     if change.get("url"):
         lines.extend(("", f"Source: {change['url']}"))
     if change.get("details"):
@@ -1452,7 +1597,15 @@ def change_section(change: Mapping[str, Any]) -> list[str]:
 
 
 def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
-    changes = diff.get("changes", [])
+    # A missing model is the one finding that always needs action, so it leads
+    # the report rather than sitting under routine document churn — and it has
+    # to survive the MAX_REPORT_CHANGES cut. Ordering belongs here rather than in
+    # diff_snapshots: the diff is canonical data, whose list order canonicalize()
+    # owns, and every caller of this function deserves the same priority.
+    changes = sorted(
+        diff.get("changes", []),
+        key=lambda change: CHANGE_PRIORITY.get(change.get("kind"), 1),
+    )
     displayed_changes = changes[:MAX_REPORT_CHANGES]
     head = [
         "# Dive provider watch report",
@@ -1472,6 +1625,25 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
             "",
         )
     )
+    missing = [
+        change for change in changes if change.get("kind") == "model_missing_from_dive"
+    ]
+    if missing:
+        head.extend(
+            (
+                f"⚠️ **{len(missing)} model(s) published upstream are missing from "
+                "Dive's catalogs:**",
+                "",
+            )
+        )
+        for change in missing[:20]:
+            head.append(
+                f"- `{change.get('provider')}` — "
+                f"<code>{escape_markdown(change.get('model'))}</code>"
+            )
+        if len(missing) > 20:
+            head.append(f"- … {len(missing) - 20} more")
+        head.append("")
     if len(changes) > len(displayed_changes):
         head.extend(
             (
