@@ -19,15 +19,15 @@ const (
 	ModelGrok4FastNonReasoning = "grok-4-fast-non-reasoning"
 	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
 	ModelGrok40709 = "grok-4-0709"
-	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	// Deprecated: No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.
 	ModelGrok4 = "grok-4"
-	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	// Deprecated: No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.
 	ModelGrok4Latest = "grok-4-latest"
 	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
 	ModelGrok3 = "grok-3"
-	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	// Deprecated: No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.
 	ModelGrok3Latest = "grok-3-latest"
-	// Deprecated: Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.
+	// Deprecated: No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.
 	ModelGrok3Mini = "grok-3-mini"
 	// Deprecated: Retired by xAI; requests route to grok-build-0.1. Use ModelGrokBuild01.
 	ModelGrokCodeFast1 = "grok-code-fast-1"

@@ -23,6 +23,30 @@ func TestGrokPricingRegistered(t *testing.T) {
 	}
 }
 
+// xAI redirects these slugs and bills at the target's rates, so quoting the
+// model's own retired price understates a Grok 4 Fast call more than fivefold.
+func TestRetiredSlugsAreCostedAtTheirRedirectTarget(t *testing.T) {
+	grok43 := TextModelPricing[ModelGrok43]
+	for _, model := range []string{
+		ModelGrok3,
+		ModelGrok40709,
+		ModelGrok41FastReasoning,
+		ModelGrok41FastNonReasoning,
+		ModelGrok4FastReasoning,
+		ModelGrok4FastNonReasoning,
+	} {
+		p, ok := TextModelPricing[model]
+		assert.True(t, ok, "pricing should exist for "+model)
+		assert.Equal(t, grok43.InputPrice, p.InputPrice, model+" input")
+		assert.Equal(t, grok43.OutputPrice, p.OutputPrice, model+" output")
+	}
+
+	build := TextModelPricing[ModelGrokBuild01]
+	code := TextModelPricing[ModelGrokCodeFast1]
+	assert.Equal(t, build.InputPrice, code.InputPrice)
+	assert.Equal(t, build.OutputPrice, code.OutputPrice)
+}
+
 func TestGrok45PopulateCostIncludesCacheReads(t *testing.T) {
 	u := &llm.Usage{
 		InputTokens:          1_000_000,

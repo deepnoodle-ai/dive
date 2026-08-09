@@ -50,6 +50,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Google's embedding pricing listed the shut-down `text-embedding-004`** —
   replaced with `gemini-embedding-001` ($0.15/1M) and `gemini-embedding-2`
   ($0.20/1M text input).
+- **Retired Grok slugs are costed at the rate they actually bill.** xAI
+  redirects them and bills at the target's rates, so `grok-4[-1]-fast-*` had
+  been understating cost more than fivefold ($0.20/$0.50 versus grok-4.3's
+  $1.25/$2.50). `grok-3` and `grok-4-0709` were overstating it.
 
 ### Changed
 

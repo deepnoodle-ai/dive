@@ -125,7 +125,7 @@
       "go_name": "ModelGrok4",
       "id": "grok-4",
       "lifecycle": "deprecated",
-      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4"
@@ -134,7 +134,7 @@
       "go_name": "ModelGrok4Latest",
       "id": "grok-4-latest",
       "lifecycle": "deprecated",
-      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 4"
@@ -152,7 +152,7 @@
       "go_name": "ModelGrok3Latest",
       "id": "grok-3-latest",
       "lifecycle": "deprecated",
-      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 3"
@@ -161,7 +161,7 @@
       "go_name": "ModelGrok3Mini",
       "id": "grok-3-mini",
       "lifecycle": "deprecated",
-      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
       "kind": "text",
       "context_window": 131072,
       "display_name": "Grok 3 Mini"
@@ -255,52 +255,59 @@
       },
       {
         "model": "grok-4-1-fast-reasoning",
-        "input_price_per_1m_tokens": "0.20",
-        "output_price_per_1m_tokens": "0.50",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-1-fast-non-reasoning",
-        "input_price_per_1m_tokens": "0.20",
-        "output_price_per_1m_tokens": "0.50",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-fast-reasoning",
-        "input_price_per_1m_tokens": "0.20",
-        "output_price_per_1m_tokens": "0.50",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-fast-non-reasoning",
-        "input_price_per_1m_tokens": "0.20",
-        "output_price_per_1m_tokens": "0.50",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-0709",
-        "input_price_per_1m_tokens": "3.00",
-        "output_price_per_1m_tokens": "15.00",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-code-fast-1",
-        "input_price_per_1m_tokens": "0.20",
-        "output_price_per_1m_tokens": "1.50",
+        "input_price_per_1m_tokens": "1.00",
+        "output_price_per_1m_tokens": "2.00",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-build-0.1 and billed at its rates."
       },
       {
         "model": "grok-3",
-        "input_price_per_1m_tokens": "3.00",
-        "output_price_per_1m_tokens": "15.00",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-3-mini",
