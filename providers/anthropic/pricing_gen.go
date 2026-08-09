@@ -97,6 +97,13 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-05-28",
 	},
+	ModelClaudeOpus5: {
+		Model:       ModelClaudeOpus5,
+		InputPrice:  5.00,
+		OutputPrice: 25.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-08-09",
+	},
 	ModelClaudeFable5: {
 		Model:       ModelClaudeFable5,
 		InputPrice:  10.00,
@@ -143,5 +150,12 @@ var FastModeTextPricing = map[string]llm.PricingInfo{
 		OutputPrice: 50.00,
 		Currency:    "USD",
 		UpdatedAt:   "2026-05-28",
+	},
+	ModelClaudeOpus5: {
+		Model:       ModelClaudeOpus5,
+		InputPrice:  10.00,
+		OutputPrice: 50.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-08-09",
 	},
 }

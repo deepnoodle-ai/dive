@@ -39,6 +39,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   what `ollama run <family>` resolves to, and `glm-` now routes to the Ollama
   provider. Mistral models are intentionally absent: they belong to the
   `mistral` provider, and listing them in both made routing ambiguous.
+- **`anthropic.ModelClaudeOpus5` added and made the default** (`claude-opus-5`,
+  1M context, $5/$25 per MTok). It was missing from the model list entirely —
+  the catalogs inherited that gap from the hand-written constants they replaced.
+  `ModelClaudeOpus48` remains available but is no longer the default.
+- **Recommended model lists trimmed to one model per class.** The CLI model
+  picker was offering several models of the same tier from consecutive
+  generations. Dropped from the recommendations (the constants remain):
+  `claude-opus-4-8`; `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`; `gemini-3.5-flash`,
+  `gemini-2.5-pro`; `grok-4.3`, `grok-4.20-0309-reasoning`.
+- **`google.DefaultModel` is now `ModelGemini36Flash`** (`gemini-3.6-flash`),
+  replacing `gemini-2.5-pro` — two generations behind and no longer
+  recommended.
 - **The CLI no longer falls back to model-family heuristics** for context
   window and label lookup; both come from the embedded catalogs alone. A model
   the catalogs do not list reports no context window, and the CLI hides the

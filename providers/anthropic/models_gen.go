@@ -19,10 +19,11 @@ const (
 	ModelClaudeOpus46           = "claude-opus-4-6"
 	ModelClaudeOpus47           = "claude-opus-4-7"
 	ModelClaudeOpus48           = "claude-opus-4-8"
+	ModelClaudeOpus5            = "claude-opus-5"
 	ModelClaudeFable5           = "claude-fable-5"
 	ModelClaudeMythos5          = "claude-mythos-5"
 	ModelClaudeSonnet5          = "claude-sonnet-5"
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelClaudeOpus48
+var DefaultModel = ModelClaudeOpus5

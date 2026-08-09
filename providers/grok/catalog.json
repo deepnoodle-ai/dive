@@ -57,20 +57,14 @@
       "id": "grok-4.3",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Grok 4.3",
-      "recommended": true,
-      "cli_order": 2,
-      "description": "Previous flagship model with 1M context"
+      "display_name": "Grok 4.3"
     },
     {
       "go_name": "ModelGrok420Reasoning",
       "id": "grok-4.20-0309-reasoning",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Grok 4.20",
-      "recommended": true,
-      "cli_order": 3,
-      "description": "Reasoning model with 1M context"
+      "display_name": "Grok 4.20"
     },
     {
       "go_name": "ModelGrok420NonReasoning",
@@ -93,7 +87,7 @@
       "context_window": 256000,
       "display_name": "Grok Build",
       "recommended": true,
-      "cli_order": 4,
+      "cli_order": 2,
       "description": "Optimized for coding tasks"
     },
     {

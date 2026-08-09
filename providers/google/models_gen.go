@@ -38,4 +38,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelGemini25Pro
+var DefaultModel = ModelGemini36Flash

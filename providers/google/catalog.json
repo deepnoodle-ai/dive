@@ -26,6 +26,7 @@
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Gemini 3.6 Flash",
+      "default": true,
       "recommended": true,
       "cli_order": 1,
       "description": "Fast agentic and multimodal model with strong coding performance"
@@ -35,10 +36,7 @@
       "id": "gemini-3.5-flash",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 3.5 Flash",
-      "recommended": true,
-      "cli_order": 2,
-      "description": "Frontier intelligence at high speed"
+      "display_name": "Gemini 3.5 Flash"
     },
     {
       "go_name": "ModelGemini35FlashLite",
@@ -57,8 +55,8 @@
       "context_window": 1000000,
       "display_name": "Gemini 3.1 Pro",
       "recommended": true,
-      "cli_order": 4,
-      "description": "Flagship Pro model for complex reasoning"
+      "cli_order": 2,
+      "description": "Flagship Pro model for complex reasoning (preview)"
     },
     {
       "go_name": "ModelGemini31ProPreviewCustomTools",
@@ -153,13 +151,9 @@
     {
       "go_name": "ModelGemini25Pro",
       "id": "gemini-2.5-pro",
-      "default": true,
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 2.5 Pro",
-      "recommended": true,
-      "cli_order": 5,
-      "description": "Strong all-around model"
+      "display_name": "Gemini 2.5 Pro"
     },
     {
       "go_name": "ModelGemini25ProLong",

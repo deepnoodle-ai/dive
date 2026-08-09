@@ -89,10 +89,7 @@
       ],
       "kind": "text",
       "context_window": 1050000,
-      "display_name": "GPT-5.5",
-      "recommended": true,
-      "cli_order": 4,
-      "description": "Previous flagship model for complex reasoning and coding"
+      "display_name": "GPT-5.5"
     },
     {
       "go_name": "ModelGPT54",
@@ -102,10 +99,7 @@
       ],
       "kind": "text",
       "context_window": 1050000,
-      "display_name": "GPT-5.4",
-      "recommended": true,
-      "cli_order": 5,
-      "description": "More affordable model for professional work"
+      "display_name": "GPT-5.4"
     },
     {
       "go_name": "ModelGPT54Mini",
@@ -115,10 +109,7 @@
       ],
       "kind": "text",
       "context_window": 400000,
-      "display_name": "GPT-5.4 Mini",
-      "recommended": true,
-      "cli_order": 6,
-      "description": "Fast mini model for coding and subagents"
+      "display_name": "GPT-5.4 Mini"
     },
     {
       "go_name": "ModelGPT54Nano",
@@ -130,8 +121,8 @@
       "context_window": 400000,
       "display_name": "GPT-5.4 Nano",
       "recommended": true,
-      "cli_order": 7,
-      "description": "Lowest-cost GPT-5.4-class model"
+      "cli_order": 4,
+      "description": "Lowest-cost model for high-throughput work"
     },
     {
       "go_name": "ModelGPT53ChatLatest",
