@@ -658,7 +658,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	}
 
 	if config.ToolChoice != nil && len(config.Tools) > 0 {
-		if requestHasThinkingEnabled(req.Model, req.Thinking) && forcedToolChoice(config.ToolChoice.Type) {
+		if requestThinkingBlocksForcedToolChoice(req.Model, req.Thinking) && forcedToolChoice(config.ToolChoice.Type) {
 			return fmt.Errorf("anthropic extended thinking only supports tool_choice auto or none; got %q", config.ToolChoice.Type)
 		}
 		req.ToolChoice = &ToolChoice{
@@ -692,12 +692,13 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 
 // applyReasoningConfig maps Dive's reasoning/thinking options onto the Anthropic
 // request, accounting for per-model differences:
-//   - Opus 4.5+, Sonnet 4.6, and the Claude 5 models (Fable 5, Mythos 5) take
-//     the native effort parameter via output_config; older models emulate
-//     effort with a thinking budget.
+//   - Opus 4.5+, Sonnet 4.6, and the Claude 5 models (Opus 5, Fable 5, Mythos 5,
+//     Sonnet 5) take the native effort parameter via output_config; older models
+//     emulate effort with a thinking budget.
 //   - Opus 4.6/4.7/4.8, Sonnet 4.6, and the Claude 5 models support adaptive
 //     thinking. Opus 4.7/4.8 and the Claude 5 models reject manual budgets, so
 //     a budget set against them transparently falls back to adaptive thinking.
+//   - Opus 5 accepts an explicit thinking disable only at effort high or below.
 func applyReasoningConfig(req *Request, config *llm.Config) error {
 	model := req.Model
 
@@ -710,6 +711,11 @@ func applyReasoningConfig(req *Request, config *llm.Config) error {
 		effort, err := normalizeReasoningEffort(model, config.ReasoningEffort)
 		if err != nil {
 			return err
+		}
+		if config.Thinking == llm.ThinkingTypeDisabled &&
+			modelRejectsDisabledThinkingAboveHighEffort(model) &&
+			(effort == llm.ReasoningEffortXHigh || effort == llm.ReasoningEffortMax) {
+			return fmt.Errorf("cannot set reasoning effort %s with thinking disabled on model %s: it accepts an explicit thinking disable only at effort high or below", effort, model)
 		}
 		if modelSupportsEffortParam(model) {
 			req.OutputConfig = &OutputConfig{Effort: string(effort)}
@@ -851,18 +857,33 @@ func requestHasThinkingEnabled(model string, thinking *Thinking) bool {
 	return modelRunsThinkingByDefault(model)
 }
 
+// requestThinkingBlocksForcedToolChoice reports whether the request's thinking
+// configuration rules out a forced tool_choice. An explicit thinking config is
+// authoritative. When the request omits it, only models that always run thinking
+// and reject an explicit disable (Fable 5, Mythos 5) block forced tool choice:
+// Opus 5 and Sonnet 5 default thinking on but the caller can still turn it off,
+// so Dive leaves that request to the API rather than rejecting it here.
+func requestThinkingBlocksForcedToolChoice(model string, thinking *Thinking) bool {
+	if thinking != nil {
+		return thinking.Type != "disabled"
+	}
+	return modelRunsThinkingByDefault(model) && !modelDefaultsThinkingOn(model)
+}
+
 func forcedToolChoice(choice llm.ToolChoiceType) bool {
 	return choice == llm.ToolChoiceTypeAny || choice == llm.ToolChoiceTypeTool
 }
 
 // modelSupportsEffortParam reports whether the model accepts the native
-// output_config.effort parameter (Opus 4.5+, Sonnet 4.6, Fable 5, Mythos 5).
+// output_config.effort parameter (Opus 4.5+, Opus 5, Sonnet 4.6, Sonnet 5,
+// Fable 5, Mythos 5).
 func modelSupportsEffortParam(model string) bool {
 	switch {
 	case strings.HasPrefix(model, "claude-opus-4-5"),
 		strings.HasPrefix(model, "claude-opus-4-6"),
 		strings.HasPrefix(model, "claude-opus-4-7"),
 		strings.HasPrefix(model, "claude-opus-4-8"),
+		strings.HasPrefix(model, "claude-opus-5"),
 		strings.HasPrefix(model, "claude-sonnet-4-6"),
 		strings.HasPrefix(model, "claude-sonnet-5"),
 		strings.HasPrefix(model, "claude-fable-5"),
@@ -875,6 +896,8 @@ func modelSupportsEffortParam(model string) bool {
 func modelSupportsXHighEffort(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-7") ||
 		strings.HasPrefix(model, "claude-opus-4-8") ||
+		strings.HasPrefix(model, "claude-opus-5") ||
+		strings.HasPrefix(model, "claude-sonnet-5") ||
 		strings.HasPrefix(model, "claude-fable-5") ||
 		strings.HasPrefix(model, "claude-mythos-5")
 }
@@ -883,6 +906,7 @@ func modelSupportsMaxEffort(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-6") ||
 		strings.HasPrefix(model, "claude-opus-4-7") ||
 		strings.HasPrefix(model, "claude-opus-4-8") ||
+		strings.HasPrefix(model, "claude-opus-5") ||
 		strings.HasPrefix(model, "claude-sonnet-4-6") ||
 		strings.HasPrefix(model, "claude-sonnet-5") ||
 		strings.HasPrefix(model, "claude-fable-5") ||
@@ -890,23 +914,28 @@ func modelSupportsMaxEffort(model string) bool {
 }
 
 // modelRejectsTemperature reports whether the model rejects the temperature
-// parameter (Claude 5 models: Fable 5, Mythos 5, Sonnet 5).
+// parameter (Opus 4.7/4.8, Opus 5, and the rest of the Claude 5 family: Fable 5,
+// Mythos 5, Sonnet 5). Opus 4.6 and Sonnet 4.6 still accept it.
 func modelRejectsTemperature(model string) bool {
-	return strings.HasPrefix(model, "claude-fable-5") ||
+	return strings.HasPrefix(model, "claude-opus-4-7") ||
+		strings.HasPrefix(model, "claude-opus-4-8") ||
+		strings.HasPrefix(model, "claude-opus-5") ||
+		strings.HasPrefix(model, "claude-fable-5") ||
 		strings.HasPrefix(model, "claude-mythos-5") ||
 		strings.HasPrefix(model, "claude-sonnet-5")
 }
 
 // modelRejectsManualThinking reports whether the model rejects manual extended
-// thinking budgets and supports only adaptive thinking (Opus 4.7/4.8, Fable 5,
-// Mythos 5, Sonnet 5). On Fable 5 and Mythos 5 adaptive thinking is always on
-// and an explicit thinking disable is also rejected by the API; Dive omits the
-// thinking parameter entirely when thinking is disabled, which is the accepted
-// form. Sonnet 5 also defaults thinking on but, unlike Fable/Mythos, accepts an
-// explicit disable — see modelDefaultsThinkingOn.
+// thinking budgets and supports only adaptive thinking (Opus 4.7/4.8, Opus 5,
+// Fable 5, Mythos 5, Sonnet 5). On Fable 5 and Mythos 5 adaptive thinking is
+// always on and an explicit thinking disable is also rejected by the API; Dive
+// omits the thinking parameter entirely when thinking is disabled, which is the
+// accepted form. Opus 5 and Sonnet 5 also default thinking on but, unlike
+// Fable/Mythos, accept an explicit disable — see modelDefaultsThinkingOn.
 func modelRejectsManualThinking(model string) bool {
 	return strings.HasPrefix(model, "claude-opus-4-7") ||
 		strings.HasPrefix(model, "claude-opus-4-8") ||
+		strings.HasPrefix(model, "claude-opus-5") ||
 		strings.HasPrefix(model, "claude-fable-5") ||
 		strings.HasPrefix(model, "claude-mythos-5") ||
 		strings.HasPrefix(model, "claude-sonnet-5")
@@ -915,11 +944,22 @@ func modelRejectsManualThinking(model string) bool {
 // modelDefaultsThinkingOn reports whether the model runs with adaptive thinking
 // when the request omits the thinking parameter. For these models a caller that
 // asks to disable thinking must send an explicit thinking:{type:"disabled"} —
-// omitting the field would leave thinking on. Currently only Sonnet 5 both
-// defaults thinking on and accepts an explicit disable (Fable 5 and Mythos 5
-// default on but reject the explicit disable, so Dive omits the field for them).
+// omitting the field would leave thinking on. Opus 5 and Sonnet 5 both default
+// thinking on and accept an explicit disable (Fable 5 and Mythos 5 default on
+// but reject the explicit disable, so Dive omits the field for them). On Opus 5
+// the explicit disable is only accepted at effort high or below — see
+// modelRejectsDisabledThinkingAboveHighEffort.
 func modelDefaultsThinkingOn(model string) bool {
-	return strings.HasPrefix(model, "claude-sonnet-5")
+	return strings.HasPrefix(model, "claude-opus-5") ||
+		strings.HasPrefix(model, "claude-sonnet-5")
+}
+
+// modelRejectsDisabledThinkingAboveHighEffort reports whether the model rejects
+// an explicit thinking disable combined with an effort level above high. Opus 5
+// accepts thinking:{type:"disabled"} only at effort high or below and returns a
+// 400 when it is paired with xhigh or max.
+func modelRejectsDisabledThinkingAboveHighEffort(model string) bool {
+	return strings.HasPrefix(model, "claude-opus-5")
 }
 
 // modelRunsThinkingByDefault reports whether omitting the thinking parameter
