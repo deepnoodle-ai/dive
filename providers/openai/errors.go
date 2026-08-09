@@ -1,8 +1,8 @@
 package openai
 
 import (
+	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/providers"
@@ -29,8 +29,9 @@ func apiErrorMessage(apiErr *openaisdk.Error) string {
 		return apiErr.Message
 	}
 	raw := strings.TrimSpace(apiErr.RawJSON())
-	if unquoted, err := strconv.Unquote(raw); err == nil {
-		raw = unquoted
+	var unquoted string
+	if err := json.Unmarshal([]byte(raw), &unquoted); err == nil {
+		return unquoted
 	}
 	return raw
 }

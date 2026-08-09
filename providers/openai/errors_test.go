@@ -35,7 +35,8 @@ func TestNormalizeOpenAIError_StandardMessage(t *testing.T) {
 func TestNormalizeOpenAIError_StringErrorFallback(t *testing.T) {
 	// xAI/Grok shape: {"code":"permission-denied","error":"<string>"}. The SDK
 	// hands UnmarshalJSON the bare "error" string, leaving Message empty. The
-	// message must still surface via the RawJSON fallback (unquoted).
+	// message must still surface via the RawJSON fallback, unquoted — not as
+	// the raw quoted JSON literal.
 	msg := "Your team has either used all available credits or reached its monthly spending limit."
 	apiErr := newAPIError(t, 403, `"`+msg+`"`)
 	assert.Equal(t, "", apiErr.Message) // precondition: Message really is empty
@@ -45,7 +46,21 @@ func TestNormalizeOpenAIError_StringErrorFallback(t *testing.T) {
 	var provErr *providers.ProviderError
 	assert.True(t, errors.As(got, &provErr))
 	assert.Equal(t, 403, provErr.StatusCode())
-	assert.Contains(t, provErr.Error(), msg)
+	assert.Equal(t, `provider api error (status 403): `+msg, provErr.Error())
+}
+
+func TestNormalizeOpenAIError_StringErrorFallback_JSONEscapes(t *testing.T) {
+	// The raw payload is JSON, not a Go string literal — escapes like \/ are
+	// valid JSON but not valid Go escape sequences, so the fallback must use
+	// a JSON-aware unquote rather than strconv.Unquote.
+	apiErr := newAPIError(t, 403, `"see https:\/\/example.com\/docs for details"`)
+	assert.Equal(t, "", apiErr.Message)
+
+	got := normalizeOpenAIError(apiErr)
+
+	var provErr *providers.ProviderError
+	assert.True(t, errors.As(got, &provErr))
+	assert.Equal(t, "provider api error (status 403): see https://example.com/docs for details", provErr.Error())
 }
 
 func TestNormalizeOpenAIError_NonAPIErrorPassthrough(t *testing.T) {
