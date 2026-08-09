@@ -9,13 +9,11 @@ import (
 )
 
 func TestGrok45Pricing(t *testing.T) {
-	for _, model := range []string{ModelGrok45, ModelGrok45Latest, ModelGrokBuildLatest} {
-		p, ok := TextModelPricing[model]
-		assert.True(t, ok, "pricing should exist for "+model)
-		assert.Equal(t, 2.0, p.InputPrice)
-		assert.Equal(t, 0.5, p.CacheReadPrice)
-		assert.Equal(t, 6.0, p.OutputPrice)
-	}
+	p, ok := TextModelPricing[ModelGrok45]
+	assert.True(t, ok, "pricing should exist for "+ModelGrok45)
+	assert.Equal(t, 2.0, p.InputPrice)
+	assert.Equal(t, 0.5, p.CacheReadPrice)
+	assert.Equal(t, 6.0, p.OutputPrice)
 }
 
 func TestGrokPricingRegistered(t *testing.T) {
@@ -23,6 +21,30 @@ func TestGrokPricingRegistered(t *testing.T) {
 		_, ok := providers.PricingFor(model, false)
 		assert.True(t, ok, "grok pricing should be registered: "+model)
 	}
+}
+
+// xAI redirects these slugs and bills at the target's rates, so quoting the
+// model's own retired price understates a Grok 4 Fast call more than fivefold.
+func TestRetiredSlugsAreCostedAtTheirRedirectTarget(t *testing.T) {
+	grok43 := TextModelPricing[ModelGrok43]
+	for _, model := range []string{
+		ModelGrok3,
+		ModelGrok40709,
+		ModelGrok41FastReasoning,
+		ModelGrok41FastNonReasoning,
+		ModelGrok4FastReasoning,
+		ModelGrok4FastNonReasoning,
+	} {
+		p, ok := TextModelPricing[model]
+		assert.True(t, ok, "pricing should exist for "+model)
+		assert.Equal(t, grok43.InputPrice, p.InputPrice, model+" input")
+		assert.Equal(t, grok43.OutputPrice, p.OutputPrice, model+" output")
+	}
+
+	build := TextModelPricing[ModelGrokBuild01]
+	code := TextModelPricing[ModelGrokCodeFast1]
+	assert.Equal(t, build.InputPrice, code.InputPrice)
+	assert.Equal(t, build.OutputPrice, code.OutputPrice)
 }
 
 func TestGrok45PopulateCostIncludesCacheReads(t *testing.T) {

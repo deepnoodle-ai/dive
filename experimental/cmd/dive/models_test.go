@@ -51,8 +51,7 @@ func TestGrok45ContextWindow(t *testing.T) {
 		want  int
 	}{
 		{"grok-4.5", 500_000},
-		{"grok-4.5-latest", 500_000},
-		{"grok-build-latest", 500_000},
+		{"grok-build-0.1", 256_000},
 	}
 
 	for _, tt := range tests {
@@ -60,6 +59,30 @@ func TestGrok45ContextWindow(t *testing.T) {
 			assert.Equal(t, tt.want, contextWindowForModel(tt.model))
 		})
 	}
+}
+
+func TestOllamaContextWindow(t *testing.T) {
+	tests := []struct {
+		model string
+		want  int
+	}{
+		{"gpt-oss:20b", 131_072},
+		{"gpt-oss", 131_072},
+		{"qwen3.6:27b", 262_144},
+		{"gemma4:12b", 262_144},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			assert.Equal(t, tt.want, contextWindowForModel(tt.model))
+		})
+	}
+}
+
+// The CLI reports no context window for a model the catalogs do not list, so
+// the UI hides the context bar instead of showing a guessed size.
+func TestUnknownModelHasNoContextWindow(t *testing.T) {
+	assert.Equal(t, 0, contextWindowForModel("not-a-real-model-9000"))
 }
 
 func TestGPT56ContextWindow(t *testing.T) {

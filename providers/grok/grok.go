@@ -8,7 +8,6 @@ import (
 )
 
 var (
-	DefaultModel         = ModelGrok45
 	DefaultEndpoint      = "https://api.x.ai/v1"
 	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = openaiProvider.DefaultMaxRetries

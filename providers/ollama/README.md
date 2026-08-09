@@ -29,7 +29,7 @@ The provider works by configuring the OpenAI client with Ollama's local endpoint
 2. **Pull a Model**: Download a model to use locally
 
    ```bash
-   ollama pull llama3.2
+   ollama pull gpt-oss:20b
    ```
 
 3. **Start Ollama**: Ensure Ollama is running (usually starts automatically)
@@ -55,7 +55,7 @@ import (
 
 func main() {
     provider := ollama.New(
-        ollama.WithModel(ollama.ModelLlama32_3B),
+        ollama.WithModel(ollama.ModelGPTOSS_20B),
         ollama.WithMaxTokens(2048),
     )
 
@@ -76,7 +76,7 @@ The provider supports all standard configuration options:
 
 ```go
 provider := ollama.New(
-    ollama.WithModel("llama3.2:3b"),                                 // Model name with optional size
+    ollama.WithModel("gpt-oss:20b"),                                 // Model name with optional size
     ollama.WithEndpoint("http://localhost:11434/v1/chat/completions"), // Custom endpoint
     ollama.WithAPIKey("custom-key"),                                 // API key (defaults to "ollama")
     ollama.WithMaxTokens(4096),                                      // Max response tokens
@@ -89,23 +89,33 @@ provider := ollama.New(
 The provider includes constants for popular model families. Models are specified with size variants:
 
 ```go
-// Llama 3.2 family
-ollama.ModelLlama32_1B   // "llama3.2:1b"
-ollama.ModelLlama32_3B   // "llama3.2:3b"
-ollama.ModelLlama32_11B  // "llama3.2:11b"
-ollama.ModelLlama32_90B  // "llama3.2:90b"
+// GPT-OSS (default)
+ollama.ModelGPTOSS_20B   // "gpt-oss:20b"
+ollama.ModelGPTOSS_120B  // "gpt-oss:120b"
 
-// Llama 3.1 family
-ollama.ModelLlama31_8B   // "llama3.1:8b"
-ollama.ModelLlama31_70B  // "llama3.1:70b"
+// Qwen3.6
+ollama.ModelQwen36_27B   // "qwen3.6:27b"
+ollama.ModelQwen36_35B   // "qwen3.6:35b"
+
+// Gemma 4
+ollama.ModelGemma4_E4B   // "gemma4:e4b"
+ollama.ModelGemma4_12B   // "gemma4:12b"
+ollama.ModelGemma4_31B   // "gemma4:31b"
 
 // Other popular models
-ollama.ModelCodeLlama_7B  // "codellama:7b"
-ollama.ModelMistral_7B    // "mistral:7b"
-ollama.ModelGemma2_2B     // "gemma2:2b"
-ollama.ModelQwen_7B       // "qwen:7b"
-ollama.ModelPhi3_Mini     // "phi3:mini"
+ollama.ModelGLM47Flash      // "glm-4.7-flash"
+ollama.ModelDeepSeekR1_8B   // "deepseek-r1:8b"
+ollama.ModelDeepSeekR1_32B  // "deepseek-r1:32b"
+
+// Ollama Cloud only — no local weights are published for these
+ollama.ModelMiniMaxM3   // "minimax-m3:cloud"
+ollama.ModelMiniMaxM27  // "minimax-m2.7:cloud"
 ```
+
+Mistral models are not listed here: use the `mistral` provider for those.
+
+Each family also has an untagged constant (`ollama.ModelGPTOSS`,
+`ollama.ModelGemma4`, …) matching what `ollama run <family>` resolves to.
 
 You can also use any model string directly that matches your locally pulled models.
 
@@ -141,7 +151,7 @@ This approach provides several key benefits:
 
 - Pull the model: `ollama pull <model-name>`
 - List available models: `ollama list`
-- Use exact model names including size variants (e.g., `llama3.2:3b` not `llama3.2`)
+- Use exact model names including size variants (e.g., `gpt-oss:20b` not `gpt-oss`)
 
 ### Performance Optimization
 

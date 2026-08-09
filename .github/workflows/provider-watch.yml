@@ -1,0 +1,102 @@
+name: Provider watch
+
+on:
+  schedule:
+    # Monday morning in the US; UTC avoids daylight-saving ambiguity.
+    - cron: "17 13 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: provider-watch
+  cancel-in-progress: false
+
+env:
+  ISSUE_TITLE: Provider watch detected upstream changes
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out Dive
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # Deliberately not provider-catalog-check: that target shells out to
+      # gofmt, and go-test.yml already runs it with a Go toolchain set up.
+      - name: Test the watcher
+        run: make provider-watch-test
+
+      - name: Check provider sources
+        id: audit
+        run: |
+          python scripts/provider_watch.py audit \
+            --public-only \
+            --baseline scripts/provider_watch_baseline.json.gz \
+            --snapshot provider-watch-current.json \
+            --report provider-watch-report.md \
+            --json-report provider-watch-report.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Add report to job summary
+        if: always() && hashFiles('provider-watch-report.md') != ''
+        run: cat provider-watch-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload changed snapshot and report
+        if: steps.audit.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: provider-watch-${{ steps.audit.outputs.change_hash }}
+          path: |
+            provider-watch-current.json
+            provider-watch-report.json
+            provider-watch-report.md
+          compression-level: 9
+          retention-days: 30
+
+      - name: Create or refresh provider-watch issue
+        if: steps.audit.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          issue_number="$(
+            gh issue list \
+              --state open \
+              --limit 100 \
+              --json number,title \
+              --jq '.[] | select(.title == env.ISSUE_TITLE) | .number' \
+              | head -n 1
+          )"
+          if [[ -n "$issue_number" ]]; then
+            gh issue edit "$issue_number" --body-file provider-watch-report.md
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file provider-watch-report.md
+          fi
+
+      - name: Close a stale provider-watch issue
+        if: steps.audit.outputs.has_changes == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          issue_number="$(
+            gh issue list \
+              --state open \
+              --limit 100 \
+              --json number,title \
+              --jq '.[] | select(.title == env.ISSUE_TITLE) | .number' \
+              | head -n 1
+          )"
+          if [[ -n "$issue_number" ]]; then
+            gh issue close "$issue_number" \
+              --comment "The current provider snapshot matches the accepted baseline."
+          fi

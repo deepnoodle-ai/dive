@@ -210,8 +210,8 @@ func TestBuildRequestParams_NormalizesGrokReasoningEffort(t *testing.T) {
 			want:   responses.ReasoningEffort("high"),
 		},
 		{
-			name:   "grok build latest alias minimal maps to low",
-			model:  "grok-build-latest",
+			name:   "grok build minimal maps to low",
+			model:  "grok-build-0.1",
 			effort: llm.ReasoningEffortMinimal,
 			want:   responses.ReasoningEffort("low"),
 		},

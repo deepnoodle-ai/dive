@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "provider": "grok",
+  "sources": [
+    {
+      "name": "models",
+      "url": "https://docs.x.ai/developers/models"
+    },
+    {
+      "name": "pricing",
+      "url": "https://docs.x.ai/developers/pricing"
+    },
+    {
+      "name": "release-notes",
+      "url": "https://docs.x.ai/developers/release-notes"
+    },
+    {
+      "name": "docs-index",
+      "url": "https://docs.x.ai/llms.txt",
+      "kind": "llms",
+      "discovery_patterns": [
+        "/developers/(?:models|pricing|release-notes)",
+        "/developers/migration/",
+        "/developers/rest-api-reference/inference/models",
+        "/developers/model-capabilities/"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "go_name": "ModelGrok45",
+      "id": "grok-4.5",
+      "default": true,
+      "kind": "text",
+      "context_window": 500000,
+      "display_name": "Grok 4.5",
+      "recommended": true,
+      "cli_order": 1,
+      "description": "xAI flagship reasoning model with vision input"
+    },
+    {
+      "go_name": "ModelGrok43",
+      "id": "grok-4.3",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Grok 4.3"
+    },
+    {
+      "go_name": "ModelGrok420Reasoning",
+      "id": "grok-4.20-0309-reasoning",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Grok 4.20"
+    },
+    {
+      "go_name": "ModelGrok420NonReasoning",
+      "id": "grok-4.20-0309-non-reasoning",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Grok 4.20"
+    },
+    {
+      "go_name": "ModelGrok420MultiAgent",
+      "id": "grok-4.20-multi-agent-0309",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Grok 4.20"
+    },
+    {
+      "go_name": "ModelGrokBuild01",
+      "id": "grok-build-0.1",
+      "kind": "text",
+      "context_window": 256000,
+      "display_name": "Grok Build",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Optimized for coding tasks"
+    },
+    {
+      "go_name": "ModelGrok41FastReasoning",
+      "id": "grok-4-1-fast-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 4.1 Fast"
+    },
+    {
+      "go_name": "ModelGrok41FastNonReasoning",
+      "id": "grok-4-1-fast-non-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43 with reasoning effort none.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 4.1 Fast"
+    },
+    {
+      "go_name": "ModelGrok4FastReasoning",
+      "id": "grok-4-fast-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 4"
+    },
+    {
+      "go_name": "ModelGrok4FastNonReasoning",
+      "id": "grok-4-fast-non-reasoning",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43 with reasoning effort none.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 4"
+    },
+    {
+      "go_name": "ModelGrok40709",
+      "id": "grok-4-0709",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 4"
+    },
+    {
+      "go_name": "ModelGrok4",
+      "id": "grok-4",
+      "lifecycle": "deprecated",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 4"
+    },
+    {
+      "go_name": "ModelGrok4Latest",
+      "id": "grok-4-latest",
+      "lifecycle": "deprecated",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 4"
+    },
+    {
+      "go_name": "ModelGrok3",
+      "id": "grok-3",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-4.3. Use ModelGrok43.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 3"
+    },
+    {
+      "go_name": "ModelGrok3Latest",
+      "id": "grok-3-latest",
+      "lifecycle": "deprecated",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 3"
+    },
+    {
+      "go_name": "ModelGrok3Mini",
+      "id": "grok-3-mini",
+      "lifecycle": "deprecated",
+      "deprecated": "No longer returned by xAI's model listing and undocumented; no replacement is published. Use ModelGrok43 or ModelGrok45.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok 3 Mini"
+    },
+    {
+      "go_name": "ModelGrokCodeFast1",
+      "id": "grok-code-fast-1",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests route to grok-build-0.1. Use ModelGrokBuild01.",
+      "kind": "text",
+      "context_window": 131072,
+      "display_name": "Grok Code"
+    },
+    {
+      "go_name": "ModelImagineImagePro",
+      "id": "grok-imagine-image-pro",
+      "lifecycle": "deprecated",
+      "deprecated": "Retired by xAI; requests redirect to grok-imagine-image-quality. Use ModelImagineImageQuality.",
+      "kind": "image",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelImagineImage",
+      "id": "grok-imagine-image",
+      "kind": "image",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelImagineImageQuality",
+      "id": "grok-imagine-image-quality",
+      "kind": "image",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelImagineVideo",
+      "id": "grok-imagine-video",
+      "kind": "video",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelImagineVideo15",
+      "id": "grok-imagine-video-1.5",
+      "kind": "video",
+      "context_window": 131072
+    }
+  ],
+  "pricing": {
+    "text": [
+      {
+        "model": "grok-4.5",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "6.00",
+        "cache_read_price_per_1m_tokens": "0.50",
+        "currency": "USD",
+        "updated_at": "2026-07-09"
+      },
+      {
+        "model": "grok-4.3",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      },
+      {
+        "model": "grok-4.20-0309-reasoning",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      },
+      {
+        "model": "grok-4.20-0309-non-reasoning",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      },
+      {
+        "model": "grok-4.20-multi-agent-0309",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      },
+      {
+        "model": "grok-build-0.1",
+        "input_price_per_1m_tokens": "1.00",
+        "output_price_per_1m_tokens": "2.00",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      },
+      {
+        "model": "grok-4-1-fast-reasoning",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
+      },
+      {
+        "model": "grok-4-1-fast-non-reasoning",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
+      },
+      {
+        "model": "grok-4-fast-reasoning",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
+      },
+      {
+        "model": "grok-4-fast-non-reasoning",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
+      },
+      {
+        "model": "grok-4-0709",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
+      },
+      {
+        "model": "grok-code-fast-1",
+        "input_price_per_1m_tokens": "1.00",
+        "output_price_per_1m_tokens": "2.00",
+        "currency": "USD",
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-build-0.1 and billed at its rates."
+      },
+      {
+        "model": "grok-3",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-08-09",
+        "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
+      },
+      {
+        "model": "grok-3-mini",
+        "input_price_per_1m_tokens": "0.30",
+        "output_price_per_1m_tokens": "0.50",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      }
+    ],
+    "fast_text": [],
+    "image": [
+      {
+        "model": "grok-imagine-image",
+        "price_per_image": "0.02",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      },
+      {
+        "model": "grok-imagine-image-quality",
+        "price_per_image": "0.05",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      }
+    ],
+    "embedding": []
+  }
+}

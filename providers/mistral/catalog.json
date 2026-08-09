@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "provider": "mistral",
+  "sources": [
+    {
+      "name": "pricing",
+      "url": "https://mistral.ai/pricing/api/"
+    },
+    {
+      "name": "models",
+      "url": "https://docs.mistral.ai/models/overview"
+    },
+    {
+      "name": "changelog",
+      "url": "https://docs.mistral.ai/resources/changelogs"
+    },
+    {
+      "name": "models-api",
+      "url": "https://docs.mistral.ai/api/endpoint/models"
+    },
+    {
+      "name": "docs-index",
+      "url": "https://docs.mistral.ai/sitemap.xml",
+      "kind": "sitemap",
+      "discovery_patterns": [
+        "/(?:models|resources/changelog|api/endpoint/models)",
+        "/pricing"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "go_name": "ModelMistralLarge3",
+      "id": "mistral-large-2512",
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelMistralLarge",
+      "id": "mistral-large-latest",
+      "default": true,
+      "kind": "text",
+      "context_window": 128000,
+      "display_name": "Mistral Large",
+      "recommended": true,
+      "cli_order": 1,
+      "description": "Flagship model"
+    },
+    {
+      "go_name": "ModelMistralLarge2411",
+      "id": "mistral-large-2411",
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelMistralSmall",
+      "id": "mistral-small-latest",
+      "kind": "text",
+      "context_window": 128000,
+      "display_name": "Mistral Small",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Fast and efficient"
+    },
+    {
+      "go_name": "ModelMinistral3_14B",
+      "id": "ministral-14b-2512",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelMinistral3_8B",
+      "id": "ministral-8b-2512",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelMinistral3_3B",
+      "id": "ministral-3b-2512",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelDevstral2",
+      "id": "devstral-2512",
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelDevstralSmall2",
+      "id": "labs-devstral-small-2512",
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelDevstralSmallLatest",
+      "id": "devstral-small-latest",
+      "kind": "text",
+      "context_window": 128000,
+      "display_name": "Devstral Small",
+      "recommended": true,
+      "cli_order": 3,
+      "description": "Optimized for coding tasks"
+    },
+    {
+      "go_name": "ModelCodestralLatest",
+      "id": "codestral-latest",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelCodestral2501",
+      "id": "codestral-2501",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelCodestralMamba",
+      "id": "open-codestral-mamba",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelMistral7B",
+      "id": "open-mistral-7b",
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelMixtral8x7B",
+      "id": "open-mixtral-8x7b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelMixtral8x22B",
+      "id": "open-mixtral-8x22b",
+      "kind": "text"
+    }
+  ],
+  "pricing": {
+    "text": [
+      {
+        "model": "mistral-large-2411",
+        "input_price_per_1m_tokens": "2.0",
+        "output_price_per_1m_tokens": "6.0",
+        "currency": "USD",
+        "updated_at": "2025-10-15"
+      },
+      {
+        "model": "mistral-large-latest",
+        "input_price_per_1m_tokens": "2.0",
+        "output_price_per_1m_tokens": "6.0",
+        "currency": "USD",
+        "updated_at": "2025-10-15"
+      },
+      {
+        "model": "mistral-small-latest",
+        "input_price_per_1m_tokens": "0.1",
+        "output_price_per_1m_tokens": "0.3",
+        "currency": "USD",
+        "updated_at": "2025-10-15"
+      },
+      {
+        "model": "codestral-latest",
+        "input_price_per_1m_tokens": "0.3",
+        "output_price_per_1m_tokens": "0.9",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "codestral-2501",
+        "input_price_per_1m_tokens": "0.3",
+        "output_price_per_1m_tokens": "0.9",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "open-mistral-7b",
+        "input_price_per_1m_tokens": "0.25",
+        "output_price_per_1m_tokens": "0.25",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "open-mixtral-8x7b",
+        "input_price_per_1m_tokens": "0.7",
+        "output_price_per_1m_tokens": "0.7",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "open-mixtral-8x22b",
+        "input_price_per_1m_tokens": "2.0",
+        "output_price_per_1m_tokens": "6.0",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "open-codestral-mamba",
+        "input_price_per_1m_tokens": "0.25",
+        "output_price_per_1m_tokens": "0.25",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      }
+    ],
+    "fast_text": [],
+    "image": [],
+    "embedding": []
+  }
+}

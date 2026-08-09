@@ -2,6 +2,8 @@
 
 Dive is a Go library for building AI agents and integrating with leading LLMs.
 
+- [Dive as an Agent Harness](harness-features.md) - Catalog of every harness feature Dive provides, organized by concern
+
 ## Core Guides
 
 - [Installation](guides/installation.md) - Setting up Dive

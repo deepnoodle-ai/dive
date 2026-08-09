@@ -54,6 +54,12 @@ Session load/save is automatic when `AgentOptions.Session` or `WithSession` is s
 
 Guides in `docs/guides/` (core) and `docs/guides/experimental/`.
 
+## Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/). Keep
+entries to one to three lines: bold summary, then the new value, breaking
+change, or migration. How a bug was found belongs in the commit message.
+
 ## Example
 
 ```go

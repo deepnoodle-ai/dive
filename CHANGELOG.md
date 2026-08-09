@@ -6,6 +6,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Provider catalogs** — each provider's models, pricing, feature flags, and
+  documentation sources now live in `providers/<name>/catalog.json`, generating
+  `models_gen.go`, `pricing_gen.go`, and `features_gen.go` via
+  `make provider-catalog-generate`. Every provider exposes `Catalog()` and
+  `CatalogJSON()`.
+- **Provider watch** — a weekly workflow (`scripts/provider_watch.py`) diffs
+  upstream provider documentation and APIs against an accepted baseline and
+  files a single refreshed issue when something material changes. It also
+  reports models published upstream that Dive lacks (`gaps`) and catalog ids
+  upstream does not serve (`unverified`), reporting only what is new relative to
+  the baseline.
+- **`make release-prep VERSION=vX.Y.Z`** points every sub-module's intra-repo
+  requirement at the version being released. `make tag-modules` now refuses to
+  tag while those requirements are stale.
+- **`grok.ModelImagineVideo15`** (`grok-imagine-video-1.5`).
+
+### Deprecated
+
+- **Twelve Grok constants xAI has retired** — `grok-3`, `grok-3-latest`,
+  `grok-3-mini`, `grok-4`, `grok-4-latest`, `grok-4-0709`, the four
+  `grok-4[-1]-fast-*` slugs, `grok-code-fast-1`, and `grok-imagine-image-pro`.
+  The slugs still resolve but redirect to `grok-4.3`, `grok-build-0.1`, or
+  `grok-imagine-image-quality`, and bill at the target's rates.
+
+### Fixed
+
+- **Nine OpenRouter ids used the wrong separator** — OpenRouter serves
+  `anthropic/claude-opus-4.7`, not `anthropic/claude-opus-4-7`. Same for Opus
+  4.8/4.6/4.5/4.1, Sonnet 4.6/4.5, Haiku 4.5, and one pricing row.
+  `openrouter.DefaultModel` was among them, so every default request used an
+  unresolvable id; it now points at the new `anthropic/claude-opus-5`.
+- **Six Mistral constants pointed at ids Mistral does not serve.**
+  `ModelMistralLarge3` → `mistral-large-2512` (`2412` never existed),
+  `ModelMinistral3_3B/_8B/_14B` → `ministral-{3b,8b,14b}-2512`,
+  `ModelDevstral2` → `devstral-2512`, `ModelDevstralSmall2` →
+  `labs-devstral-small-2512`.
+- **Grok reasoning-effort clamping skipped `grok-build-0.1`** — it keyed on
+  `grok-build-latest`, which xAI does not serve, so `xhigh`/`max` reached the
+  API unmapped.
+- **Google's embedding pricing listed the shut-down `text-embedding-004`** —
+  replaced with `gemini-embedding-001` ($0.15/1M) and `gemini-embedding-2`
+  ($0.20/1M text input).
+- **Retired Grok slugs are costed at the rate they actually bill.** xAI
+  redirects them and bills at the target's rates, so `grok-4[-1]-fast-*` had
+  been understating cost more than fivefold ($0.20/$0.50 versus grok-4.3's
+  $1.25/$2.50). `grok-3` and `grok-4-0709` were overstating it.
+
+### Changed
+
+- **`mistral.DefaultModel` is now `ModelMistralLarge`** (`mistral-large-latest`)
+  rather than a pinned dated snapshot, matching the model the CLI recommends.
+  Pass `WithModel` explicitly to pin a dated snapshot.
+- **`openrouter.ModelMistralLarge3` is now `mistralai/mistral-large-2512`**
+  (was `mistral/mistral-large-3`, which is not an id OpenRouter serves). Code
+  comparing against the old string — routing tables, stored session metadata —
+  needs updating.
+- **`openrouter` replaced three retired xAI models** (`x-ai/grok-3`,
+  `x-ai/grok-4-fast-reasoning`, `x-ai/grok-4-1-fast-reasoning`) with
+  `x-ai/grok-4.5`, `x-ai/grok-4.3`, and `x-ai/grok-build-0.1`.
+- **Ollama catalog rebuilt around current model families** — GPT-OSS, Qwen3.6,
+  Gemma 4, GLM-4.7 Flash, MiniMax, and DeepSeek-R1. `ollama.DefaultModel` is now
+  `ModelGPTOSS_20B` (`gpt-oss:20b`), replacing `llama3.2:3b`. MiniMax M2.7 and
+  M3 are Ollama Cloud only (`:cloud` tag, no pricing). Each family also gets an
+  untagged constant, and `glm-` now routes to Ollama. Mistral models are absent
+  by design — use the `mistral` provider.
+- **`anthropic.ModelClaudeOpus5` added and made the default** (`claude-opus-5`,
+  1M context, $5/$25 per MTok). `ModelClaudeOpus48` remains but is no longer the
+  default.
+- **`google.DefaultModel` is now `ModelGemini36Flash`** (`gemini-3.6-flash`),
+  replacing `gemini-2.5-pro`.
+- **Recommended model lists trimmed to one model per class.** Dropped from the
+  recommendations, constants intact: `claude-opus-4-8`; `gpt-5.5`, `gpt-5.4`,
+  `gpt-5.4-mini`; `gemini-3.5-flash`, `gemini-2.5-pro`; `grok-4.3`,
+  `grok-4.20-0309-reasoning`.
+- **The CLI no longer falls back to model-family heuristics** for context window
+  and label lookup; both come from the embedded catalogs alone. Models the
+  catalogs do not list hide the context bar rather than showing a guess.
+
+### Removed
+
+- **`google.ModelGemini25ProLong`** — never a callable model, only a key for
+  Gemini 2.5 Pro's over-200K pricing tier, now folded into the `gemini-2.5-pro`
+  pricing note.
+- **Four constants naming models that do not exist** —
+  `grok.ModelGrok45Latest`, `grok.ModelGrokBuildLatest`, `openai.ModelGPT51Mini`,
+  and `openai.ModelGPT53CodexSpark`. xAI publishes no `-latest` aliases, and
+  OpenAI has no `gpt-5.1-mini` or `gpt-5.3-codex-spark`.
+- **`grok.ModelGrok2Vision1212` and `grok.ModelGrok2Image1212`** — xAI no longer
+  lists either model; both were already marked deprecated.
+- **Ollama constants for retired model families** — Llama 3.x, CodeLlama,
+  Gemma/Gemma 2, Qwen 1, Phi-3, and `mistral:7b`/`mistral:nemo`. Any model
+  string still works via `WithModel`; only the named constants are gone.
+
 ## [1.18.0] - 2026-07-22
 
 ### Added

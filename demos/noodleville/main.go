@@ -33,7 +33,7 @@ func main() {
 		recordPath   string
 	)
 	flag.StringVar(&provider, "provider", "auto", "model provider: auto, ollama, or scripted")
-	flag.StringVar(&modelName, "model", ollama.ModelLlama32_3B, "model name for the ollama provider")
+	flag.StringVar(&modelName, "model", ollama.DefaultModel, "model name for the ollama provider")
 	flag.StringVar(&sessionDir, "sessions", ".noodleville/sessions", "directory for per-villager file sessions")
 	flag.IntVar(&ticks, "ticks", 3, "number of town ticks to run")
 	flag.IntVar(&parallelism, "parallelism", 2, "maximum simultaneous LLM turns")
@@ -309,11 +309,11 @@ func hasModel(models []string, modelName string) bool {
 
 func preferredOllamaModel(models []string) string {
 	for _, preferred := range []string{
-		ollama.ModelLlama32_3B,
-		"llama3.2:latest",
-		"llama3.2",
-		"mistral:7b",
-		"qwen3:4b",
+		ollama.ModelGPTOSS_20B,
+		ollama.ModelGPTOSS,
+		ollama.ModelQwen36_27B,
+		ollama.ModelGemma4_E4B,
+		ollama.ModelDeepSeekR1_8B,
 	} {
 		if hasModel(models, preferred) {
 			return preferred

@@ -1,0 +1,582 @@
+{
+  "schema_version": 1,
+  "provider": "openai",
+  "sources": [
+    {
+      "name": "models",
+      "url": "https://developers.openai.com/api/docs/models/all.md"
+    },
+    {
+      "name": "pricing",
+      "url": "https://developers.openai.com/api/docs/pricing.md"
+    },
+    {
+      "name": "deprecations",
+      "url": "https://developers.openai.com/api/docs/deprecations.md"
+    },
+    {
+      "name": "changelog",
+      "url": "https://developers.openai.com/api/docs/changelog.md"
+    },
+    {
+      "name": "docs-index",
+      "url": "https://developers.openai.com/llms.txt",
+      "kind": "llms",
+      "discovery_patterns": [
+        "/api/docs/(?:models|pricing|deprecations|changelog)"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "go_name": "ModelGPT56",
+      "id": "gpt-5.6",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.6"
+    },
+    {
+      "go_name": "ModelGPT56Sol",
+      "go_type": "openaisdk.ChatModel",
+      "id": "gpt-5.6-sol",
+      "default": true,
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.6 Sol",
+      "recommended": true,
+      "cli_order": 1,
+      "description": "Flagship GPT-5.6 model for complex reasoning and coding"
+    },
+    {
+      "go_name": "ModelGPT56Terra",
+      "go_type": "openaisdk.ChatModel",
+      "id": "gpt-5.6-terra",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.6 Terra",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "GPT-5.6 model balancing intelligence and cost"
+    },
+    {
+      "go_name": "ModelGPT56Luna",
+      "go_type": "openaisdk.ChatModel",
+      "id": "gpt-5.6-luna",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.6 Luna",
+      "recommended": true,
+      "cli_order": 3,
+      "description": "GPT-5.6 model for efficient high-volume workloads"
+    },
+    {
+      "go_name": "ModelGPT55",
+      "id": "gpt-5.5",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.5"
+    },
+    {
+      "go_name": "ModelGPT54",
+      "id": "gpt-5.4",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1050000,
+      "display_name": "GPT-5.4"
+    },
+    {
+      "go_name": "ModelGPT54Mini",
+      "id": "gpt-5.4-mini",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 400000,
+      "display_name": "GPT-5.4 Mini"
+    },
+    {
+      "go_name": "ModelGPT54Nano",
+      "id": "gpt-5.4-nano",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 400000,
+      "display_name": "GPT-5.4 Nano",
+      "recommended": true,
+      "cli_order": 4,
+      "description": "Lowest-cost model for high-throughput work"
+    },
+    {
+      "go_name": "ModelGPT53ChatLatest",
+      "id": "gpt-5.3-chat-latest",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.3"
+    },
+    {
+      "go_name": "ModelGPT53ChatLast",
+      "alias_of": "ModelGPT53ChatLatest",
+      "deprecated": "Use ModelGPT53ChatLatest.",
+      "lifecycle": "deprecated"
+    },
+    {
+      "go_name": "ModelGPT52",
+      "id": "gpt-5.2",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.2"
+    },
+    {
+      "go_name": "ModelGPT52Pro",
+      "id": "gpt-5.2-pro",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.2"
+    },
+    {
+      "go_name": "ModelGPT51",
+      "id": "gpt-5.1",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.1"
+    },
+    {
+      "go_name": "ModelGPT5",
+      "id": "gpt-5",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1000000
+    },
+    {
+      "go_name": "ModelGPT5Pro",
+      "id": "gpt-5-pro",
+      "kind": "text",
+      "context_window": 1000000
+    },
+    {
+      "go_name": "ModelGPT5Mini",
+      "id": "gpt-5-mini",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5 Mini"
+    },
+    {
+      "go_name": "ModelGPT5Nano",
+      "id": "gpt-5-nano",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 1000000
+    },
+    {
+      "go_name": "ModelGPT41",
+      "id": "gpt-4.1",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelGPT4o",
+      "id": "gpt-4o",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 128000,
+      "display_name": "GPT-4o"
+    },
+    {
+      "go_name": "ModelGPTImage2",
+      "id": "gpt-image-2",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTImage220260421",
+      "id": "gpt-image-2-2026-04-21",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTImage15",
+      "id": "gpt-image-1.5",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTImage1",
+      "id": "gpt-image-1",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPTImage1Mini",
+      "id": "gpt-image-1-mini",
+      "kind": "image"
+    },
+    {
+      "go_name": "ModelGPT4oMiniTTS",
+      "id": "gpt-4o-mini-tts",
+      "kind": "audio",
+      "context_window": 128000,
+      "display_name": "GPT-4o"
+    },
+    {
+      "go_name": "ModelGPT4oMiniTTS20251215",
+      "id": "gpt-4o-mini-tts-2025-12-15",
+      "kind": "audio",
+      "context_window": 128000,
+      "display_name": "GPT-4o"
+    },
+    {
+      "go_name": "ModelGPT4oTranscribe",
+      "id": "gpt-4o-transcribe",
+      "kind": "audio",
+      "context_window": 128000,
+      "display_name": "GPT-4o"
+    },
+    {
+      "go_name": "ModelGPT4oMiniTranscribe",
+      "id": "gpt-4o-mini-transcribe",
+      "kind": "audio",
+      "context_window": 128000,
+      "display_name": "GPT-4o"
+    },
+    {
+      "go_name": "ModelGPT4oMiniTranscribe20251215",
+      "id": "gpt-4o-mini-transcribe-2025-12-15",
+      "kind": "audio",
+      "context_window": 128000,
+      "display_name": "GPT-4o"
+    },
+    {
+      "go_name": "ModelGPT4oTranscribeDiarize",
+      "id": "gpt-4o-transcribe-diarize",
+      "kind": "audio",
+      "context_window": 128000,
+      "display_name": "GPT-4o"
+    },
+    {
+      "go_name": "ModelWhisper1",
+      "id": "whisper-1",
+      "kind": "audio"
+    },
+    {
+      "go_name": "ModelO3",
+      "id": "o3",
+      "kind": "text",
+      "context_window": 200000,
+      "display_name": "o3"
+    },
+    {
+      "go_name": "ModelO3Pro",
+      "id": "o3-pro",
+      "kind": "text",
+      "context_window": 200000,
+      "display_name": "o3"
+    },
+    {
+      "go_name": "ModelO3Mini",
+      "id": "o3-mini",
+      "kind": "text",
+      "context_window": 200000,
+      "display_name": "o3-mini"
+    },
+    {
+      "go_name": "ModelO4Mini",
+      "id": "o4-mini",
+      "kind": "text",
+      "context_window": 200000,
+      "display_name": "o4-mini"
+    },
+    {
+      "go_name": "ModelO3DeepResearch",
+      "id": "o3-deep-research",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 200000,
+      "display_name": "o3"
+    },
+    {
+      "go_name": "ModelO4MiniDeepResearch",
+      "id": "o4-mini-deep-research",
+      "adapters": [
+        "openaicompletions"
+      ],
+      "kind": "text",
+      "context_window": 200000,
+      "display_name": "o4-mini"
+    },
+    {
+      "go_name": "ModelGPT53Codex",
+      "id": "gpt-5.3-codex",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.3 Codex"
+    },
+    {
+      "go_name": "ModelGPT52Codex",
+      "id": "gpt-5.2-codex",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.2"
+    },
+    {
+      "go_name": "ModelGPT51CodexMax",
+      "id": "gpt-5.1-codex-max",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.1 Codex"
+    },
+    {
+      "go_name": "ModelGPT51Codex",
+      "id": "gpt-5.1-codex",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "GPT-5.1 Codex"
+    },
+    {
+      "go_name": "ModelGPT5Codex",
+      "id": "gpt-5-codex",
+      "kind": "text",
+      "context_window": 1000000
+    },
+    {
+      "go_name": "ModelGPT5CodexMini",
+      "id": "gpt-5-codex-mini",
+      "kind": "text",
+      "context_window": 1000000
+    },
+    {
+      "go_name": "ModelCodexMiniLatest",
+      "id": "codex-mini-latest",
+      "kind": "text",
+      "context_window": 200000,
+      "display_name": "Codex Mini"
+    },
+    {
+      "go_name": "ModelCodex",
+      "alias_of": "ModelCodexMiniLatest",
+      "deprecated": "Use ModelGPT53Codex instead.",
+      "lifecycle": "deprecated"
+    },
+    {
+      "go_name": "ModelCodexAsk",
+      "id": "codex-ask",
+      "kind": "text",
+      "deprecated": "Use ModelCodexMiniLatest instead.",
+      "lifecycle": "deprecated"
+    }
+  ],
+  "pricing": {
+    "text": [
+      {
+        "model": "gpt-5.6",
+        "input_price_per_1m_tokens": "5.00",
+        "output_price_per_1m_tokens": "30.00",
+        "cache_read_price_per_1m_tokens": "0.50",
+        "cache_write_price_per_1m_tokens": "6.25",
+        "currency": "USD",
+        "updated_at": "2026-07-09"
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "input_price_per_1m_tokens": "5.00",
+        "output_price_per_1m_tokens": "30.00",
+        "cache_read_price_per_1m_tokens": "0.50",
+        "cache_write_price_per_1m_tokens": "6.25",
+        "currency": "USD",
+        "updated_at": "2026-07-09"
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "input_price_per_1m_tokens": "2.50",
+        "output_price_per_1m_tokens": "15.00",
+        "cache_read_price_per_1m_tokens": "0.25",
+        "cache_write_price_per_1m_tokens": "3.125",
+        "currency": "USD",
+        "updated_at": "2026-07-09"
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "input_price_per_1m_tokens": "1.00",
+        "output_price_per_1m_tokens": "6.00",
+        "cache_read_price_per_1m_tokens": "0.10",
+        "cache_write_price_per_1m_tokens": "1.25",
+        "currency": "USD",
+        "updated_at": "2026-07-09"
+      },
+      {
+        "model": "gpt-5.5",
+        "input_price_per_1m_tokens": "5.00",
+        "output_price_per_1m_tokens": "30.00",
+        "currency": "USD",
+        "updated_at": "2026-05-29"
+      },
+      {
+        "model": "gpt-5.4",
+        "input_price_per_1m_tokens": "2.50",
+        "output_price_per_1m_tokens": "15.00",
+        "currency": "USD",
+        "updated_at": "2026-05-29"
+      },
+      {
+        "model": "gpt-5.4-mini",
+        "input_price_per_1m_tokens": "0.75",
+        "output_price_per_1m_tokens": "4.50",
+        "currency": "USD",
+        "updated_at": "2026-05-29"
+      },
+      {
+        "model": "gpt-5.4-nano",
+        "input_price_per_1m_tokens": "0.20",
+        "output_price_per_1m_tokens": "1.25",
+        "currency": "USD",
+        "updated_at": "2026-05-29"
+      },
+      {
+        "model": "gpt-5.2",
+        "input_price_per_1m_tokens": "1.75",
+        "output_price_per_1m_tokens": "14.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gpt-5.2-pro",
+        "input_price_per_1m_tokens": "21.00",
+        "output_price_per_1m_tokens": "168.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gpt-5.1",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "10.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gpt-5",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "10.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gpt-5-mini",
+        "input_price_per_1m_tokens": "0.25",
+        "output_price_per_1m_tokens": "2.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gpt-5-nano",
+        "input_price_per_1m_tokens": "0.05",
+        "output_price_per_1m_tokens": "0.40",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gpt-4.1",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "8.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gpt-4o",
+        "input_price_per_1m_tokens": "5.00",
+        "output_price_per_1m_tokens": "15.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      }
+    ],
+    "fast_text": [],
+    "image": [
+      {
+        "model": "dall-e-3",
+        "price_per_image": "0.040",
+        "max_size": "1024x1024",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "dall-e-3-hd",
+        "price_per_image": "0.080",
+        "max_size": "1024x1024",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "dall-e-2",
+        "price_per_image": "0.020",
+        "max_size": "1024x1024",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "gpt-4o-image",
+        "price_per_image": "0.035",
+        "max_size": "1024x1024",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      }
+    ],
+    "embedding": [
+      {
+        "model": "text-embedding-3-small",
+        "price_per_1m_tokens": "0.020",
+        "currency": "USD",
+        "updated_at": "2025-01-15",
+        "note": "$0.00002 per 1K tokens = $0.020 per 1M tokens"
+      },
+      {
+        "model": "text-embedding-3-large",
+        "price_per_1m_tokens": "0.130",
+        "currency": "USD",
+        "updated_at": "2025-01-15",
+        "note": "$0.00013 per 1K tokens = $0.130 per 1M tokens"
+      },
+      {
+        "model": "text-embedding-ada-002",
+        "price_per_1m_tokens": "0.100",
+        "currency": "USD",
+        "updated_at": "2025-01-15",
+        "note": "$0.0001 per 1K tokens = $0.100 per 1M tokens"
+      }
+    ]
+  }
+}

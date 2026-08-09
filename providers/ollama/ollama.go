@@ -11,7 +11,6 @@ import (
 )
 
 var (
-	DefaultModel         = "llama3.2:3b"
 	DefaultEndpoint      = "http://localhost:11434/v1/messages"
 	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = anthropic.DefaultMaxRetries
