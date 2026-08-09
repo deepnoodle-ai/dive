@@ -109,20 +109,6 @@
       "context_window": 202752
     },
     {
-      "go_name": "ModelMistralSmall32",
-      "id": "mistral-small3.2",
-      "kind": "text",
-      "display_name": "Mistral Small 3.2",
-      "context_window": 131072
-    },
-    {
-      "go_name": "ModelMistralSmall32_24B",
-      "id": "mistral-small3.2:24b",
-      "kind": "text",
-      "display_name": "Mistral Small 3.2 24B",
-      "context_window": 131072
-    },
-    {
       "go_name": "ModelDeepSeekR1",
       "id": "deepseek-r1",
       "kind": "text",
@@ -226,13 +212,6 @@
       },
       {
         "model": "glm-4.7-flash",
-        "input_price_per_1m_tokens": "0.00",
-        "output_price_per_1m_tokens": "0.00",
-        "currency": "USD",
-        "updated_at": "2026-08-09"
-      },
-      {
-        "model": "mistral-small3.2:24b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",

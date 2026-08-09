@@ -314,7 +314,6 @@ func preferredOllamaModel(models []string) string {
 		ollama.ModelQwen36_27B,
 		ollama.ModelGemma4_E4B,
 		ollama.ModelDeepSeekR1_8B,
-		ollama.ModelMistralSmall32_24B,
 	} {
 		if hasModel(models, preferred) {
 			return preferred

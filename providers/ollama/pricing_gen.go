@@ -56,13 +56,6 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-08-09",
 	},
-	ModelMistralSmall32_24B: {
-		Model:       ModelMistralSmall32_24B,
-		InputPrice:  0.00,
-		OutputPrice: 0.00,
-		Currency:    "USD",
-		UpdatedAt:   "2026-08-09",
-	},
 	ModelDeepSeekR1_8B: {
 		Model:       ModelDeepSeekR1_8B,
 		InputPrice:  0.00,

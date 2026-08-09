@@ -103,11 +103,12 @@ ollama.ModelGemma4_12B   // "gemma4:12b"
 ollama.ModelGemma4_31B   // "gemma4:31b"
 
 // Other popular models
-ollama.ModelGLM47Flash          // "glm-4.7-flash"
-ollama.ModelMistralSmall32_24B  // "mistral-small3.2:24b"
-ollama.ModelDeepSeekR1_8B       // "deepseek-r1:8b"
-ollama.ModelDeepSeekR1_32B      // "deepseek-r1:32b"
+ollama.ModelGLM47Flash      // "glm-4.7-flash"
+ollama.ModelDeepSeekR1_8B   // "deepseek-r1:8b"
+ollama.ModelDeepSeekR1_32B  // "deepseek-r1:32b"
 ```
+
+Mistral models are not listed here: use the `mistral` provider for those.
 
 Each family also has an untagged constant (`ollama.ModelGPTOSS`,
 `ollama.ModelGemma4`, …) matching what `ollama run <family>` resolves to.

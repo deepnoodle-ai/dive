@@ -6,9 +6,9 @@ import (
 )
 
 func init() {
-	// Register for locally hosted open-weight model families. "mistral-" is
-	// deliberately absent: the Mistral provider claims it, so Mistral models on
-	// Ollama need the provider selected explicitly.
+	// Register for locally hosted open-weight model families. Mistral is
+	// deliberately absent — those models are served through the Mistral
+	// provider, and claiming the prefix here would only make routing ambiguous.
 	providers.Register(providers.ProviderEntry{
 		Name: "ollama",
 		Match: providers.PrefixesMatcher(
