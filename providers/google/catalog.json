@@ -1,0 +1,411 @@
+{
+  "schema_version": 1,
+  "provider": "google",
+  "sources": [
+    {
+      "name": "pricing",
+      "url": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    {
+      "name": "deprecations",
+      "url": "https://ai.google.dev/gemini-api/docs/deprecations"
+    },
+    {
+      "name": "changelog",
+      "url": "https://ai.google.dev/gemini-api/docs/changelog"
+    },
+    {
+      "name": "models-api",
+      "url": "https://ai.google.dev/api/models"
+    }
+  ],
+  "models": [
+    {
+      "go_name": "ModelGemini36Flash",
+      "id": "gemini-3.6-flash",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.6 Flash",
+      "recommended": true,
+      "cli_order": 1,
+      "description": "Fast agentic and multimodal model with strong coding performance"
+    },
+    {
+      "go_name": "ModelGemini35Flash",
+      "id": "gemini-3.5-flash",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.5 Flash",
+      "recommended": true,
+      "cli_order": 2,
+      "description": "Frontier intelligence at high speed"
+    },
+    {
+      "go_name": "ModelGemini35FlashLite",
+      "id": "gemini-3.5-flash-lite",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.5 Flash-Lite",
+      "recommended": true,
+      "cli_order": 3,
+      "description": "Lowest-cost model for high-throughput execution"
+    },
+    {
+      "go_name": "ModelGemini31ProPreview",
+      "id": "gemini-3.1-pro-preview",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Pro",
+      "recommended": true,
+      "cli_order": 4,
+      "description": "Flagship Pro model for complex reasoning"
+    },
+    {
+      "go_name": "ModelGemini31ProPreviewCustomTools",
+      "id": "gemini-3.1-pro-preview-customtools",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Pro"
+    },
+    {
+      "go_name": "ModelGemini31FlashLite",
+      "id": "gemini-3.1-flash-lite",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Flash"
+    },
+    {
+      "go_name": "ModelGemini31FlashLitePreview",
+      "id": "gemini-3.1-flash-lite-preview",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Flash"
+    },
+    {
+      "go_name": "ModelGemini31FlashLivePreview",
+      "id": "gemini-3.1-flash-live-preview",
+      "kind": "audio",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Flash"
+    },
+    {
+      "go_name": "ModelGemini31FlashTTSPreview",
+      "id": "gemini-3.1-flash-tts-preview",
+      "kind": "audio",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Flash"
+    },
+    {
+      "go_name": "ModelGemini31FlashLiteImage",
+      "id": "gemini-3.1-flash-lite-image",
+      "kind": "image",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Flash"
+    },
+    {
+      "go_name": "ModelGemini31FlashImage",
+      "id": "gemini-3.1-flash-image",
+      "kind": "image",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Flash"
+    },
+    {
+      "go_name": "ModelGemini31FlashImagePrev",
+      "id": "gemini-3.1-flash-image-preview",
+      "kind": "image",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.1 Flash"
+    },
+    {
+      "go_name": "ModelGemini3ProImage",
+      "id": "gemini-3-pro-image",
+      "kind": "image",
+      "context_window": 1000000
+    },
+    {
+      "go_name": "ModelGemini3ProImagePreview",
+      "id": "gemini-3-pro-image-preview",
+      "kind": "image",
+      "context_window": 1000000
+    },
+    {
+      "go_name": "ModelGemini3FlashPreview",
+      "id": "gemini-3-flash-preview",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3 Flash",
+      "lifecycle": "preview"
+    },
+    {
+      "go_name": "ModelGemini31ProImage",
+      "alias_of": "ModelGemini3ProImage",
+      "deprecated": "Use ModelGemini3ProImage.",
+      "lifecycle": "deprecated"
+    },
+    {
+      "go_name": "ModelGemini3ProPreview",
+      "id": "gemini-3-pro-preview",
+      "kind": "text",
+      "context_window": 1000000,
+      "deprecated": "Model was shut down March 9, 2026. Use ModelGemini31ProPreview instead.",
+      "lifecycle": "retired"
+    },
+    {
+      "go_name": "ModelGemini25Pro",
+      "id": "gemini-2.5-pro",
+      "default": true,
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 2.5 Pro",
+      "recommended": true,
+      "cli_order": 5,
+      "description": "Strong all-around model"
+    },
+    {
+      "go_name": "ModelGemini25ProLong",
+      "id": "gemini-2.5-pro-long",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 2.5 Pro"
+    },
+    {
+      "go_name": "ModelGemini25Flash",
+      "id": "gemini-2.5-flash",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 2.5 Flash"
+    },
+    {
+      "go_name": "ModelGemini25FlashLite",
+      "id": "gemini-2.5-flash-lite",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 2.5 Flash"
+    },
+    {
+      "go_name": "ModelGemini25FlashImage",
+      "id": "gemini-2.5-flash-image",
+      "kind": "image",
+      "context_window": 1000000,
+      "display_name": "Gemini 2.5 Flash"
+    },
+    {
+      "go_name": "ModelGemini25FlashTTS",
+      "id": "gemini-2.5-flash-preview-tts",
+      "kind": "audio",
+      "context_window": 1000000,
+      "display_name": "Gemini 2.5 Flash"
+    },
+    {
+      "go_name": "ModelGemini25ProTTS",
+      "id": "gemini-2.5-pro-preview-tts",
+      "kind": "audio",
+      "context_window": 1000000,
+      "display_name": "Gemini 2.5 Pro"
+    },
+    {
+      "go_name": "ModelGemini20Flash",
+      "id": "gemini-2.0-flash",
+      "kind": "text",
+      "context_window": 1000000,
+      "deprecated": "Model was shut down March 31, 2026.",
+      "lifecycle": "retired"
+    },
+    {
+      "go_name": "ModelGemini15Pro",
+      "id": "gemini-1.5-pro",
+      "kind": "text",
+      "context_window": 1000000,
+      "deprecated": "Deprecated model.",
+      "lifecycle": "deprecated"
+    },
+    {
+      "go_name": "ModelGemini15Flash",
+      "id": "gemini-1.5-flash",
+      "kind": "text",
+      "context_window": 1000000,
+      "deprecated": "Deprecated model.",
+      "lifecycle": "deprecated"
+    }
+  ],
+  "pricing": {
+    "text": [
+      {
+        "model": "gemini-3.6-flash",
+        "input_price_per_1m_tokens": "1.50",
+        "output_price_per_1m_tokens": "7.50",
+        "currency": "USD",
+        "updated_at": "2026-07-21"
+      },
+      {
+        "model": "gemini-3.5-flash",
+        "input_price_per_1m_tokens": "1.50",
+        "output_price_per_1m_tokens": "9.00",
+        "currency": "USD",
+        "updated_at": "2026-05-28"
+      },
+      {
+        "model": "gemini-3.5-flash-lite",
+        "input_price_per_1m_tokens": "0.30",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-07-21"
+      },
+      {
+        "model": "gemini-3.1-pro-preview",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "12.00",
+        "currency": "USD",
+        "updated_at": "2026-05-28",
+        "note": "Up to 200K tokens ($4.00 over 200K) $18.00 over 200K tokens"
+      },
+      {
+        "model": "gemini-3.1-pro-preview-customtools",
+        "input_price_per_1m_tokens": "2.00",
+        "output_price_per_1m_tokens": "12.00",
+        "currency": "USD",
+        "updated_at": "2026-05-28",
+        "note": "Up to 200K tokens ($4.00 over 200K) $18.00 over 200K tokens"
+      },
+      {
+        "model": "gemini-3.1-flash-lite",
+        "input_price_per_1m_tokens": "0.25",
+        "output_price_per_1m_tokens": "1.50",
+        "currency": "USD",
+        "updated_at": "2026-05-28",
+        "note": "text/image/video ($0.50 audio)"
+      },
+      {
+        "model": "gemini-3.1-flash-live-preview",
+        "input_price_per_1m_tokens": "0.75",
+        "output_price_per_1m_tokens": "4.50",
+        "currency": "USD",
+        "updated_at": "2026-05-28",
+        "note": "text input text output"
+      },
+      {
+        "model": "gemini-3.1-flash-lite-preview",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.40",
+        "currency": "USD",
+        "updated_at": "2026-03-10"
+      },
+      {
+        "model": "gemini-3.1-flash-image-preview",
+        "input_price_per_1m_tokens": "0.50",
+        "output_price_per_1m_tokens": "3.00",
+        "currency": "USD",
+        "updated_at": "2026-03-10"
+      },
+      {
+        "model": "gemini-3-flash-preview",
+        "input_price_per_1m_tokens": "0.50",
+        "output_price_per_1m_tokens": "3.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "input_price_per_1m_tokens": "0.30",
+        "output_price_per_1m_tokens": "2.50",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gemini-2.5-flash-lite",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.40",
+        "currency": "USD",
+        "updated_at": "2026-02-09"
+      },
+      {
+        "model": "gemini-2.5-pro",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "10.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09",
+        "note": "Up to 200K tokens"
+      },
+      {
+        "model": "gemini-2.5-pro-long",
+        "input_price_per_1m_tokens": "2.50",
+        "output_price_per_1m_tokens": "15.00",
+        "currency": "USD",
+        "updated_at": "2026-02-09",
+        "note": "Over 200K tokens"
+      },
+      {
+        "model": "gemini-2.0-flash",
+        "input_price_per_1m_tokens": "0.10",
+        "output_price_per_1m_tokens": "0.40",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "gemini-1.5-pro",
+        "input_price_per_1m_tokens": "1.25",
+        "output_price_per_1m_tokens": "5.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "gemini-1.5-flash",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.60",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      }
+    ],
+    "fast_text": [],
+    "image": [
+      {
+        "model": "gemini-2.5-flash-image",
+        "price_per_image": "0.039",
+        "max_size": "1024x1024",
+        "currency": "USD",
+        "updated_at": "2026-06-30",
+        "note": "$30 per 1M tokens, 1290 tokens per 1024x1024 image"
+      },
+      {
+        "model": "gemini-3.1-flash-lite-image",
+        "price_per_image": "0.0336",
+        "max_size": "1024x1024",
+        "currency": "USD",
+        "updated_at": "2026-06-30",
+        "note": "$30 per 1M output tokens; 1120 tokens per 1K image"
+      },
+      {
+        "model": "gemini-3.1-flash-image",
+        "price_per_image": "0.067",
+        "max_size": "4096x4096",
+        "currency": "USD",
+        "updated_at": "2026-06-30",
+        "note": "$60 per 1M output tokens; ~$0.067 per 1K-resolution image"
+      },
+      {
+        "model": "gemini-3-pro-image",
+        "price_per_image": "0.134",
+        "max_size": "4096x4096",
+        "currency": "USD",
+        "updated_at": "2026-06-30",
+        "note": "$120 per 1M output tokens; ~$0.134 per 1K/2K image ($0.24 at 4K)"
+      }
+    ],
+    "embedding": [
+      {
+        "model": "text-embedding-004",
+        "price_per_1m_tokens": "0.0625",
+        "currency": "USD",
+        "updated_at": "2025-01-15",
+        "note": "$0.0000625 per 1K tokens = $0.0625 per 1M tokens"
+      },
+      {
+        "model": "text-multilingual-embedding-002",
+        "price_per_1m_tokens": "0.0625",
+        "currency": "USD",
+        "updated_at": "2025-01-15",
+        "note": "Same as text-embedding-004"
+      }
+    ]
+  }
+}

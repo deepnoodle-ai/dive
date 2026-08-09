@@ -11,7 +11,6 @@ import (
 )
 
 var (
-	DefaultModel         = ModelMistralLarge3
 	DefaultEndpoint      = "https://api.mistral.ai/v1/chat/completions"
 	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = openaic.DefaultMaxRetries

@@ -1,7 +1,5 @@
 package mistral
 
-import "github.com/deepnoodle-ai/dive/llm"
-
 // ImagePricingInfo represents pricing for image generation services
 type ImagePricingInfo struct {
 	Model     string  `json:"model"`
@@ -18,76 +16,3 @@ type EmbeddingPricingInfo struct {
 	Currency  string  `json:"currency"`
 	UpdatedAt string  `json:"updated_at"`
 }
-
-// TextModelPricing contains pricing for all text generation models
-var TextModelPricing = map[string]llm.PricingInfo{
-	ModelMistralLarge2411: {
-		Model:       ModelMistralLarge2411,
-		InputPrice:  2.0,
-		OutputPrice: 6.0,
-		Currency:    "USD",
-		UpdatedAt:   "2025-10-15",
-	},
-	ModelMistralLarge: {
-		Model:       ModelMistralLarge,
-		InputPrice:  2.0,
-		OutputPrice: 6.0,
-		Currency:    "USD",
-		UpdatedAt:   "2025-10-15",
-	},
-	ModelMistralSmall: {
-		Model:       ModelMistralSmall,
-		InputPrice:  0.1,
-		OutputPrice: 0.3,
-		Currency:    "USD",
-		UpdatedAt:   "2025-10-15",
-	},
-	ModelCodestralLatest: {
-		Model:       ModelCodestralLatest,
-		InputPrice:  0.3,
-		OutputPrice: 0.9,
-		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
-	},
-	ModelCodestral2501: {
-		Model:       ModelCodestral2501,
-		InputPrice:  0.3,
-		OutputPrice: 0.9,
-		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
-	},
-	ModelMistral7B: {
-		Model:       ModelMistral7B,
-		InputPrice:  0.25,
-		OutputPrice: 0.25,
-		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
-	},
-	ModelMixtral8x7B: {
-		Model:       ModelMixtral8x7B,
-		InputPrice:  0.7,
-		OutputPrice: 0.7,
-		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
-	},
-	ModelMixtral8x22B: {
-		Model:       ModelMixtral8x22B,
-		InputPrice:  2.0,
-		OutputPrice: 6.0,
-		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
-	},
-	ModelCodestralMamba: {
-		Model:       ModelCodestralMamba,
-		InputPrice:  0.25,
-		OutputPrice: 0.25,
-		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
-	},
-}
-
-// ImageModelPricing contains pricing for image generation models (currently none)
-var ImageModelPricing = map[string]ImagePricingInfo{}
-
-// EmbeddingModelPricing contains pricing for embedding models (currently none)
-var EmbeddingModelPricing = map[string]EmbeddingPricingInfo{}

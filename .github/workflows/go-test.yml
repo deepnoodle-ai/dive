@@ -30,6 +30,14 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Check generated provider catalogs
+        run: make provider-catalog-check
+
       - name: Install dependencies
         run: go mod download
 

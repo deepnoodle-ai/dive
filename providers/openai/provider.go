@@ -20,7 +20,6 @@ const ProviderName = "openai"
 
 var (
 	DefaultEndpoint      = "https://api.openai.com/v1"
-	DefaultModel         = ModelGPT56Sol
 	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = 2
 	DefaultRetryBaseWait = 1 * time.Second

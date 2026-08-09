@@ -2,7 +2,17 @@ package main
 
 import (
 	"os"
+	"sort"
 	"strings"
+
+	"github.com/deepnoodle-ai/dive/providers/anthropic"
+	"github.com/deepnoodle-ai/dive/providers/google"
+	"github.com/deepnoodle-ai/dive/providers/grok"
+	"github.com/deepnoodle-ai/dive/providers/mistral"
+	"github.com/deepnoodle-ai/dive/providers/modelcatalog"
+	"github.com/deepnoodle-ai/dive/providers/ollama"
+	"github.com/deepnoodle-ai/dive/providers/openai"
+	"github.com/deepnoodle-ai/dive/providers/openrouter"
 )
 
 // modelInfo describes a known model for display and context window lookup.
@@ -12,87 +22,64 @@ type modelInfo struct {
 	ContextWindow int    // max context window in tokens
 }
 
-// modelCatalog is the shared catalog of known models, checked in order.
-// More specific patterns must appear before broader ones.
-var modelCatalog = []modelInfo{
-	// Anthropic models
-	{"claude-fable-5", "Fable 5", 1_000_000},
-	{"claude-mythos-5", "Mythos 5", 1_000_000},
-	{"claude-opus-4-8", "Opus 4.8", 1_000_000},
-	{"claude-opus-4-7", "Opus 4.7", 1_000_000},
-	{"claude-opus-4-6", "Opus 4.6", 1_000_000},
-	{"claude-opus-4-5", "Opus 4.5", 1_000_000},
+// fallbackModelCatalog handles unlisted aliases and future dated variants.
+// Exact checked-in models are loaded from each provider's embedded catalog.
+var fallbackModelCatalog = []modelInfo{
 	{"claude-opus-4", "", 1_000_000},
-	{"claude-sonnet-5", "Sonnet 5", 1_000_000},
-	{"claude-sonnet-4-6", "Sonnet 4.6", 1_000_000},
-	{"claude-sonnet-4-5", "Sonnet 4.5", 1_000_000},
 	{"claude-sonnet-4", "", 1_000_000},
-	{"claude-haiku-4-5", "Haiku 4.5", 200_000},
 	{"claude-haiku-4", "", 200_000},
-	{"claude-3-5-sonnet", "Sonnet 3.5", 200_000},
-	{"claude-3-5-haiku", "Haiku 3.5", 200_000},
 	{"claude", "", 200_000},
-
-	// Google models
-	{"gemini-3.6-flash", "Gemini 3.6 Flash", 1_000_000},
-	{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", 1_000_000},
-	{"gemini-3.1-pro", "Gemini 3.1 Pro", 1_000_000},
-	{"gemini-3.1-flash", "Gemini 3.1 Flash", 1_000_000},
-	{"gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", 1_000_000},
-	{"gemini-3.5-flash", "Gemini 3.5 Flash", 1_000_000},
-	{"gemini-3-flash-preview", "Gemini 3 Flash", 1_000_000},
-	{"gemini-3-flash", "Gemini 3 Flash", 1_000_000},
 	{"gemini-3", "", 1_000_000},
-	{"gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000},
-	{"gemini-2.5-flash", "Gemini 2.5 Flash", 1_000_000},
 	{"gemini-2.5", "", 1_000_000},
 	{"gemini", "", 1_000_000},
-
-	// OpenAI models
-	{"gpt-5.6-sol", "GPT-5.6 Sol", 1_050_000},
-	{"gpt-5.6-terra", "GPT-5.6 Terra", 1_050_000},
-	{"gpt-5.6-luna", "GPT-5.6 Luna", 1_050_000},
-	{"gpt-5.6", "GPT-5.6", 1_050_000},
-	{"gpt-5.5", "GPT-5.5", 1_050_000},
-	{"gpt-5.4-mini", "GPT-5.4 Mini", 400_000},
-	{"gpt-5.4-nano", "GPT-5.4 Nano", 400_000},
-	{"gpt-5.4", "GPT-5.4", 1_050_000},
-	{"gpt-5.3-codex-spark", "GPT-5.3 Codex Spark", 1_000_000},
-	{"gpt-5.3-codex", "GPT-5.3 Codex", 1_000_000},
-	{"gpt-5.3", "GPT-5.3", 1_000_000},
-	{"gpt-5.2", "GPT-5.2", 1_000_000},
-	{"gpt-5.1-mini", "GPT-5.1 Mini", 1_000_000},
-	{"gpt-5.1-codex", "GPT-5.1 Codex", 1_000_000},
-	{"gpt-5.1", "GPT-5.1", 1_000_000},
-	{"gpt-5-mini", "GPT-5 Mini", 1_000_000},
 	{"gpt-5", "", 1_000_000},
-	{"gpt-4o", "GPT-4o", 128_000},
 	{"gpt-4", "", 128_000},
 	{"codex-mini", "Codex Mini", 200_000},
 	{"o4-mini", "o4-mini", 200_000},
 	{"o3-mini", "o3-mini", 200_000},
 	{"o3", "o3", 200_000},
-
-	// Grok models
-	{"grok-4.5", "Grok 4.5", 500_000},
-	{"grok-build-latest", "Grok 4.5", 500_000},
-	{"grok-4.3", "Grok 4.3", 1_000_000},
-	{"grok-build-0.1", "Grok Build", 256_000},
-	{"grok-4.20-0309-reasoning", "Grok 4.20", 1_000_000},
-	{"grok-4.20", "Grok 4.20", 1_000_000},
-	{"grok-4-1-fast", "Grok 4.1 Fast", 131_072},
-	{"grok-4", "Grok 4", 131_072},
-	{"grok-3-mini", "Grok 3 Mini", 131_072},
-	{"grok-3", "Grok 3", 131_072},
+	{"grok-4", "", 131_072},
+	{"grok-3", "", 131_072},
 	{"grok-code", "Grok Code", 131_072},
 	{"grok", "", 131_072},
-
-	// Mistral models
-	{"devstral-small-latest", "Devstral Small", 128_000},
 	{"devstral", "", 128_000},
-	{"mistral-large-latest", "Mistral Large", 128_000},
-	{"mistral-small-latest", "Mistral Small", 128_000},
 	{"mistral", "", 128_000},
+}
+
+var embeddedProviderCatalogs = []modelcatalog.Catalog{
+	anthropic.Catalog(),
+	google.Catalog(),
+	openai.Catalog(),
+	grok.Catalog(),
+	mistral.Catalog(),
+	openrouter.Catalog(),
+	ollama.Catalog(),
+}
+
+// modelCatalog is built from exact embedded model metadata, followed by the
+// family fallbacks above. Longer exact IDs are checked first.
+var modelCatalog = buildModelCatalog(embeddedProviderCatalogs)
+
+func buildModelCatalog(catalogs []modelcatalog.Catalog) []modelInfo {
+	models := make([]modelInfo, 0)
+	seen := map[string]bool{}
+	for _, catalog := range catalogs {
+		for _, model := range catalog.Models {
+			if model.ID == "" || model.ContextWindow == 0 || seen[model.ID] {
+				continue
+			}
+			seen[model.ID] = true
+			models = append(models, modelInfo{
+				Pattern:       model.ID,
+				Label:         model.DisplayName,
+				ContextWindow: model.ContextWindow,
+			})
+		}
+	}
+	sort.SliceStable(models, func(i, j int) bool {
+		return len(models[i].Pattern) > len(models[j].Pattern)
+	})
+	return append(models, fallbackModelCatalog...)
 }
 
 // lookupModel finds the first matching catalog entry for a model ID.
@@ -138,61 +125,30 @@ type modelChoice struct {
 	Description string // short description
 }
 
-// providerCatalog is the authoritative list of providers and their recommended models.
+func providerInfoFromCatalog(
+	name string,
+	envVars []string,
+	catalog modelcatalog.Catalog,
+) providerInfo {
+	models := catalog.RecommendedModels()
+	choices := make([]modelChoice, 0, len(models))
+	for _, model := range models {
+		choices = append(choices, modelChoice{
+			ModelID:     model.ID,
+			Label:       model.DisplayName,
+			Description: model.Description,
+		})
+	}
+	return providerInfo{Name: name, EnvVars: envVars, Models: choices}
+}
+
+// providerCatalog is derived from each provider's embedded recommended models.
 var providerCatalog = []providerInfo{
-	{
-		Name:    "Anthropic",
-		EnvVars: []string{"ANTHROPIC_API_KEY"},
-		Models: []modelChoice{
-			{"claude-fable-5", "Fable 5", "Most capable for demanding reasoning and long-horizon work"},
-			{"claude-opus-4-8", "Opus 4.8", "Most capable Opus-tier model for complex work"},
-			{"claude-sonnet-5", "Sonnet 5", "Best combination of speed and intelligence"},
-			{"claude-haiku-4-5", "Haiku 4.5", "Fastest for quick answers"},
-		},
-	},
-	{
-		Name:    "Google",
-		EnvVars: []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
-		Models: []modelChoice{
-			{"gemini-3.6-flash", "Gemini 3.6 Flash", "Fast agentic and multimodal model with strong coding performance"},
-			{"gemini-3.5-flash", "Gemini 3.5 Flash", "Frontier intelligence at high speed"},
-			{"gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Lowest-cost model for high-throughput execution"},
-			{"gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Flagship Pro model for complex reasoning"},
-			{"gemini-2.5-pro", "Gemini 2.5 Pro", "Strong all-around model"},
-		},
-	},
-	{
-		Name:    "OpenAI",
-		EnvVars: []string{"OPENAI_API_KEY"},
-		Models: []modelChoice{
-			{"gpt-5.6-sol", "GPT-5.6 Sol", "Flagship GPT-5.6 model for complex reasoning and coding"},
-			{"gpt-5.6-terra", "GPT-5.6 Terra", "GPT-5.6 model balancing intelligence and cost"},
-			{"gpt-5.6-luna", "GPT-5.6 Luna", "GPT-5.6 model for efficient high-volume workloads"},
-			{"gpt-5.5", "GPT-5.5", "Previous flagship model for complex reasoning and coding"},
-			{"gpt-5.4", "GPT-5.4", "More affordable model for professional work"},
-			{"gpt-5.4-mini", "GPT-5.4 Mini", "Fast mini model for coding and subagents"},
-			{"gpt-5.4-nano", "GPT-5.4 Nano", "Lowest-cost GPT-5.4-class model"},
-		},
-	},
-	{
-		Name:    "Grok",
-		EnvVars: []string{"XAI_API_KEY", "GROK_API_KEY"},
-		Models: []modelChoice{
-			{"grok-4.5", "Grok 4.5", "xAI flagship reasoning model with vision input"},
-			{"grok-4.3", "Grok 4.3", "Previous flagship model with 1M context"},
-			{"grok-4.20-0309-reasoning", "Grok 4.20", "Reasoning model with 1M context"},
-			{"grok-build-0.1", "Grok Build", "Optimized for coding tasks"},
-		},
-	},
-	{
-		Name:    "Mistral",
-		EnvVars: []string{"MISTRAL_API_KEY"},
-		Models: []modelChoice{
-			{"mistral-large-latest", "Mistral Large", "Flagship model"},
-			{"mistral-small-latest", "Mistral Small", "Fast and efficient"},
-			{"devstral-small-latest", "Devstral Small", "Optimized for coding tasks"},
-		},
-	},
+	providerInfoFromCatalog("Anthropic", []string{"ANTHROPIC_API_KEY"}, anthropic.Catalog()),
+	providerInfoFromCatalog("Google", []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"}, google.Catalog()),
+	providerInfoFromCatalog("OpenAI", []string{"OPENAI_API_KEY"}, openai.Catalog()),
+	providerInfoFromCatalog("Grok", []string{"XAI_API_KEY", "GROK_API_KEY"}, grok.Catalog()),
+	providerInfoFromCatalog("Mistral", []string{"MISTRAL_API_KEY"}, mistral.Catalog()),
 }
 
 // availableModelChoices returns model choices that the user can actually use,

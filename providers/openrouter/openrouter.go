@@ -10,7 +10,6 @@ import (
 )
 
 var (
-	DefaultModel         = ModelClaudeOpus48
 	DefaultEndpoint      = "https://openrouter.ai/api/v1/chat/completions"
 	DefaultMaxTokens     = 32768
 	DefaultMaxRetries    = openaic.DefaultMaxRetries

@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "provider": "ollama",
+  "sources": [
+    {
+      "name": "docs-index",
+      "url": "https://docs.ollama.com/llms.txt",
+      "kind": "llms",
+      "discovery_patterns": [
+        "/(?:api|api-reference|capabilities)/"
+      ]
+    },
+    {
+      "name": "default-model",
+      "url": "https://ollama.com/library/llama3.2"
+    }
+  ],
+  "models": [
+    {
+      "go_name": "ModelLlama32_1B",
+      "id": "llama3.2:1b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama32_3B",
+      "id": "llama3.2:3b",
+      "default": true,
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama32_11B",
+      "id": "llama3.2:11b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama32_90B",
+      "id": "llama3.2:90b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama31_8B",
+      "id": "llama3.1:8b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama31_70B",
+      "id": "llama3.1:70b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama31_405B",
+      "id": "llama3.1:405b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama3_8B",
+      "id": "llama3:8b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelLlama3_70B",
+      "id": "llama3:70b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelCodeLlama_7B",
+      "id": "codellama:7b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelCodeLlama_13B",
+      "id": "codellama:13b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelCodeLlama_34B",
+      "id": "codellama:34b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelMistral_7B",
+      "id": "mistral:7b",
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelMistral_Nemo",
+      "id": "mistral:nemo",
+      "kind": "text",
+      "context_window": 128000
+    },
+    {
+      "go_name": "ModelGemma_2B",
+      "id": "gemma:2b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelGemma_7B",
+      "id": "gemma:7b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelGemma2_2B",
+      "id": "gemma2:2b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelGemma2_9B",
+      "id": "gemma2:9b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelGemma2_27B",
+      "id": "gemma2:27b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelQwen_0_5B",
+      "id": "qwen:0.5b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelQwen_1_8B",
+      "id": "qwen:1.8b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelQwen_4B",
+      "id": "qwen:4b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelQwen_7B",
+      "id": "qwen:7b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelQwen_14B",
+      "id": "qwen:14b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelQwen_32B",
+      "id": "qwen:32b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelQwen_72B",
+      "id": "qwen:72b",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelPhi3_Mini",
+      "id": "phi3:mini",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelPhi3_Medium",
+      "id": "phi3:medium",
+      "kind": "text"
+    },
+    {
+      "go_name": "ModelPhi3_5_Mini",
+      "id": "phi3.5:3.8b",
+      "kind": "text"
+    }
+  ],
+  "pricing": {
+    "text": [
+      {
+        "model": "llama2",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15",
+        "note": "Free - runs locally"
+      },
+      {
+        "model": "llama2:13b",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "llama2:70b",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "codellama",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "mistral",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "neural-chat",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "starling-lm",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "orca-mini",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      },
+      {
+        "model": "vicuna",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      }
+    ],
+    "fast_text": [],
+    "image": [],
+    "embedding": [
+      {
+        "model": "nomic-embed-text",
+        "price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15",
+        "note": "Free - runs locally"
+      },
+      {
+        "model": "all-minilm",
+        "price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2025-01-15"
+      }
+    ]
+  }
+}
