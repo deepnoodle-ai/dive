@@ -31,3 +31,8 @@ These cover packages in `experimental/` with unstable APIs:
 
 - [Sandboxing](design/sandboxing.md) - Sandboxing design
 - [Runtime Context Injection](design/context-injection.md) - Implemented context authority, delivery, ordering, persistence, and provider-rendering contract
+
+## Project
+
+- [Releasing](releasing.md) - Cutting the changelog, tagging modules, and publishing the GitHub release
+- [Release notes](releases/) - Published release bodies, one file per version

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-08-09
+
 ### Changed
 
 - **`anthropic.DefaultModel` is now `ModelClaudeSonnet5`** (`claude-sonnet-5`),
