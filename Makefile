@@ -3,13 +3,23 @@
 
 COVER_PROFILE := cover.out
 
+# Pinned so a Prettier release can never reformat the repo out from under CI.
+# Bumping this is a deliberate change: bump, run `make fmt-md`, commit both.
+PRETTIER := npx --yes prettier@3.9.6
+
+# Tracked files only. Plain `find` also walks gitignored scratch — notably the
+# repo copies under .claude/worktrees/ — which made the check scan 590 Markdown
+# files instead of the 77 the repo actually owns.
+GO_SOURCES := git ls-files '*.go'
+MD_SOURCES := git ls-files '*.md'
+
 help:
 	@echo "Available targets:"
 	@echo "  make test        - Run all tests"
 	@echo "  make test-race   - Run tests with race detector"
 	@echo "  make cover       - Run tests with coverage profile"
 	@echo "  make cover-html  - Open HTML coverage report (writes $(COVER_PROFILE))"
-	@echo "  make fmt         - Format all Go files"
+	@echo "  make fmt         - Format all Go and Markdown files"
 	@echo "  make fmt-md      - Format Markdown files with Prettier"
 	@echo "  make fmt-check   - Fail if Go or Markdown files need formatting"
 	@echo "  make fmt-md-check - Fail if Markdown files need formatting"
@@ -39,20 +49,20 @@ cover-html:
 	go tool cover -html=$(COVER_PROFILE)
 
 fmt:
-	gofmt -w $$(find . -name '*.go' -not -path './.git/*')
-	npx --yes prettier --write $$(find . -name '*.md' -not -path './.git/*')
+	gofmt -w $$($(GO_SOURCES))
+	$(PRETTIER) --write $$($(MD_SOURCES))
 
 fmt-check:
-	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './.git/*'))" || \
+	@test -z "$$(gofmt -l $$($(GO_SOURCES)))" || \
 		(echo "The following files need gofmt:" && \
-		gofmt -l $$(find . -name '*.go' -not -path './.git/*') && exit 1)
-	npx --yes prettier --check $$(find . -name '*.md' -not -path './.git/*')
+		gofmt -l $$($(GO_SOURCES)) && exit 1)
+	$(PRETTIER) --check $$($(MD_SOURCES))
 
 fmt-md:
-	npx --yes prettier --write $$(find . -name '*.md' -not -path './.git/*')
+	$(PRETTIER) --write $$($(MD_SOURCES))
 
 fmt-md-check:
-	npx --yes prettier --check $$(find . -name '*.md' -not -path './.git/*')
+	$(PRETTIER) --check $$($(MD_SOURCES))
 
 vet:
 	go vet ./...
@@ -65,7 +75,7 @@ tidy:
 tidy-all:
 	@for dir in $(GO_MODULES); do \
 		echo "==> $$dir"; \
-		(cd $$dir && go mod tidy && gofmt -w $$(find . -name '*.go' -not -path './.git/*')); \
+		(cd $$dir && go mod tidy && gofmt -w $$($(GO_SOURCES))); \
 	done
 
 build:
