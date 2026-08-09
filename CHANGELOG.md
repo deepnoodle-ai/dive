@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-08-09
+
 ### Added
 
 - **Provider catalogs** — each provider's models, pricing, feature flags, and
@@ -34,6 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Blank error messages from OpenAI-compatible providers** — xAI/Grok returns
+  `{"code":…,"error":"<message>"}`, a shape the OpenAI SDK does not parse, so
+  failures surfaced as `provider api error (status 403):` with no reason. The
+  message now falls back to the raw JSON body.
 - **Nine OpenRouter ids used the wrong separator** — OpenRouter serves
   `anthropic/claude-opus-4.7`, not `anthropic/claude-opus-4-7`. Same for Opus
   4.8/4.6/4.5/4.1, Sonnet 4.6/4.5, Haiku 4.5, and one pricing row.
@@ -57,6 +63,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Every module pins `toolchain go1.26.5`** and refreshes its dependencies
+  (openai-go v3.50.0, mcp-go v0.57.0, a2a-go v2.4.0, otel v1.45.0). The minimum
+  `go` directive stays at 1.25.0; the pin closes standard-library CVEs.
 - **`mistral.DefaultModel` is now `ModelMistralLarge`** (`mistral-large-latest`)
   rather than a pinned dated snapshot, matching the model the CLI recommends.
   Pass `WithModel` explicitly to pin a dated snapshot.
