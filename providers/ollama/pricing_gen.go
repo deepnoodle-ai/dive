@@ -7,76 +7,75 @@ import "github.com/deepnoodle-ai/dive/llm"
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
 	// Free - runs locally
-	ModelLlama32_3B: {
-		Model:       ModelLlama32_3B,
+	ModelGPTOSS_20B: {
+		Model:       ModelGPTOSS_20B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2026-08-08",
+		UpdatedAt:   "2026-08-09",
 	},
-	// Free - runs locally
-	"llama2": {
-		Model:       "llama2",
+	ModelGPTOSS_120B: {
+		Model:       ModelGPTOSS_120B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"llama2:13b": {
-		Model:       "llama2:13b",
+	ModelQwen36_27B: {
+		Model:       ModelQwen36_27B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"llama2:70b": {
-		Model:       "llama2:70b",
+	ModelQwen36_35B: {
+		Model:       ModelQwen36_35B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"codellama": {
-		Model:       "codellama",
+	ModelGemma4_E4B: {
+		Model:       ModelGemma4_E4B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"mistral": {
-		Model:       "mistral",
+	ModelGemma4_12B: {
+		Model:       ModelGemma4_12B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"neural-chat": {
-		Model:       "neural-chat",
+	ModelGLM47Flash: {
+		Model:       ModelGLM47Flash,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"starling-lm": {
-		Model:       "starling-lm",
+	ModelMistralSmall32_24B: {
+		Model:       ModelMistralSmall32_24B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"orca-mini": {
-		Model:       "orca-mini",
+	ModelDeepSeekR1_8B: {
+		Model:       ModelDeepSeekR1_8B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
-	"vicuna": {
-		Model:       "vicuna",
+	ModelDeepSeekR1_32B: {
+		Model:       ModelDeepSeekR1_32B,
 		InputPrice:  0.00,
 		OutputPrice: 0.00,
 		Currency:    "USD",
-		UpdatedAt:   "2025-01-15",
+		UpdatedAt:   "2026-08-09",
 	},
 }
 
@@ -86,16 +85,16 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{}
 // EmbeddingModelPricing is generated from catalog.json.
 var EmbeddingModelPricing = map[string]llm.EmbeddingPricingInfo{
 	// Free - runs locally
+	"embeddinggemma": {
+		Model:     "embeddinggemma",
+		Price:     0.00,
+		Currency:  "USD",
+		UpdatedAt: "2026-08-09",
+	},
 	"nomic-embed-text": {
 		Model:     "nomic-embed-text",
 		Price:     0.00,
 		Currency:  "USD",
-		UpdatedAt: "2025-01-15",
-	},
-	"all-minilm": {
-		Model:     "all-minilm",
-		Price:     0.00,
-		Currency:  "USD",
-		UpdatedAt: "2025-01-15",
+		UpdatedAt: "2026-08-09",
 	},
 }

@@ -22,30 +22,6 @@ type modelInfo struct {
 	ContextWindow int    // max context window in tokens
 }
 
-// fallbackModelCatalog handles unlisted aliases and future dated variants.
-// Exact checked-in models are loaded from each provider's embedded catalog.
-var fallbackModelCatalog = []modelInfo{
-	{"claude-opus-4", "", 1_000_000},
-	{"claude-sonnet-4", "", 1_000_000},
-	{"claude-haiku-4", "", 200_000},
-	{"claude", "", 200_000},
-	{"gemini-3", "", 1_000_000},
-	{"gemini-2.5", "", 1_000_000},
-	{"gemini", "", 1_000_000},
-	{"gpt-5", "", 1_000_000},
-	{"gpt-4", "", 128_000},
-	{"codex-mini", "Codex Mini", 200_000},
-	{"o4-mini", "o4-mini", 200_000},
-	{"o3-mini", "o3-mini", 200_000},
-	{"o3", "o3", 200_000},
-	{"grok-4", "", 131_072},
-	{"grok-3", "", 131_072},
-	{"grok-code", "Grok Code", 131_072},
-	{"grok", "", 131_072},
-	{"devstral", "", 128_000},
-	{"mistral", "", 128_000},
-}
-
 var embeddedProviderCatalogs = []modelcatalog.Catalog{
 	anthropic.Catalog(),
 	google.Catalog(),
@@ -56,8 +32,9 @@ var embeddedProviderCatalogs = []modelcatalog.Catalog{
 	ollama.Catalog(),
 }
 
-// modelCatalog is built from exact embedded model metadata, followed by the
-// family fallbacks above. Longer exact IDs are checked first.
+// modelCatalog is built from embedded model metadata alone; a model the
+// catalogs do not list is unknown, and the UI hides the context bar for it.
+// Longer IDs are checked first so a dated variant beats its family prefix.
 var modelCatalog = buildModelCatalog(embeddedProviderCatalogs)
 
 func buildModelCatalog(catalogs []modelcatalog.Catalog) []modelInfo {
@@ -79,7 +56,7 @@ func buildModelCatalog(catalogs []modelcatalog.Catalog) []modelInfo {
 	sort.SliceStable(models, func(i, j int) bool {
 		return len(models[i].Pattern) > len(models[j].Pattern)
 	})
-	return append(models, fallbackModelCatalog...)
+	return models
 }
 
 // lookupModel finds the first matching catalog entry for a model ID.

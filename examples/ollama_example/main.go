@@ -13,7 +13,7 @@ import (
 
 func main() {
 	var modelName string
-	flag.StringVar(&modelName, "model", ollama.ModelLlama32_3B, "The model to use")
+	flag.StringVar(&modelName, "model", ollama.DefaultModel, "The model to use")
 	flag.Parse()
 
 	// Create an Ollama provider. Assumes Ollama is running locally on the

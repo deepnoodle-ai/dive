@@ -31,11 +31,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (was `mistral/mistral-large-3`, which is not an id OpenRouter serves). Code
   comparing against the old string — routing tables, stored session metadata —
   needs updating.
+- **Ollama catalog rebuilt around current model families** — GPT-OSS, Qwen3.6,
+  Gemma 4, GLM-4.7 Flash, Mistral Small 3.2, and DeepSeek-R1, each with the
+  context window Ollama reports. `ollama.DefaultModel` is now
+  `ModelGPTOSS_20B` (`gpt-oss:20b`), replacing `llama3.2:3b`. Every family also
+  gets an untagged constant matching what `ollama run <family>` resolves to,
+  and `glm-` now routes to the Ollama provider.
+- **The CLI no longer falls back to model-family heuristics** for context
+  window and label lookup; both come from the embedded catalogs alone. A model
+  the catalogs do not list reports no context window, and the CLI hides the
+  context bar rather than showing a guess.
 
 ### Removed
 
 - **`grok.ModelGrok2Vision1212` and `grok.ModelGrok2Image1212`** — xAI no longer
   lists either model; both were already marked deprecated.
+- **Ollama constants for retired model families** — Llama 3.x, CodeLlama,
+  Gemma/Gemma 2, Qwen 1, Phi-3, and `mistral:7b`/`mistral:nemo`. Any model
+  string still works via `WithModel`; only the named constants are gone.
 
 ## [1.18.0] - 2026-07-22
 

@@ -12,249 +12,262 @@
     },
     {
       "name": "default-model",
-      "url": "https://ollama.com/library/llama3.2"
+      "url": "https://ollama.com/library/gpt-oss"
     }
   ],
   "models": [
     {
-      "go_name": "ModelLlama32_1B",
-      "id": "llama3.2:1b",
-      "kind": "text"
+      "go_name": "ModelGPTOSS",
+      "id": "gpt-oss",
+      "kind": "text",
+      "display_name": "GPT-OSS",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelLlama32_3B",
-      "id": "llama3.2:3b",
+      "go_name": "ModelGPTOSS_20B",
+      "id": "gpt-oss:20b",
       "default": true,
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelLlama32_11B",
-      "id": "llama3.2:11b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelLlama32_90B",
-      "id": "llama3.2:90b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelLlama31_8B",
-      "id": "llama3.1:8b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelLlama31_70B",
-      "id": "llama3.1:70b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelLlama31_405B",
-      "id": "llama3.1:405b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelLlama3_8B",
-      "id": "llama3:8b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelLlama3_70B",
-      "id": "llama3:70b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelCodeLlama_7B",
-      "id": "codellama:7b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelCodeLlama_13B",
-      "id": "codellama:13b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelCodeLlama_34B",
-      "id": "codellama:34b",
-      "kind": "text"
-    },
-    {
-      "go_name": "ModelMistral_7B",
-      "id": "mistral:7b",
       "kind": "text",
-      "context_window": 128000
+      "display_name": "GPT-OSS 20B",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelMistral_Nemo",
-      "id": "mistral:nemo",
+      "go_name": "ModelGPTOSS_120B",
+      "id": "gpt-oss:120b",
       "kind": "text",
-      "context_window": 128000
+      "display_name": "GPT-OSS 120B",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelGemma_2B",
-      "id": "gemma:2b",
-      "kind": "text"
+      "go_name": "ModelQwen36",
+      "id": "qwen3.6",
+      "kind": "text",
+      "display_name": "Qwen3.6",
+      "context_window": 262144
     },
     {
-      "go_name": "ModelGemma_7B",
-      "id": "gemma:7b",
-      "kind": "text"
+      "go_name": "ModelQwen36_27B",
+      "id": "qwen3.6:27b",
+      "kind": "text",
+      "display_name": "Qwen3.6 27B",
+      "context_window": 262144
     },
     {
-      "go_name": "ModelGemma2_2B",
-      "id": "gemma2:2b",
-      "kind": "text"
+      "go_name": "ModelQwen36_35B",
+      "id": "qwen3.6:35b",
+      "kind": "text",
+      "display_name": "Qwen3.6 35B",
+      "context_window": 262144
     },
     {
-      "go_name": "ModelGemma2_9B",
-      "id": "gemma2:9b",
-      "kind": "text"
+      "go_name": "ModelGemma4",
+      "id": "gemma4",
+      "kind": "text",
+      "display_name": "Gemma 4",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelGemma2_27B",
-      "id": "gemma2:27b",
-      "kind": "text"
+      "go_name": "ModelGemma4_E2B",
+      "id": "gemma4:e2b",
+      "kind": "text",
+      "display_name": "Gemma 4 E2B",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelQwen_0_5B",
-      "id": "qwen:0.5b",
-      "kind": "text"
+      "go_name": "ModelGemma4_E4B",
+      "id": "gemma4:e4b",
+      "kind": "text",
+      "display_name": "Gemma 4 E4B",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelQwen_1_8B",
-      "id": "qwen:1.8b",
-      "kind": "text"
+      "go_name": "ModelGemma4_12B",
+      "id": "gemma4:12b",
+      "kind": "text",
+      "display_name": "Gemma 4 12B",
+      "context_window": 262144
     },
     {
-      "go_name": "ModelQwen_4B",
-      "id": "qwen:4b",
-      "kind": "text"
+      "go_name": "ModelGemma4_26B",
+      "id": "gemma4:26b",
+      "kind": "text",
+      "display_name": "Gemma 4 26B",
+      "context_window": 262144
     },
     {
-      "go_name": "ModelQwen_7B",
-      "id": "qwen:7b",
-      "kind": "text"
+      "go_name": "ModelGemma4_31B",
+      "id": "gemma4:31b",
+      "kind": "text",
+      "display_name": "Gemma 4 31B",
+      "context_window": 262144
     },
     {
-      "go_name": "ModelQwen_14B",
-      "id": "qwen:14b",
-      "kind": "text"
+      "go_name": "ModelGLM47Flash",
+      "id": "glm-4.7-flash",
+      "kind": "text",
+      "display_name": "GLM-4.7 Flash",
+      "context_window": 202752
     },
     {
-      "go_name": "ModelQwen_32B",
-      "id": "qwen:32b",
-      "kind": "text"
+      "go_name": "ModelMistralSmall32",
+      "id": "mistral-small3.2",
+      "kind": "text",
+      "display_name": "Mistral Small 3.2",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelQwen_72B",
-      "id": "qwen:72b",
-      "kind": "text"
+      "go_name": "ModelMistralSmall32_24B",
+      "id": "mistral-small3.2:24b",
+      "kind": "text",
+      "display_name": "Mistral Small 3.2 24B",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelPhi3_Mini",
-      "id": "phi3:mini",
-      "kind": "text"
+      "go_name": "ModelDeepSeekR1",
+      "id": "deepseek-r1",
+      "kind": "text",
+      "display_name": "DeepSeek-R1",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelPhi3_Medium",
-      "id": "phi3:medium",
-      "kind": "text"
+      "go_name": "ModelDeepSeekR1_1_5B",
+      "id": "deepseek-r1:1.5b",
+      "kind": "text",
+      "display_name": "DeepSeek-R1 1.5B",
+      "context_window": 131072
     },
     {
-      "go_name": "ModelPhi3_5_Mini",
-      "id": "phi3.5:3.8b",
-      "kind": "text"
+      "go_name": "ModelDeepSeekR1_7B",
+      "id": "deepseek-r1:7b",
+      "kind": "text",
+      "display_name": "DeepSeek-R1 7B",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelDeepSeekR1_8B",
+      "id": "deepseek-r1:8b",
+      "kind": "text",
+      "display_name": "DeepSeek-R1 8B",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelDeepSeekR1_14B",
+      "id": "deepseek-r1:14b",
+      "kind": "text",
+      "display_name": "DeepSeek-R1 14B",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelDeepSeekR1_32B",
+      "id": "deepseek-r1:32b",
+      "kind": "text",
+      "display_name": "DeepSeek-R1 32B",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelDeepSeekR1_70B",
+      "id": "deepseek-r1:70b",
+      "kind": "text",
+      "display_name": "DeepSeek-R1 70B",
+      "context_window": 131072
+    },
+    {
+      "go_name": "ModelDeepSeekR1_671B",
+      "id": "deepseek-r1:671b",
+      "kind": "text",
+      "display_name": "DeepSeek-R1 671B",
+      "context_window": 163840
     }
   ],
   "pricing": {
     "text": [
       {
-        "model": "llama3.2:3b",
+        "model": "gpt-oss:20b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2026-08-08",
+        "updated_at": "2026-08-09",
         "note": "Free - runs locally"
       },
       {
-        "model": "llama2",
+        "model": "gpt-oss:120b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15",
-        "note": "Free - runs locally"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "llama2:13b",
+        "model": "qwen3.6:27b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "llama2:70b",
+        "model": "qwen3.6:35b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "codellama",
+        "model": "gemma4:e4b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "mistral",
+        "model": "gemma4:12b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "neural-chat",
+        "model": "glm-4.7-flash",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "starling-lm",
+        "model": "mistral-small3.2:24b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "orca-mini",
+        "model": "deepseek-r1:8b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       },
       {
-        "model": "vicuna",
+        "model": "deepseek-r1:32b",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       }
     ],
     "fast_text": [],
     "image": [],
     "embedding": [
       {
-        "model": "nomic-embed-text",
+        "model": "embeddinggemma",
         "price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15",
+        "updated_at": "2026-08-09",
         "note": "Free - runs locally"
       },
       {
-        "model": "all-minilm",
+        "model": "nomic-embed-text",
         "price_per_1m_tokens": "0.00",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-09"
       }
     ]
   }

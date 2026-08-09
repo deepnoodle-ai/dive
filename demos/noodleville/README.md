@@ -24,8 +24,8 @@ go run . -provider scripted -ticks 4 -villagers 12 -reflect-every 2
 Run with local Ollama:
 
 ```sh
-ollama pull llama3.2:3b
-go run . -provider ollama -model llama3.2:3b -ticks 6 -villagers 12 -parallelism 2
+ollama pull gpt-oss:20b
+go run . -provider ollama -model gpt-oss:20b -ticks 6 -villagers 12 -parallelism 2
 ```
 
 Run the embedded browser view:

@@ -6,13 +6,16 @@ import (
 )
 
 func init() {
-	// Register for llama/mixtral/gemma models
+	// Register for locally hosted open-weight model families. "mistral-" is
+	// deliberately absent: the Mistral provider claims it, so Mistral models on
+	// Ollama need the provider selected explicitly.
 	providers.Register(providers.ProviderEntry{
 		Name: "ollama",
 		Match: providers.PrefixesMatcher(
 			"llama", "codellama",
 			"mixtral",
 			"gemma",
+			"glm-",
 			"gpt-oss",
 			"qwen",
 			"phi",
