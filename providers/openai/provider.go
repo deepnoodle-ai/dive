@@ -231,19 +231,22 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		params.MaxOutputTokens = openai.Int(int64(p.maxTokens))
 	}
 
-	// Set temperature
+	// Set temperature, unless the model rejects it. Several reasoning models
+	// answer 400 for "Unsupported parameter: 'temperature'".
 	if config.Temperature != nil {
-		params.Temperature = openai.Float(*config.Temperature)
+		if modelAcceptsTemperature(p.Name(), string(params.Model)) {
+			params.Temperature = openai.Float(*config.Temperature)
+		} else if config.Logger != nil {
+			config.Logger.Warn("model does not support temperature; omitting it",
+				"model", string(params.Model))
+		}
 	}
 
 	includes := map[Include]bool{}
 
-	// Handle reasoning effort
-	if config.ReasoningEffort != "" {
-		effort, err := normalizeResponsesReasoningEffort(p.Name(), string(params.Model), config.ReasoningEffort)
-		if err != nil {
-			return responses.ResponseNewParams{}, err
-		}
+	// Handle reasoning effort. A model with no reasoning parameter gets none:
+	// gpt-4o and gpt-4.1 reject the field outright rather than ignoring it.
+	if effort, send := resolveResponsesReasoningEffort(p.Name(), string(params.Model), config); send {
 		params.Reasoning = responses.ReasoningParam{
 			Effort: responses.ReasoningEffort(effort),
 		}

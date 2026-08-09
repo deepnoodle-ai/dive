@@ -1,38 +1,38 @@
 package openaicompletions
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/providers/modelcaps"
 )
 
-func (p *Provider) resolveReasoningEffort(model string, config *llm.Config) (ReasoningEffort, bool, error) {
+// resolveReasoningEffort maps the requested effort onto what the model accepts.
+// The bool reports whether to send a reasoning_effort field at all: several
+// models reject the parameter outright rather than ignoring it.
+//
+// Model capabilities come from the shared modelcaps tables, so the Chat
+// Completions path and the Responses path agree about the same model. Anything
+// modelcaps does not recognize — a Mistral, DeepSeek, or other OpenRouter model
+// — is forwarded untouched, except Mistral's own endpoint, which has no
+// reasoning parameter at all.
+func (p *Provider) resolveReasoningEffort(model string, config *llm.Config) (ReasoningEffort, bool) {
 	effort := config.ReasoningEffort
 	if effort == "" {
-		return "", false, nil
+		return "", false
 	}
-
-	modelLower := strings.ToLower(model)
-	switch {
-	case strings.HasPrefix(modelLower, "openai/"):
-		normalized, err := normalizeOpenAIReasoningEffort(strings.TrimPrefix(modelLower, "openai/"), effort)
-		return ReasoningEffort(normalized), true, err
-	case strings.HasPrefix(modelLower, "x-ai/"):
-		normalized, err := normalizeGrokReasoningEffort(strings.TrimPrefix(modelLower, "x-ai/"), effort)
-		return ReasoningEffort(normalized), true, err
-	case strings.HasPrefix(modelLower, "gpt-") || strings.HasPrefix(modelLower, "o"):
-		normalized, err := normalizeOpenAIReasoningEffort(modelLower, effort)
-		return ReasoningEffort(normalized), true, err
-	case strings.Contains(p.endpoint, "api.mistral.ai"):
+	if _, known := modelcaps.Lookup(p.Name(), model); known {
+		resolved, send := modelcaps.ResolveEffort(p.Name(), model, effort, config.Logger)
+		return ReasoningEffort(resolved), send
+	}
+	if strings.Contains(p.endpoint, "api.mistral.ai") {
 		if config.Logger != nil {
 			config.Logger.Warn("provider does not support reasoning effort; omitting option",
 				"provider", "mistral", "model", model, "reasoning_effort", effort)
 		}
-		return "", false, nil
-	default:
-		return ReasoningEffort(effort), true, nil
+		return "", false
 	}
+	return ReasoningEffort(effort), true
 }
 
 // normalizeToolReasoningEffort handles Chat Completions constraints that only
@@ -50,141 +50,3 @@ func normalizeToolReasoningEffort(model string, effort ReasoningEffort, hasFunct
 	return effort, false
 }
 
-func normalizeOpenAIReasoningEffort(model string, effort llm.ReasoningEffort) (llm.ReasoningEffort, error) {
-	if strings.Contains(model, "codex") {
-		return effort, nil
-	}
-
-	switch {
-	case strings.HasPrefix(model, "gpt-5.6"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{
-				llm.ReasoningEffortNone,
-				llm.ReasoningEffortLow,
-				llm.ReasoningEffortMedium,
-				llm.ReasoningEffortHigh,
-				llm.ReasoningEffortXHigh,
-				llm.ReasoningEffortMax,
-			},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal: llm.ReasoningEffortLow,
-			})
-	case strings.HasPrefix(model, "gpt-5.5"),
-		strings.HasPrefix(model, "gpt-5.4"),
-		strings.HasPrefix(model, "gpt-5.3"),
-		strings.HasPrefix(model, "gpt-5.2"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{
-				llm.ReasoningEffortNone,
-				llm.ReasoningEffortLow,
-				llm.ReasoningEffortMedium,
-				llm.ReasoningEffortHigh,
-				llm.ReasoningEffortXHigh,
-			},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal: llm.ReasoningEffortLow,
-				llm.ReasoningEffortMax:     llm.ReasoningEffortXHigh,
-			})
-	case strings.HasPrefix(model, "gpt-5.1"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{
-				llm.ReasoningEffortNone,
-				llm.ReasoningEffortLow,
-				llm.ReasoningEffortMedium,
-				llm.ReasoningEffortHigh,
-			},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal: llm.ReasoningEffortLow,
-				llm.ReasoningEffortXHigh:   llm.ReasoningEffortHigh,
-				llm.ReasoningEffortMax:     llm.ReasoningEffortHigh,
-			})
-	case strings.HasPrefix(model, "gpt-5-pro"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{llm.ReasoningEffortHigh},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal: llm.ReasoningEffortHigh,
-				llm.ReasoningEffortLow:     llm.ReasoningEffortHigh,
-				llm.ReasoningEffortMedium:  llm.ReasoningEffortHigh,
-				llm.ReasoningEffortXHigh:   llm.ReasoningEffortHigh,
-				llm.ReasoningEffortMax:     llm.ReasoningEffortHigh,
-			})
-	case strings.HasPrefix(model, "gpt-5"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal,
-				llm.ReasoningEffortLow,
-				llm.ReasoningEffortMedium,
-				llm.ReasoningEffortHigh,
-			},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortXHigh: llm.ReasoningEffortHigh,
-				llm.ReasoningEffortMax:   llm.ReasoningEffortHigh,
-			})
-	case strings.HasPrefix(model, "o"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{
-				llm.ReasoningEffortLow,
-				llm.ReasoningEffortMedium,
-				llm.ReasoningEffortHigh,
-			},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal: llm.ReasoningEffortLow,
-				llm.ReasoningEffortXHigh:   llm.ReasoningEffortHigh,
-				llm.ReasoningEffortMax:     llm.ReasoningEffortHigh,
-			})
-	default:
-		return effort, nil
-	}
-}
-
-func normalizeGrokReasoningEffort(model string, effort llm.ReasoningEffort) (llm.ReasoningEffort, error) {
-	switch {
-	case strings.HasPrefix(model, "grok-4.5"),
-		strings.HasPrefix(model, "grok-4.3"),
-		// "grok-build" rather than a pinned version: xAI serves grok-build-0.1,
-		// and this previously keyed on grok-build-latest, an id xAI does not
-		// serve, so the real model fell through without clamping.
-		strings.HasPrefix(model, "grok-build"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{
-				llm.ReasoningEffortNone,
-				llm.ReasoningEffortLow,
-				llm.ReasoningEffortMedium,
-				llm.ReasoningEffortHigh,
-			},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal: llm.ReasoningEffortLow,
-				llm.ReasoningEffortXHigh:   llm.ReasoningEffortHigh,
-				llm.ReasoningEffortMax:     llm.ReasoningEffortHigh,
-			})
-	case strings.Contains(model, "multi-agent"):
-		return mapReasoningEffort(model, effort,
-			[]llm.ReasoningEffort{
-				llm.ReasoningEffortLow,
-				llm.ReasoningEffortMedium,
-				llm.ReasoningEffortHigh,
-				llm.ReasoningEffortXHigh,
-			},
-			map[llm.ReasoningEffort]llm.ReasoningEffort{
-				llm.ReasoningEffortMinimal: llm.ReasoningEffortLow,
-				llm.ReasoningEffortMax:     llm.ReasoningEffortXHigh,
-			})
-	default:
-		return effort, nil
-	}
-}
-
-func mapReasoningEffort(model string, effort llm.ReasoningEffort, allowed []llm.ReasoningEffort, aliases map[llm.ReasoningEffort]llm.ReasoningEffort) (llm.ReasoningEffort, error) {
-	for _, value := range allowed {
-		if effort == value {
-			return effort, nil
-		}
-	}
-	if mapped, ok := aliases[effort]; ok {
-		return mapped, nil
-	}
-	if !effort.IsValid() {
-		return effort, nil
-	}
-	return "", fmt.Errorf("reasoning effort %q is not supported by model %s", effort, model)
-}

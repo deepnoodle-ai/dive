@@ -236,6 +236,77 @@ func (r ReasoningEffort) IsValid() bool {
 		r == ReasoningEffortMax
 }
 
+// reasoningEffortLadder orders the graduated effort levels from least to most
+// eager. ReasoningEffortNone is deliberately absent: it asks for no reasoning at
+// all rather than a little, so it is never selected as the neighbour of a
+// graduated level. A caller that wants it must have it explicitly supported.
+var reasoningEffortLadder = []ReasoningEffort{
+	ReasoningEffortMinimal,
+	ReasoningEffortLow,
+	ReasoningEffortMedium,
+	ReasoningEffortHigh,
+	ReasoningEffortXHigh,
+	ReasoningEffortMax,
+}
+
+func ladderIndex(effort ReasoningEffort) int {
+	for i, level := range reasoningEffortLadder {
+		if level == effort {
+			return i
+		}
+	}
+	return -1
+}
+
+// ClampReasoningEffort maps a requested effort onto the closest level a model
+// actually accepts, reporting whether it had to move. Providers use it so that
+// a portable ModelSettings survives being pointed at a model with a narrower
+// range, instead of failing the request.
+//
+// The requested level is clamped down to the most eager supported level that
+// does not exceed it — xhigh becomes high on a model that stops at high. When
+// the request sits below everything supported, it clamps up to the least eager
+// supported level, so minimal becomes low rather than none.
+//
+// An empty supported set, an unrecognized effort, or a supported set holding no
+// graduated levels all return the input unchanged with false; the caller owns
+// those cases.
+func ClampReasoningEffort(requested ReasoningEffort, supported []ReasoningEffort) (ReasoningEffort, bool) {
+	if len(supported) == 0 || !requested.IsValid() {
+		return requested, false
+	}
+	for _, level := range supported {
+		if level == requested {
+			return requested, false
+		}
+	}
+
+	best, bestIdx := ReasoningEffort(""), -1
+	lowest, lowestIdx := ReasoningEffort(""), len(reasoningEffortLadder)
+	requestedIdx := ladderIndex(requested)
+	for _, level := range supported {
+		idx := ladderIndex(level)
+		if idx < 0 {
+			continue // ReasoningEffortNone, only reachable by exact match above
+		}
+		if idx < lowestIdx {
+			lowest, lowestIdx = level, idx
+		}
+		// requestedIdx is -1 for ReasoningEffortNone, so no level qualifies and
+		// the clamp falls through to the least eager supported level.
+		if idx <= requestedIdx && idx > bestIdx {
+			best, bestIdx = level, idx
+		}
+	}
+	if bestIdx >= 0 {
+		return best, true
+	}
+	if lowestIdx < len(reasoningEffortLadder) {
+		return lowest, true
+	}
+	return requested, false
+}
+
 // WithReasoningEffort sets the reasoning effort for the interaction.
 func WithReasoningEffort(reasoningEffort ReasoningEffort) Option {
 	return func(config *Config) {

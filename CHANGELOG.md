@@ -14,10 +14,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (`anthropic/claude-sonnet-5`), matching the Anthropic provider default.
 - **The CLI's Anthropic default follows `anthropic.DefaultModel`** rather than a
   separate hardcoded `claude-haiku-4-5`.
-- **The CLI defaults `--thinking-effort` to `medium`.** Pass an empty value to
-  omit the parameter on models that reject it.
+- **The CLI defaults `--thinking-effort` to `medium`.** Providers now drop the
+  parameter on models that have none, so this is safe on every model.
+- **Unsupported reasoning and sampling settings are clamped or dropped with a
+  warning instead of returning an error.** One `ModelSettings` now survives
+  being pointed at a model with a narrower range.
+- **New `providers/modelcaps` package** holds the verified per-model capability
+  tables shared by the Responses and Chat Completions providers, replacing three
+  separate copies of the same prefix switches.
+- **New `llm.ClampReasoningEffort`** maps a requested effort onto the closest
+  level a model accepts.
 
 ### Fixed
+
+- **Reasoning effort was sent to models that have no reasoning parameter**,
+  producing a 400 on every request. Affects `gpt-4o` and `gpt-4.1`, plus
+  `grok-build`, `grok-code-fast`, and both `grok-4.20-0309` models. The CLI's new
+  `medium` default made this fire on every call.
+- **`temperature` was sent to models that reject it** on the OpenAI providers:
+  `gpt-5`/`-mini`/`-nano`, `gpt-5.5`, `gpt-5.6`, `o3`, and `o4-mini`.
+- **Adaptive thinking was sent to models that do not support it.** Haiku 4.5,
+  Sonnet 4.5, and Opus 4.5 answer "adaptive thinking is not supported on this
+  model"; the request now falls back to a manual thinking budget.
+- **Codex models bypassed effort clamping entirely**, so `minimal` and `max`
+  reached `gpt-5.3-codex`, which rejects both.
+- **A reasoning budget and an effort together were rejected client-side** on
+  Opus 4.5 and Sonnet 4.6, which accept the combination.
+- **Effort ranges corrected against the live API:** `grok-4.5` accepts `xhigh`
+  (was downgraded to `high`) and rejects `none`; the Grok multi-agent model
+  accepts `max` and `none`; `gpt-5.2-pro` accepts only `medium`/`high`/`xhigh`;
+  `gpt-5.3-chat-latest` accepts only `medium`.
 
 - **`claude-opus-5` was missing from every Anthropic reasoning classification**,
   so effort fell through to the legacy thinking-budget path and `max`/`xhigh`
