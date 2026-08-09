@@ -1,5 +1,5 @@
 
-.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy tidy-all release-prep tag-modules provider-catalog-generate provider-catalog-check provider-watch-test check
+.PHONY: help test test-race cover cover-html fmt fmt-check fmt-md fmt-md-check vet build tidy tidy-all release-prep tag-modules release-notes release-publish provider-catalog-generate provider-catalog-check provider-watch-test release-notes-test check
 
 COVER_PROFILE := cover.out
 
@@ -30,9 +30,12 @@ help:
 	@echo "  make provider-catalog-generate - Generate provider Go files from catalog.json"
 	@echo "  make provider-catalog-check - Verify provider catalogs and generated Go files"
 	@echo "  make provider-watch-test - Run the provider watcher unit tests"
+	@echo "  make release-notes-test - Run the release-notes tooling unit tests"
 	@echo "  make release-prep VERSION=v1.0.0 - Point sub-module requirements at VERSION"
+	@echo "  make release-notes VERSION=v1.0.0 - Draft docs/releases/v1.0.0.md"
 	@echo "  make tag-modules VERSION=v1.0.0 - Tag all sub-modules"
-	@echo "  make check       - Run catalog checks, watcher tests, fmt-check, vet, and test"
+	@echo "  make release-publish VERSION=v1.0.0 - Create the GitHub release from the notes"
+	@echo "  make check       - Run catalog checks, script tests, fmt-check, vet, and test"
 
 test:
 	go test ./...
@@ -91,6 +94,12 @@ endif
 	@echo ""
 	@echo "Commit the go.mod updates, then run: make tag-modules VERSION=$(VERSION)"
 
+release-notes:
+ifndef VERSION
+	$(error VERSION is required. Usage: make release-notes VERSION=v1.0.0)
+endif
+	@python3 scripts/release_notes.py $(VERSION)
+
 tag-modules:
 ifndef VERSION
 	$(error VERSION is required. Usage: make tag-modules VERSION=v1.0.0)
@@ -103,6 +112,18 @@ endif
 	@echo ""
 	@echo "Tags created. Push with: git push origin --tags"
 
+# --verify-tag so a mistyped version fails here rather than silently creating a
+# release against a tag gh invents from the default branch.
+release-publish:
+ifndef VERSION
+	$(error VERSION is required. Usage: make release-publish VERSION=v1.0.0)
+endif
+	@python3 scripts/release_notes.py $(VERSION) --check
+	gh release create $(VERSION) \
+		--title $(VERSION) \
+		--verify-tag \
+		--notes-file docs/releases/$(VERSION).md
+
 provider-catalog-generate:
 	python3 scripts/generate_provider_catalogs.py
 
@@ -113,4 +134,7 @@ provider-catalog-check:
 provider-watch-test:
 	python3 -B -m unittest -v scripts/test_provider_watch.py
 
-check: provider-catalog-check provider-watch-test fmt-check vet test
+release-notes-test:
+	python3 -B -m unittest -v scripts.test_changelog_section scripts.test_release_notes
+
+check: provider-catalog-check provider-watch-test release-notes-test fmt-check vet test

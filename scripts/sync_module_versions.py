@@ -26,6 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PREFIX = "github.com/deepnoodle-ai/dive"
 VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
+# Tagged modules. Their requirements are what downstream consumers resolve, so a
+# stale entry here is a broken release.
 SUB_MODULES = (
     "providers/google",
     "providers/openai",
@@ -36,6 +38,16 @@ SUB_MODULES = (
     "experimental/cmd/dive",
     "examples",
 )
+
+# Never tagged, so nothing downstream resolves these. They are synced anyway to
+# keep every go.mod in the repo naming one version - the v1.18.0 and v1.19.0
+# release commits both bumped them by hand, which is the step this replaces.
+UNTAGGED_MODULES = (
+    "demos/colosseum",
+    "demos/noodleville",
+)
+
+ALL_MODULES = SUB_MODULES + UNTAGGED_MODULES
 
 
 def go_mod_json(directory: Path) -> dict:
@@ -63,7 +75,7 @@ def dive_requirements(directory: Path) -> list[tuple[str, str]]:
 
 def check(version: str) -> int:
     stale: list[str] = []
-    for module in SUB_MODULES:
+    for module in ALL_MODULES:
         for path, current in dive_requirements(REPO_ROOT / module):
             if current != version:
                 stale.append(f"  {module}: requires {path} {current}, expected {version}")
@@ -83,7 +95,7 @@ def check(version: str) -> int:
 
 
 def write(version: str) -> int:
-    for module in SUB_MODULES:
+    for module in ALL_MODULES:
         directory = REPO_ROOT / module
         for path, current in dive_requirements(directory):
             if current == version:

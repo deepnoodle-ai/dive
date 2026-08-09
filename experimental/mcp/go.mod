@@ -5,7 +5,7 @@ go 1.25.5
 toolchain go1.26.5
 
 require (
-	github.com/deepnoodle-ai/dive v1.19.0
+	github.com/deepnoodle-ai/dive v1.20.0
 	github.com/deepnoodle-ai/wonton v0.0.37
 	github.com/mark3labs/mcp-go v0.57.0
 )
