@@ -32,13 +32,13 @@
     {
       "go_name": "ModelMistralLarge3",
       "id": "mistral-large-2412",
-      "default": true,
       "kind": "text",
       "context_window": 128000
     },
     {
       "go_name": "ModelMistralLarge",
       "id": "mistral-large-latest",
+      "default": true,
       "kind": "text",
       "context_window": 128000,
       "display_name": "Mistral Large",

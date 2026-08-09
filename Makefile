@@ -20,7 +20,7 @@ help:
 	@echo "  make provider-catalog-generate - Generate provider Go files from catalog.json"
 	@echo "  make provider-catalog-check - Verify provider catalogs and generated Go files"
 	@echo "  make tag-modules VERSION=v1.0.0 - Tag all sub-modules"
-	@echo "  make check       - Run fmt-check, vet, and test"
+	@echo "  make check       - Run provider-catalog-check, fmt-check, vet, and test"
 
 test:
 	go test ./...

@@ -36,7 +36,7 @@ const (
 	ModelGrok41FastReasoning = "x-ai/grok-4-1-fast-reasoning"
 	ModelGrok4FastReasoning  = "x-ai/grok-4-fast-reasoning"
 	ModelGrok3               = "x-ai/grok-3"
-	ModelMistralLarge3       = "mistral/mistral-large-3"
+	ModelMistralLarge3       = "mistralai/mistral-large-2512"
 	ModelDeepSeekR1          = "deepseek/deepseek-r1-0528"
 )
 

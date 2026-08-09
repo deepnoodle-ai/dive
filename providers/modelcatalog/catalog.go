@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"regexp"
 	"sort"
@@ -225,7 +226,7 @@ func validateSources(sources []Source) error {
 		}
 		seen[source.Name] = true
 		parsed, err := url.ParseRequestURI(source.URL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("invalid provider catalog source URL %q", source.URL)
 		}
 	}
@@ -352,7 +353,7 @@ func validateDecimal(table, model, field, value string, required bool) error {
 		return nil
 	}
 	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || parsed < 0 || strings.HasPrefix(value, "+") {
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || strings.HasPrefix(value, "+") {
 		return fmt.Errorf("%s pricing for %s has invalid %s %q", table, model, field, value)
 	}
 	return nil

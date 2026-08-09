@@ -27,7 +27,7 @@ var TextModelPricing = map[string]llm.PricingInfo{
 		Currency:    "USD",
 		UpdatedAt:   "2026-07-21",
 	},
-	// Up to 200K tokens ($4.00 over 200K) $18.00 over 200K tokens
+	// Input $2.00 up to 200K tokens, $4.00 above; output $12.00 up to 200K tokens, $18.00 above.
 	ModelGemini31ProPreview: {
 		Model:       ModelGemini31ProPreview,
 		InputPrice:  2.00,

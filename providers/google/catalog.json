@@ -257,7 +257,7 @@
         "output_price_per_1m_tokens": "12.00",
         "currency": "USD",
         "updated_at": "2026-05-28",
-        "note": "Up to 200K tokens ($4.00 over 200K) $18.00 over 200K tokens"
+        "note": "Input $2.00 up to 200K tokens, $4.00 above; output $12.00 up to 200K tokens, $18.00 above."
       },
       {
         "model": "gemini-3.1-pro-preview-customtools",

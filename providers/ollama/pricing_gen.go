@@ -7,6 +7,14 @@ import "github.com/deepnoodle-ai/dive/llm"
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
 	// Free - runs locally
+	ModelLlama32_3B: {
+		Model:       ModelLlama32_3B,
+		InputPrice:  0.00,
+		OutputPrice: 0.00,
+		Currency:    "USD",
+		UpdatedAt:   "2026-08-08",
+	},
+	// Free - runs locally
 	"llama2": {
 		Model:       "llama2",
 		InputPrice:  0.00,

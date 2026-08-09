@@ -22,4 +22,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelMistralLarge3
+var DefaultModel = ModelMistralLarge

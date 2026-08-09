@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import datetime as dt
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any, Iterable, Mapping, Sequence
@@ -20,6 +22,7 @@ DECIMAL_RE = re.compile(r"^(?:0|[1-9]\d*)(?:\.\d+)?$")
 GO_TYPE_IMPORTS = {
     "openaisdk.ChatModel": 'openaisdk "github.com/openai/openai-go/v3"',
 }
+GOFMT = shutil.which("gofmt")
 
 
 @dataclass(frozen=True)
@@ -197,8 +200,12 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
     if set(pricing) - {"text", "fast_text", "image", "embedding"}:
         raise CatalogError(f"{path}: unknown pricing table")
     for table_name, entries in pricing.items():
+        if not isinstance(entries, list):
+            raise CatalogError(f"{path}: {table_name} must be a list")
         seen: set[str] = set()
         for entry in entries:
+            if not isinstance(entry, dict):
+                raise CatalogError(f"{path}: {table_name} entries must be objects")
             model_id = entry.get("model", "")
             if not model_id or model_id in seen:
                 raise CatalogError(
@@ -220,6 +227,26 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                     raise CatalogError(
                         f"{path}: {table_name}/{model_id} has invalid {field}"
                     )
+            for field in ("currency", "updated_at"):
+                value = entry.get(field)
+                if not isinstance(value, str) or not value:
+                    raise CatalogError(
+                        f"{path}: {table_name}/{model_id} has invalid {field}"
+                    )
+            if not re.fullmatch(r"[A-Z]{3}", entry["currency"]):
+                raise CatalogError(
+                    f"{path}: {table_name}/{model_id} has invalid currency"
+                )
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry["updated_at"]):
+                raise CatalogError(
+                    f"{path}: {table_name}/{model_id} has invalid updated_at"
+                )
+            try:
+                dt.date.fromisoformat(entry["updated_at"])
+            except ValueError as error:
+                raise CatalogError(
+                    f"{path}: {table_name}/{model_id} has invalid updated_at"
+                ) from error
 
 
 def go_string(value: str) -> str:
@@ -269,7 +296,11 @@ def render_models(target: Target, catalog: Mapping[str, Any]) -> str:
         lines.append(f"\t{declaration} = {value}")
     lines.extend((")", ""))
     if target.generate_default:
-        default = next(model for model in models if model.get("default"))
+        default = next((model for model in models if model.get("default")), None)
+        if default is None:
+            raise CatalogError(
+                f"{target.name}: no default model after adapter filtering"
+            )
         lines.extend(
             (
                 "// DefaultModel is generated from the catalog's default model.",
@@ -426,8 +457,10 @@ def generated_files(target: Target, catalog: Mapping[str, Any]) -> dict[Path, st
 
 
 def gofmt(content: str) -> str:
+    if GOFMT is None:
+        raise CatalogError("gofmt not found on PATH")
     process = subprocess.run(
-        ["gofmt"],
+        [GOFMT],
         input=content,
         text=True,
         capture_output=True,

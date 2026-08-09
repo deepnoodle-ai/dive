@@ -239,7 +239,7 @@
     },
     {
       "go_name": "ModelMistralLarge3",
-      "id": "mistral/mistral-large-3",
+      "id": "mistralai/mistral-large-2512",
       "kind": "text",
       "context_window": 128000
     },

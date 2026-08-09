@@ -168,6 +168,14 @@
   "pricing": {
     "text": [
       {
+        "model": "llama3.2:3b",
+        "input_price_per_1m_tokens": "0.00",
+        "output_price_per_1m_tokens": "0.00",
+        "currency": "USD",
+        "updated_at": "2026-08-08",
+        "note": "Free - runs locally"
+      },
+      {
         "model": "llama2",
         "input_price_per_1m_tokens": "0.00",
         "output_price_per_1m_tokens": "0.00",

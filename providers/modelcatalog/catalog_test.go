@@ -1,6 +1,7 @@
 package modelcatalog
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/wonton/assert"
@@ -88,5 +89,21 @@ func TestParseRejectsInvalidPrice(t *testing.T) {
       }]}
     }`)
 	_, err := Parse("test", invalid)
+	assert.Error(t, err)
+}
+
+func TestParseRejectsNonFinitePrices(t *testing.T) {
+	for _, value := range []string{"NaN", "Inf"} {
+		t.Run(value, func(t *testing.T) {
+			invalid := strings.Replace(validCatalog, `"input_price_per_1m_tokens": "1.25"`, `"input_price_per_1m_tokens": "`+value+`"`, 1)
+			_, err := Parse("test", []byte(invalid))
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestParseRejectsHostlessSourceURL(t *testing.T) {
+	invalid := strings.Replace(validCatalog, "https://example.com/models", "https:///models", 1)
+	_, err := Parse("test", []byte(invalid))
 	assert.Error(t, err)
 }

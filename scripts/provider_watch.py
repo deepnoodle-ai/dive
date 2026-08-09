@@ -128,10 +128,15 @@ def load_provider_catalog(repo_root: Path, provider: str) -> dict[str, Any]:
 
 def catalog_document_sources(
     repo_root: Path, providers: Sequence[str]
-) -> list[DocumentSource]:
+) -> tuple[list[DocumentSource], dict[str, str]]:
     sources: list[DocumentSource] = []
+    errors: dict[str, str] = {}
     for provider in providers:
-        catalog = load_provider_catalog(repo_root, provider)
+        try:
+            catalog = load_provider_catalog(repo_root, provider)
+        except FetchFailure as error:
+            errors[provider] = safe_error(error)
+            continue
         for source in catalog.get("sources", []):
             kind = source.get("kind", "document")
             if kind == "api":
@@ -145,7 +150,7 @@ def catalog_document_sources(
                     discovery_patterns=tuple(source.get("discovery_patterns", [])),
                 )
             )
-    return sources
+    return sources, errors
 
 
 class FetchFailure(RuntimeError):
@@ -247,6 +252,8 @@ class HTTPClient:
         headers: Mapping[str, str] | None = None,
         json_body: Any | None = None,
     ) -> tuple[bytes, str, str]:
+        if urlparse(url).scheme.lower() not in {"http", "https"}:
+            raise FetchFailure(f"unsupported URL scheme: {url}")
         request_headers = {
             "Accept": "application/json, text/markdown, text/plain, text/html, application/xml;q=0.9, */*;q=0.1",
             "User-Agent": USER_AGENT,
@@ -274,11 +281,13 @@ class HTTPClient:
                         )
                     content_type = response.headers.get_content_type()
                     return data, content_type, response.geturl()
+            except FetchFailure:
+                raise
             except HTTPError as error:
                 last_error = error
                 if error.code < 500 and error.code != 429:
                     break
-            except (URLError, TimeoutError, OSError, FetchFailure) as error:
+            except (URLError, TimeoutError, OSError) as error:
                 last_error = error
             if attempt < self.retries:
                 time.sleep(0.5 * (2**attempt))
@@ -414,8 +423,10 @@ def collect_sitemap_links(
     for child_url in child_sitemaps[:max_child_sitemaps]:
         try:
             child_data, _, _ = client.request(child_url)
+            if urlparse(child_url).path.lower().endswith(".xml.gz"):
+                child_data = gzip.decompress(child_data)
             expanded.update(extract_sitemap_links(child_data))
-        except FetchFailure:
+        except (FetchFailure, OSError, EOFError):
             # The index itself remains useful if one partition is unavailable.
             continue
     return sorted(expanded)
@@ -759,7 +770,10 @@ def collect_repo_facts(repo_root: Path) -> dict[str, Any]:
             model["go_name"]: model for model in catalog.get("models", [])
         }
 
-        def model_id(model: Mapping[str, Any]) -> str | None:
+        def model_id(
+            model: Mapping[str, Any],
+            models_by_name: Mapping[str, Any] = models_by_name,
+        ) -> str | None:
             if model.get("id"):
                 return str(model["id"])
             target = models_by_name.get(str(model.get("alias_of", "")))
@@ -858,7 +872,9 @@ def build_snapshot(
         "repo": collect_repo_facts(repo_root),
     }
 
-    sources = catalog_document_sources(repo_root, providers)
+    sources, catalog_errors = catalog_document_sources(repo_root, providers)
+    if catalog_errors:
+        result["errors"] = catalog_errors
     with ThreadPoolExecutor(max_workers=min(8, len(sources) or 1)) as executor:
         pending = {
             executor.submit(collect_document, client, source): source
@@ -1215,6 +1231,37 @@ def summarize_value(value: Any, limit: int = 180) -> str:
     return rendered
 
 
+def escape_markdown(value: Any) -> str:
+    """Render provider-controlled text without allowing Markdown or HTML markup."""
+
+    text = str(value).replace("\r", " ").replace("\n", " ")
+    return text.translate(
+        str.maketrans(
+            {
+                "\\": "&#92;",
+                "`": "&#96;",
+                "*": "&#42;",
+                "_": "&#95;",
+                "{": "&#123;",
+                "}": "&#125;",
+                "[": "&#91;",
+                "]": "&#93;",
+                "(": "&#40;",
+                ")": "&#41;",
+                "<": "&lt;",
+                ">": "&gt;",
+                "#": "&#35;",
+                "+": "&#43;",
+                "-": "&#45;",
+                ".": "&#46;",
+                "!": "&#33;",
+                "|": "&#124;",
+                "&": "&amp;",
+            }
+        )
+    )
+
+
 def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
     changes = diff.get("changes", [])
     displayed_changes = changes[:MAX_REPORT_CHANGES]
@@ -1263,7 +1310,8 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
             "listed" if dive and dive.get("provider_catalog") else "not listed"
         ) if dive is not None else "-"
         lines.append(
-            f"| {change.get('provider')} | `{change.get('kind')}` | `{subject}` | "
+            f"| {change.get('provider')} | `{change.get('kind')}` | "
+            f"<code>{escape_markdown(subject)}</code> | "
             f"{dive_status} |"
         )
 
@@ -1275,12 +1323,14 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
             or change.get("source")
             or "change"
         )
-        lines.extend(("", f"## {change.get('provider')}: {subject}", ""))
+        lines.extend(
+            ("", f"## {change.get('provider')}: {escape_markdown(subject)}", "")
+        )
         lines.append(f"Type: `{change.get('kind')}`")
         if change.get("url"):
             lines.extend(("", f"Source: {change['url']}"))
         if change.get("details"):
-            lines.extend(("", f"Details: {change['details']}"))
+            lines.extend(("", f"Details: {escape_markdown(change['details'])}"))
         if change.get("dive") is not None:
             dive = change["dive"]
             lines.extend(
@@ -1293,16 +1343,27 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
                 )
             )
         if change.get("before") is not None:
-            lines.extend(("", f"Before: `{summarize_value(change['before'])}`"))
+            lines.extend(
+                (
+                    "",
+                    f"Before: <code>{escape_markdown(summarize_value(change['before']))}</code>",
+                )
+            )
         if change.get("after") is not None:
-            lines.extend(("", f"After: `{summarize_value(change['after'])}`"))
+            lines.extend(
+                (
+                    "",
+                    f"After: <code>{escape_markdown(summarize_value(change['after']))}</code>",
+                )
+            )
         fields = change.get("fields", [])
         if fields:
             lines.extend(("", "Changed fields:", ""))
             for field in fields[:30]:
                 lines.append(
-                    f"- `{field['field']}`: `{summarize_value(field.get('before'))}` → "
-                    f"`{summarize_value(field.get('after'))}`"
+                    f"- <code>{escape_markdown(field['field'])}</code>: "
+                    f"<code>{escape_markdown(summarize_value(field.get('before')))}</code> → "
+                    f"<code>{escape_markdown(summarize_value(field.get('after')))}</code>"
                 )
             if len(fields) > 30:
                 lines.append(f"- … {len(fields) - 30} more field changes")
@@ -1312,7 +1373,7 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
                 continue
             lines.extend(("", f"{label}:", ""))
             for value in values[:25]:
-                lines.append(f"- {value}")
+                lines.append(f"- {escape_markdown(value)}")
             if len(values) > 25:
                 lines.append(f"- … {len(values) - 25} more")
         if change.get("feature_flags_added"):
@@ -1320,7 +1381,7 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
             unlisted = set(change.get("unlisted_feature_flags", []))
             for feature in change["feature_flags_added"]:
                 status = "not listed in Dive" if feature in unlisted else "listed in Dive"
-                lines.append(f"- `{feature}` — {status}")
+                lines.append(f"- <code>{escape_markdown(feature)}</code> — {status}")
 
     repo_models = {
         provider: len(data.get("models", []))
