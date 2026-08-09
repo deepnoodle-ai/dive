@@ -98,7 +98,7 @@ There are three points in the agent lifecycle where compaction can happen:
    the Dive CLI does, and it produces the durable, non-destructive checkpoint
    (`AllMessages` / `CompactionHistory` retain the originals).
 3. **Mid-turn** — a `PreIteration` hook (`MidTurnCompactionHook`) fires before
-   each LLM call *inside* the tool loop. Needed because a single long turn
+   each LLM call _inside_ the tool loop. Needed because a single long turn
    (many tool calls, or a few large file reads / command dumps) can grow past
    the model's context window before the turn finishes — which otherwise
    surfaces as a hard context-length error with no recovery.
@@ -135,9 +135,9 @@ doesn't actually shrink the set is rejected (which also prevents repeated
 re-compaction). Requires an agent that honors `PreIteration` message rewrites —
 Dive reads `hctx.Messages` back after `PreIteration` hooks.
 
-Pair it with between-turn compaction: mid-turn keeps the *current* turn under
+Pair it with between-turn compaction: mid-turn keeps the _current_ turn under
 budget (ephemeral, in-memory), while the between-turn checkpoint shrinks the
-*next* turn's active window durably.
+_next_ turn's active window durably.
 
 ## Configuration
 

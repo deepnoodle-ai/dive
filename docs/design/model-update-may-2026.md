@@ -28,13 +28,13 @@ here:
 
 ### Anthropic (Claude API)
 
-| Model | API ID | Input | Output | Context | Max output | Thinking |
-|-------|--------|-------|--------|---------|------------|----------|
-| **Opus 4.8** | `claude-opus-4-8` | $5 | $25 | 1M (default) | 128k | Adaptive only |
-| Opus 4.7 | `claude-opus-4-7` | $5 | $25 | 1M | 128k | Adaptive only |
-| Opus 4.6 | `claude-opus-4-6` | $5 | $25 | 1M | 128k | Adaptive + manual (deprecated) |
-| Sonnet 4.6 | `claude-sonnet-4-6` | $3 | $15 | 1M | 64k | Adaptive + manual (deprecated) |
-| Haiku 4.5 | `claude-haiku-4-5` | $1 | $5 | 200k | 64k | Manual |
+| Model        | API ID              | Input | Output | Context      | Max output | Thinking                       |
+| ------------ | ------------------- | ----- | ------ | ------------ | ---------- | ------------------------------ |
+| **Opus 4.8** | `claude-opus-4-8`   | $5    | $25    | 1M (default) | 128k       | Adaptive only                  |
+| Opus 4.7     | `claude-opus-4-7`   | $5    | $25    | 1M           | 128k       | Adaptive only                  |
+| Opus 4.6     | `claude-opus-4-6`   | $5    | $25    | 1M           | 128k       | Adaptive + manual (deprecated) |
+| Sonnet 4.6   | `claude-sonnet-4-6` | $3    | $15    | 1M           | 64k        | Adaptive + manual (deprecated) |
+| Haiku 4.5    | `claude-haiku-4-5`  | $1    | $5     | 200k         | 64k        | Manual                         |
 
 Cache (Opus): 5m write $6.25, 1h write $10, hit $0.50. Batch: $2.50 / $12.50.
 **Fast mode**: Opus 4.8 $10/$50; Opus 4.6/4.7 $30/$150 (research preview, beta
@@ -42,39 +42,39 @@ header `fast-mode-2026-02-01`, requires account access).
 
 ### Google (Gemini)
 
-| Model | Input | Output | Notes |
-|-------|-------|--------|-------|
-| `gemini-3.5-flash` | $1.50 | $9.00 | New stable frontier Flash |
-| `gemini-3.1-pro-preview` | $2.00 / $4.00 (>200k) | $12.00 / $18.00 | Flagship preview |
-| `gemini-3.1-flash-lite` | $0.25 | $1.50 | Stable; low-latency |
-| `gemini-3.1-flash-live-preview` | $0.75 (text) | $4.50 (text) | Live API, audio-to-audio |
-| `gemini-3-pro-image` | $2.00 | $120 (img tokens) | Nano Banana Pro, ~$0.134/image |
-| `gemini-3.1-flash-lite-image` | $0.30 | $30 (img tokens) | Nano Banana family, ~$0.034/image |
-| `gemini-3.1-flash-image` | $0.50 | $60 (img tokens) | Nano Banana 2, ~$0.067/image |
+| Model                           | Input                 | Output            | Notes                             |
+| ------------------------------- | --------------------- | ----------------- | --------------------------------- |
+| `gemini-3.5-flash`              | $1.50                 | $9.00             | New stable frontier Flash         |
+| `gemini-3.1-pro-preview`        | $2.00 / $4.00 (>200k) | $12.00 / $18.00   | Flagship preview                  |
+| `gemini-3.1-flash-lite`         | $0.25                 | $1.50             | Stable; low-latency               |
+| `gemini-3.1-flash-live-preview` | $0.75 (text)          | $4.50 (text)      | Live API, audio-to-audio          |
+| `gemini-3-pro-image`            | $2.00                 | $120 (img tokens) | Nano Banana Pro, ~$0.134/image    |
+| `gemini-3.1-flash-lite-image`   | $0.30                 | $30 (img tokens)  | Nano Banana family, ~$0.034/image |
+| `gemini-3.1-flash-image`        | $0.50                 | $60 (img tokens)  | Nano Banana 2, ~$0.067/image      |
 
 ### xAI (Grok)
 
-| Model | Input | Output | Context |
-|-------|-------|--------|---------|
-| `grok-4.5` | $2.00 ($0.50 cached) | $6.00 | 500k (new default) |
-| `grok-4.3` | $1.25 | $2.50 | 1M |
-| `grok-4.20-*` | $1.25 | $2.50 | 1M (corrected from $2/$6) |
-| `grok-build-0.1` | $1.00 | $2.00 | 256k (coding) |
-| `grok-imagine-image` | $0.02/image | — | — |
-| `grok-imagine-image-quality` | $0.05/image | — | — |
+| Model                        | Input                | Output | Context                   |
+| ---------------------------- | -------------------- | ------ | ------------------------- |
+| `grok-4.5`                   | $2.00 ($0.50 cached) | $6.00  | 500k (new default)        |
+| `grok-4.3`                   | $1.25                | $2.50  | 1M                        |
+| `grok-4.20-*`                | $1.25                | $2.50  | 1M (corrected from $2/$6) |
+| `grok-build-0.1`             | $1.00                | $2.00  | 256k (coding)             |
+| `grok-imagine-image`         | $0.02/image          | —      | —                         |
+| `grok-imagine-image-quality` | $0.05/image          | —      | —                         |
 
 ### OpenAI
 
-| Model | API ID | Input | Output | Context | Max output | Notes |
-|-------|--------|-------|--------|---------|------------|-------|
-| **GPT-5.6 Sol** | `gpt-5.6-sol` | $5.00 | $30.00 | 1.05M | 128k | New OpenAI default; `gpt-5.6` aliases to Sol |
-| GPT-5.6 Terra | `gpt-5.6-terra` | $2.50 | $15.00 | 1.05M | 128k | Balances intelligence and cost |
-| GPT-5.6 Luna | `gpt-5.6-luna` | $1.00 | $6.00 | 1.05M | 128k | Efficient high-volume model |
-| GPT-5.5 | `gpt-5.5` | $5.00 | $30.00 | 1.05M | 128k | Previous OpenAI default |
-| GPT-5.4 | `gpt-5.4` | $2.50 | $15.00 | 1.05M | 128k | More affordable frontier model |
-| GPT-5.4 mini | `gpt-5.4-mini` | $0.75 | $4.50 | 400k | 128k | Fast mini model |
-| GPT-5.4 nano | `gpt-5.4-nano` | $0.20 | $1.25 | 400k | 128k | Lowest-cost GPT-5.4-class model |
-| GPT Image 2 | `gpt-image-2` | — | — | — | — | New OpenAI image-generation default |
+| Model           | API ID          | Input | Output | Context | Max output | Notes                                        |
+| --------------- | --------------- | ----- | ------ | ------- | ---------- | -------------------------------------------- |
+| **GPT-5.6 Sol** | `gpt-5.6-sol`   | $5.00 | $30.00 | 1.05M   | 128k       | New OpenAI default; `gpt-5.6` aliases to Sol |
+| GPT-5.6 Terra   | `gpt-5.6-terra` | $2.50 | $15.00 | 1.05M   | 128k       | Balances intelligence and cost               |
+| GPT-5.6 Luna    | `gpt-5.6-luna`  | $1.00 | $6.00  | 1.05M   | 128k       | Efficient high-volume model                  |
+| GPT-5.5         | `gpt-5.5`       | $5.00 | $30.00 | 1.05M   | 128k       | Previous OpenAI default                      |
+| GPT-5.4         | `gpt-5.4`       | $2.50 | $15.00 | 1.05M   | 128k       | More affordable frontier model               |
+| GPT-5.4 mini    | `gpt-5.4-mini`  | $0.75 | $4.50  | 400k    | 128k       | Fast mini model                              |
+| GPT-5.4 nano    | `gpt-5.4-nano`  | $0.20 | $1.25  | 400k    | 128k       | Lowest-cost GPT-5.4-class model              |
+| GPT Image 2     | `gpt-image-2`   | —     | —      | —       | —          | New OpenAI image-generation default          |
 
 ## The critical bug (fixed)
 
@@ -85,12 +85,12 @@ not use effort or thinking at all against the new default model.
 
 The provider is now model-aware:
 
-| Model class | Effort | Thinking |
-|-------------|--------|----------|
-| Opus 4.5+, Sonnet 4.6 | `output_config.effort` (native) | per below |
-| Opus 4.6, Sonnet 4.6 | native | adaptive or manual budget (manual deprecated) |
-| **Opus 4.7 / 4.8** | native | **adaptive only**; manual budget auto-falls-back to adaptive |
-| Older (3.x, 4, 4.5 Sonnet) | emulated via budget (back-compat) | manual budget |
+| Model class                | Effort                            | Thinking                                                     |
+| -------------------------- | --------------------------------- | ------------------------------------------------------------ |
+| Opus 4.5+, Sonnet 4.6      | `output_config.effort` (native)   | per below                                                    |
+| Opus 4.6, Sonnet 4.6       | native                            | adaptive or manual budget (manual deprecated)                |
+| **Opus 4.7 / 4.8**         | native                            | **adaptive only**; manual budget auto-falls-back to adaptive |
+| Older (3.x, 4, 4.5 Sonnet) | emulated via budget (back-compat) | manual budget                                                |
 
 ## New capabilities unlocked
 

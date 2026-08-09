@@ -308,6 +308,7 @@ func (f *ToolsetFunc) Tools(ctx context.Context) ([]Tool, error) {
 ```
 
 **Use cases:**
+
 - MCP servers: tools discovered at runtime
 - Permission-filtered tools: different tools for different users
 - Context-dependent tools: "upload" tool only available after "login"
@@ -423,6 +424,7 @@ validation, and tool output varies too much to schema-ify usefully.
 ## Migration Path
 
 **Phase 1 — Additive (non-breaking):**
+
 - Add `ToolContext` as a new type
 - Add `Toolset` interface and `AgentOptions.Toolsets`
 - Add `FuncTool` builder
@@ -430,6 +432,7 @@ validation, and tool output varies too much to schema-ify usefully.
 - Add `SchemaProvider` optional interface
 
 **Phase 2 — Breaking changes (major version):**
+
 - Remove `Schema()` from `TypedTool[T]`
 - Change `Call(context.Context, ...)` to `Call(*ToolContext, ...)` on both
   `Tool` and `TypedTool[T]`
@@ -437,17 +440,18 @@ validation, and tool output varies too much to schema-ify usefully.
 - Migrate all toolkit tools to struct-tag-based schemas
 
 **Phase 3 — Toolkit migration:**
+
 - Convert all 11 toolkit tools to use struct tags instead of manual schemas
 
 ## Summary
 
-| Change | Breaking | Impact | Complexity |
-|--------|----------|--------|------------|
-| Auto-derive schema | Yes | High — eliminates boilerplate, prevents drift | Medium |
-| ToolContext | Yes | High — enables tool-agent communication | Low |
-| Toolset | No | High — enables dynamic tool resolution | Low |
-| FuncTool builder | No | High — dramatically simplifies tool creation | Low |
-| Panic recovery | No | Medium — production safety | Trivial |
+| Change             | Breaking | Impact                                        | Complexity |
+| ------------------ | -------- | --------------------------------------------- | ---------- |
+| Auto-derive schema | Yes      | High — eliminates boilerplate, prevents drift | Medium     |
+| ToolContext        | Yes      | High — enables tool-agent communication       | Low        |
+| Toolset            | No       | High — enables dynamic tool resolution        | Low        |
+| FuncTool builder   | No       | High — dramatically simplifies tool creation  | Low        |
+| Panic recovery     | No       | Medium — production safety                    | Trivial    |
 
 The two breaking changes (auto-derive schema, ToolContext) are the most impactful
 and should ship together in a major version bump. The mechanical migration is

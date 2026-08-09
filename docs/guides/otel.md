@@ -65,21 +65,21 @@ resp, err := agent.CreateResponse(ctx, dive.WithInput("…"))
 The opt-in flags below attach verbatim payloads — review your destination's
 retention policy before turning them on.
 
-| Option | Adds | Default |
-|---|---|---|
-| `WithCaptureMessages(true)` | `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` on chat spans | off |
-| `WithCaptureToolIO(true)`   | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` on execute_tool spans | off |
+| Option                      | Adds                                                                                          | Default |
+| --------------------------- | --------------------------------------------------------------------------------------------- | ------- |
+| `WithCaptureMessages(true)` | `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions` on chat spans | off     |
+| `WithCaptureToolIO(true)`   | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` on execute_tool spans                 | off     |
 
 When off, the spans still carry timing, model, token usage, tool names, and
 status — just not the raw text.
 
 ## Attributes emitted
 
-| Span | Key attributes |
-|---|---|
-| `invoke_agent` | `gen_ai.provider.name`, `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.agent.id`, `gen_ai.agent.description`, `gen_ai.agent.version`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` |
-| `chat` | `gen_ai.provider.name`, `gen_ai.operation.name=chat`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.*`, optional `gen_ai.input.messages` / `gen_ai.output.messages` |
-| `execute_tool` | `gen_ai.provider.name`, `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`, `gen_ai.tool.description`, optional `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result` |
+| Span           | Key attributes                                                                                                                                                                                                                               |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoke_agent` | `gen_ai.provider.name`, `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.agent.id`, `gen_ai.agent.description`, `gen_ai.agent.version`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`                          |
+| `chat`         | `gen_ai.provider.name`, `gen_ai.operation.name=chat`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.*`, optional `gen_ai.input.messages` / `gen_ai.output.messages` |
+| `execute_tool` | `gen_ai.provider.name`, `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`, `gen_ai.tool.description`, optional `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result`                    |
 
 Resource-style attributes passed via `WithAttributes` are added to every span.
 
@@ -87,10 +87,10 @@ Resource-style attributes passed via `WithAttributes` are added to every span.
 
 The tracer also records the spec-defined GenAI client metrics:
 
-| Metric | Dimensions |
-|---|---|
-| `gen_ai.client.operation.duration` (histogram, seconds) | `gen_ai.operation.name`, `gen_ai.provider.name`, optional model + `error.type` |
-| `gen_ai.client.token.usage` (histogram, tokens) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.token.type`, optional model |
+| Metric                                                  | Dimensions                                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `gen_ai.client.operation.duration` (histogram, seconds) | `gen_ai.operation.name`, `gen_ai.provider.name`, optional model + `error.type`       |
+| `gen_ai.client.token.usage` (histogram, tokens)         | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.token.type`, optional model |
 
 Bucket boundaries follow the OTel GenAI metric spec — wider than SDK defaults
 because LLM call durations and token counts span many orders of magnitude.

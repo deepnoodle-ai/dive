@@ -21,6 +21,7 @@ weatherTool := dive.FuncTool("get_weather", "Get current weather for a city",
 ```
 
 The schema is derived from `WeatherInput` struct tags:
+
 - `json:"city"` — required field (no `omitempty`)
 - `json:"units,omitempty"` — optional field
 - `description:"..."` — field description for the LLM

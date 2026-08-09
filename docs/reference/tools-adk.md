@@ -239,6 +239,7 @@ The fallback wrapping (`{"result": output}`) handles cases where the output is a
 ### Other tools
 
 Non-functiontool implementations handle marshaling manuallylly:
+
 - **agenttool**: Extracts text from sub-agent's last event, returns `{"result": text}`
 - **mcptool**: Extracts text from MCP `TextContent`, returns `{"output": text}` or `{"output": structuredContent}`
 - **loadmemorytool**: Manually pulls `"query"` from `args.(map[string]any)`, returns `{"memories": entries}`
@@ -333,14 +334,14 @@ defer func() {
 
 Six callback types provide interception points:
 
-| Callback | Signature | When | Can Override |
-| --- | --- | --- | --- |
-| `BeforeModelCallback` | `(CallbackContext, *LLMRequest) → (*LLMResponse, error)` | Before LLM call | Return non-nil to skip LLM |
-| `AfterModelCallback` | `(CallbackContext, *LLMResponse, error) → (*LLMResponse, error)` | After LLM call | Return non-nil to replace response |
-| `OnModelErrorCallback` | `(CallbackContext, *LLMRequest, error) → (*LLMResponse, error)` | On LLM error | Return non-nil to recover |
-| `BeforeToolCallback` | `(Context, Tool, args) → (result, error)` | Before tool.Run | Return non-nil to skip tool |
-| `AfterToolCallback` | `(Context, Tool, args, result, error) → (result, error)` | After tool.Run | Return non-nil to replace result |
-| `OnToolErrorCallback` | `(Context, Tool, args, error) → (result, error)` | On tool error | Return non-nil to recover |
+| Callback               | Signature                                                        | When            | Can Override                       |
+| ---------------------- | ---------------------------------------------------------------- | --------------- | ---------------------------------- |
+| `BeforeModelCallback`  | `(CallbackContext, *LLMRequest) → (*LLMResponse, error)`         | Before LLM call | Return non-nil to skip LLM         |
+| `AfterModelCallback`   | `(CallbackContext, *LLMResponse, error) → (*LLMResponse, error)` | After LLM call  | Return non-nil to replace response |
+| `OnModelErrorCallback` | `(CallbackContext, *LLMRequest, error) → (*LLMResponse, error)`  | On LLM error    | Return non-nil to recover          |
+| `BeforeToolCallback`   | `(Context, Tool, args) → (result, error)`                        | Before tool.Run | Return non-nil to skip tool        |
+| `AfterToolCallback`    | `(Context, Tool, args, result, error) → (result, error)`         | After tool.Run  | Return non-nil to replace result   |
+| `OnToolErrorCallback`  | `(Context, Tool, args, error) → (result, error)`                 | On tool error   | Return non-nil to recover          |
 
 Callbacks execute in order. The first one that returns a non-nil result short-circuits the rest.
 
@@ -411,7 +412,7 @@ weatherTool, _ := functiontool.New(functiontool.Config{
 })
 ```
 
-For long-running tools, the framework appends a note to the description: *"NOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status."*
+For long-running tools, the framework appends a note to the description: _"NOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status."_
 
 ### agenttool (Agent Composition)
 
@@ -457,7 +458,7 @@ An explicit tool the model can call to search memory:
 load_memory(query: string) → {memories: []memory.Entry}
 ```
 
-Its `ProcessRequest` also injects system instructions: *"You have memory. You can use it to answer questions..."*
+Its `ProcessRequest` also injects system instructions: _"You have memory. You can use it to answer questions..."_
 
 ### preloadmemorytool (Implicit Memory Injection)
 
@@ -544,24 +545,31 @@ type genai.FunctionResponse struct {
 ## Patterns Worth Borrowing
 
 ### Minimal public interface, rich internal interface
+
 The public `Tool` interface has just 3 read-only methods. The callable behavior (`Declaration()`, `Run()`) is internal. This keeps the user-facing API clean while giving the framework the power it needs. Users create tools via `functiontool.New()` and don't need to implement the internal interface.
 
 ### Generic function wrapping with schema inference
+
 `functiontool.New[TArgs, TResults]` uses Go generics to infer JSON Schema from type parameters. Users define a struct with `json` and `jsonschema` tags, and the framework handles everything else. Schema can be overridden when inference isn't sufficient.
 
 ### ProcessRequest as a tool-level middleware
+
 Each tool gets to modify the `LLMRequest` before it's sent. Most just pack their declaration, but some inject system instructions (memory tool) or add native tool configs (Gemini tools). This is more flexible than a central tool registration system.
 
 ### JSON round-trip for type conversion
+
 The `ConvertToWithJSONSchema` approach (marshal to JSON, optionally validate, unmarshal to target type) is simple and handles all the edge cases of converting `map[string]any` to typed structs. The schema validation step runs against the intermediate map, not the struct, to handle `omitempty` correctly.
 
 ### Uniform result type
+
 All tools return `map[string]any`. Non-map results get wrapped as `{"result": value}`. This simplifies the framework's response handling - there's exactly one result format to deal with.
 
 ### Confirmation as a virtual function call
+
 HITL approval uses the same `FunctionCall`/`FunctionResponse` mechanism as regular tool calls. The client doesn't need special handling beyond recognizing the `adk_request_confirmation` name. The framework re-invokes the original tool transparently after approval.
 
 ### Callback chains with short-circuit
+
 Before/After/OnError callbacks for both model and tool calls follow a consistent pattern: execute in order, first non-nil result wins. This provides clean interception for caching, logging, access control, and error recovery.
 
 ## Package Structure

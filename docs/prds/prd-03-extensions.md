@@ -1,11 +1,11 @@
 # PRD: Agent Extensions
 
-| Field | Content |
-|-------|---------|
-| Title | Agent Extension Interface |
-| Author | Curtis / DeepNoodle |
-| Status | Draft |
-| Last Updated | 2026-03-27 |
+| Field        | Content                            |
+| ------------ | ---------------------------------- |
+| Title        | Agent Extension Interface          |
+| Author       | Curtis / DeepNoodle                |
+| Status       | Draft                              |
+| Last Updated | 2026-03-27                         |
 | Stakeholders | Dive library users, agent builders |
 
 ## Problem & Opportunity
@@ -28,13 +28,13 @@ Neither approach scales. Each new capability package reinvents the same pattern.
 
 ## Goals & Success Metrics
 
-| Goal | Metric |
-|------|--------|
-| **Primary:** Agent capabilities can be extended through a single, composable interface | One `Extension` interface that bundles tools, hooks, and rules |
-| **Primary:** Skills integrate via Extension instead of `ConfigureAgent` | `skill.Loader` satisfies `dive.Extension`; `ConfigureAgent` is deprecated |
-| **Secondary:** The pattern is reusable for future capability packages | MCP, permission, or any new package can implement `Extension` without new agent code |
-| **Guardrail:** No breaking changes to existing public API | `ConfigureAgent` continues to work (deprecated); all existing agent code compiles unchanged |
-| **Guardrail:** No hook ordering sensitivity | Extensions are merged in declaration order with no required ordering between them |
+| Goal                                                                                   | Metric                                                                                      |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| **Primary:** Agent capabilities can be extended through a single, composable interface | One `Extension` interface that bundles tools, hooks, and rules                              |
+| **Primary:** Skills integrate via Extension instead of `ConfigureAgent`                | `skill.Loader` satisfies `dive.Extension`; `ConfigureAgent` is deprecated                   |
+| **Secondary:** The pattern is reusable for future capability packages                  | MCP, permission, or any new package can implement `Extension` without new agent code        |
+| **Guardrail:** No breaking changes to existing public API                              | `ConfigureAgent` continues to work (deprecated); all existing agent code compiles unchanged |
+| **Guardrail:** No hook ordering sensitivity                                            | Extensions are merged in declaration order with no required ordering between them           |
 
 ## Users & Use Cases
 
@@ -43,6 +43,7 @@ Neither approach scales. Each new capability package reinvents the same pattern.
 **UC1: Adding skills to an agent**
 
 Today:
+
 ```go
 loader := skill.NewLoader(skill.LoaderOptions{ProjectDir: "."})
 loader.Load(ctx)
@@ -57,6 +58,7 @@ agent, _ := dive.NewAgent(opts)
 ```
 
 With extensions:
+
 ```go
 loader := skill.NewLoader(skill.LoaderOptions{ProjectDir: "."})
 loader.Load(ctx)
@@ -185,24 +187,26 @@ The `skill.Loader` gains three methods to satisfy `dive.Extension`:
 
 ## Edge Cases & Decisions
 
-| Case | Decision |
-|------|----------|
-| Nil extension in the slice | Skip silently |
-| Extension returns nil from Tools() or empty Hooks() | Safe — append of nil slice is a no-op |
-| Multiple extensions add same-named tool | `NewAgent` returns an error (`duplicate tool name: "X"`) |
-| Extension Rules() with leading/trailing whitespace | Trimmed during merge |
-| Zero extensions | No-op, identical to current behavior |
-| skill.Loader with no skills loaded | Tools() returns empty, Rules() returns empty, hooks still returned (for session resume catalog cleanup) |
+| Case                                                | Decision                                                                                                |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Nil extension in the slice                          | Skip silently                                                                                           |
+| Extension returns nil from Tools() or empty Hooks() | Safe — append of nil slice is a no-op                                                                   |
+| Multiple extensions add same-named tool             | `NewAgent` returns an error (`duplicate tool name: "X"`)                                                |
+| Extension Rules() with leading/trailing whitespace  | Trimmed during merge                                                                                    |
+| Zero extensions                                     | No-op, identical to current behavior                                                                    |
+| skill.Loader with no skills loaded                  | Tools() returns empty, Rules() returns empty, hooks still returned (for session resume catalog cleanup) |
 
 ## Implementation Plan
 
 ### Phase 1: Extension interface and merge logic
+
 1. Define `Extension` interface in `dive` package
 2. Add `Extensions` field to `AgentOptions`
 3. Implement merge logic in `NewAgent`
 4. Add tests for extension merging
 
 ### Phase 2: Skill loader as extension
+
 1. Add `Tools()`, `Hooks()`, `Rules()` methods to `skill.Loader`
 2. The Loader needs `ConfigOption` support (e.g. shell expansion) — add a `SetConfigOptions` method or handle via `LoaderOptions`
 3. Deprecate `skill.ConfigureAgent` (keep working, add deprecation comment)

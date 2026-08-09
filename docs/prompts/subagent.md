@@ -15,6 +15,7 @@ files you create. Everything that matters must be in your final message.
 
 Unlike a read-only search agent, you have full read/write/execute capability. The
 standard Dive toolkit gives you:
+
 - `Read` — read a file's contents (text; use `offset`/`limit` to page through large
   files).
 - `Glob` / `Grep` / `ListDirectory` — find files by name pattern, search file

@@ -48,12 +48,12 @@ type ReadonlyState interface {
 
 **Scope prefixes:**
 
-| Prefix   | Scope       | Description                                              |
-| -------- | ----------- | -------------------------------------------------------- |
-| `app:`   | Application | Shared across all users and sessions for the app         |
+| Prefix   | Scope       | Description                                               |
+| -------- | ----------- | --------------------------------------------------------- |
+| `app:`   | Application | Shared across all users and sessions for the app          |
 | `user:`  | User        | Shared across all sessions for a given user within an app |
-| `temp:`  | Invocation  | Exists only for the current invocation, then discarded   |
-| *(none)* | Session     | Specific to this conversation thread                     |
+| `temp:`  | Invocation  | Exists only for the current invocation, then discarded    |
+| _(none)_ | Session     | Specific to this conversation thread                      |
 
 State is stored flat in a single map, but on persistence the prefixes are stripped and values are routed to separate storage (app state table, user state table, session state). On retrieval, the three scopes are merged back together with prefixes re-applied so callers see a unified view.
 
@@ -162,6 +162,7 @@ func InMemoryService() Service
 Uses `rsc.io/omap` (ordered map) keyed by composite encoded keys via `rsc.io/ordered`. This enables efficient range scanning for `List` operations using `omap.Scan(lo, hi)` rather than iterating all sessions.
 
 State is separated into three maps:
+
 - `sessions` - ordered map of session data
 - `appState` - `map[appName]stateMap`
 - `userState` - `map[appName]map[userID]stateMap`
@@ -177,12 +178,12 @@ func AutoMigrate(service session.Service) error
 
 Uses GORM with four storage models:
 
-| Model               | Primary Key                        | Purpose                |
-| ------------------- | ---------------------------------- | ---------------------- |
-| `storageSession`    | `(AppName, UserID, ID)`            | Session metadata + state |
-| `storageEvent`      | `(ID, AppName, UserID, SessionID)` | Event history          |
-| `storageAppState`   | `(AppName)`                        | App-scoped state       |
-| `storageUserState`  | `(AppName, UserID)`                | User-scoped state      |
+| Model              | Primary Key                        | Purpose                  |
+| ------------------ | ---------------------------------- | ------------------------ |
+| `storageSession`   | `(AppName, UserID, ID)`            | Session metadata + state |
+| `storageEvent`     | `(ID, AppName, UserID, SessionID)` | Event history            |
+| `storageAppState`  | `(AppName)`                        | App-scoped state         |
+| `storageUserState` | `(AppName, UserID)`                | User-scoped state        |
 
 **Stale session detection:** On `AppendEvent`, the service compares the session's `UpdateTime` (from when the caller fetched it) against the database's current `UpdateTime`. If the database is newer, it returns a stale session error. This prevents lost updates from concurrent modifications.
 
@@ -222,6 +223,7 @@ This is the most interesting design pattern. Here's the full flow:
    e. The event (with trimmed deltas) is persisted
 
 This means:
+
 - **Temp state is visible during the invocation** (step 5a applies it locally) but **never persisted** (step 5b strips it)
 - **All persistent state changes have an audit trail** via the event's `StateDelta`
 - **State scoping is transparent to agents** - they just use prefixed keys
@@ -237,6 +239,7 @@ type MutableSession struct {
 ```
 
 The Runner wraps the session from `Service.Get()` in a `MutableSession` before passing it to agents. This wrapper:
+
 - Implements both `session.Session` and `session.State`
 - Delegates all reads to the stored session
 - For `Set()`, checks that the underlying state implements `MutableState` (type assertion)
@@ -245,24 +248,31 @@ The Runner wraps the session from `Service.Get()` in a `MutableSession` before p
 ## Patterns Worth Borrowing
 
 ### Event-sourced state changes
+
 State is never written directly to storage. It always flows through events, giving you a complete audit trail. The `StateDelta` on each event records exactly what changed and when.
 
 ### Prefix-based state scoping
+
 A flat key-value map with prefixes (`app:`, `user:`, `temp:`) is simpler than separate state objects for each scope. The routing is handled transparently by the service layer. Agents don't need to know about scope boundaries.
 
 ### Temp state for invocation-scoped scratch data
+
 The `temp:` prefix lets agents store working data that's visible during processing but automatically discarded. No manual cleanup needed.
 
 ### Stale session detection
+
 Comparing timestamps before writing prevents silent data loss from concurrent modifications. Simple but effective optimistic concurrency control.
 
 ### Copy-on-read
+
 Returning cloned state maps and event slices from service methods prevents callers from accidentally mutating stored data. This is especially important for the in-memory implementation where the storage is shared mutable state.
 
 ### Composite key encoding for range scans
+
 Using `rsc.io/ordered` to encode `(AppName, UserID, SessionID)` into a single comparable key enables efficient prefix-based range scanning in ordered maps. This avoids the need for secondary indexes.
 
 ### Streaming-aware persistence
+
 Partial events (streaming tokens) are silently dropped by `AppendEvent`. This keeps the event log clean while still allowing streaming at the transport layer.
 
 ## Package Structure

@@ -62,6 +62,7 @@ that Dive agents can be exposed as remote A2A agents and can call remote A2A
 agents without redesigning Dive core around A2A semantics.
 
 **Success metrics:**
+
 - **Primary:** A Dive app can expose a local agent through A2A in under 100
   lines of integration code using an `experimental/a2a` package.
 - **Primary:** A Dive app can call a remote A2A agent and surface its progress
@@ -101,11 +102,13 @@ single-process agents. A2A support must not complicate the common local case.
 ## 4. User Stories
 
 ### US-001: Expose a Dive agent as an A2A server
+
 **Description:** As a SaaS integrator, I want to expose a Dive agent through an
 HTTP handler that implements A2A so that external orchestrators and other
 agents can call it using a standard protocol.
 
 **Acceptance Criteria:**
+
 - [ ] An experimental package provides an HTTP-facing A2A server adapter for a
       Dive agent.
 - [ ] The adapter can return task state for both quick completions and
@@ -116,11 +119,13 @@ agents can call it using a standard protocol.
       an A2A endpoint.
 
 ### US-002: Call a remote A2A agent from Dive
+
 **Description:** As a Dive user, I want to call a remote A2A agent from Go code
 without hand-crafting A2A messages so that remote agents feel like a first-
 class integration surface.
 
 **Acceptance Criteria:**
+
 - [ ] An experimental client wrapper can resolve a remote agent card and call
       the remote endpoint.
 - [ ] The wrapper supports both one-shot requests and long-running tasks.
@@ -130,11 +135,13 @@ class integration surface.
       protocol binding details for the common case.
 
 ### US-003: Represent Dive suspend/resume cleanly in A2A
+
 **Description:** As a maintainer, I want a suspended Dive run to map onto A2A
 task state cleanly so that remote callers can understand "waiting on input"
 without Dive abandoning its stronger local runtime semantics.
 
 **Acceptance Criteria:**
+
 - [ ] A suspended Dive response maps to an A2A interrupted/waiting state rather
       than to failure.
 - [ ] The mapping preserves enough information for the caller to understand why
@@ -143,11 +150,13 @@ without Dive abandoning its stronger local runtime semantics.
       inventing a different internal persistence model.
 
 ### US-004: Evolve local Task/subagent orchestration to support remote agents
+
 **Description:** As an advanced Dive user, I want the experimental task/subagent
 system to eventually support A2A-backed execution so that I can use local and
 remote agents behind one orchestration surface.
 
 **Acceptance Criteria:**
+
 - [ ] The PRD defines a path away from storing `*dive.Agent` directly in the
       task registry as the only execution model.
 - [ ] Remote A2A-backed tasks are treated as first-class task executions, not
@@ -155,11 +164,13 @@ remote agents behind one orchestration surface.
 - [ ] The design allows local and remote backends to coexist.
 
 ### US-005: Use A2A discovery/capabilities without polluting Dive core
+
 **Description:** As a platform maintainer, I want to use agent cards,
 capabilities, and discovery with Dive while keeping A2A concerns out of
 `dive.Agent` and `dive.Response`.
 
 **Acceptance Criteria:**
+
 - [ ] A2A-specific types live in an experimental package, not in the stable
       `dive` core package.
 - [ ] The stable core API does not grow agent-card or task-protocol fields just
@@ -247,6 +258,7 @@ capabilities, and discovery with Dive while keeping A2A concerns out of
   transport.
 
 **Future considerations (deferred but worth designing for):**
+
 - A2A-backed discovery integrated into subagent selection.
 - A remote-agent convenience wrapper that can be used as a Dive tool when the
   simpler abstraction is appropriate.
@@ -256,19 +268,20 @@ capabilities, and discovery with Dive while keeping A2A concerns out of
 
 ## 7. Dependencies & Risks
 
-| Risk / Dependency | Impact | Mitigation |
-|---|---|---|
-| Official A2A Go SDK API may still evolve quickly. | Dive's experimental adapter may need churn. | Keep all A2A support under `experimental/`; wrap the SDK behind Dive-owned interfaces where useful. |
-| A2A protocol complexity may tempt core leakage. | Stable Dive APIs become polluted with protocol-specific concerns. | Keep A2A types/packages separate; only make additive core changes when a real local runtime gap is proven. |
-| Dive's current task/subagent model is in-memory and local-only. | Remote-agent integration becomes awkward or duplicated. | Introduce a transport-neutral backend concept in the experimental task layer rather than teaching `TaskTool` A2A details directly. |
-| Streaming semantics may not align perfectly between provider deltas and A2A artifacts. | Remote consumers receive noisy or low-value updates. | Emit coherent output-oriented updates rather than raw provider event passthrough. |
-| Task cancellation is clearer in A2A than in current local suspend semantics. | Adapter cannot map remote cancel cleanly to local state. | Add explicit abandonment/cancel semantics if the first implementation proves the gap is real. |
-| A2A interrupted states distinguish `INPUT_REQUIRED` and `AUTH_REQUIRED`, while Dive suspend is generic today. | Adapter has to guess or collapse states. | Start with `INPUT_REQUIRED`; add optional suspend reason/category if needed. |
-| Over-scoping the first release. | A large protocol surface delays useful delivery. | Phase the work: server adapter first, client wrapper second, task backend integration third. |
+| Risk / Dependency                                                                                             | Impact                                                            | Mitigation                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Official A2A Go SDK API may still evolve quickly.                                                             | Dive's experimental adapter may need churn.                       | Keep all A2A support under `experimental/`; wrap the SDK behind Dive-owned interfaces where useful.                                |
+| A2A protocol complexity may tempt core leakage.                                                               | Stable Dive APIs become polluted with protocol-specific concerns. | Keep A2A types/packages separate; only make additive core changes when a real local runtime gap is proven.                         |
+| Dive's current task/subagent model is in-memory and local-only.                                               | Remote-agent integration becomes awkward or duplicated.           | Introduce a transport-neutral backend concept in the experimental task layer rather than teaching `TaskTool` A2A details directly. |
+| Streaming semantics may not align perfectly between provider deltas and A2A artifacts.                        | Remote consumers receive noisy or low-value updates.              | Emit coherent output-oriented updates rather than raw provider event passthrough.                                                  |
+| Task cancellation is clearer in A2A than in current local suspend semantics.                                  | Adapter cannot map remote cancel cleanly to local state.          | Add explicit abandonment/cancel semantics if the first implementation proves the gap is real.                                      |
+| A2A interrupted states distinguish `INPUT_REQUIRED` and `AUTH_REQUIRED`, while Dive suspend is generic today. | Adapter has to guess or collapse states.                          | Start with `INPUT_REQUIRED`; add optional suspend reason/category if needed.                                                       |
+| Over-scoping the first release.                                                                               | A large protocol surface delays useful delivery.                  | Phase the work: server adapter first, client wrapper second, task backend integration third.                                       |
 
 ## 8. Assumptions & Constraints
 
 **Assumptions:**
+
 - The official A2A docs and SDKs are sufficiently stable to target
   experimentally as of 2026-04-11.
 - Dive users who care about remote-agent interoperability are willing to adopt
@@ -277,6 +290,7 @@ capabilities, and discovery with Dive while keeping A2A concerns out of
   execution model.
 
 **Constraints:**
+
 - Must not break the stable `dive` public API.
 - Must preserve Dive's library-first philosophy: explicit configuration, no CLI
   coupling, no hidden global agent registry.
@@ -303,6 +317,7 @@ Responsibilities:
 - `remoteagent/`: ergonomic higher-level adapter for calling remote A2A agents
 
 **Runtime mapping principles:**
+
 - Dive local runtime semantics stay authoritative.
 - One `CreateResponse(...)` execution generally maps to one A2A task.
 - `Session.ID()` is the natural default source for A2A `contextId`.
@@ -310,6 +325,7 @@ Responsibilities:
   not failure.
 
 **Task/subagent integration direction:**
+
 - Do not teach A2A details directly into today's `TaskTool` implementation.
 - Instead, move toward a task execution backend abstraction so local and remote
   executions can share orchestration concepts.
@@ -327,6 +343,7 @@ type TaskBackend interface {
 ```
 
 **Discovery direction:**
+
 - Static agent-card configuration should be supported first.
 - Well-known URI discovery is desirable next.
 - Catalog/registry-backed discovery is a later integration concern, not a v1
@@ -364,23 +381,27 @@ type TaskBackend interface {
 ## 11. Suggested Rollout
 
 ### Phase 1: Experimental A2A server adapter
+
 - Expose a Dive agent as an A2A endpoint
 - Generate/serve an agent card
 - Support task creation, status, streaming, and cancellation
 - Map local suspend to `INPUT_REQUIRED`
 
 ### Phase 2: Experimental A2A client + remote agent wrapper
+
 - Resolve/fetch remote agent cards
 - Call remote A2A agents from Go code
 - Surface progress and final results through Dive-friendly abstractions
 
 ### Phase 3: Transport-neutral task backend
+
 - Refactor the experimental task/subagent layer away from direct `*dive.Agent`
   storage
 - Support local and A2A-backed task backends
 - Stop treating interrupted remote work as failure-by-definition
 
 ### Phase 4: Optional core refinements
+
 - Add suspend reason/category if needed for `AUTH_REQUIRED`
 - Add explicit abandonment/cancellation for suspended local work if needed
 

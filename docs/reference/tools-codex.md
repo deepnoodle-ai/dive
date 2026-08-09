@@ -81,11 +81,11 @@ pub(crate) enum ToolSpec {
 }
 ```
 
-| Variant      | Use Case                                               |
-| ------------ | ------------------------------------------------------ |
-| `Function`   | Standard JSON function tools with typed parameters     |
-| `LocalShell` | Built-in shell execution (Responses API native tool)   |
-| `WebSearch`  | Built-in web search (Responses API native tool)        |
+| Variant      | Use Case                                                                   |
+| ------------ | -------------------------------------------------------------------------- |
+| `Function`   | Standard JSON function tools with typed parameters                         |
+| `LocalShell` | Built-in shell execution (Responses API native tool)                       |
+| `WebSearch`  | Built-in web search (Responses API native tool)                            |
 | `Freeform`   | Custom tools with non-JSON formats (e.g. `apply_patch` uses a diff syntax) |
 
 ### `ResponsesApiTool`
@@ -326,8 +326,8 @@ pub enum ToolOutput {
 
 `ToolOutput` is converted to the appropriate wire format via `into_response()`:
 
-| Payload Type | Output Wire Format           |
-| ------------ | ---------------------------- |
+| Payload Type | Output Wire Format                                           |
+| ------------ | ------------------------------------------------------------ |
 | `Function`   | `ResponseInputItem::FunctionCallOutput` with structured body |
 | `Custom`     | `ResponseInputItem::CustomToolCallOutput` with plain string  |
 | `Mcp`        | `ResponseInputItem::McpToolCallOutput` with MCP result       |
@@ -341,40 +341,40 @@ Codex registers built-in tools via the `build_specs()` function. Key tools:
 
 ### Shell Execution
 
-| Tool              | Description                                    | Key Parameters                                   |
-| ----------------- | ---------------------------------------------- | ------------------------------------------------ |
-| `exec_command`    | PTY-based command execution                    | `cmd`, `workdir`, `shell`, `timeout`, `tty`      |
-| `write_stdin`     | Write to an existing exec session              | `session_id`, `chars`                            |
-| `shell`           | Array-based command execution                  | `command` (array), `workdir`, `timeout_ms`       |
-| `shell_command`   | String-based command execution                 | `command` (string), `workdir`, `timeout_ms`      |
+| Tool            | Description                       | Key Parameters                              |
+| --------------- | --------------------------------- | ------------------------------------------- |
+| `exec_command`  | PTY-based command execution       | `cmd`, `workdir`, `shell`, `timeout`, `tty` |
+| `write_stdin`   | Write to an existing exec session | `session_id`, `chars`                       |
+| `shell`         | Array-based command execution     | `command` (array), `workdir`, `timeout_ms`  |
+| `shell_command` | String-based command execution    | `command` (string), `workdir`, `timeout_ms` |
 
 ### File Operations
 
-| Tool          | Description                              |
-| ------------- | ---------------------------------------- |
-| `apply_patch` | Apply a unified diff patch to files      |
-| `read_file`   | Read file contents (experimental)        |
-| `list_dir`    | List directory contents (experimental)   |
-| `grep_files`  | Search file contents (experimental)      |
+| Tool          | Description                            |
+| ------------- | -------------------------------------- |
+| `apply_patch` | Apply a unified diff patch to files    |
+| `read_file`   | Read file contents (experimental)      |
+| `list_dir`    | List directory contents (experimental) |
+| `grep_files`  | Search file contents (experimental)    |
 
 ### Agent Collaboration
 
-| Tool            | Description                              |
-| --------------- | ---------------------------------------- |
-| `spawn_agent`   | Launch a sub-agent                       |
-| `send_input`    | Send input to a running sub-agent        |
-| `resume_agent`  | Resume a paused sub-agent                |
-| `wait`          | Wait for a sub-agent to complete         |
-| `close_agent`   | Terminate a sub-agent                    |
+| Tool           | Description                       |
+| -------------- | --------------------------------- |
+| `spawn_agent`  | Launch a sub-agent                |
+| `send_input`   | Send input to a running sub-agent |
+| `resume_agent` | Resume a paused sub-agent         |
+| `wait`         | Wait for a sub-agent to complete  |
+| `close_agent`  | Terminate a sub-agent             |
 
 ### Other
 
-| Tool                 | Description                           |
-| -------------------- | ------------------------------------- |
-| `request_user_input` | Ask the user a question with options  |
-| `view_image`         | View a local image file               |
-| `get_memory`         | Load a stored memory payload          |
-| `update_plan`        | Update the agent's plan (freeform)    |
+| Tool                 | Description                          |
+| -------------------- | ------------------------------------ |
+| `request_user_input` | Ask the user a question with options |
+| `view_image`         | View a local image file              |
+| `get_memory`         | Load a stored memory payload         |
+| `update_plan`        | Update the agent's plan (freeform)   |
 
 ### MCP Resource Tools
 
@@ -456,6 +456,7 @@ pub(crate) fn mcp_tool_to_openai_tool(
 ```
 
 The conversion:
+
 - Extracts `description` and `input_schema` from the MCP tool definition
 - Ensures `properties` exists (some MCP servers omit it)
 - Runs `sanitize_json_schema()` to normalize type fields and structure
@@ -515,11 +516,11 @@ pub enum ExecApprovalRequirement {
 }
 ```
 
-| Outcome         | Behavior                                                |
-| --------------- | ------------------------------------------------------- |
-| `Forbidden`     | Command is blocked; error returned to the model         |
+| Outcome         | Behavior                                                    |
+| --------------- | ----------------------------------------------------------- |
+| `Forbidden`     | Command is blocked; error returned to the model             |
 | `NeedsApproval` | Execution pauses; user is prompted via `ExecApproval` event |
-| `Skip`          | Execution proceeds immediately (may bypass sandbox)     |
+| `Skip`          | Execution proceeds immediately (may bypass sandbox)         |
 
 Shell tools include `sandbox_permissions` and `justification` parameters in
 their schema, allowing the model to request specific permissions and explain

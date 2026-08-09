@@ -5,10 +5,10 @@ program, no Python, behind a single interface. Here's who lies best, and the
 receipts.**
 
 The Colosseum is a cross-provider social-deduction arena. Every player is a
-*different LLM provider's model* (Claude, GPT, Gemini, Grok), all competing in a
+_different LLM provider's model_ (Claude, GPT, Gemini, Grok), all competing in a
 game of Werewolf where lying, deduction, and persuasion decide who wins. After
 each match you get a replayable transcript that **reveals every player's private
-reasoning** — the moment where you see that the wolf *knew* it was lying.
+reasoning** — the moment where you see that the wolf _knew_ it was lying.
 
 It is built with [Dive](https://github.com/deepnoodle-ai/dive), and it exists to
 show off the one thing Dive makes trivial: **many providers behind one
@@ -44,14 +44,14 @@ colosseum serve --dir transcripts                             # open the replay 
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `colosseum run` | Play one match and print it live to the terminal. |
-| `colosseum tournament` | Run N matches, build an ELO leaderboard + metrics, write a transcript per match. |
-| `colosseum serve` | Serve the web replay viewer + leaderboard from a transcripts directory. |
-| `colosseum leaderboard <dir-or-json>` | Print the standings table for a transcripts dir or a saved `leaderboard.json`. |
-| `colosseum highlights <transcript>` | Analyze one match: per-player metrics + auto-detected dramatic moments. |
-| `colosseum serve-agent` | Host a Dive agent as an A2A challenger — "bring your own agent to the arena." |
+| Command                               | What it does                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| `colosseum run`                       | Play one match and print it live to the terminal.                                |
+| `colosseum tournament`                | Run N matches, build an ELO leaderboard + metrics, write a transcript per match. |
+| `colosseum serve`                     | Serve the web replay viewer + leaderboard from a transcripts directory.          |
+| `colosseum leaderboard <dir-or-json>` | Print the standings table for a transcripts dir or a saved `leaderboard.json`.   |
+| `colosseum highlights <transcript>`   | Analyze one match: per-player metrics + auto-detected dramatic moments.          |
+| `colosseum serve-agent`               | Host a Dive agent as an A2A challenger — "bring your own agent to the arena."    |
 
 Run `colosseum <command> -h` for each command's flags.
 
@@ -62,12 +62,12 @@ Run `colosseum <command> -h` for each command's flags.
 You need an API key for each provider you put in the match. Set whichever you
 have; the runner verifies them up front and tells you exactly what's missing.
 
-| Provider | Key flag value | Env var(s) |
-| --- | --- | --- |
-| Claude (Anthropic) | `claude` | `ANTHROPIC_API_KEY` |
-| GPT (OpenAI) | `gpt` | `OPENAI_API_KEY` |
-| Gemini (Google) | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
-| Grok (xAI) | `grok` | `XAI_API_KEY` or `GROK_API_KEY` |
+| Provider           | Key flag value | Env var(s)                           |
+| ------------------ | -------------- | ------------------------------------ |
+| Claude (Anthropic) | `claude`       | `ANTHROPIC_API_KEY`                  |
+| GPT (OpenAI)       | `gpt`          | `OPENAI_API_KEY`                     |
+| Gemini (Google)    | `gemini`       | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
+| Grok (xAI)         | `grok`         | `XAI_API_KEY` or `GROK_API_KEY`      |
 
 ```bash
 # From this directory (it's its own Go module):
@@ -84,17 +84,17 @@ several of its models (`--players claude,gpt,grok,claude` → `claude-1`,
 
 ### Flags
 
-| Flag | Default | What it does |
-| --- | --- | --- |
-| `--players` | `claude,gpt,gemini,grok` | Comma-separated provider keys. |
-| `--model key=model` | — | Override a provider's model (repeatable), e.g. `--model claude=claude-opus-4-8`. |
-| `--premium` | off | Use premium model tiers instead of the cheap defaults. |
-| `--seed` | time-based | RNG seed; the same seed reproduces the exact role assignment. |
-| `--max-rounds` | `8` | Safety cap on rounds. |
-| `--discussion-rounds` | `1` | Speaking passes per day. |
-| `--timeout` | `90s` | Per-player-turn timeout. |
-| `--reveal` | off | Print each player's private reasoning live (it is **always** in the transcript). |
-| `--transcript` | `colosseum-<ts>.jsonl` | Where to write the JSONL transcript. |
+| Flag                  | Default                  | What it does                                                                     |
+| --------------------- | ------------------------ | -------------------------------------------------------------------------------- |
+| `--players`           | `claude,gpt,gemini,grok` | Comma-separated provider keys.                                                   |
+| `--model key=model`   | —                        | Override a provider's model (repeatable), e.g. `--model claude=claude-opus-4-8`. |
+| `--premium`           | off                      | Use premium model tiers instead of the cheap defaults.                           |
+| `--seed`              | time-based               | RNG seed; the same seed reproduces the exact role assignment.                    |
+| `--max-rounds`        | `8`                      | Safety cap on rounds.                                                            |
+| `--discussion-rounds` | `1`                      | Speaking passes per day.                                                         |
+| `--timeout`           | `90s`                    | Per-player-turn timeout.                                                         |
+| `--reveal`            | off                      | Print each player's private reasoning live (it is **always** in the transcript). |
+| `--transcript`        | `colosseum-<ts>.jsonl`   | Where to write the JSONL transcript.                                             |
 
 ### Cost
 
@@ -102,7 +102,7 @@ Model calls cost money, and a match makes many of them. By default each provider
 uses its **cheap tier** (Haiku, GPT-mini, Gemini Flash, Grok-fast) so a full
 leaderboard run stays affordable; pass `--premium` (or `--model`) for showcase
 matches. Every turn's token usage is logged to the transcript and summarized at
-the end. Note that one *action* costs two model calls — one to make the tool
+the end. Note that one _action_ costs two model calls — one to make the tool
 call, one to acknowledge and end the turn — so budget accordingly.
 
 ---
@@ -116,7 +116,7 @@ A model-vs-model arena is only interesting if it's fair, and critics will
   in [`arena/prompt.go`](arena/prompt.go) — read it; that's the whole story.
   Nothing in it is tailored to any provider.
 - The **only** things that differ between players are (1) the model behind the
-  seat, (2) the *legitimate* private information their role grants — their own
+  seat, (2) the _legitimate_ private information their role grants — their own
   role, who their fellow wolves are, what the Seer has learned (delivered through
   in-game messages, **never** the system prompt), and (3) **how** they submit an
   action: local players call typed tools (validated by a referee hook); remote
@@ -198,11 +198,11 @@ Werewolf?" Each match's result feeds pairwise ELO updates (every winner-team
 model beats every loser-team model). Beyond raw win rate, three skill metrics are
 derived from the transcript:
 
-| Metric | Who | How it's measured |
-| --- | --- | --- |
-| **Deception** | Werewolves | Fraction of the match's rounds the wolf survived unlynched — a wolf that lasts is deceiving well. |
-| **Deduction** | Villagers | Fraction of a player's day-votes that landed on an actual werewolf. |
-| **Persuasion** | Everyone | Average fraction of *other* voters who matched this player's vote — a proxy for "did the table follow me." |
+| Metric         | Who        | How it's measured                                                                                          |
+| -------------- | ---------- | ---------------------------------------------------------------------------------------------------------- |
+| **Deception**  | Werewolves | Fraction of the match's rounds the wolf survived unlynched — a wolf that lasts is deceiving well.          |
+| **Deduction**  | Villagers  | Fraction of a player's day-votes that landed on an actual werewolf.                                        |
+| **Persuasion** | Everyone   | Average fraction of _other_ voters who matched this player's vote — a proxy for "did the table follow me." |
 
 The leaderboard persists to `leaderboard.json` and **accumulates across runs**, so
 a nightly tournament keeps building history. Print it any time:
@@ -229,7 +229,7 @@ step, no Node, no CDN — the whole UI is `go:embed`-ed into the binary) at
   match event by event.
 - A **"reveal private reasoning" toggle** — the centerpiece. Off, you see only
   what the table saw. On, it unmasks every player's hidden reasoning, their secret
-  roles, the wolves' night targets, and the Seer's visions: the "oh no, it *knew*"
+  roles, the wolves' night targets, and the Seer's visions: the "oh no, it _knew_"
   moment.
 - A **highlights** panel and a sortable **leaderboard** tab.
 
@@ -249,7 +249,7 @@ moments — the raw material for shareable clips:
 
 ## Bring your own agent (A2A)
 
-A seat doesn't have to be a model in *this* binary — it can be **any agent reached
+A seat doesn't have to be a model in _this_ binary — it can be **any agent reached
 over the wire**, using Dive's A2A support. Host a challenger:
 
 ```bash
@@ -266,7 +266,7 @@ players, plus a request to reply with one JSON action object
 (`{"action","target","message","reasoning"}`); it validates the reply against the
 exact same legal-move rules the referee enforces locally. The challenger keeps a
 continuing private game memory across its turns via the A2A context id. This is
-how contributors enter their *own* model — or their own scaffolding — as a
+how contributors enter their _own_ model — or their own scaffolding — as a
 competitor. `serve-agent` is a ~60-line reference host; any A2A server that
 honours the JSON protocol works.
 
