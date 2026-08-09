@@ -36,6 +36,7 @@ type StreamIterator struct {
 	messageStartSent bool
 	nextBlockIndex   int
 	textBlockIndex   int // index of the open text block, or -1 if none
+	thinkingBlockIdx int // index of the open thinking block, or -1 if none
 	usage            *genai.GenerateContentResponseUsageMetadata
 	finishReason     genai.FinishReason
 
@@ -45,11 +46,12 @@ type StreamIterator struct {
 // NewStreamIteratorFromSeq creates a new StreamIterator from a streaming sequence
 func NewStreamIteratorFromSeq(ctx context.Context, streamSeq iter.Seq2[*genai.GenerateContentResponse, error], model string) *StreamIterator {
 	return &StreamIterator{
-		ctx:            ctx,
-		streamSeq:      streamSeq,
-		model:          model,
-		responseID:     fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano()),
-		textBlockIndex: -1,
+		ctx:              ctx,
+		streamSeq:        streamSeq,
+		model:            model,
+		responseID:       fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano()),
+		textBlockIndex:   -1,
+		thinkingBlockIdx: -1,
 	}
 }
 
@@ -172,9 +174,7 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 			}
 		case part.Text != "":
 			if part.Thought {
-				// Thought-summary parts are not surfaced (matching the
-				// previous behavior based on response.Text(), which skips
-				// them).
+				s.queueThinking(part.Text)
 				continue
 			}
 			s.queueText(part.Text)
@@ -183,8 +183,37 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 	return nil
 }
 
+// queueThinking emits a thinking delta, opening a new thinking content block if
+// needed. Gemini flags thought summaries on otherwise ordinary text parts, so
+// they are separated here rather than being folded into the answer.
+func (s *StreamIterator) queueThinking(text string) {
+	s.closeTextBlock()
+	if s.thinkingBlockIdx < 0 {
+		index := s.nextBlockIndex
+		s.nextBlockIndex++
+		s.thinkingBlockIdx = index
+		s.eventQueue = append(s.eventQueue, &llm.Event{
+			Type:  llm.EventTypeContentBlockStart,
+			Index: &index,
+			ContentBlock: &llm.EventContentBlock{
+				Type: llm.ContentTypeThinking,
+			},
+		})
+	}
+	index := s.thinkingBlockIdx
+	s.eventQueue = append(s.eventQueue, &llm.Event{
+		Type:  llm.EventTypeContentBlockDelta,
+		Index: &index,
+		Delta: &llm.EventDelta{
+			Type:     llm.EventDeltaTypeThinking,
+			Thinking: text,
+		},
+	})
+}
+
 // queueText emits a text delta, opening a new text content block if needed.
 func (s *StreamIterator) queueText(text string) {
+	s.closeThinkingBlock()
 	if s.textBlockIndex < 0 {
 		index := s.nextBlockIndex
 		s.nextBlockIndex++
@@ -214,6 +243,7 @@ func (s *StreamIterator) queueText(text string) {
 // as one delta, and stops immediately. Parallel calls each get their own
 // sequential block index.
 func (s *StreamIterator) queueFunctionCall(part *genai.Part) error {
+	s.closeThinkingBlock()
 	call := part.FunctionCall
 	args, err := json.Marshal(call.Args)
 	if err != nil {
@@ -259,6 +289,20 @@ func (s *StreamIterator) queueFunctionCall(part *genai.Part) error {
 	return nil
 }
 
+// closeThinkingBlock emits a content_block_stop for the open thinking block, if
+// any.
+func (s *StreamIterator) closeThinkingBlock() {
+	if s.thinkingBlockIdx < 0 {
+		return
+	}
+	index := s.thinkingBlockIdx
+	s.thinkingBlockIdx = -1
+	s.eventQueue = append(s.eventQueue, &llm.Event{
+		Type:  llm.EventTypeContentBlockStop,
+		Index: &index,
+	})
+}
+
 // closeTextBlock emits a content_block_stop for the open text block, if any.
 func (s *StreamIterator) closeTextBlock() {
 	if s.textBlockIndex < 0 {
@@ -279,6 +323,7 @@ func (s *StreamIterator) queueFinalEvents() {
 		// Stream ended without any chunks; nothing to finalize.
 		return
 	}
+	s.closeThinkingBlock()
 	s.closeTextBlock()
 
 	delta := &llm.EventDelta{}

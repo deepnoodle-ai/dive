@@ -25,8 +25,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **New `llm.ClampReasoningEffort`** maps a requested effort onto the closest
   level a model accepts.
 
+- **Gemini thinking control is now wired up.** `WithReasoningEffort` maps to
+  `thinkingConfig.thinkingLevel`, `WithReasoningBudget` to `thinkingBudget`,
+  `WithAdaptiveThinking` to a dynamic budget, and `WithThinkingDisplay` to
+  `includeThoughts`. All four were previously discarded before the request.
+
 ### Fixed
 
+- **Gemini thought summaries were emitted as answer text.** With thoughts
+  enabled, the non-streaming path spliced the model's reasoning into its reply;
+  the streaming path dropped it. Both now produce `llm.ThinkingContent`.
 - **Reasoning effort was sent to models that have no reasoning parameter**,
   producing a 400 on every request. Affects `gpt-4o` and `gpt-4.1`, plus
   `grok-build`, `grok-code-fast`, and both `grok-4.20-0309` models. The CLI's new
