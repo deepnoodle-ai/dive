@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Anthropic per-model capability gaps.** `claude-opus-5` was absent from every
+  reasoning/thinking classification in `providers/anthropic`, so effort requests
+  fell through to the legacy thinking-budget path and `max`/`xhigh` were silently
+  downgraded to `high`. Opus 5 now uses native `output_config.effort`, the full
+  effort ladder, adaptive-only thinking, and thinking-on-by-default.
+- **Temperature is now dropped on Opus 4.7/4.8.** These models reject sampling
+  parameters with a 400; because thinking is off by default on them, a
+  caller-supplied `Temperature` was forwarded and rejected by the API.
+- **`xhigh` effort is no longer downgraded on Sonnet 5**, which supports the full
+  `low`–`max` ladder.
+- **Forced `tool_choice` no longer fails client-side on thinking-by-default
+  models** that accept an explicit thinking disable (Opus 5, Sonnet 5). An
+  explicit thinking config still takes precedence.
+
 ## [1.19.0] - 2026-08-09
 
 ### Added

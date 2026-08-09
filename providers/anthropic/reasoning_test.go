@@ -188,6 +188,36 @@ func TestDefaultThinkingWithForcedToolChoiceErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "tool_choice auto or none")
 }
 
+func TestDefaultThinkingAllowsForcedToolChoiceWhenDisableIsAccepted(t *testing.T) {
+	// Opus 5 and Sonnet 5 default thinking on but accept an explicit disable, so
+	// Dive must not reject a forced tool choice client-side — the API accepts it.
+	for _, model := range []string{ModelClaudeOpus5, ModelClaudeSonnet5} {
+		req := buildReq(t, model,
+			llm.WithTools(reasoningTestTool()),
+			llm.WithToolChoice(&llm.ToolChoice{
+				Type: llm.ToolChoiceTypeTool,
+				Name: "lookup",
+			}))
+		assert.NotNil(t, req.ToolChoice)
+		assert.Equal(t, ToolChoiceType(llm.ToolChoiceTypeTool), req.ToolChoice.Type)
+	}
+}
+
+func TestExplicitThinkingWithForcedToolChoiceStillErrors(t *testing.T) {
+	// An explicit thinking config remains authoritative on the default-on models.
+	cfg := &llm.Config{}
+	cfg.Apply(
+		llm.WithModel(ModelClaudeOpus5),
+		llm.WithAdaptiveThinking(),
+		llm.WithTools(reasoningTestTool()),
+		llm.WithToolChoice(llm.ToolChoiceAny),
+	)
+	var req Request
+	err := New().applyRequestConfig(&req, cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_choice auto or none")
+}
+
 func TestThinkingAllowsToolChoiceAutoAndNone(t *testing.T) {
 	for _, choice := range []*llm.ToolChoice{llm.ToolChoiceAuto, llm.ToolChoiceNone} {
 		req := buildReq(t, ModelClaudeOpus46,
@@ -267,10 +297,12 @@ func TestModelCapabilityHelpers(t *testing.T) {
 	assert.True(t, modelSupportsEffortParam(ModelClaudeFable5))
 	assert.True(t, modelSupportsEffortParam(ModelClaudeMythos5))
 	assert.True(t, modelSupportsEffortParam(ModelClaudeSonnet5))
+	assert.True(t, modelSupportsEffortParam(ModelClaudeOpus5))
 	assert.False(t, modelSupportsEffortParam(ModelClaude37Sonnet20250219))
 
 	assert.True(t, modelRejectsManualThinking(ModelClaudeOpus47))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeOpus48))
+	assert.True(t, modelRejectsManualThinking(ModelClaudeOpus5))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeFable5))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeMythos5))
 	assert.True(t, modelRejectsManualThinking(ModelClaudeSonnet5))
@@ -282,19 +314,40 @@ func TestModelCapabilityHelpers(t *testing.T) {
 	assert.True(t, modelSupportsXHighEffort(ModelClaudeMythos5))
 	assert.True(t, modelSupportsMaxEffort(ModelClaudeMythos5))
 
-	// Sonnet 5 supports max effort (like Sonnet 4.6) but not xhigh.
-	assert.False(t, modelSupportsXHighEffort(ModelClaudeSonnet5))
+	// Sonnet 5 is the first Sonnet-tier model with the full effort ladder.
+	assert.True(t, modelSupportsXHighEffort(ModelClaudeSonnet5))
 	assert.True(t, modelSupportsMaxEffort(ModelClaudeSonnet5))
+	assert.False(t, modelSupportsXHighEffort(ModelClaudeSonnet46))
+	assert.True(t, modelSupportsMaxEffort(ModelClaudeSonnet46))
 
-	// Sonnet 5 rejects sampling params and defaults thinking on.
+	// Opus 5 supports the full effort ladder.
+	assert.True(t, modelSupportsXHighEffort(ModelClaudeOpus5))
+	assert.True(t, modelSupportsMaxEffort(ModelClaudeOpus5))
+
+	// Opus 4.7/4.8 and the Claude 5 family reject sampling params; Opus 4.6 and
+	// Sonnet 4.6 still accept them.
+	assert.True(t, modelRejectsTemperature(ModelClaudeOpus47))
+	assert.True(t, modelRejectsTemperature(ModelClaudeOpus48))
+	assert.True(t, modelRejectsTemperature(ModelClaudeOpus5))
 	assert.True(t, modelRejectsTemperature(ModelClaudeSonnet5))
+	assert.False(t, modelRejectsTemperature(ModelClaudeOpus46))
+	assert.False(t, modelRejectsTemperature(ModelClaudeSonnet46))
+
+	// Opus 5 and Sonnet 5 default thinking on and accept an explicit disable.
+	assert.True(t, modelDefaultsThinkingOn(ModelClaudeOpus5))
 	assert.True(t, modelDefaultsThinkingOn(ModelClaudeSonnet5))
 	assert.True(t, modelRunsThinkingByDefault(ModelClaudeFable5))
 	assert.True(t, modelRunsThinkingByDefault(ModelClaudeMythos5))
 	assert.True(t, modelRunsThinkingByDefault(ModelClaudeSonnet5))
+	assert.True(t, modelRunsThinkingByDefault(ModelClaudeOpus5))
 	assert.False(t, modelRunsThinkingByDefault(ModelClaudeOpus48))
 	assert.False(t, modelDefaultsThinkingOn(ModelClaudeFable5))
 	assert.False(t, modelDefaultsThinkingOn(ModelClaudeSonnet46))
+
+	// Only Opus 5 caps an explicit thinking disable at effort high.
+	assert.True(t, modelRejectsDisabledThinkingAboveHighEffort(ModelClaudeOpus5))
+	assert.False(t, modelRejectsDisabledThinkingAboveHighEffort(ModelClaudeOpus48))
+	assert.False(t, modelRejectsDisabledThinkingAboveHighEffort(ModelClaudeSonnet5))
 }
 
 func TestReasoningEffortFable5UsesOutputConfig(t *testing.T) {
@@ -322,11 +375,10 @@ func TestThinkingDisabledFable5OmitsThinkingParam(t *testing.T) {
 }
 
 func TestReasoningEffortSonnet5UsesOutputConfig(t *testing.T) {
-	// Sonnet 5 takes the native effort parameter. It does not support xhigh, so
-	// that request degrades to high rather than erroring.
+	// Sonnet 5 takes the native effort parameter, including xhigh.
 	req := buildReq(t, ModelClaudeSonnet5, llm.WithReasoningEffort(llm.ReasoningEffortXHigh))
 	assert.NotNil(t, req.OutputConfig)
-	assert.Equal(t, "high", req.OutputConfig.Effort)
+	assert.Equal(t, "xhigh", req.OutputConfig.Effort)
 	assert.Nil(t, req.Thinking)
 }
 
@@ -351,4 +403,86 @@ func TestSonnet5RejectsTemperature(t *testing.T) {
 	// Sampling parameters return a 400 on Sonnet 5; Dive drops temperature.
 	req := buildReq(t, ModelClaudeSonnet5, llm.WithTemperature(0.7))
 	assert.Nil(t, req.Temperature)
+}
+
+func TestSonnet5SupportsXHighEffort(t *testing.T) {
+	// Sonnet 5 takes xhigh natively rather than being downgraded to high.
+	req := buildReq(t, ModelClaudeSonnet5, llm.WithReasoningEffort(llm.ReasoningEffortXHigh))
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "xhigh", req.OutputConfig.Effort)
+}
+
+func TestOpus47And48RejectTemperature(t *testing.T) {
+	// Sampling parameters return a 400 on Opus 4.7/4.8. Thinking is off by
+	// default on these models, so the temperature drop cannot rely on the
+	// thinking-enabled path.
+	for _, model := range []string{ModelClaudeOpus47, ModelClaudeOpus48} {
+		req := buildReq(t, model, llm.WithTemperature(0.7))
+		assert.Nil(t, req.Temperature)
+		assert.Nil(t, req.Thinking)
+	}
+}
+
+func TestReasoningEffortOpus5UsesOutputConfig(t *testing.T) {
+	// Opus 5 takes the native effort parameter across the full ladder.
+	for _, effort := range []llm.ReasoningEffort{
+		llm.ReasoningEffortLow,
+		llm.ReasoningEffortHigh,
+		llm.ReasoningEffortXHigh,
+		llm.ReasoningEffortMax,
+	} {
+		req := buildReq(t, ModelClaudeOpus5, llm.WithReasoningEffort(effort))
+		assert.NotNil(t, req.OutputConfig)
+		assert.Equal(t, string(effort), req.OutputConfig.Effort)
+	}
+}
+
+func TestReasoningBudgetOpus5FallsBackToAdaptive(t *testing.T) {
+	// Manual budget_tokens returns a 400 on Opus 5; Dive uses adaptive thinking.
+	req := buildReq(t, ModelClaudeOpus5, llm.WithReasoningBudget(8000))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "adaptive", req.Thinking.Type)
+	assert.Equal(t, 0, req.Thinking.BudgetTokens)
+}
+
+func TestOpus5RejectsTemperature(t *testing.T) {
+	req := buildReq(t, ModelClaudeOpus5, llm.WithTemperature(0.7))
+	assert.Nil(t, req.Temperature)
+}
+
+func TestThinkingDisabledOpus5EmitsExplicitDisable(t *testing.T) {
+	// Opus 5 defaults thinking on, so a disable must be sent explicitly —
+	// omitting the parameter would leave adaptive thinking enabled.
+	req := buildReq(t, ModelClaudeOpus5, llm.WithThinking(llm.ThinkingTypeDisabled))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "disabled", req.Thinking.Type)
+}
+
+func TestThinkingDisabledOpus5AboveHighEffortErrors(t *testing.T) {
+	// Opus 5 accepts an explicit thinking disable only at effort high or below.
+	for _, effort := range []llm.ReasoningEffort{
+		llm.ReasoningEffortXHigh,
+		llm.ReasoningEffortMax,
+	} {
+		cfg := &llm.Config{}
+		cfg.Apply(
+			llm.WithModel(ModelClaudeOpus5),
+			llm.WithReasoningEffort(effort),
+			llm.WithThinking(llm.ThinkingTypeDisabled),
+		)
+		var req Request
+		err := New().applyRequestConfig(&req, cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "effort high or below")
+	}
+}
+
+func TestThinkingDisabledOpus5AtHighEffortOK(t *testing.T) {
+	req := buildReq(t, ModelClaudeOpus5,
+		llm.WithReasoningEffort(llm.ReasoningEffortHigh),
+		llm.WithThinking(llm.ThinkingTypeDisabled))
+	assert.NotNil(t, req.Thinking)
+	assert.Equal(t, "disabled", req.Thinking.Type)
+	assert.NotNil(t, req.OutputConfig)
+	assert.Equal(t, "high", req.OutputConfig.Effort)
 }
