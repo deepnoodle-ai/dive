@@ -32,8 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   comparing against the old string — routing tables, stored session metadata —
   needs updating.
 - **Ollama catalog rebuilt around current model families** — GPT-OSS, Qwen3.6,
-  Gemma 4, GLM-4.7 Flash, and DeepSeek-R1, each with the context window Ollama
-  reports. `ollama.DefaultModel` is now `ModelGPTOSS_20B` (`gpt-oss:20b`),
+  Gemma 4, GLM-4.7 Flash, MiniMax, and DeepSeek-R1, each with the context
+  window Ollama reports. MiniMax M2.7 and M3 are Ollama Cloud only, so they
+  carry the `:cloud` tag in their ids and no pricing entry. `ollama.DefaultModel` is now `ModelGPTOSS_20B` (`gpt-oss:20b`),
   replacing `llama3.2:3b`. Every family also gets an untagged constant matching
   what `ollama run <family>` resolves to, and `glm-` now routes to the Ollama
   provider. Mistral models are intentionally absent: they belong to the

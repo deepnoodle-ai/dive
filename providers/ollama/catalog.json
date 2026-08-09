@@ -109,6 +109,20 @@
       "context_window": 202752
     },
     {
+      "go_name": "ModelMiniMaxM27",
+      "id": "minimax-m2.7:cloud",
+      "kind": "text",
+      "display_name": "MiniMax M2.7",
+      "context_window": 204800
+    },
+    {
+      "go_name": "ModelMiniMaxM3",
+      "id": "minimax-m3:cloud",
+      "kind": "text",
+      "display_name": "MiniMax M3",
+      "context_window": 524288
+    },
+    {
       "go_name": "ModelDeepSeekR1",
       "id": "deepseek-r1",
       "kind": "text",

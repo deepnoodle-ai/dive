@@ -106,6 +106,10 @@ ollama.ModelGemma4_31B   // "gemma4:31b"
 ollama.ModelGLM47Flash      // "glm-4.7-flash"
 ollama.ModelDeepSeekR1_8B   // "deepseek-r1:8b"
 ollama.ModelDeepSeekR1_32B  // "deepseek-r1:32b"
+
+// Ollama Cloud only — no local weights are published for these
+ollama.ModelMiniMaxM3   // "minimax-m3:cloud"
+ollama.ModelMiniMaxM27  // "minimax-m2.7:cloud"
 ```
 
 Mistral models are not listed here: use the `mistral` provider for those.

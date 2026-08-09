@@ -16,6 +16,8 @@ const (
 	ModelGemma4_26B      = "gemma4:26b"
 	ModelGemma4_31B      = "gemma4:31b"
 	ModelGLM47Flash      = "glm-4.7-flash"
+	ModelMiniMaxM27      = "minimax-m2.7:cloud"
+	ModelMiniMaxM3       = "minimax-m3:cloud"
 	ModelDeepSeekR1      = "deepseek-r1"
 	ModelDeepSeekR1_1_5B = "deepseek-r1:1.5b"
 	ModelDeepSeekR1_7B   = "deepseek-r1:7b"

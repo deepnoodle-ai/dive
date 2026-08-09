@@ -17,6 +17,7 @@ func init() {
 			"gemma",
 			"glm-",
 			"gpt-oss",
+			"minimax-",
 			"qwen",
 			"phi",
 			"deepseek",
