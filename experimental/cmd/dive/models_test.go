@@ -51,8 +51,7 @@ func TestGrok45ContextWindow(t *testing.T) {
 		want  int
 	}{
 		{"grok-4.5", 500_000},
-		{"grok-4.5-latest", 500_000},
-		{"grok-build-latest", 500_000},
+		{"grok-build-0.1", 256_000},
 	}
 
 	for _, tt := range tests {

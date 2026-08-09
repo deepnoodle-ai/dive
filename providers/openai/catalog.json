@@ -168,16 +168,6 @@
       "display_name": "GPT-5.1"
     },
     {
-      "go_name": "ModelGPT51Mini",
-      "id": "gpt-5.1-mini",
-      "adapters": [
-        "openaicompletions"
-      ],
-      "kind": "text",
-      "context_window": 1000000,
-      "display_name": "GPT-5.1 Mini"
-    },
-    {
       "go_name": "ModelGPT5",
       "id": "gpt-5",
       "adapters": [
@@ -356,13 +346,6 @@
       "kind": "text",
       "context_window": 1000000,
       "display_name": "GPT-5.3 Codex"
-    },
-    {
-      "go_name": "ModelGPT53CodexSpark",
-      "id": "gpt-5.3-codex-spark",
-      "kind": "text",
-      "context_window": 1000000,
-      "display_name": "GPT-5.3 Codex Spark"
     },
     {
       "go_name": "ModelGPT52Codex",

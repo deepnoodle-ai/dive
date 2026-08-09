@@ -160,8 +160,18 @@ MODEL_TOKEN_RE = re.compile(
 # — a model this drops is a silent miss, while one it wrongly admits costs a
 # single line in one weekly report before the accepted baseline absorbs it.
 MODEL_CANDIDATE_RE = re.compile(r"^(?:[a-z0-9-]+/)?[a-z][a-z0-9]*(?:[.\-:][a-z0-9]+)+$")
-# Change kinds that lead the report; everything else keeps its natural order.
-CHANGE_PRIORITY = {"model_missing_from_dive": 0}
+# Change kinds that lead the report; everything else keeps its natural order. An
+# id Dive ships that upstream does not serve is broken right now, so it outranks
+# a model Dive merely lacks.
+CHANGE_PRIORITY = {"model_not_found_upstream": 0, "model_missing_from_dive": 1}
+# Must exceed every explicit tier, or unprioritized changes tie with the ones
+# being promoted and the stable sort leaves them ahead.
+DEFAULT_CHANGE_PRIORITY = len(CHANGE_PRIORITY)
+# Below this share of a catalog corroborated upstream, the sources are not
+# enumerating models and their silence carries no information. Ollama's pages
+# document the API rather than the model library and sit near 13%; every other
+# provider clears 90%.
+MIN_CORROBORATION_RATIO = 0.5
 
 
 @dataclasses.dataclass(frozen=True)
@@ -907,8 +917,20 @@ def collect_repo_facts(repo_root: Path) -> dict[str, Any]:
             entry["model"]: canonicalize(entry)
             for entry in (catalog.get("pricing", {}) or {}).get("text", [])
         }
+        # Entries the catalog already flags as gone. Upstream drops them from its
+        # documentation, which is the correct outcome rather than a finding.
+        retired = sorted(
+            {
+                resolved
+                for model in catalog.get("models", [])
+                if (model.get("lifecycle") in ("retired", "deprecated"))
+                or model.get("deprecated")
+                if (resolved := model_id(model))
+            }
+        )
         facts["providers"][provider] = {
             "models": models,
+            "retired": retired,
             "defaults": defaults,
             "pricing": dict(sorted(pricing.items())),
             "feature_flags": sorted(
@@ -1051,6 +1073,7 @@ def build_snapshot(
             }
 
     result["gaps"] = catalog_gaps(result["providers"], result["repo"])
+    result["unverified"] = unverified_models(result["providers"], result["repo"])
 
     if check_sdks:
         result["sdks"] = collect_sdk_versions(repo_root)
@@ -1195,6 +1218,84 @@ def catalog_gaps(
         if found:
             gaps[provider] = sorted(found)
     return gaps
+
+
+def document_text(provider_data: Mapping[str, Any]) -> str:
+    """Every readable line the provider's documents produced, joined once."""
+    return "\n".join(
+        line
+        for document in (provider_data.get("documents") or {}).values()
+        if document.get("status") == "ok"
+        for line in document.get("signals") or []
+    )
+
+
+def model_is_mentioned(model_id: str, text: str) -> bool:
+    """Whether upstream prose refers to exactly this id.
+
+    Matching is deliberately independent of MODEL_TOKEN_RE: the tokenizer had
+    already missed four Mistral families once, and a check meant to catch bad
+    ids must not inherit the blind spots of the thing that missed them.
+
+    The optional dated suffix accepts `claude-haiku-4-5-20251001` as evidence for
+    `claude-haiku-4-5`. It requires the separating dash on purpose — without it,
+    `devstral-2512` would count as evidence for the fabricated `devstral-2`,
+    which is exactly the bug this check exists to find.
+    """
+    pattern = (
+        r"(?<![a-z0-9._:/-])" + re.escape(model_id) + r"(?:-\d+)?(?![a-z0-9._:/-])"
+    )
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def unverified_models(
+    providers_data: Mapping[str, Any], repo_facts: Mapping[str, Any]
+) -> dict[str, list[str]]:
+    """Ids Dive's catalogs ship that no upstream source mentions.
+
+    The inverse of catalog_gaps, and the direction that catches an id which
+    simply does not work: `mistral-large-2412`, `devstral-2`, and the
+    dash-spelled `anthropic/claude-opus-4-7` (OpenRouter serves it with a dot)
+    were all shipped constants that would fail at the API.
+
+    A miss here is not proof of fabrication -- a retired model drops out of the
+    docs while still resolving -- so the report says "not found upstream" rather
+    than "wrong", and the accepted baseline absorbs the legacy tail.
+    """
+    unverified: dict[str, list[str]] = {}
+    for provider, provider_data in providers_data.items():
+        provider_facts = (repo_facts.get("providers", {}) or {}).get(provider, {})
+        # A model the catalog already marks retired is expected to be absent
+        # upstream. Excluding it from the ratio as well as the findings keeps a
+        # long legacy tail from suppressing the check for the whole provider.
+        retired = {str(model) for model in provider_facts.get("retired", [])}
+        listed = [
+            str(model)
+            for model in provider_facts.get("models", [])
+            if str(model) not in retired
+        ]
+        if not listed:
+            continue
+        api = provider_data.get("api") or {}
+        api_ids = (
+            {
+                normalize_upstream_id(provider, str(model).lower())
+                for model in (api.get("models") or {})
+            }
+            if api.get("status") == "ok"
+            else set()
+        )
+        text = document_text(provider_data)
+        missing = sorted(
+            model
+            for model in listed
+            if model.lower() not in api_ids and not model_is_mentioned(model, text)
+        )
+        if len(listed) - len(missing) < len(listed) * MIN_CORROBORATION_RATIO:
+            continue
+        if missing:
+            unverified[provider] = missing
+    return unverified
 
 
 def gap_sources(
@@ -1424,6 +1525,22 @@ def diff_snapshots(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[
                     }
                 )
 
+    # Same accepted-baseline rule as gaps, for the opposite direction: an id
+    # Dive ships that upstream never mentions.
+    if "unverified" in before:
+        before_unverified = before.get("unverified") or {}
+        after_unverified = after.get("unverified") or {}
+        for provider in sorted(after_unverified):
+            accepted = set(before_unverified.get(provider, []))
+            for model_id in sorted(set(after_unverified[provider]) - accepted):
+                changes.append(
+                    {
+                        "provider": provider,
+                        "kind": "model_not_found_upstream",
+                        "model": model_id,
+                    }
+                )
+
     before_sdks = before.get("sdks") or {}
     after_sdks = after.get("sdks") or {}
     for module in sorted(set(before_sdks).intersection(after_sdks)):
@@ -1532,6 +1649,16 @@ def change_section(change: Mapping[str, Any]) -> list[str]:
                 f"`providers/{change.get('provider')}/catalog.json`.",
             )
         )
+    if change.get("kind") == "model_not_found_upstream":
+        lines.extend(
+            (
+                "",
+                f"`providers/{change.get('provider')}/catalog.json` ships this id, "
+                "but no upstream API listing or documentation page mentions it. "
+                "Either it is misspelled and will fail at the API, or the model "
+                "has been retired and the entry is now legacy.",
+            )
+        )
     if change.get("sources"):
         lines.extend(
             (
@@ -1612,7 +1739,9 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
     # owns, and every caller of this function deserves the same priority.
     changes = sorted(
         diff.get("changes", []),
-        key=lambda change: CHANGE_PRIORITY.get(change.get("kind"), 1),
+        key=lambda change: CHANGE_PRIORITY.get(
+            change.get("kind"), DEFAULT_CHANGE_PRIORITY
+        ),
     )
     displayed_changes = changes[:MAX_REPORT_CHANGES]
     head = [
@@ -1633,24 +1762,27 @@ def report_markdown(diff: Mapping[str, Any], current: Mapping[str, Any]) -> str:
             "",
         )
     )
-    missing = [
-        change for change in changes if change.get("kind") == "model_missing_from_dive"
-    ]
-    if missing:
-        head.extend(
-            (
-                f"⚠️ **{len(missing)} model(s) published upstream are missing from "
-                "Dive's catalogs:**",
-                "",
-            )
-        )
-        for change in missing[:20]:
+    for kind, heading in (
+        (
+            "model_not_found_upstream",
+            "model id(s) Dive ships are not served by the provider",
+        ),
+        (
+            "model_missing_from_dive",
+            "model(s) published upstream are missing from Dive's catalogs",
+        ),
+    ):
+        highlighted = [change for change in changes if change.get("kind") == kind]
+        if not highlighted:
+            continue
+        head.extend((f"⚠️ **{len(highlighted)} {heading}:**", ""))
+        for change in highlighted[:20]:
             head.append(
                 f"- `{change.get('provider')}` — "
                 f"<code>{escape_markdown(change.get('model'))}</code>"
             )
-        if len(missing) > 20:
-            head.append(f"- … {len(missing) - 20} more")
+        if len(highlighted) > 20:
+            head.append(f"- … {len(highlighted) - 20} more")
         head.append("")
     if len(changes) > len(displayed_changes):
         head.extend(

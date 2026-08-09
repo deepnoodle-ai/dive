@@ -51,8 +51,8 @@ func TestApplyRequestConfig_NormalizesReasoningEffort(t *testing.T) {
 			want:   ReasoningEffortHigh,
 		},
 		{
-			name:   "openrouter x-ai grok build latest minimal maps to low",
-			model:  "x-ai/grok-build-latest",
+			name:   "openrouter x-ai grok build minimal maps to low",
+			model:  "x-ai/grok-build-0.1",
 			effort: llm.ReasoningEffortMinimal,
 			want:   ReasoningEffortLow,
 		},

@@ -9,13 +9,11 @@ import (
 )
 
 func TestGrok45Pricing(t *testing.T) {
-	for _, model := range []string{ModelGrok45, ModelGrok45Latest, ModelGrokBuildLatest} {
-		p, ok := TextModelPricing[model]
-		assert.True(t, ok, "pricing should exist for "+model)
-		assert.Equal(t, 2.0, p.InputPrice)
-		assert.Equal(t, 0.5, p.CacheReadPrice)
-		assert.Equal(t, 6.0, p.OutputPrice)
-	}
+	p, ok := TextModelPricing[ModelGrok45]
+	assert.True(t, ok, "pricing should exist for "+ModelGrok45)
+	assert.Equal(t, 2.0, p.InputPrice)
+	assert.Equal(t, 0.5, p.CacheReadPrice)
+	assert.Equal(t, 6.0, p.OutputPrice)
 }
 
 func TestGrokPricingRegistered(t *testing.T) {

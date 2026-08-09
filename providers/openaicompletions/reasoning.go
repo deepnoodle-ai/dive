@@ -141,7 +141,10 @@ func normalizeGrokReasoningEffort(model string, effort llm.ReasoningEffort) (llm
 	switch {
 	case strings.HasPrefix(model, "grok-4.5"),
 		strings.HasPrefix(model, "grok-4.3"),
-		strings.HasPrefix(model, "grok-build-latest"):
+		// "grok-build" rather than a pinned version: xAI serves grok-build-0.1,
+		// and this previously keyed on grok-build-latest, an id xAI does not
+		// serve, so the real model fell through without clamping.
+		strings.HasPrefix(model, "grok-build"):
 		return mapReasoningEffort(model, effort,
 			[]llm.ReasoningEffort{
 				llm.ReasoningEffortNone,

@@ -878,6 +878,203 @@ class CatalogGapTests(unittest.TestCase):
         self.assertIn("no entry in `providers/anthropic/catalog.json`", body)
 
 
+class UnverifiedModelTests(unittest.TestCase):
+    """The inverse of the gap check: ids Dive ships that upstream never mentions.
+
+    Six Mistral constants and nine OpenRouter constants shipped ids their
+    providers do not serve. Every one would have failed at the API, and nothing
+    in the watcher looked in this direction.
+    """
+
+    def provider(
+        self,
+        *,
+        signals: list[str],
+        api_models: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "api": (
+                {"status": "ok", "models": api_models}
+                if api_models is not None
+                else {"status": "skipped", "models": {}}
+            ),
+            "documents": {"models": {"status": "ok", "signals": signals}},
+        }
+
+    def test_fabricated_id_is_reported(self) -> None:
+        providers = {
+            "mistral": self.provider(
+                signals=[
+                    "We released Mistral Large 3 (mistral-large-2512).",
+                    "mistral-large-latest",
+                    "mistral-large-2411",
+                ]
+            )
+        }
+        repo = {
+            "providers": {
+                "mistral": {
+                    "models": [
+                        "mistral-large-2412",
+                        "mistral-large-latest",
+                        "mistral-large-2411",
+                        "mistral-large-2512",
+                    ]
+                }
+            }
+        }
+
+        self.assertEqual(
+            provider_watch.unverified_models(providers, repo),
+            {"mistral": ["mistral-large-2412"]},
+        )
+
+    def test_a_longer_id_is_not_evidence_for_a_shorter_one(self) -> None:
+        # devstral-2512 must not vouch for the fabricated devstral-2, which is
+        # precisely the substring trap this check has to avoid.
+        providers = {"mistral": self.provider(signals=["devstral-2512 is available"])}
+        repo = {"providers": {"mistral": {"models": ["devstral-2", "devstral-2512"]}}}
+
+        self.assertEqual(
+            provider_watch.unverified_models(providers, repo),
+            {"mistral": ["devstral-2"]},
+        )
+
+    def test_dated_snapshot_confirms_the_undated_alias(self) -> None:
+        # Providers document claude-haiku-4-5-20251001 while serving the alias.
+        providers = {
+            "anthropic": self.provider(signals=["claude-haiku-4-5-20251001 | Active"])
+        }
+        repo = {"providers": {"anthropic": {"models": ["claude-haiku-4-5"]}}}
+
+        self.assertEqual(provider_watch.unverified_models(providers, repo), {})
+
+    def test_live_api_listing_settles_separator_spelling(self) -> None:
+        # OpenRouter serves anthropic/claude-opus-4.7; Dive shipped the dashed
+        # spelling, which the API does not resolve.
+        providers = {
+            "openrouter": self.provider(
+                signals=[],
+                api_models={
+                    "anthropic/claude-opus-4.7": {},
+                    "anthropic/claude-fable-5": {},
+                },
+            )
+        }
+        repo = {
+            "providers": {
+                "openrouter": {
+                    "models": ["anthropic/claude-opus-4-7", "anthropic/claude-fable-5"]
+                }
+            }
+        }
+
+        self.assertEqual(
+            provider_watch.unverified_models(providers, repo),
+            {"openrouter": ["anthropic/claude-opus-4-7"]},
+        )
+
+    def test_sources_that_do_not_enumerate_models_report_nothing(self) -> None:
+        # Ollama's pages document the API, not the library, and corroborate
+        # almost nothing. Their silence must not condemn the whole catalog.
+        providers = {"ollama": self.provider(signals=["gpt-oss is supported"])}
+        repo = {
+            "providers": {
+                "ollama": {
+                    "models": [
+                        "gpt-oss",
+                        "qwen3.6",
+                        "gemma4",
+                        "deepseek-r1",
+                        "glm-4.7-flash",
+                    ]
+                }
+            }
+        }
+
+        self.assertEqual(provider_watch.unverified_models(providers, repo), {})
+
+    def test_models_the_catalog_marks_retired_are_not_reported(self) -> None:
+        # Upstream dropping a retired model from its docs is the expected
+        # outcome, not a finding the catalog needs to answer for.
+        providers = {"openrouter": self.provider(signals=["google/gemini-3.1-pro-preview"])}
+        repo = {
+            "providers": {
+                "openrouter": {
+                    "models": [
+                        "google/gemini-3.1-pro-preview",
+                        "google/gemini-3-pro-preview",
+                    ],
+                    "retired": ["google/gemini-3-pro-preview"],
+                }
+            }
+        }
+
+        self.assertEqual(provider_watch.unverified_models(providers, repo), {})
+
+    def test_only_newly_unverified_ids_are_reported(self) -> None:
+        def snapshot(models: list[str]) -> dict[str, object]:
+            providers = {
+                "mistral": self.provider(
+                    signals=[
+                        "mistral-large-2512",
+                        "mistral-small-latest",
+                        "codestral-latest",
+                    ]
+                )
+            }
+            repo = {"providers": {"mistral": {"models": models}}}
+            return {
+                "providers": providers,
+                "repo": repo,
+                "gaps": {},
+                "unverified": provider_watch.unverified_models(providers, repo),
+            }
+
+        # open-mistral-7b is a retired id the baseline already accepts.
+        corroborated = [
+            "mistral-large-2512",
+            "mistral-small-latest",
+            "codestral-latest",
+        ]
+        before = snapshot([*corroborated, "open-mistral-7b"])
+        after = snapshot([*corroborated, "open-mistral-7b", "devstral-2"])
+
+        diff = provider_watch.diff_snapshots(before, after)
+
+        reported = [
+            change["model"]
+            for change in diff["changes"]
+            if change["kind"] == "model_not_found_upstream"
+        ]
+        self.assertEqual(reported, ["devstral-2"])
+
+    def test_report_leads_with_unserved_ids(self) -> None:
+        diff = {
+            "generated_at": "2026-08-08T00:00:00+00:00",
+            "change_hash": "abc123",
+            "changes": [
+                {
+                    "provider": "anthropic",
+                    "kind": "model_missing_from_dive",
+                    "model": "claude-opus-6",
+                },
+                {
+                    "provider": "mistral",
+                    "kind": "model_not_found_upstream",
+                    "model": "devstral-2",
+                },
+            ],
+        }
+
+        body = provider_watch.report_markdown(diff, {"repo": {"providers": {}}})
+
+        self.assertIn("1 model id(s) Dive ships are not served", body)
+        self.assertIn("1 model(s) published upstream are missing", body)
+        rows = [line for line in body.splitlines() if line.startswith("| ")]
+        self.assertIn("model_not_found_upstream", rows[2])
+
+
 class ModelTokenTests(unittest.TestCase):
     def test_mistral_model_families_are_covered(self) -> None:
         # Ministral, Magistral, Pixtral, and Voxtral ids were invisible to the

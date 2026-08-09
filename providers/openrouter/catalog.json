@@ -30,58 +30,65 @@
       "display_name": "Sonnet 5"
     },
     {
-      "go_name": "ModelClaudeOpus48",
-      "id": "anthropic/claude-opus-4-8",
+      "go_name": "ModelClaudeOpus5",
+      "id": "anthropic/claude-opus-5",
       "default": true,
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Opus 5"
+    },
+    {
+      "go_name": "ModelClaudeOpus48",
+      "id": "anthropic/claude-opus-4.8",
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Opus 4.8"
     },
     {
       "go_name": "ModelClaudeOpus47",
-      "id": "anthropic/claude-opus-4-7",
+      "id": "anthropic/claude-opus-4.7",
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Opus 4.7"
     },
     {
       "go_name": "ModelClaudeOpus46",
-      "id": "anthropic/claude-opus-4-6",
+      "id": "anthropic/claude-opus-4.6",
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Opus 4.6"
     },
     {
       "go_name": "ModelClaudeSonnet46",
-      "id": "anthropic/claude-sonnet-4-6",
+      "id": "anthropic/claude-sonnet-4.6",
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Sonnet 4.6"
     },
     {
       "go_name": "ModelClaudeOpus45",
-      "id": "anthropic/claude-opus-4-5",
+      "id": "anthropic/claude-opus-4.5",
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Opus 4.5"
     },
     {
       "go_name": "ModelClaudeSonnet45",
-      "id": "anthropic/claude-sonnet-4-5",
+      "id": "anthropic/claude-sonnet-4.5",
       "kind": "text",
       "context_window": 1000000,
       "display_name": "Sonnet 4.5"
     },
     {
       "go_name": "ModelClaudeHaiku45",
-      "id": "anthropic/claude-haiku-4-5",
+      "id": "anthropic/claude-haiku-4.5",
       "kind": "text",
       "context_window": 200000,
       "display_name": "Haiku 4.5"
     },
     {
       "go_name": "ModelClaudeOpus41",
-      "id": "anthropic/claude-opus-4-1",
+      "id": "anthropic/claude-opus-4.1",
       "kind": "text",
       "context_window": 1000000
     },
@@ -217,25 +224,25 @@
       "display_name": "Gemini 2.5 Flash"
     },
     {
-      "go_name": "ModelGrok41FastReasoning",
-      "id": "x-ai/grok-4-1-fast-reasoning",
+      "go_name": "ModelGrok45",
+      "id": "x-ai/grok-4.5",
       "kind": "text",
-      "context_window": 131072,
-      "display_name": "Grok 4.1 Fast"
+      "context_window": 500000,
+      "display_name": "Grok 4.5"
     },
     {
-      "go_name": "ModelGrok4FastReasoning",
-      "id": "x-ai/grok-4-fast-reasoning",
+      "go_name": "ModelGrok43",
+      "id": "x-ai/grok-4.3",
       "kind": "text",
-      "context_window": 131072,
-      "display_name": "Grok 4"
+      "context_window": 1000000,
+      "display_name": "Grok 4.3"
     },
     {
-      "go_name": "ModelGrok3",
-      "id": "x-ai/grok-3",
+      "go_name": "ModelGrokBuild01",
+      "id": "x-ai/grok-build-0.1",
       "kind": "text",
-      "context_window": 131072,
-      "display_name": "Grok 3"
+      "context_window": 256000,
+      "display_name": "Grok Build 0.1"
     },
     {
       "go_name": "ModelMistralLarge3",
@@ -259,7 +266,7 @@
         "updated_at": "2025-01-15"
       },
       {
-        "model": "anthropic/claude-opus-4-1",
+        "model": "anthropic/claude-opus-4.1",
         "input_price_per_1m_tokens": "15.00",
         "output_price_per_1m_tokens": "75.00",
         "currency": "USD",

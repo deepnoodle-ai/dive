@@ -5,14 +5,15 @@ package openrouter
 const (
 	ModelClaudeFable5       = "anthropic/claude-fable-5"
 	ModelClaudeSonnet5      = "anthropic/claude-sonnet-5"
-	ModelClaudeOpus48       = "anthropic/claude-opus-4-8"
-	ModelClaudeOpus47       = "anthropic/claude-opus-4-7"
-	ModelClaudeOpus46       = "anthropic/claude-opus-4-6"
-	ModelClaudeSonnet46     = "anthropic/claude-sonnet-4-6"
-	ModelClaudeOpus45       = "anthropic/claude-opus-4-5"
-	ModelClaudeSonnet45     = "anthropic/claude-sonnet-4-5"
-	ModelClaudeHaiku45      = "anthropic/claude-haiku-4-5"
-	ModelClaudeOpus41       = "anthropic/claude-opus-4-1"
+	ModelClaudeOpus5        = "anthropic/claude-opus-5"
+	ModelClaudeOpus48       = "anthropic/claude-opus-4.8"
+	ModelClaudeOpus47       = "anthropic/claude-opus-4.7"
+	ModelClaudeOpus46       = "anthropic/claude-opus-4.6"
+	ModelClaudeSonnet46     = "anthropic/claude-sonnet-4.6"
+	ModelClaudeOpus45       = "anthropic/claude-opus-4.5"
+	ModelClaudeSonnet45     = "anthropic/claude-sonnet-4.5"
+	ModelClaudeHaiku45      = "anthropic/claude-haiku-4.5"
+	ModelClaudeOpus41       = "anthropic/claude-opus-4.1"
 	ModelClaudeSonnet4      = "anthropic/claude-sonnet-4"
 	ModelGPT55              = "openai/gpt-5.5"
 	ModelGPT54              = "openai/gpt-5.4"
@@ -33,12 +34,12 @@ const (
 	ModelGemini3FlashPreview = "google/gemini-3-flash-preview"
 	ModelGemini25Pro         = "google/gemini-2.5-pro"
 	ModelGemini25Flash       = "google/gemini-2.5-flash"
-	ModelGrok41FastReasoning = "x-ai/grok-4-1-fast-reasoning"
-	ModelGrok4FastReasoning  = "x-ai/grok-4-fast-reasoning"
-	ModelGrok3               = "x-ai/grok-3"
+	ModelGrok45              = "x-ai/grok-4.5"
+	ModelGrok43              = "x-ai/grok-4.3"
+	ModelGrokBuild01         = "x-ai/grok-build-0.1"
 	ModelMistralLarge3       = "mistralai/mistral-large-2512"
 	ModelDeepSeekR1          = "deepseek/deepseek-r1-0528"
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelClaudeOpus48
+var DefaultModel = ModelClaudeOpus5

@@ -4,8 +4,6 @@ package grok
 
 const (
 	ModelGrok45                 = "grok-4.5"
-	ModelGrok45Latest           = "grok-4.5-latest"
-	ModelGrokBuildLatest        = "grok-build-latest"
 	ModelGrok43                 = "grok-4.3"
 	ModelGrok420Reasoning       = "grok-4.20-0309-reasoning"
 	ModelGrok420NonReasoning    = "grok-4.20-0309-non-reasoning"

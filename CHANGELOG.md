@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Provider watch** — a weekly workflow (`scripts/provider_watch.py`) diffs
   upstream provider documentation and APIs against an accepted baseline and
   files a single refreshed issue when something material changes.
+- **Provider watch reports model ids Dive ships that upstream does not serve.**
+  The inverse of the gap check, stored as an `unverified` map. A live API listing
+  settles it where one is available; otherwise a boundary-aware search of the
+  provider's documentation does, and providers whose pages do not enumerate
+  models at all are skipped rather than condemned wholesale. Entries the catalog
+  already marks retired or deprecated are exempt. This direction found 16
+  shipped ids that would have failed at the API.
 - **Provider watch reports models missing from Dive's catalogs.** Snapshots now
   carry a `gaps` map of upstream model ids with no catalog entry, and the report
   leads with them. This is a completeness check rather than a drift check: the
@@ -32,6 +39,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Nine OpenRouter model ids used the wrong separator.** OpenRouter serves
+  `anthropic/claude-opus-4.7`; Dive shipped `anthropic/claude-opus-4-7`, and the
+  same dash spelling for Opus 4.8/4.6/4.5/4.1, Sonnet 4.6/4.5, Haiku 4.5, and one
+  pricing row. `openrouter.DefaultModel` was among them, so every default
+  OpenRouter request used an id OpenRouter does not resolve. It now points at
+  the newly-added `anthropic/claude-opus-5`.
+- **`openrouter` shipped three retired xAI models** (`x-ai/grok-3`,
+  `x-ai/grok-4-fast-reasoning`, `x-ai/grok-4-1-fast-reasoning`), none of which
+  OpenRouter still serves. Replaced with `x-ai/grok-4.5`, `x-ai/grok-4.3`, and
+  `x-ai/grok-build-0.1`.
+- **Grok reasoning-effort clamping skipped the real Grok Build model.**
+  `normalizeGrokReasoningEffort` keyed on `grok-build-latest`, an id xAI does not
+  serve, so `grok-build-0.1` fell through without clamping and `xhigh`/`max`
+  reached the API unmapped. It now matches on the `grok-build` prefix.
+- **Four more constants pointed at models that do not exist**, confirmed against
+  live API listings: `grok.ModelGrok45Latest` (`grok-4.5-latest`),
+  `grok.ModelGrokBuildLatest` (`grok-build-latest`), `openai.ModelGPT51Mini`
+  (`gpt-5.1-mini`), and `openai.ModelGPT53CodexSpark` (`gpt-5.3-codex-spark`).
+  xAI publishes no `-latest` aliases, and OpenAI ships `gpt-5-mini` and
+  `gpt-5.4-mini` but no `gpt-5.1-mini`. All four are removed.
 - **Six Mistral model constants pointed at ids Mistral does not serve.** They
   would have failed at the API. Corrected against Mistral's changelog:
   `ModelMistralLarge3` `mistral-large-2412` → `mistral-large-2512` (Large 3 is
