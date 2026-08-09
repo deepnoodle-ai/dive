@@ -140,7 +140,15 @@ ISO_DATE_RE = re.compile(r"\b20\d{2}-\d{2}-\d{2}\b")
 MODEL_TOKEN_RE = re.compile(
     r"\b(?:"
     r"(?:anthropic|deepseek|google|mistral|openai|x-ai)/[a-z0-9][a-z0-9._:/-]*|"
-    r"(?:gpt|claude|gemini|grok|mistral|codestral|devstral|llama|o[1-9])"
+    # "open-" and "labs-" are part of the published id, not decoration:
+    # open-mistral-7b and labs-devstral-small-2512 are what the API accepts.
+    r"(?:open-|labs-)?"
+    # Mistral ships seven "-tral" families and only three were listed here, so
+    # a Ministral, Magistral, Pixtral, or Voxtral release could never be
+    # recognized as a model at all. See test_mistral_model_families_are_covered.
+    r"(?:gpt|claude|gemini|grok|llama|o[1-9]"
+    r"|mistral|mixtral|ministral|magistral|codestral|devstral|pixtral|voxtral"
+    r"|mathstral|leanstral)"
     r"[a-z0-9._:/-]*"
     r")\b",
     re.IGNORECASE,

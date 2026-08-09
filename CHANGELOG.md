@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Provider watch reports models missing from Dive's catalogs.** Snapshots now
   carry a `gaps` map of upstream model ids with no catalog entry, and the report
   leads with them. This is a completeness check rather than a drift check: the
-  diff only ever saw models that *changed* between two runs, so a model
+  diff only ever saw models that _changed_ between two runs, so a model
   published upstream that Dive had simply never carried stayed invisible
   indefinitely — which is how `claude-opus-5` went missing. Only gaps that are
   new relative to the accepted baseline are reported, so the tail of retired ids
@@ -30,11 +30,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   tag while those requirements are stale — sub-modules build locally through
   `replace` directives, which consumers never see.
 
+### Fixed
+
+- **Six Mistral model constants pointed at ids Mistral does not serve.** They
+  would have failed at the API. Corrected against Mistral's changelog:
+  `ModelMistralLarge3` `mistral-large-2412` → `mistral-large-2512` (Large 3 is
+  the December 2025 build; `2412` never existed), `ModelMinistral3_3B/_8B/_14B`
+  `ministral-3-Nb-instruct` → `ministral-Nb-2512`, `ModelDevstral2` `devstral-2`
+  → `devstral-2512`, and `ModelDevstralSmall2` `devstral-small-2` →
+  `labs-devstral-small-2512`.
+- **Google's embedding pricing listed a model Google has shut down.**
+  `text-embedding-004` (retired) and `text-multilingual-embedding-002` are
+  replaced by `gemini-embedding-001` ($0.15/1M) and `gemini-embedding-2`
+  ($0.20/1M text input). Dive exposes no embedding API; these rows are a pricing
+  reference, matching how the OpenAI, OpenRouter, and Ollama catalogs carry
+  embedding prices without model constants.
+- **Provider watch could not see four of Mistral's seven model families.**
+  `MODEL_TOKEN_RE` knew `mistral`, `codestral`, and `devstral` but not
+  `ministral`, `magistral`, `pixtral`, `voxtral`, `mixtral`, `mathstral`, or
+  `leanstral`, nor the `open-` and `labs-` id prefixes — so a Ministral or
+  Voxtral release could never be reported as missing. Adding them surfaced 21
+  previously-invisible Mistral models.
+
 ### Changed
 
 - **`mistral.DefaultModel` is now `ModelMistralLarge`** (`mistral-large-latest`)
-  rather than the pinned `mistral-large-2412` snapshot, matching the model the
-  CLI recommends. Pass `WithModel` explicitly to pin a dated snapshot.
+  rather than a pinned dated snapshot, matching the model the CLI recommends.
+  Pass `WithModel` explicitly to pin a dated snapshot.
 - **`openrouter.ModelMistralLarge3` is now `mistralai/mistral-large-2512`**
   (was `mistral/mistral-large-3`, which is not an id OpenRouter serves). Code
   comparing against the old string — routing tables, stored session metadata —

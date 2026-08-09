@@ -387,18 +387,18 @@
     ],
     "embedding": [
       {
-        "model": "text-embedding-004",
-        "price_per_1m_tokens": "0.0625",
+        "model": "gemini-embedding-001",
+        "price_per_1m_tokens": "0.15",
         "currency": "USD",
-        "updated_at": "2025-01-15",
-        "note": "$0.0000625 per 1K tokens = $0.0625 per 1M tokens"
+        "updated_at": "2026-08-09",
+        "note": "Text-only embeddings; free of charge on the free tier"
       },
       {
-        "model": "text-multilingual-embedding-002",
-        "price_per_1m_tokens": "0.0625",
+        "model": "gemini-embedding-2",
+        "price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2025-01-15",
-        "note": "Same as text-embedding-004"
+        "updated_at": "2026-08-09",
+        "note": "Multimodal embeddings; text input price. Image, audio, and video inputs are billed at separate rates"
       }
     ]
   }

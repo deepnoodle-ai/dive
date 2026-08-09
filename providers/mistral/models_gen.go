@@ -3,15 +3,15 @@
 package mistral
 
 const (
-	ModelMistralLarge3       = "mistral-large-2412"
+	ModelMistralLarge3       = "mistral-large-2512"
 	ModelMistralLarge        = "mistral-large-latest"
 	ModelMistralLarge2411    = "mistral-large-2411"
 	ModelMistralSmall        = "mistral-small-latest"
-	ModelMinistral3_14B      = "ministral-3-14b-instruct"
-	ModelMinistral3_8B       = "ministral-3-8b-instruct"
-	ModelMinistral3_3B       = "ministral-3-3b-instruct"
-	ModelDevstral2           = "devstral-2"
-	ModelDevstralSmall2      = "devstral-small-2"
+	ModelMinistral3_14B      = "ministral-14b-2512"
+	ModelMinistral3_8B       = "ministral-8b-2512"
+	ModelMinistral3_3B       = "ministral-3b-2512"
+	ModelDevstral2           = "devstral-2512"
+	ModelDevstralSmall2      = "labs-devstral-small-2512"
 	ModelDevstralSmallLatest = "devstral-small-latest"
 	ModelCodestralLatest     = "codestral-latest"
 	ModelCodestral2501       = "codestral-2501"

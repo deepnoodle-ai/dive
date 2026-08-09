@@ -878,6 +878,44 @@ class CatalogGapTests(unittest.TestCase):
         self.assertIn("no entry in `providers/anthropic/catalog.json`", body)
 
 
+class ModelTokenTests(unittest.TestCase):
+    def test_mistral_model_families_are_covered(self) -> None:
+        # Ministral, Magistral, Pixtral, and Voxtral ids were invisible to the
+        # tokenizer, so gap detection could never report one as missing. A new
+        # "-tral" family needs adding to MODEL_TOKEN_RE and to this list.
+        published = [
+            "mistral-large-2512",
+            "mixtral-8x22b",
+            "ministral-14b-2512",
+            "magistral-medium-2509",
+            "codestral-2508",
+            "devstral-2512",
+            "pixtral-large-2411",
+            "voxtral-mini-2507",
+        ]
+
+        for model_id in published:
+            with self.subTest(model=model_id):
+                self.assertEqual(
+                    provider_watch.MODEL_TOKEN_RE.findall(f"see {model_id} today"),
+                    [model_id],
+                )
+
+    def test_open_and_labs_prefixes_stay_attached(self) -> None:
+        # Truncating these produces an id the API does not accept, which then
+        # reads as a gap against the correctly-spelled catalog entry.
+        for model_id in (
+            "open-mistral-7b",
+            "open-codestral-mamba",
+            "labs-devstral-small-2512",
+        ):
+            with self.subTest(model=model_id):
+                self.assertEqual(
+                    provider_watch.MODEL_TOKEN_RE.findall(f"use {model_id} here"),
+                    [model_id],
+                )
+
+
 class CheckedInBaselineTests(unittest.TestCase):
     def test_baseline_carries_accepted_gaps_for_the_current_schema(self) -> None:
         # Without this the first scheduled run after the schema bump would file

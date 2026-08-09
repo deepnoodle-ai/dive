@@ -31,7 +31,7 @@
   "models": [
     {
       "go_name": "ModelMistralLarge3",
-      "id": "mistral-large-2412",
+      "id": "mistral-large-2512",
       "kind": "text",
       "context_window": 128000
     },
@@ -64,28 +64,28 @@
     },
     {
       "go_name": "ModelMinistral3_14B",
-      "id": "ministral-3-14b-instruct",
+      "id": "ministral-14b-2512",
       "kind": "text"
     },
     {
       "go_name": "ModelMinistral3_8B",
-      "id": "ministral-3-8b-instruct",
+      "id": "ministral-8b-2512",
       "kind": "text"
     },
     {
       "go_name": "ModelMinistral3_3B",
-      "id": "ministral-3-3b-instruct",
+      "id": "ministral-3b-2512",
       "kind": "text"
     },
     {
       "go_name": "ModelDevstral2",
-      "id": "devstral-2",
+      "id": "devstral-2512",
       "kind": "text",
       "context_window": 128000
     },
     {
       "go_name": "ModelDevstralSmall2",
-      "id": "devstral-small-2",
+      "id": "labs-devstral-small-2512",
       "kind": "text",
       "context_window": 128000
     },

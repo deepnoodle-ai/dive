@@ -171,18 +171,18 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{
 
 // EmbeddingModelPricing is generated from catalog.json.
 var EmbeddingModelPricing = map[string]llm.EmbeddingPricingInfo{
-	// $0.0000625 per 1K tokens = $0.0625 per 1M tokens
-	"text-embedding-004": {
-		Model:     "text-embedding-004",
-		Price:     0.0625,
+	// Text-only embeddings; free of charge on the free tier
+	"gemini-embedding-001": {
+		Model:     "gemini-embedding-001",
+		Price:     0.15,
 		Currency:  "USD",
-		UpdatedAt: "2025-01-15",
+		UpdatedAt: "2026-08-09",
 	},
-	// Same as text-embedding-004
-	"text-multilingual-embedding-002": {
-		Model:     "text-multilingual-embedding-002",
-		Price:     0.0625,
+	// Multimodal embeddings; text input price. Image, audio, and video inputs are billed at separate rates
+	"gemini-embedding-2": {
+		Model:     "gemini-embedding-2",
+		Price:     0.20,
 		Currency:  "USD",
-		UpdatedAt: "2025-01-15",
+		UpdatedAt: "2026-08-09",
 	},
 }
