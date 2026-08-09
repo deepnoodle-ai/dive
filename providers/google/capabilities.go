@@ -160,11 +160,17 @@ func lookupEntry(model string) (capabilityEntry, bool) {
 }
 
 // modelAcceptsTemperature reports whether Dive forwards a temperature for this
-// model. The API accepts and range-validates one on every Gemini model in the
-// catalog, including those excluded here; the exclusion is a deliberate policy
-// choice tracking Google's guidance against tuning temperature on that
-// generation, and it extends to unreleased models, so the rule stays in
-// shouldOmitTemperature rather than this table.
+// model. The rule lives in shouldOmitTemperature, which keys on the request
+// generation and so also covers models that do not exist yet.
+//
+// Do not "fix" this from probe results alone. Gemini 3.5 Flash-Lite and 3.6+
+// accept a temperature and even range-validate it — sending 5.0 returns
+// "temperature must be in the range [0.0, 2.0]" — so a probe that only records
+// status codes concludes the parameter is live. It is not honored. Sampling the
+// same prompt eight times shows gemini-3.5-flash pinned to a single answer at
+// temperature 0 while gemini-3.6-flash keeps varying, with thinking held at the
+// same level in both. The parameter is accepted and ignored, and withholding it
+// is correct.
 func modelAcceptsTemperature(model string) bool {
 	return !shouldOmitTemperature(model)
 }
