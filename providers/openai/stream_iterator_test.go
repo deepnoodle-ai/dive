@@ -162,7 +162,9 @@ func TestStreamIteratorAccumulatorPricesDisjointUsage(t *testing.T) {
 	}
 
 	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
-	defer iterator.Close()
+	t.Cleanup(func() {
+		assert.NoError(t, iterator.Close())
+	})
 	accumulator := llm.NewResponseAccumulator()
 	for iterator.Next() {
 		assert.NoError(t, accumulator.AddEvent(iterator.Event()))

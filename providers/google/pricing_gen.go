@@ -32,21 +32,25 @@ var TextModelPricing = map[string]llm.PricingInfo{
 	},
 	// Input $2.00 up to 200K tokens, $4.00 above; output $12.00 up to 200K tokens, $18.00 above.
 	ModelGemini31ProPreview: {
-		Model:          ModelGemini31ProPreview,
-		InputPrice:     2.00,
-		OutputPrice:    12.00,
-		CacheReadPrice: 0.20,
-		Currency:       "USD",
-		UpdatedAt:      "2026-07-21",
+		Model:                        ModelGemini31ProPreview,
+		InputPrice:                   2.00,
+		OutputPrice:                  12.00,
+		CacheReadPrice:               0.20,
+		CacheReadPriceAboveThreshold: 0.40,
+		CacheReadPriceThreshold:      200000,
+		Currency:                     "USD",
+		UpdatedAt:                    "2026-07-21",
 	},
 	// Up to 200K tokens ($4.00 over 200K) $18.00 over 200K tokens
 	ModelGemini31ProPreviewCustomTools: {
-		Model:          ModelGemini31ProPreviewCustomTools,
-		InputPrice:     2.00,
-		OutputPrice:    12.00,
-		CacheReadPrice: 0.20,
-		Currency:       "USD",
-		UpdatedAt:      "2026-07-21",
+		Model:                        ModelGemini31ProPreviewCustomTools,
+		InputPrice:                   2.00,
+		OutputPrice:                  12.00,
+		CacheReadPrice:               0.20,
+		CacheReadPriceAboveThreshold: 0.40,
+		CacheReadPriceThreshold:      200000,
+		Currency:                     "USD",
+		UpdatedAt:                    "2026-07-21",
 	},
 	// text/image/video ($0.50 audio)
 	ModelGemini31FlashLite: {
@@ -105,12 +109,14 @@ var TextModelPricing = map[string]llm.PricingInfo{
 	},
 	// Input $1.25 up to 200K tokens, $2.50 above; output $10.00 up to 200K tokens, $15.00 above.
 	ModelGemini25Pro: {
-		Model:          ModelGemini25Pro,
-		InputPrice:     1.25,
-		OutputPrice:    10.00,
-		CacheReadPrice: 0.125,
-		Currency:       "USD",
-		UpdatedAt:      "2026-07-21",
+		Model:                        ModelGemini25Pro,
+		InputPrice:                   1.25,
+		OutputPrice:                  10.00,
+		CacheReadPrice:               0.125,
+		CacheReadPriceAboveThreshold: 0.25,
+		CacheReadPriceThreshold:      200000,
+		Currency:                     "USD",
+		UpdatedAt:                    "2026-07-21",
 	},
 	ModelGemini20Flash: {
 		Model:          ModelGemini20Flash,

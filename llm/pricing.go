@@ -8,6 +8,11 @@ type PricingInfo struct {
 	// CacheReadPrice is the price per 1M tokens read from the prompt cache (a
 	// cache hit). Zero means the provider does not bill cache reads separately.
 	CacheReadPrice float64 `json:"cache_read_price_per_1m_tokens,omitempty"`
+	// CacheReadPriceAboveThreshold replaces CacheReadPrice when the request's
+	// full input size exceeds CacheReadPriceThreshold tokens. Both fields are
+	// zero for models without tiered cache-read pricing.
+	CacheReadPriceAboveThreshold float64 `json:"cache_read_price_above_threshold_per_1m_tokens,omitempty"`
+	CacheReadPriceThreshold      int     `json:"cache_read_price_threshold_tokens,omitempty"`
 	// CacheWritePrice is the price per 1M tokens written to the prompt cache (a
 	// cache miss). For providers with multiple cache TTLs this is the default
 	// (shortest) TTL rate. Zero means the provider does not surcharge writes.
@@ -53,10 +58,14 @@ func (p PricingInfo) CostOf(u *Usage) Cost {
 		return Cost{Currency: p.Currency, Model: p.Model}
 	}
 	const perMillion = 1_000_000.0
+	cacheReadPrice := p.CacheReadPrice
+	if p.CacheReadPriceThreshold > 0 && u.TotalInputTokens() > p.CacheReadPriceThreshold {
+		cacheReadPrice = p.CacheReadPriceAboveThreshold
+	}
 	c := Cost{
 		Input:      float64(u.InputTokens) * p.InputPrice / perMillion,
 		Output:     float64(u.OutputTokens) * p.OutputPrice / perMillion,
-		CacheRead:  float64(u.CacheReadInputTokens) * p.CacheReadPrice / perMillion,
+		CacheRead:  float64(u.CacheReadInputTokens) * cacheReadPrice / perMillion,
 		CacheWrite: float64(u.CacheCreationInputTokens) * p.CacheWritePrice / perMillion,
 		Currency:   p.Currency,
 		Model:      p.Model,

@@ -52,3 +52,39 @@ func TestGoogleCacheReadPricingCoverage(t *testing.T) {
 		})
 	}
 }
+
+func TestGoogleCacheReadPricingLongContextBoundary(t *testing.T) {
+	tests := []struct {
+		model    string
+		standard float64
+		long     float64
+	}{
+		{model: ModelGemini31ProPreview, standard: 0.20, long: 0.40},
+		{model: ModelGemini31ProPreviewCustomTools, standard: 0.20, long: 0.40},
+		{model: ModelGemini25Pro, standard: 0.125, long: 0.25},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing := TextModelPricing[tt.model]
+			assert.Equal(t, 200_000, pricing.CacheReadPriceThreshold)
+			assert.Equal(t, tt.long, pricing.CacheReadPriceAboveThreshold)
+
+			for _, boundary := range []struct {
+				totalInput int
+				wantPrice  float64
+			}{
+				{totalInput: 200_000, wantPrice: tt.standard},
+				{totalInput: 200_001, wantPrice: tt.long},
+			} {
+				usage := llm.Usage{
+					InputTokens:          boundary.totalInput - 100_000,
+					CacheReadInputTokens: 100_000,
+				}
+				assert.Equal(t, boundary.totalInput, usage.TotalInputTokens())
+				cost := pricing.CostOf(&usage)
+				assert.Equal(t, boundary.wantPrice/10, cost.CacheRead)
+			}
+		})
+	}
+}
