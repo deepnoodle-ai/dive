@@ -566,7 +566,9 @@ func (f *funcTool[T]) Call(ctx context.Context, input T) (*ToolResult, error) {
 // what calls have happened during an LLM interaction.
 //
 // Error and Result.IsError track different failure modes:
-//   - Error is a Go error from tool.Call() — the tool itself crashed or failed unexpectedly.
+//   - Error is a Go-level execution or dispatch error, such as tool.Call()
+//     failing unexpectedly or an unknown tool name. Inspect typed errors with
+//     errors.As when the distinction matters.
 //   - Result.IsError is a protocol-level flag — the tool ran but reported a failure to the LLM
 //     (e.g. via NewToolResultError). Both are surfaced to the LLM as an error result.
 type ToolCallResult struct {

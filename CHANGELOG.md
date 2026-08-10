@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unknown tool names no longer abort and discard an agent turn.** Dive returns
+  a typed `UnknownToolError` result with deterministic suggestions, preserves
+  valid sibling calls, and uses the standard tool-iteration limit.
+
 ## [1.20.0] - 2026-08-09
 
 ### Changed

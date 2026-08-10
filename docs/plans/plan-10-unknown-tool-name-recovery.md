@@ -1,7 +1,7 @@
 ---
 Title: Recover from unknown tool names instead of failing the generation
 Author: Curtis Myzie
-Status: Proposed
+Status: Implemented
 Last Updated: 2026-08-10
 ---
 
@@ -260,31 +260,18 @@ via the tools parameter, so suggestions are a nudge, not documentation. Emit
 none rather than a poor one; a bare "does not exist" is still recoverable, and
 a confident wrong suggestion is worse than silence.
 
-### Bounding the loop
+### Iteration limit
 
-Today a bad name is at least bounded: it ends the turn. After this change a
-model stuck on one name could consume iterations up to
-`defaultToolIterationLimit` (100). That is an unacceptable worst case.
+Unknown-name results use the same agent-wide `ToolIterationLimit` as every
+other recoverable tool failure. There is no unknown-specific counter or retry
+budget. If the model keeps calling a missing tool, the existing final-iteration
+mechanism appends the "respond with a final answer now" instruction and forces
+`ToolChoiceNone`.
 
-Add a per-generation counter of consecutive unknown-only _iterations_: an
-iteration increments it when it produced at least one unknown name and zero
-successful dispatches; any successful dispatch resets it. Counting per
-iteration rather than per call means a mixed batch — the actual incident
-shape, two good calls and one bad — never advances the bound. That is
-correct: a model still doing useful work is not stuck.
-
-When the counter exceeds the threshold (proposed: 3), do **not** return the
-fatal error. A fatal return at iteration N discards everything since the turn
-began — N iterations of executed tools and their transcript — because a
-`CreateResponse` error means `SaveTurn` never runs. That recreates the exact
-loss this plan exists to fix, at larger scale than the bug it bounds. Instead,
-trip the mechanism that already exists for the iteration limit
-(`agent.go:2052`): set `lastIteration`, append the "respond with a final
-answer now" instruction to the tool-result message, and force
-`ToolChoiceNone`. The turn ends gracefully with a persisted transcript and a
-user-visible explanation instead of a blank response. A model that corrects
-itself is unaffected; a model that cannot is wound down within four iterations
-rather than a hundred.
+This keeps recovery consistent with tool execution errors, panics, malformed
+results, and hook denials. Deployments that want a tighter overall bound can
+already lower `ToolIterationLimit`; unknown names do not justify a second state
+machine with different reset semantics.
 
 ### Observability
 
@@ -386,18 +373,18 @@ detectable failure for an undetectable one.
 ## Tradeoffs and consequences
 
 - **Loud becomes quiet.** The main cost, mitigated by the warning log, the
-  countable `*UnknownToolError`, and the iteration bound. Worth stating
+  countable `*UnknownToolError`, and the existing agent-wide iteration limit. Worth stating
   plainly in review: we are choosing to handle something automatically that
   currently pages a human.
 - **The worst case is now an apology, not an error.** With the graceful
-  wind-down, a systemic defect that makes every tool name unknown manifests
-  as degraded answers plus warn-log volume, never as failed turns. Monitoring
-  must watch the log line and the typed-error count, because error rates will
-  no longer move.
+  final iteration, a systemic defect that makes every tool name unknown
+  manifests as degraded answers plus warn-log volume, never as failed turns.
+  Monitoring must watch the log line and the typed-error count, because error
+  rates will no longer move.
 - **Cost per incident rises.** Today the turn dies at ~13 seconds. After, the
   model spends at least one extra generation, sometimes more. That is the right
-  trade for a recovered turn, and it is the argument for keeping the
-  consecutive-unknown threshold tight rather than generous.
+  trade for a recovered turn. `ToolIterationLimit` remains the caller's common
+  cost bound for all recoverable tool failures.
 - **Public behavior change.** Callers relying on the hard error stop receiving
   it. Minor version bump and a changelog entry, not a patch release.
 - **Sequential side effects still precede the failure.** This change means the
@@ -424,13 +411,9 @@ detectable failure for an undetectable one.
    with `prep.tool` (nil here) as `HookContext.Tool` (`agent.go:2406`),
    violating safety invariant 3 and handing existing hooks a nil interface.
    Still emit the `tool_call` event in Phase 1 as for any other call.
-4. Add the consecutive-unknown-iteration counter to the generation loop. When
-   it exceeds the threshold, set `lastIteration` and force `ToolChoiceNone`
-   via the existing final-answer mechanism at `agent.go:2052` — not a fatal
-   error.
-5. Add the logger warning to the parallel path (the sequential path gets it
+4. Add the logger warning to the parallel path (the sequential path gets it
    in step 2).
-6. Changelog entry and minor version bump.
+5. Changelog entry; ship the behavior change in the next minor release.
 
 ## Tests
 
@@ -454,12 +437,8 @@ detectable failure for an undetectable one.
   and flat names that must not qualify as namespace matches.
 - No suggestion is emitted when nothing scores within threshold.
 - Suggestions never include a name absent from `toolsByName`.
-- A mixed batch (valid + unknown) does not advance the consecutive-unknown
-  counter.
-- Consecutive unknown-only iterations beyond the threshold force a final
-  answer via `ToolChoiceNone`; the turn completes without error, and earlier
-  executed tool results are present in the saved turn.
-- The counter resets after a successful dispatch.
+- Repeated unknown-only iterations use the standard `ToolIterationLimit`
+  final-answer path; there is no unknown-specific counter.
 - No `PreToolUse`, `PostToolUse`, or `PostToolUseFailure` hook fires for an
   unknown name — in the sequential path and in the parallel drain loop.
 - Every `tool_use` in a batch containing an unknown name has a matching
@@ -484,11 +463,10 @@ this cause go to zero.
    `ToolCallResult.Error`, delivered on the standard `tool_call_result` item.
    Counting works through `errors.As`, stream consumers need no new type, and
    nothing double-counts. Rationale in Observability.
-2. **Is 3 the right consecutive-unknown threshold?** Yes, and it is cheap to
-   hold tight now that tripping it ends the turn gracefully instead of
-   fatally. Each recovery message carries suggestions, so a model that will
-   ever self-correct does so on the first one; the threshold exists for the
-   model that never will.
+2. **Should unknown names have a separate retry threshold?** No. Every other
+   recoverable tool failure uses `ToolIterationLimit`, and unknown names should
+   follow the same policy. A dedicated counter adds state and ambiguous reset
+   semantics without establishing a broader failure-budget abstraction.
 3. **Suggestion list size?** Cap at three and never fall back to dumping the
    toolset. The full tool list is already in the model's context via the
    tools parameter; a longer list is documentation, not a nudge.
