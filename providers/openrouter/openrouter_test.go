@@ -1,6 +1,10 @@
 package openrouter
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -49,6 +53,33 @@ func TestNew(t *testing.T) {
 func TestName(t *testing.T) {
 	provider := New(WithModel("openai/gpt-4"))
 	assert.Equal(t, "openrouter", provider.Name())
+}
+
+func TestGenerateInheritsDisjointUsageConversion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"id":"chatcmpl-1",
+			"model":"openai/gpt-5",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":200,"completion_tokens":10,"total_tokens":210,"prompt_tokens_details":{"cached_tokens":150}}
+		}`)
+	}))
+	defer server.Close()
+
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithModel("openai/gpt-5"),
+		WithMaxRetries(0),
+	)
+	response, err := provider.Generate(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, 50, response.Usage.InputTokens)
+	assert.Equal(t, 150, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 200, response.Usage.TotalInputTokens())
 }
 
 func TestGetAPIKey(t *testing.T) {

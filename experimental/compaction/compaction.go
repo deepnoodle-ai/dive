@@ -85,7 +85,7 @@ Wrap your summary in <summary></summary> tags.`
 type CompactionConfig struct {
 	// ContextTokenThreshold is the context window token count that triggers compaction.
 	// Default: 100000 (100k tokens).
-	// Context tokens are calculated as: InputTokens + CacheReadInputTokens.
+	// Context tokens are the sum of Dive's disjoint input buckets.
 	ContextTokenThreshold int `json:"context_token_threshold,omitempty"`
 
 	// Model is an optional LLM to use for summary generation.
@@ -112,15 +112,13 @@ type CompactionEvent struct {
 	MessagesCompacted int `json:"messages_compacted"`
 }
 
-// CalculateContextTokens returns the context window token count from usage.
-// Per Anthropic API: input_tokens are non-cached tokens, cache_read_input_tokens are
-// tokens read from cache. Together they represent the actual context size.
-// Note: cache_creation_input_tokens is a subset of input_tokens, not additive.
+// CalculateContextTokens returns the full context window token count from
+// Dive's disjoint input buckets.
 func CalculateContextTokens(usage *llm.Usage) int {
 	if usage == nil {
 		return 0
 	}
-	return usage.InputTokens + usage.CacheReadInputTokens
+	return usage.TotalInputTokens()
 }
 
 // ShouldCompact returns true if compaction should be triggered based on token usage.

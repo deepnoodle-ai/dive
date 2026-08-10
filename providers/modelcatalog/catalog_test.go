@@ -112,6 +112,17 @@ func TestParseRejectsInvalidPrice(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestParseRejectsIncompleteCacheReadPriceTier(t *testing.T) {
+	invalid := strings.Replace(
+		validCatalog,
+		`"output_price_per_1m_tokens": "5.00"`,
+		`"output_price_per_1m_tokens": "5.00", "cache_read_price_threshold_tokens": 200000`,
+		1,
+	)
+	_, err := Parse("test", []byte(invalid))
+	assert.Error(t, err)
+}
+
 func TestParseRejectsNonFinitePrices(t *testing.T) {
 	for _, value := range []string{"NaN", "Inf"} {
 		t.Run(value, func(t *testing.T) {

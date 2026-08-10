@@ -66,8 +66,10 @@ func TestContextManagementRequest(t *testing.T) {
 				&llm.TextContent{Text: "Context cleared."},
 			},
 			Usage: llm.Usage{
-				InputTokens:  1000,
-				OutputTokens: 10,
+				InputTokens:              1000,
+				OutputTokens:             10,
+				CacheCreationInputTokens: 200,
+				CacheReadInputTokens:     300,
 			},
 			ContextManagement: &llm.ContextManagementResponse{
 				OriginalInputTokens: 35000,
@@ -99,6 +101,10 @@ func TestContextManagementRequest(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.NotNil(t, resp.ContextManagement)
+	assert.Equal(t, 1000, resp.Usage.InputTokens)
+	assert.Equal(t, 200, resp.Usage.CacheCreationInputTokens)
+	assert.Equal(t, 300, resp.Usage.CacheReadInputTokens)
+	assert.Equal(t, 1500, resp.Usage.TotalInputTokens())
 	assert.Equal(t, 35000, resp.ContextManagement.OriginalInputTokens)
 	assert.Len(t, resp.ContextManagement.AppliedEdits, 1)
 

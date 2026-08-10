@@ -1,7 +1,7 @@
 ---
 Title: Define llm.Usage input buckets as disjoint and fix the subset-convention decoders
 Author: Claude, with Curtis Myzie
-Status: Proposed
+Status: Implemented
 Last Updated: 2026-08-10
 ---
 

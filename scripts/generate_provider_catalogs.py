@@ -478,6 +478,10 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                     ("InputPrice", "input_price_per_1m_tokens"),
                     ("OutputPrice", "output_price_per_1m_tokens"),
                     ("CacheReadPrice", "cache_read_price_per_1m_tokens"),
+                    (
+                        "CacheReadPriceAboveThreshold",
+                        "cache_read_price_above_threshold_per_1m_tokens",
+                    ),
                     ("CacheWritePrice", "cache_write_price_per_1m_tokens"),
                 )
             elif table.kind == "image":
@@ -488,6 +492,11 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                 value = entry.get(json_field)
                 if value not in (None, ""):
                     lines.append(f"\t\t{go_field}: {value},")
+            if table.kind == "text" and entry.get("cache_read_price_threshold_tokens"):
+                lines.append(
+                    "\t\tCacheReadPriceThreshold: "
+                    f"{entry['cache_read_price_threshold_tokens']},"
+                )
             if table.kind == "image" and entry.get("max_size"):
                 lines.append(f"\t\tMaxSize: {go_string(entry['max_size'])},")
             lines.extend(

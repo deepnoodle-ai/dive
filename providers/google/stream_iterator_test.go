@@ -78,14 +78,15 @@ func TestStreamIteratorUsageAndStopReason(t *testing.T) {
 	assert.NotNil(t, messageDelta)
 	assert.Equal(t, "stop", messageDelta.Delta.StopReason)
 	assert.NotNil(t, messageDelta.Usage)
-	assert.Equal(t, 100, messageDelta.Usage.InputTokens)
+	assert.Equal(t, 40, messageDelta.Usage.InputTokens)
 
 	response := accumulator.Response()
 	assert.Equal(t, "Hello world", response.Message().Text())
 	assert.Equal(t, "stop", response.StopReason)
-	assert.Equal(t, 100, response.Usage.InputTokens)
+	assert.Equal(t, 40, response.Usage.InputTokens)
 	assert.Equal(t, 25, response.Usage.OutputTokens)
 	assert.Equal(t, 60, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 100, response.Usage.TotalInputTokens())
 	assert.Equal(t, 10, response.Usage.ReasoningTokens)
 }
 

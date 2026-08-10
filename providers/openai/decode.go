@@ -23,11 +23,16 @@ func decodeAssistantResponse(response *responses.Response) (*llm.Response, error
 		}
 	}
 
-	usage := llm.Usage{}
-	usage.InputTokens = int(response.Usage.InputTokens)
-	usage.OutputTokens = int(response.Usage.OutputTokens)
-	usage.CacheReadInputTokens = int(response.Usage.InputTokensDetails.CachedTokens)
-	usage.ReasoningTokens = int(response.Usage.OutputTokensDetails.ReasoningTokens)
+	inputTokens, cacheReadInputTokens := normalizeInputTokens(
+		response.Usage.InputTokens,
+		response.Usage.InputTokensDetails.CachedTokens,
+	)
+	usage := llm.Usage{
+		InputTokens:          inputTokens,
+		OutputTokens:         int(response.Usage.OutputTokens),
+		CacheReadInputTokens: cacheReadInputTokens,
+		ReasoningTokens:      int(response.Usage.OutputTokensDetails.ReasoningTokens),
+	}
 
 	// Determine stop reason based on the response content and status
 	stopReason := determineStopReason(response)
@@ -40,6 +45,14 @@ func decodeAssistantResponse(response *responses.Response) (*llm.Response, error
 		StopReason: stopReason,
 		Usage:      usage,
 	}, nil
+}
+
+// normalizeInputTokens converts OpenAI's subset-shaped usage into Dive's
+// disjoint input buckets and clamps invalid provider counts.
+func normalizeInputTokens(prompt, cached int64) (inputTokens, cacheReadInputTokens int) {
+	prompt = max(0, prompt)
+	cached = min(max(0, cached), prompt)
+	return int(prompt - cached), int(cached)
 }
 
 func decodeResponseItem(item responses.ResponseOutputItemUnion) ([]llm.Content, error) {

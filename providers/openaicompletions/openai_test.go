@@ -727,8 +727,38 @@ func TestGenerateUsageDetails(t *testing.T) {
 	}`), &result)
 	assert.NoError(t, err)
 	usage := result.Usage.toLLMUsage()
-	assert.Equal(t, 200, usage.InputTokens)
+	assert.Equal(t, 50, usage.InputTokens)
 	assert.Equal(t, 25, usage.OutputTokens)
 	assert.Equal(t, 150, usage.CacheReadInputTokens)
+	assert.Equal(t, 200, usage.TotalInputTokens())
 	assert.Equal(t, 10, usage.ReasoningTokens)
+}
+
+func TestToLLMUsageClampsInvalidCacheCounts(t *testing.T) {
+	tests := []struct {
+		name       string
+		prompt     int
+		cached     int
+		wantInput  int
+		wantCached int
+	}{
+		{name: "valid", prompt: 100, cached: 70, wantInput: 30, wantCached: 70},
+		{name: "cached above prompt", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
+		{name: "negative cached", prompt: 10, cached: -20, wantInput: 10, wantCached: 0},
+		{name: "negative prompt", prompt: -10, cached: 5, wantInput: 0, wantCached: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := Usage{
+				PromptTokens: tt.prompt,
+				PromptTokensDetails: &PromptTokensDetails{
+					CachedTokens: tt.cached,
+				},
+			}.toLLMUsage()
+			assert.Equal(t, tt.wantInput, usage.InputTokens)
+			assert.Equal(t, tt.wantCached, usage.CacheReadInputTokens)
+			assert.Equal(t, max(0, tt.prompt), usage.TotalInputTokens())
+		})
+	}
 }

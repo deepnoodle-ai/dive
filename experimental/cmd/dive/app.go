@@ -2547,7 +2547,7 @@ func (a *App) usageReportView() tui.View {
 		views = append(views, tokRow("reasoning", func(u *llm.Usage) int { return u.ReasoningTokens }))
 	}
 	views = append(views, tokRow("total input", func(u *llm.Usage) int {
-		return u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+		return u.TotalInputTokens()
 	}))
 
 	hitCells := []tui.View{left(labelW, "  cache hit", rowLabelStyle)}

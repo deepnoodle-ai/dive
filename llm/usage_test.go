@@ -36,3 +36,143 @@ func TestUsageUnmarshalOpenAIReasoningTokens(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 123, usage.ReasoningTokens)
 }
+
+func TestUsageTotalInputTokens(t *testing.T) {
+	usage := Usage{
+		InputTokens:              40,
+		CacheCreationInputTokens: 10,
+		CacheReadInputTokens:     50,
+	}
+	assert.Equal(t, 100, usage.TotalInputTokens())
+}
+
+func TestUsageUnmarshalNativeInputDetails(t *testing.T) {
+	tests := []struct {
+		name      string
+		payload   string
+		wantInput int
+		wantRead  int
+		wantCost  bool
+	}{
+		{
+			name:      "responses details",
+			payload:   `{"input_tokens":100,"input_tokens_details":{"cached_tokens":70}}`,
+			wantInput: 30,
+			wantRead:  70,
+		},
+		{
+			name:      "chat completions details",
+			payload:   `{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":70}}`,
+			wantInput: 30,
+			wantRead:  70,
+		},
+		{
+			name: "responses wins when both native shapes are present",
+			payload: `{
+				"input_tokens":100,
+				"input_tokens_details":{"cached_tokens":70},
+				"prompt_tokens":80,
+				"prompt_tokens_details":{"cached_tokens":20}
+			}`,
+			wantInput: 30,
+			wantRead:  70,
+		},
+		{
+			name: "canonical fields win over native details",
+			payload: `{
+				"input_tokens":40,
+				"cache_read_input_tokens":10,
+				"input_tokens_details":{"cached_tokens":30},
+				"cost":{"input":1,"total":99}
+			}`,
+			wantInput: 40,
+			wantRead:  10,
+			wantCost:  true,
+		},
+		{
+			name: "explicit canonical zero wins",
+			payload: `{
+				"input_tokens":40,
+				"cache_read_input_tokens":0,
+				"input_tokens_details":{"cached_tokens":30},
+				"cost":{"input":1,"total":99}
+			}`,
+			wantInput: 40,
+			wantRead:  0,
+			wantCost:  true,
+		},
+		{
+			name:      "cached tokens clamp above prompt",
+			payload:   `{"input_tokens":10,"input_tokens_details":{"cached_tokens":20}}`,
+			wantInput: 0,
+			wantRead:  10,
+		},
+		{
+			name:      "negative native counts clamp to zero",
+			payload:   `{"input_tokens":-10,"input_tokens_details":{"cached_tokens":-20}}`,
+			wantInput: 0,
+			wantRead:  0,
+		},
+		{
+			name: "normalization clears stale cost",
+			payload: `{
+				"input_tokens":100,
+				"input_tokens_details":{"cached_tokens":70},
+				"cost":{"input":1,"cache_read":2,"total":3}
+			}`,
+			wantInput: 30,
+			wantRead:  70,
+		},
+		{
+			name: "no token change preserves cost",
+			payload: `{
+				"input_tokens":100,
+				"input_tokens_details":{"cached_tokens":0},
+				"cost":{"input":1,"total":99}
+			}`,
+			wantInput: 100,
+			wantRead:  0,
+			wantCost:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var usage Usage
+			assert.NoError(t, json.Unmarshal([]byte(tt.payload), &usage))
+			assert.Equal(t, tt.wantInput, usage.InputTokens)
+			assert.Equal(t, tt.wantRead, usage.CacheReadInputTokens)
+			assert.Equal(t, tt.wantInput+tt.wantRead, usage.TotalInputTokens())
+			if tt.wantCost {
+				assert.NotNil(t, usage.Cost)
+				assert.Equal(t, 99.0, usage.Cost.Total)
+			} else {
+				assert.Nil(t, usage.Cost)
+			}
+		})
+	}
+}
+
+func TestUsageCanonicalRoundTripPreservesCost(t *testing.T) {
+	original := Usage{
+		InputTokens:          40,
+		CacheReadInputTokens: 10,
+		Cost: &Cost{
+			Input:     1,
+			CacheRead: 2,
+			Total:     99,
+			Currency:  "USD",
+			Model:     "test-model",
+		},
+	}
+	body, err := json.Marshal(original)
+	assert.NoError(t, err)
+
+	var decoded Usage
+	assert.NoError(t, json.Unmarshal(body, &decoded))
+	assert.Equal(t, 40, decoded.InputTokens)
+	assert.Equal(t, 10, decoded.CacheReadInputTokens)
+	assert.NotNil(t, decoded.Cost)
+	assert.Equal(t, 99.0, decoded.Cost.Total)
+	assert.Equal(t, "test-model", decoded.Cost.Model)
+}

@@ -2,6 +2,7 @@ package grok
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -31,6 +32,34 @@ func TestProvider_Name(t *testing.T) {
 
 func TestProvider_DefaultModel(t *testing.T) {
 	assert.Equal(t, ModelGrok45, DefaultModel)
+}
+
+func TestGenerateInheritsDisjointUsageConversion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"id":"resp_1",
+			"model":"grok-4.5",
+			"status":"completed",
+			"output":[],
+			"usage":{"input_tokens":200,"output_tokens":10,"input_tokens_details":{"cached_tokens":150}}
+		}`)
+	}))
+	defer server.Close()
+
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithModel(ModelGrok45),
+		WithMaxRetries(0),
+	)
+	response, err := provider.Generate(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, 50, response.Usage.InputTokens)
+	assert.Equal(t, 150, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 200, response.Usage.TotalInputTokens())
 }
 
 func TestProvider_GetAPIKey(t *testing.T) {

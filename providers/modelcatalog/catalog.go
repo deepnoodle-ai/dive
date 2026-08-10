@@ -82,14 +82,16 @@ type Pricing struct {
 
 // TextPrice uses decimal strings so source prices survive JSON and code generation exactly.
 type TextPrice struct {
-	Model           string `json:"model"`
-	InputPrice      string `json:"input_price_per_1m_tokens"`
-	OutputPrice     string `json:"output_price_per_1m_tokens"`
-	CacheReadPrice  string `json:"cache_read_price_per_1m_tokens,omitempty"`
-	CacheWritePrice string `json:"cache_write_price_per_1m_tokens,omitempty"`
-	Currency        string `json:"currency"`
-	UpdatedAt       string `json:"updated_at"`
-	Note            string `json:"note,omitempty"`
+	Model                        string `json:"model"`
+	InputPrice                   string `json:"input_price_per_1m_tokens"`
+	OutputPrice                  string `json:"output_price_per_1m_tokens"`
+	CacheReadPrice               string `json:"cache_read_price_per_1m_tokens,omitempty"`
+	CacheReadPriceAboveThreshold string `json:"cache_read_price_above_threshold_per_1m_tokens,omitempty"`
+	CacheReadPriceThreshold      int    `json:"cache_read_price_threshold_tokens,omitempty"`
+	CacheWritePrice              string `json:"cache_write_price_per_1m_tokens,omitempty"`
+	Currency                     string `json:"currency"`
+	UpdatedAt                    string `json:"updated_at"`
+	Note                         string `json:"note,omitempty"`
 }
 
 // ImagePrice describes per-image list pricing.
@@ -303,14 +305,20 @@ func validateTextPrices(name string, prices []TextPrice) error {
 			return err
 		}
 		for field, value := range map[string]string{
-			"input_price_per_1m_tokens":       price.InputPrice,
-			"output_price_per_1m_tokens":      price.OutputPrice,
-			"cache_read_price_per_1m_tokens":  price.CacheReadPrice,
-			"cache_write_price_per_1m_tokens": price.CacheWritePrice,
+			"input_price_per_1m_tokens":                      price.InputPrice,
+			"output_price_per_1m_tokens":                     price.OutputPrice,
+			"cache_read_price_per_1m_tokens":                 price.CacheReadPrice,
+			"cache_read_price_above_threshold_per_1m_tokens": price.CacheReadPriceAboveThreshold,
+			"cache_write_price_per_1m_tokens":                price.CacheWritePrice,
 		} {
 			if err := validateDecimal(name, price.Model, field, value, field == "input_price_per_1m_tokens" || field == "output_price_per_1m_tokens"); err != nil {
 				return err
 			}
+		}
+		hasThreshold := price.CacheReadPriceThreshold != 0
+		hasPriceAboveThreshold := price.CacheReadPriceAboveThreshold != ""
+		if hasThreshold != hasPriceAboveThreshold || price.CacheReadPriceThreshold < 0 {
+			return fmt.Errorf("%s pricing for %s requires a positive cache-read threshold and above-threshold price together", name, price.Model)
 		}
 	}
 	return nil

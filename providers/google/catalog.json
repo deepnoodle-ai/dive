@@ -221,6 +221,7 @@
         "model": "gemini-3.6-flash",
         "input_price_per_1m_tokens": "1.50",
         "output_price_per_1m_tokens": "7.50",
+        "cache_read_price_per_1m_tokens": "0.15",
         "currency": "USD",
         "updated_at": "2026-07-21"
       },
@@ -228,13 +229,15 @@
         "model": "gemini-3.5-flash",
         "input_price_per_1m_tokens": "1.50",
         "output_price_per_1m_tokens": "9.00",
+        "cache_read_price_per_1m_tokens": "0.15",
         "currency": "USD",
-        "updated_at": "2026-05-28"
+        "updated_at": "2026-07-21"
       },
       {
         "model": "gemini-3.5-flash-lite",
         "input_price_per_1m_tokens": "0.30",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.03",
         "currency": "USD",
         "updated_at": "2026-07-21"
       },
@@ -242,24 +245,31 @@
         "model": "gemini-3.1-pro-preview",
         "input_price_per_1m_tokens": "2.00",
         "output_price_per_1m_tokens": "12.00",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "cache_read_price_above_threshold_per_1m_tokens": "0.40",
+        "cache_read_price_threshold_tokens": 200000,
         "currency": "USD",
-        "updated_at": "2026-05-28",
+        "updated_at": "2026-07-21",
         "note": "Input $2.00 up to 200K tokens, $4.00 above; output $12.00 up to 200K tokens, $18.00 above."
       },
       {
         "model": "gemini-3.1-pro-preview-customtools",
         "input_price_per_1m_tokens": "2.00",
         "output_price_per_1m_tokens": "12.00",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "cache_read_price_above_threshold_per_1m_tokens": "0.40",
+        "cache_read_price_threshold_tokens": 200000,
         "currency": "USD",
-        "updated_at": "2026-05-28",
+        "updated_at": "2026-07-21",
         "note": "Up to 200K tokens ($4.00 over 200K) $18.00 over 200K tokens"
       },
       {
         "model": "gemini-3.1-flash-lite",
         "input_price_per_1m_tokens": "0.25",
         "output_price_per_1m_tokens": "1.50",
+        "cache_read_price_per_1m_tokens": "0.025",
         "currency": "USD",
-        "updated_at": "2026-05-28",
+        "updated_at": "2026-07-21",
         "note": "text/image/video ($0.50 audio)"
       },
       {
@@ -288,37 +298,44 @@
         "model": "gemini-3-flash-preview",
         "input_price_per_1m_tokens": "0.50",
         "output_price_per_1m_tokens": "3.00",
+        "cache_read_price_per_1m_tokens": "0.05",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-07-21"
       },
       {
         "model": "gemini-2.5-flash",
         "input_price_per_1m_tokens": "0.30",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.03",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-07-21"
       },
       {
         "model": "gemini-2.5-flash-lite",
         "input_price_per_1m_tokens": "0.10",
         "output_price_per_1m_tokens": "0.40",
+        "cache_read_price_per_1m_tokens": "0.01",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-07-21"
       },
       {
         "model": "gemini-2.5-pro",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "10.00",
+        "cache_read_price_per_1m_tokens": "0.125",
+        "cache_read_price_above_threshold_per_1m_tokens": "0.25",
+        "cache_read_price_threshold_tokens": 200000,
         "currency": "USD",
-        "updated_at": "2026-02-09",
+        "updated_at": "2026-07-21",
         "note": "Input $1.25 up to 200K tokens, $2.50 above; output $10.00 up to 200K tokens, $15.00 above."
       },
       {
         "model": "gemini-2.0-flash",
         "input_price_per_1m_tokens": "0.10",
         "output_price_per_1m_tokens": "0.40",
+        "cache_read_price_per_1m_tokens": "0.025",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-07-21"
       },
       {
         "model": "gemini-1.5-pro",

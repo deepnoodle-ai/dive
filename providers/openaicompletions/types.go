@@ -179,9 +179,9 @@ type Usage struct {
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
 }
 
-// PromptTokensDetails breaks down the prompt token count. CachedTokens is the
-// portion of prompt_tokens served from the prompt cache (a subset of
-// PromptTokens, not additive).
+// PromptTokensDetails breaks down the wire prompt token count. CachedTokens is
+// a subset of PromptTokens on the wire; toLLMUsage resolves that relationship
+// into Dive's disjoint input buckets.
 type PromptTokensDetails struct {
 	CachedTokens int `json:"cached_tokens"`
 }
@@ -196,13 +196,16 @@ type CompletionTokensDetails struct {
 // toLLMUsage converts wire usage to llm.Usage, carrying cache and reasoning
 // token detail when the server reports it.
 func (u Usage) toLLMUsage() llm.Usage {
+	prompt := max(0, u.PromptTokens)
+	cached := 0
+	if u.PromptTokensDetails != nil {
+		cached = min(max(0, u.PromptTokensDetails.CachedTokens), prompt)
+	}
 	usage := llm.Usage{
-		InputTokens:  u.PromptTokens,
+		InputTokens:  prompt - cached,
 		OutputTokens: u.CompletionTokens,
 	}
-	if u.PromptTokensDetails != nil {
-		usage.CacheReadInputTokens = u.PromptTokensDetails.CachedTokens
-	}
+	usage.CacheReadInputTokens = cached
 	if u.CompletionTokensDetails != nil {
 		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
 	}

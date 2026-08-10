@@ -2,6 +2,7 @@ package providers
 
 import (
 	"sync"
+	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
 )
@@ -44,10 +45,39 @@ func PricingFor(model string, fast bool) (llm.PricingInfo, bool) {
 	pricingMu.RLock()
 	defer pricingMu.RUnlock()
 	if fast {
-		if p, ok := fastPricing[model]; ok {
+		if p, ok := pricingForModel(fastPricing, model); ok {
 			return p, true
 		}
 	}
-	p, ok := standardPricing[model]
+	return pricingForModel(standardPricing, model)
+}
+
+func pricingForModel(table map[string]llm.PricingInfo, model string) (llm.PricingInfo, bool) {
+	if p, ok := table[model]; ok {
+		return p, true
+	}
+	base, ok := stripDatedModelVersion(model)
+	if !ok {
+		return llm.PricingInfo{}, false
+	}
+	p, ok := table[base]
 	return p, ok
+}
+
+// Some providers return a dated deployment ID even when the request uses the
+// corresponding stable catalog ID (for example gpt-5.4-mini-2026-03-17).
+// Reuse the stable model's price only for the unambiguous YYYY-MM-DD suffix.
+func stripDatedModelVersion(model string) (string, bool) {
+	const suffixLength = len("-2006-01-02")
+	if len(model) <= suffixLength {
+		return "", false
+	}
+	suffix := model[len(model)-suffixLength:]
+	if suffix[0] != '-' {
+		return "", false
+	}
+	if _, err := time.Parse("2006-01-02", suffix[1:]); err != nil {
+		return "", false
+	}
+	return model[:len(model)-suffixLength], true
 }
