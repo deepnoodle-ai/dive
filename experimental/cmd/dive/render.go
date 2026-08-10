@@ -206,11 +206,13 @@ func (a *App) tokensPanelView() tui.View {
 	return tui.Stack(rows...).Gap(0)
 }
 
-// cacheHitRate returns the share of cacheable prompt tokens served from cache
-// (reads) versus freshly written (writes), as a percentage string. ok is false
-// when no caching occurred for the scope (zero denominator).
+// cacheHitRate returns the share of the full prompt served from cache. ok is
+// false when no caching occurred for the scope.
 func cacheHitRate(u *llm.Usage) (string, bool) {
-	denom := u.CacheReadInputTokens + u.CacheCreationInputTokens
+	if u.CacheReadInputTokens == 0 && u.CacheCreationInputTokens == 0 {
+		return "—", false
+	}
+	denom := u.TotalInputTokens()
 	if denom == 0 {
 		return "—", false
 	}
@@ -224,7 +226,7 @@ func cacheHitStyle(u *llm.Usage, ok bool) tui.Style {
 	if !ok {
 		return tui.NewStyle().WithFgRGB(tui.RGB{R: 100, G: 100, B: 110})
 	}
-	denom := u.CacheReadInputTokens + u.CacheCreationInputTokens
+	denom := u.TotalInputTokens()
 	pct := (u.CacheReadInputTokens * 100) / denom
 	switch {
 	case pct >= 80:

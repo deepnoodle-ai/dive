@@ -3,6 +3,7 @@ package dive
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -228,6 +229,38 @@ func TestResponseItemsContainToolCalls(t *testing.T) {
 
 	// Verify OutputText() returns the final message text
 	assert.Equal(t, resp.OutputText(), "Done")
+}
+
+func TestPromptCacheKeyForSession(t *testing.T) {
+	key := promptCacheKeyForSession("session-123")
+	assert.Equal(t, key, promptCacheKeyForSession("session-123"))
+	assert.NotEqual(t, key, promptCacheKeyForSession("session-456"))
+	assert.False(t, strings.Contains(key, "session-123"))
+}
+
+func TestAgentPassesStablePromptCacheKeyForSession(t *testing.T) {
+	var got string
+	model := &mockLLM{
+		generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
+			cfg := &llm.Config{}
+			cfg.Apply(opts...)
+			got = cfg.PromptCacheKey
+			return &llm.Response{
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "done"}},
+				StopReason: "stop",
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+	sess := &seededSession{id: "session-123"}
+	agent, err := NewAgent(AgentOptions{Model: model, Session: sess})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("hello"))
+	assert.NoError(t, err)
+	assert.Equal(t, promptCacheKeyForSession(sess.ID()), got)
 }
 
 // TestPreIterationCanRewriteMessages verifies that a PreIteration hook can

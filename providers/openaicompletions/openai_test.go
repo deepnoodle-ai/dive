@@ -95,6 +95,31 @@ func TestApplyRequestConfig_UnsupportedReasoningEffortClampsForKnownModel(t *tes
 	assert.Equal(t, ReasoningEffortMinimal, req.ReasoningEffort)
 }
 
+func TestApplyRequestConfig_OpenAIPromptCacheKey(t *testing.T) {
+	provider := New(WithModel(ModelGPT56Luna))
+	var req Request
+	err := provider.applyRequestConfig(&req, &llm.Config{PromptCacheKey: "stable-session-key"})
+	assert.NoError(t, err)
+	assert.Equal(t, "stable-session-key", req.PromptCacheKey)
+}
+
+func TestAddPromptCacheBreakpoints(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "one"},
+		{Role: "assistant", Content: "answer one"},
+		{Role: "user", Content: "two"},
+		{Role: "assistant", Content: "answer two"},
+		{Role: "developer", Content: "three"},
+		{Role: "user", Content: "four"},
+	}
+	addPromptCacheBreakpoints(messages, 3)
+
+	body, err := json.Marshal(messages)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
+	assert.True(t, strings.Contains(string(body), `"mode":"explicit"`))
+}
+
 func TestApplyRequestConfig_OmitsTemperatureForModelsThatRejectIt(t *testing.T) {
 	// gpt-5 answers 400 "Unsupported parameter: 'temperature'".
 	temperature := 0.5
@@ -721,7 +746,7 @@ func TestGenerateUsageDetails(t *testing.T) {
 			"prompt_tokens": 200,
 			"completion_tokens": 25,
 			"total_tokens": 225,
-			"prompt_tokens_details": {"cached_tokens": 150},
+			"prompt_tokens_details": {"cached_tokens": 100, "cache_write_tokens": 50},
 			"completion_tokens_details": {"reasoning_tokens": 10}
 		}
 	}`), &result)
@@ -729,7 +754,8 @@ func TestGenerateUsageDetails(t *testing.T) {
 	usage := result.Usage.toLLMUsage()
 	assert.Equal(t, 50, usage.InputTokens)
 	assert.Equal(t, 25, usage.OutputTokens)
-	assert.Equal(t, 150, usage.CacheReadInputTokens)
+	assert.Equal(t, 100, usage.CacheReadInputTokens)
+	assert.Equal(t, 50, usage.CacheCreationInputTokens)
 	assert.Equal(t, 200, usage.TotalInputTokens())
 	assert.Equal(t, 10, usage.ReasoningTokens)
 }
@@ -739,13 +765,16 @@ func TestToLLMUsageClampsInvalidCacheCounts(t *testing.T) {
 		name       string
 		prompt     int
 		cached     int
+		written    int
 		wantInput  int
 		wantCached int
+		wantWrite  int
 	}{
-		{name: "valid", prompt: 100, cached: 70, wantInput: 30, wantCached: 70},
+		{name: "valid", prompt: 100, cached: 20, written: 70, wantInput: 10, wantCached: 20, wantWrite: 70},
 		{name: "cached above prompt", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
-		{name: "negative cached", prompt: 10, cached: -20, wantInput: 10, wantCached: 0},
-		{name: "negative prompt", prompt: -10, cached: 5, wantInput: 0, wantCached: 0},
+		{name: "write above remainder", prompt: 10, cached: 7, written: 8, wantInput: 0, wantCached: 7, wantWrite: 3},
+		{name: "negative cached", prompt: 10, cached: -20, written: -5, wantInput: 10, wantCached: 0},
+		{name: "negative prompt", prompt: -10, cached: 5, written: 5, wantInput: 0, wantCached: 0},
 	}
 
 	for _, tt := range tests {
@@ -753,11 +782,13 @@ func TestToLLMUsageClampsInvalidCacheCounts(t *testing.T) {
 			usage := Usage{
 				PromptTokens: tt.prompt,
 				PromptTokensDetails: &PromptTokensDetails{
-					CachedTokens: tt.cached,
+					CachedTokens:     tt.cached,
+					CacheWriteTokens: tt.written,
 				},
 			}.toLLMUsage()
 			assert.Equal(t, tt.wantInput, usage.InputTokens)
 			assert.Equal(t, tt.wantCached, usage.CacheReadInputTokens)
+			assert.Equal(t, tt.wantWrite, usage.CacheCreationInputTokens)
 			assert.Equal(t, max(0, tt.prompt), usage.TotalInputTokens())
 		})
 	}

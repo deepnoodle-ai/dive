@@ -35,6 +35,7 @@ type Config struct {
 	RequestHeaders     http.Header              `json:"request_headers,omitempty"`
 	MCPServers         []MCPServerConfig        `json:"mcp_servers,omitempty"`
 	Caching            *bool                    `json:"caching,omitempty"`
+	PromptCacheKey     string                   `json:"prompt_cache_key,omitempty"`
 	PreviousResponseID string                   `json:"previous_response_id,omitempty"`
 	ServiceTier        string                   `json:"service_tier,omitempty"`
 	ProviderOptions    map[string]interface{}   `json:"provider_options,omitempty"`
@@ -462,6 +463,13 @@ func WithCaching(enabled bool) Option {
 func WithPreviousResponseID(previousResponseID string) Option {
 	return func(config *Config) {
 		config.PreviousResponseID = previousResponseID
+	}
+}
+
+// WithPromptCacheKey sets a stable routing key for provider prompt caches.
+func WithPromptCacheKey(promptCacheKey string) Option {
+	return func(config *Config) {
+		config.PromptCacheKey = promptCacheKey
 	}
 }
 

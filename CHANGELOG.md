@@ -15,8 +15,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Responses, OpenAI Completions, OpenRouter, Mistral, Grok, and Google now
   subtract cache hits from `InputTokens` before pricing. This fixes cached
   tokens being charged at both the normal input rate and the cache-read rate.
-  To reconstruct the pre-fix value on those providers, use
-  `old input = new input + cache read`.
+  GPT-5.6 cache writes are also decoded into `CacheCreationInputTokens`, so
+  they receive the published write rate instead of the normal input rate. To
+  reconstruct the pre-fix value, use
+  `old input = new input + cache read + cache write`.
+- **OpenAI prompt-cache reporting and routing now match GPT-5.6.** Agent
+  sessions use a stable hashed `prompt_cache_key`, native OpenAI requests mark
+  reusable prefix breakpoints, and the CLI's cache-hit percentage is cache
+  reads divided by total input rather than reads divided only by cache
+  activity. A small cached prefix can no longer render as `100%`.
 - **Cache-read pricing is populated for every Google and OpenAI text model
   with a published discounted-input rate.** The OpenAI catalog also corrects
   the stale GPT-4o row to the current $2.50 input, $1.25 cached-input, and

@@ -205,7 +205,14 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
+	model := string(p.model)
+	if config.Model != "" {
+		model = config.Model
+	}
 	input, err := encodeMessages(rendered)
+	if supportsExplicitPromptCaching(p.Name(), p.endpoint, model) {
+		input, err = encodeMessagesWithPromptCacheBreakpoints(rendered)
+	}
 	if err != nil {
 		return responses.ResponseNewParams{}, err
 	}
@@ -214,10 +221,9 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		Store: openai.Bool(false),
 	}
 
-	if config.Model != "" {
-		params.Model = config.Model
-	} else {
-		params.Model = p.model
+	params.Model = model
+	if config.PromptCacheKey != "" && isNativeOpenAIEndpoint(p.Name(), p.endpoint) {
+		params.PromptCacheKey = openai.String(config.PromptCacheKey)
 	}
 
 	if config.SystemPrompt != "" {
@@ -433,6 +439,14 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 		}
 	}
 	return params, nil
+}
+
+func isNativeOpenAIEndpoint(providerName, endpoint string) bool {
+	return providerName == ProviderName && strings.TrimRight(endpoint, "/") == DefaultEndpoint
+}
+
+func supportsExplicitPromptCaching(providerName, endpoint, model string) bool {
+	return isNativeOpenAIEndpoint(providerName, endpoint) && strings.HasPrefix(model, "gpt-5.6")
 }
 
 // applyResponseFormat handles setting up response format options

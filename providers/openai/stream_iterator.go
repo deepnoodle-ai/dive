@@ -446,15 +446,17 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		}
 
 	case responses.ResponseCompletedEvent:
-		inputTokens, cacheReadInputTokens := normalizeInputTokens(
+		inputTokens, cacheReadInputTokens, cacheCreationInputTokens := normalizeInputTokens(
 			data.Response.Usage.InputTokens,
 			data.Response.Usage.InputTokensDetails.CachedTokens,
+			data.Response.Usage.InputTokensDetails.CacheWriteTokens,
 		)
 		s.finalUsage = &llm.Usage{
-			InputTokens:          inputTokens,
-			OutputTokens:         int(data.Response.Usage.OutputTokens),
-			CacheReadInputTokens: cacheReadInputTokens,
-			ReasoningTokens:      int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
+			InputTokens:              inputTokens,
+			OutputTokens:             int(data.Response.Usage.OutputTokens),
+			CacheReadInputTokens:     cacheReadInputTokens,
+			CacheCreationInputTokens: cacheCreationInputTokens,
+			ReasoningTokens:          int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
 		}
 		stopReason := determineStopReason(&data.Response)
 
@@ -473,15 +475,17 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 		s.isClosed = true
 
 	case responses.ResponseIncompleteEvent:
-		inputTokens, cacheReadInputTokens := normalizeInputTokens(
+		inputTokens, cacheReadInputTokens, cacheCreationInputTokens := normalizeInputTokens(
 			data.Response.Usage.InputTokens,
 			data.Response.Usage.InputTokensDetails.CachedTokens,
+			data.Response.Usage.InputTokensDetails.CacheWriteTokens,
 		)
 		s.finalUsage = &llm.Usage{
-			InputTokens:          inputTokens,
-			OutputTokens:         int(data.Response.Usage.OutputTokens),
-			CacheReadInputTokens: cacheReadInputTokens,
-			ReasoningTokens:      int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
+			InputTokens:              inputTokens,
+			OutputTokens:             int(data.Response.Usage.OutputTokens),
+			CacheReadInputTokens:     cacheReadInputTokens,
+			CacheCreationInputTokens: cacheCreationInputTokens,
+			ReasoningTokens:          int(data.Response.Usage.OutputTokensDetails.ReasoningTokens),
 		}
 		stopReason := determineStopReason(&data.Response)
 

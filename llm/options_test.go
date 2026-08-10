@@ -32,3 +32,9 @@ func TestWithReasoningEffort_Minimal(t *testing.T) {
 	cfg.Apply(WithReasoningEffort(ReasoningEffortMinimal))
 	assert.Equal(t, ReasoningEffortMinimal, cfg.ReasoningEffort)
 }
+
+func TestWithPromptCacheKey(t *testing.T) {
+	cfg := &Config{}
+	cfg.Apply(WithPromptCacheKey("session-key"))
+	assert.Equal(t, "session-key", cfg.PromptCacheKey)
+}
