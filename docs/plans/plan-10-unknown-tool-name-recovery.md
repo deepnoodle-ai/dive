@@ -81,12 +81,12 @@ the batch produces nothing.
 
 Compare that to every other failure mode in the same file:
 
-| Failure | Handling |
-| --- | --- |
-| `tool.Call` returns an error | `IsError`, `"Tool execution error: %v"` |
-| Tool panics | Recovered, converted to an error result |
+| Failure                        | Handling                                |
+| ------------------------------ | --------------------------------------- |
+| `tool.Call` returns an error   | `IsError`, `"Tool execution error: %v"` |
+| Tool panics                    | Recovered, converted to an error result |
 | Tool returns a malformed union | `IsError` result so the agent converges |
-| Tool name is unknown | **Fatal, turn ends** |
+| Tool name is unknown           | **Fatal, turn ends**                    |
 
 The panic path states the principle directly: results are converted "so the
 LLM can see the failure and adapt, rather than crashing the process." A tool
@@ -143,7 +143,7 @@ calls were read-only, but that was luck, not design.
   analogy to structured output. It is not offered by the hosted provider APIs,
   and it would be the wrong fix regardless: masking an invalid name does not
   make the model want the right one, it makes it emit the next most probable
-  *valid* one. That converts a loud failure into a silent call against the
+  _valid_ one. That converts a loud failure into a silent call against the
   wrong tool. The error is the useful signal here.
 - **Fuzzy name correction at dispatch.** Dive stays an exact-name dispatcher.
   Suggestions are returned to the model; they are never silently substituted.
@@ -230,24 +230,30 @@ core_market_clock. Call one of the tools declared for this turn.
 ### Suggestion algorithm
 
 Suggestions are drawn only from `toolsByName`, which is the agent's declared
-set for that turn. Candidate names are sorted before ranking so the output is
-deterministic — map iteration order must not leak into messages or tests.
-Ranking, first tier with any match wins:
+set for that turn. Split names into non-empty segments on every `_`, `-`, or
+`.` delimiter. Evaluate every candidate, keep only the first tier with a
+match, then order that tier by its match score and finally by the complete wire
+name in ascending lexical order. This is the total ordering; map iteration
+order must not leak into messages or tests.
 
 1. **Segment-suffix match.** Split both names on `_`, `-`, and `.`; rank by
-   the longest common suffix of segments. A match requires at least two
-   shared trailing segments, or one shared trailing segment of five or more
-   characters — `mobius_market_clock` matches `core_market_clock` on the
-   two-segment suffix `market_clock`, while a lone shared `clock` is below
-   the floor and cannot tie `core_market_clock` with `core_portfolio_clock`.
-   This is the dominant real-world shape: right leaf, wrong namespace. Note
-   that the incident name is *not* reachable by edit distance —
-   `mobius_` → `core_` exceeds the tier-2 bound — so this tier is
-   load-bearing and gets its own test.
+   the longest common suffix of segments, then by the suffix's total character
+   count, both descending. A match requires at least two shared trailing
+   segments, or one shared trailing segment of at least six characters —
+   `mobius_market_clock` matches `core_market_clock` on the two-segment suffix
+   `market_clock`, while a lone shared `clock` is below the floor and cannot
+   tie `core_market_clock` with `core_portfolio_clock`. This is the dominant
+   real-world shape: right leaf, wrong namespace. Note that the incident name
+   is _not_ reachable by edit distance — `mobius_` → `core_` exceeds the
+   tier-2 bound — so this tier is load-bearing and gets its own test.
 2. **Bounded edit distance.** Levenshtein within `min(3, len/4)` on the full
-   name, for ordinary typos.
-3. **Prefix match.** Shared namespace, unrecognized leaf. Return that
-   namespace's members so the model can pick.
+   name, for ordinary typos; lower distance ranks first.
+3. **Prefix match.** The namespace is the complete sequence of segments before
+   the terminal leaf. A candidate matches when that sequence equals the
+   query's sequence, regardless of which supported delimiter appeared in the
+   original names; longer namespaces rank first. A flat, single-segment name
+   has no namespace and therefore cannot match this tier. Return matching
+   namespace members so the model can pick.
 
 Cap at three suggestions. The full toolset is already in the model's context
 via the tools parameter, so suggestions are a nudge, not documentation. Emit
@@ -260,7 +266,7 @@ Today a bad name is at least bounded: it ends the turn. After this change a
 model stuck on one name could consume iterations up to
 `defaultToolIterationLimit` (100). That is an unacceptable worst case.
 
-Add a per-generation counter of consecutive unknown-only *iterations*: an
+Add a per-generation counter of consecutive unknown-only _iterations_: an
 iteration increments it when it produced at least one unknown name and zero
 successful dispatches; any successful dispatch resets it. Counting per
 iteration rather than per call means a mixed batch — the actual incident
@@ -442,8 +448,10 @@ detectable failure for an undetectable one.
   distance bound, so this pins that tier 1 is load-bearing.
 - A single shared trailing segment below the length floor produces no
   suggestion (`core_market_clock` vs a query sharing only `clock`).
-- Suggestion output is deterministic across runs (candidates sorted before
-  ranking).
+- Equal-score candidates are ordered by complete wire name, and suggestion
+  output is deterministic across runs and map insertion orders.
+- Prefix-tier tests cover `_`, `-`, and `.` delimiters, equal namespace scores,
+  and flat names that must not qualify as namespace matches.
 - No suggestion is emitted when nothing scores within threshold.
 - Suggestions never include a name absent from `toolsByName`.
 - A mixed batch (valid + unknown) does not advance the consecutive-unknown
