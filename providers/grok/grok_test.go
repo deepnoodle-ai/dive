@@ -2,6 +2,7 @@ package grok
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -60,6 +61,43 @@ func TestGenerateInheritsDisjointUsageConversion(t *testing.T) {
 	assert.Equal(t, 50, response.Usage.InputTokens)
 	assert.Equal(t, 150, response.Usage.CacheReadInputTokens)
 	assert.Equal(t, 200, response.Usage.TotalInputTokens())
+}
+
+func TestGenerateForwardsPromptCacheKeyFromLLMConfig(t *testing.T) {
+	type capturedRequest struct {
+		PromptCacheKey string `json:"prompt_cache_key"`
+		Err            error  `json:"-"`
+	}
+	requestBody := make(chan capturedRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var captured capturedRequest
+		captured.Err = json.NewDecoder(r.Body).Decode(&captured)
+		requestBody <- captured
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"id":"resp_1",
+			"model":"grok-4.5",
+			"status":"completed",
+			"output":[],
+			"usage":{"input_tokens":1,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}
+		}`)
+	}))
+	defer server.Close()
+
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithModel(ModelGrok45),
+		WithMaxRetries(0),
+	)
+	_, err := provider.Generate(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")),
+		llm.WithPromptCacheKey("stable-session-key"),
+	)
+	assert.NoError(t, err)
+	captured := <-requestBody
+	assert.NoError(t, captured.Err)
+	assert.Equal(t, "stable-session-key", captured.PromptCacheKey)
 }
 
 func TestProvider_GetAPIKey(t *testing.T) {

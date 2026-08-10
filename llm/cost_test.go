@@ -50,6 +50,28 @@ func TestPricingInfoCostOf_ZeroCachePrices(t *testing.T) {
 	assert.Equal(t, 7.50, c.Total)
 }
 
+func TestPricingInfoCostOf_LongContextBoundary(t *testing.T) {
+	p := PricingInfo{
+		InputPrice:                2,
+		OutputPrice:               6,
+		CacheReadPrice:            0.3,
+		LongContextThreshold:      200_000,
+		LongContextInputPrice:     4,
+		LongContextCacheReadPrice: 0.6,
+		LongContextOutputPrice:    12,
+	}
+
+	standard := p.CostOf(&Usage{InputTokens: 199_998, CacheReadInputTokens: 1, OutputTokens: 1_000_000})
+	assert.Equal(t, float64(199_998)*2/1_000_000, standard.Input)
+	assert.Equal(t, 6.0, standard.Output)
+	assert.Equal(t, 0.3/1_000_000, standard.CacheRead)
+
+	long := p.CostOf(&Usage{InputTokens: 199_999, CacheReadInputTokens: 1, OutputTokens: 1_000_000})
+	assert.Equal(t, float64(199_999)*4/1_000_000, long.Input)
+	assert.Equal(t, 12.0, long.Output)
+	assert.Equal(t, 0.6/1_000_000, long.CacheRead)
+}
+
 func TestUsageCostAddAndCopy(t *testing.T) {
 	a := &Usage{InputTokens: 100, Cost: &Cost{Input: 1.0, Total: 1.0, Currency: "USD"}}
 	b := &Usage{InputTokens: 50, Cost: &Cost{Input: 0.5, Output: 0.25, Total: 0.75}}

@@ -31,16 +31,17 @@ var _ llm.StreamingLLM = &Provider{}
 
 // Provider implements the OpenAI LLM provider using the Responses API.
 type Provider struct {
-	name                string
-	endpoint            string
-	client              openai.Client
-	model               openai.ChatModel
-	maxTokens           int
-	maxRetries          int
-	retryBaseWait       time.Duration
-	httpClient          *http.Client
-	options             []option.RequestOption
-	extraRequestOptions []option.RequestOption
+	name                   string
+	endpoint               string
+	client                 openai.Client
+	model                  openai.ChatModel
+	maxTokens              int
+	maxRetries             int
+	retryBaseWait          time.Duration
+	httpClient             *http.Client
+	supportsPromptCacheKey bool
+	options                []option.RequestOption
+	extraRequestOptions    []option.RequestOption
 }
 
 // New creates a new OpenAI provider with the given options.
@@ -222,7 +223,7 @@ func (p *Provider) buildRequestParams(config *llm.Config) (responses.ResponseNew
 	}
 
 	params.Model = model
-	if config.PromptCacheKey != "" && isNativeOpenAIEndpoint(p.Name(), p.endpoint) {
+	if config.PromptCacheKey != "" && (p.supportsPromptCacheKey || isNativeOpenAIEndpoint(p.Name(), p.endpoint)) {
 		params.PromptCacheKey = openai.String(config.PromptCacheKey)
 	}
 
