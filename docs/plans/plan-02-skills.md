@@ -49,14 +49,13 @@ Aligned with Claude Code's architecture based on direct investigation:
 ### Key Design Decisions
 
 - **`skill.ConfigureAgent(&opts, loader)`** avoids circular import (skill→dive, not dive→skill). Follows the same one-call pattern as `AgentOptions.Session`.
-- **Hooks always installed** — even with zero skills, hooks are registered so that stale catalog blocks from a previous session can be cleaned up on resume.
+- **Hooks always installed** — the extension exposes its catalog and content hooks even when the current catalog is empty.
 - **Stable request prefix** for catalog — prepending to a model-facing copy avoids rewriting stored messages while keeping the catalog and accumulated conversation cacheable.
-- **Typed model-only reminder** — the catalog hook uses `NewContextReminder` plus `NewReminderMessage`. It removes stale legacy catalog text from a model-facing copy, does not mutate loaded messages, and is not persisted.
+- **Typed model-only reminder** — the catalog hook uses `NewContextReminder` plus `NewReminderMessage`, does not mutate loaded messages, and is not persisted.
 - **Per-call-ID content association** — `tool.Call()` reads `dive.ToolCallID(ctx)` to key pending instructions; the PostToolUse hook reads `hctx.Call.ID` to retrieve the correct content. This is safe under parallel tool execution where results arrive out of order.
 - **No tool restrictions** — `allowed-tools` is parsed as metadata but not enforced at runtime. Simplifies the implementation and avoids the complexity of skill activation/deactivation lifecycle.
 - **No HTTP provider** — removed due to security implications (remote code could exploit shell expansion). The `Provider` interface remains extensible for custom backends.
 - **Shell expansion gated by `IsLocal()`** — only skills with `file://` or empty `SourceURI` can have `!{command}` expanded, regardless of global config.
-- **Session resume** — catalog hook detects legacy `<system-reminder name="skills">` blocks, removes them from a model-facing copy, and prepends the current typed snapshot without rewriting history.
 - **Base directory** included in skill content so the agent can resolve relative paths to reference files within the skill directory.
 - **File path in catalog** — each catalog entry includes `Location:` so the agent can answer "where is this skill?" without guessing.
 - **Symlink resolution** — filesystem provider resolves symlinked skill directories, so `~/.claude/skills/` entries that are symlinks are discovered correctly.

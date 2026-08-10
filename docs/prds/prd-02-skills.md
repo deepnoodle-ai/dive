@@ -110,7 +110,7 @@ agent, _ := dive.NewAgent(opts)
 
 `ConfigureAgent` internally:
 
-1. **Always registers hooks** — even with zero skills. This ensures stale catalog blocks from a previous session can be cleaned up on resume.
+1. **Always registers hooks** — the extension exposes its catalog and content hooks even when the current catalog is empty.
 2. **Registers the Skill tool** (only when skills are loaded) — static description, no skill listing. The tool is a trigger: returns `"Launching skill: X"` and stores expanded instructions keyed by tool call ID for the PostToolUse hook.
 3. **Appends skill usage rules** to the system prompt (only when skills are loaded).
 4. **Registers a PreGenerationHook** that creates the skill catalog with `dive.NewContextReminder` and prepends it to the model-facing history with `dive.NewReminderMessage`. The typed block forms stable prompt-prefix context and is not persisted.
@@ -247,7 +247,7 @@ Promoted `experimental/skill/` to `skill/` with:
 3. **`skill/agent.go`** — `ConfigureAgent` wires tool, PreGenerationHook (catalog), PostToolUseHook (skill content)
 4. **`reminder.go` and `llm/reminder.go`** — typed reminder construction, recorded/model-only lifetimes, and provider-edge rendering (`system_reminder.go` remains the legacy text compatibility layer)
 5. **`context.go`** — `dive.WithToolCallID/ToolCallID` for tool call ID propagation via context
-6. **Catalog injection** — typed model-only `<system-reminder name="skills">` before durable conversation history, with stale legacy catalog text removed from a model-facing copy on resume
+6. **Catalog injection** — typed model-only `<system-reminder name="skills">` before durable conversation history
 7. **Skill content injection** — PostToolUseHook sets `AdditionalContext` with expanded instructions + base directory, keyed by call ID
 8. **CLI updated** to use `skill.ConfigureAgent`
 
@@ -259,7 +259,7 @@ Promoted `experimental/skill/` to `skill/` with:
 
 ## Open Questions
 
-1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** The PreGeneration hook prepends the typed catalog model-only on each `CreateResponse`. Dive places it before durable conversation history and does not persist it, preserving a reusable prompt prefix. On resume, stale same-name legacy catalog text is removed from a model-facing copy without mutating stored history.
+1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** The PreGeneration hook prepends the typed catalog model-only on each `CreateResponse`. Dive places it before durable conversation history and does not persist it, preserving a reusable prompt prefix.
 
 2. **Should command expansion timeout be configurable?** The 10-second default for `!{command}` may be too short for some use cases (e.g., `!{go test ./...}`). Recommendation: make it configurable via `ExpandOptions` with a sensible default. Currently configurable via `WithShellTimeout`.
 

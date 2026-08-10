@@ -526,10 +526,8 @@ widened to conversation-wide behavior. The new surface is additive:
   well-formed blocks only.
 
 The skill package prepends its catalog model-only so the unchanged catalog and
-conversation form a reusable prompt prefix. On resume it removes stale legacy
-catalog text from a model-facing copy without rewriting loaded history; when no
-skills remain it prepends an explicit no-skills notice. Its public API is
-untouched.
+conversation form a reusable prompt prefix without rewriting loaded history.
+Its public API is untouched.
 
 ## Compaction
 

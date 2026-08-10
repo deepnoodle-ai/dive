@@ -182,8 +182,7 @@ The key insight: the skill catalog is created with `dive.NewContextReminder`
 and prepended to the model-facing messages with `dive.NewReminderMessage`, not
 repeated in the tool description on every LLM request. The model sees it before
 the durable conversation, so an unchanged catalog and the accumulated history
-form one reusable prompt prefix. Legacy plain-text catalogs are removed from a
-copy of the model-facing history; caller-owned and persisted messages remain
+form one reusable prompt prefix. Caller-owned and persisted messages remain
 unchanged.
 
 ### Catalog Injection
@@ -246,15 +245,6 @@ tools := []dive.Tool{
 ```
 
 All toolkit tools accept a `Validator` field that takes precedence over `WorkspaceDir`. Existing code using `WorkspaceDir` is unaffected.
-
-### Session Resume
-
-The catalog hook handles session resume correctly:
-
-- On a fresh process resuming a session, the hook removes stale legacy catalog text from a copy of the model-facing history and prepends the current typed catalog without rewriting stored history
-- If no skills remain, the hook prepends an explicit no-skills notice ("No skills are available via the Skill tool; any skill listed earlier is no longer available.") after removing the stale model-facing block
-- The notice is only prepended when loaded history actually contains a stale catalog; a skill-less agent with clean history gets no `skills` reminder at all
-- Hooks are always returned by the extension (even with zero skills) specifically to handle this cleanup
 
 ## Provider System
 

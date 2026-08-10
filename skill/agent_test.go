@@ -134,7 +134,7 @@ func TestConfigureAgent_EmptyLoader(t *testing.T) {
 	assert.Equal(t, 1, len(opts.Tools)) // Only original tool
 	assert.Equal(t, "Original prompt.", opts.SystemPrompt)
 
-	// Hooks are still registered for stale catalog cleanup on session resume
+	// Hooks remain part of the extension even when the current catalog is empty.
 	assert.Equal(t, 1, len(opts.Hooks.PreGeneration))
 	assert.Equal(t, 1, len(opts.Hooks.PostToolUse))
 }
@@ -209,7 +209,7 @@ func TestLoaderExtension(t *testing.T) {
 		// Tools() returns nil
 		assert.Nil(t, loader.Tools())
 
-		// Hooks() still returns hooks (for stale catalog cleanup)
+		// Hooks() still returns the extension's hooks.
 		hooks := loader.Hooks()
 		assert.Equal(t, 1, len(hooks.PreGeneration))
 		assert.Equal(t, 1, len(hooks.PostToolUse))
@@ -350,43 +350,6 @@ func TestCatalogHook_CatalogChangeDoesNotMutateHistory(t *testing.T) {
 	assert.Equal(t, "Hello", firstMsg.Content[0].(*llm.TextContent).Text)
 }
 
-func TestCatalogHook_ResumeDoesNotMutateLegacyHistory(t *testing.T) {
-	loader := &Loader{
-		skills: map[string]*Skill{
-			"reviewer": {
-				Name:        "reviewer",
-				Description: "Review code.",
-				Config:      SkillConfig{Description: "Review code."},
-			},
-		},
-	}
-
-	// Simulate a resumed session whose first message contains a legacy catalog.
-	existingMsg := llm.NewUserTextMessage("Hello")
-	dive.SetSystemReminder([]*llm.Message{existingMsg}, "skills", BuildCatalog(loader))
-
-	hook := catalogHook(loader)
-	hctx := &dive.HookContext{
-		Messages: []*llm.Message{
-			existingMsg,
-			{Role: llm.Assistant, Content: []llm.Content{&llm.TextContent{Text: "Hi"}}},
-			llm.NewUserTextMessage("Continue"),
-		},
-	}
-
-	assert.NoError(t, hook(context.Background(), hctx))
-
-	// The hook replaces the stale catalog in its model-facing copy without
-	// rewriting the caller-owned legacy message.
-	assert.Equal(t, 2, len(existingMsg.Content))
-	assert.Equal(t, "Hello", existingMsg.Content[0].(*llm.TextContent).Text)
-	assert.False(t, dive.HasSystemReminder(hctx.Messages, skillReminderName))
-	assert.Equal(t, 1, len(hctx.Messages[1].Content), "stale catalog must be absent from the model-facing copy")
-	reminder, ok := dive.FindReminder(hctx.Messages[0], skillReminderName)
-	assert.True(t, ok)
-	assert.Contains(t, reminder.Content, "reviewer: Review code.")
-}
-
 func TestCatalogHook_PrependsWithoutUserMessage(t *testing.T) {
 	loader := &Loader{
 		skills: map[string]*Skill{
@@ -435,31 +398,6 @@ func TestCatalogHook_SkipsFreshEmptyCatalog(t *testing.T) {
 	assert.NoError(t, err)
 	_, ok := dive.FindLatestReminder(model.messages, skillReminderName)
 	assert.False(t, ok)
-}
-
-func TestCatalogHook_PrependsNoSkillsNoticeForStaleCatalog(t *testing.T) {
-	// Simulate: skills were available in a previous process, which wrote
-	// a catalog block. Now skills are gone and a fresh process resumes
-	// the session with that block still in history.
-	loader := &Loader{skills: map[string]*Skill{}} // no skills
-
-	// Messages from a previous session with a catalog block
-	existingMsg := llm.NewUserTextMessage("Hello")
-	dive.SetSystemReminder([]*llm.Message{existingMsg}, "skills", "<skills>\n- old-skill: Gone now.\n</skills>")
-	assert.True(t, dive.HasSystemReminder([]*llm.Message{existingMsg}, "skills"))
-
-	hook := catalogHook(loader)
-	hctx := &dive.HookContext{Messages: []*llm.Message{existingMsg}}
-
-	// The hook removes the stale block from its model-facing copy and prepends
-	// the no-skills notice without mutating the caller-owned message.
-	assert.NoError(t, hook(context.Background(), hctx))
-	assert.False(t, dive.HasSystemReminder(hctx.Messages, "skills"))
-	assert.Equal(t, 1, len(hctx.Messages[1].Content), "stale catalog must be absent from the model-facing copy")
-	reminder, ok := dive.FindReminder(hctx.Messages[0], skillReminderName)
-	assert.True(t, ok)
-	assert.Equal(t, emptyCatalogNotice, reminder.Content)
-	assert.True(t, dive.HasSystemReminder([]*llm.Message{existingMsg}, "skills"), "hook must not mutate loaded history")
 }
 
 func TestCatalogHook_NoNoticeAfterReloadWithoutPersistedCatalog(t *testing.T) {
@@ -584,25 +522,7 @@ func TestCatalogHook_AgentOwnedModelOnlyPrefix(t *testing.T) {
 	assert.Contains(t, reminder.Content, "deploy: Deploy.")
 }
 
-func TestCatalogHook_EvictsStaleLegacyCatalogWhenEmpty(t *testing.T) {
-	loader := &Loader{skills: map[string]*Skill{}}
-	model := &catalogCaptureLLM{}
-	agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Extensions: []dive.Extension{loader}})
-	assert.NoError(t, err)
-	legacy := llm.NewUserTextMessage("Continue")
-	dive.SetSystemReminder([]*llm.Message{legacy}, "skills", "stale")
-
-	_, err = agent.CreateResponse(context.Background(), dive.WithMessages(legacy))
-	assert.NoError(t, err)
-	assert.False(t, dive.HasSystemReminder(model.messages, "skills"), "stale catalog must be removed from model-facing history")
-	reminder, ok := dive.FindLatestReminder(model.messages, "skills")
-	assert.True(t, ok)
-	assert.Equal(t, emptyCatalogNotice, reminder.Content,
-		"eviction must state absence as a fact; an empty block asserts nothing and cannot conflict")
-	assert.True(t, dive.HasSystemReminder([]*llm.Message{legacy}, "skills"), "loaded history must remain unchanged")
-}
-
-func TestCatalogHook_NoReminderWithoutSkillsOrStaleCatalog(t *testing.T) {
+func TestCatalogHook_NoReminderWithoutSkills(t *testing.T) {
 	loader := &Loader{skills: map[string]*Skill{}}
 	model := &catalogCaptureLLM{}
 	agent, err := dive.NewAgent(dive.AgentOptions{Model: model, Extensions: []dive.Extension{loader}})
