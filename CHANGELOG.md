@@ -11,6 +11,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Unknown tool names no longer abort and discard an agent turn.** Dive returns
   a typed `UnknownToolError` result with deterministic suggestions, preserves
   valid sibling calls, and uses the standard tool-iteration limit.
+- **`llm.Usage` input buckets are now consistently disjoint.** OpenAI
+  Responses, OpenAI Completions, OpenRouter, Mistral, Grok, and Google now
+  subtract cache hits from `InputTokens` before pricing. This fixes cached
+  tokens being charged at both the normal input rate and the cache-read rate.
+  To reconstruct the pre-fix value on those providers, use
+  `old input = new input + cache read`.
+- **Cache-read pricing is populated for every Google and OpenAI text model
+  with a published discounted-input rate.** The OpenAI catalog also corrects
+  the stale GPT-4o row to the current $2.50 input, $1.25 cached-input, and
+  $10 output rates per million tokens. Dated provider model IDs now resolve to
+  their stable catalog ID so live OpenAI responses retain `Cost.Total`.
 
 ## [1.20.0] - 2026-08-09
 

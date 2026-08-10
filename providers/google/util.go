@@ -88,10 +88,12 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 // convertUsageMetadata converts genai usage metadata to llm.Usage, carrying
 // cached-content and thoughts token counts where the API reports them.
 func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) llm.Usage {
+	prompt := max(0, int(metadata.PromptTokenCount))
+	cached := min(max(0, int(metadata.CachedContentTokenCount)), prompt)
 	return llm.Usage{
-		InputTokens:          int(metadata.PromptTokenCount),
+		InputTokens:          prompt - cached,
 		OutputTokens:         int(metadata.CandidatesTokenCount),
-		CacheReadInputTokens: int(metadata.CachedContentTokenCount),
+		CacheReadInputTokens: cached,
 		ReasoningTokens:      int(metadata.ThoughtsTokenCount),
 	}
 }

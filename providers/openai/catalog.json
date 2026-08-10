@@ -443,85 +443,96 @@
         "model": "gpt-5.5",
         "input_price_per_1m_tokens": "5.00",
         "output_price_per_1m_tokens": "30.00",
+        "cache_read_price_per_1m_tokens": "0.50",
         "currency": "USD",
-        "updated_at": "2026-05-29"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5.4",
         "input_price_per_1m_tokens": "2.50",
         "output_price_per_1m_tokens": "15.00",
+        "cache_read_price_per_1m_tokens": "0.25",
         "currency": "USD",
-        "updated_at": "2026-05-29"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5.4-mini",
         "input_price_per_1m_tokens": "0.75",
         "output_price_per_1m_tokens": "4.50",
+        "cache_read_price_per_1m_tokens": "0.075",
         "currency": "USD",
-        "updated_at": "2026-05-29"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5.4-nano",
         "input_price_per_1m_tokens": "0.20",
         "output_price_per_1m_tokens": "1.25",
+        "cache_read_price_per_1m_tokens": "0.02",
         "currency": "USD",
-        "updated_at": "2026-05-29"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5.2",
         "input_price_per_1m_tokens": "1.75",
         "output_price_per_1m_tokens": "14.00",
+        "cache_read_price_per_1m_tokens": "0.175",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5.2-pro",
         "input_price_per_1m_tokens": "21.00",
         "output_price_per_1m_tokens": "168.00",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5.1",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "10.00",
+        "cache_read_price_per_1m_tokens": "0.125",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "10.00",
+        "cache_read_price_per_1m_tokens": "0.125",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5-mini",
         "input_price_per_1m_tokens": "0.25",
         "output_price_per_1m_tokens": "2.00",
+        "cache_read_price_per_1m_tokens": "0.025",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-5-nano",
         "input_price_per_1m_tokens": "0.05",
         "output_price_per_1m_tokens": "0.40",
+        "cache_read_price_per_1m_tokens": "0.005",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-4.1",
         "input_price_per_1m_tokens": "2.00",
         "output_price_per_1m_tokens": "8.00",
+        "cache_read_price_per_1m_tokens": "0.50",
         "currency": "USD",
-        "updated_at": "2026-02-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "gpt-4o",
-        "input_price_per_1m_tokens": "5.00",
-        "output_price_per_1m_tokens": "15.00",
+        "input_price_per_1m_tokens": "2.50",
+        "output_price_per_1m_tokens": "10.00",
+        "cache_read_price_per_1m_tokens": "1.25",
         "currency": "USD",
-        "updated_at": "2025-01-15"
+        "updated_at": "2026-08-10"
       }
     ],
     "fast_text": [],

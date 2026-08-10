@@ -5,6 +5,7 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
+	"github.com/openai/openai-go/v3/option"
 )
 
 func TestIntegration_SimpleTextGeneration(t *testing.T) {
@@ -53,6 +55,73 @@ func TestIntegration_MultipleMessages(t *testing.T) {
 	text := strings.TrimSpace(strings.ToLower(response.Message().Text()))
 	assert.NotEmpty(t, text)
 	assert.Equal(t, "flabbergasted", text)
+}
+
+func TestIntegration_PromptCachingUsage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+
+	provider := New(
+		WithAPIKey(apiKey),
+		WithModel(ModelGPT54Mini),
+		WithMaxTokens(16),
+		WithExtraRequestOptions(option.WithJSONSet("prompt_cache_key", uniqueCacheKey(t))),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	uniquePrefix := fmt.Sprintf("Dive cache qualification %d. ", time.Now().UnixNano())
+	longPrompt := uniquePrefix + strings.Repeat(
+		"This repeated sentence makes the stable prompt prefix long enough for automatic prompt caching. ",
+		700,
+	)
+	request := []llm.Option{
+		llm.WithUserTextMessage(longPrompt + "\nReply with the word ready."),
+	}
+
+	first, err := provider.Generate(ctx, request...)
+	assert.NoError(t, err)
+	assert.NotNil(t, first)
+
+	var cached *llm.Response
+	for attempt := 0; attempt < 4; attempt++ {
+		candidate, err := provider.Generate(ctx, request...)
+		assert.NoError(t, err)
+		assert.NotNil(t, candidate)
+		t.Logf("OpenAI cache attempt %d: model=%s input=%d cached=%d total_input=%d",
+			attempt+1,
+			candidate.Model,
+			candidate.Usage.InputTokens,
+			candidate.Usage.CacheReadInputTokens,
+			candidate.Usage.TotalInputTokens(),
+		)
+		if candidate.Usage.CacheReadInputTokens > 0 {
+			cached = candidate
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	assert.NotNil(t, cached, "repeated request should observe an OpenAI cache hit")
+	assert.Equal(t, first.Usage.TotalInputTokens(), cached.Usage.TotalInputTokens())
+	expectedCost := TextModelPricing[ModelGPT54Mini].CostOf(&cached.Usage)
+	assert.NotNil(t, cached.Usage.Cost)
+	assert.Equal(t, expectedCost, *cached.Usage.Cost)
+	t.Logf("OpenAI cache hit: input=%d cached=%d total_input=%d cost=%f",
+		cached.Usage.InputTokens,
+		cached.Usage.CacheReadInputTokens,
+		cached.Usage.TotalInputTokens(),
+		cached.Usage.Cost.Total,
+	)
+}
+
+func uniqueCacheKey(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf("dive-%s-%d", t.Name(), time.Now().UnixNano())
 }
 
 // TestIntegration_WebSearchTool tests the web search tool functionality

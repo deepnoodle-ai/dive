@@ -349,14 +349,14 @@ func (gm *GameMaster) act(ctx context.Context, p *Player, t turn) *capturedActio
 }
 
 func (gm *GameMaster) accountUsage(p *Player, usage *llm.Usage) {
-	if usage == nil || (usage.InputTokens == 0 && usage.OutputTokens == 0) {
+	if usage == nil || (usage.TotalInputTokens() == 0 && usage.OutputTokens == 0) {
 		return
 	}
 	p.usage.Add(usage)
 	gm.rec.Write(transcript.Event{
 		Type: transcript.TypeUsage, Round: gm.game.Round, Phase: string(gm.game.Phase), Actor: p.ID,
 		Data: map[string]any{
-			"input_tokens":  usage.InputTokens,
+			"input_tokens":  usage.TotalInputTokens(),
 			"output_tokens": usage.OutputTokens,
 			"model":         p.Model,
 		},
@@ -578,11 +578,11 @@ func (gm *GameMaster) recordMatchEnd() (game.Team, error) {
 	for _, id := range gm.order {
 		p := gm.players[id]
 		usageByPlayer[id] = map[string]any{
-			"input_tokens":  p.usage.InputTokens,
+			"input_tokens":  p.usage.TotalInputTokens(),
 			"output_tokens": p.usage.OutputTokens,
 			"model":         p.Model,
 		}
-		totalIn += p.usage.InputTokens
+		totalIn += p.usage.TotalInputTokens()
 		totalOut += p.usage.OutputTokens
 	}
 
@@ -631,7 +631,7 @@ func (gm *GameMaster) printUsage(byPlayer map[string]any, totalIn, totalOut int)
 	gm.ui.info(fmt.Sprintf("Token usage — %d in / %d out total", totalIn, totalOut))
 	for _, id := range gm.order {
 		u := gm.players[id].usage
-		gm.ui.info(fmt.Sprintf("  %-12s %d in / %d out", id, u.InputTokens, u.OutputTokens))
+		gm.ui.info(fmt.Sprintf("  %-12s %d in / %d out", id, u.TotalInputTokens(), u.OutputTokens))
 	}
 }
 

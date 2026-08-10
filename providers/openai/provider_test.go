@@ -379,7 +379,7 @@ func TestConvertResponse(t *testing.T) {
 	assert.Equal(t, "resp_123", result.ID)
 	assert.Equal(t, "gpt-4", result.Model)
 	assert.Equal(t, llm.Assistant, result.Role)
-	assert.Equal(t, 10, result.Usage.InputTokens)
+	assert.Equal(t, 8, result.Usage.InputTokens)
 	assert.Equal(t, 8, result.Usage.OutputTokens)
 	assert.Equal(t, 2, result.Usage.CacheReadInputTokens)
 }
@@ -446,7 +446,7 @@ func TestConvertResponseWithVariedUsage(t *testing.T) {
 			inputTokens:       200,
 			outputTokens:      75,
 			cachedTokens:      25,
-			expectedInput:     200,
+			expectedInput:     175,
 			expectedOutput:    75,
 			expectedCacheRead: 25,
 		},
@@ -596,7 +596,7 @@ func TestConvertResponseBasicFields(t *testing.T) {
 	assert.Equal(t, "end_turn", result.StopReason)
 	assert.NotNil(t, result.Content)
 	assert.Len(t, result.Content, 0) // Empty content array since mock doesn't have actual message content
-	assert.Equal(t, 15, result.Usage.InputTokens)
+	assert.Equal(t, 12, result.Usage.InputTokens)
 	assert.Equal(t, 12, result.Usage.OutputTokens)
 	assert.Equal(t, 3, result.Usage.CacheReadInputTokens)
 }

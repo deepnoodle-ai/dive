@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -67,6 +68,52 @@ func TestProviderBasicGenerate(t *testing.T) {
 	}
 	assert.True(t, foundText != "", "Should have received text content")
 	assert.Equal(t, "HELLO", foundText)
+}
+
+func TestPromptCachingUsageIntegration(t *testing.T) {
+	requireGoogleAPIKey(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	provider := New(
+		WithModel(ModelGemini25Flash),
+		WithMaxTokens(16),
+	)
+	uniquePrefix := fmt.Sprintf("Dive cache qualification %d. ", time.Now().UnixNano())
+	longPrompt := uniquePrefix + strings.Repeat(
+		"This repeated sentence makes the stable prompt prefix long enough for implicit context caching. ",
+		700,
+	)
+	request := []llm.Option{llm.WithMessages(
+		llm.NewUserTextMessage(longPrompt + "\nReply with the word ready."),
+	)}
+
+	first, err := provider.Generate(ctx, request...)
+	assert.NoError(t, err)
+	assert.NotNil(t, first)
+
+	var cached *llm.Response
+	for attempt := 0; attempt < 4; attempt++ {
+		candidate, err := provider.Generate(ctx, request...)
+		assert.NoError(t, err)
+		assert.NotNil(t, candidate)
+		if candidate.Usage.CacheReadInputTokens > 0 {
+			cached = candidate
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	assert.NotNil(t, cached, "repeated request should observe a Gemini cache hit")
+	assert.Equal(t, first.Usage.TotalInputTokens(), cached.Usage.TotalInputTokens())
+	expectedCost := TextModelPricing[ModelGemini25Flash].CostOf(&cached.Usage)
+	assert.NotNil(t, cached.Usage.Cost)
+	assert.Equal(t, expectedCost, *cached.Usage.Cost)
+	t.Logf("Google cache hit: input=%d cached=%d total_input=%d cost=%f",
+		cached.Usage.InputTokens,
+		cached.Usage.CacheReadInputTokens,
+		cached.Usage.TotalInputTokens(),
+		cached.Usage.Cost.Total,
+	)
 }
 
 // func TestProviderBasicStream(t *testing.T) {

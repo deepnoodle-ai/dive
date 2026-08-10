@@ -212,8 +212,9 @@ func TestStreamIteratorUsageDetails(t *testing.T) {
 	_, accumulator := collectEvents(t, iterator)
 
 	response := accumulator.Response()
-	assert.Equal(t, 100, response.Usage.InputTokens)
+	assert.Equal(t, 20, response.Usage.InputTokens)
 	assert.Equal(t, 50, response.Usage.OutputTokens)
 	assert.Equal(t, 80, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 100, response.Usage.TotalInputTokens())
 	assert.Equal(t, 30, response.Usage.ReasoningTokens)
 }

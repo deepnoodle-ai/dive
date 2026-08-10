@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
@@ -94,4 +95,87 @@ func TestStreamIteratorZeroBasedIndices(t *testing.T) {
 	assert.Equal(t, "Hello! How can I assist you today?", response.Message().Text())
 	assert.Equal(t, 140, response.Usage.InputTokens)
 	assert.Equal(t, 11, response.Usage.OutputTokens)
+}
+
+func TestStreamIteratorNormalizesUsageBuckets(t *testing.T) {
+	tests := []struct {
+		name       string
+		eventType  string
+		prompt     int
+		cached     int
+		wantInput  int
+		wantCached int
+	}{
+		{name: "completed valid", eventType: "response.completed", prompt: 100, cached: 70, wantInput: 30, wantCached: 70},
+		{name: "completed upper clamp", eventType: "response.completed", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
+		{name: "completed lower clamp", eventType: "response.completed", prompt: 10, cached: -20, wantInput: 10, wantCached: 0},
+		{name: "incomplete valid", eventType: "response.incomplete", prompt: 100, cached: 70, wantInput: 30, wantCached: 70},
+		{name: "incomplete upper clamp", eventType: "response.incomplete", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
+		{name: "incomplete negative prompt", eventType: "response.incomplete", prompt: -10, cached: 5, wantInput: 0, wantCached: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var event responses.ResponseStreamEventUnion
+			assert.NoError(t, json.Unmarshal([]byte(fmt.Sprintf(`{
+				"type":%q,
+				"sequence_number":1,
+				"response":{
+					"status":"%s",
+					"usage":{
+						"input_tokens":%d,
+						"output_tokens":5,
+						"input_tokens_details":{"cached_tokens":%d}
+					}
+				}
+			}`, tt.eventType, eventStatus(tt.eventType), tt.prompt, tt.cached)), &event))
+
+			iterator := newOpenAIStreamIterator(&mockStreamSource{}, &llm.Config{})
+			events, err := iterator.processOpenAIEvent(event)
+			assert.NoError(t, err)
+			assert.NotEmpty(t, events)
+			assert.NotNil(t, events[0].Usage)
+			assert.Equal(t, tt.wantInput, events[0].Usage.InputTokens)
+			assert.Equal(t, tt.wantCached, events[0].Usage.CacheReadInputTokens)
+			assert.Equal(t, max(0, tt.prompt), events[0].Usage.TotalInputTokens())
+		})
+	}
+}
+
+func eventStatus(eventType string) string {
+	if eventType == "response.incomplete" {
+		return "incomplete"
+	}
+	return "completed"
+}
+
+func TestStreamIteratorAccumulatorPricesDisjointUsage(t *testing.T) {
+	payloads := []string{
+		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
+		`{"type":"response.completed","sequence_number":2,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":100,"output_tokens":10,"input_tokens_details":{"cached_tokens":80}}}}`,
+	}
+	events := make([]responses.ResponseStreamEventUnion, 0, len(payloads))
+	for _, payload := range payloads {
+		var event responses.ResponseStreamEventUnion
+		assert.NoError(t, json.Unmarshal([]byte(payload), &event))
+		events = append(events, event)
+	}
+
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	defer iterator.Close()
+	accumulator := llm.NewResponseAccumulator()
+	for iterator.Next() {
+		assert.NoError(t, accumulator.AddEvent(iterator.Event()))
+	}
+	assert.NoError(t, iterator.Err())
+
+	usage := accumulator.Response().Usage
+	assert.Equal(t, 20, usage.InputTokens)
+	assert.Equal(t, 80, usage.CacheReadInputTokens)
+	assert.Equal(t, 100, usage.TotalInputTokens())
+	assert.NotNil(t, usage.Cost)
+	want := TextModelPricing[ModelGPT56Sol].CostOf(&usage)
+	assert.Equal(t, want.Input, usage.Cost.Input)
+	assert.Equal(t, want.CacheRead, usage.Cost.CacheRead)
+	assert.Equal(t, want.Total, usage.Cost.Total)
 }

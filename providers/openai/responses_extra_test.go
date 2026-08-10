@@ -45,10 +45,42 @@ func TestDecodeAssistantResponse_ReasoningTokens(t *testing.T) {
 	}
 	out, err := decodeAssistantResponse(resp)
 	assert.NoError(t, err)
-	assert.Equal(t, 100, out.Usage.InputTokens)
+	assert.Equal(t, 90, out.Usage.InputTokens)
 	assert.Equal(t, 50, out.Usage.OutputTokens)
 	assert.Equal(t, 10, out.Usage.CacheReadInputTokens)
+	assert.Equal(t, 100, out.Usage.TotalInputTokens())
 	assert.Equal(t, 20, out.Usage.ReasoningTokens)
+}
+
+func TestDecodeAssistantResponse_ClampsInvalidCacheCounts(t *testing.T) {
+	tests := []struct {
+		name       string
+		prompt     int64
+		cached     int64
+		wantInput  int
+		wantCached int
+	}{
+		{name: "cached above prompt", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
+		{name: "negative cached", prompt: 10, cached: -20, wantInput: 10, wantCached: 0},
+		{name: "negative prompt", prompt: -10, cached: 5, wantInput: 0, wantCached: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := decodeAssistantResponse(&responses.Response{
+				Usage: responses.ResponseUsage{
+					InputTokens: tt.prompt,
+					InputTokensDetails: responses.ResponseUsageInputTokensDetails{
+						CachedTokens: tt.cached,
+					},
+				},
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantInput, out.Usage.InputTokens)
+			assert.Equal(t, tt.wantCached, out.Usage.CacheReadInputTokens)
+			assert.Equal(t, max(0, int(tt.prompt)), out.Usage.TotalInputTokens())
+		})
+	}
 }
 
 // fakeIncludeTool implements llm.Tool, ResponsesToolProvider, and

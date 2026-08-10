@@ -33,6 +33,25 @@ func TestPricingFor_FastFallsBackToStandard(t *testing.T) {
 	assert.Equal(t, 2.0, p.InputPrice)
 }
 
+func TestPricingFor_DatedModelVersionFallsBackToStableCatalogID(t *testing.T) {
+	RegisterPricing(llm.PricingInfo{Model: "reg-versioned-model", InputPrice: 4, Currency: "USD"}, false)
+
+	p, ok := PricingFor("reg-versioned-model-2026-03-17", false)
+	assert.True(t, ok)
+	assert.Equal(t, "reg-versioned-model", p.Model)
+	assert.Equal(t, 4.0, p.InputPrice)
+
+	for _, model := range []string{
+		"reg-versioned-model-20260317",
+		"reg-versioned-model-2026-3-17",
+		"reg-versioned-model-2026-99-99",
+		"reg-versioned-model-not-a-date",
+	} {
+		_, ok := PricingFor(model, false)
+		assert.False(t, ok, model)
+	}
+}
+
 func TestCostResolverIsWired(t *testing.T) {
 	// init() should have installed PricingFor as the llm cost resolver.
 	RegisterPricing(llm.PricingInfo{Model: "reg-wired-model", InputPrice: 5, Currency: "USD"}, false)

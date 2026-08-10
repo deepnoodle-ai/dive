@@ -2,6 +2,9 @@ package mistral
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -32,6 +35,33 @@ func TestProvider_WithEndpoint(t *testing.T) {
 	endpoint := "https://custom-endpoint.com/v1/chat/completions"
 	p := New(WithEndpoint(endpoint))
 	assert.Equal(t, endpoint, p.endpoint)
+}
+
+func TestGenerateInheritsDisjointUsageConversion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"id":"chatcmpl-1",
+			"model":"mistral-small-latest",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":200,"completion_tokens":10,"total_tokens":210,"prompt_tokens_details":{"cached_tokens":150}}
+		}`)
+	}))
+	defer server.Close()
+
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithModel(ModelMistralSmall),
+		WithMaxRetries(0),
+	)
+	response, err := provider.Generate(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, 50, response.Usage.InputTokens)
+	assert.Equal(t, 150, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 200, response.Usage.TotalInputTokens())
 }
 
 func TestProvider_WithMaxTokens(t *testing.T) {

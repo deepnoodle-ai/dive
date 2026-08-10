@@ -291,10 +291,12 @@ func TestIntegration_PromptCachingStream(t *testing.T) {
 	assert.True(t, acc2.IsComplete())
 	resp2 := acc2.Response()
 	t.Logf("Stream turn 2 - cached: %d", resp2.Usage.CacheReadInputTokens)
-	// Note: the streaming accumulator does not currently extract
-	// CacheReadInputTokens from the response.completed event, so we only
-	// verify the response was successful. The non-streaming test above
-	// validates cache hits.
+	assert.True(t, resp2.Usage.CacheReadInputTokens > 0)
+	assert.NotNil(t, resp2.Usage.Cost)
+	assert.Equal(t,
+		resp2.Usage.Cost.Input+resp2.Usage.Cost.Output+resp2.Usage.Cost.CacheRead+resp2.Usage.Cost.CacheWrite,
+		resp2.Usage.Cost.Total,
+	)
 	assert.True(t, len(resp2.Message().Text()) > 0)
 }
 
