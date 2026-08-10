@@ -59,14 +59,15 @@ The user-visible outcome was a blank response after thirteen seconds. The two
 `mobius_memory_recall` calls had already executed and returned results; those
 results were discarded along with the turn.
 
-## Current behavior and root cause
+## Historical behavior and root cause
 
-Two call sites return a fatal error on an unrecognized name:
+Before this implementation, two call sites returned a fatal error on an
+unrecognized name:
 
 - `agent.go:2497` in `executeOneToolCall` (sequential path)
 - `agent.go:2248` in `executeToolCallsParallel`, Phase 1
 
-Both are the same shape:
+Both used the same shape:
 
 ```go
 tool, ok := toolsByName[toolCall.Name]
@@ -75,11 +76,11 @@ if !ok {
 }
 ```
 
-That error propagates through `executeToolCalls` to the generation loop, which
-returns it from `CreateResponse`. No `tool_result` message is ever built, so
-the batch produces nothing.
+That error propagated through `executeToolCalls` to the generation loop, which
+returned it from `CreateResponse`. No `tool_result` message was built, so the
+batch produced nothing.
 
-Compare that to every other failure mode in the same file:
+At the time, every other failure mode in the same file was recoverable:
 
 | Failure                        | Handling                                |
 | ------------------------------ | --------------------------------------- |
@@ -88,18 +89,18 @@ Compare that to every other failure mode in the same file:
 | Tool returns a malformed union | `IsError` result so the agent converges |
 | Tool name is unknown           | **Fatal, turn ends**                    |
 
-The panic path states the principle directly: results are converted "so the
+The panic path stated the principle directly: results were converted "so the
 LLM can see the failure and adapt, rather than crashing the process." A tool
-that panics is currently handled more gracefully than a name with a typo.
+that panicked was handled more gracefully than a name with a typo.
 
-`batchHasSequentialOnlyTool` already treats an unknown name as a skippable,
-non-fatal condition (`agent.go:2160`), so the file is not internally consistent
-about this either.
+`batchHasSequentialOnlyTool` already treated an unknown name as a skippable,
+non-fatal condition (`agent.go:2160`), so the file was not internally
+consistent about this either.
 
 ### Not only a hallucination
 
-The incident above is a model inventing a name, but fatal-on-unknown also
-breaks two supported configurations where the name is not invented at all:
+The incident above was a model inventing a name, but fatal-on-unknown also
+broke two supported configurations where the name was not invented at all:
 
 - **Dynamic toolsets.** Tool resolution is per-iteration: the generation loop
   calls `resolveTools` (`agent.go:1912`) before every LLM request, and
@@ -109,23 +110,23 @@ breaks two supported configurations where the name is not invented at all:
 - **Resume.** `executeToolCalls` is also invoked when resuming a suspended
   turn (`agent.go:827`) against a freshly resolved toolset. If the toolset
   changed across suspend/resume, a pending call's name can be unknown by the
-  time it runs, and today that fails the resume.
+  time it runs, which caused the resume to fail.
 
-Both are reasons this is a correctness fix, not just hallucination tolerance.
+Both were reasons this was a correctness fix, not just hallucination tolerance.
 
-### Batch loss differs by execution mode
+### Batch loss differed by execution mode
 
-The two paths discard work differently, and neither is good:
+The two paths discarded work differently, and neither was good:
 
-- **Parallel:** the name check runs in Phase 1 before any tool executes, so
-  every valid call in the batch is discarded unrun. Pure wasted latency.
-- **Sequential:** calls preceding the bad one execute to completion. Their side
-  effects land; their results are thrown away with the batch. The caller has no
-  durable record that they ran.
+- **Parallel:** the name check ran in Phase 1 before any tool executed, so every
+  valid call in the batch was discarded unrun. Pure wasted latency.
+- **Sequential:** calls preceding the bad one executed to completion. Their side
+  effects landed; their results were thrown away with the batch. The caller had
+  no durable record that they ran.
 
 Dive defaults to sequential (`ParallelToolExecution` is opt-in), so the
-side-effect case is the live one. In the two incidents above the completed
-calls were read-only, but that was luck, not design.
+side-effect case was the live pre-change behavior. In the two incidents above
+the completed calls were read-only, but that was luck, not design.
 
 ## Goals
 
