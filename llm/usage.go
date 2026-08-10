@@ -41,7 +41,8 @@ func (u Usage) TotalInputTokens() int {
 func (u *Usage) UnmarshalJSON(data []byte) error {
 	type usageAlias Usage
 	type inputTokensDetails struct {
-		CachedTokens int `json:"cached_tokens,omitempty"`
+		CachedTokens     int `json:"cached_tokens,omitempty"`
+		CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 	}
 	var raw struct {
 		usageAlias
@@ -68,15 +69,17 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 	_, hasCanonicalCacheRead := fields["cache_read_input_tokens"]
 	_, hasCanonicalCacheCreation := fields["cache_creation_input_tokens"]
 	if !hasCanonicalCacheRead && !hasCanonicalCacheCreation {
-		normalize := func(prompt, cached int) {
+		normalize := func(prompt, cached, written int) {
 			prompt = max(0, prompt)
 			cached = min(max(0, cached), prompt)
-			input := prompt - cached
-			if u.InputTokens != input || u.CacheReadInputTokens != cached {
+			written = min(max(0, written), prompt-cached)
+			input := prompt - cached - written
+			if u.InputTokens != input || u.CacheReadInputTokens != cached || u.CacheCreationInputTokens != written {
 				u.Cost = nil
 			}
 			u.InputTokens = input
 			u.CacheReadInputTokens = cached
+			u.CacheCreationInputTokens = written
 		}
 
 		_, hasInputTokens := fields["input_tokens"]
@@ -85,9 +88,9 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 		_, hasPromptDetails := fields["prompt_tokens_details"]
 		switch {
 		case hasInputTokens && hasInputDetails && raw.InputTokensDetails != nil:
-			normalize(u.InputTokens, raw.InputTokensDetails.CachedTokens)
+			normalize(u.InputTokens, raw.InputTokensDetails.CachedTokens, raw.InputTokensDetails.CacheWriteTokens)
 		case hasPromptTokens && hasPromptDetails && raw.PromptTokens != nil && raw.PromptTokensDetails != nil:
-			normalize(*raw.PromptTokens, raw.PromptTokensDetails.CachedTokens)
+			normalize(*raw.PromptTokens, raw.PromptTokensDetails.CachedTokens, raw.PromptTokensDetails.CacheWriteTokens)
 		}
 	}
 

@@ -14,8 +14,19 @@ import (
 )
 
 func encodeMessages(messages []*llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
+	return encodeMessagesWithBreakpointIndexes(messages, nil)
+}
+
+// encodeMessagesWithPromptCacheBreakpoints marks the three most recent text
+// input boundaries. OpenAI adds one implicit latest-message breakpoint, so the
+// request stays within the documented maximum of four.
+func encodeMessagesWithPromptCacheBreakpoints(messages []*llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
+	return encodeMessagesWithBreakpointIndexes(messages, promptCacheBreakpointIndexes(messages, 3))
+}
+
+func encodeMessagesWithBreakpointIndexes(messages []*llm.Message, breakpoints map[int]bool) ([]responses.ResponseInputItemUnionParam, error) {
 	items := make([]responses.ResponseInputItemUnionParam, 0, len(messages))
-	for _, message := range messages {
+	for i, message := range messages {
 		if len(message.Content) == 0 {
 			continue
 		}
@@ -31,13 +42,13 @@ func encodeMessages(messages []*llm.Message) ([]responses.ResponseInputItemUnion
 			}
 			items = append(items, outMessages...)
 		case "user":
-			outMessages, err := encodeUserMessage(message)
+			outMessages, err := encodeUserMessageWithPromptCacheBreakpoint(message, breakpoints[i])
 			if err != nil {
 				return nil, fmt.Errorf("error encoding user message: %w", err)
 			}
 			items = append(items, outMessages...)
 		case "developer":
-			outMessages, err := encodeInputMessage(message)
+			outMessages, err := encodeInputMessageWithPromptCacheBreakpoint(message, breakpoints[i])
 			if err != nil {
 				return nil, fmt.Errorf("error encoding developer message: %w", err)
 			}
@@ -75,6 +86,30 @@ func encodeMessages(messages []*llm.Message) ([]responses.ResponseInputItemUnion
 		}
 	}
 	return items, nil
+}
+
+func promptCacheBreakpointIndexes(messages []*llm.Message, limit int) map[int]bool {
+	indexes := make(map[int]bool, limit)
+	for i := len(messages) - 1; i >= 0 && len(indexes) < limit; i-- {
+		message := messages[i]
+		if message.Role != "" && message.Role != llm.User && message.Role != llm.Developer {
+			continue
+		}
+		eligible := false
+		hasToolResult := false
+		for _, content := range message.Content {
+			switch content.(type) {
+			case *llm.ToolResultContent:
+				hasToolResult = true
+			case *llm.TextContent:
+				eligible = true
+			}
+		}
+		if eligible && !hasToolResult {
+			indexes[i] = true
+		}
+	}
+	return indexes
 }
 
 func messageType(message *llm.Message) (string, error) {
@@ -423,20 +458,32 @@ func encodeAssistantCodeInterpreterCallContent(c *CodeInterpreterCallContent) (r
 }
 
 func encodeUserMessage(message *llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
+	return encodeUserMessageWithPromptCacheBreakpoint(message, false)
+}
+
+func encodeUserMessageWithPromptCacheBreakpoint(message *llm.Message, breakpoint bool) ([]responses.ResponseInputItemUnionParam, error) {
 	if message.Role != llm.User {
 		return nil, fmt.Errorf("message role is not user")
 	}
-	return encodeInputMessage(message)
+	return encodeInputMessageWithPromptCacheBreakpoint(message, breakpoint)
 }
 
-func encodeInputMessage(message *llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
+func encodeInputMessageWithPromptCacheBreakpoint(message *llm.Message, breakpoint bool) ([]responses.ResponseInputItemUnionParam, error) {
 	if message.Role != llm.User && message.Role != llm.Developer {
 		return nil, fmt.Errorf("message role is not an input role")
 	}
 	contentItems := make([]responses.ResponseInputContentUnionParam, 0, len(message.Content))
 	var standaloneItems []responses.ResponseInputItemUnionParam
+	lastTextIndex := -1
+	if breakpoint {
+		for i, content := range message.Content {
+			if _, ok := content.(*llm.TextContent); ok {
+				lastTextIndex = i
+			}
+		}
+	}
 
-	for _, c := range message.Content {
+	for i, c := range message.Content {
 		switch typedContent := c.(type) {
 		case *llm.MCPApprovalRequestContent:
 			item := responses.ResponseInputItemUnionParam{
@@ -464,7 +511,7 @@ func encodeInputMessage(message *llm.Message) ([]responses.ResponseInputItemUnio
 			// ThinkingContent is also handled as a standalone item (Reasoning)
 			standaloneItems = append(standaloneItems, encodeReasoningContent(typedContent))
 		default:
-			encodedContent, err := encodeUserContent(c)
+			encodedContent, err := encodeUserContentWithPromptCacheBreakpoint(c, i == lastTextIndex)
 			if err != nil {
 				return nil, fmt.Errorf("error encoding user content: %w", err)
 			}
@@ -483,9 +530,13 @@ func encodeInputMessage(message *llm.Message) ([]responses.ResponseInputItemUnio
 }
 
 func encodeUserContent(content llm.Content) (*responses.ResponseInputContentUnionParam, error) {
+	return encodeUserContentWithPromptCacheBreakpoint(content, false)
+}
+
+func encodeUserContentWithPromptCacheBreakpoint(content llm.Content, breakpoint bool) (*responses.ResponseInputContentUnionParam, error) {
 	switch c := content.(type) {
 	case *llm.TextContent:
-		return encodeInputTextContent(c)
+		return encodeInputTextContentWithPromptCacheBreakpoint(c, breakpoint)
 	case *llm.ImageContent:
 		return encodeInputImageContent(c)
 	case *llm.DocumentContent:
@@ -497,7 +548,14 @@ func encodeUserContent(content llm.Content) (*responses.ResponseInputContentUnio
 }
 
 func encodeInputTextContent(c *llm.TextContent) (*responses.ResponseInputContentUnionParam, error) {
+	return encodeInputTextContentWithPromptCacheBreakpoint(c, false)
+}
+
+func encodeInputTextContentWithPromptCacheBreakpoint(c *llm.TextContent, breakpoint bool) (*responses.ResponseInputContentUnionParam, error) {
 	param := responses.ResponseInputContentParamOfInputText(c.Text)
+	if breakpoint {
+		param.OfInputText.PromptCacheBreakpoint = responses.NewResponseInputTextPromptCacheBreakpointParam()
+	}
 	return &param, nil
 }
 

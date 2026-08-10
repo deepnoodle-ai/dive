@@ -110,10 +110,10 @@ agent, _ := dive.NewAgent(opts)
 
 `ConfigureAgent` internally:
 
-1. **Always registers hooks** — even with zero skills. This ensures stale catalog blocks from a previous session can be cleaned up on resume.
+1. **Always registers hooks** — the extension exposes its catalog and content hooks even when the current catalog is empty.
 2. **Registers the Skill tool** (only when skills are loaded) — static description, no skill listing. The tool is a trigger: returns `"Launching skill: X"` and stores expanded instructions keyed by tool call ID for the PostToolUse hook.
 3. **Appends skill usage rules** to the system prompt (only when skills are loaded).
-4. **Registers a PreGenerationHook** that creates the skill catalog with `dive.NewContextReminder` and appends it with `hctx.AppendReminder(..., dive.ModelOnly)`. The typed block appears at the request tail, conflicts with stale same-name catalog facts, and is not persisted.
+4. **Registers a PreGenerationHook** that creates the skill catalog with `dive.NewContextReminder` and prepends it to the model-facing history with `dive.NewReminderMessage`. The typed block forms stable prompt-prefix context and is not persisted.
 5. **Registers a PostToolUseHook** that reads `hctx.Call.ID` to retrieve the correct expanded instructions from the per-call-ID map and sets them as `hctx.AdditionalContext`. Safe under parallel tool execution.
 
 ### The Skill Tool (Trigger)
@@ -127,7 +127,7 @@ When called, the tool:
 
 ### The Skill Catalog (Context Injection)
 
-Built by `skill.BuildCatalog(loader)` and appended model-only at the request tail with Dive's typed reminder API:
+Built by `skill.BuildCatalog(loader)` and prepended model-only before durable conversation history with Dive's typed reminder API:
 
 ```xml
 <system-reminder name="skills">
@@ -145,7 +145,7 @@ only use skills listed above.
 </system-reminder>
 ```
 
-Each catalog entry includes its file path (`Location:`) so the agent can tell the user where skills live on disk. The contextual, model-only reminder is appended at the request tail without mutating or persisting session history.
+Each catalog entry includes its file path (`Location:`) so the agent can tell the user where skills live on disk. The contextual, model-only reminder is prepended to the model-facing history without mutating or persisting session history.
 
 ## Unification: Skills and Slash Commands
 
@@ -247,7 +247,7 @@ Promoted `experimental/skill/` to `skill/` with:
 3. **`skill/agent.go`** — `ConfigureAgent` wires tool, PreGenerationHook (catalog), PostToolUseHook (skill content)
 4. **`reminder.go` and `llm/reminder.go`** — typed reminder construction, recorded/model-only lifetimes, and provider-edge rendering (`system_reminder.go` remains the legacy text compatibility layer)
 5. **`context.go`** — `dive.WithToolCallID/ToolCallID` for tool call ID propagation via context
-6. **Catalog injection** — typed model-only `<system-reminder name="skills">` at the request tail, with a later full snapshot winning conflicts with stale legacy catalog values on resume
+6. **Catalog injection** — typed model-only `<system-reminder name="skills">` before durable conversation history
 7. **Skill content injection** — PostToolUseHook sets `AdditionalContext` with expanded instructions + base directory, keyed by call ID
 8. **CLI updated** to use `skill.ConfigureAgent`
 
@@ -259,7 +259,7 @@ Promoted `experimental/skill/` to `skill/` with:
 
 ## Open Questions
 
-1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** The PreGeneration hook appends the typed catalog model-only on each `CreateResponse`. Dive places it at the request tail and does not persist it. On resume, the later full snapshot wins conflicts with stale same-name legacy catalog text for model interpretation.
+1. ~~**Should the catalog be injected on every generation or only the first?**~~ **Resolved.** The PreGeneration hook prepends the typed catalog model-only on each `CreateResponse`. Dive places it before durable conversation history and does not persist it, preserving a reusable prompt prefix.
 
 2. **Should command expansion timeout be configurable?** The 10-second default for `!{command}` may be too short for some use cases (e.g., `!{go test ./...}`). Recommendation: make it configurable via `ExpandOptions` with a sensible default. Currently configurable via `WithShellTimeout`.
 

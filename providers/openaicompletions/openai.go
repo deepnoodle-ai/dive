@@ -115,6 +115,9 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
+	if supportsExplicitChatPromptCaching(p.Name(), p.endpoint, request.Model) {
+		addPromptCacheBreakpoints(msgs, 3)
+	}
 	if config.Prefill != "" {
 		msgs = append(msgs, Message{Role: "assistant", Content: config.Prefill})
 	}
@@ -247,6 +250,9 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
+	if supportsExplicitChatPromptCaching(p.Name(), p.endpoint, request.Model) {
+		addPromptCacheBreakpoints(msgs, 3)
+	}
 	if config.Prefill != "" {
 		msgs = append(msgs, Message{Role: "assistant", Content: config.Prefill})
 	}
@@ -314,6 +320,36 @@ func validateMessages(messages []*llm.Message) error {
 	}
 	// Empty messages are silently skipped during conversion rather than erroring
 	return nil
+}
+
+func supportsExplicitChatPromptCaching(providerName, endpoint, model string) bool {
+	return isDefaultOpenAICompletionsEndpoint(providerName, endpoint) && strings.HasPrefix(model, "gpt-5.6")
+}
+
+func isDefaultOpenAICompletionsEndpoint(providerName, endpoint string) bool {
+	return providerName == "openai-completions" && strings.TrimRight(endpoint, "/") == DefaultEndpoint
+}
+
+func addPromptCacheBreakpoints(messages []Message, limit int) {
+	for i := len(messages) - 1; i >= 0 && limit > 0; i-- {
+		if messages[i].Role != "user" && messages[i].Role != "developer" {
+			continue
+		}
+		if len(messages[i].ContentParts) == 0 {
+			if messages[i].Content == "" {
+				continue
+			}
+			messages[i].ContentParts = []ContentPart{{Type: "text", Text: messages[i].Content}}
+			messages[i].Content = ""
+		}
+		for j := len(messages[i].ContentParts) - 1; j >= 0; j-- {
+			if messages[i].ContentParts[j].Type == "text" {
+				messages[i].ContentParts[j].PromptCacheBreakpoint = &PromptCacheBreakpoint{Mode: "explicit"}
+				limit--
+				break
+			}
+		}
+	}
 }
 
 func convertMessages(messages []*llm.Message) ([]Message, error) {
@@ -542,6 +578,9 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 		req.Model = model
 	} else {
 		req.Model = p.model
+	}
+	if config.PromptCacheKey != "" && isDefaultOpenAICompletionsEndpoint(p.Name(), p.endpoint) {
+		req.PromptCacheKey = config.PromptCacheKey
 	}
 
 	var maxTokens int

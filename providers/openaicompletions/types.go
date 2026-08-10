@@ -39,6 +39,7 @@ type Request struct {
 	FrequencyPenalty    *float64        `json:"frequency_penalty,omitempty"` // -2 to 2, default 0
 	ReasoningEffort     ReasoningEffort `json:"reasoning_effort,omitempty"`  // supported reasoning models only
 	ReasoningFormat     string          `json:"reasoning_format,omitempty"`  // groq only?
+	PromptCacheKey      string          `json:"prompt_cache_key,omitempty"`
 }
 
 type Message struct {
@@ -112,10 +113,15 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 // ContentPart is one element of a multimodal content array in a Chat
 // Completions message.
 type ContentPart struct {
-	Type     string        `json:"type"` // "text", "image_url", or "file"
-	Text     string        `json:"text,omitempty"`
-	ImageURL *ImageURLPart `json:"image_url,omitempty"`
-	File     *FilePart     `json:"file,omitempty"`
+	Type                  string                 `json:"type"` // "text", "image_url", or "file"
+	Text                  string                 `json:"text,omitempty"`
+	ImageURL              *ImageURLPart          `json:"image_url,omitempty"`
+	File                  *FilePart              `json:"file,omitempty"`
+	PromptCacheBreakpoint *PromptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
+}
+
+type PromptCacheBreakpoint struct {
+	Mode string `json:"mode"`
 }
 
 // ImageURLPart carries an image in a content-part array, referenced by
@@ -179,11 +185,12 @@ type Usage struct {
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
 }
 
-// PromptTokensDetails breaks down the wire prompt token count. CachedTokens is
-// a subset of PromptTokens on the wire; toLLMUsage resolves that relationship
-// into Dive's disjoint input buckets.
+// PromptTokensDetails breaks down the wire prompt token count. CachedTokens and
+// CacheWriteTokens are subsets of PromptTokens on the wire; toLLMUsage resolves
+// that relationship into Dive's disjoint input buckets.
 type PromptTokensDetails struct {
-	CachedTokens int `json:"cached_tokens"`
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
 }
 
 // CompletionTokensDetails breaks down the completion token count.
@@ -198,14 +205,17 @@ type CompletionTokensDetails struct {
 func (u Usage) toLLMUsage() llm.Usage {
 	prompt := max(0, u.PromptTokens)
 	cached := 0
+	written := 0
 	if u.PromptTokensDetails != nil {
 		cached = min(max(0, u.PromptTokensDetails.CachedTokens), prompt)
+		written = min(max(0, u.PromptTokensDetails.CacheWriteTokens), prompt-cached)
 	}
 	usage := llm.Usage{
-		InputTokens:  prompt - cached,
-		OutputTokens: u.CompletionTokens,
+		InputTokens:              prompt - cached - written,
+		OutputTokens:             u.CompletionTokens,
+		CacheCreationInputTokens: written,
+		CacheReadInputTokens:     cached,
 	}
-	usage.CacheReadInputTokens = cached
 	if u.CompletionTokensDetails != nil {
 		usage.ReasoningTokens = u.CompletionTokensDetails.ReasoningTokens
 	}

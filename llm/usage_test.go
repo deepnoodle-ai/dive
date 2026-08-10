@@ -52,6 +52,7 @@ func TestUsageUnmarshalNativeInputDetails(t *testing.T) {
 		payload   string
 		wantInput int
 		wantRead  int
+		wantWrite int
 		wantCost  bool
 	}{
 		{
@@ -61,10 +62,24 @@ func TestUsageUnmarshalNativeInputDetails(t *testing.T) {
 			wantRead:  70,
 		},
 		{
+			name:      "responses cache write details",
+			payload:   `{"input_tokens":100,"input_tokens_details":{"cached_tokens":20,"cache_write_tokens":70}}`,
+			wantInput: 10,
+			wantRead:  20,
+			wantWrite: 70,
+		},
+		{
 			name:      "chat completions details",
 			payload:   `{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":70}}`,
 			wantInput: 30,
 			wantRead:  70,
+		},
+		{
+			name:      "chat completions cache write details",
+			payload:   `{"prompt_tokens":100,"prompt_tokens_details":{"cached_tokens":20,"cache_write_tokens":70}}`,
+			wantInput: 10,
+			wantRead:  20,
+			wantWrite: 70,
 		},
 		{
 			name: "responses wins when both native shapes are present",
@@ -108,6 +123,13 @@ func TestUsageUnmarshalNativeInputDetails(t *testing.T) {
 			wantRead:  10,
 		},
 		{
+			name:      "cache writes clamp to remaining prompt",
+			payload:   `{"input_tokens":10,"input_tokens_details":{"cached_tokens":7,"cache_write_tokens":8}}`,
+			wantInput: 0,
+			wantRead:  7,
+			wantWrite: 3,
+		},
+		{
 			name:      "negative native counts clamp to zero",
 			payload:   `{"input_tokens":-10,"input_tokens_details":{"cached_tokens":-20}}`,
 			wantInput: 0,
@@ -142,7 +164,8 @@ func TestUsageUnmarshalNativeInputDetails(t *testing.T) {
 			assert.NoError(t, json.Unmarshal([]byte(tt.payload), &usage))
 			assert.Equal(t, tt.wantInput, usage.InputTokens)
 			assert.Equal(t, tt.wantRead, usage.CacheReadInputTokens)
-			assert.Equal(t, tt.wantInput+tt.wantRead, usage.TotalInputTokens())
+			assert.Equal(t, tt.wantWrite, usage.CacheCreationInputTokens)
+			assert.Equal(t, tt.wantInput+tt.wantRead+tt.wantWrite, usage.TotalInputTokens())
 			if tt.wantCost {
 				assert.NotNil(t, usage.Cost)
 				assert.Equal(t, 99.0, usage.Cost.Total)

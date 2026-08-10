@@ -2,6 +2,7 @@ package dive
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1916,6 +1917,9 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 
 		// Build per-iteration LLM options
 		baseOpts := a.getGenerationOptions(systemPrompt, resolvedTools)
+		if hctx.Session != nil {
+			baseOpts = append(baseOpts, llm.WithPromptCacheKey(promptCacheKeyForSession(hctx.Session.ID())))
+		}
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
 			iterOpts = append(iterOpts, llm.WithToolChoice(llm.ToolChoiceNone))
@@ -2891,6 +2895,13 @@ func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool) []llm.Op
 	}
 	generateOpts = append(generateOpts, a.modelSettings.Options()...)
 	return generateOpts
+}
+
+// promptCacheKeyForSession keeps cache routing stable across a session without
+// sending the provider the session's potentially user-visible identifier.
+func promptCacheKeyForSession(sessionID string) string {
+	sum := sha256.Sum256([]byte(sessionID))
+	return fmt.Sprintf("dive-session-%x", sum[:16])
 }
 
 type generateResult struct {

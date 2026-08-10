@@ -1,6 +1,8 @@
 package openai
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -39,15 +41,16 @@ func TestDecodeAssistantResponse_ReasoningTokens(t *testing.T) {
 		Usage: responses.ResponseUsage{
 			InputTokens:         100,
 			OutputTokens:        50,
-			InputTokensDetails:  responses.ResponseUsageInputTokensDetails{CachedTokens: 10},
+			InputTokensDetails:  responses.ResponseUsageInputTokensDetails{CachedTokens: 10, CacheWriteTokens: 20},
 			OutputTokensDetails: responses.ResponseUsageOutputTokensDetails{ReasoningTokens: 20},
 		},
 	}
 	out, err := decodeAssistantResponse(resp)
 	assert.NoError(t, err)
-	assert.Equal(t, 90, out.Usage.InputTokens)
+	assert.Equal(t, 70, out.Usage.InputTokens)
 	assert.Equal(t, 50, out.Usage.OutputTokens)
 	assert.Equal(t, 10, out.Usage.CacheReadInputTokens)
+	assert.Equal(t, 20, out.Usage.CacheCreationInputTokens)
 	assert.Equal(t, 100, out.Usage.TotalInputTokens())
 	assert.Equal(t, 20, out.Usage.ReasoningTokens)
 }
@@ -57,12 +60,16 @@ func TestDecodeAssistantResponse_ClampsInvalidCacheCounts(t *testing.T) {
 		name       string
 		prompt     int64
 		cached     int64
+		written    int64
 		wantInput  int
 		wantCached int
+		wantWrite  int
 	}{
-		{name: "cached above prompt", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
-		{name: "negative cached", prompt: 10, cached: -20, wantInput: 10, wantCached: 0},
-		{name: "negative prompt", prompt: -10, cached: 5, wantInput: 0, wantCached: 0},
+		{name: "valid write", prompt: 10, cached: 2, written: 7, wantInput: 1, wantCached: 2, wantWrite: 7},
+		{name: "cached above prompt", prompt: 10, cached: 20, written: 5, wantInput: 0, wantCached: 10},
+		{name: "write above remainder", prompt: 10, cached: 7, written: 8, wantInput: 0, wantCached: 7, wantWrite: 3},
+		{name: "negative cached and write", prompt: 10, cached: -20, written: -4, wantInput: 10, wantCached: 0},
+		{name: "negative prompt", prompt: -10, cached: 5, written: 5, wantInput: 0, wantCached: 0},
 	}
 
 	for _, tt := range tests {
@@ -71,13 +78,15 @@ func TestDecodeAssistantResponse_ClampsInvalidCacheCounts(t *testing.T) {
 				Usage: responses.ResponseUsage{
 					InputTokens: tt.prompt,
 					InputTokensDetails: responses.ResponseUsageInputTokensDetails{
-						CachedTokens: tt.cached,
+						CachedTokens:     tt.cached,
+						CacheWriteTokens: tt.written,
 					},
 				},
 			})
 			assert.NoError(t, err)
 			assert.Equal(t, tt.wantInput, out.Usage.InputTokens)
 			assert.Equal(t, tt.wantCached, out.Usage.CacheReadInputTokens)
+			assert.Equal(t, tt.wantWrite, out.Usage.CacheCreationInputTokens)
 			assert.Equal(t, max(0, int(tt.prompt)), out.Usage.TotalInputTokens())
 		})
 	}
@@ -118,6 +127,48 @@ func TestBuildRequestParams_ToolIncludes(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "expected file_search_call.results in params.Include")
+}
+
+func TestBuildRequestParams_GPT56PromptCaching(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithModel("gpt-5.6-luna"),
+		llm.WithPromptCacheKey("stable-session-key"),
+		llm.WithMessages(
+			llm.NewUserTextMessage("one"),
+			llm.NewAssistantTextMessage("answer one"),
+			llm.NewUserTextMessage("two"),
+			llm.NewAssistantTextMessage("answer two"),
+			llm.NewUserTextMessage("three"),
+			llm.NewAssistantTextMessage("answer three"),
+			llm.NewUserTextMessage("four"),
+		),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	body, err := json.Marshal(params)
+	assert.NoError(t, err)
+	assert.True(t, strings.Contains(string(body), `"prompt_cache_key":"stable-session-key"`))
+	assert.Equal(t, 3, strings.Count(string(body), `"prompt_cache_breakpoint"`))
+}
+
+func TestBuildRequestParams_OlderModelOmitsExplicitPromptCaching(t *testing.T) {
+	provider := New(WithAPIKey("test"))
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithModel("gpt-5.5"),
+		llm.WithPromptCacheKey("stable-session-key"),
+		llm.WithMessages(llm.NewUserTextMessage("one")),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	body, err := json.Marshal(params)
+	assert.NoError(t, err)
+	assert.True(t, strings.Contains(string(body), `"prompt_cache_key":"stable-session-key"`))
+	assert.False(t, strings.Contains(string(body), `"prompt_cache_breakpoint"`))
 }
 
 func TestBuildRequestParams_NoIncludesWhenToolOptsOut(t *testing.T) {

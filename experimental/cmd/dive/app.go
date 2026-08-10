@@ -2575,7 +2575,7 @@ func (a *App) usageReportView() tui.View {
 		tui.Text(""),
 		tui.Text("  cache read  — prompt tokens served from cache (cheap, ~0.1x)").Style(labelStyle),
 		tui.Text("  cache write — prompt tokens written to cache (premium, 1.25-2x)").Style(labelStyle),
-		tui.Text("  cache hit   — cache read / (cache read + cache write)").Style(labelStyle),
+		tui.Text("  cache hit   — cache read / total input tokens").Style(labelStyle),
 	)
 	if hasCost {
 		views = append(views, tui.Text("  est. cost   — estimated at list prices; not a bill").Style(labelStyle))

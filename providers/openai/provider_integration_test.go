@@ -13,7 +13,6 @@ import (
 
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
-	"github.com/openai/openai-go/v3/option"
 )
 
 func TestIntegration_SimpleTextGeneration(t *testing.T) {
@@ -68,9 +67,8 @@ func TestIntegration_PromptCachingUsage(t *testing.T) {
 
 	provider := New(
 		WithAPIKey(apiKey),
-		WithModel(ModelGPT54Mini),
+		WithModel(ModelGPT56Luna),
 		WithMaxTokens(16),
-		WithExtraRequestOptions(option.WithJSONSet("prompt_cache_key", uniqueCacheKey(t))),
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -82,11 +80,13 @@ func TestIntegration_PromptCachingUsage(t *testing.T) {
 	)
 	request := []llm.Option{
 		llm.WithUserTextMessage(longPrompt + "\nReply with the word ready."),
+		llm.WithPromptCacheKey(uniqueCacheKey(t)),
 	}
 
 	first, err := provider.Generate(ctx, request...)
 	assert.NoError(t, err)
 	assert.NotNil(t, first)
+	assert.True(t, first.Usage.CacheCreationInputTokens > 0, "first GPT-5.6 request should report a cache write")
 
 	var cached *llm.Response
 	for attempt := 0; attempt < 4; attempt++ {
@@ -108,7 +108,7 @@ func TestIntegration_PromptCachingUsage(t *testing.T) {
 	}
 	assert.NotNil(t, cached, "repeated request should observe an OpenAI cache hit")
 	assert.Equal(t, first.Usage.TotalInputTokens(), cached.Usage.TotalInputTokens())
-	expectedCost := TextModelPricing[ModelGPT54Mini].CostOf(&cached.Usage)
+	expectedCost := TextModelPricing[ModelGPT56Luna].CostOf(&cached.Usage)
 	assert.NotNil(t, cached.Usage.Cost)
 	assert.Equal(t, expectedCost, *cached.Usage.Cost)
 	t.Logf("OpenAI cache hit: input=%d cached=%d total_input=%d cost=%f",

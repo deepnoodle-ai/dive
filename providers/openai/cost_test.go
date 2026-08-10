@@ -92,7 +92,8 @@ func TestOpenAIPricingUsesDisjointCachedTokens(t *testing.T) {
 		Usage: responses.ResponseUsage{
 			InputTokens: 1_000_000,
 			InputTokensDetails: responses.ResponseUsageInputTokensDetails{
-				CachedTokens: 900_000,
+				CachedTokens:     700_000,
+				CacheWriteTokens: 200_000,
 			},
 		},
 	})
@@ -100,6 +101,7 @@ func TestOpenAIPricingUsesDisjointCachedTokens(t *testing.T) {
 	pricing := TextModelPricing[ModelGPT56Sol]
 	cost := pricing.CostOf(&decoded.Usage)
 	assert.Equal(t, 0.5, cost.Input)
-	assert.Equal(t, 0.45, cost.CacheRead)
-	assert.Equal(t, 0.95, cost.Total)
+	assert.Equal(t, 0.35, cost.CacheRead)
+	assert.Equal(t, 1.25, cost.CacheWrite)
+	assert.Equal(t, 2.1, cost.Total)
 }

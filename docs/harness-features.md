@@ -200,8 +200,8 @@ Modular, file-based capabilities. See the [Skills Guide](guides/skills.md).
   discovered from `.claude/`, `.dive/`, and `.agents/` directories. Slash
   commands are skills without a description.
 - **Three-layer integration** — rules in the system prompt, a typed catalog
-  reminder appended model-only at the request tail, and a `Skill` tool that
-  injects skill content on invocation.
+  reminder prepended model-only as stable prompt-prefix context, and a `Skill`
+  tool that injects skill content on invocation.
 - **Triggers and expansion** — keyword and pattern triggers, `$ARGUMENTS`
   and positional variables, and `!{command}` shell substitution for local
   skills.

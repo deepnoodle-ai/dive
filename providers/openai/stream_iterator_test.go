@@ -103,15 +103,18 @@ func TestStreamIteratorNormalizesUsageBuckets(t *testing.T) {
 		eventType  string
 		prompt     int
 		cached     int
+		written    int
 		wantInput  int
 		wantCached int
+		wantWrite  int
 	}{
-		{name: "completed valid", eventType: "response.completed", prompt: 100, cached: 70, wantInput: 30, wantCached: 70},
+		{name: "completed valid", eventType: "response.completed", prompt: 100, cached: 20, written: 70, wantInput: 10, wantCached: 20, wantWrite: 70},
 		{name: "completed upper clamp", eventType: "response.completed", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
-		{name: "completed lower clamp", eventType: "response.completed", prompt: 10, cached: -20, wantInput: 10, wantCached: 0},
-		{name: "incomplete valid", eventType: "response.incomplete", prompt: 100, cached: 70, wantInput: 30, wantCached: 70},
+		{name: "completed write clamp", eventType: "response.completed", prompt: 10, cached: 7, written: 8, wantInput: 0, wantCached: 7, wantWrite: 3},
+		{name: "completed lower clamp", eventType: "response.completed", prompt: 10, cached: -20, written: -5, wantInput: 10, wantCached: 0},
+		{name: "incomplete valid", eventType: "response.incomplete", prompt: 100, cached: 20, written: 70, wantInput: 10, wantCached: 20, wantWrite: 70},
 		{name: "incomplete upper clamp", eventType: "response.incomplete", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
-		{name: "incomplete negative prompt", eventType: "response.incomplete", prompt: -10, cached: 5, wantInput: 0, wantCached: 0},
+		{name: "incomplete negative prompt", eventType: "response.incomplete", prompt: -10, cached: 5, written: 5, wantInput: 0, wantCached: 0},
 	}
 
 	for _, tt := range tests {
@@ -125,10 +128,10 @@ func TestStreamIteratorNormalizesUsageBuckets(t *testing.T) {
 					"usage":{
 						"input_tokens":%d,
 						"output_tokens":5,
-						"input_tokens_details":{"cached_tokens":%d}
+						"input_tokens_details":{"cached_tokens":%d,"cache_write_tokens":%d}
 					}
 				}
-			}`, tt.eventType, eventStatus(tt.eventType), tt.prompt, tt.cached)), &event))
+			}`, tt.eventType, eventStatus(tt.eventType), tt.prompt, tt.cached, tt.written)), &event))
 
 			iterator := newOpenAIStreamIterator(&mockStreamSource{}, &llm.Config{})
 			events, err := iterator.processOpenAIEvent(event)
@@ -137,6 +140,7 @@ func TestStreamIteratorNormalizesUsageBuckets(t *testing.T) {
 			assert.NotNil(t, events[0].Usage)
 			assert.Equal(t, tt.wantInput, events[0].Usage.InputTokens)
 			assert.Equal(t, tt.wantCached, events[0].Usage.CacheReadInputTokens)
+			assert.Equal(t, tt.wantWrite, events[0].Usage.CacheCreationInputTokens)
 			assert.Equal(t, max(0, tt.prompt), events[0].Usage.TotalInputTokens())
 		})
 	}
@@ -152,7 +156,7 @@ func eventStatus(eventType string) string {
 func TestStreamIteratorAccumulatorPricesDisjointUsage(t *testing.T) {
 	payloads := []string{
 		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
-		`{"type":"response.completed","sequence_number":2,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":100,"output_tokens":10,"input_tokens_details":{"cached_tokens":80}}}}`,
+		`{"type":"response.completed","sequence_number":2,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":100,"output_tokens":10,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":20}}}}`,
 	}
 	events := make([]responses.ResponseStreamEventUnion, 0, len(payloads))
 	for _, payload := range payloads {
@@ -173,11 +177,13 @@ func TestStreamIteratorAccumulatorPricesDisjointUsage(t *testing.T) {
 
 	usage := accumulator.Response().Usage
 	assert.Equal(t, 20, usage.InputTokens)
-	assert.Equal(t, 80, usage.CacheReadInputTokens)
+	assert.Equal(t, 60, usage.CacheReadInputTokens)
+	assert.Equal(t, 20, usage.CacheCreationInputTokens)
 	assert.Equal(t, 100, usage.TotalInputTokens())
 	assert.NotNil(t, usage.Cost)
 	want := TextModelPricing[ModelGPT56Sol].CostOf(&usage)
 	assert.Equal(t, want.Input, usage.Cost.Input)
 	assert.Equal(t, want.CacheRead, usage.Cost.CacheRead)
+	assert.Equal(t, want.CacheWrite, usage.Cost.CacheWrite)
 	assert.Equal(t, want.Total, usage.Cost.Total)
 }

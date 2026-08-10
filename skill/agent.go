@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // Compile-time check that Loader implements dive.Extension.
@@ -24,9 +25,7 @@ func (l *Loader) Tools() []dive.Tool {
 }
 
 // Hooks returns the catalog injection and skill content hooks.
-// Hooks are always returned even when no skills are loaded so a stale legacy
-// catalog from an older session can be evicted with an explicit no-skills
-// notice. Implements dive.Extension.
+// Implements dive.Extension.
 func (l *Loader) Hooks() dive.Hooks {
 	return dive.Hooks{
 		PreGeneration: []dive.PreGenerationHook{catalogHook(l)},
@@ -62,8 +61,7 @@ func ConfigureAgent(opts *dive.AgentOptions, loader *Loader, cfgOpts ...ConfigOp
 		opt(cfg)
 	}
 
-	// Always register hooks — even with zero skills, a resumed session
-	// may contain a stale catalog block that needs cleanup.
+	// Register the catalog and skill-content hooks.
 	opts.Hooks.PreGeneration = append(opts.Hooks.PreGeneration, catalogHook(loader))
 	opts.Hooks.PostToolUse = append(opts.Hooks.PostToolUse, skillContentHook(loader))
 
@@ -125,31 +123,22 @@ func skillContentHook(loader *Loader) dive.PostToolUseHook {
 // skillReminderName is the system-reminder block name for the skill catalog.
 const skillReminderName = "skills"
 
-// emptyCatalogNotice evicts a stale catalog when no skills remain. Absence
-// must be stated as a fact: under the accumulate-unless-conflict priming rule
-// an empty block asserts nothing, so it would coexist with a stale catalog
-// instead of conflicting with and replacing it.
-const emptyCatalogNotice = "No skills are available via the Skill tool; any skill listed earlier is no longer available."
-
-// catalogHook returns a PreGenerationHook that appends the skill catalog as a
-// model-only <system-reminder> block at the request tail.
+// catalogHook returns a PreGenerationHook that prepends the skill catalog as a
+// model-only <system-reminder> block. Keeping the catalog before the durable
+// conversation makes it part of the stable prompt prefix while avoiding any
+// mutation of persisted history.
 func catalogHook(loader *Loader) dive.PreGenerationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		catalog := BuildCatalog(loader)
-		// A fresh empty catalog has nothing to inject unless loaded history
-		// contains a stale catalog. That stale snapshot is evicted with an
-		// explicit no-skills sentence whose facts conflict with it, without
-		// mutating persisted messages.
 		if catalog == "" {
-			if !dive.HasSystemReminder(hctx.Messages, skillReminderName) {
-				return nil
-			}
-			catalog = emptyCatalogNotice
+			return nil
 		}
+
 		reminder, err := dive.NewContextReminder(skillReminderName, catalog)
 		if err != nil {
 			return err
 		}
-		return hctx.AppendReminder(reminder, dive.ModelOnly)
+		hctx.Messages = append([]*llm.Message{dive.NewReminderMessage(reminder)}, hctx.Messages...)
+		return nil
 	}
 }

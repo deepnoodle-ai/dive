@@ -44,15 +44,15 @@ refusals and money reporting, not just logs.
 
 Per-provider population of the input-side buckets:
 
-| Provider                | Convention                                                                                                                                                                                                                                                                                                                                                                               | Mapping sites                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `anthropic`             | **Disjoint** — the API reports `input_tokens` excluding cached; read/creation are separate additive fields                                                                                                                                                                                                                                                                               | decoder passes them through unchanged                                          |
-| `openai` (Responses)    | **Subset** — `InputTokens` is the full prompt; `CachedTokens` is part of it                                                                                                                                                                                                                                                                                                              | `providers/openai/decode.go:29`, `providers/openai/stream_iterator.go:452,475` |
-| `openaicompletions`     | **Subset**, documented on the wire type itself: "a subset of PromptTokens, not additive"                                                                                                                                                                                                                                                                                                 | `providers/openaicompletions/types.go:182-188,204`                             |
-| `grok`                  | **Subset** — embeds the OpenAI Responses provider (`providers/grok/grok.go:20-24`); verified `grok.go` only embeds and configures it, with no usage mapping of its own                                                                                                                                                                                                                   | inherited                                                                      |
-| `google`                | **Subset** — `CachedContentTokenCount` is part of `PromptTokenCount` per the Gemini API contract                                                                                                                                                                                                                                                                                         | `providers/google/util.go:89-97`                                               |
-| `openrouter`, `mistral` | **Subset today, by inheritance** — both embed `*openaic.Provider` (`providers/openrouter/openrouter.go:35`, `providers/mistral/mistral.go:34`) with no usage code of their own, so their mapping _is_ `toLLMUsage`. Whenever the served endpoint reports `prompt_tokens_details.cached_tokens` — OpenRouter passes it through for many upstreams — they are on the broken arithmetic now | shared `toLLMUsage`; fixed automatically by the `openaicompletions` change     |
-| `ollama`                | **Disjoint by construction** — embeds the Anthropic provider (`providers/ollama/ollama.go:34`) and speaks its Anthropic-compatible Messages convention                                                                                                                                                                                                                                   | none needed                                                                    |
+| Provider                | Convention                                                                                                                                                                                                                                                                                                                                                                               | Mapping sites                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `anthropic`             | **Disjoint** — the API reports `input_tokens` excluding cached; read/creation are separate additive fields                                                                                                                                                                                                                                                                               | decoder passes them through unchanged                                      |
+| `openai` (Responses)    | **Subset** — `InputTokens` is the full prompt; `CachedTokens` and GPT-5.6 `CacheWriteTokens` are parts of it                                                                                                                                                                                                                                                                             | `providers/openai/decode.go`, `providers/openai/stream_iterator.go`        |
+| `openaicompletions`     | **Subset** — `CachedTokens` and `CacheWriteTokens` are parts of the wire `PromptTokens`, not additive                                                                                                                                                                                                                                                                                    | `providers/openaicompletions/types.go`                                     |
+| `grok`                  | **Subset** — embeds the OpenAI Responses provider (`providers/grok/grok.go:20-24`); verified `grok.go` only embeds and configures it, with no usage mapping of its own                                                                                                                                                                                                                   | inherited                                                                  |
+| `google`                | **Subset** — `CachedContentTokenCount` is part of `PromptTokenCount` per the Gemini API contract                                                                                                                                                                                                                                                                                         | `providers/google/util.go:89-97`                                           |
+| `openrouter`, `mistral` | **Subset today, by inheritance** — both embed `*openaic.Provider` (`providers/openrouter/openrouter.go:35`, `providers/mistral/mistral.go:34`) with no usage code of their own, so their mapping _is_ `toLLMUsage`. Whenever the served endpoint reports `prompt_tokens_details.cached_tokens` — OpenRouter passes it through for many upstreams — they are on the broken arithmetic now | shared `toLLMUsage`; fixed automatically by the `openaicompletions` change |
+| `ollama`                | **Disjoint by construction** — embeds the Anthropic provider (`providers/ollama/ollama.go:34`) and speaks its Anthropic-compatible Messages convention                                                                                                                                                                                                                                   | none needed                                                                |
 
 On every subset-convention path, `CostOf` charges a cached token at
 `InputPrice + CacheReadPrice` instead of `CacheReadPrice`. When
@@ -98,9 +98,10 @@ reintroduce the subset convention behind the decoders' backs.
 
 ## Non-goals
 
-- No change to Anthropic's decoder or to cache-write pricing (no subset
-  provider populates `CacheCreationInputTokens`; it remains an
-  Anthropic-convention bucket).
+- No change to Anthropic's decoder or cache-write pricing. OpenAI GPT-5.6's
+  separately reported `cache_write_tokens` now populates the existing
+  `CacheCreationInputTokens` bucket and uses the configured GPT-5.6
+  cache-write rate.
 - No change to `ReasoningTokens`, which stays a documented subset of
   `OutputTokens` and is deliberately not priced as its own bucket —
   output-side subset with documentation is a coherent, existing design.
@@ -127,8 +128,10 @@ reintroduce the subset convention behind the decoders' backs.
    ```go
    prompt := max(0, wirePrompt)
    cached := min(max(0, wireCached), prompt)
-   InputTokens = prompt - cached
+   written := min(max(0, wireWritten), prompt - cached)
+   InputTokens = prompt - cached - written
    CacheReadInputTokens = cached
+   CacheCreationInputTokens = written
    ```
 
    For a valid provider payload (`0 <= wireCached <= wirePrompt`),
@@ -139,9 +142,11 @@ reintroduce the subset convention behind the decoders' backs.
 
    - `providers/openai/decode.go:29` and
      `providers/openai/stream_iterator.go:452,475`:
-     normalize `InputTokens` with `InputTokensDetails.CachedTokens`.
+     normalize `InputTokens` with `InputTokensDetails.CachedTokens` and
+     `CacheWriteTokens`.
    - `providers/openaicompletions/types.go` `toLLMUsage`: same subtraction
-     from `PromptTokens`; update the `PromptTokensDetails` comment to say
+     from `PromptTokens`, including `cache_write_tokens`; update the
+     `PromptTokensDetails` comment to say
      the subset relationship is a _wire_ fact that the conversion resolves.
      This one site also fixes `openrouter` and `mistral`, which embed the
      provider and have no usage code of their own.
@@ -150,7 +155,7 @@ reintroduce the subset convention behind the decoders' backs.
    - `grok` inherits the OpenAI Responses fix — verified: `grok.go` only
      embeds and configures the Responses provider.
    - `llm/usage.go` `UnmarshalJSON`: apply the same map-and-clamp for
-     provider-native input-side details, mirroring the existing
+     provider-native input-side read and write details, mirroring the existing
      `output_tokens_details` handling. Precedence is based on JSON key
      presence, not zero values: if either canonical
      `cache_read_input_tokens` or `cache_creation_input_tokens` is present,

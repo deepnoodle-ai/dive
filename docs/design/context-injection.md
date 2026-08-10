@@ -525,11 +525,9 @@ widened to conversation-wide behavior. The new surface is additive:
   permissive to export as-is; the legacy parser matches complete,
   well-formed blocks only.
 
-The skill package appends its catalog model-only. Its catalog header states
-completeness, so a later catalog snapshot conflicts with and replaces stale
-legacy catalog facts without rewriting loaded history; when no skills remain
-it appends an explicit no-skills notice rather than an empty block, since an
-empty block asserts nothing and cannot conflict. Its public API is untouched.
+The skill package prepends its catalog model-only so the unchanged catalog and
+conversation form a reusable prompt prefix without rewriting loaded history.
+Its public API is untouched.
 
 ## Compaction
 

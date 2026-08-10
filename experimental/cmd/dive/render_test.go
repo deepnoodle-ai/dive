@@ -27,10 +27,22 @@ func TestCacheHitRate(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "10%", rate)
 
+	// Reads are measured against the full prompt, not just cache activity.
+	rate, ok = cacheHitRate(&llm.Usage{InputTokens: 46469, CacheReadInputTokens: 3923})
+	assert.True(t, ok)
+	assert.Equal(t, "7%", rate)
+
 	// No caching at all: undefined, rendered as a dash.
 	rate, ok = cacheHitRate(&llm.Usage{InputTokens: 1000})
 	assert.False(t, ok, "rate should be undefined with no cache activity")
 	assert.Equal(t, "—", rate)
+}
+
+func TestCacheHitStyle_UsesTotalInputTokens(t *testing.T) {
+	style := cacheHitStyle(&llm.Usage{InputTokens: 21, CacheReadInputTokens: 79}, true)
+	assert.NotNil(t, style.FgRGB)
+	assert.Equal(t, tui.RGB{R: 225, G: 175, B: 80}, *style.FgRGB,
+		"79% of the full prompt should use the amber style")
 }
 
 func TestTokensPanelView_NilWhenNoUsage(t *testing.T) {
@@ -71,7 +83,7 @@ func TestTokensPanelView_ShowsCacheReadsWritesAndHitRate(t *testing.T) {
 	// The cache-write count (the previously hidden miss signal) is now visible.
 	assert.True(t, strings.Contains(text, "500"), "cache write tokens should be shown")
 	// And the per-scope hit rate.
-	assert.True(t, strings.Contains(text, "96%"), "turn hit rate should be shown")
+	assert.True(t, strings.Contains(text, "88%"), "turn hit rate should be shown")
 }
 
 func TestFormatCost(t *testing.T) {

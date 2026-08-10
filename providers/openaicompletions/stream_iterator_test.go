@@ -201,7 +201,7 @@ func TestStreamIteratorUsageDetails(t *testing.T) {
 		``,
 		`data: {"id":"chatcmpl-5","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
 		``,
-		`data: {"id":"chatcmpl-5","object":"chat.completion.chunk","model":"gpt-5","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":80},"completion_tokens_details":{"reasoning_tokens":30}}}`,
+		`data: {"id":"chatcmpl-5","object":"chat.completion.chunk","model":"gpt-5","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":60,"cache_write_tokens":20},"completion_tokens_details":{"reasoning_tokens":30}}}`,
 		``,
 		`data: [DONE]`,
 		``,
@@ -214,7 +214,8 @@ func TestStreamIteratorUsageDetails(t *testing.T) {
 	response := accumulator.Response()
 	assert.Equal(t, 20, response.Usage.InputTokens)
 	assert.Equal(t, 50, response.Usage.OutputTokens)
-	assert.Equal(t, 80, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 60, response.Usage.CacheReadInputTokens)
+	assert.Equal(t, 20, response.Usage.CacheCreationInputTokens)
 	assert.Equal(t, 100, response.Usage.TotalInputTokens())
 	assert.Equal(t, 30, response.Usage.ReasoningTokens)
 }
