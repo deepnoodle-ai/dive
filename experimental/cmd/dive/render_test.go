@@ -38,6 +38,13 @@ func TestCacheHitRate(t *testing.T) {
 	assert.Equal(t, "—", rate)
 }
 
+func TestCacheHitStyle_UsesTotalInputTokens(t *testing.T) {
+	style := cacheHitStyle(&llm.Usage{InputTokens: 21, CacheReadInputTokens: 79}, true)
+	assert.NotNil(t, style.FgRGB)
+	assert.Equal(t, tui.RGB{R: 225, G: 175, B: 80}, *style.FgRGB,
+		"79% of the full prompt should use the amber style")
+}
+
 func TestTokensPanelView_NilWhenNoUsage(t *testing.T) {
 	app := newTestApp()
 	app.interactionUsage = &llm.Usage{}

@@ -23,7 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   sessions use a stable hashed `prompt_cache_key`, native OpenAI requests mark
   reusable prefix breakpoints, and the CLI's cache-hit percentage is cache
   reads divided by total input rather than reads divided only by cache
-  activity. A small cached prefix can no longer render as `100%`.
+  activity. A small cached prefix can no longer render as `100%`. The CLI's
+  model-only skill catalog is also delivered before durable conversation
+  history so it remains reusable instead of being rewritten on every turn.
 - **Cache-read pricing is populated for every Google and OpenAI text model
   with a published discounted-input rate.** The OpenAI catalog also corrects
   the stale GPT-4o row to the current $2.50 input, $1.25 cached-input, and

@@ -100,7 +100,8 @@ reintroduce the subset convention behind the decoders' backs.
 
 - No change to Anthropic's decoder or cache-write pricing. OpenAI GPT-5.6's
   separately reported `cache_write_tokens` now populates the existing
-  `CacheCreationInputTokens` bucket.
+  `CacheCreationInputTokens` bucket and uses the configured GPT-5.6
+  cache-write rate.
 - No change to `ReasoningTokens`, which stays a documented subset of
   `OutputTokens` and is deliberately not priced as its own bucket —
   output-side subset with documentation is a coherent, existing design.

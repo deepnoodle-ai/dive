@@ -96,11 +96,15 @@ func TestApplyRequestConfig_UnsupportedReasoningEffortClampsForKnownModel(t *tes
 }
 
 func TestApplyRequestConfig_OpenAIPromptCacheKey(t *testing.T) {
-	provider := New(WithModel(ModelGPT56Luna))
+	provider := New(WithModel(ModelGPT56Luna), WithEndpoint(DefaultEndpoint+"/"))
 	var req Request
 	err := provider.applyRequestConfig(&req, &llm.Config{PromptCacheKey: "stable-session-key"})
 	assert.NoError(t, err)
 	assert.Equal(t, "stable-session-key", req.PromptCacheKey)
+}
+
+func TestSupportsExplicitChatPromptCaching_AcceptsTrailingSlash(t *testing.T) {
+	assert.True(t, supportsExplicitChatPromptCaching("openai-completions", DefaultEndpoint+"/", ModelGPT56Luna))
 }
 
 func TestAddPromptCacheBreakpoints(t *testing.T) {

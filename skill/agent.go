@@ -2,9 +2,11 @@ package skill
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/deepnoodle-ai/dive"
+	"github.com/deepnoodle-ai/dive/llm"
 )
 
 // Compile-time check that Loader implements dive.Extension.
@@ -131,8 +133,10 @@ const skillReminderName = "skills"
 // instead of conflicting with and replacing it.
 const emptyCatalogNotice = "No skills are available via the Skill tool; any skill listed earlier is no longer available."
 
-// catalogHook returns a PreGenerationHook that appends the skill catalog as a
-// model-only <system-reminder> block at the request tail.
+// catalogHook returns a PreGenerationHook that prepends the skill catalog as a
+// model-only <system-reminder> block. Keeping the catalog before the durable
+// conversation makes it part of the stable prompt prefix while avoiding any
+// mutation of persisted history.
 func catalogHook(loader *Loader) dive.PreGenerationHook {
 	return func(_ context.Context, hctx *dive.HookContext) error {
 		catalog := BuildCatalog(loader)
@@ -146,10 +150,38 @@ func catalogHook(loader *Loader) dive.PreGenerationHook {
 			}
 			catalog = emptyCatalogNotice
 		}
+
+		// Legacy sessions may contain a plain-text catalog in their first user
+		// message. Remove it from a copy of the model-facing history so it cannot
+		// override the fresh catalog that is now delivered at the request prefix.
+		hctx.Messages = withoutLegacySkillCatalog(hctx.Messages)
+
 		reminder, err := dive.NewContextReminder(skillReminderName, catalog)
 		if err != nil {
 			return err
 		}
-		return hctx.AppendReminder(reminder, dive.ModelOnly)
+		hctx.Messages = append([]*llm.Message{dive.NewReminderMessage(reminder)}, hctx.Messages...)
+		return nil
 	}
+}
+
+// withoutLegacySkillCatalog removes a legacy plain-text catalog from a
+// copy-on-write view of messages. Caller-owned and persisted messages remain
+// unchanged.
+func withoutLegacySkillCatalog(messages []*llm.Message) []*llm.Message {
+	if !dive.HasSystemReminder(messages, skillReminderName) {
+		return messages
+	}
+
+	cloned := slices.Clone(messages)
+	for i, message := range cloned {
+		if message == nil || message.Role != llm.User {
+			continue
+		}
+		messageClone := *message
+		messageClone.Content = slices.Clone(message.Content)
+		cloned[i] = &messageClone
+		break
+	}
+	return dive.RemoveSystemReminder(cloned, skillReminderName)
 }

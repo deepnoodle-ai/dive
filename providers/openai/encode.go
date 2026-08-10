@@ -468,10 +468,6 @@ func encodeUserMessageWithPromptCacheBreakpoint(message *llm.Message, breakpoint
 	return encodeInputMessageWithPromptCacheBreakpoint(message, breakpoint)
 }
 
-func encodeInputMessage(message *llm.Message) ([]responses.ResponseInputItemUnionParam, error) {
-	return encodeInputMessageWithPromptCacheBreakpoint(message, false)
-}
-
 func encodeInputMessageWithPromptCacheBreakpoint(message *llm.Message, breakpoint bool) ([]responses.ResponseInputItemUnionParam, error) {
 	if message.Role != llm.User && message.Role != llm.Developer {
 		return nil, fmt.Errorf("message role is not an input role")

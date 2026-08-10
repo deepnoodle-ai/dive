@@ -323,7 +323,11 @@ func validateMessages(messages []*llm.Message) error {
 }
 
 func supportsExplicitChatPromptCaching(providerName, endpoint, model string) bool {
-	return providerName == "openai-completions" && endpoint == DefaultEndpoint && strings.HasPrefix(model, "gpt-5.6")
+	return isDefaultOpenAICompletionsEndpoint(providerName, endpoint) && strings.HasPrefix(model, "gpt-5.6")
+}
+
+func isDefaultOpenAICompletionsEndpoint(providerName, endpoint string) bool {
+	return providerName == "openai-completions" && strings.TrimRight(endpoint, "/") == DefaultEndpoint
 }
 
 func addPromptCacheBreakpoints(messages []Message, limit int) {
@@ -575,7 +579,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	} else {
 		req.Model = p.model
 	}
-	if config.PromptCacheKey != "" && p.Name() == "openai-completions" && p.endpoint == DefaultEndpoint {
+	if config.PromptCacheKey != "" && isDefaultOpenAICompletionsEndpoint(p.Name(), p.endpoint) {
 		req.PromptCacheKey = config.PromptCacheKey
 	}
 

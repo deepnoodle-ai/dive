@@ -142,7 +142,8 @@ genuine reminder content from legacy text and user-authored lookalikes.
   request.
 - `--operator-reminder NAME=TEXT` appends recorded operator reminders after the
   first user input.
-- The skill catalog appends model-only from its `PreGenerationHook`.
+- The skill catalog prepends model-only from its `PreGenerationHook` so it
+  remains stable prompt-prefix context.
 - Workspace, pipeline, and verification-gate demos append a new model-only
   value only when their payload changes during a response.
 - Recovery, verification-debt, checkpoint, and security triggers append
