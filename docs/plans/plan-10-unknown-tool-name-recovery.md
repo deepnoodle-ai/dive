@@ -1,7 +1,7 @@
 ---
 Title: Recover from unknown tool names instead of failing the generation
 Author: Curtis Myzie
-Status: Proposed
+Status: Implemented
 Last Updated: 2026-08-10
 ---
 
@@ -59,14 +59,15 @@ The user-visible outcome was a blank response after thirteen seconds. The two
 `mobius_memory_recall` calls had already executed and returned results; those
 results were discarded along with the turn.
 
-## Current behavior and root cause
+## Historical behavior and root cause
 
-Two call sites return a fatal error on an unrecognized name:
+Before this implementation, two call sites returned a fatal error on an
+unrecognized name:
 
 - `agent.go:2497` in `executeOneToolCall` (sequential path)
 - `agent.go:2248` in `executeToolCallsParallel`, Phase 1
 
-Both are the same shape:
+Both used the same shape:
 
 ```go
 tool, ok := toolsByName[toolCall.Name]
@@ -75,11 +76,11 @@ if !ok {
 }
 ```
 
-That error propagates through `executeToolCalls` to the generation loop, which
-returns it from `CreateResponse`. No `tool_result` message is ever built, so
-the batch produces nothing.
+That error propagated through `executeToolCalls` to the generation loop, which
+returned it from `CreateResponse`. No `tool_result` message was built, so the
+batch produced nothing.
 
-Compare that to every other failure mode in the same file:
+At the time, every other failure mode in the same file was recoverable:
 
 | Failure                        | Handling                                |
 | ------------------------------ | --------------------------------------- |
@@ -88,18 +89,18 @@ Compare that to every other failure mode in the same file:
 | Tool returns a malformed union | `IsError` result so the agent converges |
 | Tool name is unknown           | **Fatal, turn ends**                    |
 
-The panic path states the principle directly: results are converted "so the
+The panic path stated the principle directly: results were converted "so the
 LLM can see the failure and adapt, rather than crashing the process." A tool
-that panics is currently handled more gracefully than a name with a typo.
+that panicked was handled more gracefully than a name with a typo.
 
-`batchHasSequentialOnlyTool` already treats an unknown name as a skippable,
-non-fatal condition (`agent.go:2160`), so the file is not internally consistent
-about this either.
+`batchHasSequentialOnlyTool` already treated an unknown name as a skippable,
+non-fatal condition (`agent.go:2160`), so the file was not internally
+consistent about this either.
 
 ### Not only a hallucination
 
-The incident above is a model inventing a name, but fatal-on-unknown also
-breaks two supported configurations where the name is not invented at all:
+The incident above was a model inventing a name, but fatal-on-unknown also
+broke two supported configurations where the name was not invented at all:
 
 - **Dynamic toolsets.** Tool resolution is per-iteration: the generation loop
   calls `resolveTools` (`agent.go:1912`) before every LLM request, and
@@ -109,23 +110,23 @@ breaks two supported configurations where the name is not invented at all:
 - **Resume.** `executeToolCalls` is also invoked when resuming a suspended
   turn (`agent.go:827`) against a freshly resolved toolset. If the toolset
   changed across suspend/resume, a pending call's name can be unknown by the
-  time it runs, and today that fails the resume.
+  time it runs, which caused the resume to fail.
 
-Both are reasons this is a correctness fix, not just hallucination tolerance.
+Both were reasons this was a correctness fix, not just hallucination tolerance.
 
-### Batch loss differs by execution mode
+### Batch loss differed by execution mode
 
-The two paths discard work differently, and neither is good:
+The two paths discarded work differently, and neither was good:
 
-- **Parallel:** the name check runs in Phase 1 before any tool executes, so
-  every valid call in the batch is discarded unrun. Pure wasted latency.
-- **Sequential:** calls preceding the bad one execute to completion. Their side
-  effects land; their results are thrown away with the batch. The caller has no
-  durable record that they ran.
+- **Parallel:** the name check ran in Phase 1 before any tool executed, so every
+  valid call in the batch was discarded unrun. Pure wasted latency.
+- **Sequential:** calls preceding the bad one executed to completion. Their side
+  effects landed; their results were thrown away with the batch. The caller had
+  no durable record that they ran.
 
 Dive defaults to sequential (`ParallelToolExecution` is opt-in), so the
-side-effect case is the live one. In the two incidents above the completed
-calls were read-only, but that was luck, not design.
+side-effect case was the live pre-change behavior. In the two incidents above
+the completed calls were read-only, but that was luck, not design.
 
 ## Goals
 
@@ -260,31 +261,18 @@ via the tools parameter, so suggestions are a nudge, not documentation. Emit
 none rather than a poor one; a bare "does not exist" is still recoverable, and
 a confident wrong suggestion is worse than silence.
 
-### Bounding the loop
+### Iteration limit
 
-Today a bad name is at least bounded: it ends the turn. After this change a
-model stuck on one name could consume iterations up to
-`defaultToolIterationLimit` (100). That is an unacceptable worst case.
+Unknown-name results use the same agent-wide `ToolIterationLimit` as every
+other recoverable tool failure. There is no unknown-specific counter or retry
+budget. If the model keeps calling a missing tool, the existing final-iteration
+mechanism appends the "respond with a final answer now" instruction and forces
+`ToolChoiceNone`.
 
-Add a per-generation counter of consecutive unknown-only _iterations_: an
-iteration increments it when it produced at least one unknown name and zero
-successful dispatches; any successful dispatch resets it. Counting per
-iteration rather than per call means a mixed batch — the actual incident
-shape, two good calls and one bad — never advances the bound. That is
-correct: a model still doing useful work is not stuck.
-
-When the counter exceeds the threshold (proposed: 3), do **not** return the
-fatal error. A fatal return at iteration N discards everything since the turn
-began — N iterations of executed tools and their transcript — because a
-`CreateResponse` error means `SaveTurn` never runs. That recreates the exact
-loss this plan exists to fix, at larger scale than the bug it bounds. Instead,
-trip the mechanism that already exists for the iteration limit
-(`agent.go:2052`): set `lastIteration`, append the "respond with a final
-answer now" instruction to the tool-result message, and force
-`ToolChoiceNone`. The turn ends gracefully with a persisted transcript and a
-user-visible explanation instead of a blank response. A model that corrects
-itself is unaffected; a model that cannot is wound down within four iterations
-rather than a hundred.
+This keeps recovery consistent with tool execution errors, panics, malformed
+results, and hook denials. Deployments that want a tighter overall bound can
+already lower `ToolIterationLimit`; unknown names do not justify a second state
+machine with different reset semantics.
 
 ### Observability
 
@@ -386,18 +374,18 @@ detectable failure for an undetectable one.
 ## Tradeoffs and consequences
 
 - **Loud becomes quiet.** The main cost, mitigated by the warning log, the
-  countable `*UnknownToolError`, and the iteration bound. Worth stating
+  countable `*UnknownToolError`, and the existing agent-wide iteration limit. Worth stating
   plainly in review: we are choosing to handle something automatically that
   currently pages a human.
 - **The worst case is now an apology, not an error.** With the graceful
-  wind-down, a systemic defect that makes every tool name unknown manifests
-  as degraded answers plus warn-log volume, never as failed turns. Monitoring
-  must watch the log line and the typed-error count, because error rates will
-  no longer move.
+  final iteration, a systemic defect that makes every tool name unknown
+  manifests as degraded answers plus warn-log volume, never as failed turns.
+  Monitoring must watch the log line and the typed-error count, because error
+  rates will no longer move.
 - **Cost per incident rises.** Today the turn dies at ~13 seconds. After, the
   model spends at least one extra generation, sometimes more. That is the right
-  trade for a recovered turn, and it is the argument for keeping the
-  consecutive-unknown threshold tight rather than generous.
+  trade for a recovered turn. `ToolIterationLimit` remains the caller's common
+  cost bound for all recoverable tool failures.
 - **Public behavior change.** Callers relying on the hard error stop receiving
   it. Minor version bump and a changelog entry, not a patch release.
 - **Sequential side effects still precede the failure.** This change means the
@@ -424,13 +412,9 @@ detectable failure for an undetectable one.
    with `prep.tool` (nil here) as `HookContext.Tool` (`agent.go:2406`),
    violating safety invariant 3 and handing existing hooks a nil interface.
    Still emit the `tool_call` event in Phase 1 as for any other call.
-4. Add the consecutive-unknown-iteration counter to the generation loop. When
-   it exceeds the threshold, set `lastIteration` and force `ToolChoiceNone`
-   via the existing final-answer mechanism at `agent.go:2052` — not a fatal
-   error.
-5. Add the logger warning to the parallel path (the sequential path gets it
+4. Add the logger warning to the parallel path (the sequential path gets it
    in step 2).
-6. Changelog entry and minor version bump.
+5. Changelog entry; ship the behavior change in the next minor release.
 
 ## Tests
 
@@ -454,12 +438,8 @@ detectable failure for an undetectable one.
   and flat names that must not qualify as namespace matches.
 - No suggestion is emitted when nothing scores within threshold.
 - Suggestions never include a name absent from `toolsByName`.
-- A mixed batch (valid + unknown) does not advance the consecutive-unknown
-  counter.
-- Consecutive unknown-only iterations beyond the threshold force a final
-  answer via `ToolChoiceNone`; the turn completes without error, and earlier
-  executed tool results are present in the saved turn.
-- The counter resets after a successful dispatch.
+- Repeated unknown-only iterations use the standard `ToolIterationLimit`
+  final-answer path; there is no unknown-specific counter.
 - No `PreToolUse`, `PostToolUse`, or `PostToolUseFailure` hook fires for an
   unknown name — in the sequential path and in the parallel drain loop.
 - Every `tool_use` in a batch containing an unknown name has a matching
@@ -484,11 +464,10 @@ this cause go to zero.
    `ToolCallResult.Error`, delivered on the standard `tool_call_result` item.
    Counting works through `errors.As`, stream consumers need no new type, and
    nothing double-counts. Rationale in Observability.
-2. **Is 3 the right consecutive-unknown threshold?** Yes, and it is cheap to
-   hold tight now that tripping it ends the turn gracefully instead of
-   fatally. Each recovery message carries suggestions, so a model that will
-   ever self-correct does so on the first one; the threshold exists for the
-   model that never will.
+2. **Should unknown names have a separate retry threshold?** No. Every other
+   recoverable tool failure uses `ToolIterationLimit`, and unknown names should
+   follow the same policy. A dedicated counter adds state and ambiguous reset
+   semantics without establishing a broader failure-budget abstraction.
 3. **Suggestion list size?** Cap at three and never fall back to dumping the
    toolset. The full tool list is already in the model's context via the
    tools parameter; a longer list is documentation, not a nudge.

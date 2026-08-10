@@ -2204,6 +2204,7 @@ type toolCallPrep struct {
 	preview *ToolCallPreview
 	preHctx *HookContext
 	denied  bool
+	unknown bool
 	input   []byte
 }
 
@@ -2245,7 +2246,22 @@ func (a *Agent) executeToolCallsParallel(
 	for i, toolCall := range toolCalls {
 		tool, ok := toolsByName[toolCall.Name]
 		if !ok {
-			return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
+			if err := callback(childCtx, &ResponseItem{
+				Type:     ResponseItemTypeToolCall,
+				ToolCall: toolCall,
+			}); err != nil {
+				return nil, err
+			}
+			result := unknownToolResult(toolCall, toolsByName)
+			unknownErr := result.Error.(*UnknownToolError)
+			a.logger.Warn("unknown tool requested",
+				"tool_name", toolCall.Name,
+				"suggestions", unknownErr.Suggestions,
+				"agent_name", a.name,
+			)
+			preps[i] = toolCallPrep{denied: true, unknown: true}
+			deniedResults[i] = result
+			continue
 		}
 
 		a.logger.Debug("executing tool call",
@@ -2371,6 +2387,16 @@ func (a *Agent) executeToolCallsParallel(
 		i := ct.index
 		result := ct.result
 		prep := preps[i]
+		if prep.unknown {
+			batch.Outcomes[i] = toolCallOutcome{Result: result}
+			if err := callback(ctx, &ResponseItem{
+				Type:           ResponseItemTypeToolCallResult,
+				ToolCallResult: result,
+			}); err != nil {
+				return nil, err
+			}
+			continue
+		}
 
 		// Suspend path: skip PostToolUse hooks but still emit a tool_call_result
 		// event so stream consumers can see the suspend signal.
@@ -2494,7 +2520,26 @@ func (a *Agent) executeOneToolCall(
 ) (*ToolCallResult, error) {
 	tool, ok := toolsByName[toolCall.Name]
 	if !ok {
-		return nil, fmt.Errorf("tool call error: unknown tool %q", toolCall.Name)
+		if err := callback(ctx, &ResponseItem{
+			Type:     ResponseItemTypeToolCall,
+			ToolCall: toolCall,
+		}); err != nil {
+			return nil, err
+		}
+		result := unknownToolResult(toolCall, toolsByName)
+		unknownErr := result.Error.(*UnknownToolError)
+		a.logger.Warn("unknown tool requested",
+			"tool_name", toolCall.Name,
+			"suggestions", unknownErr.Suggestions,
+			"agent_name", a.name,
+		)
+		if err := callback(ctx, &ResponseItem{
+			Type:           ResponseItemTypeToolCallResult,
+			ToolCallResult: result,
+		}); err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
 
 	a.logger.Debug("executing tool call",

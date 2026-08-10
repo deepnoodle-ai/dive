@@ -566,7 +566,9 @@ func (f *funcTool[T]) Call(ctx context.Context, input T) (*ToolResult, error) {
 // what calls have happened during an LLM interaction.
 //
 // Error and Result.IsError track different failure modes:
-//   - Error is a Go error from tool.Call() — the tool itself crashed or failed unexpectedly.
+//   - Error is a Go-level execution or dispatch error, such as tool.Call()
+//     failing unexpectedly or an unknown tool name. Inspect typed errors with
+//     errors.As when the distinction matters.
 //   - Result.IsError is a protocol-level flag — the tool ran but reported a failure to the LLM
 //     (e.g. via NewToolResultError). Both are surfaced to the LLM as an error result.
 type ToolCallResult struct {
@@ -575,7 +577,7 @@ type ToolCallResult struct {
 	Input              any
 	Preview            *ToolCallPreview      // Preview generated before execution (if tool implements ToolPreviewer)
 	Result             *ToolResult           // Protocol-level result sent to the LLM
-	Error              error                 // Go error if tool.Call() itself failed
+	Error              error                 // Go error from tool.Call() or dispatch, including UnknownToolError
 	AdditionalContext  string                // Context injected by hooks, appended to the tool result message
 	BackgroundHandle   *BackgroundTaskHandle // Non-nil when the tool returned BackgroundResult
 	reminderDeliveries []reminderDelivery
