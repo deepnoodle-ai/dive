@@ -124,6 +124,11 @@ type CreateResponseOptions struct {
 	// Useful in server scenarios where one agent serves multiple sessions.
 	Session Session
 
+	// PromptCacheKey routes requests from the same conversation to the same
+	// provider prompt cache. When empty, the agent derives one from the active
+	// Session or falls back to a key that is stable for this Agent instance.
+	PromptCacheKey string
+
 	// ToolResults, when non-nil, supplies externally-obtained tool results
 	// to a resume call. Keys are tool_call IDs from a prior suspended
 	// Response's Suspension.PendingToolCalls; values are the results the
@@ -212,6 +217,16 @@ func WithValue(key string, value any) CreateResponseOption {
 func WithSession(s Session) CreateResponseOption {
 	return func(opts *CreateResponseOptions) {
 		opts.Session = s
+	}
+}
+
+// WithPromptCacheKey sets the provider prompt-cache routing key for this call.
+// Stateless applications that share one Agent across conversations should pass
+// a stable, distinct key for each conversation. Session-backed agents derive a
+// private key from Session.ID automatically.
+func WithPromptCacheKey(key string) CreateResponseOption {
+	return func(opts *CreateResponseOptions) {
+		opts.PromptCacheKey = key
 	}
 }
 

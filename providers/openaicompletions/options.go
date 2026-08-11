@@ -71,3 +71,12 @@ func WithSystemRole(systemRole string) Option {
 		p.systemRole = systemRole
 	}
 }
+
+// WithReportedUsageCost trusts the provider's usage.cost field as the
+// authoritative account charge, denominated in currency. It is intended for
+// OpenAI-compatible gateways such as OpenRouter that document this contract.
+func WithReportedUsageCost(currency string) Option {
+	return func(p *Provider) {
+		p.reportedCostCurrency = currency
+	}
+}

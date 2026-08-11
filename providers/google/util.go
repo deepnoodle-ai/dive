@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -67,12 +68,24 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	// Convert usage information
 	var usage llm.Usage
 	if resp.UsageMetadata != nil {
-		usage = convertUsageMetadata(resp.UsageMetadata)
+		var err error
+		usage, err = convertUsageMetadata(resp.UsageMetadata)
+		if err != nil {
+			return nil, err
+		}
+	}
+	responseID := resp.ResponseID
+	if responseID == "" {
+		responseID = fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano())
+	}
+	servedModel := resp.ModelVersion
+	if servedModel == "" {
+		servedModel = model
 	}
 
 	diveResponse := &llm.Response{
-		ID:      fmt.Sprintf("google_%d", candidate.Index),
-		Model:   model,
+		ID:      responseID,
+		Model:   servedModel,
 		Role:    llm.Assistant,
 		Content: content,
 		Type:    "text",
@@ -85,17 +98,136 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	return diveResponse, nil
 }
 
-// convertUsageMetadata converts genai usage metadata to llm.Usage, carrying
-// cached-content and thoughts token counts where the API reports them.
-func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) llm.Usage {
-	prompt := max(0, int(metadata.PromptTokenCount))
-	cached := min(max(0, int(metadata.CachedContentTokenCount)), prompt)
-	return llm.Usage{
-		InputTokens:          prompt - cached,
-		OutputTokens:         int(metadata.CandidatesTokenCount),
-		CacheReadInputTokens: cached,
-		ReasoningTokens:      int(metadata.ThoughtsTokenCount),
+// convertUsageMetadata converts Gemini's subset-shaped prompt usage to Dive's
+// disjoint buckets. Gemini bills thoughts as output and tool results as input,
+// so both are included in their respective aggregate buckets. If Google's
+// aggregate does not reconcile, component counts remain available while cost
+// estimation fails closed.
+func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) (llm.Usage, error) {
+	if metadata == nil {
+		return llm.Usage{}, nil
 	}
+	prompt := int(metadata.PromptTokenCount)
+	cached := int(metadata.CachedContentTokenCount)
+	candidates := int(metadata.CandidatesTokenCount)
+	thoughts := int(metadata.ThoughtsTokenCount)
+	toolUse := int(metadata.ToolUsePromptTokenCount)
+	total := int(metadata.TotalTokenCount)
+	for name, count := range map[string]int{
+		"prompt": prompt, "cached": cached, "candidates": candidates,
+		"thoughts": thoughts, "tool_use": toolUse, "total": total,
+	} {
+		if count < 0 {
+			return llm.Usage{}, fmt.Errorf("invalid negative Gemini %s token count: %d", name, count)
+		}
+	}
+	if cached > prompt {
+		return llm.Usage{}, fmt.Errorf("invalid Gemini cached token count %d above prompt count %d", cached, prompt)
+	}
+	usage := llm.Usage{
+		InputTokens:                         prompt - cached + toolUse,
+		OutputTokens:                        candidates + thoughts,
+		CacheReadInputTokens:                cached,
+		ToolUseInputTokens:                  toolUse,
+		ReasoningTokens:                     thoughts,
+		CacheCreationInputTokensUnavailable: true,
+	}
+	expectedTotal := prompt + candidates + thoughts + toolUse
+	if total != expectedTotal {
+		usage.CostEstimateUnavailable = true
+	}
+	promptDetails, promptComplete, err := modalityCounts(metadata.PromptTokensDetails, prompt, "prompt")
+	if err != nil {
+		return llm.Usage{}, err
+	}
+	cacheDetails, cacheComplete, err := modalityCounts(metadata.CacheTokensDetails, cached, "cache")
+	if err != nil {
+		return llm.Usage{}, err
+	}
+	candidateDetails, candidatesComplete, err := modalityCounts(metadata.CandidatesTokensDetails, candidates, "candidates")
+	if err != nil {
+		return llm.Usage{}, err
+	}
+	toolDetails, toolComplete, err := modalityCounts(metadata.ToolUsePromptTokensDetails, toolUse, "tool_use")
+	if err != nil {
+		return llm.Usage{}, err
+	}
+	inputComplete := promptComplete && cacheComplete && toolComplete
+	usage.InputModalityTokenDetailsIncomplete = !inputComplete
+	usage.CacheReadModalityTokenDetailsIncomplete = !inputComplete
+	usage.OutputModalityTokenDetailsIncomplete = !candidatesComplete
+	if inputComplete || candidatesComplete {
+		usage.ModalityTokens = make(map[string]llm.ModalityTokenUsage)
+	}
+	if inputComplete {
+		modalities := make(map[string]struct{})
+		for _, counts := range []map[string]int{promptDetails, cacheDetails, toolDetails} {
+			for modality := range counts {
+				modalities[modality] = struct{}{}
+			}
+		}
+		for modality := range modalities {
+			if cacheDetails[modality] > promptDetails[modality] {
+				return llm.Usage{}, fmt.Errorf(
+					"invalid Gemini %s cached token count %d above prompt modality count %d",
+					modality, cacheDetails[modality], promptDetails[modality],
+				)
+			}
+			usage.ModalityTokens[modality] = llm.ModalityTokenUsage{
+				InputTokens:          promptDetails[modality] - cacheDetails[modality] + toolDetails[modality],
+				CacheReadInputTokens: cacheDetails[modality],
+			}
+		}
+	}
+	if candidatesComplete {
+		for modality, count := range candidateDetails {
+			current := usage.ModalityTokens[modality]
+			current.OutputTokens += count
+			usage.ModalityTokens[modality] = current
+		}
+		// Gemini bills thinking tokens at the text-output rate. The API does
+		// not include them in candidatesTokensDetails, so assign them to text
+		// explicitly to keep the modality buckets equal to OutputTokens.
+		if thoughts > 0 {
+			current := usage.ModalityTokens["text"]
+			current.OutputTokens += thoughts
+			usage.ModalityTokens["text"] = current
+		}
+	}
+	if len(usage.ModalityTokens) == 0 {
+		usage.ModalityTokens = nil
+	}
+	return usage, nil
+}
+
+func modalityCounts(details []*genai.ModalityTokenCount, total int, label string) (map[string]int, bool, error) {
+	if total == 0 {
+		return nil, true, nil
+	}
+	if len(details) == 0 {
+		return nil, false, nil
+	}
+	counts := make(map[string]int, len(details))
+	sum := 0
+	for _, detail := range details {
+		if detail == nil || detail.TokenCount < 0 {
+			return nil, false, fmt.Errorf("invalid Gemini %s modality token detail", label)
+		}
+		modality := strings.ToLower(string(detail.Modality))
+		if detail.Modality == genai.MediaModalityUnspecified || modality == "" {
+			return nil, false, nil
+		}
+		count := int(detail.TokenCount)
+		counts[modality] += count
+		sum += count
+	}
+	if sum != total {
+		return nil, false, fmt.Errorf(
+			"gemini %s modality tokens do not reconcile: details=%d aggregate=%d",
+			label, sum, total,
+		)
+	}
+	return counts, true, nil
 }
 
 // convertFinishReason maps a genai finish reason to Dive's stop reason
@@ -423,6 +555,9 @@ func convertPropertyToGenAI(prop *schema.Property) *genai.Schema {
 // buildGenAIGenerateConfig creates genai.GenerateContentConfig from Request
 func buildGenAIGenerateConfig(request *Request) (*genai.GenerateContentConfig, error) {
 	genConfig := &genai.GenerateContentConfig{}
+	if request.ServiceTier != "" {
+		genConfig.ServiceTier = request.ServiceTier
+	}
 	if request.Temperature != nil {
 		temp := float32(*request.Temperature)
 		genConfig.Temperature = &temp

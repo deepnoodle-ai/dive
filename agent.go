@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/google/uuid"
 )
 
 const (
@@ -299,6 +300,7 @@ type Agent struct {
 	systemPrompt          string
 	session               Session
 	tracer                Tracer
+	promptCacheKey        string
 
 	// mu protects model and systemPrompt for concurrent access via
 	// SetModel/SetSystemPrompt while CreateResponse is running.
@@ -372,6 +374,7 @@ func NewAgent(opts AgentOptions) (*Agent, error) {
 		session:               opts.Session,
 		toolsets:              opts.Toolsets,
 		tracer:                opts.Tracer,
+		promptCacheKey:        newPromptCacheKeyForAgent(),
 	}
 	tools := make([]Tool, len(opts.Tools))
 	if len(opts.Tools) > 0 {
@@ -517,6 +520,13 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	sess := options.Session
 	if sess == nil {
 		sess = a.session
+	}
+	promptCacheKey := a.promptCacheKey
+	if sess != nil {
+		promptCacheKey = promptCacheKeyForSession(sess.ID())
+	}
+	if options.PromptCacheKey != "" {
+		promptCacheKey = options.PromptCacheKey
 	}
 
 	// Serialize concurrent CreateResponse calls that share a session ID.
@@ -914,7 +924,7 @@ func (a *Agent) CreateResponse(ctx context.Context, opts ...CreateResponseOption
 	}
 
 generateLoop:
-	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, eventCallback, model)
+	genResult, err := a.generate(ctx, hctx, messages, systemPrompt, promptCacheKey, eventCallback, model)
 	if err != nil {
 		logger.Error("failed to generate response", "error", err)
 		// generate wraps loop failures in *GenerationError scoped to that
@@ -1799,7 +1809,7 @@ func (a *Agent) prepareMessages(options CreateResponseOptions) []*llm.Message {
 // generate runs the LLM generation and tool execution loop. It handles the
 // interaction between the agent and the LLM, including tool calls. Returns the
 // final LLM response, updated messages, and any error that occurred.
-func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, callback EventCallback, model llm.LLM) (result *generateResult, err error) {
+func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm.Message, systemPrompt string, promptCacheKey string, callback EventCallback, model llm.LLM) (result *generateResult, err error) {
 
 	// Contains the message history we pass to the LLM
 	updatedMessages := make([]*llm.Message, len(messages))
@@ -1917,8 +1927,8 @@ func (a *Agent) generate(ctx context.Context, hctx *HookContext, messages []*llm
 
 		// Build per-iteration LLM options
 		baseOpts := a.getGenerationOptions(systemPrompt, resolvedTools)
-		if hctx.Session != nil {
-			baseOpts = append(baseOpts, llm.WithPromptCacheKey(promptCacheKeyForSession(hctx.Session.ID())))
+		if promptCacheKey != "" {
+			baseOpts = append(baseOpts, llm.WithPromptCacheKey(promptCacheKey))
 		}
 		iterOpts := append(slices.Clone(baseOpts), llm.WithMessages(updatedMessages...))
 		if lastIteration {
@@ -2902,6 +2912,13 @@ func (a *Agent) getGenerationOptions(systemPrompt string, tools []Tool) []llm.Op
 func promptCacheKeyForSession(sessionID string) string {
 	sum := sha256.Sum256([]byte(sessionID))
 	return fmt.Sprintf("dive-session-%x", sum[:16])
+}
+
+// newPromptCacheKeyForAgent supplies a stable routing key to agents without a
+// Session. A random per-instance value avoids sending AgentOptions.ID and keeps
+// independently constructed agents on separate cache routes.
+func newPromptCacheKeyForAgent() string {
+	return "dive-agent-" + uuid.NewString()
 }
 
 type generateResult struct {

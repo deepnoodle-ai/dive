@@ -31,9 +31,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   the stale GPT-4o row to the current $2.50 input, $1.25 cached-input, and
   $10 output rates per million tokens. Dated provider model IDs now resolve to
   their stable catalog ID so live OpenAI responses retain `Cost.Total`.
-- **Grok agent sessions now send their stable `prompt_cache_key`.** The Grok
+- **Grok agents now send a stable `prompt_cache_key`.** Session-backed agents
+  derive a private key from the session ID; stateless agents use an
+  agent-instance key and can provide a conversation key per call. The Grok
   catalog also uses xAI's current cached-input rates and applies its input,
   cached-input, and output long-context tier at 200K total input tokens.
+- **Gemini usage and cost estimates now reconcile to Google's billing shape.**
+  Thinking and tool-use tokens are included, multimodal and Vertex regional
+  rates are honored, all Pro rates switch above 200K input, and unsupported
+  tiers or incomplete price dimensions remain explicitly unpriced. A provider
+  aggregate mismatch preserves completed content and component counts while
+  marking the cost estimate unavailable.
+- **OpenRouter costs now use the authoritative charge returned in `usage.cost`.**
+  This covers arbitrary routed models and provider-specific cache/tool charges
+  without depending on a necessarily incomplete static price snapshot. A null
+  usage object is treated as missing telemetry rather than a measured zero.
 
 ## [1.20.0] - 2026-08-09
 

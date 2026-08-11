@@ -26,6 +26,11 @@ func TestOpenRouterIntegration(t *testing.T) {
 	assert.NotNil(t, response)
 
 	assert.Equal(t, llm.Assistant, response.Role)
+	assert.True(t, response.Usage.TotalInputTokens()+response.Usage.OutputTokens > 0)
+	assert.NotNil(t, response.Usage.Cost)
+	assert.Equal(t, llm.CostSourceProviderReported, response.Usage.Cost.Source)
+	assert.Equal(t, "USD", response.Usage.Cost.Currency)
+	assert.True(t, response.Usage.Cost.Total >= 0)
 
 	ok := strings.Contains(strings.ToLower(response.Message().Text()), "hello")
 	assert.True(t, ok)

@@ -181,8 +181,25 @@ type Usage struct {
 	PromptTokens            int                      `json:"prompt_tokens"`
 	CompletionTokens        int                      `json:"completion_tokens"`
 	TotalTokens             int                      `json:"total_tokens"`
+	Cost                    *float64                 `json:"cost,omitempty"`
 	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details,omitempty"`
+	present                 bool
+}
+
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		*u = Usage{}
+		return nil
+	}
+	type alias Usage
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = Usage(decoded)
+	u.present = true
+	return nil
 }
 
 // PromptTokensDetails breaks down the wire prompt token count. CachedTokens and

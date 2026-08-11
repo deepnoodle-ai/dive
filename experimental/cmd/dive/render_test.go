@@ -16,6 +16,14 @@ func TestFormatTokenCount(t *testing.T) {
 	assert.Equal(t, "1.0M", formatTokenCount(1000000))
 }
 
+func TestFormatCacheCreationTokens(t *testing.T) {
+	assert.Equal(t, "0", formatCacheCreationTokens(&llm.Usage{}), "reported zero should remain zero")
+	assert.Equal(t, "2.0k", formatCacheCreationTokens(&llm.Usage{CacheCreationInputTokens: 2000}))
+	assert.Equal(t, "—", formatCacheCreationTokens(&llm.Usage{
+		CacheCreationInputTokensUnavailable: true,
+	}), "an unavailable provider metric must not look like a measured zero")
+}
+
 func TestCacheHitRate(t *testing.T) {
 	// Healthy: mostly reads.
 	rate, ok := cacheHitRate(&llm.Usage{CacheReadInputTokens: 13500, CacheCreationInputTokens: 500})
@@ -49,6 +57,23 @@ func TestTokensPanelView_NilWhenNoUsage(t *testing.T) {
 	app := newTestApp()
 	app.interactionUsage = &llm.Usage{}
 	assert.Nil(t, app.tokensPanelView(), "panel should be nil before any tokens are recorded")
+}
+
+func TestTokensPanelView_ShowsUnavailableCacheWritesWithoutTokenCounts(t *testing.T) {
+	app := newTestApp()
+	app.interactionUsage = &llm.Usage{CacheCreationInputTokensUnavailable: true}
+
+	panel := app.tokensPanelView()
+	assert.NotNil(t, panel)
+	text := tui.Sprint(panel, tui.WithWidth(100))
+	assert.True(t, strings.Contains(text, "cache write"))
+	assert.True(t, strings.Contains(text, "—"))
+
+	report := app.usageReportView()
+	assert.NotNil(t, report)
+	reportText := tui.Sprint(report, tui.WithWidth(100))
+	assert.True(t, strings.Contains(reportText, "cache write"))
+	assert.True(t, strings.Contains(reportText, "—"))
 }
 
 func TestTokensPanelView_ShowsCacheReadsWritesAndHitRate(t *testing.T) {

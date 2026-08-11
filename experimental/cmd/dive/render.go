@@ -114,15 +114,23 @@ func formatTokenCount(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-// hasUsage returns true if the usage has any non-zero token counts.
+func formatCacheCreationTokens(u *llm.Usage) string {
+	if u.CacheCreationInputTokensUnavailable {
+		return "—"
+	}
+	return formatTokenCount(u.CacheCreationInputTokens)
+}
+
+// hasUsage returns true if the usage has any recorded token metric.
 func hasUsage(u *llm.Usage) bool {
-	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 ||
+		u.CacheCreationInputTokens > 0 || u.CacheCreationInputTokensUnavailable
 }
 
 // tokensPanelView renders a clearly-labeled token + cache breakdown table, one
-// row per scope (turn / session). It makes cache reads (hits, cheap) and cache
-// writes (misses, premium) explicit and adds a per-scope hit rate, so cache
-// thrash is immediately visible. Returns nil before the first response.
+// row per scope (turn / session). It makes cache reads (hits) and reported
+// cache writes explicit and adds a per-scope hit rate. Returns nil before the
+// first response.
 //
 //	tokens       input   cache read   cache write   output    hit
 //	turn          1.2k        13.5k          0.5k       53     96%
@@ -140,8 +148,8 @@ func (a *App) tokensPanelView() tui.View {
 	headerStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 110, B: 120})
 	scopeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 160, G: 160, B: 170}).WithBold()
 	valStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 220, G: 220, B: 230}).WithBold()
-	readStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 200, B: 130}).WithBold() // green: cheap hits
-	writeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 225, G: 175, B: 80}).WithBold() // amber: premium writes
+	readStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 110, G: 200, B: 130}).WithBold() // green: cache hits
+	writeStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 225, G: 175, B: 80}).WithBold() // amber: cache writes
 	costStyle := tui.NewStyle().WithFgRGB(tui.RGB{R: 120, G: 205, B: 150}).WithBold() // green: money
 
 	const (
@@ -182,7 +190,7 @@ func (a *App) tokensPanelView() tui.View {
 			left(labelW, " "+label, scopeStyle),
 			right(inW, formatTokenCount(u.InputTokens), valStyle),
 			right(readW, formatTokenCount(u.CacheReadInputTokens), readStyle),
-			right(writeW, formatTokenCount(u.CacheCreationInputTokens), writeStyle),
+			right(writeW, formatCacheCreationTokens(u), writeStyle),
 			right(outW, formatTokenCount(u.OutputTokens), valStyle),
 		}
 		if showReasoning {
@@ -238,8 +246,8 @@ func cacheHitStyle(u *llm.Usage, ok bool) tui.Style {
 	}
 }
 
-// costString renders a usage's estimated total cost, or an em dash when cost is
-// unknown (no pricing for the model) — distinct from a known $0 (local models).
+// costString renders a usage's total cost, or an em dash when cost is unknown.
+// This keeps an unknown distinct from a known $0 provider charge.
 func costString(u *llm.Usage) string {
 	if u.Cost == nil {
 		return "—"

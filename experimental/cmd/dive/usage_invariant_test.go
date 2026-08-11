@@ -133,12 +133,13 @@ func TestProviderUsageBucketsAreDisjoint(t *testing.T) {
 						PromptTokenCount:        100,
 						CandidatesTokenCount:    20,
 						CachedContentTokenCount: 70,
+						TotalTokenCount:         120,
 					},
 				}
 				iterator := googleprovider.NewStreamIteratorFromSeq(context.Background(), func(yield func(*genai.GenerateContentResponse, error) bool) {
 					yield(response, nil)
 				}, googleprovider.ModelGemini36Flash)
-				defer iterator.Close()
+				t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
 				accumulator := llm.NewResponseAccumulator()
 				for iterator.Next() {
 					assert.NoError(t, accumulator.AddEvent(iterator.Event()))

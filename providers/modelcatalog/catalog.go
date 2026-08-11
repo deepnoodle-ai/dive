@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/url"
 	"regexp"
@@ -82,20 +83,24 @@ type Pricing struct {
 
 // TextPrice uses decimal strings so source prices survive JSON and code generation exactly.
 type TextPrice struct {
-	Model                        string `json:"model"`
-	InputPrice                   string `json:"input_price_per_1m_tokens"`
-	OutputPrice                  string `json:"output_price_per_1m_tokens"`
-	LongContextThreshold         int    `json:"long_context_threshold_tokens,omitempty"`
-	LongContextInputPrice        string `json:"long_context_input_price_per_1m_tokens,omitempty"`
-	LongContextCacheReadPrice    string `json:"long_context_cache_read_price_per_1m_tokens,omitempty"`
-	LongContextOutputPrice       string `json:"long_context_output_price_per_1m_tokens,omitempty"`
-	CacheReadPrice               string `json:"cache_read_price_per_1m_tokens,omitempty"`
-	CacheReadPriceAboveThreshold string `json:"cache_read_price_above_threshold_per_1m_tokens,omitempty"`
-	CacheReadPriceThreshold      int    `json:"cache_read_price_threshold_tokens,omitempty"`
-	CacheWritePrice              string `json:"cache_write_price_per_1m_tokens,omitempty"`
-	Currency                     string `json:"currency"`
-	UpdatedAt                    string `json:"updated_at"`
-	Note                         string `json:"note,omitempty"`
+	Model                        string            `json:"model"`
+	InputPrice                   string            `json:"input_price_per_1m_tokens"`
+	OutputPrice                  string            `json:"output_price_per_1m_tokens"`
+	LongContextThreshold         int               `json:"long_context_threshold_tokens,omitempty"`
+	LongContextInputPrice        string            `json:"long_context_input_price_per_1m_tokens,omitempty"`
+	LongContextCacheReadPrice    string            `json:"long_context_cache_read_price_per_1m_tokens,omitempty"`
+	LongContextOutputPrice       string            `json:"long_context_output_price_per_1m_tokens,omitempty"`
+	CacheReadPrice               string            `json:"cache_read_price_per_1m_tokens,omitempty"`
+	CacheReadPriceAboveThreshold string            `json:"cache_read_price_above_threshold_per_1m_tokens,omitempty"`
+	CacheReadPriceThreshold      int               `json:"cache_read_price_threshold_tokens,omitempty"`
+	CacheWritePrice              string            `json:"cache_write_price_per_1m_tokens,omitempty"`
+	InputPriceByModality         map[string]string `json:"input_price_per_1m_tokens_by_modality,omitempty"`
+	OutputPriceByModality        map[string]string `json:"output_price_per_1m_tokens_by_modality,omitempty"`
+	CacheReadPriceByModality     map[string]string `json:"cache_read_price_per_1m_tokens_by_modality,omitempty"`
+	NonGlobalPriceMultiplier     string            `json:"non_global_price_multiplier,omitempty"`
+	Currency                     string            `json:"currency"`
+	UpdatedAt                    string            `json:"updated_at"`
+	Note                         string            `json:"note,omitempty"`
 }
 
 // ImagePrice describes per-image list pricing.
@@ -161,6 +166,16 @@ func (c Catalog) Clone() Catalog {
 	}
 	clone.Pricing.Text = slices.Clone(c.Pricing.Text)
 	clone.Pricing.FastText = slices.Clone(c.Pricing.FastText)
+	for _, prices := range [][]TextPrice{
+		clone.Pricing.Text,
+		clone.Pricing.FastText,
+	} {
+		for i := range prices {
+			prices[i].InputPriceByModality = maps.Clone(prices[i].InputPriceByModality)
+			prices[i].OutputPriceByModality = maps.Clone(prices[i].OutputPriceByModality)
+			prices[i].CacheReadPriceByModality = maps.Clone(prices[i].CacheReadPriceByModality)
+		}
+	}
 	clone.Pricing.Image = slices.Clone(c.Pricing.Image)
 	clone.Pricing.Embedding = slices.Clone(c.Pricing.Embedding)
 	return clone
@@ -317,9 +332,30 @@ func validateTextPrices(name string, prices []TextPrice) error {
 			"cache_read_price_per_1m_tokens":                 price.CacheReadPrice,
 			"cache_read_price_above_threshold_per_1m_tokens": price.CacheReadPriceAboveThreshold,
 			"cache_write_price_per_1m_tokens":                price.CacheWritePrice,
+			"non_global_price_multiplier":                    price.NonGlobalPriceMultiplier,
 		} {
 			if err := validateDecimal(name, price.Model, field, value, field == "input_price_per_1m_tokens" || field == "output_price_per_1m_tokens"); err != nil {
 				return err
+			}
+		}
+		for field, prices := range map[string]map[string]string{
+			"input_price_per_1m_tokens_by_modality":      price.InputPriceByModality,
+			"output_price_per_1m_tokens_by_modality":     price.OutputPriceByModality,
+			"cache_read_price_per_1m_tokens_by_modality": price.CacheReadPriceByModality,
+		} {
+			for modality, value := range prices {
+				if modality == "" || strings.ToLower(modality) != modality {
+					return fmt.Errorf("%s pricing for %s has an invalid modality %q in %s", name, price.Model, modality, field)
+				}
+				if err := validateDecimal(name, price.Model, field+"/"+modality, value, true); err != nil {
+					return err
+				}
+			}
+		}
+		if price.NonGlobalPriceMultiplier != "" {
+			multiplier, _ := strconv.ParseFloat(price.NonGlobalPriceMultiplier, 64)
+			if multiplier <= 0 {
+				return fmt.Errorf("%s pricing for %s requires a positive non-global price multiplier", name, price.Model)
 			}
 		}
 		hasThreshold := price.CacheReadPriceThreshold != 0

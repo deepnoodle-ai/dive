@@ -263,6 +263,93 @@ func TestAgentPassesStablePromptCacheKeyForSession(t *testing.T) {
 	assert.Equal(t, promptCacheKeyForSession(sess.ID()), got)
 }
 
+func TestAgentPassesStablePromptCacheKeyWithoutSession(t *testing.T) {
+	var got []string
+	model := &mockLLM{
+		generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
+			cfg := &llm.Config{}
+			cfg.Apply(opts...)
+			got = append(got, cfg.PromptCacheKey)
+			return &llm.Response{
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "done"}},
+				StopReason: "stop",
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+	agent, err := NewAgent(AgentOptions{Model: model})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(context.Background(), WithInput("first"))
+	assert.NoError(t, err)
+	_, err = agent.CreateResponse(context.Background(), WithInput("second"))
+	assert.NoError(t, err)
+
+	assert.Len(t, got, 2)
+	assert.NotEqual(t, "", got[0])
+	assert.Equal(t, got[0], got[1])
+}
+
+func TestAgentsWithoutSessionsUseDistinctPromptCacheKeys(t *testing.T) {
+	var got []string
+	model := &mockLLM{
+		generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
+			cfg := &llm.Config{}
+			cfg.Apply(opts...)
+			got = append(got, cfg.PromptCacheKey)
+			return &llm.Response{
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "done"}},
+				StopReason: "stop",
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+	first, err := NewAgent(AgentOptions{Model: model})
+	assert.NoError(t, err)
+	second, err := NewAgent(AgentOptions{Model: model})
+	assert.NoError(t, err)
+
+	_, err = first.CreateResponse(context.Background(), WithInput("first"))
+	assert.NoError(t, err)
+	_, err = second.CreateResponse(context.Background(), WithInput("second"))
+	assert.NoError(t, err)
+
+	assert.Len(t, got, 2)
+	assert.NotEqual(t, got[0], got[1])
+}
+
+func TestWithPromptCacheKeyOverridesAgentDefault(t *testing.T) {
+	var got string
+	model := &mockLLM{
+		generateFunc: func(_ context.Context, opts ...llm.Option) (*llm.Response, error) {
+			cfg := &llm.Config{}
+			cfg.Apply(opts...)
+			got = cfg.PromptCacheKey
+			return &llm.Response{
+				Model:      "test-model",
+				Role:       llm.Assistant,
+				Content:    []llm.Content{&llm.TextContent{Text: "done"}},
+				StopReason: "stop",
+			}, nil
+		},
+		nameFunc: func() string { return "test-model" },
+	}
+	agent, err := NewAgent(AgentOptions{Model: model, Session: &seededSession{id: "session-123"}})
+	assert.NoError(t, err)
+
+	_, err = agent.CreateResponse(
+		context.Background(),
+		WithInput("hello"),
+		WithPromptCacheKey("application-conversation-456"),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "application-conversation-456", got)
+}
+
 // TestPreIterationCanRewriteMessages verifies that a PreIteration hook can
 // replace the working message set mid-turn (the seam mid-turn compaction relies
 // on): the next LLM iteration sees the rewritten messages, while the response's

@@ -29,6 +29,7 @@ func TestPricingInfoCostOf(t *testing.T) {
 	assert.Equal(t, 36.75, c.Total)
 	assert.Equal(t, "USD", c.Currency)
 	assert.Equal(t, "test-model", c.Model)
+	assert.Equal(t, CostSourceListPriceEstimate, c.Source)
 }
 
 func TestPricingInfoCostOf_NilUsage(t *testing.T) {
@@ -72,9 +73,67 @@ func TestPricingInfoCostOf_LongContextBoundary(t *testing.T) {
 	assert.Equal(t, 0.6/1_000_000, long.CacheRead)
 }
 
+func TestPricingInfoCostOf_ModalityOverrides(t *testing.T) {
+	p := PricingInfo{
+		InputPrice:     1,
+		OutputPrice:    2,
+		CacheReadPrice: 0.1,
+		InputPriceByModality: map[string]float64{
+			"audio": 4,
+		},
+		OutputPriceByModality: map[string]float64{
+			"audio": 8,
+		},
+		CacheReadPriceByModality: map[string]float64{
+			"audio": 0.4,
+		},
+	}
+	u := &Usage{
+		InputTokens:          2_000_000,
+		OutputTokens:         2_000_000,
+		CacheReadInputTokens: 2_000_000,
+		ModalityTokens: map[string]ModalityTokenUsage{
+			"audio": {InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadInputTokens: 1_000_000},
+		},
+	}
+
+	cost := p.CostOf(u)
+	assert.InDelta(t, 5.0, cost.Input, 1e-12)
+	assert.InDelta(t, 10.0, cost.Output, 1e-12)
+	assert.InDelta(t, 0.5, cost.CacheRead, 1e-12)
+	assert.InDelta(t, 15.5, cost.Total, 1e-12)
+}
+
+func TestPricingInfoScaledDeepCopiesPrices(t *testing.T) {
+	p := PricingInfo{
+		InputPrice:                   1,
+		LongContextInputPrice:        2,
+		CacheReadPrice:               0.1,
+		NonGlobalPriceMultiplier:     1.1,
+		InputPriceByModality:         map[string]float64{"audio": 4},
+		CacheReadPriceByModality:     map[string]float64{"audio": 0.4},
+		OutputPriceByModality:        map[string]float64{"audio": 8},
+		LongContextCacheReadPrice:    0.2,
+		LongContextOutputPrice:       6,
+		CacheReadPriceAboveThreshold: 0.3,
+		CacheWritePrice:              1.25,
+	}
+
+	factor := 1.1
+	scaled := p.Scaled(factor)
+	assert.Equal(t, p.InputPrice*factor, scaled.InputPrice)
+	assert.Equal(t, p.LongContextInputPrice*factor, scaled.LongContextInputPrice)
+	assert.Equal(t, p.InputPriceByModality["audio"]*factor, scaled.InputPriceByModality["audio"])
+	assert.Equal(t, p.CacheReadPriceByModality["audio"]*factor, scaled.CacheReadPriceByModality["audio"])
+	assert.Equal(t, p.OutputPriceByModality["audio"]*factor, scaled.OutputPriceByModality["audio"])
+	assert.Equal(t, 0.0, scaled.NonGlobalPriceMultiplier)
+	scaled.InputPriceByModality["audio"] = 99
+	assert.Equal(t, 4.0, p.InputPriceByModality["audio"])
+}
+
 func TestUsageCostAddAndCopy(t *testing.T) {
-	a := &Usage{InputTokens: 100, Cost: &Cost{Input: 1.0, Total: 1.0, Currency: "USD"}}
-	b := &Usage{InputTokens: 50, Cost: &Cost{Input: 0.5, Output: 0.25, Total: 0.75}}
+	a := &Usage{InputTokens: 100, Cost: &Cost{Input: 1.0, Total: 1.0, Currency: "USD", Model: "model-a", Source: CostSourceProviderReported, BreakdownUnavailable: true}}
+	b := &Usage{InputTokens: 50, Cost: &Cost{Input: 0.5, Output: 0.25, Total: 0.75, Model: "model-b", Source: CostSourceListPriceEstimate}}
 
 	a.Add(b)
 	assert.Equal(t, 150, a.InputTokens)
@@ -83,6 +142,9 @@ func TestUsageCostAddAndCopy(t *testing.T) {
 	assert.Equal(t, 0.25, a.Cost.Output)
 	assert.Equal(t, 1.75, a.Cost.Total)
 	assert.Equal(t, "USD", a.Cost.Currency)
+	assert.Equal(t, CostModelMixed, a.Cost.Model)
+	assert.Equal(t, CostSourceMixed, a.Cost.Source)
+	assert.True(t, a.Cost.BreakdownUnavailable)
 
 	// Copy is deep: mutating the copy must not affect the original.
 	cp := a.Copy()
@@ -95,9 +157,11 @@ func TestUsageAdd_NilCostSummand(t *testing.T) {
 	a.Add(&Usage{InputTokens: 5}) // neither has cost
 	assert.Nil(t, a.Cost, "no cost should remain nil")
 
-	a.Add(&Usage{InputTokens: 5, Cost: &Cost{Total: 2.0}})
+	a.Add(&Usage{InputTokens: 5, Cost: &Cost{Total: 2.0, Currency: "USD", Model: "model-a"}})
 	assert.NotNil(t, a.Cost)
 	assert.Equal(t, 2.0, a.Cost.Total)
+	assert.Equal(t, "USD", a.Cost.Currency)
+	assert.Equal(t, "model-a", a.Cost.Model)
 }
 
 func TestPopulateCost_ResolverRoundTrip(t *testing.T) {
@@ -128,6 +192,14 @@ func TestPopulateCost_ResolverRoundTrip(t *testing.T) {
 	u2 := &Usage{InputTokens: 1_000_000}
 	PopulateCost("known", true, u2)
 	assert.Equal(t, 10.0, u2.Cost.Total)
+
+	// Provider-computed and explicitly unavailable costs must not be replaced.
+	providerCost := &Usage{InputTokens: 1_000_000, Cost: &Cost{Total: 99}}
+	PopulateCost("known", false, providerCost)
+	assert.Equal(t, 99.0, providerCost.Cost.Total)
+	unavailable := &Usage{InputTokens: 1_000_000, CostEstimateUnavailable: true}
+	PopulateCost("known", false, unavailable)
+	assert.Nil(t, unavailable.Cost)
 }
 
 func TestPopulateCost_NoResolver(t *testing.T) {

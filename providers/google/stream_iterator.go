@@ -18,9 +18,11 @@ import (
 // calls are each surfaced as their own tool_use block, and the final
 // message_delta carries usage and the stop reason.
 type StreamIterator struct {
-	ctx        context.Context
-	model      string
-	responseID string
+	ctx            context.Context
+	model          string
+	pricingContext googlePricingContext
+	responseID     string
+	message        *llm.Response
 
 	// Streaming state
 	streamSeq    iter.Seq2[*genai.GenerateContentResponse, error]
@@ -45,10 +47,15 @@ type StreamIterator struct {
 
 // NewStreamIteratorFromSeq creates a new StreamIterator from a streaming sequence
 func NewStreamIteratorFromSeq(ctx context.Context, streamSeq iter.Seq2[*genai.GenerateContentResponse, error], model string) *StreamIterator {
+	return newStreamIteratorFromSeq(ctx, streamSeq, model, googlePricingContext{})
+}
+
+func newStreamIteratorFromSeq(ctx context.Context, streamSeq iter.Seq2[*genai.GenerateContentResponse, error], model string, pricingContext googlePricingContext) *StreamIterator {
 	return &StreamIterator{
 		ctx:              ctx,
 		streamSeq:        streamSeq,
 		model:            model,
+		pricingContext:   pricingContext,
 		responseID:       fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano()),
 		textBlockIndex:   -1,
 		thinkingBlockIdx: -1,
@@ -99,7 +106,11 @@ func (s *StreamIterator) Next() bool {
 		if !hasMore {
 			// Stream ended: close any open block and emit the final
 			// message_delta (usage + stop reason) and message_stop events.
-			s.queueFinalEvents()
+			if err := s.queueFinalEvents(); err != nil {
+				s.err = err
+				s.done = true
+				return false
+			}
 			s.done = true
 			continue
 		}
@@ -132,20 +143,30 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 
 	if response.ResponseID != "" {
 		s.responseID = response.ResponseID
+		if s.message != nil {
+			s.message.ID = response.ResponseID
+		}
+	}
+	if response.ModelVersion != "" {
+		s.model = response.ModelVersion
+		if s.message != nil {
+			s.message.Model = response.ModelVersion
+		}
 	}
 
 	// Send message start event first
 	if !s.messageStartSent {
 		s.messageStartSent = true
+		s.message = &llm.Response{
+			ID:      s.responseID,
+			Type:    "message",
+			Role:    llm.Assistant,
+			Model:   s.model,
+			Content: []llm.Content{},
+		}
 		s.eventQueue = append(s.eventQueue, &llm.Event{
-			Type: llm.EventTypeMessageStart,
-			Message: &llm.Response{
-				ID:      s.responseID,
-				Type:    "message",
-				Role:    llm.Assistant,
-				Model:   s.model,
-				Content: []llm.Content{},
-			},
+			Type:    llm.EventTypeMessageStart,
+			Message: s.message,
 		})
 	}
 
@@ -318,10 +339,10 @@ func (s *StreamIterator) closeTextBlock() {
 
 // queueFinalEvents closes any open content block and emits message_delta
 // (carrying usage and the stop reason) followed by message_stop.
-func (s *StreamIterator) queueFinalEvents() {
+func (s *StreamIterator) queueFinalEvents() error {
 	if !s.messageStartSent {
 		// Stream ended without any chunks; nothing to finalize.
-		return
+		return nil
 	}
 	s.closeThinkingBlock()
 	s.closeTextBlock()
@@ -335,12 +356,17 @@ func (s *StreamIterator) queueFinalEvents() {
 		Delta: delta,
 	}
 	if s.usage != nil {
-		usage := convertUsageMetadata(s.usage)
+		usage, err := convertUsageMetadata(s.usage)
+		if err != nil {
+			return err
+		}
+		populateGoogleCost(s.model, s.usage, &usage, s.pricingContext)
 		event.Usage = &usage
 	}
 	s.eventQueue = append(s.eventQueue, event, &llm.Event{
 		Type: llm.EventTypeMessageStop,
 	})
+	return nil
 }
 
 func (s *StreamIterator) Event() *llm.Event {

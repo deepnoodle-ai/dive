@@ -72,6 +72,9 @@ type Provider struct {
 	maxRetries    int
 	retryBaseWait time.Duration
 	systemRole    string
+	// reportedCostCurrency opts an OpenAI-compatible provider into trusting the
+	// authoritative usage.cost value it returns on every response.
+	reportedCostCurrency string
 }
 
 // New creates a new OpenAI Completions provider with the given options.
@@ -205,15 +208,21 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		}
 	}
 
+	responseModel := p.model
+	if p.reportedCostCurrency != "" && result.Model != "" {
+		responseModel = result.Model
+	}
 	response := &llm.Response{
 		ID:      result.ID,
-		Model:   p.model,
+		Model:   responseModel,
 		Role:    llm.Assistant,
 		Content: contentBlocks,
 		Usage:   result.Usage.toLLMUsage(),
 	}
+	p.applyReportedUsageCost(result.Usage, &response.Usage, response.Model)
 
 	llm.PopulateCost(response.Model, response.Usage.Speed == string(llm.SpeedFast), &response.Usage)
+	p.markReportedCostUnavailable(result.Usage, &response.Usage)
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.AfterGenerate,
@@ -299,18 +308,53 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			return nil, providers.NewError(resp.StatusCode, string(body))
 		}
 		return &StreamIterator{
-			body:              resp.Body,
-			reader:            bufio.NewReader(resp.Body),
-			contentBlocks:     map[int]*ContentBlockAccumulator{},
-			toolCalls:         map[int]*ToolCallAccumulator{},
-			toolCallIndices:   map[int]int{},
-			prefill:           config.Prefill,
-			prefillClosingTag: config.PrefillClosingTag,
-			thinkingIndex:     -1,
-			textIndex:         -1,
+			body:                 resp.Body,
+			reader:               bufio.NewReader(resp.Body),
+			contentBlocks:        map[int]*ContentBlockAccumulator{},
+			toolCalls:            map[int]*ToolCallAccumulator{},
+			toolCallIndices:      map[int]int{},
+			prefill:              config.Prefill,
+			prefillClosingTag:    config.PrefillClosingTag,
+			thinkingIndex:        -1,
+			textIndex:            -1,
+			reportedCostCurrency: p.reportedCostCurrency,
 		}, nil
 	})
 	return stream, nil
+}
+
+func (p *Provider) applyReportedUsageCost(wire Usage, usage *llm.Usage, model string) {
+	applyReportedUsageCost(wire, usage, model, p.reportedCostCurrency)
+}
+
+func (p *Provider) markReportedCostUnavailable(wire Usage, usage *llm.Usage) {
+	if usage == nil || p.reportedCostCurrency == "" {
+		return
+	}
+	if !wire.present {
+		usage.Cost = nil
+		usage.CostEstimateUnavailable = true
+	} else if usage.Cost == nil {
+		usage.CostEstimateUnavailable = true
+	}
+}
+
+func applyReportedUsageCost(wire Usage, usage *llm.Usage, model, currency string) {
+	if usage == nil || currency == "" || wire.Cost == nil {
+		return
+	}
+	if *wire.Cost < 0 {
+		usage.Cost = nil
+		usage.CostEstimateUnavailable = true
+		return
+	}
+	usage.Cost = &llm.Cost{
+		Total:                *wire.Cost,
+		Currency:             currency,
+		Model:                model,
+		Source:               llm.CostSourceProviderReported,
+		BreakdownUnavailable: true,
+	}
 }
 
 func validateMessages(messages []*llm.Message) error {
