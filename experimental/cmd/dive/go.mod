@@ -5,12 +5,13 @@ go 1.25.0
 toolchain go1.26.5
 
 require (
-	github.com/deepnoodle-ai/dive v1.20.0
-	github.com/deepnoodle-ai/dive/providers/google v1.20.0
-	github.com/deepnoodle-ai/dive/providers/grok v1.20.0
-	github.com/deepnoodle-ai/dive/providers/openai v1.20.0
+	github.com/deepnoodle-ai/dive v1.21.0
+	github.com/deepnoodle-ai/dive/providers/google v1.21.0
+	github.com/deepnoodle-ai/dive/providers/grok v1.21.0
+	github.com/deepnoodle-ai/dive/providers/openai v1.21.0
 	github.com/deepnoodle-ai/wonton v0.0.37
 	github.com/mattn/go-runewidth v0.0.27
+	google.golang.org/genai v1.67.0
 )
 
 require (
@@ -49,7 +50,6 @@ require (
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/api v0.292.0 // indirect
-	google.golang.org/genai v1.67.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260807164820-c8921c73eeea // indirect
 	google.golang.org/grpc v1.83.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
