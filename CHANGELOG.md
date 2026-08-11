@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-08-11
+
 ### Fixed
 
 - **Provider reasoning blocks now survive response copying, streaming, and
