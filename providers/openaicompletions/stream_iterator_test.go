@@ -2,6 +2,7 @@ package openaicompletions
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -233,6 +234,101 @@ func TestStreamIteratorUsageOnFinishChunk(t *testing.T) {
 	response := accumulator.Response()
 	assert.Equal(t, 5, response.Usage.InputTokens)
 	assert.Equal(t, 2, response.Usage.OutputTokens)
+}
+
+func TestStreamIteratorPreservesMistralThinkingChunks(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl-thinking","model":"mistral-small-latest","choices":[{"index":0,"delta":{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"First "}]}]}}]}`,
+		``,
+		`data: {"id":"chatcmpl-thinking","model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"then"}]},{"type":"text","text":"Answer"}]}}]}`,
+		``,
+		`data: {"id":"chatcmpl-thinking","model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":" done"}}]}`,
+		``,
+		`data: {"id":"chatcmpl-thinking","model":"mistral-small-latest","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	iterator := newTestStreamIterator(body)
+	iterator.providerName = "mistral-mistral-small-latest"
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+	_, accumulator := collectEvents(t, iterator)
+	response := accumulator.Response()
+	assert.Len(t, response.Content, 2)
+	thinking := response.Content[0].(*llm.ThinkingContent)
+	assert.Equal(t, "First then", thinking.Thinking)
+	assert.Equal(t, "true", thinking.Metadata[mistralThinkingMetadataKey])
+	answer := response.Content[1].(*llm.TextContent)
+	assert.Equal(t, "Answer done", answer.Text)
+
+	replayed, err := convertMessagesForProvider([]*llm.Message{response.Message().Copy()}, iterator.providerName)
+	assert.NoError(t, err)
+	assert.Len(t, replayed, 1)
+	assert.Len(t, replayed[0].ContentParts, 2)
+	assert.Equal(t, "thinking", replayed[0].ContentParts[0].Type)
+	assert.Equal(t, "First then", replayed[0].ContentParts[0].Thinking[0].Text)
+	assert.Equal(t, "Answer done", replayed[0].ContentParts[1].Text)
+}
+
+func TestStreamIteratorPreservesOpenRouterReasoningDetails(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl-reasoning","model":"google/gemini-3.1-pro-preview","choices":[{"index":0,"delta":{"role":"assistant","reasoning_details":[{"type":"reasoning.text","text":"First ","id":"reasoning-1","format":"google-gemini-v1","index":0}]}}]}`,
+		``,
+		`data: {"id":"chatcmpl-reasoning","model":"google/gemini-3.1-pro-preview","choices":[{"index":0,"delta":{"reasoning_details":[{"type":"reasoning.text","text":"then","id":"reasoning-1","format":"google-gemini-v1","index":0}]}}]}`,
+		``,
+		`data: {"id":"chatcmpl-reasoning","model":"google/gemini-3.1-pro-preview","choices":[{"index":0,"delta":{"content":"Answer"}}]}`,
+		``,
+		`data: {"id":"chatcmpl-reasoning","model":"google/gemini-3.1-pro-preview","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	iterator := newTestStreamIterator(body)
+	iterator.providerName = "openrouter"
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+	events, accumulator := collectEvents(t, iterator)
+	response := accumulator.Response()
+	assert.Len(t, response.Content, 2)
+	thinking := response.Content[0].(*llm.ThinkingContent)
+	assert.Equal(t, "First then", thinking.Thinking)
+	var details []map[string]any
+	assert.NoError(t, json.Unmarshal(
+		[]byte(thinking.Metadata[openRouterReasoningDetailsMetadataKey]),
+		&details,
+	))
+	assert.Len(t, details, 2)
+	assert.Equal(t, "First ", details[0]["text"])
+	assert.Equal(t, "then", details[1]["text"])
+
+	replayed, err := convertMessagesForProvider(
+		[]*llm.Message{response.Message().Copy()},
+		iterator.providerName,
+	)
+	assert.NoError(t, err)
+	assert.Len(t, replayed, 1)
+	assert.Equal(t, "Answer", replayed[0].Content)
+	assert.Empty(t, replayed[0].Reasoning)
+	assert.Equal(t,
+		thinking.Metadata[openRouterReasoningDetailsMetadataKey],
+		string(replayed[0].ReasoningDetails),
+	)
+	metadataDeltas := 0
+	for _, event := range events {
+		if event.Delta != nil && event.Delta.Type == llm.EventDeltaTypeMetadata {
+			metadataDeltas++
+		}
+	}
+	assert.Equal(t, 1, metadataDeltas)
+	iterator.thinkingIndex = 99
+	for _, event := range events {
+		if event.ContentBlock != nil && event.ContentBlock.Type == llm.ContentTypeThinking ||
+			event.Delta != nil && (event.Delta.Type == llm.EventDeltaTypeThinking ||
+				event.Delta.Type == llm.EventDeltaTypeMetadata) {
+			assert.Equal(t, 0, *event.Index)
+		}
+	}
 }
 
 // TestStreamIteratorUsageDetails verifies that cached prompt tokens and

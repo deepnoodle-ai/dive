@@ -55,31 +55,39 @@ type Message struct {
 	Name         string        `json:"name,omitempty"`
 	ToolCallID   string        `json:"tool_call_id,omitempty"`
 	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+	// Reasoning is the OpenAI-compatible plaintext reasoning extension used by
+	// gateways such as OpenRouter.
+	Reasoning string `json:"reasoning,omitempty"`
+	// ReasoningDetails preserves OpenRouter's structured reasoning blocks
+	// verbatim for replay. It is intentionally opaque to this shared adapter.
+	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
 }
 
 func (m Message) MarshalJSON() ([]byte, error) {
+	type alias Message
 	if len(m.ContentParts) == 0 {
-		type alias Message
 		return json.Marshal(alias(m))
 	}
 	return json.Marshal(struct {
-		Role       string        `json:"role"`
-		Content    []ContentPart `json:"content"`
-		Name       string        `json:"name,omitempty"`
-		ToolCallID string        `json:"tool_call_id,omitempty"`
-		ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
-	}{m.Role, m.ContentParts, m.Name, m.ToolCallID, m.ToolCalls})
+		alias
+		Content []ContentPart `json:"content"`
+	}{
+		alias:   alias(m),
+		Content: m.ContentParts,
+	})
 }
 
 // UnmarshalJSON accepts both content shapes: a plain string (the usual
 // response form) or a content-part array.
 func (m *Message) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		Role       string          `json:"role"`
-		Content    json.RawMessage `json:"content"`
-		Name       string          `json:"name"`
-		ToolCallID string          `json:"tool_call_id"`
-		ToolCalls  []ToolCall      `json:"tool_calls"`
+		Role             string          `json:"role"`
+		Content          json.RawMessage `json:"content"`
+		Name             string          `json:"name"`
+		ToolCallID       string          `json:"tool_call_id"`
+		ToolCalls        []ToolCall      `json:"tool_calls"`
+		Reasoning        string          `json:"reasoning"`
+		ReasoningDetails json.RawMessage `json:"reasoning_details"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -88,6 +96,13 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.Name = aux.Name
 	m.ToolCallID = aux.ToolCallID
 	m.ToolCalls = aux.ToolCalls
+	m.Reasoning = aux.Reasoning
+	reasoningDetails := bytes.TrimSpace(aux.ReasoningDetails)
+	if len(reasoningDetails) == 0 || bytes.Equal(reasoningDetails, []byte("null")) {
+		m.ReasoningDetails = nil
+	} else {
+		m.ReasoningDetails = append(m.ReasoningDetails[:0], reasoningDetails...)
+	}
 	m.Content = ""
 	m.ContentParts = nil
 	content := bytes.TrimSpace(aux.Content)
@@ -113,8 +128,11 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 // ContentPart is one element of a multimodal content array in a Chat
 // Completions message.
 type ContentPart struct {
-	Type                  string                 `json:"type"` // "text", "image_url", or "file"
-	Text                  string                 `json:"text,omitempty"`
+	Type string `json:"type"` // "text", "thinking", "image_url", or "file"
+	Text string `json:"text,omitempty"`
+	// Thinking is populated for Mistral ThinkChunk parts. Each nested part is
+	// currently a text chunk, but the recursive shape matches the wire format.
+	Thinking              []ContentPart          `json:"thinking,omitempty"`
 	ImageURL              *ImageURLPart          `json:"image_url,omitempty"`
 	File                  *FilePart              `json:"file,omitempty"`
 	PromptCacheBreakpoint *PromptCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
@@ -265,10 +283,52 @@ type StreamChoice struct {
 }
 
 type StreamDelta struct {
-	Role      string          `json:"role"`
-	Content   string          `json:"content,omitempty"`
-	Reasoning string          `json:"reasoning,omitempty"`
-	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+	Role string `json:"role"`
+	// Content holds the ordinary string form. ContentParts holds the typed
+	// array form used by Mistral while it streams thinking chunks.
+	Content          string          `json:"-"`
+	ContentParts     []ContentPart   `json:"-"`
+	Reasoning        string          `json:"reasoning,omitempty"`
+	ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
+	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// UnmarshalJSON accepts both Chat Completions delta.content shapes: the usual
+// string and Mistral's array of ThinkChunk/TextChunk objects.
+func (d *StreamDelta) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		Role             string          `json:"role"`
+		Content          json.RawMessage `json:"content"`
+		Reasoning        string          `json:"reasoning"`
+		ReasoningDetails json.RawMessage `json:"reasoning_details"`
+		ToolCalls        []ToolCallDelta `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	d.Role = aux.Role
+	d.Reasoning = aux.Reasoning
+	reasoningDetails := bytes.TrimSpace(aux.ReasoningDetails)
+	if len(reasoningDetails) == 0 || bytes.Equal(reasoningDetails, []byte("null")) {
+		d.ReasoningDetails = nil
+	} else {
+		d.ReasoningDetails = append(d.ReasoningDetails[:0], reasoningDetails...)
+	}
+	d.ToolCalls = aux.ToolCalls
+	d.Content = ""
+	d.ContentParts = nil
+	content := bytes.TrimSpace(aux.Content)
+	if len(content) == 0 || bytes.Equal(content, []byte("null")) {
+		return nil
+	}
+	switch content[0] {
+	case '"':
+		return json.Unmarshal(content, &d.Content)
+	case '[':
+		return json.Unmarshal(content, &d.ContentParts)
+	default:
+		return fmt.Errorf("unexpected stream delta content shape: %s", content)
+	}
 }
 
 // ToolCallDelta represents a partial tool call in a streaming response

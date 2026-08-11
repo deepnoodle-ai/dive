@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -181,6 +182,22 @@ func TestEncodeMessages(t *testing.T) {
 				},
 			},
 			want: `[{"arguments":"{\"city\": \"NYC\"}","call_id":"call_12345xyz","name":"get_weather","type":"function_call"}]`,
+		},
+		{
+			name: "foreign thinking is not replayed",
+			messages: []*llm.Message{
+				{
+					Role: llm.Assistant,
+					Content: []llm.Content{
+						&llm.ThinkingContent{
+							Thinking:  "Anthropic thought",
+							Signature: "anthropic-signature",
+						},
+						&llm.TextContent{Text: "answer"},
+					},
+				},
+			},
+			want: `[{"content":[{"text":"answer","type":"output_text"}],"role":"assistant","type":"message"}]`,
 		},
 		{
 			name: "tool result content",
@@ -382,6 +399,48 @@ func TestConvertResponse(t *testing.T) {
 	assert.Equal(t, 8, result.Usage.InputTokens)
 	assert.Equal(t, 8, result.Usage.OutputTokens)
 	assert.Equal(t, 2, result.Usage.CacheReadInputTokens)
+}
+
+func TestDecodeReasoningContentPreservesRawTextForReplay(t *testing.T) {
+	content, err := decodeReasoningContent(responses.ResponseReasoningItem{
+		ID:               "rs_1",
+		EncryptedContent: "encrypted",
+		Summary: []responses.ResponseReasoningItemSummary{{
+			Type: "summary_text",
+			Text: "summary",
+		}},
+		Content: []responses.ResponseReasoningItemContent{{
+			Type: "reasoning_text",
+			Text: "raw reasoning",
+		}},
+	})
+	assert.NoError(t, err)
+	assert.Len(t, content, 1)
+	thinking := content[0].(*llm.ThinkingContent)
+	assert.Equal(t, "raw reasoning", thinking.Thinking)
+	assert.Equal(t, `["summary"]`, thinking.Metadata[openAIReasoningSummaryMetadataKey])
+	assert.Equal(t, `["raw reasoning"]`, thinking.Metadata[openAIReasoningContentMetadataKey])
+
+	replayed, err := encodeMessages([]*llm.Message{{
+		Role:    llm.Assistant,
+		Content: content,
+	}})
+	assert.NoError(t, err)
+	data, err := json.Marshal(replayed)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"summary":[{"text":"summary","type":"summary_text"}]`)
+	assert.Contains(t, string(data), `"content":[{"text":"raw reasoning","type":"reasoning_text"}]`)
+}
+
+func TestOpenAIReasoningReplayOmitsEmptyEncryptedContent(t *testing.T) {
+	param := openAIReasoningItemParam(&llm.ThinkingContent{
+		ID:       "rs_without_encrypted_content",
+		Thinking: "summary",
+	})
+	data, err := json.Marshal(param)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"id":"rs_without_encrypted_content"`)
+	assert.False(t, strings.Contains(string(data), `"encrypted_content"`))
 }
 
 func TestConvertResponseWithDifferentModels(t *testing.T) {

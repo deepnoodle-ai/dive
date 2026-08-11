@@ -59,19 +59,21 @@ const (
 	EventDeltaTypeInputJSON EventDeltaType = "input_json_delta"
 	EventDeltaTypeThinking  EventDeltaType = "thinking_delta"
 	EventDeltaTypeSignature EventDeltaType = "signature_delta"
+	EventDeltaTypeMetadata  EventDeltaType = "metadata_delta"
 	EventDeltaTypeCitations EventDeltaType = "citations_delta"
 )
 
 // EventDelta carries a portion of an LLM response.
 type EventDelta struct {
-	Type         EventDeltaType `json:"type,omitempty"`
-	Text         string         `json:"text,omitempty"`
-	Index        int            `json:"index,omitempty"`
-	StopReason   string         `json:"stop_reason,omitempty"`
-	StopSequence string         `json:"stop_sequence,omitempty"`
-	PartialJSON  string         `json:"partial_json,omitempty"`
-	Thinking     string         `json:"thinking,omitempty"`
-	Signature    string         `json:"signature,omitempty"`
+	Type         EventDeltaType   `json:"type,omitempty"`
+	Text         string           `json:"text,omitempty"`
+	Index        int              `json:"index,omitempty"`
+	StopReason   string           `json:"stop_reason,omitempty"`
+	StopSequence string           `json:"stop_sequence,omitempty"`
+	PartialJSON  string           `json:"partial_json,omitempty"`
+	Thinking     string           `json:"thinking,omitempty"`
+	Signature    string           `json:"signature,omitempty"`
+	Metadata     ProviderMetadata `json:"metadata,omitempty"`
 }
 
 // ResponseAccumulator builds up a complete response from a stream of events.
@@ -111,7 +113,8 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		switch event.ContentBlock.Type {
 		case ContentTypeText:
 			content = &TextContent{
-				Text: event.ContentBlock.Text,
+				Text:     event.ContentBlock.Text,
+				Metadata: event.ContentBlock.Metadata.Clone(),
 			}
 		case ContentTypeToolUse:
 			content = &ToolUseContent{
@@ -121,8 +124,10 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			}
 		case ContentTypeThinking:
 			content = &ThinkingContent{
+				ID:        event.ContentBlock.ID,
 				Thinking:  event.ContentBlock.Thinking,
 				Signature: event.ContentBlock.Signature,
+				Metadata:  event.ContentBlock.Metadata.Clone(),
 			}
 		case ContentTypeRedactedThinking:
 			content = &RedactedThinkingContent{}
@@ -181,6 +186,10 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 			} else {
 				return errors.New("in-progress block is not a thinking content")
 			}
+		case EventDeltaTypeMetadata:
+			if err := mergeContentMetadata(content, event.Delta.Metadata); err != nil {
+				return err
+			}
 		}
 
 	case EventTypeMessageDelta:
@@ -218,6 +227,30 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 	// after usage accumulation, so the final token counts are reflected.
 	if r.complete && r.response != nil {
 		PopulateCost(r.response.Model, r.response.Usage.Speed == string(SpeedFast), &r.response.Usage)
+	}
+	return nil
+}
+
+func mergeContentMetadata(content Content, metadata ProviderMetadata) error {
+	if len(metadata) == 0 {
+		return nil
+	}
+	var target *ProviderMetadata
+	switch typed := content.(type) {
+	case *TextContent:
+		target = &typed.Metadata
+	case *ThinkingContent:
+		target = &typed.Metadata
+	case *ToolUseContent:
+		target = &typed.Metadata
+	default:
+		return errors.New("in-progress block does not support provider metadata")
+	}
+	if *target == nil {
+		*target = make(ProviderMetadata, len(metadata))
+	}
+	for key, value := range metadata {
+		(*target)[key] = value
 	}
 	return nil
 }

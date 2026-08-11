@@ -187,3 +187,86 @@ func TestStreamIteratorAccumulatorPricesDisjointUsage(t *testing.T) {
 	assert.Equal(t, want.CacheWrite, usage.Cost.CacheWrite)
 	assert.Equal(t, want.Total, usage.Cost.Total)
 }
+
+func TestStreamIteratorPreservesReplayableReasoning(t *testing.T) {
+	payloads := []string{
+		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[]}}`,
+		`{"type":"response.reasoning_summary_part.added","sequence_number":3,"item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}`,
+		`{"type":"response.reasoning_summary_text.delta","sequence_number":4,"item_id":"rs_1","output_index":0,"summary_index":0,"delta":"why"}`,
+		`{"type":"response.reasoning_summary_part.done","sequence_number":5,"item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"why"}}`,
+		`{"type":"response.output_item.done","sequence_number":6,"output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","encrypted_content":"encrypted-reasoning","summary":[{"type":"summary_text","text":"why"}]}}`,
+		`{"type":"response.completed","sequence_number":7,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":1}}}}`,
+	}
+	events := make([]responses.ResponseStreamEventUnion, 0, len(payloads))
+	for _, payload := range payloads {
+		var event responses.ResponseStreamEventUnion
+		assert.NoError(t, json.Unmarshal([]byte(payload), &event))
+		events = append(events, event)
+	}
+
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	t.Cleanup(func() {
+		assert.NoError(t, iterator.Close())
+	})
+	accumulator := llm.NewResponseAccumulator()
+	for iterator.Next() {
+		assert.NoError(t, accumulator.AddEvent(iterator.Event()))
+	}
+	assert.NoError(t, iterator.Err())
+	assert.True(t, accumulator.IsComplete())
+
+	message := accumulator.Response().Message()
+	assert.Equal(t, 1, len(message.Content))
+	thinking, ok := message.Content[0].(*llm.ThinkingContent)
+	assert.True(t, ok)
+	assert.Equal(t, "rs_1", thinking.ID)
+	assert.Equal(t, "why", thinking.Thinking)
+	assert.Equal(t, "encrypted-reasoning", thinking.Signature)
+	assert.Equal(t, `["why"]`, thinking.Metadata[openAIReasoningSummaryMetadataKey])
+
+	replayed, err := encodeMessages([]*llm.Message{message})
+	assert.NoError(t, err)
+	replayedJSON, err := json.Marshal(replayed)
+	assert.NoError(t, err)
+	assert.Contains(t, string(replayedJSON), `"id":"rs_1"`)
+	assert.Contains(t, string(replayedJSON), `"encrypted_content":"encrypted-reasoning"`)
+	assert.Contains(t, string(replayedJSON), `"text":"why"`)
+}
+
+func TestStreamIteratorPreservesRawReasoningText(t *testing.T) {
+	payloads := []string{
+		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_raw","type":"reasoning","status":"in_progress","summary":[],"content":[]}}`,
+		`{"type":"response.reasoning_text.done","sequence_number":3,"item_id":"rs_raw","output_index":0,"content_index":0,"text":"raw reasoning"}`,
+		`{"type":"response.output_item.done","sequence_number":5,"output_index":0,"item":{"id":"rs_raw","type":"reasoning","status":"completed","encrypted_content":"encrypted-raw","summary":[],"content":[{"type":"reasoning_text","text":"raw reasoning"}]}}`,
+		`{"type":"response.completed","sequence_number":6,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":1}}}}`,
+	}
+	events := make([]responses.ResponseStreamEventUnion, 0, len(payloads))
+	for _, payload := range payloads {
+		var event responses.ResponseStreamEventUnion
+		assert.NoError(t, json.Unmarshal([]byte(payload), &event))
+		events = append(events, event)
+	}
+
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+	accumulator := llm.NewResponseAccumulator()
+	for iterator.Next() {
+		assert.NoError(t, accumulator.AddEvent(iterator.Event()))
+	}
+	assert.NoError(t, iterator.Err())
+
+	message := accumulator.Response().Message()
+	thinking := message.Content[0].(*llm.ThinkingContent)
+	assert.Equal(t, "rs_raw", thinking.ID)
+	assert.Equal(t, "raw reasoning", thinking.Thinking)
+	assert.Equal(t, "encrypted-raw", thinking.Signature)
+	assert.Equal(t, `["raw reasoning"]`, thinking.Metadata[openAIReasoningContentMetadataKey])
+
+	replayed, err := encodeMessages([]*llm.Message{message})
+	assert.NoError(t, err)
+	replayedJSON, err := json.Marshal(replayed)
+	assert.NoError(t, err)
+	assert.Contains(t, string(replayedJSON), `"content":[{"text":"raw reasoning","type":"reasoning_text"}]`)
+}

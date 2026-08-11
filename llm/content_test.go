@@ -700,8 +700,11 @@ func TestThinkingContent(t *testing.T) {
 				content: &ThinkingContent{
 					Thinking:  "Let me analyze this step by step...",
 					Signature: "signature123",
+					Metadata: ProviderMetadata{
+						"example.replay_state": "opaque",
+					},
 				},
-				expected: `{"type":"thinking","thinking":"Let me analyze this step by step...","signature":"signature123"}`,
+				expected: `{"type":"thinking","thinking":"Let me analyze this step by step...","signature":"signature123","metadata":{"example.replay_state":"opaque"}}`,
 			},
 			{
 				name: "empty thinking",
@@ -766,13 +769,33 @@ func TestCloneContent(t *testing.T) {
 	cc := &CacheControl{Type: CacheControlTypeEphemeral}
 
 	t.Run("TextContent", func(t *testing.T) {
-		orig := &TextContent{Text: "hello", CacheControl: cc, Citations: []Citation{&MockCitation{Text: "cite"}}}
+		orig := &TextContent{
+			Text:         "hello",
+			CacheControl: cc,
+			Citations:    []Citation{&MockCitation{Text: "cite"}},
+			Metadata:     ProviderMetadata{"example.state": "opaque"},
+		}
 		clone := orig.CloneContent()
 		cloned := clone.(*TextContent)
 		assert.True(t, orig != cloned)
 		assert.Equal(t, "hello", cloned.Text)
 		assert.Nil(t, cloned.CacheControl)
 		assert.Len(t, cloned.Citations, 1)
+		assert.Equal(t, "opaque", cloned.Metadata["example.state"])
+		cloned.Metadata["example.state"] = "changed"
+		assert.Equal(t, "opaque", orig.Metadata["example.state"])
+	})
+
+	t.Run("ThinkingContent", func(t *testing.T) {
+		orig := &ThinkingContent{
+			Thinking: "reasoning",
+			Metadata: ProviderMetadata{"example.state": "opaque"},
+		}
+		cloned := orig.CloneContent().(*ThinkingContent)
+		assert.True(t, orig != cloned)
+		assert.Equal(t, "opaque", cloned.Metadata["example.state"])
+		cloned.Metadata["example.state"] = "changed"
+		assert.Equal(t, "opaque", orig.Metadata["example.state"])
 	})
 
 	t.Run("RefusalContent", func(t *testing.T) {

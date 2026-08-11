@@ -16,6 +16,11 @@ const (
 	IncludeCodeInterpreterCallOutputs Include = "code_interpreter_call.outputs"
 )
 
+const (
+	openAIReasoningSummaryMetadataKey = "openai.reasoning_summary"
+	openAIReasoningContentMetadataKey = "openai.reasoning_content"
+)
+
 // // Request represents the OpenAI Responses API request structure
 // type Request struct {
 // 	Model              string            `json:"model"`

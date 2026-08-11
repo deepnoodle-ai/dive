@@ -1,6 +1,7 @@
 package google
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -318,4 +319,124 @@ func TestGoogleThoughtSignatureSurvivesMessageRoundTrip(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, contents, 2)
 	assert.Equal(t, signature, contents[0].Parts[0].ThoughtSignature)
+}
+
+func TestGoogleTextAndThinkingPartsSurviveMessageRoundTrip(t *testing.T) {
+	thoughtSignature := []byte("opaque-thought-signature")
+	textSignature := []byte("opaque-text-signature")
+	emptySignature := []byte("opaque-empty-signature")
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{{
+			Content: &genai.Content{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "working it out", Thought: true, ThoughtSignature: thoughtSignature},
+					{Text: "answer", ThoughtSignature: textSignature},
+					{ThoughtSignature: emptySignature},
+				},
+			},
+		}},
+	}
+
+	converted, err := convertGoogleResponse(resp, ModelGemini36Flash)
+	assert.NoError(t, err)
+	assert.Len(t, converted.Content, 3)
+
+	thought, ok := converted.Content[0].(*llm.ThinkingContent)
+	assert.True(t, ok)
+	assert.Equal(t, "working it out", thought.Thinking)
+	assert.Equal(t, "true", thought.Metadata[googleThoughtMetadataKey])
+	assert.Equal(t, base64.StdEncoding.EncodeToString(thoughtSignature),
+		thought.Metadata[googleThoughtSignatureMetadataKey])
+
+	answer, ok := converted.Content[1].(*llm.TextContent)
+	assert.True(t, ok)
+	assert.Equal(t, "answer", answer.Text)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(textSignature),
+		answer.Metadata[googleThoughtSignatureMetadataKey])
+
+	empty, ok := converted.Content[2].(*llm.TextContent)
+	assert.True(t, ok)
+	assert.Equal(t, "", empty.Text)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(emptySignature),
+		empty.Metadata[googleThoughtSignatureMetadataKey])
+
+	replayed := converted.Message().Copy()
+	contents, err := messagesToContents([]*llm.Message{replayed})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 1)
+	assert.Len(t, contents[0].Parts, 3)
+	assert.True(t, contents[0].Parts[0].Thought)
+	assert.Equal(t, "working it out", contents[0].Parts[0].Text)
+	assert.Equal(t, thoughtSignature, contents[0].Parts[0].ThoughtSignature)
+	assert.False(t, contents[0].Parts[1].Thought)
+	assert.Equal(t, "answer", contents[0].Parts[1].Text)
+	assert.Equal(t, textSignature, contents[0].Parts[1].ThoughtSignature)
+	assert.Equal(t, "", contents[0].Parts[2].Text)
+	assert.Equal(t, emptySignature, contents[0].Parts[2].ThoughtSignature)
+}
+
+func TestGoogleSkipsThinkingFromAnotherProvider(t *testing.T) {
+	contents, err := messagesToContents([]*llm.Message{{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.ThinkingContent{Thinking: "anthropic thought", Signature: "anthropic-signature"},
+			&llm.TextContent{Text: "answer"},
+		},
+	}})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 1)
+	assert.Len(t, contents[0].Parts, 1)
+	assert.Equal(t, "answer", contents[0].Parts[0].Text)
+	assert.Equal(t, 0, len(contents[0].Parts[0].ThoughtSignature))
+}
+
+func TestGoogleSkipsMessagesFilteredToNoParts(t *testing.T) {
+	contents, err := messagesToContents([]*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []llm.Content{
+				&llm.ThinkingContent{Thinking: "foreign thought", Signature: "foreign-signature"},
+			},
+		},
+		llm.NewUserTextMessage("continue"),
+	})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 1)
+	assert.Equal(t, "user", contents[0].Role)
+	assert.Len(t, contents[0].Parts, 1)
+	assert.Equal(t, "continue", contents[0].Parts[0].Text)
+}
+
+func TestGoogleRequestPathsRejectMessagesFilteredToEmpty(t *testing.T) {
+	tests := []struct {
+		name    string
+		content llm.Content
+	}{
+		{
+			name: "foreign thinking",
+			content: &llm.ThinkingContent{
+				Thinking:  "foreign thought",
+				Signature: "foreign-signature",
+			},
+		},
+		{
+			name:    "redacted thinking",
+			content: &llm.RedactedThinkingContent{Data: "opaque"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := New(WithAPIKey("test-key"))
+			message := llm.NewAssistantMessage(tt.content)
+
+			_, err := provider.Generate(context.Background(), llm.WithMessages(message))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "no messages remain")
+
+			_, err = provider.Stream(context.Background(), llm.WithMessages(message))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "no messages remain")
+		})
+	}
 }

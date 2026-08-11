@@ -59,6 +59,12 @@ var (
 
 var _ llm.StreamingLLM = &Provider{}
 
+const (
+	mistralThinkingMetadataKey            = "mistral.thinking"
+	openRouterReasoningMetadataKey        = "openrouter.reasoning"
+	openRouterReasoningDetailsMetadataKey = "openrouter.reasoning_details"
+)
+
 // Provider implements an LLM provider using the OpenAI Chat Completions API.
 // This is used as the base for several providers including Grok, Groq, Mistral,
 // Ollama, and OpenRouter.
@@ -114,7 +120,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages)
+	msgs, err := convertMessagesForProvider(config.Messages, p.Name())
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -180,10 +186,7 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 	}
 	choice := result.Choices[0]
 
-	var contentBlocks []llm.Content
-	if choice.Message.Content != "" {
-		contentBlocks = append(contentBlocks, &llm.TextContent{Text: choice.Message.Content})
-	}
+	contentBlocks := responseMessageContent(choice.Message, p.Name())
 
 	// Transform tool calls into content blocks (like Anthropic)
 	if len(choice.Message.ToolCalls) > 0 {
@@ -255,7 +258,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 	if err := validateMessages(config.Messages); err != nil {
 		return nil, err
 	}
-	msgs, err := convertMessages(config.Messages)
+	msgs, err := convertMessagesForProvider(config.Messages, p.Name())
 	if err != nil {
 		return nil, fmt.Errorf("error converting messages: %w", err)
 	}
@@ -318,6 +321,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 			thinkingIndex:        -1,
 			textIndex:            -1,
 			reportedCostCurrency: p.reportedCostCurrency,
+			providerName:         p.Name(),
 		}, nil
 	})
 	return stream, nil
@@ -397,6 +401,10 @@ func addPromptCacheBreakpoints(messages []Message, limit int) {
 }
 
 func convertMessages(messages []*llm.Message) ([]Message, error) {
+	return convertMessagesForProvider(messages, "")
+}
+
+func convertMessagesForProvider(messages []*llm.Message, providerName string) ([]Message, error) {
 	// Chat Completions has no operator-authority role, so operator reminders
 	// always render as tagged user messages (nil resolver = no native authority).
 	messages, err := llm.RenderReminders(messages, nil)
@@ -417,6 +425,9 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		var toolResults []*llm.ToolResultContent
 		var parts []ContentPart
 		var hasMedia bool
+		var hasStructuredContent bool
+		var reasoning []string
+		var reasoningDetailParts []json.RawMessage
 		for _, c := range msg.Content {
 			switch c := c.(type) {
 			case *llm.ToolUseContent:
@@ -446,12 +457,39 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 				}
 				parts = append(parts, part)
 				hasMedia = true
-			case *llm.ThinkingContent, *llm.RedactedThinkingContent:
-				// The Chat Completions API has no standard field for
-				// replaying assistant reasoning back to the server, so
-				// thinking content (which this provider's own stream
-				// iterator can produce from "reasoning" deltas) is
-				// skipped on encode rather than erroring.
+			case *llm.ThinkingContent:
+				switch {
+				case isMistralProvider(providerName) &&
+					c.Metadata[mistralThinkingMetadataKey] == "true":
+					parts = append(parts, ContentPart{
+						Type: "thinking",
+						Thinking: []ContentPart{{
+							Type: "text",
+							Text: c.Thinking,
+						}},
+					})
+					hasStructuredContent = true
+				case providerName == "openrouter" &&
+					c.Metadata[openRouterReasoningDetailsMetadataKey] != "":
+					var raw []json.RawMessage
+					if err := json.Unmarshal(
+						[]byte(c.Metadata[openRouterReasoningDetailsMetadataKey]),
+						&raw,
+					); err != nil {
+						return nil, fmt.Errorf("invalid OpenRouter reasoning details in assistant history")
+					}
+					for _, detail := range raw {
+						reasoningDetailParts = append(reasoningDetailParts,
+							append(json.RawMessage(nil), detail...))
+					}
+				case providerName == "openrouter" &&
+					c.Metadata[openRouterReasoningMetadataKey] == "true":
+					reasoning = append(reasoning, c.Thinking)
+				}
+			case *llm.RedactedThinkingContent:
+				// Redacted thinking has no portable Chat Completions shape.
+				// Provider-specific encrypted blocks use namespaced metadata on
+				// ThinkingContent instead.
 			default:
 				return nil, fmt.Errorf("unsupported content type: %s", c.Type())
 			}
@@ -459,15 +497,33 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		if hasMedia && role == "assistant" {
 			return nil, fmt.Errorf("image and document content is not supported in assistant messages by the chat completions API")
 		}
+		var reasoningDetails json.RawMessage
+		if len(reasoningDetailParts) > 0 {
+			reasoningDetails, err = json.Marshal(reasoningDetailParts)
+			if err != nil {
+				return nil, fmt.Errorf("marshal OpenRouter reasoning details: %w", err)
+			}
+		}
 
 		// A single message carries all tool calls, plus any accompanying text.
 		if len(toolCalls) > 0 {
-			result = append(result, Message{
-				Role:      role,
-				Content:   joinTextParts(parts),
-				ToolCalls: toolCalls,
-			})
+			assistant := Message{
+				Role:             role,
+				ToolCalls:        toolCalls,
+				Reasoning:        strings.Join(reasoning, "\n\n"),
+				ReasoningDetails: reasoningDetails,
+			}
+			if hasStructuredContent {
+				assistant.ContentParts = parts
+			} else {
+				assistant.Content = joinTextParts(parts)
+			}
+			result = append(result, assistant)
 			parts = nil
+			reasoning = nil
+			reasoningDetails = nil
+			reasoningDetailParts = nil
+			hasStructuredContent = false
 		}
 
 		// One "tool" message per tool result.
@@ -481,9 +537,21 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 
 		// Remaining content: messages with media carry a content-part array;
 		// text-only messages keep the plain-string content shape.
-		if len(parts) > 0 {
-			if hasMedia {
-				result = append(result, Message{Role: role, ContentParts: parts})
+		if len(parts) > 0 || len(reasoning) > 0 || len(reasoningDetails) > 0 {
+			if hasMedia || hasStructuredContent {
+				result = append(result, Message{
+					Role:             role,
+					ContentParts:     parts,
+					Reasoning:        strings.Join(reasoning, "\n\n"),
+					ReasoningDetails: reasoningDetails,
+				})
+			} else if len(reasoning) > 0 || len(reasoningDetails) > 0 {
+				result = append(result, Message{
+					Role:             role,
+					Content:          joinTextParts(parts),
+					Reasoning:        strings.Join(reasoning, "\n\n"),
+					ReasoningDetails: reasoningDetails,
+				})
 			} else {
 				for _, p := range parts {
 					result = append(result, Message{Role: role, Content: p.Text})
@@ -492,6 +560,81 @@ func convertMessages(messages []*llm.Message) ([]Message, error) {
 		}
 	}
 	return result, nil
+}
+
+func isMistralProvider(providerName string) bool {
+	return strings.HasPrefix(providerName, "mistral-")
+}
+
+func responseMessageContent(message Message, providerName string) []llm.Content {
+	var content []llm.Content
+	if len(message.ReasoningDetails) > 0 {
+		thinking := message.Reasoning
+		if thinking == "" {
+			thinking = reasoningDetailsText(message.ReasoningDetails)
+		}
+		metadata := llm.ProviderMetadata{}
+		if providerName == "openrouter" {
+			metadata[openRouterReasoningDetailsMetadataKey] = string(message.ReasoningDetails)
+		}
+		content = append(content, &llm.ThinkingContent{
+			Thinking: thinking,
+			Metadata: metadata,
+		})
+	} else if message.Reasoning != "" {
+		metadata := llm.ProviderMetadata{}
+		if providerName == "openrouter" {
+			metadata[openRouterReasoningMetadataKey] = "true"
+		}
+		content = append(content, &llm.ThinkingContent{
+			Thinking: message.Reasoning,
+			Metadata: metadata,
+		})
+	}
+
+	if len(message.ContentParts) == 0 {
+		if message.Content != "" {
+			content = append(content, &llm.TextContent{Text: message.Content})
+		}
+		return content
+	}
+	for _, part := range message.ContentParts {
+		switch part.Type {
+		case "thinking":
+			content = append(content, &llm.ThinkingContent{
+				Thinking: joinThinkingParts(part.Thinking),
+				Metadata: llm.ProviderMetadata{mistralThinkingMetadataKey: "true"},
+			})
+		case "text":
+			content = append(content, &llm.TextContent{Text: part.Text})
+		}
+	}
+	return content
+}
+
+func joinThinkingParts(parts []ContentPart) string {
+	var text strings.Builder
+	for _, part := range parts {
+		text.WriteString(part.Text)
+	}
+	return text.String()
+}
+
+func reasoningDetailsText(raw json.RawMessage) string {
+	var details []map[string]any
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return ""
+	}
+	var text []string
+	for _, detail := range details {
+		for _, key := range []string{"text", "summary"} {
+			if value, ok := detail[key].(string); ok && value != "" {
+				text = append(text, value)
+				break
+			}
+		}
+	}
+	return strings.Join(text, "\n\n")
 }
 
 // joinTextParts flattens text content parts into a single string for message

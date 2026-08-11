@@ -34,9 +34,11 @@ type StreamIterator struct {
 	finalEvents []*llm.Event
 	// thinkingIndex and textIndex track the sequential content block index
 	// assigned to each block type, or -1 if not yet started.
-	thinkingIndex        int
-	textIndex            int
-	reportedCostCurrency string
+	thinkingIndex              int
+	textIndex                  int
+	reportedCostCurrency       string
+	providerName               string
+	openRouterReasoningDetails []json.RawMessage
 	// toolCallIndices maps OpenAI tool call indices to sequential block indices.
 	toolCallIndices map[int]int
 }
@@ -149,6 +151,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 	choice := event.Choices[0]
 	var events []*llm.Event
+	var processErr error
 
 	// Emit message start event if this is the first event
 	if s.eventCount == 0 {
@@ -167,81 +170,57 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 
 	if choice.Delta.Reasoning != "" {
-		if s.thinkingIndex < 0 {
-			s.thinkingIndex = s.nextBlockIndex
-			s.nextBlockIndex++
-			s.contentBlocks[s.thinkingIndex] = &ContentBlockAccumulator{Type: "thinking"}
-			events = append(events, &llm.Event{
-				Type:         llm.EventTypeContentBlockStart,
-				Index:        &s.thinkingIndex,
-				ContentBlock: &llm.EventContentBlock{Type: "thinking"},
-			})
+		metadata := llm.ProviderMetadata(nil)
+		if s.providerName == "openrouter" {
+			metadata = llm.ProviderMetadata{openRouterReasoningMetadataKey: "true"}
 		}
-		events = append(events, &llm.Event{
-			Type:  llm.EventTypeContentBlockDelta,
-			Index: &s.thinkingIndex,
-			Delta: &llm.EventDelta{
-				Type:     llm.EventDeltaTypeThinking,
-				Thinking: choice.Delta.Reasoning,
-			},
-		})
+		events = s.appendThinkingEvents(events, choice.Delta.Reasoning, metadata)
+	}
+	if s.providerName == "openrouter" && len(bytes.TrimSpace(choice.Delta.ReasoningDetails)) > 0 &&
+		!bytes.Equal(bytes.TrimSpace(choice.Delta.ReasoningDetails), []byte("null")) {
+		events, processErr = s.appendOpenRouterReasoningDetails(
+			events,
+			choice.Delta.ReasoningDetails,
+			choice.Delta.Reasoning == "",
+		)
+		if processErr != nil {
+			return nil, processErr
+		}
 	}
 
-	// Handle text content
+	// Mistral emits array-shaped content deltas while thinking. Preserve each
+	// ThinkChunk as thinking and each TextChunk as answer text.
+	for _, part := range choice.Delta.ContentParts {
+		switch part.Type {
+		case "thinking":
+			thinking := joinThinkingParts(part.Thinking)
+			if thinking != "" {
+				events = s.appendThinkingEvents(events, thinking,
+					llm.ProviderMetadata{mistralThinkingMetadataKey: "true"})
+			}
+		case "text":
+			events, processErr = s.flushOpenRouterReasoningDetails(events)
+			if processErr != nil {
+				return nil, processErr
+			}
+			events = s.appendTextEvents(events, part.Text)
+		}
+	}
+
+	// Handle ordinary string-shaped text content.
 	if choice.Delta.Content != "" {
-		// Apply and clear prefill if there is one
-		if s.prefill != "" {
-			if !strings.HasPrefix(choice.Delta.Content, s.prefill) &&
-				!strings.HasPrefix(s.prefill, choice.Delta.Content) {
-				choice.Delta.Content = s.prefill + choice.Delta.Content
-			}
-			s.prefill = ""
+		events, processErr = s.flushOpenRouterReasoningDetails(events)
+		if processErr != nil {
+			return nil, processErr
 		}
-		// If this is a new text block, stop any open blocks and start it
-		if s.textIndex < 0 {
-			// Stop any previous content blocks that are still open
-			for prevIndex, prev := range s.contentBlocks {
-				if !prev.IsComplete {
-					stopIndex := prevIndex
-					events = append(events, &llm.Event{
-						Type:  llm.EventTypeContentBlockStop,
-						Index: &stopIndex,
-					})
-					prev.IsComplete = true
-				}
-			}
-			// Stop any previous tool calls that are still open
-			for prevIndex, prev := range s.toolCalls {
-				if !prev.IsComplete {
-					stopIndex := prevIndex
-					events = append(events, &llm.Event{
-						Type:  llm.EventTypeContentBlockStop,
-						Index: &stopIndex,
-					})
-					prev.IsComplete = true
-				}
-			}
-			s.textIndex = s.nextBlockIndex
-			s.nextBlockIndex++
-			s.contentBlocks[s.textIndex] = &ContentBlockAccumulator{Type: "text"}
-			events = append(events, &llm.Event{
-				Type:         llm.EventTypeContentBlockStart,
-				Index:        &s.textIndex,
-				ContentBlock: &llm.EventContentBlock{Type: "text"},
-			})
-		}
-		// Generate a content_block_delta event
-		events = append(events, &llm.Event{
-			Type:  llm.EventTypeContentBlockDelta,
-			Index: &s.textIndex,
-			Delta: &llm.EventDelta{
-				Type: llm.EventDeltaTypeText,
-				Text: choice.Delta.Content,
-			},
-		})
+		events = s.appendTextEvents(events, choice.Delta.Content)
 	}
 
 	if len(choice.Delta.ToolCalls) > 0 {
+		events, processErr = s.flushOpenRouterReasoningDetails(events)
+		if processErr != nil {
+			return nil, processErr
+		}
 		for _, toolCallDelta := range choice.Delta.ToolCalls {
 			// Map OpenAI tool call index to a sequential display index
 			index, known := s.toolCallIndices[toolCallDelta.Index]
@@ -325,6 +304,10 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 
 	if choice.FinishReason != "" {
+		events, processErr = s.flushOpenRouterReasoningDetails(events)
+		if processErr != nil {
+			return nil, processErr
+		}
 		// Stop any open content blocks
 		for index, block := range s.contentBlocks {
 			blockIndex := index
@@ -367,6 +350,141 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 
 	return events, nil
+}
+
+func (s *StreamIterator) appendThinkingEvents(events []*llm.Event, text string, metadata llm.ProviderMetadata) []*llm.Event {
+	if text == "" {
+		return events
+	}
+	events = s.ensureThinkingBlock(events, metadata)
+	index := s.thinkingIndex
+	return append(events, &llm.Event{
+		Type:  llm.EventTypeContentBlockDelta,
+		Index: &index,
+		Delta: &llm.EventDelta{
+			Type:     llm.EventDeltaTypeThinking,
+			Thinking: text,
+		},
+	})
+}
+
+func (s *StreamIterator) ensureThinkingBlock(events []*llm.Event, metadata llm.ProviderMetadata) []*llm.Event {
+	if s.thinkingIndex < 0 {
+		s.thinkingIndex = s.nextBlockIndex
+		s.nextBlockIndex++
+		s.contentBlocks[s.thinkingIndex] = &ContentBlockAccumulator{Type: "thinking"}
+		index := s.thinkingIndex
+		events = append(events, &llm.Event{
+			Type:  llm.EventTypeContentBlockStart,
+			Index: &index,
+			ContentBlock: &llm.EventContentBlock{
+				Type:     llm.ContentTypeThinking,
+				Metadata: metadata.Clone(),
+			},
+		})
+	}
+	return events
+}
+
+func (s *StreamIterator) appendOpenRouterReasoningDetails(
+	events []*llm.Event,
+	raw json.RawMessage,
+	includeVisibleText bool,
+) ([]*llm.Event, error) {
+	var details []json.RawMessage
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return nil, err
+	}
+	if len(details) == 0 {
+		return events, nil
+	}
+	for _, detail := range details {
+		s.openRouterReasoningDetails = append(
+			s.openRouterReasoningDetails,
+			append(json.RawMessage(nil), detail...),
+		)
+	}
+	events = s.ensureThinkingBlock(events, nil)
+	if includeVisibleText {
+		if text := reasoningDetailsText(raw); text != "" {
+			events = s.appendThinkingEvents(events, text, nil)
+		}
+	}
+	return events, nil
+}
+
+func (s *StreamIterator) flushOpenRouterReasoningDetails(events []*llm.Event) ([]*llm.Event, error) {
+	if len(s.openRouterReasoningDetails) == 0 || s.thinkingIndex < 0 {
+		return events, nil
+	}
+	fullDetails, err := json.Marshal(s.openRouterReasoningDetails)
+	if err != nil {
+		return nil, err
+	}
+	s.openRouterReasoningDetails = nil
+	index := s.thinkingIndex
+	return append(events, &llm.Event{
+		Type:  llm.EventTypeContentBlockDelta,
+		Index: &index,
+		Delta: &llm.EventDelta{
+			Type: llm.EventDeltaTypeMetadata,
+			Metadata: llm.ProviderMetadata{
+				openRouterReasoningDetailsMetadataKey: string(fullDetails),
+			},
+		},
+	}), nil
+}
+
+func (s *StreamIterator) appendTextEvents(events []*llm.Event, text string) []*llm.Event {
+	if text == "" {
+		return events
+	}
+	// Apply and clear prefill if there is one.
+	if s.prefill != "" {
+		if !strings.HasPrefix(text, s.prefill) && !strings.HasPrefix(s.prefill, text) {
+			text = s.prefill + text
+		}
+		s.prefill = ""
+	}
+	// If this is a new text block, stop any open blocks and start it.
+	if s.textIndex < 0 {
+		for prevIndex, prev := range s.contentBlocks {
+			if !prev.IsComplete {
+				stopIndex := prevIndex
+				events = append(events, &llm.Event{
+					Type:  llm.EventTypeContentBlockStop,
+					Index: &stopIndex,
+				})
+				prev.IsComplete = true
+			}
+		}
+		for prevIndex, prev := range s.toolCalls {
+			if !prev.IsComplete {
+				stopIndex := prevIndex
+				events = append(events, &llm.Event{
+					Type:  llm.EventTypeContentBlockStop,
+					Index: &stopIndex,
+				})
+				prev.IsComplete = true
+			}
+		}
+		s.textIndex = s.nextBlockIndex
+		s.nextBlockIndex++
+		s.contentBlocks[s.textIndex] = &ContentBlockAccumulator{Type: "text"}
+		events = append(events, &llm.Event{
+			Type:         llm.EventTypeContentBlockStart,
+			Index:        &s.textIndex,
+			ContentBlock: &llm.EventContentBlock{Type: llm.ContentTypeText},
+		})
+	}
+	return append(events, &llm.Event{
+		Type:  llm.EventTypeContentBlockDelta,
+		Index: &s.textIndex,
+		Delta: &llm.EventDelta{
+			Type: llm.EventDeltaTypeText,
+			Text: text,
+		},
+	})
 }
 
 // flushFinalEvents returns the deferred message_delta and message_stop events,

@@ -35,12 +35,14 @@ type StreamIterator struct {
 	started      bool
 
 	// Event generation state
-	messageStartSent bool
-	nextBlockIndex   int
-	textBlockIndex   int // index of the open text block, or -1 if none
-	thinkingBlockIdx int // index of the open thinking block, or -1 if none
-	usage            *genai.GenerateContentResponseUsageMetadata
-	finishReason     genai.FinishReason
+	messageStartSent    bool
+	nextBlockIndex      int
+	textBlockIndex      int // index of the open text block, or -1 if none
+	thinkingBlockIdx    int // index of the open thinking block, or -1 if none
+	textBlockSigned     bool
+	thinkingBlockSigned bool
+	usage               *genai.GenerateContentResponseUsageMetadata
+	finishReason        genai.FinishReason
 
 	mu sync.Mutex
 }
@@ -188,17 +190,16 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 	}
 
 	for _, part := range candidate.Content.Parts {
+		metadata := providerMetadataForGooglePart(part)
 		switch {
 		case part.FunctionCall != nil:
 			if err := s.queueFunctionCall(part); err != nil {
 				return err
 			}
-		case part.Text != "":
-			if part.Thought {
-				s.queueThinking(part.Text)
-				continue
-			}
-			s.queueText(part.Text)
+		case part.Thought:
+			s.queueThinking(part.Text, metadata)
+		case part.Text != "" || metadata != nil:
+			s.queueText(part.Text, metadata)
 		}
 	}
 	return nil
@@ -207,19 +208,30 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 // queueThinking emits a thinking delta, opening a new thinking content block if
 // needed. Gemini flags thought summaries on otherwise ordinary text parts, so
 // they are separated here rather than being folded into the answer.
-func (s *StreamIterator) queueThinking(text string) {
+func (s *StreamIterator) queueThinking(text string, metadata llm.ProviderMetadata) {
 	s.closeTextBlock()
+	signed := metadata[googleThoughtSignatureMetadataKey] != ""
+	// A signature is positional metadata for one exact Gemini Part. Do not
+	// merge signed and unsigned parts, or two independently signed parts.
+	if signed || (s.thinkingBlockIdx >= 0 && signed != s.thinkingBlockSigned) {
+		s.closeThinkingBlock()
+	}
 	if s.thinkingBlockIdx < 0 {
 		index := s.nextBlockIndex
 		s.nextBlockIndex++
 		s.thinkingBlockIdx = index
+		s.thinkingBlockSigned = signed
 		s.eventQueue = append(s.eventQueue, &llm.Event{
 			Type:  llm.EventTypeContentBlockStart,
 			Index: &index,
 			ContentBlock: &llm.EventContentBlock{
-				Type: llm.ContentTypeThinking,
+				Type:     llm.ContentTypeThinking,
+				Metadata: metadata.Clone(),
 			},
 		})
+	}
+	if text == "" {
+		return
 	}
 	index := s.thinkingBlockIdx
 	s.eventQueue = append(s.eventQueue, &llm.Event{
@@ -233,19 +245,30 @@ func (s *StreamIterator) queueThinking(text string) {
 }
 
 // queueText emits a text delta, opening a new text content block if needed.
-func (s *StreamIterator) queueText(text string) {
+func (s *StreamIterator) queueText(text string, metadata llm.ProviderMetadata) {
 	s.closeThinkingBlock()
+	signed := metadata[googleThoughtSignatureMetadataKey] != ""
+	// Google warns that signed and unsigned Parts must not be merged. A signed
+	// text/empty part therefore gets its own canonical block.
+	if signed || (s.textBlockIndex >= 0 && signed != s.textBlockSigned) {
+		s.closeTextBlock()
+	}
 	if s.textBlockIndex < 0 {
 		index := s.nextBlockIndex
 		s.nextBlockIndex++
 		s.textBlockIndex = index
+		s.textBlockSigned = signed
 		s.eventQueue = append(s.eventQueue, &llm.Event{
 			Type:  llm.EventTypeContentBlockStart,
 			Index: &index,
 			ContentBlock: &llm.EventContentBlock{
-				Type: llm.ContentTypeText,
+				Type:     llm.ContentTypeText,
+				Metadata: metadata.Clone(),
 			},
 		})
+	}
+	if text == "" {
+		return
 	}
 	index := s.textBlockIndex
 	s.eventQueue = append(s.eventQueue, &llm.Event{
@@ -318,6 +341,7 @@ func (s *StreamIterator) closeThinkingBlock() {
 	}
 	index := s.thinkingBlockIdx
 	s.thinkingBlockIdx = -1
+	s.thinkingBlockSigned = false
 	s.eventQueue = append(s.eventQueue, &llm.Event{
 		Type:  llm.EventTypeContentBlockStop,
 		Index: &index,
@@ -331,6 +355,7 @@ func (s *StreamIterator) closeTextBlock() {
 	}
 	index := s.textBlockIndex
 	s.textBlockIndex = -1
+	s.textBlockSigned = false
 	s.eventQueue = append(s.eventQueue, &llm.Event{
 		Type:  llm.EventTypeContentBlockStop,
 		Index: &index,

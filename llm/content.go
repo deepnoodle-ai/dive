@@ -168,6 +168,9 @@ type TextContent struct {
 	Text         string        `json:"text"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 	Citations    []Citation    `json:"citations,omitempty"`
+	// Metadata carries opaque provider-specific data (see ProviderMetadata)
+	// that must remain attached to this exact text block when replayed.
+	Metadata ProviderMetadata `json:"metadata,omitempty"`
 }
 
 func (c *TextContent) Type() ContentType {
@@ -177,15 +180,17 @@ func (c *TextContent) Type() ContentType {
 func (c *TextContent) MarshalJSON() ([]byte, error) {
 	// Create a struct with Citations as json.RawMessage to handle custom marshaling
 	type TextWithRawCitations struct {
-		Text         string          `json:"text"`
-		CacheControl *CacheControl   `json:"cache_control,omitempty"`
-		Citations    json.RawMessage `json:"citations,omitempty"`
+		Text         string           `json:"text"`
+		CacheControl *CacheControl    `json:"cache_control,omitempty"`
+		Citations    json.RawMessage  `json:"citations,omitempty"`
+		Metadata     ProviderMetadata `json:"metadata,omitempty"`
 	}
 
 	// Start with base fields
 	twc := TextWithRawCitations{
 		Text:         c.Text,
 		CacheControl: c.CacheControl,
+		Metadata:     c.Metadata,
 	}
 
 	// Marshal Citations if present
@@ -214,6 +219,7 @@ func (c *TextContent) SetCacheControl(cacheControl *CacheControl) {
 func (c *TextContent) CloneContent() Content {
 	cp := *c
 	cp.CacheControl = nil
+	cp.Metadata = c.Metadata.Clone()
 	return &cp
 }
 
@@ -809,6 +815,15 @@ type ThinkingContent struct {
 	ID        string `json:"id,omitempty"`
 	Thinking  string `json:"thinking"`
 	Signature string `json:"signature,omitempty"`
+	// Metadata carries provider-specific replay state that cannot safely use
+	// Signature because its wire meaning differs between providers.
+	Metadata ProviderMetadata `json:"metadata,omitempty"`
+}
+
+func (c *ThinkingContent) CloneContent() Content {
+	cp := *c
+	cp.Metadata = c.Metadata.Clone()
+	return &cp
 }
 
 func (c *ThinkingContent) Type() ContentType {
@@ -1355,15 +1370,17 @@ func UnmarshalContent(data []byte) (Content, error) {
 	case ContentTypeText:
 		text := &TextContent{}
 		type textContent struct {
-			Text         string          `json:"text"`
-			CacheControl *CacheControl   `json:"cache_control"`
-			Citations    json.RawMessage `json:"citations"`
+			Text         string           `json:"text"`
+			CacheControl *CacheControl    `json:"cache_control"`
+			Citations    json.RawMessage  `json:"citations"`
+			Metadata     ProviderMetadata `json:"metadata"`
 		}
 		var tc textContent
 		if err := json.Unmarshal(data, &tc); err != nil {
 			return nil, err
 		}
 		text.Text = tc.Text
+		text.Metadata = tc.Metadata
 		if tc.CacheControl != nil {
 			text.CacheControl = tc.CacheControl
 		}

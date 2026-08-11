@@ -258,14 +258,48 @@ func decodeReasoningContent(reasoning responses.ResponseReasoningItem) ([]llm.Co
 	for _, summary := range reasoning.Summary {
 		summaryItems = append(summaryItems, summary.Text)
 	}
-	// Do we need to capture the reasoning.ID field?
+	var reasoningItems []string
+	for _, content := range reasoning.Content {
+		reasoningItems = append(reasoningItems, content.Text)
+	}
+	metadata, err := openAIReasoningMetadata(summaryItems, reasoningItems)
+	if err != nil {
+		return nil, err
+	}
+	displayItems := summaryItems
+	if len(reasoningItems) > 0 {
+		displayItems = reasoningItems
+	}
 	return []llm.Content{
 		&llm.ThinkingContent{
 			ID:        reasoning.ID,
-			Thinking:  strings.Join(summaryItems, "\n\n"),
+			Thinking:  strings.Join(displayItems, "\n\n"),
 			Signature: reasoning.EncryptedContent,
+			Metadata:  metadata,
 		},
 	}, nil
+}
+
+func openAIReasoningMetadata(summaryItems, reasoningItems []string) (llm.ProviderMetadata, error) {
+	metadata := llm.ProviderMetadata{}
+	if len(summaryItems) > 0 {
+		data, err := json.Marshal(summaryItems)
+		if err != nil {
+			return nil, err
+		}
+		metadata[openAIReasoningSummaryMetadataKey] = string(data)
+	}
+	if len(reasoningItems) > 0 {
+		data, err := json.Marshal(reasoningItems)
+		if err != nil {
+			return nil, err
+		}
+		metadata[openAIReasoningContentMetadataKey] = string(data)
+	}
+	if len(metadata) == 0 {
+		return nil, nil
+	}
+	return metadata, nil
 }
 
 func decodeCodeInterpreterCallContent(codeCall responses.ResponseCodeInterpreterToolCall) ([]llm.Content, error) {
