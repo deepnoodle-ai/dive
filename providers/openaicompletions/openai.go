@@ -427,7 +427,7 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 		var hasMedia bool
 		var hasStructuredContent bool
 		var reasoning []string
-		var reasoningDetails json.RawMessage
+		var reasoningDetailParts []json.RawMessage
 		for _, c := range msg.Content {
 			switch c := c.(type) {
 			case *llm.ToolUseContent:
@@ -471,11 +471,17 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 					hasStructuredContent = true
 				case providerName == "openrouter" &&
 					c.Metadata[openRouterReasoningDetailsMetadataKey] != "":
-					raw := json.RawMessage(c.Metadata[openRouterReasoningDetailsMetadataKey])
-					if !json.Valid(raw) {
+					var raw []json.RawMessage
+					if err := json.Unmarshal(
+						[]byte(c.Metadata[openRouterReasoningDetailsMetadataKey]),
+						&raw,
+					); err != nil {
 						return nil, fmt.Errorf("invalid OpenRouter reasoning details in assistant history")
 					}
-					reasoningDetails = append(reasoningDetails[:0], raw...)
+					for _, detail := range raw {
+						reasoningDetailParts = append(reasoningDetailParts,
+							append(json.RawMessage(nil), detail...))
+					}
 				case providerName == "openrouter" &&
 					c.Metadata[openRouterReasoningMetadataKey] == "true":
 					reasoning = append(reasoning, c.Thinking)
@@ -490,6 +496,13 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 		}
 		if hasMedia && role == "assistant" {
 			return nil, fmt.Errorf("image and document content is not supported in assistant messages by the chat completions API")
+		}
+		var reasoningDetails json.RawMessage
+		if len(reasoningDetailParts) > 0 {
+			reasoningDetails, err = json.Marshal(reasoningDetailParts)
+			if err != nil {
+				return nil, fmt.Errorf("marshal OpenRouter reasoning details: %w", err)
+			}
 		}
 
 		// A single message carries all tool calls, plus any accompanying text.
@@ -509,6 +522,7 @@ func convertMessagesForProvider(messages []*llm.Message, providerName string) ([
 			parts = nil
 			reasoning = nil
 			reasoningDetails = nil
+			reasoningDetailParts = nil
 			hasStructuredContent = false
 		}
 

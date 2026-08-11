@@ -848,6 +848,46 @@ func TestOpenRouterReasoningDetailsDecodeAndReplay(t *testing.T) {
 	assert.Equal(t, message.ReasoningDetails, replayed[0].ReasoningDetails)
 }
 
+func TestOpenRouterReplaysMultipleReasoningDetailBlocks(t *testing.T) {
+	messages, err := convertMessagesForProvider([]*llm.Message{{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.ThinkingContent{Metadata: llm.ProviderMetadata{
+				openRouterReasoningDetailsMetadataKey: `[{"type":"reasoning.text","text":"first"}]`,
+			}},
+			&llm.ThinkingContent{Metadata: llm.ProviderMetadata{
+				openRouterReasoningDetailsMetadataKey: `[{"type":"reasoning.text","text":"second"}]`,
+			}},
+			&llm.TextContent{Text: "answer"},
+		},
+	}}, "openrouter")
+	assert.NoError(t, err)
+	assert.Len(t, messages, 1)
+	var details []map[string]any
+	assert.NoError(t, json.Unmarshal(messages[0].ReasoningDetails, &details))
+	assert.Len(t, details, 2)
+	assert.Equal(t, "first", details[0]["text"])
+	assert.Equal(t, "second", details[1]["text"])
+}
+
+func TestMessageMarshalContentPartsPreservesOtherFields(t *testing.T) {
+	message := Message{
+		Role:         "assistant",
+		ContentParts: []ContentPart{{Type: "text", Text: "answer"}},
+		Name:         "named-assistant",
+		Reasoning:    "reasoning",
+		ReasoningDetails: json.RawMessage(
+			`[{"type":"reasoning.text","text":"reasoning"}]`,
+		),
+	}
+	data, err := json.Marshal(message)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"content":[{"type":"text","text":"answer"}]`)
+	assert.Contains(t, string(data), `"name":"named-assistant"`)
+	assert.Contains(t, string(data), `"reasoning":"reasoning"`)
+	assert.Contains(t, string(data), `"reasoning_details":[{"type":"reasoning.text","text":"reasoning"}]`)
+}
+
 func TestResponseMessageContentPreservesPlainReasoning(t *testing.T) {
 	content := responseMessageContent(Message{
 		Content:   "answer",

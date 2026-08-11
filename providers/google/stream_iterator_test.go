@@ -340,6 +340,56 @@ func TestStreamIteratorPreservesSignedThinkingAndEmptyTextParts(t *testing.T) {
 	assert.Equal(t, textSignature, contents[0].Parts[3].ThoughtSignature)
 }
 
+func TestStreamIteratorSeparatesSignedToUnsignedParts(t *testing.T) {
+	tests := []struct {
+		name    string
+		thought bool
+	}{
+		{name: "thinking", thought: true},
+		{name: "text", thought: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			signature := []byte("signed-part")
+			chunks := chunkSeq(
+				&genai.GenerateContentResponse{Candidates: []*genai.Candidate{{
+					Content: &genai.Content{Parts: []*genai.Part{{
+						Text: "signed", Thought: tt.thought, ThoughtSignature: signature,
+					}}},
+				}}},
+				&genai.GenerateContentResponse{Candidates: []*genai.Candidate{{
+					Content:      &genai.Content{Parts: []*genai.Part{{Text: "unsigned", Thought: tt.thought}}},
+					FinishReason: genai.FinishReasonStop,
+				}}},
+			)
+
+			iterator := NewStreamIteratorFromSeq(context.Background(), chunks, ModelGemini36Flash)
+			t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+			_, accumulator := collectStreamEvents(t, iterator)
+			response := accumulator.Response()
+			assert.Len(t, response.Content, 2)
+
+			if tt.thought {
+				first := response.Content[0].(*llm.ThinkingContent)
+				second := response.Content[1].(*llm.ThinkingContent)
+				assert.Equal(t, "signed", first.Thinking)
+				assert.Equal(t, "unsigned", second.Thinking)
+				assert.Equal(t, base64.StdEncoding.EncodeToString(signature),
+					first.Metadata[googleThoughtSignatureMetadataKey])
+				assert.Empty(t, second.Metadata[googleThoughtSignatureMetadataKey])
+			} else {
+				first := response.Content[0].(*llm.TextContent)
+				second := response.Content[1].(*llm.TextContent)
+				assert.Equal(t, "signed", first.Text)
+				assert.Equal(t, "unsigned", second.Text)
+				assert.Equal(t, base64.StdEncoding.EncodeToString(signature),
+					first.Metadata[googleThoughtSignatureMetadataKey])
+				assert.Empty(t, second.Metadata[googleThoughtSignatureMetadataKey])
+			}
+		})
+	}
+}
+
 func TestStreamIteratorStreamError(t *testing.T) {
 	seq := func(yield func(*genai.GenerateContentResponse, error) bool) {
 		if !yield(textChunk("partial"), nil) {

@@ -288,7 +288,7 @@ func TestStreamIteratorPreservesOpenRouterReasoningDetails(t *testing.T) {
 	iterator := newTestStreamIterator(body)
 	iterator.providerName = "openrouter"
 	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
-	_, accumulator := collectEvents(t, iterator)
+	events, accumulator := collectEvents(t, iterator)
 	response := accumulator.Response()
 	assert.Len(t, response.Content, 2)
 	thinking := response.Content[0].(*llm.ThinkingContent)
@@ -314,6 +314,21 @@ func TestStreamIteratorPreservesOpenRouterReasoningDetails(t *testing.T) {
 		thinking.Metadata[openRouterReasoningDetailsMetadataKey],
 		string(replayed[0].ReasoningDetails),
 	)
+	metadataDeltas := 0
+	for _, event := range events {
+		if event.Delta != nil && event.Delta.Type == llm.EventDeltaTypeMetadata {
+			metadataDeltas++
+		}
+	}
+	assert.Equal(t, 1, metadataDeltas)
+	iterator.thinkingIndex = 99
+	for _, event := range events {
+		if event.ContentBlock != nil && event.ContentBlock.Type == llm.ContentTypeThinking ||
+			event.Delta != nil && (event.Delta.Type == llm.EventDeltaTypeThinking ||
+				event.Delta.Type == llm.EventDeltaTypeMetadata) {
+			assert.Equal(t, 0, *event.Index)
+		}
+	}
 }
 
 // TestStreamIteratorUsageDetails verifies that cached prompt tokens and

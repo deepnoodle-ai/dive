@@ -64,26 +64,16 @@ type Message struct {
 }
 
 func (m Message) MarshalJSON() ([]byte, error) {
+	type alias Message
 	if len(m.ContentParts) == 0 {
-		type alias Message
 		return json.Marshal(alias(m))
 	}
 	return json.Marshal(struct {
-		Role             string          `json:"role"`
-		Content          []ContentPart   `json:"content"`
-		Name             string          `json:"name,omitempty"`
-		ToolCallID       string          `json:"tool_call_id,omitempty"`
-		ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
-		Reasoning        string          `json:"reasoning,omitempty"`
-		ReasoningDetails json.RawMessage `json:"reasoning_details,omitempty"`
+		alias
+		Content []ContentPart `json:"content"`
 	}{
-		Role:             m.Role,
-		Content:          m.ContentParts,
-		Name:             m.Name,
-		ToolCallID:       m.ToolCallID,
-		ToolCalls:        m.ToolCalls,
-		Reasoning:        m.Reasoning,
-		ReasoningDetails: m.ReasoningDetails,
+		alias:   alias(m),
+		Content: m.ContentParts,
 	})
 }
 

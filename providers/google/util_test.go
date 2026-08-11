@@ -1,6 +1,7 @@
 package google
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -388,4 +389,54 @@ func TestGoogleSkipsThinkingFromAnotherProvider(t *testing.T) {
 	assert.Len(t, contents[0].Parts, 1)
 	assert.Equal(t, "answer", contents[0].Parts[0].Text)
 	assert.Equal(t, 0, len(contents[0].Parts[0].ThoughtSignature))
+}
+
+func TestGoogleSkipsMessagesFilteredToNoParts(t *testing.T) {
+	contents, err := messagesToContents([]*llm.Message{
+		{
+			Role: llm.Assistant,
+			Content: []llm.Content{
+				&llm.ThinkingContent{Thinking: "foreign thought", Signature: "foreign-signature"},
+			},
+		},
+		llm.NewUserTextMessage("continue"),
+	})
+	assert.NoError(t, err)
+	assert.Len(t, contents, 1)
+	assert.Equal(t, "user", contents[0].Role)
+	assert.Len(t, contents[0].Parts, 1)
+	assert.Equal(t, "continue", contents[0].Parts[0].Text)
+}
+
+func TestGoogleRequestPathsRejectMessagesFilteredToEmpty(t *testing.T) {
+	tests := []struct {
+		name    string
+		content llm.Content
+	}{
+		{
+			name: "foreign thinking",
+			content: &llm.ThinkingContent{
+				Thinking:  "foreign thought",
+				Signature: "foreign-signature",
+			},
+		},
+		{
+			name:    "redacted thinking",
+			content: &llm.RedactedThinkingContent{Data: "opaque"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := New(WithAPIKey("test-key"))
+			message := llm.NewAssistantMessage(tt.content)
+
+			_, err := provider.Generate(context.Background(), llm.WithMessages(message))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "no messages remain")
+
+			_, err = provider.Stream(context.Background(), llm.WithMessages(message))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "no messages remain")
+		})
+	}
 }

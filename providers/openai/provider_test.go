@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -429,6 +430,17 @@ func TestDecodeReasoningContentPreservesRawTextForReplay(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, string(data), `"summary":[{"text":"summary","type":"summary_text"}]`)
 	assert.Contains(t, string(data), `"content":[{"text":"raw reasoning","type":"reasoning_text"}]`)
+}
+
+func TestOpenAIReasoningReplayOmitsEmptyEncryptedContent(t *testing.T) {
+	param := openAIReasoningItemParam(&llm.ThinkingContent{
+		ID:       "rs_without_encrypted_content",
+		Thinking: "summary",
+	})
+	data, err := json.Marshal(param)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"id":"rs_without_encrypted_content"`)
+	assert.False(t, strings.Contains(string(data), `"encrypted_content"`))
 }
 
 func TestConvertResponseWithDifferentModels(t *testing.T) {

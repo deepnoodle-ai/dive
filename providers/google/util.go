@@ -541,7 +541,13 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 				return nil, fmt.Errorf("unsupported content type for google provider: %s", c.Type())
 			}
 		}
+		if len(content.Parts) == 0 {
+			continue
+		}
 		contents = append(contents, content)
+	}
+	if len(contents) == 0 {
+		return nil, fmt.Errorf("no messages remain after filtering unsupported content")
 	}
 
 	return contents, nil

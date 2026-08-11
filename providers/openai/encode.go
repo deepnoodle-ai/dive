@@ -568,8 +568,10 @@ func encodeReasoningContent(c *llm.ThinkingContent) responses.ResponseInputItemU
 
 func openAIReasoningItemParam(c *llm.ThinkingContent) *responses.ResponseReasoningItemParam {
 	param := &responses.ResponseReasoningItemParam{
-		ID:               c.ID,
-		EncryptedContent: openai.String(c.Signature),
+		ID: c.ID,
+	}
+	if c.Signature != "" {
+		param.EncryptedContent = openai.String(c.Signature)
 	}
 	var summaryItems []string
 	if c.Metadata != nil {

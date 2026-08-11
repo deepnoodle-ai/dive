@@ -151,6 +151,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 	choice := event.Choices[0]
 	var events []*llm.Event
+	var processErr error
 
 	// Emit message start event if this is the first event
 	if s.eventCount == 0 {
@@ -177,14 +178,13 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 	if s.providerName == "openrouter" && len(bytes.TrimSpace(choice.Delta.ReasoningDetails)) > 0 &&
 		!bytes.Equal(bytes.TrimSpace(choice.Delta.ReasoningDetails), []byte("null")) {
-		var err error
-		events, err = s.appendOpenRouterReasoningDetails(
+		events, processErr = s.appendOpenRouterReasoningDetails(
 			events,
 			choice.Delta.ReasoningDetails,
 			choice.Delta.Reasoning == "",
 		)
-		if err != nil {
-			return nil, err
+		if processErr != nil {
+			return nil, processErr
 		}
 	}
 
@@ -199,16 +199,28 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 					llm.ProviderMetadata{mistralThinkingMetadataKey: "true"})
 			}
 		case "text":
+			events, processErr = s.flushOpenRouterReasoningDetails(events)
+			if processErr != nil {
+				return nil, processErr
+			}
 			events = s.appendTextEvents(events, part.Text)
 		}
 	}
 
 	// Handle ordinary string-shaped text content.
 	if choice.Delta.Content != "" {
+		events, processErr = s.flushOpenRouterReasoningDetails(events)
+		if processErr != nil {
+			return nil, processErr
+		}
 		events = s.appendTextEvents(events, choice.Delta.Content)
 	}
 
 	if len(choice.Delta.ToolCalls) > 0 {
+		events, processErr = s.flushOpenRouterReasoningDetails(events)
+		if processErr != nil {
+			return nil, processErr
+		}
 		for _, toolCallDelta := range choice.Delta.ToolCalls {
 			// Map OpenAI tool call index to a sequential display index
 			index, known := s.toolCallIndices[toolCallDelta.Index]
@@ -292,6 +304,10 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	}
 
 	if choice.FinishReason != "" {
+		events, processErr = s.flushOpenRouterReasoningDetails(events)
+		if processErr != nil {
+			return nil, processErr
+		}
 		// Stop any open content blocks
 		for index, block := range s.contentBlocks {
 			blockIndex := index
@@ -341,9 +357,10 @@ func (s *StreamIterator) appendThinkingEvents(events []*llm.Event, text string, 
 		return events
 	}
 	events = s.ensureThinkingBlock(events, metadata)
+	index := s.thinkingIndex
 	return append(events, &llm.Event{
 		Type:  llm.EventTypeContentBlockDelta,
-		Index: &s.thinkingIndex,
+		Index: &index,
 		Delta: &llm.EventDelta{
 			Type:     llm.EventDeltaTypeThinking,
 			Thinking: text,
@@ -356,9 +373,10 @@ func (s *StreamIterator) ensureThinkingBlock(events []*llm.Event, metadata llm.P
 		s.thinkingIndex = s.nextBlockIndex
 		s.nextBlockIndex++
 		s.contentBlocks[s.thinkingIndex] = &ContentBlockAccumulator{Type: "thinking"}
+		index := s.thinkingIndex
 		events = append(events, &llm.Event{
 			Type:  llm.EventTypeContentBlockStart,
-			Index: &s.thinkingIndex,
+			Index: &index,
 			ContentBlock: &llm.EventContentBlock{
 				Type:     llm.ContentTypeThinking,
 				Metadata: metadata.Clone(),
@@ -386,28 +404,35 @@ func (s *StreamIterator) appendOpenRouterReasoningDetails(
 			append(json.RawMessage(nil), detail...),
 		)
 	}
+	events = s.ensureThinkingBlock(events, nil)
+	if includeVisibleText {
+		if text := reasoningDetailsText(raw); text != "" {
+			events = s.appendThinkingEvents(events, text, nil)
+		}
+	}
+	return events, nil
+}
+
+func (s *StreamIterator) flushOpenRouterReasoningDetails(events []*llm.Event) ([]*llm.Event, error) {
+	if len(s.openRouterReasoningDetails) == 0 || s.thinkingIndex < 0 {
+		return events, nil
+	}
 	fullDetails, err := json.Marshal(s.openRouterReasoningDetails)
 	if err != nil {
 		return nil, err
 	}
-	metadata := llm.ProviderMetadata{
-		openRouterReasoningDetailsMetadataKey: string(fullDetails),
-	}
-	events = s.ensureThinkingBlock(events, metadata)
-	if includeVisibleText {
-		if text := reasoningDetailsText(raw); text != "" {
-			events = s.appendThinkingEvents(events, text, metadata)
-		}
-	}
-	events = append(events, &llm.Event{
+	s.openRouterReasoningDetails = nil
+	index := s.thinkingIndex
+	return append(events, &llm.Event{
 		Type:  llm.EventTypeContentBlockDelta,
-		Index: &s.thinkingIndex,
+		Index: &index,
 		Delta: &llm.EventDelta{
-			Type:     llm.EventDeltaTypeMetadata,
-			Metadata: metadata,
+			Type: llm.EventDeltaTypeMetadata,
+			Metadata: llm.ProviderMetadata{
+				openRouterReasoningDetailsMetadataKey: string(fullDetails),
+			},
 		},
-	})
-	return events, nil
+	}), nil
 }
 
 func (s *StreamIterator) appendTextEvents(events []*llm.Event, text string) []*llm.Event {
