@@ -75,6 +75,15 @@ func WithName(name string) Option {
 	}
 }
 
+// WithPromptCacheKeySupport enables forwarding llm.Config.PromptCacheKey to
+// an OpenAI-compatible Responses API. Native OpenAI endpoints enable this
+// automatically; wrappers must opt in when their API supports the field.
+func WithPromptCacheKeySupport() Option {
+	return func(p *Provider) {
+		p.supportsPromptCacheKey = true
+	}
+}
+
 // WithExtraRequestOptions adds additional SDK request options that are applied
 // to every API call. This can be used to inject extra body fields (e.g., via
 // option.WithJSONSet) or custom headers for provider-specific features.

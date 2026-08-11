@@ -85,6 +85,10 @@ type TextPrice struct {
 	Model                        string `json:"model"`
 	InputPrice                   string `json:"input_price_per_1m_tokens"`
 	OutputPrice                  string `json:"output_price_per_1m_tokens"`
+	LongContextThreshold         int    `json:"long_context_threshold_tokens,omitempty"`
+	LongContextInputPrice        string `json:"long_context_input_price_per_1m_tokens,omitempty"`
+	LongContextCacheReadPrice    string `json:"long_context_cache_read_price_per_1m_tokens,omitempty"`
+	LongContextOutputPrice       string `json:"long_context_output_price_per_1m_tokens,omitempty"`
 	CacheReadPrice               string `json:"cache_read_price_per_1m_tokens,omitempty"`
 	CacheReadPriceAboveThreshold string `json:"cache_read_price_above_threshold_per_1m_tokens,omitempty"`
 	CacheReadPriceThreshold      int    `json:"cache_read_price_threshold_tokens,omitempty"`
@@ -307,6 +311,9 @@ func validateTextPrices(name string, prices []TextPrice) error {
 		for field, value := range map[string]string{
 			"input_price_per_1m_tokens":                      price.InputPrice,
 			"output_price_per_1m_tokens":                     price.OutputPrice,
+			"long_context_input_price_per_1m_tokens":         price.LongContextInputPrice,
+			"long_context_cache_read_price_per_1m_tokens":    price.LongContextCacheReadPrice,
+			"long_context_output_price_per_1m_tokens":        price.LongContextOutputPrice,
 			"cache_read_price_per_1m_tokens":                 price.CacheReadPrice,
 			"cache_read_price_above_threshold_per_1m_tokens": price.CacheReadPriceAboveThreshold,
 			"cache_write_price_per_1m_tokens":                price.CacheWritePrice,
@@ -319,6 +326,14 @@ func validateTextPrices(name string, prices []TextPrice) error {
 		hasPriceAboveThreshold := price.CacheReadPriceAboveThreshold != ""
 		if hasThreshold != hasPriceAboveThreshold || price.CacheReadPriceThreshold < 0 {
 			return fmt.Errorf("%s pricing for %s requires a positive cache-read threshold and above-threshold price together", name, price.Model)
+		}
+		hasLongThreshold := price.LongContextThreshold != 0
+		hasLongPrices := price.LongContextInputPrice != "" || price.LongContextCacheReadPrice != "" || price.LongContextOutputPrice != ""
+		if hasLongThreshold != hasLongPrices || price.LongContextThreshold < 0 {
+			return fmt.Errorf("%s pricing for %s requires a positive long-context threshold and long-context prices together", name, price.Model)
+		}
+		if hasLongThreshold && (price.LongContextInputPrice == "" || price.LongContextCacheReadPrice == "" || price.LongContextOutputPrice == "") {
+			return fmt.Errorf("%s pricing for %s requires input, cache-read, and output long-context prices", name, price.Model)
 		}
 	}
 	return nil

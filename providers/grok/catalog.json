@@ -214,99 +214,135 @@
         "model": "grok-4.5",
         "input_price_per_1m_tokens": "2.00",
         "output_price_per_1m_tokens": "6.00",
-        "cache_read_price_per_1m_tokens": "0.50",
+        "cache_read_price_per_1m_tokens": "0.30",
+        "long_context_threshold_tokens": 200000,
+        "long_context_input_price_per_1m_tokens": "4.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.60",
+        "long_context_output_price_per_1m_tokens": "12.00",
         "currency": "USD",
-        "updated_at": "2026-07-09"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "grok-4.3",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "long_context_threshold_tokens": 200000,
+        "long_context_input_price_per_1m_tokens": "2.50",
+        "long_context_cache_read_price_per_1m_tokens": "0.40",
+        "long_context_output_price_per_1m_tokens": "5.00",
         "currency": "USD",
-        "updated_at": "2026-05-28"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "grok-4.20-0309-reasoning",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "long_context_threshold_tokens": 200000,
+        "long_context_input_price_per_1m_tokens": "2.50",
+        "long_context_cache_read_price_per_1m_tokens": "0.40",
+        "long_context_output_price_per_1m_tokens": "5.00",
         "currency": "USD",
-        "updated_at": "2026-05-28"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "grok-4.20-0309-non-reasoning",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "long_context_threshold_tokens": 200000,
+        "long_context_input_price_per_1m_tokens": "2.50",
+        "long_context_cache_read_price_per_1m_tokens": "0.40",
+        "long_context_output_price_per_1m_tokens": "5.00",
         "currency": "USD",
-        "updated_at": "2026-05-28"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "grok-4.20-multi-agent-0309",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "long_context_threshold_tokens": 200000,
+        "long_context_input_price_per_1m_tokens": "2.50",
+        "long_context_cache_read_price_per_1m_tokens": "0.40",
+        "long_context_output_price_per_1m_tokens": "5.00",
         "currency": "USD",
-        "updated_at": "2026-05-28"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "grok-build-0.1",
         "input_price_per_1m_tokens": "1.00",
         "output_price_per_1m_tokens": "2.00",
+        "cache_read_price_per_1m_tokens": "0.20",
+        "long_context_threshold_tokens": 200000,
+        "long_context_input_price_per_1m_tokens": "2.00",
+        "long_context_cache_read_price_per_1m_tokens": "0.40",
+        "long_context_output_price_per_1m_tokens": "4.00",
         "currency": "USD",
-        "updated_at": "2026-05-28"
+        "updated_at": "2026-08-10"
       },
       {
         "model": "grok-4-1-fast-reasoning",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2026-08-09",
+        "updated_at": "2026-08-10",
         "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-1-fast-non-reasoning",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2026-08-09",
+        "updated_at": "2026-08-10",
         "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-fast-reasoning",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2026-08-09",
+        "updated_at": "2026-08-10",
         "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-fast-non-reasoning",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2026-08-09",
+        "updated_at": "2026-08-10",
         "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-4-0709",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2026-08-09",
+        "updated_at": "2026-08-10",
         "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {
         "model": "grok-code-fast-1",
         "input_price_per_1m_tokens": "1.00",
         "output_price_per_1m_tokens": "2.00",
+        "cache_read_price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2026-08-09",
+        "updated_at": "2026-08-10",
         "note": "Retired slug; requests are served by grok-build-0.1 and billed at its rates."
       },
       {
         "model": "grok-3",
         "input_price_per_1m_tokens": "1.25",
         "output_price_per_1m_tokens": "2.50",
+        "cache_read_price_per_1m_tokens": "0.20",
         "currency": "USD",
-        "updated_at": "2026-08-09",
+        "updated_at": "2026-08-10",
         "note": "Retired slug; requests are served by grok-4.3 and billed at its rates."
       },
       {

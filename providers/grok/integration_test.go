@@ -205,7 +205,7 @@ func TestIntegration_PromptCaching(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	cacheKey := fmt.Sprintf("dive-test-%s-%d", t.Name(), time.Now().UnixNano())
-	provider := New(WithPromptCacheKey(cacheKey))
+	provider := New()
 	ctx := testContext(t, 60*time.Second)
 
 	systemPrompt := "You are a helpful assistant that answers questions concisely. " +
@@ -213,6 +213,7 @@ func TestIntegration_PromptCaching(t *testing.T) {
 
 	// First request establishes the cache
 	response1, err := provider.Generate(ctx,
+		llm.WithPromptCacheKey(cacheKey),
 		llm.WithSystemPrompt(systemPrompt),
 		llm.WithMessages(
 			llm.NewUserTextMessage("What is 2+2?"),
@@ -226,6 +227,7 @@ func TestIntegration_PromptCaching(t *testing.T) {
 
 	// Second request with the same cache key should get cache hits
 	response2, err := provider.Generate(ctx,
+		llm.WithPromptCacheKey(cacheKey),
 		llm.WithSystemPrompt(systemPrompt),
 		llm.WithMessages(
 			llm.NewUserTextMessage("What is 2+2?"),
@@ -247,13 +249,14 @@ func TestIntegration_PromptCachingStream(t *testing.T) {
 	skipIfNoAPIKey(t)
 
 	cacheKey := fmt.Sprintf("dive-test-%s-%d", t.Name(), time.Now().UnixNano())
-	provider := New(WithPromptCacheKey(cacheKey))
+	provider := New()
 	ctx := testContext(t, 60*time.Second)
 
 	systemPrompt := "You are a helpful assistant. Always respond concisely in one sentence."
 
 	// First request populates the cache
 	iter1, err := provider.Stream(ctx,
+		llm.WithPromptCacheKey(cacheKey),
 		llm.WithSystemPrompt(systemPrompt),
 		llm.WithMessages(
 			llm.NewUserTextMessage("What is 2+2?"),
@@ -273,6 +276,7 @@ func TestIntegration_PromptCachingStream(t *testing.T) {
 
 	// Second request should hit the cache
 	iter2, err := provider.Stream(ctx,
+		llm.WithPromptCacheKey(cacheKey),
 		llm.WithSystemPrompt(systemPrompt),
 		llm.WithMessages(
 			llm.NewUserTextMessage("What is 2+2?"),

@@ -171,6 +171,42 @@ func TestBuildRequestParams_OlderModelOmitsExplicitPromptCaching(t *testing.T) {
 	assert.False(t, strings.Contains(string(body), `"prompt_cache_breakpoint"`))
 }
 
+func TestBuildRequestParams_CompatibleProviderOptsIntoPromptCacheKey(t *testing.T) {
+	provider := New(
+		WithAPIKey("test"),
+		WithName("compatible"),
+		WithEndpoint("https://example.com/v1"),
+		WithPromptCacheKeySupport(),
+	)
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithPromptCacheKey("stable-session-key"),
+		llm.WithMessages(llm.NewUserTextMessage("one")),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.True(t, params.PromptCacheKey.Valid())
+	assert.Equal(t, "stable-session-key", params.PromptCacheKey.Value)
+}
+
+func TestBuildRequestParams_CompatibleProviderOmitsUnsupportedPromptCacheKey(t *testing.T) {
+	provider := New(
+		WithAPIKey("test"),
+		WithName("compatible"),
+		WithEndpoint("https://example.com/v1"),
+	)
+	config := &llm.Config{}
+	config.Apply(
+		llm.WithPromptCacheKey("stable-session-key"),
+		llm.WithMessages(llm.NewUserTextMessage("one")),
+	)
+
+	params, err := provider.buildRequestParams(config)
+	assert.NoError(t, err)
+	assert.False(t, params.PromptCacheKey.Valid())
+}
+
 func TestBuildRequestParams_NoIncludesWhenToolOptsOut(t *testing.T) {
 	provider := New(WithAPIKey("test"))
 

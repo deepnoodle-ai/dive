@@ -477,6 +477,18 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                 fields = (
                     ("InputPrice", "input_price_per_1m_tokens"),
                     ("OutputPrice", "output_price_per_1m_tokens"),
+                    (
+                        "LongContextInputPrice",
+                        "long_context_input_price_per_1m_tokens",
+                    ),
+                    (
+                        "LongContextCacheReadPrice",
+                        "long_context_cache_read_price_per_1m_tokens",
+                    ),
+                    (
+                        "LongContextOutputPrice",
+                        "long_context_output_price_per_1m_tokens",
+                    ),
                     ("CacheReadPrice", "cache_read_price_per_1m_tokens"),
                     (
                         "CacheReadPriceAboveThreshold",
@@ -496,6 +508,11 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                 lines.append(
                     "\t\tCacheReadPriceThreshold: "
                     f"{entry['cache_read_price_threshold_tokens']},"
+                )
+            if table.kind == "text" and entry.get("long_context_threshold_tokens"):
+                lines.append(
+                    "\t\tLongContextThreshold: "
+                    f"{entry['long_context_threshold_tokens']},"
                 )
             if table.kind == "image" and entry.get("max_size"):
                 lines.append(f"\t\tMaxSize: {go_string(entry['max_size'])},")
