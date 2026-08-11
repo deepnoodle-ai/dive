@@ -3,6 +3,8 @@ package openaicompletions
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -109,6 +111,34 @@ func TestApplyReportedUsageCostRejectsNegativeCharge(t *testing.T) {
 	applyReportedUsageCost(Usage{Cost: &reported}, &usage, "model", "USD")
 	assert.Nil(t, usage.Cost)
 	assert.True(t, usage.CostEstimateUnavailable)
+}
+
+func TestGenerateTreatsNullUsageAsUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-null-usage",
+			"model":"gpt-5.5",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],
+			"usage":null
+		}`))
+	}))
+	t.Cleanup(server.Close)
+	provider := New(
+		WithAPIKey("test-key"),
+		WithEndpoint(server.URL),
+		WithModel(ModelGPT55),
+		WithMaxRetries(0),
+		WithReportedUsageCost("USD"),
+	)
+
+	response, err := provider.Generate(context.Background(),
+		llm.WithMessages(llm.NewUserTextMessage("hello")),
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "done", response.Message().Text())
+	assert.Nil(t, response.Usage.Cost)
+	assert.True(t, response.Usage.CostEstimateUnavailable)
 }
 
 func TestSupportsExplicitChatPromptCaching_AcceptsTrailingSlash(t *testing.T) {

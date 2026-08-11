@@ -4,6 +4,7 @@ const (
 	CostSourceListPriceEstimate = "list_price_estimate"
 	CostSourceProviderReported  = "provider_reported"
 	CostSourceMixed             = "mixed"
+	CostModelMixed              = "mixed"
 )
 
 // PricingInfo represents pricing information for a specific service
@@ -78,7 +79,7 @@ func (c *Cost) Add(other *Cost) {
 	if c.Model == "" {
 		c.Model = other.Model
 	} else if other.Model != "" && other.Model != c.Model {
-		c.Model = "mixed"
+		c.Model = CostModelMixed
 	}
 	if c.Source == "" {
 		c.Source = other.Source
@@ -131,7 +132,8 @@ func (p PricingInfo) CostOf(u *Usage) Cost {
 }
 
 // Scaled returns a deep copy with every token price multiplied by factor.
-// Thresholds and descriptive metadata are preserved.
+// Thresholds and descriptive metadata are preserved. The regional multiplier
+// is cleared because the returned prices already include the adjustment.
 func (p PricingInfo) Scaled(factor float64) PricingInfo {
 	p.InputPrice *= factor
 	p.OutputPrice *= factor
@@ -144,6 +146,7 @@ func (p PricingInfo) Scaled(factor float64) PricingInfo {
 	p.InputPriceByModality = scalePriceMap(p.InputPriceByModality, factor)
 	p.OutputPriceByModality = scalePriceMap(p.OutputPriceByModality, factor)
 	p.CacheReadPriceByModality = scalePriceMap(p.CacheReadPriceByModality, factor)
+	p.NonGlobalPriceMultiplier = 0
 	return p
 }
 

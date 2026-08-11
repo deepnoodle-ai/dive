@@ -208,8 +208,8 @@ func (u *Usage) Add(other *Usage) {
 		if u.Cost == nil {
 			costCopy := *other.Cost
 			u.Cost = &costCopy
-			return
+		} else {
+			u.Cost.Add(other.Cost)
 		}
-		u.Cost.Add(other.Cost)
 	}
 }

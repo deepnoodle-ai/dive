@@ -93,6 +93,28 @@ func TestStreamIteratorPreservesProviderReportedZeroCost(t *testing.T) {
 	assert.Equal(t, llm.CostSourceProviderReported, accumulator.Response().Usage.Cost.Source)
 }
 
+func TestStreamIteratorTreatsNullUsageAsUnavailable(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"id":"chatcmpl-null-usage","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{"role":"assistant","content":"done"}}]}`,
+		``,
+		`data: {"id":"chatcmpl-null-usage","object":"chat.completion.chunk","model":"gpt-5.5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: {"id":"chatcmpl-null-usage","object":"chat.completion.chunk","model":"gpt-5.5","choices":[],"usage":null}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	iterator := newTestStreamIterator(body)
+	iterator.reportedCostCurrency = "USD"
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+	_, accumulator := collectEvents(t, iterator)
+	response := accumulator.Response()
+	assert.Equal(t, "done", response.Message().Text())
+	assert.Nil(t, response.Usage.Cost)
+	assert.True(t, response.Usage.CostEstimateUnavailable)
+}
+
 // TestStreamIteratorSkipsSSEComments verifies that SSE comment lines (any
 // line beginning with ':') are ignored rather than parsed as JSON. OpenRouter
 // emits ": OPENROUTER PROCESSING" keep-alive comments while a model is queued

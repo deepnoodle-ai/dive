@@ -188,6 +188,10 @@ type Usage struct {
 }
 
 func (u *Usage) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		*u = Usage{}
+		return nil
+	}
 	type alias Usage
 	var decoded alias
 	if err := json.Unmarshal(data, &decoded); err != nil {

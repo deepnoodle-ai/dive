@@ -3,6 +3,7 @@ package google
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/deepnoodle-ai/dive"
@@ -46,7 +47,7 @@ func TestConvertUsageMetadataDisjointInputBuckets(t *testing.T) {
 	assert.Equal(t, 35, usage.OutputTokens)
 	assert.Equal(t, 10, usage.ReasoningTokens)
 	assert.Equal(t, 5, usage.ToolUseInputTokens)
-	assert.Equal(t, metadata.TotalTokenCount, int32(usage.TotalInputTokens()+usage.OutputTokens))
+	assert.Equal(t, int(metadata.TotalTokenCount), usage.TotalInputTokens()+usage.OutputTokens)
 	assert.True(t, usage.CacheCreationInputTokensUnavailable)
 	assert.Equal(t, llm.ModalityTokenUsage{
 		InputTokens: 35, OutputTokens: 35, CacheReadInputTokens: 70,
@@ -74,13 +75,6 @@ func TestConvertUsageMetadataRejectsInconsistentProviderCounts(t *testing.T) {
 			wantErr: "negative Gemini prompt",
 		},
 		{
-			name: "aggregate total mismatch",
-			metadata: &genai.GenerateContentResponseUsageMetadata{
-				PromptTokenCount: 10, CandidatesTokenCount: 5, TotalTokenCount: 99,
-			},
-			wantErr: "does not reconcile",
-		},
-		{
 			name: "modality total mismatch",
 			metadata: &genai.GenerateContentResponseUsageMetadata{
 				PromptTokenCount: 10,
@@ -91,6 +85,31 @@ func TestConvertUsageMetadataRejectsInconsistentProviderCounts(t *testing.T) {
 			},
 			wantErr: "modality tokens do not reconcile",
 		},
+		{
+			name: "nil modality detail",
+			metadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:    10,
+				TotalTokenCount:     10,
+				PromptTokensDetails: []*genai.ModalityTokenCount{nil},
+			},
+			wantErr: "invalid Gemini prompt modality token detail",
+		},
+		{
+			name: "cached modality above prompt modality",
+			metadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:        10,
+				CachedContentTokenCount: 5,
+				TotalTokenCount:         10,
+				PromptTokensDetails: []*genai.ModalityTokenCount{
+					{Modality: genai.MediaModalityText, TokenCount: 4},
+					{Modality: genai.MediaModalityAudio, TokenCount: 6},
+				},
+				CacheTokensDetails: []*genai.ModalityTokenCount{
+					{Modality: genai.MediaModalityText, TokenCount: 5},
+				},
+			},
+			wantErr: "invalid Gemini text cached token count",
+		},
 	}
 
 	for _, tt := range tests {
@@ -100,6 +119,83 @@ func TestConvertUsageMetadataRejectsInconsistentProviderCounts(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestConvertUsageMetadataDegradesAggregateMismatch(t *testing.T) {
+	usage, err := convertUsageMetadata(&genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:     10,
+		CandidatesTokenCount: 5,
+		TotalTokenCount:      99,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 10, usage.InputTokens)
+	assert.Equal(t, 5, usage.OutputTokens)
+	assert.True(t, usage.CostEstimateUnavailable)
+}
+
+func TestConvertUsageMetadataMarksOmittedAndUnspecifiedModalityDetailsIncomplete(t *testing.T) {
+	t.Run("cache details without prompt details", func(t *testing.T) {
+		usage, err := convertUsageMetadata(&genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:        10,
+			CachedContentTokenCount: 2,
+			TotalTokenCount:         10,
+			CacheTokensDetails: []*genai.ModalityTokenCount{{
+				Modality: genai.MediaModalityText, TokenCount: 2,
+			}},
+		})
+		assert.NoError(t, err)
+		assert.True(t, usage.InputModalityTokenDetailsIncomplete)
+		assert.True(t, usage.CacheReadModalityTokenDetailsIncomplete)
+		assert.Nil(t, usage.ModalityTokens)
+	})
+
+	t.Run("omitted", func(t *testing.T) {
+		usage, err := convertUsageMetadata(&genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:        10,
+			CachedContentTokenCount: 2,
+			CandidatesTokenCount:    3,
+			TotalTokenCount:         13,
+		})
+		assert.NoError(t, err)
+		assert.True(t, usage.InputModalityTokenDetailsIncomplete)
+		assert.True(t, usage.CacheReadModalityTokenDetailsIncomplete)
+		assert.True(t, usage.OutputModalityTokenDetailsIncomplete)
+		assert.Nil(t, usage.ModalityTokens)
+	})
+
+	t.Run("unspecified", func(t *testing.T) {
+		usage, err := convertUsageMetadata(&genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount: 10,
+			TotalTokenCount:  10,
+			PromptTokensDetails: []*genai.ModalityTokenCount{{
+				Modality: genai.MediaModalityUnspecified, TokenCount: 10,
+			}},
+		})
+		assert.NoError(t, err)
+		assert.True(t, usage.InputModalityTokenDetailsIncomplete)
+		assert.True(t, usage.CacheReadModalityTokenDetailsIncomplete)
+		assert.Nil(t, usage.ModalityTokens)
+	})
+}
+
+func TestConvertGoogleResponsePreservesContentWhenUsageTotalDoesNotReconcile(t *testing.T) {
+	response, err := convertGoogleResponse(&genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{{
+			Content:      &genai.Content{Parts: []*genai.Part{{Text: "completed answer"}}},
+			FinishReason: genai.FinishReasonStop,
+		}},
+		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     10,
+			CandidatesTokenCount: 5,
+			TotalTokenCount:      99,
+		},
+	}, ModelGemini25Pro)
+	assert.NoError(t, err)
+	assert.Equal(t, "completed answer", response.Message().Text())
+	assert.Equal(t, 10, response.Usage.InputTokens)
+	assert.Equal(t, 5, response.Usage.OutputTokens)
+	assert.True(t, response.Usage.CostEstimateUnavailable)
+	assert.True(t, strings.HasPrefix(response.ID, "google_"+ModelGemini25Pro+"_"))
 }
 
 func TestMessagesToContentsToolRoundTrip(t *testing.T) {

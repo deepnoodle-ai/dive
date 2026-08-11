@@ -96,6 +96,29 @@ func TestStreamIteratorUsageAndStopReason(t *testing.T) {
 	assert.Equal(t, "gemini-2.5-pro", response.Model)
 }
 
+func TestStreamIteratorPreservesContentWhenUsageTotalDoesNotReconcile(t *testing.T) {
+	final := textChunk(" answer")
+	final.Candidates[0].FinishReason = genai.FinishReasonStop
+	final.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:     10,
+		CandidatesTokenCount: 5,
+		TotalTokenCount:      99,
+	}
+
+	iterator := NewStreamIteratorFromSeq(context.Background(),
+		chunkSeq(textChunk("completed"), final), ModelGemini25Pro)
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+
+	events, accumulator := collectStreamEvents(t, iterator)
+	assert.Equal(t, llm.EventTypeMessageStop, events[len(events)-1].Type)
+	response := accumulator.Response()
+	assert.Equal(t, "completed answer", response.Message().Text())
+	assert.Equal(t, 10, response.Usage.InputTokens)
+	assert.Equal(t, 5, response.Usage.OutputTokens)
+	assert.True(t, response.Usage.CostEstimateUnavailable)
+	assert.Nil(t, response.Usage.Cost)
+}
+
 func TestStreamIteratorUsesServedModelAndPreservesRegionalCost(t *testing.T) {
 	final := textChunk("done")
 	final.ResponseID = "served-response-id"

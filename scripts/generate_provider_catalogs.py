@@ -305,7 +305,7 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                         f"{path}: {table_name}/{model_id} has incomplete long-context pricing"
                     )
                 multiplier = entry.get("non_global_price_multiplier")
-                if multiplier is not None and float(multiplier) <= 0:
+                if multiplier not in (None, "") and float(multiplier) <= 0:
                     raise CatalogError(
                         f"{path}: {table_name}/{model_id} has invalid non_global_price_multiplier"
                     )

@@ -94,7 +94,7 @@ func TestGoogleProLongContextPricingBoundary(t *testing.T) {
 				assert.Equal(t, boundary.totalInput, usage.TotalInputTokens())
 				cost := pricing.CostOf(&usage)
 				assert.Equal(t, float64(usage.InputTokens)*boundary.wantInput/1_000_000, cost.Input)
-				assert.Equal(t, boundary.wantCache/10, cost.CacheRead)
+				assert.InDelta(t, boundary.wantCache/10, cost.CacheRead, 1e-12)
 				assert.Equal(t, boundary.wantOutput, cost.Output)
 			}
 		})
@@ -127,7 +127,7 @@ func TestPopulateGoogleCostFailsClosed(t *testing.T) {
 		assert.Equal(t, 0.125, usage.Cost.Input)
 		assert.Equal(t, 0.0125, usage.Cost.CacheRead)
 		assert.Equal(t, 10.00, usage.Cost.Output)
-		assert.Equal(t, "standard", usage.ServiceTier)
+		assert.Equal(t, "", usage.ServiceTier)
 	})
 
 	t.Run("Vertex regional multiplier", func(t *testing.T) {
@@ -141,12 +141,22 @@ func TestPopulateGoogleCostFailsClosed(t *testing.T) {
 		assert.InDelta(t, 9.90, usage.Cost.Output, 1e-12)
 	})
 
+	t.Run("Vertex on-demand tier", func(t *testing.T) {
+		usage := &llm.Usage{InputTokens: 1}
+		populateGoogleCost(ModelGemini35Flash, &genai.GenerateContentResponseUsageMetadata{
+			TrafficType: genai.TrafficTypeOnDemand,
+		}, usage, googlePricingContext{vertexAI: true, location: "global"})
+		assert.NotNil(t, usage.Cost)
+		assert.Equal(t, "standard", usage.ServiceTier)
+	})
+
 	tests := []struct {
 		name     string
 		model    string
 		metadata *genai.GenerateContentResponseUsageMetadata
 		usage    *llm.Usage
 		context  googlePricingContext
+		wantTier string
 	}{
 		{
 			name: "uncataloged model", model: "gemini-future-model",
@@ -161,8 +171,9 @@ func TestPopulateGoogleCostFailsClosed(t *testing.T) {
 			metadata: &genai.GenerateContentResponseUsageMetadata{
 				TrafficType: genai.TrafficTypeOnDemandPriority,
 			},
-			usage:   &llm.Usage{InputTokens: 1},
-			context: googlePricingContext{vertexAI: true, location: "global"},
+			usage:    &llm.Usage{InputTokens: 1},
+			context:  googlePricingContext{vertexAI: true, location: "global"},
+			wantTier: "priority",
 		},
 		{
 			name: "unsupported request tier", model: ModelGemini35Flash,
@@ -176,8 +187,8 @@ func TestPopulateGoogleCostFailsClosed(t *testing.T) {
 			populateGoogleCost(tt.model, tt.metadata, tt.usage, tt.context)
 			assert.Nil(t, tt.usage.Cost)
 			assert.True(t, tt.usage.CostEstimateUnavailable)
-			if tt.name == "Vertex priority traffic" {
-				assert.Equal(t, "priority", tt.usage.ServiceTier)
+			if tt.wantTier != "" {
+				assert.Equal(t, tt.wantTier, tt.usage.ServiceTier)
 			}
 		})
 	}

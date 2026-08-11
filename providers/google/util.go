@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
@@ -75,7 +76,7 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	}
 	responseID := resp.ResponseID
 	if responseID == "" {
-		responseID = fmt.Sprintf("google_%d", candidate.Index)
+		responseID = fmt.Sprintf("google_%s_%d", model, time.Now().UnixNano())
 	}
 	servedModel := resp.ModelVersion
 	if servedModel == "" {
@@ -98,9 +99,10 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 }
 
 // convertUsageMetadata converts Gemini's subset-shaped prompt usage to Dive's
-// disjoint buckets and fails closed if Google's aggregate does not reconcile
-// with its components. Gemini bills thoughts as output and tool results as
-// input, so both are included in their respective aggregate buckets.
+// disjoint buckets. Gemini bills thoughts as output and tool results as input,
+// so both are included in their respective aggregate buckets. If Google's
+// aggregate does not reconcile, component counts remain available while cost
+// estimation fails closed.
 func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) (llm.Usage, error) {
 	if metadata == nil {
 		return llm.Usage{}, nil
@@ -122,14 +124,6 @@ func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) 
 	if cached > prompt {
 		return llm.Usage{}, fmt.Errorf("invalid Gemini cached token count %d above prompt count %d", cached, prompt)
 	}
-	expectedTotal := prompt + candidates + thoughts + toolUse
-	if total != expectedTotal {
-		return llm.Usage{}, fmt.Errorf(
-			"Gemini token total does not reconcile: total=%d prompt=%d candidates=%d thoughts=%d tool_use=%d",
-			total, prompt, candidates, thoughts, toolUse,
-		)
-	}
-
 	usage := llm.Usage{
 		InputTokens:                         prompt - cached + toolUse,
 		OutputTokens:                        candidates + thoughts,
@@ -137,6 +131,10 @@ func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) 
 		ToolUseInputTokens:                  toolUse,
 		ReasoningTokens:                     thoughts,
 		CacheCreationInputTokensUnavailable: true,
+	}
+	expectedTotal := prompt + candidates + thoughts + toolUse
+	if total != expectedTotal {
+		usage.CostEstimateUnavailable = true
 	}
 	promptDetails, promptComplete, err := modalityCounts(metadata.PromptTokensDetails, prompt, "prompt")
 	if err != nil {
@@ -156,7 +154,7 @@ func convertUsageMetadata(metadata *genai.GenerateContentResponseUsageMetadata) 
 	}
 	inputComplete := promptComplete && cacheComplete && toolComplete
 	usage.InputModalityTokenDetailsIncomplete = !inputComplete
-	usage.CacheReadModalityTokenDetailsIncomplete = !cacheComplete
+	usage.CacheReadModalityTokenDetailsIncomplete = !inputComplete
 	usage.OutputModalityTokenDetailsIncomplete = !candidatesComplete
 	if inputComplete || candidatesComplete {
 		usage.ModalityTokens = make(map[string]llm.ModalityTokenUsage)
@@ -217,7 +215,7 @@ func modalityCounts(details []*genai.ModalityTokenCount, total int, label string
 		}
 		modality := strings.ToLower(string(detail.Modality))
 		if detail.Modality == genai.MediaModalityUnspecified || modality == "" {
-			modality = "text"
+			return nil, false, nil
 		}
 		count := int(detail.TokenCount)
 		counts[modality] += count
@@ -225,7 +223,7 @@ func modalityCounts(details []*genai.ModalityTokenCount, total int, label string
 	}
 	if sum != total {
 		return nil, false, fmt.Errorf(
-			"Gemini %s modality tokens do not reconcile: details=%d aggregate=%d",
+			"gemini %s modality tokens do not reconcile: details=%d aggregate=%d",
 			label, sum, total,
 		)
 	}

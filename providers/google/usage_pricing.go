@@ -66,7 +66,9 @@ func populateGoogleCost(model string, metadata *genai.GenerateContentResponseUsa
 	}
 	if context.vertexAI && metadata != nil {
 		switch metadata.TrafficType {
-		case "", genai.TrafficTypeUnspecified, genai.TrafficTypeOnDemand:
+		case "", genai.TrafficTypeUnspecified:
+			// No confirmed traffic type; retain any explicitly requested tier.
+		case genai.TrafficTypeOnDemand:
 			usage.ServiceTier = "standard"
 			// Standard pay-as-you-go pricing is represented below.
 		case genai.TrafficTypeOnDemandPriority:
@@ -86,6 +88,10 @@ func populateGoogleCost(model string, metadata *genai.GenerateContentResponseUsa
 			markGoogleCostUnavailable(usage)
 			return
 		}
+	}
+	if usage.CostEstimateUnavailable {
+		markGoogleCostUnavailable(usage)
+		return
 	}
 	if _, ok := verifiedGoogleTextPricing[model]; !ok {
 		markGoogleCostUnavailable(usage)
@@ -115,8 +121,10 @@ func googleServiceTierName(tier genai.ServiceTier) string {
 		return "flex"
 	case genai.ServiceTierPriority:
 		return "priority"
-	default:
+	case genai.ServiceTierStandard:
 		return "standard"
+	default:
+		return ""
 	}
 }
 

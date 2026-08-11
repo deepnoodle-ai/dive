@@ -244,9 +244,9 @@ func TestUsageAddAndCopyPreserveBillingDetails(t *testing.T) {
 	assert.NotNil(t, usage.Cost)
 	assert.Equal(t, 3.0, usage.Cost.Total)
 
-	copy := usage.Copy()
-	copy.ModalityTokens["text"] = ModalityTokenUsage{InputTokens: 999}
-	copy.Cost.Total = 999
+	cp := usage.Copy()
+	cp.ModalityTokens["text"] = ModalityTokenUsage{InputTokens: 999}
+	cp.Cost.Total = 999
 	assert.Equal(t, 15, usage.ModalityTokens["text"].InputTokens)
 	assert.Equal(t, 3.0, usage.Cost.Total)
 

@@ -98,10 +98,10 @@ func TestPricingInfoCostOf_ModalityOverrides(t *testing.T) {
 	}
 
 	cost := p.CostOf(u)
-	assert.Equal(t, 5.0, cost.Input)
-	assert.Equal(t, 10.0, cost.Output)
-	assert.Equal(t, 0.5, cost.CacheRead)
-	assert.Equal(t, 15.5, cost.Total)
+	assert.InDelta(t, 5.0, cost.Input, 1e-12)
+	assert.InDelta(t, 10.0, cost.Output, 1e-12)
+	assert.InDelta(t, 0.5, cost.CacheRead, 1e-12)
+	assert.InDelta(t, 15.5, cost.Total, 1e-12)
 }
 
 func TestPricingInfoScaledDeepCopiesPrices(t *testing.T) {
@@ -126,6 +126,7 @@ func TestPricingInfoScaledDeepCopiesPrices(t *testing.T) {
 	assert.Equal(t, p.InputPriceByModality["audio"]*factor, scaled.InputPriceByModality["audio"])
 	assert.Equal(t, p.CacheReadPriceByModality["audio"]*factor, scaled.CacheReadPriceByModality["audio"])
 	assert.Equal(t, p.OutputPriceByModality["audio"]*factor, scaled.OutputPriceByModality["audio"])
+	assert.Equal(t, 0.0, scaled.NonGlobalPriceMultiplier)
 	scaled.InputPriceByModality["audio"] = 99
 	assert.Equal(t, 4.0, p.InputPriceByModality["audio"])
 }
@@ -141,7 +142,7 @@ func TestUsageCostAddAndCopy(t *testing.T) {
 	assert.Equal(t, 0.25, a.Cost.Output)
 	assert.Equal(t, 1.75, a.Cost.Total)
 	assert.Equal(t, "USD", a.Cost.Currency)
-	assert.Equal(t, "mixed", a.Cost.Model)
+	assert.Equal(t, CostModelMixed, a.Cost.Model)
 	assert.Equal(t, CostSourceMixed, a.Cost.Source)
 	assert.True(t, a.Cost.BreakdownUnavailable)
 

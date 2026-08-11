@@ -121,9 +121,10 @@ func formatCacheCreationTokens(u *llm.Usage) string {
 	return formatTokenCount(u.CacheCreationInputTokens)
 }
 
-// hasUsage returns true if the usage has any non-zero token counts.
+// hasUsage returns true if the usage has any recorded token metric.
 func hasUsage(u *llm.Usage) bool {
-	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0
+	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 ||
+		u.CacheCreationInputTokens > 0 || u.CacheCreationInputTokensUnavailable
 }
 
 // tokensPanelView renders a clearly-labeled token + cache breakdown table, one

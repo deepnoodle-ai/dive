@@ -306,7 +306,7 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	case string(genai.ServiceTierStandard):
 		req.ServiceTier = genai.ServiceTierStandard
 	case string(genai.ServiceTierFlex), string(genai.ServiceTierPriority):
-		return fmt.Errorf("Google service tier %q is not supported until tier-specific billing is cataloged", config.ServiceTier)
+		return fmt.Errorf("google service tier %q is not supported until tier-specific billing is cataloged", config.ServiceTier)
 	default:
 		return fmt.Errorf("invalid Google service tier: %s", config.ServiceTier)
 	}

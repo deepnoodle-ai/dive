@@ -59,6 +59,23 @@ func TestTokensPanelView_NilWhenNoUsage(t *testing.T) {
 	assert.Nil(t, app.tokensPanelView(), "panel should be nil before any tokens are recorded")
 }
 
+func TestTokensPanelView_ShowsUnavailableCacheWritesWithoutTokenCounts(t *testing.T) {
+	app := newTestApp()
+	app.interactionUsage = &llm.Usage{CacheCreationInputTokensUnavailable: true}
+
+	panel := app.tokensPanelView()
+	assert.NotNil(t, panel)
+	text := tui.Sprint(panel, tui.WithWidth(100))
+	assert.True(t, strings.Contains(text, "cache write"))
+	assert.True(t, strings.Contains(text, "—"))
+
+	report := app.usageReportView()
+	assert.NotNil(t, report)
+	reportText := tui.Sprint(report, tui.WithWidth(100))
+	assert.True(t, strings.Contains(reportText, "cache write"))
+	assert.True(t, strings.Contains(reportText, "—"))
+}
+
 func TestTokensPanelView_ShowsCacheReadsWritesAndHitRate(t *testing.T) {
 	app := newTestApp()
 	app.interactionUsage = &llm.Usage{

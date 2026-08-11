@@ -212,11 +212,19 @@ func TestProviderServiceTierValidation(t *testing.T) {
 		})
 	}
 
-	for _, tier := range []string{"flex", "priority", "unknown"} {
-		t.Run("rejected/"+tier, func(t *testing.T) {
+	for _, tt := range []struct {
+		tier    string
+		wantErr string
+	}{
+		{tier: "flex", wantErr: `google service tier "flex" is not supported until tier-specific billing is cataloged`},
+		{tier: "priority", wantErr: `google service tier "priority" is not supported until tier-specific billing is cataloged`},
+		{tier: "unknown", wantErr: "invalid Google service tier: unknown"},
+	} {
+		t.Run("rejected/"+tt.tier, func(t *testing.T) {
 			var request Request
-			err := provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tier})
+			err := provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tt.tier})
 			assert.Error(t, err)
+			assert.Equal(t, tt.wantErr, err.Error())
 		})
 	}
 }
