@@ -103,6 +103,14 @@ func TestApplyRequestConfig_OpenAIPromptCacheKey(t *testing.T) {
 	assert.Equal(t, "stable-session-key", req.PromptCacheKey)
 }
 
+func TestApplyReportedUsageCostRejectsNegativeCharge(t *testing.T) {
+	reported := -0.01
+	usage := llm.Usage{}
+	applyReportedUsageCost(Usage{Cost: &reported}, &usage, "model", "USD")
+	assert.Nil(t, usage.Cost)
+	assert.True(t, usage.CostEstimateUnavailable)
+}
+
 func TestSupportsExplicitChatPromptCaching_AcceptsTrailingSlash(t *testing.T) {
 	assert.True(t, supportsExplicitChatPromptCaching("openai-completions", DefaultEndpoint+"/", ModelGPT56Luna))
 }

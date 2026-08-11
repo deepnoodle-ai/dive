@@ -199,3 +199,58 @@ func TestUsageCanonicalRoundTripPreservesCost(t *testing.T) {
 	assert.Equal(t, 99.0, decoded.Cost.Total)
 	assert.Equal(t, "test-model", decoded.Cost.Model)
 }
+
+func TestUsageAddAndCopyPreserveBillingDetails(t *testing.T) {
+	usage := &Usage{
+		InputTokens:        10,
+		OutputTokens:       20,
+		ToolUseInputTokens: 3,
+		ServiceTier:        "standard",
+		ModalityTokens: map[string]ModalityTokenUsage{
+			"text": {InputTokens: 10, OutputTokens: 20},
+		},
+		Cost: &Cost{Input: 1, Total: 1, Currency: "USD"},
+	}
+	usage.Add(&Usage{
+		InputTokens:                             5,
+		OutputTokens:                            7,
+		CacheReadInputTokens:                    11,
+		ToolUseInputTokens:                      2,
+		ReasoningTokens:                         4,
+		ServiceTier:                             "priority",
+		InputModalityTokenDetailsIncomplete:     true,
+		OutputModalityTokenDetailsIncomplete:    true,
+		CacheReadModalityTokenDetailsIncomplete: true,
+		CacheCreationInputTokensUnavailable:     true,
+		ModalityTokens: map[string]ModalityTokenUsage{
+			"text":  {InputTokens: 5, OutputTokens: 7},
+			"audio": {CacheReadInputTokens: 11},
+		},
+		Cost: &Cost{Output: 2, Total: 2},
+	})
+
+	assert.Equal(t, 15, usage.InputTokens)
+	assert.Equal(t, 27, usage.OutputTokens)
+	assert.Equal(t, 11, usage.CacheReadInputTokens)
+	assert.Equal(t, 5, usage.ToolUseInputTokens)
+	assert.Equal(t, 4, usage.ReasoningTokens)
+	assert.Equal(t, "mixed", usage.ServiceTier)
+	assert.True(t, usage.InputModalityTokenDetailsIncomplete)
+	assert.True(t, usage.OutputModalityTokenDetailsIncomplete)
+	assert.True(t, usage.CacheReadModalityTokenDetailsIncomplete)
+	assert.True(t, usage.CacheCreationInputTokensUnavailable)
+	assert.Equal(t, ModalityTokenUsage{InputTokens: 15, OutputTokens: 27}, usage.ModalityTokens["text"])
+	assert.Equal(t, ModalityTokenUsage{CacheReadInputTokens: 11}, usage.ModalityTokens["audio"])
+	assert.NotNil(t, usage.Cost)
+	assert.Equal(t, 3.0, usage.Cost.Total)
+
+	copy := usage.Copy()
+	copy.ModalityTokens["text"] = ModalityTokenUsage{InputTokens: 999}
+	copy.Cost.Total = 999
+	assert.Equal(t, 15, usage.ModalityTokens["text"].InputTokens)
+	assert.Equal(t, 3.0, usage.Cost.Total)
+
+	usage.Add(&Usage{CostEstimateUnavailable: true})
+	assert.True(t, usage.CostEstimateUnavailable)
+	assert.Nil(t, usage.Cost)
+}

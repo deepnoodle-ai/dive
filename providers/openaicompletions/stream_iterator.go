@@ -34,8 +34,9 @@ type StreamIterator struct {
 	finalEvents []*llm.Event
 	// thinkingIndex and textIndex track the sequential content block index
 	// assigned to each block type, or -1 if not yet started.
-	thinkingIndex int
-	textIndex     int
+	thinkingIndex        int
+	textIndex            int
+	reportedCostCurrency string
 	// toolCallIndices maps OpenAI tool call indices to sequential block indices.
 	toolCallIndices map[int]int
 }
@@ -137,7 +138,7 @@ func (s *StreamIterator) next() ([]*llm.Event, error) {
 	if event.Model != "" {
 		s.responseModel = event.Model
 	}
-	if event.Usage.TotalTokens > 0 {
+	if event.Usage.present || event.Usage.TotalTokens > 0 || event.Usage.Cost != nil {
 		s.usage = event.Usage
 	}
 	if len(event.Choices) == 0 {
@@ -379,10 +380,25 @@ func (s *StreamIterator) flushFinalEvents() []*llm.Event {
 	s.finalEvents = nil
 	for _, event := range events {
 		if event.Type == llm.EventTypeMessageDelta && event.Usage != nil {
-			*event.Usage = s.usage.toLLMUsage()
+			*event.Usage = s.llmUsage()
 		}
 	}
 	return events
+}
+
+func (s *StreamIterator) llmUsage() llm.Usage {
+	usage := s.usage.toLLMUsage()
+	applyReportedUsageCost(s.usage, &usage, s.responseModel, s.reportedCostCurrency)
+	if s.reportedCostCurrency != "" && !s.usage.present {
+		usage.Cost = nil
+		usage.CostEstimateUnavailable = true
+	} else if s.reportedCostCurrency != "" && usage.Cost == nil {
+		llm.PopulateCost(s.responseModel, false, &usage)
+		if usage.Cost == nil {
+			usage.CostEstimateUnavailable = true
+		}
+	}
+	return usage
 }
 
 func (s *StreamIterator) Close() error {

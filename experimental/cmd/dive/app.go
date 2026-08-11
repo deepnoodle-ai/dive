@@ -2528,6 +2528,13 @@ func (a *App) usageReportView() tui.View {
 		}
 		return tui.Group(cells...)
 	}
+	formattedTokRow := func(label string, get func(*llm.Usage) string) tui.View {
+		cells := []tui.View{left(labelW, "  "+label, rowLabelStyle)}
+		for _, c := range cols {
+			cells = append(cells, right(colW, get(c.u), valStyle))
+		}
+		return tui.Group(cells...)
+	}
 
 	headerCells := []tui.View{left(labelW, "", labelStyle)}
 	for _, c := range cols {
@@ -2540,7 +2547,7 @@ func (a *App) usageReportView() tui.View {
 		tui.Group(headerCells...),
 		tokRow("input", func(u *llm.Usage) int { return u.InputTokens }),
 		tokRow("cache read", func(u *llm.Usage) int { return u.CacheReadInputTokens }),
-		tokRow("cache write", func(u *llm.Usage) int { return u.CacheCreationInputTokens }),
+		formattedTokRow("cache write", formatCacheCreationTokens),
 		tokRow("output", func(u *llm.Usage) int { return u.OutputTokens }),
 	}
 	if turn.ReasoningTokens > 0 || sess.ReasoningTokens > 0 {
@@ -2564,7 +2571,7 @@ func (a *App) usageReportView() tui.View {
 		}
 	}
 	if hasCost {
-		costCells := []tui.View{left(labelW, "  est. cost", rowLabelStyle)}
+		costCells := []tui.View{left(labelW, "  cost", rowLabelStyle)}
 		for _, c := range cols {
 			costCells = append(costCells, right(colW, costString(c.u), valStyle))
 		}
@@ -2573,12 +2580,12 @@ func (a *App) usageReportView() tui.View {
 
 	views = append(views,
 		tui.Text(""),
-		tui.Text("  cache read  — prompt tokens served from cache (cheap, ~0.1x)").Style(labelStyle),
-		tui.Text("  cache write — prompt tokens written to cache (premium, 1.25-2x)").Style(labelStyle),
+		tui.Text("  cache read  — prompt tokens served from cache at the provider's rate").Style(labelStyle),
+		tui.Text("  cache write — prompt tokens written to cache, when reported").Style(labelStyle),
 		tui.Text("  cache hit   — cache read / total input tokens").Style(labelStyle),
 	)
 	if hasCost {
-		views = append(views, tui.Text("  est. cost   — estimated at list prices; not a bill").Style(labelStyle))
+		views = append(views, tui.Text("  cost        — provider charge when reported; otherwise a list-price estimate").Style(labelStyle))
 	}
 	if a.lastUsage != nil && a.lastUsage.Speed != "" {
 		views = append(views, tui.Text("  speed       — %s mode", a.lastUsage.Speed).Style(labelStyle))

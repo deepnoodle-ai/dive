@@ -11,6 +11,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/schema"
+	"google.golang.org/genai"
 )
 
 // hasGoogleAPIKey returns true if a Google API key is available
@@ -194,6 +195,30 @@ func TestProviderVertexAIOption(t *testing.T) {
 	assert.True(t, provider.vertexAI, "WithVertexAI should enable the Vertex backend")
 	assert.Equal(t, "us-central1", provider.location)
 	assert.Equal(t, "test-project", provider.projectID)
+}
+
+func TestProviderServiceTierValidation(t *testing.T) {
+	provider := New()
+
+	for _, tier := range []string{"", "default", "standard", "STANDARD"} {
+		t.Run("accepted/"+tier, func(t *testing.T) {
+			var request Request
+			assert.NoError(t, provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tier}))
+			if strings.EqualFold(tier, "standard") {
+				assert.Equal(t, genai.ServiceTierStandard, request.ServiceTier)
+			} else {
+				assert.Equal(t, genai.ServiceTierUnspecified, request.ServiceTier)
+			}
+		})
+	}
+
+	for _, tier := range []string{"flex", "priority", "unknown"} {
+		t.Run("rejected/"+tier, func(t *testing.T) {
+			var request Request
+			err := provider.applyRequestConfig(&request, &llm.Config{ServiceTier: tier})
+			assert.Error(t, err)
+		})
+	}
 }
 
 // func TestConvertMessages(t *testing.T) {

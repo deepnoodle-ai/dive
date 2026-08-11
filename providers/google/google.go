@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,14 +161,13 @@ func (p *Provider) Generate(ctx context.Context, opts ...llm.Option) (*llm.Respo
 		if convErr != nil {
 			return fmt.Errorf("error converting response: %w", convErr)
 		}
+		populateGoogleCost(result.Model, resp.UsageMetadata, &result.Usage, p.pricingContext(request.ServiceTier))
 		return nil
 	}, retry.WithMaxAttempts(p.maxRetries+1), retry.WithBackoff(p.retryBaseWait, 5*time.Minute), retry.WithRetryIf(retry.SkipPermanent()))
 
 	if err != nil {
 		return nil, err
 	}
-
-	llm.PopulateCost(result.Model, result.Usage.Speed == string(llm.SpeedFast), &result.Usage)
 
 	if err := config.FireHooks(ctx, &llm.HookContext{
 		Type: llm.AfterGenerate,
@@ -234,7 +234,7 @@ func (p *Provider) Stream(ctx context.Context, opts ...llm.Option) (llm.StreamIt
 		// sequence. The shared iterator consumes the first result as part of
 		// the provider's pre-event retry boundary.
 		streamSeq := p.client.Models.GenerateContentStream(ctx, request.Model, contents, genConfig)
-		return NewStreamIteratorFromSeq(ctx, streamSeq, request.Model), nil
+		return newStreamIteratorFromSeq(ctx, streamSeq, request.Model, p.pricingContext(request.ServiceTier)), nil
 	})
 
 	return stream, nil
@@ -300,6 +300,16 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 
 	req.Thinking = buildThinkingConfig(req.Model, config)
 	req.System = config.SystemPrompt
+	switch strings.ToLower(config.ServiceTier) {
+	case "", "default":
+		req.ServiceTier = genai.ServiceTierUnspecified
+	case string(genai.ServiceTierStandard):
+		req.ServiceTier = genai.ServiceTierStandard
+	case string(genai.ServiceTierFlex), string(genai.ServiceTierPriority):
+		return fmt.Errorf("Google service tier %q is not supported until tier-specific billing is cataloged", config.ServiceTier)
+	default:
+		return fmt.Errorf("invalid Google service tier: %s", config.ServiceTier)
+	}
 
 	return nil
 }

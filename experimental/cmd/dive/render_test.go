@@ -16,6 +16,14 @@ func TestFormatTokenCount(t *testing.T) {
 	assert.Equal(t, "1.0M", formatTokenCount(1000000))
 }
 
+func TestFormatCacheCreationTokens(t *testing.T) {
+	assert.Equal(t, "0", formatCacheCreationTokens(&llm.Usage{}), "reported zero should remain zero")
+	assert.Equal(t, "2.0k", formatCacheCreationTokens(&llm.Usage{CacheCreationInputTokens: 2000}))
+	assert.Equal(t, "—", formatCacheCreationTokens(&llm.Usage{
+		CacheCreationInputTokensUnavailable: true,
+	}), "an unavailable provider metric must not look like a measured zero")
+}
+
 func TestCacheHitRate(t *testing.T) {
 	// Healthy: mostly reads.
 	rate, ok := cacheHitRate(&llm.Usage{CacheReadInputTokens: 13500, CacheCreationInputTokens: 500})

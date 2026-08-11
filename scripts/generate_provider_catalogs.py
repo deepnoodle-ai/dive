@@ -198,7 +198,12 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
     pricing = catalog.get("pricing", {})
     if not isinstance(pricing, dict):
         raise CatalogError(f"{path}: pricing must be an object")
-    if set(pricing) - {"text", "fast_text", "image", "embedding"}:
+    if set(pricing) - {
+        "text",
+        "fast_text",
+        "image",
+        "embedding",
+    }:
         raise CatalogError(f"{path}: unknown pricing table")
     for table_name, entries in pricing.items():
         if not isinstance(entries, list):
@@ -220,8 +225,13 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                 )
                 # Optional, but still interpolated into Go source unquoted.
                 optional_price_fields = (
+                    "long_context_input_price_per_1m_tokens",
+                    "long_context_cache_read_price_per_1m_tokens",
+                    "long_context_output_price_per_1m_tokens",
                     "cache_read_price_per_1m_tokens",
+                    "cache_read_price_above_threshold_per_1m_tokens",
                     "cache_write_price_per_1m_tokens",
+                    "non_global_price_multiplier",
                 )
             elif table_name == "image":
                 price_fields = ("price_per_image",)
@@ -242,6 +252,62 @@ def validate_catalog(catalog: Mapping[str, Any], provider: str, path: Path) -> N
                 if not isinstance(value, str) or not DECIMAL_RE.fullmatch(value):
                     raise CatalogError(
                         f"{path}: {table_name}/{model_id} has invalid {field}"
+                    )
+            if table_name in {"text", "fast_text"}:
+                for field in (
+                    "input_price_per_1m_tokens_by_modality",
+                    "output_price_per_1m_tokens_by_modality",
+                    "cache_read_price_per_1m_tokens_by_modality",
+                ):
+                    values = entry.get(field)
+                    if values is None:
+                        continue
+                    if not isinstance(values, dict) or not values:
+                        raise CatalogError(
+                            f"{path}: {table_name}/{model_id} has invalid {field}"
+                        )
+                    for modality, value in values.items():
+                        if (
+                            not isinstance(modality, str)
+                            or not modality
+                            or modality.lower() != modality
+                            or not isinstance(value, str)
+                            or not DECIMAL_RE.fullmatch(value)
+                        ):
+                            raise CatalogError(
+                                f"{path}: {table_name}/{model_id} has invalid {field}/{modality}"
+                            )
+                cache_threshold = entry.get("cache_read_price_threshold_tokens")
+                cache_above = entry.get(
+                    "cache_read_price_above_threshold_per_1m_tokens"
+                )
+                if bool(cache_threshold) != bool(cache_above) or (
+                    cache_threshold is not None
+                    and (not isinstance(cache_threshold, int) or cache_threshold <= 0)
+                ):
+                    raise CatalogError(
+                        f"{path}: {table_name}/{model_id} has incomplete cache-read threshold pricing"
+                    )
+                long_threshold = entry.get("long_context_threshold_tokens")
+                long_prices = tuple(
+                    entry.get(field)
+                    for field in (
+                        "long_context_input_price_per_1m_tokens",
+                        "long_context_cache_read_price_per_1m_tokens",
+                        "long_context_output_price_per_1m_tokens",
+                    )
+                )
+                if bool(long_threshold) != any(long_prices) or (
+                    long_threshold is not None
+                    and (not isinstance(long_threshold, int) or long_threshold <= 0)
+                ) or (long_threshold and not all(long_prices)):
+                    raise CatalogError(
+                        f"{path}: {table_name}/{model_id} has incomplete long-context pricing"
+                    )
+                multiplier = entry.get("non_global_price_multiplier")
+                if multiplier is not None and float(multiplier) <= 0:
+                    raise CatalogError(
+                        f"{path}: {table_name}/{model_id} has invalid non_global_price_multiplier"
                     )
             for field in ("currency", "updated_at"):
                 value = entry.get(field)
@@ -495,6 +561,7 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                         "cache_read_price_above_threshold_per_1m_tokens",
                     ),
                     ("CacheWritePrice", "cache_write_price_per_1m_tokens"),
+                    ("NonGlobalPriceMultiplier", "non_global_price_multiplier"),
                 )
             elif table.kind == "image":
                 fields = (("Price", "price_per_image"),)
@@ -504,6 +571,30 @@ def render_pricing(target: Target, catalog: Mapping[str, Any]) -> str:
                 value = entry.get(json_field)
                 if value not in (None, ""):
                     lines.append(f"\t\t{go_field}: {value},")
+            if table.kind == "text":
+                for go_field, json_field in (
+                    (
+                        "InputPriceByModality",
+                        "input_price_per_1m_tokens_by_modality",
+                    ),
+                    (
+                        "OutputPriceByModality",
+                        "output_price_per_1m_tokens_by_modality",
+                    ),
+                    (
+                        "CacheReadPriceByModality",
+                        "cache_read_price_per_1m_tokens_by_modality",
+                    ),
+                ):
+                    prices = entry.get(json_field)
+                    if prices:
+                        rendered = ", ".join(
+                            f"{go_string(modality)}: {prices[modality]}"
+                            for modality in sorted(prices)
+                        )
+                        lines.append(
+                            f"\t\t{go_field}: map[string]float64{{{rendered}}},"
+                        )
             if table.kind == "text" and entry.get("cache_read_price_threshold_tokens"):
                 lines.append(
                     "\t\tCacheReadPriceThreshold: "

@@ -202,11 +202,7 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 
 	// Update usage information if provided
 	if event.Usage != nil && r.response != nil {
-		r.response.Usage.InputTokens += event.Usage.InputTokens
-		r.response.Usage.OutputTokens += event.Usage.OutputTokens
-		r.response.Usage.CacheReadInputTokens += event.Usage.CacheReadInputTokens
-		r.response.Usage.CacheCreationInputTokens += event.Usage.CacheCreationInputTokens
-		r.response.Usage.ReasoningTokens += event.Usage.ReasoningTokens
+		r.response.Usage.Add(event.Usage)
 		if event.Usage.Speed != "" {
 			r.response.Usage.Speed = event.Usage.Speed
 		}

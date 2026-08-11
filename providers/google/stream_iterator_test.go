@@ -58,7 +58,10 @@ func TestStreamIteratorUsageAndStopReason(t *testing.T) {
 		CandidatesTokenCount:    25,
 		CachedContentTokenCount: 60,
 		ThoughtsTokenCount:      10,
+		TotalTokenCount:         135,
 	}
+	final.ResponseID = "google-response-id"
+	final.ModelVersion = "gemini-2.5-pro"
 
 	iterator := NewStreamIteratorFromSeq(context.Background(),
 		chunkSeq(textChunk("Hello"), final), "gemini-2.5-pro")
@@ -84,10 +87,48 @@ func TestStreamIteratorUsageAndStopReason(t *testing.T) {
 	assert.Equal(t, "Hello world", response.Message().Text())
 	assert.Equal(t, "stop", response.StopReason)
 	assert.Equal(t, 40, response.Usage.InputTokens)
-	assert.Equal(t, 25, response.Usage.OutputTokens)
+	assert.Equal(t, 35, response.Usage.OutputTokens)
 	assert.Equal(t, 60, response.Usage.CacheReadInputTokens)
 	assert.Equal(t, 100, response.Usage.TotalInputTokens())
 	assert.Equal(t, 10, response.Usage.ReasoningTokens)
+	assert.True(t, response.Usage.CacheCreationInputTokensUnavailable)
+	assert.Equal(t, "google-response-id", response.ID)
+	assert.Equal(t, "gemini-2.5-pro", response.Model)
+}
+
+func TestStreamIteratorUsesServedModelAndPreservesRegionalCost(t *testing.T) {
+	final := textChunk("done")
+	final.ResponseID = "served-response-id"
+	final.ModelVersion = ModelGemini35Flash
+	final.Candidates[0].FinishReason = genai.FinishReasonStop
+	final.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:     1_000_000,
+		CandidatesTokenCount: 1_000_000,
+		TotalTokenCount:      2_000_000,
+		PromptTokensDetails: []*genai.ModalityTokenCount{{
+			Modality: genai.MediaModalityText, TokenCount: 1_000_000,
+		}},
+		CandidatesTokensDetails: []*genai.ModalityTokenCount{{
+			Modality: genai.MediaModalityText, TokenCount: 1_000_000,
+		}},
+	}
+
+	iterator := newStreamIteratorFromSeq(context.Background(),
+		chunkSeq(textChunk("starting "), final), "gemini-request-alias", googlePricingContext{
+			vertexAI: true,
+			location: "us-central1",
+		})
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+
+	_, accumulator := collectStreamEvents(t, iterator)
+	response := accumulator.Response()
+	assert.Equal(t, "served-response-id", response.ID)
+	assert.Equal(t, ModelGemini35Flash, response.Model)
+	assert.NotNil(t, response.Usage.Cost)
+	assert.InDelta(t, 1.65, response.Usage.Cost.Input, 1e-12)
+	assert.InDelta(t, 9.90, response.Usage.Cost.Output, 1e-12)
+	assert.InDelta(t, 11.55, response.Usage.Cost.Total, 1e-12)
+	assert.Equal(t, ModelGemini35Flash, response.Usage.Cost.Model)
 }
 
 func TestStreamIteratorParallelFunctionCalls(t *testing.T) {
@@ -114,6 +155,7 @@ func TestStreamIteratorParallelFunctionCalls(t *testing.T) {
 		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
 			PromptTokenCount:     50,
 			CandidatesTokenCount: 20,
+			TotalTokenCount:      70,
 		},
 	}
 
@@ -182,6 +224,7 @@ func TestStreamIteratorFunctionCallsAcrossChunks(t *testing.T) {
 		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
 			PromptTokenCount:     30,
 			CandidatesTokenCount: 12,
+			TotalTokenCount:      42,
 		},
 	}
 
@@ -213,6 +256,7 @@ func TestStreamIteratorMaxTokensStopReason(t *testing.T) {
 	final.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
 		PromptTokenCount:     10,
 		CandidatesTokenCount: 5,
+		TotalTokenCount:      15,
 	}
 
 	iterator := NewStreamIteratorFromSeq(context.Background(),

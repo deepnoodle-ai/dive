@@ -78,6 +78,7 @@ func New(opts ...Option) *Provider {
 		openaic.WithBaseWait(p.retryBaseWait),
 		openaic.WithModel(p.model),
 		openaic.WithSystemRole("system"),
+		openaic.WithReportedUsageCost("USD"),
 	)
 	return p
 }

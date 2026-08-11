@@ -7,12 +7,13 @@ import (
 )
 
 type Request struct {
-	Model       string           `json:"model"`
-	Messages    []*llm.Message   `json:"messages"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-	Temperature *float64         `json:"temperature,omitempty"`
-	System      string           `json:"system,omitempty"`
-	Tools       []map[string]any `json:"tools,omitempty"`
+	Model       string            `json:"model"`
+	Messages    []*llm.Message    `json:"messages"`
+	MaxTokens   int               `json:"max_tokens,omitempty"`
+	Temperature *float64          `json:"temperature,omitempty"`
+	System      string            `json:"system,omitempty"`
+	Tools       []map[string]any  `json:"tools,omitempty"`
+	ServiceTier genai.ServiceTier `json:"service_tier,omitempty"`
 
 	// Thinking carries Gemini's thinkingConfig: the thinking level or budget,
 	// plus whether to surface thought summaries. Nil leaves the model on its

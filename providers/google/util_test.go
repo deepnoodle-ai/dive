@@ -23,28 +23,81 @@ func TestGenerateToolCallIDUnique(t *testing.T) {
 }
 
 func TestConvertUsageMetadataDisjointInputBuckets(t *testing.T) {
+	metadata := &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:        100,
+		CachedContentTokenCount: 70,
+		CandidatesTokenCount:    25,
+		ThoughtsTokenCount:      10,
+		ToolUsePromptTokenCount: 5,
+		TotalTokenCount:         140,
+		PromptTokensDetails:     []*genai.ModalityTokenCount{{Modality: genai.MediaModalityText, TokenCount: 100}},
+		CacheTokensDetails:      []*genai.ModalityTokenCount{{Modality: genai.MediaModalityText, TokenCount: 70}},
+		CandidatesTokensDetails: []*genai.ModalityTokenCount{{Modality: genai.MediaModalityText, TokenCount: 25}},
+		ToolUsePromptTokensDetails: []*genai.ModalityTokenCount{{
+			Modality: genai.MediaModalityText, TokenCount: 5,
+		}},
+	}
+
+	usage, err := convertUsageMetadata(metadata)
+	assert.NoError(t, err)
+	assert.Equal(t, 35, usage.InputTokens)
+	assert.Equal(t, 70, usage.CacheReadInputTokens)
+	assert.Equal(t, 105, usage.TotalInputTokens())
+	assert.Equal(t, 35, usage.OutputTokens)
+	assert.Equal(t, 10, usage.ReasoningTokens)
+	assert.Equal(t, 5, usage.ToolUseInputTokens)
+	assert.Equal(t, metadata.TotalTokenCount, int32(usage.TotalInputTokens()+usage.OutputTokens))
+	assert.True(t, usage.CacheCreationInputTokensUnavailable)
+	assert.Equal(t, llm.ModalityTokenUsage{
+		InputTokens: 35, OutputTokens: 35, CacheReadInputTokens: 70,
+	}, usage.ModalityTokens["text"])
+}
+
+func TestConvertUsageMetadataRejectsInconsistentProviderCounts(t *testing.T) {
 	tests := []struct {
-		name       string
-		prompt     int32
-		cached     int32
-		wantInput  int
-		wantCached int
+		name     string
+		metadata *genai.GenerateContentResponseUsageMetadata
+		wantErr  string
 	}{
-		{name: "valid", prompt: 100, cached: 70, wantInput: 30, wantCached: 70},
-		{name: "cached above prompt", prompt: 10, cached: 20, wantInput: 0, wantCached: 10},
-		{name: "negative cached", prompt: 10, cached: -20, wantInput: 10, wantCached: 0},
-		{name: "negative prompt", prompt: -10, cached: 5, wantInput: 0, wantCached: 0},
+		{
+			name: "cached above prompt",
+			metadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount: 10, CachedContentTokenCount: 20,
+			},
+			wantErr: "cached token count",
+		},
+		{
+			name: "negative prompt",
+			metadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount: -10,
+			},
+			wantErr: "negative Gemini prompt",
+		},
+		{
+			name: "aggregate total mismatch",
+			metadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount: 10, CandidatesTokenCount: 5, TotalTokenCount: 99,
+			},
+			wantErr: "does not reconcile",
+		},
+		{
+			name: "modality total mismatch",
+			metadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount: 10,
+				TotalTokenCount:  10,
+				PromptTokensDetails: []*genai.ModalityTokenCount{{
+					Modality: genai.MediaModalityText, TokenCount: 9,
+				}},
+			},
+			wantErr: "modality tokens do not reconcile",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			usage := convertUsageMetadata(&genai.GenerateContentResponseUsageMetadata{
-				PromptTokenCount:        tt.prompt,
-				CachedContentTokenCount: tt.cached,
-			})
-			assert.Equal(t, tt.wantInput, usage.InputTokens)
-			assert.Equal(t, tt.wantCached, usage.CacheReadInputTokens)
-			assert.Equal(t, max(0, int(tt.prompt)), usage.TotalInputTokens())
+			_, err := convertUsageMetadata(tt.metadata)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
@@ -122,6 +175,8 @@ func TestToolResultSurvivesJSONRoundTrip(t *testing.T) {
 func TestGoogleThoughtSignatureSurvivesMessageRoundTrip(t *testing.T) {
 	signature := []byte("opaque-google-signature")
 	resp := &genai.GenerateContentResponse{
+		ResponseID:   "response-from-google",
+		ModelVersion: "gemini-3.1-flash-lite-served",
 		Candidates: []*genai.Candidate{
 			{
 				Index: 0,
@@ -144,6 +199,8 @@ func TestGoogleThoughtSignatureSurvivesMessageRoundTrip(t *testing.T) {
 
 	converted, err := convertGoogleResponse(resp, "gemini-3.1-flash-lite")
 	assert.NoError(t, err)
+	assert.Equal(t, "response-from-google", converted.ID)
+	assert.Equal(t, "gemini-3.1-flash-lite-served", converted.Model)
 	assert.Len(t, converted.Content, 1)
 
 	toolUse, ok := converted.Content[0].(*llm.ToolUseContent)

@@ -25,9 +25,10 @@ func SetCostResolver(r CostResolver) {
 // PopulateCost sets u.Cost from the resolved pricing for the model, when a
 // resolver is installed and pricing is known. It is a no-op (leaving u.Cost
 // nil — i.e. "unknown") when there is no resolver, no pricing, or no usage.
+// It also preserves a provider-computed cost or an explicit unavailable marker.
 // fast selects fast-mode pricing where a provider distinguishes it.
 func PopulateCost(model string, fast bool, u *Usage) {
-	if u == nil {
+	if u == nil || u.Cost != nil || u.CostEstimateUnavailable {
 		return
 	}
 	rp := costResolver.Load()

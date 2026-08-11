@@ -34,6 +34,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Grok agent sessions now send their stable `prompt_cache_key`.** The Grok
   catalog also uses xAI's current cached-input rates and applies its input,
   cached-input, and output long-context tier at 200K total input tokens.
+- **Gemini usage and cost estimates now reconcile to Google's billing shape.**
+  Thinking and tool-use tokens are included, multimodal and Vertex regional
+  rates are honored, all Pro rates switch above 200K input, and unsupported
+  tiers or incomplete price dimensions remain explicitly unpriced.
+- **OpenRouter costs now use the authoritative charge returned in `usage.cost`.**
+  This covers arbitrary routed models and provider-specific cache/tool charges
+  without depending on a necessarily incomplete static price snapshot.
 
 ## [1.20.0] - 2026-08-09
 
