@@ -150,3 +150,81 @@ func TestResponseAccumulatorPreservesOmittedThinkingSignature(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "done", text.Text)
 }
+
+func TestResponseAccumulatorMergesProviderMetadataDelta(t *testing.T) {
+	acc := NewResponseAccumulator()
+	index := 0
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:    EventTypeMessageStart,
+		Message: &Response{ID: "msg_1", Role: Assistant},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockStart,
+		Index: &index,
+		ContentBlock: &EventContentBlock{
+			Type:     ContentTypeThinking,
+			Metadata: ProviderMetadata{"provider.initial": "true"},
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockDelta,
+		Index: &index,
+		Delta: &EventDelta{
+			Type: EventDeltaTypeMetadata,
+			Metadata: ProviderMetadata{
+				"provider.initial": "updated",
+				"provider.detail":  "preserved",
+			},
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeMessageStop}))
+
+	thinking := acc.Response().Content[0].(*ThinkingContent)
+	assert.Equal(t, "updated", thinking.Metadata["provider.initial"])
+	assert.Equal(t, "preserved", thinking.Metadata["provider.detail"])
+}
+
+func TestResponseAccumulatorPreservesContentMetadataAndThinkingID(t *testing.T) {
+	acc := NewResponseAccumulator()
+	textIndex, thinkingIndex := 0, 1
+
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:    EventTypeMessageStart,
+		Message: &Response{ID: "msg_1", Role: Assistant},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockStart,
+		Index: &textIndex,
+		ContentBlock: &EventContentBlock{
+			Type:     ContentTypeText,
+			Metadata: ProviderMetadata{"google.thought_signature": "text-sig"},
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockDelta,
+		Index: &textIndex,
+		Delta: &EventDelta{Type: EventDeltaTypeText, Text: "answer"},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockStart,
+		Index: &thinkingIndex,
+		ContentBlock: &EventContentBlock{
+			Type:     ContentTypeThinking,
+			ID:       "rs_123",
+			Metadata: ProviderMetadata{"google.thought": "true"},
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockDelta,
+		Index: &thinkingIndex,
+		Delta: &EventDelta{Type: EventDeltaTypeThinking, Thinking: "summary"},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeMessageStop}))
+
+	response := acc.Response()
+	text := response.Content[0].(*TextContent)
+	assert.Equal(t, "text-sig", text.Metadata["google.thought_signature"])
+	thinking := response.Content[1].(*ThinkingContent)
+	assert.Equal(t, "rs_123", thinking.ID)
+	assert.Equal(t, "true", thinking.Metadata["google.thought"])
+}

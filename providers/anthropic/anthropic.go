@@ -257,6 +257,22 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 		var copiedContent []llm.Content
 		for _, content := range message.Content {
 			switch c := content.(type) {
+			case *llm.TextContent:
+				text := c.CloneContent().(*llm.TextContent)
+				text.Metadata = nil
+				copiedContent = append(copiedContent, text)
+			case *llm.ToolUseContent:
+				toolUse := c.CloneContent().(*llm.ToolUseContent)
+				toolUse.Metadata = nil
+				copiedContent = append(copiedContent, toolUse)
+			case *llm.ThinkingContent:
+				// Anthropic thinking blocks have no item ID or provider metadata.
+				// Skip reasoning captured from another provider instead of leaking
+				// its opaque replay fields into the Anthropic wire format.
+				if c.ID != "" || len(c.Metadata) > 0 {
+					continue
+				}
+				copiedContent = append(copiedContent, c.CloneContent())
 			case *llm.ToolResultContent:
 				copiedContent = append(copiedContent, &llm.ToolResultContent{
 					Content:      convertToolResultBlocks(c),
@@ -296,10 +312,19 @@ func convertMessages(messages []*llm.Message) ([]*llm.Message, error) {
 			Content: copiedContent,
 		}
 	}
+	nonEmpty := copied[:0]
+	for _, message := range copied {
+		if len(message.Content) > 0 {
+			nonEmpty = append(nonEmpty, message)
+		}
+	}
+	if len(nonEmpty) == 0 {
+		return nil, fmt.Errorf("all messages are empty after provider conversion")
+	}
 	// Workaround for Anthropic bug. Run on the copies so the caller's
 	// messages are not mutated.
-	reorderMessageContent(copied)
-	return copied, nil
+	reorderMessageContent(nonEmpty)
+	return nonEmpty, nil
 }
 
 // convertToolResultBlocks renders tool_result content in the Anthropic wire

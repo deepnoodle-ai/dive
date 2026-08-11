@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Provider reasoning blocks now survive response copying, streaming, and
+  multi-turn replay.** Gemini preserves thought parts and positional thought
+  signatures (including signed text and empty parts); Mistral preserves its
+  structured thinking chunks; OpenRouter retains plaintext and structured
+  `reasoning_details`; and OpenAI Responses retains summaries, raw reasoning
+  text, reasoning item IDs, and encrypted content from streamed responses.
+
 ## [1.21.0] - 2026-08-10
 
 ### Fixed

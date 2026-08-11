@@ -188,17 +188,16 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 	}
 
 	for _, part := range candidate.Content.Parts {
+		metadata := providerMetadataForGooglePart(part)
 		switch {
 		case part.FunctionCall != nil:
 			if err := s.queueFunctionCall(part); err != nil {
 				return err
 			}
-		case part.Text != "":
-			if part.Thought {
-				s.queueThinking(part.Text)
-				continue
-			}
-			s.queueText(part.Text)
+		case part.Thought:
+			s.queueThinking(part.Text, metadata)
+		case part.Text != "" || metadata != nil:
+			s.queueText(part.Text, metadata)
 		}
 	}
 	return nil
@@ -207,8 +206,13 @@ func (s *StreamIterator) processChunk(response *genai.GenerateContentResponse) e
 // queueThinking emits a thinking delta, opening a new thinking content block if
 // needed. Gemini flags thought summaries on otherwise ordinary text parts, so
 // they are separated here rather than being folded into the answer.
-func (s *StreamIterator) queueThinking(text string) {
+func (s *StreamIterator) queueThinking(text string, metadata llm.ProviderMetadata) {
 	s.closeTextBlock()
+	// A signature is positional metadata for one exact Gemini Part. Do not
+	// merge that signed part into an already-open unsigned thinking block.
+	if metadata[googleThoughtSignatureMetadataKey] != "" {
+		s.closeThinkingBlock()
+	}
 	if s.thinkingBlockIdx < 0 {
 		index := s.nextBlockIndex
 		s.nextBlockIndex++
@@ -217,9 +221,13 @@ func (s *StreamIterator) queueThinking(text string) {
 			Type:  llm.EventTypeContentBlockStart,
 			Index: &index,
 			ContentBlock: &llm.EventContentBlock{
-				Type: llm.ContentTypeThinking,
+				Type:     llm.ContentTypeThinking,
+				Metadata: metadata.Clone(),
 			},
 		})
+	}
+	if text == "" {
+		return
 	}
 	index := s.thinkingBlockIdx
 	s.eventQueue = append(s.eventQueue, &llm.Event{
@@ -233,8 +241,13 @@ func (s *StreamIterator) queueThinking(text string) {
 }
 
 // queueText emits a text delta, opening a new text content block if needed.
-func (s *StreamIterator) queueText(text string) {
+func (s *StreamIterator) queueText(text string, metadata llm.ProviderMetadata) {
 	s.closeThinkingBlock()
+	// Google warns that signed and unsigned Parts must not be merged. A signed
+	// text/empty part therefore gets its own canonical block.
+	if metadata[googleThoughtSignatureMetadataKey] != "" {
+		s.closeTextBlock()
+	}
 	if s.textBlockIndex < 0 {
 		index := s.nextBlockIndex
 		s.nextBlockIndex++
@@ -243,9 +256,13 @@ func (s *StreamIterator) queueText(text string) {
 			Type:  llm.EventTypeContentBlockStart,
 			Index: &index,
 			ContentBlock: &llm.EventContentBlock{
-				Type: llm.ContentTypeText,
+				Type:     llm.ContentTypeText,
+				Metadata: metadata.Clone(),
 			},
 		})
+	}
+	if text == "" {
+		return
 	}
 	index := s.textBlockIndex
 	s.eventQueue = append(s.eventQueue, &llm.Event{

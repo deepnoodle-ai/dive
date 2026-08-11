@@ -775,6 +775,103 @@ func TestConvertMessagesSkipsThinkingContent(t *testing.T) {
 	assert.Equal(t, "The answer is 4.", result[0].Content)
 }
 
+func TestMistralThinkingChunksDecodeAndReplay(t *testing.T) {
+	var message Message
+	assert.NoError(t, json.Unmarshal([]byte(`{
+		"role":"assistant",
+		"content":[
+			{"type":"thinking","thinking":[{"type":"text","text":"First reason. "},{"type":"text","text":"Second reason."}]},
+			{"type":"text","text":"Final answer."}
+		]
+	}`), &message))
+
+	content := responseMessageContent(message, "mistral-mistral-small-latest")
+	assert.Len(t, content, 2)
+	thinking, ok := content[0].(*llm.ThinkingContent)
+	assert.True(t, ok)
+	assert.Equal(t, "First reason. Second reason.", thinking.Thinking)
+	assert.Equal(t, "true", thinking.Metadata[mistralThinkingMetadataKey])
+	answer, ok := content[1].(*llm.TextContent)
+	assert.True(t, ok)
+	assert.Equal(t, "Final answer.", answer.Text)
+
+	replayed, err := convertMessagesForProvider([]*llm.Message{{
+		Role:    llm.Assistant,
+		Content: content,
+	}}, "mistral-mistral-small-latest")
+	assert.NoError(t, err)
+	assert.Len(t, replayed, 1)
+	body, err := json.Marshal(replayed[0])
+	assert.NoError(t, err)
+	assert.Equal(t,
+		`{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"First reason. Second reason."}]},{"type":"text","text":"Final answer."}]}`,
+		string(body))
+}
+
+func TestMistralDoesNotReplayAnotherProvidersThinking(t *testing.T) {
+	messages, err := convertMessagesForProvider([]*llm.Message{{
+		Role: llm.Assistant,
+		Content: []llm.Content{
+			&llm.ThinkingContent{Thinking: "anthropic reasoning", Signature: "anthropic-signature"},
+			&llm.TextContent{Text: "answer"},
+		},
+	}}, "mistral-mistral-small-latest")
+	assert.NoError(t, err)
+	assert.Len(t, messages, 1)
+	assert.Equal(t, "answer", messages[0].Content)
+	assert.Empty(t, messages[0].ContentParts)
+}
+
+func TestOpenRouterReasoningDetailsDecodeAndReplay(t *testing.T) {
+	var message Message
+	assert.NoError(t, json.Unmarshal([]byte(`{
+		"role":"assistant",
+		"content":"answer",
+		"reasoning":"summary",
+		"reasoning_details":[{"type":"reasoning.text","text":"summary","signature":"sig","format":"anthropic-claude-v1","index":0}]
+	}`), &message))
+
+	content := responseMessageContent(message, "openrouter")
+	assert.Len(t, content, 2)
+	thinking := content[0].(*llm.ThinkingContent)
+	assert.Equal(t, "summary", thinking.Thinking)
+	assert.True(t, json.Valid([]byte(thinking.Metadata[openRouterReasoningDetailsMetadataKey])))
+
+	replayed, err := convertMessagesForProvider([]*llm.Message{{
+		Role:    llm.Assistant,
+		Content: content,
+	}}, "openrouter")
+	assert.NoError(t, err)
+	assert.Len(t, replayed, 1)
+	assert.Equal(t, "answer", replayed[0].Content)
+	assert.Empty(t, replayed[0].Reasoning)
+	assert.Equal(t, message.ReasoningDetails, replayed[0].ReasoningDetails)
+}
+
+func TestResponseMessageContentPreservesPlainReasoning(t *testing.T) {
+	content := responseMessageContent(Message{
+		Content:   "answer",
+		Reasoning: "visible reasoning",
+	}, "openrouter")
+	assert.Len(t, content, 2)
+	thinking := content[0].(*llm.ThinkingContent)
+	assert.Equal(t, "visible reasoning", thinking.Thinking)
+	assert.Equal(t, "true", thinking.Metadata[openRouterReasoningMetadataKey])
+}
+
+func TestMessageIgnoresNullReasoningDetails(t *testing.T) {
+	var message Message
+	assert.NoError(t, json.Unmarshal([]byte(`{
+		"role":"assistant",
+		"content":"answer",
+		"reasoning_details":null
+	}`), &message))
+	assert.Nil(t, message.ReasoningDetails)
+	content := responseMessageContent(message, "openrouter")
+	assert.Len(t, content, 1)
+	assert.Equal(t, "answer", content[0].(*llm.TextContent).Text)
+}
+
 // TestGenerateUsageDetails verifies that cached prompt tokens and reasoning
 // tokens from a non-streaming response are carried into llm.Usage.
 func TestGenerateUsageDetails(t *testing.T) {

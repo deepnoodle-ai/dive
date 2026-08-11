@@ -15,7 +15,10 @@ import (
 	"google.golang.org/genai"
 )
 
-const googleThoughtSignatureMetadataKey = "google.thought_signature"
+const (
+	googleThoughtMetadataKey          = "google.thought"
+	googleThoughtSignatureMetadataKey = "google.thought_signature"
+)
 
 // convertGoogleResponse converts a Google GenAI response to a Dive LLM response
 func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*llm.Response, error) {
@@ -31,15 +34,22 @@ func convertGoogleResponse(resp *genai.GenerateContentResponse, model string) (*
 	// Convert parts to Dive content
 	var content []llm.Content
 	for _, part := range candidate.Content.Parts {
-		if part.Text != "" {
+		metadata := providerMetadataForGooglePart(part)
+		if part.Text != "" || (part.FunctionCall == nil && metadata != nil) {
 			// Thought summaries arrive as text parts flagged Thought. Emitting
 			// them as TextContent would splice the model's reasoning into its
 			// answer.
 			if part.Thought {
-				content = append(content, &llm.ThinkingContent{Thinking: part.Text})
+				content = append(content, &llm.ThinkingContent{
+					Thinking: part.Text,
+					Metadata: metadata,
+				})
 				continue
 			}
-			content = append(content, &llm.TextContent{Text: part.Text})
+			content = append(content, &llm.TextContent{
+				Text:     part.Text,
+				Metadata: metadata,
+			})
 		} else if part.FunctionCall != nil {
 			// Handle function calls - convert args to JSON
 			args, err := json.Marshal(part.FunctionCall.Args)
@@ -354,27 +364,60 @@ func convertToolResultToFunctionResponse(content *llm.ToolResultContent, functio
 }
 
 func providerMetadataForGooglePart(part *genai.Part) llm.ProviderMetadata {
-	if part == nil || len(part.ThoughtSignature) == 0 {
+	if part == nil {
 		return nil
 	}
-	return llm.ProviderMetadata{
-		googleThoughtSignatureMetadataKey: base64.StdEncoding.EncodeToString(part.ThoughtSignature),
+	metadata := llm.ProviderMetadata{}
+	if part.Thought {
+		metadata[googleThoughtMetadataKey] = "true"
 	}
+	if len(part.ThoughtSignature) > 0 {
+		metadata[googleThoughtSignatureMetadataKey] = base64.StdEncoding.EncodeToString(part.ThoughtSignature)
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
-func googleThoughtSignatureFromToolUse(toolUse *llm.ToolUseContent) ([]byte, error) {
-	if toolUse == nil || toolUse.Metadata == nil {
+func googleThoughtSignatureFromMetadata(metadata llm.ProviderMetadata, label string) ([]byte, error) {
+	if metadata == nil {
 		return nil, nil
 	}
-	encoded := strings.TrimSpace(toolUse.Metadata[googleThoughtSignatureMetadataKey])
+	encoded := strings.TrimSpace(metadata[googleThoughtSignatureMetadataKey])
 	if encoded == "" {
 		return nil, nil
 	}
 	signature, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("invalid Google thought signature for tool %q: %w", toolUse.Name, err)
+		return nil, fmt.Errorf("invalid Google thought signature for %s: %w", label, err)
 	}
 	return signature, nil
+}
+
+func googleThoughtSignatureFromToolUse(toolUse *llm.ToolUseContent) ([]byte, error) {
+	if toolUse == nil {
+		return nil, nil
+	}
+	return googleThoughtSignatureFromMetadata(toolUse.Metadata, fmt.Sprintf("tool %q", toolUse.Name))
+}
+
+func googlePartFromText(text string, thought bool, metadata llm.ProviderMetadata) (*genai.Part, error) {
+	part := &genai.Part{Text: text, Thought: thought}
+	signature, err := googleThoughtSignatureFromMetadata(metadata, "text part")
+	if err != nil {
+		return nil, err
+	}
+	part.ThoughtSignature = signature
+	return part, nil
+}
+
+func isGoogleThinkingContent(content *llm.ThinkingContent) bool {
+	if content == nil || content.Metadata == nil {
+		return false
+	}
+	return content.Metadata[googleThoughtMetadataKey] == "true" ||
+		content.Metadata[googleThoughtSignatureMetadataKey] != ""
 }
 
 // messagesToContents converts Dive messages to genai.Content format for GenerateContent API
@@ -404,7 +447,11 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 		for _, c := range message.Content {
 			switch ct := c.(type) {
 			case *llm.TextContent:
-				content.Parts = append(content.Parts, genai.NewPartFromText(ct.Text))
+				part, err := googlePartFromText(ct.Text, false, ct.Metadata)
+				if err != nil {
+					return nil, err
+				}
+				content.Parts = append(content.Parts, part)
 			case *llm.ImageContent:
 				if ct.Source == nil {
 					return nil, fmt.Errorf("image content has nil source")
@@ -475,10 +522,21 @@ func messagesToContents(messages []*llm.Message) ([]*genai.Content, error) {
 					return nil, err
 				}
 				content.Parts = append(content.Parts, part)
-			case *llm.ThinkingContent, *llm.RedactedThinkingContent:
-				// Gemini has no field for replaying another model's reasoning,
-				// so thinking blocks (e.g. from a session started on Anthropic)
-				// are skipped on encode rather than erroring.
+			case *llm.ThinkingContent:
+				// Only replay thinking that originated from Gemini. Sending an
+				// Anthropic/OpenAI signature in a Gemini Part would corrupt the
+				// provider-specific reasoning state.
+				if !isGoogleThinkingContent(ct) {
+					continue
+				}
+				part, err := googlePartFromText(ct.Thinking, true, ct.Metadata)
+				if err != nil {
+					return nil, err
+				}
+				content.Parts = append(content.Parts, part)
+			case *llm.RedactedThinkingContent:
+				// RedactedThinkingContent is an Anthropic wire type. It has no
+				// safe Gemini representation and is intentionally skipped.
 			default:
 				return nil, fmt.Errorf("unsupported content type for google provider: %s", c.Type())
 			}

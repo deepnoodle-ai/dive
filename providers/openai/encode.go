@@ -187,6 +187,13 @@ func encodeAssistantMessage(message *llm.Message) ([]responses.ResponseInputItem
 		if processed[i] {
 			continue // Skip if already processed
 		}
+		if thinking, ok := c.(*llm.ThinkingContent); ok && thinking.ID == "" {
+			// Responses reasoning items require their provider-issued ID. A
+			// ThinkingContent without one originated elsewhere and has no safe
+			// OpenAI representation.
+			processed[i] = true
+			continue
+		}
 		if mcpToolUse, ok := c.(*llm.MCPToolUseContent); ok {
 			// Handle MCP tool use, potentially pairing it with a result
 			mcpCallParam, pairedResultIndex, err := findAndEncodeMCPPair(mcpToolUse, message.Content, i, processed)
@@ -288,16 +295,7 @@ func encodeAssistantToolUseContent(c *llm.ToolUseContent) (responses.ResponseInp
 
 func encodeAssistantThinkingContent(c *llm.ThinkingContent) (responses.ResponseInputItemUnionParam, error) {
 	return responses.ResponseInputItemUnionParam{
-		OfReasoning: &responses.ResponseReasoningItemParam{
-			ID: c.ID,
-			Summary: []responses.ResponseReasoningItemSummaryParam{
-				{
-					Type: "summary_text",
-					Text: c.Thinking,
-				},
-			},
-			EncryptedContent: openai.String(c.Signature),
-		},
+		OfReasoning: openAIReasoningItemParam(c),
 	}, nil
 }
 
@@ -508,8 +506,11 @@ func encodeInputMessageWithPromptCacheBreakpoint(message *llm.Message, breakpoin
 			}
 			standaloneItems = append(standaloneItems, item)
 		case *llm.ThinkingContent:
-			// ThinkingContent is also handled as a standalone item (Reasoning)
-			standaloneItems = append(standaloneItems, encodeReasoningContent(typedContent))
+			// Responses reasoning items require their provider-issued ID. Skip
+			// thinking captured from another provider.
+			if typedContent.ID != "" {
+				standaloneItems = append(standaloneItems, encodeReasoningContent(typedContent))
+			}
 		default:
 			encodedContent, err := encodeUserContentWithPromptCacheBreakpoint(c, i == lastTextIndex)
 			if err != nil {
@@ -561,11 +562,39 @@ func encodeInputTextContentWithPromptCacheBreakpoint(c *llm.TextContent, breakpo
 
 func encodeReasoningContent(c *llm.ThinkingContent) responses.ResponseInputItemUnionParam {
 	return responses.ResponseInputItemUnionParam{
-		OfReasoning: &responses.ResponseReasoningItemParam{
-			ID:               "",
-			EncryptedContent: openai.String(c.Signature),
-		},
+		OfReasoning: openAIReasoningItemParam(c),
 	}
+}
+
+func openAIReasoningItemParam(c *llm.ThinkingContent) *responses.ResponseReasoningItemParam {
+	param := &responses.ResponseReasoningItemParam{
+		ID:               c.ID,
+		EncryptedContent: openai.String(c.Signature),
+	}
+	var summaryItems []string
+	if c.Metadata != nil {
+		_ = json.Unmarshal([]byte(c.Metadata[openAIReasoningSummaryMetadataKey]), &summaryItems)
+	}
+	if len(summaryItems) == 0 && c.Metadata[openAIReasoningContentMetadataKey] == "" {
+		summaryItems = []string{c.Thinking}
+	}
+	for _, text := range summaryItems {
+		param.Summary = append(param.Summary, responses.ResponseReasoningItemSummaryParam{
+			Type: "summary_text",
+			Text: text,
+		})
+	}
+	var reasoningItems []string
+	if c.Metadata != nil {
+		_ = json.Unmarshal([]byte(c.Metadata[openAIReasoningContentMetadataKey]), &reasoningItems)
+	}
+	for _, text := range reasoningItems {
+		param.Content = append(param.Content, responses.ResponseReasoningItemContentParam{
+			Type: "reasoning_text",
+			Text: text,
+		})
+	}
+	return param
 }
 
 func encodeInputImageContent(c *llm.ImageContent) (*responses.ResponseInputContentUnionParam, error) {

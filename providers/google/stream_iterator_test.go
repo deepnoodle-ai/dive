@@ -2,6 +2,7 @@ package google
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"iter"
 	"strings"
@@ -289,6 +290,54 @@ func TestStreamIteratorMaxTokensStopReason(t *testing.T) {
 	_, accumulator := collectStreamEvents(t, iterator)
 	assert.True(t, accumulator.IsComplete())
 	assert.Equal(t, "max_tokens", accumulator.Response().StopReason)
+}
+
+func TestStreamIteratorPreservesSignedThinkingAndEmptyTextParts(t *testing.T) {
+	thoughtSignature := []byte("thought-sig")
+	textSignature := []byte("text-sig")
+	chunks := chunkSeq(
+		&genai.GenerateContentResponse{Candidates: []*genai.Candidate{{
+			Content: &genai.Content{Parts: []*genai.Part{{Text: "thinking ", Thought: true}}},
+		}}},
+		&genai.GenerateContentResponse{Candidates: []*genai.Candidate{{
+			Content: &genai.Content{Parts: []*genai.Part{{
+				Text: "summary", Thought: true, ThoughtSignature: thoughtSignature,
+			}}},
+		}}},
+		&genai.GenerateContentResponse{Candidates: []*genai.Candidate{{
+			Content: &genai.Content{Parts: []*genai.Part{{Text: "answer"}}},
+		}}},
+		&genai.GenerateContentResponse{Candidates: []*genai.Candidate{{
+			Content:      &genai.Content{Parts: []*genai.Part{{ThoughtSignature: textSignature}}},
+			FinishReason: genai.FinishReasonStop,
+		}}},
+	)
+
+	iterator := NewStreamIteratorFromSeq(context.Background(), chunks, ModelGemini36Flash)
+	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
+	_, accumulator := collectStreamEvents(t, iterator)
+	response := accumulator.Response()
+	assert.Len(t, response.Content, 4)
+
+	firstThought := response.Content[0].(*llm.ThinkingContent)
+	assert.Equal(t, "thinking ", firstThought.Thinking)
+	assert.Equal(t, "true", firstThought.Metadata[googleThoughtMetadataKey])
+	secondThought := response.Content[1].(*llm.ThinkingContent)
+	assert.Equal(t, "summary", secondThought.Thinking)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(thoughtSignature),
+		secondThought.Metadata[googleThoughtSignatureMetadataKey])
+	answer := response.Content[2].(*llm.TextContent)
+	assert.Equal(t, "answer", answer.Text)
+	empty := response.Content[3].(*llm.TextContent)
+	assert.Equal(t, "", empty.Text)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(textSignature),
+		empty.Metadata[googleThoughtSignatureMetadataKey])
+
+	contents, err := messagesToContents([]*llm.Message{response.Message().Copy()})
+	assert.NoError(t, err)
+	assert.Len(t, contents[0].Parts, 4)
+	assert.Equal(t, thoughtSignature, contents[0].Parts[1].ThoughtSignature)
+	assert.Equal(t, textSignature, contents[0].Parts[3].ThoughtSignature)
 }
 
 func TestStreamIteratorStreamError(t *testing.T) {
