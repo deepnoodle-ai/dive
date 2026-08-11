@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-08-10
+
 ### Fixed
 
 - **Unknown tool names no longer abort and discard an agent turn.** Dive returns
