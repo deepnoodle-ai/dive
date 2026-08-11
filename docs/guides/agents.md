@@ -274,6 +274,7 @@ response, err := agent.CreateResponse(ctx,
 | `WithMessages(msgs...)`      | Multiple messages                                           |
 | `WithEventCallback(fn)`      | Receive events during generation                            |
 | `WithSession(sess)`          | Per-call session override                                   |
+| `WithPromptCacheKey(key)`    | Stable conversation key for provider prompt-cache routing   |
 | `WithModelOnlyReminder(r)`   | Append a reminder for this response without recording it    |
 | `WithValue(key, val)`        | Pass data to hooks via HookContext.Values                   |
 | `WithToolResults(results)`   | Resume a session-backed suspended turn (see suspend-resume) |

@@ -24,6 +24,38 @@ outputs, and reasoning. Its context window is 500k tokens; list pricing is
 $2.00 per 1M input tokens, $0.50 per 1M cached input tokens, and $6.00 per 1M
 output tokens.
 
+## Prompt caching
+
+xAI recommends sending one stable `prompt_cache_key` per conversation to keep
+its requests routed to the same cache server. Dive agents do this automatically:
+
+- With a Dive `Session`, the key is privately derived from `Session.ID()`.
+- Without a session, the key is stable for the lifetime of that `Agent`
+  instance.
+
+If one stateless Agent serves multiple conversations, or if Agent instances are
+recreated between turns, identify the conversation on every call. Reuse the
+same key as history grows, and use a different key for each unrelated
+conversation:
+
+```go
+response, err := agent.CreateResponse(
+    ctx,
+    dive.WithMessages(history...),
+    dive.WithPromptCacheKey(conversationID),
+)
+```
+
+For direct provider calls, configure the same routing key on the provider:
+
+```go
+provider := grok.New(grok.WithPromptCacheKey(conversationID))
+```
+
+Earlier messages must remain an exact, append-only prefix to be reusable. Cache
+hits are reported on `response.Usage.CacheReadInputTokens`. See xAI's
+[prompt-caching guidance](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits).
+
 ## Server-side tools
 
 Grok runs several tools on xAI's servers: you attach a tool, and the API
@@ -145,13 +177,3 @@ Dive surfaces this on `llm.Usage.ReasoningTokens` (a subset of `OutputTokens`):
 ```go
 fmt.Printf("reasoning tokens: %d\n", response.Usage.ReasoningTokens)
 ```
-
-## Prompt caching
-
-Route requests in a conversation to the same cache with `WithPromptCacheKey`:
-
-```go
-provider := grok.New(grok.WithPromptCacheKey("conversation-uuid"))
-```
-
-Cache hits are reported on `response.Usage.CacheReadInputTokens`.

@@ -31,7 +31,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   the stale GPT-4o row to the current $2.50 input, $1.25 cached-input, and
   $10 output rates per million tokens. Dated provider model IDs now resolve to
   their stable catalog ID so live OpenAI responses retain `Cost.Total`.
-- **Grok agent sessions now send their stable `prompt_cache_key`.** The Grok
+- **Grok agents now send a stable `prompt_cache_key`.** Session-backed agents
+  derive a private key from the session ID; stateless agents use an
+  agent-instance key and can provide a conversation key per call. The Grok
   catalog also uses xAI's current cached-input rates and applies its input,
   cached-input, and output long-context tier at 200K total input tokens.
 - **Gemini usage and cost estimates now reconcile to Google's billing shape.**
