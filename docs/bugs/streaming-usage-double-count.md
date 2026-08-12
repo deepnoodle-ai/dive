@@ -1,10 +1,13 @@
 # Streaming usage is double counted on the input side
 
-**Status:** open
-**Severity:** high — corrupts every usage-derived number (cost, billing, context gauges) on streamed Anthropic traffic
+**Status:** fixed — [#261](https://github.com/deepnoodle-ai/dive/pull/261), unreleased. This document is kept as the historical record.
+**Severity:** high — corrupted every usage-derived number (cost, billing, context gauges) on streamed Anthropic traffic
 **Affected:** `llm/stream.go` (`ResponseAccumulator`), `providers/anthropic`, `providers/ollama`, `experimental/cmd/dive`
-**Confirmed on:** `v1.23.0`; present since April 2025 (see [History](#history))
+**Confirmed on:** `v1.23.0`; present from April 2025 until #261 (see [History](#history))
 **Originally reported by:** Mobius Cloud team, 2026-08-12
+
+The sections below describe the defect in the present tense as it existed
+before the fix.
 
 ## Summary
 
@@ -51,7 +54,7 @@ and becomes an `Add`.
 
 Feeding real Anthropic frames through the accumulator:
 
-```
+```text
 message_start {"input_tokens":14,"cache_creation_input_tokens":8012,"cache_read_input_tokens":120000,"output_tokens":4}
 message_delta {"input_tokens":14,"cache_creation_input_tokens":8012,"cache_read_input_tokens":120000,"output_tokens":7}
 ```
@@ -128,11 +131,14 @@ summing only `InputTokens` saw an absolute error of 14 tokens.
 provider, but drives each one through `generateFixture`, which decodes a **single non-streaming
 JSON body**. The streaming path it was meant to protect is never exercised.
 
-## Proposed fix
+## Fix
 
-Make the guard in the accumulator the primary fix rather than a per-provider patch. It covers
-Anthropic, Ollama, and the latent `openaicompletions` path in one place, and preserves the
-`message_start`-only fields that a provider-side strip would drop.
+Shipped in #261. The guard lives in the accumulator rather than in a per-provider patch: it
+covers Anthropic, Ollama, and the latent `openaicompletions` path in one place, and preserves
+the `message_start`-only fields that a provider-side strip would drop.
+
+`Usage.Absorb` (`llm/usage.go`) merges cumulative frames by per-field max, and
+`ResponseAccumulator.AddEvent` (`llm/stream.go`) calls it in place of `Usage.Add`:
 
 ```go
 // Usage frames from Anthropic and Google are cumulative for the whole message,
@@ -143,30 +149,40 @@ func (u *Usage) Absorb(other *Usage) {
     u.CacheCreationInputTokens = max(u.CacheCreationInputTokens, other.CacheCreationInputTokens)
     u.CacheReadInputTokens = max(u.CacheReadInputTokens, other.CacheReadInputTokens)
     u.ReasoningTokens = max(u.ReasoningTokens, other.ReasoningTokens)
-    // ServiceTier / Speed / modality details keep their existing merge rules
+    // ModalityTokens merge by per-bucket max; ServiceTier/Speed take the later
+    // non-empty value; boolean flags OR-merge; provider Cost replaces rather
+    // than sums. See llm/usage.go for the full rule set.
 }
 ```
 
 Per-field max rather than wholesale replacement matters: `message_start` carries fields that
 `message_delta` omits (`service_tier`, the `cache_creation` ephemeral 5m/1h breakdown), so a
-straight overwrite loses them. It also fixes the output drift for free.
+straight overwrite loses them. It also fixes the output drift for free. Choosing max over
+replacement means the rules hold whether or not `message_delta.usage` repeats every key — the
+originally reported dumps show exactly four keys in both frames, which suggests the capture
+script selected specific keys.
 
-**`Usage.Add` must keep its additive semantics** for the cross-generation aggregation in
-`Agent.chat` (`agent.go:1996`), which is correct.
+**`Usage.Add` keeps its additive semantics** for the cross-generation aggregation in
+`Agent.chat` (`agent.go:1996`), which was and remains correct.
 
-Before finalizing the merge rules, confirm against a raw uncaptured frame dump what
-`message_delta.usage` actually carries. The originally reported dumps show exactly four keys in
-both frames, which suggests the capture script selected specific keys.
+## Regression tests
 
-## Suggested regression tests
+Landed with the fix:
 
-1. **Accumulator, cumulative frames.** `message_start{input:14, cache_creation:8012, output:4}`
-   → `content_block_*` → `message_delta{input:14, cache_creation:8012, output:7}` →
-   `message_stop`. Assert `input:14, cache_creation:8012, output:7`.
-2. **Warm-cache variant** with `cache_read_input_tokens` non-zero in both frames.
-3. **Provider-level golden test** replaying a captured Anthropic SSE transcript, asserting
-   accumulated usage equals the final frame's values.
-4. **Extend `usage_invariant_test.go` to the streaming path** for every provider — the gap that
-   let this through.
-5. **Cross-provider invariant**: assert no `message_start` event carries non-zero usage, which
-   also pins the `openaicompletions` latent case.
+1. **Accumulator, cumulative frames** — `TestResponseAccumulatorCumulativeUsageFrames`
+   (`llm/stream_test.go`). Replays the reproduction frames with both the cache-write and
+   cache-read buckets non-zero, asserting the final frame's values.
+2. **Output-only `message_delta`** — `TestResponseAccumulatorOutputOnlyDeltaKeepsSeededInputUsage`
+   (`llm/stream_test.go`). Pins why max beats wholesale replacement.
+3. **Provider-level golden test** — `TestStreamCumulativeUsageNotDoubleCounted`
+   (`providers/anthropic/stream_usage_test.go`). Replays a captured SSE transcript through the
+   real provider via `httptest`.
+4. **`Usage.Absorb` unit tests** (`llm/usage_test.go`) covering the cost-replace, tier/speed,
+   modality, and nil-argument rules.
+
+Still open:
+
+1. **Extend `usage_invariant_test.go` to the streaming path** for every provider — the gap that
+   let this through. It still drives each provider through a single non-streaming JSON body.
+2. **Pin the `openaicompletions` latent case** with a stream whose usage arrives on a chunk that
+   also carries choices. `Absorb` makes it correct today, but nothing asserts it.
