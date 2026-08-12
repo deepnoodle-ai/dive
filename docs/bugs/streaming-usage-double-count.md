@@ -15,7 +15,7 @@ For streaming requests whose provider forwards Anthropic-shaped SSE frames,
 `ResponseAccumulator` counts `input_tokens`, `cache_creation_input_tokens`, and
 `cache_read_input_tokens` **exactly twice**.
 
-The accumulator seeds `Response.Usage` from `message_start`, then *adds* the usage carried by
+The accumulator seeds `Response.Usage` from `message_start`, then _adds_ the usage carried by
 `message_delta`. Anthropic repeats the full cumulative usage object in both frames, so every
 input-side bucket lands twice.
 
@@ -59,31 +59,31 @@ message_start {"input_tokens":14,"cache_creation_input_tokens":8012,"cache_read_
 message_delta {"input_tokens":14,"cache_creation_input_tokens":8012,"cache_read_input_tokens":120000,"output_tokens":7}
 ```
 
-| bucket | true | accumulated |
-|---|---:|---:|
-| `input_tokens` | 14 | **28** |
-| `cache_creation_input_tokens` | 8,012 | **16,024** |
-| `cache_read_input_tokens` | 120,000 | **240,000** |
-| `output_tokens` | 7 | **11** |
-| `TotalInputTokens()` | 128,026 | **256,052** |
+| bucket                        |    true | accumulated |
+| ----------------------------- | ------: | ----------: |
+| `input_tokens`                |      14 |      **28** |
+| `cache_creation_input_tokens` |   8,012 |  **16,024** |
+| `cache_read_input_tokens`     | 120,000 | **240,000** |
+| `output_tokens`               |       7 |      **11** |
+| `TotalInputTokens()`          | 128,026 | **256,052** |
 
 Verified end to end by driving `dive.NewAgent` against an `httptest` server replaying the SSE
 transcript above through the real `providers/anthropic` provider.
 
 ## Scope
 
-| Provider | Stream path | Affected |
-|---|---|---|
-| `anthropic` | passthrough SSE → `llm.Event` | **yes** |
-| `ollama` | embeds `*anthropic.Provider` (Anthropic-compatible Messages API) | **yes** |
-| `openaicompletions` (→ `mistral`, `openrouter`) | own iterator | **latent** — see below |
-| `openai` (Responses API, → `grok`) | own iterator; `message_start` carries no usage | no |
-| `google` | own iterator; usage emitted once on `message_delta` | no |
+| Provider                                        | Stream path                                                      | Affected               |
+| ----------------------------------------------- | ---------------------------------------------------------------- | ---------------------- |
+| `anthropic`                                     | passthrough SSE → `llm.Event`                                    | **yes**                |
+| `ollama`                                        | embeds `*anthropic.Provider` (Anthropic-compatible Messages API) | **yes**                |
+| `openaicompletions` (→ `mistral`, `openrouter`) | own iterator                                                     | **latent** — see below |
+| `openai` (Responses API, → `grok`)              | own iterator; `message_start` carries no usage                   | no                     |
+| `google`                                        | own iterator; usage emitted once on `message_delta`              | no                     |
 
 `openaicompletions` is not structurally immune. Its `message_start` carries
 `Usage: s.usage.toLLMUsage()` (`stream_iterator.go:167`), populated at `:143` from the same
 chunk. It is safe only because OpenAI delivers usage in a trailing choices-empty chunk. A
-provider that emits usage on a chunk that *also* carries choices double counts identically —
+provider that emits usage on a chunk that _also_ carries choices double counts identically —
 measured `input=200` against a true `100`. OpenRouter proxies many upstreams and is the most
 plausible route to this.
 
@@ -111,12 +111,12 @@ Using the reproduction above (`claude-sonnet-5`, list-price estimate):
 
 The bug is old and was not introduced by the recent billing work.
 
-| Date | PR | Effect |
-|---|---|---|
-| 2025-04-03 | #21 | Added `r.response = event.Message`. Input/output double count begins. |
-| 2025-06-05 | #39 | Added cache-bucket accumulation. Cache double count — the costly part — begins. |
-| 2026-08-10 | #251 | Added `TotalInputTokens()`. Did not touch the accumulator. |
-| 2026-08-10 | #254 | Replaced five explicit `+=` lines with `Usage.Add()`. Semantics unchanged. |
+| Date       | PR   | Effect                                                                          |
+| ---------- | ---- | ------------------------------------------------------------------------------- |
+| 2025-04-03 | #21  | Added `r.response = event.Message`. Input/output double count begins.           |
+| 2025-06-05 | #39  | Added cache-bucket accumulation. Cache double count — the costly part — begins. |
+| 2026-08-10 | #251 | Added `TotalInputTokens()`. Did not touch the accumulator.                      |
+| 2026-08-10 | #254 | Replaced five explicit `+=` lines with `Usage.Add()`. Semantics unchanged.      |
 
 The same seed-then-add shape is present verbatim at `v1.15.0` and `v1.20.0`, and `CostOf`
 already priced cache buckets separately at `v1.20.0`.
