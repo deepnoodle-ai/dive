@@ -55,6 +55,7 @@ func TestRetiredSlugsAreCostedAtTheirRedirectTarget(t *testing.T) {
 
 func TestPublishedGrokCacheReadPricingCoverage(t *testing.T) {
 	want := map[string]float64{
+		ModelGrok46:                 0.50,
 		ModelGrok45:                 0.30,
 		ModelGrok43:                 0.20,
 		ModelGrok420Reasoning:       0.20,
