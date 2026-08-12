@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-08-12
+
 ### Fixed
 
 - **Streaming usage no longer double counts the input side.** Anthropic-shaped
