@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Streaming usage no longer double counts the input side.** Anthropic-shaped
+  streams repeat cumulative usage in both `message_start` and `message_delta`;
+  `ResponseAccumulator` now merges frames by supersession (new `Usage.Absorb`)
+  instead of summing, so input, cache, and cost figures are no longer ~2x on
+  streamed Anthropic/Ollama traffic. `Usage.Add` keeps its additive semantics
+  for cross-request aggregation.
+
 ## [1.23.0] - 2026-08-12
 
 ### Added

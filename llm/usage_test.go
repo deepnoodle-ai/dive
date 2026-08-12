@@ -254,3 +254,58 @@ func TestUsageAddAndCopyPreserveBillingDetails(t *testing.T) {
 	assert.True(t, usage.CostEstimateUnavailable)
 	assert.Nil(t, usage.Cost)
 }
+
+func TestUsageAbsorbCumulativeFrames(t *testing.T) {
+	usage := Usage{
+		InputTokens:              14,
+		CacheCreationInputTokens: 8012,
+		CacheReadInputTokens:     120000,
+		OutputTokens:             4,
+		ServiceTier:              "standard",
+		ModalityTokens: map[string]ModalityTokenUsage{
+			"text": {InputTokens: 14, OutputTokens: 4},
+		},
+	}
+	usage.Absorb(&Usage{
+		InputTokens:              14,
+		CacheCreationInputTokens: 8012,
+		CacheReadInputTokens:     120000,
+		OutputTokens:             7,
+		Speed:                    "fast",
+		ModalityTokens: map[string]ModalityTokenUsage{
+			"text": {InputTokens: 14, OutputTokens: 7},
+		},
+	})
+
+	assert.Equal(t, 14, usage.InputTokens)
+	assert.Equal(t, 8012, usage.CacheCreationInputTokens)
+	assert.Equal(t, 120000, usage.CacheReadInputTokens)
+	assert.Equal(t, 7, usage.OutputTokens)
+	assert.Equal(t, 128026, usage.TotalInputTokens())
+	// message_start-only fields survive frames that omit them
+	assert.Equal(t, "standard", usage.ServiceTier)
+	assert.Equal(t, "fast", usage.Speed)
+	assert.Equal(t, 14, usage.ModalityTokens["text"].InputTokens)
+	assert.Equal(t, 7, usage.ModalityTokens["text"].OutputTokens)
+}
+
+func TestUsageAbsorbCostReplacesRatherThanSums(t *testing.T) {
+	usage := Usage{Cost: &Cost{Total: 0.5, Input: 0.3, Output: 0.2}}
+	usage.Absorb(&Usage{Cost: &Cost{Total: 0.9, Input: 0.3, Output: 0.6}})
+	assert.Equal(t, 0.9, usage.Cost.Total)
+	assert.Equal(t, 0.6, usage.Cost.Output)
+
+	// A frame without cost leaves the existing cost alone.
+	usage.Absorb(&Usage{OutputTokens: 10})
+	assert.Equal(t, 0.9, usage.Cost.Total)
+
+	usage.Absorb(&Usage{CostEstimateUnavailable: true})
+	assert.True(t, usage.CostEstimateUnavailable)
+	assert.Nil(t, usage.Cost)
+}
+
+func TestUsageAbsorbNilIsNoOp(t *testing.T) {
+	usage := Usage{InputTokens: 5}
+	usage.Absorb(nil)
+	assert.Equal(t, 5, usage.InputTokens)
+}

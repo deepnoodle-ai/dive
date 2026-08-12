@@ -168,6 +168,58 @@ func (u *Usage) Copy() *Usage {
 	return cp
 }
 
+// Absorb merges a cumulative usage frame into this usage object. Streaming
+// providers report running totals for the whole message rather than
+// increments (Anthropic documents message_delta usage as cumulative), so a
+// later frame supersedes an earlier one field by field. A zero token count
+// means the frame omitted that field, so token buckets merge by max rather
+// than wholesale replacement — message_delta frames that carry only
+// output_tokens must not erase the input buckets seeded by message_start.
+// Use Add for aggregating usage across separate requests.
+func (u *Usage) Absorb(other *Usage) {
+	if other == nil {
+		return
+	}
+	u.InputTokens = max(u.InputTokens, other.InputTokens)
+	u.OutputTokens = max(u.OutputTokens, other.OutputTokens)
+	u.CacheCreationInputTokens = max(u.CacheCreationInputTokens, other.CacheCreationInputTokens)
+	u.CacheReadInputTokens = max(u.CacheReadInputTokens, other.CacheReadInputTokens)
+	u.ToolUseInputTokens = max(u.ToolUseInputTokens, other.ToolUseInputTokens)
+	u.ReasoningTokens = max(u.ReasoningTokens, other.ReasoningTokens)
+	if len(other.ModalityTokens) > 0 {
+		if u.ModalityTokens == nil {
+			u.ModalityTokens = make(map[string]ModalityTokenUsage, len(other.ModalityTokens))
+		}
+		for modality, frame := range other.ModalityTokens {
+			current := u.ModalityTokens[modality]
+			current.InputTokens = max(current.InputTokens, frame.InputTokens)
+			current.OutputTokens = max(current.OutputTokens, frame.OutputTokens)
+			current.CacheCreationInputTokens = max(current.CacheCreationInputTokens, frame.CacheCreationInputTokens)
+			current.CacheReadInputTokens = max(current.CacheReadInputTokens, frame.CacheReadInputTokens)
+			u.ModalityTokens[modality] = current
+		}
+	}
+	if other.ServiceTier != "" {
+		u.ServiceTier = other.ServiceTier
+	}
+	if other.Speed != "" {
+		u.Speed = other.Speed
+	}
+	u.CacheCreationInputTokensUnavailable = u.CacheCreationInputTokensUnavailable || other.CacheCreationInputTokensUnavailable
+	u.InputModalityTokenDetailsIncomplete = u.InputModalityTokenDetailsIncomplete || other.InputModalityTokenDetailsIncomplete
+	u.OutputModalityTokenDetailsIncomplete = u.OutputModalityTokenDetailsIncomplete || other.OutputModalityTokenDetailsIncomplete
+	u.CacheReadModalityTokenDetailsIncomplete = u.CacheReadModalityTokenDetailsIncomplete || other.CacheReadModalityTokenDetailsIncomplete
+	u.CostEstimateUnavailable = u.CostEstimateUnavailable || other.CostEstimateUnavailable
+	if u.CostEstimateUnavailable {
+		u.Cost = nil
+	} else if other.Cost != nil {
+		// Cumulative frames supersede: the later provider-reported cost
+		// replaces the earlier one rather than summing with it.
+		costCopy := *other.Cost
+		u.Cost = &costCopy
+	}
+}
+
 // Add incremental usage to this usage object.
 func (u *Usage) Add(other *Usage) {
 	if other == nil {
