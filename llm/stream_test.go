@@ -102,6 +102,85 @@ func TestResponseAccumulatorUsageIncludesReasoningAndSpeed(t *testing.T) {
 	assert.Equal(t, usage.Speed, "fast")
 }
 
+func TestResponseAccumulatorCumulativeUsageFrames(t *testing.T) {
+	// Anthropic's message_delta repeats the full cumulative usage that
+	// message_start seeded; the accumulator must not count it twice.
+	acc := NewResponseAccumulator()
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type: EventTypeMessageStart,
+		Message: &Response{
+			ID:   "msg_1",
+			Role: Assistant,
+			Usage: Usage{
+				InputTokens:              14,
+				CacheCreationInputTokens: 8012,
+				CacheReadInputTokens:     120000,
+				OutputTokens:             4,
+			},
+		},
+	}))
+	idx := 0
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:         EventTypeContentBlockStart,
+		Index:        &idx,
+		ContentBlock: &EventContentBlock{Type: ContentTypeText},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeContentBlockDelta,
+		Index: &idx,
+		Delta: &EventDelta{Type: EventDeltaTypeText, Text: "hello"},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeMessageDelta,
+		Delta: &EventDelta{StopReason: "end_turn"},
+		Usage: &Usage{
+			InputTokens:              14,
+			CacheCreationInputTokens: 8012,
+			CacheReadInputTokens:     120000,
+			OutputTokens:             7,
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeMessageStop}))
+
+	usage := acc.Response().Usage
+	assert.Equal(t, usage.InputTokens, 14)
+	assert.Equal(t, usage.CacheCreationInputTokens, 8012)
+	assert.Equal(t, usage.CacheReadInputTokens, 120000)
+	assert.Equal(t, usage.OutputTokens, 7)
+	assert.Equal(t, usage.TotalInputTokens(), 128026)
+}
+
+func TestResponseAccumulatorOutputOnlyDeltaKeepsSeededInputUsage(t *testing.T) {
+	// Some message_delta frames carry only output_tokens; the input buckets
+	// seeded by message_start must survive the merge.
+	acc := NewResponseAccumulator()
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type: EventTypeMessageStart,
+		Message: &Response{
+			ID:   "msg_1",
+			Role: Assistant,
+			Usage: Usage{
+				InputTokens:              14,
+				CacheCreationInputTokens: 8012,
+				CacheReadInputTokens:     120000,
+				OutputTokens:             1,
+			},
+		},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{
+		Type:  EventTypeMessageDelta,
+		Delta: &EventDelta{StopReason: "end_turn"},
+		Usage: &Usage{OutputTokens: 104},
+	}))
+	assert.NoError(t, acc.AddEvent(&Event{Type: EventTypeMessageStop}))
+
+	usage := acc.Response().Usage
+	assert.Equal(t, usage.InputTokens, 14)
+	assert.Equal(t, usage.CacheCreationInputTokens, 8012)
+	assert.Equal(t, usage.CacheReadInputTokens, 120000)
+	assert.Equal(t, usage.OutputTokens, 104)
+}
+
 func TestResponseAccumulatorPreservesOmittedThinkingSignature(t *testing.T) {
 	acc := NewResponseAccumulator()
 	idx0, idx1 := 0, 1

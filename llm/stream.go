@@ -209,12 +209,11 @@ func (r *ResponseAccumulator) AddEvent(event *Event) error {
 		r.finalizeContent()
 	}
 
-	// Update usage information if provided
+	// Update usage information if provided. Streaming usage frames carry
+	// cumulative totals for the whole message, not increments, so merge by
+	// supersession rather than summing.
 	if event.Usage != nil && r.response != nil {
-		r.response.Usage.Add(event.Usage)
-		if event.Usage.Speed != "" {
-			r.response.Usage.Speed = event.Usage.Speed
-		}
+		r.response.Usage.Absorb(event.Usage)
 	}
 
 	// Update context management information if provided
