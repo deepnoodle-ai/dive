@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Grok 4.6** — `grok-4.6` added to the Grok catalog and pricing; now the
+  Grok default, with the same 500k context as `grok-4.5` but higher cached-
+  and long-context pricing. Its reasoning-effort ladder is narrower than
+  `grok-4.5`'s (`low`/`medium`/`high`/`xhigh`, no `none` or `minimal`). Also
+  adds `grok-imagine-image-2.0` ($0.04/image).
+
 ## [1.22.0] - 2026-08-11
 
 ### Fixed

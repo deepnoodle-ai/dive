@@ -40,7 +40,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	provider := grok.New() // defaults to grok-4.5
+	provider := grok.New() // defaults to grok-4.6
 
 	response, err := provider.Generate(context.Background(),
 		llm.WithMessages(llm.NewUserTextMessage(prompt)),

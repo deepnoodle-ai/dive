@@ -143,6 +143,18 @@ var grokTable = Table{
 		Temperature: true,
 	}},
 
+	// grok-4.6 narrows further still: xAI's docs list only low, medium,
+	// high (the default), and xhigh — neither none nor minimal.
+	{Prefix: "grok-4.6", Caps: Capabilities{
+		Efforts: []llm.ReasoningEffort{
+			llm.ReasoningEffortLow,
+			llm.ReasoningEffortMedium,
+			llm.ReasoningEffortHigh,
+			llm.ReasoningEffortXHigh,
+		},
+		Temperature: true,
+	}},
+
 	{Prefix: "grok-4.3", Caps: Capabilities{Efforts: grokBelowMax, Temperature: true}},
 	{Prefix: "grok-4", Caps: Capabilities{Efforts: grokBelowMax, Temperature: true}},
 	{Prefix: "grok-3", Caps: Capabilities{Efforts: grokBelowMax, Temperature: true}},

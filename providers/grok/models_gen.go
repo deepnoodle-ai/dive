@@ -3,6 +3,7 @@
 package grok
 
 const (
+	ModelGrok46              = "grok-4.6"
 	ModelGrok45              = "grok-4.5"
 	ModelGrok43              = "grok-4.3"
 	ModelGrok420Reasoning    = "grok-4.20-0309-reasoning"
@@ -35,9 +36,10 @@ const (
 	ModelImagineImagePro     = "grok-imagine-image-pro"
 	ModelImagineImage        = "grok-imagine-image"
 	ModelImagineImageQuality = "grok-imagine-image-quality"
+	ModelImagineImage20      = "grok-imagine-image-2.0"
 	ModelImagineVideo        = "grok-imagine-video"
 	ModelImagineVideo15      = "grok-imagine-video-1.5"
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelGrok45
+var DefaultModel = ModelGrok46

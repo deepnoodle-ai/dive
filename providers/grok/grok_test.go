@@ -32,7 +32,7 @@ func TestProvider_Name(t *testing.T) {
 }
 
 func TestProvider_DefaultModel(t *testing.T) {
-	assert.Equal(t, ModelGrok45, DefaultModel)
+	assert.Equal(t, ModelGrok46, DefaultModel)
 }
 
 func TestGenerateInheritsDisjointUsageConversion(t *testing.T) {

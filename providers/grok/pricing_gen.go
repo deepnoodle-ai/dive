@@ -6,6 +6,18 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelGrok46: {
+		Model:                     ModelGrok46,
+		InputPrice:                2.00,
+		OutputPrice:               6.00,
+		LongContextInputPrice:     4.00,
+		LongContextCacheReadPrice: 1.00,
+		LongContextOutputPrice:    12.00,
+		CacheReadPrice:            0.50,
+		LongContextThreshold:      200000,
+		Currency:                  "USD",
+		UpdatedAt:                 "2026-08-12",
+	},
 	ModelGrok45: {
 		Model:                     ModelGrok45,
 		InputPrice:                2.00,
@@ -163,5 +175,11 @@ var ImageModelPricing = map[string]llm.ImagePricingInfo{
 		Price:     0.05,
 		Currency:  "USD",
 		UpdatedAt: "2026-05-28",
+	},
+	ModelImagineImage20: {
+		Model:     ModelImagineImage20,
+		Price:     0.04,
+		Currency:  "USD",
+		UpdatedAt: "2026-08-12",
 	},
 }

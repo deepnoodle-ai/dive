@@ -11,18 +11,19 @@ the server-side tool plumbing described below.
 ```go
 import "github.com/deepnoodle-ai/dive/providers/grok"
 
-model := grok.New() // defaults to grok-4.5
+model := grok.New() // defaults to grok-4.6
 ```
 
 **Env:** `XAI_API_KEY` (preferred) or `GROK_API_KEY`.
-**Models:** See `providers/grok/models.go`. `grok-4.5` is the current default;
-`grok-4.5-latest` and `grok-build-latest` are aliases, and `grok-build-0.1`
-remains available as the coding model.
+**Models:** See `providers/grok/models_gen.go`. `grok-4.6` is the current
+default; `grok-4.5` remains available, and `grok-build-0.1` remains available
+as the coding model.
 
-`grok-4.5` supports text and image inputs, tool/function calling, structured
+`grok-4.6` supports text and image inputs, tool/function calling, structured
 outputs, and reasoning. Its context window is 500k tokens; list pricing is
 $2.00 per 1M input tokens, $0.50 per 1M cached input tokens, and $6.00 per 1M
-output tokens.
+output tokens below a 200k-token prompt, rising to $4.00 / $1.00 / $12.00
+above it.
 
 ## Prompt caching
 
