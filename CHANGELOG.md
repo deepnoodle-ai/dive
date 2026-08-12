@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-08-12
+
 ### Added
 
 - **Grok 4.6** — `grok-4.6` added to the Grok catalog and pricing; now the
