@@ -34,8 +34,10 @@ type modelCapabilities struct {
 	// disable thinking has to degrade instead.
 	canDisableThinking bool
 
-	// unverified marks a model that is catalogued but could not be reached — it
-	// answered 404 "no longer available". Lookup reports it as unknown so its
+	// unverified marks a model whose thinking parameters have not been
+	// confirmed against the live API — either a retired model that now
+	// answers 404 "no longer available", or a newly catalogued model that
+	// has not been probed yet. Lookup reports it as unknown so its
 	// parameters pass through untouched rather than being guessed at.
 	unverified bool
 }
@@ -76,7 +78,17 @@ type capabilityEntry struct {
 // generation — gemini-3.5-flash can turn thinking off and gemini-3.5-flash-lite
 // cannot, and the 2.5 generation has no thinking level at all.
 var modelCapabilityTable = []capabilityEntry{
-	// --- 3.x: thinking levels, budgets in [1, 65535]. ---
+	// --- 3.x: thinking levels, budgets in [1, 65535] unless noted. ---
+	// 3.7 Flash rejects MINIMAL ("Thinking level is unsupported:
+	// THINKING_LEVEL_MINIMAL") and its budget ceiling is lower than the rest
+	// of the family — 32768, not 65535 ("thinking_budget is out of range;
+	// supported values are integers from 1 to 32768"). Verified live against
+	// Vertex AI on 2026-08-15; unlike the rest of this table it was not
+	// probed against the public Gemini API.
+	{prefix: "gemini-3.7-flash", caps: modelCapabilities{
+		efforts: effortsLowThroughHigh, minBudget: 1, maxBudget: 32768,
+		canDisableThinking: true,
+	}},
 	{prefix: "gemini-3.6-flash", caps: modelCapabilities{
 		efforts: effortsThroughHigh, minBudget: 1, maxBudget: 65535,
 	}},

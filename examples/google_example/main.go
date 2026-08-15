@@ -11,7 +11,7 @@ import (
 
 func main() {
 	// Create the Google provider
-	provider := google.New(google.WithModel(google.ModelGemini36Flash))
+	provider := google.New(google.WithModel(google.ModelGemini37Flash))
 
 	ctx := context.Background()
 
@@ -47,7 +47,7 @@ func main() {
 	}
 	fmt.Println()
 
-	// Example 3: With system prompt. Gemini 3.6 Flash uses fixed sampling
+	// Example 3: With system prompt. Gemini 3.7 Flash uses fixed sampling
 	// controls, so requests should not set a temperature.
 	fmt.Println("=== With System Prompt ===")
 	response, err = provider.Generate(ctx,

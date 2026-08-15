@@ -3,6 +3,7 @@
 package mistral
 
 const (
+	ModelMistralMedium       = "mistral-medium-latest"
 	ModelMistralLarge3       = "mistral-large-2512"
 	ModelMistralLarge        = "mistral-large-latest"
 	ModelMistralLarge2411    = "mistral-large-2411"
@@ -22,4 +23,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelMistralLarge
+var DefaultModel = ModelMistralMedium

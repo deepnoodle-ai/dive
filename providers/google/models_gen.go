@@ -3,6 +3,7 @@
 package google
 
 const (
+	ModelGemini37Flash                 = "gemini-3.7-flash"
 	ModelGemini36Flash                 = "gemini-3.6-flash"
 	ModelGemini35Flash                 = "gemini-3.5-flash"
 	ModelGemini35FlashLite             = "gemini-3.5-flash-lite"
@@ -37,4 +38,4 @@ const (
 )
 
 // DefaultModel is generated from the catalog's default model.
-var DefaultModel = ModelGemini36Flash
+var DefaultModel = ModelGemini37Flash

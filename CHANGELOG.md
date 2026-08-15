@@ -12,6 +12,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   startup** (via `wonton/env`), so provider API keys like `MISTRAL_API_KEY`
   no longer need to be exported into the shell manually. Existing
   environment variables take precedence; a missing `.env` is not an error.
+- **Gemini 3.7 Flash** — `gemini-3.7-flash` added to the Google catalog and
+  pricing; now the Google default. Google publishes identical list pricing to
+  `gemini-3.6-flash`, which remains available. Its thinking parameters were
+  verified live against Vertex AI: unlike the rest of the 3.x flash family it
+  rejects `MINIMAL` effort and its `thinkingBudget` ceiling is 32768, not
+  65535 (see `providers/google/capabilities.go`).
+- **Mistral Medium 3.5** — `mistral-medium-latest` added to the Mistral
+  catalog and pricing ($1.50/$7.50 per 1M tokens, 256k context); now the
+  Mistral default, replacing `mistral-large-latest` per Mistral's own "becomes
+  the default model in Le Chat" announcement. `mistral-large-latest` and
+  `mistral-small-latest` also had their published list prices corrected —
+  Large fell to $0.50/$1.50 (from a stale $2.00/$6.00) and Small rose to
+  $0.15/$0.60 (from a stale $0.10/$0.30) — both now match Mistral's current
+  pricing page rather than late-2025 figures.
 
 ## [1.24.0] - 2026-08-12
 

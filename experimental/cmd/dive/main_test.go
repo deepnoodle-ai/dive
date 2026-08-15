@@ -49,7 +49,7 @@ func TestGetDefaultModel(t *testing.T) {
 			envVars: map[string]string{
 				"GOOGLE_API_KEY": "test",
 			},
-			expected: "gemini-3.6-flash",
+			expected: "gemini-3.7-flash",
 		},
 		{
 			name: "openai key present",
@@ -64,6 +64,13 @@ func TestGetDefaultModel(t *testing.T) {
 				"XAI_API_KEY": "test",
 			},
 			expected: "grok-4.6",
+		},
+		{
+			name: "mistral key present",
+			envVars: map[string]string{
+				"MISTRAL_API_KEY": "test",
+			},
+			expected: "mistral-medium-latest",
 		},
 	}
 

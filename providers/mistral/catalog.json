@@ -30,6 +30,17 @@
   ],
   "models": [
     {
+      "go_name": "ModelMistralMedium",
+      "id": "mistral-medium-latest",
+      "default": true,
+      "kind": "text",
+      "context_window": 256000,
+      "display_name": "Mistral Medium",
+      "recommended": true,
+      "cli_order": 1,
+      "description": "Flagship merged model for long-horizon agentic tasks and coding"
+    },
+    {
       "go_name": "ModelMistralLarge3",
       "id": "mistral-large-2512",
       "kind": "text",
@@ -38,13 +49,9 @@
     {
       "go_name": "ModelMistralLarge",
       "id": "mistral-large-latest",
-      "default": true,
       "kind": "text",
       "context_window": 128000,
-      "display_name": "Mistral Large",
-      "recommended": true,
-      "cli_order": 1,
-      "description": "Flagship model"
+      "display_name": "Mistral Large"
     },
     {
       "go_name": "ModelMistralLarge2411",
@@ -134,6 +141,13 @@
   "pricing": {
     "text": [
       {
+        "model": "mistral-medium-latest",
+        "input_price_per_1m_tokens": "1.5",
+        "output_price_per_1m_tokens": "7.5",
+        "currency": "USD",
+        "updated_at": "2026-08-15"
+      },
+      {
         "model": "mistral-large-2411",
         "input_price_per_1m_tokens": "2.0",
         "output_price_per_1m_tokens": "6.0",
@@ -142,17 +156,17 @@
       },
       {
         "model": "mistral-large-latest",
-        "input_price_per_1m_tokens": "2.0",
-        "output_price_per_1m_tokens": "6.0",
+        "input_price_per_1m_tokens": "0.5",
+        "output_price_per_1m_tokens": "1.5",
         "currency": "USD",
-        "updated_at": "2025-10-15"
+        "updated_at": "2026-08-15"
       },
       {
         "model": "mistral-small-latest",
-        "input_price_per_1m_tokens": "0.1",
-        "output_price_per_1m_tokens": "0.3",
+        "input_price_per_1m_tokens": "0.15",
+        "output_price_per_1m_tokens": "0.6",
         "currency": "USD",
-        "updated_at": "2025-10-15"
+        "updated_at": "2026-08-15"
       },
       {
         "model": "codestral-latest",

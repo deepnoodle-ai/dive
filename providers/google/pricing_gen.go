@@ -6,6 +6,14 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelGemini37Flash: {
+		Model:          ModelGemini37Flash,
+		InputPrice:     1.50,
+		OutputPrice:    7.50,
+		CacheReadPrice: 0.15,
+		Currency:       "USD",
+		UpdatedAt:      "2026-08-15",
+	},
 	ModelGemini36Flash: {
 		Model:          ModelGemini36Flash,
 		InputPrice:     1.50,
