@@ -207,7 +207,10 @@ func TestProviderServiceTierValidation(t *testing.T) {
 			if strings.EqualFold(tier, "standard") {
 				assert.Equal(t, genai.ServiceTierStandard, request.ServiceTier)
 			} else {
-				assert.Equal(t, genai.ServiceTierUnspecified, request.ServiceTier)
+				// The zero value, not genai.ServiceTierUnspecified: that
+				// constant is the non-empty string "unspecified", which
+				// serializes onto the wire and Vertex AI rejects with a 400.
+				assert.Equal(t, genai.ServiceTier(""), request.ServiceTier)
 			}
 		})
 	}

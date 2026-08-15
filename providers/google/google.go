@@ -302,7 +302,11 @@ func (p *Provider) applyRequestConfig(req *Request, config *llm.Config) error {
 	req.System = config.SystemPrompt
 	switch strings.ToLower(config.ServiceTier) {
 	case "", "default":
-		req.ServiceTier = genai.ServiceTierUnspecified
+		// Leave ServiceTier at its zero value. genai.ServiceTierUnspecified is
+		// the non-empty string "unspecified", which serializes into the request
+		// body; Vertex AI rejects it with a 400, and the Developer API gains
+		// nothing from it. Omitting the field is the only spelling both
+		// backends accept.
 	case string(genai.ServiceTierStandard):
 		req.ServiceTier = genai.ServiceTierStandard
 	case string(genai.ServiceTierFlex), string(genai.ServiceTierPriority):

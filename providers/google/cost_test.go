@@ -194,3 +194,19 @@ func TestPopulateGoogleCostFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// TestPopulateGoogleCostUnspecifiedTierParity pins that an empty tier and
+// genai.ServiceTierUnspecified produce identical usage. The fix for the Vertex
+// service-tier regression stops the "unspecified" sentinel from ever entering
+// the pricing context, and this equivalence is what makes that change invisible
+// to the cost path — it must stay true if the tier guards are ever rewritten.
+func TestPopulateGoogleCostUnspecifiedTierParity(t *testing.T) {
+	compute := func(tier genai.ServiceTier) *llm.Usage {
+		usage := &llm.Usage{InputTokens: 100_000, OutputTokens: 1_000_000}
+		populateGoogleCost(ModelGemini25Pro, nil, usage, googlePricingContext{serviceTier: tier})
+		return usage
+	}
+	assert.Equal(t, compute(""), compute(genai.ServiceTierUnspecified))
+	assert.NotNil(t, compute("").Cost)
+	assert.Equal(t, "", compute("").ServiceTier)
+}
