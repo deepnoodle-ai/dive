@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Google text generation works on Vertex AI again.** Since v1.21.0 the
+  provider sent `serviceTier: "unspecified"` when no tier was requested, which
+  Vertex AI rejects with a 400 on every `Generate` and `Stream` call; the field
+  is now omitted unless a tier is explicitly set. The Gemini Developer API
+  backend was unaffected.
+
 ## [1.25.0] - 2026-08-15
 
 ### Added
