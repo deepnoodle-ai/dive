@@ -1255,7 +1255,7 @@ func getDefaultModel() string {
 		return defaultGrokModel
 	}
 	if os.Getenv("MISTRAL_API_KEY") != "" {
-		return "mistral-small-latest"
+		return defaultMistralModel
 	}
 	return anthropic.DefaultModel
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/deepnoodle-ai/dive/llm"
 	"github.com/deepnoodle-ai/dive/providers"
 	"github.com/deepnoodle-ai/dive/providers/grok"
+	"github.com/deepnoodle-ai/dive/providers/mistral"
 
 	// Import providers to trigger their init() registration
 	_ "github.com/deepnoodle-ai/dive/providers/anthropic"
@@ -21,6 +22,9 @@ import (
 
 // defaultGrokModel is the default model used when a Grok API key is detected.
 var defaultGrokModel = grok.DefaultModel
+
+// defaultMistralModel is the default model used when a Mistral API key is detected.
+var defaultMistralModel = mistral.DefaultModel
 
 // createModel creates an LLM provider using the global registry.
 // Providers are registered via init() when imported above.

@@ -65,6 +65,13 @@ func TestGetDefaultModel(t *testing.T) {
 			},
 			expected: "grok-4.6",
 		},
+		{
+			name: "mistral key present",
+			envVars: map[string]string{
+				"MISTRAL_API_KEY": "test",
+			},
+			expected: "mistral-medium-latest",
+		},
 	}
 
 	for _, tt := range tests {
