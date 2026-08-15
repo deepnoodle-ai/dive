@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.25.1] - 2026-08-15
+
 ### Fixed
 
 - **Google text generation works on Vertex AI again.** Since v1.21.0 the
