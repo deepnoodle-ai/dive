@@ -30,10 +30,13 @@ import (
 	"github.com/deepnoodle-ai/dive/toolkit/firecrawl"
 	"github.com/deepnoodle-ai/dive/toolkit/orchestration"
 	"github.com/deepnoodle-ai/wonton/cli"
+	"github.com/deepnoodle-ai/wonton/env"
 	"github.com/deepnoodle-ai/wonton/fetch"
 )
 
 func main() {
+	loadDotEnv()
+
 	app := cli.New("dive").
 		Description("Interactive AI assistant for coding tasks").
 		Version("0.1.0")
@@ -169,6 +172,16 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(cli.GetExitCode(err))
+	}
+}
+
+// loadDotEnv loads variables from a ".env" file in the current directory
+// into the process environment, without overwriting variables already set.
+// A missing file is not an error; other failures (e.g. a malformed file)
+// are reported but don't prevent startup.
+func loadDotEnv() {
+	if err := env.LoadEnvFile(); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load .env file: %v\n", err)
 	}
 }
 
