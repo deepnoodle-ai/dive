@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-08-15
+
 ### Added
 
 - **The `dive` CLI now loads a `.env` file from the current directory on
