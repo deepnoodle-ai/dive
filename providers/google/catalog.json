@@ -25,15 +25,22 @@
   ],
   "models": [
     {
+      "go_name": "ModelGemini37Flash",
+      "id": "gemini-3.7-flash",
+      "kind": "text",
+      "context_window": 1000000,
+      "display_name": "Gemini 3.7 Flash",
+      "default": true,
+      "recommended": true,
+      "cli_order": 1,
+      "description": "Most capable Flash model for agentic workflows and multimodal reasoning"
+    },
+    {
       "go_name": "ModelGemini36Flash",
       "id": "gemini-3.6-flash",
       "kind": "text",
       "context_window": 1000000,
-      "display_name": "Gemini 3.6 Flash",
-      "default": true,
-      "recommended": true,
-      "cli_order": 1,
-      "description": "Fast agentic and multimodal model with strong coding performance"
+      "display_name": "Gemini 3.6 Flash"
     },
     {
       "go_name": "ModelGemini35Flash",
@@ -221,6 +228,14 @@
   ],
   "pricing": {
     "text": [
+      {
+        "model": "gemini-3.7-flash",
+        "input_price_per_1m_tokens": "1.50",
+        "output_price_per_1m_tokens": "7.50",
+        "cache_read_price_per_1m_tokens": "0.15",
+        "currency": "USD",
+        "updated_at": "2026-08-15"
+      },
       {
         "model": "gemini-3.6-flash",
         "input_price_per_1m_tokens": "1.50",

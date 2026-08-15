@@ -72,6 +72,24 @@ func TestMinimalClampsOnProModels(t *testing.T) {
 	assert.Equal(t, genai.ThinkingLevelLow, thinking.ThinkingLevel)
 }
 
+func TestMinimalClampsOnGemini37Flash(t *testing.T) {
+	// Verified live: 3.7 Flash answers "Thinking level is unsupported:
+	// THINKING_LEVEL_MINIMAL" even though the rest of the 3.x flash family
+	// accepts it — clamp up to LOW like the Pro models do.
+	thinking := buildThinking(t, ModelGemini37Flash,
+		llm.WithReasoningEffort(llm.ReasoningEffortMinimal))
+	assert.NotNil(t, thinking)
+	assert.Equal(t, genai.ThinkingLevelLow, thinking.ThinkingLevel)
+}
+
+func TestGemini37FlashBudgetCeilingIsLowerThanTheFamily(t *testing.T) {
+	// Verified live: 3.7 Flash reports "supported values are integers from 1
+	// to 32768", not the 65535 ceiling the rest of the 3.x flash family uses.
+	thinking := buildThinking(t, ModelGemini37Flash, llm.WithReasoningBudget(1_000_000))
+	assert.NotNil(t, thinking)
+	assert.Equal(t, int32(32768), *thinking.ThinkingBudget)
+}
+
 func TestReasoningBudgetMapsToThinkingBudget(t *testing.T) {
 	thinking := buildThinking(t, ModelGemini36Flash, llm.WithReasoningBudget(4096))
 	assert.NotNil(t, thinking)

@@ -49,7 +49,7 @@ func TestGetDefaultModel(t *testing.T) {
 			envVars: map[string]string{
 				"GOOGLE_API_KEY": "test",
 			},
-			expected: "gemini-3.6-flash",
+			expected: "gemini-3.7-flash",
 		},
 		{
 			name: "openai key present",

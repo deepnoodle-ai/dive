@@ -11,7 +11,7 @@ func TestLatestGeminiFlashModels(t *testing.T) {
 		model string
 		label string
 	}{
-		{"gemini-3.6-flash", "Gemini 3.6 Flash"},
+		{"gemini-3.7-flash", "Gemini 3.7 Flash"},
 		{"gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"},
 	}
 
@@ -27,7 +27,7 @@ func TestLatestGeminiFlashModels(t *testing.T) {
 
 func TestGoogleProviderCatalogIncludesLatestFlashModels(t *testing.T) {
 	want := map[string]bool{
-		"gemini-3.6-flash":      false,
+		"gemini-3.7-flash":      false,
 		"gemini-3.5-flash-lite": false,
 	}
 	for _, provider := range providerCatalog {

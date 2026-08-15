@@ -1246,7 +1246,7 @@ func getDefaultModel() string {
 		return anthropic.DefaultModel
 	}
 	if os.Getenv("GOOGLE_API_KEY") != "" || os.Getenv("GEMINI_API_KEY") != "" {
-		return "gemini-3.6-flash"
+		return "gemini-3.7-flash"
 	}
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		return "gpt-5.6-sol"

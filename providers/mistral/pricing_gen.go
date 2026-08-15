@@ -6,6 +6,13 @@ import "github.com/deepnoodle-ai/dive/llm"
 
 // TextModelPricing is generated from catalog.json.
 var TextModelPricing = map[string]llm.PricingInfo{
+	ModelMistralMedium: {
+		Model:       ModelMistralMedium,
+		InputPrice:  1.5,
+		OutputPrice: 7.5,
+		Currency:    "USD",
+		UpdatedAt:   "2026-08-15",
+	},
 	ModelMistralLarge2411: {
 		Model:       ModelMistralLarge2411,
 		InputPrice:  2.0,
@@ -15,17 +22,17 @@ var TextModelPricing = map[string]llm.PricingInfo{
 	},
 	ModelMistralLarge: {
 		Model:       ModelMistralLarge,
-		InputPrice:  2.0,
-		OutputPrice: 6.0,
+		InputPrice:  0.5,
+		OutputPrice: 1.5,
 		Currency:    "USD",
-		UpdatedAt:   "2025-10-15",
+		UpdatedAt:   "2026-08-15",
 	},
 	ModelMistralSmall: {
 		Model:       ModelMistralSmall,
-		InputPrice:  0.1,
-		OutputPrice: 0.3,
+		InputPrice:  0.15,
+		OutputPrice: 0.6,
 		Currency:    "USD",
-		UpdatedAt:   "2025-10-15",
+		UpdatedAt:   "2026-08-15",
 	},
 	ModelCodestralLatest: {
 		Model:       ModelCodestralLatest,
