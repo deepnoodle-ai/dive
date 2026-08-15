@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **The `dive` CLI now loads a `.env` file from the current directory on
+  startup** (via `wonton/env`), so provider API keys like `MISTRAL_API_KEY`
+  no longer need to be exported into the shell manually. Existing
+  environment variables take precedence; a missing `.env` is not an error.
+
 ## [1.24.0] - 2026-08-12
 
 ### Fixed
