@@ -163,6 +163,7 @@ func main() {
 				Default(100000).
 				Env("DIVE_COMPACTION_THRESHOLD").
 				Help("Token threshold for automatic context compaction"),
+			dangerouslySkipPermissionsFlag(),
 		).
 		Run(runMain)
 
@@ -331,7 +332,7 @@ func runInteractive(ctx *cli.Context) error {
 
 	// Set up tool permission hook using the permission package
 	permConfig := &permission.Config{
-		Mode:  permission.ModeDefault,
+		Mode:  permissionMode(ctx),
 		Rules: defaultPermissionRules(tools),
 	}
 	permManager := permission.NewManager(permConfig, tuiDialog)
@@ -442,6 +443,21 @@ func runInteractive(ctx *cli.Context) error {
 	monNotifier.app = app
 
 	return app.Run()
+}
+
+const dangerouslySkipPermissions = "dangerously-skip-permissions"
+
+func dangerouslySkipPermissionsFlag() cli.Flag {
+	return cli.Bool(dangerouslySkipPermissions).
+		Default(false).
+		Help("Run all tools without approval prompts; only use in an externally sandboxed environment")
+}
+
+func permissionMode(ctx *cli.Context) permission.Mode {
+	if ctx.Bool(dangerouslySkipPermissions) {
+		return permission.ModeBypassPermissions
+	}
+	return permission.ModeDefault
 }
 
 //go:embed system_prompt.txt
