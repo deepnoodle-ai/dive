@@ -7,6 +7,7 @@ import (
 
 	"github.com/deepnoodle-ai/dive"
 	"github.com/deepnoodle-ai/dive/llm"
+	"github.com/deepnoodle-ai/dive/permission"
 	"github.com/deepnoodle-ai/dive/toolkit"
 	"github.com/deepnoodle-ai/wonton/assert"
 	"github.com/deepnoodle-ai/wonton/cli"
@@ -137,6 +138,41 @@ func TestDefaultPermissionRules_AllowsReadOnlyToolsByDefault(t *testing.T) {
 	assert.False(t, allowed["Write"], "Write should not be auto-allowed")
 	assert.False(t, allowed["Edit"], "Edit should not be auto-allowed")
 	assert.False(t, allowed["Bash"], "Bash should not be auto-allowed")
+}
+
+func TestPermissionMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected permission.Mode
+	}{
+		{
+			name:     "defaults to approval prompts",
+			expected: permission.ModeDefault,
+		},
+		{
+			name:     "bypasses approval prompts",
+			args:     []string{"--" + dangerouslySkipPermissions},
+			expected: permission.ModeBypassPermissions,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := cli.New("test")
+			var actual permission.Mode
+			app.Main().
+				Flags(dangerouslySkipPermissionsFlag()).
+				Run(func(ctx *cli.Context) error {
+					actual = permissionMode(ctx)
+					return nil
+				})
+
+			result := app.Test(t, cli.TestArgs(tt.args...))
+			assert.True(t, result.Success(), result.Stderr)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
 }
 
 func TestNewCLIModelSettingsThinkingFlags(t *testing.T) {

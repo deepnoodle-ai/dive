@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **The experimental `dive` CLI can skip tool approval prompts with
+  `--dangerously-skip-permissions`.** The default approval flow is unchanged;
+  use the bypass only in an externally sandboxed environment.
+
 ## [1.25.1] - 2026-08-15
 
 ### Fixed
