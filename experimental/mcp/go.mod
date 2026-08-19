@@ -6,8 +6,8 @@ toolchain go1.26.5
 
 require (
 	github.com/deepnoodle-ai/dive v1.25.1
-	github.com/deepnoodle-ai/wonton v0.0.37
-	github.com/mark3labs/mcp-go v0.57.0
+	github.com/deepnoodle-ai/wonton v0.0.38
+	github.com/mark3labs/mcp-go v0.58.0
 )
 
 require (
@@ -20,7 +20,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )
 
 replace github.com/deepnoodle-ai/dive => ../..

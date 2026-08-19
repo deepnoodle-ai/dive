@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/deepnoodle-ai/dive v1.25.1
-	github.com/deepnoodle-ai/wonton v0.0.37
+	github.com/deepnoodle-ai/wonton v0.0.38
 )
 
 require (
