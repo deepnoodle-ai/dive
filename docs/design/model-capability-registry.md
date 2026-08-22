@@ -19,8 +19,8 @@ This proposal adds two provider-neutral, read-only views in
 1. `ClassificationFor` returns independent, static facts suitable for catalog
    display.
 2. `Explain` performs a network-free dry run of a concrete `llm.Config` and
-   reports which controls would be applied, adjusted, emulated, omitted, or
-   rejected.
+   reports which controls would be applied, adjusted, emulated, or omitted, and
+   separately reports whether the request would be rejected.
 
 Each provider package remains authoritative and registers both functions during
 `init()`. Request construction and `Explain` share provider-private pure control
@@ -170,18 +170,22 @@ provider capability table ──► provider-private control planner ──► r
 call existing shared `modelcaps` helpers, but a request builder never resolves
 itself back through the registry.
 
-### Static facts stay independent
+### Static classification contains no combination policy
 
-`Classification` contains facts that remain meaningful without a complete
-request:
+`Classification` contains normalized Dive contract facts that remain meaningful
+without a complete request:
 
 - native effort levels;
-- whether Dive can emulate effort using a budget;
+- which recognized effort values Dive can emulate using a budget;
 - fixed effective budget bounds;
 - whether adaptive thinking is expressible;
 - whether thinking can be disabled; and
 - whether temperature is a meaningful control in the absence of another
   control that suppresses it.
+
+These are not raw probe columns. Provider projections may apply semantic guards,
+such as reporting disablement only when the model can reason, but they do not
+evaluate combinations from a concrete request.
 
 It does not contain pairwise fields such as `EffortWithTemperature`,
 `BudgetWithTemperature`, or `EffortBudgetCompatible`. Those fields would copy
@@ -246,6 +250,10 @@ inference-profile IDs, Vertex publisher/deployment paths, fine-tunes, and other
 custom names return `ok=false` unless a separately registered provider owns
 their contract.
 
+Both `Classification.Model` and `Plan.Model` contain the normalized canonical
+catalog ID, not the caller's spelling or qualified input. Consumers therefore
+do not need to duplicate provider normalization to key a published catalog.
+
 The public classifier must use an exact map from canonical catalog model ID to
 the intended capability entry and verification scopes for that exact ID. The
 map does not copy capability facts; it records which authoritative entry applies
@@ -279,6 +287,13 @@ Verification on one scope is not evidence for another. For example,
 `google:gemini-api`, because its documented probe was performed against Vertex
 AI. Anthropic's direct Messages API, Bedrock, and Vertex are likewise distinct
 surfaces. A strict consumer checks the scope it will actually call.
+
+A scope attests to the entire populated classification snapshot on that exact
+model and surface: affirmative support, negative support, effort ladders,
+bounds, and semantic omission rules. Verifying only the model-to-entry mapping
+or a subset of fields is insufficient. When evidence is partial, the provider
+omits the scope rather than implying per-field proof that this first API cannot
+represent.
 
 Verification scope is not a freshness, entitlement, regional availability, or
 served-model guarantee. Consumers that need rollback provenance should record
@@ -316,9 +331,10 @@ type ReasoningClassification struct {
 	// least to most eager. Budget-only emulation is deliberately excluded.
 	NativeEfforts []llm.ReasoningEffort
 
-	// EffortEmulatedAsBudget reports that Dive can translate recognized effort
-	// values into a manual budget when no native effort parameter exists.
-	EffortEmulatedAsBudget bool
+	// EmulatedEfforts lists recognized effort values Dive can translate into a
+	// manual budget when no native effort parameter exists. It excludes "none",
+	// which is represented by CanDisableThinking, and arbitrary custom strings.
+	EmulatedEfforts []llm.ReasoningEffort
 
 	// Budget is non-nil when Dive can send a manual reasoning budget.
 	Budget *ReasoningBudgetClassification
@@ -334,6 +350,9 @@ type ReasoningClassification struct {
 type Classification struct {
 	noUnkeyedLiterals struct{}
 
+	// Model is the normalized, exact canonical provider catalog ID.
+	Model string
+
 	// Temperature reports whether Dive forwards temperature as a meaningful
 	// control when no other requested control suppresses it.
 	Temperature bool
@@ -341,8 +360,8 @@ type Classification struct {
 	Reasoning ReasoningClassification
 
 	// VerificationScopes identifies the endpoint and API surfaces on which this
-	// exact classification was successfully live-probed. An empty slice makes no
-	// live-verification claim.
+	// entire exact classification was successfully live-probed. An empty slice
+	// makes no live-verification claim.
 	VerificationScopes []VerificationScope
 }
 
@@ -361,6 +380,7 @@ const (
 type ControlAction string
 
 const (
+	ControlUnspecified  ControlAction = ""
 	ControlNotRequested ControlAction = "not_requested"
 	ControlApplied      ControlAction = "applied"
 	ControlEmulated     ControlAction = "emulated"
@@ -395,7 +415,9 @@ type EffectiveControls struct {
 type Plan struct {
 	noUnkeyedLiterals struct{}
 
-	Model       string
+	// Model is the normalized, exact canonical provider catalog ID.
+	Model string
+
 	Effort      ControlDecision
 	Budget      ControlDecision
 	Thinking    ControlDecision
@@ -439,11 +461,11 @@ func Providers() []string
 
 // ClassificationFor returns static facts for an exact catalog model. ok is
 // false when the provider is not registered or the normalized model is not an
-// exact classified catalog ID.
+// exact classified catalog ID. The returned Model is that canonical ID.
 func ClassificationFor(provider, model string) (Classification, bool)
 
 // Explain performs a network-free dry run for config.Model. ok has the same
-// exact-model meaning as ClassificationFor.
+// exact-model meaning as ClassificationFor, and Plan.Model is canonical.
 func Explain(provider string, config llm.Config) (Plan, bool)
 
 // SupportsNativeEffort reports native provider support. Budget emulation does
@@ -456,6 +478,40 @@ func (c Classification) SupportsNativeEffort(
 // the requested endpoint and API surface.
 func (c Classification) VerifiedOn(scope VerificationScope) bool
 ```
+
+### Plan invariants
+
+Each decision belongs to the logical caller input named by its field; it does
+not move to the destination field when Dive translates that input. The action
+contract is:
+
+| Action                | Meaning                                                                    |
+| --------------------- | -------------------------------------------------------------------------- |
+| `ControlUnspecified`  | invalid for a successful plan; the zero value is diagnostic                |
+| `ControlNotRequested` | no caller input; another decision may populate the related effective field |
+| `ControlApplied`      | caller input is honored through its native semantic control                |
+| `ControlEmulated`     | caller input is realized through a different effective control             |
+| `ControlOmitted`      | caller input has no effect on the final request                            |
+| `ControlDefaulted`    | no caller input; a default supplies the related effective field            |
+
+`Adjusted` may accompany `ControlApplied` or `ControlEmulated` when a comparable
+requested magnitude was clamped or normalized. It is false for the other
+actions. `Effective` contains the final provider-neutral state, regardless of
+which input produced it.
+
+Examples:
+
+| Input and outcome                               | Owning decision                                 | Effective state                    |
+| ----------------------------------------------- | ----------------------------------------------- | ---------------------------------- |
+| effort translated into a budget                 | `Effort=ControlEmulated`                        | `ReasoningBudget` is populated     |
+| explicit budget translated to adaptive thinking | `Budget=ControlEmulated`                        | `Thinking=adaptive`                |
+| explicit budget wins over simultaneous effort   | `Effort=ControlOmitted`, budget owns its result | final budget/thinking is populated |
+| provider activates thinking with no input       | `Thinking=ControlDefaulted`                     | effective thinking is populated    |
+
+When `Rejected=true`, `RejectionReason` is non-empty and all decisions plus
+`Effective` are unspecified diagnostics that callers must ignore. A successful
+plan has `Rejected=false`, an empty rejection reason, and no
+`ControlUnspecified` decisions.
 
 The unexported sentinel fields require external packages to use keyed composite
 literals, preserving source compatibility when fields are added. They also
@@ -480,8 +536,9 @@ The registry uses a `sync.RWMutex` and a map keyed by normalized provider name.
 - Lookup copies the resolver while holding the read lock, releases the lock,
   and only then invokes it. A resolver therefore cannot deadlock the registry.
 - Returned values are deep-enough snapshots for public mutation. The registry
-  clones `NativeEfforts`, `VerificationScopes`, optional budget records and
-  bounds, effective value pointers, and reason-bearing plan values as necessary.
+  clones `NativeEfforts`, `EmulatedEfforts`, `VerificationScopes`, optional
+  budget records and bounds, effective value pointers, and reason-bearing plan
+  values as necessary.
 - `Providers` returns a newly allocated, sorted slice.
 - Resolver registration normally happens during package initialization, but
   the mutex keeps concurrent lookups and plugin-style imports race-safe.
@@ -507,6 +564,7 @@ remain distinguishable.
 For these providers:
 
 - `NativeEfforts` comes from `Entry.Caps.Efforts`.
+- `EmulatedEfforts` is empty.
 - `Temperature` comes from `Entry.Caps.Temperature`.
 - Reasoning budgets, adaptive thinking, and explicit disablement are absent.
 - `VerificationScopes` comes from the exact model mapping and is empty when
@@ -526,17 +584,21 @@ adaptive emulation.
 
 Add `providers/anthropic/capabilities_register.go`. The static projection is:
 
-| Public field             | Anthropic source                                |
-| ------------------------ | ----------------------------------------------- |
-| `NativeEfforts`          | `caps.efforts`                                  |
-| `EffortEmulatedAsBudget` | no native efforts and `caps.manualBudget`       |
-| `Budget`                 | present when `caps.manualBudget`                |
-| Budget minimum           | `minThinkingBudget`                             |
-| Budget maximum           | no fixed maximum                                |
-| `AdaptiveThinking`       | `caps.adaptive`                                 |
-| `CanDisableThinking`     | guarded semantic disablement                    |
-| `Temperature`            | `caps.temperature`                              |
-| `VerificationScopes`     | exact mapping scopes and private entry evidence |
+| Public field         | Anthropic source                                |
+| -------------------- | ----------------------------------------------- |
+| `NativeEfforts`      | `caps.efforts`                                  |
+| `EmulatedEfforts`    | recognized legacy budget mappings               |
+| `Budget`             | present when `caps.manualBudget`                |
+| Budget minimum       | `minThinkingBudget`                             |
+| Budget maximum       | no fixed maximum                                |
+| `AdaptiveThinking`   | `caps.adaptive`                                 |
+| `CanDisableThinking` | guarded semantic disablement                    |
+| `Temperature`        | `caps.temperature`                              |
+| `VerificationScopes` | exact mapping scopes and private entry evidence |
+
+For legacy budget models, `EmulatedEfforts` lists `minimal`, `low`, `medium`,
+`high`, `xhigh`, and `max`, matching `legacyEffortBudget`. It excludes `none`
+and unrecognized custom strings because those do not produce an emulated budget.
 
 `CanDisableThinking` is semantic and only meaningful for a model that can
 reason. The projection first requires at least one of native effort, manual
@@ -552,12 +614,6 @@ because Google's existing `unverified` field changes runtime lookup semantics.
 It suppresses the exact mapping's verification scopes. The Anthropic marker
 affects only public evidence and must not accidentally turn a known runtime
 entry into passthrough.
-
-The current `lookupCapabilities` prefix matcher remains on the runtime path.
-The public classifier uses an exact catalog-ID map and records the intended
-capability entry key; its coverage test asserts both the exact ID and matched
-key. A future `claude-opus-4-9` therefore cannot pass coverage by inheriting
-`claude-opus-4`.
 
 Anthropic's pure planner must cover the current request-dependent branches,
 including:
@@ -578,15 +634,19 @@ Add `providers/google/capabilities_register.go`. The classifier projects the
 raw `lookupEntry`, not `lookupCapabilities`, because the latter converts
 not-live-probed entries into unknown runtime passthrough.
 
-| Public field             | Google source                                    |
-| ------------------------ | ------------------------------------------------ |
-| `NativeEfforts`          | `caps.efforts`                                   |
-| `EffortEmulatedAsBudget` | no native efforts on a classified budget model   |
-| `Budget`                 | classified `caps.minBudget` and `caps.maxBudget` |
-| `AdaptiveThinking`       | model accepts Dive's adaptive-thinking request   |
-| `CanDisableThinking`     | `caps.canDisableThinking`                        |
-| `Temperature`            | `modelAcceptsTemperature(model)`                 |
-| `VerificationScopes`     | exact mapping scopes, empty if `caps.unverified` |
+| Public field         | Google source                                    |
+| -------------------- | ------------------------------------------------ |
+| `NativeEfforts`      | `caps.efforts`                                   |
+| `EmulatedEfforts`    | known effort ladder on budget-only models        |
+| `Budget`             | classified `caps.minBudget` and `caps.maxBudget` |
+| `AdaptiveThinking`   | model accepts Dive's adaptive-thinking request   |
+| `CanDisableThinking` | `caps.canDisableThinking`                        |
+| `Temperature`        | `modelAcceptsTemperature(model)`                 |
+| `VerificationScopes` | exact mapping scopes, empty if `caps.unverified` |
+
+For budget-only Gemini models, `EmulatedEfforts` publishes the same known
+non-`none` ladder. The current runtime fallback for an arbitrary custom effort
+string remains permissive behavior and is not advertised as a strict fact.
 
 There is no separate `Dynamic` field. Google's `-1` thinking budget is the wire
 encoding used when the provider-private planner applies
@@ -600,10 +660,6 @@ The exact `gemini-3.7-flash` mapping includes only
 `VerificationGoogleVertexAI`. Its table comment says it was verified on Vertex
 AI and was not probed against the public Gemini API. Other Gemini mappings list
 only scopes supported by their own probe evidence.
-
-As with Anthropic, exact catalog-ID membership and an explicit model-to-entry
-mapping precede any private prefix lookup. Vertex deployment and publisher
-paths are not normalized into native Gemini IDs.
 
 The Google explainer and request builder both use the existing thinking-plan
 logic for effort-to-budget emulation, effort and budget precedence, adaptive
@@ -659,7 +715,9 @@ helper.
 
 A consumer may deliberately expose Dive's portable effort emulation, but it
 must label that separately from native effort support. Emulation does not imply
-that every provider preserves identical effort semantics.
+that every provider preserves identical effort semantics. It advertises only
+values present in `EmulatedEfforts`; arbitrary `llm.ReasoningEffort` strings
+remain a permissive runtime compatibility feature, not a strict catalog fact.
 
 Provider naming remains consumer-specific. Dive's canonical xAI adapter name
 is `grok`; a consumer that publishes `xai` maps that name at its adapter
@@ -736,8 +794,8 @@ Add root-module tests covering:
    verification scopes;
 5. invalid and duplicate `Register` errors plus `MustRegister` panics;
 6. concurrent registration and lookup safety;
-7. defensive cloning of effort and verification-scope slices, budget records,
-   bound pointers, and plan effective-value pointers;
+7. defensive cloning of native/emulated effort and verification-scope slices,
+   budget records, bound pointers, and plan effective-value pointers;
 8. resolvers being invoked outside the registry lock; and
 9. unchanged behavior of existing `Lookup`, `ResolveEffort`, and
    `AcceptsTemperature` APIs.
@@ -750,18 +808,22 @@ new sentinel-bearing structs.
 Each provider module verifies:
 
 1. every catalogued text model with an ID has one exact classification mapping;
-2. the mapping names the intended capability entry key and exact-ID evidence
-   state, not merely any matching prefix;
-3. representative native effort ladders and budget bounds match the
+2. the mapping names the intended capability entry key and exact-ID verification
+   scopes, not merely any matching prefix;
+3. qualified and case-varied input returns the exact canonical catalog ID in
+   both classification and plan results;
+4. representative native effort ladders and budget bounds match the
    authoritative table;
-4. effort-to-budget emulation remains distinct from native effort;
-5. temperature, adaptive thinking, and disablement match provider behavior;
-6. endpoint scopes reflect exact probe evidence, including Vertex-only
+5. effort-to-budget emulation lists exactly the recognized translated ladder
+   and remains distinct from native effort;
+6. temperature, adaptive thinking, and disablement match provider behavior;
+7. endpoint scopes attest to the complete populated snapshot and reflect exact
+   probe evidence, including Vertex-only
    `gemini-3.7-flash`, while not-live-probed entries have no scopes;
-7. invented future point releases such as `claude-opus-4-9`, `gpt-5.7`, and
+8. invented future point releases such as `claude-opus-4-9`, `gpt-5.7`, and
    `gemini-3.8-flash` return `ok=false`;
-8. arbitrary gateway and deployment paths return `ok=false`; and
-9. mutating a public result cannot change a later lookup or provider request.
+9. arbitrary gateway and deployment paths return `ok=false`; and
+10. mutating a public result cannot change a later lookup or provider request.
 
 ### Planner parity tests
 
@@ -770,6 +832,11 @@ the dry-run plan and the constructed provider request. Representative cases
 include native clamping, budget emulation, simultaneous controls, temperature
 omission, adaptive thinking, disablement, defaults, request-dependent budget
 floors, interleaved-thinking exceptions, and hard rejections.
+
+The table also enforces the plan invariants: cross-control translations remain
+owned by their source decision, successful plans contain no unspecified actions,
+and rejected plans provide a non-empty reason without consumable effective
+values.
 
 The parity test must inspect the constructed request rather than reimplementing
 the expected branch in test code. This is the primary defense against plan and
@@ -797,31 +864,30 @@ The normal GitHub workflow remains the final cross-module check.
 
 1. Add the public types, error-returning registry, `MustRegister`, defensive
    cloning, `Providers`, and registry unit tests to `providers/modelcaps`.
-2. Add exact catalog-ID registration in OpenAI and Grok provider packages,
-   including per-ID verification scopes, while projecting their existing
-   `modelcaps` entries.
-3. Add the Anthropic projection, exact model-to-entry-and-scope map, and private
-   `notLiveProbed` entry marker.
-4. Add the Google projection using raw entry lookup, exact
-   model-to-entry-and-scope mapping, and effective temperature rules.
-5. Extract or consolidate one pure control planner per provider; use it from
-   both request construction and `Explain` without changing request behavior.
-6. Add exact-ID coverage, dry-run/request parity, and mutation-isolation tests.
-7. Create `docs/guides/model-control-classification.md` with provider import
+2. Add provider-private exact classifier functions and
+   model-to-entry-and-scope maps for OpenAI, Grok, Anthropic, and Google, without
+   registering incomplete resolvers. Include Anthropic's private
+   `notLiveProbed` entry marker and Google's effective temperature rule.
+3. Extract or consolidate one pure control planner per provider and switch each
+   request builder to it without changing request behavior.
+4. Add each provider's explainer projection, then register its complete
+   `Resolver` only after both `Classify` and `Explain` are real implementations.
+5. Add exact-ID coverage, dry-run/request parity, registry integration, and
+   mutation-isolation tests.
+6. Create `docs/guides/model-control-classification.md` with provider import
    requirements, model-ID and verification-scope rules, `go-cmp` guidance, and
    strict-consumer examples.
-8. Release the root and nested provider modules at the same Dive version and
+7. Release the root and nested provider modules at the same Dive version and
    validate their declared root-module requirements.
-9. Migrate consumers separately. A consumer deletes copied facts only after its
+8. Migrate consumers separately. A consumer deletes copied facts only after its
    catalog and admission tests use both classification and planning
    successfully.
 
-Steps 1 through 4 form a reviewable static-classification phase. Steps 5 through
-7 are a second implementation phase for the real pure-planner refactor and
-public `Explain` contract. They may land as separate commits, but steps 1 through
-7 release together so the registry never substitutes static combination
-guesses or a parallel dry-run implementation for planner parity. Consumer
-adoption does not block the Dive release.
+Steps 1 and 2 form a reviewable classification foundation and compile without
+placeholder registrations. Steps 3 through 6 complete the pure-planner and
+public `Explain` phase. They may land as separate commits, but steps 1 through 6
+release together so every registered resolver is complete and planner parity is
+enforced. Consumer adoption does not block the Dive release.
 
 ## Alternatives considered
 
@@ -916,17 +982,7 @@ initialization-order failure modes to runtime without removing data duplication.
 - The sentinel fields preserve additive compatibility but require explicit
   `go-cmp` configuration in external tests.
 
-## Resolved review questions
-
-Three issues that were open in the earlier draft are now explicit design
-decisions:
-
-1. Model-ID normalization is provider-specific, conservative, and exact at the
-   public boundary; runtime prefix inheritance is not classification evidence.
-2. Combination behavior is derived by `Explain` from the provider's shared pure
-   request planner, not maintained as static pairwise booleans.
-3. Verification evidence is scoped to a named endpoint and API surface; no
-   provider-wide boolean can promote a Vertex probe to a direct-API guarantee.
+## Future extensions
 
 Gateway registration and additional control families remain future proposals
 because they require their own verified source of truth and consumer need.
