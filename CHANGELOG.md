@@ -13,12 +13,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `openai.phase` provider metadata and is replayed on follow-up requests, so
   runtimes that persist and resend history manually no longer silently drop it.
   Unlabeled messages stay unphased.
+- **Compaction keeps provider metadata on truncated content.** Shrinking an
+  oversized text or `tool_use` block no longer strips replay state such as a
+  Google thought signature or an OpenAI message phase.
 
 ### Added
 
 - **The experimental `dive` CLI can skip tool approval prompts with
   `--dangerously-skip-permissions`.** The default approval flow is unchanged;
   use the bypass only in an externally sandboxed environment.
+
+### Changed
+
+- **OpenAI streaming closes a text block on its output item's done event**
+  rather than on `output_text.done`, so metadata that arrives only with the
+  done event — such as a late `phase` label — reaches consumers while the block
+  is still open.
 
 ## [1.25.1] - 2026-08-15
 

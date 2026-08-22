@@ -544,15 +544,18 @@ func reducible(c llm.Content) bool {
 // reduceBlock returns a smaller version of c — text-bearing blocks truncated by
 // `excess` bytes, tool_use inputs and image/document payloads culled to a
 // placeholder. Always a fresh struct, so the original block is never mutated.
+// Provider metadata is carried over: a shrunken block is still replayed, and
+// dropping it would strip replay state such as an OpenAI message phase or a
+// Google thought signature.
 func reduceBlock(c llm.Content, excess int) llm.Content {
 	switch cc := c.(type) {
 	case *llm.TextContent:
-		return &llm.TextContent{Text: truncateText(cc.Text, len(cc.Text)-excess), CacheControl: cc.CacheControl, Citations: cc.Citations}
+		return &llm.TextContent{Text: truncateText(cc.Text, len(cc.Text)-excess), CacheControl: cc.CacheControl, Citations: cc.Citations, Metadata: cc.Metadata.Clone()}
 	case *llm.ToolResultContent:
 		txt := toolResultText(cc)
 		return &llm.ToolResultContent{ToolUseID: cc.ToolUseID, Content: truncateText(txt, len(txt)-excess), IsError: cc.IsError, CacheControl: cc.CacheControl}
 	case *llm.ToolUseContent:
-		return &llm.ToolUseContent{ID: cc.ID, Name: cc.Name, Input: culledToolInput}
+		return &llm.ToolUseContent{ID: cc.ID, Name: cc.Name, Input: culledToolInput, Metadata: cc.Metadata.Clone()}
 	case *llm.ImageContent:
 		return &llm.TextContent{Text: "[image content omitted for summarization]"}
 	case *llm.DocumentContent:

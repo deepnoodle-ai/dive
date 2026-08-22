@@ -481,3 +481,33 @@ func TestTruncateText(t *testing.T) {
 	assert.True(t, len(out) <= 200)
 	assert.True(t, strings.Contains(out, "truncated"))
 }
+
+// TestReduceBlockKeepsProviderMetadata guards replay state on shrunken blocks:
+// truncating a text block or culling a tool_use input must not strip metadata
+// the provider requires on the next request, such as an OpenAI message phase or
+// a Google thought signature.
+func TestReduceBlockKeepsProviderMetadata(t *testing.T) {
+	text := &llm.TextContent{
+		Text:     strings.Repeat("a", 1000),
+		Metadata: llm.ProviderMetadata{"openai.phase": "final_answer"},
+	}
+	reducedText, isText := reduceBlock(text, 800).(*llm.TextContent)
+	assert.True(t, isText)
+	assert.True(t, len(reducedText.Text) < len(text.Text))
+	assert.Equal(t, "final_answer", reducedText.Metadata["openai.phase"])
+
+	// The reduced block owns its metadata rather than aliasing the original.
+	reducedText.Metadata["openai.phase"] = "commentary"
+	assert.Equal(t, "final_answer", text.Metadata["openai.phase"])
+
+	toolUse := &llm.ToolUseContent{
+		ID:       "t1",
+		Name:     "search",
+		Input:    json.RawMessage(`{"query":"` + strings.Repeat("b", 1000) + `"}`),
+		Metadata: llm.ProviderMetadata{"google.thought_signature": "sig"},
+	}
+	reducedToolUse, isToolUse := reduceBlock(toolUse, 800).(*llm.ToolUseContent)
+	assert.True(t, isToolUse)
+	assert.True(t, len(reducedToolUse.Input) < len(toolUse.Input))
+	assert.Equal(t, "sig", reducedToolUse.Metadata["google.thought_signature"])
+}
