@@ -1,6 +1,6 @@
 # Model Control Classification and Planning Registry
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-08-22
 **Audience:** Dive maintainers and integrators that publish model catalogs
 **Target:** Next compatible minor release after v1.26.0
@@ -763,6 +763,9 @@ providers/
 │   ├── tables.go                 # existing OpenAI and Grok facts
 │   ├── registry.go               # new public types and registry
 │   └── registry_test.go
+├── internal/
+│   └── responsescontrol/
+│       └── plan.go              # shared OpenAI/Grok Responses control planner
 ├── anthropic/
 │   ├── capabilities.go           # private source of truth and planner inputs
 │   ├── capabilities_register.go  # exact classification and explanation
