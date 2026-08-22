@@ -404,3 +404,60 @@ func TestStreamIteratorStreamError(t *testing.T) {
 	}
 	assert.Error(t, iterator.Err())
 }
+
+// TestStreamIteratorClosesDanglingBlocks verifies that a stream which simply
+// ends — no FinishReason, no usage chunk — still closes the block it left
+// open and terminates with message_delta then message_stop, so consumers see
+// a balanced block lifecycle whatever kind of block was streaming last.
+func TestStreamIteratorClosesDanglingBlocks(t *testing.T) {
+	partChunk := func(part *genai.Part) *genai.GenerateContentResponse {
+		return &genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Role: "model", Parts: []*genai.Part{part}},
+			}},
+		}
+	}
+	tests := []struct {
+		name    string
+		chunk   *genai.GenerateContentResponse
+		content llm.ContentType
+	}{
+		{name: "text", chunk: partChunk(&genai.Part{Text: "Hi"}), content: llm.ContentTypeText},
+		{name: "thinking", chunk: partChunk(&genai.Part{Text: "hmm", Thought: true}), content: llm.ContentTypeThinking},
+		{name: "function call", chunk: partChunk(&genai.Part{FunctionCall: &genai.FunctionCall{Name: "calc", Args: map[string]any{"a": 1}}}), content: llm.ContentTypeToolUse},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			iterator := NewStreamIteratorFromSeq(context.Background(),
+				chunkSeq(tc.chunk), "gemini-2.5-pro")
+			defer iterator.Close()
+			events, accumulator := collectStreamEvents(t, iterator)
+
+			var types []llm.EventType
+			starts, stops, stopIndex, deltaIndex := 0, 0, -1, -1
+			for i, event := range events {
+				types = append(types, event.Type)
+				switch event.Type {
+				case llm.EventTypeContentBlockStart:
+					starts++
+				case llm.EventTypeContentBlockStop:
+					stops++
+					stopIndex = i
+				case llm.EventTypeMessageDelta:
+					deltaIndex = i
+				}
+			}
+			assert.Equal(t, 1, starts)
+			assert.Equal(t, 1, stops)
+			assert.True(t, deltaIndex >= 0, "expected a message_delta event")
+			assert.True(t, stopIndex < deltaIndex, "content_block_stop must precede message_delta, got %v", types)
+			assert.Equal(t, llm.EventTypeMessageStop, types[len(types)-1])
+
+			// The partial block still reaches consumers as a well-formed message.
+			assert.True(t, accumulator.IsComplete())
+			message := accumulator.Response().Message()
+			assert.Equal(t, 1, len(message.Content))
+			assert.Equal(t, tc.content, message.Content[0].Type())
+		})
+	}
+}
