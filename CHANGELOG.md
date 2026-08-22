@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-08-22
+
 ### Fixed
 
 - **OpenAI Responses assistant messages keep their `phase`.** The phase
