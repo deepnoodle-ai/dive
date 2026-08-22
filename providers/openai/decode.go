@@ -92,12 +92,17 @@ func decodeResponseItem(item responses.ResponseOutputItemUnion) ([]llm.Content, 
 
 func decodeMessageContent(outputMsg responses.ResponseOutputMessage) ([]llm.Content, error) {
 	var contentBlocks []llm.Content
+	phase := string(outputMsg.Phase)
 	for _, content := range outputMsg.Content {
 		switch content.Type {
 		case "output_text":
 			outputText := content.AsOutputText()
 			textContent := &llm.TextContent{
 				Text: outputText.Text,
+				// Each text block records the phase of the output message it
+				// came from, so a response mixing commentary with a final
+				// answer replays each block under its own phase.
+				Metadata: openAIPhaseMetadata(phase),
 			}
 			// Convert OpenAI annotations to web_search_result_location citations
 			if len(outputText.Annotations) > 0 {
@@ -278,6 +283,16 @@ func decodeReasoningContent(reasoning responses.ResponseReasoningItem) ([]llm.Co
 			Metadata:  metadata,
 		},
 	}, nil
+}
+
+// openAIPhaseMetadata returns metadata carrying an assistant output message's
+// phase, or nil when OpenAI did not label the message. Each call returns a
+// fresh map so blocks decoded from one message do not share state.
+func openAIPhaseMetadata(phase string) llm.ProviderMetadata {
+	if phase == "" {
+		return nil
+	}
+	return llm.ProviderMetadata{openAIPhaseMetadataKey: phase}
 }
 
 func openAIReasoningMetadata(summaryItems, reasoningItems []string) (llm.ProviderMetadata, error) {

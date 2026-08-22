@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenAI Responses assistant messages keep their `phase`.** The phase
+  (`commentary` or `final_answer`) now decodes onto each text block as
+  `openai.phase` provider metadata and is replayed on follow-up requests, so
+  runtimes that persist and resend history manually no longer silently drop it.
+  Unlabeled messages stay unphased.
+
 ### Added
 
 - **The experimental `dive` CLI can skip tool approval prompts with

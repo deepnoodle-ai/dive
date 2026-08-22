@@ -59,6 +59,22 @@ type outputItemState struct {
 	// For message with text/reasoning content parts
 	// Keyed by ContentIndex
 	ContentParts map[int]*contentPartState
+
+	// Phase is the phase OpenAI assigned to a message item. It may be absent
+	// when the item is added and only appear on the done event, so the done
+	// event is treated as authoritative.
+	Phase string
+}
+
+// hasTextPart reports whether this item streamed an output_text part, meaning
+// the accumulator holds a text content block at this item's index.
+func (s *outputItemState) hasTextPart() bool {
+	for _, part := range s.ContentParts {
+		if part.PartType == "output_text" {
+			return true
+		}
+	}
+	return false
 }
 
 type contentPartState struct {
@@ -184,6 +200,10 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			ContentParts: make(map[int]*contentPartState),
 		}
 
+		if data.Item.Type == "message" {
+			s.outputItemsState[outputIdx].Phase = string(data.Item.Phase)
+		}
+
 		if data.Item.Type == "function_call" {
 			fnCall := data.Item.AsFunctionCall()
 			s.outputItemsState[outputIdx].ToolCallName = fnCall.Name
@@ -225,12 +245,17 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			return diveEvents, nil
 		}
 
+		contentBlock := &llm.EventContentBlock{Type: diveContentType}
+		if diveContentType == llm.ContentTypeText {
+			// Surface the phase to live consumers as soon as it is known. When
+			// OpenAI only labels the message on the done event, the metadata
+			// delta emitted there fills it in.
+			contentBlock.Metadata = openAIPhaseMetadata(itemState.Phase)
+		}
 		diveEvents = append(diveEvents, &llm.Event{
-			Type:  llm.EventTypeContentBlockStart,
-			Index: &outputIdx,
-			ContentBlock: &llm.EventContentBlock{
-				Type: diveContentType,
-			},
+			Type:         llm.EventTypeContentBlockStart,
+			Index:        &outputIdx,
+			ContentBlock: contentBlock,
 		})
 
 	case responses.ResponseTextDeltaEvent:
@@ -587,6 +612,28 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 					Type:  llm.EventTypeContentBlockStop,
 					Index: &idxStop,
 				})
+			}
+		}
+
+		// The done event carries the authoritative phase for a message item:
+		// OpenAI may omit it when the item is added and only label it here.
+		if data.Item.Type == "message" {
+			if itemState, ok := s.outputItemsState[outputIdx]; ok {
+				if phase := string(data.Item.Phase); phase != "" {
+					itemState.Phase = phase
+				}
+				metadata := openAIPhaseMetadata(itemState.Phase)
+				if metadata != nil && itemState.hasTextPart() {
+					idxPhase := outputIdx
+					diveEvents = append(diveEvents, &llm.Event{
+						Type:  llm.EventTypeContentBlockDelta,
+						Index: &idxPhase,
+						Delta: &llm.EventDelta{
+							Type:     llm.EventDeltaTypeMetadata,
+							Metadata: metadata,
+						},
+					})
+				}
 			}
 		}
 

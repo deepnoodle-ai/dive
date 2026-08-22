@@ -5,6 +5,7 @@ package openai
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -294,4 +295,70 @@ func setupIntegrationProvider(t *testing.T) *Provider {
 		WithModel("gpt-4o"),
 		WithMaxTokens(1000),
 	)
+}
+
+// TestIntegration_PhaseReplayedAcrossStatelessTurns qualifies faithful manual
+// continuation: the assistant turn from a live GPT-5.6 call is persisted,
+// reloaded, and resent as history without `previous_response_id`. Every phase
+// OpenAI assigned must reach the wire unchanged on the follow-up request.
+func TestIntegration_PhaseReplayedAcrossStatelessTurns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+	provider := New(
+		WithAPIKey(apiKey),
+		WithModel(string(ModelGPT56Sol)),
+		WithMaxTokens(2000),
+	)
+
+	first, err := provider.Generate(
+		context.Background(),
+		llm.WithUserTextMessage("In two sentences, what is the capital of France?"),
+		llm.WithReasoningEffort(llm.ReasoningEffortLow),
+	)
+	assert.NoError(t, err)
+
+	// Persist and reload the assistant turn the way a durable runtime would.
+	stored, err := json.Marshal(first.Message())
+	assert.NoError(t, err)
+	var reloaded llm.Message
+	assert.NoError(t, json.Unmarshal(stored, &reloaded))
+
+	var phases []string
+	for _, content := range reloaded.Content {
+		if text, ok := content.(*llm.TextContent); ok {
+			if phase := text.Metadata[openAIPhaseMetadataKey]; phase != "" {
+				phases = append(phases, phase)
+			}
+		}
+	}
+	if len(phases) == 0 {
+		t.Skip("model returned no phased output messages; nothing to qualify")
+	}
+
+	// The replayed request must carry every phase the model assigned.
+	replayed, err := encodeMessages([]*llm.Message{&reloaded})
+	assert.NoError(t, err)
+	replayedJSON, err := json.Marshal(replayed)
+	assert.NoError(t, err)
+	for _, phase := range phases {
+		assert.Contains(t, string(replayedJSON), `"phase":"`+phase+`"`)
+	}
+
+	// And OpenAI must accept that history on a stateless follow-up turn.
+	second, err := provider.Generate(
+		context.Background(),
+		llm.WithMessages(
+			llm.NewUserTextMessage("In two sentences, what is the capital of France?"),
+			&reloaded,
+			llm.NewUserTextMessage("Now name its largest airport."),
+		),
+		llm.WithReasoningEffort(llm.ReasoningEffortLow),
+	)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, second.Message().Text())
 }
