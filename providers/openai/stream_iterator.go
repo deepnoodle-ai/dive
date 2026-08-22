@@ -3,6 +3,7 @@ package openai
 import (
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 
 	"github.com/deepnoodle-ai/dive/llm"
@@ -64,10 +65,38 @@ type outputItemState struct {
 	// when the item is added and only appear on the done event, so the done
 	// event is treated as authoritative.
 	Phase string
+
+	// PhaseEmitted is the phase already carried to consumers on the text
+	// block's start event, so the done event only emits a metadata delta when
+	// OpenAI relabeled the message after the block opened.
+	PhaseEmitted string
 }
 
 // hasTextPart reports whether this item streamed an output_text part, meaning
 // the accumulator holds a text content block at this item's index.
+// closeTextBlocks emits content_block_stop for every text block this item
+// opened and has not closed yet, at the item's own event index.
+func (s *outputItemState) closeTextBlocks(outputIdx int) []*llm.Event {
+	contentIndexes := make([]int, 0, len(s.ContentParts))
+	for contentIdx, part := range s.ContentParts {
+		if part.PartType == "output_text" && !part.BlockStopped {
+			contentIndexes = append(contentIndexes, contentIdx)
+		}
+	}
+	sort.Ints(contentIndexes)
+
+	events := make([]*llm.Event, 0, len(contentIndexes))
+	for _, contentIdx := range contentIndexes {
+		s.ContentParts[contentIdx].BlockStopped = true
+		idxStop := outputIdx
+		events = append(events, &llm.Event{
+			Type:  llm.EventTypeContentBlockStop,
+			Index: &idxStop,
+		})
+	}
+	return events
+}
+
 func (s *outputItemState) hasTextPart() bool {
 	for _, part := range s.ContentParts {
 		if part.PartType == "output_text" {
@@ -83,6 +112,10 @@ type contentPartState struct {
 	PartType     string // E.g., "output_text", "reasoning"
 	Text         string // Accumulated text for output_text or reasoning
 	IsComplete   bool
+
+	// BlockStopped records that this part's content_block_stop was emitted, so
+	// the item's done event closes each block exactly once.
+	BlockStopped bool
 }
 
 func newOpenAIStreamIterator(sdkStream StreamSource, config *llm.Config) *openaiStreamIterator {
@@ -251,6 +284,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			// OpenAI only labels the message on the done event, the metadata
 			// delta emitted there fills it in.
 			contentBlock.Metadata = openAIPhaseMetadata(itemState.Phase)
+			itemState.PhaseEmitted = itemState.Phase
 		}
 		diveEvents = append(diveEvents, &llm.Event{
 			Type:         llm.EventTypeContentBlockStart,
@@ -513,10 +547,10 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			if part, ok2 := item.ContentParts[contentIdx]; ok2 {
 				part.Text = data.Text
 				part.IsComplete = true
-				diveEvents = append(diveEvents, &llm.Event{
-					Type:  llm.EventTypeContentBlockStop,
-					Index: &outputIdx,
-				})
+				// The block is closed by the item's done event rather than
+				// here: OpenAI sends output_text.done first, and closing now
+				// would push any metadata the done event carries (such as a
+				// late phase label) outside the block lifecycle.
 			}
 		}
 
@@ -622,19 +656,30 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 				if phase := string(data.Item.Phase); phase != "" {
 					itemState.Phase = phase
 				}
-				metadata := openAIPhaseMetadata(itemState.Phase)
-				if metadata != nil && itemState.hasTextPart() {
-					idxPhase := outputIdx
-					diveEvents = append(diveEvents, &llm.Event{
-						Type:  llm.EventTypeContentBlockDelta,
-						Index: &idxPhase,
-						Delta: &llm.EventDelta{
-							Type:     llm.EventDeltaTypeMetadata,
-							Metadata: metadata,
-						},
-					})
+				// A delta is only needed when the block's start event could not
+				// announce this phase, which keeps the stream free of redundant
+				// metadata for the common case of a message labeled up front.
+				if itemState.Phase != itemState.PhaseEmitted && itemState.hasTextPart() {
+					if metadata := openAIPhaseMetadata(itemState.Phase); metadata != nil {
+						itemState.PhaseEmitted = itemState.Phase
+						idxPhase := outputIdx
+						diveEvents = append(diveEvents, &llm.Event{
+							Type:  llm.EventTypeContentBlockDelta,
+							Index: &idxPhase,
+							Delta: &llm.EventDelta{
+								Type:     llm.EventDeltaTypeMetadata,
+								Metadata: metadata,
+							},
+						})
+					}
 				}
 			}
+		}
+
+		// Close the text blocks this item opened, after any metadata the done
+		// event contributed to them.
+		if itemState, ok := s.outputItemsState[outputIdx]; ok {
+			diveEvents = append(diveEvents, itemState.closeTextBlocks(outputIdx)...)
 		}
 
 		if item, ok := s.outputItemsState[outputIdx]; ok && !item.IsComplete {
@@ -670,6 +715,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			},
 			Usage: s.finalUsage,
 		})
+		diveEvents = append(diveEvents, s.closeDanglingTextBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{Type: llm.EventTypeMessageStop})
 		s.isClosed = true
 
@@ -699,6 +745,7 @@ func (s *openaiStreamIterator) processOpenAIEvent(event responses.ResponseStream
 			},
 			Usage: s.finalUsage,
 		})
+		diveEvents = append(diveEvents, s.closeDanglingTextBlocks()...)
 		diveEvents = append(diveEvents, &llm.Event{Type: llm.EventTypeMessageStop})
 		s.isClosed = true
 
@@ -746,4 +793,21 @@ func reasoningContentTexts(reasoning responses.ResponseReasoningItem) []string {
 		texts = append(texts, part.Text)
 	}
 	return texts
+}
+
+// closeDanglingTextBlocks closes any text block left open because the response
+// ended without the output_item.done event that normally closes it, so the
+// event stream always hands consumers a balanced block lifecycle.
+func (s *openaiStreamIterator) closeDanglingTextBlocks() []*llm.Event {
+	outputIndexes := make([]int, 0, len(s.outputItemsState))
+	for outputIdx := range s.outputItemsState {
+		outputIndexes = append(outputIndexes, outputIdx)
+	}
+	sort.Ints(outputIndexes)
+
+	var events []*llm.Event
+	for _, outputIdx := range outputIndexes {
+		events = append(events, s.outputItemsState[outputIdx].closeTextBlocks(outputIdx)...)
+	}
+	return events
 }

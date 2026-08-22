@@ -270,3 +270,46 @@ func TestStreamIteratorPreservesRawReasoningText(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Contains(t, string(replayedJSON), `"content":[{"text":"raw reasoning","type":"reasoning_text"}]`)
 }
+
+// TestStreamIteratorClosesTextBlockWithoutItemDone covers a response that ends
+// without the output_item.done event that normally closes a text block, which
+// must still leave consumers with a balanced block lifecycle.
+func TestStreamIteratorClosesTextBlockWithoutItemDone(t *testing.T) {
+	payloads := []string{
+		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
+		`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.content_part.added","sequence_number":3,"item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}`,
+		`{"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"Partial"}`,
+		`{"type":"response.incomplete","sequence_number":5,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1,"output_tokens":2,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}}`,
+	}
+	events := make([]responses.ResponseStreamEventUnion, 0, len(payloads))
+	for _, payload := range payloads {
+		var event responses.ResponseStreamEventUnion
+		assert.NoError(t, json.Unmarshal([]byte(payload), &event))
+		events = append(events, event)
+	}
+
+	iterator := newOpenAIStreamIterator(&mockStreamSource{events: events}, &llm.Config{})
+	defer iterator.Close()
+
+	var starts, stops, stopBeforeMessageStop int
+	var sawMessageStop bool
+	for iterator.Next() {
+		switch iterator.Event().Type {
+		case llm.EventTypeContentBlockStart:
+			starts++
+		case llm.EventTypeContentBlockStop:
+			stops++
+			if !sawMessageStop {
+				stopBeforeMessageStop++
+			}
+		case llm.EventTypeMessageStop:
+			sawMessageStop = true
+		}
+	}
+	assert.NoError(t, iterator.Err())
+
+	assert.Equal(t, 1, starts)
+	assert.Equal(t, 1, stops)
+	assert.Equal(t, 1, stopBeforeMessageStop)
+}

@@ -163,7 +163,7 @@ func TestUserMessagesNeverCarryPhase(t *testing.T) {
 	assert.NotContains(t, replayJSON(t, userMessage), `"phase"`)
 }
 
-func streamPhaseEvents(t *testing.T, addedPhase, donePhase string) *llm.Message {
+func streamPhase(t *testing.T, addedPhase, donePhase string) (*llm.Message, []*llm.Event) {
 	t.Helper()
 	payloads := []string{
 		`{"type":"response.created","sequence_number":1,"response":{"id":"resp_1","model":"gpt-5.6-sol","status":"in_progress"}}`,
@@ -185,12 +185,23 @@ func streamPhaseEvents(t *testing.T, addedPhase, donePhase string) *llm.Message 
 	t.Cleanup(func() { assert.NoError(t, iterator.Close()) })
 
 	accumulator := llm.NewResponseAccumulator()
+	var streamed []*llm.Event
 	for iterator.Next() {
-		assert.NoError(t, accumulator.AddEvent(iterator.Event()))
+		event := iterator.Event()
+		streamed = append(streamed, event)
+		assert.NoError(t, accumulator.AddEvent(event))
 	}
 	assert.NoError(t, iterator.Err())
 	assert.True(t, accumulator.IsComplete())
-	return accumulator.Response().Message()
+	return accumulator.Response().Message(), streamed
+}
+
+// streamPhaseEvents returns only the accumulated message for tests that do not
+// inspect the event stream itself.
+func streamPhaseEvents(t *testing.T, addedPhase, donePhase string) *llm.Message {
+	t.Helper()
+	message, _ := streamPhase(t, addedPhase, donePhase)
+	return message
 }
 
 // TestStreamingPhaseFromOutputItemDone proves that reading phase only from the
@@ -230,4 +241,74 @@ func TestStreamingWithoutPhaseStaysUnphased(t *testing.T) {
 	text := message.Content[0].(*llm.TextContent)
 	assert.Equal(t, 0, len(text.Metadata))
 	assert.NotContains(t, replayJSON(t, message), `"phase"`)
+}
+
+// phaseOfDelta returns the phase carried by a metadata delta, or "" for any
+// other event, so ordering assertions can read the stream positionally.
+func phaseOfDelta(event *llm.Event) string {
+	if event.Type != llm.EventTypeContentBlockDelta || event.Delta == nil {
+		return ""
+	}
+	if event.Delta.Type != llm.EventDeltaTypeMetadata {
+		return ""
+	}
+	return event.Delta.Metadata[openAIPhaseMetadataKey]
+}
+
+// TestStreamingLatePhaseArrivesBeforeBlockStop guards the event contract for
+// consumers that rebuild messages from the stream: a phase OpenAI only reveals
+// on the done event must reach the text block while it is still open, or those
+// consumers finalize the block and drop it.
+func TestStreamingLatePhaseArrivesBeforeBlockStop(t *testing.T) {
+	_, events := streamPhase(t, "", `,"phase":"commentary"`)
+
+	phaseIndex, stopIndex := -1, -1
+	for i, event := range events {
+		if phaseOfDelta(event) == "commentary" {
+			assert.Equal(t, -1, phaseIndex, "phase delta must be emitted once")
+			phaseIndex = i
+		}
+		if event.Type == llm.EventTypeContentBlockStop {
+			assert.Equal(t, -1, stopIndex, "text block must stop once")
+			stopIndex = i
+		}
+	}
+	assert.True(t, phaseIndex >= 0, "expected a phase metadata delta")
+	assert.True(t, stopIndex >= 0, "expected a content block stop")
+	assert.True(t, phaseIndex < stopIndex, "phase delta must precede content_block_stop")
+}
+
+// TestStreamingEarlyPhaseSkipsRedundantDelta locks in that a message labeled on
+// the added event announces its phase once, on the block's start event.
+func TestStreamingEarlyPhaseSkipsRedundantDelta(t *testing.T) {
+	_, events := streamPhase(t, `,"phase":"final_answer"`, `,"phase":"final_answer"`)
+
+	var starts, deltas int
+	for _, event := range events {
+		if event.Type == llm.EventTypeContentBlockStart && event.ContentBlock != nil {
+			if event.ContentBlock.Metadata[openAIPhaseMetadataKey] == "final_answer" {
+				starts++
+			}
+		}
+		if phaseOfDelta(event) != "" {
+			deltas++
+		}
+	}
+	assert.Equal(t, 1, starts)
+	assert.Equal(t, 0, deltas)
+}
+
+// TestStreamingRelabeledPhaseEmitsSingleDelta covers a message relabeled between
+// added and done: the correction reaches consumers as one in-block delta.
+func TestStreamingRelabeledPhaseEmitsSingleDelta(t *testing.T) {
+	message, events := streamPhase(t, `,"phase":"commentary"`, `,"phase":"final_answer"`)
+
+	var phases []string
+	for _, event := range events {
+		if phase := phaseOfDelta(event); phase != "" {
+			phases = append(phases, phase)
+		}
+	}
+	assert.Equal(t, []string{"final_answer"}, phases)
+	assert.Equal(t, "final_answer", message.Content[0].(*llm.TextContent).Metadata[openAIPhaseMetadataKey])
 }
